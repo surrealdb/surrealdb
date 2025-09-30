@@ -62,7 +62,7 @@ fn test_enum_untagged_bar() {
 ////////////////////////////////////////////////////
 
 #[derive(SurrealValue, Debug, PartialEq)]
-#[surreal(untagged)]
+#[surreal(untagged, lowercase)]
 enum EnumUntaggedLowercase {
 	Foo,
 	Bar,
@@ -152,7 +152,7 @@ fn test_enum_untagged_uppercase_foo() {
 
 	// is_value
 	assert!(EnumUntaggedUppercase::is_value(&value));
-	assert!(value.is::<EnumUntagged>());
+	assert!(value.is::<EnumUntaggedUppercase>());
 }
 
 #[test]

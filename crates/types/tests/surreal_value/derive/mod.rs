@@ -120,7 +120,7 @@ fn test_simple_single_field_struct() {
 
 	// Test kind_of
 	let person_kind = StringWrapper::kind_of();
-	assert_eq!(format!("{:?}", person_kind), r#"Literal(Array([String]))"#);
+	assert_eq!(format!("{:?}", person_kind), r#"String"#);
 
 	// Test is_value
 	assert!(StringWrapper::is_value(&value));

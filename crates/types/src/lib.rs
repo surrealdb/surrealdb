@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 #![warn(missing_docs)]
 
+mod error;
 mod flatbuffers;
 mod kind;
 mod notification;
@@ -10,6 +11,7 @@ mod value;
 mod variables;
 
 pub use anyhow;
+pub use error::*;
 pub use flatbuffers::*;
 pub use kind::*;
 pub use notification::*;

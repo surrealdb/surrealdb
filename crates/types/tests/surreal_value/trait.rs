@@ -15,6 +15,8 @@ macro_rules! test_surreal_value {
             $(is($is:ident),)?
             $(into($into:ident),)?
             $(from($from:ident),)?
+			$(as_ty($($as:ident),+),)?
+			$(is_ty_and($($is_and:ident),+),)?
         )
     ) => {
         #[rustfmt::skip]
@@ -25,6 +27,13 @@ macro_rules! test_surreal_value {
 
             assert!(matches!(value, $value));
             assert!(matches!(<$type>::kind_of(), $kind));
+
+			$(
+				$(assert_eq!(value.$as(), Some(&val));)+
+			)?
+			$(
+				$(assert!(value.$is_and(|x| x == &val));)+
+			)?
 
             assert!(<$type>::is_value(&value));
             assert!(value.is::<$type>());
@@ -103,6 +112,7 @@ test_surreal_value!(
 		is(is_bool),
 		into(into_bool),
 		from(from_bool),
+		as_ty(as_bool),
 	)
 );
 
@@ -135,6 +145,7 @@ test_surreal_value!(
 		is(is_number),
 		into(into_number),
 		from(from_number),
+		as_ty(as_number),
 	)
 );
 
@@ -147,6 +158,8 @@ test_surreal_value!(
 		is(is_number),
 		into(into_int),
 		from(from_int),
+		as_ty(as_int, as_i64),
+		is_ty_and(is_int_and, is_i64_and),
 	)
 );
 
@@ -159,6 +172,8 @@ test_surreal_value!(
 		is(is_float),
 		into(into_float),
 		from(from_float),
+		as_ty(as_float, as_f64),
+		is_ty_and(is_float_and, is_f64_and),
 	)
 );
 
@@ -171,6 +186,8 @@ test_surreal_value!(
 		is(is_decimal),
 		into(into_decimal),
 		from(from_decimal),
+		as_ty(as_decimal),
+		is_ty_and(is_decimal_and, is_decimal_and),
 	)
 );
 
@@ -183,6 +200,8 @@ test_surreal_value!(
 		is(is_string),
 		into(into_string),
 		from(from_string),
+		as_ty(as_string),
+		is_ty_and(is_string_and),
 	)
 );
 
@@ -195,6 +214,8 @@ test_surreal_value!(
 		is(is_duration),
 		into(into_duration),
 		from(from_duration),
+		as_ty(as_duration),
+		is_ty_and(is_duration_and),
 	)
 );
 
@@ -216,6 +237,8 @@ test_surreal_value!(
 		is(is_datetime),
 		into(into_datetime),
 		from(from_datetime),
+		as_ty(as_datetime),
+		is_ty_and(is_datetime_and),
 	)
 );
 
@@ -237,6 +260,8 @@ test_surreal_value!(
 		is(is_uuid),
 		into(into_uuid),
 		from(from_uuid),
+		as_ty(as_uuid),
+		is_ty_and(is_uuid_and),
 	)
 );
 
@@ -258,6 +283,8 @@ test_surreal_value!(
 		is(is_array),
 		into(into_array),
 		from(from_array),
+		as_ty(as_array),
+		is_ty_and(is_array_and),
 	)
 );
 
@@ -270,6 +297,8 @@ test_surreal_value!(
 		is(is_object),
 		into(into_object),
 		from(from_object),
+		as_ty(as_object),
+		is_ty_and(is_object_and),
 	)
 );
 
@@ -282,6 +311,8 @@ test_surreal_value!(
 		is(is_geometry),
 		into(into_geometry),
 		from(from_geometry),
+		as_ty(as_geometry),
+		is_ty_and(is_geometry_and),
 	)
 );
 
@@ -294,15 +325,8 @@ test_surreal_value!(
 		is(is_bytes),
 		into(into_bytes),
 		from(from_bytes),
-	)
-);
-
-test_surreal_value!(
-	bytes_vec<Vec<u8>>(
-		vec![1_u8, 2, 3] => (
-			Value::Bytes(_),
-			Kind::Bytes
-		),
+		as_ty(as_bytes),
+		is_ty_and(is_bytes_and),
 	)
 );
 
@@ -324,6 +348,8 @@ test_surreal_value!(
 		is(is_record),
 		into(into_record),
 		from(from_record),
+		as_ty(as_record),
+		is_ty_and(is_record_and),
 	)
 );
 
@@ -336,6 +362,8 @@ test_surreal_value!(
 		is(is_file),
 		into(into_file),
 		from(from_file),
+		as_ty(as_file),
+		is_ty_and(is_file_and),
 	)
 );
 
@@ -345,6 +373,11 @@ test_surreal_value!(
 			Value::Range(_),
 			Kind::Range
 		),
+		is(is_range),
+		into(into_range),
+		from(from_range),
+		as_ty(as_range),
+		is_ty_and(is_range_and),
 	)
 );
 
@@ -448,6 +481,8 @@ test_surreal_value!(
 		is(is_point),
 		into(into_point),
 		from(from_point),
+		as_ty(as_point),
+		is_ty_and(is_point_and),
 	)
 );
 
@@ -460,6 +495,8 @@ test_surreal_value!(
 		is(is_line),
 		into(into_line),
 		from(from_line),
+		as_ty(as_line),
+		is_ty_and(is_line_and),
 	)
 );
 
@@ -472,6 +509,8 @@ test_surreal_value!(
 		is(is_polygon),
 		into(into_polygon),
 		from(from_polygon),
+		as_ty(as_polygon),
+		is_ty_and(is_polygon_and),
 	)
 );
 
@@ -484,6 +523,8 @@ test_surreal_value!(
 		is(is_multipoint),
 		into(into_multipoint),
 		from(from_multipoint),
+		as_ty(as_multipoint),
+		is_ty_and(is_multipoint_and),
 	)
 );
 
@@ -493,6 +534,11 @@ test_surreal_value!(
 			Value::Geometry(_),
 			Kind::Geometry(_)
 		),
+		is(is_multiline),
+		into(into_multiline),
+		from(from_multiline),
+		as_ty(as_multiline),
+		is_ty_and(is_multiline_and),
 	)
 );
 
@@ -502,6 +548,11 @@ test_surreal_value!(
 			Value::Geometry(_),
 			Kind::Geometry(_)
 		),
+		is(is_multipolygon),
+		into(into_multipolygon),
+		from(from_multipolygon),
+		as_ty(as_multipolygon),
+		is_ty_and(is_multipolygon_and),
 	)
 );
 

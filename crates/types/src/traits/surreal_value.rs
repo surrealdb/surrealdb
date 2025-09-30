@@ -1,11 +1,13 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use anyhow::Context;
 use rust_decimal::Decimal;
 
 use crate as surrealdb_types;
+use crate::error::{ConversionError, length_mismatch_error, out_of_range_error};
 use crate::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Kind, Number, Object, Range, RecordId,
 	SurrealNone, SurrealNull, Uuid, Value, kind,
@@ -68,14 +70,33 @@ impl<T: SurrealValue + Clone> SurrealValue for Arc<T> {
 	}
 }
 
+impl<T: SurrealValue + Clone> SurrealValue for Rc<T> {
+	fn kind_of() -> Kind {
+		T::kind_of()
+	}
+
+	fn is_value(value: &Value) -> bool {
+		T::is_value(value)
+	}
+
+	fn into_value(self) -> Value {
+		T::into_value(self.as_ref().clone())
+	}
+
+	fn from_value(value: Value) -> anyhow::Result<Self> {
+		T::from_value(value).map(Rc::new)
+	}
+}
+
 macro_rules! impl_surreal_value {
 	// Generic types
     (
         <$($generic:ident),*> $type:ty as $kind:expr,
         $($is_fnc:ident<$($is_generic:ident),*>)? ($value_is:ident) => $is:expr,
         $($from_fnc:ident<$($from_generic:ident),*>)? ($self:ident) => $into:expr,
-        $($into_fnc:ident<$($into_generic:ident),*>)? ($value_into:ident) => $from:expr $(,)?
-		$(,$is_and_fnc:ident<$($is_and_generic:ident),*> ($self_is_and:ident, $is_and_callback:ident) => $is_and:expr)?
+        $($into_fnc:ident<$($into_generic:ident),*>)? ($value_into:ident) => $from:expr
+		$(, as_ty => $as_fnc:ident<$($as_generic:ident),*> ($self_as:ident) => $as_expr:expr)?
+		$(, is_ty_and => $is_and_fnc:ident<$($is_and_generic:ident),*> ($self_is_and:ident, $is_and_callback:ident) => $is_and:expr)?
     ) => {
         impl<$($generic: SurrealValue),*> SurrealValue for $type {
             fn kind_of() -> Kind {
@@ -128,6 +149,17 @@ macro_rules! impl_surreal_value {
 
 		$(
 			impl Value {
+				/// Returns a reference to the inner value if it matches the expected type.
+				///
+				/// Returns `Some(&T)` if the value is of the expected type, `None` otherwise.
+				pub fn $as_fnc<$($as_generic: SurrealValue),*>(&$self_as) -> Option<&$type> {
+					$as_expr
+				}
+			}
+        )?
+
+		$(
+			impl Value {
 				/// Checks if this value can be converted to the given type
 				///
 				/// Returns `true` if the value can be converted to the type, `false` otherwise.
@@ -141,10 +173,11 @@ macro_rules! impl_surreal_value {
 	// Concrete types
     (
         $type:ty as $kind:expr,
-        $($is_fnc:ident)? ($value_is:ident) => $is:expr,
-        $($from_fnc:ident)? ($self:ident) => $into:expr,
-        $($into_fnc:ident)? ($value_into:ident) => $from:expr $(,)?
-		$(,$is_and_fnc:ident($self_is_and:ident, $is_and_callback:ident) => $is_and:expr)?
+        $($is_fnc:ident),* ($value_is:ident) => $is:expr,
+        $($from_fnc:ident),* ($self:ident) => $into:expr,
+        $($into_fnc:ident),* ($value_into:ident) => $from:expr
+		$(, as_ty => $($as_fnc:ident),+ ($self_as:ident) => $as_expr:expr)?
+		$(, is_ty_and => $($is_and_fnc:ident),+($self_is_and:ident, $is_and_callback:ident) => $is_and:expr)?
     ) => {
         impl SurrealValue for $type {
             fn kind_of() -> Kind {
@@ -173,7 +206,7 @@ macro_rules! impl_surreal_value {
                     <$type>::is_value(self)
                 }
             }
-        )?
+        )*
 
         $(
             impl Value {
@@ -182,7 +215,7 @@ macro_rules! impl_surreal_value {
                     <$type>::into_value(value)
                 }
             }
-        )?
+        )*
 
         $(
             impl Value {
@@ -193,16 +226,31 @@ macro_rules! impl_surreal_value {
                     <$type>::from_value(self)
                 }
             }
-        )?
+        )*
 
 		$(
 			impl Value {
-				/// Checks if this value can be converted to the given type
-				///
-				/// Returns `true` if the value can be converted to the type, `false` otherwise.
-				pub fn $is_and_fnc(&$self_is_and, $is_and_callback: impl FnOnce(&$type) -> bool) -> bool {
-					$is_and
-				}
+				$(
+					/// Returns a reference to the inner value if it matches the expected type.
+					///
+					/// Returns `Some(&T)` if the value is of the expected type, `None` otherwise.
+					pub fn $as_fnc(&$self_as) -> Option<&$type> {
+						$as_expr
+					}
+				)+
+			}
+		)?
+
+		$(
+			impl Value {
+				$(
+					/// Checks if this value can be converted to the given type
+					///
+					/// Returns `true` if the value can be converted to the type, `false` otherwise.
+					pub fn $is_and_fnc(&$self_is_and, $is_and_callback: impl FnOnce(&$type) -> bool) -> bool {
+						$is_and
+					}
+				)+
 			}
 		)?
     };
@@ -264,6 +312,13 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(b)
+	},
+	as_ty => as_bool(self) => {
+		if let Value::Bool(b) = self {
+			Some(b)
+		} else {
+			None
+		}
 	}
 );
 
@@ -295,7 +350,14 @@ impl_surreal_value!(
 		};
 		Ok(n)
 	},
-	is_number_and(self, callback) => {
+	as_ty => as_number(self) => {
+		if let Value::Number(n) = self {
+			Some(n)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_number_and(self, callback) => {
 		if let Value::Number(n) = self {
 			callback(n)
 		} else {
@@ -306,15 +368,22 @@ impl_surreal_value!(
 
 impl_surreal_value!(
 	i64 as kind!(int),
-	is_int(value) => matches!(value, Value::Number(Number::Int(_))),
-	from_int(self) => Value::Number(Number::Int(self)),
-	into_int(value) => {
+	is_int, is_i64(value) => matches!(value, Value::Number(Number::Int(_))),
+	from_int, from_i64(self) => Value::Number(Number::Int(self)),
+	into_int, into_i64(value) => {
 		let Value::Number(Number::Int(n)) = value else {
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(n)
 	},
-	is_int_and(self, callback) => {
+	as_ty => as_int, as_i64(self) => {
+		if let Value::Number(Number::Int(n)) = self {
+			Some(n)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_int_and, is_i64_and(self, callback) => {
 		if let Value::Number(Number::Int(n)) = self {
 			callback(n)
 		} else {
@@ -325,15 +394,22 @@ impl_surreal_value!(
 
 impl_surreal_value!(
 	f64 as kind!(float),
-	is_float(value) => matches!(value, Value::Number(Number::Float(_))),
-	from_float(self) => Value::Number(Number::Float(self)),
-	into_float(value) => {
+	is_float, is_f64(value) => matches!(value, Value::Number(Number::Float(_))),
+	from_float, from_f64(self) => Value::Number(Number::Float(self)),
+	into_float, into_f64(value) => {
 		let Value::Number(Number::Float(n)) = value else {
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(n)
 	},
-	is_float_and(self, callback) => {
+	as_ty => as_float, as_f64(self) => {
+		if let Value::Number(Number::Float(n)) = self {
+			Some(n)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_float_and, is_f64_and(self, callback) => {
 		if let Value::Number(Number::Float(n)) = self {
 			callback(n)
 		} else {
@@ -352,7 +428,14 @@ impl_surreal_value!(
 		};
 		Ok(n)
 	},
-	is_decimal_and(self, callback) => {
+	as_ty => as_decimal(self) => {
+		if let Value::Number(Number::Decimal(n)) = self {
+			Some(n)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_decimal_and(self, callback) => {
 		if let Value::Number(Number::Decimal(n)) = self {
 			callback(n)
 		} else {
@@ -371,7 +454,14 @@ impl_surreal_value!(
 		};
 		Ok(s)
 	},
-	is_string_and(self, callback) => {
+	as_ty => as_string(self) => {
+		if let Value::String(s) = self {
+			Some(s)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_string_and(self, callback) => {
 		if let Value::String(s) = self {
 			callback(s)
 		} else {
@@ -415,7 +505,9 @@ impl SurrealValue for &'static str {
 	}
 
 	fn from_value(_value: Value) -> anyhow::Result<Self> {
-		Err(anyhow::anyhow!("Cannot deserialize &'static str"))
+		Err(anyhow::anyhow!(
+			"Cannot deserialize &'static str from value: static string references cannot be created from runtime values"
+		))
 	}
 }
 
@@ -429,7 +521,14 @@ impl_surreal_value!(
 		};
 		Ok(d)
 	},
-	is_duration_and(self, callback) => {
+	as_ty => as_duration(self) => {
+		if let Value::Duration(d) = self {
+			Some(d)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_duration_and(self, callback) => {
 		if let Value::Duration(d) = self {
 			callback(d)
 		} else {
@@ -460,7 +559,14 @@ impl_surreal_value!(
 		};
 		Ok(d)
 	},
-	is_datetime_and(self, callback) => {
+	as_ty => as_datetime(self) => {
+		if let Value::Datetime(d) = self {
+			Some(d)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_datetime_and(self, callback) => {
 		if let Value::Datetime(d) = self {
 			callback(d)
 		} else {
@@ -491,7 +597,14 @@ impl_surreal_value!(
 		};
 		Ok(u)
 	},
-	is_uuid_and(self, callback) => {
+	as_ty => as_uuid(self) => {
+		if let Value::Uuid(u) = self {
+			Some(u)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_uuid_and(self, callback) => {
 		if let Value::Uuid(u) = self {
 			callback(u)
 		} else {
@@ -522,7 +635,14 @@ impl_surreal_value!(
 		};
 		Ok(a)
 	},
-	is_array_and(self, callback) => {
+	as_ty => as_array(self) => {
+		if let Value::Array(a) = self {
+			Some(a)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_array_and(self, callback) => {
 		if let Value::Array(a) = self {
 			callback(a)
 		} else {
@@ -541,7 +661,14 @@ impl_surreal_value!(
 		};
 		Ok(o)
 	},
-	is_object_and(self, callback) => {
+	as_ty => as_object(self) => {
+		if let Value::Object(o) = self {
+			Some(o)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_object_and(self, callback) => {
 		if let Value::Object(o) = self {
 			callback(o)
 		} else {
@@ -560,7 +687,14 @@ impl_surreal_value!(
 		};
 		Ok(g)
 	},
-	is_geometry_and(self, callback) => {
+	as_ty => as_geometry(self) => {
+		if let Value::Geometry(g) = self {
+			Some(g)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_geometry_and(self, callback) => {
 		if let Value::Geometry(g) = self {
 			callback(g)
 		} else {
@@ -579,7 +713,14 @@ impl_surreal_value!(
 		};
 		Ok(b)
 	},
-	is_bytes_and(self, callback) => {
+	as_ty => as_bytes(self) => {
+		if let Value::Bytes(b) = self {
+			Some(b)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_bytes_and(self, callback) => {
 		if let Value::Bytes(b) = self {
 			callback(b)
 		} else {
@@ -588,17 +729,11 @@ impl_surreal_value!(
 	}
 );
 
-impl_surreal_value!(
-	Vec<u8> as kind!(bytes),
-	(value) => matches!(value, Value::Bytes(_)),
-	(self) => Value::Bytes(Bytes(self)),
-	(value) => {
-		let Value::Bytes(Bytes(b)) = value else {
-			return Err(conversion_error(Self::kind_of(), value));
-		};
-		Ok(b)
-	}
-);
+// NOTE: Vec<u8> is intentionally NOT implemented to force explicit usage of Bytes.
+// This prevents ambiguity: should Vec<u8> be bytes or an array of numbers?
+// Users should explicitly use:
+//   - Bytes(vec) for binary data
+//   - Vec<i64> or similar for arrays of numbers
 
 impl_surreal_value!(
 	bytes::Bytes as kind!(bytes),
@@ -634,13 +769,20 @@ impl_surreal_value!(
 				v.clone().into_record()
 			}
 			Value::Array(a) => {
-				let first = a.first().context("Invalid record id: {value}")?;
+				let first = a.first().context("Invalid record id: array is empty")?;
 				first.clone().into_record()
 			}
-			_ => Err(anyhow::anyhow!("Invalid record id: {value}")),
+			_ => Err(conversion_error(Self::kind_of(), value)),
 		}
 	},
-	is_record_and(self, callback) => {
+	as_ty => as_record(self) => {
+		if let Value::RecordId(r) = self {
+			Some(r)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_record_and(self, callback) => {
 		if let Value::RecordId(r) = self {
 			callback(r)
 		} else {
@@ -659,7 +801,14 @@ impl_surreal_value!(
 		};
 		Ok(f)
 	},
-	is_file_and(self, callback) => {
+	as_ty => as_file(self) => {
+		if let Value::File(f) = self {
+			Some(f)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_file_and(self, callback) => {
 		if let Value::File(f) = self {
 			callback(f)
 		} else {
@@ -678,7 +827,14 @@ impl_surreal_value!(
 		};
 		Ok(*r)
 	},
-	is_range_and(self, callback) => {
+	as_ty => as_range(self) => {
+		if let Value::Range(r) = self {
+			Some(r)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_range_and(self, callback) => {
 		if let Value::Range(r) = self {
 			callback(r)
 		} else {
@@ -775,7 +931,14 @@ impl_surreal_value!(
 		};
 		Ok(p)
 	},
-	is_point_and(self, callback) => {
+	as_ty => as_point(self) => {
+		if let Value::Geometry(Geometry::Point(p)) = self {
+			Some(p)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_point_and(self, callback) => {
 		if let Value::Geometry(Geometry::Point(p)) = self {
 			callback(p)
 		} else {
@@ -794,7 +957,14 @@ impl_surreal_value!(
 		};
 		Ok(l)
 	},
-	is_line_and(self, callback) => {
+	as_ty => as_line(self) => {
+		if let Value::Geometry(Geometry::Line(l)) = self {
+			Some(l)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_line_and(self, callback) => {
 		if let Value::Geometry(Geometry::Line(l)) = self {
 			callback(l)
 		} else {
@@ -813,7 +983,14 @@ impl_surreal_value!(
 		};
 		Ok(p)
 	},
-	is_polygon_and(self, callback) => {
+	as_ty => as_polygon(self) => {
+		if let Value::Geometry(Geometry::Polygon(p)) = self {
+			Some(p)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_polygon_and(self, callback) => {
 		if let Value::Geometry(Geometry::Polygon(p)) = self {
 			callback(p)
 		} else {
@@ -832,7 +1009,14 @@ impl_surreal_value!(
 		};
 		Ok(m)
 	},
-	is_multipoint_and(self, callback) => {
+	as_ty => as_multipoint(self) => {
+		if let Value::Geometry(Geometry::MultiPoint(m)) = self {
+			Some(m)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_multipoint_and(self, callback) => {
 		if let Value::Geometry(Geometry::MultiPoint(m)) = self {
 			callback(m)
 		} else {
@@ -851,7 +1035,14 @@ impl_surreal_value!(
 		};
 		Ok(m)
 	},
-	is_multiline_and(self, callback) => {
+	as_ty => as_multiline(self) => {
+		if let Value::Geometry(Geometry::MultiLine(m)) = self {
+			Some(m)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_multiline_and(self, callback) => {
 		if let Value::Geometry(Geometry::MultiLine(m)) = self {
 			callback(m)
 		} else {
@@ -870,7 +1061,14 @@ impl_surreal_value!(
 		};
 		Ok(m)
 	},
-	is_multipolygon_and(self, callback) => {
+	as_ty => as_multipolygon(self) => {
+		if let Value::Geometry(Geometry::MultiPolygon(m)) = self {
+			Some(m)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_multipolygon_and(self, callback) => {
 		if let Value::Geometry(Geometry::MultiPolygon(m)) = self {
 			callback(m)
 		} else {
@@ -885,7 +1083,7 @@ macro_rules! impl_tuples {
         $(
             impl<$($t: SurrealValue),+> SurrealValue for ($($t,)+) {
                 fn kind_of() -> Kind {
-					kind!(array<$(($t::kind_of()))|+>)
+					kind!([$(($t::kind_of())),+])
                 }
 
                 fn is_value(value: &Value) -> bool {
@@ -913,7 +1111,7 @@ macro_rules! impl_tuples {
                     };
 
                     if a.len() != $n {
-                        return Err(anyhow::anyhow!("Failed to convert to {}: Expected Array of length {}, got {}", Self::kind_of(), $n, a.len()));
+                        return Err(length_mismatch_error($n, a.len(), std::any::type_name::<Self>()));
                     }
 
                     $(#[allow(non_snake_case)] let $t = $t::from_value(a.remove(0)).map_err(|e| anyhow::anyhow!("Failed to convert to {}: {}", Self::kind_of(), e))?;)+
@@ -938,13 +1136,13 @@ impl_tuples! {
 }
 
 fn conversion_error(expected: Kind, got: Value) -> anyhow::Error {
-	anyhow::anyhow!("Expected {}, got {:?}", expected, got.kind())
+	ConversionError::from_value(expected, &got).into()
 }
 
-/// Non-standard numeric implementations, such as u8, u16, u32, u64, u128, i8, i16, i32, usize, f32,
-/// f64,
+/// Non-standard numeric implementations, such as u8, u16, u32, u64, i8, i16, i32, isize, f32
 macro_rules! impl_numeric {
-	($($k:ty => $variant:ident($type:ty)),+ $(,)?) => {
+	// Integer types that need checked conversion from i64
+	(int: $($k:ty => ($is_fn:ident, $from_fn:ident, $into_fn:ident, $is_and_fn:ident, $as_fn:ident)),+ $(,)?) => {
 		$(
 			impl SurrealValue for $k {
 				fn kind_of() -> Kind {
@@ -956,29 +1154,141 @@ macro_rules! impl_numeric {
 				}
 
 				fn into_value(self) -> Value {
-					Value::Number(Number::$variant(self as $type))
+					Value::Number(Number::Int(self as i64))
 				}
 
 				fn from_value(value: Value) -> anyhow::Result<Self> {
-					let Value::Number(Number::$variant(n)) = value else {
+					let Value::Number(Number::Int(n)) = value else {
+						return Err(conversion_error(Self::kind_of(), value));
+					};
+					<$k>::try_from(n)
+						.map_err(|_| out_of_range_error(n, std::any::type_name::<$k>()))
+				}
+			}
+
+			impl Value {
+				/// Checks if this value can be converted to the given type
+				pub fn $is_fn(&self) -> bool {
+					<$k>::is_value(self)
+				}
+
+				/// Converts the given value into a `Value`
+				pub fn $from_fn(value: $k) -> Value {
+					<$k>::into_value(value)
+				}
+
+				/// Attempts to convert a SurrealDB value into the given type
+				pub fn $into_fn(self) -> anyhow::Result<$k> {
+					<$k>::from_value(self)
+				}
+
+				/// Checks if this value matches the type and passes the callback check
+				pub fn $is_and_fn(&self, callback: impl FnOnce(&$k) -> bool) -> bool {
+					if let Value::Number(Number::Int(n)) = self {
+						if let Ok(v) = <$k>::try_from(*n) {
+							return callback(&v);
+						}
+					}
+					false
+				}
+
+				/// Returns a reference-like value if it matches the expected type
+				/// Note: For integer types, this returns `None` since the value needs conversion
+				pub fn $as_fn(&self) -> Option<$k> {
+					if let Value::Number(Number::Int(n)) = self {
+						<$k>::try_from(*n).ok()
+					} else {
+						None
+					}
+				}
+			}
+		)+
+	};
+
+	// Float types
+	(float: $($k:ty => ($is_fn:ident, $from_fn:ident, $into_fn:ident, $is_and_fn:ident, $as_fn:ident)),+ $(,)?) => {
+		$(
+			impl SurrealValue for $k {
+				fn kind_of() -> Kind {
+					kind!(number)
+				}
+
+				fn is_value(value: &Value) -> bool {
+					matches!(value, Value::Number(_))
+				}
+
+				fn into_value(self) -> Value {
+					Value::Number(Number::Float(self as f64))
+				}
+
+				fn from_value(value: Value) -> anyhow::Result<Self> {
+					let Value::Number(Number::Float(n)) = value else {
 						return Err(conversion_error(Self::kind_of(), value));
 					};
 					Ok(n as $k)
 				}
 			}
+
+			impl Value {
+				/// Checks if this value can be converted to the given type
+				pub fn $is_fn(&self) -> bool {
+					<$k>::is_value(self)
+				}
+
+				/// Converts the given value into a `Value`
+				pub fn $from_fn(value: $k) -> Value {
+					<$k>::into_value(value)
+				}
+
+				/// Attempts to convert a SurrealDB value into the given type
+				pub fn $into_fn(self) -> anyhow::Result<$k> {
+					<$k>::from_value(self)
+				}
+
+				/// Checks if this value matches the type and passes the callback check
+				pub fn $is_and_fn(&self, callback: impl FnOnce(&$k) -> bool) -> bool {
+					if let Value::Number(Number::Float(n)) = self {
+						let v = *n as $k;
+						callback(&v)
+					} else {
+						false
+					}
+				}
+
+				/// Returns the converted value if it matches the expected type
+				/// Note: For float types, this returns a converted value, not a reference
+				pub fn $as_fn(&self) -> Option<$k> {
+					if let Value::Number(Number::Float(n)) = self {
+						Some(*n as $k)
+					} else {
+						None
+					}
+				}
+			}
 		)+
-	}
+	};
 }
 
+// Non-primary integer types with conversion
 impl_numeric! {
-	i8 => Int(i64),
-	i16 => Int(i64),
-	i32 => Int(i64),
-	isize => Int(i64),
-	u16 => Int(i64),
-	u32 => Int(i64),
-	usize => Int(i64),
-	f32 => Float(f64),
+	int:
+		i8 => (is_i8, from_i8, into_i8, is_i8_and, as_i8),
+		i16 => (is_i16, from_i16, into_i16, is_i16_and, as_i16),
+		i32 => (is_i32, from_i32, into_i32, is_i32_and, as_i32),
+		// i64 is implemented with the impl_surreal_value! macro
+		isize => (is_isize, from_isize, into_isize, is_isize_and, as_isize),
+		u8 => (is_u8, from_u8, into_u8, is_u8_and, as_u8),
+		u16 => (is_u16, from_u16, into_u16, is_u16_and, as_u16),
+		u32 => (is_u32, from_u32, into_u32, is_u32_and, as_u32),
+		u64 => (is_u64, from_u64, into_u64, is_u64_and, as_u64),
+		usize => (is_usize, from_usize, into_usize, is_usize_and, as_usize),
+}
+
+// Non-primary float types with conversion
+impl_numeric! {
+	float:
+		f32 => (is_f32, from_f32, into_f32, is_f32_and, as_f32),
+		// f64 is implemented with the impl_surreal_value! macro
 }
 
 impl SurrealValue for serde_json::Value {
@@ -1074,7 +1384,7 @@ macro_rules! impl_slice {
 						return Err(conversion_error(Self::kind_of(), value));
 					};
 					if a.len() != $n {
-						return Err(anyhow::anyhow!("Expected array of length {}, got {}", $n, a.len()));
+						return Err(length_mismatch_error($n, a.len(), std::any::type_name::<Self>()));
 					}
 					let mut result = Vec::with_capacity($n);
 					for v in a {

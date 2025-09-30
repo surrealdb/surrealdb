@@ -15,21 +15,33 @@ pub fn impl_struct(name: &Ident, generics: &Generics, fields: Fields) -> TokenSt
 			if let surrealdb_types::Value::Object(mut map) = value {
 				#x
 			} else {
-				Err(surrealdb_types::anyhow::anyhow!("Expected object value"))
+				let err = surrealdb_types::ConversionError::from_value(
+					surrealdb_types::Kind::Object,
+					&value
+				);
+				Err(err.into())
 			}
 		},
 		With::Arr(x) => quote! {
 			if let surrealdb_types::Value::Array(mut arr) = value {
 				#x
 			} else {
-				Err(surrealdb_types::anyhow::anyhow!("Expected array value"))
+				let err = surrealdb_types::ConversionError::from_value(
+					surrealdb_types::Kind::Array(Box::new(surrealdb_types::Kind::Any), None),
+					&value
+				);
+				Err(err.into())
 			}
 		},
 		With::String(x) => quote! {
 			if let surrealdb_types::Value::String(string) = value {
 				#x
 			} else {
-				Err(surrealdb_types::anyhow::anyhow!("Expected string value"))
+				let err = surrealdb_types::ConversionError::from_value(
+					surrealdb_types::Kind::String,
+					&value
+				);
+				Err(err.into())
 			}
 		},
 		With::Value(x) => x,

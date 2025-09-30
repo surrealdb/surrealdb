@@ -258,7 +258,11 @@ impl Fields {
 								#(#map_retrievals)*
 								#ok
 							} else {
-								return Err(surrealdb_types::anyhow::anyhow!("Expected object value"))
+								let err = surrealdb_types::ConversionError::from_value(
+									surrealdb_types::Kind::Object,
+									&value
+								).with_context(format!("variant '{}'", #variant));
+								return Err(err.into())
 							}
 						}
 					}}),
@@ -281,7 +285,10 @@ impl Fields {
 								#(#map_retrievals)*
 								#ok
 							} else {
-								return Err(surrealdb_types::anyhow::anyhow!("Expected object under content key"))
+								let err = surrealdb_types::TypeError::Invalid(
+									format!("Expected object under content key '{}' for variant '{}'", #content, #variant)
+								);
+								return Err(err.into())
 							}
 						}
 					}}),
@@ -341,7 +348,10 @@ impl Fields {
 								if let Some(value) = map.remove(#content) {
 									#retrieve
 								} else {
-									return Err(surrealdb_types::anyhow::anyhow!("Expected content key"))
+									let err = surrealdb_types::TypeError::Invalid(
+										format!("Expected content key '{}' for variant '{}'", #content, #variant)
+									);
+									return Err(err.into())
 								}
 							}
 						}}),
@@ -369,7 +379,11 @@ impl Fields {
 						if let surrealdb_types::Value::Array(mut arr) = value {
 							#retrieve_arr
 						} else {
-							return Err(surrealdb_types::anyhow::anyhow!("Expected array value"))
+							let err = surrealdb_types::ConversionError::from_value(
+								surrealdb_types::Kind::Array(Box::new(surrealdb_types::Kind::Any), None),
+								&value
+							);
+							return Err(err.into())
 						}
 					}};
 
@@ -448,7 +462,10 @@ impl Fields {
 							if map.get(#content).is_some_and(|v| v.is_object_and(|o| o.is_empty())) {
 								#ok
 							} else {
-								return Err(surrealdb_types::anyhow::anyhow!("Expected object value"))
+								let err = surrealdb_types::TypeError::Invalid(
+									format!("Expected empty object under content key '{}' for variant '{}'", #content, #variant)
+								);
+								return Err(err.into())
 							}
 						}
 					}}),
@@ -488,7 +505,10 @@ impl Fields {
 								if #is_value {
 									#ok
 								} else {
-									return Err(surrealdb_types::anyhow::anyhow!("Expected {} while decoding {}", #inner, #name))
+									let err = surrealdb_types::TypeError::Invalid(
+										format!("Expected {} while decoding {}", #inner, #name)
+									);
+									return Err(err.into())
 								}
 							}})
 						} else {
@@ -496,7 +516,10 @@ impl Fields {
 								if map.is_empty() {
 									#ok
 								} else {
-								   return Err(surrealdb_types::anyhow::anyhow!("Expected empty object value while decoding {}", #name))
+									let err = surrealdb_types::TypeError::Invalid(
+										format!("Expected empty object value while decoding {}", #name)
+									);
+									return Err(err.into())
 								}
 							}})
 						}

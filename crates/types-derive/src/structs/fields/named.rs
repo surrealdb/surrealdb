@@ -30,22 +30,30 @@ impl NamedFields {
 
 	pub fn map_retrievals(&self, name: &String) -> Vec<TokenStream2> {
 		self.0
-            .iter()
-            .map(|field| {
-                let field_name = &field.ident;
-                let field_name_str = field.ident.to_string();
-                let obj_key = field.rename.as_ref().unwrap_or(&field_name_str);
-                let ty = &field.ty;
+			.iter()
+			.map(|field| {
+				let field_name = &field.ident;
+				let field_name_str = field.ident.to_string();
+				let obj_key = field.rename.as_ref().unwrap_or(&field_name_str);
+				let ty = &field.ty;
 
-                quote! {
-                    let Some(field_value) = map.remove(#obj_key) else {
-                        return Err(surrealdb_types::anyhow::anyhow!("Missing field {} on {}", #field_name_str, #name));
-                    };
-                    let #field_name = <#ty as SurrealValue>::from_value(field_value)
-                        .map_err(|e| surrealdb_types::anyhow::anyhow!("Failed to deserialize field {} on {}: {}", #field_name_str, #name, e))?;
-                }
-            })
-            .collect()
+				quote! {
+					let Some(field_value) = map.remove(#obj_key) else {
+						let err = surrealdb_types::TypeError::Invalid(
+							format!("Missing field '{}' on type '{}'", #field_name_str, #name)
+						);
+						return Err(err.into());
+					};
+					let #field_name = <#ty as SurrealValue>::from_value(field_value)
+						.map_err(|e| {
+							surrealdb_types::anyhow::anyhow!(
+								"Failed to deserialize field '{}' on type '{}': {}",
+								#field_name_str, #name, e
+							)
+						})?;
+				}
+			})
+			.collect()
 	}
 
 	/// Requires a mutable variable `valid` which defaults to true
@@ -55,7 +63,7 @@ impl NamedFields {
 			.map(|field| {
 				let struct_name = field.ident.to_string();
 				let obj_key = field.rename.as_ref().unwrap_or(&struct_name);
-				let ty = field.ty.clone();
+				let ty = &field.ty;
 
 				quote! {
 					if valid {
@@ -76,7 +84,7 @@ impl NamedFields {
 		self.0
 			.iter()
 			.map(|field| {
-				let ty = field.ty.clone();
+				let ty = &field.ty;
 				let struct_name = field.ident.to_string();
 				let obj_key = field.rename.as_ref().unwrap_or(&struct_name);
 
