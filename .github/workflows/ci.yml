@@ -449,9 +449,13 @@ jobs:
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) cargo-llvm-cov
+        with:
+          tool: cargo-llvm-cov
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) nextest
+        with:
+          tool: cargo-nextest
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -509,6 +513,8 @@ jobs:
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) nextest
+        with:
+          tool: cargo-nextest
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
@@ -582,6 +588,8 @@ jobs:
 
       - name: Install cargo-nextest
         uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) nextest
+        with:
+          tool: cargo-nextest
 
       - name: Install cargo-make
         run: cargo install --debug --locked cargo-make
