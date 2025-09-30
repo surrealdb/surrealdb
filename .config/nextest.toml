@@ -4,22 +4,14 @@
 [profile.default]
 retries = 3
 fail-fast = false
-test-threads = -2
+test-threads = -1
 slow-timeout = "180s"
 global-timeout = "30m"
 
-# Configure test group for KVS tests
 [[profile.default.overrides]]
 filter = 'test(kvs::tests::)'
 test-group = 'serial-kvs'
 
-# Configure test group for SDK tests
-[[profile.default.overrides]]
-filter = 'test(api_integration::)'
-test-group = 'serial-sdk'
-
 [test-groups]
 # Ensure all KVS tests run serially
 serial-kvs = { max-threads = 1 }
-# Ensure all SDK tests run serially
-serial-sdk = { max-threads = 1 }

@@ -45,7 +45,6 @@ mod live;
 mod serialisation;
 mod version;
 
-const NS: &str = "test-ns";
 const ROOT_USER: &str = "root";
 const ROOT_PASS: &str = "root";
 
