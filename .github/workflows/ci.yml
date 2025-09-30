@@ -950,12 +950,43 @@ jobs:
           fi
 
   # ----------------------------------------
+  # SDK output
+  # ----------------------------------------
+
+  sdk-output:
+    name: ${{ needs.sdk-javascript.outputs.tests-failed == 'true' || needs.sdk-golang.outputs.tests-failed == 'true' || needs.sdk-python.outputs.tests-failed == 'true' || needs.sdk-php.outputs.tests-failed == 'true' || needs.sdk-dotnet.outputs.tests-failed == 'true' && '⚠️ SDK tests failed' || '✅ SDK tests passed' }}
+    runs-on: ubuntu-latest
+    needs:
+      - sdk-javascript
+      - sdk-golang
+      - sdk-python
+      - sdk-php
+      - sdk-dotnet
+    steps:
+      - name: Output SDK test results
+        run: |
+          echo "JavaScript: ${{ needs.sdk-javascript.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
+          echo "Golang: ${{ needs.sdk-golang.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
+          echo "Python: ${{ needs.sdk-python.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
+          echo "PHP: ${{ needs.sdk-php.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
+          echo ".NET: ${{ needs.sdk-dotnet.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
+
+      - name: All required checks passed
+        run: |
+          if [[ "${{ needs.sdk-javascript.outputs.tests-failed == 'true' || needs.sdk-golang.outputs.tests-failed == 'true' || needs.sdk-python.outputs.tests-failed == 'true' || needs.sdk-php.outputs.tests-failed == 'true' || needs.sdk-dotnet.outputs.tests-failed == 'true' }}" == "true" ]]; then
+            echo "⚠️ Some SDK tests failed"
+          else
+            echo "✅ All SDK tests passed successfully"
+          fi
+
+  # ----------------------------------------
   # Required checks
   # ----------------------------------------
 
   required-checks:
     name: Required checks
     runs-on: ubuntu-latest
+    if: ${{ !github.event.pull_request.draft }}
     needs:
       # Server build
       - build
@@ -988,26 +1019,6 @@ jobs:
       # SurrealQL language tests
       - lang-tests
       - upgrade-tests
-      # Other SDK tests
-      - sdk-javascript
-      - sdk-golang
-      - sdk-python
-      - sdk-php
-      - sdk-dotnet
     steps:
-      - name: Check SDK test results
-        run: |
-          echo "SDK Test Results:"
-          echo "JavaScript: ${{ needs.sdk-javascript.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
-          echo "Golang: ${{ needs.sdk-golang.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
-          echo "Python: ${{ needs.sdk-python.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
-          echo "PHP: ${{ needs.sdk-php.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
-          echo ".NET: ${{ needs.sdk-dotnet.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
-
       - name: All required checks passed
-        run: |
-          if [[ "${{ needs.sdk-javascript.outputs.tests-failed == 'true' || needs.sdk-golang.outputs.tests-failed == 'true' || needs.sdk-python.outputs.tests-failed == 'true' || needs.sdk-php.outputs.tests-failed == 'true' || needs.sdk-dotnet.outputs.tests-failed == 'true' }}" == "true" ]]; then
-            echo "⚠️  All required CI checks have passed, but some SDK tests failed (non-blocking)"
-          else
-            echo "✅ All required CI checks have passed successfully!"
-          fi
+        run: echo "All required CI checks have passed successfully!"
