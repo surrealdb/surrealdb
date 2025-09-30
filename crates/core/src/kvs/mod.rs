@@ -50,8 +50,11 @@ pub(crate) mod tasklease;
 mod tests;
 mod util;
 
-pub use api::Transaction as KVTransaction;
-pub use clock::SizedClock;
+// Re-export selected types so embedding applications can depend on `surrealdb_core::kvs`
+// without digging into submodules.
+pub use api::Transaction as KVTransaction; // Alias for the backend-agnostic transaction trait
+pub use clock::SizedClock; // Exposed to allow external factories to provide a clock
+// Traits to enable pluggable transaction builders/factories used by the server and CLI
 pub use ds::requirements::{TransactionBuilderFactoryRequirements, TransactionBuilderRequirements};
 pub use ds::{Datastore, DatastoreFlavor, TransactionBuilder, TransactionBuilderFactory};
 #[cfg(not(target_family = "wasm"))]

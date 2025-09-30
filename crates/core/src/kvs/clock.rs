@@ -19,6 +19,9 @@ pub enum SizedClock {
 }
 
 impl SizedClock {
+	/// Expose a public system clock so external `TransactionBuilderFactory`
+	/// implementations (used when embedding or customizing the server) can
+	/// easily obtain a default clock instance.
 	pub fn system() -> Self {
 		Self::System(Default::default())
 	}

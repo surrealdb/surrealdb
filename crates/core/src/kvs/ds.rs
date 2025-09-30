@@ -172,24 +172,54 @@ impl TransactionFactory {
 
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+/// Abstraction over storage backends for creating and managing transactions.
+///
+/// This trait allows decoupling `Datastore` from concrete KV engines (memory,
+/// RocksDB, TiKV, FoundationDB, SurrealKV, etc.). Implementors translate the
+/// generic transaction parameters into a backend-specific transaction and
+/// report whether the transaction is considered "local" (used internally to
+/// enable some optimizations).
+///
+/// This was introduced to make the server more composable/embeddable. External
+/// crates can implement `TransactionBuilder` to plug in custom backends while
+/// reusing the rest of SurrealDB.
 pub trait TransactionBuilder: TransactionBuilderRequirements {
+	/// Create a new backend transaction.
+	///
+	/// - `write`: whether the transaction is writable (Write vs Read)
+	/// - `lock`: whether pessimistic locking is requested
+	///
+	/// Returns the backend transaction object and a flag indicating if the
+	/// transaction is local to the process (true) or requires external resources
+	/// (false).
 	async fn new_transaction(
 		&self,
 		write: bool,
 		lock: bool,
 	) -> Result<(Box<dyn api::Transaction>, bool)>;
 
+	/// Perform any backend-specific shutdown/cleanup.
 	async fn shutdown(&self) -> Result<()>;
 }
 
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+/// Factory that parses a datastore path and returns a concrete `TransactionBuilder`.
+///
+/// Implementations can decide how to interpret connection strings (e.g. "memory",
+/// "rocksdb:...", "tikv:...") and which clock to use. This lets the CLI and
+/// server be generic over different storage backends without hard-coding them.
+///
+/// The `path_valid` helper is used by the CLI to validate the path early and
+/// provide better error messages before starting the runtime.
 pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
+	/// Create a new transaction builder and the clock to use throughout the datastore.
 	async fn new_transaction_builder(
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
 	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)>;
 
+	/// Validate a datastore path string.
 	fn path_valid(v: &str) -> Result<String>;
 }
 
