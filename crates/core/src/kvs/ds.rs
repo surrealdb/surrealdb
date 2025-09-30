@@ -576,7 +576,7 @@ impl Datastore {
 			strict: false,
 			auth_enabled: false,
 			query_timeout: None,
-				slow_log: None,
+			slow_log: None,
 			transaction_timeout: None,
 			notification_channel: None,
 			capabilities: Arc::new(Capabilities::default()),
