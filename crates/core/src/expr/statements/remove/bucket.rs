@@ -8,6 +8,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
@@ -18,6 +19,14 @@ pub struct RemoveBucketStatement {
 	pub if_exists: bool,
 }
 
+impl VisitExpression for RemoveBucketStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.name.visit(visitor);
+	}
+}
 impl Default for RemoveBucketStatement {
 	fn default() -> Self {
 		Self {

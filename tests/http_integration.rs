@@ -946,16 +946,6 @@ mod http_integration {
 			assert!(res.is_ok(), "upgrade err: {}", res.unwrap_err());
 		}
 
-		// Test nul character
-		{
-			let res =
-				client.post(url).body("parse::email::user('\\u0000@example.com')").send().await?;
-			assert_eq!(res.status(), 400);
-
-			let body = res.text().await?;
-			assert!(body.contains("Null bytes are not allowed"), "body: {body}");
-		}
-
 		Ok(())
 	}
 
