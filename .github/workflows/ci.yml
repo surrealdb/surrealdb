@@ -737,44 +737,8 @@ jobs:
           df -h
           ps auxf
 
-  fdb-engine-7-1:
-    name: Rust SDK - FoundationDB engine 7.1
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # (Actions must be pinned by commit hash) v.2.2.0
-        with:
-          version: "7.1.61"
-
-      - name: Test FoundationDB engine
-        run: cargo make ci-api-integration-fdb-7_1
-
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
-
-  fdb-engine-7-3:
-    name: Rust SDK - FoundationDB engine 7.3
+  fdb-engine:
+    name: Rust SDK - FoundationDB engine
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -799,7 +763,7 @@ jobs:
           version: "7.3.47"
 
       - name: Test FoundationDB engine
-        run: cargo make ci-api-integration-fdb-7_3
+        run: cargo make ci-api-integration-fdb
 
       - name: Debug info
         if: always()
@@ -912,36 +876,8 @@ jobs:
       - name: Test TiKV KVS
         run: cargo make ci-tikv-kvs
 
-  fdb-7-1-kvs:
-    name: KVS - FoundationDB 7.1
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # (Actions must be pinned by commit hash) v.2.2.0
-        with:
-          version: "7.1.61"
-
-      - name: Test FoundationDB 7.1 KVS
-        run: cargo make ci-fdb-7_1-kvs
-
-  fdb-7-3-kvs:
-    name: KVS - FoundationDB 7.3
+  fdb-kvs:
+    name: KVS - FoundationDB
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -965,8 +901,8 @@ jobs:
         with:
           version: "7.3.47"
 
-      - name: Test FoundationDB 7.3 KVS
-        run: cargo make ci-fdb-7_3-kvs
+      - name: Test FoundationDB KVS
+        run: cargo make ci-fdb-kvs
 
   # ----------------------------------------
   # Database upgrade tests
@@ -997,7 +933,7 @@ jobs:
   # ----------------------------------------
 
   lang-tests:
-    name: Run SurrealQL language tests
+    name: SurrealQL language tests
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -1025,7 +961,7 @@ jobs:
           ./target/debug/surrealql-test --color always run --no-wip -j 3
 
   upgrade-tests:
-    name: Run SurrealQL upgrade tests
+    name: SurrealQL upgrade tests
     runs-on: ubuntu-latest
     steps:
       - name: Install stable toolchain
@@ -1060,7 +996,7 @@ jobs:
   # ----------------------------------------
 
   sdk-javascript:
-    name: JavaScript SDK tests (${{ matrix.version }})
+    name: SDK - JavaScript (${{ matrix.version }})
     continue-on-error: true
     runs-on: ubuntu-latest
     needs: build
@@ -1107,7 +1043,7 @@ jobs:
           SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
 
   sdk-golang:
-    name: Golang SDK tests (${{ matrix.version }})
+    name: SDK - Golang (${{ matrix.version }})
     continue-on-error: true
     runs-on: ubuntu-latest
     needs: build
@@ -1170,7 +1106,7 @@ jobs:
           SURREALDB_URL: ws://localhost:8000/rpc
 
   sdk-python:
-    name: Python SDK tests (${{ matrix.version }})
+    name: SDK - Python (${{ matrix.version }})
     continue-on-error: true
     runs-on: ubuntu-latest
     needs: build
@@ -1246,7 +1182,7 @@ jobs:
           PYTHONWARNINGS: ignore::ResourceWarning,ignore::UserWarning
 
   sdk-php:
-    name: PHP SDK tests (${{ matrix.version }})
+    name: SDK - PHP (${{ matrix.version }})
     continue-on-error: true
     runs-on: ubuntu-latest
     needs: build
@@ -1305,7 +1241,7 @@ jobs:
         run: composer test-coverage-v2
 
   sdk-dotnet:
-    name: .NET SDK tests (${{ matrix.version }})
+    name: SDK - .NET (${{ matrix.version }})
     continue-on-error: true
     runs-on: ubuntu-latest
     needs: build
@@ -1377,3 +1313,63 @@ jobs:
           ./SurrealDb.Net.LiveQuery.Tests/SurrealDb.Net.LiveQuery.Tests.csproj
           --no-restore
           --no-build
+
+  # ----------------------------------------
+  # Required checks
+  # ----------------------------------------
+
+  required-checks:
+    name: Required checks
+    runs-on: ubuntu-latest
+    needs:
+      # Server build
+      - build
+      # Quality checks
+      - format
+      - clippy
+      - check
+      - check-msrv
+      - check-fuzzing
+      - check-wasm
+      - check-revision
+      - check-docs
+      - check-binaries
+      # Integration tests
+      - cli-integration
+      - http-integration
+      - ws-integration
+      - ml-integration
+      - graphql-integration
+      # Workspace tests
+      - test
+      # SDK tests
+      - sdk-build
+      - any-engine
+      - ws-engine
+      - http-engine
+      - mem-engine
+      - file-engine
+      - rocksdb-engine
+      - surrealkv-engine
+      - tikv-engine
+      - fdb-engine
+      # KVS tests
+      - mem-kvs
+      - rocksdb-kvs
+      - surrealkv-kvs
+      - tikv-kvs
+      - fdb-kvs
+      # Database upgrade tests
+      - db-upgrade
+      # SurrealQL language tests
+      - lang-tests
+      - upgrade-tests
+      # Other SDK tests
+      # - sdk-javascript
+      # - sdk-golang
+      # - sdk-python
+      # - sdk-php
+      # - sdk-dotnet
+    steps:
+      - name: All required checks passed
+        run: echo "All required CI checks have passed successfully!"
