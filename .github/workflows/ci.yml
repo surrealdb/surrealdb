@@ -444,21 +444,10 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install dependencies
-        run: sudo apt-get -y update
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) cargo-llvm-cov
+      - name: Install tools
+        uses: taiki-e/install-action@3216b6964cbfe053bb8b9a2ef245bd9300e2061d # (Actions must be pinned by commit hash) v2.62.14
         with:
-          tool: cargo-llvm-cov
-
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) nextest
-        with:
-          tool: cargo-nextest
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+          tool: cargo-llvm-cov,cargo-nextest,cargo-make
 
       - name: Test workspace + coverage
         run: cargo make ci-workspace-coverage
@@ -497,6 +486,11 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           shared-key: kvs-${{ matrix.engine }}
 
+      - name: Install tools
+        uses: taiki-e/install-action@3216b6964cbfe053bb8b9a2ef245bd9300e2061d # (Actions must be pinned by commit hash) v2.62.14
+        with:
+          tool: cargo-nextest,cargo-make
+
       - name: Install TiKV
         if: ${{ matrix.engine == 'tikv' }}
         timeout-minutes: 10
@@ -510,14 +504,6 @@ jobs:
         uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # (Actions must be pinned by commit hash) v.2.2.0
         with:
           version: "7.3.47"
-
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) nextest
-        with:
-          tool: cargo-nextest
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test engine
         run: cargo make ci-${{ matrix.engine }}-kvs
@@ -572,6 +558,11 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           shared-key: sdk-${{ matrix.engine }}
 
+      - name: Install tools
+        uses: taiki-e/install-action@3216b6964cbfe053bb8b9a2ef245bd9300e2061d # (Actions must be pinned by commit hash) v2.62.14
+        with:
+          tool: cargo-nextest,cargo-make
+
       - name: Install TiKV
         if: ${{ matrix.engine == 'tikv' }}
         timeout-minutes: 10
@@ -585,14 +576,6 @@ jobs:
         uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # (Actions must be pinned by commit hash) v.2.2.0
         with:
           version: "7.3.47"
-
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) nextest
-        with:
-          tool: cargo-nextest
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
 
       - name: Test engine
         run: cargo make ci-api-integration-${{ matrix.engine }}
