@@ -122,34 +122,6 @@ macro_rules! array {
     };
 }
 
-/// Macro for creating a SurrealDB record ID.
-///
-/// This macro creates a SurrealDB record ID, which is a combination of a table and a name.
-///
-/// # Example
-///
-/// ```rust
-/// use surrealdb_types::rid;
-///
-/// let rid = rid!(user:john);
-/// let rid = rid!("user:123");
-/// ```
-#[macro_export]
-macro_rules! rid {
-	// Handle identifier:identifier
-	($table:ident : $name:ident) => {
-		RecordId::new(stringify!($table), stringify!($name))
-	};
-	// Handle "string:string"
-	($input:literal) => {{
-		let parts = $input.split(':').collect::<Vec<&str>>();
-		if parts.len() != 2 {
-			panic!("Invalid rid! input: {}", $input);
-		}
-		RecordId::new(parts[0], parts[1])
-	}};
-}
-
 /// Example usage of the `object!` and `array!` macros:
 ///
 /// ```rust

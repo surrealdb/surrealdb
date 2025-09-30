@@ -6,13 +6,28 @@ use serde_json::json;
 use surrealdb::IndexedResults;
 use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess};
 use surrealdb::opt::{PatchOp, PatchOps, Raw, Resource};
-use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, Value, array, object, rid};
+use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, Value, array, object};
 use surrealdb_core::expr::TopLevelExpr;
 use surrealdb_core::syn;
 use ulid::Ulid;
 
 use super::CreateDb;
 use crate::api_integration::{ApiRecordId, AuthParams, NS, Record, RecordBuf, RecordName};
+
+macro_rules! rid {
+	// Handle identifier:identifier
+	($table:ident : $name:ident) => {
+		RecordId::new(stringify!($table), stringify!($name))
+	};
+	// Handle "string:string"
+	($input:literal) => {{
+		let parts = $input.split(':').collect::<Vec<&str>>();
+		if parts.len() != 2 {
+			panic!("Invalid rid! input: {}", $input);
+		}
+		RecordId::new(parts[0], parts[1])
+	}};
+}
 
 pub async fn connect(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
