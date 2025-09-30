@@ -1945,7 +1945,7 @@ mod cli_integration {
 		// Start the server
 		let (addr, mut server) = common::start_server(StartServerArguments {
 			auth: false,
-			args: "--slow-log-threshold=1s".to_owned(),
+			args: "--slow-log-threshold=1s --slow-log-param-deny=secret".to_owned(),
 			..Default::default()
 		})
 		.await
@@ -1957,8 +1957,11 @@ mod cli_integration {
 			throwaway = Ulid::new()
 		);
 
-		// Start a slow query
-		let query = "SLEEP 1200ms;\n";
+		// Start a slow query containing a line feed
+		let query = "
+			LET $public = 'foo'; LET $secret = 'bar';
+			RETURN string::concat(sleep(1200ms), '/', $public, '/', $secret);
+		";
 		let _ = common::run(&cmd).input(query).output().unwrap();
 
 		// Extract the stderr
@@ -1966,7 +1969,10 @@ mod cli_integration {
 
 		// Check the log is present
 		assert!(stderr.contains("Slow query detected - time: "));
-		assert!(stderr.contains("s - query: SLEEP 1s200ms"));
+		assert!(stderr.contains(
+			"s - query: RETURN string::concat(sleep(1s200ms), '/', $public, '/', $secret) - params: [ $public='foo' ]"
+		));
+		println!("{stderr}");
 	}
 }
 
