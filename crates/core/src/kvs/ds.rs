@@ -129,14 +129,11 @@ pub(super) struct TransactionFactory {
 	// Clock for tracking time. It is read-only and accessible to all transactions.
 	clock: Arc<SizedClock>,
 	// The inner datastore type
-	builder: Arc<Box<dyn TransactionBuilder + Send + Sync>>,
+	builder: Arc<Box<dyn TransactionBuilder>>,
 }
 
 impl TransactionFactory {
-	pub(super) fn new(
-		clock: Arc<SizedClock>,
-		builder: Box<dyn TransactionBuilder + Send + Sync>,
-	) -> Self {
+	pub(super) fn new(clock: Arc<SizedClock>, builder: Box<dyn TransactionBuilder>) -> Self {
 		Self {
 			clock,
 			builder: Arc::new(builder),
