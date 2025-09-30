@@ -118,7 +118,7 @@ pub fn numeric(lexer: &mut Lexer, start: Token) -> Result<Numeric, SyntaxError> 
 }
 
 pub fn number_kind(lexer: &mut Lexer, start: Token) -> Result<NumberKind, SyntaxError> {
-	let offset = start.span.offset as usize;
+	let offset = start.span.offset;
 	match start.kind {
 		t!("-") | t!("+") => {
 			eat_digits1(lexer, offset)?;
@@ -202,7 +202,7 @@ pub fn integer<I>(lexer: &mut Lexer, start: Token) -> Result<I, SyntaxError>
 where
 	I: FromStr<Err = ParseIntError>,
 {
-	let offset = start.span.offset as usize;
+	let offset = start.span.offset;
 	match start.kind {
 		t!("-") | t!("+") => {
 			eat_digits1(lexer, offset)?;
@@ -223,7 +223,7 @@ where
 		let is_mantissa = lexer.reader.peek1().map(|x| x.is_ascii_digit()).unwrap_or(false);
 		if is_mantissa {
 			let span = Span {
-				offset: last_offset as u32,
+				offset: last_offset,
 				len: 1,
 			};
 			bail!("Unexpected character `.` starting float, only integers are allowed here", @span)
@@ -245,7 +245,7 @@ pub fn float<I>(lexer: &mut Lexer, start: Token) -> Result<I, SyntaxError>
 where
 	I: FromStr<Err = ParseFloatError>,
 {
-	let offset = start.span.offset as usize;
+	let offset = start.span.offset;
 	match start.kind {
 		t!("-") | t!("+") => {
 			eat_digits1(lexer, offset)?;
@@ -410,7 +410,7 @@ fn has_ident_after(lexer: &mut Lexer) -> bool {
 	}
 }
 
-fn eat_digits1(lexer: &mut Lexer, start: usize) -> Result<(), SyntaxError> {
+fn eat_digits1(lexer: &mut Lexer, start: u32) -> Result<(), SyntaxError> {
 	match lexer.reader.peek() {
 		Some(x) if x.is_ascii_digit() => {}
 		Some(x) => {

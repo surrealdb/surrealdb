@@ -193,9 +193,9 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		UpgradeBackend::SurrealKv => {}
 		#[cfg(not(feature = "backend-surrealkv"))]
 		UpgradeBackend::SurrealKv => bail!("SurrealKV backend feature is not enabled"),
-		#[cfg(any(feature = "backend-foundation-7_1", feature = "backend-foundation-7_1"))]
+		#[cfg(feature = "backend-foundation")]
 		UpgradeBackend::Foundation => {}
-		#[cfg(not(any(feature = "backend-foundation-7_1", feature = "backend-foundation-7_1")))]
+		#[cfg(not(feature = "backend-foundation"))]
 		UpgradeBackend::Foundation => bail!("FoundationDB backend features is not enabled"),
 	}
 
