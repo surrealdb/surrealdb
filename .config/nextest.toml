@@ -2,7 +2,11 @@
 # https://nexte.st/book/configuration.html
 
 [profile.default]
-test-threads = 4
+retries = 3
+fail-fast = false
+test-threads = -2
+slow-timeout = "180s"
+global-timeout = "30m"
 
 # Configure test group for KVS tests
 [[profile.default.overrides]]
