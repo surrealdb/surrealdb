@@ -1,9 +1,11 @@
+use std::collections::HashMap;
+
 use crate::ctx::Context;
 use crate::dbs::result::Results;
 use crate::dbs::{Iterable, Statement};
-use crate::expr::{Object, Value};
+use crate::expr::lookup::LookupKind;
 use crate::idx::planner::RecordStrategy;
-use std::collections::HashMap;
+use crate::val::{Object, Value};
 
 pub(super) struct Plan {
 	pub(super) do_iterate: bool,
@@ -108,19 +110,29 @@ impl ExplainItem {
 			},
 			Iterable::Yield(t) => Self {
 				name: "Iterate Yield".into(),
-				details: vec![("table", Value::from(t.0.clone()))],
+				details: vec![("table", t.clone().into())],
 			},
 			Iterable::Thing(t) => Self {
 				name: "Iterate Thing".into(),
-				details: vec![("thing", Value::Thing(t.clone()))],
+				details: vec![("thing", Value::RecordId(t.clone()))],
 			},
 			Iterable::Defer(t) => Self {
 				name: "Iterate Defer".into(),
-				details: vec![("thing", Value::Thing(t.clone()))],
+				details: vec![("thing", Value::RecordId(t.clone()))],
 			},
-			Iterable::Edges(e) => Self {
-				name: "Iterate Edges".into(),
-				details: vec![("from", Value::Thing(e.from.clone()))],
+			Iterable::Lookup {
+				from,
+				kind,
+				..
+			} => match kind {
+				LookupKind::Graph(_) => Self {
+					name: "Iterate Edges".into(),
+					details: vec![("from", Value::RecordId(from.clone()))],
+				},
+				LookupKind::Reference => Self {
+					name: "Iterate References".into(),
+					details: vec![("from", Value::RecordId(from.clone()))],
+				},
 			},
 			Iterable::Table(t, rs, sc) => Self {
 				name: match rs {
@@ -130,7 +142,7 @@ impl ExplainItem {
 				}
 				.into(),
 				details: vec![
-					("table", Value::from(t.0.clone())),
+					("table", Value::from(t.clone())),
 					("direction", sc.to_string().into()),
 				],
 			},
@@ -142,36 +154,37 @@ impl ExplainItem {
 				}
 				.into(),
 				details: vec![
-					("table", tb.to_owned().into()),
-					("range", r.to_owned().into()),
+					//TODO: Properly handle possible null byte.
+					("table", Value::String(tb.clone())),
+					("range", Value::Range(Box::new(r.clone().into_value_range()))),
 					("direction", sc.to_string().into()),
 				],
 			},
 			Iterable::Mergeable(t, v) => Self {
 				name: "Iterate Mergeable".into(),
-				details: vec![("thing", Value::Thing(t.to_owned())), ("value", v.to_owned())],
+				details: vec![("thing", Value::RecordId(t.to_owned())), ("value", v.to_owned())],
 			},
 			Iterable::Relatable(t1, t2, t3, None) => Self {
 				name: "Iterate Relatable".into(),
 				details: vec![
-					("thing-1", Value::Thing(t1.to_owned())),
-					("thing-2", Value::Thing(t2.to_owned())),
-					("thing-3", Value::Thing(t3.to_owned())),
+					("thing-1", Value::RecordId(t1.to_owned())),
+					("thing-2", Value::RecordId(t2.to_owned())),
+					("thing-3", Value::RecordId(t3.to_owned())),
 				],
 			},
 			Iterable::Relatable(t1, t2, t3, Some(v)) => Self {
 				name: "Iterate Relatable".into(),
 				details: vec![
-					("thing-1", Value::Thing(t1.to_owned())),
-					("thing-2", Value::Thing(t2.to_owned())),
-					("thing-3", Value::Thing(t3.to_owned())),
+					("thing-1", Value::RecordId(t1.to_owned())),
+					("thing-2", Value::RecordId(t2.to_owned())),
+					("thing-3", Value::RecordId(t3.to_owned())),
 					("value", v.to_owned()),
 				],
 			},
 			Iterable::Index(t, ir, rs) => {
-				let mut details = vec![("table", Value::from(t.0.clone()))];
+				let mut details = vec![("table", Value::String(t.clone()))];
 				if let Some(qp) = ctx.get_query_planner() {
-					if let Some(exe) = qp.get_query_executor(&t.0) {
+					if let Some(exe) = qp.get_query_executor(t.as_str()) {
 						details.push(("plan", exe.explain(*ir)));
 					}
 				}

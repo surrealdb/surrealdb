@@ -1,70 +1,108 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::err::Error;
-use crate::expr::statements::define::DefineTableStatement;
-use crate::expr::{Base, Ident, Idiom, Value};
-use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
+
+use anyhow::Result;
+use reblessive::tree::Stk;
 use uuid::Uuid;
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+use crate::catalog::TableDefinition;
+use crate::catalog::providers::TableProvider;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::expr::expression::VisitExpression;
+use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
+use crate::expr::{Base, Expr, Literal, Value};
+use crate::iam::{Action, ResourceKind};
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveFieldStatement {
-	pub name: Idiom,
-	pub what: Ident,
-	#[revision(start = 2)]
+	pub name: Expr,
+	pub table_name: Expr,
 	pub if_exists: bool,
+}
+
+impl VisitExpression for RemoveFieldStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.name.visit(visitor);
+		self.table_name.visit(visitor);
+	}
+}
+impl Default for RemoveFieldStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			table_name: Expr::Literal(Literal::None),
+			if_exists: false,
+		}
+	}
 }
 
 impl RemoveFieldStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
+		// Compute the table name
+		let table_name = expr_to_ident(stk, ctx, opt, doc, &self.table_name, "table name").await?;
+		// Compute the name
+		let name = expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns_name, db_name) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the field name
-		let na = self.name.to_string();
+		let name = name.to_raw_string();
 		// Get the definition
-		let fd = match txn.get_tb_field(ns, db, &self.what, &na).await {
-			Ok(x) => x,
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::FdNotFound { .. })) {
+		let _fd = match txn.get_tb_field(ns, db, &table_name, &name).await? {
+			Some(x) => x,
+			None => {
+				if self.if_exists {
 					return Ok(Value::None);
 				} else {
-					return Err(e);
+					return Err(Error::FdNotFound {
+						name,
+					}
+					.into());
 				}
 			}
 		};
 		// Delete the definition
-		let key = crate::key::table::fd::new(ns, db, &fd.what, &na);
-		txn.del(key).await?;
+		let key = crate::key::table::fd::new(ns, db, &table_name, &name);
+		txn.del(&key).await?;
 		// Refresh the table cache for fields
-		let key = crate::key::database::tb::new(ns, db, &self.what);
-		let tb = txn.get_tb(ns, db, &self.what).await?;
-		txn.set(
-			key,
-			revision::to_vec(&DefineTableStatement {
+		let Some(tb) = txn.get_tb(ns, db, &table_name).await? else {
+			return Err(Error::TbNotFound {
+				name: self.table_name.to_string(),
+			}
+			.into());
+		};
+
+		txn.put_tb(
+			ns_name,
+			db_name,
+			&TableDefinition {
 				cache_fields_ts: Uuid::now_v7(),
 				..tb.as_ref().clone()
-			})?,
-			None,
+			},
 		)
 		.await?;
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.what);
+			cache.clear_tb(ns, db, &table_name);
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -76,7 +114,7 @@ impl Display for RemoveFieldStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", self.name, self.table_name)?;
 		Ok(())
 	}
 }

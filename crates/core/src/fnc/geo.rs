@@ -1,10 +1,10 @@
-use crate::expr::geometry::Geometry;
-use crate::expr::value::Value;
 use anyhow::Result;
 use geo::algorithm::bearing::HaversineBearing;
 use geo::algorithm::centroid::Centroid;
 use geo::algorithm::chamberlain_duquette_area::ChamberlainDuquetteArea;
 use geo::algorithm::haversine_distance::HaversineDistance;
+
+use crate::val::{Geometry, Value};
 
 pub fn area((arg,): (Geometry,)) -> Result<Value> {
 	match arg {
@@ -51,12 +51,12 @@ pub fn distance((v, w): (Geometry, Geometry)) -> Result<Value> {
 
 pub mod hash {
 
+	use anyhow::{Result, bail};
+
 	use crate::err::Error;
-	use crate::expr::geometry::Geometry;
-	use crate::expr::value::Value;
 	use crate::fnc::args::Optional;
 	use crate::fnc::util::geo;
-	use anyhow::{Result, bail};
+	use crate::val::{Geometry, Value};
 
 	pub fn encode((arg, Optional(len)): (Geometry, Optional<i64>)) -> Result<Value> {
 		let len = match len {
@@ -77,17 +77,18 @@ pub mod hash {
 	}
 
 	pub fn decode((arg,): (Value,)) -> Result<Value> {
-		match arg {
-			Value::Strand(v) => Ok(geo::decode(v).into()),
-			_ => Ok(Value::None),
+		if let Some(s) = arg.as_strand() {
+			Ok(geo::decode(s).into())
+		} else {
+			Ok(Value::None)
 		}
 	}
 }
 
 pub mod is {
-	use crate::expr::geometry::Geometry;
-	use crate::expr::value::Value;
 	use anyhow::Result;
+
+	use crate::val::{Geometry, Value};
 
 	pub fn valid((arg,): (Geometry,)) -> Result<Value> {
 		Ok(arg.is_valid().into())

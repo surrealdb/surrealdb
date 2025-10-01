@@ -1,14 +1,10 @@
-use crate::sql::ident::Ident;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use crate::fmt::EscapeIdent;
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum RebuildStatement {
 	Index(RebuildIndexStatement),
 }
@@ -37,14 +33,13 @@ impl From<crate::expr::statements::rebuild::RebuildStatement> for RebuildStateme
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct RebuildIndexStatement {
-	pub name: Ident,
-	pub what: Ident,
+	pub name: String,
+	pub what: String,
 	pub if_exists: bool,
+	pub concurrently: bool,
 }
 
 impl Display for RebuildIndexStatement {
@@ -53,7 +48,10 @@ impl Display for RebuildIndexStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what))?;
+		if self.concurrently {
+			write!(f, " CONCURRENTLY")?
+		}
 		Ok(())
 	}
 }
@@ -61,9 +59,10 @@ impl Display for RebuildIndexStatement {
 impl From<RebuildIndexStatement> for crate::expr::statements::rebuild::RebuildIndexStatement {
 	fn from(v: RebuildIndexStatement) -> Self {
 		Self {
-			name: v.name.into(),
-			what: v.what.into(),
+			name: v.name,
+			what: v.what,
 			if_exists: v.if_exists,
+			concurrently: v.concurrently,
 		}
 	}
 }
@@ -71,9 +70,10 @@ impl From<RebuildIndexStatement> for crate::expr::statements::rebuild::RebuildIn
 impl From<crate::expr::statements::rebuild::RebuildIndexStatement> for RebuildIndexStatement {
 	fn from(v: crate::expr::statements::rebuild::RebuildIndexStatement) -> Self {
 		Self {
-			name: v.name.into(),
-			what: v.what.into(),
+			name: v.name,
+			what: v.what,
 			if_exists: v.if_exists,
+			concurrently: v.concurrently,
 		}
 	}
 }

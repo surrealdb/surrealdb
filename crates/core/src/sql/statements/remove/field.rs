@@ -1,18 +1,23 @@
-use crate::sql::{Ident, Idiom};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use crate::sql::{Expr, Literal};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct RemoveFieldStatement {
-	pub name: Idiom,
-	pub what: Ident,
-	#[revision(start = 2)]
+	pub name: Expr,
+	pub what: Expr,
 	pub if_exists: bool,
+}
+
+impl Default for RemoveFieldStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			what: Expr::Literal(Literal::None),
+			if_exists: false,
+		}
+	}
 }
 
 impl Display for RemoveFieldStatement {
@@ -31,7 +36,7 @@ impl From<RemoveFieldStatement> for crate::expr::statements::RemoveFieldStatemen
 		crate::expr::statements::RemoveFieldStatement {
 			name: v.name.into(),
 			if_exists: v.if_exists,
-			what: v.what.into(),
+			table_name: v.what.into(),
 		}
 	}
 }
@@ -41,7 +46,7 @@ impl From<crate::expr::statements::RemoveFieldStatement> for RemoveFieldStatemen
 		RemoveFieldStatement {
 			name: v.name.into(),
 			if_exists: v.if_exists,
-			what: v.what.into(),
+			what: v.table_name.into(),
 		}
 	}
 }

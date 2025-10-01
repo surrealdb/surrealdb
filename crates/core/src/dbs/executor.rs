@@ -1,39 +1,35 @@
-use crate::ctx::Context;
-use crate::ctx::reason::Reason;
-use crate::dbs::Force;
-use crate::dbs::Options;
-use crate::dbs::QueryType;
-use crate::dbs::response::Response;
-use crate::err;
-use crate::err::Error;
-use crate::expr::Base;
-use crate::expr::ControlFlow;
-use crate::expr::FlowResult;
-use crate::expr::paths::DB;
-use crate::expr::paths::NS;
-use crate::expr::statement::LogicalPlan;
-use crate::expr::value::Value;
-use crate::iam::Action;
-use crate::iam::ResourceKind;
-use crate::kvs::Datastore;
-use crate::kvs::TransactionType;
-use crate::kvs::{LockType, Transaction};
-use crate::sql::planner::SqlToLogical;
-use crate::sql::query::Query;
-use crate::sql::statement::Statement;
-use crate::sql::statements::{OptionStatement, UseStatement};
-use anyhow::{Result, anyhow, bail};
-use futures::{Stream, StreamExt};
-use reblessive::TreeStack;
+use std::fmt::Display;
 use std::pin::{Pin, pin};
 use std::sync::Arc;
 use std::time::Duration;
+
+use anyhow::{Result, anyhow, bail};
+use futures::{Stream, StreamExt, stream};
+use reblessive::TreeStack;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tracing::instrument;
 use trice::Instant;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
+
+use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
+use crate::ctx::Context;
+use crate::ctx::reason::Reason;
+use crate::dbs::response::Response;
+use crate::dbs::{Force, Notification, Options, QueryType};
+use crate::doc::DefaultBroker;
+use crate::err::Error;
+use crate::expr::expression::VisitExpression;
+use crate::expr::paths::{DB, NS};
+use crate::expr::plan::LogicalPlan;
+use crate::expr::statements::OptionStatement;
+use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
+use crate::iam::{Action, ResourceKind};
+use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
+use crate::sql::{self, Ast};
+use crate::val::Value;
+use crate::{err, expr};
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -42,6 +38,21 @@ pub struct Executor {
 	results: Vec<Response>,
 	opt: Options,
 	ctx: Context,
+}
+
+impl Executor {
+	fn prepare_broker(&mut self) -> Option<async_channel::Receiver<Notification>> {
+		if !self.ctx.has_notifications() {
+			return None;
+		}
+		// If a broker is already provided by a higher layer, don't override it here.
+		if self.opt.broker.is_some() {
+			return None;
+		}
+		let (send, recv) = async_channel::unbounded();
+		self.opt.broker = Some(DefaultBroker::new(send));
+		Some(recv)
+	}
 }
 
 impl Executor {
@@ -54,69 +65,145 @@ impl Executor {
 		}
 	}
 
-	fn execute_use_statement(&mut self, stmt: UseStatement) -> Result<()> {
-		let ctx_ref = Arc::get_mut(&mut self.ctx).ok_or_else(|| {
-			err::Error::unreachable(format_args!(
-				"Tried to unfreeze a Context with multiple references"
-			))
-		})?;
-
-		if let Some(ns) = stmt.ns {
-			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
-			self.opt.set_ns(Some(ns.as_str().into()));
-			session.put(NS.as_ref(), ns.into());
-			ctx_ref.add_value("session", session.into());
-		}
-		if let Some(db) = stmt.db {
-			let mut session = ctx_ref.value("session").unwrap_or(&Value::None).clone();
-			self.opt.set_db(Some(db.as_str().into()));
-			session.put(DB.as_ref(), db.into());
-			ctx_ref.add_value("session", session.into());
-		}
-		Ok(())
-	}
-
 	fn execute_option_statement(&mut self, stmt: OptionStatement) -> Result<()> {
 		// Allowed to run?
 		self.opt.is_allowed(Action::Edit, ResourceKind::Option, &Base::Db)?;
-		// Convert to uppercase
-		let mut name = stmt.name.0;
-		name.make_ascii_uppercase();
-		// Process the option
-		match name.as_str() {
-			"IMPORT" => {
-				self.opt.set_import(stmt.what);
-			}
-			"FORCE" => {
-				let force = if stmt.what {
-					Force::All
-				} else {
-					Force::None
-				};
-				self.opt.force = force;
-			}
-			"FUTURES" => {
-				if stmt.what {
-					self.opt.set_futures(true);
-				} else {
-					self.opt.set_futures_never();
-				}
-			}
-			_ => {}
-		};
+
+		if stmt.name.eq_ignore_ascii_case("IMPORT") {
+			self.opt.set_import(stmt.what);
+		} else if stmt.name.eq_ignore_ascii_case("FORCE") {
+			let force = if stmt.what {
+				Force::All
+			} else {
+				Force::None
+			};
+			self.opt.force = force;
+		}
+
 		Ok(())
 	}
 
-	/// Executes a statement which needs a transaction with the supplied transaction.
+	/// If slow logging is configured in the current context, evaluate whether the
+	/// statement exceeded the slow threshold and emit a log entry if so.
+	///
+	/// Generic over `S` to accept both concrete statements and wrappers that
+	/// implement `Display` and `VisitExpression`.
+	fn check_slow_log<S: VisitExpression + Display>(&self, start: &Instant, stm: &S) {
+		if let Some(slow_log) = self.ctx.slow_log() {
+			slow_log.check_log(&self.ctx, start, stm);
+		}
+	}
+
+	/// Executes a statement which needs a transaction with the supplied
+	/// transaction.
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	async fn execute_plan_in_transaction(
 		&mut self,
 		txn: Arc<Transaction>,
-		plan: LogicalPlan,
+		start: &Instant,
+		plan: TopLevelExpr,
 	) -> FlowResult<Value> {
 		let res = match plan {
-			LogicalPlan::Set(stm) => {
+			TopLevelExpr::Use(stmt) => {
 				// Avoid moving in and out of the context via Arc::get_mut
+				let ctx = Arc::get_mut(&mut self.ctx)
+					.ok_or_else(|| {
+						Error::unreachable("Tried to unfreeze a Context with multiple references")
+					})
+					.map_err(anyhow::Error::new)?;
+
+				if let Some(ns) = stmt.ns {
+					txn.get_or_add_ns(&ns, self.opt.strict).await?;
+
+					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+					self.opt.set_ns(Some(ns.as_str().into()));
+					session.put(NS.as_ref(), ns.into());
+					ctx.add_value("session", session.into());
+				}
+				if let Some(db) = stmt.db {
+					let Some(ns) = &self.opt.ns else {
+						return Err(ControlFlow::Err(anyhow::anyhow!(
+							"Cannot use database without namespace"
+						)));
+					};
+
+					txn.ensure_ns_db(ns, &db, self.opt.strict).await?;
+
+					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+					self.opt.set_db(Some(db.as_str().into()));
+					session.put(DB.as_ref(), db.into());
+					ctx.add_value("session", session.into());
+				}
+				Ok(Value::None)
+			}
+			TopLevelExpr::Option(_) => {
+				return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
+					"TopLevelExpr::Option should have been handled by a calling function",
+				))));
+			}
+
+			TopLevelExpr::Expr(Expr::Let(stm)) => {
+				// Avoid moving in and out of the context via Arc::get_mut
+				Arc::get_mut(&mut self.ctx)
+					.ok_or_else(|| {
+						Error::unreachable("Tried to unfreeze a Context with multiple references")
+					})
+					.map_err(anyhow::Error::new)?
+					.set_transaction(txn);
+
+				// Run the statement
+				let res = self
+					.stack
+					.enter(|stk| stm.what.compute(stk, &self.ctx, &self.opt, None))
+					.finish()
+					.await;
+
+				let res = res?;
+				let result = match &stm.kind {
+					Some(kind) => res
+						.coerce_to_kind(kind)
+						.map_err(|e| Error::SetCoerce {
+							name: stm.name.to_string(),
+							error: Box::new(e),
+						})
+						.map_err(anyhow::Error::new)?,
+					None => res,
+				};
+
+				if stm.is_protected_set() {
+					return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidParam {
+						name: stm.name.clone(),
+					})));
+				}
+				// Set the parameter
+				Arc::get_mut(&mut self.ctx)
+					.ok_or_else(|| {
+						Error::unreachable("Tried to unfreeze a Context with multiple references")
+					})
+					.map_err(anyhow::Error::new)?
+					.add_value(stm.name.clone(), result.into());
+
+				// Check if we dump the slow log
+				self.check_slow_log(start, stm.as_ref());
+				// Finalise transaction, returning nothing unless it couldn't commit
+				Ok(Value::None)
+			}
+			TopLevelExpr::Begin => {
+				return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+					"Cannot BEGIN a transaction within a transaction".to_string(),
+				))));
+			}
+			TopLevelExpr::Commit => {
+				return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+					"Cannot COMMIT without starting a transaction".to_string(),
+				))));
+			}
+			TopLevelExpr::Cancel => {
+				return Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidStatement(
+					"Cannot CANCEL without starting a transaction".to_string(),
+				))));
+			}
+			TopLevelExpr::Kill(s) => {
 				Arc::get_mut(&mut self.ctx)
 					.ok_or_else(|| {
 						err::Error::unreachable(
@@ -125,61 +212,86 @@ impl Executor {
 					})
 					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
-				// Run the statement
-				match self
-					.stack
-					.enter(|stk| stm.compute(stk, &self.ctx, &self.opt, None))
+				self.stack
+					.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None))
 					.finish()
 					.await
-				{
-					Ok(val) => {
-						// Set the parameter
-						Arc::get_mut(&mut self.ctx)
-							.ok_or_else(|| {
-								err::Error::unreachable(
-									"Tried to unfreeze a Context with multiple references",
-								)
-							})
-							.map_err(anyhow::Error::new)?
-							.add_value(stm.name, val.into());
-						// Finalise transaction, returning nothing unless it couldn't commit
-						Ok(Value::None)
-					}
-					Err(err) => Err(err),
-				}
+					.map_err(ControlFlow::Err)
 			}
-			// Process all other normal statements
-			plan => {
-				// The transaction began successfully
+			TopLevelExpr::Live(s) => {
 				Arc::get_mut(&mut self.ctx)
 					.ok_or_else(|| {
 						err::Error::unreachable(
 							"Tried to unfreeze a Context with multiple references",
 						)
+					})
+					.map_err(anyhow::Error::new)?
+					.set_transaction(txn);
+				self.stack
+					.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None))
+					.finish()
+					.await
+					.map_err(ControlFlow::Err)
+			}
+			TopLevelExpr::Show(s) => {
+				Arc::get_mut(&mut self.ctx)
+					.ok_or_else(|| {
+						err::Error::unreachable(
+							"Tried to unfreeze a Context with multiple references",
+						)
+					})
+					.map_err(anyhow::Error::new)?
+					.set_transaction(txn);
+				s.compute(&self.ctx, &self.opt, None).await.map_err(ControlFlow::Err)
+			}
+			TopLevelExpr::Access(s) => {
+				Arc::get_mut(&mut self.ctx)
+					.ok_or_else(|| {
+						err::Error::unreachable(
+							"Tried to unfreeze a Context with multiple references",
+						)
+					})
+					.map_err(anyhow::Error::new)?
+					.set_transaction(txn);
+				self.stack.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None)).finish().await
+			}
+			// Process all other normal statements
+			TopLevelExpr::Expr(e) => {
+				// The transaction began successfully
+				Arc::get_mut(&mut self.ctx)
+					.ok_or_else(|| {
+						Error::unreachable("Tried to unfreeze a Context with multiple references")
 					})
 					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
 				// Process the statement
-				self.stack.enter(|stk| plan.compute(stk, &self.ctx, &self.opt, None)).finish().await
+				let res = self
+					.stack
+					.enter(|stk| e.compute(stk, &self.ctx, &self.opt, None))
+					.finish()
+					.await;
+				self.check_slow_log(start, &e);
+				res
 			}
 		};
 
 		// Catch cancellation during running.
 		match self.ctx.done(true)? {
-			None => {}
-			Some(Reason::Timedout) => {
-				return Err(ControlFlow::from(anyhow::anyhow!(Error::QueryTimedout)));
-			}
+			None => res,
+			Some(Reason::Timedout) => Err(ControlFlow::from(anyhow::anyhow!(Error::QueryTimedout))),
 			Some(Reason::Canceled) => {
-				return Err(ControlFlow::from(anyhow::anyhow!(Error::QueryCancelled)));
+				Err(ControlFlow::from(anyhow::anyhow!(Error::QueryCancelled)))
 			}
 		}
-
-		res
 	}
 
 	/// Execute a query not wrapped in a transaction block.
-	async fn execute_bare_statement(&mut self, kvs: &Datastore, stmt: Statement) -> Result<Value> {
+	async fn execute_bare_statement(
+		&mut self,
+		kvs: &Datastore,
+		start: &Instant,
+		stmt: TopLevelExpr,
+	) -> Result<Value> {
 		// Don't even try to run if the query should already be finished.
 		match self.ctx.done(true)? {
 			None => {}
@@ -191,35 +303,31 @@ impl Executor {
 			}
 		}
 
-		match stmt {
-			// These statements don't need a transaction.
-			Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
-			stmt => {
-				let planner = SqlToLogical::new();
-				let plan = planner.statement_to_logical(stmt)?;
-
-				self.execute_plan_impl(kvs, plan).await
-			}
-		}
+		self.execute_plan_impl(kvs, start, stmt).await
 	}
 
-	async fn execute_plan_impl(&mut self, kvs: &Datastore, plan: LogicalPlan) -> Result<Value> {
-		let writeable = plan.writeable();
-		let txn = Arc::new(kvs.transaction(writeable.into(), LockType::Optimistic).await?);
-		let receiver = self.ctx.has_notifications().then(|| {
-			let (send, recv) = async_channel::unbounded();
-			self.opt.sender = Some(send);
-			recv
-		});
+	async fn execute_plan_impl(
+		&mut self,
+		kvs: &Datastore,
+		start: &Instant,
+		plan: TopLevelExpr,
+	) -> Result<Value> {
+		let transaction_type = if plan.read_only() {
+			TransactionType::Read
+		} else {
+			TransactionType::Write
+		};
+		let txn = Arc::new(kvs.transaction(transaction_type, LockType::Optimistic).await?);
+		let receiver = self.prepare_broker();
 
-		match self.execute_plan_in_transaction(txn.clone(), plan).await {
+		match self.execute_plan_in_transaction(txn.clone(), start, plan).await {
 			Ok(value) | Err(ControlFlow::Return(value)) => {
 				let mut lock = txn.lock().await;
 
 				// non-writable transactions might return an error on commit.
 				// So cancel them instead. This is fine since a non-writable transaction
 				// has nothing to commit anyway.
-				if !writeable {
+				if let TransactionType::Read = transaction_type {
 					let _ = lock.cancel().await;
 					return Ok(value);
 				}
@@ -240,7 +348,7 @@ impl Executor {
 
 				// flush notifications.
 				if let Some(recv) = receiver {
-					self.opt.sender = None;
+					self.opt.broker = None;
 					if let Some(sink) = self.ctx.notifications() {
 						spawn(async move {
 							while let Ok(x) = recv.recv().await {
@@ -264,14 +372,15 @@ impl Executor {
 		}
 	}
 
-	/// Execute the begin statement and all statements after which are within a transaction block.
+	/// Execute the begin statement and all statements after which are within a
+	/// transaction block.
 	async fn execute_begin_statement<S>(
 		&mut self,
 		kvs: &Datastore,
 		mut stream: Pin<&mut S>,
 	) -> Result<()>
 	where
-		S: Stream<Item = Result<Statement>>,
+		S: Stream<Item = Result<TopLevelExpr>>,
 	{
 		let Ok(txn) = kvs.transaction(TransactionType::Write, LockType::Optimistic).await else {
 			// couldn't create a transaction.
@@ -279,7 +388,7 @@ impl Executor {
 			while let Some(stmt) = stream.next().await {
 				yield_now!();
 				let stmt = stmt?;
-				if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
+				if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
 					return Ok(());
 				}
 
@@ -296,12 +405,9 @@ impl Executor {
 			return Ok(());
 		};
 
-		// Create a sender for this transaction only if the context allows for notifications.
-		let receiver = self.ctx.has_notifications().then(|| {
-			let (send, recv) = async_channel::unbounded();
-			self.opt.sender = Some(send);
-			recv
-		});
+		// Create a sender for this transaction only if the context allows for
+		// notifications.
+		let receiver = self.prepare_broker();
 
 		let txn = Arc::new(txn);
 		let start_results = self.results.len();
@@ -333,7 +439,7 @@ impl Executor {
 				while let Some(stmt) = stream.next().await {
 					yield_now!();
 					let stmt = stmt?;
-					if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
+					if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
 						return Ok(());
 					}
 
@@ -351,21 +457,21 @@ impl Executor {
 				return Ok(());
 			}
 
-			if skip_remaining && !matches!(stmt, Statement::Cancel(_) | Statement::Commit(_)) {
+			if skip_remaining && !matches!(stmt, TopLevelExpr::Cancel | TopLevelExpr::Commit) {
 				continue;
 			}
 
 			trace!(target: TARGET, statement = %stmt, "Executing statement");
 
 			let query_type = match stmt {
-				Statement::Live(_) => QueryType::Live,
-				Statement::Kill(_) => QueryType::Kill,
+				TopLevelExpr::Live(_) => QueryType::Live,
+				TopLevelExpr::Kill(_) => QueryType::Kill,
 				_ => QueryType::Other,
 			};
 
 			let before = Instant::now();
 			let value = match stmt {
-				Statement::Begin(_) => {
+				TopLevelExpr::Begin => {
 					let _ = txn.cancel().await;
 					// tried to begin a transaction within a transaction.
 
@@ -384,12 +490,12 @@ impl Executor {
 						query_type: QueryType::Other,
 					});
 
-					self.opt.sender = None;
+					self.opt.broker = None;
 
 					while let Some(stmt) = stream.next().await {
 						yield_now!();
 						let stmt = stmt?;
-						if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
+						if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
 							return Ok(());
 						}
 
@@ -403,7 +509,7 @@ impl Executor {
 					// Missing CANCEL/COMMIT statement, statement already canceled so nothing todo.
 					return Ok(());
 				}
-				Statement::Cancel(_) => {
+				TopLevelExpr::Cancel => {
 					let _ = txn.cancel().await;
 
 					// update the results indicating cancelation.
@@ -412,11 +518,11 @@ impl Executor {
 						res.result = Err(anyhow!(Error::QueryCancelled));
 					}
 
-					self.opt.sender = None;
+					self.opt.broker = None;
 
 					return Ok(());
 				}
-				Statement::Commit(_) => {
+				TopLevelExpr::Commit => {
 					let mut lock = txn.lock().await;
 
 					// complete_changes and then commit.
@@ -431,7 +537,7 @@ impl Executor {
 
 						// flush notifications.
 						if let Some(recv) = receiver {
-							self.opt.sender = None;
+							self.opt.broker = None;
 							if let Some(sink) = self.ctx.notifications() {
 								spawn(async move {
 									while let Ok(x) = recv.recv().await {
@@ -454,11 +560,11 @@ impl Executor {
 						}));
 					}
 
-					self.opt.sender = None;
+					self.opt.broker = None;
 
 					return Ok(());
 				}
-				Statement::Option(stmt) => match self.execute_option_statement(stmt) {
+				TopLevelExpr::Option(stmt) => match self.execute_option_statement(stmt) {
 					Ok(_) => {
 						// skip adding the value as executing an option statement doesn't produce
 						// results
@@ -466,14 +572,14 @@ impl Executor {
 					}
 					Err(e) => Err(e),
 				},
-				Statement::Use(stmt) => self.execute_use_statement(stmt).map(|_| Value::None),
 				stmt => {
-					skip_remaining = matches!(stmt, Statement::Output(_));
+					skip_remaining = matches!(stmt, TopLevelExpr::Expr(Expr::Return(_)));
 
-					let planner = SqlToLogical::new();
-					let plan = planner.statement_to_logical(stmt)?;
+					// reintroduce planner later.
+					let plan = stmt;
 
-					let r = match self.execute_plan_in_transaction(txn.clone(), plan).await {
+					let r = match self.execute_plan_in_transaction(txn.clone(), &before, plan).await
+					{
 						Ok(x) => Ok(x),
 						Err(ControlFlow::Return(value)) => {
 							skip_remaining = true;
@@ -488,7 +594,8 @@ impl Executor {
 								res.result = Err(anyhow!(Error::QueryNotExecuted));
 							}
 
-							// statement return an error. Consume all the other statement until we hit a cancel or commit.
+							// statement return an error. Consume all the other statement until we
+							// hit a cancel or commit.
 							self.results.push(Response {
 								time: before.elapsed(),
 								result: Err(e),
@@ -497,12 +604,12 @@ impl Executor {
 
 							let _ = txn.cancel().await;
 
-							self.opt.sender = None;
+							self.opt.broker = None;
 
 							while let Some(stmt) = stream.next().await {
 								yield_now!();
 								let stmt = stmt?;
-								if let Statement::Cancel(_) | Statement::Commit(_) = stmt {
+								if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
 									return Ok(());
 								}
 
@@ -547,7 +654,7 @@ impl Executor {
 			}));
 		}
 
-		self.opt.sender = None;
+		self.opt.broker = None;
 
 		Ok(())
 	}
@@ -557,34 +664,30 @@ impl Executor {
 		kvs: &Datastore,
 		ctx: Context,
 		opt: Options,
-		qry: Query,
+		qry: Ast,
 	) -> Result<Vec<Response>> {
-		let stream = futures::stream::iter(qry.into_iter().map(Ok));
+		let stream = futures::stream::iter(qry.expressions.into_iter().map(Ok));
 		Self::execute_stream(kvs, ctx, opt, false, stream).await
 	}
 
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	pub async fn execute_plan(
 		kvs: &Datastore,
 		ctx: Context,
 		opt: Options,
-		plan: LogicalPlan,
+		qry: LogicalPlan,
 	) -> Result<Vec<Response>> {
-		let mut this = Executor::new(ctx, opt);
+		let stream = futures::stream::iter(qry.expressions.into_iter().map(Ok));
+		Self::execute_expr_stream(kvs, ctx, opt, false, stream).await
+	}
 
-		let query_type = match &plan {
-			LogicalPlan::Live(_) => QueryType::Live,
-			LogicalPlan::Kill(_) => QueryType::Kill,
-			_ => QueryType::Other,
-		};
-
-		let now = Instant::now();
-		let result = this.execute_plan_impl(kvs, plan).await;
-
-		Ok(vec![Response {
-			time: now.elapsed(),
-			result,
-			query_type,
-		}])
+	pub async fn execute_expr(
+		kvs: &Datastore,
+		ctx: Context,
+		opt: Options,
+		plan: TopLevelExpr,
+	) -> Result<Vec<Response>> {
+		Self::execute_expr_stream(kvs, ctx, opt, false, stream::once(async { Ok(plan) })).await
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
@@ -596,13 +699,33 @@ impl Executor {
 		stream: S,
 	) -> Result<Vec<Response>>
 	where
-		S: Stream<Item = Result<Statement>>,
+		S: Stream<Item = Result<sql::TopLevelExpr>>,
+	{
+		Self::execute_expr_stream(
+			kvs,
+			ctx,
+			opt,
+			skip_success_results,
+			stream.map(|x| x.map(expr::TopLevelExpr::from)),
+		)
+		.await
+	}
+
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	pub async fn execute_expr_stream<S>(
+		kvs: &Datastore,
+		ctx: Context,
+		opt: Options,
+		skip_success_results: bool,
+		stream: S,
+	) -> Result<Vec<Response>>
+	where
+		S: Stream<Item = Result<TopLevelExpr>>,
 	{
 		let mut this = Executor::new(ctx, opt);
 		let mut stream = pin!(stream);
 
 		while let Some(stmt) = stream.next().await {
-			yield_now!();
 			let stmt = match stmt {
 				Ok(x) => x,
 				Err(e) => {
@@ -617,9 +740,9 @@ impl Executor {
 			};
 
 			match stmt {
-				Statement::Option(stmt) => this.execute_option_statement(stmt)?,
+				TopLevelExpr::Option(stmt) => this.execute_option_statement(stmt)?,
 				// handle option here because it doesn't produce a result.
-				Statement::Begin(_) => {
+				TopLevelExpr::Begin => {
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
 						this.results.push(Response {
 							time: Duration::ZERO,
@@ -631,10 +754,10 @@ impl Executor {
 					}
 				}
 				stmt => {
-					let query_type: QueryType = (&stmt).into();
+					let query_type: QueryType = QueryType::for_toplevel_expr(&stmt);
 
 					let now = Instant::now();
-					let result = this.execute_bare_statement(kvs, stmt).await;
+					let result = this.execute_bare_statement(kvs, &now, stmt).await;
 					if !skip_success_results || result.is_err() {
 						this.results.push(Response {
 							time: now.elapsed(),
@@ -644,6 +767,7 @@ impl Executor {
 					}
 				}
 			}
+			yield_now!();
 		}
 		Ok(this.results)
 	}
@@ -651,11 +775,9 @@ impl Executor {
 
 #[cfg(test)]
 mod tests {
-	use crate::{
-		dbs::Session,
-		iam::{Level, Role},
-		kvs::Datastore,
-	};
+	use crate::dbs::Session;
+	use crate::iam::{Level, Role};
+	use crate::kvs::Datastore;
 
 	#[tokio::test]
 	async fn check_execute_option_permissions() {

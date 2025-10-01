@@ -1,22 +1,25 @@
 //! Stores a DEFINE NAMESPACE config definition
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Ns<'a> {
+use storekey::{BorrowDecode, Encode};
+
+use crate::catalog::NamespaceDefinition;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::impl_kv_key_storekey;
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+pub(crate) struct NamespaceKey<'key> {
 	__: u8,
 	_a: u8,
 	_b: u8,
 	_c: u8,
-	pub ns: &'a str,
+	pub ns: Cow<'key, str>,
 }
-impl_key!(Ns<'a>);
 
-pub fn new(ns: &str) -> Ns<'_> {
-	Ns::new(ns)
+impl_kv_key_storekey!(NamespaceKey<'_> => NamespaceDefinition);
+
+pub fn new(ns: &str) -> NamespaceKey<'_> {
+	NamespaceKey::new(ns)
 }
 
 pub fn prefix() -> Vec<u8> {
@@ -31,38 +34,33 @@ pub fn suffix() -> Vec<u8> {
 	k
 }
 
-impl Categorise for Ns<'_> {
+impl Categorise for NamespaceKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::Namespace
 	}
 }
 
-impl<'a> Ns<'a> {
-	pub fn new(ns: &'a str) -> Self {
+impl<'key> NamespaceKey<'key> {
+	pub fn new(ns: &'key str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'!',
 			_b: b'n',
 			_c: b's',
-			ns,
+			ns: Cow::Borrowed(ns),
 		}
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+	use crate::kvs::KVKey;
+
 	#[test]
 	fn key() {
-		use super::*;
-		#[rustfmt::skip]
-            let val = Ns::new(
-            "testns",
-        );
-		let enc = Ns::encode(&val).unwrap();
-		assert_eq!(enc, b"/!nstestns\0");
-
-		let dec = Ns::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let val = NamespaceKey::new("test");
+		let enc = NamespaceKey::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/!nstest\0");
 	}
 }

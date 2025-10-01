@@ -1,14 +1,14 @@
-use crate::{
-	sql::{Algorithm, language::Language},
-	syn::token::{DistanceKind, Keyword, TokenKind, VectorTypeKind},
-};
 use phf::{phf_map, phf_set};
 use unicase::UniCase;
 
-/// A set of keywords which might in some contexts are dissallowed as an identifier.
+use crate::sql::Algorithm;
+use crate::sql::language::Language;
+use crate::syn::token::{DistanceKind, Keyword, TokenKind, VectorTypeKind};
+
+/// A set of keywords which might in some contexts are dissallowed as an
+/// identifier.
 pub static RESERVED_KEYWORD: phf::Set<UniCase<&'static str>> = phf_set! {
 	UniCase::ascii("ALTER"),
-	UniCase::ascii("ANALYZE"),
 	UniCase::ascii("BEGIN"),
 	UniCase::ascii("BREAK"),
 	UniCase::ascii("CANCEL"),
@@ -64,7 +64,6 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("ALL") => TokenKind::Keyword(Keyword::All),
 	UniCase::ascii("ALTER") => TokenKind::Keyword(Keyword::Alter),
 	UniCase::ascii("ALWAYS") => TokenKind::Keyword(Keyword::Always),
-	UniCase::ascii("ANALYZE") => TokenKind::Keyword(Keyword::Analyze),
 	UniCase::ascii("ANALYZER") => TokenKind::Keyword(Keyword::Analyzer),
 	UniCase::ascii("API") => TokenKind::Keyword(Keyword::Api),
 	UniCase::ascii("AS") => TokenKind::Keyword(Keyword::As),
@@ -98,6 +97,8 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("CONFIG") => TokenKind::Keyword(Keyword::Config),
 	UniCase::ascii("CONTENT") => TokenKind::Keyword(Keyword::Content),
 	UniCase::ascii("CONTINUE") => TokenKind::Keyword(Keyword::Continue),
+	UniCase::ascii("COMPUTED") => TokenKind::Keyword(Keyword::Computed),
+		UniCase::ascii("COUNT") => TokenKind::Keyword(Keyword::Count),
 	UniCase::ascii("CREATE") => TokenKind::Keyword(Keyword::Create),
 	UniCase::ascii("DATABASE") => TokenKind::Keyword(Keyword::Database),
 	UniCase::ascii("DB") => TokenKind::Keyword(Keyword::Database),
@@ -110,10 +111,6 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("DIMENSION") => TokenKind::Keyword(Keyword::Dimension),
 	UniCase::ascii("DISTANCE") => TokenKind::Keyword(Keyword::Distance),
 	UniCase::ascii("DIST") => TokenKind::Keyword(Keyword::Distance),
-	UniCase::ascii("DOC_IDS_CACHE") => TokenKind::Keyword(Keyword::DocIdsCache),
-	UniCase::ascii("DOC_IDS_ORDER") => TokenKind::Keyword(Keyword::DocIdsOrder),
-	UniCase::ascii("DOC_LENGTHS_CACHE") => TokenKind::Keyword(Keyword::DocLengthsCache),
-	UniCase::ascii("DOC_LENGTHS_ORDER") => TokenKind::Keyword(Keyword::DocLengthsOrder),
 	UniCase::ascii("DROP") => TokenKind::Keyword(Keyword::Drop),
 	UniCase::ascii("DUPLICATE") => TokenKind::Keyword(Keyword::Duplicate),
 	UniCase::ascii("EDGENGRAM") => TokenKind::Keyword(Keyword::Edgengram),
@@ -140,6 +137,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("FOR") => TokenKind::Keyword(Keyword::For),
 	UniCase::ascii("FROM") => TokenKind::Keyword(Keyword::From),
 	UniCase::ascii("FULL") => TokenKind::Keyword(Keyword::Full),
+	UniCase::ascii("FULLTEXT") => TokenKind::Keyword(Keyword::Fulltext),
 	UniCase::ascii("FUNCTION") => TokenKind::Keyword(Keyword::Function),
 	UniCase::ascii("FUNCTIONS") => TokenKind::Keyword(Keyword::Functions),
 	UniCase::ascii("GRANT") => TokenKind::Keyword(Keyword::Grant),
@@ -222,7 +220,6 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("SCHEMALESS") => TokenKind::Keyword(Keyword::Schemaless),
 	UniCase::ascii("SCOPE") => TokenKind::Keyword(Keyword::Scope),
 	UniCase::ascii("SC") => TokenKind::Keyword(Keyword::Scope),
-	UniCase::ascii("SEARCH") => TokenKind::Keyword(Keyword::Search),
 	UniCase::ascii("SELECT") => TokenKind::Keyword(Keyword::Select),
 	UniCase::ascii("SEQUENCE") => TokenKind::Keyword(Keyword::Sequence),
 	UniCase::ascii("SESSION") => TokenKind::Keyword(Keyword::Session),
@@ -292,7 +289,6 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("ARRAY") => TokenKind::Keyword(Keyword::Array),
 	UniCase::ascii("GEOMETRY") => TokenKind::Keyword(Keyword::Geometry),
 	UniCase::ascii("RECORD") => TokenKind::Keyword(Keyword::Record),
-	UniCase::ascii("FUTURE") => TokenKind::Keyword(Keyword::Future),
 	UniCase::ascii("BOOL") => TokenKind::Keyword(Keyword::Bool),
 	UniCase::ascii("BYTES") => TokenKind::Keyword(Keyword::Bytes),
 	UniCase::ascii("DATETIME") => TokenKind::Keyword(Keyword::Datetime),

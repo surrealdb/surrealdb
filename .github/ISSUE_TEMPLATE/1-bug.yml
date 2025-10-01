@@ -32,7 +32,7 @@ body:
       label: Steps to reproduce
       description: What are the steps necessary to reproduce this bug?
       placeholder: |
-        Detail the steps taken to reproduce the behaviour. Include as much relevant information as possible. Please ensure that all code is formatted within code blocks.
+        **Show the exact code or commands needed to reproduce the behaviour.** If this is not possible, detail the steps taken and as much relevant information as possible. Please ensure that all code is formatted within code blocks. Ideally, anyone interested in the issue should be able to directly copy and paste the code to run it and see the indicated behaviour. Screenshots and videos are welcome, but be sure to include code that can be copied and pasted in this case as well.
     validations:
       required: true
   - id: expected

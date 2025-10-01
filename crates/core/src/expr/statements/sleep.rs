@@ -1,17 +1,15 @@
+use std::fmt;
+
+use anyhow::Result;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Base, Duration, Value};
+use crate::expr::Base;
 use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
+use crate::val::{Duration, Value};
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct SleepStatement {
 	pub(crate) duration: Duration,
 }
@@ -49,9 +47,10 @@ impl fmt::Display for SleepStatement {
 
 #[cfg(test)]
 mod tests {
+	use std::time::{self, SystemTime};
+
 	use super::*;
 	use crate::dbs::test::mock;
-	use std::time::{self, SystemTime};
 
 	#[tokio::test]
 	async fn test_sleep_compute() {

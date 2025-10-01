@@ -1,7 +1,7 @@
-use super::Auth;
-use crate::dbs::Session;
-use std::collections::BTreeMap;
 use std::sync::Arc;
+
+use super::Auth;
+use crate::dbs::{Session, Variables};
 
 pub fn reset(session: &mut Session) {
 	session.au = Arc::new(Auth::default());
@@ -10,5 +10,5 @@ pub fn reset(session: &mut Session) {
 	session.rd = None;
 	session.ns = None;
 	session.db = None;
-	session.parameters = BTreeMap::new();
+	session.variables = Variables::default();
 }

@@ -339,7 +339,7 @@ Defaults to `[]`
 Specifies a duration in milliseconds within which the test should finish. If the
 test takes longer than the given duration it will be considered an error and it
 will cause a test run to fail. This key can also be set to `false` to disable
-the timeout altogether or `true` to default to 1 second. Defaults to `1000`.
+the timeout altogether or `true` to default to 2 seconds. Defaults to `2000`.
 
 
 #### `[env.signin]` `[env.signup]`

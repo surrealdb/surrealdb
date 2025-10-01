@@ -1,13 +1,14 @@
-use crate::idx::trees::store::cache::TreeCache;
-use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider};
-use crate::kvs::{Key, Transaction};
-use ahash::{HashMap, HashSet};
-use anyhow::Result;
 use std::fmt::{Debug, Display};
 use std::mem;
 use std::sync::Arc;
 
-#[non_exhaustive]
+use ahash::{HashMap, HashSet};
+use anyhow::Result;
+
+use crate::idx::trees::store::cache::TreeCache;
+use crate::idx::trees::store::{NodeId, StoredNode, TreeNode, TreeNodeProvider};
+use crate::kvs::{Key, Transaction};
+
 pub struct TreeWrite<N>
 where
 	N: TreeNode + Debug + Clone,
@@ -105,7 +106,8 @@ where
 		if self.updated.is_empty() && self.removed.is_empty() {
 			return Ok(None);
 		}
-		// Create a new cache hydrated with non-updated and non-removed previous cache entries.
+		// Create a new cache hydrated with non-updated and non-removed previous cache
+		// entries.
 		let new_cache = self.cache.next_generation(&self.updated, &self.removed).await;
 
 		let updated = mem::take(&mut self.updated);
@@ -121,7 +123,7 @@ where
 		}
 		let removed = mem::take(&mut self.removed);
 		for (node_id, node_key) in removed {
-			tx.del(node_key).await?;
+			tx.del(&node_key).await?;
 			new_cache.remove_node(&node_id).await;
 		}
 
@@ -144,7 +146,6 @@ where
 	}
 }
 
-#[non_exhaustive]
 pub struct TreeRead<N>
 where
 	N: TreeNode + Debug + Clone,

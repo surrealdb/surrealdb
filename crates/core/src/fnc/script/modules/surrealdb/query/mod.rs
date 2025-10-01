@@ -1,23 +1,20 @@
 use std::cell::RefCell;
 
-use js::{
-	Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value,
-	class::{JsClass, OwnedBorrow, Readable, Trace},
-	prelude::{Coerced, Opt},
-};
+use js::class::{JsClass, OwnedBorrow, Readable, Trace};
+use js::prelude::{Coerced, Opt};
+use js::{Ctx, Exception, FromJs, JsLifetime, Promise, Result, Value};
 use reblessive::tree::Stk;
 
-use crate::{
-	ctx::Context,
-	dbs::{Attach, Options},
-	doc::CursorDoc,
-	expr::FlowResultExt as _,
-};
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::expr::FlowResultExt as _;
 
 mod classes;
 
-use crate::ctx::MutableContext;
 pub use classes::Query;
+
+use crate::ctx::MutableContext;
 
 /// A class to carry the data to run subqueries.
 #[derive(js::JsLifetime)]
@@ -61,7 +58,8 @@ pub fn query<'js>(
 	let promise = Promise::wrap_future(&ctx_clone, async move {
 		let query_ctx = ctx.userdata::<QueryContext<'js>>().expect("query context should be set");
 
-		// Wait on existing query ctx so that we can't spawn more then one query at the same time.
+		// Wait on existing query ctx so that we can't spawn more then one query at the
+		// same time.
 		if let Some(x) = pending_query_future {
 			let _ = x.await;
 		}
@@ -79,11 +77,11 @@ pub fn query<'js>(
 			};
 
 			let mut context = MutableContext::new(query_ctx.context);
-			query
-				.clone()
-				.vars
-				.attach(&mut context)
-				.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+			if let Some(v) = query.clone().vars {
+				context
+					.attach_variables(v)
+					.map_err(|e| Exception::throw_message(&ctx, &e.to_string()))?;
+			};
 			let context = context.freeze();
 
 			Stk::enter_scope(|stk| {

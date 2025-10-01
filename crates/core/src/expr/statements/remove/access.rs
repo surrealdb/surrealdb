@@ -1,56 +1,76 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::err::Error;
-use crate::expr::{Base, Ident, Value};
-use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+use anyhow::Result;
+use reblessive::tree::Stk;
+
+use crate::catalog::providers::AuthorisationProvider;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::expr::expression::VisitExpression;
+use crate::expr::parameterize::expr_to_ident;
+use crate::expr::{Base, Expr, Literal, Value};
+use crate::iam::{Action, ResourceKind};
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveAccessStatement {
-	pub name: Ident,
+	pub name: Expr,
 	pub base: Base,
-	#[revision(start = 2)]
 	pub if_exists: bool,
+}
+
+impl VisitExpression for RemoveAccessStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.name.visit(visitor);
+	}
+}
+impl Default for RemoveAccessStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			base: Base::default(),
+			if_exists: false,
+		}
+	}
 }
 
 impl RemoveAccessStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
+		// Compute the name
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "access name").await?;
 		// Check the statement type
 		match &self.base {
 			Base::Root => {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Get the definition
-				let ac = match txn.get_root_access(&self.name).await {
-					Ok(x) => x,
-					Err(e) => {
-						if self.if_exists
-							&& matches!(e.downcast_ref(), Some(Error::AccessRootNotFound { .. }))
-						{
-							return Ok(Value::None);
-						} else {
-							return Err(e);
-						}
+				let Some(ac) = txn.get_root_access(&name).await? else {
+					if self.if_exists {
+						return Ok(Value::None);
+					} else {
+						return Err(anyhow::Error::new(Error::AccessRootNotFound {
+							ac: name,
+						}));
 					}
 				};
+
 				// Delete the definition
-				let key = crate::key::root::ac::new(&ac.name);
-				txn.del(key).await?;
-				// Delete any associated data including access grants.
-				let key = crate::key::root::access::all::new(&ac.name);
-				txn.delp(key).await?;
+				txn.del_root_access(&ac.name).await?;
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -58,26 +78,23 @@ impl RemoveAccessStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Get the definition
-				let ac = match txn.get_ns_access(opt.ns()?, &self.name).await {
-					Ok(x) => x,
-					Err(e) => {
-						if self.if_exists
-							&& matches!(e.downcast_ref(), Some(Error::AccessNsNotFound { .. }))
-						{
-							return Ok(Value::None);
-						} else {
-							return Err(e);
-						}
+				let ns = ctx.get_ns_id(opt).await?;
+				let Some(ac) = txn.get_ns_access(ns, &name).await? else {
+					if self.if_exists {
+						return Ok(Value::None);
+					} else {
+						let ns = opt.ns()?;
+						return Err(anyhow::Error::new(Error::AccessNsNotFound {
+							ac: name,
+							ns: ns.to_string(),
+						}));
 					}
 				};
+
 				// Delete the definition
-				let key = crate::key::namespace::ac::new(opt.ns()?, &ac.name);
-				txn.del(key).await?;
-				// Delete any associated data including access grants.
-				let key = crate::key::namespace::access::all::new(opt.ns()?, &ac.name);
-				txn.delp(key).await?;
+				txn.del_ns_access(ns, &ac.name).await?;
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -85,31 +102,26 @@ impl RemoveAccessStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Get the definition
-				let (ns, db) = opt.ns_db()?;
-				let ac = match txn.get_db_access(ns, db, &self.name).await {
-					Ok(x) => x,
-					Err(e) => {
-						if self.if_exists
-							&& matches!(e.downcast_ref(), Some(Error::AccessDbNotFound { .. }))
-						{
-							return Ok(Value::None);
-						} else {
-							return Err(e);
-						}
+				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+				let Some(ac) = txn.get_db_access(ns, db, &name).await? else {
+					if self.if_exists {
+						return Ok(Value::None);
+					} else {
+						let (ns, db) = opt.ns_db()?;
+						return Err(anyhow::Error::new(Error::AccessDbNotFound {
+							ac: name,
+							ns: ns.to_string(),
+							db: db.to_string(),
+						}));
 					}
 				};
 				// Delete the definition
-				let key = crate::key::database::ac::new(ns, db, &ac.name);
-				txn.del(key).await?;
-				// Delete any associated data including access grants.
-				let key = crate::key::database::access::all::new(ns, db, &ac.name);
-				txn.delp(key).await?;
+				txn.del_db_access(ns, db, &ac.name).await?;
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}
-			_ => Err(anyhow::Error::new(Error::InvalidLevel(self.base.to_string()))),
 		}
 	}
 }

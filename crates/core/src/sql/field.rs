@@ -1,88 +1,75 @@
-use crate::sql::{Idiom, SqlValue, fmt::Fmt};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter, Write};
-use std::ops::Deref;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use crate::fmt::Fmt;
+use crate::sql::{Expr, Idiom};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct Fields(pub Vec<Field>, pub bool);
+pub enum Fields {
+	/// Fields had the `VALUE` clause and should only return the given selector
+	Value(Box<Field>),
+	/// Normal fields where an object with the selected fields is expected
+	Select(Vec<Field>),
+}
 
 impl Fields {
-	/// Create a new `*` field projection
-	pub(crate) fn all() -> Self {
-		Self(vec![Field::All], false)
+	// Shorthand for `Fields::Select(vec![Field::all])`
+	pub fn all() -> Fields {
+		Fields::Select(vec![Field::All])
 	}
-	/// Check to see if this field is a `*` projection
-	pub fn is_all(&self) -> bool {
-		self.0.iter().any(|v| matches!(v, Field::All))
+
+	pub fn none() -> Fields {
+		Fields::Select(vec![])
 	}
-	/// Get all fields which are not an `*` projection
-	pub fn other(&self) -> impl Iterator<Item = &Field> {
-		self.0.iter().filter(|v| !matches!(v, Field::All))
-	}
-	/// Check to see if this field is a single VALUE clause
-	pub fn single(&self) -> Option<&Field> {
-		match (self.0.len(), self.1) {
-			(1, true) => match self.0.first() {
-				Some(Field::All) => None,
-				Some(v) => Some(v),
-				_ => None,
-			},
-			_ => None,
+
+	pub fn contains_all(&self) -> bool {
+		match self {
+			Fields::Value(field) => matches!(**field, Field::All),
+			Fields::Select(fields) => fields.iter().all(|x| matches!(x, Field::All)),
 		}
 	}
 }
 
 impl From<Fields> for crate::expr::field::Fields {
 	fn from(v: Fields) -> Self {
-		Self(v.0.into_iter().map(Into::into).collect(), v.1)
+		match v {
+			Fields::Value(x) => crate::expr::field::Fields::Value(Box::new((*x).into())),
+			Fields::Select(x) => {
+				crate::expr::field::Fields::Select(x.into_iter().map(From::from).collect())
+			}
+		}
 	}
 }
 
 impl From<crate::expr::field::Fields> for Fields {
 	fn from(v: crate::expr::field::Fields) -> Self {
-		Self(v.0.into_iter().map(Into::into).collect(), false)
-	}
-}
-
-impl Deref for Fields {
-	type Target = Vec<Field>;
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
-
-impl IntoIterator for Fields {
-	type Item = Field;
-	type IntoIter = std::vec::IntoIter<Self::Item>;
-	fn into_iter(self) -> Self::IntoIter {
-		self.0.into_iter()
+		match v {
+			crate::expr::field::Fields::Value(x) => Fields::Value(Box::new((*x).into())),
+			crate::expr::field::Fields::Select(x) => {
+				Fields::Select(x.into_iter().map(From::from).collect())
+			}
+		}
 	}
 }
 
 impl Display for Fields {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self.single() {
-			Some(v) => write!(f, "VALUE {}", &v),
-			None => Display::fmt(&Fmt::comma_separated(&self.0), f),
+		match self {
+			Fields::Value(v) => write!(f, "VALUE {}", &v),
+			Fields::Select(x) => Display::fmt(&Fmt::comma_separated(x), f),
 		}
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Field {
 	/// The `*` in `SELECT * FROM ...`
 	#[default]
 	All,
 	/// The 'rating' in `SELECT rating FROM ...`
 	Single {
-		expr: SqlValue,
+		expr: Expr,
 		/// The `quality` in `SELECT rating AS quality FROM ...`
 		alias: Option<Idiom>,
 	},

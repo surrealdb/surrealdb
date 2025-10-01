@@ -1,37 +1,41 @@
 //! Stores a DEFINE ANALYZER config definition
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Az<'a> {
+use anyhow::Result;
+use storekey::{BorrowDecode, Encode};
+
+use crate::catalog;
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::key::category::{Categorise, Category};
+use crate::kvs::{KVKey, impl_kv_key_storekey};
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+pub(crate) struct Az<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub az: &'a str,
+	pub az: Cow<'a, str>,
 }
-impl_key!(Az<'a>);
 
-pub fn new<'a>(ns: &'a str, db: &'a str, az: &'a str) -> Az<'a> {
+impl_kv_key_storekey!(Az<'_> => catalog::AnalyzerDefinition);
+
+pub fn new(ns: NamespaceId, db: DatabaseId, az: &str) -> Az<'_> {
 	Az::new(ns, db, az)
 }
 
-pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode()?;
+pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
+	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"!az\x00");
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode()?;
+pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
+	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"!az\xff");
 	Ok(k)
 }
@@ -43,48 +47,46 @@ impl Categorise for Az<'_> {
 }
 
 impl<'a> Az<'a> {
-	pub fn new(ns: &'a str, db: &'a str, az: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, az: &'a str) -> Self {
 		Self {
-			__: b'/', // /
-			_a: b'*', // *
+			__: b'/',
+			_a: b'*',
 			ns,
-			_b: b'*', // *
+			_b: b'*',
 			db,
-			_c: b'!', // !
-			_d: b'a', // a
-			_e: b'z', // z
-			az,
+			_c: b'!',
+			_d: b'a',
+			_e: b'z',
+			az: Cow::Borrowed(az),
 		}
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
             let val = Az::new(
-            "ns",
-            "db",
+            NamespaceId(1),
+            DatabaseId(2),
             "test",
         );
-		let enc = Az::encode(&val).unwrap();
-		assert_eq!(enc, b"/*ns\0*db\0!aztest\0");
-		let dec = Az::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = Az::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!aztest\0");
 	}
 
 	#[test]
 	fn prefix() {
-		let val = super::prefix("namespace", "database").unwrap();
-		assert_eq!(val, b"/*namespace\0*database\0!az\0");
+		let val = super::prefix(NamespaceId(1), DatabaseId(2)).unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!az\0");
 	}
 
 	#[test]
 	fn suffix() {
-		let val = super::suffix("namespace", "database").unwrap();
-		assert_eq!(val, b"/*namespace\0*database\0!az\xff");
+		let val = super::suffix(NamespaceId(1), DatabaseId(2)).unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!az\xff");
 	}
 }

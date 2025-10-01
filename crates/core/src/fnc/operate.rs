@@ -1,12 +1,12 @@
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::value::TryRem;
-use crate::expr::value::{TryAdd, TryDiv, TryMul, TryNeg, TryPow, TrySub, Value};
-use crate::expr::{Expression, Thing};
+use crate::expr::Expr;
 use crate::idx::planner::executor::QueryExecutor;
-use anyhow::Result;
-use reblessive::tree::Stk;
+use crate::val::{RecordId, TryAdd, TryDiv, TryMul, TryNeg, TryPow, TryRem, TrySub, Value};
 
 pub fn neg(a: Value) -> Result<Value> {
 	a.try_neg()
@@ -14,34 +14,6 @@ pub fn neg(a: Value) -> Result<Value> {
 
 pub fn not(a: Value) -> Result<Value> {
 	super::not::not((a,))
-}
-
-pub fn or(a: Value, b: Value) -> Result<Value> {
-	Ok(match a.is_truthy() {
-		true => a,
-		false => b,
-	})
-}
-
-pub fn and(a: Value, b: Value) -> Result<Value> {
-	Ok(match a.is_truthy() {
-		true => b,
-		false => a,
-	})
-}
-
-pub fn tco(a: Value, b: Value) -> Result<Value> {
-	Ok(match a.is_truthy() {
-		true => a,
-		false => b,
-	})
-}
-
-pub fn nco(a: Value, b: Value) -> Result<Value> {
-	Ok(match a.is_some() {
-		true => a,
-		false => b,
-	})
 }
 
 pub fn add(a: Value, b: Value) -> Result<Value> {
@@ -86,22 +58,6 @@ pub fn all_equal(a: &Value, b: &Value) -> Result<Value> {
 
 pub fn any_equal(a: &Value, b: &Value) -> Result<Value> {
 	Ok(a.any_equal(b).into())
-}
-
-pub fn like(a: &Value, b: &Value) -> Result<Value> {
-	Ok(a.fuzzy(b).into())
-}
-
-pub fn not_like(a: &Value, b: &Value) -> Result<Value> {
-	Ok((!a.fuzzy(b)).into())
-}
-
-pub fn all_like(a: &Value, b: &Value) -> Result<Value> {
-	Ok(a.all_fuzzy(b).into())
-}
-
-pub fn any_like(a: &Value, b: &Value) -> Result<Value> {
-	Ok(a.any_fuzzy(b).into())
 }
 
 pub fn less_than(a: &Value, b: &Value) -> Result<Value> {
@@ -171,21 +127,21 @@ pub fn intersects(a: &Value, b: &Value) -> Result<Value> {
 enum ExecutorOption<'a> {
 	PreMatch,
 	None,
-	Execute(&'a QueryExecutor, &'a Thing),
+	Execute(&'a QueryExecutor, &'a RecordId),
 }
 
 fn get_executor_and_thing<'a>(
 	ctx: &'a Context,
 	doc: &'a CursorDoc,
-) -> Option<(&'a QueryExecutor, &'a Thing)> {
+) -> Option<(&'a QueryExecutor, &'a RecordId)> {
 	if let Some(thg) = &doc.rid {
 		if let Some(exe) = ctx.get_query_executor() {
-			if exe.is_table(&thg.tb) {
+			if exe.is_table(&thg.table) {
 				return Some((exe, thg.as_ref()));
 			}
 		}
 		if let Some(pla) = ctx.get_query_planner() {
-			if let Some(exe) = pla.get_query_executor(&thg.tb) {
+			if let Some(exe) = pla.get_query_executor(&thg.table) {
 				return Some((exe, thg));
 			}
 		}
@@ -196,7 +152,7 @@ fn get_executor_and_thing<'a>(
 fn get_executor_option<'a>(
 	ctx: &'a Context,
 	doc: Option<&'a CursorDoc>,
-	exp: &'a Expression,
+	exp: &'a Expr,
 ) -> ExecutorOption<'a> {
 	if let Some(doc) = doc {
 		if let Some((exe, thg)) = get_executor_and_thing(ctx, doc) {
@@ -216,7 +172,7 @@ pub(crate) async fn matches(
 	ctx: &Context,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
-	exp: &Expression,
+	exp: &Expr,
 	l: Value,
 	r: Value,
 ) -> Result<Value> {
@@ -233,7 +189,7 @@ pub(crate) async fn knn(
 	ctx: &Context,
 	opt: &Options,
 	doc: Option<&CursorDoc>,
-	exp: &Expression,
+	exp: &Expr,
 ) -> Result<Value> {
 	match get_executor_option(ctx, doc, exp) {
 		ExecutorOption::PreMatch => Ok(Value::Bool(true)),
@@ -246,114 +202,6 @@ pub(crate) async fn knn(
 mod tests {
 
 	use super::*;
-
-	#[test]
-	fn or_true() {
-		let one = Value::from(1);
-		let two = Value::from(2);
-		let res = or(one, two);
-		let out = res.unwrap();
-		assert_eq!("1", format!("{}", out));
-	}
-
-	#[test]
-	fn or_false_one() {
-		let one = Value::from(0);
-		let two = Value::from(1);
-		let res = or(one, two);
-		let out = res.unwrap();
-		assert_eq!("1", format!("{}", out));
-	}
-
-	#[test]
-	fn or_false_two() {
-		let one = Value::from(1);
-		let two = Value::from(0);
-		let res = or(one, two);
-		let out = res.unwrap();
-		assert_eq!("1", format!("{}", out));
-	}
-
-	#[test]
-	fn and_true() {
-		let one = Value::from(1);
-		let two = Value::from(2);
-		let res = and(one, two);
-		let out = res.unwrap();
-		assert_eq!("2", format!("{}", out));
-	}
-
-	#[test]
-	fn and_false_one() {
-		let one = Value::from(0);
-		let two = Value::from(1);
-		let res = and(one, two);
-		let out = res.unwrap();
-		assert_eq!("0", format!("{}", out));
-	}
-
-	#[test]
-	fn and_false_two() {
-		let one = Value::from(1);
-		let two = Value::from(0);
-		let res = and(one, two);
-		let out = res.unwrap();
-		assert_eq!("0", format!("{}", out));
-	}
-
-	#[test]
-	fn tco_true() {
-		let one = Value::from(1);
-		let two = Value::from(2);
-		let res = tco(one, two);
-		let out = res.unwrap();
-		assert_eq!("1", format!("{}", out));
-	}
-
-	#[test]
-	fn tco_false_one() {
-		let one = Value::from(0);
-		let two = Value::from(1);
-		let res = tco(one, two);
-		let out = res.unwrap();
-		assert_eq!("1", format!("{}", out));
-	}
-
-	#[test]
-	fn tco_false_two() {
-		let one = Value::from(1);
-		let two = Value::from(0);
-		let res = tco(one, two);
-		let out = res.unwrap();
-		assert_eq!("1", format!("{}", out));
-	}
-
-	#[test]
-	fn nco_true() {
-		let one = Value::from(1);
-		let two = Value::from(2);
-		let res = nco(one, two);
-		let out = res.unwrap();
-		assert_eq!("1", format!("{}", out));
-	}
-
-	#[test]
-	fn nco_false_one() {
-		let one = Value::None;
-		let two = Value::from(1);
-		let res = nco(one, two);
-		let out = res.unwrap();
-		assert_eq!("1", format!("{}", out));
-	}
-
-	#[test]
-	fn nco_false_two() {
-		let one = Value::from(1);
-		let two = Value::None;
-		let res = nco(one, two);
-		let out = res.unwrap();
-		assert_eq!("1", format!("{}", out));
-	}
 
 	#[test]
 	fn add_basic() {

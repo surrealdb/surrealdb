@@ -3,12 +3,12 @@
 # This stage is used to build the SurrealDB linux binary
 ###
 
-FROM docker.io/rockylinux:8 AS builder
+FROM docker.io/rockylinux/rockylinux:9 AS builder
 
-RUN yum install -y gcc-toolset-13 git cmake llvm-toolset patch zlib-devel python3.11
+RUN dnf install -y gcc-toolset-13 git cmake llvm-toolset patch zlib-devel python3.11
 
 # Install rust
-ARG RUST_VERSION=1.84.0
+ARG RUST_VERSION=1.88.0
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs > /tmp/rustup.sh
 RUN bash /tmp/rustup.sh -y --default-toolchain ${RUST_VERSION}
 ENV PATH="/root/.cargo/bin:${PATH}"
@@ -42,9 +42,8 @@ RUN apk add --no-cache tzdata
 #
 # Development image (built on the CI environment)
 #
-FROM --platform=$TARGETPLATFORM cgr.dev/chainguard/glibc-dynamic:latest-dev AS dev-ci
+FROM cgr.dev/chainguard/glibc-dynamic:latest-dev AS dev-ci
 
-ARG TARGETPLATFORM
 ARG TARGETOS
 ARG TARGETARCH
 
@@ -76,9 +75,7 @@ ENTRYPOINT ["/surreal"]
 #
 # Production image (built on the CI environment)
 #
-FROM --platform=$TARGETPLATFORM cgr.dev/chainguard/glibc-dynamic:latest AS prod-ci
-
-ARG TARGETPLATFORM
+FROM cgr.dev/chainguard/glibc-dynamic:latest AS prod-ci
 
 COPY --from=dev-ci /surreal /surreal
 

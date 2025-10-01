@@ -1,6 +1,10 @@
-use crate::api::ExtraFeatures;
-use crate::api::Surreal;
-use crate::api::conn;
+use std::collections::HashSet;
+use std::sync::atomic::AtomicI64;
+
+use anyhow::{Result, bail};
+use tokio::sync::watch;
+use wasm_bindgen_futures::spawn_local;
+
 use crate::api::conn::Router;
 #[allow(unused_imports, reason = "Used by the DB engines.")]
 use crate::api::engine;
@@ -8,13 +12,9 @@ use crate::api::engine::any::Any;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::{Endpoint, EndpointKind};
+use crate::api::{ExtraFeatures, Surreal, conn};
 use crate::error::Db as DbError;
 use crate::opt::WaitFor;
-use anyhow::{Result, bail};
-use std::collections::HashSet;
-use std::sync::atomic::AtomicI64;
-use tokio::sync::watch;
-use wasm_bindgen_futures::spawn_local;
 
 impl crate::api::Connection for Any {}
 impl conn::Sealed for Any {
@@ -37,14 +37,14 @@ impl conn::Sealed for Any {
 
 			match EndpointKind::from(address.url.scheme()) {
 				EndpointKind::FoundationDb => {
-					#[cfg(kv_fdb)]
+					#[cfg(feature = "kv-fdb")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
 						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
 						conn_rx.recv().await??;
 					}
 
-					#[cfg(not(kv_fdb))]
+					#[cfg(not(feature = "kv-fdb"))]
 					bail!(
 						DbError::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
 					);

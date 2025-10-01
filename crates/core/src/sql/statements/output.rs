@@ -1,16 +1,12 @@
-use crate::sql::fetch::Fetchs;
-use crate::sql::value::SqlValue;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use crate::sql::Expr;
+use crate::sql::fetch::Fetchs;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct OutputStatement {
-	pub what: SqlValue,
+	pub what: Expr,
 	pub fetch: Option<Fetchs>,
 }
 

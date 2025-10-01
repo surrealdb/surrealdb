@@ -1,16 +1,17 @@
+use std::collections::BTreeMap;
+
 use anyhow::Result;
 use http::HeaderMap;
 use reblessive::tree::Stk;
-use std::collections::BTreeMap;
-
-use crate::{
-	api::{body::ApiBody, invocation::ApiInvocation, method::Method},
-	ctx::Context,
-	dbs::Options,
-	expr::{Object, Value, statements::FindApi},
-};
 
 use super::args::Optional;
+use crate::api::body::ApiBody;
+use crate::api::invocation::ApiInvocation;
+use crate::catalog::providers::ApiProvider;
+use crate::catalog::{ApiDefinition, ApiMethod};
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::val::{Object, Value};
 
 pub async fn invoke(
 	(stk, ctx, opt): (&mut Stk, &Context, &Options),
@@ -23,9 +24,9 @@ pub async fn invoke(
 		};
 
 		let method = if let Some(v) = opts.get("method") {
-			Method::try_from(v)?
+			ApiMethod::try_from(v)?
 		} else {
-			Method::Get
+			ApiMethod::Get
 		};
 
 		let query: BTreeMap<String, String> = if let Some(v) = opts.get("query") {
@@ -42,15 +43,14 @@ pub async fn invoke(
 
 		(body, method, query, headers)
 	} else {
-		(Default::default(), Method::Get, Default::default(), Default::default())
+		(Default::default(), ApiMethod::Get, Default::default(), Default::default())
 	};
 
-	let ns = opt.ns()?;
-	let db = opt.db()?;
+	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 	let apis = ctx.tx().all_db_apis(ns, db).await?;
 	let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
 
-	if let Some((api, params)) = apis.as_ref().find_api(segments, method) {
+	if let Some((api, params)) = ApiDefinition::find_definition(&apis, segments, method) {
 		let invocation = ApiInvocation {
 			params,
 			method,
@@ -59,7 +59,7 @@ pub async fn invoke(
 		};
 
 		match invocation.invoke_with_context(stk, ctx, opt, api, ApiBody::from_value(body)).await {
-			Ok(Some(v)) => Ok(v.0.try_into()?),
+			Ok(Some(v)) => Ok(v.0.into_response_value()?),
 			Err(e) => Err(e),
 			_ => Ok(Value::None),
 		}

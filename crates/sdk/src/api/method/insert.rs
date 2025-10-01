@@ -1,24 +1,22 @@
-use super::transaction::WithTransaction;
-use crate::Surreal;
-use crate::Value;
-use crate::api::Connection;
-use crate::api::Result;
-use crate::api::conn::Command;
-use crate::api::err::Error;
-use crate::api::method::BoxFuture;
-use crate::api::method::Content;
-use crate::api::opt::Resource;
-use crate::method::OnceLockExt;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::{Object as CoreObject, Value as CoreValue, to_value as to_core_value};
+
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use uuid::Uuid;
 
 use super::insert_relation::InsertRelation;
+use super::transaction::WithTransaction;
 use super::validate_data;
+use crate::api::conn::Command;
+use crate::api::err::Error;
+use crate::api::method::{BoxFuture, Content};
+use crate::api::opt::Resource;
+use crate::api::{self, Connection, Result};
+use crate::core::val;
+use crate::method::OnceLockExt;
+use crate::{Surreal, Value};
 
 /// An insert future
 #[derive(Debug)]
@@ -44,7 +42,8 @@ impl<C, R> Insert<'_, C, R>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Insert<'static, C, R> {
 		Insert {
 			client: Cow::Owned(self.client.into_owned()),
@@ -64,18 +63,15 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let (table, data) = match resource? {
-					Resource::Table(table) => (table.into(), CoreObject::default()),
+					Resource::Table(table) => (table.into(), val::Object::default()),
 					Resource::RecordId(record_id) => {
 						let record_id = record_id.into_inner();
-						let mut map = CoreObject::default();
-						map.insert("id".to_string(), record_id.id.into());
-						(record_id.tb, map)
+						let mut map = val::Object::default();
+						map.insert("id".to_string(), record_id.key.into_value());
+						(record_id.table, map)
 					}
 					Resource::Object(_) => return Err(Error::InsertOnObject.into()),
 					Resource::Array(_) => return Err(Error::InsertOnArray.into()),
-					Resource::Edge {
-						..
-					} => return Err(Error::InsertOnEdges.into()),
 					Resource::Range {
 						..
 					} => return Err(Error::InsertOnRange.into()),
@@ -137,7 +133,7 @@ where
 		D: Serialize + 'static,
 	{
 		Content::from_closure(self.client, self.txn, || {
-			let mut data = to_core_value(data)?;
+			let mut data = api::value::to_core_value(data)?;
 			validate_data(
 				&data,
 				"Tried to insert non-object-like data as content, only structs and objects are supported",
@@ -156,20 +152,19 @@ where
 						.into())
 					} else {
 						let thing = thing.into_inner();
-						if let CoreValue::Object(ref mut x) = data {
-							x.insert("id".to_string(), thing.id.into());
+						if let val::Value::Object(ref mut x) = data {
+							x.insert("id".to_string(), thing.key.into_value());
 						}
 
 						Ok(Command::Insert {
 							txn: self.txn,
-							what: Some(thing.tb),
+							what: Some(thing.table),
 							data,
 						})
 					}
 				}
 				Resource::Object(_) => Err(Error::InsertOnObject.into()),
 				Resource::Array(_) => Err(Error::InsertOnArray.into()),
-				Resource::Edge(_) => Err(Error::InsertOnEdges.into()),
 				Resource::Range(_) => Err(Error::InsertOnRange.into()),
 				Resource::Unspecified => Ok(Command::Insert {
 					txn: self.txn,
@@ -192,7 +187,7 @@ where
 		D: Serialize + 'static,
 	{
 		InsertRelation::from_closure(self.client, || {
-			let mut data = to_core_value(data)?;
+			let mut data = api::value::to_core_value(data)?;
 			validate_data(
 				&data,
 				"Tried to insert non-object-like data as relation data, only structs and objects are supported",
@@ -211,13 +206,13 @@ where
 						.into())
 					} else {
 						let thing = thing.into_inner();
-						if let CoreValue::Object(ref mut x) = data {
-							x.insert("id".to_string(), thing.id.into());
+						if let val::Value::Object(ref mut x) = data {
+							x.insert("id".to_string(), thing.key.into_value());
 						}
 
 						Ok(Command::InsertRelation {
 							txn: self.txn,
-							what: Some(thing.tb),
+							what: Some(thing.table),
 							data,
 						})
 					}
@@ -229,7 +224,6 @@ where
 				}),
 				Resource::Object(_) => Err(Error::InsertOnObject.into()),
 				Resource::Array(_) => Err(Error::InsertOnArray.into()),
-				Resource::Edge(_) => Err(Error::InsertOnEdges.into()),
 				Resource::Range(_) => Err(Error::InsertOnRange.into()),
 			}
 		})

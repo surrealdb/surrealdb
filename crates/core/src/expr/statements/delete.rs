@@ -1,39 +1,31 @@
+use std::fmt;
+
+use anyhow::{Result, ensure};
+use reblessive::tree::Stk;
+
 use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Cond, Explain, FlowResultExt as _, Output, Timeout, Value, Values, With};
+use crate::expr::expression::VisitExpression;
+use crate::expr::{Cond, Explain, Expr, Output, Timeout, With};
+use crate::fmt::Fmt;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
-use anyhow::{Result, ensure};
+use crate::val::Value;
 
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DeleteStatement {
-	#[revision(start = 2)]
 	pub only: bool,
-	pub what: Values,
-	#[revision(start = 3)]
+	pub what: Vec<Expr>,
 	pub with: Option<With>,
 	pub cond: Option<Cond>,
 	pub output: Option<Output>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
-	#[revision(start = 3)]
 	pub explain: Option<Explain>,
 }
 
 impl DeleteStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		true
-	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -48,17 +40,16 @@ impl DeleteStatement {
 		let mut i = Iterator::new();
 		// Assign the statement
 		let stm = Statement::from(self);
-		// Ensure futures are stored
-		let opt = &opt.new_with_futures(false);
 		// Check if there is a timeout
-		let ctx = stm.setup_timeout(ctx)?;
+		let ctx = stm.setup_timeout(stk, ctx, opt, doc).await?;
+
 		// Get a query planner
 		let mut planner = QueryPlanner::new();
+
 		let stm_ctx = StatementContext::new(&ctx, opt, &stm)?;
 		// Loop over the delete targets
-		for w in self.what.0.iter() {
-			let v = w.compute(stk, &ctx, opt, doc).await.catch_return()?;
-			i.prepare(stk, &mut planner, &stm_ctx, v).await.map_err(|e| {
+		for w in self.what.iter() {
+			i.prepare(stk, &ctx, opt, doc, &mut planner, &stm_ctx, w).await.map_err(|e| {
 				if matches!(e.downcast_ref(), Some(Error::InvalidStatementTarget { .. })) {
 					let Ok(Error::InvalidStatementTarget {
 						value,
@@ -76,6 +67,7 @@ impl DeleteStatement {
 		}
 		// Attach the query planner to the context
 		let ctx = stm.setup_query_planner(planner, ctx);
+
 		// Process the statement
 		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 		// Catch statement timeout
@@ -95,13 +87,24 @@ impl DeleteStatement {
 	}
 }
 
+impl VisitExpression for DeleteStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.what.iter().for_each(|expr| expr.visit(visitor));
+		self.cond.iter().for_each(|cond| cond.0.visit(visitor));
+		self.output.iter().for_each(|output| output.visit(visitor));
+	}
+}
+
 impl fmt::Display for DeleteStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DELETE")?;
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", self.what)?;
+		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
 		if let Some(ref v) = self.with {
 			write!(f, " {v}")?
 		}

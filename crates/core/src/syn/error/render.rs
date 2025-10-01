@@ -1,19 +1,20 @@
 //! Module for rendering errors onto source code.
 
-use std::{cmp::Ordering, fmt, ops::Range};
+use std::cmp::Ordering;
+use std::fmt;
+use std::ops::Range;
 
 use super::{Location, MessageKind};
 
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub struct RenderedError {
 	pub errors: Vec<String>,
 	pub snippets: Vec<Snippet>,
 }
 
 impl RenderedError {
-	/// Offset the snippet locations within the rendered error by a given number of lines and
-	/// columns.
+	/// Offset the snippet locations within the rendered error by a given number
+	/// of lines and columns.
 	///
 	/// The column offset is only applied to the any snippet which is at line 1
 	pub fn offset_location(mut self, line: usize, col: usize) -> Self {
@@ -84,7 +85,8 @@ pub struct Snippet {
 impl Snippet {
 	/// How long with the source line have to be before it gets truncated.
 	const MAX_SOURCE_DISPLAY_LEN: usize = 80;
-	/// How far the will have to be in the source line before everything before it gets truncated.
+	/// How far the will have to be in the source line before everything before
+	/// it gets truncated.
 	const MAX_ERROR_LINE_OFFSET: usize = 50;
 
 	pub fn from_source_location(
@@ -116,7 +118,7 @@ impl Snippet {
 		let line = source.split('\n').nth(location.start.line - 1).unwrap();
 		let (line, truncation, offset) = Self::truncate_line(line, location.start.column - 1);
 		let length = if location.start.line == location.end.line {
-			location.end.column - location.start.column
+			(location.end.column - location.start.column).max(1)
 		} else {
 			1
 		};
@@ -131,9 +133,11 @@ impl Snippet {
 		}
 	}
 
-	/// Trims whitespace of an line and additionally truncates the string around the target_col_offset if it is too long.
+	/// Trims whitespace of an line and additionally truncates the string around
+	/// the target_col_offset if it is too long.
 	///
-	/// returns the trimmed string, how it is truncated, and the offset into truncated the string where the target_col is located.
+	/// returns the trimmed string, how it is truncated, and the offset into
+	/// truncated the string where the target_col is located.
 	fn truncate_line(mut line: &str, target_col: usize) -> (&str, Truncation, usize) {
 		// offset in characters from the start of the string.
 		let mut offset = 0;
@@ -227,9 +231,8 @@ impl fmt::Display for Snippet {
 		for _ in 0..self.length {
 			write!(f, "^")?;
 		}
-		write!(f, " ")?;
 		if let Some(ref explain) = self.label {
-			write!(f, "{explain}")?;
+			write!(f, " {explain}")?;
 		}
 		Ok(())
 	}
@@ -238,10 +241,8 @@ impl fmt::Display for Snippet {
 #[cfg(test)]
 mod test {
 	use super::{RenderedError, Snippet, Truncation};
-	use crate::syn::{
-		error::{Location, MessageKind},
-		token::Span,
-	};
+	use crate::syn::error::{Location, MessageKind};
+	use crate::syn::token::Span;
 
 	#[test]
 	fn truncate_whitespace() {

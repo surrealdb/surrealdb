@@ -1,9 +1,3 @@
-use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
-use crate::cli::abstraction::{
-	AuthArguments, DatabaseConnectionArguments, LevelSelectionArguments,
-};
-use crate::cnf::PKG_VERSION;
-use crate::dbs::DbsCapabilities;
 use anyhow::{Result, anyhow};
 use clap::Args;
 use futures::StreamExt;
@@ -12,13 +6,20 @@ use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use serde::Serialize;
 use serde_json::ser::PrettyFormatter;
-use surrealdb::dbs::Capabilities as CoreCapabilities;
 use surrealdb::engine::any::{self, connect};
-use surrealdb::expr::{Uuid as CoreUuid, Value as CoreValue};
 use surrealdb::method::{Stats, WithStats};
 use surrealdb::opt::Config;
 use surrealdb::{Notification, Response, Value};
-use surrealdb_core::sql::{Param, SqlValue as CoreSqlValue, Statement};
+
+use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
+use crate::cli::abstraction::{
+	AuthArguments, DatabaseConnectionArguments, LevelSelectionArguments,
+};
+use crate::cnf::PKG_VERSION;
+use crate::core::dbs::Capabilities as CoreCapabilities;
+use crate::core::sql::{Expr, Param, TopLevelExpr};
+use crate::core::val;
+use crate::dbs::DbsCapabilities;
 
 #[derive(Args, Debug)]
 pub struct SqlCommandArguments {
@@ -72,8 +73,11 @@ pub async fn init(
 	let capabilities = capabilities.into_cli_capabilities();
 	let config = Config::new().capabilities(capabilities.clone().into());
 	let is_local = any::__into_endpoint(&endpoint)?.parse_kind()?.is_local();
-	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
-	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
+	// If username and password are specified, and we are connecting to a remote
+	// SurrealDB server, then we need to authenticate. If we are connecting
+	// directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we
+	// don't need to authenticate because we use an embedded (local) SurrealDB
+	// instance with auth disabled.
 	let client = if username.is_some() && password.is_some() && !is_local {
 		debug!("Connecting to the database engine with authentication");
 		let creds = CredentialsBuilder::default()
@@ -191,16 +195,16 @@ pub async fn init(
 			continue;
 		}
 		// Complete the request
-		match surrealdb_core::syn::parse_with_capabilities(&line, &capabilities) {
+		match crate::core::syn::parse_with_capabilities(&line, &capabilities) {
 			Ok(mut query) => {
 				let mut namespace = None;
 				let mut database = None;
 				let mut vars = Vec::new();
-				let init_length = query.len();
+				let init_length = query.expressions.len();
 				// Capture `use` and `set/let` statements from the query
-				for statement in query.iter() {
+				for statement in query.expressions.iter() {
 					match statement {
-						Statement::Use(stmt) => {
+						TopLevelExpr::Use(stmt) => {
 							if let Some(ns) = &stmt.ns {
 								namespace = Some(ns.clone());
 							}
@@ -208,13 +212,13 @@ pub async fn init(
 								database = Some(db.clone());
 							}
 						}
-						Statement::Set(stmt) => vars.push(stmt.name.clone()),
+						TopLevelExpr::Expr(Expr::Let(stmt)) => vars.push(stmt.name.clone()),
 						_ => {}
 					}
 				}
 
 				for var in &vars {
-					query.push(Statement::Value(CoreSqlValue::Param(Param::from(var.as_str()))))
+					query.expressions.push(TopLevelExpr::Expr(Expr::Param(Param::new(var.clone()))))
 				}
 
 				// Extract the namespace and database from the current prompt
@@ -246,9 +250,11 @@ pub async fn init(
 
 				// Process the last `use` statements, if any
 				if namespace.is_some() || database.is_some() {
-					// Use the namespace provided in the query if any, otherwise use the one in the prompt
+					// Use the namespace provided in the query if any, otherwise use the one in the
+					// prompt
 					let namespace = namespace.as_deref().unwrap_or(prompt_ns);
-					// Use the database provided in the query if any, otherwise use the one in the prompt
+					// Use the database provided in the query if any, otherwise use the one in the
+					// prompt
 					let database = database.as_deref().unwrap_or(prompt_db);
 					// If the database is empty we should only use the namespace
 					if database.is_empty() {
@@ -288,7 +294,7 @@ fn process(
 		let (stats, result) = response.take(index).ok_or_else(|| {
 			anyhow!("Expected some result for a query with index {index}, but found none")
 		})?;
-		let output = result.unwrap_or_else(|e| Value::from_inner(CoreValue::from(e.to_string())));
+		let output = result.unwrap_or_else(|e| Value::from_inner(val::Value::from(e.to_string())));
 		vec.push((stats, output));
 	}
 
@@ -300,18 +306,24 @@ fn process(
 				return;
 			}
 		};
-		while let Some(Notification {
-			query_id,
-			action,
-			data,
-			..
-		}) = stream.next().await
-		{
+		while let Some(result) = stream.next().await {
+			let Notification {
+				query_id,
+				action,
+				data,
+				..
+			} = match result {
+				Ok(notification) => notification,
+				Err(error) => {
+					print(Err(error));
+					continue;
+				}
+			};
 			let message = match (json, pretty) {
 				// Don't prettify the SurrealQL response
 				(false, false) => {
-					let value = CoreValue::from(map! {
-						String::from("id") => CoreValue::from(CoreUuid::from(query_id)),
+					let value = val::Value::from(map! {
+						String::from("id") => val::Value::from(val::Uuid::from(query_id)),
 						String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
 						String::from("result") => data.into_inner(),
 					});
@@ -323,12 +335,16 @@ fn process(
 				),
 				// Don't pretty print the JSON response
 				(true, false) => {
-					let value = CoreValue::from(map! {
-						String::from("id") => CoreValue::from(CoreUuid::from(query_id)),
+					let value = val::Value::from(map! {
+						String::from("id") => val::Value::from(val::Uuid::from(query_id)),
 						String::from("action") => format!("{action:?}").to_ascii_uppercase().into(),
 						String::from("result") => data.into_inner(),
 					});
-					value.into_json().to_string()
+					if let Some(x) = value.into_json_value() {
+						x.to_string()
+					} else {
+						"Value cannot be encoded into json".to_string()
+					}
 				}
 				// Yes prettify the JSON response
 				(true, true) => {
@@ -337,7 +353,7 @@ fn process(
 						&mut buf,
 						PrettyFormatter::with_indent(b"\t"),
 					);
-					data.into_inner().into_json().serialize(&mut serializer).unwrap();
+					data.into_inner().into_json_value().serialize(&mut serializer).unwrap();
 					let output = String::from_utf8(buf).unwrap();
 					format!(
 						"-- Notification (action: {action:?}, live query ID: {query_id})\n{output:#}"
@@ -352,8 +368,7 @@ fn process(
 	Ok(match (json, pretty) {
 		// Don't prettify the SurrealQL response
 		(false, false) => {
-			CoreValue::from(vec.into_iter().map(|(_, x)| x.into_inner()).collect::<Vec<_>>())
-				.to_string()
+			vec.into_iter().map(|(_, x)| x.into_inner()).collect::<val::Value>().to_string()
 		}
 		// Yes prettify the SurrealQL response
 		(false, true) => vec
@@ -369,8 +384,12 @@ fn process(
 		// Don't pretty print the JSON response
 		(true, false) => {
 			let value =
-				CoreValue::from(vec.into_iter().map(|(_, x)| x.into_inner()).collect::<Vec<_>>());
-			serde_json::to_string(&value.into_json()).unwrap()
+				val::Value::from(vec.into_iter().map(|(_, x)| x.into_inner()).collect::<Vec<_>>());
+			if let Some(x) = value.into_json_value() {
+				serde_json::to_string(&x).unwrap()
+			} else {
+				"Value cannot be serialized to json".to_owned()
+			}
 		}
 		// Yes prettify the JSON response
 		(true, true) => vec
@@ -382,8 +401,12 @@ fn process(
 					&mut buf,
 					PrettyFormatter::with_indent(b"\t"),
 				);
-				value.into_inner().into_json().serialize(&mut serializer).unwrap();
-				let output = String::from_utf8(buf).unwrap();
+				let output = if let Some(x) = value.into_inner().into_json_value() {
+					x.serialize(&mut serializer).unwrap();
+					String::from_utf8(buf).unwrap()
+				} else {
+					"Value cannot be serialized to json".to_owned()
+				};
 				let query_num = index + 1;
 				let execution_time = stats.execution_time.unwrap_or_default();
 				format!("-- Query {query_num} (execution time: {execution_time:?}\n{output:#}",)
@@ -429,7 +452,7 @@ impl Validator for InputValidator<'_> {
 		} else if input.is_empty() {
 			Valid(None) // Ignore empty lines
 		} else {
-			match surrealdb::syn::parse_with_capabilities(input, self.capabilities) {
+			match crate::core::syn::parse_with_capabilities(input, self.capabilities) {
 				Err(e) => Invalid(Some(format!(" --< {e}"))),
 				_ => Valid(None),
 			}

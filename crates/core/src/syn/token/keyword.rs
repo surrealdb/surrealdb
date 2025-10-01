@@ -3,7 +3,7 @@ macro_rules! keyword {
 
 		#[repr(u8)]
 		#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-		#[non_exhaustive] pub enum Keyword{
+		pub enum Keyword{
 			$($name,)*
 		}
 
@@ -30,7 +30,6 @@ keyword! {
 	All => "ALL",
 	Alter => "ALTER",
 	Always => "ALWAYS",
-	Analyze => "ANALYZE",
 	Analyzer => "ANALYZER",
 	Api => "API",
 	As => "AS",
@@ -64,6 +63,8 @@ keyword! {
 	Config => "CONFIG",
 	Content => "CONTENT",
 	Continue => "CONTINUE",
+	Computed => "COMPUTED",
+	Count => "COUNT",
 	Create => "CREATE",
 	Database => "DATABASE",
 	Default => "DEFAULT",
@@ -73,10 +74,6 @@ keyword! {
 	Diff => "DIFF",
 	Dimension => "DIMENSION",
 	Distance => "DISTANCE",
-	DocIdsCache => "DOC_IDS_CACHE",
-	DocIdsOrder => "DOC_IDS_ORDER",
-	DocLengthsCache => "DOC_LENGTHS_CACHE",
-	DocLengthsOrder => "DOC_LENGTHS_ORDER",
 	Drop => "DROP",
 	Duplicate => "DUPLICATE",
 	Efc => "EFC",
@@ -100,6 +97,7 @@ keyword! {
 	For => "FOR",
 	From => "FROM",
 	Full => "FULL",
+	Fulltext => "FULLTEXT",
 	Function => "FUNCTION",
 	Functions => "FUNCTIONS",
 	Grant => "GRANT",
@@ -177,7 +175,6 @@ keyword! {
 	Schemafull => "SCHEMAFULL",
 	Schemaless => "SCHEMALESS",
 	Scope => "SCOPE",
-	Search => "SEARCH",
 	Select => "SELECT",
 	Sequence => "SEQUENCE",
 	Session => "SESSION",
@@ -245,7 +242,6 @@ keyword! {
 	Array => "ARRAY",
 	Geometry => "GEOMETRY",
 	Record => "RECORD",
-	Future => "FUTURE",
 	Bool => "BOOL",
 	Bytes => "BYTES",
 	Datetime => "DATETIME",

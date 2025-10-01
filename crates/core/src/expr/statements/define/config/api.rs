@@ -1,54 +1,97 @@
-use std::fmt::{self, Display};
+use std::fmt;
 
-use crate::api::middleware::RequestMiddleware;
-use crate::expr::fmt::Fmt;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Permission, Value};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use anyhow::Result;
+use reblessive::tree::Stk;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+use crate::catalog::{ApiConfigDefinition, MiddlewareDefinition, Permission};
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::expr::expression::VisitExpression;
+use crate::expr::{Expr, FlowResultExt};
+use crate::fmt::Fmt;
+
+/// The api configuration as it is received from ast.
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct ApiConfig {
-	pub middleware: Option<RequestMiddleware>,
-	pub permissions: Option<Permission>,
+	pub middleware: Vec<Middleware>,
+	pub permissions: Permission,
 }
 
-impl ApiConfig {
-	pub fn is_empty(&self) -> bool {
-		self.middleware.is_none() && self.permissions.is_none()
+impl VisitExpression for ApiConfig {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.middleware.iter().for_each(|m| m.visit(visitor));
 	}
 }
 
-impl Display for ApiConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, " API")?;
+/// The api middleware as it is received from ast.
 
-		if let Some(mw) = &self.middleware {
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub struct Middleware {
+	pub name: String,
+	pub args: Vec<Expr>,
+}
+
+impl VisitExpression for Middleware {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.args.iter().for_each(|expr| expr.visit(visitor));
+	}
+}
+
+impl ApiConfig {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<ApiConfigDefinition> {
+		let mut middleware = Vec::new();
+		for m in self.middleware.iter() {
+			let mut args = Vec::new();
+			for arg in m.args.iter() {
+				args.push(stk.run(|stk| arg.compute(stk, ctx, opt, doc)).await.catch_return()?)
+			}
+			middleware.push(MiddlewareDefinition {
+				name: m.name.clone(),
+				args,
+			});
+		}
+
+		Ok(ApiConfigDefinition {
+			middleware,
+			permissions: self.permissions.clone(),
+		})
+	}
+
+	pub fn is_empty(&self) -> bool {
+		self.middleware.is_empty() && self.permissions.is_none()
+	}
+}
+
+impl fmt::Display for ApiConfig {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		if !self.middleware.is_empty() {
 			write!(f, " MIDDLEWARE ")?;
 			write!(
 				f,
 				"{}",
-				Fmt::pretty_comma_separated(
-					mw.iter().map(|(k, v)| format!("{k}({})", Fmt::pretty_comma_separated(v)))
-				)
+				Fmt::pretty_comma_separated(self.middleware.iter().map(|m| format!(
+					"{}({})",
+					m.name,
+					Fmt::pretty_comma_separated(m.args.iter())
+				)))
 			)?
 		}
 
-		if let Some(p) = &self.permissions {
-			write!(f, " PERMISSIONS {}", p)?;
-		}
+		write!(f, " PERMISSIONS {}", self.permissions)?;
 		Ok(())
-	}
-}
-
-impl InfoStructure for ApiConfig {
-	fn structure(self) -> Value {
-		Value::from(map!(
-			"permissions", if let Some(v) = self.permissions => v.structure(),
-			"middleware", if let Some(v) = self.middleware => v.structure(),
-		))
 	}
 }

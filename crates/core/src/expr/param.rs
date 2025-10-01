@@ -1,50 +1,77 @@
-use crate::{
-	ctx::Context,
-	dbs::Options,
-	doc::CursorDoc,
-	err::Error,
-	expr::{Permission, ident::Ident, value::Value},
-	iam::Action,
-};
+use std::ops::Deref;
+use std::{fmt, str};
+
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::{fmt, ops::Deref, str};
+use revision::Revisioned;
 
 use super::FlowResultExt as _;
+use crate::catalog::Permission;
+use crate::catalog::providers::DatabaseProvider;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::fmt::EscapeKwFreeIdent;
+use crate::iam::Action;
+use crate::val::Value;
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Param";
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub struct Param(String);
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Param")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct Param(pub Ident);
+impl Revisioned for Param {
+	fn revision() -> u16 {
+		String::revision()
+	}
 
-impl From<Ident> for Param {
-	fn from(v: Ident) -> Self {
-		Self(v)
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		w: &mut W,
+	) -> std::result::Result<(), revision::Error> {
+		String::serialize_revisioned(&self.0, w)
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(
+		r: &mut R,
+	) -> std::result::Result<Self, revision::Error>
+	where
+		Self: Sized,
+	{
+		String::deserialize_revisioned(r).map(Param)
+	}
+}
+
+impl Param {
+	/// Create a new identifier
+	///
+	/// This function checks if the string has a null byte, returns None if it
+	/// has.
+	pub fn new(str: String) -> Self {
+		Self(str)
+	}
+
+	// Convert into a string.
+	pub fn into_string(self) -> String {
+		self.0
+	}
+
+	/// returns the identifier section of the parameter,
+	/// i.e. `$foo` without the `$` so: `foo`
+	pub fn as_str(&self) -> &str {
+		&self.0
 	}
 }
 
 impl From<String> for Param {
 	fn from(v: String) -> Self {
-		Self(v.into())
-	}
-}
-
-impl From<&str> for Param {
-	fn from(v: &str) -> Self {
-		Self(v.into())
+		Self(v)
 	}
 }
 
 impl Deref for Param {
-	type Target = Ident;
+	type Target = str;
 	fn deref(&self) -> &Self::Target {
-		&self.0
+		self.0.as_str()
 	}
 }
 
@@ -58,24 +85,24 @@ impl Param {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Find the variable by name
-		match self.as_str() {
+		match self.0.as_str() {
 			// This is a special param
 			"this" | "self" => match doc {
 				// The base document exists
-				Some(v) => v.doc.as_ref().compute(stk, ctx, opt, doc).await.catch_return(),
+				Some(v) => Ok(v.doc.as_ref().clone()),
 				// The base document does not exist
 				None => Ok(Value::None),
 			},
 			// This is a normal param
 			v => match ctx.value(v) {
 				// The param has been set locally
-				Some(v) => v.compute(stk, ctx, opt, doc).await.catch_return(),
+				Some(v) => Ok(v.clone()),
 				// The param has not been set locally
 				None => {
 					// Ensure a database is set
 					opt.valid_for_db()?;
 					// Fetch a defined param if set
-					let (ns, db) = opt.ns_db()?;
+					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 					let val = ctx.tx().get_db_param(ns, db, v).await;
 					// Check if the param has been set globally
 					let val = match val {
@@ -101,7 +128,11 @@ impl Param {
 								// Disable permissions
 								let opt = &opt.new_with_perms(false);
 								// Process the PERMISSION clause
-								if !e.compute(stk, ctx, opt, doc).await.catch_return()?.is_truthy()
+								if !stk
+									.run(|stk| e.compute(stk, ctx, opt, doc))
+									.await
+									.catch_return()?
+									.is_truthy()
 								{
 									bail!(Error::ParamPermissions {
 										name: v.to_owned(),
@@ -111,7 +142,7 @@ impl Param {
 						}
 					}
 					// Return the computed value
-					val.value.compute(stk, ctx, opt, doc).await.catch_return()
+					Ok(val.value.clone())
 				}
 			},
 		}
@@ -120,6 +151,6 @@ impl Param {
 
 impl fmt::Display for Param {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "${}", &self.0.0)
+		write!(f, "${}", EscapeKwFreeIdent(&self.0))
 	}
 }

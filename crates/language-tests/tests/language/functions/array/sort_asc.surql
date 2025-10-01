@@ -20,7 +20,7 @@ value = "[1, 2, 3, 4, 4, 'text']"
 value = "[1, 2, 3, 4, 4, 'text']"
 
 [[test.results]]
-value = "[NONE, NULL, true, 1, 1d, u'ffffffff-ffff-ffff-ffff-ffffffffffff', [], {  }, (1, 2), a:b, |a:1..2|, /a/, 1..2, |$a: any| {  }]"
+value = "[NONE, NULL, true, 1, 1d, u'ffffffff-ffff-ffff-ffff-ffffffffffff', [], {  }, (1, 2), a:b, /a/, 1..2]"
 
 */
 

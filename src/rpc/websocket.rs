@@ -1,9 +1,33 @@
+use core::fmt;
+use std::sync::Arc;
+use std::time::Duration;
+
+use arc_swap::ArcSwap;
+use axum::extract::ws::close_code::AGAIN;
+use axum::extract::ws::{CloseFrame, Message, WebSocket};
+use futures::stream::FuturesUnordered;
+use futures::{Sink, SinkExt, StreamExt};
+use opentelemetry::Context as TelemetryContext;
+use opentelemetry::trace::FutureExt;
+use tokio::sync::Semaphore;
+use tokio::sync::mpsc::{Receiver, Sender, channel};
+use tokio::task::JoinSet;
+use tokio_util::sync::CancellationToken;
+use tracing::{Instrument, Span};
+use uuid::Uuid;
+
 use super::RpcState;
-use crate::cnf::WEBSOCKET_PING_FREQUENCY;
-use crate::cnf::WEBSOCKET_RESPONSE_BUFFER_SIZE;
-use crate::cnf::WEBSOCKET_RESPONSE_CHANNEL_SIZE;
-use crate::cnf::WEBSOCKET_RESPONSE_FLUSH_PERIOD;
-use crate::cnf::{PKG_NAME, PKG_VERSION};
+use crate::cnf::{
+	PKG_NAME, PKG_VERSION, WEBSOCKET_PING_FREQUENCY, WEBSOCKET_RESPONSE_BUFFER_SIZE,
+	WEBSOCKET_RESPONSE_CHANNEL_SIZE, WEBSOCKET_RESPONSE_FLUSH_PERIOD,
+};
+use crate::core::dbs::Session;
+//use surrealdb::gql::{Pessimistic, SchemaCache};
+use crate::core::kvs::Datastore;
+use crate::core::mem::ALLOC;
+use crate::core::rpc::format::Format;
+use crate::core::rpc::{Data, Method, RpcContext, RpcProtocolV1, RpcProtocolV2};
+use crate::core::val::{self, Array, Value};
 use crate::rpc::CONN_CLOSED_ERR;
 use crate::rpc::failure::Failure;
 use crate::rpc::format::WsFormat;
@@ -11,34 +35,6 @@ use crate::rpc::response::{IntoRpcResponse, failure};
 use crate::telemetry;
 use crate::telemetry::metrics::ws::RequestContext;
 use crate::telemetry::traces::rpc::span_for_request;
-use arc_swap::ArcSwap;
-use axum::extract::ws::{CloseFrame, Message, WebSocket, close_code::AGAIN};
-use core::fmt;
-use futures::stream::FuturesUnordered;
-use futures::{Sink, SinkExt, StreamExt};
-use opentelemetry::Context as TelemetryContext;
-use opentelemetry::trace::FutureExt;
-use std::sync::Arc;
-use std::time::Duration;
-use surrealdb::dbs::Session;
-use surrealdb::gql::{Pessimistic, SchemaCache};
-use surrealdb::kvs::Datastore;
-use surrealdb::mem::ALLOC;
-use surrealdb::rpc::Data;
-use surrealdb::rpc::Method;
-use surrealdb::rpc::RpcContext;
-use surrealdb::rpc::format::Format;
-use surrealdb::sql::Array;
-use surrealdb::sql::SqlValue;
-use surrealdb_core::rpc::RpcProtocolV1;
-use surrealdb_core::rpc::RpcProtocolV2;
-use tokio::sync::Semaphore;
-use tokio::sync::mpsc::{Receiver, Sender, channel};
-use tokio::task::JoinSet;
-use tokio_util::sync::CancellationToken;
-use tracing::Instrument;
-use tracing::Span;
-use uuid::Uuid;
 
 /// An error string sent when the server is out of memory
 const SERVER_OVERLOADED: &str = "The server is unable to handle the request";
@@ -65,8 +61,8 @@ pub struct Websocket {
 	pub(crate) canceller: CancellationToken,
 	/// The channels used to send and receive WebSocket messages
 	pub(crate) channel: Sender<Message>,
-	/// The GraphQL schema cache stored in advance
-	pub(crate) gql_schema: SchemaCache<Pessimistic>,
+	// The GraphQL schema cache stored in advance
+	//pub(crate) gql_schema: SchemaCache<Pessimistic>,
 }
 
 impl Websocket {
@@ -93,7 +89,7 @@ impl Websocket {
 			canceller: CancellationToken::new(),
 			session: ArcSwap::from(Arc::new(session)),
 			channel: sender.clone(),
-			gql_schema: SchemaCache::new(datastore.clone()),
+			//gql_schema: SchemaCache::new(datastore.clone()),
 			datastore,
 		});
 		// Add this WebSocket to the list
@@ -353,7 +349,7 @@ impl Websocket {
 					span.record("otel.name", format!("surrealdb.rpc/{}", req.method));
 					span.record(
 						"rpc.request_id",
-						req.id.clone().map(SqlValue::as_string).unwrap_or_default(),
+						req.id.clone().map(val::Value::as_raw_string).unwrap_or_default(),
 					);
 					let otel_cx = Arc::new(TelemetryContext::current_with_value(
 						req_cx.with_method(req.method.to_str()).with_size(len),
@@ -369,7 +365,7 @@ impl Websocket {
 							// Don't start processing if we are gracefully shutting down
 							if shutdown.is_cancelled() {
 								// Process the response
-								failure(req.id.map(Into::into), Failure::custom(SERVER_SHUTTING_DOWN))
+								failure(req.id, Failure::custom(SERVER_SHUTTING_DOWN))
 									.send(otel_cx.clone(), rpc.format, chn)
 									.with_context(otel_cx.as_ref().clone())
 									.await;
@@ -377,7 +373,7 @@ impl Websocket {
 							// Check to see whether we have available memory
 							else if ALLOC.is_beyond_threshold() {
 								// Process the response
-								failure(req.id.map(Into::into), Failure::custom(SERVER_OVERLOADED))
+								failure(req.id, Failure::custom(SERVER_OVERLOADED))
 									.send(otel_cx.clone(), rpc.format, chn)
 									.with_context(otel_cx.as_ref().clone())
 									.await;
@@ -386,7 +382,7 @@ impl Websocket {
 							else {
 								// Process the message
 								Self::process_message(rpc.clone(), req.version, req.txn, req.method, req.params).await
-									.into_response(req.id.map(Into::into))
+									.into_response(req.id)
 									.send(otel_cx.clone(), rpc.format, chn)
 									.with_context(otel_cx.as_ref().clone())
 									.await;
@@ -464,7 +460,8 @@ impl RpcContext for Websocket {
 	}
 	/// The version information for this RPC context
 	fn version_data(&self) -> Data {
-		format!("{PKG_NAME}-{}", *PKG_VERSION).into()
+		let value = Value::from(format!("{PKG_NAME}-{}", *PKG_VERSION));
+		Data::Other(value)
 	}
 
 	// ------------------------------
@@ -509,10 +506,10 @@ impl RpcContext for Websocket {
 	// GraphQL
 	// ------------------------------
 
-	/// GraphQL queries are enabled on WebSockets
-	const GQL_SUPPORT: bool = true;
+	// GraphQL queries are enabled on WebSockets
+	//const GQL_SUPPORT: bool = true;
 
-	fn graphql_schema_cache(&self) -> &SchemaCache {
-		&self.gql_schema
-	}
+	//fn graphql_schema_cache(&self) -> &SchemaCache {
+	//&self.gql_schema
+	//}
 }

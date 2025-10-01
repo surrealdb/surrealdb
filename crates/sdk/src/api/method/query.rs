@@ -1,17 +1,9 @@
-use super::transaction::WithTransaction;
-use super::{Stream, live};
-use crate::api::Connection;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::conn::Command;
-use crate::api::err::Error;
-use crate::api::method::BoxFuture;
-use crate::api::opt;
-use crate::method::OnceLockExt;
-use crate::method::Stats;
-use crate::method::WithStats;
-use crate::value::Notification;
-use crate::{Surreal, Value};
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::future::IntoFuture;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
 use anyhow::bail;
 use futures::StreamExt;
 use futures::future::Either;
@@ -19,16 +11,19 @@ use futures::stream::SelectAll;
 use indexmap::IndexMap;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use std::borrow::Cow;
-use std::collections::HashMap;
-use std::future::IntoFuture;
-use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
-use surrealdb_core::expr::{Object as CoreObject, Value as CoreValue, to_value as to_core_value};
-use surrealdb_core::sql;
-use surrealdb_core::sql::Statement;
 use uuid::Uuid;
+
+use super::transaction::WithTransaction;
+use super::{Stream, live};
+use crate::api::conn::Command;
+use crate::api::err::Error;
+use crate::api::method::BoxFuture;
+use crate::api::{self, Connection, ExtraFeatures, Result, opt};
+use crate::core::expr::{LogicalPlan, TopLevelExpr};
+use crate::core::val;
+use crate::method::{OnceLockExt, Stats, WithStats};
+use crate::value::Notification;
+use crate::{Surreal, Value};
 
 /// A query future
 #[derive(Debug)]
@@ -53,12 +48,12 @@ where
 pub(crate) enum ValidQuery {
 	Raw {
 		query: Cow<'static, str>,
-		bindings: CoreObject,
+		bindings: val::Object,
 	},
 	Normal {
-		query: Vec<Statement>,
+		query: Vec<TopLevelExpr>,
 		register_live_queries: bool,
-		bindings: CoreObject,
+		bindings: val::Object,
 	},
 }
 
@@ -68,8 +63,8 @@ where
 {
 	pub(crate) fn normal(
 		client: Cow<'r, Surreal<C>>,
-		query: Vec<Statement>,
-		bindings: CoreObject,
+		query: Vec<TopLevelExpr>,
+		bindings: val::Object,
 		register_live_queries: bool,
 	) -> Self {
 		Query {
@@ -101,7 +96,8 @@ where
 		}
 	}
 
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Query<'static, C> {
 		Query {
 			txn: self.txn,
@@ -141,22 +137,20 @@ where
 					register_live_queries,
 					bindings,
 				} => {
-					let query_statements = query;
-
 					// Collect the indexes of the live queries which should be registerd.
 					let query_indicies = if register_live_queries {
-						query_statements
+						query
 							.iter()
 							// BEGIN, COMMIT, and CANCEL don't return a result.
 							.filter(|x| {
 								!matches!(
 									x,
-									Statement::Begin(_)
-										| Statement::Commit(_) | Statement::Cancel(_)
+									TopLevelExpr::Begin
+										| TopLevelExpr::Commit | TopLevelExpr::Cancel
 								)
 							})
 							.enumerate()
-							.filter(|(_, x)| matches!(x, Statement::Live(_)))
+							.filter(|(_, x)| matches!(x, TopLevelExpr::Live(_)))
 							.map(|(i, _)| i)
 							.collect()
 					} else {
@@ -170,8 +164,9 @@ where
 						return Err(Error::LiveQueriesNotSupported.into());
 					}
 
-					let mut query = sql::Query::default();
-					query.0.0 = query_statements;
+					let query = LogicalPlan {
+						expressions: query,
+					};
 
 					let mut response = router
 						.execute_query(Command::Query {
@@ -190,7 +185,7 @@ where
 						// creating another public error variant for this internal error.
 						let res = match result {
 							Ok(id) => {
-								let CoreValue::Uuid(uuid) = id else {
+								let val::Value::Uuid(uuid) = id else {
 									bail!(Error::InternalError(
 										"successfull live query did not return a uuid".to_string(),
 									));
@@ -320,25 +315,25 @@ where
 					..
 				} => bindings,
 			};
-			let bindings = to_core_value(bindings)?;
+			let bindings = api::value::to_core_value(bindings)?;
 			match bindings {
-				CoreValue::Object(mut map) => current_bindings.append(&mut map.0),
-				CoreValue::Array(array) => {
-					if array.len() != 2 || !matches!(array[0], CoreValue::Strand(_)) {
-						let bindings = CoreValue::Array(array);
+				val::Value::Object(mut map) => current_bindings.append(&mut map.0),
+				val::Value::Array(array) => {
+					if array.len() != 2 || !matches!(array[0], val::Value::String(_)) {
+						let bindings = val::Value::Array(array);
 						let bindings = Value::from_inner(bindings);
 						return Err(Error::InvalidBindings(bindings).into());
 					}
 
 					let mut iter = array.into_iter();
-					let Some(CoreValue::Strand(key)) = iter.next() else {
+					let Some(val::Value::String(key)) = iter.next() else {
 						unreachable!()
 					};
 					let Some(value) = iter.next() else {
 						unreachable!()
 					};
 
-					current_bindings.insert(key.0, value);
+					current_bindings.insert(key, value);
 				}
 				_ => {
 					let bindings = Value::from_inner(bindings);
@@ -351,7 +346,7 @@ where
 	}
 }
 
-pub(crate) type QueryResult = Result<CoreValue>;
+pub(crate) type QueryResult = Result<val::Value>;
 
 /// The response type of a `Surreal::query` request
 #[derive(Debug)]
@@ -366,7 +361,7 @@ pub struct Response {
 pub struct QueryStream<R>(pub(crate) Either<Stream<R>, SelectAll<Stream<R>>>);
 
 impl futures::Stream for QueryStream<Value> {
-	type Item = Notification<Value>;
+	type Item = Result<Notification<Value>>;
 
 	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
 		self.as_mut().0.poll_next_unpin(cx)
@@ -502,20 +497,22 @@ impl Response {
 	/// # }
 	/// ```
 	///
-	/// Consume the stream the same way you would any other type that implements `futures::Stream`.
+	/// Consume the stream the same way you would any other type that implements
+	/// `futures::Stream`.
 	pub fn stream<R>(&mut self, index: impl opt::QueryStream<R>) -> Result<QueryStream<R>> {
 		index.query_stream(self)
 	}
 
 	/// Take all errors from the query response
 	///
-	/// The errors are keyed by the corresponding index of the statement that failed.
-	/// Afterwards the response is left with only statements that did not produce any errors.
+	/// The errors are keyed by the corresponding index of the statement that
+	/// failed. Afterwards the response is left with only statements that did
+	/// not produce any errors.
 	///
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -540,12 +537,13 @@ impl Response {
 		errors
 	}
 
-	/// Check query response for errors and return the first error, if any, or the response
+	/// Check query response for errors and return the first error, if any, or
+	/// the response
 	///
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -575,7 +573,7 @@ impl Response {
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -664,13 +662,14 @@ impl WithStats<Response> {
 
 	/// Take all errors from the query response
 	///
-	/// The errors are keyed by the corresponding index of the statement that failed.
-	/// Afterwards the response is left with only statements that did not produce any errors.
+	/// The errors are keyed by the corresponding index of the statement that
+	/// failed. Afterwards the response is left with only statements that did
+	/// not produce any errors.
 	///
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -695,12 +694,13 @@ impl WithStats<Response> {
 		errors
 	}
 
-	/// Check query response for errors and return the first error, if any, or the response
+	/// Check query response for errors and return the first error, if any, or
+	/// the response
 	///
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -719,7 +719,7 @@ impl WithStats<Response> {
 	/// # Examples
 	///
 	/// ```no_run
-	///
+	/// 
 	/// # #[tokio::main]
 	/// # async fn main() -> surrealdb::Result<()> {
 	/// # let db = surrealdb::engine::any::connect("mem://").await?;
@@ -741,10 +741,10 @@ impl WithStats<Response> {
 
 #[cfg(test)]
 mod tests {
+	use serde::Deserialize;
+
 	use super::*;
 	use crate::value::to_value;
-	use serde::Deserialize;
-	use surrealdb_core::expr::Value as CoreValue;
 
 	#[derive(Debug, Clone, Serialize, Deserialize)]
 	struct Summary {
@@ -826,7 +826,7 @@ mod tests {
 			..Response::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value.into_inner(), CoreValue::from(scalar));
+		assert_eq!(value.into_inner(), val::Value::from(scalar));
 
 		let mut response = Response {
 			results: to_map(vec![Ok(scalar.into())]),
@@ -849,7 +849,7 @@ mod tests {
 			..Response::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value.into_inner(), CoreValue::from(scalar));
+		assert_eq!(value.into_inner(), val::Value::from(scalar));
 
 		let mut response = Response {
 			results: to_map(vec![Ok(scalar.into())]),
@@ -894,7 +894,7 @@ mod tests {
 		};
 		assert_eq!(zero, 0);
 		let one: Value = response.take(1).unwrap();
-		assert_eq!(one.into_inner(), CoreValue::from(1));
+		assert_eq!(one.into_inner(), val::Value::from(1));
 	}
 
 	#[test]
@@ -909,7 +909,7 @@ mod tests {
 			..Response::new()
 		};
 		let title: Value = response.take("title").unwrap();
-		assert_eq!(title.into_inner(), CoreValue::from(summary.title.as_str()));
+		assert_eq!(title.into_inner(), val::Value::from(summary.title.as_str()));
 
 		let mut response = Response {
 			results: to_map(vec![Ok(value.clone().into_inner())]),
@@ -958,7 +958,7 @@ mod tests {
 			..Response::new()
 		};
 		let value: Value = response.take("title").unwrap();
-		assert_eq!(value.into_inner(), CoreValue::from(article.title));
+		assert_eq!(value.into_inner(), val::Value::from(article.title));
 	}
 
 	#[test]
@@ -989,21 +989,24 @@ mod tests {
 	#[test]
 	fn take_partial_records() {
 		let mut response = Response {
-			results: to_map(vec![Ok(vec![true, false].into())]),
+			results: to_map(vec![Ok(vec![val::Value::from(true), val::Value::from(false)].into())]),
 			..Response::new()
 		};
 		let value: Value = response.take(0).unwrap();
-		assert_eq!(value.into_inner(), vec![CoreValue::from(true), CoreValue::from(false)].into());
+		assert_eq!(
+			value.into_inner(),
+			val::Value::from(vec![val::Value::from(true), val::Value::from(false)])
+		);
 
 		let mut response = Response {
-			results: to_map(vec![Ok(vec![true, false].into())]),
+			results: to_map(vec![Ok(vec![val::Value::from(true), val::Value::from(false)].into())]),
 			..Response::new()
 		};
 		let vec: Vec<bool> = response.take(0).unwrap();
 		assert_eq!(vec, vec![true, false]);
 
 		let mut response = Response {
-			results: to_map(vec![Ok(vec![true, false].into())]),
+			results: to_map(vec![Ok(vec![val::Value::from(true), val::Value::from(false)].into())]),
 			..Response::new()
 		};
 
@@ -1019,7 +1022,10 @@ mod tests {
 		};
 
 		let records = map.swap_remove(&0).unwrap().1.unwrap();
-		assert_eq!(records, vec![true, false].into());
+		assert_eq!(
+			records,
+			val::Value::from(vec![val::Value::from(true), val::Value::from(false)])
+		);
 	}
 
 	#[test]
@@ -1083,6 +1089,6 @@ mod tests {
 		};
 		assert_eq!(value, 2);
 		let value: Value = response.take(4).unwrap();
-		assert_eq!(value.into_inner(), CoreValue::from(3));
+		assert_eq!(value.into_inner(), val::Value::from(3));
 	}
 }

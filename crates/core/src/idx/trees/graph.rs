@@ -1,12 +1,14 @@
-use crate::idx::trees::dynamicset::DynamicSet;
-use crate::idx::trees::hnsw::ElementId;
+use std::collections::hash_map::Entry;
+use std::fmt::Debug;
+
 use ahash::HashMap;
 #[cfg(test)]
 use ahash::HashSet;
 use anyhow::Result;
 use bytes::{Buf, BufMut, BytesMut};
-use std::collections::hash_map::Entry;
-use std::fmt::Debug;
+
+use crate::idx::trees::dynamicset::DynamicSet;
+use crate::idx::trees::hnsw::ElementId;
 
 #[derive(Debug)]
 pub(super) struct UndirectedGraph<S>

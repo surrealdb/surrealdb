@@ -1,20 +1,11 @@
-use super::classes;
-use crate::expr::geometry::Geometry;
-use crate::expr::number::Number;
-use crate::expr::value::Value;
-use js::Array;
-use js::BigInt;
-use js::Class;
-use js::Ctx;
-use js::Error;
-use js::Exception;
-use js::FromIteratorJs as _;
-use js::IntoJs;
-use js::Null;
-use js::Object;
-use js::TypedArray;
-use js::Undefined;
+use js::{
+	Array, BigInt, Class, Ctx, Error, Exception, FromIteratorJs as _, IntoJs, Null, Object,
+	TypedArray, Undefined,
+};
 use rust_decimal::prelude::ToPrimitive;
+
+use super::classes;
+use crate::val::{Geometry, Number, Value};
 
 const F64_INT_MAX: i64 = ((1u64 << f64::MANTISSA_DIGITS) - 1) as i64;
 const F64_INT_MIN: i64 = -F64_INT_MAX - 1;
@@ -31,7 +22,7 @@ impl<'js> IntoJs<'js> for &Value {
 			Value::Null => Null.into_js(ctx),
 			Value::None => Undefined.into_js(ctx),
 			Value::Bool(boolean) => Ok(js::Value::new_bool(ctx.clone(), boolean)),
-			Value::Strand(ref v) => js::String::from_str(ctx.clone(), v)?.into_js(ctx),
+			Value::String(ref v) => js::String::from_str(ctx.clone(), v)?.into_js(ctx),
 			Value::Number(Number::Int(v)) => {
 				if ((i32::MIN as i64)..=(i32::MAX as i64)).contains(&v) {
 					Ok(js::Value::new_int(ctx.clone(), v as i32))
@@ -74,7 +65,7 @@ impl<'js> IntoJs<'js> for &Value {
 				let date: js::function::Constructor = ctx.globals().get("Date")?;
 				date.construct((v.0.timestamp_millis(),))
 			}
-			Value::Thing(ref v) => Ok(Class::<classes::record::Record>::instance(
+			Value::RecordId(ref v) => Ok(Class::<classes::record::Record>::instance(
 				ctx.clone(),
 				classes::record::Record {
 					value: v.to_owned(),

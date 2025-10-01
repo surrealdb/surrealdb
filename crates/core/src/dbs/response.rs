@@ -1,19 +1,19 @@
-use crate::expr::Value as CoreValue;
-use crate::sql::statement::Statement;
-use anyhow::Result;
-use revision::Revisioned;
-use revision::revisioned;
-use serde::Deserialize;
-use serde::Serialize;
-use serde::ser::SerializeStruct;
+use std::fmt;
 use std::time::Duration;
+
+use anyhow::Result;
+use revision::{Revisioned, revisioned};
+use serde::ser::SerializeStruct;
+use serde::{Deserialize, Serialize};
+
+use crate::expr::TopLevelExpr;
+use crate::val::{Object, Value};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-#[non_exhaustive]
 pub enum QueryType {
 	// Any kind of query
 	#[default]
@@ -24,17 +24,22 @@ pub enum QueryType {
 	Kill,
 }
 
-impl QueryType {
-	fn is_other(&self) -> bool {
-		matches!(self, Self::Other)
+impl fmt::Display for QueryType {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			QueryType::Other => "other".fmt(f),
+			QueryType::Live => "live".fmt(f),
+			QueryType::Kill => "kill".fmt(f),
+		}
 	}
 }
 
-impl From<&Statement> for QueryType {
-	fn from(stmt: &Statement) -> Self {
-		match stmt {
-			Statement::Live(_) => QueryType::Live,
-			Statement::Kill(_) => QueryType::Kill,
+impl QueryType {
+	/// Returns the query type for the given toplevel expression.
+	pub fn for_toplevel_expr(expr: &TopLevelExpr) -> Self {
+		match expr {
+			TopLevelExpr::Live(_) => QueryType::Live,
+			TopLevelExpr::Kill(_) => QueryType::Kill,
 			_ => QueryType::Other,
 		}
 	}
@@ -42,30 +47,47 @@ impl From<&Statement> for QueryType {
 
 /// The return value when running a query set on the database.
 #[derive(Debug)]
-#[non_exhaustive]
 pub struct Response {
 	pub time: Duration,
-	pub result: Result<CoreValue>,
-	// Record the query type in case processing the response is necessary (such as tracking live queries).
+	pub result: Result<Value>,
+	// Record the query type in case processing the response is necessary (such as tracking live
+	// queries).
 	pub query_type: QueryType,
 }
 
 impl Response {
-	/// Return the transaction duration as a string
-	pub fn speed(&self) -> String {
-		format!("{:?}", self.time)
+	/// Retrieve the response as a normal result
+	pub fn output(self) -> Result<Value> {
+		self.result
 	}
 
-	/// Retrieve the response as a normal result
-	pub fn output(self) -> Result<CoreValue> {
-		self.result
+	/// Convert's the response into a value as it is send across the net.
+	pub fn into_value(self) -> Value {
+		let mut res = Object::new();
+		res.insert("time".to_owned(), format!("{:?}", self.time).into());
+
+		if !matches!(self.query_type, QueryType::Other) {
+			res.insert("type".to_owned(), self.query_type.to_string().into());
+		}
+
+		match self.result {
+			Ok(v) => {
+				res.insert("status".to_owned(), "OK".to_owned().into());
+				res.insert("result".to_owned(), v);
+			}
+			Err(e) => {
+				res.insert("status".to_owned(), "ERR".to_owned().into());
+				res.insert("result".to_owned(), e.to_string().into());
+			}
+		}
+
+		res.into()
 	}
 }
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
-#[non_exhaustive]
 pub enum Status {
 	Ok,
 	Err,
@@ -76,7 +98,7 @@ impl Serialize for Response {
 	where
 		S: serde::Serializer,
 	{
-		let includes_type = !self.query_type.is_other();
+		let includes_type = !matches!(self.query_type, QueryType::Other);
 		let mut val = serializer.serialize_struct(
 			TOKEN,
 			if includes_type {
@@ -86,7 +108,7 @@ impl Serialize for Response {
 			},
 		)?;
 
-		val.serialize_field("time", self.speed().as_str())?;
+		val.serialize_field("time", &format!("{:?}", self.time))?;
 		if includes_type {
 			val.serialize_field("type", &self.query_type)?;
 		}
@@ -98,7 +120,7 @@ impl Serialize for Response {
 			}
 			Err(e) => {
 				val.serialize_field("status", &Status::Err)?;
-				val.serialize_field("result", &CoreValue::from(e.to_string()))?;
+				val.serialize_field("result", &Value::from(e.to_string()))?;
 			}
 		}
 		val.end()
@@ -107,19 +129,18 @@ impl Serialize for Response {
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize)]
-#[non_exhaustive]
 pub struct QueryMethodResponse {
 	pub time: String,
 	pub status: Status,
-	pub result: CoreValue,
+	pub result: Value,
 }
 
 impl From<&Response> for QueryMethodResponse {
 	fn from(res: &Response) -> Self {
-		let time = res.speed();
+		let time = format!("{:?}", res.time);
 		let (status, result) = match &res.result {
 			Ok(value) => (Status::Ok, value.clone()),
-			Err(error) => (Status::Err, CoreValue::from(error.to_string())),
+			Err(error) => (Status::Err, Value::from(error.to_string())),
 		};
 		Self {
 			status,

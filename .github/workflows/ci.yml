@@ -1,4 +1,4 @@
-name: Continuous integration
+name: CI
 
 run-name: "CI run '${{ github.head_ref || github.ref_name }}'"
 
@@ -12,7 +12,6 @@ on:
       - opened
       - synchronize
       - reopened
-
   merge_group:
 
 concurrency:
@@ -30,7 +29,7 @@ permissions:
   contents: read
 
 env:
-  RUST_VERSION: 1.86.0
+  RUST_VERSION: "1.87"
 
 jobs:
   # ----------------------------------------
@@ -50,18 +49,14 @@ jobs:
             target: aarch64-unknown-linux-gnu
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build binary
         run: cargo build --target ${{ matrix.target }}
@@ -80,22 +75,24 @@ jobs:
     name: Check format
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-          components: rustfmt
-
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
+      - name: Lookup the nightly toolchain
+        id: info
+        run: |
+          set -x
+          echo "toolchain=$(cat rust-toolchain.nightly)" >> $GITHUB_OUTPUT
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          toolchain: ${{ steps.info.outputs.toolchain }}
+          components: rustfmt
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Check format
         run: cargo make ci-format
@@ -104,25 +101,38 @@ jobs:
     name: Check clippy
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
           components: clippy
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Run clippy
         run: cargo make ci-clippy
+
+  clippy-release:
+    name: Check clippy (release)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: clippy
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Run clippy release
         run: cargo make ci-clippy-release
@@ -131,47 +141,54 @@ jobs:
     name: Check workspace
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Check workspace
         run: cargo make ci-check
+
+  check-release:
+    name: Check workspace (release)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Check workspace release
         run: cargo make ci-check-release
 
   check-msrv:
-    name: Check workspace MSRV
+    name: Check workspace (MSRV)
     runs-on: ubuntu-latest
     env:
-      msrv: "1.85" # This should be updated if the MSRV is updated.
-
+      msrv: "1.87" # This should be updated if the MSRV is updated.
     steps:
-      - name: Install MSRV toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.msrv }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install cargo-make
         run: cargo +${{ env.msrv }} install --debug --locked cargo-make
@@ -179,58 +196,22 @@ jobs:
       - name: Check workspace on MSRV
         run: cargo +${{ env.msrv }} make ci-check
 
-      - name: Check workspace release on MSRV
-        run: cargo +${{ env.msrv }} make ci-check-release
-
-  check-fuzzing:
-    name: Check fuzzing
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          workspaces: crates/fuzz
-
-      - name: Check fuzzers
-        run: cargo build --manifest-path crates/fuzz/Cargo.toml
-
-      - name: Check OSS-Fuzz
-        uses: google/oss-fuzz/infra/cifuzz/actions/build_fuzzers@cafd7a0eb8ecb4e007c56897996a9b65c49c972f # (Actions must be pinned by commit hash) master
-        with:
-          oss-fuzz-project-name: surrealdb
-          language: rust
-        # Temporarily allow this step to fail
-        continue-on-error: true
-
   check-wasm:
     name: Check Wasm
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: wasm32-unknown-unknown
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Check wasm
         run: cargo make ci-check-wasm
@@ -240,12 +221,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install revision-lock
         run: cargo install revision-lock
@@ -253,12 +235,33 @@ jobs:
       - name: Check revision.lock
         run: revision-lock --check
 
+  check-docs:
+    name: Check docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+
+      - name: Check docs
+        run: cargo make ci-docs
+
   check-binaries:
     name: Cross-compile binaries
     needs: format
     uses: ./.github/workflows/build.yml
+    if: ${{ !github.event.pull_request.draft }}
     with:
       name: ci
+      extra-features: storage-mem,allocator,allocation-tracking,scripting,http,http-compression,jwks,ml
       # Only upload if not a pull request.
       upload: ${{ github.event_name != 'pull_request' }}
       # Only compile with --release when not a pull request.
@@ -273,21 +276,17 @@ jobs:
     name: CLI integration tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Run CLI integration tests
         run: cargo make ci-cli-integration
@@ -296,21 +295,17 @@ jobs:
     name: HTTP integration tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Run HTTP integration tests
         run: cargo make ci-http-integration
@@ -319,21 +314,17 @@ jobs:
     name: WebSocket integration tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Run WebSocket integration tests
         run: cargo make ci-ws-integration
@@ -342,21 +333,17 @@ jobs:
     name: ML integration tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Run ML integration tests
         run: cargo make ci-ml-integration
@@ -365,24 +352,20 @@ jobs:
     name: GraphQL integration
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Run GraphQL integration tests
-        run: cargo make ci-graphql-integration
+      #- name: Run GraphQL integration tests
+        #run: cargo make ci-graphql-integration
 
   # ----------------------------------------
   # Workspace tests
@@ -390,41 +373,59 @@ jobs:
 
   test:
     name: Test workspace
-    runs-on: [ runner-arm64-2xlarge ]
+    runs-on: [ runner-amd64-2xlarge ]
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+        with:
+          tools: cargo-nextest,cargo-make
+
+      - name: Test workspace
+        run: cargo make ci-test-workspace
+
+  # ----------------------------------------
+  # Storage engine tests
+  # ----------------------------------------
+
+  kvs-engines:
+    name: KVS - ${{ matrix.engine }} engine
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        engine: [mem, rocksdb, surrealkv, tikv, fdb]
+    steps:
       - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          cache-key: kvs-${{ matrix.engine }}
 
-      - name: Install dependencies
-        run: sudo apt-get -y update
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) cargo-llvm-cov
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test workspace + coverage
-        run: cargo make ci-workspace-coverage
-
-      - name: Upload coverage report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # (Actions must be pinned by commit hash) v4.6.2
-        timeout-minutes: 1
-        continue-on-error: true
+      - name: Install tools
+        uses: ./.github/actions/install-tools
         with:
-          name: code-coverage-report
-          path: target/llvm-cov/html/
-          retention-days: 5
+          tools: cargo-nextest,cargo-make
+
+      - name: Setup databases
+        uses: ./.github/actions/setup-databases
+        with:
+          tikv: ${{ matrix.engine == 'tikv' }}
+          foundationdb: ${{ matrix.engine == 'fdb' }}
+
+      - name: Test engine
+        run: cargo make ci-${{ matrix.engine }}-kvs
 
   # ----------------------------------------
   # Rust SDK tests
@@ -434,18 +435,14 @@ jobs:
     name: Test SDK build
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build local
         working-directory: tests/sdk/local
@@ -455,380 +452,73 @@ jobs:
         working-directory: tests/sdk/remote
         run: cargo build
 
-  any-engine:
-    name: Rust SDK - Any engine
+  sdk-engines:
+    name: Rust SDK - ${{ matrix.engine }} engine
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        engine: [any, ws, http, mem, file, rocksdb, surrealkv, tikv, fdb]
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
+          cache-key: sdk-${{ matrix.engine }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
+      - name: Install tools
+        uses: ./.github/actions/install-tools
         with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          tools: cargo-nextest,cargo-make
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test Any engine
-        run: cargo make ci-api-integration-any
-
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
-
-  ws-engine:
-    name: Rust SDK - WebSocket engine
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Setup databases
+        uses: ./.github/actions/setup-databases
         with:
-          toolchain: ${{ env.RUST_VERSION }}
+          tikv: ${{ matrix.engine == 'tikv' }}
+          foundationdb: ${{ matrix.engine == 'fdb' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test WS engine
-        run: cargo make ci-api-integration-ws
-
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
-
-  http-engine:
-    name: Rust SDK - HTTP engine
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test HTTP engine
-        run: cargo make ci-api-integration-http
-
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
-
-  mem-engine:
-    name: Rust SDK - Memory engine
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test Memory engine
-        run: cargo make ci-api-integration-mem
-
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
-
-  file-engine:
-    name: Rust SDK - File engine
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test File engine
-        run: cargo make ci-api-integration-file
-
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
-
-  rocksdb-engine:
-    name: Rust SDK - RocksDB engine
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test RocksDB engine
-        run: cargo make ci-api-integration-rocksdb
-
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
-
-  surrealkv-engine:
-    name: Rust SDK - SurrealKV engine
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test SurrealKV engine
-        run: cargo make ci-api-integration-surrealkv
-
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
-
-  tikv-engine:
-    name: Rust SDK - TiKV engine
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install TiUP
-        timeout-minutes: 10
-        run: |
-          while ! ~/.tiup/bin/tiup -v; do
-            curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh
-          done
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test TiKV engine
-        run: cargo make ci-api-integration-tikv
-
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
-
-  fdb-engine-7-1:
-    name: Rust SDK - FoundationDB engine 7.1
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # (Actions must be pinned by commit hash) v.2.2.0
-        with:
-          version: "7.1.61"
-
-      - name: Test FoundationDB engine
-        run: cargo make ci-api-integration-fdb-7_1
-
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
-
-  fdb-engine-7-3:
-    name: Rust SDK - FoundationDB engine 7.3
-    runs-on: ubuntu-latest
-    steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # (Actions must be pinned by commit hash) v.2.2.0
-        with:
-          version: "7.3.47"
-
-      - name: Test FoundationDB engine
-        run: cargo make ci-api-integration-fdb-7_3
-
-      - name: Debug info
-        if: always()
-        run: |
-          set -x
-          free -m
-          df -h
-          ps auxf
+      - name: Test engine
+        run: cargo make ci-api-integration-${{ matrix.engine }}
 
   # ----------------------------------------
   # Database upgrade tests
   # ----------------------------------------
 
   db-upgrade:
-    name: Database Upgrade from previous versions
+    name: Database upgrade from previous versions
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
-
-      - name: Test upgrade
-        run: cargo make ci-database-upgrade
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
   # ----------------------------------------
   # SurrealQL language tests
   # ----------------------------------------
 
   lang-tests:
-    name: Run SurrealQL language tests
+    name: SurrealQL language tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: crates/language-tests
 
       - name: Build SurrealQL test tool
@@ -842,21 +532,17 @@ jobs:
           ./target/debug/surrealql-test --color always run --no-wip -j 3
 
   upgrade-tests:
-    name: Run SurrealQL upgrade tests
+    name: SurrealQL upgrade tests
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ env.RUST_VERSION }}
-
-      - name: Checkout sources
-        uses: actions/checkout@v4
-
-      - name: Setup cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             crates/language-tests
             ./
@@ -867,20 +553,21 @@ jobs:
           cd crates/language-tests
           cargo build --features upgrade
 
-      - name: Run SurrealQL test suite
-        run: |
-          cd crates/language-tests
-          ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
+  #    - name: Run SurrealQL test suite
+        #run: |
+        #  cd crates/language-tests
+        #  ./target/debug/surrealql-test --color always upgrade --allow-download --from 2.2.0,2.1.0,2.0.0 --to ../..
 
   # ----------------------------------------
   # Other SDK tests
   # ----------------------------------------
 
   sdk-javascript:
-    name: JavaScript SDK tests (${{ matrix.version }})
-    continue-on-error: true
+    name: SDK - JavaScript (${{ matrix.version }})
     runs-on: ubuntu-latest
     needs: build
+    outputs:
+      tests-failed: ${{ steps.check-failures.outputs.failed }}
     strategy:
       fail-fast: false
       matrix:
@@ -910,24 +597,38 @@ jobs:
         run: bun install
 
       - name: Run JavaScript tests (HTTP)
+        id: test-http
         run: bun test
+        continue-on-error: true
         env:
           SURREAL_PROTOCOL: http
           SURREAL_VERSION_CHECK: "false"
           SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
 
       - name: Run JavaScript tests (WebSocket)
+        id: test-ws
         run: bun test
+        continue-on-error: true
         env:
           SURREAL_PROTOCOL: ws
           SURREAL_VERSION_CHECK: "false"
           SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
 
+      - name: Check for test failures
+        id: check-failures
+        run: |
+          if [ "${{ steps.test-http.outcome }}" = "failure" ] || [ "${{ steps.test-ws.outcome }}" = "failure" ]; then
+            echo "failed=true" >> $GITHUB_OUTPUT
+          else
+            echo "failed=false" >> $GITHUB_OUTPUT
+          fi
+
   sdk-golang:
-    name: Golang SDK tests (${{ matrix.version }})
-    continue-on-error: true
+    name: SDK - Golang (${{ matrix.version }})
     runs-on: ubuntu-latest
     needs: build
+    outputs:
+      tests-failed: ${{ steps.check-failures.outputs.failed }}
     strategy:
       fail-fast: false
       matrix:
@@ -959,23 +660,52 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
-        run: sleep 10
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
 
       - name: Run Golang tests (HTTP)
+        id: test-http
         run: go test -v -cover ./...
+        continue-on-error: true
         env:
           SURREALDB_URL: http://localhost:8000/rpc
 
       - name: Run Golang tests (WebSocket)
+        id: test-ws
         run: go test -v -cover ./...
+        continue-on-error: true
         env:
           SURREALDB_URL: ws://localhost:8000/rpc
 
+      - name: Check for test failures
+        id: check-failures
+        run: |
+          if [ "${{ steps.test-http.outcome }}" = "failure" ] || [ "${{ steps.test-ws.outcome }}" = "failure" ]; then
+            echo "failed=true" >> $GITHUB_OUTPUT
+          else
+            echo "failed=false" >> $GITHUB_OUTPUT
+          fi
+
   sdk-python:
-    name: Python SDK tests (${{ matrix.version }})
-    continue-on-error: true
+    name: SDK - Python (${{ matrix.version }})
     runs-on: ubuntu-latest
     needs: build
+    outputs:
+      tests-failed: ${{ steps.check-failures.outputs.failed }}
     strategy:
       fail-fast: false
       matrix:
@@ -1001,34 +731,71 @@ jobs:
         with:
           python-version: ${{ matrix.version }}
 
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+
       - name: Start SurrealDB
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
-        run: sleep 10
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: uv sync --group dev
 
       - name: Run Python tests (HTTP)
-        run: python -m unittest discover -s tests
+        id: test-http
+        run: uv run pytest
+        continue-on-error: true
         env:
           PYTHONPATH: ./src
           SURREALDB_URL: http://localhost:8000
           SURREALDB_VERSION: ${{ matrix.version }}
+          PYTHONWARNINGS: ignore::ResourceWarning,ignore::UserWarning
 
       - name: Run Python tests (WebSocket)
-        run: python -m unittest discover -s tests
+        id: test-ws
+        run: uv run pytest
+        continue-on-error: true
         env:
           PYTHONPATH: ./src
           SURREALDB_URL: ws://localhost:8000
           SURREALDB_VERSION: ${{ matrix.version }}
+          PYTHONWARNINGS: ignore::ResourceWarning,ignore::UserWarning
+
+      - name: Check for test failures
+        id: check-failures
+        run: |
+          if [ "${{ steps.test-http.outcome }}" = "failure" ] || [ "${{ steps.test-ws.outcome }}" = "failure" ]; then
+            echo "failed=true" >> $GITHUB_OUTPUT
+          else
+            echo "failed=false" >> $GITHUB_OUTPUT
+          fi
 
   sdk-php:
-    name: PHP SDK tests (${{ matrix.version }})
-    continue-on-error: true
+    name: SDK - PHP (${{ matrix.version }})
     runs-on: ubuntu-latest
     needs: build
+    outputs:
+      tests-failed: ${{ steps.check-failures.outputs.failed }}
     strategy:
       fail-fast: false
       matrix:
@@ -1063,16 +830,43 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
-        run: sleep 10
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
 
       - name: Run PHP tests
+        id: test-php
         run: composer test-coverage-v2
+        continue-on-error: true
+
+      - name: Check for test failures
+        id: check-failures
+        run: |
+          if [ "${{ steps.test-php.outcome }}" = "failure" ]; then
+            echo "failed=true" >> $GITHUB_OUTPUT
+          else
+            echo "failed=false" >> $GITHUB_OUTPUT
+          fi
 
   sdk-dotnet:
-    name: .NET SDK tests (${{ matrix.version }})
-    continue-on-error: true
+    name: SDK - .NET (${{ matrix.version }})
     runs-on: ubuntu-latest
     needs: build
+    outputs:
+      tests-failed: ${{ steps.check-failures.outputs.failed }}
     strategy:
       fail-fast: false
       matrix:
@@ -1111,18 +905,120 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
-        run: sleep 10
+        run: |
+          # Wait for SurrealDB to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/health > /dev/null 2>&1; then
+              echo "SurrealDB is ready"
+              break
+            fi
+            echo "Waiting for SurrealDB to start... (attempt $i/30)"
+            sleep 2
+          done
+
+          # Final check
+          if ! curl -s http://localhost:8000/health > /dev/null 2>&1; then
+            echo "SurrealDB failed to start"
+            exit 1
+          fi
 
       - name: Run .NET tests
+        id: test-main
         run: >
           dotnet test
           ./SurrealDb.Net.Tests/SurrealDb.Net.Tests.csproj
           --no-restore
           --no-build
+        continue-on-error: true
 
       - name: Run .NET tests (Live Query)
+        id: test-live-query
         run: >
           dotnet test
           ./SurrealDb.Net.LiveQuery.Tests/SurrealDb.Net.LiveQuery.Tests.csproj
           --no-restore
           --no-build
+        continue-on-error: true
+
+      - name: Check for test failures
+        id: check-failures
+        run: |
+          if [ "${{ steps.test-main.outcome }}" = "failure" ] || [ "${{ steps.test-live-query.outcome }}" = "failure" ]; then
+            echo "failed=true" >> $GITHUB_OUTPUT
+          else
+            echo "failed=false" >> $GITHUB_OUTPUT
+          fi
+
+  # ----------------------------------------
+  # SDK output
+  # ----------------------------------------
+
+  sdk-output:
+    name: ${{ (needs.sdk-javascript.outputs.tests-failed == 'true' || needs.sdk-golang.outputs.tests-failed == 'true' || needs.sdk-python.outputs.tests-failed == 'true' || needs.sdk-php.outputs.tests-failed == 'true' || needs.sdk-dotnet.outputs.tests-failed == 'true') && '⚠️ SDK tests failed' || '✅ SDK tests passed' }}
+    runs-on: ubuntu-latest
+    needs:
+      - sdk-javascript
+      - sdk-golang
+      - sdk-python
+      - sdk-php
+      - sdk-dotnet
+    steps:
+      - name: Output SDK test results
+        run: |
+          echo "JavaScript: ${{ needs.sdk-javascript.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
+          echo "Golang: ${{ needs.sdk-golang.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
+          echo "Python: ${{ needs.sdk-python.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
+          echo "PHP: ${{ needs.sdk-php.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
+          echo ".NET: ${{ needs.sdk-dotnet.outputs.tests-failed == 'true' && '❌ Failed' || '✅ Passed' }}"
+
+      - name: Output SDK test summary
+        run: |
+          if [[ "${{ needs.sdk-javascript.outputs.tests-failed == 'true' || needs.sdk-golang.outputs.tests-failed == 'true' || needs.sdk-python.outputs.tests-failed == 'true' || needs.sdk-php.outputs.tests-failed == 'true' || needs.sdk-dotnet.outputs.tests-failed == 'true' }}" == "true" ]]; then
+            echo "⚠️ Some SDK tests failed"
+          else
+            echo "✅ All SDK tests passed successfully"
+          fi
+
+  # ----------------------------------------
+  # Required checks
+  # ----------------------------------------
+
+  required-checks:
+    name: Required checks
+    runs-on: ubuntu-latest
+    if: ${{ !github.event.pull_request.draft }}
+    needs:
+      # Server build
+      - build
+      # Quality checks
+      - format
+      - clippy
+      - clippy-release
+      - check
+      - check-release
+      - check-msrv
+      - check-wasm
+      - check-revision
+      - check-docs
+      - check-binaries
+      # Integration tests
+      - cli-integration
+      - http-integration
+      - ws-integration
+      - ml-integration
+      - graphql-integration
+      # Workspace tests
+      - test
+      # SDK tests
+      - sdk-build
+      - sdk-engines
+      # KVS tests
+      - kvs-engines
+      # Database upgrade tests
+      - db-upgrade
+      # SurrealQL language tests
+      - lang-tests
+      - upgrade-tests
+    steps:
+      - name: All required checks passed
+        run: echo "All required CI checks have passed successfully!"

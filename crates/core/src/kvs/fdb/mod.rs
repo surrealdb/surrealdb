@@ -2,21 +2,20 @@
 
 mod cnf;
 
+use std::ops::Range;
+use std::sync::{Arc, LazyLock};
+
+use anyhow::{Result, bail, ensure};
+use foundationdb::options::{DatabaseOption, MutationType};
+use foundationdb::{Database, RangeOption, Transaction as Tx};
+use futures::StreamExt;
+
 use crate::err::Error;
+use crate::key::database::vs::VsKey;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare};
 use crate::kvs::{Check, Key, Val};
 use crate::vs::VersionStamp;
-use anyhow::{Result, bail, ensure};
-use foundationdb::Database;
-use foundationdb::RangeOption;
-use foundationdb::Transaction as Tx;
-use foundationdb::options::DatabaseOption;
-use foundationdb::options::MutationType;
-use futures::StreamExt;
-use std::ops::Range;
-use std::sync::Arc;
-use std::sync::LazyLock;
 
 const TARGET: &str = "surrealdb::core::kvs::fdb";
 
@@ -488,8 +487,8 @@ impl super::api::Transaction for Transaction {
 	}
 
 	/// Obtain a new change timestamp for a key
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = _key.sprint()))]
-	async fn get_timestamp(&mut self, _key: Key) -> Result<VersionStamp> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
+	async fn get_timestamp(&mut self, _key: VsKey) -> Result<VersionStamp> {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Get the current read version
@@ -501,10 +500,10 @@ impl super::api::Transaction for Transaction {
 	}
 
 	// Sets the value for a versionstamped key prefixed with the user-supplied key.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(ts_key = _ts_key.sprint()))]
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn set_versionstamp(
 		&mut self,
-		_ts_key: Key,
+		_ts_key: VsKey,
 		prefix: Key,
 		suffix: Key,
 		val: Val,

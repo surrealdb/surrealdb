@@ -1,23 +1,19 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::dbs::Workable;
-use crate::doc::Document;
-use crate::doc::Permitted::*;
-use crate::err::Error;
-use crate::expr::FlowResultExt as _;
-use crate::expr::paths::ID;
-use crate::expr::paths::IN;
-use crate::expr::paths::OUT;
-use crate::expr::permission::Permission;
-use crate::expr::value::Value;
-use crate::iam::Action;
-use anyhow::Result;
-use anyhow::bail;
-use anyhow::ensure;
+use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
+use crate::catalog::Permission;
+use crate::ctx::Context;
+use crate::dbs::{Options, Statement, Workable};
+use crate::doc::Document;
+use crate::doc::Permitted::*;
+use crate::doc::compute::DocKind;
+use crate::err::Error;
+use crate::expr::FlowResultExt as _;
+use crate::expr::paths::{ID, IN, OUT};
+use crate::iam::Action;
+use crate::sql::ToSql;
+use crate::val::Value;
 
 impl Document {
 	/// Checks whether this operation is allowed on
@@ -42,7 +38,7 @@ impl Document {
 					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: false,
-						target_type: tb.kind.to_string(),
+						target_type: tb.table_type.to_sql(),
 					}
 				);
 			}
@@ -52,7 +48,7 @@ impl Document {
 					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: false,
-						target_type: tb.kind.to_string(),
+						target_type: tb.table_type.to_sql(),
 					}
 				);
 			}
@@ -62,7 +58,7 @@ impl Document {
 					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: true,
-						target_type: tb.kind.to_string(),
+						target_type: tb.table_type.to_sql(),
 					}
 				);
 			}
@@ -73,7 +69,7 @@ impl Document {
 						Error::TableCheck {
 							thing: self.id()?.to_string(),
 							relation: true,
-							target_type: tb.kind.to_string(),
+							target_type: tb.table_type.to_sql(),
 						}
 					);
 				}
@@ -83,7 +79,7 @@ impl Document {
 						Error::TableCheck {
 							thing: self.id()?.to_string(),
 							relation: false,
-							target_type: tb.kind.to_string(),
+							target_type: tb.table_type.to_sql(),
 						}
 					);
 				}
@@ -105,7 +101,7 @@ impl Document {
 		_stm: &Statement<'_>,
 	) -> Result<(), IgnoreError> {
 		// Check if this record exists
-		if self.id.is_some() && self.current.doc.is_none() {
+		if self.id.is_some() && self.current.doc.as_ref().is_none() {
 			return Err(IgnoreError::Ignore);
 		}
 		// Carry on
@@ -135,7 +131,7 @@ impl Document {
 		}
 		// You cannot store a range id as the id field on a document
 		ensure!(
-			!rid.is_range(),
+			!rid.key.is_range(),
 			Error::IdInvalid {
 				value: rid.to_string(),
 			}
@@ -145,24 +141,23 @@ impl Document {
 			// This is a CONTENT, MERGE or SET clause
 			if let Some(data) = stm.data() {
 				// Check if there is an id field specified
-				if let Some(field) = data.pick(stk, ctx, opt, &*ID).await? {
-					match field {
-						// You cannot store a range id as the id field on a document
-						Value::Thing(v) if v.is_range() => {
-							bail!(Error::IdInvalid {
+				match data.pick(stk, ctx, opt, "id").await? {
+					// You cannot store a range id as the id field on a document
+					Value::RecordId(v) if v.key.is_range() => {
+						bail!(Error::IdInvalid {
+							value: v.to_string(),
+						})
+					}
+					// The id is a match, so don't error
+					Value::RecordId(v) if v.eq(&rid) => {}
+					Value::None => {}
+					v => {
+						ensure!(
+							rid.key == v,
+							Error::IdMismatch {
 								value: v.to_string(),
-							})
-						}
-						// The id is a match, so don't error
-						Value::Thing(v) if v.eq(&rid) => (),
-						// The id is a match, so don't error
-						v if rid.id.is(&v) => (),
-						// The id field does not match
-						v => {
-							bail!(Error::IdMismatch {
-								value: v.to_string(),
-							})
-						}
+							}
+						)
 					}
 				}
 			}
@@ -172,90 +167,81 @@ impl Document {
 			// This is a RELATE statement
 			if let Some(data) = stm.data() {
 				// Check that the 'id' field matches
-				if let Some(field) = data.pick(stk, ctx, opt, &*ID).await? {
-					match field {
-						// You cannot store a range id as the id field on a document
-						Value::Thing(v) if v.is_range() => {
-							bail!(Error::IdInvalid {
+				match data.pick(stk, ctx, opt, "id").await? {
+					// You cannot store a range id as the id field on a document
+					Value::RecordId(v) if v.key.is_range() => {
+						bail!(Error::IdInvalid {
+							value: v.to_string(),
+						})
+					}
+					// The id field is a match, so don't error
+					Value::RecordId(v) if v.eq(&rid) => (),
+					// There was no id field specified
+					Value::None => {}
+					v => {
+						ensure!(
+							rid.key == v,
+							Error::IdMismatch {
 								value: v.to_string(),
-							})
-						}
-						// The id field is a match, so don't error
-						Value::Thing(v) if v.eq(&rid) => (),
-						// The id is a match, so don't error
-						v if rid.id.is(&v) => (),
-						// There was no id field specified
-						v if v.is_none() => (),
-						// The id field does not match
-						v => {
-							bail!(Error::IdMismatch {
-								value: v.to_string(),
-							})
-						}
+							}
+						)
 					}
 				}
 				// Check that the 'in' field matches
-				if let Some(field) = data.pick(stk, ctx, opt, &*IN).await? {
-					match field {
-						// You cannot store a range id as the in field on a document
-						Value::Thing(v) if v.is_range() => {
-							bail!(Error::InInvalid {
+				match data.pick(stk, ctx, opt, "in").await? {
+					// You cannot store a range id as the in field on a document
+					Value::RecordId(v) if v.key.is_range() => {
+						bail!(Error::InInvalid {
+							value: v.to_string(),
+						})
+					}
+					// The in field is a match, so don't error
+					Value::RecordId(v) if v.eq(l) => (),
+					Value::None => {}
+					v => {
+						ensure!(
+							l.key == v,
+							Error::InMismatch {
 								value: v.to_string(),
-							})
-						}
-						// The in field is a match, so don't error
-						Value::Thing(v) if v.eq(l) => (),
-						// The in is a match, so don't error
-						v if l.id.is(&v) => (),
-						// The in field does not match
-						v => {
-							bail!(Error::InMismatch {
-								value: v.to_string(),
-							})
-						}
+							}
+						)
 					}
 				}
 				// Check that the 'out' field matches
-				if let Some(field) = data.pick(stk, ctx, opt, &*OUT).await? {
-					match field {
-						// You cannot store a range id as the out field on a document
-						Value::Thing(v) if v.is_range() => {
-							bail!(Error::OutInvalid {
+				match data.pick(stk, ctx, opt, "out").await? {
+					// You cannot store a range id as the out field on a document
+					Value::RecordId(v) if v.key.is_range() => {
+						bail!(Error::OutInvalid {
+							value: v.to_string(),
+						})
+					}
+					// The out field is a match, so don't error
+					Value::RecordId(v) if v.eq(r) => {}
+					Value::None => {}
+					v => {
+						ensure!(
+							r.key == v,
+							Error::OutMismatch {
 								value: v.to_string(),
-							})
-						}
-						// The out field is a match, so don't error
-						Value::Thing(v) if v.eq(r) => (),
-						// The out is a match, so don't error
-						v if r.id.is(&v) => (),
-						// The out field does not match
-						v => {
-							bail!(Error::OutMismatch {
-								value: v.to_string(),
-							})
-						}
+							}
+						)
 					}
 				}
 			}
 			// This is a INSERT RELATION statement
 			else if let Some(data) = v {
 				// Check that the 'id' field matches
-				match data
-					.pick(&*ID)
-					.compute(stk, ctx, opt, Some(&self.current))
-					.await
-					.catch_return()?
-				{
+				match data.pick(&*ID) {
 					// You cannot store a range id as the id field on a document
-					Value::Thing(v) if v.is_range() => {
+					Value::RecordId(v) if v.key.is_range() => {
 						bail!(Error::IdInvalid {
 							value: v.to_string(),
 						})
 					}
 					// The id field is a match, so don't error
-					Value::Thing(v) if v.eq(&rid) => (),
+					Value::RecordId(v) if v.eq(&rid) => (),
 					// The id is a match, so don't error
-					v if rid.id.is(&v) => (),
+					v if rid.key == v => (),
 					// There was no id field specified
 					v if v.is_none() => (),
 					// The id field does not match
@@ -266,22 +252,17 @@ impl Document {
 					}
 				}
 				// Check that the 'in' field matches
-				match data
-					.pick(&*IN)
-					.compute(stk, ctx, opt, Some(&self.current))
-					.await
-					.catch_return()?
-				{
+				match data.pick(&*IN) {
 					// You cannot store a range id as the in field on a document
-					Value::Thing(v) if v.is_range() => {
+					Value::RecordId(v) if v.key.is_range() => {
 						bail!(Error::InInvalid {
 							value: v.to_string(),
 						})
 					}
 					// The in field is a match, so don't error
-					Value::Thing(v) if v.eq(l) => (),
+					Value::RecordId(v) if v.eq(l) => (),
 					// The in is a match, so don't error
-					v if l.id.is(&v) => (),
+					v if l.key == v => (),
 					// The in field does not match
 					v => {
 						bail!(Error::InMismatch {
@@ -290,22 +271,17 @@ impl Document {
 					}
 				}
 				// Check that the 'out' field matches
-				match data
-					.pick(&*OUT)
-					.compute(stk, ctx, opt, Some(&self.current))
-					.await
-					.catch_return()?
-				{
+				match data.pick(&*OUT) {
 					// You cannot store a range id as the out field on a document
-					Value::Thing(v) if v.is_range() => {
+					Value::RecordId(v) if v.key.is_range() => {
 						bail!(Error::OutInvalid {
 							value: v.to_string(),
 						})
 					}
 					// The out field is a match, so don't error
-					Value::Thing(v) if v.eq(r) => (),
+					Value::RecordId(v) if v.eq(r) => (),
 					// The out is a match, so don't error
-					v if r.id.is(&v) => (),
+					v if r.key == v => (),
 					// The out field does not match
 					v => {
 						bail!(Error::OutMismatch {
@@ -335,12 +311,20 @@ impl Document {
 			// Check if a WHERE condition is specified
 			if let Some(cond) = stm.cond() {
 				// Process the permitted documents
-				let current = match self.reduced(stk, ctx, opt, Current).await? {
-					true => &self.current_reduced,
-					false => &self.current,
+				let current = if self.reduced(stk, ctx, opt, Current).await? {
+					self.computed_fields(stk, ctx, opt, DocKind::CurrentReduced).await?;
+					&self.current_reduced
+				} else {
+					self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
+					&self.current
 				};
 				// Check if the expression is truthy
-				if !cond.compute(stk, ctx, opt, Some(current)).await.catch_return()?.is_truthy() {
+				if !stk
+					.run(|stk| cond.0.compute(stk, ctx, opt, Some(current)))
+					.await
+					.catch_return()?
+					.is_truthy()
+				{
 					// Ignore this document
 					return Err(IgnoreError::Ignore);
 				}
@@ -383,7 +367,12 @@ impl Document {
 						// Disable permissions
 						let opt = &opt.new_with_perms(false);
 						// Process the PERMISSION clause
-						if !e.compute(stk, ctx, opt, Some(doc)).await.catch_return()?.is_truthy() {
+						if !stk
+							.run(|stk| e.compute(stk, ctx, opt, Some(doc)))
+							.await
+							.catch_return()?
+							.is_truthy()
+						{
 							return Err(IgnoreError::Ignore);
 						}
 					}
@@ -465,16 +454,18 @@ impl Document {
 						// Disable permissions
 						let opt = &opt.new_with_perms(false);
 						// Process the PERMISSION clause
-						if !e
-							.compute(
-								stk,
-								ctx,
-								opt,
-								Some(match stm.is_delete() {
-									true => &self.initial,
-									false => &self.current,
-								}),
-							)
+						if !stk
+							.run(|stk| {
+								e.compute(
+									stk,
+									ctx,
+									opt,
+									Some(match stm.is_delete() {
+										true => &self.initial,
+										false => &self.current,
+									}),
+								)
+							})
 							.await
 							.catch_return()?
 							.is_truthy()

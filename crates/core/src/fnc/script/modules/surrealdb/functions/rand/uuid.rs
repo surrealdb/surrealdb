@@ -1,9 +1,9 @@
-use js::{Ctx, prelude::Rest};
+use js::Ctx;
+use js::prelude::Rest;
 
 use super::super::run;
-use crate::expr::value::Value;
+use crate::val::Value;
 
-#[non_exhaustive]
 pub struct Package;
 
 impl js::module::ModuleDef for Package {

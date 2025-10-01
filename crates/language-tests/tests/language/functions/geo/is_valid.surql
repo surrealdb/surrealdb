@@ -17,8 +17,8 @@ value = "false"
 value = "false"
 
 */
-geo::is::valid((-0.118092, 51.509865));
-geo::is::valid((-181.0, 51.509865));
-geo::is::valid((181.0, 51.509865));
-geo::is::valid((-0.118092, -91.0));
-geo::is::valid((-0.118092, 91.0));
+geo::is_valid((-0.118092, 51.509865));
+geo::is_valid((-181.0, 51.509865));
+geo::is_valid((181.0, 51.509865));
+geo::is_valid((-0.118092, -91.0));
+geo::is_valid((-0.118092, 91.0));

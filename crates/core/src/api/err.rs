@@ -4,7 +4,6 @@ use thiserror::Error;
 use crate::expr::Bytesize;
 
 #[derive(Error, Debug)]
-#[non_exhaustive]
 pub enum ApiError {
 	#[error("Invalid request body: Expected data frame but received another frame type")]
 	InvalidRequestBody,

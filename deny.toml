@@ -56,9 +56,8 @@ db-path = "~/.cargo/advisory-db"
 yanked = "warn"
 # A list of security advisory identifiers to ignore.
 # TODOs:
-# - remove RUSTSEC-2025-0014 once https://github.com/apache/arrow-rs/pull/7261 is released
 # - for RUSTSEC-2024-0436, track https://github.com/3Hren/msgpack-rust/issues/365
-ignore = ["RUSTSEC-2025-0014", "RUSTSEC-2024-0436"]
+ignore = ["RUSTSEC-2024-0436"]
 
 # --------------------------------------------------
 # LICENSES
@@ -87,10 +86,6 @@ confidence-threshold = 0.95
 # Allow specific licenses on a per-crate basis, instead of globally.
 
 [[licenses.exceptions]]
-name = "ring"
-allow = ["OpenSSL"]
-
-[[licenses.exceptions]]
 name = "surreal"
 allow = ["BUSL-1.1"]
 
@@ -103,12 +98,20 @@ name = "surrealdb-core"
 allow = ["BUSL-1.1"]
 
 [[licenses.exceptions]]
+name = "surrealdb-protocol"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
 name = "surrealml-core"
 allow = ["Apache-2.0"]
 
 [[licenses.exceptions]]
-name = "unicode-ident"
-allow = ["Unicode-DFS-2016"]
+name = "surrealdb-types"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealdb-types-derive"
+allow = ["BUSL-1.1"]
 
 # Specify overrides for crates where licenses are hard to guess.
 
@@ -130,6 +133,16 @@ license-files = []
 [[licenses.clarify]]
 name = "surrealml-core"
 expression = "Apache-2.0"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-types"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealdb-types-derive"
+expression = "BUSL-1.1"
 license-files = []
 
 [[licenses.clarify]]

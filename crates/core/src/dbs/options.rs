@@ -1,13 +1,17 @@
+use std::fmt::Debug;
+use std::pin::Pin;
+use std::sync::Arc;
+
+use anyhow::{Result, bail};
+use uuid::Uuid;
+
+use crate::catalog;
+use crate::catalog::SubscriptionDefinition;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::dbs::Notification;
 use crate::err::Error;
 use crate::expr::Base;
-use crate::expr::statements::define::{DefineIndexStatement, DefineTableStatement};
 use crate::iam::{Action, Auth, ResourceKind};
-use anyhow::{Result, bail};
-use async_channel::Sender;
-use std::sync::Arc;
-use uuid::Uuid;
 
 /// An Options is passed around when processing a set of query
 /// statements.
@@ -22,9 +26,9 @@ pub struct Options {
 	/// The current Node ID of the datastore instance
 	id: Option<Uuid>,
 	/// The currently selected Namespace
-	ns: Option<Arc<str>>,
+	pub(crate) ns: Option<Arc<str>>,
 	/// The currently selected Database
-	db: Option<Arc<str>>,
+	pub(crate) db: Option<Arc<str>>,
 	/// Approximately how large is the current call stack?
 	dive: u32,
 	/// Connection authentication data
@@ -41,28 +45,28 @@ pub struct Options {
 	pub(crate) strict: bool,
 	/// Should we process field queries?
 	pub(crate) import: bool,
-	/// Should we process function futures?
-	pub(crate) futures: Futures,
 	/// The data version as nanosecond timestamp
 	pub(crate) version: Option<u64>,
-	/// The channel over which we send notifications
-	pub(crate) sender: Option<Sender<Notification>>,
+	/// Optional message broker for live notifications
+	pub(crate) broker: Option<Arc<dyn MessageBroker>>,
 }
 
 #[derive(Clone, Debug)]
-#[non_exhaustive]
 pub enum Force {
 	All,
 	None,
-	Table(Arc<[DefineTableStatement]>),
-	Index(Arc<[DefineIndexStatement]>),
+	Table(Arc<[catalog::TableDefinition]>),
+	Index(Arc<[catalog::IndexDefinition]>),
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum Futures {
-	Disabled,
-	Enabled,
-	Never,
+/// Trait for a pluggable message broker used to forward live query events across nodes.
+/// Default implementation can be a no-op. Implementations should be cheap to clone behind Arc.
+pub trait MessageBroker: Send + Sync + Debug {
+	fn can_be_sent(&self, opt: &Options, subscription: &SubscriptionDefinition) -> Result<bool>;
+
+	/// Forward a live query event for the given subscription to its owning node.
+	/// The concrete implementation decides how to encode and route this request.
+	fn send(&self, notification: Notification) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
 }
 
 impl Default for Options {
@@ -84,9 +88,8 @@ impl Options {
 			force: Force::None,
 			strict: false,
 			import: false,
-			futures: Futures::Disabled,
 			auth_enabled: true,
-			sender: None,
+			broker: None,
 			auth: Arc::new(Auth::default()),
 			version: None,
 		}
@@ -179,33 +182,6 @@ impl Options {
 		self.import = import;
 	}
 
-	/// Specify if we should process futures
-	pub fn with_futures(mut self, futures: bool) -> Self {
-		self.set_futures(futures);
-		self
-	}
-
-	pub fn set_futures(&mut self, futures: bool) {
-		self.futures = match self.futures {
-			Futures::Never => Futures::Never,
-			_ => match futures {
-				true => Futures::Enabled,
-				false => Futures::Disabled,
-			},
-		};
-	}
-
-	/// Specify if we should never process futures
-	pub fn with_futures_never(mut self) -> Self {
-		self.set_futures_never();
-		self
-	}
-
-	/// Specify if we should never process futures
-	pub fn set_futures_never(&mut self) {
-		self.futures = Futures::Never;
-	}
-
 	/// Create a new Options object with auth enabled
 	pub fn with_auth_enabled(mut self, auth_enabled: bool) -> Self {
 		self.auth_enabled = auth_enabled;
@@ -223,7 +199,7 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn new_with_auth(&self, auth: Arc<Auth>) -> Self {
 		Self {
-			sender: self.sender.clone(),
+			broker: self.broker.clone(),
 			auth,
 			ns: self.ns.clone(),
 			db: self.db.clone(),
@@ -236,7 +212,7 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn new_with_perms(&self, perms: bool) -> Self {
 		Self {
-			sender: self.sender.clone(),
+			broker: self.broker.clone(),
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
@@ -249,7 +225,7 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn new_with_force(&self, force: Force) -> Self {
 		Self {
-			sender: self.sender.clone(),
+			broker: self.broker.clone(),
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
@@ -261,7 +237,7 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn new_with_strict(&self, strict: bool) -> Self {
 		Self {
-			sender: self.sender.clone(),
+			broker: self.broker.clone(),
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
@@ -274,7 +250,7 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn new_with_import(&self, import: bool) -> Self {
 		Self {
-			sender: self.sender.clone(),
+			broker: self.broker.clone(),
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
@@ -285,32 +261,13 @@ impl Options {
 	}
 
 	/// Create a new Options object for a subquery
-	pub fn new_with_futures(&self, futures: bool) -> Self {
-		Self {
-			sender: self.sender.clone(),
-			auth: self.auth.clone(),
-			ns: self.ns.clone(),
-			db: self.db.clone(),
-			force: self.force.clone(),
-			futures: match self.futures {
-				Futures::Never => Futures::Never,
-				_ => match futures {
-					true => Futures::Enabled,
-					false => Futures::Disabled,
-				},
-			},
-			..*self
-		}
-	}
-
-	/// Create a new Options object for a subquery
-	pub fn new_with_sender(&self, sender: Sender<Notification>) -> Self {
+	pub fn new_with_broker(&self, sender: Arc<dyn MessageBroker>) -> Self {
 		Self {
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
-			sender: Some(sender),
+			broker: Some(sender),
 			..*self
 		}
 	}
@@ -334,7 +291,7 @@ impl Options {
 			return Err(Error::ComputationDepthExceeded);
 		}
 		Ok(Self {
-			sender: self.sender.clone(),
+			broker: self.broker.clone(),
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
@@ -411,11 +368,6 @@ impl Options {
 			Base::Db => {
 				let (ns, db) = self.ns_db()?;
 				res.on_db(ns, db)
-			}
-			// TODO(gguillemas): This variant is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
-			Base::Sc(_) => {
-				// We should not get here, the scope base is only used in parsing for backward compatibility.
-				bail!(Error::InvalidAuth);
 			}
 		};
 
@@ -553,22 +505,5 @@ mod tests {
 				.is_allowed(Action::View, ResourceKind::Any, &Base::Db)
 				.unwrap();
 		}
-	}
-
-	#[test]
-	pub fn execute_futures() {
-		let mut opts = Options::default().with_futures(false);
-
-		// Futures should be disabled
-		assert!(matches!(opts.futures, Futures::Disabled));
-
-		// Allow setting to true
-		opts = opts.with_futures(true);
-		assert!(matches!(opts.futures, Futures::Enabled));
-
-		// Set to never and disallow setting to true
-		opts = opts.with_futures_never();
-		opts = opts.with_futures(true);
-		assert!(matches!(opts.futures, Futures::Never));
 	}
 }

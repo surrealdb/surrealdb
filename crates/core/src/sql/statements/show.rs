@@ -1,14 +1,10 @@
-use crate::sql::{Datetime, Table};
-use crate::vs::VersionStamp;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use crate::val::Datetime;
+use crate::vs::VersionStamp;
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum ShowSince {
 	Timestamp(Datetime),
 	Versionstamp(u64),
@@ -30,7 +26,7 @@ impl ShowSince {
 impl From<ShowSince> for crate::expr::statements::show::ShowSince {
 	fn from(v: ShowSince) -> Self {
 		match v {
-			ShowSince::Timestamp(v) => Self::Timestamp(v.into()),
+			ShowSince::Timestamp(v) => Self::Timestamp(v),
 			ShowSince::Versionstamp(v) => Self::Versionstamp(v),
 		}
 	}
@@ -39,21 +35,17 @@ impl From<ShowSince> for crate::expr::statements::show::ShowSince {
 impl From<crate::expr::statements::show::ShowSince> for ShowSince {
 	fn from(v: crate::expr::statements::show::ShowSince) -> Self {
 		match v {
-			crate::expr::statements::show::ShowSince::Timestamp(v) => {
-				ShowSince::Timestamp(v.into())
-			}
+			crate::expr::statements::show::ShowSince::Timestamp(v) => ShowSince::Timestamp(v),
 			crate::expr::statements::show::ShowSince::Versionstamp(v) => ShowSince::Versionstamp(v),
 		}
 	}
 }
 
 /// A SHOW CHANGES statement for displaying changes made to a table or database.
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct ShowStatement {
-	pub table: Option<Table>,
+	pub table: Option<String>,
 	pub since: ShowSince,
 	pub limit: Option<u32>,
 }
@@ -79,7 +71,7 @@ impl fmt::Display for ShowStatement {
 impl From<ShowStatement> for crate::expr::statements::ShowStatement {
 	fn from(v: ShowStatement) -> Self {
 		crate::expr::statements::ShowStatement {
-			table: v.table.map(Into::into),
+			table: v.table,
 			since: v.since.into(),
 			limit: v.limit,
 		}
@@ -89,7 +81,7 @@ impl From<ShowStatement> for crate::expr::statements::ShowStatement {
 impl From<crate::expr::statements::ShowStatement> for ShowStatement {
 	fn from(v: crate::expr::statements::ShowStatement) -> Self {
 		ShowStatement {
-			table: v.table.map(Into::into),
+			table: v.table,
 			since: v.since.into(),
 			limit: v.limit,
 		}
