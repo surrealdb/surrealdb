@@ -23,7 +23,7 @@ alwaysApply: true
 - Never use `.unwrap_or_default()` or similar coding conventions when debugging - it masks errors
 
 ## 5. Testing and linting
-- Run `cargo make ci-format` and address formatting, before submitting changes
+- Run `cargo make fmt` to format all of the code before submitting changes
 - Run `cargo make ci-clippy` and address warnings; do not suppress lints without justification
 - Add language tests or SDK tests alongside bug fixes where applicable
 - Add tests according to the project testing conventions
