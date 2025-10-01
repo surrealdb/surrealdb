@@ -13,8 +13,6 @@
 //! using zero-terminated components where appropriate to ensure parsers stop at
 //! the correct boundaries when decoding.
 pub mod all;
-pub mod bd;
-pub mod bi;
 pub mod dc;
 pub mod dl;
 pub mod hd;
@@ -31,6 +29,7 @@ pub mod ii;
 #[cfg(not(target_family = "wasm"))]
 pub mod ip;
 pub mod is;
+pub mod iu;
 pub mod td;
 pub mod tt;
 pub mod vm;
@@ -291,7 +290,7 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let fd: Array = vec!["testfd1", "testfd2"].into();
-		let id = RecordIdKey::String("testid".to_owned());
+		let id = RecordIdKey::String("testid".into());
 		let val = Index::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), &fd, Some(&id));
 		let enc = Index::encode_key(&val).unwrap();
 		assert_eq!(

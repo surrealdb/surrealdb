@@ -9,10 +9,11 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
-use crate::expr::fmt::Fmt;
+use crate::expr::expression::VisitExpression;
 use crate::expr::order::Ordering;
 use crate::expr::start::Start;
-use crate::expr::{Cond, Dir, Fields, Groups, Ident, Idiom, Limit, RecordIdKeyRangeLit, Splits};
+use crate::expr::{Cond, Dir, Expr, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits};
+use crate::fmt::{EscapeIdent, Fmt};
 use crate::kvs::KVKey;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
 
@@ -36,6 +37,23 @@ impl Lookup {
 	/// Convert the graph edge to a raw String
 	pub fn to_raw(&self) -> String {
 		self.to_string()
+	}
+}
+
+impl VisitExpression for Lookup {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.expr.iter().for_each(|expr| expr.visit(visitor));
+		self.what.iter().for_each(|subject| subject.visit(visitor));
+		self.cond.iter().for_each(|cond| cond.0.visit(visitor));
+		self.split.iter().for_each(|split| split.visit(visitor));
+		self.group.iter().for_each(|group| group.visit(visitor));
+		self.order.iter().for_each(|order| order.visit(visitor));
+		self.limit.iter().for_each(|limit| limit.visit(visitor));
+		self.start.iter().for_each(|start| start.visit(visitor));
+		self.alias.iter().for_each(|idiom| idiom.visit(visitor));
 	}
 }
 
@@ -112,11 +130,26 @@ impl Display for LookupKind {
 /// This enum instructs whether we scan all edges on a table or just a specific range
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum LookupSubject {
-	Table(Ident),
+	Table(String),
 	Range {
-		table: Ident,
+		table: String,
 		range: RecordIdKeyRangeLit,
 	},
+}
+
+impl VisitExpression for LookupSubject {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		if let LookupSubject::Range {
+			range,
+			..
+		} = self
+		{
+			range.visit(visitor);
+		}
+	}
 }
 
 impl LookupSubject {
@@ -152,9 +185,9 @@ impl LookupSubject {
 /// This enum instructs whether we scan all edges on a table or just a specific range
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ComputedLookupSubject {
-	Table(Ident),
+	Table(String),
 	Range {
-		table: Ident,
+		table: String,
 		range: RecordIdKeyRange,
 	},
 }
@@ -242,7 +275,7 @@ impl ComputedLookupSubject {
 							id,
 							dir,
 							&RecordId {
-								table: table.clone().into_string(),
+								table: table.clone(),
 								key: v.clone(),
 							},
 						)
@@ -254,7 +287,7 @@ impl ComputedLookupSubject {
 							id,
 							dir,
 							&RecordId {
-								table: table.clone().into_string(),
+								table: table.clone(),
 								key: v.to_owned(),
 							},
 						)
@@ -276,7 +309,7 @@ impl ComputedLookupSubject {
 							id,
 							dir,
 							&RecordId {
-								table: table.clone().into_string(),
+								table: table.clone(),
 								key: v.to_owned(),
 							},
 						)
@@ -288,7 +321,7 @@ impl ComputedLookupSubject {
 							id,
 							dir,
 							&RecordId {
-								table: table.clone().into_string(),
+								table: table.clone(),
 								key: v.to_owned(),
 							},
 						)
@@ -309,11 +342,11 @@ impl ComputedLookupSubject {
 impl Display for LookupSubject {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Self::Table(tb) => Display::fmt(&tb, f),
+			Self::Table(tb) => EscapeIdent(tb).fmt(f),
 			Self::Range {
 				table,
 				range,
-			} => write!(f, "{table}:{range}"),
+			} => write!(f, "{}:{range}", EscapeIdent(table)),
 		}
 	}
 }

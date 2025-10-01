@@ -10,8 +10,8 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Base;
-use crate::expr::ident::Ident;
 use crate::expr::statements::define::run_indexing;
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -45,9 +45,10 @@ impl Display for RebuildStatement {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RebuildIndexStatement {
-	pub name: Ident,
-	pub what: Ident,
+	pub name: String,
+	pub what: String,
 	pub if_exists: bool,
+	pub concurrently: bool,
 }
 
 impl RebuildIndexStatement {
@@ -80,7 +81,7 @@ impl RebuildIndexStatement {
 		let ix = ix.as_ref().clone();
 
 		// Rebuild the index
-		run_indexing(stk, ctx, opt, doc, &ix, false).await?;
+		run_indexing(stk, ctx, opt, doc, &ix, !self.concurrently).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -92,7 +93,10 @@ impl Display for RebuildIndexStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what))?;
+		if self.concurrently {
+			write!(f, " CONCURRENTLY")?
+		}
 		Ok(())
 	}
 }

@@ -22,7 +22,7 @@ value = "[{ id: foo:baq, published: false, user: user:bla }, { id: foo:bar, publ
 */
 DEFINE ACCESS account ON DATABASE TYPE RECORD
 	SIGNUP ({
-		if(!string::is::email($email)){
+		if(!string::is_email($email)){
 			throw "Email field is not a valid email";
 		};
 		// id field to ensure consistant user ids so we can specify data upfront

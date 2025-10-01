@@ -44,7 +44,7 @@ macro_rules! impl_module_def {
 			$e
 		}
 	};
-	($pkg: ident, $path: literal, $($name: literal => $action: tt $($wrapper: ident)?),*) => {
+	($pkg: ident, $path: literal, $($name: literal => $action: tt $($wrapper: ident)?),* $(,)?) => {
 		impl js::module::ModuleDef for Package {
 			fn declare(decls: &js::module::Declarations) -> js::Result<()> {
 				decls.declare("default")?;

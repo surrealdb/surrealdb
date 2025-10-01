@@ -1,7 +1,8 @@
 use std::cmp::Ordering;
-use std::mem::size_of_val;
+use std::mem::{self};
+use std::ops::Bound;
 
-use anyhow::{Result, bail, ensure};
+use anyhow::{Result, ensure};
 use rand::prelude::SliceRandom;
 use reblessive::tree::Stk;
 
@@ -12,9 +13,9 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::val::array::{
-	Clump, Combine, Complement, Difference, Flatten, Intersect, Matches, Transpose, Union, Uniq,
-	Windows,
+	Clump, Combine, Complement, Difference, Flatten, Intersect, Matches, Union, Uniq, Windows,
 };
+use crate::val::range::TypedRange;
 use crate::val::{Array, Closure, Value};
 
 /// Returns an error if an array of this length is too much to allocate.
@@ -56,7 +57,6 @@ pub async fn all(
 		Some(Value::Closure(closure)) => {
 			if let Some(opt) = opt {
 				for arg in array.into_iter() {
-					// TODO: Don't clone the closure every time the function is called.
 					if closure.compute(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						continue;
 					} else {
@@ -111,45 +111,64 @@ pub fn at((array, i): (Array, i64)) -> Result<Value> {
 	Ok(array.get(idx).cloned().unwrap_or_default())
 }
 
-pub fn boolean_and((lh, rh): (Array, Array)) -> Result<Value> {
-	let longest_length = lh.len().max(rh.len());
-	let mut results = Array::with_capacity(longest_length);
-	for i in 0..longest_length {
-		let lhv = lh.get(i);
-		let rhv = rh.get(i);
-		results
-			.push((lhv.is_some_and(Value::is_truthy) && rhv.is_some_and(Value::is_truthy)).into());
-	}
-	Ok(results.into())
-}
-
 pub fn boolean_not((mut array,): (Array,)) -> Result<Value> {
 	array.iter_mut().for_each(|v| *v = (!v.is_truthy()).into());
 	Ok(array.into())
 }
 
 pub fn boolean_or((lh, rh): (Array, Array)) -> Result<Value> {
-	let longest_length = lh.len().max(rh.len());
-	let mut results = Array::with_capacity(longest_length);
-	for i in 0..longest_length {
-		let lhv = lh.get(i);
-		let rhv = rh.get(i);
-		results
-			.push((lhv.is_some_and(Value::is_truthy) || rhv.is_some_and(Value::is_truthy)).into());
+	let (mut res, comp) = if lh.len() < rh.len() {
+		(rh, lh)
+	} else {
+		(lh, rh)
+	};
+
+	let comp_len = comp.len();
+	for (idx, i) in comp.into_iter().enumerate() {
+		res[idx] = (res[idx].is_truthy() || i.is_truthy()).into()
 	}
-	Ok(results.into())
+
+	for i in &mut res[comp_len..] {
+		*i = i.is_truthy().into()
+	}
+
+	Ok(res.into())
+}
+
+pub fn boolean_and((lh, rh): (Array, Array)) -> Result<Value> {
+	let (mut res, comp) = if lh.len() < rh.len() {
+		(rh, lh)
+	} else {
+		(lh, rh)
+	};
+
+	let comp_len = comp.len();
+	for (idx, i) in comp.into_iter().enumerate() {
+		res[idx] = (res[idx].is_truthy() && i.is_truthy()).into()
+	}
+
+	res[comp_len..].fill(Value::Bool(false));
+
+	Ok(res.into())
 }
 
 pub fn boolean_xor((lh, rh): (Array, Array)) -> Result<Value> {
-	let longest_length = lh.len().max(rh.len());
-	let mut results = Array::with_capacity(longest_length);
-	for i in 0..longest_length {
-		let lhv = lh.get(i);
-		let rhv = rh.get(i);
-		results
-			.push((lhv.is_some_and(Value::is_truthy) ^ rhv.is_some_and(Value::is_truthy)).into());
+	let (mut res, comp) = if lh.len() < rh.len() {
+		(rh, lh)
+	} else {
+		(lh, rh)
+	};
+
+	let comp_len = comp.len();
+	for (idx, i) in comp.into_iter().enumerate() {
+		res[idx] = (res[idx].is_truthy() ^ i.is_truthy()).into()
 	}
-	Ok(results.into())
+
+	for i in &mut res[comp_len..] {
+		*i = i.is_truthy().into()
+	}
+
+	Ok(res.into())
 }
 
 pub fn clump((array, clump_size): (Array, i64)) -> Result<Value> {
@@ -165,17 +184,12 @@ pub fn complement((array, other): (Array, Array)) -> Result<Value> {
 	Ok(array.complement(other).into())
 }
 
-pub fn concat(Rest(mut arrays): Rest<Array>) -> Result<Value> {
-	let len = match arrays.iter().map(Array::len).reduce(|c, v| c + v) {
-		None => Err(Error::InvalidArguments {
-			name: String::from("array::concat"),
-			message: String::from("Expected at least one argument"),
-		}),
-		Some(l) => Ok(l),
-	}?;
+pub fn concat(Rest(arrays): Rest<Array>) -> Result<Value> {
+	let len = arrays.iter().map(Array::len).sum();
+	limit("array::concat", mem::size_of::<Value>().saturating_mul(len))?;
 	let mut arr = Array::with_capacity(len);
-	arrays.iter_mut().for_each(|val| {
-		arr.append(val);
+	arrays.into_iter().for_each(|mut val| {
+		arr.0.append(&mut val);
 	});
 	Ok(arr.into())
 }
@@ -189,33 +203,100 @@ pub fn distinct((array,): (Array,)) -> Result<Value> {
 }
 
 pub fn fill(
-	(mut array, value, Optional(start), Optional(end)): (
+	(mut array, value, Optional(range_start), Optional(end)): (
 		Array,
 		Value,
-		Optional<i64>,
+		Optional<Value>,
 		Optional<i64>,
 	),
 ) -> Result<Value> {
-	let len = array.len();
-
-	let start = start.unwrap_or(0);
-	let start = if start < 0 {
-		len.saturating_sub((-start) as usize)
-	} else {
-		(start as usize).min(len)
+	let Some(range_start) = range_start else {
+		array.fill(value);
+		return Ok(array.into());
 	};
 
-	let end = if let Some(end) = end {
-		if end < 0 {
-			len.saturating_sub((-end) as usize)
-		} else {
-			(end as usize).min(len)
+	let range = if let Some(end) = end {
+		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?;
+
+		TypedRange {
+			start: Bound::Included(start),
+			end: Bound::Excluded(end),
 		}
+	} else if range_start.is_range() {
+		// Condition checked above, unwrap cannot trigger.
+		let range = range_start.into_range().unwrap();
+		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?
 	} else {
-		len
+		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?;
+		TypedRange {
+			start: Bound::Included(start),
+			end: Bound::Unbounded,
+		}
 	};
 
-	array[start..end].fill(value);
+	let array_len = array.len() as i64;
+
+	let start = match range.start {
+		Bound::Included(x) => {
+			if x < 0 {
+				array_len.saturating_add(x).max(0) as usize
+			} else {
+				x as usize
+			}
+		}
+		Bound::Excluded(x) => {
+			if x < 0 {
+				array_len.saturating_add(x).saturating_add(1).max(0) as usize
+			} else {
+				x.saturating_add(1) as usize
+			}
+		}
+		Bound::Unbounded => 0,
+	};
+
+	if start >= array.len() {
+		return Ok(array.into());
+	}
+
+	let end = match range.end {
+		Bound::Included(x) => {
+			if x < 0 {
+				array_len.saturating_add(x).clamp(0, array_len) as usize
+			} else {
+				x.min(array_len) as usize
+			}
+		}
+		Bound::Excluded(x) => {
+			if x < 0 {
+				let end = array_len.saturating_add(x).min(array_len).saturating_sub(1);
+				if end < start as i64 {
+					return Ok(array.into());
+				}
+				end as usize
+			} else {
+				if x <= start as i64 {
+					return Ok(array.into());
+				}
+				x.min(array_len).saturating_sub(1) as usize
+			}
+		}
+		Bound::Unbounded => array.len() - 1,
+	};
+
+	if end < start {
+		return Ok(array.into());
+	}
+
+	array[start..=end].fill(value);
 
 	Ok(array.into())
 }
@@ -347,7 +428,6 @@ pub async fn fold(
 	if let Some(opt) = opt {
 		let mut accum = init;
 		for (i, val) in array.into_iter().enumerate() {
-			// TODO: Don't clone the closure every time the function is called.
 			accum = mapper.compute(stk, ctx, opt, doc, vec![accum, val, i.into()]).await?
 		}
 		Ok(accum)
@@ -407,76 +487,96 @@ pub fn len((array,): (Array,)) -> Result<Value> {
 	Ok(array.len().into())
 }
 
-pub fn logical_and((lh, rh): (Array, Array)) -> Result<Value> {
-	let mut result_arr = Array::with_capacity(lh.len().max(rh.len()));
-	let mut iters = (lh.into_iter(), rh.into_iter());
-	for (lhv, rhv) in std::iter::from_fn(|| {
-		let r = (iters.0.next(), iters.1.next());
-		if r.0.is_none() && r.1.is_none() {
-			None
-		} else {
-			Some((r.0.unwrap_or(Value::Null), r.1.unwrap_or(Value::Null)))
+pub fn logical_and((mut lh, mut rh): (Array, Array)) -> Result<Value> {
+	if lh.len() < rh.len() {
+		let lh_len = lh.len();
+		for (idx, b) in lh.into_iter().enumerate() {
+			if !b.is_truthy() {
+				rh[idx] = b;
+			}
 		}
-	}) {
-		let truth = lhv.is_truthy() && rhv.is_truthy();
-		let r = if lhv.is_truthy() == truth {
-			lhv
-		} else if rhv.is_truthy() == truth {
-			rhv
-		} else {
-			truth.into()
-		};
-		result_arr.push(r);
+
+		rh[lh_len..].fill(Value::Null);
+		Ok(rh.into())
+	} else {
+		let rh_len = rh.len();
+		for (idx, b) in rh.into_iter().enumerate() {
+			if lh[idx].is_truthy() {
+				lh[idx] = b
+			}
+		}
+
+		for i in &mut lh[rh_len..] {
+			if i.is_truthy() {
+				*i = Value::Null
+			}
+		}
+		Ok(lh.into())
 	}
-	Ok(result_arr.into())
 }
 
-pub fn logical_or((lh, rh): (Array, Array)) -> Result<Value> {
-	let mut result_arr = Array::with_capacity(lh.len().max(rh.len()));
-	let mut iters = (lh.into_iter(), rh.into_iter());
-	for (lhv, rhv) in std::iter::from_fn(|| {
-		let r = (iters.0.next(), iters.1.next());
-		if r.0.is_none() && r.1.is_none() {
-			None
-		} else {
-			Some((r.0.unwrap_or(Value::Null), r.1.unwrap_or(Value::Null)))
+pub fn logical_or((mut lh, mut rh): (Array, Array)) -> Result<Value> {
+	if lh.len() < rh.len() {
+		for (idx, b) in lh.into_iter().enumerate() {
+			if b.is_truthy() {
+				rh[idx] = b;
+			}
 		}
-	}) {
-		let truth = lhv.is_truthy() || rhv.is_truthy();
-		let r = if lhv.is_truthy() == truth {
-			lhv
-		} else if rhv.is_truthy() == truth {
-			rhv
-		} else {
-			truth.into()
-		};
-		result_arr.push(r);
+
+		Ok(rh.into())
+	} else {
+		let rh_len = rh.len();
+		for (idx, b) in rh.into_iter().enumerate() {
+			if !lh[idx].is_truthy() {
+				lh[idx] = b
+			}
+		}
+
+		for i in &mut lh[rh_len..] {
+			if !i.is_truthy() {
+				*i = Value::Null
+			}
+		}
+
+		Ok(lh.into())
 	}
-	Ok(result_arr.into())
 }
 
-pub fn logical_xor((lh, rh): (Array, Array)) -> Result<Value> {
-	let mut result_arr = Array::with_capacity(lh.len().max(rh.len()));
-	let mut iters = (lh.into_iter(), rh.into_iter());
-	for (lhv, rhv) in std::iter::from_fn(|| {
-		let r = (iters.0.next(), iters.1.next());
-		if r.0.is_none() && r.1.is_none() {
-			None
-		} else {
-			Some((r.0.unwrap_or(Value::Null), r.1.unwrap_or(Value::Null)))
+pub fn logical_xor((mut lh, mut rh): (Array, Array)) -> Result<Value> {
+	if lh.len() < rh.len() {
+		let lh_len = lh.len();
+		for (idx, b) in lh.into_iter().enumerate() {
+			let v = b.is_truthy() ^ rh[idx].is_truthy();
+			if b.is_truthy() == v {
+				rh[idx] = b;
+			} else if rh[idx].is_truthy() != v {
+				rh[idx] = v.into();
+			}
 		}
-	}) {
-		let truth = lhv.is_truthy() ^ rhv.is_truthy();
-		let r = if lhv.is_truthy() == truth {
-			lhv
-		} else if rhv.is_truthy() == truth {
-			rhv
-		} else {
-			truth.into()
-		};
-		result_arr.push(r);
+
+		for i in &mut rh[lh_len..] {
+			if !i.is_truthy() {
+				*i = Value::Null;
+			}
+		}
+
+		Ok(rh.into())
+	} else {
+		for (idx, b) in rh.into_iter().enumerate() {
+			let v = b.is_truthy() ^ lh[idx].is_truthy();
+			if lh[idx].is_truthy() == v {
+				continue;
+			}
+
+			if b.is_truthy() == v {
+				lh[idx] = b;
+			} else {
+				lh[idx] = v.into();
+			}
+		}
+
+		Ok(lh.into())
 	}
-	Ok(result_arr.into())
 }
 
 pub async fn map(
@@ -521,25 +621,38 @@ pub fn push((mut array, value): (Array, Value)) -> Result<Value> {
 	Ok(array.into())
 }
 
-pub fn range((start, count): (i64, i64)) -> Result<Value> {
-	ensure!(
-		count >= 0,
-		Error::InvalidArguments {
+pub fn range((start_range, Optional(end)): (Value, Optional<i64>)) -> Result<Value> {
+	let range = if let Some(end) = end {
+		let start = start_range.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
 			name: String::from("array::range"),
-			message: format!(
-				"Argument 1 was the wrong type. Expected a positive number but found {count}"
-			),
-		}
-	);
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?;
 
-	if let Some(end) = start.checked_add(count - 1) {
-		Ok(Array((start..=end).map(Value::from).collect::<Vec<_>>()).into())
-	} else {
-		bail!(Error::InvalidArguments {
+		TypedRange {
+			start: Bound::Included(start),
+			end: Bound::Excluded(end),
+		}
+	} else if start_range.is_range() {
+		// Condition checked above, unwrap cannot trigger.
+		let range = start_range.into_range().unwrap();
+		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
 			name: String::from("array::range"),
-			message: String::from("The range overflowed the maximum value for an integer"),
-		})
-	}
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?
+	} else {
+		let start = start_range.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?;
+		TypedRange {
+			start: Bound::Included(start),
+			end: Bound::Unbounded,
+		}
+	};
+
+	limit("array::range", mem::size_of::<Value>().saturating_mul(range.len()))?;
+
+	Ok(range.iter().map(Value::from).collect())
 }
 
 pub async fn reduce(
@@ -589,9 +702,17 @@ pub fn remove((mut array, mut index): (Array, i64)) -> Result<Value> {
 }
 
 pub fn repeat((value, count): (Value, i64)) -> Result<Value> {
+	ensure!(
+		count >= 0,
+		Error::InvalidArguments {
+			name: "array::repeat".to_owned(),
+			message: "Expected argument 2 to be a positive number".to_owned()
+		}
+	);
+
 	// TODO: Fix signed to unsigned casting here.
 	let count = count as usize;
-	limit("array::repeat", size_of_val(&value).saturating_mul(count))?;
+	limit("array::repeat", mem::size_of::<Value>().saturating_mul(count))?;
 	Ok(Array(std::iter::repeat_n(value, count).collect()).into())
 }
 
@@ -607,34 +728,108 @@ pub fn shuffle((mut array,): (Array,)) -> Result<Value> {
 }
 
 pub fn slice(
-	(array, Optional(beg), Optional(lim)): (Array, Optional<i64>, Optional<i64>),
+	(mut array, Optional(range_start), Optional(end)): (Array, Optional<Value>, Optional<i64>),
 ) -> Result<Value> {
-	let skip = match beg {
-		Some(v) if v < 0 => array.len().saturating_sub(v.unsigned_abs() as usize),
-		Some(v) => v as usize,
-		None => 0,
+	let Some(range_start) = range_start else {
+		return Ok(array.into());
 	};
 
-	let take = match lim {
-		Some(v) if v < 0 => {
-			array.len().saturating_sub(skip).saturating_sub(v.unsigned_abs() as usize)
+	let range = if let Some(end) = end {
+		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?;
+
+		TypedRange {
+			start: Bound::Included(start),
+			end: Bound::Excluded(end),
 		}
-		Some(v) => v as usize,
-		None => usize::MAX,
+	} else if range_start.is_range() {
+		// Condition checked above, unwrap cannot trigger.
+		let range = range_start.into_range().unwrap();
+		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?
+	} else {
+		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?;
+		TypedRange {
+			start: Bound::Included(start),
+			end: Bound::Unbounded,
+		}
 	};
 
-	Ok(if skip > 0 || take < usize::MAX {
-		array.into_iter().skip(skip).take(take).collect::<Vec<_>>().into()
-	} else {
-		array
+	let array_len = array.len() as i64;
+
+	let start = match range.start {
+		Bound::Included(x) => {
+			if x < 0 {
+				array_len.saturating_add(x).max(0) as usize
+			} else {
+				x as usize
+			}
+		}
+		Bound::Excluded(x) => {
+			if x < 0 {
+				array_len.saturating_add(x).saturating_add(1).max(0) as usize
+			} else {
+				x.saturating_add(1) as usize
+			}
+		}
+		Bound::Unbounded => 0,
+	};
+
+	if start >= array.len() {
+		return Ok(Array::new().into());
 	}
-	.into())
+
+	let end = match range.end {
+		Bound::Included(x) => {
+			if x < 0 {
+				array_len.saturating_add(x).max(0) as usize
+			} else {
+				x as usize
+			}
+		}
+		Bound::Excluded(x) => {
+			if x < 0 {
+				let end = array_len.saturating_add(x).saturating_sub(1);
+				if end < start as i64 {
+					return Ok(Array::new().into());
+				}
+				end as usize
+			} else {
+				if x <= start as i64 {
+					return Ok(Array::new().into());
+				}
+				x.saturating_sub(1) as usize
+			}
+		}
+		Bound::Unbounded => usize::MAX,
+	};
+
+	if end < start {
+		return Ok(Array::new().into());
+	}
+
+	let mut i = 0;
+	array.retain(|_| {
+		let res = i >= start && i <= end;
+		i += 1;
+		res
+	});
+	array.shrink_to_fit();
+
+	Ok(array.into())
 }
 
 fn sort_as_asc(order: &Option<Value>) -> bool {
 	match order {
-		Some(Value::Strand(s)) if s.as_str() == "asc" => true,
-		Some(Value::Strand(s)) if s.as_str() == "desc" => false,
+		Some(Value::String(s)) if s.as_str() == "asc" => true,
+		Some(Value::String(s)) if s.as_str() == "desc" => false,
 		Some(Value::Bool(true)) => true,
 		Some(Value::Bool(false)) => false,
 		_ => true,
@@ -754,13 +949,14 @@ mod tests {
 
 	#[test]
 	fn array_slice() {
-		fn test(initial: &[u8], beg: Option<i64>, lim: Option<i64>, expected: &[u8]) {
+		#[track_caller]
+		fn test(initial: &[u8], beg: Option<i64>, end: Option<i64>, expected: &[u8]) {
 			let initial_values =
 				initial.iter().map(|n| Value::from(*n as i64)).collect::<Vec<_>>().into();
 			let expected_values: Array =
 				expected.iter().map(|n| Value::from(*n as i64)).collect::<Vec<_>>().into();
 			assert_eq!(
-				slice((initial_values, Optional(beg), Optional(lim))).unwrap(),
+				slice((initial_values, Optional(beg.map(Value::from)), Optional(end))).unwrap(),
 				Value::from(expected_values)
 			);
 		}
@@ -768,10 +964,10 @@ mod tests {
 		let array = b"abcdefg";
 		test(array, None, None, array);
 		test(array, Some(2), None, &array[2..]);
-		test(array, Some(2), Some(3), &array[2..5]);
+		test(array, Some(2), Some(3), &array[2..3]);
 		test(array, Some(2), Some(-1), b"cdef");
 		test(array, Some(-2), None, b"fg");
-		test(array, Some(-4), Some(2), b"de");
+		test(array, Some(-4), Some(2), b"");
 		test(array, Some(-4), Some(-1), b"def");
 	}
 

@@ -3,15 +3,15 @@ use std::fmt;
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 
-use super::{ControlFlow, FlowResult, FlowResultExt as _, Kind};
+use super::{ControlFlow, FlowResult, FlowResultExt as _};
 use crate::catalog::Permission;
 use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::Fmt;
-use crate::expr::{Expr, Ident, Idiom, Model, Script, Value};
+use crate::expr::{Expr, Idiom, Model, Script, Value};
+use crate::fmt::Fmt;
 use crate::fnc;
 use crate::iam::Action;
 
@@ -37,10 +37,10 @@ impl Function {
 	pub fn to_idiom(&self) -> Idiom {
 		match self {
 			// Safety: "function" does not contain null bytes"
-			Self::Script(_) => Idiom::field(unsafe { Ident::new_unchecked("function".to_owned()) }),
-			Self::Normal(f) => Idiom::field(unsafe { Ident::new_unchecked(f.to_owned()) }),
-			Self::Custom(f) => Idiom::field(unsafe { Ident::new_unchecked(format!("fn::{f}")) }),
-			Self::Model(m) => Idiom::field(unsafe { Ident::new_unchecked(m.to_string()) }),
+			Self::Script(_) => Idiom::field("function".to_owned()),
+			Self::Normal(f) => Idiom::field(f.to_owned()),
+			Self::Custom(f) => Idiom::field(format!("fn::{f}")),
+			Self::Model(m) => Idiom::field(m.to_string()),
 		}
 	}
 	/// Checks if this function invocation is writable
@@ -136,17 +136,17 @@ impl Function {
 				let max_args_len = val.args.len();
 				// Track the number of required arguments
 				// Check for any final optional arguments
-				let min_args_len =
-					val.args.iter().rev().map(|x| &x.1).fold(0, |acc, kind| match kind {
-						Kind::Option(_) | Kind::Any => {
-							if acc == 0 {
-								0
-							} else {
-								acc + 1
-							}
+				let min_args_len = val.args.iter().rev().map(|x| &x.1).fold(0, |acc, kind| {
+					if kind.can_be_none() {
+						if acc == 0 {
+							0
+						} else {
+							acc + 1
 						}
-						_ => acc + 1,
-					});
+					} else {
+						acc + 1
+					}
+				});
 				// Check the necessary arguments are passed
 				//TODO(planner): Move this check out of the call.
 				if !(min_args_len..=max_args_len).contains(&args.len()) {
@@ -223,6 +223,13 @@ impl FunctionCall {
 	/// Returns if this expression type object can do any writes.
 	pub fn read_only(&self) -> bool {
 		self.receiver.read_only() && self.arguments.iter().all(|x| x.read_only())
+	}
+
+	pub(crate) fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.arguments.iter().for_each(visitor);
 	}
 }
 

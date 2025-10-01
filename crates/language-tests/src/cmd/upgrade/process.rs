@@ -322,7 +322,7 @@ impl SurrealConnection {
 						if let Status::Ok = x.status {
 							Ok(Ok(x.result))
 						} else {
-							let Value::Strand(x) = x.result else {
+							let Value::String(x) = x.result else {
 								bail!("Value of result with error status was not a string");
 							};
 							Ok(Err(x.to_string()))

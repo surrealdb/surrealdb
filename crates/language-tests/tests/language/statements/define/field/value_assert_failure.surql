@@ -32,7 +32,7 @@ value = "[{ age: 13, email: 'info@surrealdb.com', id: person:test, name: 'No nam
 
 DEFINE TABLE person SCHEMAFULL;
 DEFINE FIELD age ON person TYPE number ASSERT $value > 0;
-DEFINE FIELD email ON person TYPE string ASSERT string::is::email($value);
+DEFINE FIELD email ON person TYPE string ASSERT string::is_email($value);
 DEFINE FIELD name ON person TYPE option<string> VALUE $value OR 'No name';
 CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore';
 CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = NONE;

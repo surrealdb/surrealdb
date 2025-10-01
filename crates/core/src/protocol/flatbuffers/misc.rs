@@ -64,7 +64,7 @@ impl FromFlatbuffers for Table {
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		let name = input.name().ok_or_else(|| anyhow::anyhow!("Missing name in Table"))?;
-		Table::new(name.to_string()).ok_or_else(|| anyhow::anyhow!("Invalid table name"))
+		Ok(Table::new(name.to_string()))
 	}
 }
 

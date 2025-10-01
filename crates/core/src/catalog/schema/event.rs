@@ -3,9 +3,9 @@ use revision::revisioned;
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::ToSql;
 use crate::sql::statements::define::DefineKind;
-use crate::sql::{Ident, ToSql};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -23,11 +23,16 @@ impl EventDefinition {
 	pub fn to_sql_definition(&self) -> crate::sql::DefineEventStatement {
 		crate::sql::DefineEventStatement {
 			kind: DefineKind::Default,
-			name: unsafe { Ident::new_unchecked(self.name.clone()) },
-			target_table: unsafe { Ident::new_unchecked(self.target_table.clone()) },
+			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
+			target_table: crate::sql::Expr::Idiom(crate::sql::Idiom::field(
+				self.target_table.clone(),
+			)),
 			when: self.when.clone().into(),
 			then: self.then.iter().cloned().map(Into::into).collect(),
-			comment: self.comment.clone().map(Strand::new_lossy),
+			comment: self
+				.comment
+				.clone()
+				.map(|v| crate::sql::Expr::Literal(crate::sql::Literal::String(v))),
 		}
 	}
 }

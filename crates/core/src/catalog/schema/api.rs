@@ -6,11 +6,11 @@ use revision::revisioned;
 use crate::api::path::Path;
 use crate::catalog::Permission;
 use crate::expr::Expr;
-use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
+use crate::fmt::Fmt;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
-use crate::val::{Array, Object, Strand, Value};
+use crate::sql::{Literal, ToSql};
+use crate::val::{Array, Object, Value};
 
 /// The API definition.
 #[revisioned(revision = 1)]
@@ -59,13 +59,11 @@ impl ApiDefinition {
 	fn to_sql_definition(&self) -> crate::sql::statements::DefineApiStatement {
 		crate::sql::statements::DefineApiStatement {
 			kind: crate::sql::statements::define::DefineKind::Default,
-			path: crate::sql::Expr::Literal(crate::sql::Literal::Strand(unsafe {
-				Strand::new_unchecked(self.path.to_string())
-			})),
+			path: crate::sql::Expr::Literal(crate::sql::Literal::String(self.path.to_string())),
 			actions: self.actions.iter().map(|x| x.to_sql_action()).collect(),
 			fallback: self.fallback.clone().map(|x| x.into()),
 			config: self.config.to_sql_config(),
-			comment: self.comment.clone().map(|x| unsafe { Strand::new_unchecked(x) }),
+			comment: self.comment.clone().map(|x| crate::sql::Expr::Literal(Literal::String(x))),
 		}
 	}
 }
@@ -79,8 +77,7 @@ impl ToSql for ApiDefinition {
 impl InfoStructure for ApiDefinition {
 	fn structure(self) -> Value {
 		Value::from(Object(map! {
-			// TODO: Null byte validity
-			"path".to_string() => Strand::new(self.path.to_string()).unwrap().into(),
+			"path".to_string() => self.path.to_string().into(),
 			"config".to_string() => self.config.structure(),
 			"fallback".to_string(), if let Some(fallback) = self.fallback => fallback.structure(),
 			"actions".to_string() => Value::from(self.actions.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
@@ -112,7 +109,7 @@ impl TryFrom<&Value> for ApiMethod {
 	type Error = anyhow::Error;
 	fn try_from(value: &Value) -> Result<Self, Self::Error> {
 		match value {
-			Value::Strand(s) => match s.to_ascii_lowercase().as_str() {
+			Value::String(s) => match s.to_ascii_lowercase().as_str() {
 				"delete" => Ok(Self::Delete),
 				"get" => Ok(Self::Get),
 				"patch" => Ok(Self::Patch),
@@ -206,7 +203,7 @@ impl InfoStructure for ApiConfigDefinition {
 						.map(|m| {
 							let value = m.args
 								.iter()
-								.map(|x| Value::Strand(Strand::new(x.to_string()).unwrap()))
+								.map(|x| Value::String(x.to_string()))
 								.collect();
 
 							(m.name.clone(), Value::Array(Array(value)))
@@ -220,7 +217,7 @@ impl InfoStructure for ApiConfigDefinition {
 
 impl Display for ApiConfigDefinition {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, " API")?;
+		write!(f, "API")?;
 
 		if !self.middleware.is_empty() {
 			write!(f, " MIDDLEWARE ")?;

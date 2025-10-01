@@ -10,13 +10,14 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Expr, FlowResultExt, Ident, Kind};
+use crate::expr::expression::VisitExpression;
+use crate::expr::{Expr, FlowResultExt, Kind, Param};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Closure {
-	pub args: Vec<(Ident, Kind)>,
+	pub args: Vec<(Param, Kind)>,
 	pub returns: Option<Kind>,
 	pub body: Expr,
 }
@@ -46,27 +47,25 @@ impl Closure {
 		args: Vec<Value>,
 	) -> Result<Value> {
 		let mut ctx = MutableContext::new_isolated(ctx);
-		for (i, (name, kind)) in self.args.iter().enumerate() {
-			match (kind, args.get(i)) {
-				(Kind::Option(_), None) => continue,
-				(_, None) => {
-					bail!(Error::InvalidArguments {
-						name: "ANONYMOUS".to_string(),
-						message: format!("Expected a value for ${name}"),
-					})
-				}
-				(kind, Some(val)) => {
-					if let Ok(val) = val.to_owned().coerce_to_kind(kind) {
-						ctx.add_value(name.to_string(), val.into());
-					} else {
-						bail!(Error::InvalidArguments {
-							name: "ANONYMOUS".to_string(),
-							message: format!(
-								"Expected a value of type '{kind}' for argument ${name}"
-							),
-						});
-					}
-				}
+
+		// check for missing arguments.
+		if self.args.len() > args.len() {
+			if let Some(x) = self.args[args.len()..].iter().find(|x| !x.1.can_be_none()) {
+				bail!(Error::InvalidArguments {
+					name: "ANONYMOUS".to_string(),
+					message: format!("Expected a value for {}", x.0),
+				})
+			}
+		}
+
+		for ((name, kind), val) in self.args.iter().zip(args.into_iter()) {
+			if let Ok(val) = val.coerce_to_kind(kind) {
+				ctx.add_value(name.clone().into_string(), val.into());
+			} else {
+				bail!(Error::InvalidArguments {
+					name: "ANONYMOUS".to_string(),
+					message: format!("Expected a value of type '{kind}' for argument {name}"),
+				});
 			}
 		}
 
@@ -86,6 +85,15 @@ impl Closure {
 	}
 }
 
+impl VisitExpression for Closure {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.body.visit(visitor)
+	}
+}
+
 impl fmt::Display for Closure {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str("|")?;
@@ -93,7 +101,7 @@ impl fmt::Display for Closure {
 			if i > 0 {
 				f.write_str(", ")?;
 			}
-			write!(f, "${name}: ")?;
+			write!(f, "{name}: ")?;
 			match kind {
 				k @ Kind::Either(_) => write!(f, "<{k}>")?,
 				k => write!(f, "{k}")?,

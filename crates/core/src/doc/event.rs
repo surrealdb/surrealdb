@@ -57,12 +57,20 @@ impl Document {
 			// Freeze the context
 			let ctx = ctx.freeze();
 			// Process conditional clause
-			let val =
-				stk.run(|stk| ev.when.compute(stk, &ctx, opt, Some(doc))).await.catch_return()?;
+			let val = stk
+				.run(|stk| ev.when.compute(stk, &ctx, opt, Some(doc)))
+				.await
+				.catch_return()
+				.map_err(|e| anyhow::anyhow!("Error while processing event {}: {}", ev.name, e))?;
 			// Execute event if value is truthy
 			if val.is_truthy() {
 				for v in ev.then.iter() {
-					stk.run(|stk| v.compute(stk, &ctx, opt, Some(&*doc))).await.catch_return()?;
+					stk.run(|stk| v.compute(stk, &ctx, opt, Some(&*doc)))
+						.await
+						.catch_return()
+						.map_err(|e| {
+							anyhow::anyhow!("Error while processing event {}: {}", ev.name, e)
+						})?;
 				}
 			}
 		}

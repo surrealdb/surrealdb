@@ -3,6 +3,7 @@ use std::fmt::{self, Display};
 use anyhow::{Result, bail};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
+use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::providers::{AuthorisationProvider, NamespaceProvider};
@@ -16,20 +17,46 @@ use crate::expr::access_type::{
 	BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccessIssue, JwtAccessVerify,
 	JwtAccessVerifyJwks, JwtAccessVerifyKey,
 };
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{AccessType, Algorithm, Base, Expr, Ident, JwtAccess, RecordAccess};
+use crate::expr::expression::VisitExpression;
+use crate::expr::parameterize::expr_to_ident;
+use crate::expr::{AccessType, Algorithm, Base, Expr, Idiom, JwtAccess, Literal, RecordAccess};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{self, Strand, Value};
+use crate::val::{self, Value};
 
-#[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineAccessStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: Expr,
 	pub base: Base,
 	pub access_type: AccessType,
 	pub authenticate: Option<Expr>,
 	pub duration: AccessDuration,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
+}
+
+impl VisitExpression for DefineAccessStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.name.visit(visitor);
+		self.authenticate.iter().for_each(|expr| expr.visit(visitor));
+		self.comment.iter().for_each(|expr| expr.visit(visitor));
+	}
+}
+
+impl Default for DefineAccessStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			base: Base::Root,
+			access_type: AccessType::default(),
+			authenticate: None,
+			duration: AccessDuration::default(),
+			comment: None,
+		}
+	}
 }
 
 impl DefineAccessStatement {
@@ -64,17 +91,17 @@ impl DefineAccessStatement {
 				verify: match &access.verify {
 					catalog::JwtAccessVerify::Key(k) => JwtAccessVerify::Key(JwtAccessVerifyKey {
 						alg: convert_algorithm(&k.alg),
-						key: k.key.clone(),
+						key: Expr::Literal(Literal::String(k.key.clone())),
 					}),
 					catalog::JwtAccessVerify::Jwks(j) => {
 						JwtAccessVerify::Jwks(JwtAccessVerifyJwks {
-							url: j.url.clone(),
+							url: Expr::Literal(Literal::String(j.url.clone())),
 						})
 					}
 				},
 				issue: access.issue.as_ref().map(|x| JwtAccessIssue {
 					alg: convert_algorithm(&x.alg),
-					key: x.key.clone(),
+					key: Expr::Literal(Literal::String(x.key.clone())),
 				}),
 			}
 		}
@@ -96,13 +123,19 @@ impl DefineAccessStatement {
 		DefineAccessStatement {
 			kind: DefineKind::Default,
 			base,
-			name: Ident::new(def.name.clone()).unwrap(),
+			name: Expr::Idiom(Idiom::field(def.name.clone())),
 			duration: AccessDuration {
-				grant: def.grant_duration.map(val::Duration),
-				token: def.token_duration.map(val::Duration),
-				session: def.session_duration.map(val::Duration),
+				grant: def
+					.grant_duration
+					.map(|v| Expr::Literal(Literal::Duration(val::Duration(v)))),
+				token: def
+					.token_duration
+					.map(|v| Expr::Literal(Literal::Duration(val::Duration(v)))),
+				session: def
+					.session_duration
+					.map(|v| Expr::Literal(Literal::Duration(val::Duration(v)))),
 			},
-			comment: def.comment.clone().map(|x| Strand::new(x).unwrap()),
+			comment: def.comment.clone().map(|x| Expr::Literal(Literal::String(x))),
 			authenticate: def.authenticate.clone(),
 			access_type: match &def.access_type {
 				catalog::AccessType::Record(record_access) => AccessType::Record(RecordAccess {
@@ -140,7 +173,13 @@ impl DefineAccessStatement {
 		das
 	}
 
-	fn to_definition(&self) -> AccessDefinition {
+	async fn to_definition(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<AccessDefinition> {
 		fn convert_algorithm(access: &Algorithm) -> catalog::Algorithm {
 			match access {
 				Algorithm::EdDSA => catalog::Algorithm::EdDSA,
@@ -159,30 +198,42 @@ impl DefineAccessStatement {
 			}
 		}
 
-		fn convert_jwt_access(access: &JwtAccess) -> catalog::JwtAccess {
-			catalog::JwtAccess {
+		async fn convert_jwt_access(
+			stk: &mut Stk,
+			ctx: &Context,
+			opt: &Options,
+			doc: Option<&CursorDoc>,
+			access: &JwtAccess,
+		) -> Result<catalog::JwtAccess> {
+			Ok(catalog::JwtAccess {
 				verify: match &access.verify {
 					JwtAccessVerify::Key(k) => {
 						catalog::JwtAccessVerify::Key(catalog::JwtAccessVerifyKey {
 							alg: convert_algorithm(&k.alg),
-							key: k.key.clone(),
+							key: compute_to!(stk, ctx, opt, doc, k.key => String),
 						})
 					}
 					JwtAccessVerify::Jwks(j) => {
 						catalog::JwtAccessVerify::Jwks(catalog::JwtAccessVerifyJwks {
-							url: j.url.clone(),
+							url: compute_to!(stk, ctx, opt, doc, j.url => String),
 						})
 					}
 				},
-				issue: access.issue.as_ref().map(|x| catalog::JwtAccessIssue {
+				issue: map_opt!(x as &access.issue => catalog::JwtAccessIssue {
 					alg: convert_algorithm(&x.alg),
-					key: x.key.clone(),
+					key: compute_to!(stk, ctx, opt, doc, x.key => String),
 				}),
-			}
+			})
 		}
 
-		fn convert_bearer_access(access: &BearerAccess) -> catalog::BearerAccess {
-			catalog::BearerAccess {
+		async fn convert_bearer_access(
+			stk: &mut Stk,
+			ctx: &Context,
+			opt: &Options,
+			doc: Option<&CursorDoc>,
+			access: &BearerAccess,
+		) -> Result<catalog::BearerAccess> {
+			Ok(catalog::BearerAccess {
 				kind: match access.kind {
 					BearerAccessType::Bearer => catalog::BearerAccessType::Bearer,
 					BearerAccessType::Refresh => catalog::BearerAccessType::Refresh,
@@ -191,34 +242,34 @@ impl DefineAccessStatement {
 					BearerAccessSubject::Record => catalog::BearerAccessSubject::Record,
 					BearerAccessSubject::User => catalog::BearerAccessSubject::User,
 				},
-				jwt: convert_jwt_access(&access.jwt),
-			}
+				jwt: convert_jwt_access(stk, ctx, opt, doc, &access.jwt).await?,
+			})
 		}
 
-		AccessDefinition {
-			name: self.name.clone().to_raw_string(),
-			grant_duration: self.duration.grant.map(|x| x.0),
-			token_duration: self.duration.token.map(|x| x.0),
-			session_duration: self.duration.session.map(|x| x.0),
-			comment: self.comment.clone().map(|x| x.into_string()),
+		Ok(AccessDefinition {
+			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "access name").await?,
+			grant_duration: map_opt!(x as &self.duration.grant => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
+			token_duration: map_opt!(x as &self.duration.token => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
+			session_duration: map_opt!(x as &self.duration.session => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
+			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 			authenticate: self.authenticate.clone(),
 			access_type: match &self.access_type {
 				AccessType::Record(record_access) => {
 					catalog::AccessType::Record(catalog::RecordAccess {
 						signup: record_access.signup.clone(),
 						signin: record_access.signin.clone(),
-						jwt: convert_jwt_access(&record_access.jwt),
-						bearer: record_access.bearer.as_ref().map(convert_bearer_access),
+						jwt: convert_jwt_access(stk, ctx, opt, doc, &record_access.jwt).await?,
+						bearer: map_opt!(x as &record_access.bearer => convert_bearer_access(stk, ctx, opt, doc, x).await?),
 					})
 				}
-				AccessType::Jwt(jwt_access) => {
-					catalog::AccessType::Jwt(convert_jwt_access(jwt_access))
-				}
-				AccessType::Bearer(bearer_access) => {
-					catalog::AccessType::Bearer(convert_bearer_access(bearer_access))
-				}
+				AccessType::Jwt(jwt_access) => catalog::AccessType::Jwt(
+					convert_jwt_access(stk, ctx, opt, doc, jwt_access).await?,
+				),
+				AccessType::Bearer(bearer_access) => catalog::AccessType::Bearer(
+					convert_bearer_access(stk, ctx, opt, doc, bearer_access).await?,
+				),
 			},
-		}
+		})
 	}
 }
 
@@ -226,19 +277,22 @@ impl DefineAccessStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
+		// Compute the definition
+		let definition = self.to_definition(stk, ctx, opt, doc).await?;
 		// Check the statement type
 		match &self.base {
 			Base::Root => {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if access method already exists
-				if let Some(access) = txn.get_root_access(&self.name).await? {
+				if let Some(access) = txn.get_root_access(&definition.name).await? {
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
@@ -252,8 +306,8 @@ impl DefineAccessStatement {
 					}
 				}
 				// Process the statement
-				let key = crate::key::root::ac::new(&self.name);
-				txn.set(&key, &self.to_definition(), None).await?;
+				let key = crate::key::root::ac::new(&definition.name);
+				txn.set(&key, &definition, None).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -264,7 +318,7 @@ impl DefineAccessStatement {
 				let txn = ctx.tx();
 				// Check if the definition exists
 				let ns = ctx.get_ns_id(opt).await?;
-				if let Some(access) = txn.get_ns_access(ns, &self.name).await? {
+				if let Some(access) = txn.get_ns_access(ns, &definition.name).await? {
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
@@ -279,9 +333,9 @@ impl DefineAccessStatement {
 					}
 				}
 				// Process the statement
-				let key = crate::key::namespace::ac::new(ns, &self.name);
+				let key = crate::key::namespace::ac::new(ns, &definition.name);
 				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-				txn.set(&key, &self.to_definition(), None).await?;
+				txn.set(&key, &definition, None).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -292,7 +346,7 @@ impl DefineAccessStatement {
 				let txn = ctx.tx();
 				// Check if the definition exists
 				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-				if let Some(access) = txn.get_db_access(ns, db, &self.name).await? {
+				if let Some(access) = txn.get_db_access(ns, db, &definition.name).await? {
 					match self.kind {
 						DefineKind::Default => {
 							if !opt.import {
@@ -308,8 +362,8 @@ impl DefineAccessStatement {
 					}
 				}
 				// Process the statement
-				let key = crate::key::database::ac::new(ns, db, &self.name);
-				txn.set(&key, &self.to_definition(), None).await?;
+				let key = crate::key::database::ac::new(ns, db, &definition.name);
+				txn.set(&key, &definition, None).await?;
 				// Clear the cache
 				txn.clear_cache();
 				// Ok all good
@@ -323,11 +377,11 @@ impl DefineAccessStatement {
 		fn redact_jwt_access(acc: &mut JwtAccess) {
 			if let JwtAccessVerify::Key(ref mut v) = acc.verify {
 				if v.alg.is_symmetric() {
-					v.key = "[REDACTED]".to_string();
+					v.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
 				}
 			}
 			if let Some(ref mut s) = acc.issue {
-				s.key = "[REDACTED]".to_string();
+				s.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
 			}
 		}
 
@@ -372,7 +426,7 @@ impl Display for DefineAccessStatement {
 				f,
 				" FOR GRANT {},",
 				match self.duration.grant {
-					Some(dur) => format!("{}", dur),
+					Some(ref dur) => format!("{}", dur),
 					None => "NONE".to_string(),
 				}
 			)?;
@@ -382,7 +436,7 @@ impl Display for DefineAccessStatement {
 				f,
 				" FOR TOKEN {},",
 				match self.duration.token {
-					Some(dur) => format!("{}", dur),
+					Some(ref dur) => format!("{}", dur),
 					None => "NONE".to_string(),
 				}
 			)?;
@@ -391,30 +445,13 @@ impl Display for DefineAccessStatement {
 			f,
 			" FOR SESSION {}",
 			match self.duration.session {
-				Some(dur) => format!("{}", dur),
+				Some(ref dur) => format!("{}", dur),
 				None => "NONE".to_string(),
 			}
 		)?;
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?
+			write!(f, " COMMENT {}", comment)?
 		}
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineAccessStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"base".to_string() => self.base.structure(),
-			"authenticate".to_string(), if let Some(v) = self.authenticate => v.structure(),
-			"duration".to_string() => Value::from(map!{
-				"session".to_string() => self.duration.session.map(Value::from).unwrap_or(Value::None),
-				"grant".to_string(), if self.access_type.can_issue_grants() => self.duration.grant.map(Value::from).unwrap_or(Value::None),
-				"token".to_string(), if self.access_type.can_issue_tokens() => self.duration.token.map(Value::from).unwrap_or(Value::None),
-			}),
-			"kind".to_string() => self.access_type.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
 	}
 }

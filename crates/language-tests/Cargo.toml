@@ -8,11 +8,10 @@ edition = "2024"
 members = []
 
 [features]
-default = ["upgrade"]
+default = []
 backend-surrealkv = ["surrealdb-core/kv-surrealkv"]
 backend-rocksdb = ["surrealdb-core/kv-rocksdb"]
-backend-foundation-7_1 = ["surrealdb-core/kv-fdb-7_1"]
-backend-foundation-7_3 = ["surrealdb-core/kv-fdb-7_3"]
+backend-foundation = ["surrealdb-core/kv-fdb"]
 upgrade = ["backend-surrealkv", "tokio-tungstenite", "revision"] # Upgrade test suite.
 
 [dependencies]

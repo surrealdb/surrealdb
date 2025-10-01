@@ -8,7 +8,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''{ events: {  }, fields: { "`value`": 'DEFINE FIELD `value` ON test PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }'''
+value = "{ events: {  }, fields: { value: 'DEFINE FIELD `value` ON test PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }"
 
 [[test.results]]
 value = "NONE"

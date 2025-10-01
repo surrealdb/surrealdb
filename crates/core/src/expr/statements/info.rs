@@ -12,9 +12,10 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::expression::VisitExpression;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{
 	Base, DefineAccessStatement, DefineAnalyzerStatement, DefineUserStatement, Expr, FlowResultExt,
-	Ident,
 };
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
@@ -31,11 +32,11 @@ pub enum InfoStatement {
 
 	Db(bool, Option<Expr>),
 
-	Tb(Ident, bool, Option<Expr>),
+	Tb(Expr, bool, Option<Expr>),
 
-	User(Ident, Option<Base>, bool),
+	User(Expr, Option<Base>, bool),
 
-	Index(Ident, Ident, bool),
+	Index(Expr, Expr, bool),
 }
 
 impl InfoStatement {
@@ -45,7 +46,7 @@ impl InfoStatement {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		match self {
 			InfoStatement::Root(structured) => {
@@ -69,7 +70,7 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_root_accesses().await?.iter() {
 								let def = DefineAccessStatement::from_definition(Base::Root, v).redact();
-								out.insert(def.name.to_raw_string(), def.to_string().into());
+								out.insert(v.name.clone(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -120,7 +121,7 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_ns_accesses(ns).await?.iter() {
 								let def = DefineAccessStatement::from_definition(Base::Ns, v).redact();
-								out.insert(def.name.to_raw_string(), def.to_string().into());
+								out.insert(v.name.clone(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -182,7 +183,7 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_db_accesses(ns, db).await?.iter() {
 								let def = DefineAccessStatement::from_definition(Base::Db, v).redact();
-								out.insert(def.name.to_raw_string(), def.to_string().into());
+								out.insert(v.name.clone(), def.to_string().into());
 							}
 							out.into()
 						},
@@ -266,6 +267,8 @@ impl InfoStatement {
 				opt.is_allowed(Action::View, ResourceKind::Any, &Base::Db)?;
 				// Get the NS and DB
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+				// Compute table name
+				let tb = expr_to_ident(stk, ctx, opt, doc, tb, "table name").await?;
 				// Convert the version to u64 if present
 				let version = match version {
 					Some(v) => Some(
@@ -282,45 +285,45 @@ impl InfoStatement {
 				// Create the result set
 				Ok(if *structured {
 					Value::from(map! {
-						"events".to_string() => process(txn.all_tb_events(ns, db, tb).await?),
-						"fields".to_string() => process(txn.all_tb_fields(ns, db, tb, version).await?),
-						"indexes".to_string() => process(txn.all_tb_indexes(ns, db, tb).await?),
-						"lives".to_string() => process(txn.all_tb_lives(ns, db, tb).await?),
-						"tables".to_string() => process(txn.all_tb_views(ns, db, tb).await?),
+						"events".to_string() => process(txn.all_tb_events(ns, db, &tb).await?),
+						"fields".to_string() => process(txn.all_tb_fields(ns, db, &tb, version).await?),
+						"indexes".to_string() => process(txn.all_tb_indexes(ns, db, &tb).await?),
+						"lives".to_string() => process(txn.all_tb_lives(ns, db, &tb).await?),
+						"tables".to_string() => process(txn.all_tb_views(ns, db, &tb).await?),
 					})
 				} else {
 					Value::from(map! {
 						"events".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_tb_events(ns, db, tb).await?.iter() {
+							for v in txn.all_tb_events(ns, db, &tb).await?.iter() {
 								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
 						"fields".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_tb_fields(ns, db, tb, version).await?.iter() {
-								out.insert(v.name.to_string(), v.to_sql().into());
+							for v in txn.all_tb_fields(ns, db, &tb, version).await?.iter() {
+								out.insert(v.name.to_raw_string(), v.to_sql().into());
 							}
 							out.into()
 						},
 						"indexes".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_tb_indexes(ns, db, tb).await?.iter() {
+							for v in txn.all_tb_indexes(ns, db, &tb).await?.iter() {
 								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
 						"lives".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_tb_lives(ns, db, tb).await?.iter() {
+							for v in txn.all_tb_lives(ns, db, &tb).await?.iter() {
 								out.insert(v.id.to_string(), v.to_sql().into());
 							}
 							out.into()
 						},
 						"tables".to_string() => {
 							let mut out = Object::default();
-							for v in txn.all_tb_views(ns, db, tb).await?.iter() {
+							for v in txn.all_tb_views(ns, db, &tb).await?.iter() {
 								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
@@ -331,21 +334,22 @@ impl InfoStatement {
 			InfoStatement::User(user, base, structured) => {
 				// Get the base type
 				let base = base.clone().unwrap_or(opt.selected_base()?);
-
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &base)?;
+				// Compute user name
+				let user = expr_to_ident(stk, ctx, opt, doc, user, "user name").await?;
 				// Get the transaction
 				let txn = ctx.tx();
 				// Process the user
 				let res = match base {
-					Base::Root => txn.expect_root_user(user).await?,
+					Base::Root => txn.expect_root_user(&user).await?,
 					Base::Ns => {
 						let ns = txn.expect_ns_by_name(opt.ns()?).await?;
-						match txn.get_ns_user(ns.namespace_id, user).await? {
+						match txn.get_ns_user(ns.namespace_id, &user).await? {
 							Some(user) => user,
 							None => {
 								return Err(Error::UserNsNotFound {
-									name: user.to_string(),
+									name: user,
 									ns: ns.name.clone(),
 								}
 								.into());
@@ -356,16 +360,16 @@ impl InfoStatement {
 						let (ns, db) = opt.ns_db()?;
 						let Some(db_def) = txn.get_db_by_name(ns, db).await? else {
 							return Err(Error::UserDbNotFound {
-								name: user.to_string(),
+								name: user,
 								ns: ns.to_string(),
 								db: db.to_string(),
 							}
 							.into());
 						};
-						txn.get_db_user(db_def.namespace_id, db_def.database_id, user)
+						txn.get_db_user(db_def.namespace_id, db_def.database_id, &user)
 							.await?
 							.ok_or_else(|| Error::UserDbNotFound {
-								name: user.to_string(),
+								name: user,
 								ns: ns.to_string(),
 								db: db.to_string(),
 							})?
@@ -382,7 +386,9 @@ impl InfoStatement {
 			InfoStatement::Index(index, table, _structured) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &Base::Db)?;
-
+				// Compute table & index names
+				let index = expr_to_ident(stk, ctx, opt, doc, index, "index name").await?;
+				let table = expr_to_ident(stk, ctx, opt, doc, table, "table name").await?;
 				// Output
 				#[cfg(not(target_family = "wasm"))]
 				{
@@ -392,7 +398,7 @@ impl InfoStatement {
 					if let Some(ib) = ctx.get_index_builder() {
 						// Obtain the index
 						let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-						let res = txn.expect_tb_index(ns, db, table, index).await?;
+						let res = txn.expect_tb_index(ns, db, &table, &index).await?;
 						let status = ib.get_status(ns, db, &res).await;
 						let mut out = Object::default();
 						out.insert("building".to_string(), status.into());
@@ -400,6 +406,25 @@ impl InfoStatement {
 					}
 				}
 				Ok(Object::default().into())
+			}
+		}
+	}
+}
+
+impl VisitExpression for InfoStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		match self {
+			InfoStatement::Root(_) | InfoStatement::Ns(_) => {}
+			InfoStatement::Db(_, expr) | InfoStatement::Tb(_, _, expr) => {
+				expr.iter().for_each(|expr| expr.visit(visitor))
+			}
+			InfoStatement::User(expr, _, _) => expr.visit(visitor),
+			InfoStatement::Index(expr1, expr2, _) => {
+				expr1.visit(visitor);
+				expr2.visit(visitor);
 			}
 		}
 	}
@@ -421,24 +446,28 @@ impl fmt::Display for InfoStatement {
 				None => f.write_str("INFO FOR DATABASE STRUCTURE"),
 			},
 			Self::Tb(t, false, v) => match v {
-				Some(v) => write!(f, "INFO FOR TABLE {t} VERSION {v}"),
-				None => write!(f, "INFO FOR TABLE {t}"),
+				Some(v) => write!(f, "INFO FOR TABLE {} VERSION {v}", t),
+				None => write!(f, "INFO FOR TABLE {}", t),
 			},
 
 			Self::Tb(t, true, v) => match v {
-				Some(v) => write!(f, "INFO FOR TABLE {t} VERSION {v} STRUCTURE"),
-				None => write!(f, "INFO FOR TABLE {t} STRUCTURE"),
+				Some(v) => write!(f, "INFO FOR TABLE {} VERSION {v} STRUCTURE", t),
+				None => write!(f, "INFO FOR TABLE {} STRUCTURE", t),
 			},
 			Self::User(u, b, false) => match b {
-				Some(b) => write!(f, "INFO FOR USER {u} ON {b}"),
-				None => write!(f, "INFO FOR USER {u}"),
+				Some(b) => write!(f, "INFO FOR USER {} ON {b}", u),
+				None => write!(f, "INFO FOR USER {}", u),
 			},
 			Self::User(u, b, true) => match b {
-				Some(b) => write!(f, "INFO FOR USER {u} ON {b} STRUCTURE"),
-				None => write!(f, "INFO FOR USER {u} STRUCTURE"),
+				Some(b) => write!(f, "INFO FOR USER {} ON {b} STRUCTURE", u),
+				None => write!(f, "INFO FOR USER {} STRUCTURE", u),
 			},
-			Self::Index(i, t, false) => write!(f, "INFO FOR INDEX {i} ON {t}"),
-			Self::Index(i, t, true) => write!(f, "INFO FOR INDEX {i} ON {t} STRUCTURE"),
+			Self::Index(i, t, false) => {
+				write!(f, "INFO FOR INDEX {} ON {}", i, t)
+			}
+			Self::Index(i, t, true) => {
+				write!(f, "INFO FOR INDEX {} ON {} STRUCTURE", i, t)
+			}
 		}
 	}
 }

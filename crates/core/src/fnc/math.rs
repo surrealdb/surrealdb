@@ -123,7 +123,7 @@ pub fn log2((arg,): (Number,)) -> Result<Value> {
 pub fn max((array,): (Vec<Number>,)) -> Result<Value> {
 	Ok(match array.into_iter().max() {
 		Some(v) => v.into(),
-		None => Value::None,
+		None => f64::NEG_INFINITY.into(),
 	})
 }
 
@@ -146,7 +146,7 @@ pub fn midhinge((mut array,): (Vec<Number>,)) -> Result<Value> {
 pub fn min((array,): (Vec<Number>,)) -> Result<Value> {
 	Ok(match array.into_iter().min() {
 		Some(v) => v.into(),
-		None => Value::None,
+		None => f64::INFINITY.into(),
 	})
 }
 
@@ -194,7 +194,7 @@ pub fn sqrt((arg,): (Number,)) -> Result<Value> {
 	if arg >= Number::Int(0) {
 		Ok(arg.sqrt().into())
 	} else {
-		Ok(Value::None)
+		Ok(f64::NAN.into())
 	}
 }
 

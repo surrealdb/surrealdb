@@ -265,7 +265,7 @@ mod tests {
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			strand!("testid").to_owned().into(),
+			"testid".to_owned().into(),
 			Dir::Out,
 			&fk,
 		);

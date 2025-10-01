@@ -9,7 +9,7 @@ use crate::expr::ChangeFeed;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::DefineDatabaseStatement;
-use crate::sql::{Ident, ToSql};
+use crate::sql::{Expr, Idiom, Literal, ToSql};
 use crate::val::Value;
 
 #[derive(
@@ -76,10 +76,8 @@ impl_kv_value_revisioned!(DatabaseDefinition);
 impl DatabaseDefinition {
 	pub fn to_sql_definition(&self) -> DefineDatabaseStatement {
 		DefineDatabaseStatement {
-			// SAFETY: we know the name is valid because it was validated when the database was
-			// created.
-			name: unsafe { Ident::new_unchecked(self.name.clone()) },
-			comment: self.comment.clone().map(|v| v.into()),
+			name: Expr::Idiom(Idiom::field(self.name.clone())),
+			comment: self.comment.clone().map(|v| Expr::Literal(Literal::String(v))),
 			changefeed: self.changefeed.map(|v| v.into()),
 			..Default::default()
 		}

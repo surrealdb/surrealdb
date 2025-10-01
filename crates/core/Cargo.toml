@@ -45,7 +45,7 @@ scripting = ["dep:js"]
 http = ["dep:reqwest"]
 ml = ["dep:surrealml"]
 jwks = ["dep:reqwest"]
-allocator = ["dep:jemallocator", "dep:mimalloc"]
+allocator = ["dep:jemallocator"]
 arbitrary = [
     "dep:arbitrary",
     "dep:regex-syntax",
@@ -55,9 +55,6 @@ arbitrary = [
     "uuid/arbitrary",
 ]
 allocation-tracking = []
-# Special features
-kv-fdb-7_1 = ["foundationdb/fdb-7_1", "kv-fdb"]
-kv-fdb-7_3 = ["foundationdb/fdb-7_3", "kv-fdb"]
 enterprise = ["dep:rust-s3"]
 
 [package.metadata.docs.rs]
@@ -178,6 +175,7 @@ arbitrary = { workspace = true, features = ["derive"], optional = true }
 ext-sort = { workspace = true, optional = true }
 regex-syntax = { workspace = true, optional = true }
 reqwest = { workspace = true, default-features = false, features = [
+    "http2",
     "json",
     "stream",
     "multipart",
@@ -217,10 +215,7 @@ tokio-tungstenite = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 
 # OS-SPECIFIC ALLOCATOR DEPENDENCIES
-[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios"))'.dependencies]
-mimalloc = { workspace = true, optional = true, default-features = false }
-
-[target.'cfg(any(target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
 jemallocator = { workspace = true, optional = true }
 
 # DEVELOPMENT DEPENDENCIES
@@ -228,6 +223,7 @@ jemallocator = { workspace = true, optional = true }
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true
+hashbrown.workspace = true
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }
 rstest.workspace = true
 serial_test.workspace = true
@@ -237,7 +233,6 @@ time = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock.workspace = true
-
 
 [lints]
 workspace = true

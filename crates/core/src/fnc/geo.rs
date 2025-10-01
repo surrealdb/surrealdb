@@ -77,9 +77,10 @@ pub mod hash {
 	}
 
 	pub fn decode((arg,): (Value,)) -> Result<Value> {
-		match arg {
-			Value::Strand(v) => Ok(geo::decode(v).into()),
-			_ => Ok(Value::None),
+		if let Some(s) = arg.as_strand() {
+			Ok(geo::decode(s).into())
+		} else {
+			Ok(Value::None)
 		}
 	}
 }

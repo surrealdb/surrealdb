@@ -1,16 +1,26 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::Ident;
-use crate::val::Strand;
+use crate::sql::{Expr, Literal};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineNamespaceStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
-	pub comment: Option<Strand>,
+	pub name: Expr,
+	pub comment: Option<Expr>,
+}
+
+impl Default for DefineNamespaceStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			id: None,
+			name: Expr::Literal(Literal::None),
+			comment: None,
+		}
+	}
 }
 
 impl Display for DefineNamespaceStatement {
@@ -23,7 +33,7 @@ impl Display for DefineNamespaceStatement {
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
 	}
@@ -35,18 +45,19 @@ impl From<DefineNamespaceStatement> for crate::expr::statements::DefineNamespace
 			kind: v.kind.into(),
 			id: v.id,
 			name: v.name.into(),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 		}
 	}
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<crate::expr::statements::DefineNamespaceStatement> for DefineNamespaceStatement {
 	fn from(v: crate::expr::statements::DefineNamespaceStatement) -> Self {
 		Self {
 			kind: v.kind.into(),
 			id: v.id,
 			name: v.name.into(),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 		}
 	}
 }

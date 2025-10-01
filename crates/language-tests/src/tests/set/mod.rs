@@ -256,14 +256,14 @@ impl TestSet {
 		Ok(())
 	}
 
-	pub fn iter(&self) -> Iter {
+	pub fn iter(&self) -> Iter<'_> {
 		Iter {
 			map_iter: self.map.values(),
 			slice: self.all.as_slice(),
 		}
 	}
 
-	pub fn iter_ids(&self) -> IterIds {
+	pub fn iter_ids(&self) -> IterIds<'_> {
 		IterIds {
 			map_iter: self.map.values(),
 			slice: self.all.as_slice(),

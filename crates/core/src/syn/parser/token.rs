@@ -1,5 +1,5 @@
 use super::Parser;
-use crate::syn::token::{Glued, TokenKind, t};
+use crate::syn::token::{TokenKind, t};
 
 impl Parser<'_> {
 	/// Returns true if the next token can start a statement.
@@ -8,7 +8,6 @@ impl Parser<'_> {
 			kind,
 			t!("ACCESS")
 				| t!("ALTER")
-				| t!("ANALYZE")
 				| t!("BEGIN")
 				| t!("BREAK")
 				| t!("CANCEL")
@@ -69,7 +68,6 @@ impl Parser<'_> {
 					| t!("+") | t!("-")
 					| t!("u'") | t!("u\"")
 					| t!("'") | t!("\"")
-					| TokenKind::Glued(Glued::Uuid | Glued::Strand)
 			)
 	}
 
@@ -118,8 +116,7 @@ impl Parser<'_> {
 	pub(super) fn starts_disallowed_subquery_statement(kind: TokenKind) -> bool {
 		matches!(
 			kind,
-			t!("ANALYZE")
-				| t!("BEGIN")
+			t!("BEGIN")
 				| t!("BREAK")
 				| t!("CANCEL")
 				| t!("COMMIT")
