@@ -23,10 +23,15 @@ runs:
       shell: bash
       run: |
         attempt=0
-        while ! $HOME/.tiup/bin/tiup -v && [ $attempt -lt 10 ]; do
+        until $HOME/.tiup/bin/tiup -v || [ $attempt -ge 10 ]; do
           attempt=$((attempt + 1))
-          curl --proto '=https' --tlsv1.2 -sSf --connect-timeout 30 --max-time 120 https://tiup-mirrors.pingcap.com/install.sh | sh
+          if curl --proto '=https' --tlsv1.2 -sSf --connect-timeout 30 --max-time 120 https://tiup-mirrors.pingcap.com/install.sh | sh; then
+            continue
+          fi
+          echo "TiUP install attempt ${attempt} failed; retrying..." >&2
+          sleep 5
         done
+        $HOME/.tiup/bin/tiup -v
 
     - name: Install FoundationDB
       if: ${{ inputs.foundationdb == 'true' }}
