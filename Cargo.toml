@@ -141,7 +141,7 @@ tempfile = "3.10.1"
 thiserror = "1.0.63"
 tokio = { version = "1.44.2", default-features = false }
 tokio-stream = "0.1"
-tokio-tungstenite = "0.23.1"
+tokio-tungstenite = "0.28.0"
 tokio-util = "0.7.11"
 tracing = "0.1.40"
 ulid = "1.1.0"
@@ -230,13 +230,13 @@ revision = { workspace = true, features = [
 # Crates only used by the root surrealdb crate
 anyhow.workspace = true
 arc-swap = "1.7.1"
-axum = { version = "0.7.5", features = ["tracing", "ws"] }
-axum-extra = { version = "0.9.3", features = [
+axum = { version = "0.8.5", features = ["tracing", "ws"] }
+axum-extra = { version = "0.10.2", features = [
     "query",
     "typed-routing",
     "typed-header",
 ] }
-axum-server = { version = "0.7.1", features = ["tls-rustls-no-provider"] }
+axum-server = { version = "0.7.2", features = ["tls-rustls-no-provider"] }
 bincode.workspace = true
 console-subscriber = "0.4.1"
 clap = { version = "4.4.11", features = [

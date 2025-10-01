@@ -106,15 +106,21 @@ async fn get_handler(
 	if rpc_state.web_sockets.read().await.contains_key(&id) {
 		return Err(NetError::Request);
 	}
-	// Now let's upgrade the WebSocket connection
+	// Now let's upgrade the WebSocket connection with comprehensive buffer configuration
 	Ok(ws
-		// Set the potential WebSocket protocols
+		// Set the potential WebSocket protocols (JSON, CBOR, Bincode, etc.)
 		.protocols(PROTOCOLS)
-		// Set the maximum WebSocket frame size
+		// Set the maximum WebSocket frame size to prevent oversized frames
 		.max_frame_size(*cnf::WEBSOCKET_MAX_FRAME_SIZE)
-		// Set the maximum WebSocket message size
+		// Set the maximum WebSocket message size to prevent memory exhaustion
 		.max_message_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
-		// Set an error
+		// Configure read buffer size for incoming data optimization
+		.read_buffer_size(*cnf::WEBSOCKET_READ_BUFFER_SIZE)
+		// Configure write buffer size for outgoing data optimization
+		.write_buffer_size(*cnf::WEBSOCKET_WRITE_BUFFER_SIZE)
+		// Set maximum write buffer size to apply backpressure when needed
+		.max_write_buffer_size(*cnf::WEBSOCKET_MAX_WRITE_BUFFER_SIZE)
+		// Handle WebSocket upgrade failures with appropriate logging
 		.on_failed_upgrade(|err| {
 			warn!("Failed to upgrade WebSocket connection: {err}");
 		})

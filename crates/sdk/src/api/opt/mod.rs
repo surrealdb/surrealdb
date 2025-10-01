@@ -13,6 +13,7 @@ mod export;
 pub(crate) mod query;
 mod resource;
 mod tls;
+mod websocket;
 
 pub use config::*;
 pub use endpoint::*;
@@ -22,6 +23,7 @@ pub use resource::*;
 use serde_content::{Serializer, Value as Content};
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 pub use tls::*;
+pub use websocket::*;
 
 type UnitOp<'a> = InnerOp<'a, ()>;
 

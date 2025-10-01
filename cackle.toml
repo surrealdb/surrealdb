@@ -1430,3 +1430,7 @@ allow_unsafe = true
 [pkg.cssparser]
 allow_unsafe = true
 
+[pkg.serde_core]
+allow_unsafe = true
+allow_apis = ["fs", "process"]
+

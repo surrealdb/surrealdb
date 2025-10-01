@@ -430,7 +430,7 @@ end = "2026-04-11"
 
 [[trusted.libc]]
 criteria = "safe-to-deploy"
-user-id = 51017 # Yuki Okushi (JohnTitor)
+user-id = 51017
 start = "2020-03-17"
 end = "2025-11-14"
 
