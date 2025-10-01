@@ -189,7 +189,7 @@ mod ws {
 	#[test_log::test(tokio::test)]
 	async fn check_max_size() {
 		use serde::{Deserialize, Serialize};
-		use surrealdb::opt::WebsocketConfig;
+		use surrealdb::opt::{Config, WebsocketConfig};
 		use ulid::Ulid;
 
 		#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -205,14 +205,24 @@ mod ws {
 			}
 		}
 
-		let (permit, db) = new_db().await;
+		let max_size = 256 << 20;
+
+		let permit = PERMITS.acquire().await.unwrap();
+		let ws_config =
+			WebsocketConfig::default().max_message_size(max_size).max_frame_size(max_size);
+		let config = Config::new().websocket(ws_config).unwrap();
+		let db = Surreal::new::<Ws>(("127.0.0.1:8000", config)).await.unwrap();
+		db.signin(Root {
+			username: ROOT_USER,
+			password: ROOT_PASS,
+		})
+		.await
+		.unwrap();
 		db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 		drop(permit);
 
-		let max_message_size = WebsocketConfig::default().max_message_size.unwrap();
-
 		{
-			let sizes = [1024, max_message_size - (1 << 20)];
+			let sizes = [0, 1, 1024, max_size - (1 << 20)];
 
 			for size in sizes {
 				let content = Content::new(size);
@@ -225,7 +235,7 @@ mod ws {
 		}
 
 		{
-			let content = Content::new(max_message_size + (1 << 20));
+			let content = Content::new(max_size + (1 << 20));
 
 			let error = db
 				.upsert::<Option<Content>>(("table", "test"))
