@@ -1,0 +1,17 @@
+# Nextest configuration for SurrealDB
+# https://nexte.st/book/configuration.html
+
+[profile.default]
+retries = 5
+fail-fast = false
+test-threads = -1
+slow-timeout = "180s"
+global-timeout = "30m"
+
+[[profile.default.overrides]]
+filter = 'test(kvs::tests::)'
+test-group = 'serial-kvs'
+
+[test-groups]
+# Ensure all KVS tests run serially
+serial-kvs = { max-threads = 1 }
