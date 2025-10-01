@@ -5,7 +5,7 @@
 value = "NONE"
 
 [[test.results]]
-value = '[{ id: foo:ve4sc2rmebi9bpa4ac4m, value: encoding::base64::decode("YmFy") }]'
+value = '[{ id: foo:ve4sc2rmebi9bpa4ac4m, value: b"626172" }]'
 skip-record-id-key = true
 
 */

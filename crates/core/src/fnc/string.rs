@@ -1,11 +1,13 @@
-use crate::cnf::GENERATION_ALLOCATION_LIMIT;
-use crate::err::Error;
-use crate::expr::Regex;
-use crate::expr::value::Value;
-use crate::fnc::util::string;
+use std::ops::Bound;
+
 use anyhow::{Result, ensure};
 
 use super::args::{Any, Cast, Optional};
+use crate::cnf::GENERATION_ALLOCATION_LIMIT;
+use crate::err::Error;
+use crate::fnc::util::string;
+use crate::val::range::TypedRange;
+use crate::val::{Regex, Value};
 
 /// Returns `true` if a string of this length is too much to allocate.
 fn limit(name: &str, n: usize) -> Result<()> {
@@ -20,7 +22,7 @@ fn limit(name: &str, n: usize) -> Result<()> {
 }
 
 pub fn concat(Any(args): Any) -> Result<Value> {
-	let strings = args.into_iter().map(Value::as_string).collect::<Vec<_>>();
+	let strings = args.into_iter().map(Value::as_raw_string).collect::<Vec<_>>();
 	limit("string::concat", strings.iter().map(String::len).sum::<usize>())?;
 	Ok(strings.concat().into())
 }
@@ -34,24 +36,21 @@ pub fn ends_with((val, chr): (String, String)) -> Result<Value> {
 }
 
 pub fn join(Any(args): Any) -> Result<Value> {
-	let mut args = args.into_iter().map(Value::as_string);
+	let mut args = args.into_iter().map(Value::as_raw_string);
 	let chr = args.next().ok_or_else(|| Error::InvalidArguments {
 		name: String::from("string::join"),
 		message: String::from("Expected at least one argument"),
 	})?;
 
-	let strings = args.collect::<Vec<_>>();
-	limit(
-		"string::join",
-		strings
-			.len()
-			.saturating_mul(chr.len())
-			.saturating_add(strings.iter().map(String::len).sum::<usize>()),
-	)?;
+	let mut res = args.next().unwrap_or_else(String::new);
 
-	// FIXME: Use intersperse to avoid intermediate allocation once stable
-	// https://github.com/rust-lang/rust/issues/79524
-	Ok(strings.join(&chr).into())
+	for a in args {
+		limit("string::join", res.len() + a.len() + chr.len())?;
+		res.push_str(&chr);
+		res.push_str(&a);
+	}
+
+	Ok(res.into())
 }
 
 pub fn len((string,): (String,)) -> Result<Value> {
@@ -76,16 +75,17 @@ pub fn matches((val, Cast(regex)): (String, Cast<Regex>)) -> Result<Value> {
 
 pub fn replace((val, search, replace): (String, Value, String)) -> Result<Value> {
 	match search {
-		Value::Strand(search) => {
+		Value::String(search) => {
 			if replace.len() > search.len() {
 				let increase = replace.len() - search.len();
 				limit(
 					"string::replace",
-					val.len()
-						.saturating_add(val.matches(&search.0).count().saturating_mul(increase)),
+					val.len().saturating_add(
+						val.matches(search.as_str()).count().saturating_mul(increase),
+					),
 				)?;
 			}
-			Ok(val.replace(&search.0, &replace).into())
+			Ok(val.replace(search.as_str(), &replace).into())
 		}
 		Value::Regex(search) => {
 			let mut new_val = String::with_capacity(val.len());
@@ -123,39 +123,93 @@ pub fn reverse((string,): (String,)) -> Result<Value> {
 }
 
 pub fn slice(
-	(val, Optional(beg), Optional(lim)): (String, Optional<i64>, Optional<i64>),
+	(val, Optional(range_start), Optional(end)): (String, Optional<Value>, Optional<i64>),
 ) -> Result<Value> {
+	let Some(range_start) = range_start else {
+		return Ok(val.into());
+	};
+
+	let range = if let Some(end) = end {
+		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?;
+
+		TypedRange {
+			start: Bound::Included(start),
+			end: Bound::Excluded(end),
+		}
+	} else if range_start.is_range() {
+		// Condition checked above, unwrap cannot trigger.
+		let range = range_start.into_range().unwrap();
+		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?
+	} else {
+		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
+			name: String::from("array::range"),
+			message: format!("Argument 1 was the wrong type. {e}"),
+		})?;
+		TypedRange {
+			start: Bound::Included(start),
+			end: Bound::Unbounded,
+		}
+	};
+
 	// Only count the chars if we need to and only do it once.
 	let mut str_len_cache = None;
 	let mut str_len = || *str_len_cache.get_or_insert_with(|| val.chars().count() as i64);
 
-	let beg = if let Some(v) = beg {
-		if v < 0 {
-			str_len().saturating_add(v).max(0) as usize
-		} else {
-			v as usize
-		}
-	} else {
-		0
-	};
-
-	let take = match lim {
-		Some(v) => {
-			if v < 0 {
-				let len = str_len().saturating_add(v).max(0) as usize;
-				len.saturating_sub(beg)
+	let start = match range.start {
+		Bound::Included(x) => {
+			if x < 0 {
+				str_len().saturating_add(x).max(0) as usize
 			} else {
-				v as usize
+				x as usize
 			}
 		}
-		None => usize::MAX,
+		Bound::Excluded(x) => {
+			if x < 0 {
+				str_len().saturating_add(x).saturating_add(1).max(0) as usize
+			} else {
+				let Some(x) = x.checked_add(1) else {
+					return Ok(String::new().into());
+				};
+				x as usize
+			}
+		}
+		Bound::Unbounded => 0,
 	};
 
-	if take == 0 {
-		return Ok(String::new().into());
-	}
+	let end = match range.end {
+		Bound::Included(x) => {
+			if x < 0 {
+				str_len().saturating_add(x).max(0) as usize
+			} else {
+				x as usize
+			}
+		}
+		Bound::Excluded(x) => {
+			if x < 0 {
+				let end = str_len().saturating_add(x).saturating_sub(1);
+				if end < 0 {
+					return Ok(String::new().into());
+				}
+				end as usize
+			} else {
+				if x == 0 {
+					return Ok(String::new().into());
+				}
+				x.saturating_sub(1) as usize
+			}
+		}
+		Bound::Unbounded => usize::MAX,
+	};
 
-	Ok(val.chars().skip(beg).take(take).collect::<String>().into())
+	let len = end.saturating_add(1).saturating_sub(start);
+
+	Ok(val.chars().skip(start).take(len).collect::<String>().into())
 }
 
 pub fn slug((string,): (String,)) -> Result<Value> {
@@ -163,7 +217,7 @@ pub fn slug((string,): (String,)) -> Result<Value> {
 }
 
 pub fn split((val, chr): (String, String)) -> Result<Value> {
-	Ok(val.split(&chr).collect::<Vec<&str>>().into())
+	Ok(val.split(&chr).map(|x| Value::from(x.to_owned())).collect::<Vec<_>>().into())
 }
 
 pub fn starts_with((val, chr): (String, String)) -> Result<Value> {
@@ -179,16 +233,16 @@ pub fn uppercase((string,): (String,)) -> Result<Value> {
 }
 
 pub fn words((string,): (String,)) -> Result<Value> {
-	Ok(string.split_whitespace().collect::<Vec<&str>>().into())
+	Ok(string.split_whitespace().map(|v| Value::from(v.to_owned())).collect::<Vec<_>>().into())
 }
 
 pub mod distance {
 
-	use crate::err::Error;
-	use crate::expr::Value;
 	use anyhow::Result;
-
 	use strsim;
+
+	use crate::err::Error;
+	use crate::val::Value;
 
 	/// Calculate the Damerau-Levenshtein distance between two strings
 	/// via [`strsim::damerau_levenshtein`].
@@ -196,8 +250,8 @@ pub mod distance {
 		Ok(strsim::damerau_levenshtein(&a, &b).into())
 	}
 
-	/// Calculate the normalized Damerau-Levenshtein distance between two strings
-	/// via [`strsim::normalized_damerau_levenshtein`].
+	/// Calculate the normalized Damerau-Levenshtein distance between two
+	/// strings via [`strsim::normalized_damerau_levenshtein`].
 	pub fn normalized_damerau_levenshtein((a, b): (String, String)) -> Result<Value> {
 		Ok(strsim::normalized_damerau_levenshtein(&a, &b).into())
 	}
@@ -205,7 +259,8 @@ pub mod distance {
 	/// Calculate the Hamming distance between two strings
 	/// via [`strsim::hamming`].
 	///
-	/// Will result in an [`Error::InvalidArguments`] if the given strings are of different lengths.
+	/// Will result in an [`Error::InvalidArguments`] if the given strings are
+	/// of different lengths.
 	pub fn hamming((a, b): (String, String)) -> Result<Value> {
 		match strsim::hamming(&a, &b) {
 			Ok(v) => Ok(v.into()),
@@ -229,16 +284,17 @@ pub mod distance {
 	}
 
 	/// Calculate the OSA distance &ndash; a variant of the Levenshtein distance
-	/// that allows for transposition of adjacent characters &ndash; between two strings
-	/// via [`strsim::osa_distance`].
+	/// that allows for transposition of adjacent characters &ndash; between two
+	/// strings via [`strsim::osa_distance`].
 	pub fn osa_distance((a, b): (String, String)) -> Result<Value> {
 		Ok(strsim::osa_distance(&a, &b).into())
 	}
 }
 
 pub mod html {
-	use crate::expr::value::Value;
 	use anyhow::Result;
+
+	use crate::val::Value;
 
 	pub fn encode((arg,): (String,)) -> Result<Value> {
 		Ok(ammonia::clean_text(&arg).into())
@@ -250,20 +306,22 @@ pub mod html {
 }
 
 pub mod is {
-	use crate::err::Error;
-	use crate::expr::value::Value;
-	use crate::expr::{Datetime, Thing};
-	use crate::fnc::args::Optional;
+	use std::char;
+	use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+	use std::sync::LazyLock;
+
 	use anyhow::{Result, bail};
 	use chrono::NaiveDateTime;
 	use regex::Regex;
 	use semver::Version;
-	use std::char;
-	use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-	use std::sync::LazyLock;
 	use ulid::Ulid;
 	use url::Url;
 	use uuid::Uuid;
+
+	use crate::err::Error;
+	use crate::fnc::args::Optional;
+	use crate::syn;
+	use crate::val::{Datetime, Value};
 
 	#[rustfmt::skip] static LATITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
 	#[rustfmt::skip] static LONGITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?(180(\\.0+)?|((1[0-7]\\d)|([1-9]?\\d))(\\.\\d+)?)$").unwrap());
@@ -295,7 +353,7 @@ pub mod is {
 	pub fn datetime((arg, Optional(fmt)): (String, Optional<String>)) -> Result<Value> {
 		Ok(match fmt {
 			Some(fmt) => NaiveDateTime::parse_from_str(&arg, &fmt).is_ok().into(),
-			None => Datetime::try_from(arg.as_ref()).is_ok().into(),
+			None => arg.parse::<Datetime>().is_ok().into(),
 		})
 	}
 
@@ -360,13 +418,13 @@ pub mod is {
 	}
 
 	pub fn record((arg, Optional(tb)): (String, Optional<Value>)) -> Result<Value> {
-		let res = match Thing::try_from(arg) {
+		let res = match syn::record_id(&arg) {
 			Ok(t) => match tb {
-				Some(Value::Strand(tb)) => t.tb == *tb,
-				Some(Value::Table(tb)) => t.tb == tb.0,
+				Some(Value::String(tb)) => t.table.as_str() == tb.as_str(),
+				Some(Value::Table(tb)) => t.table.as_str() == tb.as_str(),
 				Some(_) => {
 					bail!(Error::InvalidArguments {
-						name: "string::is::record()".into(),
+						name: "string::is_record()".into(),
 						message:
 							"Expected an optional string or table type for the second argument"
 								.into(),
@@ -382,12 +440,13 @@ pub mod is {
 }
 
 pub mod similarity {
-
 	use std::sync::LazyLock;
 
-	use crate::expr::Value;
 	use anyhow::Result;
-	use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
+	use fuzzy_matcher::FuzzyMatcher;
+	use fuzzy_matcher::skim::SkimMatcherV2;
+
+	use crate::val::Value;
 	static MATCHER: LazyLock<SkimMatcherV2> =
 		LazyLock::new(|| SkimMatcherV2::default().ignore_case());
 
@@ -422,10 +481,11 @@ pub mod similarity {
 
 pub mod semver {
 
-	use crate::err::Error;
-	use crate::expr::Value;
 	use anyhow::Result;
 	use semver::Version;
+
+	use crate::err::Error;
+	use crate::val::Value;
 
 	fn parse_version(ver: &str, func: &str, msg: &str) -> Result<Version> {
 		Version::parse(ver)
@@ -467,9 +527,10 @@ pub mod semver {
 	}
 
 	pub mod inc {
-		use crate::expr::Value;
-		use crate::fnc::string::semver::parse_version;
 		use anyhow::Result;
+
+		use crate::fnc::string::semver::parse_version;
+		use crate::val::Value;
 
 		pub fn major((version,): (String,)) -> Result<Value> {
 			parse_version(&version, "string::semver::inc::major", "Invalid semantic version").map(
@@ -503,9 +564,10 @@ pub mod semver {
 	}
 
 	pub mod set {
-		use crate::expr::Value;
-		use crate::fnc::string::semver::parse_version;
 		use anyhow::Result;
+
+		use crate::fnc::string::semver::parse_version;
+		use crate::val::Value;
 
 		pub fn major((version, value): (String, i64)) -> Result<Value> {
 			// TODO: Deal with negative trunc:
@@ -546,17 +608,15 @@ pub mod semver {
 #[cfg(test)]
 mod tests {
 	use super::{matches, replace, slice};
-	use crate::{
-		expr::Value,
-		fnc::args::{Cast, Optional},
-	};
+	use crate::fnc::args::{Cast, Optional};
+	use crate::val::Value;
 
 	#[test]
 	fn string_slice() {
 		#[track_caller]
 		fn test(initial: &str, beg: Option<i64>, end: Option<i64>, expected: &str) {
 			assert_eq!(
-				slice((initial.to_owned(), Optional(beg), Optional(end))).unwrap(),
+				slice((initial.to_owned(), Optional(beg.map(Value::from)), Optional(end))).unwrap(),
 				Value::from(expected)
 			);
 		}
@@ -564,17 +624,18 @@ mod tests {
 		let string = "abcdefg";
 		test(string, None, None, string);
 		test(string, Some(2), None, &string[2..]);
-		test(string, Some(2), Some(3), &string[2..5]);
+		test(string, Some(2), Some(3), &string[2..3]);
 		test(string, Some(2), Some(-1), "cdef");
 		test(string, Some(-2), None, "fg");
-		test(string, Some(-4), Some(2), "de");
+		test(string, Some(-4), Some(2), "");
 		test(string, Some(-4), Some(-1), "def");
 
 		let string = "你好世界";
 		test(string, None, None, string);
 		test(string, Some(1), None, "好世界");
 		test(string, Some(-1), None, "界");
-		test(string, Some(-2), Some(1), "世");
+		test(string, Some(-2), Some(1), "");
+		test(string, Some(-2), Some(3), "世");
 	}
 
 	#[test]
@@ -617,19 +678,19 @@ mod tests {
 	#[test]
 	fn html_encode() {
 		let value = super::html::encode((String::from("<div>Hello world!</div>"),)).unwrap();
-		assert_eq!(value, Value::Strand("&lt;div&gt;Hello&#32;world!&lt;&#47;div&gt;".into()));
+		assert_eq!(value, Value::String("&lt;div&gt;Hello&#32;world!&lt;&#47;div&gt;".into()));
 
 		let value = super::html::encode((String::from("SurrealDB"),)).unwrap();
-		assert_eq!(value, Value::Strand("SurrealDB".into()));
+		assert_eq!(value, Value::String("SurrealDB".into()));
 	}
 
 	#[test]
 	fn html_sanitize() {
 		let value = super::html::sanitize((String::from("<div>Hello world!</div>"),)).unwrap();
-		assert_eq!(value, Value::Strand("<div>Hello world!</div>".into()));
+		assert_eq!(value, Value::String("<div>Hello world!</div>".into()));
 
 		let value = super::html::sanitize((String::from("XSS<script>attack</script>"),)).unwrap();
-		assert_eq!(value, Value::Strand("XSS".into()));
+		assert_eq!(value, Value::String("XSS".into()));
 	}
 
 	#[test]

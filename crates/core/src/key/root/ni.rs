@@ -1,32 +1,33 @@
 //! Stores namespace ID generator state
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Ni {
+use crate::idg::u32::U32;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::impl_kv_key_storekey;
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+pub(crate) struct NamespaceIdGeneratorKey {
 	__: u8,
 	_a: u8,
 	_b: u8,
 	_c: u8,
 }
-impl_key!(Ni);
 
-impl Default for Ni {
+impl_kv_key_storekey!(NamespaceIdGeneratorKey=> U32);
+
+impl Default for NamespaceIdGeneratorKey {
 	fn default() -> Self {
 		Self::new()
 	}
 }
 
-impl Categorise for Ni {
+impl Categorise for NamespaceIdGeneratorKey {
 	fn categorise(&self) -> Category {
 		Category::NamespaceIdentifier
 	}
 }
 
-impl Ni {
+impl NamespaceIdGeneratorKey {
 	pub fn new() -> Self {
 		Self {
 			__: b'/',
@@ -39,13 +40,13 @@ impl Ni {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+	use crate::kvs::KVKey;
+
 	#[test]
 	fn key() {
-		use super::*;
-		let val = Ni::new();
-		let enc = Ni::encode(&val).unwrap();
-		let dec = Ni::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let val = NamespaceIdGeneratorKey::new();
+		let enc = NamespaceIdGeneratorKey::encode_key(&val).unwrap();
+		assert_eq!(&enc, b"/!ni");
 	}
 }

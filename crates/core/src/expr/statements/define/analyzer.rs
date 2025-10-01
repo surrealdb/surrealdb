@@ -1,69 +1,117 @@
+use std::fmt::{self, Display};
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+
+use super::DefineKind;
+use crate::catalog;
+use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Array, Base, Ident, Strand, Value, filter::Filter, tokenizer::Tokenizer};
+use crate::expr::expression::VisitExpression;
+use crate::expr::filter::Filter;
+use crate::expr::parameterize::expr_to_ident;
+use crate::expr::tokenizer::Tokenizer;
+use crate::expr::{Base, Expr, Idiom, Literal, Value};
 use crate::iam::{Action, ResourceKind};
-use anyhow::{Result, bail};
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-
-#[revisioned(revision = 4)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineAnalyzerStatement {
-	pub name: Ident,
-	#[revision(start = 2)]
-	pub function: Option<Ident>,
+	pub kind: DefineKind,
+	pub name: Expr,
+	pub function: Option<String>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
-	pub comment: Option<Strand>,
-	#[revision(start = 3)]
-	pub if_not_exists: bool,
-	#[revision(start = 4)]
-	pub overwrite: bool,
+	pub comment: Option<Expr>,
+}
+
+impl VisitExpression for DefineAnalyzerStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.name.visit(visitor);
+		self.comment.iter().for_each(|comment| comment.visit(visitor));
+	}
+}
+
+impl Default for DefineAnalyzerStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			function: None,
+			tokenizers: None,
+			filters: None,
+			comment: None,
+		}
+	}
 }
 
 impl DefineAnalyzerStatement {
-	pub(crate) async fn compute(
+	pub(crate) async fn to_definition(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
+	) -> Result<catalog::AnalyzerDefinition> {
+		Ok(catalog::AnalyzerDefinition {
+			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "analyzer name").await?,
+			function: self.function.clone(),
+			tokenizers: self.tokenizers.clone(),
+			filters: self.filters.clone(),
+			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+		})
+	}
+
+	pub fn from_definition(def: &catalog::AnalyzerDefinition) -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Idiom(Idiom::field(def.name.clone())),
+			function: def.function.clone(),
+			tokenizers: def.tokenizers.clone(),
+			filters: def.filters.clone(),
+			comment: def.comment.as_ref().map(|x| Expr::Literal(Literal::String(x.clone()))),
+		}
+	}
+
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Analyzer, &Base::Db)?;
+		// Compute the definition
+		let definition = self.to_definition(stk, ctx, opt, doc).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
-		if txn.get_db_analyzer(ns, db, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::AzAlreadyExists {
-					name: self.name.to_string(),
-				});
+		if txn.get_db_analyzer(ns, db, &definition.name).await.is_ok() {
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::AzAlreadyExists {
+							name: definition.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 		}
 		// Process the statement
-		let key = crate::key::database::az::new(ns, db, &self.name);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
-		let az = DefineAnalyzerStatement {
-			// Don't persist the `IF NOT EXISTS` clause to schema
-			if_not_exists: false,
-			overwrite: false,
-			..self.clone()
-		};
-		ctx.get_index_stores().mappers().load(&az).await?;
-		txn.set(key, revision::to_vec(&az)?, None).await?;
+		let key = crate::key::database::az::new(ns, db, &definition.name);
+		ctx.get_index_stores().mappers().load(&definition).await?;
+		txn.set(&key, &definition, None).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -72,11 +120,10 @@ impl DefineAnalyzerStatement {
 impl Display for DefineAnalyzerStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE ANALYZER")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " IF NOT EXISTS")?,
+			DefineKind::IfNotExists => write!(f, " OVERWRITE")?,
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref i) = self.function {
@@ -91,22 +138,8 @@ impl Display for DefineAnalyzerStatement {
 			write!(f, " FILTERS {}", tokens.join(","))?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineAnalyzerStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"function".to_string(), if let Some(v) = self.function => v.structure(),
-			"tokenizers".to_string(), if let Some(v) = self.tokenizers =>
-				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),
-			"filters".to_string(), if let Some(v) = self.filters =>
-				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
 	}
 }

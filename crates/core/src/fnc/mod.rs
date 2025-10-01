@@ -1,14 +1,15 @@
-//! Executes functions from SQL. If there is an SQL function it will be defined in this module.
+//! Executes functions from SQL. If there is an SQL function it will be defined
+//! in this module.
+
+use anyhow::Result;
+use reblessive::tree::Stk;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
-use crate::expr::Thing;
-use crate::expr::value::Value;
 use crate::idx::planner::executor::QueryExecutor;
-use anyhow::Result;
-use reblessive::tree::Stk;
+use crate::val::{RecordId, Value};
 pub mod api;
 pub mod args;
 pub mod array;
@@ -27,6 +28,7 @@ pub mod operate;
 pub mod parse;
 pub mod rand;
 pub mod record;
+pub mod schema;
 pub mod script;
 pub mod search;
 pub mod sequence;
@@ -76,7 +78,7 @@ pub async fn run(
 		|| name.eq("file::rename_if_not_exists")
 		|| name.eq("file::list")
 		|| name.eq("record::exists")
-		|| name.eq("record::refs")
+		|| name.eq("record::is_edge")
 		|| name.eq("type::field")
 		|| name.eq("type::fields")
 		|| name.eq("value::diff")
@@ -88,6 +90,7 @@ pub async fn run(
 		|| name.starts_with("crypto::bcrypt")
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
+		|| name.eq("schema::table::exists")
 	{
 		stk.run(|stk| asynchronous(stk, ctx, opt, doc, name, args)).await
 	} else {
@@ -95,10 +98,11 @@ pub async fn run(
 	}
 }
 
-/// Each function is specified by its name (a string literal) followed by its path. The path
-/// may be followed by one parenthesized argument, e.g. ctx, which is passed to the function
-/// before the remainder of the arguments. The path may be followed by `.await` to signify that
-/// it is `async`. Finally, the path may be prefixed by a parenthesized wrapper function e.g.
+/// Each function is specified by its name (a string literal) followed by its
+/// path. The path may be followed by one parenthesized argument, e.g. ctx,
+/// which is passed to the function before the remainder of the arguments. The
+/// path may be followed by `.await` to signify that it is `async`. Finally, the
+/// path may be prefixed by a parenthesized wrapper function e.g.
 /// `cpu_intensive`.
 macro_rules! dispatch {
     ($ctx: ident, $name: ident, $args: expr_2021, $message: expr_2021,
@@ -215,14 +219,14 @@ pub fn synchronous(
 		"duration::secs" => duration::secs,
 		"duration::weeks" => duration::weeks,
 		"duration::years" => duration::years,
-		"duration::from::days" => duration::from::days,
-		"duration::from::hours" => duration::from::hours,
-		"duration::from::micros" => duration::from::micros,
-		"duration::from::millis" => duration::from::millis,
-		"duration::from::mins" => duration::from::mins,
-		"duration::from::nanos" => duration::from::nanos,
-		"duration::from::secs" => duration::from::secs,
-		"duration::from::weeks" => duration::from::weeks,
+		"duration::from_days" => duration::from::days,
+		"duration::from_hours" => duration::from::hours,
+		"duration::from_micros" => duration::from::micros,
+		"duration::from_millis" => duration::from::millis,
+		"duration::from_mins" => duration::from::mins,
+		"duration::from_nanos" => duration::from::nanos,
+		"duration::from_secs" => duration::from::secs,
+		"duration::from_weeks" => duration::from::weeks,
 		//
 		exp(Files) "file::bucket" => file::bucket,
 		exp(Files) "file::key" => file::key,
@@ -238,7 +242,7 @@ pub fn synchronous(
 		"geo::distance" => geo::distance,
 		"geo::hash::decode" => geo::hash::decode,
 		"geo::hash::encode" => geo::hash::encode,
-		"geo::is::valid" => geo::is::valid,
+		"geo::is_valid" => geo::is::valid,
 		//
 		"math::abs" => math::abs,
 		"math::acos" => math::acos,
@@ -359,28 +363,28 @@ pub fn synchronous(
 		"string::distance::levenshtein" => string::distance::levenshtein,
 		"string::distance::normalized_damerau_levenshtein" => string::distance::normalized_damerau_levenshtein,
 		"string::distance::normalized_levenshtein" => string::distance::normalized_levenshtein,
-		"string::distance::osa_distance" => string::distance::osa_distance,
+		"string::distance::osa" => string::distance::osa_distance,
 		//
 		"string::html::encode" => string::html::encode,
 		"string::html::sanitize" => string::html::sanitize,
-		"string::is::alphanum" => string::is::alphanum,
-		"string::is::alpha" => string::is::alpha,
-		"string::is::ascii" => string::is::ascii,
-		"string::is::datetime" => string::is::datetime,
-		"string::is::domain" => string::is::domain,
-		"string::is::email" => string::is::email,
-		"string::is::hexadecimal" => string::is::hexadecimal,
-		"string::is::ip" => string::is::ip,
-		"string::is::ipv4" => string::is::ipv4,
-		"string::is::ipv6" => string::is::ipv6,
-		"string::is::latitude" => string::is::latitude,
-		"string::is::longitude" => string::is::longitude,
-		"string::is::numeric" => string::is::numeric,
-		"string::is::semver" => string::is::semver,
-		"string::is::url" => string::is::url,
-		"string::is::ulid" => string::is::ulid,
-		"string::is::uuid" => string::is::uuid,
-		"string::is::record" => string::is::record,
+		"string::is_alphanum" => string::is::alphanum,
+		"string::is_alpha" => string::is::alpha,
+		"string::is_ascii" => string::is::ascii,
+		"string::is_datetime" => string::is::datetime,
+		"string::is_domain" => string::is::domain,
+		"string::is_email" => string::is::email,
+		"string::is_hexadecimal" => string::is::hexadecimal,
+		"string::is_ip" => string::is::ip,
+		"string::is_ipv4" => string::is::ipv4,
+		"string::is_ipv6" => string::is::ipv6,
+		"string::is_latitude" => string::is::latitude,
+		"string::is_longitude" => string::is::longitude,
+		"string::is_numeric" => string::is::numeric,
+		"string::is_semver" => string::is::semver,
+		"string::is_url" => string::is::url,
+		"string::is_ulid" => string::is::ulid,
+		"string::is_uuid" => string::is::uuid,
+		"string::is_record" => string::is::record,
 		//
 		"string::similarity::fuzzy" => string::similarity::fuzzy,
 		"string::similarity::jaro" => string::similarity::jaro,
@@ -421,14 +425,14 @@ pub fn synchronous(
 		"time::week" => time::week,
 		"time::yday" => time::yday,
 		"time::year" => time::year,
-		"time::from::nanos" => time::from::nanos,
-		"time::from::micros" => time::from::micros,
-		"time::from::millis" => time::from::millis,
-		"time::from::secs" => time::from::secs,
-		"time::from::ulid" => time::from::ulid,
-		"time::from::unix" => time::from::unix,
-		"time::from::uuid" => time::from::uuid,
-		"time::is::leap_year" => time::is::leap_year,
+		"time::from_nanos" => time::from::nanos,
+		"time::from_micros" => time::from::micros,
+		"time::from_millis" => time::from::millis,
+		"time::from_secs" => time::from::secs,
+		"time::from_ulid" => time::from::ulid,
+		"time::from_unix" => time::from::unix,
+		"time::from_uuid" => time::from::uuid,
+		"time::is_leap_year" => time::is::leap_year,
 		//
 		"type::array" => r#type::array,
 		"type::bool" => r#type::bool,
@@ -449,30 +453,30 @@ pub fn synchronous(
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,
 		"type::uuid" => r#type::uuid,
-		"type::is::array" => r#type::is::array,
-		"type::is::bool" => r#type::is::bool,
-		"type::is::bytes" => r#type::is::bytes,
-		"type::is::collection" => r#type::is::collection,
-		"type::is::datetime" => r#type::is::datetime,
-		"type::is::decimal" => r#type::is::decimal,
-		"type::is::duration" => r#type::is::duration,
-		"type::is::float" => r#type::is::float,
-		"type::is::geometry" => r#type::is::geometry,
-		"type::is::int" => r#type::is::int,
-		"type::is::line" => r#type::is::line,
-		"type::is::none" => r#type::is::none,
-		"type::is::null" => r#type::is::null,
-		"type::is::multiline" => r#type::is::multiline,
-		"type::is::multipoint" => r#type::is::multipoint,
-		"type::is::multipolygon" => r#type::is::multipolygon,
-		"type::is::number" => r#type::is::number,
-		"type::is::object" => r#type::is::object,
-		"type::is::point" => r#type::is::point,
-		"type::is::polygon" => r#type::is::polygon,
-		"type::is::range" => r#type::is::range,
-		"type::is::record" => r#type::is::record,
-		"type::is::string" => r#type::is::string,
-		"type::is::uuid" => r#type::is::uuid,
+		"type::is_array" => r#type::is::array,
+		"type::is_bool" => r#type::is::bool,
+		"type::is_bytes" => r#type::is::bytes,
+		"type::is_collection" => r#type::is::collection,
+		"type::is_datetime" => r#type::is::datetime,
+		"type::is_decimal" => r#type::is::decimal,
+		"type::is_duration" => r#type::is::duration,
+		"type::is_float" => r#type::is::float,
+		"type::is_geometry" => r#type::is::geometry,
+		"type::is_int" => r#type::is::int,
+		"type::is_line" => r#type::is::line,
+		"type::is_none" => r#type::is::none,
+		"type::is_null" => r#type::is::null,
+		"type::is_multiline" => r#type::is::multiline,
+		"type::is_multipoint" => r#type::is::multipoint,
+		"type::is_multipolygon" => r#type::is::multipolygon,
+		"type::is_number" => r#type::is::number,
+		"type::is_object" => r#type::is::object,
+		"type::is_point" => r#type::is::point,
+		"type::is_polygon" => r#type::is::polygon,
+		"type::is_range" => r#type::is::range,
+		"type::is_record" => r#type::is::record,
+		"type::is_string" => r#type::is::string,
+		"type::is_uuid" => r#type::is::uuid,
 		//
 		"vector::add" => vector::add,
 		"vector::angle" => vector::angle,
@@ -508,12 +512,12 @@ pub async fn asynchronous(
 	name: &str,
 	args: Vec<Value>,
 ) -> Result<Value> {
-	// Wrappers return a function as opposed to a value so that the dispatch! method can always
-	// perform a function call.
+	// Wrappers return a function as opposed to a value so that the dispatch! method
+	// can always perform a function call.
 	#[cfg(not(target_family = "wasm"))]
 	fn cpu_intensive<R: Send + 'static>(
 		function: impl FnOnce() -> R + Send + 'static,
-	) -> impl FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = R> + Send>> {
+	) -> impl FnOnce() -> std::pin::Pin<Box<dyn Future<Output = R> + Send>> {
 		|| Box::pin(crate::exe::spawn(function))
 	}
 
@@ -575,9 +579,11 @@ pub async fn asynchronous(
 		"http::delete" => http::delete(ctx).await,
 		//
 		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
-		"record::refs" => record::refs((stk, ctx, opt, doc)).await,
+		"record::is_edge" => record::is::edge((stk, ctx, Some(opt), doc)).await,
 		//
 		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
+		"search::linear" => search::linear(ctx).await,
+		"search::rrf" => search::rrf(ctx).await,
 		"search::score" => search::score((ctx, doc)).await,
 		"search::highlight" => search::highlight((ctx, doc)).await,
 		"search::offsets" => search::offsets((ctx, doc)).await,
@@ -589,8 +595,9 @@ pub async fn asynchronous(
 		"type::field" => r#type::field((stk, ctx, Some(opt), doc)).await,
 		"type::fields" => r#type::fields((stk, ctx, Some(opt), doc)).await,
 		//
-		"value::diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-		"value::patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+		"value::diff" => value::diff.await,
+		"value::patch" => value::patch.await,
+		"schema::table::exists" => schema::table::exists((ctx, Some(opt))).await,
 	)
 }
 
@@ -604,7 +611,7 @@ pub async fn idiom(
 	name: &str,
 	mut args: Vec<Value>,
 ) -> Result<Value> {
-	ctx.check_allowed_function(&idiom_name_to_normal(value.kindof(), name))?;
+	ctx.check_allowed_function(&idiom_name_to_normal(value.kind_of(), name))?;
 	match value {
 		Value::Array(x) => {
 			args.insert(0, Value::Array(x));
@@ -741,8 +748,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -800,8 +807,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -867,8 +874,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 
@@ -934,14 +941,14 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
 		}
-		Value::Thing(t) => {
-			args.insert(0, Value::Thing(t));
+		Value::RecordId(t) => {
+			args.insert(0, Value::RecordId(t));
 			dispatch!(
 				ctx,
 				name,
@@ -952,8 +959,6 @@ pub async fn idiom(
 				"id" => record::id,
 				"table" => record::tb,
 				"tb" => record::tb,
-				"refs" => record::refs((stk, ctx, opt, doc)).await,
-
 
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
@@ -998,8 +1003,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -1064,8 +1069,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -1143,14 +1148,14 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
 		}
-		Value::Strand(s) => {
-			args.insert(0, Value::Strand(s));
+		Value::String(s) => {
+			args.insert(0, Value::String(s));
 			dispatch!(
 				ctx,
 				name,
@@ -1256,8 +1261,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 			)
 		}
 		Value::Datetime(d) => {
@@ -1332,8 +1337,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -1404,14 +1409,14 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
 		}
 		x => {
-			let message = format!("no such method found for the {} type", x.kindof());
+			let message = format!("no such method found for the {} type", x.kind_of());
 			args.insert(0, x);
 			dispatch!(
 				ctx,
@@ -1462,8 +1467,8 @@ pub async fn idiom(
 				"to_uuid" => r#type::uuid,
 				//
 				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
-				"diff" => value::diff((stk, ctx, Some(opt), doc)).await,
-				"patch" => value::patch((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
 				//
 				"repeat" => array::repeat,
 			)
@@ -1474,11 +1479,11 @@ pub async fn idiom(
 fn get_execution_context<'a>(
 	ctx: &'a Context,
 	doc: Option<&'a CursorDoc>,
-) -> Option<(&'a QueryExecutor, &'a CursorDoc, &'a Thing)> {
+) -> Option<(&'a QueryExecutor, &'a CursorDoc, &'a RecordId)> {
 	if let Some(doc) = doc {
 		if let Some(thg) = &doc.rid {
 			if let Some(pla) = ctx.get_query_planner() {
-				if let Some(exe) = pla.get_query_executor(&thg.tb) {
+				if let Some(exe) = pla.get_query_executor(&thg.table) {
 					return Some((exe, doc, thg));
 				}
 			}
@@ -1588,14 +1593,13 @@ mod tests {
 	use regex::Regex;
 
 	use crate::dbs::Capabilities;
-	use crate::{
-		dbs::capabilities::ExperimentalTarget,
-		sql::{Function, Query, SqlValue, Statement, statements::OutputStatement},
-	};
+	use crate::dbs::capabilities::ExperimentalTarget;
+	use crate::sql::{Expr, Function};
 
 	#[tokio::test]
 	async fn implementations_are_present() {
-		// Accumulate and display all problems at once to avoid a test -> fix -> test -> fix cycle.
+		// Accumulate and display all problems at once to avoid a test -> fix -> test ->
+		// fix cycle.
 		let mut problems = Vec::new();
 
 		// Read the source code of this file
@@ -1623,27 +1627,18 @@ mod tests {
 			let (quote, _) = line.split_once("=>").unwrap();
 			let name = quote.trim().trim_matches('"');
 
-			let res = crate::syn::parse_with_capabilities(
-				&format!("RETURN {}()", name),
+			let res = crate::syn::expr_with_capabilities(
+				&format!("{}()", name),
 				&Capabilities::all().with_experimental(ExperimentalTarget::DefineApi.into()),
 			);
 
-			if let Ok(Query(mut x)) = res {
-				match x.0.pop() {
-					Some(Statement::Output(OutputStatement {
-						what: SqlValue::Function(x),
-						..
-					})) => match *x {
-						Function::Normal(parsed_name, _) => {
-							if parsed_name != name {
-								problems
-									.push(format!("function `{name}` parsed as `{parsed_name}`"));
-							}
+			if let Ok(Expr::FunctionCall(call)) = res {
+				match call.receiver {
+					Function::Normal(parsed_name) => {
+						if parsed_name != name {
+							problems.push(format!("function `{name}` parsed as `{parsed_name}`"));
 						}
-						_ => {
-							problems.push(format!("couldn't parse {name} function"));
-						}
-					},
+					}
 					_ => {
 						problems.push(format!("couldn't parse {name} function"));
 					}
@@ -1654,7 +1649,7 @@ mod tests {
 
 			#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 			{
-				use crate::expr::Value;
+				use crate::val::Value;
 
 				let name = name.replace("::", ".");
 				let sql =
@@ -1666,9 +1661,10 @@ mod tests {
 				let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
 				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 				let tmp = res.remove(0).result.unwrap();
-				if tmp == Value::from("object") {
-					// Assume this function is superseded by a module of the same name.
-				} else if tmp != Value::from("function") {
+				if tmp == Value::String("object".to_owned()) {
+					// Assume this function is superseded by a module of the
+					// same name.
+				} else if tmp != Value::String("function".to_owned()) {
 					problems.push(format!("function {name} not exported to JavaScript: {tmp:?}"));
 				}
 			}

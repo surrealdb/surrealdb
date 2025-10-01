@@ -1,88 +1,46 @@
-use crate::sql::{
-	Cond, Explain, Fetchs, Fields, Groups, Idioms, Limit, Splits, SqlValues, Start, Timeout,
-	Version, With,
-	order::{OldOrders, Order, OrderList, Ordering},
-};
-use anyhow::Result;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 4)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use crate::fmt::Fmt;
+use crate::sql::order::Ordering;
+use crate::sql::{
+	Cond, Explain, Expr, Fetchs, Fields, Groups, Limit, Splits, Start, Timeout, With,
+};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
 	pub expr: Fields,
-	pub omit: Option<Idioms>,
-	#[revision(start = 2)]
+	pub omit: Vec<Expr>,
 	pub only: bool,
 	/// The baz part in SELECT foo,bar FROM baz.
-	pub what: SqlValues,
+	pub what: Vec<Expr>,
 	pub with: Option<With>,
 	pub cond: Option<Cond>,
 	pub split: Option<Splits>,
 	pub group: Option<Groups>,
-	#[revision(end = 4, convert_fn = "convert_old_orders")]
-	pub old_order: Option<OldOrders>,
-	#[revision(start = 4)]
 	pub order: Option<Ordering>,
 	pub limit: Option<Limit>,
 	pub start: Option<Start>,
 	pub fetch: Option<Fetchs>,
-	pub version: Option<Version>,
+	pub version: Option<Expr>,
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
 	pub explain: Option<Explain>,
-	#[revision(start = 3)]
 	pub tempfiles: bool,
-}
-
-impl SelectStatement {
-	fn convert_old_orders(
-		&mut self,
-		_rev: u16,
-		old_value: Option<OldOrders>,
-	) -> Result<(), revision::Error> {
-		let Some(x) = old_value else {
-			// nothing to do.
-			return Ok(());
-		};
-
-		if x.0.iter().any(|x| x.random) {
-			self.order = Some(Ordering::Random);
-			return Ok(());
-		}
-
-		let new_ord =
-			x.0.into_iter()
-				.map(|x| Order {
-					value: x.order,
-					collate: x.collate,
-					numeric: x.numeric,
-					direction: x.direction,
-				})
-				.collect();
-
-		self.order = Some(Ordering::Order(OrderList(new_ord)));
-
-		Ok(())
-	}
 }
 
 impl fmt::Display for SelectStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SELECT {}", self.expr)?;
-		if let Some(ref v) = self.omit {
-			write!(f, " OMIT {v}")?
+		if !self.omit.is_empty() {
+			write!(f, " OMIT {}", Fmt::comma_separated(self.omit.iter()))?
 		}
 		write!(f, " FROM")?;
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", self.what)?;
+		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
 		if let Some(ref v) = self.with {
 			write!(f, " {v}")?
 		}
@@ -108,7 +66,7 @@ impl fmt::Display for SelectStatement {
 			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.version {
-			write!(f, " {v}")?
+			write!(f, " VERSION {v}")?
 		}
 		if let Some(ref v) = self.timeout {
 			write!(f, " {v}")?
@@ -127,9 +85,9 @@ impl From<SelectStatement> for crate::expr::statements::SelectStatement {
 	fn from(v: SelectStatement) -> Self {
 		Self {
 			expr: v.expr.into(),
-			omit: v.omit.map(Into::into),
+			omit: v.omit.into_iter().map(Into::into).collect(),
 			only: v.only,
-			what: v.what.into(),
+			what: v.what.into_iter().map(From::from).collect(),
 			with: v.with.map(Into::into),
 			cond: v.cond.map(Into::into),
 			split: v.split.map(Into::into),
@@ -151,9 +109,9 @@ impl From<crate::expr::statements::SelectStatement> for SelectStatement {
 	fn from(v: crate::expr::statements::SelectStatement) -> Self {
 		Self {
 			expr: v.expr.into(),
-			omit: v.omit.map(Into::into),
+			omit: v.omit.into_iter().map(Into::into).collect(),
 			only: v.only,
-			what: v.what.into(),
+			what: v.what.into_iter().map(From::from).collect(),
 			with: v.with.map(Into::into),
 			cond: v.cond.map(Into::into),
 			split: v.split.map(Into::into),

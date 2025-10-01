@@ -1,30 +1,37 @@
-use crate::sql::{Ident, Timeout};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use super::DefineKind;
+use crate::sql::{Expr, Literal, Timeout};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct DefineSequenceStatement {
-	pub name: Ident,
-	pub if_not_exists: bool,
-	pub overwrite: bool,
-	pub batch: u32,
-	pub start: i64,
+	pub kind: DefineKind,
+	pub name: Expr,
+	pub batch: Expr,
+	pub start: Expr,
 	pub timeout: Option<Timeout>,
+}
+
+impl Default for DefineSequenceStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			batch: Expr::Literal(Literal::Integer(0)),
+			start: Expr::Literal(Literal::Integer(0)),
+			timeout: None,
+		}
+	}
 }
 
 impl Display for DefineSequenceStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE SEQUENCE")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {} BATCH {} START {}", self.name, self.batch, self.start)?;
 		if let Some(ref v) = self.timeout {
@@ -37,11 +44,10 @@ impl Display for DefineSequenceStatement {
 impl From<DefineSequenceStatement> for crate::expr::statements::define::DefineSequenceStatement {
 	fn from(v: DefineSequenceStatement) -> Self {
 		Self {
+			kind: v.kind.into(),
 			name: v.name.into(),
-			if_not_exists: v.if_not_exists,
-			overwrite: v.overwrite,
-			batch: v.batch,
-			start: v.start,
+			batch: v.batch.into(),
+			start: v.start.into(),
 			timeout: v.timeout.map(Into::into),
 		}
 	}
@@ -50,11 +56,10 @@ impl From<DefineSequenceStatement> for crate::expr::statements::define::DefineSe
 impl From<crate::expr::statements::define::DefineSequenceStatement> for DefineSequenceStatement {
 	fn from(v: crate::expr::statements::define::DefineSequenceStatement) -> Self {
 		DefineSequenceStatement {
+			kind: v.kind.into(),
 			name: v.name.into(),
-			if_not_exists: v.if_not_exists,
-			overwrite: v.overwrite,
-			batch: v.batch,
-			start: v.start,
+			batch: v.batch.into(),
+			start: v.start.into(),
 			timeout: v.timeout.map(Into::into),
 		}
 	}

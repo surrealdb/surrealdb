@@ -1,19 +1,17 @@
-use crate::Surreal;
-use crate::api::Connection;
-use crate::api::Result;
-use crate::api::conn::Command;
-use crate::api::method::BoxFuture;
-use crate::expr::Value;
-use crate::method::OnceLockExt;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
-use serde_content::Serializer;
-use serde_content::Value as Content;
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
-use surrealdb_core::expr::Array;
-use surrealdb_core::expr::to_value;
+
+use serde::Serialize;
+use serde::de::DeserializeOwned;
+use serde_content::{Serializer, Value as Content};
+
+use crate::api::conn::Command;
+use crate::api::method::BoxFuture;
+use crate::api::{Connection, Result};
+use crate::core::val;
+use crate::method::OnceLockExt;
+use crate::{Surreal, api};
 
 /// A run future
 #[derive(Debug)]
@@ -28,7 +26,8 @@ impl<C, R> Run<'_, C, R>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> Run<'static, C, R> {
 		Run {
 			client: Cow::Owned(self.client.into_owned()),
@@ -55,15 +54,16 @@ where
 		Box::pin(async move {
 			let router = client.inner.router.extract()?;
 			let (name, version) = function?;
-			let value = match args.map_err(crate::error::Db::from)? {
-				// Tuples are treated as multiple function arguments
-				Content::Tuple(tup) => tup,
-				// Everything else is treated as a single argument
-				content => vec![content],
-			};
-			let args = match to_value(value)? {
-				Value::Array(array) => array,
-				value => Array::from(vec![value]),
+			let value =
+				match args.map_err(|x| crate::error::Api::DeSerializeValue(x.to_string()))? {
+					// Tuples are treated as multiple function arguments
+					Content::Tuple(tup) => tup,
+					// Everything else is treated as a single argument
+					content => vec![content],
+				};
+			let args = match api::value::to_core_value(value)? {
+				val::Value::Array(array) => array,
+				value => val::Array::from(vec![value]),
 			};
 			router
 				.execute(Command::Run {

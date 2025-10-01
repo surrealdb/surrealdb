@@ -1,6 +1,8 @@
-use crate::tests::report::TestGrade;
-use crate::{cli::ColorMode, format::ansi};
 use std::io::{self, BufWriter, IsTerminal as _, Stderr, Write};
+
+use crate::cli::ColorMode;
+use crate::format::ansi;
+use crate::tests::report::TestGrade;
 
 pub struct Progress<I, W> {
 	items: Vec<(I, String)>,

@@ -1,22 +1,11 @@
-use crate::expr::Datetime;
-use crate::expr::value::Value;
-use anyhow::Result;
-use chrono::TimeZone;
-use chrono::Utc;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use super::Duration;
+use anyhow::Result;
+use chrono::{TimeZone, Utc};
 
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Constant";
+use crate::val::{Datetime, Duration, Value};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[serde(rename = "$surrealdb::private::sql::Constant")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 pub enum Constant {
 	MathE,
 	MathFrac1Pi,

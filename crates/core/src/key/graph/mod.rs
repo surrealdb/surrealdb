@@ -1,29 +1,33 @@
 //! Stores a graph edge pointer
-use crate::expr::dir::Dir;
-use crate::expr::id::Id;
-use crate::expr::thing::Thing;
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+use anyhow::Result;
+use storekey::{BorrowDecode, Encode};
+
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::expr::dir::Dir;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::{KVKey, impl_kv_key_storekey};
+use crate::val::{RecordId, RecordIdKey};
+
+#[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 struct Prefix<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub id: Id,
+	pub id: RecordIdKey,
 }
-impl_key!(Prefix<'a>);
+
+impl_kv_key_storekey!(Prefix<'_> => Vec<u8>);
 
 impl<'a> Prefix<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -31,30 +35,32 @@ impl<'a> Prefix<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'~',
 			id: id.to_owned(),
 		}
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 struct PrefixEg<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub id: Id,
+	pub id: RecordIdKey,
 	pub eg: Dir,
 }
-impl_key!(PrefixEg<'a>);
+
+impl_kv_key_storekey!(PrefixEg<'_> => Vec<u8>);
 
 impl<'a> PrefixEg<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id, eg: &Dir) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey, eg: &Dir) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -62,32 +68,41 @@ impl<'a> PrefixEg<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'~',
-			id: id.to_owned(),
-			eg: eg.to_owned(),
+			id: id.clone(),
+			eg: eg.clone(),
 		}
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 struct PrefixFt<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub id: Id,
+	pub id: RecordIdKey,
 	pub eg: Dir,
-	pub ft: &'a str,
+	pub ft: Cow<'a, str>,
 }
-impl_key!(PrefixFt<'a>);
+
+impl_kv_key_storekey!(PrefixFt<'_> => Vec<u8>);
 
 impl<'a> PrefixFt<'a> {
-	fn new(ns: &'a str, db: &'a str, tb: &'a str, id: &Id, eg: &Dir, ft: &'a str) -> Self {
+	fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a str,
+		id: &RecordIdKey,
+		eg: &Dir,
+		ft: &'a str,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -95,76 +110,109 @@ impl<'a> PrefixFt<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'~',
 			id: id.to_owned(),
 			eg: eg.to_owned(),
-			ft,
+			ft: Cow::Borrowed(ft),
 		}
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Graph<'a> {
+#[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
+pub(crate) struct Graph<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub id: Id,
+	pub id: RecordIdKey,
 	pub eg: Dir,
-	pub ft: &'a str,
-	pub fk: Id,
+	pub ft: Cow<'a, str>,
+	pub fk: Cow<'a, RecordIdKey>,
 }
-impl_key!(Graph<'a>);
+
+impl_kv_key_storekey!(Graph<'_> => ());
+
+impl Graph<'_> {
+	pub fn decode_key(k: &[u8]) -> Result<Graph<'_>> {
+		Ok(storekey::decode_borrow(k)?)
+	}
+}
 
 pub fn new<'a>(
-	ns: &'a str,
-	db: &'a str,
+	ns: NamespaceId,
+	db: DatabaseId,
 	tb: &'a str,
-	id: &Id,
+	id: &RecordIdKey,
 	eg: &Dir,
-	fk: &'a Thing,
+	fk: &'a RecordId,
 ) -> Graph<'a> {
 	Graph::new(ns, db, tb, id.to_owned(), eg.to_owned(), fk)
 }
 
-pub fn prefix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>> {
-	let mut k = Prefix::new(ns, db, tb, id).encode()?;
+pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>> {
+	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str, tb: &str, id: &Id) -> Result<Vec<u8>> {
-	let mut k = Prefix::new(ns, db, tb, id).encode()?;
+pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str, id: &RecordIdKey) -> Result<Vec<u8>> {
+	let mut k = Prefix::new(ns, db, tb, id).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
-pub fn egprefix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir) -> Result<Vec<u8>> {
-	let mut k = PrefixEg::new(ns, db, tb, id, eg).encode()?;
+pub fn egprefix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &str,
+	id: &RecordIdKey,
+	eg: &Dir,
+) -> Result<Vec<u8>> {
+	let mut k = PrefixEg::new(ns, db, tb, id, eg).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn egsuffix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir) -> Result<Vec<u8>> {
-	let mut k = PrefixEg::new(ns, db, tb, id, eg).encode()?;
+pub fn egsuffix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &str,
+	id: &RecordIdKey,
+	eg: &Dir,
+) -> Result<Vec<u8>> {
+	let mut k = PrefixEg::new(ns, db, tb, id, eg).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
 
-pub fn ftprefix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir, ft: &str) -> Result<Vec<u8>> {
-	let mut k = PrefixFt::new(ns, db, tb, id, eg, ft).encode()?;
+pub fn ftprefix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &str,
+	id: &RecordIdKey,
+	eg: &Dir,
+	ft: &str,
+) -> Result<Vec<u8>> {
+	let mut k = PrefixFt::new(ns, db, tb, id, eg, ft).encode_key()?;
 	k.extend_from_slice(&[0x00]);
 	Ok(k)
 }
 
-pub fn ftsuffix(ns: &str, db: &str, tb: &str, id: &Id, eg: &Dir, ft: &str) -> Result<Vec<u8>> {
-	let mut k = PrefixFt::new(ns, db, tb, id, eg, ft).encode()?;
+pub fn ftsuffix(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &str,
+	id: &RecordIdKey,
+	eg: &Dir,
+	ft: &str,
+) -> Result<Vec<u8>> {
+	let mut k = PrefixFt::new(ns, db, tb, id, eg, ft).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
 }
@@ -176,31 +224,13 @@ impl Categorise for Graph<'_> {
 }
 
 impl<'a> Graph<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, id: Id, eg: Dir, fk: &'a Thing) -> Self {
-		Self {
-			__: b'/',
-			_a: b'*',
-			ns,
-			_b: b'*',
-			db,
-			_c: b'*',
-			tb,
-			_d: b'~',
-			id,
-			eg,
-			ft: &fk.tb,
-			fk: fk.id.clone(),
-		}
-	}
-
-	pub fn new_from_id(
-		ns: &'a str,
-		db: &'a str,
+	pub fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
 		tb: &'a str,
-		id: Id,
+		id: RecordIdKey,
 		eg: Dir,
-		ft: &'a str,
-		fk: Id,
+		fk: &'a RecordId,
 	) -> Self {
 		Self {
 			__: b'/',
@@ -209,12 +239,12 @@ impl<'a> Graph<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'~',
 			id,
 			eg,
-			ft,
-			fk,
+			ft: Cow::Borrowed(&fk.table),
+			fk: Cow::Borrowed(&fk.key),
 		}
 	}
 }
@@ -222,31 +252,27 @@ impl<'a> Graph<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KeyDecode;
-
-	use crate::sql::Thing as SqlThing;
+	use crate::syn;
+	use crate::val::Value;
 
 	#[test]
 	fn key() {
-		use crate::syn::Parse;
-
-		let fk: Thing = SqlThing::parse("other:test").into();
+		let Ok(Value::RecordId(fk)) = syn::value("other:test") else {
+			panic!()
+		};
 		#[rustfmt::skip]
 		let val = Graph::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testtb",
-			"testid".into(),
+			"testid".to_owned().into(),
 			Dir::Out,
 			&fk,
 		);
-		let enc = Graph::encode(&val).unwrap();
+		let enc = Graph::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\0*testdb\0*testtb\x00~\0\0\0\x01testid\0\0\0\0\x01other\0\0\0\0\x01test\0"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0~\x03testid\0\x03other\0\x03test\0"
 		);
-
-		let dec = Graph::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

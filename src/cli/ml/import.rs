@@ -1,11 +1,13 @@
+use anyhow::Result;
+use clap::Args;
+use surrealdb::engine::any::{self, connect};
+use surrealdb::opt::Config;
+use surrealdb::opt::capabilities::Capabilities;
+
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{
 	AuthArguments, DatabaseConnectionArguments, DatabaseSelectionArguments,
 };
-use anyhow::Result;
-use clap::Args;
-use surrealdb::engine::any::{self, connect};
-use surrealdb::opt::{Config, capabilities::Capabilities};
 
 #[derive(Args, Debug)]
 pub struct ImportCommandArguments {
@@ -41,8 +43,11 @@ pub async fn init(
 	// Default datastore configuration for local engines
 	let config = Config::new().capabilities(Capabilities::all());
 	let is_local = any::__into_endpoint(&endpoint)?.parse_kind()?.is_local();
-	// If username and password are specified, and we are connecting to a remote SurrealDB server, then we need to authenticate.
-	// If we are connecting directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we don't need to authenticate because we use an embedded (local) SurrealDB instance with auth disabled.
+	// If username and password are specified, and we are connecting to a remote
+	// SurrealDB server, then we need to authenticate. If we are connecting
+	// directly to a datastore (i.e. surrealkv://local.skv or tikv://...), then we
+	// don't need to authenticate because we use an embedded (local) SurrealDB
+	// instance with auth disabled.
 	let client = if username.is_some() && password.is_some() && !is_local {
 		debug!("Connecting to the database engine with authentication");
 		let creds = CredentialsBuilder::default()
@@ -75,7 +80,7 @@ pub async fn init(
 	client.use_ns(namespace).use_db(database).await?;
 	// Import the data into the database
 	client.import(file).ml().await?;
-	info!("The SurrealML file was imported successfully");
+	info!("Import executed with no errors");
 	// All ok
 	Ok(())
 }

@@ -1,35 +1,38 @@
 //! Stores a grant associated with an access method
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Gr<'a> {
+use anyhow::Result;
+use storekey::{BorrowDecode, Encode};
+
+use crate::catalog;
+use crate::key::category::{Categorise, Category};
+use crate::kvs::{KVKey, impl_kv_key_storekey};
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+pub(crate) struct Gr<'a> {
 	__: u8,
 	_a: u8,
-	pub ac: &'a str,
+	pub ac: Cow<'a, str>,
 	_b: u8,
 	_c: u8,
 	_d: u8,
-	pub gr: &'a str,
+	pub gr: Cow<'a, str>,
 }
-impl_key!(Gr<'a>);
+
+impl_kv_key_storekey!(Gr<'_> => catalog::AccessGrant);
 
 pub fn new<'a>(ac: &'a str, gr: &'a str) -> Gr<'a> {
 	Gr::new(ac, gr)
 }
 
 pub fn prefix(ac: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ac).encode()?;
+	let mut k = super::all::new(ac).encode_key()?;
 	k.extend_from_slice(b"!gr\x00");
 	Ok(k)
 }
 
 pub fn suffix(ac: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ac).encode()?;
+	let mut k = super::all::new(ac).encode_key()?;
 	k.extend_from_slice(b"!gr\xff");
 	Ok(k)
 }
@@ -45,31 +48,28 @@ impl<'a> Gr<'a> {
 		Self {
 			__: b'/',
 			_a: b'&',
-			ac,
+			ac: Cow::Borrowed(ac),
 			_b: b'!',
 			_c: b'g',
 			_d: b'r',
-			gr,
+			gr: Cow::Borrowed(gr),
 		}
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Gr::new(
 			"testac",
 			"testgr",
 		);
-		let enc = Gr::encode(&val).unwrap();
+		let enc = Gr::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/&testac\0!grtestgr\0");
-
-		let dec = Gr::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 
 	#[test]

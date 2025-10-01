@@ -3,7 +3,7 @@ mod http;
 #[cfg(feature = "protocol-ws")]
 mod ws;
 
-#[cfg(kv_fdb)]
+#[cfg(feature = "kv-fdb")]
 mod fdb;
 #[cfg(feature = "kv-indxdb")]
 mod indxdb;
@@ -16,12 +16,11 @@ mod surrealkv;
 #[cfg(feature = "kv-tikv")]
 mod tikv;
 
-use crate::api::Connection;
-use crate::api::Result;
-use crate::api::err::Error;
 use url::Url;
 
 use super::Config;
+use crate::api::err::Error;
+use crate::api::{Connection, Result};
 
 /// A server address used to connect to the server
 #[derive(Debug, Clone)]
@@ -76,8 +75,9 @@ fn replace_tilde(path: &str) -> String {
 }
 
 pub(crate) fn path_to_string(protocol: &str, path: impl AsRef<std::path::Path>) -> String {
-	use path_clean::PathClean;
 	use std::path::Path;
+
+	use path_clean::PathClean;
 
 	let path = path.as_ref().display().to_string();
 	let expanded = replace_tilde(&path);

@@ -1,41 +1,38 @@
-use crate::sql::{Ident, Idioms, Index, Strand};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 4)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use super::DefineKind;
+use crate::fmt::Fmt;
+use crate::sql::{Expr, Index};
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct DefineIndexStatement {
-	pub name: Ident,
-	pub what: Ident,
-	pub cols: Idioms,
+	pub kind: DefineKind,
+	pub name: Expr,
+	pub what: Expr,
+	pub cols: Vec<Expr>,
 	pub index: Index,
-	pub comment: Option<Strand>,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
-	#[revision(start = 4)]
+	pub comment: Option<Expr>,
 	pub concurrently: bool,
 }
 
 impl Display for DefineIndexStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE INDEX")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		write!(f, " {} ON {}", self.name, self.what)?;
+		if !self.cols.is_empty() {
+			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter()))?;
 		}
-		write!(f, " {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		if self.concurrently {
 			write!(f, " CONCURRENTLY")?
@@ -47,13 +44,12 @@ impl Display for DefineIndexStatement {
 impl From<DefineIndexStatement> for crate::expr::statements::DefineIndexStatement {
 	fn from(v: DefineIndexStatement) -> Self {
 		Self {
+			kind: v.kind.into(),
 			name: v.name.into(),
 			what: v.what.into(),
-			cols: v.cols.into(),
+			cols: v.cols.into_iter().map(From::from).collect(),
 			index: v.index.into(),
-			comment: v.comment.map(Into::into),
-			if_not_exists: v.if_not_exists,
-			overwrite: v.overwrite,
+			comment: v.comment.map(|x| x.into()),
 			concurrently: v.concurrently,
 		}
 	}
@@ -62,13 +58,12 @@ impl From<DefineIndexStatement> for crate::expr::statements::DefineIndexStatemen
 impl From<crate::expr::statements::DefineIndexStatement> for DefineIndexStatement {
 	fn from(v: crate::expr::statements::DefineIndexStatement) -> Self {
 		Self {
+			kind: v.kind.into(),
 			name: v.name.into(),
 			what: v.what.into(),
-			cols: v.cols.into(),
+			cols: v.cols.into_iter().map(From::from).collect(),
 			index: v.index.into(),
-			comment: v.comment.map(Into::into),
-			if_not_exists: v.if_not_exists,
-			overwrite: v.overwrite,
+			comment: v.comment.map(|x| x.into()),
 			concurrently: v.concurrently,
 		}
 	}

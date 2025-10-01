@@ -1,5 +1,5 @@
 [env]
-RUSTFLAGS = { value = "-D warnings --cfg tokio_unstable", condition = { env_not_set = [
+RUSTFLAGS = { value = "--cfg tokio_unstable", condition = { env_not_set = [
     "RUSTFLAGS",
 ] } }
 BENCH_WORKER_THREADS = { value = "1", condition = { env_not_set = [
@@ -24,6 +24,7 @@ SURREAL_SCRIPTING_MAX_TIME_LIMIT = { value = "500", condition = { env_not_set = 
 
 [tasks.ci-format]
 category = "CI - CHECK"
+toolchain = "${SURREAL_NIGHTLY_RUST_TOOLCHAIN}"
 command = "cargo"
 args = ["fmt", "--all", "--check"]
 
@@ -105,6 +106,18 @@ args = [
     "protocol-ws,protocol-http,kv-mem,kv-indxdb,http,jwks",
     "--target",
     "wasm32-unknown-unknown",
+]
+
+[tasks.ci-docs]
+category = "CI - CHECK"
+command = "cargo"
+args = [
+    "doc",
+    "--no-deps",
+    "--package",
+    "surrealdb",
+    "--features",
+    "rustls,native-tls,protocol-ws,protocol-http,kv-mem,kv-rocksdb,kv-tikv,http,scripting,jwks",
 ]
 
 #
@@ -210,12 +223,14 @@ args = [
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--no-default-features",
     "--features",
-    "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
+    "storage-mem,scripting,http,jwks",
     "--workspace",
+    "--no-fail-fast",
     "--",
     "--skip",
     "api_integration",
@@ -238,27 +253,13 @@ category = "CI - INTEGRATION TESTS"
 command = "cargo"
 args = [
     "llvm-cov",
+    "nextest",
     "--html",
     "--locked",
     "--no-default-features",
     "--features",
-    "storage-mem,scripting,http,jwks",
+    "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
     "--workspace",
-    "--",
-    "--skip",
-    "api_integration",
-    "--skip",
-    "cli_integration",
-    "--skip",
-    "http_integration",
-    "--skip",
-    "ws_integration",
-    "--skip",
-    "ml_integration",
-    "--skip",
-    "graphql_integration",
-    "--skip",
-    "database_upgrade",
 ]
 
 [tasks.test-workspace-coverage-complete]
@@ -283,11 +284,6 @@ run_task = { name = [
     "stop-surrealdb",
 ], fork = true }
 
-[tasks.ci-database-upgrade]
-env = { _TEST_FEATURES = "storage-rocksdb", RUSTFLAGS = "-D warnings --cfg docker --cfg tokio_unstable" }
-category = "CI - DATABASE UPGRADE TESTS"
-run_task = { name = ["test-database-upgrade"], fork = true }
-
 #
 # Tests private tasks
 #
@@ -297,7 +293,8 @@ private = true
 command = "cargo"
 env = { RUST_BACKTRACE = 1 }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--package",
     "surrealdb-core",
@@ -305,6 +302,7 @@ args = [
     "--features",
     "${_TEST_FEATURES}",
     "--lib",
+    "--",
     "kvs::tests",
 ]
 
@@ -313,7 +311,8 @@ private = true
 command = "cargo"
 env = { RUST_BACKTRACE = 1 }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--package",
     "surrealdb",
@@ -322,7 +321,7 @@ args = [
     "${_TEST_FEATURES}",
     "--test",
     "api",
-    "api_integration::${_TEST_API_ENGINE}",
+    "${@}",
 ]
 
 [tasks.ci-api-integration]
@@ -333,24 +332,6 @@ run_task = { name = [
     "test-api-integration",
     "stop-surrealdb",
 ], fork = true }
-
-[tasks.test-database-upgrade]
-private = true
-command = "cargo"
-env = { RUST_LOG = "info" }
-args = [
-    "test",
-    "--locked",
-    "--no-default-features",
-    "--features",
-    "${_TEST_FEATURES}",
-    "--workspace",
-    "--test",
-    "database_upgrade",
-    "--",
-    "database_upgrade",
-    "--show-output",
-]
 
 #
 # Integration tests with background services
@@ -378,7 +359,6 @@ run_task = "ci-api-integration"
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "mem", _TEST_FEATURES = "kv-mem" }
 run_task = { name = [
-    "test-kvs",
     "test-api-integration",
 ], fork = true, parallel = true }
 
@@ -386,7 +366,6 @@ run_task = { name = [
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb" }
 run_task = { name = [
-    "test-kvs",
     "test-api-integration",
 ], fork = true, parallel = true }
 
@@ -394,7 +373,6 @@ run_task = { name = [
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "rocksdb", _TEST_FEATURES = "kv-rocksdb" }
 run_task = { name = [
-    "test-kvs",
     "test-api-integration",
 ], fork = true, parallel = true }
 
@@ -402,7 +380,6 @@ run_task = { name = [
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv" }
 run_task = { name = [
-    "test-kvs",
     "test-api-integration",
 ], fork = true, parallel = false }
 
@@ -411,28 +388,14 @@ category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
 run_task = { name = [
     "start-tikv",
-    "test-kvs",
-    "stop-tikv",
-    "start-tikv",
     "test-api-integration",
     "stop-tikv",
 ], fork = true, parallel = false }
 
-[tasks.ci-api-integration-fdb-7_1]
+[tasks.ci-api-integration-fdb]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb-7_1" }
+env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb" }
 run_task = { name = [
-    "test-kvs",
-    "clear-fdb",
-    "test-api-integration",
-], fork = true, parallel = false }
-
-[tasks.ci-api-integration-fdb-7_3]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb-7_3" }
-run_task = { name = [
-    "test-kvs",
-    "clear-fdb",
     "test-api-integration",
 ], fork = true, parallel = false }
 
@@ -445,11 +408,50 @@ dependencies = [
     "ci-api-integration-rocksdb",
     "ci-api-integration-surrealkv",
     "ci-api-integration-tikv",
-    "ci-api-integration-fdb-7_1",
-    "ci-api-integration-fdb-7_3",
+    "ci-api-integration-fdb",
     "ci-api-integration-http",
     "ci-api-integration-ws",
 ]
+
+#
+# KVS tests
+#
+[tasks.ci-mem-kvs]
+category = "CI - INTEGRATION TESTS"
+env = { _TEST_API_ENGINE = "mem", _TEST_FEATURES = "kv-mem" }
+run_task = { name = [
+    "test-kvs",
+], fork = true, parallel = true }
+
+[tasks.ci-rocksdb-kvs]
+category = "CI - INTEGRATION TESTS"
+env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb" }
+run_task = { name = [
+    "test-kvs",
+], fork = true, parallel = true }
+
+[tasks.ci-surrealkv-kvs]
+category = "CI - INTEGRATION TESTS"
+env = { _TEST_API_ENGINE = "surrealkv", _TEST_FEATURES = "kv-surrealkv" }
+run_task = { name = [
+    "test-kvs",
+], fork = true, parallel = false }
+
+[tasks.ci-tikv-kvs]
+category = "CI - INTEGRATION TESTS"
+env = { _TEST_API_ENGINE = "tikv", _TEST_FEATURES = "kv-tikv" }
+run_task = { name = [
+    "start-tikv",
+    "test-kvs",
+    "stop-tikv",
+], fork = true, parallel = false }
+
+[tasks.ci-fdb-kvs]
+category = "CI - INTEGRATION TESTS"
+env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb" }
+run_task = { name = [
+    "test-kvs",
+], fork = true, parallel = false }
 
 #
 # Services
@@ -489,16 +491,22 @@ script = """
 category = "CI - SERVICES"
 script = """
     #!/bin/bash -ex
+
 	echo "Installing TiKV playground..."
     ${HOME}/.tiup/bin/tiup install pd tikv playground
-	echo "Cleaning TiKV playground..."
-	${HOME}/.tiup/bin/tiup clean --all
+
+    echo "Cleaning TiKV playground..."
+    ${HOME}/.tiup/bin/tiup clean --all
+    killall -q tiup-playground || true
+    rm -rf ${HOME}/.tiup/data/testing
+
 	echo "Starting TiKV playground..."
-	nohup ${HOME}/.tiup/bin/tiup playground --mode tikv-slim --kv 1 --pd 1 --db 0 --ticdc 0 --tiflash 0 --without-monitor > /tmp/tiup.log &
-	set +e
+	nohup ${HOME}/.tiup/bin/tiup playground --mode tikv-slim --kv 1 --pd 1 --db 0 --ticdc 0 --tiflash 0 --without-monitor --tag "testing" > /tmp/tiup.log &
+
+    set +e
 	tries=0
-	echo "Waiting for TiKV playground to be ready..."
-	while [[ $tries -lt 10 ]]; do
+	echo "Waiting for TiKV playground to start..."
+	while [[ $tries -lt 5 ]]; do
 		sleep 5
 		echo "Displaying playground status..."
 		if ! ${HOME}/.tiup/bin/tiup playground display >/dev/null; then
@@ -507,17 +515,41 @@ script = """
 		fi
 		exit 0;
 	done
-	echo "PANIC: Couldn't start tiup playground! Here are the logs for the last attempt:"
+
+	echo "PANIC: Couldn't start TiKV playground! Here are the logs for the last attempt:"
     cat /tmp/tiup.log
+
     exit 1
 """
 
 [tasks.stop-tikv]
 category = "CI - SERVICES"
 script = """
-${HOME}/.tiup/bin/tiup clean --all
-"""
+    #!/bin/bash -ex
 
+    echo "Cleaning TiKV playground..."
+    ${HOME}/.tiup/bin/tiup clean --all
+    killall -q tiup-playground || true
+    rm -rf ${HOME}/.tiup/data/testing
+
+    set +e
+	tries=0
+	echo "Waiting for TiKV playground to stop..."
+	while [[ $tries -lt 5 ]]; do
+		sleep 5
+		echo "Displaying playground status..."
+		if ${HOME}/.tiup/bin/tiup playground display >/dev/null; then
+			tries=$((tries + 1));
+			continue
+		fi
+		exit 0;
+	done
+
+	echo "PANIC: Couldn't stop TiKV playground! Here are the logs for the last attempt:"
+    cat /tmp/tiup.log
+
+    exit 1
+"""
 
 [tasks.clear-fdb]
 category = "CI - SERVICES"
@@ -549,6 +581,7 @@ args = [
 #
 # Benchmarks - Common
 #
+
 [tasks.ci-bench]
 category = "CI - BENCHMARK"
 command = "cargo"

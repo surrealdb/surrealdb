@@ -1,33 +1,27 @@
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::Surreal;
-use crate::api::conn;
-use crate::api::conn::Route;
-use crate::api::conn::Router;
-use crate::api::engine::local::Db;
-use crate::api::method::BoxFuture;
-use crate::api::opt::Endpoint;
-use crate::dbs::Session;
-use crate::engine::tasks;
-use crate::iam::Level;
-use crate::kvs::Datastore;
-use crate::opt::WaitFor;
-use crate::opt::auth::Root;
-use crate::options::EngineOptions;
-use async_channel::{Receiver, Sender};
-use futures::FutureExt;
-use futures::StreamExt;
-use futures::stream::poll_fn;
-use std::collections::BTreeMap;
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::task::Poll;
-use tokio::sync::RwLock;
-use tokio::sync::watch;
+
+use async_channel::{Receiver, Sender};
+use futures::stream::poll_fn;
+use futures::{FutureExt, StreamExt};
+use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
 use wasm_bindgen_futures::spawn_local;
+
+use crate::api::conn::{Route, Router};
+use crate::api::engine::local::Db;
+use crate::api::method::BoxFuture;
+use crate::api::opt::Endpoint;
+use crate::api::{ExtraFeatures, Result, Surreal, conn};
+use crate::core::dbs::{Session, Variables};
+use crate::core::iam::Level;
+use crate::core::kvs::Datastore;
+use crate::core::options::EngineOptions;
+use crate::engine::tasks;
+use crate::opt::WaitFor;
+use crate::opt::auth::Root;
 
 impl crate::api::Connection for Db {}
 impl conn::Sealed for Db {
@@ -108,7 +102,7 @@ pub(crate) async fn run_router(
 		.with_capabilities(address.config.capabilities);
 
 	let kvs = Arc::new(kvs);
-	let vars = Arc::new(RwLock::new(BTreeMap::new()));
+	let vars = Arc::new(RwLock::new(Variables::new()));
 	let live_queries = Arc::new(RwLock::new(HashMap::new()));
 	let session = Arc::new(RwLock::new(Session::default().with_rt(true)));
 
@@ -170,7 +164,7 @@ pub(crate) async fn run_router(
 
 				let id = notification.id;
 				if let Some(sender) = live_queries.read().await.get(&id) {
-					if sender.send(notification).await.is_err() {
+					if sender.send(Ok(notification)).await.is_err() {
 						live_queries.write().await.remove(&id);
 						if let Err(error) =
 							super::kill_live_query(&kvs, *id, &*session.read().await, vars.read().await.clone()).await

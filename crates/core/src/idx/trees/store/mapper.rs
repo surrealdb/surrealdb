@@ -1,19 +1,21 @@
-use crate::err::Error;
-use crate::expr::Filter;
-use crate::expr::statements::DefineAnalyzerStatement;
-use crate::iam::file::is_path_allowed;
-use crate::idx::ft::analyzer::mapper::Mapper;
+use std::path::Path;
+
 use ahash::HashSet;
 use anyhow::{Result, bail};
 use dashmap::DashMap;
-use std::path::Path;
+
+use crate::catalog;
+use crate::err::Error;
+use crate::expr::Filter;
+use crate::iam::file::is_path_allowed;
+use crate::idx::ft::analyzer::mapper::Mapper;
 
 #[derive(Default)]
 pub(crate) struct Mappers(DashMap<String, Mapper>);
 
 impl Mappers {
 	/// If any mapper is defined, it will be loaded in memory.
-	pub(crate) async fn load(&self, az: &DefineAnalyzerStatement) -> Result<()> {
+	pub(crate) async fn load(&self, az: &catalog::AnalyzerDefinition) -> Result<()> {
 		if let Some(filters) = &az.filters {
 			for f in filters {
 				if let Filter::Mapper(path) = f {
@@ -26,7 +28,7 @@ impl Mappers {
 
 	/// Ensure that if a mapper is defined, that it is also loaded in memory.
 	/// This method does not reload a mapper if it is already in memory.
-	pub(crate) async fn check(&self, az: &DefineAnalyzerStatement) -> Result<()> {
+	pub(crate) async fn check(&self, az: &catalog::AnalyzerDefinition) -> Result<()> {
 		if let Some(filters) = &az.filters {
 			for f in filters {
 				if let Filter::Mapper(path) = f {
@@ -60,7 +62,7 @@ impl Mappers {
 		}
 	}
 
-	pub(crate) fn cleanup(&self, azs: &[DefineAnalyzerStatement]) {
+	pub(crate) fn cleanup(&self, azs: &[catalog::AnalyzerDefinition]) {
 		// Collect every existing mapper
 		let mut keys: HashSet<String> = self.0.iter().map(|e| e.key().to_string()).collect();
 		// Remove keys that still exist in the definitions

@@ -6,7 +6,7 @@ fuzz_target!(|commands: &str| {
 	let commands: Vec<&str> = commands.split_inclusive(";").collect();
 	let blacklisted_command_strings = ["sleep", "SLEEP"];
 
-	use surrealdb::{dbs::Session, kvs::Datastore};
+	use surrealdb_core::{dbs::Session, kvs::Datastore};
 	let max_commands = 500;
 	if commands.len() > max_commands {
 		return;

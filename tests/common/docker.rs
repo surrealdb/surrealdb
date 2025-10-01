@@ -1,7 +1,8 @@
-use http::{HeaderMap, StatusCode, header};
-use reqwest::Client;
 use std::process::Command;
 use std::time::{Duration, SystemTime};
+
+use http::{HeaderMap, StatusCode, header};
+use reqwest::Client;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 

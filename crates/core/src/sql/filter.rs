@@ -1,13 +1,11 @@
-use crate::sql::language::Language;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Display;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use crate::fmt::QuoteStr;
+use crate::sql::language::Language;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Filter {
 	Ascii,
 	EdgeNgram(u16, u16),
@@ -27,7 +25,7 @@ impl Display for Filter {
 			Self::Ngram(min, max) => write!(f, "NGRAM({min},{max})"),
 			Self::Snowball(lang) => write!(f, "SNOWBALL({lang})"),
 			Self::Uppercase => f.write_str("UPPERCASE"),
-			Self::Mapper(path) => write!(f, "MAPPER({path})"),
+			Self::Mapper(path) => write!(f, "MAPPER({})", QuoteStr(path)),
 		}
 	}
 }

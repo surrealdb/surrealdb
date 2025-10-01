@@ -1,84 +1,53 @@
-use super::Raw;
-use crate::{
-	Value,
-	api::{Response as QueryResponse, Result, err::Error},
-	method::{self, Stats, Stream, query::ValidQuery},
-	value::Notification,
-};
+use std::marker::PhantomData;
+use std::mem;
+
 use anyhow::bail;
 use futures::future::Either;
 use futures::stream::select_all;
 use serde::de::DeserializeOwned;
-use std::marker::PhantomData;
-use std::mem;
-use surrealdb_core::expr::Value as CoreValue;
-use surrealdb_core::expr::from_value as from_core_value;
-use surrealdb_core::sql::{self, Statement, Statements, statements::*};
 
-pub struct Query(pub(crate) ValidQuery);
+use super::Raw;
+use crate::api::err::Error;
+use crate::api::{OnceLockExt, Response as QueryResponse, Result};
+use crate::core::expr::{
+	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, Expr, IfelseStatement,
+	InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement, OutputStatement,
+	RelateStatement, RemoveStatement, SelectStatement, TopLevelExpr, UpdateStatement, UseStatement,
+};
+use crate::core::sql::Ast;
+use crate::core::val;
+use crate::method::query::ValidQuery;
+use crate::method::{self, Stats, Stream};
+use crate::value::Notification;
+use crate::{Connection, Surreal, Value, api};
+
+pub struct Query(pub(crate) Result<ValidQuery>);
 /// A trait for converting inputs into SQL statements
 pub trait IntoQuery: into_query::Sealed {}
 
-pub(crate) mod into_query {
-	pub trait Sealed {
-		/// Converts an input into SQL statements
-		fn into_query(self) -> super::Query;
-
-		/// Not public API
-		#[doc(hidden)]
-		fn as_str(&self) -> Option<&str> {
-			None
-		}
-	}
-}
-
-impl IntoQuery for sql::Query {}
-impl into_query::Sealed for sql::Query {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: self.0.0,
+#[diagnostic::do_not_recommend]
+#[doc(hidden)]
+impl IntoQuery for Ast {}
+impl into_query::Sealed for Ast {
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Normal {
+			query: self.expressions.into_iter().map(From::from).collect(),
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
+		}))
 	}
 }
 
 #[diagnostic::do_not_recommend]
 #[doc(hidden)]
-impl IntoQuery for Statements {}
-impl into_query::Sealed for Statements {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: self.0,
-			register_live_queries: true,
-			bindings: Default::default(),
-		})
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for Vec<Statement> {}
-impl into_query::Sealed for Vec<Statement> {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: self,
-			register_live_queries: true,
-			bindings: Default::default(),
-		})
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for Statement {}
-impl into_query::Sealed for Statement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
+impl IntoQuery for TopLevelExpr {}
+impl into_query::Sealed for TopLevelExpr {
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Normal {
 			query: vec![self],
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
+		}))
 	}
 }
 
@@ -86,25 +55,12 @@ impl into_query::Sealed for Statement {
 #[doc(hidden)]
 impl IntoQuery for UseStatement {}
 impl into_query::Sealed for UseStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Use(self)],
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Normal {
+			query: vec![TopLevelExpr::Use(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for SetStatement {}
-impl into_query::Sealed for SetStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Set(self)],
-			register_live_queries: true,
-			bindings: Default::default(),
-		})
+		}))
 	}
 }
 
@@ -112,12 +68,12 @@ impl into_query::Sealed for SetStatement {
 #[doc(hidden)]
 impl IntoQuery for InfoStatement {}
 impl into_query::Sealed for InfoStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Info(self)],
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Normal {
+			query: vec![TopLevelExpr::Expr(Expr::Info(Box::new(self)))],
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
+		}))
 	}
 }
 
@@ -125,12 +81,12 @@ impl into_query::Sealed for InfoStatement {
 #[doc(hidden)]
 impl IntoQuery for LiveStatement {}
 impl into_query::Sealed for LiveStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Live(self)],
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Normal {
+			query: vec![TopLevelExpr::Live(Box::new(self))],
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
+		}))
 	}
 }
 
@@ -138,51 +94,12 @@ impl into_query::Sealed for LiveStatement {
 #[doc(hidden)]
 impl IntoQuery for KillStatement {}
 impl into_query::Sealed for KillStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Kill(self)],
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Normal {
+			query: vec![TopLevelExpr::Kill(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for BeginStatement {}
-impl into_query::Sealed for BeginStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Begin(self)],
-			register_live_queries: true,
-			bindings: Default::default(),
-		})
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for CancelStatement {}
-impl into_query::Sealed for CancelStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Cancel(self)],
-			register_live_queries: true,
-			bindings: Default::default(),
-		})
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for CommitStatement {}
-impl into_query::Sealed for CommitStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Commit(self)],
-			register_live_queries: true,
-			bindings: Default::default(),
-		})
+		}))
 	}
 }
 
@@ -190,12 +107,12 @@ impl into_query::Sealed for CommitStatement {
 #[doc(hidden)]
 impl IntoQuery for OutputStatement {}
 impl into_query::Sealed for OutputStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Output(self)],
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Normal {
+			query: vec![TopLevelExpr::Expr(Expr::Return(Box::new(self)))],
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
+		}))
 	}
 }
 
@@ -203,12 +120,12 @@ impl into_query::Sealed for OutputStatement {
 #[doc(hidden)]
 impl IntoQuery for IfelseStatement {}
 impl into_query::Sealed for IfelseStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Ifelse(self)],
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Normal {
+			query: vec![TopLevelExpr::Expr(Expr::IfElse(Box::new(self)))],
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
+		}))
 	}
 }
 
@@ -216,12 +133,12 @@ impl into_query::Sealed for IfelseStatement {
 #[doc(hidden)]
 impl IntoQuery for SelectStatement {}
 impl into_query::Sealed for SelectStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Select(self)],
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Normal {
+			query: vec![TopLevelExpr::Expr(Expr::Select(Box::new(self)))],
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
+		}))
 	}
 }
 
@@ -229,12 +146,12 @@ impl into_query::Sealed for SelectStatement {
 #[doc(hidden)]
 impl IntoQuery for CreateStatement {}
 impl into_query::Sealed for CreateStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Create(self)],
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Normal {
+			query: vec![TopLevelExpr::Expr(Expr::Create(Box::new(self)))],
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
+		}))
 	}
 }
 
@@ -242,12 +159,12 @@ impl into_query::Sealed for CreateStatement {
 #[doc(hidden)]
 impl IntoQuery for UpdateStatement {}
 impl into_query::Sealed for UpdateStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Update(self)],
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Normal {
+			query: vec![TopLevelExpr::Expr(Expr::Update(Box::new(self)))],
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
+		}))
 	}
 }
 
@@ -255,12 +172,12 @@ impl into_query::Sealed for UpdateStatement {
 #[doc(hidden)]
 impl IntoQuery for RelateStatement {}
 impl into_query::Sealed for RelateStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Relate(self)],
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Normal {
+			query: vec![TopLevelExpr::Expr(Expr::Relate(Box::new(self)))],
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
+		}))
 	}
 }
 
@@ -268,12 +185,12 @@ impl into_query::Sealed for RelateStatement {
 #[doc(hidden)]
 impl IntoQuery for DeleteStatement {}
 impl into_query::Sealed for DeleteStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Delete(self)],
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Normal {
+			query: vec![TopLevelExpr::Expr(Expr::Delete(Box::new(self)))],
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
+		}))
 	}
 }
 
@@ -281,12 +198,12 @@ impl into_query::Sealed for DeleteStatement {
 #[doc(hidden)]
 impl IntoQuery for InsertStatement {}
 impl into_query::Sealed for InsertStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Insert(self)],
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Normal {
+			query: vec![TopLevelExpr::Expr(Expr::Insert(Box::new(self)))],
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
+		}))
 	}
 }
 
@@ -294,12 +211,12 @@ impl into_query::Sealed for InsertStatement {
 #[doc(hidden)]
 impl IntoQuery for DefineStatement {}
 impl into_query::Sealed for DefineStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Define(self)],
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Normal {
+			query: vec![TopLevelExpr::Expr(Expr::Define(Box::new(self)))],
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
+		}))
 	}
 }
 
@@ -307,12 +224,12 @@ impl into_query::Sealed for DefineStatement {
 #[doc(hidden)]
 impl IntoQuery for AlterStatement {}
 impl into_query::Sealed for AlterStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Alter(self)],
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Normal {
+			query: vec![TopLevelExpr::Expr(Expr::Alter(Box::new(self)))],
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
+		}))
 	}
 }
 
@@ -320,12 +237,12 @@ impl into_query::Sealed for AlterStatement {
 #[doc(hidden)]
 impl IntoQuery for RemoveStatement {}
 impl into_query::Sealed for RemoveStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Remove(self)],
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Normal {
+			query: vec![TopLevelExpr::Expr(Expr::Remove(Box::new(self)))],
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
+		}))
 	}
 }
 
@@ -333,67 +250,62 @@ impl into_query::Sealed for RemoveStatement {
 #[doc(hidden)]
 impl IntoQuery for OptionStatement {}
 impl into_query::Sealed for OptionStatement {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: vec![Statement::Option(self)],
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Normal {
+			query: vec![TopLevelExpr::Option(self)],
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
+		}))
+	}
+}
+
+pub(crate) mod into_query {
+	use crate::{Connection, Surreal};
+
+	pub trait Sealed {
+		/// Converts an input into SQL statements
+		fn into_query<C: Connection>(self, conn: &Surreal<C>) -> super::Query;
 	}
 }
 
 impl IntoQuery for &str {}
 impl into_query::Sealed for &str {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: Vec::new(),
+	fn into_query<C: Connection>(self, conn: &Surreal<C>) -> Query {
+		let query = conn.inner.router.extract().and_then(|router| {
+			let capabilities = &router.config.capabilities;
+			crate::core::syn::parse_with_capabilities(self, capabilities)
+		});
+
+		Query(query.map(|x| ValidQuery::Normal {
+			//TODO: Figure out what type to actually use, core::expr, or core::sql
+			query: x.expressions.into_iter().map(From::from).collect(),
 			register_live_queries: true,
 			bindings: Default::default(),
-		})
-	}
-
-	fn as_str(&self) -> Option<&str> {
-		Some(self)
+		}))
 	}
 }
 
 impl IntoQuery for &String {}
 impl into_query::Sealed for &String {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: Vec::new(),
-			register_live_queries: true,
-			bindings: Default::default(),
-		})
-	}
-
-	fn as_str(&self) -> Option<&str> {
-		Some(self)
+	fn into_query<C: Connection>(self, conn: &Surreal<C>) -> Query {
+		self.as_str().into_query(conn)
 	}
 }
 
 impl IntoQuery for String {}
 impl into_query::Sealed for String {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Normal {
-			query: Vec::new(),
-			register_live_queries: true,
-			bindings: Default::default(),
-		})
-	}
-
-	fn as_str(&self) -> Option<&str> {
-		Some(self)
+	fn into_query<C: Connection>(self, conn: &Surreal<C>) -> Query {
+		self.as_str().into_query(conn)
 	}
 }
 
 impl IntoQuery for Raw {}
 impl into_query::Sealed for Raw {
-	fn into_query(self) -> Query {
-		Query(ValidQuery::Raw {
+	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
+		Query(Ok(ValidQuery::Raw {
 			query: self.0,
 			bindings: Default::default(),
-		})
+		}))
 	}
 }
 
@@ -424,7 +336,7 @@ impl query_result::Sealed<Value> for usize {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Value> {
 		match response.results.swap_remove(&self) {
 			Some((_, result)) => Ok(Value::from_inner(result?)),
-			None => Ok(Value::from_inner(CoreValue::None)),
+			None => Ok(Value::from_inner(val::Value::None)),
 		}
 	}
 
@@ -453,11 +365,11 @@ where
 			}
 		};
 		let result = match value {
-			CoreValue::Array(vec) => match &mut vec.0[..] {
+			val::Value::Array(vec) => match &mut vec.0[..] {
 				[] => Ok(None),
 				[value] => {
 					let value = mem::take(value);
-					from_core_value(value)
+					api::value::from_core_value(value)
 				}
 				_ => Err(Error::LossyTake(QueryResponse {
 					results: mem::take(&mut response.results),
@@ -467,7 +379,7 @@ where
 			},
 			_ => {
 				let value = mem::take(value);
-				from_core_value(value)
+				api::value::from_core_value(value)
 			}
 		};
 		response.results.swap_remove(&self);
@@ -493,13 +405,13 @@ impl query_result::Sealed<Value> for (usize, &str) {
 				}
 			},
 			None => {
-				return Ok(Value::from_inner(CoreValue::None));
+				return Ok(Value::from_inner(val::Value::None));
 			}
 		};
 
 		let value = match value {
-			CoreValue::Object(object) => object.remove(key).unwrap_or_default(),
-			_ => CoreValue::None,
+			val::Value::Object(object) => object.remove(key).unwrap_or_default(),
+			_ => val::Value::None,
 		};
 
 		Ok(Value::from_inner(value))
@@ -517,7 +429,7 @@ where
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Option<T>> {
 		let (index, key) = self;
-		let value = match response.results.get_mut(&index) {
+		let value: &mut val::Value = match response.results.get_mut(&index) {
 			Some((_, result)) => match result {
 				Ok(val) => val,
 				Err(error) => {
@@ -531,7 +443,7 @@ where
 			}
 		};
 		let value = match value {
-			CoreValue::Array(vec) => match &mut vec.0[..] {
+			val::Value::Array(vec) => match &mut vec.0[..] {
 				[] => {
 					response.results.swap_remove(&index);
 					return Ok(None);
@@ -548,11 +460,11 @@ where
 			value => value,
 		};
 		match value {
-			CoreValue::None => {
+			val::Value::None => {
 				response.results.swap_remove(&index);
 				Ok(None)
 			}
-			CoreValue::Object(object) => {
+			val::Value::Object(object) => {
 				if object.is_empty() {
 					response.results.swap_remove(&index);
 					return Ok(None);
@@ -560,7 +472,7 @@ where
 				let Some(value) = object.remove(key) else {
 					return Ok(None);
 				};
-				from_core_value(value)
+				api::value::from_core_value(value)
 			}
 			_ => Ok(None),
 		}
@@ -579,14 +491,14 @@ where
 	fn query_result(self, response: &mut QueryResponse) -> Result<Vec<T>> {
 		let vec = match response.results.swap_remove(&self) {
 			Some((_, result)) => match result? {
-				CoreValue::Array(vec) => vec.0,
+				val::Value::Array(vec) => vec.0,
 				vec => vec![vec],
 			},
 			None => {
 				return Ok(vec![]);
 			}
 		};
-		from_core_value(vec.into())
+		api::value::from_core_value(vec.into())
 	}
 
 	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
@@ -604,21 +516,21 @@ where
 		match response.results.get_mut(&index) {
 			Some((_, result)) => match result {
 				Ok(val) => match val {
-					CoreValue::Array(vec) => {
+					val::Value::Array(vec) => {
 						let mut responses = Vec::with_capacity(vec.len());
 						for value in vec.iter_mut() {
-							if let CoreValue::Object(object) = value {
+							if let val::Value::Object(object) = value {
 								if let Some(value) = object.remove(key) {
 									responses.push(value);
 								}
 							}
 						}
-						from_core_value(responses.into())
+						api::value::from_core_value(responses.into())
 					}
 					val => {
-						if let CoreValue::Object(object) = val {
+						if let val::Value::Object(object) = val {
 							if let Some(value) = object.remove(key) {
-								return from_core_value(vec![value].into());
+								return api::value::from_core_value(vec![value].into());
 							}
 						}
 						Ok(vec![])

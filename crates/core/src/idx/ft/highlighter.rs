@@ -1,13 +1,14 @@
-use crate::err::Error;
-use crate::expr::{Array, Idiom, Object, Value};
-use crate::idx::ft::offsets::{Offset, Position};
-use anyhow::{Result, ensure};
-use std::collections::BTreeMap;
-use std::collections::HashMap;
 use std::collections::btree_map::Entry as BEntry;
 use std::collections::hash_map::Entry as HEntry;
-use std::convert::Infallible;
-use std::result;
+use std::collections::{BTreeMap, HashMap};
+
+use anyhow::{Result, ensure};
+
+use crate::err::Error;
+use crate::expr::Idiom;
+use crate::idx::ft::Position;
+use crate::idx::ft::offset::Offset;
+use crate::val::{Array, Object, Value};
 
 pub(crate) struct HighlightParams {
 	pub(crate) prefix: Value,
@@ -49,7 +50,7 @@ impl Highlighter {
 
 	fn extract(val: Value, vals: &mut Vec<String>) {
 		match val {
-			Value::Strand(s) => vals.push(s.0),
+			Value::String(s) => vals.push(s),
 			Value::Number(n) => vals.push(n.to_string()),
 			Value::Bool(b) => vals.push(b.to_string()),
 			Value::Array(a) => {
@@ -159,12 +160,10 @@ impl Offseter {
 	}
 }
 
-impl TryFrom<Offseter> for Value {
-	type Error = Infallible;
-
-	fn try_from(or: Offseter) -> result::Result<Self, Infallible> {
+impl From<Offseter> for Value {
+	fn from(or: Offseter) -> Self {
 		if or.offsets.is_empty() {
-			return Ok(Self::None);
+			return Self::None;
 		}
 		let mut res = BTreeMap::default();
 		for (idx, offsets) in or.offsets {
@@ -176,9 +175,9 @@ impl TryFrom<Offseter> for Value {
 			res.insert(idx.to_string(), Value::Array(Array::from(r)));
 		}
 		if res.is_empty() {
-			Ok(Value::None)
+			Value::None
 		} else {
-			Ok(Value::from(Object::from(res)))
+			Value::from(Object::from(res))
 		}
 	}
 }

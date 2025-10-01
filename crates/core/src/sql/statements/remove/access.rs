@@ -1,18 +1,23 @@
-use crate::sql::{Base, Ident};
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use crate::sql::{Base, Expr, Literal};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct RemoveAccessStatement {
-	pub name: Ident,
+	pub name: Expr,
 	pub base: Base,
-	#[revision(start = 2)]
 	pub if_exists: bool,
+}
+
+impl Default for RemoveAccessStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			base: Base::default(),
+			if_exists: false,
+		}
+	}
 }
 
 impl Display for RemoveAccessStatement {

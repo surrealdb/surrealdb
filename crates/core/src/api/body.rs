@@ -1,34 +1,24 @@
-#[cfg(not(target_family = "wasm"))]
 use std::fmt::Display;
 
-#[cfg(not(target_family = "wasm"))]
 use bytes::Bytes;
-#[cfg(not(target_family = "wasm"))]
-use futures::Stream;
-#[cfg(not(target_family = "wasm"))]
-use futures::StreamExt;
+use futures::{Stream, StreamExt};
 use http::header::CONTENT_TYPE;
-
-use crate::err::Error;
-use crate::expr;
-use crate::expr::Bytesize;
-use crate::expr::Value;
-use crate::rpc::format::cbor;
-use crate::rpc::format::json;
-use crate::rpc::format::revision;
 
 use super::context::InvocationContext;
 use super::err::ApiError;
 use super::invocation::ApiInvocation;
+use crate::err::Error;
+use crate::expr::Bytesize;
+use crate::rpc::format::{cbor, json, revision};
+use crate::val;
+use crate::val::Value;
 
 pub enum ApiBody {
-	#[cfg(not(target_family = "wasm"))]
 	Stream(Box<dyn Stream<Item = Result<Bytes, Box<dyn Display + Send + Sync>>> + Send + Unpin>),
 	Native(Value),
 }
 
 impl ApiBody {
-	#[cfg(not(target_family = "wasm"))]
 	pub fn from_stream<S, E>(stream: S) -> Self
 	where
 		S: Stream<Item = Result<Bytes, E>> + Unpin + Send + 'static,
@@ -81,10 +71,6 @@ impl ApiBody {
 		ctx: &InvocationContext,
 		invocation: &ApiInvocation,
 	) -> Result<Value, Error> {
-		#[cfg_attr(
-			target_family = "wasm",
-			expect(irrefutable_let_patterns, reason = "For WASM this is the only pattern.")
-		)]
 		if let ApiBody::Native(value) = self {
 			let max = ctx.request_body_max.unwrap_or(Bytesize::MAX);
 			let size = std::mem::size_of_val(&value);
@@ -94,7 +80,7 @@ impl ApiBody {
 			}
 
 			if ctx.request_body_raw {
-				Ok(value.coerce_to::<expr::Bytes>()?.into())
+				Ok(value.coerce_to::<val::Bytes>()?.into())
 			} else {
 				Ok(value)
 			}
@@ -102,19 +88,19 @@ impl ApiBody {
 			let bytes = self.stream(ctx.request_body_max).await?;
 
 			if ctx.request_body_raw {
-				Ok(Value::Bytes(crate::expr::Bytes(bytes)))
+				Ok(Value::Bytes(val::Bytes(bytes)))
 			} else {
 				let content_type =
 					invocation.headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok());
 
 				let parsed = match content_type {
-					Some("application/json") => json::parse_value(&bytes),
-					Some("application/cbor") => cbor::parse_value(bytes),
-					Some("application/surrealdb") => revision::parse_value(bytes),
-					_ => return Ok(Value::Bytes(crate::expr::Bytes(bytes))),
+					Some("application/json") => json::decode(&bytes),
+					Some("application/cbor") => cbor::decode(&bytes),
+					Some("application/surrealdb") => revision::decode(&bytes),
+					_ => return Ok(Value::Bytes(crate::val::Bytes(bytes))),
 				};
 
-				parsed.map(Into::into).map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))
+				parsed.map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))
 			}
 		}
 	}

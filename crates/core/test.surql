@@ -81,9 +81,6 @@ SELECT
         },
         person:tobie->purchased->(phone, laptop WHERE new = true).sku,
         math::PI > 3.14,
-		-- The following doesn't parse, as we don't yet support function chaining
-        -- <future> { person:tobie.tags.reverse().slice(0, 4) },
-        <future> { array::slice(array::reverse(person:tobie.tags), 0, 4) },
         fn::my::custom::namespaced::function('Tobie'),
     ],
 	math::PI > 3.14 AS check_constant,

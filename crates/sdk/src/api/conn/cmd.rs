@@ -1,26 +1,24 @@
-use super::MlExportConfig;
-use crate::{Result, opt::Resource};
-use async_channel::Sender;
-use bincode::Options;
-use revision::Revisioned;
-use serde::{Serialize, ser::SerializeMap as _};
 use std::borrow::Cow;
 use std::io::Read;
 use std::path::PathBuf;
-use surrealdb_core::dbs::Notification;
-#[allow(unused_imports)]
-use surrealdb_core::expr::{
-	Array as CoreArray, Object as CoreObject, Query as CoreQuery, Value as CoreValue,
-};
-use surrealdb_core::kvs::export::Config as DbExportConfig;
-#[allow(unused_imports)]
-use surrealdb_core::sql::{
-	Object as CoreSqlObject, Query as CoreSqlQuery, SqlValue as CoreSqlValue,
-};
+
+use async_channel::Sender;
+use bincode::Options;
+use revision::Revisioned;
+use serde::Serialize;
+use serde::ser::SerializeMap as _;
 use uuid::Uuid;
 
+use super::MlExportConfig;
+use crate::Result;
+use crate::core::dbs::Notification;
+use crate::core::expr::LogicalPlan;
+use crate::core::kvs::export::Config as DbExportConfig;
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-use surrealdb_core::expr::Table as CoreTable;
+use crate::core::val::Table as CoreTable;
+#[allow(unused_imports)]
+use crate::core::val::{Array as CoreArray, Object as CoreObject, Value as CoreValue};
+use crate::opt::Resource;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -87,7 +85,7 @@ pub(crate) enum Command {
 	},
 	Query {
 		txn: Option<Uuid>,
-		query: CoreSqlQuery,
+		query: LogicalPlan,
 		variables: CoreObject,
 	},
 	RawQuery {
@@ -128,7 +126,7 @@ pub(crate) enum Command {
 	},
 	SubscribeLive {
 		uuid: Uuid,
-		notification_sender: Sender<Notification>,
+		notification_sender: Sender<Result<Notification>>,
 	},
 	Kill {
 		uuid: Uuid,
@@ -143,22 +141,24 @@ pub(crate) enum Command {
 impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
-		use crate::api::engine::resource_to_sql_values;
-		use surrealdb_core::sql::{
-			Data, Output,
-			statements::{UpdateStatement, UpsertStatement},
-		};
+		use crate::core::expr::{Data, Output, UpdateStatement, UpsertStatement};
+		use crate::core::val::{self};
+		use crate::engine::resource_to_exprs;
 
 		let res = match self {
 			Command::Use {
 				namespace,
 				database,
-			} => RouterRequest {
-				id,
-				method: "use",
-				params: Some(vec![CoreValue::from(namespace), CoreValue::from(database)].into()),
-				transaction: None,
-			},
+			} => {
+				let namespace = namespace.map(From::from).unwrap_or(CoreValue::None);
+				let database = database.map(From::from).unwrap_or(CoreValue::None);
+				RouterRequest {
+					id,
+					method: "use",
+					params: Some(vec![namespace, database].into()),
+					transaction: None,
+				}
+			}
 			Command::Signup {
 				credentials,
 			} => RouterRequest {
@@ -250,8 +250,7 @@ impl Command {
 			} => {
 				let table = match what {
 					Some(w) => {
-						let mut table = CoreTable::default();
-						table.0.clone_from(&w);
+						let table = CoreTable::new(w);
 						CoreValue::from(table)
 					}
 					None => CoreValue::None,
@@ -273,9 +272,8 @@ impl Command {
 			} => {
 				let table = match what {
 					Some(w) => {
-						let mut tmp = CoreTable::default();
-						tmp.0.clone_from(&w);
-						CoreValue::from(tmp)
+						let table = CoreTable::new(w);
+						CoreValue::from(table)
 					}
 					None => CoreValue::None,
 				};
@@ -296,22 +294,35 @@ impl Command {
 				..
 			} => {
 				let query = if upsert {
-					let mut stmt = UpsertStatement::default();
-					stmt.what = resource_to_sql_values(what);
-					stmt.data = data.map(|d| Data::PatchExpression(d.into()));
-					stmt.output = Some(Output::After);
-					CoreSqlQuery::from(stmt)
+					let expr = UpsertStatement {
+						only: false,
+						what: resource_to_exprs(what),
+						with: None,
+						data: data.map(|x| Data::PatchExpression(x.into_literal())),
+						cond: None,
+						output: Some(Output::After),
+						timeout: None,
+						parallel: false,
+						explain: None,
+					};
+					expr.to_string()
 				} else {
-					let mut stmt = UpdateStatement::default();
-					stmt.what = resource_to_sql_values(what);
-					stmt.data = data.map(|d| Data::PatchExpression(d.into()));
-					stmt.output = Some(Output::After);
-					CoreSqlQuery::from(stmt)
+					let expr = UpdateStatement {
+						only: false,
+						what: resource_to_exprs(what),
+						with: None,
+						data: data.map(|x| Data::PatchExpression(x.into_literal())),
+						cond: None,
+						output: Some(Output::After),
+						timeout: None,
+						parallel: false,
+						explain: None,
+					};
+					expr.to_string()
 				};
 
-				let variables = CoreSqlObject::default();
-				let params: Vec<CoreValue> =
-					vec![CoreSqlValue::from(query).into(), CoreSqlValue::from(variables).into()];
+				let variables = val::Object::default();
+				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
 
 				RouterRequest {
 					id,
@@ -328,22 +339,35 @@ impl Command {
 				..
 			} => {
 				let query = if upsert {
-					let mut stmt = UpsertStatement::default();
-					stmt.what = resource_to_sql_values(what);
-					stmt.data = data.map(|d| Data::MergeExpression(d.into()));
-					stmt.output = Some(Output::After);
-					CoreSqlQuery::from(stmt)
+					let expr = UpsertStatement {
+						only: false,
+						what: resource_to_exprs(what),
+						with: None,
+						data: data.map(|x| Data::MergeExpression(x.into_literal())),
+						cond: None,
+						output: Some(Output::After),
+						timeout: None,
+						parallel: false,
+						explain: None,
+					};
+					expr.to_string()
 				} else {
-					let mut stmt = UpdateStatement::default();
-					stmt.what = resource_to_sql_values(what);
-					stmt.data = data.map(|d| Data::MergeExpression(d.into()));
-					stmt.output = Some(Output::After);
-					CoreSqlQuery::from(stmt)
+					let expr = UpdateStatement {
+						only: false,
+						what: resource_to_exprs(what),
+						with: None,
+						data: data.map(|x| Data::MergeExpression(x.into_literal())),
+						cond: None,
+						output: Some(Output::After),
+						timeout: None,
+						parallel: false,
+						explain: None,
+					};
+					expr.to_string()
 				};
 
-				let variables = CoreSqlObject::default();
-				let params: Vec<CoreValue> =
-					vec![CoreSqlValue::from(query).into(), CoreSqlValue::from(variables).into()];
+				let variables = val::Object::default();
+				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
 
 				RouterRequest {
 					id,
@@ -377,7 +401,7 @@ impl Command {
 				query,
 				variables,
 			} => {
-				let params: Vec<CoreValue> = vec![CoreQuery::from(query).into(), variables.into()];
+				let params: Vec<CoreValue> = vec![query.to_string().into(), variables.into()];
 				RouterRequest {
 					id,
 					method: "query",
@@ -453,22 +477,24 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "kill",
-				params: Some(CoreValue::from(vec![CoreValue::from(uuid)])),
+				params: Some(CoreValue::from(vec![CoreValue::from(val::Uuid(uuid))])),
 				transaction: None,
 			},
 			Command::Run {
 				name,
 				version,
 				args,
-			} => RouterRequest {
-				id,
-				method: "run",
-				params: Some(
-					vec![CoreValue::from(name), CoreValue::from(version), CoreValue::Array(args)]
-						.into(),
-				),
-				transaction: None,
-			},
+			} => {
+				let version = version.map(From::from).unwrap_or(CoreValue::None);
+				RouterRequest {
+					id,
+					method: "run",
+					params: Some(
+						vec![CoreValue::from(name), version, CoreValue::Array(args)].into(),
+					),
+					transaction: None,
+				}
+			}
 		};
 		Some(res)
 	}
@@ -509,9 +535,10 @@ impl Command {
 	}
 }
 
-/// A struct which will be serialized as a map to behave like the previously used BTreeMap.
+/// A struct which will be serialized as a map to behave like the previously
+/// used BTreeMap.
 ///
-/// This struct serializes as if it is a surrealdb_core::expr::Value::Object.
+/// This struct serializes as if it is a crate::core::expr::Value::Object.
 #[derive(Debug)]
 pub(crate) struct RouterRequest {
 	id: Option<i64>,
@@ -519,27 +546,6 @@ pub(crate) struct RouterRequest {
 	params: Option<CoreValue>,
 	#[allow(dead_code)]
 	transaction: Option<Uuid>,
-}
-
-#[cfg(feature = "protocol-ws")]
-fn stringify_queries(value: CoreValue) -> CoreValue {
-	match value {
-		CoreValue::Query(query) => CoreValue::Strand(query.to_string().into()),
-		CoreValue::Array(array) => CoreValue::Array(CoreArray::from(
-			array.0.into_iter().map(stringify_queries).collect::<Vec<_>>(),
-		)),
-		_ => value,
-	}
-}
-
-impl RouterRequest {
-	#[cfg(feature = "protocol-ws")]
-	pub(crate) fn stringify_queries(self) -> Self {
-		Self {
-			params: self.params.map(stringify_queries),
-			..self
-		}
-	}
 }
 
 impl Serialize for RouterRequest {
@@ -553,7 +559,6 @@ impl Serialize for RouterRequest {
 		struct InnerMethod(&'static str);
 		struct InnerTransaction<'a>(&'a Uuid);
 		struct InnerUuid<'a>(&'a Uuid);
-		struct InnerStrand(&'static str);
 		struct InnerObject<'a>(&'a RouterRequest);
 
 		impl Serialize for InnerNumberVariant {
@@ -579,7 +584,7 @@ impl Serialize for RouterRequest {
 			where
 				S: serde::Serializer,
 			{
-				serializer.serialize_newtype_variant("Value", 4, "Strand", &InnerStrand(self.0))
+				serializer.serialize_newtype_variant("Value", 4, "String", &self.0)
 			}
 		}
 
@@ -598,14 +603,6 @@ impl Serialize for RouterRequest {
 				S: serde::Serializer,
 			{
 				serializer.serialize_newtype_struct("$surrealdb::private::sql::Uuid", self.0)
-			}
-		}
-		impl Serialize for InnerStrand {
-			fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-			where
-				S: serde::Serializer,
-			{
-				serializer.serialize_newtype_struct("$surrealdb::private::sql::Strand", self.0)
 			}
 		}
 
@@ -650,7 +647,7 @@ impl Serialize for RouterRequest {
 
 impl Revisioned for RouterRequest {
 	fn revision() -> u16 {
-		2
+		1
 	}
 
 	fn serialize_revisioned<W: std::io::Write>(
@@ -658,7 +655,7 @@ impl Revisioned for RouterRequest {
 		w: &mut W,
 	) -> std::result::Result<(), revision::Error> {
 		// version
-		Revisioned::serialize_revisioned(&2u32, w)?;
+		Revisioned::serialize_revisioned(&1u32, w)?;
 		// object variant
 		Revisioned::serialize_revisioned(&9u32, w)?;
 		// object wrapper version
@@ -682,7 +679,7 @@ impl Revisioned for RouterRequest {
 				.map_err(|err| revision::Error::Serialize(err.to_string()))?;
 
 			// the Value version
-			2u16.serialize_revisioned(w)?;
+			1u16.serialize_revisioned(w)?;
 
 			// the Value::Number variant
 			3u16.serialize_revisioned(w)?;
@@ -701,13 +698,10 @@ impl Revisioned for RouterRequest {
 			.map_err(|err| revision::Error::Serialize(err.to_string()))?;
 
 		// the Value version
-		2u16.serialize_revisioned(w)?;
-
-		// the Value::Strand variant
-		4u16.serialize_revisioned(w)?;
-
-		// the Strand version
 		1u16.serialize_revisioned(w)?;
+
+		// the Value::String variant
+		4u16.serialize_revisioned(w)?;
 
 		serializer
 			.serialize_into(&mut *w, self.method)
@@ -727,7 +721,7 @@ impl Revisioned for RouterRequest {
 				.map_err(|err| revision::Error::Serialize(err.to_string()))?;
 
 			// the Value version
-			2u16.serialize_revisioned(w)?;
+			1u16.serialize_revisioned(w)?;
 
 			// the Value::Uuid variant
 			7u16.serialize_revisioned(w)?;
@@ -754,10 +748,10 @@ mod test {
 	use std::io::Cursor;
 
 	use revision::Revisioned;
-	use surrealdb_core::expr::{Number, Value};
 	use uuid::Uuid;
 
 	use super::RouterRequest;
+	use crate::core::val::{Number, Value};
 
 	fn assert_converts<S, D, I>(req: &RouterRequest, s: S, d: D)
 	where
@@ -777,10 +771,10 @@ mod test {
 			}),
 			req.id
 		);
-		let Some(Value::Strand(x)) = obj.get("method") else {
+		let Some(Value::String(x)) = obj.get("method") else {
 			panic!("invalid method field: {}", obj)
 		};
-		assert_eq!(x.0, req.method);
+		assert_eq!(x.as_str(), req.method);
 
 		assert_eq!(obj.get("params").cloned(), req.params);
 	}
@@ -798,16 +792,8 @@ mod test {
 
 		assert_converts(
 			&request,
-			|i| bincode::serialize(i).unwrap(),
-			|b| bincode::deserialize(&b).unwrap(),
-		);
-
-		println!("test convert json");
-
-		assert_converts(
-			&request,
-			|i| serde_json::to_string(i).unwrap(),
-			|b| serde_json::from_str(&b).unwrap(),
+			|i| crate::core::rpc::format::bincode::encode(i).unwrap(),
+			|b| crate::core::rpc::format::bincode::decode(&b).unwrap(),
 		);
 
 		println!("test convert revisioned");

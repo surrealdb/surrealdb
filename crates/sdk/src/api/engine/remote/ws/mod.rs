@@ -5,21 +5,21 @@ pub(crate) mod native;
 #[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
 
-use crate::api::Connect;
-use crate::api::Result;
-use crate::api::Surreal;
-use crate::api::conn::Command;
-use crate::api::conn::DbResponse;
-use crate::opt::IntoEndpoint;
-use async_channel::Sender;
-use indexmap::IndexMap;
 use std::collections::HashMap;
+use std::io;
 use std::marker::PhantomData;
 use std::time::Duration;
-use surrealdb_core::dbs::Notification;
-use surrealdb_core::expr::Value as CoreValue;
+
+use async_channel::Sender;
+use indexmap::IndexMap;
 use trice::Instant;
 use uuid::Uuid;
+
+use crate::api::conn::{Command, DbResponse};
+use crate::api::{Connect, Result, Surreal};
+use crate::core::dbs::Notification;
+use crate::core::val::Value as CoreValue;
+use crate::opt::IntoEndpoint;
 
 pub(crate) const PATH: &str = "rpc";
 const PING_INTERVAL: Duration = Duration::from_secs(5);
@@ -63,7 +63,7 @@ struct RouterState<Sink, Stream> {
 	/// Messages which aught to be replayed on a reconnect.
 	replay: IndexMap<ReplayMethod, Command>,
 	/// Pending live queries
-	live_queries: HashMap<Uuid, async_channel::Sender<Notification>>,
+	live_queries: HashMap<Uuid, Sender<Result<Notification>>>,
 	/// Send requests which are still awaiting an awnser.
 	pending_requests: HashMap<i64, PendingRequest>,
 	/// The last time a message was recieved from the server.
@@ -85,6 +85,28 @@ impl<Sink, Stream> RouterState<Sink, Stream> {
 			sink,
 			stream,
 		}
+	}
+
+	async fn clear_pending_requests(&mut self) {
+		for (_id, request) in self.pending_requests.drain() {
+			let error = io::Error::from(io::ErrorKind::ConnectionReset);
+			let sender = request.response_channel;
+			sender.send(Err(error.into())).await.ok();
+			sender.close();
+		}
+	}
+
+	async fn clear_live_queries(&mut self) {
+		for (_id, sender) in self.live_queries.drain() {
+			let error = io::Error::from(io::ErrorKind::ConnectionReset);
+			sender.send(Err(error.into())).await.ok();
+			sender.close();
+		}
+	}
+
+	async fn reset(&mut self) {
+		self.clear_pending_requests().await;
+		self.clear_live_queries().await;
 	}
 }
 
@@ -108,7 +130,8 @@ pub struct Wss;
 pub struct Client(());
 
 impl Surreal<Client> {
-	/// Connects to a specific database endpoint, saving the connection on the static client
+	/// Connects to a specific database endpoint, saving the connection on the
+	/// static client
 	///
 	/// # Examples
 	///

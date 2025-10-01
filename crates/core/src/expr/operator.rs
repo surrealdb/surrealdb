@@ -1,157 +1,280 @@
-use crate::expr::index::Distance;
-use crate::idx::ft::MatchRef;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::fmt::Write;
 
-use super::Value;
+use crate::catalog::Distance;
+use crate::expr::{Expr, Kind};
+use crate::fmt::Fmt;
+use crate::idx::ft::MatchRef;
 
-/// Binary operators.
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub enum Operator {
-	//
-	Neg, // -
-	Not, // !
-	//
-	Or,  // ||
-	And, // &&
-	Tco, // ?: Ternary conditional operator
-	Nco, // ?? Null coalescing operator
-	//
-	Add, // +
-	Sub, // -
-	Mul, // *
-	Div, // /
-	Pow, // **
-	Inc, // +=
-	Dec, // -=
-	Ext, // +?=
-	//
-	Equal,    // =
-	Exact,    // ==
-	NotEqual, // !=
-	AllEqual, // *=
-	AnyEqual, // ?=
-	//
-	#[revision(end = 3, convert_fn = "like_convert")]
-	Like, // ~
-	#[revision(end = 3, convert_fn = "like_convert")]
-	NotLike, // !~
-	#[revision(end = 3, convert_fn = "like_convert")]
-	AllLike, // *~
-	#[revision(end = 3, convert_fn = "like_convert")]
-	AnyLike, // ?~
-	Matches(Option<MatchRef>), // @{ref}@
-	//
-	LessThan,        // <
-	LessThanOrEqual, // <=
-	MoreThan,        // >
-	MoreThanOrEqual, // >=
-	//
-	Contain,     // ∋
-	NotContain,  // ∌
-	ContainAll,  // ⊇
-	ContainAny,  // ⊃
-	ContainNone, // ⊅
-	Inside,      // ∈
-	NotInside,   // ∉
-	AllInside,   // ⊆
-	AnyInside,   // ⊂
-	NoneInside,  // ⊄
-	//
-	Outside,
-	Intersects,
-	//
-	Knn(u32, Option<Distance>), // <|{k}[,{dist}]|>
-	#[revision(start = 2)]
-	Ann(u32, u32), // <|{k},{ef}|>
-	//
-	Rem, // %
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum PrefixOperator {
+	/// `!`
+	Not,
+	/// `+`
+	Positive,
+	/// `-`
+	Negate,
+	/// `..`
+	Range,
+	/// `..=`
+	RangeInclusive,
+	Cast(Kind),
 }
 
-impl Operator {
-	fn like_convert<T>(_: T, _revision: u16) -> Result<Self, revision::Error> {
-		Err(revision::Error::Conversion("Like operators are no longer supported".to_owned()))
-	}
-}
-
-impl Default for Operator {
-	fn default() -> Self {
-		Self::Equal
-	}
-}
-
-impl fmt::Display for Operator {
+impl fmt::Display for PrefixOperator {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Neg => f.write_str("-"),
-			Self::Not => f.write_str("!"),
-			Self::Or => f.write_str("OR"),
+			Self::Not => write!(f, "!"),
+			Self::Positive => write!(f, "+"),
+			Self::Negate => write!(f, "-"),
+			Self::Range => write!(f, ".."),
+			Self::RangeInclusive => write!(f, "..="),
+			Self::Cast(kind) => write!(f, "<{kind}> "),
+		}
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum PostfixOperator {
+	Range,
+	RangeSkip,
+	/// Not used as of yet but will be once the idiom is properly restructured.
+	MethodCall(String, Vec<Expr>),
+	Call(Vec<Expr>),
+}
+
+impl fmt::Display for PostfixOperator {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::Range => write!(f, ".."),
+			Self::RangeSkip => write!(f, ">.."),
+			Self::MethodCall(name, expr) => {
+				write!(f, ".{name}({})", Fmt::comma_separated(expr.iter()))
+			}
+			Self::Call(expr) => {
+				write!(f, "({})", Fmt::comma_separated(expr.iter()))
+			}
+		}
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum BinaryOperator {
+	/// `-`
+	Subtract,
+	/// `+`
+	Add,
+	/// `*`, `×`
+	Multiply,
+	/// `/`
+	Divide,
+	/// `%`
+	Remainder,
+	/// `**`
+	Power,
+	/// `=`
+	Equal,
+	/// `==`
+	ExactEqual,
+	/// `!=`
+	NotEqual,
+	/// `*=`
+	AllEqual,
+	/// `?=`
+	AnyEqual,
+
+	/// `||`, `OR`
+	Or,
+	/// `&&`, `AND`
+	And,
+	/// `??`
+	NullCoalescing,
+	/// `?:`
+	TenaryCondition,
+
+	/// `<`
+	LessThan,
+	/// `<=`
+	LessThanEqual,
+	/// `>`
+	MoreThan,
+	/// `>=`
+	MoreThanEqual,
+
+	/// `∋`
+	Contain,
+	/// `∌`
+	NotContain,
+	/// `⊇`
+	ContainAll,
+	/// `⊃`
+	ContainAny,
+	/// `⊅`
+	ContainNone,
+	/// `∈`
+	Inside,
+	/// `∉`
+	NotInside,
+	/// `⊆`
+	AllInside,
+	/// `⊂`
+	AnyInside,
+	/// `⊄`
+	NoneInside,
+
+	/// `OUTSIDE`
+	Outside,
+	/// `INTERSECTS`
+	Intersects,
+
+	/// `..`
+	Range,
+	/// `..=`
+	RangeInclusive,
+	/// `>..`
+	RangeSkip,
+	/// `>..=`
+	RangeSkipInclusive,
+
+	// `@@`
+	Matches(MatchesOperator),
+	// `<|k,..|>`
+	NearestNeighbor(Box<NearestNeighbor>),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct MatchesOperator {
+	pub rf: Option<MatchRef>,
+	pub operator: BooleanOperator,
+}
+
+impl fmt::Display for MatchesOperator {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		if let Some(r) = self.rf {
+			if self.operator != BooleanOperator::And {
+				write!(f, "@{r},{}@", self.operator)
+			} else {
+				write!(f, "@{r}@")
+			}
+		} else if self.operator != BooleanOperator::And {
+			write!(f, "@{}@", self.operator)
+		} else {
+			f.write_str("@@")
+		}
+	}
+}
+
+/// Boolean operation executed by the full-text index
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+pub enum BooleanOperator {
+	And,
+	Or,
+}
+
+impl fmt::Display for BooleanOperator {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
 			Self::And => f.write_str("AND"),
-			Self::Tco => f.write_str("?:"),
-			Self::Nco => f.write_str("??"),
-			Self::Add => f.write_str("+"),
-			Self::Sub => f.write_char('-'),
-			Self::Mul => f.write_char('*'),
-			Self::Div => f.write_char('/'),
-			Self::Rem => f.write_char('%'),
-			Self::Pow => f.write_str("**"),
-			Self::Inc => f.write_str("+="),
-			Self::Dec => f.write_str("-="),
-			Self::Ext => f.write_str("+?="),
-			Self::Equal => f.write_char('='),
-			Self::Exact => f.write_str("=="),
-			Self::NotEqual => f.write_str("!="),
-			Self::AllEqual => f.write_str("*="),
-			Self::AnyEqual => f.write_str("?="),
-			Self::LessThan => f.write_char('<'),
-			Self::LessThanOrEqual => f.write_str("<="),
-			Self::MoreThan => f.write_char('>'),
-			Self::MoreThanOrEqual => f.write_str(">="),
-			Self::Contain => f.write_str("CONTAINS"),
-			Self::NotContain => f.write_str("CONTAINSNOT"),
-			Self::ContainAll => f.write_str("CONTAINSALL"),
-			Self::ContainAny => f.write_str("CONTAINSANY"),
-			Self::ContainNone => f.write_str("CONTAINSNONE"),
-			Self::Inside => f.write_str("INSIDE"),
-			Self::NotInside => f.write_str("NOTINSIDE"),
-			Self::AllInside => f.write_str("ALLINSIDE"),
-			Self::AnyInside => f.write_str("ANYINSIDE"),
-			Self::NoneInside => f.write_str("NONEINSIDE"),
-			Self::Outside => f.write_str("OUTSIDE"),
-			Self::Intersects => f.write_str("INTERSECTS"),
-			Self::Matches(reference) => {
-				if let Some(r) = reference {
-					write!(f, "@{r}@")
-				} else {
-					f.write_str("@@")
-				}
+			Self::Or => f.write_str("OR"),
+		}
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum NearestNeighbor {
+	/// `<|k, dist|>`
+	K(u32, Distance),
+	/// `<|k|>`
+	KTree(u32),
+	/// `<|k, ef|>`
+	Approximate(u32, u32),
+}
+
+impl fmt::Display for NearestNeighbor {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			NearestNeighbor::KTree(k) => {
+				write!(f, "<|{k}|>")
 			}
-			Self::Knn(k, dist) => {
-				if let Some(d) = dist {
-					write!(f, "<|{k},{d}|>")
-				} else {
-					write!(f, "<|{k}|>")
-				}
+			NearestNeighbor::K(k, distance) => {
+				write!(f, "<|{k},{distance}|>")
 			}
-			Self::Ann(k, ef) => {
+			NearestNeighbor::Approximate(k, ef) => {
 				write!(f, "<|{k},{ef}|>")
 			}
 		}
 	}
 }
 
+impl fmt::Display for BinaryOperator {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Self::Or => write!(f, "OR"),
+			Self::And => write!(f, "AND"),
+			Self::NullCoalescing => write!(f, "??"),
+			Self::TenaryCondition => write!(f, "?:"),
+			Self::Add => write!(f, "+"),
+			Self::Subtract => write!(f, "-"),
+			Self::Multiply => write!(f, "*"),
+			Self::Divide => write!(f, "/"),
+			Self::Remainder => write!(f, "%"),
+			Self::Power => write!(f, "**"),
+			Self::Equal => write!(f, "="),
+			Self::ExactEqual => write!(f, "=="),
+			Self::NotEqual => write!(f, "!="),
+			Self::AllEqual => write!(f, "*="),
+			Self::AnyEqual => write!(f, "?="),
+			Self::LessThan => write!(f, "<"),
+			Self::LessThanEqual => write!(f, "<="),
+			Self::MoreThan => write!(f, ">"),
+			Self::MoreThanEqual => write!(f, ">="),
+			Self::Contain => write!(f, "CONTAINS"),
+			Self::NotContain => write!(f, "CONTAINSNOT"),
+			Self::ContainAll => write!(f, "CONTAINSALL"),
+			Self::ContainAny => write!(f, "CONTAINSANY"),
+			Self::ContainNone => write!(f, "CONTAINSNONE"),
+			Self::Inside => write!(f, "INSIDE"),
+			Self::NotInside => write!(f, "NOTINSIDE"),
+			Self::AllInside => write!(f, "ALLINSIDE"),
+			Self::AnyInside => write!(f, "ANYINSIDE"),
+			Self::NoneInside => write!(f, "NONEINSIDE"),
+			Self::Outside => write!(f, "OUTSIDE"),
+			Self::Intersects => write!(f, "INTERSECTS"),
+			Self::Matches(x) => x.fmt(f),
+			Self::Range => write!(f, ".."),
+			Self::RangeInclusive => write!(f, "..="),
+			Self::RangeSkip => write!(f, ">.."),
+			Self::RangeSkipInclusive => write!(f, ">..="),
+			Self::NearestNeighbor(n) => n.fmt(f),
+		}
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum AssignOperator {
+	Assign,
+	Add,
+	Subtract,
+	Extend,
+}
+
+impl fmt::Display for AssignOperator {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Self::Assign => write!(f, "="),
+			Self::Add => write!(f, "+="),
+			Self::Subtract => write!(f, "-="),
+			Self::Extend => write!(f, "+?="),
+		}
+	}
+}
+
 /// An enum which defines how strong a operator binds it's operands.
 ///
-/// If a binding power is higher the operator is more likely to directly operate on it's
-/// neighbours.
+/// If a binding power is higher the operator is more likely to directly operate
+/// on it's neighbours.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 pub enum BindingPower {
-	Base,
 	Or,
 	And,
 	Equality,
@@ -161,7 +284,7 @@ pub enum BindingPower {
 	Power,
 	Range,
 	Nullish,
-	Unary,
+	Prefix,
 	Postfix,
 	Prime,
 }
@@ -171,72 +294,93 @@ impl BindingPower {
 	///
 	/// Note that there are some variants here which can have multiple meanings.
 	/// `Operator::Equal` can be assignment but can also be equality.
-	/// `Operator::Add` can be the add operator but also the plus prefix operator which have different binding
-	/// powers.
+	/// `Operator::Add` can be the add operator but also the plus prefix
+	/// operator which have different binding powers.
 	///
-	/// This function returns the binding power for if the operator is used in the infix position.
-	pub fn for_operator(op: &Operator) -> Self {
+	/// This function returns the binding power for if the operator is used in
+	/// the infix position.
+	pub fn for_binary_operator(op: &BinaryOperator) -> Self {
 		match op {
-			Operator::Or => BindingPower::Or,
-			Operator::And => BindingPower::And,
+			BinaryOperator::Or => BindingPower::Or,
+			BinaryOperator::And => BindingPower::And,
 
-			Operator::Equal
-			| Operator::Exact
-			| Operator::NotEqual
-			| Operator::AllEqual
-			| Operator::AnyEqual => BindingPower::Equality,
+			BinaryOperator::Equal
+			| BinaryOperator::ExactEqual
+			| BinaryOperator::NotEqual
+			| BinaryOperator::AllEqual
+			| BinaryOperator::AnyEqual => BindingPower::Equality,
 
-			Operator::LessThan
-			| Operator::LessThanOrEqual
-			| Operator::MoreThan
-			| Operator::MoreThanOrEqual
-			| Operator::Matches(_)
-			| Operator::Contain
-			| Operator::NotContain
-			| Operator::ContainAll
-			| Operator::ContainAny
-			| Operator::ContainNone
-			| Operator::Inside
-			| Operator::NotInside
-			| Operator::AllInside
-			| Operator::AnyInside
-			| Operator::NoneInside
-			| Operator::Outside
-			| Operator::Intersects
-			| Operator::Knn(_, _)
-			| Operator::Ann(_, _) => BindingPower::Relation,
+			BinaryOperator::LessThan
+			| BinaryOperator::LessThanEqual
+			| BinaryOperator::MoreThan
+			| BinaryOperator::MoreThanEqual
+			| BinaryOperator::Matches(_)
+			| BinaryOperator::Contain
+			| BinaryOperator::NotContain
+			| BinaryOperator::ContainAll
+			| BinaryOperator::ContainAny
+			| BinaryOperator::ContainNone
+			| BinaryOperator::Inside
+			| BinaryOperator::NotInside
+			| BinaryOperator::AllInside
+			| BinaryOperator::AnyInside
+			| BinaryOperator::NoneInside
+			| BinaryOperator::Outside
+			| BinaryOperator::Intersects
+			| BinaryOperator::NearestNeighbor(_) => BindingPower::Relation,
 
-			Operator::Add | Operator::Sub => BindingPower::AddSub,
+			BinaryOperator::Add | BinaryOperator::Subtract => BindingPower::AddSub,
 
-			Operator::Mul | Operator::Div | Operator::Rem => BindingPower::MulDiv,
+			BinaryOperator::Multiply | BinaryOperator::Divide | BinaryOperator::Remainder => {
+				BindingPower::MulDiv
+			}
 
-			Operator::Pow => BindingPower::Power,
+			BinaryOperator::Power => BindingPower::Power,
 
-			Operator::Tco | Operator::Nco => BindingPower::Nullish,
+			BinaryOperator::NullCoalescing | BinaryOperator::TenaryCondition => {
+				BindingPower::Nullish
+			}
 
-			Operator::Neg | Operator::Not => BindingPower::Unary,
-
-			Operator::Inc | Operator::Dec | Operator::Ext => BindingPower::Base,
+			BinaryOperator::Range
+			| BinaryOperator::RangeInclusive
+			| BinaryOperator::RangeSkip
+			| BinaryOperator::RangeSkipInclusive => BindingPower::Range,
 		}
 	}
 
-	/// Returns the binding power for this expression. This is generally `BindingPower::Prime` as
-	/// most value variants are prime expressions, however some like Value::Expression and
-	/// Value::Range have a different binding power.
-	pub fn for_value(value: &Value) -> BindingPower {
-		match value {
-			Value::Expression(expr) => match **expr {
-				// All prefix expressions have the same binding power, regardless of the actual
-				// operator.
-				super::Expression::Unary {
-					..
-				} => BindingPower::Unary,
-				super::Expression::Binary {
-					ref o,
-					..
-				} => BindingPower::for_operator(o),
-			},
-			Value::Range(..) => BindingPower::Range,
+	pub fn for_postfix_operator(op: &PostfixOperator) -> Self {
+		match op {
+			PostfixOperator::Range | PostfixOperator::RangeSkip => BindingPower::Range,
+			PostfixOperator::MethodCall(..) | PostfixOperator::Call(..) => BindingPower::Postfix,
+		}
+	}
+
+	pub fn for_prefix_operator(op: &PrefixOperator) -> Self {
+		match op {
+			PrefixOperator::Range | PrefixOperator::RangeInclusive => BindingPower::Range,
+			PrefixOperator::Not
+			| PrefixOperator::Positive
+			| PrefixOperator::Negate
+			| PrefixOperator::Cast(_) => BindingPower::Prefix,
+		}
+	}
+	/// Returns the binding power for this expression. This is generally
+	/// `BindingPower::Prime` as most value variants are prime expressions,
+	/// however some like Value::Expression and Value::Range have a different
+	/// binding power.
+	pub fn for_expr(expr: &Expr) -> BindingPower {
+		match expr {
+			Expr::Prefix {
+				..
+			} => BindingPower::Prefix,
+			Expr::Postfix {
+				op,
+				..
+			} => BindingPower::for_postfix_operator(op),
+			Expr::Binary {
+				op,
+				..
+			} => BindingPower::for_binary_operator(op),
 			_ => BindingPower::Prime,
 		}
 	}

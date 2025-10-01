@@ -1,10 +1,9 @@
-use super::AppState;
-use crate::net::error::Error as NetError;
-use axum::Extension;
-use axum::Router;
 use axum::routing::get;
-use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb::kvs::{LockType::*, TransactionType::*};
+use axum::{Extension, Router};
+
+use super::AppState;
+use crate::core::dbs::capabilities::RouteTarget;
+use crate::net::error::Error as NetError;
 
 pub(super) fn router<S>() -> Router<S>
 where
@@ -21,29 +20,9 @@ async fn handler(Extension(state): Extension<AppState>) -> Result<(), NetError> 
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Health);
 		return Err(NetError::ForbiddenRoute(RouteTarget::Health.to_string()));
 	}
-	// Attempt to open a transaction
-	match db.transaction(Read, Optimistic).await {
-		// The transaction failed to start
-		Err(_) => Err(NetError::InvalidStorage),
-		// The transaction was successful
-		Ok(tx) => {
-			// Cancel the transaction
-			trace!("Health endpoint cancelling transaction");
-			// Attempt to fetch data
-			match tx.get(vec![0x00], None).await {
-				Err(_) => {
-					// Ensure the transaction is cancelled
-					let _ = tx.cancel().await;
-					// Return an error for this endpoint
-					Err(NetError::InvalidStorage)
-				}
-				Ok(_) => {
-					// Ensure the transaction is cancelled
-					let _ = tx.cancel().await;
-					// Return success for this endpoint
-					Ok(())
-				}
-			}
-		}
-	}
+
+	db.health_check().await.map_err(|err| {
+		tracing::error!("Health check failed: {err}");
+		NetError::InvalidStorage
+	})
 }

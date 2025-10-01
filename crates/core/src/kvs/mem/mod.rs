@@ -1,19 +1,18 @@
 #![cfg(feature = "kv-mem")]
 
+use std::ops::Range;
+#[cfg(not(target_family = "wasm"))]
+use std::sync::OnceLock;
+
+use anyhow::{Result, bail, ensure};
+use surrealkv::{Options, Store, Transaction as Tx};
+
+use super::Check;
 use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::savepoint::SavePoints;
 use crate::kvs::{Key, Val, Version};
-use anyhow::{Result, bail, ensure};
-use std::ops::Range;
-use surrealkv::Options;
-use surrealkv::Store;
-use surrealkv::Transaction as Tx;
 
-use super::{Check, KeyEncode};
-
-#[cfg(not(target_family = "wasm"))]
-use std::sync::OnceLock;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) static SKV_COMMIT_POOL: OnceLock<affinitypool::Threadpool> = OnceLock::new();
 #[cfg(not(target_family = "wasm"))]
@@ -179,8 +178,6 @@ impl super::api::Transaction for Transaction {
 	async fn exists(&mut self, key: Key, version: Option<u64>) -> Result<bool> {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
-		// Get the arguments
-		let key = key.encode_owned()?;
 		// Get the inner transaction
 		let inner =
 			self.inner.as_mut().ok_or_else(|| Error::Tx("Transaction inner is None".into()))?;

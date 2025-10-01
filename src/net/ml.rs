@@ -1,10 +1,9 @@
-//! This file defines the endpoints for the ML API for importing and exporting SurrealML models.
+//! This file defines the endpoints for the ML API for importing and exporting
+//! SurrealML models.
 
-use axum::{
-	Router,
-	extract::DefaultBodyLimit,
-	routing::{get, post},
-};
+use axum::Router;
+use axum::extract::DefaultBodyLimit;
+use axum::routing::{get, post};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use crate::cnf::HTTP_MAX_ML_BODY_SIZE;
@@ -24,23 +23,24 @@ where
 #[cfg(feature = "ml")]
 mod implementation {
 	use anyhow::Context;
-	use axum::{Extension, body::Body, extract::Path, response::Response};
+	use axum::Extension;
+	use axum::body::Body;
+	use axum::extract::Path;
+	use axum::response::Response;
 	use bytes::Bytes;
 	use futures_util::StreamExt;
 	use http::StatusCode;
-	use surrealdb_core::{
-		dbs::{Session, capabilities::RouteTarget},
-		iam::{Action, ResourceKind, check::check_ns_db},
-		kvs::{LockType, TransactionType},
-		ml::storage::surml_file::SurMlFile,
-		sql::statements::{DefineModelStatement, DefineStatement},
-	};
 
-	use crate::net::{
-		AppState,
-		error::{Error as NetError, ResponseError},
-		output::Output,
-	};
+	use crate::core::dbs::Session;
+	use crate::core::dbs::capabilities::RouteTarget;
+	use crate::core::expr::statements::{DefineModelStatement, DefineStatement};
+	use crate::core::expr::{Expr, LogicalPlan, TopLevelExpr, get_model_path};
+	use crate::core::iam::check::check_ns_db;
+	use crate::core::iam::{Action, ResourceKind};
+	use crate::core::ml::storage::surml_file::SurMlFile;
+	use crate::net::AppState;
+	use crate::net::error::{Error as NetError, ResponseError};
+	use crate::net::output::Output;
 
 	/// This endpoint allows the user to import a model into the database.
 	pub async fn import(
@@ -50,16 +50,16 @@ mod implementation {
 	) -> Result<Output, ResponseError> {
 		let mut stream = body.into_data_stream();
 		// Get the datastore reference
-		let db = &state.datastore;
+		let ds = &state.datastore;
 		// Check if capabilities allow querying the requested HTTP route
-		if !db.allows_http_route(&RouteTarget::Ml) {
+		if !ds.allows_http_route(&RouteTarget::Ml) {
 			warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Ml);
 			return Err(NetError::ForbiddenRoute(RouteTarget::Ml.to_string()).into());
 		}
 		// Ensure a NS and DB are set
 		let (nsv, dbv) = check_ns_db(&session).map_err(ResponseError)?;
 		// Check the permissions level
-		db.check(&session, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))
+		ds.check(&session, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))
 			.map_err(ResponseError)?;
 		// Create a new buffer
 		let mut buffer = Vec::new();
@@ -79,24 +79,35 @@ mod implementation {
 		// Convert the file back in to raw bytes
 		let data = file.to_bytes();
 		// Calculate the hash of the model file
-		let hash = surrealdb::obs::hash(&data);
+		let hash = crate::core::obs::hash(&data);
 		// Calculate the path of the model file
-		let path = format!(
-			"ml/{nsv}/{dbv}/{}-{}-{hash}.surml",
-			file.header.name.to_string(),
-			file.header.version.to_string()
+		let path = get_model_path(
+			&nsv,
+			&dbv,
+			&file.header.name.to_string(),
+			&file.header.version.to_string(),
+			&hash,
 		);
 		// Insert the file data in to the store
-		surrealdb::obs::put(&path, data).await.map_err(ResponseError)?;
+		crate::core::obs::put(&path, data).await.map_err(ResponseError)?;
 		// Insert the model in to the database
-		let mut model = DefineModelStatement::default();
-		model.name = file.header.name.to_string().into();
-		model.version = file.header.version.to_string();
-		model.comment = Some(file.header.description.to_string().into());
-		model.hash = hash;
-		db.process(DefineStatement::Model(model).into(), &session, None)
-			.await
-			.map_err(ResponseError)?;
+		let model = DefineModelStatement {
+			name: file.header.name.to_string(),
+			version: file.header.version.to_string(),
+			comment: Some(Expr::Literal(crate::core::expr::Literal::String(
+				file.header.description.to_string(),
+			))),
+			hash,
+			..Default::default()
+		};
+
+		let q = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Model(
+				model,
+			))))],
+		};
+
+		ds.process_plan(q, &session, None).await.map_err(ResponseError)?;
 		//
 		Ok(Output::None)
 	}
@@ -109,28 +120,27 @@ mod implementation {
 	) -> Result<Response, ResponseError> {
 		// Get the datastore reference
 
-		let db = &state.datastore;
+		let ds = &state.datastore;
 		// Check if capabilities allow querying the requested HTTP route
-		if !db.allows_http_route(&RouteTarget::Ml) {
+		if !ds.allows_http_route(&RouteTarget::Ml) {
 			warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Ml);
 			return Err(NetError::ForbiddenRoute(RouteTarget::Ml.to_string()).into());
 		}
 		// Ensure a NS and DB are set
 		let (nsv, dbv) = check_ns_db(&session).map_err(ResponseError)?;
 		// Check the permissions level
-		db.check(&session, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))
+		ds.check(&session, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))
 			.map_err(ResponseError)?;
 		// Start a new readonly transaction
-		let tx = db
-			.transaction(TransactionType::Read, LockType::Optimistic)
-			.await
-			.map_err(ResponseError)?;
-		// Attempt to get the model definition
-		let info = tx.get_db_model(&nsv, &dbv, &name, &version).await.map_err(ResponseError)?;
+		let Some(info) =
+			ds.get_db_model(&nsv, &dbv, &name, &version).await.map_err(ResponseError)?
+		else {
+			return Err(NetError::NotFound(format!("Model {name} {version} not found")).into());
+		};
 		// Calculate the path of the model file
 		let path = format!("ml/{nsv}/{dbv}/{name}-{version}-{}.surml", info.hash);
 		// Export the file data in to the store
-		let mut data = surrealdb::obs::stream(path)
+		let mut data = crate::core::obs::stream(path)
 			.await
 			.context("Failed to read model file")
 			.map_err(ResponseError)?;
@@ -150,13 +160,14 @@ mod implementation {
 
 #[cfg(not(feature = "ml"))]
 mod implementation {
-	use axum::{Extension, body::Body, extract::Path};
-	use surrealdb_core::dbs::{Session, capabilities::RouteTarget};
+	use axum::Extension;
+	use axum::body::Body;
+	use axum::extract::Path;
 
-	use crate::net::{
-		AppState,
-		error::{Error as NetError, ResponseError},
-	};
+	use crate::core::dbs::Session;
+	use crate::core::dbs::capabilities::RouteTarget;
+	use crate::net::AppState;
+	use crate::net::error::{Error as NetError, ResponseError};
 
 	/// This endpoint allows the user to import a model into the database.
 	pub async fn import(

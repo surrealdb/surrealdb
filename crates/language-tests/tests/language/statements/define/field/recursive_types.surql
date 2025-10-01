@@ -16,8 +16,8 @@ value = '''
 	events: {},
 	fields: {
 		"foo": "DEFINE FIELD foo ON bar TYPE array<float | array<bool>> | set<number> PERMISSIONS FULL",
-		"foo[*]": "DEFINE FIELD foo[*] ON bar TYPE float | array<bool> | number PERMISSIONS FULL",
-		"foo[*][*]": "DEFINE FIELD foo[*][*] ON bar TYPE bool PERMISSIONS FOR select, create FULL, FOR update NONE"
+		"foo.*": "DEFINE FIELD foo.* ON bar TYPE float | array<bool> | number PERMISSIONS FULL",
+		"foo.*.*": "DEFINE FIELD foo.*.* ON bar TYPE bool PERMISSIONS FOR select, create FULL, FOR update NONE"
 	},
 	indexes: {},
 	lives: {},

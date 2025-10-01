@@ -1,46 +1,71 @@
+use std::fmt::{self, Display};
+
+use anyhow::{Result, bail};
+use argon2::Argon2;
+use argon2::password_hash::{PasswordHasher, SaltString};
+use rand::Rng as _;
+use rand::distributions::Alphanumeric;
+use rand::rngs::OsRng;
+use reblessive::tree::Stk;
+
+use super::DefineKind;
+use crate::catalog::providers::{CatalogProvider, NamespaceProvider, UserProvider};
+use crate::catalog::{self, UserDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Strand, Value, escape::QuoteStr, fmt::Fmt, user::UserDuration};
+use crate::expr::expression::VisitExpression;
+use crate::expr::parameterize::expr_to_ident;
+use crate::expr::user::UserDuration;
+use crate::expr::{Base, Expr, Idiom, Literal};
+use crate::fmt::{Fmt, QuoteStr};
 use crate::iam::{Action, ResourceKind};
-use anyhow::{Result, bail};
-use argon2::{
-	Argon2,
-	password_hash::{PasswordHasher, SaltString},
-};
+use crate::val::{self, Duration, Value};
 
-use rand::{Rng, distributions::Alphanumeric, rngs::OsRng};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-
-#[revisioned(revision = 4)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineUserStatement {
-	pub name: Ident,
+	pub kind: DefineKind,
+	pub name: Expr,
 	pub base: Base,
 	pub hash: String,
 	pub code: String,
-	pub roles: Vec<Ident>,
-	#[revision(start = 3)]
+	pub roles: Vec<String>,
 	pub duration: UserDuration,
-	pub comment: Option<Strand>,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 4)]
-	pub overwrite: bool,
+	pub comment: Option<Expr>,
 }
 
-#[expect(clippy::fallible_impl_from)]
-impl From<(Base, &str, &str, &str)> for DefineUserStatement {
-	fn from((base, user, pass, role): (Base, &str, &str, &str)) -> Self {
+impl VisitExpression for DefineUserStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.name.visit(visitor);
+		self.comment.iter().for_each(|expr| expr.visit(visitor));
+	}
+}
+
+impl Default for DefineUserStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			base: Base::Root,
+			hash: String::new(),
+			code: String::new(),
+			roles: vec![],
+			duration: UserDuration::default(),
+			comment: None,
+		}
+	}
+}
+
+impl DefineUserStatement {
+	pub(crate) fn new_with_password(base: Base, user: String, pass: &str, role: String) -> Self {
 		DefineUserStatement {
+			kind: DefineKind::Default,
 			base,
-			name: user.into(),
+			name: Expr::Idiom(Idiom::field(user)),
 			hash: Argon2::default()
 				.hash_password(pass.as_ref(), &SaltString::generate(&mut OsRng))
 				.unwrap()
@@ -50,88 +75,117 @@ impl From<(Base, &str, &str, &str)> for DefineUserStatement {
 				.take(128)
 				.map(char::from)
 				.collect::<String>(),
-			roles: vec![role.into()],
+			roles: vec![role],
 			duration: UserDuration::default(),
 			comment: None,
-			if_not_exists: false,
-			overwrite: false,
 		}
 	}
-}
 
-impl DefineUserStatement {
+	pub(crate) async fn to_definition(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<catalog::UserDefinition> {
+		Ok(UserDefinition {
+			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "user name").await?,
+			hash: self.hash.clone(),
+			code: self.code.clone(),
+			roles: self.roles.clone(),
+			token_duration: map_opt!(x as &self.duration.token => compute_to!(stk, ctx, opt, doc, x => Duration).0),
+			session_duration: map_opt!(x as &self.duration.session => compute_to!(stk, ctx, opt, doc, x => Duration).0),
+			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+		})
+	}
+
+	pub fn from_definition(base: Base, def: &catalog::UserDefinition) -> Self {
+		Self {
+			kind: DefineKind::Default,
+			base,
+			name: Expr::Idiom(Idiom::field(def.name.clone())),
+			hash: def.hash.clone(),
+			code: def.code.clone(),
+			roles: def.roles.clone(),
+			duration: UserDuration {
+				token: def
+					.token_duration
+					.map(|x| Expr::Literal(Literal::Duration(val::Duration(x)))),
+				session: def
+					.session_duration
+					.map(|x| Expr::Literal(Literal::Duration(val::Duration(x)))),
+			},
+			comment: def.comment.as_ref().map(|x| Expr::Idiom(Idiom::field(x.clone()))),
+		}
+	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Actor, &self.base)?;
+		// Compute definition
+		let definition = self.to_definition(stk, ctx, opt, doc).await?;
 		// Check the statement type
 		match self.base {
 			Base::Root => {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if the definition exists
-				if txn.get_root_user(&self.name).await.is_ok() {
-					if self.if_not_exists {
-						return Ok(Value::None);
-					} else if !self.overwrite && !opt.import {
-						bail!(Error::UserRootAlreadyExists {
-							name: self.name.to_string(),
-						});
+				if let Some(user) = txn.get_root_user(&definition.name).await? {
+					match self.kind {
+						DefineKind::Default => {
+							if !opt.import {
+								bail!(Error::UserRootAlreadyExists {
+									name: user.name.to_string(),
+								});
+							}
+						}
+						DefineKind::Overwrite => {}
+						DefineKind::IfNotExists => return Ok(Value::None),
 					}
 				}
 				// Process the statement
-				let key = crate::key::root::us::new(&self.name);
-				txn.set(
-					key,
-					revision::to_vec(&DefineUserStatement {
-						// Don't persist the `IF NOT EXISTS` clause to schema
-						if_not_exists: false,
-						overwrite: false,
-						..self.clone()
-					})?,
-					None,
-				)
-				.await?;
+				txn.put_root_user(&definition).await?;
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}
 			Base::Ns => {
 				// Fetch the transaction
 				let txn = ctx.tx();
+				let ns = ctx.get_ns_id(opt).await?;
 				// Check if the definition exists
-				if txn.get_ns_user(opt.ns()?, &self.name).await.is_ok() {
-					if self.if_not_exists {
-						return Ok(Value::None);
-					} else if !self.overwrite && !opt.import {
-						bail!(Error::UserNsAlreadyExists {
-							name: self.name.to_string(),
-							ns: opt.ns()?.into(),
-						});
+				if let Some(user) = txn.get_ns_user(ns, &definition.name).await? {
+					match self.kind {
+						DefineKind::Default => {
+							if !opt.import {
+								bail!(Error::UserNsAlreadyExists {
+									name: user.name.to_string(),
+									ns: opt.ns()?.into(),
+								});
+							}
+						}
+						DefineKind::Overwrite => {}
+						DefineKind::IfNotExists => return Ok(Value::None),
 					}
 				}
+
+				let ns = {
+					let ns = opt.ns()?;
+					txn.get_or_add_ns(ns, opt.strict).await?
+				};
+
 				// Process the statement
-				let key = crate::key::namespace::us::new(opt.ns()?, &self.name);
-				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
-				txn.set(
-					key,
-					revision::to_vec(&DefineUserStatement {
-						// Don't persist the `IF NOT EXISTS` clause to schema
-						if_not_exists: false,
-						overwrite: false,
-						..self.clone()
-					})?,
-					None,
-				)
-				.await?;
+				txn.put_ns_user(ns.namespace_id, &definition).await?;
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}
@@ -139,40 +193,35 @@ impl DefineUserStatement {
 				// Fetch the transaction
 				let txn = ctx.tx();
 				// Check if the definition exists
-				let (ns, db) = opt.ns_db()?;
-				if txn.get_db_user(ns, db, &self.name).await.is_ok() {
-					if self.if_not_exists {
-						return Ok(Value::None);
-					} else if !self.overwrite && !opt.import {
-						bail!(Error::UserDbAlreadyExists {
-							name: self.name.to_string(),
-							ns: ns.into(),
-							db: db.into(),
-						});
+				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+				if let Some(user) = txn.get_db_user(ns, db, &definition.name).await? {
+					match self.kind {
+						DefineKind::Default => {
+							if !opt.import {
+								bail!(Error::UserDbAlreadyExists {
+									name: user.name.to_string(),
+									ns: opt.ns()?.to_string(),
+									db: opt.db()?.to_string(),
+								});
+							}
+						}
+						DefineKind::Overwrite => {}
+						DefineKind::IfNotExists => return Ok(Value::None),
 					}
 				}
+
+				let db = {
+					let (ns, db) = opt.ns_db()?;
+					txn.get_or_add_db(ns, db, opt.strict).await?
+				};
+
 				// Process the statement
-				let key = crate::key::database::us::new(ns, db, &self.name);
-				txn.get_or_add_ns(ns, opt.strict).await?;
-				txn.get_or_add_db(ns, db, opt.strict).await?;
-				txn.set(
-					key,
-					revision::to_vec(&DefineUserStatement {
-						// Don't persist the `IF NOT EXISTS` clause to schema
-						if_not_exists: false,
-						overwrite: false,
-						..self.clone()
-					})?,
-					None,
-				)
-				.await?;
+				txn.put_db_user(db.namespace_id, db.database_id, &definition).await?;
 				// Clear the cache
-				txn.clear();
+				txn.clear_cache();
 				// Ok all good
 				Ok(Value::None)
 			}
-			// Other levels are not supported
-			_ => Err(anyhow::Error::new(Error::InvalidLevel(self.base.to_string()))),
 		}
 	}
 }
@@ -180,11 +229,10 @@ impl DefineUserStatement {
 impl Display for DefineUserStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE USER")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(
 			f,
@@ -193,7 +241,7 @@ impl Display for DefineUserStatement {
 			self.base,
 			QuoteStr(&self.hash),
 			Fmt::comma_separated(
-				&self.roles.iter().map(|r| r.to_string().to_uppercase()).collect::<Vec<String>>()
+				&self.roles.iter().map(|r| r.to_string().to_uppercase()).collect::<Vec<_>>()
 			),
 		)?;
 		// Always print relevant durations so defaults can be changed in the future
@@ -204,7 +252,7 @@ impl Display for DefineUserStatement {
 			f,
 			" FOR TOKEN {},",
 			match self.duration.token {
-				Some(dur) => format!("{}", dur),
+				Some(ref dur) => format!("{}", dur),
 				None => "NONE".to_string(),
 			}
 		)?;
@@ -212,29 +260,13 @@ impl Display for DefineUserStatement {
 			f,
 			" FOR SESSION {}",
 			match self.duration.session {
-				Some(dur) => format!("{}", dur),
+				Some(ref dur) => format!("{}", dur),
 				None => "NONE".to_string(),
 			}
 		)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+		if let Some(ref comment) = self.comment {
+			write!(f, " COMMENT {}", comment)?
 		}
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineUserStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"base".to_string() => self.base.structure(),
-			"hash".to_string() => self.hash.into(),
-			"roles".to_string() => self.roles.into_iter().map(Ident::structure).collect(),
-			"duration".to_string() => Value::from(map! {
-				"token".to_string() => self.duration.token.into(),
-				"session".to_string() => self.duration.session.into(),
-			}),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
 	}
 }

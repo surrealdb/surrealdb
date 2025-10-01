@@ -1,73 +1,102 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::err::Error;
-use crate::expr::{Base, Ident, Value};
-use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+use anyhow::Result;
+use reblessive::tree::Stk;
+
+use crate::catalog::providers::NamespaceProvider;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::expr::expression::VisitExpression;
+use crate::expr::parameterize::expr_to_ident;
+use crate::expr::{Base, Expr, Literal, Value};
+use crate::iam::{Action, ResourceKind};
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveNamespaceStatement {
-	pub name: Ident,
-	#[revision(start = 2)]
+	pub name: Expr,
 	pub if_exists: bool,
-	#[revision(start = 3)]
 	pub expunge: bool,
+}
+
+impl VisitExpression for RemoveNamespaceStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.name.visit(visitor);
+	}
+}
+
+impl Default for RemoveNamespaceStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			if_exists: false,
+			expunge: false,
+		}
+	}
 }
 
 impl RemoveNamespaceStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Namespace, &Base::Root)?;
 		// Get the transaction
 		let txn = ctx.tx();
-		// Remove the index stores
-		#[cfg(not(target_family = "wasm"))]
-		ctx.get_index_stores().namespace_removed(ctx.get_index_builder(), &txn, &self.name).await?;
-		#[cfg(target_family = "wasm")]
-		ctx.get_index_stores().namespace_removed(&txn, &self.name).await?;
-		// Remove the sequences
-		if let Some(seq) = ctx.get_sequences() {
-			seq.namespace_removed(&txn, &self.name).await?;
-		}
-		// Get the definition
-		let ns = match txn.get_ns(&self.name).await {
-			Ok(x) => x,
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::NsNotFound { .. })) {
+		// Compute the name
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "namespace name").await?;
+		let ns = match txn.get_ns_by_name(&name).await? {
+			Some(x) => x,
+			None => {
+				if self.if_exists {
 					return Ok(Value::None);
-				} else {
-					return Err(e);
 				}
+
+				return Err(Error::NsNotFound {
+					name,
+				}
+				.into());
 			}
 		};
+
+		// Remove the index stores
+		#[cfg(not(target_family = "wasm"))]
+		ctx.get_index_stores()
+			.namespace_removed(ctx.get_index_builder(), &txn, ns.namespace_id)
+			.await?;
+		#[cfg(target_family = "wasm")]
+		ctx.get_index_stores().namespace_removed(&txn, ns.namespace_id).await?;
+		// Remove the sequences
+		if let Some(seq) = ctx.get_sequences() {
+			seq.namespace_removed(&txn, ns.namespace_id).await?;
+		}
+
 		// Delete the definition
 		let key = crate::key::root::ns::new(&ns.name);
+		let namespace_root = crate::key::namespace::all::new(ns.namespace_id);
 		if self.expunge {
-			txn.clr(key).await?
+			txn.clr(&key).await?;
+			txn.clrp(&namespace_root).await?;
 		} else {
-			txn.del(key).await?
+			txn.del(&key).await?;
+			txn.delp(&namespace_root).await?;
 		};
-		// Delete the resource data
-		let key = crate::key::namespace::all::new(&ns.name);
-		if self.expunge {
-			txn.clrp(key).await?
-		} else {
-			txn.delp(key).await?
-		};
+
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
 			cache.clear();
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

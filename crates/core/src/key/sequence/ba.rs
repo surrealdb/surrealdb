@@ -1,25 +1,31 @@
 //! Stores sequence batches
-use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_key;
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+use storekey::{BorrowDecode, Encode};
+
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::key::category::{Categorise, Category};
+use crate::kvs::impl_kv_key_storekey;
+use crate::kvs::sequences::BatchValue;
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Ba<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub sq: &'a str,
+	pub sq: Cow<'a, str>,
 	_f: u8,
 	_g: u8,
 	_h: u8,
 	pub start: i64,
 }
-impl_key!(Ba<'a>);
+
+impl_kv_key_storekey!(Ba<'_> => BatchValue);
 
 impl Categorise for Ba<'_> {
 	fn categorise(&self) -> Category {
@@ -28,7 +34,7 @@ impl Categorise for Ba<'_> {
 }
 
 impl<'a> Ba<'a> {
-	pub(crate) fn new(ns: &'a str, db: &'a str, sq: &'a str, start: i64) -> Self {
+	pub(crate) fn new(ns: NamespaceId, db: DatabaseId, sq: &'a str, start: i64) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -38,7 +44,7 @@ impl<'a> Ba<'a> {
 			_c: b'!',
 			_d: b's',
 			_e: b'q',
-			sq,
+			sq: Cow::Borrowed(sq),
 			_f: b'!',
 			_g: b'b',
 			_h: b'a',
@@ -49,15 +55,13 @@ impl<'a> Ba<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+	use crate::kvs::KVKey;
+
 	#[test]
 	fn key() {
-		use super::*;
-		let val = Ba::new("testns", "testdb", "testsq", 100);
-		let enc = Ba::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0!sqtestsq\0!ba\x80\0\0\0\0\0\0\x64");
-
-		let dec = Ba::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let val = Ba::new(NamespaceId(1), DatabaseId(2), "testsq", 100);
+		let enc = Ba::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!sqtestsq\0!ba\x80\0\0\0\0\0\0\x64");
 	}
 }

@@ -1,5 +1,6 @@
-use crate::syn::token::Span;
 use std::fmt::Display;
+
+use crate::syn::token::Span;
 
 mod location;
 mod mac;
@@ -34,11 +35,11 @@ pub struct Diagnostic {
 #[derive(Debug)]
 pub struct SyntaxError {
 	diagnostic: Box<Diagnostic>,
-	data_pending: bool,
 }
 
 impl SyntaxError {
 	/// Create a new parse error.
+	#[cold]
 	pub fn new<T>(message: T) -> Self
 	where
 		T: Display,
@@ -50,22 +51,10 @@ impl SyntaxError {
 
 		Self {
 			diagnostic: Box::new(diagnostic),
-			data_pending: false,
 		}
 	}
 
-	/// Returns whether this error is possibly the result of missing data.
-	pub fn is_data_pending(&self) -> bool {
-		self.data_pending
-	}
-
-	/// Indicate that this error might be the result of missing data and could be resolved with
-	/// more data.
-	pub fn with_data_pending(mut self) -> Self {
-		self.data_pending = true;
-		self
-	}
-
+	#[cold]
 	pub fn with_span(mut self, span: Span, kind: MessageKind) -> Self {
 		self.diagnostic = Box::new(Diagnostic {
 			kind: DiagnosticKind::Span {
@@ -78,6 +67,7 @@ impl SyntaxError {
 		self
 	}
 
+	#[cold]
 	pub fn with_labeled_span<T: Display>(
 		mut self,
 		span: Span,
@@ -95,6 +85,7 @@ impl SyntaxError {
 		self
 	}
 
+	#[cold]
 	pub fn with_cause<T: Display>(mut self, t: T) -> Self {
 		self.diagnostic = Box::new(Diagnostic {
 			kind: DiagnosticKind::Cause(t.to_string()),
@@ -115,6 +106,28 @@ impl SyntaxError {
 	pub fn render_on_bytes(&self, source: &[u8]) -> RenderedError {
 		let source = String::from_utf8_lossy(source);
 		self.render_on(&source)
+	}
+
+	/// Traverses all diagnostics and hands a mutable reference to the diagnostic span to the given
+	/// callback.
+	pub fn update_spans<F: FnMut(&mut Span)>(mut self, mut cb: F) -> Self {
+		let mut cur = &mut *self.diagnostic;
+
+		loop {
+			match cur.kind {
+				DiagnosticKind::Cause(_) => {}
+				DiagnosticKind::Span {
+					ref mut span,
+					..
+				} => cb(span),
+			}
+			let Some(next) = cur.next.as_mut() else {
+				break;
+			};
+			cur = &mut *next;
+		}
+
+		self
 	}
 
 	fn render_on_inner(diagnostic: &Diagnostic, source: &str, res: &mut RenderedError) {

@@ -2,21 +2,21 @@
 
 mod cnf;
 
-use crate::err::Error;
-use crate::key::debug::Sprintable;
-use crate::kvs::Check;
-use crate::kvs::Key;
-use crate::kvs::Val;
-use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare};
-use crate::vs::VersionStamp;
-use anyhow::{Result, bail, ensure};
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
-use tikv::TimestampExt;
-use tikv::TransactionOptions;
-use tikv::{CheckLevel, Config, TransactionClient};
+
+use anyhow::{Result, bail, ensure};
+use tikv::{CheckLevel, Config, TimestampExt, TransactionClient, TransactionOptions};
+
+use crate::err::Error;
+use crate::key::database::vs::VsKey;
+use crate::key::debug::Sprintable;
+use crate::kvs::key::KVKey;
+use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare};
+use crate::kvs::{Check, Key, Val};
+use crate::vs::VersionStamp;
 
 const TARGET: &str = "surrealdb::core::kvs::tikv";
 
@@ -462,21 +462,22 @@ impl super::api::Transaction for Transaction {
 	}
 
 	/// Obtain a new change timestamp for a key
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get_timestamp(&mut self, key: Key) -> Result<VersionStamp> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
+	async fn get_timestamp(&mut self, key: VsKey) -> Result<VersionStamp> {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Get the transaction version
 		let ver = self.inner.current_timestamp().await?.version();
+		let key_encoded = key.encode_key()?;
 		// Calculate the previous version value
-		if let Some(prev) = self.get(key.clone(), None).await? {
+		if let Some(prev) = self.get(key_encoded.clone(), None).await? {
 			let prev = VersionStamp::from_slice(prev.as_slice())?.try_into_u64()?;
 			ensure!(prev < ver, Error::TxFailure);
 		};
 		// Convert the timestamp to a versionstamp
 		let ver = VersionStamp::from_u64(ver);
 		// Store the timestamp to prevent other transactions from committing
-		self.set(key, ver.to_vec(), None).await?;
+		self.set(key_encoded, ver.to_vec(), None).await?;
 		// Return the uint64 representation of the timestamp as the result
 		Ok(ver)
 	}

@@ -1,21 +1,53 @@
 # Contributing
 
-We would &nbsp;<img width="15" src="./img/love.svg">&nbsp; for you to contribute to SurrealDB and help make it better! We want contributing to SurrealDB to be fun, enjoyable, and educational for anyone and everyone. All contributions are welcome, including features, bugfixes, and documentation changes, as well as updates and tweaks, blog posts, workshops, and everything else.
+We would &nbsp;<img width="15" src="./img/love.svg">&nbsp; for you to contribute to SurrealDB and help make it better! We want contributing to SurrealDB to be fun, enjoyable, and educational for anyone and everyone. All contributions are welcome, including features, bugfixes, and [documentation changes](https://github.com/surrealdb/docs.surrealdb.com), as well as updates and tweaks, blog post ideas, workshops, and everything else.
 
 ## How to start
 
-If you are worried or don’t know where to start, check out our next section explaining what kind of help we could use and where can you get involved. You can ask us a question on [GitHub Discussions](https://github.com/surrealdb/surrealdb/discussions), or the [SurrealDB Discord Server](https://surrealdb.com/discord). Alternatively, you can message us on any channel in the [SurrealDB Community](https://surrealdb.com/community)!
+If you are worried or don’t know where to start, check out our next section explaining what kind of help we could use and where can you get involved. You can ask us a question on the [SurrealDB Discord Server](https://surrealdb.com/discord) or [GitHub Discussions](https://github.com/surrealdb/surrealdb/discussions). Alternatively, you can message us on any channel in the [SurrealDB Community](https://surrealdb.com/community)!
 
 ## Code of conduct
 
 Help us keep SurrealDB open and inclusive. Please read and follow our [Code of Conduct](/CODE_OF_CONDUCT.md).
 
+## General notes on contributing to SurrealDB
+
+SurrealDB is open source and contributions are most welcome. On the other hand, most of the development for SurrealDB is planned and done internally among the engineering team. It is very likely that a PR that shows up will not be reviewed for some time. Many merged PRs have spent a good number of weeks before being reviewed!
+
+In theory, any and all PRs are welcome. In practice, there are two metrics that generally determine what will happen to a PR:
+
+* How crucial is it?
+* How large is it?
+
+These metrics lead to two possible extremes:
+
+* Crucial and small: A one-line bug fix, for example.
+* Not crucial and large: A large implementation of some new functionality.
+
+The former is quick to review and merge. The latter is still possible, but is best done with a good deal of discussion up front.
+
+Some bigger features might need to go through our [RFC process](https://github.com/surrealdb/rfcs).
+
+### What if my PR hasn't been looked at?
+
+Here are some tips if you have an outstanding PR that you would like to get merged.
+
+* **Current activity**: you can get an idea of the latest activity by [viewing PRs that are most recently updated](https://github.com/surrealdb/surrealdb/pulls?q=is%3Apr+is%3Aopen+sort%3Aupdated-desc), or [active branches](https://github.com/surrealdb/surrealdb/branches). If these tend to be particularly large, some major development may be going on and engineers may not have the head space to review PRs.
+* **Talk about it**: you can cut through the noise a bit by mentioning your PR from time to time in our Discord community. SurrealDB staff are also present on Discord, and the majority of engineering team members monitor channels pertaining to their part of the code base. But also feel free to mention the PR in a more general channel if you would like the community to see and comment on it as well.
+* **Adding images or videos**: a visual demonstration of the change can be the easiest way to cut through the noise and show what the PR does.
+
+Finally, please keep in mind that **a PR may conflict with an upcoming addition that has not yet been announced**. It is possible that your PR may do something similar to an unannounced functionality that the engineering team is already working on! In this case it is not possible to even comment on the PR, as doing so may leak the fact that a similar functionality is already in development.
+
+In short, feel free to submit any and all PRs, and then sit back and relax. Discuss it and ping people from time to time, update the PR if there are any merge conflicts, and enjoy the ride!
+
 ## Coding standards
 
-SurrealDB uses [`rustfmt`](https://github.com/rust-lang/rustfmt) to ensure that all code is formatted to the same standards. To install `rustfmt` run the following code:
+SurrealDB uses cargo commands to ensure that code is formatted and linted to the same standards. To run them, use the following commands:
 
 ```bash
-rustup component add rustfmt
+// Use this for formatting because nightly rustfmt is used
+make fmt (or cargo make fmt)
+cargo clippy
 ```
 
 ## Getting started from the source
@@ -35,19 +67,25 @@ cargo run -- help
 To run the SurrealDB database server, use the following command:
 
 ```bash
-cargo run --no-default-features --features storage-mem,http,scripting -- start --log trace --user root --pass root memory
+cargo run --no-default-features --features \
+storage-mem,http,scripting -- start --log trace \
+--user root --pass root memory
 ```
 
 To listen to code changes as you develop, use the following command:
 
 ```bash
-cargo watch -x 'run --no-default-features --features storage-mem,http,scripting -- start --log trace --user root --pass root memory'
+cargo watch -x 'run --no-default-features \
+--features storage-mem,http,scripting -- start \
+--log trace --user root --pass root memory'
 ```
 
 By default, SurrealDB runs locally on port 8000. To change the default listening address or port, use the following command:
 
 ```bash
-cargo run --no-default-features --features storage-mem,http,scripting -- start --log trace --user root --pass root --bind 0.0.0.0:9000 memory
+cargo run --no-default-features --features \
+storage-mem,http,scripting -- start --log trace \
+--user root --pass root --bind 0.0.0.0:9000 memory
 ```
 
 To run all tests manually, use the SurrealDB command-line from your terminal:
@@ -56,11 +94,51 @@ To run all tests manually, use the SurrealDB command-line from your terminal:
 cargo test
 ```
 
+Many tests have recently moved to the [language-tests](https://github.com/surrealdb/surrealdb/tree/main/crates/language-tests) crate which allows a test to be created using only SurrealQL via a .toml file which includes the queries and expected output. An example of a test:
+
+```toml
+/**
+# The env map configures the general environment of the test
+[env]
+namespace = false
+database = false
+auth = { level = "owner" }
+signin = {}
+signup = {}
+
+[test]
+# Sets the reason behind this test; what exactly this test is testing.
+reason = "Ensure multi line comments are properly parsed as toml."
+# Whether to actually run this file, some files might only be used as an import,
+# setting this to false disables running that test.
+run = true
+
+# set the expected result for this test
+# Can also be a plain array i.e. results = ["foo",{ error = true }]
+[[test.results]]
+# the first result should be foo
+value = "'foo'"
+
+[[test.results]]
+# the second result should be an error.
+# You can error to a string for an error test, then the test will ensure that
+# the error has the same text. Otherwise it will just check for an error without
+# checking it's value.
+error = true
+*/
+
+// The actual queries tested in the test.
+RETURN "foo";
+1 + "1";
+```
+
 To build a production-ready SurrealDB binary, execute the following command:
 
 ```bash
 cargo build --release
 ```
+
+We also have [a blog post](https://surrealdb.com/blog/making-your-own-pr-to-the-surrealdb-source-code) introducing the steps involved in creating a small sample PR.
 
 ## Scalability and Performance
 
@@ -98,21 +176,20 @@ cargo install revision-lock
 revision-lock
 ```
 
-## Introducing new features
+## Check existing topic labels
 
-We would &nbsp;<img width="15" alt="Love" src="https://github.com/surrealdb/surrealdb/blob/main/img/love.svg?raw=true">&nbsp; for you to contribute to SurrealDB, but we would also like to make sure SurrealDB is as great as possible and loyal to its vision and mission statement. For us to find the right balance, please open a question on [GitHub discussions](https://github.com/surrealdb/surrealdb/discussions) with any ideas before creating a [**GitHub Issue**](https://github.com/surrealdb/surrealdb/issues). This will allow the SurrealDB community to have sufficient discussion about the new feature value and how it fits in the product roadmap and vision, before introducing a new pull request.
-
-This is also important for the SurrealDB lead developers to be able to give technical input and different emphasis regarding the feature design and architecture. Some bigger features might need to go through our [RFC process](https://github.com/surrealdb/rfcs).
-
+Issues on SurrealDB's GitHub repo have a label that begins with `topic:`, such as [`topic:typing`](https://github.com/surrealdb/surrealdb/issues?q=is%3Aissue%20state%3Aopen%20label%3Atopic%3Atyping) or `topic:record ids`. Referencing them may give greater insight into how to resolve an issue and perhaps even resolve other related issues at the same time.
 
 ## Submitting a pull request
 
 The **branch name** is your first opportunity to give your task context.
-Branch naming convention is as follows 
+
+Branch naming convention is as follows:
 
 `TYPE-ISSUE_ID-DESCRIPTION`
 
 It is recommended to combine the relevant [**GitHub Issue**](https://github.com/surrealdb/surrealdb/issues) with a short description that describes the task resolved in this branch. If you don't have GitHub issue for your PR, then you may avoid the prefix, but keep in mind that more likely you have to create the issue first. For example:
+
 ```
 bugfix-548-ensure-queries-execute-sequentially
 ```

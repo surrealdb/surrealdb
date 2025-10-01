@@ -1,18 +1,15 @@
-use std::{
-	any::Any,
-	mem,
-	panic::AssertUnwindSafe,
-	path::Path,
-	sync::{
-		Arc,
-		atomic::{AtomicUsize, Ordering},
-	},
-	time::SystemTime,
-};
+use std::any::Any;
+use std::mem;
+use std::panic::AssertUnwindSafe;
+use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 use futures::FutureExt as _;
-use surrealdb_core::{dbs::Capabilities, kvs::Datastore};
+use surrealdb_core::dbs::Capabilities;
+use surrealdb_core::kvs::Datastore;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::cli::Backend;

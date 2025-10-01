@@ -1,14 +1,9 @@
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
-use super::{Idiom, SqlValue, Table};
+use crate::sql::Expr;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
-#[serde(rename = "$surrealdb::private::sql::Reference")]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Reference {
 	pub on_delete: ReferenceDeleteStrategy,
 }
@@ -34,17 +29,14 @@ impl From<crate::expr::reference::Reference> for Reference {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
-#[serde(rename = "$surrealdb::private::sql::ReferenceDeleteStrategy")]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum ReferenceDeleteStrategy {
 	Reject,
 	Ignore,
 	Cascade,
 	Unset,
-	Custom(SqlValue),
+	Custom(Expr),
 }
 
 impl fmt::Display for ReferenceDeleteStrategy {
@@ -100,30 +92,5 @@ impl From<crate::expr::reference::ReferenceDeleteStrategy> for ReferenceDeleteSt
 				ReferenceDeleteStrategy::Custom(v.into())
 			}
 		}
-	}
-}
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
-#[serde(rename = "$surrealdb::private::sql::Refs")]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct Refs(pub Vec<(Option<Table>, Option<Idiom>)>);
-
-impl fmt::Display for Refs {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "[]")
-	}
-}
-
-impl From<Refs> for crate::expr::reference::Refs {
-	fn from(v: Refs) -> Self {
-		Self(v.0.into_iter().map(|(t, i)| (t.map(Into::into), i.map(Into::into))).collect())
-	}
-}
-
-impl From<crate::expr::reference::Refs> for Refs {
-	fn from(v: crate::expr::reference::Refs) -> Self {
-		Self(v.0.into_iter().map(|(t, i)| (t.map(Into::into), i.map(Into::into))).collect())
 	}
 }

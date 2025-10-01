@@ -1,18 +1,15 @@
-use super::{ParseResult, Parser};
-use crate::{
-	sql::{Constant, Function, SqlValue},
-	syn::{
-		error::{MessageKind, bail},
-		parser::{SyntaxError, mac::expected, unexpected},
-		token::{Span, t},
-	},
-};
 use phf::phf_map;
 use reblessive::Stk;
 use unicase::UniCase;
 
+use super::{ParseResult, Parser};
+use crate::sql::{Constant, Expr, Function, FunctionCall};
+use crate::syn::error::{MessageKind, bail};
+use crate::syn::parser::mac::expected;
+use crate::syn::parser::{SyntaxError, unexpected};
+use crate::syn::token::{Span, t};
+
 /// The kind of a parsed path.
-#[non_exhaustive]
 pub enum PathKind {
 	Constant(Constant),
 	Function,
@@ -112,14 +109,14 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("duration::secs") => PathKind::Function,
 		UniCase::ascii("duration::weeks") => PathKind::Function,
 		UniCase::ascii("duration::years") => PathKind::Function,
-		UniCase::ascii("duration::from::days") => PathKind::Function,
-		UniCase::ascii("duration::from::hours") => PathKind::Function,
-		UniCase::ascii("duration::from::micros") => PathKind::Function,
-		UniCase::ascii("duration::from::millis") => PathKind::Function,
-		UniCase::ascii("duration::from::mins") => PathKind::Function,
-		UniCase::ascii("duration::from::nanos") => PathKind::Function,
-		UniCase::ascii("duration::from::secs") => PathKind::Function,
-		UniCase::ascii("duration::from::weeks") => PathKind::Function,
+		UniCase::ascii("duration::from_days") => PathKind::Function,
+		UniCase::ascii("duration::from_hours") => PathKind::Function,
+		UniCase::ascii("duration::from_micros") => PathKind::Function,
+		UniCase::ascii("duration::from_millis") => PathKind::Function,
+		UniCase::ascii("duration::from_mins") => PathKind::Function,
+		UniCase::ascii("duration::from_nanos") => PathKind::Function,
+		UniCase::ascii("duration::from_secs") => PathKind::Function,
+		UniCase::ascii("duration::from_weeks") => PathKind::Function,
 		//
 		UniCase::ascii("encoding::base64::decode") => PathKind::Function,
 		UniCase::ascii("encoding::base64::encode") => PathKind::Function,
@@ -146,7 +143,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("geo::distance") => PathKind::Function,
 		UniCase::ascii("geo::hash::decode") => PathKind::Function,
 		UniCase::ascii("geo::hash::encode") => PathKind::Function,
-		UniCase::ascii("geo::is::valid") => PathKind::Function,
+		UniCase::ascii("geo::is_valid") => PathKind::Function,
 		//
 		UniCase::ascii("http::head") => PathKind::Function,
 		UniCase::ascii("http::get") => PathKind::Function,
@@ -241,11 +238,13 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		//
 		UniCase::ascii("record::exists") => PathKind::Function,
 		UniCase::ascii("record::id") => PathKind::Function,
+		UniCase::ascii("record::is_edge") => PathKind::Function,
 		UniCase::ascii("record::table") => PathKind::Function,
 		UniCase::ascii("record::tb") => PathKind::Function,
-		UniCase::ascii("record::refs") => PathKind::Function,
 		//
 		UniCase::ascii("search::analyze") => PathKind::Function,
+		UniCase::ascii("search::linear") => PathKind::Function,
+		UniCase::ascii("search::rrf") => PathKind::Function,
 		UniCase::ascii("search::score") => PathKind::Function,
 		UniCase::ascii("search::highlight") => PathKind::Function,
 		UniCase::ascii("search::offsets") => PathKind::Function,
@@ -285,28 +284,28 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("string::distance::levenshtein") => PathKind::Function,
 		UniCase::ascii("string::distance::normalized_damerau_levenshtein") => PathKind::Function,
 		UniCase::ascii("string::distance::normalized_levenshtein") => PathKind::Function,
-		UniCase::ascii("string::distance::osa_distance") => PathKind::Function,
+		UniCase::ascii("string::distance::osa") => PathKind::Function,
 		//
 		UniCase::ascii("string::html::encode") => PathKind::Function,
 		UniCase::ascii("string::html::sanitize") => PathKind::Function,
-		UniCase::ascii("string::is::alphanum") => PathKind::Function,
-		UniCase::ascii("string::is::alpha") => PathKind::Function,
-		UniCase::ascii("string::is::ascii") => PathKind::Function,
-		UniCase::ascii("string::is::datetime") => PathKind::Function,
-		UniCase::ascii("string::is::domain") => PathKind::Function,
-		UniCase::ascii("string::is::email") => PathKind::Function,
-		UniCase::ascii("string::is::hexadecimal") => PathKind::Function,
-		UniCase::ascii("string::is::ip") => PathKind::Function,
-		UniCase::ascii("string::is::ipv4") => PathKind::Function,
-		UniCase::ascii("string::is::ipv6") => PathKind::Function,
-		UniCase::ascii("string::is::latitude") => PathKind::Function,
-		UniCase::ascii("string::is::longitude") => PathKind::Function,
-		UniCase::ascii("string::is::numeric") => PathKind::Function,
-		UniCase::ascii("string::is::semver") => PathKind::Function,
-		UniCase::ascii("string::is::url") => PathKind::Function,
-		UniCase::ascii("string::is::ulid") => PathKind::Function,
-		UniCase::ascii("string::is::uuid") => PathKind::Function,
-		UniCase::ascii("string::is::record") => PathKind::Function,
+		UniCase::ascii("string::is_alphanum") => PathKind::Function,
+		UniCase::ascii("string::is_alpha") => PathKind::Function,
+		UniCase::ascii("string::is_ascii") => PathKind::Function,
+		UniCase::ascii("string::is_datetime") => PathKind::Function,
+		UniCase::ascii("string::is_domain") => PathKind::Function,
+		UniCase::ascii("string::is_email") => PathKind::Function,
+		UniCase::ascii("string::is_hexadecimal") => PathKind::Function,
+		UniCase::ascii("string::is_ip") => PathKind::Function,
+		UniCase::ascii("string::is_ipv4") => PathKind::Function,
+		UniCase::ascii("string::is_ipv6") => PathKind::Function,
+		UniCase::ascii("string::is_latitude") => PathKind::Function,
+		UniCase::ascii("string::is_longitude") => PathKind::Function,
+		UniCase::ascii("string::is_numeric") => PathKind::Function,
+		UniCase::ascii("string::is_semver") => PathKind::Function,
+		UniCase::ascii("string::is_url") => PathKind::Function,
+		UniCase::ascii("string::is_ulid") => PathKind::Function,
+		UniCase::ascii("string::is_uuid") => PathKind::Function,
+		UniCase::ascii("string::is_record") => PathKind::Function,
 		UniCase::ascii("string::semver::compare") => PathKind::Function,
 		UniCase::ascii("string::semver::major") => PathKind::Function,
 		UniCase::ascii("string::semver::minor") => PathKind::Function,
@@ -347,14 +346,14 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("time::week") => PathKind::Function,
 		UniCase::ascii("time::yday") => PathKind::Function,
 		UniCase::ascii("time::year") => PathKind::Function,
-		UniCase::ascii("time::from::micros") => PathKind::Function,
-		UniCase::ascii("time::from::millis") => PathKind::Function,
-		UniCase::ascii("time::from::nanos") => PathKind::Function,
-		UniCase::ascii("time::from::secs") => PathKind::Function,
-		UniCase::ascii("time::from::ulid") => PathKind::Function,
-		UniCase::ascii("time::from::unix") => PathKind::Function,
-		UniCase::ascii("time::from::uuid") => PathKind::Function,
-		UniCase::ascii("time::is::leap_year") => PathKind::Function,
+		UniCase::ascii("time::from_micros") => PathKind::Function,
+		UniCase::ascii("time::from_millis") => PathKind::Function,
+		UniCase::ascii("time::from_nanos") => PathKind::Function,
+		UniCase::ascii("time::from_secs") => PathKind::Function,
+		UniCase::ascii("time::from_ulid") => PathKind::Function,
+		UniCase::ascii("time::from_unix") => PathKind::Function,
+		UniCase::ascii("time::from_uuid") => PathKind::Function,
+		UniCase::ascii("time::is_leap_year") => PathKind::Function,
 		//
 		UniCase::ascii("type::array") => PathKind::Function,
 		UniCase::ascii("type::bool") => PathKind::Function,
@@ -377,30 +376,30 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("type::table") => PathKind::Function,
 		UniCase::ascii("type::thing") => PathKind::Function,
 		UniCase::ascii("type::uuid") => PathKind::Function,
-		UniCase::ascii("type::is::array") => PathKind::Function,
-		UniCase::ascii("type::is::bool") => PathKind::Function,
-		UniCase::ascii("type::is::bytes") => PathKind::Function,
-		UniCase::ascii("type::is::collection") => PathKind::Function,
-		UniCase::ascii("type::is::datetime") => PathKind::Function,
-		UniCase::ascii("type::is::decimal") => PathKind::Function,
-		UniCase::ascii("type::is::duration") => PathKind::Function,
-		UniCase::ascii("type::is::float") => PathKind::Function,
-		UniCase::ascii("type::is::geometry") => PathKind::Function,
-		UniCase::ascii("type::is::int") => PathKind::Function,
-		UniCase::ascii("type::is::line") => PathKind::Function,
-		UniCase::ascii("type::is::multiline") => PathKind::Function,
-		UniCase::ascii("type::is::multipoint") => PathKind::Function,
-		UniCase::ascii("type::is::multipolygon") => PathKind::Function,
-		UniCase::ascii("type::is::none") => PathKind::Function,
-		UniCase::ascii("type::is::null") => PathKind::Function,
-		UniCase::ascii("type::is::number") => PathKind::Function,
-		UniCase::ascii("type::is::object") => PathKind::Function,
-		UniCase::ascii("type::is::point") => PathKind::Function,
-		UniCase::ascii("type::is::polygon") => PathKind::Function,
-		UniCase::ascii("type::is::range") => PathKind::Function,
-		UniCase::ascii("type::is::record") => PathKind::Function,
-		UniCase::ascii("type::is::string") => PathKind::Function,
-		UniCase::ascii("type::is::uuid") => PathKind::Function,
+		UniCase::ascii("type::is_array") => PathKind::Function,
+		UniCase::ascii("type::is_bool") => PathKind::Function,
+		UniCase::ascii("type::is_bytes") => PathKind::Function,
+		UniCase::ascii("type::is_collection") => PathKind::Function,
+		UniCase::ascii("type::is_datetime") => PathKind::Function,
+		UniCase::ascii("type::is_decimal") => PathKind::Function,
+		UniCase::ascii("type::is_duration") => PathKind::Function,
+		UniCase::ascii("type::is_float") => PathKind::Function,
+		UniCase::ascii("type::is_geometry") => PathKind::Function,
+		UniCase::ascii("type::is_int") => PathKind::Function,
+		UniCase::ascii("type::is_line") => PathKind::Function,
+		UniCase::ascii("type::is_multiline") => PathKind::Function,
+		UniCase::ascii("type::is_multipoint") => PathKind::Function,
+		UniCase::ascii("type::is_multipolygon") => PathKind::Function,
+		UniCase::ascii("type::is_none") => PathKind::Function,
+		UniCase::ascii("type::is_null") => PathKind::Function,
+		UniCase::ascii("type::is_number") => PathKind::Function,
+		UniCase::ascii("type::is_object") => PathKind::Function,
+		UniCase::ascii("type::is_point") => PathKind::Function,
+		UniCase::ascii("type::is_polygon") => PathKind::Function,
+		UniCase::ascii("type::is_range") => PathKind::Function,
+		UniCase::ascii("type::is_record") => PathKind::Function,
+		UniCase::ascii("type::is_string") => PathKind::Function,
+		UniCase::ascii("type::is_uuid") => PathKind::Function,
 		//
 		UniCase::ascii("value::diff") => PathKind::Function,
 		UniCase::ascii("value::patch") => PathKind::Function,
@@ -452,7 +451,9 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("time::EPOCH") => PathKind::Constant(Constant::TimeEpoch),
 		UniCase::ascii("time::MINIMUM") => PathKind::Constant(Constant::TimeMin),
 		UniCase::ascii("time::MAXIMUM") => PathKind::Constant(Constant::TimeMax),
-		UniCase::ascii("duration::MAX") => PathKind::Constant(Constant::DurationMax)
+		UniCase::ascii("duration::MAX") => PathKind::Constant(Constant::DurationMax),
+		//
+		UniCase::ascii("schema::table::exists") => PathKind::Function,
 };
 
 const MAX_LEVENSTHEIN_CUT_OFF: u8 = 4;
@@ -461,19 +462,21 @@ const LEVENSTHEIN_ARRAY_SIZE: usize = 1 + MAX_FUNCTION_NAME_LEN + MAX_LEVENSTHEI
 
 /// simple function calculating levenshtein distance with a cut-off.
 ///
-/// levenshtein distance seems fast enough for searching possible functions to suggest as the list
-/// isn't that long and the function names aren't that long. Additionally this function also uses a
-/// cut off for quick rejection of strings which won't lower the minimum searched distance.
+/// levenshtein distance seems fast enough for searching possible functions to
+/// suggest as the list isn't that long and the function names aren't that long.
+/// Additionally this function also uses a cut off for quick rejection of
+/// strings which won't lower the minimum searched distance.
 ///
-/// Function uses stack allocated array's of size LEVENSTHEIN_ARRAY_SIZE. LEVENSTHEIN_ARRAY_SIZE should the largest size in the haystack +
+/// Function uses stack allocated array's of size LEVENSTHEIN_ARRAY_SIZE.
+/// LEVENSTHEIN_ARRAY_SIZE should the largest size in the haystack +
 /// maximum cut_off + 1 for the additional value required during calculation
 fn levenshtein(a: &[u8], b: &[u8], cut_off: u8) -> u8 {
 	debug_assert!(LEVENSTHEIN_ARRAY_SIZE < u8::MAX as usize);
 	let mut distance_array = [[0u8; LEVENSTHEIN_ARRAY_SIZE]; 2];
 
 	if a.len().abs_diff(b.len()) > cut_off as usize {
-		// moving from a to b requires atleast more then cut off insertions or deletions so don't
-		// even bother.
+		// moving from a to b requires atleast more then cut off insertions or deletions
+		// so don't even bother.
 		return cut_off + 1;
 	}
 
@@ -505,9 +508,9 @@ fn levenshtein(a: &[u8], b: &[u8], cut_off: u8) -> u8 {
 			lowest = res.min(lowest)
 		}
 
-		// The lowest value in the next calculated row will always be equal or larger then the
-		// lowest value of the current row. So we can cut off search early if the score can't equal
-		// the cut_off.
+		// The lowest value in the next calculated row will always be equal or larger
+		// then the lowest value of the current row. So we can cut off search early if
+		// the score can't equal the cut_off.
 		if lowest > cut_off {
 			return cut_off + 1;
 		}
@@ -539,11 +542,7 @@ fn find_suggestion(got: &str) -> Option<&'static str> {
 
 impl Parser<'_> {
 	/// Parse a builtin path.
-	pub(super) async fn parse_builtin(
-		&mut self,
-		stk: &mut Stk,
-		start: Span,
-	) -> ParseResult<SqlValue> {
+	pub(super) async fn parse_builtin(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Expr> {
 		let mut last_span = start;
 		while self.eat(t!("::")) {
 			let peek = self.peek();
@@ -558,15 +557,16 @@ impl Parser<'_> {
 		let str = self.lexer.span_str(span);
 
 		match PATHS.get_entry(&UniCase::ascii(str)) {
-			Some((_, PathKind::Constant(x))) => Ok(SqlValue::Constant(x.clone())),
+			Some((_, PathKind::Constant(x))) => Ok(Expr::Constant(x.clone())),
 			Some((k, PathKind::Function)) => {
+				// TODO: Move this out of the parser.
 				if k == &UniCase::ascii("api::invoke") && !self.settings.define_api_enabled {
 					bail!("Cannot use the `api::invoke` method, as the experimental define api capability is not enabled", @span);
 				}
 
 				stk.run(|ctx| self.parse_builtin_function(ctx, k.into_inner().to_owned()))
 					.await
-					.map(|x| SqlValue::Function(Box::new(x)))
+					.map(|x| Expr::FunctionCall(Box::new(x)))
 			}
 			None => {
 				if let Some(suggest) = find_suggestion(str) {
@@ -587,7 +587,7 @@ impl Parser<'_> {
 		&mut self,
 		stk: &mut Stk,
 		name: String,
-	) -> ParseResult<Function> {
+	) -> ParseResult<FunctionCall> {
 		let start = expected!(self, t!("(")).span;
 		let mut args = Vec::new();
 		loop {
@@ -595,7 +595,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let arg = stk.run(|ctx| self.parse_value_inherit(ctx)).await?;
+			let arg = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
 			args.push(arg);
 
 			if !self.eat(t!(",")) {
@@ -603,7 +603,11 @@ impl Parser<'_> {
 				break;
 			}
 		}
-		Ok(Function::Normal(name, args))
+		let receiver = Function::Normal(name);
+		Ok(FunctionCall {
+			receiver,
+			arguments: args,
+		})
 	}
 }
 
@@ -614,8 +618,8 @@ mod test {
 	#[test]
 	fn function_name_constant_up_to_date() {
 		let max = PATHS.keys().map(|x| x.len()).max().unwrap();
-		// These two need to be the same but the constant needs to manually be updated if PATHS
-		// ever changes so that these two values are not the same.
+		// These two need to be the same but the constant needs to manually be updated
+		// if PATHS ever changes so that these two values are not the same.
 		assert_eq!(
 			MAX_FUNCTION_NAME_LEN, max,
 			"the constant MAX_FUNCTION_NAME_LEN should be {} but is {}, please update the constant",

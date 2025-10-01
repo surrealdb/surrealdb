@@ -3,8 +3,6 @@
 rec {
   inherit systems system;
 
-  config = import ./config.nix;
-
   supportedPlatforms = let
     specDir = builtins.readDir ./spec;
     nixExt = ".nix";
@@ -59,23 +57,7 @@ rec {
 
   packageName = cargoToml.package.name;
 
-  fdbPackage = fdbPackages:
-    let
-      fdbPkgVersion = builtins.replaceStrings [ "." ] [ "" ] config.fdbVersion;
-    in fdbPackages."foundationdb${fdbPkgVersion}";
-
-  fdbSupported = fdbPackages:
-    let
-      package = fdbPackage fdbPackages;
-      fdbSystems = package.meta.platforms or [ ];
-    in builtins.elem system fdbSystems;
-
-  features = cargoToml.features // {
-    storage-fdb = let
-      fdbFeatureVersion =
-        builtins.replaceStrings [ "." ] [ "_" ] config.fdbVersion;
-    in [ "surrealdb/kv-fdb-${fdbFeatureVersion}" ];
-  };
+  features = cargoToml.features;
 
   buildMetadata = with lib.strings;
     let

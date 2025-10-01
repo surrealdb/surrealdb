@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
-use crate::api_integration::NS;
-
 use super::CreateDb;
 
 pub async fn serialise_uuid(new_db: impl CreateDb) {
@@ -12,7 +10,7 @@ pub async fn serialise_uuid(new_db: impl CreateDb) {
 		uuid: Uuid,
 	}
 	let (permit, db) = new_db.create_db().await;
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let record = Record {
 		uuid: Uuid::new_v4(),

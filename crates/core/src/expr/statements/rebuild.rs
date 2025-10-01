@@ -1,32 +1,26 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
+use anyhow::Result;
+use reblessive::tree::Stk;
+
+use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Base;
-use crate::expr::ident::Ident;
-use crate::expr::value::Value;
+use crate::expr::statements::define::run_indexing;
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
+use crate::val::Value;
 
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt;
-use std::fmt::{Display, Formatter};
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RebuildStatement {
 	Index(RebuildIndexStatement),
 }
 
 impl RebuildStatement {
-	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		true
-	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -49,14 +43,12 @@ impl Display for RebuildStatement {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RebuildIndexStatement {
-	pub name: Ident,
-	pub what: Ident,
+	pub name: String,
+	pub what: String,
 	pub if_exists: bool,
+	pub concurrently: bool,
 }
 
 impl RebuildIndexStatement {
@@ -71,24 +63,25 @@ impl RebuildIndexStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the index definition
-		let (ns, db) = opt.ns_db()?;
-		let res = ctx.tx().get_tb_index(ns, db, &self.what, &self.name).await;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		let res = ctx.tx().get_tb_index(ns, db, &self.what, &self.name).await?;
 		let ix = match res {
-			Ok(x) => x,
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
+			Some(x) => x,
+			None => {
+				if self.if_exists {
 					return Ok(Value::None);
 				} else {
-					return Err(e);
+					return Err(Error::IxNotFound {
+						name: self.name.to_string(),
+					}
+					.into());
 				}
 			}
 		};
-		let mut ix = ix.as_ref().clone();
+		let ix = ix.as_ref().clone();
 
-		ix.overwrite = true;
-		ix.if_not_exists = false;
 		// Rebuild the index
-		ix.compute(stk, ctx, opt, doc).await?;
+		run_indexing(stk, ctx, opt, doc, &ix, !self.concurrently).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -100,7 +93,10 @@ impl Display for RebuildIndexStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what))?;
+		if self.concurrently {
+			write!(f, " CONCURRENTLY")?
+		}
 		Ok(())
 	}
 }

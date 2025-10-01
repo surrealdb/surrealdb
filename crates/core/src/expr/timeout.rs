@@ -1,19 +1,32 @@
-use crate::expr::duration::Duration;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::ops::Deref;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct Timeout(pub Duration);
+use anyhow::Result;
+use reblessive::tree::Stk;
 
-impl Deref for Timeout {
-	type Target = Duration;
-	fn deref(&self) -> &Self::Target {
-		&self.0
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::expr::{Expr, Literal};
+use crate::val::Duration;
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct Timeout(pub Expr);
+
+impl Default for Timeout {
+	fn default() -> Self {
+		Self(Expr::Literal(Literal::Duration(Duration::default())))
+	}
+}
+
+impl Timeout {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Duration> {
+		Ok(compute_to!(stk, ctx, opt, doc, self.0 => Duration))
 	}
 }
 

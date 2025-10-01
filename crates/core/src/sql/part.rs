@@ -1,109 +1,27 @@
-use crate::{
-	cnf::IDIOM_RECURSION_LIMIT,
-	err::Error,
-	sql::{Graph, Ident, Idiom, Number, SqlValue, fmt::Fmt, strand::no_nul_bytes},
-};
-use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::fmt::Write;
-use std::str;
 
-use super::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt, is_pretty, pretty_indent};
+use crate::sql::{Expr, Idiom, Lookup};
 
-#[revisioned(revision = 4)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Part {
 	All,
 	Flatten,
 	Last,
 	First,
-	Field(Ident),
-	Index(Number),
-	Where(SqlValue),
-	Graph(Graph),
-	Value(SqlValue),
-	Start(SqlValue),
-	Method(#[serde(with = "no_nul_bytes")] String, Vec<SqlValue>),
-	#[revision(start = 2)]
+	Field(String),
+	Where(Expr),
+	Graph(Lookup),
+	Value(Expr),
+	Start(Expr),
+	Method(String, Vec<Expr>),
 	Destructure(Vec<DestructurePart>),
 	Optional,
-	#[revision(
-		start = 3,
-		end = 4,
-		convert_fn = "convert_recurse_add_instruction",
-		fields_name = "OldRecurseFields"
-	)]
-	Recurse(Recurse, Option<Idiom>),
-	#[revision(start = 4)]
 	Recurse(Recurse, Option<Idiom>, Option<RecurseInstruction>),
-	#[revision(start = 3)]
 	Doc,
-	#[revision(start = 3)]
 	RepeatRecurse,
-}
-
-impl Part {
-	fn convert_recurse_add_instruction(
-		fields: OldRecurseFields,
-		_revision: u16,
-	) -> Result<Self, revision::Error> {
-		Ok(Part::Recurse(fields.0, fields.1, None))
-	}
-}
-
-impl From<i32> for Part {
-	fn from(v: i32) -> Self {
-		Self::Index(v.into())
-	}
-}
-
-impl From<isize> for Part {
-	fn from(v: isize) -> Self {
-		Self::Index(v.into())
-	}
-}
-
-impl From<usize> for Part {
-	fn from(v: usize) -> Self {
-		Self::Index(v.into())
-	}
-}
-
-impl From<String> for Part {
-	fn from(v: String) -> Self {
-		Self::Field(v.into())
-	}
-}
-
-impl From<Number> for Part {
-	fn from(v: Number) -> Self {
-		Self::Index(v)
-	}
-}
-
-impl From<Ident> for Part {
-	fn from(v: Ident) -> Self {
-		Self::Field(v)
-	}
-}
-
-impl From<Graph> for Part {
-	fn from(v: Graph) -> Self {
-		Self::Graph(v)
-	}
-}
-
-impl From<&str> for Part {
-	fn from(v: &str) -> Self {
-		match v.parse::<isize>() {
-			Ok(v) => Self::from(v),
-			_ => Self::from(v.to_owned()),
-		}
-	}
 }
 
 impl From<Part> for crate::expr::Part {
@@ -113,10 +31,9 @@ impl From<Part> for crate::expr::Part {
 			Part::Flatten => Self::Flatten,
 			Part::Last => Self::Last,
 			Part::First => Self::First,
-			Part::Field(ident) => Self::Field(ident.into()),
-			Part::Index(number) => Self::Index(number.into()),
+			Part::Field(ident) => Self::Field(ident),
 			Part::Where(value) => Self::Where(value.into()),
-			Part::Graph(graph) => Self::Graph(graph.into()),
+			Part::Graph(graph) => Self::Lookup(graph.into()),
 			Part::Value(value) => Self::Value(value.into()),
 			Part::Start(value) => Self::Start(value.into()),
 			Part::Method(method, values) => {
@@ -144,14 +61,13 @@ impl From<crate::expr::Part> for Part {
 			crate::expr::Part::Flatten => Self::Flatten,
 			crate::expr::Part::Last => Self::Last,
 			crate::expr::Part::First => Self::First,
-			crate::expr::Part::Field(ident) => Self::Field(ident.into()),
-			crate::expr::Part::Index(number) => Self::Index(number.into()),
+			crate::expr::Part::Field(ident) => Self::Field(ident),
 			crate::expr::Part::Where(value) => Self::Where(value.into()),
-			crate::expr::Part::Graph(graph) => Self::Graph(graph.into()),
+			crate::expr::Part::Lookup(graph) => Self::Graph(graph.into()),
 			crate::expr::Part::Value(value) => Self::Value(value.into()),
 			crate::expr::Part::Start(value) => Self::Start(value.into()),
 			crate::expr::Part::Method(method, values) => {
-				Self::Method(method, values.into_iter().map(Into::<SqlValue>::into).collect())
+				Self::Method(method, values.into_iter().map(Into::into).collect())
 			}
 			crate::expr::Part::Destructure(parts) => {
 				Self::Destructure(parts.into_iter().map(Into::<DestructurePart>::into).collect())
@@ -171,13 +87,12 @@ impl From<crate::expr::Part> for Part {
 impl fmt::Display for Part {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Part::All => f.write_str("[*]"),
+			Part::All => f.write_str(".*"),
 			Part::Last => f.write_str("[$]"),
 			Part::First => f.write_str("[0]"),
 			Part::Start(v) => write!(f, "{v}"),
-			Part::Field(v) => write!(f, ".{v}"),
+			Part::Field(v) => write!(f, ".{}", EscapeKwFreeIdent(v)),
 			Part::Flatten => f.write_str("…"),
-			Part::Index(v) => write!(f, "[{v}]"),
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
 			Part::Graph(v) => write!(f, "{v}"),
 			Part::Value(v) => write!(f, "[{v}]"),
@@ -220,34 +135,17 @@ impl fmt::Display for Part {
 
 // ------------------------------
 
-pub trait Next<'a> {
-	fn next(&'a self) -> &'a [Part];
-}
-
-impl<'a> Next<'a> for &'a [Part] {
-	fn next(&'a self) -> &'a [Part] {
-		match self.len() {
-			0 => &[],
-			_ => &self[1..],
-		}
-	}
-}
-
-// ------------------------------
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum DestructurePart {
-	All(Ident),
-	Field(Ident),
-	Aliased(Ident, Idiom),
-	Destructure(Ident, Vec<DestructurePart>),
+	All(String),
+	Field(String),
+	Aliased(String, Idiom),
+	Destructure(String, Vec<DestructurePart>),
 }
 
 impl DestructurePart {
-	pub fn field(&self) -> &Ident {
+	pub fn field(&self) -> &str {
 		match self {
 			DestructurePart::All(v) => v,
 			DestructurePart::Field(v) => v,
@@ -275,11 +173,11 @@ impl DestructurePart {
 impl fmt::Display for DestructurePart {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			DestructurePart::All(fd) => write!(f, "{fd}.*"),
-			DestructurePart::Field(fd) => write!(f, "{fd}"),
-			DestructurePart::Aliased(fd, v) => write!(f, "{fd}: {v}"),
+			DestructurePart::All(fd) => write!(f, "{}.*", EscapeIdent(fd)),
+			DestructurePart::Field(fd) => write!(f, "{}", EscapeIdent(fd)),
+			DestructurePart::Aliased(fd, v) => write!(f, "{}: {v}", EscapeIdent(fd)),
 			DestructurePart::Destructure(fd, d) => {
-				write!(f, "{fd}{}", Part::Destructure(d.clone()))
+				write!(f, "{}{}", EscapeIdent(&fd), Part::Destructure(d.clone()))
 			}
 		}
 	}
@@ -288,11 +186,11 @@ impl fmt::Display for DestructurePart {
 impl From<DestructurePart> for crate::expr::part::DestructurePart {
 	fn from(v: DestructurePart) -> Self {
 		match v {
-			DestructurePart::All(v) => Self::All(v.into()),
-			DestructurePart::Field(v) => Self::Field(v.into()),
-			DestructurePart::Aliased(v, idiom) => Self::Aliased(v.into(), idiom.into()),
+			DestructurePart::All(v) => Self::All(v),
+			DestructurePart::Field(v) => Self::Field(v),
+			DestructurePart::Aliased(v, idiom) => Self::Aliased(v, idiom.into()),
 			DestructurePart::Destructure(v, d) => {
-				Self::Destructure(v.into(), d.into_iter().map(Into::into).collect())
+				Self::Destructure(v, d.into_iter().map(Into::into).collect())
 			}
 		}
 	}
@@ -301,56 +199,23 @@ impl From<DestructurePart> for crate::expr::part::DestructurePart {
 impl From<crate::expr::part::DestructurePart> for DestructurePart {
 	fn from(v: crate::expr::part::DestructurePart) -> Self {
 		match v {
-			crate::expr::part::DestructurePart::All(v) => Self::All(v.into()),
-			crate::expr::part::DestructurePart::Field(v) => Self::Field(v.into()),
-			crate::expr::part::DestructurePart::Aliased(v, idiom) => {
-				Self::Aliased(v.into(), idiom.into())
+			crate::expr::part::DestructurePart::All(v) => Self::All(v),
+			crate::expr::part::DestructurePart::Field(v) => Self::Field(v),
+			crate::expr::part::DestructurePart::Aliased(v, idiom) => Self::Aliased(v, idiom.into()),
+			crate::expr::part::DestructurePart::Destructure(v, d) => {
+				Self::Destructure(v, d.into_iter().map(Into::<DestructurePart>::into).collect())
 			}
-			crate::expr::part::DestructurePart::Destructure(v, d) => Self::Destructure(
-				v.into(),
-				d.into_iter().map(Into::<DestructurePart>::into).collect(),
-			),
 		}
 	}
 }
 
 // ------------------------------
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Recurse {
 	Fixed(u32),
 	Range(Option<u32>, Option<u32>),
-}
-
-impl TryInto<(u32, Option<u32>)> for Recurse {
-	type Error = anyhow::Error;
-
-	fn try_into(self) -> Result<(u32, Option<u32>)> {
-		let v = match self {
-			Recurse::Fixed(v) => (v, Some(v)),
-			Recurse::Range(min, max) => {
-				let min = min.unwrap_or(1);
-				(min, max)
-			}
-		};
-
-		match v {
-			(min, _) if min < 1 => Err(anyhow::Error::new(Error::InvalidBound {
-				found: min.to_string(),
-				expected: "at least 1".into(),
-			})),
-			(_, Some(max)) if max > (*IDIOM_RECURSION_LIMIT as u32) => {
-				Err(anyhow::Error::new(Error::InvalidBound {
-					found: max.to_string(),
-					expected: format!("{} at most", *IDIOM_RECURSION_LIMIT),
-				}))
-			}
-			v => Ok(v),
-		}
-	}
 }
 
 impl fmt::Display for Recurse {
@@ -386,10 +251,8 @@ impl From<crate::expr::part::Recurse> for Recurse {
 }
 // ------------------------------
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum RecurseInstruction {
 	Path {
 		// Do we include the starting point in the paths?
@@ -401,7 +264,7 @@ pub enum RecurseInstruction {
 	},
 	Shortest {
 		// What ending node are we looking for?
-		expects: SqlValue,
+		expects: Expr,
 		// Do we include the starting point in the collection?
 		inclusive: bool,
 	},

@@ -1,17 +1,10 @@
-use crate::api::err::ApiError;
-use crate::buc::BucketOperation;
-use crate::expr::idiom::Idiom;
-use crate::expr::index::Distance;
-use crate::expr::thing::Thing;
-use crate::expr::value::{CastError, CoerceError, Value};
-use crate::iam::Error as IamError;
-use crate::idx::ft::MatchRef;
-use crate::idx::trees::vector::SharedVector;
-use crate::syn::error::RenderedError as RenderedParserError;
-use crate::vs::VersionStampError;
+use core::fmt;
+use std::fmt::Display;
+use std::io::Error as IoError;
+use std::string::FromUtf8Error;
+
 use base64::DecodeError as Base64Error;
 use bincode::Error as BincodeError;
-use core::fmt;
 #[cfg(storage)]
 use ext_sort::SortError;
 use fst::Error as FstError;
@@ -20,15 +13,24 @@ use jsonwebtoken::errors::Error as JWTError;
 use object_store::Error as ObjectStoreError;
 use revision::Error as RevisionError;
 use serde::Serialize;
-use std::fmt::Display;
-use std::io::Error as IoError;
-use std::string::FromUtf8Error;
-use storekey::decode::Error as DecodeError;
-use storekey::encode::Error as EncodeError;
+use storekey::DecodeError;
 use thiserror::Error;
+
+use crate::api::err::ApiError;
+use crate::buc::BucketOperation;
+use crate::catalog::Distance;
+use crate::expr::operation::PatchError;
+use crate::expr::{Expr, Idiom};
+use crate::iam::Error as IamError;
+use crate::idx::ft::MatchRef;
+use crate::idx::trees::vector::SharedVector;
+use crate::syn::error::RenderedError as RenderedParserError;
+use crate::val::{CastError, CoerceError, RecordId, Value};
+use crate::vs::VersionStampError;
 
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
+// kept, non_exhaustive because it is still public in the sdk.
 #[non_exhaustive]
 pub enum Error {
 	/// The database encountered unreachable logic
@@ -122,10 +124,8 @@ pub enum Error {
 	},
 
 	/// There was an error with the provided JSON Patch
-	#[error("The JSON Patch contains invalid operations. {message}")]
-	InvalidPatch {
-		message: String,
-	},
+	#[error("The JSON Patch contains invalid operations. {0}")]
+	InvalidPatch(PatchError),
 
 	/// Given test operation failed for JSON Patch
 	#[error(
@@ -157,7 +157,7 @@ pub enum Error {
 	/// The FETCH clause accepts idioms, strings and fields.
 	#[error("Found {value} on FETCH CLAUSE, but FETCH expects an idiom, a string or fields")]
 	InvalidFetch {
-		value: Value,
+		value: Expr,
 	},
 
 	#[error(
@@ -215,14 +215,16 @@ pub enum Error {
 		message: String,
 	},
 
-	/// The wrong quantity or magnitude of arguments was given for the specified function
+	/// The wrong quantity or magnitude of arguments was given for the specified
+	/// function
 	#[error("Incorrect arguments for function {name}(). {message}")]
 	InvalidArguments {
 		name: String,
 		message: String,
 	},
 
-	/// The wrong quantity or magnitude of arguments was given for the specified function
+	/// The wrong quantity or magnitude of arguments was given for the specified
+	/// function
 	#[error("Incorrect arguments for aggregate function {name}() on table '{table}'. {message}")]
 	InvalidAggregation {
 		name: String,
@@ -230,7 +232,8 @@ pub enum Error {
 		message: String,
 	},
 
-	/// The wrong quantity or magnitude of arguments was given for the specified function
+	/// The wrong quantity or magnitude of arguments was given for the specified
+	/// function
 	#[error(
 		"There was a problem running the {name} function. Expected this function to return a value of type {check}, but found {value}"
 	)]
@@ -300,7 +303,8 @@ pub enum Error {
 	#[error("The query was not executed due to a failed transaction")]
 	QueryNotExecuted,
 
-	/// The query did not execute, because the transaction has failed (with a message)
+	/// The query did not execute, because the transaction has failed (with a
+	/// message)
 	#[error("The query was not executed due to a failed transaction. {message}")]
 	QueryNotExecutedDetail {
 		message: String,
@@ -421,9 +425,9 @@ pub enum Error {
 	},
 
 	/// The requested api does not exist
-	#[error("The bucket '{value}' does not exist")]
+	#[error("The bucket '{name}' does not exist")]
 	BuNotFound {
-		value: String,
+		name: String,
 	},
 
 	/// The requested analyzer does not exist
@@ -466,7 +470,8 @@ pub enum Error {
 	#[error("Unable to perform the realtime query")]
 	RealtimeDisabled,
 
-	/// Reached excessive computation depth due to functions, subqueries, or futures
+	/// Reached excessive computation depth due to functions, subqueries, or
+	/// futures
 	#[error("Reached excessive computation depth due to functions, subqueries, or futures")]
 	ComputationDepthExceeded,
 
@@ -593,7 +598,8 @@ pub enum Error {
 		op: BucketOperation,
 	},
 
-	/// The specified table can not be written as it is setup as a foreign table view
+	/// The specified table can not be written as it is setup as a foreign table
+	/// view
 	#[error("Unable to write to the `{table}` table while setup as a view")]
 	TableIsView {
 		table: String,
@@ -602,13 +608,13 @@ pub enum Error {
 	/// A database entry for the specified record already exists
 	#[error("Database record `{thing}` already exists")]
 	RecordExists {
-		thing: Thing,
+		thing: RecordId,
 	},
 
 	/// A database index entry for the specified record already exists
 	#[error("Database index `{index}` already contains {value}, with record `{thing}`")]
 	IndexExists {
-		thing: Thing,
+		thing: RecordId,
 		index: String,
 		value: String,
 	},
@@ -785,9 +791,9 @@ pub enum Error {
 	#[error("I/O error: {0}")]
 	Io(#[from] IoError),
 
-	/// Represents an error when encoding a key-value entry
-	#[error("Key encoding error: {0}")]
-	Encode(#[from] EncodeError),
+	/// Error for when trying to serialize values like Regex and Closure
+	#[error("Tried to serialize a value which cannot be serialized.")]
+	Unencodable,
 
 	/// Represents an error when decoding a key-value entry
 	#[error("Key decoding error: {0}")]
@@ -801,7 +807,8 @@ pub enum Error {
 	#[error("Index is corrupted: {0}")]
 	CorruptedIndex(&'static str),
 
-	/// The query planner did not find an index able to support the given expression
+	/// The query planner did not find an index able to support the given
+	/// expression
 	#[error("There was no suitable index supporting the expression: {exp}")]
 	NoIndexFoundForMatch {
 		exp: String,
@@ -841,13 +848,20 @@ pub enum Error {
 		mr: MatchRef,
 	},
 
-	/// Represents a failure in timestamp arithmetic related to database internals
+	/// Represents a failure in timestamp arithmetic related to database
+	/// internals
 	#[error("Timestamp arithmetic error: {0}")]
 	TimestampOverflow(String),
 
+	/// Represents a failure in timestamp arithmetic related to database
+	/// internals
+	#[error("Invalid timestamp '{0}', datetime lies outside of valid timestamp range")]
+	InvalidTimestamp(String),
+
 	/// Internal server error
-	/// This should be used extremely sporadically, since we lose the type of error as a consequence
-	/// There will be times when it is useful, such as with unusual type conversion errors
+	/// This should be used extremely sporadically, since we lose the type of
+	/// error as a consequence There will be times when it is useful, such as
+	/// with unusual type conversion errors
 	#[error("Internal database error: {0}")]
 	Internal(String),
 
@@ -868,7 +882,6 @@ pub enum Error {
 
 	//
 	// Capabilities
-	//
 	/// Scripting is not allowed
 	#[error("Scripting functions are not allowed")]
 	ScriptingNotAllowed,
@@ -883,7 +896,6 @@ pub enum Error {
 
 	//
 	// Authentication / Signup
-	//
 	#[error("There was an error creating the token")]
 	TokenMakingFailed,
 
@@ -907,13 +919,15 @@ pub enum Error {
 
 	/// There was an error with authentication
 	///
-	/// This error hides different kinds of errors directly related to authentication
+	/// This error hides different kinds of errors directly related to
+	/// authentication
 	#[error("There was a problem with authentication")]
 	InvalidAuth,
 
 	/// There was an unexpected error while performing authentication
 	///
-	/// This error hides different kinds of unexpected errors that may affect authentication
+	/// This error hides different kinds of unexpected errors that may affect
+	/// authentication
 	#[error("There was an unexpected error while performing authentication")]
 	UnexpectedAuth,
 
@@ -1241,7 +1255,8 @@ pub enum Error {
 	#[error("Size of query script exceeded maximum supported size of 4,294,967,295 bytes.")]
 	QueryTooLarge,
 
-	/// Represents a failure in timestamp arithmetic related to database internals
+	/// Represents a failure in timestamp arithmetic related to database
+	/// internals
 	#[error("Failed to compute: \"{0}\", as the operation results in an arithmetic overflow.")]
 	ArithmeticOverflow(String),
 
@@ -1284,7 +1299,8 @@ pub enum Error {
 		symbol: String,
 	},
 
-	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not supported
+	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not
+	/// supported
 	#[error("Tried to use a `@` repeat recurse symbol in a position where it is not supported")]
 	UnsupportedRepeatRecurse,
 
@@ -1293,7 +1309,8 @@ pub enum Error {
 		found: Value,
 	},
 
-	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not supported
+	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not
+	/// supported
 	#[error("Can not construct a recursion plan when an instruction is provided")]
 	RecursionInstructionPlanConflict,
 
@@ -1301,17 +1318,20 @@ pub enum Error {
 	#[error("Cannot delete `{0}` as it is referenced by `{1}` with an ON DELETE REJECT clause")]
 	DeleteRejectedByReference(String, String),
 
-	/// The `REFERENCE` keyword can only be used in combination with a type referencing a record
+	/// The `REFERENCE` keyword can only be used in combination with a type
+	/// referencing a record
 	#[error(
 		"Cannot use the `REFERENCE` keyword with `TYPE {0}`. Specify a `record` type, or a type containing only records, instead."
 	)]
 	ReferenceTypeConflict(String),
 
-	/// The `references` type cannot be used with other clauses altering or working with the value
+	/// The `references` type cannot be used with other clauses altering or
+	/// working with the value
 	#[error("Cannot use the `{0}` keyword with `TYPE {0}`.")]
 	RefsTypeConflict(String, String),
 
-	/// The `references` type cannot be used with other clauses altering or working with the value
+	/// The `references` type cannot be used with other clauses altering or
+	/// working with the value
 	#[error(
 		"When specifying a `TYPE` clause with `references`, all variants must be of type `references`."
 	)]
@@ -1321,7 +1341,8 @@ pub enum Error {
 	#[error("An error occured while updating references for `{0}`: {1}")]
 	RefsUpdateFailure(String, String),
 
-	/// Cannot process `Value::Refs` as there is no Record ID in the context for the operation
+	/// Cannot process `Value::Refs` as there is no Record ID in the context for
+	/// the operation
 	#[error(
 		"Cannot obtain a list of references as there is no Record ID in the context for the operation"
 	)]
@@ -1375,6 +1396,30 @@ pub enum Error {
 
 	#[error("Failed to connect to bucket: {0}")]
 	BucketConnectionFailed(String),
+
+	/// The `COMPUTED` clause cannot be used with other clauses altering or
+	/// working with the value
+	#[error("Cannot use the `{0}` keyword with `COMPUTED`.")]
+	ComputedKeywordConflict(String),
+
+	/// The `COMPUTED` clause cannot be used with other nested fields
+	#[error("Cannot define field `{0}` as `COMPUTED` since a nested field `{1}` already exists.")]
+	ComputedNestedFieldConflict(String, String),
+
+	/// The `COMPUTED` clause cannot be used with other nested fields
+	#[error("Cannot define nested field `{0}` as parent field `{1}` is a `COMPUTED` field.")]
+	ComputedParentFieldConflict(String, String),
+
+	#[error("Cannot define field `{0}` as `COMPUTED` fields must be top-level.")]
+	ComputedNestedField(String),
+
+	/// Cannot use the `{0}` keyword on the `id` field
+	#[error("Cannot use the `{0}` keyword on the `id` field.")]
+	IdFieldKeywordConflict(String),
+
+	/// Cannot use the `{0}` keyword on the `id` field
+	#[error("Cannot use the `{0}` type on the `id` field, as that's not a valid record id key.")]
+	IdFieldUnsupportedKind(String),
 }
 
 impl Error {
@@ -1563,11 +1608,5 @@ impl serde::ser::Error for Error {
 		T: Display,
 	{
 		Self::Serialization(msg.to_string())
-	}
-}
-
-impl From<serde_content::Error> for Error {
-	fn from(error: serde_content::Error) -> Self {
-		Self::Serialization(error.to_string())
 	}
 }

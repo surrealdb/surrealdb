@@ -1,17 +1,17 @@
-use std::{
-	future::Future,
-	path::{Path as OsPath, PathBuf},
-	pin::Pin,
-};
+use std::future::Future;
+use std::path::{Path as OsPath, PathBuf};
+use std::pin::Pin;
 
 use bytes::Bytes;
 use path_clean::PathClean;
-use tokio::{fs::File, io::AsyncWriteExt};
+use tokio::fs::File;
+use tokio::io::AsyncWriteExt;
 use url::Url;
 
-use crate::{cnf::BUCKET_FOLDER_ALLOWLIST, err::Error, expr::Datetime};
-
 use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
+use crate::cnf::BUCKET_FOLDER_ALLOWLIST;
+use crate::err::Error;
+use crate::val::Datetime;
 
 /// Options for configuring the FileStore
 #[derive(Clone, Debug)]
@@ -35,8 +35,8 @@ impl FileStore {
 	}
 
 	/// Parse a URL into FileStoreOptions
-	pub async fn parse_url(url: &str) -> Result<Option<FileStoreOptions>, Error> {
-		let Ok(url) = Url::parse(url) else {
+	pub async fn parse_url(url_str: &str) -> Result<Option<FileStoreOptions>, Error> {
+		let Ok(url) = Url::parse(url_str) else {
 			return Ok(None);
 		};
 
@@ -63,23 +63,42 @@ impl FileStore {
 			.unwrap_or(true);
 
 		// Get the path from the URL
-		let path = if lowercase_paths {
-			&url.path().to_lowercase()
+		// The mutability is needed to remove the leading slash on Windows
+		#[allow(unused_mut)]
+		let mut path_from_url = if lowercase_paths {
+			url.path().to_lowercase()
 		} else {
-			url.path()
+			url.path().to_string()
 		};
 
+		// Handle Windows-specific path formatting
+		#[cfg(windows)]
+		{
+			// Handle URL paths like "file:///C:/path" -> "/C:/path"
+			if path_from_url.starts_with('/')
+				&& path_from_url.len() > 2
+				&& path_from_url.as_bytes()[1].is_ascii_alphabetic()
+				&& path_from_url.as_bytes()[2] == b':'
+			{
+				path_from_url.remove(0); // Remove the leading slash
+			}
+		}
+
 		// Create a PathBuf from the path, and clean it
-		let path_buf = PathBuf::from(path).clean();
+		let path_buf = PathBuf::from(&path_from_url).clean();
 
 		// File backends only support absolute paths as the base
 		if !path_buf.is_absolute() {
-			return Err(Error::InvalidBucketUrl(format!("File path is not absolute: {}", path)));
+			return Err(Error::InvalidBucketUrl(format!(
+				"File path '{}' (derived from URL path '{}') is not absolute.",
+				path_buf.display(),
+				path_from_url
+			)));
 		}
 
 		// Check if the path is allowed
 		if !is_path_allowed(&path_buf, lowercase_paths) {
-			return Err(Error::FileAccessDenied(path.to_string()));
+			return Err(Error::FileAccessDenied(path_from_url.to_string()));
 		}
 
 		// Check if the path exists
@@ -87,17 +106,24 @@ impl FileStore {
 
 		if let Ok(metadata) = metadata {
 			if !metadata.is_dir() {
-				return Err(Error::InvalidBucketUrl(format!("Path is not a directory: {}", path)));
+				return Err(Error::InvalidBucketUrl(format!(
+					"Path '{}' is not a directory.",
+					path_buf.display()
+				)));
 			}
 		} else {
 			// Create directory and its parents if they don't exist
 			tokio::fs::create_dir_all(&path_buf).await.map_err(|e| {
-				Error::InvalidBucketUrl(format!("Failed to create directory {}: {}", path, e))
+				Error::InvalidBucketUrl(format!(
+					"Failed to create directory '{}': {}",
+					path_buf.display(),
+					e
+				))
 			})?;
 		};
 
 		Ok(Some(FileStoreOptions {
-			root: ObjectKey::from(path.to_string()),
+			root: ObjectKey::new(path_from_url),
 			lowercase_paths,
 		}))
 	}
@@ -111,30 +137,49 @@ impl FileStore {
 
 	/// Convert a Path to an OsPath, checking against the allowlist
 	async fn to_os_path(&self, path: &ObjectKey) -> Result<PathBuf, String> {
-		let root = PathBuf::from(self.options.root.as_str());
+		// The mutability is needed to remove the leading slash on Windows
+		#[allow(unused_mut)]
+		let mut root_str = self.options.root.as_str();
+
+		// Handle Windows-specific path formatting
+		#[cfg(windows)]
+		{
+			// Fix paths with leading slash before drive letter like "/C:/foo"
+			if root_str.starts_with('/')
+				&& root_str.len() > 2
+				&& root_str.as_bytes()[1] != b'/' // Ensure it's not a UNC path
+				&& root_str.as_bytes()[2] == b':'
+			{
+				root_str = &root_str[1..];
+			}
+		}
+
+		let root_path = PathBuf::from(root_str).clean();
 
 		// First canonicalize the root (which should exist)
-		let canonical_root = tokio::fs::canonicalize(&root)
-			.await
-			.map_err(|e| format!("Failed to canonicalize root path: {}", e))?;
+		let canonical_root = tokio::fs::canonicalize(&root_path).await.map_err(|e| {
+			format!("Failed to canonicalize root path '{}': {}", root_path.display(), e)
+		})?;
 
 		// Get the relative path components
-		let relative_path = path.as_str().trim_start_matches('/');
+		let relative_path_str = path.as_str().trim_start_matches('/');
 
-		// Handle case sensitivity
+		// Handle case sensitivity for the relative part
 		let relative_path = if self.options.lowercase_paths {
-			&relative_path.to_lowercase()
+			relative_path_str.to_lowercase()
 		} else {
-			relative_path
+			relative_path_str.to_string()
 		};
 
 		// Combine the canonical root with the relative path
-		let full_path = canonical_root.join(relative_path).clean();
+		let full_path = canonical_root.join(&relative_path).clean();
 
-		// Verify the path is within the allowlist without canonicalizing
-		// Since we're starting from a canonicalized root, the path should be valid
+		// Verify the path is within the allowlist
 		if !is_path_allowed(&full_path, self.options.lowercase_paths) {
-			return Err(format!("Path is not in inside the bucket: {}", path));
+			return Err(format!(
+				"Path is not inside the allowed bucket directories: {}",
+				full_path.display()
+			));
 		}
 
 		Ok(full_path)
@@ -152,22 +197,35 @@ impl FileStore {
 }
 
 /// Check if a path is allowed according to the allowlist
-fn is_path_allowed(path: &std::path::Path, lowercase_paths: bool) -> bool {
+fn is_path_allowed(path_to_check: &std::path::Path, lowercase_paths: bool) -> bool {
 	// If the allowlist is empty, nothing is allowed
 	if BUCKET_FOLDER_ALLOWLIST.is_empty() {
 		return false;
 	}
 
 	// Check if the path is within any of the allowed paths
-	BUCKET_FOLDER_ALLOWLIST.iter().any(|allowed| {
+	BUCKET_FOLDER_ALLOWLIST.iter().any(|allowed_path| {
 		if lowercase_paths {
-			// Convert both paths to lowercase strings for case-insensitive comparison
-			let path_str = path.to_string_lossy().to_lowercase();
-			let allowed_str = allowed.to_string_lossy().to_lowercase();
+			// Windows canonical paths often have "\\?\" prefix that needs special handling
+			// Convert to lowercase and normalize path separators for consistent comparison
+			let mut path_str = path_to_check.to_string_lossy().to_lowercase().replace("\\", "/");
+
+			// Strip Windows canonical path prefix if present (becomes "//?/" after normalization)
+			const WINDOWS_CANONICAL_PATH_PREFIX: &str = "//?/";
+			if path_str.starts_with(WINDOWS_CANONICAL_PATH_PREFIX) {
+				path_str = path_str
+					.strip_prefix(WINDOWS_CANONICAL_PATH_PREFIX)
+					.unwrap_or(&path_str)
+					.to_string();
+			}
+
+			// Normalize allowed path for comparison
+			let allowed_str = allowed_path.to_string_lossy().to_lowercase().replace("\\", "/");
+
 			path_str.starts_with(&allowed_str)
 		} else {
 			// Case-sensitive comparison (original behavior)
-			path.starts_with(allowed)
+			path_to_check.starts_with(allowed_path)
 		}
 	})
 }
@@ -260,7 +318,10 @@ impl ObjectStore for FileStore {
 			let size = metadata.len();
 
 			// Get modified time if available
-			let updated = metadata.modified().map(|time| Datetime(time.into())).unwrap_or_default();
+			let updated = metadata
+				.modified()
+				.map(|time| Datetime(time.into()))
+				.unwrap_or_else(|_| Datetime::now());
 
 			Ok(Some(ObjectMeta {
 				size,
@@ -415,7 +476,7 @@ impl ObjectStore for FileStore {
 		Box::pin(async move {
 			// If a prefix is provided, combine it with the store prefix
 			// If not, just use the store's prefix
-			let base_key = opts.prefix.as_ref().cloned().unwrap_or_else(|| ObjectKey::from(""));
+			let base_key = opts.prefix.clone().unwrap_or_default();
 			let os_path = self.to_os_path(&base_key).await?;
 
 			// Check if the directory exists
@@ -438,8 +499,10 @@ impl ObjectStore for FileStore {
 				}
 
 				let size = metadata.len();
-				let updated =
-					metadata.modified().map(|time| Datetime(time.into())).unwrap_or_default();
+				let updated = metadata
+					.modified()
+					.map(|time| Datetime(time.into()))
+					.unwrap_or_else(|_| Datetime::now());
 				return Ok(vec![ObjectMeta {
 					key: base_key,
 					size,
@@ -477,7 +540,7 @@ impl ObjectStore for FileStore {
 					.strip_prefix(&os_path)
 					.map_err(|e| format!("Failed to get relative path: {}", e))?;
 				let rel_str = rel_path.to_string_lossy();
-				let entry_key = base_key.join(&ObjectKey::from(rel_str.to_string()));
+				let entry_key = base_key.join(&ObjectKey::new(rel_str.into_owned()));
 
 				all_entries.push((entry_key, metadata));
 			}
@@ -507,8 +570,10 @@ impl ObjectStore for FileStore {
 				.into_iter()
 				.map(|(entry_key, metadata)| {
 					let size = metadata.len();
-					let updated =
-						metadata.modified().map(|time| Datetime(time.into())).unwrap_or_default();
+					let updated = metadata
+						.modified()
+						.map(|time| Datetime(time.into()))
+						.unwrap_or_else(|_| Datetime::now());
 					ObjectMeta {
 						key: entry_key,
 						size,

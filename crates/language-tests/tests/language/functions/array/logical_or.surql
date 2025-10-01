@@ -5,10 +5,10 @@
 value = "[true, true, true, false]"
 
 [[test.results]]
-value = "[1, true, 1, 0]"
+value = "[1, true, 1, false]"
 
 [[test.results]]
-value = "[0, 1]"
+value = "[NULL, 1]"
 
 */
 array::logical_or([true, false, true, false], [true, true, false, false]);

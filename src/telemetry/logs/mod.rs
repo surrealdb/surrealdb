@@ -1,12 +1,14 @@
-use crate::cli::LogFormat;
-use crate::cli::validator::parser::tracing::CustomFilter;
+pub mod socket;
+
 use anyhow::Result;
-use tracing::Level;
-use tracing::Subscriber;
+use tracing::{Level, Subscriber};
 use tracing_appender::non_blocking::NonBlocking;
 use tracing_subscriber::Layer;
 use tracing_subscriber::fmt::format::FmtSpan;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
+
+use crate::cli::LogFormat;
+use crate::cli::validator::parser::tracing::CustomFilter;
 
 pub fn file<S>(
 	filter: CustomFilter,

@@ -1,20 +1,20 @@
 //! Module defining the configuration schema.
 
-mod bytes_hack;
+//mod bytes_hack;
 
-use std::{collections::BTreeMap, fmt, str::FromStr};
+use std::collections::BTreeMap;
+use std::fmt;
+use std::str::FromStr;
 
 use semver::VersionReq;
 use serde::{Deserialize, Serialize, de};
-use surrealdb_core::{
-	dbs::capabilities::{
-		Capabilities as CoreCapabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
-		RouteTarget, Targets,
-	},
-	expr::{Thing, Value as CoreValue},
-	sql::Object as CoreObject,
-	syn,
+use surrealdb_core::dbs::capabilities::{
+	ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
 };
+use surrealdb_core::sql::Expr;
+use surrealdb_core::syn::parser::ParserSettings;
+use surrealdb_core::syn::{self};
+use surrealdb_core::val::{Object as CoreObject, RecordId, Value as CoreValue};
 
 /// Root test config struct.
 #[derive(Default, Clone, Debug, Deserialize, Serialize)]
@@ -49,12 +49,15 @@ impl TestConfig {
 
 	/// Returns if this test must be run without other test running.
 	pub fn should_run_sequentially(&self) -> bool {
-		self.env.as_ref().map(|x| x.sequential).unwrap_or(false)
+		self.env.as_ref().map(|x| x.sequential).unwrap_or(
+			// TODO(ssttuu): This should be `true` but we're currently having flakiness issues.
+			false,
+		)
 	}
 
 	/// Whether this test can use one of the datastorage struct which are reused between tests.
 	pub fn can_use_reusable_ds(&self) -> bool {
-		self.env.as_ref().map(|x| !x.clean).unwrap_or(true)
+		self.env.as_ref().map(|x| !x.clean).unwrap_or(false)
 	}
 
 	/// Returns a list of keys which are not in the schema but still define.
@@ -212,7 +215,7 @@ pub struct ValueTestResult {
 #[serde(rename_all = "kebab-case")]
 pub struct MatchTestResult {
 	#[serde(rename = "match")]
-	pub _match: SurrealValue,
+	pub _match: SurrealExpr,
 	#[serde(default)]
 	pub error: Option<bool>,
 }
@@ -266,38 +269,14 @@ impl<T> BoolOr<T> {
 		}
 	}
 
-	/// Returns the value of this bool/or returning the default in case of BoolOr::Bool(true), the value in
-	/// case of BoolOr::Value(_) or None in case of BoolOr::Bool(false)
+	/// Returns the value of this bool/or returning the default in case of BoolOr::Bool(true), the
+	/// value in case of BoolOr::Value(_) or None in case of BoolOr::Bool(false)
 	pub fn into_value(self, default: T) -> Option<T> {
 		match self {
 			BoolOr::Bool(false) => None,
 			BoolOr::Bool(true) => Some(default),
 			BoolOr::Value(x) => Some(x),
 		}
-	}
-}
-
-#[derive(Default, Clone, Debug)]
-pub struct Version(semver::VersionReq);
-
-impl<'de> Deserialize<'de> for Version {
-	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-	where
-		D: serde::Deserializer<'de>,
-	{
-		let str = String::deserialize(deserializer)?;
-		let version = semver::VersionReq::parse(&str).map_err(to_deser_error)?;
-		Ok(Version(version))
-	}
-}
-
-impl Serialize for Version {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		let str = self.0.to_string();
-		str.serialize(serializer)
 	}
 }
 
@@ -314,9 +293,9 @@ pub struct TestDetails {
 	pub upgrade: bool,
 
 	#[serde(default)]
-	pub version: VersionReq,
+	pub version: Option<VersionReq>,
 	#[serde(default)]
-	pub importing_version: VersionReq,
+	pub importing_version: Option<VersionReq>,
 
 	pub results: Option<TestDetailsResults>,
 
@@ -448,17 +427,67 @@ impl<'de> Deserialize<'de> for SurrealValue {
 		D: serde::Deserializer<'de>,
 	{
 		let source = String::deserialize(deserializer)?;
-		let capabilities = CoreCapabilities::all().with_experimental(Targets::All);
-		let mut v: CoreValue = syn::value_with_capabilities(&source, &capabilities)
-			.map_err(<D::Error as serde::de::Error>::custom)?
-			.into();
-		bytes_hack::compute_bytes_inplace(&mut v);
+		let settings = ParserSettings {
+			object_recursion_limit: 100,
+			query_recursion_limit: 100,
+			legacy_strands: false,
+			flexible_record_id: true,
+			references_enabled: true,
+			bearer_access_enabled: true,
+			define_api_enabled: true,
+			files_enabled: true,
+		};
+
+		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
+			parser.parse_value(stk).await
+		})
+		.map_err(<D::Error as serde::de::Error>::custom)?;
+
 		Ok(SurrealValue(v))
 	}
 }
 
 #[derive(Clone, Debug)]
-pub struct SurrealRecordId(pub Thing);
+pub struct SurrealExpr(pub Expr);
+
+impl Serialize for SurrealExpr {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		let v = self.0.to_string();
+		v.serialize(serializer)
+	}
+}
+
+impl<'de> Deserialize<'de> for SurrealExpr {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: serde::Deserializer<'de>,
+	{
+		let source = String::deserialize(deserializer)?;
+		let settings = ParserSettings {
+			object_recursion_limit: 100,
+			query_recursion_limit: 100,
+			legacy_strands: false,
+			flexible_record_id: true,
+			references_enabled: true,
+			bearer_access_enabled: true,
+			define_api_enabled: true,
+			files_enabled: true,
+		};
+
+		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
+			parser.parse_expr_start(stk).await
+		})
+		.map_err(<D::Error as serde::de::Error>::custom)?;
+
+		Ok(SurrealExpr(v))
+	}
+}
+
+#[derive(Clone, Debug)]
+pub struct SurrealRecordId(pub RecordId);
 
 impl Serialize for SurrealRecordId {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -476,11 +505,22 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 		D: serde::Deserializer<'de>,
 	{
 		let source = String::deserialize(deserializer)?;
-		let capabilities = CoreCapabilities::all().with_experimental(Targets::All);
-		let v: CoreValue = syn::value_with_capabilities(&source, &capabilities)
-			.map_err(<D::Error as serde::de::Error>::custom)?
-			.into();
-		if let CoreValue::Thing(x) = v {
+		let settings = ParserSettings {
+			object_recursion_limit: 100,
+			query_recursion_limit: 100,
+			legacy_strands: false,
+			flexible_record_id: true,
+			references_enabled: true,
+			bearer_access_enabled: true,
+			define_api_enabled: true,
+			files_enabled: true,
+		};
+
+		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
+			parser.parse_value(stk).await
+		})
+		.map_err(<D::Error as serde::de::Error>::custom)?;
+		if let CoreValue::RecordId(x) = v {
 			Ok(SurrealRecordId(x))
 		} else {
 			Err(<D::Error as serde::de::Error>::custom(format_args!(
@@ -509,9 +549,22 @@ impl<'de> Deserialize<'de> for SurrealObject {
 		D: serde::Deserializer<'de>,
 	{
 		let source = String::deserialize(deserializer)?;
-		let capabilities = CoreCapabilities::all().with_experimental(Targets::All);
-		let v = syn::value_with_capabilities(&source, &capabilities)
-			.map_err(<D::Error as serde::de::Error>::custom)?;
+		let settings = ParserSettings {
+			object_recursion_limit: 100,
+			query_recursion_limit: 100,
+			legacy_strands: false,
+			flexible_record_id: true,
+			references_enabled: true,
+			bearer_access_enabled: true,
+			define_api_enabled: true,
+			files_enabled: true,
+		};
+
+		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
+			parser.parse_value(stk).await
+		})
+		.map_err(<D::Error as serde::de::Error>::custom)?;
+
 		v.into_object().map(SurrealObject).ok_or_else(|| {
 			<D::Error as serde::de::Error>::custom(format_args!(
 				"Expected a object, found '{source}'"

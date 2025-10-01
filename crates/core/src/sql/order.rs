@@ -1,14 +1,11 @@
-use crate::sql::fmt::Fmt;
-use crate::sql::idiom::Idiom;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::ops::Deref;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use crate::fmt::Fmt;
+use crate::sql::Idiom;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum Ordering {
 	Random,
 	Order(OrderList),
@@ -41,10 +38,8 @@ impl From<crate::expr::order::Ordering> for Ordering {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct OrderList(pub Vec<Order>);
 
 impl Deref for OrderList {
@@ -72,10 +67,8 @@ impl From<crate::expr::order::OrderList> for OrderList {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct Order {
 	/// The value to order by
 	pub value: Idiom,
@@ -120,23 +113,4 @@ impl From<crate::expr::order::Order> for Order {
 			direction: v.direction,
 		}
 	}
-}
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct OldOrders(pub Vec<OldOrder>);
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
-pub struct OldOrder {
-	pub order: Idiom,
-	pub random: bool,
-	pub collate: bool,
-	pub numeric: bool,
-	/// true if the direction is ascending
-	pub direction: bool,
 }
