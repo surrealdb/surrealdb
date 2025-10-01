@@ -10,6 +10,7 @@ use revision::Revisioned;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::expr::expression::VisitExpression;
 use crate::expr::part::{Next, NextMethod};
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::statements::info::InfoStructure;
@@ -170,6 +171,15 @@ impl Idiom {
 				None => Value::None.get(stk, ctx, opt, doc, self.next_method()).await,
 			},
 		}
+	}
+}
+
+impl VisitExpression for Idiom {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.0.iter().for_each(|p| p.visit(visitor))
 	}
 }
 

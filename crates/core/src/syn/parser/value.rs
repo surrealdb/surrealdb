@@ -91,17 +91,9 @@ impl Parser<'_> {
 					Value::String(strand)
 				}
 			}
-			t!("d\"") | t!("d'") => {
-				let datetime = self.next_token_value()?;
-				Value::Datetime(datetime)
-			}
-			t!("u\"") | t!("u'") => {
-				let uuid = self.next_token_value()?;
-				Value::Uuid(uuid)
-			}
-			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
-				Value::Bytes(self.next_token_value()?)
-			}
+			t!("d\"") | t!("d'") => Value::Datetime(self.next_token_value()?),
+			t!("u\"") | t!("u'") => Value::Uuid(self.next_token_value()?),
+			t!("b\"") | t!("b'") => Value::Bytes(self.next_token_value()?),
 			//TODO: Implement record id for value parsing
 			t!("f\"") | t!("f'") => {
 				if !self.settings.files_enabled {
@@ -289,10 +281,6 @@ impl Parser<'_> {
 					Numeric::Float(x) => Ok(Value::Number(Number::Float(x))),
 					Numeric::Decimal(x) => Ok(Value::Number(Number::Decimal(x))),
 				}
-			}
-			TokenKind::Glued(Glued::String) => {
-				let glued = pop_glued!(self, String);
-				Ok(Value::String(glued))
 			}
 			TokenKind::Glued(Glued::Duration) => {
 				let glued = pop_glued!(self, Duration);
