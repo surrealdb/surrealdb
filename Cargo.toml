@@ -459,3 +459,7 @@ inherits = "dev"
 debug = true
 inherits = "release"
 strip = false
+
+[lib]
+name = "surreal"
+path = "src/lib.rs"

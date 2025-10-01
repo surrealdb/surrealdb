@@ -25,10 +25,10 @@ use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
-use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::MajorVersion;
+use super::{api, export};
 use crate::api::body::ApiBody;
 use crate::api::invocation::ApiInvocation;
 use crate::api::response::{ApiResponse, ResponseInstruction};
@@ -62,6 +62,9 @@ use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SizedClock;
 #[expect(unused_imports)]
 use crate::kvs::clock::SystemClock;
+use crate::kvs::ds::requirements::{
+	TransactionBuilderFactoryRequirements, TransactionBuilderRequirements,
+};
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
@@ -127,14 +130,14 @@ pub(super) struct TransactionFactory {
 	// Clock for tracking time. It is read-only and accessible to all transactions.
 	clock: Arc<SizedClock>,
 	// The inner datastore type
-	flavor: Arc<DatastoreFlavor>,
+	builder: Arc<Box<dyn TransactionBuilder>>,
 }
 
 impl TransactionFactory {
-	pub(super) fn new(clock: Arc<SizedClock>, flavor: DatastoreFlavor) -> Self {
+	pub(super) fn new(clock: Arc<SizedClock>, builder: Box<dyn TransactionBuilder>) -> Self {
 		Self {
 			clock,
-			flavor: flavor.into(),
+			builder: Arc::new(builder),
 		}
 	}
 
@@ -156,39 +159,7 @@ impl TransactionFactory {
 			Optimistic => false,
 		};
 		// Create a new transaction on the datastore
-		let (inner, local) = match self.flavor.as_ref() {
-			#[cfg(feature = "kv-mem")]
-			DatastoreFlavor::Mem(v) => {
-				let tx = v.transaction(write, lock).await?;
-				(tx, true)
-			}
-			#[cfg(feature = "kv-rocksdb")]
-			DatastoreFlavor::RocksDB(v) => {
-				let tx = v.transaction(write, lock).await?;
-				(tx, true)
-			}
-			#[cfg(feature = "kv-indxdb")]
-			DatastoreFlavor::IndxDB(v) => {
-				let tx = v.transaction(write, lock).await?;
-				(tx, true)
-			}
-			#[cfg(feature = "kv-tikv")]
-			DatastoreFlavor::TiKV(v) => {
-				let tx = v.transaction(write, lock).await?;
-				(tx, false)
-			}
-			#[cfg(feature = "kv-fdb")]
-			DatastoreFlavor::FoundationDB(v) => {
-				let tx = v.transaction(write, lock).await?;
-				(tx, false)
-			}
-			#[cfg(feature = "kv-surrealkv")]
-			DatastoreFlavor::SurrealKV(v) => {
-				let tx = v.transaction(write, lock).await?;
-				(tx, true)
-			}
-			_ => unreachable!(),
-		};
+		let (inner, local) = self.builder.new_transaction(write, lock).await?;
 		Ok(Transaction::new(
 			local,
 			Transactor {
@@ -200,7 +171,76 @@ impl TransactionFactory {
 	}
 }
 
-pub(super) enum DatastoreFlavor {
+#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+/// Abstraction over storage backends for creating and managing transactions.
+///
+/// This trait allows decoupling `Datastore` from concrete KV engines (memory,
+/// RocksDB, TiKV, FoundationDB, SurrealKV, etc.). Implementors translate the
+/// generic transaction parameters into a backend-specific transaction and
+/// report whether the transaction is considered "local" (used internally to
+/// enable some optimizations).
+///
+/// This was introduced to make the server more composable/embeddable. External
+/// crates can implement `TransactionBuilder` to plug in custom backends while
+/// reusing the rest of SurrealDB.
+pub trait TransactionBuilder: TransactionBuilderRequirements {
+	/// Create a new backend transaction.
+	///
+	/// - `write`: whether the transaction is writable (Write vs Read)
+	/// - `lock`: whether pessimistic locking is requested
+	///
+	/// Returns the backend transaction object and a flag indicating if the
+	/// transaction is local to the process (true) or requires external resources
+	/// (false).
+	async fn new_transaction(
+		&self,
+		write: bool,
+		lock: bool,
+	) -> Result<(Box<dyn api::Transaction>, bool)>;
+
+	/// Perform any backend-specific shutdown/cleanup.
+	async fn shutdown(&self) -> Result<()>;
+}
+
+#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+/// Factory that parses a datastore path and returns a concrete `TransactionBuilder`.
+///
+/// Implementations can decide how to interpret connection strings (e.g. "memory",
+/// "rocksdb:...", "tikv:...") and which clock to use. This lets the CLI and
+/// server be generic over different storage backends without hard-coding them.
+///
+/// The `path_valid` helper is used by the CLI to validate the path early and
+/// provide better error messages before starting the runtime.
+pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
+	/// Create a new transaction builder and the clock to use throughout the datastore.
+	async fn new_transaction_builder(
+		path: &str,
+		clock: Option<Arc<SizedClock>>,
+	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)>;
+
+	/// Validate a datastore path string.
+	fn path_valid(v: &str) -> Result<String>;
+}
+
+pub mod requirements {
+	use std::fmt::Display;
+
+	#[cfg(target_family = "wasm")]
+	pub trait TransactionBuilderRequirements: Display {}
+
+	#[cfg(not(target_family = "wasm"))]
+	pub trait TransactionBuilderRequirements: Display + Send + Sync + 'static {}
+
+	#[cfg(target_family = "wasm")]
+	pub trait TransactionBuilderFactoryRequirements {}
+
+	#[cfg(not(target_family = "wasm"))]
+	pub trait TransactionBuilderFactoryRequirements: Send + Sync + 'static {}
+}
+
+pub enum DatastoreFlavor {
 	#[cfg(feature = "kv-mem")]
 	Mem(super::mem::Datastore),
 	#[cfg(feature = "kv-rocksdb")]
@@ -215,25 +255,282 @@ pub(super) enum DatastoreFlavor {
 	SurrealKV(super::surrealkv::Datastore),
 }
 
-impl fmt::Display for Datastore {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		#![allow(unused_variables)]
-		match self.transaction_factory.flavor.as_ref() {
+impl TransactionBuilderFactoryRequirements for DatastoreFlavor {}
+
+#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+impl TransactionBuilderFactory for DatastoreFlavor {
+	#[allow(unused_variables)]
+	async fn new_transaction_builder(
+		path: &str,
+		clock: Option<Arc<SizedClock>>,
+	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)> {
+		let (flavour, path) = match path.split_once("://").or_else(|| path.split_once(':')) {
+			None if path == "memory" => ("memory", ""),
+			Some((flavour, path)) => (flavour, path),
+			// Validated already in the CLI, should never happen
+			_ => bail!(Error::Unreachable("Provide a valid database path parameter".to_owned())),
+		};
+
+		let path = if path.starts_with("/") {
+			// if absolute, remove all slashes except one
+			let normalised = format!("/{}", path.trim_start_matches("/"));
+			info!(target: TARGET, "Starting kvs store at absolute path {flavour}:{normalised}");
+			normalised
+		} else if path.is_empty() {
+			info!(target: TARGET, "Starting kvs store in memory");
+			"".to_string()
+		} else {
+			info!(target: TARGET, "Starting kvs store at relative path {flavour}://{path}");
+			path.to_string()
+		};
+		// Initiate the desired datastore
+		let (datastore_flavour, clock) = match (flavour, path) {
+			// Initiate an in-memory datastore
+			(flavour @ "memory", _) => {
+				#[cfg(feature = "kv-mem")]
+				{
+					// Initialise the storage engine
+					let v = super::mem::Datastore::new().await.map(Self::Mem)?;
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Started kvs store in {flavour}");
+					(v, c)
+				}
+				#[cfg(not(feature = "kv-mem"))]
+				bail!(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
+			// Initiate a File (RocksDB) datastore
+			(flavour @ "file", path) => {
+				#[cfg(feature = "kv-rocksdb")]
+				{
+					// Create a new blocking threadpool
+					super::threadpool::initialise();
+
+					// Initialise the storage engine
+					warn!(
+						"file:// is deprecated, please use surrealkv:// or surrealkv+versioned:// or rocksdb://"
+					);
+
+					let v = super::rocksdb::Datastore::new(&path).await.map(Self::RocksDB)?;
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Started {flavour} kvs store");
+					(v, c)
+				}
+				#[cfg(not(feature = "kv-rocksdb"))]
+				bail!(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
+			// Initiate a RocksDB datastore
+			(flavour @ "rocksdb", path) => {
+				#[cfg(feature = "kv-rocksdb")]
+				{
+					// Create a new blocking threadpool
+					super::threadpool::initialise();
+					// Initialise the storage engine
+
+					let v = super::rocksdb::Datastore::new(&path).await.map(Self::RocksDB)?;
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Started {flavour} kvs store");
+					(v, c)
+				}
+				#[cfg(not(feature = "kv-rocksdb"))]
+				bail!(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
+			// Initiate a SurrealKV versioned database
+			(flavour @ "surrealkv+versioned", path) => {
+				#[cfg(feature = "kv-surrealkv")]
+				{
+					// Create a new blocking threadpool
+					super::threadpool::initialise();
+					// Initialise the storage engine
+					let v = super::surrealkv::Datastore::new(&path, true)
+						.await
+						.map(DatastoreFlavor::SurrealKV)?;
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Started {flavour} kvs store with versions enabled");
+					(v, c)
+				}
+				#[cfg(not(feature = "kv-surrealkv"))]
+				bail!(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
+			// Initiate a SurrealKV non-versioned database
+			(flavour @ "surrealkv", path) => {
+				#[cfg(feature = "kv-surrealkv")]
+				{
+					// Create a new blocking threadpool
+					super::threadpool::initialise();
+					// Initialise the storage engine
+
+					let v = super::surrealkv::Datastore::new(&path, false)
+						.await
+						.map(Self::SurrealKV)?;
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Started {flavour} kvs store with versions not enabled");
+					(v, c)
+				}
+				#[cfg(not(feature = "kv-surrealkv"))]
+				bail!(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
+			// Initiate an IndxDB database
+			(flavour @ "indxdb", path) => {
+				#[cfg(feature = "kv-indxdb")]
+				{
+					let v =
+						super::indxdb::Datastore::new(&path).await.map(DatastoreFlavor::IndxDB)?;
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Started {flavour} kvs store");
+					(v, c)
+				}
+				#[cfg(not(feature = "kv-indxdb"))]
+				bail!(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
+			// Initiate a TiKV datastore
+			(flavour @ "tikv", path) => {
+				#[cfg(feature = "kv-tikv")]
+				{
+					let v = super::tikv::Datastore::new(&path).await.map(DatastoreFlavor::TiKV)?;
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Started {flavour} kvs store");
+					(v, c)
+				}
+				#[cfg(not(feature = "kv-tikv"))]
+				bail!(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
+			// Initiate a FoundationDB datastore
+			(flavour @ "fdb", path) => {
+				#[cfg(feature = "kv-fdb")]
+				{
+					let v = super::fdb::Datastore::new(&path)
+						.await
+						.map(DatastoreFlavor::FoundationDB)?;
+					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
+					info!(target: TARGET, "Started {flavour} kvs store");
+					(v, c)
+				}
+				#[cfg(not(feature = "kv-fdb"))]
+				bail!(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+			}
+			// The datastore path is not valid
+			(flavour, path) => {
+				info!(target: TARGET, "Unable to load the specified datastore {flavour}{}", path);
+				bail!(Error::Ds("Unable to load the specified datastore".into()))
+			}
+		};
+		Ok((Box::<DatastoreFlavor>::new(datastore_flavour), clock))
+	}
+
+	fn path_valid(v: &str) -> Result<String> {
+		match v {
+			"memory" => Ok(v.to_string()),
+			v if v.starts_with("file:") => Ok(v.to_string()),
+			v if v.starts_with("rocksdb:") => Ok(v.to_string()),
+			v if v.starts_with("surrealkv:") => Ok(v.to_string()),
+			v if v.starts_with("surrealkv+versioned:") => Ok(v.to_string()),
+			v if v.starts_with("tikv:") => Ok(v.to_string()),
+			v if v.starts_with("fdb:") => Ok(v.to_string()),
+			_ => bail!("Provide a valid database path parameter"),
+		}
+	}
+}
+
+impl TransactionBuilderRequirements for DatastoreFlavor {}
+
+#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+impl TransactionBuilder for DatastoreFlavor {
+	#[allow(
+		unreachable_code,
+		unreachable_patterns,
+		unused_variables,
+		reason = "Some variables are unused when no backends are enabled."
+	)]
+	async fn new_transaction(
+		&self,
+		write: bool,
+		lock: bool,
+	) -> Result<(Box<dyn api::Transaction>, bool)> {
+		//-> Pin<Box<dyn Future<Output = Result<(Box<dyn api::Transaction>, bool)>> + Send + 'a>> {
+		//Box::pin(async move {
+		Ok(match self {
 			#[cfg(feature = "kv-mem")]
-			DatastoreFlavor::Mem(_) => write!(f, "memory"),
+			Self::Mem(v) => {
+				let tx = v.transaction(write, lock).await?;
+				(tx, true)
+			}
 			#[cfg(feature = "kv-rocksdb")]
-			DatastoreFlavor::RocksDB(_) => write!(f, "rocksdb"),
+			Self::RocksDB(v) => {
+				let tx = v.transaction(write, lock).await?;
+				(tx, true)
+			}
 			#[cfg(feature = "kv-indxdb")]
-			DatastoreFlavor::IndxDB(_) => write!(f, "indxdb"),
+			Self::IndxDB(v) => {
+				let tx = v.transaction(write, lock).await?;
+				(tx, true)
+			}
 			#[cfg(feature = "kv-tikv")]
-			DatastoreFlavor::TiKV(_) => write!(f, "tikv"),
+			Self::TiKV(v) => {
+				let tx = v.transaction(write, lock).await?;
+				(tx, false)
+			}
 			#[cfg(feature = "kv-fdb")]
-			DatastoreFlavor::FoundationDB(_) => write!(f, "fdb"),
+			Self::FoundationDB(v) => {
+				let tx = v.transaction(write, lock).await?;
+				(tx, false)
+			}
 			#[cfg(feature = "kv-surrealkv")]
-			DatastoreFlavor::SurrealKV(_) => write!(f, "surrealkv"),
+			Self::SurrealKV(v) => {
+				let tx = v.transaction(write, lock).await?;
+				(tx, true)
+			}
+			_ => unreachable!(),
+		})
+	}
+
+	async fn shutdown(&self) -> Result<()> {
+		//Box::pin(async move {
+		match self {
+			#[cfg(feature = "kv-mem")]
+			Self::Mem(v) => v.shutdown().await,
+			#[cfg(feature = "kv-rocksdb")]
+			Self::RocksDB(v) => v.shutdown().await,
+			#[cfg(feature = "kv-indxdb")]
+			Self::IndxDB(v) => v.shutdown().await,
+			#[cfg(feature = "kv-tikv")]
+			Self::TiKV(v) => v.shutdown().await,
+			#[cfg(feature = "kv-fdb")]
+			Self::FoundationDB(v) => v.shutdown().await,
+			#[cfg(feature = "kv-surrealkv")]
+			Self::SurrealKV(v) => v.shutdown().await,
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
+	}
+}
+
+impl Display for DatastoreFlavor {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		#![allow(unused_variables)]
+		match self {
+			#[cfg(feature = "kv-mem")]
+			Self::Mem(_) => write!(f, "memory"),
+			#[cfg(feature = "kv-rocksdb")]
+			Self::RocksDB(_) => write!(f, "rocksdb"),
+			#[cfg(feature = "kv-indxdb")]
+			Self::IndxDB(_) => write!(f, "indxdb"),
+			#[cfg(feature = "kv-tikv")]
+			Self::TiKV(_) => write!(f, "tikv"),
+			#[cfg(feature = "kv-fdb")]
+			Self::FoundationDB(_) => write!(f, "fdb"),
+			#[cfg(feature = "kv-surrealkv")]
+			Self::SurrealKV(_) => write!(f, "surrealkv"),
+			#[allow(unreachable_patterns)]
+			_ => unreachable!(),
+		}
+	}
+}
+
+impl Display for Datastore {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		self.transaction_factory.builder.fmt(f)
 	}
 }
 
@@ -276,193 +573,48 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Self> {
-		Self::new_with_clock(path, None).await
+		Self::new_with_factory::<DatastoreFlavor>(path).await
 	}
 
-	#[allow(unused_variables)]
-	pub async fn new_with_clock(path: &str, clock: Option<Arc<SizedClock>>) -> Result<Datastore> {
-		let (flavour, path) = match path.split_once("://").or_else(|| path.split_once(':')) {
-			None if path == "memory" => ("memory", ""),
-			Some((flavour, path)) => (flavour, path),
-			// Validated already in the CLI, should never happen
-			_ => bail!(Error::Unreachable("Provide a valid database path parameter".to_owned())),
-		};
+	pub async fn new_with_factory<F: TransactionBuilderFactory>(path: &str) -> Result<Self> {
+		Self::new_with_clock::<F>(path, None).await
+	}
 
-		let path = if path.starts_with("/") {
-			// if absolute, remove all slashes except one
-			let normalised = format!("/{}", path.trim_start_matches("/"));
-			info!(target: TARGET, "Starting kvs store at absolute path {flavour}:{normalised}");
-			normalised
-		} else if path.is_empty() {
-			info!(target: TARGET, "Starting kvs store in memory");
-			"".to_string()
-		} else {
-			info!(target: TARGET, "Starting kvs store at relative path {flavour}://{path}");
-			path.to_string()
-		};
-
+	pub async fn new_with_clock<F: TransactionBuilderFactory>(
+		path: &str,
+		clock: Option<Arc<SizedClock>>,
+	) -> Result<Datastore> {
 		// Initiate the desired datastore
-		let (datastore_flavour, clock): (Result<DatastoreFlavor>, Arc<SizedClock>) = match (
-			flavour, path,
-		) {
-			// Initiate an in-memory datastore
-			(flavour @ "memory", _) => {
-				#[cfg(feature = "kv-mem")]
-				{
-					// Initialise the storage engine
-					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started kvs store in {flavour}");
-					Ok((v, c))
-				}
-				#[cfg(not(feature = "kv-mem"))]
-				bail!(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
-			// Initiate a File (RocksDB) datastore
-			(flavour @ "file", path) => {
-				#[cfg(feature = "kv-rocksdb")]
-				{
-					// Create a new blocking threadpool
-					super::threadpool::initialise();
-
-					// Initialise the storage engine
-					warn!(
-						"file:// is deprecated, please use surrealkv:// or surrealkv+versioned:// or rocksdb://"
-					);
-
-					let v =
-						super::rocksdb::Datastore::new(&path).await.map(DatastoreFlavor::RocksDB);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((v, c))
-				}
-				#[cfg(not(feature = "kv-rocksdb"))]
-				bail!(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
-			// Initiate a RocksDB datastore
-			(flavour @ "rocksdb", path) => {
-				#[cfg(feature = "kv-rocksdb")]
-				{
-					// Create a new blocking threadpool
-					super::threadpool::initialise();
-					// Initialise the storage engine
-
-					let v =
-						super::rocksdb::Datastore::new(&path).await.map(DatastoreFlavor::RocksDB);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((v, c))
-				}
-				#[cfg(not(feature = "kv-rocksdb"))]
-				bail!(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
-			// Initiate a SurrealKV versioned database
-			(flavour @ "surrealkv+versioned", path) => {
-				#[cfg(feature = "kv-surrealkv")]
-				{
-					// Create a new blocking threadpool
-					super::threadpool::initialise();
-					// Initialise the storage engine
-					let v = super::surrealkv::Datastore::new(&path, true)
-						.await
-						.map(DatastoreFlavor::SurrealKV);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store with versions enabled");
-					Ok((v, c))
-				}
-				#[cfg(not(feature = "kv-surrealkv"))]
-				bail!(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
-			// Initiate a SurrealKV non-versioned database
-			(flavour @ "surrealkv", path) => {
-				#[cfg(feature = "kv-surrealkv")]
-				{
-					// Create a new blocking threadpool
-					super::threadpool::initialise();
-					// Initialise the storage engine
-
-					let v = super::surrealkv::Datastore::new(&path, false)
-						.await
-						.map(DatastoreFlavor::SurrealKV);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store with versions not enabled");
-					Ok((v, c))
-				}
-				#[cfg(not(feature = "kv-surrealkv"))]
-				bail!(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
-			// Initiate an IndxDB database
-			(flavour @ "indxdb", path) => {
-				#[cfg(feature = "kv-indxdb")]
-				{
-					let v = super::indxdb::Datastore::new(&path).await.map(DatastoreFlavor::IndxDB);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((v, c))
-				}
-				#[cfg(not(feature = "kv-indxdb"))]
-				bail!(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
-			// Initiate a TiKV datastore
-			(flavour @ "tikv", path) => {
-				#[cfg(feature = "kv-tikv")]
-				{
-					let v = super::tikv::Datastore::new(&path).await.map(DatastoreFlavor::TiKV);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((v, c))
-				}
-				#[cfg(not(feature = "kv-tikv"))]
-				bail!(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
-			// Initiate a FoundationDB datastore
-			(flavour @ "fdb", path) => {
-				#[cfg(feature = "kv-fdb")]
-				{
-					let v =
-						super::fdb::Datastore::new(&path).await.map(DatastoreFlavor::FoundationDB);
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((v, c))
-				}
-				#[cfg(not(feature = "kv-fdb"))]
-				bail!(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
-			// The datastore path is not valid
-			(flavour, path) => {
-				info!(target: TARGET, "Unable to load the specified datastore {flavour}{}", path);
-				Err(Error::Ds("Unable to load the specified datastore".into()))
-			}
-		}?;
-
-		if datastore_flavour.is_err() {
-			error!(target: TARGET, "Error after startup. Please see surrealdb.com/docs/surrealdb/cli/start for more on this command.");
-		}
-
+		let (builder, clock) = F::new_transaction_builder(path, clock).await?;
 		// Set the properties on the datastore
-		datastore_flavour.map(|datastore_flavor| {
-			let tf = TransactionFactory::new(clock, datastore_flavor);
-			Self {
-				id: Uuid::new_v4(),
-				transaction_factory: tf.clone(),
-				strict: false,
-				auth_enabled: false,
-				query_timeout: None,
-				slow_log: None,
-				transaction_timeout: None,
-				notification_channel: None,
-				capabilities: Arc::new(Capabilities::default()),
-				index_stores: IndexStores::default(),
-				#[cfg(not(target_family = "wasm"))]
-				index_builder: IndexBuilder::new(tf.clone()),
-				#[cfg(feature = "jwks")]
-				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
-				#[cfg(storage)]
-				temporary_directory: None,
-				cache: Arc::new(DatastoreCache::new()),
-				buckets: Arc::new(DashMap::new()),
-				sequences: Sequences::new(tf),
-			}
+		Self::new_with_builder(builder, clock)
+	}
+
+	pub fn new_with_builder(
+		builder: Box<dyn TransactionBuilder>,
+		clock: Arc<SizedClock>,
+	) -> Result<Self> {
+		let tf = TransactionFactory::new(clock, builder);
+		Ok(Self {
+			id: Uuid::new_v4(),
+			transaction_factory: tf.clone(),
+			strict: false,
+			auth_enabled: false,
+			query_timeout: None,
+			slow_log: None,
+			transaction_timeout: None,
+			notification_channel: None,
+			capabilities: Arc::new(Capabilities::default()),
+			index_stores: IndexStores::default(),
+			#[cfg(not(target_family = "wasm"))]
+			index_builder: IndexBuilder::new(tf.clone()),
+			#[cfg(feature = "jwks")]
+			jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
+			#[cfg(storage)]
+			temporary_directory: None,
+			cache: Arc::new(DatastoreCache::new()),
+			buckets: Arc::new(DashMap::new()),
+			sequences: Sequences::new(tf),
 		})
 	}
 
@@ -957,22 +1109,7 @@ impl Datastore {
 		// Delete this datastore from the cluster
 		self.delete_node(self.id).await?;
 		// Run any storag engine shutdown tasks
-		match self.transaction_factory.flavor.as_ref() {
-			#[cfg(feature = "kv-mem")]
-			DatastoreFlavor::Mem(v) => v.shutdown().await,
-			#[cfg(feature = "kv-rocksdb")]
-			DatastoreFlavor::RocksDB(v) => v.shutdown().await,
-			#[cfg(feature = "kv-indxdb")]
-			DatastoreFlavor::IndxDB(v) => v.shutdown().await,
-			#[cfg(feature = "kv-tikv")]
-			DatastoreFlavor::TiKV(v) => v.shutdown().await,
-			#[cfg(feature = "kv-fdb")]
-			DatastoreFlavor::FoundationDB(v) => v.shutdown().await,
-			#[cfg(feature = "kv-surrealkv")]
-			DatastoreFlavor::SurrealKV(v) => v.shutdown().await,
-			#[allow(unreachable_patterns)]
-			_ => unreachable!(),
-		}
+		self.transaction_factory.builder.shutdown().await
 	}
 
 	/// Create a new transaction on this datastore
