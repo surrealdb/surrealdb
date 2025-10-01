@@ -117,7 +117,7 @@ impl TableDefinition {
 }
 
 impl ToSql for TableDefinition {
-	fn to_sql(&self) -> String {
+	fn to_sql(&self) -> anyhow::Result<String> {
 		self.to_sql_definition().to_string()
 	}
 }
@@ -148,7 +148,7 @@ pub enum TableType {
 }
 
 impl ToSql for TableType {
-	fn to_sql(&self) -> String {
+	fn to_sql(&self) -> anyhow::Result<String> {
 		match self {
 			TableType::Normal => "NORMAL".to_string(),
 			TableType::Relation(rel) => {

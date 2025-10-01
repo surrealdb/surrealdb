@@ -439,7 +439,7 @@ impl Display for DefineAccessStatement {
 }
 
 impl ToSql for DefineAccessStatement {
-	fn to_sql(&self) -> String {
+	fn to_sql(&self) -> anyhow::Result<String> {
 		self.to_string()
 	}
 }

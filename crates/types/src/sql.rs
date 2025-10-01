@@ -20,26 +20,25 @@
 /// assert_eq!(datetime.to_string(), "2021-01-01T00:00:00Z");
 /// assert_eq!(datetime.to_sql(), "'d2021-01-01T00:00:00Z'");
 /// ```
-#[doc(hidden)]
 pub trait ToSql {
 	/// Convert the type to a SQL string.
-	fn to_sql(&self) -> String;
+	fn to_sql(&self) -> anyhow::Result<String>;
 }
 
 impl ToSql for String {
-	fn to_sql(&self) -> String {
-		self.clone()
+	fn to_sql(&self) -> anyhow::Result<String> {
+		Ok(format!("'{self}'"))
 	}
 }
 
 impl ToSql for &str {
-	fn to_sql(&self) -> String {
-		(*self).to_string()
+	fn to_sql(&self) -> anyhow::Result<String> {
+		Ok(format!("'{self}'"))
 	}
 }
 
 impl ToSql for &&str {
-	fn to_sql(&self) -> String {
-		(**self).to_string()
+	fn to_sql(&self) -> anyhow::Result<String> {
+		Ok(format!("'{self}'"))
 	}
 }

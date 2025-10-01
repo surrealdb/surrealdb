@@ -102,6 +102,19 @@ impl SurrealValue for Resource {
 	}
 }
 
+impl surrealdb_types::sql::ToSql for Resource {
+	fn to_sql(&self) -> anyhow::Result<String> {
+		match self {
+			Resource::Table(x) => x.to_sql(),
+			Resource::RecordId(x) => x.to_sql(),
+			Resource::Object(x) => x.to_sql(),
+			Resource::Array(x) => x.to_sql(),
+			Resource::Range(QueryRange(x)) => x.to_sql(),
+			Resource::Unspecified => "".to_string(),
+		}
+	}
+}
+
 impl From<RecordId> for Resource {
 	fn from(thing: RecordId) -> Self {
 		Self::RecordId(thing)

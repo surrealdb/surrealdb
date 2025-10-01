@@ -88,7 +88,7 @@ impl InfoStructure for IndexDefinition {
 }
 
 impl ToSql for IndexDefinition {
-	fn to_sql(&self) -> String {
+	fn to_sql(&self) -> anyhow::Result<String> {
 		self.to_sql_definition().to_string()
 	}
 }
@@ -131,7 +131,7 @@ impl InfoStructure for Index {
 }
 
 impl ToSql for Index {
-	fn to_sql(&self) -> String {
+	fn to_sql(&self) -> anyhow::Result<String> {
 		self.to_sql_definition().to_string()
 	}
 }

@@ -45,6 +45,7 @@ pub use self::range::Range;
 pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::regex::Regex;
 pub use self::uuid::Uuid;
+use crate::sql::ToSql;
 use crate::{Kind, SurrealValue};
 
 /// Marker type for value conversions from Value::None
@@ -323,6 +324,29 @@ impl Display for Value {
 			Value::RecordId(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
 			Value::File(v) => write!(f, "{v}"),
+		}
+	}
+}
+
+impl ToSql for Value {
+	fn to_sql(&self) -> anyhow::Result<String> {
+		match self {
+			Value::None => "NONE".to_string(),
+			Value::Null => "NULL".to_string(),
+			Value::Bool(v) => v.to_string(),
+			Value::Number(v) => v.to_string(),
+			Value::String(v) => v.to_sql(),
+			Value::Duration(v) => v.to_string(),
+			Value::Datetime(v) => v.to_string(),
+			Value::Uuid(v) => v.to_string(),
+			Value::Array(v) => v.to_string(),
+			Value::Object(v) => v.to_string(),
+			Value::Geometry(v) => v.to_string(),
+			Value::Bytes(v) => v.to_string(),
+			Value::RecordId(v) => v.to_string(),
+			Value::File(v) => v.to_string(),
+			Value::Range(v) => v.to_string(),
+			Value::Regex(v) => v.to_string(),
 		}
 	}
 }

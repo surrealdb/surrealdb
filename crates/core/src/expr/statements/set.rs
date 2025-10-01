@@ -90,7 +90,7 @@ impl fmt::Display for SetStatement {
 }
 
 impl ToSql for SetStatement {
-	fn to_sql(&self) -> String {
+	fn to_sql(&self) -> anyhow::Result<String> {
 		self.to_string()
 	}
 }

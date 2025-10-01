@@ -82,7 +82,7 @@ impl NamespaceDefinition {
 }
 
 impl ToSql for NamespaceDefinition {
-	fn to_sql(&self) -> String {
+	fn to_sql(&self) -> anyhow::Result<String> {
 		self.to_sql_definition().to_string()
 	}
 }

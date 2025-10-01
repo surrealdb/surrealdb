@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self, Display};
+use std::fmt::{self, Display, Write};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
+use crate::sql::ToSql;
 use crate::{SurrealValue, Value};
 
 /// Represents an object with key-value pairs in SurrealDB
@@ -81,20 +82,23 @@ impl Object {
 	}
 }
 
-impl Display for Object {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for Object {
+	fn to_sql(&self) -> anyhow::Result<String> {
+		let mut f = String::new();
 		f.write_str("{ ")?;
 
 		for (i, (k, v)) in self.0.iter().enumerate() {
-			k.fmt(f)?;
+			f.write_str(&k.to_sql()?)?;
 			f.write_str(": ")?;
-			v.fmt(f)?;
+			f.write_str(&v.to_sql()?)?;
 			if i < self.0.len() - 1 {
 				f.write_str(", ")?;
 			}
 		}
 
-		f.write_str(" }")
+		f.write_str(" }")?;
+
+		Ok(f)
 	}
 }
 

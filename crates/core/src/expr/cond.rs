@@ -16,7 +16,7 @@ impl fmt::Display for Cond {
 }
 
 impl ToSql for Cond {
-	fn to_sql(&self) -> String {
+	fn to_sql(&self) -> anyhow::Result<String> {
 		format!("WHERE {}", self.0)
 	}
 }

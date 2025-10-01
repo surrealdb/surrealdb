@@ -231,7 +231,8 @@ mod mem {
 	use surrealdb::opt::capabilities::{Capabilities, ExperimentalFeature};
 	use surrealdb::opt::{Config, Resource};
 	use surrealdb::types::RecordIdKey;
-	use tokio::sync::{Semaphore, SemaphorePermit};
+	use surrealdb_types::RecordId;
+use tokio::sync::{Semaphore, SemaphorePermit};
 
 	use super::{ROOT_PASS, ROOT_USER};
 	use crate::api_integration::ApiRecordId;
@@ -265,7 +266,7 @@ mod mem {
 	async fn signin_first_not_necessary() {
 		let db = Surreal::new::<Mem>(()).await.unwrap();
 		db.use_ns("namespace").use_db("database").await.unwrap();
-		let Some(record): Option<ApiRecordId> = db.create(("item", "foo")).await.unwrap() else {
+		let Some(record): Option<ApiRecordId> = db.create(RecordId::new("item", "foo")).await.unwrap() else {
 			panic!("record not found");
 		};
 		assert_eq!(record.id.key, RecordIdKey::from("foo"));
@@ -275,7 +276,6 @@ mod mem {
 	async fn cant_sign_into_default_root_account() {
 		let db = Surreal::new::<Mem>(()).await.unwrap();
 
-		let expected = "STU";
 		assert_eq!(
 			db.signin(Root {
 				username: ROOT_USER.to_string(),
@@ -284,7 +284,7 @@ mod mem {
 			.await
 			.unwrap_err()
 			.to_string(),
-			expected,
+			"Internal error: There was a problem with authentication",
 		);
 	}
 

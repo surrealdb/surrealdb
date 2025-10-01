@@ -891,7 +891,7 @@ impl fmt::Display for Expr {
 }
 
 impl ToSql for Expr {
-	fn to_sql(&self) -> String {
+	fn to_sql(&self) -> anyhow::Result<String> {
 		self.to_string()
 	}
 }

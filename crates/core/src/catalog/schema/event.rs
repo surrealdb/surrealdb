@@ -51,7 +51,7 @@ impl InfoStructure for EventDefinition {
 }
 
 impl ToSql for EventDefinition {
-	fn to_sql(&self) -> String {
+	fn to_sql(&self) -> anyhow::Result<String> {
 		self.to_sql_definition().to_string()
 	}
 }

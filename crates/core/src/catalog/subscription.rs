@@ -59,7 +59,7 @@ impl InfoStructure for SubscriptionDefinition {
 }
 
 impl ToSql for &SubscriptionDefinition {
-	fn to_sql(&self) -> String {
+	fn to_sql(&self) -> anyhow::Result<String> {
 		self.to_sql_definition().to_string()
 	}
 }

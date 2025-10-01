@@ -3,6 +3,7 @@ use std::fmt::{self, Debug};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
+use crate::sql::ToSql;
 // Needed because we use the SurrealValue derive macro inside the crate which exports it :)
 use crate as surrealdb_types;
 use crate::{Array, Number, Object, RecordIdKeyRange, SurrealValue, Uuid, Value};
@@ -139,14 +140,14 @@ impl PartialEq<Value> for RecordIdKey {
 	}
 }
 
-impl fmt::Display for RecordIdKey {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl ToSql for RecordIdKey {
+	fn to_sql(&self) -> anyhow::Result<String> {
 		match self {
-			RecordIdKey::Number(n) => write!(f, "{n}"),
-			RecordIdKey::String(v) => write!(f, "{v}"),
-			RecordIdKey::Uuid(uuid) => std::fmt::Display::fmt(uuid, f),
-			RecordIdKey::Object(object) => std::fmt::Display::fmt(object, f),
-			RecordIdKey::Array(array) => std::fmt::Display::fmt(array, f),
+			RecordIdKey::Number(n) => n.to_sql(),
+			RecordIdKey::String(v) => v.to_sql(),
+			RecordIdKey::Uuid(uuid) => uuid.to_sql(),
+			RecordIdKey::Object(object) => object.to_sql(),
+			RecordIdKey::Array(array) => array.to_sql(),
 			RecordIdKey::Range(rid) => rid.fmt(f),
 		}
 	}

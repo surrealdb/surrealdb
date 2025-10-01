@@ -60,7 +60,7 @@ impl conn::Sealed for Any {
 
 					#[cfg(not(feature = "kv-fdb"))]
 					bail!(
-						DbError::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
+						Error::Scheme("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
 					);
 				}
 
