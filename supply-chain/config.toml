@@ -173,6 +173,10 @@ criteria = "safe-to-deploy"
 version = "0.7.9"
 criteria = "safe-to-deploy"
 
+[[exemptions.axum]]
+version = "0.8.5"
+criteria = "safe-to-deploy"
+
 [[exemptions.axum-core]]
 version = "0.3.4"
 criteria = "safe-to-deploy"
@@ -181,12 +185,24 @@ criteria = "safe-to-deploy"
 version = "0.4.5"
 criteria = "safe-to-deploy"
 
+[[exemptions.axum-core]]
+version = "0.5.4"
+criteria = "safe-to-deploy"
+
 [[exemptions.axum-extra]]
 version = "0.9.6"
 criteria = "safe-to-deploy"
 
+[[exemptions.axum-extra]]
+version = "0.10.2"
+criteria = "safe-to-deploy"
+
 [[exemptions.axum-macros]]
 version = "0.4.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.axum-macros]]
+version = "0.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.axum-server]]
@@ -757,6 +773,10 @@ criteria = "safe-to-deploy"
 version = "0.7.3"
 criteria = "safe-to-deploy"
 
+[[exemptions.matchit]]
+version = "0.8.4"
+criteria = "safe-to-deploy"
+
 [[exemptions.md-5]]
 version = "0.10.6"
 criteria = "safe-to-deploy"
@@ -1209,8 +1229,20 @@ criteria = "safe-to-deploy"
 version = "0.6.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.serde]]
+version = "1.0.228"
+criteria = "safe-to-deploy"
+
 [[exemptions.serde-content]]
 version = "0.1.2"
+criteria = "safe-to-deploy"
+
+[[exemptions.serde_core]]
+version = "1.0.228"
+criteria = "safe-to-deploy"
+
+[[exemptions.serde_derive]]
+version = "1.0.228"
 criteria = "safe-to-deploy"
 
 [[exemptions.serde_html_form]]
@@ -1365,6 +1397,10 @@ criteria = "safe-to-deploy"
 version = "0.24.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.tokio-tungstenite]]
+version = "0.28.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.toml_datetime]]
 version = "0.6.8"
 criteria = "safe-to-deploy"
@@ -1423,6 +1459,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tungstenite]]
 version = "0.24.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.tungstenite]]
+version = "0.28.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.typenum]]
