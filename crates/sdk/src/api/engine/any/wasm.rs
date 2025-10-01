@@ -78,7 +78,7 @@ impl conn::Sealed for Any {
 					);
 				}
 
-				EndpointKind::File | EndpointKind::RocksDb => {
+				EndpointKind::RocksDb => {
 					#[cfg(feature = "kv-rocksdb")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);

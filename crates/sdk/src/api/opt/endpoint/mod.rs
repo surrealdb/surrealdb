@@ -126,7 +126,6 @@ pub enum EndpointKind {
 	IndxDb,
 	Memory,
 	RocksDb,
-	File,
 	TiKv,
 	Unsupported(String),
 	SurrealKv,
@@ -144,7 +143,6 @@ impl From<&str> for EndpointKind {
 			#[cfg(target_family = "wasm")]
 			"indxdb" => Self::IndxDb,
 			"mem" => Self::Memory,
-			"file" => Self::File,
 			"rocksdb" => Self::RocksDb,
 			"tikv" => Self::TiKv,
 			"surrealkv" => Self::SurrealKv,
