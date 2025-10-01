@@ -9,8 +9,8 @@ use rust_decimal::Decimal;
 
 use crate::syn;
 use crate::val::{
-	self, Array, DecimalExt, Geometry, Number, Object, Range, RecordIdKey, RecordIdKeyRange, Table,
-	Uuid, Value,
+	self, Array, Datetime, DecimalExt, Geometry, Number, Object, Range, RecordIdKey,
+	RecordIdKeyRange, Table, Uuid, Value,
 };
 
 // Tags from the spec - https://www.iana.org/assignments/cbor-tags/cbor-tags.xhtml
@@ -100,7 +100,7 @@ pub fn to_value(val: CborValue) -> Result<Value, &'static str> {
 				TAG_NONE => Ok(val::Value::None),
 				// A literal uuid
 				TAG_STRING_UUID => match *v {
-					CborValue::Text(v) => match val::Uuid::try_from(v) {
+					CborValue::Text(v) => match v.parse::<Uuid>() {
 						Ok(v) => Ok(v.into()),
 						_ => Err("Expected a valid UUID value"),
 					},
@@ -118,7 +118,7 @@ pub fn to_value(val: CborValue) -> Result<Value, &'static str> {
 				},
 				// A literal duration
 				TAG_STRING_DURATION => match *v {
-					CborValue::Text(v) => match val::Duration::try_from(v) {
+					CborValue::Text(v) => match v.parse::<Datetime>() {
 						Ok(v) => Ok(v.into()),
 						_ => Err("Expected a valid val::Duration value"),
 					},
@@ -165,7 +165,7 @@ pub fn to_value(val: CborValue) -> Result<Value, &'static str> {
 						}
 
 						let table = match to_value(table) {
-							Ok(val::Value::Strand(tb)) => tb.into_string(),
+							Ok(val::Value::String(tb)) => tb,
 							Ok(val::Value::Table(tb)) => tb.into_string(),
 							_ => {
 								return Err(
@@ -185,8 +185,7 @@ pub fn to_value(val: CborValue) -> Result<Value, &'static str> {
 				},
 				// A literal table
 				TAG_TABLE => match *v {
-					// TODO: Null byte validitY
-					CborValue::Text(v) => Ok(val::Value::Table(Table::new(v).unwrap())),
+					CborValue::Text(v) => Ok(val::Value::Table(Table::new(v))),
 					_ => Err("Expected a CBOR text data type"),
 				},
 				// A range
@@ -355,7 +354,7 @@ pub fn from_value(val: Value) -> Result<CborValue, &'static str> {
 				Ok(CborValue::Tag(TAG_STRING_DECIMAL, Box::new(CborValue::Text(v.to_string()))))
 			}
 		},
-		Value::Strand(v) => Ok(CborValue::Text(v.into_string())),
+		Value::String(v) => Ok(CborValue::Text(v)),
 		Value::Duration(v) => {
 			let seconds = v.secs();
 			let nanos = v.subsec_nanos();
@@ -578,7 +577,7 @@ fn to_record_id_key(val: CborValue) -> Result<RecordIdKey, &'static str> {
 			Ok(RecordIdKey::Range(Box::new(to_record_id_key_range(*v)?)))
 		}
 		CborValue::Tag(TAG_STRING_UUID, v) => match *v {
-			CborValue::Text(v) => match val::Uuid::try_from(v) {
+			CborValue::Text(v) => match v.parse() {
 				Ok(v) => Ok(RecordIdKey::Uuid(v)),
 				_ => Err("Expected a valid UUID value"),
 			},

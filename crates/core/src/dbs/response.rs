@@ -7,7 +7,7 @@ use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 
 use crate::expr::TopLevelExpr;
-use crate::val::{Object, Strand, Value};
+use crate::val::{Object, Value};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
 
@@ -64,20 +64,20 @@ impl Response {
 	/// Convert's the response into a value as it is send across the net.
 	pub fn into_value(self) -> Value {
 		let mut res = Object::new();
-		res.insert("time".to_owned(), Strand::new(format!("{:?}", self.time)).unwrap().into());
+		res.insert("time".to_owned(), format!("{:?}", self.time).into());
 
 		if !matches!(self.query_type, QueryType::Other) {
-			res.insert("type".to_owned(), Strand::new(self.query_type.to_string()).unwrap().into());
+			res.insert("type".to_owned(), self.query_type.to_string().into());
 		}
 
 		match self.result {
 			Ok(v) => {
-				res.insert("status".to_owned(), strand!("OK").to_owned().into());
+				res.insert("status".to_owned(), "OK".to_owned().into());
 				res.insert("result".to_owned(), v);
 			}
 			Err(e) => {
-				res.insert("status".to_owned(), strand!("ERR").to_owned().into());
-				res.insert("result".to_owned(), Strand::new(e.to_string()).unwrap().into());
+				res.insert("status".to_owned(), "ERR".to_owned().into());
+				res.insert("result".to_owned(), e.to_string().into());
 			}
 		}
 

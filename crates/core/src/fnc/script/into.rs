@@ -22,7 +22,7 @@ impl<'js> IntoJs<'js> for &Value {
 			Value::Null => Null.into_js(ctx),
 			Value::None => Undefined.into_js(ctx),
 			Value::Bool(boolean) => Ok(js::Value::new_bool(ctx.clone(), boolean)),
-			Value::Strand(ref v) => js::String::from_str(ctx.clone(), v)?.into_js(ctx),
+			Value::String(ref v) => js::String::from_str(ctx.clone(), v)?.into_js(ctx),
 			Value::Number(Number::Int(v)) => {
 				if ((i32::MIN as i64)..=(i32::MAX as i64)).contains(&v) {
 					Ok(js::Value::new_int(ctx.clone(), v as i32))

@@ -33,7 +33,7 @@ impl Value {
 				}
 				Number::Decimal(decimal) => JsonValue::String(decimal.to_string()),
 			},
-			Value::Strand(strand) => JsonValue::String(strand.into_string()),
+			Value::String(strand) => JsonValue::String(strand),
 			Value::Duration(duration) => JsonValue::String(duration.to_raw()),
 			Value::Datetime(datetime) => {
 				JsonValue::String(datetime.0.to_rfc3339_opts(SecondsFormat::AutoSi, true))
@@ -210,47 +210,47 @@ mod tests {
 	#[case::number(
 		Value::Number(val::Number::Decimal(Decimal::new(123, 2))),
 		json!("1.23"),
-		Value::Strand("1.23".into()),
+		Value::String("1.23".into()),
 	)]
 	#[case::strand(
-		Value::Strand("".into()),
+		Value::String("".into()),
 		json!(""),
-		Value::Strand("".into()),
+		Value::String("".into()),
 	)]
 	#[case::strand(
-		Value::Strand("foo".into()),
+		Value::String("foo".into()),
 		json!("foo"),
-		Value::Strand("foo".into()),
+		Value::String("foo".into()),
 	)]
 	#[case::duration(
 		Value::Duration(val::Duration(Duration::ZERO)),
 		json!("0ns"),
-		Value::Strand("0ns".into()),
+		Value::String("0ns".into()),
 	)]
 	#[case::duration(
 		Value::Duration(val::Duration(Duration::MAX)),
 		json!("584942417355y3w5d7h15s999ms999µs999ns"),
-		Value::Strand("584942417355y3w5d7h15s999ms999µs999ns".into()),
+		Value::String("584942417355y3w5d7h15s999ms999µs999ns".into()),
 	)]
 	#[case::datetime(
 		Value::Datetime(val::Datetime(DateTime::<Utc>::MIN_UTC)),
 		json!("-262143-01-01T00:00:00Z"),
-		Value::Strand("-262143-01-01T00:00:00Z".into()),
+		Value::String("-262143-01-01T00:00:00Z".into()),
 	)]
 	#[case::datetime(
 		Value::Datetime(val::Datetime(DateTime::<Utc>::MAX_UTC)),
 		json!("+262142-12-31T23:59:59.999999999Z"),
-		Value::Strand("+262142-12-31T23:59:59.999999999Z".into()),
+		Value::String("+262142-12-31T23:59:59.999999999Z".into()),
 	)]
 	#[case::uuid(
 		Value::Uuid(val::Uuid(Uuid::nil())),
 		json!("00000000-0000-0000-0000-000000000000"),
-		Value::Strand("00000000-0000-0000-0000-000000000000".into()),
+		Value::String("00000000-0000-0000-0000-000000000000".into()),
 	)]
 	#[case::uuid(
 		Value::Uuid(val::Uuid(Uuid::max())),
 		json!("ffffffff-ffff-ffff-ffff-ffffffffffff"),
-		Value::Strand("ffffffff-ffff-ffff-ffff-ffffffffffff".into()),
+		Value::String("ffffffff-ffff-ffff-ffff-ffffffffffff".into()),
 	)]
 	#[case::bytes(
 		Value::Bytes(val::Bytes(vec![])),

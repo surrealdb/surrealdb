@@ -19,11 +19,7 @@ impl Value {
 					Part::All => v
 						.iter()
 						.flat_map(|(field, v)| {
-							v._walk(
-								path.next(),
-								// TODO: null byte validity.
-								prev.clone().push(Part::field(field.clone()).unwrap()),
-							)
+							v._walk(path.next(), prev.clone().push(Part::Field(field.clone())))
 						})
 						.collect::<Vec<_>>(),
 					x => {

@@ -776,7 +776,7 @@ impl FullTextIndex {
 					or.highlight(tk.get_char_len(), o.o);
 				}
 			}
-			return or.try_into().map_err(anyhow::Error::new);
+			return Ok(or.into());
 		}
 		Ok(Value::None)
 	}
@@ -986,7 +986,21 @@ mod tests {
 			let DefineStatement::Analyzer(az) = *q else {
 				panic!()
 			};
-			let az = Arc::new(DefineAnalyzerStatement::from(az).to_definition());
+			let mut stack = reblessive::TreeStack::new();
+
+			let opts = Options::default();
+			let stk_ctx = ctx.clone();
+			let az = stack
+				.enter(|stk| async move {
+					Arc::new(
+						DefineAnalyzerStatement::from(az)
+							.to_definition(stk, &stk_ctx, &opts, None)
+							.await
+							.unwrap(),
+					)
+				})
+				.finish()
+				.await;
 			let content = Arc::new(Value::from(Array::from(vec![
 				"Enter a search term",
 				"Welcome",
@@ -1163,10 +1177,8 @@ mod tests {
 
 	#[test(tokio::test(flavor = "multi_thread"))]
 	async fn concurrent_test() {
-		let doc1: Arc<RecordId> =
-			Arc::new(RecordId::new("t".to_owned(), strand!("doc1").to_owned()));
-		let doc2: Arc<RecordId> =
-			Arc::new(RecordId::new("t".to_owned(), strand!("doc2").to_owned()));
+		let doc1: Arc<RecordId> = Arc::new(RecordId::new("t".to_owned(), "doc1".to_owned()));
+		let doc2: Arc<RecordId> = Arc::new(RecordId::new("t".to_owned(), "doc2".to_owned()));
 
 		let test = TestContext::new().await;
 		// Ensure the documents are pre-existing

@@ -8,12 +8,13 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::Fmt;
+use crate::expr::expression::VisitExpression;
 use crate::expr::order::Ordering;
 use crate::expr::{
-	Cond, Explain, Expr, Fetchs, Fields, FlowResultExt as _, Groups, Idioms, Limit, Splits, Start,
-	Timeout, With,
+	Cond, Explain, Expr, Fetchs, Fields, FlowResultExt as _, Groups, Limit, Splits, Start, Timeout,
+	With,
 };
+use crate::fmt::Fmt;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::{Datetime, Value};
 
@@ -21,7 +22,7 @@ use crate::val::{Datetime, Value};
 pub struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
 	pub expr: Fields,
-	pub omit: Option<Idioms>,
+	pub omit: Vec<Expr>,
 	pub only: bool,
 	/// The baz part in SELECT foo,bar FROM baz.
 	pub what: Vec<Expr>,
@@ -44,7 +45,7 @@ impl Default for SelectStatement {
 	fn default() -> Self {
 		SelectStatement {
 			expr: Fields::all(),
-			omit: None,
+			omit: vec![],
 			only: false,
 			what: Vec::new(),
 			with: None,
@@ -83,7 +84,7 @@ impl SelectStatement {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Assign the statement
-		let stm = Statement::from(self);
+		let stm = Statement::from_select(stk, ctx, opt, doc, self).await?;
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored and the version is set if specified
@@ -108,7 +109,7 @@ impl SelectStatement {
 			Error::SingleOnlyOutput
 		);
 		// Check if there is a timeout
-		let ctx = stm.setup_timeout(ctx)?;
+		let ctx = stm.setup_timeout(stk, ctx, &opt, doc).await?;
 
 		// Get a query planner
 		let mut planner = QueryPlanner::new();
@@ -144,11 +145,22 @@ impl SelectStatement {
 	}
 }
 
+impl VisitExpression for SelectStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.expr.visit(visitor);
+		self.what.iter().for_each(|expr| expr.visit(visitor));
+		self.cond.iter().for_each(|cond| cond.0.visit(visitor));
+	}
+}
+
 impl fmt::Display for SelectStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SELECT {}", self.expr)?;
-		if let Some(ref v) = self.omit {
-			write!(f, " OMIT {v}")?
+		if !self.omit.is_empty() {
+			write!(f, " OMIT {}", Fmt::comma_separated(self.omit.iter()))?
 		}
 		write!(f, " FROM")?;
 		if self.only {

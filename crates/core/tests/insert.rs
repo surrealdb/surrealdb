@@ -1,6 +1,6 @@
 use surrealdb_core::iam::Level;
 use surrealdb_core::syn;
-use surrealdb_core::val::{Array, Strand, Value};
+use surrealdb_core::val::{Array, Value};
 mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
@@ -251,32 +251,32 @@ async fn insert_statement_duplicate_key_update() -> Result<()> {
 	//
 	let tmp = res.remove(0).result?;
 	assert_eq!(
-		tmp.first().pick(&[Part::field("name".to_owned()).unwrap()]),
-		Value::from(Strand::new("SurrealDB".to_owned()).unwrap())
+		tmp.first().pick(&[Part::Field("name".to_owned())]),
+		Value::from("SurrealDB".to_owned())
 	);
 	assert_eq!(
-		tmp.first().pick(&[Part::field("founded".to_owned()).unwrap()]),
-		Value::from(Strand::new("2021-09-10".to_owned()).unwrap())
-	);
-	//
-	let tmp = res.remove(0).result?;
-	assert_eq!(
-		tmp.first().pick(&[Part::field("name".to_owned()).unwrap()]),
-		Value::from(Strand::new("SurrealDB".to_owned()).unwrap())
-	);
-	assert_eq!(
-		tmp.first().pick(&[Part::field("founded".to_owned()).unwrap()]),
-		Value::from(Strand::new("2021-09-11".to_owned()).unwrap())
+		tmp.first().pick(&[Part::Field("founded".to_owned())]),
+		Value::from("2021-09-10".to_owned())
 	);
 	//
 	let tmp = res.remove(0).result?;
 	assert_eq!(
-		tmp.first().pick(&[Part::field("name".to_owned()).unwrap()]),
-		Value::from(Strand::new("SurrealDB".to_owned()).unwrap())
+		tmp.first().pick(&[Part::Field("name".to_owned())]),
+		Value::from("SurrealDB".to_owned())
 	);
 	assert_eq!(
-		tmp.first().pick(&[Part::field("founded".to_owned()).unwrap()]),
-		Value::from(Strand::new("2021-09-12".to_owned()).unwrap())
+		tmp.first().pick(&[Part::Field("founded".to_owned())]),
+		Value::from("2021-09-11".to_owned())
+	);
+	//
+	let tmp = res.remove(0).result?;
+	assert_eq!(
+		tmp.first().pick(&[Part::Field("name".to_owned())]),
+		Value::from("SurrealDB".to_owned())
+	);
+	assert_eq!(
+		tmp.first().pick(&[Part::Field("founded".to_owned())]),
+		Value::from("2021-09-12".to_owned())
 	);
 	//
 	Ok(())
@@ -816,5 +816,40 @@ async fn insert_ignore() -> Result<()> {
 	//
 	t.expect_size(2)?;
 	t.expect_vals(&["[{ id: user:1, name: 'foo' }]", "[]"])?;
+	Ok(())
+}
+
+#[tokio::test]
+async fn insert_relation_ignore_unique_index_fix_test() -> Result<()> {
+	let sql = "
+        USE NS test DB test;
+        DEFINE INDEX key ON wrote FIELDS in, out UNIQUE;
+        INSERT RELATION IGNORE INTO wrote [
+            { in: author:one, out: blog:one },
+            { in: author:one, out: blog:one }
+        ];
+        INSERT RELATION IGNORE INTO wrote { in: author:one, out: blog:one };
+        SELECT * FROM wrote;
+    ";
+	let mut t = Test::new(sql).await?;
+
+	// Skip USE and DEFINE INDEX
+	t.skip_ok(2)?;
+
+	let first_result = t.next()?.result?;
+	assert_eq!(first_result.as_array().unwrap().len(), 1);
+
+	t.expect_val("[]")?;
+
+	let select_result = t.next()?.result?;
+	let records = select_result.as_array().unwrap();
+
+	assert_eq!(
+		records.len(),
+		1,
+		"INSERT IGNORE bug: Expected 1 record, got {}. Duplicates not ignored!",
+		records.len()
+	);
+
 	Ok(())
 }

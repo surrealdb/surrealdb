@@ -6,6 +6,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::expression::VisitExpression;
 use crate::expr::{Block, ControlFlow, Expr, FlowResult, Param, Value};
 use crate::val::range::IntegerRangeIter;
 
@@ -72,7 +73,7 @@ impl ForeachStatement {
 			// Duplicate context
 			let ctx = MutableContext::new(ctx).freeze();
 			// Set the current parameter
-			let key = self.param.clone().ident().into_string();
+			let key = self.param.as_str().to_owned();
 			let mut ctx = MutableContext::unfreeze(ctx)?;
 			ctx.add_value(key, v.into());
 			let mut ctx = Some(ctx.freeze());
@@ -98,7 +99,15 @@ impl ForeachStatement {
 		Ok(Value::None)
 	}
 }
-
+impl VisitExpression for ForeachStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.range.visit(visitor);
+		self.block.visit(visitor);
+	}
+}
 impl Display for ForeachStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "FOR {} IN {} {}", self.param, self.range, self.block)

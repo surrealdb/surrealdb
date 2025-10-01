@@ -69,7 +69,7 @@ use crate::syn::error::{SyntaxError, bail};
 use crate::syn::lexer::Lexer;
 use crate::syn::lexer::compound::NumberKind;
 use crate::syn::token::{Span, Token, TokenKind, t};
-use crate::val::{Bytes, Datetime, Duration, File, Strand, Uuid};
+use crate::val::{Bytes, Datetime, Duration, File, Uuid};
 
 mod basic;
 mod builtin;
@@ -121,7 +121,6 @@ pub enum GluedValue {
 	Datetime(Datetime),
 	Uuid(Uuid),
 	Number(NumberKind),
-	Strand(Strand),
 	#[default]
 	None,
 	Bytes(Bytes),
@@ -191,6 +190,7 @@ pub struct Parser<'a> {
 	glued_value: GluedValue,
 	pub(crate) table_as_field: bool,
 	settings: ParserSettings,
+	unscape_buffer: Vec<u8>,
 }
 
 impl<'a> Parser<'a> {
@@ -213,6 +213,7 @@ impl<'a> Parser<'a> {
 			glued_value: GluedValue::None,
 			table_as_field: true,
 			settings,
+			unscape_buffer: Vec::new(),
 		}
 	}
 

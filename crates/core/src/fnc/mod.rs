@@ -1150,8 +1150,8 @@ pub async fn idiom(
 				"repeat" => array::repeat,
 			)
 		}
-		Value::Strand(s) => {
-			args.insert(0, Value::Strand(s));
+		Value::String(s) => {
+			args.insert(0, Value::String(s));
 			dispatch!(
 				ctx,
 				name,
@@ -1654,12 +1654,10 @@ mod tests {
 				let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
 				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 				let tmp = res.remove(0).result.unwrap();
-				if tmp == Value::Strand(crate::val::Strand::new("object".to_owned()).unwrap()) {
+				if tmp == Value::String("object".to_owned()) {
 					// Assume this function is superseded by a module of the
 					// same name.
-				} else if tmp
-					!= Value::Strand(crate::val::Strand::new("function".to_owned()).unwrap())
-				{
+				} else if tmp != Value::String("function".to_owned()) {
 					problems.push(format!("function {name} not exported to JavaScript: {tmp:?}"));
 				}
 			}

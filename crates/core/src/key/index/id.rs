@@ -111,7 +111,7 @@ mod tests {
 			DatabaseId(2),
 			"testtb",
 			IndexId(3),
-			RecordIdKey::from(strand!("id").to_owned()),
+			RecordIdKey::from("id".to_owned()),
 		);
 		let enc = Id::encode_key(&val).unwrap();
 		assert_eq!(

@@ -6,6 +6,7 @@ pub(crate) mod native;
 pub(crate) mod wasm;
 
 use std::collections::HashMap;
+use std::io;
 use std::marker::PhantomData;
 use std::time::Duration;
 
@@ -62,7 +63,7 @@ struct RouterState<Sink, Stream> {
 	/// Messages which aught to be replayed on a reconnect.
 	replay: IndexMap<ReplayMethod, Command>,
 	/// Pending live queries
-	live_queries: HashMap<Uuid, async_channel::Sender<Notification>>,
+	live_queries: HashMap<Uuid, Sender<Result<Notification>>>,
 	/// Send requests which are still awaiting an awnser.
 	pending_requests: HashMap<i64, PendingRequest>,
 	/// The last time a message was recieved from the server.
@@ -84,6 +85,28 @@ impl<Sink, Stream> RouterState<Sink, Stream> {
 			sink,
 			stream,
 		}
+	}
+
+	async fn clear_pending_requests(&mut self) {
+		for (_id, request) in self.pending_requests.drain() {
+			let error = io::Error::from(io::ErrorKind::ConnectionReset);
+			let sender = request.response_channel;
+			sender.send(Err(error.into())).await.ok();
+			sender.close();
+		}
+	}
+
+	async fn clear_live_queries(&mut self) {
+		for (_id, sender) in self.live_queries.drain() {
+			let error = io::Error::from(io::ErrorKind::ConnectionReset);
+			sender.send(Err(error.into())).await.ok();
+			sender.close();
+		}
+	}
+
+	async fn reset(&mut self) {
+		self.clear_pending_requests().await;
+		self.clear_live_queries().await;
 	}
 }
 

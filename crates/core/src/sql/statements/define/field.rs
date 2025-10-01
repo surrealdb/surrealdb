@@ -1,10 +1,9 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
-use crate::sql::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
-use crate::sql::{Expr, Ident, Idiom, Kind, Permissions};
-use crate::val::Strand;
+use crate::sql::{Expr, Kind, Literal, Permissions};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -43,12 +42,12 @@ impl From<crate::expr::statements::define::DefineDefault> for DefineDefault {
 	}
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineFieldStatement {
 	pub kind: DefineKind,
-	pub name: Idiom,
-	pub what: Ident,
+	pub name: Expr,
+	pub what: Expr,
 	/// Whether the field is marked as flexible.
 	/// Flexible allows the field to be schemaless even if the table is marked
 	/// as schemafull.
@@ -60,8 +59,28 @@ pub struct DefineFieldStatement {
 	pub computed: Option<Expr>,
 	pub default: DefineDefault,
 	pub permissions: Permissions,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 	pub reference: Option<Reference>,
+}
+
+impl Default for DefineFieldStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			what: Expr::Literal(Literal::None),
+			flex: false,
+			field_kind: None,
+			readonly: false,
+			value: None,
+			assert: None,
+			computed: None,
+			default: DefineDefault::None,
+			permissions: Permissions::default(),
+			comment: None,
+			reference: None,
+		}
+	}
 }
 
 impl Display for DefineFieldStatement {
@@ -137,12 +156,13 @@ impl From<DefineFieldStatement> for crate::expr::statements::DefineFieldStatemen
 			computed: v.computed.map(Into::into),
 			default: v.default.into(),
 			permissions: v.permissions.into(),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 			reference: v.reference.map(Into::into),
 		}
 	}
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<crate::expr::statements::DefineFieldStatement> for DefineFieldStatement {
 	fn from(v: crate::expr::statements::DefineFieldStatement) -> Self {
 		Self {
@@ -157,7 +177,7 @@ impl From<crate::expr::statements::DefineFieldStatement> for DefineFieldStatemen
 			computed: v.computed.map(Into::into),
 			default: v.default.into(),
 			permissions: v.permissions.into(),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 			reference: v.reference.map(Into::into),
 		}
 	}

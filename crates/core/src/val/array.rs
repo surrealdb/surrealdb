@@ -9,7 +9,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
 use crate::expr::Expr;
-use crate::expr::fmt::{Fmt, Pretty, pretty_indent};
+use crate::fmt::{Fmt, Pretty, pretty_indent};
 use crate::val::{IndexFormat, Value};
 
 #[revisioned(revision = 1)]

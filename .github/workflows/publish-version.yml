@@ -86,8 +86,8 @@ jobs:
           if [[ "${{ inputs.nightly-release }}" == "true" ]]; then
             date=$(git show --no-patch --format=%ad --date=format:%Y%m%d)
             rev=$(git rev-parse --short HEAD)
-            buildMetadata=${date}.${rev}
-            echo "build-metadata=${buildMetadata}" >> $GITHUB_OUTPUT
+            build_metadata=${date}.${rev}
+            echo "build-metadata=${build_metadata}" >> $GITHUB_OUTPUT
             echo "name=nightly" >> $GITHUB_OUTPUT
             echo "pre-release=true" >> $GITHUB_OUTPUT
             echo "release-name=nightly" >> $GITHUB_OUTPUT
@@ -96,8 +96,8 @@ jobs:
             if [[ $version == *"-"* ]]; then
               echo "pre-release=true" >> $GITHUB_OUTPUT
               suffix=$(echo $version | tr "-" "\n" | sed -n 2p)
-              releaseName=$(echo $suffix | tr "." "\n" | sed -n 1p)
-              echo "release-name=${releaseName}" >> $GITHUB_OUTPUT
+              release_name=$(echo $suffix | tr "." "\n" | sed -n 1p)
+              echo "release-name=${release_name}" >> $GITHUB_OUTPUT
             else
               echo "pre-release=false" >> $GITHUB_OUTPUT
               echo "release-name=stable" >> $GITHUB_OUTPUT
@@ -124,11 +124,10 @@ jobs:
         with:
           save-if: ${{ inputs.git-ref == 'main' }}
 
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) cargo-llvm-cov
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: taiki-e/install-action@3216b6964cbfe053bb8b9a2ef245bd9300e2061d # (Actions must be pinned by commit hash) v2.62.14
+        with:
+          tool: cargo-llvm-cov,cargo-make
 
       - name: Test workspace + coverage
         run: cargo make ci-workspace-coverage
@@ -256,46 +255,26 @@ jobs:
       upload: true
     secrets: inherit
 
+  publish-crates:
+    name: Publish crates
+    needs: [ test, format, check, check-wasm, clippy, build ]
+    uses: ./.github/workflows/crate.yml
+    with:
+      git-ref: ${{ inputs.git-ref }}
+      publish: ${{ inputs.publish }}
+      nightly-release: ${{ inputs.nightly-release }}
+
   publish:
-    name: Publish crate and artifacts binaries
+    name: Publish binaries
     permissions:
       contents: write
-    needs: [ prepare-vars, test, format, check, check-wasm, clippy, build ]
-    runs-on: [ runner-amd64-2xlarge ]
+    needs: [ prepare-vars, publish-crates ]
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ inputs.git-ref }}
-
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable (Actions must be pinned by commit hash)
-        with:
-          toolchain: stable
-
-      - name: Install release-plz
-        run: |
-          curl -L https://github.com/MarcoIeni/release-plz/releases/download/release-plz-v0.3.30/release-plz-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xz -C /usr/bin
-          sudo chmod +x /usr/bin/release-plz
-
-      - name: Create a temporary branch
-        run: git checkout -b crate
-
-      - name: Configure release-plz
-        run: |
-          cat << EOF > /tmp/release-plz.toml
-          [workspace]
-          changelog_update = false
-          git_release_enable = false
-          semver_check = false
-          git_tag_enable = false
-          EOF
-
-      - name: Publish the crate
-        if: ${{ inputs.publish && !inputs.nightly-release }}
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: release-plz release --config /tmp/release-plz.toml
 
       - name: Download artifacts
         if: ${{ inputs.publish }}

@@ -14,7 +14,7 @@ impl Parser<'_> {
 
 		let data = self.try_parse_data(stk).await?;
 		let output = self.try_parse_output(stk).await?;
-		let timeout = self.try_parse_timeout()?;
+		let timeout = self.try_parse_timeout(stk).await?;
 		let parallel = self.eat(t!("PARALLEL"));
 		Ok(RelateStatement {
 			only,
@@ -102,7 +102,7 @@ impl Parser<'_> {
 		if self.peek_whitespace1().kind == t!(":") {
 			self.parse_record_id(stk).await.map(|x| Expr::Literal(Literal::RecordId(x)))
 		} else {
-			self.next_token_value().map(Expr::Table)
+			self.parse_ident().map(Expr::Table)
 		}
 	}
 }

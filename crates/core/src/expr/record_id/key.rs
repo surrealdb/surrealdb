@@ -6,11 +6,11 @@ use reblessive::tree::Stk;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::escape::{EscapeKey, EscapeRid};
-use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
+use crate::expr::expression::VisitExpression;
 use crate::expr::literal::ObjectEntry;
-use crate::expr::{Expr, FlowResultExt as _, RecordIdKeyRangeLit};
-use crate::val::{Array, Object, RecordIdKey, Strand, Uuid};
+use crate::expr::{Expr, FlowResultExt as _, Kind, KindLiteral, RecordIdKeyRangeLit};
+use crate::fmt::{EscapeKey, EscapeRid, Fmt, Pretty, is_pretty, pretty_indent};
+use crate::val::{Array, Object, RecordIdKey, Uuid};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RecordIdKeyGen {
@@ -32,7 +32,7 @@ impl RecordIdKeyGen {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RecordIdKeyLit {
 	Number(i64),
-	String(Strand),
+	String(String),
 	Uuid(Uuid),
 	Array(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
@@ -40,9 +40,53 @@ pub enum RecordIdKeyLit {
 	Range(Box<RecordIdKeyRangeLit>),
 }
 
+impl RecordIdKeyLit {
+	pub(crate) fn kind_supported(kind: &Kind) -> bool {
+		match kind {
+			Kind::Any => true,
+			Kind::Number => true,
+			Kind::Int => true,
+			Kind::String => true,
+			Kind::Uuid => true,
+			Kind::Array(_, _) => true,
+			Kind::Set(_, _) => true,
+			Kind::Object => true,
+			Kind::Literal(l) => matches!(
+				l,
+				KindLiteral::Integer(_)
+					| KindLiteral::String(_)
+					| KindLiteral::Array(_)
+					| KindLiteral::Object(_)
+			),
+			Kind::Either(x) => x.iter().all(RecordIdKeyLit::kind_supported),
+			_ => false,
+		}
+	}
+}
+
 impl From<RecordIdKeyRangeLit> for RecordIdKeyLit {
 	fn from(v: RecordIdKeyRangeLit) -> Self {
 		Self::Range(Box::new(v))
+	}
+}
+
+impl VisitExpression for RecordIdKeyLit {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		match self {
+			RecordIdKeyLit::Array(array) => {
+				array.iter().for_each(|expr| expr.visit(visitor));
+			}
+			RecordIdKeyLit::Object(object) => {
+				object.iter().for_each(|entry| entry.visit(visitor));
+			}
+			RecordIdKeyLit::Range(range) => {
+				range.visit(visitor);
+			}
+			_ => {}
+		}
 	}
 }
 
@@ -120,7 +164,7 @@ impl RecordIdKeyLit {
 	) -> Result<RecordIdKey> {
 		match self {
 			RecordIdKeyLit::Number(v) => Ok(RecordIdKey::Number(*v)),
-			RecordIdKeyLit::String(v) => Ok(RecordIdKey::String(v.clone().into_string())),
+			RecordIdKeyLit::String(v) => Ok(RecordIdKey::String(v.clone())),
 			RecordIdKeyLit::Uuid(v) => Ok(RecordIdKey::Uuid(*v)),
 			RecordIdKeyLit::Array(v) => {
 				let mut res = Vec::new();

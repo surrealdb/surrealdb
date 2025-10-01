@@ -162,6 +162,8 @@ pub enum Category {
 	IndexPrimaryAppending,
 	/// crate::key::index::is                /*{ns}*{db}*{tb}+{ix}!is{uuid}
 	IndexFullTextDocIdsSequenceState,
+	/// crate::key::index::iu                /*{ns}*{db}*{tb}+{ix}*iu{uuid}{uuid}{count}
+	IndexCountState,
 	/// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 	Index,
 	///
@@ -270,6 +272,7 @@ impl Display for Category {
 			Self::IndexFullTextDocCountAndLength => "IndexFullTextDocCountAndLength",
 			Self::IndexTermDocuments => "IndexTermDocuments",
 			Self::IndexCompaction => "IndexCompaction",
+			Self::IndexCountState => "IndexCountState",
 		};
 		write!(f, "{}", name)
 	}

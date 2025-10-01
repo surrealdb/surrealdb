@@ -1,6 +1,6 @@
 use std::fmt::{self, Display};
 
-use crate::sql::fmt::Fmt;
+use crate::fmt::Fmt;
 use crate::sql::{Expr, Permission};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -12,8 +12,6 @@ pub struct ApiConfig {
 
 impl Display for ApiConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, " API")?;
-
 		if !self.middleware.is_empty() {
 			write!(f, " MIDDLEWARE ")?;
 			write!(

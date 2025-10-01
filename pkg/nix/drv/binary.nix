@@ -1,4 +1,4 @@
-{ pkgs, spec, util, rustToolchain, crane }:
+{ pkgs, lib, spec, util, rustToolchain, crane }:
 
 let
 
@@ -12,8 +12,17 @@ let
     rustc = rustToolchain;
   });
 
+  unfilteredRoot = ../../../.; # The original, unfiltered source
   buildSpec = spec.buildSpec // {
-    src = craneLib.cleanCargoSource ../../../.;
+    src = lib.fileset.toSource {
+      root = unfilteredRoot;
+      fileset = lib.fileset.unions [
+        # Default files from crane (Rust and cargo files)
+        (craneLib.fileset.commonCargoSources unfilteredRoot)
+        # Also keep any markdown files
+        (lib.fileset.fileFilter (file: file.hasExt "md") unfilteredRoot)
+      ];
+    };
     doCheck = false;
     cargoExtraArgs = let flags = [ "--no-default-features" ] ++ featureFlags;
     in builtins.concatStringsSep " " flags;

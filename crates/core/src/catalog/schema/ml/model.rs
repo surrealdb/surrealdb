@@ -24,10 +24,13 @@ impl MlModelDefinition {
 		crate::sql::DefineModelStatement {
 			kind: DefineKind::Default,
 			hash: self.hash.clone(),
-			name: unsafe { crate::sql::Ident::new_unchecked(self.name.clone()) },
+			name: self.name.clone(),
 			version: self.version.clone(),
 			permissions: self.permissions.clone().into(),
-			comment: self.comment.clone().map(Into::into),
+			comment: self
+				.comment
+				.clone()
+				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
 		}
 	}
 }

@@ -10,18 +10,28 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::{Base, Expr, FlowResultExt as _, Ident};
+use crate::expr::expression::VisitExpression;
+use crate::expr::{Base, Expr, FlowResultExt as _};
+use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineParamStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: String,
 	pub value: Expr,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 	pub permissions: Permission,
+}
+
+impl VisitExpression for DefineParamStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.comment.iter().for_each(|comment| comment.visit(visitor));
+	}
 }
 
 impl DefineParamStatement {
@@ -68,8 +78,8 @@ impl DefineParamStatement {
 			db.database_id,
 			&ParamDefinition {
 				value,
-				name: self.name.to_raw_string(),
-				comment: self.comment.clone().map(|s| s.into_string()),
+				name: self.name.clone(),
+				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 				permissions: self.permissions.clone(),
 			},
 		)
@@ -89,9 +99,9 @@ impl Display for DefineParamStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " ${} VALUE {}", self.name, self.value)?;
+		write!(f, " ${} VALUE {}", EscapeKwFreeIdent(&self.name), self.value)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

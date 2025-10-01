@@ -13,17 +13,17 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::operator::{BooleanOperator, MatchesOperator};
-use crate::expr::{Cond, Expr, FlowResultExt as _, Ident, Idiom};
+use crate::expr::{Cond, Expr, FlowResultExt as _, Idiom};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
 use crate::idx::ft::highlighter::HighlightParams;
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
-	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
-	IndexUnionThingIterator, IteratorRecord, IteratorRef, KnnIterator, KnnIteratorResult,
-	MatchesThingIterator, ThingIterator, UniqueEqualThingIterator, UniqueJoinThingIterator,
-	UniqueRangeThingIterator, UniqueUnionThingIterator,
+	IndexCountThingIterator, IndexEqualThingIterator, IndexJoinThingIterator,
+	IndexRangeThingIterator, IndexUnionThingIterator, IteratorRecord, IteratorRef, KnnIterator,
+	KnnIteratorResult, MatchesThingIterator, ThingIterator, UniqueEqualThingIterator,
+	UniqueJoinThingIterator, UniqueRangeThingIterator, UniqueUnionThingIterator,
 };
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 use crate::idx::planner::iterators::{
@@ -134,7 +134,7 @@ impl InnerQueryExecutor {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		table: &Ident,
+		table: &str,
 		ios: Vec<(Arc<Expr>, IndexOption)>,
 		kbtes: KnnBruteForceExpressions,
 		knn_condition: Option<Cond>,
@@ -147,38 +147,39 @@ impl InnerQueryExecutor {
 		// Create all the instances of index entries.
 		// Map them to Idioms and MatchRef
 		for (exp, io) in ios {
-			let ixr = io.ix_ref();
-			match &ixr.index {
+			let index_reference = io.index_reference();
+			match &index_reference.index {
 				Index::FullText(p) => {
-					let fulltext_entry: Option<FullTextEntry> = match ir_map.entry(ixr.clone()) {
-						Entry::Occupied(e) => {
-							if let PerIndexReferenceIndex::FullText(fti) = e.get() {
-								FullTextEntry::new(stk, ctx, opt, fti, io).await?
-							} else {
-								None
+					let fulltext_entry: Option<FullTextEntry> =
+						match ir_map.entry(index_reference.clone()) {
+							Entry::Occupied(e) => {
+								if let PerIndexReferenceIndex::FullText(fti) = e.get() {
+									FullTextEntry::new(stk, ctx, opt, fti, io).await?
+								} else {
+									None
+								}
 							}
-						}
-						Entry::Vacant(e) => {
-							let ix: &IndexDefinition = e.key();
-							let ikb = IndexKeyBase::new(
-								db.namespace_id,
-								db.database_id,
-								&ix.table_name,
-								ix.index_id,
-							);
-							let ft = FullTextIndex::new(
-								opt.id()?,
-								ctx.get_index_stores(),
-								&ctx.tx(),
-								ikb,
-								p,
-							)
-							.await?;
-							let fte = FullTextEntry::new(stk, ctx, opt, &ft, io).await?;
-							e.insert(PerIndexReferenceIndex::FullText(ft));
-							fte
-						}
-					};
+							Entry::Vacant(e) => {
+								let ix: &IndexDefinition = e.key();
+								let ikb = IndexKeyBase::new(
+									db.namespace_id,
+									db.database_id,
+									&ix.table_name,
+									ix.index_id,
+								);
+								let ft = FullTextIndex::new(
+									opt.id()?,
+									ctx.get_index_stores(),
+									&ctx.tx(),
+									ikb,
+									p,
+								)
+								.await?;
+								let fte = FullTextEntry::new(stk, ctx, opt, &ft, io).await?;
+								e.insert(PerIndexReferenceIndex::FullText(ft));
+								fte
+							}
+						};
 					if let Some(e) = fulltext_entry {
 						if let Matches(
 							_,
@@ -201,7 +202,7 @@ impl InnerQueryExecutor {
 				}
 				Index::MTree(p) => {
 					if let IndexOperator::Knn(a, k) = io.op() {
-						let mte = match ir_map.entry(ixr.clone()) {
+						let mte = match ir_map.entry(index_reference.clone()) {
 							Entry::Occupied(e) => {
 								if let PerIndexReferenceIndex::MTree(mti) = e.get() {
 									Some(
@@ -256,7 +257,7 @@ impl InnerQueryExecutor {
 				}
 				Index::Hnsw(p) => {
 					if let IndexOperator::Ann(a, k, ef) = io.op() {
-						let he = match ir_map.entry(ixr.clone()) {
+						let he = match ir_map.entry(index_reference.clone()) {
 							Entry::Occupied(e) => {
 								if let PerIndexReferenceIndex::Hnsw(hi) = e.get() {
 									Some(
@@ -280,7 +281,13 @@ impl InnerQueryExecutor {
 							Entry::Vacant(e) => {
 								let hi = ctx
 									.get_index_stores()
-									.get_index_hnsw(db.namespace_id, db.database_id, ctx, ixr, p)
+									.get_index_hnsw(
+										db.namespace_id,
+										db.database_id,
+										ctx,
+										index_reference,
+										p,
+									)
 									.await?;
 								// Ensure the local HNSW index is up to date with the KVS
 								hi.write().await.check_state(&ctx.tx()).await?;
@@ -317,7 +324,7 @@ impl InnerQueryExecutor {
 		}
 
 		Ok(Self {
-			table: table.clone().into_string(),
+			table: table.to_owned(),
 			ir_map,
 			mr_entries,
 			exp_entries,
@@ -416,9 +423,16 @@ impl QueryExecutor {
 		if let Some(it_entry) = self.0.it_entries.get(ir) {
 			match it_entry {
 				IteratorEntry::Single(_, io) => self.new_single_iterator(ns, db, ir, io).await,
-				IteratorEntry::Range(_, ixr, from, to, sc) => {
-					Ok(self.new_range_iterator(ir, ns, db, ixr, from.clone(), to.clone(), *sc)?)
-				}
+				IteratorEntry::Range(_, index_reference, from, to, sc) => Ok(self
+					.new_range_iterator(
+						ir,
+						ns,
+						db,
+						index_reference,
+						from.clone(),
+						to.clone(),
+						*sc,
+					)?),
 			}
 		} else {
 			Ok(None)
@@ -432,10 +446,11 @@ impl QueryExecutor {
 		irf: IteratorRef,
 		io: &IndexOption,
 	) -> Result<Option<ThingIterator>> {
-		let ixr = io.ix_ref();
-		match ixr.index {
-			Index::Idx => Ok(self.new_index_iterator(ns, db, irf, ixr, io.clone()).await?),
-			Index::Uniq => Ok(self.new_unique_index_iterator(ns, db, irf, ixr, io.clone()).await?),
+		match io.index_reference().index {
+			Index::Idx | Index::Count(_) => {
+				Ok(self.new_index_iterator(ns, db, irf, io.clone()).await?)
+			}
+			Index::Uniq => Ok(self.new_unique_index_iterator(ns, db, irf, io.clone()).await?),
 			Index::FullText {
 				..
 			} => self.new_fulltext_index_iterator(irf, io.clone()).await,
@@ -473,9 +488,9 @@ impl QueryExecutor {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ir: IteratorRef,
-		ix: &IndexReference,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>> {
+		let ix = io.index_reference();
 		Ok(match io.op() {
 			IndexOperator::Equality(value) => {
 				let fd = Self::equality_to_fd(value);
@@ -510,6 +525,12 @@ impl QueryExecutor {
 			IndexOperator::Range(prefix, ranges) => Some(ThingIterator::IndexRange(
 				IndexRangeThingIterator::compound_range(ir, ns, db, ix, prefix, ranges)?,
 			)),
+			IndexOperator::Count => Some(ThingIterator::IndexCount(IndexCountThingIterator::new(
+				ns,
+				db,
+				&ix.table_name,
+				ix.index_id,
+			)?)),
 			_ => None,
 		})
 	}
@@ -592,24 +613,32 @@ impl QueryExecutor {
 		ns: NamespaceId,
 		db: DatabaseId,
 		irf: IteratorRef,
-		ixr: &IndexReference,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>> {
 		Ok(match io.op() {
 			IndexOperator::Equality(value) => {
 				let fd = Self::equality_to_fd(value);
-				Some(Self::new_unique_equal_iterator(irf, ns, db, ixr, &fd)?)
+				Some(Self::new_unique_equal_iterator(irf, ns, db, io.index_reference(), &fd)?)
 			}
 			IndexOperator::Union(values) => {
 				let fds = Self::union_to_fds(values);
 				Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(
-					irf, ns, db, ixr, &fds,
+					irf,
+					ns,
+					db,
+					io.index_reference(),
+					&fds,
 				)?))
 			}
 			IndexOperator::Join(ios) => {
 				let iterators = self.build_iterators(ns, db, irf, ios).await?;
-				let unique_join =
-					Box::new(UniqueJoinThingIterator::new(irf, ns, db, ixr.clone(), iterators)?);
+				let unique_join = Box::new(UniqueJoinThingIterator::new(
+					irf,
+					ns,
+					db,
+					io.index_reference().clone(),
+					iterators,
+				)?);
 				Some(ThingIterator::UniqueJoin(unique_join))
 			}
 			IndexOperator::Order(reverse) => {
@@ -617,20 +646,35 @@ impl QueryExecutor {
 					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 					{
 						Some(ThingIterator::UniqueRangeReverse(
-							UniqueRangeReverseThingIterator::full_range(irf, ns, db, ixr)?,
+							UniqueRangeReverseThingIterator::full_range(
+								irf,
+								ns,
+								db,
+								io.index_reference(),
+							)?,
 						))
 					}
 					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
 					None
 				} else {
 					Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::full_range(
-						irf, ns, db, ixr,
+						irf,
+						ns,
+						db,
+						io.index_reference(),
 					)?))
 				}
 			}
-			IndexOperator::Range(prefix, ranges) => Some(ThingIterator::UniqueRange(
-				UniqueRangeThingIterator::compound_range(irf, ns, db, ixr, prefix, ranges)?,
-			)),
+			IndexOperator::Range(prefix, ranges) => {
+				Some(ThingIterator::UniqueRange(UniqueRangeThingIterator::compound_range(
+					irf,
+					ns,
+					db,
+					io.index_reference(),
+					prefix,
+					ranges,
+				)?))
+			}
 			_ => None,
 		})
 	}
@@ -666,7 +710,8 @@ impl QueryExecutor {
 				},
 			) = io.op()
 			{
-				if let Some(PerIndexReferenceIndex::FullText(fti)) = self.0.ir_map.get(io.ix_ref())
+				if let Some(PerIndexReferenceIndex::FullText(fti)) =
+					self.0.ir_map.get(io.index_reference())
 				{
 					if let Some(PerExpressionEntry::FullText(fte)) = self.0.exp_entries.get(exp) {
 						let hits = fti.new_hits_iterator(&fte.0.qt, *operator);
@@ -727,7 +772,7 @@ impl QueryExecutor {
 		r: Value,
 	) -> Result<bool> {
 		if let Some(PerExpressionEntry::FullText(fte)) = self.0.exp_entries.get(exp) {
-			let ix = fte.0.io.ix_ref();
+			let ix = fte.0.io.index_reference();
 			if let Some(PerIndexReferenceIndex::FullText(fti)) = self.0.ir_map.get(ix) {
 				if self.0.table == ix.table_name.as_str() {
 					return self.fulltext_matches_with_doc_id(ctx, thg, fti, fte).await;
@@ -778,7 +823,7 @@ impl QueryExecutor {
 		if fte.0.qt.is_empty() {
 			return Ok(false);
 		}
-		let v = match fte.0.io.id_pos() {
+		let v = match fte.0.io.idiom_position() {
 			IdiomPosition::Left => r,
 			IdiomPosition::Right => l,
 			IdiomPosition::None => return Ok(false),
@@ -795,7 +840,9 @@ impl QueryExecutor {
 	}
 
 	fn get_fulltext_index(&self, fe: &FullTextEntry) -> Option<&FullTextIndex> {
-		if let Some(PerIndexReferenceIndex::FullText(si)) = self.0.ir_map.get(fe.0.io.ix_ref()) {
+		if let Some(PerIndexReferenceIndex::FullText(si)) =
+			self.0.ir_map.get(fe.0.io.index_reference())
+		{
 			Some(si)
 		} else {
 			None
@@ -811,7 +858,7 @@ impl QueryExecutor {
 	) -> Result<Value> {
 		if let Some(PerMatchRefEntry::FullText(fte)) = self.get_match_ref_entry(hlp.match_ref()) {
 			if let Some(fti) = self.get_fulltext_index(fte) {
-				if let Some(id) = fte.0.io.id_ref() {
+				if let Some(id) = fte.0.io.idiom_ref() {
 					let tx = ctx.tx();
 					let res = fti.highlight(&tx, thg, &fte.0.qt, hlp, id, doc).await;
 					return res;

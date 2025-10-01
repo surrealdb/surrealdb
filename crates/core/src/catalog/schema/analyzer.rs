@@ -21,7 +21,6 @@ impl InfoStructure for AnalyzerDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
 			"name".to_string() => Value::from(self.name.clone()),
-			// TODO: Null byte validity
 			"function".to_string(), if let Some(v) = self.function => Value::from(v.clone()),
 			"tokenizers".to_string(), if let Some(v) = self.tokenizers =>
 				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),

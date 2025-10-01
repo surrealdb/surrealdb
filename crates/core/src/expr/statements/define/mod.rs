@@ -40,6 +40,8 @@ pub use user::DefineUserStatement;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
+use crate::expr::Expr;
+use crate::expr::expression::VisitExpression;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
@@ -80,22 +82,48 @@ impl DefineStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		match self {
-			Self::Namespace(v) => v.compute(ctx, opt, doc).await,
-			Self::Database(v) => v.compute(ctx, opt, doc).await,
-			Self::Function(v) => v.compute(ctx, opt, doc).await,
+			Self::Namespace(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Database(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Function(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Param(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Table(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Event(v) => v.compute(ctx, opt, doc).await,
-			Self::Field(v) => v.compute(ctx, opt, doc).await,
+			Self::Event(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Field(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Index(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Analyzer(v) => v.compute(ctx, opt, doc).await,
-			Self::User(v) => v.compute(ctx, opt, doc).await,
-			Self::Model(v) => v.compute(ctx, opt, doc).await,
-			Self::Access(v) => v.compute(ctx, opt, doc).await,
+			Self::Analyzer(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::User(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Model(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Access(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Config(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Api(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Bucket(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Sequence(v) => v.compute(ctx, opt).await,
+			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
+		}
+	}
+}
+
+impl VisitExpression for DefineStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		match self {
+			DefineStatement::Namespace(namespace) => namespace.visit(visitor),
+			DefineStatement::Database(database) => database.visit(visitor),
+			DefineStatement::Function(function) => function.visit(visitor),
+			DefineStatement::Analyzer(analyzer) => analyzer.visit(visitor),
+			DefineStatement::Param(param) => param.visit(visitor),
+			DefineStatement::Table(table) => table.visit(visitor),
+			DefineStatement::Event(event) => event.visit(visitor),
+			DefineStatement::Field(field) => field.visit(visitor),
+			DefineStatement::Index(index) => index.visit(visitor),
+			DefineStatement::User(user) => user.visit(visitor),
+			DefineStatement::Model(model) => model.visit(visitor),
+			DefineStatement::Access(access) => access.visit(visitor),
+			DefineStatement::Config(_) => {}
+			DefineStatement::Api(api) => api.visit(visitor),
+			DefineStatement::Bucket(bucket) => bucket.visit(visitor),
+			DefineStatement::Sequence(sequence) => sequence.visit(visitor),
 		}
 	}
 }

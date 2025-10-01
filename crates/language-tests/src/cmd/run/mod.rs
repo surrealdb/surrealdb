@@ -83,9 +83,9 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		Backend::SurrealKv => {}
 		#[cfg(not(feature = "backend-surrealkv"))]
 		Backend::SurrealKv => bail!("SurrealKV backend feature is not enabled"),
-		#[cfg(any(feature = "backend-foundation-7_1", feature = "backend-foundation-7_1"))]
+		#[cfg(feature = "backend-foundation")]
 		Backend::Foundation => {}
-		#[cfg(not(any(feature = "backend-foundation-7_1", feature = "backend-foundation-7_1")))]
+		#[cfg(not(feature = "backend-foundation"))]
 		Backend::Foundation => bail!("FoundationDB backend features is not enabled"),
 	}
 
@@ -118,14 +118,16 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			let config = test.config.clone();
 
 			// Ensure this test can run on this version.
-			if let Some(version_req) = config.test.as_ref().map(|x| &x.version) {
+			if let Some(version_req) = config.test.as_ref().and_then(|x| x.version.as_ref()) {
 				if !version_req.matches(&core_version) {
 					return None;
 				}
 			}
 
 			// Ensure this test imports can run on this version as specified by the test itself.
-			if let Some(version_req) = config.test.as_ref().map(|x| &x.importing_version) {
+			if let Some(version_req) =
+				config.test.as_ref().and_then(|x| x.importing_version.as_ref())
+			{
 				if !version_req.matches(&core_version) {
 					return None;
 				}
@@ -134,7 +136,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			// Ensure this test imports can run on this version as specified by the imports.
 			for import in test.imports.iter() {
 				if let Some(version_req) =
-					subset[import.id].config.test.as_ref().map(|x| &x.version)
+					subset[import.id].config.test.as_ref().and_then(|x| x.version.as_ref())
 				{
 					if !version_req.matches(&core_version) {
 						return None;
@@ -332,6 +334,16 @@ async fn run_test_with_dbs(
 	let config = &set[id].config;
 
 	let mut session = util::session_from_test_config(config);
+
+	if let Some(ref x) = session.ns {
+		let db = session.db.take();
+		dbs.execute(&format!("DEFINE NAMESPACE `{x}`"), &session, None).await?;
+		session.db = db;
+	}
+
+	if let Some(ref x) = session.db {
+		dbs.execute(&format!("DEFINE DATABASE `{x}`"), &session, None).await?;
+	}
 
 	let timeout_duration = config
 		.env

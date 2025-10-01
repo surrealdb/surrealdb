@@ -12,7 +12,7 @@ use crate::kvs::{KVKey, impl_kv_key_storekey};
 /// discovering if an event is remote or local as well as garbage collection
 /// after dead nodes
 ///
-/// The value is just the table of the live query as a Strand, which is the
+/// The value is just the table of the live query as a String, which is the
 /// missing information from the key path
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Lq {

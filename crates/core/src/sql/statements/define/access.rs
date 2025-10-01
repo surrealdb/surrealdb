@@ -2,19 +2,18 @@ use std::fmt::{self, Display};
 
 use super::DefineKind;
 use crate::sql::access::AccessDuration;
-use crate::sql::{AccessType, Base, Expr, Ident};
-use crate::val::Strand;
+use crate::sql::{AccessType, Base, Expr};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineAccessStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: Expr,
 	pub base: Base,
 	pub access_type: AccessType,
 	pub authenticate: Option<Expr>,
 	pub duration: AccessDuration,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 }
 
 impl Display for DefineAccessStatement {
@@ -44,7 +43,7 @@ impl Display for DefineAccessStatement {
 				f,
 				" FOR GRANT {},",
 				match self.duration.grant {
-					Some(dur) => format!("{}", dur),
+					Some(ref dur) => format!("{}", dur),
 					None => "NONE".to_string(),
 				}
 			)?;
@@ -54,7 +53,7 @@ impl Display for DefineAccessStatement {
 				f,
 				" FOR TOKEN {},",
 				match self.duration.token {
-					Some(dur) => format!("{}", dur),
+					Some(ref dur) => format!("{}", dur),
 					None => "NONE".to_string(),
 				}
 			)?;
@@ -63,12 +62,12 @@ impl Display for DefineAccessStatement {
 			f,
 			" FOR SESSION {}",
 			match self.duration.session {
-				Some(dur) => format!("{}", dur),
+				Some(ref dur) => format!("{}", dur),
 				None => "NONE".to_string(),
 			}
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
 	}
@@ -83,7 +82,7 @@ impl From<DefineAccessStatement> for crate::expr::statements::DefineAccessStatem
 			access_type: v.access_type.into(),
 			authenticate: v.authenticate.map(Into::into),
 			duration: v.duration.into(),
-			comment: v.comment,
+			comment: v.comment.map(Into::into),
 		}
 	}
 }
@@ -97,7 +96,7 @@ impl From<crate::expr::statements::DefineAccessStatement> for DefineAccessStatem
 			access_type: v.access_type.into(),
 			authenticate: v.authenticate.map(Into::into),
 			duration: v.duration.into(),
-			comment: v.comment,
+			comment: v.comment.map(Into::into),
 		}
 	}
 }

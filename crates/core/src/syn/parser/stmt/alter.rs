@@ -15,7 +15,7 @@ impl Parser<'_> {
 		match next.kind {
 			t!("TABLE") => self.parse_alter_table(stk).await.map(AlterStatement::Table),
 			t!("FIELD") => self.parse_alter_field(stk).await.map(AlterStatement::Field),
-			t!("SEQUENCE") => self.parse_alter_sequence().await.map(AlterStatement::Sequence),
+			t!("SEQUENCE") => self.parse_alter_sequence(stk).await.map(AlterStatement::Sequence),
 			_ => unexpected!(self, next, "a alter statement keyword"),
 		}
 	}
@@ -30,7 +30,7 @@ impl Parser<'_> {
 		} else {
 			false
 		};
-		let name = self.next_token_value()?;
+		let name = self.parse_ident()?;
 		let mut res = AlterTableStatement {
 			name,
 			if_exists,
@@ -58,7 +58,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = AlterKind::Set(self.next_token_value()?);
+					res.comment = AlterKind::Set(self.parse_string_lit()?);
 				}
 				t!("TYPE") => {
 					self.pop_peek();
@@ -115,7 +115,7 @@ impl Parser<'_> {
 		let name = self.parse_local_idiom(stk).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = self.next_token_value()?;
+		let what = self.parse_ident()?;
 		let mut res = AlterFieldStatement {
 			name,
 			what,
@@ -213,7 +213,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = AlterKind::Set(self.next_token_value()?);
+					res.comment = AlterKind::Set(self.parse_string_lit()?);
 				}
 				t!("REFERENCE") => {
 					if !self.settings.references_enabled {
@@ -233,21 +233,24 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub(crate) async fn parse_alter_sequence(&mut self) -> ParseResult<AlterSequenceStatement> {
+	pub(crate) async fn parse_alter_sequence(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<AlterSequenceStatement> {
 		let if_exists = if self.eat(t!("IF")) {
 			expected!(self, t!("EXISTS"));
 			true
 		} else {
 			false
 		};
-		let name = self.next_token_value()?;
+		let name = self.parse_ident()?;
 		let mut res = AlterSequenceStatement {
 			name,
 			if_exists,
 			..Default::default()
 		};
 
-		if let Some(to) = self.try_parse_timeout()? {
+		if let Some(to) = self.try_parse_timeout(stk).await? {
 			res.timeout = Some(to);
 		}
 

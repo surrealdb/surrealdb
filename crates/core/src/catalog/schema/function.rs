@@ -25,19 +25,20 @@ impl FunctionDefinition {
 	fn to_sql_definition(&self) -> DefineFunctionStatement {
 		DefineFunctionStatement {
 			kind: DefineKind::Default,
-			name: unsafe { crate::sql::Ident::new_unchecked(self.name.clone()) },
+			name: self.name.clone(),
 			args: self
 				.args
 				.clone()
 				.into_iter()
-				.map(|(n, k)| {
-					(unsafe { crate::sql::Ident::new_unchecked(n) }, crate::sql::Kind::from(k))
-				})
+				.map(|(n, k)| (n, crate::sql::Kind::from(k)))
 				.collect(),
 			block: self.block.clone().into(),
 			permissions: self.permissions.clone().into(),
 			returns: self.returns.clone().map(|k| k.into()),
-			comment: self.comment.clone().map(Into::into),
+			comment: self
+				.comment
+				.clone()
+				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
 		}
 	}
 }

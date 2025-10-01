@@ -10,7 +10,7 @@ use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::catalog::{self, DatabaseDefinition, Permission, TableDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Workable};
-use crate::expr::{Base, FlowResultExt as _, Ident};
+use crate::expr::{Base, FlowResultExt as _};
 use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
@@ -22,7 +22,7 @@ pub(crate) struct Document {
 	/// The record id of this document
 	pub(super) id: Option<Arc<RecordId>>,
 	/// The table that we should generate a record id from
-	pub(super) r#gen: Option<Ident>,
+	pub(super) r#gen: Option<String>,
 	/// Whether this is the second iteration of the processing
 	pub(super) retry: bool,
 	pub(super) extras: Workable,
@@ -191,7 +191,7 @@ impl Document {
 	pub fn new(
 		id: Option<Arc<RecordId>>,
 		ir: Option<Arc<IteratorRecord>>,
-		r#gen: Option<Ident>,
+		r#gen: Option<String>,
 		val: Arc<Record>,
 		extras: Workable,
 		retry: bool,
@@ -406,9 +406,9 @@ impl Document {
 	}
 
 	/// Retrieve the record id for this document
-	pub fn id(&self) -> Result<Arc<RecordId>> {
-		match self.id.clone() {
-			Some(id) => Ok(id),
+	pub(crate) fn id(&self) -> Result<Arc<RecordId>> {
+		match &self.id {
+			Some(id) => Ok(id.clone()),
 			_ => fail!("Expected a document id to be present"),
 		}
 	}
