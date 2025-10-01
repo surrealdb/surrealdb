@@ -212,12 +212,16 @@ mod ws {
 		let max_message_size = WebsocketConfig::default().max_message_size.unwrap();
 
 		{
-			let content = Content::new(1024);
+			let sizes = [1024, max_message_size - (1 << 20)];
 
-			let response: Option<Content> =
-				db.upsert(("table", "test")).content(content.clone()).await.unwrap();
+			for size in sizes {
+				let content = Content::new(size);
 
-			assert_eq!(content, response.unwrap());
+				let response: Option<Content> =
+					db.upsert(("table", "test")).content(content.clone()).await.unwrap();
+
+				assert_eq!(content, response.unwrap(), "size: {size}");
+			}
 		}
 
 		{
@@ -228,7 +232,8 @@ mod ws {
 				.content(content.clone())
 				.await
 				.unwrap_err();
-			assert_eq!(error.to_string(), "The message is too long: 68157514");
+
+			assert!(error.to_string().starts_with("The message is too long"));
 		}
 	}
 

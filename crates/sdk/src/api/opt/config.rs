@@ -113,9 +113,12 @@ impl Config {
 	}
 
 	/// Set the WebSocket config
-	pub fn websocket(mut self, websocket: WebsocketConfig) -> Self {
+	pub fn websocket(mut self, websocket: WebsocketConfig) -> crate::Result<Self> {
+		if !(websocket.max_write_buffer_size > websocket.write_buffer_size) {
+			return Err(crate::api::err::Error::MaxWriteBufferSizeTooSmall.into());
+		}
 		self.websocket = websocket;
-		self
+		Ok(self)
 	}
 
 	#[cfg(storage)]

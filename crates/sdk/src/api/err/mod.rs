@@ -12,10 +12,6 @@ use crate::core::dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError};
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
-	/// The message is too long
-	#[error("The message is too long: {0}")]
-	MessageTooLong(usize),
-
 	/// There was an error processing the query
 	#[error("{0}")]
 	Query(String),
@@ -277,6 +273,13 @@ pub enum Error {
 	/// The engine used does not support data versioning
 	#[error("The '{0}' engine does not support data versioning")]
 	VersionsNotSupported(String),
+
+	/// The message is too long
+	#[error("The message is too long: {0}")]
+	MessageTooLong(usize),
+
+	#[error("The write buffer size is too small")]
+	MaxWriteBufferSizeTooSmall,
 }
 
 impl serde::ser::Error for Error {
