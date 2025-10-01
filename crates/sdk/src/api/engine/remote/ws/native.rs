@@ -236,8 +236,9 @@ async fn router_handle_route(
 	};
 
 	if let Some(max_message_size) = max_message_size {
-		if message.len() > max_message_size {
-			if response.send(Err(Error::MessageTooLong(message.len()).into())).await.is_err() {
+		let size = message.len();
+		if size > max_message_size {
+			if response.send(Err(Error::MessageTooLong(size).into())).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			return HandleResult::Ok;

@@ -278,6 +278,7 @@ pub enum Error {
 	#[error("The message is too long: {0}")]
 	MessageTooLong(usize),
 
+	/// The write buffer size is too small
 	#[error("The write buffer size is too small")]
 	MaxWriteBufferSizeTooSmall,
 }
