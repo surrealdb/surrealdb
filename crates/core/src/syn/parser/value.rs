@@ -1,3 +1,4 @@
+use core::f64;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::Bound;
@@ -49,6 +50,10 @@ impl Parser<'_> {
 			TokenKind::NaN => {
 				self.pop_peek();
 				Value::Number(Number::Float(f64::NAN))
+			}
+			TokenKind::Infinity => {
+				self.pop_peek();
+				Value::Number(Number::Float(f64::INFINITY))
 			}
 			t!("true") => {
 				self.pop_peek();
