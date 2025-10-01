@@ -41,6 +41,20 @@ args = [
     "${@}",
 ]
 
+[tasks.ci-check-all]
+category = "CI - CHECK"
+command = "cargo"
+args = [
+    "check",
+    "--locked",
+    "--workspace",
+    "--all-targets",
+    "--tests",
+    "--features",
+    "${ALL_FEATURES}",
+    "${@}",
+]
+
 [tasks.ci-check-release]
 category = "CI - CHECK"
 command = "cargo"
@@ -257,7 +271,7 @@ args = [
     "--locked",
     "--no-default-features",
     "--features",
-    "storage-mem,scripting,http,jwks",
+    "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
     "--workspace",
     "--",
     "--skip",

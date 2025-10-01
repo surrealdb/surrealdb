@@ -211,7 +211,7 @@ fn excessive_cast_chain_depth() -> Result<()> {
 		//
 		let tmp = res.next().unwrap();
 		let err = tmp.unwrap_err();
-		assert_eq!(err, DbResultError::InternalError("STU".to_string()));
+		assert_eq!(err, DbResultError::InternalError("Reached excessive computation depth due to functions, subqueries, or futures".to_string()));
 		//
 		Ok(())
 	})
