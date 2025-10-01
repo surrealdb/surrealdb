@@ -5,7 +5,7 @@
 
 pub use std::{error, fmt, mem};
 
-use revision::Revisioned;
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use storekey::{BorrowDecode, Encode};
 
 use crate::kvs::KVValue;
@@ -63,16 +63,20 @@ impl Revisioned for VersionStamp {
 	fn revision() -> u16 {
 		0
 	}
+}
 
+impl SerializeRevisioned for VersionStamp {
 	fn serialize_revisioned<W: std::io::Write>(&self, w: &mut W) -> Result<(), revision::Error> {
-		self.0.serialize_revisioned(w)
+		SerializeRevisioned::serialize_revisioned(&self.0, w)
 	}
+}
 
+impl DeserializeRevisioned for VersionStamp {
 	fn deserialize_revisioned<R: std::io::Read>(r: &mut R) -> Result<Self, revision::Error>
 	where
 		Self: Sized,
 	{
-		Revisioned::deserialize_revisioned(r).map(VersionStamp)
+		DeserializeRevisioned::deserialize_revisioned(r).map(VersionStamp)
 	}
 }
 
