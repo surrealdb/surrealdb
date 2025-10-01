@@ -626,6 +626,104 @@ impl Expr {
 	}
 }
 
+/// A lightweight visitor for traversing an expression tree.
+///
+/// Implementors call the provided `visitor` function on `self` and any nested
+/// expressions. The traversal order is pre-order: the current node is visited
+/// before its children. This is intentionally minimal to keep traversal cheap.
+///
+/// This trait enables features that need to inspect a statement without
+/// executing it, such as slow-query logging, which walks the AST to find
+/// `$param` usages.
+pub(crate) trait VisitExpression {
+	/// Visit this expression and its nested expressions, invoking `visitor`
+	/// for each encountered node.
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr);
+}
+
+impl VisitExpression for Expr {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		visitor(self);
+		match self {
+			Expr::Literal(_) => {}
+			Expr::Param(_) => {}
+			Expr::Idiom(_) => {}
+			Expr::Table(_) => {}
+			Expr::Mock(_) => {}
+			Expr::Block(block) => {
+				block.visit(visitor);
+			}
+			Expr::Constant(_) => {}
+			Expr::Prefix {
+				expr,
+				..
+			} => {
+				expr.visit(visitor);
+			}
+			Expr::Postfix {
+				expr,
+				..
+			} => expr.visit(visitor),
+			Expr::Binary {
+				..
+			} => {}
+			Expr::FunctionCall(function) => function.visit(visitor),
+			Expr::Closure(closure) => {
+				closure.visit(visitor);
+			}
+			Expr::Break => {}
+			Expr::Continue => {}
+			Expr::Return(output) => {
+				output.visit(visitor);
+			}
+			Expr::Throw(expr) => expr.visit(visitor),
+			Expr::IfElse(_) => {}
+			Expr::Select(select) => {
+				select.visit(visitor);
+			}
+			Expr::Create(create) => {
+				create.visit(visitor);
+			}
+			Expr::Update(update) => {
+				update.visit(visitor);
+			}
+			Expr::Upsert(upsert) => {
+				upsert.visit(visitor);
+			}
+			Expr::Delete(delete) => {
+				delete.visit(visitor);
+			}
+			Expr::Relate(relate) => relate.visit(visitor),
+			Expr::Insert(insert) => {
+				insert.visit(visitor);
+			}
+			Expr::Define(define) => {
+				define.visit(visitor);
+			}
+			Expr::Remove(remove) => {
+				remove.visit(visitor);
+			}
+			Expr::Rebuild(_) => {}
+			Expr::Alter(alter) => {
+				alter.visit(visitor);
+			}
+			Expr::Info(info) => {
+				info.visit(visitor);
+			}
+			Expr::Foreach(foreach) => foreach.visit(visitor),
+			Expr::Let(set) => {
+				set.visit(visitor);
+			}
+			Expr::Sleep(_) => {}
+		}
+	}
+}
+
 impl fmt::Display for Expr {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		use std::fmt::Write;

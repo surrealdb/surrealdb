@@ -1,0 +1,60 @@
+name: Coverage
+
+run-name: "Coverage report for ${{ github.ref_name }}"
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to run coverage on'
+        required: false
+        default: 'main'
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  RUST_VERSION: "1.87"
+
+jobs:
+  coverage:
+    name: Generate coverage report
+    runs-on: [ runner-arm64-4xlarge ]
+    timeout-minutes: 120
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.ref || 'main' }}
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          save-cache: false  # Don't pollute cache with coverage artifacts
+
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+        with:
+          tools: cargo-llvm-cov,cargo-nextest,cargo-make
+
+      - name: Generate coverage report
+        run: cargo make ci-workspace-coverage
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-report-${{ github.ref_name }}-${{ github.sha }}
+          path: target/llvm-cov/html/
+          retention-days: 30
+
+      - name: Upload coverage to Codecov (if main branch)
+        if: github.ref == 'refs/heads/main'
+        uses: codecov/codecov-action@v4
+        with:
+          file: target/llvm-cov/lcov.info
+          fail_ci_if_error: false
