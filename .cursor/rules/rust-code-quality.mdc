@@ -1,0 +1,35 @@
+---
+alwaysApply: true
+---
+
+# Rust code and quality
+
+## 1. Coding standards
+- Prefer workspace-managed dependencies; don't add dependencies without getting confirmation first
+- Use `anyhow::Result` for fallible APIs and `thiserror` for domain error enums
+- Leverage `ensure!` and `bail!` macros for guard-style validation
+
+## 2. Async and concurrency
+- Keep long-running or blocking work off async tasks; push blocking work to tokios blocking threadpool or `affinitypool` when needed
+- Maintain `#[cfg_attr]` patterns for WASM compatibility (e.g., `async_trait(?Send)`)
+- Avoid spawning background tasks without cancellation paths; tie task lifetime to owners
+
+## 3. Tracing and logging
+- Instrument public async functions with the `#[instrument(...)]` macro
+- Never log sensitive user data or credentials; scrub values before tracing
+
+## 4. Error handling
+- Propagate datastore errors via project error types (e.g., `crate::err::Error`) before wrapping in `anyhow`
+- Never use `.unwrap_or_default()` or similar coding conventions when debugging - it masks errors
+
+## 5. Testing and linting
+- Run `cargo make ci-format` and address formatting, before submitting changes
+- Run `cargo make ci-clippy` and address warnings; do not suppress lints without justification
+- Add language tests or SDK tests alongside bug fixes where applicable
+- Add tests according to the project testing conventions
+
+## 6. Performance and memory
+- Guard recursion depth by using helper runtimes with increased stack size when necessary
+- Avoid unnecessary allocations; prefer `clone` minimisation patterns enforced by Clippy
+- This is a database: performance matters, and any change must consider the impact which it has
+- Think thoroughly about performance of code changes before making suggestions or altering code
