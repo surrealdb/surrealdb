@@ -82,15 +82,27 @@ impl Object {
 	}
 }
 
+impl Display for Object {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		f.write_str("{ ")?;
+		for (i, (k, v)) in self.0.iter().enumerate() {
+			write!(f, "{}: {}", k, v)?;
+			if i < self.0.len() - 1 {
+				f.write_str(", ")?;
+			}
+		}
+		f.write_str(" }")
+	}
+}
+
 impl ToSql for Object {
-	fn to_sql(&self) -> anyhow::Result<String> {
-		let mut f = String::new();
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
 		f.write_str("{ ")?;
 
 		for (i, (k, v)) in self.0.iter().enumerate() {
-			f.write_str(&k.to_sql()?)?;
+			k.fmt_sql(f)?;
 			f.write_str(": ")?;
-			f.write_str(&v.to_sql()?)?;
+			v.fmt_sql(f)?;
 			if i < self.0.len() - 1 {
 				f.write_str(", ")?;
 			}
@@ -98,7 +110,7 @@ impl ToSql for Object {
 
 		f.write_str(" }")?;
 
-		Ok(f)
+		Ok(())
 	}
 }
 

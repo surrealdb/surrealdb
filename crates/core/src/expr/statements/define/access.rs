@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use std::fmt::{self, Display, Write};
 
 use anyhow::{Result, bail};
 use rand::Rng;
@@ -439,7 +439,7 @@ impl Display for DefineAccessStatement {
 }
 
 impl ToSql for DefineAccessStatement {
-	fn to_sql(&self) -> anyhow::Result<String> {
-		self.to_string()
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self)
 	}
 }

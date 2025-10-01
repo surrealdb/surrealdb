@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
+use surrealdb_types::sql::ToSql;
 use surrealdb_types::{self, RecordIdKeyRange, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
@@ -65,7 +66,7 @@ macro_rules! into_future {
 				router
 					.$method(Command::RawQuery {
 						txn,
-						query: Cow::Owned(format!("UPSERT {}", what.into_value())),
+						query: Cow::Owned(format!("UPSERT {}", what.to_sql()?)),
 						variables: Variables::new(),
 					})
 					.await
@@ -154,8 +155,8 @@ where
 			let what = self.resource?.into_value();
 
 			let query = match data {
-				None => format!("UPSERT {what}"),
-				Some(content) => format!("UPSERT {what} CONTENT {content}"),
+				None => format!("UPSERT {}", what.to_sql()?),
+				Some(content) => format!("UPSERT {} CONTENT {}", what.to_sql()?, content.to_sql()?),
 			};
 
 			Ok(Command::RawQuery {

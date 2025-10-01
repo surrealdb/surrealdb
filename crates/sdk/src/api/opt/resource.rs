@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use std::ops::{self, Bound};
 
 use surrealdb_types::{
@@ -103,14 +104,19 @@ impl SurrealValue for Resource {
 }
 
 impl surrealdb_types::sql::ToSql for Resource {
-	fn to_sql(&self) -> anyhow::Result<String> {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
 		match self {
-			Resource::Table(x) => x.to_sql(),
-			Resource::RecordId(x) => x.to_sql(),
-			Resource::Object(x) => x.to_sql(),
-			Resource::Array(x) => x.to_sql(),
-			Resource::Range(QueryRange(x)) => x.to_sql(),
-			Resource::Unspecified => "".to_string(),
+			Resource::Table(x) => {
+				f.write_char('`')?;
+				x.fmt_sql(f)?;
+				f.write_char('`')?;
+				Ok(())
+			}
+			Resource::RecordId(x) => x.fmt_sql(f),
+			Resource::Object(x) => x.fmt_sql(f),
+			Resource::Array(x) => Array::from_values(x.clone()).fmt_sql(f),
+			Resource::Range(QueryRange(x)) => x.fmt_sql(f),
+			Resource::Unspecified => Ok(()),
 		}
 	}
 }
@@ -377,7 +383,8 @@ where
 	I: Into<RecordIdKey>,
 {
 	fn into_resource(self) -> Result<Resource> {
-		Ok(self.into())
+		let record_id = RecordId::new(self.0, self.1);
+		Ok(Resource::RecordId(record_id))
 	}
 }
 

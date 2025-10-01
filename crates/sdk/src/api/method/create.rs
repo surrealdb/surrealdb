@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
+use surrealdb_types::sql::ToSql;
 use surrealdb_types::{self, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
@@ -13,7 +14,6 @@ use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
-use surrealdb_types::sql::ToSql;
 
 /// A record create future
 #[derive(Debug)]
@@ -64,7 +64,7 @@ macro_rules! into_future {
 
 				let cmd = Command::RawQuery {
 					txn,
-					query: Cow::Owned(format!("CREATE {}", what.into_value())),
+					query: Cow::Owned(format!("CREATE {}", what.to_sql()?)),
 					variables: Variables::new(),
 				};
 				router.$method(cmd).await
@@ -111,9 +111,9 @@ where
 				"Tried to create non-object-like data as content, only structs and objects are supported",
 			)?;
 
-			let what = self.resource?.to_sql();
+			let what = self.resource?.to_sql()?;
 
-			let query = format!("CREATE {} CONTENT {}", what, content.to_sql());
+			let query = format!("CREATE {} CONTENT {}", what, content.to_sql()?);
 
 			Ok(Command::RawQuery {
 				txn: self.txn,
@@ -141,9 +141,9 @@ where
 				"Tried to create non-object-like data as content, only structs and objects are supported",
 			)?;
 
-			let what = self.resource?.into_value();
+			let what = self.resource?.to_sql()?;
 
-			let query = format!("CREATE {what} CONTENT {content}");
+			let query = format!("CREATE {} CONTENT {}", what, content.to_sql()?);
 
 			Ok(Command::RawQuery {
 				txn: self.txn,

@@ -77,7 +77,15 @@ mod implementation {
 		// Convert the file back in to raw bytes
 		let data = file.to_bytes();
 
-		ds.put_ml_model(&session, &file.header.name.to_string(), &file.header.version.to_string(), &file.header.description.to_string(), data).await.map_err(ResponseError)?;
+		ds.put_ml_model(
+			&session,
+			&file.header.name.to_string(),
+			&file.header.version.to_string(),
+			&file.header.description.to_string(),
+			data,
+		)
+		.await
+		.map_err(ResponseError)?;
 
 		Ok(Output::None)
 	}

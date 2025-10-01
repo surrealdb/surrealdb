@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Write};
 
 use revision::revisioned;
 use surrealdb_types::sql::ToSql;
@@ -16,7 +16,7 @@ impl fmt::Display for Cond {
 }
 
 impl ToSql for Cond {
-	fn to_sql(&self) -> anyhow::Result<String> {
-		format!("WHERE {}", self.0)
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "WHERE {}", self.0)
 	}
 }

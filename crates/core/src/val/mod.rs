@@ -539,8 +539,8 @@ impl fmt::Display for Value {
 }
 
 impl ToSql for Value {
-	fn to_sql(&self) -> anyhow::Result<String> {
-		self.to_string()
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self)
 	}
 }
 

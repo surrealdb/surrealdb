@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use revision::revisioned;
 use surrealdb_types::sql::ToSql;
 use uuid::Uuid;
@@ -59,8 +61,8 @@ impl InfoStructure for SubscriptionDefinition {
 }
 
 impl ToSql for &SubscriptionDefinition {
-	fn to_sql(&self) -> anyhow::Result<String> {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self.to_sql_definition())
 	}
 }
 

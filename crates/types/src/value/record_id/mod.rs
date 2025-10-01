@@ -3,7 +3,7 @@ pub mod key;
 /// Record id range types
 pub mod range;
 
-use std::fmt;
+use std::fmt::{self, Write};
 
 pub use key::*;
 pub use range::*;
@@ -54,7 +54,7 @@ impl fmt::Display for RecordId {
 }
 
 impl ToSql for RecordId {
-	fn to_sql(&self) -> anyhow::Result<String> {
-		format!("{}:{}", self.table, self.key)
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		f.write_fmt(format_args!("{}:{}", self.table, self.key))
 	}
 }

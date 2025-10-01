@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use revision::revisioned;
 use surrealdb_types::sql::ToSql;
 
@@ -62,7 +64,7 @@ impl InfoStructure for FunctionDefinition {
 }
 
 impl ToSql for &FunctionDefinition {
-	fn to_sql(&self) -> anyhow::Result<String> {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self.to_sql_definition())
 	}
 }

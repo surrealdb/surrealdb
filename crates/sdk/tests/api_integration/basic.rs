@@ -1422,17 +1422,17 @@ pub async fn delete_record_id(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
-	let record_id = ("user", "john");
-	let _: Option<ApiRecordId> = db.create(record_id).await.unwrap();
-	let _: Option<ApiRecordId> = db.select(record_id).await.unwrap();
-	let john: Option<ApiRecordId> = db.delete(record_id).await.unwrap();
+	let record_id = RecordId::new("user", "john");
+	let _: Option<ApiRecordId> = db.create(&record_id).await.unwrap();
+	let _: Option<ApiRecordId> = db.select(&record_id).await.unwrap();
+	let john: Option<ApiRecordId> = db.delete(&record_id).await.unwrap();
 	assert!(john.is_some());
 	let john: Option<ApiRecordId> = db.select(record_id).await.unwrap();
 	assert!(john.is_none());
 	// non-existing user
-	let jane: Option<ApiRecordId> = db.delete(("user", "jane")).await.unwrap();
+	let jane: Option<ApiRecordId> = db.delete(RecordId::new("user", "jane")).await.unwrap();
 	assert!(jane.is_none());
-	let value: Value = db.delete(Resource::from(("user", "jane"))).await.unwrap();
+	let value: Value = db.delete(Resource::from(RecordId::new("user", "jane"))).await.unwrap();
 	assert_eq!(value, Value::None);
 }
 

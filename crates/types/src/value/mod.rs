@@ -26,7 +26,7 @@ pub mod regex;
 pub mod uuid;
 
 use std::cmp::Ordering;
-use std::fmt::{self, Display};
+use std::fmt::{self, Display, Write};
 use std::ops::Index;
 
 use revision::revisioned;
@@ -329,24 +329,24 @@ impl Display for Value {
 }
 
 impl ToSql for Value {
-	fn to_sql(&self) -> anyhow::Result<String> {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
 		match self {
-			Value::None => "NONE".to_string(),
-			Value::Null => "NULL".to_string(),
-			Value::Bool(v) => v.to_string(),
-			Value::Number(v) => v.to_string(),
-			Value::String(v) => v.to_sql(),
-			Value::Duration(v) => v.to_string(),
-			Value::Datetime(v) => v.to_string(),
-			Value::Uuid(v) => v.to_string(),
-			Value::Array(v) => v.to_string(),
-			Value::Object(v) => v.to_string(),
-			Value::Geometry(v) => v.to_string(),
-			Value::Bytes(v) => v.to_string(),
-			Value::RecordId(v) => v.to_string(),
-			Value::File(v) => v.to_string(),
-			Value::Range(v) => v.to_string(),
-			Value::Regex(v) => v.to_string(),
+			Value::None => f.write_str("NONE"),
+			Value::Null => f.write_str("NULL"),
+			Value::Bool(v) => v.fmt_sql(f),
+			Value::Number(v) => v.fmt_sql(f),
+			Value::String(v) => v.fmt_sql(f),
+			Value::Duration(v) => v.fmt_sql(f),
+			Value::Datetime(v) => v.fmt_sql(f),
+			Value::Uuid(v) => v.fmt_sql(f),
+			Value::Array(v) => v.fmt_sql(f),
+			Value::Object(v) => v.fmt_sql(f),
+			Value::Geometry(v) => v.fmt_sql(f),
+			Value::Bytes(v) => v.fmt_sql(f),
+			Value::RecordId(v) => v.fmt_sql(f),
+			Value::File(v) => v.fmt_sql(f),
+			Value::Range(v) => v.fmt_sql(f),
+			Value::Regex(v) => v.fmt_sql(f),
 		}
 	}
 }

@@ -232,7 +232,7 @@ mod mem {
 	use surrealdb::opt::{Config, Resource};
 	use surrealdb::types::RecordIdKey;
 	use surrealdb_types::RecordId;
-use tokio::sync::{Semaphore, SemaphorePermit};
+	use tokio::sync::{Semaphore, SemaphorePermit};
 
 	use super::{ROOT_PASS, ROOT_USER};
 	use crate::api_integration::ApiRecordId;
@@ -266,7 +266,9 @@ use tokio::sync::{Semaphore, SemaphorePermit};
 	async fn signin_first_not_necessary() {
 		let db = Surreal::new::<Mem>(()).await.unwrap();
 		db.use_ns("namespace").use_db("database").await.unwrap();
-		let Some(record): Option<ApiRecordId> = db.create(RecordId::new("item", "foo")).await.unwrap() else {
+		let Some(record): Option<ApiRecordId> =
+			db.create(RecordId::new("item", "foo")).await.unwrap()
+		else {
 			panic!("record not found");
 		};
 		assert_eq!(record.id.key, RecordIdKey::from("foo"));

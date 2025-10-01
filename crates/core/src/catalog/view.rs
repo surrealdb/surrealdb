@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use revision::revisioned;
 use surrealdb_types::sql::ToSql;
 
@@ -27,12 +29,12 @@ impl ViewDefinition {
 }
 
 impl ToSql for ViewDefinition {
-	fn to_sql(&self) -> anyhow::Result<String> {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self.to_sql_definition())
 	}
 }
 impl InfoStructure for ViewDefinition {
 	fn structure(self) -> Value {
-		self.to_sql().into()
+		self.to_sql().unwrap_or_else(|_| "<error>".to_string()).into()
 	}
 }

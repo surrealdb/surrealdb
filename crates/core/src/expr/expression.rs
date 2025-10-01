@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Write};
 use std::ops::Bound;
 
 use reblessive::tree::Stk;
@@ -891,8 +891,8 @@ impl fmt::Display for Expr {
 }
 
 impl ToSql for Expr {
-	fn to_sql(&self) -> anyhow::Result<String> {
-		self.to_string()
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self)
 	}
 }
 

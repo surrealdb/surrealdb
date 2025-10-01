@@ -189,7 +189,7 @@ impl Display for DefineIndexStatement {
 			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter()))?;
 		}
 		if Index::Idx != self.index {
-			write!(f, " {}", self.index.to_sql())?;
+			write!(f, " {}", self.index.to_sql().unwrap_or_else(|_| "<error>".to_string()))?;
 		}
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {v}")?

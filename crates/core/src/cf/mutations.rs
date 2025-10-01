@@ -155,7 +155,9 @@ impl Display for TableMutation {
 			TableMutation::SetWithDiff(id, _previous, v) => write!(f, "SET {} {:?}", id, v),
 			TableMutation::Del(id) => write!(f, "DEL {}", id),
 			TableMutation::DelWithOriginal(id, _) => write!(f, "DEL {}", id),
-			TableMutation::Def(t) => write!(f, "{}", t.to_sql()),
+			TableMutation::Def(t) => {
+				write!(f, "{}", t.to_sql().unwrap_or_else(|_| "<error>".to_string()))
+			}
 		}
 	}
 }

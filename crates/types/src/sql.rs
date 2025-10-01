@@ -1,5 +1,10 @@
 //! SQL utilities.
 
+use std::fmt::Write;
+use std::ops::Bound;
+
+use crate::{Array, RecordIdKeyRange, Uuid};
+
 /// Trait for types that can be converted to SQL representation.
 ///
 /// ⚠️ **EXPERIMENTAL**: This trait is not stable and may change
@@ -22,23 +27,145 @@
 /// ```
 pub trait ToSql {
 	/// Convert the type to a SQL string.
-	fn to_sql(&self) -> anyhow::Result<String>;
+	fn to_sql(&self) -> anyhow::Result<String> {
+		let mut f = String::new();
+		self.fmt_sql(&mut f)?;
+		Ok(f)
+	}
+
+	/// Format the type to a SQL string.
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result;
 }
 
 impl ToSql for String {
-	fn to_sql(&self) -> anyhow::Result<String> {
-		Ok(format!("'{self}'"))
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		f.write_fmt(format_args!("'{self}'"))
+	}
+}
+
+impl ToSql for i64 {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		f.write_fmt(format_args!("{}", self))
 	}
 }
 
 impl ToSql for &str {
-	fn to_sql(&self) -> anyhow::Result<String> {
-		Ok(format!("'{self}'"))
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		f.write_fmt(format_args!("'{self}'"))
 	}
 }
 
 impl ToSql for &&str {
-	fn to_sql(&self) -> anyhow::Result<String> {
-		Ok(format!("'{self}'"))
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		f.write_fmt(format_args!("'{self}'"))
+	}
+}
+
+impl ToSql for Uuid {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		f.write_fmt(format_args!("u'{}'", self))
+	}
+}
+
+impl ToSql for Array {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		f.write_str("[")?;
+		for (i, v) in self.iter().enumerate() {
+			if i > 0 {
+				f.write_str(", ")?;
+			}
+			v.fmt_sql(f)?;
+		}
+		f.write_str("]")?;
+		Ok(())
+	}
+}
+
+impl ToSql for RecordIdKeyRange {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		match &self.start {
+			Bound::Unbounded => {}
+			Bound::Included(v) => {
+				v.fmt_sql(f)?;
+			}
+			Bound::Excluded(v) => {
+				f.write_str(">")?;
+				v.fmt_sql(f)?
+			}
+		};
+
+		f.write_str("..")?;
+
+		match &self.end {
+			Bound::Unbounded => {}
+			Bound::Included(v) => {
+				f.write_str("=")?;
+				v.fmt_sql(f)?;
+			}
+			Bound::Excluded(v) => {
+				f.write_str(">")?;
+				v.fmt_sql(f)?;
+			}
+		};
+
+		Ok(())
+	}
+}
+
+impl ToSql for bool {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		f.write_str(if *self {
+			"true"
+		} else {
+			"false"
+		})
+	}
+}
+
+impl ToSql for crate::Number {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self)
+	}
+}
+
+impl ToSql for crate::Duration {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self)
+	}
+}
+
+impl ToSql for crate::Datetime {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "d'{}'", self)
+	}
+}
+
+impl ToSql for crate::Geometry {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self)
+	}
+}
+
+impl ToSql for crate::Bytes {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self)
+	}
+}
+
+impl ToSql for crate::File {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self)
+	}
+}
+
+impl ToSql for crate::Range {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self)
+	}
+}
+
+impl ToSql for crate::Regex {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self)
 	}
 }

@@ -1,11 +1,11 @@
-use std::fmt::{self, Debug};
+use std::fmt::{Debug, Display};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
 // Needed because we use the SurrealValue derive macro inside the crate which exports it :)
 use crate as surrealdb_types;
+use crate::sql::ToSql;
 use crate::{Array, Number, Object, RecordIdKeyRange, SurrealValue, Uuid, Value};
 
 /// The characters which are supported in server record IDs
@@ -140,15 +140,34 @@ impl PartialEq<Value> for RecordIdKey {
 	}
 }
 
-impl ToSql for RecordIdKey {
-	fn to_sql(&self) -> anyhow::Result<String> {
+impl Display for RecordIdKey {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
-			RecordIdKey::Number(n) => n.to_sql(),
-			RecordIdKey::String(v) => v.to_sql(),
-			RecordIdKey::Uuid(uuid) => uuid.to_sql(),
-			RecordIdKey::Object(object) => object.to_sql(),
-			RecordIdKey::Array(array) => array.to_sql(),
-			RecordIdKey::Range(rid) => rid.fmt(f),
+			RecordIdKey::Number(n) => write!(f, "{}", n),
+			RecordIdKey::String(v) => write!(f, "{}", v),
+			RecordIdKey::Uuid(uuid) => write!(f, "{}", uuid),
+			RecordIdKey::Object(object) => {
+				write!(f, "{}", object.to_sql().unwrap_or_else(|_| "<error>".to_string()))
+			}
+			RecordIdKey::Array(array) => {
+				write!(f, "{}", array.to_sql().unwrap_or_else(|_| "<error>".to_string()))
+			}
+			RecordIdKey::Range(rid) => {
+				write!(f, "{}", rid.to_sql().unwrap_or_else(|_| "<error>".to_string()))
+			}
+		}
+	}
+}
+
+impl ToSql for RecordIdKey {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		match self {
+			RecordIdKey::Number(n) => n.fmt_sql(f),
+			RecordIdKey::String(v) => v.fmt_sql(f),
+			RecordIdKey::Uuid(uuid) => uuid.fmt_sql(f),
+			RecordIdKey::Object(object) => object.fmt_sql(f),
+			RecordIdKey::Array(array) => array.fmt_sql(f),
+			RecordIdKey::Range(rid) => rid.fmt_sql(f),
 		}
 	}
 }

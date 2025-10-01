@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
+use surrealdb_types::sql::ToSql;
 use surrealdb_types::{SurrealValue, Value, Variables};
 use uuid::Uuid;
 
@@ -67,10 +68,14 @@ macro_rules! into_future {
 
 				let what = resource?.into_value();
 				let query = match (upsert, content) {
-					(true, Some(data)) => format!("UPSERT {what} MERGE {data}"),
-					(true, None) => format!("UPSERT {what}"),
-					(false, Some(data)) => format!("UPDATE {what} MERGE {data}"),
-					(false, None) => format!("UPDATE {what}"),
+					(true, Some(data)) => {
+						format!("UPSERT {} MERGE {}", what.to_sql()?, data.to_sql()?)
+					}
+					(true, None) => format!("UPSERT {}", what.to_sql()?),
+					(false, Some(data)) => {
+						format!("UPDATE {} MERGE {}", what.to_sql()?, data.to_sql()?)
+					}
+					(false, None) => format!("UPDATE {}", what.to_sql()?),
 				};
 
 				let cmd = Command::RawQuery {

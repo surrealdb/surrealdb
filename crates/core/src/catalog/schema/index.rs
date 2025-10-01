@@ -1,4 +1,4 @@
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display, Formatter, Write};
 use std::hash::{Hash, Hasher};
 
 use anyhow::Result;
@@ -88,8 +88,8 @@ impl InfoStructure for IndexDefinition {
 }
 
 impl ToSql for IndexDefinition {
-	fn to_sql(&self) -> anyhow::Result<String> {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self.to_sql_definition())
 	}
 }
 
@@ -126,13 +126,13 @@ impl Index {
 
 impl InfoStructure for Index {
 	fn structure(self) -> Value {
-		self.to_sql().into()
+		self.to_sql().unwrap_or_else(|_| "<error>".to_string()).into()
 	}
 }
 
 impl ToSql for Index {
-	fn to_sql(&self) -> anyhow::Result<String> {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self.to_sql_definition())
 	}
 }
 

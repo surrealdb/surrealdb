@@ -1,3 +1,5 @@
+use std::fmt::Write;
+
 use revision::{Revisioned, revisioned};
 use surrealdb_types::sql::ToSql;
 use uuid::Uuid;
@@ -117,8 +119,8 @@ impl TableDefinition {
 }
 
 impl ToSql for TableDefinition {
-	fn to_sql(&self) -> anyhow::Result<String> {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self.to_sql_definition())
 	}
 }
 
@@ -148,24 +150,23 @@ pub enum TableType {
 }
 
 impl ToSql for TableType {
-	fn to_sql(&self) -> anyhow::Result<String> {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
 		match self {
-			TableType::Normal => "NORMAL".to_string(),
+			TableType::Normal => f.write_str("NORMAL"),
 			TableType::Relation(rel) => {
-				let mut out = "RELATION".to_string();
+				f.write_str("RELATION")?;
 				if let Some(kind) = &rel.from {
-					out.push_str(&format!(" IN {}", kind));
+					write!(f, " IN {}", kind)?;
 				}
 				if let Some(kind) = &rel.to {
-					out.push_str(&format!(" OUT {}", kind));
+					write!(f, " OUT {}", kind)?;
 				}
 				if rel.enforced {
-					out.push_str(" ENFORCED");
+					f.write_str(" ENFORCED")?;
 				}
-
-				out
+				Ok(())
 			}
-			TableType::Any => "ANY".to_string(),
+			TableType::Any => f.write_str("ANY"),
 		}
 	}
 }
