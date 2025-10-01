@@ -906,6 +906,10 @@ impl Value {
 
 	/// Try to convert this value to a `Geometry` of a certain type
 	fn cast_to_geometry(self, val: &[GeometryKind]) -> Result<Geometry, CastError> {
+		// An array of two numbers can be cast into a point
+		if let Some(p) = Geometry::array_to_point(&self) {
+			return Ok(Geometry::Point(p));
+		}
 		match self {
 			// Geometries are allowed if correct type
 			Value::Geometry(v) if self.is_geometry_type(val) => Ok(v),
