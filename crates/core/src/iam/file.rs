@@ -12,7 +12,7 @@ pub(crate) fn is_path_allowed(path: &Path) -> Result<PathBuf> {
 }
 
 /// Checks if the requested file path is within any of the allowed directories.
-fn check_is_path_allowed(path: &Path, allowed_paths: &[PathBuf]) -> Result<PathBuf, Error> {
+fn check_is_path_allowed(path: &Path, allowed_paths: &[PathBuf]) -> Result<PathBuf> {
 	// Convert the requested path to its canonical form.
 	let canonical_path = fs::canonicalize(path)?;
 
@@ -51,7 +51,7 @@ fn check_is_path_allowed(path: &Path, allowed_paths: &[PathBuf]) -> Result<PathB
 		Ok(canonical_path)
 	} else {
 		// Use the new, direct error type
-		Err(Error::FileAccessDenied(path.to_string_lossy().to_string()))
+		Err(Error::FileAccessDenied(path.to_string_lossy().to_string()).into())
 	}
 }
 

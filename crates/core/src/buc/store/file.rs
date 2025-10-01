@@ -63,6 +63,8 @@ impl FileStore {
 			.unwrap_or(true);
 
 		// Get the path from the URL
+		// The mutability is needed to remove the leading slash on Windows
+		#[allow(unused_mut)]
 		let mut path_from_url = if lowercase_paths {
 			url.path().to_lowercase()
 		} else {
@@ -135,6 +137,8 @@ impl FileStore {
 
 	/// Convert a Path to an OsPath, checking against the allowlist
 	async fn to_os_path(&self, path: &ObjectKey) -> Result<PathBuf, String> {
+		// The mutability is needed to remove the leading slash on Windows
+		#[allow(unused_mut)]
 		let mut root_str = self.options.root.as_str();
 
 		// Handle Windows-specific path formatting
