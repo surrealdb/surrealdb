@@ -1431,5 +1431,5 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.serde_core]
-allow_apis = ["fs"]
+allow_apis = ["fs", "process"]
 
