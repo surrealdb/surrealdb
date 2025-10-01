@@ -258,7 +258,6 @@ jobs:
     name: Cross-compile binaries
     needs: format
     uses: ./.github/workflows/build.yml
-    if: ${{ !github.event.pull_request.draft }}
     with:
       name: ci
       extra-features: storage-mem,allocator,allocation-tracking,scripting,http,http-compression,jwks,ml
@@ -988,7 +987,6 @@ jobs:
   required-checks:
     name: Required checks
     runs-on: ubuntu-latest
-    if: ${{ !github.event.pull_request.draft }}
     needs:
       # Server build
       - build
