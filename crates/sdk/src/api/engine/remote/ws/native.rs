@@ -94,6 +94,7 @@ impl conn::Sealed for Client {
 			let maybe_connector = None;
 
 			let ws_config = WebSocketConfig::default()
+				.read_buffer_size(address.config.websocket.read_buffer_size)
 				.max_message_size(address.config.websocket.max_message_size)
 				.max_frame_size(address.config.websocket.max_frame_size)
 				.max_write_buffer_size(address.config.websocket.max_write_buffer_size)

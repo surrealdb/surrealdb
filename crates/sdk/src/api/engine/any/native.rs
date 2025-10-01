@@ -166,6 +166,7 @@ impl conn::Sealed for Any {
 					#[cfg(feature = "protocol-ws")]
 					{
 						let WebsocketConfig {
+							read_buffer_size,
 							max_message_size,
 							max_frame_size,
 							max_write_buffer_size,
@@ -184,7 +185,8 @@ impl conn::Sealed for Any {
 							.max_message_size(max_message_size)
 							.max_frame_size(max_frame_size)
 							.max_write_buffer_size(max_write_buffer_size)
-							.write_buffer_size(write_buffer_size);
+							.write_buffer_size(write_buffer_size)
+							.read_buffer_size(read_buffer_size);
 						let socket = engine::remote::ws::native::connect(
 							&endpoint,
 							Some(config),

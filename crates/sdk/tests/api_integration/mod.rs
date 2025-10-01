@@ -192,8 +192,6 @@ mod ws {
 		use surrealdb::opt::WebsocketConfig;
 		use ulid::Ulid;
 
-		use super::NS;
-
 		#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 		struct Content {
 			content: String,
@@ -208,17 +206,30 @@ mod ws {
 		}
 
 		let (permit, db) = new_db().await;
-		db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+		db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 		drop(permit);
 
 		let max_message_size = WebsocketConfig::default().max_message_size.unwrap();
 
-		let content = Content::new(max_message_size - (1 << 20));
+		{
+			let content = Content::new(1024);
 
-		let response: Option<Content> =
-			db.upsert(("table", "test")).content(content.clone()).await.unwrap();
+			let response: Option<Content> =
+				db.upsert(("table", "test")).content(content.clone()).await.unwrap();
 
-		assert_eq!(content, response.unwrap());
+			assert_eq!(content, response.unwrap());
+		}
+
+		{
+			let content = Content::new(max_message_size + (1 << 20));
+
+			let error = db
+				.upsert::<Option<Content>>(("table", "test"))
+				.content(content.clone())
+				.await
+				.unwrap_err();
+			assert_eq!(error.to_string(), "The message is too long: 68157514");
+		}
 	}
 
 	include_tests!(new_db => basic, serialisation, live);

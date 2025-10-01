@@ -1,3 +1,4 @@
+use std::env;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -76,6 +77,28 @@ pub static WEBSOCKET_MAX_FRAME_SIZE: LazyLock<usize> =
 /// What is the maximum WebSocket message size (default: 128 MiB)
 pub static WEBSOCKET_MAX_MESSAGE_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE", usize, 128 << 20);
+
+/// What is the read buffer size (default: 128 KiB)
+pub static WEBSOCKET_READ_BUFFER_SIZE: LazyLock<usize> =
+	lazy_env_parse!(bytes, "SURREAL_WEBSOCKET_READ_BUFFER_SIZE", usize, 128 * 1024);
+
+/// What is the write buffer size (default: 128 KiB)
+pub static WEBSOCKET_WRITE_BUFFER_SIZE: LazyLock<usize> =
+	lazy_env_parse!(bytes, "SURREAL_WEBSOCKET_WRITE_BUFFER_SIZE", usize, 128 * 1024);
+
+/// What is the maximum WebSocket write buffer size (default: unlimited)
+pub static WEBSOCKET_MAX_WRITE_BUFFER_SIZE: LazyLock<usize> = LazyLock::new(|| {
+	let buffer_size = || {
+		let var = env::var("SURREAL_WEBSOCKET_MAX_WRITE_BUFFER_SIZE").ok()?;
+		let size = var.parse().ok()?;
+		if size > *WEBSOCKET_WRITE_BUFFER_SIZE {
+			Some(size)
+		} else {
+			None
+		}
+	};
+	buffer_size().unwrap_or(usize::MAX)
+});
 
 /// How many messages can be queued for sending down the WebSocket (default:
 /// 100)
