@@ -1,0 +1,47 @@
+---
+alwaysApply: true
+---
+
+# GitHub issues and bugs
+
+**NEVER assume bug reports are correct without verification. Always follow this process:**
+
+## 1. Verify expected behavior first
+- Read the issue description completely and think about the submitted issue
+- Check existing language tests in `crates/language-tests/tests/` that relate to the reported functionality
+- If related to or referencing SurrealQL, look for relevant test cases in `.surql` files
+- If related to the Rust SDK, the API, or the network interface, check tests in `crates/sdk/tests/` and `tests/` for similar usage patterns
+- Search for similar functionality patterns in the codebase to understand intended behavior
+- Consult SurrealQL documentation at https://surrealdb.com/docs or existing examples before assuming something is broken
+
+## 2. Reproduce and analyze
+- Create minimal test cases to reproduce the reported issue
+- Test the behavior described in the bug report using the language-tests framework
+- Compare actual results with SurrealQL language specifications
+- Look for edge cases or misunderstandings in the user's expectations
+- Ensure the user's code is not badly written, and could be causing the bug
+
+## 3. Investigate before implementing
+- Search for existing tests that validate the reported "broken" behavior
+- Check if the behavior is actually documented/intended functionality
+- Look for recent changes that might have altered expected behavior
+- Consider whether this is a core database issue, SDK problem, or user error
+- Ensure code is well written, and doesn't hide or ignore any returned errors
+
+## 4. Create reproduction test (for SurrealQL/core issues)
+- If the issue involves SurrealQL queries or core database functionality, create a reproduction test file, regardless of whether it is a bug or not
+- Create file: `crates/language-tests/tests/reproductions/ISSUENUMBER_short_summary.surql`
+- Follow the format specified in `crates/language-tests/README.md`:
+  - Use test comments with TOML configuration (`/**` or `//!`)
+  - You can use the `--results accept` arguments to automatically generate the database output
+  - Include `[test]` section with `reason` and `issue` number
+  - Include `[env]` section with appropriate namespace/database settings if relevant
+  - Add `[[test.results]]` sections for expected outcomes (if not automatically generated)
+  - Write the actual SurrealQL queries to reproduce the issue
+
+## 5. Response protocol
+- Start by verifying if this is actually unexpected behavior
+- Investigate existing tests and documentation before proposing solutions
+- Only proceed with fixes after confirming the behavior is incorrect
+
+**Remember: Issues may stem from various sources including usage patterns, SDK integration, deserialization, or actual bugs. Always verify the root cause before implementing fixes.**
