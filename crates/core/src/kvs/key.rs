@@ -6,7 +6,11 @@ use anyhow::{Context, Result};
 use roaring::{RoaringBitmap, RoaringTreemap};
 
 /// KVKey is a trait that defines a key for the key-value store.
-pub(crate) trait KVKey: Debug + Sized {
+///
+/// This was made `pub` so external crates (e.g. when embedding the server or
+/// implementing custom KV layers) can define their own key types that integrate
+/// with SurrealDB's storage APIs.
+pub trait KVKey: Debug + Sized {
 	/// The associated value type for this key.
 	type ValueType: KVValue;
 

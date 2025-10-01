@@ -5,6 +5,7 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::Args;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
+use surrealdb_core::kvs::TransactionBuilderFactory;
 
 use crate::cli::CF;
 use crate::core::dbs::Session;
@@ -560,9 +561,9 @@ impl From<DbsCapabilities> for Capabilities {
 	}
 }
 
-/// Initialise the database server
 #[instrument(level = "trace", target = "surreal::dbs", skip_all)]
-pub async fn init(
+/// Initialise the database server
+pub async fn init<F: TransactionBuilderFactory>(
 	StartCommandDbsOptions {
 		strict_mode,
 		query_timeout,
@@ -614,7 +615,7 @@ pub async fn init(
 	// Log the specified server capabilities
 	debug!("Server capabilities: {capabilities}");
 	// Parse and setup the desired kv datastore
-	let dbs = Datastore::new(&opt.path)
+	let dbs = Datastore::new_with_factory::<F>(&opt.path)
 		.await?
 		.with_notifications()
 		.with_strict_mode(strict_mode)

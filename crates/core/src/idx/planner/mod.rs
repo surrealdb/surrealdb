@@ -49,7 +49,7 @@ pub(crate) enum RecordStrategy {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum ScanDirection {
+pub enum ScanDirection {
 	Forward,
 	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 	Backward,
