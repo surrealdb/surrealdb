@@ -78,8 +78,6 @@ value = """
 [[test.results]]
 value = "'\t'"
 
-[[test.results]]
-value = "'/'"
 
 [[test.results]]
 value = """
@@ -109,8 +107,6 @@ value = """
 [[test.results]]
 value = "'\t'"
 
-[[test.results]]
-value = "'/'"
 
 */
 
@@ -150,7 +146,6 @@ newline';
 "\f";
 "\n";
 "\t";
-"\/";
 
 '\n';
 '\r';
@@ -160,4 +155,3 @@ newline';
 '\f';
 '\n';
 '\t';
-'\/';

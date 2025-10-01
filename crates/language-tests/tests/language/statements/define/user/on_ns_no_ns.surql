@@ -2,6 +2,7 @@
 /**
 [env]
 
+database = false
 namespace = false
 
 [test]

@@ -1,16 +1,9 @@
-use crate::sql::Ident;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct RemoveFunctionStatement {
-	pub name: Ident,
-	#[revision(start = 2)]
+	pub name: String,
 	pub if_exists: bool,
 }
 
@@ -21,7 +14,7 @@ impl Display for RemoveFunctionStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " fn::{}", self.name.0)?;
+		write!(f, " fn::{}", self.name)?;
 		Ok(())
 	}
 }
@@ -29,7 +22,7 @@ impl Display for RemoveFunctionStatement {
 impl From<RemoveFunctionStatement> for crate::expr::statements::RemoveFunctionStatement {
 	fn from(v: RemoveFunctionStatement) -> Self {
 		crate::expr::statements::RemoveFunctionStatement {
-			name: v.name.into(),
+			name: v.name,
 			if_exists: v.if_exists,
 		}
 	}
@@ -37,7 +30,7 @@ impl From<RemoveFunctionStatement> for crate::expr::statements::RemoveFunctionSt
 impl From<crate::expr::statements::RemoveFunctionStatement> for RemoveFunctionStatement {
 	fn from(v: crate::expr::statements::RemoveFunctionStatement) -> Self {
 		RemoveFunctionStatement {
-			name: v.name.into(),
+			name: v.name,
 			if_exists: v.if_exists,
 		}
 	}

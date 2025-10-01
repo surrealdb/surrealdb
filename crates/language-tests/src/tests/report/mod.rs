@@ -1,17 +1,15 @@
 use std::any::Any;
-use std::collections::BTreeMap;
+
+use surrealdb_core::dbs::{Session, Variables};
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::sql::{Ast, Expr, TopLevelExpr};
+use surrealdb_core::syn::error::RenderedError;
+use surrealdb_core::val::Value as SurValue;
 
 use super::cmp::{RoughlyEq, RoughlyEqConfig};
-use crate::tests::schema::{self, TestConfig};
-use crate::tests::{
-	TestSet,
-	schema::{BoolOr, TestDetailsResults},
-	set::TestId,
-};
-use surrealdb_core::dbs::Session;
-use surrealdb_core::expr::Value as SurValue;
-use surrealdb_core::kvs::Datastore;
-use surrealdb_core::syn::error::RenderedError;
+use crate::tests::TestSet;
+use crate::tests::schema::{self, BoolOr, TestConfig, TestDetailsResults};
+use crate::tests::set::TestId;
 
 mod display;
 mod update;
@@ -111,7 +109,7 @@ pub enum MatcherMismatch {
 	},
 	/// Running the matcher returned false
 	Failed {
-		matcher: SurValue,
+		matcher: Expr,
 		value: Result<SurValue, String>,
 	},
 	/// The test returned a value when an error was expected
@@ -171,7 +169,7 @@ pub enum MatchValueType {
 #[derive(Clone)]
 pub struct MatcherExpectation {
 	matcher_value_type: MatchValueType,
-	value: SurValue,
+	value: Expr,
 }
 
 #[derive(Clone)]
@@ -624,18 +622,30 @@ impl TestReport {
 		};
 
 		let run_vars = match value {
-			Ok(ref x) => BTreeMap::from([("result".to_string(), x.clone())]),
-			Err(ref e) => {
-				BTreeMap::from([("error".to_string(), SurValue::Strand(e.clone().into()).clone())])
-			}
+			Ok(ref x) => Variables::from_iter([("result".to_string(), x.clone())]),
+			Err(ref e) => Variables::from_iter([(
+				"error".to_string(),
+				SurValue::String(e.clone().into()).clone(),
+			)]),
 		};
 
 		let session = Session::viewer().with_ns("match").with_db("match");
 
-		let res =
-			matcher_datastore.compute(expectation.value.clone(), &session, Some(run_vars)).await;
+		let ast = Ast {
+			expressions: vec![TopLevelExpr::Expr(expectation.value.clone())],
+		};
+		let res = matcher_datastore.process(ast, &session, Some(run_vars)).await;
 
 		let x = match res {
+			Err(e) => {
+				return Some(MatcherMismatch::Error {
+					error: e.to_string(),
+					got: value,
+				});
+			}
+			Ok(x) => x,
+		};
+		let x = match x.into_iter().next().unwrap().result {
 			Err(e) => {
 				return Some(MatcherMismatch::Error {
 					error: e.to_string(),

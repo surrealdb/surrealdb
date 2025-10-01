@@ -7,16 +7,16 @@ pub fn is_identifier_continue(x: u8) -> bool {
 /// Character constants
 pub mod chars {
 	// Character tabulation
-	pub const TAB: char = '\u{0009}';
-	/// Form feed
-	pub const FF: char = '\u{000C}';
+	//pub const TAB: char = '\u{0009}';
+	// Form feed
+	//pub const FF: char = '\u{000C}';
 
 	/// Line feed
 	pub const LF: char = '\u{000A}';
 	/// Carriage return
 	pub const CR: char = '\u{000D}';
-	/// Backspace
-	pub const BS: char = '\u{0008}';
+	// Backspace
+	//pub const BS: char = '\u{0008}';
 	/// Line separator
 	pub const LS: char = '\u{2028}';
 	/// Paragraph separator
@@ -40,6 +40,8 @@ pub mod byte {
 	pub const LF: u8 = 0xA;
 	/// Carriage return
 	pub const CR: u8 = 0xD;
+	/// Backspace
+	pub const BS: u8 = b'\x08';
 
 	/// Space
 	pub const SP: u8 = 0x20;

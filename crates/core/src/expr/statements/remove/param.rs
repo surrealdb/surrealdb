@@ -1,21 +1,18 @@
+use std::fmt::{self, Display, Formatter};
+
+use anyhow::Result;
+
+use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Value};
+use crate::expr::{Base, Value};
+use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
-
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct RemoveParamStatement {
-	pub name: Ident,
-	#[revision(start = 2)]
+	pub name: String,
 	pub if_exists: bool,
 }
 
@@ -27,7 +24,7 @@ impl RemoveParamStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the definition
-		let (ns, db) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let pa = match txn.get_db_param(ns, db, &self.name).await {
 			Ok(x) => x,
 			Err(e) => {
@@ -40,9 +37,9 @@ impl RemoveParamStatement {
 		};
 		// Delete the definition
 		let key = crate::key::database::pa::new(ns, db, &pa.name);
-		txn.del(key).await?;
+		txn.del(&key).await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -54,7 +51,7 @@ impl Display for RemoveParamStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " ${}", self.name)?;
+		write!(f, " ${}", EscapeKwFreeIdent(&self.name))?;
 		Ok(())
 	}
 }

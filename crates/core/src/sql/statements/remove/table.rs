@@ -1,19 +1,23 @@
-use crate::sql::Ident;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use crate::sql::{Expr, Literal};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct RemoveTableStatement {
-	pub name: Ident,
-	#[revision(start = 2)]
+	pub name: Expr,
 	pub if_exists: bool,
-	#[revision(start = 3)]
 	pub expunge: bool,
+}
+
+impl Default for RemoveTableStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			if_exists: false,
+			expunge: false,
+		}
+	}
 }
 
 impl Display for RemoveTableStatement {

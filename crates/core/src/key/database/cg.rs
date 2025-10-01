@@ -1,37 +1,40 @@
 //! Stores a DEFINE CONFIG definition
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::{KeyEncode, impl_key};
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Cg<'a> {
+use anyhow::Result;
+use storekey::{BorrowDecode, Encode};
+
+use crate::catalog::{ConfigDefinition, DatabaseId, NamespaceId};
+use crate::key::category::{Categorise, Category};
+use crate::kvs::{KVKey, impl_kv_key_storekey};
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+pub(crate) struct Cg<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub ty: &'a str,
+	pub ty: Cow<'a, str>,
 }
-impl_key!(Cg<'a>);
 
-pub fn new<'a>(ns: &'a str, db: &'a str, ty: &'a str) -> Cg<'a> {
+impl_kv_key_storekey!(Cg<'_> => ConfigDefinition);
+
+pub fn new(ns: NamespaceId, db: DatabaseId, ty: &str) -> Cg<'_> {
 	Cg::new(ns, db, ty)
 }
 
-pub fn prefix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode()?;
+pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
+	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(&[b'!', b'c', b'g', 0x00]);
 	Ok(k)
 }
 
-pub fn suffix(ns: &str, db: &str) -> Result<Vec<u8>> {
-	let mut k = super::all::new(ns, db).encode()?;
+pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
+	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(&[b'!', b'c', b'g', 0xff]);
 	Ok(k)
 }
@@ -43,7 +46,7 @@ impl Categorise for Cg<'_> {
 }
 
 impl<'a> Cg<'a> {
-	pub fn new(ns: &'a str, db: &'a str, ty: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, ty: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -53,38 +56,36 @@ impl<'a> Cg<'a> {
 			_c: b'!',
 			_d: b'c',
 			_e: b'g',
-			ty,
+			ty: Cow::Borrowed(ty),
 		}
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::KeyDecode;
+	use super::*;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
 		let val = Cg::new(
-			"testns",
-			"testdb",
+			NamespaceId(1),
+			DatabaseId(2),
 			"testty",
 		);
-		let enc = Cg::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\x00*testdb\x00!cgtestty\x00");
-		let dec = Cg::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = Cg::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!cgtestty\0");
 	}
 
 	#[test]
 	fn test_prefix() {
-		let val = super::prefix("testns", "testdb").unwrap();
-		assert_eq!(val, b"/*testns\0*testdb\0!cg\0");
+		let val = super::prefix(NamespaceId(1), DatabaseId(2)).unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!cg\0");
 	}
 
 	#[test]
 	fn test_suffix() {
-		let val = super::suffix("testns", "testdb").unwrap();
-		assert_eq!(val, b"/*testns\0*testdb\0!cg\xff");
+		let val = super::suffix(NamespaceId(1), DatabaseId(2)).unwrap();
+		assert_eq!(val, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!cg\xff");
 	}
 }

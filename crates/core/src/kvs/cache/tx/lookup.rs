@@ -1,7 +1,9 @@
-use super::key::Key;
-use crate::expr::id::Id;
 use quick_cache::Equivalent;
 use uuid::Uuid;
+
+use super::key::Key;
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::val::RecordIdKey;
 
 #[derive(Hash, Eq, PartialEq)]
 pub(crate) enum Lookup<'a> {
@@ -16,47 +18,47 @@ pub(crate) enum Lookup<'a> {
 	/// A cache key for namespaces
 	Nss,
 	/// A cache key for namespace users
-	Nus(&'a str),
+	Nus(NamespaceId),
 	/// A cache key for namespace accesses
-	Nas(&'a str),
+	Nas(NamespaceId),
 	/// A cache key for namespace access grants
-	Ngs(&'a str, &'a str),
+	Ngs(NamespaceId, &'a str),
 	/// A cache key for databases
-	Dbs(&'a str),
+	Dbs(NamespaceId),
 	/// A cache key for database users
-	Dus(&'a str, &'a str),
+	Dus(NamespaceId, DatabaseId),
 	/// A cache key for database accesses
-	Das(&'a str, &'a str),
+	Das(NamespaceId, DatabaseId),
 	/// A cache key for database access grants
-	Dgs(&'a str, &'a str, &'a str),
+	Dgs(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for apis (on a database)
-	Aps(&'a str, &'a str),
+	Aps(NamespaceId, DatabaseId),
 	/// A cache key for analyzers (on a database)
-	Azs(&'a str, &'a str),
+	Azs(NamespaceId, DatabaseId),
 	/// A cache key for buckets (on a database)
-	Bus(&'a str, &'a str),
+	Bus(NamespaceId, DatabaseId),
 	/// A cache key for functions (on a database)
-	Fcs(&'a str, &'a str),
+	Fcs(NamespaceId, DatabaseId),
 	/// A cache key for models (on a database)
-	Mls(&'a str, &'a str),
+	Mls(NamespaceId, DatabaseId),
 	/// A cache key for configs (on a database)
-	Cgs(&'a str, &'a str),
+	Cgs(NamespaceId, DatabaseId),
 	/// A cache key for parameters (on a database)
-	Pas(&'a str, &'a str),
+	Pas(NamespaceId, DatabaseId),
 	/// A cache key for sequences (on a database)
-	Sqs(&'a str, &'a str),
+	Sqs(NamespaceId, DatabaseId),
 	/// A cache key for tables
-	Tbs(&'a str, &'a str),
+	Tbs(NamespaceId, DatabaseId),
 	/// A cache key for events (on a table)
-	Evs(&'a str, &'a str, &'a str),
+	Evs(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for fields (on a table)
-	Fds(&'a str, &'a str, &'a str),
+	Fds(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for views (on a table)
-	Fts(&'a str, &'a str, &'a str),
+	Fts(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for indexes (on a table)
-	Ixs(&'a str, &'a str, &'a str),
+	Ixs(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for live queries (on a table)
-	Lvs(&'a str, &'a str, &'a str),
+	Lvs(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a node
 	Nd(Uuid),
 	/// A cache key for a root user
@@ -66,47 +68,49 @@ pub(crate) enum Lookup<'a> {
 	/// A cache key for a root access grant
 	Rg(&'a str, &'a str),
 	/// A cache key for a namespace
-	Ns(&'a str),
+	NsByName(&'a str),
 	/// A cache key for a namespace user
-	Nu(&'a str, &'a str),
+	Nu(NamespaceId, &'a str),
 	/// A cache key for a namespace access
-	Na(&'a str, &'a str),
+	Na(NamespaceId, &'a str),
 	/// A cache key for a namespace access grant
-	Ng(&'a str, &'a str, &'a str),
-	/// A cache key for a database
-	Db(&'a str, &'a str),
+	Ng(NamespaceId, &'a str, &'a str),
+	/// A cache key for a database by name.
+	DbByName(&'a str, &'a str),
 	/// A cache key for a database user
-	Du(&'a str, &'a str, &'a str),
+	Du(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a database access
-	Da(&'a str, &'a str, &'a str),
+	Da(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a database access grant
-	Dg(&'a str, &'a str, &'a str, &'a str),
+	Dg(NamespaceId, DatabaseId, &'a str, &'a str),
 	/// A cache key for an api (on a database)
-	Ap(&'a str, &'a str, &'a str),
+	Ap(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for an analyzer (on a database)
-	Az(&'a str, &'a str, &'a str),
+	Az(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a bucket (on a database)
-	Bu(&'a str, &'a str, &'a str),
+	Bu(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a function (on a database)
-	Fc(&'a str, &'a str, &'a str),
+	Fc(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a model (on a database)
-	Ml(&'a str, &'a str, &'a str, &'a str),
+	Ml(NamespaceId, DatabaseId, &'a str, &'a str),
 	/// A cache key for a config (on a database)
-	Cg(&'a str, &'a str, &'a str),
+	Cg(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a parameter (on a database)
-	Pa(&'a str, &'a str, &'a str),
+	Pa(NamespaceId, DatabaseId, &'a str),
 	/// A cache key for a sequence (on a database)
-	Sq(&'a str, &'a str, &'a str),
-	/// A cache key for a table
-	Tb(&'a str, &'a str, &'a str),
+	Sq(NamespaceId, DatabaseId, &'a str),
+	/// A cache key for a table by id.
+	Tb(NamespaceId, DatabaseId, &'a str),
+	/// A cache key for a table by name.
+	TbByName(&'a str, &'a str, &'a str),
 	/// A cache key for an event (on a table)
-	Ev(&'a str, &'a str, &'a str, &'a str),
+	Ev(NamespaceId, DatabaseId, &'a str, &'a str),
 	/// A cache key for a field (on a table)
-	Fd(&'a str, &'a str, &'a str, &'a str),
+	Fd(NamespaceId, DatabaseId, &'a str, &'a str),
 	/// A cache key for an index (on a table)
-	Ix(&'a str, &'a str, &'a str, &'a str),
+	Ix(NamespaceId, DatabaseId, &'a str, &'a str),
 	/// A cache key for a record
-	Record(&'a str, &'a str, &'a str, &'a Id),
+	Record(NamespaceId, DatabaseId, &'a str, &'a RecordIdKey),
 }
 
 impl Equivalent<Key> for Lookup<'_> {
@@ -133,6 +137,7 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Mls(la, lb), Key::Mls(ka, kb)) => la == ka && lb == kb,
 			(Self::Cgs(la, lb), Key::Cgs(ka, kb)) => la == ka && lb == kb,
 			(Self::Pas(la, lb), Key::Pas(ka, kb)) => la == ka && lb == kb,
+			(Self::Sqs(la, lb), Key::Sqs(ka, kb)) => la == ka && lb == kb,
 			(Self::Tbs(la, lb), Key::Tbs(ka, kb)) => la == ka && lb == kb,
 			(Self::Evs(la, lb, lc), Key::Evs(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Fds(la, lb, lc), Key::Fds(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
@@ -144,11 +149,11 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Ru(la), Key::Ru(ka)) => la == ka,
 			(Self::Ra(la), Key::Ra(ka)) => la == ka,
 			(Self::Rg(la, lb), Key::Rg(ka, kb)) => la == ka && lb == kb,
-			(Self::Ns(la), Key::Ns(ka)) => la == ka,
+			(Self::NsByName(la), Key::NsByName(ka)) => la == ka,
 			(Self::Nu(la, lb), Key::Nu(ka, kb)) => la == ka && lb == kb,
 			(Self::Na(la, lb), Key::Na(ka, kb)) => la == ka && lb == kb,
 			(Self::Ng(la, lb, lc), Key::Ng(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
-			(Self::Db(la, lb), Key::Db(ka, kb)) => la == ka && lb == kb,
+			(Self::DbByName(la, lb), Key::DbByName(ka, kb)) => la == ka && lb == kb,
 			(Self::Du(la, lb, lc), Key::Du(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Da(la, lb, lc), Key::Da(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Dg(la, lb, lc, ld), Key::Dg(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
@@ -159,7 +164,9 @@ impl Equivalent<Key> for Lookup<'_> {
 			(Self::Ml(la, lb, lc, ld), Key::Ml(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			(Self::Cg(la, lb, lc), Key::Cg(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Pa(la, lb, lc), Key::Pa(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
+			(Self::Sq(la, lb, lc), Key::Sq(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Tb(la, lb, lc), Key::Tb(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
+			(Self::TbByName(la, lb, lc), Key::TbByName(ka, kb, kc)) => la == ka && lb == kb && lc == kc,
 			(Self::Ev(la, lb, lc, ld), Key::Ev(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			(Self::Fd(la, lb, lc, ld), Key::Fd(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
 			(Self::Ix(la, lb, lc, ld), Key::Ix(ka, kb, kc, kd)) => la == ka && lb == kb && lc == kc && ld == kd,
@@ -167,5 +174,110 @@ impl Equivalent<Key> for Lookup<'_> {
 			//
 			_ => false,
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use rstest::rstest;
+
+	use super::*;
+
+	#[rstest]
+	#[case(Lookup::Nds, Key::Nds, true)]
+	#[case(Lookup::Rus, Key::Rus, true)]
+	#[case(Lookup::Ras, Key::Ras, true)]
+	#[case(Lookup::Rgs("test"), Key::Rgs("test".to_string()), true)]
+	#[case(Lookup::Nss, Key::Nss, true)]
+	#[case(Lookup::Nus(NamespaceId(1)), Key::Nus(NamespaceId(1)), true)]
+	#[case(Lookup::Nas(NamespaceId(1)), Key::Nas(NamespaceId(1)), true)]
+	#[case(Lookup::Ngs(NamespaceId(1), "test"), Key::Ngs(NamespaceId(1), "test".to_string()), true)]
+	#[case(Lookup::Dbs(NamespaceId(1)), Key::Dbs(NamespaceId(1)), true)]
+	#[case(
+		Lookup::Dus(NamespaceId(1), DatabaseId(1)),
+		Key::Dus(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Das(NamespaceId(1), DatabaseId(1)),
+		Key::Das(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(Lookup::Dgs(NamespaceId(1), DatabaseId(1), "test"), Key::Dgs(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(
+		Lookup::Aps(NamespaceId(1), DatabaseId(1)),
+		Key::Aps(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Azs(NamespaceId(1), DatabaseId(1)),
+		Key::Azs(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Bus(NamespaceId(1), DatabaseId(1)),
+		Key::Bus(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Fcs(NamespaceId(1), DatabaseId(1)),
+		Key::Fcs(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Mls(NamespaceId(1), DatabaseId(1)),
+		Key::Mls(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Cgs(NamespaceId(1), DatabaseId(1)),
+		Key::Cgs(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Pas(NamespaceId(1), DatabaseId(1)),
+		Key::Pas(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(
+		Lookup::Tbs(NamespaceId(1), DatabaseId(1)),
+		Key::Tbs(NamespaceId(1), DatabaseId(1)),
+		true
+	)]
+	#[case(Lookup::Evs(NamespaceId(1), DatabaseId(1), "test"), Key::Evs(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Fds(NamespaceId(1), DatabaseId(1), "test"), Key::Fds(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Fts(NamespaceId(1), DatabaseId(1), "test"), Key::Fts(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Ixs(NamespaceId(1), DatabaseId(1), "test"), Key::Ixs(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Lvs(NamespaceId(1), DatabaseId(1), "test"), Key::Lvs(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Nd(Uuid::from_u128(1)), Key::Nd(Uuid::from_u128(1)), true)]
+	#[case(Lookup::Ru("test"), Key::Ru("test".to_string()), true)]
+	#[case(Lookup::Ra("test"), Key::Ra("test".to_string()), true)]
+	#[case(Lookup::Rg("test", "test"), Key::Rg("test".to_string(), "test".to_string()), true)]
+	#[case(Lookup::NsByName("test"), Key::NsByName("test".to_string()), true)]
+	#[case(Lookup::Nu(NamespaceId(1), "test"), Key::Nu(NamespaceId(1), "test".to_string()), true)]
+	#[case(Lookup::Na(NamespaceId(1), "test"), Key::Na(NamespaceId(1), "test".to_string()), true)]
+	#[case(Lookup::Ng(NamespaceId(1), "test", "test"), Key::Ng(NamespaceId(1), "test".to_string(), "test".to_string()), true)]
+	#[case(Lookup::DbByName("test", "test"), Key::DbByName("test".to_string(), "test".to_string()), true)]
+	#[case(Lookup::Du(NamespaceId(1), DatabaseId(1), "test"), Key::Du(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Da(NamespaceId(1), DatabaseId(1), "test"), Key::Da(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Dg(NamespaceId(1), DatabaseId(1), "test", "test"), Key::Dg(NamespaceId(1), DatabaseId(1), "test".to_string(), "test".to_string()), true)]
+	#[case(Lookup::Ap(NamespaceId(1), DatabaseId(1), "test"), Key::Ap(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Az(NamespaceId(1), DatabaseId(1), "test"), Key::Az(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Bu(NamespaceId(1), DatabaseId(1), "test"), Key::Bu(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Fc(NamespaceId(1), DatabaseId(1), "test"), Key::Fc(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Ml(NamespaceId(1), DatabaseId(1), "test", "test"), Key::Ml(NamespaceId(1), DatabaseId(1), "test".to_string(), "test".to_string()), true)]
+	#[case(Lookup::Cg(NamespaceId(1), DatabaseId(1), "test"), Key::Cg(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Pa(NamespaceId(1), DatabaseId(1), "test"), Key::Pa(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Sq(NamespaceId(1), DatabaseId(1), "test"), Key::Sq(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::Tb(NamespaceId(1), DatabaseId(1), "test"), Key::Tb(NamespaceId(1), DatabaseId(1), "test".to_string()), true)]
+	#[case(Lookup::TbByName("test", "test", "test"), Key::TbByName("test".to_string(), "test".to_string(), "test".to_string()), true)]
+	#[case(Lookup::Ev(NamespaceId(1), DatabaseId(1), "test", "test"), Key::Ev(NamespaceId(1), DatabaseId(1), "test".to_string(), "test".to_string()), true)]
+	#[case(Lookup::Fd(NamespaceId(1), DatabaseId(1), "test", "test"), Key::Fd(NamespaceId(1), DatabaseId(1), "test".to_string(), "test".to_string()), true)]
+	#[case(Lookup::Ix(NamespaceId(1), DatabaseId(1), "test", "test"), Key::Ix(NamespaceId(1), DatabaseId(1), "test".to_string(), "test".to_string()), true)]
+	#[case(Lookup::Record(NamespaceId(1), DatabaseId(1), "test", &RecordIdKey::Number(1)), Key::Record(NamespaceId(1), DatabaseId(1), "test".to_string(), RecordIdKey::Number(1)), true)]
+	#[case(Lookup::Record(NamespaceId(1), DatabaseId(1), "test", &RecordIdKey::Number(1)), Key::Record(NamespaceId(1), DatabaseId(1), "test".to_string(), RecordIdKey::Number(2)), false)]
+	#[case(Lookup::Record(NamespaceId(1), DatabaseId(1), "test", &RecordIdKey::Number(1)), Key::Record(NamespaceId(1), DatabaseId(2), "test".to_string(), RecordIdKey::Number(1)), false)]
+	fn test_equivalent(#[case] l: Lookup<'_>, #[case] k: Key, #[case] expected: bool) {
+		assert_eq!(l.equivalent(&k), expected);
 	}
 }

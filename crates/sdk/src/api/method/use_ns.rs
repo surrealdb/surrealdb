@@ -1,12 +1,11 @@
-use crate::Surreal;
-use crate::api::Connection;
-use crate::api::Result;
-use crate::api::conn::Command;
-use crate::api::method::BoxFuture;
-use crate::api::method::UseDb;
-use crate::method::OnceLockExt;
 use std::borrow::Cow;
 use std::future::IntoFuture;
+
+use crate::Surreal;
+use crate::api::conn::Command;
+use crate::api::method::{BoxFuture, UseDb};
+use crate::api::{Connection, Result};
+use crate::method::OnceLockExt;
 
 /// Stores the namespace to use
 #[derive(Debug)]
@@ -20,7 +19,8 @@ impl<C> UseNs<'_, C>
 where
 	C: Connection,
 {
-	/// Converts to an owned type which can easily be moved to a different thread
+	/// Converts to an owned type which can easily be moved to a different
+	/// thread
 	pub fn into_owned(self) -> UseNs<'static, C> {
 		UseNs {
 			client: Cow::Owned(self.client.into_owned()),

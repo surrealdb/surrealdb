@@ -1,18 +1,25 @@
-use crate::ctx::Context;
-use crate::dbs::{Iterable, Options};
-use crate::doc::CursorDoc;
-use crate::expr::{Cond, FlowResultExt as _, Thing, Value};
-use crate::idx::docids::{DocId, DocIds};
-use crate::idx::planner::iterators::KnnIteratorResult;
-use crate::idx::trees::hnsw::docs::HnswDocs;
-use crate::idx::trees::knn::Ids64;
-use crate::kvs::Transaction;
-use ahash::HashMap;
-use anyhow::Result;
-use reblessive::tree::Stk;
 use std::collections::VecDeque;
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
+
+use ahash::HashMap;
+use anyhow::Result;
+use reblessive::tree::Stk;
+
+use crate::catalog::DatabaseDefinition;
+use crate::catalog::providers::TableProvider;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::expr::{Cond, Expr, FlowResultExt as _, Literal};
+use crate::idx::IndexKeyBase;
+use crate::idx::planner::iterators::KnnIteratorResult;
+use crate::idx::seqdocids::{DocId, SeqDocIds};
+use crate::idx::trees::hnsw::docs::HnswDocs;
+use crate::idx::trees::knn::Ids64;
+use crate::kvs::Transaction;
+use crate::val::RecordId;
+use crate::val::record::Record;
 
 pub enum HnswConditionChecker<'a> {
 	Hnsw(HnswChecker),
@@ -40,13 +47,14 @@ impl<'a> HnswConditionChecker<'a> {
 
 	pub(in crate::idx) async fn check_truthy(
 		&mut self,
+		db: &DatabaseDefinition,
 		tx: &Transaction,
 		stk: &mut Stk,
 		docs: &HnswDocs,
 		doc_ids: Ids64,
 	) -> Result<bool> {
 		match self {
-			Self::HnswCondition(c) => c.check_any_truthy(tx, stk, docs, doc_ids).await,
+			Self::HnswCondition(c) => c.check_any_truthy(db, tx, stk, docs, doc_ids).await,
 			Self::Hnsw(_) => Ok(true),
 		}
 	}
@@ -77,33 +85,40 @@ impl<'a> HnswConditionChecker<'a> {
 }
 
 impl<'a> MTreeConditionChecker<'a> {
-	pub fn new_cond(ctx: &'a Context, opt: &'a Options, cond: Arc<Cond>) -> Self {
-		if Cond(Value::Bool(true)).ne(cond.as_ref()) {
+	pub fn new_cond(
+		ctx: &'a Context,
+		opt: &'a Options,
+		cond: Arc<Cond>,
+		ikb: IndexKeyBase,
+	) -> Self {
+		if Expr::Literal(Literal::Bool(true)) != cond.0 {
 			Self::MTreeCondition(MTreeCondChecker {
 				ctx,
 				opt,
 				cond,
 				cache: Default::default(),
+				ikb,
 			})
 		} else {
-			Self::new(ctx)
+			Self::new(ctx, ikb)
 		}
 	}
 
-	pub fn new(ctx: &'a Context) -> Self {
+	pub fn new(ctx: &'a Context, ikb: IndexKeyBase) -> Self {
 		Self::MTree(MTreeChecker {
 			ctx,
+			ikb,
 		})
 	}
 
 	pub(in crate::idx) async fn check_truthy(
 		&mut self,
+		db: &DatabaseDefinition,
 		stk: &mut Stk,
-		doc_ids: &DocIds,
 		doc_id: DocId,
 	) -> Result<bool> {
 		match self {
-			Self::MTreeCondition(c) => c.check_truthy(stk, doc_ids, doc_id).await,
+			Self::MTreeCondition(c) => c.check_truthy(db, stk, doc_id).await,
 			Self::MTree(_) => Ok(true),
 		}
 	}
@@ -116,11 +131,10 @@ impl<'a> MTreeConditionChecker<'a> {
 
 	pub(in crate::idx) async fn convert_result(
 		&mut self,
-		doc_ids: &DocIds,
 		res: VecDeque<(DocId, f64)>,
 	) -> Result<VecDeque<KnnIteratorResult>> {
 		match self {
-			Self::MTree(c) => c.convert_result(doc_ids, res).await,
+			Self::MTree(c) => c.convert_result(res).await,
 			Self::MTreeCondition(c) => Ok(c.convert_result(res)),
 		}
 	}
@@ -128,12 +142,12 @@ impl<'a> MTreeConditionChecker<'a> {
 
 pub struct MTreeChecker<'a> {
 	ctx: &'a Context,
+	ikb: IndexKeyBase,
 }
 
 impl MTreeChecker<'_> {
 	async fn convert_result(
 		&self,
-		doc_ids: &DocIds,
 		res: VecDeque<(DocId, f64)>,
 	) -> Result<VecDeque<KnnIteratorResult>> {
 		if res.is_empty() {
@@ -142,9 +156,12 @@ impl MTreeChecker<'_> {
 		let mut result = VecDeque::with_capacity(res.len());
 		let txn = self.ctx.tx();
 		for (doc_id, dist) in res {
-			if let Some(key) = doc_ids.get_doc_key(&txn, doc_id).await? {
-				let rid: Thing = revision::from_slice(&key)?;
-				result.push_back((rid.into(), dist, None));
+			if let Some(key) = SeqDocIds::get_id(&self.ikb, &txn, doc_id).await? {
+				result.push_back((
+					Arc::new(RecordId::new(self.ikb.table().to_owned(), key)),
+					dist,
+					None,
+				));
 			}
 		}
 		Ok(result)
@@ -152,7 +169,7 @@ impl MTreeChecker<'_> {
 }
 
 struct CheckerCacheEntry {
-	record: Option<(Arc<Thing>, Arc<Value>)>,
+	record: Option<(Arc<RecordId>, Arc<Record>)>,
 	truthy: bool,
 }
 
@@ -176,31 +193,34 @@ impl CheckerCacheEntry {
 
 	async fn build(
 		stk: &mut Stk,
+		db: &DatabaseDefinition,
 		ctx: &Context,
 		opt: &Options,
-		rid: Option<Thing>,
+		rid: Option<RecordId>,
 		cond: &Cond,
 	) -> Result<Self> {
 		if let Some(rid) = rid {
 			let rid = Arc::new(rid);
 			let txn = ctx.tx();
-			let val = Iterable::fetch_thing(&txn, opt, &rid).await?;
-			if !val.is_none_or_null() {
-				let (value, truthy) = {
-					let mut cursor_doc = CursorDoc {
+			let val =
+				txn.get_record(db.namespace_id, db.database_id, &rid.table, &rid.key, None).await?;
+			if !val.data.as_ref().is_nullish() {
+				let (record, truthy) = {
+					let cursor_doc = CursorDoc {
 						rid: Some(rid.clone()),
 						ir: None,
 						doc: val.into(),
+						fields_computed: false,
 					};
-					let truthy = cond
-						.compute(stk, ctx, opt, Some(&cursor_doc))
+					let truthy = stk
+						.run(|stk| cond.0.compute(stk, ctx, opt, Some(&cursor_doc)))
 						.await
 						.catch_return()?
 						.is_truthy();
-					(cursor_doc.doc.as_arc(), truthy)
+					(cursor_doc.doc.into_read_only(), truthy)
 				};
 				return Ok(CheckerCacheEntry {
-					record: Some((rid, value)),
+					record: Some((rid, record)),
 					truthy,
 				});
 			}
@@ -216,22 +236,26 @@ pub struct MTreeCondChecker<'a> {
 	ctx: &'a Context,
 	opt: &'a Options,
 	cond: Arc<Cond>,
+	ikb: IndexKeyBase,
 	cache: HashMap<DocId, CheckerCacheEntry>,
 }
 
 impl MTreeCondChecker<'_> {
-	async fn check_truthy(&mut self, stk: &mut Stk, doc_ids: &DocIds, doc_id: u64) -> Result<bool> {
+	async fn check_truthy(
+		&mut self,
+		db: &DatabaseDefinition,
+		stk: &mut Stk,
+		doc_id: u64,
+	) -> Result<bool> {
 		match self.cache.entry(doc_id) {
 			Entry::Occupied(e) => Ok(e.get().truthy),
 			Entry::Vacant(e) => {
 				let txn = self.ctx.tx();
-				let rid = doc_ids
-					.get_doc_key(&txn, doc_id)
+				let rid = SeqDocIds::get_id(&self.ikb, &txn, doc_id)
 					.await?
-					.map(|k| revision::from_slice(&k))
-					.transpose()?;
+					.map(|key| RecordId::new(self.ikb.table().to_owned(), key));
 				let ent =
-					CheckerCacheEntry::build(stk, self.ctx, self.opt, rid, self.cond.as_ref())
+					CheckerCacheEntry::build(stk, db, self.ctx, self.opt, rid, self.cond.as_ref())
 						.await?;
 				let truthy = ent.truthy;
 				e.insert(ent);
@@ -291,6 +315,7 @@ impl HnswCondChecker<'_> {
 
 	async fn check_any_truthy(
 		&mut self,
+		db: &DatabaseDefinition,
 		tx: &Transaction,
 		stk: &mut Stk,
 		docs: &HnswDocs,
@@ -302,9 +327,15 @@ impl HnswCondChecker<'_> {
 				Entry::Occupied(e) => e.get().truthy,
 				Entry::Vacant(e) => {
 					let rid = docs.get_thing(tx, doc_id).await?;
-					let ent =
-						CheckerCacheEntry::build(stk, self.ctx, self.opt, rid, self.cond.as_ref())
-							.await?;
+					let ent = CheckerCacheEntry::build(
+						stk,
+						db,
+						self.ctx,
+						self.opt,
+						rid,
+						self.cond.as_ref(),
+					)
+					.await?;
 					let truthy = ent.truthy;
 					e.insert(ent);
 					truthy

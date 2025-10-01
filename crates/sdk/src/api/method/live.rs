@@ -1,44 +1,31 @@
-use crate::Action;
-use crate::Surreal;
-use crate::Value;
-use crate::api::Connection;
-use crate::api::ExtraFeatures;
-use crate::api::Result;
-use crate::api::conn::Command;
-use crate::api::conn::Router;
-use crate::api::err::Error;
-use crate::api::method::BoxFuture;
-use crate::engine::any::Any;
-use crate::method::Live;
-use crate::method::OnceLockExt;
-use crate::method::Query;
-use crate::method::Select;
-use crate::opt::Resource;
-use crate::value::Notification;
-use async_channel::Receiver;
-use futures::StreamExt;
-use serde::de::DeserializeOwned;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
-use surrealdb_core::dbs::{Action as CoreAction, Notification as CoreNotification};
-use surrealdb_core::expr::Value as CoreValue;
-use surrealdb_core::sql::Statement;
-use surrealdb_core::sql::{
-	Cond, Expression, Field, Fields, Ident, Idiom, Operator, Part, SqlValue as CoreSqlValue, Table,
-	Thing as SqlThing, statements::LiveStatement,
-};
-use uuid::Uuid;
+use std::task::{Context, Poll};
 
+use async_channel::Receiver;
+use futures::StreamExt;
+use serde::de::DeserializeOwned;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-
+use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
-const ID: &str = "id";
+use crate::api::conn::{Command, Router};
+use crate::api::err::Error;
+use crate::api::method::BoxFuture;
+use crate::api::{self, Connection, ExtraFeatures, Result};
+use crate::core::dbs::{Action as CoreAction, Notification as CoreNotification};
+use crate::core::expr::{
+	BinaryOperator, Cond, Expr, Fields, Idiom, Literal, LiveStatement, TopLevelExpr,
+};
+use crate::core::val;
+use crate::engine::any::Any;
+use crate::method::{Live, OnceLockExt, Query, Select};
+use crate::opt::Resource;
+use crate::value::Notification;
+use crate::{Action, Surreal, Value};
 
 fn into_future<C, O>(this: Select<C, O, Live>) -> BoxFuture<Result<Stream<O>>>
 where
@@ -54,46 +41,103 @@ where
 		if !router.features.contains(&ExtraFeatures::LiveQueries) {
 			return Err(Error::LiveQueriesNotSupported.into());
 		}
-		let mut fields = Fields::default();
-		fields.0 = vec![Field::All];
-		let mut stmt = LiveStatement::new(fields);
-		let mut table = Table::default();
+		let mut stmt = LiveStatement::new(Fields::all());
 		match resource? {
 			Resource::Table(table) => {
-				let mut core_table = Table::default();
-				core_table.0 = table;
-				stmt.what = core_table.into()
+				stmt.what = Expr::Table(table);
 			}
 			Resource::RecordId(record) => {
-				let record: SqlThing = record.into_inner().into();
-				table.0.clone_from(&record.tb);
-				stmt.what = table.into();
-				let mut ident = Ident::default();
-				ID.clone_into(&mut ident.0);
-				let mut idiom = Idiom::default();
-				idiom.0 = vec![Part::from(ident)];
-				let mut cond = Cond::default();
-				cond.0 = CoreSqlValue::Expression(Box::new(Expression::new(
-					idiom.into(),
-					Operator::Equal,
-					record.into(),
-				)));
-				stmt.cond = Some(cond);
+				let record = record.into_inner();
+				stmt.what = Expr::Table(record.table.clone());
+				let ident = "id".to_string();
+				let cond = Expr::Binary {
+					left: Box::new(Expr::Idiom(Idiom::field(ident))),
+					op: BinaryOperator::Equal,
+					right: Box::new(Expr::Literal(Literal::RecordId(record.into_literal()))),
+				};
+				stmt.cond = Some(Cond(cond));
 			}
 			Resource::Object(_) => return Err(Error::LiveOnObject.into()),
 			Resource::Array(_) => return Err(Error::LiveOnArray.into()),
-			Resource::Edge(_) => return Err(Error::LiveOnEdges.into()),
 			Resource::Range(range) => {
-				let range = range.into_inner();
-				table.0.clone_from(&range.tb);
-				stmt.what = table.into();
-				stmt.cond = range.to_cond().map(Into::into);
+				let record = range.into_inner();
+
+				let val::RecordIdKey::Range(range) = record.key else {
+					panic!("invalid resource?");
+				};
+
+				stmt.what = Expr::Table(record.table.clone());
+
+				let id = Expr::Idiom(Idiom::field("id".to_string()));
+
+				let left = match range.start {
+					std::ops::Bound::Included(x) => Some(Expr::Binary {
+						left: Box::new(id.clone()),
+						op: BinaryOperator::MoreThanEqual,
+						right: Box::new(Expr::Literal(Literal::RecordId(
+							crate::core::expr::RecordIdLit {
+								table: record.table.clone(),
+								key: x.into_literal(),
+							},
+						))),
+					}),
+					std::ops::Bound::Excluded(x) => Some(Expr::Binary {
+						left: Box::new(id.clone()),
+						op: BinaryOperator::MoreThan,
+						right: Box::new(Expr::Literal(Literal::RecordId(
+							crate::core::expr::RecordIdLit {
+								table: record.table.clone(),
+								key: x.into_literal(),
+							},
+						))),
+					}),
+					std::ops::Bound::Unbounded => None,
+				};
+				let right = match range.end {
+					std::ops::Bound::Included(x) => Some(Expr::Binary {
+						left: Box::new(id),
+						op: BinaryOperator::LessThanEqual,
+						right: Box::new(Expr::Literal(Literal::RecordId(
+							crate::core::expr::RecordIdLit {
+								table: record.table,
+								key: x.into_literal(),
+							},
+						))),
+					}),
+					std::ops::Bound::Excluded(x) => Some(Expr::Binary {
+						left: Box::new(id),
+						op: BinaryOperator::LessThan,
+						right: Box::new(Expr::Literal(Literal::RecordId(
+							crate::core::expr::RecordIdLit {
+								table: record.table,
+								key: x.into_literal(),
+							},
+						))),
+					}),
+					std::ops::Bound::Unbounded => None,
+				};
+
+				let cond = match (left, right) {
+					(Some(l), Some(r)) => Some(Cond(Expr::Binary {
+						left: Box::new(l),
+						op: BinaryOperator::And,
+						right: Box::new(r),
+					})),
+					(Some(x), None) | (None, Some(x)) => Some(Cond(x)),
+					_ => None,
+				};
+
+				stmt.cond = cond
 			}
 			Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
 		}
-		let query =
-			Query::normal(client.clone(), vec![Statement::Live(stmt)], Default::default(), false);
-		let CoreValue::Uuid(id) = query.await?.take::<Value>(0)?.into_inner() else {
+		let query = Query::normal(
+			client.clone(),
+			vec![TopLevelExpr::Live(Box::new(stmt))],
+			Default::default(),
+			false,
+		);
+		let val::Value::Uuid(id) = query.await?.take::<Value>(0)?.into_inner() else {
 			return Err(Error::InternalError(
 				"successufull live query didn't return a uuid".to_string(),
 			)
@@ -104,7 +148,10 @@ where
 	})
 }
 
-pub(crate) async fn register(router: &Router, id: Uuid) -> Result<Receiver<CoreNotification>> {
+pub(crate) async fn register(
+	router: &Router,
+	id: Uuid,
+) -> Result<Receiver<Result<CoreNotification>>> {
 	let (tx, rx) = async_channel::unbounded();
 	router
 		.execute_unit(Command::SubscribeLive {
@@ -161,7 +208,7 @@ pub struct Stream<R> {
 	// We no longer need the lifetime and the type parameter
 	// Leaving them in for backwards compatibility
 	pub(crate) id: Uuid,
-	pub(crate) rx: Option<Pin<Box<Receiver<CoreNotification>>>>,
+	pub(crate) rx: Option<Pin<Box<Receiver<Result<CoreNotification>>>>>,
 	pub(crate) response_type: PhantomData<R>,
 }
 
@@ -169,7 +216,7 @@ impl<R> Stream<R> {
 	pub(crate) fn new(
 		client: Surreal<Any>,
 		id: Uuid,
-		rx: Option<Receiver<CoreNotification>>,
+		rx: Option<Receiver<Result<CoreNotification>>>,
 	) -> Self {
 		Self {
 			id,
@@ -181,13 +228,13 @@ impl<R> Stream<R> {
 }
 
 macro_rules! poll_next {
-	($notification:ident => $body:expr_2021) => {
+	($result:ident => $body:expr_2021) => {
 		fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
 			let Some(ref mut rx) = self.as_mut().rx else {
 				return Poll::Ready(None);
 			};
 			match rx.poll_next_unpin(cx) {
-				Poll::Ready(Some($notification)) => $body,
+				Poll::Ready(Some($result)) => $body,
 				Poll::Ready(None) => Poll::Ready(None),
 				Poll::Pending => Poll::Pending,
 			}
@@ -196,17 +243,22 @@ macro_rules! poll_next {
 }
 
 impl futures::Stream for Stream<Value> {
-	type Item = Notification<Value>;
+	type Item = Result<Notification<Value>>;
 
 	poll_next! {
-		notification => {
-			match notification.action {
-				CoreAction::Killed => Poll::Ready(None),
-				action => Poll::Ready(Some(Notification {
-					query_id: *notification.id,
-					action: Action::from_core(action),
-					data: Value::from_inner(notification.result),
-				})),
+		result => match result {
+			Ok(notification) => {
+				match notification.action {
+					CoreAction::Killed => Poll::Ready(None),
+					action => Poll::Ready(Some(Ok(Notification {
+						query_id: *notification.id,
+						action: Action::from_core(action),
+						data: Value::from_inner(notification.result),
+					}))),
+				}
+			}
+			Err(error) => {
+				Poll::Ready(Some(Err(error)))
 			}
 		}
 	}
@@ -219,7 +271,14 @@ impl futures::Stream for Stream<Value> {
 macro_rules! poll_next_and_convert {
 	() => {
 		poll_next! {
-			notification => Poll::Ready(deserialize(notification))
+			result => match result {
+				Ok(notification) => {
+					Poll::Ready(deserialize(notification))
+				}
+				Err(error) => {
+					Poll::Ready(Some(Err(error)))
+				}
+			}
 		}
 	};
 }
@@ -287,7 +346,7 @@ where
 	let action = notification.action;
 	match action {
 		CoreAction::Killed => None,
-		action => match surrealdb_core::expr::from_value(notification.result) {
+		action => match api::value::from_core_value(notification.result) {
 			Ok(data) => Some(Ok(Notification {
 				query_id,
 				data,

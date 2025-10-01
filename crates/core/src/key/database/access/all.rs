@@ -1,34 +1,37 @@
 //! Stores the key prefix for all keys under a database access method
-use crate::key::category::Categorise;
-use crate::key::category::Category;
-use crate::kvs::impl_key;
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Access<'a> {
+use storekey::{BorrowDecode, Encode};
+
+use crate::catalog::{DatabaseId, NamespaceId};
+use crate::key::category::{Categorise, Category};
+use crate::kvs::impl_kv_key_storekey;
+
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+pub(crate) struct DbAccess<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
-	pub ac: &'a str,
-}
-impl_key!(Access<'a>);
-
-pub fn new<'a>(ns: &'a str, db: &'a str, ac: &'a str) -> Access<'a> {
-	Access::new(ns, db, ac)
+	pub ac: Cow<'a, str>,
 }
 
-impl Categorise for Access<'_> {
+impl_kv_key_storekey!(DbAccess<'_> => Vec<u8>);
+
+pub fn new(ns: NamespaceId, db: DatabaseId, ac: &str) -> DbAccess<'_> {
+	DbAccess::new(ns, db, ac)
+}
+
+impl Categorise for DbAccess<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseAccessRoot
 	}
 }
 
-impl<'a> Access<'a> {
-	pub fn new(ns: &'a str, db: &'a str, ac: &'a str) -> Self {
+impl<'a> DbAccess<'a> {
+	pub fn new(ns: NamespaceId, db: DatabaseId, ac: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -36,27 +39,25 @@ impl<'a> Access<'a> {
 			_b: b'*',
 			db,
 			_c: b'&',
-			ac,
+			ac: Cow::Borrowed(ac),
 		}
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+	use crate::kvs::KVKey;
+
 	#[test]
 	fn key() {
-		use super::*;
 		#[rustfmt::skip]
-		let val = Access::new(
-			"testns",
-			"testdb",
+		let val = DbAccess::new(
+			NamespaceId(1),
+			DatabaseId(2),
 			"testac",
 		);
-		let enc = Access::encode(&val).unwrap();
-		assert_eq!(enc, b"/*testns\0*testdb\0&testac\0");
-
-		let dec = Access::decode(&enc).unwrap();
-		assert_eq!(val, dec);
+		let enc = DbAccess::encode_key(&val).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02&testac\0");
 	}
 }

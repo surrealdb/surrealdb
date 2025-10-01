@@ -1,115 +1,75 @@
-use crate::sql::{Base, Duration, Ident, Strand, escape::QuoteStr, fmt::Fmt, user::UserDuration};
-use argon2::{
-	Argon2,
-	password_hash::{PasswordHasher, SaltString},
-};
-
-use rand::{Rng, distributions::Alphanumeric, rngs::OsRng};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
-#[revisioned(revision = 4)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use argon2::Argon2;
+use argon2::password_hash::{PasswordHasher, SaltString};
+use rand::Rng;
+use rand::distributions::Alphanumeric;
+use rand::rngs::OsRng;
+
+use super::DefineKind;
+use crate::fmt::{EscapeIdent, Fmt, QuoteStr};
+use crate::sql::{Base, Expr, Literal};
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+pub enum PassType {
+	#[default]
+	Unset,
+	Hash(String),
+	Password(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DefineUserStatement {
-	pub name: Ident,
+	pub kind: DefineKind,
+	pub name: Expr,
 	pub base: Base,
-	pub hash: String,
-	pub code: String,
-	pub roles: Vec<Ident>,
-	#[revision(start = 3)]
-	pub duration: UserDuration,
-	pub comment: Option<Strand>,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 4)]
-	pub overwrite: bool,
+	pub pass_type: PassType,
+	pub roles: Vec<String>,
+	pub token_duration: Option<Expr>,
+	pub session_duration: Option<Expr>,
+
+	pub comment: Option<Expr>,
 }
 
-#[expect(clippy::fallible_impl_from)]
-impl From<(Base, &str, &str, &str)> for DefineUserStatement {
-	fn from((base, user, pass, role): (Base, &str, &str, &str)) -> Self {
-		DefineUserStatement {
-			base,
-			name: user.into(),
-			hash: Argon2::default()
-				.hash_password(pass.as_ref(), &SaltString::generate(&mut OsRng))
-				.unwrap()
-				.to_string(),
-			code: rand::thread_rng()
-				.sample_iter(&Alphanumeric)
-				.take(128)
-				.map(char::from)
-				.collect::<String>(),
-			roles: vec![role.into()],
-			duration: UserDuration::default(),
+impl Default for DefineUserStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			base: Base::Root,
+			pass_type: PassType::Unset,
+			roles: vec![],
+			token_duration: None,
+			session_duration: None,
 			comment: None,
-			if_not_exists: false,
-			overwrite: false,
 		}
-	}
-}
-
-impl DefineUserStatement {
-	pub(crate) fn from_parsed_values(
-		name: Ident,
-		base: Base,
-		roles: Vec<Ident>,
-		duration: UserDuration,
-	) -> Self {
-		DefineUserStatement {
-			name,
-			base,
-			roles,
-			duration,
-			code: rand::thread_rng()
-				.sample_iter(&Alphanumeric)
-				.take(128)
-				.map(char::from)
-				.collect::<String>(),
-			..Default::default()
-		}
-	}
-
-	pub(crate) fn set_password(&mut self, password: &str) {
-		self.hash = Argon2::default()
-			.hash_password(password.as_bytes(), &SaltString::generate(&mut OsRng))
-			.unwrap()
-			.to_string()
-	}
-
-	pub(crate) fn set_passhash(&mut self, passhash: String) {
-		self.hash = passhash;
-	}
-
-	pub(crate) fn set_token_duration(&mut self, duration: Option<Duration>) {
-		self.duration.token = duration;
-	}
-
-	pub(crate) fn set_session_duration(&mut self, duration: Option<Duration>) {
-		self.duration.session = duration;
 	}
 }
 
 impl Display for DefineUserStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE USER")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+
+		write!(f, " {} ON {}", self.name, self.base)?;
+
+		match self.pass_type {
+			PassType::Unset => write!(f, "  PASSHASH \"\" ")?,
+			PassType::Hash(ref x) => write!(f, "  PASSHASH {}", QuoteStr(x))?,
+			PassType::Password(ref x) => write!(f, "  PASSWORD {}", QuoteStr(x))?,
 		}
+
 		write!(
 			f,
-			" {} ON {} PASSHASH {} ROLES {}",
-			self.name,
-			self.base,
-			QuoteStr(&self.hash),
+			" ROLES {}",
 			Fmt::comma_separated(
-				&self.roles.iter().map(|r| r.to_string().to_uppercase()).collect::<Vec<String>>()
+				&self.roles.iter().map(|r| EscapeIdent(r.to_uppercase())).collect::<Vec<_>>()
 			),
 		)?;
 		// Always print relevant durations so defaults can be changed in the future
@@ -119,38 +79,57 @@ impl Display for DefineUserStatement {
 		write!(
 			f,
 			" FOR TOKEN {},",
-			match self.duration.token {
-				Some(dur) => format!("{}", dur),
+			match self.token_duration {
+				Some(ref dur) => format!("{}", dur),
 				None => "NONE".to_string(),
 			}
 		)?;
 		write!(
 			f,
 			" FOR SESSION {}",
-			match self.duration.session {
-				Some(dur) => format!("{}", dur),
+			match self.session_duration {
+				Some(ref dur) => format!("{}", dur),
 				None => "NONE".to_string(),
 			}
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
 	}
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<DefineUserStatement> for crate::expr::statements::DefineUserStatement {
 	fn from(v: DefineUserStatement) -> Self {
+		let hash = match v.pass_type {
+			PassType::Unset => String::new(),
+			PassType::Hash(x) => x,
+			// TODO: Move out of AST.
+			PassType::Password(p) => Argon2::default()
+				.hash_password(p.as_bytes(), &SaltString::generate(&mut OsRng))
+				.unwrap()
+				.to_string(),
+		};
+
+		let code = rand::thread_rng()
+			.sample_iter(&Alphanumeric)
+			.take(128)
+			.map(char::from)
+			.collect::<String>();
+
 		Self {
+			kind: v.kind.into(),
 			name: v.name.into(),
 			base: v.base.into(),
-			hash: v.hash,
-			code: v.code,
-			roles: v.roles.into_iter().map(Into::into).collect(),
-			duration: v.duration.into(),
-			comment: v.comment.map(Into::into),
-			if_not_exists: v.if_not_exists,
-			overwrite: v.overwrite,
+			hash,
+			code,
+			roles: v.roles,
+			duration: crate::expr::user::UserDuration {
+				token: v.token_duration.map(Into::into),
+				session: v.session_duration.map(Into::into),
+			},
+			comment: v.comment.map(|x| x.into()),
 		}
 	}
 }
@@ -158,15 +137,14 @@ impl From<DefineUserStatement> for crate::expr::statements::DefineUserStatement 
 impl From<crate::expr::statements::DefineUserStatement> for DefineUserStatement {
 	fn from(v: crate::expr::statements::DefineUserStatement) -> Self {
 		Self {
+			kind: v.kind.into(),
 			name: v.name.into(),
 			base: v.base.into(),
-			hash: v.hash,
-			code: v.code,
-			roles: v.roles.into_iter().map(Into::into).collect(),
-			duration: v.duration.into(),
-			comment: v.comment.map(Into::into),
-			if_not_exists: v.if_not_exists,
-			overwrite: v.overwrite,
+			pass_type: PassType::Hash(v.hash),
+			roles: v.roles,
+			token_duration: v.duration.token.map(Into::into),
+			session_duration: v.duration.session.map(Into::into),
+			comment: v.comment.map(|x| x.into()),
 		}
 	}
 }

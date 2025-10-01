@@ -1,32 +1,34 @@
-use super::KeyDecode;
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::ops::Range;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use anyhow::{Result, ensure};
+use futures::channel::oneshot::{Receiver, Sender, channel};
+use reblessive::TreeStack;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
+use tokio::task;
+use tokio::task::JoinHandle;
+
+use crate::catalog::{DatabaseDefinition, DatabaseId, IndexDefinition, NamespaceId};
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
-use crate::expr::statements::DefineIndexStatement;
-use crate::expr::{Id, Object, Thing, Value};
+use crate::idx::IndexKeyBase;
+use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
-use crate::key::index::ia::Ia;
-use crate::key::index::ip::Ip;
-use crate::key::thing;
+use crate::key::record;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
-use crate::kvs::{Key, Transaction, TransactionType, Val};
+use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val, impl_kv_value_revisioned};
 use crate::mem::ALLOC;
-use anyhow::{Result, ensure};
-use dashmap::DashMap;
-use dashmap::mapref::entry::Entry;
-use futures::channel::oneshot::{Receiver, Sender, channel};
-use reblessive::TreeStack;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::ops::Range;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::RwLock;
-use tokio::task;
-use tokio::task::JoinHandle;
+use crate::val::record::Record;
+use crate::val::{Object, RecordId, RecordIdKey, Value};
 
 #[derive(Debug, Clone)]
 pub(crate) enum BuildingStatus {
@@ -125,17 +127,17 @@ type IndexBuilding = (Arc<Building>, JoinHandle<()>);
 
 #[derive(Hash, PartialEq, Eq)]
 struct IndexKey {
-	ns: String,
-	db: String,
+	ns: NamespaceId,
+	db: DatabaseId,
 	tb: String,
 	ix: String,
 }
 
 impl IndexKey {
-	fn new(ns: &str, db: &str, tb: &str, ix: &str) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str) -> Self {
 		Self {
-			ns: ns.to_owned(),
-			db: db.to_owned(),
+			ns,
+			db,
 			tb: tb.to_owned(),
 			ix: ix.to_owned(),
 		}
@@ -145,7 +147,7 @@ impl IndexKey {
 #[derive(Clone)]
 pub(crate) struct IndexBuilder {
 	tf: TransactionFactory,
-	indexes: Arc<DashMap<IndexKey, IndexBuilding>>,
+	indexes: Arc<RwLock<HashMap<IndexKey, IndexBuilding>>>,
 }
 
 impl IndexBuilder {
@@ -160,10 +162,12 @@ impl IndexBuilder {
 		&self,
 		ctx: &Context,
 		opt: Options,
-		ix: Arc<DefineIndexStatement>,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: Arc<IndexDefinition>,
 		sdr: Option<Sender<Result<()>>>,
 	) -> Result<IndexBuilding> {
-		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix)?);
+		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ns, db, ix)?);
 		let b = building.clone();
 		let jh = task::spawn(async move {
 			let r = b.run().await;
@@ -179,36 +183,37 @@ impl IndexBuilder {
 		Ok((building, jh))
 	}
 
-	pub(crate) fn build(
+	pub(crate) async fn build(
 		&self,
 		ctx: &Context,
 		opt: Options,
-		ix: Arc<DefineIndexStatement>,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: Arc<IndexDefinition>,
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<()>>>> {
-		let (ns, db) = opt.ns_db()?;
-		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
+		let key = IndexKey::new(ns, db, &ix.table_name, &ix.name);
 		let (rcv, sdr) = if blocking {
 			let (s, r) = channel();
 			(Some(r), Some(s))
 		} else {
 			(None, None)
 		};
-		match self.indexes.entry(key) {
-			Entry::Occupied(e) => {
-				// If the building is currently running, we return error
+		match self.indexes.write().await.entry(key) {
+			Entry::Occupied(mut e) => {
+				// If the building is currently running, we return an error
 				ensure!(
 					e.get().1.is_finished(),
 					Error::IndexAlreadyBuilding {
 						name: e.key().ix.clone(),
 					}
 				);
-				let ib = self.start_building(ctx, opt, ix, sdr)?;
-				e.replace_entry(ib);
+				let ib = self.start_building(ctx, opt, ns, db, ix, sdr)?;
+				e.insert(ib);
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let ib = self.start_building(ctx, opt, ix, sdr)?;
+				let ib = self.start_building(ctx, opt, ns, db, ix, sdr)?;
 				e.insert(ib);
 			}
 		};
@@ -217,16 +222,15 @@ impl IndexBuilder {
 
 	pub(crate) async fn consume(
 		&self,
+		db: &DatabaseDefinition,
 		ctx: &Context,
-		(ns, db): (&str, &str),
-		ix: &DefineIndexStatement,
+		ix: &IndexDefinition,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
-		rid: &Thing,
+		rid: &RecordId,
 	) -> Result<ConsumeResult> {
-		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
-		if let Some(r) = self.indexes.get(&key) {
-			let (b, _) = r.value();
+		let key = IndexKey::new(db.namespace_id, db.database_id, &ix.table_name, &ix.name);
+		if let Some((b, _)) = self.indexes.read().await.get(&key) {
 			return b.maybe_consume(ctx, old_values, new_values, rid).await;
 		}
 		Ok(ConsumeResult::Ignored(old_values, new_values))
@@ -234,22 +238,28 @@ impl IndexBuilder {
 
 	pub(crate) async fn get_status(
 		&self,
-		ns: &str,
-		db: &str,
-		ix: &DefineIndexStatement,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: &IndexDefinition,
 	) -> BuildingStatus {
-		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
-		if let Some(a) = self.indexes.get(&key) {
-			a.value().0.status.read().await.clone()
+		let key = IndexKey::new(ns, db, &ix.table_name, &ix.name);
+		if let Some(a) = self.indexes.read().await.get(&key) {
+			a.0.status.read().await.clone()
 		} else {
 			BuildingStatus::default()
 		}
 	}
 
-	pub(crate) fn remove_index(&self, ns: &str, db: &str, tb: &str, ix: &str) -> Result<()> {
+	pub(crate) async fn remove_index(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		ix: &str,
+	) -> Result<()> {
 		let key = IndexKey::new(ns, db, tb, ix);
-		if let Some((_, b)) = self.indexes.remove(&key) {
-			b.0.abort();
+		if let Some((b, _)) = self.indexes.write().await.remove(&key) {
+			b.abort();
 		}
 		Ok(())
 	}
@@ -257,17 +267,19 @@ impl IndexBuilder {
 
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize, Debug)]
-#[non_exhaustive]
-struct Appending {
+pub(crate) struct Appending {
 	old_values: Option<Vec<Value>>,
 	new_values: Option<Vec<Value>>,
-	id: Id,
+	id: RecordIdKey,
 }
+
+impl_kv_value_revisioned!(Appending);
 
 #[revisioned(revision = 1)]
 #[derive(Serialize, Deserialize, Debug)]
-#[non_exhaustive]
-struct PrimaryAppending(u32);
+pub(crate) struct PrimaryAppending(u32);
+
+impl_kv_value_revisioned!(PrimaryAppending);
 
 #[derive(Default)]
 struct QueueSequences {
@@ -311,9 +323,11 @@ impl QueueSequences {
 struct Building {
 	ctx: Context,
 	opt: Options,
+	ns: NamespaceId,
+	db: DatabaseId,
+	ikb: IndexKeyBase,
 	tf: TransactionFactory,
-	ix: Arc<DefineIndexStatement>,
-	tb: String,
+	ix: Arc<IndexDefinition>,
 	status: Arc<RwLock<BuildingStatus>>,
 	queue: Arc<RwLock<QueueSequences>>,
 	aborted: AtomicBool,
@@ -324,13 +338,18 @@ impl Building {
 		ctx: &Context,
 		tf: TransactionFactory,
 		opt: Options,
-		ix: Arc<DefineIndexStatement>,
+		ns: NamespaceId,
+		db: DatabaseId,
+		ix: Arc<IndexDefinition>,
 	) -> Result<Self> {
+		let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
 		Ok(Self {
 			ctx: MutableContext::new_concurrent(ctx).freeze(),
 			opt,
+			ns,
+			db,
+			ikb,
 			tf,
-			tb: ix.what.to_raw(),
 			ix,
 			status: Arc::new(RwLock::new(BuildingStatus::Started)),
 			queue: Default::default(),
@@ -351,10 +370,11 @@ impl Building {
 		ctx: &Context,
 		old_values: Option<Vec<Value>>,
 		new_values: Option<Vec<Value>>,
-		rid: &Thing,
+		rid: &RecordId,
 	) -> Result<ConsumeResult> {
 		let mut queue = self.queue.write().await;
-		// Now that the queue is locked, we have the possibility to assess if the asynchronous build is done.
+		// Now that the queue is locked, we have the possibility to assess if the
+		// asynchronous build is done.
 		if queue.is_empty() {
 			// If the appending queue is empty and the index is built...
 			if self.status.read().await.is_ready() {
@@ -367,31 +387,21 @@ impl Building {
 		let a = Appending {
 			old_values,
 			new_values,
-			id: rid.id.clone(),
+			id: rid.key.clone(),
 		};
 		// Get the idx of this appended record from the sequence
 		let idx = queue.add_update();
 		// Store the appending
-		let ia = self.new_ia_key(idx)?;
-		tx.set(ia, revision::to_vec(&a)?, None).await?;
+		let ia = self.ikb.new_ia_key(idx);
+		tx.set(&ia, &a, None).await?;
 		// Do we already have a primary appending?
-		let ip = self.new_ip_key(rid.id.clone())?;
-		if tx.get(ip.clone(), None).await?.is_none() {
+		let ip = self.ikb.new_ip_key(rid.key.clone());
+		if tx.get(&ip, None).await?.is_none() {
 			// If not, we set it
-			tx.set(ip, revision::to_vec(&PrimaryAppending(idx))?, None).await?;
+			tx.set(&ip, &PrimaryAppending(idx), None).await?;
 		}
 		drop(queue);
 		Ok(ConsumeResult::Enqueued)
-	}
-
-	fn new_ia_key(&self, i: u32) -> Result<Ia> {
-		let (ns, db) = self.opt.ns_db()?;
-		Ok(Ia::new(ns, db, &self.ix.what, &self.ix.name, i))
-	}
-
-	fn new_ip_key(&self, id: Id) -> Result<Ip> {
-		let (ns, db) = self.opt.ns_db()?;
-		Ok(Ip::new(ns, db, &self.ix.what, &self.ix.name, id))
 	}
 
 	async fn new_read_tx(&self) -> Result<Transaction> {
@@ -406,19 +416,20 @@ impl Building {
 	}
 
 	async fn run(&self) -> Result<()> {
-		let (ns, db) = self.opt.ns_db()?;
 		// Remove the index data
 		{
 			self.set_status(BuildingStatus::Cleaning).await;
 			let ctx = self.new_write_tx_ctx().await?;
-			let key = crate::key::index::all::new(ns, db, &self.tb, &self.ix.name);
+			let key =
+				crate::key::index::all::new(self.ns, self.db, self.ikb.table(), self.ikb.index());
 			let tx = ctx.tx();
-			tx.delp(key).await?;
+			tx.delp(&key).await?;
 			tx.commit().await?;
 		}
+
 		// First iteration, we index every key
-		let beg = thing::prefix(ns, db, &self.tb)?;
-		let end = thing::suffix(ns, db, &self.tb)?;
+		let beg = record::prefix(self.ns, self.db, self.ikb.table())?;
+		let end = record::suffix(self.ns, self.db, self.ikb.table())?;
 		let mut next = Some(beg..end);
 		let mut initial_count = 0;
 		// Set the initial status
@@ -457,7 +468,8 @@ impl Building {
 				tx.commit().await?;
 			}
 		}
-		// Second iteration, we index/remove any records that has been added or removed since the initial indexing
+		// Second iteration, we index/remove any records that has been added or removed
+		// since the initial indexing
 		self.set_status(BuildingStatus::Indexing {
 			initial: Some(initial_count),
 			pending: Some(self.queue.read().await.pending() as usize),
@@ -478,7 +490,8 @@ impl Building {
 				}
 				if queue.is_empty() {
 					// If the batch is empty, we are done.
-					// Due to the lock on self.queue, we know that no external process can add an item to the queue.
+					// Due to the lock on self.queue, we know that no external process can add an
+					// item to the queue.
 					self.set_status(BuildingStatus::Ready {
 						initial: Some(initial_count),
 						pending: Some(queue.pending() as usize),
@@ -517,6 +530,7 @@ impl Building {
 		values: Vec<(Key, Val)>,
 		count: &mut usize,
 	) -> Result<()> {
+		let mut rc = false;
 		let mut stack = TreeStack::new();
 		// Index the records
 		for (k, v) in values.into_iter() {
@@ -524,24 +538,27 @@ impl Building {
 				return Ok(());
 			}
 			self.is_beyond_threshold(Some(*count))?;
-			let key = thing::Thing::decode(&k)?;
+			let key = record::RecordKey::decode_key(&k)?;
 			// Parse the value
-			let val: Value = revision::from_slice(&v)?;
-			let rid: Arc<Thing> = Thing::from((key.tb, key.id)).into();
+			let val = Record::kv_decode_value(v)?;
+			let rid: Arc<RecordId> = RecordId {
+				table: key.tb.into_owned(),
+				key: key.id,
+			}
+			.into();
 
 			let opt_values;
 
 			// Do we already have an appended value?
-			let ip = self.new_ip_key(rid.id.clone())?;
-			if let Some(v) = tx.get(ip, None).await? {
-				// Then we take the old value of the appending value as the initial indexing value
-				let pa: PrimaryAppending = revision::from_slice(&v)?;
-				let ia = self.new_ia_key(pa.0)?;
-				let v = tx
-					.get(ia, None)
+			let ip = self.ikb.new_ip_key(rid.key.clone());
+			if let Some(pa) = tx.get(&ip, None).await? {
+				// Then we take the old value of the appending value as the initial indexing
+				// value
+				let ia = self.ikb.new_ia_key(pa.0);
+				let a = tx
+					.get(&ia, None)
 					.await?
 					.ok_or_else(|| Error::CorruptedIndex("Appending record is missing"))?;
-				let a: Appending = revision::from_slice(&v)?;
 				opt_values = a.old_values;
 			} else {
 				// Otherwise, we normally proceed to the indexing
@@ -553,9 +570,17 @@ impl Building {
 			}
 
 			// Index the record
-			let mut io =
-				IndexOperation::new(ctx, &self.opt, &self.ix, None, opt_values.clone(), &rid);
-			stack.enter(|stk| io.compute(stk)).finish().await?;
+			let mut io = IndexOperation::new(
+				ctx,
+				&self.opt,
+				self.ns,
+				self.db,
+				&self.ix,
+				None,
+				opt_values.clone(),
+				&rid,
+			);
+			stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
 
 			// Increment the count and update the status
 			*count += 1;
@@ -566,6 +591,9 @@ impl Building {
 			})
 			.await;
 		}
+		// Check if we trigger the compaction
+		self.check_index_compaction(tx, &mut rc).await?;
+		// We're done
 		Ok(())
 	}
 
@@ -577,24 +605,35 @@ impl Building {
 		initial: usize,
 		count: &mut usize,
 	) -> Result<()> {
+		let mut rc = false;
 		let mut stack = TreeStack::new();
 		for i in range {
 			if self.is_aborted().await {
 				return Ok(());
 			}
 			self.is_beyond_threshold(Some(*count))?;
-			let ia = self.new_ia_key(i)?;
-			if let Some(v) = tx.get(ia.clone(), None).await? {
-				tx.del(ia).await?;
-				let a: Appending = revision::from_slice(&v)?;
-				let rid = Thing::from((self.tb.clone(), a.id));
-				let mut io =
-					IndexOperation::new(ctx, &self.opt, &self.ix, a.old_values, a.new_values, &rid);
-				stack.enter(|stk| io.compute(stk)).finish().await?;
+			let ia = self.ikb.new_ia_key(i);
+			if let Some(a) = tx.get(&ia, None).await? {
+				tx.del(&ia).await?;
+				let rid = RecordId {
+					table: self.ikb.table().to_string(),
+					key: a.id,
+				};
+				let mut io = IndexOperation::new(
+					ctx,
+					&self.opt,
+					self.ns,
+					self.db,
+					&self.ix,
+					a.old_values,
+					a.new_values,
+					&rid,
+				);
+				stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
 
 				// We can delete the ip record if any
-				let ip = self.new_ip_key(rid.id)?;
-				tx.del(ip).await?;
+				let ip = self.ikb.new_ip_key(rid.key);
+				tx.del(&ip).await?;
 
 				*count += 1;
 				self.set_status(BuildingStatus::Indexing {
@@ -605,9 +644,20 @@ impl Building {
 				.await;
 			}
 		}
+		// Check if we trigger the compaction
+		self.check_index_compaction(tx, &mut rc).await?;
+		// We're done
 		Ok(())
 	}
 
+	async fn check_index_compaction(&self, tx: &Transaction, rc: &mut bool) -> Result<()> {
+		if !*rc {
+			return Ok(());
+		}
+		FullTextIndex::trigger_compaction(&self.ikb, tx, self.opt.id()?).await?;
+		*rc = false;
+		Ok(())
+	}
 	/// Abort the current indexing process.
 	fn abort(&self) {
 		// We use `Ordering::Relaxed` as the called does not require to be synchronized.
@@ -617,8 +667,9 @@ impl Building {
 
 	/// Check if the indexing process is aborting.
 	async fn is_aborted(&self) -> bool {
-		// We use `Ordering::Relaxed` as there are no shared data that would require any synchronization.
-		// This method is only called by the single thread building the index.
+		// We use `Ordering::Relaxed` as there are no shared data that would require any
+		// synchronization. This method is only called by the single thread building
+		// the index.
 		if self.aborted.load(Ordering::Relaxed) {
 			self.set_status(BuildingStatus::Aborted).await;
 			true

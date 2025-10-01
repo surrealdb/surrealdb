@@ -1,15 +1,15 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::doc::Document;
-use crate::err;
-use crate::err::Error;
-use crate::expr::statements::InsertStatement;
-use crate::expr::value::Value;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
+use crate::catalog::providers::TableProvider;
+use crate::ctx::Context;
+use crate::dbs::{Options, Statement};
+use crate::doc::Document;
+use crate::err;
+use crate::err::Error;
+use crate::expr::statements::InsertStatement;
+use crate::val::Value;
 
 impl Document {
 	pub(super) async fn insert(
@@ -19,11 +19,11 @@ impl Document {
 		opt: &Options,
 		stm: &InsertStatement,
 	) -> Result<Value, IgnoreError> {
-		// Even though we haven't tried to create first this can still not be the 'initial iteration' if
-		// the initial doc is not set.
+		// Even though we haven't tried to create first this can still not be the
+		// 'initial iteration' if the initial doc is not set.
 		//
-		// If this is not the initial iteration we immediatly skip trying to create and go straight
-		// to updating.
+		// If this is not the initial iteration we immediatly skip trying to create and
+		// go straight to updating.
 		if !self.is_iteration_initial() {
 			return self.insert_update(stk, ctx, opt, &Statement::Insert(stm)).await;
 		}
@@ -31,16 +31,16 @@ impl Document {
 		// is this retryable?
 		// it is retryable when some data is present on the insert statement to update.
 		let retryable = stm.update.is_some();
-		if retryable {
-			// it is retryable so generate a save point we can roll back to.
-			ctx.tx().lock().await.new_save_point();
-		}
+		// it is retryable so generate a save point we can roll back to.
+		// always create a save point even if not retryable, as we have to rollback to original
+		// state.
+		ctx.tx().lock().await.new_save_point();
 
-		// First try to create the value and if that is not possible due to an existing value fall
-		// back to update instead.
+		// First try to create the value and if that is not possible due to an existing
+		// value fall back to update instead.
 		//
-		// This is done this way to make the create path fast and take priority over the update
-		// path.
+		// This is done this way to make the create path fast and take priority over the
+		// update path.
 		let retry = match self.insert_create(stk, ctx, opt, &Statement::Insert(stm)).await {
 			// We received an index exists error, so we
 			// ignore the error, and attempt to update the
@@ -55,9 +55,7 @@ impl Document {
 					// or if the statement contained a specific record id, we
 					// don't retry to
 					if !retryable || self.is_specific_record_id() {
-						if retryable {
-							ctx.tx().lock().await.rollback_to_save_point().await?;
-						}
+						ctx.tx().lock().await.rollback_to_save_point().await?;
 
 						// Ignore flag; disables error.
 						// Error::Ignore is never raised to the user.
@@ -86,6 +84,8 @@ impl Document {
 				}) => {
 					// if not retryable return the error.
 					if !retryable {
+						ctx.tx().lock().await.rollback_to_save_point().await?;
+
 						// Ignore flag; disables error.
 						// Error::Ignore is never raised to the user.
 						if stm.ignore {
@@ -104,28 +104,29 @@ impl Document {
 					thing
 				}
 				_ => {
-					// if retryable we need to do something with the savepoint.
-					if retryable {
-						ctx.tx().lock().await.rollback_to_save_point().await?;
-					}
+					// we have to rollback to the save point, even though retryable is false.
+					// this is because we have to guarantee atomicity of the insert.
+					ctx.tx().lock().await.rollback_to_save_point().await?;
+
 					return Err(IgnoreError::Error(e));
 				}
 			},
 			Err(IgnoreError::Ignore) => {
-				if retryable {
-					ctx.tx().lock().await.release_last_save_point()?;
-				}
+				// if the error is ignored, we can release the save point.
+				ctx.tx().lock().await.release_last_save_point()?;
 				return Err(IgnoreError::Ignore);
 			}
 			Ok(x) => {
-				if retryable {
-					ctx.tx().lock().await.release_last_save_point()?;
-				}
+				// if the transaction is successful, we can release the save point.
+				ctx.tx().lock().await.release_last_save_point()?;
 				return Ok(x);
 			}
 		};
 
 		// Insertion failed so instead do an update.
+		// Always rollback to save point here, regardless of retryable flag.
+		// This ensures we can properly handle ON DUPLICATE KEY UPDATE by
+		// rolling back to the state before the failed insert attempt.
 		ctx.tx().lock().await.rollback_to_save_point().await?;
 
 		if ctx.is_done(true).await? {
@@ -133,8 +134,8 @@ impl Document {
 			return Err(IgnoreError::Ignore);
 		}
 
-		let (ns, db) = opt.ns_db()?;
-		let val = ctx.tx().get_record(ns, db, &retry.tb, &retry.id, opt.version).await?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		let val = ctx.tx().get_record(ns, db, &retry.table, &retry.key, opt.version).await?;
 
 		self.modify_for_update_retry(retry, val);
 
@@ -156,14 +157,14 @@ impl Document {
 		self.check_permissions_quick(stk, ctx, opt, stm).await?;
 		self.check_table_type(ctx, opt, stm).await?;
 		self.check_data_fields(stk, ctx, opt, stm).await?;
-		self.process_merge_data(stk, ctx, opt, stm).await?;
+		self.process_merge_data().await?;
 		self.store_edges_data(ctx, opt, stm).await?;
+		self.default_record_data(ctx, opt, stm).await?;
 		self.process_table_fields(stk, ctx, opt, stm).await?;
 		self.cleanup_table_fields(ctx, opt, stm).await?;
-		self.default_record_data(ctx, opt, stm).await?;
 		self.check_permissions_table(stk, ctx, opt, stm).await?;
-		self.store_record_data(ctx, opt, stm).await?;
 		self.store_index_data(stk, ctx, opt, stm).await?;
+		self.store_record_data(ctx, opt, stm).await?;
 		self.process_table_views(stk, ctx, opt, stm).await?;
 		self.process_table_lives(stk, ctx, opt, stm).await?;
 		self.process_table_events(stk, ctx, opt, stm).await?;
@@ -184,12 +185,12 @@ impl Document {
 		self.check_data_fields(stk, ctx, opt, stm).await?;
 		self.check_permissions_table(stk, ctx, opt, stm).await?;
 		self.process_record_data(stk, ctx, opt, stm).await?;
+		self.default_record_data(ctx, opt, stm).await?;
 		self.process_table_fields(stk, ctx, opt, stm).await?;
 		self.cleanup_table_fields(ctx, opt, stm).await?;
-		self.default_record_data(ctx, opt, stm).await?;
 		self.check_permissions_table(stk, ctx, opt, stm).await?;
-		self.store_record_data(ctx, opt, stm).await?;
 		self.store_index_data(stk, ctx, opt, stm).await?;
+		self.store_record_data(ctx, opt, stm).await?;
 		self.process_table_views(stk, ctx, opt, stm).await?;
 		self.process_table_lives(stk, ctx, opt, stm).await?;
 		self.process_table_events(stk, ctx, opt, stm).await?;

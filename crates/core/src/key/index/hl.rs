@@ -1,30 +1,41 @@
 //! Store and chunked layers of an HNSW index
-use crate::kvs::impl_key;
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::fmt::Debug;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[non_exhaustive]
-pub struct Hl<'a> {
+use storekey::{BorrowDecode, Encode};
+
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::kvs::impl_kv_key_storekey;
+
+#[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
+pub(crate) struct Hl<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: &'a str,
+	pub ns: NamespaceId,
 	_b: u8,
-	pub db: &'a str,
+	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
 	pub layer: u16,
 	pub chunk: u32,
 }
-impl_key!(Hl<'a>);
+
+impl_kv_key_storekey!(Hl<'_> => Vec<u8>);
 
 impl<'a> Hl<'a> {
-	pub fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str, layer: u16, chunk: u32) -> Self {
+	pub fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &'a str,
+		ix: IndexId,
+		layer: u16,
+		chunk: u32,
+	) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -32,7 +43,7 @@ impl<'a> Hl<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -46,21 +57,18 @@ impl<'a> Hl<'a> {
 
 #[cfg(test)]
 mod tests {
-	use crate::kvs::{KeyDecode, KeyEncode};
+	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {
-		use super::*;
-		let val = Hl::new("testns", "testdb", "testtb", "testix", 7, 8);
-		let enc = Hl::encode(&val).unwrap();
+		let val = Hl::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), 7, 8);
+		let enc = Hl::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*testns\0*testdb\0*testtb\0+testix\0!hl\0\x07\0\0\0\x08",
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hl\0\x07\0\0\0\x08",
 			"{}",
 			String::from_utf8_lossy(&enc)
 		);
-
-		let dec = Hl::decode(&enc).unwrap();
-		assert_eq!(val, dec);
 	}
 }

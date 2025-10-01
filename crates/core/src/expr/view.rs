@@ -1,23 +1,50 @@
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Value, cond::Cond, field::Fields, group::Groups, table::Tables};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
+use std::fmt::Debug;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+use crate::catalog::ViewDefinition;
+use crate::expr::expression::VisitExpression;
+use crate::expr::statements::info::InfoStructure;
+use crate::expr::{Cond, Expr, Fields, Groups, Value};
+use crate::fmt::{EscapeIdent, Fmt};
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct View {
 	pub expr: Fields,
-	pub what: Tables,
+	pub what: Vec<String>,
 	pub cond: Option<Cond>,
 	pub group: Option<Groups>,
 }
 
+impl VisitExpression for View {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.expr.visit(visitor);
+		self.cond.iter().for_each(|cond| cond.0.visit(visitor));
+		self.group.iter().for_each(|groups| groups.visit(visitor));
+	}
+}
+
+impl View {
+	pub(crate) fn to_definition(&self) -> ViewDefinition {
+		ViewDefinition {
+			fields: self.expr.clone(),
+			what: self.what.clone(),
+			cond: self.cond.clone().map(|c| c.0),
+			groups: self.group.clone(),
+		}
+	}
+}
+
 impl fmt::Display for View {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "AS SELECT {} FROM {}", self.expr, self.what)?;
+		write!(
+			f,
+			"AS SELECT {} FROM {}",
+			self.expr,
+			Fmt::comma_separated(self.what.iter().map(EscapeIdent))
+		)?;
 		if let Some(ref v) = self.cond {
 			write!(f, " {v}")?
 		}

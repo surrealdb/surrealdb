@@ -1,7 +1,8 @@
-use criterion::measurement::WallTime;
-use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use std::collections::HashSet;
 use std::time::{Duration, SystemTime};
+
+use criterion::measurement::WallTime;
+use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use surrealdb_core::idx::trees::dynamicset::{AHashSet, ArraySet, DynamicSet};
 
 fn bench_hashset(samples_vec: &Vec<Vec<u64>>) {
@@ -73,10 +74,11 @@ fn create_samples(capacity: usize, num_samples: usize) -> Vec<Vec<u64>> {
 	res
 }
 
-/// This bench compares the performance of insert and search for small size HashSet collections.
-/// It compares HashSet, HashBrown, Vector and SmallVec.
-/// It is used to help choosing the best options for the UndirectedGraph used for the HNSW index.
-/// The ultimate goal is to be sure that the DynamicSet use the best option based on the expected capacity.
+/// This bench compares the performance of insert and search for small size
+/// HashSet collections. It compares HashSet, HashBrown, Vector and SmallVec.
+/// It is used to help choosing the best options for the UndirectedGraph used
+/// for the HNSW index. The ultimate goal is to be sure that the DynamicSet use
+/// the best option based on the expected capacity.
 fn bench_hashset_vs_vector(c: &mut Criterion) {
 	const ITERATIONS: usize = 1_000_000;
 

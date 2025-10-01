@@ -1,124 +1,152 @@
-use crate::ctx::Context;
-use crate::dbs::{self, Notification, Options};
-use crate::err::Error;
-use crate::expr::statements::define::DefineTableStatement;
-use crate::expr::{Base, Ident, Value};
-use crate::iam::{Action, ResourceKind};
+use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display, Formatter};
+use reblessive::tree::Stk;
 use uuid::Uuid;
 
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+use crate::catalog::TableDefinition;
+use crate::catalog::providers::TableProvider;
+use crate::ctx::Context;
+use crate::dbs::{self, Notification, Options};
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::expr::expression::VisitExpression;
+use crate::expr::parameterize::expr_to_ident;
+use crate::expr::{Base, Expr, Literal, Value};
+use crate::iam::{Action, ResourceKind};
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RemoveTableStatement {
-	pub name: Ident,
-	#[revision(start = 2)]
+	pub name: Expr,
 	pub if_exists: bool,
-	#[revision(start = 3)]
 	pub expunge: bool,
+}
+
+impl VisitExpression for RemoveTableStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.name.visit(visitor);
+	}
+}
+impl Default for RemoveTableStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			if_exists: false,
+			expunge: false,
+		}
+	}
 }
 
 impl RemoveTableStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
+		// Compute the name
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "table name").await?;
 		// Get the NS and DB
-		let (ns, db) = opt.ns_db()?;
+		let (ns_name, db_name) = opt.ns_db()?;
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
 		// Remove the index stores
 		#[cfg(not(target_family = "wasm"))]
-		ctx.get_index_stores()
-			.table_removed(ctx.get_index_builder(), &txn, ns, db, &self.name)
-			.await?;
+		ctx.get_index_stores().table_removed(ctx.get_index_builder(), &txn, ns, db, &name).await?;
 		#[cfg(target_family = "wasm")]
-		ctx.get_index_stores().table_removed(&txn, ns, db, &self.name).await?;
+		ctx.get_index_stores().table_removed(&txn, ns, db, &name).await?;
 		// Get the defined table
-		let tb = match txn.get_tb(ns, db, &self.name).await {
-			Ok(x) => x,
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::TbNotFound { .. })) {
-					return Ok(Value::None);
-				} else {
-					return Err(e);
-				}
+		let Some(tb) = txn.get_tb(ns, db, &name).await? else {
+			if self.if_exists {
+				return Ok(Value::None);
 			}
+
+			return Err(Error::TbNotFound {
+				name,
+			}
+			.into());
 		};
+
 		// Get the foreign tables
-		let fts = txn.all_tb_views(ns, db, &self.name).await?;
+		let fts = txn.all_tb_views(ns, db, &name).await?;
 		// Get the live queries
-		let lvs = txn.all_tb_lives(ns, db, &self.name).await?;
+		let lvs = txn.all_tb_lives(ns, db, &name).await?;
+
 		// Delete the definition
-		let key = crate::key::database::tb::new(ns, db, &self.name);
-		match self.expunge {
-			true => txn.clr(key).await?,
-			false => txn.del(key).await?,
+		if self.expunge {
+			txn.clr_tb(ns_name, db_name, &name).await?
+		} else {
+			txn.del_tb(ns_name, db_name, &name).await?
 		};
+
 		// Remove the resource data
-		let key = crate::key::table::all::new(ns, db, &self.name);
-		match self.expunge {
-			true => txn.clrp(key).await?,
-			false => txn.delp(key).await?,
+		let key = crate::key::table::all::new(ns, db, &name);
+		if self.expunge {
+			txn.clrp(&key).await?
+		} else {
+			txn.delp(&key).await?
 		};
 		// Process each attached foreign table
 		for ft in fts.iter() {
 			// Refresh the table cache
-			let key = crate::key::database::tb::new(ns, db, &ft.name);
-			let tb = txn.get_tb(ns, db, &ft.name).await?;
-			txn.set(
-				key,
-				revision::to_vec(&DefineTableStatement {
+			let foreign_tb = txn.expect_tb(ns, db, &ft.name).await?;
+			txn.put_tb(
+				ns_name,
+				db_name,
+				&TableDefinition {
 					cache_tables_ts: Uuid::now_v7(),
-					..tb.as_ref().clone()
-				})?,
-				None,
+					..foreign_tb.as_ref().clone()
+				},
 			)
 			.await?;
 		}
 		// Check if this is a foreign table
 		if let Some(view) = &tb.view {
 			// Process each foreign table
-			for ft in view.what.0.iter() {
+			for ft in view.what.iter() {
 				// Save the view config
-				let key = crate::key::table::ft::new(ns, db, ft, &self.name);
-				txn.del(key).await?;
+				let key = crate::key::table::ft::new(ns, db, ft, &name);
+				txn.del(&key).await?;
 				// Refresh the table cache for foreign tables
-				let key = crate::key::database::tb::new(ns, db, ft);
-				let tb = txn.get_tb(ns, db, ft).await?;
-				txn.set(
-					key,
-					revision::to_vec(&DefineTableStatement {
+				let foreign_tb = txn.expect_tb(ns, db, ft).await?;
+				txn.put_tb(
+					ns_name,
+					db_name,
+					&TableDefinition {
 						cache_tables_ts: Uuid::now_v7(),
-						..tb.as_ref().clone()
-					})?,
-					None,
+						..foreign_tb.as_ref().clone()
+					},
 				)
 				.await?;
 			}
 		}
-		if let Some(chn) = opt.sender.as_ref() {
+		if let Some(sender) = opt.broker.as_ref() {
 			for lv in lvs.iter() {
-				chn.send(Notification {
-					id: lv.id,
-					action: dbs::Action::Killed,
-					record: Value::None,
-					result: Value::None,
-				})
-				.await?;
+				sender
+					.send(Notification {
+						id: lv.id.into(),
+						action: dbs::Action::Killed,
+						record: Value::None,
+						result: Value::None,
+					})
+					.await;
 			}
 		}
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.name);
+			cache.clear_tb(ns, db, &name);
+			cache.clear();
 		}
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

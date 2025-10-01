@@ -1,8 +1,10 @@
-use crate::{dbs::Statement, expr::permission::PermissionKind};
+use crate::catalog::PermissionKind;
+use crate::dbs::Statement;
 
-// TODO(sgirones): For now keep it simple. In the future, we will allow for custom roles and policies using a more exhaustive list of actions and resources.
+// TODO(sgirones): For now keep it simple. In the future, we will allow for
+// custom roles and policies using a more exhaustive list of actions and
+// resources.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd)]
-#[non_exhaustive]
 pub enum Action {
 	View,
 	Edit,
@@ -27,7 +29,9 @@ impl From<&Statement<'_>> for Action {
 	fn from(stmt: &Statement) -> Self {
 		match stmt {
 			Statement::Live(_) => Action::View,
-			Statement::Select(_) => Action::View,
+			Statement::Select {
+				..
+			} => Action::View,
 			Statement::Show(_) => Action::View,
 			Statement::Create(_) => Action::Edit,
 			Statement::Upsert(_) => Action::Edit,

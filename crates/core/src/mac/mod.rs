@@ -5,13 +5,13 @@
 ///
 /// - `$key`: An expression representing the name of the environment variable.
 /// - `$t`: The type of the value to be parsed.
-/// - `$default`: The default value to fall back to if the environment variable
-///   is not set or parsing fails.
+/// - `$default`: The default value to fall back to if the environment variable is not set or
+///   parsing fails.
 ///
 /// # Return Value
 ///
-/// A lazy static variable of type `std::sync::LazyLock`, which holds the parsed value
-/// from the environment variable or the default value.
+/// A lazy static variable of type `std::sync::LazyLock`, which holds the parsed
+/// value from the environment variable or the default value.
 #[macro_export]
 macro_rules! lazy_env_parse {
 	// With no default specified
@@ -75,6 +75,25 @@ macro_rules! map {
 		$( $(if let $grant = $check)? $(if $guard)? { m.insert($k, $v); };)+
         m
     }};
+}
+
+/// Maps an optional value to a new value if the optional value is some, otherwise returns none.
+/// Useful when the computation is async
+macro_rules! map_opt {
+	($x:ident as $opt:expr => $exp:expr) => {
+		match $opt {
+			Some($x) => Some($exp),
+			None => None,
+		}
+	};
+}
+
+/// Computes a value and coerces it to a type
+macro_rules! compute_to {
+	($stk:ident, $ctx:ident, $opt:ident, $doc:ident, $x:expr => $t:ty) => {{
+		use crate::expr::FlowResultExt;
+		$stk.run(|stk| $x.compute(stk, $ctx, $opt, $doc)).await.catch_return()?.coerce_to::<$t>()?
+	}};
 }
 
 /// Extends a b-tree map of key-value pairs.
@@ -177,7 +196,7 @@ mod test {
 		let Ok(Error::Unreachable(msg)) = fail_func().unwrap_err().downcast() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:168: Reached unreachable code", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:187: Reached unreachable code", msg);
 	}
 
 	#[test]
@@ -185,7 +204,7 @@ mod test {
 		let Error::Unreachable(msg) = Error::unreachable("Reached unreachable code") else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:185: Reached unreachable code", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:204: Reached unreachable code", msg);
 	}
 
 	#[test]
@@ -193,6 +212,6 @@ mod test {
 		let Ok(Error::Unreachable(msg)) = fail_func_args().unwrap_err().downcast() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:172: Found test but expected other", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:191: Found test but expected other", msg);
 	}
 }

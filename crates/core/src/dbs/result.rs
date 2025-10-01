@@ -1,3 +1,6 @@
+use anyhow::Result;
+use reblessive::tree::Stk;
+
 use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::ctx::Context;
 #[cfg(storage)]
@@ -6,11 +9,9 @@ use crate::dbs::group::GroupsCollector;
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::{MemoryCollector, MemoryOrdered, MemoryOrderedLimit, MemoryRandom};
 use crate::dbs::{Options, Statement};
-use crate::expr::Value;
 use crate::expr::order::Ordering;
 use crate::idx::planner::RecordStrategy;
-use anyhow::Result;
-use reblessive::tree::Stk;
+use crate::val::Value;
 
 pub(super) enum Results {
 	None,

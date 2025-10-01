@@ -22,14 +22,14 @@ value = "[{ id: foo:baq, published: false, user: user:bla }, { id: foo:bar, publ
 */
 DEFINE ACCESS account ON DATABASE TYPE RECORD
 	SIGNUP ({
-		if(!string::is::email($email)){
+		if(!string::is_email($email)){
 			throw "Email field is not a valid email";
 		};
 		// id field to ensure consistant user ids so we can specify data upfront
 		(CREATE user SET id = $id, email = $email, pass = crypto::argon2::generate($pass)).id
 	})
 	SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
-	DURATION FOR TOKEN 15m, FOR SESSION 12h;
+	DURATION FOR TOKEN 17m, FOR SESSION 12h;
 
 DEFINE TABLE foo
 	PERMISSIONS

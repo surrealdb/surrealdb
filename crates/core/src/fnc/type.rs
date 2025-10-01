@@ -1,23 +1,19 @@
-use std::ops::Deref;
-
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::table::Table;
-use crate::expr::thing::Thing;
-use crate::expr::value::Value;
-use crate::expr::{
-	Array, Bytes, Datetime, Duration, File, FlowResultExt as _, Geometry, Idiom, Kind, Number,
-	Range, Strand, Uuid,
-};
-use crate::syn;
 use anyhow::{Result, bail, ensure};
 use geo::Point;
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
 
 use super::args::Optional;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::err::Error;
+use crate::expr::{FlowResultExt as _, Idiom, Kind};
+use crate::syn;
+use crate::val::{
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
+	RecordIdKeyRange, Table, Uuid, Value,
+};
 
 pub fn array((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<Array>()?.into())
@@ -107,13 +103,24 @@ pub fn range((val,): (Value,)) -> Result<Value> {
 
 pub fn record((rid, Optional(tb)): (Value, Optional<Value>)) -> Result<Value> {
 	match tb {
-		Some(Value::Strand(Strand(tb)) | Value::Table(Table(tb))) if tb.is_empty() => {
-			Err(anyhow::Error::new(Error::TbInvalid {
-				value: tb,
-			}))
+		Some(Value::String(tb)) => {
+			if tb.is_empty() {
+				Err(anyhow::Error::new(Error::TbInvalid {
+					value: tb,
+				}))
+			} else {
+				rid.cast_to_kind(&Kind::Record(vec![tb])).map_err(From::from)
+			}
 		}
-		Some(Value::Strand(Strand(tb)) | Value::Table(Table(tb))) => {
-			rid.cast_to_kind(&Kind::Record(vec![tb.into()])).map_err(From::from)
+
+		Some(Value::Table(tb)) => {
+			if tb.is_empty() {
+				Err(anyhow::Error::new(Error::TbInvalid {
+					value: tb.into_string(),
+				}))
+			} else {
+				rid.cast_to_kind(&Kind::Record(vec![tb.into_string()])).map_err(From::from)
+			}
 		}
 		Some(_) => Err(anyhow::Error::new(Error::InvalidArguments {
 			name: "type::record".into(),
@@ -124,7 +131,7 @@ pub fn record((rid, Optional(tb)): (Value, Optional<Value>)) -> Result<Value> {
 }
 
 pub fn string((val,): (Value,)) -> Result<Value> {
-	Ok(val.cast_to::<Strand>()?.into())
+	Ok(val.cast_to::<String>()?.into())
 }
 
 pub fn string_lossy((val,): (Value,)) -> Result<Value> {
@@ -138,44 +145,61 @@ pub fn string_lossy((val,): (Value,)) -> Result<Value> {
 }
 
 pub fn table((val,): (Value,)) -> Result<Value> {
-	Ok(Value::Table(Table(match val {
-		Value::Thing(t) => t.tb,
-		v => v.as_string(),
-	})))
+	let strand = match val {
+		// TODO: null byte check.
+		Value::RecordId(t) => t.table,
+		// TODO: Handle null byte
+		v => v.as_raw_string(),
+	};
+	Ok(Value::Table(Table::new(strand)))
 }
 
 pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> {
 	match (arg1, arg2) {
 		// Empty table name
-		(Value::Strand(arg1), _) if arg1.is_empty() => bail!(Error::TbInvalid {
-			value: arg1.as_string(),
+		(Value::String(arg1), _) if arg1.is_empty() => bail!(Error::TbInvalid {
+			value: arg1,
 		}),
 
 		// Handle second argument
-		(arg1, Some(arg2)) => Ok(Value::Thing(Thing {
-			id: match arg2 {
-				Value::Thing(v) => v.id,
+		(arg1, Some(arg2)) => Ok(Value::RecordId(RecordId {
+			key: match arg2 {
+				Value::RecordId(v) => v.key,
 				Value::Array(v) => v.into(),
 				Value::Object(v) => v.into(),
-				Value::Number(v) => v.into(),
-				Value::Range(v) => v.deref().to_owned().try_into()?,
+				Value::Number(v) => match v {
+					Number::Int(x) => x.into(),
+					// Safety: float -> string conversion cannot contain a null byte.
+					Number::Float(x) => x.to_string().into(),
+					// Safety: decimal -> string conversion cannot contain a null byte.
+					Number::Decimal(x) => x.to_string().into(),
+				},
+				Value::Range(v) => {
+					let res =
+						RecordIdKeyRange::from_value_range((*v).clone()).ok_or_else(|| {
+							Error::IdInvalid {
+								value: Value::Range(v).as_raw_string(),
+							}
+						})?;
+					RecordIdKey::Range(Box::new(res))
+				}
 				Value::Uuid(u) => u.into(),
 				ref v => {
-					let s = v.clone().as_string();
+					let s = v.to_raw_string();
 					ensure!(
 						!s.is_empty(),
 						Error::IdInvalid {
-							value: arg2.as_string(),
+							value: arg2.as_raw_string(),
 						}
 					);
-					s.into()
+					RecordIdKey::String(s)
 				}
 			},
-			tb: arg1.as_string(),
+			table: arg1.as_raw_string(),
 		})),
 
 		(arg1, None) => arg1
-			.cast_to::<Thing>()
+			.cast_to::<RecordId>()
 			.map(Value::from)
 			.map_err(Error::from)
 			.map_err(anyhow::Error::new),
@@ -187,14 +211,13 @@ pub fn uuid((val,): (Value,)) -> Result<Value> {
 }
 
 pub mod is {
-	use crate::expr::Geometry;
-	use crate::expr::table::Table;
-	use crate::expr::value::Value;
-	use crate::fnc::args::Optional;
 	use anyhow::Result;
 
+	use crate::fnc::args::Optional;
+	use crate::val::{Geometry, Value};
+
 	pub fn array((arg,): (Value,)) -> Result<Value> {
-		Ok(arg.is_array().into())
+		Ok((arg).is_array().into())
 	}
 
 	pub fn bool((arg,): (Value,)) -> Result<Value> {
@@ -278,10 +301,11 @@ pub mod is {
 	}
 
 	pub fn record((arg, Optional(table)): (Value, Optional<String>)) -> Result<Value> {
-		Ok(match table {
-			Some(tb) => arg.is_record_type(&[Table(tb)]).into(),
+		let res = match table {
+			Some(tb) => arg.is_record_type(&[tb]).into(),
 			None => arg.is_thing().into(),
-		})
+		};
+		Ok(res)
 	}
 
 	pub fn string((arg,): (Value,)) -> Result<Value> {
@@ -296,12 +320,17 @@ pub mod is {
 #[cfg(test)]
 mod tests {
 	use crate::err::Error;
-	use crate::expr::value::Value;
 	use crate::fnc::args::Optional;
+	use crate::val::Value;
 
 	#[test]
 	fn is_array() {
-		let value = super::is::array((vec!["hello", "world"].into(),)).unwrap();
+		let value = super::is::array((vec![
+			Value::String("hello".to_owned()),
+			Value::String("world".to_owned()),
+		]
+		.into(),))
+		.unwrap();
 		assert_eq!(value, Value::Bool(true));
 
 		let value = super::is::array(("test".into(),)).unwrap();

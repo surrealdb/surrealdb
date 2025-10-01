@@ -1,11 +1,9 @@
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter, Result};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use crate::fmt::{EscapeIdent, Fmt};
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub enum With {
 	NoIndex,
 	Index(Vec<String>),
@@ -18,7 +16,7 @@ impl Display for With {
 			With::NoIndex => f.write_str(" NOINDEX"),
 			With::Index(i) => {
 				f.write_str(" INDEX ")?;
-				f.write_str(&i.join(","))
+				Fmt::comma_separated(i.iter().map(EscapeIdent)).fmt(f)
 			}
 		}
 	}

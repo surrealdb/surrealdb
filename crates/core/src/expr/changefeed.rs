@@ -1,18 +1,16 @@
-use crate::expr::Value;
-use crate::expr::duration::Duration;
-use crate::expr::statements::info::InfoStructure;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
-use std::str;
 use std::time;
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[non_exhaustive]
+use revision::revisioned;
+
+use crate::expr::statements::info::InfoStructure;
+use crate::val::{Duration, Value};
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct ChangeFeed {
 	pub expiry: time::Duration,
-	#[revision(start = 2)]
 	pub store_diff: bool,
 }
 impl Display for ChangeFeed {

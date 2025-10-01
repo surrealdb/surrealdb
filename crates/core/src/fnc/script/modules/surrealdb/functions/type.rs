@@ -1,11 +1,8 @@
-use super::fut;
-use super::run;
-use crate::fnc::script::modules::impl_module_def;
 use js::prelude::Async;
 
-mod is;
+use super::{fut, run};
+use crate::fnc::script::modules::impl_module_def;
 
-#[non_exhaustive]
 pub struct Package;
 
 impl_module_def!(
@@ -22,7 +19,6 @@ impl_module_def!(
 	"file" => run,
 	"float" => run,
 	"int" => run,
-	"is" => (is::Package),
 	"number" => run,
 	"point" => run,
 	"regex" => run,
@@ -33,5 +29,29 @@ impl_module_def!(
 	"range" => run,
 	"record" => run,
 	"uuid" => run,
-	"geometry" => run
+	"geometry" => run,
+	"is_array" => run,
+	"is_bool" => run,
+	"is_bytes" => run,
+	"is_collection" => run,
+	"is_datetime" => run,
+	"is_decimal" => run,
+	"is_duration" => run,
+	"is_float" => run,
+	"is_geometry" => run,
+	"is_int" => run,
+	"is_line" => run,
+	"is_none" => run,
+	"is_null" => run,
+	"is_multiline" => run,
+	"is_multipoint" => run,
+	"is_multipolygon" => run,
+	"is_number" => run,
+	"is_object" => run,
+	"is_point" => run,
+	"is_polygon" => run,
+	"is_range" => run,
+	"is_record" => run,
+	"is_string" => run,
+	"is_uuid" => run
 );

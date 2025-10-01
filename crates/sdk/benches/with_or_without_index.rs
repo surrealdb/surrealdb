@@ -1,11 +1,11 @@
-use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use std::collections::BTreeMap;
 use std::time::Duration;
-use surrealdb::dbs::Session;
-use surrealdb::kvs::Datastore;
-use surrealdb_core::dbs::Capabilities;
+
+use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use surrealdb_core::dbs::capabilities::{FuncTarget, Targets};
-use surrealdb_core::expr::{Array, Number, Object, Value};
+use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::val::{Array, Number, Object, Value};
 use tokio::runtime::Runtime;
 
 fn bench_with_or_without_index(c: &mut Criterion) {

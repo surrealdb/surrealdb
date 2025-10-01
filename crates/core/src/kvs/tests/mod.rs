@@ -7,10 +7,13 @@
 	feature = "kv-surrealkv",
 ))]
 
+use std::future::Future;
+use std::sync::Arc;
+
+use uuid::Uuid;
+
 use super::Datastore;
 use crate::kvs::clock::SizedClock;
-use std::{future::Future, sync::Arc};
-use uuid::Uuid;
 
 macro_rules! include_tests {
 	($new_ds:ident => $($name:ident),* $(,)?) => {
@@ -64,15 +67,19 @@ where
 
 #[cfg(feature = "kv-mem")]
 mod mem {
-	use super::{ClockType, Kvs};
-	use crate::kvs::Datastore;
 	use uuid::Uuid;
+
+	use super::{ClockType, Kvs};
+	use crate::kvs::{Datastore, DatastoreFlavor};
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Use a memory datastore instance
 		let path = "memory";
 		// Setup the in-memory datastore
-		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_clock::<DatastoreFlavor>(path, Some(clock))
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::Mem)
 	}
@@ -82,18 +89,21 @@ mod mem {
 
 #[cfg(feature = "kv-rocksdb")]
 mod rocksdb {
-	use super::{ClockType, Kvs};
-	use crate::kvs::Datastore;
+	use temp_dir::TempDir;
 	use uuid::Uuid;
 
-	use temp_dir::TempDir;
+	use super::{ClockType, Kvs};
+	use crate::kvs::{Datastore, DatastoreFlavor};
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the temporary data storage path
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		let path = format!("rocksdb:{path}");
 		// Setup the RocksDB datastore
-		let ds = Datastore::new_with_clock(&path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_clock::<DatastoreFlavor>(&path, Some(clock))
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::Rocksdb)
 	}
@@ -103,18 +113,21 @@ mod rocksdb {
 
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv {
-	use super::{ClockType, Kvs};
-	use crate::kvs::Datastore;
+	use temp_dir::TempDir;
 	use uuid::Uuid;
 
-	use temp_dir::TempDir;
+	use super::{ClockType, Kvs};
+	use crate::kvs::{Datastore, DatastoreFlavor};
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the temporary data storage path
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		let path = format!("surrealkv:{path}");
 		// Setup the SurrealKV datastore
-		let ds = Datastore::new_with_clock(&path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_clock::<DatastoreFlavor>(&path, Some(clock))
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::SurrealKV)
 	}
@@ -124,15 +137,19 @@ mod surrealkv {
 
 #[cfg(feature = "kv-tikv")]
 mod tikv {
-	use super::{ClockType, Kvs};
-	use crate::kvs::{Datastore, LockType, TransactionType};
 	use uuid::Uuid;
+
+	use super::{ClockType, Kvs};
+	use crate::kvs::{Datastore, DatastoreFlavor, LockType, TransactionType};
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the cluster connection string
 		let path = "tikv:127.0.0.1:2379";
 		// Setup the TiKV datastore
-		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_clock::<DatastoreFlavor>(path, Some(clock))
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Clear any previous test entries
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
 		tx.delr(vec![0u8]..vec![0xffu8]).await.unwrap();
@@ -146,18 +163,22 @@ mod tikv {
 
 #[cfg(feature = "kv-fdb")]
 mod fdb {
-	use super::{ClockType, Kvs};
-	use crate::kvs::{Datastore, LockType, TransactionType};
 	use uuid::Uuid;
+
+	use super::{ClockType, Kvs};
+	use crate::kvs::{Datastore, DatastoreFlavor, LockType, TransactionType};
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the cluster connection string
 		let path = "fdb:/etc/foundationdb/fdb.cluster";
 		// Setup the FoundationDB datastore
-		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_clock::<DatastoreFlavor>(path, Some(clock))
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Clear any previous test entries
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
-		tx.delp(vec![]).await.unwrap();
+		tx.delp(&vec![]).await.unwrap();
 		tx.commit().await.unwrap();
 		// Return the datastore
 		(ds, Kvs::Fdb)

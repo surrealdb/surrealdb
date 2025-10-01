@@ -1,11 +1,10 @@
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::dbs::Statement;
-use crate::doc::Document;
-use crate::expr::value::Value;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
+use crate::ctx::Context;
+use crate::dbs::{Options, Statement};
+use crate::doc::Document;
+use crate::val::Value;
 
 impl Document {
 	pub(super) async fn delete(

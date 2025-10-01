@@ -1,73 +1,85 @@
+use std::fmt::{self, Write};
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+
+use super::DefineKind;
+use crate::catalog::providers::DatabaseProvider;
+use crate::catalog::{MlModelDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Permission, Strand, Value};
+use crate::expr::expression::VisitExpression;
+use crate::expr::{Base, Expr};
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
-use anyhow::{Result, bail};
+use crate::val::Value;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Write};
-
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct DefineModelStatement {
+	pub kind: DefineKind,
 	pub hash: String,
-	pub name: Ident,
+	pub name: String,
 	pub version: String,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 	pub permissions: Permission,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
+}
+
+impl VisitExpression for DefineModelStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.comment.iter().for_each(|expr| expr.visit(visitor));
+	}
 }
 
 impl DefineModelStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
-		let (ns, db) = opt.ns_db()?;
-		if txn.get_db_model(ns, db, &self.name, &self.version).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::MlAlreadyExists {
-					name: self.name.to_string(),
-				});
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		if let Some(model) = txn.get_db_model(ns, db, &self.name, &self.version).await? {
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::MlAlreadyExists {
+							name: model.name.to_string(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 		}
+
 		// Process the statement
 		let key = crate::key::database::ml::new(ns, db, &self.name, &self.version);
-		txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.get_or_add_db(ns, db, opt.strict).await?;
 		txn.set(
-			key,
-			revision::to_vec(&DefineModelStatement {
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				..self.clone()
-			})?,
+			&key,
+			&MlModelDefinition {
+				hash: self.hash.clone(),
+				name: self.name.clone(),
+				version: self.version.clone(),
+				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+				permissions: self.permissions.clone(),
+			},
 			None,
 		)
 		.await?;
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -76,11 +88,10 @@ impl DefineModelStatement {
 impl fmt::Display for DefineModelStatement {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		write!(f, "DEFINE MODEL")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " ml::{}<{}>", self.name, self.version)?;
 		if let Some(comment) = self.comment.as_ref() {
@@ -94,16 +105,5 @@ impl fmt::Display for DefineModelStatement {
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
 		Ok(())
-	}
-}
-
-impl InfoStructure for DefineModelStatement {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"name".to_string() => self.name.structure(),
-			"version".to_string() => self.version.into(),
-			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-		})
 	}
 }

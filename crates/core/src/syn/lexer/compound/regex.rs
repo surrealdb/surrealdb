@@ -1,40 +1,22 @@
-use regex::Regex;
-
-use crate::syn::{
-	error::{SyntaxError, bail, syntax_error},
-	lexer::Lexer,
-	token::{Token, t},
-};
+use crate::syn::error::{SyntaxError, bail, syntax_error};
+use crate::syn::lexer::Lexer;
+use crate::syn::token::{Token, t};
+use crate::val::Regex;
 
 pub fn regex(lexer: &mut Lexer, start: Token) -> Result<Regex, SyntaxError> {
 	assert_eq!(start.kind, t!("/"), "Invalid start token of regex compound");
-	lexer.scratch.clear();
 
 	loop {
 		match lexer.reader.next() {
 			Some(b'\\') => {
-				// We can't just eat all bytes after a \ because a byte might be non-ascii.
-				if lexer.eat(b'/') {
-					lexer.scratch.push('/');
-				} else {
-					lexer.scratch.push('\\');
+				if let Some(x) = lexer.reader.next() {
+					lexer.reader.convert_to_char(x)?;
 				}
 			}
 			Some(b'/') => break,
+			Some(x) if x.is_ascii() => {}
 			Some(x) => {
-				if !x.is_ascii() {
-					match lexer.reader.complete_char(x) {
-						Err(e) => {
-							let span = lexer.current_span();
-							bail!("Invalid token: {e}", @span);
-						}
-						Ok(x) => {
-							lexer.scratch.push(x);
-						}
-					}
-				} else {
-					lexer.scratch.push(x as char);
-				}
+				lexer.reader.complete_char(x)?;
 			}
 			None => {
 				let span = lexer.current_span();
@@ -43,8 +25,14 @@ pub fn regex(lexer: &mut Lexer, start: Token) -> Result<Regex, SyntaxError> {
 		}
 	}
 
-	let span = lexer.current_span();
-	let regex = lexer.scratch.parse().map_err(|e| syntax_error!("Invalid regex: {e}", @span))?;
-	lexer.scratch.clear();
+	let mut span = lexer.current_span();
+	// the `\`
+	span.len -= 2;
+	span.offset += 1;
+
+	// Safety: We checked the bytes for utf-8 validity so this is sound.
+	let s = unsafe { std::str::from_utf8_unchecked(lexer.span_bytes(span)) };
+
+	let regex = s.parse().map_err(|e| syntax_error!("Invalid regex: {e}", @span))?;
 	Ok(regex)
 }

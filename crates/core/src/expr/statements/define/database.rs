@@ -1,80 +1,114 @@
+use std::fmt::{self, Display};
+
+use anyhow::{Result, bail};
+use reblessive::tree::Stk;
+
+use super::DefineKind;
+use crate::catalog::DatabaseDefinition;
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::changefeed::ChangeFeed;
+use crate::expr::expression::VisitExpression;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident, Strand, Value, changefeed::ChangeFeed};
+use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
-use anyhow::{Result, bail};
+use crate::val::Value;
 
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::fmt::{self, Display};
-
-#[revisioned(revision = 3)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineDatabaseStatement {
+	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
-	pub comment: Option<Strand>,
+	pub name: Expr,
+	pub comment: Option<Expr>,
 	pub changefeed: Option<ChangeFeed>,
-	#[revision(start = 2)]
-	pub if_not_exists: bool,
-	#[revision(start = 3)]
-	pub overwrite: bool,
+}
+
+impl VisitExpression for DefineDatabaseStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.name.visit(visitor);
+		self.comment.iter().for_each(|comment| comment.visit(visitor));
+	}
+}
+
+impl Default for DefineDatabaseStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			id: None,
+			name: Expr::Literal(Literal::None),
+			comment: None,
+			changefeed: None,
+		}
+	}
 }
 
 impl DefineDatabaseStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
+
 		// Get the NS
 		let ns = opt.ns()?;
+
 		// Fetch the transaction
 		let txn = ctx.tx();
-		// Check if the definition exists
-		if txn.get_db(ns, &self.name).await.is_ok() {
-			if self.if_not_exists {
-				return Ok(Value::None);
-			} else if !self.overwrite && !opt.import {
-				bail!(Error::DbAlreadyExists {
-					name: self.name.to_string(),
-				});
-			}
-		}
-		// Process the statement
-		let key = crate::key::namespace::db::new(ns, &self.name);
 		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
-		txn.set(
-			key,
-			revision::to_vec(&DefineDatabaseStatement {
-				id: match (self.id, nsv.id) {
-					(Some(id), _) => Some(id),
-					(None, Some(nsv_id)) => Some(txn.lock().await.get_next_db_id(nsv_id).await?),
-					(None, None) => None,
-				},
-				// Don't persist the `IF NOT EXISTS` clause to schema
-				if_not_exists: false,
-				overwrite: false,
-				..self.clone()
-			})?,
-			None,
-		)
-		.await?;
+
+		// Process the name
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "database name").await?;
+
+		// Check if the definition exists
+		let database_id = if let Some(db) = txn.get_db_by_name(ns, &name).await? {
+			match self.kind {
+				DefineKind::Default => {
+					if !opt.import {
+						bail!(Error::DbAlreadyExists {
+							name: name.clone(),
+						});
+					}
+				}
+				DefineKind::Overwrite => {}
+				DefineKind::IfNotExists => {
+					return Ok(Value::None);
+				}
+			}
+
+			db.database_id
+		} else {
+			txn.lock().await.get_next_db_id(nsv.namespace_id).await?
+		};
+
+		// Set the database definition, keyed by namespace name and database name.
+		let db_def = DatabaseDefinition {
+			namespace_id: nsv.namespace_id,
+			database_id,
+			name: name.clone(),
+			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			changefeed: self.changefeed,
+		};
+		txn.put_db(&nsv.name, db_def).await?;
+
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
 			cache.clear();
 		}
+
 		// Clear the cache
-		txn.clear();
+		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -83,15 +117,14 @@ impl DefineDatabaseStatement {
 impl Display for DefineDatabaseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "DEFINE DATABASE")?;
-		if self.if_not_exists {
-			write!(f, " IF NOT EXISTS")?
-		}
-		if self.overwrite {
-			write!(f, " OVERWRITE")?
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
+			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		if let Some(ref v) = self.changefeed {
 			write!(f, " {v}")?;
@@ -104,7 +137,7 @@ impl InfoStructure for DefineDatabaseStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
 			"name".to_string() => self.name.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"comment".to_string(), if let Some(v) = self.comment => v.structure(),
 		})
 	}
 }

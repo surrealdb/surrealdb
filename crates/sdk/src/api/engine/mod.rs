@@ -2,8 +2,8 @@
 
 pub mod any;
 #[cfg(any(
-	kv_fdb,
 	feature = "kv-mem",
+	feature = "kv-fdb",
 	feature = "kv-tikv",
 	feature = "kv-rocksdb",
 	feature = "kv-indxdb",
@@ -16,13 +16,10 @@ pub mod remote;
 #[doc(hidden)]
 pub mod tasks;
 
-use futures::Stream;
 use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
-use surrealdb_core::expr::Values as CoreValues;
-use surrealdb_core::sql::SqlValues as CoreSqlValues;
-use surrealdb_core::sql::{Edges as CoreSqlEdges, Object as CoreSqlObject, Thing as CoreSqlThing};
+use std::task::{Context, Poll};
+
+use futures::Stream;
 #[cfg(not(target_family = "wasm"))]
 use tokio::time::Instant;
 #[cfg(not(target_family = "wasm"))]
@@ -32,45 +29,28 @@ use wasmtimer::std::Instant;
 #[cfg(target_family = "wasm")]
 use wasmtimer::tokio::Interval;
 
-use crate::Value;
-
 use super::opt::Resource;
-use super::opt::Table;
+use crate::core::expr;
 
 // used in http and all local engines.
 #[allow(dead_code)]
-pub(crate) fn resource_to_sql_values(r: Resource) -> CoreSqlValues {
-	let mut res = CoreSqlValues::default();
+pub(crate) fn resource_to_exprs(r: Resource) -> Vec<expr::Expr> {
 	match r {
 		Resource::Table(x) => {
-			res.0 = vec![Table(x).into_core_sql().into()];
+			vec![expr::Expr::Table(x)]
 		}
-		Resource::RecordId(x) => res.0 = vec![CoreSqlThing::from(x.into_inner()).into()],
-		Resource::Object(x) => res.0 = vec![CoreSqlObject::from(x.into_inner()).into()],
-		Resource::Array(x) => res.0 = Value::array_to_core(x).into_iter().map(Into::into).collect(),
-		Resource::Edge(x) => res.0 = vec![CoreSqlEdges::from(x.into_inner()).into()],
-		Resource::Range(x) => res.0 = vec![CoreSqlThing::from(x.into_inner()).into()],
-		Resource::Unspecified => {}
-	}
-	res
-}
-
-// used in http and all local engines.
-#[allow(dead_code)]
-pub(crate) fn resource_to_values(r: Resource) -> CoreValues {
-	let mut res = CoreValues::default();
-	match r {
-		Resource::Table(x) => {
-			res.0 = vec![Table(x).into_core().into()];
+		Resource::RecordId(x) => {
+			vec![expr::Expr::Literal(expr::Literal::RecordId(x.into_inner().into_literal()))]
 		}
-		Resource::RecordId(x) => res.0 = vec![x.into_inner().into()],
-		Resource::Object(x) => res.0 = vec![x.into_inner().into()],
-		Resource::Array(x) => res.0 = Value::array_to_core(x),
-		Resource::Edge(x) => res.0 = vec![x.into_inner().into()],
-		Resource::Range(x) => res.0 = vec![x.into_inner().into()],
-		Resource::Unspecified => {}
+		Resource::Object(x) => {
+			vec![expr::Expr::Literal(expr::Literal::Object(x.into_inner().into_literal()))]
+		}
+		Resource::Array(x) => x.into_iter().map(|x| x.into_inner().into_literal()).collect(),
+		Resource::Range(x) => {
+			vec![expr::Expr::Literal(expr::Literal::RecordId(x.into_inner().into_literal()))]
+		}
+		Resource::Unspecified => vec![expr::Expr::Literal(expr::Literal::None)],
 	}
-	res
 }
 
 struct IntervalStream {

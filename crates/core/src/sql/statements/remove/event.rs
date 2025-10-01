@@ -1,18 +1,23 @@
-use crate::sql::Ident;
-
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
 
-#[revisioned(revision = 2)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+use crate::sql::{Expr, Literal};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
 pub struct RemoveEventStatement {
-	pub name: Ident,
-	pub what: Ident,
-	#[revision(start = 2)]
+	pub name: Expr,
+	pub what: Expr,
 	pub if_exists: bool,
+}
+
+impl Default for RemoveEventStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			what: Expr::Literal(Literal::None),
+			if_exists: false,
+		}
+	}
 }
 
 impl Display for RemoveEventStatement {
@@ -30,7 +35,7 @@ impl From<RemoveEventStatement> for crate::expr::statements::RemoveEventStatemen
 	fn from(v: RemoveEventStatement) -> Self {
 		crate::expr::statements::RemoveEventStatement {
 			name: v.name.into(),
-			what: v.what.into(),
+			table_name: v.what.into(),
 			if_exists: v.if_exists,
 		}
 	}
@@ -40,7 +45,7 @@ impl From<crate::expr::statements::RemoveEventStatement> for RemoveEventStatemen
 	fn from(v: crate::expr::statements::RemoveEventStatement) -> Self {
 		RemoveEventStatement {
 			name: v.name.into(),
-			what: v.what.into(),
+			what: v.table_name.into(),
 			if_exists: v.if_exists,
 		}
 	}

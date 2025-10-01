@@ -4,19 +4,21 @@ pub mod http;
 pub mod response;
 pub mod websocket;
 
-use crate::rpc::response::success;
-use crate::rpc::websocket::Websocket;
-use crate::telemetry::metrics::ws::NotificationContext;
-use futures::stream::FuturesUnordered;
-use opentelemetry::Context as TelemetryContext;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use surrealdb::kvs::Datastore;
+
+use futures::stream::FuturesUnordered;
+use opentelemetry::Context as TelemetryContext;
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
+
+use crate::core::kvs::Datastore;
+use crate::core::rpc::Data;
+use crate::rpc::websocket::Websocket;
+use crate::telemetry::metrics::ws::NotificationContext;
 
 static CONN_CLOSED_ERR: &str = "Connection closed normally";
 /// A type alias for an RPC Connection
@@ -78,7 +80,7 @@ pub(crate) async fn notifications(
 						// Ensure the specified WebSocket exists
 						if let Some(rpc) = websocket {
 							// Serialize the message to send
-							let message = success(None, notification);
+							let message = response::success(None, Data::Live(notification));
 							// Add telemetry metrics
 							let cx = TelemetryContext::new();
 							let not_ctx = NotificationContext::default()

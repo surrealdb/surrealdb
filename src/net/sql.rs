@@ -1,28 +1,25 @@
+use anyhow::Context;
+use axum::extract::ws::{Message, WebSocket};
+use axum::extract::{DefaultBodyLimit, Query, WebSocketUpgrade};
+use axum::response::IntoResponse;
+use axum::routing::options;
+use axum::{Extension, Router};
+use axum_extra::TypedHeader;
+use bytes::Bytes;
+use futures::{SinkExt, StreamExt};
+use tower_http::limit::RequestBodyLimitLayer;
+
 use super::AppState;
 use super::error::ResponseError;
 use super::headers::Accept;
 use super::output::Output;
 use crate::cnf::HTTP_MAX_SQL_BODY_SIZE;
+use crate::core::dbs::capabilities::RouteTarget;
+use crate::core::dbs::{Session, Variables};
+use crate::core::val::Value;
 use crate::net::error::Error as NetError;
 use crate::net::input::bytes_to_utf8;
-use crate::net::output;
 use crate::net::params::Params;
-use anyhow::Context;
-use axum::Extension;
-use axum::Router;
-use axum::extract::DefaultBodyLimit;
-use axum::extract::Query;
-use axum::extract::WebSocketUpgrade;
-use axum::extract::ws::Message;
-use axum::extract::ws::WebSocket;
-use axum::response::IntoResponse;
-use axum::routing::options;
-use axum_extra::TypedHeader;
-use bytes::Bytes;
-use futures::{SinkExt, StreamExt};
-use surrealdb::dbs::Session;
-use surrealdb::dbs::capabilities::RouteTarget;
-use tower_http::limit::RequestBodyLimitLayer;
 
 pub(super) fn router<S>() -> Router<S>
 where
@@ -55,17 +52,19 @@ async fn post_handler(
 	// Convert the received sql query
 	let sql = bytes_to_utf8(&sql).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Execute the received sql query
-	match db.execute(sql, &session, params.0.parse().into()).await {
+	match db.execute(sql, &session, Some(Variables::from(params.0.parse()))).await {
 		Ok(res) => match output.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => {
-				Ok(Output::json(&output::simplify(res).map_err(ResponseError)?))
+				let v = res.into_iter().map(|x| x.into_value()).collect::<Value>();
+				Ok(Output::json_value(&v))
 			}
 			Some(Accept::ApplicationCbor) => {
-				Ok(Output::cbor(&output::simplify(res).map_err(ResponseError)?))
+				let v = res.into_iter().map(|x| x.into_value()).collect::<Value>();
+				Ok(Output::cbor(&v))
 			}
 			// Internal serialization
-			Some(Accept::Surrealdb) => Ok(Output::full(&res)),
+			Some(Accept::Surrealdb) => Ok(Output::bincode(&res)),
 			// An incorrect content-type was requested
 			_ => Err(NetError::InvalidType.into()),
 		},
@@ -94,7 +93,9 @@ async fn handle_socket(state: AppState, ws: WebSocket, session: Session) {
 				// Execute the received sql query
 				let _ = match db.execute(sql, &session, None).await {
 					// Convert the response to JSON
-					Ok(v) => match serde_json::to_string(&v) {
+					Ok(v) => match crate::core::rpc::format::json::encode_str(Value::from(
+						v.into_iter().map(|x| x.into_value()).collect::<Vec<_>>(),
+					)) {
 						// Send the JSON response to the client
 						Ok(v) => tx.send(Message::Text(v)).await,
 						// There was an error converting to JSON

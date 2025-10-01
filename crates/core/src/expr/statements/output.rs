@@ -1,29 +1,27 @@
-use crate::dbs::Options;
-use crate::doc::CursorDoc;
-use crate::expr::ControlFlow;
-use crate::expr::fetch::Fetchs;
-use crate::expr::value::Value;
-use crate::{ctx::Context, expr::FlowResult};
-
-use reblessive::tree::Stk;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+use reblessive::tree::Stk;
+
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::doc::CursorDoc;
+use crate::expr::expression::VisitExpression;
+use crate::expr::fetch::Fetchs;
+use crate::expr::{ControlFlow, Expr, FlowResult};
+use crate::val::Value;
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct OutputStatement {
-	pub what: Value,
+	pub what: Expr,
 	pub fetch: Option<Fetchs>,
 }
 
 impl OutputStatement {
 	/// Check if we require a writeable transaction
-	pub(crate) fn writeable(&self) -> bool {
-		self.what.writeable()
+	pub(crate) fn read_only(&self) -> bool {
+		self.what.read_only()
 	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -32,10 +30,8 @@ impl OutputStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> FlowResult<Value> {
-		// Ensure futures are processed
-		let opt = &opt.new_with_futures(true);
 		// Process the output value
-		let mut value = self.what.compute(stk, ctx, opt, doc).await?;
+		let mut value = stk.run(|stk| self.what.compute(stk, ctx, opt, doc)).await?;
 		// Fetch any
 		if let Some(fetchs) = &self.fetch {
 			let mut idioms = Vec::with_capacity(fetchs.0.len());
@@ -48,6 +44,18 @@ impl OutputStatement {
 		}
 		//
 		Err(ControlFlow::Return(value))
+	}
+}
+
+impl VisitExpression for OutputStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.what.visit(visitor);
+		if let Some(fetchs) = &self.fetch {
+			fetchs.visit(visitor);
+		}
 	}
 }
 

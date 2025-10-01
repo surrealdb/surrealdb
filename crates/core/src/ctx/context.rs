@@ -1,47 +1,54 @@
-use crate::buc::store::ObjectStore;
-use crate::buc::{self, BucketConnectionKey, BucketConnections};
-use crate::cnf::PROTECTED_PARAM_NAMES;
-use crate::ctx::canceller::Canceller;
-use crate::ctx::reason::Reason;
-use crate::dbs::{Capabilities, Notification};
-use crate::err::Error;
-use crate::expr::value::Value;
-use crate::idx::planner::executor::QueryExecutor;
-use crate::idx::planner::{IterationStage, QueryPlanner};
-use crate::idx::trees::store::IndexStores;
-use crate::kvs::Transaction;
-use crate::kvs::cache::ds::DatastoreCache;
-use crate::kvs::sequences::Sequences;
-use crate::mem::ALLOC;
-use anyhow::{Result, bail};
-use async_channel::Sender;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::{self, Debug};
+#[cfg(storage)]
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use trice::Instant;
 
-#[cfg(feature = "http")]
-use crate::dbs::capabilities::NetTarget;
+use anyhow::{Result, bail};
+use async_channel::Sender;
+use trice::Instant;
 #[cfg(feature = "http")]
 use url::Url;
 
+use crate::buc::store::ObjectStore;
+use crate::buc::{self, BucketConnectionKey, BucketConnections};
+use crate::catalog::providers::{
+	BucketProvider, CatalogProvider, DatabaseProvider, NamespaceProvider,
+};
+use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
+use crate::cnf::PROTECTED_PARAM_NAMES;
+use crate::ctx::canceller::Canceller;
+use crate::ctx::reason::Reason;
+#[cfg(feature = "http")]
+use crate::dbs::capabilities::NetTarget;
+use crate::dbs::{Capabilities, Notification, Options, Session, Variables};
+use crate::err::Error;
+use crate::idx::planner::executor::QueryExecutor;
+use crate::idx::planner::{IterationStage, QueryPlanner};
+use crate::idx::trees::store::IndexStores;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::IndexBuilder;
-
-#[cfg(storage)]
-use std::path::PathBuf;
+use crate::kvs::Transaction;
+use crate::kvs::cache::ds::DatastoreCache;
+use crate::kvs::sequences::Sequences;
+use crate::kvs::slowlog::SlowLog;
+use crate::mem::ALLOC;
+use crate::val::Value;
 
 pub type Context = Arc<MutableContext>;
 
-#[non_exhaustive]
 pub struct MutableContext {
 	// An optional parent context.
 	parent: Option<Context>,
 	// An optional deadline.
 	deadline: Option<Instant>,
+	// An optional slow log configuration used by the executor to log statements
+	// that exceed a given duration threshold. This configuration is propagated
+	// from the datastore into the context for the lifetime of a request.
+	slow_log: Option<SlowLog>,
 	// Whether or not this context is cancelled.
 	cancelled: Arc<AtomicBool>,
 	// A collection of read only values stored in this context.
@@ -108,6 +115,7 @@ impl MutableContext {
 			values: HashMap::default(),
 			parent: None,
 			deadline: None,
+			slow_log: None,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: None,
 			query_planner: None,
@@ -132,6 +140,7 @@ impl MutableContext {
 		MutableContext {
 			values: HashMap::default(),
 			deadline: parent.deadline,
+			slow_log: parent.slow_log.clone(),
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: parent.notifications.clone(),
 			query_planner: parent.query_planner.clone(),
@@ -159,6 +168,7 @@ impl MutableContext {
 		Self {
 			values: HashMap::default(),
 			deadline: parent.deadline,
+			slow_log: parent.slow_log.clone(),
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: parent.notifications.clone(),
 			query_planner: parent.query_planner.clone(),
@@ -187,6 +197,7 @@ impl MutableContext {
 		Self {
 			values: HashMap::default(),
 			deadline: None,
+			slow_log: from.slow_log.clone(),
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: from.notifications.clone(),
 			query_planner: from.query_planner.clone(),
@@ -207,9 +218,10 @@ impl MutableContext {
 	}
 
 	/// Creates a new context from a configured datastore.
-	#[allow(clippy::too_many_arguments)]
+	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn from_ds(
 		time_out: Option<Duration>,
+		slow_log: Option<SlowLog>,
 		capabilities: Arc<Capabilities>,
 		index_stores: IndexStores,
 		#[cfg(not(target_family = "wasm"))] index_builder: IndexBuilder,
@@ -222,6 +234,7 @@ impl MutableContext {
 			values: HashMap::default(),
 			parent: None,
 			deadline: None,
+			slow_log,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: None,
 			query_planner: None,
@@ -256,6 +269,59 @@ impl MutableContext {
 			fail!("Tried to unfreeze a Context with multiple references")
 		};
 		Ok(x)
+	}
+
+	/// Get the namespace id for the current context.
+	/// If the namespace does not exist, it will be try to be created based on
+	/// the `strict` option.
+	pub(crate) async fn get_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
+		let ns = opt.ns()?;
+		let ns_def = self.tx().get_or_add_ns(ns, opt.strict).await?;
+		Ok(ns_def.namespace_id)
+	}
+
+	/// Get the namespace id for the current context.
+	/// If the namespace does not exist, it will return an error.
+	pub(crate) async fn expect_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
+		let ns = opt.ns()?;
+		let Some(ns_def) = self.tx().get_ns_by_name(ns).await? else {
+			return Err(Error::NsNotFound {
+				name: ns.to_string(),
+			}
+			.into());
+		};
+		Ok(ns_def.namespace_id)
+	}
+
+	/// Get the namespace and database ids for the current context.
+	/// If the namespace or database does not exist, it will be try to be
+	/// created based on the `strict` option.
+	pub(crate) async fn get_ns_db_ids(&self, opt: &Options) -> Result<(NamespaceId, DatabaseId)> {
+		let (ns, db) = opt.ns_db()?;
+		let db_def = self.tx().ensure_ns_db(ns, db, opt.strict).await?;
+		Ok((db_def.namespace_id, db_def.database_id))
+	}
+
+	/// Get the namespace and database ids for the current context.
+	/// If the namespace or database does not exist, it will return an error.
+	pub(crate) async fn expect_ns_db_ids(
+		&self,
+		opt: &Options,
+	) -> Result<(NamespaceId, DatabaseId)> {
+		let (ns, db) = opt.ns_db()?;
+		let Some(db_def) = self.tx().get_db_by_name(ns, db).await? else {
+			return Err(Error::DbNotFound {
+				name: db.to_string(),
+			}
+			.into());
+		};
+		Ok((db_def.namespace_id, db_def.database_id))
+	}
+
+	pub(crate) async fn get_db(&self, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
+		let (ns, db) = opt.ns_db()?;
+		let db_def = self.tx().ensure_ns_db(ns, db, opt.strict).await?;
+		Ok(db_def)
 	}
 
 	/// Add a value to the context. It overwrites any previously set values
@@ -317,6 +383,11 @@ impl MutableContext {
 		self.query_planner = Some(Arc::new(qp));
 	}
 
+	/// Cache a table-specific QueryExecutor in the Context.
+	///
+	/// This is set by the collector/processor when iterating over a specific
+	/// table or index so that downstream per-record operations can access the
+	/// executor without repeatedly looking it up from the QueryPlanner.
 	pub(crate) fn set_query_executor(&mut self, qe: QueryExecutor) {
 		self.query_executor = Some(qe);
 	}
@@ -341,6 +412,12 @@ impl MutableContext {
 		self.deadline.map(|v| v.saturating_duration_since(Instant::now()))
 	}
 
+	/// Returns the slow log configuration, if any, attached to this context.
+	/// The executor consults this to decide whether to emit slow-query log lines.
+	pub(crate) fn slow_log(&self) -> Option<&SlowLog> {
+		self.slow_log.as_ref()
+	}
+
 	pub(crate) fn notifications(&self) -> Option<Sender<Notification>> {
 		self.notifications.clone()
 	}
@@ -353,6 +430,8 @@ impl MutableContext {
 		self.query_planner.as_ref().map(|qp| qp.as_ref())
 	}
 
+	/// Get the cached QueryExecutor (if any) attached by the current iteration
+	/// context.
 	pub(crate) fn get_query_executor(&self) -> Option<&QueryExecutor> {
 		self.query_executor.as_ref()
 	}
@@ -375,6 +454,14 @@ impl MutableContext {
 	/// Return the sequences manager
 	pub(crate) fn get_sequences(&self) -> Option<&Sequences> {
 		self.sequences.as_ref()
+	}
+
+	pub(crate) fn try_get_sequences(&self) -> Result<&Sequences> {
+		if let Some(sqs) = self.get_sequences() {
+			Ok(sqs)
+		} else {
+			bail!(Error::Internal("Sequences are not supported in this context.".to_string(),))
+		}
 	}
 
 	// Get the current datastore cache
@@ -418,8 +505,8 @@ impl MutableContext {
 
 	/// Check if there is some reason to stop processing the current query.
 	///
-	/// Returns true when the query is canceled or if check_deadline is true when the query
-	/// deadline is met.
+	/// Returns true when the query is canceled or if check_deadline is true
+	/// when the query deadline is met.
 	pub(crate) async fn is_done(&self, deep_check: bool) -> Result<bool> {
 		if deep_check {
 			yield_now!();
@@ -463,6 +550,29 @@ impl MutableContext {
 		)
 	}
 
+	/// Attach a session to the context and add any session variables to the
+	/// context.
+	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
+		self.add_values(session.values());
+		if !session.variables.is_empty() {
+			self.attach_variables(session.variables.clone())?;
+		}
+		Ok(())
+	}
+
+	/// Attach variables to the context.
+	pub(crate) fn attach_variables(&mut self, vars: Variables) -> Result<(), Error> {
+		for (key, val) in vars {
+			if PROTECTED_PARAM_NAMES.contains(&key.as_str()) {
+				return Err(Error::InvalidParam {
+					name: key.clone(),
+				});
+			}
+			self.add_value(key, val.into());
+		}
+		Ok(())
+	}
+
 	//
 	// Capabilities
 	//
@@ -498,12 +608,13 @@ impl MutableContext {
 		Ok(())
 	}
 
-	/// Checks if the provided URL's network target is allowed based on current capabilities.
-	///
-	/// This function performs a validation to ensure that the outgoing network connection
-	/// specified by the provided `url` is permitted. It checks the resolved network targets
-	/// associated with the URL and ensures that all targets adhere to the configured
+	/// Checks if the provided URL's network target is allowed based on current
 	/// capabilities.
+	///
+	/// This function performs a validation to ensure that the outgoing network
+	/// connection specified by the provided `url` is permitted. It checks the
+	/// resolved network targets associated with the URL and ensures that all
+	/// targets adhere to the configured capabilities.
 	///
 	/// # Features
 	/// The function is only available if the `http` feature is enabled.
@@ -520,12 +631,11 @@ impl MutableContext {
 	///
 	/// # Behavior
 	/// 1. Extracts the host and port information from the URL.
-	/// 2. Constructs a [`NetTarget`] object and checks if it is allowed by the current
-	///    network capabilities.
-	/// 3. If the network target resolves to multiple targets (e.g., DNS resolution), each
-	///    target is validated individually.
-	/// 4. Logs a warning and prevents the connection if the target is denied by the
+	/// 2. Constructs a [`NetTarget`] object and checks if it is allowed by the current network
 	///    capabilities.
+	/// 3. If the network target resolves to multiple targets (e.g., DNS resolution), each target is
+	///    validated individually.
+	/// 4. Logs a warning and prevents the connection if the target is denied by the capabilities.
 	///
 	/// # Logging
 	/// - Logs a warning message if the network target is denied.
@@ -534,7 +644,6 @@ impl MutableContext {
 	/// # Errors
 	/// - `NetTargetNotAllowed`: Returned if any of the resolved targets are not allowed.
 	/// - `InvalidUrl`: Returned if the URL does not have a valid host.
-	///
 	#[cfg(feature = "http")]
 	pub(crate) async fn check_allowed_net(&self, url: &Url) -> Result<()> {
 		let match_any_deny_net = |t| {
@@ -580,8 +689,8 @@ impl MutableContext {
 	/// Obtain the connection for a bucket
 	pub(crate) async fn get_bucket_store(
 		&self,
-		ns: &str,
-		db: &str,
+		ns: NamespaceId,
+		db: DatabaseId,
 		bu: &str,
 	) -> Result<Arc<dyn ObjectStore>> {
 		// Do we have a buckets context?
@@ -593,7 +702,7 @@ impl MutableContext {
 			} else {
 				// Obtain the bucket definition
 				let tx = self.tx();
-				let bd = tx.get_db_bucket(ns, db, bu).await?;
+				let bd = tx.expect_db_bucket(ns, db, bu).await?;
 
 				// Connect to the bucket
 				let store = if let Some(ref backend) = bd.backend {
@@ -615,15 +724,17 @@ impl MutableContext {
 #[cfg(test)]
 mod tests {
 	#[cfg(feature = "http")]
+	use std::str::FromStr;
+
+	#[cfg(feature = "http")]
+	use url::Url;
+
+	#[cfg(feature = "http")]
 	use crate::ctx::MutableContext;
 	#[cfg(feature = "http")]
 	use crate::dbs::Capabilities;
 	#[cfg(feature = "http")]
 	use crate::dbs::capabilities::{NetTarget, Targets};
-	#[cfg(feature = "http")]
-	use std::str::FromStr;
-	#[cfg(feature = "http")]
-	use url::Url;
 
 	#[cfg(feature = "http")]
 	#[tokio::test]

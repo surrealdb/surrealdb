@@ -1,7 +1,8 @@
-use crate::cli::abstraction::DatabaseConnectionArguments;
 use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::any::connect;
+
+use crate::cli::abstraction::DatabaseConnectionArguments;
 
 #[derive(Args, Debug)]
 pub struct IsReadyCommandArguments {

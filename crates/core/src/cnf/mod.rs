@@ -1,6 +1,7 @@
-use crate::iam::file::extract_allowed_paths;
 use std::path::PathBuf;
 use std::sync::LazyLock;
+
+use crate::iam::file::extract_allowed_paths;
 
 /// The publicly visible name of the server
 pub const SERVER_NAME: &str = "SurrealDB";
@@ -14,7 +15,8 @@ pub const ID_CHARS: [char; 36] = [
 /// Specifies the names of parameters which can not be specified in a query
 pub const PROTECTED_PARAM_NAMES: &[&str] = &["access", "auth", "token", "session"];
 
-/// The memory usage threshold before tasks are forced to exit (default: 0 bytes)
+/// The memory usage threshold before tasks are forced to exit (default: 0
+/// bytes)
 pub static MEMORY_THRESHOLD: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_MEMORY_THRESHOLD", usize, 0);
 
@@ -23,11 +25,13 @@ pub static MEMORY_THRESHOLD: LazyLock<usize> =
 pub static MAX_CONCURRENT_TASKS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_MAX_CONCURRENT_TASKS", usize, 64);
 
-/// Specifies how deep recursive computation will go before erroring (default: 120)
+/// Specifies how deep recursive computation will go before erroring (default:
+/// 120)
 pub static MAX_COMPUTATION_DEPTH: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_MAX_COMPUTATION_DEPTH", u32, 120);
 
-/// Specifies how deep the parser will parse nested objects and arrays (default: 100)
+/// Specifies how deep the parser will parse nested objects and arrays (default:
+/// 100)
 pub static MAX_OBJECT_PARSING_DEPTH: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_MAX_OBJECT_PARSING_DEPTH", u32, 100);
 
@@ -43,35 +47,43 @@ pub static IDIOM_RECURSION_LIMIT: LazyLock<usize> =
 pub static REGEX_SIZE_LIMIT: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_REGEX_SIZE_LIMIT", usize, 10 * 1024 * 1024);
 
-/// Specifies the number of computed regexes which can be cached in the engine (default: 1000)
+/// Specifies the number of computed regexes which can be cached in the engine
+/// (default: 1000)
 pub static REGEX_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_REGEX_CACHE_SIZE", usize, 1_000);
 
-/// Specifies the number of items which can be cached within a single transaction (default: 10,000)
+/// Specifies the number of items which can be cached within a single
+/// transaction (default: 10,000)
 pub static TRANSACTION_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_TRANSACTION_CACHE_SIZE", usize, 10_000);
 
-/// Specifies the number of definitions which can be cached across transactions (default: 1,000)
+/// Specifies the number of definitions which can be cached across transactions
+/// (default: 1,000)
 pub static DATASTORE_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_DATASTORE_CACHE_SIZE", usize, 1_000);
 
-/// The maximum number of keys that should be scanned at once in general queries (default: 500)
+/// The maximum number of keys that should be scanned at once in general queries
+/// (default: 500)
 pub static NORMAL_FETCH_SIZE: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_NORMAL_FETCH_SIZE", u32, 500);
 
-/// The maximum number of keys that should be scanned at once for export queries (default: 1000)
+/// The maximum number of keys that should be scanned at once for export queries
+/// (default: 1000)
 pub static EXPORT_BATCH_SIZE: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_EXPORT_BATCH_SIZE", u32, 1000);
 
-/// The maximum number of keys that should be scanned at once for count queries (default: 10,000)
+/// The maximum number of keys that should be scanned at once for count queries
+/// (default: 10,000)
 pub static COUNT_BATCH_SIZE: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_COUNT_BATCH_SIZE", u32, 10_000);
 
-/// The maximum number of keys to scan at once per concurrent indexing batch (default: 250)
+/// The maximum number of keys to scan at once per concurrent indexing batch
+/// (default: 250)
 pub static INDEXING_BATCH_SIZE: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_INDEXING_BATCH_SIZE", u32, 250);
 
-/// The maximum size of the priority queue triggering usage of the priority queue for the result collector.
+/// The maximum size of the priority queue triggering usage of the priority
+/// queue for the result collector.
 pub static MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE", u32, 1000);
 
@@ -83,19 +95,39 @@ pub static SCRIPTING_MAX_STACK_SIZE: LazyLock<usize> =
 pub static SCRIPTING_MAX_MEMORY_LIMIT: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_SCRIPTING_MAX_MEMORY_LIMIT", usize, 2 << 20);
 
-/// The maximum amount of time that a JavaScript function can run (default: 5 seconds)
+/// The maximum amount of time that a JavaScript function can run (default: 5
+/// seconds)
 pub static SCRIPTING_MAX_TIME_LIMIT: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_SCRIPTING_MAX_TIME_LIMIT", usize, 5 * 1000);
 
-/// The maximum number of HTTP redirects allowed within http functions (default: 10)
+/// The maximum number of HTTP redirects allowed within http functions (default:
+/// 10)
 pub static MAX_HTTP_REDIRECTS: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_MAX_HTTP_REDIRECTS", usize, 10);
 
-/// Forward all authentication errors to the client. Do not use in production (default: false)
+/// The maximum number of idle HTTP connections to maintain per host (default: 128)
+pub static MAX_HTTP_IDLE_CONNECTIONS_PER_HOST: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_MAX_HTTP_IDLE_CONNECTIONS_PER_HOST", usize, 128);
+
+/// The maximum number of total idle HTTP connections to maintain (default: 1000)
+pub static MAX_HTTP_IDLE_CONNECTIONS: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_MAX_HTTP_IDLE_CONNECTIONS", usize, 1000);
+
+/// The timeout for idle HTTP connections before closing (default: 90 seconds)
+pub static HTTP_IDLE_TIMEOUT_SECS: LazyLock<u64> =
+	lazy_env_parse!("SURREAL_HTTP_IDLE_TIMEOUT_SECS", u64, 90);
+
+/// The timeout for connecting to HTTP endpoints (default: 30 seconds)
+pub static HTTP_CONNECT_TIMEOUT_SECS: LazyLock<u64> =
+	lazy_env_parse!("SURREAL_HTTP_CONNECT_TIMEOUT_SECS", u64, 30);
+
+/// Forward all authentication errors to the client. Do not use in production
+/// (default: false)
 pub static INSECURE_FORWARD_ACCESS_ERRORS: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_INSECURE_FORWARD_ACCESS_ERRORS", bool, false);
 
-/// The number of result records which will trigger on-disk sorting (default: 50,000)
+/// The number of result records which will trigger on-disk sorting (default:
+/// 50,000)
 #[cfg(storage)]
 pub static EXTERNAL_SORTING_BUFFER_LIMIT: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_EXTERNAL_SORTING_BUFFER_LIMIT", usize, 50_000);
@@ -129,3 +161,12 @@ pub static GLOBAL_BUCKET: LazyLock<Option<String>> =
 /// Whether to enforce a global bucket for file data (default: false)
 pub static GLOBAL_BUCKET_ENFORCED: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_GLOBAL_BUCKET_ENFORCED", bool, false);
+
+/// Whether to output in a form readable for devices like screen and braille
+/// readers For example, by showing ⟨ and ⟩ as `
+pub static ACCESSIBLE_OUTPUT: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_ACCESSIBLE_OUTPUT", bool, false);
+
+/// Specify the USER-AGENT string used by HTTP requests
+pub static SURREALDB_USER_AGENT: LazyLock<String> =
+	LazyLock::new(|| std::env::var("SURREAL_USER_AGENT").unwrap_or("SurrealDB".to_string()));

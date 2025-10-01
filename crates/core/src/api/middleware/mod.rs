@@ -1,63 +1,54 @@
-use std::ops::Deref;
-
 pub mod api;
 pub(super) mod invoke;
 
+use anyhow::{Result, bail};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-	err::Error,
-	expr::{Object, Value, statements::info::InfoStructure},
-};
+use crate::err::Error;
+use crate::expr::statements::info::InfoStructure;
+use crate::val::{Array, Object, Value};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-#[non_exhaustive]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 pub struct RequestMiddleware(pub Vec<(String, Vec<Value>)>);
-
-impl InfoStructure for RequestMiddleware {
-	fn structure(self) -> Value {
-		Value::Object(Object(self.0.into_iter().map(|(k, v)| (k, Value::from(v))).collect()))
-	}
-}
-
-impl Deref for RequestMiddleware {
-	type Target = Vec<(String, Vec<Value>)>;
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
-}
 
 pub type CollectedMiddleware<'a> = Vec<(&'a String, &'a Vec<Value>)>;
 
-pub trait CollectMiddleware<'a> {
-	fn collect(&'a self) -> Result<CollectedMiddleware<'a>, Error>;
-}
-
-impl<'a> CollectMiddleware<'a> for Vec<&'a RequestMiddleware> {
-	fn collect(&'a self) -> Result<CollectedMiddleware<'a>, Error> {
+impl RequestMiddleware {
+	pub fn collect<'a>(slice: &'a [&'a RequestMiddleware]) -> Result<CollectedMiddleware<'a>> {
 		let mut middleware: CollectedMiddleware<'a> = Vec::new();
-
-		for map in self.iter() {
-			for (k, v) in map.iter() {
+		for map in slice {
+			for (k, v) in map.0.iter() {
 				match k.split_once("::") {
 					Some(("api", _)) => middleware.push((k, v)),
 					Some(("fn", _)) => {
-						return Err(Error::Unreachable(
+						bail!(Error::Unimplemented(
 							"Custom middleware are not yet supported".into(),
 						));
 					}
 					_ => {
-						return Err(Error::Unreachable(
-							"Found a middleware which is unparsable".into(),
-						));
+						fail!("Found a middleware which is unparsable")
 					}
 				}
 			}
 		}
 
 		Ok(middleware)
+	}
+}
+
+impl InfoStructure for RequestMiddleware {
+	fn structure(self) -> Value {
+		Value::Object(Object(
+			self.0
+				.into_iter()
+				.map(|(k, v)| {
+					let value = v.iter().map(|x| Value::String(x.to_string())).collect();
+
+					(k, Value::Array(Array(value)))
+				})
+				.collect(),
+		))
 	}
 }
