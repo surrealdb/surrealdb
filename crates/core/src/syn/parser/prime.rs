@@ -1,3 +1,5 @@
+use core::f64;
+
 use reblessive::Stk;
 
 use super::basic::NumberToken;
@@ -7,7 +9,8 @@ use crate::sql::lookup::LookupKind;
 use crate::sql::{
 	Closure, Dir, Expr, Function, FunctionCall, Idiom, Kind, Literal, Mock, Param, Part, Script,
 };
-use crate::syn::error::bail;
+use crate::syn::error::{SyntaxError, bail};
+use crate::syn::lexer::Lexer;
 use crate::syn::lexer::compound::{self, Numeric};
 use crate::syn::parser::enter_object_recursion;
 use crate::syn::parser::mac::{expected, unexpected};
@@ -30,7 +33,8 @@ impl Parser<'_> {
 					NumberToken::Decimal(d) => Ok(Expr::Literal(Literal::Decimal(d))),
 				}
 			}
-			_ => {
+			TokenKind::Infinity => Ok(Expr::Literal(Literal::Float(f64::INFINITY))),
+			t!("+") | t!("-") | TokenKind::Digits => {
 				self.pop_peek();
 				let value = self.lexer.lex_compound(token, compound::numeric)?;
 				let v = match value.value {
@@ -43,6 +47,7 @@ impl Parser<'_> {
 				};
 				Ok(v)
 			}
+			_ => unexpected!(self, token, "a number"),
 		}
 	}
 
@@ -104,29 +109,32 @@ impl Parser<'_> {
 					unexpected!(self, token, "expected either a `<-` or a future")
 				}
 			}
-			t!("r\"") => {
+			t!("r\"") | t!("r'") => {
 				self.pop_peek();
-				let record_id = self.parse_record_string(stk, true).await?;
+				let source_str = self.lexer.span_str(token.span);
+				let str =
+					Lexer::unescape_string_span(source_str, token.span, &mut self.unscape_buffer)?;
+				let mut inner_parser = Parser::new(str.as_bytes());
+				let record_id = match stk.run(|stk| inner_parser.parse_record_id(stk)).await {
+					Ok(x) => x,
+					Err(e) => {
+						let e = e.update_spans(|span| {
+							let range = span.to_range();
+							let start = Lexer::escaped_string_offset(source_str, range.start);
+							let end = Lexer::escaped_string_offset(source_str, range.end);
+							*span = Span::from_range(
+								(token.span.offset + start)..(token.span.offset + end),
+							)
+						});
+						return Err(e);
+					}
+				};
 				Expr::Literal(Literal::RecordId(record_id))
 			}
-			t!("r'") => {
-				self.pop_peek();
-				let record_id = self.parse_record_string(stk, false).await?;
-				Expr::Literal(Literal::RecordId(record_id))
-			}
-			t!("d\"") | t!("d'") | TokenKind::Glued(Glued::Datetime) => {
-				let datetime = self.next_token_value()?;
-				Expr::Literal(Literal::Datetime(datetime))
-			}
-			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
-				let datetime = self.next_token_value()?;
-				Expr::Literal(Literal::Uuid(datetime))
-			}
-			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
-				let bytes = self.next_token_value()?;
-				Expr::Literal(Literal::Bytes(bytes))
-			}
-			t!("f\"") | t!("f'") | TokenKind::Glued(Glued::File) => {
+			t!("d\"") | t!("d'") => Expr::Literal(Literal::Datetime(self.next_token_value()?)),
+			t!("u\"") | t!("u'") => Expr::Literal(Literal::Uuid(self.next_token_value()?)),
+			t!("b\"") | t!("b'") => Expr::Literal(Literal::Bytes(self.next_token_value()?)),
+			t!("f\"") | t!("f'") => {
 				if !self.settings.files_enabled {
 					unexpected!(self, token, "the experimental files feature to be enabled");
 				}
@@ -134,11 +142,11 @@ impl Parser<'_> {
 				let file = self.next_token_value()?;
 				Expr::Literal(Literal::File(file))
 			}
-			t!("'") | t!("\"") | TokenKind::Glued(Glued::String) => {
-				let s = self.parse_string_lit()?;
+			t!("'") | t!("\"") => {
 				if self.settings.legacy_strands {
-					Expr::Literal(self.reparse_legacy_strand(stk, s).await)
+					Expr::Literal(self.reparse_legacy_strand(stk).await?)
 				} else {
+					let s = self.parse_string_lit()?;
 					Expr::Literal(Literal::String(s))
 				}
 			}
@@ -146,6 +154,10 @@ impl Parser<'_> {
 			| t!("-")
 			| TokenKind::Digits
 			| TokenKind::Glued(Glued::Number | Glued::Duration) => self.parse_number_like_prime()?,
+			TokenKind::Infinity => {
+				self.pop_peek();
+				Expr::Literal(Literal::Float(f64::INFINITY))
+			}
 			TokenKind::NaN => {
 				self.pop_peek();
 				Expr::Literal(Literal::Float(f64::NAN))
@@ -497,17 +509,26 @@ impl Parser<'_> {
 
 	/// Parses a strand with legacy rules, parsing to a record id, datetime or
 	/// uuid if the string matches.
-	pub(super) async fn reparse_legacy_strand(&mut self, stk: &mut Stk, text: String) -> Literal {
-		if let Ok(x) = Parser::new(text.as_bytes()).parse_record_id(stk).await {
-			return Literal::RecordId(x);
+	pub(super) async fn reparse_legacy_strand(
+		&mut self,
+		stk: &mut Stk,
+	) -> Result<Literal, SyntaxError> {
+		let token = self.next();
+		assert!(matches!(token.kind, t!("'") | t!("\"")));
+
+		let str = self.lexer.span_str(token.span);
+		let str = Lexer::unescape_string_span(str, token.span, &mut self.unscape_buffer)?;
+
+		if let Ok(x) = Lexer::lex_uuid(str) {
+			return Ok(Literal::Uuid(x));
 		}
-		if let Ok(x) = Parser::new(text.as_bytes()).next_token_value() {
-			return Literal::Datetime(x);
+		if let Ok(x) = Lexer::lex_datetime(str) {
+			return Ok(Literal::Datetime(x));
 		}
-		if let Ok(x) = Parser::new(text.as_bytes()).next_token_value() {
-			return Literal::Uuid(x);
+		if let Ok(x) = Parser::new(str.as_bytes()).parse_record_id(stk).await {
+			return Ok(Literal::RecordId(x));
 		}
-		Literal::String(text)
+		Ok(Literal::String(str.to_owned()))
 	}
 
 	async fn parse_script(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {

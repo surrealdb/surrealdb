@@ -12,21 +12,6 @@ use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::syn::token::{Glued, TokenKind, t};
 
 impl Parser<'_> {
-	pub(crate) async fn parse_record_string(
-		&mut self,
-		stk: &mut Stk,
-		double: bool,
-	) -> ParseResult<RecordIdLit> {
-		let thing = self.parse_record_id(stk).await?;
-
-		if double {
-			expected_whitespace!(self, t!("\""));
-		} else {
-			expected_whitespace!(self, t!("'"));
-		};
-		Ok(thing)
-	}
-
 	pub(crate) async fn parse_record_id_or_range(
 		&mut self,
 		stk: &mut Stk,

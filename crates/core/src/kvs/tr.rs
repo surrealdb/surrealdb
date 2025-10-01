@@ -57,7 +57,7 @@ impl From<bool> for LockType {
 
 /// A set of undoable updates and requests against a dataset.
 pub struct Transactor {
-	pub(super) inner: Box<dyn super::api::Transaction>,
+	pub(super) inner: Box<dyn Transaction>,
 	pub(super) stash: Stash,
 	pub(super) cf: cf::Writer,
 }

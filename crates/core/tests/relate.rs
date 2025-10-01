@@ -289,7 +289,9 @@ async fn relate_enforced() -> Result<()> {
 	//
 	t.skip_ok(1)?;
 	//
-	t.expect_error_func(|e| *e == DbResultError::InternalError("The record 'a:1' does not exist".to_string()))?;
+	t.expect_error_func(|e| {
+		*e == DbResultError::InternalError("The record 'a:1' does not exist".to_string())
+	})?;
 	//
 	t.expect_val("[{ id: a:1 }, { id: a:2 }]")?;
 	//

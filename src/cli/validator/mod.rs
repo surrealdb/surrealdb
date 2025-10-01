@@ -11,19 +11,6 @@ use surrealdb_core::kvs::export::TableConfig;
 
 pub(crate) mod parser;
 
-pub(crate) fn path_valid(v: &str) -> Result<String, String> {
-	match v {
-		"memory" => Ok(v.to_string()),
-		v if v.starts_with("file:") => Ok(v.to_string()),
-		v if v.starts_with("rocksdb:") => Ok(v.to_string()),
-		v if v.starts_with("surrealkv:") => Ok(v.to_string()),
-		v if v.starts_with("surrealkv+versioned:") => Ok(v.to_string()),
-		v if v.starts_with("tikv:") => Ok(v.to_string()),
-		v if v.starts_with("fdb:") => Ok(v.to_string()),
-		_ => Err(String::from("Provide a valid database path parameter")),
-	}
-}
-
 pub(crate) fn path_exists(path: &str) -> Result<PathBuf, String> {
 	let path = Path::new(path);
 	if !*path.try_exists().as_ref().map_err(ToString::to_string)? {

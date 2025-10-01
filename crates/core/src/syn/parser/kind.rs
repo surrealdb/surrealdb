@@ -188,7 +188,7 @@ impl Parser<'_> {
 				self.pop_peek();
 				Ok(KindLiteral::Bool(false))
 			}
-			t!("'") | t!("\"") | TokenKind::Glued(Glued::String) => {
+			t!("'") | t!("\"") => {
 				let s = self.parse_string_lit()?;
 				Ok(KindLiteral::String(s))
 			}
@@ -248,7 +248,7 @@ impl Parser<'_> {
 				| t!("false")
 				| t!("'") | t!("\"")
 				| t!("+") | t!("-")
-				| TokenKind::Glued(Glued::Duration | Glued::String | Glued::Number)
+				| TokenKind::Glued(Glued::Duration | Glued::Number)
 				| TokenKind::Digits
 				| t!("{") | t!("[")
 		)

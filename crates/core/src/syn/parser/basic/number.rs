@@ -1,3 +1,4 @@
+use core::f64;
 use std::mem;
 use std::num::ParseIntError;
 use std::str::FromStr;
@@ -136,7 +137,15 @@ impl TokenValue for Numeric {
 					}
 				}
 			}
-			t!("+") | t!("-") | TokenKind::Digits => {
+			t!("+") => {
+				parser.pop_peek();
+				Ok((parser.lexer.lex_compound(token, compound::number))?.value)
+			}
+			t!("-") => {
+				parser.pop_peek();
+				Ok((parser.lexer.lex_compound(token, compound::number))?.value)
+			}
+			TokenKind::Digits => {
 				parser.pop_peek();
 				Ok((parser.lexer.lex_compound(token, compound::number))?.value)
 			}

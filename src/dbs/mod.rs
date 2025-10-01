@@ -5,14 +5,14 @@ use std::time::Duration;
 use anyhow::Result;
 use clap::Args;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
-use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::{
+use surrealdb_core::kvs::{Datastore, TransactionBuilderFactory};
+
+use crate::cli::CF;
+use crate::core::dbs::Session;
+use crate::core::dbs::capabilities::{
 	ArbitraryQueryTarget, Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
 	RouteTarget, Targets,
 };
-use surrealdb_core::kvs::Datastore;
-
-use crate::cli::CF;
 
 const TARGET: &str = "surreal::dbs";
 
@@ -45,10 +45,25 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_IMPORT_FILE", long = "import-file")]
 	#[arg(value_parser = super::cli::validator::file_exists)]
 	import_file: Option<PathBuf>,
+	// Slow query logging configuration. When `slow_log_threshold` is set, any
+	// statement taking longer than the threshold will be logged along with a
+	// normalized, single-line SQL rendering. You can control which `$param`
+	// values appear in the log with the following lists:
+	// - `slow_log_param_deny` takes precedence and excludes matches.
+	// - If `slow_log_param_allow` is non-empty, only listed parameter names are included;
+	//   otherwise all parameters are allowed by default (subject to deny).
 	#[arg(help = "The minimum execution time in milliseconds to trigger slow query logging")]
 	#[arg(env = "SURREAL_SLOW_QUERY_LOG_THRESHOLD", long = "slow-log-threshold")]
 	#[arg(value_parser = super::cli::validator::duration)]
 	slow_log_threshold: Option<Duration>,
+	#[arg(help = "A comma-separated list of parameter names to include in slow query logs")]
+	#[arg(env = "SURREAL_SLOW_QUERY_LOG_PARAM_ALLOW", long = "slow-log-param-allow")]
+	#[arg(value_delimiter = ',', num_args = 1..)]
+	slow_log_param_allow: Vec<String>,
+	#[arg(help = "A comma-separated list of parameter names to omit from slow query logs")]
+	#[arg(env = "SURREAL_SLOW_QUERY_LOG_PARAM_DENY", long = "slow-log-param-deny")]
+	#[arg(value_delimiter = ',', num_args = 1..)]
+	slow_log_param_deny: Vec<String>,
 }
 
 #[derive(Args, Debug)]
@@ -545,9 +560,9 @@ impl From<DbsCapabilities> for Capabilities {
 	}
 }
 
-/// Initialise the database server
 #[instrument(level = "trace", target = "surreal::dbs", skip_all)]
-pub async fn init(
+/// Initialise the database server
+pub async fn init<F: TransactionBuilderFactory>(
 	StartCommandDbsOptions {
 		strict_mode,
 		query_timeout,
@@ -557,6 +572,8 @@ pub async fn init(
 		temporary_directory,
 		import_file,
 		slow_log_threshold,
+		slow_log_param_allow,
+		slow_log_param_deny,
 	}: StartCommandDbsOptions,
 ) -> Result<Datastore> {
 	// Get local copy of options
@@ -586,12 +603,18 @@ pub async fn init(
 	if let Some(v) = slow_log_threshold {
 		debug!("Slow log threshold is {v:?}");
 	}
+	if !slow_log_param_allow.is_empty() {
+		debug!("Slow log param allow is {:?}", slow_log_param_allow);
+	}
+	if !slow_log_param_deny.is_empty() {
+		debug!("Slow log param deny is {:?}", slow_log_param_deny);
+	}
 	// Convert the capabilities
 	let capabilities = capabilities.into();
 	// Log the specified server capabilities
 	debug!("Server capabilities: {capabilities}");
 	// Parse and setup the desired kv datastore
-	let dbs = Datastore::new(&opt.path)
+	let dbs = Datastore::new_with_factory::<F>(&opt.path)
 		.await?
 		.with_notifications()
 		.with_strict_mode(strict_mode)
@@ -600,7 +623,7 @@ pub async fn init(
 		.with_auth_enabled(!unauthenticated)
 		.with_temporary_directory(temporary_directory)
 		.with_capabilities(capabilities)
-		.with_slow_log_threshold(slow_log_threshold);
+		.with_slow_log(slow_log_threshold, slow_log_param_allow, slow_log_param_deny);
 	// Ensure the storage version is up to date to prevent corruption
 	dbs.check_version().await?;
 	// Import file at start, if provided

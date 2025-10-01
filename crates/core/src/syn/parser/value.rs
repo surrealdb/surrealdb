@@ -1,3 +1,4 @@
+use core::f64;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::Bound;
@@ -51,6 +52,10 @@ impl Parser<'_> {
 				self.pop_peek();
 				PublicValue::Number(PublicNumber::Float(f64::NAN))
 			}
+			TokenKind::Infinity => {
+				self.pop_peek();
+				PublicValue::Number(PublicNumber::Float(f64::INFINITY))
+			}
 			t!("true") => {
 				self.pop_peek();
 				PublicValue::Bool(true)
@@ -94,17 +99,9 @@ impl Parser<'_> {
 					PublicValue::String(strand)
 				}
 			}
-			t!("d\"") | t!("d'") => {
-				let datetime = self.next_token_value()?;
-				PublicValue::Datetime(datetime)
-			}
-			t!("u\"") | t!("u'") => {
-				let uuid = self.next_token_value()?;
-				PublicValue::Uuid(uuid)
-			}
-			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
-				PublicValue::Bytes(self.next_token_value()?)
-			}
+			t!("d\"") | t!("d'") => PublicValue::Datetime(self.next_token_value()?),
+			t!("u\"") | t!("u'") => PublicValue::Uuid(self.next_token_value()?),
+			t!("b\"") | t!("b'") => PublicValue::Bytes(self.next_token_value()?),
 			//TODO: Implement record id for value parsing
 			t!("f\"") | t!("f'") => {
 				if !self.settings.files_enabled {
@@ -299,10 +296,6 @@ impl Parser<'_> {
 					Numeric::Float(x) => Ok(PublicValue::Number(PublicNumber::Float(x))),
 					Numeric::Decimal(x) => Ok(PublicValue::Number(PublicNumber::Decimal(x))),
 				}
-			}
-			TokenKind::Glued(Glued::String) => {
-				let glued = pop_glued!(self, String);
-				Ok(PublicValue::String(glued))
 			}
 			TokenKind::Glued(Glued::Duration) => {
 				let glued = pop_glued!(self, Duration);

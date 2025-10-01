@@ -8,8 +8,7 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::{any, tasks};
-#[cfg(feature = "ml")]
-use surrealdb_core::ml::execution::session::set_environment;
+use surrealdb_core::kvs::TransactionBuilderFactory;
 use surrealdb_core::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
 
@@ -24,7 +23,6 @@ pub struct StartCommandArguments {
 	#[arg(help = "Database path used for storing data")]
 	#[arg(env = "SURREAL_PATH", index = 1)]
 	#[arg(default_value = "memory")]
-	#[arg(value_parser = super::validator::path_valid)]
 	path: String,
 	#[arg(help = "Whether to hide the startup banner")]
 	#[arg(env = "SURREAL_NO_BANNER", long)]
@@ -148,7 +146,7 @@ struct StartCommandWebTlsOptions {
 	web_key: Option<PathBuf>,
 }
 
-pub async fn init(
+pub async fn init<F: TransactionBuilderFactory>(
 	StartCommandArguments {
 		path,
 		username: user,
@@ -167,6 +165,8 @@ pub async fn init(
 		..
 	}: StartCommandArguments,
 ) -> Result<()> {
+	// Check the path is valid
+	F::path_valid(&path)?;
 	// Check if we should output a banner
 	if !no_banner {
 		println!("{LOGO}");
@@ -210,12 +210,13 @@ pub async fn init(
 
 	// if ML feature is enabled load the ONNX runtime lib that is embedded
 	#[cfg(feature = "ml")]
-	set_environment().context("Failed to initialize ML library")?;
+	crate::core::ml::execution::session::set_environment()
+		.context("Failed to initialize ML library")?;
 
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();
 	// Start the datastore
-	let datastore = Arc::new(dbs::init(dbs).await?);
+	let datastore = Arc::new(dbs::init::<F>(dbs).await?);
 	// Start the node agent
 	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &CF.get().unwrap().engine);
 	// Start the web server

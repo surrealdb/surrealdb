@@ -12,6 +12,7 @@ use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::sql::ToSql;
 
 use crate::dbs::executor::convert_value_to_public_value;
 use crate::err::Error;
@@ -534,6 +535,12 @@ impl fmt::Display for Value {
 			Value::File(v) => write!(f, "{v}"),
 			Value::Table(v) => write!(f, "{v}"),
 		}
+	}
+}
+
+impl ToSql for Value {
+	fn to_sql(&self) -> String {
+		self.to_string()
 	}
 }
 

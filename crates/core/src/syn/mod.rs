@@ -22,7 +22,7 @@ pub trait Parse<T> {
 mod test;
 
 use anyhow::{Result, bail, ensure};
-use lexer::{Lexer, compound};
+use lexer::Lexer;
 use parser::{ParseResult, Parser, ParserSettings};
 use reblessive::{Stack, Stk};
 use token::t;
@@ -150,15 +150,12 @@ pub fn datetime(input: &str) -> Result<PublicDatetime> {
 
 	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
-	let mut lexer = Lexer::new(input.as_bytes());
-	let res = compound::datetime_inner(&mut lexer);
-	if let Err(e) = lexer.assert_finished() {
-		bail!(Error::InvalidQuery(e.render_on(input)));
+	match Lexer::lex_datetime(input) {
+		Ok(x) => Ok(x),
+		Err(e) => {
+			bail!(Error::InvalidQuery(e.render_on(input)))
+		}
 	}
-	res.map(PublicDatetime::new)
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)
 }
 
 /// Parse a duration from a string.

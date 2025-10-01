@@ -2,7 +2,7 @@
 use super::{GluedValue, ParseResult, Parser};
 use crate::syn::lexer::compound;
 use crate::syn::token::{Glued, Token, TokenKind, t};
-use crate::types::{PublicDatetime, PublicDuration, PublicUuid};
+use crate::types::PublicDuration;
 
 impl Parser<'_> {
 	/// Glues the next token and returns the token after.
@@ -91,52 +91,6 @@ impl Parser<'_> {
 						});
 					}
 				}
-			}
-			t!("\"") | t!("'") => {
-				self.pop_peek();
-				let value = self.lexer.lex_compound(token, compound::strand)?;
-				self.glued_value = GluedValue::String(value.value);
-				self.prepend_token(Token {
-					span: value.span,
-					kind: TokenKind::Glued(Glued::String),
-				});
-				return Ok(self.peek1());
-			}
-			t!("d\"") | t!("d'") => {
-				self.pop_peek();
-				let value = self.lexer.lex_compound(token, compound::datetime)?;
-				self.glued_value = GluedValue::Datetime(PublicDatetime::from(value.value));
-				self.prepend_token(Token {
-					span: value.span,
-					kind: TokenKind::Glued(Glued::Datetime),
-				});
-			}
-			t!("u\"") | t!("u'") => {
-				self.pop_peek();
-				let value = self.lexer.lex_compound(token, compound::uuid)?;
-				self.glued_value = GluedValue::Uuid(PublicUuid::from(value.value));
-				self.prepend_token(Token {
-					span: value.span,
-					kind: TokenKind::Glued(Glued::Uuid),
-				});
-			}
-			t!("b\"") | t!("b'") => {
-				self.pop_peek();
-				let value = self.lexer.lex_compound(token, compound::bytes)?;
-				self.glued_value = GluedValue::Bytes(value.value);
-				self.prepend_token(Token {
-					span: value.span,
-					kind: TokenKind::Glued(Glued::Bytes),
-				});
-			}
-			t!("f\"") | t!("f'") => {
-				self.pop_peek();
-				let value = self.lexer.lex_compound(token, compound::file)?;
-				self.glued_value = GluedValue::File(value.value);
-				self.prepend_token(Token {
-					span: value.span,
-					kind: TokenKind::Glued(Glued::File),
-				});
 			}
 			_ => {}
 		}

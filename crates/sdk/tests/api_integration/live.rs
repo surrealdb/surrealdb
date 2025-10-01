@@ -3,8 +3,7 @@
 	feature = "kv-mem",
 	feature = "kv-rocksdb",
 	feature = "kv-tikv",
-	feature = "kv-fdb-7_3",
-	feature = "kv-fdb-7_1",
+	feature = "kv-fdb",
 	feature = "kv-surrealkv",
 ))]
 
@@ -24,7 +23,7 @@ use tokio::sync::RwLock;
 use tracing::info;
 use ulid::Ulid;
 
-use super::{CreateDb, NS};
+use super::CreateDb;
 use crate::api_integration::ApiRecordId;
 
 const LQ_TIMEOUT: Duration = Duration::from_secs(2);
@@ -33,7 +32,7 @@ const MAX_NOTIFICATIONS: usize = 100;
 pub async fn live_select_table(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 
 	{
 		let table = format!("table_{}", Ulid::new());
@@ -98,7 +97,7 @@ pub async fn live_select_table(new_db: impl CreateDb) {
 pub async fn live_select_record_id(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 
 	{
 		let table = format!("table_{}", Ulid::new());
@@ -168,7 +167,7 @@ pub async fn live_select_record_id(new_db: impl CreateDb) {
 pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 
 	{
 		let table = format!("table_{}", Ulid::new());
@@ -260,7 +259,7 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 pub async fn live_select_query(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	{
 		let table = format!("table_{}", Ulid::new());
 		db.query(format!("DEFINE TABLE {table}")).await.unwrap();
@@ -423,7 +422,7 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 pub async fn live_query_delete_notifications(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 
 	let mut stream =
 		db.query("LIVE SELECT field FROM bar").await.unwrap().stream::<Value>(0).unwrap();
@@ -474,7 +473,7 @@ struct UpdateContent {
 pub async fn live_select_with_fetch(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 
 	let table = format!("table_{}", Ulid::new());
 	let linktb = format!("link_{}", Ulid::new());

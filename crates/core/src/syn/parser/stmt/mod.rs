@@ -16,7 +16,7 @@ use crate::sql::statements::{
 use crate::sql::{AssignOperator, Expr, Fields, Literal, Param, TopLevelExpr};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::unexpected;
-use crate::syn::token::{Glued, TokenKind, t};
+use crate::syn::token::{TokenKind, t};
 use crate::types::PublicDuration;
 
 mod alter;
@@ -392,7 +392,7 @@ impl Parser<'_> {
 	pub(super) fn parse_kill_stmt(&mut self) -> ParseResult<KillStatement> {
 		let peek = self.peek();
 		let id = match peek.kind {
-			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
+			t!("u\"") | t!("u'") => {
 				self.next_token_value().map(|u| Expr::Literal(Literal::Uuid(u)))?
 			}
 			t!("$param") => self.next_token_value().map(Expr::Param)?,

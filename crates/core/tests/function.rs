@@ -41,7 +41,8 @@ async fn error_on_invalid_function() -> Result<()> {
 	let query = "`this is an invalid function name`()";
 	let session = Session::owner().with_ns("test").with_db("test");
 	let err = dbs.execute(query, &session, None).await.unwrap_err();
-	if err.downcast_ref::<DbResultError>() == Some(&DbResultError::InternalError("STU".to_string())) {
+	if err.downcast_ref::<DbResultError>() == Some(&DbResultError::InternalError("STU".to_string()))
+	{
 		panic!("returned wrong result {:#?}", err)
 	}
 	Ok(())
@@ -3879,7 +3880,10 @@ async fn function_outside_database() -> Result<()> {
 	let ses = Session::owner().with_ns("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 
-	assert_eq!(res.remove(0).result.unwrap_err(), DbResultError::InternalError("Specify a database to use".to_string()));
+	assert_eq!(
+		res.remove(0).result.unwrap_err(),
+		DbResultError::InternalError("Specify a database to use".to_string())
+	);
 
 	Ok(())
 }

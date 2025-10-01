@@ -187,12 +187,16 @@ impl Display for Number {
 		match self {
 			Number::Int(v) => Display::fmt(v, f),
 			Number::Float(v) => {
-				if v.is_finite() {
-					// Add suffix to distinguish between int and float
-					write!(f, "{v}f")
+				if v.is_infinite() {
+					if v.is_sign_negative() {
+						write!(f, "-Infinity")
+					} else {
+						write!(f, "Infinity")
+					}
+				} else if v.is_nan() {
+					write!(f, "NaN")
 				} else {
-					// Don't add suffix for NaN, inf, -inf
-					Display::fmt(v, f)
+					write!(f, "{v}f")
 				}
 			}
 			Number::Decimal(v) => write!(f, "{v}dec"),

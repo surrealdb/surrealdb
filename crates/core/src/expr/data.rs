@@ -6,6 +6,7 @@ use reblessive::tree::Stk;
 use super::FlowResultExt as _;
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::expr::expression::VisitExpression;
 use crate::expr::{AssignOperator, Expr, Idiom, Literal, Part, Value};
 use crate::fmt::Fmt;
 
@@ -31,7 +32,17 @@ pub(crate) struct Assignment {
 	pub value: Expr,
 }
 
-impl fmt::Display for Assignment {
+impl VisitExpression for Assignment {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.place.visit(visitor);
+		self.value.visit(visitor);
+	}
+}
+
+impl Display for Assignment {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		write!(f, "{} {} {}", self.place, self.operator, self.value)
 	}
@@ -110,6 +121,37 @@ impl Data {
 	}
 }
 
+impl VisitExpression for Data {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		match self {
+			Data::EmptyExpression => {}
+			Data::SetExpression(x) | Data::UpdateExpression(x) => {
+				x.iter().for_each(|a| a.visit(visitor));
+			}
+			Data::UnsetExpression(x) => {
+				x.iter().for_each(|x| x.visit(visitor));
+			}
+			Data::ValuesExpression(x) => {
+				x.iter().for_each(|x| {
+					x.iter().for_each(|(i, e)| {
+						i.visit(visitor);
+						e.visit(visitor);
+					})
+				});
+			}
+			Data::PatchExpression(e)
+			| Data::MergeExpression(e)
+			| Data::ReplaceExpression(e)
+			| Data::ContentExpression(e)
+			| Data::SingleExpression(e) => {
+				e.visit(visitor);
+			}
+		}
+	}
+}
 impl Display for Data {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {

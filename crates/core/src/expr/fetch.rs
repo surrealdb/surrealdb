@@ -9,6 +9,7 @@ use super::FlowResultExt as _;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::expr::expression::VisitExpression;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Function, Idiom};
 use crate::fmt::Fmt;
@@ -19,6 +20,15 @@ use crate::val::Value;
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct Fetchs(pub Vec<Fetch>);
+
+impl Fetchs {
+	pub(crate) fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.0.iter().for_each(|e| e.visit(visitor));
+	}
+}
 
 impl Deref for Fetchs {
 	type Target = Vec<Fetch>;
@@ -135,6 +145,15 @@ impl Fetch {
 				value: v.clone(),
 			})),
 		}
+	}
+}
+
+impl VisitExpression for Fetch {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.0.visit(visitor);
 	}
 }
 

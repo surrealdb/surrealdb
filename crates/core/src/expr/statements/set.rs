@@ -1,12 +1,14 @@
 use std::fmt;
 
 use reblessive::tree::Stk;
+use surrealdb_types::sql::ToSql;
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::expression::VisitExpression;
 use crate::expr::{ControlFlow, Expr, FlowResult, Kind, Value};
 use crate::fmt::EscapeKwFreeIdent;
 
@@ -67,6 +69,15 @@ impl SetStatement {
 	}
 }
 
+impl VisitExpression for SetStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.what.visit(visitor);
+	}
+}
+
 impl fmt::Display for SetStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "LET ${}", EscapeKwFreeIdent(&self.name))?;
@@ -75,6 +86,12 @@ impl fmt::Display for SetStatement {
 		}
 		write!(f, " = {}", self.what)?;
 		Ok(())
+	}
+}
+
+impl ToSql for SetStatement {
+	fn to_sql(&self) -> String {
+		self.to_string()
 	}
 }
 
