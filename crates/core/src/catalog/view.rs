@@ -1,17 +1,18 @@
 use revision::revisioned;
+use surrealdb_types::sql::ToSql;
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Fields, Groups};
-use crate::sql::{ToSql, View};
+use crate::sql::View;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ViewDefinition {
-	pub fields: Fields,
-	pub what: Vec<String>,
-	pub cond: Option<Expr>,
-	pub groups: Option<Groups>,
+	pub(crate) fields: Fields,
+	pub(crate) what: Vec<String>,
+	pub(crate) cond: Option<Expr>,
+	pub(crate) groups: Option<Groups>,
 }
 
 impl ViewDefinition {

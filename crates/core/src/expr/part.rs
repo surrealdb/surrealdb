@@ -18,7 +18,7 @@ use crate::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt, is_pretty, pretty_indent};
 use crate::val::{Array, RecordId};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Part {
+pub(crate) enum Part {
 	All,
 	Flatten,
 	Last,
@@ -387,7 +387,7 @@ impl<'a> NextMethod<'a> for &'a Idiom {
 // ------------------------------
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum DestructurePart {
+pub(crate) enum DestructurePart {
 	All(String),
 	Field(String),
 	Aliased(String, Idiom),
@@ -395,7 +395,7 @@ pub enum DestructurePart {
 }
 
 impl DestructurePart {
-	pub fn field(&self) -> &str {
+	pub(crate) fn field(&self) -> &str {
 		match self {
 			DestructurePart::All(v) => v,
 			DestructurePart::Field(v) => v,
@@ -404,7 +404,7 @@ impl DestructurePart {
 		}
 	}
 
-	pub fn path(&self) -> Vec<Part> {
+	pub(crate) fn path(&self) -> Vec<Part> {
 		match self {
 			DestructurePart::All(v) => vec![Part::Field(v.clone()), Part::All],
 			DestructurePart::Field(v) => vec![Part::Field(v.clone())],
@@ -415,7 +415,7 @@ impl DestructurePart {
 		}
 	}
 
-	pub fn idiom(&self) -> Idiom {
+	pub(crate) fn idiom(&self) -> Idiom {
 		Idiom(self.path())
 	}
 }
@@ -486,7 +486,7 @@ impl fmt::Display for Recurse {
 // ------------------------------
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum RecurseInstruction {
+pub(crate) enum RecurseInstruction {
 	Path {
 		// Do we include the starting point in the paths?
 		inclusive: bool,

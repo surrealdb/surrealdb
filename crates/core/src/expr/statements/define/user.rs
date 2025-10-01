@@ -7,6 +7,7 @@ use rand::Rng as _;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 use reblessive::tree::Stk;
+use surrealdb_types::sql::ToSql;
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, UserProvider};
@@ -23,7 +24,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Duration, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineUserStatement {
+pub(crate) struct DefineUserStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub base: Base,
@@ -257,5 +258,11 @@ impl Display for DefineUserStatement {
 			write!(f, " COMMENT {}", comment)?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for DefineUserStatement {
+	fn to_sql(&self) -> String {
+		self.to_string()
 	}
 }

@@ -27,7 +27,7 @@ use crate::types::PublicValue;
 use crate::val::{Array, Closure, Range, Table, Value};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Expr {
+pub(crate) enum Expr {
 	Literal(Literal),
 	Param(Param),
 	Idiom(Idiom),

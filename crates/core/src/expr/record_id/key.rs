@@ -20,7 +20,7 @@ pub enum RecordIdKeyGen {
 }
 
 impl RecordIdKeyGen {
-	pub fn compute(&self) -> RecordIdKey {
+	pub(crate) fn compute(&self) -> RecordIdKey {
 		match self {
 			RecordIdKeyGen::Rand => RecordIdKey::rand(),
 			RecordIdKeyGen::Ulid => RecordIdKey::ulid(),
@@ -30,7 +30,7 @@ impl RecordIdKeyGen {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum RecordIdKeyLit {
+pub(crate) enum RecordIdKeyLit {
 	Number(i64),
 	String(String),
 	Uuid(Uuid),

@@ -19,7 +19,7 @@ use crate::fmt::{EscapeIdent, Fmt};
 pub mod recursion;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct Idioms(pub Vec<Idiom>);
+pub(crate) struct Idioms(pub(crate) Vec<Idiom>);
 
 impl Deref for Idioms {
 	type Target = Vec<Idiom>;
@@ -50,7 +50,7 @@ impl InfoStructure for Idioms {
 
 /// An idiom defines a way to reference a field, reference, or other part of the document graph.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct Idiom(pub Vec<Part>);
+pub(crate) struct Idiom(pub(crate) Vec<Part>);
 
 impl Deref for Idiom {
 	type Target = [Part];

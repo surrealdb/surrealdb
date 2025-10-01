@@ -49,7 +49,7 @@ pub(crate) enum NumberKind {
 #[derive(Clone, Copy, Serialize, Deserialize, Debug)]
 #[serde(rename = "$surrealdb::private::Number")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Number {
+pub(crate) enum Number {
 	Int(i64),
 	Float(f64),
 	Decimal(Decimal),
@@ -223,18 +223,6 @@ impl Number {
 		matches!(self, Number::Float(_))
 	}
 
-	pub fn is_decimal(&self) -> bool {
-		matches!(self, Number::Decimal(_))
-	}
-
-	pub fn is_integer(&self) -> bool {
-		match self {
-			Number::Int(_) => true,
-			Number::Float(v) => v.fract() == 0.0,
-			Number::Decimal(v) => v.is_integer(),
-		}
-	}
-
 	pub fn is_truthy(&self) -> bool {
 		match self {
 			Number::Int(v) => v != &0,
@@ -243,43 +231,11 @@ impl Number {
 		}
 	}
 
-	pub fn is_positive(&self) -> bool {
-		match self {
-			Number::Int(v) => v > &0,
-			Number::Float(v) => v > &0.0,
-			Number::Decimal(v) => v > &Decimal::ZERO,
-		}
-	}
-
-	pub fn is_negative(&self) -> bool {
-		match self {
-			Number::Int(v) => v < &0,
-			Number::Float(v) => v < &0.0,
-			Number::Decimal(v) => v < &Decimal::ZERO,
-		}
-	}
-
 	pub fn is_zero(&self) -> bool {
 		match self {
 			Number::Int(v) => v == &0,
 			Number::Float(v) => v == &0.0,
 			Number::Decimal(v) => v == &Decimal::ZERO,
-		}
-	}
-
-	pub fn is_zero_or_positive(&self) -> bool {
-		match self {
-			Number::Int(v) => v >= &0,
-			Number::Float(v) => v >= &0.0,
-			Number::Decimal(v) => v >= &Decimal::ZERO,
-		}
-	}
-
-	pub fn is_zero_or_negative(&self) -> bool {
-		match self {
-			Number::Int(v) => v <= &0,
-			Number::Float(v) => v <= &0.0,
-			Number::Decimal(v) => v <= &Decimal::ZERO,
 		}
 	}
 
@@ -646,15 +602,6 @@ impl Number {
 			Number::Int(v) => (v as f64).sqrt().into(),
 			Number::Float(v) => v.sqrt().into(),
 			Number::Decimal(v) => v.sqrt().unwrap_or_default().into(),
-		}
-	}
-
-	pub fn pow(self, power: Number) -> Number {
-		match (self, power) {
-			(Number::Int(v), Number::Int(p)) => Number::Int(v.pow(p as u32)),
-			(Number::Decimal(v), Number::Int(p)) => v.powi(p).into(),
-			// TODO: (Number::Decimal(v), Number::Decimal(p)) => todo!(),
-			(v, p) => v.as_float().powf(p.as_float()).into(),
 		}
 	}
 }

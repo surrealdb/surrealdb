@@ -4,6 +4,7 @@ use anyhow::Result;
 use async_channel::Sender;
 use chrono::TimeZone;
 use chrono::prelude::Utc;
+use surrealdb_types::sql::ToSql;
 use surrealdb_types::{SurrealValue, Value};
 
 use super::Transaction;
@@ -18,7 +19,6 @@ use crate::expr::statements::define::{DefineAccessStatement, DefineUserStatement
 use crate::expr::{Base, DefineAnalyzerStatement};
 use crate::key::record;
 use crate::kvs::KVValue;
-use crate::sql::ToSql;
 use crate::val::record::Record;
 
 #[derive(Clone, Debug, SurrealValue)]

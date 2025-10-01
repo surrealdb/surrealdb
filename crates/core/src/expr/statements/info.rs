@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::sql::ToSql;
 
 use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, NamespaceProvider,
@@ -17,12 +18,11 @@ use crate::expr::{
 	Base, DefineAccessStatement, DefineAnalyzerStatement, DefineUserStatement, Expr, FlowResultExt,
 };
 use crate::iam::{Action, ResourceKind};
-use crate::sql::ToSql;
 use crate::sys::INFORMATION;
 use crate::val::{Datetime, Object, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum InfoStatement {
+pub(crate) enum InfoStatement {
 	// revision discriminant override accounting for previous behavior when adding variants and
 	// removing not at the end of the enum definition.
 	Root(bool),

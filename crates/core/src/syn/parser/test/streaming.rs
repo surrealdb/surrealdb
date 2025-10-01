@@ -3,7 +3,9 @@ use chrono::offset::TimeZone;
 use chrono::{NaiveDate, Offset, Utc};
 
 use crate::sql::access::AccessDuration;
-use crate::sql::access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey};
+use crate::sql::access_type::{
+	AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey, RecordAccess,
+};
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::data::Assignment;
 use crate::sql::filter::Filter;
@@ -20,20 +22,18 @@ use crate::sql::statements::{
 	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
 	DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement,
 	DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement, InsertStatement,
-	KillStatement, OutputStatement, RelateStatement, RemoveFieldStatement, RemoveStatement,
-	SelectStatement, SetStatement, UpdateStatement, UpsertStatement,
+	KillStatement, OutputStatement, RelateStatement, RemoveFieldStatement, RemoveFunctionStatement,
+	RemoveStatement, SelectStatement, SetStatement, UpdateStatement, UpsertStatement,
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
 	Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr, Fetch,
 	Fetchs, Field, Fields, Function, FunctionCall, Group, Groups, Idiom, Index, Kind, Limit,
-	Literal, Lookup, Mock, Order, Output, Param, Part, Permission, Permissions, RecordAccess,
-	RecordIdKeyLit, RecordIdLit, RemoveFunctionStatement, Scoring, Script, Split, Splits, Start,
-	TableType, Timeout, TopLevelExpr, With,
+	Literal, Lookup, Mock, Order, Output, Param, Part, Permission, Permissions, RecordIdKeyLit,
+	RecordIdLit, Scoring, Script, Split, Splits, Start, TableType, Timeout, TopLevelExpr, With,
 };
 use crate::syn::parser::StatementStream;
-use crate::types::{PublicDatetime, PublicDuration, PublicUuid};
-use crate::val::Number;
+use crate::types::{PublicDatetime, PublicDuration, PublicNumber, PublicUuid};
 
 fn ident_field(name: &str) -> Expr {
 	Expr::Idiom(Idiom(vec![Part::Field(name.to_string())]))
@@ -358,7 +358,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())]))],
 			index: Index::MTree(MTreeParams {
 				dimension: 4,
-				distance: Distance::Minkowski(Number::Int(5)),
+				distance: Distance::Minkowski(PublicNumber::Int(5)),
 				capacity: 6,
 				mtree_cache: 9,
 				vector_type: VectorType::F64,

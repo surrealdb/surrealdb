@@ -10,7 +10,8 @@ use crate::expr::{AssignOperator, Expr, Idiom, Literal, Part, Value};
 use crate::fmt::Fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Data {
+#[allow(clippy::enum_variant_names)]
+pub(crate) enum Data {
 	EmptyExpression,
 	SetExpression(Vec<Assignment>),
 	UnsetExpression(Vec<Idiom>),
@@ -24,7 +25,7 @@ pub enum Data {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Assignment {
+pub(crate) struct Assignment {
 	pub place: Idiom,
 	pub operator: AssignOperator,
 	pub value: Expr,

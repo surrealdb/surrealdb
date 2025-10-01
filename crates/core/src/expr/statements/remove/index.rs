@@ -15,7 +15,7 @@ use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct RemoveIndexStatement {
+pub(crate) struct RemoveIndexStatement {
 	pub name: Expr,
 	pub what: Expr,
 	pub if_exists: bool,

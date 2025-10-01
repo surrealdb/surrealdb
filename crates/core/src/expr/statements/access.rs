@@ -2,10 +2,8 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 
 use anyhow::{Result, bail, ensure};
-use md5::Digest;
 use rand::Rng;
 use reblessive::tree::Stk;
-use sha2::Sha256;
 
 use crate::catalog::providers::{
 	AuthorisationProvider, CatalogProvider, NamespaceProvider, UserProvider,
@@ -17,7 +15,7 @@ use crate::err::Error;
 use crate::expr::{Base, Cond, ControlFlow, FlowResult, FlowResultExt as _, RecordIdLit};
 use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Array, Datetime, Duration, Object, Uuid, Value};
+use crate::val::{Array, Datetime, Duration, Object, Value};
 use crate::{catalog, val};
 
 // Keys and their identifiers are generated randomly from a 62-character pool.
@@ -33,7 +31,7 @@ pub static GRANT_BEARER_ID_LENGTH: usize = 12;
 pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum AccessStatement {
+pub(crate) enum AccessStatement {
 	Grant(AccessStatementGrant),   // Create access grant.
 	Show(AccessStatementShow),     // Show access grants.
 	Revoke(AccessStatementRevoke), // Revoke access grant.
@@ -41,14 +39,14 @@ pub enum AccessStatement {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct AccessStatementGrant {
+pub(crate) struct AccessStatementGrant {
 	pub ac: String,
 	pub base: Option<Base>,
 	pub subject: Subject,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct AccessStatementShow {
+pub(crate) struct AccessStatementShow {
 	pub ac: String,
 	pub base: Option<Base>,
 	pub gr: Option<String>,
@@ -56,7 +54,7 @@ pub struct AccessStatementShow {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct AccessStatementRevoke {
+pub(crate) struct AccessStatementRevoke {
 	pub ac: String,
 	pub base: Option<Base>,
 	pub gr: Option<String>,
@@ -64,7 +62,7 @@ pub struct AccessStatementRevoke {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct AccessStatementPurge {
+pub(crate) struct AccessStatementPurge {
 	pub ac: String,
 	pub base: Option<Base>,
 	pub expired: bool,
@@ -73,37 +71,7 @@ pub struct AccessStatementPurge {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct AccessGrant {
-	pub id: String,                   // Unique grant identifier.
-	pub ac: String,                   // Access method used to create the grant.
-	pub expiration: Option<Datetime>, // Grant expiration time, if any.
-	pub revocation: Option<Datetime>, // Grant revocation time, if any.
-	pub subject: Subject,             // Subject of the grant.
-	pub grant: Grant,                 // Grant data.
-}
-
-impl AccessGrant {
-	// Returns if the access grant is expired.
-	pub fn is_expired(&self) -> bool {
-		match &self.expiration {
-			Some(exp) => exp < &Datetime::now(),
-			None => false,
-		}
-	}
-
-	// Returns if the access grant is revoked.
-	pub fn is_revoked(&self) -> bool {
-		self.revocation.is_some()
-	}
-
-	// Returns if the access grant is active.
-	pub fn is_active(&self) -> bool {
-		!(self.is_expired() || self.is_revoked())
-	}
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Subject {
+pub(crate) enum Subject {
 	Record(RecordIdLit),
 	User(String),
 }
@@ -121,81 +89,6 @@ impl Subject {
 				Ok(catalog::Subject::Record(record_id_lit.compute(stk, ctx, opt, doc).await?))
 			}
 			Subject::User(ident) => Ok(catalog::Subject::User(ident.clone())),
-		}
-	}
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Grant {
-	Jwt(GrantJwt),
-	Record(GrantRecord),
-	Bearer(GrantBearer),
-}
-
-impl Grant {
-	// Returns the type of the grant as a string.
-	pub fn variant(&self) -> &str {
-		match self {
-			Grant::Jwt(_) => "jwt",
-			Grant::Record(_) => "record",
-			Grant::Bearer(_) => "bearer",
-		}
-	}
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct GrantJwt {
-	pub jti: Uuid,             // JWT ID
-	pub token: Option<String>, // JWT. Will not be stored after being returned.
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct GrantRecord {
-	pub rid: Uuid,             // Record ID
-	pub jti: Uuid,             // JWT ID
-	pub token: Option<String>, // JWT. Will not be stored after being returned.
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct GrantBearer {
-	pub id: String, // Key ID
-	// Key. Will not be stored and be returned as redacted.
-	// Immediately after generation, it will contain the plaintext key.
-	// Will be hashed before storage so that the plaintext key is not stored.
-	pub key: String,
-}
-
-impl GrantBearer {
-	pub fn new(prefix: &str) -> Self {
-		let id = format!(
-			"{}{}",
-			// The pool for the first character of the key identifier excludes digits.
-			random_string(1, &GRANT_BEARER_CHARACTER_POOL[10..]),
-			random_string(GRANT_BEARER_ID_LENGTH - 1, GRANT_BEARER_CHARACTER_POOL)
-		);
-		// Safety: id cannot contain a null byte guarenteed above.
-		let secret = random_string(GRANT_BEARER_KEY_LENGTH, GRANT_BEARER_CHARACTER_POOL);
-		// Safety: id cannot contain a null byte guarenteed above.
-		let key = format!("{prefix}-{id}-{secret}");
-		Self {
-			id,
-			key,
-		}
-	}
-
-	pub fn hashed(self) -> Self {
-		// The hash of the bearer key is stored to mitigate the impact of a read-only compromise.
-		// We use SHA-256 as the key needs to be verified performantly for every operation.
-		// Unlike with passwords, brute force and rainbow tables are infeasable due to the key
-		// length. When hashing the bearer keys, the prefix and key identifier are kept as salt.
-		let mut hasher = Sha256::new();
-		hasher.update(self.key.as_str());
-		let hash = hasher.finalize();
-		let hash_hex = format!("{hash:x}");
-
-		Self {
-			key: hash_hex,
-			..self
 		}
 	}
 }

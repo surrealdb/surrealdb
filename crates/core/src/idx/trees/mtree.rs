@@ -26,7 +26,7 @@ use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val};
 use crate::val::{Number, RecordId, Value};
 
-pub struct MTreeIndex {
+pub(crate) struct MTreeIndex {
 	ikb: IndexKeyBase,
 	dim: usize,
 	vector_type: VectorType,

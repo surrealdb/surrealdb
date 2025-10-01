@@ -426,7 +426,7 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Parse a single statement.
-	pub async fn parse_statement(&mut self, stk: &mut Stk) -> ParseResult<sql::TopLevelExpr> {
+	async fn parse_statement(&mut self, stk: &mut Stk) -> ParseResult<sql::TopLevelExpr> {
 		self.parse_top_level_expr(stk).await
 	}
 
@@ -484,7 +484,7 @@ impl StatementStream {
 	/// If the function returns Ok(None), not enough data was in the buffer to
 	/// fully parse a statement, the function might still consume data from the
 	/// buffer, like whitespace between statements, when a none is returned.
-	pub fn parse_partial(
+	pub(crate) fn parse_partial(
 		&mut self,
 		buffer: &mut BytesMut,
 	) -> Result<Option<sql::TopLevelExpr>, RenderedError> {
@@ -567,7 +567,7 @@ impl StatementStream {
 	}
 
 	/// Parse remaining statements once the buffer is complete.
-	pub fn parse_complete(
+	pub(crate) fn parse_complete(
 		&mut self,
 		buffer: &mut BytesMut,
 	) -> Result<Option<sql::TopLevelExpr>, RenderedError> {

@@ -10,6 +10,7 @@ use futures::{FutureExt, SinkExt, StreamExt};
 use pharos::{Channel, Events, Observable, ObserveConfig};
 use revision::revisioned;
 use serde::Deserialize;
+use surrealdb_core::dbs::QueryResultBuilder;
 use surrealdb_core::rpc::{DbResponse, DbResult};
 use surrealdb_types::{Value, object};
 use tokio::sync::watch;
@@ -20,7 +21,7 @@ use wasmtimer::tokio::MissedTickBehavior;
 use ws_stream_wasm::{WsEvent, WsMessage as Message, WsMeta, WsStream};
 
 use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
-use crate::api::conn::{self, Command, IndexedDbResults, RequestData, Route, Router};
+use crate::api::conn::{self, Command, RequestData, Route, Router};
 use crate::api::engine::remote::ws::{Client, PING_INTERVAL};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
@@ -111,17 +112,12 @@ async fn router_handle_request(
 				key: key.clone(),
 			};
 		}
-		Command::Insert {
-			..
-		} => {
-			effect = RequestEffect::Insert;
-		}
 		Command::SubscribeLive {
 			ref uuid,
 			ref notification_sender,
 		} => {
 			state.live_queries.insert(*uuid, notification_sender.clone());
-			if response.send(Ok(IndexedDbResults::Other(Value::None))).await.is_err() {
+			if response.send(Ok(vec![QueryResultBuilder::instant_none()])).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			// There is nothing to send to the server here
@@ -207,32 +203,6 @@ async fn router_handle_response(
 							if let Some(pending) = state.pending_requests.remove(&id) {
 								match pending.effect {
 									RequestEffect::None => {}
-									RequestEffect::Insert => {
-										// For insert, we need to flatten single responses in an
-										// array
-										if let Ok(DbResult::Other(Value::Array(value))) =
-											response.result
-										{
-											if value.len() == 1 {
-												let _ = pending
-													.response_channel
-													.send(IndexedDbResults::from_server_result(
-														DbResult::Other(
-															value.into_iter().next().unwrap(),
-														),
-													))
-													.await;
-											} else {
-												let _ = pending
-													.response_channel
-													.send(IndexedDbResults::from_server_result(
-														DbResult::Other(Value::Array(value)),
-													))
-													.await;
-											}
-											return HandleResult::Ok;
-										}
-									}
 									RequestEffect::Set {
 										key,
 										value,
@@ -245,15 +215,26 @@ async fn router_handle_response(
 										state.vars.shift_remove(&key);
 									}
 								}
-								let _res = pending
-									.response_channel
-									.send(match response.result {
-										Ok(db_result) => {
-											IndexedDbResults::from_server_result(db_result)
-										}
-										Err(error) => Err(Error::Query(error.to_string()).into()),
-									})
-									.await;
+								match response.result {
+									Ok(DbResult::Query(results)) => {
+										let _res = pending.response_channel.send(Ok(results)).await;
+									}
+									Ok(DbResult::Live(_notification)) => {
+										// Live queries should not be handled here
+										warn!("Unexpected live query result in response");
+									}
+									Ok(DbResult::Other(_value)) => {
+										// Other results should be converted to a single result vec
+										let _res = pending
+											.response_channel
+											.send(Ok(vec![QueryResultBuilder::instant_none()]))
+											.await;
+									}
+									Err(error) => {
+										let _res =
+											pending.response_channel.send(Err(error.into())).await;
+									}
+								}
 							} else {
 								warn!(
 									"got response for request with id '{id}', which was not in pending requests"

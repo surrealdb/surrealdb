@@ -38,7 +38,7 @@ impl ApiBody {
 
 	// The `max` variable is unused in WASM only
 	#[cfg_attr(target_family = "wasm", expect(unused_variables))]
-	pub async fn stream(self, max: Option<Bytesize>) -> Result<Vec<u8>, Error> {
+	pub(crate) async fn stream(self, max: Option<Bytesize>) -> Result<Vec<u8>, Error> {
 		match self {
 			#[cfg(not(target_family = "wasm"))]
 			Self::Stream(mut stream) => {
@@ -65,7 +65,7 @@ impl ApiBody {
 		}
 	}
 
-	pub async fn process(
+	pub(crate) async fn process(
 		self,
 		ctx: &InvocationContext,
 		invocation: &ApiInvocation,

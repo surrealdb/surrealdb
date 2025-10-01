@@ -5,7 +5,7 @@ use crate::expr::idiom::Idiom;
 use crate::fmt::Fmt;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct Splits(pub Vec<Split>);
+pub(crate) struct Splits(pub(crate) Vec<Split>);
 
 impl Deref for Splits {
 	type Target = Vec<Split>;
@@ -29,7 +29,7 @@ impl fmt::Display for Splits {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct Split(pub Idiom);
+pub(crate) struct Split(pub(crate) Idiom);
 
 impl Deref for Split {
 	type Target = Idiom;

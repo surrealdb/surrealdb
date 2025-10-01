@@ -6,11 +6,11 @@ use crate::expr::{Cond, Fields, Groups, Value};
 use crate::fmt::{EscapeIdent, Fmt};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct View {
-	pub expr: Fields,
-	pub what: Vec<String>,
-	pub cond: Option<Cond>,
-	pub group: Option<Groups>,
+pub(crate) struct View {
+	pub(crate) expr: Fields,
+	pub(crate) what: Vec<String>,
+	pub(crate) cond: Option<Cond>,
+	pub(crate) group: Option<Groups>,
 }
 
 impl View {

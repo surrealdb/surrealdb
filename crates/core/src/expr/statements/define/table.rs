@@ -25,7 +25,7 @@ use crate::kvs::Transaction;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineTableStatement {
+pub(crate) struct DefineTableStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Expr,
@@ -187,18 +187,6 @@ impl DefineTableStatement {
 }
 
 impl DefineTableStatement {
-	/// Checks if this is a TYPE RELATION table
-	pub fn is_relation(&self) -> bool {
-		matches!(self.table_type, TableType::Relation(_))
-	}
-	/// Checks if this table allows graph edges / relations
-	pub fn allows_relation(&self) -> bool {
-		matches!(self.table_type, TableType::Relation(_) | TableType::Any)
-	}
-	/// Checks if this table allows normal records / documents
-	pub fn allows_normal(&self) -> bool {
-		matches!(self.table_type, TableType::Normal | TableType::Any)
-	}
 	/// Used to add relational fields to existing table records
 	///
 	/// Returns the cache key ts.

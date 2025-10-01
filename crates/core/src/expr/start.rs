@@ -12,7 +12,7 @@ use crate::expr::Expr;
 use crate::val::{Number, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Start(pub Expr);
+pub(crate) struct Start(pub(crate) Expr);
 
 impl Start {
 	pub(crate) async fn process(

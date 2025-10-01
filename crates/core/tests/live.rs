@@ -40,7 +40,7 @@ async fn live_permissions() -> Result<()> {
 		"test",
 		"test",
 		"test",
-		Value::RecordId(RecordId::new("user".to_owned(), "test".to_owned())).into(),
+		Value::RecordId(RecordId::new("user".to_owned(), "test".to_owned())),
 	)
 	.with_rt(true);
 	let sql = "
@@ -89,7 +89,7 @@ async fn live_document_reduction() -> Result<()> {
 		"test",
 		"test",
 		"test",
-		Value::RecordId(RecordId::new("user".to_owned(), "test".to_owned())).into(),
+		Value::RecordId(RecordId::new("user".to_owned(), "test".to_owned())),
 	)
 	.with_rt(true);
 

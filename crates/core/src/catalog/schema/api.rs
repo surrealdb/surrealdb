@@ -2,6 +2,7 @@ use std::fmt::{self, Display};
 
 use revision::revisioned;
 use surrealdb_types::SurrealValue;
+use surrealdb_types::sql::ToSql;
 
 use crate::api::path::Path;
 use crate::catalog::Permission;
@@ -9,23 +10,23 @@ use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
 use crate::fmt::Fmt;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::val::{Array, Object, Value};
 
 /// The API definition.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[non_exhaustive]
 pub struct ApiDefinition {
 	/// The URL path of the API.
-	pub path: Path,
+	pub(crate) path: Path,
 	/// The actions of the API.
-	pub actions: Vec<ApiActionDefinition>,
+	pub(crate) actions: Vec<ApiActionDefinition>,
 	/// The fallback expression of the API.
-	pub fallback: Option<Expr>,
+	pub(crate) fallback: Option<Expr>,
 	/// The config of the API.
-	pub config: ApiConfigDefinition,
+	pub(crate) config: ApiConfigDefinition,
 	/// An optional comment for the definition.
-	pub comment: Option<String>,
+	pub(crate) comment: Option<String>,
 }
 
 impl_kv_value_revisioned!(ApiDefinition);
@@ -33,7 +34,7 @@ impl_kv_value_revisioned!(ApiDefinition);
 impl ApiDefinition {
 	/// Finds the api definition which most closely matches the segments of the
 	/// path.
-	pub fn find_definition<'a>(
+	pub(crate) fn find_definition<'a>(
 		definitions: &'a [ApiDefinition],
 		segments: Vec<&str>,
 		method: ApiMethod,
@@ -163,9 +164,9 @@ impl InfoStructure for ApiActionDefinition {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct ApiConfigDefinition {
 	/// The middleware of the API.
-	pub middleware: Vec<MiddlewareDefinition>,
+	pub(crate) middleware: Vec<MiddlewareDefinition>,
 	/// The permissions of the API.
-	pub permissions: Permission,
+	pub(crate) permissions: Permission,
 }
 
 impl ApiConfigDefinition {
@@ -226,7 +227,7 @@ impl Display for ApiConfigDefinition {
 /// API Middleware definition.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct MiddlewareDefinition {
+pub(crate) struct MiddlewareDefinition {
 	/// The name of function to invoke.
 	pub name: String,
 	/// The arguments to pass to the function.

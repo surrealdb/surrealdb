@@ -373,7 +373,7 @@ async fn select_count_group_all_permissions(
 			"test",
 			"test",
 			"test",
-			Value::RecordId(RecordId::new("table".to_string(), "baz".to_string())).into(),
+			Value::RecordId(RecordId::new("table".to_string(), "baz".to_string())),
 		),
 		sql,
 	)
@@ -594,7 +594,7 @@ async fn select_count_range_keys_only_permissions(
 			"test",
 			"test",
 			"test",
-			Value::RecordId(RecordId::new("table".to_owned(), "me".to_owned())).into(),
+			Value::RecordId(RecordId::new("table".to_owned(), "me".to_owned())),
 		),
 		sql,
 	)

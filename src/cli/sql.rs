@@ -13,7 +13,6 @@ use surrealdb::types::{SurrealValue, Value, object};
 use surrealdb::{IndexedResults, Notification};
 use surrealdb_core::dbs::Capabilities as CoreCapabilities;
 use surrealdb_core::rpc::DbResultStats;
-use surrealdb_core::sql::{Expr, Param, TopLevelExpr};
 
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{
@@ -198,28 +197,14 @@ pub async fn init(
 		// Complete the request
 		match surrealdb_core::syn::parse_with_capabilities(&line, &capabilities) {
 			Ok(mut query) => {
-				let mut namespace = None;
-				let mut database = None;
-				let mut vars = Vec::new();
-				let init_length = query.expressions.len();
-				// Capture `use` and `set/let` statements from the query
-				for statement in query.expressions.iter() {
-					match statement {
-						TopLevelExpr::Use(stmt) => {
-							if let Some(ns) = &stmt.ns {
-								namespace = Some(ns.clone());
-							}
-							if let Some(db) = &stmt.db {
-								database = Some(db.clone());
-							}
-						}
-						TopLevelExpr::Expr(Expr::Let(stmt)) => vars.push(stmt.name.clone()),
-						_ => {}
-					}
-				}
+				let init_length = query.num_statements();
+
+				let namespace = query.get_used_namespace();
+				let database = query.get_used_database();
+				let vars = query.get_let_statements();
 
 				for var in &vars {
-					query.expressions.push(TopLevelExpr::Expr(Expr::Param(Param::new(var.clone()))))
+					query.add_param(var.clone());
 				}
 
 				// Extract the namespace and database from the current prompt

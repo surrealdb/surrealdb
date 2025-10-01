@@ -32,7 +32,7 @@ use crate::val::{IndexFormat, RecordId, Value};
 #[serde(rename = "$surrealdb::private::Object")]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub struct Object(pub BTreeMap<String, Value>);
+pub(crate) struct Object(pub(crate) BTreeMap<String, Value>);
 
 impl From<BTreeMap<&str, Value>> for Object {
 	fn from(v: BTreeMap<&str, Value>) -> Self {
@@ -135,10 +135,6 @@ impl TryInto<HeaderMap> for Object {
 }
 
 impl Object {
-	pub fn new() -> Self {
-		Object(BTreeMap::new())
-	}
-
 	/// Fetch the record id if there is one
 	pub fn rid(&self) -> Option<RecordId> {
 		match self.get("id") {

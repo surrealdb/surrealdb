@@ -30,7 +30,7 @@ use crate::val::{IndexFormat, Value};
 #[serde(rename = "$surrealdb::private::Array")]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub struct Array(pub Vec<Value>);
+pub(crate) struct Array(pub(crate) Vec<Value>);
 
 impl<T> From<Vec<T>> for Array
 where

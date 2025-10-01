@@ -10,11 +10,11 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Literal};
+use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct LiveStatement {
+pub(crate) struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,
 	pub fields: Fields,
@@ -24,28 +24,6 @@ pub struct LiveStatement {
 }
 
 impl LiveStatement {
-	pub fn new(expr: Fields) -> Self {
-		LiveStatement {
-			id: Uuid::new_v4(),
-			node: Uuid::new_v4(),
-			fields: expr,
-			what: Expr::Literal(Literal::Null),
-			cond: None,
-			fetch: None,
-		}
-	}
-
-	pub fn new_from_what_expr(expr: Fields, what: Expr) -> Self {
-		LiveStatement {
-			id: Uuid::new_v4(),
-			node: Uuid::new_v4(),
-			what,
-			fields: expr,
-			cond: None,
-			fetch: None,
-		}
-	}
-
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

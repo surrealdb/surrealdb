@@ -1,6 +1,5 @@
 mod all;
 mod changed;
-mod clear;
 mod compare;
 mod cut;
 mod decrement;
@@ -17,7 +16,6 @@ mod generate;
 mod get;
 mod inc;
 mod increment;
-mod last;
 mod merge;
 mod patch;
 mod pick;
@@ -28,5 +26,5 @@ mod set;
 mod walk;
 
 mod convert;
-pub use convert::cast::{Cast, CastError};
-pub use convert::coerce::{Coerce, CoerceError, CoerceErrorExt};
+pub(crate) use convert::cast::{Cast, CastError};
+pub(crate) use convert::coerce::{Coerce, CoerceError, CoerceErrorExt};

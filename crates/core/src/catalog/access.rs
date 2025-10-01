@@ -8,7 +8,7 @@ use crate::val::{Datetime, RecordId};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Subject {
+pub(crate) enum Subject {
 	Record(RecordId),
 	User(String),
 }
@@ -83,7 +83,7 @@ impl GrantBearer {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct AccessGrant {
+pub(crate) struct AccessGrant {
 	pub id: String,                   // Unique grant identifier.
 	pub ac: String,                   // Access method used to create the grant.
 	pub creation: Datetime,           // Grant creation time.

@@ -12,7 +12,7 @@ use crate::expr::Expr;
 use crate::val::{Number, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Limit(pub Expr);
+pub(crate) struct Limit(pub(crate) Expr);
 
 impl Limit {
 	pub(crate) async fn process(

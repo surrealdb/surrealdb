@@ -11,7 +11,7 @@ use crate::expr::{ControlFlow, Expr, FlowResult, Kind, Value};
 use crate::fmt::EscapeKwFreeIdent;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct SetStatement {
+pub(crate) struct SetStatement {
 	pub name: String,
 	pub what: Expr,
 	pub kind: Option<Kind>,

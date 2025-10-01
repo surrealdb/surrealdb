@@ -13,7 +13,6 @@ use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::{Endpoint, EndpointKind};
 use crate::api::{ExtraFeatures, Surreal, conn};
-use crate::error::Db as DbError;
 use crate::opt::WaitFor;
 
 impl crate::api::Connection for Any {}
@@ -46,7 +45,7 @@ impl conn::Sealed for Any {
 
 					#[cfg(not(kv_fdb))]
 					bail!(
-						DbError::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
+						Error::Ws("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
 					);
 				}
 
@@ -60,7 +59,7 @@ impl conn::Sealed for Any {
 
 					#[cfg(not(feature = "kv-indxdb"))]
 					bail!(
-						DbError::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
+						Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
 					);
 				}
 
@@ -74,7 +73,7 @@ impl conn::Sealed for Any {
 
 					#[cfg(not(feature = "kv-mem"))]
 					bail!(
-						DbError::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())
+						Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())
 					);
 				}
 
@@ -87,7 +86,7 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
-					bail!(DbError::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()))
+				bail!(Error::Ws("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()))
 				}
 
 				EndpointKind::SurrealKv | EndpointKind::SurrealKvVersioned => {
@@ -99,9 +98,9 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-surrealkv"))]
-					bail!(DbError::Ds(
-						"Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
-					));
+					bail!(Error::Ws(
+					"Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
+				));
 				}
 
 				EndpointKind::TiKv => {
@@ -114,7 +113,7 @@ impl conn::Sealed for Any {
 
 					#[cfg(not(feature = "kv-tikv"))]
 					bail!(
-						DbError::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())
+						Error::Ws("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())
 					);
 				}
 
@@ -127,7 +126,7 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "protocol-http"))]
-					bail!(DbError::Ds(
+					bail!(Error::Ds(
 						"Cannot connect to the `HTTP` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
 					));
 				}
@@ -145,7 +144,7 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "protocol-ws"))]
-					bail!(DbError::Ds(
+					bail!(Error::Ds(
 						"Cannot connect to the `WebSocket` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
 					));
 				}

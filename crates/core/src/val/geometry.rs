@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 
 use super::Object;
-use crate::expr::kind::GeometryKind;
 use crate::fmt::Fmt;
 use crate::val::{Array, Value};
 
@@ -22,7 +21,7 @@ use crate::val::{Array, Value};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::Geometry")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Geometry {
+pub(crate) enum Geometry {
 	Point(Point<f64>),
 	Line(LineString<f64>),
 	Polygon(Polygon<f64>),
@@ -34,30 +33,6 @@ pub enum Geometry {
 }
 
 impl Geometry {
-	/// Check if this is a Point
-	pub fn is_point(&self) -> bool {
-		matches!(self, Self::Point(_))
-	}
-	/// Check if this is a Line
-	pub fn is_line(&self) -> bool {
-		matches!(self, Self::Line(_))
-	}
-	/// Check if this is a Polygon
-	pub fn is_polygon(&self) -> bool {
-		matches!(self, Self::Polygon(_))
-	}
-	/// Check if this is a MultiPoint
-	pub fn is_multipoint(&self) -> bool {
-		matches!(self, Self::MultiPoint(_))
-	}
-	/// Check if this is a MultiLine
-	pub fn is_multiline(&self) -> bool {
-		matches!(self, Self::MultiLine(_))
-	}
-	/// Check if this is a MultiPolygon
-	pub fn is_multipolygon(&self) -> bool {
-		matches!(self, Self::MultiPolygon(_))
-	}
 	/// Check if this is not a Collection
 	pub fn is_geometry(&self) -> bool {
 		!matches!(self, Self::Collection(_))
@@ -65,18 +40,6 @@ impl Geometry {
 	/// Check if this is a Collection
 	pub fn is_collection(&self) -> bool {
 		matches!(self, Self::Collection(_))
-	}
-
-	pub fn kind(&self) -> GeometryKind {
-		match self {
-			Geometry::Point(_) => GeometryKind::Point,
-			Geometry::Line(_) => GeometryKind::Line,
-			Geometry::Polygon(_) => GeometryKind::Polygon,
-			Geometry::MultiPoint(_) => GeometryKind::MultiPoint,
-			Geometry::MultiLine(_) => GeometryKind::MultiLine,
-			Geometry::MultiPolygon(_) => GeometryKind::MultiPolygon,
-			Geometry::Collection(_) => GeometryKind::Collection,
-		}
 	}
 
 	/// Check if this has valid latitude and longitude points:
@@ -190,7 +153,8 @@ impl Geometry {
 		obj.into()
 	}
 
-	pub fn try_from_object(object: &Object) -> Option<Geometry> {
+	#[cfg_attr(target_family = "wasm", expect(dead_code))]
+	pub(crate) fn try_from_object(object: &Object) -> Option<Geometry> {
 		if object.len() != 2 {
 			return None;
 		}

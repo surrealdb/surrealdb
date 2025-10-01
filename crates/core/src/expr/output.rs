@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 use crate::expr::field::Fields;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Output {
+pub(crate) enum Output {
 	None,
 	Null,
 	Diff,

@@ -2,23 +2,59 @@ use std::fmt::{self, Display};
 
 use crate::expr;
 use crate::fmt::{Fmt, Pretty};
-use crate::sql::Expr;
 use crate::sql::statements::{
 	AccessStatement, KillStatement, LiveStatement, OptionStatement, ShowStatement, UseStatement,
 };
+use crate::sql::{Expr, Param};
 
 #[derive(Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Ast {
-	pub expressions: Vec<TopLevelExpr>,
+	pub(crate) expressions: Vec<TopLevelExpr>,
 }
 
 impl Ast {
 	/// Creates an ast with a signle expression
-	pub fn single_expr(expr: Expr) -> Self {
+	pub(crate) fn single_expr(expr: Expr) -> Self {
 		Ast {
 			expressions: vec![TopLevelExpr::Expr(expr)],
 		}
+	}
+
+	pub fn num_statements(&self) -> usize {
+		self.expressions.len()
+	}
+
+	pub fn get_used_namespace(&self) -> Option<String> {
+		for expr in &self.expressions {
+			if let TopLevelExpr::Use(stmt) = expr {
+				return stmt.ns.clone();
+			}
+		}
+		None
+	}
+
+	pub fn get_used_database(&self) -> Option<String> {
+		for expr in &self.expressions {
+			if let TopLevelExpr::Use(stmt) = expr {
+				return stmt.db.clone();
+			}
+		}
+		None
+	}
+
+	pub fn get_let_statements(&self) -> Vec<String> {
+		let mut let_var_names = Vec::new();
+		for expr in &self.expressions {
+			if let TopLevelExpr::Expr(Expr::Let(stmt)) = expr {
+				let_var_names.push(stmt.name.clone());
+			}
+		}
+		let_var_names
+	}
+
+	pub fn add_param(&mut self, name: String) {
+		self.expressions.push(TopLevelExpr::Expr(Expr::Param(Param::new(name))));
 	}
 }
 
@@ -52,7 +88,7 @@ impl From<Ast> for expr::LogicalPlan {
 
 #[derive(Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum TopLevelExpr {
+pub(crate) enum TopLevelExpr {
 	Begin,
 	Cancel,
 	Commit,

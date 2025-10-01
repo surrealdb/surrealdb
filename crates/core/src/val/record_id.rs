@@ -22,7 +22,7 @@ use crate::val::{Array, IndexFormat, Number, Object, Range, Uuid, Value};
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, Encode, BorrowDecode)]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub struct RecordIdKeyRange {
+pub(crate) struct RecordIdKeyRange {
 	pub start: Bound<RecordIdKey>,
 	pub end: Bound<RecordIdKey>,
 }
@@ -105,7 +105,7 @@ impl From<crate::types::PublicRecordIdKeyRange> for RecordIdKeyRange {
 }
 
 impl RecordIdKeyRange {
-	pub fn into_literal(self) -> expr::RecordIdKeyRangeLit {
+	pub(crate) fn into_literal(self) -> expr::RecordIdKeyRangeLit {
 		let start = self.start.map(|x| x.into_literal());
 		let end = self.end.map(|x| x.into_literal());
 		expr::RecordIdKeyRangeLit {
@@ -115,7 +115,7 @@ impl RecordIdKeyRange {
 	}
 
 	/// Convertes a record id key range into the range from a normal value.
-	pub fn into_value_range(self) -> Range {
+	pub(crate) fn into_value_range(self) -> Range {
 		Range {
 			start: self.start.map(|x| x.into_value()),
 			end: self.end.map(|x| x.into_value()),
@@ -123,7 +123,7 @@ impl RecordIdKeyRange {
 	}
 
 	/// Convertes a record id key range into the range from a normal value.
-	pub fn from_value_range(range: Range) -> Option<Self> {
+	pub(crate) fn from_value_range(range: Range) -> Option<Self> {
 		let start = match range.start {
 			Bound::Included(x) => Bound::Included(RecordIdKey::from_value(x)?),
 			Bound::Excluded(x) => Bound::Excluded(RecordIdKey::from_value(x)?),
@@ -187,7 +187,7 @@ impl PartialEq<Range> for RecordIdKeyRange {
 #[serde(rename = "$surrealdb::private::sql::Id")]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub enum RecordIdKey {
+pub(crate) enum RecordIdKey {
 	Number(i64),
 	String(String),
 	Uuid(Uuid),
@@ -218,7 +218,7 @@ impl RecordIdKey {
 	}
 
 	/// Returns surrealql value of this key.
-	pub fn into_value(self) -> Value {
+	pub(crate) fn into_value(self) -> Value {
 		match self {
 			RecordIdKey::Number(n) => Value::Number(Number::Int(n)),
 			RecordIdKey::String(s) => Value::String(s),
@@ -235,7 +235,7 @@ impl RecordIdKey {
 	/// Tries to convert a value into a record id key,
 	///
 	/// Returns None if the value cannot be converted.
-	pub fn from_value(value: Value) -> Option<Self> {
+	pub(crate) fn from_value(value: Value) -> Option<Self> {
 		// NOTE: This method dictates how coversion between values and record id keys
 		// behave. This method is reimplementing previous (before expr inversion pr)
 		// behavior but I am not sure if it is the right one, float and decimal
@@ -395,7 +395,7 @@ impl fmt::Display for RecordIdKey {
 #[serde(rename = "$surrealdb::private::RecordId")]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub struct RecordId {
+pub(crate) struct RecordId {
 	pub table: String,
 	pub key: RecordIdKey,
 }
@@ -404,7 +404,7 @@ impl_kv_value_revisioned!(RecordId);
 
 impl RecordId {
 	/// Creates a new record id from the given table and key
-	pub fn new<K>(table: String, key: K) -> Self
+	pub(crate) fn new<K>(table: String, key: K) -> Self
 	where
 		RecordIdKey: From<K>,
 	{
@@ -422,7 +422,7 @@ impl RecordId {
 	}
 
 	/// Turns the record id into a literal which resolves to the same value.
-	pub fn into_literal(self) -> expr::RecordIdLit {
+	pub(crate) fn into_literal(self) -> expr::RecordIdLit {
 		expr::RecordIdLit {
 			table: self.table,
 			key: self.key.into_literal(),

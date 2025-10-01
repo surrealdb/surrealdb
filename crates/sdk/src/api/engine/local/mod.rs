@@ -166,9 +166,6 @@ use futures::StreamExt;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
 use surrealdb_core::dbs::{QueryResult, QueryResultBuilder, Session};
-#[cfg(feature = "ml")]
-use surrealdb_core::expr::Model;
-use surrealdb_core::expr::{Expr, Function, KillStatement, Literal, LogicalPlan, TopLevelExpr};
 use surrealdb_core::iam;
 use surrealdb_core::kvs::Datastore;
 #[cfg(not(target_family = "wasm"))]
@@ -176,7 +173,6 @@ use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::rpc::DbResultError;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::{
-	expr::statements::{DefineModelStatement, DefineStatement},
 	iam::{Action, ResourceKind, check::check_ns_db},
 	ml::storage::surml_file::SurMlFile,
 };
@@ -195,7 +191,6 @@ use crate::Result;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use crate::api::conn::MlExportConfig;
 use crate::api::conn::{Command, RequestData};
-use crate::api::err::Error;
 use crate::api::{Connect, Surreal};
 use crate::opt::IntoEndpoint;
 
@@ -504,9 +499,11 @@ async fn export_file(
 	};
 
 	if let Err(error) = res {
-		if let Some(surrealdb_core::err::Error::Channel(message)) = error.downcast_ref() {
+		// Check if this is a channel error by examining the error message
+		let error_str = error.to_string();
+		if error_str.contains("channel") || error_str.contains("Channel") {
 			// This is not really an error. Just logging it for improved visibility.
-			trace!("{message}");
+			trace!("{error_str}");
 			return Ok(());
 		}
 
@@ -567,14 +564,16 @@ async fn kill_live_query(
 	session: &Session,
 	vars: Variables,
 ) -> Result<Vec<QueryResult>> {
-	let kill_plan = KillStatement {
-		id: Expr::Literal(Literal::Uuid(id.into())),
-	};
-	let plan = LogicalPlan {
-		expressions: vec![TopLevelExpr::Kill(kill_plan)],
-	};
+	// let kill_plan = KillStatement {
+	// 	id: Expr::Literal(Literal::Uuid(id.into())),
+	// };
+	// let plan = LogicalPlan {
+	// 	expressions: vec![TopLevelExpr::Kill(kill_plan)],
+	// };
 
-	let results = kvs.process_plan(plan, session, Some(vars)).await?;
+	let sql = format!("KILL {id}");
+
+	let results = kvs.execute(&sql, session, Some(vars)).await?;
 	Ok(results)
 }
 
@@ -710,7 +709,7 @@ async fn router(
 			{
 				Ok(path) => path,
 				Err(error) => {
-					return Err(Error::FileOpen {
+					return Err(crate::api::Error::FileOpen {
 						path: file,
 						error,
 					}
@@ -759,7 +758,7 @@ async fn router(
 			{
 				Ok(path) => path,
 				Err(error) => {
-					return Err(Error::FileOpen {
+					return Err(crate::api::Error::FileOpen {
 						path,
 						error,
 					}
@@ -842,7 +841,7 @@ async fn router(
 			let file = match OpenOptions::new().read(true).open(&path).await {
 				Ok(path) => path,
 				Err(error) => {
-					bail!(Error::FileOpen {
+					bail!(crate::api::Error::FileOpen {
 						path,
 						error,
 					});
@@ -891,7 +890,7 @@ async fn router(
 			let mut file = match OpenOptions::new().read(true).open(&path).await {
 				Ok(path) => path,
 				Err(error) => {
-					return Err(Error::FileOpen {
+					return Err(crate::api::Error::FileOpen {
 						path,
 						error,
 					}
@@ -907,7 +906,7 @@ async fn router(
 			let mut buffer = Vec::new();
 			// Load all the uploaded file chunks
 			if let Err(error) = file.read_to_end(&mut buffer).await {
-				return Err(Error::FileRead {
+				return Err(crate::api::Error::FileRead {
 					path,
 					error,
 				}
@@ -917,7 +916,7 @@ async fn router(
 			let file = match SurMlFile::from_bytes(buffer) {
 				Ok(file) => file,
 				Err(error) => {
-					return Err(Error::FileRead {
+					return Err(crate::api::Error::FileRead {
 						path,
 						error: io::Error::new(
 							io::ErrorKind::InvalidData,
@@ -929,31 +928,15 @@ async fn router(
 			};
 			// Convert the file back in to raw bytes
 			let data = file.to_bytes();
-			// Calculate the hash of the model file
-			let hash = surrealdb_core::obs::hash(&data);
-			// Insert the file data in to the store
-			surrealdb_core::obs::put(&hash, data).await?;
-			// Insert the model in to the database
-			let model = DefineModelStatement {
-				name: file.header.name.to_string(),
-				version: file.header.version.to_string(),
-				comment: Some(Expr::Literal(surrealdb_core::expr::Literal::String(
-					file.header.description.to_string(),
-				))),
-				hash,
-				..Default::default()
-			};
-			let q = DefineStatement::Model(model);
-			let q = LogicalPlan {
-				expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(q)))],
-			};
-			let responses = kvs
-				.process_plan(q, &*session.read().await, Some(vars.read().await.clone()))
-				.await?;
 
-			for response in responses {
-				response.result?;
-			}
+			kvs.put_ml_model(
+				&*session.read().await,
+				&file.header.name.to_string(),
+				&file.header.version.to_string(),
+				&file.header.description.to_string(),
+				data,
+			)
+			.await?;
 
 			Ok(vec![query_result.finish()])
 		}
@@ -1011,40 +994,43 @@ async fn router(
 			version: _version,
 			args,
 		} => {
-			let func = match name.strip_prefix("fn::") {
-				Some(name) => Function::Custom(name.to_owned()),
-				None => match name.strip_prefix("ml::") {
-					#[cfg(feature = "ml")]
-					Some(name) => Function::Model(Model {
-						name: name.to_owned(),
-						version: _version
-							.ok_or(Error::Query("ML functions must have a version".to_string()))?,
-					}),
-					#[cfg(not(feature = "ml"))]
-					Some(_) => {
-						return Err(Error::Query(format!(
-							"tried to call an ML function `{name}` but the `ml` feature is not enabled"
-						))
-						.into());
-					}
-					None => Function::Normal(name),
-				},
-			};
+			// let func = match name.strip_prefix("fn::") {
+			// 	Some(name) => Function::Custom(name.to_owned()),
+			// 	None => match name.strip_prefix("ml::") {
+			// 		#[cfg(feature = "ml")]
+			// 		Some(name) => Function::Model(Model {
+			// 			name: name.to_owned(),
+			// 			version: _version
+			// 				.ok_or(Error::Query("ML functions must have a version".to_string()))?,
+			// 		}),
+			// 		#[cfg(not(feature = "ml"))]
+			// 		Some(_) => {
+			// 			return Err(Error::Query(format!(
+			// 				"tried to call an ML function `{name}` but the `ml` feature is not enabled"
+			// 			))
+			// 			.into());
+			// 		}
+			// 		None => Function::Normal(name),
+			// 	},
+			// };
 
-			let args = args.into_iter().map(Expr::from_public_value).collect();
+			// let args = args.into_iter().map(Expr::from_public_value).collect();
 
-			let plan = Expr::FunctionCall(Box::new(surrealdb_core::expr::FunctionCall {
-				receiver: func,
-				arguments: args,
-			}));
+			// let plan = Expr::FunctionCall(Box::new(surrealdb_core::expr::FunctionCall {
+			// 	receiver: func,
+			// 	arguments: args,
+			// }));
 
-			let plan = LogicalPlan {
-				expressions: vec![TopLevelExpr::Expr(plan)],
-			};
+			// let plan = LogicalPlan {
+			// 	expressions: vec![TopLevelExpr::Expr(plan)],
+			// };
 
-			let response = kvs
-				.process_plan(plan, &*session.read().await, Some(vars.read().await.clone()))
-				.await?;
+			let args = args.into_iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",");
+
+			let sql = format!("{name}({args})");
+
+			let response =
+				kvs.execute(&sql, &*session.read().await, Some(vars.read().await.clone())).await?;
 
 			Ok(response)
 		}

@@ -17,7 +17,7 @@ use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineSequenceStatement {
+pub(crate) struct DefineSequenceStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub batch: Expr,

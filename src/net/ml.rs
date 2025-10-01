@@ -32,8 +32,6 @@ mod implementation {
 	use http::StatusCode;
 	use surrealdb_core::dbs::Session;
 	use surrealdb_core::dbs::capabilities::RouteTarget;
-	use surrealdb_core::expr::statements::{DefineModelStatement, DefineStatement};
-	use surrealdb_core::expr::{Expr, Literal, LogicalPlan, TopLevelExpr, get_model_path};
 	use surrealdb_core::iam::check::check_ns_db;
 	use surrealdb_core::iam::{Action, ResourceKind};
 	use surrealdb_core::ml::storage::surml_file::SurMlFile;
@@ -78,34 +76,17 @@ mod implementation {
 
 		// Convert the file back in to raw bytes
 		let data = file.to_bytes();
-		// Calculate the hash of the model file
-		let hash = surrealdb_core::obs::hash(&data);
-		// Calculate the path of the model file
-		let path = get_model_path(
-			&nsv,
-			&dbv,
+
+		ds.put_ml_model(
+			&session,
 			&file.header.name.to_string(),
 			&file.header.version.to_string(),
-			&hash,
-		);
-		// Insert the file data in to the store
-		surrealdb_core::obs::put(&path, data).await.map_err(ResponseError)?;
-		// Insert the model in to the database
-		let model = DefineModelStatement {
-			name: file.header.name.to_string(),
-			version: file.header.version.to_string(),
-			comment: Some(Expr::Literal(Literal::String(file.header.description.to_string()))),
-			hash,
-			..Default::default()
-		};
+			&file.header.description.to_string(),
+			data,
+		)
+		.await
+		.map_err(ResponseError)?;
 
-		let q = LogicalPlan {
-			expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Model(
-				model,
-			))))],
-		};
-
-		ds.process_plan(q, &session, None).await.map_err(ResponseError)?;
 		//
 		Ok(Output::None)
 	}

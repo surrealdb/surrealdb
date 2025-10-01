@@ -276,7 +276,7 @@ impl Options {
 	}
 
 	// Get currently selected base
-	pub fn selected_base(&self) -> Result<Base, Error> {
+	pub(crate) fn selected_base(&self) -> Result<Base, Error> {
 		match (self.ns.as_ref(), self.db.as_ref()) {
 			(None, None) => Ok(Base::Root),
 			(Some(_), None) => Ok(Base::Ns),
@@ -289,7 +289,7 @@ impl Options {
 	///
 	/// The parameter is the approximate cost of the operation (more concretely, the size of the
 	/// stack frame it uses relative to a simple function call). When in doubt, use a value of 1.
-	pub fn dive(&self, cost: u8) -> Result<Self, Error> {
+	pub(crate) fn dive(&self, cost: u8) -> Result<Self, Error> {
 		if self.dive < cost as u32 {
 			return Err(Error::ComputationDepthExceeded);
 		}

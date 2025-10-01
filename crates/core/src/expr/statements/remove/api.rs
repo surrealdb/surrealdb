@@ -13,7 +13,7 @@ use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct RemoveApiStatement {
+pub(crate) struct RemoveApiStatement {
 	pub name: Expr,
 	pub if_exists: bool,
 }

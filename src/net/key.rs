@@ -14,7 +14,7 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_core::iam::check::check_ns_db;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::{sql, syn};
+use surrealdb_core::syn;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
@@ -71,11 +71,10 @@ async fn execute_and_return(
 	session: &Session,
 	mut vars: Variables,
 	accept: Option<&Accept>,
-	expr: Option<sql::Expr>,
+	expr: Option<String>,
 ) -> Result<Output, anyhow::Error> {
 	let vars = if let Some(expr) = expr {
-		let mut value =
-			db.process(sql::Ast::single_expr(expr), session, Some(vars.clone())).await?;
+		let mut value = db.execute(&expr, session, Some(vars.clone())).await?;
 		if let Some(resp) = value.pop() {
 			vars.insert("data".to_owned(), resp.result?);
 		}
@@ -176,23 +175,17 @@ async fn create_all(
 	let _ = check_ns_db(&session).map_err(ResponseError)?;
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
-	// Parse the request body as JSON
-	match syn::expr(data) {
-		Ok(data) => {
-			// Specify the request statement
-			let sql = "CREATE type::table($table) CONTENT $data";
-			// Specify the request variables
-			let vars = Variables::from(map! {
-				String::from("table") => Value::String(table),
-				=> params.parse()
-			});
+	// Specify the request statement
+	let sql = "CREATE type::table($table) CONTENT $data";
+	// Specify the request variables
+	let vars = Variables::from(map! {
+		String::from("table") => Value::String(table),
+		=> params.parse()
+	});
 
-			execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data))
-				.await
-				.map_err(ResponseError)
-		}
-		Err(_) => Err(NetError::Request.into()),
-	}
+	execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data.to_string()))
+		.await
+		.map_err(ResponseError)
 }
 
 async fn update_all(
@@ -211,22 +204,16 @@ async fn update_all(
 	let _ = check_ns_db(&session).map_err(ResponseError)?;
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
-	// Parse the request body as JSON
-	match syn::expr(data) {
-		Ok(data) => {
-			// Specify the request statement
-			let sql = "UPDATE type::table($table) CONTENT $data";
-			// Specify the request variables
-			let vars = Variables::from(map! {
-				String::from("table") => Value::String(table),
-				=> params.parse()
-			});
-			execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data))
-				.await
-				.map_err(ResponseError)
-		}
-		Err(_) => Err(NetError::Request.into()),
-	}
+	// Specify the request statement
+	let sql = "UPDATE type::table($table) CONTENT $data";
+	// Specify the request variables
+	let vars = Variables::from(map! {
+		String::from("table") => Value::String(table),
+		=> params.parse()
+	});
+	execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data.to_string()))
+		.await
+		.map_err(ResponseError)
 }
 
 async fn modify_all(
@@ -245,22 +232,16 @@ async fn modify_all(
 	let _ = check_ns_db(&session).map_err(ResponseError)?;
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
-	// Parse the request body as JSON
-	match syn::expr(data) {
-		Ok(data) => {
-			// Specify the request statement
-			let sql = "UPDATE type::table($table) MERGE $data";
-			// Specify the request variables
-			let vars = Variables::from(map! {
-				String::from("table") => Value::String(table),
-				=> params.parse()
-			});
-			execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data))
-				.await
-				.map_err(ResponseError)
-		}
-		Err(_) => Err(NetError::Request.into()),
-	}
+	// Specify the request statement
+	let sql = "UPDATE type::table($table) MERGE $data";
+	// Specify the request variables
+	let vars = Variables::from(map! {
+		String::from("table") => Value::String(table),
+		=> params.parse()
+	});
+	execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data.to_string()))
+		.await
+		.map_err(ResponseError)
 }
 
 async fn delete_all(
@@ -349,24 +330,19 @@ async fn create_one(
 		Ok(id) => id,
 		Err(_) => Value::String(id),
 	};
-	// Parse the request body as JSON
-	match syn::expr(data) {
-		Ok(data) => {
-			// Specify the request statement
-			let sql = "CREATE type::thing($table, $id) CONTENT $data";
-			// Specify the request variables
-			let vars = Variables::from(map! {
-				String::from("table") => Value::String(table),
-				String::from("id") => rid,
-				=> params.parse()
-			});
-			// Execute the query and return the result
-			execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data))
-				.await
-				.map_err(ResponseError)
-		}
-		Err(_) => Err(NetError::Request.into()),
-	}
+
+	// Specify the request statement
+	let sql = "CREATE type::thing($table, $id) CONTENT $data";
+	// Specify the request variables
+	let vars = Variables::from(map! {
+		String::from("table") => Value::String(table),
+		String::from("id") => rid,
+		=> params.parse()
+	});
+	// Execute the query and return the result
+	execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data.to_string()))
+		.await
+		.map_err(ResponseError)
 }
 
 async fn update_one(
@@ -390,24 +366,19 @@ async fn update_one(
 		Ok(id) => id,
 		Err(_) => Value::String(id),
 	};
-	// Parse the request body as JSON
-	match syn::expr(data) {
-		Ok(data) => {
-			// Specify the request statement
-			let sql = "UPSERT type::thing($table, $id) CONTENT $data";
-			// Specify the request variables
-			let vars = Variables::from(map! {
-				String::from("table") => Value::String(table),
-				String::from("id") => rid,
-				=> params.parse()
-			});
-			// Execute the query and return the result
-			execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data))
-				.await
-				.map_err(ResponseError)
-		}
-		Err(_) => Err(NetError::Request.into()),
-	}
+
+	// Specify the request statement
+	let sql = "UPSERT type::thing($table, $id) CONTENT $data";
+	// Specify the request variables
+	let vars = Variables::from(map! {
+		String::from("table") => Value::String(table),
+		String::from("id") => rid,
+		=> params.parse()
+	});
+	// Execute the query and return the result
+	execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data.to_string()))
+		.await
+		.map_err(ResponseError)
 }
 
 async fn modify_one(
@@ -431,24 +402,19 @@ async fn modify_one(
 		Ok(id) => id,
 		Err(_) => Value::String(id),
 	};
-	// Parse the request body as JSON
-	match syn::expr(data) {
-		Ok(data) => {
-			// Specify the request statement
-			let sql = "UPSERT type::thing($table, $id) MERGE $data";
-			// Specify the request variables
-			let vars = Variables::from(map! {
-				String::from("table") => Value::String(table),
-				String::from("id") => rid,
-				=> params.parse()
-			});
-			// Execute the query and return the result
-			execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data))
-				.await
-				.map_err(ResponseError)
-		}
-		Err(_) => Err(NetError::Request.into()),
-	}
+
+	// Specify the request statement
+	let sql = "UPSERT type::thing($table, $id) MERGE $data";
+	// Specify the request variables
+	let vars = Variables::from(map! {
+		String::from("table") => Value::String(table),
+		String::from("id") => rid,
+		=> params.parse()
+	});
+	// Execute the query and return the result
+	execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data.to_string()))
+		.await
+		.map_err(ResponseError)
 }
 
 async fn delete_one(

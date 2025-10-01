@@ -12,7 +12,7 @@ use crate::types::PublicKind;
 use crate::val::{Array, Object, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct Path(pub Vec<Segment>);
+pub(crate) struct Path(pub Vec<Segment>);
 
 impl<'a> Path {
 	/// Attempts to fit a passed URL into a already parsed Path Segments.

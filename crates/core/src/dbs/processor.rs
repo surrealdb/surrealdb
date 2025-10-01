@@ -967,12 +967,12 @@ pub(super) trait Collector {
 				// Everything ok
 				return Ok(());
 			} else {
-				bail!(Error::QueryNotExecutedDetail {
+				bail!(Error::QueryNotExecuted {
 					message: "No iterator has been found.".to_string(),
 				});
 			}
 		}
-		bail!(Error::QueryNotExecutedDetail {
+		bail!(Error::QueryNotExecuted {
 			message: "No QueryExecutor has been found.".to_string(),
 		})
 	}

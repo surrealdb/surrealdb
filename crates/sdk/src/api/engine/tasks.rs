@@ -4,8 +4,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Error;
 use futures::StreamExt;
-use surrealdb_core::err::Error;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::options::EngineOptions;
 #[cfg(not(target_family = "wasm"))]

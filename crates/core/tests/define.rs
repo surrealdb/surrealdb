@@ -5,7 +5,6 @@ use std::time::{Duration, SystemTime};
 use anyhow::Result;
 use helpers::*;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::err::Error;
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_core::syn;
 use surrealdb_types::Value;
@@ -118,7 +117,7 @@ async fn define_statement_index_concurrently_building_status(
 	info!("Loop");
 	let time_out = Duration::from_secs(300);
 	loop {
-		if now.elapsed().map_err(|e| Error::Internal(e.to_string()))?.gt(&time_out) {
+		if now.elapsed().map_err(|e| anyhow::anyhow!(e.to_string()))?.gt(&time_out) {
 			panic!("Time-out {time_out:?}");
 		}
 		// Update and delete records

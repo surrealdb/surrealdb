@@ -177,40 +177,22 @@ impl HttpFormat for Format {
 	}
 	/// Process a HTTP RPC response
 	fn res_http(&self, res: DbResponse) -> Result<AxumResponse, RpcError> {
-		match self {
-			Format::Json => {
-				let val = surrealdb_core::rpc::format::json::encode_str(res.into_value())
-					.map_err(|_| RpcError::ParseError)?;
-				Ok(AxumResponse::builder()
-					.header(CONTENT_TYPE, ContentType::ApplicationJson)
-					.body(val.into())
-					.unwrap())
-			}
-			Format::Cbor => {
-				let val = surrealdb_core::rpc::format::cbor::encode(res.into_value())
-					.map_err(|_| RpcError::ParseError)?;
-				Ok(AxumResponse::builder()
-					.header(CONTENT_TYPE, ContentType::from(self))
-					.body(val.into())
-					.unwrap())
-			}
-			Format::Bincode => {
-				let val = surrealdb_core::rpc::format::bincode::encode(&res)
-					.map_err(|_| RpcError::ParseError)?;
-				Ok(AxumResponse::builder()
-					.header(CONTENT_TYPE, ContentType::from(self))
-					.body(val.into())
-					.unwrap())
-			}
-			Format::Revision => {
-				let val = surrealdb_core::rpc::format::revision::encode(&res)
-					.map_err(|_| RpcError::ParseError)?;
-				Ok(AxumResponse::builder()
-					.header(CONTENT_TYPE, ContentType::from(self))
-					.body(val.into())
-					.unwrap())
-			}
-			Format::Unsupported => Err(RpcError::InvalidRequest),
-		}
+		let val = match self {
+			Format::Json => surrealdb_core::rpc::format::json::encode_str(res.into_value())
+				.map_err(|_| RpcError::ParseError)?
+				.into_bytes(),
+			Format::Cbor => surrealdb_core::rpc::format::cbor::encode(res.into_value())
+				.map_err(|_| RpcError::ParseError)?,
+			Format::Bincode => surrealdb_core::rpc::format::bincode::encode(&res)
+				.map_err(|_| RpcError::ParseError)?,
+			Format::Revision => surrealdb_core::rpc::format::revision::encode(&res)
+				.map_err(|_| RpcError::ParseError)?,
+			Format::Unsupported => return Err(RpcError::InvalidRequest),
+		};
+
+		Ok(AxumResponse::builder()
+			.header(CONTENT_TYPE, ContentType::from(self))
+			.body(val.into())
+			.unwrap())
 	}
 }

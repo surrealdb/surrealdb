@@ -94,7 +94,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_database(
+	pub(crate) async fn parse_define_database(
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineDatabaseStatement> {
@@ -130,7 +130,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_function(
+	pub(crate) async fn parse_define_function(
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineFunctionStatement> {
@@ -198,7 +198,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_user(&mut self, stk: &mut Stk) -> ParseResult<DefineUserStatement> {
+	pub(crate) async fn parse_define_user(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineUserStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -319,7 +322,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_access(
+	pub(crate) async fn parse_define_access(
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineAccessStatement> {
@@ -537,7 +540,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_param(&mut self, stk: &mut Stk) -> ParseResult<DefineParamStatement> {
+	pub(crate) async fn parse_define_param(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineParamStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -577,7 +583,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_table(&mut self, stk: &mut Stk) -> ParseResult<DefineTableStatement> {
+	pub(crate) async fn parse_define_table(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineTableStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -668,7 +677,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_api(&mut self, stk: &mut Stk) -> ParseResult<DefineApiStatement> {
+	pub(crate) async fn parse_define_api(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineApiStatement> {
 		if !self.settings.define_api_enabled {
 			bail!("Cannot define an API, as the experimental define api capability is not enabled", @self.last_span);
 		}
@@ -761,7 +773,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_event(&mut self, stk: &mut Stk) -> ParseResult<DefineEventStatement> {
+	pub(crate) async fn parse_define_event(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineEventStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -809,7 +824,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_field(&mut self, stk: &mut Stk) -> ParseResult<DefineFieldStatement> {
+	pub(crate) async fn parse_define_field(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineFieldStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -894,7 +912,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_index(&mut self, stk: &mut Stk) -> ParseResult<DefineIndexStatement> {
+	pub(crate) async fn parse_define_index(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineIndexStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -1100,7 +1121,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_analyzer(
+	pub(crate) async fn parse_define_analyzer(
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineAnalyzerStatement> {
@@ -1220,7 +1241,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_bucket(
+	pub(crate) async fn parse_define_bucket(
 		&mut self,
 		stk: &mut Stk,
 		token: Token,
@@ -1274,7 +1295,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_sequence(
+	pub(crate) async fn parse_define_sequence(
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineSequenceStatement> {
@@ -1308,7 +1329,7 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_define_config(
+	pub(crate) async fn parse_define_config(
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineConfigStatement> {
@@ -1335,7 +1356,7 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_api_config(&mut self, stk: &mut Stk) -> ParseResult<ApiConfig> {
+	pub(crate) async fn parse_api_config(&mut self, stk: &mut Stk) -> ParseResult<ApiConfig> {
 		let mut config = ApiConfig::default();
 		loop {
 			match self.peek_kind() {
@@ -1513,7 +1534,7 @@ impl Parser<'_> {
 		Ok(Kind::Record(names))
 	}
 
-	pub async fn parse_jwt(&mut self, stk: &mut Stk) -> ParseResult<access_type::JwtAccess> {
+	async fn parse_jwt(&mut self, stk: &mut Stk) -> ParseResult<access_type::JwtAccess> {
 		let mut res = access_type::JwtAccess {
 			// By default, a JWT access method is only used to verify.
 			issue: None,

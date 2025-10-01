@@ -13,7 +13,7 @@ use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct DeleteStatement {
+pub(crate) struct DeleteStatement {
 	pub only: bool,
 	pub what: Vec<Expr>,
 	pub with: Option<With>,

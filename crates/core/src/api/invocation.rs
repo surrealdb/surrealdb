@@ -16,42 +16,39 @@ use crate::dbs::Options;
 use crate::dbs::executor::convert_value_to_public_value;
 use crate::expr::FlowResultExt as _;
 use crate::sql::expression::convert_public_value_to_internal;
-use crate::val::{Object, Value};
+use crate::types::{PublicObject, PublicValue};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ApiInvocation {
-	pub params: Object,
+	pub params: PublicObject,
 	pub method: ApiMethod,
 	pub query: BTreeMap<String, String>,
 	pub headers: HeaderMap,
 }
 
 impl ApiInvocation {
-	pub fn vars(self, body: Value) -> Result<Value> {
+	pub fn vars(self, body: PublicValue) -> Result<PublicValue> {
 		// Create an Object with the request data
-		let mut obj = Object::default();
-		obj.0.insert("params".to_string(), Value::Object(self.params));
-		obj.0.insert("body".to_string(), body);
-		obj.0.insert("method".to_string(), Value::from(self.method.to_string()));
+		let mut obj = PublicObject::new();
+		obj.insert("params".to_string(), PublicValue::Object(self.params));
+		obj.insert("body".to_string(), body);
+		obj.insert("method".to_string(), PublicValue::String(self.method.to_string()));
 
 		// Convert query BTreeMap<String, String> to Value
-		let query_obj = Object(self.query.into_iter().map(|(k, v)| (k, Value::from(v))).collect());
-		obj.0.insert("query".to_string(), Value::Object(query_obj));
+		let query_obj = PublicObject::from_iter(
+			self.query.into_iter().map(|(k, v)| (k, PublicValue::String(v))),
+		);
+		obj.insert("query".to_string(), PublicValue::Object(query_obj));
 
 		// Convert headers HeaderMap to Value
-		let headers_obj = Object(
-			self.headers
-				.into_iter()
-				.filter_map(|(k, v)| {
-					k.map(|name| {
-						(name.to_string(), Value::from(v.to_str().unwrap_or("").to_string()))
-					})
-				})
-				.collect(),
-		);
-		obj.0.insert("headers".to_string(), Value::Object(headers_obj));
+		let headers_obj = PublicObject::from_iter(self.headers.into_iter().filter_map(|(k, v)| {
+			k.map(|name| {
+				(name.to_string(), PublicValue::String(v.to_str().unwrap_or("").to_string()))
+			})
+		}));
+		obj.insert("headers".to_string(), PublicValue::Object(headers_obj));
 
-		Ok(Value::Object(obj))
+		Ok(PublicValue::Object(obj))
 	}
 
 	pub async fn invoke_with_transaction(
@@ -117,8 +114,6 @@ impl ApiInvocation {
 		};
 
 		let body_public = body.process(&inv_ctx, &self).await?;
-		// Convert the public body to internal Value for processing
-		let body_internal = convert_public_value_to_internal(body_public);
 
 		// Edit the options
 		let opt = opt.new_with_perms(false);
@@ -127,8 +122,9 @@ impl ApiInvocation {
 		let mut ctx = MutableContext::new_isolated(ctx);
 
 		// Set the request variable
-		let vars = self.vars(body_internal)?;
-		ctx.add_value("request", vars.into());
+		let vars = self.vars(body_public)?;
+		let vars_internal = convert_public_value_to_internal(vars);
+		ctx.add_value("request", vars_internal.into());
 
 		// Possibly set the timeout
 		if let Some(timeout) = inv_ctx.timeout {

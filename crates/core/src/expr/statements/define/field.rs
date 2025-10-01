@@ -25,7 +25,7 @@ use crate::kvs::Transaction;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub enum DefineDefault {
+pub(crate) enum DefineDefault {
 	#[default]
 	None,
 	Always(Expr),
@@ -33,7 +33,7 @@ pub enum DefineDefault {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineFieldStatement {
+pub(crate) struct DefineFieldStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub what: Expr,

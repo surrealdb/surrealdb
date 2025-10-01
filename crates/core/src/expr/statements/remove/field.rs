@@ -15,7 +15,7 @@ use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct RemoveFieldStatement {
+pub(crate) struct RemoveFieldStatement {
 	pub name: Expr,
 	pub table_name: Expr,
 	pub if_exists: bool,

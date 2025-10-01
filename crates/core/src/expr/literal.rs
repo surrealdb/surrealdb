@@ -25,7 +25,7 @@ use crate::val::{
 /// surrealql rules regarding number equality are not observed, 1f != 1dec.
 
 #[derive(Clone, Debug)]
-pub enum Literal {
+pub(crate) enum Literal {
 	None,
 	Null,
 	// An unbounded range, i.e. `..` without any start or end bound.
@@ -248,7 +248,7 @@ impl fmt::Display for Literal {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ObjectEntry {
+pub(crate) struct ObjectEntry {
 	pub key: String,
 	pub value: Expr,
 }

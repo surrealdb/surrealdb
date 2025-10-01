@@ -1,24 +1,25 @@
 use revision::revisioned;
+use surrealdb_types::sql::ToSql;
 
 use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::sql::statements::define::{DefineKind, DefineParamStatement};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[non_exhaustive]
 pub struct ParamDefinition {
-	pub name: String,
-	pub value: Value,
-	pub comment: Option<String>,
-	pub permissions: Permission,
+	pub(crate) name: String,
+	pub(crate) value: Value,
+	pub(crate) comment: Option<String>,
+	pub(crate) permissions: Permission,
 }
 impl_kv_value_revisioned!(ParamDefinition);
 
 impl ParamDefinition {
-	pub fn to_sql_definition(&self) -> DefineParamStatement {
+	fn to_sql_definition(&self) -> DefineParamStatement {
 		DefineParamStatement {
 			kind: DefineKind::Default,
 			name: self.name.clone(),

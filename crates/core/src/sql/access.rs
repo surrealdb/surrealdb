@@ -1,6 +1,3 @@
-use std::fmt::{self, Display, Formatter};
-
-use crate::fmt::EscapeIdent;
 use crate::sql::{Expr, Literal};
 use crate::types::PublicDuration;
 
@@ -54,19 +51,5 @@ impl From<crate::expr::access::AccessDuration> for AccessDuration {
 			token: v.token.map(Into::into),
 			session: v.session.map(Into::into),
 		}
-	}
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Accesses(pub Vec<Access>);
-
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Access(pub String);
-
-impl Display for Access {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		EscapeIdent(&self.0).fmt(f)
 	}
 }

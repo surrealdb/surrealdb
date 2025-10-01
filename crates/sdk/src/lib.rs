@@ -33,8 +33,6 @@ pub mod channel {
 
 /// Different error types for embedded and remote databases
 pub mod error {
-	pub use surrealdb_core::err::Error as Db;
-
 	pub use crate::api::err::Error as Api;
 }
 

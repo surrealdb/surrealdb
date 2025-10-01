@@ -15,44 +15,44 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::dbs::executor::convert_value_to_public_value;
 use crate::err::Error;
+use crate::expr;
 use crate::expr::kind::GeometryKind;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{self, Kind};
 use crate::fmt::{Pretty, QuoteStr};
 use crate::sql::expression::convert_public_value_to_internal;
 
-pub mod array;
-pub mod bytes;
-pub mod closure;
-pub mod datetime;
-pub mod duration;
-pub mod file;
-pub mod geometry;
-pub mod number;
-pub mod object;
-pub mod range;
-pub mod record;
-pub mod record_id;
-pub mod regex;
-pub mod table;
-pub mod uuid;
-pub mod value;
+pub(crate) mod array;
+pub(crate) mod bytes;
+pub(crate) mod closure;
+pub(crate) mod datetime;
+pub(crate) mod duration;
+pub(crate) mod file;
+pub(crate) mod geometry;
+pub(crate) mod number;
+pub(crate) mod object;
+pub(crate) mod range;
+pub(crate) mod record;
+pub(crate) mod record_id;
+pub(crate) mod regex;
+pub(crate) mod table;
+pub(crate) mod uuid;
+pub(crate) mod value;
 
-pub use self::array::Array;
-pub use self::bytes::Bytes;
-pub use self::closure::Closure;
-pub use self::datetime::Datetime;
-pub use self::duration::Duration;
-pub use self::file::File;
-pub use self::geometry::Geometry;
-pub use self::number::{DecimalExt, Number};
-pub use self::object::Object;
-pub use self::range::Range;
-pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
-pub use self::regex::Regex;
-pub use self::table::Table;
-pub use self::uuid::Uuid;
-pub use self::value::{CastError, CoerceError};
+pub(crate) use self::array::Array;
+pub(crate) use self::bytes::Bytes;
+pub(crate) use self::closure::Closure;
+pub(crate) use self::datetime::Datetime;
+pub(crate) use self::duration::Duration;
+pub(crate) use self::file::File;
+pub(crate) use self::geometry::Geometry;
+pub(crate) use self::number::{DecimalExt, Number};
+pub(crate) use self::object::Object;
+pub(crate) use self::range::Range;
+pub(crate) use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
+pub(crate) use self::regex::Regex;
+pub(crate) use self::table::Table;
+pub(crate) use self::uuid::Uuid;
+pub(crate) use self::value::{CastError, CoerceError};
 
 /// Marker type for a different serialization format for value which does not encode type
 /// information which is not required for indexing.
@@ -73,7 +73,7 @@ pub struct Null;
 #[serde(rename = "$surrealdb::private::Value")]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub enum Value {
+pub(crate) enum Value {
 	#[default]
 	None,
 	Null,
@@ -134,16 +134,6 @@ impl Value {
 		}
 	}
 
-	/// Check if this Value is TRUE or 'true'
-	pub fn is_true(&self) -> bool {
-		matches!(self, Value::Bool(true))
-	}
-
-	/// Check if this Value is FALSE or 'false'
-	pub fn is_false(&self) -> bool {
-		matches!(self, Value::Bool(false))
-	}
-
 	/// Check if this Value is truthy
 	pub fn is_truthy(&self) -> bool {
 		match self {
@@ -163,28 +153,9 @@ impl Value {
 		}
 	}
 
-	/// Check if this Value is a Thing, and belongs to a certain table
-	pub fn is_record_of_table(&self, table: String) -> bool {
-		match self {
-			Value::RecordId(RecordId {
-				table: tb,
-				..
-			}) => *tb == table,
-			_ => false,
-		}
-	}
-
 	/// Check if this Value is an int Number
 	pub fn is_int(&self) -> bool {
 		matches!(self, Value::Number(Number::Int(_)))
-	}
-
-	pub fn into_int(self) -> Option<i64> {
-		if let Number::Int(x) = self.into_number()? {
-			Some(x)
-		} else {
-			None
-		}
 	}
 
 	/// Check if this Value is a float Number
@@ -192,25 +163,9 @@ impl Value {
 		matches!(self, Value::Number(Number::Float(_)))
 	}
 
-	pub fn into_float(self) -> Option<f64> {
-		if let Number::Float(x) = self.into_number()? {
-			Some(x)
-		} else {
-			None
-		}
-	}
-
 	/// Check if this Value is a decimal Number
 	pub fn is_decimal(&self) -> bool {
 		matches!(self, Value::Number(Number::Decimal(_)))
-	}
-
-	pub fn into_decimal(self) -> Option<Decimal> {
-		if let Number::Decimal(x) = self.into_number()? {
-			Some(x)
-		} else {
-			None
-		}
 	}
 
 	/// Check if this Value is a Thing of a specific type
@@ -273,42 +228,6 @@ impl Value {
 		}
 	}
 
-	// -----------------------------------
-	// Simple output of value type
-	// -----------------------------------
-
-	pub fn kind(&self) -> Option<Kind> {
-		match self {
-			Value::None => None,
-			Value::Null => Some(Kind::Null),
-			Value::Bool(_) => Some(Kind::Bool),
-			Value::Number(_) => Some(Kind::Number),
-			Value::String(_) => Some(Kind::String),
-			Value::Duration(_) => Some(Kind::Duration),
-			Value::Datetime(_) => Some(Kind::Datetime),
-			Value::Uuid(_) => Some(Kind::Uuid),
-			Value::Array(arr) => Some(Kind::Array(
-				Box::new(arr.first().and_then(|v| v.kind()).unwrap_or_default()),
-				None,
-			)),
-			Value::Object(_) => Some(Kind::Object),
-			Value::Geometry(geo) => Some(Kind::Geometry(vec![geo.kind()])),
-			Value::Bytes(_) => Some(Kind::Bytes),
-			Value::Regex(_) => Some(Kind::Regex),
-			Value::RecordId(thing) => Some(Kind::Record(vec![thing.table.clone()])),
-			Value::Closure(closure) => {
-				let args_kinds =
-					closure.args.iter().map(|(_, kind)| kind.clone()).collect::<Vec<_>>();
-				let returns_kind = closure.returns.clone().map(Box::new);
-
-				Some(Kind::Function(Some(args_kinds), returns_kind))
-			}
-			//Value::Refs(_) => None,
-			Value::File(file) => Some(Kind::File(vec![file.bucket.clone()])),
-			_ => None,
-		}
-	}
-
 	/// Returns the surql representation of the kind of the value as a string.
 	///
 	/// # Warning
@@ -346,30 +265,6 @@ impl Value {
 			Self::RecordId(_) => "thing",
 			// TODO: Dubious types
 			Self::Table(_) => "table",
-		}
-	}
-
-	// -----------------------------------
-	// Record ID extraction
-	// -----------------------------------
-
-	/// Fetch the record id if there is one
-	pub fn record(self) -> Option<RecordId> {
-		match self {
-			// This is an object so look for the id field
-			Value::Object(mut v) => match v.remove("id") {
-				Some(Value::RecordId(v)) => Some(v),
-				_ => None,
-			},
-			// This is an array so take the first item
-			Value::Array(mut v) => match v.len() {
-				1 => v.remove(0).record(),
-				_ => None,
-			},
-			// This is a record id already
-			Value::RecordId(v) => Some(v),
-			// There is no valid record id
-			_ => None,
 		}
 	}
 
@@ -804,18 +699,7 @@ impl TryNeg for Value {
 /// Macro implementing conversion methods for the variants of the value enum.
 macro_rules! subtypes {
 	($($name:ident$( ( $($t:tt)* ) )? => ($is:ident,$as:ident,$into:ident)),*$(,)?) => {
-		pub enum Type {
-			$($name),*
-		}
-
 		impl Value {
-
-			pub fn type_of(&self) -> Type {
-				match &self{
-					$(subtypes!{@pat $name $( ($($t)*) )?} => Type::$name),*
-				}
-			}
-
 			$(
 				subtypes!{@method $name $( ($($t)*) )? => $is,$as,$into}
 			)*
@@ -837,11 +721,13 @@ macro_rules! subtypes {
 
 	(@method $name:ident($t:ty) => $is:ident,$as:ident,$into:ident) => {
 		#[doc = concat!("Check if the value is a [`",stringify!($name),"`]")]
+		#[allow(dead_code)]
 		pub fn $is(&self) -> bool{
 			matches!(self,Value::$name(_))
 		}
 
 		#[doc = concat!("Return a reference to [`",stringify!($name),"`] if the value is of that type")]
+		#[allow(dead_code)]
 		pub fn $as(&self) -> Option<&$t>{
 			if let Value::$name(x) = self{
 				Some(x)
@@ -851,6 +737,7 @@ macro_rules! subtypes {
 		}
 
 		#[doc = concat!("Turns the value into a [`",stringify!($name),"`] returning None if the value is not of that type")]
+		#[allow(dead_code)]
 		pub fn $into(self) -> Option<$t>{
 			if let Value::$name(x) = self{
 				Some(x)
@@ -862,6 +749,7 @@ macro_rules! subtypes {
 
 	(@method $name:ident => $is:ident,$as:ident,$into:ident) => {
 		#[doc = concat!("Check if the value is a [`",stringify!($name),"`]")]
+		#[allow(dead_code)]
 		pub fn $is(&self) -> bool{
 			matches!(self,Value::$name)
 		}
@@ -1070,24 +958,6 @@ mod tests {
 		assert!(Value::Null.is_null());
 		assert!(!Value::None.is_null());
 		assert!(!Value::from(1).is_null());
-	}
-
-	#[test]
-	fn check_true() {
-		assert!(!Value::None.is_true());
-		assert!(Value::Bool(true).is_true());
-		assert!(!Value::Bool(false).is_true());
-		assert!(!Value::from(1).is_true());
-		assert!(!Value::from("something").is_true());
-	}
-
-	#[test]
-	fn check_false() {
-		assert!(!Value::None.is_false());
-		assert!(!Value::Bool(true).is_false());
-		assert!(Value::Bool(false).is_false());
-		assert!(!Value::from(1).is_false());
-		assert!(!Value::from("something").is_false());
 	}
 
 	#[test]

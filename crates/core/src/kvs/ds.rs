@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[allow(unused_imports)]
 use anyhow::bail;
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
@@ -47,11 +47,12 @@ use crate::dbs::executor::convert_value_to_public_value;
 use crate::dbs::node::Timestamp;
 use crate::dbs::{Capabilities, Executor, Options, QueryResult, QueryResultBuilder, Session};
 use crate::err::Error;
-use crate::expr::statements::DefineUserStatement;
-use crate::expr::{Base, Expr, FlowResultExt as _, LogicalPlan};
+use crate::expr::model::get_model_path;
+use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
+use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevelExpr};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
-use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
+use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
@@ -1121,7 +1122,7 @@ impl Datastore {
 		self.process_plan(ast.into(), sess, vars).await
 	}
 
-	pub async fn process_plan(
+	pub(crate) async fn process_plan(
 		&self,
 		plan: LogicalPlan,
 		sess: &Session,
@@ -1527,7 +1528,7 @@ impl Datastore {
 		let res = match ApiDefinition::find_definition(apis.as_ref(), segments, method) {
 			Some((api, params)) => {
 				let invocation = ApiInvocation {
-					params,
+					params: params.try_into()?,
 					method,
 					headers,
 					query,
@@ -1557,6 +1558,45 @@ impl Datastore {
 		}
 
 		res
+	}
+
+	pub async fn put_ml_model(
+		&self,
+		session: &Session,
+		name: &str,
+		version: &str,
+		description: &str,
+		data: Vec<u8>,
+	) -> Result<()> {
+		let ns = session.ns.as_ref().context("Namespace is required")?;
+		let db = session.db.as_ref().context("Database is required")?;
+
+		self.check(session, Action::Edit, ResourceKind::Model.on_db(ns, db))?;
+
+		// Calculate the hash of the model file
+		let hash = crate::obs::hash(&data);
+		// Calculate the path of the model file
+		let path = get_model_path(ns, db, name, version, &hash);
+		// Insert the file data in to the store
+		crate::obs::put(&path, data).await?;
+		// Insert the model in to the database
+		let model = DefineModelStatement {
+			name: name.to_string(),
+			version: version.to_string(),
+			comment: Some(Expr::Literal(Literal::String(description.to_string()))),
+			hash,
+			..Default::default()
+		};
+
+		let q = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Model(
+				model,
+			))))],
+		};
+
+		self.process_plan(q, session, None).await?;
+
+		Ok(())
 	}
 }
 

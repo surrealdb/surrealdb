@@ -8,7 +8,7 @@ use revision::Revisioned;
 use serde::Serialize;
 use serde::ser::SerializeMap as _;
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_types::{Array, Notification, Object, Value, Variables};
+use surrealdb_types::{Array, Notification, Object, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::MlExportConfig;
@@ -228,7 +228,7 @@ impl Command {
 /// used BTreeMap.
 ///
 /// This struct serializes as if it is a surrealdb_core::expr::Value::Object.
-#[derive(Debug)]
+#[derive(Debug, SurrealValue)]
 pub(crate) struct RouterRequest {
 	id: Option<i64>,
 	method: &'static str,

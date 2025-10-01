@@ -143,8 +143,18 @@ pub async fn db_access(
 			if let Some(au) = &av.authenticate {
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
-				sess.rd = Some(Value::RecordId(rid.clone().into()));
-				sess.tk = Some(claims.clone().into_claims_object().into());
+				sess.rd = Some(
+					crate::dbs::executor::convert_value_to_public_value(Value::RecordId(
+						rid.clone().into(),
+					))
+					.unwrap(),
+				);
+				sess.tk = Some(
+					crate::dbs::executor::convert_value_to_public_value(
+						claims.clone().into_claims_object().into(),
+					)
+					.unwrap(),
+				);
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
 				rid = authenticate_record(kvs, &sess, au).await?;
@@ -179,11 +189,21 @@ pub async fn db_access(
 			// Create the authentication token
 			let enc = encode(&Header::new(algorithm_to_jwt_algorithm(iss.alg)), &claims, &key);
 			// Set the authentication on the session
-			session.tk = Some(claims.into_claims_object().into());
+			session.tk = Some(
+				crate::dbs::executor::convert_value_to_public_value(
+					claims.into_claims_object().into(),
+				)
+				.unwrap(),
+			);
 			session.ns = Some(ns.clone());
 			session.db = Some(db.clone());
 			session.ac = Some(ac.clone());
-			session.rd = Some(Value::RecordId(rid.clone().into()));
+			session.rd = Some(
+				crate::dbs::executor::convert_value_to_public_value(Value::RecordId(
+					rid.clone().into(),
+				))
+				.unwrap(),
+			);
 			session.exp = expiration(av.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_string(),
@@ -205,7 +225,7 @@ pub async fn db_access(
 			Some(Error::Thrown(_)) => Err(e),
 			// If the SIGNUP clause failed due to an unexpected error, be more specific
 			// This allows clients to handle these errors, which may be retryable
-			Some(Error::Tx(_) | Error::TxFailure | Error::TxRetryable) => {
+			Some(Error::Tx(_) | Error::TxRetryable) => {
 				debug!("Unexpected error found while executing a SIGNUP clause: {e}");
 				Err(anyhow::Error::new(Error::UnexpectedAuth))
 			}

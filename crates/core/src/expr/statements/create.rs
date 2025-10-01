@@ -13,21 +13,21 @@ use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::{Datetime, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct CreateStatement {
+pub(crate) struct CreateStatement {
 	// A keyword modifier indicating if we are expecting a single result or several
 	pub only: bool,
 	// Where we are creating (i.e. table, or record ID)
-	pub what: Vec<Expr>,
+	pub(crate) what: Vec<Expr>,
 	// The data associated with the record being created
-	pub data: Option<Data>,
+	pub(crate) data: Option<Data>,
 	//  What the result of the statement should resemble (i.e. Diff or no result etc).
-	pub output: Option<Output>,
+	pub(crate) output: Option<Output>,
 	// The timeout for the statement
 	pub timeout: Option<Timeout>,
 	// If the statement should be run in parallel
 	pub parallel: bool,
 	// Version as nanosecond timestamp passed down to Datastore
-	pub version: Option<Expr>,
+	pub(crate) version: Option<Expr>,
 }
 
 impl CreateStatement {

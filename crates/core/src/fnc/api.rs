@@ -55,7 +55,7 @@ pub async fn invoke(
 
 	if let Some((api, params)) = ApiDefinition::find_definition(&apis, segments, method) {
 		let invocation = ApiInvocation {
-			params,
+			params: params.try_into()?,
 			method,
 			query,
 			headers,

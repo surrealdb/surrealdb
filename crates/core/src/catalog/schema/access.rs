@@ -70,7 +70,7 @@ impl InfoStructure for AccessType {
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub struct RecordAccess {
+pub(crate) struct RecordAccess {
 	pub signup: Option<Expr>,
 	pub signin: Option<Expr>,
 	pub jwt: JwtAccess,
@@ -212,14 +212,15 @@ impl fmt::Display for Algorithm {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[non_exhaustive]
 pub struct AccessDefinition {
-	pub name: String,
-	pub access_type: AccessType,
-	pub authenticate: Option<Expr>,
-	pub grant_duration: Option<Duration>,
-	pub token_duration: Option<Duration>,
-	pub session_duration: Option<Duration>,
-	pub comment: Option<String>,
+	pub(crate) name: String,
+	pub(crate) access_type: AccessType,
+	pub(crate) authenticate: Option<Expr>,
+	pub(crate) grant_duration: Option<Duration>,
+	pub(crate) token_duration: Option<Duration>,
+	pub(crate) session_duration: Option<Duration>,
+	pub(crate) comment: Option<String>,
 }
 impl_kv_value_revisioned!(AccessDefinition);
 

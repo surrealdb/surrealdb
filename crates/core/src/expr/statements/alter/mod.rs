@@ -13,12 +13,12 @@ mod field;
 mod sequence;
 mod table;
 
-pub use field::{AlterDefault, AlterFieldStatement};
-pub use sequence::AlterSequenceStatement;
-pub use table::AlterTableStatement;
+pub(crate) use field::{AlterDefault, AlterFieldStatement};
+pub(crate) use sequence::AlterSequenceStatement;
+pub(crate) use table::AlterTableStatement;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub enum AlterKind<T> {
+pub(crate) enum AlterKind<T> {
 	#[default]
 	None,
 	Set(T),
@@ -72,7 +72,7 @@ impl<T: Revisioned> Revisioned for AlterKind<T> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum AlterStatement {
+pub(crate) enum AlterStatement {
 	Table(AlterTableStatement),
 	Sequence(AlterSequenceStatement),
 	Field(AlterFieldStatement),

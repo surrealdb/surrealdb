@@ -19,6 +19,7 @@ use crate::sql::statements::access::{
 };
 use crate::sql::statements::define::user::PassType;
 use crate::sql::statements::define::{DefineDefault, DefineKind};
+use crate::sql::statements::remove::RemoveAnalyzerStatement;
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
@@ -27,10 +28,10 @@ use crate::sql::statements::{
 	DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
 	DefineTableStatement, DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement,
 	InsertStatement, KillStatement, OptionStatement, OutputStatement, RelateStatement,
-	RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
-	RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement,
-	RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
-	SelectStatement, UpdateStatement, UpsertStatement, UseStatement,
+	RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
+	RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement, RemoveParamStatement,
+	RemoveStatement, RemoveTableStatement, RemoveUserStatement, SelectStatement, UpdateStatement,
+	UpsertStatement, UseStatement,
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
@@ -41,8 +42,7 @@ use crate::sql::{
 };
 use crate::syn;
 use crate::syn::parser::ParserSettings;
-use crate::types::{PublicDatetime, PublicDuration, PublicUuid};
-use crate::val::Number;
+use crate::types::{PublicDatetime, PublicDuration, PublicNumber, PublicUuid};
 
 fn ident_field(name: &str) -> Expr {
 	Expr::Idiom(Idiom(vec![Part::Field(name.to_string())]))
@@ -1878,7 +1878,7 @@ fn parse_define_index() {
 			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())]))],
 			index: Index::MTree(MTreeParams {
 				dimension: 4,
-				distance: Distance::Minkowski(Number::Int(5)),
+				distance: Distance::Minkowski(PublicNumber::Int(5)),
 				capacity: 6,
 				mtree_cache: 9,
 				vector_type: VectorType::I16,

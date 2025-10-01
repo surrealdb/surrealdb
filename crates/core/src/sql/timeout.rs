@@ -5,7 +5,7 @@ use crate::types::PublicDuration;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Timeout(pub Expr);
+pub(crate) struct Timeout(pub(crate) Expr);
 
 impl Default for Timeout {
 	fn default() -> Self {

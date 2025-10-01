@@ -281,10 +281,26 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 										state.vars.shift_remove(&key);
 									}
 								}
-								todo!("STU")
+
 								// let _res =
 								// pending.response_channel.send(response.result.map_err(|e|
 								// e.into())).await;
+
+								match response.result {
+									Ok(DbResult::Query(results)) => {
+										let _res = pending.response_channel.send(Ok(results)).await;
+									}
+									Ok(DbResult::Live(_notification)) => {
+										panic!("TODO: STU: What should we do here?")
+									}
+									Ok(DbResult::Other(_value)) => {
+										panic!("TODO: STU: I don't think this is possible anymore.")
+									}
+									Err(error) => {
+										let _res =
+											pending.response_channel.send(Err(error.into())).await;
+									}
+								}
 							}
 							_ => {
 								warn!(

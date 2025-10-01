@@ -5,7 +5,7 @@ use crate::sql::{Expr, Literal, Permission};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct DefineBucketStatement {
+pub(crate) struct DefineBucketStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub backend: Option<Expr>,

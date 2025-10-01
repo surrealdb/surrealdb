@@ -1,26 +1,12 @@
 use std::fmt;
 
 use crate::types::PublicDatetime;
-use crate::vs::VersionStamp;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum ShowSince {
 	Timestamp(PublicDatetime),
 	Versionstamp(u64),
-}
-
-impl ShowSince {
-	pub fn versionstamp(vs: &VersionStamp) -> ShowSince {
-		ShowSince::Versionstamp(vs.into_u64_lossy())
-	}
-
-	pub fn as_versionstamp(&self) -> Option<VersionStamp> {
-		match self {
-			ShowSince::Timestamp(_) => None,
-			ShowSince::Versionstamp(v) => Some(VersionStamp::from_u64(*v)),
-		}
-	}
 }
 
 impl From<ShowSince> for crate::expr::statements::show::ShowSince {

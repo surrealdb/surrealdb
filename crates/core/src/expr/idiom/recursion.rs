@@ -11,7 +11,7 @@ use crate::expr::{FlowResultExt as _, Part};
 use crate::val::{Array, Value};
 
 #[derive(Clone, Copy, Debug)]
-pub struct Recursion<'a> {
+pub(crate) struct Recursion<'a> {
 	pub min: u32,
 	pub max: Option<u32>,
 	pub iterated: u32,

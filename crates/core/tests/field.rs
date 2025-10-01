@@ -178,7 +178,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 		"test",
 		"test",
 		"test",
-		Value::RecordId(RecordId::new("user", "one".to_string())).into(),
+		Value::RecordId(RecordId::new("user", "one".to_string())),
 	);
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);

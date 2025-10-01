@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
-use futures::{Stream, StreamExt, stream};
+use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
@@ -334,13 +334,13 @@ impl Executor {
 				if let Err(e) = lock.complete_changes(false).await {
 					let _ = lock.cancel().await;
 
-					bail!(Error::QueryNotExecutedDetail {
+					bail!(Error::QueryNotExecuted {
 						message: e.to_string(),
 					});
 				}
 
 				if let Err(e) = lock.commit().await {
-					bail!(Error::QueryNotExecutedDetail {
+					bail!(Error::QueryNotExecuted {
 						message: e.to_string(),
 					});
 				}
@@ -689,15 +689,6 @@ impl Executor {
 		Self::execute_expr_stream(kvs, ctx, opt, false, stream).await
 	}
 
-	pub async fn execute_expr(
-		kvs: &Datastore,
-		ctx: Context,
-		opt: Options,
-		plan: TopLevelExpr,
-	) -> Result<Vec<QueryResult>> {
-		Self::execute_expr_stream(kvs, ctx, opt, false, stream::once(async { Ok(plan) })).await
-	}
-
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	pub async fn execute_stream<S>(
 		kvs: &Datastore,
@@ -789,7 +780,9 @@ impl Executor {
 ///
 /// In the future, as the two types diverge, this function will need access to the context in order
 /// to convert certain values to the public value.
-pub fn convert_value_to_public_value(value: crate::val::Value) -> Result<surrealdb_types::Value> {
+pub(crate) fn convert_value_to_public_value(
+	value: crate::val::Value,
+) -> Result<surrealdb_types::Value> {
 	match value {
 		crate::val::Value::None => Ok(surrealdb_types::Value::None),
 		crate::val::Value::Null => Ok(surrealdb_types::Value::Null),

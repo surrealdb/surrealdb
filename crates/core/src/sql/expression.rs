@@ -19,7 +19,7 @@ use crate::types::{
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Expr {
+pub(crate) enum Expr {
 	Literal(Literal),
 
 	Param(Param),

@@ -20,7 +20,6 @@ use crate::iam::{self, Actor, Auth, Level, Role};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::val::Value;
 use crate::{catalog, syn};
 
 /// Returns the decoding key as wel as the method by which to verify the key against
@@ -158,7 +157,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	// Decode the token without verifying
 	let token_data = decode::<Claims>(token, &KEY, &DUD)?;
 	// Convert the token to a SurrealQL object value
-	let value = Value::from(token_data.claims.clone().into_claims_object());
+	let value = crate::val::Value::from(token_data.claims.clone().into_claims_object());
 	// Check if the auth token can be used
 	if let Some(nbf) = token_data.claims.nbf {
 		if nbf > Utc::now().timestamp() {
@@ -221,7 +220,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
-							Err(anyhow::Error::new(Error::MissingTokenHeader("kid".to_string())))
+							Err(anyhow::Error::new(Error::InvalidArguments {
+								name: "token".to_string(),
+								message: "Missing token header 'kid'".to_string(),
+							}))
 						}
 					}
 					#[cfg(not(feature = "jwks"))]
@@ -235,8 +237,18 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(ns).with_db(db);
-				sess.rd = Some(Value::RecordId(rid.clone().into()));
-				sess.tk = Some(token_data.claims.clone().into_claims_object().into());
+				sess.rd = Some(
+					crate::dbs::executor::convert_value_to_public_value(
+						crate::val::Value::RecordId(rid.clone().into()),
+					)
+					.unwrap(),
+				);
+				sess.tk = Some(
+					crate::dbs::executor::convert_value_to_public_value(
+						token_data.claims.clone().into_claims_object().into(),
+					)
+					.unwrap(),
+				);
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
 				rid = authenticate_record(kvs, &sess, au).await?;
@@ -244,11 +256,16 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated with record access method `{}`", ac);
 			// Set the session
-			session.tk = Some(value);
+			session.tk = Some(crate::dbs::executor::convert_value_to_public_value(value).unwrap());
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.ac = Some(ac.to_owned());
-			session.rd = Some(Value::RecordId(rid.clone().into()));
+			session.rd = Some(
+				crate::dbs::executor::convert_value_to_public_value(crate::val::Value::RecordId(
+					rid.clone().into(),
+				))
+				.unwrap(),
+			);
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_string(),
@@ -310,9 +327,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 							if let Some(kid) = token_data.header.kid {
 								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 							} else {
-								Err(anyhow::Error::new(Error::MissingTokenHeader(
-									"kid".to_string(),
-								)))
+								Err(anyhow::Error::new(Error::InvalidArguments {
+									name: "token".to_string(),
+									message: "Missing token header 'kid'".to_string(),
+								}))
 							}
 						}
 						#[cfg(not(feature = "jwks"))]
@@ -324,7 +342,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					if let Some(au) = &de.authenticate {
 						// Setup the system session for executing the clause
 						let mut sess = Session::editor().with_ns(ns).with_db(db);
-						sess.tk = Some(token_data.claims.clone().into_claims_object().into());
+						sess.tk = Some(
+							crate::dbs::executor::convert_value_to_public_value(
+								token_data.claims.clone().into_claims_object().into(),
+							)
+							.unwrap(),
+						);
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
 						authenticate_generic(kvs, &sess, au).await?;
@@ -346,7 +369,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					// Log the success
 					debug!("Authenticated to database `{}` with access method `{}`", db, ac);
 					// Set the session
-					session.tk = Some(value);
+					session.tk =
+						Some(crate::dbs::executor::convert_value_to_public_value(value).unwrap());
 					session.ns = Some(ns.to_owned());
 					session.db = Some(db.to_owned());
 					session.ac = Some(ac.to_owned());
@@ -373,9 +397,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 								if let Some(kid) = token_data.header.kid {
 									jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 								} else {
-									Err(anyhow::Error::new(Error::MissingTokenHeader(
-										"kid".to_string(),
-									)))
+									Err(anyhow::Error::new(Error::InvalidArguments {
+										name: "token".to_string(),
+										message: "Missing token header 'kid'".to_string(),
+									}))
 								}
 							}
 							#[cfg(not(feature = "jwks"))]
@@ -387,18 +412,30 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						// AUTHENTICATE clause
 						// Setup the system session for finding the signin record
 						let mut sess = Session::editor().with_ns(ns).with_db(db);
-						sess.tk = Some(token_data.claims.clone().into_claims_object().into());
+						sess.tk = Some(
+							crate::dbs::executor::convert_value_to_public_value(
+								token_data.claims.clone().into_claims_object().into(),
+							)
+							.unwrap(),
+						);
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
 						let rid = authenticate_record(kvs, &sess, au).await?;
 						// Log the success
 						debug!("Authenticated with record access method `{}`", ac);
 						// Set the session
-						session.tk = Some(value);
+						session.tk = Some(
+							crate::dbs::executor::convert_value_to_public_value(value).unwrap(),
+						);
 						session.ns = Some(ns.to_owned());
 						session.db = Some(db.to_owned());
 						session.ac = Some(ac.to_owned());
-						session.rd = Some(Value::RecordId(rid.clone().into()));
+						session.rd = Some(
+							crate::dbs::executor::convert_value_to_public_value(
+								crate::val::Value::RecordId(rid.clone().into()),
+							)
+							.unwrap(),
+						);
 						session.exp = expiration(de.session_duration)?;
 						session.au = Arc::new(Auth::new(Actor::new(
 							rid.to_string(),
@@ -452,7 +489,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to database `{}` with user `{}` using token", db, id);
 			// Set the session
-			session.tk = Some(value);
+			session.tk = Some(crate::dbs::executor::convert_value_to_public_value(value).unwrap());
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.exp = expiration(de.session_duration)?;
@@ -512,7 +549,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
-							bail!(Error::MissingTokenHeader("kid".to_string()))
+							bail!(Error::InvalidArguments {
+								name: "token".to_string(),
+								message: "Missing token header 'kid'".to_string()
+							})
 						}
 					}
 					#[cfg(not(feature = "jwks"))]
@@ -526,7 +566,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for executing the clause
 				let mut sess = Session::editor().with_ns(ns);
-				sess.tk = Some(token_data.claims.clone().into_claims_object().into());
+				sess.tk = Some(
+					crate::dbs::executor::convert_value_to_public_value(
+						token_data.claims.clone().into_claims_object().into(),
+					)
+					.unwrap(),
+				);
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
 				authenticate_generic(kvs, &sess, au).await?;
@@ -548,7 +593,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to namespace `{}` with access method `{}`", ns, ac);
 			// Set the session
-			session.tk = Some(value);
+			session.tk = Some(crate::dbs::executor::convert_value_to_public_value(value).unwrap());
 			session.ns = Some(ns.to_owned());
 			session.ac = Some(ac.to_owned());
 			session.exp = expiration(de.session_duration)?;
@@ -596,7 +641,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to namespace `{}` with user `{}` using token", ns, id);
 			// Set the session
-			session.tk = Some(value);
+			session.tk = Some(crate::dbs::executor::convert_value_to_public_value(value).unwrap());
 			session.ns = Some(ns.to_owned());
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
@@ -644,7 +689,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
-							bail!(Error::MissingTokenHeader("kid".to_string()))
+							bail!(Error::InvalidArguments {
+								name: "token".to_string(),
+								message: "Missing token header 'kid'".to_string()
+							})
 						}
 					}
 					#[cfg(not(feature = "jwks"))]
@@ -658,7 +706,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for executing the clause
 				let mut sess = Session::editor();
-				sess.tk = Some(token_data.claims.clone().into_claims_object().into());
+				sess.tk = Some(
+					crate::dbs::executor::convert_value_to_public_value(
+						token_data.claims.clone().into_claims_object().into(),
+					)
+					.unwrap(),
+				);
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
 				authenticate_generic(kvs, &sess, au).await?;
@@ -680,7 +733,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to root with access method `{}`", ac);
 			// Set the session
-			session.tk = Some(value);
+			session.tk = Some(crate::dbs::executor::convert_value_to_public_value(value).unwrap());
 			session.ac = Some(ac.to_owned());
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Root)));
@@ -709,7 +762,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to root level with user `{}` using token", id);
 			// Set the session
-			session.tk = Some(value);
+			session.tk = Some(crate::dbs::executor::convert_value_to_public_value(value).unwrap());
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
@@ -1338,27 +1391,40 @@ mod tests {
 				"Session expiration is expected to match the defined duration"
 			);
 			let tk = match sess.tk {
-				Some(Value::Object(tk)) => tk,
+				Some(crate::types::PublicValue::Object(tk)) => tk,
 				_ => panic!("Session token is not an object"),
 			};
 			let string_claim = tk.get("string_claim").unwrap();
-			assert_eq!(*string_claim, Value::String("test".into()));
+			assert_eq!(*string_claim, crate::types::PublicValue::String("test".into()));
 			let bool_claim = tk.get("bool_claim").unwrap();
-			assert_eq!(*bool_claim, Value::Bool(true));
+			assert_eq!(*bool_claim, crate::types::PublicValue::Bool(true));
 			let int_claim = tk.get("int_claim").unwrap();
-			assert_eq!(*int_claim, Value::Number(123456.into()));
+			assert_eq!(*int_claim, crate::types::PublicValue::Number(123456.into()));
 			let float_claim = tk.get("float_claim").unwrap();
-			assert_eq!(*float_claim, Value::Number(123.456.into()));
+			assert_eq!(*float_claim, crate::types::PublicValue::Number(123.456.into()));
 			let array_claim = tk.get("array_claim").unwrap();
-			assert_eq!(*array_claim, Value::Array(vec!["test_1", "test_2"].into()));
+			assert_eq!(
+				*array_claim,
+				crate::types::PublicValue::Array(vec!["test_1", "test_2"].into())
+			);
 			let object_claim = tk.get("object_claim").unwrap();
-			let mut test_object: HashMap<String, Value> = HashMap::new();
-			test_object.insert("test_1".to_string(), Value::String("value_1".into()));
+			let mut test_object: HashMap<String, crate::types::PublicValue> = HashMap::new();
+			test_object
+				.insert("test_1".to_string(), crate::types::PublicValue::String("value_1".into()));
 			let mut test_object_child = HashMap::new();
-			test_object_child.insert("test_2_1".to_string(), Value::String("value_2_1".into()));
-			test_object_child.insert("test_2_2".to_string(), Value::String("value_2_2".into()));
-			test_object.insert("test_2".to_string(), Value::Object(test_object_child.into()));
-			assert_eq!(*object_claim, Value::Object(test_object.into()));
+			test_object_child.insert(
+				"test_2_1".to_string(),
+				crate::types::PublicValue::String("value_2_1".into()),
+			);
+			test_object_child.insert(
+				"test_2_2".to_string(),
+				crate::types::PublicValue::String("value_2_2".into()),
+			);
+			test_object.insert(
+				"test_2".to_string(),
+				crate::types::PublicValue::Object(test_object_child.into()),
+			);
+			assert_eq!(*object_claim, crate::types::PublicValue::Object(test_object.into()));
 		}
 	}
 

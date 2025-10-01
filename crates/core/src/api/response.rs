@@ -49,7 +49,7 @@ pub enum ResponseInstruction {
 }
 
 impl ResponseInstruction {
-	pub fn for_format(invocation: &ApiInvocation) -> Result<Self, Error> {
+	pub(crate) fn for_format(invocation: &ApiInvocation) -> Result<Self, Error> {
 		let mime = invocation
 			.headers
 			.get(ACCEPT)

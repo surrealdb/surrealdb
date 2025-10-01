@@ -3,8 +3,7 @@ use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::rpc::DbResultError;
-use surrealdb_core::sql::{Expr, FunctionCall};
-use surrealdb_core::{sql, syn};
+use surrealdb_core::syn;
 use surrealdb_types::{Array, Number, Value};
 
 use crate::helpers::Test;
@@ -39,14 +38,9 @@ macro_rules! assert_delta {
 #[tokio::test]
 async fn error_on_invalid_function() -> Result<()> {
 	let dbs = new_ds().await?;
-	let query = sql::Ast {
-		expressions: vec![sql::TopLevelExpr::Expr(Expr::FunctionCall(Box::new(FunctionCall {
-			receiver: sql::Function::Normal("this is an invalid function name".to_string()),
-			arguments: Vec::new(),
-		})))],
-	};
+	let query = "`this is an invalid function name`()";
 	let session = Session::owner().with_ns("test").with_db("test");
-	let mut resp = dbs.process(query, &session, None).await.unwrap();
+	let mut resp = dbs.execute(query, &session, None).await.unwrap();
 	assert_eq!(resp.len(), 1);
 	let err = resp.pop().unwrap().result.unwrap_err();
 	if err == DbResultError::InternalError("STU".to_string()) {
@@ -57,7 +51,6 @@ async fn error_on_invalid_function() -> Result<()> {
 
 // --------------------------------------------------
 // rand
-// --------------------------------------------------
 
 #[tokio::test]
 async fn function_rand_time() -> Result<()> {

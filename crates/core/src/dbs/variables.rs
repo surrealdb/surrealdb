@@ -8,7 +8,7 @@ use crate::val::{Object, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[repr(transparent)]
-pub struct Variables(pub BTreeMap<String, Value>);
+pub(crate) struct Variables(pub(crate) BTreeMap<String, Value>);
 
 impl Variables {
 	/// Create a new empty variables map.

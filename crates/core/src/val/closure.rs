@@ -15,7 +15,7 @@ use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Closure {
+pub(crate) struct Closure {
 	pub args: Vec<(Param, Kind)>,
 	pub returns: Option<Kind>,
 	pub body: Expr,
@@ -33,10 +33,6 @@ impl Ord for Closure {
 }
 
 impl Closure {
-	pub fn read_only(&self) -> bool {
-		self.body.read_only()
-	}
-
 	pub(crate) async fn compute(
 		&self,
 		stk: &mut Stk,

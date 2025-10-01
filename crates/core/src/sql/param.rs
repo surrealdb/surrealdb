@@ -15,10 +15,6 @@ impl Param {
 		Self(str)
 	}
 
-	pub fn as_str(&self) -> &str {
-		&self.0
-	}
-
 	// Convert into a string.
 	pub fn into_string(self) -> String {
 		self.0

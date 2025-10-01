@@ -75,7 +75,7 @@ pub struct Claims {
 }
 
 impl Claims {
-	pub fn into_claims_object(self) -> Object {
+	pub(crate) fn into_claims_object(self) -> Object {
 		// Set default value
 		let mut out = Object::default();
 		// Add iss field if set

@@ -2,12 +2,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display, Formatter};
 
 use revision::revisioned;
+use surrealdb_types::sql::ToSql;
 
 use crate::catalog::TableDefinition;
 use crate::expr::Operation;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::val::{Array, Number, Object, RecordId, Value};
 use crate::vs::VersionStamp;
 

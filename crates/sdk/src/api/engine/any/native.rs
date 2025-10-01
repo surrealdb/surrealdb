@@ -5,8 +5,6 @@ use std::sync::atomic::AtomicI64;
 use anyhow::bail;
 #[cfg(feature = "protocol-http")]
 use reqwest::ClientBuilder;
-#[allow(unused_imports, reason = "Used when a DB engine is disabled.")]
-use surrealdb_core::err::Error as DbError;
 use tokio::sync::watch;
 #[cfg(feature = "protocol-ws")]
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
@@ -61,9 +59,7 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(kv_fdb))]
-					bail!(
-						DbError::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
-					);
+					bail!(Error::Scheme("foundationdb".to_owned()));
 				}
 
 				EndpointKind::Memory => {
@@ -76,9 +72,7 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
-					bail!(
-						DbError::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())
-					);
+					bail!(Error::Scheme("memory".to_owned()));
 				}
 
 				EndpointKind::File | EndpointKind::RocksDb => {
@@ -91,7 +85,7 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
-					bail!(DbError::Ds(
+					bail!(Error::Scheme(
 						"Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
 					))
 				}
@@ -107,7 +101,7 @@ impl conn::Sealed for Any {
 
 					#[cfg(not(feature = "kv-tikv"))]
 					bail!(
-						DbError::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())
+						Error::Scheme("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())
 					);
 				}
 
@@ -121,7 +115,7 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-surrealkv"))]
-					bail!(DbError::Ds(
+					bail!(Error::Scheme(
 						"Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
 					)
 					);
@@ -157,7 +151,7 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "protocol-http"))]
-					bail!(DbError::Ds(
+					bail!(Error::Scheme(
 						"Cannot connect to the `HTTP` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
 					)
 					);
@@ -197,7 +191,7 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "protocol-ws"))]
-					bail!(DbError::Ds(
+					bail!(Error::Scheme(
 						"Cannot connect to the `WebSocket` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
 					));
 				}

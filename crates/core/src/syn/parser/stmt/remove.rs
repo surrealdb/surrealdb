@@ -14,7 +14,10 @@ use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;
 
 impl Parser<'_> {
-	pub async fn parse_remove_stmt(&mut self, stk: &mut Stk) -> ParseResult<RemoveStatement> {
+	pub(crate) async fn parse_remove_stmt(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<RemoveStatement> {
 		let next = self.next();
 		let res = match next.kind {
 			t!("NAMESPACE") => {
