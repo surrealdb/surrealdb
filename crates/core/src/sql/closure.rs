@@ -17,7 +17,7 @@ impl fmt::Display for Closure {
 			if i > 0 {
 				f.write_str(", ")?;
 			}
-			write!(f, "${name}: ")?;
+			write!(f, "{name}: ")?;
 			match kind {
 				k @ Kind::Either(_) => write!(f, "<{}>", k)?,
 				k => write!(f, "{}", k)?,
