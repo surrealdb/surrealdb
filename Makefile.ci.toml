@@ -345,7 +345,7 @@ run_task = "ci-api-integration"
 
 [tasks.ci-api-integration-ws]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "ws", _TEST_FEATURES = "protocol-ws" }
+env = { _TEST_API_ENGINE = "ws", _TEST_FEATURES = "protocol-ws", SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE = 268435456, SURREAL_WEBSOCKET_MAX_FRAME_SIZE = 268435456 }
 run_task = "ci-api-integration"
 
 [tasks.ci-api-integration-any]
@@ -359,13 +359,6 @@ run_task = "ci-api-integration"
 [tasks.ci-api-integration-mem]
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "mem", _TEST_FEATURES = "kv-mem" }
-run_task = { name = [
-    "test-api-integration",
-], fork = true, parallel = true }
-
-[tasks.ci-api-integration-file]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb" }
 run_task = { name = [
     "test-api-integration",
 ], fork = true, parallel = true }
@@ -405,7 +398,6 @@ category = "CI - INTEGRATION TESTS"
 description = "Run all integration tests"
 dependencies = [
     "ci-api-integration-mem",
-    "ci-api-integration-file",
     "ci-api-integration-rocksdb",
     "ci-api-integration-surrealkv",
     "ci-api-integration-tikv",

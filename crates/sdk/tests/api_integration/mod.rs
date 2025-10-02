@@ -112,7 +112,8 @@ mod ws {
 	use surrealdb::Surreal;
 	use surrealdb::engine::remote::ws::{Client, Ws};
 	use surrealdb::opt::auth::Root;
-	use tokio::sync::{Semaphore, SemaphorePermit};
+	use surrealdb_types::SurrealValue;
+use tokio::sync::{Semaphore, SemaphorePermit};
 
 	use super::{ROOT_PASS, ROOT_USER};
 	use crate::api_integration::ws;
@@ -184,6 +185,82 @@ mod ws {
 		assert_eq!(poll!(pin!(db.wait_for(Database))), Poll::Ready(()));
 
 		drop(permit);
+	}
+
+	/// Test WebSocket message size limits to ensure proper handling of large messages.
+	///
+	/// This test verifies that:
+	/// 1. Messages within the configured size limits are processed successfully
+	/// 2. Messages exceeding the size limits are properly rejected with appropriate error messages
+	/// 3. The WebSocket configuration correctly applies both message and frame size limits
+	///
+	/// The test uses a custom WebSocket configuration with a 256 MiB message size limit
+	/// and tests various message sizes including edge cases.
+	#[test_log::test(tokio::test)]
+	async fn check_max_size() {
+		use surrealdb_types::SurrealValue;
+		use surrealdb::opt::{Config, WebsocketConfig};
+		use ulid::Ulid;
+
+		/// Test content structure for validating large message handling
+		#[derive(Debug, Clone, SurrealValue, PartialEq)]
+		struct Content {
+			content: String,
+		}
+
+		impl Content {
+			/// Creates test content with a string of the specified length
+			fn new(len: usize) -> Self {
+				Self {
+					content: "a".repeat(len),
+				}
+			}
+		}
+
+		// Set a 256 MiB limit for testing large message handling
+		let max_size = 256 << 20;
+
+		let permit = PERMITS.acquire().await.unwrap();
+		// Configure WebSocket with custom size limits for testing
+		let ws_config =
+			WebsocketConfig::default().max_message_size(max_size).max_frame_size(max_size);
+		let config = Config::new().websocket(ws_config).unwrap();
+		let db = Surreal::new::<Ws>(("127.0.0.1:8000", config)).await.unwrap();
+		db.signin(Root {
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
+		})
+		.await
+		.unwrap();
+		db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+		drop(permit);
+
+		// Test various message sizes that should be accepted
+		{
+			let sizes = [0, 1, 1024, max_size - (1 << 20)];
+
+			for size in sizes {
+				let content = Content::new(size);
+
+				let response: Option<Content> =
+					db.upsert(("table", "test")).content(content.clone()).await.unwrap();
+
+				assert_eq!(content, response.unwrap(), "size: {size}");
+			}
+		}
+
+		// Test message size that should be rejected
+		{
+			let content = Content::new(max_size + (1 << 20));
+
+			let error = db
+				.upsert::<Option<Content>>(("table", "test"))
+				.content(content.clone())
+				.await
+				.unwrap_err();
+
+			assert!(error.to_string().starts_with("The message is too long"));
+		}
 	}
 
 	include_tests!(new_db => basic, serialisation, live);

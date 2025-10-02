@@ -15,7 +15,7 @@ where
 {
 	Router::new()
 		.route("/ml/import", post(implementation::import))
-		.route("/ml/export/:name/:version", get(implementation::export))
+		.route("/ml/export/{name}/{version}", get(implementation::export))
 		.route_layer(DefaultBodyLimit::disable())
 		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_ML_BODY_SIZE))
 }

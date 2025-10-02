@@ -6,6 +6,7 @@ use surrealdb_core::dbs::Capabilities as CoreCapabilities;
 use surrealdb_core::iam::Level;
 
 use crate::opt::capabilities::Capabilities;
+use crate::opt::websocket::WebsocketConfig;
 
 /// Configuration for server connection, including: strictness, notifications,
 /// query_timeout, transaction_timeout
@@ -23,6 +24,7 @@ pub struct Config {
 	pub(crate) username: String,
 	pub(crate) password: String,
 	pub(crate) capabilities: CoreCapabilities,
+	pub(crate) websocket: WebsocketConfig,
 	#[cfg(storage)]
 	pub(crate) temporary_directory: Option<PathBuf>,
 	pub(crate) node_membership_refresh_interval: Option<Duration>,
@@ -109,6 +111,15 @@ impl Config {
 	pub fn capabilities(mut self, capabilities: Capabilities) -> Self {
 		self.capabilities = capabilities.into();
 		self
+	}
+
+	/// Set the WebSocket config
+	pub fn websocket(mut self, websocket: WebsocketConfig) -> crate::Result<Self> {
+		if websocket.max_write_buffer_size <= websocket.write_buffer_size {
+			return Err(crate::api::err::Error::MaxWriteBufferSizeTooSmall.into());
+		}
+		self.websocket = websocket;
+		Ok(self)
 	}
 
 	#[cfg(storage)]

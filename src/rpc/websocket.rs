@@ -5,6 +5,7 @@ use std::time::Duration;
 use arc_swap::ArcSwap;
 use axum::extract::ws::close_code::AGAIN;
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
+use bytes::Bytes;
 use futures::stream::FuturesUnordered;
 use futures::{Sink, SinkExt, StreamExt};
 use opentelemetry::Context as TelemetryContext;
@@ -155,7 +156,7 @@ impl Websocket {
 				// Send a regular ping message
 				_ = interval.tick() => {
 					// Create a new ping message
-					let msg = Message::Ping(vec![]);
+					let msg = Message::Ping(Bytes::from_static(b""));
 					// Close the connection if the message fails
 					if let Err(err) = internal_sender.send(msg).await {
 						// Output any errors if not a close error

@@ -39,7 +39,7 @@ where
 {
 	Router::new()
 		.route(
-			"/key/:table",
+			"/key/{table}",
 			options(|| async {})
 				.get(select_all)
 				.post(create_all)
@@ -52,7 +52,7 @@ where
 		.merge(
 			Router::new()
 				.route(
-					"/key/:table/:key",
+					"/key/{table}/{key}",
 					options(|| async {})
 						.get(select_one)
 						.post(create_one)

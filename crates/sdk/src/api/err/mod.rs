@@ -294,6 +294,13 @@ pub enum Error {
 	/// A thrown error from the database
 	#[error("Thrown error: {0}")]
 	Thrown(String),
+	/// The message is too long
+	#[error("The message is too long: {0}")]
+	MessageTooLong(usize),
+
+	/// The write buffer size is too small
+	#[error("The write buffer size is too small")]
+	MaxWriteBufferSizeTooSmall,
 }
 
 impl serde::ser::Error for Error {

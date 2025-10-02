@@ -9,6 +9,7 @@ mod export;
 pub(crate) mod query;
 mod resource;
 mod tls;
+mod websocket;
 
 pub use config::*;
 pub use endpoint::*;
@@ -18,6 +19,7 @@ pub use resource::*;
 use surrealdb_types::{SurrealValue, Value};
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 pub use tls::*;
+pub use websocket::*;
 
 #[derive(Debug, SurrealValue)]
 #[surreal(untagged, lowercase)]
