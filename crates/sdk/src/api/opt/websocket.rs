@@ -12,8 +12,7 @@
 /// let config = WebsocketConfig::new()
 ///     .read_buffer_size(256 * 1024)  // 256 KiB read buffer
 ///     .write_buffer_size(256 * 1024) // 256 KiB write buffer
-///     .max_message_size(16 << 20)    // 16 MiB max message size
-///     .max_frame_size(16 << 20);      // 16 MiB max frame size
+///     .max_message_size(16 << 20);    // 16 MiB max message size
 /// ```
 ///
 /// # Performance Considerations
@@ -24,9 +23,6 @@
 ///
 /// - **Message Size Limits**: Setting appropriate limits helps prevent memory exhaustion from
 ///   malicious or malformed clients while allowing legitimate large messages.
-///
-/// - **Frame Size Limits**: WebSocket frames have their own size limits that should be set
-///   appropriately for your use case.
 #[derive(Debug, Clone)]
 pub struct WebsocketConfig {
 	/// The size of the read buffer for incoming WebSocket data (default: 128 KiB)
@@ -37,8 +33,6 @@ pub struct WebsocketConfig {
 	pub(crate) max_write_buffer_size: usize,
 	/// The maximum size of a complete WebSocket message (default: 64 MiB)
 	pub(crate) max_message_size: Option<usize>,
-	/// The maximum size of a single WebSocket frame (default: 16 MiB)
-	pub(crate) max_frame_size: Option<usize>,
 }
 
 impl Default for WebsocketConfig {
@@ -48,7 +42,6 @@ impl Default for WebsocketConfig {
 	/// - 128 KiB read and write buffers
 	/// - Unlimited write buffer size (no backpressure)
 	/// - 64 MiB maximum message size
-	/// - 16 MiB maximum frame size
 	///
 	/// These defaults are suitable for most applications but can be customized
 	/// based on specific performance and memory requirements.
@@ -58,7 +51,6 @@ impl Default for WebsocketConfig {
 			write_buffer_size: 128 * 1024,
 			max_write_buffer_size: usize::MAX,
 			max_message_size: Some(64 << 20),
-			max_frame_size: Some(16 << 20),
 		}
 	}
 }
@@ -171,32 +163,6 @@ impl WebsocketConfig {
 	/// ```
 	pub fn max_message_size(mut self, max_message_size: impl Into<Option<usize>>) -> Self {
 		self.max_message_size = max_message_size.into();
-		self
-	}
-
-	/// Sets the maximum size of a single WebSocket frame.
-	///
-	/// This limit applies to individual WebSocket frames. Large messages may be split
-	/// across multiple frames, but each frame cannot exceed this limit.
-	///
-	/// # Arguments
-	///
-	/// * `max_frame_size` - The maximum frame size in bytes, or `None` to disable the limit
-	///
-	/// # Examples
-	///
-	/// ```rust
-	/// use surrealdb::opt::WebsocketConfig;
-	///
-	/// let config = WebsocketConfig::new()
-	///     .max_frame_size(16 << 20); // 16 MiB
-	///
-	/// // Or disable the limit entirely
-	/// let config = WebsocketConfig::new()
-	///     .max_frame_size(None);
-	/// ```
-	pub fn max_frame_size(mut self, max_frame_size: impl Into<Option<usize>>) -> Self {
-		self.max_frame_size = max_frame_size.into();
 		self
 	}
 }
