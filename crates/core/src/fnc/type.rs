@@ -149,7 +149,7 @@ pub fn table((val,): (Value,)) -> Result<Value> {
 		Value::RecordId(t) => t.table,
 		v => v.into_raw_string(),
 	};
-	Ok(Value::String(strand))
+	Ok(Value::Table(Table::new(strand)))
 }
 
 pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> {

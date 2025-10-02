@@ -71,10 +71,10 @@ impl ToSql for Array {
 	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
 		f.write_str("[")?;
 		for (i, v) in self.iter().enumerate() {
-			if i > 0 {
+			v.fmt_sql(f)?;
+			if i < self.len() - 1 {
 				f.write_str(", ")?;
 			}
-			v.fmt_sql(f)?;
 		}
 		f.write_str("]")?;
 		Ok(())

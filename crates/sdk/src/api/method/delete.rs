@@ -64,8 +64,6 @@ macro_rules! into_future {
 
 				let delete_query = format!("DELETE {} RETURN BEFORE", what.to_sql()?);
 
-				tracing::warn!("DELETE query: {}", delete_query);
-
 				router
 					.$method(Command::RawQuery {
 						txn,

@@ -65,8 +65,6 @@ macro_rules! into_future {
 
 				let query = format!("SELECT * FROM {}", what.to_sql()?);
 
-				tracing::warn!("SELECT query: {}", query);
-
 				router
 					.$method(Command::RawQuery {
 						txn,

@@ -118,7 +118,281 @@ impl PartialOrd for Value {
 
 impl Ord for Value {
 	fn cmp(&self, other: &Self) -> Ordering {
-		self.partial_cmp(other).unwrap_or(Ordering::Equal)
+		match (self, other) {
+			// Same variant comparisons - delegate to inner type
+			(Value::None, Value::None) => Ordering::Equal,
+			(Value::Null, Value::Null) => Ordering::Equal,
+			(Value::Bool(a), Value::Bool(b)) => a.cmp(b),
+			(Value::Number(a), Value::Number(b)) => a.cmp(b),
+			(Value::String(a), Value::String(b)) => a.cmp(b),
+			(Value::Duration(a), Value::Duration(b)) => a.cmp(b),
+			(Value::Datetime(a), Value::Datetime(b)) => a.cmp(b),
+			(Value::Uuid(a), Value::Uuid(b)) => a.cmp(b),
+			(Value::Array(a), Value::Array(b)) => a.cmp(b),
+			(Value::Object(a), Value::Object(b)) => a.cmp(b),
+			(Value::Geometry(a), Value::Geometry(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
+			(Value::Bytes(a), Value::Bytes(b)) => a.cmp(b),
+			(Value::RecordId(a), Value::RecordId(b)) => a.cmp(b),
+			(Value::File(a), Value::File(b)) => a.cmp(b),
+			(Value::Range(a), Value::Range(b)) => a.cmp(b),
+			(Value::Regex(a), Value::Regex(b)) => a.cmp(b),
+
+			// Different variant types - define a total order
+			// Order: None < Null < Bool < Number < String < Duration < Datetime < Uuid
+			//        < Array < Object < Geometry < Bytes < RecordId < File < Range < Regex
+			(Value::None, _) => Ordering::Less,
+			(_, Value::None) => Ordering::Greater,
+
+			(Value::Null, _) => Ordering::Less,
+			(_, Value::Null) => Ordering::Greater,
+
+			(
+				Value::Bool(_),
+				Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
+			) => Ordering::Less,
+			(
+				Value::Number(_)
+				| Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
+				Value::Bool(_),
+			) => Ordering::Greater,
+
+			(
+				Value::Number(_),
+				Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
+			) => Ordering::Less,
+			(
+				Value::String(_)
+				| Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
+				Value::Number(_),
+			) => Ordering::Greater,
+
+			(
+				Value::String(_),
+				Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
+			) => Ordering::Less,
+			(
+				Value::Duration(_)
+				| Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
+				Value::String(_),
+			) => Ordering::Greater,
+
+			(
+				Value::Duration(_),
+				Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
+			) => Ordering::Less,
+			(
+				Value::Datetime(_)
+				| Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
+				Value::Duration(_),
+			) => Ordering::Greater,
+
+			(
+				Value::Datetime(_),
+				Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
+			) => Ordering::Less,
+			(
+				Value::Uuid(_)
+				| Value::Array(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
+				Value::Datetime(_),
+			) => Ordering::Greater,
+
+			(
+				Value::Uuid(_),
+				Value::Array(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
+			) => Ordering::Less,
+			(
+				Value::Array(_)
+				| Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
+				Value::Uuid(_),
+			) => Ordering::Greater,
+
+			(
+				Value::Array(_),
+				Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
+			) => Ordering::Less,
+			(
+				Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
+				Value::Array(_),
+			) => Ordering::Greater,
+
+			(
+				Value::Object(_),
+				Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
+			) => Ordering::Less,
+			(
+				Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
+				Value::Object(_),
+			) => Ordering::Greater,
+
+			(
+				Value::Geometry(_),
+				Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
+			) => Ordering::Less,
+			(
+				Value::Bytes(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
+				Value::Geometry(_),
+			) => Ordering::Greater,
+
+			(
+				Value::Bytes(_),
+				Value::RecordId(_) | Value::File(_) | Value::Range(_) | Value::Regex(_),
+			) => Ordering::Less,
+			(
+				Value::RecordId(_) | Value::File(_) | Value::Range(_) | Value::Regex(_),
+				Value::Bytes(_),
+			) => Ordering::Greater,
+
+			(Value::RecordId(_), Value::File(_) | Value::Range(_) | Value::Regex(_)) => {
+				Ordering::Less
+			}
+			(Value::File(_) | Value::Range(_) | Value::Regex(_), Value::RecordId(_)) => {
+				Ordering::Greater
+			}
+
+			(Value::File(_), Value::Range(_) | Value::Regex(_)) => Ordering::Less,
+			(Value::Range(_) | Value::Regex(_), Value::File(_)) => Ordering::Greater,
+
+			(Value::Range(_), Value::Regex(_)) => Ordering::Less,
+			(Value::Regex(_), Value::Range(_)) => Ordering::Greater,
+		}
 	}
 }
 
@@ -383,5 +657,285 @@ mod tests {
 	#[case::number(Value::Number(Number::Decimal(Decimal::new(1, 0))), false)]
 	fn test_is_empty(#[case] value: Value, #[case] expected: bool) {
 		assert_eq!(value.is_empty(), expected);
+	}
+
+	// Test ordering between same variants
+	#[rstest]
+	#[case::none_eq_none(Value::None, Value::None, Ordering::Equal)]
+	#[case::null_eq_null(Value::Null, Value::Null, Ordering::Equal)]
+	#[case::bool_false_lt_true(Value::Bool(false), Value::Bool(true), Ordering::Less)]
+	#[case::bool_true_gt_false(Value::Bool(true), Value::Bool(false), Ordering::Greater)]
+	#[case::bool_true_eq_true(Value::Bool(true), Value::Bool(true), Ordering::Equal)]
+	#[case::string_a_lt_b(Value::String("a".to_string()), Value::String("b".to_string()), Ordering::Less)]
+	#[case::string_b_gt_a(Value::String("b".to_string()), Value::String("a".to_string()), Ordering::Greater)]
+	#[case::string_a_eq_a(Value::String("a".to_string()), Value::String("a".to_string()), Ordering::Equal)]
+	fn test_value_ordering_same_variant(
+		#[case] left: Value,
+		#[case] right: Value,
+		#[case] expected: Ordering,
+	) {
+		assert_eq!(left.cmp(&right), expected);
+		assert_eq!(left.partial_cmp(&right), Some(expected));
+	}
+
+	// Test ordering between numbers (cross-type numeric comparisons)
+	#[rstest]
+	#[case::int_0_lt_int_1(
+		Value::Number(Number::Int(0)),
+		Value::Number(Number::Int(1)),
+		Ordering::Less
+	)]
+	#[case::int_1_gt_int_0(
+		Value::Number(Number::Int(1)),
+		Value::Number(Number::Int(0)),
+		Ordering::Greater
+	)]
+	#[case::int_5_eq_int_5(
+		Value::Number(Number::Int(5)),
+		Value::Number(Number::Int(5)),
+		Ordering::Equal
+	)]
+	#[case::float_0_lt_float_1(
+		Value::Number(Number::Float(0.0)),
+		Value::Number(Number::Float(1.0)),
+		Ordering::Less
+	)]
+	#[case::int_5_lt_float_5_5(
+		Value::Number(Number::Int(5)),
+		Value::Number(Number::Float(5.5)),
+		Ordering::Less
+	)]
+	#[case::int_5_eq_float_5(
+		Value::Number(Number::Int(5)),
+		Value::Number(Number::Float(5.0)),
+		Ordering::Equal
+	)]
+	#[case::float_5_eq_int_5(
+		Value::Number(Number::Float(5.0)),
+		Value::Number(Number::Int(5)),
+		Ordering::Equal
+	)]
+	#[case::int_10_gt_float_9_9(
+		Value::Number(Number::Int(10)),
+		Value::Number(Number::Float(9.9)),
+		Ordering::Greater
+	)]
+	#[case::decimal_5_eq_int_5(
+		Value::Number(Number::Decimal(Decimal::new(5, 0))),
+		Value::Number(Number::Int(5)),
+		Ordering::Equal
+	)]
+	#[case::int_5_eq_decimal_5(
+		Value::Number(Number::Int(5)),
+		Value::Number(Number::Decimal(Decimal::new(5, 0))),
+		Ordering::Equal
+	)]
+	#[case::decimal_5_5_gt_int_5(
+		Value::Number(Number::Decimal(Decimal::new(55, 1))), // 5.5
+		Value::Number(Number::Int(5)),
+		Ordering::Greater
+	)]
+	fn test_value_ordering_numbers(
+		#[case] left: Value,
+		#[case] right: Value,
+		#[case] expected: Ordering,
+	) {
+		assert_eq!(left.cmp(&right), expected);
+		assert_eq!(left.partial_cmp(&right), Some(expected));
+	}
+
+	// Test ordering between different variant types
+	// Order: None < Null < Bool < Number < String < Duration < Datetime < Uuid
+	//        < Array < Object < Geometry < Bytes < RecordId < File < Range < Regex
+	#[rstest]
+	#[case::none_lt_null(Value::None, Value::Null, Ordering::Less)]
+	#[case::null_gt_none(Value::Null, Value::None, Ordering::Greater)]
+	#[case::null_lt_bool(Value::Null, Value::Bool(false), Ordering::Less)]
+	#[case::bool_gt_null(Value::Bool(true), Value::Null, Ordering::Greater)]
+	#[case::bool_lt_number(Value::Bool(true), Value::Number(Number::Int(0)), Ordering::Less)]
+	#[case::number_gt_bool(Value::Number(Number::Int(100)), Value::Bool(true), Ordering::Greater)]
+	#[case::number_lt_string(
+		Value::Number(Number::Int(100)),
+		Value::String("a".to_string()),
+		Ordering::Less
+	)]
+	#[case::string_gt_number(
+		Value::String("a".to_string()),
+		Value::Number(Number::Int(100)),
+		Ordering::Greater
+	)]
+	#[case::string_lt_duration(
+		Value::String("z".to_string()),
+		Value::Duration(Duration::new(1, 0)),
+		Ordering::Less
+	)]
+	#[case::duration_gt_string(
+		Value::Duration(Duration::new(1, 0)),
+		Value::String("z".to_string()),
+		Ordering::Greater
+	)]
+	#[case::duration_lt_datetime(
+		Value::Duration(Duration::new(100, 0)),
+		Value::Datetime(Datetime::from_timestamp(1, 0).unwrap()),
+		Ordering::Less
+	)]
+	#[case::datetime_gt_duration(
+		Value::Datetime(Datetime::from_timestamp(1, 0).unwrap()),
+		Value::Duration(Duration::new(100, 0)),
+		Ordering::Greater
+	)]
+	#[case::datetime_lt_uuid(
+		Value::Datetime(Datetime::from_timestamp(1000000, 0).unwrap()),
+		Value::Uuid(Uuid::new_v4()),
+		Ordering::Less
+	)]
+	#[case::uuid_gt_datetime(
+		Value::Uuid(Uuid::new_v4()),
+		Value::Datetime(Datetime::from_timestamp(1000000, 0).unwrap()),
+		Ordering::Greater
+	)]
+	#[case::uuid_lt_array(Value::Uuid(Uuid::new_v4()), Value::Array(Array::new()), Ordering::Less)]
+	#[case::array_gt_uuid(
+		Value::Array(Array::new()),
+		Value::Uuid(Uuid::new_v4()),
+		Ordering::Greater
+	)]
+	#[case::array_lt_object(
+		Value::Array(Array::new()),
+		Value::Object(Object::default()),
+		Ordering::Less
+	)]
+	#[case::object_gt_array(
+		Value::Object(Object::default()),
+		Value::Array(Array::new()),
+		Ordering::Greater
+	)]
+	#[case::object_lt_geometry(
+		Value::Object(Object::default()),
+		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+		Ordering::Less
+	)]
+	#[case::geometry_gt_object(
+		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+		Value::Object(Object::default()),
+		Ordering::Greater
+	)]
+	#[case::geometry_lt_bytes(
+		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+		Value::Bytes(Bytes::default()),
+		Ordering::Less
+	)]
+	#[case::bytes_gt_geometry(
+		Value::Bytes(Bytes::default()),
+		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+		Ordering::Greater
+	)]
+	#[case::bytes_lt_record(
+		Value::Bytes(Bytes::default()),
+		Value::RecordId(RecordId::new("test", "key")),
+		Ordering::Less
+	)]
+	#[case::record_gt_bytes(
+		Value::RecordId(RecordId::new("test", "key")),
+		Value::Bytes(Bytes::default()),
+		Ordering::Greater
+	)]
+	#[case::record_lt_file(
+		Value::RecordId(RecordId::new("test", "key")),
+		Value::File(File::default()),
+		Ordering::Less
+	)]
+	#[case::file_gt_record(
+		Value::File(File::default()),
+		Value::RecordId(RecordId::new("test", "key")),
+		Ordering::Greater
+	)]
+	#[case::file_lt_range(
+		Value::File(File::default()),
+		Value::Range(Box::new(Range::unbounded())),
+		Ordering::Less
+	)]
+	#[case::range_gt_file(
+		Value::Range(Box::new(Range::unbounded())),
+		Value::File(File::default()),
+		Ordering::Greater
+	)]
+	#[case::range_lt_regex(
+		Value::Range(Box::new(Range::unbounded())),
+		Value::Regex("test".parse().unwrap()),
+		Ordering::Less
+	)]
+	#[case::regex_gt_range(
+		Value::Regex("test".parse().unwrap()),
+		Value::Range(Box::new(Range::unbounded())),
+		Ordering::Greater
+	)]
+	fn test_value_ordering_cross_variant(
+		#[case] left: Value,
+		#[case] right: Value,
+		#[case] expected: Ordering,
+	) {
+		assert_eq!(left.cmp(&right), expected);
+		assert_eq!(left.partial_cmp(&right), Some(expected));
+	}
+
+	// Test equality with cross-type numeric comparisons
+	#[rstest]
+	#[case::int_eq_float(Value::Number(Number::Int(5)), Value::Number(Number::Float(5.0)))]
+	#[case::float_eq_int(Value::Number(Number::Float(5.0)), Value::Number(Number::Int(5)))]
+	#[case::int_eq_decimal(
+		Value::Number(Number::Int(5)),
+		Value::Number(Number::Decimal(Decimal::new(5, 0)))
+	)]
+	#[case::decimal_eq_int(
+		Value::Number(Number::Decimal(Decimal::new(5, 0))),
+		Value::Number(Number::Int(5))
+	)]
+	#[case::none_eq_none(Value::None, Value::None)]
+	#[case::null_eq_null(Value::Null, Value::Null)]
+	fn test_value_equality(#[case] left: Value, #[case] right: Value) {
+		assert_eq!(left, right);
+		assert_eq!(right, left);
+		assert_eq!(left.cmp(&right), Ordering::Equal);
+	}
+
+	// Test inequality
+	#[rstest]
+	#[case::none_ne_null(Value::None, Value::Null)]
+	#[case::int_ne_float(Value::Number(Number::Int(5)), Value::Number(Number::Float(5.5)))]
+	#[case::bool_ne_number(Value::Bool(true), Value::Number(Number::Int(1)))]
+	#[case::string_ne_number(Value::String("5".to_string()), Value::Number(Number::Int(5)))]
+	fn test_value_inequality(#[case] left: Value, #[case] right: Value) {
+		assert_ne!(left, right);
+		assert_ne!(right, left);
+		assert_ne!(left.cmp(&right), Ordering::Equal);
+	}
+
+	// Test that sorting works correctly
+	#[test]
+	fn test_value_sorting() {
+		let mut values = vec![
+			Value::String("b".to_string()),
+			Value::None,
+			Value::Number(Number::Int(10)),
+			Value::Null,
+			Value::Bool(true),
+			Value::Number(Number::Int(5)),
+			Value::String("a".to_string()),
+			Value::Bool(false),
+			Value::Number(Number::Float(7.5)),
+		];
+
+		values.sort();
+
+		assert_eq!(values[0], Value::None);
+		assert_eq!(values[1], Value::Null);
+		assert_eq!(values[2], Value::Bool(false));
+		assert_eq!(values[3], Value::Bool(true));
+		assert_eq!(values[4], Value::Number(Number::Int(5)));
+		assert_eq!(values[5], Value::Number(Number::Float(7.5)));
+		assert_eq!(values[6], Value::Number(Number::Int(10)));
+		assert_eq!(values[7], Value::String("a".to_string()));
+		assert_eq!(values[8], Value::String("b".to_string()));
 	}
 }

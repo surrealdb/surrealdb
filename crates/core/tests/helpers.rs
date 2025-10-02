@@ -14,6 +14,7 @@ use surrealdb_core::iam::{Auth, Level, Role};
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::DbResultError;
 use surrealdb_core::syn;
+use surrealdb_types::sql::ToSql;
 use surrealdb_types::{Number, Value};
 
 pub async fn new_ds() -> Result<Datastore> {
@@ -406,7 +407,7 @@ impl Test {
 	#[track_caller]
 	#[allow(dead_code)]
 	pub fn expect_regex(&mut self, regex: &str) -> Result<&mut Self> {
-		let tmp = self.next_value()?.into_string().unwrap();
+		let tmp = self.next_value()?.to_sql().unwrap();
 		let regex = Regex::new(regex)?;
 		assert!(regex.is_match(&tmp), "Output '{tmp}' doesn't match regex '{regex}'",);
 		Ok(self)

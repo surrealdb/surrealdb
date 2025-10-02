@@ -597,7 +597,7 @@ async fn permissions_access_grant() {
 	let level_db = Level::Database("NS".to_owned(), "DB".to_owned());
 
 	for level in &test_levels {
-		let base = level.to_string();
+		let base = (*level).to_string();
 		println!("Test level: {}", base);
 
 		let tests = vec![

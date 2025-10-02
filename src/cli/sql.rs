@@ -9,6 +9,7 @@ use serde_json::ser::PrettyFormatter;
 use surrealdb::engine::any::{self, connect};
 use surrealdb::method::WithStats;
 use surrealdb::opt::Config;
+use surrealdb::types::sql::ToSql;
 use surrealdb::types::{SurrealValue, Value, object};
 use surrealdb::{IndexedResults, Notification};
 use surrealdb_core::dbs::Capabilities as CoreCapabilities;
@@ -361,7 +362,10 @@ fn process(
 			.map(|(index, (stats, value))| {
 				let query_num = index + 1;
 				let execution_time = stats.execution_time.unwrap_or_default();
-				format!("-- Query {query_num} (execution time: {execution_time:?})\n{value:#?}",)
+				format!(
+					"-- Query {query_num} (execution time: {execution_time:?})\n{:#}",
+					value.to_sql().unwrap()
+				)
 			})
 			.collect::<Vec<String>>()
 			.join("\n"),

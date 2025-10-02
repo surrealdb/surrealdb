@@ -67,8 +67,6 @@ macro_rules! into_future {
 				};
 				let query = format!("{operation} {what} PATCH {} RETURN AFTER", patches.to_sql()?);
 
-				tracing::warn!("PATCH query: {}", query);
-
 				let cmd = Command::RawQuery {
 					txn,
 					query: Cow::Owned(query),

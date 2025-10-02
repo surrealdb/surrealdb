@@ -57,7 +57,6 @@ impl RelateStatement {
 			match stk.run(|stk| self.from.compute(stk, &ctx, opt, doc)).await.catch_return()? {
 				Value::RecordId(v) => out.push(v),
 				Value::Array(v) => {
-					tracing::warn!("RelateStatement from array: {v:?}");
 					for v in v {
 						match v {
 							Value::RecordId(v) => out.push(v),
@@ -77,19 +76,15 @@ impl RelateStatement {
 						}
 					}
 				}
-				Value::Object(v) => {
-					tracing::warn!("RelateStatement from object: {v:?}");
-					match v.rid() {
-						Some(v) => out.push(v),
-						None => {
-							bail!(Error::RelateStatementIn {
-								value: v.to_string(),
-							})
-						}
+				Value::Object(v) => match v.rid() {
+					Some(v) => out.push(v),
+					None => {
+						bail!(Error::RelateStatementIn {
+							value: v.to_string(),
+						})
 					}
-				}
+				},
 				v => {
-					tracing::warn!("RelateStatement from value: {v:?}");
 					bail!(Error::RelateStatementIn {
 						value: v.to_string(),
 					})

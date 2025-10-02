@@ -299,12 +299,7 @@ async fn define_statement_user_root() -> Result<()> {
 	let tmp = res.remove(0).result?;
 	let define_str = tmp.get("users").get("test").clone().into_string().unwrap();
 
-	assert!(
-		define_str
-			.strip_prefix('\"')
-			.unwrap()
-			.starts_with("DEFINE USER test ON ROOT PASSHASH '$argon2id$")
-	);
+	assert!(define_str.starts_with("DEFINE USER test ON ROOT PASSHASH '$argon2id$"));
 	Ok(())
 }
 

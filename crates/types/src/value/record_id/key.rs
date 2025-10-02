@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 // Needed because we use the SurrealValue derive macro inside the crate which exports it :)
 use crate as surrealdb_types;
 use crate::sql::ToSql;
+use crate::utils::escape::EscapeRid;
 use crate::{Array, Number, Object, RecordIdKeyRange, SurrealValue, Uuid, Value};
 
 /// The characters which are supported in server record IDs
@@ -144,8 +145,12 @@ impl Display for RecordIdKey {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
 			RecordIdKey::Number(n) => write!(f, "{}", n),
-			RecordIdKey::String(v) => write!(f, "{}", v),
-			RecordIdKey::Uuid(uuid) => write!(f, "{}", uuid),
+			RecordIdKey::String(v) => EscapeRid(v).fmt(f),
+			RecordIdKey::Uuid(uuid) => {
+				// UUIDs with hyphens need to be escaped
+				let uuid_str = uuid.to_string();
+				EscapeRid(&uuid_str).fmt(f)
+			}
 			RecordIdKey::Object(object) => {
 				write!(f, "{}", object.to_sql().unwrap_or_else(|_| "<error>".to_string()))
 			}

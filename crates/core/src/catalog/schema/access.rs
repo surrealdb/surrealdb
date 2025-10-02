@@ -2,6 +2,7 @@ use std::fmt;
 use std::time::Duration;
 
 use revision::revisioned;
+use surrealdb_types::sql::ToSql;
 
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
@@ -119,19 +120,19 @@ impl InfoStructure for JwtAccess {
 				JwtAccessVerify::Key(v) => {
 					if v.alg.is_symmetric(){
 						Value::from(map!{
-							"alg".to_string() => v.alg.to_string().into(),
+							"alg".to_string() => v.alg.to_sql().unwrap().into(),
 							"key".to_string() => "[REDACTED]".to_string().into(),
 						})
 					}else{
 						Value::from(map!{
-							"alg".to_string() => v.alg.to_string().into(),
+							"alg".to_string() => v.alg.to_sql().unwrap().into(),
 							"key".to_string() => v.key.into(),
 						})
 					}
 				},
 			},
 			"issuer".to_string(), if let Some(v) = self.issue => Value::from(map!{
-				"alg".to_string() => v.alg.to_string().into(),
+				"alg".to_string() => v.alg.to_sql().unwrap().into(),
 				"key".to_string() => "[REDACTED]".to_string().into(),
 			}),
 		})
@@ -207,6 +208,12 @@ impl fmt::Display for Algorithm {
 			Self::Rs384 => "RS384",
 			Self::Rs512 => "RS512",
 		})
+	}
+}
+
+impl ToSql for Algorithm {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		self.to_string().fmt_sql(f)
 	}
 }
 

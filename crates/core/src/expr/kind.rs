@@ -6,6 +6,7 @@ use std::str::FromStr;
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;
 use rust_decimal::Decimal;
+use surrealdb_types::sql::ToSql;
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
@@ -455,6 +456,12 @@ impl Display for Kind {
 				}
 			}
 		}
+	}
+}
+
+impl ToSql for Kind {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self)
 	}
 }
 

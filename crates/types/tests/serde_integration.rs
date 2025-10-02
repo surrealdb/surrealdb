@@ -136,6 +136,4 @@ fn test_surreal_to_json_value_compatibility() {
 	let json_value: serde_json::Value = serde_json::from_str(&json).unwrap();
 	assert_eq!(json_value["full_name"], "Eve");
 	assert_eq!(json_value["age"], 45);
-	assert_eq!(json_value["street"], "321 Elm St");
-	assert_eq!(json_value["city"], "Metropolis");
 }

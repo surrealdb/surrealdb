@@ -103,9 +103,6 @@ where
 			// Extract the router from the client
 			let router = client.inner.router.extract()?;
 
-			tracing::warn!("query: {}", query);
-			tracing::warn!("variables: {:?}", variables);
-
 			let results = router
 				.execute_query(Command::RawQuery {
 					query: Cow::Owned(query.into_owned()),
