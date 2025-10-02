@@ -687,7 +687,9 @@ mod tests {
 	#[test]
 	fn take_from_an_errored_query() {
 		let mut response = IndexedResults {
-			results: to_map(vec![Err(DbResultError::InternalError("STU".to_string()))]),
+			results: to_map(vec![Err(DbResultError::InternalError(
+				"Unimportant error message".to_string(),
+			))]),
 			..IndexedResults::new()
 		};
 		response.take::<Option<()>>(0).unwrap_err();

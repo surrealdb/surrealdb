@@ -117,7 +117,7 @@ impl SurrealValue for DbResult {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Error, SurrealValue, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Error, SurrealValue)]
 pub enum DbResultError {
 	ParseError(String),
 	InvalidRequest(String),
@@ -179,6 +179,30 @@ impl DbResultError {
 		}
 	}
 
+	pub fn message(&self) -> String {
+		match self {
+			Self::ParseError(msg) => msg.clone(),
+			Self::InvalidRequest(msg) => msg.clone(),
+			Self::MethodNotFound(msg) => msg.clone(),
+			Self::MethodNotAllowed(msg) => msg.clone(),
+			Self::InvalidParams(msg) => msg.clone(),
+			Self::LiveQueryNotSupported => "Live query not supported".to_string(),
+			Self::BadLiveQueryConfig(msg) => msg.clone(),
+			Self::BadGraphQLConfig(msg) => msg.clone(),
+			Self::InternalError(msg) => msg.clone(),
+			Self::Thrown(msg) => msg.clone(),
+			Self::SerializationError(msg) => msg.clone(),
+			Self::DeserializationError(msg) => msg.clone(),
+			Self::ClientSideError(msg) => msg.clone(),
+			Self::InvalidAuth(msg) => msg.clone(),
+			Self::QueryNotExecuted(msg) => msg.clone(),
+			Self::QueryTimedout => "Query timed out".to_string(),
+			Self::QueryCancelled => {
+				"The query was not executed due to a cancelled transaction".to_string()
+			}
+		}
+	}
+
 	pub fn from_code(code: i64, message: String) -> DbResultError {
 		match code {
 			Self::PARSE_ERROR => Self::ParseError(message),
@@ -221,30 +245,9 @@ impl Revisioned for DbResultError {
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		let message = match self {
-			Self::ParseError(msg) => msg.clone(),
-			Self::InvalidRequest(msg) => msg.clone(),
-			Self::MethodNotFound(msg) => msg.clone(),
-			Self::MethodNotAllowed(msg) => msg.clone(),
-			Self::InvalidParams(msg) => msg.clone(),
-			Self::LiveQueryNotSupported => "Live query not supported".to_string(),
-			Self::BadLiveQueryConfig(msg) => msg.clone(),
-			Self::BadGraphQLConfig(msg) => msg.clone(),
-			Self::InternalError(msg) => msg.clone(),
-			Self::Thrown(msg) => msg.clone(),
-			Self::SerializationError(msg) => msg.clone(),
-			Self::DeserializationError(msg) => msg.clone(),
-			Self::ClientSideError(msg) => msg.clone(),
-			Self::InvalidAuth(msg) => msg.clone(),
-			Self::QueryNotExecuted(msg) => msg.clone(),
-			Self::QueryTimedout => "Query timed out".to_string(),
-			Self::QueryCancelled => {
-				"The query was not executed due to a cancelled transaction".to_string()
-			}
-		};
 		DbResultSerde {
 			code: self.code(),
-			message,
+			message: self.message(),
 		}
 		.serialize_revisioned(writer)
 	}
@@ -255,29 +258,34 @@ impl Revisioned for DbResultError {
 	}
 }
 
+// Examples of correct serialization:
+// { code: -32603, message: "Invalid params: Invalid params" }
+impl Serialize for DbResultError {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	where
+		S: serde::Serializer,
+	{
+		DbResultSerde {
+			code: self.code(),
+			message: self.message(),
+		}
+		.serialize(serializer)
+	}
+}
+
+impl<'de> Deserialize<'de> for DbResultError {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: serde::Deserializer<'de>,
+	{
+		let s = DbResultSerde::deserialize(deserializer)?;
+		Ok(DbResultError::from_code(s.code, s.message))
+	}
+}
+
 impl Display for DbResultError {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		match self {
-			Self::ParseError(msg) => write!(f, "{}", msg),
-			Self::InvalidRequest(msg) => write!(f, "{}", msg),
-			Self::MethodNotFound(msg) => write!(f, "{}", msg),
-			Self::MethodNotAllowed(msg) => write!(f, "{}", msg),
-			Self::InvalidParams(msg) => write!(f, "{}", msg),
-			Self::LiveQueryNotSupported => write!(f, "Live query not supported"),
-			Self::BadLiveQueryConfig(msg) => write!(f, "{}", msg),
-			Self::BadGraphQLConfig(msg) => write!(f, "{}", msg),
-			Self::InternalError(msg) => write!(f, "{}", msg),
-			Self::Thrown(msg) => write!(f, "{}", msg),
-			Self::SerializationError(msg) => write!(f, "{}", msg),
-			Self::DeserializationError(msg) => write!(f, "{}", msg),
-			Self::ClientSideError(msg) => write!(f, "{}", msg),
-			Self::InvalidAuth(msg) => write!(f, "{}", msg),
-			Self::QueryNotExecuted(msg) => write!(f, "{}", msg),
-			Self::QueryTimedout => write!(f, "Query timed out"),
-			Self::QueryCancelled => {
-				write!(f, "The query was not executed due to a cancelled transaction")
-			}
-		}
+		f.write_str(&self.message())
 	}
 }
 

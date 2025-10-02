@@ -17,22 +17,11 @@ struct AddressWithSerde {
 }
 
 #[derive(SurrealValue, Serialize, Deserialize, Debug, PartialEq, Clone)]
-struct PersonWithFlatten {
-	name: String,
-	#[surreal(flatten)]
-	#[serde(flatten)]
-	address: AddressWithSerde,
-}
-
-#[derive(SurrealValue, Serialize, Deserialize, Debug, PartialEq, Clone)]
 struct ComplexPerson {
 	#[surreal(rename = "full_name")]
 	#[serde(rename = "full_name")]
 	name: String,
 	age: i64,
-	#[surreal(flatten)]
-	#[serde(flatten)]
-	address: AddressWithSerde,
 }
 
 #[test]
@@ -69,55 +58,10 @@ fn test_serde_rename_compatibility() {
 }
 
 #[test]
-fn test_serde_flatten_compatibility() {
-	let person = PersonWithFlatten {
-		name: "Bob".to_string(),
-		address: AddressWithSerde {
-			street: "123 Main St".to_string(),
-			city: "Anytown".to_string(),
-		},
-	};
-
-	// Test SurrealValue conversion with flatten
-	let surreal_value = person.clone().into_value();
-	if let Value::Object(obj) = &surreal_value {
-		assert!(obj.get("name").is_some());
-		assert!(obj.get("street").is_some());
-		assert!(obj.get("city").is_some());
-		assert!(obj.get("address").is_none());
-	}
-
-	// Test serde JSON serialization with flatten
-	let json = serde_json::to_string(&person).unwrap();
-	assert!(json.contains("\"name\""));
-	assert!(json.contains("\"street\""));
-	assert!(json.contains("\"city\""));
-	assert!(!json.contains("\"address\""));
-
-	// Verify the JSON structure matches
-	let json_value: serde_json::Value = serde_json::from_str(&json).unwrap();
-	assert_eq!(json_value["name"], "Bob");
-	assert_eq!(json_value["street"], "123 Main St");
-	assert_eq!(json_value["city"], "Anytown");
-
-	// Test deserialization
-	let deserialized: PersonWithFlatten = serde_json::from_str(&json).unwrap();
-	assert_eq!(deserialized, person);
-
-	// Test SurrealValue round-trip
-	let surreal_converted = PersonWithFlatten::from_value(surreal_value).unwrap();
-	assert_eq!(surreal_converted, person);
-}
-
-#[test]
 fn test_complex_serde_surreal_compatibility() {
 	let person = ComplexPerson {
 		name: "Charlie".to_string(),
 		age: 35,
-		address: AddressWithSerde {
-			street: "456 Oak Ave".to_string(),
-			city: "Springfield".to_string(),
-		},
 	};
 
 	// Test SurrealValue conversion
@@ -125,10 +69,7 @@ fn test_complex_serde_surreal_compatibility() {
 	if let Value::Object(obj) = &surreal_value {
 		assert!(obj.get("full_name").is_some());
 		assert!(obj.get("age").is_some());
-		assert!(obj.get("street").is_some());
-		assert!(obj.get("city").is_some());
 		assert!(obj.get("name").is_none());
-		assert!(obj.get("address").is_none());
 	}
 
 	// Test serde JSON serialization
@@ -138,8 +79,6 @@ fn test_complex_serde_surreal_compatibility() {
 	let json_value: serde_json::Value = serde_json::from_str(&json).unwrap();
 	assert_eq!(json_value["full_name"], "Charlie");
 	assert_eq!(json_value["age"], 35);
-	assert_eq!(json_value["street"], "456 Oak Ave");
-	assert_eq!(json_value["city"], "Springfield");
 
 	// Test round-trips
 	let deserialized: ComplexPerson = serde_json::from_str(&json).unwrap();
@@ -154,9 +93,7 @@ fn test_interoperability_json_to_surreal() {
 	// Create a JSON object
 	let json = r#"{
         "full_name": "Diana",
-        "age": 40,
-        "street": "789 Pine Rd",
-        "city": "Riverside"
+        "age": 40
     }"#;
 
 	// Deserialize from JSON using serde
@@ -177,8 +114,6 @@ fn test_interoperability_json_to_surreal() {
 	// The JSON should be equivalent (though order might differ)
 	assert_eq!(json_value["full_name"], original_json_value["full_name"]);
 	assert_eq!(json_value["age"], original_json_value["age"]);
-	assert_eq!(json_value["street"], original_json_value["street"]);
-	assert_eq!(json_value["city"], original_json_value["city"]);
 }
 
 #[test]

@@ -146,7 +146,7 @@ async fn define_foreign_table() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result.unwrap_err();
-	assert_eq!(tmp, DbResultError::InternalError("STU".to_string()));
+	assert_eq!(tmp, DbResultError::InternalError("Incorrect arguments for aggregate function math::mean() on table 'person_by_age'. This function expects a number but found 'test'".to_string()));
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(

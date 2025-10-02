@@ -289,19 +289,15 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 									}
 								}
 
-								// let _res =
-								// pending.response_channel.send(response.result.map_err(|e|
-								// e.into())).await;
-
 								match response.result {
 									Ok(DbResult::Query(results)) => {
 										let _res = pending.response_channel.send(Ok(results)).await;
 									}
 									Ok(DbResult::Live(_notification)) => {
-										panic!("TODO: STU: What should we do here?")
+										tracing::error!("Unexpected live query result in response");
 									}
 									Ok(DbResult::Other(_value)) => {
-										panic!("TODO: STU: I don't think this is possible anymore.")
+										tracing::error!("Unexpected other result in response");
 									}
 									Err(error) => {
 										let _res =

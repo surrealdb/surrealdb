@@ -100,7 +100,7 @@ impl ToSql for Object {
 		f.write_str("{ ")?;
 
 		for (i, (k, v)) in self.0.iter().enumerate() {
-			k.fmt_sql(f)?;
+			f.write_str(k)?;
 			f.write_str(": ")?;
 			v.fmt_sql(f)?;
 			if i < self.0.len() - 1 {

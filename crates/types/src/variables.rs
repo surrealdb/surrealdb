@@ -95,6 +95,9 @@ mod tests {
 		let json = serde_json::to_string(&vars).unwrap();
 		assert_eq!(json, "{}");
 
+		let vars1 = serde_json::from_str::<Variables>("{\"name\":\"John\"}").unwrap();
+		assert_eq!(vars1.get("name"), Some(&Value::String("John".to_string())));
+
 		let vars2 =
 			Variables::from_iter(vec![("name".to_string(), "John".to_string().into_value())]);
 		let json = serde_json::to_string(&vars2).unwrap();

@@ -4,6 +4,7 @@ use anyhow::Result;
 use http::HeaderMap;
 use reblessive::TreeStack;
 use reblessive::tree::Stk;
+use surrealdb_types::SurrealValue;
 
 use super::body::ApiBody;
 use super::context::InvocationContext;
@@ -28,25 +29,31 @@ pub struct ApiInvocation {
 
 impl ApiInvocation {
 	pub fn vars(self, body: PublicValue) -> Result<PublicValue> {
-		// Create an Object with the request data
 		let mut obj = PublicObject::new();
 		obj.insert("params".to_string(), PublicValue::Object(self.params));
 		obj.insert("body".to_string(), body);
 		obj.insert("method".to_string(), PublicValue::String(self.method.to_string()));
 
-		// Convert query BTreeMap<String, String> to Value
-		let query_obj = PublicObject::from_iter(
-			self.query.into_iter().map(|(k, v)| (k, PublicValue::String(v))),
+		obj.insert(
+			"query".to_string(),
+			PublicValue::Object(PublicObject::from_iter(
+				self.query.into_iter().map(|(k, v)| (k, PublicValue::String(v))),
+			)),
 		);
-		obj.insert("query".to_string(), PublicValue::Object(query_obj));
 
-		// Convert headers HeaderMap to Value
-		let headers_obj = PublicObject::from_iter(self.headers.into_iter().filter_map(|(k, v)| {
-			k.map(|name| {
-				(name.to_string(), PublicValue::String(v.to_str().unwrap_or("").to_string()))
-			})
-		}));
-		obj.insert("headers".to_string(), PublicValue::Object(headers_obj));
+		obj.insert(
+			"headers".to_string(),
+			PublicValue::Object(PublicObject::from_iter(self.headers.into_iter().filter_map(
+				|(k, v)| {
+					k.map(|name| {
+						(
+							name.to_string(),
+							PublicValue::String(v.to_str().unwrap_or("").to_string()),
+						)
+					})
+				},
+			))),
+		);
 
 		Ok(PublicValue::Object(obj))
 	}
@@ -145,7 +152,7 @@ impl ApiInvocation {
 		let res = stk.run(|stk| action.compute(stk, &ctx, &opt, None)).await.catch_return()?;
 
 		let val = convert_value_to_public_value(res)?;
-		let mut res = ApiResponse::from_action_result(val)?;
+		let mut res = ApiResponse::from_value(val)?;
 		if let Some(headers) = inv_ctx.response_headers {
 			let mut headers = headers;
 			headers.extend(res.headers);

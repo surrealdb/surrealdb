@@ -338,7 +338,7 @@ async fn define_statement_user_ns() -> Result<()> {
 			.clone()
 			.into_string()
 			.unwrap()
-			.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
+			.starts_with("DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
 	);
 	assert!(
 		res.next()
@@ -349,7 +349,7 @@ async fn define_statement_user_ns() -> Result<()> {
 			.clone()
 			.into_string()
 			.unwrap()
-			.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
+			.starts_with("DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
 	);
 	assert!(
 		res.next()
@@ -360,7 +360,7 @@ async fn define_statement_user_ns() -> Result<()> {
 			.clone()
 			.into_string()
 			.unwrap()
-			.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
+			.starts_with("DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
 	);
 
 	assert_eq!(
@@ -406,36 +406,14 @@ async fn define_statement_user_db() -> Result<()> {
 		"The user 'test' does not exist in the namespace 'ns'"
 	); // User doesn't exist at the NS level
 
-	assert!(
-		res[3]
-			.result
-			.as_ref()
-			.unwrap()
-			.clone()
-			.into_string()
-			.unwrap()
-			.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$")
-	);
-	assert!(
-		res[4]
-			.result
-			.as_ref()
-			.unwrap()
-			.clone()
-			.into_string()
-			.unwrap()
-			.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$")
-	);
-	assert!(
-		res[5]
-			.result
-			.as_ref()
-			.unwrap()
-			.clone()
-			.into_string()
-			.unwrap()
-			.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$")
-	);
+	let s = res[3].result.as_ref().unwrap().clone().into_string().unwrap();
+	assert!(s.starts_with("DEFINE USER test ON DATABASE PASSHASH '$argon2id$"), "{}", s);
+
+	let s = res[4].result.as_ref().unwrap().clone().into_string().unwrap();
+	assert!(s.starts_with("DEFINE USER test ON DATABASE PASSHASH '$argon2id$"), "{}", s);
+
+	let s = res[5].result.as_ref().unwrap().clone().into_string().unwrap();
+	assert!(s.starts_with("DEFINE USER test ON DATABASE PASSHASH '$argon2id$"), "{}", s);
 
 	// If it tries to create a NS user without specifying a NS, it should fail
 	let sql = "

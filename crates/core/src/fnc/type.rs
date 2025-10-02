@@ -146,12 +146,10 @@ pub fn string_lossy((val,): (Value,)) -> Result<Value> {
 
 pub fn table((val,): (Value,)) -> Result<Value> {
 	let strand = match val {
-		// TODO: null byte check.
 		Value::RecordId(t) => t.table,
-		// TODO: Handle null byte
 		v => v.into_raw_string(),
 	};
-	Ok(Value::Table(Table::new(strand)))
+	Ok(Value::String(strand))
 }
 
 pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> {

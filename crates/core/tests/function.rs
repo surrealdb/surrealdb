@@ -41,10 +41,10 @@ async fn error_on_invalid_function() -> Result<()> {
 	let query = "`this is an invalid function name`()";
 	let session = Session::owner().with_ns("test").with_db("test");
 	let err = dbs.execute(query, &session, None).await.unwrap_err();
-	if err.downcast_ref::<DbResultError>() == Some(&DbResultError::InternalError("STU".to_string()))
-	{
-		panic!("returned wrong result {:#?}", err)
-	}
+	assert_eq!(
+		err.to_string(),
+		"Parse error: Invalid function/constant path\n --> [1:1]\n  |\n1 | `this is an invalid function name`()\n  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"
+	);
 	Ok(())
 }
 

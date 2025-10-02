@@ -21,6 +21,10 @@ BENCH_FEATURES = { value = "protocol-ws,kv-mem,kv-rocksdb,kv-surrealkv", conditi
 SURREAL_SCRIPTING_MAX_TIME_LIMIT = { value = "500", condition = { env_not_set = [
     "SURREAL_SCRIPTING_MAX_TIME_LIMIT",
 ] } }
+# Configure LLVM profiling output to go to target directory instead of repo root
+LLVM_PROFILE_FILE = { value = "target/llvm-cov-target/%p-%m.profraw", condition = { env_not_set = [
+    "LLVM_PROFILE_FILE",
+] } }
 
 [tasks.ci-format]
 category = "CI - CHECK"
@@ -231,7 +235,6 @@ args = [
     "--features",
     "storage-mem,scripting,http,jwks",
     "--workspace",
-    "--no-fail-fast",
     "--",
     "--skip",
     "api_integration",
@@ -252,6 +255,7 @@ args = [
 [tasks.ci-workspace-coverage]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
+env = { LLVM_PROFILE_FILE = "target/llvm-cov-target/%p-%m.profraw" }
 args = [
     "llvm-cov",
     "nextest",
@@ -266,6 +270,7 @@ args = [
 [tasks.test-workspace-coverage-complete]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
+env = { LLVM_PROFILE_FILE = "target/llvm-cov-target/%p-%m.profraw" }
 args = [
     "llvm-cov",
     "--html",

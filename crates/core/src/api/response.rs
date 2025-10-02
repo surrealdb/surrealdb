@@ -17,31 +17,6 @@ pub struct ApiResponse {
 	pub headers: HeaderMap,
 }
 
-impl ApiResponse {
-	/// Try to create a ApiResponse from the value as it should be returned from
-	/// an API action.
-	pub fn from_action_result(mut opts: PublicValue) -> anyhow::Result<Self> {
-		let raw =
-			opts.remove("raw").into_option::<PublicValue>()?.map(|v| v.into_bool()).transpose()?;
-		let status = StatusCode::from_value(opts.remove("status"))?;
-
-		let headers = HeaderMap::from_value(opts.remove("headers"))?;
-
-		let body = opts.remove("body").into_option()?;
-
-		if !opts.is_empty() {
-			return Err(ApiError::InvalidApiResponse("Contains invalid properties".into()).into());
-		}
-
-		Ok(Self {
-			raw,
-			status,
-			body,
-			headers,
-		})
-	}
-}
-
 pub enum ResponseInstruction {
 	Native,
 	Raw,

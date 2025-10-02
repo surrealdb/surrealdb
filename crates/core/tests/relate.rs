@@ -270,7 +270,7 @@ async fn schemafull_relate() -> Result<()> {
 	t.expect_error_func(|e| *e == DbResultError::InternalError("Couldn't coerce value for field `reason` of `likes:2`: Expected `string` but found `true`".to_string()))?;
 
 	// dog:1 is not a person
-	t.expect_error_func(|e| *e == DbResultError::InternalError("STU".to_string()))?;
+	t.expect_error_func(|e| *e == DbResultError::InternalError("Couldn't coerce value for field `in` of `likes:3`: Expected `record<person>` but found `dog:1`".to_string()))?;
 
 	Ok(())
 }

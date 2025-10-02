@@ -171,8 +171,8 @@ fn ok_graph_traversal_depth() -> Result<()> {
 					assert_eq!(res, val);
 				}
 				Err(res) => {
-					assert_eq!(res, DbResultError::InternalError("STU".to_string()));
 					assert!(n > 10, "Max traversals: {}", n - 1);
+					panic!("This should not happen: {res:?}");
 				}
 			}
 
