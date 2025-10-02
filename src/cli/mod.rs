@@ -31,17 +31,18 @@ use ml::MlCommand;
 use semver::Version;
 use sql::SqlCommandArguments;
 use start::StartCommandArguments;
+use surrealdb_core::kvs::TransactionBuilderFactory;
 use upgrade::UpgradeCommandArguments;
 use validate::ValidateCommandArguments;
 use validator::parser::tracing::{CustomFilter, CustomFilterParser};
 use version::VersionCommandArguments;
 
-use crate::ServerComposer;
 use crate::cli::version_client::VersionClient;
 #[cfg(debug_assertions)]
 use crate::cnf::DEBUG_BUILD_WARNING;
 use crate::cnf::{LOGO, PKG_VERSION};
 use crate::env::RELEASE;
+use crate::net::RouterFactory;
 
 const INFO: &str = "
 To get started using SurrealDB, and for guides on connecting to and building applications
@@ -200,7 +201,12 @@ impl LogFileRotation {
 	}
 }
 
-pub async fn init<Composer: ServerComposer>() -> ExitCode {
+/// CLI entrypoint.
+///
+/// Generic over:
+/// - T: builds datastore transactions, allowing embedders to pick a storage backend.
+/// - R: constructs the HTTP router, allowing embedders to customize server routes.
+pub async fn init<T: TransactionBuilderFactory, R: RouterFactory>() -> ExitCode {
 	// Enables ANSI code support on Windows
 	#[cfg(windows)]
 	nu_ansi_term::enable_ansi_support().ok();
@@ -249,7 +255,7 @@ pub async fn init<Composer: ServerComposer>() -> ExitCode {
 	let guards = telemetry.init().expect("Unable to configure logs");
 	// After version warning we can run the respective command
 	let output = match args.command {
-		Commands::Start(args) => start::init::<Composer>(args).await,
+		Commands::Start(args) => start::init::<T, R>(args).await,
 		Commands::Import(args) => import::init(args).await,
 		Commands::Export(args) => export::init(args).await,
 		Commands::Version(args) => version::init(args).await,
@@ -258,7 +264,7 @@ pub async fn init<Composer: ServerComposer>() -> ExitCode {
 		Commands::Ml(args) => ml::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
-		Commands::Fix(args) => fix::init::<Composer>(args).await,
+		Commands::Fix(args) => fix::init::<T>(args).await,
 	};
 	// Save the flamegraph and profile
 	#[cfg(feature = "performance-profiler")]

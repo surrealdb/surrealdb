@@ -8,6 +8,7 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::{any, tasks};
+use surrealdb_core::kvs::TransactionBuilderFactory;
 use tokio_util::sync::CancellationToken;
 
 use super::config::{CF, Config};
@@ -16,8 +17,9 @@ use crate::cnf::LOGO;
 use crate::core::ml::execution::session::set_environment;
 use crate::core::options::EngineOptions;
 use crate::dbs::StartCommandDbsOptions;
+use crate::net::RouterFactory;
 use crate::net::client_ip::ClientIp;
-use crate::{ServerComposer, dbs, env, net};
+use crate::{dbs, env, net};
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
@@ -147,7 +149,12 @@ struct StartCommandWebTlsOptions {
 	web_key: Option<PathBuf>,
 }
 
-pub async fn init<Composer: ServerComposer>(
+/// Start the server.
+///
+/// Generic over:
+/// - T: datastore transaction builder (storage/backend selection).
+/// - R: HTTP router factory (route/middleware customization).
+pub async fn init<T: TransactionBuilderFactory, R: RouterFactory>(
 	StartCommandArguments {
 		path,
 		username: user,
@@ -167,7 +174,7 @@ pub async fn init<Composer: ServerComposer>(
 	}: StartCommandArguments,
 ) -> Result<()> {
 	// Check the path is valid
-	Composer::path_valid(&path)?;
+	T::path_valid(&path)?;
 	// Check if we should output a banner
 	if !no_banner {
 		println!("{LOGO}");
@@ -216,11 +223,12 @@ pub async fn init<Composer: ServerComposer>(
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();
 	// Start the datastore
-	let datastore = Arc::new(dbs::init::<Composer>(dbs).await?);
+	let datastore = Arc::new(dbs::init::<T>(dbs).await?);
 	// Start the node agent
 	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &CF.get().unwrap().engine);
 	// Start the web server
-	net::init::<Composer>(datastore.clone(), canceller.clone()).await?;
+	// Build and run the HTTP server using the provided RouterFactory implementation
+	net::init::<R>(datastore.clone(), canceller.clone()).await?;
 	// Shutdown and stop closed tasks
 	canceller.cancel();
 	// Wait for background tasks to finish

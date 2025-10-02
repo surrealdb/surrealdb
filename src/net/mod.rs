@@ -60,9 +60,38 @@ use crate::telemetry::metrics::HttpMetricsLayer;
 
 const LOG: &str = "surrealdb::net";
 
+/// Factory for constructing the top-level Axum Router used by the HTTP server.
+///
+/// Embedders can provide their own implementation to add or remove routes, or wrap
+/// additional middleware. The default binary uses `DefaultRouterFactory`.
 pub trait RouterFactory {
-	fn configure_router(router: Router<Arc<RpcState>>) -> Router<Arc<RpcState>> {
-		router
+	/// Build and return the base Router. The server will attach shared state and layers.
+	fn configure_router() -> Router<Arc<RpcState>>;
+}
+
+/// Default router that mirrors the routes shipped with the `surreal` binary.
+/// Consumers embedding SurrealDB can implement `RouterFactory` to customize routes.
+pub struct DefaultRouterFactory {}
+
+impl RouterFactory for DefaultRouterFactory {
+	fn configure_router() -> Router<Arc<RpcState>> {
+		Router::<Arc<RpcState>>::new()
+			// Redirect until we provide a UI
+			.route("/", get(|| async { Redirect::temporary(cnf::APP_ENDPOINT) }))
+			.route("/status", get(|| async {}))
+			.merge(health::router())
+			.merge(export::router())
+			.merge(import::router())
+			.merge(rpc::router())
+			.merge(version::router())
+			.merge(sync::router())
+			.merge(sql::router())
+			.merge(signin::router())
+			.merge(signup::router())
+			.merge(key::router())
+			.merge(ml::router())
+			.merge(api::router())
+		//.merge(gql::router(ds.clone()))
 	}
 }
 
@@ -174,26 +203,7 @@ pub async fn init<F: RouterFactory>(ds: Arc<Datastore>, ct: CancellationToken) -
 				.max_age(Duration::from_secs(86400)),
 		);
 
-	let axum_app = Router::<Arc<RpcState>>::new()
-		// Redirect until we provide a UI
-		.route("/", get(|| async { Redirect::temporary(cnf::APP_ENDPOINT) }))
-		.route("/status", get(|| async {}))
-		.merge(health::router())
-		.merge(export::router())
-		.merge(import::router())
-		.merge(rpc::router())
-		.merge(version::router())
-		.merge(sync::router())
-		.merge(sql::router())
-		.merge(signin::router())
-		.merge(signup::router())
-		.merge(key::router())
-		.merge(ml::router())
-		.merge(api::router());
-	//.merge(gql::router(ds.clone()));
-
-	// Merge any external additional routers
-	let axum_app = F::configure_router(axum_app);
+	let axum_app = F::configure_router();
 
 	if ds.get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
 		warn!(
