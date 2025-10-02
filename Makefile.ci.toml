@@ -159,7 +159,7 @@ args = [
     "--locked",
     "--no-default-features",
     "--features",
-    "storage-mem,http-compression,jwks",
+    "storage-mem,jwks",
     "--workspace",
     "--test",
     "http_integration",
@@ -338,7 +338,7 @@ run_task = "ci-api-integration"
 
 [tasks.ci-api-integration-ws]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "ws", _TEST_FEATURES = "protocol-ws", SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE = 268435456, SURREAL_WEBSOCKET_MAX_FRAME_SIZE = 268435456 }
+env = { _TEST_API_ENGINE = "ws", _TEST_FEATURES = "protocol-ws", SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE = 268435456 }
 run_task = "ci-api-integration"
 
 [tasks.ci-api-integration-any]

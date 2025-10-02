@@ -7,7 +7,7 @@ use crate::sql::statements::{
 };
 use crate::sql::{Expr, Param};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Ast {
 	pub(crate) expressions: Vec<TopLevelExpr>,
@@ -86,7 +86,7 @@ impl From<Ast> for expr::LogicalPlan {
 	}
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) enum TopLevelExpr {
 	Begin,

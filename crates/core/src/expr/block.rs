@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
 use reblessive::tree::Stk;
-use revision::revisioned;
+use revision::Revisioned;
 
 use super::FlowResult;
 use crate::ctx::{Context, MutableContext};
@@ -13,9 +13,30 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Value};
 use crate::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct Block(pub(crate) Vec<Expr>);
+
+impl Revisioned for Block {
+	fn revision() -> u16 {
+		1
+	}
+
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
+		self.to_string().serialize_revisioned(writer)?;
+		Ok(())
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		let query: String = Revisioned::deserialize_revisioned(reader)?;
+
+		let expr = crate::syn::block(&query)
+			.map_err(|err| revision::Error::Conversion(err.to_string()))?;
+		Ok(expr.into())
+	}
+}
 
 impl Deref for Block {
 	type Target = [Expr];

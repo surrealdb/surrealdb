@@ -17,23 +17,33 @@ mod cnf;
 mod dbs;
 mod env;
 // mod gql; // currently disabled in binary too
-mod net;
-mod rpc;
+pub mod net;
+/// Make `rpc` public so embedders can access RpcState and related router definitions
+/// when running SurrealDB as a library.
+pub mod rpc;
 mod telemetry;
 
 use std::future::Future;
 use std::process::ExitCode;
 
-// Re-export the core crate in the same path used across internal modules
-// so that `crate::core::...` keeps working when used as a library target.
+/// Re-export `RpcState` for convenience so embedders can `use surreal::RpcState`.
+pub use rpc::RpcState;
 pub use surrealdb_core as core;
 use surrealdb_core::kvs::TransactionBuilderFactory;
+
+// Re-export the core crate in the same path used across internal modules
+// so that `crate::core::...` keeps working when used as a library target.
+use crate::net::RouterFactory;
 
 /// Initialize SurrealDB CLI/server with the same behavior as the `surreal` binary.
 /// This spins up a Tokio runtime with a larger stack size and then runs the CLI
 /// entrypoint (which starts the server when the `start` subcommand is used).
-pub fn init<F: TransactionBuilderFactory>() -> ExitCode {
-	with_enough_stack(cli::init::<F>())
+///
+/// Generic parameters:
+/// - T: `TransactionBuilderFactory` (selects/validates the datastore backend).
+/// - R: `RouterFactory` (constructs the HTTP router).
+pub fn init<T: TransactionBuilderFactory, R: RouterFactory>() -> ExitCode {
+	with_enough_stack(cli::init::<T, R>())
 }
 
 /// Rust's default thread stack size of 2MiB doesn't allow sufficient recursion depth.

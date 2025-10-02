@@ -188,6 +188,17 @@ impl Display for Idiom {
 		let mut iter = self.0.iter();
 		match iter.next() {
 			Some(Part::Field(v)) => EscapeIdent(v).fmt(f)?,
+			Some(Part::Start(x)) => match x {
+				Expr::Block(_)
+				| Expr::Literal(_)
+				| Expr::Table(_)
+				| Expr::Mock(_)
+				| Expr::Constant(_)
+				| Expr::Param(_) => x.fmt(f)?,
+				_ => {
+					write!(f, "({x})")?;
+				}
+			},
 			Some(x) => x.fmt(f)?,
 			None => {}
 		};

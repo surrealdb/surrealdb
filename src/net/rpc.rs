@@ -111,7 +111,7 @@ async fn get_handler(
 		// Set the potential WebSocket protocols (JSON, CBOR, Bincode, etc.)
 		.protocols(PROTOCOLS)
 		// Set the maximum WebSocket frame size to prevent oversized frames
-		.max_frame_size(*cnf::WEBSOCKET_MAX_FRAME_SIZE)
+		.max_frame_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
 		// Set the maximum WebSocket message size to prevent memory exhaustion
 		.max_message_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
 		// Configure read buffer size for incoming data optimization

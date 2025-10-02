@@ -195,19 +195,31 @@ pub fn record_id_with_range(input: &str) -> Result<RecordIdLit> {
 pub fn block(input: &str) -> Result<Block> {
 	trace!(target: TARGET, "Parsing SurrealQL block");
 
-	parse_with(input.as_bytes(), async |parser, stk| {
-		let token = parser.peek();
-		match token.kind {
-			t!("{") => {
-				let start = parser.pop_peek().span;
-				parser.parse_block(stk, start).await
+	parse_with_settings(
+		input.as_bytes(),
+		ParserSettings {
+			legacy_strands: true,
+			flexible_record_id: true,
+			references_enabled: true,
+			bearer_access_enabled: true,
+			define_api_enabled: true,
+			files_enabled: true,
+			..Default::default()
+		},
+		async |parser, stk| {
+			let token = parser.peek();
+			match token.kind {
+				t!("{") => {
+					let start = parser.pop_peek().span;
+					parser.parse_block(stk, start).await
+				}
+				found => Err(error::SyntaxError::new(format_args!(
+					"Unexpected token `{found}` expected `{{`"
+				))
+				.with_span(token.span, error::MessageKind::Error)),
 			}
-			found => Err(error::SyntaxError::new(format_args!(
-				"Unexpected token `{found}` expected `{{`"
-			))
-			.with_span(token.span, error::MessageKind::Error)),
-		}
-	})
+		},
+	)
 }
 
 /// Parses fields for a SELECT statement
