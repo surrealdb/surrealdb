@@ -3,7 +3,7 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 
 use surrealdb_types::sql::ToSql;
-use surrealdb_types::{SurrealValue, Value, Variables};
+use surrealdb_types::{Object, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::insert_relation::InsertRelation;
@@ -61,13 +61,26 @@ macro_rules! into_future {
 				..
 			} = self;
 			Box::pin(async move {
-				let what = resource?;
+				let (table, data) = match resource? {
+					Resource::Table(table) => (table.into(), Object::default()),
+					Resource::RecordId(record_id) => {
+						let mut map = Object::default();
+						map.insert("id".to_string(), record_id.key.into_value());
+						(record_id.table, map)
+					}
+					Resource::Object(_) => return Err(Error::InsertOnObject.into()),
+					Resource::Array(_) => return Err(Error::InsertOnArray.into()),
+					Resource::Range {
+						..
+					} => return Err(Error::InsertOnRange.into()),
+					Resource::Unspecified => return Err(Error::InsertOnUnspecified.into()),
+				};
 
 				let router = client.inner.router.extract()?;
 				router
 					.$method(Command::RawQuery {
 						txn,
-						query: Cow::Owned(format!("INSERT INTO {}", what.to_sql()?)),
+						query: Cow::Owned(format!("INSERT INTO {} {}", table, data.to_sql()?)),
 						variables: Variables::new(),
 					})
 					.await
@@ -126,7 +139,7 @@ where
 			)?;
 			match self.resource? {
 				Resource::Table(table) => {
-					let query = format!("INSERT INTO {} {}", table, data);
+					let query = format!("INSERT INTO {} {}", table, data.to_sql()?);
 					Ok(Command::RawQuery {
 						txn: self.txn,
 						query: Cow::Owned(query),
@@ -144,7 +157,7 @@ where
 							x.insert("id".to_string(), thing.key.into_value());
 						}
 
-						let query = format!("INSERT INTO {} {}", thing.table, data);
+						let query = format!("INSERT INTO {} {}", thing.table, data.to_sql()?);
 						Ok(Command::RawQuery {
 							txn: self.txn,
 							query: Cow::Owned(query),
@@ -157,7 +170,7 @@ where
 				Resource::Range(_) => Err(Error::InsertOnRange.into()),
 				Resource::Unspecified => {
 					// When unspecified, we just INSERT the data directly
-					let query = format!("INSERT {}", data);
+					let query = format!("INSERT {}", data.to_sql()?);
 					Ok(Command::RawQuery {
 						txn: self.txn,
 						query: Cow::Owned(query),

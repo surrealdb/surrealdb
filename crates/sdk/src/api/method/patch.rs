@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
+use surrealdb_types::sql::ToSql;
 use surrealdb_types::{SurrealValue, Value, Variables};
 use uuid::Uuid;
 
@@ -11,6 +12,7 @@ use crate::api::method::BoxFuture;
 use crate::api::opt::{PatchOp, Resource};
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
+use crate::opt::PatchOps;
 
 /// A patch future
 #[derive(Debug)]
@@ -19,7 +21,7 @@ pub struct Patch<'r, C: Connection, R> {
 	pub(super) txn: Option<Uuid>,
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
-	pub(super) patches: Vec<Value>,
+	pub(super) patches: PatchOps,
 	pub(super) upsert: bool,
 	pub(super) response_type: PhantomData<R>,
 }
@@ -51,19 +53,21 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let mut vec = Vec::with_capacity(patches.len());
-				for patch in patches {
-					vec.push(patch);
+				for patch in patches.into_iter() {
+					vec.push(surrealdb_types::Value::from(patch));
 				}
 				let patches = surrealdb_types::Value::Array(surrealdb_types::Array::from(vec));
 				let router = client.inner.router.extract()?;
 
-				let what = resource?.into_value();
+				let what = resource?.to_sql()?;
 				let operation = if upsert {
 					"UPSERT"
 				} else {
 					"UPDATE"
 				};
-				let query = format!("{operation} {what} PATCH {patches}");
+				let query = format!("{operation} {what} PATCH {} RETURN AFTER", patches.to_sql()?);
+
+				tracing::warn!("PATCH query: {}", query);
 
 				let cmd = Command::RawQuery {
 					txn,
@@ -115,16 +119,22 @@ where
 {
 	/// Applies JSON Patch changes to all records, or a specific record, in the
 	/// database.
-	pub fn patch(mut self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
-		let PatchOp(patch) = patch.into();
-		match patch {
-			Value::Array(values) => {
-				for value in values {
-					self.patches.push(value);
-				}
-			}
-			value => self.patches.push(value),
+	pub fn patch(self, patch: impl Into<PatchOp>) -> Self {
+		let Patch {
+			txn,
+			client,
+			resource,
+			patches,
+			upsert,
+			response_type,
+		} = self;
+		Patch {
+			txn,
+			client,
+			resource,
+			patches: patches.push(patch.into()),
+			upsert,
+			response_type,
 		}
-		self
 	}
 }

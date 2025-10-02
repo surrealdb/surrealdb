@@ -61,10 +61,15 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 
 				let what = resource?;
+
+				let delete_query = format!("DELETE {} RETURN BEFORE", what.to_sql()?);
+
+				tracing::warn!("DELETE query: {}", delete_query);
+
 				router
 					.$method(Command::RawQuery {
 						txn,
-						query: Cow::Owned(format!("DELETE {}", what.to_sql()?)),
+						query: Cow::Owned(delete_query),
 						variables: Variables::new(),
 					})
 					.await

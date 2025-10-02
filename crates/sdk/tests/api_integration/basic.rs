@@ -8,6 +8,7 @@ use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess};
 use surrealdb::opt::{PatchOp, PatchOps, Resource};
 use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, Value, array, object};
 use surrealdb_core::syn;
+use surrealdb_types::Array;
 use ulid::Ulid;
 
 use super::{AuthParams, CreateDb};
@@ -587,7 +588,7 @@ pub async fn create_record_with_id_in_content(new_db: impl CreateDb) {
 
 	assert_eq!(
 		error.to_string(),
-		"Found user:jane for the `id` field, but a specific record has been specified"
+		"Internal error: Found user:jane for the `id` field, but a specific record has been specified"
 	);
 
 	let _: Option<Record> = db
@@ -677,7 +678,9 @@ pub async fn insert_unspecified(new_db: impl CreateDb) {
 		.content(object! { id: RecordId::new("user", "user2"), foo: "bar"})
 		.await
 		.unwrap();
-	let val = Value::Object(object! { id: RecordId::new("user", "user2"), foo: "bar"});
+	let val = Value::Array(array![Value::Object(
+		object! { id: RecordId::new("user", "user2"), foo: "bar"}
+	)]);
 	assert_eq!(tmp, val);
 }
 
@@ -1433,7 +1436,7 @@ pub async fn delete_record_id(new_db: impl CreateDb) {
 	let jane: Option<ApiRecordId> = db.delete(RecordId::new("user", "jane")).await.unwrap();
 	assert!(jane.is_none());
 	let value: Value = db.delete(Resource::from(RecordId::new("user", "jane"))).await.unwrap();
-	assert_eq!(value, Value::None);
+	assert_eq!(value, Value::Array(Array::new()));
 }
 
 pub async fn delete_record_range(new_db: impl CreateDb) {
@@ -1737,7 +1740,8 @@ pub async fn run(new_db: impl CreateDb) {
 	println!("fn::idontexist res: {tmp}");
 	assert!(tmp.to_string().contains("The function 'fn::idnotexist' does not exist"));
 
-	let tmp: usize = db.run("count").args(vec![1, 2, 3]).await.unwrap();
+	// Pass the array as a single argument to count()
+	let tmp: usize = db.run("count").args(vec![vec![1, 2, 3]]).await.unwrap();
 	assert_eq!(tmp, 3);
 
 	let tmp: Option<RecordId> = db.run("fn::bar").args(7).await.unwrap();

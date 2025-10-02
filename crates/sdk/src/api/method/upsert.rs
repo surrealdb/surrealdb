@@ -11,9 +11,10 @@ use super::validate_data;
 use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::method::{BoxFuture, Content, Merge, Patch};
-use crate::api::opt::{PatchOp, Resource};
+use crate::api::opt::Resource;
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
+use crate::opt::PatchOps;
 
 /// An upsert future
 #[derive(Debug)]
@@ -184,14 +185,9 @@ where
 
 	/// Patches the current document / record data with the specified JSON Patch
 	/// data
-	pub fn patch(self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
-		let PatchOp(result) = patch.into();
-		let patches = match result {
-			Value::Array(values) => values.into_vec(),
-			value => vec![value],
-		};
+	pub fn patch(self, patches: impl Into<PatchOps>) -> Patch<'r, C, R> {
 		Patch {
-			patches,
+			patches: patches.into(),
 			txn: self.txn,
 			client: self.client,
 			resource: self.resource,

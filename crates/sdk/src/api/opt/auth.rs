@@ -3,7 +3,7 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use surrealdb_types::SurrealValue;
+use surrealdb_types::{Kind, Object, SurrealValue, Value};
 
 /// A signup action
 #[derive(Debug)]
@@ -65,20 +65,89 @@ pub struct Database {
 impl Credentials<Signin, Jwt> for Database {}
 
 /// Credentials for the record user
-#[derive(Debug, SurrealValue)]
+#[derive(Debug)]
 pub struct Record<P: SurrealValue> {
 	/// The namespace the user has access to
-	#[surreal(rename = "ns")]
 	pub namespace: String,
 	/// The database the user has access to
-	#[surreal(rename = "db")]
 	pub database: String,
 	/// The access method to use for signin and signup
-	#[surreal(rename = "ac")]
 	pub access: String,
 	/// The additional params to use
-	#[surreal(flatten)]
 	pub params: P,
+}
+
+impl<P: SurrealValue> SurrealValue for Record<P> {
+	fn into_value(self) -> Value {
+		let mut obj = Object::new();
+		obj.insert("ns".to_string(), Value::String(self.namespace));
+		obj.insert("db".to_string(), Value::String(self.database));
+		obj.insert("ac".to_string(), Value::String(self.access));
+
+		// Flatten the params into the top level object
+		if let Value::Object(params_obj) = self.params.into_value() {
+			for (key, value) in params_obj {
+				obj.insert(key, value);
+			}
+		}
+
+		Value::Object(obj)
+	}
+
+	fn from_value(value: Value) -> surrealdb_types::anyhow::Result<Self> {
+		if let Value::Object(mut obj) = value {
+			let namespace = obj
+				.remove("ns")
+				.and_then(|v| {
+					if let Value::String(s) = v {
+						Some(s)
+					} else {
+						None
+					}
+				})
+				.ok_or_else(|| surrealdb_types::anyhow::anyhow!("Missing 'ns' field"))?;
+			let database = obj
+				.remove("db")
+				.and_then(|v| {
+					if let Value::String(s) = v {
+						Some(s)
+					} else {
+						None
+					}
+				})
+				.ok_or_else(|| surrealdb_types::anyhow::anyhow!("Missing 'db' field"))?;
+			let access = obj
+				.remove("ac")
+				.and_then(|v| {
+					if let Value::String(s) = v {
+						Some(s)
+					} else {
+						None
+					}
+				})
+				.ok_or_else(|| surrealdb_types::anyhow::anyhow!("Missing 'ac' field"))?;
+
+			// The remaining fields go into params
+			let params = P::from_value(Value::Object(obj))?;
+
+			Ok(Record {
+				namespace,
+				database,
+				access,
+				params,
+			})
+		} else {
+			Err(surrealdb_types::anyhow::anyhow!("Expected an object for Record"))
+		}
+	}
+
+	fn is_value(value: &Value) -> bool {
+		matches!(value, Value::Object(_))
+	}
+
+	fn kind_of() -> Kind {
+		Kind::Object
+	}
 }
 
 impl<T, P> Credentials<T, Jwt> for Record<P> where P: SurrealValue {}

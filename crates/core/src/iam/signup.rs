@@ -230,8 +230,8 @@ pub async fn db_access(
 				Err(anyhow::Error::new(Error::UnexpectedAuth))
 			}
 			// Otherwise, return a generic error unless it should be forwarded
-			_ => {
-				debug!("Record user signup query failed: {e}");
+			err => {
+				tracing::warn!("Record user signup query failed: {err:?}");
 				if *INSECURE_FORWARD_ACCESS_ERRORS {
 					Err(e)
 				} else {

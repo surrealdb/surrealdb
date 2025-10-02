@@ -105,7 +105,14 @@ impl Router {
 		Box::pin(async move {
 			let rx = self.send_command(command).await?;
 			let value = self.recv_value(rx).await?;
-			R::from_value(value)
+			// Handle single-element arrays that might be returned from operations like
+			// signup/signin
+			match value {
+				Value::Array(array) if array.len() == 1 => {
+					R::from_value(array.into_iter().next().unwrap())
+				}
+				v => R::from_value(v),
+			}
 		})
 	}
 
@@ -118,6 +125,15 @@ impl Router {
 			let rx = self.send_command(command).await?;
 			match self.recv_value(rx).await? {
 				Value::None | Value::Null => Ok(None),
+				Value::Array(array) => match array.len() {
+					// Empty array means no results
+					0 => Ok(None),
+					// Single-element array: extract and return the element
+					// This happens when operating on a record ID
+					1 => Ok(Some(R::from_value(array.into_iter().next().unwrap())?)),
+					// Multiple elements should not happen for operations expecting Option<T>
+					_ => Ok(Some(R::from_value(Value::Array(array))?)),
+				},
 				value => Ok(Some(R::from_value(value)?)),
 			}
 		})

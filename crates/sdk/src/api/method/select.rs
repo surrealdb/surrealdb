@@ -63,10 +63,14 @@ macro_rules! into_future {
 
 				let what = resource?;
 
+				let query = format!("SELECT * FROM {}", what.to_sql()?);
+
+				tracing::warn!("SELECT query: {}", query);
+
 				router
 					.$method(Command::RawQuery {
 						txn,
-						query: Cow::Owned(format!("SELECT * FROM {}", what.to_sql()?)),
+						query: Cow::Owned(query),
 						variables: Variables::new(),
 					})
 					.await

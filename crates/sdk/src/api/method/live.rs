@@ -6,8 +6,9 @@ use std::task::{Context, Poll};
 
 use async_channel::Receiver;
 use futures::StreamExt;
+use surrealdb_types::sql::ToSql;
 use surrealdb_types::{
-	self, Action, Notification as CoreNotification, SurrealValue, Value, Variables,
+	self, Action, Notification as CoreNotification, RecordIdKey, SurrealValue, Value, Variables,
 };
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
@@ -19,9 +20,10 @@ use crate::Surreal;
 use crate::api::conn::{Command, Router};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
+use crate::api::opt::Resource;
 use crate::api::{Connection, ExtraFeatures, Result};
 use crate::engine::any::Any;
-use crate::method::{Live, OnceLockExt, Query, Select};
+use crate::method::{Live, OnceLockExt, Select};
 use crate::notification::Notification;
 
 fn into_future<C, O>(this: Select<C, O, Live>) -> BoxFuture<Result<Stream<O>>>
@@ -38,128 +40,99 @@ where
 		if !router.features.contains(&ExtraFeatures::LiveQueries) {
 			return Err(Error::LiveQueriesNotSupported.into());
 		}
-		// let mut stmt = LiveStatement::new(Fields::all());
-		// match resource? {
-		// 	Resource::Table(table) => {
-		// 		stmt.what = Expr::Table(table);
-		// 	}
-		// 	Resource::RecordId(record) => {
-		// 		stmt.what = Expr::Table(record.table.clone());
-		// 		let ident = "id".to_string();
-		// 		let key_lit = record.key.into();
-		// 		let cond = Expr::Binary {
-		// 			left: Box::new(Expr::Idiom(Idiom::field(ident))),
-		// 			op: BinaryOperator::Equal,
-		// 			right: Box::new(Expr::Literal(Literal::RecordId(RecordIdLit {
-		// 				table: record.table,
-		// 				key: key_lit,
-		// 			}))),
-		// 		};
-		// 		stmt.cond = Some(Cond(cond));
-		// 	}
-		// 	Resource::Object(_) => return Err(Error::LiveOnObject.into()),
-		// 	Resource::Array(_) => return Err(Error::LiveOnArray.into()),
-		// 	Resource::Range(range) => {
-		// 		let record = range.0;
 
-		// 		let RecordIdKey::Range(range) = record.key else {
-		// 			panic!("invalid resource?");
-		// 		};
+		// Generate the LIVE SELECT SQL based on resource type
+		let stmt = match resource? {
+			Resource::Table(table) => {
+				format!("LIVE SELECT * FROM `{}`", table)
+			}
+			Resource::RecordId(record) => {
+				// For a specific record, we use WHERE id = record
+				format!("LIVE SELECT * FROM `{}` WHERE id = {}", record.table, record.to_sql()?)
+			}
+			Resource::Object(_) => return Err(Error::LiveOnObject.into()),
+			Resource::Array(_) => return Err(Error::LiveOnArray.into()),
+			Resource::Range(range) => {
+				let record = range.0;
+				let RecordIdKey::Range(ref key_range) = record.key else {
+					return Err(Error::InvalidParams("Invalid range in resource".to_owned()).into());
+				};
 
-		// 		stmt.what = Expr::Table(record.table.clone());
+				// Build WHERE clause for range queries
+				let mut conditions = Vec::new();
 
-		// 		let id = Expr::Idiom(Idiom::field("id".to_string()));
+				// Handle start bound
+				match &key_range.start {
+					std::ops::Bound::Included(key) => {
+						conditions.push(format!("id >= {}:{}", record.table, key.to_sql()?));
+					}
+					std::ops::Bound::Excluded(key) => {
+						conditions.push(format!("id > {}:{}", record.table, key.to_sql()?));
+					}
+					std::ops::Bound::Unbounded => {}
+				}
 
-		// 		// Convert RecordIdKey bounds to expressions
-		// 		let convert_key = |key: RecordIdKey| -> Expr {
-		// 			let key_lit = match key {
-		// 				RecordIdKey::Number(n) => RecordIdKeyLit::Number(n),
-		// 				RecordIdKey::String(s) => RecordIdKeyLit::String(s),
-		// 				RecordIdKey::Uuid(u) => RecordIdKeyLit::Uuid(u.into()),
-		// 				RecordIdKey::Array(a) => RecordIdKeyLit::Array(
-		// 					a.inner().iter().cloned().map(Expr::from_public_value).collect(),
-		// 				),
-		// 				RecordIdKey::Object(o) => {
-		// 					use surrealdb_core::expr::ObjectEntry;
-		// 					RecordIdKeyLit::Object(
-		// 						o.inner()
-		// 							.iter()
-		// 							.map(|(k, v)| ObjectEntry {
-		// 								key: k.clone(),
-		// 								value: Expr::from_public_value(v.clone()),
-		// 							})
-		// 							.collect(),
-		// 					)
-		// 				}
-		// 				RecordIdKey::Range(_range) => {
-		// 					// Ranges within RecordIdKey are not yet fully supported in the SDK
-		// 					// For now, default to a Number(0) key
-		// 					RecordIdKeyLit::Number(0)
-		// 				}
-		// 			};
-		// 			Expr::Literal(Literal::RecordId(RecordIdLit {
-		// 				table: record.table.clone(),
-		// 				key: key_lit,
-		// 			}))
-		// 		};
+				// Handle end bound
+				match &key_range.end {
+					std::ops::Bound::Included(key) => {
+						conditions.push(format!("id <= {}:{}", record.table, key.to_sql()?));
+					}
+					std::ops::Bound::Excluded(key) => {
+						conditions.push(format!("id < {}:{}", record.table, key.to_sql()?));
+					}
+					std::ops::Bound::Unbounded => {}
+				}
 
-		// 		let left = match range.start {
-		// 			std::ops::Bound::Included(x) => Some(Expr::Binary {
-		// 				left: Box::new(id.clone()),
-		// 				op: BinaryOperator::MoreThanEqual,
-		// 				right: Box::new(convert_key(x)),
-		// 			}),
-		// 			std::ops::Bound::Excluded(x) => Some(Expr::Binary {
-		// 				left: Box::new(id.clone()),
-		// 				op: BinaryOperator::MoreThan,
-		// 				right: Box::new(convert_key(x)),
-		// 			}),
-		// 			std::ops::Bound::Unbounded => None,
-		// 		};
-		// 		let right = match range.end {
-		// 			std::ops::Bound::Included(x) => Some(Expr::Binary {
-		// 				left: Box::new(id),
-		// 				op: BinaryOperator::LessThanEqual,
-		// 				right: Box::new(convert_key(x)),
-		// 			}),
-		// 			std::ops::Bound::Excluded(x) => Some(Expr::Binary {
-		// 				left: Box::new(id),
-		// 				op: BinaryOperator::LessThan,
-		// 				right: Box::new(convert_key(x)),
-		// 			}),
-		// 			std::ops::Bound::Unbounded => None,
-		// 		};
-
-		// 		let cond = match (left, right) {
-		// 			(Some(l), Some(r)) => Some(Cond(Expr::Binary {
-		// 				left: Box::new(l),
-		// 				op: BinaryOperator::And,
-		// 				right: Box::new(r),
-		// 			})),
-		// 			(Some(x), None) | (None, Some(x)) => Some(Cond(x)),
-		// 			_ => None,
-		// 		};
-
-		// 		stmt.cond = cond
-		// 	}
-		// 	Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
-		// }
-
-		let stmt = format!("LIVE SELECT * FROM {:?} TODO STU", resource?);
-		let query = Query {
-			txn: None,
-			client: client.clone(),
-			query: Cow::Owned(stmt),
-			variables: Ok(Variables::new()),
+				// Build final query
+				if conditions.is_empty() {
+					format!("LIVE SELECT * FROM `{}`", record.table)
+				} else {
+					format!(
+						"LIVE SELECT * FROM `{}` WHERE {}",
+						record.table,
+						conditions.join(" AND ")
+					)
+				}
+			}
+			Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
 		};
-		let Value::Uuid(id) = query.await?.take::<Value>(0)? else {
-			return Err(Error::InternalError(
-				"successufull live query didn't return a uuid".to_string(),
-			)
-			.into());
+		// Execute the LIVE SELECT query directly to get the UUID
+		let results = router
+			.execute_query(Command::RawQuery {
+				query: Cow::Owned(stmt),
+				txn: None,
+				variables: Variables::new(),
+			})
+			.await?;
+
+		// Get the first result which should be the UUID
+		let result = results
+			.into_iter()
+			.next()
+			.ok_or_else(|| Error::InternalError("LIVE query returned no results".to_string()))?;
+
+		let id = match result.result? {
+			Value::Uuid(id) => *id,
+			Value::Array(mut arr) if arr.len() == 1 => match arr.pop() {
+				Some(Value::Uuid(id)) => *id,
+				_ => {
+					return Err(Error::InternalError(
+						"successful live query didn't return a uuid".to_string(),
+					)
+					.into());
+				}
+			},
+			other => {
+				return Err(Error::InternalError(format!(
+					"successful live query didn't return a uuid, got: {:?}",
+					other
+				))
+				.into());
+			}
 		};
-		let rx = register(router, *id).await?;
-		Ok(Stream::new(client.inner.clone().into(), *id, Some(rx)))
+
+		let rx = register(router, id).await?;
+		Ok(Stream::new(client.inner.clone().into(), id, Some(rx)))
 	})
 }
 

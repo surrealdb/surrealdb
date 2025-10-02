@@ -220,10 +220,15 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 			db.select(Resource::from(&table)).range("jane".."john").live().await.unwrap();
 
 		// Create a record
-		let created_value = match db.create(Resource::from((table, "job"))).await.unwrap() {
-			Value::Object(created_value) => created_value,
-			_ => panic!("Expected an object"),
-		};
+		let created_value = db
+			.create(Resource::from((table, "job")))
+			.await
+			.unwrap()
+			.into_array()
+			.unwrap()
+			.remove(0)
+			.into_object()
+			.unwrap();
 
 		// Pull the notification
 		let notification: Notification<Value> =

@@ -1,4 +1,4 @@
-use std::fmt::{Debug, Display};
+use std::fmt::{Debug, Display, Write};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -163,7 +163,7 @@ impl ToSql for RecordIdKey {
 	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
 		match self {
 			RecordIdKey::Number(n) => n.fmt_sql(f),
-			RecordIdKey::String(v) => v.fmt_sql(f),
+			RecordIdKey::String(v) => f.write_str(v),
 			RecordIdKey::Uuid(uuid) => uuid.fmt_sql(f),
 			RecordIdKey::Object(object) => object.fmt_sql(f),
 			RecordIdKey::Array(array) => array.fmt_sql(f),

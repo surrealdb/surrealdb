@@ -53,6 +53,7 @@ where
 			let (name, version) = function?;
 
 			let args = match args.into_value() {
+				Value::None => Array::new(),
 				Value::Array(array) => array,
 				value => Array::from(vec![value]),
 			};

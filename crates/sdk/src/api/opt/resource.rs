@@ -108,14 +108,27 @@ impl surrealdb_types::sql::ToSql for Resource {
 		match self {
 			Resource::Table(x) => {
 				f.write_char('`')?;
-				x.fmt_sql(f)?;
-				f.write_char('`')?;
-				Ok(())
+				f.write_str(x)?;
+				f.write_char('`')
 			}
 			Resource::RecordId(x) => x.fmt_sql(f),
 			Resource::Object(x) => x.fmt_sql(f),
 			Resource::Array(x) => Array::from_values(x.clone()).fmt_sql(f),
-			Resource::Range(QueryRange(x)) => x.fmt_sql(f),
+			Resource::Range(QueryRange(x)) => {
+				// For ranges, we need to format as table:start..table:end
+				// not table:range
+				if let RecordIdKey::Range(ref range) = x.key {
+					f.write_char('`')?;
+					f.write_str(&x.table)?;
+					f.write_char('`')?;
+					f.write_char(':')?;
+					range.fmt_sql(f)?;
+				} else {
+					// Fallback to normal RecordId formatting
+					x.fmt_sql(f)?;
+				}
+				Ok(())
+			}
 			Resource::Unspecified => Ok(()),
 		}
 	}
