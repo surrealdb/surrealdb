@@ -154,7 +154,7 @@ args = [
     "--locked",
     "--no-default-features",
     "--features",
-    "storage-mem,http-compression,jwks",
+    "storage-mem,jwks",
     "--workspace",
     "--test",
     "http_integration",

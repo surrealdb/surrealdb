@@ -10,6 +10,10 @@ pub struct FixCommandArguments {
 	path: String,
 }
 
+/// Validate the datastore path for the `fix` subcommand.
+///
+/// Only the `TransactionBuilderFactory` bound is required here because this
+/// command does not need to start the HTTP server or build routes.
 pub async fn init<F: TransactionBuilderFactory>(args: FixCommandArguments) -> Result<()> {
 	// All ok
 	F::path_valid(&args.path)?;
