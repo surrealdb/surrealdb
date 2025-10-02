@@ -168,7 +168,6 @@ impl conn::Sealed for Any {
 						let WebsocketConfig {
 							read_buffer_size,
 							max_message_size,
-							max_frame_size,
 							max_write_buffer_size,
 							write_buffer_size,
 						} = address.config.websocket;
@@ -183,7 +182,7 @@ impl conn::Sealed for Any {
 
 						let config = WebSocketConfig::default()
 							.max_message_size(max_message_size)
-							.max_frame_size(max_frame_size)
+							.max_frame_size(max_message_size)
 							.max_write_buffer_size(max_write_buffer_size)
 							.write_buffer_size(write_buffer_size)
 							.read_buffer_size(read_buffer_size);

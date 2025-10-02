@@ -221,8 +221,7 @@ mod ws {
 
 		let permit = PERMITS.acquire().await.unwrap();
 		// Configure WebSocket with custom size limits for testing
-		let ws_config =
-			WebsocketConfig::default().max_message_size(max_size).max_frame_size(max_size);
+		let ws_config = WebsocketConfig::default().max_message_size(max_size);
 		let config = Config::new().websocket(ws_config).unwrap();
 		let db = Surreal::new::<Ws>(("127.0.0.1:8000", config)).await.unwrap();
 		db.signin(Root {

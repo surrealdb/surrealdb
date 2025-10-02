@@ -70,10 +70,6 @@ pub static HTTP_MAX_IMPORT_BODY_SIZE: LazyLock<usize> =
 /// Specifies the frequency with which ping messages are sent to the client
 pub const WEBSOCKET_PING_FREQUENCY: Duration = Duration::from_secs(5);
 
-/// What is the maximum WebSocket frame size (default: 16 MiB)
-pub static WEBSOCKET_MAX_FRAME_SIZE: LazyLock<usize> =
-	lazy_env_parse!(bytes, "SURREAL_WEBSOCKET_MAX_FRAME_SIZE", usize, 16 << 20);
-
 /// What is the maximum WebSocket message size (default: 128 MiB)
 pub static WEBSOCKET_MAX_MESSAGE_SIZE: LazyLock<usize> =
 	lazy_env_parse!(bytes, "SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE", usize, 128 << 20);
