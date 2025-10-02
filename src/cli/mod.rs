@@ -31,12 +31,12 @@ use ml::MlCommand;
 use semver::Version;
 use sql::SqlCommandArguments;
 use start::StartCommandArguments;
-use surrealdb_core::kvs::TransactionBuilderFactory;
 use upgrade::UpgradeCommandArguments;
 use validate::ValidateCommandArguments;
 use validator::parser::tracing::{CustomFilter, CustomFilterParser};
 use version::VersionCommandArguments;
 
+use crate::ServerComposer;
 use crate::cli::version_client::VersionClient;
 #[cfg(debug_assertions)]
 use crate::cnf::DEBUG_BUILD_WARNING;
@@ -200,7 +200,7 @@ impl LogFileRotation {
 	}
 }
 
-pub async fn init<F: TransactionBuilderFactory>() -> ExitCode {
+pub async fn init<Composer: ServerComposer>() -> ExitCode {
 	// Enables ANSI code support on Windows
 	#[cfg(windows)]
 	nu_ansi_term::enable_ansi_support().ok();
@@ -249,7 +249,7 @@ pub async fn init<F: TransactionBuilderFactory>() -> ExitCode {
 	let guards = telemetry.init().expect("Unable to configure logs");
 	// After version warning we can run the respective command
 	let output = match args.command {
-		Commands::Start(args) => start::init::<F>(args).await,
+		Commands::Start(args) => start::init::<Composer>(args).await,
 		Commands::Import(args) => import::init(args).await,
 		Commands::Export(args) => export::init(args).await,
 		Commands::Version(args) => version::init(args).await,
@@ -258,7 +258,7 @@ pub async fn init<F: TransactionBuilderFactory>() -> ExitCode {
 		Commands::Ml(args) => ml::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
-		Commands::Fix(args) => fix::init::<F>(args).await,
+		Commands::Fix(args) => fix::init::<Composer>(args).await,
 	};
 	// Save the flamegraph and profile
 	#[cfg(feature = "performance-profiler")]

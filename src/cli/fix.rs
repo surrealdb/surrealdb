@@ -1,6 +1,6 @@
+use crate::ServerComposer;
 use anyhow::Result;
 use clap::Args;
-use surrealdb_core::kvs::TransactionBuilderFactory;
 
 #[derive(Args, Debug)]
 pub struct FixCommandArguments {
@@ -10,7 +10,7 @@ pub struct FixCommandArguments {
 	path: String,
 }
 
-pub async fn init<F: TransactionBuilderFactory>(args: FixCommandArguments) -> Result<()> {
+pub async fn init<F: ServerComposer>(args: FixCommandArguments) -> Result<()> {
 	// All ok
 	F::path_valid(&args.path)?;
 	Err(anyhow::anyhow!("Fix is not implemented"))

@@ -60,6 +60,12 @@ use crate::telemetry::metrics::HttpMetricsLayer;
 
 const LOG: &str = "surrealdb::net";
 
+pub trait RouterFactory {
+	fn configure_router(router: Router<Arc<RpcState>>) -> Router<Arc<RpcState>> {
+		router
+	}
+}
+
 ///
 /// AppState is used to share data between routes.
 #[derive(Clone)]
@@ -68,7 +74,7 @@ pub struct AppState {
 	pub datastore: Arc<Datastore>,
 }
 
-pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<()> {
+pub async fn init<F: RouterFactory>(ds: Arc<Datastore>, ct: CancellationToken) -> Result<()> {
 	// Get local copy of options
 	let opt = CF.get().unwrap();
 
@@ -186,6 +192,9 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<()> {
 		.merge(api::router());
 	//.merge(gql::router(ds.clone()));
 
+	// Merge any external additional routers
+	let axum_app = F::configure_router(axum_app);
+
 	if ds.get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
 		warn!(
 			"❌🔒IMPORTANT: GraphQL is a pre-release feature with known security flaws. This is not recommended for production use.🔒❌"
@@ -197,7 +206,7 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<()> {
 	// Get a new server handler
 	let handle = Handle::new();
 
-	let rpc_state = Arc::new(RpcState::new());
+	let rpc_state = Arc::new(RpcState::default());
 
 	// Setup the graceful shutdown handler
 	let shutdown_handler = graceful_shutdown(rpc_state.clone(), ct.clone(), handle.clone());

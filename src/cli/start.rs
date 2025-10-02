@@ -8,7 +8,6 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::{any, tasks};
-use surrealdb_core::kvs::TransactionBuilderFactory;
 use tokio_util::sync::CancellationToken;
 
 use super::config::{CF, Config};
@@ -18,7 +17,7 @@ use crate::core::ml::execution::session::set_environment;
 use crate::core::options::EngineOptions;
 use crate::dbs::StartCommandDbsOptions;
 use crate::net::client_ip::ClientIp;
-use crate::{dbs, env, net};
+use crate::{ServerComposer, dbs, env, net};
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
@@ -148,7 +147,7 @@ struct StartCommandWebTlsOptions {
 	web_key: Option<PathBuf>,
 }
 
-pub async fn init<F: TransactionBuilderFactory>(
+pub async fn init<Composer: ServerComposer>(
 	StartCommandArguments {
 		path,
 		username: user,
@@ -168,7 +167,7 @@ pub async fn init<F: TransactionBuilderFactory>(
 	}: StartCommandArguments,
 ) -> Result<()> {
 	// Check the path is valid
-	F::path_valid(&path)?;
+	Composer::path_valid(&path)?;
 	// Check if we should output a banner
 	if !no_banner {
 		println!("{LOGO}");
@@ -217,11 +216,11 @@ pub async fn init<F: TransactionBuilderFactory>(
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();
 	// Start the datastore
-	let datastore = Arc::new(dbs::init::<F>(dbs).await?);
+	let datastore = Arc::new(dbs::init::<Composer>(dbs).await?);
 	// Start the node agent
 	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &CF.get().unwrap().engine);
 	// Start the web server
-	net::init(datastore.clone(), canceller.clone()).await?;
+	net::init::<Composer>(datastore.clone(), canceller.clone()).await?;
 	// Shutdown and stop closed tasks
 	canceller.cancel();
 	// Wait for background tasks to finish

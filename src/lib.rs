@@ -17,7 +17,7 @@ mod cnf;
 mod dbs;
 mod env;
 // mod gql; // currently disabled in binary too
-mod net;
+pub mod net;
 mod rpc;
 mod telemetry;
 
@@ -26,14 +26,17 @@ use std::process::ExitCode;
 
 // Re-export the core crate in the same path used across internal modules
 // so that `crate::core::...` keeps working when used as a library target.
+use crate::net::RouterFactory;
 pub use surrealdb_core as core;
 use surrealdb_core::kvs::TransactionBuilderFactory;
+
+pub trait ServerComposer: TransactionBuilderFactory + RouterFactory {}
 
 /// Initialize SurrealDB CLI/server with the same behavior as the `surreal` binary.
 /// This spins up a Tokio runtime with a larger stack size and then runs the CLI
 /// entrypoint (which starts the server when the `start` subcommand is used).
-pub fn init<F: TransactionBuilderFactory>() -> ExitCode {
-	with_enough_stack(cli::init::<F>())
+pub fn init<Composer: ServerComposer>() -> ExitCode {
+	with_enough_stack(cli::init::<Composer>())
 }
 
 /// Rust's default thread stack size of 2MiB doesn't allow sufficient recursion depth.
