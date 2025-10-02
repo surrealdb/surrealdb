@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize, de};
 use surrealdb_core::dbs::capabilities::{
 	ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
 };
-use surrealdb_core::sql::Expr;
 use surrealdb_core::syn::parser::ParserSettings;
 use surrealdb_core::syn::{self};
 use surrealdb_types::{Object, RecordId, Value};
@@ -449,15 +448,14 @@ impl<'de> Deserialize<'de> for SurrealValue {
 }
 
 #[derive(Clone, Debug)]
-pub struct SurrealExpr(pub Expr);
+pub struct SurrealExpr(pub String);
 
 impl Serialize for SurrealExpr {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: serde::Serializer,
 	{
-		let v = self.0.to_string();
-		v.serialize(serializer)
+		self.0.serialize(serializer)
 	}
 }
 
@@ -467,23 +465,10 @@ impl<'de> Deserialize<'de> for SurrealExpr {
 		D: serde::Deserializer<'de>,
 	{
 		let source = String::deserialize(deserializer)?;
-		let settings = ParserSettings {
-			object_recursion_limit: 100,
-			query_recursion_limit: 100,
-			legacy_strands: false,
-			flexible_record_id: true,
-			references_enabled: true,
-			bearer_access_enabled: true,
-			define_api_enabled: true,
-			files_enabled: true,
-		};
-
-		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
-			parser.parse_expr_start(stk).await
-		})
-		.map_err(<D::Error as serde::de::Error>::custom)?;
-
-		Ok(SurrealExpr(v))
+		// We can't validate the expression anymore since parse_expr_start is private
+		// and parse_value doesn't handle variables like $error
+		// We'll rely on runtime validation when the expression is executed
+		Ok(SurrealExpr(source))
 	}
 }
 

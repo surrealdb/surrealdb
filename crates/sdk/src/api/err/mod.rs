@@ -350,7 +350,9 @@ impl From<DbResultError> for Error {
 			DbResultError::InvalidAuth(message) => Error::Query(message),
 			DbResultError::QueryNotExecuted(message) => Error::Query(message),
 			DbResultError::QueryTimedout => Error::Query("Query timed out".to_string()),
-			DbResultError::QueryCancelled => Error::Query("Query cancelled".to_string()),
+			DbResultError::QueryCancelled => Error::Query(
+				"The query was not executed due to a cancelled transaction".to_string(),
+			),
 		}
 	}
 }

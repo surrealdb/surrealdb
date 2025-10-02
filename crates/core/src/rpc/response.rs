@@ -238,7 +238,9 @@ impl Revisioned for DbResultError {
 			Self::InvalidAuth(msg) => msg.clone(),
 			Self::QueryNotExecuted(msg) => msg.clone(),
 			Self::QueryTimedout => "Query timed out".to_string(),
-			Self::QueryCancelled => "Query cancelled".to_string(),
+			Self::QueryCancelled => {
+				"The query was not executed due to a cancelled transaction".to_string()
+			}
 		};
 		DbResultSerde {
 			code: self.code(),
@@ -272,7 +274,9 @@ impl Display for DbResultError {
 			Self::InvalidAuth(msg) => write!(f, "{}", msg),
 			Self::QueryNotExecuted(msg) => write!(f, "{}", msg),
 			Self::QueryTimedout => write!(f, "Query timed out"),
-			Self::QueryCancelled => write!(f, "Query cancelled"),
+			Self::QueryCancelled => {
+				write!(f, "The query was not executed due to a cancelled transaction")
+			}
 		}
 	}
 }

@@ -113,7 +113,7 @@ mod ws {
 	use surrealdb::engine::remote::ws::{Client, Ws};
 	use surrealdb::opt::auth::Root;
 	use surrealdb_types::SurrealValue;
-use tokio::sync::{Semaphore, SemaphorePermit};
+	use tokio::sync::{Semaphore, SemaphorePermit};
 
 	use super::{ROOT_PASS, ROOT_USER};
 	use crate::api_integration::ws;
@@ -198,7 +198,6 @@ use tokio::sync::{Semaphore, SemaphorePermit};
 	/// and tests various message sizes including edge cases.
 	#[test_log::test(tokio::test)]
 	async fn check_max_size() {
-		use surrealdb_types::SurrealValue;
 		use surrealdb::opt::{Config, WebsocketConfig};
 		use ulid::Ulid;
 

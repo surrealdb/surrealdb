@@ -445,13 +445,13 @@ impl TestReport {
 			},
 			TestValueExpectation::Matcher(m) => match m.matcher_value_type {
 				MatchValueType::Both => {
-					writeln!(f, "- A result to match matching expression: {}", m.value)
+					writeln!(f, "- A result to match matching expression: {}", m.value_str)
 				}
 				MatchValueType::Error => {
-					writeln!(f, "- A error to match matching expression: {}", m.value)
+					writeln!(f, "- A error to match matching expression: {}", m.value_str)
 				}
 				MatchValueType::Value => {
-					writeln!(f, "- A value to match matching expression: {}", m.value)
+					writeln!(f, "- A value to match matching expression: {}", m.value_str)
 				}
 			},
 		}

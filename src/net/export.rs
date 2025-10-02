@@ -8,6 +8,7 @@ use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use http::StatusCode;
+use surrealdb::types::SurrealValue;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_core::iam::Action::View;
@@ -61,7 +62,7 @@ async fn post_handler(
 			return Err(ResponseError(anyhow::Error::msg("unsupported body format")));
 		}
 	};
-	let cfg = export::Config::from_value(&val).map_err(ResponseError)?;
+	let cfg = export::Config::from_value(val).map_err(ResponseError)?;
 	handle_inner(state, session, cfg).await
 }
 

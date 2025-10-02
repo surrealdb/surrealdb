@@ -4,8 +4,8 @@ use anyhow::Result;
 use async_channel::Sender;
 use chrono::TimeZone;
 use chrono::prelude::Utc;
+use surrealdb_types::SurrealValue;
 use surrealdb_types::sql::ToSql;
-use surrealdb_types::{SurrealValue, Value};
 
 use super::Transaction;
 use crate::catalog::providers::{
@@ -50,51 +50,6 @@ impl Default for Config {
 	}
 }
 
-impl Config {
-	pub fn from_value(value: &Value) -> Result<Self, anyhow::Error> {
-		match value {
-			Value::Object(obj) => {
-				let mut config = Config::default();
-
-				macro_rules! bool_prop {
-					($prop:ident) => {{
-						match obj.get(stringify!($prop)) {
-							Some(Value::Bool(v)) => {
-								config.$prop = v.to_owned();
-							}
-							Some(v) => {
-								return Err(anyhow::Error::new(Error::InvalidExportConfig(
-									v.to_owned(),
-									"a bool".into(),
-								)));
-							}
-							_ => (),
-						}
-					}};
-				}
-
-				bool_prop!(users);
-				bool_prop!(accesses);
-				bool_prop!(params);
-				bool_prop!(functions);
-				bool_prop!(analyzers);
-				bool_prop!(versions);
-				bool_prop!(records);
-
-				if let Some(v) = obj.get("tables") {
-					config.tables = v.try_into()?;
-				}
-
-				Ok(config)
-			}
-			v => Err(anyhow::Error::new(Error::InvalidExportConfig(
-				v.to_owned(),
-				"an object".into(),
-			))),
-		}
-	}
-}
-
 #[derive(Clone, Debug, Default, SurrealValue)]
 #[surreal(untagged)]
 pub enum TableConfig {
@@ -124,38 +79,6 @@ impl From<Vec<String>> for TableConfig {
 impl From<Vec<&str>> for TableConfig {
 	fn from(value: Vec<&str>) -> Self {
 		TableConfig::Some(value.into_iter().map(ToOwned::to_owned).collect())
-	}
-}
-
-impl TryFrom<&Value> for TableConfig {
-	type Error = anyhow::Error;
-	fn try_from(value: &Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Bool(b) => {
-				if *b {
-					Ok(TableConfig::All)
-				} else {
-					Ok(TableConfig::None)
-				}
-			}
-			Value::None | Value::Null => Ok(TableConfig::None),
-			Value::Array(v) => v
-				.iter()
-				.cloned()
-				.map(|v| match v {
-					Value::String(str) => Ok(str),
-					v => Err(anyhow::Error::new(Error::InvalidExportConfig(
-						v.clone(),
-						"a string".into(),
-					))),
-				})
-				.collect::<Result<Vec<String>>>()
-				.map(TableConfig::Some),
-			v => Err(anyhow::Error::new(Error::InvalidExportConfig(
-				v.to_owned(),
-				"a bool, none, null or array<string>".into(),
-			))),
-		}
 	}
 }
 
