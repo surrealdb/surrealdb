@@ -486,7 +486,7 @@ impl Vector {
 		}
 	}
 
-	pub fn try_from_vector(t: VectorType, v: &[Number]) -> Result<Self> {
+	pub(super) fn try_from_vector(t: VectorType, v: &[Number]) -> Result<Self> {
 		let res = match t {
 			VectorType::F64 => {
 				let mut vec = Vec::with_capacity(v.len());

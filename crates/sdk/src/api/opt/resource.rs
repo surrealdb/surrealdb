@@ -1,48 +1,16 @@
+use std::fmt::Write;
 use std::ops::{self, Bound};
+
+use surrealdb_types::{
+	Array, Kind, Object, RecordId, RecordIdKey, RecordIdKeyRange, SurrealValue, Value,
+};
 
 use crate::api::Result;
 use crate::api::err::Error;
-use crate::core::val;
-use crate::{Object, RecordId, RecordIdKey, Value};
 
-/// A wrapper type to assert that you ment to use a string as a table name.
-///
-/// To prevent some possible errors, by defauit [`IntoResource`] does not allow
-/// `:` in table names as this might be an indication that the user might have
-/// intended to use a record id instead. If you wrap your table name string in
-/// this tupe the [`IntoResource`] trait will accept any table names.
-#[derive(Debug)]
-pub struct Table<T>(pub T);
-
-impl<T> Table<T>
-where
-	T: Into<String>,
-{
-	#[allow(dead_code)]
-	pub(crate) fn into_core(self) -> val::Table {
-		val::Table::new(self.0.into())
-	}
-
-	/// Add a range of keys to the table.
-	pub fn with_range<R>(self, range: R) -> QueryRange
-	where
-		KeyRange: From<R>,
-	{
-		let range = KeyRange::from(range);
-		let res = val::RecordIdKeyRange {
-			start: range.start.map(RecordIdKey::into_inner),
-			end: range.end.map(RecordIdKey::into_inner),
-		};
-		let res = val::RecordId::new(self.0.into(), Box::new(res));
-		QueryRange(res)
-	}
-}
-
-transparent_wrapper!(
-	/// A table range.
-	#[derive(Clone, PartialEq)]
-	pub struct QueryRange(val::RecordId)
-);
+/// A table range.
+#[derive(Debug, Clone, PartialEq)]
+pub struct QueryRange(pub RecordId);
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Direction {
@@ -74,9 +42,11 @@ pub enum Resource {
 
 impl Resource {
 	/// Add a range to the resource, this only works if the resource is a table.
-	pub fn with_range(self, range: KeyRange) -> Result<Self> {
+	pub fn with_range(self, range: RecordIdKeyRange) -> Result<Self> {
 		match self {
-			Resource::Table(table) => Ok(Resource::Range(Table(table).with_range(range))),
+			Resource::Table(table) => {
+				Ok(Resource::Range(QueryRange(RecordId::new(table, Box::new(range)))))
+			}
 			Resource::RecordId(_) => Err(Error::RangeOnRecordId.into()),
 			Resource::Object(_) => Err(Error::RangeOnObject.into()),
 			Resource::Array(_) => Err(Error::RangeOnArray.into()),
@@ -85,23 +55,81 @@ impl Resource {
 		}
 	}
 
-	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-	pub(crate) fn into_core_value(self) -> val::Value {
-		match self {
-			Resource::Table(x) => Table(x).into_core().into(),
-			Resource::RecordId(x) => x.into_inner().into(),
-			Resource::Object(x) => x.into_inner().into(),
-			Resource::Array(x) => Value::array_to_core(x).into(),
-			Resource::Range(x) => x.into_inner().into(),
-			Resource::Unspecified => val::Value::None,
-		}
-	}
 	pub fn is_single_recordid(&self) -> bool {
 		match self {
-			Resource::RecordId(rid) => {
-				!matches!(rid.into_inner_ref().key, val::RecordIdKey::Range(_))
-			}
+			Resource::RecordId(rid) => !matches!(rid.key, RecordIdKey::Range(_)),
 			_ => false,
+		}
+	}
+}
+
+impl SurrealValue for Resource {
+	fn kind_of() -> Kind {
+		Kind::Either(vec![
+			Kind::String,
+			Kind::Record(vec![]),
+			Kind::Object,
+			Kind::Array(Box::new(Kind::Any), None),
+			Kind::Range,
+			Kind::None,
+		])
+	}
+
+	fn is_value(value: &Value) -> bool {
+		matches!(
+			value,
+			Value::String(_)
+				| Value::RecordId(_)
+				| Value::Object(_)
+				| Value::Array(_)
+				| Value::Range(_)
+				| Value::None
+		)
+	}
+
+	fn into_value(self) -> Value {
+		match self {
+			Resource::Table(x) => Value::String(x),
+			Resource::RecordId(x) => Value::RecordId(x),
+			Resource::Object(x) => Value::Object(x),
+			Resource::Array(x) => Value::Array(Array::from(x)),
+			Resource::Range(QueryRange(record_id)) => Value::RecordId(record_id),
+			Resource::Unspecified => Value::None,
+		}
+	}
+
+	fn from_value(value: Value) -> anyhow::Result<Self> {
+		Err(anyhow::anyhow!("Invalid resource: {value}"))
+	}
+}
+
+impl surrealdb_types::sql::ToSql for Resource {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		match self {
+			Resource::Table(x) => {
+				f.write_char('`')?;
+				f.write_str(x)?;
+				f.write_char('`')
+			}
+			Resource::RecordId(x) => x.fmt_sql(f),
+			Resource::Object(x) => x.fmt_sql(f),
+			Resource::Array(x) => Array::from_values(x.clone()).fmt_sql(f),
+			Resource::Range(QueryRange(x)) => {
+				// For ranges, we need to format as table:start..table:end
+				// not table:range
+				if let RecordIdKey::Range(ref range) = x.key {
+					f.write_char('`')?;
+					f.write_str(&x.table)?;
+					f.write_char('`')?;
+					f.write_char(':')?;
+					range.fmt_sql(f)?;
+				} else {
+					// Fallback to normal RecordId formatting
+					x.fmt_sql(f)?;
+				}
+				Ok(())
+			}
+			Resource::Unspecified => Ok(()),
 		}
 	}
 }
@@ -172,7 +200,7 @@ where
 	I: Into<RecordIdKey>,
 {
 	fn from((table, id): (T, I)) -> Self {
-		let record_id = RecordId::from_table_key(table, id);
+		let record_id = RecordId::new(table, id.into());
 		Self::RecordId(record_id)
 	}
 }
@@ -368,7 +396,8 @@ where
 	I: Into<RecordIdKey>,
 {
 	fn into_resource(self) -> Result<Resource> {
-		Ok(self.into())
+		let record_id = RecordId::new(self.0, self.1);
+		Ok(Resource::RecordId(record_id))
 	}
 }
 
@@ -383,17 +412,6 @@ impl<R> IntoResource<Vec<R>> for QueryRange {}
 impl<R> into_resource::Sealed<Vec<R>> for QueryRange {
 	fn into_resource(self) -> Result<Resource> {
 		Ok(self.into())
-	}
-}
-
-impl<T, R> IntoResource<Vec<R>> for Table<T> where T: Into<String> {}
-impl<T, R> into_resource::Sealed<Vec<R>> for Table<T>
-where
-	T: Into<String>,
-{
-	fn into_resource(self) -> Result<Resource> {
-		let t = self.0.into();
-		Ok(t.into())
 	}
 }
 
@@ -474,16 +492,16 @@ where
 	}
 }
 
-impl<T, R> CreateResource<Option<R>> for Table<T> where T: Into<String> {}
-impl<T, R> create_resource::Sealed<Option<R>> for Table<T>
-where
-	T: Into<String>,
-{
-	fn into_resource(self) -> Result<Resource> {
-		let t = self.0.into();
-		Ok(t.into())
-	}
-}
+// impl<T, R> CreateResource<Option<R>> for Table<T> where T: Into<String> {}
+// impl<T, R> create_resource::Sealed<Option<R>> for Table<T>
+// where
+// 	T: Into<String>,
+// {
+// 	fn into_resource(self) -> Result<Resource> {
+// 		let t = self.0.into();
+// 		Ok(t.into())
+// 	}
+// }
 
 impl<R> CreateResource<Option<R>> for &str {}
 impl<R> create_resource::Sealed<Option<R>> for &str {

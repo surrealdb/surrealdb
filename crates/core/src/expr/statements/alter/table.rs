@@ -18,13 +18,13 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct AlterTableStatement {
+pub(crate) struct AlterTableStatement {
 	pub name: String,
 	pub if_exists: bool,
-	pub schemafull: AlterKind<()>,
+	pub(crate) schemafull: AlterKind<()>,
 	pub permissions: Option<Permissions>,
-	pub changefeed: AlterKind<ChangeFeed>,
-	pub comment: AlterKind<String>,
+	pub(crate) changefeed: AlterKind<ChangeFeed>,
+	pub(crate) comment: AlterKind<String>,
 	pub kind: Option<TableType>,
 }
 

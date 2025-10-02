@@ -1,5 +1,5 @@
 use crate::syn;
-use crate::val::{Object, Value};
+use crate::types::PublicValue;
 
 #[test]
 fn object_with_negative() {
@@ -27,7 +27,7 @@ fn not_record_id() {
 		parser.parse_json(stk).await
 	})
 	.unwrap();
-	assert_eq!(res, Value::String("foo:bar-baz".to_owned()))
+	assert_eq!(res, PublicValue::String("foo:bar-baz".to_owned()))
 }
 
 #[test]
@@ -38,7 +38,7 @@ fn not_a_record_id_in_object() {
 		})
 		.unwrap();
 
-	let object = res.coerce_to::<Object>().unwrap();
+	let object = res.into_object().unwrap();
 	let data = object.get("data").unwrap();
-	assert_eq!(*data, Value::String("focus:outline-none".to_owned()))
+	assert_eq!(*data, PublicValue::String("focus:outline-none".to_owned()))
 }

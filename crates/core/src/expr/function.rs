@@ -16,7 +16,7 @@ use crate::fnc;
 use crate::iam::Action;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Function {
+pub(crate) enum Function {
 	Normal(String),
 	Custom(String),
 	Script(Script),
@@ -24,17 +24,8 @@ pub enum Function {
 }
 
 impl Function {
-	/// Get function name if applicable
-	pub fn name(&self) -> Option<&str> {
-		match self {
-			Self::Normal(n) => Some(n.as_str()),
-			Self::Custom(n) => Some(n.as_str()),
-			_ => None,
-		}
-	}
-
 	/// Convert function call to a field name
-	pub fn to_idiom(&self) -> Idiom {
+	pub(crate) fn to_idiom(&self) -> Idiom {
 		match self {
 			// Safety: "function" does not contain null bytes"
 			Self::Script(_) => Idiom::field("function".to_owned()),
@@ -214,7 +205,7 @@ impl Function {
 ///TODO(3.0): Remove after proper first class function support?
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct FunctionCall {
+pub(crate) struct FunctionCall {
 	pub receiver: Function,
 	pub arguments: Vec<Expr>,
 }

@@ -6,7 +6,7 @@ use crate::sql::{Expr, Idiom, Lookup};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Part {
+pub(crate) enum Part {
 	All,
 	Flatten,
 	Last,
@@ -142,32 +142,6 @@ pub enum DestructurePart {
 	Field(String),
 	Aliased(String, Idiom),
 	Destructure(String, Vec<DestructurePart>),
-}
-
-impl DestructurePart {
-	pub fn field(&self) -> &str {
-		match self {
-			DestructurePart::All(v) => v,
-			DestructurePart::Field(v) => v,
-			DestructurePart::Aliased(v, _) => v,
-			DestructurePart::Destructure(v, _) => v,
-		}
-	}
-
-	pub fn path(&self) -> Vec<Part> {
-		match self {
-			DestructurePart::All(v) => vec![Part::Field(v.clone()), Part::All],
-			DestructurePart::Field(v) => vec![Part::Field(v.clone())],
-			DestructurePart::Aliased(_, v) => v.0.clone(),
-			DestructurePart::Destructure(f, d) => {
-				vec![Part::Field(f.clone()), Part::Destructure(d.clone())]
-			}
-		}
-	}
-
-	pub fn idiom(&self) -> Idiom {
-		Idiom(self.path())
-	}
 }
 
 impl fmt::Display for DestructurePart {

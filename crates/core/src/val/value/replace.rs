@@ -23,11 +23,17 @@ mod tests {
 
 	use crate::syn;
 
+	macro_rules! parse_val {
+		($input:expr) => {
+			crate::val::convert_public_value_to_internal(syn::value($input).unwrap())
+		};
+	}
+
 	#[tokio::test]
 	async fn replace() {
-		let mut val = syn::value("{ test: { other: null, something: 123 } }").unwrap();
-		let res = syn::value("{ other: true }").unwrap();
-		let obj = syn::value("{ other: true }").unwrap();
+		let mut val = parse_val!("{ test: { other: null, something: 123 } }");
+		let res = parse_val!("{ other: true }");
+		let obj = parse_val!("{ other: true }");
 		val.replace(obj).unwrap();
 		assert_eq!(res, val);
 	}

@@ -229,7 +229,7 @@ impl Parser<'_> {
 
 	/// Parse a idiom which can only start with a graph or an identifier.
 	/// Other expressions are not allowed as start of this idiom
-	pub async fn parse_plain_idiom(&mut self, stk: &mut Stk) -> ParseResult<Idiom> {
+	pub(crate) async fn parse_plain_idiom(&mut self, stk: &mut Stk) -> ParseResult<Idiom> {
 		let start = match self.peek_kind() {
 			t!("->") => {
 				self.pop_peek();

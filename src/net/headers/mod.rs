@@ -4,10 +4,10 @@ use axum_extra::typed_header::{TypedHeaderRejection, TypedHeaderRejectionReason}
 use http::HeaderValue;
 use http::header::SERVER;
 use surrealdb::headers::VERSION;
+use surrealdb_core::cnf::SERVER_NAME;
 use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::cnf::{PKG_NAME, PKG_VERSION};
-use crate::core::cnf::SERVER_NAME;
 use crate::net::error::Error;
 
 mod accept;

@@ -6,7 +6,11 @@ use rust_decimal::Decimal;
 
 use crate::fmt::{EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::sql::{Closure, Expr, RecordIdLit};
-use crate::val::{Bytes, Datetime, Duration, File, Geometry, Regex, Uuid};
+use crate::types::{
+	PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicGeometry, PublicRegex,
+	PublicUuid,
+};
+use crate::val::Geometry;
 
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -20,20 +24,20 @@ pub enum Literal {
 	Integer(i64),
 	//TODO: Possibly remove wrapper.
 	Decimal(Decimal),
-	Duration(Duration),
+	Duration(PublicDuration),
 
 	String(String),
 	RecordId(RecordIdLit),
-	Datetime(Datetime),
-	Uuid(Uuid),
-	Regex(Regex),
+	Datetime(PublicDatetime),
+	Uuid(PublicUuid),
+	Regex(PublicRegex),
 
 	//TODO: Possibly remove wrapper.
 	Array(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
-	Geometry(Geometry),
-	File(File),
-	Bytes(Bytes),
+	Geometry(PublicGeometry),
+	File(PublicFile),
+	Bytes(PublicBytes),
 	Closure(Box<Closure>),
 }
 
@@ -144,21 +148,21 @@ impl From<Literal> for crate::expr::Literal {
 			Literal::Float(x) => crate::expr::Literal::Float(x),
 			Literal::Integer(x) => crate::expr::Literal::Integer(x),
 			Literal::Decimal(decimal) => crate::expr::Literal::Decimal(decimal),
-			Literal::Duration(duration) => crate::expr::Literal::Duration(duration),
+			Literal::Duration(duration) => crate::expr::Literal::Duration(duration.into()),
 			Literal::String(strand) => crate::expr::Literal::String(strand),
 			Literal::RecordId(record_id_lit) => {
 				crate::expr::Literal::RecordId(record_id_lit.into())
 			}
-			Literal::Datetime(datetime) => crate::expr::Literal::Datetime(datetime),
-			Literal::Uuid(uuid) => crate::expr::Literal::Uuid(uuid),
-			Literal::Regex(regex) => crate::expr::Literal::Regex(regex),
+			Literal::Datetime(datetime) => crate::expr::Literal::Datetime(datetime.into()),
+			Literal::Uuid(uuid) => crate::expr::Literal::Uuid(uuid.into()),
+			Literal::Regex(regex) => crate::expr::Literal::Regex(regex.into()),
 			Literal::Array(exprs) => {
 				crate::expr::Literal::Array(exprs.into_iter().map(From::from).collect())
 			}
 			Literal::Object(items) => convert_geometry(items),
-			Literal::Geometry(geometry) => crate::expr::Literal::Geometry(geometry),
-			Literal::File(file) => crate::expr::Literal::File(file),
-			Literal::Bytes(bytes) => crate::expr::Literal::Bytes(bytes),
+			Literal::Geometry(geometry) => crate::expr::Literal::Geometry(geometry.into()),
+			Literal::File(file) => crate::expr::Literal::File(file.into()),
+			Literal::Bytes(bytes) => crate::expr::Literal::Bytes(bytes.into()),
 			Literal::Closure(closure) => crate::expr::Literal::Closure(Box::new((*closure).into())),
 		}
 	}
@@ -174,23 +178,23 @@ impl From<crate::expr::Literal> for Literal {
 			crate::expr::Literal::Float(x) => Literal::Float(x),
 			crate::expr::Literal::Integer(x) => Literal::Integer(x),
 			crate::expr::Literal::Decimal(decimal) => Literal::Decimal(decimal),
-			crate::expr::Literal::Duration(duration) => Literal::Duration(duration),
+			crate::expr::Literal::Duration(duration) => Literal::Duration(duration.into()),
 			crate::expr::Literal::String(strand) => Literal::String(strand),
 			crate::expr::Literal::RecordId(record_id_lit) => {
 				Literal::RecordId(record_id_lit.into())
 			}
-			crate::expr::Literal::Datetime(datetime) => Literal::Datetime(datetime),
-			crate::expr::Literal::Uuid(uuid) => Literal::Uuid(uuid),
-			crate::expr::Literal::Regex(regex) => Literal::Regex(regex),
+			crate::expr::Literal::Datetime(datetime) => Literal::Datetime(datetime.into()),
+			crate::expr::Literal::Uuid(uuid) => Literal::Uuid(uuid.into()),
+			crate::expr::Literal::Regex(regex) => Literal::Regex(regex.into()),
 			crate::expr::Literal::Array(exprs) => {
 				Literal::Array(exprs.into_iter().map(From::from).collect())
 			}
 			crate::expr::Literal::Object(items) => {
 				Literal::Object(items.into_iter().map(From::from).collect())
 			}
-			crate::expr::Literal::Geometry(geometry) => Literal::Geometry(geometry),
-			crate::expr::Literal::File(file) => Literal::File(file),
-			crate::expr::Literal::Bytes(bytes) => Literal::Bytes(bytes),
+			crate::expr::Literal::Geometry(geometry) => Literal::Geometry(geometry.into()),
+			crate::expr::Literal::File(file) => Literal::File(file.into()),
+			crate::expr::Literal::Bytes(bytes) => Literal::Bytes(bytes.into()),
 			crate::expr::Literal::Closure(closure) => Literal::Closure(Box::new((*closure).into())),
 		}
 	}
@@ -356,7 +360,7 @@ fn collect_array<R, F: Fn(&Expr) -> Option<R>>(expr: &Expr, f: F) -> Option<Vec<
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct ObjectEntry {
+pub(crate) struct ObjectEntry {
 	pub key: String,
 	pub value: Expr,
 }

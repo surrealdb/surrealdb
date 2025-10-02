@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[allow(unused_imports)]
 use anyhow::bail;
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
@@ -43,14 +43,16 @@ use crate::dbs::capabilities::NetTarget;
 use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
+use crate::dbs::executor::convert_value_to_public_value;
 use crate::dbs::node::Timestamp;
-use crate::dbs::{Capabilities, Executor, Notification, Options, Response, Session, Variables};
+use crate::dbs::{Capabilities, Executor, Options, QueryResult, QueryResultBuilder, Session};
 use crate::err::Error;
-use crate::expr::statements::DefineUserStatement;
-use crate::expr::{Base, Expr, FlowResultExt as _, LogicalPlan};
+use crate::expr::model::get_model_path;
+use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
+use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevelExpr};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
-use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
+use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
@@ -73,6 +75,7 @@ use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::{LockType, TransactionType};
 use crate::sql::Ast;
 use crate::syn::parser::{ParserSettings, StatementStream};
+use crate::types::{PublicNotification, PublicValue, PublicVariables};
 use crate::val::Value;
 use crate::{cf, syn};
 
@@ -105,7 +108,7 @@ pub struct Datastore {
 	/// The security and feature capabilities for this datastore.
 	capabilities: Arc<Capabilities>,
 	// Whether this datastore enables live query notifications to subscribers.
-	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
+	notification_channel: Option<(Sender<PublicNotification>, Receiver<PublicNotification>)>,
 	// The index store cache
 	index_stores: IndexStores,
 	// The cross transaction cache
@@ -1092,7 +1095,7 @@ impl Datastore {
 
 	/// Performs a database import from SQL
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn startup(&self, sql: &str, sess: &Session) -> Result<Vec<Response>> {
+	pub async fn startup(&self, sql: &str, sess: &Session) -> Result<Vec<QueryResult>> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore startup import script");
 		// Check if the session has expired
@@ -1173,8 +1176,8 @@ impl Datastore {
 		&self,
 		txt: &str,
 		sess: &Session,
-		vars: Option<Variables>,
-	) -> Result<Vec<Response>> {
+		vars: Option<PublicVariables>,
+	) -> Result<Vec<QueryResult>> {
 		// Parse the SQL query text
 		let ast = syn::parse_with_capabilities(txt, &self.capabilities)?;
 		// Process the AST
@@ -1185,9 +1188,9 @@ impl Datastore {
 	pub async fn execute_import<S>(
 		&self,
 		sess: &Session,
-		vars: Option<Variables>,
+		vars: Option<PublicVariables>,
 		query: S,
-	) -> Result<Vec<Response>>
+	) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<Bytes>>,
 	{
@@ -1213,7 +1216,7 @@ impl Datastore {
 		ctx.attach_session(sess)?;
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars)?;
+			ctx.attach_variables(vars.into())?;
 		}
 		// Process all statements
 
@@ -1298,18 +1301,18 @@ impl Datastore {
 		&self,
 		ast: Ast,
 		sess: &Session,
-		vars: Option<Variables>,
-	) -> Result<Vec<Response>> {
+		vars: Option<PublicVariables>,
+	) -> Result<Vec<QueryResult>> {
 		//TODO: Insert planner here.
 		self.process_plan(ast.into(), sess, vars).await
 	}
 
-	pub async fn process_plan(
+	pub(crate) async fn process_plan(
 		&self,
 		plan: LogicalPlan,
 		sess: &Session,
-		vars: Option<Variables>,
-	) -> Result<Vec<Response>> {
+		vars: Option<PublicVariables>,
+	) -> Result<Vec<QueryResult>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Check if anonymous actors can execute queries when auth is enabled
@@ -1331,7 +1334,7 @@ impl Datastore {
 		ctx.attach_session(sess)?;
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars)?;
+			ctx.attach_variables(vars.into())?;
 		}
 
 		// Process all statements
@@ -1344,7 +1347,7 @@ impl Datastore {
 		&self,
 		val: Expr,
 		sess: &Session,
-		vars: Option<Variables>,
+		vars: Option<PublicVariables>,
 	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
@@ -1378,7 +1381,7 @@ impl Datastore {
 		ctx.attach_session(sess)?;
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars)?;
+			ctx.attach_variables(vars.into())?;
 		}
 		let txn_type = if val.read_only() {
 			TransactionType::Read
@@ -1416,8 +1419,8 @@ impl Datastore {
 		&self,
 		val: &Expr,
 		sess: &Session,
-		vars: Option<Variables>,
-	) -> Result<Value> {
+		vars: Option<PublicVariables>,
+	) -> Result<PublicValue> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Create a new memory stack
@@ -1436,12 +1439,7 @@ impl Datastore {
 		if let Some(channel) = &self.notification_channel {
 			ctx.add_notifications(Some(&channel.0));
 		}
-		// Start an execution context
-		ctx.attach_session(sess)?;
-		// Store the query variables
-		if let Some(vars) = vars {
-			ctx.attach_variables(vars)?;
-		}
+
 		let txn_type = if val.read_only() {
 			TransactionType::Read
 		} else {
@@ -1451,6 +1449,14 @@ impl Datastore {
 		let txn = self.transaction(txn_type, Optimistic).await?.enclose();
 		// Store the transaction
 		ctx.set_transaction(txn.clone());
+
+		// Start an execution context
+		ctx.attach_session(sess)?;
+		// Store the query variables
+		if let Some(vars) = vars {
+			ctx.attach_public_variables(vars)?;
+		}
+
 		// Freeze the context
 		let ctx = ctx.freeze();
 		// Compute the value
@@ -1465,7 +1471,7 @@ impl Datastore {
 			txn.cancel().await?;
 		};
 		// Return result
-		res
+		convert_value_to_public_value(res?)
 	}
 
 	/// Subscribe to live notifications
@@ -1488,13 +1494,13 @@ impl Datastore {
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub fn notifications(&self) -> Option<Receiver<Notification>> {
+	pub fn notifications(&self) -> Option<Receiver<PublicNotification>> {
 		self.notification_channel.as_ref().map(|v| v.1.clone())
 	}
 
 	/// Performs a database import from SQL
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>> {
+	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<QueryResult>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Execute the SQL import
@@ -1503,7 +1509,7 @@ impl Datastore {
 
 	/// Performs a database import from SQL
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn import_stream<S>(&self, sess: &Session, stream: S) -> Result<Vec<Response>>
+	pub async fn import_stream<S>(&self, sess: &Session, stream: S) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<Bytes>>,
 	{
@@ -1612,7 +1618,8 @@ impl Datastore {
 		session: &mut Session,
 		namespace: Option<String>,
 		database: Option<String>,
-	) -> Result<()> {
+	) -> Result<QueryResult> {
+		let query_result = QueryResultBuilder::started_now();
 		match (namespace, database) {
 			(Some(ns), Some(db)) => {
 				let tx = self.transaction(TransactionType::Write, LockType::Optimistic).await?;
@@ -1642,7 +1649,7 @@ impl Datastore {
 			}
 		}
 
-		Ok(())
+		Ok(query_result.finish())
 	}
 
 	/// Get a db model by name.
@@ -1706,7 +1713,7 @@ impl Datastore {
 		let res = match ApiDefinition::find_definition(apis.as_ref(), segments, method) {
 			Some((api, params)) => {
 				let invocation = ApiInvocation {
-					params,
+					params: params.try_into()?,
 					method,
 					headers,
 					query,
@@ -1737,12 +1744,52 @@ impl Datastore {
 
 		res
 	}
+
+	pub async fn put_ml_model(
+		&self,
+		session: &Session,
+		name: &str,
+		version: &str,
+		description: &str,
+		data: Vec<u8>,
+	) -> Result<()> {
+		let ns = session.ns.as_ref().context("Namespace is required")?;
+		let db = session.db.as_ref().context("Database is required")?;
+
+		self.check(session, Action::Edit, ResourceKind::Model.on_db(ns, db))?;
+
+		// Calculate the hash of the model file
+		let hash = crate::obs::hash(&data);
+		// Calculate the path of the model file
+		let path = get_model_path(ns, db, name, version, &hash);
+		// Insert the file data in to the store
+		crate::obs::put(&path, data).await?;
+		// Insert the model in to the database
+		let model = DefineModelStatement {
+			name: name.to_string(),
+			version: version.to_string(),
+			comment: Some(Expr::Literal(Literal::String(description.to_string()))),
+			hash,
+			..Default::default()
+		};
+
+		let q = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Model(
+				model,
+			))))],
+		};
+
+		self.process_plan(q, session, None).await?;
+
+		Ok(())
+	}
 }
 
 #[cfg(test)]
 mod test {
 	use super::*;
 	use crate::iam::verify::verify_root_creds;
+	use crate::types::{PublicValue, PublicVariables};
 
 	#[tokio::test]
 	async fn test_setup_superuser() {
@@ -1893,7 +1940,7 @@ mod test {
 		res.remove(0).result.unwrap();
 		res.remove(0).result.unwrap();
 		let lqid = res.remove(0).result?;
-		assert!(matches!(lqid, Value::Uuid(_)));
+		assert!(matches!(lqid, PublicValue::Uuid(_)));
 		// Obtain the uuids after definitions
 		let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 		let after_define = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
@@ -1916,7 +1963,7 @@ mod test {
 		KILL $lqid;
 	"
 		.to_owned();
-		let vars = Variables::from(map! { "lqid".to_string() => lqid });
+		let vars = PublicVariables::from(map! { "lqid".to_string() => lqid });
 		let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
 		assert_eq!(res.len(), 5);
 		res.remove(0).result.unwrap();

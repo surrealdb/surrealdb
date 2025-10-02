@@ -4,7 +4,7 @@ use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Limit(pub Expr);
+pub(crate) struct Limit(pub(crate) Expr);
 
 impl fmt::Display for Limit {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

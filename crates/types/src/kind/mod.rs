@@ -47,8 +47,6 @@ pub enum Kind {
 	/// A record type.
 	Record(Vec<String>),
 	/// A geometry type.
-	/// The vec contains the geometry types as strings, for example `"point"` or
-	/// `"polygon"`. TODO(3.0): Change to use an enum
 	Geometry(Vec<GeometryKind>),
 	/// An either type.
 	/// Can be any of the kinds in the vec.

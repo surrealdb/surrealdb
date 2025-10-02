@@ -3,7 +3,7 @@ use std::fmt;
 use crate::fmt::EscapeIdent;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct UseStatement {
+pub(crate) struct UseStatement {
 	pub ns: Option<String>,
 	pub db: Option<String>,
 }

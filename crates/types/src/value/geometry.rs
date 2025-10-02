@@ -1,10 +1,12 @@
 use std::cmp::Ordering;
+use std::fmt::{self, Display, Formatter};
 use std::hash;
 use std::iter::once;
 
 use geo::{
 	Coord, LineString, LinesIter, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon,
 };
+use revision::Revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::{GeometryKind, Object, SurrealValue, Value, array, object};
@@ -65,6 +67,106 @@ macro_rules! impl_geometry {
 					Self::$variant(v)
 				}
 			)+
+		}
+	}
+}
+
+impl Display for Geometry {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		match self {
+			Self::Point(v) => {
+				write!(f, "({}, {})", v.x(), v.y())
+			}
+			Self::Line(v) => {
+				write!(f, "{{ type: 'LineString', coordinates: [")?;
+				for (i, point) in v.points().enumerate() {
+					if i > 0 {
+						write!(f, ", ")?;
+					}
+					write!(f, "[{}, {}]", point.x(), point.y())?;
+				}
+				write!(f, "] }}")
+			}
+			Self::Polygon(v) => {
+				write!(f, "{{ type: 'Polygon', coordinates: [")?;
+				for (ring_idx, ring) in once(v.exterior()).chain(v.interiors()).enumerate() {
+					if ring_idx > 0 {
+						write!(f, ", ")?;
+					}
+					write!(f, "[")?;
+					for (i, point) in ring.points().enumerate() {
+						if i > 0 {
+							write!(f, ", ")?;
+						}
+						write!(f, "[{}, {}]", point.x(), point.y())?;
+					}
+					write!(f, "]")?;
+				}
+				write!(f, "] }}")
+			}
+			Self::MultiPoint(v) => {
+				write!(f, "{{ type: 'MultiPoint', coordinates: [")?;
+				for (i, point) in v.iter().enumerate() {
+					if i > 0 {
+						write!(f, ", ")?;
+					}
+					write!(f, "[{}, {}]", point.x(), point.y())?;
+				}
+				write!(f, "] }}")
+			}
+			Self::MultiLine(v) => {
+				write!(f, "{{ type: 'MultiLineString', coordinates: [")?;
+				for (line_idx, line) in v.iter().enumerate() {
+					if line_idx > 0 {
+						write!(f, ", ")?;
+					}
+					write!(f, "[")?;
+					for (i, point) in line.points().enumerate() {
+						if i > 0 {
+							write!(f, ", ")?;
+						}
+						write!(f, "[{}, {}]", point.x(), point.y())?;
+					}
+					write!(f, "]")?;
+				}
+				write!(f, "] }}")
+			}
+			Self::MultiPolygon(v) => {
+				write!(f, "{{ type: 'MultiPolygon', coordinates: [")?;
+				for (poly_idx, polygon) in v.iter().enumerate() {
+					if poly_idx > 0 {
+						write!(f, ", ")?;
+					}
+					write!(f, "[")?;
+					for (ring_idx, ring) in
+						once(polygon.exterior()).chain(polygon.interiors()).enumerate()
+					{
+						if ring_idx > 0 {
+							write!(f, ", ")?;
+						}
+						write!(f, "[")?;
+						for (i, point) in ring.points().enumerate() {
+							if i > 0 {
+								write!(f, ", ")?;
+							}
+							write!(f, "[{}, {}]", point.x(), point.y())?;
+						}
+						write!(f, "]")?;
+					}
+					write!(f, "]")?;
+				}
+				write!(f, "] }}")
+			}
+			Self::Collection(v) => {
+				write!(f, "{{ type: 'GeometryCollection', geometries: [")?;
+				for (i, geom) in v.iter().enumerate() {
+					if i > 0 {
+						write!(f, ", ")?;
+					}
+					write!(f, "{}", geom)?;
+				}
+				write!(f, "] }}")
+			}
 		}
 	}
 }
@@ -180,7 +282,7 @@ impl Geometry {
 	/// Convert this geometry into an object
 	pub fn as_object(&self) -> Object {
 		object! {
-			type: self.as_type().to_string(),
+			type: Value::String(self.as_type().to_string()),
 			coordinates: self.as_coordinates(),
 		}
 	}
@@ -481,5 +583,26 @@ impl hash::Hash for Geometry {
 				v.iter().for_each(|v| v.hash(state));
 			}
 		}
+	}
+}
+
+impl Revisioned for Geometry {
+	fn revision() -> u16 {
+		1
+	}
+
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
+		// Serialize as an object with type and coordinates
+		let obj = self.as_object();
+		obj.serialize_revisioned(writer)
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		let obj: Object = Revisioned::deserialize_revisioned(reader)?;
+		Self::try_from_object(&obj)
+			.ok_or_else(|| revision::Error::Conversion("invalid geometry object".to_string()))
 	}
 }

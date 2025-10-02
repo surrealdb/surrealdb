@@ -17,7 +17,7 @@ use crate::sql::{AssignOperator, Expr, Fields, Literal, Param, TopLevelExpr};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::unexpected;
 use crate::syn::token::{TokenKind, t};
-use crate::val::Duration;
+use crate::types::PublicDuration;
 
 mod alter;
 mod create;
@@ -244,7 +244,7 @@ impl Parser<'_> {
 				let grace = if self.eat(t!("FOR")) {
 					self.next_token_value()?
 				} else {
-					Duration::default()
+					PublicDuration::default()
 				};
 				Ok(AccessStatement::Purge(AccessStatementPurge {
 					ac,

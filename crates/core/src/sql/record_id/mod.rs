@@ -3,14 +3,14 @@ use std::fmt;
 use crate::fmt::EscapeRid;
 
 pub mod key;
-pub use key::{RecordIdKeyGen, RecordIdKeyLit};
+pub(crate) use key::{RecordIdKeyGen, RecordIdKeyLit};
 pub mod range;
 pub use range::RecordIdKeyRangeLit;
 
 /// A record id literal, needs to be evaluated to get the actual record id.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct RecordIdLit {
+pub(crate) struct RecordIdLit {
 	/// Table name
 	pub table: String,
 	pub key: RecordIdKeyLit,

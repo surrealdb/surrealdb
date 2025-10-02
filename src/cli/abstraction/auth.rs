@@ -26,47 +26,47 @@ pub enum Error {
 
 /// Construct a Credentials instance for the given auth level
 #[derive(Debug, Default)]
-pub struct CredentialsBuilder<'a> {
+pub struct CredentialsBuilder {
 	/// The auth username
-	pub username: Option<&'a str>,
+	pub username: Option<String>,
 	/// The auth password
-	pub password: Option<&'a str>,
+	pub password: Option<String>,
 	/// The auth namespace
-	pub namespace: Option<&'a str>,
+	pub namespace: Option<String>,
 	/// The auth database
-	pub database: Option<&'a str>,
+	pub database: Option<String>,
 }
 
-impl<'a> CredentialsBuilder<'a> {
+impl CredentialsBuilder {
 	// Builder methods
-	pub fn with_username(mut self, username: impl Into<Option<&'a str>>) -> Self {
+	pub fn with_username(mut self, username: impl Into<Option<String>>) -> Self {
 		self.username = username.into();
 		self
 	}
 
-	pub fn with_password(mut self, password: impl Into<Option<&'a str>>) -> Self {
+	pub fn with_password(mut self, password: impl Into<Option<String>>) -> Self {
 		self.password = password.into();
 		self
 	}
 
-	pub fn with_namespace(mut self, namespace: impl Into<Option<&'a str>>) -> Self {
+	pub fn with_namespace(mut self, namespace: impl Into<Option<String>>) -> Self {
 		self.namespace = namespace.into();
 		self
 	}
 
-	pub fn with_database(mut self, database: impl Into<Option<&'a str>>) -> Self {
+	pub fn with_database(mut self, database: impl Into<Option<String>>) -> Self {
 		self.database = database.into();
 		self
 	}
 
-	pub fn root(self) -> Result<Root<'a>, Error> {
+	pub fn root(self) -> Result<Root, Error> {
 		Ok(Root {
 			username: self.username.ok_or(Error::Username)?,
 			password: self.password.ok_or(Error::Password)?,
 		})
 	}
 
-	pub fn namespace(self) -> Result<Namespace<'a>, Error> {
+	pub fn namespace(self) -> Result<Namespace, Error> {
 		Ok(Namespace {
 			username: self.username.ok_or(Error::Username)?,
 			password: self.password.ok_or(Error::Password)?,
@@ -74,7 +74,7 @@ impl<'a> CredentialsBuilder<'a> {
 		})
 	}
 
-	pub fn database(self) -> Result<Database<'a>, Error> {
+	pub fn database(self) -> Result<Database, Error> {
 		Ok(Database {
 			username: self.username.ok_or(Error::Username)?,
 			password: self.password.ok_or(Error::Password)?,

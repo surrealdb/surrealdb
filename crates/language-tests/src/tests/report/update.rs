@@ -3,7 +3,7 @@ use std::fmt::Write;
 use std::ops::Range;
 
 use anyhow::Result;
-use surrealdb_core::val::Value as SurValue;
+use surrealdb_types::Value as SurValue;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};

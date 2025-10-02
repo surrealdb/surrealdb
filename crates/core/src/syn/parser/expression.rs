@@ -11,7 +11,7 @@ use crate::syn::lexer::compound::Numeric;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{self, Glued, Span, Token, TokenKind, t};
-use crate::val;
+use crate::types::PublicDuration;
 
 impl Parser<'_> {
 	/// Parse a generic expression without triggering the query depth and
@@ -19,7 +19,7 @@ impl Parser<'_> {
 	///
 	/// Meant to be used when parsing an expression the first time to avoid
 	/// having the depth limit be lowered unnecessarily.
-	pub async fn parse_expr_start(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+	pub(crate) async fn parse_expr_start(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		self.table_as_field = true;
 		self.pratt_parse_expr(stk, BindingPower::Base).await
 	}
@@ -203,7 +203,9 @@ impl Parser<'_> {
 						Numeric::Decimal(d) => Expr::Literal(Literal::Decimal(d)),
 						Numeric::Duration(d) => Expr::Prefix {
 							op: PrefixOperator::Positive,
-							expr: Box::new(Expr::Literal(Literal::Duration(val::Duration(d)))),
+							expr: Box::new(Expr::Literal(Literal::Duration(PublicDuration::from(
+								d,
+							)))),
 						},
 					};
 					if self.peek_continues_idiom() {
@@ -239,7 +241,9 @@ impl Parser<'_> {
 						Numeric::Decimal(d) => Expr::Literal(Literal::Decimal(d)),
 						Numeric::Duration(d) => Expr::Prefix {
 							op: PrefixOperator::Negate,
-							expr: Box::new(Expr::Literal(Literal::Duration(val::Duration(d)))),
+							expr: Box::new(Expr::Literal(Literal::Duration(PublicDuration::from(
+								d,
+							)))),
 						},
 					};
 					if self.peek_continues_idiom() {

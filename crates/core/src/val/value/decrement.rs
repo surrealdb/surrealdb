@@ -47,12 +47,18 @@ mod tests {
 	use crate::expr::idiom::Idiom;
 	use crate::syn;
 
+	macro_rules! parse_val {
+		($input:expr) => {
+			crate::val::convert_public_value_to_internal(syn::value($input).unwrap())
+		};
+	}
+
 	#[tokio::test]
 	async fn decrement_none() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("other").unwrap().into();
-		let mut val = syn::value("{ test: 100 }").unwrap();
-		let res = syn::value("{ test: 100, other: -10 }").unwrap();
+		let mut val = parse_val!("{ test: 100 }");
+		let res = parse_val!("{ test: 100, other: -10 }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
 			.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, Value::from(10)))
@@ -66,8 +72,8 @@ mod tests {
 	async fn decrement_number() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test").unwrap().into();
-		let mut val = syn::value("{ test: 100 }").unwrap();
-		let res = syn::value("{ test: 90 }").unwrap();
+		let mut val = parse_val!("{ test: 100 }");
+		let res = parse_val!("{ test: 90 }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
 			.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, Value::from(10)))
@@ -81,8 +87,8 @@ mod tests {
 	async fn decrement_array_number() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test[1]").unwrap().into();
-		let mut val = syn::value("{ test: [100, 200, 300] }").unwrap();
-		let res = syn::value("{ test: [100, 190, 300] }").unwrap();
+		let mut val = parse_val!("{ test: [100, 200, 300] }");
+		let res = parse_val!("{ test: [100, 190, 300] }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
 			.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, Value::from(10)))
@@ -96,8 +102,8 @@ mod tests {
 	async fn decrement_array_value() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test").unwrap().into();
-		let mut val = syn::value("{ test: [100, 200, 300] }").unwrap();
-		let res = syn::value("{ test: [100, 300] }").unwrap();
+		let mut val = parse_val!("{ test: [100, 200, 300] }");
+		let res = parse_val!("{ test: [100, 300] }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
 			.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, Value::from(200)))
@@ -111,11 +117,11 @@ mod tests {
 	async fn decrement_array_array() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test").unwrap().into();
-		let mut val = syn::value("{ test: [100, 200, 300] }").unwrap();
-		let res = syn::value("{ test: [200] }").unwrap();
+		let mut val = parse_val!("{ test: [100, 200, 300] }");
+		let res = parse_val!("{ test: [200] }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
-			.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, syn::value("[100,300]").unwrap()))
+			.enter(|stk| val.decrement(stk, &ctx, &opt, &idi, parse_val!("[100,300]")))
 			.finish()
 			.await
 			.unwrap();

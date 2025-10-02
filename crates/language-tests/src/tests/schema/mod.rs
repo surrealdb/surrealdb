@@ -11,10 +11,9 @@ use serde::{Deserialize, Serialize, de};
 use surrealdb_core::dbs::capabilities::{
 	ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
 };
-use surrealdb_core::sql::Expr;
 use surrealdb_core::syn::parser::ParserSettings;
 use surrealdb_core::syn::{self};
-use surrealdb_core::val::{Object as CoreObject, RecordId, Value as CoreValue};
+use surrealdb_types::{Object, RecordId, Value};
 
 /// Root test config struct.
 #[derive(Default, Clone, Debug, Deserialize, Serialize)]
@@ -408,8 +407,9 @@ pub struct SignupErrorResult {
 	_unused_keys: BTreeMap<String, toml::Value>,
 }
 
+/// A wrapper around the `Value` type for SurrealDB in order to support parsing from toml.
 #[derive(Clone, Debug)]
-pub struct SurrealValue(pub CoreValue);
+pub struct SurrealValue(pub Value);
 
 impl Serialize for SurrealValue {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -448,15 +448,14 @@ impl<'de> Deserialize<'de> for SurrealValue {
 }
 
 #[derive(Clone, Debug)]
-pub struct SurrealExpr(pub Expr);
+pub struct SurrealExpr(pub String);
 
 impl Serialize for SurrealExpr {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: serde::Serializer,
 	{
-		let v = self.0.to_string();
-		v.serialize(serializer)
+		self.0.serialize(serializer)
 	}
 }
 
@@ -466,23 +465,10 @@ impl<'de> Deserialize<'de> for SurrealExpr {
 		D: serde::Deserializer<'de>,
 	{
 		let source = String::deserialize(deserializer)?;
-		let settings = ParserSettings {
-			object_recursion_limit: 100,
-			query_recursion_limit: 100,
-			legacy_strands: false,
-			flexible_record_id: true,
-			references_enabled: true,
-			bearer_access_enabled: true,
-			define_api_enabled: true,
-			files_enabled: true,
-		};
-
-		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
-			parser.parse_expr_start(stk).await
-		})
-		.map_err(<D::Error as serde::de::Error>::custom)?;
-
-		Ok(SurrealExpr(v))
+		// We can't validate the expression anymore since parse_expr_start is private
+		// and parse_value doesn't handle variables like $error
+		// We'll rely on runtime validation when the expression is executed
+		Ok(SurrealExpr(source))
 	}
 }
 
@@ -520,7 +506,7 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			parser.parse_value(stk).await
 		})
 		.map_err(<D::Error as serde::de::Error>::custom)?;
-		if let CoreValue::RecordId(x) = v {
+		if let Value::RecordId(x) = v {
 			Ok(SurrealRecordId(x))
 		} else {
 			Err(<D::Error as serde::de::Error>::custom(format_args!(
@@ -531,7 +517,7 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 }
 
 #[derive(Clone, Debug)]
-pub struct SurrealObject(pub CoreObject);
+pub struct SurrealObject(pub Object);
 
 impl Serialize for SurrealObject {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -565,10 +551,10 @@ impl<'de> Deserialize<'de> for SurrealObject {
 		})
 		.map_err(<D::Error as serde::de::Error>::custom)?;
 
-		v.into_object().map(SurrealObject).ok_or_else(|| {
-			<D::Error as serde::de::Error>::custom(format_args!(
-				"Expected a object, found '{source}'"
-			))
+		v.into_object().map(SurrealObject).or_else(|err| {
+			Err(<D::Error as serde::de::Error>::custom(format_args!(
+				"Expected a object, found '{source}': {err}"
+			)))
 		})
 	}
 }

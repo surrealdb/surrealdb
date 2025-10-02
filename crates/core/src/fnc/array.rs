@@ -472,7 +472,7 @@ pub fn is_empty((array,): (Array,)) -> Result<Value> {
 }
 
 pub fn join((arr, sep): (Array, String)) -> Result<Value> {
-	Ok(arr.into_iter().map(Value::as_raw_string).collect::<Vec<_>>().join(&sep).into())
+	Ok(arr.into_iter().map(Value::into_raw_string).collect::<Vec<_>>().join(&sep).into())
 }
 
 pub fn last((array,): (Array,)) -> Result<Value> {
@@ -783,7 +783,7 @@ pub fn slice(
 	};
 
 	if start >= array.len() {
-		return Ok(Array::new().into());
+		return Ok(Value::Array(Array::new()));
 	}
 
 	let end = match range.end {
@@ -798,12 +798,12 @@ pub fn slice(
 			if x < 0 {
 				let end = array_len.saturating_add(x).saturating_sub(1);
 				if end < start as i64 {
-					return Ok(Array::new().into());
+					return Ok(Value::Array(Array::new()));
 				}
 				end as usize
 			} else {
 				if x <= start as i64 {
-					return Ok(Array::new().into());
+					return Ok(Value::Array(Array::new()));
 				}
 				x.saturating_sub(1) as usize
 			}
@@ -812,7 +812,7 @@ pub fn slice(
 	};
 
 	if end < start {
-		return Ok(Array::new().into());
+		return Ok(Value::Array(Array::new()));
 	}
 
 	let mut i = 0;

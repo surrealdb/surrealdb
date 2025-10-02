@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::pin::Pin;
@@ -5,27 +6,25 @@ use std::task::{Context, Poll};
 
 use async_channel::Receiver;
 use futures::StreamExt;
-use serde::de::DeserializeOwned;
+use surrealdb_types::sql::ToSql;
+use surrealdb_types::{
+	self, Action, Notification as CoreNotification, RecordIdKey, SurrealValue, Value, Variables,
+};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
+use crate::Surreal;
 use crate::api::conn::{Command, Router};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
-use crate::api::{self, Connection, ExtraFeatures, Result};
-use crate::core::dbs::{Action as CoreAction, Notification as CoreNotification};
-use crate::core::expr::{
-	BinaryOperator, Cond, Expr, Fields, Idiom, Literal, LiveStatement, TopLevelExpr,
-};
-use crate::core::val;
+use crate::api::opt::Resource;
+use crate::api::{Connection, ExtraFeatures, Result};
 use crate::engine::any::Any;
-use crate::method::{Live, OnceLockExt, Query, Select};
-use crate::opt::Resource;
-use crate::value::Notification;
-use crate::{Action, Surreal, Value};
+use crate::method::{Live, OnceLockExt, Select};
+use crate::notification::Notification;
 
 fn into_future<C, O>(this: Select<C, O, Live>) -> BoxFuture<Result<Stream<O>>>
 where
@@ -41,110 +40,99 @@ where
 		if !router.features.contains(&ExtraFeatures::LiveQueries) {
 			return Err(Error::LiveQueriesNotSupported.into());
 		}
-		let mut stmt = LiveStatement::new(Fields::all());
-		match resource? {
+
+		// Generate the LIVE SELECT SQL based on resource type
+		let stmt = match resource? {
 			Resource::Table(table) => {
-				stmt.what = Expr::Table(table);
+				format!("LIVE SELECT * FROM `{}`", table)
 			}
 			Resource::RecordId(record) => {
-				let record = record.into_inner();
-				stmt.what = Expr::Table(record.table.clone());
-				let ident = "id".to_string();
-				let cond = Expr::Binary {
-					left: Box::new(Expr::Idiom(Idiom::field(ident))),
-					op: BinaryOperator::Equal,
-					right: Box::new(Expr::Literal(Literal::RecordId(record.into_literal()))),
-				};
-				stmt.cond = Some(Cond(cond));
+				// For a specific record, we use WHERE id = record
+				format!("LIVE SELECT * FROM `{}` WHERE id = {}", record.table, record.to_sql()?)
 			}
 			Resource::Object(_) => return Err(Error::LiveOnObject.into()),
 			Resource::Array(_) => return Err(Error::LiveOnArray.into()),
 			Resource::Range(range) => {
-				let record = range.into_inner();
-
-				let val::RecordIdKey::Range(range) = record.key else {
-					panic!("invalid resource?");
+				let record = range.0;
+				let RecordIdKey::Range(ref key_range) = record.key else {
+					return Err(Error::InvalidParams("Invalid range in resource".to_owned()).into());
 				};
 
-				stmt.what = Expr::Table(record.table.clone());
+				// Build WHERE clause for range queries
+				let mut conditions = Vec::new();
 
-				let id = Expr::Idiom(Idiom::field("id".to_string()));
+				// Handle start bound
+				match &key_range.start {
+					std::ops::Bound::Included(key) => {
+						conditions.push(format!("id >= {}:{}", record.table, key.to_sql()?));
+					}
+					std::ops::Bound::Excluded(key) => {
+						conditions.push(format!("id > {}:{}", record.table, key.to_sql()?));
+					}
+					std::ops::Bound::Unbounded => {}
+				}
 
-				let left = match range.start {
-					std::ops::Bound::Included(x) => Some(Expr::Binary {
-						left: Box::new(id.clone()),
-						op: BinaryOperator::MoreThanEqual,
-						right: Box::new(Expr::Literal(Literal::RecordId(
-							crate::core::expr::RecordIdLit {
-								table: record.table.clone(),
-								key: x.into_literal(),
-							},
-						))),
-					}),
-					std::ops::Bound::Excluded(x) => Some(Expr::Binary {
-						left: Box::new(id.clone()),
-						op: BinaryOperator::MoreThan,
-						right: Box::new(Expr::Literal(Literal::RecordId(
-							crate::core::expr::RecordIdLit {
-								table: record.table.clone(),
-								key: x.into_literal(),
-							},
-						))),
-					}),
-					std::ops::Bound::Unbounded => None,
-				};
-				let right = match range.end {
-					std::ops::Bound::Included(x) => Some(Expr::Binary {
-						left: Box::new(id),
-						op: BinaryOperator::LessThanEqual,
-						right: Box::new(Expr::Literal(Literal::RecordId(
-							crate::core::expr::RecordIdLit {
-								table: record.table,
-								key: x.into_literal(),
-							},
-						))),
-					}),
-					std::ops::Bound::Excluded(x) => Some(Expr::Binary {
-						left: Box::new(id),
-						op: BinaryOperator::LessThan,
-						right: Box::new(Expr::Literal(Literal::RecordId(
-							crate::core::expr::RecordIdLit {
-								table: record.table,
-								key: x.into_literal(),
-							},
-						))),
-					}),
-					std::ops::Bound::Unbounded => None,
-				};
+				// Handle end bound
+				match &key_range.end {
+					std::ops::Bound::Included(key) => {
+						conditions.push(format!("id <= {}:{}", record.table, key.to_sql()?));
+					}
+					std::ops::Bound::Excluded(key) => {
+						conditions.push(format!("id < {}:{}", record.table, key.to_sql()?));
+					}
+					std::ops::Bound::Unbounded => {}
+				}
 
-				let cond = match (left, right) {
-					(Some(l), Some(r)) => Some(Cond(Expr::Binary {
-						left: Box::new(l),
-						op: BinaryOperator::And,
-						right: Box::new(r),
-					})),
-					(Some(x), None) | (None, Some(x)) => Some(Cond(x)),
-					_ => None,
-				};
-
-				stmt.cond = cond
+				// Build final query
+				if conditions.is_empty() {
+					format!("LIVE SELECT * FROM `{}`", record.table)
+				} else {
+					format!(
+						"LIVE SELECT * FROM `{}` WHERE {}",
+						record.table,
+						conditions.join(" AND ")
+					)
+				}
 			}
 			Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
-		}
-		let query = Query::normal(
-			client.clone(),
-			vec![TopLevelExpr::Live(Box::new(stmt))],
-			Default::default(),
-			false,
-		);
-		let val::Value::Uuid(id) = query.await?.take::<Value>(0)?.into_inner() else {
-			return Err(Error::InternalError(
-				"successufull live query didn't return a uuid".to_string(),
-			)
-			.into());
 		};
-		let rx = register(router, *id).await?;
-		Ok(Stream::new(client.inner.clone().into(), *id, Some(rx)))
+		// Execute the LIVE SELECT query directly to get the UUID
+		let results = router
+			.execute_query(Command::RawQuery {
+				query: Cow::Owned(stmt),
+				txn: None,
+				variables: Variables::new(),
+			})
+			.await?;
+
+		// Get the first result which should be the UUID
+		let result = results
+			.into_iter()
+			.next()
+			.ok_or_else(|| Error::InternalError("LIVE query returned no results".to_string()))?;
+
+		let id = match result.result? {
+			Value::Uuid(id) => *id,
+			Value::Array(mut arr) if arr.len() == 1 => match arr.pop() {
+				Some(Value::Uuid(id)) => *id,
+				_ => {
+					return Err(Error::InternalError(
+						"successful live query didn't return a uuid".to_string(),
+					)
+					.into());
+				}
+			},
+			other => {
+				return Err(Error::InternalError(format!(
+					"successful live query didn't return a uuid, got: {:?}",
+					other
+				))
+				.into());
+			}
+		};
+
+		let rx = register(router, id).await?;
+		Ok(Stream::new(client.inner.clone().into(), id, Some(rx)))
 	})
 }
 
@@ -177,7 +165,7 @@ where
 impl<'r, Client, R> IntoFuture for Select<'r, Client, Option<R>, Live>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Stream<Option<R>>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -190,7 +178,7 @@ where
 impl<'r, Client, R> IntoFuture for Select<'r, Client, Vec<R>, Live>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Stream<Vec<R>>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -249,11 +237,11 @@ impl futures::Stream for Stream<Value> {
 		result => match result {
 			Ok(notification) => {
 				match notification.action {
-					CoreAction::Killed => Poll::Ready(None),
+					Action::Killed => Poll::Ready(None),
 					action => Poll::Ready(Some(Ok(Notification {
-						query_id: *notification.id,
-						action: Action::from_core(action),
-						data: Value::from_inner(notification.result),
+						query_id: notification.id,
+						action,
+						data: notification.result,
 					}))),
 				}
 			}
@@ -285,7 +273,7 @@ macro_rules! poll_next_and_convert {
 
 impl<R> futures::Stream for Stream<Option<R>>
 where
-	R: DeserializeOwned + Unpin,
+	R: SurrealValue + Unpin,
 {
 	type Item = Result<Notification<R>>;
 
@@ -294,7 +282,7 @@ where
 
 impl<R> futures::Stream for Stream<Vec<R>>
 where
-	R: DeserializeOwned + Unpin,
+	R: SurrealValue + Unpin,
 {
 	type Item = Result<Notification<R>>;
 
@@ -303,7 +291,7 @@ where
 
 impl<R> futures::Stream for Stream<Notification<R>>
 where
-	R: DeserializeOwned + Unpin,
+	R: SurrealValue + Unpin,
 {
 	type Item = Result<Notification<R>>;
 
@@ -338,19 +326,19 @@ impl<R> Drop for Stream<R> {
 	}
 }
 
-fn deserialize<R>(notification: CoreNotification) -> Option<Result<crate::Notification<R>>>
+fn deserialize<R>(notification: CoreNotification) -> Option<Result<Notification<R>>>
 where
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
-	let query_id = *notification.id;
+	let query_id = notification.id;
 	let action = notification.action;
 	match action {
-		CoreAction::Killed => None,
-		action => match api::value::from_core_value(notification.result) {
+		Action::Killed => None,
+		action => match R::from_value(notification.result) {
 			Ok(data) => Some(Ok(Notification {
 				query_id,
 				data,
-				action: Action::from_core(action),
+				action,
 			})),
 			Err(error) => Some(Err(error)),
 		},

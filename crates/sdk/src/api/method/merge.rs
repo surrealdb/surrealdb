@@ -2,8 +2,8 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use serde::Serialize;
-use serde::de::DeserializeOwned;
+use surrealdb_types::sql::ToSql;
+use surrealdb_types::{SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::validate_data;
@@ -13,7 +13,6 @@ use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
-use crate::value::Value;
 
 /// A merge future
 #[derive(Debug)]
@@ -42,7 +41,7 @@ where
 }
 
 macro_rules! into_future {
-	() => {
+	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Merge {
 				txn,
@@ -52,10 +51,10 @@ macro_rules! into_future {
 				upsert,
 				..
 			} = self;
-			let content = crate::api::value::to_core_value(content);
+			let content = content.into_value();
 			Box::pin(async move {
-				let content = match content? {
-					crate::core::val::Value::None | surrealdb_core::val::Value::Null => None,
+				let content = match content {
+					surrealdb_types::Value::None | surrealdb_types::Value::Null => None,
 					data => {
 						validate_data(
 							&data,
@@ -66,13 +65,26 @@ macro_rules! into_future {
 				};
 
 				let router = client.inner.router.extract()?;
-				let cmd = Command::Merge {
-					upsert,
-					txn,
-					what: resource?,
-					data: content,
+
+				let what = resource?.into_value();
+				let query = match (upsert, content) {
+					(true, Some(data)) => {
+						format!("UPSERT {} MERGE {}", what.to_sql()?, data.to_sql()?)
+					}
+					(true, None) => format!("UPSERT {}", what.to_sql()?),
+					(false, Some(data)) => {
+						format!("UPDATE {} MERGE {}", what.to_sql()?, data.to_sql()?)
+					}
+					(false, None) => format!("UPDATE {}", what.to_sql()?),
 				};
-				router.execute_query(cmd).await?.take(0)
+
+				let cmd = Command::RawQuery {
+					txn,
+					query: Cow::Owned(query),
+					variables: Variables::new(),
+				};
+
+				router.$method(cmd).await
 			})
 		}
 	};
@@ -81,34 +93,34 @@ macro_rules! into_future {
 impl<'r, Client, D> IntoFuture for Merge<'r, Client, D, Value>
 where
 	Client: Connection,
-	D: Serialize + 'static,
+	D: SurrealValue + 'static,
 {
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {}
+	into_future! {execute_value}
 }
 
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Option<R>>
 where
 	Client: Connection,
-	D: Serialize + 'static,
-	R: DeserializeOwned,
+	D: SurrealValue + 'static,
+	R: SurrealValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {}
+	into_future! {execute_opt}
 }
 
 impl<'r, Client, D, R> IntoFuture for Merge<'r, Client, D, Vec<R>>
 where
 	Client: Connection,
-	D: Serialize + 'static,
-	R: DeserializeOwned,
+	D: SurrealValue + 'static,
+	R: SurrealValue,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {}
+	into_future! {execute_vec}
 }

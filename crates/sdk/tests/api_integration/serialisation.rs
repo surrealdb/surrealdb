@@ -1,11 +1,11 @@
-use serde::{Deserialize, Serialize};
+use surrealdb::types::SurrealValue;
 use ulid::Ulid;
 
 use super::CreateDb;
 
 pub async fn serialise_uuid(new_db: impl CreateDb) {
 	use uuid::Uuid;
-	#[derive(Debug, Serialize, Deserialize)]
+	#[derive(Debug, SurrealValue)]
 	struct Record {
 		uuid: Uuid,
 	}

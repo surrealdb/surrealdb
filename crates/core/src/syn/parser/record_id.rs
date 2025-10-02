@@ -292,8 +292,7 @@ impl Parser<'_> {
 					Ok(RecordIdKeyLit::Generate(RecordIdKeyGen::Ulid))
 				} else {
 					let slice = self.lexer.span_str(token.span);
-					let text = slice.to_owned();
-					Ok(RecordIdKeyLit::String(text))
+					Ok(RecordIdKeyLit::String(slice.to_owned()))
 				}
 			}
 			t!("UUID") => {
@@ -303,8 +302,7 @@ impl Parser<'_> {
 					Ok(RecordIdKeyLit::Generate(RecordIdKeyGen::Uuid))
 				} else {
 					let slice = self.lexer.span_str(token.span);
-					let text = slice.to_owned();
-					Ok(RecordIdKeyLit::String(text))
+					Ok(RecordIdKeyLit::String(slice.to_owned()))
 				}
 			}
 			t!("RAND") => {
@@ -314,9 +312,7 @@ impl Parser<'_> {
 					Ok(RecordIdKeyLit::Generate(RecordIdKeyGen::Rand))
 				} else {
 					let slice = self.lexer.span_str(token.span);
-					// Safety: Parser guarentees no null bytes present in string.
-					let text = slice.to_owned();
-					Ok(RecordIdKeyLit::String(text))
+					Ok(RecordIdKeyLit::String(slice.to_owned()))
 				}
 			}
 			_ => {

@@ -11,7 +11,7 @@ use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct RemoveParamStatement {
+pub(crate) struct RemoveParamStatement {
 	pub name: String,
 	pub if_exists: bool,
 }

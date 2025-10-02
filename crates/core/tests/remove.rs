@@ -2,7 +2,7 @@ mod helpers;
 use helpers::*;
 use surrealdb_core::iam::Level;
 use surrealdb_core::syn;
-use surrealdb_core::val::Value;
+use surrealdb_types::Value;
 
 #[macro_use]
 mod util;

@@ -76,7 +76,7 @@ impl ToFlatbuffers for Regex {
 		&self,
 		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
 	) -> anyhow::Result<Self::Output<'bldr>> {
-		let value = builder.create_string(self.regex().as_str());
+		let value = builder.create_string(self.inner().as_str());
 		Ok(proto_fb::StringValue::create(
 			builder,
 			&proto_fb::StringValueArgs {

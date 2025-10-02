@@ -101,7 +101,7 @@ async fn delete_update_mtree_index() -> Result<()> {
 		]",
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -149,7 +149,7 @@ async fn index_embedding() -> Result<()> {
 		}",
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -346,7 +346,7 @@ async fn select_mtree_knn_with_condition() -> Result<()> {
 			]",
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -364,7 +364,7 @@ async fn select_mtree_knn_with_condition() -> Result<()> {
 			]",
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -420,7 +420,7 @@ async fn select_hnsw_knn_with_condition() -> Result<()> {
 			]",
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -438,7 +438,7 @@ async fn select_hnsw_knn_with_condition() -> Result<()> {
 			]",
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -489,7 +489,7 @@ async fn select_bruteforce_knn_with_condition() -> Result<()> {
 			]",
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -507,7 +507,7 @@ async fn select_bruteforce_knn_with_condition() -> Result<()> {
 			]",
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }

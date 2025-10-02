@@ -18,7 +18,7 @@ use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::Transaction;
 use crate::val::{Number, RecordIdKey, Value};
 
-pub struct HnswIndex {
+pub(crate) struct HnswIndex {
 	dim: usize,
 	vector_type: VectorType,
 	hnsw: HnswFlavor,
@@ -73,7 +73,7 @@ impl<'a> HnswCheckedSearchContext<'a> {
 }
 
 impl HnswIndex {
-	pub async fn new(
+	pub(crate) async fn new(
 		tx: &Transaction,
 		ikb: IndexKeyBase,
 		tb: String,

@@ -19,6 +19,7 @@ use crate::sql::statements::access::{
 };
 use crate::sql::statements::define::user::PassType;
 use crate::sql::statements::define::{DefineDefault, DefineKind};
+use crate::sql::statements::remove::RemoveAnalyzerStatement;
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
@@ -27,10 +28,10 @@ use crate::sql::statements::{
 	DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
 	DefineTableStatement, DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement,
 	InsertStatement, KillStatement, OptionStatement, OutputStatement, RelateStatement,
-	RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
-	RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement,
-	RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
-	SelectStatement, UpdateStatement, UpsertStatement, UseStatement,
+	RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
+	RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement, RemoveParamStatement,
+	RemoveStatement, RemoveTableStatement, RemoveUserStatement, SelectStatement, UpdateStatement,
+	UpsertStatement, UseStatement,
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
@@ -41,7 +42,7 @@ use crate::sql::{
 };
 use crate::syn;
 use crate::syn::parser::ParserSettings;
-use crate::val::{Datetime, Duration, Number, Uuid};
+use crate::types::{PublicDatetime, PublicDuration, PublicNumber, PublicUuid};
 
 fn ident_field(name: &str) -> Expr {
 	Expr::Idiom(Idiom(vec![Part::Field(name.to_string())]))
@@ -142,9 +143,7 @@ fn parse_create() {
 				expr: ident_field("foo"),
 				alias: Some(Idiom(vec![Part::Field("bar".to_string())])),
 			})))),
-			timeout: Some(Timeout(Expr::Literal(Literal::Duration(Duration(
-				std::time::Duration::from_secs(1)
-			))))),
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))))),
 			parallel: true,
 			version: None,
 		})),
@@ -198,7 +197,7 @@ fn parse_define_database() {
 			name: Expr::Idiom(Idiom::field("a".to_string())),
 			comment: Some(Expr::Literal(Literal::String("test".to_string()))),
 			changefeed: Some(ChangeFeed {
-				expiry: std::time::Duration::from_secs(60) * 10,
+				expiry: PublicDuration::from_secs(60 * 10),
 				store_diff: true,
 			}),
 		})))
@@ -277,7 +276,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.comment, Some(Expr::Literal(Literal::String("*******".to_string()))));
 		assert_eq!(
 			stmt.token_duration,
-			Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap())))
+			Some(Expr::Literal(Literal::Duration(PublicDuration::from_hours(1).unwrap())))
 		);
 		assert_eq!(stmt.session_duration, None);
 	}
@@ -304,7 +303,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.comment, Some(Expr::Literal(Literal::String("*******".to_string()))));
 		assert_eq!(
 			stmt.token_duration,
-			Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap())))
+			Some(Expr::Literal(Literal::Duration(PublicDuration::from_hours(1).unwrap())))
 		);
 		assert_eq!(stmt.session_duration, None);
 	}
@@ -330,7 +329,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.roles, vec!["editor".to_string(), "OWNER".to_string()]);
 		assert_eq!(
 			stmt.token_duration,
-			Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap())))
+			Some(Expr::Literal(Literal::Duration(PublicDuration::from_hours(1).unwrap())))
 		);
 		assert_eq!(stmt.session_duration, None);
 	}
@@ -356,11 +355,11 @@ fn parse_define_user() {
 		assert_eq!(stmt.roles, vec!["Viewer".to_string()]);
 		assert_eq!(
 			stmt.token_duration,
-			Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap())))
+			Some(Expr::Literal(Literal::Duration(PublicDuration::from_hours(1).unwrap())))
 		);
 		assert_eq!(
 			stmt.session_duration,
-			Some(Expr::Literal(Literal::Duration(Duration::from_hours(6).unwrap())))
+			Some(Expr::Literal(Literal::Duration(PublicDuration::from_hours(6).unwrap())))
 		);
 	}
 	// With session and token duration.
@@ -384,11 +383,11 @@ fn parse_define_user() {
 		assert_eq!(stmt.roles, vec!["Viewer".to_string()]);
 		assert_eq!(
 			stmt.token_duration,
-			Some(Expr::Literal(Literal::Duration(Duration::from_mins(15).unwrap())))
+			Some(Expr::Literal(Literal::Duration(PublicDuration::from_mins(15).unwrap())))
 		);
 		assert_eq!(
 			stmt.session_duration,
-			Some(Expr::Literal(Literal::Duration(Duration::from_hours(6).unwrap())))
+			Some(Expr::Literal(Literal::Duration(PublicDuration::from_hours(6).unwrap())))
 		);
 	}
 	// With none token duration.
@@ -445,8 +444,12 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: Some(Expr::Literal(Literal::String("bar".to_string()))),
@@ -475,8 +478,12 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: None,
@@ -505,8 +512,12 @@ fn parse_define_access_jwt_key() {
 				authenticate: Some(Expr::Literal(Literal::Bool(true))),
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: None,
@@ -539,8 +550,12 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: None,
@@ -568,8 +583,10 @@ fn parse_define_access_jwt_key() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
 					session: None,
 				},
 				comment: None,
@@ -598,8 +615,12 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: None,
@@ -650,8 +671,12 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: Some(Expr::Literal(Literal::String("bar".to_string()))),
@@ -682,8 +707,12 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: Some(Expr::Literal(Literal::String("bar".to_string()))),
@@ -714,8 +743,12 @@ fn parse_define_access_jwt_jwks() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: Some(Expr::Literal(Literal::String("bar".to_string()))),
@@ -745,8 +778,12 @@ fn parse_define_access_jwt_jwks() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: None,
@@ -775,8 +812,10 @@ fn parse_define_access_jwt_jwks() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
 					session: None,
 				},
 				comment: None,
@@ -806,8 +845,12 @@ fn parse_define_access_jwt_jwks() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: None,
@@ -836,10 +879,12 @@ fn parse_define_access_jwt_jwks() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
 					session: Some(Expr::Literal(Literal::Duration(
-						Duration::from_days(2).unwrap()
+						PublicDuration::from_days(2).unwrap()
 					))),
 				},
 				comment: None,
@@ -875,8 +920,12 @@ fn parse_define_access_record() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-				token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+				grant: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_days(30).unwrap()
+				))),
+				token: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_hours(1).unwrap()
+				))),
 				session: None,
 			}
 		);
@@ -930,8 +979,12 @@ fn parse_define_access_record() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(10).unwrap()))),
-				token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+				grant: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_days(10).unwrap()
+				))),
+				token: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_hours(1).unwrap()
+				))),
 				session: None,
 			}
 		);
@@ -999,9 +1052,15 @@ fn parse_define_access_record() {
 		assert_eq!(
 			stmt.duration,
 			AccessDuration {
-				grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-				token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
-				session: Some(Expr::Literal(Literal::Duration(Duration::from_days(7).unwrap()))),
+				grant: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_days(30).unwrap()
+				))),
+				token: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_hours(1).unwrap()
+				))),
+				session: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_days(7).unwrap()
+				))),
 			}
 		);
 		assert_eq!(stmt.comment, None);
@@ -1053,10 +1112,12 @@ fn parse_define_access_record() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
 					session: Some(Expr::Literal(Literal::Duration(
-						Duration::from_mins(15).unwrap()
+						PublicDuration::from_mins(15).unwrap()
 					))),
 				},
 				comment: None,
@@ -1090,10 +1151,12 @@ fn parse_define_access_record() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
 					session: Some(Expr::Literal(Literal::Duration(
-						Duration::from_mins(15).unwrap()
+						PublicDuration::from_mins(15).unwrap()
 					))),
 				},
 				comment: None,
@@ -1148,10 +1211,12 @@ fn parse_define_access_record() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(10).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(10).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
 					session: Some(Expr::Literal(Literal::Duration(
-						Duration::from_mins(15).unwrap()
+						PublicDuration::from_mins(15).unwrap()
 					))),
 				},
 				comment: None,
@@ -1205,10 +1270,12 @@ fn parse_define_access_record() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(10).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(10).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
 					session: Some(Expr::Literal(Literal::Duration(
-						Duration::from_mins(15).unwrap()
+						PublicDuration::from_mins(15).unwrap()
 					))),
 				},
 				comment: None,
@@ -1242,10 +1309,12 @@ fn parse_define_access_record() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
 					session: Some(Expr::Literal(Literal::Duration(
-						Duration::from_mins(15).unwrap()
+						PublicDuration::from_mins(15).unwrap()
 					))),
 				},
 				comment: None,
@@ -1310,8 +1379,12 @@ fn parse_define_access_bearer() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-				token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+				grant: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_days(30).unwrap()
+				))),
+				token: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_hours(1).unwrap()
+				))),
 				session: None,
 			}
 		);
@@ -1352,8 +1425,12 @@ fn parse_define_access_bearer() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-				token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+				grant: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_days(30).unwrap()
+				))),
+				token: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_hours(1).unwrap()
+				))),
 				session: None,
 			}
 		);
@@ -1394,8 +1471,12 @@ fn parse_define_access_bearer() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-				token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+				grant: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_days(30).unwrap()
+				))),
+				token: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_hours(1).unwrap()
+				))),
 				session: None,
 			}
 		);
@@ -1435,8 +1516,12 @@ fn parse_define_access_bearer() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-				token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+				grant: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_days(30).unwrap()
+				))),
+				token: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_hours(1).unwrap()
+				))),
 				session: None,
 			}
 		);
@@ -1506,9 +1591,11 @@ fn parse_define_access_bearer() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(90).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
-					session: Some(Expr::Literal(Literal::Duration(Duration::from_secs(900)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(90).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
+					session: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(900)))),
 				},
 				comment: None,
 			}))),
@@ -1548,9 +1635,11 @@ fn parse_define_access_bearer() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(90).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
-					session: Some(Expr::Literal(Literal::Duration(Duration::from_secs(900)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(90).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
+					session: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(900)))),
 				},
 				comment: None,
 			}))),
@@ -1620,7 +1709,7 @@ fn parse_define_table() {
 				delete: Permission::Full,
 			},
 			changefeed: Some(ChangeFeed {
-				expiry: std::time::Duration::from_secs(1),
+				expiry: PublicDuration::from_secs(1),
 				store_diff: true,
 			}),
 			comment: None,
@@ -1789,7 +1878,7 @@ fn parse_define_index() {
 			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())]))],
 			index: Index::MTree(MTreeParams {
 				dimension: 4,
-				distance: Distance::Minkowski(Number::Int(5)),
+				distance: Distance::Minkowski(PublicNumber::Int(5)),
 				capacity: 6,
 				mtree_cache: 9,
 				vector_type: VectorType::I16,
@@ -1864,9 +1953,7 @@ fn parse_delete() {
 			with: Some(With::Index(vec!["index".to_string(), "index_2".to_string()])),
 			cond: Some(Cond(Expr::Literal(Literal::Integer(2)))),
 			output: Some(Output::After),
-			timeout: Some(Timeout(Expr::Literal(Literal::Duration(Duration(
-				std::time::Duration::from_secs(1)
-			))))),
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))))),
 			parallel: true,
 			explain: Some(Explain(true)),
 		}))
@@ -1895,8 +1982,8 @@ fn parse_delete_2() {
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Expr::Literal(Literal::Null))),
 			output: Some(Output::Null),
-			timeout: Some(Timeout(Expr::Literal(Literal::Duration(Duration(
-				std::time::Duration::from_secs(60 * 60)
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(PublicDuration::from_secs(
+				60 * 60
 			))))),
 			parallel: true,
 			explain: Some(Explain(false)),
@@ -2132,7 +2219,9 @@ fn parse_select() {
 				value: Expr::Literal(Literal::Bool(true))
 			}])))),
 			fetch: Some(Fetchs(vec![Fetch(ident_field("foo"))])),
-			version: Some(Expr::Literal(Literal::Datetime(Datetime(expected_datetime)))),
+			version: Some(Expr::Literal(Literal::Datetime(PublicDatetime::from(
+				expected_datetime
+			)))),
 			timeout: None,
 			parallel: false,
 			tempfiles: false,
@@ -2182,7 +2271,7 @@ fn parse_show() {
 		res,
 		TopLevelExpr::Show(ShowStatement {
 			table: None,
-			since: ShowSince::Timestamp(Datetime(expected_datetime)),
+			since: ShowSince::Timestamp(PublicDatetime::from(expected_datetime)),
 			limit: None
 		})
 	)
@@ -2196,7 +2285,7 @@ fn parse_sleep() {
 	.unwrap();
 
 	let expect = Expr::Sleep(Box::new(SleepStatement {
-		duration: Duration(std::time::Duration::from_secs(1)),
+		duration: PublicDuration::from_secs(1),
 	}));
 	assert_eq!(res, expect)
 }
@@ -2293,7 +2382,7 @@ fn parse_value_stmt() {
 	let res =
 		syn::parse_with(r"1s".as_bytes(), async |parser, stk| parser.parse_expr_inherit(stk).await)
 			.unwrap();
-	let expect = Expr::Literal(Literal::Duration(Duration(std::time::Duration::from_secs(1))));
+	let expect = Expr::Literal(Literal::Duration(PublicDuration::from_secs(1)));
 	assert_eq!(res, expect);
 }
 
@@ -2304,9 +2393,8 @@ fn parse_throw() {
 	})
 	.unwrap();
 
-	let expect = Expr::Throw(Box::new(Expr::Literal(Literal::Duration(Duration(
-		std::time::Duration::from_secs(1),
-	)))));
+	let expect =
+		Expr::Throw(Box::new(Expr::Literal(Literal::Duration(PublicDuration::from_secs(1)))));
 	assert_eq!(res, expect)
 }
 
@@ -2425,7 +2513,7 @@ fn parse_kill() {
 	assert_eq!(
 		res,
 		TopLevelExpr::Kill(KillStatement {
-			id: Expr::Literal(Literal::Uuid(Uuid(uuid::uuid!(
+			id: Expr::Literal(Literal::Uuid(PublicUuid::from(uuid::uuid!(
 				"e72bee20-f49b-11ec-b939-0242ac120002"
 			))))
 		})
@@ -2736,9 +2824,7 @@ fn parse_update() {
 				Idiom(vec![Part::Field("c".to_owned()), Part::All])
 			])),
 			output: Some(Output::Diff),
-			timeout: Some(Timeout(Expr::Literal(Literal::Duration(Duration(
-				std::time::Duration::from_secs(1)
-			))))),
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))))),
 			parallel: true,
 			explain: Some(Explain(true))
 		}))
@@ -2775,9 +2861,7 @@ fn parse_upsert() {
 				Idiom(vec![Part::Field("c".to_owned()), Part::All])
 			])),
 			output: Some(Output::Diff),
-			timeout: Some(Timeout(Expr::Literal(Literal::Duration(Duration(
-				std::time::Duration::from_secs(1)
-			))))),
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))))),
 			parallel: true,
 			explain: Some(Explain(false))
 		}))
@@ -2985,7 +3069,7 @@ fn parse_access_purge() {
 				base: Some(Base::Db),
 				expired: true,
 				revoked: true,
-				grace: Duration::from_millis(0),
+				grace: PublicDuration::from_millis(0),
 			})))
 		);
 	}
@@ -3007,7 +3091,7 @@ fn parse_access_purge() {
 				base: Some(Base::Db),
 				expired: true,
 				revoked: false,
-				grace: Duration::from_millis(0),
+				grace: PublicDuration::from_millis(0),
 			})))
 		);
 	}
@@ -3029,7 +3113,7 @@ fn parse_access_purge() {
 				base: Some(Base::Db),
 				expired: false,
 				revoked: true,
-				grace: Duration::from_millis(0),
+				grace: PublicDuration::from_millis(0),
 			})))
 		);
 	}
@@ -3051,7 +3135,7 @@ fn parse_access_purge() {
 				base: Some(Base::Db),
 				expired: true,
 				revoked: false,
-				grace: Duration::from_days(90).unwrap(),
+				grace: PublicDuration::from_days(90).unwrap(),
 			})))
 		);
 	}
@@ -3073,7 +3157,7 @@ fn parse_access_purge() {
 				base: Some(Base::Db),
 				expired: false,
 				revoked: true,
-				grace: Duration::from_days(90).unwrap(),
+				grace: PublicDuration::from_days(90).unwrap(),
 			})))
 		);
 	}
@@ -3095,7 +3179,7 @@ fn parse_access_purge() {
 				base: Some(Base::Db),
 				expired: true,
 				revoked: true,
-				grace: Duration::from_days(90).unwrap(),
+				grace: PublicDuration::from_days(90).unwrap(),
 			})))
 		);
 	}

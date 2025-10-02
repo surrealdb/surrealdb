@@ -1,9 +1,10 @@
 use std::cmp::Ordering;
-use std::fmt::{self, Debug, Formatter};
+use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
 use regex::RegexBuilder;
+use revision::Revisioned;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -72,6 +73,13 @@ impl Debug for Regex {
 	}
 }
 
+impl Display for Regex {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		let t = self.0.to_string().replace('/', "\\/");
+		write!(f, "/{}/", &t)
+	}
+}
+
 impl Serialize for Regex {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
@@ -123,5 +131,25 @@ impl<'de> Deserialize<'de> for Regex {
 		}
 
 		deserializer.deserialize_newtype_struct(REGEX_TOKEN, RegexNewtypeVisitor)
+	}
+}
+
+impl Revisioned for Regex {
+	fn revision() -> u16 {
+		1
+	}
+
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
+		self.0.as_str().to_string().serialize_revisioned(writer)
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		let s: String = Revisioned::deserialize_revisioned(reader)?;
+		regex::Regex::new(&s)
+			.map_err(|err| revision::Error::Conversion(format!("invalid regex pattern: {err:?}")))
+			.map(Regex)
 	}
 }

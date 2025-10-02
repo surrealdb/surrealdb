@@ -7,7 +7,7 @@ use crate::sql::{Expr, Part};
 // TODO: Remove unnessacry newtype.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Idioms(pub Vec<Idiom>);
+pub(crate) struct Idioms(pub(crate) Vec<Idiom>);
 
 impl Deref for Idioms {
 	type Target = Vec<Idiom>;
@@ -43,7 +43,7 @@ impl From<crate::expr::Idioms> for Idioms {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Idiom(pub Vec<Part>);
+pub(crate) struct Idiom(pub(crate) Vec<Part>);
 
 impl Idiom {
 	/// Simplifies this Idiom for use in object keys

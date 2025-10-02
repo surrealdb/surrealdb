@@ -2,6 +2,7 @@ use std::fmt;
 use std::time::Duration;
 
 use revision::revisioned;
+use surrealdb_types::sql::ToSql;
 
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
@@ -70,7 +71,7 @@ impl InfoStructure for AccessType {
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub struct RecordAccess {
+pub(crate) struct RecordAccess {
 	pub signup: Option<Expr>,
 	pub signin: Option<Expr>,
 	pub jwt: JwtAccess,
@@ -119,19 +120,19 @@ impl InfoStructure for JwtAccess {
 				JwtAccessVerify::Key(v) => {
 					if v.alg.is_symmetric(){
 						Value::from(map!{
-							"alg".to_string() => v.alg.to_string().into(),
+							"alg".to_string() => v.alg.to_sql().unwrap().into(),
 							"key".to_string() => "[REDACTED]".to_string().into(),
 						})
 					}else{
 						Value::from(map!{
-							"alg".to_string() => v.alg.to_string().into(),
+							"alg".to_string() => v.alg.to_sql().unwrap().into(),
 							"key".to_string() => v.key.into(),
 						})
 					}
 				},
 			},
 			"issuer".to_string(), if let Some(v) = self.issue => Value::from(map!{
-				"alg".to_string() => v.alg.to_string().into(),
+				"alg".to_string() => v.alg.to_sql().unwrap().into(),
 				"key".to_string() => "[REDACTED]".to_string().into(),
 			}),
 		})
@@ -210,16 +211,23 @@ impl fmt::Display for Algorithm {
 	}
 }
 
+impl ToSql for Algorithm {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		self.to_string().fmt_sql(f)
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[non_exhaustive]
 pub struct AccessDefinition {
-	pub name: String,
-	pub access_type: AccessType,
-	pub authenticate: Option<Expr>,
-	pub grant_duration: Option<Duration>,
-	pub token_duration: Option<Duration>,
-	pub session_duration: Option<Duration>,
-	pub comment: Option<String>,
+	pub(crate) name: String,
+	pub(crate) access_type: AccessType,
+	pub(crate) authenticate: Option<Expr>,
+	pub(crate) grant_duration: Option<Duration>,
+	pub(crate) token_duration: Option<Duration>,
+	pub(crate) session_duration: Option<Duration>,
+	pub(crate) comment: Option<String>,
 }
 impl_kv_value_revisioned!(AccessDefinition);
 

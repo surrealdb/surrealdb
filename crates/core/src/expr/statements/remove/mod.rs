@@ -16,23 +16,23 @@ mod user;
 
 use std::fmt::{self, Display, Formatter};
 
-pub use access::RemoveAccessStatement;
-pub use analyzer::RemoveAnalyzerStatement;
+pub(crate) use access::RemoveAccessStatement;
+pub(crate) use analyzer::RemoveAnalyzerStatement;
 use anyhow::Result;
-pub use api::RemoveApiStatement;
-pub use bucket::RemoveBucketStatement;
-pub use database::RemoveDatabaseStatement;
-pub use event::RemoveEventStatement;
-pub use field::RemoveFieldStatement;
-pub use function::RemoveFunctionStatement;
-pub use index::RemoveIndexStatement;
-pub use model::RemoveModelStatement;
-pub use namespace::RemoveNamespaceStatement;
-pub use param::RemoveParamStatement;
+pub(crate) use api::RemoveApiStatement;
+pub(crate) use bucket::RemoveBucketStatement;
+pub(crate) use database::RemoveDatabaseStatement;
+pub(crate) use event::RemoveEventStatement;
+pub(crate) use field::RemoveFieldStatement;
+pub(crate) use function::RemoveFunctionStatement;
+pub(crate) use index::RemoveIndexStatement;
+pub(crate) use model::RemoveModelStatement;
+pub(crate) use namespace::RemoveNamespaceStatement;
+pub(crate) use param::RemoveParamStatement;
 use reblessive::tree::Stk;
-pub use sequence::RemoveSequenceStatement;
-pub use table::RemoveTableStatement;
-pub use user::RemoveUserStatement;
+pub(crate) use sequence::RemoveSequenceStatement;
+pub(crate) use table::RemoveTableStatement;
+pub(crate) use user::RemoveUserStatement;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -41,7 +41,7 @@ use crate::expr::expression::VisitExpression;
 use crate::expr::{Expr, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum RemoveStatement {
+pub(crate) enum RemoveStatement {
 	Namespace(RemoveNamespaceStatement),
 	Database(RemoveDatabaseStatement),
 	Function(RemoveFunctionStatement),

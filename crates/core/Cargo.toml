@@ -188,6 +188,7 @@ getrandom = { workspace = true, features = ["wasm_js"] }
 pharos.workspace = true
 ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
 surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers"] }
+surrealdb-types = { workspace = true }
 tokio = { workspace = true, default-features = false, features = [
     "rt",
     "sync",
@@ -201,7 +202,7 @@ ws_stream_wasm.workspace = true
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 rust-s3 = { workspace = true, optional = true }
 surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers", "rpc"] }
-surrealdb-types = { workspace = true }
+surrealdb-types = { workspace = true, features = ["js"] }
 tokio = { workspace = true, default-features = false, features = [
     "macros",
     "io-util",

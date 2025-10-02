@@ -5,7 +5,7 @@ use revision::revisioned;
 use crate::val::{Array, Object, Value};
 
 #[derive(Debug)]
-pub struct PatchError {
+pub(crate) struct PatchError {
 	pub message: String,
 }
 
@@ -19,7 +19,7 @@ impl fmt::Display for PatchError {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Operation {
+pub(crate) enum Operation {
 	Add {
 		path: Vec<String>,
 		value: Value,

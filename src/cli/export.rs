@@ -4,11 +4,11 @@ use futures_util::StreamExt;
 use surrealdb::Connection;
 use surrealdb::engine::any::{self, connect};
 use surrealdb::method::{Export, ExportConfig};
+use surrealdb_core::kvs::export::TableConfig;
 use tokio::io::{self, AsyncWriteExt};
 
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{AuthArguments, DatabaseSelectionArguments};
-use crate::core::kvs::export::TableConfig;
 
 #[derive(Args, Debug)]
 pub struct DatabaseConnectionArguments {
@@ -94,10 +94,10 @@ pub async fn init(
 	let client = if username.is_some() && password.is_some() && !is_local {
 		debug!("Connecting to the database engine with authentication");
 		let creds = CredentialsBuilder::default()
-			.with_username(username.as_deref())
-			.with_password(password.as_deref())
-			.with_namespace(namespace.as_str())
-			.with_database(database.as_str());
+			.with_username(username.clone())
+			.with_password(password.clone())
+			.with_namespace(namespace.clone())
+			.with_database(database.clone());
 
 		let client = connect(endpoint).await?;
 

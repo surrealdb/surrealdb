@@ -1,14 +1,13 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::time::Duration;
 
-use crate::core::dbs::capabilities::{
+use surrealdb::types::Duration;
+use surrealdb_core::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
 	Targets,
 };
-use crate::core::kvs::export::TableConfig;
-use crate::core::val;
+use surrealdb_core::kvs::export::TableConfig;
 
 pub(crate) mod parser;
 
@@ -73,8 +72,8 @@ pub(crate) fn key_valid(v: &str) -> Result<String, String> {
 	}
 }
 
-pub(crate) fn duration(v: &str) -> Result<Duration, String> {
-	val::Duration::from_str(v).map(|d| d.0).map_err(|_| String::from("invalid duration"))
+pub(crate) fn duration(v: &str) -> Result<std::time::Duration, String> {
+	Duration::from_str(v).map(|d| d.inner()).map_err(|_| String::from("invalid duration"))
 }
 
 pub(crate) fn net_targets(value: &str) -> Result<Targets<NetTarget>, String> {

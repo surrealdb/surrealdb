@@ -1,9 +1,9 @@
 use crate::syn::error::{SyntaxError, bail, syntax_error};
 use crate::syn::lexer::Lexer;
 use crate::syn::token::{Token, t};
-use crate::val::Regex;
+use crate::types::PublicRegex;
 
-pub fn regex(lexer: &mut Lexer, start: Token) -> Result<Regex, SyntaxError> {
+pub fn regex(lexer: &mut Lexer, start: Token) -> Result<PublicRegex, SyntaxError> {
 	assert_eq!(start.kind, t!("/"), "Invalid start token of regex compound");
 
 	loop {

@@ -2,19 +2,18 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use serde::Serialize;
-use serde::de::DeserializeOwned;
+use surrealdb_types::sql::ToSql;
+use surrealdb_types::{self, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
 use super::{Content, validate_data};
+use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
-use crate::api::{self, Connection, Result};
-use crate::core::val;
+use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
-use crate::{Surreal, Value};
 
 /// A record create future
 #[derive(Debug)]
@@ -60,10 +59,13 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let router = client.inner.router.extract()?;
-				let cmd = Command::Create {
+
+				let what = resource?;
+
+				let cmd = Command::RawQuery {
 					txn,
-					what: resource?,
-					data: None,
+					query: Cow::Owned(format!("CREATE {}", what.to_sql()?)),
+					variables: Variables::new(),
 				};
 				router.$method(cmd).await
 			})
@@ -84,7 +86,7 @@ where
 impl<'r, Client, R> IntoFuture for Create<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -99,25 +101,24 @@ where
 	/// Sets content of a record
 	pub fn content<D>(self, data: D) -> Content<'r, C, Value>
 	where
-		D: Serialize + 'static,
+		D: SurrealValue + 'static,
 	{
 		Content::from_closure(self.client, self.txn, || {
-			let content = api::value::to_core_value(data)?;
+			let content = data.into_value();
 
 			validate_data(
 				&content,
 				"Tried to create non-object-like data as content, only structs and objects are supported",
 			)?;
 
-			let data = match content {
-				val::Value::None | val::Value::Null => None,
-				content => Some(content),
-			};
+			let what = self.resource?.to_sql()?;
 
-			Ok(Command::Create {
+			let query = format!("CREATE {} CONTENT {}", what, content.to_sql()?);
+
+			Ok(Command::RawQuery {
 				txn: self.txn,
-				what: self.resource?,
-				data,
+				query: Cow::Owned(query),
+				variables: Variables::new(),
 			})
 		})
 	}
@@ -130,25 +131,24 @@ where
 	/// Sets content of a record
 	pub fn content<D>(self, data: D) -> Content<'r, C, Option<R>>
 	where
-		D: Serialize + 'static,
+		D: SurrealValue + 'static,
 	{
 		Content::from_closure(self.client, self.txn, || {
-			let content = api::value::to_core_value(data)?;
+			let content = data.into_value();
 
 			validate_data(
 				&content,
 				"Tried to create non-object-like data as content, only structs and objects are supported",
 			)?;
 
-			let data = match content {
-				val::Value::None | val::Value::Null => None,
-				content => Some(content),
-			};
+			let what = self.resource?.to_sql()?;
 
-			Ok(Command::Create {
+			let query = format!("CREATE {} CONTENT {}", what, content.to_sql()?);
+
+			Ok(Command::RawQuery {
 				txn: self.txn,
-				what: self.resource?,
-				data,
+				query: Cow::Owned(query),
+				variables: Variables::new(),
 			})
 		})
 	}

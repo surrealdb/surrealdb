@@ -7,6 +7,8 @@ use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use revision::revisioned;
 use serde::Deserialize;
+use surrealdb_core::dbs::QueryResultBuilder;
+use surrealdb_core::rpc::{DbResponse, DbResult};
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tokio::time;
@@ -21,8 +23,7 @@ use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use trice::Instant;
 
 use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
-use crate::api::conn::{self, Command, DbResponse, RequestData, Route, Router};
-use crate::api::engine::remote::Response;
+use crate::api::conn::{self, Command, RequestData, Route, Router};
 use crate::api::engine::remote::ws::{Client, PING_INTERVAL};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
@@ -30,10 +31,9 @@ use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
 use crate::api::{ExtraFeatures, Result, Surreal};
-use crate::core::val::Value as CoreValue;
 use crate::engine::IntervalStream;
-use crate::engine::remote::Data;
 use crate::opt::WaitFor;
+use crate::types::Value;
 
 pub(crate) const NAGLE_ALG: bool = false;
 
@@ -175,17 +175,12 @@ async fn router_handle_route(
 				key: key.clone(),
 			};
 		}
-		Command::Insert {
-			..
-		} => {
-			effect = RequestEffect::Insert;
-		}
 		Command::SubscribeLive {
 			ref uuid,
 			ref notification_sender,
 		} => {
 			state.live_queries.insert(*uuid, notification_sender.clone());
-			if response.clone().send(Ok(DbResponse::Other(CoreValue::None))).await.is_err() {
+			if response.clone().send(Ok(vec![QueryResultBuilder::instant_none()])).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			// There is nothing to send to the server here
@@ -230,7 +225,7 @@ async fn router_handle_route(
 		trace!("Request {:?}", request);
 
 		// Unwrap because a router request cannot fail to serialize.
-		let payload = crate::core::rpc::format::revision::encode(&request).unwrap();
+		let payload = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
 
 		Message::Binary(payload.into())
 	};
@@ -254,7 +249,6 @@ async fn router_handle_route(
 			});
 		}
 		Err(error) => {
-			let error = Error::Ws(error.to_string());
 			if response.send(Err(error.into())).await.is_err() {
 				trace!("Receiver dropped");
 			}
@@ -264,109 +258,88 @@ async fn router_handle_route(
 	HandleResult::Ok
 }
 
-async fn router_handle_response(response: Message, state: &mut RouterState) -> HandleResult {
-	match Response::try_from(&response) {
-		Ok(option) => {
-			// We are only interested in responses that are not empty
-			if let Some(response) = option {
-				trace!("{response:?}");
-				match response.id {
-					// If `id` is set this is a normal response
-					Some(id) => {
-						if let Ok(id) = id.coerce_to() {
-							match state.pending_requests.remove(&id) {
-								Some(pending) => {
-									let resp = match DbResponse::from_server_result(response.result)
-									{
-										Ok(x) => x,
-										Err(e) => {
-											let _ = pending.response_channel.send(Err(e)).await;
-											return HandleResult::Ok;
-										}
-									};
-									// We can only route responses with IDs
-									match pending.effect {
-										RequestEffect::None => {}
-										RequestEffect::Insert => {
-											// For insert, we need to flatten single responses in an
-											// array
-											if let DbResponse::Other(CoreValue::Array(array)) = resp
-											{
-												if array.len() == 1 {
-													let _ = pending
-														.response_channel
-														.send(Ok(DbResponse::Other(
-															array.into_iter().next().unwrap(),
-														)))
-														.await;
-												} else {
-													let _ = pending
-														.response_channel
-														.send(Ok(DbResponse::Other(
-															CoreValue::Array(array),
-														)))
-														.await;
-												}
-												return HandleResult::Ok;
-											}
-										}
-										RequestEffect::Set {
-											key,
-											value,
-										} => {
-											state.vars.insert(key, value);
-										}
-										RequestEffect::Clear {
-											key,
-										} => {
-											state.vars.shift_remove(&key);
-										}
+async fn router_handle_response(message: Message, state: &mut RouterState) -> HandleResult {
+	match db_response_from_message(&message) {
+		Ok(response) => {
+			trace!("{response:?}");
+			let Some(response) = response else {
+				return HandleResult::Ok;
+			};
+
+			match response.id {
+				// If `id` is set this is a normal response
+				Some(id) => {
+					// Try to extract i64 from Value
+					if let Value::Number(surrealdb_types::Number::Int(id_num)) = id {
+						match state.pending_requests.remove(&id_num) {
+							Some(pending) => {
+								// We can only route responses with IDs
+								match pending.effect {
+									RequestEffect::None => {}
+									RequestEffect::Set {
+										key,
+										value,
+									} => {
+										state.vars.insert(key, value);
 									}
-									let _res = pending.response_channel.send(Ok(resp)).await;
+									RequestEffect::Clear {
+										key,
+									} => {
+										state.vars.shift_remove(&key);
+									}
 								}
-								_ => {
-									warn!(
-										"got response for request with id '{id}', which was not in pending requests"
-									)
+
+								match response.result {
+									Ok(DbResult::Query(results)) => {
+										let _res = pending.response_channel.send(Ok(results)).await;
+									}
+									Ok(DbResult::Live(_notification)) => {
+										tracing::error!("Unexpected live query result in response");
+									}
+									Ok(DbResult::Other(_value)) => {
+										tracing::error!("Unexpected other result in response");
+									}
+									Err(error) => {
+										let _res =
+											pending.response_channel.send(Err(error.into())).await;
+									}
 								}
+							}
+							_ => {
+								warn!(
+									"got response for request with id '{id_num}', which was not in pending requests"
+								)
 							}
 						}
 					}
-					// If `id` is not set, this may be a live query notification
-					None => {
-						match response.result {
-							Ok(Data::Live(notification)) => {
-								let live_query_id = notification.id;
-								// Check if this live query is registered
-								if let Some(sender) = state.live_queries.get(&live_query_id) {
-									// Send the notification back to the caller or kill live query
-									// if the receiver is already dropped
-									if sender.send(Ok(notification)).await.is_err() {
-										state.live_queries.remove(&live_query_id);
-										let kill = {
-											let request = Command::Kill {
-												uuid: live_query_id.0,
-											}
-											.into_router_request(None)
-											.unwrap();
-
-											let value = crate::core::rpc::format::revision::encode(
-												&request,
-											)
-											.unwrap();
-											Message::Binary(value.into())
-										};
-										if let Err(error) = state.sink.send(kill).await {
-											trace!(
-												"failed to send kill query to the server; {error:?}"
-											);
-											return HandleResult::Disconnected;
-										}
+				}
+				// If `id` is not set, this may be a live query notification
+				None => {
+					if let Ok(DbResult::Live(notification)) = response.result {
+						let live_query_id = notification.id.0;
+						// Check if this live query is registered
+						if let Some(sender) = state.live_queries.get(&live_query_id) {
+							// Send the notification back to the caller or kill live query
+							// if the receiver is already dropped
+							if sender.send(Ok(notification)).await.is_err() {
+								state.live_queries.remove(&live_query_id);
+								let kill = {
+									let request = Command::Kill {
+										uuid: live_query_id,
 									}
+									.into_router_request(None)
+									.unwrap();
+
+									let value =
+										surrealdb_core::rpc::format::revision::encode(&request)
+											.unwrap();
+									Message::Binary(value.into())
+								};
+								if let Err(error) = state.sink.send(kill).await {
+									trace!("failed to send kill query to the server; {error:?}");
+									return HandleResult::Disconnected;
 								}
 							}
-							Ok(..) => { /* Ignored responses like pings */ }
-							Err(error) => error!("{error:?}"),
 						}
 					}
 				}
@@ -376,24 +349,24 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 			#[revisioned(revision = 1)]
 			#[derive(Deserialize)]
 			struct ErrorResponse {
-				id: Option<CoreValue>,
+				id: Option<Value>,
 			}
 
 			// Let's try to find out the ID of the response that failed to deserialise
-			if let Message::Binary(binary) = response {
-				match crate::core::rpc::format::revision::decode(&binary) {
+			if let Message::Binary(binary) = message {
+				match surrealdb_core::rpc::format::revision::decode(&binary) {
 					Ok(ErrorResponse {
 						id,
 					}) => {
 						// Return an error if an ID was returned
-						if let Some(Ok(id)) = id.map(CoreValue::coerce_to) {
-							match state.pending_requests.remove(&id) {
+						if let Some(Value::Number(surrealdb_types::Number::Int(id_num))) = id {
+							match state.pending_requests.remove(&id_num) {
 								Some(pending) => {
 									let _res = pending.response_channel.send(Err(error)).await;
 								}
 								_ => {
 									warn!(
-										"got response for request with id '{id}', which was not in pending requests"
+										"got response for request with id '{id_num}', which was not in pending requests"
 									)
 								}
 							}
@@ -408,6 +381,32 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 		}
 	}
 	HandleResult::Ok
+}
+
+fn db_response_from_message(message: &Message) -> Result<Option<DbResponse>> {
+	match message {
+		Message::Text(text) => {
+			trace!("Received an unexpected text message; {text}");
+			Ok(None)
+		}
+		Message::Binary(binary) => DbResponse::from_bytes(binary).map(Some),
+		Message::Ping(..) => {
+			trace!("Received a ping from the server");
+			Ok(None)
+		}
+		Message::Pong(..) => {
+			trace!("Received a pong from the server");
+			Ok(None)
+		}
+		Message::Frame(..) => {
+			trace!("Received an unexpected raw frame");
+			Ok(None)
+		}
+		Message::Close(..) => {
+			trace!("Received an unexpected close message");
+			Ok(None)
+		}
+	}
 }
 
 async fn router_reconnect(
@@ -429,7 +428,7 @@ async fn router_reconnect(
 						.into_router_request(None)
 						.expect("replay commands should always convert to route requests");
 
-					let message = crate::core::rpc::format::revision::encode(&request).unwrap();
+					let message = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
 
 					if let Err(error) = state.sink.send(Message::Binary(message.into())).await {
 						trace!("{error}");
@@ -445,7 +444,7 @@ async fn router_reconnect(
 					.into_router_request(None)
 					.unwrap();
 					trace!("Request {:?}", request);
-					let payload = crate::core::rpc::format::revision::encode(&request).unwrap();
+					let payload = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
 
 					if let Err(error) = state.sink.send(Message::Binary(payload.into())).await {
 						trace!("{error}");
@@ -474,7 +473,7 @@ pub(crate) async fn run_router(
 ) {
 	let ping = {
 		let request = Command::Health.into_router_request(None).unwrap();
-		let value = crate::core::rpc::format::revision::encode(&request).unwrap();
+		let value = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
 		Message::Binary(value.into())
 	};
 
@@ -601,38 +600,6 @@ pub(crate) async fn run_router(
 	}
 }
 
-impl Response {
-	fn try_from(message: &Message) -> Result<Option<Self>> {
-		match message {
-			Message::Text(text) => {
-				trace!("Received an unexpected text message; {text}");
-				Ok(None)
-			}
-			Message::Binary(binary) => crate::core::rpc::format::revision::decode(binary)
-				.map(Some)
-				.map_err(|x| format!("Failed to deserialize revision payload: {x}"))
-				.map_err(crate::api::Error::InvalidResponse)
-				.map_err(anyhow::Error::new),
-			Message::Ping(..) => {
-				trace!("Received a ping from the server");
-				Ok(None)
-			}
-			Message::Pong(..) => {
-				trace!("Received a pong from the server");
-				Ok(None)
-			}
-			Message::Frame(..) => {
-				trace!("Received an unexpected raw frame");
-				Ok(None)
-			}
-			Message::Close(..) => {
-				trace!("Received an unexpected close message");
-				Ok(None)
-			}
-		}
-	}
-}
-
 #[cfg(test)]
 mod tests {
 	use std::io::Write;
@@ -642,8 +609,9 @@ mod tests {
 	use flate2::Compression;
 	use flate2::write::GzEncoder;
 	use rand::{Rng, thread_rng};
+	use surrealdb_core::rpc;
 
-	use crate::core::{rpc, val};
+	use crate::types::{Array, Value};
 
 	#[test_log::test]
 	fn large_vector_serialisation_bench() {
@@ -698,7 +666,7 @@ mod tests {
 			results.push((payload.len(), COMPRESSED_BINCODE_REF, duration, 1.0));
 		}
 		// Build the Value
-		let vector = val::Value::Array(val::Array::from(vector));
+		let vector = Value::Array(Array::from(vector));
 		//
 		const BINCODE: &str = "Bincode Vec<Value>";
 		const COMPRESSED_BINCODE: &str = "Compressed Bincode Vec<Value>";
@@ -729,7 +697,7 @@ mod tests {
 		{
 			// Unversioned
 			let (duration, payload) =
-				timed(&|| crate::core::rpc::format::bincode::encode(&vector).unwrap());
+				timed(&|| surrealdb_core::rpc::format::bincode::encode(&vector).unwrap());
 			results.push((
 				payload.len(),
 				UNVERSIONED,
@@ -753,7 +721,7 @@ mod tests {
 		{
 			// Versioned
 			let (duration, payload) =
-				timed(&|| crate::core::rpc::format::revision::encode(&vector).unwrap());
+				timed(&|| surrealdb_core::rpc::format::revision::encode(&vector).unwrap());
 			results.push((payload.len(), VERSIONED, duration, payload.len() as f32 / ref_payload));
 
 			// Compressed Versioned

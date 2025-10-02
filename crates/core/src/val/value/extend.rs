@@ -41,12 +41,18 @@ mod tests {
 	use crate::expr::idiom::Idiom;
 	use crate::syn;
 
+	macro_rules! parse_val {
+		($input:expr) => {
+			crate::val::convert_public_value_to_internal(syn::value($input).unwrap())
+		};
+	}
+
 	#[tokio::test]
 	async fn extend_array_value() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test").unwrap().into();
-		let mut val = syn::value("{ test: [100, 200, 300] }").unwrap();
-		let res = syn::value("{ test: [100, 200, 300] }").unwrap();
+		let mut val = parse_val!("{ test: [100, 200, 300] }");
+		let res = parse_val!("{ test: [100, 200, 300] }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
 			.enter(|stk| val.extend(stk, &ctx, &opt, &idi, Value::from(200)))
@@ -60,13 +66,11 @@ mod tests {
 	async fn extend_array_array() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test").unwrap().into();
-		let mut val = syn::value("{ test: [100, 200, 300] }").unwrap();
-		let res = syn::value("{ test: [100, 200, 300, 400, 500] }").unwrap();
+		let mut val = parse_val!("{ test: [100, 200, 300] }");
+		let res = parse_val!("{ test: [100, 200, 300, 400, 500] }");
 		let mut stack = reblessive::TreeStack::new();
 		stack
-			.enter(|stk| {
-				val.extend(stk, &ctx, &opt, &idi, syn::value("[100, 300, 400, 500]").unwrap())
-			})
+			.enter(|stk| val.extend(stk, &ctx, &opt, &idi, parse_val!("[100, 300, 400, 500]")))
 			.finish()
 			.await
 			.unwrap();

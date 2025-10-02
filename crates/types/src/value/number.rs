@@ -1,6 +1,9 @@
 use std::cmp::Ordering;
+use std::fmt::{self, Display};
 use std::hash;
+use std::str::FromStr;
 
+use revision::Revisioned;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
@@ -19,6 +22,56 @@ pub enum Number {
 	Float(f64),
 	/// A decimal number with arbitrary precision
 	Decimal(Decimal),
+}
+
+impl Number {
+	/// A NaN number
+	pub const NAN: Self = Self::Float(f64::NAN);
+
+	/// Checks if this number is NaN.
+	pub fn is_nan(&self) -> bool {
+		matches!(self, Number::Float(v) if v.is_nan())
+	}
+
+	/// Converts this number into an i64.
+	///
+	/// Returns 0 if the number cannot be converted.
+	pub fn to_int(&self) -> Option<i64> {
+		match self {
+			Number::Int(v) => Some(*v),
+			Number::Float(v) => Some(*v as i64),
+			Number::Decimal(v) => v.to_i64(),
+		}
+	}
+
+	/// Converts this number into an f64.
+	///
+	/// Returns 0.0 if the number cannot be converted.
+	pub fn to_f64(&self) -> Option<f64> {
+		match self {
+			Number::Int(v) => Some(*v as f64),
+			Number::Float(v) => Some(*v),
+			Number::Decimal(v) => v.to_f64(),
+		}
+	}
+}
+
+impl Display for Number {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Number::Int(v) => Display::fmt(v, f),
+			Number::Float(v) => {
+				if v.is_finite() {
+					// Add suffix to distinguish between int and float
+					write!(f, "{v}f")
+				} else {
+					// Don't add suffix for NaN, inf, -inf
+					Display::fmt(v, f)
+				}
+			}
+			Number::Decimal(v) => write!(f, "{v}dec"),
+		}
+	}
 }
 
 macro_rules! impl_number {
@@ -268,6 +321,44 @@ impl PartialEq for Number {
 impl PartialOrd for Number {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		Some(self.cmp(other))
+	}
+}
+
+impl Revisioned for Number {
+	fn revision() -> u16 {
+		1
+	}
+
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
+		match self {
+			Number::Int(i) => (0u8, *i).serialize_revisioned(writer),
+			Number::Float(f) => (1u8, *f).serialize_revisioned(writer),
+			Number::Decimal(d) => (2u8, d.to_string()).serialize_revisioned(writer),
+		}
+	}
+
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		let (tag, data): (u8, String) = Revisioned::deserialize_revisioned(reader)?;
+		match tag {
+			0 => data
+				.parse()
+				.map(Number::Int)
+				.map_err(|err| revision::Error::Conversion(format!("invalid int: {err:?}"))),
+			1 => data
+				.parse()
+				.map(Number::Float)
+				.map_err(|err| revision::Error::Conversion(format!("invalid float: {err:?}"))),
+			2 => {
+				let s: String = data;
+				Decimal::from_str(&s)
+					.map_err(|err| revision::Error::Conversion(format!("invalid decimal: {err:?}")))
+					.map(Number::Decimal)
+			}
+			_ => Err(revision::Error::Conversion("invalid number tag".to_string())),
+		}
 	}
 }
 

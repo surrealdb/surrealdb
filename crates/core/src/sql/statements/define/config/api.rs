@@ -5,7 +5,7 @@ use crate::sql::{Expr, Permission};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct ApiConfig {
+pub(crate) struct ApiConfig {
 	pub middleware: Vec<Middleware>,
 	pub permissions: Permission,
 }
@@ -49,7 +49,7 @@ impl From<crate::expr::statements::define::config::api::ApiConfig> for ApiConfig
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Middleware {
+pub(crate) struct Middleware {
 	pub name: String,
 	pub args: Vec<Expr>,
 }

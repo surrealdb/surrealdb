@@ -13,7 +13,7 @@ use crate::idx::planner::RecordStrategy;
 use crate::val::RecordId;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct RelateStatement {
+pub(crate) struct RelateStatement {
 	pub only: bool,
 	/// The expression resulting in the table through which we create a relation
 	pub through: Expr,

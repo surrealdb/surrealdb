@@ -41,52 +41,59 @@ impl Value {
 #[cfg(test)]
 mod tests {
 	use crate::syn;
+	use crate::val::convert_public_value_to_internal;
+
+	macro_rules! parse_val {
+		($input:expr) => {
+			convert_public_value_to_internal(syn::value($input).unwrap())
+		};
+	}
 
 	#[test]
 	fn changed_none() {
-		let old = syn::value("{ test: true, text: 'text', other: { something: true } }").unwrap();
-		let now = syn::value("{ test: true, text: 'text', other: { something: true } }").unwrap();
-		let res = syn::value("{}").unwrap();
+		let old = parse_val!("{ test: true, text: 'text', other: { something: true } }");
+		let now = parse_val!("{ test: true, text: 'text', other: { something: true } }");
+		let res = parse_val!("{}");
 		assert_eq!(res, old.changed(&now));
 	}
 
 	#[test]
 	fn changed_add() {
-		let old = syn::value("{ test: true }").unwrap();
-		let now = syn::value("{ test: true, other: 'test' }").unwrap();
-		let res = syn::value("{ other: 'test' }").unwrap();
+		let old = parse_val!("{ test: true }");
+		let now = parse_val!("{ test: true, other: 'test' }");
+		let res = parse_val!("{ other: 'test' }");
 		assert_eq!(res, old.changed(&now));
 	}
 
 	#[test]
 	fn changed_remove() {
-		let old = syn::value("{ test: true, other: 'test' }").unwrap();
-		let now = syn::value("{ test: true }").unwrap();
-		let res = syn::value("{ other: NONE }").unwrap();
+		let old = parse_val!("{ test: true, other: 'test' }");
+		let now = parse_val!("{ test: true }");
+		let res = parse_val!("{ other: NONE }");
 		assert_eq!(res, old.changed(&now));
 	}
 
 	#[test]
 	fn changed_add_array() {
-		let old = syn::value("{ test: [1,2,3] }").unwrap();
-		let now = syn::value("{ test: [1,2,3,4] }").unwrap();
-		let res = syn::value("{ test: [1,2,3,4] }").unwrap();
+		let old = parse_val!("{ test: [1,2,3] }");
+		let now = parse_val!("{ test: [1,2,3,4] }");
+		let res = parse_val!("{ test: [1,2,3,4] }");
 		assert_eq!(res, old.changed(&now));
 	}
 
 	#[test]
 	fn changed_replace_embedded() {
-		let old = syn::value("{ test: { other: 'test' } }").unwrap();
-		let now = syn::value("{ test: { other: false } }").unwrap();
-		let res = syn::value("{ test: { other: false } }").unwrap();
+		let old = parse_val!("{ test: { other: 'test' } }");
+		let now = parse_val!("{ test: { other: false } }");
+		let res = parse_val!("{ test: { other: false } }");
 		assert_eq!(res, old.changed(&now));
 	}
 
 	#[test]
 	fn changed_change_text() {
-		let old = syn::value("{ test: { other: 'test' } }").unwrap();
-		let now = syn::value("{ test: { other: 'text' } }").unwrap();
-		let res = syn::value("{ test: { other: 'text' } }").unwrap();
+		let old = parse_val!("{ test: { other: 'test' } }");
+		let now = parse_val!("{ test: { other: 'text' } }");
+		let res = parse_val!("{ test: { other: 'text' } }");
 		assert_eq!(res, old.changed(&now));
 	}
 }

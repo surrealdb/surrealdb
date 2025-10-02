@@ -1,42 +1,15 @@
 pub mod api;
 pub(super) mod invoke;
 
-use anyhow::{Result, bail};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
-use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::val::{Array, Object, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
-pub struct RequestMiddleware(pub Vec<(String, Vec<Value>)>);
-
-pub type CollectedMiddleware<'a> = Vec<(&'a String, &'a Vec<Value>)>;
-
-impl RequestMiddleware {
-	pub fn collect<'a>(slice: &'a [&'a RequestMiddleware]) -> Result<CollectedMiddleware<'a>> {
-		let mut middleware: CollectedMiddleware<'a> = Vec::new();
-		for map in slice {
-			for (k, v) in map.0.iter() {
-				match k.split_once("::") {
-					Some(("api", _)) => middleware.push((k, v)),
-					Some(("fn", _)) => {
-						bail!(Error::Unimplemented(
-							"Custom middleware are not yet supported".into(),
-						));
-					}
-					_ => {
-						fail!("Found a middleware which is unparsable")
-					}
-				}
-			}
-		}
-
-		Ok(middleware)
-	}
-}
+pub(crate) struct RequestMiddleware(pub(crate) Vec<(String, Vec<Value>)>);
 
 impl InfoStructure for RequestMiddleware {
 	fn structure(self) -> Value {

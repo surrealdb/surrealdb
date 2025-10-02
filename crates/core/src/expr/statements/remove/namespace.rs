@@ -14,7 +14,7 @@ use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct RemoveNamespaceStatement {
+pub(crate) struct RemoveNamespaceStatement {
 	pub name: Expr,
 	pub if_exists: bool,
 	pub expunge: bool,

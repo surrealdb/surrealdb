@@ -6,6 +6,11 @@ use std::task::Poll;
 use async_channel::{Receiver, Sender};
 use futures::StreamExt;
 use futures::stream::poll_fn;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::iam::Level;
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::options::EngineOptions;
+use surrealdb_types::Variables;
 use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
 
@@ -14,10 +19,6 @@ use crate::api::engine::local::Db;
 use crate::api::method::BoxFuture;
 use crate::api::opt::{Endpoint, EndpointKind};
 use crate::api::{ExtraFeatures, Result, Surreal};
-use crate::core::dbs::{Session, Variables};
-use crate::core::iam::Level;
-use crate::core::kvs::Datastore;
-use crate::core::options::EngineOptions;
 use crate::engine::tasks;
 use crate::opt::WaitFor;
 use crate::opt::auth::Root;
@@ -62,8 +63,8 @@ pub(crate) async fn run_router(
 ) {
 	let configured_root = match address.config.auth {
 		Level::Root => Some(Root {
-			username: &address.config.username,
-			password: &address.config.password,
+			username: address.config.username,
+			password: address.config.password,
 		}),
 		_ => None,
 	};
@@ -84,8 +85,9 @@ pub(crate) async fn run_router(
 				return;
 			}
 			// If a root user is specified, setup the initial datastore credentials
-			if let Some(root) = configured_root {
-				if let Err(error) = kvs.initialise_credentials(root.username, root.password).await {
+			if let Some(root) = &configured_root {
+				if let Err(error) = kvs.initialise_credentials(&root.username, &root.password).await
+				{
 					conn_tx.send(Err(error)).await.ok();
 					return;
 				}

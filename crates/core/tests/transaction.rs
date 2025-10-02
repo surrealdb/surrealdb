@@ -137,7 +137,7 @@ async fn transaction_with_failure_and_return() -> Result<()> {
 	let tmp = res.remove(0).result;
 	assert_eq!(
 		tmp.err().map(|x| x.to_string()),
-		Some(r#"The query was not executed due to a failed transaction"#.to_string())
+		Some(r#"The query was not executed due to a cancelled transaction"#.to_string())
 	);
 	//
 	Ok(())

@@ -1,8 +1,9 @@
-use std::fmt;
+use std::fmt::{self, Write};
 use std::ops::Bound;
 
 use reblessive::tree::Stk;
 use revision::Revisioned;
+use surrealdb_types::sql::ToSql;
 
 use super::SleepStatement;
 use crate::ctx::{Context, MutableContext};
@@ -19,14 +20,15 @@ use crate::expr::statements::{
 };
 use crate::expr::{
 	BinaryOperator, Block, Constant, ControlFlow, FlowResult, FunctionCall, Idiom, Literal, Mock,
-	Param, PostfixOperator, PrefixOperator,
+	ObjectEntry, Param, PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
 use crate::fmt::{EscapeIdent, Pretty};
 use crate::fnc;
+use crate::types::PublicValue;
 use crate::val::{Array, Closure, Range, Table, Value};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Expr {
+pub(crate) enum Expr {
 	Literal(Literal),
 	Param(Param),
 	Idiom(Idiom),
@@ -127,6 +129,69 @@ impl Expr {
 		}
 	}
 
+	pub fn from_public_value(value: PublicValue) -> Self {
+		match value {
+			surrealdb_types::Value::None => Expr::Literal(Literal::None),
+			surrealdb_types::Value::Null => Expr::Literal(Literal::Null),
+			surrealdb_types::Value::Bool(b) => Expr::Literal(Literal::Bool(b)),
+			surrealdb_types::Value::Number(n) => match n {
+				surrealdb_types::Number::Int(i) => Expr::Literal(Literal::Integer(i)),
+				surrealdb_types::Number::Float(f) => Expr::Literal(Literal::Float(f)),
+				surrealdb_types::Number::Decimal(d) => Expr::Literal(Literal::Decimal(d)),
+			},
+			surrealdb_types::Value::String(s) => Expr::Literal(Literal::String(s)),
+			surrealdb_types::Value::Bytes(b) => {
+				Expr::Literal(Literal::Bytes(crate::val::Bytes(b.inner().clone())))
+			}
+			surrealdb_types::Value::Duration(d) => {
+				Expr::Literal(Literal::Duration(crate::val::Duration(d.inner())))
+			}
+			surrealdb_types::Value::Datetime(dt) => {
+				Expr::Literal(Literal::Datetime(crate::val::Datetime(dt.inner())))
+			}
+			surrealdb_types::Value::Uuid(u) => Expr::Literal(Literal::Uuid(crate::val::Uuid(u.0))),
+			surrealdb_types::Value::Array(a) => Expr::Literal(Literal::Array(
+				a.inner().iter().cloned().map(Expr::from_public_value).collect(),
+			)),
+			surrealdb_types::Value::Object(o) => Expr::Literal(Literal::Object(
+				o.inner()
+					.iter()
+					.map(|(k, v)| ObjectEntry {
+						key: k.clone(),
+						value: Expr::from_public_value(v.clone()),
+					})
+					.collect(),
+			)),
+			surrealdb_types::Value::RecordId(r) => {
+				let key_lit = match r.key {
+					surrealdb_types::RecordIdKey::Number(n) => RecordIdKeyLit::Number(n),
+					surrealdb_types::RecordIdKey::String(s) => RecordIdKeyLit::String(s),
+					surrealdb_types::RecordIdKey::Uuid(u) => {
+						RecordIdKeyLit::Uuid(crate::val::Uuid(u.0))
+					}
+					surrealdb_types::RecordIdKey::Array(a) => RecordIdKeyLit::Array(
+						a.inner().iter().cloned().map(Expr::from_public_value).collect(),
+					),
+					surrealdb_types::RecordIdKey::Object(o) => RecordIdKeyLit::Object(
+						o.inner()
+							.iter()
+							.map(|(k, v)| ObjectEntry {
+								key: k.clone(),
+								value: Expr::from_public_value(v.clone()),
+							})
+							.collect(),
+					),
+					_ => return Expr::Literal(Literal::None), // For unsupported key types
+				};
+				Expr::Literal(Literal::RecordId(RecordIdLit {
+					table: r.table.clone(),
+					key: key_lit,
+				}))
+			}
+			_ => todo!("Handle other PublicValue variants"),
+		}
+	}
+
 	/// Checks if a expression is 'pure' i.e. does not rely on the environment.
 	pub(crate) fn is_static(&self) -> bool {
 		match self {
@@ -188,7 +253,7 @@ impl Expr {
 			Expr::FunctionCall(x) => x.receiver.to_idiom(),
 			Expr::Literal(l) => match l {
 				Literal::String(s) => Idiom::field(s.clone()),
-				Literal::Datetime(d) => Idiom::field(d.into_raw_string()),
+				Literal::Datetime(d) => Idiom::field(d.to_raw_string()),
 				x => Idiom::field(x.to_string()),
 			},
 			x => Idiom::field(x.to_string()),
@@ -822,6 +887,12 @@ impl fmt::Display for Expr {
 			Expr::Let(s) => write!(f, "{s}"),
 			Expr::Sleep(s) => write!(f, "{s}"),
 		}
+	}
+}
+
+impl ToSql for Expr {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self)
 	}
 }
 

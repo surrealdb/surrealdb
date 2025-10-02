@@ -3,7 +3,7 @@ use std::io::{self, IsTerminal as _};
 use std::time::{Duration, Instant};
 
 use similar::{Algorithm, TextDiff};
-use surrealdb_core::val::Value as SurValue;
+use surrealdb_types::Value as SurValue;
 
 use super::{
 	MatchValueType, MatcherMismatch, Mismatch, MismatchKind, ResultTypeMismatchReport, TestError,
@@ -445,13 +445,13 @@ impl TestReport {
 			},
 			TestValueExpectation::Matcher(m) => match m.matcher_value_type {
 				MatchValueType::Both => {
-					writeln!(f, "- A result to match matching expression: {}", m.value)
+					writeln!(f, "- A result to match matching expression: {}", m.value_str)
 				}
 				MatchValueType::Error => {
-					writeln!(f, "- A error to match matching expression: {}", m.value)
+					writeln!(f, "- A error to match matching expression: {}", m.value_str)
 				}
 				MatchValueType::Value => {
-					writeln!(f, "- A value to match matching expression: {}", m.value)
+					writeln!(f, "- A value to match matching expression: {}", m.value_str)
 				}
 			},
 		}

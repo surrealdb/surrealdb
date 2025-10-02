@@ -43,6 +43,21 @@ impl File {
 	}
 }
 
+impl From<surrealdb_types::File> for File {
+	fn from(v: surrealdb_types::File) -> Self {
+		Self {
+			bucket: v.bucket().to_string(),
+			key: v.key().to_string(),
+		}
+	}
+}
+
+impl From<File> for surrealdb_types::File {
+	fn from(x: File) -> Self {
+		surrealdb_types::File::new(x.bucket, x.key)
+	}
+}
+
 impl fmt::Display for File {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "f\"{}\"", self.display_inner())

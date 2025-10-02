@@ -27,8 +27,6 @@ use crate::api::method::BoxFuture;
 use crate::api::opt::Tls;
 use crate::api::opt::{Endpoint, EndpointKind, WebsocketConfig};
 use crate::api::{Result, Surreal, conn};
-#[allow(unused_imports, reason = "Used when a DB engine is disabled.")]
-use crate::core::err::Error as DbError;
 use crate::opt::WaitFor;
 impl crate::api::Connection for Any {}
 impl conn::Sealed for Any {
@@ -61,7 +59,7 @@ impl conn::Sealed for Any {
 
 					#[cfg(not(feature = "kv-fdb"))]
 					bail!(
-						DbError::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
+						Error::Scheme("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
 					);
 				}
 
@@ -75,9 +73,7 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
-					bail!(
-						DbError::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())
-					);
+					bail!(Error::Scheme("memory".to_owned()));
 				}
 
 				EndpointKind::RocksDb => {
@@ -90,7 +86,7 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
-					bail!(DbError::Ds(
+					bail!(Error::Scheme(
 						"Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
 					))
 				}
@@ -106,7 +102,7 @@ impl conn::Sealed for Any {
 
 					#[cfg(not(feature = "kv-tikv"))]
 					bail!(
-						DbError::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())
+						Error::Scheme("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())
 					);
 				}
 
@@ -120,7 +116,7 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-surrealkv"))]
-					bail!(DbError::Ds(
+					bail!(Error::Scheme(
 						"Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
 					)
 					);
@@ -149,14 +145,14 @@ impl conn::Sealed for Any {
 						let base_url = address.url;
 						let req = client.get(base_url.join("health")?).header(
 							reqwest::header::USER_AGENT,
-							&*crate::core::cnf::SURREALDB_USER_AGENT,
+							&*surrealdb_core::cnf::SURREALDB_USER_AGENT,
 						);
 						http::health(req).await?;
 						tokio::spawn(http::native::run_router(base_url, client, route_rx));
 					}
 
 					#[cfg(not(feature = "protocol-http"))]
-					bail!(DbError::Ds(
+					bail!(Error::Scheme(
 						"Cannot connect to the `HTTP` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
 					)
 					);
@@ -203,7 +199,7 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "protocol-ws"))]
-					bail!(DbError::Ds(
+					bail!(Error::Scheme(
 						"Cannot connect to the `WebSocket` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
 					));
 				}

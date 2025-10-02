@@ -44,6 +44,7 @@ pub struct Duration(pub time::Duration);
 
 impl Duration {
 	pub const MAX: Duration = Duration(time::Duration::MAX);
+	pub const ZERO: Duration = Duration(time::Duration::ZERO);
 }
 
 impl From<time::Duration> for Duration {
@@ -64,11 +65,23 @@ impl From<time::Duration> for Value {
 	}
 }
 
+impl From<Duration> for crate::types::PublicDuration {
+	fn from(value: Duration) -> Self {
+		Self::from(value.0)
+	}
+}
+
+impl From<crate::types::PublicDuration> for Duration {
+	fn from(value: crate::types::PublicDuration) -> Self {
+		Self(value.inner())
+	}
+}
+
 impl FromStr for Duration {
 	type Err = ();
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		match syn::duration(s) {
-			Ok(v) => Ok(v),
+			Ok(v) => Ok(v.into()),
 			_ => Err(()),
 		}
 	}
@@ -87,7 +100,7 @@ impl Duration {
 		time::Duration::new(secs, nanos).into()
 	}
 	/// Convert the Duration to a raw String
-	pub fn to_raw(&self) -> String {
+	pub fn to_raw(self) -> String {
 		self.to_string()
 	}
 	/// Get the total number of nanoseconds

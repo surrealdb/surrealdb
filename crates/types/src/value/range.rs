@@ -1,6 +1,8 @@
 use std::cmp::Ordering;
+use std::fmt;
 use std::ops::{Bound, RangeBounds};
 
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::{SurrealValue, Value};
@@ -9,6 +11,7 @@ use crate::{SurrealValue, Value};
 ///
 /// A range defines an interval between two values with inclusive or exclusive bounds.
 /// This is commonly used for range queries and comparisons.
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Range {
 	/// The lower bound of the range
@@ -136,5 +139,22 @@ impl Ord for Range {
 			Ordering::Equal => compare_bounds(&self.end, &other.end),
 			x => x,
 		}
+	}
+}
+
+impl fmt::Display for Range {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self.start {
+			Bound::Unbounded => {}
+			Bound::Included(ref x) => write!(f, "{x:?}")?,
+			Bound::Excluded(ref x) => write!(f, "{x:?}>")?,
+		}
+		write!(f, "..")?;
+		match self.end {
+			Bound::Unbounded => {}
+			Bound::Included(ref x) => write!(f, "={x:?}")?,
+			Bound::Excluded(ref x) => write!(f, "{x:?}")?,
+		}
+		Ok(())
 	}
 }

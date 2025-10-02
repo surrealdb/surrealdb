@@ -8,7 +8,7 @@ use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct DefineApiStatement {
+pub(crate) struct DefineApiStatement {
 	pub kind: DefineKind,
 	pub path: Expr,
 	pub actions: Vec<ApiAction>,
@@ -95,7 +95,7 @@ impl From<crate::expr::statements::DefineApiStatement> for DefineApiStatement {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct ApiAction {
+pub(crate) struct ApiAction {
 	pub methods: Vec<ApiMethod>,
 	pub action: Expr,
 	pub config: ApiConfig,

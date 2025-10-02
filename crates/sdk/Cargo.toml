@@ -60,6 +60,7 @@ targets = []
 [dependencies]
 # workspace internal dependencies
 surrealdb-core = { workspace = true, default-features = false }
+surrealdb-types.workspace = true
 
 # External surreal crates
 dmp.workspace = true
@@ -86,7 +87,6 @@ geo = { workspace = true, features = ["use-serde"] }
 indexmap = { workspace = true, features = ["serde"] }
 path-clean.workspace = true
 rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
-serde-content.workspace = true
 semver = { workspace = true, features = ["serde"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true

@@ -4,7 +4,7 @@ use crate::sql::{Data, Expr, Output, Timeout};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct RelateStatement {
+pub(crate) struct RelateStatement {
 	pub only: bool,
 	/// The expression through which we create a relation
 	pub through: Expr,

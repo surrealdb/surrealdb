@@ -4,7 +4,7 @@ use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Cond(pub Expr);
+pub(crate) struct Cond(pub(crate) Expr);
 
 impl fmt::Display for Cond {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

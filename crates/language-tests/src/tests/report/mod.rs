@@ -1,10 +1,10 @@
 use std::any::Any;
 
-use surrealdb_core::dbs::{Session, Variables};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::sql::{Ast, Expr, TopLevelExpr};
 use surrealdb_core::syn::error::RenderedError;
-use surrealdb_core::val::Value as SurValue;
+use surrealdb_types::Variables;
+use surrealdb_types::Value as SurValue;
 
 use super::cmp::{RoughlyEq, RoughlyEqConfig};
 use crate::tests::TestSet;
@@ -109,7 +109,7 @@ pub enum MatcherMismatch {
 	},
 	/// Running the matcher returned false
 	Failed {
-		matcher: Expr,
+		matcher: String,
 		value: Result<SurValue, String>,
 	},
 	/// The test returned a value when an error was expected
@@ -169,7 +169,7 @@ pub enum MatchValueType {
 #[derive(Clone)]
 pub struct MatcherExpectation {
 	matcher_value_type: MatchValueType,
-	value: Expr,
+	value_str: String,
 }
 
 #[derive(Clone)]
@@ -233,7 +233,7 @@ impl TestExpectation {
 							};
 							TestValueExpectation::Matcher(MatcherExpectation {
 								matcher_value_type: ty,
-								value: x._match.0.clone(),
+								value_str: x._match.0.clone(),
 							})
 						}
 					})
@@ -631,10 +631,9 @@ impl TestReport {
 
 		let session = Session::viewer().with_ns("match").with_db("match");
 
-		let ast = Ast {
-			expressions: vec![TopLevelExpr::Expr(expectation.value.clone())],
-		};
-		let res = matcher_datastore.process(ast, &session, Some(run_vars)).await;
+		// Instead of creating an Ast directly, we'll execute the expression as a query string
+		let query = format!("RETURN {}", expectation.value_str);
+		let res = matcher_datastore.execute(&query, &session, Some(run_vars)).await;
 
 		let x = match res {
 			Err(e) => {
@@ -669,7 +668,7 @@ impl TestReport {
 		}
 
 		Some(MatcherMismatch::Failed {
-			matcher: expectation.value.clone(),
+			matcher: expectation.value_str.clone(),
 			value,
 		})
 	}

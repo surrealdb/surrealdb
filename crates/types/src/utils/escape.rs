@@ -58,3 +58,19 @@ impl fmt::Display for QuoteStr<'_> {
 		f.write_fmt(format_args!("{}{}{}", quote, Escape::escape_str(s, quote), quote))
 	}
 }
+
+pub struct EscapeRid<'a>(pub &'a str);
+impl fmt::Display for EscapeRid<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		let s = self.0;
+		// Any non 'normal' characters or are all character digits?
+		if s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
+			|| !s.contains(|x: char| !x.is_ascii_digit() && x != '_')
+		{
+			// Always use brackets for display (not backticks)
+			return f.write_fmt(format_args!("⟨{}⟩", Escape::escape_str(s, '⟩')));
+		}
+
+		f.write_str(s)
+	}
+}

@@ -7,7 +7,7 @@ use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct DefineAnalyzerStatement {
+pub(crate) struct DefineAnalyzerStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub function: Option<String>,

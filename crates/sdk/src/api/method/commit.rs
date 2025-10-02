@@ -2,7 +2,6 @@ use std::future::IntoFuture;
 
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result, Surreal};
-use crate::core::expr::TopLevelExpr;
 
 /// A transaction commit future
 #[derive(Debug)]
@@ -20,7 +19,7 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			self.client.query(TopLevelExpr::Commit).await?;
+			self.client.query("COMMIT").await?;
 			Ok(self.client)
 		})
 	}

@@ -8,10 +8,10 @@ use uuid::Uuid;
 use crate::catalog;
 use crate::catalog::SubscriptionDefinition;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
-use crate::dbs::Notification;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::iam::{Action, Auth, ResourceKind};
+use crate::types::PublicNotification;
 
 /// An Options is passed around when processing a set of query
 /// statements.
@@ -66,7 +66,10 @@ pub trait MessageBroker: Send + Sync + Debug {
 
 	/// Forward a live query event for the given subscription to its owning node.
 	/// The concrete implementation decides how to encode and route this request.
-	fn send(&self, notification: Notification) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
+	fn send(
+		&self,
+		notification: PublicNotification,
+	) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
 }
 
 impl Default for Options {
@@ -273,7 +276,7 @@ impl Options {
 	}
 
 	// Get currently selected base
-	pub fn selected_base(&self) -> Result<Base, Error> {
+	pub(crate) fn selected_base(&self) -> Result<Base, Error> {
 		match (self.ns.as_ref(), self.db.as_ref()) {
 			(None, None) => Ok(Base::Root),
 			(Some(_), None) => Ok(Base::Ns),
@@ -286,7 +289,7 @@ impl Options {
 	///
 	/// The parameter is the approximate cost of the operation (more concretely, the size of the
 	/// stack frame it uses relative to a simple function call). When in doubt, use a value of 1.
-	pub fn dive(&self, cost: u8) -> Result<Self, Error> {
+	pub(crate) fn dive(&self, cost: u8) -> Result<Self, Error> {
 		if self.dive < cost as u32 {
 			return Err(Error::ComputationDepthExceeded);
 		}

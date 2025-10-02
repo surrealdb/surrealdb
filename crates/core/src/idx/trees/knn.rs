@@ -638,6 +638,7 @@ pub(super) mod tests {
 	use crate::idx::seqdocids::DocId;
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
+	use crate::sql::expression::convert_public_value_to_internal;
 	use crate::syn;
 	use crate::val::{Number, Value};
 
@@ -692,8 +693,9 @@ pub(super) mod tests {
 				}
 			}
 			let line = line_result?;
-			let Ok(Value::Array(array)) = syn::value(&line) else {
-				panic!()
+			let Value::Array(array) = convert_public_value_to_internal(syn::value(&line).unwrap())
+			else {
+				panic!("Expected a valid array value");
 			};
 			let vec = Vector::try_from_value(t, array.len(), &Value::Array(array))?.into();
 			res.push((i as DocId, vec));

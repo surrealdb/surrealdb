@@ -13,9 +13,9 @@ use crate::expr::expression::VisitExpression;
 use crate::val::RecordIdKeyRange;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct RecordIdKeyRangeLit {
-	pub start: Bound<RecordIdKeyLit>,
-	pub end: Bound<RecordIdKeyLit>,
+pub(crate) struct RecordIdKeyRangeLit {
+	pub(crate) start: Bound<RecordIdKeyLit>,
+	pub(crate) end: Bound<RecordIdKeyLit>,
 }
 
 impl VisitExpression for RecordIdKeyRangeLit {

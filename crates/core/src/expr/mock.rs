@@ -3,7 +3,7 @@ use std::fmt;
 use crate::fmt::EscapeKwFreeIdent;
 use crate::val::{RecordId, RecordIdKey};
 
-pub struct IntoIter {
+pub(crate) struct IntoIter {
 	model: Mock,
 }
 
@@ -38,7 +38,7 @@ impl Iterator for IntoIter {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Mock {
+pub(crate) enum Mock {
 	Count(String, u64),
 	Range(String, u64, u64),
 	// Add new variants here

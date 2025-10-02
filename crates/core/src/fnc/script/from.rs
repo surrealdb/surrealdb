@@ -22,7 +22,7 @@ impl<'js> FromJs<'js> for Value {
 			js::Type::Bool => Ok(Value::from(val.as_bool().unwrap())),
 			js::Type::Int => Ok(Value::from(val.as_int().unwrap() as f64)),
 			js::Type::Float => Ok(Value::from(val.as_float().unwrap())),
-			js::Type::String => Ok(Value::from(val.as_string().unwrap().to_string()?)),
+			js::Type::String => Ok(Value::from(val.into_string().unwrap().to_string()?)),
 			js::Type::Array => {
 				let v = val.as_array().unwrap();
 				let mut x = Array::with_capacity(v.len());

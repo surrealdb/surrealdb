@@ -1,11 +1,11 @@
-use std::fmt::Display;
 use std::pin::{Pin, pin};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
-use futures::{Stream, StreamExt, stream};
+use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
+use surrealdb_types::sql::ToSql;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tracing::instrument;
@@ -16,8 +16,8 @@ use wasm_bindgen_futures::spawn_local as spawn;
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
 use crate::ctx::Context;
 use crate::ctx::reason::Reason;
-use crate::dbs::response::Response;
-use crate::dbs::{Force, Notification, Options, QueryType};
+use crate::dbs::response::QueryResult;
+use crate::dbs::{Force, Options, QueryType};
 use crate::doc::DefaultBroker;
 use crate::err::Error;
 use crate::expr::expression::VisitExpression;
@@ -27,7 +27,9 @@ use crate::expr::statements::OptionStatement;
 use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
+use crate::rpc::DbResultError;
 use crate::sql::{self, Ast};
+use crate::types::PublicNotification;
 use crate::val::Value;
 use crate::{err, expr};
 
@@ -35,13 +37,13 @@ const TARGET: &str = "surrealdb::core::dbs";
 
 pub struct Executor {
 	stack: TreeStack,
-	results: Vec<Response>,
+	results: Vec<QueryResult>,
 	opt: Options,
 	ctx: Context,
 }
 
 impl Executor {
-	fn prepare_broker(&mut self) -> Option<async_channel::Receiver<Notification>> {
+	fn prepare_broker(&mut self) -> Option<async_channel::Receiver<PublicNotification>> {
 		if !self.ctx.has_notifications() {
 			return None;
 		}
@@ -88,7 +90,7 @@ impl Executor {
 	///
 	/// Generic over `S` to accept both concrete statements and wrappers that
 	/// implement `Display` and `VisitExpression`.
-	fn check_slow_log<S: VisitExpression + Display>(&self, start: &Instant, stm: &S) {
+	fn check_slow_log<S: VisitExpression + ToSql>(&self, start: &Instant, stm: &S) {
 		if let Some(slow_log) = self.ctx.slow_log() {
 			slow_log.check_log(&self.ctx, start, stm);
 		}
@@ -335,13 +337,13 @@ impl Executor {
 				if let Err(e) = lock.complete_changes(false).await {
 					let _ = lock.cancel().await;
 
-					bail!(Error::QueryNotExecutedDetail {
+					bail!(Error::QueryNotExecuted {
 						message: e.to_string(),
 					});
 				}
 
 				if let Err(e) = lock.commit().await {
-					bail!(Error::QueryNotExecutedDetail {
+					bail!(Error::QueryNotExecuted {
 						message: e.to_string(),
 					});
 				}
@@ -392,9 +394,12 @@ impl Executor {
 					return Ok(());
 				}
 
-				self.results.push(Response {
+				self.results.push(QueryResult {
 					time: Duration::ZERO,
-					result: Err(anyhow!(Error::QueryNotExecuted)),
+					result: Err(DbResultError::QueryNotExecuted(
+						"Tried to start a transaction while another transaction was open"
+							.to_string(),
+					)),
 					query_type: QueryType::Other,
 				});
 			}
@@ -433,7 +438,7 @@ impl Executor {
 
 				for res in &mut self.results[start_results..] {
 					res.query_type = QueryType::Other;
-					res.result = Err(anyhow!(Error::QueryCancelled));
+					res.result = Err(DbResultError::QueryCancelled);
 				}
 
 				while let Some(stmt) = stream.next().await {
@@ -443,11 +448,11 @@ impl Executor {
 						return Ok(());
 					}
 
-					self.results.push(Response {
+					self.results.push(QueryResult {
 						time: Duration::ZERO,
 						result: Err(match done {
-							Reason::Timedout => anyhow!(Error::QueryTimedout),
-							Reason::Canceled => anyhow!(Error::QueryCancelled),
+							Reason::Timedout => DbResultError::QueryTimedout,
+							Reason::Canceled => DbResultError::QueryCancelled,
 						}),
 						query_type: QueryType::Other,
 					});
@@ -470,23 +475,24 @@ impl Executor {
 			};
 
 			let before = Instant::now();
-			let value = match stmt {
+			let result = match stmt {
 				TopLevelExpr::Begin => {
 					let _ = txn.cancel().await;
 					// tried to begin a transaction within a transaction.
 
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(anyhow!(Error::QueryNotExecuted));
+						res.result = Err(DbResultError::QueryNotExecuted(
+							"The query was not executed due to a failed transaction".to_string(),
+						));
 					}
 
-					self.results.push(Response {
+					self.results.push(QueryResult {
 						time: Duration::ZERO,
-						result: Err(anyhow!(Error::QueryNotExecutedDetail {
-							message:
-								"Tried to start a transaction while another transaction was open"
-									.to_string(),
-						})),
+						result: Err(DbResultError::InternalError(
+							"Tried to start a transaction while another transaction was open"
+								.to_string(),
+						)),
 						query_type: QueryType::Other,
 					});
 
@@ -499,9 +505,12 @@ impl Executor {
 							return Ok(());
 						}
 
-						self.results.push(Response {
+						self.results.push(QueryResult {
 							time: Duration::ZERO,
-							result: Err(anyhow!(Error::QueryNotExecuted)),
+							result: Err(DbResultError::QueryNotExecuted(
+								"The query was not executed due to a failed transaction"
+									.to_string(),
+							)),
 							query_type: QueryType::Other,
 						});
 					}
@@ -515,7 +524,7 @@ impl Executor {
 					// update the results indicating cancelation.
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(anyhow!(Error::QueryCancelled));
+						res.result = Err(DbResultError::QueryCancelled);
 					}
 
 					self.opt.broker = None;
@@ -555,9 +564,8 @@ impl Executor {
 					// failed to commit
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(anyhow!(Error::QueryNotExecutedDetail {
-							message: e.to_string(),
-						}));
+						res.result =
+							Err(DbResultError::InternalError(format!("Query not executed: {}", e)));
 					}
 
 					self.opt.broker = None;
@@ -570,7 +578,7 @@ impl Executor {
 						// results
 						continue;
 					}
-					Err(e) => Err(e),
+					Err(e) => Err(DbResultError::InternalError(e.to_string())),
 				},
 				stmt => {
 					skip_remaining = matches!(stmt, TopLevelExpr::Expr(Expr::Return(_)));
@@ -578,53 +586,58 @@ impl Executor {
 					// reintroduce planner later.
 					let plan = stmt;
 
-					let r = match self.execute_plan_in_transaction(txn.clone(), &before, plan).await
-					{
-						Ok(x) => Ok(x),
-						Err(ControlFlow::Return(value)) => {
-							skip_remaining = true;
-							Ok(value)
-						}
-						Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
-							Err(anyhow!(Error::InvalidControlFlow))
-						}
-						Err(ControlFlow::Err(e)) => {
-							for res in &mut self.results[start_results..] {
-								res.query_type = QueryType::Other;
-								res.result = Err(anyhow!(Error::QueryNotExecuted));
+					let r =
+						match self.execute_plan_in_transaction(txn.clone(), &before, plan).await {
+							Ok(x) => Ok(x),
+							Err(ControlFlow::Return(value)) => {
+								skip_remaining = true;
+								Ok(value)
 							}
-
-							// statement return an error. Consume all the other statement until we
-							// hit a cancel or commit.
-							self.results.push(Response {
-								time: before.elapsed(),
-								result: Err(e),
-								query_type,
-							});
-
-							let _ = txn.cancel().await;
-
-							self.opt.broker = None;
-
-							while let Some(stmt) = stream.next().await {
-								yield_now!();
-								let stmt = stmt?;
-								if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
-									return Ok(());
+							Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
+								Err(anyhow!(Error::InvalidControlFlow))
+							}
+							Err(ControlFlow::Err(e)) => {
+								for res in &mut self.results[start_results..] {
+									res.query_type = QueryType::Other;
+									res.result = Err(DbResultError::QueryNotExecuted(
+										"The query was not executed due to a failed transaction"
+											.to_string(),
+									));
 								}
 
-								self.results.push(Response {
+								// statement return an error. Consume all the other statement until
+								// we hit a cancel or commit.
+								self.results.push(QueryResult {
+									time: before.elapsed(),
+									result: Err(DbResultError::InternalError(e.to_string())),
+									query_type,
+								});
+
+								let _ = txn.cancel().await;
+
+								self.opt.broker = None;
+
+								while let Some(stmt) = stream.next().await {
+									yield_now!();
+									let stmt = stmt?;
+									if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
+										return Ok(());
+									}
+
+									self.results.push(QueryResult {
 									time: Duration::ZERO,
-									result: Err(anyhow!(Error::QueryNotExecuted)),
+									result: Err(DbResultError::QueryNotExecuted(
+										"The query was not executed due to a cancelled transaction".to_string(),
+									)),
 									query_type: QueryType::Other,
 								});
-							}
+								}
 
-							// ran out of statements before the transaction ended.
-							// Just break as we have nothing else we can do.
-							return Ok(());
-						}
-					};
+								// ran out of statements before the transaction ended.
+								// Just break as we have nothing else we can do.
+								return Ok(());
+							}
+						};
 
 					if skip_remaining {
 						// If we skip the next values due to return then we need to clear the other
@@ -632,13 +645,16 @@ impl Executor {
 						self.results.truncate(start_results)
 					}
 
-					r
+					match r {
+						Ok(value) => Ok(convert_value_to_public_value(value)?),
+						Err(err) => Err(DbResultError::InternalError(err.to_string())),
+					}
 				}
 			};
 
-			self.results.push(Response {
+			self.results.push(QueryResult {
 				time: before.elapsed(),
-				result: value,
+				result,
 				query_type,
 			});
 		}
@@ -649,9 +665,7 @@ impl Executor {
 
 		for res in &mut self.results[start_results..] {
 			res.query_type = QueryType::Other;
-			res.result = Err(anyhow!(Error::QueryNotExecutedDetail {
-				message: "Missing COMMIT statement".to_string(),
-			}));
+			res.result = Err(DbResultError::InternalError("Missing COMMIT statement".to_string()));
 		}
 
 		self.opt.broker = None;
@@ -665,7 +679,7 @@ impl Executor {
 		ctx: Context,
 		opt: Options,
 		qry: Ast,
-	) -> Result<Vec<Response>> {
+	) -> Result<Vec<QueryResult>> {
 		let stream = futures::stream::iter(qry.expressions.into_iter().map(Ok));
 		Self::execute_stream(kvs, ctx, opt, false, stream).await
 	}
@@ -676,18 +690,9 @@ impl Executor {
 		ctx: Context,
 		opt: Options,
 		qry: LogicalPlan,
-	) -> Result<Vec<Response>> {
+	) -> Result<Vec<QueryResult>> {
 		let stream = futures::stream::iter(qry.expressions.into_iter().map(Ok));
 		Self::execute_expr_stream(kvs, ctx, opt, false, stream).await
-	}
-
-	pub async fn execute_expr(
-		kvs: &Datastore,
-		ctx: Context,
-		opt: Options,
-		plan: TopLevelExpr,
-	) -> Result<Vec<Response>> {
-		Self::execute_expr_stream(kvs, ctx, opt, false, stream::once(async { Ok(plan) })).await
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
@@ -697,7 +702,7 @@ impl Executor {
 		opt: Options,
 		skip_success_results: bool,
 		stream: S,
-	) -> Result<Vec<Response>>
+	) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<sql::TopLevelExpr>>,
 	{
@@ -718,7 +723,7 @@ impl Executor {
 		opt: Options,
 		skip_success_results: bool,
 		stream: S,
-	) -> Result<Vec<Response>>
+	) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<TopLevelExpr>>,
 	{
@@ -729,9 +734,9 @@ impl Executor {
 			let stmt = match stmt {
 				Ok(x) => x,
 				Err(e) => {
-					this.results.push(Response {
+					this.results.push(QueryResult {
 						time: Duration::ZERO,
-						result: Err(e),
+						result: Err(DbResultError::InternalError(e.to_string())),
 						query_type: QueryType::Other,
 					});
 
@@ -744,9 +749,9 @@ impl Executor {
 				// handle option here because it doesn't produce a result.
 				TopLevelExpr::Begin => {
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
-						this.results.push(Response {
+						this.results.push(QueryResult {
 							time: Duration::ZERO,
-							result: Err(e),
+							result: Err(DbResultError::InternalError(e.to_string())),
 							query_type: QueryType::Other,
 						});
 
@@ -758,8 +763,12 @@ impl Executor {
 
 					let now = Instant::now();
 					let result = this.execute_bare_statement(kvs, &now, stmt).await;
+					let result = match result {
+						Ok(value) => Ok(convert_value_to_public_value(value)?),
+						Err(err) => Err(DbResultError::InternalError(err.to_string())),
+					};
 					if !skip_success_results || result.is_err() {
-						this.results.push(Response {
+						this.results.push(QueryResult {
 							time: now.elapsed(),
 							result,
 							query_type,
@@ -771,6 +780,203 @@ impl Executor {
 		}
 		Ok(this.results)
 	}
+}
+
+/// Convert our internal value `crate::val::Value` to the public value `surrealdb_types::Value`.
+///
+/// In the future, as the two types diverge, this function will need access to the context in order
+/// to convert certain values to the public value.
+pub(crate) fn convert_value_to_public_value(
+	value: crate::val::Value,
+) -> Result<surrealdb_types::Value> {
+	match value {
+		crate::val::Value::None => Ok(surrealdb_types::Value::None),
+		crate::val::Value::Null => Ok(surrealdb_types::Value::Null),
+		crate::val::Value::Bool(value) => Ok(surrealdb_types::Value::Bool(value)),
+		crate::val::Value::Number(value) => convert_number_to_public(value),
+		crate::val::Value::String(value) => Ok(surrealdb_types::Value::String(value)),
+		crate::val::Value::Datetime(value) => convert_datetime_to_public(value),
+		crate::val::Value::Duration(value) => convert_duration_to_public(value),
+		crate::val::Value::Uuid(value) => convert_uuid_to_public(value),
+		crate::val::Value::Array(value) => convert_array_to_public(value),
+		crate::val::Value::Object(value) => convert_object_to_public(value),
+		crate::val::Value::Geometry(value) => convert_geometry_to_public(value),
+		crate::val::Value::Bytes(value) => convert_bytes_to_public(value),
+		crate::val::Value::RecordId(value) => convert_record_id_to_public(value),
+		crate::val::Value::File(value) => convert_file_to_public(value),
+		crate::val::Value::Range(value) => convert_range_to_public(*value),
+		crate::val::Value::Regex(value) => convert_regex_to_public(value),
+		crate::val::Value::Table(value) => {
+			let s = value.into_string();
+			tracing::debug!("Converting table value to public value: {s}");
+			Ok(surrealdb_types::Value::String(s))
+		}
+		crate::val::Value::Closure(_) => {
+			Err(anyhow::anyhow!("Closure values cannot be converted to public value"))
+		}
+	}
+}
+
+fn convert_number_to_public(value: crate::val::Number) -> Result<surrealdb_types::Value> {
+	let number = match value {
+		crate::val::Number::Int(i) => surrealdb_types::Number::Int(i),
+		crate::val::Number::Float(f) => surrealdb_types::Number::Float(f),
+		crate::val::Number::Decimal(d) => surrealdb_types::Number::Decimal(d),
+	};
+	Ok(surrealdb_types::Value::Number(number))
+}
+
+fn convert_datetime_to_public(value: crate::val::Datetime) -> Result<surrealdb_types::Value> {
+	Ok(surrealdb_types::Value::Datetime(surrealdb_types::Datetime::new(value.0)))
+}
+
+fn convert_duration_to_public(value: crate::val::Duration) -> Result<surrealdb_types::Value> {
+	Ok(surrealdb_types::Value::Duration(surrealdb_types::Duration::from_duration(value.0)))
+}
+
+fn convert_uuid_to_public(value: crate::val::Uuid) -> Result<surrealdb_types::Value> {
+	Ok(surrealdb_types::Value::Uuid(surrealdb_types::Uuid(value.0)))
+}
+
+fn convert_bytes_to_public(value: crate::val::Bytes) -> Result<surrealdb_types::Value> {
+	Ok(surrealdb_types::Value::Bytes(surrealdb_types::Bytes::new(value.0)))
+}
+
+fn convert_regex_to_public(value: crate::val::Regex) -> Result<surrealdb_types::Value> {
+	Ok(surrealdb_types::Value::Regex(surrealdb_types::Regex(value.0)))
+}
+
+fn convert_file_to_public(value: crate::val::File) -> Result<surrealdb_types::Value> {
+	Ok(surrealdb_types::Value::File(surrealdb_types::File::new(
+		value.bucket.clone(),
+		value.key.clone(),
+	)))
+}
+
+fn convert_geometry_to_public(value: crate::val::Geometry) -> Result<surrealdb_types::Value> {
+	use surrealdb_types::Geometry as PublicGeometry;
+	let geometry = match value {
+		crate::val::Geometry::Point(p) => PublicGeometry::Point(p),
+		crate::val::Geometry::Line(l) => PublicGeometry::Line(l),
+		crate::val::Geometry::Polygon(p) => PublicGeometry::Polygon(p),
+		crate::val::Geometry::MultiPoint(mp) => PublicGeometry::MultiPoint(mp),
+		crate::val::Geometry::MultiLine(ml) => PublicGeometry::MultiLine(ml),
+		crate::val::Geometry::MultiPolygon(mp) => PublicGeometry::MultiPolygon(mp),
+		crate::val::Geometry::Collection(c) => {
+			let converted: Result<Vec<_>> = c
+				.into_iter()
+				.map(|g| {
+					if let surrealdb_types::Value::Geometry(g) = convert_geometry_to_public(g)? {
+						Ok(g)
+					} else {
+						Err(anyhow::anyhow!("Failed to convert geometry collection item"))
+					}
+				})
+				.collect();
+			PublicGeometry::Collection(converted?)
+		}
+	};
+	Ok(surrealdb_types::Value::Geometry(geometry))
+}
+
+fn convert_array_to_public(value: crate::val::Array) -> Result<surrealdb_types::Value> {
+	let converted: Result<Vec<_>> =
+		value.0.into_iter().map(convert_value_to_public_value).collect();
+	Ok(surrealdb_types::Value::Array(surrealdb_types::Array::from_values(converted?)))
+}
+
+fn convert_object_to_public(value: crate::val::Object) -> Result<surrealdb_types::Value> {
+	let converted: Result<std::collections::BTreeMap<_, _>> = value
+		.0
+		.into_iter()
+		.map(|(k, v)| convert_value_to_public_value(v).map(|v| (k, v)))
+		.collect();
+	Ok(surrealdb_types::Value::Object(surrealdb_types::Object::from_map(converted?)))
+}
+
+fn convert_record_id_to_public(value: crate::val::RecordId) -> Result<surrealdb_types::Value> {
+	let key = convert_record_id_key_to_public(value.key)?;
+	Ok(surrealdb_types::Value::RecordId(surrealdb_types::RecordId {
+		table: value.table,
+		key,
+	}))
+}
+
+fn convert_record_id_key_to_public(
+	key: crate::val::RecordIdKey,
+) -> Result<surrealdb_types::RecordIdKey> {
+	match key {
+		crate::val::RecordIdKey::Number(n) => Ok(surrealdb_types::RecordIdKey::Number(n)),
+		crate::val::RecordIdKey::String(s) => Ok(surrealdb_types::RecordIdKey::String(s)),
+		crate::val::RecordIdKey::Uuid(u) => {
+			Ok(surrealdb_types::RecordIdKey::Uuid(surrealdb_types::Uuid(u.0)))
+		}
+		crate::val::RecordIdKey::Array(a) => {
+			let converted_array = convert_array_to_public(a)?;
+			if let surrealdb_types::Value::Array(arr) = converted_array {
+				Ok(surrealdb_types::RecordIdKey::Array(arr))
+			} else {
+				Err(anyhow::anyhow!("Failed to convert record id key array"))
+			}
+		}
+		crate::val::RecordIdKey::Object(o) => {
+			let converted_object = convert_object_to_public(o)?;
+			if let surrealdb_types::Value::Object(obj) = converted_object {
+				Ok(surrealdb_types::RecordIdKey::Object(obj))
+			} else {
+				Err(anyhow::anyhow!("Failed to convert record id key object"))
+			}
+		}
+		crate::val::RecordIdKey::Range(r) => {
+			let start = match r.start {
+				std::ops::Bound::Included(k) => {
+					std::ops::Bound::Included(convert_record_id_key_to_public(k)?)
+				}
+				std::ops::Bound::Excluded(k) => {
+					std::ops::Bound::Excluded(convert_record_id_key_to_public(k)?)
+				}
+				std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
+			};
+			let end = match r.end {
+				std::ops::Bound::Included(k) => {
+					std::ops::Bound::Included(convert_record_id_key_to_public(k)?)
+				}
+				std::ops::Bound::Excluded(k) => {
+					std::ops::Bound::Excluded(convert_record_id_key_to_public(k)?)
+				}
+				std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
+			};
+			Ok(surrealdb_types::RecordIdKey::Range(Box::new(surrealdb_types::RecordIdKeyRange {
+				start,
+				end,
+			})))
+		}
+	}
+}
+
+fn convert_range_to_public(value: crate::val::Range) -> Result<surrealdb_types::Value> {
+	let start = match value.start {
+		std::ops::Bound::Included(v) => {
+			std::ops::Bound::Included(convert_value_to_public_value(v)?)
+		}
+		std::ops::Bound::Excluded(v) => {
+			std::ops::Bound::Excluded(convert_value_to_public_value(v)?)
+		}
+		std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
+	};
+	let end = match value.end {
+		std::ops::Bound::Included(v) => {
+			std::ops::Bound::Included(convert_value_to_public_value(v)?)
+		}
+		std::ops::Bound::Excluded(v) => {
+			std::ops::Bound::Excluded(convert_value_to_public_value(v)?)
+		}
+		std::ops::Bound::Unbounded => std::ops::Bound::Unbounded,
+	};
+	Ok(surrealdb_types::Value::Range(Box::new(surrealdb_types::Range {
+		start,
+		end,
+	})))
 }
 
 #[cfg(test)]

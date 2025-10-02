@@ -6,7 +6,7 @@ use crate::sql::{AccessType, Base, Expr};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct DefineAccessStatement {
+pub(crate) struct DefineAccessStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub base: Base,

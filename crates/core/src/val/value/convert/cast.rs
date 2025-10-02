@@ -355,7 +355,7 @@ impl Cast for String {
 			Value::None => Ok("NONE".into()),
 			Value::String(x) => Ok(x),
 			Value::Uuid(x) => Ok(x.to_raw()),
-			Value::Datetime(x) => Ok(x.into_raw_string()),
+			Value::Datetime(x) => Ok(x.to_raw_string()),
 			Value::Number(Number::Decimal(x)) => Ok(x.to_string()),
 			x => Ok(x.to_string()),
 		}
@@ -643,7 +643,7 @@ impl Cast for RecordId {
 		match v {
 			Value::RecordId(x) => Ok(x),
 			Value::String(x) => match syn::record_id(&x) {
-				Ok(x) => Ok(x),
+				Ok(x) => Ok(x.into()),
 				Err(_) => Err(CastError::InvalidKind {
 					from: Value::String(x),
 					into: "record".to_string(),
@@ -869,7 +869,7 @@ impl Value {
 		match self {
 			Value::RecordId(v) if v.is_record_type(val) => Ok(v),
 			Value::String(v) => match syn::record_id(v.as_str()) {
-				Ok(x) if x.is_record_type(val) => Ok(x),
+				Ok(x) if x.is_record_type(val) => Ok(x.into()),
 				_ => {
 					let mut kind = "record<".to_string();
 					for (idx, t) in val.iter().enumerate() {

@@ -407,7 +407,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 			num @ GqlValue::Number(_) => gql_to_sql_kind(num, Kind::Number),
 			GqlValue::Boolean(b) => Ok(SurValue::Bool(*b)),
 			bin @ GqlValue::Binary(_) => gql_to_sql_kind(bin, Kind::Bytes),
-			GqlValue::Enum(s) => Ok(SurValue::Strand(s.as_str().into())),
+			GqlValue::Enum(s) => Ok(SurValue::String(s.as_str().into())),
 			arr @ GqlValue::List(_) => gql_to_sql_kind(arr, Kind::Array(Box::new(Kind::Any), None)),
 		},
 		Kind::None => match val {
@@ -551,8 +551,8 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::String => match val {
-			GqlValue::String(s) => Ok(SurValue::Strand(s.to_owned().into())),
-			GqlValue::Enum(s) => Ok(SurValue::Strand(s.as_str().into())),
+			GqlValue::String(s) => Ok(SurValue::String(s.to_owned().into())),
+			GqlValue::Enum(s) => Ok(SurValue::String(s.as_str().into())),
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::Uuid => match val {

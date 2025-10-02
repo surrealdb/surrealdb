@@ -12,13 +12,13 @@ use std::time::Duration;
 
 use async_channel::Sender;
 use indexmap::IndexMap;
+use surrealdb_core::dbs::QueryResult;
+use surrealdb_types::{Notification, Value};
 use trice::Instant;
 use uuid::Uuid;
 
-use crate::api::conn::{Command, DbResponse};
+use crate::api::conn::Command;
 use crate::api::{Connect, Result, Surreal};
-use crate::core::dbs::Notification;
-use crate::core::val::Value as CoreValue;
 use crate::opt::IntoEndpoint;
 
 pub(crate) const PATH: &str = "rpc";
@@ -29,14 +29,12 @@ enum RequestEffect {
 	/// Completing this request sets a variable to a give value.
 	Set {
 		key: String,
-		value: CoreValue,
+		value: Value,
 	},
 	/// Completing this request sets a variable to a give value.
 	Clear {
 		key: String,
 	},
-	/// Insert requests repsonses need to be flattened in an array.
-	Insert,
 	/// No effect
 	None,
 }
@@ -54,12 +52,12 @@ struct PendingRequest {
 	// Does resolving this request has some effects.
 	effect: RequestEffect,
 	// The channel to send the result of the request into.
-	response_channel: Sender<Result<DbResponse>>,
+	response_channel: Sender<Result<Vec<QueryResult>>>,
 }
 
 struct RouterState<Sink, Stream> {
 	/// Vars currently set by the set method,
-	vars: IndexMap<String, CoreValue>,
+	vars: IndexMap<String, Value>,
 	/// Messages which aught to be replayed on a reconnect.
 	replay: IndexMap<ReplayMethod, Command>,
 	/// Pending live queries

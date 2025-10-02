@@ -1,4 +1,5 @@
 use std::ops::Deref;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::extract::ws::{WebSocket, WebSocketUpgrade};
@@ -11,6 +12,12 @@ use axum_extra::headers::Header;
 use bytes::Bytes;
 use http::HeaderMap;
 use http::header::SEC_WEBSOCKET_PROTOCOL;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::capabilities::RouteTarget;
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::mem::ALLOC;
+use surrealdb_core::rpc::format::{Format, PROTOCOLS};
+use surrealdb_core::rpc::{DbResponse, RpcContext};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
@@ -20,17 +27,10 @@ use super::error::ResponseError;
 use super::headers::{Accept, ContentType, SurrealId};
 use crate::cnf;
 use crate::cnf::HTTP_MAX_RPC_BODY_SIZE;
-use crate::core::dbs::Session;
-use crate::core::dbs::capabilities::RouteTarget;
-use crate::core::kvs::Datastore;
-use crate::core::mem::ALLOC;
-use crate::core::rpc::RpcContext;
-use crate::core::rpc::format::{Format, PROTOCOLS};
 use crate::net::error::Error as NetError;
 use crate::rpc::RpcState;
 use crate::rpc::format::HttpFormat;
 use crate::rpc::http::Http;
-use crate::rpc::response::IntoRpcResponse;
 use crate::rpc::websocket::Websocket;
 
 pub(super) fn router() -> Router<Arc<RpcState>> {
@@ -70,7 +70,7 @@ async fn get_handler(
 			match id.to_str() {
 				Ok(id) => {
 					// Attempt to parse the request id as a UUID
-					match Uuid::try_parse(id) {
+					match Uuid::from_str(id) {
 						// The specified request id was a valid UUID
 						Ok(id) => id,
 						// The specified request id was not a UUID
@@ -87,7 +87,7 @@ async fn get_handler(
 			// A request id was specified to try to parse it
 			false => match id.header_value().to_str() {
 				// Attempt to parse the request id as a UUID
-				Ok(id) => match Uuid::try_parse(id) {
+				Ok(id) => match Uuid::from_str(id) {
 					// The specified request id was a valid UUID
 					Ok(id) => id,
 					// The specified request id was not a UUID
@@ -186,9 +186,19 @@ async fn post_handler(
 	match fmt.req_http(body) {
 		Ok(req) => {
 			// Execute the specified method
-			let res = RpcContext::execute(&rpc, req.version, req.txn, req.method, req.params).await;
+			let res = RpcContext::execute(
+				&rpc,
+				req.version,
+				req.txn.map(Into::into),
+				req.method,
+				req.params,
+			)
+			.await;
 			// Return the HTTP response
-			Ok(fmt.res_http(res.into_response(None))?)
+			Ok(fmt.res_http(match res {
+				Ok(result) => DbResponse::success(None, result),
+				Err(err) => DbResponse::failure(None, err.into()),
+			})?)
 		}
 		Err(err) => Err(err.into()),
 	}

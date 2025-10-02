@@ -1,9 +1,10 @@
-use std::fmt::{self, Display};
+use std::fmt::{self, Display, Write};
 
 use anyhow::{Result, bail};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
 use reblessive::tree::Stk;
+use surrealdb_types::sql::ToSql;
 
 use super::DefineKind;
 use crate::catalog::providers::{AuthorisationProvider, NamespaceProvider};
@@ -24,7 +25,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineAccessStatement {
+pub(crate) struct DefineAccessStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub base: Base,
@@ -152,25 +153,6 @@ impl DefineAccessStatement {
 				}
 			},
 		}
-	}
-
-	/// Returns a version of the statement where potential secrets are redacted
-	/// This function should be used when displaying the statement to datastore users
-	/// This function should NOT be used when displaying the statement for export purposes
-	pub fn redacted(&self) -> DefineAccessStatement {
-		let mut das = self.clone();
-		das.access_type = match das.access_type {
-			AccessType::Jwt(ac) => AccessType::Jwt(ac.redacted()),
-			AccessType::Record(mut ac) => {
-				ac.jwt = ac.jwt.redacted();
-				AccessType::Record(ac)
-			}
-			AccessType::Bearer(mut ac) => {
-				ac.jwt = ac.jwt.redacted();
-				AccessType::Bearer(ac)
-			}
-		};
-		das
 	}
 
 	async fn to_definition(
@@ -453,5 +435,11 @@ impl Display for DefineAccessStatement {
 			write!(f, " COMMENT {}", comment)?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for DefineAccessStatement {
+	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+		write!(f, "{}", self)
 	}
 }

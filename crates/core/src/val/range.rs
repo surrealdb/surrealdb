@@ -20,7 +20,7 @@ use crate::val::{Array, IndexFormat, Number, Value};
 #[serde(rename = "$surrealdb::private::Range")]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub struct Range {
+pub(crate) struct Range {
 	pub start: Bound<Value>,
 	pub end: Bound<Value>,
 }
@@ -31,15 +31,6 @@ impl Range {
 		Range {
 			start: Bound::Unbounded,
 			end: Bound::Unbounded,
-		}
-	}
-
-	/// Creates a new range with the first argument as the start bound and the
-	/// second as the end bound.
-	pub const fn new(start: Bound<Value>, end: Bound<Value>) -> Self {
-		Range {
-			start,
-			end,
 		}
 	}
 }
@@ -135,7 +126,7 @@ impl Range {
 		})
 	}
 
-	pub fn into_literal(self) -> expr::Expr {
+	pub(crate) fn into_literal(self) -> expr::Expr {
 		match (self.start, self.end) {
 			(Bound::Unbounded, Bound::Unbounded) => {
 				expr::Expr::Literal(expr::Literal::UnboundedRange)
@@ -283,7 +274,7 @@ impl TypedRange<i64> {
 		usize::try_from(start.abs_diff(end)).unwrap_or(usize::MAX)
 	}
 
-	pub fn cast_to_array(self) -> Array {
+	pub(crate) fn cast_to_array(self) -> Array {
 		let iter = self.iter();
 		Array(iter.map(|i| Value::Number(Number::Int(i))).collect())
 	}
@@ -348,11 +339,12 @@ impl Iterator for IntegerRangeIter {
 #[cfg(test)]
 mod test {
 	use super::Range;
+	use crate::sql::expression::convert_public_value_to_internal;
 	use crate::syn;
 	use crate::val::Value;
 
 	fn r(r: &str) -> Range {
-		let Value::Range(r) = syn::value(r).unwrap() else {
+		let Value::Range(r) = convert_public_value_to_internal(syn::value(r).unwrap()) else {
 			panic!()
 		};
 		*r

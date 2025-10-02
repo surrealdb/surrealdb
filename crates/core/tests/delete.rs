@@ -1,10 +1,10 @@
 mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
-use surrealdb_core::dbs::{Action, Notification, Session};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_core::syn;
-use surrealdb_core::val::{Array, RecordId, Value};
+use surrealdb_types::{Action, Array, Notification, RecordId, Value};
 
 //
 // Permissions
@@ -149,7 +149,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Array::new().into(),
+				res.is_ok() && res.unwrap() != Value::Array(Array::new()),
 				"unexpected error creating person record"
 			);
 
@@ -163,7 +163,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Array::new().into(),
+				res.is_ok() && res.unwrap() != Value::Array(Array::new()),
 				"unexpected error creating person record"
 			);
 
@@ -177,7 +177,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Array::new().into(),
+				res.is_ok() && res.unwrap() != Value::Array(Array::new()),
 				"unexpected error creating person record"
 			);
 
@@ -197,7 +197,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					.await
 					.unwrap();
 				let res = resp.remove(0).output();
-				assert!(res.is_ok() && res.unwrap() == Array::new().into(), "{}", msg);
+				assert!(res.is_ok() && res.unwrap() == Value::Array(Array::new()), "{}", msg);
 			} else {
 				// Verify the record has not been deleted in any DB
 				let mut resp = ds
@@ -209,7 +209,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					.await
 					.unwrap();
 				let res = resp.remove(0).output();
-				assert!(res.is_ok() && res.unwrap() != Array::new().into(), "{}", msg);
+				assert!(res.is_ok() && res.unwrap() != Value::Array(Array::new()), "{}", msg);
 
 				let mut resp = ds
 					.execute(
@@ -220,7 +220,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					.await
 					.unwrap();
 				let res = resp.remove(0).output();
-				assert!(res.is_ok() && res.unwrap() != Array::new().into(), "{}", msg);
+				assert!(res.is_ok() && res.unwrap() != Value::Array(Array::new()), "{}", msg);
 
 				let mut resp = ds
 					.execute(
@@ -231,7 +231,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					.await
 					.unwrap();
 				let res = resp.remove(0).output();
-				assert!(res.is_ok() && res.unwrap() != Array::new().into(), "{}", msg);
+				assert!(res.is_ok() && res.unwrap() != Value::Array(Array::new()), "{}", msg);
 			}
 		}
 	}
@@ -267,7 +267,7 @@ async fn check_permissions_auth_enabled() {
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
 		assert!(
-			res.is_ok() && res.unwrap() != Array::new().into(),
+			res.is_ok() && res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"failed to create record"
 		);
@@ -291,7 +291,7 @@ async fn check_permissions_auth_enabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 		assert!(
-			res.is_ok() && res.unwrap() != Array::new().into(),
+			res.is_ok() && res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"anonymous user should not be able to delete a record if the table has no permissions"
 		);
@@ -313,7 +313,7 @@ async fn check_permissions_auth_enabled() {
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
 		assert!(
-			res.is_ok() && res.unwrap() != Array::new().into(),
+			res.is_ok() && res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"failed to create record"
 		);
@@ -337,7 +337,7 @@ async fn check_permissions_auth_enabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 		assert!(
-			res.is_ok() && res.unwrap() == Array::new().into(),
+			res.is_ok() && res.unwrap() == Value::Array(Array::new()),
 			"{}",
 			"anonymous user should be able to delete a record if the table has full permissions"
 		);
@@ -374,7 +374,7 @@ async fn check_permissions_auth_disabled() {
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
 		assert!(
-			res.is_ok() && res.unwrap() != Array::new().into(),
+			res.is_ok() && res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"failed to create record"
 		);
@@ -398,7 +398,7 @@ async fn check_permissions_auth_disabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 		assert!(
-			res.is_ok() && res.unwrap() == Array::new().into(),
+			res.is_ok() && res.unwrap() == Value::Array(Array::new()),
 			"{}",
 			"anonymous user should be able to delete a record if the table has no permissions"
 		);
@@ -420,7 +420,7 @@ async fn check_permissions_auth_disabled() {
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 		let res = resp.remove(0).output();
 		assert!(
-			res.is_ok() && res.unwrap() != Array::new().into(),
+			res.is_ok() && res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"failed to create record"
 		);
@@ -444,7 +444,7 @@ async fn check_permissions_auth_disabled() {
 			.unwrap();
 		let res = resp.remove(0).output();
 		assert!(
-			res.is_ok() && res.unwrap() == Array::new().into(),
+			res.is_ok() && res.unwrap() == Value::Array(Array::new()),
 			"{}",
 			"anonymous user should be able to delete a record if the table has full permissions"
 		);
@@ -484,7 +484,7 @@ async fn delete_filtered_live_notification() -> Result<()> {
 	let res = &mut dbs.execute("DELETE person:test_true", &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	let tmp = res.remove(0).result?;
-	let val = Array::new().into();
+	let val = Value::Array(Array::new());
 	assert_eq!(tmp, val);
 
 	// Validate notification

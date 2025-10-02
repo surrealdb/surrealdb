@@ -3,7 +3,7 @@ use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
-use surrealdb_core::val::{Array, RecordId};
+use surrealdb_types::{Array, RecordId, Value};
 
 use crate::helpers::Test;
 
@@ -178,7 +178,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 		"test",
 		"test",
 		"test",
-		RecordId::new("user".to_owned(), "one".to_owned()).into(),
+		Value::RecordId(RecordId::new("user", "one".to_string())),
 	);
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -197,7 +197,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Array::new().into();
+	let val = Value::Array(Array::new());
 	assert_eq!(tmp, val);
 	//
 	Ok(())

@@ -7,18 +7,12 @@ use bincode::Options;
 use revision::Revisioned;
 use serde::Serialize;
 use serde::ser::SerializeMap as _;
+use surrealdb_core::kvs::export::Config as DbExportConfig;
+use surrealdb_types::{Array, Notification, Object, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::MlExportConfig;
 use crate::Result;
-use crate::core::dbs::Notification;
-use crate::core::expr::LogicalPlan;
-use crate::core::kvs::export::Config as DbExportConfig;
-#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-use crate::core::val::Table as CoreTable;
-#[allow(unused_imports)]
-use crate::core::val::{Array as CoreArray, Object as CoreObject, Value as CoreValue};
-use crate::opt::Resource;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
@@ -28,70 +22,19 @@ pub(crate) enum Command {
 		database: Option<String>,
 	},
 	Signup {
-		credentials: CoreObject,
+		credentials: Object,
 	},
 	Signin {
-		credentials: CoreObject,
+		credentials: Object,
 	},
 	Authenticate {
 		token: String,
 	},
 	Invalidate,
-	Create {
-		txn: Option<Uuid>,
-		what: Resource,
-		data: Option<CoreValue>,
-	},
-	Upsert {
-		txn: Option<Uuid>,
-		what: Resource,
-		data: Option<CoreValue>,
-	},
-	Update {
-		txn: Option<Uuid>,
-		what: Resource,
-		data: Option<CoreValue>,
-	},
-	Insert {
-		txn: Option<Uuid>,
-		// inserts can only be on a table.
-		what: Option<String>,
-		data: CoreValue,
-	},
-	InsertRelation {
-		txn: Option<Uuid>,
-		what: Option<String>,
-		data: CoreValue,
-	},
-	Patch {
-		txn: Option<Uuid>,
-		what: Resource,
-		data: Option<CoreValue>,
-		upsert: bool,
-	},
-	Merge {
-		txn: Option<Uuid>,
-		what: Resource,
-		data: Option<CoreValue>,
-		upsert: bool,
-	},
-	Select {
-		txn: Option<Uuid>,
-		what: Resource,
-	},
-	Delete {
-		txn: Option<Uuid>,
-		what: Resource,
-	},
-	Query {
-		txn: Option<Uuid>,
-		query: LogicalPlan,
-		variables: CoreObject,
-	},
 	RawQuery {
 		txn: Option<Uuid>,
 		query: Cow<'static, str>,
-		variables: CoreObject,
+		variables: Variables,
 	},
 	ExportFile {
 		path: PathBuf,
@@ -119,7 +62,7 @@ pub(crate) enum Command {
 	Version,
 	Set {
 		key: String,
-		value: CoreValue,
+		value: Value,
 	},
 	Unset {
 		key: String,
@@ -134,28 +77,26 @@ pub(crate) enum Command {
 	Run {
 		name: String,
 		version: Option<String>,
-		args: CoreArray,
+		args: Array,
 	},
 }
 
 impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
-		use crate::core::expr::{Data, Output, UpdateStatement, UpsertStatement};
-		use crate::core::val::{self};
-		use crate::engine::resource_to_exprs;
+		use surrealdb_types::Uuid;
 
 		let res = match self {
 			Command::Use {
 				namespace,
 				database,
 			} => {
-				let namespace = namespace.map(From::from).unwrap_or(CoreValue::None);
-				let database = database.map(From::from).unwrap_or(CoreValue::None);
+				let namespace = namespace.map(Value::String).unwrap_or(Value::None);
+				let database = database.map(Value::String).unwrap_or(Value::None);
 				RouterRequest {
 					id,
 					method: "use",
-					params: Some(vec![namespace, database].into()),
+					params: Some(Value::Array(Array::from(vec![namespace, database]))),
 					transaction: None,
 				}
 			}
@@ -164,7 +105,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "signup",
-				params: Some(vec![CoreValue::from(credentials)].into()),
+				params: Some(Value::Array(Array::from(vec![Value::from_t(credentials)]))),
 				transaction: None,
 			},
 			Command::Signin {
@@ -172,7 +113,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "signin",
-				params: Some(vec![CoreValue::from(credentials)].into()),
+				params: Some(Value::Array(Array::from(vec![Value::from_t(credentials)]))),
 				transaction: None,
 			},
 			Command::Authenticate {
@@ -180,7 +121,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "authenticate",
-				params: Some(vec![CoreValue::from(token)].into()),
+				params: Some(Value::Array(Array::from(vec![Value::from_t(token)]))),
 				transaction: None,
 			},
 			Command::Invalidate => RouterRequest {
@@ -189,236 +130,17 @@ impl Command {
 				params: None,
 				transaction: None,
 			},
-			Command::Create {
-				txn,
-				what,
-				data,
-			} => {
-				let mut params = vec![what.into_core_value()];
-				if let Some(data) = data {
-					params.push(data);
-				}
-
-				RouterRequest {
-					id,
-					method: "create",
-					params: Some(params.into()),
-					transaction: txn,
-				}
-			}
-			Command::Upsert {
-				txn,
-				what,
-				data,
-				..
-			} => {
-				let mut params = vec![what.into_core_value()];
-				if let Some(data) = data {
-					params.push(data);
-				}
-
-				RouterRequest {
-					id,
-					method: "upsert",
-					params: Some(params.into()),
-					transaction: txn,
-				}
-			}
-			Command::Update {
-				txn,
-				what,
-				data,
-				..
-			} => {
-				let mut params = vec![what.into_core_value()];
-
-				if let Some(data) = data {
-					params.push(data);
-				}
-
-				RouterRequest {
-					id,
-					method: "update",
-					params: Some(params.into()),
-					transaction: txn,
-				}
-			}
-			Command::Insert {
-				txn,
-				what,
-				data,
-			} => {
-				let table = match what {
-					Some(w) => {
-						let table = CoreTable::new(w);
-						CoreValue::from(table)
-					}
-					None => CoreValue::None,
-				};
-
-				let params = vec![table, data];
-
-				RouterRequest {
-					id,
-					method: "insert",
-					params: Some(params.into()),
-					transaction: txn,
-				}
-			}
-			Command::InsertRelation {
-				txn,
-				what,
-				data,
-			} => {
-				let table = match what {
-					Some(w) => {
-						let table = CoreTable::new(w);
-						CoreValue::from(table)
-					}
-					None => CoreValue::None,
-				};
-				let params = vec![table, data];
-
-				RouterRequest {
-					id,
-					method: "insert_relation",
-					params: Some(params.into()),
-					transaction: txn,
-				}
-			}
-			Command::Patch {
-				txn,
-				what,
-				data,
-				upsert,
-				..
-			} => {
-				let query = if upsert {
-					let expr = UpsertStatement {
-						only: false,
-						what: resource_to_exprs(what),
-						with: None,
-						data: data.map(|x| Data::PatchExpression(x.into_literal())),
-						cond: None,
-						output: Some(Output::After),
-						timeout: None,
-						parallel: false,
-						explain: None,
-					};
-					expr.to_string()
-				} else {
-					let expr = UpdateStatement {
-						only: false,
-						what: resource_to_exprs(what),
-						with: None,
-						data: data.map(|x| Data::PatchExpression(x.into_literal())),
-						cond: None,
-						output: Some(Output::After),
-						timeout: None,
-						parallel: false,
-						explain: None,
-					};
-					expr.to_string()
-				};
-
-				let variables = val::Object::default();
-				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
-
-				RouterRequest {
-					id,
-					method: "query",
-					params: Some(params.into()),
-					transaction: txn,
-				}
-			}
-			Command::Merge {
-				txn,
-				what,
-				data,
-				upsert,
-				..
-			} => {
-				let query = if upsert {
-					let expr = UpsertStatement {
-						only: false,
-						what: resource_to_exprs(what),
-						with: None,
-						data: data.map(|x| Data::MergeExpression(x.into_literal())),
-						cond: None,
-						output: Some(Output::After),
-						timeout: None,
-						parallel: false,
-						explain: None,
-					};
-					expr.to_string()
-				} else {
-					let expr = UpdateStatement {
-						only: false,
-						what: resource_to_exprs(what),
-						with: None,
-						data: data.map(|x| Data::MergeExpression(x.into_literal())),
-						cond: None,
-						output: Some(Output::After),
-						timeout: None,
-						parallel: false,
-						explain: None,
-					};
-					expr.to_string()
-				};
-
-				let variables = val::Object::default();
-				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
-
-				RouterRequest {
-					id,
-					method: "query",
-					params: Some(params.into()),
-					transaction: txn,
-				}
-			}
-			Command::Select {
-				txn,
-				what,
-				..
-			} => RouterRequest {
-				id,
-				method: "select",
-				params: Some(CoreValue::Array(vec![what.into_core_value()].into())),
-				transaction: txn,
-			},
-			Command::Delete {
-				txn,
-				what,
-				..
-			} => RouterRequest {
-				id,
-				method: "delete",
-				params: Some(CoreValue::Array(vec![what.into_core_value()].into())),
-				transaction: txn,
-			},
-			Command::Query {
-				txn,
-				query,
-				variables,
-			} => {
-				let params: Vec<CoreValue> = vec![query.to_string().into(), variables.into()];
-				RouterRequest {
-					id,
-					method: "query",
-					params: Some(params.into()),
-					transaction: txn,
-				}
-			}
 			Command::RawQuery {
 				txn,
 				query,
 				variables,
 			} => {
-				let params: Vec<CoreValue> = vec![query.into_owned().into(), variables.into()];
+				let params: Vec<Value> =
+					vec![Value::String(query.into_owned()), Value::Object(variables.into())];
 				RouterRequest {
 					id,
 					method: "query",
-					params: Some(params.into()),
+					params: Some(Value::Array(Array::from(params))),
 					transaction: txn,
 				}
 			}
@@ -458,7 +180,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "let",
-				params: Some(CoreValue::from(vec![CoreValue::from(key), value])),
+				params: Some(Value::from_t(vec![Value::from_t(key), value])),
 				transaction: None,
 			},
 			Command::Unset {
@@ -466,7 +188,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "unset",
-				params: Some(CoreValue::from(vec![CoreValue::from(key)])),
+				params: Some(Value::from_t(vec![Value::from_t(key)])),
 				transaction: None,
 			},
 			Command::SubscribeLive {
@@ -477,7 +199,7 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "kill",
-				params: Some(CoreValue::from(vec![CoreValue::from(val::Uuid(uuid))])),
+				params: Some(Value::from_t(vec![Value::Uuid(Uuid(uuid))])),
 				transaction: None,
 			},
 			Command::Run {
@@ -485,65 +207,32 @@ impl Command {
 				version,
 				args,
 			} => {
-				let version = version.map(From::from).unwrap_or(CoreValue::None);
+				let version = version.map(Value::String).unwrap_or(Value::None);
 				RouterRequest {
 					id,
 					method: "run",
-					params: Some(
-						vec![CoreValue::from(name), version, CoreValue::Array(args)].into(),
-					),
+					params: Some(Value::Array(Array::from(vec![
+						Value::String(name),
+						version,
+						Value::Array(args),
+					]))),
 					transaction: None,
 				}
 			}
 		};
 		Some(res)
 	}
-
-	#[cfg(feature = "protocol-http")]
-	pub(crate) fn needs_flatten(&self) -> bool {
-		match self {
-			Command::Upsert {
-				what,
-				..
-			}
-			| Command::Update {
-				what,
-				..
-			}
-			| Command::Patch {
-				what,
-				..
-			}
-			| Command::Merge {
-				what,
-				..
-			}
-			| Command::Select {
-				what,
-				..
-			}
-			| Command::Delete {
-				what,
-				..
-			} => matches!(what, Resource::RecordId(_)),
-			Command::Insert {
-				data,
-				..
-			} => !data.is_array(),
-			_ => false,
-		}
-	}
 }
 
 /// A struct which will be serialized as a map to behave like the previously
 /// used BTreeMap.
 ///
-/// This struct serializes as if it is a crate::core::expr::Value::Object.
-#[derive(Debug)]
+/// This struct serializes as if it is a surrealdb_core::expr::Value::Object.
+#[derive(Debug, SurrealValue)]
 pub(crate) struct RouterRequest {
 	id: Option<i64>,
 	method: &'static str,
-	params: Option<CoreValue>,
+	params: Option<Value>,
 	#[allow(dead_code)]
 	transaction: Option<Uuid>,
 }
@@ -748,10 +437,10 @@ mod test {
 	use std::io::Cursor;
 
 	use revision::Revisioned;
+	use surrealdb_types::{Array, Number, Value};
 	use uuid::Uuid;
 
 	use super::RouterRequest;
-	use crate::core::val::{Number, Value};
 
 	fn assert_converts<S, D, I>(req: &RouterRequest, s: S, d: D)
 	where
@@ -772,7 +461,7 @@ mod test {
 			req.id
 		);
 		let Some(Value::String(x)) = obj.get("method") else {
-			panic!("invalid method field: {}", obj)
+			panic!("invalid method field: {obj:?}")
 		};
 		assert_eq!(x.as_str(), req.method);
 
@@ -784,7 +473,10 @@ mod test {
 		let request = RouterRequest {
 			id: Some(1234),
 			method: "request",
-			params: Some(vec![Value::from(1234i64), Value::from("request")].into()),
+			params: Some(Value::Array(Array::from(vec![
+				Value::Number(Number::Int(1234i64)),
+				Value::String("request".to_string()),
+			]))),
 			transaction: Some(Uuid::new_v4()),
 		};
 
@@ -792,8 +484,8 @@ mod test {
 
 		assert_converts(
 			&request,
-			|i| crate::core::rpc::format::bincode::encode(i).unwrap(),
-			|b| crate::core::rpc::format::bincode::decode(&b).unwrap(),
+			|i| surrealdb_core::rpc::format::bincode::encode(i).unwrap(),
+			|b| surrealdb_core::rpc::format::bincode::decode(&b).unwrap(),
 		);
 
 		println!("test convert revisioned");

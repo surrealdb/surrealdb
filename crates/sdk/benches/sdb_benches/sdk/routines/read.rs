@@ -1,6 +1,6 @@
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
-use surrealdb_core::val::RecordIdKey;
+use surrealdb_types::RecordIdKey;
 use tokio::runtime::Runtime;
 use tokio::task::JoinSet;
 

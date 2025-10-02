@@ -17,7 +17,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineParamStatement {
+pub(crate) struct DefineParamStatement {
 	pub kind: DefineKind,
 	pub name: String,
 	pub value: Expr,

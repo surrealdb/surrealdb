@@ -6,7 +6,7 @@ use crate::sql::Expr;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Fetchs(pub Vec<Fetch>);
+pub(crate) struct Fetchs(pub(crate) Vec<Fetch>);
 
 impl Deref for Fetchs {
 	type Target = Vec<Fetch>;
@@ -34,7 +34,7 @@ impl From<crate::expr::Fetchs> for Fetchs {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Fetch(pub Expr);
+pub(crate) struct Fetch(pub(crate) Expr);
 
 impl Display for Fetch {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
