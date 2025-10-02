@@ -39,9 +39,7 @@ use tower::ServiceBuilder;
 use tower_http::ServiceBuilderExt;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::auth::AsyncRequireAuthorizationLayer;
-#[cfg(feature = "http-compression")]
 use tower_http::compression::CompressionLayer;
-#[cfg(feature = "http-compression")]
 use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::request_id::MakeRequestUuid;
@@ -131,7 +129,6 @@ pub async fn init<F: RouterFactory>(ds: Arc<Datastore>, ct: CancellationToken) -
 		// Limit the number of requests handled at once
 		.concurrency_limit(*cnf::NET_MAX_CONCURRENT_REQUESTS);
 
-	#[cfg(feature = "http-compression")]
 	let service = service.layer(
 		CompressionLayer::new().compress_when(
 			// Don't compress below 512 bytes
@@ -143,23 +140,9 @@ pub async fn init<F: RouterFactory>(ds: Arc<Datastore>, ct: CancellationToken) -
 		),
 	);
 
-	#[cfg(feature = "http-compression")]
 	let allow_header = [
 		http::header::ACCEPT,
 		http::header::ACCEPT_ENCODING,
-		http::header::AUTHORIZATION,
-		http::header::CONTENT_TYPE,
-		http::header::ORIGIN,
-		NS.clone(),
-		DB.clone(),
-		ID.clone(),
-		AUTH_NS.clone(),
-		AUTH_DB.clone(),
-	];
-
-	#[cfg(not(feature = "http-compression"))]
-	let allow_header = [
-		http::header::ACCEPT,
 		http::header::AUTHORIZATION,
 		http::header::CONTENT_TYPE,
 		http::header::ORIGIN,

@@ -194,7 +194,6 @@ default = [
     "http",
 ]
 http = ["surrealdb/http"]
-http-compression = []
 jwks = ["surrealdb/jwks"]
 ml = ["surrealdb/ml"]
 performance-profiler = ["dep:pprof"]

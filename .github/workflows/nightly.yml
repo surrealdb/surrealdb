@@ -31,6 +31,6 @@ jobs:
     with:
       nightly-release: true
       git-ref: main
-      extra-features: storage-tikv,http-compression,jwks,ml
+      extra-features: storage-tikv,jwks,ml
       publish: ${{ inputs.publish || github.event_name == 'schedule' }}
     secrets: inherit
