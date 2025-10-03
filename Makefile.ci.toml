@@ -253,7 +253,6 @@ category = "CI - INTEGRATION TESTS"
 command = "cargo"
 args = [
     "llvm-cov",
-    "nextest",
     "--lcov",
     "--output-path",
     "lcov.info",
