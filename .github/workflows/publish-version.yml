@@ -126,7 +126,7 @@ jobs:
           tools: cargo-nextest,cargo-make
 
       - name: Test workspace + coverage
-        run: cargo make ci-workspace-coverage
+        run: cargo make ci-test-workspace
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # (Actions must be pinned by commit hash) v5.5.1
