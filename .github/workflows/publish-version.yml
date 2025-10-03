@@ -132,6 +132,16 @@ jobs:
       - name: Test workspace + coverage
         run: cargo make ci-workspace-coverage
 
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # (Actions must be pinned by commit hash) v5.5.1
+        with:
+          files: lcov.info
+          fail_ci_if_error: true
+          flags: workspace-tests
+          name: released-coverage
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
       - name: Debug info
         if: always()
         run: |
@@ -140,13 +150,6 @@ jobs:
           df -h
           ps auxf
           cat /tmp/surrealdb.log || true
-
-      - name: Upload coverage report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # (Actions must be pinned by commit hash) v4.6.2
-        with:
-          name: code-coverage-report
-          path: target/llvm-cov/html/
-          retention-days: 5
 
   format:
     name: Check format

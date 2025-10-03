@@ -254,7 +254,9 @@ command = "cargo"
 args = [
     "llvm-cov",
     "nextest",
-    "--html",
+    "--lcov",
+    "--output-path",
+    "lcov.info",
     "--locked",
     "--no-default-features",
     "--features",
