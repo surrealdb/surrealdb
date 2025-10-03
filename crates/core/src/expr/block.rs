@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
 
 use reblessive::tree::Stk;
-use revision::Revisioned;
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 
 use super::FlowResult;
 use crate::ctx::{Context, MutableContext};
@@ -20,7 +20,9 @@ impl Revisioned for Block {
 	fn revision() -> u16 {
 		1
 	}
+}
 
+impl SerializeRevisioned for Block {
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		writer: &mut W,
@@ -28,9 +30,11 @@ impl Revisioned for Block {
 		self.to_string().serialize_revisioned(writer)?;
 		Ok(())
 	}
+}
 
+impl DeserializeRevisioned for Block {
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		let query: String = Revisioned::deserialize_revisioned(reader)?;
+		let query: String = DeserializeRevisioned::deserialize_revisioned(reader)?;
 
 		let expr = crate::syn::block(&query)
 			.map_err(|err| revision::Error::Conversion(err.to_string()))?;
