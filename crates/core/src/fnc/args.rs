@@ -1,10 +1,10 @@
 use std::vec::IntoIter;
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 
 use crate::err::Error;
-use crate::val::Value;
 use crate::val::value::{Cast as CastTrait, Coerce};
+use crate::val::Value;
 
 /// The number of arguments a function takes.
 #[derive(Debug)]
@@ -97,13 +97,6 @@ impl<T: FromArg> FromArg for Optional<T> {
 		if !arg.has_next() {
 			return Ok(Optional(None));
 		}
-
-		if T::arity().lower == 1 {
-			if let Some(Value::None) = arg.peek() {
-				return Ok(Optional(None));
-			}
-		}
-
 		let v = T::from_arg(name, arg)?;
 		Ok(Optional(Some(v)))
 	}
