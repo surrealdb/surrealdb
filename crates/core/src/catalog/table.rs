@@ -1,4 +1,4 @@
-use revision::{Revisioned, revisioned};
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId, Permissions, ViewDefinition};
@@ -19,18 +19,22 @@ impl Revisioned for TableId {
 	fn revision() -> u16 {
 		1
 	}
+}
 
+impl SerializeRevisioned for TableId {
 	#[inline]
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		self.0.serialize_revisioned(writer)
+		SerializeRevisioned::serialize_revisioned(&self.0, writer)
 	}
+}
 
+impl DeserializeRevisioned for TableId {
 	#[inline]
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		Revisioned::deserialize_revisioned(reader).map(TableId)
+		DeserializeRevisioned::deserialize_revisioned(reader).map(TableId)
 	}
 }
 
