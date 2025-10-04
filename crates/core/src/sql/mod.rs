@@ -84,7 +84,7 @@ pub use self::lookup::Lookup;
 pub use self::mock::Mock;
 pub use self::model::Model;
 pub use self::operator::{AssignOperator, BinaryOperator, PostfixOperator, PrefixOperator};
-pub use self::order::Order;
+pub use self::order::{Order, OrderList, Ordering};
 pub use self::output::Output;
 pub use self::param::Param;
 pub use self::part::Part;
