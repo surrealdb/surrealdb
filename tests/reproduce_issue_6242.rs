@@ -99,7 +99,7 @@ mod tests {
 
 		// Assertions to verify the bug
 		let count_val =
-			cnt_rows2.get(0).and_then(|v| v.get("count")).and_then(|v| v.as_u64()).unwrap_or(0);
+			cnt_rows2.first().and_then(|v| v.get("count")).and_then(|v| v.as_u64()).unwrap_or(0);
 		println!("\nBUG CHECK:");
 		println!("- Count reported: {}", count_val);
 		println!("- CREATE results empty: {}", create_rows.is_empty());
@@ -169,7 +169,7 @@ mod tests {
 		};
 
 		// Analysis
-		let count_val = count_rows.get(0).map(|c| c.count).unwrap_or(0);
+		let count_val = count_rows.first().map(|c| c.count).unwrap_or(0);
 		println!("\nAnalysis:");
 		println!("- CREATE returned {} rows", create_rows.len());
 		println!("- SELECT returned {} rows", select_rows.len());
