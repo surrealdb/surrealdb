@@ -950,7 +950,6 @@ mod http_integration {
 	}
 
 	#[test(tokio::test)]
-	#[cfg(feature = "http-compression")]
 	async fn sql_endpoint_with_compression() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/sql");

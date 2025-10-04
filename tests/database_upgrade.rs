@@ -408,7 +408,7 @@ mod database_upgrade {
 		info!("Create a new local instance; endpoint => {endpoint}");
 		let db = connect(endpoint).await.unwrap();
 		info!("Select namespace and database");
-		db.use_ns(NS).use_db(DB).await.unwrap();
+		db.use_ns(Ulid::new().to_string()).use_db(DB).await.unwrap();
 		db
 	}
 }

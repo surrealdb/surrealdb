@@ -41,7 +41,22 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable (Actions must be pinned by commit hash)
         with:
-          toolchain: ${{ inputs.rust-version }}
+          toolchain: stable
+
+      - name: Install release-plz
+        run: |
+          curl -L https://github.com/MarcoIeni/release-plz/releases/download/release-plz-v0.3.30/release-plz-x86_64-unknown-linux-gnu.tar.gz | sudo tar -xz -C /usr/bin
+          sudo chmod +x /usr/bin/release-plz
+
+      - name: Configure release-plz
+        run: |
+          cat << EOF > /tmp/release-plz.toml
+          [workspace]
+          changelog_update = false
+          git_release_enable = false
+          semver_check = false
+          git_tag_enable = false
+          EOF
 
       - name: Publish the crate
         env:
@@ -59,4 +74,4 @@ jobs:
             extra_args="${extra_args} --dry-run"
           fi
 
-          cargo +${{ inputs.rust-version }} publish --workspace ${extra_args}
+          release-plz release --config /tmp/release-plz.toml ${extra_args}

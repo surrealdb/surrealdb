@@ -73,13 +73,13 @@ fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> Fiel
 
 		// Sum operations
 		(FieldStatsDelta::SumAdd, FieldStatsDelta::SumSub) => FieldStatsDelta::SumAdd, /* No net
-		                                                                                 * change
-		                                                                                 * in count
-		                                                                                 * for sum */
+																						* change
+																						* in count
+																						* for sum */
 		(FieldStatsDelta::SumSub, FieldStatsDelta::SumAdd) => FieldStatsDelta::SumAdd, /* No net
-		                                                                                 * change
-		                                                                                 * in count
-		                                                                                 * for sum */
+																						* change
+																						* in count
+																						* for sum */
 
 		// Mean operations
 		(
@@ -418,521 +418,302 @@ impl Document {
 			let Some(tb) = ft.view.as_ref() else {
 				fail!("Table stored as view table did not have a view");
 			};
+
 			// Check if there is a GROUP BY clause
-			match &tb.groups {
-				// There is a GROUP BY clause specified
-				Some(group) => {
-					// Check if a WHERE clause is specified
-					match &tb.cond {
-						// There is a WHERE clause specified
-						Some(cond) => {
-							// Get the group IDs for the initial and current values
-							let initial_group_ids = if !targeted_force && act != Action::Create {
-								if stk
-									.run(|stk| cond.compute(stk, ctx, opt, Some(&self.initial)))
-									.await
-									.catch_return()?
-									.is_truthy()
-								{
-									Some(
-										Self::get_group_ids(stk, ctx, opt, group, &self.initial)
-											.await?,
-									)
-								} else {
-									None
-								}
-							} else {
-								None
-							};
-
-							let current_group_ids = if act != Action::Delete {
-								if stk
-									.run(|stk| cond.compute(stk, ctx, opt, Some(&self.current)))
-									.await
-									.catch_return()?
-									.is_truthy()
-								{
-									Some(
-										Self::get_group_ids(stk, ctx, opt, group, &self.current)
-											.await?,
-									)
-								} else {
-									None
-								}
-							} else {
-								None
-							};
-
-							// Check if the groups are different (record moved between groups)
-							let groups_changed = match (&initial_group_ids, &current_group_ids) {
-								(Some(initial), Some(current)) => initial != current,
-								_ => false,
-							};
-
-							if groups_changed {
-								// Handle removal from old group
-								if let Some(initial_ids) = initial_group_ids {
-									let mut old_set_ops = Vec::new();
-									let mut old_del_ops = None;
-									let mut old_metadata_deltas = HashMap::new();
-
-									let fdc = FieldDataContext {
-										ft,
-										act: FieldAction::Sub,
-										view: tb,
-										groups: group,
-										group_ids: initial_ids.clone(),
-										doc: &self.initial,
-									};
-									let (set_ops, del_ops, metadata_deltas) =
-										self.fields(stk, ctx, opt, &fdc).await?;
-									old_set_ops.extend(set_ops);
-									accumulate_all_delete_expr(&mut old_del_ops, del_ops);
-									merge_metadata_deltas(
-										&mut old_metadata_deltas,
-										metadata_deltas,
-									);
-
-									if !old_metadata_deltas.is_empty() || !old_set_ops.is_empty() {
-										let rid = RecordId {
-											table: ft.name.clone(),
-											key: RecordIdKey::Array(Array(initial_ids)),
-										};
-										self.handle_record_with_metadata(
-											stk,
-											ctx,
-											opt,
-											&rid,
-											old_set_ops,
-											old_del_ops,
-											old_metadata_deltas,
-										)
-										.await?;
-									}
-								}
-
-								// Handle addition to new group
-								if let Some(current_ids) = current_group_ids {
-									let mut new_set_ops = Vec::new();
-									let mut new_del_ops = None;
-									let mut new_metadata_deltas = HashMap::new();
-
-									let fdc = FieldDataContext {
-										ft,
-										act: FieldAction::Add,
-										view: tb,
-										groups: group,
-										group_ids: current_ids.clone(),
-										doc: &self.current,
-									};
-									let (set_ops, del_ops, metadata_deltas) =
-										self.fields(stk, ctx, opt, &fdc).await?;
-									new_set_ops.extend(set_ops);
-									accumulate_all_delete_expr(&mut new_del_ops, del_ops);
-									merge_metadata_deltas(
-										&mut new_metadata_deltas,
-										metadata_deltas,
-									);
-
-									if !new_metadata_deltas.is_empty() || !new_set_ops.is_empty() {
-										let rid = RecordId {
-											table: ft.name.clone(),
-											key: RecordIdKey::Array(Array(current_ids)),
-										};
-										self.handle_record_with_metadata(
-											stk,
-											ctx,
-											opt,
-											&rid,
-											new_set_ops,
-											new_del_ops,
-											new_metadata_deltas,
-										)
-										.await?;
-									}
-								}
-							} else {
-								// Groups didn't change, handle normally
-								let mut all_set_ops = Vec::new();
-								let mut all_del_ops = None;
-								let mut all_metadata_deltas = HashMap::new();
-
-								// Determine the action based on document state
-								// - If document hasn't changed (initial == current), it's initial
-								//   population → only Add
-								// - If document has changed and both groups exist, it's an UPDATE →
-								//   UpdateSub + UpdateAdd
-								// - If only initial group exists, it's a DELETE → Sub
-								// - If only current group exists, it's a CREATE → Add
-
-								let doc_changed = self.changed();
-								let has_initial = initial_group_ids.is_some();
-								let has_current = current_group_ids.is_some();
-
-								// Process the old value if needed
-								if has_initial && (doc_changed || !has_current) {
-									if let Some(initial_ids) = &initial_group_ids {
-										let act = if has_current && doc_changed {
-											FieldAction::UpdateSub
-										} else {
-											FieldAction::Sub
-										};
-
-										let fdc = FieldDataContext {
-											ft,
-											act,
-											view: tb,
-											groups: group,
-											group_ids: initial_ids.clone(),
-											doc: &self.initial,
-										};
-										let (set_ops, del_ops, metadata_deltas) =
-											self.fields(stk, ctx, opt, &fdc).await?;
-										all_set_ops.extend(set_ops);
-										accumulate_all_delete_expr(&mut all_del_ops, del_ops);
-										merge_metadata_deltas(
-											&mut all_metadata_deltas,
-											metadata_deltas,
-										);
-									}
-								}
-
-								// Process the new value if it exists
-								if let Some(current_ids) = &current_group_ids {
-									let act = if has_initial && doc_changed {
-										FieldAction::UpdateAdd
-									} else {
-										FieldAction::Add
-									};
-
-									let fdc = FieldDataContext {
-										ft,
-										act,
-										view: tb,
-										groups: group,
-										group_ids: current_ids.clone(),
-										doc: &self.current,
-									};
-									let (set_ops, del_ops, metadata_deltas) =
-										self.fields(stk, ctx, opt, &fdc).await?;
-									all_set_ops.extend(set_ops);
-									accumulate_all_delete_expr(&mut all_del_ops, del_ops);
-									merge_metadata_deltas(
-										&mut all_metadata_deltas,
-										metadata_deltas,
-									);
-								}
-
-								// Apply all collected changes to the appropriate group
-								if !all_metadata_deltas.is_empty() || !all_set_ops.is_empty() {
-									// Use current_group_ids if available, otherwise use
-									// initial_group_ids
-									let group_ids =
-										current_group_ids.or(initial_group_ids).unwrap();
-									let rid = RecordId {
-										table: ft.name.clone(),
-										key: RecordIdKey::Array(Array(group_ids)),
-									};
-									self.handle_record_with_metadata(
-										stk,
-										ctx,
-										opt,
-										&rid,
-										all_set_ops,
-										all_del_ops,
-										all_metadata_deltas,
-									)
-									.await?;
-								}
-							}
-						}
-						// No WHERE clause is specified
-						None => {
-							// Get the group IDs for initial and current values
-							let initial_group_ids = if !targeted_force
-								&& (act == Action::Delete || act == Action::Update)
-							{
-								Some(
-									Self::get_group_ids(stk, ctx, opt, group, &self.initial)
-										.await?,
+			if let Some(group) = &tb.groups {
+				// Get the group IDs for initial and current values
+				let initial_group_ids = if !targeted_force && act != Action::Create {
+					if let Some(cond) = &tb.cond {
+						if stk
+							.run(|stk| cond.compute(stk, ctx, opt, Some(&self.initial)))
+							.await
+							.catch_return()?
+							.is_truthy()
+						{
+							Some(
+								Self::get_group_ids(
+									stk,
+									ctx,
+									opt,
+									group,
+									&tb.fields,
+									&self.initial,
 								)
-							} else {
-								None
-							};
-
-							let current_group_ids =
-								if act == Action::Create || act == Action::Update {
-									Some(
-										Self::get_group_ids(stk, ctx, opt, group, &self.current)
-											.await?,
-									)
-								} else {
-									None
-								};
-
-							// Check if the groups are different (record moved between groups)
-							let groups_changed = match (&initial_group_ids, &current_group_ids) {
-								(Some(initial), Some(current)) => initial != current,
-								_ => false,
-							};
-
-							if groups_changed {
-								// Handle removal from old group
-								if let Some(initial_ids) = initial_group_ids {
-									let mut old_set_ops = Vec::new();
-									let mut old_del_ops = None;
-									let mut old_metadata_deltas = HashMap::new();
-
-									let fdc = FieldDataContext {
-										ft,
-										act: FieldAction::Sub,
-										view: tb,
-										groups: group,
-										group_ids: initial_ids.clone(),
-										doc: &self.initial,
-									};
-									let (set_ops, del_ops, metadata_deltas) =
-										self.fields(stk, ctx, opt, &fdc).await?;
-									old_set_ops.extend(set_ops);
-									accumulate_all_delete_expr(&mut old_del_ops, del_ops);
-									merge_metadata_deltas(
-										&mut old_metadata_deltas,
-										metadata_deltas,
-									);
-
-									if !old_metadata_deltas.is_empty() || !old_set_ops.is_empty() {
-										let rid = RecordId {
-											table: ft.name.clone(),
-											key: RecordIdKey::Array(Array(initial_ids)),
-										};
-										self.handle_record_with_metadata(
-											stk,
-											ctx,
-											opt,
-											&rid,
-											old_set_ops,
-											old_del_ops,
-											old_metadata_deltas,
-										)
-										.await?;
-									}
-								}
-
-								// Handle addition to new group
-								if let Some(current_ids) = current_group_ids {
-									let mut new_set_ops = Vec::new();
-									let mut new_del_ops = None;
-									let mut new_metadata_deltas = HashMap::new();
-
-									let fdc = FieldDataContext {
-										ft,
-										act: FieldAction::Add,
-										view: tb,
-										groups: group,
-										group_ids: current_ids.clone(),
-										doc: &self.current,
-									};
-									let (set_ops, del_ops, metadata_deltas) =
-										self.fields(stk, ctx, opt, &fdc).await?;
-									new_set_ops.extend(set_ops);
-									accumulate_all_delete_expr(&mut new_del_ops, del_ops);
-									merge_metadata_deltas(
-										&mut new_metadata_deltas,
-										metadata_deltas,
-									);
-
-									if !new_metadata_deltas.is_empty() || !new_set_ops.is_empty() {
-										let rid = RecordId {
-											table: ft.name.clone(),
-											key: RecordIdKey::Array(Array(current_ids)),
-										};
-										self.handle_record_with_metadata(
-											stk,
-											ctx,
-											opt,
-											&rid,
-											new_set_ops,
-											new_del_ops,
-											new_metadata_deltas,
-										)
-										.await?;
-									}
-								}
-							} else {
-								// Groups didn't change, handle normally
-								let mut all_set_ops = Vec::new();
-								let mut all_del_ops = None;
-								let mut all_metadata_deltas = HashMap::new();
-
-								// Check if this is an UPDATE (both old and new values exist)
-								let is_update =
-									initial_group_ids.is_some() && current_group_ids.is_some();
-
-								// Process the old value
-								if let Some(initial_ids) = &initial_group_ids {
-									let fdc = FieldDataContext {
-										ft,
-										act: if is_update {
-											FieldAction::UpdateSub
-										} else {
-											FieldAction::Sub
-										},
-										view: tb,
-										groups: group,
-										group_ids: initial_ids.clone(),
-										doc: &self.initial,
-									};
-									let (set_ops, del_ops, metadata_deltas) =
-										self.fields(stk, ctx, opt, &fdc).await?;
-									all_set_ops.extend(set_ops);
-									accumulate_all_delete_expr(&mut all_del_ops, del_ops);
-									merge_metadata_deltas(
-										&mut all_metadata_deltas,
-										metadata_deltas,
-									);
-								}
-
-								// Process the new value
-								if let Some(current_ids) = &current_group_ids {
-									let fdc = FieldDataContext {
-										ft,
-										act: if is_update {
-											FieldAction::UpdateAdd
-										} else {
-											FieldAction::Add
-										},
-										view: tb,
-										groups: group,
-										group_ids: current_ids.clone(),
-										doc: &self.current,
-									};
-									let (set_ops, del_ops, metadata_deltas) =
-										self.fields(stk, ctx, opt, &fdc).await?;
-									all_set_ops.extend(set_ops);
-									accumulate_all_delete_expr(&mut all_del_ops, del_ops);
-									merge_metadata_deltas(
-										&mut all_metadata_deltas,
-										metadata_deltas,
-									);
-								}
-
-								// Apply all collected changes to the appropriate group
-								if !all_metadata_deltas.is_empty() || !all_set_ops.is_empty() {
-									// Use current_group_ids if available, otherwise use
-									// initial_group_ids
-									let group_ids =
-										current_group_ids.or(initial_group_ids).unwrap();
-									let rid = RecordId {
-										table: ft.name.clone(),
-										key: RecordIdKey::Array(Array(group_ids)),
-									};
-									self.handle_record_with_metadata(
-										stk,
-										ctx,
-										opt,
-										&rid,
-										all_set_ops,
-										all_del_ops,
-										all_metadata_deltas,
-									)
-									.await?;
-								}
-							}
+								.await?,
+							)
+						} else {
+							None
 						}
+					} else {
+						Some(
+							Self::get_group_ids(stk, ctx, opt, group, &tb.fields, &self.initial)
+								.await?,
+						)
+					}
+				} else {
+					None
+				};
+
+				let current_group_ids = if act != Action::Delete {
+					if let Some(cond) = &tb.cond {
+						if stk
+							.run(|stk| cond.compute(stk, ctx, opt, Some(&self.current)))
+							.await
+							.catch_return()?
+							.is_truthy()
+						{
+							Some(
+								Self::get_group_ids(
+									stk,
+									ctx,
+									opt,
+									group,
+									&tb.fields,
+									&self.current,
+								)
+								.await?,
+							)
+						} else {
+							None
+						}
+					} else {
+						Some(
+							Self::get_group_ids(stk, ctx, opt, group, &tb.fields, &self.current)
+								.await?,
+						)
+					}
+				} else {
+					None
+				};
+
+				// Check if the groups are different (record moved between groups)
+				let groups_changed = match (&initial_group_ids, &current_group_ids) {
+					(Some(initial), Some(current)) => initial != current,
+					_ => false,
+				};
+
+				if groups_changed {
+					// Handle removal from old group
+					if let Some(initial_ids) = initial_group_ids {
+						let fdc = FieldDataContext {
+							ft,
+							act: FieldAction::Sub,
+							view: tb,
+							groups: group,
+							group_ids: initial_ids.clone(),
+							doc: &self.initial,
+						};
+						let (set_ops, del_ops, metadata_deltas) =
+							self.fields(stk, ctx, opt, &fdc).await?;
+
+						if !metadata_deltas.is_empty() || !set_ops.is_empty() {
+							let rid = RecordId {
+								table: ft.name.clone(),
+								key: RecordIdKey::Array(Array(initial_ids)),
+							};
+							self.handle_record_with_metadata(
+								stk,
+								ctx,
+								opt,
+								&rid,
+								set_ops,
+								del_ops,
+								metadata_deltas,
+							)
+							.await?;
+						}
+					}
+
+					// Handle addition to new group
+					if let Some(current_ids) = current_group_ids {
+						let fdc = FieldDataContext {
+							ft,
+							act: FieldAction::Add,
+							view: tb,
+							groups: group,
+							group_ids: current_ids.clone(),
+							doc: &self.current,
+						};
+						let (set_ops, del_ops, metadata_deltas) =
+							self.fields(stk, ctx, opt, &fdc).await?;
+
+						if !metadata_deltas.is_empty() || !set_ops.is_empty() {
+							let rid = RecordId {
+								table: ft.name.clone(),
+								key: RecordIdKey::Array(Array(current_ids)),
+							};
+							self.handle_record_with_metadata(
+								stk,
+								ctx,
+								opt,
+								&rid,
+								set_ops,
+								del_ops,
+								metadata_deltas,
+							)
+							.await?;
+						}
+					}
+				} else {
+					// Groups didn't change, handle normally
+					let mut all_set_ops = Vec::new();
+					let mut all_del_ops = None;
+					let mut all_metadata_deltas = HashMap::new();
+
+					// Check if this is an UPDATE (both old and new values exist)
+					let doc_changed = self.changed();
+					let has_initial = initial_group_ids.is_some();
+					let has_current = current_group_ids.is_some();
+
+					// Process the old value if needed
+					if has_initial && (doc_changed || !has_current) {
+						if let Some(initial_ids) = &initial_group_ids {
+							let act = if has_current && doc_changed {
+								FieldAction::UpdateSub
+							} else {
+								FieldAction::Sub
+							};
+
+							let fdc = FieldDataContext {
+								ft,
+								act,
+								view: tb,
+								groups: group,
+								group_ids: initial_ids.clone(),
+								doc: &self.initial,
+							};
+							let (set_ops, del_ops, metadata_deltas) =
+								self.fields(stk, ctx, opt, &fdc).await?;
+							all_set_ops.extend(set_ops);
+							accumulate_all_delete_expr(&mut all_del_ops, del_ops);
+							merge_metadata_deltas(&mut all_metadata_deltas, metadata_deltas);
+						}
+					}
+
+					// Process the new value if it exists
+					if let Some(current_ids) = &current_group_ids {
+						let act = if has_initial && doc_changed {
+							FieldAction::UpdateAdd
+						} else {
+							FieldAction::Add
+						};
+
+						let fdc = FieldDataContext {
+							ft,
+							act,
+							view: tb,
+							groups: group,
+							group_ids: current_ids.clone(),
+							doc: &self.current,
+						};
+						let (set_ops, del_ops, metadata_deltas) =
+							self.fields(stk, ctx, opt, &fdc).await?;
+						all_set_ops.extend(set_ops);
+						accumulate_all_delete_expr(&mut all_del_ops, del_ops);
+						merge_metadata_deltas(&mut all_metadata_deltas, metadata_deltas);
+					}
+
+					// Apply all collected changes to the appropriate group
+					if !all_metadata_deltas.is_empty() || !all_set_ops.is_empty() {
+						// Use current_group_ids if available, otherwise use
+						// initial_group_ids
+						let group_ids = current_group_ids.or(initial_group_ids).unwrap();
+						let rid = RecordId {
+							table: ft.name.clone(),
+							key: RecordIdKey::Array(Array(group_ids)),
+						};
+						self.handle_record_with_metadata(
+							stk,
+							ctx,
+							opt,
+							&rid,
+							all_set_ops,
+							all_del_ops,
+							all_metadata_deltas,
+						)
+						.await?;
 					}
 				}
-				// No GROUP BY clause is specified
-				None => {
-					// Set the current record id
-					let rid = RecordId {
-						table: ft.name.clone(),
-						key: rid.key.clone(),
-					};
-					// Check if a WHERE clause is specified
-					match &tb.cond {
-						// There is a WHERE clause specified
-						Some(cond) => {
-							match stk
-								.run(|stk| cond.compute(stk, ctx, opt, Some(&self.current)))
-								.await
-								.catch_return()?
-							{
-								v if v.is_truthy() => {
-									// Define the statement
-									match act {
-										// Delete the value in the table
-										Action::Delete => {
-											let stm = DeleteStatement {
-												what: vec![Expr::Literal(Literal::RecordId(
-													rid.into_literal(),
-												))],
-												..DeleteStatement::default()
-											};
-											// Execute the statement
-											stm.compute(stk, ctx, opt, None).await?;
-										}
-										// Update the value in the table
-										_ => {
-											let stm = UpsertStatement {
-												what: vec![Expr::Literal(Literal::RecordId(
-													rid.into_literal(),
-												))],
-												data: Some(
-													self.full(stk, ctx, opt, &tb.fields).await?,
-												),
-												..UpsertStatement::default()
-											};
-											// Execute the statement
-											stm.compute(stk, ctx, opt, None).await?;
-										}
-									};
-								}
-								_ => {
-									// Delete the value in the table
-									let stm = DeleteStatement {
-										what: vec![Expr::Literal(Literal::RecordId(
-											rid.into_literal(),
-										))],
-										..DeleteStatement::default()
-									};
-									// Execute the statement
-									stm.compute(stk, ctx, opt, None).await?;
-								}
+			} else {
+				// no group clause.
+
+				// Set the current record id
+				let rid = RecordId {
+					table: ft.name.clone(),
+					key: rid.key.clone(),
+				};
+				// Check if a WHERE clause is specified
+				if let Some(cond) = &tb.cond {
+					if stk
+						.run(|stk| cond.compute(stk, ctx, opt, Some(&self.current)))
+						.await
+						.catch_return()?
+						.is_truthy()
+					{
+						// Define the statement
+						match act {
+							// Delete the value in the table
+							Action::Delete => {
+								let stm = DeleteStatement {
+									what: vec![Expr::Literal(Literal::RecordId(
+										rid.into_literal(),
+									))],
+									..DeleteStatement::default()
+								};
+								// Execute the statement
+								stm.compute(stk, ctx, opt, None).await?;
 							}
-						}
-						// No WHERE clause is specified
-						None => {
-							// Define the statement
-							match act {
-								// Delete the value in the table
-								Action::Delete => {
-									let stm = DeleteStatement {
-										what: vec![Expr::Literal(Literal::RecordId(
-											rid.into_literal(),
-										))],
-										..DeleteStatement::default()
-									};
-									// Execute the statement
-									stm.compute(stk, ctx, opt, None).await?;
-								}
-								// Update the value in the table
-								_ => {
-									let stm = UpsertStatement {
-										what: vec![Expr::Literal(Literal::RecordId(
-											rid.into_literal(),
-										))],
-										data: Some(self.full(stk, ctx, opt, &tb.fields).await?),
-										..UpsertStatement::default()
-									};
-									// Execute the statement
-									stm.compute(stk, ctx, opt, None).await?;
-								}
-							};
-						}
+							// Update the value in the table
+							_ => {
+								let stm = UpsertStatement {
+									what: vec![Expr::Literal(Literal::RecordId(
+										rid.into_literal(),
+									))],
+									data: Some(self.full(stk, ctx, opt, &tb.fields).await?),
+									..UpsertStatement::default()
+								};
+								// Execute the statement
+								stm.compute(stk, ctx, opt, None).await?;
+							}
+						};
+					} else {
+						// Delete the value in the table
+						let stm = DeleteStatement {
+							what: vec![Expr::Literal(Literal::RecordId(rid.into_literal()))],
+							..DeleteStatement::default()
+						};
+						// Execute the statement
+						stm.compute(stk, ctx, opt, None).await?;
 					}
+				} else {
+					// no where condition.
+
+					// Define the statement
+					match act {
+						// Delete the value in the table
+						Action::Delete => {
+							let stm = DeleteStatement {
+								what: vec![Expr::Literal(Literal::RecordId(rid.into_literal()))],
+								..DeleteStatement::default()
+							};
+							// Execute the statement
+							stm.compute(stk, ctx, opt, None).await?;
+						}
+						// Update the value in the table
+						_ => {
+							let stm = UpsertStatement {
+								what: vec![Expr::Literal(Literal::RecordId(rid.into_literal()))],
+								data: Some(self.full(stk, ctx, opt, &tb.fields).await?),
+								..UpsertStatement::default()
+							};
+							// Execute the statement
+							stm.compute(stk, ctx, opt, None).await?;
+						}
+					};
 				}
 			}
 		}
+
 		// Carry on
 		Ok(())
 	}
@@ -942,13 +723,27 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		group: &Groups,
+		fields: &Fields,
 		doc: &CursorDoc,
 	) -> Result<Vec<Value>> {
 		Ok(stk
 			.scope(|scope| {
 				try_join_all(group.iter().map(|v| {
 					scope.run(|stk| async {
-						v.compute(stk, ctx, opt, Some(doc)).await.catch_return()
+						// TODO: Move this check out of the computation, we can already now if a
+						// group is targeting an alias during definition, so we could compute the
+						// actual expression for the group at that point.
+						if let Some(x) = fields.iter_non_all_fields().find_map(|x| match x {
+							Field::Single {
+								expr,
+								alias: Some(alias),
+							} if *alias == v.0 => Some(expr),
+							_ => None,
+						}) {
+							x.compute(stk, ctx, opt, Some(doc)).await.catch_return()
+						} else {
+							v.compute(stk, ctx, opt, Some(doc)).await.catch_return()
+						}
 					})
 				}))
 			})

@@ -25,12 +25,11 @@ use crate::api::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 #[cfg(feature = "protocol-http")]
 use crate::api::opt::Tls;
-use crate::api::opt::{Endpoint, EndpointKind};
+use crate::api::opt::{Endpoint, EndpointKind, WebsocketConfig};
 use crate::api::{Result, Surreal, conn};
 #[allow(unused_imports, reason = "Used when a DB engine is disabled.")]
 use crate::core::err::Error as DbError;
 use crate::opt::WaitFor;
-
 impl crate::api::Connection for Any {}
 impl conn::Sealed for Any {
 	#[allow(
@@ -81,7 +80,7 @@ impl conn::Sealed for Any {
 					);
 				}
 
-				EndpointKind::File | EndpointKind::RocksDb => {
+				EndpointKind::RocksDb => {
 					#[cfg(feature = "kv-rocksdb")]
 					{
 						features.insert(ExtraFeatures::Backup);
@@ -166,6 +165,13 @@ impl conn::Sealed for Any {
 				EndpointKind::Ws | EndpointKind::Wss => {
 					#[cfg(feature = "protocol-ws")]
 					{
+						let WebsocketConfig {
+							read_buffer_size,
+							max_message_size,
+							max_write_buffer_size,
+							write_buffer_size,
+						} = address.config.websocket;
+
 						features.insert(ExtraFeatures::LiveQueries);
 						let mut endpoint = address;
 						endpoint.url = endpoint.url.join(engine::remote::ws::PATH)?;
@@ -174,12 +180,12 @@ impl conn::Sealed for Any {
 						#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 						let maybe_connector = None;
 
-						let config = WebSocketConfig {
-							max_message_size: Some(engine::remote::ws::native::MAX_MESSAGE_SIZE),
-							max_frame_size: Some(engine::remote::ws::native::MAX_FRAME_SIZE),
-							max_write_buffer_size: engine::remote::ws::native::MAX_MESSAGE_SIZE,
-							..Default::default()
-						};
+						let config = WebSocketConfig::default()
+							.max_message_size(max_message_size)
+							.max_frame_size(max_message_size)
+							.max_write_buffer_size(max_write_buffer_size)
+							.write_buffer_size(write_buffer_size)
+							.read_buffer_size(read_buffer_size);
 						let socket = engine::remote::ws::native::connect(
 							&endpoint,
 							Some(config),

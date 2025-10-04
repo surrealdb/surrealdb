@@ -97,14 +97,15 @@ async fn handle_socket(state: AppState, ws: WebSocket, session: Session) {
 						v.into_iter().map(|x| x.into_value()).collect::<Vec<_>>(),
 					)) {
 						// Send the JSON response to the client
-						Ok(v) => tx.send(Message::Text(v)).await,
+						Ok(v) => tx.send(Message::Text(v.into())).await,
 						// There was an error converting to JSON
 						Err(e) => {
-							tx.send(Message::Text(format!("Failed to parse JSON: {e}",))).await
+							tx.send(Message::Text(format!("Failed to parse JSON: {e}",).into()))
+								.await
 						}
 					},
 					// There was an error when executing the query
-					Err(e) => tx.send(Message::Text(e.to_string())).await,
+					Err(e) => tx.send(Message::Text(e.to_string().into())).await,
 				};
 			}
 		}
