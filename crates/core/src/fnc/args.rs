@@ -1,10 +1,10 @@
 use std::vec::IntoIter;
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 use crate::err::Error;
-use crate::val::value::{Cast as CastTrait, Coerce};
 use crate::val::Value;
+use crate::val::value::{Cast as CastTrait, Coerce};
 
 /// The number of arguments a function takes.
 #[derive(Debug)]
@@ -51,13 +51,6 @@ impl Args {
 			self.next = self.iter.next();
 			self.next.is_some()
 		}
-	}
-
-	pub fn peek(&mut self) -> Option<&Value> {
-		if self.next.is_none() {
-			self.next = self.iter.next();
-		}
-		self.next.as_ref()
 	}
 
 	pub fn next(&mut self) -> Option<(usize, Value)> {
