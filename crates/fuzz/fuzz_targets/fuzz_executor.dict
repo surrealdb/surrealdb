@@ -290,7 +290,7 @@
 "rand::duration("
 "rand::enum("
 "rand::float("
-"rand::guid("
+"rand::id("
 "rand::int("
 "rand::string("
 "rand::time("

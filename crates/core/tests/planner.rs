@@ -2534,7 +2534,7 @@ async fn select_where_index_boolean_behaviour() -> Result<()> {
 #[tokio::test]
 async fn select_memory_ordered_collector() -> Result<()> {
 	let sql = r"
-		CREATE |i:1500| SET v = rand::guid() RETURN NONE;
+		CREATE |i:1500| SET v = rand::id() RETURN NONE;
 		SELECT v FROM i ORDER BY RAND() EXPLAIN;
 		SELECT v FROM i ORDER BY v EXPLAIN;
 		SELECT v FROM i ORDER BY RAND() PARALLEL EXPLAIN;
