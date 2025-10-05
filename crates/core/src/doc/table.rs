@@ -44,6 +44,26 @@ enum FieldStatsDelta {
 	},
 	MinMaxAdd,
 	MinMaxSub,
+	StdDevAdd {
+		value: Decimal,
+	},
+	StdDevSub {
+		value: Decimal,
+	},
+	StdDevUpdate {
+		old_value: Decimal,
+		new_value: Decimal,
+	},
+	VarianceAdd {
+		value: Decimal,
+	},
+	VarianceSub {
+		value: Decimal,
+	},
+	VarianceUpdate {
+		old_value: Decimal,
+		new_value: Decimal,
+	},
 }
 
 /// Combine two deltas for the same field
