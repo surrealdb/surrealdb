@@ -109,8 +109,8 @@ fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> Fiel
 
 		// Sum operations: Count-based tracking for math::sum() aggregations
 		// These only track count of records, actual sum is computed via field assignments
-		(FieldStatsDelta::SumAdd, FieldStatsDelta::SumSub) => FieldStatsDelta::SumAdd, /* Add then delete: no net change in record count */
-		(FieldStatsDelta::SumSub, FieldStatsDelta::SumAdd) => FieldStatsDelta::SumAdd, /* Delete then add: no net change in record count */
+		(FieldStatsDelta::SumAdd, FieldStatsDelta::SumSub) => FieldStatsDelta::SumAdd,
+		(FieldStatsDelta::SumSub, FieldStatsDelta::SumAdd) => FieldStatsDelta::SumAdd,
 
 		// Mean operations: Combine value-aware deltas for math::mean() rolling calculations
 		// These track both sum of values and count for efficient mean computation
@@ -170,8 +170,8 @@ fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> Fiel
 
 		// MinMax operations: Count-based tracking for min/max aggregations
 		// These only track record count since actual min/max values are computed via subqueries
-		(FieldStatsDelta::MinMaxAdd, FieldStatsDelta::MinMaxSub) => FieldStatsDelta::MinMaxAdd, /* Add then delete: no net change */
-		(FieldStatsDelta::MinMaxSub, FieldStatsDelta::MinMaxAdd) => FieldStatsDelta::MinMaxAdd, /* Delete then add: no net change */
+		(FieldStatsDelta::MinMaxAdd, FieldStatsDelta::MinMaxSub) => FieldStatsDelta::MinMaxAdd,
+		(FieldStatsDelta::MinMaxSub, FieldStatsDelta::MinMaxAdd) => FieldStatsDelta::MinMaxAdd,
 
 		// StdDev operations: Combine deltas for math::stddev() rolling calculations
 		// These use Welford's method: track sum, sum_of_squares, and count for O(1) updates
@@ -521,9 +521,12 @@ fn apply_field_stats_delta(
 				None // No values left, remove view record
 			} else {
 				Some(FieldStats::StdDev {
-					sum: sum - value,                                 // Remove value from running sum
-					sum_of_squares: sum_of_squares - (value * value), // Remove value² from sum of squares
-					count: new_count,                                 // Decrement count
+					// Remove value from running sum
+					sum: sum - value,
+					// Remove value² from sum of squares
+					sum_of_squares: sum_of_squares - (value * value),
+					// Decrement count
+					count: new_count,
 				})
 			}
 		}
@@ -593,9 +596,12 @@ fn apply_field_stats_delta(
 				value,
 			},
 		) => Some(FieldStats::Variance {
-			sum: sum + value,                                 // Add value to running sum
-			sum_of_squares: sum_of_squares + (value * value), // Add value² to sum of squares
-			count: count + 1,                                 // Increment count
+			// Add value to running sum
+			sum: sum + value,
+			// Add value² to sum of squares
+			sum_of_squares: sum_of_squares + (value * value),
+			// Increment count
+			count: count + 1,
 		}),
 		(
 			Some(FieldStats::Variance {
@@ -612,9 +618,12 @@ fn apply_field_stats_delta(
 				None // No values left, remove view record
 			} else {
 				Some(FieldStats::Variance {
-					sum: sum - value,                                 // Remove value from running sum
-					sum_of_squares: sum_of_squares - (value * value), // Remove value² from sum of squares
-					count: new_count,                                 // Decrement count
+					// Remove value from running sum
+					sum: sum - value,
+					// Remove value² from sum of squares
+					sum_of_squares: sum_of_squares - (value * value),
+					// Decrement count
+					count: new_count,
 				})
 			}
 		}
@@ -1236,7 +1245,7 @@ impl Document {
 				} = &new_stats
 				{
 					if *count > 1 {
-						// Sample standard deviation: sqrt((sum_of_squares - (sum^2 / count)) / (count - 1))
+						// Sample: sqrt((sum_of_squares - (sum^2 / count)) / (count - 1))
 						let mean = *sum / rust_decimal::Decimal::from(*count);
 						let variance = (*sum_of_squares - (*sum * mean))
 							/ rust_decimal::Decimal::from(*count - 1);
@@ -1264,7 +1273,7 @@ impl Document {
 				} = &new_stats
 				{
 					if *count > 1 {
-						// Sample variance: (sum_of_squares - (sum^2 / count)) / (count - 1)
+						// Sample: (sum_of_squares - (sum^2 / count)) / (count - 1)
 						let mean = *sum / rust_decimal::Decimal::from(*count);
 						let variance = (*sum_of_squares - (*sum * mean))
 							/ rust_decimal::Decimal::from(*count - 1);
