@@ -67,16 +67,31 @@ enum FieldStatsDelta {
 }
 
 /// Combine two deltas for the same field
+///
+/// This function merges multiple field statistics changes that occur within the same transaction.
+/// For example, if a record is first added then deleted, we can optimize by combining these
+/// operations rather than processing them separately. This is crucial for performance and
+/// correctness of rolling aggregations.
+///
+/// The key insight is that certain operation pairs can be optimized:
+/// - Add + Sub = Update (when values differ) or No-op (when equal)
+/// - Sub + Add = Update (represents changing a value)
+/// - Add + Add = Larger Add (multiple records added)
+/// - Sub + Sub = Larger Sub (multiple records deleted)
 fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> FieldStatsDelta {
 	match (first, second) {
-		// Count operations
+		// Count operations: Simple arithmetic on count deltas
+		// These handle count() function calls and metadata for other aggregations
 		(FieldStatsDelta::CountAdd(a), FieldStatsDelta::CountAdd(b)) => {
+			// Multiple additions: sum the counts
 			FieldStatsDelta::CountAdd(a + b)
 		}
 		(FieldStatsDelta::CountSub(a), FieldStatsDelta::CountSub(b)) => {
+			// Multiple deletions: sum the counts to subtract
 			FieldStatsDelta::CountSub(a + b)
 		}
 		(FieldStatsDelta::CountAdd(a), FieldStatsDelta::CountSub(b)) => {
+			// Add then delete: net effect depends on which is larger
 			if a >= b {
 				FieldStatsDelta::CountAdd(a - b)
 			} else {
@@ -84,6 +99,7 @@ fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> Fiel
 			}
 		}
 		(FieldStatsDelta::CountSub(a), FieldStatsDelta::CountAdd(b)) => {
+			// Delete then add: net effect depends on which is larger
 			if b >= a {
 				FieldStatsDelta::CountAdd(b - a)
 			} else {
@@ -91,17 +107,13 @@ fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> Fiel
 			}
 		}
 
-		// Sum operations
-		(FieldStatsDelta::SumAdd, FieldStatsDelta::SumSub) => FieldStatsDelta::SumAdd, /* No net
-																						* change
-																						* in count
-																						* for sum */
-		(FieldStatsDelta::SumSub, FieldStatsDelta::SumAdd) => FieldStatsDelta::SumAdd, /* No net
-																						* change
-																						* in count
-																						* for sum */
+		// Sum operations: Count-based tracking for math::sum() aggregations
+		// These only track count of records, actual sum is computed via field assignments
+		(FieldStatsDelta::SumAdd, FieldStatsDelta::SumSub) => FieldStatsDelta::SumAdd, /* Add then delete: no net change in record count */
+		(FieldStatsDelta::SumSub, FieldStatsDelta::SumAdd) => FieldStatsDelta::SumAdd, /* Delete then add: no net change in record count */
 
-		// Mean operations
+		// Mean operations: Combine value-aware deltas for math::mean() rolling calculations
+		// These track both sum of values and count for efficient mean computation
 		(
 			FieldStatsDelta::MeanSub {
 				value: v1,
@@ -110,7 +122,8 @@ fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> Fiel
 				value: v2,
 			},
 		) => {
-			// This represents an UPDATE: remove old value, add new value
+			// Delete value v1, then add value v2 = UPDATE operation
+			// This represents changing a field value from v1 to v2 within same group
 			// Net effect: sum changes by (v2 - v1), count unchanged
 			FieldStatsDelta::MeanUpdate {
 				old_value: v1,
@@ -125,7 +138,8 @@ fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> Fiel
 				value: v2,
 			},
 		) => {
-			// This shouldn't happen in normal operation (sub before add), but handle it
+			// Add v1, then delete v2 (unusual but possible in complex transactions)
+			// Treat as update from v2 to v1
 			FieldStatsDelta::MeanUpdate {
 				old_value: v2,
 				new_value: v1,
@@ -139,6 +153,7 @@ fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> Fiel
 				value: v2,
 			},
 		) => FieldStatsDelta::MeanAdd {
+			// Multiple record additions: sum the values being added
 			value: v1 + v2,
 		},
 		(
@@ -149,14 +164,18 @@ fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> Fiel
 				value: v2,
 			},
 		) => FieldStatsDelta::MeanSub {
+			// Multiple record deletions: sum the values being removed
 			value: v1 + v2,
 		},
 
-		// MinMax operations
-		(FieldStatsDelta::MinMaxAdd, FieldStatsDelta::MinMaxSub) => FieldStatsDelta::MinMaxAdd, /* No net change */
-		(FieldStatsDelta::MinMaxSub, FieldStatsDelta::MinMaxAdd) => FieldStatsDelta::MinMaxAdd, /* No net change */
+		// MinMax operations: Count-based tracking for min/max aggregations
+		// These only track record count since actual min/max values are computed via subqueries
+		(FieldStatsDelta::MinMaxAdd, FieldStatsDelta::MinMaxSub) => FieldStatsDelta::MinMaxAdd, /* Add then delete: no net change */
+		(FieldStatsDelta::MinMaxSub, FieldStatsDelta::MinMaxAdd) => FieldStatsDelta::MinMaxAdd, /* Delete then add: no net change */
 
-		// StdDev operations
+		// StdDev operations: Combine deltas for math::stddev() rolling calculations
+		// These use Welford's method: track sum, sum_of_squares, and count for O(1) updates
+		// Key insight: stddev² = (sum_of_squares - sum²/count) / (count-1)
 		(
 			FieldStatsDelta::StdDevSub {
 				value: v1,
@@ -165,6 +184,8 @@ fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> Fiel
 				value: v2,
 			},
 		) => {
+			// Remove value v1, then add value v2 = UPDATE within same group
+			// More efficient than separate sub/add operations
 			FieldStatsDelta::StdDevUpdate {
 				old_value: v1,
 				new_value: v2,
@@ -178,6 +199,7 @@ fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> Fiel
 				value: v2,
 			},
 		) => {
+			// Add v1 then remove v2 (unusual but mathematically valid)
 			FieldStatsDelta::StdDevUpdate {
 				old_value: v2,
 				new_value: v1,
@@ -191,6 +213,8 @@ fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> Fiel
 				value: v2,
 			},
 		) => FieldStatsDelta::StdDevAdd {
+			// Multiple records added: sum their values for batch processing
+			// Will update sum += (v1+v2) and sum_of_squares += (v1²+v2²)
 			value: v1 + v2,
 		},
 		(
@@ -201,10 +225,13 @@ fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> Fiel
 				value: v2,
 			},
 		) => FieldStatsDelta::StdDevSub {
+			// Multiple records deleted: sum their values for batch processing
+			// Will update sum -= (v1+v2) and sum_of_squares -= (v1²+v2²)
 			value: v1 + v2,
 		},
 
-		// Variance operations
+		// Variance operations: Identical logic to StdDev (variance = stddev²)
+		// Both use the same underlying statistics: sum, sum_of_squares, count
 		(
 			FieldStatsDelta::VarianceSub {
 				value: v1,
@@ -213,6 +240,7 @@ fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> Fiel
 				value: v2,
 			},
 		) => {
+			// Remove v1, add v2 = efficient UPDATE operation
 			FieldStatsDelta::VarianceUpdate {
 				old_value: v1,
 				new_value: v2,
@@ -226,6 +254,7 @@ fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> Fiel
 				value: v2,
 			},
 		) => {
+			// Add v1, remove v2 = UPDATE operation
 			FieldStatsDelta::VarianceUpdate {
 				old_value: v2,
 				new_value: v1,
@@ -239,6 +268,7 @@ fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> Fiel
 				value: v2,
 			},
 		) => FieldStatsDelta::VarianceAdd {
+			// Multiple additions: batch process the values
 			value: v1 + v2,
 		},
 		(
@@ -249,28 +279,52 @@ fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> Fiel
 				value: v2,
 			},
 		) => FieldStatsDelta::VarianceSub {
+			// Multiple deletions: batch process the values
 			value: v1 + v2,
 		},
 
-		// Default case - shouldn't happen in normal operation but handle gracefully
+		// Default case: mismatched or unhandled delta combinations
+		// Return the first delta unchanged - this maintains safety but may not be optimal
+		// In practice, this should rarely occur due to the transaction processing order
 		(first, _) => first,
 	}
 }
 
 /// Apply a delta to existing field stats
+///
+/// This function is the core of the rolling aggregation system. It takes the current
+/// field statistics and applies a change (delta) to produce new statistics. This enables
+/// O(1) incremental updates instead of O(n) full recomputation.
+///
+/// Key behaviors:
+/// - Returns None when count reaches 0 (triggers view record deletion)
+/// - Handles initialization from None to Some (first record in group)
+/// - Uses saturating arithmetic to prevent underflow
+/// - Maintains mathematical correctness for all aggregation types
+///
+/// The function supports these aggregation types:
+/// - Count: Simple counter
+/// - Sum: Counter for sum aggregations (actual sum computed via field assignments)
+/// - Mean: Maintains sum and count for rolling mean calculation
+/// - MinMax: Counter for min/max aggregations (actual min/max computed via subqueries)
+/// - StdDev/Variance: Maintains sum, sum_of_squares, and count for rolling calculations
 fn apply_field_stats_delta(
 	existing: Option<FieldStats>,
 	delta: FieldStatsDelta,
 ) -> Option<FieldStats> {
 	match (existing, delta) {
-		// Count operations
+		// ═══════════════════════════════════════════════════════════════════════════════
+		// COUNT OPERATIONS: Simple arithmetic for count() aggregations
+		// ═══════════════════════════════════════════════════════════════════════════════
 		(Some(FieldStats::Count(count)), FieldStatsDelta::CountAdd(delta)) => {
+			// Add delta to existing count: count() function gets more records
 			Some(FieldStats::Count(count + delta))
 		}
 		(Some(FieldStats::Count(count)), FieldStatsDelta::CountSub(delta)) => {
+			// Subtract delta from existing count: count() function has fewer records
 			let new_count = count.saturating_sub(delta);
 			if new_count == 0 {
-				None
+				None // Return None to trigger view record deletion
 			} else {
 				Some(FieldStats::Count(new_count))
 			}
@@ -278,14 +332,17 @@ fn apply_field_stats_delta(
 		(None, FieldStatsDelta::CountAdd(delta)) => Some(FieldStats::Count(delta)),
 		(None, FieldStatsDelta::CountSub(_)) => None, // Can't subtract from nothing
 
-		// Sum operations
+		// ═══════════════════════════════════════════════════════════════════════════════
+		// SUM OPERATIONS: Count-only tracking for math::sum() aggregations
+		// Actual sum values are computed via field assignments, we only track record count
+		// ═══════════════════════════════════════════════════════════════════════════════
 		(
 			Some(FieldStats::Sum {
 				count,
 			}),
 			FieldStatsDelta::SumAdd,
 		) => Some(FieldStats::Sum {
-			count: count + 1,
+			count: count + 1, // One more record contributing to sum
 		}),
 		(
 			Some(FieldStats::Sum {
@@ -295,19 +352,23 @@ fn apply_field_stats_delta(
 		) => {
 			let new_count = count.saturating_sub(1);
 			if new_count == 0 {
-				None
+				None // No records left, remove view record
 			} else {
 				Some(FieldStats::Sum {
-					count: new_count,
+					count: new_count, // One fewer record contributing to sum
 				})
 			}
 		}
 		(None, FieldStatsDelta::SumAdd) => Some(FieldStats::Sum {
-			count: 1,
+			count: 1, // First record in group
 		}),
-		(None, FieldStatsDelta::SumSub) => None,
+		(None, FieldStatsDelta::SumSub) => None, // Can't subtract from empty group
 
-		// Mean operations
+		// ═══════════════════════════════════════════════════════════════════════════════
+		// MEAN OPERATIONS: Full value tracking for math::mean() rolling calculations
+		// Formula: mean = sum / count
+		// We maintain both sum of values and count for efficient mean computation
+		// ═══════════════════════════════════════════════════════════════════════════════
 		(
 			Some(FieldStats::Mean {
 				sum,
@@ -317,8 +378,8 @@ fn apply_field_stats_delta(
 				value,
 			},
 		) => Some(FieldStats::Mean {
-			sum: sum + value,
-			count: count + 1,
+			sum: sum + value, // Add new value to running sum
+			count: count + 1, // Increment count of values
 		}),
 		(
 			Some(FieldStats::Mean {
@@ -331,11 +392,11 @@ fn apply_field_stats_delta(
 		) => {
 			let new_count = count.saturating_sub(1);
 			if new_count == 0 {
-				None
+				None // No values left, remove view record
 			} else {
 				Some(FieldStats::Mean {
-					sum: sum - value,
-					count: new_count,
+					sum: sum - value, // Remove deleted value from sum
+					count: new_count, // Decrement count of values
 				})
 			}
 		}
@@ -349,10 +410,12 @@ fn apply_field_stats_delta(
 				new_value,
 			},
 		) => {
-			// For UPDATE: change sum by (new_value - old_value), keep count the same
+			// UPDATE within same group: replace old_value with new_value
+			// This is more efficient than separate sub/add operations
+			// Count stays the same, sum changes by (new_value - old_value)
 			Some(FieldStats::Mean {
 				sum: sum - old_value + new_value,
-				count,
+				count, // Unchanged: same record, different value
 			})
 		}
 		(
@@ -361,15 +424,15 @@ fn apply_field_stats_delta(
 				value,
 			},
 		) => Some(FieldStats::Mean {
-			sum: value,
-			count: 1,
+			sum: value, // First value in group
+			count: 1,   // First record in group
 		}),
 		(
 			None,
 			FieldStatsDelta::MeanSub {
 				..
 			},
-		) => None,
+		) => None, // Can't subtract from empty group
 		(
 			None,
 			FieldStatsDelta::MeanUpdate {
@@ -377,18 +440,22 @@ fn apply_field_stats_delta(
 				..
 			},
 		) => Some(FieldStats::Mean {
-			sum: new_value,
+			sum: new_value, // Treat update as first value (unusual but handle gracefully)
 			count: 1,
 		}),
 
-		// MinMax operations
+		// ═══════════════════════════════════════════════════════════════════════════════
+		// MIN/MAX OPERATIONS: Count-only tracking for math::min()/math::max() aggregations
+		// We only track count because actual min/max values are computed via expensive
+		// subqueries when records are deleted (in case the deleted value was the min/max)
+		// ═══════════════════════════════════════════════════════════════════════════════
 		(
 			Some(FieldStats::MinMax {
 				count,
 			}),
 			FieldStatsDelta::MinMaxAdd,
 		) => Some(FieldStats::MinMax {
-			count: count + 1,
+			count: count + 1, // One more value to consider for min/max
 		}),
 		(
 			Some(FieldStats::MinMax {
@@ -398,19 +465,33 @@ fn apply_field_stats_delta(
 		) => {
 			let new_count = count.saturating_sub(1);
 			if new_count == 0 {
-				None
+				None // No values left, remove view record
 			} else {
 				Some(FieldStats::MinMax {
-					count: new_count,
+					count: new_count, // One fewer value to consider for min/max
 				})
 			}
 		}
 		(None, FieldStatsDelta::MinMaxAdd) => Some(FieldStats::MinMax {
-			count: 1,
+			count: 1, // First value in group
 		}),
-		(None, FieldStatsDelta::MinMaxSub) => None,
+		(None, FieldStatsDelta::MinMaxSub) => None, // Can't subtract from empty group
 
-		// StdDev operations
+		// ═══════════════════════════════════════════════════════════════════════════════
+		// STANDARD DEVIATION OPERATIONS: Full Welford's method for math::stddev()
+		//
+		// Uses the mathematically stable formula for sample standard deviation:
+		// variance = (sum_of_squares - sum²/count) / (count-1)
+		// stddev = √variance
+		//
+		// We maintain three running statistics for O(1) updates:
+		// - sum: sum of all values
+		// - sum_of_squares: sum of all values squared
+		// - count: number of values
+		//
+		// This approach is superior to min/max because it enables true rolling updates
+		// without expensive recomputation when records are deleted.
+		// ═══════════════════════════════════════════════════════════════════════════════
 		(
 			Some(FieldStats::StdDev {
 				sum,
@@ -421,9 +502,9 @@ fn apply_field_stats_delta(
 				value,
 			},
 		) => Some(FieldStats::StdDev {
-			sum: sum + value,
-			sum_of_squares: sum_of_squares + (value * value),
-			count: count + 1,
+			sum: sum + value,                                 // Add value to running sum
+			sum_of_squares: sum_of_squares + (value * value), // Add value² to sum of squares
+			count: count + 1,                                 // Increment count
 		}),
 		(
 			Some(FieldStats::StdDev {
@@ -437,12 +518,12 @@ fn apply_field_stats_delta(
 		) => {
 			let new_count = count.saturating_sub(1);
 			if new_count == 0 {
-				None
+				None // No values left, remove view record
 			} else {
 				Some(FieldStats::StdDev {
-					sum: sum - value,
-					sum_of_squares: sum_of_squares - (value * value),
-					count: new_count,
+					sum: sum - value,                                 // Remove value from running sum
+					sum_of_squares: sum_of_squares - (value * value), // Remove value² from sum of squares
+					count: new_count,                                 // Decrement count
 				})
 			}
 		}
@@ -457,9 +538,12 @@ fn apply_field_stats_delta(
 				new_value,
 			},
 		) => Some(FieldStats::StdDev {
+			// UPDATE within same group: efficiently replace old_value with new_value
+			// This is mathematically equivalent to: Sub(old_value) + Add(new_value)
+			// but more efficient and numerically stable
 			sum: sum - old_value + new_value,
 			sum_of_squares: sum_of_squares - (old_value * old_value) + (new_value * new_value),
-			count,
+			count, // Unchanged: same record, different value
 		}),
 		(
 			None,
@@ -467,16 +551,16 @@ fn apply_field_stats_delta(
 				value,
 			},
 		) => Some(FieldStats::StdDev {
-			sum: value,
-			sum_of_squares: value * value,
-			count: 1,
+			sum: value,                    // First value in group
+			sum_of_squares: value * value, // First value squared
+			count: 1,                      // First record in group
 		}),
 		(
 			None,
 			FieldStatsDelta::StdDevSub {
 				..
 			},
-		) => None,
+		) => None, // Can't subtract from empty group
 		(
 			None,
 			FieldStatsDelta::StdDevUpdate {
@@ -484,12 +568,21 @@ fn apply_field_stats_delta(
 				..
 			},
 		) => Some(FieldStats::StdDev {
-			sum: new_value,
+			sum: new_value, // Treat update as first value (unusual case)
 			sum_of_squares: new_value * new_value,
 			count: 1,
 		}),
 
-		// Variance operations
+		// ═══════════════════════════════════════════════════════════════════════════════
+		// VARIANCE OPERATIONS: Identical logic to StdDev for math::variance()
+		//
+		// Uses the same mathematically stable formula for sample variance:
+		// variance = (sum_of_squares - sum²/count) / (count-1)
+		//
+		// StdDev and Variance use identical underlying statistics and calculations.
+		// The only difference is that StdDev takes the square root of the variance.
+		// Both maintain the same three running statistics for O(1) updates.
+		// ═══════════════════════════════════════════════════════════════════════════════
 		(
 			Some(FieldStats::Variance {
 				sum,
@@ -500,9 +593,9 @@ fn apply_field_stats_delta(
 				value,
 			},
 		) => Some(FieldStats::Variance {
-			sum: sum + value,
-			sum_of_squares: sum_of_squares + (value * value),
-			count: count + 1,
+			sum: sum + value,                                 // Add value to running sum
+			sum_of_squares: sum_of_squares + (value * value), // Add value² to sum of squares
+			count: count + 1,                                 // Increment count
 		}),
 		(
 			Some(FieldStats::Variance {
@@ -516,12 +609,12 @@ fn apply_field_stats_delta(
 		) => {
 			let new_count = count.saturating_sub(1);
 			if new_count == 0 {
-				None
+				None // No values left, remove view record
 			} else {
 				Some(FieldStats::Variance {
-					sum: sum - value,
-					sum_of_squares: sum_of_squares - (value * value),
-					count: new_count,
+					sum: sum - value,                                 // Remove value from running sum
+					sum_of_squares: sum_of_squares - (value * value), // Remove value² from sum of squares
+					count: new_count,                                 // Decrement count
 				})
 			}
 		}
@@ -536,9 +629,10 @@ fn apply_field_stats_delta(
 				new_value,
 			},
 		) => Some(FieldStats::Variance {
+			// UPDATE within same group: efficiently replace old_value with new_value
 			sum: sum - old_value + new_value,
 			sum_of_squares: sum_of_squares - (old_value * old_value) + (new_value * new_value),
-			count,
+			count, // Unchanged: same record, different value
 		}),
 		(
 			None,
@@ -546,16 +640,16 @@ fn apply_field_stats_delta(
 				value,
 			},
 		) => Some(FieldStats::Variance {
-			sum: value,
-			sum_of_squares: value * value,
-			count: 1,
+			sum: value,                    // First value in group
+			sum_of_squares: value * value, // First value squared
+			count: 1,                      // First record in group
 		}),
 		(
 			None,
 			FieldStatsDelta::VarianceSub {
 				..
 			},
-		) => None,
+		) => None, // Can't subtract from empty group
 		(
 			None,
 			FieldStatsDelta::VarianceUpdate {
@@ -563,13 +657,19 @@ fn apply_field_stats_delta(
 				..
 			},
 		) => Some(FieldStats::Variance {
-			sum: new_value,
+			sum: new_value, // Treat update as first value (unusual case)
 			sum_of_squares: new_value * new_value,
 			count: 1,
 		}),
 
-		// Mismatched operations - ignore (shouldn't happen)
-		(existing, _) => existing,
+		// ═══════════════════════════════════════════════════════════════════════════════
+		// MISMATCHED OPERATIONS: Safety fallback for unexpected delta/stats combinations
+		//
+		// This should rarely occur in normal operation due to transaction processing order,
+		// but provides safety by preserving existing stats when delta type doesn't match.
+		// Example: Applying a MeanAdd delta to StdDev stats would hit this case.
+		// ═══════════════════════════════════════════════════════════════════════════════
+		(existing, _) => existing, // Return existing stats unchanged
 	}
 }
 
