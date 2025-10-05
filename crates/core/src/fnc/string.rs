@@ -21,6 +21,25 @@ fn limit(name: &str, n: usize) -> Result<()> {
 	Ok(())
 }
 
+pub fn capitalize((string,): (String,)) -> Result<Value> {
+	if string.is_empty() {
+		return Ok(string.into());
+	}
+	// Capitalize first character of each word (title case)
+	let words: Vec<&str> = string.split_whitespace().collect();
+	let capitalized_words: Vec<String> = words
+		.iter()
+		.map(|word| {
+			let mut chars: Vec<char> = word.chars().collect();
+			if !chars.is_empty() {
+				chars[0] = chars[0].to_uppercase().collect::<Vec<char>>()[0];
+			}
+			chars.iter().collect()
+		})
+		.collect();
+	Ok(capitalized_words.join(" ").into())
+}
+
 pub fn concat(Any(args): Any) -> Result<Value> {
 	let strings = args.into_iter().map(Value::as_raw_string).collect::<Vec<_>>();
 	limit("string::concat", strings.iter().map(String::len).sum::<usize>())?;

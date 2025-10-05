@@ -337,6 +337,7 @@ pub fn synchronous(
 		"session::rd" => session::rd(ctx),
 		"session::token" => session::token(ctx),
 		//
+		"string::capitalize" => string::capitalize,
 		"string::concat" => string::concat,
 		"string::contains" => string::contains,
 		"string::ends_with" => string::ends_with,
@@ -1158,6 +1159,7 @@ pub async fn idiom(
 				args.clone(),
 				"no such method found for the string type",
 				//
+				"capitalize" => string::capitalize,
 				"concat" => string::concat,
 				"contains" => string::contains,
 				"ends_with" => string::ends_with,
