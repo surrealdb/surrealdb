@@ -25,19 +25,25 @@ pub fn capitalize((string,): (String,)) -> Result<Value> {
 	if string.is_empty() {
 		return Ok(string.into());
 	}
-	// Capitalize first character of each word (title case)
-	let words: Vec<&str> = string.split_whitespace().collect();
-	let capitalized_words: Vec<String> = words
-		.iter()
-		.map(|word| {
-			let mut chars: Vec<char> = word.chars().collect();
-			if !chars.is_empty() {
-				chars[0] = chars[0].to_uppercase().collect::<Vec<char>>()[0];
+
+	let mut new_str = String::with_capacity(string.len());
+	let mut is_previous_whitespace = true;
+
+	for c in string.chars() {
+		if is_previous_whitespace && c.is_lowercase() {
+			// Capitalize the character
+			for upper_c in c.to_uppercase() {
+				new_str.push(upper_c);
 			}
-			chars.iter().collect()
-		})
-		.collect();
-	Ok(capitalized_words.join(" ").into())
+		} else {
+			// Keep the character as-is
+			new_str.push(c);
+		}
+
+		is_previous_whitespace = c.is_whitespace();
+	}
+
+	Ok(new_str.into())
 }
 
 pub fn concat(Any(args): Any) -> Result<Value> {
