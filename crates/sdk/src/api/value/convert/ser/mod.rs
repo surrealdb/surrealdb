@@ -23,7 +23,6 @@ where
 		val::Value as v => Ok(v),
 		val::Number as v => Ok(v.into()),
 		rust_decimal::Decimal as v => Ok(val::Number::Decimal(v).into()),
-		val::Strand as v => Ok(v.into()),
 		val::Duration as v => Ok(v.into()),
 		core::time::Duration as v => Ok(val::Duration(v).into()),
 		val::Datetime as v => Ok(v.into()),
@@ -71,8 +70,7 @@ fn value_from_content(content: Content) -> Result<val::Value> {
 			_ => Err(anyhow::Error::new(Api::DeSerializeValue("unsupported number".to_owned()))),
 		},
 		Content::Char(v) => Ok(v.to_string().into()),
-		// TODO: Null byte validity
-		Content::String(v) => Ok(unsafe { val::Strand::new_unchecked(v.into_owned()) }.into()),
+		Content::String(v) => Ok(v.into_owned().into()),
 		Content::Bytes(v) => Ok(val::Bytes::from(v.into_owned()).into()),
 		Content::Seq(v) => array_from_content(v),
 		Content::Map(v) => object_from_content(v),
@@ -171,27 +169,6 @@ mod tests {
 	}
 
 	#[test]
-	fn strand() {
-		let strand = val::Strand::new("foobar".to_owned()).unwrap();
-		let value = to_value(strand.clone()).unwrap();
-		let expected = val::Value::Strand(strand);
-		assert_eq!(value, expected);
-		assert_eq!(expected.clone(), to_value(expected).unwrap());
-
-		let strand = "foobar".to_owned();
-		let value = to_value(strand.clone()).unwrap();
-		let expected = val::Value::Strand(strand.into());
-		assert_eq!(value, expected);
-		assert_eq!(expected.clone(), to_value(expected).unwrap());
-
-		let strand = "foobar";
-		let value = to_value(strand).unwrap();
-		let expected = val::Value::Strand(strand.into());
-		assert_eq!(value, expected);
-		assert_eq!(expected.clone(), to_value(expected).unwrap());
-	}
-
-	#[test]
 	fn duration() {
 		let duration = val::Duration::default();
 		let value = to_value(duration).unwrap();
@@ -256,7 +233,7 @@ mod tests {
 
 	#[test]
 	fn table() {
-		let table = val::Table::new("foo".to_owned()).unwrap();
+		let table = val::Table::new("foo".to_owned());
 		let value = to_value(table.clone()).unwrap();
 		let expected = val::Value::Table(table);
 		assert_eq!(value, expected);
@@ -284,7 +261,7 @@ mod tests {
 	#[test]
 	fn range() {
 		let range = val::Range {
-			start: Bound::Included(val::Strand::new("foo".to_owned()).unwrap().into()),
+			start: Bound::Included("foo".to_owned().into()),
 			end: Bound::Unbounded,
 		};
 		let value = to_value(range.clone()).unwrap();

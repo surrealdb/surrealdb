@@ -1,9 +1,11 @@
-use std::{collections::BTreeMap, ops::Bound, sync::LazyLock};
+use std::collections::BTreeMap;
+use std::ops::Bound;
+use std::sync::LazyLock;
 
 use rust_decimal::Decimal;
 use surrealdb_core::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
-	RecordIdKey, RecordIdKeyRange, Regex, Strand, Table, Uuid, Value,
+	RecordIdKey, RecordIdKeyRange, Regex, Table, Uuid, Value,
 };
 
 #[derive(Debug, Clone)]
@@ -230,7 +232,7 @@ impl RoughlyEq for Number {
 }
 
 impl_roughly_eq_delegate!(
-	i64, bool, String, Closure, Geometry, Bytes, Range, Regex, Duration, File, Strand, Table
+	i64, bool, String, Closure, Geometry, Bytes, Range, Regex, Duration, File, Table
 );
 
 impl_roughly_eq_struct!(Array, 0);
@@ -244,7 +246,7 @@ impl_roughly_eq_enum!(
 		Null,
 		Bool(b),
 		Number(n),
-		Strand(s),
+		String(s),
 		Duration(d),
 		Datetime(d),
 		Uuid(u),

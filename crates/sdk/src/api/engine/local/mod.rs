@@ -174,14 +174,14 @@ use surrealdb_core::err::Error as CoreError;
 use surrealdb_core::expr::Model;
 use surrealdb_core::expr::statements::DeleteStatement;
 use surrealdb_core::expr::{
-	CreateStatement, Data, Expr, Fields, Function, Ident, InsertStatement, KillStatement, Literal,
+	CreateStatement, Data, Expr, Fields, Function, InsertStatement, KillStatement, Literal,
 	LogicalPlan, Output, SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
 use surrealdb_core::iam;
+use surrealdb_core::kvs::Datastore;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::kvs::{Datastore, LockType, TransactionType};
-use surrealdb_core::val::{self, Strand};
+use surrealdb_core::val::{self};
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::{
 	expr::statements::{DefineModelStatement, DefineStatement},
@@ -213,7 +213,7 @@ pub(crate) mod native;
 #[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
 
-type LiveQueryMap = HashMap<Uuid, Sender<Notification>>;
+type LiveQueryMap = HashMap<Uuid, Sender<Result<Notification>>>;
 
 /// In-memory database
 ///
@@ -408,8 +408,8 @@ pub struct TiKv;
 /// # Ok(())
 /// # }
 /// ```
-#[cfg(kv_fdb)]
-#[cfg_attr(docsrs, doc(cfg(feature = "kv-fdb-7_3")))]
+#[cfg(feature = "kv-fdb")]
+#[cfg_attr(docsrs, doc(cfg(feature = "kv-fdb")))]
 #[derive(Debug)]
 pub struct FDb;
 
@@ -548,16 +548,8 @@ async fn export_ml(
 	// Check the permissions level
 	kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))?;
 
-	// Ensure a NS and DB are set
-	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
-	let Some(db) = tx.get_db_by_name(&nsv, &dbv).await? else {
-		anyhow::bail!("Database not found".to_string());
-	};
-	tx.cancel().await?;
-
 	// Attempt to get the model definition
-	let Some(model) = tx.get_db_model(db.namespace_id, db.database_id, &name, &version).await?
-	else {
+	let Some(model) = kvs.get_db_model(&nsv, &dbv, &name, &version).await? else {
 		// Attempt to get the model definition
 		anyhow::bail!("Model not found".to_string());
 	};
@@ -620,19 +612,7 @@ async fn router(
 			namespace,
 			database,
 		} => {
-			if let Some(ns) = namespace {
-				let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-				tx.get_or_add_ns(&ns, kvs.is_strict_mode()).await?;
-				tx.commit().await?;
-				session.write().await.ns = Some(ns);
-			}
-			if let Some(db) = database {
-				let ns = session.read().await.ns.clone().unwrap();
-				let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-				tx.ensure_ns_db(&ns, &db, kvs.is_strict_mode()).await?;
-				tx.commit().await?;
-				session.write().await.db = Some(db);
-			}
+			kvs.process_use(&mut *session.write().await, namespace, database).await?;
 			Ok(DbResponse::Other(val::Value::None))
 		}
 		Command::Signup {
@@ -640,11 +620,7 @@ async fn router(
 		} => {
 			let response =
 				iam::signup::signup(kvs, &mut *session.write().await, credentials).await?.token;
-			// TODO: Null byte validity
-			let response = response
-				.map(|x| unsafe { Strand::new_unchecked(x) })
-				.map(From::from)
-				.unwrap_or(val::Value::None);
+			let response = response.map(From::from).unwrap_or(val::Value::None);
 			Ok(DbResponse::Other(response))
 		}
 		Command::Signin {
@@ -746,7 +722,7 @@ async fn router(
 			let one = !data.is_array();
 
 			let insert_plan = InsertStatement {
-				into: what.map(|w| Expr::Table(unsafe { Ident::new_unchecked(w) })),
+				into: what.map(Expr::Table),
 				data: Data::SingleExpression(data.into_literal()),
 				ignore: false,
 				update: None,
@@ -772,7 +748,7 @@ async fn router(
 			let one = !data.is_array();
 
 			let insert_plan = InsertStatement {
-				into: what.map(|w| Expr::Table(unsafe { Ident::new_unchecked(w) })),
+				into: what.map(Expr::Table),
 				data: Data::SingleExpression(data.into_literal()),
 				output: Some(Output::After),
 				relation: true,
@@ -885,7 +861,7 @@ async fn router(
 			let select_plan = SelectStatement {
 				expr: Fields::all(),
 				what: resource_to_exprs(what),
-				omit: None,
+				omit: vec![],
 				only: false,
 				with: None,
 				cond: None,
@@ -1232,13 +1208,14 @@ async fn router(
 			surrealdb_core::obs::put(&hash, data).await?;
 			// Insert the model in to the database
 			let model = DefineModelStatement {
-				name: Ident::new(file.header.name.to_string()).unwrap(),
+				name: file.header.name.to_string(),
 				version: file.header.version.to_string(),
-				comment: Some(file.header.description.to_string().into()),
+				comment: Some(Expr::Literal(surrealdb_core::expr::Literal::String(
+					file.header.description.to_string(),
+				))),
 				hash,
 				..Default::default()
 			};
-			// TODO: Null byte validity
 			let q = DefineStatement::Model(model);
 			let q = LogicalPlan {
 				expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(q)))],

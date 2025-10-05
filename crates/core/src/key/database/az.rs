@@ -1,13 +1,15 @@
 //! Stores a DEFINE ANALYZER config definition
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Az<'a> {
 	__: u8,
 	_a: u8,
@@ -17,12 +19,10 @@ pub(crate) struct Az<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub az: &'a str,
+	pub az: Cow<'a, str>,
 }
 
-impl KVKey for Az<'_> {
-	type ValueType = catalog::AnalyzerDefinition;
-}
+impl_kv_key_storekey!(Az<'_> => catalog::AnalyzerDefinition);
 
 pub fn new(ns: NamespaceId, db: DatabaseId, az: &str) -> Az<'_> {
 	Az::new(ns, db, az)
@@ -57,7 +57,7 @@ impl<'a> Az<'a> {
 			_c: b'!',
 			_d: b'a',
 			_e: b'z',
-			az,
+			az: Cow::Borrowed(az),
 		}
 	}
 }

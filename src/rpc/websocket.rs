@@ -5,6 +5,7 @@ use std::time::Duration;
 use arc_swap::ArcSwap;
 use axum::extract::ws::close_code::AGAIN;
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
+use bytes::Bytes;
 use futures::stream::FuturesUnordered;
 use futures::{Sink, SinkExt, StreamExt};
 use opentelemetry::Context as TelemetryContext;
@@ -27,7 +28,7 @@ use crate::core::kvs::Datastore;
 use crate::core::mem::ALLOC;
 use crate::core::rpc::format::Format;
 use crate::core::rpc::{Data, Method, RpcContext, RpcProtocolV1, RpcProtocolV2};
-use crate::core::val::{self, Array, Strand, Value};
+use crate::core::val::{self, Array, Value};
 use crate::rpc::CONN_CLOSED_ERR;
 use crate::rpc::failure::Failure;
 use crate::rpc::format::WsFormat;
@@ -157,7 +158,7 @@ impl Websocket {
 				// Send a regular ping message
 				_ = interval.tick() => {
 					// Create a new ping message
-					let msg = Message::Ping(vec![]);
+					let msg = Message::Ping(Bytes::from_static(b""));
 					// Close the connection if the message fails
 					if let Err(err) = internal_sender.send(msg).await {
 						// Output any errors if not a close error
@@ -460,7 +461,7 @@ impl RpcContext for Websocket {
 	}
 	/// The version information for this RPC context
 	fn version_data(&self) -> Data {
-		let value = Value::from(Strand::new(format!("{PKG_NAME}-{}", *PKG_VERSION)).unwrap());
+		let value = Value::from(format!("{PKG_NAME}-{}", *PKG_VERSION));
 		Data::Other(value)
 	}
 

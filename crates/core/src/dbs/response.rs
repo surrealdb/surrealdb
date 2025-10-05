@@ -2,12 +2,12 @@ use std::fmt;
 use std::time::Duration;
 
 use anyhow::Result;
-use revision::{Revisioned, revisioned};
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 
 use crate::expr::TopLevelExpr;
-use crate::val::{Object, Strand, Value};
+use crate::val::{Object, Value};
 
 pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
 
@@ -64,20 +64,20 @@ impl Response {
 	/// Convert's the response into a value as it is send across the net.
 	pub fn into_value(self) -> Value {
 		let mut res = Object::new();
-		res.insert("time".to_owned(), Strand::new(format!("{:?}", self.time)).unwrap().into());
+		res.insert("time".to_owned(), format!("{:?}", self.time).into());
 
 		if !matches!(self.query_type, QueryType::Other) {
-			res.insert("type".to_owned(), Strand::new(self.query_type.to_string()).unwrap().into());
+			res.insert("type".to_owned(), self.query_type.to_string().into());
 		}
 
 		match self.result {
 			Ok(v) => {
-				res.insert("status".to_owned(), strand!("OK").to_owned().into());
+				res.insert("status".to_owned(), "OK".to_owned().into());
 				res.insert("result".to_owned(), v);
 			}
 			Err(e) => {
-				res.insert("status".to_owned(), strand!("ERR").to_owned().into());
-				res.insert("result".to_owned(), Strand::new(e.to_string()).unwrap().into());
+				res.insert("status".to_owned(), "ERR".to_owned().into());
+				res.insert("result".to_owned(), e.to_string().into());
 			}
 		}
 
@@ -151,20 +151,24 @@ impl From<&Response> for QueryMethodResponse {
 }
 
 impl Revisioned for Response {
+	fn revision() -> u16 {
+		1
+	}
+}
+
+impl SerializeRevisioned for Response {
 	#[inline]
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		QueryMethodResponse::from(self).serialize_revisioned(writer)
+		SerializeRevisioned::serialize_revisioned(&QueryMethodResponse::from(self), writer)
 	}
+}
 
+impl DeserializeRevisioned for Response {
 	#[inline]
 	fn deserialize_revisioned<R: std::io::Read>(_reader: &mut R) -> Result<Self, revision::Error> {
 		unreachable!("deserialising `Response` directly is not supported")
-	}
-
-	fn revision() -> u16 {
-		1
 	}
 }

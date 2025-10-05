@@ -4,8 +4,8 @@ use anyhow::Result;
 use revision::revisioned;
 
 use crate::catalog::ApiConfigDefinition;
-use crate::expr::fmt::{Fmt, Pretty, pretty_indent};
 use crate::expr::statements::info::InfoStructure;
+use crate::fmt::{Fmt, Pretty, pretty_indent};
 use crate::iam::ConfigKind;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::Value;
@@ -20,6 +20,7 @@ pub enum ConfigDefinition {
 impl_kv_value_revisioned!(ConfigDefinition);
 
 impl ConfigDefinition {
+	/// Get the name of the config.
 	pub fn name(&self) -> String {
 		match self {
 			ConfigDefinition::GraphQL(_) => ConfigKind::GraphQL.to_string(),
@@ -27,6 +28,10 @@ impl ConfigDefinition {
 		}
 	}
 
+	/// Convert the config definition into a graphql config.
+	///
+	/// TODO: This is used in the commented out graphql code.
+	#[allow(unused)]
 	pub fn try_into_graphql(self) -> Result<GraphQLConfig> {
 		match self {
 			ConfigDefinition::GraphQL(g) => Ok(g),
@@ -73,7 +78,7 @@ pub struct GraphQLConfig {
 
 impl Display for GraphQLConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, " GRAPHQL")?;
+		write!(f, "GRAPHQL")?;
 
 		write!(f, " TABLES {}", self.tables)?;
 		write!(f, " FUNCTIONS {}", self.functions)?;
@@ -133,7 +138,7 @@ impl InfoStructure for TablesConfig {
 	fn structure(self) -> Value {
 		match self {
 			TablesConfig::None => Value::None,
-			TablesConfig::Auto => Value::Strand("AUTO".into()),
+			TablesConfig::Auto => Value::String("AUTO".into()),
 			TablesConfig::Include(ts) => Value::from(map!(
 				"include" => Value::Array(ts.into_iter().map(InfoStructure::structure).collect()),
 			)),
@@ -218,7 +223,7 @@ impl InfoStructure for FunctionsConfig {
 	fn structure(self) -> Value {
 		match self {
 			FunctionsConfig::None => Value::None,
-			FunctionsConfig::Auto => Value::Strand("AUTO".into()),
+			FunctionsConfig::Auto => Value::String("AUTO".into()),
 			FunctionsConfig::Include(fs) => Value::from(map!(
 				"include" => Value::Array(fs.into_iter().map(Value::from).collect()),
 			)),

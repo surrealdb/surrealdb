@@ -1,4 +1,3 @@
-use crate::expr::Ident;
 use crate::expr::idiom::Idiom;
 use crate::val::Value;
 
@@ -11,8 +10,7 @@ impl Value {
 				// Loop over old keys
 				for (key, _) in a.iter() {
 					if !b.contains_key(key) {
-						// TODO: null byte validity.
-						let path = Idiom::field(Ident::new(key.clone()).unwrap());
+						let path = Idiom::field(key.clone());
 						chg.put(&path, Value::None);
 					}
 				}
@@ -21,14 +19,12 @@ impl Value {
 					match a.get(key) {
 						// Key did not exist
 						None => {
-							// TODO: null byte validity.
-							let path = Idiom::field(Ident::new(key.clone()).unwrap());
+							let path = Idiom::field(key.clone());
 							chg.put(&path, val.clone());
 						}
 						Some(old) => {
 							if old != val {
-								// TODO: null byte validity.
-								let path = Idiom::field(Ident::new(key.clone()).unwrap());
+								let path = Idiom::field(key.clone());
 								chg.put(&path, old.changed(val));
 							}
 						}

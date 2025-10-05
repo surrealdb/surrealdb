@@ -2,13 +2,13 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 use std::str::FromStr;
 
-use revision::Revisioned;
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 
 use crate::err::Error;
 use crate::expr::Kind;
-use crate::expr::fmt::{Fmt, fmt_separated_by};
+use crate::fmt::{Fmt, fmt_separated_by};
 use crate::syn;
-use crate::val::{Array, Object, Strand, Value};
+use crate::val::{Array, Object, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Path(pub Vec<Segment>);
@@ -228,17 +228,20 @@ impl Revisioned for Path {
 	fn revision() -> u16 {
 		1
 	}
+}
 
+impl SerializeRevisioned for Path {
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		self.to_string().serialize_revisioned(writer)?;
-		Ok(())
+		SerializeRevisioned::serialize_revisioned(&self.to_string(), writer)
 	}
+}
 
+impl DeserializeRevisioned for Path {
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		let path: String = Revisioned::deserialize_revisioned(reader)?;
+		let path: String = DeserializeRevisioned::deserialize_revisioned(reader)?;
 		path.parse().map_err(|err: Error| revision::Error::Conversion(err.to_string()))
 	}
 }
@@ -268,11 +271,10 @@ impl Segment {
 					val.map(|val| Some((x.to_owned(), val)))
 				}
 				Self::Rest(x) => {
-					// TODO: Null byte validity
 					let values = segments
 						.iter()
 						.copied()
-						.map(|x| Value::Strand(Strand::new(x.to_owned()).unwrap()))
+						.map(|x| Value::String(x.to_owned()))
 						.collect::<Vec<_>>();
 
 					Some(Some((x.to_owned(), Value::Array(Array(values)))))

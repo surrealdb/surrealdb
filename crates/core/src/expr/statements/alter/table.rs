@@ -5,25 +5,26 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use super::AlterKind;
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{Permissions, TableType};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
 use crate::expr::statements::DefineTableStatement;
-use crate::expr::{Base, ChangeFeed, Ident, Kind};
+use crate::expr::{Base, ChangeFeed, Kind};
+use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AlterTableStatement {
-	pub name: Ident,
+	pub name: String,
 	pub if_exists: bool,
 	pub schemafull: AlterKind<()>,
 	pub permissions: Option<Permissions>,
 	pub changefeed: AlterKind<ChangeFeed>,
-	pub comment: AlterKind<Strand>,
+	pub comment: AlterKind<String>,
 	pub kind: Option<TableType>,
 }
 
@@ -79,7 +80,7 @@ impl AlterTableStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(ref x) => dt.comment = Some(x.clone().into_string()),
+			AlterKind::Set(ref x) => dt.comment = Some(x.clone()),
 
 			AlterKind::Drop => dt.comment = None,
 			AlterKind::None => {}
@@ -115,7 +116,7 @@ impl Display for AlterTableStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		if let Some(kind) = &self.kind {
 			write!(f, " TYPE")?;
 			match &kind {

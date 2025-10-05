@@ -7,17 +7,16 @@ use crate::sql::statements::access::{
 	AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
 	AccessStatementShow, Subject,
 };
-use crate::sql::statements::analyze::AnalyzeStatement;
 use crate::sql::statements::rebuild::RebuildIndexStatement;
 use crate::sql::statements::show::ShowSince;
 use crate::sql::statements::{
 	ForeachStatement, InfoStatement, KillStatement, LiveStatement, OptionStatement,
 	OutputStatement, RebuildStatement, SetStatement, ShowStatement, SleepStatement, UseStatement,
 };
-use crate::sql::{AssignOperator, Expr, Fields, Ident, Literal, Param, TopLevelExpr};
+use crate::sql::{AssignOperator, Expr, Fields, Literal, Param, TopLevelExpr};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::unexpected;
-use crate::syn::token::{Glued, TokenKind, t};
+use crate::syn::token::{TokenKind, t};
 use crate::val::Duration;
 
 mod alter;
@@ -109,21 +108,22 @@ impl Parser<'_> {
 				self.pop_peek();
 				self.parse_access(stk).await.map(|x| TopLevelExpr::Access(Box::new(x)))
 			}
-			t!("ANALYZE") => {
-				self.pop_peek();
-				self.parse_analyze().map(TopLevelExpr::Analyze)
-			}
 			t!("SHOW") => {
 				self.pop_peek();
 				self.parse_show_stmt().map(TopLevelExpr::Show)
 			}
-			_ => self.parse_expr_start(stk).await.map(TopLevelExpr::Expr),
+			_ => {
+				let expr = self.parse_expr_start(stk).await?;
+				let span = token.span.covers(self.last_span);
+				Self::reject_letless_let(&expr, span)?;
+				Ok(TopLevelExpr::Expr(expr))
+			}
 		}
 	}
 
 	/// Parsers an access statement.
 	async fn parse_access(&mut self, stk: &mut Stk) -> ParseResult<AccessStatement> {
-		let ac = self.next_token_value()?;
+		let ac = self.parse_ident()?;
 		let base = self.eat(t!("ON")).then(|| self.parse_base()).transpose()?;
 		let peek = self.peek();
 		match peek.kind {
@@ -133,7 +133,7 @@ impl Parser<'_> {
 				match self.peek_kind() {
 					t!("USER") => {
 						self.pop_peek();
-						let user = self.next_token_value()?;
+						let user = self.parse_ident()?;
 						Ok(AccessStatement::Grant(AccessStatementGrant {
 							ac,
 							base,
@@ -165,7 +165,7 @@ impl Parser<'_> {
 					}
 					t!("GRANT") => {
 						self.pop_peek();
-						let gr = Some(self.next_token_value()?);
+						let gr = Some(self.parse_ident()?);
 						Ok(AccessStatement::Show(AccessStatementShow {
 							ac,
 							base,
@@ -198,7 +198,7 @@ impl Parser<'_> {
 					}
 					t!("GRANT") => {
 						self.pop_peek();
-						let gr = Some(self.next_token_value()?);
+						let gr = Some(self.parse_ident()?);
 						Ok(AccessStatement::Revoke(AccessStatementRevoke {
 							ac,
 							base,
@@ -258,17 +258,6 @@ impl Parser<'_> {
 		}
 	}
 
-	/// Parsers a analyze statement.
-	fn parse_analyze(&mut self) -> ParseResult<AnalyzeStatement> {
-		expected!(self, t!("INDEX"));
-
-		let index = self.next_token_value()?;
-		expected!(self, t!("ON"));
-		let table = self.next_token_value()?;
-
-		Ok(AnalyzeStatement::Idx(table, index))
-	}
-
 	/// Parsers a begin statement.
 	///
 	/// # Parser State
@@ -305,16 +294,13 @@ impl Parser<'_> {
 		let (ns, db) = match peek.kind {
 			t!("NAMESPACE") => {
 				self.pop_peek();
-				let ns = self.next_token_value::<Ident>()?;
-				let db = self
-					.eat(t!("DATABASE"))
-					.then(|| self.next_token_value::<Ident>())
-					.transpose()?;
+				let ns = self.parse_ident()?;
+				let db = self.eat(t!("DATABASE")).then(|| self.parse_ident()).transpose()?;
 				(Some(ns), db)
 			}
 			t!("DATABASE") => {
 				self.pop_peek();
-				let db = self.next_token_value::<Ident>()?;
+				let db = self.parse_ident()?;
 				(None, Some(db))
 			}
 			_ => unexpected!(self, peek, "either DATABASE or NAMESPACE"),
@@ -370,7 +356,7 @@ impl Parser<'_> {
 				InfoStatement::Db(structure, version)
 			}
 			t!("TABLE") => {
-				let ident = self.next_token_value()?;
+				let ident = stk.run(|stk| self.parse_expr_field(stk)).await?;
 				let version = if self.eat(t!("VERSION")) {
 					Some(stk.run(|stk| self.parse_expr_inherit(stk)).await?)
 				} else {
@@ -380,16 +366,16 @@ impl Parser<'_> {
 				InfoStatement::Tb(ident, structure, version)
 			}
 			t!("USER") => {
-				let ident = self.next_token_value()?;
+				let ident = stk.run(|stk| self.parse_expr_field(stk)).await?;
 				let base = self.eat(t!("ON")).then(|| self.parse_base()).transpose()?;
 				let structure = self.eat(t!("STRUCTURE"));
 				InfoStatement::User(ident, base, structure)
 			}
 			t!("INDEX") => {
-				let index = self.next_token_value()?;
+				let index = stk.run(|stk| self.parse_expr_field(stk)).await?;
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
-				let table = self.next_token_value()?;
+				let table = stk.run(|stk| self.parse_expr_field(stk)).await?;
 				let structure = self.eat(t!("STRUCTURE"));
 				InfoStatement::Index(index, table, structure)
 			}
@@ -406,7 +392,7 @@ impl Parser<'_> {
 	pub(super) fn parse_kill_stmt(&mut self) -> ParseResult<KillStatement> {
 		let peek = self.peek();
 		let id = match peek.kind {
-			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
+			t!("u\"") | t!("u'") => {
 				self.next_token_value().map(|u| Expr::Literal(Literal::Uuid(u)))?
 			}
 			t!("$param") => self.next_token_value().map(Expr::Param)?,
@@ -452,7 +438,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects `OPTION` to already be consumed.
 	pub(super) fn parse_option_stmt(&mut self) -> ParseResult<OptionStatement> {
-		let name = self.next_token_value()?;
+		let name = self.parse_ident()?;
 		let what = if self.eat(t!("=")) {
 			let next = self.next();
 			match next.kind {
@@ -479,15 +465,16 @@ impl Parser<'_> {
 				} else {
 					false
 				};
-				let name = self.next_token_value()?;
+				let name = self.parse_ident()?;
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
-				let what = self.next_token_value()?;
-
+				let what = self.parse_ident()?;
+				let concurrently = self.eat(t!("CONCURRENTLY"));
 				RebuildStatement::Index(RebuildIndexStatement {
 					what,
 					name,
 					if_exists,
+					concurrently,
 				})
 			}
 			_ => unexpected!(self, next, "a rebuild statement keyword"),
@@ -521,7 +508,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects `LET` to already be consumed.
 	pub(super) async fn parse_let_stmt(&mut self, stk: &mut Stk) -> ParseResult<SetStatement> {
-		let name = self.next_token_value::<Param>()?.ident();
+		let name = self.next_token_value::<Param>()?.into_string();
 		let kind = if self.eat(t!(":")) {
 			Some(self.parse_inner_kind(stk).await?)
 		} else {
@@ -547,7 +534,7 @@ impl Parser<'_> {
 		let next = self.next();
 		let table = match next.kind {
 			t!("TABLE") => {
-				let table = self.next_token_value()?;
+				let table = self.parse_ident()?;
 				Some(table)
 			}
 			t!("DATABASE") => None,

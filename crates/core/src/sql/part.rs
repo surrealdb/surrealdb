@@ -1,9 +1,8 @@
 use std::fmt;
 use std::fmt::Write;
 
-use super::fmt::{is_pretty, pretty_indent};
-use crate::sql::fmt::Fmt;
-use crate::sql::{Expr, Ident, Idiom, Lookup};
+use crate::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt, is_pretty, pretty_indent};
+use crate::sql::{Expr, Idiom, Lookup};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -12,7 +11,7 @@ pub enum Part {
 	Flatten,
 	Last,
 	First,
-	Field(Ident),
+	Field(String),
 	Where(Expr),
 	Graph(Lookup),
 	Value(Expr),
@@ -32,7 +31,7 @@ impl From<Part> for crate::expr::Part {
 			Part::Flatten => Self::Flatten,
 			Part::Last => Self::Last,
 			Part::First => Self::First,
-			Part::Field(ident) => Self::Field(ident.into()),
+			Part::Field(ident) => Self::Field(ident),
 			Part::Where(value) => Self::Where(value.into()),
 			Part::Graph(graph) => Self::Lookup(graph.into()),
 			Part::Value(value) => Self::Value(value.into()),
@@ -62,7 +61,7 @@ impl From<crate::expr::Part> for Part {
 			crate::expr::Part::Flatten => Self::Flatten,
 			crate::expr::Part::Last => Self::Last,
 			crate::expr::Part::First => Self::First,
-			crate::expr::Part::Field(ident) => Self::Field(ident.into()),
+			crate::expr::Part::Field(ident) => Self::Field(ident),
 			crate::expr::Part::Where(value) => Self::Where(value.into()),
 			crate::expr::Part::Lookup(graph) => Self::Graph(graph.into()),
 			crate::expr::Part::Value(value) => Self::Value(value.into()),
@@ -88,11 +87,11 @@ impl From<crate::expr::Part> for Part {
 impl fmt::Display for Part {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Part::All => f.write_str("[*]"),
+			Part::All => f.write_str(".*"),
 			Part::Last => f.write_str("[$]"),
 			Part::First => f.write_str("[0]"),
 			Part::Start(v) => write!(f, "{v}"),
-			Part::Field(v) => write!(f, ".{v}"),
+			Part::Field(v) => write!(f, ".{}", EscapeKwFreeIdent(v)),
 			Part::Flatten => f.write_str("…"),
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
 			Part::Graph(v) => write!(f, "{v}"),
@@ -139,14 +138,14 @@ impl fmt::Display for Part {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum DestructurePart {
-	All(Ident),
-	Field(Ident),
-	Aliased(Ident, Idiom),
-	Destructure(Ident, Vec<DestructurePart>),
+	All(String),
+	Field(String),
+	Aliased(String, Idiom),
+	Destructure(String, Vec<DestructurePart>),
 }
 
 impl DestructurePart {
-	pub fn field(&self) -> &Ident {
+	pub fn field(&self) -> &str {
 		match self {
 			DestructurePart::All(v) => v,
 			DestructurePart::Field(v) => v,
@@ -174,11 +173,11 @@ impl DestructurePart {
 impl fmt::Display for DestructurePart {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			DestructurePart::All(fd) => write!(f, "{fd}.*"),
-			DestructurePart::Field(fd) => write!(f, "{fd}"),
-			DestructurePart::Aliased(fd, v) => write!(f, "{fd}: {v}"),
+			DestructurePart::All(fd) => write!(f, "{}.*", EscapeIdent(fd)),
+			DestructurePart::Field(fd) => write!(f, "{}", EscapeIdent(fd)),
+			DestructurePart::Aliased(fd, v) => write!(f, "{}: {v}", EscapeIdent(fd)),
 			DestructurePart::Destructure(fd, d) => {
-				write!(f, "{}{}", fd, Part::Destructure(d.clone()))
+				write!(f, "{}{}", EscapeIdent(&fd), Part::Destructure(d.clone()))
 			}
 		}
 	}
@@ -187,11 +186,11 @@ impl fmt::Display for DestructurePart {
 impl From<DestructurePart> for crate::expr::part::DestructurePart {
 	fn from(v: DestructurePart) -> Self {
 		match v {
-			DestructurePart::All(v) => Self::All(v.into()),
-			DestructurePart::Field(v) => Self::Field(v.into()),
-			DestructurePart::Aliased(v, idiom) => Self::Aliased(v.into(), idiom.into()),
+			DestructurePart::All(v) => Self::All(v),
+			DestructurePart::Field(v) => Self::Field(v),
+			DestructurePart::Aliased(v, idiom) => Self::Aliased(v, idiom.into()),
 			DestructurePart::Destructure(v, d) => {
-				Self::Destructure(v.into(), d.into_iter().map(Into::into).collect())
+				Self::Destructure(v, d.into_iter().map(Into::into).collect())
 			}
 		}
 	}
@@ -200,15 +199,12 @@ impl From<DestructurePart> for crate::expr::part::DestructurePart {
 impl From<crate::expr::part::DestructurePart> for DestructurePart {
 	fn from(v: crate::expr::part::DestructurePart) -> Self {
 		match v {
-			crate::expr::part::DestructurePart::All(v) => Self::All(v.into()),
-			crate::expr::part::DestructurePart::Field(v) => Self::Field(v.into()),
-			crate::expr::part::DestructurePart::Aliased(v, idiom) => {
-				Self::Aliased(v.into(), idiom.into())
+			crate::expr::part::DestructurePart::All(v) => Self::All(v),
+			crate::expr::part::DestructurePart::Field(v) => Self::Field(v),
+			crate::expr::part::DestructurePart::Aliased(v, idiom) => Self::Aliased(v, idiom.into()),
+			crate::expr::part::DestructurePart::Destructure(v, d) => {
+				Self::Destructure(v, d.into_iter().map(Into::<DestructurePart>::into).collect())
 			}
-			crate::expr::part::DestructurePart::Destructure(v, d) => Self::Destructure(
-				v.into(),
-				d.into_iter().map(Into::<DestructurePart>::into).collect(),
-			),
 		}
 	}
 }

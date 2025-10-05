@@ -218,9 +218,7 @@ pub async fn init(
 				}
 
 				for var in &vars {
-					query
-						.expressions
-						.push(TopLevelExpr::Expr(Expr::Param(Param::from(var.clone()))))
+					query.expressions.push(TopLevelExpr::Expr(Expr::Param(Param::new(var.clone()))))
 				}
 
 				// Extract the namespace and database from the current prompt
@@ -238,7 +236,7 @@ pub async fn init(
 				if let Ok(WithStats(res)) = &mut result {
 					for (i, n) in vars.into_iter().enumerate() {
 						if let Result::<Value, _>::Ok(v) = res.take(init_length + i) {
-							let _ = client.set(n.into_string(), v).await;
+							let _ = client.set(n, v).await;
 						}
 					}
 				}
@@ -308,13 +306,19 @@ fn process(
 				return;
 			}
 		};
-		while let Some(Notification {
-			query_id,
-			action,
-			data,
-			..
-		}) = stream.next().await
-		{
+		while let Some(result) = stream.next().await {
+			let Notification {
+				query_id,
+				action,
+				data,
+				..
+			} = match result {
+				Ok(notification) => notification,
+				Err(error) => {
+					print(Err(error));
+					continue;
+				}
+			};
 			let message = match (json, pretty) {
 				// Don't prettify the SurrealQL response
 				(false, false) => {

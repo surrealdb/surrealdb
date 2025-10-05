@@ -1,3 +1,4 @@
+use core::f64;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::Bound;
@@ -5,14 +6,13 @@ use std::ops::Bound;
 use reblessive::Stk;
 
 use super::{ParseResult, Parser};
-use crate::sql::Ident;
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
 use crate::syn::parser::mac::{expected, pop_glued};
 use crate::syn::parser::unexpected;
 use crate::syn::token::{Glued, Span, TokenKind, t};
 use crate::val::{
-	self, Array, Duration, Geometry, Number, Object, Range, RecordId, RecordIdKey, Strand, Value,
+	self, Array, Duration, Geometry, Number, Object, Range, RecordId, RecordIdKey, Value,
 };
 
 trait ValueParseFunc {
@@ -51,6 +51,10 @@ impl Parser<'_> {
 				self.pop_peek();
 				Value::Number(Number::Float(f64::NAN))
 			}
+			TokenKind::Infinity => {
+				self.pop_peek();
+				Value::Number(Number::Float(f64::INFINITY))
+			}
 			t!("true") => {
 				self.pop_peek();
 				Value::Bool(true)
@@ -85,24 +89,16 @@ impl Parser<'_> {
 				self.parse_value_array::<SurrealQL>(stk, token.span).await.map(Value::Array)?
 			}
 			t!("\"") | t!("'") => {
-				let strand: Strand = self.next_token_value()?;
+				let strand = self.parse_string_lit()?;
 				if self.settings.legacy_strands {
 					self.reparse_json_legacy_strand(stk, strand).await
 				} else {
-					Value::Strand(strand)
+					Value::String(strand)
 				}
 			}
-			t!("d\"") | t!("d'") => {
-				let datetime = self.next_token_value()?;
-				Value::Datetime(datetime)
-			}
-			t!("u\"") | t!("u'") => {
-				let uuid = self.next_token_value()?;
-				Value::Uuid(uuid)
-			}
-			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
-				Value::Bytes(self.next_token_value()?)
-			}
+			t!("d\"") | t!("d'") => Value::Datetime(self.next_token_value()?),
+			t!("u\"") | t!("u'") => Value::Uuid(self.next_token_value()?),
+			t!("b\"") | t!("b'") => Value::Bytes(self.next_token_value()?),
 			//TODO: Implement record id for value parsing
 			t!("f\"") | t!("f'") => {
 				if !self.settings.files_enabled {
@@ -274,11 +270,11 @@ impl Parser<'_> {
 				self.parse_value_array::<Json>(stk, token.span).await.map(Value::Array)
 			}
 			t!("\"") | t!("'") => {
-				let strand: Strand = self.next_token_value()?;
+				let strand = self.parse_string_lit()?;
 				if self.settings.legacy_strands {
 					Ok(self.reparse_json_legacy_strand(stk, strand).await)
 				} else {
-					Ok(Value::Strand(strand))
+					Ok(Value::String(strand))
 				}
 			}
 			t!("-") | t!("+") | TokenKind::Digits => {
@@ -291,10 +287,6 @@ impl Parser<'_> {
 					Numeric::Decimal(x) => Ok(Value::Number(Number::Decimal(x))),
 				}
 			}
-			TokenKind::Glued(Glued::Strand) => {
-				let glued = pop_glued!(self, Strand);
-				Ok(Value::Strand(glued))
-			}
 			TokenKind::Glued(Glued::Duration) => {
 				let glued = pop_glued!(self, Duration);
 				Ok(Value::Duration(glued))
@@ -303,7 +295,7 @@ impl Parser<'_> {
 		}
 	}
 
-	async fn reparse_json_legacy_strand(&mut self, stk: &mut Stk, strand: Strand) -> Value {
+	async fn reparse_json_legacy_strand(&mut self, stk: &mut Stk, strand: String) -> Value {
 		if let Ok(x) = Parser::new(strand.as_bytes()).parse_value_record_id(stk).await {
 			return Value::RecordId(x);
 		}
@@ -316,7 +308,7 @@ impl Parser<'_> {
 		}
 
 		//TODO: Fix record id and others
-		Value::Strand(strand)
+		Value::String(strand)
 	}
 
 	async fn parse_value_object<VP>(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Object>
@@ -367,7 +359,7 @@ impl Parser<'_> {
 	where
 		VP: ValueParseFunc,
 	{
-		let table = self.next_token_value::<Ident>()?;
+		let table = self.parse_ident()?;
 		expected!(self, t!(":"));
 		let peek = self.peek();
 		let key = match peek.kind {
@@ -433,7 +425,7 @@ impl Parser<'_> {
 					&& Self::kind_is_identifier(self.peek_whitespace1().kind)
 				{
 					let ident = self.parse_flexible_ident()?;
-					RecordIdKey::String(ident.into_string())
+					RecordIdKey::String(ident)
 				} else {
 					self.pop_peek();
 
@@ -458,14 +450,14 @@ impl Parser<'_> {
 				let ident = if self.settings.flexible_record_id {
 					self.parse_flexible_ident()?
 				} else {
-					self.next_token_value::<Ident>()?
+					self.parse_ident()?
 				};
-				RecordIdKey::String(ident.into_string())
+				RecordIdKey::String(ident)
 			}
 		};
 
 		Ok(RecordId {
-			table: table.into_string(),
+			table,
 			key,
 		})
 	}

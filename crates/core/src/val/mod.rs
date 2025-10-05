@@ -11,12 +11,13 @@ use geo::Point;
 use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
-use crate::expr::fmt::Pretty;
 use crate::expr::kind::GeometryKind;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{self, Kind};
+use crate::fmt::{Pretty, QuoteStr};
 
 pub mod array;
 pub mod bytes;
@@ -31,7 +32,6 @@ pub mod range;
 pub mod record;
 pub mod record_id;
 pub mod regex;
-pub mod strand;
 pub mod table;
 pub mod uuid;
 pub mod value;
@@ -48,10 +48,13 @@ pub use self::object::Object;
 pub use self::range::Range;
 pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::regex::Regex;
-pub use self::strand::{Strand, StrandRef};
 pub use self::table::Table;
 pub use self::uuid::Uuid;
 pub use self::value::{CastError, CoerceError};
+
+/// Marker type for a different serialization format for value which does not encode type
+/// information which is not required for indexing.
+pub enum IndexFormat {}
 
 /// Marker type for value conversions from Value::None
 #[derive(Clone, Copy, Eq, PartialEq, PartialOrd)]
@@ -62,15 +65,19 @@ pub struct SqlNone;
 pub struct Null;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(
+	Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Encode, BorrowDecode,
+)]
 #[serde(rename = "$surrealdb::private::Value")]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub enum Value {
 	#[default]
 	None,
 	Null,
 	Bool(bool),
 	Number(Number),
-	Strand(Strand),
+	String(String),
 	Duration(Duration),
 	Datetime(Datetime),
 	Uuid(Uuid),
@@ -143,13 +150,12 @@ impl Value {
 			Value::RecordId(_) => true,
 			Value::Geometry(_) => true,
 			Value::Datetime(_) => true,
+			Value::Bytes(v) => !v.is_empty(),
 			Value::Array(v) => !v.is_empty(),
 			Value::Object(v) => !v.is_empty(),
-			Value::Strand(v) => !v.is_empty(),
+			Value::String(v) => !v.is_empty(),
 			Value::Number(v) => v.is_truthy(),
 			Value::Duration(v) => v.as_nanos() > 0,
-			// TODO: Table, range, bytes and closure should probably also have certain truthy
-			// values.
 			_ => false,
 		}
 	}
@@ -247,7 +253,7 @@ impl Value {
 	/// Converts this Value into an unquoted String
 	pub fn as_raw_string(self) -> String {
 		match self {
-			Value::Strand(v) => v.into_string(),
+			Value::String(v) => v,
 			Value::Uuid(v) => v.to_raw(),
 			Value::Datetime(v) => v.into_raw_string(),
 			_ => self.to_string(),
@@ -257,7 +263,7 @@ impl Value {
 	/// Converts this Value into an unquoted String
 	pub fn to_raw_string(&self) -> String {
 		match self {
-			Value::Strand(v) => v.clone().into_string(),
+			Value::String(v) => v.clone(),
 			Value::Uuid(v) => v.to_raw(),
 			Value::Datetime(v) => v.into_raw_string(),
 			_ => self.to_string(),
@@ -274,7 +280,7 @@ impl Value {
 			Value::Null => Some(Kind::Null),
 			Value::Bool(_) => Some(Kind::Bool),
 			Value::Number(_) => Some(Kind::Number),
-			Value::Strand(_) => Some(Kind::String),
+			Value::String(_) => Some(Kind::String),
 			Value::Duration(_) => Some(Kind::Duration),
 			Value::Datetime(_) => Some(Kind::Datetime),
 			Value::Uuid(_) => Some(Kind::Uuid),
@@ -316,7 +322,7 @@ impl Value {
 			Self::Uuid(_) => "uuid",
 			Self::Array(_) => "array",
 			Self::Object(_) => "object",
-			Self::Strand(_) => "string",
+			Self::String(_) => "string",
 			Self::Duration(_) => "duration",
 			Self::Datetime(_) => "datetime",
 			Self::Closure(_) => "function",
@@ -387,8 +393,8 @@ impl Value {
 				//Value::Regex(w) => w.regex().is_match(v.to_raw().as_str()),
 				_ => false,
 			},
-			Value::Strand(v) => match other {
-				Value::Strand(w) => v == w,
+			Value::String(v) => match other {
+				Value::String(w) => v == w,
 				Value::Regex(w) => w.regex().is_match(v.as_str()),
 				_ => false,
 			},
@@ -396,7 +402,7 @@ impl Value {
 				Value::Regex(w) => v == w,
 				// TODO(3.0.0): Decide if we want to keep this behavior.
 				//Value::RecordId(w) => v.regex().is_match(w.to_raw().as_str()),
-				Value::Strand(w) => v.regex().is_match(w.as_str()),
+				Value::String(w) => v.regex().is_match(w.as_str()),
 				_ => false,
 			},
 			Value::Array(v) => match other {
@@ -448,11 +454,11 @@ impl Value {
 		match self {
 			Value::Array(v) => v.iter().any(|v| v.equal(other)),
 			Value::Uuid(v) => match other {
-				Value::Strand(w) => v.to_raw().contains(w.as_str()),
+				Value::String(w) => v.to_raw().contains(w.as_str()),
 				_ => false,
 			},
-			Value::Strand(v) => match other {
-				Value::Strand(w) => v.contains(w.as_str()),
+			Value::String(v) => match other {
+				Value::String(w) => v.contains(w.as_str()),
 				_ => false,
 			},
 			Value::Geometry(v) => match other {
@@ -460,7 +466,7 @@ impl Value {
 				_ => false,
 			},
 			Value::Object(v) => match other {
-				Value::Strand(w) => v.0.contains_key(&**w),
+				Value::String(w) => v.0.contains_key(&**w),
 				_ => false,
 			},
 			Value::Range(r) => {
@@ -485,11 +491,11 @@ impl Value {
 		match other {
 			Value::Array(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
 				// confirmed as strand so all return false is unreachable
-				let Value::Strand(this) = self else {
+				let Value::String(this) = self else {
 					return false;
 				};
 				v.iter().all(|s| {
-					let Value::Strand(other_string) = s else {
+					let Value::String(other_string) = s else {
 						return false;
 					};
 					this.contains(&**other_string)
@@ -500,8 +506,8 @@ impl Value {
 				Value::Geometry(_) => self.contains(v),
 				_ => false,
 			}),
-			Value::Strand(other_strand) => match self {
-				Value::Strand(s) => s.contains(&**other_strand),
+			Value::String(other_strand) => match self {
+				Value::String(s) => s.contains(&**other_strand),
 				_ => false,
 			},
 			_ => false,
@@ -513,11 +519,11 @@ impl Value {
 		match other {
 			Value::Array(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
 				// confirmed as strand so all return false is unreachable
-				let Value::Strand(this) = self else {
+				let Value::String(this) = self else {
 					return false;
 				};
 				v.iter().any(|s| {
-					let Value::Strand(other_string) = s else {
+					let Value::String(other_string) = s else {
 						return false;
 					};
 					this.contains(&**other_string)
@@ -528,8 +534,8 @@ impl Value {
 				Value::Geometry(_) => self.contains(v),
 				_ => false,
 			}),
-			Value::Strand(other_strand) => match self {
-				Value::Strand(s) => s.contains(&**other_strand),
+			Value::String(other_strand) => match self {
+				Value::String(s) => s.contains(&**other_strand),
 				_ => false,
 			},
 			_ => false,
@@ -554,7 +560,7 @@ impl Value {
 	/// Compare this Value to another Value lexicographically
 	pub fn lexical_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
-			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::lexical_cmp(a, b)),
+			(Value::String(a), Value::String(b)) => Some(lexicmp::lexical_cmp(a, b)),
 			_ => self.partial_cmp(other),
 		}
 	}
@@ -562,7 +568,7 @@ impl Value {
 	/// Compare this Value to another Value using natural numerical comparison
 	pub fn natural_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
-			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_cmp(a, b)),
+			(Value::String(a), Value::String(b)) => Some(lexicmp::natural_cmp(a, b)),
 			_ => self.partial_cmp(other),
 		}
 	}
@@ -571,7 +577,7 @@ impl Value {
 	/// numerical comparison
 	pub fn natural_lexical_cmp(&self, other: &Value) -> Option<Ordering> {
 		match (self, other) {
-			(Value::Strand(a), Value::Strand(b)) => Some(lexicmp::natural_lexical_cmp(a, b)),
+			(Value::String(a), Value::String(b)) => Some(lexicmp::natural_lexical_cmp(a, b)),
 			_ => self.partial_cmp(other),
 		}
 	}
@@ -585,7 +591,7 @@ impl Value {
 			Value::Number(Number::Int(i)) => expr::Expr::Literal(expr::Literal::Integer(i)),
 			Value::Number(Number::Float(f)) => expr::Expr::Literal(expr::Literal::Float(f)),
 			Value::Number(Number::Decimal(d)) => expr::Expr::Literal(expr::Literal::Decimal(d)),
-			Value::Strand(strand) => expr::Expr::Literal(expr::Literal::Strand(strand)),
+			Value::String(strand) => expr::Expr::Literal(expr::Literal::String(strand)),
 			Value::Duration(duration) => expr::Expr::Literal(expr::Literal::Duration(duration)),
 			Value::Datetime(datetime) => expr::Expr::Literal(expr::Literal::Datetime(datetime)),
 			Value::Uuid(uuid) => expr::Expr::Literal(expr::Literal::Uuid(uuid)),
@@ -602,7 +608,7 @@ impl Value {
 			Value::File(file) => expr::Expr::Literal(expr::Literal::File(file)),
 			Value::Closure(closure) => expr::Expr::Literal(expr::Literal::Closure(closure)),
 			Value::Range(range) => range.into_literal(),
-			Value::Table(t) => expr::Expr::Table(t.into()),
+			Value::Table(t) => expr::Expr::Table(t.into_string()),
 		}
 	}
 }
@@ -623,7 +629,7 @@ impl fmt::Display for Value {
 			Value::Object(v) => write!(f, "{v}"),
 			Value::Range(v) => write!(f, "{v}"),
 			Value::Regex(v) => write!(f, "{v}"),
-			Value::Strand(v) => write!(f, "{v}"),
+			Value::String(v) => write!(f, "{}", QuoteStr(v)),
 			Value::RecordId(v) => write!(f, "{v}"),
 			Value::Uuid(v) => write!(f, "{v}"),
 			Value::Closure(v) => write!(f, "{v}"),
@@ -653,7 +659,10 @@ impl TryAdd for Value {
 	fn try_add(self, other: Self) -> Result<Self> {
 		Ok(match (self, other) {
 			(Self::Number(v), Self::Number(w)) => Self::Number(v.try_add(w)?),
-			(Self::Strand(v), Self::Strand(w)) => Self::Strand(v.try_add(w)?),
+			(Self::String(mut v), Self::String(w)) => {
+				v.push_str(&w);
+				Value::String(v)
+			}
 			(Self::Datetime(v), Self::Duration(w)) => Self::Datetime(w.try_add(v)?),
 			(Self::Duration(v), Self::Datetime(w)) => Self::Datetime(v.try_add(w)?),
 			(Self::Duration(v), Self::Duration(w)) => Self::Duration(v.try_add(w)?),
@@ -889,7 +898,7 @@ subtypes! {
 	Null => (is_null,_unused,_unused),
 	Bool(bool) => (is_bool,as_bool,into_bool),
 	Number(Number) => (is_number,as_number,into_number),
-	Strand(Strand) => (is_strand,as_strand,into_strand),
+	String(String) => (is_strand,as_strand,into_strand),
 	Table(Table) => (is_table,as_table,into_table),
 	Duration(Duration) => (is_duration,as_duration,into_duration),
 	Datetime(Datetime) => (is_datetime,as_datetime,into_datetime),
@@ -956,15 +965,9 @@ impl From<usize> for Value {
 	}
 }
 
-impl From<String> for Value {
-	fn from(v: String) -> Self {
-		Self::Strand(Strand::from(v))
-	}
-}
-
 impl From<&str> for Value {
 	fn from(v: &str) -> Self {
-		Self::Strand(Strand::from(v))
+		Self::String(v.to_owned())
 	}
 }
 
@@ -1107,9 +1110,9 @@ mod tests {
 		let enc: Vec<u8> = revision::to_vec(&Value::Bool(false)).unwrap();
 		assert_eq!(3, enc.len());
 		let enc: Vec<u8> = revision::to_vec(&Value::from("test")).unwrap();
-		assert_eq!(8, enc.len());
+		assert_eq!(7, enc.len());
 		let enc: Vec<u8> = revision::to_vec(&syn::value("{ hello: 'world' }").unwrap()).unwrap();
-		assert_eq!(19, enc.len());
+		assert_eq!(18, enc.len());
 		let enc: Vec<u8> =
 			revision::to_vec(&syn::value("{ compact: true, schema: 0 }").unwrap()).unwrap();
 		assert_eq!(27, enc.len());

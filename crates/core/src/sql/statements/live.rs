@@ -35,8 +35,6 @@ impl From<LiveStatement> for crate::expr::statements::LiveStatement {
 			what: v.what.into(),
 			cond: v.cond.map(Into::into),
 			fetch: v.fetch.map(Into::into),
-			auth: None,
-			session: None,
 		}
 	}
 }

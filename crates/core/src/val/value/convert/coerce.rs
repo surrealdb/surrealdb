@@ -10,7 +10,7 @@ use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
-	RecordId, Regex, Strand, Uuid, Value,
+	RecordId, Regex, SqlNone, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -104,6 +104,22 @@ impl Coerce for Value {
 
 	fn coerce(v: Value) -> Result<Self, CoerceError> {
 		Ok(v)
+	}
+}
+
+impl Coerce for SqlNone {
+	fn can_coerce(v: &Value) -> bool {
+		matches!(v, Value::None)
+	}
+
+	fn coerce(v: Value) -> Result<Self, CoerceError> {
+		match v {
+			Value::None => Ok(SqlNone),
+			x => Err(CoerceError::InvalidKind {
+				from: x,
+				into: "none".to_string(),
+			}),
+		}
 	}
 }
 
@@ -232,16 +248,6 @@ impl Coerce for Decimal {
 				into: "decimal".into(),
 			}),
 		}
-	}
-}
-
-impl Coerce for String {
-	fn can_coerce(v: &Value) -> bool {
-		Strand::can_coerce(v)
-	}
-
-	fn coerce(v: Value) -> Result<Self, CoerceError> {
-		Strand::coerce(v).map(|x| x.into_string())
 	}
 }
 
@@ -414,7 +420,7 @@ impl_direct! {
 	Object => Object,
 	Array => Array,
 	RecordId => RecordId,
-	Strand => Strand,
+	String => String,
 	Geometry => Geometry,
 	Regex => Regex,
 }
@@ -428,13 +434,14 @@ impl Value {
 	pub fn can_coerce_to_kind(&self, kind: &Kind) -> bool {
 		match kind {
 			Kind::Any => true,
+			Kind::None => self.can_coerce_to::<SqlNone>(),
 			Kind::Null => self.can_coerce_to::<Null>(),
 			Kind::Bool => self.can_coerce_to::<bool>(),
 			Kind::Int => self.can_coerce_to::<i64>(),
 			Kind::Float => self.can_coerce_to::<f64>(),
 			Kind::Decimal => self.can_coerce_to::<Decimal>(),
 			Kind::Number => self.can_coerce_to::<Number>(),
-			Kind::String => self.can_coerce_to::<Strand>(),
+			Kind::String => self.can_coerce_to::<String>(),
 			Kind::Datetime => self.can_coerce_to::<Datetime>(),
 			Kind::Duration => self.can_coerce_to::<Duration>(),
 			Kind::Object => self.can_coerce_to::<Object>(),
@@ -465,10 +472,6 @@ impl Value {
 					self.can_coerce_to_geometry(t)
 				}
 			}
-			Kind::Option(k) => match self {
-				Self::None => true,
-				v => v.can_coerce_to_kind(k),
-			},
 			Kind::Either(k) => k.iter().any(|x| self.can_coerce_to_kind(x)),
 			Kind::Literal(lit) => self.can_coerce_to_literal(lit),
 			Kind::File(buckets) => {
@@ -532,13 +535,14 @@ impl Value {
 		// Attempt to convert to the desired type
 		match kind {
 			Kind::Any => Ok(self),
+			Kind::None => self.coerce_to::<SqlNone>().map(|_| Value::None),
 			Kind::Null => self.coerce_to::<Null>().map(Value::from),
 			Kind::Bool => self.coerce_to::<bool>().map(Value::from),
 			Kind::Int => self.coerce_to::<i64>().map(Value::from),
 			Kind::Float => self.coerce_to::<f64>().map(Value::from),
 			Kind::Decimal => self.coerce_to::<Decimal>().map(Value::from),
 			Kind::Number => self.coerce_to::<Number>().map(Value::from),
-			Kind::String => self.coerce_to::<Strand>().map(Value::from),
+			Kind::String => self.coerce_to::<String>().map(Value::from),
 			Kind::Datetime => self.coerce_to::<Datetime>().map(Value::from),
 			Kind::Duration => self.coerce_to::<Duration>().map(Value::from),
 			Kind::Object => self.coerce_to::<Object>().map(Value::from),
@@ -569,10 +573,6 @@ impl Value {
 					self.coerce_to_geometry_kind(t).map(Value::from)
 				}
 			}
-			Kind::Option(k) => match self {
-				Self::None => Ok(Self::None),
-				v => v.coerce_to_kind(k),
-			},
 			Kind::Either(k) => {
 				// Check first for valid kind, then convert to not consume the value
 				let Some(k) = k.iter().find(|x| self.can_coerce_to_kind(x)) else {

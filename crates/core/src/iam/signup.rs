@@ -9,11 +9,11 @@ use uuid::Uuid;
 
 use super::access::{authenticate_record, create_refresh_token_record};
 use crate::catalog;
+use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Session, Variables};
 use crate::err::Error;
-use crate::expr::Ident;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::Claims;
 use crate::iam::{Actor, Auth, Level, algorithm_to_jwt_algorithm};
@@ -159,7 +159,7 @@ pub async fn db_access(
 						Some(
 							create_refresh_token_record(
 								kvs,
-								Ident::new(av.name.clone()).unwrap(),
+								av.name.clone(),
 								&ns,
 								&db,
 								rid.clone(),

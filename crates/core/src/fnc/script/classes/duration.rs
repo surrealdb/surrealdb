@@ -15,7 +15,7 @@ impl Duration {
 	#[qjs(constructor)]
 	pub fn new(value: String) -> Self {
 		Self {
-			value: val::Duration::try_from(value).ok(),
+			value: value.parse().ok(),
 		}
 	}
 

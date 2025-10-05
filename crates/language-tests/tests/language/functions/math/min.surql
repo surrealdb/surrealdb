@@ -2,7 +2,7 @@
 [test]
 
 [[test.results]]
-value = "NONE"
+match = "$result == math::inf"
 
 [[test.results]]
 value = "101"

@@ -946,21 +946,10 @@ mod http_integration {
 			assert!(res.is_ok(), "upgrade err: {}", res.unwrap_err());
 		}
 
-		// Test nul character
-		{
-			let res =
-				client.post(url).body("parse::email::user('\\u0000@example.com')").send().await?;
-			assert_eq!(res.status(), 400);
-
-			let body = res.text().await?;
-			assert!(body.contains("Null bytes are not allowed"), "body: {body}");
-		}
-
 		Ok(())
 	}
 
 	#[test(tokio::test)]
-	#[cfg(feature = "http-compression")]
 	async fn sql_endpoint_with_compression() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/sql");
@@ -1172,7 +1161,7 @@ mod http_integration {
 			// Verify there are no records
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body["information"], "Table `table` not found", "body: {body}");
+			assert_eq!(body["information"], "The table 'table' does not exist", "body: {body}");
 
 			// Try to create the record
 			let res = client
@@ -1205,7 +1194,10 @@ mod http_integration {
 			// Verify the table is empty
 			let res = client.get(url).basic_auth(USER, Some(PASS)).send().await?;
 			let body: serde_json::Value = serde_json::from_str(&res.text().await?).unwrap();
-			assert_eq!(body["information"], "Table `table_noauth` not found", "body: {body}");
+			assert_eq!(
+				body["information"], "The table 'table_noauth' does not exist",
+				"body: {body}"
+			);
 		}
 
 		Ok(())

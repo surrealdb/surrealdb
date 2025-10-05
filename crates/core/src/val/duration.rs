@@ -6,11 +6,12 @@ use std::{fmt, ops, time};
 use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::syn;
-use crate::val::{Datetime, Strand, TryAdd, TrySub, Value};
+use crate::val::{Datetime, IndexFormat, TryAdd, TrySub, Value};
 
 pub(crate) static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
 pub(crate) static SECONDS_PER_WEEK: u64 = 7 * SECONDS_PER_DAY;
@@ -22,9 +23,23 @@ pub(crate) static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 
 #[revisioned(revision = 1)]
 #[derive(
-	Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Ord,
+	Clone,
+	Copy,
+	Debug,
+	Default,
+	Eq,
+	PartialEq,
+	PartialOrd,
+	Serialize,
+	Deserialize,
+	Hash,
+	Ord,
+	Encode,
+	BorrowDecode,
 )]
 #[serde(rename = "$surrealdb::private::Duration")]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub struct Duration(pub time::Duration);
 
 impl Duration {
@@ -52,28 +67,7 @@ impl From<time::Duration> for Value {
 impl FromStr for Duration {
 	type Err = ();
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Self::try_from(s)
-	}
-}
-
-impl TryFrom<String> for Duration {
-	type Error = ();
-	fn try_from(v: String) -> Result<Self, Self::Error> {
-		Self::try_from(v.as_str())
-	}
-}
-
-impl TryFrom<Strand> for Duration {
-	type Error = ();
-	fn try_from(v: Strand) -> Result<Self, Self::Error> {
-		Self::try_from(v.as_str())
-	}
-}
-
-impl TryFrom<&str> for Duration {
-	type Error = ();
-	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match syn::duration(v) {
+		match syn::duration(s) {
 			Ok(v) => Ok(v),
 			_ => Err(()),
 		}

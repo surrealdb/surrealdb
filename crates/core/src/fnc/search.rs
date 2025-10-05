@@ -5,6 +5,7 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use super::args::Optional;
+use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -18,11 +19,11 @@ pub async fn analyze(
 	(stk, ctx, opt): (&mut Stk, &Context, Option<&Options>),
 	(az, val): (Value, Value),
 ) -> Result<Value> {
-	if let (Some(opt), Value::Strand(az), Value::Strand(val)) = (opt, az, val) {
+	if let (Some(opt), Value::String(az), Value::String(val)) = (opt, az, val) {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let az = ctx.tx().get_db_analyzer(ns, db, &az).await?;
 		let az = Analyzer::new(ctx.get_index_stores(), az)?;
-		az.analyze(stk, ctx, opt, val.into_string()).await
+		az.analyze(stk, ctx, opt, val).await
 	} else {
 		Ok(Value::None)
 	}

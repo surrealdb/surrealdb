@@ -5,12 +5,14 @@
 //! The data can be stored in either mutable or read-only form for performance optimization.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::mem;
 use std::sync::Arc;
 
 use revision::error::Error;
-use revision::{Revisioned, revisioned};
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
+use rust_decimal::Decimal;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize, Serializer};
 
@@ -37,7 +39,7 @@ use crate::val::Value;
 /// assert!(!record.is_edge());
 /// ```
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Record {
 	/// Optional metadata about the record (e.g., record type)
 	pub(crate) metadata: Option<Metadata>,
@@ -77,7 +79,7 @@ impl Record {
 		matches!(
 			&self.metadata,
 			Some(Metadata {
-				record_type: Some(RecordType::Edge),
+				record_type: RecordType::Edge,
 				..
 			})
 		)
@@ -113,11 +115,12 @@ impl Record {
 	pub(crate) fn set_record_type(&mut self, rtype: RecordType) {
 		match &mut self.metadata {
 			Some(metadata) => {
-				metadata.record_type = Some(rtype);
+				metadata.record_type = rtype;
 			}
 			metadata => {
 				*metadata = Some(Metadata {
-					record_type: Some(rtype),
+					record_type: rtype,
+					stats: HashMap::new(),
 				});
 			}
 		}
@@ -204,25 +207,29 @@ impl Default for Data {
 }
 
 impl Revisioned for Data {
+	/// Returns the revision number for this type
+	fn revision() -> u16 {
+		1
+	}
+}
+
+impl SerializeRevisioned for Data {
 	/// Serializes the data using the revisioned format
 	///
 	/// This delegates to the underlying Value's serialization.
 	#[inline]
 	fn serialize_revisioned<W: std::io::Write>(&self, writer: &mut W) -> Result<(), Error> {
-		self.as_ref().serialize_revisioned(writer)
+		SerializeRevisioned::serialize_revisioned(self.as_ref(), writer)
 	}
+}
 
+impl DeserializeRevisioned for Data {
 	/// Deserializes the data from the revisioned format
 	///
 	/// This deserializes a Value and wraps it in a Mutable Data variant.
 	#[inline]
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, Error> {
-		Value::deserialize_revisioned(reader).map(Self::Mutable)
-	}
-
-	/// Returns the revision number for this type
-	fn revision() -> u16 {
-		1
+		DeserializeRevisioned::deserialize_revisioned(reader).map(Self::Mutable)
 	}
 }
 
@@ -292,16 +299,29 @@ impl From<Arc<Value>> for Data {
 	}
 }
 
-/// Metadata associated with a record
+/// Statistics for aggregated fields in materialized views
 ///
-/// This struct contains optional metadata about a record, such as its type.
-/// The metadata is revisioned to ensure compatibility across different versions
-/// of the database.
+/// This enum represents different types of aggregation statistics that are
+/// maintained for fields in materialized views. Each variant contains the
+/// necessary metadata to support incremental updates and deletions.
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-pub(crate) struct Metadata {
-	/// The type of the record (e.g., Edge for graph edges)
-	record_type: Option<RecordType>,
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Serialize, Deserialize, Hash)]
+pub(crate) enum FieldStats {
+	/// Simple counter for count() aggregations
+	Count(u64),
+	/// Sum aggregation with count for potential purging
+	Sum {
+		count: u64,
+	},
+	/// Mean calculation metadata with running sum and count
+	Mean {
+		sum: Decimal,
+		count: u64,
+	},
+	/// Min/Max aggregation with count for recalculation when values are removed
+	MinMax {
+		count: u64,
+	},
 }
 
 /// Types of records that can be stored in the database
@@ -310,8 +330,99 @@ pub(crate) struct Metadata {
 /// Currently, only Edge is supported, but this can be extended to support
 /// other record types in the future.
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub(crate) enum RecordType {
+	/// Represents a normal table record
+	#[default]
+	Table,
 	/// Represents an edge in a graph
 	Edge,
+}
+
+/// Metadata associated with a record
+///
+/// This struct contains optional metadata about a record, such as its type and
+/// aggregation statistics for materialized view records.
+/// The metadata is revisioned to ensure compatibility across different versions
+/// of the database.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Metadata {
+	/// The type of the record (e.g., Edge for graph edges)
+	record_type: RecordType,
+	/// Aggregation statistics for materialized view records
+	stats: HashMap<String, FieldStats>,
+}
+
+impl Record {
+	/// Gets the aggregation statistics for a specific field
+	///
+	/// # Arguments
+	///
+	/// * `field_name` - The name of the field to get statistics for
+	///
+	/// # Returns
+	///
+	/// An optional reference to the field statistics
+	pub(crate) fn get_field_stats(&self, field_name: &str) -> Option<&FieldStats> {
+		self.metadata.as_ref()?.stats.get(field_name)
+	}
+
+	/// Sets aggregation statistics for a specific field
+	///
+	/// This method updates or creates the metadata to include the specified
+	/// field statistics. If metadata or stats don't exist, they will be created.
+	///
+	/// # Arguments
+	///
+	/// * `field_name` - The name of the field to set statistics for
+	/// * `stats` - The field statistics to set
+	pub(crate) fn set_field_stats(&mut self, field_name: String, stats: FieldStats) {
+		let metadata = self.metadata.get_or_insert_with(|| Metadata {
+			record_type: RecordType::default(),
+			stats: HashMap::new(),
+		});
+
+		metadata.stats.insert(field_name, stats);
+	}
+
+	/// Removes aggregation statistics for a specific field
+	///
+	/// # Arguments
+	///
+	/// * `field_name` - The name of the field to remove statistics for
+	///
+	/// # Returns
+	///
+	/// The removed field statistics, if they existed
+	pub(crate) fn remove_field_stats(&mut self, field_name: &str) -> Option<FieldStats> {
+		self.metadata.as_mut()?.stats.remove(field_name)
+	}
+
+	/// Checks if any count field has become zero (indicating the record should be deleted)
+	///
+	/// # Returns
+	///
+	/// `true` if any field has a count of 0, indicating the record should be purged
+	pub(crate) fn has_zero_count(&self) -> bool {
+		if let Some(metadata) = &self.metadata {
+			for stats in metadata.stats.values() {
+				match stats {
+					FieldStats::Count(count) if *count == 0 => return true,
+					FieldStats::Sum {
+						count,
+					} if *count == 0 => return true,
+					FieldStats::Mean {
+						count,
+						..
+					} if *count == 0 => return true,
+					FieldStats::MinMax {
+						count,
+					} if *count == 0 => return true,
+					_ => {}
+				}
+			}
+		}
+		false
+	}
 }

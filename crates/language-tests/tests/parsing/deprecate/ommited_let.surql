@@ -1,14 +1,13 @@
 /**
 [test]
-wip = true
 
 [test.results]
 parsing-error = """
-Variable declaration without `let` is deprecated
+Parameter declarations without `let` are deprecated.
   --> [14:1]
    |
 14 | $a = 1
-   | ^^^^^^ replace with `let $a = ..`
+   | ^^^^^^ Replace with `let $a = ...` to keep the previous behavior.
 """
 
 */

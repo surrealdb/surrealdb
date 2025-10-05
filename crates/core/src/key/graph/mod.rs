@@ -1,14 +1,17 @@
 //! Stores a graph edge pointer
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::dir::Dir;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 use crate::val::{RecordId, RecordIdKey};
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 struct Prefix<'a> {
 	__: u8,
 	_a: u8,
@@ -16,14 +19,12 @@ struct Prefix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub id: RecordIdKey,
 }
 
-impl KVKey for Prefix<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(Prefix<'_> => Vec<u8>);
 
 impl<'a> Prefix<'a> {
 	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey) -> Self {
@@ -34,14 +35,15 @@ impl<'a> Prefix<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'~',
 			id: id.to_owned(),
 		}
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 struct PrefixEg<'a> {
 	__: u8,
 	_a: u8,
@@ -49,15 +51,13 @@ struct PrefixEg<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub id: RecordIdKey,
 	pub eg: Dir,
 }
 
-impl KVKey for PrefixEg<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(PrefixEg<'_> => Vec<u8>);
 
 impl<'a> PrefixEg<'a> {
 	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, id: &RecordIdKey, eg: &Dir) -> Self {
@@ -68,7 +68,7 @@ impl<'a> PrefixEg<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'~',
 			id: id.clone(),
 			eg: eg.clone(),
@@ -76,7 +76,8 @@ impl<'a> PrefixEg<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 struct PrefixFt<'a> {
 	__: u8,
 	_a: u8,
@@ -84,16 +85,14 @@ struct PrefixFt<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub id: RecordIdKey,
 	pub eg: Dir,
-	pub ft: &'a str,
+	pub ft: Cow<'a, str>,
 }
 
-impl KVKey for PrefixFt<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(PrefixFt<'_> => Vec<u8>);
 
 impl<'a> PrefixFt<'a> {
 	fn new(
@@ -111,16 +110,17 @@ impl<'a> PrefixFt<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'~',
 			id: id.to_owned(),
 			eg: eg.to_owned(),
-			ft,
+			ft: Cow::Borrowed(ft),
 		}
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Encode, BorrowDecode)]
+#[storekey(format = "()")]
 pub(crate) struct Graph<'a> {
 	__: u8,
 	_a: u8,
@@ -128,21 +128,19 @@ pub(crate) struct Graph<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
 	pub id: RecordIdKey,
 	pub eg: Dir,
-	pub ft: &'a str,
-	pub fk: RecordIdKey,
+	pub ft: Cow<'a, str>,
+	pub fk: Cow<'a, RecordIdKey>,
 }
 
-impl KVKey for Graph<'_> {
-	type ValueType = ();
-}
+impl_kv_key_storekey!(Graph<'_> => ());
 
 impl Graph<'_> {
 	pub fn decode_key(k: &[u8]) -> Result<Graph<'_>> {
-		Ok(storekey::deserialize(k)?)
+		Ok(storekey::decode_borrow(k)?)
 	}
 }
 
@@ -241,12 +239,12 @@ impl<'a> Graph<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'~',
 			id,
 			eg,
-			ft: &fk.table,
-			fk: fk.key.clone(),
+			ft: Cow::Borrowed(&fk.table),
+			fk: Cow::Borrowed(&fk.key),
 		}
 	}
 }
@@ -267,14 +265,14 @@ mod tests {
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			strand!("testid").to_owned().into(),
+			"testid".to_owned().into(),
 			Dir::Out,
 			&fk,
 		);
 		let enc = Graph::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\x00~\0\0\0\x01testid\0\0\0\0\x01other\0\0\0\0\x01test\0"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0~\x03testid\0\x03other\0\x03test\0"
 		);
 	}
 }

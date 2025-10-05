@@ -35,10 +35,6 @@ use crate::engine::IntervalStream;
 use crate::engine::remote::Data;
 use crate::opt::WaitFor;
 
-pub(crate) const MAX_MESSAGE_SIZE: usize = 64 << 20; // 64 MiB
-pub(crate) const MAX_FRAME_SIZE: usize = 16 << 20; // 16 MiB
-pub(crate) const WRITE_BUFFER_SIZE: usize = 128000; // tungstenite default
-pub(crate) const MAX_WRITE_BUFFER_SIZE: usize = WRITE_BUFFER_SIZE + MAX_MESSAGE_SIZE; // Recommended max according to tungstenite docs
 pub(crate) const NAGLE_ALG: bool = false;
 
 type MessageSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
@@ -97,12 +93,12 @@ impl conn::Sealed for Client {
 			#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 			let maybe_connector = None;
 
-			let ws_config = WebSocketConfig {
-				max_message_size: Some(MAX_MESSAGE_SIZE),
-				max_frame_size: Some(MAX_FRAME_SIZE),
-				max_write_buffer_size: MAX_WRITE_BUFFER_SIZE,
-				..Default::default()
-			};
+			let ws_config = WebSocketConfig::default()
+				.read_buffer_size(address.config.websocket.read_buffer_size)
+				.max_message_size(address.config.websocket.max_message_size)
+				.max_frame_size(address.config.websocket.max_message_size)
+				.max_write_buffer_size(address.config.websocket.max_write_buffer_size)
+				.write_buffer_size(address.config.websocket.write_buffer_size);
 
 			let socket = connect(&address, Some(ws_config), maybe_connector.clone()).await?;
 
@@ -142,6 +138,7 @@ async fn router_handle_route(
 		request,
 		response,
 	}: Route,
+	max_message_size: Option<usize>,
 	state: &mut RouterState,
 ) -> HandleResult {
 	let RequestData {
@@ -235,8 +232,18 @@ async fn router_handle_route(
 		// Unwrap because a router request cannot fail to serialize.
 		let payload = crate::core::rpc::format::revision::encode(&request).unwrap();
 
-		Message::Binary(payload)
+		Message::Binary(payload.into())
 	};
+
+	if let Some(max_message_size) = max_message_size {
+		let size = message.len();
+		if size > max_message_size {
+			if response.send(Err(Error::MessageTooLong(size).into())).await.is_err() {
+				trace!("Receiver dropped");
+			}
+			return HandleResult::Ok;
+		}
+	}
 
 	match state.sink.send(message).await {
 		Ok(_) => {
@@ -334,7 +341,7 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 								if let Some(sender) = state.live_queries.get(&live_query_id) {
 									// Send the notification back to the caller or kill live query
 									// if the receiver is already dropped
-									if sender.send(notification).await.is_err() {
+									if sender.send(Ok(notification)).await.is_err() {
 										state.live_queries.remove(&live_query_id);
 										let kill = {
 											let request = Command::Kill {
@@ -347,7 +354,7 @@ async fn router_handle_response(response: Message, state: &mut RouterState) -> H
 												&request,
 											)
 											.unwrap();
-											Message::Binary(value)
+											Message::Binary(value.into())
 										};
 										if let Err(error) = state.sink.send(kill).await {
 											trace!(
@@ -424,7 +431,7 @@ async fn router_reconnect(
 
 					let message = crate::core::rpc::format::revision::encode(&request).unwrap();
 
-					if let Err(error) = state.sink.send(Message::Binary(message)).await {
+					if let Err(error) = state.sink.send(Message::Binary(message.into())).await {
 						trace!("{error}");
 						time::sleep(time::Duration::from_secs(1)).await;
 						continue;
@@ -440,7 +447,7 @@ async fn router_reconnect(
 					trace!("Request {:?}", request);
 					let payload = crate::core::rpc::format::revision::encode(&request).unwrap();
 
-					if let Err(error) = state.sink.send(Message::Binary(payload)).await {
+					if let Err(error) = state.sink.send(Message::Binary(payload.into())).await {
 						trace!("{error}");
 						time::sleep(time::Duration::from_secs(1)).await;
 						continue;
@@ -468,7 +475,7 @@ pub(crate) async fn run_router(
 	let ping = {
 		let request = Command::Health.into_router_request(None).unwrap();
 		let value = crate::core::rpc::format::revision::encode(&request).unwrap();
-		Message::Binary(value)
+		Message::Binary(value.into())
 	};
 
 	let (socket_sink, socket_stream) = socket.split();
@@ -485,8 +492,7 @@ pub(crate) async fn run_router(
 		// be recreated with each next.
 
 		state.last_activity = Instant::now();
-		state.live_queries.clear();
-		state.pending_requests.clear();
+		state.reset().await;
 
 		loop {
 			tokio::select! {
@@ -505,7 +511,7 @@ pub(crate) async fn run_router(
 						break 'router;
 					};
 
-					match router_handle_route(response, &mut state).await {
+					match router_handle_route(response, config.max_message_size, &mut state).await {
 						HandleResult::Ok => {},
 						HandleResult::Disconnected => {
 							router_reconnect(
@@ -552,6 +558,7 @@ pub(crate) async fn run_router(
 							}
 						}
 						Err(error) => {
+							state.reset().await;
 							match error {
 								WsError::ConnectionClosed => {
 									trace!("Connection successfully closed on the server");

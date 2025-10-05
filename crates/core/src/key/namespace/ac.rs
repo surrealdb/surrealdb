@@ -1,28 +1,28 @@
 //! Stores a DEFINE ACCESS ON NAMESPACE configuration
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{AccessDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
-pub(crate) struct Ac<'a> {
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+pub(crate) struct NamespaceAccessKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
 	_b: u8,
 	_c: u8,
 	_d: u8,
-	pub ac: &'a str,
+	pub ac: Cow<'a, str>,
 }
 
-impl KVKey for Ac<'_> {
-	type ValueType = AccessDefinition;
-}
+impl_kv_key_storekey!(NamespaceAccessKey<'_> => AccessDefinition);
 
-pub fn new(ns: NamespaceId, ac: &str) -> Ac<'_> {
-	Ac::new(ns, ac)
+pub fn new(ns: NamespaceId, ac: &str) -> NamespaceAccessKey<'_> {
+	NamespaceAccessKey::new(ns, ac)
 }
 
 pub fn prefix(ns: NamespaceId) -> Result<Vec<u8>> {
@@ -37,13 +37,13 @@ pub fn suffix(ns: NamespaceId) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Ac<'_> {
+impl Categorise for NamespaceAccessKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::NamespaceAccess
 	}
 }
 
-impl<'a> Ac<'a> {
+impl<'a> NamespaceAccessKey<'a> {
 	pub fn new(ns: NamespaceId, ac: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -52,7 +52,7 @@ impl<'a> Ac<'a> {
 			_b: b'!',
 			_c: b'a',
 			_d: b'c',
-			ac,
+			ac: Cow::Borrowed(ac),
 		}
 	}
 }
@@ -64,11 +64,11 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Ac::new(
+		let val = NamespaceAccessKey::new(
 			NamespaceId(1),
 			"testac",
 		);
-		let enc = Ac::encode_key(&val).unwrap();
+		let enc = NamespaceAccessKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01!actestac\0");
 	}
 

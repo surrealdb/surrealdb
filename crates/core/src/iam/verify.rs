@@ -6,6 +6,9 @@ use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
 use jsonwebtoken::{DecodingKey, Validation, decode};
 
+use crate::catalog::providers::{
+	AuthorisationProvider, DatabaseProvider, NamespaceProvider, UserProvider,
+};
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::access::{authenticate_generic, authenticate_record};
@@ -775,6 +778,7 @@ pub async fn verify_ns_creds(
 		.ok_or(Error::InvalidAuth)?;
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
+
 	// Verify the specified password for the user
 	verify_pass(pass, user.hash.as_ref())?;
 	// Clone the cached user object
@@ -801,6 +805,7 @@ pub async fn verify_db_creds(
 			.into());
 		}
 	};
+
 	// Fetch the specified user from storage
 	let user = tx
 		.get_db_user(db_def.namespace_id, db_def.database_id, user)
@@ -812,6 +817,7 @@ pub async fn verify_db_creds(
 		.ok_or(Error::InvalidAuth)?;
 	// Ensure that the transaction is cancelled
 	tx.cancel().await?;
+
 	// Verify the specified password for the user
 	verify_pass(pass, user.hash.as_ref())?;
 	// Clone the cached user object
@@ -856,9 +862,9 @@ mod tests {
 
 	use super::*;
 	use crate::iam::token::{Audience, HEADER};
+	use crate::sql::Ast;
 	use crate::sql::statements::define::DefineKind;
 	use crate::sql::statements::define::user::PassType;
-	use crate::sql::{Ast, Ident};
 
 	struct TestLevel {
 		level: &'static str,
@@ -1043,13 +1049,13 @@ mod tests {
 			let user = DefineUserStatement {
 				kind: DefineKind::Default,
 				base,
-				name: Ident::new("user".to_string()).unwrap(),
+				name: crate::sql::Expr::Idiom(crate::sql::Idiom::field("user".to_string())),
 				// This is the Argon2id hash for "pass" with a random salt.
 				pass_type: PassType::Hash(
 					"$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
 						.to_string(),
 				),
-				roles: vec![Ident::new("nonexistent".to_owned()).unwrap()],
+				roles: vec!["nonexistent".to_owned()],
 				token_duration: None,
 				session_duration: None,
 				comment: None,
@@ -1482,7 +1488,7 @@ mod tests {
 				_ => panic!("Session token is not an object"),
 			};
 			let string_claim = tk.get("string_claim").unwrap();
-			assert_eq!(*string_claim, Value::Strand("test".into()));
+			assert_eq!(*string_claim, Value::String("test".into()));
 			let bool_claim = tk.get("bool_claim").unwrap();
 			assert_eq!(*bool_claim, Value::Bool(true));
 			let int_claim = tk.get("int_claim").unwrap();
@@ -1493,10 +1499,10 @@ mod tests {
 			assert_eq!(*array_claim, Value::Array(vec!["test_1", "test_2"].into()));
 			let object_claim = tk.get("object_claim").unwrap();
 			let mut test_object: HashMap<String, Value> = HashMap::new();
-			test_object.insert("test_1".to_string(), Value::Strand("value_1".into()));
+			test_object.insert("test_1".to_string(), Value::String("value_1".into()));
 			let mut test_object_child = HashMap::new();
-			test_object_child.insert("test_2_1".to_string(), Value::Strand("value_2_1".into()));
-			test_object_child.insert("test_2_2".to_string(), Value::Strand("value_2_2".into()));
+			test_object_child.insert("test_2_1".to_string(), Value::String("value_2_1".into()));
+			test_object_child.insert("test_2_2".to_string(), Value::String("value_2_2".into()));
 			test_object.insert("test_2".to_string(), Value::Object(test_object_child.into()));
 			assert_eq!(*object_claim, Value::Object(test_object.into()));
 		}
@@ -1864,7 +1870,7 @@ mod tests {
 							ALGORITHM HS512 KEY '{1}'
 							AUTHENTICATE {{
 								IF $token.iss != "surrealdb-test" {{ {2} "Invalid token issuer" }};
-								IF type::is::array($token.aud) {{
+								IF type::is_array($token.aud) {{
 									IF "surrealdb-test" NOT IN $token.aud {{ {2} "Invalid token audience array" }}
 								}} ELSE {{
 									IF $token.aud IS NOT "surrealdb-test" {{ {2} "Invalid token audience string" }}

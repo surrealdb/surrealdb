@@ -7,6 +7,7 @@ use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use super::DefineKind;
+use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::catalog::{Index, IndexDefinition, TableDefinition};
 use crate::ctx::Context;
 #[cfg(target_family = "wasm")]
@@ -15,24 +16,54 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 #[cfg(target_family = "wasm")]
+use crate::expr::Idiom;
+#[cfg(target_family = "wasm")]
 use crate::expr::Output;
+use crate::expr::expression::VisitExpression;
+use crate::expr::parameterize::{expr_to_ident, exprs_to_fields};
 #[cfg(target_family = "wasm")]
 use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
-use crate::expr::{Base, Ident, Idiom, Part};
+use crate::expr::{Base, Expr, Literal, Part};
+use crate::fmt::Fmt;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ToSql;
-use crate::sql::fmt::Fmt;
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DefineIndexStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
-	pub what: Ident,
-	pub cols: Vec<Idiom>,
+	pub name: Expr,
+	pub what: Expr,
+	pub cols: Vec<Expr>,
 	pub index: Index,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 	pub concurrently: bool,
+}
+
+impl VisitExpression for DefineIndexStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.name.visit(visitor);
+		self.what.visit(visitor);
+		self.cols.iter().for_each(|expr| expr.visit(visitor));
+		self.comment.iter().for_each(|expr| expr.visit(visitor));
+	}
+}
+
+impl Default for DefineIndexStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			what: Expr::Literal(Literal::None),
+			cols: Vec::new(),
+			index: Index::Idx,
+			comment: None,
+			concurrently: false,
+		}
+	}
 }
 
 impl DefineIndexStatement {
@@ -49,11 +80,17 @@ impl DefineIndexStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 
+		// Compute name and what
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "index name").await?;
+		let what = expr_to_ident(stk, ctx, opt, doc, &self.what, "index table").await?;
+
 		let (ns, db) = opt.ns_db()?;
-		let tb = txn.ensure_ns_db_tb(ns, db, &self.what, opt.strict).await?;
+		let tb = txn.ensure_ns_db_tb(ns, db, &what, opt.strict).await?;
 
 		// Check if the definition exists
-		if txn.get_tb_index(tb.namespace_id, tb.database_id, &tb.name, &self.name).await.is_ok() {
+		let index_id = if let Some(ix) =
+			txn.get_tb_index(tb.namespace_id, tb.database_id, &tb.name, &name).await?
+		{
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -74,19 +111,26 @@ impl DefineIndexStatement {
 					tb.namespace_id,
 					tb.database_id,
 					&tb.name,
-					&self.name,
+					&name,
 				)
 				.await?;
 			#[cfg(target_family = "wasm")]
 			ctx.get_index_stores()
-				.index_removed(&txn, tb.namespace_id, tb.database_id, &tb.name, &self.name)
+				.index_removed(&txn, tb.namespace_id, tb.database_id, &tb.name, &name)
 				.await?;
-		}
+
+			ix.index_id
+		} else {
+			txn.lock().await.get_next_ix_id(tb.namespace_id, tb.database_id).await?
+		};
+
+		// Compute columns
+		let cols = exprs_to_fields(stk, ctx, opt, doc, self.cols.as_slice()).await?;
 
 		// If the table is schemafull, ensure that the fields exist.
 		if tb.schemafull {
 			// Check that the fields exist
-			for idiom in self.cols.iter() {
+			for idiom in cols.iter() {
 				// TODO: Was this correct? Can users not index data on sub-fields?
 				let Some(Part::Field(first)) = idiom.0.first() else {
 					continue;
@@ -94,7 +138,7 @@ impl DefineIndexStatement {
 
 				//
 				if txn
-					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, &first.to_raw_string())
+					.get_tb_field(tb.namespace_id, tb.database_id, &tb.name, first)
 					.await?
 					.is_none()
 				{
@@ -106,15 +150,15 @@ impl DefineIndexStatement {
 		}
 
 		// Process the statement
-		let key = crate::key::table::ix::new(tb.namespace_id, tb.database_id, &tb.name, &self.name);
 		let index_def = IndexDefinition {
-			name: self.name.to_raw_string(),
-			what: self.what.to_raw_string(),
-			cols: self.cols.clone(),
+			index_id,
+			name,
+			table_name: what,
+			cols: cols.clone(),
 			index: self.index.clone(),
-			comment: self.comment.clone().map(|x| x.to_raw_string()),
+			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 		};
-		txn.set(&key, &index_def, None).await?;
+		txn.put_tb_index(tb.namespace_id, tb.database_id, &tb.name, &index_def).await?;
 
 		// Refresh the table cache
 
@@ -150,13 +194,10 @@ impl Display for DefineIndexStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(
-			f,
-			" {} ON {} FIELDS {}",
-			self.name,
-			self.what,
-			Fmt::comma_separated(self.cols.iter())
-		)?;
+		write!(f, " {} ON {}", self.name, self.what)?;
+		if !self.cols.is_empty() {
+			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter()))?;
+		}
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index.to_sql())?;
 		}
@@ -183,19 +224,19 @@ pub(in crate::expr::statements) async fn run_indexing(
 		{
 			// Create the remove statement
 			let stm = RemoveIndexStatement {
-				name: Ident::new(index.name.clone()).unwrap(),
-				what: Ident::new(index.what.clone()).unwrap(),
+				name: Expr::Idiom(Idiom::field(index.name.clone())),
+				what: Expr::Idiom(Idiom::field(index.table_name.clone())),
 				if_exists: false,
 			};
 			// Execute the delete statement
-			stm.compute(ctx, opt).await?;
+			stm.compute(stk, ctx, opt, doc).await?;
 		}
 		{
 			// Force queries to run
 			let opt = &opt.new_with_force(Force::Index(Arc::new([index.clone()])));
 			// Update the index data
 			let stm = crate::expr::UpdateStatement {
-				what: vec![crate::expr::Expr::Table(Ident::new(index.what.clone()).unwrap())],
+				what: vec![crate::expr::Expr::Table(index.table_name.clone())],
 				output: Some(Output::None),
 				..UpdateStatement::default()
 			};
@@ -210,7 +251,8 @@ pub(in crate::expr::statements) async fn run_indexing(
 		let rcv = ctx
 			.get_index_builder()
 			.ok_or_else(|| Error::unreachable("No Index Builder"))?
-			.build(ctx, opt.clone(), ns, db, index.clone().into(), _blocking)?;
+			.build(ctx, opt.clone(), ns, db, index.clone().into(), _blocking)
+			.await?;
 		if let Some(rcv) = rcv {
 			rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?
 		} else {

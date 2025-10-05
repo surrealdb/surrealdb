@@ -4,19 +4,22 @@ use std::ops::Bound;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use super::value::CoerceErrorExt;
 use crate::expr;
 use crate::expr::kind::HasKind;
 use crate::val::value::{Coerce, CoerceError};
-use crate::val::{Array, Number, Value};
+use crate::val::{Array, IndexFormat, Number, Value};
 
 /// A range of surrealql values,
 ///
 /// Can be any kind of values, "a"..1 is allowed.
 #[revisioned(revision = 1)]
-#[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone, Hash)]
+#[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone, Hash, Encode, BorrowDecode)]
 #[serde(rename = "$surrealdb::private::Range")]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub struct Range {
 	pub start: Bound<Value>,
 	pub end: Bound<Value>,
@@ -252,6 +255,7 @@ impl TypedRange<i64> {
 		}
 	}
 
+	// TODO: Change this to return an option.
 	#[allow(clippy::len_without_is_empty)]
 	pub fn len(&self) -> usize {
 		let end = match self.end {
@@ -338,5 +342,57 @@ impl Iterator for IntegerRangeIter {
 		// handling if u64::MAX > usize::MAX
 		let upper: Option<usize> = len.try_into().ok();
 		(upper.unwrap_or(usize::MAX), upper)
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use super::Range;
+	use crate::syn;
+	use crate::val::Value;
+
+	fn r(r: &str) -> Range {
+		let Value::Range(r) = syn::value(r).unwrap() else {
+			panic!()
+		};
+		*r
+	}
+
+	fn round_trip(r: Range) {
+		let enc = storekey::encode_vec(&r).unwrap();
+		let dec = storekey::decode_borrow(&enc).unwrap();
+		assert_eq!(r, dec)
+	}
+
+	fn ensure_order(a: Range, b: Range) {
+		let a_enc = storekey::encode_vec(&a).unwrap();
+		let b_enc = storekey::encode_vec(&b).unwrap();
+
+		assert_eq!(
+			a.cmp(&b),
+			a_enc.cmp(&b_enc),
+			"ordering of {a:?} {b:?} is not correct after encoding"
+		);
+	}
+
+	#[test]
+	fn encode_decode() {
+		round_trip(r("1..2"));
+		round_trip(r(".."));
+		round_trip(r("1>.."));
+		round_trip(r("1>..=3"));
+		round_trip(r("..3"));
+		round_trip(r("'a'..'b'"));
+	}
+
+	#[test]
+	fn encoding_ordering() {
+		ensure_order(r(".."), r(".."));
+		ensure_order(r(".."), r("1.."));
+		ensure_order(r("1.."), r("1>.."));
+		ensure_order(r(".."), r("..1"));
+		ensure_order(r(".."), r("..=1"));
+		ensure_order(r("1.."), r("2.."));
+		ensure_order(r("'a'.."), r("'b'.."));
 	}
 }

@@ -6,19 +6,33 @@ use anyhow::Result;
 use http::{HeaderMap, HeaderName, HeaderValue};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
-use crate::expr::escape::EscapeKey;
-use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::literal::ObjectEntry;
-use crate::val::{RecordId, Value};
+use crate::fmt::{EscapeKey, Fmt, Pretty, is_pretty, pretty_indent};
+use crate::val::{IndexFormat, RecordId, Value};
 
 /// Invariant: Keys never contain NUL bytes.
-/// TODO: Null byte validity
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(
+	Clone,
+	Debug,
+	Default,
+	Eq,
+	Ord,
+	PartialEq,
+	PartialOrd,
+	Serialize,
+	Deserialize,
+	Hash,
+	Encode,
+	BorrowDecode,
+)]
 #[serde(rename = "$surrealdb::private::Object")]
-pub struct Object(#[serde(with = "no_nul_bytes_in_keys")] pub BTreeMap<String, Value>);
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
+pub struct Object(pub BTreeMap<String, Value>);
 
 impl From<BTreeMap<&str, Value>> for Object {
 	fn from(v: BTreeMap<&str, Value>) -> Self {
@@ -171,59 +185,5 @@ impl std::ops::Add for Object {
 impl Display for Object {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Object::display(f, &self.0)
-	}
-}
-
-mod no_nul_bytes_in_keys {
-	use std::collections::BTreeMap;
-	use std::fmt;
-
-	use serde::de::{self, Visitor};
-	use serde::ser::SerializeMap;
-	use serde::{Deserializer, Serializer};
-
-	use crate::val::Value;
-
-	pub(crate) fn serialize<S>(
-		m: &BTreeMap<String, Value>,
-		serializer: S,
-	) -> Result<S::Ok, S::Error>
-	where
-		S: Serializer,
-	{
-		let mut s = serializer.serialize_map(Some(m.len()))?;
-		for (k, v) in m {
-			debug_assert!(!k.contains('\0'));
-			s.serialize_entry(k, v)?;
-		}
-		s.end()
-	}
-
-	pub(crate) fn deserialize<'de, D>(deserializer: D) -> Result<BTreeMap<String, Value>, D::Error>
-	where
-		D: Deserializer<'de>,
-	{
-		struct NoNulBytesInKeysVisitor;
-
-		impl<'de> Visitor<'de> for NoNulBytesInKeysVisitor {
-			type Value = BTreeMap<String, Value>;
-
-			fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-				formatter.write_str("a map without any NUL bytes in its keys")
-			}
-
-			fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
-			where
-				A: de::MapAccess<'de>,
-			{
-				let mut ret = BTreeMap::new();
-				while let Some((k, v)) = map.next_entry()? {
-					ret.insert(k, v);
-				}
-				Ok(ret)
-			}
-		}
-
-		deserializer.deserialize_map(NoNulBytesInKeysVisitor)
 	}
 }

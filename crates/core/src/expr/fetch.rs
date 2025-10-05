@@ -9,16 +9,26 @@ use super::FlowResultExt as _;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::fmt::Fmt;
+use crate::expr::expression::VisitExpression;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Function, Idiom};
+use crate::fmt::Fmt;
 use crate::fnc::args::FromArgs;
 use crate::syn;
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Fetchs(pub Vec<Fetch>);
+
+impl Fetchs {
+	pub(crate) fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.0.iter().for_each(|e| e.visit(visitor));
+	}
+}
 
 impl Deref for Fetchs {
 	type Target = Vec<Fetch>;
@@ -70,7 +80,7 @@ impl Fetch {
 				idioms.push(
 					syn::idiom(
 						v.clone()
-							.coerce_to::<Strand>()
+							.coerce_to::<String>()
 							.map_err(|_| Error::InvalidFetch {
 								value: v.into_literal(),
 							})?
@@ -135,6 +145,15 @@ impl Fetch {
 				value: v.clone(),
 			})),
 		}
+	}
+}
+
+impl VisitExpression for Fetch {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.0.visit(visitor);
 	}
 }
 

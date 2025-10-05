@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use async_channel::Sender;
 use bincode::Options;
-use revision::Revisioned;
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use serde::Serialize;
 use serde::ser::SerializeMap as _;
 use uuid::Uuid;
@@ -126,7 +126,7 @@ pub(crate) enum Command {
 	},
 	SubscribeLive {
 		uuid: Uuid,
-		notification_sender: Sender<Notification>,
+		notification_sender: Sender<Result<Notification>>,
 	},
 	Kill {
 		uuid: Uuid,
@@ -142,7 +142,7 @@ impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
 		use crate::core::expr::{Data, Output, UpdateStatement, UpsertStatement};
-		use crate::core::val::{self, Strand};
+		use crate::core::val::{self};
 		use crate::engine::resource_to_exprs;
 
 		let res = match self {
@@ -150,13 +150,8 @@ impl Command {
 				namespace,
 				database,
 			} => {
-				// TODO: Null byte validity
-				let namespace = namespace
-					.map(|n| unsafe { Strand::new_unchecked(n) }.into())
-					.unwrap_or(CoreValue::None);
-				let database = database
-					.map(|d| unsafe { Strand::new_unchecked(d) }.into())
-					.unwrap_or(CoreValue::None);
+				let namespace = namespace.map(From::from).unwrap_or(CoreValue::None);
+				let database = database.map(From::from).unwrap_or(CoreValue::None);
 				RouterRequest {
 					id,
 					method: "use",
@@ -255,8 +250,7 @@ impl Command {
 			} => {
 				let table = match what {
 					Some(w) => {
-						// TODO: Null byte validity
-						let table = unsafe { CoreTable::new_unchecked(w) };
+						let table = CoreTable::new(w);
 						CoreValue::from(table)
 					}
 					None => CoreValue::None,
@@ -278,8 +272,7 @@ impl Command {
 			} => {
 				let table = match what {
 					Some(w) => {
-						// TODO: Null byte validity
-						let table = unsafe { CoreTable::new_unchecked(w) };
+						let table = CoreTable::new(w);
 						CoreValue::from(table)
 					}
 					None => CoreValue::None,
@@ -327,8 +320,6 @@ impl Command {
 					};
 					expr.to_string()
 				};
-				//TODO: Null byte validity
-				let query = unsafe { Strand::new_unchecked(query) };
 
 				let variables = val::Object::default();
 				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
@@ -374,8 +365,6 @@ impl Command {
 					};
 					expr.to_string()
 				};
-				//TODO: Null byte validity
-				let query = unsafe { Strand::new_unchecked(query) };
 
 				let variables = val::Object::default();
 				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
@@ -412,9 +401,7 @@ impl Command {
 				query,
 				variables,
 			} => {
-				// TODO: Null byte validity
-				let query = unsafe { Strand::new_unchecked(query.to_string()) };
-				let params: Vec<CoreValue> = vec![query.into(), variables.into()];
+				let params: Vec<CoreValue> = vec![query.to_string().into(), variables.into()];
 				RouterRequest {
 					id,
 					method: "query",
@@ -498,10 +485,7 @@ impl Command {
 				version,
 				args,
 			} => {
-				// TODO: Null byte validity
-				let version = version
-					.map(|x| unsafe { Strand::new_unchecked(x) }.into())
-					.unwrap_or(CoreValue::None);
+				let version = version.map(From::from).unwrap_or(CoreValue::None);
 				RouterRequest {
 					id,
 					method: "run",
@@ -575,7 +559,6 @@ impl Serialize for RouterRequest {
 		struct InnerMethod(&'static str);
 		struct InnerTransaction<'a>(&'a Uuid);
 		struct InnerUuid<'a>(&'a Uuid);
-		struct InnerStrand(&'static str);
 		struct InnerObject<'a>(&'a RouterRequest);
 
 		impl Serialize for InnerNumberVariant {
@@ -601,7 +584,7 @@ impl Serialize for RouterRequest {
 			where
 				S: serde::Serializer,
 			{
-				serializer.serialize_newtype_variant("Value", 4, "Strand", &InnerStrand(self.0))
+				serializer.serialize_newtype_variant("Value", 4, "String", &self.0)
 			}
 		}
 
@@ -620,14 +603,6 @@ impl Serialize for RouterRequest {
 				S: serde::Serializer,
 			{
 				serializer.serialize_newtype_struct("$surrealdb::private::sql::Uuid", self.0)
-			}
-		}
-		impl Serialize for InnerStrand {
-			fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-			where
-				S: serde::Serializer,
-			{
-				serializer.serialize_newtype_struct("$surrealdb::private::sql::Strand", self.0)
 			}
 		}
 
@@ -674,23 +649,25 @@ impl Revisioned for RouterRequest {
 	fn revision() -> u16 {
 		1
 	}
+}
 
+impl SerializeRevisioned for RouterRequest {
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		w: &mut W,
 	) -> std::result::Result<(), revision::Error> {
 		// version
-		Revisioned::serialize_revisioned(&1u32, w)?;
+		SerializeRevisioned::serialize_revisioned(&1u32, w)?;
 		// object variant
-		Revisioned::serialize_revisioned(&9u32, w)?;
+		SerializeRevisioned::serialize_revisioned(&9u32, w)?;
 		// object wrapper version
-		Revisioned::serialize_revisioned(&1u32, w)?;
+		SerializeRevisioned::serialize_revisioned(&1u32, w)?;
 
 		let size = 1
 			+ self.id.is_some() as usize
 			+ self.params.is_some() as usize
 			+ self.transaction.is_some() as usize;
-		size.serialize_revisioned(w)?;
+		SerializeRevisioned::serialize_revisioned(&size, w)?;
 
 		let serializer = bincode::options()
 			.with_no_limit()
@@ -704,18 +681,18 @@ impl Revisioned for RouterRequest {
 				.map_err(|err| revision::Error::Serialize(err.to_string()))?;
 
 			// the Value version
-			1u16.serialize_revisioned(w)?;
+			SerializeRevisioned::serialize_revisioned(&1u16, w)?;
 
 			// the Value::Number variant
-			3u16.serialize_revisioned(w)?;
+			SerializeRevisioned::serialize_revisioned(&3u16, w)?;
 
 			// the Number version
-			1u16.serialize_revisioned(w)?;
+			SerializeRevisioned::serialize_revisioned(&1u16, w)?;
 
 			// the Number::Int variant
-			0u16.serialize_revisioned(w)?;
+			SerializeRevisioned::serialize_revisioned(&0u16, w)?;
 
-			x.serialize_revisioned(w)?;
+			SerializeRevisioned::serialize_revisioned(x, w)?;
 		}
 
 		serializer
@@ -723,13 +700,10 @@ impl Revisioned for RouterRequest {
 			.map_err(|err| revision::Error::Serialize(err.to_string()))?;
 
 		// the Value version
-		1u16.serialize_revisioned(w)?;
+		SerializeRevisioned::serialize_revisioned(&1u16, w)?;
 
-		// the Value::Strand variant
-		4u16.serialize_revisioned(w)?;
-
-		// the Strand version
-		1u16.serialize_revisioned(w)?;
+		// the Value::String variant
+		SerializeRevisioned::serialize_revisioned(&4u16, w)?;
 
 		serializer
 			.serialize_into(&mut *w, self.method)
@@ -740,7 +714,7 @@ impl Revisioned for RouterRequest {
 				.serialize_into(&mut *w, "params")
 				.map_err(|err| revision::Error::Serialize(err.to_string()))?;
 
-			x.serialize_revisioned(w)?;
+			SerializeRevisioned::serialize_revisioned(x, w)?;
 		}
 
 		if let Some(x) = self.transaction.as_ref() {
@@ -749,20 +723,22 @@ impl Revisioned for RouterRequest {
 				.map_err(|err| revision::Error::Serialize(err.to_string()))?;
 
 			// the Value version
-			1u16.serialize_revisioned(w)?;
+			SerializeRevisioned::serialize_revisioned(&1u16, w)?;
 
 			// the Value::Uuid variant
-			7u16.serialize_revisioned(w)?;
+			SerializeRevisioned::serialize_revisioned(&7u16, w)?;
 
 			// the Uuid version
-			1u16.serialize_revisioned(w)?;
+			SerializeRevisioned::serialize_revisioned(&1u16, w)?;
 
-			x.serialize_revisioned(w)?;
+			SerializeRevisioned::serialize_revisioned(x, w)?;
 		}
 
 		Ok(())
 	}
+}
 
+impl DeserializeRevisioned for RouterRequest {
 	fn deserialize_revisioned<R: Read>(_: &mut R) -> std::result::Result<Self, revision::Error>
 	where
 		Self: Sized,
@@ -775,7 +751,7 @@ impl Revisioned for RouterRequest {
 mod test {
 	use std::io::Cursor;
 
-	use revision::Revisioned;
+	use revision::{DeserializeRevisioned, SerializeRevisioned};
 	use uuid::Uuid;
 
 	use super::RouterRequest;
@@ -799,7 +775,7 @@ mod test {
 			}),
 			req.id
 		);
-		let Some(Value::Strand(x)) = obj.get("method") else {
+		let Some(Value::String(x)) = obj.get("method") else {
 			panic!("invalid method field: {}", obj)
 		};
 		assert_eq!(x.as_str(), req.method);
@@ -830,10 +806,14 @@ mod test {
 			&request,
 			|i| {
 				let mut buf = Vec::new();
-				i.serialize_revisioned(&mut Cursor::new(&mut buf)).unwrap();
+				SerializeRevisioned::serialize_revisioned(i, &mut Cursor::new(&mut buf)).unwrap();
 				buf
 			},
-			|b| Value::deserialize_revisioned(&mut Cursor::new(b)).unwrap(),
+			|b| {
+				let val: Value =
+					DeserializeRevisioned::deserialize_revisioned(&mut Cursor::new(b)).unwrap();
+				val
+			},
 		);
 
 		println!("done");

@@ -1,11 +1,11 @@
 use std::fmt;
 
-use crate::sql::{Expr, Ident, Kind};
+use crate::sql::{Expr, Kind, Param};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Closure {
-	pub args: Vec<(Ident, Kind)>,
+	pub args: Vec<(Param, Kind)>,
 	pub returns: Option<Kind>,
 	pub body: Expr,
 }
@@ -17,7 +17,7 @@ impl fmt::Display for Closure {
 			if i > 0 {
 				f.write_str(", ")?;
 			}
-			write!(f, "${name}: ")?;
+			write!(f, "{name}: ")?;
 			match kind {
 				k @ Kind::Either(_) => write!(f, "<{}>", k)?,
 				k => write!(f, "{}", k)?,

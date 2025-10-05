@@ -78,21 +78,25 @@ macro_rules! impl_serialize_wrapper {
 			fn revision() -> u16 {
 				crate::core::val::Value::revision()
 			}
+		}
 
+		impl ::revision::SerializeRevisioned for $ty {
 			fn serialize_revisioned<W: std::io::Write>(
 				&self,
 				w: &mut W,
 			) -> std::result::Result<(), revision::Error> {
-				self.0.serialize_revisioned(w)
+				::revision::SerializeRevisioned::serialize_revisioned(&self.0, w)
 			}
+		}
 
+		impl ::revision::DeserializeRevisioned for $ty {
 			fn deserialize_revisioned<R: std::io::Read>(
 				r: &mut R,
 			) -> std::result::Result<Self, revision::Error>
 			where
 				Self: Sized,
 			{
-				::revision::Revisioned::deserialize_revisioned(r).map(Self::from_inner)
+				::revision::DeserializeRevisioned::deserialize_revisioned(r).map(Self::from_inner)
 			}
 		}
 

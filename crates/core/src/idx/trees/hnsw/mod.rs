@@ -9,7 +9,7 @@ use anyhow::Result;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use reblessive::tree::Stk;
-use revision::{Revisioned, revisioned};
+use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::{DatabaseDefinition, HnswParams};
@@ -54,13 +54,13 @@ impl KVValue for HnswState {
 	#[inline]
 	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
 		let mut val = Vec::new();
-		self.serialize_revisioned(&mut val)?;
+		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
 		Ok(val)
 	}
 
 	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
-		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
+		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
 
@@ -446,13 +446,14 @@ mod tests {
 	use roaring::RoaringTreemap;
 	use test_log::test;
 
+	use crate::catalog::providers::CatalogProvider;
 	use crate::catalog::{
-		DatabaseDefinition, DatabaseId, Distance, HnswParams, NamespaceId, VectorType,
+		DatabaseDefinition, DatabaseId, Distance, HnswParams, IndexId, NamespaceId, VectorType,
 	};
 	use crate::ctx::{Context, MutableContext};
 	use crate::idx::IndexKeyBase;
-	use crate::idx::docids::DocId;
 	use crate::idx::planner::checker::HnswConditionChecker;
+	use crate::idx::seqdocids::DocId;
 	use crate::idx::trees::hnsw::flavor::HnswFlavor;
 	use crate::idx::trees::hnsw::index::HnswIndex;
 	use crate::idx::trees::hnsw::{ElementId, HnswSearch};
@@ -536,7 +537,7 @@ mod tests {
 	async fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
 		let ds = Datastore::new("memory").await.unwrap();
 		let mut h =
-			HnswFlavor::new(IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"), p)
+			HnswFlavor::new(IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)), p)
 				.unwrap();
 		let map = {
 			let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
@@ -737,7 +738,7 @@ mod tests {
 			let tx = ctx.tx();
 			let mut h = HnswIndex::new(
 				&tx,
-				IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+				IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
 				"test".to_string(),
 				&p,
 			)
@@ -826,7 +827,7 @@ mod tests {
 			(9, new_i16_vec(-4, -2)),
 			(10, new_i16_vec(0, 3)),
 		]);
-		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix");
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3));
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true);
 		let mut h = HnswFlavor::new(ikb, &p).unwrap();
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
@@ -869,7 +870,7 @@ mod tests {
 		let tx = ctx.tx();
 		let mut h = HnswIndex::new(
 			&tx,
-			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", "ix"),
+			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
 			"Index".to_string(),
 			&p,
 		)

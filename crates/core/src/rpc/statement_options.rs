@@ -138,7 +138,7 @@ impl StatementOptions {
 		// Process "data_expr" option
 		if let Some(data) = &self.data {
 			if let Some(v) = obj.remove("data_expr") {
-				if let Value::Strand(v) = v {
+				if let Value::String(v) = v {
 					self.data = Some(RpcData::from_string(v.to_string(), data.value().to_owned())?);
 				} else {
 					return Err(RpcError::InvalidParams(
@@ -150,7 +150,7 @@ impl StatementOptions {
 
 		// Process "fields" option
 		if let Some(v) = obj.remove("fields") {
-			if let Value::Strand(v) = v {
+			if let Value::String(v) = v {
 				self.fields = Some(syn::fields_with_capabilities(v.as_str(), capabilities)?)
 			} else {
 				return Err(RpcError::InvalidParams("Expected 'fields' to be string".to_string()));
@@ -159,7 +159,7 @@ impl StatementOptions {
 
 		// Process "return" option
 		if let Some(v) = obj.remove("return") {
-			if let Value::Strand(v) = v {
+			if let Value::String(v) = v {
 				self.output = Some(syn::output_with_capabilities(v.as_str(), capabilities)?)
 			} else {
 				return Err(RpcError::InvalidParams("Expected 'return' to be string".to_string()));
@@ -186,7 +186,7 @@ impl StatementOptions {
 
 		// Process "cond" option
 		if let Some(v) = obj.remove("cond") {
-			if let Value::Strand(v) = v {
+			if let Value::String(v) = v {
 				let v = syn::expr_with_capabilities(v.as_str(), capabilities)?;
 				self.cond = Some(Cond(v))
 			} else {
@@ -198,7 +198,7 @@ impl StatementOptions {
 		if let Some(v) = obj.remove("version") {
 			let v = match v {
 				Value::Datetime(d) => Expr::Literal(Literal::Datetime(d)),
-				Value::Strand(v) => syn::expr_with_capabilities(v.as_str(), capabilities)?,
+				Value::String(v) => syn::expr_with_capabilities(v.as_str(), capabilities)?,
 				_ => {
 					return Err(RpcError::InvalidParams(
 						"Expected 'version' to be string or datetime".to_string(),
@@ -212,7 +212,7 @@ impl StatementOptions {
 		// Process "timeout" option
 		if let Some(v) = obj.remove("timeout") {
 			if let Value::Duration(v) = v {
-				self.timeout = Some(Timeout(v))
+				self.timeout = Some(Timeout(Expr::Literal(Literal::Duration(v))))
 			} else {
 				return Err(RpcError::InvalidParams(
 					"Expected 'timeout' to be duration".to_string(),
@@ -276,7 +276,7 @@ impl StatementOptions {
 
 		// Process "fetch" option
 		if let Some(v) = obj.remove("fetch") {
-			if let Value::Strand(v) = v {
+			if let Value::String(v) = v {
 				self.fetch = Some(syn::fetchs_with_capabilities(v.as_str(), capabilities)?)
 			} else {
 				return Err(RpcError::InvalidParams("Expected 'fetch' to be string".to_string()));

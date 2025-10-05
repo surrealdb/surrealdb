@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
+use crate::catalog::providers::{DatabaseProvider, TableProvider};
 use crate::catalog::{DatabaseId, HnswParams, Index, IndexDefinition, NamespaceId};
 use crate::ctx::Context;
 use crate::err::Error;
@@ -57,6 +58,7 @@ where
 		}
 	}
 
+	#[cfg(test)]
 	pub(in crate::idx) async fn get_node(
 		&self,
 		tx: &Transaction,
@@ -121,10 +123,6 @@ where
 
 #[derive(Clone)]
 pub enum TreeNodeProvider {
-	DocIds(IndexKeyBase),
-	DocLengths(IndexKeyBase),
-	Postings(IndexKeyBase),
-	Terms(IndexKeyBase),
 	Vector(IndexKeyBase),
 	Debug,
 }
@@ -132,10 +130,6 @@ pub enum TreeNodeProvider {
 impl TreeNodeProvider {
 	pub fn get_key(&self, node_id: NodeId) -> Result<Key> {
 		match self {
-			TreeNodeProvider::DocIds(ikb) => ikb.new_bd_key(node_id).encode_key(),
-			TreeNodeProvider::DocLengths(ikb) => ikb.new_bl_key(node_id).encode_key(),
-			TreeNodeProvider::Postings(ikb) => ikb.new_bp_key(node_id).encode_key(),
-			TreeNodeProvider::Terms(ikb) => ikb.new_bt_key(node_id).encode_key(),
 			TreeNodeProvider::Vector(ikb) => ikb.new_vm_key(node_id).encode_key(),
 			TreeNodeProvider::Debug => Ok(node_id.to_be_bytes().to_vec()),
 		}
@@ -234,8 +228,8 @@ impl IndexStores {
 		ix: &IndexDefinition,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex> {
-		let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
-		self.0.hnsw_indexes.get(ctx, &ix.what, &ikb, p).await
+		let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
+		self.0.hnsw_indexes.get(ctx, &ix.table_name, &ikb, p).await
 	}
 
 	pub(crate) async fn index_removed(
@@ -249,9 +243,9 @@ impl IndexStores {
 	) -> Result<()> {
 		#[cfg(not(target_family = "wasm"))]
 		if let Some(ib) = ib {
-			ib.remove_index(ns, db, tb, ix)?;
+			ib.remove_index(ns, db, tb, ix).await?;
 		}
-		self.remove_index(ns, db, tx.get_tb_index(ns, db, tb, ix).await?.as_ref()).await
+		self.remove_index(ns, db, tx.expect_tb_index(ns, db, tb, ix).await?.as_ref()).await
 	}
 
 	pub(crate) async fn namespace_removed(
@@ -296,7 +290,7 @@ impl IndexStores {
 		for ix in tx.all_tb_indexes(ns, db, tb).await?.iter() {
 			#[cfg(not(target_family = "wasm"))]
 			if let Some(ib) = ib {
-				ib.remove_index(ns, db, tb, &ix.name)?;
+				ib.remove_index(ns, db, tb, &ix.name).await?;
 			}
 			self.remove_index(ns, db, ix).await?;
 		}
@@ -310,7 +304,7 @@ impl IndexStores {
 		ix: &IndexDefinition,
 	) -> Result<()> {
 		if matches!(ix.index, Index::Hnsw(_)) {
-			let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
+			let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
 			self.remove_hnsw_index(ikb).await?;
 		}
 		Ok(())

@@ -254,9 +254,6 @@ build.allow_apis = ["process"]
 [pkg.surrealdb-derive]
 allow_proc_macro = true
 
-[pkg.surrealdb-macros]
-allow_proc_macro = true
-
 [pkg.tokio-macros]
 allow_proc_macro = true
 
@@ -949,6 +946,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.fd-lock]
+allow_apis = ["fs"]
 allow_unsafe = true
 
 [pkg.deunicode]
@@ -1165,6 +1163,7 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.html5ever]
+allow_unsafe = true
 build.allow_apis = ["fs"]
 
 [pkg.futf]
@@ -1250,6 +1249,7 @@ allow_unsafe = true
 
 [pkg.revision]
 allow_apis = ["fs"]
+allow_unsafe = true
 
 [pkg.equator-macro]
 allow_proc_macro = true
@@ -1383,6 +1383,13 @@ allow_unsafe = true
 [pkg.take_mut]
 allow_unsafe = true
 
+[pkg.tikv-jemallocator]
+allow_unsafe = true
+
+[pkg.tikv-jemalloc-sys]
+allow_unsafe = true
+allow_apis = ["fs", "process"]
+
 [pkg.surrealdb-tikv-client]
 allow_unsafe = true
 allow_apis = ["fs", "net"]
@@ -1399,3 +1406,32 @@ allow_apis = ["fs", "net"]
 
 [pkg.console-api]
 allow_apis = ["net"]
+
+[pkg.storekey-derive]
+allow_proc_macro = true
+
+[pkg.storekey]
+allow_unsafe = true
+
+[pkg.cssparser-macros]
+allow_proc_macro = true
+
+[pkg.match_token]
+allow_proc_macro = true
+
+[pkg.web_atoms]
+allow_apis = ["fs"]
+
+[pkg.dtoa]
+allow_unsafe = true
+
+[pkg.dtoa-short]
+allow_unsafe = true
+
+[pkg.cssparser]
+allow_unsafe = true
+
+[pkg.serde_core]
+allow_unsafe = true
+allow_apis = ["fs", "process"]
+

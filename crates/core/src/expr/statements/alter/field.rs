@@ -6,15 +6,17 @@ use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use super::AlterKind;
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{self, Permission, Permissions, TableDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::reference::Reference;
-use crate::expr::{Base, Expr, Ident, Idiom, Kind};
+use crate::expr::{Base, Expr, Idiom, Kind};
+use crate::fmt::{EscapeIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum AlterDefault {
@@ -28,7 +30,7 @@ pub enum AlterDefault {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AlterFieldStatement {
 	pub name: Idiom,
-	pub what: Ident,
+	pub what: String,
 	pub if_exists: bool,
 	pub flex: AlterKind<()>,
 	pub kind: AlterKind<Kind>,
@@ -37,7 +39,7 @@ pub struct AlterFieldStatement {
 	pub assert: AlterKind<Expr>,
 	pub default: AlterDefault,
 	pub permissions: Option<Permissions>,
-	pub comment: AlterKind<Strand>,
+	pub comment: AlterKind<String>,
 	pub reference: AlterKind<Reference>,
 }
 
@@ -126,7 +128,7 @@ impl AlterFieldStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(ref k) => df.comment = Some(k.clone().into_string()),
+			AlterKind::Set(ref k) => df.comment = Some(k.clone()),
 			AlterKind::Drop => df.comment = None,
 			AlterKind::None => {}
 		}
@@ -159,8 +161,6 @@ impl AlterFieldStatement {
 			},
 		)
 		.await?;
-		// Clear the cache
-		txn.clear_cache();
 		// Process possible recursive defitions
 		//df.process_recursive_definitions(ns, db, txn.clone()).await?;
 		// Clear the cache
@@ -176,7 +176,7 @@ impl Display for AlterFieldStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", self.name, EscapeIdent(&self.what))?;
 
 		match self.flex {
 			AlterKind::Set(_) => write!(f, " FLEXIBLE")?,
@@ -219,7 +219,7 @@ impl Display for AlterFieldStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(ref v) => write!(f, " COMMENT {v}")?,
+			AlterKind::Set(ref x) => write!(f, " COMMENT {}", QuoteStr(x))?,
 			AlterKind::Drop => write!(f, " DROP COMMENT")?,
 			AlterKind::None => {}
 		}

@@ -105,22 +105,22 @@ impl WsFormat for Format {
 			Format::Json => {
 				let val = crate::core::rpc::format::json::encode_str(res.into_value())
 					.map_err(|_| RpcError::ParseError)?;
-				Ok((val.len(), Message::Text(val)))
+				Ok((val.len(), Message::Text(val.into())))
 			}
 			Format::Cbor => {
 				let val = crate::core::rpc::format::cbor::encode(res.into_value())
 					.map_err(|_| RpcError::ParseError)?;
-				Ok((val.len(), Message::Binary(val)))
+				Ok((val.len(), Message::Binary(val.into())))
 			}
 			Format::Bincode => {
 				let val = crate::core::rpc::format::bincode::encode(&res)
 					.map_err(|_| RpcError::ParseError)?;
-				Ok((val.len(), Message::Binary(val)))
+				Ok((val.len(), Message::Binary(val.into())))
 			}
 			Format::Revision => {
 				let val = crate::core::rpc::format::revision::encode(&res)
 					.map_err(|_| RpcError::ParseError)?;
-				Ok((val.len(), Message::Binary(val)))
+				Ok((val.len(), Message::Binary(val.into())))
 			}
 			Format::Unsupported => Err(Failure::from(RpcError::InvalidRequest)),
 		}

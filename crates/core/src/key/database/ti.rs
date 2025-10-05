@@ -1,13 +1,13 @@
 //! Stores the next and available freed IDs for documents
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
 // Table ID generator
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Ti {
 	table_root: DatabaseRoot,
 	_c: u8,
@@ -15,9 +15,7 @@ pub(crate) struct Ti {
 	_e: u8,
 }
 
-impl KVKey for Ti {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(Ti => Vec<u8>);
 
 pub fn new(ns: NamespaceId, db: DatabaseId) -> Ti {
 	Ti::new(ns, db)
@@ -43,6 +41,7 @@ impl Ti {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

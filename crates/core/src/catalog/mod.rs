@@ -1,6 +1,15 @@
+//! SurrealDB Catalog definitions.
+//!
+//! The catalog is the collection of definitions (namespaces, databases, tables, fields, indexes,
+//! etc) that are used to describe the state of the database.
+//!
+//! The catalog should be the only structs/enums that are stored physically in the KV Store.
+#![warn(missing_docs)]
+
 mod access;
 mod database;
 mod namespace;
+pub(crate) mod providers;
 mod schema;
 mod subscription;
 mod table;
@@ -9,16 +18,14 @@ mod view;
 pub(crate) use access::*;
 pub(crate) use database::*;
 pub(crate) use namespace::*;
+pub use providers::CatalogProvider;
 pub(crate) use schema::*;
 // TODO: These can be private if we move the bench tests from the sdk to the core.
 pub use schema::{ApiDefinition, ApiMethod};
-pub use schema::{
-	Distance, FullTextParams, HnswParams, MTreeParams, Scoring, SearchParams, VectorType,
-};
+pub use schema::{Distance, FullTextParams, HnswParams, MTreeParams, Scoring, VectorType};
 pub(crate) use subscription::*;
 pub(crate) use table::*;
 pub(crate) use view::*;
-
 #[cfg(test)]
 mod test {
 	use std::str::FromStr;
@@ -65,11 +72,11 @@ mod test {
         schemafull: false,
         view: Some(ViewDefinition {
             fields: Fields::Select(vec![Field::All, Field::Single {
-                expr: Expr::Literal(Literal::Strand("expr".to_string().into())),
+                expr: Expr::Literal(Literal::String("expr".to_string())),
                 alias: Some(Idiom::from_str("field[0]").unwrap()),
             }]),
             what: vec!["what".to_string()],
-            cond: Some(Expr::Literal(Literal::Strand("cond".to_string().into()))),
+            cond: Some(Expr::Literal(Literal::String("cond".to_string()))),
             groups: Some(Groups::default()),
         }),
         permissions: Permissions::default(),
@@ -88,12 +95,12 @@ mod test {
         id: Uuid::default(),
         node: Uuid::default(),
         fields: Fields::Select(vec![Field::All, Field::Single {
-            expr: Expr::Literal(Literal::Strand("expr".to_string().into())),
+            expr: Expr::Literal(Literal::String("expr".to_string())),
             alias: Some(Idiom::from_str("field[0]").unwrap()),
         }]),
-        what: Expr::Literal(Literal::Strand("what".to_string().into())),
-        cond: Some(Expr::Literal(Literal::Strand("cond".to_string().into()))),
-        fetch: Some(Fetchs(vec![Fetch(Expr::Literal(Literal::Strand("fetch".to_string().into())))])),
+        what: Expr::Literal(Literal::String("what".to_string())),
+        cond: Some(Expr::Literal(Literal::String("cond".to_string()))),
+        fetch: Some(Fetchs(vec![Fetch(Expr::Literal(Literal::String("fetch".to_string())))])),
         auth: Some(Auth::default()),
         session: Some(Value::default()),
     }, 97)]
@@ -113,7 +120,7 @@ mod test {
                 }),
             },
          }),
-        authenticate: Some(Expr::Literal(Literal::Strand("expr".to_string().into()))),
+        authenticate: Some(Expr::Literal(Literal::String("expr".to_string()))),
         grant_duration: Some(Duration::from_secs(123)),
         token_duration: Some(Duration::from_secs(123)),
         session_duration: Some(Duration::from_secs(123)),
@@ -143,7 +150,7 @@ mod test {
         actions: vec![
             ApiActionDefinition {
                 methods: vec![ApiMethod::Get],
-                action: Expr::Literal(Literal::Strand("action".to_string().into())),
+                action: Expr::Literal(Literal::String("action".to_string())),
                 config: ApiConfigDefinition::default(),
             },
         ],
@@ -174,8 +181,8 @@ mod test {
 	#[case::event(EventDefinition {
         name: "test".to_string(),
         target_table: "test".to_string(),
-        when: Expr::Literal(Literal::Strand("when".to_string().into())),
-        then: vec![Expr::Literal(Literal::Strand("then".to_string().into()))],
+        when: Expr::Literal(Literal::String("when".to_string())),
+        then: vec![Expr::Literal(Literal::String("then".to_string()))],
         comment: Some("comment".to_string()),
     }, 35)]
 	#[case::field(FieldDefinition {
@@ -198,19 +205,20 @@ mod test {
         name: "function".to_string(),
         args: vec![],
         block: Block(vec![
-            Expr::Literal(Literal::Strand("expr".to_string().into())),
+            Expr::Literal(Literal::String("expr".to_string())),
         ]),
         comment: Some("comment".to_string()),
         permissions: Permission::Full,
         returns: Some(Kind::Any),
-    }, 34)]
+    }, 36)]
 	#[case::index(IndexDefinition {
+        index_id: IndexId(123),
         name: "test".to_string(),
-        what: "what".to_string(),
+        table_name: "what".to_string(),
         cols: vec![Idiom::from_str("field[0]").unwrap()],
         index: Index::Idx,
         comment: Some("comment".to_string()),
-    }, 32)]
+    }, 33)]
 	#[case::model(MlModelDefinition {
         name: "model".to_string(),
         hash: "hash".to_string(),

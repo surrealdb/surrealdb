@@ -1,17 +1,31 @@
 use std::fmt::{Display, Formatter};
 
-use revision::{Revisioned, revisioned};
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::NamespaceId;
 use crate::expr::ChangeFeed;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::DefineDatabaseStatement;
-use crate::sql::{Ident, ToSql};
+use crate::sql::{Expr, Idiom, Literal, ToSql};
 use crate::val::Value;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(
+	Debug,
+	Clone,
+	Copy,
+	PartialEq,
+	Eq,
+	PartialOrd,
+	Ord,
+	Hash,
+	Serialize,
+	Deserialize,
+	Encode,
+	BorrowDecode,
+)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct DatabaseId(pub u32);
 
@@ -21,18 +35,22 @@ impl Revisioned for DatabaseId {
 	fn revision() -> u16 {
 		1
 	}
+}
 
+impl SerializeRevisioned for DatabaseId {
 	#[inline]
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		self.0.serialize_revisioned(writer)
+		SerializeRevisioned::serialize_revisioned(&self.0, writer)
 	}
+}
 
+impl DeserializeRevisioned for DatabaseId {
 	#[inline]
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		Revisioned::deserialize_revisioned(reader).map(DatabaseId)
+		DeserializeRevisioned::deserialize_revisioned(reader).map(DatabaseId)
 	}
 }
 
@@ -62,10 +80,8 @@ impl_kv_value_revisioned!(DatabaseDefinition);
 impl DatabaseDefinition {
 	pub fn to_sql_definition(&self) -> DefineDatabaseStatement {
 		DefineDatabaseStatement {
-			// SAFETY: we know the name is valid because it was validated when the database was
-			// created.
-			name: unsafe { Ident::new_unchecked(self.name.clone()) },
-			comment: self.comment.clone().map(|v| v.into()),
+			name: Expr::Idiom(Idiom::field(self.name.clone())),
+			comment: self.comment.clone().map(|v| Expr::Literal(Literal::String(v))),
 			changefeed: self.changefeed.map(|v| v.into()),
 			..Default::default()
 		}

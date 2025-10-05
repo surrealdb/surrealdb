@@ -2,16 +2,19 @@
 
 //mod bytes_hack;
 
-use std::{collections::BTreeMap, fmt, str::FromStr};
+use std::collections::BTreeMap;
+use std::fmt;
+use std::str::FromStr;
 
 use semver::VersionReq;
 use serde::{Deserialize, Serialize, de};
-use surrealdb_core::{
-	dbs::capabilities::{ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget},
-	sql::Expr,
-	syn::{self, parser::ParserSettings},
-	val::{Object as CoreObject, RecordId, Value as CoreValue},
+use surrealdb_core::dbs::capabilities::{
+	ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
 };
+use surrealdb_core::sql::Expr;
+use surrealdb_core::syn::parser::ParserSettings;
+use surrealdb_core::syn::{self};
+use surrealdb_core::val::{Object as CoreObject, RecordId, Value as CoreValue};
 
 /// Root test config struct.
 #[derive(Default, Clone, Debug, Deserialize, Serialize)]
@@ -48,7 +51,7 @@ impl TestConfig {
 	pub fn should_run_sequentially(&self) -> bool {
 		self.env.as_ref().map(|x| x.sequential).unwrap_or(
 			// TODO(ssttuu): This should be `true` but we're currently having flakiness issues.
-			false
+			false,
 		)
 	}
 
@@ -266,38 +269,14 @@ impl<T> BoolOr<T> {
 		}
 	}
 
-	/// Returns the value of this bool/or returning the default in case of BoolOr::Bool(true), the value in
-	/// case of BoolOr::Value(_) or None in case of BoolOr::Bool(false)
+	/// Returns the value of this bool/or returning the default in case of BoolOr::Bool(true), the
+	/// value in case of BoolOr::Value(_) or None in case of BoolOr::Bool(false)
 	pub fn into_value(self, default: T) -> Option<T> {
 		match self {
 			BoolOr::Bool(false) => None,
 			BoolOr::Bool(true) => Some(default),
 			BoolOr::Value(x) => Some(x),
 		}
-	}
-}
-
-#[derive(Default, Clone, Debug)]
-pub struct Version(semver::VersionReq);
-
-impl<'de> Deserialize<'de> for Version {
-	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-	where
-		D: serde::Deserializer<'de>,
-	{
-		let str = String::deserialize(deserializer)?;
-		let version = semver::VersionReq::parse(&str).map_err(to_deser_error)?;
-		Ok(Version(version))
-	}
-}
-
-impl Serialize for Version {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		let str = self.0.to_string();
-		str.serialize(serializer)
 	}
 }
 
@@ -314,9 +293,9 @@ pub struct TestDetails {
 	pub upgrade: bool,
 
 	#[serde(default)]
-	pub version: VersionReq,
+	pub version: Option<VersionReq>,
 	#[serde(default)]
-	pub importing_version: VersionReq,
+	pub importing_version: Option<VersionReq>,
 
 	pub results: Option<TestDetailsResults>,
 

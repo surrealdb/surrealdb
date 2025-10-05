@@ -6,8 +6,9 @@ use reblessive::tree::Stk;
 use super::FlowResultExt as _;
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::expr::fmt::Fmt;
+use crate::expr::expression::VisitExpression;
 use crate::expr::{AssignOperator, Expr, Idiom, Literal, Part, Value};
+use crate::fmt::Fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Data {
@@ -30,7 +31,17 @@ pub struct Assignment {
 	pub value: Expr,
 }
 
-impl fmt::Display for Assignment {
+impl VisitExpression for Assignment {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.place.visit(visitor);
+		self.value.visit(visitor);
+	}
+}
+
+impl Display for Assignment {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		write!(f, "{} {} {}", self.place, self.operator, self.value)
 	}
@@ -83,7 +94,7 @@ impl Data {
 							.catch_return()?
 							// Bad unwrap but this function should be removed anyway and it works
 							// with the current calls.
-							.pick(&[Part::field(path.to_owned()).unwrap()]))
+							.pick(&[Part::Field(path.to_owned())]))
 					}
 					Expr::Literal(Literal::Object(x)) => {
 						// Find the field manually, done to replicate previous behavior.
@@ -96,7 +107,7 @@ impl Data {
 					_ => Ok(Value::None),
 				}
 			}
-			Self::SetExpression(v) => match v.iter().find(|f| f.place.is_field(path)) {
+			Self::SetExpression(v) => match v.iter().find(|f| f.place.is_field(Some(path))) {
 				Some(ass) => {
 					stk.run(|stk| ass.value.compute(stk, ctx, opt, None)).await.catch_return()
 				}
@@ -109,6 +120,37 @@ impl Data {
 	}
 }
 
+impl VisitExpression for Data {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		match self {
+			Data::EmptyExpression => {}
+			Data::SetExpression(x) | Data::UpdateExpression(x) => {
+				x.iter().for_each(|a| a.visit(visitor));
+			}
+			Data::UnsetExpression(x) => {
+				x.iter().for_each(|x| x.visit(visitor));
+			}
+			Data::ValuesExpression(x) => {
+				x.iter().for_each(|x| {
+					x.iter().for_each(|(i, e)| {
+						i.visit(visitor);
+						e.visit(visitor);
+					})
+				});
+			}
+			Data::PatchExpression(e)
+			| Data::MergeExpression(e)
+			| Data::ReplaceExpression(e)
+			| Data::ContentExpression(e)
+			| Data::SingleExpression(e) => {
+				e.visit(visitor);
+			}
+		}
+	}
+}
 impl Display for Data {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {

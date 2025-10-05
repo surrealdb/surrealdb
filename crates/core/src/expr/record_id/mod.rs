@@ -6,7 +6,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::FlowResult;
-use crate::expr::escape::EscapeRid;
+use crate::fmt::EscapeRid;
 use crate::val::RecordId;
 
 pub mod key;

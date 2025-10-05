@@ -26,7 +26,7 @@ on:
       extra-features:
         required: false
         type: string
-        default: storage-tikv,http-compression,jwks,ml
+        default: storage-tikv,jwks,ml
         description: "Extra features enabled in the binary"
       upload:
         required: false

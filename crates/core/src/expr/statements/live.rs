@@ -4,13 +4,13 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use uuid::Uuid;
 
+use crate::catalog::providers::CatalogProvider;
 use crate::catalog::{NodeLiveQuery, SubscriptionDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Literal};
-use crate::iam::Auth;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -21,18 +21,6 @@ pub struct LiveStatement {
 	pub what: Expr,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
-	// When a live query is created, we must also store the
-	// authenticated session of the user who made the query,
-	// so we can check it later when sending notifications.
-	// This is optional as it is only set by the database
-	// runtime when storing the live query to storage.
-	pub(crate) auth: Option<Auth>,
-	// When a live query is created, we must also store the
-	// authenticated session of the user who made the query,
-	// so we can check it later when sending notifications.
-	// This is optional as it is only set by the database
-	// runtime when storing the live query to storage.
-	pub(crate) session: Option<Value>,
 }
 
 impl LiveStatement {
@@ -44,8 +32,6 @@ impl LiveStatement {
 			what: Expr::Literal(Literal::Null),
 			cond: None,
 			fetch: None,
-			auth: None,
-			session: None,
 		}
 	}
 
@@ -56,8 +42,6 @@ impl LiveStatement {
 			what,
 			fields: expr,
 			cond: None,
-			auth: None,
-			session: None,
 			fetch: None,
 		}
 	}
@@ -161,6 +145,7 @@ impl fmt::Display for LiveStatement {
 mod tests {
 	use anyhow::Result;
 
+	use crate::catalog::providers::{CatalogProvider, TableProvider};
 	use crate::dbs::{Action, Capabilities, Notification, Session};
 	use crate::expr::Value;
 	use crate::kvs::Datastore;

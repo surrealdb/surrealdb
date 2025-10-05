@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::Revisioned;
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -17,6 +17,9 @@ pub use field::{AlterDefault, AlterFieldStatement};
 pub use sequence::AlterSequenceStatement;
 pub use table::AlterTableStatement;
 
+use crate::expr::Expr;
+use crate::expr::expression::VisitExpression;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum AlterKind<T> {
 	#[default]
@@ -29,37 +32,41 @@ impl<T: Revisioned> Revisioned for AlterKind<T> {
 	fn revision() -> u16 {
 		1
 	}
+}
 
+impl<T: Revisioned + SerializeRevisioned> SerializeRevisioned for AlterKind<T> {
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		w: &mut W,
 	) -> std::result::Result<(), revision::Error> {
-		Self::revision().serialize_revisioned(w)?;
+		SerializeRevisioned::serialize_revisioned(&Self::revision(), w)?;
 		match self {
-			AlterKind::None => 0u32.serialize_revisioned(w)?,
+			AlterKind::None => SerializeRevisioned::serialize_revisioned(&0u32, w)?,
 			AlterKind::Set(x) => {
-				1u32.serialize_revisioned(w)?;
-				x.serialize_revisioned(w)?;
+				SerializeRevisioned::serialize_revisioned(&1u32, w)?;
+				SerializeRevisioned::serialize_revisioned(x, w)?;
 			}
 			AlterKind::Drop => {
-				2u32.serialize_revisioned(w)?;
+				SerializeRevisioned::serialize_revisioned(&2u32, w)?;
 			}
 		}
 		Ok(())
 	}
+}
 
+impl<T: Revisioned + DeserializeRevisioned> DeserializeRevisioned for AlterKind<T> {
 	fn deserialize_revisioned<R: std::io::Read>(
 		r: &mut R,
 	) -> std::result::Result<Self, revision::Error>
 	where
 		Self: Sized,
 	{
-		match u16::deserialize_revisioned(r)? {
-			1 => {
-				let variant = u32::deserialize_revisioned(r)?;
+		match DeserializeRevisioned::deserialize_revisioned(r)? {
+			1u16 => {
+				let variant: u32 = DeserializeRevisioned::deserialize_revisioned(r)?;
 				match variant {
 					0 => Ok(AlterKind::None),
-					1 => Ok(AlterKind::Set(Revisioned::deserialize_revisioned(r)?)),
+					1 => Ok(AlterKind::Set(DeserializeRevisioned::deserialize_revisioned(r)?)),
 					2 => Ok(AlterKind::Drop),
 					x => Err(revision::Error::Deserialize(format!(
 						"Unknown variant `{x}` for AlterKind"
@@ -89,8 +96,23 @@ impl AlterStatement {
 	) -> Result<Value> {
 		match self {
 			Self::Table(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Sequence(v) => v.compute(ctx, opt).await,
+			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Field(v) => v.compute(stk, ctx, opt, doc).await,
+		}
+	}
+}
+
+impl VisitExpression for AlterStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		if let AlterStatement::Field(AlterFieldStatement {
+			name,
+			..
+		}) = self
+		{
+			name.visit(visitor);
 		}
 	}
 }

@@ -1,30 +1,24 @@
-use crate::{
-	cli::{Backend, ColorMode, ResultsMode},
-	format::Progress,
-	runner::Schedular,
-	tests::{
-		TestSet,
-		report::{TestGrade, TestReport, TestTaskResult},
-		set::TestId,
-	},
-};
+use std::time::Duration;
+use std::{io, mem, str, thread};
 
 use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
 use provisioner::{Permit, PermitError, Provisioner};
 use semver::Version;
-use std::{io, mem, str, thread, time::Duration};
-use surrealdb_core::{
-	dbs::{capabilities::ExperimentalTarget, Session},
-	env::VERSION,
-	kvs::{Datastore, LockType, TransactionType},
-	syn,
-};
-use tokio::{
-	select,
-	sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender},
-	time,
-};
+use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::capabilities::ExperimentalTarget;
+use surrealdb_core::env::VERSION;
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::syn;
+use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
+use tokio::{select, time};
+
+use crate::cli::{Backend, ColorMode, ResultsMode};
+use crate::format::Progress;
+use crate::runner::Schedular;
+use crate::tests::TestSet;
+use crate::tests::report::{TestGrade, TestReport, TestTaskResult};
+use crate::tests::set::TestId;
 
 mod provisioner;
 mod util;
@@ -89,9 +83,9 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		Backend::SurrealKv => {}
 		#[cfg(not(feature = "backend-surrealkv"))]
 		Backend::SurrealKv => bail!("SurrealKV backend feature is not enabled"),
-		#[cfg(any(feature = "backend-foundation-7_1", feature = "backend-foundation-7_1"))]
+		#[cfg(feature = "backend-foundation")]
 		Backend::Foundation => {}
-		#[cfg(not(any(feature = "backend-foundation-7_1", feature = "backend-foundation-7_1")))]
+		#[cfg(not(feature = "backend-foundation"))]
 		Backend::Foundation => bail!("FoundationDB backend features is not enabled"),
 	}
 
@@ -124,14 +118,16 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			let config = test.config.clone();
 
 			// Ensure this test can run on this version.
-			if let Some(version_req) = config.test.as_ref().map(|x| &x.version) {
+			if let Some(version_req) = config.test.as_ref().and_then(|x| x.version.as_ref()) {
 				if !version_req.matches(&core_version) {
 					return None;
 				}
 			}
 
 			// Ensure this test imports can run on this version as specified by the test itself.
-			if let Some(version_req) = config.test.as_ref().map(|x| &x.importing_version) {
+			if let Some(version_req) =
+				config.test.as_ref().and_then(|x| x.importing_version.as_ref())
+			{
 				if !version_req.matches(&core_version) {
 					return None;
 				}
@@ -140,7 +136,7 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 			// Ensure this test imports can run on this version as specified by the imports.
 			for import in test.imports.iter() {
 				if let Some(version_req) =
-					subset[import.id].config.test.as_ref().map(|x| &x.version)
+					subset[import.id].config.test.as_ref().and_then(|x| x.version.as_ref())
 				{
 					if !version_req.matches(&core_version) {
 						return None;
@@ -280,9 +276,10 @@ pub async fn grade_task(
 		.await
 		.expect("failed to create datastore for running matching expressions");
 
-	let txn = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
-	txn.ensure_ns_db("match", "match", false).await.unwrap();
-	txn.commit().await.unwrap();
+	let mut session = surrealdb_core::dbs::Session::default();
+	ds.process_use(&mut session, Some("match".to_string()), Some("match".to_string()))
+		.await
+		.unwrap();
 
 	loop {
 		let Some((id, res)) = results.recv().await else {
@@ -338,6 +335,16 @@ async fn run_test_with_dbs(
 
 	let mut session = util::session_from_test_config(config);
 
+	if let Some(ref x) = session.ns {
+		let db = session.db.take();
+		dbs.execute(&format!("DEFINE NAMESPACE `{x}`"), &session, None).await?;
+		session.db = db;
+	}
+
+	if let Some(ref x) = session.db {
+		dbs.execute(&format!("DEFINE DATABASE `{x}`"), &session, None).await?;
+	}
+
 	let timeout_duration = config
 		.env
 		.as_ref()
@@ -345,20 +352,7 @@ async fn run_test_with_dbs(
 		.unwrap_or(Duration::from_secs(2));
 
 	let mut import_session = Session::owner();
-	if let Some(ns) = session.ns.as_ref() {
-		import_session = import_session.with_ns(ns);
-		let txn = dbs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		txn.get_or_add_ns(ns, false).await?;
-		txn.commit().await?;
-
-		if let Some(db) = session.db.as_ref() {
-			import_session = import_session.with_db(db);
-			let txn = dbs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-			txn.get_or_add_db(ns, db, false).await?;
-			txn.commit().await?;
-		};
-
-	};
+	dbs.process_use(&mut import_session, session.ns.clone(), session.db.clone()).await?;
 
 	for import in set[id].config.imports() {
 		let Some(test) = set.find_all(import) else {

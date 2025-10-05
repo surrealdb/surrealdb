@@ -22,15 +22,17 @@
 //! - `tb`: Table identifier
 //! - `ix`: Index identifier
 //! - `nid`: Node UUID (16 bytes, compact serialized)
-use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+
+use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::sequences::SequenceState;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Is<'a> {
 	__: u8,
 	_a: u8,
@@ -38,19 +40,16 @@ pub(crate) struct Is<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
-	#[serde(with = "uuid::serde::compact")]
 	pub nid: Uuid,
 }
 
-impl KVKey for Is<'_> {
-	type ValueType = SequenceState;
-}
+impl_kv_key_storekey!(Is<'_> => SequenceState);
 
 impl Categorise for Is<'_> {
 	fn categorise(&self) -> Category {
@@ -63,7 +62,7 @@ impl<'a> Is<'a> {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a str,
-		ix: &'a str,
+		ix: IndexId,
 		nid: Uuid,
 	) -> Self {
 		Self {
@@ -73,7 +72,7 @@ impl<'a> Is<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -87,6 +86,7 @@ impl<'a> Is<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {
@@ -94,10 +94,10 @@ mod tests {
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			"testix",
+			IndexId(3),
 			Uuid::from_bytes([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
 		);
 		let enc = Is::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!is\0\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!is\0\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f");
 	}
 }

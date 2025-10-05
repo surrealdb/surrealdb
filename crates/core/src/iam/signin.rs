@@ -16,13 +16,16 @@ use super::access::{
 use super::verify::{verify_db_creds, verify_ns_creds, verify_root_creds};
 use super::{Actor, Level, Role};
 use crate::catalog;
+use crate::catalog::providers::{
+	AuthorisationProvider, DatabaseProvider, NamespaceProvider, UserProvider,
+};
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Session, Variables};
 use crate::err::Error;
+use crate::expr::access_type;
 use crate::expr::statements::access;
-use crate::expr::{Ident, access_type};
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::{Claims, HEADER};
 use crate::iam::{self, Auth, algorithm_to_jwt_algorithm};
@@ -234,8 +237,7 @@ pub async fn db_access(
 														Some(
 															create_refresh_token_record(
 																kvs,
-																Ident::new(av.name.clone())
-																	.unwrap(),
+																av.name.clone(),
 																&ns,
 																&db,
 																rid.clone(),
@@ -710,8 +712,8 @@ pub async fn signin_bearer(
 						// Revoke the used refresh token.
 						revoke_refresh_token_record(
 							kvs,
-							Ident::new(gr.id.clone()).unwrap(),
-							Ident::new(gr.ac.clone()).unwrap(),
+							gr.id.clone(),
+							gr.ac.clone(),
 							&ns.name,
 							&db.name,
 						)
@@ -719,7 +721,7 @@ pub async fn signin_bearer(
 						// Create a new refresh token to replace it.
 						let refresh = create_refresh_token_record(
 							kvs,
-							Ident::new(gr.ac.clone()).unwrap(),
+							gr.ac.clone(),
 							&ns.name,
 							&db.name,
 							rid.clone(),
@@ -874,7 +876,7 @@ mod tests {
 	use crate::iam::Role;
 	use crate::sql::statements::define::DefineKind;
 	use crate::sql::statements::define::user::PassType;
-	use crate::sql::{Ast, Expr, Ident, TopLevelExpr};
+	use crate::sql::{Ast, Expr, TopLevelExpr};
 
 	struct TestLevel {
 		level: &'static str,
@@ -4213,13 +4215,13 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			let user = DefineUserStatement {
 				kind: DefineKind::Default,
 				base,
-				name: Ident::new("user".to_owned()).unwrap(),
+				name: crate::sql::Expr::Idiom(crate::sql::Idiom::field("user".to_string())),
 				// This is the Argon2id hash for "pass" with a random salt.
 				pass_type: PassType::Hash(
 					"$argon2id$v=19$m=16,t=2,p=1$VUlHTHVOYjc5d0I1dGE3OQ$sVtmRNH+Xtiijk0uXL2+4w"
 						.to_string(),
 				),
-				roles: vec![Ident::new("nonexistent".to_owned()).unwrap()],
+				roles: vec!["nonexistent".to_owned()],
 				session_duration: None,
 				token_duration: None,
 				comment: None,

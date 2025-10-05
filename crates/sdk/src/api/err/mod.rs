@@ -273,6 +273,14 @@ pub enum Error {
 	/// The engine used does not support data versioning
 	#[error("The '{0}' engine does not support data versioning")]
 	VersionsNotSupported(String),
+
+	/// The message is too long
+	#[error("The message is too long: {0}")]
+	MessageTooLong(usize),
+
+	/// The write buffer size is too small
+	#[error("The write buffer size is too small")]
+	MaxWriteBufferSizeTooSmall,
 }
 
 impl serde::ser::Error for Error {

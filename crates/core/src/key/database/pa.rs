@@ -1,12 +1,14 @@
 //! Stores a DEFINE PARAM config definition
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId, ParamDefinition};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Pa<'a> {
 	__: u8,
 	_a: u8,
@@ -16,12 +18,10 @@ pub(crate) struct Pa<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub pa: &'a str,
+	pub pa: Cow<'a, str>,
 }
 
-impl KVKey for Pa<'_> {
-	type ValueType = ParamDefinition;
-}
+impl_kv_key_storekey!(Pa<'_> => ParamDefinition);
 
 pub fn new(ns: NamespaceId, db: DatabaseId, pa: &str) -> Pa<'_> {
 	Pa::new(ns, db, pa)
@@ -56,7 +56,7 @@ impl<'a> Pa<'a> {
 			_c: b'!',
 			_d: b'p',
 			_e: b'a',
-			pa,
+			pa: Cow::Borrowed(pa),
 		}
 	}
 }

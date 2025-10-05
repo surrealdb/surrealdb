@@ -28,20 +28,12 @@ type WebSockets = RwLock<HashMap<Uuid, WebSocket>>;
 /// Mapping of LIVE Query ID to WebSocket ID
 type LiveQueries = RwLock<HashMap<Uuid, Uuid>>;
 
+#[derive(Default)]
 pub struct RpcState {
 	/// Stores the currently connected WebSockets
 	pub web_sockets: WebSockets,
 	/// Stores the currently initiated LIVE queries
 	pub live_queries: LiveQueries,
-}
-
-impl RpcState {
-	pub fn new() -> Self {
-		RpcState {
-			web_sockets: WebSockets::default(),
-			live_queries: LiveQueries::default(),
-		}
-	}
 }
 
 /// Performs notification delivery to the WebSockets

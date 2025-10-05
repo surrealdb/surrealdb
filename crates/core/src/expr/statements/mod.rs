@@ -1,6 +1,5 @@
 pub(crate) mod access;
 pub(crate) mod alter;
-pub(crate) mod analyze;
 pub(crate) mod create;
 // needs to be public because the RPC layer is accessing the kv store for api
 // definitions.
@@ -27,7 +26,6 @@ pub(crate) mod r#use;
 
 pub use self::access::{AccessGrant, AccessStatement};
 pub use self::alter::{AlterStatement, AlterTableStatement};
-pub use self::analyze::AnalyzeStatement;
 pub use self::create::CreateStatement;
 pub use self::define::{
 	DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement,

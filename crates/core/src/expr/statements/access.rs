@@ -7,13 +7,17 @@ use rand::Rng;
 use reblessive::tree::Stk;
 use sha2::Sha256;
 
+use crate::catalog::providers::{
+	AuthorisationProvider, CatalogProvider, NamespaceProvider, UserProvider,
+};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Cond, ControlFlow, FlowResult, FlowResultExt as _, Ident, RecordIdLit};
+use crate::expr::{Base, Cond, ControlFlow, FlowResult, FlowResultExt as _, RecordIdLit};
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Array, Datetime, Duration, Object, Strand, Uuid, Value};
+use crate::val::{Array, Datetime, Duration, Object, Uuid, Value};
 use crate::{catalog, val};
 
 // Keys and their identifiers are generated randomly from a 62-character pool.
@@ -38,30 +42,30 @@ pub enum AccessStatement {
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AccessStatementGrant {
-	pub ac: Ident,
+	pub ac: String,
 	pub base: Option<Base>,
 	pub subject: Subject,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AccessStatementShow {
-	pub ac: Ident,
+	pub ac: String,
 	pub base: Option<Base>,
-	pub gr: Option<Ident>,
+	pub gr: Option<String>,
 	pub cond: Option<Cond>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AccessStatementRevoke {
-	pub ac: Ident,
+	pub ac: String,
 	pub base: Option<Base>,
-	pub gr: Option<Ident>,
+	pub gr: Option<String>,
 	pub cond: Option<Cond>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct AccessStatementPurge {
-	pub ac: Ident,
+	pub ac: String,
 	pub base: Option<Base>,
 	pub expired: bool,
 	pub revoked: bool,
@@ -70,8 +74,8 @@ pub struct AccessStatementPurge {
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AccessGrant {
-	pub id: Ident,                    // Unique grant identifier.
-	pub ac: Ident,                    // Access method used to create the grant.
+	pub id: String,                   // Unique grant identifier.
+	pub ac: String,                   // Access method used to create the grant.
 	pub expiration: Option<Datetime>, // Grant expiration time, if any.
 	pub revocation: Option<Datetime>, // Grant revocation time, if any.
 	pub subject: Subject,             // Subject of the grant.
@@ -101,7 +105,7 @@ impl AccessGrant {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Subject {
 	Record(RecordIdLit),
-	User(Ident),
+	User(String),
 }
 
 impl Subject {
@@ -116,7 +120,7 @@ impl Subject {
 			Subject::Record(record_id_lit) => {
 				Ok(catalog::Subject::Record(record_id_lit.compute(stk, ctx, opt, doc).await?))
 			}
-			Subject::User(ident) => Ok(catalog::Subject::User(ident.clone().to_raw_string())),
+			Subject::User(ident) => Ok(catalog::Subject::User(ident.clone())),
 		}
 	}
 }
@@ -142,23 +146,23 @@ impl Grant {
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct GrantJwt {
 	pub jti: Uuid,             // JWT ID
-	pub token: Option<Strand>, // JWT. Will not be stored after being returned.
+	pub token: Option<String>, // JWT. Will not be stored after being returned.
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct GrantRecord {
 	pub rid: Uuid,             // Record ID
 	pub jti: Uuid,             // JWT ID
-	pub token: Option<Strand>, // JWT. Will not be stored after being returned.
+	pub token: Option<String>, // JWT. Will not be stored after being returned.
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct GrantBearer {
-	pub id: Ident, // Key ID
+	pub id: String, // Key ID
 	// Key. Will not be stored and be returned as redacted.
 	// Immediately after generation, it will contain the plaintext key.
 	// Will be hashed before storage so that the plaintext key is not stored.
-	pub key: Strand,
+	pub key: String,
 }
 
 impl GrantBearer {
@@ -170,10 +174,9 @@ impl GrantBearer {
 			random_string(GRANT_BEARER_ID_LENGTH - 1, GRANT_BEARER_CHARACTER_POOL)
 		);
 		// Safety: id cannot contain a null byte guarenteed above.
-		let id = unsafe { Ident::new_unchecked(id) };
 		let secret = random_string(GRANT_BEARER_KEY_LENGTH, GRANT_BEARER_CHARACTER_POOL);
 		// Safety: id cannot contain a null byte guarenteed above.
-		let key = unsafe { Strand::new_unchecked(format!("{prefix}-{id}-{secret}")) };
+		let key = format!("{prefix}-{id}-{secret}");
 		Self {
 			id,
 			key,
@@ -188,7 +191,7 @@ impl GrantBearer {
 		let mut hasher = Sha256::new();
 		hasher.update(self.key.as_str());
 		let hash = hasher.finalize();
-		let hash_hex = format!("{hash:x}").into();
+		let hash_hex = format!("{hash:x}");
 
 		Self {
 			key: hash_hex,
@@ -232,8 +235,8 @@ pub fn new_grant_bearer(ty: catalog::BearerAccessType) -> catalog::GrantBearer {
 /// Returns the surrealql object representation of the access grant
 pub fn access_object_from_grant(grant: &catalog::AccessGrant) -> Object {
 	let mut res = Object::default();
-	res.insert("id".to_owned(), Value::from(Strand::new(grant.id.clone()).unwrap()));
-	res.insert("ac".to_owned(), Value::from(Strand::new(grant.ac.clone()).unwrap()));
+	res.insert("id".to_owned(), Value::from(grant.id.clone()));
+	res.insert("ac".to_owned(), Value::from(grant.ac.clone()));
 	res.insert("type".to_owned(), Value::from(grant.grant.variant()));
 	res.insert("creation".to_owned(), Value::from(grant.creation.clone()));
 	res.insert(
@@ -277,7 +280,7 @@ pub fn access_object_from_grant(grant: &catalog::AccessGrant) -> Object {
 }
 
 pub async fn create_grant(
-	access: Ident,
+	access: String,
 	base: Option<Base>,
 	subject: catalog::Subject,
 	ctx: &Context,
@@ -598,8 +601,8 @@ async fn compute_show(
 				Base::Root => match txn.get_root_access_grant(&stmt.ac, gr).await? {
 					Some(val) => val.clone(),
 					None => bail!(Error::AccessGrantRootNotFound {
-						ac: stmt.ac.to_raw_string(),
-						gr: gr.to_raw_string(),
+						ac: stmt.ac.clone(),
+						gr: gr.clone(),
 					}),
 				},
 				Base::Ns => {
@@ -607,8 +610,8 @@ async fn compute_show(
 					match txn.get_ns_access_grant(ns, &stmt.ac, gr).await? {
 						Some(val) => val.clone(),
 						None => bail!(Error::AccessGrantNsNotFound {
-							ac: stmt.ac.to_raw_string(),
-							gr: gr.to_raw_string(),
+							ac: stmt.ac.clone(),
+							gr: gr.clone(),
 							ns: ns.to_string(),
 						}),
 					}
@@ -618,8 +621,8 @@ async fn compute_show(
 					match txn.get_db_access_grant(ns, db, &stmt.ac, gr).await? {
 						Some(val) => val.clone(),
 						None => bail!(Error::AccessGrantDbNotFound {
-							ac: stmt.ac.to_raw_string(),
-							gr: gr.to_raw_string(),
+							ac: stmt.ac.clone(),
+							gr: gr.clone(),
 							ns: ns.to_string(),
 							db: db.to_string(),
 						}),
@@ -720,8 +723,8 @@ pub async fn revoke_grant(
 				Base::Root => match txn.get_root_access_grant(&stmt.ac, gr).await? {
 					Some(val) => (*val).clone(),
 					None => bail!(Error::AccessGrantRootNotFound {
-						ac: stmt.ac.to_raw_string(),
-						gr: gr.to_raw_string(),
+						ac: stmt.ac.clone(),
+						gr: gr.clone(),
 					}),
 				},
 				Base::Ns => {
@@ -731,8 +734,8 @@ pub async fn revoke_grant(
 						None => {
 							let ns = opt.ns()?;
 							bail!(Error::AccessGrantNsNotFound {
-								ac: stmt.ac.to_raw_string(),
-								gr: gr.to_raw_string(),
+								ac: stmt.ac.clone(),
+								gr: gr.clone(),
 								ns: ns.to_string(),
 							})
 						}
@@ -745,8 +748,8 @@ pub async fn revoke_grant(
 						None => {
 							let (ns, db) = opt.ns_db()?;
 							bail!(Error::AccessGrantDbNotFound {
-								ac: stmt.ac.to_raw_string(),
-								gr: gr.to_raw_string(),
+								ac: stmt.ac.clone(),
+								gr: gr.to_owned(),
 								ns: ns.to_string(),
 								db: db.to_string(),
 							})
@@ -903,7 +906,7 @@ async fn compute_revoke(
 	_doc: Option<&CursorDoc>,
 ) -> Result<Value> {
 	let revoked = revoke_grant(stmt, stk, ctx, opt).await?;
-	Ok(Value::Array(revoked.into()))
+	Ok(Value::Array(vec![revoked].into()))
 }
 
 async fn compute_purge(
@@ -1023,25 +1026,25 @@ impl Display for AccessStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Grant(stmt) => {
-				write!(f, "ACCESS {}", stmt.ac)?;
+				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " GRANT")?;
 				match &stmt.subject {
-					Subject::User(x) => write!(f, " FOR USER {}", x.to_raw_string())?,
+					Subject::User(x) => write!(f, " FOR USER {}", EscapeIdent(x))?,
 					Subject::Record(x) => write!(f, " FOR RECORD {}", x)?,
 				}
 				Ok(())
 			}
 			Self::Show(stmt) => {
-				write!(f, "ACCESS {}", stmt.ac)?;
+				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " SHOW")?;
 				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {v}")?,
+					Some(v) => write!(f, " GRANT {}", EscapeIdent(v))?,
 					None => match &stmt.cond {
 						Some(v) => write!(f, " {v}")?,
 						None => write!(f, " ALL")?,
@@ -1050,13 +1053,13 @@ impl Display for AccessStatement {
 				Ok(())
 			}
 			Self::Revoke(stmt) => {
-				write!(f, "ACCESS {}", stmt.ac)?;
+				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " REVOKE")?;
 				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {v}")?,
+					Some(v) => write!(f, " GRANT {}", EscapeIdent(v))?,
 					None => match &stmt.cond {
 						Some(v) => write!(f, " {v}")?,
 						None => write!(f, " ALL")?,
@@ -1065,7 +1068,7 @@ impl Display for AccessStatement {
 				Ok(())
 			}
 			Self::Purge(stmt) => {
-				write!(f, "ACCESS {}", stmt.ac)?;
+				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}

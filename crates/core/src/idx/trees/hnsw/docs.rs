@@ -1,12 +1,10 @@
-use std::sync::Arc;
-
 use anyhow::Result;
-use revision::{Revisioned, revisioned};
+use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
 use crate::idx::IndexKeyBase;
-use crate::idx::docids::DocId;
+use crate::idx::seqdocids::DocId;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
 use crate::idx::trees::knn::Ids64;
@@ -116,13 +114,13 @@ impl KVValue for HnswDocsState {
 	#[inline]
 	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
 		let mut val = Vec::new();
-		self.serialize_revisioned(&mut val)?;
+		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
 		Ok(val)
 	}
 
 	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
-		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
+		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
 
@@ -137,13 +135,13 @@ impl KVValue for ElementDocs {
 	#[inline]
 	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
 		let mut val = Vec::new();
-		self.serialize_revisioned(&mut val)?;
+		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
 		Ok(val)
 	}
 
 	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
-		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
+		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
 
@@ -159,7 +157,8 @@ impl VecDocs {
 	}
 
 	pub(super) async fn get_docs(&self, tx: &Transaction, pt: &Vector) -> Result<Option<Ids64>> {
-		let key = self.ikb.new_hv_key(Arc::new(pt.into()));
+		let ser_vec = pt.into();
+		let key = self.ikb.new_hv_key(&ser_vec);
 		if let Some(ed) = tx.get(&key, None).await? {
 			Ok(Some(ed.docs))
 		} else {
@@ -174,8 +173,8 @@ impl VecDocs {
 		d: DocId,
 		h: &mut HnswFlavor,
 	) -> Result<()> {
-		let ser_vec = Arc::new(SerializedVector::from(&o));
-		let key = self.ikb.new_hv_key(ser_vec);
+		let ser_vec = SerializedVector::from(&o);
+		let key = self.ikb.new_hv_key(&ser_vec);
 		if let Some(ed) = match tx.get(&key, None).await? {
 			Some(mut ed) => {
 				// We already have the vector
@@ -206,7 +205,8 @@ impl VecDocs {
 		d: DocId,
 		h: &mut HnswFlavor,
 	) -> Result<()> {
-		let key = self.ikb.new_hv_key(Arc::new(o.into()));
+		let ser_vec = o.into();
+		let key = self.ikb.new_hv_key(&ser_vec);
 		if let Some(mut ed) = tx.get(&key, None).await? {
 			if let Some(new_docs) = ed.docs.remove(d) {
 				if new_docs.is_empty() {

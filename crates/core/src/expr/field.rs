@@ -10,9 +10,10 @@ use super::paths::ID;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::fmt::Fmt;
+use crate::expr::expression::VisitExpression;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, FlowResultExt as _, Function, Idiom, Part};
+use crate::fmt::Fmt;
 use crate::fnc::args::FromArgs;
 use crate::syn;
 use crate::val::{Array, Value};
@@ -55,6 +56,16 @@ impl Fields {
 		}
 	}
 
+	pub(crate) fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		match self {
+			Fields::Value(field) => field.visit(visitor),
+			Fields::Select(fields) => fields.iter().for_each(|f| f.visit(visitor)),
+		}
+	}
+
 	/// Create a new `*` field projection
 	pub fn all() -> Self {
 		Fields::Select(vec![Field::All])
@@ -76,7 +87,7 @@ impl Fields {
 	}
 
 	/// Get all fields which are not an `*` projection
-	pub fn iter_fields(&self) -> FieldsIter {
+	pub fn iter_fields(&self) -> FieldsIter<'_> {
 		match self {
 			Fields::Value(field) => FieldsIter::Single(Some(field)),
 			Fields::Select(fields) => FieldsIter::Multiple(fields.iter()),
@@ -410,6 +421,20 @@ impl Field {
 	}
 }
 
+impl VisitExpression for Field {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		if let Field::Single {
+			expr,
+			..
+		} = self
+		{
+			expr.visit(visitor);
+		}
+	}
+}
 impl Display for Field {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {

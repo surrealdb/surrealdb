@@ -12,13 +12,15 @@ use crate::kvs::{Key, Val};
 type SavePoint = HashMap<Key, SavedValue>;
 
 #[derive(Debug)]
-pub(crate) enum SaveOperation {
+/// Public to allow external transaction implementations (e.g. custom backends)
+/// to construct and inspect savepoints when integrating with SurrealDB.
+pub enum SaveOperation {
 	Set,
 	Put,
 	Del,
 }
 
-pub(crate) struct SavedValue {
+pub struct SavedValue {
 	pub(crate) saved_val: Option<Val>,
 	pub(crate) saved_version: Option<u64>,
 	pub(crate) last_operation: SaveOperation,
@@ -38,13 +40,13 @@ impl SavedValue {
 	}
 }
 
-pub(crate) enum SavePrepare {
+pub enum SavePrepare {
 	AlreadyPresent(Key, SaveOperation),
 	NewKey(Key, SavedValue),
 }
 
 #[derive(Default)]
-pub(crate) struct SavePoints {
+pub struct SavePoints {
 	stack: VecDeque<SavePoint>,
 	current: Option<SavePoint>,
 }

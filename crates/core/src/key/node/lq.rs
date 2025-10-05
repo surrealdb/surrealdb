@@ -1,35 +1,31 @@
 //! Stores a LIVE SELECT query definition on the cluster
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::NodeLiveQuery;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 /// The Lq key is used to quickly discover which live queries belong to which
 /// nodes This is used in networking for clustered environments such as
 /// discovering if an event is remote or local as well as garbage collection
 /// after dead nodes
 ///
-/// The value is just the table of the live query as a Strand, which is the
+/// The value is just the table of the live query as a String, which is the
 /// missing information from the key path
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Lq {
 	__: u8,
 	_a: u8,
-	#[serde(with = "uuid::serde::compact")]
 	pub nd: Uuid,
 	_b: u8,
 	_c: u8,
 	_d: u8,
-	#[serde(with = "uuid::serde::compact")]
 	pub lq: Uuid,
 }
 
-impl KVKey for Lq {
-	type ValueType = NodeLiveQuery;
-}
+impl_kv_key_storekey!(Lq => NodeLiveQuery);
 
 pub fn new(nd: Uuid, lq: Uuid) -> Lq {
 	Lq::new(nd, lq)
@@ -67,7 +63,7 @@ impl Lq {
 	}
 
 	pub fn decode_key(k: Vec<u8>) -> anyhow::Result<Self> {
-		Ok(storekey::deserialize(k.as_slice())?)
+		Ok(storekey::decode_borrow(k.as_slice())?)
 	}
 }
 

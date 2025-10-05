@@ -13,8 +13,7 @@ use jsonwebtoken::errors::Error as JWTError;
 use object_store::Error as ObjectStoreError;
 use revision::Error as RevisionError;
 use serde::Serialize;
-use storekey::decode::Error as DecodeError;
-use storekey::encode::Error as EncodeError;
+use storekey::DecodeError;
 use thiserror::Error;
 
 use crate::api::err::ApiError;
@@ -792,9 +791,9 @@ pub enum Error {
 	#[error("I/O error: {0}")]
 	Io(#[from] IoError),
 
-	/// Represents an error when encoding a key-value entry
-	#[error("Key encoding error: {0}")]
-	Encode(#[from] EncodeError),
+	/// Error for when trying to serialize values like Regex and Closure
+	#[error("Tried to serialize a value which cannot be serialized.")]
+	Unencodable,
 
 	/// Represents an error when decoding a key-value entry
 	#[error("Key decoding error: {0}")]
@@ -1417,6 +1416,10 @@ pub enum Error {
 	/// Cannot use the `{0}` keyword on the `id` field
 	#[error("Cannot use the `{0}` keyword on the `id` field.")]
 	IdFieldKeywordConflict(String),
+
+	/// Cannot use the `{0}` keyword on the `id` field
+	#[error("Cannot use the `{0}` type on the `id` field, as that's not a valid record id key.")]
+	IdFieldUnsupportedKind(String),
 }
 
 impl Error {

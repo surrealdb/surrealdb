@@ -77,7 +77,7 @@ pub async fn run(
 		|| name.eq("file::rename_if_not_exists")
 		|| name.eq("file::list")
 		|| name.eq("record::exists")
-		|| name.eq("record::is::edge")
+		|| name.eq("record::is_edge")
 		|| name.eq("type::field")
 		|| name.eq("type::fields")
 		|| name.eq("value::diff")
@@ -218,14 +218,14 @@ pub fn synchronous(
 		"duration::secs" => duration::secs,
 		"duration::weeks" => duration::weeks,
 		"duration::years" => duration::years,
-		"duration::from::days" => duration::from::days,
-		"duration::from::hours" => duration::from::hours,
-		"duration::from::micros" => duration::from::micros,
-		"duration::from::millis" => duration::from::millis,
-		"duration::from::mins" => duration::from::mins,
-		"duration::from::nanos" => duration::from::nanos,
-		"duration::from::secs" => duration::from::secs,
-		"duration::from::weeks" => duration::from::weeks,
+		"duration::from_days" => duration::from::days,
+		"duration::from_hours" => duration::from::hours,
+		"duration::from_micros" => duration::from::micros,
+		"duration::from_millis" => duration::from::millis,
+		"duration::from_mins" => duration::from::mins,
+		"duration::from_nanos" => duration::from::nanos,
+		"duration::from_secs" => duration::from::secs,
+		"duration::from_weeks" => duration::from::weeks,
 		//
 		exp(Files) "file::bucket" => file::bucket,
 		exp(Files) "file::key" => file::key,
@@ -241,7 +241,7 @@ pub fn synchronous(
 		"geo::distance" => geo::distance,
 		"geo::hash::decode" => geo::hash::decode,
 		"geo::hash::encode" => geo::hash::encode,
-		"geo::is::valid" => geo::is::valid,
+		"geo::is_valid" => geo::is::valid,
 		//
 		"math::abs" => math::abs,
 		"math::acos" => math::acos,
@@ -360,28 +360,28 @@ pub fn synchronous(
 		"string::distance::levenshtein" => string::distance::levenshtein,
 		"string::distance::normalized_damerau_levenshtein" => string::distance::normalized_damerau_levenshtein,
 		"string::distance::normalized_levenshtein" => string::distance::normalized_levenshtein,
-		"string::distance::osa_distance" => string::distance::osa_distance,
+		"string::distance::osa" => string::distance::osa_distance,
 		//
 		"string::html::encode" => string::html::encode,
 		"string::html::sanitize" => string::html::sanitize,
-		"string::is::alphanum" => string::is::alphanum,
-		"string::is::alpha" => string::is::alpha,
-		"string::is::ascii" => string::is::ascii,
-		"string::is::datetime" => string::is::datetime,
-		"string::is::domain" => string::is::domain,
-		"string::is::email" => string::is::email,
-		"string::is::hexadecimal" => string::is::hexadecimal,
-		"string::is::ip" => string::is::ip,
-		"string::is::ipv4" => string::is::ipv4,
-		"string::is::ipv6" => string::is::ipv6,
-		"string::is::latitude" => string::is::latitude,
-		"string::is::longitude" => string::is::longitude,
-		"string::is::numeric" => string::is::numeric,
-		"string::is::semver" => string::is::semver,
-		"string::is::url" => string::is::url,
-		"string::is::ulid" => string::is::ulid,
-		"string::is::uuid" => string::is::uuid,
-		"string::is::record" => string::is::record,
+		"string::is_alphanum" => string::is::alphanum,
+		"string::is_alpha" => string::is::alpha,
+		"string::is_ascii" => string::is::ascii,
+		"string::is_datetime" => string::is::datetime,
+		"string::is_domain" => string::is::domain,
+		"string::is_email" => string::is::email,
+		"string::is_hexadecimal" => string::is::hexadecimal,
+		"string::is_ip" => string::is::ip,
+		"string::is_ipv4" => string::is::ipv4,
+		"string::is_ipv6" => string::is::ipv6,
+		"string::is_latitude" => string::is::latitude,
+		"string::is_longitude" => string::is::longitude,
+		"string::is_numeric" => string::is::numeric,
+		"string::is_semver" => string::is::semver,
+		"string::is_url" => string::is::url,
+		"string::is_ulid" => string::is::ulid,
+		"string::is_uuid" => string::is::uuid,
+		"string::is_record" => string::is::record,
 		//
 		"string::similarity::fuzzy" => string::similarity::fuzzy,
 		"string::similarity::jaro" => string::similarity::jaro,
@@ -422,14 +422,14 @@ pub fn synchronous(
 		"time::week" => time::week,
 		"time::yday" => time::yday,
 		"time::year" => time::year,
-		"time::from::nanos" => time::from::nanos,
-		"time::from::micros" => time::from::micros,
-		"time::from::millis" => time::from::millis,
-		"time::from::secs" => time::from::secs,
-		"time::from::ulid" => time::from::ulid,
-		"time::from::unix" => time::from::unix,
-		"time::from::uuid" => time::from::uuid,
-		"time::is::leap_year" => time::is::leap_year,
+		"time::from_nanos" => time::from::nanos,
+		"time::from_micros" => time::from::micros,
+		"time::from_millis" => time::from::millis,
+		"time::from_secs" => time::from::secs,
+		"time::from_ulid" => time::from::ulid,
+		"time::from_unix" => time::from::unix,
+		"time::from_uuid" => time::from::uuid,
+		"time::is_leap_year" => time::is::leap_year,
 		//
 		"type::array" => r#type::array,
 		"type::bool" => r#type::bool,
@@ -450,30 +450,30 @@ pub fn synchronous(
 		"type::table" => r#type::table,
 		"type::thing" => r#type::thing,
 		"type::uuid" => r#type::uuid,
-		"type::is::array" => r#type::is::array,
-		"type::is::bool" => r#type::is::bool,
-		"type::is::bytes" => r#type::is::bytes,
-		"type::is::collection" => r#type::is::collection,
-		"type::is::datetime" => r#type::is::datetime,
-		"type::is::decimal" => r#type::is::decimal,
-		"type::is::duration" => r#type::is::duration,
-		"type::is::float" => r#type::is::float,
-		"type::is::geometry" => r#type::is::geometry,
-		"type::is::int" => r#type::is::int,
-		"type::is::line" => r#type::is::line,
-		"type::is::none" => r#type::is::none,
-		"type::is::null" => r#type::is::null,
-		"type::is::multiline" => r#type::is::multiline,
-		"type::is::multipoint" => r#type::is::multipoint,
-		"type::is::multipolygon" => r#type::is::multipolygon,
-		"type::is::number" => r#type::is::number,
-		"type::is::object" => r#type::is::object,
-		"type::is::point" => r#type::is::point,
-		"type::is::polygon" => r#type::is::polygon,
-		"type::is::range" => r#type::is::range,
-		"type::is::record" => r#type::is::record,
-		"type::is::string" => r#type::is::string,
-		"type::is::uuid" => r#type::is::uuid,
+		"type::is_array" => r#type::is::array,
+		"type::is_bool" => r#type::is::bool,
+		"type::is_bytes" => r#type::is::bytes,
+		"type::is_collection" => r#type::is::collection,
+		"type::is_datetime" => r#type::is::datetime,
+		"type::is_decimal" => r#type::is::decimal,
+		"type::is_duration" => r#type::is::duration,
+		"type::is_float" => r#type::is::float,
+		"type::is_geometry" => r#type::is::geometry,
+		"type::is_int" => r#type::is::int,
+		"type::is_line" => r#type::is::line,
+		"type::is_none" => r#type::is::none,
+		"type::is_null" => r#type::is::null,
+		"type::is_multiline" => r#type::is::multiline,
+		"type::is_multipoint" => r#type::is::multipoint,
+		"type::is_multipolygon" => r#type::is::multipolygon,
+		"type::is_number" => r#type::is::number,
+		"type::is_object" => r#type::is::object,
+		"type::is_point" => r#type::is::point,
+		"type::is_polygon" => r#type::is::polygon,
+		"type::is_range" => r#type::is::range,
+		"type::is_record" => r#type::is::record,
+		"type::is_string" => r#type::is::string,
+		"type::is_uuid" => r#type::is::uuid,
 		//
 		"vector::add" => vector::add,
 		"vector::angle" => vector::angle,
@@ -576,7 +576,7 @@ pub async fn asynchronous(
 		"http::delete" => http::delete(ctx).await,
 		//
 		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
-		"record::is::edge" => record::is::edge((stk, ctx, Some(opt), doc)).await,
+		"record::is_edge" => record::is::edge((stk, ctx, Some(opt), doc)).await,
 		//
 		"search::analyze" => search::analyze((stk, ctx, Some(opt))).await,
 		"search::linear" => search::linear(ctx).await,
@@ -1151,8 +1151,8 @@ pub async fn idiom(
 				"repeat" => array::repeat,
 			)
 		}
-		Value::Strand(s) => {
-			args.insert(0, Value::Strand(s));
+		Value::String(s) => {
+			args.insert(0, Value::String(s));
 			dispatch!(
 				ctx,
 				name,
@@ -1655,12 +1655,10 @@ mod tests {
 				let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
 				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 				let tmp = res.remove(0).result.unwrap();
-				if tmp == Value::Strand(crate::val::Strand::new("object".to_owned()).unwrap()) {
+				if tmp == Value::String("object".to_owned()) {
 					// Assume this function is superseded by a module of the
 					// same name.
-				} else if tmp
-					!= Value::Strand(crate::val::Strand::new("function".to_owned()).unwrap())
-				{
+				} else if tmp != Value::String("function".to_owned()) {
 					problems.push(format!("function {name} not exported to JavaScript: {tmp:?}"));
 				}
 			}

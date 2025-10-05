@@ -5,17 +5,32 @@ use std::str::FromStr;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use super::Datetime;
-use crate::expr::escape::QuoteStr;
-use crate::val::Strand;
+use crate::fmt::QuoteStr;
+use crate::val::IndexFormat;
 
 #[revisioned(revision = 1)]
 #[derive(
-	Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize, Hash,
+	Clone,
+	Copy,
+	Debug,
+	Default,
+	Eq,
+	Ord,
+	PartialEq,
+	PartialOrd,
+	Serialize,
+	Deserialize,
+	Hash,
+	Encode,
+	BorrowDecode,
 )]
 #[serde(rename = "$surrealdb::private::Uuid")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub struct Uuid(pub uuid::Uuid);
 
 impl From<uuid::Uuid> for Uuid {
@@ -31,33 +46,9 @@ impl From<Uuid> for uuid::Uuid {
 }
 
 impl FromStr for Uuid {
-	type Err = ();
+	type Err = uuid::Error;
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Self::try_from(s)
-	}
-}
-
-impl TryFrom<String> for Uuid {
-	type Error = ();
-	fn try_from(v: String) -> Result<Self, Self::Error> {
-		Self::try_from(v.as_str())
-	}
-}
-
-impl TryFrom<Strand> for Uuid {
-	type Error = ();
-	fn try_from(v: Strand) -> Result<Self, Self::Error> {
-		Self::try_from(v.as_str())
-	}
-}
-
-impl TryFrom<&str> for Uuid {
-	type Error = ();
-	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match uuid::Uuid::try_parse(v) {
-			Ok(v) => Ok(Self(v)),
-			Err(_) => Err(()),
-		}
+		uuid::Uuid::try_parse(s).map(Uuid)
 	}
 }
 

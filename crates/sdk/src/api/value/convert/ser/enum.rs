@@ -6,7 +6,7 @@ use serde::de::IntoDeserializer;
 use serde_content::{Data, Expected, Unexpected};
 
 use super::{Content, object_from_content_struct, value_from_content};
-use crate::core::val::{self, Object, Strand, Value};
+use crate::core::val::{self, Object, Value};
 
 pub(super) fn to_value(content: Content) -> Result<Value> {
 	match content {
@@ -26,7 +26,7 @@ pub(super) fn to_value(content: Content) -> Result<Value> {
 			}
 			_ => match v.data {
 				//TODO:  Null byte validity
-				Data::Unit => Ok(unsafe { Strand::new_unchecked(v.variant.into_owned()) }.into()),
+				Data::Unit => Ok(v.variant.into_owned().into()),
 				Data::NewType {
 					value,
 				} => {

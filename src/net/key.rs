@@ -9,7 +9,6 @@ use axum_extra::TypedHeader;
 use axum_extra::extract::Query;
 use bytes::Bytes;
 use serde::Deserialize;
-use surrealdb_core::kvs::{LockType, TransactionType};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
@@ -21,7 +20,7 @@ use crate::core::dbs::capabilities::RouteTarget;
 use crate::core::dbs::{Session, Variables};
 use crate::core::iam::check::check_ns_db;
 use crate::core::kvs::Datastore;
-use crate::core::val::{Strand, Value};
+use crate::core::val::Value;
 use crate::core::{sql, syn};
 use crate::net::error::Error as NetError;
 use crate::net::input::bytes_to_utf8;
@@ -40,7 +39,7 @@ where
 {
 	Router::new()
 		.route(
-			"/key/:table",
+			"/key/{table}",
 			options(|| async {})
 				.get(select_all)
 				.post(create_all)
@@ -53,7 +52,7 @@ where
 		.merge(
 			Router::new()
 				.route(
-					"/key/:table/:key",
+					"/key/{table}/{key}",
 					options(|| async {})
 						.get(select_one)
 						.post(create_one)
@@ -138,12 +137,7 @@ async fn select_all(
 	let (ns, db) = check_ns_db(&session).map_err(ResponseError)?;
 
 	// Check if the table exists
-	let tx =
-		ds.transaction(TransactionType::Read, LockType::Optimistic).await.map_err(ResponseError)?;
-	if tx.get_tb_by_name(&ns, &db, &table).await.map_err(ResponseError)?.is_none() {
-		return Err(ResponseError(anyhow::anyhow!("Table `{table}` not found")));
-	}
-	tx.cancel().await.map_err(ResponseError)?;
+	ds.ensure_tb_exists(&ns, &db, &table).await.map_err(ResponseError)?;
 
 	// Specify the request statement
 	let sql = match query.fields {
@@ -155,7 +149,7 @@ async fn select_all(
 		String::from("table") => Value::from(table),
 		String::from("start") => Value::from(query.start.unwrap_or(0)),
 		String::from("limit") => Value::from(query.limit.unwrap_or(100)),
-		String::from("fields") => query.fields.unwrap_or_default().into_iter().map(|x| unsafe{ Strand::new_unchecked(x) }).map(Value::from).collect(),
+		String::from("fields") => query.fields.unwrap_or_default().into_iter().map(Value::from).collect(),
 	});
 	execute_and_return(ds, sql, &session, vars, accept.as_deref(), None)
 		.await
@@ -322,7 +316,7 @@ async fn select_one(
 	let vars = Variables::from(map! {
 		String::from("table") => Value::from(table),
 		String::from("id") => rid,
-		String::from("fields") => query.fields.unwrap_or_default().into_iter().map(|x| unsafe{ Strand::new_unchecked(x) }).map(Value::from).collect::<Value>(),
+		String::from("fields") => query.fields.unwrap_or_default().into_iter().map(Value::from).collect::<Value>(),
 	});
 	// Execute the query and return the result
 	execute_and_return(db, sql, &session, vars, accept.as_deref(), None)

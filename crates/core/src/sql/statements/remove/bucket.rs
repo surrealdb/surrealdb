@@ -1,12 +1,21 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::sql::Ident;
+use crate::sql::{Expr, Literal};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveBucketStatement {
-	pub name: Ident,
+	pub name: Expr,
 	pub if_exists: bool,
+}
+
+impl Default for RemoveBucketStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			if_exists: false,
+		}
+	}
 }
 
 impl Display for RemoveBucketStatement {

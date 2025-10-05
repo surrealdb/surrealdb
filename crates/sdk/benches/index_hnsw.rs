@@ -6,7 +6,7 @@ use criterion::measurement::WallTime;
 use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use flate2::read::GzDecoder;
 use reblessive::TreeStack;
-use surrealdb_core::catalog::{Distance, HnswParams, VectorType};
+use surrealdb_core::catalog::{CatalogProvider, Distance, HnswParams, VectorType};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::idx::IndexKeyBase;
 use surrealdb_core::idx::planner::checker::{HnswChecker, HnswConditionChecker};
@@ -218,9 +218,7 @@ async fn hnsw(tx: &Transaction) -> HnswIndex {
 		extend_candidates: false,
 		keep_pruned_connections: false,
 	};
-	HnswIndex::new(tx, IndexKeyBase::new(0, 0, "test", "test"), "test".to_string(), &p)
-		.await
-		.unwrap()
+	HnswIndex::new(tx, IndexKeyBase::new(0, 0, "test", 0), "test".to_string(), &p).await.unwrap()
 }
 
 async fn insert_objects(samples: &[(RecordId, Vec<Value>)]) -> (Datastore, HnswIndex) {
