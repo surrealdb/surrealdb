@@ -156,6 +156,102 @@ fn combine_field_deltas(first: FieldStatsDelta, second: FieldStatsDelta) -> Fiel
 		(FieldStatsDelta::MinMaxAdd, FieldStatsDelta::MinMaxSub) => FieldStatsDelta::MinMaxAdd, /* No net change */
 		(FieldStatsDelta::MinMaxSub, FieldStatsDelta::MinMaxAdd) => FieldStatsDelta::MinMaxAdd, /* No net change */
 
+		// StdDev operations
+		(
+			FieldStatsDelta::StdDevSub {
+				value: v1,
+			},
+			FieldStatsDelta::StdDevAdd {
+				value: v2,
+			},
+		) => {
+			FieldStatsDelta::StdDevUpdate {
+				old_value: v1,
+				new_value: v2,
+			}
+		}
+		(
+			FieldStatsDelta::StdDevAdd {
+				value: v1,
+			},
+			FieldStatsDelta::StdDevSub {
+				value: v2,
+			},
+		) => {
+			FieldStatsDelta::StdDevUpdate {
+				old_value: v2,
+				new_value: v1,
+			}
+		}
+		(
+			FieldStatsDelta::StdDevAdd {
+				value: v1,
+			},
+			FieldStatsDelta::StdDevAdd {
+				value: v2,
+			},
+		) => FieldStatsDelta::StdDevAdd {
+			value: v1 + v2,
+		},
+		(
+			FieldStatsDelta::StdDevSub {
+				value: v1,
+			},
+			FieldStatsDelta::StdDevSub {
+				value: v2,
+			},
+		) => FieldStatsDelta::StdDevSub {
+			value: v1 + v2,
+		},
+
+		// Variance operations
+		(
+			FieldStatsDelta::VarianceSub {
+				value: v1,
+			},
+			FieldStatsDelta::VarianceAdd {
+				value: v2,
+			},
+		) => {
+			FieldStatsDelta::VarianceUpdate {
+				old_value: v1,
+				new_value: v2,
+			}
+		}
+		(
+			FieldStatsDelta::VarianceAdd {
+				value: v1,
+			},
+			FieldStatsDelta::VarianceSub {
+				value: v2,
+			},
+		) => {
+			FieldStatsDelta::VarianceUpdate {
+				old_value: v2,
+				new_value: v1,
+			}
+		}
+		(
+			FieldStatsDelta::VarianceAdd {
+				value: v1,
+			},
+			FieldStatsDelta::VarianceAdd {
+				value: v2,
+			},
+		) => FieldStatsDelta::VarianceAdd {
+			value: v1 + v2,
+		},
+		(
+			FieldStatsDelta::VarianceSub {
+				value: v1,
+			},
+			FieldStatsDelta::VarianceSub {
+				value: v2,
+			},
+		) => FieldStatsDelta::VarianceSub {
+			value: v1 + v2,
+		},
+
 		// Default case - shouldn't happen in normal operation but handle gracefully
 		(first, _) => first,
 	}
@@ -313,6 +409,164 @@ fn apply_field_stats_delta(
 			count: 1,
 		}),
 		(None, FieldStatsDelta::MinMaxSub) => None,
+
+		// StdDev operations
+		(
+			Some(FieldStats::StdDev {
+				sum,
+				sum_of_squares,
+				count,
+			}),
+			FieldStatsDelta::StdDevAdd {
+				value,
+			},
+		) => Some(FieldStats::StdDev {
+			sum: sum + value,
+			sum_of_squares: sum_of_squares + (value * value),
+			count: count + 1,
+		}),
+		(
+			Some(FieldStats::StdDev {
+				sum,
+				sum_of_squares,
+				count,
+			}),
+			FieldStatsDelta::StdDevSub {
+				value,
+			},
+		) => {
+			let new_count = count.saturating_sub(1);
+			if new_count == 0 {
+				None
+			} else {
+				Some(FieldStats::StdDev {
+					sum: sum - value,
+					sum_of_squares: sum_of_squares - (value * value),
+					count: new_count,
+				})
+			}
+		}
+		(
+			Some(FieldStats::StdDev {
+				sum,
+				sum_of_squares,
+				count,
+			}),
+			FieldStatsDelta::StdDevUpdate {
+				old_value,
+				new_value,
+			},
+		) => Some(FieldStats::StdDev {
+			sum: sum - old_value + new_value,
+			sum_of_squares: sum_of_squares - (old_value * old_value) + (new_value * new_value),
+			count,
+		}),
+		(
+			None,
+			FieldStatsDelta::StdDevAdd {
+				value,
+			},
+		) => Some(FieldStats::StdDev {
+			sum: value,
+			sum_of_squares: value * value,
+			count: 1,
+		}),
+		(
+			None,
+			FieldStatsDelta::StdDevSub {
+				..
+			},
+		) => None,
+		(
+			None,
+			FieldStatsDelta::StdDevUpdate {
+				new_value,
+				..
+			},
+		) => Some(FieldStats::StdDev {
+			sum: new_value,
+			sum_of_squares: new_value * new_value,
+			count: 1,
+		}),
+
+		// Variance operations
+		(
+			Some(FieldStats::Variance {
+				sum,
+				sum_of_squares,
+				count,
+			}),
+			FieldStatsDelta::VarianceAdd {
+				value,
+			},
+		) => Some(FieldStats::Variance {
+			sum: sum + value,
+			sum_of_squares: sum_of_squares + (value * value),
+			count: count + 1,
+		}),
+		(
+			Some(FieldStats::Variance {
+				sum,
+				sum_of_squares,
+				count,
+			}),
+			FieldStatsDelta::VarianceSub {
+				value,
+			},
+		) => {
+			let new_count = count.saturating_sub(1);
+			if new_count == 0 {
+				None
+			} else {
+				Some(FieldStats::Variance {
+					sum: sum - value,
+					sum_of_squares: sum_of_squares - (value * value),
+					count: new_count,
+				})
+			}
+		}
+		(
+			Some(FieldStats::Variance {
+				sum,
+				sum_of_squares,
+				count,
+			}),
+			FieldStatsDelta::VarianceUpdate {
+				old_value,
+				new_value,
+			},
+		) => Some(FieldStats::Variance {
+			sum: sum - old_value + new_value,
+			sum_of_squares: sum_of_squares - (old_value * old_value) + (new_value * new_value),
+			count,
+		}),
+		(
+			None,
+			FieldStatsDelta::VarianceAdd {
+				value,
+			},
+		) => Some(FieldStats::Variance {
+			sum: value,
+			sum_of_squares: value * value,
+			count: 1,
+		}),
+		(
+			None,
+			FieldStatsDelta::VarianceSub {
+				..
+			},
+		) => None,
+		(
+			None,
+			FieldStatsDelta::VarianceUpdate {
+				new_value,
+				..
+			},
+		) => Some(FieldStats::Variance {
+			sum: new_value,
+			sum_of_squares: new_value * new_value,
+			count: 1,
+		}),
 
 		// Mismatched operations - ignore (shouldn't happen)
 		(existing, _) => existing,
@@ -873,6 +1127,56 @@ impl Document {
 						record.data.to_mut().put(&parts, mean_value);
 					}
 				}
+
+				// For standard deviation calculations, we need to update the actual field value too
+				if let FieldStats::StdDev {
+					sum,
+					sum_of_squares,
+					count,
+				} = &new_stats
+				{
+					if *count > 1 {
+						// Sample standard deviation: sqrt((sum_of_squares - (sum^2 / count)) / (count - 1))
+						let mean = *sum / rust_decimal::Decimal::from(*count);
+						let variance = (*sum_of_squares - (*sum * mean))
+							/ rust_decimal::Decimal::from(*count - 1);
+						let stddev_value = if variance >= rust_decimal::Decimal::ZERO {
+							// Convert to Number to use the sqrt method
+							let variance_num = crate::val::Number::Decimal(variance);
+							Value::from(variance_num.sqrt())
+						} else {
+							Value::from(0.0) // Handle negative variance edge case (should not happen with proper calculation)
+						};
+						let parts = vec![Part::Field(field_name.clone())];
+						record.data.to_mut().put(&parts, stddev_value);
+					} else if *count == 1 {
+						// With only one data point, standard deviation is 0
+						let parts = vec![Part::Field(field_name.clone())];
+						record.data.to_mut().put(&parts, Value::from(0.0));
+					}
+				}
+
+				// For variance calculations, we need to update the actual field value too
+				if let FieldStats::Variance {
+					sum,
+					sum_of_squares,
+					count,
+				} = &new_stats
+				{
+					if *count > 1 {
+						// Sample variance: (sum_of_squares - (sum^2 / count)) / (count - 1)
+						let mean = *sum / rust_decimal::Decimal::from(*count);
+						let variance = (*sum_of_squares - (*sum * mean))
+							/ rust_decimal::Decimal::from(*count - 1);
+						let variance_value = Value::from(variance.max(rust_decimal::Decimal::ZERO)); // Ensure non-negative
+						let parts = vec![Part::Field(field_name.clone())];
+						record.data.to_mut().put(&parts, variance_value);
+					} else if *count == 1 {
+						// With only one data point, variance is 0
+						let parts = vec![Part::Field(field_name.clone())];
+						record.data.to_mut().put(&parts, Value::from(0.0));
+					}
+				}
 			} else {
 				// If delta results in None, remove the field stats (count reached 0)
 				record.remove_field_stats(&field_name);
@@ -884,6 +1188,12 @@ impl Document {
 					FieldStatsDelta::MeanAdd { .. }
 						| FieldStatsDelta::MeanSub { .. }
 						| FieldStatsDelta::MeanUpdate { .. }
+						| FieldStatsDelta::StdDevAdd { .. }
+						| FieldStatsDelta::StdDevSub { .. }
+						| FieldStatsDelta::StdDevUpdate { .. }
+						| FieldStatsDelta::VarianceAdd { .. }
+						| FieldStatsDelta::VarianceSub { .. }
+						| FieldStatsDelta::VarianceUpdate { .. }
 				) {
 					let parts = vec![Part::Field(field_name.clone())];
 					record.data.to_mut().put(&parts, Value::None);
@@ -1108,6 +1418,58 @@ impl Document {
 									}
 								};
 								self.mean(
+									&mut del_ops,
+									&mut metadata_deltas,
+									&fdc.act,
+									idiom,
+									val,
+								)?;
+								continue;
+							}
+							"math::stddev" => {
+								let val = stk
+									.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
+									.await
+									.catch_return()?;
+								let val = match val {
+									val @ Value::Number(_) => val.coerce_to::<Decimal>()?.into(),
+									val => {
+										bail!(Error::InvalidAggregation {
+											name: name.to_string(),
+											table: fdc.ft.name.clone(),
+											message: format!(
+												"This function expects a number but found {val}"
+											),
+										})
+									}
+								};
+								self.stddev(
+									&mut del_ops,
+									&mut metadata_deltas,
+									&fdc.act,
+									idiom,
+									val,
+								)?;
+								continue;
+							}
+							"math::variance" => {
+								let val = stk
+									.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(fdc.doc)))
+									.await
+									.catch_return()?;
+								let val = match val {
+									val @ Value::Number(_) => val.coerce_to::<Decimal>()?.into(),
+									val => {
+										bail!(Error::InvalidAggregation {
+											name: name.to_string(),
+											table: fdc.ft.name.clone(),
+											message: format!(
+												"This function expects a number but found {val}"
+											),
+										})
+									}
+								};
+								self.variance(
 									&mut del_ops,
 									&mut metadata_deltas,
 									&fdc.act,
@@ -1499,6 +1861,142 @@ impl Document {
 		}
 
 		// Everything ok
+		Ok(())
+	}
+
+	/// Set the new standard deviation value for the field in the foreign table
+	fn stddev(
+		&self,
+		del_cond: &mut Option<Expr>,
+		metadata_deltas: &mut HashMap<String, FieldStatsDelta>,
+		act: &FieldAction,
+		key: Idiom,
+		val: Value,
+	) -> Result<()> {
+		let field_name = key.to_string();
+		let decimal_val = match &val {
+			Value::Number(n) => n.to_decimal(),
+			_ => bail!(Error::InvalidAggregation {
+				name: "stddev".to_string(),
+				table: "unknown".to_string(),
+				message: format!("Standard deviation expects a number but found {val}"),
+			}),
+		};
+
+		// Store the delta operation for standard deviation calculation
+		match act {
+			FieldAction::Add | FieldAction::UpdateAdd => {
+				let new_delta = FieldStatsDelta::StdDevAdd {
+					value: decimal_val,
+				};
+				match metadata_deltas.entry(field_name) {
+					Entry::Occupied(mut occupied_entry) => {
+						let existing = occupied_entry.insert(FieldStatsDelta::StdDevAdd {
+							value: decimal_val,
+						});
+						occupied_entry.insert(combine_field_deltas(existing, new_delta));
+					}
+					Entry::Vacant(vacant_entry) => {
+						vacant_entry.insert(new_delta);
+					}
+				}
+			}
+			FieldAction::Sub | FieldAction::UpdateSub => {
+				let new_delta = FieldStatsDelta::StdDevSub {
+					value: decimal_val,
+				};
+				match metadata_deltas.entry(field_name) {
+					Entry::Occupied(mut occupied_entry) => {
+						let existing = occupied_entry.insert(FieldStatsDelta::StdDevSub {
+							value: decimal_val,
+						});
+						occupied_entry.insert(combine_field_deltas(existing, new_delta));
+					}
+					Entry::Vacant(vacant_entry) => {
+						vacant_entry.insert(new_delta);
+					}
+				}
+
+				// For stddev, we need to potentially delete the record if count becomes 0
+				accumulate_delete_expr(
+					del_cond,
+					Expr::Binary {
+						left: Box::new(Expr::Idiom(key)),
+						op: BinaryOperator::ExactEqual,
+						right: Box::new(Expr::Literal(Literal::None)),
+					},
+				);
+			}
+		}
+
+		Ok(())
+	}
+
+	/// Set the new variance value for the field in the foreign table
+	fn variance(
+		&self,
+		del_cond: &mut Option<Expr>,
+		metadata_deltas: &mut HashMap<String, FieldStatsDelta>,
+		act: &FieldAction,
+		key: Idiom,
+		val: Value,
+	) -> Result<()> {
+		let field_name = key.to_string();
+		let decimal_val = match &val {
+			Value::Number(n) => n.to_decimal(),
+			_ => bail!(Error::InvalidAggregation {
+				name: "variance".to_string(),
+				table: "unknown".to_string(),
+				message: format!("Variance expects a number but found {val}"),
+			}),
+		};
+
+		// Store the delta operation for variance calculation
+		match act {
+			FieldAction::Add | FieldAction::UpdateAdd => {
+				let new_delta = FieldStatsDelta::VarianceAdd {
+					value: decimal_val,
+				};
+				match metadata_deltas.entry(field_name) {
+					Entry::Occupied(mut occupied_entry) => {
+						let existing = occupied_entry.insert(FieldStatsDelta::VarianceAdd {
+							value: decimal_val,
+						});
+						occupied_entry.insert(combine_field_deltas(existing, new_delta));
+					}
+					Entry::Vacant(vacant_entry) => {
+						vacant_entry.insert(new_delta);
+					}
+				}
+			}
+			FieldAction::Sub | FieldAction::UpdateSub => {
+				let new_delta = FieldStatsDelta::VarianceSub {
+					value: decimal_val,
+				};
+				match metadata_deltas.entry(field_name) {
+					Entry::Occupied(mut occupied_entry) => {
+						let existing = occupied_entry.insert(FieldStatsDelta::VarianceSub {
+							value: decimal_val,
+						});
+						occupied_entry.insert(combine_field_deltas(existing, new_delta));
+					}
+					Entry::Vacant(vacant_entry) => {
+						vacant_entry.insert(new_delta);
+					}
+				}
+
+				// For variance, we need to potentially delete the record if count becomes 0
+				accumulate_delete_expr(
+					del_cond,
+					Expr::Binary {
+						left: Box::new(Expr::Idiom(key)),
+						op: BinaryOperator::ExactEqual,
+						right: Box::new(Expr::Literal(Literal::None)),
+					},
+				);
+			}
+		}
+
 		Ok(())
 	}
 
