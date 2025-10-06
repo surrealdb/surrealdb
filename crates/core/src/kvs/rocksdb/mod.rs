@@ -116,6 +116,29 @@ impl Datastore {
 		// Store large values separate from keys
 		info!(target: TARGET, "Minimum blob value size: {}", *cnf::ROCKSDB_MIN_BLOB_SIZE);
 		opts.set_min_blob_size(*cnf::ROCKSDB_MIN_BLOB_SIZE);
+		// Additional blob file options
+		info!(target: TARGET, "Target blob file size: {}", *cnf::ROCKSDB_BLOB_FILE_SIZE);
+		opts.set_blob_file_size(*cnf::ROCKSDB_BLOB_FILE_SIZE);
+		info!(target: TARGET, "Blob compression type: {}", *cnf::ROCKSDB_BLOB_COMPRESSION_TYPE);
+		opts.set_blob_compression_type(
+			match cnf::ROCKSDB_BLOB_COMPRESSION_TYPE.to_ascii_lowercase().as_str() {
+				"none" => DBCompressionType::None,
+				"snappy" => DBCompressionType::Snappy,
+				"lz4" => DBCompressionType::Lz4,
+				"zstd" => DBCompressionType::Zstd,
+				_ => DBCompressionType::Snappy,
+			},
+		);
+		info!(target: TARGET, "Enable blob garbage collection: {}", *cnf::ROCKSDB_ENABLE_BLOB_GC);
+		opts.set_enable_blob_gc(*cnf::ROCKSDB_ENABLE_BLOB_GC);
+		info!(target: TARGET, "Blob GC age cutoff: {}", *cnf::ROCKSDB_BLOB_GC_AGE_CUTOFF);
+		opts.set_blob_gc_age_cutoff(*cnf::ROCKSDB_BLOB_GC_AGE_CUTOFF);
+		info!(target: TARGET, "Blob GC force threshold: {}", *cnf::ROCKSDB_BLOB_GC_FORCE_THRESHOLD);
+		opts.set_blob_gc_force_threshold(*cnf::ROCKSDB_BLOB_GC_FORCE_THRESHOLD);
+		info!(target: TARGET, "Blob compaction readahead size: {}", *cnf::ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE);
+		opts.set_blob_compaction_readahead_size(
+			(*cnf::ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE) as u64,
+		);
 		// Set the write-ahead-log size limit in MB
 		info!(target: TARGET, "Write-ahead-log file size limit: {}MB", *cnf::ROCKSDB_WAL_SIZE_LIMIT);
 		opts.set_wal_size_limit_mb(*cnf::ROCKSDB_WAL_SIZE_LIMIT);
