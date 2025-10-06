@@ -246,7 +246,7 @@ impl Value {
 						let res = fallback_function! {
 							if res => InvalidFunction(e) then {
 								if let Some(Value::Closure(x)) = v.get(name) {
-									x.compute(stk, ctx, opt, doc, args).await
+									x.invoke(stk, ctx, opt, doc, args).await
 								} else {
 									Err(e)
 								}
@@ -451,7 +451,7 @@ impl Value {
 								if res => InvalidFunction(e) then {
 									let v = val.select_document(stk, ctx, opt, doc).await?.unwrap_or_default();
 									if let Some(Value::Closure(x)) = v.get(name) {
-										x.compute(stk, ctx, opt, doc, a).await
+										x.invoke(stk, ctx, opt, doc, a).await
 									} else {
 										Err(e)
 									}

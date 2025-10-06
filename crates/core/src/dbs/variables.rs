@@ -2,9 +2,12 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::ctx::Context;
+use crate::expr::Expr;
+use crate::expr::expression::VisitExpression;
 use crate::val::{Object, Value};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[repr(transparent)]
 pub struct Variables(pub BTreeMap<String, Value>);
 
@@ -68,6 +71,20 @@ impl Variables {
 		let mut vars = self.clone();
 		vars.merge(other.into());
 		vars
+	}
+
+	pub(crate) fn from_expr<T: VisitExpression>(expr: &T, ctx: &Context) -> Self {
+		let mut vars = BTreeMap::new();
+		let mut visitor = |x: &Expr| {
+			if let Expr::Param(param) = x {
+				if let Some(v) = ctx.value(param.as_str()) {
+					vars.insert(param.clone().into_string(), v.clone());
+				}
+			}
+		};
+
+		expr.visit(&mut visitor);
+		Self(vars)
 	}
 }
 

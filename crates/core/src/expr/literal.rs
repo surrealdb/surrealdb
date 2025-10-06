@@ -118,7 +118,7 @@ impl Literal {
 			Literal::Uuid(uuid) => Value::Uuid(*uuid),
 			Literal::Geometry(geometry) => Value::Geometry(geometry.clone()),
 			Literal::File(file) => Value::File(file.clone()),
-			Literal::Closure(closure) => Value::Closure(closure.clone()),
+			Literal::Closure(closure) => closure.compute(ctx).await?,
 		};
 		Ok(res)
 	}

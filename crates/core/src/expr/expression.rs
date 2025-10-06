@@ -255,7 +255,7 @@ impl Expr {
 				..
 			} => Self::compute_binary(stk, ctx, &opt, doc, self).await,
 			Expr::FunctionCall(function_call) => function_call.compute(stk, ctx, &opt, doc).await,
-			Expr::Closure(closure) => Ok(Value::Closure(closure.clone())),
+			Expr::Closure(closure) => Ok(closure.compute(ctx).await?),
 			Expr::Break => Err(ControlFlow::Break),
 			Expr::Continue => Err(ControlFlow::Continue),
 			Expr::Return(output_statement) => output_statement.compute(stk, ctx, &opt, doc).await,
@@ -409,7 +409,7 @@ impl Expr {
 
 				if let Value::Object(ref x) = res {
 					if let Some(Value::Closure(x)) = x.get(name.as_str()) {
-						return x.compute(stk, ctx, opt, doc, args).await.map_err(ControlFlow::Err);
+						return x.invoke(stk, ctx, opt, doc, args).await.map_err(ControlFlow::Err);
 					}
 				};
 				fnc::idiom(stk, ctx, opt, doc, res, name, args).await.map_err(ControlFlow::Err)
@@ -422,7 +422,7 @@ impl Expr {
 				}
 
 				if let Value::Closure(x) = res {
-					x.compute(stk, ctx, opt, doc, args).await.map_err(ControlFlow::Err)
+					x.invoke(stk, ctx, opt, doc, args).await.map_err(ControlFlow::Err)
 				} else {
 					Err(ControlFlow::Err(anyhow::Error::new(Error::InvalidFunction {
 						name: "ANONYMOUS".to_string(),
