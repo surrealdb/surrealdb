@@ -50,7 +50,7 @@ pub mod cbor {
 
 	pub fn encode((arg,): (Value,)) -> Result<Value> {
 		// Convert internal value to public, encode, then convert back
-		let public_val = crate::dbs::executor::convert_value_to_public_value(arg)?;
+		let public_val = crate::val::convert_value_to_public_value(arg)?;
 		let val = cbor::encode(public_val).map_err(|_| Error::InvalidArguments {
 			name: "encoding::cbor::encode".to_owned(),
 			message: "Value could not be encoded into CBOR".to_owned(),

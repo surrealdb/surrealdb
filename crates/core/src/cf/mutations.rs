@@ -199,7 +199,7 @@ mod tests {
 
 	use super::*;
 	use crate::catalog::{DatabaseId, NamespaceId, TableId};
-	use crate::dbs::executor::convert_value_to_public_value;
+	use crate::val::convert_value_to_public_value;
 
 	#[test]
 	fn serialization() {

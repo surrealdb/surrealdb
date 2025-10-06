@@ -10,7 +10,6 @@ use reblessive::tree::Stk;
 use super::IgnoreError;
 use crate::catalog::{Permission, SubscriptionDefinition};
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::executor::convert_value_to_public_value;
 use crate::dbs::{MessageBroker, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
@@ -18,7 +17,7 @@ use crate::expr::FlowResultExt as _;
 use crate::expr::paths::{AC, RD, TK};
 use crate::kvs::Transaction;
 use crate::types::{PublicAction, PublicNotification};
-use crate::val::Value;
+use crate::val::{Value, convert_value_to_public_value};
 
 impl Document {
 	/// Processes any LIVE SELECT statements which

@@ -14,10 +14,10 @@ use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{ApiDefinition, ApiMethod};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
-use crate::dbs::executor::convert_value_to_public_value;
 use crate::expr::FlowResultExt as _;
 use crate::sql::expression::convert_public_value_to_internal;
 use crate::types::{PublicObject, PublicValue};
+use crate::val::convert_value_to_public_value;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ApiInvocation {

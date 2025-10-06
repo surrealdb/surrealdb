@@ -238,13 +238,13 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(ns).with_db(db);
 				sess.rd = Some(
-					crate::dbs::executor::convert_value_to_public_value(
-						crate::val::Value::RecordId(rid.clone().into()),
-					)
+					crate::val::convert_value_to_public_value(crate::val::Value::RecordId(
+						rid.clone().into(),
+					))
 					.unwrap(),
 				);
 				sess.tk = Some(
-					crate::dbs::executor::convert_value_to_public_value(
+					crate::val::convert_value_to_public_value(
 						token_data.claims.clone().into_claims_object().into(),
 					)
 					.unwrap(),
@@ -256,12 +256,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated with record access method `{}`", ac);
 			// Set the session
-			session.tk = Some(crate::dbs::executor::convert_value_to_public_value(value).unwrap());
+			session.tk = Some(crate::val::convert_value_to_public_value(value).unwrap());
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.ac = Some(ac.to_owned());
 			session.rd = Some(
-				crate::dbs::executor::convert_value_to_public_value(crate::val::Value::RecordId(
+				crate::val::convert_value_to_public_value(crate::val::Value::RecordId(
 					rid.clone().into(),
 				))
 				.unwrap(),
@@ -343,7 +343,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						// Setup the system session for executing the clause
 						let mut sess = Session::editor().with_ns(ns).with_db(db);
 						sess.tk = Some(
-							crate::dbs::executor::convert_value_to_public_value(
+							crate::val::convert_value_to_public_value(
 								token_data.claims.clone().into_claims_object().into(),
 							)
 							.unwrap(),
@@ -369,8 +369,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					// Log the success
 					debug!("Authenticated to database `{}` with access method `{}`", db, ac);
 					// Set the session
-					session.tk =
-						Some(crate::dbs::executor::convert_value_to_public_value(value).unwrap());
+					session.tk = Some(crate::val::convert_value_to_public_value(value).unwrap());
 					session.ns = Some(ns.to_owned());
 					session.db = Some(db.to_owned());
 					session.ac = Some(ac.to_owned());
@@ -413,7 +412,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						// Setup the system session for finding the signin record
 						let mut sess = Session::editor().with_ns(ns).with_db(db);
 						sess.tk = Some(
-							crate::dbs::executor::convert_value_to_public_value(
+							crate::val::convert_value_to_public_value(
 								token_data.claims.clone().into_claims_object().into(),
 							)
 							.unwrap(),
@@ -424,16 +423,15 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						// Log the success
 						debug!("Authenticated with record access method `{}`", ac);
 						// Set the session
-						session.tk = Some(
-							crate::dbs::executor::convert_value_to_public_value(value).unwrap(),
-						);
+						session.tk =
+							Some(crate::val::convert_value_to_public_value(value).unwrap());
 						session.ns = Some(ns.to_owned());
 						session.db = Some(db.to_owned());
 						session.ac = Some(ac.to_owned());
 						session.rd = Some(
-							crate::dbs::executor::convert_value_to_public_value(
-								crate::val::Value::RecordId(rid.clone().into()),
-							)
+							crate::val::convert_value_to_public_value(crate::val::Value::RecordId(
+								rid.clone().into(),
+							))
 							.unwrap(),
 						);
 						session.exp = expiration(de.session_duration)?;
@@ -489,7 +487,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to database `{}` with user `{}` using token", db, id);
 			// Set the session
-			session.tk = Some(crate::dbs::executor::convert_value_to_public_value(value).unwrap());
+			session.tk = Some(crate::val::convert_value_to_public_value(value).unwrap());
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.exp = expiration(de.session_duration)?;
@@ -567,7 +565,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				// Setup the system session for executing the clause
 				let mut sess = Session::editor().with_ns(ns);
 				sess.tk = Some(
-					crate::dbs::executor::convert_value_to_public_value(
+					crate::val::convert_value_to_public_value(
 						token_data.claims.clone().into_claims_object().into(),
 					)
 					.unwrap(),
@@ -593,7 +591,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to namespace `{}` with access method `{}`", ns, ac);
 			// Set the session
-			session.tk = Some(crate::dbs::executor::convert_value_to_public_value(value).unwrap());
+			session.tk = Some(crate::val::convert_value_to_public_value(value).unwrap());
 			session.ns = Some(ns.to_owned());
 			session.ac = Some(ac.to_owned());
 			session.exp = expiration(de.session_duration)?;
@@ -641,7 +639,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to namespace `{}` with user `{}` using token", ns, id);
 			// Set the session
-			session.tk = Some(crate::dbs::executor::convert_value_to_public_value(value).unwrap());
+			session.tk = Some(crate::val::convert_value_to_public_value(value).unwrap());
 			session.ns = Some(ns.to_owned());
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
@@ -707,7 +705,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				// Setup the system session for executing the clause
 				let mut sess = Session::editor();
 				sess.tk = Some(
-					crate::dbs::executor::convert_value_to_public_value(
+					crate::val::convert_value_to_public_value(
 						token_data.claims.clone().into_claims_object().into(),
 					)
 					.unwrap(),
@@ -733,7 +731,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to root with access method `{}`", ac);
 			// Set the session
-			session.tk = Some(crate::dbs::executor::convert_value_to_public_value(value).unwrap());
+			session.tk = Some(crate::val::convert_value_to_public_value(value).unwrap());
 			session.ac = Some(ac.to_owned());
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Root)));
@@ -762,7 +760,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to root level with user `{}` using token", id);
 			// Set the session
-			session.tk = Some(crate::dbs::executor::convert_value_to_public_value(value).unwrap());
+			session.tk = Some(crate::val::convert_value_to_public_value(value).unwrap());
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),

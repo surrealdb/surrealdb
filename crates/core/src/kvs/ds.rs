@@ -43,7 +43,6 @@ use crate::dbs::capabilities::NetTarget;
 use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
-use crate::dbs::executor::convert_value_to_public_value;
 use crate::dbs::node::Timestamp;
 use crate::dbs::{Capabilities, Executor, Options, QueryResult, QueryResultBuilder, Session};
 use crate::err::Error;
@@ -76,7 +75,7 @@ use crate::kvs::{LockType, TransactionType};
 use crate::sql::Ast;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::types::{PublicNotification, PublicValue, PublicVariables};
-use crate::val::Value;
+use crate::val::{Value, convert_value_to_public_value};
 use crate::{cf, syn};
 
 const TARGET: &str = "surrealdb::core::kvs::ds";

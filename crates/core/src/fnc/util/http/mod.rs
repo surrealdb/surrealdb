@@ -187,7 +187,7 @@ async fn request(
 	ctx.check_allowed_net(&url).await?;
 
 	let body = match body {
-		Some(v) => Some(crate::dbs::executor::convert_value_to_public_value(v)?),
+		Some(v) => Some(crate::val::convert_value_to_public_value(v)?),
 		None => None,
 	};
 

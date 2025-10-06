@@ -26,7 +26,7 @@ pub async fn invoke(
 		};
 
 		let method = if let Some(v) = opts.get("method") {
-			let public_val = crate::dbs::executor::convert_value_to_public_value(v.clone())?;
+			let public_val = crate::val::convert_value_to_public_value(v.clone())?;
 			ApiMethod::from_value(public_val)?
 		} else {
 			ApiMethod::Get
@@ -62,7 +62,7 @@ pub async fn invoke(
 		};
 
 		// Convert body to public value for ApiBody
-		let public_body = crate::dbs::executor::convert_value_to_public_value(body)?;
+		let public_body = crate::val::convert_value_to_public_value(body)?;
 		match invocation
 			.invoke_with_context(stk, ctx, opt, api, ApiBody::from_value(public_body))
 			.await

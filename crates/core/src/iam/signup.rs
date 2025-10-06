@@ -144,13 +144,11 @@ pub async fn db_access(
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 				sess.rd = Some(
-					crate::dbs::executor::convert_value_to_public_value(Value::RecordId(
-						rid.clone().into(),
-					))
-					.unwrap(),
+					crate::val::convert_value_to_public_value(Value::RecordId(rid.clone().into()))
+						.unwrap(),
 				);
 				sess.tk = Some(
-					crate::dbs::executor::convert_value_to_public_value(
+					crate::val::convert_value_to_public_value(
 						claims.clone().into_claims_object().into(),
 					)
 					.unwrap(),
@@ -190,19 +188,15 @@ pub async fn db_access(
 			let enc = encode(&Header::new(algorithm_to_jwt_algorithm(iss.alg)), &claims, &key);
 			// Set the authentication on the session
 			session.tk = Some(
-				crate::dbs::executor::convert_value_to_public_value(
-					claims.into_claims_object().into(),
-				)
-				.unwrap(),
+				crate::val::convert_value_to_public_value(claims.into_claims_object().into())
+					.unwrap(),
 			);
 			session.ns = Some(ns.clone());
 			session.db = Some(db.clone());
 			session.ac = Some(ac.clone());
 			session.rd = Some(
-				crate::dbs::executor::convert_value_to_public_value(Value::RecordId(
-					rid.clone().into(),
-				))
-				.unwrap(),
+				crate::val::convert_value_to_public_value(Value::RecordId(rid.clone().into()))
+					.unwrap(),
 			);
 			session.exp = expiration(av.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
