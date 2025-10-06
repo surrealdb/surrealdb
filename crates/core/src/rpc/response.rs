@@ -2,7 +2,7 @@ use std::fmt::Display;
 use std::time::Duration;
 
 use anyhow::Context;
-use revision::{Revisioned, revisioned};
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use surrealdb_types::object;
 use thiserror::Error;
@@ -269,7 +269,9 @@ impl Revisioned for DbResultError {
 	fn revision() -> u16 {
 		1
 	}
+}
 
+impl SerializeRevisioned for DbResultError {
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		writer: &mut W,
@@ -280,9 +282,11 @@ impl Revisioned for DbResultError {
 		}
 		.serialize_revisioned(writer)
 	}
+}
 
+impl DeserializeRevisioned for DbResultError {
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		let serde: DbResultSerde = Revisioned::deserialize_revisioned(reader)?;
+		let serde: DbResultSerde = DeserializeRevisioned::deserialize_revisioned(reader)?;
 		Ok(DbResultError::from_code(serde.code, serde.message))
 	}
 }

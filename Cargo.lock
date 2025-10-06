@@ -5772,6 +5772,7 @@ dependencies = [
  "serial_test",
  "surrealdb",
  "surrealdb-core",
+ "surrealdb-types",
  "tempfile",
  "test-log",
  "thiserror 1.0.69",

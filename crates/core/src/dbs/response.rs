@@ -3,7 +3,7 @@ use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use surrealdb_types::{Kind, SurrealValue, Value, kind, object};
 

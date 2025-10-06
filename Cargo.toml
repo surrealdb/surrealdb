@@ -349,6 +349,7 @@ test-log = { workspace = true, features = ["trace"] }
 ulid.workspace = true
 wiremock.workspace = true
 rstest.workspace = true
+surrealdb-types.workspace = true
 
 [build-dependencies]
 semver.workspace = true

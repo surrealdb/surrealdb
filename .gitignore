@@ -30,11 +30,8 @@ Temporary Items
 *.skv
 *.sw?
 *.skv
-<<<<<<< HEAD
 *.profraw
-=======
 lcov.info
->>>>>>> origin/main
 
 # -----------------------------------
 # Folders
