@@ -188,10 +188,66 @@ impl Expr {
 					key: key_lit,
 				}))
 			}
-			_ => todo!("Handle other PublicValue variants"),
+			surrealdb_types::Value::Geometry(g) => Expr::Literal(Literal::Geometry(g.into())),
+			surrealdb_types::Value::File(f) => Expr::Literal(Literal::File(crate::val::File::new(
+				f.bucket().to_string(),
+				f.key().to_string(),
+			))),
+			surrealdb_types::Value::Range(r) => Expr::from(*r),
+			surrealdb_types::Value::Regex(r) => {
+				Expr::Literal(Literal::Regex(crate::val::Regex(r.0)))
+			}
 		}
 	}
+}
 
+impl From<surrealdb_types::Range> for Expr {
+	fn from(r: surrealdb_types::Range) -> Self {
+		use std::ops::Bound;
+		match (r.start, r.end) {
+			// Unbounded range: ..
+			(Bound::Unbounded, Bound::Unbounded) => Expr::Literal(Literal::UnboundedRange),
+			// Prefix ranges: ..end or ..=end
+			(Bound::Unbounded, Bound::Excluded(end)) => Expr::Prefix {
+				op: PrefixOperator::Range,
+				expr: Box::new(Expr::from_public_value(end)),
+			},
+			(Bound::Unbounded, Bound::Included(end)) => Expr::Prefix {
+				op: PrefixOperator::RangeInclusive,
+				expr: Box::new(Expr::from_public_value(end)),
+			},
+			// Binary ranges with inclusive start
+			(Bound::Included(start), Bound::Excluded(end)) => Expr::Binary {
+				left: Box::new(Expr::from_public_value(start)),
+				op: BinaryOperator::Range,
+				right: Box::new(Expr::from_public_value(end)),
+			},
+			(Bound::Included(start), Bound::Included(end)) => Expr::Binary {
+				left: Box::new(Expr::from_public_value(start)),
+				op: BinaryOperator::RangeInclusive,
+				right: Box::new(Expr::from_public_value(end)),
+			},
+			// Binary ranges with excluded start (skip)
+			(Bound::Excluded(start), Bound::Excluded(end)) => Expr::Binary {
+				left: Box::new(Expr::from_public_value(start)),
+				op: BinaryOperator::RangeSkip,
+				right: Box::new(Expr::from_public_value(end)),
+			},
+			(Bound::Excluded(start), Bound::Included(end)) => Expr::Binary {
+				left: Box::new(Expr::from_public_value(start)),
+				op: BinaryOperator::RangeSkipInclusive,
+				right: Box::new(Expr::from_public_value(end)),
+			},
+			// Invalid ranges with unbounded start but bounded in a way we can't represent
+			// start>.. (excluded start with no end) - not valid in SurrealQL
+			(Bound::Excluded(_), Bound::Unbounded) | (Bound::Included(_), Bound::Unbounded) => {
+				Expr::Literal(Literal::None)
+			}
+		}
+	}
+}
+
+impl Expr {
 	/// Checks if a expression is 'pure' i.e. does not rely on the environment.
 	pub(crate) fn is_static(&self) -> bool {
 		match self {

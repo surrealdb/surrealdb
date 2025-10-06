@@ -98,7 +98,7 @@ impl AccessGrant {
 	/// Returns a version of the statement where potential secrets are redacted.
 	/// This function should be used when displaying the statement to datastore users.
 	/// This function should NOT be used when displaying the statement for export purposes.
-	pub fn redacted(mut self) -> AccessGrant {
+	pub(crate) fn redacted(mut self) -> AccessGrant {
 		self.grant = match self.grant {
 			Grant::Jwt(mut gr) => {
 				// Token should not even be stored. We clear it just as a precaution.

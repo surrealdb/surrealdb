@@ -51,8 +51,10 @@ mod http_integration {
 			let res =
 				client.post(url).basic_auth(USER, Some(PASS)).body("CREATE foo").send().await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
-			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {body}");
+			let body: serde_json::Value = res.json().await?;
+			assert_eq!(body[0]["status"], "OK");
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1);
+			assert!(body[0]["result"][0]["id"].to_string().starts_with("\"foo:"));
 		}
 
 		// Prepare users with identical credentials on ROOT, NAMESPACE and DATABASE
@@ -264,8 +266,10 @@ mod http_integration {
 		{
 			let res = client.post(url).bearer_auth(&token).body("CREATE foo").send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-			let body = res.text().await?;
-			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {body}");
+			let body: serde_json::Value = res.json().await?;
+			assert_eq!(body[0]["status"], "OK", "body: {body}");
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
+			assert!(body[0]["result"][0]["id"].to_string().starts_with("\"foo:"), "body: {body}");
 
 			// Check the selected namespace and database
 			let res = client
@@ -2016,8 +2020,10 @@ mod http_integration {
 				.send()
 				.await
 				.unwrap();
-			let res = res.text().await.unwrap();
-			assert!(res.contains("[{\"result\":null,\"status\":\"OK\""), "body: {}", res);
+			let res: serde_json::Value = res.json().await.unwrap();
+
+			assert_eq!(res[0]["status"], "OK", "body: {res}");
+			assert_eq!(res[0]["result"], serde_json::Value::Null, "body: {res}");
 		}
 		// Deny 1
 		{
@@ -2099,8 +2105,8 @@ mod http_integration {
 				.await
 				.unwrap();
 			let res: serde_json::Value = res.json().await.unwrap();
-			assert_eq!(res["result"], 123);
-			assert_eq!(res["status"], "OK");
+			assert_eq!(res[0]["status"], "OK");
+			assert_eq!(res[0]["result"], 123);
 		}
 		// Allow record
 		{

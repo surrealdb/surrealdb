@@ -493,6 +493,60 @@ impl Value {
 	pub fn from_t<T: SurrealValue>(value: T) -> Value {
 		value.into_value()
 	}
+
+	/// Check if this value matches the specified kind
+	///
+	/// Returns `true` if the value conforms to the given kind specification.
+	/// This includes checking nested types for arrays, objects, records, etc.
+	pub fn is_kind(&self, kind: &Kind) -> bool {
+		match kind {
+			Kind::Any => true,
+			Kind::None => self.is_none(),
+			Kind::Null => self.is_null(),
+			Kind::Bool => self.is_bool(),
+			Kind::Bytes => self.is_bytes(),
+			Kind::Datetime => self.is_datetime(),
+			Kind::Decimal => self.is_decimal(),
+			Kind::Duration => self.is_duration(),
+			Kind::Float => self.is_float(),
+			Kind::Int => self.is_int(),
+			Kind::Number => self.is_number(),
+			Kind::Object => self.is_object(),
+			Kind::String => self.is_string(),
+			Kind::Uuid => self.is_uuid(),
+			Kind::Regex => matches!(self, Value::Regex(_)),
+			Kind::Record(table) => self.is_record_and(|r| r.is_record_type(table)),
+			Kind::Geometry(kinds) => {
+				self.is_geometry_and(|g| kinds.is_empty() || kinds.contains(&g.kind()))
+			}
+			Kind::Either(kinds) => kinds.iter().any(|k| self.is_kind(k)),
+			Kind::Set(_kind, _max) => {
+				// Sets are not yet implemented as a value type
+				false
+			}
+			Kind::Array(kind, max) => {
+				self.is_array_and(|arr| {
+					// Check max length if specified
+					if let Some(max_len) = max {
+						if arr.len() > *max_len as usize {
+							return false;
+						}
+					}
+					// Check all elements match the kind
+					arr.iter().all(|v| v.is_kind(kind))
+				})
+			}
+			Kind::Range => self.is_range(),
+			Kind::Literal(literal) => literal.matches(self),
+			Kind::File(bucket) => {
+				self.is_file_and(|f| bucket.is_empty() || bucket.contains(&f.bucket().to_string()))
+			}
+			Kind::Function(_, _) => {
+				// Functions are not a value type
+				false
+			}
+		}
+	}
 }
 
 impl Index<usize> for Value {
@@ -628,10 +682,12 @@ impl ToSql for Value {
 
 #[cfg(test)]
 mod tests {
+	use std::collections::BTreeMap;
+
 	use rstest::rstest;
 
 	use super::*;
-	use crate::object;
+	use crate::{GeometryKind, Kind, KindLiteral, object};
 
 	#[rstest]
 	#[case::none(Value::None, true)]
@@ -1192,5 +1248,222 @@ mod tests {
 	fn test_to_sql(#[case] value: Value, #[case] expected_sql: &str, #[case] expected_str: &str) {
 		assert_eq!(&value.to_sql(), expected_sql);
 		assert_eq!(&value.to_string(), expected_str);
+	}
+
+	#[rstest]
+	#[case::none(Value::None, vec![Kind::None, Kind::Any], vec![Kind::Null])]
+	#[case::null(Value::Null, vec![Kind::Null, Kind::Any], vec![Kind::None])]
+	#[case::bool(
+		Value::Bool(true),
+		vec![Kind::Bool, Kind::Any, Kind::Literal(KindLiteral::Bool(true))],
+		vec![Kind::None, Kind::Null, Kind::Literal(KindLiteral::Bool(false))]
+	)]
+	#[case::bool_false(
+		Value::Bool(false),
+		vec![Kind::Bool, Kind::Any, Kind::Literal(KindLiteral::Bool(false))],
+		vec![Kind::None, Kind::Null, Kind::Literal(KindLiteral::Bool(true))]
+	)]
+	#[case::bytes(Value::Bytes(Bytes::default()), vec![Kind::Bytes, Kind::Any], vec![Kind::None, Kind::Null])]
+	#[case::datetime(
+		Value::Datetime(Datetime::default()),
+		vec![Kind::Datetime, Kind::Any],
+		vec![Kind::None, Kind::Null]
+	)]
+	#[case::duration(
+		Value::Duration(Duration::default()),
+		vec![
+			Kind::Duration,
+			Kind::Any,
+			Kind::Literal(KindLiteral::Duration(Duration::default()))
+		],
+		vec![Kind::None, Kind::Null, Kind::Literal(KindLiteral::Duration(Duration::new(1, 0)))]
+	)]
+	#[case::int(
+		Value::Number(Number::Int(0)),
+		vec![Kind::Int, Kind::Number, Kind::Any, Kind::Literal(KindLiteral::Integer(0))],
+		vec![Kind::None, Kind::Null, Kind::Literal(KindLiteral::Integer(1))]
+	)]
+	#[case::float(
+		Value::Number(Number::Float(0.0)),
+		vec![Kind::Float, Kind::Number, Kind::Any, Kind::Literal(KindLiteral::Float(0.0))],
+		vec![Kind::None, Kind::Null, Kind::Literal(KindLiteral::Float(1.0))]
+	)]
+	#[case::decimal(
+		Value::Number(Number::Decimal(Decimal::default())),
+		vec![
+			Kind::Decimal,
+			Kind::Number,
+			Kind::Any,
+			Kind::Literal(KindLiteral::Decimal(Decimal::default()))
+		],
+		vec![Kind::None, Kind::Null]
+	)]
+	#[case::string(
+		Value::String("".to_string()),
+		vec![Kind::String, Kind::Any, Kind::Literal(KindLiteral::String("".to_string()))],
+		vec![Kind::None, Kind::Null, Kind::Literal(KindLiteral::String("foo".to_string()))]
+	)]
+	#[case::string(
+		Value::String("foo".to_string()),
+		vec![Kind::String, Kind::Any, Kind::Literal(KindLiteral::String("foo".to_string()))],
+		vec![Kind::None, Kind::Null, Kind::Literal(KindLiteral::String("bar".to_string()))]
+	)]
+	#[case::uuid(Value::Uuid(Uuid::new_v4()), vec![Kind::Uuid, Kind::Any], vec![Kind::None, Kind::Null])]
+	#[case::regex(
+		Value::Regex("hello".parse().unwrap()),
+		vec![Kind::Regex, Kind::Any],
+		vec![Kind::None, Kind::Null]
+	)]
+	#[case::record(
+		Value::RecordId(RecordId::new("test", "key")),
+		vec![Kind::Record(vec!["test".to_string()]), Kind::Record(vec![]), Kind::Any],
+		vec![Kind::None, Kind::Null, Kind::Record(vec!["other".to_string()])]
+	)]
+	#[case::record_multi_table(
+		Value::RecordId(RecordId::new("user", "id")),
+		vec![Kind::Record(vec!["user".to_string(), "admin".to_string()]), Kind::Any],
+		vec![Kind::Record(vec!["post".to_string(), "comment".to_string()])]
+	)]
+	#[case::geometry_point(
+		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+		vec![Kind::Geometry(vec![GeometryKind::Point]), Kind::Geometry(vec![]), Kind::Any],
+		vec![Kind::None, Kind::Null, Kind::Geometry(vec![GeometryKind::Line])]
+	)]
+	#[case::geometry_line(
+		Value::Geometry(Geometry::Line(geo::LineString::from(vec![(0.0, 0.0), (1.0, 1.0)]))),
+		vec![Kind::Geometry(vec![GeometryKind::Line]), Kind::Geometry(vec![]), Kind::Any],
+		vec![Kind::Geometry(vec![GeometryKind::Point])]
+	)]
+	#[case::geometry_polygon(
+		Value::Geometry(Geometry::Polygon(geo::Polygon::new(
+			geo::LineString::from(vec![
+				(0.0, 0.0),
+				(1.0, 0.0),
+				(1.0, 1.0),
+				(0.0, 1.0),
+				(0.0, 0.0)
+			]),
+			vec![]
+		))),
+		vec![Kind::Geometry(vec![GeometryKind::Polygon]), Kind::Geometry(vec![]), Kind::Any],
+		vec![Kind::Geometry(vec![GeometryKind::Point])]
+	)]
+	#[case::geometry_multi(
+		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
+		vec![Kind::Geometry(vec![GeometryKind::Point, GeometryKind::Line]), Kind::Any],
+		vec![Kind::Geometry(vec![GeometryKind::Line, GeometryKind::Polygon])]
+	)]
+	#[case::array_empty(
+		Value::Array(Array::new()),
+		vec![
+			Kind::Array(Box::new(Kind::Any), None),
+			Kind::Array(Box::new(Kind::String), None),
+			Kind::Any
+		],
+		vec![Kind::None, Kind::Null]
+	)]
+	#[case::array_strings(
+		Value::Array(Array::from_values(vec![
+			Value::String("a".to_string()),
+			Value::String("b".to_string())
+		])),
+		vec![
+			Kind::Array(Box::new(Kind::String), None),
+			Kind::Array(Box::new(Kind::String), Some(5)),
+			Kind::Any
+		],
+		vec![Kind::Array(Box::new(Kind::Int), None), Kind::Array(Box::new(Kind::String), Some(1))]
+	)]
+	#[case::array_mixed_fails(
+		Value::Array(Array::from_values(vec![
+			Value::String("a".to_string()),
+			Value::Number(Number::Int(1))
+		])),
+		vec![Kind::Array(Box::new(Kind::Any), None), Kind::Any],
+		vec![Kind::Array(Box::new(Kind::String), None), Kind::Array(Box::new(Kind::Int), None)]
+	)]
+	#[case::array_with_max(
+		Value::Array(Array::from_values(vec![
+			Value::Number(Number::Int(1)),
+			Value::Number(Number::Int(2)),
+			Value::Number(Number::Int(3))
+		])),
+		vec![
+			Kind::Array(Box::new(Kind::Int), Some(3)),
+			Kind::Array(Box::new(Kind::Int), Some(10)),
+			Kind::Any
+		],
+		vec![Kind::Array(Box::new(Kind::Int), Some(2))]
+	)]
+	#[case::range(
+		Value::Range(Box::new(Range::unbounded())),
+		vec![Kind::Range, Kind::Any],
+		vec![Kind::None, Kind::Null]
+	)]
+	#[case::file_empty_bucket(
+		Value::File(File::default()),
+		vec![Kind::File(vec!["".to_string()]), Kind::File(vec![]), Kind::Any],
+		vec![Kind::None, Kind::Null]
+	)]
+	#[case::file_specific_bucket(
+		Value::File(File::new("mybucket", "file.txt")),
+		vec![Kind::File(vec!["mybucket".to_string()]), Kind::File(vec![]), Kind::Any],
+		vec![Kind::File(vec!["other".to_string()])]
+	)]
+	#[case::object_empty(
+		Value::Object(Object::default()),
+		vec![Kind::Object, Kind::Any, Kind::Literal(KindLiteral::Object(BTreeMap::new()))],
+		vec![Kind::None, Kind::Null]
+	)]
+	#[case::object_with_fields(
+		Value::Object(object! { key: "value".to_string() }),
+		vec![
+			Kind::Object,
+			Kind::Any,
+			Kind::Literal(KindLiteral::Object(BTreeMap::from([(
+				"key".to_string(),
+				Kind::String
+			)])))
+		],
+		vec![Kind::None, Kind::Null, Kind::Literal(KindLiteral::Object(BTreeMap::new()))]
+	)]
+	#[case::literal_array(
+		Value::Array(Array::from_values(vec![
+			Value::Number(Number::Int(1)),
+			Value::String("test".to_string())
+		])),
+		vec![Kind::Literal(KindLiteral::Array(vec![Kind::Int, Kind::String])), Kind::Any],
+		vec![
+			Kind::Literal(KindLiteral::Array(vec![Kind::String, Kind::Int])),
+			Kind::Literal(KindLiteral::Array(vec![Kind::Int]))
+		]
+	)]
+	#[case::either_string_or_int(
+		Value::String("test".to_string()),
+		vec![Kind::Either(vec![Kind::String, Kind::Int]), Kind::Any],
+		vec![Kind::Either(vec![Kind::Int, Kind::Bool])]
+	)]
+	#[case::either_int_matches(
+		Value::Number(Number::Int(42)),
+		vec![Kind::Either(vec![Kind::String, Kind::Int]), Kind::Any],
+		vec![Kind::Either(vec![Kind::String, Kind::Bool])]
+	)]
+	#[case::option_kind_none(
+		Value::None,
+		vec![Kind::option(Kind::String), Kind::Any],
+		vec![Kind::String]
+	)]
+	#[case::option_kind_value(
+		Value::String("test".to_string()),
+		vec![Kind::option(Kind::String), Kind::Any],
+		vec![Kind::Int]
+	)]
+	fn test_is_kind(#[case] value: Value, #[case] kinds: Vec<Kind>, #[case] not_kinds: Vec<Kind>) {
+		for kind in kinds {
+			assert!(value.is_kind(&kind), "{value:?} is not a {kind}");
+		}
+		for kind in not_kinds {
+			assert!(!value.is_kind(&kind), "{value:?} is a {kind} but should not be");
+		}
 	}
 }

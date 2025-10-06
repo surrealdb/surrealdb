@@ -3,7 +3,7 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use surrealdb_types::{Kind, Object, SurrealValue, Value};
+use surrealdb_types::{Kind, Object, SurrealValue, Value, kind};
 
 /// A signup action
 #[derive(Debug)]
@@ -78,6 +78,10 @@ pub struct Record<P: SurrealValue> {
 }
 
 impl<P: SurrealValue> SurrealValue for Record<P> {
+	fn kind_of() -> Kind {
+		kind!({ ns: string, db: string, ac: string, params: any })
+	}
+
 	fn into_value(self) -> Value {
 		let mut obj = Object::new();
 		obj.insert("ns".to_string(), Value::String(self.namespace));
@@ -139,14 +143,6 @@ impl<P: SurrealValue> SurrealValue for Record<P> {
 		} else {
 			Err(surrealdb_types::anyhow::anyhow!("Expected an object for Record"))
 		}
-	}
-
-	fn is_value(value: &Value) -> bool {
-		matches!(value, Value::Object(_))
-	}
-
-	fn kind_of() -> Kind {
-		Kind::Object
 	}
 }
 

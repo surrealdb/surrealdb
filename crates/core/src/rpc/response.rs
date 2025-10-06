@@ -4,7 +4,7 @@ use std::time::Duration;
 use anyhow::Context;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
-use surrealdb_types::object;
+use surrealdb_types::{kind, object};
 use thiserror::Error;
 
 use crate::dbs::QueryResult;
@@ -49,7 +49,12 @@ pub enum DbResult {
 
 impl SurrealValue for DbResult {
 	fn kind_of() -> PublicKind {
-		PublicKind::Any
+		kind!(array | {
+			id: uuid,
+			action: string,
+			record: any,
+			result: any,
+		} | any)
 	}
 
 	fn is_value(_value: &PublicValue) -> bool {
@@ -230,11 +235,10 @@ impl DbResultError {
 
 impl SurrealValue for DbResultError {
 	fn kind_of() -> PublicKind {
-		PublicKind::Object
-	}
-
-	fn is_value(value: &PublicValue) -> bool {
-		matches!(value, PublicValue::Object(_))
+		kind!({
+		  code: int,
+		  message: string
+		})
 	}
 
 	fn into_value(self) -> PublicValue {

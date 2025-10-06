@@ -229,17 +229,3 @@ impl From<crate::types::PublicRecordIdKey> for RecordIdKeyLit {
 		}
 	}
 }
-
-// impl From<RecordIdKeyLit> for crate::types::PublicRecordIdKey {
-// 	fn from(value: RecordIdKeyLit) -> Self {
-// 		match value {
-// 			RecordIdKeyLit::Number(x) => Self::Number(x),
-// 			RecordIdKeyLit::String(x) => Self::String(x),
-// 			RecordIdKeyLit::Uuid(x) => Self::Uuid(x.into()),
-// 			RecordIdKeyLit::Array(x) => Self::Array(x.into_iter().map(Expr::from_public_value).collect()),
-// 			RecordIdKeyLit::Object(x) => Self::Object(x.into_iter().map(|(k, v)| ObjectEntry { key: k,
-// value: Expr::from_public_value(v) }).collect()), 			RecordIdKeyLit::Range(x) =>
-// Self::Range(Box::new(RecordIdKeyRangeLit::from(x))), 			RecordIdKeyLit::Generate(x) =>
-// Self::Generate(x), 		}
-// 	}
-// }

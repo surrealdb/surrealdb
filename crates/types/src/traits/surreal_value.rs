@@ -25,7 +25,9 @@ pub trait SurrealValue {
 	/// Returns the kind that represents this type
 	fn kind_of() -> Kind;
 	/// Checks if the given value can be converted to this type
-	fn is_value(value: &Value) -> bool;
+	fn is_value(value: &Value) -> bool {
+		value.is_kind(&Self::kind_of())
+	}
 	/// Converts this type into a SurrealDB value
 	fn into_value(self) -> Value;
 	/// Attempts to convert a SurrealDB value into this type
