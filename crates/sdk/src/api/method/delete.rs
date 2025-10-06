@@ -62,7 +62,7 @@ macro_rules! into_future {
 
 				let what = resource?;
 
-				let delete_query = format!("DELETE {} RETURN BEFORE", what.to_sql()?);
+				let delete_query = format!("DELETE {} RETURN BEFORE", what.to_sql());
 
 				router
 					.$method(Command::RawQuery {

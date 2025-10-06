@@ -69,13 +69,13 @@ macro_rules! into_future {
 				let what = resource?.into_value();
 				let query = match (upsert, content) {
 					(true, Some(data)) => {
-						format!("UPSERT {} MERGE {}", what.to_sql()?, data.to_sql()?)
+						format!("UPSERT {} MERGE {}", what.to_sql(), data.to_sql())
 					}
-					(true, None) => format!("UPSERT {}", what.to_sql()?),
+					(true, None) => format!("UPSERT {}", what.to_sql()),
 					(false, Some(data)) => {
-						format!("UPDATE {} MERGE {}", what.to_sql()?, data.to_sql()?)
+						format!("UPDATE {} MERGE {}", what.to_sql(), data.to_sql())
 					}
-					(false, None) => format!("UPDATE {}", what.to_sql()?),
+					(false, None) => format!("UPDATE {}", what.to_sql()),
 				};
 
 				let cmd = Command::RawQuery {

@@ -1,4 +1,4 @@
-use std::fmt::{Display, Formatter, Write};
+use std::fmt::{Display, Formatter};
 
 use revision::{Revisioned, revisioned};
 use serde::{Deserialize, Serialize};
@@ -86,8 +86,8 @@ impl DatabaseDefinition {
 }
 
 impl ToSql for DatabaseDefinition {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		write!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&self.to_sql_definition().to_string());
 	}
 }
 

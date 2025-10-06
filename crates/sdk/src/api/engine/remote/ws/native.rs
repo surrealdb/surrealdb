@@ -291,13 +291,27 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 
 								match response.result {
 									Ok(DbResult::Query(results)) => {
-										let _res = pending.response_channel.send(Ok(results)).await;
+										if let Err(err) =
+											pending.response_channel.send(Ok(results)).await
+										{
+											tracing::error!(
+												"Failed to send query results to channel: {err:?}"
+											);
+										}
 									}
 									Ok(DbResult::Live(_notification)) => {
 										tracing::error!("Unexpected live query result in response");
 									}
-									Ok(DbResult::Other(_value)) => {
-										tracing::error!("Unexpected other result in response");
+									Ok(DbResult::Other(value)) => {
+										let result = QueryResultBuilder::started_now()
+											.finish_with_result(Ok(value));
+										if let Err(err) =
+											pending.response_channel.send(Ok(vec![result])).await
+										{
+											tracing::error!(
+												"Failed to send query results to channel: {err:?}"
+											);
+										}
 									}
 									Err(error) => {
 										let _res =

@@ -64,7 +64,7 @@ macro_rules! into_future {
 
 				let cmd = Command::RawQuery {
 					txn,
-					query: Cow::Owned(format!("CREATE {}", what.to_sql()?)),
+					query: Cow::Owned(format!("CREATE {}", what.to_sql())),
 					variables: Variables::new(),
 				};
 				router.$method(cmd).await
@@ -111,9 +111,9 @@ where
 				"Tried to create non-object-like data as content, only structs and objects are supported",
 			)?;
 
-			let what = self.resource?.to_sql()?;
+			let what = self.resource?.to_sql();
 
-			let query = format!("CREATE {} CONTENT {}", what, content.to_sql()?);
+			let query = format!("CREATE {} CONTENT {}", what, content.to_sql());
 
 			Ok(Command::RawQuery {
 				txn: self.txn,
@@ -141,9 +141,9 @@ where
 				"Tried to create non-object-like data as content, only structs and objects are supported",
 			)?;
 
-			let what = self.resource?.to_sql()?;
+			let what = self.resource?.to_sql();
 
-			let query = format!("CREATE {} CONTENT {}", what, content.to_sql()?);
+			let query = format!("CREATE {} CONTENT {}", what, content.to_sql());
 
 			Ok(Command::RawQuery {
 				txn: self.txn,

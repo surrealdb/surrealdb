@@ -6,6 +6,8 @@ use revision::revisioned;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 
+use crate::sql::ToSql;
+
 /// Represents binary data in SurrealDB
 ///
 /// Bytes stores raw binary data as a vector of unsigned 8-bit integers.
@@ -65,6 +67,12 @@ impl Deref for Bytes {
 impl Display for Bytes {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		write!(f, "b\"{}\"", hex::encode_upper(&self.0))
+	}
+}
+
+impl ToSql for crate::Bytes {
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&self.to_string())
 	}
 }
 

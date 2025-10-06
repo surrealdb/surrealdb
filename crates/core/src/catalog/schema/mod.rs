@@ -3,6 +3,7 @@ use revision::revisioned;
 mod access;
 mod analyzer;
 mod api;
+pub(crate) mod base;
 mod bucket;
 mod config;
 mod event;

@@ -314,7 +314,7 @@ fn process(
 						"action": action.into_value(),
 						"result": data,
 					});
-					value.to_string()
+					value.to_sql()
 				}
 				// Yes prettify the SurrealQL response
 				(false, true) => format!(
@@ -327,11 +327,7 @@ fn process(
 						"action": action.into_value(),
 						"result": data,
 					});
-					if let Some(x) = value.into_json_value() {
-						x.to_string()
-					} else {
-						"Value cannot be encoded into json".to_string()
-					}
+					value.into_json_value().to_string()
 				}
 				// Yes prettify the JSON response
 				(true, true) => {
@@ -364,7 +360,7 @@ fn process(
 				let execution_time = stats.execution_time.unwrap_or_default();
 				format!(
 					"-- Query {query_num} (execution time: {execution_time:?})\n{:#}",
-					value.to_sql().unwrap()
+					value.to_sql()
 				)
 			})
 			.collect::<Vec<String>>()
@@ -372,11 +368,7 @@ fn process(
 		// Don't pretty print the JSON response
 		(true, false) => {
 			let value = Value::from_vec(vec.into_iter().map(|(_, x)| x).collect::<Vec<_>>());
-			if let Some(x) = value.into_json_value() {
-				serde_json::to_string(&x).unwrap()
-			} else {
-				"Value cannot be serialized to json".to_owned()
-			}
+			serde_json::to_string(&value.into_json_value()).unwrap()
 		}
 		// Yes prettify the JSON response
 		(true, true) => vec
@@ -388,12 +380,9 @@ fn process(
 					&mut buf,
 					PrettyFormatter::with_indent(b"\t"),
 				);
-				let output = if let Some(x) = value.into_json_value() {
-					x.serialize(&mut serializer).unwrap();
-					String::from_utf8(buf).unwrap()
-				} else {
-					"Value cannot be serialized to json".to_owned()
-				};
+				let x = value.into_json_value();
+				x.serialize(&mut serializer).unwrap();
+				let output = String::from_utf8(buf).unwrap();
 				let query_num = index + 1;
 				let execution_time = stats.execution_time.unwrap_or_default();
 				format!("-- Query {query_num} (execution time: {execution_time:?}\n{output:#}",)

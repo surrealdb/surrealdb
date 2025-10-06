@@ -34,6 +34,7 @@ mod test {
 	use uuid::Uuid;
 
 	use super::*;
+	use crate::catalog::schema::base::Base;
 	use crate::expr::{
 		Block, ChangeFeed, Expr, Fetch, Fetchs, Field, Fields, Filter, Groups, Idiom, Kind,
 		Literal, Tokenizer,
@@ -119,12 +120,13 @@ mod test {
                 }),
             },
          }),
+        base: Base::Root,
         authenticate: Some(Expr::Literal(Literal::String("expr".to_string()))),
         grant_duration: Some(Duration::from_secs(123)),
         token_duration: Some(Duration::from_secs(123)),
         session_duration: Some(Duration::from_secs(123)),
         comment: Some("comment".to_string()),
-    }, 59)]
+    }, 60)]
 	#[case::access(AccessGrant {
         id: "access".to_string(),
         ac: "access".to_string(),

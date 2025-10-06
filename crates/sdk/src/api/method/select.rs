@@ -63,7 +63,7 @@ macro_rules! into_future {
 
 				let what = resource?;
 
-				let query = format!("SELECT * FROM {}", what.to_sql()?);
+				let query = format!("SELECT * FROM {}", what.to_sql());
 
 				router
 					.$method(Command::RawQuery {

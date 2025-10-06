@@ -1487,7 +1487,7 @@ impl Datastore {
 	///     let ses = Session::owner();
 	/// 	if let Some(channel) = ds.notifications() {
 	///     	while let Ok(v) = channel.recv().await {
-	///     	    println!("Received notification: {v}");
+	///     	    println!("Received notification: {v:?}");
 	///     	}
 	/// 	}
 	///     Ok(())

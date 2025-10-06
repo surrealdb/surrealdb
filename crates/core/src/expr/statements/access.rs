@@ -180,7 +180,7 @@ pub async fn create_grant(
 	opt: &Options,
 ) -> Result<catalog::AccessGrant> {
 	let base = match &base {
-		Some(base) => base.clone(),
+		Some(base) => *base,
 		None => opt.selected_base()?,
 	};
 	// Allowed to run?
@@ -435,7 +435,7 @@ async fn compute_grant(
 ) -> FlowResult<Value> {
 	let subject = stmt.subject.compute(stk, ctx, opt, doc).await?;
 
-	let grant = create_grant(stmt.ac.clone(), stmt.base.clone(), subject, ctx, opt).await?;
+	let grant = create_grant(stmt.ac.clone(), stmt.base, subject, ctx, opt).await?;
 
 	Ok(Value::Object(access_object_from_grant(&grant)))
 }
@@ -448,7 +448,7 @@ async fn compute_show(
 	_doc: Option<&CursorDoc>,
 ) -> Result<Value> {
 	let base = match &stmt.base {
-		Some(base) => base.clone(),
+		Some(base) => *base,
 		None => opt.selected_base()?,
 	};
 	// Allowed to run?
@@ -586,7 +586,7 @@ pub async fn revoke_grant(
 	opt: &Options,
 ) -> Result<Value> {
 	let base = match &stmt.base {
-		Some(base) => base.clone(),
+		Some(base) => *base,
 		None => opt.selected_base()?,
 	};
 	// Allowed to run?
@@ -809,7 +809,7 @@ async fn compute_purge(
 	_doc: Option<&CursorDoc>,
 ) -> Result<Value> {
 	let base = match &stmt.base {
-		Some(base) => base.clone(),
+		Some(base) => *base,
 		None => opt.selected_base()?,
 	};
 	// Allowed to run?

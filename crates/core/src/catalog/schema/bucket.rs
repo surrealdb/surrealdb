@@ -1,5 +1,3 @@
-use std::fmt::Write;
-
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use surrealdb_types::sql::ToSql;
@@ -59,7 +57,7 @@ impl InfoStructure for BucketDefinition {
 }
 
 impl ToSql for BucketDefinition {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		write!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&self.to_sql_definition().to_string());
 	}
 }

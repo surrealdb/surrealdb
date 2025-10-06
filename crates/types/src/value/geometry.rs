@@ -6,9 +6,10 @@ use std::iter::once;
 use geo::{
 	Coord, LineString, LinesIter, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon,
 };
-use revision::Revisioned;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
+use crate::sql::ToSql;
 use crate::{GeometryKind, Object, SurrealValue, Value, array, object};
 
 /// Represents geometric shapes in SurrealDB
@@ -17,6 +18,7 @@ use crate::{GeometryKind, Object, SurrealValue, Value, array, object};
 /// and their multi-variants. This is useful for spatial data and geographic applications.
 ///
 /// The types used internally originate from the `geo` crate.
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Geometry {
 	/// A single point in 2D space
@@ -168,6 +170,12 @@ impl Display for Geometry {
 				write!(f, "] }}")
 			}
 		}
+	}
+}
+
+impl ToSql for Geometry {
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&self.to_string())
 	}
 }
 
@@ -583,26 +591,5 @@ impl hash::Hash for Geometry {
 				v.iter().for_each(|v| v.hash(state));
 			}
 		}
-	}
-}
-
-impl Revisioned for Geometry {
-	fn revision() -> u16 {
-		1
-	}
-
-	fn serialize_revisioned<W: std::io::Write>(
-		&self,
-		writer: &mut W,
-	) -> Result<(), revision::Error> {
-		// Serialize as an object with type and coordinates
-		let obj = self.as_object();
-		obj.serialize_revisioned(writer)
-	}
-
-	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		let obj: Object = Revisioned::deserialize_revisioned(reader)?;
-		Self::try_from_object(&obj)
-			.ok_or_else(|| revision::Error::Conversion("invalid geometry object".to_string()))
 	}
 }

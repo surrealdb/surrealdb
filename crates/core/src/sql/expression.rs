@@ -124,13 +124,6 @@ impl Expr {
 				x.bucket().to_string(),
 				x.key().to_string(),
 			))),
-			// PublicValue::Closure(x) => Expr::Literal(Literal::Closure(Box::new(Closure {
-			// 	args: x.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
-			// 	returns: x.returns.map(|k| k.into()),
-			// 	body: x.body.into(),
-			// }))),
-			// PublicValue::Table(x) => Expr::Table(unsafe { Ident::new_unchecked(x.into_string())
-			// }),
 			PublicValue::Range(x) => convert_public_range_to_literal(*x),
 		}
 	}

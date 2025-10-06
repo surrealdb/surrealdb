@@ -2,37 +2,25 @@ use std::fmt::{self, Display};
 use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 
-use revision::Revisioned;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::Datetime;
+use crate::sql::ToSql;
 
 /// Represents a UUID value in SurrealDB
 ///
 /// A UUID (Universally Unique Identifier) is a 128-bit identifier that is unique across space and
 /// time. This type wraps the `uuid::Uuid` type.
+#[revisioned(revision = 1)]
 #[derive(
 	Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
 )]
 pub struct Uuid(pub uuid::Uuid);
 
-impl Revisioned for Uuid {
-	fn revision() -> u16 {
-		1
-	}
-
-	fn serialize_revisioned<W: std::io::Write>(
-		&self,
-		writer: &mut W,
-	) -> Result<(), revision::Error> {
-		self.0.to_string().serialize_revisioned(writer)
-	}
-
-	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		let s: String = Revisioned::deserialize_revisioned(reader)?;
-		uuid::Uuid::parse_str(&s)
-			.map_err(|err| revision::Error::Conversion(format!("invalid UUID format: {err:?}")))
-			.map(Uuid)
+impl ToSql for Uuid {
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&format!("u'{}'", self))
 	}
 }
 

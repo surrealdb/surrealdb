@@ -80,7 +80,7 @@ macro_rules! into_future {
 				router
 					.$method(Command::RawQuery {
 						txn,
-						query: Cow::Owned(format!("INSERT INTO {} {}", table, data.to_sql()?)),
+						query: Cow::Owned(format!("INSERT INTO {} {}", table, data.to_sql())),
 						variables: Variables::new(),
 					})
 					.await
@@ -139,7 +139,7 @@ where
 			)?;
 			match self.resource? {
 				Resource::Table(table) => {
-					let query = format!("INSERT INTO {} {}", table, data.to_sql()?);
+					let query = format!("INSERT INTO {} {}", table, data.to_sql());
 					Ok(Command::RawQuery {
 						txn: self.txn,
 						query: Cow::Owned(query),
@@ -157,7 +157,7 @@ where
 							x.insert("id".to_string(), thing.key.into_value());
 						}
 
-						let query = format!("INSERT INTO {} {}", thing.table, data.to_sql()?);
+						let query = format!("INSERT INTO {} {}", thing.table, data.to_sql());
 						Ok(Command::RawQuery {
 							txn: self.txn,
 							query: Cow::Owned(query),
@@ -170,7 +170,7 @@ where
 				Resource::Range(_) => Err(Error::InsertOnRange.into()),
 				Resource::Unspecified => {
 					// When unspecified, we just INSERT the data directly
-					let query = format!("INSERT {}", data.to_sql()?);
+					let query = format!("INSERT {}", data.to_sql());
 					Ok(Command::RawQuery {
 						txn: self.txn,
 						query: Cow::Owned(query),

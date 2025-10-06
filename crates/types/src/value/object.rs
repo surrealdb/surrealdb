@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self, Display, Write};
+use std::fmt::{self, Display};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::sql::ToSql;
+use crate::utils::escape::EscapeKey;
 use crate::{SurrealValue, Value};
 
 /// Represents an object with key-value pairs in SurrealDB
@@ -84,6 +85,10 @@ impl Object {
 
 impl Display for Object {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		if self.is_empty() {
+			return f.write_str("{}");
+		}
+
 		f.write_str("{ ")?;
 		for (i, (k, v)) in self.0.iter().enumerate() {
 			write!(f, "{}: {}", k, v)?;
@@ -96,21 +101,24 @@ impl Display for Object {
 }
 
 impl ToSql for Object {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		f.write_str("{ ")?;
+	fn fmt_sql(&self, f: &mut String) {
+		if self.is_empty() {
+			return f.push_str("{}");
+		}
 
-		for (i, (k, v)) in self.0.iter().enumerate() {
-			f.write_str(k)?;
-			f.write_str(": ")?;
-			v.fmt_sql(f)?;
-			if i < self.0.len() - 1 {
-				f.write_str(", ")?;
+		f.push_str("{ ");
+
+		for (i, (k, v)) in self.iter().enumerate() {
+			f.push_str(&EscapeKey(k).to_string());
+			f.push_str(": ");
+			v.fmt_sql(f);
+
+			if i < self.len() - 1 {
+				f.push_str(", ");
 			}
 		}
 
-		f.write_str(" }")?;
-
-		Ok(())
+		f.push_str(" }")
 	}
 }
 

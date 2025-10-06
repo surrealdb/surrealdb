@@ -48,7 +48,7 @@ where
 			}
 			Resource::RecordId(record) => {
 				// For a specific record, we use WHERE id = record
-				format!("LIVE SELECT * FROM `{}` WHERE id = {}", record.table, record.to_sql()?)
+				format!("LIVE SELECT * FROM `{}` WHERE id = {}", record.table, record.to_sql())
 			}
 			Resource::Object(_) => return Err(Error::LiveOnObject.into()),
 			Resource::Array(_) => return Err(Error::LiveOnArray.into()),
@@ -64,10 +64,10 @@ where
 				// Handle start bound
 				match &key_range.start {
 					std::ops::Bound::Included(key) => {
-						conditions.push(format!("id >= {}:{}", record.table, key.to_sql()?));
+						conditions.push(format!("id >= {}:{}", record.table, key.to_sql()));
 					}
 					std::ops::Bound::Excluded(key) => {
-						conditions.push(format!("id > {}:{}", record.table, key.to_sql()?));
+						conditions.push(format!("id > {}:{}", record.table, key.to_sql()));
 					}
 					std::ops::Bound::Unbounded => {}
 				}
@@ -75,10 +75,10 @@ where
 				// Handle end bound
 				match &key_range.end {
 					std::ops::Bound::Included(key) => {
-						conditions.push(format!("id <= {}:{}", record.table, key.to_sql()?));
+						conditions.push(format!("id <= {}:{}", record.table, key.to_sql()));
 					}
 					std::ops::Bound::Excluded(key) => {
-						conditions.push(format!("id < {}:{}", record.table, key.to_sql()?));
+						conditions.push(format!("id < {}:{}", record.table, key.to_sql()));
 					}
 					std::ops::Bound::Unbounded => {}
 				}

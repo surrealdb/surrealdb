@@ -5,6 +5,8 @@ use std::str::FromStr;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
+use crate::sql::ToSql;
+
 pub(crate) static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
 pub(crate) static SECONDS_PER_WEEK: u64 = 7 * SECONDS_PER_DAY;
 pub(crate) static SECONDS_PER_DAY: u64 = 24 * SECONDS_PER_HOUR;
@@ -112,9 +114,7 @@ impl Duration {
 	pub fn from_weeks(weeks: u64) -> Option<Duration> {
 		weeks.checked_mul(SECONDS_PER_WEEK).map(std::time::Duration::from_secs).map(|x| x.into())
 	}
-}
 
-impl Duration {
 	pub(crate) fn fmt_internal(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		// Split up the duration
 		let secs = self.0.as_secs();
@@ -323,6 +323,12 @@ impl Deref for Duration {
 impl std::fmt::Display for Duration {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		self.fmt_internal(f)
+	}
+}
+
+impl ToSql for Duration {
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&self.to_string())
 	}
 }
 

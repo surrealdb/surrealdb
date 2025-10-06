@@ -92,10 +92,7 @@ pub(crate) use self::record_id::{
 pub(crate) use self::script::Script;
 pub(crate) use self::split::{Split, Splits};
 pub(crate) use self::start::Start;
-pub(crate) use self::statements::{
-	DefineAccessStatement, DefineAnalyzerStatement, DefineUserStatement, SelectStatement,
-	SleepStatement,
-};
+pub(crate) use self::statements::{DefineAnalyzerStatement, SelectStatement, SleepStatement};
 pub(crate) use self::timeout::Timeout;
 pub(crate) use self::tokenizer::Tokenizer;
 pub(crate) use self::view::View;

@@ -5,7 +5,7 @@ mod enum_tagged_variant;
 mod enum_unit_value;
 mod enum_untagged;
 
-use surrealdb_types::{Array, Object, SurrealValue, Value};
+use surrealdb_types::{Array, Object, SurrealValue, Uuid, Value};
 
 ////////////////////////////////////////////////////
 ///////////////// Simple struct ////////////////////
@@ -248,4 +248,41 @@ fn test_unit_struct_with_value() {
 	assert!(value.is::<UnitStructWithValue>());
 	assert!(!UnitStructWithValue::is_value(&Value::None));
 	assert!(!UnitStructWithValue::is_value(&Value::Object(Object::new())));
+}
+
+////////////////////////////////////////////////////
+////////////////// RouterRequest ///////////////////
+////////////////////////////////////////////////////
+
+#[derive(Clone, Debug, SurrealValue)]
+pub(crate) struct RouterRequest {
+	id: Option<i64>,
+	method: String,
+	params: Option<Value>,
+	#[allow(dead_code)]
+	transaction: Option<Uuid>,
+}
+
+#[test]
+fn test_router_request() {
+	let request = RouterRequest {
+		id: Some(1234),
+		method: "request".to_string(),
+		params: Some(Value::String("request".to_string())),
+		transaction: Some(Uuid::nil()),
+	};
+
+	let value = request.into_value();
+	let obj = value.clone().into_object().unwrap();
+
+	assert_eq!(obj.get("id"), Some(&Value::Number(1234.into())));
+	assert_eq!(obj.get("method"), Some(&Value::String("request".to_string())));
+	assert_eq!(obj.get("params"), Some(&Value::String("request".to_string())));
+	assert_eq!(obj.get("transaction"), Some(&Value::Uuid(Uuid::nil())));
+
+	let converted = RouterRequest::from_value(value).unwrap();
+	assert_eq!(converted.id, Some(1234));
+	assert_eq!(converted.method, "request");
+	assert_eq!(converted.params, Some(Value::String("request".to_string())));
+	assert_eq!(converted.transaction, Some(Uuid::nil()));
 }

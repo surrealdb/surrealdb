@@ -134,12 +134,7 @@ fn encode_body(req: RequestBuilder, body: PublicValue) -> Result<RequestBuilder>
 		PublicValue::String(v) => req.body(v),
 		//TODO: Improve the handling here. We should check if this value can be send as a json
 		//value.
-		_ if !body.is_nullish() => req.json(&body.into_json_value().ok_or_else(|| {
-			anyhow::Error::new(Error::Thrown(
-				"tried to send request with surealql value body which cannot be encoded into json"
-					.to_owned(),
-			))
-		})?),
+		_ if !body.is_nullish() => req.json(&body.into_json_value()),
 		_ => req,
 	};
 	Ok(res)

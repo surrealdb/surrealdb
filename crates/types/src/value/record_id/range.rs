@@ -1,10 +1,12 @@
 use std::cmp::Ordering;
+use std::fmt::Display;
 use std::ops::{Bound, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate as surrealdb_types;
+use crate::sql::ToSql;
 use crate::{Kind, Range, RecordIdKey, SurrealValue, Value, kind};
 
 /// Represents a range of record identifier keys in SurrealDB
@@ -181,6 +183,59 @@ impl PartialEq<Range> for RecordIdKeyRange {
 			}
 			Bound::Unbounded => matches!(other.end, Bound::Unbounded),
 		})
+	}
+}
+
+impl Display for RecordIdKeyRange {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		match &self.start {
+			Bound::Unbounded => {}
+			Bound::Included(v) => {
+				v.fmt(f)?;
+			}
+			Bound::Excluded(v) => {
+				f.write_fmt(format_args!(">{v}"))?;
+			}
+		};
+		f.write_str("..")?;
+		match &self.end {
+			Bound::Unbounded => {}
+			Bound::Included(v) => {
+				f.write_fmt(format_args!("={v}"))?;
+			}
+			Bound::Excluded(v) => {
+				v.fmt(f)?;
+			}
+		};
+		Ok(())
+	}
+}
+
+impl ToSql for RecordIdKeyRange {
+	fn fmt_sql(&self, f: &mut String) {
+		match &self.start {
+			Bound::Unbounded => {}
+			Bound::Included(v) => {
+				v.fmt_sql(f);
+			}
+			Bound::Excluded(v) => {
+				f.push('>');
+				v.fmt_sql(f)
+			}
+		};
+
+		f.push_str("..");
+
+		match &self.end {
+			Bound::Unbounded => {}
+			Bound::Included(v) => {
+				f.push('=');
+				v.fmt_sql(f);
+			}
+			Bound::Excluded(v) => {
+				v.fmt_sql(f);
+			}
+		};
 	}
 }
 

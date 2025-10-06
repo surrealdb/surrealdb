@@ -3,6 +3,8 @@ use std::fmt;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
+use crate::sql::ToSql;
+
 /// Represents a file reference in SurrealDB
 ///
 /// A file reference points to a file stored in a bucket with a specific key.
@@ -48,7 +50,15 @@ impl File {
 
 impl fmt::Display for File {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}:{}", fmt_inner(&self.bucket, true), fmt_inner(&self.key, false))
+		write!(f, "{}:{}", self.bucket, self.key)
+	}
+}
+
+impl ToSql for crate::File {
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&fmt_inner(&self.bucket, true));
+		f.push(':');
+		f.push_str(&fmt_inner(&self.key, false));
 	}
 }
 

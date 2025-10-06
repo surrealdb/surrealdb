@@ -1,4 +1,3 @@
-use std::fmt::Write;
 use std::time::Duration;
 
 use revision::revisioned;
@@ -46,7 +45,7 @@ impl InfoStructure for SequenceDefinition {
 }
 
 impl ToSql for &SequenceDefinition {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		write!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&self.to_sql_definition().to_string());
 	}
 }

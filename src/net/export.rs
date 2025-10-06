@@ -62,6 +62,7 @@ async fn post_handler(
 			return Err(ResponseError(anyhow::Error::msg("unsupported body format")));
 		}
 	};
+
 	let cfg = export::Config::from_value(val).map_err(ResponseError)?;
 	handle_inner(state, session, cfg).await
 }
@@ -94,7 +95,9 @@ async fn handle_inner(
 	// Process all chunk values
 	tokio::spawn(async move {
 		while let Ok(v) = rcv.recv().await {
-			let _ = chn.send(Ok(Bytes::from(v))).await;
+			if let Err(err) = chn.send(Ok(Bytes::from(v))).await {
+				tracing::warn!("Error sending bytes: {:?}", err);
+			}
 		}
 	});
 	// Return the chunked body

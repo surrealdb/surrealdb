@@ -1,19 +1,20 @@
 use std::cmp::Ordering;
 use std::fmt::{self, Display};
 use std::hash;
-use std::str::FromStr;
 
-use revision::Revisioned;
+use revision::revisioned;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
 use crate::Kind;
+use crate::sql::ToSql;
 
 /// Represents a numeric value in SurrealDB
 ///
 /// Numbers in SurrealDB can be integers, floating-point numbers, or decimal numbers.
 /// This enum provides type-safe representation for all numeric types.
+#[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum Number {
 	/// A 64-bit signed integer
@@ -71,6 +72,12 @@ impl Display for Number {
 			}
 			Number::Decimal(v) => write!(f, "{v}dec"),
 		}
+	}
+}
+
+impl ToSql for Number {
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&self.to_string())
 	}
 }
 
@@ -321,44 +328,6 @@ impl PartialEq for Number {
 impl PartialOrd for Number {
 	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
 		Some(self.cmp(other))
-	}
-}
-
-impl Revisioned for Number {
-	fn revision() -> u16 {
-		1
-	}
-
-	fn serialize_revisioned<W: std::io::Write>(
-		&self,
-		writer: &mut W,
-	) -> Result<(), revision::Error> {
-		match self {
-			Number::Int(i) => (0u8, *i).serialize_revisioned(writer),
-			Number::Float(f) => (1u8, *f).serialize_revisioned(writer),
-			Number::Decimal(d) => (2u8, d.to_string()).serialize_revisioned(writer),
-		}
-	}
-
-	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		let (tag, data): (u8, String) = Revisioned::deserialize_revisioned(reader)?;
-		match tag {
-			0 => data
-				.parse()
-				.map(Number::Int)
-				.map_err(|err| revision::Error::Conversion(format!("invalid int: {err:?}"))),
-			1 => data
-				.parse()
-				.map(Number::Float)
-				.map_err(|err| revision::Error::Conversion(format!("invalid float: {err:?}"))),
-			2 => {
-				let s: String = data;
-				Decimal::from_str(&s)
-					.map_err(|err| revision::Error::Conversion(format!("invalid decimal: {err:?}")))
-					.map(Number::Decimal)
-			}
-			_ => Err(revision::Error::Conversion("invalid number tag".to_string())),
-		}
 	}
 }
 

@@ -4,35 +4,19 @@ use std::str::FromStr;
 
 use chrono::offset::LocalResult;
 use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
-use revision::Revisioned;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
+
+use crate::sql::ToSql;
+use crate::utils::escape::QuoteStr;
 
 /// Represents a datetime value in SurrealDB
 ///
 /// A datetime represents a specific point in time, stored as UTC.
 /// This type wraps the `chrono::DateTime<Utc>` type.
+#[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Datetime(pub(crate) DateTime<Utc>);
-
-impl Revisioned for Datetime {
-	fn revision() -> u16 {
-		1
-	}
-
-	fn serialize_revisioned<W: std::io::Write>(
-		&self,
-		writer: &mut W,
-	) -> Result<(), revision::Error> {
-		self.0.to_rfc3339().serialize_revisioned(writer)
-	}
-
-	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		let s: String = Revisioned::deserialize_revisioned(reader)?;
-		DateTime::parse_from_rfc3339(&s)
-			.map_err(|err| revision::Error::Conversion(format!("invalid datetime format: {err:?}")))
-			.map(|dt| Datetime(dt.to_utc()))
-	}
-}
 
 impl Default for Datetime {
 	fn default() -> Self {
@@ -93,6 +77,13 @@ impl From<Datetime> for DateTime<Utc> {
 impl Display for Datetime {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true).fmt(f)
+	}
+}
+
+impl ToSql for Datetime {
+	fn fmt_sql(&self, f: &mut String) {
+		f.push('d');
+		f.push_str(&QuoteStr(&self.to_string()).to_string())
 	}
 }
 

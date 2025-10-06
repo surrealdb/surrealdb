@@ -1,5 +1,3 @@
-use std::fmt::Write;
-
 use revision::revisioned;
 use surrealdb_types::sql::ToSql;
 
@@ -49,22 +47,22 @@ impl FunctionDefinition {
 impl InfoStructure for FunctionDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.to_sql().unwrap().into(),
+			"name".to_string() => self.name.to_sql().into(),
 			"args".to_string() => self.args
 				.into_iter()
-				.map(|(n, k)| vec![n.to_sql().unwrap().into(), format!("'{}'", k).into()].into())
+				.map(|(n, k)| vec![n.to_sql().into(), format!("'{}'", k).into()].into())
 				.collect::<Vec<Value>>()
 				.into(),
 			"block".to_string() => format!("\"{}\"", self.block).into(),
 			"permissions".to_string() => self.permissions.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.to_sql().unwrap().into(),
+			"comment".to_string(), if let Some(v) = self.comment => v.to_sql().into(),
 			"returns".to_string(), if let Some(v) = self.returns => format!("'{}'", v).into(),
 		})
 	}
 }
 
 impl ToSql for &FunctionDefinition {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		write!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&self.to_sql_definition().to_string());
 	}
 }

@@ -1,4 +1,4 @@
-use std::fmt::{Debug, Display, Write};
+use std::fmt::Display;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -146,29 +146,19 @@ impl Display for RecordIdKey {
 		match self {
 			RecordIdKey::Number(n) => write!(f, "{}", n),
 			RecordIdKey::String(v) => EscapeRid(v).fmt(f),
-			RecordIdKey::Uuid(uuid) => {
-				// UUIDs with hyphens need to be escaped
-				let uuid_str = uuid.to_string();
-				EscapeRid(&uuid_str).fmt(f)
-			}
-			RecordIdKey::Object(object) => {
-				write!(f, "{}", object.to_sql().unwrap_or_else(|_| "<error>".to_string()))
-			}
-			RecordIdKey::Array(array) => {
-				write!(f, "{}", array.to_sql().unwrap_or_else(|_| "<error>".to_string()))
-			}
-			RecordIdKey::Range(rid) => {
-				write!(f, "{}", rid.to_sql().unwrap_or_else(|_| "<error>".to_string()))
-			}
+			RecordIdKey::Uuid(uuid) => uuid.fmt(f),
+			RecordIdKey::Object(object) => object.fmt(f),
+			RecordIdKey::Array(array) => array.fmt(f),
+			RecordIdKey::Range(rid) => rid.fmt(f),
 		}
 	}
 }
 
 impl ToSql for RecordIdKey {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+	fn fmt_sql(&self, f: &mut String) {
 		match self {
 			RecordIdKey::Number(n) => n.fmt_sql(f),
-			RecordIdKey::String(v) => f.write_str(v),
+			RecordIdKey::String(v) => f.push_str(&EscapeRid(v).to_string()),
 			RecordIdKey::Uuid(uuid) => uuid.fmt_sql(f),
 			RecordIdKey::Object(object) => object.fmt_sql(f),
 			RecordIdKey::Array(array) => array.fmt_sql(f),

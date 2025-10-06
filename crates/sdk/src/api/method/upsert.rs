@@ -67,7 +67,7 @@ macro_rules! into_future {
 				router
 					.$method(Command::RawQuery {
 						txn,
-						query: Cow::Owned(format!("UPSERT {}", what.to_sql()?)),
+						query: Cow::Owned(format!("UPSERT {}", what.to_sql())),
 						variables: Variables::new(),
 					})
 					.await
@@ -156,8 +156,8 @@ where
 			let what = self.resource?.into_value();
 
 			let query = match data {
-				None => format!("UPSERT {}", what.to_sql()?),
-				Some(content) => format!("UPSERT {} CONTENT {}", what.to_sql()?, content.to_sql()?),
+				None => format!("UPSERT {}", what.to_sql()),
+				Some(content) => format!("UPSERT {} CONTENT {}", what.to_sql(), content.to_sql()),
 			};
 
 			Ok(Command::RawQuery {

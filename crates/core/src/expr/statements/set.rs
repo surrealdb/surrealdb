@@ -1,4 +1,4 @@
-use std::fmt::{self, Write};
+use std::fmt;
 
 use reblessive::tree::Stk;
 use surrealdb_types::sql::ToSql;
@@ -90,8 +90,8 @@ impl fmt::Display for SetStatement {
 }
 
 impl ToSql for SetStatement {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		write!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&self.to_string());
 	}
 }
 

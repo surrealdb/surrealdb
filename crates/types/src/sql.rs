@@ -1,10 +1,5 @@
 //! SQL utilities.
 
-use std::fmt::Write;
-use std::ops::Bound;
-
-use crate::{Array, RecordIdKeyRange, Uuid};
-
 /// Trait for types that can be converted to SQL representation.
 ///
 /// ⚠️ **EXPERIMENTAL**: This trait is not stable and may change
@@ -20,100 +15,45 @@ use crate::{Array, RecordIdKeyRange, Uuid};
 /// ```rust
 /// use surrealdb_types::sql::ToSql;
 /// use surrealdb_types::Datetime;
+/// use chrono::{TimeZone, Utc};
 ///
-/// let datetime = Datetime::now();
-/// assert_eq!(datetime.to_string(), "2021-01-01T00:00:00Z");
-/// assert_eq!(datetime.to_sql(), "'d2021-01-01T00:00:00Z'");
+/// let datetime = Datetime::new(Utc.with_ymd_and_hms(2025, 10, 3, 10, 2, 32).unwrap() + chrono::Duration::microseconds(873077));
+/// assert_eq!(datetime.to_string(), "2025-10-03T10:02:32.873077Z");
+/// assert_eq!(datetime.to_sql(), "d'2025-10-03T10:02:32.873077Z'");
 /// ```
 pub trait ToSql {
 	/// Convert the type to a SQL string.
-	fn to_sql(&self) -> anyhow::Result<String> {
+	fn to_sql(&self) -> String {
 		let mut f = String::new();
-		self.fmt_sql(&mut f)?;
-		Ok(f)
+		self.fmt_sql(&mut f);
+		f
 	}
 
 	/// Format the type to a SQL string.
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result;
+	fn fmt_sql(&self, f: &mut String);
 }
 
 impl ToSql for String {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		f.write_fmt(format_args!("'{self}'"))
-	}
-}
-
-impl ToSql for i64 {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		f.write_fmt(format_args!("{}", self))
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&format!("'{self}'"))
 	}
 }
 
 impl ToSql for &str {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		f.write_fmt(format_args!("'{self}'"))
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&format!("'{self}'"))
 	}
 }
 
 impl ToSql for &&str {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		f.write_fmt(format_args!("'{self}'"))
-	}
-}
-
-impl ToSql for Uuid {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		f.write_fmt(format_args!("u'{}'", self))
-	}
-}
-
-impl ToSql for Array {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		f.write_str("[")?;
-		for (i, v) in self.iter().enumerate() {
-			v.fmt_sql(f)?;
-			if i < self.len() - 1 {
-				f.write_str(", ")?;
-			}
-		}
-		f.write_str("]")?;
-		Ok(())
-	}
-}
-
-impl ToSql for RecordIdKeyRange {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		match &self.start {
-			Bound::Unbounded => {}
-			Bound::Included(v) => {
-				v.fmt_sql(f)?;
-			}
-			Bound::Excluded(v) => {
-				f.write_str(">")?;
-				v.fmt_sql(f)?
-			}
-		};
-
-		f.write_str("..")?;
-
-		match &self.end {
-			Bound::Unbounded => {}
-			Bound::Included(v) => {
-				f.write_str("=")?;
-				v.fmt_sql(f)?;
-			}
-			Bound::Excluded(v) => {
-				v.fmt_sql(f)?;
-			}
-		};
-
-		Ok(())
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&format!("'{self}'"))
 	}
 }
 
 impl ToSql for bool {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		f.write_str(if *self {
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(if *self {
 			"true"
 		} else {
 			"false"
@@ -121,50 +61,8 @@ impl ToSql for bool {
 	}
 }
 
-impl ToSql for crate::Number {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		write!(f, "{}", self)
-	}
-}
-
-impl ToSql for crate::Duration {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		write!(f, "{}", self)
-	}
-}
-
-impl ToSql for crate::Datetime {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		write!(f, "d'{}'", self)
-	}
-}
-
-impl ToSql for crate::Geometry {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		write!(f, "{}", self)
-	}
-}
-
-impl ToSql for crate::Bytes {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		write!(f, "{}", self)
-	}
-}
-
-impl ToSql for crate::File {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		write!(f, "{}", self)
-	}
-}
-
-impl ToSql for crate::Range {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		write!(f, "{}", self)
-	}
-}
-
-impl ToSql for crate::Regex {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		write!(f, "{}", self)
+impl ToSql for i64 {
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&format!("{}", self))
 	}
 }

@@ -1,4 +1,3 @@
-use std::fmt::Write;
 use std::ops::{self, Bound};
 
 use surrealdb_types::{
@@ -104,12 +103,12 @@ impl SurrealValue for Resource {
 }
 
 impl surrealdb_types::sql::ToSql for Resource {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+	fn fmt_sql(&self, f: &mut String) {
 		match self {
 			Resource::Table(x) => {
-				f.write_char('`')?;
-				f.write_str(x)?;
-				f.write_char('`')
+				f.push('`');
+				f.push_str(x);
+				f.push('`')
 			}
 			Resource::RecordId(x) => x.fmt_sql(f),
 			Resource::Object(x) => x.fmt_sql(f),
@@ -118,18 +117,17 @@ impl surrealdb_types::sql::ToSql for Resource {
 				// For ranges, we need to format as table:start..table:end
 				// not table:range
 				if let RecordIdKey::Range(ref range) = x.key {
-					f.write_char('`')?;
-					f.write_str(&x.table)?;
-					f.write_char('`')?;
-					f.write_char(':')?;
-					range.fmt_sql(f)?;
+					f.push('`');
+					f.push_str(&x.table);
+					f.push('`');
+					f.push(':');
+					range.fmt_sql(f);
 				} else {
 					// Fallback to normal RecordId formatting
-					x.fmt_sql(f)?;
+					x.fmt_sql(f);
 				}
-				Ok(())
 			}
-			Resource::Unspecified => Ok(()),
+			Resource::Unspecified => {}
 		}
 	}
 }

@@ -1,4 +1,4 @@
-use std::fmt::{self, Display, Write};
+use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use argon2::Argon2;
@@ -273,7 +273,7 @@ impl Display for DefineUserStatement {
 }
 
 impl ToSql for DefineUserStatement {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		write!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&self.to_string());
 	}
 }

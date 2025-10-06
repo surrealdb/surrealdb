@@ -4,14 +4,11 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use revision::revisioned;
-use serde::ser::SerializeStruct;
 use serde::{Deserialize, Serialize};
 use surrealdb_types::{Kind, SurrealValue, Value, kind, object};
 
 use crate::expr::TopLevelExpr;
 use crate::rpc::DbResultError;
-
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
 
 #[revisioned(revision = 1)]
 #[derive(Debug, Copy, Clone, Default, Serialize, Deserialize, SurrealValue)]
@@ -131,10 +128,10 @@ impl SurrealValue for QueryResult {
 			.unwrap_or_default();
 
 		// Grab result based on status
-		let result = if status.is_ok() {
-			Ok(Value::from_value(result)?)
-		} else {
-			Err(DbResultError::from_value(result)?)
+
+		let result = match status {
+			Status::Ok => Ok(Value::from_value(result)?),
+			Status::Err => Err(DbResultError::from_value(result)?),
 		};
 
 		Ok(QueryResult {
@@ -228,32 +225,7 @@ impl Serialize for QueryResult {
 	where
 		S: serde::Serializer,
 	{
-		let includes_type = !matches!(self.query_type, QueryType::Other);
-		let mut val = serializer.serialize_struct(
-			TOKEN,
-			if includes_type {
-				3
-			} else {
-				4
-			},
-		)?;
-
-		val.serialize_field("time", &format!("{:?}", self.time))?;
-		if includes_type {
-			val.serialize_field("type", &self.query_type)?;
-		}
-
-		match &self.result {
-			Ok(v) => {
-				val.serialize_field("status", &Status::Ok)?;
-				val.serialize_field("result", v)?;
-			}
-			Err(e) => {
-				val.serialize_field("status", &Status::Err)?;
-				val.serialize_field("result", &Value::from_string(e.to_string()))?;
-			}
-		}
-		val.end()
+		self.clone().into_value().serialize(serializer)
 	}
 }
 

@@ -539,8 +539,8 @@ impl fmt::Display for Value {
 }
 
 impl ToSql for Value {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		write!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&self.to_string());
 	}
 }
 
@@ -1024,7 +1024,7 @@ mod tests {
 		assert_eq!(18, enc.len());
 		let enc: Vec<u8> =
 			revision::to_vec(&syn::value("{ compact: true, schema: 0 }").unwrap()).unwrap();
-		assert_eq!(26, enc.len());
+		assert_eq!(27, enc.len());
 	}
 
 	#[test]
@@ -1300,7 +1300,7 @@ mod tests {
 		#[case] expected: Json,
 		#[case] expected_deserialized: PublicValue,
 	) {
-		let json_value = value.into_json_value().unwrap();
+		let json_value = value.into_json_value();
 		assert_eq!(json_value, expected);
 
 		let json_str = serde_json::to_string(&json_value).expect("Failed to serialize to JSON");

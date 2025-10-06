@@ -8,9 +8,7 @@ pub fn encode(value: PublicValue) -> anyhow::Result<Vec<u8>> {
 }
 
 pub fn encode_str(value: PublicValue) -> anyhow::Result<String> {
-	let v = value
-		.into_json_value()
-		.ok_or_else(|| anyhow::anyhow!("value cannot be converted into json"))?;
+	let v = value.into_json_value();
 	// Because we convert to serde_json::Value first we can guarantee that
 	// serialization wont fail.
 	Ok(serde_json::to_string(&v).unwrap())

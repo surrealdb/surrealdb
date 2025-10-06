@@ -9,12 +9,12 @@ impl Value {
 	/// Returns None if there are non serializable values present in the value.
 	// TODO: Remove the JsonValue intermediate and implement a json formatter for
 	// Value.
-	pub fn into_json_value(self) -> Option<JsonValue> {
+	pub fn into_json_value(self) -> JsonValue {
 		// This function goes through some extra length to manually implement the
 		// encoding into json value. This is done to ensure clarity and stability in
-		// regards to how the value varients are converted.
+		// regards to how the value variants are converted.
 
-		let res = match self {
+		match self {
 			// These value types are simple values which
 			// can be used in query responses sent to
 			// the client.
@@ -45,16 +45,12 @@ impl Value {
 				JsonValue::String(string)
 			}
 			Value::Array(array) => JsonValue::Array(
-				array
-					.0
-					.into_iter()
-					.map(Value::into_json_value)
-					.collect::<Option<Vec<JsonValue>>>()?,
+				array.0.into_iter().map(Value::into_json_value).collect::<Vec<JsonValue>>(),
 			),
 			Value::Object(object) => {
 				let mut map = Map::with_capacity(object.len());
 				for (k, v) in object.0 {
-					map.insert(k, v.into_json_value()?);
+					map.insert(k, v.into_json_value());
 				}
 				JsonValue::Object(map)
 			}
@@ -69,8 +65,7 @@ impl Value {
 			// This kind of breaks the behaviour
 			// TODO: look at the serialization here.
 			Value::Range(range) => JsonValue::String(range.to_string()),
-		};
-		Some(res)
+		}
 	}
 }
 

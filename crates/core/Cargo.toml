@@ -84,14 +84,7 @@ js = { workspace = true, features = [
 ], optional = true }
 lexicmp.workspace = true
 reblessive = { workspace = true, features = ["tree"] }
-revision = { workspace = true, features = [
-    "chrono",
-    "geo",
-    "roaring",
-    "regex",
-    "rust_decimal",
-    "uuid",
-] }
+revision.workspace = true
 storekey.workspace = true
 vart.workspace = true
 

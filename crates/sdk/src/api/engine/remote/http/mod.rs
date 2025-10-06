@@ -235,8 +235,9 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 			}
 		}
 	} else {
+		let bytes = res.bytes().await?;
 		let response: Vec<QueryMethodResponse> =
-			surrealdb_core::rpc::format::bincode::decode(&res.bytes().await?)
+			surrealdb_core::rpc::format::bincode::decode(&bytes)
 				.map_err(|x| format!("Failed to deserialize bincode payload: {x}"))
 				.map_err(crate::api::Error::InvalidResponse)?;
 		for res in response {
@@ -435,7 +436,7 @@ async fn router(
 		} => {
 			let req_path = base_url.join("export")?;
 			let config = config.unwrap_or_default();
-			let config_value: Value = config.into_value();
+			let config_value = config.into_value();
 			let request = client
 				.post(req_path)
 				.body(rpc::format::json::encode_str(config_value).map_err(anyhow::Error::msg)?)

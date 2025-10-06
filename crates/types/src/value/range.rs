@@ -5,6 +5,7 @@ use std::ops::{Bound, RangeBounds};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
+use crate::sql::ToSql;
 use crate::{SurrealValue, Value};
 
 /// Represents a range of values in SurrealDB
@@ -146,15 +147,39 @@ impl fmt::Display for Range {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self.start {
 			Bound::Unbounded => {}
-			Bound::Included(ref x) => write!(f, "{x:?}")?,
-			Bound::Excluded(ref x) => write!(f, "{x:?}>")?,
+			Bound::Included(ref x) => write!(f, "{x}")?,
+			Bound::Excluded(ref x) => write!(f, "{x}>")?,
 		}
 		write!(f, "..")?;
 		match self.end {
 			Bound::Unbounded => {}
-			Bound::Included(ref x) => write!(f, "={x:?}")?,
-			Bound::Excluded(ref x) => write!(f, "{x:?}")?,
+			Bound::Included(ref x) => write!(f, "={x}")?,
+			Bound::Excluded(ref x) => write!(f, "{x}")?,
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for Range {
+	fn fmt_sql(&self, f: &mut String) {
+		match self.start {
+			Bound::Unbounded => {}
+			Bound::Included(ref x) => x.fmt_sql(f),
+			Bound::Excluded(ref x) => {
+				x.fmt_sql(f);
+				f.push('>');
+			}
+		}
+		f.push_str("..");
+		match self.end {
+			Bound::Unbounded => {}
+			Bound::Included(ref x) => {
+				f.push('=');
+				x.fmt_sql(f);
+			}
+			Bound::Excluded(ref x) => {
+				x.fmt_sql(f);
+			}
+		}
 	}
 }

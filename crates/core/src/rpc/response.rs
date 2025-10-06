@@ -117,7 +117,7 @@ impl SurrealValue for DbResult {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Error, SurrealValue)]
+#[derive(Clone, Debug, PartialEq, Eq, Error)]
 pub enum DbResultError {
 	ParseError(String),
 	InvalidRequest(String),
@@ -223,13 +223,42 @@ impl DbResultError {
 			Self::QUERY_TIMEDOUT => Self::QueryTimedout,
 			Self::QUERY_CANCELLED => Self::QueryCancelled,
 			// For any unknown code, map to InternalError
-			_ => Self::InternalError(format!("Unknown error code {}: {}", code, message)),
+			_ => Self::InternalError(format!("Unknown error code {code}: {message}")),
+		}
+	}
+}
+
+impl SurrealValue for DbResultError {
+	fn kind_of() -> PublicKind {
+		PublicKind::Object
+	}
+
+	fn is_value(value: &PublicValue) -> bool {
+		matches!(value, PublicValue::Object(_))
+	}
+
+	fn into_value(self) -> PublicValue {
+		PublicValue::Object(object! {
+			"code": self.code(),
+			"message": self.message(),
+		})
+	}
+
+	fn from_value(value: PublicValue) -> anyhow::Result<Self> {
+		match value {
+			PublicValue::Object(mut obj) => {
+				let code = obj.remove("code").context("Missing code")?;
+				let message = obj.remove("message").context("Missing message")?;
+				Ok(DbResultError::from_code(code.into_int()?, message.into_string()?))
+			}
+			PublicValue::String(s) => Ok(DbResultError::Thrown(s.to_string())),
+			other => anyhow::bail!("Expected object for DbResultError, got {other}"),
 		}
 	}
 }
 
 #[revisioned(revision = 1)]
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct DbResultSerde {
 	code: i64,
 	message: String,
@@ -279,6 +308,7 @@ impl<'de> Deserialize<'de> for DbResultError {
 		D: serde::Deserializer<'de>,
 	{
 		let s = DbResultSerde::deserialize(deserializer)?;
+		println!("s: {:?}", s);
 		Ok(DbResultError::from_code(s.code, s.message))
 	}
 }

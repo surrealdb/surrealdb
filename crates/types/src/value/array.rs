@@ -4,6 +4,7 @@ use std::ops::{Deref, DerefMut};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
+use crate::sql::ToSql;
 use crate::{SurrealValue, Value};
 
 /// Represents an array of values in SurrealDB
@@ -97,5 +98,18 @@ impl Display for Array {
 			}
 		}
 		f.write_char(']')
+	}
+}
+
+impl ToSql for Array {
+	fn fmt_sql(&self, f: &mut String) {
+		f.push('[');
+		for (i, v) in self.iter().enumerate() {
+			v.fmt_sql(f);
+			if i < self.len() - 1 {
+				f.push_str(", ");
+			}
+		}
+		f.push(']');
 	}
 }

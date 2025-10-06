@@ -156,7 +156,7 @@ impl Display for TableMutation {
 			TableMutation::Del(id) => write!(f, "DEL {}", id),
 			TableMutation::DelWithOriginal(id, _) => write!(f, "DEL {}", id),
 			TableMutation::Def(t) => {
-				write!(f, "{}", t.to_sql().unwrap_or_else(|_| "<error>".to_string()))
+				write!(f, "{}", t.to_sql())
 			}
 		}
 	}
@@ -228,7 +228,7 @@ mod tests {
 				],
 			)]),
 		);
-		let v = convert_value_to_public_value(cs.into_value()).unwrap().into_json_value().unwrap();
+		let v = convert_value_to_public_value(cs.into_value()).unwrap().into_json_value();
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,
@@ -287,7 +287,7 @@ mod tests {
 				],
 			)]),
 		);
-		let v = convert_value_to_public_value(cs.into_value()).unwrap().into_json_value().unwrap();
+		let v = convert_value_to_public_value(cs.into_value()).unwrap().into_json_value();
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,

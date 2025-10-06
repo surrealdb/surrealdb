@@ -1,5 +1,3 @@
-use std::fmt::Write;
-
 use revision::{Revisioned, revisioned};
 use surrealdb_types::sql::ToSql;
 use uuid::Uuid;
@@ -119,15 +117,15 @@ impl TableDefinition {
 }
 
 impl ToSql for TableDefinition {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		write!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&self.to_sql_definition().to_string());
 	}
 }
 
 impl InfoStructure for TableDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.into(),
+			"name".to_string() => self.name.to_sql().into(),
 			"drop".to_string() => self.drop.into(),
 			"schemafull".to_string() => self.schemafull.into(),
 			"kind".to_string() => self.table_type.structure(),
@@ -150,23 +148,24 @@ pub enum TableType {
 }
 
 impl ToSql for TableType {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
+	fn fmt_sql(&self, f: &mut String) {
 		match self {
-			TableType::Normal => f.write_str("NORMAL"),
+			TableType::Any => f.push_str("ANY"),
+			TableType::Normal => f.push_str("NORMAL"),
 			TableType::Relation(rel) => {
-				f.write_str("RELATION")?;
+				f.push_str("RELATION");
 				if let Some(kind) = &rel.from {
-					write!(f, " IN {}", kind)?;
+					f.push_str(" IN ");
+					f.push_str(&kind.to_string());
 				}
 				if let Some(kind) = &rel.to {
-					write!(f, " OUT {}", kind)?;
+					f.push_str(" OUT ");
+					f.push_str(&kind.to_string());
 				}
 				if rel.enforced {
-					f.write_str(" ENFORCED")?;
+					f.push_str(" ENFORCED");
 				}
-				Ok(())
 			}
-			TableType::Any => f.write_str("ANY"),
 		}
 	}
 }
@@ -175,18 +174,18 @@ impl InfoStructure for TableType {
 	fn structure(self) -> Value {
 		match self {
 			Self::Any => Value::from(map! {
-				"kind".to_string() => "ANY".into(),
+				"kind".to_string() => "ANY".to_sql().into(),
 			}),
 			Self::Normal => Value::from(map! {
-				"kind".to_string() => "NORMAL".into(),
+				"kind".to_string() => "NORMAL".to_sql().into(),
 			}),
 			Self::Relation(rel) => Value::from(map! {
-				"kind".to_string() => "RELATION".into(),
+				"kind".to_string() => "RELATION".to_sql().into(),
 				"in".to_string(), if let Some(Kind::Record(tables)) = rel.from =>
 					tables.into_iter().map(Value::from).collect::<Vec<_>>().into(),
 				"out".to_string(), if let Some(Kind::Record(tables)) = rel.to =>
 					tables.into_iter().map(Value::from).collect::<Vec<_>>().into(),
-				"enforced".to_string() => rel.enforced.into()
+				"enforced".to_string() => rel.enforced.to_sql().into()
 			}),
 		}
 	}

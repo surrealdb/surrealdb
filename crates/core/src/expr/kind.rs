@@ -460,8 +460,8 @@ impl Display for Kind {
 }
 
 impl ToSql for Kind {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		write!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&self.to_string());
 	}
 }
 

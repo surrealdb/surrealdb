@@ -203,10 +203,13 @@ where
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
 			if !router.features.contains(&ExtraFeatures::Backup) {
+				tracing::warn!("Backups are not supported");
 				return Err(Error::BackupsNotSupported.into());
 			}
 			let (tx, rx) = crate::channel::bounded(1);
 			let rx = Box::pin(rx);
+
+			tracing::info!("Exporting bytes");
 
 			if let Some(config) = self.ml_config {
 				router

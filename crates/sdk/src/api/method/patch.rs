@@ -59,13 +59,13 @@ macro_rules! into_future {
 				let patches = surrealdb_types::Value::Array(surrealdb_types::Array::from(vec));
 				let router = client.inner.router.extract()?;
 
-				let what = resource?.to_sql()?;
+				let what = resource?.to_sql();
 				let operation = if upsert {
 					"UPSERT"
 				} else {
 					"UPDATE"
 				};
-				let query = format!("{operation} {what} PATCH {} RETURN AFTER", patches.to_sql()?);
+				let query = format!("{operation} {what} PATCH {} RETURN AFTER", patches.to_sql());
 
 				let cmd = Command::RawQuery {
 					txn,

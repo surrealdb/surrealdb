@@ -1,4 +1,4 @@
-use std::fmt::{self, Display, Write};
+use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use rand::Rng;
@@ -230,6 +230,7 @@ impl DefineAccessStatement {
 
 		Ok(AccessDefinition {
 			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "access name").await?,
+			base: self.base.into(),
 			grant_duration: map_opt!(x as &self.duration.grant => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
 			token_duration: map_opt!(x as &self.duration.token => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
 			session_duration: map_opt!(x as &self.duration.session => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
@@ -439,7 +440,7 @@ impl Display for DefineAccessStatement {
 }
 
 impl ToSql for DefineAccessStatement {
-	fn fmt_sql(&self, f: &mut String) -> std::fmt::Result {
-		write!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&self.to_string());
 	}
 }

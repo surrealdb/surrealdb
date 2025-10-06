@@ -147,11 +147,10 @@ impl IntoResponse for ResponseError {
 		// Handle errors based on their string representation
 		let error_str = self.0.to_string();
 
+		let error_str_lower = error_str.to_lowercase();
+
 		// Check for authentication errors
-		if error_str.contains("authentication")
-			|| error_str.contains("Authentication")
-			|| error_str.contains("InvalidAuth")
-		{
+		if error_str_lower.contains("authentication") || error_str_lower.contains("invalidauth") {
 			return ErrorMessage{
 				code: StatusCode::UNAUTHORIZED,
 				details: Some("Authentication failed".to_string()),
@@ -161,9 +160,10 @@ impl IntoResponse for ResponseError {
 		}
 
 		// Check for forbidden/not allowed errors
-		if error_str.contains("NotAllowed")
-			|| error_str.contains("not allowed")
-			|| error_str.contains("Forbidden")
+		if error_str_lower.contains("notallowed")
+			|| error_str_lower.contains("not allowed")
+			|| error_str_lower.contains("forbidden")
+			|| error_str_lower.contains("not enough permissions")
 		{
 			return ErrorMessage {
 				code: StatusCode::FORBIDDEN,

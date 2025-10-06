@@ -235,7 +235,7 @@ impl Transaction {
 		chn.send(bytes!("")).await?;
 
 		for item in items {
-			chn.send(bytes!(format!("{};", item.to_sql()?))).await?;
+			chn.send(bytes!(format!("{};", item.to_sql()))).await?;
 		}
 
 		chn.send(bytes!("")).await?;
@@ -283,24 +283,24 @@ impl Transaction {
 		chn.send(bytes!(format!("-- TABLE: {}", InlineCommentDisplay(&table.name)))).await?;
 		chn.send(bytes!("-- ------------------------------")).await?;
 		chn.send(bytes!("")).await?;
-		chn.send(bytes!(format!("{};", table.to_sql()?))).await?;
+		chn.send(bytes!(format!("{};", table.to_sql()))).await?;
 		chn.send(bytes!("")).await?;
 		// Export all table field definitions for this table
 		let fields = self.all_tb_fields(ns, db, &table.name, None).await?;
 		for field in fields.iter() {
-			chn.send(bytes!(format!("{};", field.to_sql()?))).await?;
+			chn.send(bytes!(format!("{};", field.to_sql()))).await?;
 		}
 		chn.send(bytes!("")).await?;
 		// Export all table index definitions for this table
 		let indexes = self.all_tb_indexes(ns, db, &table.name).await?;
 		for index in indexes.iter() {
-			chn.send(bytes!(format!("{};", index.to_sql()?))).await?;
+			chn.send(bytes!(format!("{};", index.to_sql()))).await?;
 		}
 		chn.send(bytes!("")).await?;
 		// Export all table event definitions for this table
 		let events = self.all_tb_events(ns, db, &table.name).await?;
 		for event in events.iter() {
-			chn.send(bytes!(format!("{};", event.to_sql()?))).await?;
+			chn.send(bytes!(format!("{};", event.to_sql()))).await?;
 		}
 		chn.send(bytes!("")).await?;
 		// Everything ok

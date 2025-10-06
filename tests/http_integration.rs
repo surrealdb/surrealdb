@@ -2098,8 +2098,9 @@ mod http_integration {
 				.send()
 				.await
 				.unwrap();
-			let res = res.text().await.unwrap();
-			assert!(res.contains("[{\"result\":123,\"status\":\"OK\""), "body: {}", res);
+			let res: serde_json::Value = res.json().await.unwrap();
+			assert_eq!(res["result"], 123);
+			assert_eq!(res["status"], "OK");
 		}
 		// Allow record
 		{

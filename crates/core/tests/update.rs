@@ -651,7 +651,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					.await
 					.unwrap();
 				let res = resp.remove(0).output();
-				let res = res.unwrap().to_sql().unwrap();
+				let res = res.unwrap().to_sql();
 				assert!(res.contains("Name"), "{}: {:?}", msg, res);
 			} else {
 				assert!(res.unwrap() == Value::Array(Array::new()), "{}", msg);
@@ -666,7 +666,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					.await
 					.unwrap();
 				let res = resp.remove(0).output();
-				let res = res.unwrap().to_sql().unwrap();
+				let res = res.unwrap().to_sql();
 				assert!(!res.contains("Name"), "{}: {:?}", msg, res);
 			}
 		}
@@ -731,7 +731,7 @@ async fn check_permissions_auth_enabled() {
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
-		let res = res.unwrap().to_sql().unwrap();
+		let res = res.unwrap().to_sql();
 		assert!(
 			!res.contains("Name"),
 			"{}: {:?}",
@@ -783,7 +783,7 @@ async fn check_permissions_auth_enabled() {
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
-		let res = res.unwrap().to_sql().unwrap();
+		let res = res.unwrap().to_sql();
 		assert!(
 			res.contains("Name"),
 			"{}: {:?}",
@@ -851,7 +851,7 @@ async fn check_permissions_auth_disabled() {
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
-		let res = res.unwrap().to_sql().unwrap();
+		let res = res.unwrap().to_sql();
 		assert!(
 			res.contains("Name"),
 			"{}: {:?}",
@@ -903,7 +903,7 @@ async fn check_permissions_auth_disabled() {
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
-		let res = res.unwrap().to_sql().unwrap();
+		let res = res.unwrap().to_sql();
 		assert!(
 			res.contains("Name"),
 			"{}: {:?}",

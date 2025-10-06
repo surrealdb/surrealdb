@@ -180,7 +180,7 @@ impl Socket {
 						// Then we convert it to a SurrealQL Value.
 						let msg = surrealdb_core::rpc::format::cbor::decode(msg.as_ref())?;
 						// Then we convert the SurrealQL to JSON.
-						let msg = msg.into_json_value().unwrap();
+						let msg = msg.into_json_value();
 						// Then output the response.
 						debug!("Received message: {msg:?}");
 						Ok(Some(msg))

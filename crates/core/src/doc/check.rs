@@ -38,7 +38,7 @@ impl Document {
 					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: false,
-						target_type: tb.table_type.to_sql()?,
+						target_type: tb.table_type.to_sql(),
 					}
 				);
 			}
@@ -48,7 +48,7 @@ impl Document {
 					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: false,
-						target_type: tb.table_type.to_sql()?,
+						target_type: tb.table_type.to_sql(),
 					}
 				);
 			}
@@ -58,7 +58,7 @@ impl Document {
 					Error::TableCheck {
 						thing: self.id()?.to_string(),
 						relation: true,
-						target_type: tb.table_type.to_sql()?,
+						target_type: tb.table_type.to_sql(),
 					}
 				);
 			}
@@ -69,7 +69,7 @@ impl Document {
 						Error::TableCheck {
 							thing: self.id()?.to_string(),
 							relation: true,
-							target_type: tb.table_type.to_sql()?,
+							target_type: tb.table_type.to_sql(),
 						}
 					);
 				}
@@ -79,7 +79,7 @@ impl Document {
 						Error::TableCheck {
 							thing: self.id()?.to_string(),
 							relation: false,
-							target_type: tb.table_type.to_sql()?,
+							target_type: tb.table_type.to_sql(),
 						}
 					);
 				}
