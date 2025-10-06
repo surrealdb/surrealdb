@@ -153,7 +153,7 @@ impl Geometry {
 		obj.into()
 	}
 
-	#[cfg_attr(target_family = "wasm", expect(dead_code))]
+	#[cfg_attr(not(feature = "scripting"), expect(dead_code))]
 	pub(crate) fn try_from_object(object: &Object) -> Option<Geometry> {
 		if object.len() != 2 {
 			return None;

@@ -141,7 +141,7 @@ mod cli_integration {
 			let (line1, rest) = output.split_once('\n').expect("response to have multiple lines");
 			assert!(line1.starts_with("-- Query 1"), "Expected on {line1}, and rest was {rest}");
 			assert!(line1.contains("execution time"));
-			assert_eq!(rest, "[{ tid: thing:one }]\n\n", "failed to send sql: {args}");
+			assert_eq!(rest, "[{ id: thing:one }]\n\n", "failed to send sql: {args}");
 		}
 
 		info!("* Advanced uncomputed variable to be computed before saving");

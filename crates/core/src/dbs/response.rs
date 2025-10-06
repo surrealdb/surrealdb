@@ -86,7 +86,7 @@ impl SurrealValue for QueryResult {
 			map.get("status").is_some_and(Status::is_value)
 				&& map.get("time").is_some_and(Value::is_string)
 				&& map.get("result").is_some()
-				&& map.get("query_type").is_some_and(QueryType::is_value)
+				&& map.get("type").is_some_and(QueryType::is_value)
 		})
 	}
 
@@ -98,7 +98,7 @@ impl SurrealValue for QueryResult {
 				Ok(v) => v.into_value(),
 				Err(e) => Value::from_string(e.to_string()),
 			},
-			query_type: self.query_type.into_value(),
+			type: self.query_type.into_value(),
 		})
 	}
 
@@ -120,7 +120,7 @@ impl SurrealValue for QueryResult {
 		// Grab status, query type and time
 		let status = Status::from_value(status)?;
 		let query_type =
-			map.remove("query_type").map(QueryType::from_value).transpose()?.unwrap_or_default();
+			map.remove("type").map(QueryType::from_value).transpose()?.unwrap_or_default();
 
 		let time = surrealdb_types::Duration::from_str(&time.into_string()?)
 			.map_err(|_| anyhow::anyhow!("Invalid time for QueryResult"))

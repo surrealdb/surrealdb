@@ -2097,7 +2097,7 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 			let res = res.unwrap();
 			assert!(res.is_object(), "result: {res:?}");
 			let res = res.as_object().unwrap();
-			assert_eq!(res["error"], json!({"code": -32000, "message": "Method not allowed"}));
+			assert_eq!(res["error"], json!({"code": -32602, "message": "Method not allowed"}));
 		}
 
 		// Test operations that SHOULD work with the provided capabilities
