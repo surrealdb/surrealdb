@@ -63,6 +63,12 @@ impl LiveStatement {
 		let nid = opt.id()?;
 
 		let mut vars = BTreeMap::new();
+		println!("self.fields: {:?}", self.fields);
+		println!("self.what: {:?}", self.what);
+		println!("self.cond: {:?}", self.cond);
+		println!("self.fetch: {:?}", self.fetch);
+		println!("ctx: {:?}", ctx.value("num"));
+		println!("vars1: {:?}", vars);
 		vars.extend(Variables::from_expr(&self.fields, ctx));
 		vars.extend(Variables::from_expr(&self.what, ctx));
 		if let Some(cond) = &self.cond {
@@ -71,6 +77,7 @@ impl LiveStatement {
 		if let Some(fetch) = &self.fetch {
 			vars.extend(Variables::from_expr(fetch, ctx));
 		}
+		println!("vars2: {:?}", vars);
 
 		// Check that auth has been set
 		let mut subscription_definition = SubscriptionDefinition {
