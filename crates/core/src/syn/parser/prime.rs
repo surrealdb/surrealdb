@@ -1,3 +1,5 @@
+use core::f64;
+
 use reblessive::Stk;
 
 use super::basic::NumberToken;
@@ -31,7 +33,8 @@ impl Parser<'_> {
 					NumberToken::Decimal(d) => Ok(Expr::Literal(Literal::Decimal(d))),
 				}
 			}
-			_ => {
+			TokenKind::Infinity => Ok(Expr::Literal(Literal::Float(f64::INFINITY))),
+			t!("+") | t!("-") | TokenKind::Digits => {
 				self.pop_peek();
 				let value = self.lexer.lex_compound(token, compound::numeric)?;
 				let v = match value.value {
@@ -42,6 +45,7 @@ impl Parser<'_> {
 				};
 				Ok(v)
 			}
+			_ => unexpected!(self, token, "a number"),
 		}
 	}
 
@@ -148,6 +152,10 @@ impl Parser<'_> {
 			| t!("-")
 			| TokenKind::Digits
 			| TokenKind::Glued(Glued::Number | Glued::Duration) => self.parse_number_like_prime()?,
+			TokenKind::Infinity => {
+				self.pop_peek();
+				Expr::Literal(Literal::Float(f64::INFINITY))
+			}
 			TokenKind::NaN => {
 				self.pop_peek();
 				Expr::Literal(Literal::Float(f64::NAN))

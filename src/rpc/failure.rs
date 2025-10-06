@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use revision::{Revisioned, revisioned};
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use serde::Serialize;
 
 use crate::core::rpc::RpcError;
@@ -30,6 +30,12 @@ struct Inner {
 }
 
 impl Revisioned for Failure {
+	fn revision() -> u16 {
+		1
+	}
+}
+
+impl SerializeRevisioned for Failure {
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		writer: &mut W,
@@ -38,15 +44,13 @@ impl Revisioned for Failure {
 			code: self.code,
 			message: self.message.as_ref().to_owned(),
 		};
-		inner.serialize_revisioned(writer)
+		SerializeRevisioned::serialize_revisioned(&inner, writer)
 	}
+}
 
+impl DeserializeRevisioned for Failure {
 	fn deserialize_revisioned<R: std::io::Read>(_reader: &mut R) -> Result<Self, revision::Error> {
 		unreachable!("deserialization not supported for this type")
-	}
-
-	fn revision() -> u16 {
-		1
 	}
 }
 

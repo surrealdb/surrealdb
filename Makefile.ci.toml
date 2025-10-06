@@ -154,7 +154,7 @@ args = [
     "--locked",
     "--no-default-features",
     "--features",
-    "storage-mem,http-compression,jwks",
+    "storage-mem,jwks",
     "--workspace",
     "--test",
     "http_integration",
@@ -223,11 +223,12 @@ args = [
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--no-default-features",
     "--features",
-    "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
+    "storage-mem,scripting,http,jwks",
     "--workspace",
     "--no-fail-fast",
     "--",
@@ -252,11 +253,13 @@ category = "CI - INTEGRATION TESTS"
 command = "cargo"
 args = [
     "llvm-cov",
-    "--html",
+    "--lcov",
+    "--output-path",
+    "lcov.info",
     "--locked",
     "--no-default-features",
     "--features",
-    "storage-mem,scripting,http,jwks",
+    "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
     "--workspace",
     "--",
     "--skip",
@@ -306,7 +309,8 @@ private = true
 command = "cargo"
 env = { RUST_BACKTRACE = 1 }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--package",
     "surrealdb-core",
@@ -314,6 +318,7 @@ args = [
     "--features",
     "${_TEST_FEATURES}",
     "--lib",
+    "--",
     "kvs::tests",
 ]
 
@@ -322,7 +327,8 @@ private = true
 command = "cargo"
 env = { RUST_BACKTRACE = 1 }
 args = [
-    "test",
+    "nextest",
+    "run",
     "--locked",
     "--package",
     "surrealdb",
@@ -331,8 +337,6 @@ args = [
     "${_TEST_FEATURES}",
     "--test",
     "api",
-    # "api_integration::${_TEST_API_ENGINE}",
-    # "--",
     "${@}",
 ]
 
@@ -356,7 +360,7 @@ run_task = "ci-api-integration"
 
 [tasks.ci-api-integration-ws]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "ws", _TEST_FEATURES = "protocol-ws" }
+env = { _TEST_API_ENGINE = "ws", _TEST_FEATURES = "protocol-ws", SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE = 268435456 }
 run_task = "ci-api-integration"
 
 [tasks.ci-api-integration-any]
@@ -370,13 +374,6 @@ run_task = "ci-api-integration"
 [tasks.ci-api-integration-mem]
 category = "CI - INTEGRATION TESTS"
 env = { _TEST_API_ENGINE = "mem", _TEST_FEATURES = "kv-mem" }
-run_task = { name = [
-    "test-api-integration",
-], fork = true, parallel = true }
-
-[tasks.ci-api-integration-file]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb" }
 run_task = { name = [
     "test-api-integration",
 ], fork = true, parallel = true }
@@ -416,7 +413,6 @@ category = "CI - INTEGRATION TESTS"
 description = "Run all integration tests"
 dependencies = [
     "ci-api-integration-mem",
-    "ci-api-integration-file",
     "ci-api-integration-rocksdb",
     "ci-api-integration-surrealkv",
     "ci-api-integration-tikv",

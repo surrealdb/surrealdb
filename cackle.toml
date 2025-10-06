@@ -1249,6 +1249,7 @@ allow_unsafe = true
 
 [pkg.revision]
 allow_apis = ["fs"]
+allow_unsafe = true
 
 [pkg.equator-macro]
 allow_proc_macro = true
@@ -1429,4 +1430,8 @@ allow_unsafe = true
 
 [pkg.cssparser]
 allow_unsafe = true
+
+[pkg.serde_core]
+allow_unsafe = true
+allow_apis = ["fs", "process"]
 

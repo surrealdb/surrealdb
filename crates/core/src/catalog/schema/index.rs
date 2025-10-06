@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Formatter};
 use std::hash::{Hash, Hasher};
 
 use anyhow::Result;
-use revision::{Revisioned, revisioned};
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use storekey::{BorrowDecode, Encode};
 
 use crate::expr::statements::info::InfoStructure;
@@ -23,18 +23,22 @@ impl Revisioned for IndexId {
 	fn revision() -> u16 {
 		1
 	}
+}
 
+impl SerializeRevisioned for IndexId {
 	#[inline]
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		self.0.serialize_revisioned(writer)
+		SerializeRevisioned::serialize_revisioned(&self.0, writer)
 	}
+}
 
+impl DeserializeRevisioned for IndexId {
 	#[inline]
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		Revisioned::deserialize_revisioned(reader).map(IndexId)
+		DeserializeRevisioned::deserialize_revisioned(reader).map(IndexId)
 	}
 }
 

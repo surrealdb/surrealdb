@@ -1,5 +1,5 @@
 use anyhow::Result;
-use revision::{Revisioned, revisioned};
+use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 
@@ -114,13 +114,13 @@ impl KVValue for HnswDocsState {
 	#[inline]
 	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
 		let mut val = Vec::new();
-		self.serialize_revisioned(&mut val)?;
+		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
 		Ok(val)
 	}
 
 	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
-		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
+		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
 
@@ -135,13 +135,13 @@ impl KVValue for ElementDocs {
 	#[inline]
 	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
 		let mut val = Vec::new();
-		self.serialize_revisioned(&mut val)?;
+		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
 		Ok(val)
 	}
 
 	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
-		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
+		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
 

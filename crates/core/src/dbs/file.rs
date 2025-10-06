@@ -7,7 +7,7 @@ use anyhow::Result;
 use ext_sort::{ExternalChunk, ExternalSorter, ExternalSorterBuilder, LimitedBufferBuilder};
 use rand::Rng as _;
 use rand::seq::SliceRandom as _;
-use revision::Revisioned;
+use revision::{DeserializeRevisioned, SerializeRevisioned};
 use tempfile::{Builder, TempDir};
 #[cfg(not(target_family = "wasm"))]
 use tokio::task::spawn_blocking;
@@ -217,7 +217,7 @@ impl FileWriter {
 
 	fn write_value<W: Write>(writer: &mut W, value: Value) -> Result<usize, Error> {
 		let mut val = Vec::new();
-		value.serialize_revisioned(&mut val)?;
+		SerializeRevisioned::serialize_revisioned(&value, &mut val)?;
 		// Write the size of the buffer in the index
 		Self::write_usize(writer, val.len())?;
 		// Write the buffer in the records
@@ -265,7 +265,7 @@ impl FileReader {
 		if let Err(e) = reader.read_exact(&mut buf) {
 			return Err(Error::Io(e));
 		}
-		let val = Value::deserialize_revisioned(&mut buf.as_slice())?;
+		let val: Value = DeserializeRevisioned::deserialize_revisioned(&mut buf.as_slice())?;
 		Ok(val)
 	}
 

@@ -70,13 +70,16 @@ mod mem {
 	use uuid::Uuid;
 
 	use super::{ClockType, Kvs};
-	use crate::kvs::Datastore;
+	use crate::kvs::{Datastore, DatastoreFlavor};
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Use a memory datastore instance
 		let path = "memory";
 		// Setup the in-memory datastore
-		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_clock::<DatastoreFlavor>(path, Some(clock))
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::Mem)
 	}
@@ -90,14 +93,17 @@ mod rocksdb {
 	use uuid::Uuid;
 
 	use super::{ClockType, Kvs};
-	use crate::kvs::Datastore;
+	use crate::kvs::{Datastore, DatastoreFlavor};
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the temporary data storage path
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		let path = format!("rocksdb:{path}");
 		// Setup the RocksDB datastore
-		let ds = Datastore::new_with_clock(&path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_clock::<DatastoreFlavor>(&path, Some(clock))
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::Rocksdb)
 	}
@@ -111,14 +117,17 @@ mod surrealkv {
 	use uuid::Uuid;
 
 	use super::{ClockType, Kvs};
-	use crate::kvs::Datastore;
+	use crate::kvs::{Datastore, DatastoreFlavor};
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the temporary data storage path
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		let path = format!("surrealkv:{path}");
 		// Setup the SurrealKV datastore
-		let ds = Datastore::new_with_clock(&path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_clock::<DatastoreFlavor>(&path, Some(clock))
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::SurrealKV)
 	}
@@ -131,13 +140,16 @@ mod tikv {
 	use uuid::Uuid;
 
 	use super::{ClockType, Kvs};
-	use crate::kvs::{Datastore, LockType, TransactionType};
+	use crate::kvs::{Datastore, DatastoreFlavor, LockType, TransactionType};
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the cluster connection string
 		let path = "tikv:127.0.0.1:2379";
 		// Setup the TiKV datastore
-		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_clock::<DatastoreFlavor>(path, Some(clock))
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Clear any previous test entries
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
 		tx.delr(vec![0u8]..vec![0xffu8]).await.unwrap();
@@ -154,13 +166,16 @@ mod fdb {
 	use uuid::Uuid;
 
 	use super::{ClockType, Kvs};
-	use crate::kvs::{Datastore, LockType, TransactionType};
+	use crate::kvs::{Datastore, DatastoreFlavor, LockType, TransactionType};
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the cluster connection string
 		let path = "fdb:/etc/foundationdb/fdb.cluster";
 		// Setup the FoundationDB datastore
-		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_clock::<DatastoreFlavor>(path, Some(clock))
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Clear any previous test entries
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
 		tx.delp(&vec![]).await.unwrap();

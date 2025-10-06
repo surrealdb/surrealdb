@@ -5,7 +5,7 @@ use std::str::FromStr;
 
 use reblessive::Stack;
 use reblessive::tree::Stk;
-use revision::Revisioned;
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -188,6 +188,17 @@ impl Display for Idiom {
 		let mut iter = self.0.iter();
 		match iter.next() {
 			Some(Part::Field(v)) => EscapeIdent(v).fmt(f)?,
+			Some(Part::Start(x)) => match x {
+				Expr::Block(_)
+				| Expr::Literal(_)
+				| Expr::Table(_)
+				| Expr::Mock(_)
+				| Expr::Constant(_)
+				| Expr::Param(_) => x.fmt(f)?,
+				_ => {
+					write!(f, "({x})")?;
+				}
+			},
 			Some(x) => x.fmt(f)?,
 			None => {}
 		};
@@ -220,17 +231,20 @@ impl Revisioned for Idiom {
 	fn revision() -> u16 {
 		1
 	}
+}
 
+impl SerializeRevisioned for Idiom {
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		self.to_raw_string().serialize_revisioned(writer)?;
-		Ok(())
+		SerializeRevisioned::serialize_revisioned(&self.to_raw_string(), writer)
 	}
+}
 
+impl DeserializeRevisioned for Idiom {
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		let s: String = Revisioned::deserialize_revisioned(reader)?;
+		let s: String = DeserializeRevisioned::deserialize_revisioned(reader)?;
 		let idiom =
 			Idiom::from_str(&s).map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
 		Ok(idiom)
