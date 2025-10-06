@@ -445,18 +445,7 @@ impl Value {
 								.run(|stk| {
 									idiom(stk, ctx, opt, doc, v.clone().into(), name, a.clone())
 								})
-								.await;
-
-							let res = fallback_function! {
-								if res => InvalidFunction(e) then {
-									let v = val.select_document(stk, ctx, opt, doc).await?.unwrap_or_default();
-									if let Some(Value::Closure(x)) = v.get(name) {
-										x.invoke(stk, ctx, opt, doc, a).await
-									} else {
-										Err(e)
-									}
-								}
-							}?;
+								.await?;
 
 							stk.run(|stk| res.get(stk, ctx, opt, doc, path.next())).await
 						}

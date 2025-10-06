@@ -105,7 +105,7 @@ mod test {
         auth: Some(Auth::default()),
         session: Some(Value::default()),
         vars: BTreeMap::new(),
-    }, 97)]
+    }, 98)]
 	#[case::access(AccessDefinition {
         name: "access".to_string(),
         access_type: AccessType::Bearer(BearerAccess {
