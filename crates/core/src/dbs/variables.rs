@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
 use crate::expr::Expr;
 use crate::expr::expression::VisitExpression;
@@ -77,8 +78,10 @@ impl Variables {
 		let mut vars = BTreeMap::new();
 		let mut visitor = |x: &Expr| {
 			if let Expr::Param(param) = x {
-				if let Some(v) = ctx.value(param.as_str()) {
-					vars.insert(param.clone().into_string(), v.clone());
+				if !PROTECTED_PARAM_NAMES.contains(&param.as_str()) {
+					if let Some(v) = ctx.value(param.as_str()) {
+						vars.insert(param.clone().into_string(), v.clone());
+					}
 				}
 			}
 		};
