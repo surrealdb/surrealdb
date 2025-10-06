@@ -275,10 +275,10 @@ impl DeserializeRevisioned for RouterRequest {
 
 #[cfg(test)]
 mod test {
-	use surrealdb_types::{Array, Number, Value};
 	use std::io::Cursor;
 
 	use revision::{DeserializeRevisioned, SerializeRevisioned};
+	use surrealdb_types::{Array, Number, Value};
 	use uuid::Uuid;
 
 	use super::RouterRequest;
