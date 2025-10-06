@@ -18,7 +18,7 @@ pub(crate) struct DefineAccessStatement {
 
 impl Display for DefineAccessStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE ACCESS",)?;
+		write!(f, "DEFINE ACCESS")?;
 		match self.kind {
 			DefineKind::Default => {}
 			DefineKind::Overwrite => {

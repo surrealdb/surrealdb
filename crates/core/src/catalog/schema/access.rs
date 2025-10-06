@@ -48,21 +48,21 @@ impl InfoStructure for AccessType {
 	fn structure(self) -> Value {
 		match self {
 			AccessType::Jwt(v) => Value::from(map! {
-				"kind".to_string() => "JWT".to_sql().into(),
+				"kind".to_string() => "JWT".into(),
 				"jwt".to_string() => v.structure(),
 			}),
 			AccessType::Record(v) => Value::from(map! {
-				"kind".to_string() => "RECORD".to_sql().into(),
+				"kind".to_string() => "RECORD".into(),
 				"jwt".to_string() => v.jwt.structure(),
 				"signup".to_string(), if let Some(v) = v.signup => v.structure(),
 				"signin".to_string(), if let Some(v) = v.signin => v.structure(),
-				"refresh".to_string(), if v.bearer.is_some() => true.to_sql().into(),
+				"refresh".to_string(), if v.bearer.is_some() => true.into(),
 			}),
 			AccessType::Bearer(ac) => Value::from(map! {
-				"kind".to_string() => "BEARER".to_sql().into(),
+				"kind".to_string() => "BEARER".into(),
 				"subject".to_string() => match ac.subject {
-					BearerAccessSubject::Record => "RECORD".to_sql().into(),
-					BearerAccessSubject::User => "USER".to_sql().into(),
+					BearerAccessSubject::Record => "RECORD".into(),
+					BearerAccessSubject::User => "USER".into(),
 				},
 				"jwt".to_string() => ac.jwt.structure(),
 			}),
@@ -220,7 +220,6 @@ impl ToSql for Algorithm {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-#[non_exhaustive]
 pub struct AccessDefinition {
 	pub(crate) name: String,
 	pub(crate) access_type: AccessType,
@@ -235,11 +234,14 @@ impl_kv_value_revisioned!(AccessDefinition);
 
 impl AccessDefinition {
 	fn to_sql_definition(&self) -> crate::sql::statements::define::DefineAccessStatement {
+		// Create a redacted version of the access type
+		let redacted_access_type = self.access_type.clone().redacted();
+
 		crate::sql::statements::define::DefineAccessStatement {
 			kind: crate::sql::statements::define::DefineKind::Default,
 			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
 			access_type: crate::sql::AccessType::from(crate::expr::AccessType::from(
-				self.access_type.clone(),
+				redacted_access_type,
 			)),
 			authenticate: self.authenticate.clone().map(|e| e.into()),
 			duration: crate::sql::access::AccessDuration {
@@ -264,6 +266,70 @@ impl AccessDefinition {
 				.clone()
 				.map(|c| crate::sql::Expr::Literal(crate::sql::Literal::String(c))),
 			base: crate::sql::Base::from(crate::expr::Base::from(self.base.clone())),
+		}
+	}
+}
+
+// Redaction methods for access types
+impl AccessType {
+	fn redacted(self) -> Self {
+		match self {
+			AccessType::Jwt(jwt) => AccessType::Jwt(jwt.redacted()),
+			AccessType::Record(mut rec) => {
+				rec.jwt = rec.jwt.redacted();
+				if let Some(bearer) = rec.bearer {
+					rec.bearer = Some(bearer.redacted());
+				}
+				AccessType::Record(rec)
+			}
+			AccessType::Bearer(mut bearer) => {
+				bearer.jwt = bearer.jwt.redacted();
+				AccessType::Bearer(bearer)
+			}
+		}
+	}
+}
+
+impl JwtAccess {
+	fn redacted(self) -> Self {
+		Self {
+			verify: self.verify.redacted(),
+			issue: self.issue.map(|i| i.redacted()),
+		}
+	}
+}
+
+impl JwtAccessVerify {
+	fn redacted(self) -> Self {
+		match self {
+			Self::Key(mut k) => {
+				// Redact symmetric keys
+				if k.alg.is_symmetric() {
+					k.key = "[REDACTED]".to_string();
+				}
+				Self::Key(k)
+			}
+			Self::Jwks(j) => Self::Jwks(j),
+		}
+	}
+}
+
+impl JwtAccessIssue {
+	fn redacted(self) -> Self {
+		Self {
+			alg: self.alg,
+			// Always redact issuer keys as they're private keys
+			key: "[REDACTED]".to_string(),
+		}
+	}
+}
+
+impl BearerAccess {
+	fn redacted(self) -> Self {
+		Self {
+			kind: self.kind,
+			subject: self.subject,
+			jwt: self.jwt.redacted(),
 		}
 	}
 }

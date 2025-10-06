@@ -298,10 +298,9 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 		// Expected error
 	} else if let Some(e) = err.downcast_ref() {
 		match e {
-			surrealdb::error::Api::Query(e) => assert_eq!(
-				e,
-				"There was a problem with the database: The record access signup query failed"
-			),
+			surrealdb::error::Api::Query(e) => {
+				assert_eq!(e, "The record access signup query failed")
+			}
 			surrealdb::error::Api::Http(e) => assert_eq!(
 				e,
 				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
@@ -331,10 +330,9 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 		// Expected error
 	} else if let Some(e) = err.downcast_ref() {
 		match e {
-			surrealdb::error::Api::Query(e) => assert_eq!(
-				e,
-				"There was a problem with the database: The record access signin query failed"
-			),
+			surrealdb::error::Api::Query(e) => {
+				assert_eq!(e, "The record access signin query failed")
+			}
 			surrealdb::error::Api::Http(e) => assert_eq!(
 				e,
 				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signin)"

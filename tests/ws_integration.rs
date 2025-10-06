@@ -236,8 +236,7 @@ pub async fn invalidate(cfg_server: Option<Format>, cfg_format: Format) {
 	// Verify we have an invalidated session
 	let res = socket.send_request("query", json!(["DEFINE NAMESPACE test"])).await.unwrap();
 	assert_eq!(
-		res["error"]["message"],
-		"There was a problem with the database: IAM error: Not enough permissions to perform this action",
+		res["error"]["message"], "IAM error: Not enough permissions to perform this action",
 		"result: {res:?}"
 	);
 	// Test passed
@@ -1189,10 +1188,7 @@ pub async fn session_expiration(cfg_server: Option<Format>, cfg_format: Format) 
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(
-		res["error"],
-		json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
-	);
+	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
 	// Sign in again using the same session
 	let res = socket
 		.send_request(
@@ -1299,10 +1295,7 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(
-		res["error"],
-		json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
-	);
+	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
 	// Test operations that SHOULD NOT work with an expired session
 	let operations_ko = vec![
 		socket.send_request("let", json!(["let_var", "let_value",])),
@@ -1377,10 +1370,7 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 		let res = res.unwrap();
 		assert!(res.is_object(), "result: {res:?}");
 		let res = res.as_object().unwrap();
-		assert_eq!(
-			res["error"],
-			json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
-		);
+		assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
 	}
 
 	// Test operations that SHOULD work with an expired session
@@ -1431,10 +1421,7 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(
-		res["error"],
-		json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
-	);
+	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
 	let res = socket
 		.send_request(
 			"signin",
@@ -1463,10 +1450,7 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(
-		res["error"],
-		json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
-	);
+	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
 
 	// This needs to be last operation as the session will no longer expire
 	// afterwards
@@ -1645,10 +1629,7 @@ pub async fn session_reauthentication_expired(cfg_server: Option<Format>, cfg_fo
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(
-		res["error"],
-		json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
-	);
+	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
 	// Authenticate using the root token, which has not expired yet
 	socket.send_request("authenticate", json!([root_token,])).await.unwrap();
 	// Check that we have root access and the session is not expired

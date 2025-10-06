@@ -60,9 +60,9 @@ impl Display for DefineUserStatement {
 		write!(f, " {} ON {}", self.name, self.base)?;
 
 		match self.pass_type {
-			PassType::Unset => write!(f, "  PASSHASH \"\" ")?,
-			PassType::Hash(ref x) => write!(f, "  PASSHASH {}", QuoteStr(x))?,
-			PassType::Password(ref x) => write!(f, "  PASSWORD {}", QuoteStr(x))?,
+			PassType::Unset => write!(f, " PASSHASH \"\" ")?,
+			PassType::Hash(ref x) => write!(f, " PASSHASH {}", QuoteStr(x))?,
+			PassType::Password(ref x) => write!(f, " PASSWORD {}", QuoteStr(x))?,
 		}
 
 		write!(

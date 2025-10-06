@@ -1108,7 +1108,7 @@ mod tests {
 	#[case::array(Value::Array(vec![Value::Array(vec![Value::Number(Number::Int(1))].into())].into()), "[[1]]", "[[1]]")]
 	#[case::array(Value::Array(vec![Value::Array(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))].into()), Value::Array(vec![Value::Number(Number::Int(3))].into())].into()), "[[1, 2], [3]]", "[[1, 2], [3]]")]
 	// Objects - basic
-	#[case::object(Value::Object(Object::default()), "{}", "{}")]
+	#[case::object(Value::Object(Object::default()), "{  }", "{}")]
 	#[case::object(Value::Object(object! {
 		"hello": "world".to_string(),
 	}), "{ hello: 'world' }", "{ hello: world }")]

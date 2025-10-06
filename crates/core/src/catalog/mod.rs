@@ -126,7 +126,7 @@ mod test {
         token_duration: Some(Duration::from_secs(123)),
         session_duration: Some(Duration::from_secs(123)),
         comment: Some("comment".to_string()),
-    }, 60)]
+    }, 61)]
 	#[case::access(AccessGrant {
         id: "access".to_string(),
         ac: "access".to_string(),
@@ -249,7 +249,8 @@ mod test {
         token_duration: Some(Duration::from_secs(123)),
         session_duration: Some(Duration::from_secs(123)),
         comment: Some("comment".to_string()),
-    }, 38)]
+        base: crate::catalog::schema::base::Base::Root,
+    }, 40)]
 	#[case::record(Record::new(Data::from(Value::Bool(true))), 5)]
 	fn test_serialize_deserialize<T>(#[case] original: T, #[case] expected_encoded_size: usize)
 	where

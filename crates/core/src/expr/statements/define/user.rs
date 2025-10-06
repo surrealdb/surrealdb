@@ -97,6 +97,7 @@ impl DefineUserStatement {
 			token_duration: map_opt!(x as &self.duration.token => compute_to!(stk, ctx, opt, doc, x => Duration).0),
 			session_duration: map_opt!(x as &self.duration.session => compute_to!(stk, ctx, opt, doc, x => Duration).0),
 			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			base: self.base.into(),
 		})
 	}
 

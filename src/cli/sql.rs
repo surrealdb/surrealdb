@@ -212,9 +212,7 @@ pub async fn init(
 				let (prompt_ns, prompt_db) = split_prompt(&prompt);
 				// The namespace should be set before the database can be set
 				if namespace.is_none() && prompt_ns.is_empty() && database.is_some() {
-					eprintln!(
-						"There was a problem with the database: Specify a namespace to use\n"
-					);
+					eprintln!("Specify a namespace to use\n");
 					continue;
 				}
 				// Run the query provided

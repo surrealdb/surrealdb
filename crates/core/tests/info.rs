@@ -77,8 +77,7 @@ async fn info_for_table() {
 	let mut t = Test::new(sql).await.unwrap();
 	t.skip_ok(4).unwrap();
 	t.expect_regex(
-		r"\{ events: \{ event: .* \}, fields: \{ field: .* \}, indexes: \{ index: .* \}, lives: \{  \},
-tables: \{  \} \}",
+		r"\{ events: \{ event: .* \}, fields: \{ field: .* \}, indexes: \{ index: .* \}, lives: \{  \}, tables: \{  \} \}",
 	)
 	.unwrap();
 }

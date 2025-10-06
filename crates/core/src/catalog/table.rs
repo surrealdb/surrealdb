@@ -129,7 +129,7 @@ impl ToSql for TableDefinition {
 impl InfoStructure for TableDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"name".to_string() => self.name.to_sql().into(),
+			"name".to_string() => self.name.into(),
 			"drop".to_string() => self.drop.into(),
 			"schemafull".to_string() => self.schemafull.into(),
 			"kind".to_string() => self.table_type.structure(),
@@ -178,18 +178,18 @@ impl InfoStructure for TableType {
 	fn structure(self) -> Value {
 		match self {
 			Self::Any => Value::from(map! {
-				"kind".to_string() => "ANY".to_sql().into(),
+				"kind".to_string() => "ANY".into(),
 			}),
 			Self::Normal => Value::from(map! {
-				"kind".to_string() => "NORMAL".to_sql().into(),
+				"kind".to_string() => "NORMAL".into(),
 			}),
 			Self::Relation(rel) => Value::from(map! {
-				"kind".to_string() => "RELATION".to_sql().into(),
+				"kind".to_string() => "RELATION".into(),
 				"in".to_string(), if let Some(Kind::Record(tables)) = rel.from =>
 					tables.into_iter().map(Value::from).collect::<Vec<_>>().into(),
 				"out".to_string(), if let Some(Kind::Record(tables)) = rel.to =>
 					tables.into_iter().map(Value::from).collect::<Vec<_>>().into(),
-				"enforced".to_string() => rel.enforced.to_sql().into()
+				"enforced".to_string() => rel.enforced.into()
 			}),
 		}
 	}

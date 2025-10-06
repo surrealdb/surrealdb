@@ -103,7 +103,7 @@ impl Display for Object {
 impl ToSql for Object {
 	fn fmt_sql(&self, f: &mut String) {
 		if self.is_empty() {
-			return f.push_str("{}");
+			return f.push_str("{  }");
 		}
 
 		f.push_str("{ ");
