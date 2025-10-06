@@ -3,7 +3,7 @@ use std::{fmt, str};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use revision::Revisioned;
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 
 use super::FlowResultExt as _;
 use crate::catalog::Permission;
@@ -23,21 +23,25 @@ impl Revisioned for Param {
 	fn revision() -> u16 {
 		String::revision()
 	}
+}
 
+impl SerializeRevisioned for Param {
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		w: &mut W,
 	) -> std::result::Result<(), revision::Error> {
-		String::serialize_revisioned(&self.0, w)
+		SerializeRevisioned::serialize_revisioned(&self.0, w)
 	}
+}
 
+impl DeserializeRevisioned for Param {
 	fn deserialize_revisioned<R: std::io::Read>(
 		r: &mut R,
 	) -> std::result::Result<Self, revision::Error>
 	where
 		Self: Sized,
 	{
-		String::deserialize_revisioned(r).map(Param)
+		DeserializeRevisioned::deserialize_revisioned(r).map(Param)
 	}
 }
 

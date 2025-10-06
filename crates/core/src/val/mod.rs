@@ -143,13 +143,12 @@ impl Value {
 			Value::RecordId(_) => true,
 			Value::Geometry(_) => true,
 			Value::Datetime(_) => true,
+			Value::Bytes(v) => !v.is_empty(),
 			Value::Array(v) => !v.is_empty(),
 			Value::Object(v) => !v.is_empty(),
 			Value::String(v) => !v.is_empty(),
 			Value::Number(v) => v.is_truthy(),
 			Value::Duration(v) => v.as_nanos() > 0,
-			// TODO: Table, range, bytes and closure should probably also have certain truthy
-			// values.
 			_ => false,
 		}
 	}

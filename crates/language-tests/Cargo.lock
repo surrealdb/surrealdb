@@ -2904,14 +2904,14 @@ dependencies = [
 
 [[package]]
 name = "revision"
-version = "0.11.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54b8ee532f15b2f0811eb1a50adf10d036e14a6cdae8d99893e7f3b921cb227d"
+checksum = "d9dcd5731a0eb50c0e4d183d5a0e1affc42139c05954f8bc57c386ca1df246ed"
 dependencies = [
  "chrono",
  "geo",
  "regex",
- "revision-derive 0.11.0",
+ "revision-derive 0.13.0",
  "roaring",
  "rust_decimal",
  "uuid",
@@ -2930,9 +2930,9 @@ dependencies = [
 
 [[package]]
 name = "revision-derive"
-version = "0.11.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3415e1bc838c36f9a0a2ac60c0fa0851c72297685e66592c44870d82834dfa2"
+checksum = "e5babe1bdb35dda70850e128e2932f3e3f99a2203ff2686ee0c2d17b1ab7ed10"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3624,7 +3624,7 @@ dependencies = [
  "rayon",
  "reblessive",
  "regex",
- "revision 0.11.0",
+ "revision 0.13.0",
  "ring",
  "roaring",
  "rocksdb",
@@ -3746,7 +3746,7 @@ dependencies = [
  "clap",
  "futures",
  "reblessive",
- "revision 0.11.0",
+ "revision 0.13.0",
  "rust_decimal",
  "semver",
  "serde",

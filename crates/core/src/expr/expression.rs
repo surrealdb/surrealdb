@@ -2,7 +2,7 @@ use std::fmt;
 use std::ops::Bound;
 
 use reblessive::tree::Stk;
-use revision::Revisioned;
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use surrealdb_types::sql::ToSql;
 
 use super::SleepStatement;
@@ -906,17 +906,20 @@ impl Revisioned for Expr {
 	fn revision() -> u16 {
 		1
 	}
+}
 
+impl SerializeRevisioned for Expr {
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		self.to_string().serialize_revisioned(writer)?;
-		Ok(())
+		SerializeRevisioned::serialize_revisioned(&self.to_string(), writer)
 	}
+}
 
+impl DeserializeRevisioned for Expr {
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		let query: String = Revisioned::deserialize_revisioned(reader)?;
+		let query: String = DeserializeRevisioned::deserialize_revisioned(reader)?;
 
 		let expr = crate::syn::parse_with_settings(
 			query.as_bytes(),

@@ -3,7 +3,8 @@ use std::io::Read;
 use std::path::PathBuf;
 
 use async_channel::Sender;
-use revision::Revisioned;
+use bincode::Options;
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use serde::Serialize;
 use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_types::{Array, Notification, Object, SurrealValue, Value, Variables};
@@ -249,7 +250,9 @@ impl Revisioned for RouterRequest {
 	fn revision() -> u16 {
 		1
 	}
+}
 
+impl SerializeRevisioned for RouterRequest {
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		w: &mut W,
@@ -257,8 +260,10 @@ impl Revisioned for RouterRequest {
 		let value = self.clone().into_value();
 		value.serialize_revisioned(w)
 	}
+}
 
-	fn deserialize_revisioned<R: Read>(r: &mut R) -> std::result::Result<Self, revision::Error>
+impl DeserializeRevisioned for RouterRequest {
+	fn deserialize_revisioned<R: Read>(_: &mut R) -> std::result::Result<Self, revision::Error>
 	where
 		Self: Sized,
 	{
@@ -271,6 +276,9 @@ impl Revisioned for RouterRequest {
 #[cfg(test)]
 mod test {
 	use surrealdb_types::{Array, Number, Value};
+	use std::io::Cursor;
+
+	use revision::{DeserializeRevisioned, SerializeRevisioned};
 	use uuid::Uuid;
 
 	use super::RouterRequest;

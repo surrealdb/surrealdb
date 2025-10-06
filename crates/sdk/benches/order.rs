@@ -56,10 +56,10 @@ struct Input {
 }
 
 async fn prepare_data(n: usize, n_value: usize) -> Input {
-	let value = (0..n_value).map(|_| "rand::guid()").collect::<Vec<_>>().join(" + ");
+	let value = (0..n_value).map(|_| "rand::id()").collect::<Vec<_>>().join(" + ");
 	let dbs = Datastore::new("memory").await.unwrap();
 	let ses = Session::owner().with_ns("bench").with_db("bench");
-	let sql = format!(" CREATE |i:{n}| SET v = rand::guid(), d = {value} RETURN NONE");
+	let sql = format!(" CREATE |i:{n}| SET v = rand::id(), d = {value} RETURN NONE");
 	let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 	let _ = res.remove(0).result.is_ok();
 	Input {

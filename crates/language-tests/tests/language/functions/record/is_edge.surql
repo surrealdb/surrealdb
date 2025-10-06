@@ -58,6 +58,9 @@ value = "[]"
 
 [[test.results]]
 value = "[{ id: knows:person, in: person:john, out: person:jane, since: '2023-01-01' }]"
+
+[[test.results]]
+value = "true"
 */
 
 -- Test 1: Non-existent record, using a record I
@@ -116,3 +119,6 @@ SELECT * FROM person WHERE record::is_edge(id) = true;
 
 -- Test 19: Check if the function works as expected inside a select filter (should not be empty)
 SELECT * FROM knows WHERE record::is_edge(id) = true;
+
+-- Test 20: Check if edge record is an edge with method syntax, using a record ID (should be true)
+knows:person.is_edge();

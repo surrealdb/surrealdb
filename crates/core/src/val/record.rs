@@ -11,7 +11,7 @@ use std::mem;
 use std::sync::Arc;
 
 use revision::error::Error;
-use revision::{Revisioned, revisioned};
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use rust_decimal::Decimal;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize, Serializer};
@@ -207,25 +207,29 @@ impl Default for Data {
 }
 
 impl Revisioned for Data {
+	/// Returns the revision number for this type
+	fn revision() -> u16 {
+		1
+	}
+}
+
+impl SerializeRevisioned for Data {
 	/// Serializes the data using the revisioned format
 	///
 	/// This delegates to the underlying Value's serialization.
 	#[inline]
 	fn serialize_revisioned<W: std::io::Write>(&self, writer: &mut W) -> Result<(), Error> {
-		self.as_ref().serialize_revisioned(writer)
+		SerializeRevisioned::serialize_revisioned(self.as_ref(), writer)
 	}
+}
 
+impl DeserializeRevisioned for Data {
 	/// Deserializes the data from the revisioned format
 	///
 	/// This deserializes a Value and wraps it in a Mutable Data variant.
 	#[inline]
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, Error> {
-		Value::deserialize_revisioned(reader).map(Self::Mutable)
-	}
-
-	/// Returns the revision number for this type
-	fn revision() -> u16 {
-		1
+		DeserializeRevisioned::deserialize_revisioned(reader).map(Self::Mutable)
 	}
 }
 
@@ -316,6 +320,18 @@ pub(crate) enum FieldStats {
 	},
 	/// Min/Max aggregation with count for recalculation when values are removed
 	MinMax {
+		count: u64,
+	},
+	/// Standard deviation calculation metadata with running sum, sum of squares and count
+	StdDev {
+		sum: Decimal,
+		sum_of_squares: Decimal,
+		count: u64,
+	},
+	/// Variance calculation metadata with running sum, sum of squares and count
+	Variance {
+		sum: Decimal,
+		sum_of_squares: Decimal,
 		count: u64,
 	},
 }
