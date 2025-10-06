@@ -322,6 +322,18 @@ pub(crate) enum FieldStats {
 	MinMax {
 		count: u64,
 	},
+	/// Standard deviation calculation metadata with running sum, sum of squares and count
+	StdDev {
+		sum: Decimal,
+		sum_of_squares: Decimal,
+		count: u64,
+	},
+	/// Variance calculation metadata with running sum, sum of squares and count
+	Variance {
+		sum: Decimal,
+		sum_of_squares: Decimal,
+		count: u64,
+	},
 }
 
 /// Types of records that can be stored in the database
