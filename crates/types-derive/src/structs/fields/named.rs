@@ -38,12 +38,7 @@ impl NamedFields {
 				let ty = &field.ty;
 
 				quote! {
-					let Some(field_value) = map.remove(#obj_key) else {
-						let err = surrealdb_types::TypeError::Invalid(
-							format!("Missing field '{}' on type '{}'", #field_name_str, #name)
-						);
-						return Err(err.into());
-					};
+					let field_value = map.remove(#obj_key).unwrap_or_default();
 					let #field_name = <#ty as SurrealValue>::from_value(field_value)
 						.map_err(|e| {
 							surrealdb_types::anyhow::anyhow!(

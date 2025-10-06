@@ -5,7 +5,7 @@ mod enum_tagged_variant;
 mod enum_unit_value;
 mod enum_untagged;
 
-use surrealdb_types::{Array, Object, SurrealValue, Uuid, Value};
+use surrealdb_types::{Array, Object, SurrealValue, Uuid, Value, object};
 
 ////////////////////////////////////////////////////
 ///////////////// Simple struct ////////////////////
@@ -285,4 +285,31 @@ fn test_router_request() {
 	assert_eq!(converted.method, "request");
 	assert_eq!(converted.params, Some(Value::String("request".to_string())));
 	assert_eq!(converted.transaction, Some(Uuid::nil()));
+}
+
+#[derive(Clone, Debug, SurrealValue)]
+struct TestOptional {
+	id: i64,
+	name: Option<String>,
+}
+
+#[test]
+fn test_test_optional() {
+	#[derive(Clone, Debug, SurrealValue)]
+	struct TestOptionalNoOption {
+		id: i64,
+	}
+
+	let value = TestOptionalNoOption {
+		id: 1,
+	}
+	.into_value();
+	assert_eq!(value, Value::Object(object! { id: 1 }));
+
+	let converted = TestOptionalNoOption::from_value(value.clone()).unwrap();
+	assert_eq!(converted.id, 1);
+
+	let optional_value = TestOptional::from_value(value.clone()).unwrap();
+	assert_eq!(optional_value.id, 1);
+	assert_eq!(optional_value.name, None);
 }

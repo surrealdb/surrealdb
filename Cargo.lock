@@ -6055,7 +6055,6 @@ version = "3.0.0-alpha.10"
 dependencies = [
  "proc-macro2",
  "quote",
- "surrealdb-types",
  "syn 2.0.100",
 ]
 
