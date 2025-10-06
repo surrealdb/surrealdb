@@ -31,6 +31,7 @@ pub(crate) struct Document {
 	pub(super) initial_reduced: CursorDoc,
 	pub(super) current_reduced: CursorDoc,
 	pub(super) record_strategy: RecordStrategy,
+	pub(super) input: Option<Arc<Value>>,
 }
 
 #[derive(Clone, Debug)]
@@ -207,6 +208,7 @@ impl Document {
 			current_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 			initial_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 			record_strategy: rs,
+			input: None,
 		}
 	}
 
