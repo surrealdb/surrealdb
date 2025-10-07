@@ -18,7 +18,7 @@ impl std::fmt::Display for ContentType {
 			ContentType::ApplicationJson => write!(f, "application/json"),
 			ContentType::ApplicationCbor => write!(f, "application/cbor"),
 			ContentType::ApplicationOctetStream => write!(f, "application/octet-stream"),
-			ContentType::Surrealdb => write!(f, "application/surrealdb"),
+			ContentType::Surrealdb => write!(f, "application/vnd.surrealdb.v1.flatbuffers"),
 		}
 	}
 }
@@ -41,7 +41,7 @@ impl Header for ContentType {
 			"application/json" => Ok(ContentType::ApplicationJson),
 			"application/cbor" => Ok(ContentType::ApplicationCbor),
 			"application/octet-stream" => Ok(ContentType::ApplicationOctetStream),
-			"application/surrealdb" => Ok(ContentType::Surrealdb),
+			"application/vnd.surrealdb.v1.flatbuffers" => Ok(ContentType::Surrealdb),
 			// TODO: Support more (all?) mime-types
 			_ => Err(headers::Error::invalid()),
 		}

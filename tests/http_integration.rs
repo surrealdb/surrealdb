@@ -914,7 +914,7 @@ mod http_integration {
 			let res = client
 				.post(url)
 				.basic_auth(USER, Some(PASS))
-				.header(header::ACCEPT, "application/surrealdb")
+				.header(header::ACCEPT, "application/vnd.surrealdb.v1.flatbuffers")
 				.body("CREATE foo")
 				.send()
 				.await?;
@@ -1739,8 +1739,8 @@ mod http_integration {
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("surreal-ns", ns.parse()?);
 		headers.insert("surreal-db", db.parse()?);
-		headers.insert(header::ACCEPT, "application/surrealdb".parse()?);
-		headers.insert(header::CONTENT_TYPE, "application/surrealdb".parse()?);
+		headers.insert(header::ACCEPT, "application/vnd.surrealdb.v1.flatbuffers".parse()?);
+		headers.insert(header::CONTENT_TYPE, "application/vnd.surrealdb.v1.flatbuffers".parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
 			.default_headers(headers)

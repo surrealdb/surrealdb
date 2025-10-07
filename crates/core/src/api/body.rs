@@ -102,7 +102,7 @@ impl ApiBody {
 				let parsed = match content_type {
 					Some("application/json") => json::decode(&bytes),
 					Some("application/cbor") => cbor::decode(&bytes),
-					Some("application/surrealdb") => flatbuffers::decode(&bytes),
+					Some("application/vnd.surrealdb.v1.flatbuffers") => flatbuffers::decode(&bytes),
 					_ => return Ok(PublicValue::Bytes(surrealdb_types::Bytes::new(bytes))),
 				};
 

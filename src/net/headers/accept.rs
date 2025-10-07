@@ -19,7 +19,7 @@ impl std::fmt::Display for Accept {
 			Accept::ApplicationJson => write!(f, "application/json"),
 			Accept::ApplicationCbor => write!(f, "application/cbor"),
 			Accept::ApplicationOctetStream => write!(f, "application/octet-stream"),
-			Accept::Surrealdb => write!(f, "application/surrealdb"),
+			Accept::Surrealdb => write!(f, "application/vnd.surrealdb.v1.flatbuffers"),
 		}
 	}
 }
@@ -42,7 +42,7 @@ impl Header for Accept {
 			"application/json" => Ok(Accept::ApplicationJson),
 			"application/cbor" => Ok(Accept::ApplicationCbor),
 			"application/octet-stream" => Ok(Accept::ApplicationOctetStream),
-			"application/surrealdb" => Ok(Accept::Surrealdb),
+			"application/vnd.surrealdb.v1.flatbuffers" => Ok(Accept::Surrealdb),
 			// TODO: Support more (all?) mime-types
 			_ => Err(headers::Error::invalid()),
 		}

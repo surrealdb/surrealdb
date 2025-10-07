@@ -83,8 +83,9 @@ impl Surreal<Client> {
 
 pub(crate) fn default_headers() -> HeaderMap {
 	let mut headers = HeaderMap::new();
-	headers.insert(ACCEPT, HeaderValue::from_static("application/surrealdb"));
-	headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/surrealdb"));
+	headers.insert(ACCEPT, HeaderValue::from_static("application/vnd.surrealdb.v1.flatbuffers"));
+	headers
+		.insert(CONTENT_TYPE, HeaderValue::from_static("application/vnd.surrealdb.v1.flatbuffers"));
 	headers
 }
 
@@ -217,7 +218,11 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 		}
 	};
 
-	let res = request.header(ACCEPT, "application/surrealdb").body(file).send().await?;
+	let res = request
+		.header(ACCEPT, "application/vnd.surrealdb.v1.flatbuffers")
+		.body(file)
+		.send()
+		.await?;
 
 	if res.error_for_status_ref().is_err() {
 		let res = res.text().await?;

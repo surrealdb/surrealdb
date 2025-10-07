@@ -136,7 +136,7 @@ async fn handler(
 						("application/cbor", cbor::encode(body).map_err(|_| RpcError::ParseError)?)
 					}
 					Format::Flatbuffers => (
-						"application/surrealdb",
+						"application/vnd.surrealdb.v1.flatbuffers",
 						flatbuffers::encode(&body).map_err(|_| RpcError::ParseError)?,
 					),
 					_ => return Err(ApiError::Unreachable("Expected a valid format".into()).into()),
