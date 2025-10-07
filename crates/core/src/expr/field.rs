@@ -56,16 +56,6 @@ impl Fields {
 		}
 	}
 
-	pub(crate) fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		match self {
-			Fields::Value(field) => field.visit(visitor),
-			Fields::Select(fields) => fields.iter().for_each(|f| f.visit(visitor)),
-		}
-	}
-
 	/// Create a new `*` field projection
 	pub fn all() -> Self {
 		Fields::Select(vec![Field::All])
@@ -361,6 +351,18 @@ impl Fields {
 			}
 		}
 		Ok(out)
+	}
+}
+
+impl VisitExpression for Fields {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		match self {
+			Fields::Value(field) => field.visit(visitor),
+			Fields::Select(fields) => fields.iter().for_each(|f| f.visit(visitor)),
+		}
 	}
 }
 

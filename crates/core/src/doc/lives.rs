@@ -162,6 +162,8 @@ impl Document {
 		ctx.add_value("value", current.clone());
 		ctx.add_value("after", current);
 		ctx.add_value("before", initial);
+		// Add the variables to the context
+		ctx.add_values(live_subscription.vars.clone());
 		// Freeze the context
 		let ctx = ctx.freeze();
 

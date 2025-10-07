@@ -3,23 +3,23 @@ use std::fmt;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use revision::revisioned;
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use storekey::{BorrowDecode, Encode};
 
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::Options;
+use crate::dbs::{Options, Variables};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::expression::VisitExpression;
 use crate::expr::{Expr, FlowResultExt, Kind, Param};
 use crate::val::Value;
 
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct Closure {
 	pub args: Vec<(Param, Kind)>,
 	pub returns: Option<Kind>,
 	pub body: Expr,
+	pub vars: Variables,
 }
 
 impl PartialOrd for Closure {
@@ -34,7 +34,13 @@ impl Ord for Closure {
 }
 
 impl Closure {
-	pub(crate) async fn compute(
+	pub(crate) async fn compute(&self, ctx: &Context) -> Result<Value> {
+		let mut closure = self.clone();
+		closure.vars.extend(Variables::from_expr(&self.body, ctx));
+		Ok(Value::Closure(Box::new(closure)))
+	}
+
+	pub(crate) async fn invoke(
 		&self,
 		stk: &mut Stk,
 		ctx: &Context,
@@ -43,6 +49,7 @@ impl Closure {
 		args: Vec<Value>,
 	) -> Result<Value> {
 		let mut ctx = MutableContext::new_isolated(ctx);
+		ctx.attach_variables(self.vars.clone())?;
 
 		// check for missing arguments.
 		if self.args.len() > args.len() {
@@ -123,5 +130,26 @@ impl<F> Encode<F> for Closure {
 impl<'de, F> BorrowDecode<'de, F> for Closure {
 	fn borrow_decode(_: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
 		Err(storekey::DecodeError::message("Closure cannot be decoded"))
+	}
+}
+
+impl Revisioned for Closure {
+	fn revision() -> u16 {
+		1
+	}
+}
+
+impl SerializeRevisioned for Closure {
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		_writer: &mut W,
+	) -> Result<(), revision::Error> {
+		Err(revision::Error::Conversion("Closures cannot be stored on disk".to_string()))
+	}
+}
+
+impl DeserializeRevisioned for Closure {
+	fn deserialize_revisioned<R: std::io::Read>(_reader: &mut R) -> Result<Self, revision::Error> {
+		Err(revision::Error::Conversion("Closures cannot be deserialized from disk".to_string()))
 	}
 }

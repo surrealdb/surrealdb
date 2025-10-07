@@ -51,6 +51,43 @@ pub(crate) enum Literal {
 	Closure(Box<Closure>),
 }
 
+impl VisitExpression for Literal {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		match self {
+			Literal::None
+			| Literal::Null
+			| Literal::UnboundedRange
+			| Literal::Bool(_)
+			| Literal::Float(_)
+			| Literal::Integer(_)
+			| Literal::Decimal(_)
+			| Literal::String(_)
+			| Literal::Bytes(_)
+			| Literal::Regex(_)
+			| Literal::Duration(_)
+			| Literal::Datetime(_)
+			| Literal::Uuid(_)
+			| Literal::Geometry(_)
+			| Literal::File(_) => {}
+			Literal::RecordId(x) => {
+				x.key.visit(visitor);
+			}
+			Literal::Array(x) => {
+				x.iter().for_each(|x| x.visit(visitor));
+			}
+			Literal::Object(x) => {
+				x.iter().for_each(|x| x.visit(visitor));
+			}
+			Literal::Closure(x) => {
+				x.visit(visitor);
+			}
+		}
+	}
+}
+
 impl Literal {
 	pub(crate) fn is_static(&self) -> bool {
 		match self {
@@ -118,7 +155,7 @@ impl Literal {
 			Literal::Uuid(uuid) => Value::Uuid(*uuid),
 			Literal::Geometry(geometry) => Value::Geometry(geometry.clone()),
 			Literal::File(file) => Value::File(file.clone()),
-			Literal::Closure(closure) => Value::Closure(closure.clone()),
+			Literal::Closure(closure) => closure.compute(ctx).await?,
 		};
 		Ok(res)
 	}

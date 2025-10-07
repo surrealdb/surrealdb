@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt;
 
 use anyhow::{Result, bail};
@@ -7,7 +8,7 @@ use uuid::Uuid;
 use crate::catalog::providers::CatalogProvider;
 use crate::catalog::{NodeLiveQuery, SubscriptionDefinition};
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{Options, Variables};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _};
@@ -38,6 +39,17 @@ impl LiveStatement {
 		opt.valid_for_db()?;
 		// Get the Node ID
 		let nid = opt.id()?;
+
+		let mut vars = BTreeMap::new();
+		vars.extend(Variables::from_expr(&self.fields, ctx));
+		vars.extend(Variables::from_expr(&self.what, ctx));
+		if let Some(cond) = &self.cond {
+			vars.extend(Variables::from_expr(cond, ctx));
+		}
+		if let Some(fetch) = &self.fetch {
+			vars.extend(Variables::from_expr(fetch, ctx));
+		}
+
 		// Check that auth has been set
 		let mut subscription_definition = SubscriptionDefinition {
 			id: self.id,
@@ -53,6 +65,8 @@ impl LiveStatement {
 			// Use the current session authentication
 			// for when we store the LIVE Statement
 			session: ctx.value("session").cloned(),
+			// Add the variables to the subscription definition
+			vars,
 		};
 		// Get the id
 		let live_query_id = subscription_definition.id;

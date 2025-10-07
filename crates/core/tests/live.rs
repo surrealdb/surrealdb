@@ -251,3 +251,56 @@ async fn live_document_reduction() -> Result<()> {
 	// Test passed!
 	Ok(())
 }
+
+#[tokio::test]
+async fn test_live_with_variables() -> Result<()> {
+	let dbs = new_ds().await?.with_auth_enabled(true).with_notifications();
+	let Some(channel) = dbs.notifications() else {
+		unreachable!("No notification channel");
+	};
+
+	// Setup
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let sql = "
+		DEFINE TABLE test;
+		DEFINE FIELD num ON test TYPE number;
+	";
+
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	skip_ok(res, 2)?;
+
+	// Start live query
+	let sql = "LIVE SELECT * FROM test WHERE num = $num;";
+	let res = &mut dbs.execute(sql, &ses, Some(vars!("num": 123))).await?;
+	assert_eq!(res.len(), 1);
+	let lqid = res.remove(0).result?;
+	assert_eq!(lqid.kind(), Kind::Uuid);
+
+	// Triggers notification
+	let sql = "CREATE test:1 SET num = 123;";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	skip_ok(res, 1)?;
+
+	// Does not trigger notification
+	let sql = "UPDATE test:1 SET num = 456;";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	skip_ok(res, 1)?;
+
+	// Kill live query
+	let sql = "KILL $uuid";
+	let res = &mut dbs.execute(sql, &ses, Some(vars!("uuid": lqid))).await?;
+	assert_eq!(res.len(), 1);
+	skip_ok(res, 1)?;
+
+	// Receive notification
+	let tmp = channel.recv().await?;
+	assert_eq!(tmp.action, Action::Create);
+	assert_eq!(tmp.result, syn::value("{ id: test:1, num: 123 }")?);
+	let tmp = channel.recv().await?;
+	assert_eq!(tmp.action, Action::Killed);
+
+	Ok(())
+}

@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use revision::revisioned;
 use surrealdb_types::sql::ToSql;
 use uuid::Uuid;
@@ -30,6 +32,9 @@ pub struct SubscriptionDefinition {
 	// This is optional as it is only set by the database
 	// runtime when storing the live query to storage.
 	pub(crate) session: Option<Value>,
+	// When a live query is created, we analyze the query
+	// and store the variables that are used in the query.
+	pub(crate) vars: BTreeMap<String, Value>,
 }
 
 impl_kv_value_revisioned!(SubscriptionDefinition);

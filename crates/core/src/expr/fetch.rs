@@ -21,8 +21,8 @@ use crate::val::Value;
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct Fetchs(pub Vec<Fetch>);
 
-impl Fetchs {
-	pub(crate) fn visit<F>(&self, visitor: &mut F)
+impl VisitExpression for Fetchs {
+	fn visit<F>(&self, visitor: &mut F)
 	where
 		F: FnMut(&Expr),
 	{

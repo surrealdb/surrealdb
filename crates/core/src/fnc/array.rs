@@ -57,7 +57,7 @@ pub async fn all(
 		Some(Value::Closure(closure)) => {
 			if let Some(opt) = opt {
 				for arg in array.into_iter() {
-					if closure.compute(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
+					if closure.invoke(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						continue;
 					} else {
 						return Ok(Value::Bool(false));
@@ -82,7 +82,7 @@ pub async fn any(
 			if let Some(opt) = opt {
 				for arg in array.into_iter() {
 					// TODO: Don't clone the closure every time the function is called.
-					if closure.compute(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
+					if closure.invoke(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						return Ok(Value::Bool(true));
 					} else {
 						continue;
@@ -310,7 +310,7 @@ pub async fn filter(
 			if let Some(opt) = opt {
 				let mut res = Vec::with_capacity(array.len());
 				for arg in array.into_iter() {
-					if closure.compute(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
+					if closure.invoke(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
 						res.push(arg)
 					}
 				}
@@ -332,7 +332,7 @@ pub async fn filter_index(
 			if let Some(opt) = opt {
 				let mut res = Vec::with_capacity(array.len());
 				for (i, arg) in array.into_iter().enumerate() {
-					if closure.compute(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
+					if closure.invoke(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						res.push(Value::from(i as i64));
 					}
 				}
@@ -364,7 +364,7 @@ pub async fn find(
 		Value::Closure(closure) => {
 			if let Some(opt) = opt {
 				for arg in array.into_iter() {
-					if closure.compute(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
+					if closure.invoke(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
 						return Ok(arg);
 					}
 				}
@@ -386,7 +386,7 @@ pub async fn find_index(
 			if let Some(opt) = opt {
 				for (i, arg) in array.into_iter().enumerate() {
 					// TODO: Don't clone the closure every time the function is called.
-					if closure.compute(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
+					if closure.invoke(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						return Ok(i.into());
 					}
 				}
@@ -428,7 +428,7 @@ pub async fn fold(
 	if let Some(opt) = opt {
 		let mut accum = init;
 		for (i, val) in array.into_iter().enumerate() {
-			accum = mapper.compute(stk, ctx, opt, doc, vec![accum, val, i.into()]).await?
+			accum = mapper.invoke(stk, ctx, opt, doc, vec![accum, val, i.into()]).await?
 		}
 		Ok(accum)
 	} else {
@@ -587,7 +587,7 @@ pub async fn map(
 		let mut res = Vec::with_capacity(array.len());
 		for (i, arg) in array.into_iter().enumerate() {
 			// TODO: Don't clone the closure every time the function is called.
-			res.push(mapper.compute(stk, ctx, opt, doc, vec![arg, i.into()]).await?);
+			res.push(mapper.invoke(stk, ctx, opt, doc, vec![arg, i.into()]).await?);
 		}
 		Ok(res.into())
 	} else {
@@ -675,8 +675,7 @@ pub async fn reduce(
 					return Ok(Value::None);
 				};
 				for (idx, val) in iter.enumerate() {
-					accum =
-						mapper.compute(stk, ctx, opt, doc, vec![accum, val, idx.into()]).await?;
+					accum = mapper.invoke(stk, ctx, opt, doc, vec![accum, val, idx.into()]).await?;
 				}
 				Ok(accum)
 			}

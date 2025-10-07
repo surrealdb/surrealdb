@@ -2,11 +2,15 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::cnf::PROTECTED_PARAM_NAMES;
+use crate::ctx::Context;
+use crate::expr::Expr;
+use crate::expr::expression::VisitExpression;
 use crate::sql::expression::convert_public_value_to_internal;
 use crate::types::PublicVariables;
 use crate::val::{Object, Value};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[repr(transparent)]
 pub(crate) struct Variables(pub(crate) BTreeMap<String, Value>);
 
@@ -21,6 +25,28 @@ impl Variables {
 	#[allow(dead_code)]
 	pub fn insert(&mut self, key: String, value: Value) {
 		self.0.insert(key, value);
+	}
+
+	/// Extend the variables map with the contents of another variables map.
+	pub fn extend(&mut self, other: Variables) {
+		self.0.extend(other.0);
+	}
+
+	/// Create a new variables map from an expression and a context.
+	pub(crate) fn from_expr<T: VisitExpression>(expr: &T, ctx: &Context) -> Self {
+		let mut vars = BTreeMap::new();
+		let mut visitor = |x: &Expr| {
+			if let Expr::Param(param) = x {
+				if !PROTECTED_PARAM_NAMES.contains(&param.as_str()) {
+					if let Some(v) = ctx.value(param.as_str()) {
+						vars.insert(param.clone().into_string(), v.clone());
+					}
+				}
+			}
+		};
+
+		expr.visit(&mut visitor);
+		Self(vars)
 	}
 }
 

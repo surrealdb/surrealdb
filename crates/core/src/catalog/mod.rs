@@ -27,6 +27,7 @@ pub(crate) use table::*;
 pub(crate) use view::*;
 #[cfg(test)]
 mod test {
+	use std::collections::BTreeMap;
 	use std::str::FromStr;
 	use std::time::Duration;
 
@@ -103,7 +104,8 @@ mod test {
         fetch: Some(Fetchs(vec![Fetch(Expr::Literal(Literal::String("fetch".to_string())))])),
         auth: Some(Auth::default()),
         session: Some(Value::default()),
-    }, 97)]
+        vars: BTreeMap::new(),
+    }, 98)]
 	#[case::access(AccessDefinition {
         name: "access".to_string(),
         access_type: AccessType::Bearer(BearerAccess {
