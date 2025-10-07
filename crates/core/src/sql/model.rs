@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::value::Value;
+use crate::sql::value::VisitExpression;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -219,5 +220,16 @@ impl Model {
 		Err(Error::InvalidModel {
 			message: String::from("Machine learning computation is not enabled."),
 		})
+	}
+}
+
+impl VisitExpression for Model {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		for a in &self.args {
+			a.visit(visitor);
+		}
 	}
 }

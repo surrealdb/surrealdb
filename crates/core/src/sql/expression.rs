@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::fnc;
 use crate::sql::operator::Operator;
 use crate::sql::value::Value;
+use crate::sql::value::VisitExpression;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -37,6 +38,28 @@ impl Default for Expression {
 			l: Value::Null,
 			o: Operator::default(),
 			r: Value::Null,
+		}
+	}
+}
+
+impl VisitExpression for Expression {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		match self {
+			Expression::Unary {
+				v,
+				..
+			} => v.visit(visitor),
+			Expression::Binary {
+				l,
+				r,
+				..
+			} => {
+				l.visit(visitor);
+				r.visit(visitor);
+			}
 		}
 	}
 }

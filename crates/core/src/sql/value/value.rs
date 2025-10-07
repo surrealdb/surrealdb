@@ -3257,19 +3257,43 @@ impl VisitExpression for Value {
 			}
 			Self::Geometry(_) => {}
 			Self::Bytes(_) => {}
-			Self::Thing(_) => {}
+			Self::Thing(t) => {
+				t.visit(visitor);
+			}
 			Value::Regex(_) => {}
-			Value::Cast(_) => {}
-			Value::Range(_) => {}
-			Value::Edges(_) => {}
-			Value::Future(_) => {}
-			Value::Function(_) => {}
-			Value::Subquery(_) => {}
-			Value::Expression(_) => {}
-			Value::Query(_) => {}
-			Value::Model(_) => {}
-			Value::Closure(_) => {}
-			Value::Refs(_) => {}
+			Value::Cast(c) => {
+				c.visit(visitor);
+			}
+			Value::Range(r) => {
+				r.visit(visitor);
+			}
+			Value::Edges(e) => {
+				e.visit(visitor);
+			}
+			Value::Future(f) => {
+				f.visit(visitor);
+			}
+			Value::Function(f) => {
+				f.visit(visitor);
+			}
+			Value::Subquery(sq) => {
+				sq.visit(visitor);
+			}
+			Value::Expression(e) => {
+				e.visit(visitor);
+			}
+			Value::Query(q) => {
+				q.visit(visitor);
+			}
+			Value::Model(m) => {
+				m.visit(visitor);
+			}
+			Value::Closure(c) => {
+				c.visit(visitor);
+			}
+			Value::Refs(r) => {
+				r.visit(visitor);
+			}
 		}
 	}
 }

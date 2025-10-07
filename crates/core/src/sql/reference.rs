@@ -10,6 +10,7 @@ use crate::{
 };
 
 use super::{array::Uniq, statements::info::InfoStructure, Array, Idiom, Table, Thing, Value};
+use crate::sql::value::VisitExpression;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
@@ -112,6 +113,19 @@ impl Refs {
 		};
 
 		Ok(Value::Array(arr.uniq()))
+	}
+}
+
+impl VisitExpression for Refs {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		for (_table, idiom) in &self.0 {
+			if let Some(i) = idiom {
+				i.visit(visitor);
+			}
+		}
 	}
 }
 

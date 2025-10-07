@@ -341,3 +341,34 @@ impl VisitExpression for Graph {
 		}
 	}
 }
+
+impl VisitExpression for GraphSubjects {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&crate::sql::Value),
+	{
+		self.0.iter().for_each(|s| s.visit(visitor));
+	}
+}
+
+impl VisitExpression for GraphSubject {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&crate::sql::Value),
+	{
+		use std::ops::Bound;
+		match self {
+			GraphSubject::Table(_) => {}
+			GraphSubject::Range(_, rng) => {
+				match &rng.beg {
+					Bound::Included(id) | Bound::Excluded(id) => id.visit(visitor),
+					Bound::Unbounded => {}
+				}
+				match &rng.end {
+					Bound::Included(id) | Bound::Excluded(id) => id.visit(visitor),
+					Bound::Unbounded => {}
+				}
+			}
+		}
+	}
+}
