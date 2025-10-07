@@ -1,7 +1,6 @@
 use std::fmt::{self, Debug, Display};
 use std::str::FromStr;
 
-use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 // Needed because we use the SurrealValue derive macro inside the crate which exports it :)
@@ -9,7 +8,7 @@ use crate as surrealdb_types;
 use crate::{SurrealValue, Uuid, Value};
 
 /// The action that caused the notification
-#[revisioned(revision = 1)]
+
 #[derive(
 	Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, SurrealValue,
 )]
@@ -52,7 +51,7 @@ impl FromStr for Action {
 }
 
 /// A live query notification.
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, SurrealValue)]
 #[non_exhaustive]
 pub struct Notification {

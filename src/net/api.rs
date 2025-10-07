@@ -15,7 +15,7 @@ use surrealdb_core::catalog::ApiMethod;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::{ExperimentalTarget, RouteTarget};
 use surrealdb_core::rpc::RpcError;
-use surrealdb_core::rpc::format::{Format, cbor, json, revision};
+use surrealdb_core::rpc::format::{Format, cbor, flatbuffers, json};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
@@ -135,9 +135,9 @@ async fn handler(
 					Format::Cbor => {
 						("application/cbor", cbor::encode(body).map_err(|_| RpcError::ParseError)?)
 					}
-					Format::Revision => (
+					Format::Flatbuffers => (
 						"application/surrealdb",
-						revision::encode(&body).map_err(|_| RpcError::ParseError)?,
+						flatbuffers::encode(&body).map_err(|_| RpcError::ParseError)?,
 					),
 					_ => return Err(ApiError::Unreachable("Expected a valid format".into()).into()),
 				};

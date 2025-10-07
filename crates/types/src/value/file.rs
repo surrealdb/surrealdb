@@ -1,6 +1,5 @@
 use std::fmt;
 
-use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::sql::ToSql;
@@ -9,7 +8,7 @@ use crate::sql::ToSql;
 ///
 /// A file reference points to a file stored in a bucket with a specific key.
 /// This is used for file storage and retrieval operations.
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct File {
 	/// The bucket name where the file is stored

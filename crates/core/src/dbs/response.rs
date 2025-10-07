@@ -46,7 +46,6 @@ impl QueryType {
 }
 
 /// The return value when running a query set on the database.
-#[revisioned(revision = 1)]
 #[derive(Debug, Clone)]
 pub struct QueryResult {
 	pub time: Duration,

@@ -6,7 +6,6 @@ use std::iter::once;
 use geo::{
 	Coord, LineString, LinesIter, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon,
 };
-use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::sql::ToSql;
@@ -18,7 +17,7 @@ use crate::{GeometryKind, Object, SurrealValue, Value, array, object};
 /// and their multi-variants. This is useful for spatial data and geographic applications.
 ///
 /// The types used internally originate from the `geo` crate.
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Geometry {
 	/// A single point in 2D space

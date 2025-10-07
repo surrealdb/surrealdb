@@ -2,7 +2,6 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::ops::{Bound, RangeBounds};
 
-use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::sql::ToSql;
@@ -12,7 +11,7 @@ use crate::{SurrealValue, Value};
 ///
 /// A range defines an interval between two values with inclusive or exclusive bounds.
 /// This is commonly used for range queries and comparisons.
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Range {
 	/// The lower bound of the range

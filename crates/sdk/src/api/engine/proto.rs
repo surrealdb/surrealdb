@@ -1,17 +1,7 @@
-use revision::revisioned;
-use serde::Deserialize;
-use surrealdb_types::Value;
+use surrealdb_types::{SurrealValue, Value};
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Deserialize)]
-pub(crate) struct Failure {
-	pub(crate) code: i64,
-	pub(crate) message: String,
-}
-
-#[revisioned(revision = 1)]
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "UPPERCASE")]
+#[derive(Debug, SurrealValue)]
+#[surreal(untagged, uppercase)]
 #[doc(hidden)]
 #[non_exhaustive]
 pub enum Status {
@@ -19,8 +9,7 @@ pub enum Status {
 	Err,
 }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Deserialize)]
+#[derive(Debug, SurrealValue)]
 #[doc(hidden)]
 #[non_exhaustive]
 pub struct QueryMethodResponse {

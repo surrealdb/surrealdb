@@ -4,7 +4,6 @@ use std::str::FromStr;
 
 use chrono::offset::LocalResult;
 use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
-use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::sql::ToSql;
@@ -14,7 +13,7 @@ use crate::utils::escape::QuoteStr;
 ///
 /// A datetime represents a specific point in time, stored as UTC.
 /// This type wraps the `chrono::DateTime<Utc>` type.
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Datetime(pub(crate) DateTime<Utc>);
 

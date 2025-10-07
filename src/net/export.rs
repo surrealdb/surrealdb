@@ -52,10 +52,7 @@ async fn post_handler(
 		Format::Cbor => surrealdb_core::rpc::format::cbor::decode(&body)
 			.map_err(anyhow::Error::msg)
 			.map_err(ResponseError)?,
-		Format::Bincode => surrealdb_core::rpc::format::bincode::decode(&body)
-			.map_err(anyhow::Error::msg)
-			.map_err(ResponseError)?,
-		Format::Revision => surrealdb_core::rpc::format::revision::decode(&body)
+		Format::Flatbuffers => surrealdb_core::rpc::format::flatbuffers::decode(&body)
 			.map_err(anyhow::Error::msg)
 			.map_err(ResponseError)?,
 		Format::Unsupported => {

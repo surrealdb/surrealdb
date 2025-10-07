@@ -34,7 +34,7 @@ impl ResponseInstruction {
 		let format = match mime {
 			Some("application/json") => Format::Json,
 			Some("application/cbor") => Format::Cbor,
-			Some("application/surrealdb") => Format::Revision,
+			Some("application/surrealdb") => Format::Flatbuffers,
 			Some(_) => return Err(Error::ApiError(ApiError::InvalidFormat)),
 			_ => return Err(Error::ApiError(ApiError::MissingFormat)),
 		};

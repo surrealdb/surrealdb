@@ -1,10 +1,7 @@
 use std::borrow::Cow;
-use std::io::Read;
 use std::path::PathBuf;
 
 use async_channel::Sender;
-use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
-use serde::Serialize;
 use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_types::{Array, Notification, Object, SurrealValue, Value, Variables};
 use uuid::Uuid;
@@ -235,55 +232,20 @@ pub(crate) struct RouterRequest {
 	transaction: Option<Uuid>,
 }
 
-impl Serialize for RouterRequest {
-	fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		let value = self.clone().into_value();
-		value.serialize(serializer)
-	}
-}
-
-impl Revisioned for RouterRequest {
-	fn revision() -> u16 {
-		1
-	}
-}
-
-impl SerializeRevisioned for RouterRequest {
-	fn serialize_revisioned<W: std::io::Write>(
-		&self,
-		w: &mut W,
-	) -> std::result::Result<(), revision::Error> {
-		let value = self.clone().into_value();
-		value.serialize_revisioned(w)
-	}
-}
-
-impl DeserializeRevisioned for RouterRequest {
-	fn deserialize_revisioned<R: Read>(r: &mut R) -> std::result::Result<Self, revision::Error>
-	where
-		Self: Sized,
-	{
-		let value = Value::deserialize_revisioned(r)?;
-		Self::from_value(value).map_err(|err| revision::Error::Conversion(err.to_string()))
-	}
-}
-
 #[cfg(test)]
 mod test {
-	use surrealdb_types::{Array, Number, Value};
+	use surrealdb_types::{Array, Number, SurrealValue, Value};
 	use uuid::Uuid;
 
 	use super::RouterRequest;
 
-	fn assert_converts<S, D, I>(req: &RouterRequest, s: S, d: D)
+	fn assert_converts<S, D, I>(req: RouterRequest, s: S, d: D)
 	where
-		S: FnOnce(&RouterRequest) -> I,
+		S: FnOnce(&Value) -> I,
 		D: FnOnce(I) -> Value,
 	{
-		let ser = s(req);
+		let v = req.clone().into_value();
+		let ser = s(&v);
 		let val = d(ser);
 		let Value::Object(obj) = val else {
 			panic!("not an object");
@@ -316,22 +278,10 @@ mod test {
 			transaction: Some(Uuid::new_v4()),
 		};
 
-		println!("test convert bincode");
-
 		assert_converts(
-			&request,
-			|i| surrealdb_core::rpc::format::bincode::encode(i).unwrap(),
-			|b| surrealdb_core::rpc::format::bincode::decode(&b).unwrap(),
+			request,
+			|i| surrealdb_core::rpc::format::flatbuffers::encode(i).unwrap(),
+			|b| surrealdb_core::rpc::format::flatbuffers::decode(&b).unwrap(),
 		);
-
-		println!("test convert revisioned");
-
-		assert_converts(
-			&request,
-			|i| revision::to_vec(i).unwrap(),
-			|b| revision::from_slice(&b).unwrap(),
-		);
-
-		println!("done");
 	}
 }

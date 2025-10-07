@@ -16,7 +16,7 @@ impl From<&Accept> for Format {
 			Accept::ApplicationJson => Format::Json,
 			Accept::ApplicationCbor => Format::Cbor,
 			Accept::ApplicationOctetStream => Format::Unsupported,
-			Accept::Surrealdb => Format::Bincode,
+			Accept::Surrealdb => Format::Flatbuffers,
 		}
 	}
 }
@@ -28,7 +28,7 @@ impl From<&ContentType> for Format {
 			ContentType::ApplicationJson => Format::Json,
 			ContentType::ApplicationCbor => Format::Cbor,
 			ContentType::ApplicationOctetStream => Format::Unsupported,
-			ContentType::Surrealdb => Format::Bincode,
+			ContentType::Surrealdb => Format::Flatbuffers,
 		}
 	}
 }
@@ -38,9 +38,8 @@ impl From<&Format> for ContentType {
 		match format {
 			Format::Json => ContentType::ApplicationJson,
 			Format::Cbor => ContentType::ApplicationCbor,
+			Format::Flatbuffers => ContentType::Surrealdb,
 			Format::Unsupported => ContentType::ApplicationOctetStream,
-			Format::Bincode => ContentType::Surrealdb,
-			_ => ContentType::TextPlain,
 		}
 	}
 }
@@ -75,17 +74,8 @@ impl WsFormat for Format {
 					Err(DbResultError::from(RpcError::ParseError))
 				}
 			}
-			Format::Bincode => {
-				let val = surrealdb_core::rpc::format::bincode::decode(&val)
-					.map_err(|_| RpcError::ParseError)?;
-				if let Value::Object(obj) = val {
-					Ok(Request::from_object(obj)?)
-				} else {
-					Err(DbResultError::from(RpcError::ParseError))
-				}
-			}
-			Format::Revision => {
-				let val = surrealdb_core::rpc::format::revision::decode(&val)
+			Format::Flatbuffers => {
+				let val = surrealdb_core::rpc::format::flatbuffers::decode(&val)
 					.map_err(|_| RpcError::ParseError)?;
 				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
@@ -110,13 +100,9 @@ impl WsFormat for Format {
 					.map_err(|_| RpcError::ParseError)?;
 				Ok((val.len(), Message::Binary(val.into())))
 			}
-			Format::Bincode => {
-				let val = surrealdb_core::rpc::format::bincode::encode(&res)
-					.map_err(|_| RpcError::ParseError)?;
-				Ok((val.len(), Message::Binary(val.into())))
-			}
-			Format::Revision => {
-				let val = surrealdb_core::rpc::format::revision::encode(&res)
+			Format::Flatbuffers => {
+				let res_value = res.into_value();
+				let val = surrealdb_core::rpc::format::flatbuffers::encode(&res_value)
 					.map_err(|_| RpcError::ParseError)?;
 				Ok((val.len(), Message::Binary(val.into())))
 			}
@@ -154,17 +140,8 @@ impl HttpFormat for Format {
 					Err(RpcError::ParseError)
 				}
 			}
-			Format::Bincode => {
-				let val = surrealdb_core::rpc::format::bincode::decode(&body)
-					.map_err(|_| RpcError::ParseError)?;
-				if let Value::Object(obj) = val {
-					Ok(Request::from_object(obj)?)
-				} else {
-					Err(RpcError::ParseError)
-				}
-			}
-			Format::Revision => {
-				let val = surrealdb_core::rpc::format::revision::decode(&body)
+			Format::Flatbuffers => {
+				let val = surrealdb_core::rpc::format::flatbuffers::decode(&body)
 					.map_err(|_| RpcError::ParseError)?;
 				if let Value::Object(obj) = val {
 					Ok(Request::from_object(obj)?)
@@ -184,10 +161,11 @@ impl HttpFormat for Format {
 				.into_bytes(),
 			Format::Cbor => surrealdb_core::rpc::format::cbor::encode(res.into_value())
 				.map_err(|_| RpcError::ParseError)?,
-			Format::Bincode => surrealdb_core::rpc::format::bincode::encode(&res)
-				.map_err(|_| RpcError::ParseError)?,
-			Format::Revision => surrealdb_core::rpc::format::revision::encode(&res)
-				.map_err(|_| RpcError::ParseError)?,
+			Format::Flatbuffers => {
+				let res_value = res.into_value();
+				surrealdb_core::rpc::format::flatbuffers::encode(&res_value)
+					.map_err(|_| RpcError::ParseError)?
+			}
 			Format::Unsupported => return Err(RpcError::InvalidRequest),
 		};
 

@@ -4,7 +4,6 @@ use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
 use regex::RegexBuilder;
-use revision::revisioned;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -16,7 +15,7 @@ pub(crate) const REGEX_TOKEN: &str = "$surrealdb::public::Regex";
 ///
 /// A regular expression is a pattern used for matching strings.
 /// This type wraps the `regex::Regex` type and provides custom serialization/deserialization.
-#[revisioned(revision = 1)]
+
 #[derive(Clone)]
 pub struct Regex(pub regex::Regex);
 

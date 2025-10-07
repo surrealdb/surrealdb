@@ -9,7 +9,7 @@ use super::err::ApiError;
 use super::invocation::ApiInvocation;
 use crate::err::Error;
 use crate::expr::Bytesize;
-use crate::rpc::format::{cbor, json, revision};
+use crate::rpc::format::{cbor, flatbuffers, json};
 use crate::types::PublicValue;
 
 pub enum ApiBody {
@@ -102,7 +102,7 @@ impl ApiBody {
 				let parsed = match content_type {
 					Some("application/json") => json::decode(&bytes),
 					Some("application/cbor") => cbor::decode(&bytes),
-					Some("application/surrealdb") => revision::decode(&bytes),
+					Some("application/surrealdb") => flatbuffers::decode(&bytes),
 					_ => return Ok(PublicValue::Bytes(surrealdb_types::Bytes::new(bytes))),
 				};
 

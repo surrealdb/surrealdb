@@ -2,7 +2,6 @@ use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
 use hex;
-use revision::revisioned;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +10,7 @@ use crate::sql::ToSql;
 /// Represents binary data in SurrealDB
 ///
 /// Bytes stores raw binary data as a vector of unsigned 8-bit integers.
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Bytes(pub(crate) Vec<u8>);
 

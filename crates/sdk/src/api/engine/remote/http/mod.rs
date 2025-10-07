@@ -234,16 +234,16 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 				return Err(Error::Http(res).into());
 			}
 		}
-	} else {
-		let bytes = res.bytes().await?;
-		let response: Vec<QueryMethodResponse> =
-			surrealdb_core::rpc::format::bincode::decode(&bytes)
-				.map_err(|x| format!("Failed to deserialize bincode payload: {x}"))
-				.map_err(crate::api::Error::InvalidResponse)?;
-		for res in response {
-			if let Status::Err = res.status {
-				return Err(Error::Query(res.result.into_string()?).into());
-			}
+	}
+
+	let bytes = res.bytes().await?;
+	let response: Vec<QueryMethodResponse> =
+		surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
+			.map_err(|x| format!("Failed to deserialize bincode payload: {x}"))
+			.map_err(crate::api::Error::InvalidResponse)?;
+	for res in response {
+		if let Status::Err = res.status {
+			return Err(Error::Query(res.result.into_string()?).into());
 		}
 	}
 
@@ -264,7 +264,9 @@ async fn send_request(
 ) -> Result<Vec<QueryResult>> {
 	let url = base_url.join(RPC_PATH).unwrap();
 
-	let body = surrealdb_core::rpc::format::bincode::encode(&req)
+	let req_value = req.into_value();
+
+	let body = surrealdb_core::rpc::format::flatbuffers::encode(&req_value)
 		.map_err(|x| format!("Failed to serialized to bincode: {x}"))
 		.map_err(crate::api::Error::UnserializableValue)?;
 
@@ -272,7 +274,7 @@ async fn send_request(
 	let response = http_req.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 
-	let response: DbResponse = surrealdb_core::rpc::format::bincode::decode(&bytes)
+	let response: DbResponse = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
 		.map_err(|x| format!("Failed to deserialize bincode payload: {x}"))
 		.map_err(crate::api::Error::InvalidResponse)?;
 

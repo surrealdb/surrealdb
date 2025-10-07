@@ -1,6 +1,5 @@
 use std::fmt::Display;
 
-use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 // Needed because we use the SurrealValue derive macro inside the crate which exports it :)
@@ -19,7 +18,7 @@ pub const ID_CHARS: [char; 36] = [
 ///
 /// Record identifiers can have various types of keys including numbers, strings, UUIDs,
 /// arrays, objects, or ranges. This enum provides type-safe representation for all key types.
-#[revisioned(revision = 1)]
+
 #[derive(
 	Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize, SurrealValue,
 )]

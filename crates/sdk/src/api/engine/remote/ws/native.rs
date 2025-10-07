@@ -5,10 +5,10 @@ use std::sync::atomic::AtomicI64;
 use async_channel::Receiver;
 use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
-use revision::revisioned;
 use serde::Deserialize;
 use surrealdb_core::dbs::QueryResultBuilder;
 use surrealdb_core::rpc::{DbResponse, DbResult};
+use surrealdb_types::SurrealValue;
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tokio::time;
@@ -243,8 +243,10 @@ async fn router_handle_route(
 		};
 		trace!("Request {:?}", request);
 
+		let request_value = request.into_value();
+
 		// Unwrap because a router request cannot fail to serialize.
-		let payload = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
+		let payload = surrealdb_core::rpc::format::flatbuffers::encode(&request_value).unwrap();
 
 		Message::Binary(payload.into())
 	};
@@ -363,9 +365,12 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 									.into_router_request(None)
 									.unwrap();
 
-									let value =
-										surrealdb_core::rpc::format::revision::encode(&request)
-											.unwrap();
+									let request_value = request.into_value();
+
+									let value = surrealdb_core::rpc::format::flatbuffers::encode(
+										&request_value,
+									)
+									.unwrap();
 									Message::Binary(value.into())
 								};
 								if let Err(error) = state.sink.send(kill).await {
@@ -379,15 +384,14 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 			}
 		}
 		Err(error) => {
-			#[revisioned(revision = 1)]
-			#[derive(Deserialize)]
+			#[derive(Deserialize, SurrealValue)]
 			struct ErrorResponse {
 				id: Option<Value>,
 			}
 
 			// Let's try to find out the ID of the response that failed to deserialise
 			if let Message::Binary(binary) = message {
-				match surrealdb_core::rpc::format::revision::decode(&binary) {
+				match surrealdb_core::rpc::format::flatbuffers::decode(&binary) {
 					Ok(ErrorResponse {
 						id,
 					}) => {
@@ -461,7 +465,10 @@ async fn router_reconnect(
 						.into_router_request(None)
 						.expect("replay commands should always convert to route requests");
 
-					let message = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
+					let request_value = request.into_value();
+
+					let message =
+						surrealdb_core::rpc::format::flatbuffers::encode(&request_value).unwrap();
 
 					if let Err(error) = state.sink.send(Message::Binary(message.into())).await {
 						trace!("{error}");
@@ -477,7 +484,9 @@ async fn router_reconnect(
 					.into_router_request(None)
 					.unwrap();
 					trace!("Request {:?}", request);
-					let payload = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
+					let request_value = request.into_value();
+					let payload =
+						surrealdb_core::rpc::format::flatbuffers::encode(&request_value).unwrap();
 
 					if let Err(error) = state.sink.send(Message::Binary(payload.into())).await {
 						trace!("{error}");
@@ -506,7 +515,8 @@ pub(crate) async fn run_router(
 ) {
 	let ping = {
 		let request = Command::Health.into_router_request(None).unwrap();
-		let value = surrealdb_core::rpc::format::revision::encode(&request).unwrap();
+		let request_value = request.into_value();
+		let value = surrealdb_core::rpc::format::flatbuffers::encode(&request_value).unwrap();
 		Message::Binary(value.into())
 	};
 
@@ -725,15 +735,15 @@ mod tests {
 				payload.len() as f32 / ref_compressed,
 			));
 		}
-		const UNVERSIONED: &str = "Unversioned Vec<Value>";
-		const COMPRESSED_UNVERSIONED: &str = "Compressed Unversioned Vec<Value>";
+		const FLATBUFFERS: &str = "Flatbuffers Vec<Value>";
+		const FLATBUFFERS_COMPRESSED: &str = "Flatbuffers Compressed Vec<Value>";
 		{
 			// Unversioned
 			let (duration, payload) =
-				timed(&|| surrealdb_core::rpc::format::bincode::encode(&vector).unwrap());
+				timed(&|| surrealdb_core::rpc::format::flatbuffers::encode(&vector).unwrap());
 			results.push((
 				payload.len(),
-				UNVERSIONED,
+				FLATBUFFERS,
 				duration,
 				payload.len() as f32 / ref_payload,
 			));
@@ -743,26 +753,7 @@ mod tests {
 			let duration = duration + compression_duration;
 			results.push((
 				payload.len(),
-				COMPRESSED_UNVERSIONED,
-				duration,
-				payload.len() as f32 / ref_compressed,
-			));
-		}
-		//
-		const VERSIONED: &str = "Versioned Vec<Value>";
-		const COMPRESSED_VERSIONED: &str = "Compressed Versioned Vec<Value>";
-		{
-			// Versioned
-			let (duration, payload) =
-				timed(&|| surrealdb_core::rpc::format::revision::encode(&vector).unwrap());
-			results.push((payload.len(), VERSIONED, duration, payload.len() as f32 / ref_payload));
-
-			// Compressed Versioned
-			let (compression_duration, payload) = timed(&|| compress(&payload));
-			let duration = duration + compression_duration;
-			results.push((
-				payload.len(),
-				COMPRESSED_VERSIONED,
+				FLATBUFFERS_COMPRESSED,
 				duration,
 				payload.len() as f32 / ref_compressed,
 			));
@@ -822,13 +813,11 @@ mod tests {
 				BINCODE_REF,
 				COMPRESSED_BINCODE_REF,
 				COMPRESSED_BINCODE,
-				COMPRESSED_UNVERSIONED,
-				COMPRESSED_VERSIONED,
 				COMPRESSED_CBOR,
 				BINCODE,
-				UNVERSIONED,
-				VERSIONED,
 				CBOR,
+				FLATBUFFERS_COMPRESSED,
+				FLATBUFFERS,
 			]
 		)
 	}

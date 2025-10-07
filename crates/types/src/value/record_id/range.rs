@@ -2,7 +2,6 @@ use std::cmp::Ordering;
 use std::fmt::Display;
 use std::ops::{Bound, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
 
-use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate as surrealdb_types;
@@ -13,7 +12,7 @@ use crate::{Kind, Range, RecordIdKey, SurrealValue, Value, kind};
 ///
 /// This type is used for range queries on record identifiers,
 /// allowing queries like "find all records with IDs between X and Y".
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct RecordIdKeyRange {
 	/// The lower bound of the range

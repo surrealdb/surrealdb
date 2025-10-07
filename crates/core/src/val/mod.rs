@@ -1203,23 +1203,17 @@ mod tests {
 		assert!(64 >= std::mem::size_of::<Value>(), "size of value too big");
 	}
 
-	#[test]
-	fn check_serialize() {
-		let enc: Vec<u8> = revision::to_vec(&Value::None).unwrap();
-		assert_eq!(2, enc.len());
-		let enc: Vec<u8> = revision::to_vec(&Value::Null).unwrap();
-		assert_eq!(2, enc.len());
-		let enc: Vec<u8> = revision::to_vec(&Value::Bool(true)).unwrap();
-		assert_eq!(3, enc.len());
-		let enc: Vec<u8> = revision::to_vec(&Value::Bool(false)).unwrap();
-		assert_eq!(3, enc.len());
-		let enc: Vec<u8> = revision::to_vec(&Value::from("test")).unwrap();
-		assert_eq!(7, enc.len());
-		let enc: Vec<u8> = revision::to_vec(&syn::value("{ hello: 'world' }").unwrap()).unwrap();
-		assert_eq!(18, enc.len());
-		let enc: Vec<u8> =
-			revision::to_vec(&syn::value("{ compact: true, schema: 0 }").unwrap()).unwrap();
-		assert_eq!(27, enc.len());
+	#[rstest]
+	#[case::none(Value::None, 2)]
+	#[case::null(Value::Null, 2)]
+	#[case::bool(Value::Bool(true), 3)]
+	#[case::bool(Value::Bool(false), 3)]
+	#[case::string(Value::from("test"), 7)]
+	#[case::object(Value::from(syn::value("{ hello: 'world' }").unwrap()), 18)]
+	#[case::object(Value::from(syn::value("{ compact: true, schema: 0 }").unwrap()), 27)]
+	fn check_serialize(#[case] value: Value, #[case] expected: usize) {
+		let enc: Vec<u8> = revision::to_vec(&value).unwrap();
+		assert_eq!(expected, enc.len());
 	}
 
 	#[test]

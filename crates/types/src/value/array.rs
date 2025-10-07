@@ -1,7 +1,6 @@
 use std::fmt::{self, Display, Write};
 use std::ops::{Deref, DerefMut};
 
-use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::sql::ToSql;
@@ -11,7 +10,7 @@ use crate::{SurrealValue, Value};
 ///
 /// An array is an ordered collection of values that can contain elements of any type.
 /// The underlying storage is a `Vec<Value>`.
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Array(pub(crate) Vec<Value>);
 

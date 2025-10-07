@@ -2,7 +2,6 @@ use std::cmp::Ordering;
 use std::fmt::{self, Display};
 use std::hash;
 
-use revision::revisioned;
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
@@ -14,7 +13,7 @@ use crate::sql::ToSql;
 ///
 /// Numbers in SurrealDB can be integers, floating-point numbers, or decimal numbers.
 /// This enum provides type-safe representation for all numeric types.
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum Number {
 	/// A 64-bit signed integer

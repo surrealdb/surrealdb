@@ -28,7 +28,6 @@ hex.workspace = true
 http.workspace = true
 js = { workspace = true, optional = true }
 nanoid.workspace = true
-revision.workspace = true
 regex.workspace = true
 rstest.workspace = true
 rust_decimal.workspace = true

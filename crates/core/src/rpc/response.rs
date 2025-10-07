@@ -34,7 +34,6 @@ impl DbResultStats {
 /// The data returned by the database
 // The variants here should be in exactly the same order as `crate::engine::remote::ws::Data`
 // In future, they will possibly be merged to avoid having to keep them in sync.
-#[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum DbResult {
 	/// Generally methods return a `expr::Value`
@@ -355,7 +354,6 @@ impl From<RpcError> for DbResultError {
 	}
 }
 
-#[revisioned(revision = 1)]
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DbResponse {
 	pub id: Option<PublicValue>,
@@ -385,8 +383,8 @@ impl DbResponse {
 	}
 
 	pub fn from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
-		// Decode using revision format
-		crate::rpc::format::revision::decode(bytes)
+		let value = crate::rpc::format::flatbuffers::decode(bytes)?;
+		Self::from_value(value)
 	}
 }
 

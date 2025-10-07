@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display};
 
-use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::sql::ToSql;
@@ -12,7 +11,7 @@ use crate::{SurrealValue, Value};
 ///
 /// An object is a collection of key-value pairs where keys are strings and values can be of any
 /// type. The underlying storage is a `BTreeMap<String, Value>` which maintains sorted keys.
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Object(pub(crate) BTreeMap<String, Value>);
 

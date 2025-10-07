@@ -29,7 +29,6 @@ use std::cmp::Ordering;
 use std::fmt::{self, Display};
 use std::ops::Index;
 
-use revision::revisioned;
 pub use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -71,7 +70,7 @@ pub struct SurrealNull;
 ///
 /// This enum contains all possible value types that can be stored in SurrealDB.
 /// Each variant corresponds to a different data type supported by the database.
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
 pub enum Value {
 	/// Represents the absence of a value
@@ -995,99 +994,6 @@ mod tests {
 		assert_eq!(values[6], Value::Number(Number::Int(10)));
 		assert_eq!(values[7], Value::String("a".to_string()));
 		assert_eq!(values[8], Value::String("b".to_string()));
-	}
-
-	#[rstest]
-	// None and Null
-	#[case::none(Value::None, 2)]
-	#[case::null(Value::Null, 2)]
-	// Booleans
-	#[case::bool(Value::Bool(true), 3)]
-	#[case::bool(Value::Bool(false), 3)]
-	// Numbers - integers
-	#[case::number(Value::Number(Number::Int(0)), 5)]
-	#[case::number(Value::Number(Number::Int(5)), 5)]
-	#[case::number(Value::Number(Number::Int(-5)), 5)]
-	#[case::number(Value::Number(Number::Int(i64::MAX)), 13)]
-	#[case::number(Value::Number(Number::Int(i64::MIN)), 13)]
-	// Numbers - floats
-	#[case::number(Value::Number(Number::Float(0.0)), 12)]
-	#[case::number(Value::Number(Number::Float(5.0)), 12)]
-	#[case::number(Value::Number(Number::Float(-5.5)), 12)]
-	#[case::number(Value::Number(Number::Float(f64::MAX)), 12)]
-	#[case::number(Value::Number(Number::Float(f64::MIN)), 12)]
-	// Numbers - decimals
-	#[case::number(Value::Number(Number::Decimal(Decimal::new(0, 0))), 20)]
-	#[case::number(Value::Number(Number::Decimal(Decimal::new(5, 0))), 20)]
-	#[case::number(Value::Number(Number::Decimal(Decimal::new(-5, 0))), 20)]
-	#[case::number(Value::Number(Number::Decimal(Decimal::new(12345, 2))), 20)]
-	// Strings
-	#[case::string(Value::String("".to_string()), 3)]
-	#[case::string(Value::String("hello".to_string()), 8)]
-	#[case::string(Value::String("hello world with spaces".to_string()), 26)]
-	#[case::string(Value::String("unicode: 你好🌍".to_string()), 22)]
-	#[case::string(Value::String("special\n\t\"chars\"".to_string()), 19)]
-	// Durations
-	#[case::duration(Value::Duration(Duration::new(0, 0)), 5)]
-	#[case::duration(Value::Duration(Duration::new(1, 0)), 5)]
-	#[case::duration(Value::Duration(Duration::new(60, 0)), 5)]
-	#[case::duration(Value::Duration(Duration::new(3600, 0)), 7)]
-	// Datetimes
-	#[case::datetime(Value::Datetime(Datetime::from_timestamp(0, 0).unwrap()), 5)]
-	#[case::datetime(Value::Datetime(Datetime::from_timestamp(1, 0).unwrap()), 5)]
-	#[case::datetime(Value::Datetime(Datetime::from_timestamp(1234567890, 0).unwrap()), 9)]
-	// UUIDs
-	#[case::uuid(Value::Uuid(Uuid::nil()), 19)]
-	#[case::uuid(Value::Uuid(Uuid::new_v4()), 19)]
-	// Arrays
-	#[case::array(Value::Array(Array::new()), 4)]
-	#[case::array(Value::Array(vec![Value::Number(Number::Int(1))].into()), 9)]
-	#[case::array(Value::Array(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2)), Value::Number(Number::Int(3))].into()), 19)]
-	#[case::array(Value::Array(vec![Value::Array(vec![Value::Number(Number::Int(1))].into())].into()), 13)]
-	// Objects
-	#[case::object(Value::Object(Object::default()), 4)]
-	#[case::object(Value::Object(object! { "key": "value".to_string() }), 16)]
-	#[case::object(Value::Object(object! { "a": 1, "b": 2 }), 18)]
-	#[case::object(Value::Object(object! { "nested": object! { "inner": "value".to_string() } }), 29)]
-	// Geometry
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(0.0, 0.0))), 20)]
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))), 20)]
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(-123.45, 67.89))), 20)]
-	// Bytes
-	#[case::bytes(Value::Bytes(Bytes::default()), 4)]
-	#[case::bytes(Value::Bytes(Bytes::from(vec![1, 2, 3])), 7)]
-	#[case::bytes(Value::Bytes(Bytes::from(vec![0; 100])), 104)]
-	// Record IDs
-	#[case::record_id(Value::RecordId(RecordId::new("test", "key")), 14)]
-	#[case::record_id(Value::RecordId(RecordId::new("user", 123)), 11)]
-	#[case::record_id(Value::RecordId(RecordId::new("table", "id_with_underscores")), 31)]
-	// Files
-	#[case::file(Value::File(File::default()), 5)]
-	// Ranges
-	#[case::range(Value::Range(Box::new(Range::unbounded())), 5)]
-	#[case::range(
-		Value::Range(Box::new(Range::new(
-			std::ops::Bound::Included(Value::Number(Number::Int(1))),
-			std::ops::Bound::Excluded(Value::Number(Number::Int(10)))
-		))),
-		15
-	)]
-	#[case::range(
-		Value::Range(Box::new(Range::new(
-			std::ops::Bound::Included(Value::Number(Number::Int(0))),
-			std::ops::Bound::Included(Value::Number(Number::Int(100)))
-		))),
-		15
-	)]
-	// Regex
-	#[case::regex(Value::Regex("hello".parse().unwrap()), 9)]
-	#[case::regex(Value::Regex("[a-z]+".parse().unwrap()), 10)]
-	#[case::regex(Value::Regex("^test$".parse().unwrap()), 10)]
-	fn test_revisioned_roundtrip(#[case] value: Value, #[case] expected_bytes: usize) {
-		let bytes = revision::to_vec(&value).unwrap();
-		assert_eq!(bytes.len(), expected_bytes);
-		let result: Value = revision::from_slice(&bytes).unwrap();
-		assert_eq!(value, result);
 	}
 
 	#[rstest]

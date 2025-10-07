@@ -3,7 +3,6 @@ use std::ops::Deref;
 use std::str::FromStr;
 
 use anyhow::anyhow;
-use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::sql::ToSql;
@@ -20,7 +19,7 @@ pub(crate) static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 ///
 /// A duration represents a span of time, typically used for time-based calculations and
 /// comparisons. This type wraps the standard `std::time::Duration` type.
-#[revisioned(revision = 1)]
+
 #[derive(
 	Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
 )]

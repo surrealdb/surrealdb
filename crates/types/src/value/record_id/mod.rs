@@ -7,7 +7,6 @@ use std::fmt;
 
 pub use key::*;
 pub use range::*;
-use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::sql::ToSql;
@@ -17,7 +16,7 @@ use crate::utils::escape::EscapeRid;
 ///
 /// A record identifier consists of a table name and a key that uniquely identifies
 /// a record within that table. This is the primary way to reference specific records.
-#[revisioned(revision = 1)]
+
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct RecordId {
 	/// The name of the table containing the record

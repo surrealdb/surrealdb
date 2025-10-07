@@ -2,7 +2,6 @@ use std::fmt::{self, Display};
 use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 
-use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::Datetime;
@@ -12,7 +11,7 @@ use crate::sql::ToSql;
 ///
 /// A UUID (Universally Unique Identifier) is a 128-bit identifier that is unique across space and
 /// time. This type wraps the `uuid::Uuid` type.
-#[revisioned(revision = 1)]
+
 #[derive(
 	Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
 )]

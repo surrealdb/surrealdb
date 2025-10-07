@@ -181,7 +181,7 @@ async fn router_handle_request(
 			return HandleResult::Ok;
 		};
 		trace!("Request {:?}", req);
-		let payload = surrealdb_core::rpc::format::revision::encode(&req).unwrap();
+		let payload = surrealdb_core::rpc::format::flatbuffers::encode(&req).unwrap();
 		Message::Binary(payload)
 	};
 
@@ -277,8 +277,10 @@ async fn router_handle_response(
 										}
 										.into_router_request(None);
 										let value =
-											surrealdb_core::rpc::format::revision::encode(&request)
-												.unwrap();
+											surrealdb_core::rpc::format::flatbuffers::encode(
+												&request,
+											)
+											.unwrap();
 										Message::Binary(value)
 									};
 									if let Err(error) = state.sink.send(kill).await {
@@ -307,7 +309,7 @@ async fn router_handle_response(
 			if let Message::Binary(binary) = response {
 				if let Ok(Response {
 					id,
-				}) = surrealdb_core::rpc::format::revision::decode(&binary)
+				}) = surrealdb_core::rpc::format::flatbuffers::decode(&binary)
 				{
 					// Return an error if an ID was returned
 					if let Some(Ok(id)) = id.map(Value::into_int) {
@@ -360,7 +362,8 @@ async fn router_reconnect(
 				for (_, message) in &state.replay {
 					let message = message.clone().into_router_request(None);
 
-					let message = surrealdb_core::rpc::format::revision::encode(&message).unwrap();
+					let message =
+						surrealdb_core::rpc::format::flatbuffers::encode(&message).unwrap();
 
 					if let Err(error) = state.sink.send(Message::Binary(message)).await {
 						trace!("{error}");
@@ -376,7 +379,7 @@ async fn router_reconnect(
 					.into_router_request(None);
 					trace!("Request {:?}", request);
 					let serialize =
-						surrealdb_core::rpc::format::revision::encode(&request).unwrap();
+						surrealdb_core::rpc::format::flatbuffers::encode(&request).unwrap();
 					if let Err(error) = state.sink.send(Message::Binary(serialize)).await {
 						trace!("{error}");
 						time::sleep(Duration::from_secs(1)).await;
@@ -429,7 +432,7 @@ pub(crate) async fn run_router(
 		let value = Value::Object(object! {
 			"method": "ping",
 		});
-		let value = surrealdb_core::rpc::format::revision::encode(&value).unwrap();
+		let value = surrealdb_core::rpc::format::flatbuffers::encode(&value).unwrap();
 		Message::Binary(value)
 	};
 
@@ -526,7 +529,7 @@ fn ws_message_to_db_response(message: &Message) -> Result<Option<DbResponse>> {
 			trace!("Received an unexpected text message; {text}");
 			Ok(None)
 		}
-		Message::Binary(binary) => surrealdb_core::rpc::format::revision::decode(&binary)
+		Message::Binary(binary) => surrealdb_core::rpc::format::flatbuffers::decode(&binary)
 			.map(Some)
 			.map_err(|error| Error::InvalidResponse(error.to_string()))
 			.map_err(anyhow::Error::new),
