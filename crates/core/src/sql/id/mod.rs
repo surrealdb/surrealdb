@@ -9,7 +9,7 @@ use crate::sql::{escape::EscapeRid, Array, Number, Object, Strand, Thing, Uuid, 
 use nanoid::nanoid;
 use range::IdRange;
 use reblessive::tree::Stk;
-use revision::{revisioned, Revisioned};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};

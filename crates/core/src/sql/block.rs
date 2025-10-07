@@ -13,7 +13,7 @@ use crate::sql::statements::{
 };
 use crate::sql::value::{Value, VisitExpression};
 use reblessive::tree::Stk;
-use revision::{revisioned, Revisioned};
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fmt::{self, Display, Formatter, Write};
