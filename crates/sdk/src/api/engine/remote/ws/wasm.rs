@@ -8,11 +8,9 @@ use async_channel::{Receiver, Sender};
 use futures::stream::{SplitSink, SplitStream};
 use futures::{FutureExt, SinkExt, StreamExt};
 use pharos::{Channel, Events, Observable, ObserveConfig};
-use revision::revisioned;
-use serde::Deserialize;
 use surrealdb_core::dbs::QueryResultBuilder;
 use surrealdb_core::rpc::{DbResponse, DbResult};
-use surrealdb_types::{Value, Variables, object};
+use surrealdb_types::{SurrealValue, Value, Variables, object};
 use tokio::sync::watch;
 use trice::Instant;
 use wasm_bindgen_futures::spawn_local;
@@ -181,7 +179,8 @@ async fn router_handle_request(
 			return HandleResult::Ok;
 		};
 		trace!("Request {:?}", req);
-		let payload = surrealdb_core::rpc::format::flatbuffers::encode(&req).unwrap();
+		let req_value = req.into_value();
+		let payload = surrealdb_core::rpc::format::flatbuffers::encode(&req_value).unwrap();
 		Message::Binary(payload)
 	};
 
@@ -275,7 +274,9 @@ async fn router_handle_response(
 										let request = Command::Kill {
 											uuid: live_query_id.0,
 										}
-										.into_router_request(None);
+										.into_router_request(None)
+										.into_value();
+
 										let value =
 											surrealdb_core::rpc::format::flatbuffers::encode(
 												&request,
@@ -299,8 +300,7 @@ async fn router_handle_response(
 			}
 		}
 		Err(error) => {
-			#[derive(Deserialize)]
-			#[revisioned(revision = 1)]
+			#[derive(SurrealValue)]
 			struct Response {
 				id: Option<Value>,
 			}
@@ -339,7 +339,7 @@ async fn router_reconnect(
 ) {
 	loop {
 		trace!("Reconnecting...");
-		let connect = WsMeta::connect(&endpoint.url, vec![super::REVISION_HEADER]).await;
+		let connect = WsMeta::connect(&endpoint.url, vec!["flatbuffers"]).await;
 		match connect {
 			Ok((mut meta, stream)) => {
 				let (new_sink, new_stream) = stream.split();
@@ -360,7 +360,7 @@ async fn router_reconnect(
 					}
 				};
 				for (_, message) in &state.replay {
-					let message = message.clone().into_router_request(None);
+					let message = message.clone().into_router_request(None).into_value();
 
 					let message =
 						surrealdb_core::rpc::format::flatbuffers::encode(&message).unwrap();
@@ -376,7 +376,9 @@ async fn router_reconnect(
 						key: key.as_str().into(),
 						value: value.clone(),
 					}
-					.into_router_request(None);
+					.into_router_request(None)
+					.into_value();
+
 					trace!("Request {:?}", request);
 					let serialize =
 						surrealdb_core::rpc::format::flatbuffers::encode(&request).unwrap();
@@ -403,7 +405,7 @@ pub(crate) async fn run_router(
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Route>,
 ) {
-	let connect = WsMeta::connect(&endpoint.url, vec![super::REVISION_HEADER]).await;
+	let connect = WsMeta::connect(&endpoint.url, vec!["flatbuffers"]).await;
 	let (mut ws, socket) = match connect {
 		Ok(pair) => pair,
 		Err(error) => {

@@ -35,10 +35,21 @@ pub enum RpcError {
 impl From<anyhow::Error> for RpcError {
 	fn from(e: anyhow::Error) -> Self {
 		use err::Error;
-		match e.downcast_ref() {
-			Some(Error::RealtimeDisabled) => RpcError::LqNotSuported,
-			_ => RpcError::InternalError(e),
+		// First, try to downcast to our Error type
+		if let Some(err) = e.downcast_ref::<Error>() {
+			match err {
+				// Live query specific error
+				Error::RealtimeDisabled => return RpcError::LqNotSuported,
+				// User-facing errors should be "Thrown" not "Internal"
+				Error::IdMismatch {
+					..
+				} => return RpcError::Thrown(err.to_string()),
+				// Most other database errors are also user-facing
+				_ => return RpcError::Thrown(err.to_string()),
+			}
 		}
+		// For errors that aren't database errors, treat as internal
+		RpcError::InternalError(e)
 	}
 }
 

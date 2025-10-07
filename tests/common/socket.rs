@@ -277,6 +277,7 @@ impl Socket {
 		method: &str,
 		params: serde_json::Value,
 	) -> Result<serde_json::Value> {
+		tracing::info!("Sending request: {method} {params:?}");
 		let (send, recv) = oneshot::channel();
 		if (self
 			.sender

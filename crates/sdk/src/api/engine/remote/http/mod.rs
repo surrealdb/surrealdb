@@ -83,9 +83,9 @@ impl Surreal<Client> {
 
 pub(crate) fn default_headers() -> HeaderMap {
 	let mut headers = HeaderMap::new();
-	headers.insert(ACCEPT, HeaderValue::from_static("application/vnd.surrealdb.v1.flatbuffers"));
+	headers.insert(ACCEPT, HeaderValue::from_static(surrealdb_core::api::format::FLATBUFFERS));
 	headers
-		.insert(CONTENT_TYPE, HeaderValue::from_static("application/vnd.surrealdb.v1.flatbuffers"));
+		.insert(CONTENT_TYPE, HeaderValue::from_static(surrealdb_core::api::format::FLATBUFFERS));
 	headers
 }
 
@@ -205,8 +205,6 @@ async fn export_bytes(request: RequestBuilder, bytes: BackupSender) -> Result<()
 
 #[cfg(not(target_family = "wasm"))]
 async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
-	use crate::engine::proto::{QueryMethodResponse, Status};
-
 	let file = match OpenOptions::new().read(true).open(&path).await {
 		Ok(path) => path,
 		Err(error) => {
@@ -218,11 +216,8 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 		}
 	};
 
-	let res = request
-		.header(ACCEPT, "application/vnd.surrealdb.v1.flatbuffers")
-		.body(file)
-		.send()
-		.await?;
+	let res =
+		request.header(ACCEPT, surrealdb_core::api::format::FLATBUFFERS).body(file).send().await?;
 
 	if res.error_for_status_ref().is_err() {
 		let res = res.text().await?;
@@ -242,13 +237,12 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 	}
 
 	let bytes = res.bytes().await?;
-	let response: Vec<QueryMethodResponse> =
-		surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
-			.map_err(|x| format!("Failed to deserialize bincode payload: {x}"))
-			.map_err(crate::api::Error::InvalidResponse)?;
+	let response: Vec<QueryResult> = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
+		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x}"))
+		.map_err(crate::api::Error::InvalidResponse)?;
 	for res in response {
-		if let Status::Err = res.status {
-			return Err(Error::Query(res.result.into_string()?).into());
+		if let Err(e) = res.result {
+			return Err(Error::Query(e.to_string()).into());
 		}
 	}
 
@@ -272,7 +266,7 @@ async fn send_request(
 	let req_value = req.into_value();
 
 	let body = surrealdb_core::rpc::format::flatbuffers::encode(&req_value)
-		.map_err(|x| format!("Failed to serialized to bincode: {x}"))
+		.map_err(|x| format!("Failed to serialized to flatbuffers: {x}"))
 		.map_err(crate::api::Error::UnserializableValue)?;
 
 	let http_req = client.post(url).headers(headers.clone()).auth(auth).body(body);
@@ -280,7 +274,7 @@ async fn send_request(
 	let bytes = response.bytes().await?;
 
 	let response: DbResponse = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
-		.map_err(|x| format!("Failed to deserialize bincode payload: {x}"))
+		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x}"))
 		.map_err(crate::api::Error::InvalidResponse)?;
 
 	match response.result? {

@@ -454,7 +454,6 @@ pub async fn query_with_stats(new_db: impl CreateDb) {
 	let mut response = db.query(sql).with_stats().await.unwrap();
 	// First query statement
 	let (stats, result) = response.take(0).unwrap();
-	println!("stats: {stats:?}, result: {result:?}");
 	assert!(stats.execution_time > Some(Duration::ZERO));
 	let _: Value = result.unwrap();
 	// Second query statement
@@ -1683,7 +1682,6 @@ pub async fn set_unset(new_db: impl CreateDb) {
 	let sql = "RETURN $name";
 	db.set(key, value).await.unwrap();
 	let mut response = db.query(sql).await.unwrap();
-	println!("response: {response:#?}");
 	let Some(name): Option<String> = response.take(0).unwrap() else {
 		panic!("record not found");
 	};

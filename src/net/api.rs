@@ -95,31 +95,31 @@ async fn handler(
 
 	let res_body: Vec<u8> = if let Some(body) = res.body {
 		match res_instruction {
-			ResponseInstruction::Raw => {
-				match body {
-					Value::String(v) => {
-						res.headers.entry(CONTENT_TYPE).or_insert("text/plain".parse().map_err(
-							|_| ApiError::Unreachable("Expected a valid format".into()),
-						)?);
-						v.into_bytes()
-					}
-					Value::Bytes(v) => {
-						res.headers.entry(CONTENT_TYPE).or_insert(
-							"application/octet-stream".parse().map_err(|_| {
-								ApiError::Unreachable("Expected a valid format".into())
-							})?,
-						);
-						v.into()
-					}
-					v => {
-						return Err(ApiError::InvalidApiResponse(format!(
-							"Expected bytes or string, found {}",
-							v.kind()
-						))
-						.into());
-					}
+			ResponseInstruction::Raw => match body {
+				Value::String(v) => {
+					res.headers.entry(CONTENT_TYPE).or_insert(
+						surrealdb_core::api::format::PLAIN
+							.parse()
+							.map_err(|_| ApiError::Unreachable("Expected a valid format".into()))?,
+					);
+					v.into_bytes()
 				}
-			}
+				Value::Bytes(v) => {
+					res.headers.entry(CONTENT_TYPE).or_insert(
+						surrealdb_core::api::format::OCTET_STREAM
+							.parse()
+							.map_err(|_| ApiError::Unreachable("Expected a valid format".into()))?,
+					);
+					v.into()
+				}
+				v => {
+					return Err(ApiError::InvalidApiResponse(format!(
+						"Expected bytes or string, found {}",
+						v.kind()
+					))
+					.into());
+				}
+			},
 			ResponseInstruction::Format(format) => {
 				if res.headers.contains_key("Content-Type") {
 					return Err(ApiError::InvalidApiResponse(
@@ -129,14 +129,16 @@ async fn handler(
 				}
 
 				let (header, val) = match format {
-					Format::Json => {
-						("application/json", json::encode(body).map_err(|_| RpcError::ParseError)?)
-					}
-					Format::Cbor => {
-						("application/cbor", cbor::encode(body).map_err(|_| RpcError::ParseError)?)
-					}
+					Format::Json => (
+						surrealdb_core::api::format::JSON,
+						json::encode(body).map_err(|_| RpcError::ParseError)?,
+					),
+					Format::Cbor => (
+						surrealdb_core::api::format::CBOR,
+						cbor::encode(body).map_err(|_| RpcError::ParseError)?,
+					),
 					Format::Flatbuffers => (
-						"application/vnd.surrealdb.v1.flatbuffers",
+						surrealdb_core::api::format::FLATBUFFERS,
 						flatbuffers::encode(&body).map_err(|_| RpcError::ParseError)?,
 					),
 					_ => return Err(ApiError::Unreachable("Expected a valid format".into()).into()),

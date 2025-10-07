@@ -1,4 +1,3 @@
-use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -152,7 +151,7 @@ async fn post_handler(
 	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	accept: Option<TypedHeader<Accept>>,
-	content_type: TypedHeader<ContentType>,
+	TypedHeader(content_type): TypedHeader<ContentType>,
 	body: Bytes,
 ) -> Result<impl IntoResponse, ResponseError> {
 	// Get the datastore reference
@@ -163,7 +162,7 @@ async fn post_handler(
 		return Err(NetError::ForbiddenRoute(RouteTarget::Rpc.to_string()).into());
 	}
 	// Get the input format from the Content-Type header
-	let fmt: Format = content_type.deref().into();
+	let fmt: Format = (&content_type).into();
 	// Check that the input format is a valid format
 	if matches!(fmt, Format::Unsupported) {
 		return Err(NetError::InvalidType.into());

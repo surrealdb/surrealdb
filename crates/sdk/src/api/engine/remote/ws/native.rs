@@ -61,9 +61,7 @@ pub(crate) async fn connect(
 ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
 	let mut request = (&endpoint.url).into_client_request()?;
 
-	request
-		.headers_mut()
-		.insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static(super::REVISION_HEADER));
+	request.headers_mut().insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static("flatbuffers"));
 
 	#[cfg(any(feature = "native-tls", feature = "rustls"))]
 	let (socket, _) = tokio_tungstenite::connect_async_tls_with_config(

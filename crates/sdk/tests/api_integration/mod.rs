@@ -257,7 +257,9 @@ mod ws {
 				.await
 				.unwrap_err();
 
-			assert!(error.to_string().starts_with("The message is too long"));
+			let error_str = error.to_string();
+
+			assert!(error_str.starts_with("The message is too long"), "{error_str}");
 		}
 	}
 

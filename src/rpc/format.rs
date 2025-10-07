@@ -28,7 +28,7 @@ impl From<&ContentType> for Format {
 			ContentType::ApplicationJson => Format::Json,
 			ContentType::ApplicationCbor => Format::Cbor,
 			ContentType::ApplicationOctetStream => Format::Unsupported,
-			ContentType::Surrealdb => Format::Flatbuffers,
+			ContentType::ApplicationSurrealDBFlatbuffers => Format::Flatbuffers,
 		}
 	}
 }
@@ -38,7 +38,7 @@ impl From<&Format> for ContentType {
 		match format {
 			Format::Json => ContentType::ApplicationJson,
 			Format::Cbor => ContentType::ApplicationCbor,
-			Format::Flatbuffers => ContentType::Surrealdb,
+			Format::Flatbuffers => ContentType::ApplicationSurrealDBFlatbuffers,
 			Format::Unsupported => ContentType::ApplicationOctetStream,
 		}
 	}

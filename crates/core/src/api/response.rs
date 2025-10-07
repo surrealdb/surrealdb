@@ -32,9 +32,9 @@ impl ResponseInstruction {
 			.and_then(|v| v.to_str().ok());
 
 		let format = match mime {
-			Some("application/json") => Format::Json,
-			Some("application/cbor") => Format::Cbor,
-			Some("application/vnd.surrealdb.v1.flatbuffers") => Format::Flatbuffers,
+			Some(super::format::JSON) => Format::Json,
+			Some(super::format::CBOR) => Format::Cbor,
+			Some(super::format::FLATBUFFERS) => Format::Flatbuffers,
 			Some(_) => return Err(Error::ApiError(ApiError::InvalidFormat)),
 			_ => return Err(Error::ApiError(ApiError::MissingFormat)),
 		};

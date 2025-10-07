@@ -100,9 +100,9 @@ impl ApiBody {
 					invocation.headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok());
 
 				let parsed = match content_type {
-					Some("application/json") => json::decode(&bytes),
-					Some("application/cbor") => cbor::decode(&bytes),
-					Some("application/vnd.surrealdb.v1.flatbuffers") => flatbuffers::decode(&bytes),
+					Some(super::format::JSON) => json::decode(&bytes),
+					Some(super::format::CBOR) => cbor::decode(&bytes),
+					Some(super::format::FLATBUFFERS) => flatbuffers::decode(&bytes),
 					_ => return Ok(PublicValue::Bytes(surrealdb_types::Bytes::new(bytes))),
 				};
 

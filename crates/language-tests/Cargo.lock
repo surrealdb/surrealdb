@@ -3697,7 +3697,6 @@ dependencies = [
  "http",
  "nanoid",
  "regex",
- "revision 0.13.0",
  "rquickjs",
  "rstest",
  "rust_decimal",
@@ -3705,6 +3704,7 @@ dependencies = [
  "serde_json",
  "surrealdb-protocol",
  "surrealdb-types-derive",
+ "tracing",
  "ulid",
  "uuid",
 ]

@@ -10,7 +10,6 @@ pub mod any;
 	feature = "kv-surrealkv",
 ))]
 pub mod local;
-pub(crate) mod proto;
 #[cfg(any(feature = "protocol-http", feature = "protocol-ws"))]
 pub mod remote;
 #[doc(hidden)]
