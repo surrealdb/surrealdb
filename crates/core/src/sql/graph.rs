@@ -22,7 +22,7 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::ops::{Bound, Deref};
 
 use super::fmt::Fmt;
-use super::{Id, IdRange, Table, Thing};
+use super::{Id, IdRange, Table, Thing, Value};
 
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -313,7 +313,7 @@ impl Display for GraphSubject {
 impl VisitExpression for Graph {
 	fn visit<F>(&self, visitor: &mut F)
 	where
-		F: FnMut(&crate::sql::Value),
+		F: FnMut(&Value),
 	{
 		if let Some(expr) = &self.expr {
 			expr.visit(visitor);
@@ -345,7 +345,7 @@ impl VisitExpression for Graph {
 impl VisitExpression for GraphSubjects {
 	fn visit<F>(&self, visitor: &mut F)
 	where
-		F: FnMut(&crate::sql::Value),
+		F: FnMut(&Value),
 	{
 		self.0.iter().for_each(|s| s.visit(visitor));
 	}
@@ -354,7 +354,7 @@ impl VisitExpression for GraphSubjects {
 impl VisitExpression for GraphSubject {
 	fn visit<F>(&self, visitor: &mut F)
 	where
-		F: FnMut(&crate::sql::Value),
+		F: FnMut(&Value),
 	{
 		use std::ops::Bound;
 		match self {

@@ -12,7 +12,7 @@ use crate::sql::statements::UpdateStatement;
 use crate::sql::statements::UpsertStatement;
 use crate::sql::statements::{DefineStatement, RemoveStatement};
 use crate::sql::value::VisitExpression;
-use crate::sql::{Statement, Statements};
+use crate::sql::{Statement, Statements, Value};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -144,7 +144,7 @@ impl IntoIterator for Query {
 impl VisitExpression for Query {
 	fn visit<F>(&self, visitor: &mut F)
 	where
-		F: FnMut(&crate::sql::Value),
+		F: FnMut(&Value),
 	{
 		for s in &self.0 .0 {
 			s.visit(visitor);

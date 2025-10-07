@@ -96,7 +96,7 @@ impl fmt::Display for Order {
 impl VisitExpression for Ordering {
 	fn visit<F>(&self, visitor: &mut F)
 	where
-		F: FnMut(&crate::sql::Value),
+		F: FnMut(&Value),
 	{
 		match self {
 			Ordering::Random => {}
@@ -108,7 +108,7 @@ impl VisitExpression for Ordering {
 impl VisitExpression for OrderList {
 	fn visit<F>(&self, visitor: &mut F)
 	where
-		F: FnMut(&crate::sql::Value),
+		F: FnMut(&Value),
 	{
 		self.0.iter().for_each(|o| o.visit(visitor));
 	}
@@ -117,7 +117,7 @@ impl VisitExpression for OrderList {
 impl VisitExpression for Order {
 	fn visit<F>(&self, visitor: &mut F)
 	where
-		F: FnMut(&crate::sql::Value),
+		F: FnMut(&Value),
 	{
 		self.value.visit(visitor);
 	}
@@ -132,7 +132,7 @@ pub struct OldOrders(pub Vec<OldOrder>);
 impl VisitExpression for OldOrders {
 	fn visit<F>(&self, visitor: &mut F)
 	where
-		F: FnMut(&crate::sql::Value),
+		F: FnMut(&Value),
 	{
 		self.0.iter().for_each(|o| o.visit(visitor));
 	}
@@ -154,7 +154,7 @@ pub struct OldOrder {
 impl VisitExpression for OldOrder {
 	fn visit<F>(&self, visitor: &mut F)
 	where
-		F: FnMut(&crate::sql::Value),
+		F: FnMut(&Value),
 	{
 		self.order.visit(visitor);
 	}
