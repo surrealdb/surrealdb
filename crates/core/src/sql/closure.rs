@@ -1,5 +1,6 @@
 use std::fmt;
 
+use crate::dbs::Variables;
 use crate::sql::{Expr, Kind, Param};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -37,6 +38,7 @@ impl From<Closure> for crate::val::Closure {
 			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
 			returns: v.returns.map(Into::into),
 			body: v.body.into(),
+			vars: Variables::new(),
 		}
 	}
 }
