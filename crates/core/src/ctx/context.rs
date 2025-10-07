@@ -7,10 +7,10 @@ use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::cache::ds::DatastoreCache;
+use crate::kvs::slowlog::SlowLog;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
-use crate::kvs::slowlog::SlowLog;
 use crate::mem::ALLOC;
 use crate::sql::value::Value;
 use async_channel::Sender;

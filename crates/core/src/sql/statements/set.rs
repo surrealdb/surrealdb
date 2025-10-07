@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::sql::Value;
 use crate::{cnf::PROTECTED_PARAM_NAMES, sql::Kind};
 
+use crate::sql::value::VisitExpression;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -62,6 +63,15 @@ impl fmt::Display for SetStatement {
 		}
 		write!(f, " = {}", self.what)?;
 		Ok(())
+	}
+}
+
+impl VisitExpression for SetStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.what.visit(visitor);
 	}
 }
 

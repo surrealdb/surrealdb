@@ -23,8 +23,8 @@ use crate::kvs::clock::SizedClock;
 use crate::kvs::clock::SystemClock;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::index::IndexBuilder;
-use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::kvs::slowlog::SlowLog;
+use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
 use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
 use crate::syn;
 use crate::syn::parser::{ParserSettings, StatementStream};

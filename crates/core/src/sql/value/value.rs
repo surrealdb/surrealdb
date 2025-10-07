@@ -84,6 +84,15 @@ impl From<&Tables> for Values {
 	}
 }
 
+impl VisitExpression for Values {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.0.iter().for_each(|v| visitor(v));
+	}
+}
+
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
@@ -3197,6 +3206,71 @@ impl TryNeg for Value {
 			Self::Number(n) => Self::Number(n.try_neg()?),
 			v => return Err(Error::TryNeg(v.to_string())),
 		})
+	}
+}
+
+/// A lightweight visitor for traversing an expression tree.
+///
+/// Implementors call the provided `visitor` function on `self` and any nested
+/// expressions. The traversal order is pre-order: the current node is visited
+/// before its children. This is intentionally minimal to keep traversal cheap.
+///
+/// This trait enables features that need to inspect a statement without
+/// executing it, such as slow-query logging, which walks the AST to find
+/// `$param` usages.
+pub(crate) trait VisitExpression {
+	/// Visit this expression and its nested expressions, invoking `visitor`
+	/// for each encountered node.
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value);
+}
+
+impl VisitExpression for Value {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		visitor(self);
+		match self {
+			Self::Param(_) => {}
+			Self::Idiom(_) => {}
+			Self::Table(_) => {}
+			Self::Mock(_) => {}
+			Self::Block(block) => {
+				block.visit(visitor);
+			}
+			Self::Constant(_) => {}
+			Self::None => {}
+			Self::Null => {}
+			Self::Bool(_) => {}
+			Self::Number(_) => {}
+			Self::Strand(_) => {}
+			Self::Duration(_) => {}
+			Self::Datetime(_) => {}
+			Self::Uuid(_) => {}
+			Self::Array(v) => {
+				v.visit(visitor);
+			}
+			Self::Object(v) => {
+				v.visit(visitor);
+			}
+			Self::Geometry(_) => {}
+			Self::Bytes(_) => {}
+			Self::Thing(_) => {}
+			Value::Regex(_) => {}
+			Value::Cast(_) => {}
+			Value::Range(_) => {}
+			Value::Edges(_) => {}
+			Value::Future(_) => {}
+			Value::Function(_) => {}
+			Value::Subquery(_) => {}
+			Value::Expression(_) => {}
+			Value::Query(_) => {}
+			Value::Model(_) => {}
+			Value::Closure(_) => {}
+			Value::Refs(_) => {}
+		}
 	}
 }
 

@@ -9,6 +9,7 @@ use crate::sql::{
 	Values, Version, With,
 };
 
+use crate::sql::value::VisitExpression;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -203,5 +204,18 @@ impl fmt::Display for SelectStatement {
 			write!(f, " {v}")?
 		}
 		Ok(())
+	}
+}
+
+impl VisitExpression for SelectStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.what.visit(visitor);
+		self.cond.iter().for_each(|v| v.visit(visitor));
+		self.order.iter().for_each(|v| v.visit(visitor));
+		self.start.iter().for_each(|v| v.0.visit(visitor));
+		self.group.iter().for_each(|v| v.visit(visitor));
 	}
 }

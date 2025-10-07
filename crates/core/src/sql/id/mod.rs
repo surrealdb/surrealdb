@@ -4,11 +4,12 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::value::VisitExpression;
 use crate::sql::{escape::EscapeRid, Array, Number, Object, Strand, Thing, Uuid, Value};
 use nanoid::nanoid;
 use range::IdRange;
 use reblessive::tree::Stk;
-use revision::revisioned;
+use revision::{revisioned, Revisioned};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
@@ -266,6 +267,27 @@ impl Id {
 				Gen::Uuid => Ok(Self::uuid()),
 			},
 			Id::Range(v) => Ok(Id::Range(Box::new(v.compute(stk, ctx, opt, doc).await?))),
+		}
+	}
+}
+
+impl VisitExpression for Id {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		match self {
+			Self::Number(_) => {}
+			Self::String(_) => {}
+			Self::Uuid(_) => {}
+			Self::Array(v) => {
+				v.visit(visitor);
+			}
+			Self::Object(v) => {
+				v.visit(visitor);
+			}
+			Self::Generate(_) => {}
+			Self::Range(_) => {}
 		}
 	}
 }

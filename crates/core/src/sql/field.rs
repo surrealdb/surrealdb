@@ -1,8 +1,10 @@
+use super::paths::ID;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
+use crate::sql::value::VisitExpression;
 use crate::sql::{fmt::Fmt, Idiom, Part, Value};
 use crate::syn;
 use reblessive::tree::Stk;
@@ -11,8 +13,6 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Deref;
-
-use super::paths::ID;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -71,6 +71,15 @@ impl Fields {
 			return false;
 		}
 		is_count_only
+	}
+}
+
+impl VisitExpression for Fields {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.0.iter().for_each(|v| v.visit(visitor));
 	}
 }
 
@@ -307,6 +316,23 @@ impl Display for Field {
 				} else {
 					Ok(())
 				}
+			}
+		}
+	}
+}
+
+impl VisitExpression for Field {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		match self {
+			Field::All => {}
+			Field::Single {
+				expr,
+				..
+			} => {
+				expr.visit(visitor);
 			}
 		}
 	}

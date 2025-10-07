@@ -15,7 +15,7 @@ use crate::sql::paths::NS;
 use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::statements::{OptionStatement, UseStatement};
-use crate::sql::value::Value;
+use crate::sql::value::{Value, VisitExpression};
 use crate::sql::Base;
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
@@ -143,8 +143,8 @@ impl Executor {
 							})?
 							.add_value(stm.name, val.into());
 
-				// Check if we dump the slow log
-				self.check_slow_log(start, stm.as_ref());
+						// Check if we dump the slow log
+						self.check_slow_log(start, &stm.what);
 						// Finalise transaction, returning nothing unless it couldn't commit
 						Ok(Value::None)
 					}

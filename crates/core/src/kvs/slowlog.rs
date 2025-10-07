@@ -22,9 +22,8 @@ use std::time::Duration;
 use trice::Instant;
 
 use crate::ctx::Context;
-use crate::expr::Expr;
-use crate::expr::expression::VisitExpression;
-use crate::sql::ToSql;
+use crate::sql::value::VisitExpression;
+use crate::sql::Value;
 
 #[derive(Clone)]
 /// Configuration and logic for slow query logging.
@@ -106,13 +105,13 @@ impl SlowLog {
 		// Extract params
 		let mut params = vec![];
 		stm.visit(&mut |e| {
-			if let Expr::Param(p) = e {
+			if let Value::Param(p) = e {
 				let name = p.as_str();
 				if !self.is_param_allowed(name) {
 					return;
 				}
 				if let Some(value) = ctx.value(name) {
-					if !value.is_nullish() {
+					if !value.is_none() && !value.is_null() {
 						let value = value.to_sql().split_whitespace().collect::<Vec<_>>().join(" ");
 						params.push(format!("${}={}", name, value));
 					}

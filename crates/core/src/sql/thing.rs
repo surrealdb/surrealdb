@@ -7,6 +7,7 @@ use crate::err::Error;
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::kvs::KeyDecode as _;
+use crate::sql::value::VisitExpression;
 use crate::sql::{escape::EscapeRid, id::Id, Strand, Value};
 use crate::syn;
 use futures::StreamExt;
@@ -301,6 +302,14 @@ impl Thing {
 	}
 }
 
+impl VisitExpression for Thing {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.id.visit(visitor);
+	}
+}
 #[cfg(test)]
 mod test {
 	use std::{ops::Bound, str::FromStr};
