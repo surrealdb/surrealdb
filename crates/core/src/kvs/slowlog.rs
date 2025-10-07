@@ -112,14 +112,15 @@ impl SlowLog {
 				}
 				if let Some(value) = ctx.value(name) {
 					if !value.is_none() && !value.is_null() {
-						let value = value.to_sql().split_whitespace().collect::<Vec<_>>().join(" ");
+						let value =
+							value.to_string().split_whitespace().collect::<Vec<_>>().join(" ");
 						params.push(format!("${}={}", name, value));
 					}
 				}
 			}
 		});
 		// Ensure the query is logged on a single line by collapsing whitespace
-		let stm = stm.to_sql().split_whitespace().collect::<Vec<_>>().join(" ");
+		let stm = stm.to_string().split_whitespace().collect::<Vec<_>>().join(" ");
 		let params = params.join(", ");
 		warn!("Slow query detected - time: {elapsed:#?} - query: {stm} - params: [ {params} ]");
 	}

@@ -14,6 +14,7 @@ use crate::sql::order::{OldOrders, Order, OrderList, Ordering};
 use crate::sql::split::Splits;
 use crate::sql::start::Start;
 use crate::sql::table::Tables;
+use crate::sql::value::VisitExpression;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -305,6 +306,38 @@ impl Display for GraphSubject {
 		match self {
 			Self::Table(tb) => Display::fmt(&tb, f),
 			Self::Range(tb, rng) => write!(f, "{tb}:{rng}"),
+		}
+	}
+}
+
+impl VisitExpression for Graph {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&crate::sql::Value),
+	{
+		if let Some(expr) = &self.expr {
+			expr.visit(visitor);
+		}
+		if let Some(cond) = &self.cond {
+			cond.visit(visitor);
+		}
+		if let Some(split) = &self.split {
+			split.visit(visitor);
+		}
+		if let Some(group) = &self.group {
+			group.visit(visitor);
+		}
+		if let Some(order) = &self.order {
+			order.visit(visitor);
+		}
+		if let Some(limit) = &self.limit {
+			limit.visit(visitor);
+		}
+		if let Some(start) = &self.start {
+			start.visit(visitor);
+		}
+		if let Some(alias) = &self.alias {
+			alias.visit(visitor);
 		}
 	}
 }

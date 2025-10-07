@@ -1,5 +1,6 @@
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
+use crate::sql::value::VisitExpression;
 use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -92,11 +93,50 @@ impl fmt::Display for Order {
 	}
 }
 
+impl VisitExpression for Ordering {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&crate::sql::Value),
+	{
+		match self {
+			Ordering::Random => {}
+			Ordering::Order(list) => list.visit(visitor),
+		}
+	}
+}
+
+impl VisitExpression for OrderList {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&crate::sql::Value),
+	{
+		self.0.iter().for_each(|o| o.visit(visitor));
+	}
+}
+
+impl VisitExpression for Order {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&crate::sql::Value),
+	{
+		self.value.visit(visitor);
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub struct OldOrders(pub Vec<OldOrder>);
+
+impl VisitExpression for OldOrders {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&crate::sql::Value),
+	{
+		self.0.iter().for_each(|o| o.visit(visitor));
+	}
+}
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -109,4 +149,13 @@ pub struct OldOrder {
 	pub numeric: bool,
 	/// true if the direction is ascending
 	pub direction: bool,
+}
+
+impl VisitExpression for OldOrder {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&crate::sql::Value),
+	{
+		self.order.visit(visitor);
+	}
 }

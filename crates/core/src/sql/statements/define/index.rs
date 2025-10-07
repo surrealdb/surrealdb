@@ -8,6 +8,7 @@ use crate::sql::statements::DefineTableStatement;
 use crate::sql::statements::UpdateStatement;
 use crate::sql::{Base, Ident, Idioms, Index, Output, Part, Strand, Value, Values};
 
+use crate::sql::value::VisitExpression;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -195,5 +196,14 @@ impl InfoStructure for DefineIndexStatement {
 			"index".to_string() => self.index.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})
+	}
+}
+
+impl VisitExpression for DefineIndexStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.cols.visit(visitor);
 	}
 }

@@ -53,6 +53,15 @@ impl InfoStructure for Idioms {
 	}
 }
 
+impl VisitExpression for Idioms {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.0.iter().for_each(|i| i.visit(visitor));
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Idiom")]

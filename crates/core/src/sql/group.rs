@@ -1,5 +1,6 @@
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
+use crate::sql::value::VisitExpression;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -52,5 +53,23 @@ impl Deref for Group {
 impl Display for Group {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&self.0, f)
+	}
+}
+
+impl VisitExpression for Groups {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&crate::sql::Value),
+	{
+		self.0.iter().for_each(|g| g.visit(visitor));
+	}
+}
+
+impl VisitExpression for Group {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&crate::sql::Value),
+	{
+		self.0.visit(visitor);
 	}
 }

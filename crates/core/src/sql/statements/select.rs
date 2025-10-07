@@ -212,10 +212,26 @@ impl VisitExpression for SelectStatement {
 	where
 		F: FnMut(&Value),
 	{
+		// SELECT projection expressions
+		self.expr.visit(visitor);
+		// OMIT clause idioms
+		self.omit.iter().for_each(|ids| ids.visit(visitor));
+		// FROM targets
 		self.what.visit(visitor);
+		// WHERE
 		self.cond.iter().for_each(|v| v.visit(visitor));
-		self.order.iter().for_each(|v| v.visit(visitor));
-		self.start.iter().for_each(|v| v.0.visit(visitor));
+		// SPLIT
+		self.split.iter().for_each(|v| v.visit(visitor));
+		// GROUP BY
 		self.group.iter().for_each(|v| v.visit(visitor));
+		// ORDER BY
+		self.order.iter().for_each(|v| v.visit(visitor));
+		// LIMIT / START
+		self.limit.iter().for_each(|v| v.visit(visitor));
+		self.start.iter().for_each(|v| v.0.visit(visitor));
+		// FETCH
+		self.fetch.iter().for_each(|v| v.visit(visitor));
+		// VERSION
+		self.version.iter().for_each(|v| v.visit(visitor));
 	}
 }
