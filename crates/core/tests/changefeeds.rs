@@ -307,7 +307,7 @@ async fn table_change_feeds() -> Result<()> {
 				syn::value(
 					format!(
 						r#"[
-						{{ versionstamp: {vs1}, changes: [ {{ define_table: {{ name: 'person', changefeed: {{ expiry: '1h', original: false }}, drop: false, kind: {{ kind: 'ANY' }}, permissions: {{ create: false, delete: false, select: false, update: false }}, schemafull: false }} }} ] }},
+						{{ versionstamp: {vs1}, changes: [ {{ define_table: {{ name: 'person', changefeed: {{ expiry: 1h, original: false }}, drop: false, kind: {{ kind: 'ANY' }}, permissions: {{ create: false, delete: false, select: false, update: false }}, schemafull: false }} }} ] }},
 						{{ versionstamp: {vs2}, changes: [ {{ update: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
 						{{ versionstamp: {vs3}, changes: [ {{ update: {{ id: person:test, name: 'Name: Jaime' }} }} ] }},
 						{{ versionstamp: {vs4}, changes: [ {{ update: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
