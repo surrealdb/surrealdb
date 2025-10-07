@@ -89,7 +89,7 @@ impl VisitExpression for Values {
 	where
 		F: FnMut(&Value),
 	{
-		self.0.iter().for_each(|v| visitor(v));
+		self.0.iter().for_each(|v| v.visit(visitor));
 	}
 }
 

@@ -29,9 +29,8 @@ impl VisitExpression for Output {
 	where
 		F: FnMut(&Value),
 	{
-		match self {
-			Self::Fields(f) => f.visit(visitor),
-			_ => {}
+		if let Self::Fields(f) = self {
+			f.visit(visitor);
 		}
 	}
 }
