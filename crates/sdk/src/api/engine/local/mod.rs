@@ -452,40 +452,6 @@ impl Surreal<Db> {
 	}
 }
 
-// fn process(responses: Vec<QueryResult>) -> IndexedResults {
-// 	let mut results = IndexMap::with_capacity(responses.len());
-// 	for (index, response) in responses.into_iter().enumerate() {
-// 		let stats = DbResultStats::default().with_execution_time(response.time);
-// 		results.insert(index, (stats, response.result));
-// 	}
-// 	IndexedResults {
-// 		results,
-// 		..QueryResponse::new()
-// 	}
-// }
-
-// async fn take(one: bool, responses: Vec<QueryResult>) -> Result<Value> {
-// 	if let Some((_stats, result)) = process(responses).results.swap_remove(&0) {
-// 		let value = result?;
-// 		match one {
-// 			true => match value {
-// 				Value::Array(mut array) => {
-// 					if let [ref mut value] = array[..] {
-// 						return Ok(mem::replace(value, Value::None));
-// 					}
-// 				}
-// 				Value::None | Value::Null => {}
-// 				value => return Ok(value),
-// 			},
-// 			false => return Ok(value),
-// 		}
-// 	}
-// 	match one {
-// 		true => Ok(Value::None),
-// 		false => Ok(Value::Array(Default::default())),
-// 	}
-// }
-
 #[cfg(not(target_family = "wasm"))]
 async fn export_file(
 	kvs: &Datastore,
@@ -994,37 +960,6 @@ async fn router(
 			version: _version,
 			args,
 		} => {
-			// let func = match name.strip_prefix("fn::") {
-			// 	Some(name) => Function::Custom(name.to_owned()),
-			// 	None => match name.strip_prefix("ml::") {
-			// 		#[cfg(feature = "ml")]
-			// 		Some(name) => Function::Model(Model {
-			// 			name: name.to_owned(),
-			// 			version: _version
-			// 				.ok_or(Error::Query("ML functions must have a version".to_string()))?,
-			// 		}),
-			// 		#[cfg(not(feature = "ml"))]
-			// 		Some(_) => {
-			// 			return Err(Error::Query(format!(
-			// 				"tried to call an ML function `{name}` but the `ml` feature is not enabled"
-			// 			))
-			// 			.into());
-			// 		}
-			// 		None => Function::Normal(name),
-			// 	},
-			// };
-
-			// let args = args.into_iter().map(Expr::from_public_value).collect();
-
-			// let plan = Expr::FunctionCall(Box::new(surrealdb_core::expr::FunctionCall {
-			// 	receiver: func,
-			// 	arguments: args,
-			// }));
-
-			// let plan = LogicalPlan {
-			// 	expressions: vec![TopLevelExpr::Expr(plan)],
-			// };
-
 			let args = args.into_iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",");
 
 			let sql = format!("{name}({args})");

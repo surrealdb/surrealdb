@@ -10,7 +10,7 @@ use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use surrealdb_core::dbs::{QueryResult, QueryResultBuilder};
 use surrealdb_core::rpc::{self, DbResponse, DbResult};
-use surrealdb_types::{SurrealValue, Value};
+use surrealdb_types::{SurrealValue, Value, Variables};
 #[cfg(not(target_family = "wasm"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_family = "wasm"))]
@@ -505,6 +505,24 @@ async fn router(
 		Command::SubscribeLive {
 			..
 		} => Err(Error::LiveQueriesNotSupported.into()),
+		Command::RawQuery {
+			txn,
+			query,
+			variables,
+		} => {
+			// Merge stored vars with query vars
+			let mut merged_vars =
+				vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Variables>();
+			merged_vars.extend(variables);
+			let cmd = Command::RawQuery {
+				txn,
+				query,
+				variables: merged_vars,
+			};
+			let req = cmd.into_router_request(None).unwrap();
+			let res = send_request(req, base_url, client, headers, auth).await?;
+			Ok(res)
+		}
 		cmd => {
 			let req = cmd.into_router_request(None).unwrap();
 			let res = send_request(req, base_url, client, headers, auth).await?;

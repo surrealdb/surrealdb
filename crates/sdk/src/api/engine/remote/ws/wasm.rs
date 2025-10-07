@@ -12,7 +12,7 @@ use revision::revisioned;
 use serde::Deserialize;
 use surrealdb_core::dbs::QueryResultBuilder;
 use surrealdb_core::rpc::{DbResponse, DbResult};
-use surrealdb_types::{Value, object};
+use surrealdb_types::{Value, Variables, object};
 use tokio::sync::watch;
 use trice::Instant;
 use wasm_bindgen_futures::spawn_local;
@@ -91,6 +91,25 @@ async fn router_handle_request(
 			trace!("Receiver dropped");
 		}
 		return HandleResult::Ok;
+	};
+
+	// Merge stored vars with query vars for RawQuery
+	let command = match command {
+		Command::RawQuery {
+			txn,
+			query,
+			variables,
+		} => {
+			let mut merged_vars =
+				state.vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Variables>();
+			merged_vars.extend(variables);
+			Command::RawQuery {
+				txn,
+				query,
+				variables: merged_vars,
+			}
+		}
+		other => other,
 	};
 
 	let mut effect = RequestEffect::None;

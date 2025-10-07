@@ -978,7 +978,7 @@ fn convert_datetime_to_public(value: crate::val::Datetime) -> Result<surrealdb_t
 }
 
 fn convert_duration_to_public(value: crate::val::Duration) -> Result<surrealdb_types::Value> {
-	Ok(surrealdb_types::Value::Duration(surrealdb_types::Duration::from_duration(value.0)))
+	Ok(surrealdb_types::Value::Duration(surrealdb_types::Duration::from_std(value.0)))
 }
 
 fn convert_uuid_to_public(value: crate::val::Uuid) -> Result<surrealdb_types::Value> {

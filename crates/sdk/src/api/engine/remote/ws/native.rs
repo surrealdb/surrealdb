@@ -33,7 +33,7 @@ use crate::api::opt::Tls;
 use crate::api::{ExtraFeatures, Result, Surreal};
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
-use crate::types::Value;
+use crate::types::{Value, Variables};
 
 pub(crate) const NAGLE_ALG: bool = false;
 
@@ -154,6 +154,25 @@ async fn router_handle_route(
 			trace!("Receiver dropped");
 		}
 		return HandleResult::Ok;
+	};
+
+	// Merge stored vars with query vars for RawQuery
+	let command = match command {
+		Command::RawQuery {
+			txn,
+			query,
+			variables,
+		} => {
+			let mut merged_vars =
+				state.vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Variables>();
+			merged_vars.extend(variables);
+			Command::RawQuery {
+				txn,
+				query,
+				variables: merged_vars,
+			}
+		}
+		other => other,
 	};
 
 	let mut effect = RequestEffect::None;

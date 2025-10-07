@@ -32,14 +32,6 @@ pub struct Failure {
 	pub message: String,
 }
 
-// #[revisioned(revision = 1)]
-// #[derive(Debug)]
-// pub enum Data {
-// 	Other(Value),
-// 	Query(Vec<dbs::QueryMethodResponse>),
-// 	Live(dbs::Notification),
-// }
-
 #[revisioned(revision = 1)]
 #[derive(Debug)]
 pub struct Response {

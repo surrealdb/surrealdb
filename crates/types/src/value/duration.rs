@@ -2,6 +2,7 @@ use std::fmt::Debug;
 use std::ops::Deref;
 use std::str::FromStr;
 
+use anyhow::anyhow;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
@@ -37,7 +38,7 @@ impl Duration {
 	}
 
 	/// Create a duration from std::time::Duration
-	pub fn from_duration(d: std::time::Duration) -> Self {
+	pub fn from_std(d: std::time::Duration) -> Self {
 		Self(d)
 	}
 
@@ -177,7 +178,8 @@ impl Duration {
 }
 
 impl FromStr for Duration {
-	type Err = ();
+	type Err = anyhow::Error;
+
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
 		let mut total_secs = 0u64;
 		let mut total_nanos = 0u32;
@@ -185,7 +187,7 @@ impl FromStr for Duration {
 
 		// Handle empty string
 		if remaining.is_empty() {
-			return Err(());
+			return Err(anyhow!("Invalid duration string: {s}, empty string"));
 		}
 
 		// Handle special case for zero duration
@@ -205,11 +207,13 @@ impl FromStr for Duration {
 			}
 
 			if end == 0 {
-				return Err(());
+				return Err(anyhow!("Invalid duration string: {s}, empty characters"));
 			}
 
 			let value_str = &remaining[..end];
-			let value: u64 = value_str.parse().map_err(|_| ())?;
+			let value: u64 = value_str.parse().map_err(|err| {
+				anyhow!("Invalid duration string: {s}, failed to parse value: {err}")
+			})?;
 
 			remaining = &remaining[end..];
 
@@ -245,7 +249,9 @@ impl FromStr for Duration {
 				remaining = &remaining[1..];
 				"s"
 			} else {
-				return Err(());
+				return Err(anyhow!(
+					"Invalid duration string: {s}, unexpected remainder: {remaining}"
+				));
 			};
 
 			// Convert to seconds and nanoseconds based on unit
@@ -286,7 +292,11 @@ impl FromStr for Duration {
 					total_secs = total_secs.saturating_add(secs);
 					total_nanos = total_nanos.saturating_add(nanos);
 				}
-				_ => return Err(()),
+				unexpected => {
+					return Err(anyhow!(
+						"Invalid duration string: {s}, unexpected unit: {unexpected}"
+					));
+				}
 			}
 		}
 

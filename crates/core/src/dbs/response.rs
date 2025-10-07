@@ -1,5 +1,4 @@
 use std::fmt;
-use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -122,10 +121,7 @@ impl SurrealValue for QueryResult {
 		let query_type =
 			map.remove("type").map(QueryType::from_value).transpose()?.unwrap_or_default();
 
-		let time = surrealdb_types::Duration::from_str(&time.into_string()?)
-			.map_err(|_| anyhow::anyhow!("Invalid time for QueryResult"))
-			.map(std::time::Duration::from)
-			.unwrap_or_default();
+		let time = humantime::parse_duration(&time.into_string()?)?;
 
 		// Grab result based on status
 

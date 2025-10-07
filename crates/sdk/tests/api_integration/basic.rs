@@ -454,6 +454,7 @@ pub async fn query_with_stats(new_db: impl CreateDb) {
 	let mut response = db.query(sql).with_stats().await.unwrap();
 	// First query statement
 	let (stats, result) = response.take(0).unwrap();
+	println!("stats: {stats:?}, result: {result:?}");
 	assert!(stats.execution_time > Some(Duration::ZERO));
 	let _: Value = result.unwrap();
 	// Second query statement
@@ -586,7 +587,7 @@ pub async fn create_record_with_id_in_content(new_db: impl CreateDb) {
 
 	assert_eq!(
 		error.to_string(),
-		"Internal error: Found user:jane for the `id` field, but a specific record has been specified"
+		"Thrown error: Found user:jane for the `id` field, but a specific record has been specified"
 	);
 
 	let _: Option<Record> = db
@@ -1545,7 +1546,7 @@ pub async fn changefeed(new_db: impl CreateDb) {
             define_table: {
                 name: 'testuser',
 				changefeed: {
-					expiry: '1h',
+					expiry: 1h,
 					original: false
 				},
 				drop: false,
@@ -1682,6 +1683,7 @@ pub async fn set_unset(new_db: impl CreateDb) {
 	let sql = "RETURN $name";
 	db.set(key, value).await.unwrap();
 	let mut response = db.query(sql).await.unwrap();
+	println!("response: {response:#?}");
 	let Some(name): Option<String> = response.take(0).unwrap() else {
 		panic!("record not found");
 	};

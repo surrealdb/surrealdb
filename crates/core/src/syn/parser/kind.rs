@@ -210,7 +210,7 @@ impl Parser<'_> {
 					compound::Numeric::Float(x) => KindLiteral::Float(x),
 					compound::Numeric::Decimal(x) => KindLiteral::Decimal(x),
 					compound::Numeric::Duration(x) => {
-						KindLiteral::Duration(PublicDuration::from_duration(x))
+						KindLiteral::Duration(PublicDuration::from_std(x))
 					}
 				};
 				Ok(v)
@@ -307,22 +307,6 @@ mod tests {
 		"set<float, 10>",
 		Kind::Set(Box::new(Kind::Float), Some(10))
 	)]
-	// #[case::union_literal_object(
-	// 	"{ status: 'ok', data: object } | { status: string, message: string }",
-	// 	"{ data: object, status: 'ok' } | { message: string, status: string }",
-	// 	Kind::Either(
-	// 		vec![
-	// 			Kind::Literal(KindLiteral::Object(map! {
-	// 				"status".to_string() => KindLiteral::String("ok".into()),
-	// 				"data".to_string() => KindLiteral::Object(map! {
-	// 					"status".to_string() => KindLiteral::String("ok".into()),
-	// 				}),
-	// 				"status".to_string() => KindLiteral::String("ok".into()),
-	// 				"message".to_string() => KindLiteral::String("ok".into()),
-	// 			})),
-	// 		]
-	// 	)
-	// )]
 	#[case::function_any("function", "function", Kind::Function(None, None))]
 	#[case::file_record_any("file", "file", Kind::File(vec![]))]
 	#[case::file_record_one("file<one>", "file<one>", Kind::File(vec!["one".to_owned()]))]

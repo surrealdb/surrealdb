@@ -105,21 +105,6 @@ impl TokenValue for surrealdb_types::Datetime {
 	}
 }
 
-// impl TokenValue for Uuid {
-// 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
-// 		let token = parser.peek();
-// 		match token.kind {
-// 			TokenKind::Glued(token::Glued::Uuid) => Ok(pop_glued!(parser, Uuid)),
-// 			t!("u\"") | t!("u'") => {
-// 				parser.pop_peek();
-// 				let v = parser.lexer.lex_compound(token, compound::uuid)?.value;
-// 				Ok(Uuid(v))
-// 			}
-// 			_ => unexpected!(parser, token, "a uuid"),
-// 		}
-// 	}
-// }
-
 impl TokenValue for surrealdb_types::Uuid {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();

@@ -14,8 +14,7 @@ use crate::types::{
 };
 use crate::{dbs, map};
 
-/// Query statistics
-// #[revisioned(revision = 1)]
+/// Query statistics.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub struct DbResultStats {

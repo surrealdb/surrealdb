@@ -59,6 +59,34 @@ impl FromStr for GeometryKind {
 	}
 }
 
+impl From<GeometryKind> for crate::types::PublicGeometryKind {
+	fn from(k: GeometryKind) -> Self {
+		match k {
+			GeometryKind::Point => crate::types::PublicGeometryKind::Point,
+			GeometryKind::Line => crate::types::PublicGeometryKind::Line,
+			GeometryKind::Polygon => crate::types::PublicGeometryKind::Polygon,
+			GeometryKind::MultiPoint => crate::types::PublicGeometryKind::MultiPoint,
+			GeometryKind::MultiLine => crate::types::PublicGeometryKind::MultiLine,
+			GeometryKind::MultiPolygon => crate::types::PublicGeometryKind::MultiPolygon,
+			GeometryKind::Collection => crate::types::PublicGeometryKind::Collection,
+		}
+	}
+}
+
+impl From<crate::types::PublicGeometryKind> for GeometryKind {
+	fn from(k: crate::types::PublicGeometryKind) -> Self {
+		match k {
+			crate::types::PublicGeometryKind::Point => GeometryKind::Point,
+			crate::types::PublicGeometryKind::Line => GeometryKind::Line,
+			crate::types::PublicGeometryKind::Polygon => GeometryKind::Polygon,
+			crate::types::PublicGeometryKind::MultiPoint => GeometryKind::MultiPoint,
+			crate::types::PublicGeometryKind::MultiLine => GeometryKind::MultiLine,
+			crate::types::PublicGeometryKind::MultiPolygon => GeometryKind::MultiPolygon,
+			crate::types::PublicGeometryKind::Collection => GeometryKind::Collection,
+		}
+	}
+}
+
 /// The kind, or data type, of a value or field.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -491,22 +519,9 @@ impl From<crate::types::PublicKind> for Kind {
 			crate::types::PublicKind::Regex => Kind::Regex,
 			crate::types::PublicKind::Range => Kind::Range,
 			crate::types::PublicKind::Record(tables) => Kind::Record(tables),
-			crate::types::PublicKind::Geometry(kinds) => Kind::Geometry(
-				kinds
-					.into_iter()
-					.map(|k| match k {
-						crate::types::PublicGeometryKind::Point => GeometryKind::Point,
-						crate::types::PublicGeometryKind::Line => GeometryKind::Line,
-						crate::types::PublicGeometryKind::Polygon => GeometryKind::Polygon,
-						crate::types::PublicGeometryKind::MultiPoint => GeometryKind::MultiPoint,
-						crate::types::PublicGeometryKind::MultiLine => GeometryKind::MultiLine,
-						crate::types::PublicGeometryKind::MultiPolygon => {
-							GeometryKind::MultiPolygon
-						}
-						crate::types::PublicGeometryKind::Collection => GeometryKind::Collection,
-					})
-					.collect(),
-			),
+			crate::types::PublicKind::Geometry(kinds) => {
+				Kind::Geometry(kinds.into_iter().map(Into::into).collect())
+			}
 			crate::types::PublicKind::Either(kinds) => {
 				Kind::Either(kinds.into_iter().map(Kind::from).collect())
 			}
@@ -546,22 +561,9 @@ impl From<Kind> for crate::types::PublicKind {
 			Kind::Regex => crate::types::PublicKind::Regex,
 			Kind::Range => crate::types::PublicKind::Range,
 			Kind::Record(tables) => crate::types::PublicKind::Record(tables),
-			Kind::Geometry(kinds) => crate::types::PublicKind::Geometry(
-				kinds
-					.into_iter()
-					.map(|k| match k {
-						GeometryKind::Point => crate::types::PublicGeometryKind::Point,
-						GeometryKind::Line => crate::types::PublicGeometryKind::Line,
-						GeometryKind::Polygon => crate::types::PublicGeometryKind::Polygon,
-						GeometryKind::MultiPoint => crate::types::PublicGeometryKind::MultiPoint,
-						GeometryKind::MultiLine => crate::types::PublicGeometryKind::MultiLine,
-						GeometryKind::MultiPolygon => {
-							crate::types::PublicGeometryKind::MultiPolygon
-						}
-						GeometryKind::Collection => crate::types::PublicGeometryKind::Collection,
-					})
-					.collect(),
-			),
+			Kind::Geometry(kinds) => {
+				crate::types::PublicKind::Geometry(kinds.into_iter().map(Into::into).collect())
+			}
 			Kind::Either(kinds) => {
 				crate::types::PublicKind::Either(kinds.into_iter().map(Into::into).collect())
 			}
