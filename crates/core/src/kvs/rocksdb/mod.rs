@@ -120,8 +120,8 @@ impl Datastore {
 		// Additional blob file options
 		info!(target: TARGET, "Target blob file size: {}", *cnf::ROCKSDB_BLOB_FILE_SIZE);
 		opts.set_blob_file_size(*cnf::ROCKSDB_BLOB_FILE_SIZE);
-		info!(target: TARGET, "Blob compression type: {}", *cnf::ROCKSDB_BLOB_COMPRESSION_TYPE);
-		if let Some(c) = cnf::ROCKSDB_BLOB_COMPRESSION_TYPE {
+		if let Some(c) = cnf::ROCKSDB_BLOB_COMPRESSION_TYPE.as_ref() {
+			info!(target: TARGET, "Blob compression type: {c}");
 			opts.set_blob_compression_type(match c.as_str() {
 				"none" => DBCompressionType::None,
 				"snappy" => DBCompressionType::Snappy,
