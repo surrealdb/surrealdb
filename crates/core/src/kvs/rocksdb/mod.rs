@@ -119,16 +119,18 @@ impl Datastore {
 		// Additional blob file options
 		info!(target: TARGET, "Target blob file size: {}", *cnf::ROCKSDB_BLOB_FILE_SIZE);
 		opts.set_blob_file_size(*cnf::ROCKSDB_BLOB_FILE_SIZE);
-		info!(target: TARGET, "Blob compression type: {}", *cnf::ROCKSDB_BLOB_COMPRESSION_TYPE);
-		opts.set_blob_compression_type(
-			match cnf::ROCKSDB_BLOB_COMPRESSION_TYPE.to_ascii_lowercase().as_str() {
+		if let Some(c) = cnf::ROCKSDB_BLOB_COMPRESSION_TYPE.as_ref() {
+			info!(target: TARGET, "Blob compression type: {c}");
+			opts.set_blob_compression_type(match c.as_str() {
 				"none" => DBCompressionType::None,
 				"snappy" => DBCompressionType::Snappy,
 				"lz4" => DBCompressionType::Lz4,
 				"zstd" => DBCompressionType::Zstd,
-				_ => DBCompressionType::Snappy,
-			},
-		);
+				l => {
+					return Err(Error::Ds(format!("Invalid compression type: {l}")));
+				}
+			});
+		}
 		info!(target: TARGET, "Enable blob garbage collection: {}", *cnf::ROCKSDB_ENABLE_BLOB_GC);
 		opts.set_enable_blob_gc(*cnf::ROCKSDB_ENABLE_BLOB_GC);
 		info!(target: TARGET, "Blob GC age cutoff: {}", *cnf::ROCKSDB_BLOB_GC_AGE_CUTOFF);
