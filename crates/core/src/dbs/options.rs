@@ -374,15 +374,12 @@ impl Options {
 			}
 		};
 
-		// If auth is disabled, allow all actions for anonymous users
-		if !self.auth_enabled && self.auth.is_anon() {
-			return Ok(());
-		}
+	// If auth is disabled, allow all actions for anonymous users
+	if !self.auth_enabled && self.auth.is_anon() {
+		return Ok(());
+	}
 
-		self.auth.is_allowed(action, &res).map_err(|x| match x.downcast() {
-			Ok(x) => anyhow::Error::new(Error::IamError(x)),
-			Err(e) => e,
-		})
+	self.auth.is_allowed(action, &res)
 	}
 
 	/// Checks the current server configuration, and
