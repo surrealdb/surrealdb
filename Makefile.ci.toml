@@ -466,7 +466,7 @@ script = """
     #!/bin/bash -ex
 
 
-    target/debug/surreal start ${_START_SURREALDB_PATH} --allow-all &>/tmp/surrealdb-${_TEST_API_ENGINE}.log &
+    target-${_TEST_API_ENGINE}/debug/surreal start ${_START_SURREALDB_PATH} --allow-all &>/tmp/surrealdb-${_TEST_API_ENGINE}.log &
 
     echo $! > /tmp/surreal-${_TEST_API_ENGINE}.pid
 
@@ -474,7 +474,7 @@ script = """
     echo "Waiting for surreal to be ready..."
     tries=0
     while [[ $tries < 5 ]]; do
-            target/debug/surreal is-ready 2>/dev/null && echo "Ready!" && exit 0 || sleep 1
+            target-${_TEST_API_ENGINE}/debug/surreal is-ready 2>/dev/null && echo "Ready!" && exit 0 || sleep 1
             tries=$((tries + 1))
     done
 
@@ -653,3 +653,82 @@ run_task = { name = ["bench-target"] }
 category = "CI - BENCHMARK - SurrealDB Target"
 env = { BENCH_DATASTORE_TARGET = "sdk-ws" }
 run_task = { name = ["bench-target"] }
+
+#
+# Comprehensive CI check - runs all required checks for PR merge
+#
+
+[tasks.ci-sdk-tests]
+category = "CI - INTEGRATION TESTS"
+dependencies = [
+    "ci-api-integration-mem",
+    "ci-api-integration-any",
+    "ci-api-integration-http",
+    "ci-api-integration-ws",
+]
+
+
+
+[tasks.ci-sdk-build]
+category = "CI - INTEGRATION TESTS"
+description = "Build SDK test projects"
+script = """
+    #!/bin/bash -e
+    echo "Building SDK local tests..."
+    cd tests/sdk/local
+    cargo build
+    
+    echo "Building SDK remote tests..."
+    cd ../remote
+    cargo build
+"""
+
+[tasks.ci-all-required]
+category = "CI - ALL REQUIRED CHECKS"
+description = "Run all required CI checks that must pass for PR merge (excludes tikv/fdb which require external services)"
+dependencies = [
+    # Code quality checks
+    "ci-format",
+    "ci-clippy",
+    "ci-clippy-release",
+    "ci-check",
+    "ci-check-release",
+    "ci-check-wasm",
+    "ci-docs",
+    # Integration tests
+    "ci-cli-integration",
+    "ci-http-integration",
+    "ci-ws-integration",
+    "ci-ml-integration",
+    # Workspace tests (use ci-test-workspace instead of ci-workspace-coverage to skip coverage overhead)
+    "ci-test-workspace",
+    # KVS tests (local engines only - tikv/fdb require external services)
+    "ci-mem-kvs",
+    "ci-rocksdb-kvs",
+    "ci-surrealkv-kvs",
+    # SDK build tests
+    "ci-sdk-build",
+    # SDK tests (local engines only - tikv/fdb require external services)
+    "ci-api-integration-mem",
+    "ci-api-integration-rocksdb",
+    "ci-api-integration-surrealkv",
+    "ci-api-integration-http",
+    "ci-api-integration-ws",
+    "ci-api-integration-any",
+]
+
+[tasks.ci-all-required-with-lang]
+category = "CI - ALL REQUIRED CHECKS"
+description = "Run all required CI checks including SurrealQL language tests"
+script = """
+    #!/bin/bash -e
+    
+    # Run all standard required checks
+    cargo make ci-all-required
+    
+    # Run SurrealQL language tests
+    echo "Running SurrealQL language tests..."
+    cd crates/language-tests
+    cargo build
+    ./target/debug/surrealql-test --color always run --no-wip -j 3
+"""

@@ -215,8 +215,8 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 	let err_str = err.to_string();
 	if err_str.contains("signup_thrown_error") {
 		// Expected thrown error
-	} else if let Some(e) = err.downcast_ref() {
-		match e {
+	} else {
+		match &err {
 			surrealdb::error::Api::Query(e) => assert!(e.contains("signup")),
 			surrealdb::error::Api::Http(e) => assert_eq!(
 				e,
@@ -224,8 +224,6 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 			),
 			x => panic!("unexpected error: {x:?}"),
 		}
-	} else {
-		panic!("unexpected error: {err:?}")
 	}
 
 	let err = db
@@ -245,8 +243,8 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 	let err_str = err.to_string();
 	if err_str.contains("signin_thrown_error") {
 		// Expected thrown error
-	} else if let Some(e) = err.downcast_ref() {
-		match e {
+	} else {
+		match &err {
 			surrealdb::error::Api::Query(e) => assert!(e.contains("signin")),
 			surrealdb::error::Api::Http(e) => assert_eq!(
 				e,
@@ -254,8 +252,6 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 			),
 			x => panic!("unexpected error: {x:?}"),
 		}
-	} else {
-		panic!("unexpected error: {err:?}")
 	}
 }
 
@@ -296,8 +292,8 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 	let err_str = err.to_string();
 	if err_str.contains("signup query failed") || err_str.contains("signup") {
 		// Expected error
-	} else if let Some(e) = err.downcast_ref() {
-		match e {
+	} else {
+		match &err {
 			surrealdb::error::Api::Query(e) => {
 				assert_eq!(e, "The record access signup query failed")
 			}
@@ -307,8 +303,6 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 			),
 			x => panic!("unexpected error: {x:?}"),
 		}
-	} else {
-		panic!("unexpected error: {err:?}")
 	};
 
 	let err = db
@@ -328,8 +322,8 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 	let err_str = err.to_string();
 	if err_str.contains("signin query failed") || err_str.contains("signin") {
 		// Expected error
-	} else if let Some(e) = err.downcast_ref() {
-		match e {
+	} else {
+		match &err {
 			surrealdb::error::Api::Query(e) => {
 				assert_eq!(e, "The record access signin query failed")
 			}
@@ -339,8 +333,6 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 			),
 			x => panic!("unexpected error: {x:?}"),
 		}
-	} else {
-		panic!("unexpected error: {err:?}")
 	};
 }
 
@@ -586,7 +578,7 @@ pub async fn create_record_with_id_in_content(new_db: impl CreateDb) {
 
 	assert_eq!(
 		error.to_string(),
-		"Thrown error: Found user:jane for the `id` field, but a specific record has been specified"
+		"Internal error: Found user:jane for the `id` field, but a specific record has been specified"
 	);
 
 	let _: Option<Record> = db

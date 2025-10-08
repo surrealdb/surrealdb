@@ -38,7 +38,7 @@ where
 	Box::pin(async move {
 		let router = client.inner.router.extract()?;
 		if !router.features.contains(&ExtraFeatures::LiveQueries) {
-			return Err(Error::LiveQueriesNotSupported.into());
+			return Err(Error::LiveQueriesNotSupported);
 		}
 
 		// Generate the LIVE SELECT SQL based on resource type
@@ -50,12 +50,12 @@ where
 				// For a specific record, we use WHERE id = record
 				format!("LIVE SELECT * FROM `{}` WHERE id = {}", record.table, record.to_sql())
 			}
-			Resource::Object(_) => return Err(Error::LiveOnObject.into()),
-			Resource::Array(_) => return Err(Error::LiveOnArray.into()),
+			Resource::Object(_) => return Err(Error::LiveOnObject),
+			Resource::Array(_) => return Err(Error::LiveOnArray),
 			Resource::Range(range) => {
 				let record = range.0;
 				let RecordIdKey::Range(ref key_range) = record.key else {
-					return Err(Error::InvalidParams("Invalid range in resource".to_owned()).into());
+					return Err(Error::InvalidParams("Invalid range in resource".to_owned()));
 				};
 
 				// Build WHERE clause for range queries
@@ -94,7 +94,7 @@ where
 					)
 				}
 			}
-			Resource::Unspecified => return Err(Error::LiveOnUnspecified.into()),
+			Resource::Unspecified => return Err(Error::LiveOnUnspecified),
 		};
 		// Execute the LIVE SELECT query directly to get the UUID
 		let results = router
@@ -118,16 +118,14 @@ where
 				_ => {
 					return Err(Error::InternalError(
 						"successful live query didn't return a uuid".to_string(),
-					)
-					.into());
+					));
 				}
 			},
 			other => {
 				return Err(Error::InternalError(format!(
 					"successful live query didn't return a uuid, got: {:?}",
 					other
-				))
-				.into());
+				)));
 			}
 		};
 
@@ -340,7 +338,7 @@ where
 				data,
 				action,
 			})),
-			Err(error) => Some(Err(error)),
+			Err(error) => Some(Err(error.into())),
 		},
 	}
 }

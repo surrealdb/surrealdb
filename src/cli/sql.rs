@@ -287,7 +287,7 @@ fn process(
 		let mut stream = match response.into_inner().stream::<Value>(()) {
 			Ok(stream) => stream,
 			Err(error) => {
-				print(Err(error));
+				print(Err(error.into()));
 				return;
 			}
 		};
@@ -300,7 +300,7 @@ fn process(
 			} = match result {
 				Ok(notification) => notification,
 				Err(error) => {
-					print(Err(error));
+					print(Err(error.into()));
 					continue;
 				}
 			};

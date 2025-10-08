@@ -2,7 +2,6 @@ use std::fmt::Display;
 use std::time::Duration;
 
 use anyhow::Context;
-use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use surrealdb_types::{kind, object};
 use thiserror::Error;
@@ -259,66 +258,6 @@ impl SurrealValue for DbResultError {
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize)]
-struct DbResultSerde {
-	code: i64,
-	message: String,
-}
-
-// Serialize as if it were struct with a code and message field.
-impl Revisioned for DbResultError {
-	fn revision() -> u16 {
-		1
-	}
-}
-
-impl SerializeRevisioned for DbResultError {
-	fn serialize_revisioned<W: std::io::Write>(
-		&self,
-		writer: &mut W,
-	) -> Result<(), revision::Error> {
-		DbResultSerde {
-			code: self.code(),
-			message: self.message(),
-		}
-		.serialize_revisioned(writer)
-	}
-}
-
-impl DeserializeRevisioned for DbResultError {
-	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		let serde: DbResultSerde = DeserializeRevisioned::deserialize_revisioned(reader)?;
-		Ok(DbResultError::from_code(serde.code, serde.message))
-	}
-}
-
-// Examples of correct serialization:
-// { code: -32603, message: "Invalid params: Invalid params" }
-impl Serialize for DbResultError {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: serde::Serializer,
-	{
-		DbResultSerde {
-			code: self.code(),
-			message: self.message(),
-		}
-		.serialize(serializer)
-	}
-}
-
-impl<'de> Deserialize<'de> for DbResultError {
-	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-	where
-		D: serde::Deserializer<'de>,
-	{
-		let s = DbResultSerde::deserialize(deserializer)?;
-		println!("s: {:?}", s);
-		Ok(DbResultError::from_code(s.code, s.message))
-	}
-}
-
 impl Display for DbResultError {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		f.write_str(&self.message())
@@ -354,7 +293,7 @@ impl From<RpcError> for DbResultError {
 	}
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct DbResponse {
 	pub id: Option<PublicValue>,
 	pub result: Result<DbResult, DbResultError>,

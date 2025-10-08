@@ -5798,7 +5798,6 @@ dependencies = [
 name = "surrealdb"
 version = "3.0.0-alpha.10"
 dependencies = [
- "anyhow",
  "arrayvec",
  "async-channel",
  "bincode",

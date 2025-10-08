@@ -4,7 +4,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Error;
 use futures::StreamExt;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::options::EngineOptions;
@@ -14,6 +13,7 @@ use tokio_util::sync::CancellationToken;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
+use crate::api::err::Error;
 use crate::engine::IntervalStream;
 
 #[cfg(not(target_family = "wasm"))]

@@ -13,12 +13,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Result;
 use futures::{Stream, StreamExt};
-use surrealdb::Notification;
 use surrealdb::method::QueryStream;
 use surrealdb::opt::Resource;
 use surrealdb::types::{Action, RecordId, SurrealValue, Value, object};
+use surrealdb::{Notification, Result};
 use tokio::sync::RwLock;
 use tracing::info;
 use ulid::Ulid;

@@ -51,7 +51,8 @@ struct PendingRequest {
 	// Does resolving this request has some effects.
 	effect: RequestEffect,
 	// The channel to send the result of the request into.
-	response_channel: Sender<Result<Vec<QueryResult>>>,
+	response_channel:
+		Sender<std::result::Result<Vec<QueryResult>, surrealdb_core::rpc::DbResultError>>,
 }
 
 struct RouterState<Sink, Stream> {
@@ -88,7 +89,8 @@ impl<Sink, Stream> RouterState<Sink, Stream> {
 		for (_id, request) in self.pending_requests.drain() {
 			let error = io::Error::from(io::ErrorKind::ConnectionReset);
 			let sender = request.response_channel;
-			sender.send(Err(error.into())).await.ok();
+			let err: crate::api::err::Error = error.into();
+			sender.send(Err(err.into())).await.ok();
 			sender.close();
 		}
 	}

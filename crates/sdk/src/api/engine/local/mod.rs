@@ -158,8 +158,6 @@ use std::task::{Poll, ready};
 #[cfg(not(target_family = "wasm"))]
 use std::{future::Future, path::PathBuf};
 
-#[cfg(not(target_family = "wasm"))]
-use anyhow::bail;
 use async_channel::Sender;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use futures::StreamExt;
@@ -458,7 +456,7 @@ async fn export_file(
 	sess: &Session,
 	chn: async_channel::Sender<Vec<u8>>,
 	config: Option<DbExportConfig>,
-) -> Result<()> {
+) -> std::result::Result<(), crate::api::Error> {
 	let res = match config {
 		Some(config) => kvs.export_with_config(sess, chn, config).await?.await,
 		None => kvs.export(sess, chn).await?.await,
@@ -473,7 +471,7 @@ async fn export_file(
 			return Ok(());
 		}
 
-		return Err(error);
+		return Err(crate::api::Error::InternalError(error.to_string()));
 	}
 	Ok(())
 }
@@ -487,18 +485,26 @@ async fn export_ml(
 		name,
 		version,
 	}: MlExportConfig,
-) -> Result<()> {
-	let (nsv, dbv) = check_ns_db(sess)?;
+) -> std::result::Result<(), crate::api::Error> {
+	let (nsv, dbv) =
+		check_ns_db(sess).map_err(|e| crate::api::Error::InternalError(e.to_string()))?;
 	// Check the permissions level
-	kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))?;
+	kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))
+		.map_err(|e| crate::api::Error::InternalError(e.to_string()))?;
 
 	// Attempt to get the model definition
-	let Some(model) = kvs.get_db_model(&nsv, &dbv, &name, &version).await? else {
+	let Some(model) = kvs
+		.get_db_model(&nsv, &dbv, &name, &version)
+		.await
+		.map_err(|e| crate::api::Error::InternalError(e.to_string()))?
+	else {
 		// Attempt to get the model definition
-		anyhow::bail!("Model not found".to_string());
+		return Err(crate::api::Error::InternalError("Model not found".to_string()));
 	};
 	// Export the file data in to the store
-	let mut data = surrealdb_core::obs::stream(model.hash.clone()).await?;
+	let mut data = surrealdb_core::obs::stream(model.hash.clone())
+		.await
+		.map_err(|e| crate::api::Error::InternalError(e.to_string()))?;
 	// Process all stream values
 	while let Some(Ok(bytes)) = data.next().await {
 		if chn.send(bytes.to_vec()).await.is_err() {
@@ -509,19 +515,19 @@ async fn export_ml(
 }
 
 #[cfg(not(target_family = "wasm"))]
-async fn copy<'a, R, W>(path: PathBuf, reader: &'a mut R, writer: &'a mut W) -> Result<()>
+async fn copy<'a, R, W>(
+	path: PathBuf,
+	reader: &'a mut R,
+	writer: &'a mut W,
+) -> std::result::Result<(), crate::api::Error>
 where
 	R: tokio::io::AsyncRead + Unpin + ?Sized,
 	W: tokio::io::AsyncWrite + Unpin + ?Sized,
 {
-	io::copy(reader, writer)
-		.await
-		.map(|_| ())
-		.map_err(|error| crate::error::Api::FileRead {
-			path,
-			error,
-		})
-		.map_err(anyhow::Error::new)
+	io::copy(reader, writer).await.map(|_| ()).map_err(|error| crate::api::Error::FileRead {
+		path,
+		error,
+	})
 }
 
 async fn kill_live_query(
@@ -529,14 +535,7 @@ async fn kill_live_query(
 	id: Uuid,
 	session: &Session,
 	vars: Variables,
-) -> Result<Vec<QueryResult>> {
-	// let kill_plan = KillStatement {
-	// 	id: Expr::Literal(Literal::Uuid(id.into())),
-	// };
-	// let plan = LogicalPlan {
-	// 	expressions: vec![TopLevelExpr::Kill(kill_plan)],
-	// };
-
+) -> std::result::Result<Vec<QueryResult>, DbResultError> {
 	let sql = format!("KILL {id}");
 
 	let results = kvs.execute(&sql, session, Some(vars)).await?;
@@ -552,7 +551,7 @@ async fn router(
 	session: &Arc<RwLock<Session>>,
 	vars: &Arc<RwLock<Variables>>,
 	live_queries: &Arc<RwLock<LiveQueryMap>>,
-) -> Result<Vec<QueryResult>> {
+) -> std::result::Result<Vec<QueryResult>, crate::api::Error> {
 	match command {
 		Command::Use {
 			namespace,
@@ -678,8 +677,7 @@ async fn router(
 					return Err(crate::api::Error::FileOpen {
 						path: file,
 						error,
-					}
-					.into());
+					});
 				}
 			};
 
@@ -727,8 +725,7 @@ async fn router(
 					return Err(crate::api::Error::FileOpen {
 						path,
 						error,
-					}
-					.into());
+					});
 				}
 			};
 
@@ -807,7 +804,7 @@ async fn router(
 			let file = match OpenOptions::new().read(true).open(&path).await {
 				Ok(path) => path,
 				Err(error) => {
-					bail!(crate::api::Error::FileOpen {
+					return Err(crate::api::Error::FileOpen {
 						path,
 						error,
 					});
@@ -832,7 +829,7 @@ async fn router(
 					Ok(0) => Poll::Ready(None),
 					Ok(_) => Poll::Ready(Some(Ok(buffer.split().freeze()))),
 					Err(e) => {
-						let error = anyhow::Error::new(e);
+						let error = surrealdb_types::anyhow::Error::new(e);
 						Poll::Ready(Some(Err(error)))
 					}
 				}
@@ -840,7 +837,8 @@ async fn router(
 
 			let responses = kvs
 				.execute_import(&*session.read().await, Some(vars.read().await.clone()), stream)
-				.await?;
+				.await
+				.map_err(|e| crate::api::Error::InternalError(e.to_string()))?;
 
 			for response in responses {
 				response.result?;
@@ -859,8 +857,7 @@ async fn router(
 					return Err(crate::api::Error::FileOpen {
 						path,
 						error,
-					}
-					.into());
+					});
 				}
 			};
 
@@ -875,8 +872,7 @@ async fn router(
 				return Err(crate::api::Error::FileRead {
 					path,
 					error,
-				}
-				.into());
+				});
 			}
 			// Check that the SurrealML file is valid
 			let file = match SurMlFile::from_bytes(buffer) {
@@ -888,8 +884,7 @@ async fn router(
 							io::ErrorKind::InvalidData,
 							error.message.to_string(),
 						),
-					}
-					.into());
+					});
 				}
 			};
 			// Convert the file back in to raw bytes
@@ -920,7 +915,8 @@ async fn router(
 			value,
 		} => {
 			let query_result = QueryResultBuilder::started_now();
-			surrealdb_core::rpc::check_protected_param(&key)?;
+			surrealdb_core::rpc::check_protected_param(&key)
+				.map_err(|e| crate::api::Error::InternalError(e.to_string()))?;
 			// Need to compute because certain keys might not be allowed to be set and those
 			// should be rejected by an error.
 			match value {

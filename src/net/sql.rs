@@ -72,7 +72,7 @@ async fn post_handler(
 			_ => Err(NetError::InvalidType.into()),
 		},
 		// There was an error when executing the query
-		Err(err) => Err(ResponseError(err)),
+		Err(err) => Err(ResponseError(err.into())),
 	}
 }
 

@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 
 use async_channel::{Receiver, Sender};
 use surrealdb_core::dbs::QueryResult;
+use surrealdb_core::rpc::DbResultError;
 use surrealdb_types::{SurrealValue, Value};
 
 use crate::api::err::Error;
@@ -30,7 +31,7 @@ pub(crate) struct Route {
 	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) request: RequestData,
 	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
-	pub(crate) response: Sender<Result<Vec<QueryResult>>>,
+	pub(crate) response: Sender<std::result::Result<Vec<QueryResult>, DbResultError>>,
 }
 
 /// Message router
@@ -48,10 +49,11 @@ impl Router {
 		self.last_id.fetch_add(1, Ordering::SeqCst)
 	}
 
+	#[allow(clippy::type_complexity)]
 	pub(crate) fn send_command(
 		&self,
 		command: Command,
-	) -> BoxFuture<'_, Result<Receiver<Result<Vec<QueryResult>>>>> {
+	) -> BoxFuture<'_, Result<Receiver<std::result::Result<Vec<QueryResult>, DbResultError>>>> {
 		Box::pin(async move {
 			let id = self.next_id();
 			let (sender, receiver) = async_channel::bounded(1);
@@ -62,7 +64,10 @@ impl Router {
 				},
 				response: sender,
 			};
-			self.sender.send(route).await?;
+			self.sender
+				.send(route)
+				.await
+				.map_err(|e| Error::InternalError(format!("Failed to send command: {}", e)))?;
 			Ok(receiver)
 		})
 	}
@@ -70,11 +75,12 @@ impl Router {
 	/// Receive responses for all methods except `query`
 	pub(crate) fn recv_value(
 		&self,
-		receiver: Receiver<Result<Vec<QueryResult>>>,
+		receiver: Receiver<std::result::Result<Vec<QueryResult>, DbResultError>>,
 	) -> BoxFuture<'_, std::result::Result<Value, Error>> {
 		Box::pin(async move {
 			let response = receiver.recv().await.map_err(|_| Error::ConnectionUninitialised)?;
-			let mut results = response.map_err(|e| Error::InternalError(e.to_string()))?;
+			// The response already uses DbResultError, so we just convert directly
+			let mut results = response.map_err(Error::from)?;
 
 			match results.len() {
 				0 => Ok(Value::None),
@@ -92,9 +98,12 @@ impl Router {
 	/// Receive the response of the `query` method
 	pub(crate) fn recv_results(
 		&self,
-		receiver: Receiver<Result<Vec<QueryResult>>>,
+		receiver: Receiver<std::result::Result<Vec<QueryResult>, DbResultError>>,
 	) -> BoxFuture<'_, Result<Vec<QueryResult>>> {
-		Box::pin(async move { receiver.recv().await? })
+		Box::pin(async move {
+			let results = receiver.recv().await.map_err(|_| Error::ConnectionUninitialised)?;
+			results.map_err(Error::from)
+		})
 	}
 
 	/// Execute all methods except `query`
@@ -107,12 +116,13 @@ impl Router {
 			let value = self.recv_value(rx).await?;
 			// Handle single-element arrays that might be returned from operations like
 			// signup/signin
-			match value {
+			let result = match value {
 				Value::Array(array) if array.len() == 1 => {
 					R::from_value(array.into_iter().next().unwrap())
 				}
 				v => R::from_value(v),
-			}
+			};
+			Ok(result?)
 		})
 	}
 
@@ -148,9 +158,10 @@ impl Router {
 			let rx = self.send_command(command).await?;
 			match self.recv_value(rx).await? {
 				Value::None | Value::Null => Ok(Vec::new()),
-				Value::Array(array) => {
-					array.into_iter().map(R::from_value).collect::<Result<Vec<R>>>()
-				}
+				Value::Array(array) => array
+					.into_iter()
+					.map(|v| R::from_value(v).map_err(Into::into))
+					.collect::<Result<Vec<R>>>(),
 				value => Ok(vec![R::from_value(value)?]),
 			}
 		})
@@ -166,8 +177,7 @@ impl Router {
 				value => Err(Error::FromValue {
 					value,
 					error: "expected the database to return nothing".to_owned(),
-				}
-				.into()),
+				}),
 			}
 		})
 	}
@@ -176,7 +186,7 @@ impl Router {
 	pub(crate) fn execute_value(&self, command: Command) -> BoxFuture<'_, Result<Value>> {
 		Box::pin(async move {
 			let rx = self.send_command(command).await?;
-			self.recv_value(rx).await.map_err(Into::into)
+			self.recv_value(rx).await
 		})
 	}
 

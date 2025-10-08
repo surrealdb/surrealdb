@@ -46,11 +46,11 @@ impl Resource {
 			Resource::Table(table) => {
 				Ok(Resource::Range(QueryRange(RecordId::new(table, Box::new(range)))))
 			}
-			Resource::RecordId(_) => Err(Error::RangeOnRecordId.into()),
-			Resource::Object(_) => Err(Error::RangeOnObject.into()),
-			Resource::Array(_) => Err(Error::RangeOnArray.into()),
-			Resource::Range(_) => Err(Error::RangeOnRange.into()),
-			Resource::Unspecified => Err(Error::RangeOnUnspecified.into()),
+			Resource::RecordId(_) => Err(Error::RangeOnRecordId),
+			Resource::Object(_) => Err(Error::RangeOnObject),
+			Resource::Array(_) => Err(Error::RangeOnArray),
+			Resource::Range(_) => Err(Error::RangeOnRange),
+			Resource::Unspecified => Err(Error::RangeOnUnspecified),
 		}
 	}
 
@@ -97,8 +97,8 @@ impl SurrealValue for Resource {
 		}
 	}
 
-	fn from_value(value: Value) -> anyhow::Result<Self> {
-		Err(anyhow::anyhow!("Invalid resource: {value}"))
+	fn from_value(value: Value) -> surrealdb_types::anyhow::Result<Self> {
+		Err(surrealdb_types::anyhow::anyhow!("Invalid resource: {value}"))
 	}
 }
 
@@ -346,8 +346,7 @@ fn no_colon(a: &str) -> Result<()> {
 	if a.contains(':') {
 		return Err(Error::TableColonId {
 			table: a.to_string(),
-		}
-		.into());
+		});
 	}
 	Ok(())
 }

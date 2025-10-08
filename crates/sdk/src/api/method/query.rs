@@ -62,7 +62,7 @@ impl<T: SurrealValue> IntoVariables for T {
 				Ok(vars)
 			}
 			unexpected => {
-				Err(Error::InvalidParams(format!("Invalid variables type: {unexpected:?}")).into())
+				Err(Error::InvalidParams(format!("Invalid variables type: {unexpected:?}")))
 			}
 		}
 	}
@@ -918,13 +918,13 @@ mod tests {
 		let Err(e) = response.take::<Option<bool>>(0) else {
 			panic!("silently dropping records not allowed");
 		};
-		let Ok(Error::LossyTake(IndexedResults {
-			results: mut map,
-			..
-		})) = e.downcast()
-		else {
+		let Error::LossyTake(boxed) = e else {
 			panic!("silently dropping records not allowed");
 		};
+		let IndexedResults {
+			results: mut map,
+			..
+		} = *boxed;
 
 		let records = map.swap_remove(&0).unwrap().1.unwrap();
 		assert_eq!(records, Value::from_vec(vec![Value::from_bool(true), Value::from_bool(false)]));

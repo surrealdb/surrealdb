@@ -105,7 +105,7 @@ async fn execute_and_return(
 			_ => Err(anyhow::Error::new(NetError::InvalidType)),
 		},
 		// There was an error when executing the query
-		Err(err) => Err(err),
+		Err(err) => Err(err.into()),
 	}
 }
 

@@ -150,8 +150,7 @@ where
 					if data.is_array() {
 						Err(Error::InvalidParams(
 							"Tried to insert multiple records on a record ID".to_owned(),
-						)
-						.into())
+						))
 					} else {
 						if let Value::Object(ref mut x) = data {
 							x.insert("id".to_string(), thing.key.into_value());
@@ -165,9 +164,9 @@ where
 						})
 					}
 				}
-				Resource::Object(_) => Err(Error::InsertOnObject.into()),
-				Resource::Array(_) => Err(Error::InsertOnArray.into()),
-				Resource::Range(_) => Err(Error::InsertOnRange.into()),
+				Resource::Object(_) => Err(Error::InsertOnObject),
+				Resource::Array(_) => Err(Error::InsertOnArray),
+				Resource::Range(_) => Err(Error::InsertOnRange),
 				Resource::Unspecified => {
 					// When unspecified, we just INSERT the data directly
 					let query = format!("INSERT {}", data.to_sql());
@@ -211,8 +210,7 @@ where
 					if data.is_array() {
 						Err(Error::InvalidParams(
 							"Tried to insert multiple records on a record ID".to_owned(),
-						)
-						.into())
+						))
 					} else {
 						if let Value::Object(ref mut x) = data {
 							x.insert("id".to_string(), thing.key.into_value());
@@ -235,9 +233,9 @@ where
 						variables: Variables::new(),
 					})
 				}
-				Resource::Object(_) => Err(Error::InsertOnObject.into()),
-				Resource::Array(_) => Err(Error::InsertOnArray.into()),
-				Resource::Range(_) => Err(Error::InsertOnRange.into()),
+				Resource::Object(_) => Err(Error::InsertOnObject),
+				Resource::Array(_) => Err(Error::InsertOnArray),
+				Resource::Range(_) => Err(Error::InsertOnRange),
 			}
 		})
 	}

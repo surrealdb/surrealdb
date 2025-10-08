@@ -6,7 +6,7 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::sync::{Arc, OnceLock};
 
-use anyhow::ensure;
+// Removed anyhow::ensure - will implement custom ensure macro if needed
 use method::BoxFuture;
 use semver::{BuildMetadata, Version, VersionReq};
 use tokio::sync::watch;
@@ -122,7 +122,9 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			// Avoid establishing another connection if already connected
-			ensure!(self.surreal.inner.router.get().is_none(), Error::AlreadyConnected);
+			if self.surreal.inner.router.get().is_some() {
+				return Err(Error::AlreadyConnected);
+			}
 			let endpoint = self.address?;
 			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
 			let client = Client::connect(endpoint, self.capacity).await?;
@@ -222,21 +224,19 @@ where
 		let req = VersionReq::parse(versions).expect("valid supported versions");
 		let build_meta = BuildMetadata::new(build_meta).expect("valid supported build metadata");
 		let server_build = &version.build;
-		ensure!(
-			req.matches(version),
-			Error::VersionMismatch {
+		if !req.matches(version) {
+			return Err(Error::VersionMismatch {
 				server_version: version.clone(),
 				supported_versions: versions.to_owned(),
-			}
-		);
+			});
+		}
 
-		ensure!(
-			server_build.is_empty() || server_build >= &build_meta,
-			Error::BuildMetadataMismatch {
+		if !server_build.is_empty() && server_build < &build_meta {
+			return Err(Error::BuildMetadataMismatch {
 				server_metadata: server_build.clone(),
 				supported_metadata: build_meta,
-			}
-		);
+			});
+		}
 		Ok(())
 	}
 }

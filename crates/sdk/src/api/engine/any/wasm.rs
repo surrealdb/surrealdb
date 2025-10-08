@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
 
-use anyhow::{Result, bail};
 use tokio::sync::watch;
 use wasm_bindgen_futures::spawn_local;
 
@@ -12,7 +11,7 @@ use crate::api::engine::any::Any;
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::{Endpoint, EndpointKind};
-use crate::api::{ExtraFeatures, Surreal, conn};
+use crate::api::{ExtraFeatures, Result, Surreal, conn};
 use crate::opt::WaitFor;
 
 impl crate::api::Connection for Any {}
@@ -44,9 +43,9 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-fdb"))]
-					bail!(
-						Error::Ws("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
-					);
+				return Err(
+					Error::Ws("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
+				);
 				}
 
 				EndpointKind::IndxDb => {
@@ -58,9 +57,9 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-indxdb"))]
-					bail!(
-						Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
-					);
+				return Err(
+					Error::InternalError("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
+				);
 				}
 
 				EndpointKind::Memory => {
@@ -72,9 +71,9 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
-					bail!(
-						Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())
-					);
+				return Err(
+					Error::InternalError("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())
+				);
 				}
 
 				EndpointKind::RocksDb => {
@@ -86,7 +85,7 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
-				bail!(Error::Ws("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()))
+			return Err(Error::Ws("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 				}
 
 				EndpointKind::SurrealKv | EndpointKind::SurrealKvVersioned => {
@@ -98,9 +97,9 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-surrealkv"))]
-					bail!(Error::Ws(
-					"Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
-				));
+				return Err(Error::Ws(
+				"Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
+			));
 				}
 
 				EndpointKind::TiKv => {
@@ -112,9 +111,9 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-tikv"))]
-					bail!(
-						Error::Ws("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())
-					);
+				return Err(
+					Error::Ws("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())
+				);
 				}
 
 				EndpointKind::Http | EndpointKind::Https => {
@@ -126,9 +125,9 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "protocol-http"))]
-					bail!(Error::Ds(
-						"Cannot connect to the `HTTP` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
-					));
+				return Err(Error::InternalError(
+					"Cannot connect to the `HTTP` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
+				));
 				}
 
 				EndpointKind::Ws | EndpointKind::Wss => {
@@ -144,9 +143,9 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "protocol-ws"))]
-					bail!(Error::Ds(
-						"Cannot connect to the `WebSocket` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
-					));
+				return Err(Error::InternalError(
+					"Cannot connect to the `WebSocket` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
+				));
 				}
 
 				EndpointKind::Unsupported(v) => return Err(Error::Scheme(v).into()),

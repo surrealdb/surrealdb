@@ -268,7 +268,8 @@ async fn router_handle_route(
 			});
 		}
 		Err(error) => {
-			if response.send(Err(error.into())).await.is_err() {
+			let err: Error = error.into();
+			if response.send(Err(err.into())).await.is_err() {
 				trace!("Receiver dropped");
 			}
 			return HandleResult::Disconnected;
@@ -293,23 +294,23 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 						match state.pending_requests.remove(&id_num) {
 							Some(pending) => {
 								// We can only route responses with IDs
-								match pending.effect {
-									RequestEffect::None => {}
-									RequestEffect::Set {
-										key,
-										value,
-									} => {
-										state.vars.insert(key, value);
-									}
-									RequestEffect::Clear {
-										key,
-									} => {
-										state.vars.shift_remove(&key);
-									}
-								}
-
 								match response.result {
 									Ok(DbResult::Query(results)) => {
+										// Apply effect only on success
+										match pending.effect {
+											RequestEffect::None => {}
+											RequestEffect::Set {
+												key,
+												value,
+											} => {
+												state.vars.insert(key, value);
+											}
+											RequestEffect::Clear {
+												key,
+											} => {
+												state.vars.shift_remove(&key);
+											}
+										}
 										if let Err(err) =
 											pending.response_channel.send(Ok(results)).await
 										{
@@ -322,6 +323,21 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 										tracing::error!("Unexpected live query result in response");
 									}
 									Ok(DbResult::Other(value)) => {
+										// Apply effect only on success
+										match pending.effect {
+											RequestEffect::None => {}
+											RequestEffect::Set {
+												key,
+												value,
+											} => {
+												state.vars.insert(key, value);
+											}
+											RequestEffect::Clear {
+												key,
+											} => {
+												state.vars.shift_remove(&key);
+											}
+										}
 										let result = QueryResultBuilder::started_now()
 											.finish_with_result(Ok(value));
 										if let Err(err) =
@@ -333,8 +349,8 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 										}
 									}
 									Err(error) => {
-										let _res =
-											pending.response_channel.send(Err(error.into())).await;
+										// Don't apply effect on error
+										let _res = pending.response_channel.send(Err(error)).await;
 									}
 								}
 							}
@@ -397,7 +413,8 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 						if let Some(Value::Number(surrealdb_types::Number::Int(id_num))) = id {
 							match state.pending_requests.remove(&id_num) {
 								Some(pending) => {
-									let _res = pending.response_channel.send(Err(error)).await;
+									let _res =
+										pending.response_channel.send(Err(error.into())).await;
 								}
 								_ => {
 									warn!(
@@ -424,7 +441,7 @@ fn db_response_from_message(message: &Message) -> Result<Option<DbResponse>> {
 			trace!("Received an unexpected text message; {text}");
 			Ok(None)
 		}
-		Message::Binary(binary) => DbResponse::from_bytes(binary).map(Some),
+		Message::Binary(binary) => Ok(Some(DbResponse::from_bytes(binary)?)),
 		Message::Ping(..) => {
 			trace!("Received a ping from the server");
 			Ok(None)

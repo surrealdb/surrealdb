@@ -79,6 +79,8 @@ pub(crate) async fn run_router(base_url: Url, client: reqwest::Client, route_rx:
 		let result =
 			super::router(route.request, &base_url, &client, &mut headers, &mut vars, &mut auth)
 				.await;
-		let _ = route.response.send(result).await;
+		// Convert api::err::Error to DbResultError
+		let db_result = result.map_err(surrealdb_core::rpc::DbResultError::from);
+		let _ = route.response.send(db_result).await;
 	}
 }

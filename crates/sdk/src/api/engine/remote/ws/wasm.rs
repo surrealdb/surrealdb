@@ -219,22 +219,23 @@ async fn router_handle_response(
 						if let Ok(id) = id.into_int() {
 							// We can only route responses with IDs
 							if let Some(pending) = state.pending_requests.remove(&id) {
-								match pending.effect {
-									RequestEffect::None => {}
-									RequestEffect::Set {
-										key,
-										value,
-									} => {
-										state.vars.insert(key, value);
-									}
-									RequestEffect::Clear {
-										key,
-									} => {
-										state.vars.shift_remove(&key);
-									}
-								}
 								match response.result {
 									Ok(DbResult::Query(results)) => {
+										// Apply effect only on success
+										match pending.effect {
+											RequestEffect::None => {}
+											RequestEffect::Set {
+												key,
+												value,
+											} => {
+												state.vars.insert(key, value);
+											}
+											RequestEffect::Clear {
+												key,
+											} => {
+												state.vars.shift_remove(&key);
+											}
+										}
 										let _res = pending.response_channel.send(Ok(results)).await;
 									}
 									Ok(DbResult::Live(_notification)) => {
@@ -242,6 +243,21 @@ async fn router_handle_response(
 										warn!("Unexpected live query result in response");
 									}
 									Ok(DbResult::Other(_value)) => {
+										// Apply effect only on success
+										match pending.effect {
+											RequestEffect::None => {}
+											RequestEffect::Set {
+												key,
+												value,
+											} => {
+												state.vars.insert(key, value);
+											}
+											RequestEffect::Clear {
+												key,
+											} => {
+												state.vars.shift_remove(&key);
+											}
+										}
 										// Other results should be converted to a single result vec
 										let _res = pending
 											.response_channel
@@ -249,6 +265,7 @@ async fn router_handle_response(
 											.await;
 									}
 									Err(error) => {
+										// Don't apply effect on error
 										let _res =
 											pending.response_channel.send(Err(error.into())).await;
 									}

@@ -92,8 +92,7 @@ impl into_fn::Sealed for String {
 				None => Err(crate::error::Api::InvalidParams(format!(
 					"Invalid function syntax '{}': function version is missing a closing '>'",
 					self
-				))
-				.into()),
+				))),
 			},
 			None => Ok((self, None)),
 		}
@@ -109,8 +108,7 @@ impl into_fn::Sealed for &str {
 				None => Err(crate::error::Api::InvalidParams(format!(
 					"Invalid function syntax '{}': function version is missing a closing '>'",
 					self
-				))
-				.into()),
+				))),
 			},
 			None => Ok((self.to_owned(), None)),
 		}

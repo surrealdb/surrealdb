@@ -40,7 +40,7 @@ async fn concurrency() -> Result<()> {
 				if err.to_string().contains("timeout") || err.to_string().contains("Timeout") {
 					Ok(false)
 				} else {
-					Err(err)
+					Err(err.into())
 				}
 			}
 			Ok(res) => {

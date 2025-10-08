@@ -1,8 +1,7 @@
 use std::collections::HashSet;
 use std::sync::atomic::AtomicI64;
 
-#[allow(unused_imports, reason = "Used when a DB engine is disabled.")]
-use anyhow::bail;
+// Removed anyhow::bail - using return Err() instead
 #[cfg(feature = "protocol-http")]
 use reqwest::ClientBuilder;
 use tokio::sync::watch;
@@ -58,9 +57,9 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-fdb"))]
-					bail!(
-						Error::Scheme("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
-					);
+				return Err(
+					Error::Scheme("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
+				);
 				}
 
 				EndpointKind::Memory => {
@@ -73,7 +72,7 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-mem"))]
-					bail!(Error::Scheme("memory".to_owned()));
+					return Err(Error::Scheme("memory".to_owned()));
 				}
 
 				EndpointKind::RocksDb => {
@@ -86,9 +85,9 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-rocksdb"))]
-					bail!(Error::Scheme(
-						"Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
-					))
+				return Err(Error::Scheme(
+					"Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
+				));
 				}
 
 				EndpointKind::TiKv => {
@@ -101,9 +100,9 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-tikv"))]
-					bail!(
-						Error::Scheme("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())
-					);
+				return Err(
+					Error::Scheme("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())
+				);
 				}
 
 				EndpointKind::SurrealKv | EndpointKind::SurrealKvVersioned => {
@@ -116,10 +115,9 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "kv-surrealkv"))]
-					bail!(Error::Scheme(
-						"Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
-					)
-					);
+				return Err(Error::Scheme(
+					"Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned(),
+				));
 				}
 
 				EndpointKind::Http | EndpointKind::Https => {
@@ -152,10 +150,9 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "protocol-http"))]
-					bail!(Error::Scheme(
-						"Cannot connect to the `HTTP` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
-					)
-					);
+				return Err(Error::Scheme(
+					"Cannot connect to the `HTTP` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
+				));
 				}
 
 				EndpointKind::Ws | EndpointKind::Wss => {
@@ -199,11 +196,11 @@ impl conn::Sealed for Any {
 					}
 
 					#[cfg(not(feature = "protocol-ws"))]
-					bail!(Error::Scheme(
-						"Cannot connect to the `WebSocket` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
-					));
+				return Err(Error::Scheme(
+					"Cannot connect to the `WebSocket` remote engine as it is not enabled in this build of SurrealDB".to_owned(),
+				));
 				}
-				EndpointKind::Unsupported(v) => return Err(Error::Scheme(v).into()),
+				EndpointKind::Unsupported(v) => return Err(Error::Scheme(v)),
 			}
 
 			let waiter = watch::channel(Some(WaitFor::Connection));

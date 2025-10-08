@@ -44,7 +44,7 @@ pub async fn export_import(new_db: impl CreateDb) {
 		db.export(&file).await?;
 		db.query("REMOVE TABLE user").await?;
 		db.import(&file).await?;
-		Result::<(), anyhow::Error>::Ok(())
+		Ok::<(), surrealdb::Error>(())
 	}
 	.await;
 
@@ -99,10 +99,10 @@ pub async fn export_with_config(new_db: impl CreateDb) {
 
 	// Export, remove table, and import
 	let res = async {
-		db.export(&file).with_config().tables(vec!["user"]).await?;
-		db.query("REMOVE TABLE user; REMOVE TABLE group;").await?;
-		db.import(&file).await?;
-		Result::<(), anyhow::Error>::Ok(())
+		db.export(&file).with_config().tables(vec!["user"]).await.unwrap();
+		db.query("REMOVE TABLE user; REMOVE TABLE group;").await.unwrap();
+		db.import(&file).await.unwrap();
+		Ok::<(), surrealdb::Error>(())
 	}
 	.await;
 

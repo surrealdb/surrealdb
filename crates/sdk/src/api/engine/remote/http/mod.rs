@@ -167,16 +167,14 @@ async fn export_file(request: RequestBuilder, path: PathBuf) -> Result<()> {
 				return Err(Error::FileOpen {
 					path,
 					error,
-				}
-				.into());
+				});
 			}
 		};
 	if let Err(error) = io::copy(&mut response, &mut file).await {
 		return Err(Error::FileRead {
 			path,
 			error,
-		}
-		.into());
+		});
 	}
 
 	Ok(())
@@ -211,8 +209,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 			return Err(Error::FileOpen {
 				path,
 				error,
-			}
-			.into());
+			});
 		}
 	};
 
@@ -228,10 +225,10 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 					"\n{}",
 					serde_json::to_string_pretty(&body).unwrap_or_else(|_| "{}".into())
 				);
-				return Err(Error::Http(error_msg).into());
+				return Err(Error::Http(error_msg));
 			}
 			Err(_) => {
-				return Err(Error::Http(res).into());
+				return Err(Error::Http(res));
 			}
 		}
 	}
@@ -242,7 +239,7 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 		.map_err(crate::api::Error::InvalidResponse)?;
 	for res in response {
 		if let Err(e) = res.result {
-			return Err(Error::Query(e.to_string()).into());
+			return Err(Error::Query(e.to_string()));
 		}
 	}
 
@@ -264,9 +261,8 @@ async fn send_request(
 	let url = base_url.join(RPC_PATH).unwrap();
 
 	let req_value = req.into_value();
-
 	let body = surrealdb_core::rpc::format::flatbuffers::encode(&req_value)
-		.map_err(|x| format!("Failed to serialized to flatbuffers: {x}"))
+		.map_err(|x| format!("Failed to serialize to flatbuffers: {x}"))
 		.map_err(crate::api::Error::UnserializableValue)?;
 
 	let http_req = client.post(url).headers(headers.clone()).auth(auth).body(body);
@@ -339,8 +335,7 @@ async fn router(
 					error!("recieved invalid result from server");
 					return Err(Error::InternalError(
 						"Recieved invalid result from server".to_string(),
-					)
-					.into());
+					));
 				}
 			};
 
@@ -423,7 +418,10 @@ async fn router(
 			let config_value: Value = config.into_value();
 			let request = client
 				.post(req_path)
-				.body(rpc::format::json::encode_str(config_value).map_err(anyhow::Error::msg)?)
+				.body(
+					rpc::format::json::encode_str(config_value)
+						.map_err(|e| Error::SerializeValue(e.to_string()))?,
+				)
 				.headers(headers.clone())
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/json")
@@ -440,7 +438,10 @@ async fn router(
 			let config_value = config.into_value();
 			let request = client
 				.post(req_path)
-				.body(rpc::format::json::encode_str(config_value).map_err(anyhow::Error::msg)?)
+				.body(
+					rpc::format::json::encode_str(config_value)
+						.map_err(|e| Error::SerializeValue(e.to_string()))?,
+				)
 				.headers(headers.clone())
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/json")
@@ -505,7 +506,7 @@ async fn router(
 		}
 		Command::SubscribeLive {
 			..
-		} => Err(Error::LiveQueriesNotSupported.into()),
+		} => Err(Error::LiveQueriesNotSupported),
 		Command::RawQuery {
 			txn,
 			query,

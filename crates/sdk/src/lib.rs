@@ -50,5 +50,5 @@ pub use crate::api::{Connect, Connection, IndexedResults, Surreal, engine, metho
 pub use crate::notification::Notification;
 
 /// A specialized `Result` type
-pub type Result<T> = anyhow::Result<T>;
-pub use anyhow::Error;
+pub type Result<T> = std::result::Result<T, api::err::Error>;
+pub use api::err::Error;

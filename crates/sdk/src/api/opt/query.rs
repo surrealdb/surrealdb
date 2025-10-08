@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 use std::mem;
 
-use anyhow::bail;
+// Removed anyhow::bail - using return Err() instead
 use futures::future::Either;
 use futures::stream::select_all;
 use surrealdb_core::rpc::DbResultStats;
@@ -61,7 +61,7 @@ where
 				Ok(val) => val,
 				Err(_) => {
 					response.results.swap_remove(&self);
-					return Err(Error::ConnectionUninitialised.into());
+					return Err(Error::ConnectionUninitialised);
 				}
 			},
 			None => {
@@ -75,20 +75,19 @@ where
 					let value = mem::take(value);
 					match value {
 						Value::None => Ok(None),
-						v => T::from_value(v).map(Some),
+						v => Ok(Some(T::from_value(v)?)),
 					}
 				}
-				_ => Err(Error::LossyTake(QueryResponse {
+				_ => Err(Error::LossyTake(Box::new(QueryResponse {
 					results: mem::take(&mut response.results),
 					live_queries: mem::take(&mut response.live_queries),
-				})
-				.into()),
+				}))),
 			},
 			value => {
 				let value = mem::take(value);
 				match value {
 					Value::None => Ok(None),
-					v => T::from_value(v).map(Some),
+					v => Ok(Some(T::from_value(v)?)),
 				}
 			}
 		};
@@ -110,7 +109,7 @@ impl query_result::Sealed<Value> for (usize, &str) {
 				Ok(val) => val,
 				Err(_) => {
 					response.results.swap_remove(&index);
-					return Err(Error::ConnectionUninitialised.into());
+					return Err(Error::ConnectionUninitialised);
 				}
 			},
 			None => {
@@ -143,7 +142,7 @@ where
 				Ok(val) => val,
 				Err(_) => {
 					response.results.swap_remove(&index);
-					return Err(Error::ConnectionUninitialised.into());
+					return Err(Error::ConnectionUninitialised);
 				}
 			},
 			None => {
@@ -158,11 +157,10 @@ where
 				}
 				[value] => value,
 				_ => {
-					return Err(Error::LossyTake(QueryResponse {
+					return Err(Error::LossyTake(Box::new(QueryResponse {
 						results: mem::take(&mut response.results),
 						live_queries: mem::take(&mut response.live_queries),
-					})
-					.into());
+					})));
 				}
 			},
 			value => value,
@@ -180,7 +178,7 @@ where
 				let Some(value) = object.remove(key) else {
 					return Ok(None);
 				};
-				T::from_value(value).map(Some)
+				Ok(Some(T::from_value(value)?))
 			}
 			_ => Ok(None),
 		}
@@ -207,7 +205,7 @@ where
 			}
 		};
 
-		vec.into_iter().map(T::from_value).collect::<Result<Vec<T>>>()
+		vec.into_iter().map(|v| T::from_value(v).map_err(Into::into)).collect::<Result<Vec<T>>>()
 	}
 
 	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
@@ -234,7 +232,10 @@ where
 								}
 							}
 						}
-						responses.into_iter().map(T::from_value).collect::<Result<Vec<T>>>()
+						responses
+							.into_iter()
+							.map(|v| T::from_value(v).map_err(Into::into))
+							.collect::<Result<Vec<T>>>()
 					}
 					val => {
 						if let Value::Object(object) = val {
@@ -247,7 +248,7 @@ where
 				},
 				Err(_) => {
 					response.results.swap_remove(&index);
-					Err(Error::ConnectionUninitialised.into())
+					Err(Error::ConnectionUninitialised)
 				}
 			},
 			None => Ok(vec![]),
@@ -310,7 +311,7 @@ impl query_stream::Sealed<Value> for usize {
 			.swap_remove(&self)
 			.and_then(|result| match result {
 				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
+					if matches!(e, Error::NotLiveQuery(..)) {
 						response.results.swap_remove(&self);
 						None
 					} else {
@@ -320,8 +321,8 @@ impl query_stream::Sealed<Value> for usize {
 				result => Some(result),
 			})
 			.unwrap_or_else(|| match response.results.contains_key(&self) {
-				true => Err(Error::NotLiveQuery(self).into()),
-				false => Err(Error::QueryIndexOutOfBounds(self).into()),
+				true => Err(Error::NotLiveQuery(self)),
+				false => Err(Error::QueryIndexOutOfBounds(self)),
 			})?;
 		Ok(crate::api::method::QueryStream(Either::Left(stream)))
 	}
@@ -338,16 +339,16 @@ impl query_stream::Sealed<Value> for () {
 			match result {
 				Ok(stream) => streams.push(stream),
 				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
+					if matches!(e, Error::NotLiveQuery(..)) {
 						match response.results.swap_remove(&index) {
 							Some((_, Err(_))) => {
-								return Err(Error::ConnectionUninitialised.into());
+								return Err(Error::ConnectionUninitialised);
 							}
 							Some((_, Ok(..))) => unreachable!(
 								"the internal error variant indicates that an error occurred in the `LIVE SELECT` query"
 							),
 							None => {
-								bail!(Error::ResponseAlreadyTaken);
+								return Err(Error::ResponseAlreadyTaken);
 							}
 						}
 					} else {
@@ -374,7 +375,7 @@ where
 			.swap_remove(&self)
 			.and_then(|result| match result {
 				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
+					if matches!(e, Error::NotLiveQuery(..)) {
 						response.results.swap_remove(&self);
 						None
 					} else {
@@ -384,8 +385,8 @@ where
 				result => Some(result),
 			})
 			.unwrap_or_else(|| match response.results.contains_key(&self) {
-				true => Err(Error::NotLiveQuery(self).into()),
-				false => Err(Error::QueryIndexOutOfBounds(self).into()),
+				true => Err(Error::NotLiveQuery(self)),
+				false => Err(Error::QueryIndexOutOfBounds(self)),
 			})?;
 		Ok(crate::api::method::QueryStream(Either::Left(Stream {
 			client: stream.client.clone(),
@@ -410,16 +411,16 @@ where
 			let mut stream = match result {
 				Ok(stream) => stream,
 				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
+					if matches!(e, Error::NotLiveQuery(..)) {
 						match response.results.swap_remove(&index) {
 							Some((_, Err(_))) => {
-								return Err(Error::ConnectionUninitialised.into());
+								return Err(Error::ConnectionUninitialised);
 							}
 							Some((_, Ok(..))) => unreachable!(
 								"the internal error variant indicates that an error occurred in the `LIVE SELECT` query"
 							),
 							None => {
-								bail!(Error::ResponseAlreadyTaken);
+								return Err(Error::ResponseAlreadyTaken);
 							}
 						}
 					} else {

@@ -41,9 +41,7 @@ where
 			let version = router.execute_value(Command::Version).await?;
 			let version = version.into_string()?;
 			let semantic = version.trim_start_matches("surrealdb-");
-			semantic
-				.parse()
-				.map_err(|_| Error::InvalidSemanticVersion(format!("\"{version}\"")).into())
+			semantic.parse().map_err(|_| Error::InvalidSemanticVersion(format!("\"{version}\"")))
 		})
 	}
 }
