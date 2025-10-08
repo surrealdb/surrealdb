@@ -9,7 +9,7 @@ pub enum Accept {
 	ApplicationJson,
 	ApplicationCbor,
 	ApplicationOctetStream,
-	Surrealdb,
+	ApplicationFlatbuffers,
 }
 
 impl std::fmt::Display for Accept {
@@ -21,7 +21,7 @@ impl std::fmt::Display for Accept {
 			Accept::ApplicationOctetStream => {
 				f.write_str(surrealdb_core::api::format::OCTET_STREAM)
 			}
-			Accept::Surrealdb => f.write_str(surrealdb_core::api::format::FLATBUFFERS),
+			Accept::ApplicationFlatbuffers => f.write_str(surrealdb_core::api::format::FLATBUFFERS),
 		}
 	}
 }
@@ -44,7 +44,7 @@ impl Header for Accept {
 			surrealdb_core::api::format::JSON => Ok(Accept::ApplicationJson),
 			surrealdb_core::api::format::CBOR => Ok(Accept::ApplicationCbor),
 			surrealdb_core::api::format::OCTET_STREAM => Ok(Accept::ApplicationOctetStream),
-			surrealdb_core::api::format::FLATBUFFERS => Ok(Accept::Surrealdb),
+			surrealdb_core::api::format::FLATBUFFERS => Ok(Accept::ApplicationFlatbuffers),
 			_ => Err(headers::Error::invalid()),
 		}
 	}

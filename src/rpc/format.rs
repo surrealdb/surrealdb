@@ -16,7 +16,7 @@ impl From<&Accept> for Format {
 			Accept::ApplicationJson => Format::Json,
 			Accept::ApplicationCbor => Format::Cbor,
 			Accept::ApplicationOctetStream => Format::Unsupported,
-			Accept::Surrealdb => Format::Flatbuffers,
+			Accept::ApplicationFlatbuffers => Format::Flatbuffers,
 		}
 	}
 }

@@ -4,7 +4,7 @@ use axum::routing::post;
 use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use futures::TryStreamExt;
-use surrealdb::types::{Array, SurrealValue, Value};
+use surrealdb::types::SurrealValue;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_core::iam::Action::Edit;
@@ -56,23 +56,22 @@ async fn handler(
 					// result in some values of the code being serialized wrong.
 					//
 					// this will serialize structs differently then they should.
-					let res = Value::Array(Array::from(
-						res.into_iter().map(|x| x.into_value()).collect::<Vec<Value>>(),
-					));
+					let res = res.into_value();
 					Ok(Output::json_value(&res))
 				}
 				Some(Accept::ApplicationCbor) => {
 					// TODO(3.0): This code here is using the wrong serialization method which might
 					// result in some values of the code being serialized wrong.
-					let res = Value::Array(Array::from(
-						res.into_iter().map(|x| x.into_value()).collect::<Vec<Value>>(),
-					));
+					let res = res.into_value();
 					Ok(Output::cbor(&res))
 				}
 				// Return nothing
 				Some(Accept::ApplicationOctetStream) => Ok(Output::None),
 				// Internal serialization
-				Some(Accept::Surrealdb) => Ok(Output::bincode(&res)),
+				Some(Accept::ApplicationFlatbuffers) => {
+					let res = res.into_value();
+					Ok(Output::flatbuffers(&res))
+				}
 				// An incorrect content-type was requested
 				_ => Err(NetError::InvalidType.into()),
 			}

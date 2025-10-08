@@ -67,7 +67,10 @@ async fn post_handler(
 				Ok(Output::cbor(&v))
 			}
 			// Internal serialization
-			Some(Accept::Surrealdb) => Ok(Output::bincode(&res)),
+			Some(Accept::ApplicationFlatbuffers) => {
+				let v = res.into_value();
+				Ok(Output::flatbuffers(&v))
+			}
 			// An incorrect content-type was requested
 			_ => Err(NetError::InvalidType.into()),
 		},

@@ -576,9 +576,11 @@ pub async fn create_record_with_id_in_content(new_db: impl CreateDb) {
 		.await
 		.unwrap_err();
 
-	assert_eq!(
-		error.to_string(),
-		"Internal error: Found user:jane for the `id` field, but a specific record has been specified"
+	assert!(
+		error.to_string().contains(
+			"Found user:jane for the `id` field, but a specific record has been specified"
+		),
+		"{error}"
 	);
 
 	let _: Option<Record> = db

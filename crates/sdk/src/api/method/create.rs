@@ -62,10 +62,13 @@ macro_rules! into_future {
 
 				let what = resource?;
 
+				let mut variables = Variables::new();
+				variables.insert("_resource".to_string(), what.into_value());
+
 				let cmd = Command::RawQuery {
 					txn,
-					query: Cow::Owned(format!("CREATE {}", what.to_sql())),
-					variables: Variables::new(),
+					query: Cow::Owned(format!("CREATE $_resource")),
+					variables,
 				};
 				router.$method(cmd).await
 			})
@@ -111,14 +114,18 @@ where
 				"Tried to create non-object-like data as content, only structs and objects are supported",
 			)?;
 
-			let what = self.resource?.to_sql();
+			let what = self.resource?.into_value();
 
-			let query = format!("CREATE {} CONTENT {}", what, content.to_sql());
+			let mut variables = Variables::new();
+			variables.insert("_resource".to_string(), what);
+			variables.insert("_content".to_string(), content);
+
+			let query = format!("CREATE $_resource CONTENT $_content");
 
 			Ok(Command::RawQuery {
 				txn: self.txn,
 				query: Cow::Owned(query),
-				variables: Variables::new(),
+				variables,
 			})
 		})
 	}
@@ -141,14 +148,14 @@ where
 				"Tried to create non-object-like data as content, only structs and objects are supported",
 			)?;
 
-			let what = self.resource?.to_sql();
+			let what = self.resource?.into_value();
 
-			let query = format!("CREATE {} CONTENT {}", what, content.to_sql());
+			let query = format!("CREATE $_resource CONTENT $_content");
 
 			Ok(Command::RawQuery {
 				txn: self.txn,
 				query: Cow::Owned(query),
-				variables: Variables::new(),
+				variables,
 			})
 		})
 	}

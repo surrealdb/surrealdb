@@ -1,5 +1,4 @@
 use axum::response::{IntoResponse, Response};
-use bincode::Options;
 use http::StatusCode;
 use http::header::{CONTENT_TYPE, HeaderValue};
 use serde::Serialize;
@@ -11,10 +10,9 @@ pub enum Output {
 	None,
 	Fail,
 	Text(String),
-	Json(Vec<u8>), // JSON
-	Cbor(Vec<u8>), // CBOR
-	Bincode(Vec<u8>), /* Full type serialization, don't know why this is called 'full'
-	                * serialization, this is just bincode. Should not be used. */
+	Json(Vec<u8>),
+	Cbor(Vec<u8>),
+	Flatbuffers(Vec<u8>),
 }
 impl Output {
 	// All these methods should not be used.
@@ -42,10 +40,7 @@ impl Output {
 	}
 
 	#[deprecated]
-	pub fn cbor<T>(val: &T) -> Output
-	where
-		T: Serialize,
-	{
+	pub fn cbor(val: &Value) -> Output {
 		let mut out = Vec::new();
 		match ciborium::into_writer(&val, &mut out) {
 			Ok(_) => Output::Cbor(out),
@@ -54,17 +49,10 @@ impl Output {
 	}
 
 	#[deprecated]
-	pub fn bincode<T>(val: &T) -> Output
-	where
-		T: Serialize,
-	{
-		let val = bincode::options()
-			.with_no_limit()
-			.with_little_endian()
-			.with_varint_encoding()
-			.serialize(val);
+	pub fn flatbuffers(val: &Value) -> Output {
+		let val = surrealdb_core::rpc::format::flatbuffers::encode(val);
 		match val {
-			Ok(v) => Output::Bincode(v),
+			Ok(v) => Output::Flatbuffers(v),
 			Err(_) => Output::Fail,
 		}
 	}
@@ -82,8 +70,9 @@ impl IntoResponse for Output {
 			Output::Cbor(v) => {
 				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationCbor))], v).into_response()
 			}
-			Output::Bincode(v) => {
-				([(CONTENT_TYPE, HeaderValue::from(Accept::Surrealdb))], v).into_response()
+			Output::Flatbuffers(v) => {
+				([(CONTENT_TYPE, HeaderValue::from(Accept::ApplicationFlatbuffers))], v)
+					.into_response()
 			}
 			Output::None => StatusCode::OK.into_response(),
 			Output::Fail => StatusCode::INTERNAL_SERVER_ERROR.into_response(),

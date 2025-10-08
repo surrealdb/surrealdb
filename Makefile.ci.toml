@@ -466,7 +466,7 @@ script = """
     #!/bin/bash -ex
 
 
-    target-${_TEST_API_ENGINE}/debug/surreal start ${_START_SURREALDB_PATH} --allow-all &>/tmp/surrealdb-${_TEST_API_ENGINE}.log &
+    target/debug/surreal start ${_START_SURREALDB_PATH} --allow-all &>/tmp/surrealdb-${_TEST_API_ENGINE}.log &
 
     echo $! > /tmp/surreal-${_TEST_API_ENGINE}.pid
 
@@ -474,7 +474,7 @@ script = """
     echo "Waiting for surreal to be ready..."
     tries=0
     while [[ $tries < 5 ]]; do
-            target-${_TEST_API_ENGINE}/debug/surreal is-ready 2>/dev/null && echo "Ready!" && exit 0 || sleep 1
+            target/debug/surreal is-ready 2>/dev/null && echo "Ready!" && exit 0 || sleep 1
             tries=$((tries + 1))
     done
 

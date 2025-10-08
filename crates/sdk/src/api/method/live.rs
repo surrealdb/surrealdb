@@ -41,14 +41,19 @@ where
 			return Err(Error::LiveQueriesNotSupported);
 		}
 
+		let mut variables = Variables::new();
+
 		// Generate the LIVE SELECT SQL based on resource type
 		let stmt = match resource? {
 			Resource::Table(table) => {
-				format!("LIVE SELECT * FROM `{}`", table)
+				variables.insert("_table".to_string(), Value::String(table));
+				format!("LIVE SELECT * FROM $_table")
 			}
 			Resource::RecordId(record) => {
 				// For a specific record, we use WHERE id = record
-				format!("LIVE SELECT * FROM `{}` WHERE id = {}", record.table, record.to_sql())
+				variables.insert("_table".to_string(), Value::String(record.table));
+				variables.insert("_id".to_string(), Value::String(record.to_sql()));
+				format!("LIVE SELECT * FROM $_table WHERE id = $_id")
 			}
 			Resource::Object(_) => return Err(Error::LiveOnObject),
 			Resource::Array(_) => return Err(Error::LiveOnArray),
@@ -64,10 +69,12 @@ where
 				// Handle start bound
 				match &key_range.start {
 					std::ops::Bound::Included(key) => {
-						conditions.push(format!("id >= {}:{}", record.table, key.to_sql()));
+						variables.insert("_start".to_string(), Value::RecordId(RecordId::new(record.table, key.clone())));
+						conditions.push(format!("id >= $_start"));
 					}
 					std::ops::Bound::Excluded(key) => {
-						conditions.push(format!("id > {}:{}", record.table, key.to_sql()));
+						variables.insert("_start".to_string(), Value::RecordId(RecordId::new(record.table, key.clone())));
+						conditions.push(format!("id > $_start"));
 					}
 					std::ops::Bound::Unbounded => {}
 				}
@@ -75,21 +82,24 @@ where
 				// Handle end bound
 				match &key_range.end {
 					std::ops::Bound::Included(key) => {
-						conditions.push(format!("id <= {}:{}", record.table, key.to_sql()));
+						variables.insert("_end".to_string(), Value::RecordId(RecordId::new(record.table, key.clone())));
+						conditions.push(format!("id <= $_end"));
 					}
 					std::ops::Bound::Excluded(key) => {
-						conditions.push(format!("id < {}:{}", record.table, key.to_sql()));
+						variables.insert("_end".to_string(), Value::RecordId(RecordId::new(record.table, key.clone())));
+						conditions.push(format!("id < $_end"));
 					}
 					std::ops::Bound::Unbounded => {}
 				}
 
 				// Build final query
 				if conditions.is_empty() {
-					format!("LIVE SELECT * FROM `{}`", record.table)
+					variables.insert("_table".to_string(), Value::String(record.table));
+					format!("LIVE SELECT * FROM $_table")
 				} else {
+					variables.insert("_table".to_string(), Value::String(record.table));
 					format!(
-						"LIVE SELECT * FROM `{}` WHERE {}",
-						record.table,
+						"LIVE SELECT * FROM $_table WHERE {}",
 						conditions.join(" AND ")
 					)
 				}
@@ -101,7 +111,7 @@ where
 			.execute_query(Command::RawQuery {
 				query: Cow::Owned(stmt),
 				txn: None,
-				variables: Variables::new(),
+				variables,
 			})
 			.await?;
 

@@ -223,6 +223,7 @@ surrealdb = { workspace = true, features = [
     "rustls",
 ] }
 surrealdb-core.workspace = true
+surrealdb-types.workspace = true
 
 # External surreal crates
 revision = { workspace = true, features = [

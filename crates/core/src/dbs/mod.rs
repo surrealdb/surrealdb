@@ -8,7 +8,6 @@ mod distinct;
 pub mod executor;
 mod group;
 mod iterator;
-mod notification;
 mod options;
 mod plan;
 mod processor;

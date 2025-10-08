@@ -234,11 +234,20 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 	}
 
 	let bytes = res.bytes().await?;
-	let response: Vec<QueryResult> = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
-		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x}"))
+
+	let value: Value = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
+		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x:?}"))
 		.map_err(crate::api::Error::InvalidResponse)?;
-	for res in response {
-		if let Err(e) = res.result {
+
+	// Convert Value::Array to Vec<QueryResult>
+	let Value::Array(arr) = value else {
+		return Err(Error::InvalidResponse("Expected array response from import".to_string()));
+	};
+
+	for val in arr.into_vec() {
+		let result = QueryResult::from_value(val)
+			.map_err(|e| Error::InvalidResponse(format!("Failed to parse query result: {}", e)))?;
+		if let Err(e) = result.result {
 			return Err(Error::Query(e.to_string()));
 		}
 	}

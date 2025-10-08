@@ -99,10 +99,14 @@ async fn execute_and_return(
 				Ok(Output::cbor(&v))
 			}
 			// Internal serialization
-			// TODO: remove format in 2.0.0
-			Some(Accept::Surrealdb) => Ok(Output::bincode(&res)),
+			Some(Accept::ApplicationFlatbuffers) => {
+				let v = Value::Array(Array::from(
+					res.into_iter().map(|x| x.into_value()).collect::<Vec<Value>>(),
+				));
+				Ok(Output::flatbuffers(&v))
+			}
 			// An incorrect content-type was requested
-			_ => Err(anyhow::Error::new(NetError::InvalidType)),
+			_ => Err(NetError::InvalidType.into()),
 		},
 		// There was an error when executing the query
 		Err(err) => Err(err.into()),
