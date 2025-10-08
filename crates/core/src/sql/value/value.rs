@@ -3234,7 +3234,9 @@ impl VisitExpression for Value {
 		visitor(self);
 		match self {
 			Self::Param(_) => {}
-			Self::Idiom(_) => {}
+			Self::Idiom(x) => {
+				x.visit(visitor);
+			}
 			Self::Table(_) => {}
 			Self::Mock(_) => {}
 			Self::Block(block) => {
