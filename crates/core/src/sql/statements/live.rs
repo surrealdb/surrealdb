@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::iam::Auth;
 use crate::kvs::Live;
 use crate::sql::statements::info::InfoStructure;
+use crate::sql::value::VisitExpression;
 use crate::sql::{Cond, Fetchs, Fields, Uuid, Value};
 
 use reblessive::tree::Stk;
@@ -141,6 +142,25 @@ impl LiveStatement {
 		};
 		// Return the query id
 		Ok(id.into())
+	}
+}
+
+impl VisitExpression for LiveStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.expr.visit(visitor);
+		self.what.visit(visitor);
+		if let Some(c) = &self.cond {
+			c.visit(visitor);
+		}
+		if let Some(f) = &self.fetch {
+			f.visit(visitor);
+		}
+		if let Some(s) = &self.session {
+			s.visit(visitor);
+		}
 	}
 }
 

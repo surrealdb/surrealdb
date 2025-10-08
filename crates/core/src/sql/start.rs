@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::number::Number;
-use crate::sql::value::Value;
+use crate::sql::value::{Value, VisitExpression};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -47,5 +47,14 @@ impl Start {
 impl fmt::Display for Start {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "START {}", self.0)
+	}
+}
+
+impl VisitExpression for Start {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.0.visit(visitor);
 	}
 }

@@ -7,6 +7,7 @@ use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Block, Ident, Kind, Permission, Strand, Value};
 
+use crate::sql::value::VisitExpression;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
@@ -123,5 +124,14 @@ impl InfoStructure for DefineFunctionStatement {
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 			"returns".to_string(), if let Some(v) = self.returns => v.structure(),
 		})
+	}
+}
+
+impl VisitExpression for DefineFunctionStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.block.visit(visitor);
 	}
 }

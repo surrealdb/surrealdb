@@ -6,7 +6,7 @@ use crate::sql::idiom::Idiom;
 use crate::sql::operator::Operator;
 use crate::sql::part::Part;
 use crate::sql::paths::ID;
-use crate::sql::value::Value;
+use crate::sql::value::{Value, VisitExpression};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -79,6 +79,37 @@ impl Data {
 			},
 			// Return nothing
 			_ => Ok(None),
+		}
+	}
+}
+
+impl VisitExpression for Data {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		match self {
+			Self::EmptyExpression => {}
+			Self::SetExpression(v) | Self::UpdateExpression(v) => {
+				for (i, _, val) in v {
+					i.visit(visitor);
+					val.visit(visitor);
+				}
+			}
+			Self::UnsetExpression(v) => v.iter().for_each(|i| i.visit(visitor)),
+			Self::PatchExpression(v)
+			| Self::MergeExpression(v)
+			| Self::ReplaceExpression(v)
+			| Self::ContentExpression(v)
+			| Self::SingleExpression(v) => v.visit(visitor),
+			Self::ValuesExpression(rows) => {
+				for row in rows {
+					for (i, v) in row {
+						i.visit(visitor);
+						v.visit(visitor);
+					}
+				}
+			}
 		}
 	}
 }

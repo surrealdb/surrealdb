@@ -2,6 +2,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::sql::value::VisitExpression;
 use crate::sql::{
 	fmt::{pretty_indent, Fmt, Pretty},
 	Number, Operation, Value,
@@ -543,5 +544,14 @@ impl Windows<Array> for Array {
 			.map::<Value, _>(|chunk| chunk.to_vec().into())
 			.collect::<Vec<_>>()
 			.into())
+	}
+}
+
+impl VisitExpression for Array {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.0.iter().for_each(|v| v.visit(visitor));
 	}
 }

@@ -1,5 +1,5 @@
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::value::Value;
+use crate::sql::value::{Value, VisitExpression};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -27,5 +27,14 @@ impl fmt::Display for Cond {
 impl InfoStructure for Cond {
 	fn structure(self) -> Value {
 		self.0.structure()
+	}
+}
+
+impl VisitExpression for Cond {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.0.visit(visitor);
 	}
 }

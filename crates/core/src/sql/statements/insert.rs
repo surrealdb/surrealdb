@@ -7,6 +7,7 @@ use crate::sql::paths::IN;
 use crate::sql::paths::OUT;
 use crate::sql::{Data, Id, Output, Table, Thing, Timeout, Value, Version};
 
+use crate::sql::value::VisitExpression;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -130,6 +131,24 @@ impl InsertStatement {
 		}
 		// Output the results
 		Ok(res)
+	}
+}
+
+impl VisitExpression for InsertStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		if let Some(ref into) = self.into {
+			into.visit(visitor);
+		}
+		self.data.visit(visitor);
+		if let Some(ref u) = self.update {
+			u.visit(visitor);
+		}
+		if let Some(ref o) = self.output {
+			o.visit(visitor);
+		}
 	}
 }
 

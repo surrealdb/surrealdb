@@ -5,6 +5,7 @@ use crate::err::Error;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::sql::{Cond, Data, Explain, Output, Timeout, Value, Values, With};
 
+use crate::sql::value::VisitExpression;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -118,5 +119,17 @@ impl fmt::Display for UpsertStatement {
 			write!(f, " {v}")?
 		}
 		Ok(())
+	}
+}
+
+impl VisitExpression for UpsertStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		if let Some(v) = &self.cond {
+			v.visit(visitor);
+		}
+		self.what.visit(visitor);
 	}
 }

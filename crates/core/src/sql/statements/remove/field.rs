@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::statements::define::DefineTableStatement;
+use crate::sql::value::VisitExpression;
 use crate::sql::{Base, Ident, Idiom, Value};
 
 use revision::revisioned;
@@ -77,5 +78,14 @@ impl Display for RemoveFieldStatement {
 		}
 		write!(f, " {} ON {}", self.name, self.what)?;
 		Ok(())
+	}
+}
+
+impl VisitExpression for RemoveFieldStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.name.visit(visitor);
 	}
 }

@@ -2,7 +2,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::block::Block;
-use crate::sql::value::Value;
+use crate::sql::value::{Value, VisitExpression};
 use crate::{ctx::Context, dbs::Futures};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -38,6 +38,15 @@ impl Future {
 			Futures::Enabled => stk.run(|stk| self.0.compute(stk, ctx, opt, doc)).await?.ok(),
 			_ => Ok(self.clone().into()),
 		}
+	}
+}
+
+impl VisitExpression for Future {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.0.visit(visitor);
 	}
 }
 

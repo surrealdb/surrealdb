@@ -11,7 +11,8 @@ use crate::sql::statements::SelectStatement;
 use crate::sql::statements::UpdateStatement;
 use crate::sql::statements::UpsertStatement;
 use crate::sql::statements::{DefineStatement, RemoveStatement};
-use crate::sql::{Statement, Statements};
+use crate::sql::value::VisitExpression;
+use crate::sql::{Statement, Statements, Value};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -137,6 +138,17 @@ impl IntoIterator for Query {
 	type IntoIter = std::vec::IntoIter<Self::Item>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
+	}
+}
+
+impl VisitExpression for Query {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		for s in &self.0 .0 {
+			s.visit(visitor);
+		}
 	}
 }
 
