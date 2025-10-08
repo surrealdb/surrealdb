@@ -160,9 +160,9 @@ pub(super) static ROCKSDB_ENABLE_BLOB_GC: LazyLock<bool> =
 pub(super) static ROCKSDB_BLOB_GC_AGE_CUTOFF: LazyLock<f64> =
 	lazy_env_parse!("SURREAL_ROCKSDB_BLOB_GC_AGE_CUTOFF", f64, 0.25);
 
-/// Discardable ratio threshold to force GC in [0,1] (default: 0.8)
+/// Discardable ratio threshold to force GC in [0,1] (default: 1.0)
 pub(super) static ROCKSDB_BLOB_GC_FORCE_THRESHOLD: LazyLock<f64> =
-	lazy_env_parse!("SURREAL_ROCKSDB_BLOB_GC_FORCE_THRESHOLD", f64, 0.8);
+	lazy_env_parse!("SURREAL_ROCKSDB_BLOB_GC_FORCE_THRESHOLD", f64, 1.0);
 
 /// Readahead size for blob compaction/GC (default: 0)
 pub(super) static ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE: LazyLock<usize> =
