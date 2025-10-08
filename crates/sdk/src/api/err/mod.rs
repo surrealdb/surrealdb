@@ -404,14 +404,6 @@ impl From<semver::Error> for Error {
 	}
 }
 
-// Allow conversion from tokio_tungstenite::tungstenite::Error
-#[cfg(feature = "protocol-ws")]
-impl From<tokio_tungstenite::tungstenite::Error> for Error {
-	fn from(error: tokio_tungstenite::tungstenite::Error) -> Self {
-		Error::Ws(error.to_string())
-	}
-}
-
 // Allow conversion from RpcError from core
 impl From<surrealdb_core::rpc::RpcError> for Error {
 	fn from(error: surrealdb_core::rpc::RpcError) -> Self {

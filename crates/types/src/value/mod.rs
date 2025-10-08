@@ -26,7 +26,6 @@ pub mod regex;
 pub mod uuid;
 
 use std::cmp::Ordering;
-use std::fmt::{self, Display};
 use std::ops::Index;
 
 pub use rust_decimal::Decimal;
@@ -633,29 +632,6 @@ impl FromIterator<Value> for Value {
 	}
 }
 
-impl Display for Value {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			Value::None => write!(f, "NONE"),
-			Value::Null => write!(f, "NULL"),
-			Value::Array(v) => write!(f, "{v}"),
-			Value::Bool(v) => write!(f, "{v}"),
-			Value::Bytes(v) => write!(f, "{v}"),
-			Value::Datetime(v) => write!(f, "{v}"),
-			Value::Duration(v) => write!(f, "{v}"),
-			Value::Geometry(v) => write!(f, "{v}"),
-			Value::Number(v) => write!(f, "{v}"),
-			Value::Object(v) => write!(f, "{v}"),
-			Value::Range(v) => write!(f, "{v}"),
-			Value::Regex(v) => write!(f, "{v}"),
-			Value::String(v) => write!(f, "{v}"),
-			Value::RecordId(v) => write!(f, "{v}"),
-			Value::Uuid(v) => write!(f, "{v}"),
-			Value::File(v) => write!(f, "{v}"),
-		}
-	}
-}
-
 impl ToSql for Value {
 	fn fmt_sql(&self, f: &mut String) {
 		match self {
@@ -998,129 +974,100 @@ mod tests {
 
 	#[rstest]
 	// None and Null
-	#[case::none(Value::None, "NONE", "NONE")]
-	#[case::null(Value::Null, "NULL", "NULL")]
+	#[case::none(Value::None, "NONE")]
+	#[case::null(Value::Null, "NULL")]
 	// Booleans
-	#[case::bool(Value::Bool(true), "true", "true")]
-	#[case::bool(Value::Bool(false), "false", "false")]
+	#[case::bool(Value::Bool(true), "true")]
+	#[case::bool(Value::Bool(false), "false")]
 	// Numbers - integers
-	#[case::number(Value::Number(Number::Int(0)), "0", "0")]
-	#[case::number(Value::Number(Number::Int(5)), "5", "5")]
-	#[case::number(Value::Number(Number::Int(-5)), "-5", "-5")]
-	#[case::number(
-		Value::Number(Number::Int(i64::MAX)),
-		"9223372036854775807",
-		"9223372036854775807"
-	)]
-	#[case::number(
-		Value::Number(Number::Int(i64::MIN)),
-		"-9223372036854775808",
-		"-9223372036854775808"
-	)]
+	#[case::number(Value::Number(Number::Int(0)), "0")]
+	#[case::number(Value::Number(Number::Int(5)), "5")]
+	#[case::number(Value::Number(Number::Int(-5)), "-5")]
+	#[case::number(Value::Number(Number::Int(i64::MAX)), "9223372036854775807")]
+	#[case::number(Value::Number(Number::Int(i64::MIN)), "-9223372036854775808")]
 	// Numbers - floats
-	#[case::number(Value::Number(Number::Float(0.0)), "0f", "0f")]
-	#[case::number(Value::Number(Number::Float(5.0)), "5f", "5f")]
-	#[case::number(Value::Number(Number::Float(-5.5)), "-5.5f", "-5.5f")]
-	#[case::number(Value::Number(Number::Float(3.12345)), "3.12345f", "3.12345f")]
+	#[case::number(Value::Number(Number::Float(0.0)), "0f")]
+	#[case::number(Value::Number(Number::Float(5.0)), "5f")]
+	#[case::number(Value::Number(Number::Float(-5.5)), "-5.5f")]
+	#[case::number(Value::Number(Number::Float(3.12345)), "3.12345f")]
 	// Numbers - decimals
-	#[case::number(Value::Number(Number::Decimal(Decimal::new(0, 0))), "0dec", "0dec")]
-	#[case::number(Value::Number(Number::Decimal(Decimal::new(5, 0))), "5dec", "5dec")]
-	#[case::number(Value::Number(Number::Decimal(Decimal::new(-5, 0))), "-5dec", "-5dec")]
-	#[case::number(
-		Value::Number(Number::Decimal(Decimal::new(12345, 2))),
-		"123.45dec",
-		"123.45dec"
-	)]
+	#[case::number(Value::Number(Number::Decimal(Decimal::new(0, 0))), "0dec")]
+	#[case::number(Value::Number(Number::Decimal(Decimal::new(5, 0))), "5dec")]
+	#[case::number(Value::Number(Number::Decimal(Decimal::new(-5, 0))), "-5dec")]
+	#[case::number(Value::Number(Number::Decimal(Decimal::new(12345, 2))), "123.45dec")]
 	// Strings - basic
-	#[case::string(Value::String("".to_string()), "''", "")]
-	#[case::string(Value::String("hello".to_string()), "'hello'", "hello")]
-	#[case::string(Value::String("hello world".to_string()), "'hello world'", "hello world")]
+	#[case::string(Value::String("".to_string()), "''")]
+	#[case::string(Value::String("hello".to_string()), "'hello'")]
+	#[case::string(Value::String("hello world".to_string()), "'hello world'")]
 	// Strings - escaping
-	#[case::string(Value::String("escap'd".to_string()), "\"escap'd\"", "escap'd")]
-	#[case::string(Value::String("\"escaped\"".to_string()), "'\"escaped\"'", "\"escaped\"")]
-	#[case::string(Value::String("mix'd \"quotes\"".to_string()), "\"mix'd \\\"quotes\\\"\"", "mix'd \"quotes\"")]
-	#[case::string(Value::String("tab\there".to_string()), "'tab\there'", "tab\there")]
-	#[case::string(Value::String("new\nline".to_string()), "'new\nline'", "new\nline")]
+	#[case::string(Value::String("escap'd".to_string()), "\"escap'd\"")]
+	#[case::string(Value::String("\"escaped\"".to_string()), "'\"escaped\"'")]
+	#[case::string(Value::String("mix'd \"quotes\"".to_string()), "\"mix'd \\\"quotes\\\"\"")]
+	#[case::string(Value::String("tab\there".to_string()), "'tab\there'")]
+	#[case::string(Value::String("new\nline".to_string()), "'new\nline'")]
 	// Strings - unicode
-	#[case::string(Value::String("你好".to_string()), "'你好'", "你好")]
-	#[case::string(Value::String("emoji 🎉".to_string()), "'emoji 🎉'", "emoji 🎉")]
+	#[case::string(Value::String("你好".to_string()), "'你好'")]
+	#[case::string(Value::String("emoji 🎉".to_string()), "'emoji 🎉'")]
 	// Durations
-	#[case::duration(Value::Duration(Duration::new(0, 0)), "0ns", "0ns")]
-	#[case::duration(Value::Duration(Duration::new(1, 0)), "1s", "1s")]
-	#[case::duration(Value::Duration(Duration::new(60, 0)), "1m", "1m")]
-	#[case::duration(Value::Duration(Duration::new(3600, 0)), "1h", "1h")]
-	#[case::duration(Value::Duration(Duration::new(90, 0)), "1m30s", "1m30s")]
+	#[case::duration(Value::Duration(Duration::new(0, 0)), "0ns")]
+	#[case::duration(Value::Duration(Duration::new(1, 0)), "1s")]
+	#[case::duration(Value::Duration(Duration::new(60, 0)), "1m")]
+	#[case::duration(Value::Duration(Duration::new(3600, 0)), "1h")]
+	#[case::duration(Value::Duration(Duration::new(90, 0)), "1m30s")]
 	// Datetimes
-	#[case::datetime(Value::Datetime(Datetime::from_timestamp(0, 0).unwrap()), "d'1970-01-01T00:00:00Z'", "1970-01-01T00:00:00Z")]
-	#[case::datetime(Value::Datetime(Datetime::from_timestamp(1, 0).unwrap()), "d'1970-01-01T00:00:01Z'", "1970-01-01T00:00:01Z")]
-	#[case::datetime(Value::Datetime(Datetime::from_timestamp(1234567890, 0).unwrap()), "d'2009-02-13T23:31:30Z'", "2009-02-13T23:31:30Z")]
+	#[case::datetime(Value::Datetime(Datetime::from_timestamp(0, 0).unwrap()), "d'1970-01-01T00:00:00Z'")]
+	#[case::datetime(Value::Datetime(Datetime::from_timestamp(1, 0).unwrap()), "d'1970-01-01T00:00:01Z'")]
+	#[case::datetime(Value::Datetime(Datetime::from_timestamp(1234567890, 0).unwrap()), "d'2009-02-13T23:31:30Z'")]
 	// UUIDs
-	#[case::uuid(
-		Value::Uuid(Uuid::nil()),
-		"u'00000000-0000-0000-0000-000000000000'",
-		"00000000-0000-0000-0000-000000000000"
-	)]
+	#[case::uuid(Value::Uuid(Uuid::nil()), "u'00000000-0000-0000-0000-000000000000'")]
 	// Arrays - basic
-	#[case::array(Value::Array(Array::new()), "[]", "[]")]
-	#[case::array(Value::Array(vec![Value::Number(Number::Int(1))].into()), "[1]", "[1]")]
-	#[case::array(Value::Array(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2)), Value::Number(Number::Int(3))].into()), "[1, 2, 3]", "[1, 2, 3]")]
+	#[case::array(Value::Array(Array::new()), "[]")]
+	#[case::array(Value::Array(vec![Value::Number(Number::Int(1))].into()), "[1]")]
+	#[case::array(Value::Array(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2)), Value::Number(Number::Int(3))].into()), "[1, 2, 3]")]
 	// Arrays - mixed types
-	#[case::array(Value::Array(vec![Value::String("hello".to_string()), Value::Number(Number::Int(42)), Value::Bool(true)].into()), "['hello', 42, true]", "[hello, 42, true]")]
+	#[case::array(Value::Array(vec![Value::String("hello".to_string()), Value::Number(Number::Int(42)), Value::Bool(true)].into()), "['hello', 42, true]")]
 	// Arrays - nested
-	#[case::array(Value::Array(vec![Value::Array(vec![Value::Number(Number::Int(1))].into())].into()), "[[1]]", "[[1]]")]
-	#[case::array(Value::Array(vec![Value::Array(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))].into()), Value::Array(vec![Value::Number(Number::Int(3))].into())].into()), "[[1, 2], [3]]", "[[1, 2], [3]]")]
+	#[case::array(Value::Array(vec![Value::Array(vec![Value::Number(Number::Int(1))].into())].into()), "[[1]]")]
+	#[case::array(Value::Array(vec![Value::Array(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))].into()), Value::Array(vec![Value::Number(Number::Int(3))].into())].into()), "[[1, 2], [3]]")]
 	// Objects - basic
-	#[case::object(Value::Object(Object::default()), "{  }", "{}")]
+	#[case::object(Value::Object(Object::default()), "{  }")]
 	#[case::object(Value::Object(object! {
 		"hello": "world".to_string(),
-	}), "{ hello: 'world' }", "{ hello: world }")]
+	}), "{ hello: 'world' }")]
 	// Objects - multiple keys
 	#[case::object(Value::Object(object! {
 		"name": "John".to_string(),
 		"age": 30,
-	}), "{ age: 30, name: 'John' }", "{ age: 30, name: John }")]
+	}), "{ age: 30, name: 'John' }")]
 	// Objects - nested
 	#[case::object(Value::Object(object! {
 		"user": object! {
 			"name": "Jane".to_string(),
 		}
-	}), "{ user: { name: 'Jane' } }", "{ user: { name: Jane } }")]
+	}), "{ user: { name: 'Jane' } }")]
 	// Objects - arrays in objects
 	#[case::object(Value::Object(object! {
 		"items": vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))],
-	}), "{ items: [1, 2] }", "{ items: [1, 2] }")]
+	}), "{ items: [1, 2] }")]
 	// Geometry
-	#[case::geometry(
-		Value::Geometry(Geometry::Point(geo::Point::new(0.0, 0.0))),
-		"(0, 0)",
-		"(0, 0)"
-	)]
-	#[case::geometry(
-		Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))),
-		"(1, 2)",
-		"(1, 2)"
-	)]
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(-123.45, 67.89))), "(-123.45, 67.89)", "(-123.45, 67.89)")]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(0.0, 0.0))), "(0, 0)")]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))), "(1, 2)")]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(-123.45, 67.89))), "(-123.45, 67.89)")]
 	// Bytes
-	#[case::bytes(Value::Bytes(Bytes::default()), "b\"\"", "b\"\"")]
-	#[case::bytes(Value::Bytes(Bytes::from(vec![1, 2, 3])), "b\"010203\"", "b\"010203\"")]
-	#[case::bytes(Value::Bytes(Bytes::from(vec![255, 0, 128])), "b\"FF0080\"", "b\"FF0080\"")]
+	#[case::bytes(Value::Bytes(Bytes::default()), "b\"\"")]
+	#[case::bytes(Value::Bytes(Bytes::from(vec![1, 2, 3])), "b\"010203\"")]
+	#[case::bytes(Value::Bytes(Bytes::from(vec![255, 0, 128])), "b\"FF0080\"")]
 	// Record IDs
-	#[case::record_id(Value::RecordId(RecordId::new("test", "key")), "test:key", "test:key")]
-	#[case::record_id(Value::RecordId(RecordId::new("user", 123)), "user:123", "user:123")]
-	#[case::record_id(
-		Value::RecordId(RecordId::new("table", "complex_id")),
-		"table:complex_id",
-		"table:complex_id"
-	)]
+	#[case::record_id(Value::RecordId(RecordId::new("test", "key")), "test:key")]
+	#[case::record_id(Value::RecordId(RecordId::new("user", 123)), "user:123")]
+	#[case::record_id(Value::RecordId(RecordId::new("table", "complex_id")), "table:complex_id")]
 	// Ranges
-	#[case::range(Value::Range(Box::new(Range::unbounded())), "..", "..")]
+	#[case::range(Value::Range(Box::new(Range::unbounded())), "..")]
 	#[case::range(
 		Value::Range(Box::new(Range::new(
 			std::ops::Bound::Included(Value::Number(Number::Int(1))),
 			std::ops::Bound::Excluded(Value::Number(Number::Int(10)))
 		))),
-		"1..10",
 		"1..10"
 	)]
 	#[case::range(
@@ -1128,7 +1075,6 @@ mod tests {
 			std::ops::Bound::Included(Value::Number(Number::Int(0))),
 			std::ops::Bound::Included(Value::Number(Number::Int(100)))
 		))),
-		"0..=100",
 		"0..=100"
 	)]
 	#[case::range(
@@ -1136,7 +1082,6 @@ mod tests {
 			std::ops::Bound::Unbounded,
 			std::ops::Bound::Excluded(Value::Number(Number::Int(50)))
 		))),
-		"..50",
 		"..50"
 	)]
 	#[case::range(
@@ -1144,16 +1089,14 @@ mod tests {
 			std::ops::Bound::Included(Value::Number(Number::Int(10))),
 			std::ops::Bound::Unbounded
 		))),
-		"10..",
 		"10.."
 	)]
 	// Regex
-	#[case::regex(Value::Regex("hello".parse().unwrap()), "/hello/", "/hello/")]
-	#[case::regex(Value::Regex("[a-z]+".parse().unwrap()), "/[a-z]+/", "/[a-z]+/")]
-	#[case::regex(Value::Regex("^test$".parse().unwrap()), "/^test$/", "/^test$/")]
-	fn test_to_sql(#[case] value: Value, #[case] expected_sql: &str, #[case] expected_str: &str) {
+	#[case::regex(Value::Regex("hello".parse().unwrap()), "/hello/")]
+	#[case::regex(Value::Regex("[a-z]+".parse().unwrap()), "/[a-z]+/")]
+	#[case::regex(Value::Regex("^test$".parse().unwrap()), "/^test$/")]
+	fn test_to_sql(#[case] value: Value, #[case] expected_sql: &str) {
 		assert_eq!(&value.to_sql(), expected_sql);
-		assert_eq!(&value.to_string(), expected_str);
 	}
 
 	#[rstest]

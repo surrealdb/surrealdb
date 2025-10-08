@@ -2,8 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::sql::ToSql;
-use surrealdb_types::{SurrealValue, Value, Variables};
+use surrealdb_types::{SurrealValue, Value, vars};
 use uuid::Uuid;
 
 use crate::Surreal;
@@ -59,18 +58,22 @@ macro_rules! into_future {
 				let patches = surrealdb_types::Value::Array(surrealdb_types::Array::from(vec));
 				let router = client.inner.router.extract()?;
 
-				let what = resource?.to_sql();
+				let what = resource?.into_value();
 				let operation = if upsert {
 					"UPSERT"
 				} else {
 					"UPDATE"
 				};
-				let query = format!("{operation} {what} PATCH {} RETURN AFTER", patches.to_sql());
+				let variables = vars! {
+					_what: what,
+					_patches: patches,
+				};
+				let query = format!("{operation} $_what PATCH $_patches RETURN AFTER");
 
 				let cmd = Command::RawQuery {
 					txn,
 					query: Cow::Owned(query),
-					variables: Variables::new(),
+					variables,
 				};
 
 				router.$method(cmd).await

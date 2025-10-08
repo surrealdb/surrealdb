@@ -952,18 +952,9 @@ async fn router(
 		}
 
 		Command::Run {
-			name,
+			name: _name,
 			version: _version,
-			args,
-		} => {
-			let args = args.into_iter().map(|v| v.to_string()).collect::<Vec<_>>().join(",");
-
-			let sql = format!("{name}({args})");
-
-			let response =
-				kvs.execute(&sql, &*session.read().await, Some(vars.read().await.clone())).await?;
-
-			Ok(response)
-		}
+			args: _args,
+		} => Err(crate::api::Error::InternalError("Run command not implemented".to_string())),
 	}
 }

@@ -1,4 +1,3 @@
-use std::fmt::{self, Display, Write};
 use std::ops::{Deref, DerefMut};
 
 use serde::{Deserialize, Serialize};
@@ -84,19 +83,6 @@ impl IntoIterator for Array {
 	type IntoIter = std::vec::IntoIter<Self::Item>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
-	}
-}
-
-impl Display for Array {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_char('[')?;
-		for (i, v) in self.0.iter().enumerate() {
-			v.fmt(f)?;
-			if i < self.0.len() - 1 {
-				f.write_str(", ")?;
-			}
-		}
-		f.write_char(']')
 	}
 }
 

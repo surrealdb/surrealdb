@@ -3,7 +3,6 @@ use std::collections::hash_map::Entry;
 use std::sync::atomic::AtomicI64;
 use std::time::Duration;
 
-use anyhow::Result;
 use async_channel::{Receiver, Sender};
 use futures::stream::{SplitSink, SplitStream};
 use futures::{FutureExt, SinkExt, StreamExt};
@@ -24,7 +23,7 @@ use crate::api::engine::remote::ws::{Client, PING_INTERVAL};
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Endpoint;
-use crate::api::{ExtraFeatures, Surreal};
+use crate::api::{ExtraFeatures, Result, Surreal};
 use crate::engine::IntervalStream;
 use crate::opt::WaitFor;
 
@@ -331,7 +330,7 @@ async fn router_handle_response(
 					// Return an error if an ID was returned
 					if let Some(Ok(id)) = id.map(Value::into_int) {
 						if let Some(req) = state.pending_requests.remove(&id) {
-							let _res = req.response_channel.send(Err(error)).await;
+							let _res = req.response_channel.send(Err(error.into())).await;
 						} else {
 							warn!(
 								"got response for request with id '{id}', which was not in pending requests"
@@ -426,7 +425,7 @@ pub(crate) async fn run_router(
 	let (mut ws, socket) = match connect {
 		Ok(pair) => pair,
 		Err(error) => {
-			let _ = conn_tx.send(Err(error.into())).await;
+			let _ = conn_tx.send(Err(Error::Ws(error.to_string()).into())).await;
 			return;
 		}
 	};
@@ -439,7 +438,7 @@ pub(crate) async fn run_router(
 		match result {
 			Ok(events) => events,
 			Err(error) => {
-				let _ = conn_tx.send(Err(error.into())).await;
+				let _ = conn_tx.send(Err(Error::Ws(error.to_string()).into())).await;
 				return;
 			}
 		}
@@ -550,7 +549,6 @@ fn ws_message_to_db_response(message: &Message) -> Result<Option<DbResponse>> {
 		}
 		Message::Binary(binary) => surrealdb_core::rpc::format::flatbuffers::decode(&binary)
 			.map(Some)
-			.map_err(|error| Error::InvalidResponse(error.to_string()))
-			.map_err(anyhow::Error::new),
+			.map_err(|error| Error::InvalidResponse(error.to_string()).into()),
 	}
 }

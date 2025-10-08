@@ -59,7 +59,8 @@ pub(crate) async fn connect(
 	#[cfg_attr(not(any(feature = "native-tls", feature = "rustls")), expect(unused_variables))]
 	maybe_connector: Option<Connector>,
 ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>> {
-	let mut request = (&endpoint.url).into_client_request()?;
+	let mut request =
+		(&endpoint.url).into_client_request().map_err(|err| Error::InvalidUrl(err.to_string()))?;
 
 	request.headers_mut().insert(SEC_WEBSOCKET_PROTOCOL, HeaderValue::from_static("flatbuffers"));
 
@@ -70,7 +71,8 @@ pub(crate) async fn connect(
 		NAGLE_ALG,
 		maybe_connector,
 	)
-	.await?;
+	.await
+	.map_err(|err| Error::Ws(err.to_string()))?;
 
 	#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
 	let (socket, _) = tokio_tungstenite::connect_async_with_config(request, config, NAGLE_ALG).await?;
@@ -268,7 +270,7 @@ async fn router_handle_route(
 			});
 		}
 		Err(error) => {
-			let err: Error = error.into();
+			let err = Error::Ws(error.to_string());
 			if response.send(Err(err.into())).await.is_err() {
 				trace!("Receiver dropped");
 			}

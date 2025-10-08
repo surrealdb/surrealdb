@@ -2,8 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::sql::ToSql;
-use surrealdb_types::{self, RecordIdKeyRange, SurrealValue, Value, Variables};
+use surrealdb_types::{self, RecordIdKeyRange, SurrealValue, Value, vars};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -64,11 +63,15 @@ macro_rules! into_future {
 
 				let what = resource?;
 
+				let variables = vars! {
+					_what: what,
+				};
+
 				router
 					.$method(Command::RawQuery {
 						txn,
-						query: Cow::Owned(format!("UPDATE {}", what.to_sql())),
-						variables: Variables::new(),
+						query: Cow::Borrowed("UPDATE $_what"),
+						variables,
 					})
 					.await
 			})
@@ -148,17 +151,25 @@ where
 				"Tried to update non-object-like data as content, only structs and objects are supported",
 			)?;
 
-			let what = self.resource?.to_sql();
+			let what = self.resource?.into_value();
 
-			let query = match data {
-				Value::None => format!("UPDATE {what}"),
-				content => format!("UPDATE {what} CONTENT {}", content.to_sql()),
+			let data_is_none = data.is_none();
+
+			let variables = vars! {
+				_what: what,
+				_content: data,
+			};
+
+			let query = if data_is_none {
+				"UPDATE $_what"
+			} else {
+				"UPDATE $_what CONTENT $_content"
 			};
 
 			Ok(Command::RawQuery {
 				txn: self.txn,
-				query: Cow::Owned(query),
-				variables: Variables::new(),
+				query: Cow::Borrowed(query),
+				variables,
 			})
 		})
 	}

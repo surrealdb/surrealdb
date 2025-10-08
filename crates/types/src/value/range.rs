@@ -1,5 +1,4 @@
 use std::cmp::Ordering;
-use std::fmt;
 use std::ops::{Bound, RangeBounds};
 
 use serde::{Deserialize, Serialize};
@@ -139,23 +138,6 @@ impl Ord for Range {
 			Ordering::Equal => compare_bounds(&self.end, &other.end),
 			x => x,
 		}
-	}
-}
-
-impl fmt::Display for Range {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self.start {
-			Bound::Unbounded => {}
-			Bound::Included(ref x) => write!(f, "{x}")?,
-			Bound::Excluded(ref x) => write!(f, "{x}>")?,
-		}
-		write!(f, "..")?;
-		match self.end {
-			Bound::Unbounded => {}
-			Bound::Included(ref x) => write!(f, "={x}")?,
-			Bound::Excluded(ref x) => write!(f, "{x}")?,
-		}
-		Ok(())
 	}
 }
 

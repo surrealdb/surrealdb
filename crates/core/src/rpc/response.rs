@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
+use surrealdb_types::sql::ToSql;
 use surrealdb_types::{kind, object};
 use thiserror::Error;
 
@@ -253,7 +254,7 @@ impl SurrealValue for DbResultError {
 				Ok(DbResultError::from_code(code.into_int()?, message.into_string()?))
 			}
 			PublicValue::String(s) => Ok(DbResultError::Thrown(s.to_string())),
-			other => anyhow::bail!("Expected object for DbResultError, got {other}"),
+			other => anyhow::bail!("Expected object for DbResultError, got {}", other.to_sql()),
 		}
 	}
 }

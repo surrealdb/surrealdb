@@ -2,8 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::sql::ToSql;
-use surrealdb_types::{SurrealValue, Value, Variables};
+use surrealdb_types::{SurrealValue, Value, vars};
 use uuid::Uuid;
 
 use super::validate_data;
@@ -67,21 +66,40 @@ macro_rules! into_future {
 				let router = client.inner.router.extract()?;
 
 				let what = resource?.into_value();
-				let query = match (upsert, content) {
+
+				let (variables, query) = match (upsert, content) {
 					(true, Some(data)) => {
-						format!("UPSERT {} MERGE {}", what.to_sql(), data.to_sql())
+						let variables = vars! {
+							_what: what,
+							_data: data,
+						};
+						(variables, "UPSERT $_what MERGE $_data")
 					}
-					(true, None) => format!("UPSERT {}", what.to_sql()),
+					(true, None) => (
+						vars! {
+							_what: what,
+						},
+						"UPSERT $_what",
+					),
 					(false, Some(data)) => {
-						format!("UPDATE {} MERGE {}", what.to_sql(), data.to_sql())
+						let variables = vars! {
+							_what: what,
+							_data: data,
+						};
+						(variables, "UPDATE $_what MERGE $_data")
 					}
-					(false, None) => format!("UPDATE {}", what.to_sql()),
+					(false, None) => (
+						vars! {
+							_what: what,
+						},
+						"UPDATE $_what",
+					),
 				};
 
 				let cmd = Command::RawQuery {
 					txn,
-					query: Cow::Owned(query),
-					variables: Variables::new(),
+					query: Cow::Borrowed(query),
+					variables,
 				};
 
 				router.$method(cmd).await

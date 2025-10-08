@@ -3,14 +3,11 @@ pub mod key;
 /// Record id range types
 pub mod range;
 
-use std::fmt;
-
 pub use key::*;
 pub use range::*;
 use serde::{Deserialize, Serialize};
 
 use crate::sql::ToSql;
-use crate::utils::escape::EscapeRid;
 
 /// Represents a record identifier in SurrealDB
 ///
@@ -47,14 +44,10 @@ impl RecordId {
 	}
 }
 
-impl fmt::Display for RecordId {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}:{}", EscapeRid(&self.table), self.key)
-	}
-}
-
 impl ToSql for RecordId {
 	fn fmt_sql(&self, f: &mut String) {
-		f.push_str(&format!("{}:{}", self.table, self.key))
+		f.push_str(&self.table);
+		f.push(':');
+		self.key.fmt_sql(f);
 	}
 }

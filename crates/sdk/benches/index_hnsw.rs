@@ -7,6 +7,7 @@ use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterio
 use flate2::read::GzDecoder;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_types::sql::ToSql;
 use surrealdb_types::{RecordId, RecordIdKey, Value};
 use tokio::runtime::{Builder, Runtime};
 
@@ -25,8 +26,10 @@ fn bench_hnsw_with_db(c: &mut Criterion) {
 	const GROUP_NAME: &str = "hnsw_with_db";
 
 	let samples = new_vectors_from_file(INGESTING_SOURCE);
-	let samples: Vec<String> =
-		samples.into_iter().map(|(r, a)| format!("CREATE {r} SET r={a} RETURN NONE;")).collect();
+	let samples: Vec<String> = samples
+		.into_iter()
+		.map(|(r, a)| format!("CREATE {} SET r={a} RETURN NONE;", r.to_sql()))
+		.collect();
 
 	let session = &Session::owner().with_ns("ns").with_db("db");
 
@@ -64,8 +67,10 @@ fn bench_db_without_index(c: &mut Criterion) {
 	const GROUP_NAME: &str = "hnsw_without_index";
 
 	let samples = new_vectors_from_file(INGESTING_SOURCE);
-	let samples: Vec<String> =
-		samples.into_iter().map(|(r, a)| format!("CREATE {r} SET r={a} RETURN NONE;")).collect();
+	let samples: Vec<String> = samples
+		.into_iter()
+		.map(|(r, a)| format!("CREATE {} SET r={a} RETURN NONE;", r.to_sql()))
+		.collect();
 
 	let session = &Session::owner().with_ns("ns").with_db("db");
 
@@ -88,7 +93,12 @@ fn bench_db_without_index(c: &mut Criterion) {
 	let samples = new_vectors_from_file(QUERYING_SOURCE);
 	let selects: Vec<String> = samples
 		.into_iter()
-		.map(|(id, _)| format!("SELECT id FROM {id},{id},{id},{id},{id},{id},{id},{id},{id},{id};"))
+		.map(|(id, _)| {
+			format!(
+				"SELECT id FROM {id},{id},{id},{id},{id},{id},{id},{id},{id},{id};",
+				id = id.to_sql()
+			)
+		})
 		.collect();
 	{
 		let mut group = get_group(c, GROUP_NAME, selects.len(), 10);

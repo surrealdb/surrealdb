@@ -1,5 +1,6 @@
 use std::ops::{self, Bound};
 
+use surrealdb_types::sql::ToSql;
 use surrealdb_types::{
 	Array, Kind, Object, RecordId, RecordIdKey, RecordIdKeyRange, SurrealValue, Value,
 };
@@ -98,7 +99,7 @@ impl SurrealValue for Resource {
 	}
 
 	fn from_value(value: Value) -> surrealdb_types::anyhow::Result<Self> {
-		Err(surrealdb_types::anyhow::anyhow!("Invalid resource: {value}"))
+		Err(surrealdb_types::anyhow::anyhow!("Invalid resource: {}", value.to_sql()))
 	}
 }
 

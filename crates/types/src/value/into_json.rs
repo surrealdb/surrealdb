@@ -2,6 +2,7 @@ use chrono::SecondsFormat;
 use geo::{LineString, Point, Polygon};
 use serde_json::{Map, Number as JsonNumber, Value as JsonValue, json};
 
+use crate::sql::ToSql;
 use crate::{Geometry, Number, Value};
 
 impl Value {
@@ -58,13 +59,13 @@ impl Value {
 			Value::Bytes(bytes) => {
 				JsonValue::Array(bytes.0.into_iter().map(|x| JsonValue::Number(x.into())).collect())
 			}
-			Value::RecordId(thing) => JsonValue::String(thing.to_string()),
+			Value::RecordId(thing) => JsonValue::String(thing.to_sql()),
 			// TODO: Maybe remove
-			Value::Regex(regex) => JsonValue::String(regex.0.to_string()),
-			Value::File(file) => JsonValue::String(file.to_string()),
+			Value::Regex(regex) => JsonValue::String(regex.to_sql()),
+			Value::File(file) => JsonValue::String(file.to_sql()),
 			// This kind of breaks the behaviour
 			// TODO: look at the serialization here.
-			Value::Range(range) => JsonValue::String(range.to_string()),
+			Value::Range(range) => JsonValue::String(range.to_sql()),
 		}
 	}
 }

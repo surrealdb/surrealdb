@@ -6,9 +6,9 @@ use std::task::{Context, Poll};
 
 use async_channel::Receiver;
 use futures::StreamExt;
-use surrealdb_types::sql::ToSql;
 use surrealdb_types::{
-	self, Action, Notification as CoreNotification, RecordIdKey, SurrealValue, Value, Variables,
+	self, Action, Notification as CoreNotification, RecordId, RecordIdKey, SurrealValue, Value,
+	Variables,
 };
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
@@ -47,13 +47,12 @@ where
 		let stmt = match resource? {
 			Resource::Table(table) => {
 				variables.insert("_table".to_string(), Value::String(table));
-				format!("LIVE SELECT * FROM $_table")
+				"LIVE SELECT * FROM $_table".to_string()
 			}
 			Resource::RecordId(record) => {
 				// For a specific record, we use WHERE id = record
-				variables.insert("_table".to_string(), Value::String(record.table));
-				variables.insert("_id".to_string(), Value::String(record.to_sql()));
-				format!("LIVE SELECT * FROM $_table WHERE id = $_id")
+				variables.insert("_record_id".to_string(), Value::RecordId(record));
+				"LIVE SELECT * FROM $_record_id".to_string()
 			}
 			Resource::Object(_) => return Err(Error::LiveOnObject),
 			Resource::Array(_) => return Err(Error::LiveOnArray),
@@ -69,12 +68,18 @@ where
 				// Handle start bound
 				match &key_range.start {
 					std::ops::Bound::Included(key) => {
-						variables.insert("_start".to_string(), Value::RecordId(RecordId::new(record.table, key.clone())));
-						conditions.push(format!("id >= $_start"));
+						variables.insert(
+							"_start".to_string(),
+							Value::RecordId(RecordId::new(record.table.clone(), key.clone())),
+						);
+						conditions.push("id >= $_start");
 					}
 					std::ops::Bound::Excluded(key) => {
-						variables.insert("_start".to_string(), Value::RecordId(RecordId::new(record.table, key.clone())));
-						conditions.push(format!("id > $_start"));
+						variables.insert(
+							"_start".to_string(),
+							Value::RecordId(RecordId::new(record.table.clone(), key.clone())),
+						);
+						conditions.push("id > $_start");
 					}
 					std::ops::Bound::Unbounded => {}
 				}
@@ -82,12 +87,18 @@ where
 				// Handle end bound
 				match &key_range.end {
 					std::ops::Bound::Included(key) => {
-						variables.insert("_end".to_string(), Value::RecordId(RecordId::new(record.table, key.clone())));
-						conditions.push(format!("id <= $_end"));
+						variables.insert(
+							"_end".to_string(),
+							Value::RecordId(RecordId::new(record.table.clone(), key.clone())),
+						);
+						conditions.push("id <= $_end");
 					}
 					std::ops::Bound::Excluded(key) => {
-						variables.insert("_end".to_string(), Value::RecordId(RecordId::new(record.table, key.clone())));
-						conditions.push(format!("id < $_end"));
+						variables.insert(
+							"_end".to_string(),
+							Value::RecordId(RecordId::new(record.table.clone(), key.clone())),
+						);
+						conditions.push("id < $_end");
 					}
 					std::ops::Bound::Unbounded => {}
 				}
@@ -95,13 +106,10 @@ where
 				// Build final query
 				if conditions.is_empty() {
 					variables.insert("_table".to_string(), Value::String(record.table));
-					format!("LIVE SELECT * FROM $_table")
+					"LIVE SELECT * FROM $_table".to_string()
 				} else {
 					variables.insert("_table".to_string(), Value::String(record.table));
-					format!(
-						"LIVE SELECT * FROM $_table WHERE {}",
-						conditions.join(" AND ")
-					)
+					format!("LIVE SELECT * FROM $_table WHERE {}", conditions.join(" AND "))
 				}
 			}
 			Resource::Unspecified => return Err(Error::LiveOnUnspecified),

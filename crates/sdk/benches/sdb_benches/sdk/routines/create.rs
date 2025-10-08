@@ -15,7 +15,7 @@ impl Create {
 	pub fn new(runtime: &'static Runtime) -> Self {
 		Self {
 			runtime,
-			table_name: format!("table_{}", RecordIdKey::rand()),
+			table_name: format!("table_{}", super::rand_id()),
 		}
 	}
 }

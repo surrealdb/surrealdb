@@ -5,6 +5,7 @@ use anyhow::{Result, bail};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
 use jsonwebtoken::{DecodingKey, Validation, decode};
+use surrealdb_types::sql::ToSql;
 
 use crate::catalog::providers::{
 	AuthorisationProvider, DatabaseProvider, NamespaceProvider, UserProvider,
@@ -268,9 +269,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			);
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
-				rid.to_string(),
+				rid.to_sql(),
 				Default::default(),
-				Level::Record(ns.to_string(), db.to_string(), rid.to_string()),
+				Level::Record(ns.to_string(), db.to_string(), rid.to_sql()),
 			)));
 			Ok(())
 		}
@@ -436,9 +437,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						);
 						session.exp = expiration(de.session_duration)?;
 						session.au = Arc::new(Auth::new(Actor::new(
-							rid.to_string(),
+							rid.to_sql(),
 							Default::default(),
-							Level::Record(ns.to_string(), db.to_string(), rid.to_string()),
+							Level::Record(ns.to_string(), db.to_string(), rid.to_sql()),
 						)));
 					}
 					_ => bail!(Error::AccessMethodMismatch),
@@ -1256,7 +1257,7 @@ mod tests {
 		for id in &ids {
 			// Prepare the claims object
 			let mut claims = claims.clone();
-			claims.id = Some(syn::record_id(id).unwrap().to_string());
+			claims.id = Some(syn::record_id(id).unwrap().to_sql());
 			claims.roles = roles.clone().map(|roles| roles.into_iter().map(String::from).collect());
 
 			// Create the token

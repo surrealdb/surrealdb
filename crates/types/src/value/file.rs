@@ -1,5 +1,3 @@
-use std::fmt;
-
 use serde::{Deserialize, Serialize};
 
 use crate::sql::ToSql;
@@ -44,12 +42,6 @@ impl File {
 	/// The key always starts with a "/"
 	pub fn key(&self) -> &str {
 		&self.key
-	}
-}
-
-impl fmt::Display for File {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}:{}", self.bucket, self.key)
 	}
 }
 

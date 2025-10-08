@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use chrono::Utc;
+use surrealdb_types::sql::ToSql;
 
 use crate::iam::{Auth, Level, Role};
 use crate::types::{PublicValue, PublicVariables};
@@ -132,7 +133,7 @@ impl Session {
 	pub fn for_record(ns: &str, db: &str, ac: &str, rid: PublicValue) -> Session {
 		Session {
 			ac: Some(ac.to_owned()),
-			au: Arc::new(Auth::for_record(rid.to_string(), ns, db, ac)),
+			au: Arc::new(Auth::for_record(rid.to_sql(), ns, db, ac)),
 			rt: false,
 			ip: None,
 			or: None,

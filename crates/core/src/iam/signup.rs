@@ -5,6 +5,7 @@ use chrono::Utc;
 use jsonwebtoken::{Header, encode};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use surrealdb_types::sql::ToSql;
 use uuid::Uuid;
 
 use super::access::{authenticate_record, create_refresh_token_record};
@@ -136,7 +137,7 @@ pub async fn db_access(
 				ns: Some(ns.clone()),
 				db: Some(db.clone()),
 				ac: Some(ac.clone()),
-				id: Some(rid.to_string()),
+				id: Some(rid.to_sql()),
 				..Claims::default()
 			};
 			// AUTHENTICATE clause
@@ -200,9 +201,9 @@ pub async fn db_access(
 			);
 			session.exp = expiration(av.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
-				rid.to_string(),
+				rid.to_sql(),
 				Default::default(),
-				Level::Record(ns, db, rid.to_string()),
+				Level::Record(ns, db, rid.to_sql()),
 			)));
 			// Check the authentication token
 			match enc {

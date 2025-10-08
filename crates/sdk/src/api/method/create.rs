@@ -2,8 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::sql::ToSql;
-use surrealdb_types::{self, SurrealValue, Value, Variables};
+use surrealdb_types::{self, SurrealValue, Value, vars};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -62,12 +61,13 @@ macro_rules! into_future {
 
 				let what = resource?;
 
-				let mut variables = Variables::new();
-				variables.insert("_resource".to_string(), what.into_value());
+				let variables = vars! {
+					_resource: what,
+				};
 
 				let cmd = Command::RawQuery {
 					txn,
-					query: Cow::Owned(format!("CREATE $_resource")),
+					query: Cow::Borrowed("CREATE $_resource"),
 					variables,
 				};
 				router.$method(cmd).await
@@ -116,15 +116,14 @@ where
 
 			let what = self.resource?.into_value();
 
-			let mut variables = Variables::new();
-			variables.insert("_resource".to_string(), what);
-			variables.insert("_content".to_string(), content);
-
-			let query = format!("CREATE $_resource CONTENT $_content");
+			let variables = vars! {
+				_resource: what,
+				_content: content,
+			};
 
 			Ok(Command::RawQuery {
 				txn: self.txn,
-				query: Cow::Owned(query),
+				query: Cow::Borrowed("CREATE $_resource CONTENT $_content"),
 				variables,
 			})
 		})
@@ -150,11 +149,14 @@ where
 
 			let what = self.resource?.into_value();
 
-			let query = format!("CREATE $_resource CONTENT $_content");
+			let variables = vars! {
+				_resource: what,
+				_content: content,
+			};
 
 			Ok(Command::RawQuery {
 				txn: self.txn,
-				query: Cow::Owned(query),
+				query: Cow::Borrowed("CREATE $_resource CONTENT $_content"),
 				variables,
 			})
 		})

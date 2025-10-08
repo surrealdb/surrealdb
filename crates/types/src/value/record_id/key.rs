@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 use serde::{Deserialize, Serialize};
 
 // Needed because we use the SurrealValue derive macro inside the crate which exports it :)
@@ -18,7 +16,6 @@ pub const ID_CHARS: [char; 36] = [
 ///
 /// Record identifiers can have various types of keys including numbers, strings, UUIDs,
 /// arrays, objects, or ranges. This enum provides type-safe representation for all key types.
-
 #[derive(
 	Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize, SurrealValue,
 )]
@@ -136,19 +133,6 @@ impl PartialEq<Value> for RecordIdKey {
 					false
 				}
 			}
-		}
-	}
-}
-
-impl Display for RecordIdKey {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		match self {
-			RecordIdKey::Number(n) => write!(f, "{}", n),
-			RecordIdKey::String(v) => EscapeRid(v).fmt(f),
-			RecordIdKey::Uuid(uuid) => uuid.fmt(f),
-			RecordIdKey::Object(object) => object.fmt(f),
-			RecordIdKey::Array(array) => array.fmt(f),
-			RecordIdKey::Range(rid) => rid.fmt(f),
 		}
 	}
 }

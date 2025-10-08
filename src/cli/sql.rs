@@ -316,7 +316,8 @@ fn process(
 				}
 				// Yes prettify the SurrealQL response
 				(false, true) => format!(
-					"-- Notification (action: {action:?}, live query ID: {query_id})\n{data:#}"
+					"-- Notification (action: {action:?}, live query ID: {query_id})\n{}",
+					data.to_sql()
 				),
 				// Don't pretty print the JSON response
 				(true, false) => {

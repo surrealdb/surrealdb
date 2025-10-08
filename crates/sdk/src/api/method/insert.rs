@@ -2,8 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::sql::ToSql;
-use surrealdb_types::{Object, SurrealValue, Value, Variables};
+use surrealdb_types::{Object, SurrealValue, Value, vars};
 use uuid::Uuid;
 
 use super::insert_relation::InsertRelation;
@@ -77,11 +76,15 @@ macro_rules! into_future {
 				};
 
 				let router = client.inner.router.extract()?;
+				let variables = vars! {
+					_table: table,
+					_data: data,
+				};
 				router
 					.$method(Command::RawQuery {
 						txn,
-						query: Cow::Owned(format!("INSERT INTO {} {}", table, data.to_sql())),
-						variables: Variables::new(),
+						query: Cow::Borrowed("INSERT INTO $_table $_data"),
+						variables,
 					})
 					.await
 			})
@@ -139,11 +142,14 @@ where
 			)?;
 			match self.resource? {
 				Resource::Table(table) => {
-					let query = format!("INSERT INTO {} {}", table, data.to_sql());
+					let variables = vars! {
+						_table: table,
+						_data: data,
+					};
 					Ok(Command::RawQuery {
 						txn: self.txn,
-						query: Cow::Owned(query),
-						variables: Variables::new(),
+						query: Cow::Borrowed("INSERT INTO $_table $_data"),
+						variables,
 					})
 				}
 				Resource::RecordId(thing) => {
@@ -156,11 +162,15 @@ where
 							x.insert("id".to_string(), thing.key.into_value());
 						}
 
-						let query = format!("INSERT INTO {} {}", thing.table, data.to_sql());
+						let variables = vars! {
+							_table: thing.table,
+							_data: data,
+						};
+
 						Ok(Command::RawQuery {
 							txn: self.txn,
-							query: Cow::Owned(query),
-							variables: Variables::new(),
+							query: Cow::Borrowed("INSERT INTO $_table $_data"),
+							variables,
 						})
 					}
 				}
@@ -169,11 +179,14 @@ where
 				Resource::Range(_) => Err(Error::InsertOnRange),
 				Resource::Unspecified => {
 					// When unspecified, we just INSERT the data directly
-					let query = format!("INSERT {}", data.to_sql());
+					let variables = vars! {
+						_data: data,
+					};
+
 					Ok(Command::RawQuery {
 						txn: self.txn,
-						query: Cow::Owned(query),
-						variables: Variables::new(),
+						query: Cow::Borrowed("INSERT $_data"),
+						variables,
 					})
 				}
 			}
@@ -199,11 +212,14 @@ where
 			)?;
 			match self.resource? {
 				Resource::Table(table) => {
-					let query = format!("INSERT RELATION INTO {} {}", table, data);
+					let variables = vars! {
+						_table: table,
+						_data: data,
+					};
 					Ok(Command::RawQuery {
 						txn: self.txn,
-						query: Cow::Owned(query),
-						variables: Variables::new(),
+						query: Cow::Borrowed("INSERT RELATION INTO $_table $_data"),
+						variables,
 					})
 				}
 				Resource::RecordId(thing) => {
@@ -216,21 +232,26 @@ where
 							x.insert("id".to_string(), thing.key.into_value());
 						}
 
-						let query = format!("INSERT RELATION INTO {} {}", thing.table, data);
+						let variables = vars! {
+							_table: thing.table,
+							_data: data,
+						};
 						Ok(Command::RawQuery {
 							txn: self.txn,
-							query: Cow::Owned(query),
-							variables: Variables::new(),
+							query: Cow::Borrowed("INSERT RELATION INTO $_table $_data"),
+							variables,
 						})
 					}
 				}
 				Resource::Unspecified => {
 					// When unspecified, we just INSERT RELATION the data directly
-					let query = format!("INSERT RELATION {}", data);
+					let variables = vars! {
+						_data: data,
+					};
 					Ok(Command::RawQuery {
 						txn: self.txn,
-						query: Cow::Owned(query),
-						variables: Variables::new(),
+						query: Cow::Borrowed("INSERT RELATION $_data"),
+						variables,
 					})
 				}
 				Resource::Object(_) => Err(Error::InsertOnObject),

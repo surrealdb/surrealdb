@@ -1,5 +1,9 @@
 //! SQL utilities.
 
+use std::fmt::Write;
+
+use crate::utils::escape::QuoteStr;
+
 /// Trait for types that can be converted to SQL representation.
 ///
 /// ⚠️ **EXPERIMENTAL**: This trait is not stable and may change
@@ -33,21 +37,23 @@ pub trait ToSql {
 	fn fmt_sql(&self, f: &mut String);
 }
 
+const EXPECT_WRITE_CANNOT_FAIL: &str = "Write cannot fail when writing to a String";
+
 impl ToSql for String {
 	fn fmt_sql(&self, f: &mut String) {
-		f.push_str(&format!("'{self}'"))
+		write!(f, "{}", QuoteStr(self)).expect(EXPECT_WRITE_CANNOT_FAIL)
 	}
 }
 
 impl ToSql for &str {
 	fn fmt_sql(&self, f: &mut String) {
-		f.push_str(&format!("'{self}'"))
+		write!(f, "{}", QuoteStr(self)).expect(EXPECT_WRITE_CANNOT_FAIL)
 	}
 }
 
 impl ToSql for &&str {
 	fn fmt_sql(&self, f: &mut String) {
-		f.push_str(&format!("'{self}'"))
+		write!(f, "{}", QuoteStr(self)).expect(EXPECT_WRITE_CANNOT_FAIL)
 	}
 }
 
@@ -63,6 +69,6 @@ impl ToSql for bool {
 
 impl ToSql for i64 {
 	fn fmt_sql(&self, f: &mut String) {
-		f.push_str(&format!("{}", self))
+		write!(f, "{}", self).expect(EXPECT_WRITE_CANNOT_FAIL)
 	}
 }

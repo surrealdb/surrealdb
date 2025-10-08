@@ -3,6 +3,7 @@ use std::fmt::{self, Write as _};
 //use async_graphql::dynamic::Object;
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use rust_decimal::Decimal;
+use surrealdb_types::sql::ToSql;
 
 use crate::fmt::{EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::sql::{Closure, Expr, RecordIdLit};
@@ -132,7 +133,7 @@ impl fmt::Display for Literal {
 			Literal::Datetime(datetime) => write!(f, "{datetime}"),
 			Literal::Uuid(uuid) => write!(f, "{uuid}"),
 			Literal::Geometry(geometry) => write!(f, "{geometry}"),
-			Literal::File(file) => write!(f, "{file}"),
+			Literal::File(file) => write!(f, "{}", file.to_sql()),
 			Literal::Closure(closure) => write!(f, "{closure}"),
 		}
 	}

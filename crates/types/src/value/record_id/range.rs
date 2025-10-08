@@ -1,5 +1,4 @@
 use std::cmp::Ordering;
-use std::fmt::Display;
 use std::ops::{Bound, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
 
 use serde::{Deserialize, Serialize};
@@ -182,31 +181,6 @@ impl PartialEq<Range> for RecordIdKeyRange {
 			}
 			Bound::Unbounded => matches!(other.end, Bound::Unbounded),
 		})
-	}
-}
-
-impl Display for RecordIdKeyRange {
-	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		match &self.start {
-			Bound::Unbounded => {}
-			Bound::Included(v) => {
-				v.fmt(f)?;
-			}
-			Bound::Excluded(v) => {
-				f.write_fmt(format_args!(">{v}"))?;
-			}
-		};
-		f.write_str("..")?;
-		match &self.end {
-			Bound::Unbounded => {}
-			Bound::Included(v) => {
-				f.write_fmt(format_args!("={v}"))?;
-			}
-			Bound::Excluded(v) => {
-				v.fmt(f)?;
-			}
-		};
-		Ok(())
 	}
 }
 
