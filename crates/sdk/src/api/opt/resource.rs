@@ -39,8 +39,6 @@ pub enum Resource {
 	Array(Vec<Value>),
 	/// A range of id's on a table.
 	Range(QueryRange),
-	/// Unspecified resource
-	Unspecified,
 }
 
 impl Resource {
@@ -55,7 +53,6 @@ impl Resource {
 			Resource::Object(_) => Err(Error::RangeOnObject),
 			Resource::Array(_) => Err(Error::RangeOnArray),
 			Resource::Range(_) => Err(Error::RangeOnRange),
-			Resource::Unspecified => Err(Error::RangeOnUnspecified),
 		}
 	}
 
@@ -70,13 +67,11 @@ impl Resource {
 		match self {
 			Resource::Table(table) => {
 				variables.insert("_table".to_string(), Value::String(table.clone()));
-
 				Ok("type::table($_table)")
 			}
 			Resource::RecordId(record_id) => {
-				variables.insert("_table".to_string(), Value::String(record_id.table.clone()));
 				variables.insert("_record_id".to_string(), Value::RecordId(record_id.clone()));
-				Ok("type::thing($_table, $_record_id)")
+				Ok("$_record_id")
 			}
 			Resource::Object(object) => {
 				variables.insert("_object".to_string(), Value::Object(object.clone()));
@@ -87,17 +82,13 @@ impl Resource {
 				Ok("$_array")
 			}
 			Resource::Range(query_range) => {
-				variables.insert(
-					"_range".to_string(),
-					Value::RecordId(RecordId::new(
-						query_range.table.clone(),
-						query_range.range.clone(),
-					)),
+				// Create a RecordId with the range as the key
+				let range_record_id = RecordId::new(
+					query_range.table.clone(),
+					RecordIdKey::Range(Box::new(query_range.range.clone())),
 				);
+				variables.insert("_range".to_string(), Value::RecordId(range_record_id));
 				Ok("$_range")
-			}
-			Resource::Unspecified => {
-				Err(Error::Thrown("Resource on unspecified resource".to_string()))
 			}
 		}
 	}
@@ -137,7 +128,6 @@ impl SurrealValue for Resource {
 				table,
 				range,
 			}) => Value::RecordId(RecordId::new(table, range)),
-			Resource::Unspecified => Value::None,
 		}
 	}
 
@@ -145,27 +135,6 @@ impl SurrealValue for Resource {
 		Err(surrealdb_types::anyhow::anyhow!("Invalid resource: {}", value.to_sql()))
 	}
 }
-
-// impl surrealdb_types::sql::ToSql for Resource {
-// 	fn fmt_sql(&self, f: &mut String) {
-// 		match self {
-// 			Resource::Table(x) => {
-// 				f.push('`');
-// 				f.push_str(x);
-// 				f.push('`')
-// 			}
-// 			Resource::RecordId(x) => x.fmt_sql(f),
-// 			Resource::Object(x) => x.fmt_sql(f),
-// 			Resource::Array(x) => Array::from_values(x.clone()).fmt_sql(f),
-// 			Resource::Range(QueryRange { table, range }) => {
-// 				f.push_str(&table);
-// 				f.push(':');
-// 				range.fmt_sql(f);
-// 			}
-// 			Resource::Unspecified => {}
-// 		}
-// 	}
-// }
 
 impl From<RecordId> for Resource {
 	fn from(thing: RecordId) -> Self {
@@ -235,12 +204,6 @@ where
 	fn from((table, id): (T, I)) -> Self {
 		let record_id = RecordId::new(table, id.into());
 		Self::RecordId(record_id)
-	}
-}
-
-impl From<()> for Resource {
-	fn from(_value: ()) -> Self {
-		Self::Unspecified
 	}
 }
 
@@ -468,13 +431,6 @@ impl<R> into_resource::Sealed<Vec<R>> for &String {
 	fn into_resource(self) -> Result<Resource> {
 		no_colon(self)?;
 		Ok(self.into())
-	}
-}
-
-impl<R> IntoResource<Vec<R>> for () {}
-impl<R> into_resource::Sealed<Vec<R>> for () {
-	fn into_resource(self) -> Result<Resource> {
-		Ok(Resource::Unspecified)
 	}
 }
 

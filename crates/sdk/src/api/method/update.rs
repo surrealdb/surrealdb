@@ -1,19 +1,20 @@
 use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
+use std::ops::Bound;
 
-use surrealdb_types::{self, RecordIdKeyRange, SurrealValue, Value, Variables};
+use surrealdb_types::{self, RecordId, RecordIdKeyRange, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
 use super::validate_data;
-use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::method::{BoxFuture, Content, Merge, Patch};
 use crate::api::opt::Resource;
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
 use crate::opt::PatchOps;
+use crate::{Error, Surreal};
 
 /// An update future
 #[derive(Debug)]
@@ -150,16 +151,69 @@ where
 				"Tried to update non-object-like data as content, only structs and objects are supported",
 			)?;
 
-			let what = self.resource?;
+			let what_resource = self.resource?;
 
 			let mut variables = Variables::new();
-			let what = what.for_sql_query(&mut variables)?;
+			let what = what_resource.for_sql_query(&mut variables)?;
 
-			let query = match data {
-				Value::None => Cow::Owned(format!("UPDATE {what}")),
+			let content_str = match data {
+				Value::None => "",
 				content => {
 					variables.insert("_content".to_string(), content);
-					Cow::Owned(format!("UPDATE {what} CONTENT $_content"))
+					"CONTENT $_content"
+				}
+			};
+
+			let query = match what_resource {
+				Resource::Table(_) => Cow::Owned(format!("UPDATE {what} {content_str}")),
+				Resource::RecordId(_) => Cow::Owned(format!("UPDATE {what} {content_str}")),
+				Resource::Range(range) => {
+					let mut conditions = Vec::new();
+					match range.range.start {
+						Bound::Included(start) => {
+							variables.insert(
+								"_start".to_string(),
+								Value::RecordId(RecordId::new(range.table.clone(), start)),
+							);
+							conditions.push("id >= $_start");
+						}
+						Bound::Excluded(start) => {
+							variables.insert(
+								"_start".to_string(),
+								Value::RecordId(RecordId::new(range.table.clone(), start)),
+							);
+							conditions.push("id > $_start");
+						}
+						Bound::Unbounded => {}
+					}
+					match range.range.end {
+						Bound::Included(end) => {
+							variables.insert(
+								"_end".to_string(),
+								Value::RecordId(RecordId::new(range.table, end)),
+							);
+							conditions.push("id <= $_end");
+						}
+						Bound::Excluded(end) => {
+							variables.insert(
+								"_end".to_string(),
+								Value::RecordId(RecordId::new(range.table, end)),
+							);
+							conditions.push("id < $_end");
+						}
+						Bound::Unbounded => {}
+					}
+
+					Cow::Owned(format!(
+						"UPDATE {what} {content_str} WHERE {}",
+						conditions.join(" AND ")
+					))
+				}
+				Resource::Object(_) => {
+					return Err(Error::InvalidParams("Update on object not supported".to_string()));
+				}
+				Resource::Array(_) => {
+					return Err(Error::InvalidParams("Update on array not supported".to_string()));
 				}
 			};
 

@@ -75,7 +75,9 @@ pub(crate) async fn connect(
 	.map_err(|err| Error::Ws(err.to_string()))?;
 
 	#[cfg(not(any(feature = "native-tls", feature = "rustls")))]
-	let (socket, _) = tokio_tungstenite::connect_async_with_config(request, config, NAGLE_ALG).await?;
+	let (socket, _) = tokio_tungstenite::connect_async_with_config(request, config, NAGLE_ALG)
+		.await
+		.map_err(|err| Error::Ws(err.to_string()))?;
 
 	Ok(socket)
 }

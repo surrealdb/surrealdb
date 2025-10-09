@@ -66,10 +66,6 @@ pub enum Error {
 	#[error("Tried to add a range to a resource which was already a range")]
 	RangeOnRange,
 
-	/// Tried to use a range query on an unspecified resource
-	#[error("Tried to add a range to an unspecified resource")]
-	RangeOnUnspecified,
-
 	/// Tried to use `table:id` syntax as a method parameter when `(table, id)`
 	/// should be used instead
 	#[error(
@@ -204,10 +200,6 @@ pub enum Error {
 	#[error("Live queries on edges not supported")]
 	LiveOnEdges,
 
-	/// Tried to use a range query on an unspecified resource
-	#[error("Live queries on unspecified resource not supported")]
-	LiveOnUnspecified,
-
 	/// Tried to access a query statement as a live query when it isn't a live
 	/// query
 	#[error("Query statement {0} is not a live query")]
@@ -238,10 +230,6 @@ pub enum Error {
 	/// Tried to insert on an edge or edges
 	#[error("Insert queries on ranges are not supported")]
 	InsertOnRange,
-
-	/// Tried to insert on an unspecified resource with no data
-	#[error("Insert queries on unspecified resource with no data are not supported")]
-	InsertOnUnspecified,
 
 	#[error("Crendentials for signin and signup should be an object")]
 	CrendentialsNotObject,
@@ -446,9 +434,6 @@ impl From<Error> for DbResultError {
 			Error::RangeOnRange => {
 				DbResultError::InvalidParams("Range on range not supported".to_string())
 			}
-			Error::RangeOnUnspecified => {
-				DbResultError::InvalidParams("Range on unspecified not supported".to_string())
-			}
 			Error::TableColonId {
 				table,
 			} => DbResultError::InvalidParams(format!("Table name '{}' contains colon", table)),
@@ -528,9 +513,6 @@ impl From<Error> for DbResultError {
 			Error::LiveOnEdges => {
 				DbResultError::BadLiveQueryConfig("Live queries on edges not supported".to_string())
 			}
-			Error::LiveOnUnspecified => DbResultError::BadLiveQueryConfig(
-				"Live queries on unspecified resource not supported".to_string(),
-			),
 			Error::NotLiveQuery(idx) => DbResultError::BadLiveQueryConfig(format!(
 				"Query statement {} is not a live query",
 				idx
@@ -552,9 +534,6 @@ impl From<Error> for DbResultError {
 			),
 			Error::InsertOnRange => DbResultError::InvalidParams(
 				"Insert queries on ranges are not supported".to_string(),
-			),
-			Error::InsertOnUnspecified => DbResultError::InvalidParams(
-				"Insert queries on unspecified resource with no data are not supported".to_string(),
 			),
 			Error::CrendentialsNotObject => DbResultError::InvalidParams(
 				"Credentials for signin and signup should be an object".to_string(),

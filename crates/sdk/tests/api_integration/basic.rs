@@ -640,43 +640,6 @@ pub async fn insert_thing(new_db: impl CreateDb) {
 	);
 }
 
-pub async fn insert_unspecified(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
-	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
-	drop(permit);
-	let tmp: Result<Vec<RecordId>, _> = db.insert(()).await;
-	tmp.unwrap_err();
-	let tmp: Result<Vec<RecordId>, _> = db.insert(()).content(json!({ "foo": "bar" })).await;
-	tmp.unwrap_err();
-	let tmp: ApiRecordId = db
-		.insert(object! { id: RecordId::new("user", "user1"), foo: "bar"})
-		.await
-		.unwrap()
-		.unwrap();
-
-	assert_eq!(
-		tmp,
-		ApiRecordId {
-			id: RecordId::new("user", "user1"),
-		}
-	);
-
-	let tmp: Result<Value, _> = db.insert(Resource::from(())).await;
-	tmp.unwrap_err();
-	let tmp: Result<Value, _> =
-		db.insert(Resource::from(())).content(json!({ "foo": "bar" })).await;
-	tmp.unwrap_err();
-	let tmp: Value = db
-		.insert(Resource::from(()))
-		.content(object! { id: RecordId::new("user", "user2"), foo: "bar"})
-		.await
-		.unwrap();
-	let val = Value::Array(array![Value::Object(
-		object! { id: RecordId::new("user", "user2"), foo: "bar"}
-	)]);
-	assert_eq!(tmp, val);
-}
-
 pub async fn insert_relation_table(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
@@ -1797,8 +1760,6 @@ define_include_tests!(basic => {
 	insert_table,
 	#[test_log::test(tokio::test)]
 	insert_thing,
-	#[test_log::test(tokio::test)]
-	insert_unspecified,
 	#[test_log::test(tokio::test)]
 	insert_relation_table,
 	#[test_log::test(tokio::test)]
