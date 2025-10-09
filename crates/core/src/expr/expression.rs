@@ -624,6 +624,49 @@ impl Expr {
 			_ => self.to_string(),
 		}
 	}
+
+	fn is_statement_expression(&self) -> bool {
+		match self {
+			Expr::Literal(_)
+			| Expr::Param(_)
+			| Expr::Idiom(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Block(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::Postfix {
+				..
+			}
+			| Expr::Binary {
+				..
+			}
+			| Expr::FunctionCall(_) => false,
+			Expr::Closure(_)
+			| Expr::Break
+			| Expr::Continue
+			| Expr::Throw(_)
+			| Expr::Return(_)
+			| Expr::IfElse(_)
+			| Expr::Select(_)
+			| Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Delete(_)
+			| Expr::Relate(_)
+			| Expr::Insert(_)
+			| Expr::Define(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Upsert(_)
+			| Expr::Alter(_)
+			| Expr::Info(_)
+			| Expr::Foreach(_)
+			| Expr::Let(_)
+			| Expr::Sleep(_) => true,
+		}
+	}
 }
 
 /// A lightweight visitor for traversing an expression tree.
@@ -760,7 +803,10 @@ impl fmt::Display for Expr {
 			} => {
 				let expr_bp = BindingPower::for_expr(expr);
 				let op_bp = BindingPower::for_prefix_operator(op);
-				if expr_bp < op_bp || expr_bp == op_bp && matches!(expr_bp, BindingPower::Range) {
+				if expr.is_statement_expression()
+					|| expr_bp < op_bp
+					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
+				{
 					write!(f, "{op}({expr})")
 				} else {
 					write!(f, "{op}{expr}")
@@ -772,7 +818,10 @@ impl fmt::Display for Expr {
 			} => {
 				let expr_bp = BindingPower::for_expr(expr);
 				let op_bp = BindingPower::for_postfix_operator(op);
-				if expr_bp < op_bp || expr_bp == op_bp && matches!(expr_bp, BindingPower::Range) {
+				if expr.is_statement_expression()
+					|| expr_bp < op_bp
+					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
+				{
 					write!(f, "({expr}){op}")
 				} else {
 					write!(f, "{expr}{op}")
@@ -787,7 +836,8 @@ impl fmt::Display for Expr {
 				let left_bp = BindingPower::for_expr(left);
 				let right_bp = BindingPower::for_expr(right);
 
-				if left_bp < op_bp
+				if left.is_statement_expression()
+					|| left_bp < op_bp
 					|| left_bp == right_bp
 						&& matches!(left_bp, BindingPower::Range | BindingPower::Relation)
 				{
@@ -808,7 +858,8 @@ impl fmt::Display for Expr {
 					write!(f, " {op} ")?;
 				}
 
-				if right_bp < op_bp
+				if right.is_statement_expression()
+					|| right_bp < op_bp
 					|| left_bp == right_bp
 						&& matches!(right_bp, BindingPower::Range | BindingPower::Relation)
 				{
