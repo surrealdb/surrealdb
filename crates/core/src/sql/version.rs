@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 use super::Value;
+use crate::sql::value::VisitExpression;
 
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -47,5 +48,14 @@ impl Version {
 impl fmt::Display for Version {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "VERSION {}", self.0)
+	}
+}
+
+impl VisitExpression for Version {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.0.visit(visitor);
 	}
 }

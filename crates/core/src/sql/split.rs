@@ -1,5 +1,7 @@
 use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
+use crate::sql::value::VisitExpression;
+use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Formatter};
@@ -48,5 +50,23 @@ impl Deref for Split {
 impl Display for Split {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&self.0, f)
+	}
+}
+
+impl VisitExpression for Splits {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.0.iter().for_each(|s| s.visit(visitor));
+	}
+}
+
+impl VisitExpression for Split {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.0.visit(visitor);
 	}
 }

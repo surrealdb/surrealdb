@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::fetch::Fetchs;
-use crate::sql::value::Value;
+use crate::sql::value::{Value, VisitExpression};
 
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -50,6 +50,18 @@ impl OutputStatement {
 		Err(Error::Return {
 			value,
 		})
+	}
+}
+
+impl VisitExpression for OutputStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.what.visit(visitor);
+		if let Some(fetch) = &self.fetch {
+			fetch.visit(visitor);
+		}
 	}
 }
 

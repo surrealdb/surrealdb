@@ -49,6 +49,7 @@ mod index;
 	feature = "kv-surrealcs",
 ))]
 mod savepoint;
+pub(crate) mod slowlog;
 #[cfg(test)]
 mod tests;
 mod util;

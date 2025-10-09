@@ -3,6 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
+use crate::sql::value::VisitExpression;
 use crate::sql::{
 	fmt::{fmt_separated_by, Fmt},
 	part::{Next, NextMethod},
@@ -49,6 +50,15 @@ impl Display for Idioms {
 impl InfoStructure for Idioms {
 	fn structure(self) -> Value {
 		self.to_string().into()
+	}
+}
+
+impl VisitExpression for Idioms {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.0.iter().for_each(|i| i.visit(visitor));
 	}
 }
 
@@ -220,5 +230,14 @@ impl Display for Idiom {
 impl InfoStructure for Idiom {
 	fn structure(self) -> Value {
 		self.to_string().into()
+	}
+}
+
+impl VisitExpression for Idiom {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.0.iter().for_each(|v| v.visit(visitor));
 	}
 }

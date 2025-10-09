@@ -7,6 +7,7 @@ use crate::sql::fmt::{is_pretty, pretty_indent};
 use crate::sql::statements::info::InfoStructure;
 use crate::sql::{Base, Ident, Permission, Strand, Value};
 
+use crate::sql::value::VisitExpression;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -107,5 +108,14 @@ impl InfoStructure for DefineParamStatement {
 			"permissions".to_string() => self.permissions.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})
+	}
+}
+
+impl VisitExpression for DefineParamStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		self.value.visit(visitor);
 	}
 }

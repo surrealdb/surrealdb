@@ -11,7 +11,7 @@ use crate::sql::statements::{
 	RelateStatement, RemoveStatement, SelectStatement, SetStatement, ThrowStatement,
 	UpdateStatement, UpsertStatement,
 };
-use crate::sql::value::Value;
+use crate::sql::value::{Value, VisitExpression};
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -186,6 +186,17 @@ impl InfoStructure for Block {
 	}
 }
 
+impl VisitExpression for Block {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		for e in &self.0 {
+			e.visit(visitor);
+		}
+	}
+}
+
 #[revisioned(revision = 4)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -271,6 +282,63 @@ impl Display for Entry {
 			Self::Continue(v) => write!(f, "{v}"),
 			Self::Foreach(v) => write!(f, "{v}"),
 			Self::Alter(v) => write!(f, "{v}"),
+		}
+	}
+}
+
+impl VisitExpression for Entry {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		match self {
+			Self::Value(v) => {
+				v.visit(visitor);
+			}
+			Self::Set(v) => {
+				v.visit(visitor);
+			}
+			Self::Ifelse(v) => {
+				v.visit(visitor);
+			}
+			Self::Select(v) => {
+				v.visit(visitor);
+			}
+			Self::Create(v) => {
+				v.visit(visitor);
+			}
+			Self::Update(v) => {
+				v.visit(visitor);
+			}
+			Self::Delete(v) => {
+				v.visit(visitor);
+			}
+			Self::Relate(v) => {
+				v.visit(visitor);
+			}
+			Self::Insert(v) => {
+				v.visit(visitor);
+			}
+			Self::Output(v) => {
+				v.visit(visitor);
+			}
+			Self::Define(v) => {
+				v.visit(visitor);
+			}
+			Self::Remove(v) => {
+				v.visit(visitor);
+			}
+			Self::Throw(v) => v.visit(visitor),
+			Self::Break(_) => {}
+			Self::Continue(_) => {}
+			Self::Foreach(v) => {
+				v.visit(visitor);
+			}
+			Self::Rebuild(_) => {}
+			Self::Upsert(v) => {
+				v.visit(visitor);
+			}
+			Self::Alter(_) => {}
 		}
 	}
 }

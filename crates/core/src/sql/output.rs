@@ -1,4 +1,6 @@
 use crate::sql::field::Fields;
+use crate::sql::value::VisitExpression;
+use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
@@ -19,6 +21,17 @@ pub enum Output {
 impl Default for Output {
 	fn default() -> Self {
 		Self::None
+	}
+}
+
+impl VisitExpression for Output {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Value),
+	{
+		if let Self::Fields(f) = self {
+			f.visit(visitor);
+		}
 	}
 }
 
