@@ -317,13 +317,13 @@ async fn router_handle_response(
 		}
 		Err(error) => {
 			#[derive(SurrealValue)]
-			struct Response {
+			struct ErrorResponse {
 				id: Option<Value>,
 			}
 
 			// Let's try to find out the ID of the response that failed to deserialise
 			if let Message::Binary(binary) = response {
-				if let Ok(Response {
+				if let Ok(ErrorResponse {
 					id,
 				}) = surrealdb_core::rpc::format::flatbuffers::decode(&binary)
 				{

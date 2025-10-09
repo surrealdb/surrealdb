@@ -13,7 +13,7 @@ use surrealdb_core::dbs::capabilities::{
 };
 use surrealdb_core::syn::parser::ParserSettings;
 use surrealdb_core::syn::{self};
-use surrealdb_types::{Object, RecordId, Value};
+use surrealdb_types::{Object, RecordId, Value, sql::ToSql};
 
 /// Root test config struct.
 #[derive(Default, Clone, Debug, Deserialize, Serialize)]
@@ -145,11 +145,11 @@ impl TestEnv {
 #[serde(untagged)]
 pub enum TestExpectation {
 	// NOTE! Ordering of variants here is important.
-	// Match must come before Error so that they are deserialized correctely.
+	// Match must come before Error so that they are deserialized correctly.
 	// Swapping match with error causes the error variant to be chosen when
 	// match specifies if it expects an error.
-	/// The result is a nomral value
-	Plain(SurrealValue),
+	/// The result is a normal value
+	Plain(SurrealConfigValue),
 	/// The result is a value but specified as a table.
 	Match(MatchTestResult),
 	/// The result should be an error.
@@ -169,7 +169,7 @@ impl<'de> Deserialize<'de> for TestExpectation {
 	{
 		let v = toml::Value::deserialize(deserializer)?;
 		if v.is_str() {
-			SurrealValue::deserialize(v).map_err(to_deser_error).map(TestExpectation::Plain)
+			SurrealConfigValue::deserialize(v).map_err(to_deser_error).map(TestExpectation::Plain)
 		} else if let Some(x) = v.as_table() {
 			if x.contains_key("match") {
 				MatchTestResult::deserialize(v).map_err(to_deser_error).map(TestExpectation::Match)
@@ -197,7 +197,7 @@ pub struct ErrorTestResult {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct ValueTestResult {
-	pub value: SurrealValue,
+	pub value: SurrealConfigValue,
 	#[serde(default)]
 	pub skip_datetime: Option<bool>,
 	#[serde(default)]
@@ -409,19 +409,19 @@ pub struct SignupErrorResult {
 
 /// A wrapper around the `Value` type for SurrealDB in order to support parsing from toml.
 #[derive(Clone, Debug)]
-pub struct SurrealValue(pub Value);
+pub struct SurrealConfigValue(pub Value);
 
-impl Serialize for SurrealValue {
+impl Serialize for SurrealConfigValue {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: serde::Serializer,
 	{
-		let v = self.0.to_string();
+		let v = self.0.to_sql();
 		v.serialize(serializer)
 	}
 }
 
-impl<'de> Deserialize<'de> for SurrealValue {
+impl<'de> Deserialize<'de> for SurrealConfigValue {
 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
 	where
 		D: serde::Deserializer<'de>,
@@ -443,7 +443,7 @@ impl<'de> Deserialize<'de> for SurrealValue {
 		})
 		.map_err(<D::Error as serde::de::Error>::custom)?;
 
-		Ok(SurrealValue(v))
+		Ok(SurrealConfigValue(v))
 	}
 }
 
@@ -480,7 +480,7 @@ impl Serialize for SurrealRecordId {
 	where
 		S: serde::Serializer,
 	{
-		let v = self.0.to_string();
+		let v = self.0.to_sql();
 		v.serialize(serializer)
 	}
 }
@@ -524,7 +524,7 @@ impl Serialize for SurrealObject {
 	where
 		S: serde::Serializer,
 	{
-		let v = self.0.to_string();
+		let v = self.0.to_sql();
 		v.serialize(serializer)
 	}
 }

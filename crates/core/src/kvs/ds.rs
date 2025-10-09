@@ -1316,7 +1316,7 @@ impl Datastore {
 	) -> Result<Vec<QueryResult>, DbResultError> {
 		// Check if the session has expired
 		if sess.expired() {
-			return Err(DbResultError::InvalidAuth("Session has expired".to_string()));
+			return Err(DbResultError::InvalidAuth("The session has expired".to_string()));
 		}
 
 		// Check if anonymous actors can execute queries when auth is enabled
@@ -1331,7 +1331,7 @@ impl Datastore {
 		// Create a default context
 		let mut ctx = self.setup_ctx().map_err(|e| match e.downcast_ref::<Error>() {
 			Some(Error::ExpiredSession) => {
-				DbResultError::InvalidAuth("Session has expired".to_string())
+				DbResultError::InvalidAuth("The session has expired".to_string())
 			}
 			Some(Error::InvalidAuth) => {
 				DbResultError::InvalidAuth("Authentication failed".to_string())
@@ -1391,7 +1391,9 @@ impl Datastore {
 
 		// Start an execution context
 		ctx.attach_session(sess).map_err(|e| match e {
-			Error::ExpiredSession => DbResultError::InvalidAuth("Session has expired".to_string()),
+			Error::ExpiredSession => {
+				DbResultError::InvalidAuth("The session has expired".to_string())
+			}
 			Error::InvalidAuth => DbResultError::InvalidAuth("Authentication failed".to_string()),
 			Error::UnexpectedAuth => {
 				DbResultError::InvalidAuth("Unexpected authentication error".to_string())
@@ -1417,7 +1419,7 @@ impl Datastore {
 		Executor::execute_plan(self, ctx.freeze(), opt, plan).await.map_err(|e| {
 			match e.downcast_ref::<Error>() {
 				Some(Error::ExpiredSession) => {
-					DbResultError::InvalidAuth("Session has expired".to_string())
+					DbResultError::InvalidAuth("The session has expired".to_string())
 				}
 				Some(Error::InvalidAuth) => {
 					DbResultError::InvalidAuth("Authentication failed".to_string())
