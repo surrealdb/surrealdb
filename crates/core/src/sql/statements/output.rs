@@ -3,7 +3,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::fetch::Fetchs;
-use crate::sql::value::{Value, VisitExpression};
+use crate::sql::value::Value;
 
 use reblessive::tree::Stk;
 use revision::revisioned;
