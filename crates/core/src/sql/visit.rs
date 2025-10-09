@@ -63,10 +63,6 @@ macro_rules! implement_visitor{
 				}
 			}
 		)*
-
-
-
-
 	};
 }
 
@@ -153,7 +149,6 @@ implement_visitor! {
 			}
 			Statement::Rebuild(r) => {
 				this.visit_rebuild(r)?;
-
 			}
 			Statement::Upsert(u) => {
 				this.visit_upsert(u)?;
