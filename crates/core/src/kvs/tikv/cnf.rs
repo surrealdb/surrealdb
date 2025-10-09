@@ -23,3 +23,15 @@ pub(super) static TIKV_ONE_PHASE_COMMIT: LazyLock<bool> =
 /// Limits the maximum size of a decoded message - default value to 4MB
 pub(super) static TIKV_GRPC_MAX_DECODING_MESSAGE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_TIKV_GRPC_MAX_DECODING_MESSAGE_SIZE", usize, 4 * 1024 * 1024);
+
+/// Maximum number of connection retry attempts
+pub(super) static TIKV_CONNECTION_RETRY_ATTEMPTS: LazyLock<u32> =
+	lazy_env_parse!("SURREAL_TIKV_CONNECTION_RETRY_ATTEMPTS", u32, 5);
+
+/// Initial backoff duration for connection retries in milliseconds
+pub(super) static TIKV_CONNECTION_RETRY_INITIAL_BACKOFF_MS: LazyLock<u64> =
+	lazy_env_parse!("SURREAL_TIKV_CONNECTION_RETRY_INITIAL_BACKOFF_MS", u64, 500);
+
+/// Maximum backoff duration for connection retries in seconds
+pub(super) static TIKV_CONNECTION_RETRY_MAX_BACKOFF_SEC: LazyLock<u64> =
+	lazy_env_parse!("SURREAL_TIKV_CONNECTION_RETRY_MAX_BACKOFF_SEC", u64, 30);

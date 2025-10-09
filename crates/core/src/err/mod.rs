@@ -1531,6 +1531,14 @@ impl From<tikv::Error> for Error {
 			tikv::Error::KeyError(ke) if ke.conflict.is_some() => Error::TxRetryable,
 			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
 			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => Error::TxTooLarge,
+			// Region errors where there's no leader are typically transient and retryable
+			// This happens during leader elections, PD failovers, or region splits/merges
+			tikv::Error::RegionError(re) if re.not_leader.is_some() => Error::TxRetryable,
+			tikv::Error::RegionError(re) if re.region_not_found.is_some() => Error::TxRetryable,
+			tikv::Error::RegionError(re) if re.epoch_not_match.is_some() => Error::TxRetryable,
+			tikv::Error::RegionError(re) if re.server_is_busy.is_some() => Error::TxRetryable,
+			tikv::Error::RegionError(re) if re.stale_command.is_some() => Error::TxRetryable,
+			tikv::Error::RegionError(re) if re.read_index_not_ready.is_some() => Error::TxRetryable,
 			_ => Error::Tx(e.to_string()),
 		}
 	}

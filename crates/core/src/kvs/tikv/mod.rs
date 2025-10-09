@@ -63,6 +63,18 @@ impl Drop for Transaction {
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new(path: &str) -> Result<Datastore> {
+		// Parse PD endpoints from the connection string
+		// Support both single endpoint (tikv://pd:2379) and multiple endpoints
+		// (tikv://pd1:2379,pd2:2379,pd3:2379)
+		let endpoints: Vec<String> =
+			path.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+
+		if endpoints.is_empty() {
+			bail!(Error::Ds("No TiKV PD endpoints provided".into()));
+		}
+
+		info!(target: TARGET, "Connecting to TiKV PD endpoints: {:?}", endpoints);
+
 		// Configure the client and keyspace
 		let config = match *cnf::TIKV_API_VERSION {
 			2 => match *cnf::TIKV_KEYSPACE {
@@ -86,15 +98,74 @@ impl Datastore {
 		// Set the max decoding message size
 		let config =
 			config.with_grpc_max_decoding_message_size(*cnf::TIKV_GRPC_MAX_DECODING_MESSAGE_SIZE);
-		// Create the client with the config
-		let client = TransactionClient::new_with_config(vec![path], config);
-		// Check for errors with the client
-		match client.await {
-			Ok(db) => Ok(Datastore {
-				db: Arc::pin(db),
-			}),
-			Err(e) => Err(anyhow::Error::new(Error::Ds(e.to_string()))),
+
+		// Attempt to connect with exponential backoff retry
+		let max_attempts = *cnf::TIKV_CONNECTION_RETRY_ATTEMPTS;
+		let initial_backoff_ms = *cnf::TIKV_CONNECTION_RETRY_INITIAL_BACKOFF_MS;
+		let max_backoff_sec = *cnf::TIKV_CONNECTION_RETRY_MAX_BACKOFF_SEC;
+
+		let mut last_error = None;
+		for attempt in 0..max_attempts {
+			if attempt > 0 {
+				// Calculate exponential backoff with jitter
+				let backoff_ms = std::cmp::min(
+					initial_backoff_ms * (2_u64.pow(attempt - 1)),
+					max_backoff_sec * 1000,
+				);
+				// Add jitter (±25% randomness)
+				let jitter = (backoff_ms as f64 * 0.25) as u64;
+				let jitter_range =
+					backoff_ms.saturating_sub(jitter)..=backoff_ms.saturating_add(jitter);
+				let actual_backoff = rand::random::<u64>()
+					% (jitter_range.end() - jitter_range.start())
+					+ jitter_range.start();
+
+				warn!(
+					target: TARGET,
+					"TiKV connection attempt {} failed, retrying in {}ms (max {} attempts)",
+					attempt,
+					actual_backoff,
+					max_attempts
+				);
+				tokio::time::sleep(Duration::from_millis(actual_backoff)).await;
+			}
+
+			// Create the client with the config
+			let client = TransactionClient::new_with_config(endpoints.clone(), config.clone());
+
+			// Check for errors with the client
+			match client.await {
+				Ok(db) => {
+					if attempt > 0 {
+						info!(
+							target: TARGET,
+							"Successfully connected to TiKV after {} attempt(s)",
+							attempt + 1
+						);
+					}
+					return Ok(Datastore {
+						db: Arc::pin(db),
+					});
+				}
+				Err(e) => {
+					error!(
+						target: TARGET,
+						"Failed to connect to TiKV (attempt {}/{}): {}",
+						attempt + 1,
+						max_attempts,
+						e
+					);
+					last_error = Some(e);
+				}
+			}
 		}
+
+		// All retry attempts exhausted
+		Err(anyhow::Error::new(Error::Ds(format!(
+			"Failed to connect to TiKV after {} attempts: {}",
+			max_attempts,
+			last_error.map(|e| e.to_string()).unwrap_or_else(|| "Unknown error".into())
+		))))
 	}
 
 	/// Shutdown the database
