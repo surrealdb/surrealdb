@@ -3200,23 +3200,6 @@ impl TryNeg for Value {
 	}
 }
 
-/// A lightweight visitor for traversing an expression tree.
-///
-/// Implementors call the provided `visitor` function on `self` and any nested
-/// expressions. The traversal order is pre-order: the current node is visited
-/// before its children. This is intentionally minimal to keep traversal cheap.
-///
-/// This trait enables features that need to inspect a statement without
-/// executing it, such as slow-query logging, which walks the AST to find
-/// `$param` usages.
-pub(crate) trait VisitExpression {
-	/// Visit this expression and its nested expressions, invoking `visitor`
-	/// for each encountered node.
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value);
-}
-
 #[cfg(test)]
 mod tests {
 
