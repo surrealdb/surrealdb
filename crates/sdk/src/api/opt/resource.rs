@@ -2,7 +2,7 @@ use std::ops::{self, Bound};
 
 use surrealdb_types::sql::ToSql;
 use surrealdb_types::{
-	Array, Kind, Object, RecordId, RecordIdKey, RecordIdKeyRange, SurrealValue, Value,
+	Array, Kind, Object, RecordId, RecordIdKey, RecordIdKeyRange, SurrealValue, Value, Variables,
 };
 
 use crate::api::Result;
@@ -10,7 +10,10 @@ use crate::api::err::Error;
 
 /// A table range.
 #[derive(Debug, Clone, PartialEq)]
-pub struct QueryRange(pub RecordId);
+pub struct QueryRange {
+	pub table: String,
+	pub range: RecordIdKeyRange,
+}
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum Direction {
@@ -44,9 +47,10 @@ impl Resource {
 	/// Add a range to the resource, this only works if the resource is a table.
 	pub fn with_range(self, range: RecordIdKeyRange) -> Result<Self> {
 		match self {
-			Resource::Table(table) => {
-				Ok(Resource::Range(QueryRange(RecordId::new(table, Box::new(range)))))
-			}
+			Resource::Table(table) => Ok(Resource::Range(QueryRange {
+				table,
+				range,
+			})),
 			Resource::RecordId(_) => Err(Error::RangeOnRecordId),
 			Resource::Object(_) => Err(Error::RangeOnObject),
 			Resource::Array(_) => Err(Error::RangeOnArray),
@@ -59,6 +63,42 @@ impl Resource {
 		match self {
 			Resource::RecordId(rid) => !matches!(rid.key, RecordIdKey::Range(_)),
 			_ => false,
+		}
+	}
+
+	pub(crate) fn for_sql_query(&self, variables: &mut Variables) -> Result<&'static str> {
+		match self {
+			Resource::Table(table) => {
+				variables.insert("_table".to_string(), Value::String(table.clone()));
+
+				Ok("type::table($_table)")
+			}
+			Resource::RecordId(record_id) => {
+				variables.insert("_table".to_string(), Value::String(record_id.table.clone()));
+				variables.insert("_record_id".to_string(), Value::RecordId(record_id.clone()));
+				Ok("type::thing($_table, $_record_id)")
+			}
+			Resource::Object(object) => {
+				variables.insert("_object".to_string(), Value::Object(object.clone()));
+				Ok("$_object")
+			}
+			Resource::Array(array) => {
+				variables.insert("_array".to_string(), Value::Array(Array::from(array.clone())));
+				Ok("$_array")
+			}
+			Resource::Range(query_range) => {
+				variables.insert(
+					"_range".to_string(),
+					Value::RecordId(RecordId::new(
+						query_range.table.clone(),
+						query_range.range.clone(),
+					)),
+				);
+				Ok("$_range")
+			}
+			Resource::Unspecified => {
+				Err(Error::Thrown("Resource on unspecified resource".to_string()))
+			}
 		}
 	}
 }
@@ -93,7 +133,10 @@ impl SurrealValue for Resource {
 			Resource::RecordId(x) => Value::RecordId(x),
 			Resource::Object(x) => Value::Object(x),
 			Resource::Array(x) => Value::Array(Array::from(x)),
-			Resource::Range(QueryRange(record_id)) => Value::RecordId(record_id),
+			Resource::Range(QueryRange {
+				table,
+				range,
+			}) => Value::RecordId(RecordId::new(table, range)),
 			Resource::Unspecified => Value::None,
 		}
 	}
@@ -103,35 +146,26 @@ impl SurrealValue for Resource {
 	}
 }
 
-impl surrealdb_types::sql::ToSql for Resource {
-	fn fmt_sql(&self, f: &mut String) {
-		match self {
-			Resource::Table(x) => {
-				f.push('`');
-				f.push_str(x);
-				f.push('`')
-			}
-			Resource::RecordId(x) => x.fmt_sql(f),
-			Resource::Object(x) => x.fmt_sql(f),
-			Resource::Array(x) => Array::from_values(x.clone()).fmt_sql(f),
-			Resource::Range(QueryRange(x)) => {
-				// For ranges, we need to format as table:start..table:end
-				// not table:range
-				if let RecordIdKey::Range(ref range) = x.key {
-					f.push('`');
-					f.push_str(&x.table);
-					f.push('`');
-					f.push(':');
-					range.fmt_sql(f);
-				} else {
-					// Fallback to normal RecordId formatting
-					x.fmt_sql(f);
-				}
-			}
-			Resource::Unspecified => {}
-		}
-	}
-}
+// impl surrealdb_types::sql::ToSql for Resource {
+// 	fn fmt_sql(&self, f: &mut String) {
+// 		match self {
+// 			Resource::Table(x) => {
+// 				f.push('`');
+// 				f.push_str(x);
+// 				f.push('`')
+// 			}
+// 			Resource::RecordId(x) => x.fmt_sql(f),
+// 			Resource::Object(x) => x.fmt_sql(f),
+// 			Resource::Array(x) => Array::from_values(x.clone()).fmt_sql(f),
+// 			Resource::Range(QueryRange { table, range }) => {
+// 				f.push_str(&table);
+// 				f.push(':');
+// 				range.fmt_sql(f);
+// 			}
+// 			Resource::Unspecified => {}
+// 		}
+// 	}
+// }
 
 impl From<RecordId> for Resource {
 	fn from(thing: RecordId) -> Self {
@@ -171,25 +205,25 @@ impl From<&[Value]> for Resource {
 
 impl From<&str> for Resource {
 	fn from(s: &str) -> Self {
-		Resource::from(s.to_string())
+		Self::Table(s.to_string())
 	}
 }
 
 impl From<&String> for Resource {
 	fn from(s: &String) -> Self {
-		Self::from(s.as_str())
+		Self::Table(s.clone())
 	}
 }
 
 impl From<String> for Resource {
 	fn from(s: String) -> Self {
-		Resource::Table(s)
+		Self::Table(s)
 	}
 }
 
 impl From<QueryRange> for Resource {
 	fn from(value: QueryRange) -> Self {
-		Resource::Range(value)
+		Self::Range(value)
 	}
 }
 

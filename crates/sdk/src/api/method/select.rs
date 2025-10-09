@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{RecordIdKeyRange, SurrealValue, Value, vars};
+use surrealdb_types::{RecordIdKeyRange, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -62,16 +62,13 @@ macro_rules! into_future {
 
 				let what = resource?;
 
-				let variables = vars! {
-					_what: what,
-				};
-
-				let query = "SELECT * FROM $_what";
+				let mut variables = Variables::new();
+				let what = what.for_sql_query(&mut variables)?;
 
 				router
 					.$method(Command::RawQuery {
 						txn,
-						query: Cow::Borrowed(query),
+						query: Cow::Owned(format!("SELECT * FROM {what}")),
 						variables,
 					})
 					.await

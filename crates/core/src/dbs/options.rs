@@ -374,12 +374,12 @@ impl Options {
 			}
 		};
 
-	// If auth is disabled, allow all actions for anonymous users
-	if !self.auth_enabled && self.auth.is_anon() {
-		return Ok(());
-	}
+		// If auth is disabled, allow all actions for anonymous users
+		if !self.auth_enabled && self.auth.is_anon() {
+			return Ok(());
+		}
 
-	self.auth.is_allowed(action, &res)
+		self.auth.is_allowed(action, &res)
 	}
 
 	/// Checks the current server configuration, and

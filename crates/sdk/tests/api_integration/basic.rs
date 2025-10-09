@@ -648,16 +648,17 @@ pub async fn insert_unspecified(new_db: impl CreateDb) {
 	tmp.unwrap_err();
 	let tmp: Result<Vec<RecordId>, _> = db.insert(()).content(json!({ "foo": "bar" })).await;
 	tmp.unwrap_err();
-	let tmp: Vec<ApiRecordId> = db
-		.insert(())
-		.content(object! { id: RecordId::new("user", "user1"), foo: "bar"})
+	let tmp: ApiRecordId = db
+		.insert(object! { id: RecordId::new("user", "user1"), foo: "bar"})
 		.await
+		.unwrap()
 		.unwrap();
+
 	assert_eq!(
 		tmp,
-		vec![ApiRecordId {
+		ApiRecordId {
 			id: RecordId::new("user", "user1"),
-		}]
+		}
 	);
 
 	let tmp: Result<Value, _> = db.insert(Resource::from(())).await;
@@ -1703,46 +1704,6 @@ pub async fn return_bool(new_db: impl CreateDb) {
 	assert_eq!(value, Value::Bool(false));
 }
 
-pub async fn run(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
-	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
-	drop(permit);
-	let sql = "
-	DEFINE FUNCTION fn::foo() {
-	   RETURN 42;
-	};
-	DEFINE FUNCTION fn::bar($val: any) {
-	   CREATE foo:1 set val = $val;
-	   RETURN NONE;
-	};
-	DEFINE FUNCTION fn::baz() {
-	   RETURN SELECT VALUE val FROM ONLY foo:1;
-	};
-	";
-	let _ = db.query(sql).await.unwrap();
-
-	let tmp: i32 = db.run("fn::foo").await.unwrap();
-	assert_eq!(tmp, 42);
-
-	let tmp = db.run::<i32>("fn::foo").args(7).await.unwrap_err();
-	println!("fn::foo res: {tmp}");
-	assert!(tmp.to_string().contains("The function expects 0 arguments."));
-
-	let tmp = db.run::<()>("fn::idnotexist").await.unwrap_err();
-	println!("fn::idontexist res: {tmp}");
-	assert!(tmp.to_string().contains("The function 'fn::idnotexist' does not exist"));
-
-	// Pass the array as a single argument to count()
-	let tmp: usize = db.run("count").args(vec![vec![1, 2, 3]]).await.unwrap();
-	assert_eq!(tmp, 3);
-
-	let tmp: Option<RecordId> = db.run("fn::bar").args(7).await.unwrap();
-	assert_eq!(tmp, None);
-
-	let tmp: i32 = db.run("fn::baz").await.unwrap();
-	assert_eq!(tmp, 7);
-}
-
 pub async fn multi_take(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
@@ -1888,8 +1849,6 @@ define_include_tests!(basic => {
 	set_unset,
 	#[test_log::test(tokio::test)]
 	return_bool,
-	#[test_log::test(tokio::test)]
-	run,
 	#[test_log::test(tokio::test)]
 	multi_take,
 	#[test_log::test(tokio::test)]

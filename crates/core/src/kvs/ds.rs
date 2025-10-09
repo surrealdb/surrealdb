@@ -1392,15 +1392,15 @@ impl Datastore {
 		// Start an execution context
 		ctx.attach_session(sess).map_err(|e| match e {
 			Error::ExpiredSession => DbResultError::InvalidAuth("Session has expired".to_string()),
-		Error::InvalidAuth => DbResultError::InvalidAuth("Authentication failed".to_string()),
-		Error::UnexpectedAuth => {
-			DbResultError::InvalidAuth("Unexpected authentication error".to_string())
-		}
-		Error::IamError(iam_err) => {
-			DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
-		}
-		_ => DbResultError::InternalError(e.to_string()),
-	})?;
+			Error::InvalidAuth => DbResultError::InvalidAuth("Authentication failed".to_string()),
+			Error::UnexpectedAuth => {
+				DbResultError::InvalidAuth("Unexpected authentication error".to_string())
+			}
+			Error::IamError(iam_err) => {
+				DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
+			}
+			_ => DbResultError::InternalError(e.to_string()),
+		})?;
 
 		// Store the query variables
 		if let Some(vars) = vars {
@@ -1434,14 +1434,14 @@ impl Datastore {
 				Some(Error::NoSigninTarget) => {
 					DbResultError::InvalidAuth("No signin target specified".to_string())
 				}
-			Some(Error::TokenMakingFailed) => {
-				DbResultError::InvalidAuth("Failed to create authentication token".to_string())
-			}
-			Some(Error::IamError(iam_err)) => {
-				DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
-			}
-			Some(Error::Ds(msg)) => {
-				DbResultError::InternalError(format!("Datastore error: {}", msg))
+				Some(Error::TokenMakingFailed) => {
+					DbResultError::InvalidAuth("Failed to create authentication token".to_string())
+				}
+				Some(Error::IamError(iam_err)) => {
+					DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
+				}
+				Some(Error::Ds(msg)) => {
+					DbResultError::InternalError(format!("Datastore error: {}", msg))
 				}
 				Some(Error::Tx(msg)) => {
 					DbResultError::InternalError(format!("Transaction error: {}", msg))

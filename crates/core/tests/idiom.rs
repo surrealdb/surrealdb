@@ -1085,6 +1085,6 @@ async fn idiom_recursion_instruction_plan_conflict() -> Result<()> {
 
 	Test::new(sql)
 		.await?
-		.expect_error("Can not construct a recursion plan when an instruction is provided")?;
+		.expect_error("Cannot construct a recursion plan when an instruction is provided")?;
 	Ok(())
 }

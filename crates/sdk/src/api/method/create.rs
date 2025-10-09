@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{self, SurrealValue, Value, vars};
+use surrealdb_types::{self, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -61,13 +61,12 @@ macro_rules! into_future {
 
 				let what = resource?;
 
-				let variables = vars! {
-					_resource: what,
-				};
+				let mut variables = Variables::new();
+				let what = what.for_sql_query(&mut variables)?;
 
 				let cmd = Command::RawQuery {
 					txn,
-					query: Cow::Borrowed("CREATE $_resource"),
+					query: Cow::Owned(format!("CREATE {what}")),
 					variables,
 				};
 				router.$method(cmd).await
@@ -114,16 +113,15 @@ where
 				"Tried to create non-object-like data as content, only structs and objects are supported",
 			)?;
 
-			let what = self.resource?.into_value();
+			let what = self.resource?;
 
-			let variables = vars! {
-				_resource: what,
-				_content: content,
-			};
+			let mut variables = Variables::new();
+			let what = what.for_sql_query(&mut variables)?;
+			variables.insert("_content".to_string(), content);
 
 			Ok(Command::RawQuery {
 				txn: self.txn,
-				query: Cow::Borrowed("CREATE $_resource CONTENT $_content"),
+				query: Cow::Owned(format!("CREATE {what} CONTENT $_content")),
 				variables,
 			})
 		})
@@ -147,16 +145,22 @@ where
 				"Tried to create non-object-like data as content, only structs and objects are supported",
 			)?;
 
-			let what = self.resource?.into_value();
+			let what = self.resource?;
 
-			let variables = vars! {
-				_resource: what,
-				_content: content,
+			let mut variables = Variables::new();
+			let what = what.for_sql_query(&mut variables)?;
+
+			let query = match content {
+				Value::None => Cow::Owned(format!("CREATE {what}")),
+				content => {
+					variables.insert("_content".to_string(), content);
+					Cow::Owned(format!("CREATE {what} CONTENT $_content"))
+				}
 			};
 
 			Ok(Command::RawQuery {
 				txn: self.txn,
-				query: Cow::Borrowed("CREATE $_resource CONTENT $_content"),
+				query,
 				variables,
 			})
 		})

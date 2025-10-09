@@ -2,7 +2,7 @@
 # https://nexte.st/book/configuration.html
 
 [profile.default]
-retries = 4
+retries = 1
 fail-fast = false
 test-threads = -1
 slow-timeout = "180s"

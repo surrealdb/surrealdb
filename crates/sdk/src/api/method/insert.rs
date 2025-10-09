@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{Object, SurrealValue, Value, vars};
+use surrealdb_types::{SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::insert_relation::InsertRelation;
@@ -60,30 +60,34 @@ macro_rules! into_future {
 				..
 			} = self;
 			Box::pin(async move {
-				let (table, data) = match resource? {
-					Resource::Table(table) => (table.into(), Object::default()),
-					Resource::RecordId(record_id) => {
-						let mut map = Object::default();
-						map.insert("id".to_string(), record_id.key.into_value());
-						(record_id.table, map)
+				let router = client.inner.router.extract()?;
+
+				let what_resource = resource?;
+
+				let mut variables = Variables::new();
+				let what = what_resource.for_sql_query(&mut variables)?;
+
+				let query = match what_resource {
+					Resource::Table(_) => {
+						// `INSERT INTO` is finicky. It cannot accept an expression for the table name, so we wrap
+						// the call in a block and use a local variable so that we still only get one returned result.
+						Cow::Owned(format!("{{ LET $__table = {what}; INSERT INTO $__table; }}"))
+					}
+					Resource::RecordId(_) => {
+						Cow::Owned(format!("CREATE {what}"))
 					}
 					Resource::Object(_) => return Err(Error::InsertOnObject.into()),
 					Resource::Array(_) => return Err(Error::InsertOnArray.into()),
-					Resource::Range {
-						..
-					} => return Err(Error::InsertOnRange.into()),
+					Resource::Range(_) => return Err(Error::InsertOnRange.into()),
 					Resource::Unspecified => return Err(Error::InsertOnUnspecified.into()),
 				};
 
-				let router = client.inner.router.extract()?;
-				let variables = vars! {
-					_table: table,
-					_data: data,
-				};
+				tracing::warn!("Insert query: {}", query);
+
 				router
 					.$method(Command::RawQuery {
 						txn,
-						query: Cow::Borrowed("INSERT INTO $_table $_data"),
+						query,
 						variables,
 					})
 					.await
@@ -140,56 +144,44 @@ where
 				&data,
 				"Tried to insert non-object-like data as content, only structs and objects are supported",
 			)?;
-			match self.resource? {
-				Resource::Table(table) => {
-					let variables = vars! {
-						_table: table,
-						_data: data,
-					};
-					Ok(Command::RawQuery {
-						txn: self.txn,
-						query: Cow::Borrowed("INSERT INTO $_table $_data"),
-						variables,
-					})
+
+			let what_resource = self.resource?;
+
+			let mut variables = Variables::new();
+			let what = what_resource.for_sql_query(&mut variables)?;
+
+			let query = match what_resource {
+				Resource::Table(_) => {
+					// `INSERT INTO` is finicky. It cannot accept an expression for the table name, so we wrap
+					// the call in a block and use a local variable so that we still only get one returned result.
+					Cow::Owned(format!("{{ LET $__table = {what}; INSERT INTO $__table CONTENT $_data; }}"))
 				}
-				Resource::RecordId(thing) => {
+				Resource::RecordId(record_id) => {
 					if data.is_array() {
-						Err(Error::InvalidParams(
+						return Err(Error::InvalidParams(
 							"Tried to insert multiple records on a record ID".to_owned(),
-						))
-					} else {
-						if let Value::Object(ref mut x) = data {
-							x.insert("id".to_string(), thing.key.into_value());
-						}
-
-						let variables = vars! {
-							_table: thing.table,
-							_data: data,
-						};
-
-						Ok(Command::RawQuery {
-							txn: self.txn,
-							query: Cow::Borrowed("INSERT INTO $_table $_data"),
-							variables,
-						})
+						));
 					}
-				}
-				Resource::Object(_) => Err(Error::InsertOnObject),
-				Resource::Array(_) => Err(Error::InsertOnArray),
-				Resource::Range(_) => Err(Error::InsertOnRange),
-				Resource::Unspecified => {
-					// When unspecified, we just INSERT the data directly
-					let variables = vars! {
-						_data: data,
-					};
 
-					Ok(Command::RawQuery {
-						txn: self.txn,
-						query: Cow::Borrowed("INSERT $_data"),
-						variables,
-					})
+					if let Value::Object(ref mut x) = data {
+						x.insert("id".to_string(), record_id.key.into_value());
+					}
+
+					Cow::Owned(format!("INSERT INTO {what} CONTENT $_data"))
 				}
-			}
+				Resource::Unspecified => {}
+				Resource::Object(_) => return Err(Error::InsertOnObject),
+				Resource::Array(_) => return Err(Error::InsertOnArray),
+				Resource::Range(_) => return Err(Error::InsertOnRange),
+			};
+
+			variables.insert("_data".to_string(), data);
+
+			Ok(Command::RawQuery {
+				txn: self.txn,
+				query,
+				variables,
+			})
 		})
 	}
 }
@@ -210,54 +202,44 @@ where
 				&data,
 				"Tried to insert non-object-like data as relation data, only structs and objects are supported",
 			)?;
-			match self.resource? {
-				Resource::Table(table) => {
-					let variables = vars! {
-						_table: table,
-						_data: data,
-					};
-					Ok(Command::RawQuery {
-						txn: self.txn,
-						query: Cow::Borrowed("INSERT RELATION INTO $_table $_data"),
-						variables,
-					})
-				}
-				Resource::RecordId(thing) => {
-					if data.is_array() {
-						Err(Error::InvalidParams(
-							"Tried to insert multiple records on a record ID".to_owned(),
-						))
-					} else {
-						if let Value::Object(ref mut x) = data {
-							x.insert("id".to_string(), thing.key.into_value());
-						}
 
-						let variables = vars! {
-							_table: thing.table,
-							_data: data,
-						};
-						Ok(Command::RawQuery {
-							txn: self.txn,
-							query: Cow::Borrowed("INSERT RELATION INTO $_table $_data"),
-							variables,
-						})
+			let what_resource = self.resource?;
+
+			let mut variables = Variables::new();
+			let what = what_resource.for_sql_query(&mut variables)?;
+
+			let query = match what_resource {
+				Resource::Table(_) => {
+					// `INSERT RELATION INTO` is finicky. It cannot accept an expression for the table name, so we wrap
+					// the call in a block and use a local variable so that we still only get one returned result.
+					Cow::Owned(format!("{{ LET $__table = {what}; INSERT RELATION INTO $__table $_data; }}"))
+				},
+				Resource::RecordId(record_id) => {
+					if data.is_array() {
+						return Err(Error::InvalidParams(
+							"Tried to insert multiple records on a record ID".to_owned(),
+						));
 					}
+
+					if let Value::Object(ref mut x) = data {
+						x.insert("id".to_string(), record_id.key.into_value());
+					}
+
+					Cow::Owned(format!("INSERT RELATION INTO {what} $_data RETURN AFTER"))
 				}
-				Resource::Unspecified => {
-					// When unspecified, we just INSERT RELATION the data directly
-					let variables = vars! {
-						_data: data,
-					};
-					Ok(Command::RawQuery {
-						txn: self.txn,
-						query: Cow::Borrowed("INSERT RELATION $_data"),
-						variables,
-					})
-				}
-				Resource::Object(_) => Err(Error::InsertOnObject),
-				Resource::Array(_) => Err(Error::InsertOnArray),
-				Resource::Range(_) => Err(Error::InsertOnRange),
-			}
+				Resource::Unspecified => Cow::Borrowed("INSERT RELATION $_data RETURN AFTER"),
+				Resource::Array(_) => return Err(Error::InsertOnArray),
+				Resource::Range(_) => return Err(Error::InsertOnRange),
+				Resource::Object(_) => return Err(Error::InsertOnObject),
+			};
+
+			variables.insert("_data".to_string(), data);
+
+			Ok(Command::RawQuery {
+				txn: self.txn,
+				query,
+				variables,
+			})
 		})
 	}
 }

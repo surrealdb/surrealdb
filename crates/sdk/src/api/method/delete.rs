@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{RecordIdKeyRange, SurrealValue, Value, vars};
+use surrealdb_types::{RecordIdKeyRange, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -61,14 +61,13 @@ macro_rules! into_future {
 
 				let what = resource?;
 
-				let variables = vars! {
-					_resource: what,
-				};
+				let mut variables = Variables::new();
+				let what = what.for_sql_query(&mut variables)?;
 
 				router
 					.$method(Command::RawQuery {
 						txn,
-						query: Cow::Borrowed("DELETE $_resource RETURN BEFORE"),
+						query: Cow::Owned(format!("DELETE FROM {what} RETURN BEFORE")),
 						variables,
 					})
 					.await

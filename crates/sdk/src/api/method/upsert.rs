@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{self, RecordIdKeyRange, SurrealValue, Value, vars};
+use surrealdb_types::{self, RecordIdKeyRange, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -63,14 +63,13 @@ macro_rules! into_future {
 
 				let what = resource?;
 
-				let variables = vars! {
-					_what: what,
-				};
+				let mut variables = Variables::new();
+				let what = what.for_sql_query(&mut variables)?;
 
 				router
 					.$method(Command::RawQuery {
 						txn,
-						query: Cow::Borrowed("UPSERT $_what"),
+						query: Cow::Owned(format!("UPSERT {what}")),
 						variables,
 					})
 					.await
@@ -156,23 +155,22 @@ where
 				content => Some(content),
 			};
 
-			let what = self.resource?.into_value();
+			let what = self.resource?;
 
-			let mut variables = vars! {
-				_what: what,
-			};
+			let mut variables = Variables::new();
+			let what = what.for_sql_query(&mut variables)?;
 
 			let query = match data {
-				None => "UPSERT $_what",
+				None => Cow::Owned(format!("UPSERT {what}")),
 				Some(content) => {
 					variables.insert("_content", content);
-					"UPSERT $_what CONTENT $_content"
+					Cow::Owned(format!("UPSERT {what} CONTENT $_content"))
 				}
 			};
 
 			Ok(Command::RawQuery {
 				txn: self.txn,
-				query: Cow::Borrowed(query),
+				query,
 				variables,
 			})
 		})

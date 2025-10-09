@@ -82,13 +82,13 @@ pub(crate) enum Error {
 	InvalidQuery(RenderedParserError),
 
 	/// There was an error with the SQL query
-	#[error("Can not use {value} in a CONTENT clause")]
+	#[error("Cannot use {value} in a CONTENT clause")]
 	InvalidContent {
 		value: Value,
 	},
 
 	/// There was an error with the SQL query
-	#[error("Can not use {value} in a MERGE clause")]
+	#[error("Cannot use {value} in a MERGE clause")]
 	InvalidMerge {
 		value: Value,
 	},
@@ -370,91 +370,91 @@ pub(crate) enum Error {
 	#[error("Invalid statement: {0}")]
 	InvalidStatement(String),
 
-	/// Can not execute statement using the specified value
-	#[error("Can not execute statement using value: {value}")]
+	/// Cannot execute statement using the specified value
+	#[error("Cannot execute statement using value: {value}")]
 	InvalidStatementTarget {
 		value: String,
 	},
 
-	/// Can not execute CREATE statement using the specified value
-	#[error("Can not execute CREATE statement using value: {value}")]
+	/// Cannot execute CREATE statement using the specified value
+	#[error("Cannot execute CREATE statement using value: {value}")]
 	CreateStatement {
 		value: String,
 	},
 
-	/// Can not execute UPSERT statement using the specified value
-	#[error("Can not execute UPSERT statement using value: {value}")]
+	/// Cannot execute UPSERT statement using the specified value
+	#[error("Cannot execute UPSERT statement using value: {value}")]
 	UpsertStatement {
 		value: String,
 	},
 
-	/// Can not execute UPDATE statement using the specified value
-	#[error("Can not execute UPDATE statement using value: {value}")]
+	/// Cannot execute UPDATE statement using the specified value
+	#[error("Cannot execute UPDATE statement using value: {value}")]
 	UpdateStatement {
 		value: String,
 	},
 
-	/// Can not execute RELATE statement using the specified value
-	#[error("Can not execute RELATE statement where property 'in' is: {value}")]
+	/// Cannot execute RELATE statement using the specified value
+	#[error("Cannot execute RELATE statement where property 'in' is: {value}")]
 	RelateStatementIn {
 		value: String,
 	},
 
-	/// Can not execute RELATE statement using the specified value
-	#[error("Can not execute RELATE statement where property 'id' is: {value}")]
+	/// Cannot execute RELATE statement using the specified value
+	#[error("Cannot execute RELATE statement where property 'id' is: {value}")]
 	RelateStatementId {
 		value: String,
 	},
 
-	/// Can not execute RELATE statement using the specified value
-	#[error("Can not execute RELATE statement where property 'out' is: {value}")]
+	/// Cannot execute RELATE statement using the specified value
+	#[error("Cannot execute RELATE statement where property 'out' is: {value}")]
 	RelateStatementOut {
 		value: String,
 	},
 
-	/// Can not execute DELETE statement using the specified value
-	#[error("Can not execute DELETE statement using value: {value}")]
+	/// Cannot execute DELETE statement using the specified value
+	#[error("Cannot execute DELETE statement using value: {value}")]
 	DeleteStatement {
 		value: String,
 	},
 
-	/// Can not execute INSERT statement using the specified value
-	#[error("Can not execute INSERT statement using value: {value}")]
+	/// Cannot execute INSERT statement using the specified value
+	#[error("Cannot execute INSERT statement using value: {value}")]
 	InsertStatement {
 		value: String,
 	},
 
-	/// Can not execute INSERT statement using the specified value
-	#[error("Can not execute INSERT statement where property 'in' is: {value}")]
+	/// Cannot execute INSERT statement using the specified value
+	#[error("Cannot execute INSERT statement where property 'in' is: {value}")]
 	InsertStatementIn {
 		value: String,
 	},
 
-	/// Can not execute INSERT statement using the specified value
-	#[error("Can not execute INSERT statement where property 'id' is: {value}")]
+	/// Cannot execute INSERT statement using the specified value
+	#[error("Cannot execute INSERT statement where property 'id' is: {value}")]
 	InsertStatementId {
 		value: String,
 	},
 
-	/// Can not execute INSERT statement using the specified value
-	#[error("Can not execute INSERT statement where property 'out' is: {value}")]
+	/// Cannot execute INSERT statement using the specified value
+	#[error("Cannot execute INSERT statement where property 'out' is: {value}")]
 	InsertStatementOut {
 		value: String,
 	},
 
-	/// Can not execute LIVE statement using the specified value
-	#[error("Can not execute LIVE statement using value: {value}")]
+	/// Cannot execute LIVE statement using the specified value
+	#[error("Cannot execute LIVE statement using value: {value}")]
 	LiveStatement {
 		value: String,
 	},
 
-	/// Can not execute KILL statement using the specified id
-	#[error("Can not execute KILL statement using id: {value}")]
+	/// Cannot execute KILL statement using the specified id
+	#[error("Cannot execute KILL statement using id: {value}")]
 	KillStatement {
 		value: String,
 	},
 
-	/// Can not execute CREATE statement using the specified value
+	/// Cannot execute CREATE statement using the specified value
 	#[error("Expected a single result output when using the ONLY keyword")]
 	SingleOnlyOutput,
 
@@ -1096,7 +1096,7 @@ pub(crate) enum Error {
 
 	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not
 	/// supported
-	#[error("Can not construct a recursion plan when an instruction is provided")]
+	#[error("Cannot construct a recursion plan when an instruction is provided")]
 	RecursionInstructionPlanConflict,
 
 	/// The record cannot be deleted as it's still referenced elsewhere

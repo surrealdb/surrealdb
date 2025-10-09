@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{SurrealValue, Value, vars};
+use surrealdb_types::{SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::validate_data;
@@ -65,40 +65,28 @@ macro_rules! into_future {
 
 				let router = client.inner.router.extract()?;
 
-				let what = resource?.into_value();
+				let what = resource?;
 
-				let (variables, query) = match (upsert, content) {
-					(true, Some(data)) => {
-						let variables = vars! {
-							_what: what,
-							_data: data,
-						};
-						(variables, "UPSERT $_what MERGE $_data")
+				let mut variables = Variables::new();
+				let what = what.for_sql_query(&mut variables)?;
+
+				let operation = if upsert {
+					"UPSERT"
+				} else {
+					"UPDATE"
+				};
+
+				let query = match content {
+					None => Cow::Owned(format!("{operation} {what}")),
+					Some(data) => {
+						variables.insert("_data".to_string(), data);
+						Cow::Owned(format!("{operation} {what} MERGE $_data"))
 					}
-					(true, None) => (
-						vars! {
-							_what: what,
-						},
-						"UPSERT $_what",
-					),
-					(false, Some(data)) => {
-						let variables = vars! {
-							_what: what,
-							_data: data,
-						};
-						(variables, "UPDATE $_what MERGE $_data")
-					}
-					(false, None) => (
-						vars! {
-							_what: what,
-						},
-						"UPDATE $_what",
-					),
 				};
 
 				let cmd = Command::RawQuery {
 					txn,
-					query: Cow::Borrowed(query),
+					query,
 					variables,
 				};
 

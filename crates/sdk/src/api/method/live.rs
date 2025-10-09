@@ -7,8 +7,7 @@ use std::task::{Context, Poll};
 use async_channel::Receiver;
 use futures::StreamExt;
 use surrealdb_types::{
-	self, Action, Notification as CoreNotification, RecordId, RecordIdKey, SurrealValue, Value,
-	Variables,
+	self, Action, Notification as CoreNotification, RecordId, SurrealValue, Value, Variables,
 };
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
@@ -41,43 +40,40 @@ where
 			return Err(Error::LiveQueriesNotSupported);
 		}
 
+		let what_resource = resource?;
+
 		let mut variables = Variables::new();
+		let what = what_resource.for_sql_query(&mut variables)?;
 
 		// Generate the LIVE SELECT SQL based on resource type
-		let stmt = match resource? {
+		let query = match what_resource {
 			Resource::Table(table) => {
 				variables.insert("_table".to_string(), Value::String(table));
-				"LIVE SELECT * FROM $_table".to_string()
+				format!("LIVE SELECT * FROM {what}")
 			}
-			Resource::RecordId(record) => {
+			Resource::RecordId(_record) => {
 				// For a specific record, we use WHERE id = record
-				variables.insert("_record_id".to_string(), Value::RecordId(record));
-				"LIVE SELECT * FROM $_record_id".to_string()
+				format!("LIVE SELECT * FROM {what}")
 			}
 			Resource::Object(_) => return Err(Error::LiveOnObject),
 			Resource::Array(_) => return Err(Error::LiveOnArray),
-			Resource::Range(range) => {
-				let record = range.0;
-				let RecordIdKey::Range(ref key_range) = record.key else {
-					return Err(Error::InvalidParams("Invalid range in resource".to_owned()));
-				};
-
+			Resource::Range(query_range) => {
 				// Build WHERE clause for range queries
 				let mut conditions = Vec::new();
 
 				// Handle start bound
-				match &key_range.start {
+				match &query_range.range.start {
 					std::ops::Bound::Included(key) => {
 						variables.insert(
 							"_start".to_string(),
-							Value::RecordId(RecordId::new(record.table.clone(), key.clone())),
+							Value::RecordId(RecordId::new(query_range.table.clone(), key.clone())),
 						);
 						conditions.push("id >= $_start");
 					}
 					std::ops::Bound::Excluded(key) => {
 						variables.insert(
 							"_start".to_string(),
-							Value::RecordId(RecordId::new(record.table.clone(), key.clone())),
+							Value::RecordId(RecordId::new(query_range.table.clone(), key.clone())),
 						);
 						conditions.push("id > $_start");
 					}
@@ -85,18 +81,18 @@ where
 				}
 
 				// Handle end bound
-				match &key_range.end {
+				match &query_range.range.end {
 					std::ops::Bound::Included(key) => {
 						variables.insert(
 							"_end".to_string(),
-							Value::RecordId(RecordId::new(record.table.clone(), key.clone())),
+							Value::RecordId(RecordId::new(query_range.table.clone(), key.clone())),
 						);
 						conditions.push("id <= $_end");
 					}
 					std::ops::Bound::Excluded(key) => {
 						variables.insert(
 							"_end".to_string(),
-							Value::RecordId(RecordId::new(record.table.clone(), key.clone())),
+							Value::RecordId(RecordId::new(query_range.table.clone(), key.clone())),
 						);
 						conditions.push("id < $_end");
 					}
@@ -105,11 +101,9 @@ where
 
 				// Build final query
 				if conditions.is_empty() {
-					variables.insert("_table".to_string(), Value::String(record.table));
-					"LIVE SELECT * FROM $_table".to_string()
+					format!("LIVE SELECT * FROM {what}")
 				} else {
-					variables.insert("_table".to_string(), Value::String(record.table));
-					format!("LIVE SELECT * FROM $_table WHERE {}", conditions.join(" AND "))
+					format!("LIVE SELECT * FROM {what} WHERE {}", conditions.join(" AND "))
 				}
 			}
 			Resource::Unspecified => return Err(Error::LiveOnUnspecified),
@@ -117,7 +111,7 @@ where
 		// Execute the LIVE SELECT query directly to get the UUID
 		let results = router
 			.execute_query(Command::RawQuery {
-				query: Cow::Owned(stmt),
+				query: Cow::Owned(query),
 				txn: None,
 				variables,
 			})

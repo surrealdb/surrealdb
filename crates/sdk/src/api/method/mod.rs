@@ -5,7 +5,7 @@ use std::path::Path;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
 
-use surrealdb_types::{self, Array, SurrealValue, Value, Variables};
+use surrealdb_types::{self, SurrealValue, Value, Variables};
 
 use crate::api::opt::auth::{Credentials, Jwt};
 use crate::api::opt::{IntoEndpoint, auth};
@@ -1246,35 +1246,6 @@ where
 	pub fn version(&'_ self) -> Version<'_, C> {
 		Version {
 			client: Cow::Borrowed(self),
-		}
-	}
-
-	/// Runs a function
-	///
-	/// # Examples
-	///
-	/// ```no_run
-	/// # #[tokio::main]
-	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engine::any::connect("mem://").await?;
-	/// // Specify no args by not calling `.args()`
-	/// let foo: usize = db.run("fn::foo").await?; // fn::foo()
-	/// // A single value will be turned into one argument
-	/// let bar: usize = db.run("fn::bar").args(42).await?; // fn::bar(42)
-	/// // Arrays are treated as single arguments
-	/// let count: usize = db.run("count").args(vec![1,2,3]).await?;
-	/// // Specify multiple args using a tuple
-	/// let two: usize = db.run("math::log").args((100, 10)).await?; // math::log(100, 10)
-	///
-	/// # Ok(())
-	/// # }
-	/// ```
-	pub fn run<R>(&'_ self, function: impl IntoFn) -> Run<'_, C, R> {
-		Run {
-			client: Cow::Borrowed(self),
-			function: function.into_fn(),
-			args: Value::Array(Array::new()),
-			response_type: PhantomData,
 		}
 	}
 

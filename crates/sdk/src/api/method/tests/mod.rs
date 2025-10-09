@@ -161,9 +161,6 @@ async fn api() {
 
 	// version
 	let _: Version = DB.version().await.unwrap();
-
-	// run
-	let _: Option<User> = DB.run("foo").await.unwrap();
 }
 
 fn assert_send_sync(_: impl Send + Sync) {}

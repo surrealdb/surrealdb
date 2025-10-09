@@ -78,16 +78,25 @@ impl From<Uuid> for RecordIdKey {
 		RecordIdKey::Uuid(value)
 	}
 }
+
 impl From<Object> for RecordIdKey {
 	fn from(value: Object) -> Self {
 		RecordIdKey::Object(value)
 	}
 }
+
 impl From<Array> for RecordIdKey {
 	fn from(value: Array) -> Self {
 		RecordIdKey::Array(value)
 	}
 }
+
+impl From<RecordIdKeyRange> for RecordIdKey {
+	fn from(value: RecordIdKeyRange) -> Self {
+		RecordIdKey::Range(Box::new(value))
+	}
+}
+
 impl From<Box<RecordIdKeyRange>> for RecordIdKey {
 	fn from(value: Box<RecordIdKeyRange>) -> Self {
 		RecordIdKey::Range(value)
