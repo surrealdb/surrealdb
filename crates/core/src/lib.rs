@@ -73,3 +73,5 @@ pub mod ent;
 pub mod channel {
 	pub use async_channel::{Receiver, Sender, bounded, unbounded};
 }
+
+pub struct CommunityComposer();

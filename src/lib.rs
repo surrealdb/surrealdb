@@ -26,6 +26,7 @@ mod telemetry;
 use std::future::Future;
 use std::process::ExitCode;
 
+use crate::cli::ConfigCheck;
 /// Re-export `RpcState` for convenience so embedders can `use surreal::RpcState`.
 pub use rpc::RpcState;
 pub use surrealdb_core as core;
@@ -42,8 +43,10 @@ use crate::net::RouterFactory;
 /// Generic parameters:
 /// - T: `TransactionBuilderFactory` (selects/validates the datastore backend).
 /// - R: `RouterFactory` (constructs the HTTP router).
-pub fn init<T: TransactionBuilderFactory, R: RouterFactory>() -> ExitCode {
-	with_enough_stack(cli::init::<T, R>())
+pub fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
+	composer: &mut C,
+) -> ExitCode {
+	with_enough_stack(cli::init::<C>(composer))
 }
 
 /// Rust's default thread stack size of 2MiB doesn't allow sufficient recursion depth.

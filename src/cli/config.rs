@@ -1,11 +1,20 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::OnceLock;
 
 use crate::core::options::EngineOptions;
 use crate::net::client_ip::ClientIp;
+use anyhow::Result;
+use surrealdb_core::CommunityComposer;
 
-pub static CF: OnceLock<Config> = OnceLock::new();
+pub trait ConfigCheck {
+	fn check_config(&mut self, _cfg: &Config) -> Result<()>;
+}
+
+impl ConfigCheck for CommunityComposer {
+	fn check_config(&mut self, _cfg: &Config) -> Result<()> {
+		Ok(())
+	}
+}
 
 #[derive(Clone, Debug)]
 pub struct Config {

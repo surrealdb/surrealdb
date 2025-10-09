@@ -26,6 +26,13 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::cli::Config;
+use crate::cnf;
+use crate::core::dbs::capabilities::ExperimentalTarget;
+use crate::core::kvs::Datastore;
+use crate::net::signals::graceful_shutdown;
+use crate::rpc::{RpcState, notifications};
+use crate::telemetry::metrics::HttpMetricsLayer;
 use anyhow::Result;
 use axum::response::Redirect;
 use axum::routing::get;
@@ -34,6 +41,7 @@ use axum_server::Handle;
 use axum_server::tls_rustls::RustlsConfig;
 use http::header;
 use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
+use surrealdb_core::CommunityComposer;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::ServiceBuilderExt;
@@ -48,14 +56,6 @@ use tower_http::sensitive_headers::{
 };
 use tower_http::trace::TraceLayer;
 
-use crate::cli::CF;
-use crate::cnf;
-use crate::core::dbs::capabilities::ExperimentalTarget;
-use crate::core::kvs::Datastore;
-use crate::net::signals::graceful_shutdown;
-use crate::rpc::{RpcState, notifications};
-use crate::telemetry::metrics::HttpMetricsLayer;
-
 const LOG: &str = "surrealdb::net";
 
 /// Factory for constructing the top-level Axum Router used by the HTTP server.
@@ -67,11 +67,7 @@ pub trait RouterFactory {
 	fn configure_router() -> Router<Arc<RpcState>>;
 }
 
-/// Default router that mirrors the routes shipped with the `surreal` binary.
-/// Consumers embedding SurrealDB can implement `RouterFactory` to customize routes.
-pub struct DefaultRouterFactory {}
-
-impl RouterFactory for DefaultRouterFactory {
+impl RouterFactory for CommunityComposer {
 	fn configure_router() -> Router<Arc<RpcState>> {
 		Router::<Arc<RpcState>>::new()
 			// Redirect until we provide a UI
@@ -101,10 +97,11 @@ pub struct AppState {
 	pub datastore: Arc<Datastore>,
 }
 
-pub async fn init<F: RouterFactory>(ds: Arc<Datastore>, ct: CancellationToken) -> Result<()> {
-	// Get local copy of options
-	let opt = CF.get().unwrap();
-
+pub async fn init<F: RouterFactory>(
+	opt: &Config,
+	ds: Arc<Datastore>,
+	ct: CancellationToken,
+) -> Result<()> {
 	let app_state = AppState {
 		client_ip: opt.client_ip,
 		datastore: ds.clone(),

@@ -74,7 +74,7 @@ use crate::kvs::{LockType, TransactionType};
 use crate::sql::Ast;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::val::Value;
-use crate::{cf, syn};
+use crate::{CommunityComposer, cf, syn};
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
 
@@ -216,6 +216,7 @@ pub trait TransactionBuilder: TransactionBuilderRequirements {
 pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
 	/// Create a new transaction builder and the clock to use throughout the datastore.
 	async fn new_transaction_builder(
+		&self,
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
 	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)>;
@@ -255,13 +256,14 @@ pub enum DatastoreFlavor {
 	SurrealKV(super::surrealkv::Datastore),
 }
 
-impl TransactionBuilderFactoryRequirements for DatastoreFlavor {}
+impl TransactionBuilderFactoryRequirements for CommunityComposer {}
 
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-impl TransactionBuilderFactory for DatastoreFlavor {
+impl TransactionBuilderFactory for CommunityComposer {
 	#[allow(unused_variables)]
 	async fn new_transaction_builder(
+		&self,
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
 	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)> {
@@ -291,7 +293,7 @@ impl TransactionBuilderFactory for DatastoreFlavor {
 				#[cfg(feature = "kv-mem")]
 				{
 					// Initialise the storage engine
-					let v = super::mem::Datastore::new().await.map(Self::Mem)?;
+					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store in {flavour}");
 					(v, c)
@@ -311,7 +313,9 @@ impl TransactionBuilderFactory for DatastoreFlavor {
 						"file:// is deprecated, please use surrealkv:// or surrealkv+versioned:// or rocksdb://"
 					);
 
-					let v = super::rocksdb::Datastore::new(&path).await.map(Self::RocksDB)?;
+					let v = super::rocksdb::Datastore::new(&path)
+						.await
+						.map(DatastoreFlavor::RocksDB)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
 					(v, c)
@@ -327,7 +331,9 @@ impl TransactionBuilderFactory for DatastoreFlavor {
 					super::threadpool::initialise();
 					// Initialise the storage engine
 
-					let v = super::rocksdb::Datastore::new(&path).await.map(Self::RocksDB)?;
+					let v = super::rocksdb::Datastore::new(&path)
+						.await
+						.map(DatastoreFlavor::RocksDB)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
 					(v, c)
@@ -362,7 +368,7 @@ impl TransactionBuilderFactory for DatastoreFlavor {
 
 					let v = super::surrealkv::Datastore::new(&path, false)
 						.await
-						.map(Self::SurrealKV)?;
+						.map(DatastoreFlavor::SurrealKV)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store with versions not enabled");
 					(v, c)
@@ -573,19 +579,23 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Self> {
-		Self::new_with_factory::<DatastoreFlavor>(path).await
+		Self::new_with_factory(&CommunityComposer(), path).await
 	}
 
-	pub async fn new_with_factory<F: TransactionBuilderFactory>(path: &str) -> Result<Self> {
-		Self::new_with_clock::<F>(path, None).await
+	pub async fn new_with_factory<F: TransactionBuilderFactory>(
+		factory: &F,
+		path: &str,
+	) -> Result<Self> {
+		Self::new_with_clock::<F>(factory, path, None).await
 	}
 
 	pub async fn new_with_clock<F: TransactionBuilderFactory>(
+		factory: &F,
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
 	) -> Result<Datastore> {
 		// Initiate the desired datastore
-		let (builder, clock) = F::new_transaction_builder(path, clock).await?;
+		let (builder, clock) = factory.new_transaction_builder(path, clock).await?;
 		// Set the properties on the datastore
 		Self::new_with_builder(builder, clock)
 	}

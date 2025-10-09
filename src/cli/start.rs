@@ -11,7 +11,8 @@ use surrealdb::engine::{any, tasks};
 use surrealdb_core::kvs::TransactionBuilderFactory;
 use tokio_util::sync::CancellationToken;
 
-use super::config::{CF, Config};
+use super::config::Config;
+use crate::cli::ConfigCheck;
 use crate::cnf::LOGO;
 #[cfg(feature = "ml")]
 use crate::core::ml::execution::session::set_environment;
@@ -154,7 +155,8 @@ struct StartCommandWebTlsOptions {
 /// Generic over:
 /// - T: datastore transaction builder (storage/backend selection).
 /// - R: HTTP router factory (route/middleware customization).
-pub async fn init<T: TransactionBuilderFactory, R: RouterFactory>(
+pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
+	composer: &mut C,
 	StartCommandArguments {
 		path,
 		username: user,
@@ -174,7 +176,7 @@ pub async fn init<T: TransactionBuilderFactory, R: RouterFactory>(
 	}: StartCommandArguments,
 ) -> Result<()> {
 	// Check the path is valid
-	T::path_valid(&path)?;
+	C::path_valid(&path)?;
 	// Check if we should output a banner
 	if !no_banner {
 		println!("{LOGO}");
@@ -211,8 +213,8 @@ pub async fn init<T: TransactionBuilderFactory, R: RouterFactory>(
 		crt,
 		key,
 	};
+	composer.check_config(&config)?;
 	// Setup the command-line options
-	let _ = CF.set(config);
 	// Initiate environment
 	env::init()?;
 
@@ -223,12 +225,12 @@ pub async fn init<T: TransactionBuilderFactory, R: RouterFactory>(
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();
 	// Start the datastore
-	let datastore = Arc::new(dbs::init::<T>(dbs).await?);
+	let datastore = Arc::new(dbs::init::<C>(composer, &config, dbs).await?);
 	// Start the node agent
-	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &CF.get().unwrap().engine);
+	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &config.engine);
 	// Start the web server
 	// Build and run the HTTP server using the provided RouterFactory implementation
-	net::init::<R>(datastore.clone(), canceller.clone()).await?;
+	net::init::<C>(&config, datastore.clone(), canceller.clone()).await?;
 	// Shutdown and stop closed tasks
 	canceller.cancel();
 	// Wait for background tasks to finish

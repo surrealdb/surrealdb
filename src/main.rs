@@ -5,10 +5,9 @@
 
 use std::process::ExitCode;
 
-use surreal::net::DefaultRouterFactory;
-use surrealdb_core::kvs::DatastoreFlavor;
+use surrealdb_core::CommunityComposer;
 
 fn main() -> ExitCode {
 	// Use the default storage flavor and default HTTP router shipped with the binary
-	surreal::init::<DatastoreFlavor, DefaultRouterFactory>()
+	surreal::init(&mut CommunityComposer())
 }
