@@ -16,6 +16,8 @@ impl Document {
 	) -> Result<Value, IgnoreError> {
 		// Check if table has correct relation status
 		self.check_table_type(ctx, opt, stm).await?;
+		// Process the record data
+		self.process_record_data(stk, ctx, opt, stm).await?;
 		// Check whether current record exists
 		if self.current.doc.as_ref().is_nullish() {
 			// If the current document is null, it doesn't exist yet so we need to create a
@@ -37,7 +39,6 @@ impl Document {
 		self.check_permissions_quick(stk, ctx, opt, stm).await?;
 		self.check_table_type(ctx, opt, stm).await?;
 		self.check_data_fields(stk, ctx, opt, stm).await?;
-		self.process_record_data(stk, ctx, opt, stm).await?;
 		self.store_edges_data(ctx, opt, stm).await?;
 		self.default_record_data(ctx, opt, stm).await?;
 		self.process_table_fields(stk, ctx, opt, stm).await?;
@@ -59,12 +60,12 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
+		self.generate_record_id()?;
 		self.check_permissions_quick(stk, ctx, opt, stm).await?;
 		self.check_table_type(ctx, opt, stm).await?;
 		self.check_data_fields(stk, ctx, opt, stm).await?;
 		self.check_permissions_table(stk, ctx, opt, stm).await?;
 		self.store_edges_data(ctx, opt, stm).await?;
-		self.process_record_data(stk, ctx, opt, stm).await?;
 		self.default_record_data(ctx, opt, stm).await?;
 		self.process_table_fields(stk, ctx, opt, stm).await?;
 		self.cleanup_table_fields(ctx, opt, stm).await?;

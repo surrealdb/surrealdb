@@ -6,13 +6,16 @@ reason = "Test self-referential updating with DEFINE EVENT and nested UPSERT ope
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
+value = "[{ city: city:london, id: person:tobie }]"
 
 [[test.results]]
-value = "[{ animals: [animal:test], id: child:test, name: 'John' }]"
+value = "[{ city: { citizens: [person:tobie], id: city:london }, id: person:tobie }]"
 
 [[test.results]]
-value = "[{ animals: [{ id: animal:test, toy: toy:test, toys: [{ id: animal:test, toy: toy:test, toys: [animal:test] }] }], id: child:test, name: 'John' }]"
+value = "[{ city: city:sanfrancisco, id: person:tobie }]"
+
+[[test.results]]
+value = "[{ city: { citizens: [person:tobie], id: city:sanfrancisco }, id: person:tobie }]"
 
 [env]
 namespace = "test"
@@ -20,23 +23,19 @@ database = "test"
 
 */
 
-DEFINE EVENT updateOwner ON TABLE toy WHEN $before.owner != $after.owner THEN {
-    UPSERT $after.owner SET toys += $this.id;
+DEFINE EVENT updateCitizens ON TABLE person WHEN $before.city != $after.city THEN {
+    IF $before.city {
+        UPSERT $before.city SET citizens -= $value.id;
+    };
+    IF $after.city {
+        UPSERT $after.city SET citizens += $value.id;
+    };
 };
 
-DEFINE EVENT updateOwner ON TABLE animal WHEN $before.owner != $after.owner THEN {
-    UPSERT $after.owner SET animals += $this.id;
-};
+UPSERT person:tobie SET city = city:london;
 
-UPSERT child:test SET
-    name = 'John',
-    animals = [
-        (
-           UPSERT ONLY animal:test SET toy = (
-               UPSERT ONLY toy:test SET owner=$parent.id, name = 'doll'
-           ).id
-        ).id
-    ]
-;
+SELECT * FROM person FETCH city;
 
-SELECT * FROM child FETCH animals, animals.toys;
+UPSERT person:tobie SET city = city:sanfrancisco;
+
+SELECT * FROM person FETCH city;

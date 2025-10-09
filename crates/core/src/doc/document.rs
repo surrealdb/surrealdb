@@ -10,6 +10,7 @@ use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::catalog::{self, DatabaseDefinition, Permission, TableDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Workable};
+use crate::doc::alter::ComputedData;
 use crate::expr::{Base, FlowResultExt as _};
 use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::RecordStrategy;
@@ -31,7 +32,7 @@ pub(crate) struct Document {
 	pub(super) initial_reduced: CursorDoc,
 	pub(super) current_reduced: CursorDoc,
 	pub(super) record_strategy: RecordStrategy,
-	pub(super) input: Option<Arc<Value>>,
+	pub(super) input_data: Option<ComputedData>,
 }
 
 #[derive(Clone, Debug)]
@@ -208,7 +209,7 @@ impl Document {
 			current_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 			initial_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 			record_strategy: rs,
-			input: None,
+			input_data: None,
 		}
 	}
 

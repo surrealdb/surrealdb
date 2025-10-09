@@ -42,6 +42,7 @@ impl Document {
 			};
 			let after = self.current.doc.as_arc();
 			let before = self.initial.doc.as_arc();
+			let input = self.compute_input_value(stk, ctx, opt, stm).await?;
 			// Depending on type of event, how do we populate the document
 			let doc = if stm.is_delete() {
 				&mut self.initial
@@ -54,7 +55,7 @@ impl Document {
 			ctx.add_value("value", doc.doc.as_arc());
 			ctx.add_value("after", after);
 			ctx.add_value("before", before);
-			ctx.add_value("input", self.input.as_ref().map(|v| v.clone()).unwrap_or_default());
+			ctx.add_value("input", input);
 			// Freeze the context
 			let ctx = ctx.freeze();
 			// Process conditional clause

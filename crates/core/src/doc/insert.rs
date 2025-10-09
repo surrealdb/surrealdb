@@ -140,7 +140,7 @@ impl Document {
 		self.modify_for_update_retry(retry, val);
 
 		// we restarted, so we might need to generate a record id again?
-		self.generate_record_id(stk, ctx, opt, &Statement::Insert(stm)).await?;
+		self.generate_record_id()?;
 
 		self.insert_update(stk, ctx, opt, &Statement::Insert(stm)).await
 	}
