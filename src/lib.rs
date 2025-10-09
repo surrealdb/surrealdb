@@ -26,12 +26,12 @@ mod telemetry;
 use std::future::Future;
 use std::process::ExitCode;
 
-use crate::cli::ConfigCheck;
 /// Re-export `RpcState` for convenience so embedders can `use surreal::RpcState`.
 pub use rpc::RpcState;
 pub use surrealdb_core as core;
 use surrealdb_core::kvs::TransactionBuilderFactory;
 
+use crate::cli::ConfigCheck;
 // Re-export the core crate in the same path used across internal modules
 // so that `crate::core::...` keeps working when used as a library target.
 use crate::net::RouterFactory;

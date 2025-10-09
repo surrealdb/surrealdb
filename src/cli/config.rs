@@ -1,10 +1,11 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 
-use crate::core::options::EngineOptions;
-use crate::net::client_ip::ClientIp;
 use anyhow::Result;
 use surrealdb_core::CommunityComposer;
+
+use crate::core::options::EngineOptions;
+use crate::net::client_ip::ClientIp;
 
 pub trait ConfigCheck {
 	fn check_config(&mut self, _cfg: &Config) -> Result<()>;

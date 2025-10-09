@@ -26,13 +26,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::cli::Config;
-use crate::cnf;
-use crate::core::dbs::capabilities::ExperimentalTarget;
-use crate::core::kvs::Datastore;
-use crate::net::signals::graceful_shutdown;
-use crate::rpc::{RpcState, notifications};
-use crate::telemetry::metrics::HttpMetricsLayer;
 use anyhow::Result;
 use axum::response::Redirect;
 use axum::routing::get;
@@ -55,6 +48,14 @@ use tower_http::sensitive_headers::{
 	SetSensitiveRequestHeadersLayer, SetSensitiveResponseHeadersLayer,
 };
 use tower_http::trace::TraceLayer;
+
+use crate::cli::Config;
+use crate::cnf;
+use crate::core::dbs::capabilities::ExperimentalTarget;
+use crate::core::kvs::Datastore;
+use crate::net::signals::graceful_shutdown;
+use crate::rpc::{RpcState, notifications};
+use crate::telemetry::metrics::HttpMetricsLayer;
 
 const LOG: &str = "surrealdb::net";
 
