@@ -4,7 +4,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::access_type::BearerAccessSubject;
-use crate::sql::value::VisitExpression;
 use crate::sql::{
 	AccessType, Array, Base, Cond, Datetime, Duration, Ident, Object, Strand, Thing, Uuid, Value,
 };
@@ -199,20 +198,6 @@ impl Subject {
 		match self {
 			Subject::Record(id) => id.to_raw(),
 			Subject::User(name) => name.to_raw(),
-		}
-	}
-}
-
-impl VisitExpression for Subject {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		match self {
-			Subject::Record(v) => {
-				v.visit(visitor);
-			}
-			Subject::User(_) => {}
 		}
 	}
 }
@@ -1010,30 +995,6 @@ impl Display for AccessStatement {
 				}
 				Ok(())
 			}
-		}
-	}
-}
-
-impl VisitExpression for AccessStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		match self {
-			Self::Grant(v) => {
-				v.subject.visit(visitor);
-			}
-			AccessStatement::Show(v) => {
-				if let Some(v) = &v.cond {
-					v.visit(visitor);
-				}
-			}
-			AccessStatement::Revoke(v) => {
-				if let Some(v) = &v.cond {
-					v.visit(visitor);
-				}
-			}
-			AccessStatement::Purge(_) => {}
 		}
 	}
 }

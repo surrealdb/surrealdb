@@ -4,7 +4,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::value::VisitExpression;
 use crate::sql::{Number, Subquery, Value};
 use crate::syn;
 use reblessive::tree::Stk;
@@ -207,23 +206,6 @@ impl Range {
 		}
 
 		Ok(())
-	}
-}
-
-impl VisitExpression for Range {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		use std::ops::Bound;
-		match &self.beg {
-			Bound::Included(v) | Bound::Excluded(v) => v.visit(visitor),
-			Bound::Unbounded => {}
-		}
-		match &self.end {
-			Bound::Included(v) | Bound::Excluded(v) => v.visit(visitor),
-			Bound::Unbounded => {}
-		}
 	}
 }
 

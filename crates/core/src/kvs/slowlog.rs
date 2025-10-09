@@ -22,8 +22,7 @@ use std::time::Duration;
 use trice::Instant;
 
 use crate::ctx::Context;
-use crate::sql::value::VisitExpression;
-use crate::sql::Value;
+use crate::sql::visit::{Visit, Visitor};
 
 #[derive(Clone)]
 /// Configuration and logic for slow query logging.
@@ -43,6 +42,32 @@ struct Inner {
 	param_allow: Vec<String>,
 	param_deny: Vec<String>,
 }
+
+pub(crate) struct ParamVisitor<'a> {
+	params: Vec<String>,
+	slow_log: &'a SlowLog,
+	ctx: &'a Context,
+}
+
+impl Visitor for ParamVisitor<'_> {
+	type Error = ();
+
+	fn visit_param(&mut self, param: &crate::sql::Param) -> Result<(), Self::Error> {
+		if !self.slow_log.is_param_allowed(&param.0) {
+			return Ok(());
+		}
+		if let Some(value) = self.ctx.value(&param.0) {
+			if !value.is_none() && !value.is_null() {
+				let value = value.to_string().split_whitespace().collect::<Vec<_>>().join(" ");
+				self.params.push(format!("${}={}", param.0, value));
+			}
+		}
+		Ok(())
+	}
+}
+
+pub(crate) trait SlowLogVisit: for<'a> Visit<ParamVisitor<'a>> {}
+impl<V: for<'a> Visit<ParamVisitor<'a>>> SlowLogVisit for V {}
 
 impl SlowLog {
 	/// Create a new slow log configuration.
@@ -92,7 +117,7 @@ impl SlowLog {
 	///   values from the `Context`.
 	/// - Renders the SQL and parameter values, collapsing whitespace so the output is a single line
 	///   suitable for log processing.
-	pub(crate) fn check_log<S: VisitExpression + Display>(
+	pub(crate) fn check_log<S: SlowLogVisit + Display>(
 		&self,
 		ctx: &Context,
 		start: &Instant,
@@ -102,26 +127,19 @@ impl SlowLog {
 		if elapsed < self.0.duration {
 			return;
 		}
-		// Extract params
-		let mut params = vec![];
-		stm.visit(&mut |e| {
-			if let Value::Param(p) = e {
-				let name = p.as_str();
-				if !self.is_param_allowed(name) {
-					return;
-				}
-				if let Some(value) = ctx.value(name) {
-					if !value.is_none() && !value.is_null() {
-						let value =
-							value.to_string().split_whitespace().collect::<Vec<_>>().join(" ");
-						params.push(format!("${}={}", name, value));
-					}
-				}
-			}
-		});
+
+		let mut visitor = ParamVisitor {
+			params: Vec::new(),
+			slow_log: self,
+			ctx,
+		};
+
+		// no errors can happen
+		let _ = stm.visit(&mut visitor);
+
 		// Ensure the query is logged on a single line by collapsing whitespace
 		let stm = stm.to_string().split_whitespace().collect::<Vec<_>>().join(" ");
-		let params = params.join(", ");
+		let params = visitor.params.join(", ");
 		warn!("Slow query detected - time: {elapsed:#?} - query: {stm} - params: [ {params} ]");
 	}
 }

@@ -2,7 +2,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::value::VisitExpression;
 use crate::sql::{
 	escape::EscapeKey,
 	fmt::{is_pretty, pretty_indent, Fmt, Pretty},
@@ -378,14 +377,5 @@ mod no_nul_bytes_in_keys {
 		}
 
 		deserializer.deserialize_map(NoNulBytesInKeysVisitor)
-	}
-}
-
-impl VisitExpression for Object {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		self.0.values().for_each(|v| v.visit(visitor));
 	}
 }

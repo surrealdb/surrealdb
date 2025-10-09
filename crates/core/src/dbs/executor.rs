@@ -7,6 +7,7 @@ use crate::dbs::QueryType;
 use crate::err::Error;
 use crate::iam::Action;
 use crate::iam::ResourceKind;
+use crate::kvs::slowlog::SlowLogVisit;
 use crate::kvs::Datastore;
 use crate::kvs::TransactionType;
 use crate::kvs::{LockType, Transaction};
@@ -15,7 +16,7 @@ use crate::sql::paths::NS;
 use crate::sql::query::Query;
 use crate::sql::statement::Statement;
 use crate::sql::statements::{OptionStatement, UseStatement};
-use crate::sql::value::{Value, VisitExpression};
+use crate::sql::value::Value;
 use crate::sql::Base;
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
@@ -104,7 +105,7 @@ impl Executor {
 	///
 	/// Generic over `S` to accept both concrete statements and wrappers that
 	/// implement `Display` and `VisitExpression`.
-	fn check_slow_log<S: VisitExpression + Display>(&self, start: &Instant, stm: &S) {
+	fn check_slow_log<S: SlowLogVisit + Display>(&self, start: &Instant, stm: &S) {
 		if let Some(slow_log) = self.ctx.slow_log() {
 			slow_log.check_log(&self.ctx, start, stm);
 		}

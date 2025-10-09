@@ -131,30 +131,6 @@ impl DefineStatement {
 	}
 }
 
-impl VisitExpression for DefineStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		match self {
-			Self::Namespace(_) => {}
-			Self::Database(_) => {}
-			Self::Function(v) => v.visit(visitor),
-			Self::Analyzer(_) => {}
-			Self::Param(v) => v.visit(visitor),
-			Self::Table(_) => {}
-			Self::Event(_) => {}
-			Self::Field(v) => v.visit(visitor),
-			Self::Index(v) => v.visit(visitor),
-			Self::User(_) => {}
-			Self::Model(_) => {}
-			Self::Access(_) => {}
-			Self::Config(_) => {}
-			Self::Api(_) => {}
-		}
-	}
-}
-
 impl Display for DefineStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {

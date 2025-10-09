@@ -9,7 +9,6 @@ use crate::sql::statements::{
 	UpdateStatement, UpsertStatement,
 };
 use crate::sql::value::Value;
-use crate::sql::value::VisitExpression;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -137,30 +136,6 @@ impl Display for Subquery {
 			Self::Rebuild(v) => write!(f, "({v})"),
 			Self::Alter(v) => write!(f, "({v})"),
 			Self::Ifelse(v) => Display::fmt(v, f),
-		}
-	}
-}
-
-impl VisitExpression for Subquery {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		match self {
-			Self::Value(v) => v.visit(visitor),
-			Self::Ifelse(v) => v.visit(visitor),
-			Self::Output(v) => v.visit(visitor),
-			Self::Select(v) => v.visit(visitor),
-			Self::Create(v) => v.visit(visitor),
-			Self::Upsert(v) => v.visit(visitor),
-			Self::Update(v) => v.visit(visitor),
-			Self::Delete(v) => v.visit(visitor),
-			Self::Relate(v) => v.visit(visitor),
-			Self::Insert(v) => v.visit(visitor),
-			Self::Define(v) => v.visit(visitor),
-			Self::Remove(v) => v.visit(visitor),
-			Self::Rebuild(_v) => {}
-			Self::Alter(_v) => {}
 		}
 	}
 }

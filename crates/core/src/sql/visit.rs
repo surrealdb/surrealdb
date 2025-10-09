@@ -579,7 +579,7 @@ implement_visitor! {
 			this.visit_value(f)?;
 		}
 		if let Some(config) = d.config.as_ref(){
-			this.visit_api_config(&config)?;
+			this.visit_api_config(config)?;
 		}
 
 		Ok(())

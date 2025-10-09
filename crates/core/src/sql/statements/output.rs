@@ -53,18 +53,6 @@ impl OutputStatement {
 	}
 }
 
-impl VisitExpression for OutputStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		self.what.visit(visitor);
-		if let Some(fetch) = &self.fetch {
-			fetch.visit(visitor);
-		}
-	}
-}
-
 impl fmt::Display for OutputStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "RETURN {}", self.what)?;

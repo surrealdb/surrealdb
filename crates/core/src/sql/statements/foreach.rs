@@ -4,7 +4,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::{block::Entry, Block, Param, Value};
 
-use crate::sql::value::VisitExpression;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -134,15 +133,5 @@ impl ForeachStatement {
 impl Display for ForeachStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "FOR {} IN {} {}", self.param, self.range, self.block)
-	}
-}
-
-impl VisitExpression for ForeachStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		self.range.visit(visitor);
-		self.block.visit(visitor);
 	}
 }

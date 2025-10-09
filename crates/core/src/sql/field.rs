@@ -4,7 +4,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::value::VisitExpression;
 use crate::sql::{fmt::Fmt, Idiom, Part, Value};
 use crate::syn;
 use reblessive::tree::Stk;
@@ -71,15 +70,6 @@ impl Fields {
 			return false;
 		}
 		is_count_only
-	}
-}
-
-impl VisitExpression for Fields {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		self.0.iter().for_each(|v| v.visit(visitor));
 	}
 }
 
@@ -316,23 +306,6 @@ impl Display for Field {
 				} else {
 					Ok(())
 				}
-			}
-		}
-	}
-}
-
-impl VisitExpression for Field {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		match self {
-			Field::All => {}
-			Field::Single {
-				expr,
-				..
-			} => {
-				expr.visit(visitor);
 			}
 		}
 	}

@@ -17,7 +17,6 @@ use crate::sql::{
 	value::Value,
 };
 
-use crate::sql::value::VisitExpression;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -231,81 +230,6 @@ impl Display for Statement {
 			Self::Update(v) => write!(Pretty::from(f), "{v}"),
 			Self::Upsert(v) => write!(Pretty::from(f), "{v}"),
 			Self::Use(v) => write!(Pretty::from(f), "{v}"),
-		}
-	}
-}
-
-impl VisitExpression for Statement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		match self {
-			Self::Value(v) => {
-				v.visit(visitor);
-			}
-			Self::Analyze(_) => {}
-			Self::Begin(_) => {}
-			Self::Break(_) => {}
-			Self::Continue(_) => {}
-			Self::Cancel(_) => {}
-			Self::Commit(_) => {}
-			Self::Create(v) => {
-				v.visit(visitor);
-			}
-			Self::Define(v) => {
-				v.visit(visitor);
-			}
-			Self::Delete(v) => {
-				v.visit(visitor);
-			}
-			Self::Foreach(v) => {
-				v.visit(visitor);
-			}
-			Self::Ifelse(v) => {
-				v.visit(visitor);
-			}
-			Self::Info(_) => {}
-			Self::Insert(v) => {
-				v.visit(visitor);
-			}
-			Self::Kill(v) => {
-				v.visit(visitor);
-			}
-			Self::Live(v) => {
-				v.visit(visitor);
-			}
-			Self::Option(_) => {}
-			Self::Output(v) => {
-				v.visit(visitor);
-			}
-			Self::Relate(v) => v.visit(visitor),
-			Self::Remove(v) => {
-				v.visit(visitor);
-			}
-			Self::Select(v) => {
-				v.visit(visitor);
-			}
-			Self::Set(v) => {
-				v.visit(visitor);
-			}
-			Self::Show(_) => {}
-			Self::Sleep(_) => {}
-			Self::Update(v) => {
-				v.visit(visitor);
-			}
-			Self::Throw(v) => {
-				v.visit(visitor);
-			}
-			Self::Use(_) => {}
-			Self::Rebuild(_) => {}
-			Self::Upsert(v) => {
-				v.visit(visitor);
-			}
-			Self::Alter(_) => {}
-			Self::Access(v) => {
-				v.visit(visitor);
-			}
 		}
 	}
 }

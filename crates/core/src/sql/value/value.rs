@@ -84,15 +84,6 @@ impl From<&Tables> for Values {
 	}
 }
 
-impl VisitExpression for Values {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		self.0.iter().for_each(|v| v.visit(visitor));
-	}
-}
-
 #[revisioned(revision = 2)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::sql::Value")]
@@ -3224,80 +3215,6 @@ pub(crate) trait VisitExpression {
 	fn visit<F>(&self, visitor: &mut F)
 	where
 		F: FnMut(&Value);
-}
-
-impl VisitExpression for Value {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		visitor(self);
-		match self {
-			Self::Param(_) => {}
-			Self::Idiom(x) => {
-				x.visit(visitor);
-			}
-			Self::Table(_) => {}
-			Self::Mock(_) => {}
-			Self::Block(block) => {
-				block.visit(visitor);
-			}
-			Self::Constant(_) => {}
-			Self::None => {}
-			Self::Null => {}
-			Self::Bool(_) => {}
-			Self::Number(_) => {}
-			Self::Strand(_) => {}
-			Self::Duration(_) => {}
-			Self::Datetime(_) => {}
-			Self::Uuid(_) => {}
-			Self::Array(v) => {
-				v.visit(visitor);
-			}
-			Self::Object(v) => {
-				v.visit(visitor);
-			}
-			Self::Geometry(_) => {}
-			Self::Bytes(_) => {}
-			Self::Thing(t) => {
-				t.visit(visitor);
-			}
-			Value::Regex(_) => {}
-			Value::Cast(c) => {
-				c.visit(visitor);
-			}
-			Value::Range(r) => {
-				r.visit(visitor);
-			}
-			Value::Edges(e) => {
-				e.visit(visitor);
-			}
-			Value::Future(f) => {
-				f.visit(visitor);
-			}
-			Value::Function(f) => {
-				f.visit(visitor);
-			}
-			Value::Subquery(sq) => {
-				sq.visit(visitor);
-			}
-			Value::Expression(e) => {
-				e.visit(visitor);
-			}
-			Value::Query(q) => {
-				q.visit(visitor);
-			}
-			Value::Model(m) => {
-				m.visit(visitor);
-			}
-			Value::Closure(c) => {
-				c.visit(visitor);
-			}
-			Value::Refs(r) => {
-				r.visit(visitor);
-			}
-		}
-	}
 }
 
 #[cfg(test)]

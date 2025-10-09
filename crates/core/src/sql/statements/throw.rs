@@ -4,7 +4,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::Value;
 
-use crate::sql::value::VisitExpression;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -38,14 +37,5 @@ impl ThrowStatement {
 impl fmt::Display for ThrowStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "THROW {}", self.error)
-	}
-}
-
-impl VisitExpression for ThrowStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		self.error.visit(visitor);
 	}
 }

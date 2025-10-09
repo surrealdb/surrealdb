@@ -2,7 +2,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::value::VisitExpression;
 use crate::sql::{Idiom, Kind, Value};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -52,15 +51,6 @@ impl Cast {
 	) -> Result<Value, Error> {
 		// Compute the value to be cast and convert it
 		stk.run(|stk| self.1.compute(stk, ctx, opt, doc)).await?.convert_to(&self.0)
-	}
-}
-
-impl VisitExpression for Cast {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		self.1.visit(visitor);
 	}
 }
 

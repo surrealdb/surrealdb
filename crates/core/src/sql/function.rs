@@ -8,7 +8,6 @@ use crate::sql::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 use crate::sql::script::Script;
 use crate::sql::value::Value;
-use crate::sql::value::VisitExpression;
 use crate::sql::Permission;
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
@@ -391,27 +390,6 @@ impl fmt::Display for Function {
 			Self::Custom(s, e) => write!(f, "fn::{s}({})", Fmt::comma_separated(e)),
 			Self::Script(s, e) => write!(f, "function({}) {{{s}}}", Fmt::comma_separated(e)),
 			Self::Anonymous(p, e, _) => write!(f, "{p}({})", Fmt::comma_separated(e)),
-		}
-	}
-}
-
-impl VisitExpression for Function {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		match self {
-			Self::Normal(_, args) | Self::Custom(_, args) | Self::Script(_, args) => {
-				for a in args {
-					a.visit(visitor);
-				}
-			}
-			Self::Anonymous(callee, args, _) => {
-				callee.visit(visitor);
-				for a in args {
-					a.visit(visitor);
-				}
-			}
 		}
 	}
 }
