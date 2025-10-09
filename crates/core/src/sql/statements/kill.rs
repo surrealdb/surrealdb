@@ -3,7 +3,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::kvs::Live;
-use crate::sql::value::VisitExpression;
 use crate::sql::Value;
 
 use reblessive::tree::Stk;
@@ -77,15 +76,6 @@ impl KillStatement {
 		}
 		// Return the query id
 		Ok(Value::None)
-	}
-}
-
-impl VisitExpression for KillStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		self.id.visit(visitor);
 	}
 }
 

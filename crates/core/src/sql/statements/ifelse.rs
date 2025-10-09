@@ -3,7 +3,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::fmt::{fmt_separated_by, is_pretty, pretty_indent, Fmt, Pretty};
-use crate::sql::value::VisitExpression;
 use crate::sql::Value;
 
 use reblessive::tree::Stk;
@@ -142,21 +141,6 @@ impl Display for IfelseStatement {
 				}
 				Ok(())
 			}
-		}
-	}
-}
-
-impl VisitExpression for IfelseStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		for (cond, then) in &self.exprs {
-			cond.visit(visitor);
-			then.visit(visitor);
-		}
-		if let Some(v) = &self.close {
-			v.visit(visitor);
 		}
 	}
 }

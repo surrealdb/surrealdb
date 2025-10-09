@@ -28,7 +28,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::sql::value::VisitExpression;
 use crate::sql::Value;
 
 use revision::revisioned;
@@ -79,19 +78,6 @@ impl RemoveStatement {
 			Self::Analyzer(ref v) => v.compute(ctx, opt).await,
 			Self::User(ref v) => v.compute(ctx, opt).await,
 			Self::Model(ref v) => v.compute(ctx, opt).await,
-		}
-	}
-}
-
-impl VisitExpression for RemoveStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		match self {
-			Self::Field(v) => v.visit(visitor),
-			// Other remove statements currently do not carry idioms/values needing traversal
-			_ => {}
 		}
 	}
 }

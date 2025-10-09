@@ -75,6 +75,7 @@ pub(crate) mod view;
 pub(crate) mod with;
 
 pub mod index;
+pub mod visit;
 
 pub mod serde;
 pub mod statements;

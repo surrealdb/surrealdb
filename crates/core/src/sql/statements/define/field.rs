@@ -12,7 +12,6 @@ use crate::sql::{Base, Ident, Idiom, Kind, Permissions, Strand, Value};
 use crate::sql::{Literal, Part};
 use crate::sql::{Relation, TableType};
 
-use crate::sql::value::VisitExpression;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display, Write};
@@ -456,20 +455,5 @@ impl InfoStructure for DefineFieldStatement {
 			"permissions".to_string() => self.permissions.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})
-	}
-}
-
-impl VisitExpression for DefineFieldStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		// Visit the field path (Idiom) for any embedded expressions
-		self.name.visit(visitor);
-		// Visit potential expressions on the field definition
-		self.value.iter().for_each(|v| v.visit(visitor));
-		self.assert.iter().for_each(|v| v.visit(visitor));
-		self.default.iter().for_each(|v| v.visit(visitor));
-		// Do NOT visit permissions (explicitly excluded)
 	}
 }

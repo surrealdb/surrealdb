@@ -5,9 +5,7 @@ use crate::{
 	doc::CursorDoc,
 	err::Error,
 	exe::try_join_all_buffered,
-	sql::{
-		fmt::Fmt, strand::no_nul_bytes, value::VisitExpression, Graph, Ident, Idiom, Number, Value,
-	},
+	sql::{fmt::Fmt, strand::no_nul_bytes, Graph, Ident, Idiom, Number, Value},
 };
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -777,73 +775,6 @@ impl fmt::Display for RecurseInstruction {
 
 				Ok(())
 			}
-		}
-	}
-}
-
-impl VisitExpression for Part {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		match self {
-			Part::All => {}
-			Part::Flatten => {}
-			Part::Last => {}
-			Part::First => {}
-			Part::Field(_) => {}
-			Part::Index(_) => {}
-			Part::Where(v) => v.visit(visitor),
-			Part::Graph(g) => g.visit(visitor),
-			Part::Value(v) => v.visit(visitor),
-			Part::Start(v) => v.visit(visitor),
-			Part::Method(_, args) => args.iter().for_each(|v| v.visit(visitor)),
-			Part::Destructure(parts) => parts.iter().for_each(|p| p.visit(visitor)),
-			Part::Optional => {}
-			Part::Recurse(_, nest, instr) => {
-				if let Some(nest) = nest {
-					nest.visit(visitor);
-				}
-				if let Some(instr) = instr {
-					instr.visit(visitor);
-				}
-			}
-			Part::Doc => {}
-			Part::RepeatRecurse => {}
-		}
-	}
-}
-
-impl VisitExpression for DestructurePart {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		match self {
-			DestructurePart::All(_) => {}
-			DestructurePart::Field(_) => {}
-			DestructurePart::Aliased(_, idiom) => idiom.visit(visitor),
-			DestructurePart::Destructure(_, parts) => parts.iter().for_each(|p| p.visit(visitor)),
-		}
-	}
-}
-
-impl VisitExpression for RecurseInstruction {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		match self {
-			RecurseInstruction::Path {
-				..
-			} => {}
-			RecurseInstruction::Collect {
-				..
-			} => {}
-			RecurseInstruction::Shortest {
-				expects,
-				..
-			} => expects.visit(visitor),
 		}
 	}
 }

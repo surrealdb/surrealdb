@@ -5,7 +5,6 @@ use crate::err::Error;
 use crate::idx::planner::RecordStrategy;
 use crate::sql::{Data, Output, Timeout, Value};
 
-use crate::sql::value::VisitExpression;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -188,23 +187,6 @@ impl RelateStatement {
 			},
 			// This is standard query result
 			v => Ok(v),
-		}
-	}
-}
-
-impl VisitExpression for RelateStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		self.kind.visit(visitor);
-		self.from.visit(visitor);
-		self.with.visit(visitor);
-		if let Some(ref d) = self.data {
-			d.visit(visitor);
-		}
-		if let Some(ref o) = self.output {
-			o.visit(visitor);
 		}
 	}
 }

@@ -3,7 +3,6 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::sql::fmt::Fmt;
 use crate::sql::statements::info::InfoStructure;
-use crate::sql::value::VisitExpression;
 use crate::sql::{Idiom, Value};
 use crate::syn;
 use reblessive::tree::Stk;
@@ -150,24 +149,6 @@ impl Deref for Fetch {
 impl Display for Fetch {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		Display::fmt(&self.0, f)
-	}
-}
-
-impl VisitExpression for Fetchs {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		self.0.iter().for_each(|f| f.visit(visitor));
-	}
-}
-
-impl VisitExpression for Fetch {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		self.0.visit(visitor);
 	}
 }
 

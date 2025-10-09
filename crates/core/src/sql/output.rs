@@ -1,38 +1,20 @@
 use crate::sql::field::Fields;
-use crate::sql::value::VisitExpression;
-use crate::sql::Value;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Output {
+	#[default]
 	None,
 	Null,
 	Diff,
 	After,
 	Before,
 	Fields(Fields),
-}
-
-impl Default for Output {
-	fn default() -> Self {
-		Self::None
-	}
-}
-
-impl VisitExpression for Output {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		if let Self::Fields(f) = self {
-			f.visit(visitor);
-		}
-	}
 }
 
 impl Display for Output {

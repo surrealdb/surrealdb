@@ -5,7 +5,6 @@ use crate::err::Error;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::sql::{Cond, Explain, Output, Timeout, Value, Values, With};
 
-use crate::sql::value::VisitExpression;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -86,21 +85,6 @@ impl DeleteStatement {
 			},
 			// This is standard query result
 			v => Ok(v),
-		}
-	}
-}
-
-impl VisitExpression for DeleteStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		self.what.visit(visitor);
-		if let Some(ref c) = self.cond {
-			c.visit(visitor);
-		}
-		if let Some(ref o) = self.output {
-			o.visit(visitor);
 		}
 	}
 }

@@ -5,7 +5,6 @@ use crate::err::Error;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::sql::{Data, Output, Timeout, Value, Values, Version};
 
-use crate::sql::value::VisitExpression;
 use reblessive::tree::Stk;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -96,21 +95,6 @@ impl CreateStatement {
 			},
 			// This is standard query result
 			v => Ok(v),
-		}
-	}
-}
-
-impl VisitExpression for CreateStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		self.what.visit(visitor);
-		if let Some(ref d) = self.data {
-			d.visit(visitor);
-		}
-		if let Some(ref o) = self.output {
-			o.visit(visitor);
 		}
 	}
 }

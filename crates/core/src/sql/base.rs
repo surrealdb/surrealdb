@@ -8,18 +8,14 @@ use std::fmt;
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
+#[derive(Default)]
 pub enum Base {
+	#[default]
 	Root,
 	Ns,
 	Db,
 	// TODO(gguillemas): This variant is kept in 2.0.0 for backward compatibility. Drop in 3.0.0.
 	Sc(Ident),
-}
-
-impl Default for Base {
-	fn default() -> Self {
-		Self::Root
-	}
 }
 
 impl fmt::Display for Base {

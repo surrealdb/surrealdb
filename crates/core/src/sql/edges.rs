@@ -3,7 +3,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::sql::table::Tables;
 use crate::sql::thing::Thing;
-use crate::sql::value::VisitExpression;
 use crate::{ctx::Context, sql::dir::Dir};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -55,18 +54,6 @@ impl Edges {
 			from: self.from.clone(),
 			what: self.what.clone().compute(stk, ctx, opt, doc).await?,
 		})))
-	}
-}
-
-impl VisitExpression for Edges {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		// Visit the starting Thing's Id for any embedded values
-		self.from.visit(visitor);
-		// Visit the GraphSubjects (tables or id ranges)
-		self.what.visit(visitor);
 	}
 }
 

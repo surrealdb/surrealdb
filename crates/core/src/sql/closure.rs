@@ -1,6 +1,5 @@
 use super::{Ident, Kind};
 use crate::ctx::MutableContext;
-use crate::sql::value::VisitExpression;
 use crate::{ctx::Context, dbs::Options, doc::CursorDoc, err::Error, sql::value::Value};
 use reblessive::tree::Stk;
 use revision::revisioned;
@@ -83,14 +82,5 @@ impl fmt::Display for Closure {
 			write!(f, " -> {returns}")?;
 		}
 		write!(f, " {}", self.body)
-	}
-}
-
-impl VisitExpression for Closure {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Value),
-	{
-		self.body.visit(visitor);
 	}
 }
