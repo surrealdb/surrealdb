@@ -152,9 +152,16 @@ struct StartCommandWebTlsOptions {
 
 /// Start the server.
 ///
-/// Generic over:
-/// - T: datastore transaction builder (storage/backend selection).
-/// - R: HTTP router factory (route/middleware customization).
+/// Initializes and starts the SurrealDB server with the provided configuration.
+///
+/// # Parameters
+/// - `composer`: A composer implementing the required traits for dependency injection
+///
+/// # Generic parameters
+/// - `C`: A composer type that implements:
+///   - `TransactionBuilderFactory` (datastore transaction builder for storage/backend selection)
+///   - `RouterFactory` (HTTP router factory for route/middleware customization)
+///   - `ConfigCheck` (validates configuration before initialization)
 pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
 	mut composer: C,
 	StartCommandArguments {

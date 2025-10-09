@@ -68,6 +68,11 @@ pub trait RouterFactory {
 	fn configure_router() -> Router<Arc<RpcState>>;
 }
 
+/// Default router implementation for the community edition.
+///
+/// Provides the standard set of HTTP routes shipped with the `surreal` binary.
+/// Consumers embedding SurrealDB can implement `RouterFactory` on their own
+/// composer to customize routes.
 impl RouterFactory for CommunityComposer {
 	fn configure_router() -> Router<Arc<RpcState>> {
 		Router::<Arc<RpcState>>::new()
@@ -98,6 +103,17 @@ pub struct AppState {
 	pub datastore: Arc<Datastore>,
 }
 
+/// Initialize and start the HTTP server.
+///
+/// Sets up the Axum HTTP server with middleware, routing, and TLS configuration.
+///
+/// # Parameters
+/// - `opt`: Server configuration including bind address and TLS settings
+/// - `ds`: The datastore instance to serve
+/// - `ct`: Cancellation token for graceful shutdown
+///
+/// # Generic parameters
+/// - `F`: Router factory type implementing `RouterFactory`
 pub async fn init<F: RouterFactory>(
 	opt: &Config,
 	ds: Arc<Datastore>,

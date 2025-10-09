@@ -26,12 +26,12 @@ mod telemetry;
 use std::future::Future;
 use std::process::ExitCode;
 
+pub use cli::{Config, ConfigCheck};
 /// Re-export `RpcState` for convenience so embedders can `use surreal::RpcState`.
 pub use rpc::RpcState;
 pub use surrealdb_core as core;
 use surrealdb_core::kvs::TransactionBuilderFactory;
 
-use crate::cli::ConfigCheck;
 // Re-export the core crate in the same path used across internal modules
 // so that `crate::core::...` keeps working when used as a library target.
 use crate::net::RouterFactory;
@@ -40,9 +40,14 @@ use crate::net::RouterFactory;
 /// This spins up a Tokio runtime with a larger stack size and then runs the CLI
 /// entrypoint (which starts the server when the `start` subcommand is used).
 ///
-/// Generic parameters:
-/// - T: `TransactionBuilderFactory` (selects/validates the datastore backend).
-/// - R: `RouterFactory` (constructs the HTTP router).
+/// # Parameters
+/// - `composer`: A composer implementing the required traits for dependency injection.
+///
+/// # Generic parameters
+/// - `C`: A composer type that implements:
+///   - `TransactionBuilderFactory` (selects/validates the datastore backend)
+///   - `RouterFactory` (constructs the HTTP router)
+///   - `ConfigCheck` (validates configuration before initialization)
 pub fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(composer: C) -> ExitCode {
 	with_enough_stack(cli::init::<C>(composer))
 }

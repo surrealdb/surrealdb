@@ -563,6 +563,15 @@ impl From<DbsCapabilities> for Capabilities {
 
 #[instrument(level = "trace", target = "surreal::dbs", skip_all)]
 /// Initialise the database server
+///
+/// Creates and configures the datastore with the provided options.
+///
+/// # Parameters
+/// - `factory`: Transaction builder factory for datastore backend selection
+/// - `opt`: Server configuration including database path and authentication
+///
+/// # Generic parameters
+/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
 pub async fn init<F: TransactionBuilderFactory>(
 	factory: &F,
 	opt: &Config,

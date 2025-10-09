@@ -203,9 +203,17 @@ impl LogFileRotation {
 
 /// CLI entrypoint.
 ///
-/// Generic over:
-/// - T: builds datastore transactions, allowing embedders to pick a storage backend.
-/// - R: constructs the HTTP router, allowing embedders to customize server routes.
+/// Processes command-line arguments and dispatches to the appropriate subcommand handler.
+///
+/// # Parameters
+/// - `composer`: A composer implementing the required traits for dependency injection
+///
+/// # Generic parameters
+/// - `C`: A composer type that implements:
+///   - `TransactionBuilderFactory` (builds datastore transactions, allowing embedders to pick a
+///     storage backend)
+///   - `RouterFactory` (constructs the HTTP router, allowing embedders to customize server routes)
+///   - `ConfigCheck` (validates configuration before initialization)
 pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
 	composer: C,
 ) -> ExitCode {

@@ -582,6 +582,17 @@ impl Datastore {
 		Self::new_with_factory(&CommunityComposer(), path).await
 	}
 
+	/// Creates a new datastore instance with a custom transaction builder factory.
+	///
+	/// This allows embedders to provide their own factory implementation for custom
+	/// backend selection or configuration.
+	///
+	/// # Parameters
+	/// - `factory`: Transaction builder factory for backend selection
+	/// - `path`: Database path (e.g., "memory", "surrealkv://path", "tikv://host:port")
+	///
+	/// # Generic parameters
+	/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
 	pub async fn new_with_factory<F: TransactionBuilderFactory>(
 		factory: &F,
 		path: &str,
@@ -589,6 +600,18 @@ impl Datastore {
 		Self::new_with_clock::<F>(factory, path, None).await
 	}
 
+	/// Creates a new datastore instance with a custom factory and clock.
+	///
+	/// This is the most flexible constructor, allowing full control over both
+	/// the backend and the clock used for timestamps.
+	///
+	/// # Parameters
+	/// - `factory`: Transaction builder factory for backend selection
+	/// - `path`: Database path (e.g., "memory", "surrealkv://path", "tikv://host:port")
+	/// - `clock`: Optional custom clock for timestamp generation (uses system clock if None)
+	///
+	/// # Generic parameters
+	/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
 	pub async fn new_with_clock<F: TransactionBuilderFactory>(
 		factory: &F,
 		path: &str,
