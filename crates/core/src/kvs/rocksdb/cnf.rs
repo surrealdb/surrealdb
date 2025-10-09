@@ -143,34 +143,30 @@ pub(super) static ROCKSDB_ENABLE_BLOB_FILES: LazyLock<bool> =
 pub(super) static ROCKSDB_MIN_BLOB_SIZE: LazyLock<u64> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_MIN_BLOB_SIZE", u64, 4 * 1024);
 
-/// The target blob file size (default: 64 MiB)
+/// The target blob file size (default: 256 MiB)
 pub(super) static ROCKSDB_BLOB_FILE_SIZE: LazyLock<u64> =
-	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_BLOB_FILE_SIZE", u64, 64 * 1024 * 1024);
+	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_BLOB_FILE_SIZE", u64, 256 * 1024 * 1024);
 
 /// Compression type used for blob files (default: "snappy")
 /// Supported values: "none", "snappy", "lz4", "zstd"
-pub(super) static ROCKSDB_BLOB_COMPRESSION_TYPE: LazyLock<String> =
-	lazy_env_parse!("SURREAL_ROCKSDB_BLOB_COMPRESSION_TYPE", String, "snappy".to_string());
+pub(super) static ROCKSDB_BLOB_COMPRESSION_TYPE: LazyLock<Option<String>> =
+	lazy_env_parse!("SURREAL_ROCKSDB_BLOB_COMPRESSION_TYPE", Option<String>);
 
 /// Whether to enable blob garbage collection (default: false)
 pub(super) static ROCKSDB_ENABLE_BLOB_GC: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_ROCKSDB_ENABLE_BLOB_GC", bool, false);
 
-/// Fractional age cutoff for blob GC eligibility in [0,1] (default: 0.5)
+/// Fractional age cutoff for blob GC eligibility in [0,1] (default: 0.25)
 pub(super) static ROCKSDB_BLOB_GC_AGE_CUTOFF: LazyLock<f64> =
-	lazy_env_parse!("SURREAL_ROCKSDB_BLOB_GC_AGE_CUTOFF", f64, 0.5);
+	lazy_env_parse!("SURREAL_ROCKSDB_BLOB_GC_AGE_CUTOFF", f64, 0.25);
 
-/// Discardable ratio threshold to force GC in [0,1] (default: 0.8)
+/// Discardable ratio threshold to force GC in [0,1] (default: 1.0)
 pub(super) static ROCKSDB_BLOB_GC_FORCE_THRESHOLD: LazyLock<f64> =
-	lazy_env_parse!("SURREAL_ROCKSDB_BLOB_GC_FORCE_THRESHOLD", f64, 0.8);
+	lazy_env_parse!("SURREAL_ROCKSDB_BLOB_GC_FORCE_THRESHOLD", f64, 1.0);
 
-/// Readahead size for blob compaction/GC (default: 8 MiB)
-pub(super) static ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE: LazyLock<usize> = lazy_env_parse!(
-	bytes,
-	"SURREAL_ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE",
-	usize,
-	8 * 1024 * 1024
-);
+/// Readahead size for blob compaction/GC (default: 0)
+pub(super) static ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE: LazyLock<usize> =
+	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_BLOB_COMPACTION_READAHEAD_SIZE", usize, 0);
 
 /// The size of the least-recently-used block cache (default: 16 MiB)
 pub(super) static ROCKSDB_BLOCK_CACHE_SIZE: LazyLock<usize> =
