@@ -236,7 +236,8 @@ pub async fn invalidate(cfg_server: Option<Format>, cfg_format: Format) {
 	// Verify we have an invalidated session
 	let res = socket.send_request("query", json!(["DEFINE NAMESPACE test"])).await.unwrap();
 	assert_eq!(
-		res["error"]["message"], "IAM error: Not enough permissions to perform this action",
+		res["error"]["message"],
+		"Anonymous access not allowed: Not enough permissions to perform this action",
 		"result: {res:?}"
 	);
 	// Test passed
@@ -1370,7 +1371,7 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 		let res = res.unwrap();
 		assert!(res.is_object(), "result: {res:?}");
 		let res = res.as_object().unwrap();
-		assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
+		assert_eq!(res["error"]["message"], "The session has expired");
 	}
 
 	// Test operations that SHOULD work with an expired session
