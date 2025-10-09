@@ -9,5 +9,5 @@ use surrealdb_core::CommunityComposer;
 
 fn main() -> ExitCode {
 	// Use the default storage flavor and default HTTP router shipped with the binary
-	surreal::init(&mut CommunityComposer())
+	surreal::init(CommunityComposer())
 }

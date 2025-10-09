@@ -156,7 +156,7 @@ struct StartCommandWebTlsOptions {
 /// - T: datastore transaction builder (storage/backend selection).
 /// - R: HTTP router factory (route/middleware customization).
 pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
-	composer: &mut C,
+	mut composer: C,
 	StartCommandArguments {
 		path,
 		username: user,
@@ -225,7 +225,7 @@ pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();
 	// Start the datastore
-	let datastore = Arc::new(dbs::init::<C>(composer, &config, dbs).await?);
+	let datastore = Arc::new(dbs::init::<C>(&composer, &config, dbs).await?);
 	// Start the node agent
 	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &config.engine);
 	// Start the web server

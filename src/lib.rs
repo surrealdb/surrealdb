@@ -43,9 +43,7 @@ use crate::net::RouterFactory;
 /// Generic parameters:
 /// - T: `TransactionBuilderFactory` (selects/validates the datastore backend).
 /// - R: `RouterFactory` (constructs the HTTP router).
-pub fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
-	composer: &mut C,
-) -> ExitCode {
+pub fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(composer: C) -> ExitCode {
 	with_enough_stack(cli::init::<C>(composer))
 }
 

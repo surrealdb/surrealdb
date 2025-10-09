@@ -207,7 +207,7 @@ impl LogFileRotation {
 /// - T: builds datastore transactions, allowing embedders to pick a storage backend.
 /// - R: constructs the HTTP router, allowing embedders to customize server routes.
 pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
-	composer: &mut C,
+	composer: C,
 ) -> ExitCode {
 	// Enables ANSI code support on Windows
 	#[cfg(windows)]
