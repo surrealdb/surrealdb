@@ -64,6 +64,14 @@ impl Visitor for ParamVisitor<'_> {
 		}
 		Ok(())
 	}
+
+	// Empty implementations so that the visitor won't recurse into permissions.
+	fn visit_permissions(&mut self, _: &crate::sql::Permissions) -> Result<(), Self::Error> {
+		Ok(())
+	}
+	fn visit_permission(&mut self, _: &crate::sql::Permission) -> Result<(), Self::Error> {
+		Ok(())
+	}
 }
 
 pub(crate) trait SlowLogVisit: for<'a> Visit<ParamVisitor<'a>> {}
@@ -128,6 +136,12 @@ impl SlowLog {
 			return;
 		}
 
+		let params = self.get_params(ctx, stm);
+		let stm = stm.to_string().split_whitespace().collect::<Vec<_>>().join(" ");
+		warn!("Slow query detected - time: {elapsed:#?} - query: {stm} - params: [ {params} ]");
+	}
+
+	fn get_params<S: SlowLogVisit>(&self, ctx: &Context, stm: &S) -> String {
 		let mut visitor = ParamVisitor {
 			params: Vec::new(),
 			slow_log: self,
@@ -138,17 +152,15 @@ impl SlowLog {
 		let _ = stm.visit(&mut visitor);
 
 		// Ensure the query is logged on a single line by collapsing whitespace
-		let stm = stm.to_string().split_whitespace().collect::<Vec<_>>().join(" ");
-		let params = visitor.params.join(", ");
-		warn!("Slow query detected - time: {elapsed:#?} - query: {stm} - params: [ {params} ]");
+		visitor.params.join(", ")
 	}
 }
 
 #[cfg(test)]
 mod tests {
-	use std::time::Duration;
-
 	use super::*;
+	use crate::sql::Value;
+	use std::time::Duration;
 
 	fn slowlog(allow: &[&str], deny: &[&str]) -> SlowLog {
 		SlowLog::new(
@@ -193,5 +205,47 @@ mod tests {
 		let s = slowlog(&[], &["nope"]);
 		assert!(s.is_param_allowed("ok"));
 		assert!(!s.is_param_allowed("nope"));
+	}
+
+	fn test_param_capture(
+		slowlog: &SlowLog,
+		query: &str,
+		vars: Vec<(&str, Value)>,
+		expected: &str,
+	) {
+		let q = crate::syn::parse(query).unwrap();
+		let mut ctx = crate::ctx::MutableContext::background();
+		for (k, v) in vars {
+			ctx.add_value(k.to_string(), v.into());
+		}
+
+		let ctx = crate::ctx::Context::new(ctx);
+		let str = slowlog.get_params(&ctx, &q);
+		assert_eq!(expected, str)
+	}
+
+	#[test]
+	fn capture_param() {
+		let q = r#"
+			SELECT $foo FROM $var WHERE $baz;
+		"#;
+		let expected = "$foo=1, $baz=3";
+		let slowlog =
+			SlowLog::new(Duration::ZERO, vec!["foo".to_string(), "baz".to_string()], vec![]);
+		test_param_capture(
+			&slowlog,
+			q,
+			vec![("foo", 1i64.into()), ("bar", 2i64.into()), ("baz", 3i64.into())],
+			expected,
+		);
+	}
+
+	#[test]
+	fn capture_param_permissions() {
+		let q = r#"
+			DEFINE TABLE bar PERMISSIONS FOR select WHERE $foo = 1;
+		"#;
+		let slowlog = SlowLog::new(Duration::ZERO, Vec::new(), Vec::new());
+		test_param_capture(&slowlog, q, vec![("foo", 1i64.into())], "");
 	}
 }
