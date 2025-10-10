@@ -4,11 +4,11 @@ use std::time::Duration;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use surrealdb_types::{ToSql, write_sql};
 use uuid::Uuid;
 
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::{ToSql, write_sql};
 use crate::val::{Object, Value};
 
 /// A node in the cluster

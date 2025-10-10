@@ -18,12 +18,12 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use surrealdb_types::ToSql;
 use trice::Instant;
 
 use crate::ctx::Context;
 use crate::expr::Expr;
 use crate::expr::expression::VisitExpression;
+use crate::sql::ToSql;
 
 #[derive(Clone)]
 /// Configuration and logic for slow query logging.

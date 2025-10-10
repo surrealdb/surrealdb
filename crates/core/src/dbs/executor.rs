@@ -5,7 +5,6 @@ use std::time::Duration;
 use anyhow::{Result, anyhow, bail};
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
-use surrealdb_types::ToSql;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tracing::instrument;
@@ -28,7 +27,7 @@ use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::rpc::DbResultError;
-use crate::sql::{self, Ast};
+use crate::sql::{self, Ast, ToSql};
 use crate::types::PublicNotification;
 use crate::val::{Value, convert_value_to_public_value};
 use crate::{err, expr};

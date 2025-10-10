@@ -4,7 +4,7 @@ use std::ops::{Bound, RangeFrom, RangeFull, RangeTo, RangeToInclusive};
 use serde::{Deserialize, Serialize};
 
 use crate as surrealdb_types;
-use crate::sql::ToSql;
+use crate::sql::ToSqon;
 use crate::{Kind, Range, RecordIdKey, SurrealValue, Value, kind};
 
 /// Represents a range of record identifier keys in SurrealDB
@@ -184,16 +184,16 @@ impl PartialEq<Range> for RecordIdKeyRange {
 	}
 }
 
-impl ToSql for RecordIdKeyRange {
-	fn fmt_sql(&self, f: &mut String) {
+impl ToSqon for RecordIdKeyRange {
+	fn fmt_sqon(&self, f: &mut String) {
 		match &self.start {
 			Bound::Unbounded => {}
 			Bound::Included(v) => {
-				v.fmt_sql(f);
+				v.fmt_sqon(f);
 			}
 			Bound::Excluded(v) => {
 				f.push('>');
-				v.fmt_sql(f)
+				v.fmt_sqon(f)
 			}
 		};
 
@@ -203,10 +203,10 @@ impl ToSql for RecordIdKeyRange {
 			Bound::Unbounded => {}
 			Bound::Included(v) => {
 				f.push('=');
-				v.fmt_sql(f);
+				v.fmt_sqon(f);
 			}
 			Bound::Excluded(v) => {
-				v.fmt_sql(f);
+				v.fmt_sqon(f);
 			}
 		};
 	}

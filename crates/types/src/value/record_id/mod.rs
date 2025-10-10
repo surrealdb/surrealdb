@@ -7,7 +7,7 @@ pub use key::*;
 pub use range::*;
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
+use crate::sql::ToSqon;
 
 /// Represents a record identifier in SurrealDB
 ///
@@ -44,10 +44,10 @@ impl RecordId {
 	}
 }
 
-impl ToSql for RecordId {
-	fn fmt_sql(&self, f: &mut String) {
+impl ToSqon for RecordId {
+	fn fmt_sqon(&self, f: &mut String) {
 		f.push_str(&self.table);
 		f.push(':');
-		self.key.fmt_sql(f);
+		self.key.fmt_sqon(f);
 	}
 }

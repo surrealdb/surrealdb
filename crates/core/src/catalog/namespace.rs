@@ -3,12 +3,11 @@ use std::fmt::{Display, Formatter};
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
-use surrealdb_types::{ToSql, write_sql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::DefineNamespaceStatement;
-use crate::sql::{Expr, Literal};
+use crate::sql::{Expr, Literal, ToSql, write_sql};
 use crate::val::Value;
 
 #[derive(

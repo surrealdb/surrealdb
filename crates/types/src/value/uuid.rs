@@ -4,8 +4,8 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
-use crate::{Datetime, write_sql};
+use crate::Datetime;
+use crate::sql::ToSqon;
 
 /// Represents a UUID value in SurrealDB
 ///
@@ -17,9 +17,9 @@ use crate::{Datetime, write_sql};
 )]
 pub struct Uuid(pub uuid::Uuid);
 
-impl ToSql for Uuid {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "u'{}'", self)
+impl ToSqon for Uuid {
+	fn fmt_sqon(&self, f: &mut String) {
+		f.push_str(&format!("u'{}'", self))
 	}
 }
 

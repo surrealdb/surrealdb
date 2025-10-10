@@ -1,8 +1,8 @@
 use std::ops::{self, Bound};
 
+use surrealdb_types::sql::ToSqon;
 use surrealdb_types::{
-	Array, Kind, Object, RecordId, RecordIdKey, RecordIdKeyRange, SurrealValue, ToSql, Value,
-	Variables,
+	Array, Kind, Object, RecordId, RecordIdKey, RecordIdKeyRange, SurrealValue, Value, Variables,
 };
 
 use crate::api::Result;
@@ -132,7 +132,7 @@ impl SurrealValue for Resource {
 	}
 
 	fn from_value(value: Value) -> surrealdb_types::anyhow::Result<Self> {
-		Err(surrealdb_types::anyhow::anyhow!("Invalid resource: {}", value.to_sql()))
+		Err(surrealdb_types::anyhow::anyhow!("Invalid resource: {}", value.to_sqon()))
 	}
 }
 

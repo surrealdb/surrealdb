@@ -1,12 +1,11 @@
 use revision::revisioned;
-use surrealdb_types::{ToSql, write_sql};
 
 use super::Permission;
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Idiom, Kind};
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::DefineFieldStatement;
+use crate::sql::{DefineFieldStatement, ToSql, write_sql};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]

@@ -2,11 +2,11 @@ use std::time::Duration;
 
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
-use surrealdb_types::{ToSql, write_sql};
 
 use crate::catalog::base::Base;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::{ToSql, write_sql};
 use crate::val::{Array, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]

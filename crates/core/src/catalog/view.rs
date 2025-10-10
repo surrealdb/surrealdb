@@ -1,9 +1,8 @@
 use revision::revisioned;
-use surrealdb_types::{ToSql, write_sql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Fields, Groups};
-use crate::sql::View;
+use crate::sql::{ToSql, View, write_sql};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]

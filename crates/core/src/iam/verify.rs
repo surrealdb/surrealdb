@@ -5,7 +5,6 @@ use anyhow::{Result, bail};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
 use jsonwebtoken::{DecodingKey, Validation, decode};
-use surrealdb_types::ToSql;
 
 use crate::catalog::providers::{
 	AuthorisationProvider, DatabaseProvider, NamespaceProvider, UserProvider,
@@ -21,6 +20,7 @@ use crate::iam::{self, Actor, Auth, Level, Role};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
+use crate::sql::ToSql;
 use crate::{catalog, syn};
 
 /// Returns the decoding key as wel as the method by which to verify the key against

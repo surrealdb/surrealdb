@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
-use crate::utils::escape::EscapeRid;
 // Needed because we use the SurrealValue derive macro inside the crate which exports it :)
-use crate::{self as surrealdb_types, write_sql};
+use crate as surrealdb_types;
+use crate::sql::ToSqon;
+use crate::utils::escape::EscapeRid;
 use crate::{Array, Number, Object, RecordIdKeyRange, SurrealValue, Uuid, Value};
 
 /// The characters which are supported in server record IDs
@@ -146,15 +146,15 @@ impl PartialEq<Value> for RecordIdKey {
 	}
 }
 
-impl ToSql for RecordIdKey {
-	fn fmt_sql(&self, f: &mut String) {
+impl ToSqon for RecordIdKey {
+	fn fmt_sqon(&self, f: &mut String) {
 		match self {
-			RecordIdKey::Number(n) => n.fmt_sql(f),
-			RecordIdKey::String(v) => write_sql!(f, "{}", EscapeRid(v)),
-			RecordIdKey::Uuid(uuid) => uuid.fmt_sql(f),
-			RecordIdKey::Object(object) => object.fmt_sql(f),
-			RecordIdKey::Array(array) => array.fmt_sql(f),
-			RecordIdKey::Range(rid) => rid.fmt_sql(f),
+			RecordIdKey::Number(n) => n.fmt_sqon(f),
+			RecordIdKey::String(v) => f.push_str(&EscapeRid(v).to_string()),
+			RecordIdKey::Uuid(uuid) => uuid.fmt_sqon(f),
+			RecordIdKey::Object(object) => object.fmt_sqon(f),
+			RecordIdKey::Array(array) => array.fmt_sqon(f),
+			RecordIdKey::Range(rid) => rid.fmt_sqon(f),
 		}
 	}
 }

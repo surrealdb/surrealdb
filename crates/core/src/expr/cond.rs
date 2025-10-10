@@ -1,10 +1,10 @@
 use std::fmt;
 
 use revision::revisioned;
-use surrealdb_types::{ToSql, write_sql};
 
 use super::Expr;
 use super::expression::VisitExpression;
+use crate::sql::{ToSql, write_sql};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

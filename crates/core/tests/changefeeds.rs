@@ -7,7 +7,8 @@ use surrealdb_core::kvs::LockType::Optimistic;
 use surrealdb_core::kvs::TransactionType::Write;
 use surrealdb_core::syn;
 use surrealdb_core::vs::VersionStamp;
-use surrealdb_types::{Array, ToSql, Value};
+use surrealdb_types::sql::ToSqon;
+use surrealdb_types::{Array, Value};
 
 mod helpers;
 
@@ -322,7 +323,7 @@ async fn table_change_feeds() -> Result<()> {
 		allowed_values.contains(&tmp),
 		"tmp:\n{:?}\nchecked:\n{:?}",
 		tmp,
-		allowed_values.iter().map(|v| v.to_sql()).reduce(|a, b| format!("{a}\n{b}")).unwrap()
+		allowed_values.iter().map(|v| v.to_sqon()).reduce(|a, b| format!("{a}\n{b}")).unwrap()
 	);
 	// Retain for 1h
 	let sql = "
@@ -335,7 +336,7 @@ async fn table_change_feeds() -> Result<()> {
 		allowed_values.contains(&tmp),
 		"tmp:\n{:?}\nchecked:\n{:?}",
 		tmp,
-		allowed_values.iter().map(|v| v.to_sql()).reduce(|a, b| format!("{a}\n{b}")).unwrap()
+		allowed_values.iter().map(|v| v.to_sqon()).reduce(|a, b| format!("{a}\n{b}")).unwrap()
 	);
 	// GC after 1hs
 	dbs.changefeed_process_at(None, end_ts + 3600).await?;

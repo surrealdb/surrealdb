@@ -1,5 +1,4 @@
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
-use surrealdb_types::{ToSql, write_sql};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId, Permissions, ViewDefinition};
@@ -7,6 +6,7 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{ChangeFeed, Kind};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::DefineTableStatement;
+use crate::sql::{ToSql, write_sql};
 use crate::val::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

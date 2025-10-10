@@ -652,7 +652,7 @@ pub async fn init<F: TransactionBuilderFactory>(
 mod tests {
 	use std::str::FromStr;
 
-	use surrealdb_types::ToSql;
+	use surrealdb_types::sql::ToSqon;
 	use test_log::test;
 	use wiremock::matchers::{method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -1038,7 +1038,7 @@ mod tests {
 			let res = res.unwrap().remove(0).output();
 			let res = if succeeds {
 				assert!(res.is_ok(), "Unexpected error for test case {idx}: {res:?}");
-				res.unwrap().to_sql()
+				res.unwrap().to_sqon()
 			} else {
 				assert!(res.is_err(), "Unexpected success for test case {idx}: {res:?}");
 				res.unwrap_err().to_string()

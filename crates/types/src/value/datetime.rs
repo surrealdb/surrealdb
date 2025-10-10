@@ -6,9 +6,8 @@ use chrono::offset::LocalResult;
 use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
+use crate::sql::ToSqon;
 use crate::utils::escape::QuoteStr;
-use crate::write_sql;
 
 /// Represents a datetime value in SurrealDB
 ///
@@ -80,9 +79,10 @@ impl Display for Datetime {
 	}
 }
 
-impl ToSql for Datetime {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "d{}", QuoteStr(&self.to_string()))
+impl ToSqon for Datetime {
+	fn fmt_sqon(&self, f: &mut String) {
+		f.push('d');
+		f.push_str(&QuoteStr(&self.to_string()).to_string())
 	}
 }
 

@@ -4,12 +4,12 @@ use std::hash::{Hash, Hasher};
 use anyhow::Result;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use storekey::{BorrowDecode, Encode};
-use surrealdb_types::{ToSql, write_sql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Idiom};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::DefineKind;
+use crate::sql::{ToSql, write_sql};
 use crate::val::{Array, Number, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, BorrowDecode)]

@@ -3,11 +3,12 @@ use std::time::Duration;
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use surrealdb_types::{ToSql, kind, object};
+use surrealdb_types::{kind, object};
 use thiserror::Error;
 
 use crate::dbs::QueryResult;
 use crate::rpc::RpcError;
+use crate::sql::ToSql;
 use crate::types::{
 	PublicArray, PublicKind, PublicNotification, PublicObject, PublicValue, SurrealValue,
 };

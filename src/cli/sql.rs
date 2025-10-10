@@ -9,7 +9,8 @@ use serde_json::ser::PrettyFormatter;
 use surrealdb::engine::any::{self, connect};
 use surrealdb::method::WithStats;
 use surrealdb::opt::Config;
-use surrealdb::types::{SurrealValue, ToSql, Value, object};
+use surrealdb::types::sql::ToSqon;
+use surrealdb::types::{SurrealValue, Value, object};
 use surrealdb::{IndexedResults, Notification};
 use surrealdb_core::dbs::Capabilities as CoreCapabilities;
 use surrealdb_core::rpc::DbResultStats;
@@ -311,12 +312,12 @@ fn process(
 						"action": action.into_value(),
 						"result": data,
 					});
-					value.to_sql()
+					value.to_sqon()
 				}
 				// Yes prettify the SurrealQL response
 				(false, true) => format!(
 					"-- Notification (action: {action:?}, live query ID: {query_id})\n{}",
-					data.to_sql()
+					data.to_sqon()
 				),
 				// Don't pretty print the JSON response
 				(true, false) => {
@@ -348,7 +349,7 @@ fn process(
 	// Check if we should emit JSON and/or prettify
 	Ok(match (json, pretty) {
 		// Don't prettify the SurrealQL response
-		(false, false) => vec.into_iter().map(|(_, x)| x).collect::<Value>().to_sql(),
+		(false, false) => vec.into_iter().map(|(_, x)| x).collect::<Value>().to_sqon(),
 		// Yes prettify the SurrealQL response
 		(false, true) => vec
 			.into_iter()
@@ -358,7 +359,7 @@ fn process(
 				let execution_time = stats.execution_time.unwrap_or_default();
 				format!(
 					"-- Query {query_num} (execution time: {execution_time:?})\n{:#}",
-					value.to_sql()
+					value.to_sqon()
 				)
 			})
 			.collect::<Vec<String>>()

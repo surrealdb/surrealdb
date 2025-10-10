@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use surrealdb_types::ToSql;
 
 use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, NamespaceProvider,
@@ -17,6 +16,7 @@ use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::ToSql;
 use crate::sys::INFORMATION;
 use crate::val::{Datetime, Object, Value};
 
