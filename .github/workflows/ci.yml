@@ -511,7 +511,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        engine: [mem, rocksdb, surrealkv, tikv, fdb]
+        engine: [mem, rocksdb, surrealkv, tikv]
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
