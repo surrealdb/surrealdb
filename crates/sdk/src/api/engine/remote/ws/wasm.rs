@@ -286,7 +286,7 @@ async fn router_handle_response(
 									data: notification.result,
 								};
 
-								if sender.send(notification).await.is_err() {
+								if sender.send(Ok(notification)).await.is_err() {
 									state.live_queries.remove(&live_query_id);
 									let kill = {
 										let request = Command::Kill {
@@ -456,8 +456,7 @@ pub(crate) async fn run_router(
 		let mut pinger = IntervalStream::new(interval);
 
 		state.last_activity = Instant::now();
-		state.live_queries.clear();
-		state.pending_requests.clear();
+		state.reset().await;
 
 		loop {
 			futures::select! {
@@ -509,6 +508,7 @@ pub(crate) async fn run_router(
 							trace!("{error}");
 						}
 						WsEvent::Closed(..) => {
+							state.reset().await;
 							trace!("connection closed");
 							router_reconnect(&mut state, &mut events, &endpoint, capacity).await;
 							break;
