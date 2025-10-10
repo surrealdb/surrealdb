@@ -396,7 +396,7 @@ jobs:
     name: KVS - ${{ matrix.engine }} engine
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         engine: [mem, rocksdb, surrealkv, tikv, fdb]
     steps:
@@ -453,7 +453,7 @@ jobs:
     name: Rust SDK - ${{ matrix.engine }} engine
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         engine: [any, ws, http, mem, rocksdb, surrealkv, tikv, fdb]
     steps:
