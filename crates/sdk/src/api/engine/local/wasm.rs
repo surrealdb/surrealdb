@@ -179,7 +179,7 @@ pub(crate) async fn run_router(
 						data: notification.result,
 					};
 
-					if sender.send(notification).await.is_err() {
+					if sender.send(Ok(notification)).await.is_err() {
 						live_queries.write().await.remove(&id);
 						if let Err(error) =
 							super::kill_live_query(&kvs, *id, &*session.read().await, vars.read().await.clone()).await

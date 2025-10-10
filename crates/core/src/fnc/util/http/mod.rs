@@ -2,6 +2,7 @@ use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
 use std::time::Duration;
 
+#[cfg(not(target_family = "wasm"))]
 use dashmap::DashMap;
 use reqwest::header::CONTENT_TYPE;
 #[cfg(not(target_family = "wasm"))]
