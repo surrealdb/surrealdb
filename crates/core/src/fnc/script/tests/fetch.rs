@@ -1,12 +1,12 @@
 use std::str::FromStr;
 
+use surrealdb_types::{Value, object};
 use wiremock::matchers::{body_string, header, method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::dbs::capabilities::{NetTarget, Targets};
 use crate::dbs::{Capabilities, Session};
 use crate::kvs::Datastore;
-use crate::syn;
 
 #[tokio::test]
 async fn test_fetch_get() {
@@ -45,8 +45,12 @@ async fn test_fetch_get() {
 	server.verify().await;
 
 	assert_eq!(
-		res.to_string(),
-		"{ body: 'some body once told me', status: 200f }",
+		res,
+		// "{ body: 'some body once told me', status: 200f }",
+		Value::Object(object! {
+			body: "some body once told me".to_string(),
+			status: 200,
+		}),
 		"Unexpected result: {:?}",
 		res
 	);
@@ -92,10 +96,12 @@ async fn test_fetch_put() {
 	server.verify().await;
 
 	assert_eq!(
-		res.to_string(),
-		"{ body: 'some body once told me', status: 201f }",
-		"Unexpected result: {:?}",
-		res
+		res,
+		Value::Object(object! {
+			body: "some body once told me".to_string(),
+			status: 201,
+		}),
+		"Unexpected result: {res:?}"
 	);
 }
 
@@ -143,9 +149,14 @@ async fn test_fetch_error() {
 
 	assert_eq!(
 		res,
-		syn::value("{ body: {baz:2, foo:\"bar\"}, status: 500f }").unwrap(),
-		"Unexpected result: {:?}",
-		res
+		Value::Object(object! {
+			body: Value::Object(object! {
+				baz: 2,
+				foo: "bar".to_string(),
+			}),
+			status: 500,
+		}),
+		"Unexpected result: {res:?}",
 	);
 }
 

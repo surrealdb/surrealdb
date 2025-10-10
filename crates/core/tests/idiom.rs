@@ -1,8 +1,6 @@
 mod helpers;
 use anyhow::Result;
 use helpers::Test;
-use surrealdb_core::err::Error;
-use surrealdb_core::syn::error::RenderedError;
 
 #[tokio::test]
 async fn idiom_chain_part_optional() -> Result<()> {
@@ -1051,15 +1049,12 @@ async fn idiom_recursion_shortest_path() -> Result<()> {
 macro_rules! expect_parse_error {
 	($query:expr, $error:expr) => {{
 		let res = Test::new($query).await;
-		match res.unwrap_err().downcast() {
-			Ok(Error::InvalidQuery(RenderedError {
-				errors,
-				..
-			})) => match errors.first() {
-				Some(err) => assert_eq!(err, $error),
-				None => panic!("Expected an error message"),
-			},
-			_ => panic!("Expected a parse error"),
+		let err_str = res.unwrap_err().to_string();
+		if !err_str.contains("Parse error") {
+			panic!("Expected a parse error, got: {}", err_str);
+		}
+		if !err_str.contains($error) {
+			panic!("Expected error to contain '{}', got: {}", $error, err_str);
 		}
 	}};
 }
@@ -1090,6 +1085,6 @@ async fn idiom_recursion_instruction_plan_conflict() -> Result<()> {
 
 	Test::new(sql)
 		.await?
-		.expect_error("Can not construct a recursion plan when an instruction is provided")?;
+		.expect_error("Cannot construct a recursion plan when an instruction is provided")?;
 	Ok(())
 }

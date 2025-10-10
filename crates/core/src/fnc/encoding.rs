@@ -49,7 +49,9 @@ pub mod cbor {
 	use crate::val::{Bytes, Value};
 
 	pub fn encode((arg,): (Value,)) -> Result<Value> {
-		let val = cbor::encode(arg).map_err(|_| Error::InvalidArguments {
+		// Convert internal value to public, encode, then convert back
+		let public_val = crate::val::convert_value_to_public_value(arg)?;
+		let val = cbor::encode(public_val).map_err(|_| Error::InvalidArguments {
 			name: "encoding::cbor::encode".to_owned(),
 			message: "Value could not be encoded into CBOR".to_owned(),
 		})?;
@@ -58,12 +60,12 @@ pub mod cbor {
 	}
 
 	pub fn decode((arg,): (Bytes,)) -> Result<Value> {
-		cbor::decode(arg.as_slice())
-			.map_err(|_| Error::InvalidArguments {
-				name: "encoding::cbor::decode".to_owned(),
-				message: "invalid cbor".to_owned(),
-			})
-			.map_err(anyhow::Error::new)
+		let public_val = cbor::decode(arg.as_slice()).map_err(|_| Error::InvalidArguments {
+			name: "encoding::cbor::decode".to_owned(),
+			message: "invalid cbor".to_owned(),
+		})?;
+		// Convert public value back to internal
+		Ok(crate::sql::expression::convert_public_value_to_internal(public_val))
 	}
 }
 

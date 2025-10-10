@@ -30,6 +30,7 @@ Temporary Items
 *.skv
 *.sw?
 *.skv
+*.profraw
 lcov.info
 
 # -----------------------------------

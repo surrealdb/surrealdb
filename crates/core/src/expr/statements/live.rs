@@ -11,11 +11,11 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Variables};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Literal};
+use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct LiveStatement {
+pub(crate) struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,
 	pub fields: Fields,
@@ -25,28 +25,6 @@ pub struct LiveStatement {
 }
 
 impl LiveStatement {
-	pub fn new(expr: Fields) -> Self {
-		LiveStatement {
-			id: Uuid::new_v4(),
-			node: Uuid::new_v4(),
-			fields: expr,
-			what: Expr::Literal(Literal::Null),
-			cond: None,
-			fetch: None,
-		}
-	}
-
-	pub fn new_from_what_expr(expr: Fields, what: Expr) -> Self {
-		LiveStatement {
-			id: Uuid::new_v4(),
-			node: Uuid::new_v4(),
-			what,
-			fields: expr,
-			cond: None,
-			fetch: None,
-		}
-	}
-
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -160,13 +138,14 @@ mod tests {
 	use anyhow::Result;
 
 	use crate::catalog::providers::{CatalogProvider, TableProvider};
-	use crate::dbs::{Action, Capabilities, Notification, Session};
-	use crate::expr::Value;
+	use crate::dbs::{Capabilities, Session};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
 	use crate::syn;
-	use crate::val::{RecordId, RecordIdKey};
+	use crate::types::{
+		PublicAction, PublicNotification, PublicRecordId, PublicRecordIdKey, PublicValue,
+	};
 
 	pub async fn new_ds() -> Result<Datastore> {
 		Ok(Datastore::new("memory")
@@ -197,7 +176,7 @@ mod tests {
 
 		let live_id = live_query_response.remove(0).result.unwrap();
 		let live_id = match live_id {
-			Value::Uuid(id) => id,
+			PublicValue::Uuid(id) => id,
 			_ => panic!("expected uuid"),
 		};
 
@@ -212,7 +191,7 @@ mod tests {
 		let create_statement = format!("CREATE {tb}:test_true SET condition = true");
 		let create_response = &mut dbs.execute(&create_statement, &ses, None).await.unwrap();
 		assert_eq!(create_response.len(), 1);
-		let expected_record: Value = syn::value(&format!(
+		let expected_record: PublicValue = syn::value(&format!(
 			"[{{
 				id: {tb}:test_true,
 				condition: true,
@@ -235,12 +214,12 @@ mod tests {
 		let notification = notifications.recv().await.unwrap();
 		assert_eq!(
 			notification,
-			Notification::new(
+			PublicNotification::new(
 				live_id,
-				Action::Create,
-				Value::RecordId(RecordId {
+				PublicAction::Create,
+				PublicValue::RecordId(PublicRecordId {
 					table: tb.to_owned(),
-					key: RecordIdKey::String("test_true".to_owned())
+					key: PublicRecordIdKey::String("test_true".to_owned())
 				}),
 				syn::value(&format!(
 					"{{

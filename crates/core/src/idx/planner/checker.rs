@@ -85,7 +85,7 @@ impl<'a> HnswConditionChecker<'a> {
 }
 
 impl<'a> MTreeConditionChecker<'a> {
-	pub fn new_cond(
+	pub(in crate::idx) fn new_cond(
 		ctx: &'a Context,
 		opt: &'a Options,
 		cond: Arc<Cond>,

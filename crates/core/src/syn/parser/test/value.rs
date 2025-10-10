@@ -7,7 +7,7 @@ use crate::sql::{
 };
 use crate::syn;
 use crate::syn::parser::{Parser, ParserSettings};
-use crate::val::Geometry;
+use crate::types::PublicGeometry;
 
 #[test]
 fn parse_index_expression() {
@@ -35,7 +35,7 @@ fn parse_coordinate() {
 		parser.parse_expr_field(stk).await
 	})
 	.unwrap();
-	let Expr::Literal(Literal::Geometry(Geometry::Point(x))) = coord else {
+	let Expr::Literal(Literal::Geometry(PublicGeometry::Point(x))) = coord else {
 		panic!("not the right value");
 	};
 	assert_eq!(x.x(), 1.88);

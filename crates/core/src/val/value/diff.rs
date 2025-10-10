@@ -92,59 +92,64 @@ mod tests {
 	use super::*;
 	use crate::syn;
 
+	macro_rules! parse_val {
+		($input:expr) => {
+			crate::val::convert_public_value_to_internal(syn::value($input).unwrap())
+		};
+	}
+
 	#[test]
 	fn diff_none() {
-		let old = syn::value("{ test: true, text: 'text', other: { something: true } }").unwrap();
-		let now = syn::value("{ test: true, text: 'text', other: { something: true } }").unwrap();
-		let res = syn::value("[]").unwrap();
+		let old = parse_val!("{ test: true, text: 'text', other: { something: true } }");
+		let now = parse_val!("{ test: true, text: 'text', other: { something: true } }");
+		let res = parse_val!("[]");
 		let res = Operation::value_to_operations(res).unwrap();
 		assert_eq!(res, old.diff(&now));
 	}
 
 	#[test]
 	fn diff_add() {
-		let old = syn::value("{ test: true }").unwrap();
-		let now = syn::value("{ test: true, other: 'test' }").unwrap();
-		let res = syn::value("[{ op: 'add', path: '/other', value: 'test' }]").unwrap();
+		let old = parse_val!("{ test: true }");
+		let now = parse_val!("{ test: true, other: 'test' }");
+		let res = parse_val!("[{ op: 'add', path: '/other', value: 'test' }]");
 		let res = Operation::value_to_operations(res).unwrap();
 		assert_eq!(res, old.diff(&now));
 	}
 
 	#[test]
 	fn diff_remove() {
-		let old = syn::value("{ test: true, other: 'test' }").unwrap();
-		let now = syn::value("{ test: true }").unwrap();
-		let res = syn::value("[{ op: 'remove', path: '/other' }]").unwrap();
+		let old = parse_val!("{ test: true, other: 'test' }");
+		let now = parse_val!("{ test: true }");
+		let res = parse_val!("[{ op: 'remove', path: '/other' }]");
 		let res = Operation::value_to_operations(res).unwrap();
 		assert_eq!(res, old.diff(&now));
 	}
 
 	#[test]
 	fn diff_add_array() {
-		let old = syn::value("{ test: [1,2,3] }").unwrap();
-		let now = syn::value("{ test: [1,2,3,4] }").unwrap();
-		let res = syn::value("[{ op: 'add', path: '/test/3', value: 4 }]").unwrap();
+		let old = parse_val!("{ test: [1,2,3] }");
+		let now = parse_val!("{ test: [1,2,3,4] }");
+		let res = parse_val!("[{ op: 'add', path: '/test/3', value: 4 }]");
 		let res = Operation::value_to_operations(res).unwrap();
 		assert_eq!(res, old.diff(&now));
 	}
 
 	#[test]
 	fn diff_replace_embedded() {
-		let old = syn::value("{ test: { other: 'test' } }").unwrap();
-		let now = syn::value("{ test: { other: false } }").unwrap();
-		let res = syn::value("[{ op: 'replace', path: '/test/other', value: false }]").unwrap();
+		let old = parse_val!("{ test: { other: 'test' } }");
+		let now = parse_val!("{ test: { other: false } }");
+		let res = parse_val!("[{ op: 'replace', path: '/test/other', value: false }]");
 		let res = Operation::value_to_operations(res).unwrap();
 		assert_eq!(res, old.diff(&now));
 	}
 
 	#[test]
 	fn diff_change_text() {
-		let old = syn::value("{ test: { other: 'test' } }").unwrap();
-		let now = syn::value("{ test: { other: 'text' } }").unwrap();
-		let res = syn::value(
-			"[{ op: 'change', path: '/test/other', value: '@@ -1,4 +1,4 @@\n te\n-s\n+x\n t\n' }]",
-		)
-		.unwrap();
+		let old = parse_val!("{ test: { other: 'test' } }");
+		let now = parse_val!("{ test: { other: 'text' } }");
+		let res = parse_val!(
+			"[{ op: 'change', path: '/test/other', value: '@@ -1,4 +1,4 @@\n te\n-s\n+x\n t\n' }]"
+		);
 		let res = Operation::value_to_operations(res).unwrap();
 		assert_eq!(res, old.diff(&now));
 	}

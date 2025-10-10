@@ -8,13 +8,13 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-error = "Can not execute RELATE statement where property 'in' is: 1"
+error = "Cannot execute RELATE statement where property 'in' is: 1"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-error = "Can not execute RELATE statement where property 'id' is: 2"
+error = "Cannot execute RELATE statement where property 'id' is: 2"
 
 */
 let $a = 1;

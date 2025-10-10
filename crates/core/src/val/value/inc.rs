@@ -31,11 +31,17 @@ mod tests {
 	use crate::expr::idiom::Idiom;
 	use crate::syn;
 
+	macro_rules! parse_val {
+		($input:expr) => {
+			crate::val::convert_public_value_to_internal(syn::value($input).unwrap())
+		};
+	}
+
 	#[tokio::test]
 	async fn increment_none() {
 		let idi: Idiom = syn::idiom("other").unwrap().into();
-		let mut val = syn::value("{ test: 100 }").unwrap();
-		let res = syn::value("{ test: 100, other: +10 }").unwrap();
+		let mut val = parse_val!("{ test: 100 }");
+		let res = parse_val!("{ test: 100, other: +10 }");
 		val.inc(&idi, Value::from(10));
 		assert_eq!(res, val);
 	}
@@ -43,8 +49,8 @@ mod tests {
 	#[tokio::test]
 	async fn increment_number() {
 		let idi: Idiom = syn::idiom("test").unwrap().into();
-		let mut val = syn::value("{ test: 100 }").unwrap();
-		let res = syn::value("{ test: 110 }").unwrap();
+		let mut val = parse_val!("{ test: 100 }");
+		let res = parse_val!("{ test: 110 }");
 		val.inc(&idi, Value::from(10));
 		assert_eq!(res, val);
 	}
@@ -52,8 +58,8 @@ mod tests {
 	#[tokio::test]
 	async fn increment_array_number() {
 		let idi: Idiom = syn::idiom("test[1]").unwrap().into();
-		let mut val = syn::value("{ test: [100, 200, 300] }").unwrap();
-		let res = syn::value("{ test: [100, 210, 300] }").unwrap();
+		let mut val = parse_val!("{ test: [100, 200, 300] }");
+		let res = parse_val!("{ test: [100, 210, 300] }");
 		val.inc(&idi, Value::from(10));
 		assert_eq!(res, val);
 	}
@@ -61,8 +67,8 @@ mod tests {
 	#[tokio::test]
 	async fn increment_array_value() {
 		let idi: Idiom = syn::idiom("test").unwrap().into();
-		let mut val = syn::value("{ test: [100, 200, 300] }").unwrap();
-		let res = syn::value("{ test: [100, 200, 300, 200] }").unwrap();
+		let mut val = parse_val!("{ test: [100, 200, 300] }");
+		let res = parse_val!("{ test: [100, 200, 300, 200] }");
 		val.inc(&idi, Value::from(200));
 		assert_eq!(res, val);
 	}
@@ -70,9 +76,9 @@ mod tests {
 	#[tokio::test]
 	async fn increment_array_array() {
 		let idi: Idiom = syn::idiom("test").unwrap().into();
-		let mut val = syn::value("{ test: [100, 200, 300] }").unwrap();
-		let res = syn::value("{ test: [100, 200, 300, 100, 300, 400, 500] }").unwrap();
-		val.inc(&idi, syn::value("[100, 300, 400, 500]").unwrap());
+		let mut val = parse_val!("{ test: [100, 200, 300] }");
+		let res = parse_val!("{ test: [100, 200, 300, 100, 300, 400, 500] }");
+		val.inc(&idi, parse_val!("[100, 300, 400, 500]"));
 		assert_eq!(res, val);
 	}
 }

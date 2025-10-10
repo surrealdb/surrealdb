@@ -2,12 +2,14 @@ use std::ops::{Deref, DerefMut};
 
 use serde::{Deserialize, Serialize};
 
+use crate::sql::ToSql;
 use crate::{SurrealValue, Value};
 
 /// Represents an array of values in SurrealDB
 ///
 /// An array is an ordered collection of values that can contain elements of any type.
 /// The underlying storage is a `Vec<Value>`.
+
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct Array(pub(crate) Vec<Value>);
 
@@ -27,6 +29,21 @@ impl Array {
 	/// Check if there array is empty
 	pub fn is_empty(&self) -> bool {
 		self.0.is_empty()
+	}
+
+	/// Convert the array into a vector of values.
+	pub fn into_vec(self) -> Vec<Value> {
+		self.0
+	}
+
+	/// Create array from existing Vec<Value>
+	pub fn from_values(values: Vec<Value>) -> Self {
+		Self(values)
+	}
+
+	/// Get the inner Vec<Value>
+	pub fn inner(&self) -> &Vec<Value> {
+		&self.0
 	}
 }
 
@@ -66,5 +83,18 @@ impl IntoIterator for Array {
 	type IntoIter = std::vec::IntoIter<Self::Item>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
+	}
+}
+
+impl ToSql for Array {
+	fn fmt_sql(&self, f: &mut String) {
+		f.push('[');
+		for (i, v) in self.iter().enumerate() {
+			v.fmt_sql(f);
+			if i < self.len() - 1 {
+				f.push_str(", ");
+			}
+		}
+		f.push(']');
 	}
 }

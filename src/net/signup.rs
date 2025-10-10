@@ -5,6 +5,10 @@ use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use serde::Serialize;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::capabilities::RouteTarget;
+use surrealdb_core::syn;
+use surrealdb_types::{SurrealValue, Value};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
@@ -12,14 +16,10 @@ use super::error::ResponseError;
 use super::headers::Accept;
 use super::output::Output;
 use crate::cnf::HTTP_MAX_SIGNIN_BODY_SIZE;
-use crate::core::dbs::Session;
-use crate::core::dbs::capabilities::RouteTarget;
-use crate::core::syn;
-use crate::core::val::Value;
 use crate::net::error::Error as NetError;
 use crate::net::input::bytes_to_utf8;
 
-#[derive(Serialize)]
+#[derive(Serialize, SurrealValue)]
 struct Success {
 	code: u16,
 	details: String,
@@ -67,7 +67,7 @@ async fn handler(
 	match syn::json(data) {
 		// The provided value was an object
 		Ok(Value::Object(vars)) => {
-			match crate::core::iam::signup::signup(kvs, &mut session, vars).await {
+			match surrealdb_core::iam::signup::signup(kvs, &mut session, vars.into()).await {
 				// Authentication was successful
 				Ok(v) => match accept.as_deref() {
 					// Simple serialization
@@ -75,14 +75,16 @@ async fn handler(
 						Ok(Output::json_other(&Success::new(v.token, v.refresh)))
 					}
 					Some(Accept::ApplicationCbor) => {
-						Ok(Output::cbor(&Success::new(v.token, v.refresh)))
+						let success = Success::new(v.token, v.refresh).into_value();
+						Ok(Output::cbor(&success))
 					}
 					// Text serialization
 					// NOTE: Only the token is returned in a plain text response.
 					Some(Accept::TextPlain) => Ok(Output::Text(v.token.unwrap_or_default())),
 					// Internal serialization
-					Some(Accept::Surrealdb) => {
-						Ok(Output::bincode(&Success::new(v.token, v.refresh)))
+					Some(Accept::ApplicationFlatbuffers) => {
+						let success = Success::new(v.token, v.refresh).into_value();
+						Ok(Output::flatbuffers(&success))
 					}
 					// Return nothing
 					None => Ok(Output::None),

@@ -21,7 +21,7 @@ error = "The query was not executed due to a failed transaction"
 error = "An error occurred: Some error"
 
 [[test.results]]
-error = "The query was not executed due to a failed transaction"
+error = "The query was not executed due to a cancelled transaction"
 
 [env]
 namespace = "test"

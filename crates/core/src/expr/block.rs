@@ -14,7 +14,7 @@ use crate::expr::{Expr, Value};
 use crate::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct Block(pub Vec<Expr>);
+pub(crate) struct Block(pub(crate) Vec<Expr>);
 
 impl Revisioned for Block {
 	fn revision() -> u16 {

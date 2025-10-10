@@ -10,13 +10,14 @@ use reblessive::tree::Stk;
 use super::IgnoreError;
 use crate::catalog::{Permission, SubscriptionDefinition};
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::{Action, MessageBroker, Notification, Options, Statement};
+use crate::dbs::{MessageBroker, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::FlowResultExt as _;
 use crate::expr::paths::{AC, RD, TK};
 use crate::kvs::Transaction;
-use crate::val::Value;
+use crate::types::{PublicAction, PublicNotification};
+use crate::val::{Value, convert_value_to_public_value};
 
 impl Document {
 	/// Processes any LIVE SELECT statements which
@@ -223,7 +224,7 @@ impl Document {
 				Err(IgnoreError::Error(e)) => return Err(e),
 				Ok(x) => x,
 			};
-			(Action::Delete, result)
+			(PublicAction::Delete, result)
 		} else if self.is_new() {
 			// Prepare a CREATE notification
 			// An error ignore here is about livequery not the query which invoked the
@@ -234,7 +235,7 @@ impl Document {
 				Err(IgnoreError::Error(e)) => return Err(e),
 				Ok(x) => x,
 			};
-			(Action::Create, result)
+			(PublicAction::Create, result)
 		} else {
 			// Prepare a UPDATE notification
 			// An error ignore here is about livequery not the query which invoked the
@@ -245,7 +246,7 @@ impl Document {
 				Err(IgnoreError::Error(e)) => return Err(e),
 				Ok(x) => x,
 			};
-			(Action::Update, result)
+			(PublicAction::Update, result)
 		};
 
 		// Process any potential `FETCH` clause on the live statement
@@ -259,12 +260,12 @@ impl Document {
 			}
 		}
 
-		let notification = Notification {
-			id: live_subscription.id.into(),
+		let notification = PublicNotification::new(
+			live_subscription.id.into(),
 			action,
-			record: Value::RecordId(rid.as_ref().clone()),
-			result,
-		};
+			convert_value_to_public_value(Value::RecordId(rid.as_ref().clone()))?,
+			convert_value_to_public_value(result)?,
+		);
 
 		// Send the notification
 		sender.send(notification).await;
@@ -352,10 +353,10 @@ impl Document {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct DefaultBroker(Sender<Notification>);
+pub(crate) struct DefaultBroker(Sender<PublicNotification>);
 
 impl DefaultBroker {
-	pub(crate) fn new(sender: Sender<Notification>) -> Arc<Self> {
+	pub(crate) fn new(sender: Sender<PublicNotification>) -> Arc<Self> {
 		Arc::new(Self(sender))
 	}
 }
@@ -364,7 +365,10 @@ impl MessageBroker for DefaultBroker {
 		Ok(opt.id()? == subscription.node)
 	}
 
-	fn send(&self, notification: Notification) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+	fn send(
+		&self,
+		notification: PublicNotification,
+	) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
 		Box::pin(async move {
 			// If there is an error, we can just ignore it,
 			// as it means that the channel was closed.

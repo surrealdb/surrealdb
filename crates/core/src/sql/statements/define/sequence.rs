@@ -5,7 +5,7 @@ use crate::sql::{Expr, Literal, Timeout};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct DefineSequenceStatement {
+pub(crate) struct DefineSequenceStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub batch: Expr,
