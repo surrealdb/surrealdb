@@ -127,6 +127,52 @@ impl Expr {
 			PublicValue::Range(x) => convert_public_range_to_literal(*x),
 		}
 	}
+
+	// NOTE: Changes to this function also likely require changes to
+	// crate::expr::Expr::needs_parentheses
+	/// Returns if this expression needs to be parenthesized when inside another expression.
+	fn needs_parentheses(&self) -> bool {
+		match self {
+			Expr::Literal(_)
+			| Expr::Param(_)
+			| Expr::Idiom(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Block(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::Postfix {
+				..
+			}
+			| Expr::Binary {
+				..
+			}
+			| Expr::FunctionCall(_) => false,
+			Expr::Closure(_)
+			| Expr::Break
+			| Expr::Continue
+			| Expr::Throw(_)
+			| Expr::Return(_)
+			| Expr::If(_)
+			| Expr::Select(_)
+			| Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Delete(_)
+			| Expr::Relate(_)
+			| Expr::Insert(_)
+			| Expr::Define(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Upsert(_)
+			| Expr::Alter(_)
+			| Expr::Info(_)
+			| Expr::Foreach(_)
+			| Expr::Let(_)
+			| Expr::Sleep(_) => true,
+		}
+	}
 }
 
 fn convert_public_geometry_to_internal(geom: surrealdb_types::Geometry) -> crate::val::Geometry {
@@ -299,52 +345,6 @@ fn convert_public_record_id_key_to_internal(
 				start,
 				end,
 			}))
-		}
-	}
-
-	// NOTE: Changes to this function also likely require changes to
-	// crate::expr::Expr::needs_parentheses
-	/// Returns if this expression needs to be parenthesized when inside another expression.
-	fn needs_parentheses(&self) -> bool {
-		match self {
-			Expr::Literal(_)
-			| Expr::Param(_)
-			| Expr::Idiom(_)
-			| Expr::Table(_)
-			| Expr::Mock(_)
-			| Expr::Block(_)
-			| Expr::Constant(_)
-			| Expr::Prefix {
-				..
-			}
-			| Expr::Postfix {
-				..
-			}
-			| Expr::Binary {
-				..
-			}
-			| Expr::FunctionCall(_) => false,
-			Expr::Closure(_)
-			| Expr::Break
-			| Expr::Continue
-			| Expr::Throw(_)
-			| Expr::Return(_)
-			| Expr::If(_)
-			| Expr::Select(_)
-			| Expr::Create(_)
-			| Expr::Update(_)
-			| Expr::Delete(_)
-			| Expr::Relate(_)
-			| Expr::Insert(_)
-			| Expr::Define(_)
-			| Expr::Remove(_)
-			| Expr::Rebuild(_)
-			| Expr::Upsert(_)
-			| Expr::Alter(_)
-			| Expr::Info(_)
-			| Expr::Foreach(_)
-			| Expr::Let(_)
-			| Expr::Sleep(_) => true,
 		}
 	}
 }
