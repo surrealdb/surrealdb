@@ -123,7 +123,10 @@ impl Expr {
 		}
 	}
 
-	fn is_statement_expression(&self) -> bool {
+	// NOTE: Changes to this function also likely require changes to
+	// crate::expr::Expr::needs_parentheses
+	/// Returns if this expression needs to be parenthesized when inside another expression.
+	fn needs_parentheses(&self) -> bool {
 		match self {
 			Expr::Literal(_)
 			| Expr::Param(_)
@@ -185,7 +188,7 @@ impl fmt::Display for Expr {
 			} => {
 				let expr_bp = BindingPower::for_expr(expr);
 				let op_bp = BindingPower::for_prefix_operator(op);
-				if expr.is_statement_expression()
+				if expr.needs_parentheses()
 					|| expr_bp < op_bp
 					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
 				{
@@ -200,7 +203,7 @@ impl fmt::Display for Expr {
 			} => {
 				let expr_bp = BindingPower::for_expr(expr);
 				let op_bp = BindingPower::for_postfix_operator(op);
-				if expr.is_statement_expression()
+				if expr.needs_parentheses()
 					|| expr_bp < op_bp
 					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
 				{
@@ -218,7 +221,7 @@ impl fmt::Display for Expr {
 				let left_bp = BindingPower::for_expr(left);
 				let right_bp = BindingPower::for_expr(right);
 
-				if left.is_statement_expression()
+				if left.needs_parentheses()
 					|| left_bp < op_bp
 					|| left_bp == op_bp
 						&& matches!(left_bp, BindingPower::Range | BindingPower::Relation)
@@ -240,7 +243,7 @@ impl fmt::Display for Expr {
 					write!(f, " {op} ")?;
 				}
 
-				if right.is_statement_expression()
+				if right.needs_parentheses()
 					|| right_bp < op_bp
 					|| right_bp == op_bp
 						&& matches!(right_bp, BindingPower::Range | BindingPower::Relation)
