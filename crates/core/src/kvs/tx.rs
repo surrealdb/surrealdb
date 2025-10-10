@@ -42,7 +42,7 @@ pub struct Transaction {
 	/// Cache the index updates
 	index_caches: IndexTreeCaches,
 	/// Does this support reverse scan?
-	reverse_scan: bool,
+	has_reverse_scan: bool,
 }
 
 impl Transaction {
@@ -50,7 +50,7 @@ impl Transaction {
 	pub fn new(local: bool, tx: Transactor) -> Transaction {
 		Transaction {
 			local,
-			reverse_scan: tx.inner.supports_reverse_scan(),
+			has_reverse_scan: tx.inner.supports_reverse_scan(),
 			tx: Mutex::new(tx),
 			cache: TransactionCache::new(),
 			index_caches: IndexTreeCaches::default(),
@@ -78,8 +78,8 @@ impl Transaction {
 	}
 
 	/// Check if the transaction supports reverse scan
-	pub fn reverse_scan(&self) -> bool {
-		self.reverse_scan
+	pub fn has_reverse_scan(&self) -> bool {
+		self.has_reverse_scan
 	}
 
 	/// Check if the transaction is finished.
