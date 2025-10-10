@@ -506,8 +506,12 @@ jobs:
   # ----------------------------------------
 
   lang-tests:
-    name: SurrealQL language tests
+    name: SurrealQL tests - ${{ matrix.engine }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        engine: [memory, rocksdb, surrealkv, tikv]
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -518,16 +522,36 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: crates/language-tests
+          cache-key: lang-${{ matrix.engine }}
+
+      - name: Setup databases
+        uses: ./.github/actions/setup-databases
+        with:
+          tikv: ${{ matrix.engine == 'tikv' }}
+          foundationdb: ${{ matrix.engine == 'fdb' }}
 
       - name: Build SurrealQL test tool
         run: |
           cd crates/language-tests
-          cargo build
+          case "${{ matrix.engine }}" in
+            memory)
+              cargo build
+              ;;
+            rocksdb)
+              cargo build --features backend-rocksdb
+              ;;
+            surrealkv)
+              cargo build --features backend-surrealkv
+              ;;
+            tikv)
+              cargo build --features backend-tikv
+              ;;
+          esac
 
       - name: Run SurrealQL test suite
         run: |
           cd crates/language-tests
-          ./target/debug/surrealql-test --color always run --no-wip -j 3
+          ./target/debug/surrealql-test --color always run --no-wip -j 3 --backend ${{ matrix.engine }}
 
   upgrade-tests:
     name: SurrealQL upgrade tests
