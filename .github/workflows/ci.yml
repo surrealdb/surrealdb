@@ -965,6 +965,7 @@ jobs:
   sdk-output:
     name: ${{ (needs.sdk-javascript.outputs.tests-failed == 'true' || needs.sdk-golang.outputs.tests-failed == 'true' || needs.sdk-python.outputs.tests-failed == 'true' || needs.sdk-php.outputs.tests-failed == 'true' || needs.sdk-dotnet.outputs.tests-failed == 'true') && '⚠️ SDK tests failed' || '✅ SDK tests passed' }}
     runs-on: ubuntu-latest
+    if: always()
     needs:
       - sdk-javascript
       - sdk-golang
@@ -983,7 +984,7 @@ jobs:
       - name: Output SDK test summary
         run: |
           if [[ "${{ needs.sdk-javascript.outputs.tests-failed == 'true' || needs.sdk-golang.outputs.tests-failed == 'true' || needs.sdk-python.outputs.tests-failed == 'true' || needs.sdk-php.outputs.tests-failed == 'true' || needs.sdk-dotnet.outputs.tests-failed == 'true' }}" == "true" ]]; then
-            echo "⚠️ Some SDK tests failed"
+            echo "❌ Some SDK tests failed"
           else
             echo "✅ All SDK tests passed successfully"
           fi
