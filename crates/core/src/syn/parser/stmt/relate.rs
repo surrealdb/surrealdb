@@ -7,7 +7,10 @@ use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;
 
 impl Parser<'_> {
-	pub async fn parse_relate_stmt(&mut self, stk: &mut Stk) -> ParseResult<RelateStatement> {
+	pub(crate) async fn parse_relate_stmt(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<RelateStatement> {
 		let only = self.eat(t!("ONLY"));
 		let (from, through, to) = stk.run(|stk| self.parse_relation(stk)).await?;
 		let uniq = self.eat(t!("UNIQUE"));
@@ -29,7 +32,10 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_relation(&mut self, stk: &mut Stk) -> ParseResult<(Expr, Expr, Expr)> {
+	pub(crate) async fn parse_relation(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<(Expr, Expr, Expr)> {
 		let first = self.parse_relate_expr(stk).await?;
 		let next = self.next();
 		let is_o = match next.kind {
@@ -55,7 +61,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_relate_kind(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+	pub(crate) async fn parse_relate_kind(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		match self.peek_kind() {
 			t!("$param") => self.next_token_value().map(Expr::Param),
 			t!("(") => {
@@ -68,7 +74,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_relate_expr(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+	pub(crate) async fn parse_relate_expr(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		match self.peek_kind() {
 			t!("[") => {
 				let start = self.pop_peek().span;
@@ -98,7 +104,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_thing_or_table(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+	pub(crate) async fn parse_thing_or_table(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
 		if self.peek_whitespace1().kind == t!(":") {
 			self.parse_record_id(stk).await.map(|x| Expr::Literal(Literal::RecordId(x)))
 		} else {

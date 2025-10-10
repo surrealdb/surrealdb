@@ -1,8 +1,7 @@
 use anyhow::{Result, bail};
 use clap::Args;
 use glob::glob;
-
-use crate::core::syn;
+use surrealdb_core::syn;
 
 #[derive(Args, Debug)]
 pub struct ValidateCommandArguments {

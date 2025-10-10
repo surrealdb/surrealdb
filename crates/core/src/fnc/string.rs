@@ -21,8 +21,33 @@ fn limit(name: &str, n: usize) -> Result<()> {
 	Ok(())
 }
 
+pub fn capitalize((string,): (String,)) -> Result<Value> {
+	if string.is_empty() {
+		return Ok(string.into());
+	}
+
+	let mut new_str = String::with_capacity(string.len());
+	let mut is_previous_whitespace = true;
+
+	for c in string.chars() {
+		if is_previous_whitespace && c.is_lowercase() {
+			// Capitalize the character
+			for upper_c in c.to_uppercase() {
+				new_str.push(upper_c);
+			}
+		} else {
+			// Keep the character as-is
+			new_str.push(c);
+		}
+
+		is_previous_whitespace = c.is_whitespace();
+	}
+
+	Ok(new_str.into())
+}
+
 pub fn concat(Any(args): Any) -> Result<Value> {
-	let strings = args.into_iter().map(Value::as_raw_string).collect::<Vec<_>>();
+	let strings = args.into_iter().map(Value::into_raw_string).collect::<Vec<_>>();
 	limit("string::concat", strings.iter().map(String::len).sum::<usize>())?;
 	Ok(strings.concat().into())
 }
@@ -36,7 +61,7 @@ pub fn ends_with((val, chr): (String, String)) -> Result<Value> {
 }
 
 pub fn join(Any(args): Any) -> Result<Value> {
-	let mut args = args.into_iter().map(Value::as_raw_string);
+	let mut args = args.into_iter().map(Value::into_raw_string);
 	let chr = args.next().ok_or_else(|| Error::InvalidArguments {
 		name: String::from("string::join"),
 		message: String::from("Expected at least one argument"),

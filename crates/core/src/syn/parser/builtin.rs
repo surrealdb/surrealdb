@@ -225,7 +225,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("rand::duration") => PathKind::Function,
 		UniCase::ascii("rand::enum") => PathKind::Function,
 		UniCase::ascii("rand::float") => PathKind::Function,
-		UniCase::ascii("rand::guid") => PathKind::Function,
+		UniCase::ascii("rand::id") => PathKind::Function,
 		UniCase::ascii("rand::int") => PathKind::Function,
 		UniCase::ascii("rand::string") => PathKind::Function,
 		UniCase::ascii("rand::time") => PathKind::Function,
@@ -260,6 +260,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		//
 		UniCase::ascii("sleep") => PathKind::Function,
 		//
+		UniCase::ascii("string::capitalize") => PathKind::Function,
 		UniCase::ascii("string::concat") => PathKind::Function,
 		UniCase::ascii("string::contains") => PathKind::Function,
 		UniCase::ascii("string::ends_with") => PathKind::Function,

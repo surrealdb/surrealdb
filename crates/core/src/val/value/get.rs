@@ -246,7 +246,7 @@ impl Value {
 						let res = fallback_function! {
 							if res => InvalidFunction(e) then {
 								if let Some(Value::Closure(x)) = v.get(name) {
-									x.compute(stk, ctx, opt, doc, args).await
+									x.invoke(stk, ctx, opt, doc, args).await
 								} else {
 									Err(e)
 								}
@@ -445,18 +445,7 @@ impl Value {
 								.run(|stk| {
 									idiom(stk, ctx, opt, doc, v.clone().into(), name, a.clone())
 								})
-								.await;
-
-							let res = fallback_function! {
-								if res => InvalidFunction(e) then {
-									let v = val.select_document(stk, ctx, opt, doc).await?.unwrap_or_default();
-									if let Some(Value::Closure(x)) = v.get(name) {
-										x.compute(stk, ctx, opt, doc, a).await
-									} else {
-										Err(e)
-									}
-								}
-							}?;
+								.await?;
 
 							stk.run(|stk| res.get(stk, ctx, opt, doc, path.next())).await
 						}
@@ -561,11 +550,17 @@ mod tests {
 	use crate::syn;
 	use crate::val::RecordId;
 
+	macro_rules! parse_val {
+		($input:expr) => {
+			crate::val::convert_public_value_to_internal(syn::value($input).unwrap())
+		};
+	}
+
 	#[tokio::test]
 	async fn get_none() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = SqlIdiom::default().into();
-		let val: Value = syn::value("{ test: { other: null, something: 123 } }").unwrap();
+		let val: Value = parse_val!("{ test: { other: null, something: 123 } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
@@ -575,7 +570,7 @@ mod tests {
 	async fn get_basic() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.something").unwrap().into();
-		let val: Value = syn::value("{ test: { other: null, something: 123 } }").unwrap();
+		let val: Value = parse_val!("{ test: { other: null, something: 123 } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(123));
@@ -586,12 +581,11 @@ mod tests {
 		let (ctx, opt) = mock().await;
 		let depth = 20;
 		let idi: Idiom = syn::idiom(&format!("{}something", "test.".repeat(depth))).unwrap().into();
-		let val: Value = syn::value(&format!(
+		let val: Value = parse_val!(&format!(
 			"{} {{ other: null, something: 123 {} }}",
 			"{ test: ".repeat(depth),
 			"}".repeat(depth)
-		))
-		.unwrap();
+		));
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(123));
@@ -602,7 +596,7 @@ mod tests {
 		let (ctx, opt) = mock().await;
 		let depth = 2000;
 		let idi: Idiom = syn::idiom(&format!("{}something", "test.".repeat(depth))).unwrap().into();
-		let val: Value = syn::value("{}").unwrap(); // A deep enough object cannot be parsed.
+		let val: Value = parse_val!("{}"); // A deep enough object cannot be parsed.
 		let mut stack = reblessive::tree::TreeStack::new();
 		let err = stack
 			.enter(|stk| val.get(stk, &ctx, &opt, None, &idi))
@@ -622,7 +616,7 @@ mod tests {
 	async fn get_thing() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.other").unwrap().into();
-		let val: Value = syn::value("{ test: { other: test:tobie, something: 123 } }").unwrap();
+		let val: Value = parse_val!("{ test: { other: test:tobie, something: 123 } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(
@@ -638,7 +632,7 @@ mod tests {
 	async fn get_array() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.something[1]").unwrap().into();
-		let val: Value = syn::value("{ test: { something: [123, 456, 789] } }").unwrap();
+		let val: Value = parse_val!("{ test: { something: [123, 456, 789] } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(456));
@@ -648,7 +642,7 @@ mod tests {
 	async fn get_array_thing() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.something[1]").unwrap().into();
-		let val: Value = syn::value("{ test: { something: [test:tobie, test:jaime] } }").unwrap();
+		let val: Value = parse_val!("{ test: { something: [test:tobie, test:jaime] } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(
@@ -664,7 +658,7 @@ mod tests {
 	async fn get_array_field() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.something[1].age").unwrap().into();
-		let val: Value = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
+		let val: Value = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(36));
@@ -674,7 +668,7 @@ mod tests {
 	async fn get_array_fields() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.something[*].age").unwrap().into();
-		let val: Value = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
+		let val: Value = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, [Value::from(34i64), Value::from(36i64)].into_iter().collect::<Value>());
@@ -684,7 +678,7 @@ mod tests {
 	async fn get_array_fields_flat() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.something.age").unwrap().into();
-		let val: Value = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
+		let val: Value = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, [Value::from(34i64), Value::from(36i64)].into_iter().collect::<Value>());
@@ -694,7 +688,7 @@ mod tests {
 	async fn get_array_where_field() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.something[WHERE age > 35].age").unwrap().into();
-		let val: Value = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
+		let val: Value = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, [Value::from(36i64)].into_iter().collect::<Value>());
@@ -704,7 +698,7 @@ mod tests {
 	async fn get_array_where_fields() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.something[WHERE age > 35]").unwrap().into();
-		let val: Value = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
+		let val: Value = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(
@@ -719,7 +713,7 @@ mod tests {
 	async fn get_array_where_fields_array_index() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.something[WHERE age > 30][0]").unwrap().into();
-		let val: Value = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
+		let val: Value = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(
@@ -735,8 +729,7 @@ mod tests {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test[city:london]").unwrap().into();
 		let val: Value =
-			syn::value("{ test: { 'city:london': true, other: test:tobie, something: 123 } }")
-				.unwrap();
+			parse_val!("{ test: { 'city:london': true, other: test:tobie, something: 123 } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(true));

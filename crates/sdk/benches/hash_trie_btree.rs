@@ -6,7 +6,7 @@ use criterion::measurement::WallTime;
 use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterion_main};
 use radix_trie::{Trie, TrieCommon, TrieKey};
 use surrealdb_core::syn;
-use surrealdb_core::val::{Array, RecordId};
+use surrealdb_types::{Array, RecordId};
 
 // Common use case: VectorSearch
 fn bench_hash_trie_btree_large_vector(c: &mut Criterion) {

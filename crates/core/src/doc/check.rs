@@ -1,5 +1,6 @@
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::sql::ToSql;
 
 use super::IgnoreError;
 use crate::catalog::Permission;
@@ -12,7 +13,6 @@ use crate::err::Error;
 use crate::expr::FlowResultExt as _;
 use crate::expr::paths::{ID, IN, OUT};
 use crate::iam::Action;
-use crate::sql::ToSql;
 use crate::val::Value;
 
 impl Document {

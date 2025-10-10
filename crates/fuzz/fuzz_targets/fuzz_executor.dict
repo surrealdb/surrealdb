@@ -290,7 +290,7 @@
 "rand::duration("
 "rand::enum("
 "rand::float("
-"rand::guid("
+"rand::id("
 "rand::int("
 "rand::string("
 "rand::time("
@@ -325,6 +325,7 @@
 # Sleep is just going to slow the fuzzer down
 # "sleep("
 "string"
+"string::capitalize("
 "string::concat("
 "string::contains("
 "string::distance::damerau_levenshtein("

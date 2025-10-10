@@ -315,7 +315,7 @@ pub fn synchronous(
 		"rand::duration" => rand::duration,
 		"rand::enum" => rand::r#enum,
 		"rand::float" => rand::float,
-		"rand::guid" => rand::guid,
+		"rand::id" => rand::id,
 		"rand::int" => rand::int,
 		"rand::string" => rand::string,
 		"rand::time" => rand::time,
@@ -337,6 +337,7 @@ pub fn synchronous(
 		"session::rd" => session::rd(ctx),
 		"session::token" => session::token(ctx),
 		//
+		"string::capitalize" => string::capitalize,
 		"string::concat" => string::concat,
 		"string::contains" => string::contains,
 		"string::ends_with" => string::ends_with,
@@ -1159,6 +1160,7 @@ pub async fn idiom(
 				args.clone(),
 				"no such method found for the string type",
 				//
+				"capitalize" => string::capitalize,
 				"concat" => string::concat,
 				"contains" => string::contains,
 				"ends_with" => string::ends_with,
@@ -1643,8 +1645,6 @@ mod tests {
 
 			#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 			{
-				use crate::val::Value;
-
 				let name = name.replace("::", ".");
 				let sql =
 					format!("RETURN function() {{ return typeof surrealdb.functions.{name}; }}");
@@ -1655,10 +1655,10 @@ mod tests {
 				let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
 				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 				let tmp = res.remove(0).result.unwrap();
-				if tmp == Value::String("object".to_owned()) {
+				if tmp == crate::types::PublicValue::String("object".to_owned()) {
 					// Assume this function is superseded by a module of the
 					// same name.
-				} else if tmp != Value::String("function".to_owned()) {
+				} else if tmp != crate::types::PublicValue::String("function".to_owned()) {
 					problems.push(format!("function {name} not exported to JavaScript: {tmp:?}"));
 				}
 			}

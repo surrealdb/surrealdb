@@ -4,6 +4,7 @@ use std::sync::LazyLock;
 use jsonwebtoken::{Algorithm, Header};
 use serde::{Deserialize, Serialize};
 
+use crate::sql::expression::convert_public_value_to_internal;
 use crate::syn;
 use crate::val::{Object, Value};
 
@@ -74,7 +75,7 @@ pub struct Claims {
 }
 
 impl Claims {
-	pub fn into_claims_object(self) -> Object {
+	pub(crate) fn into_claims_object(self) -> Object {
 		// Set default value
 		let mut out = Object::default();
 		// Add iss field if set
@@ -153,6 +154,7 @@ impl Claims {
 						continue;
 					}
 				};
+				let claim_value = convert_public_value_to_internal(claim_value);
 				out.insert(claim.clone(), claim_value);
 			}
 		}

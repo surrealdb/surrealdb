@@ -6,7 +6,7 @@ use crate::sql::{AccessType, Base, Expr};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct DefineAccessStatement {
+pub(crate) struct DefineAccessStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub base: Base,
@@ -18,7 +18,7 @@ pub struct DefineAccessStatement {
 
 impl Display for DefineAccessStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE ACCESS",)?;
+		write!(f, "DEFINE ACCESS")?;
 		match self.kind {
 			DefineKind::Default => {}
 			DefineKind::Overwrite => {

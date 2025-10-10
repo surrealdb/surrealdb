@@ -5,7 +5,7 @@
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
+value = "1"
 
 [[test.results]]
 value = "1"

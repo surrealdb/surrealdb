@@ -518,7 +518,7 @@ dependencies = [
  "bitflags",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -538,7 +538,7 @@ dependencies = [
  "bitflags",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "regex",
@@ -1615,9 +1615,9 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "humantime"
-version = "2.2.0"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b112acc8b3adf4b107a8ec20977da0273a8c386765a3ec0229bd500a1443f9f"
+checksum = "135b12329e5e3ce057a9f972339ea52bc954fe1e9358ef27f95e89716fbc5424"
 
 [[package]]
 name = "hyper"
@@ -3023,9 +3023,9 @@ checksum = "cbf4a6aa5f6d6888f39e980649f3ad6b666acdce1d78e95b8a2cb076e687ae30"
 
 [[package]]
 name = "rocksdb"
-version = "0.23.0"
+version = "0.24.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26ec73b20525cb235bad420f911473b69f9fe27cc856c5461bccd7e4af037f43"
+checksum = "ddb7af00d2b17dbd07d82c0063e25411959748ff03e8d4f96134c2ff41fce34f"
 dependencies = [
  "libc",
  "librocksdb-sys",
@@ -3601,6 +3601,7 @@ dependencies = [
  "getrandom 0.3.2",
  "hex",
  "http",
+ "humantime",
  "ipnet",
  "jsonwebtoken",
  "lexicmp",
@@ -3693,12 +3694,18 @@ dependencies = [
  "flatbuffers",
  "geo",
  "hex",
+ "http",
+ "nanoid",
  "regex",
+ "rquickjs",
  "rstest",
  "rust_decimal",
  "serde",
+ "serde_json",
  "surrealdb-protocol",
  "surrealdb-types-derive",
+ "tracing",
+ "ulid",
  "uuid",
 ]
 
@@ -3747,6 +3754,7 @@ dependencies = [
  "serde_json",
  "similar",
  "surrealdb-core",
+ "surrealdb-types",
  "tokio",
  "tokio-tungstenite",
  "toml",

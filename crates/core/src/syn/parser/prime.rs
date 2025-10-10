@@ -15,7 +15,7 @@ use crate::syn::lexer::compound::{self, Numeric};
 use crate::syn::parser::enter_object_recursion;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::token::{Glued, Span, TokenKind, t};
-use crate::val::Duration;
+use crate::types::{PublicDuration, PublicGeometry};
 
 impl Parser<'_> {
 	pub(super) fn parse_number_like_prime(&mut self) -> ParseResult<Expr> {
@@ -41,7 +41,9 @@ impl Parser<'_> {
 					compound::Numeric::Float(x) => Expr::Literal(Literal::Float(x)),
 					compound::Numeric::Integer(x) => Expr::Literal(Literal::Integer(x)),
 					compound::Numeric::Decimal(x) => Expr::Literal(Literal::Decimal(x)),
-					compound::Numeric::Duration(x) => Expr::Literal(Literal::Duration(Duration(x))),
+					compound::Numeric::Duration(x) => {
+						Expr::Literal(Literal::Duration(PublicDuration::from(x)))
+					}
 				};
 				Ok(v)
 			}
@@ -482,7 +484,7 @@ impl Parser<'_> {
 
 					let y = self.next_token_value::<f64>()?;
 					self.expect_closing_delimiter(t!(")"), start)?;
-					return Ok(Expr::Literal(Literal::Geometry(crate::val::Geometry::Point(
+					return Ok(Expr::Literal(Literal::Geometry(PublicGeometry::Point(
 						geo::Point::new(x, y),
 					))));
 				} else {

@@ -9,7 +9,7 @@ use crate::val::{Duration, Value};
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct ChangeFeed {
+pub(crate) struct ChangeFeed {
 	pub expiry: time::Duration,
 	pub store_diff: bool,
 }
@@ -35,7 +35,7 @@ impl Default for ChangeFeed {
 impl InfoStructure for ChangeFeed {
 	fn structure(self) -> Value {
 		Value::from(map! {
-			"expiry".to_string() => Duration(self.expiry).structure(),
+			"expiry".to_string() => Duration(self.expiry).into(),
 			"original".to_string() => self.store_diff.into(),
 		})
 	}

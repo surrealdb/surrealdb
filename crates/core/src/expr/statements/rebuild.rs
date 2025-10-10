@@ -16,7 +16,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum RebuildStatement {
+pub(crate) enum RebuildStatement {
 	Index(RebuildIndexStatement),
 }
 
@@ -44,7 +44,7 @@ impl Display for RebuildStatement {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct RebuildIndexStatement {
+pub(crate) struct RebuildIndexStatement {
 	pub name: String,
 	pub what: String,
 	pub if_exists: bool,

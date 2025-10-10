@@ -1,11 +1,11 @@
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
+use surrealdb_types::sql::ToSql;
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId, Permissions, ViewDefinition};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{ChangeFeed, Kind};
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::sql::statements::DefineTableStatement;
 use crate::val::Value;
 
@@ -41,27 +41,26 @@ impl DeserializeRevisioned for TableId {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TableDefinition {
-	pub namespace_id: NamespaceId,
-	pub database_id: DatabaseId,
-	pub table_id: TableId,
-
-	pub name: String,
-	pub drop: bool,
-	pub schemafull: bool,
-	pub view: Option<ViewDefinition>,
-	pub permissions: Permissions,
-	pub changefeed: Option<ChangeFeed>,
-	pub comment: Option<String>,
-	pub table_type: TableType,
+	pub(crate) namespace_id: NamespaceId,
+	pub(crate) database_id: DatabaseId,
+	pub(crate) table_id: TableId,
+	pub(crate) name: String,
+	pub(crate) drop: bool,
+	pub(crate) schemafull: bool,
+	pub(crate) view: Option<ViewDefinition>,
+	pub(crate) permissions: Permissions,
+	pub(crate) changefeed: Option<ChangeFeed>,
+	pub(crate) comment: Option<String>,
+	pub(crate) table_type: TableType,
 
 	/// The last time that a DEFINE FIELD was added to this table
-	pub cache_fields_ts: Uuid,
+	pub(crate) cache_fields_ts: Uuid,
 	/// The last time that a DEFINE EVENT was added to this table
-	pub cache_events_ts: Uuid,
+	pub(crate) cache_events_ts: Uuid,
 	/// The last time that a DEFINE TABLE was added to this table
-	pub cache_tables_ts: Uuid,
+	pub(crate) cache_tables_ts: Uuid,
 	/// The last time that a DEFINE INDEX was added to this table
-	pub cache_indexes_ts: Uuid,
+	pub(crate) cache_indexes_ts: Uuid,
 }
 
 impl_kv_value_revisioned!(TableDefinition);
@@ -93,11 +92,6 @@ impl TableDefinition {
 		}
 	}
 
-	pub fn with_changefeed(mut self, changefeed: ChangeFeed) -> Self {
-		self.changefeed = Some(changefeed);
-		self
-	}
-
 	/// Checks if this table allows normal records / documents
 	pub fn allows_normal(&self) -> bool {
 		matches!(self.table_type, TableType::Normal | TableType::Any)
@@ -127,8 +121,8 @@ impl TableDefinition {
 }
 
 impl ToSql for TableDefinition {
-	fn to_sql(&self) -> String {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&self.to_sql_definition().to_string());
 	}
 }
 
@@ -158,24 +152,24 @@ pub enum TableType {
 }
 
 impl ToSql for TableType {
-	fn to_sql(&self) -> String {
+	fn fmt_sql(&self, f: &mut String) {
 		match self {
-			TableType::Normal => "NORMAL".to_string(),
+			TableType::Any => f.push_str("ANY"),
+			TableType::Normal => f.push_str("NORMAL"),
 			TableType::Relation(rel) => {
-				let mut out = "RELATION".to_string();
+				f.push_str("RELATION");
 				if let Some(kind) = &rel.from {
-					out.push_str(&format!(" IN {}", kind));
+					f.push_str(" IN ");
+					f.push_str(&kind.to_string());
 				}
 				if let Some(kind) = &rel.to {
-					out.push_str(&format!(" OUT {}", kind));
+					f.push_str(" OUT ");
+					f.push_str(&kind.to_string());
 				}
 				if rel.enforced {
-					out.push_str(" ENFORCED");
+					f.push_str(" ENFORCED");
 				}
-
-				out
 			}
-			TableType::Any => "ANY".to_string(),
 		}
 	}
 }

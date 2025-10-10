@@ -5,11 +5,11 @@ use crate::val::Duration;
 // Durations representing the expiration of different elements of user
 // authentication In this context, the None variant represents that the element
 // does not expire
-pub struct UserDuration {
+pub(crate) struct UserDuration {
 	// Duration after which the token obtained after authenticating with user credentials expires
-	pub token: Option<Expr>,
+	pub(crate) token: Option<Expr>,
 	// Duration after which the session authenticated with user credentials or token expires
-	pub session: Option<Expr>,
+	pub(crate) session: Option<Expr>,
 }
 
 impl Default for UserDuration {

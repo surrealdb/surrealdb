@@ -1,4 +1,4 @@
-use crate::val::Value;
+use surrealdb_types::Value;
 
 pub trait Extractor: Sized {
 	fn take<I>(iterator: &mut I) -> Option<Self>
