@@ -3,7 +3,7 @@ use std::fmt::{self, Write as _};
 //use async_graphql::dynamic::Object;
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use rust_decimal::Decimal;
-use surrealdb_types::sql::ToSql;
+use surrealdb_types::ToSql;
 
 use crate::fmt::{EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::sql::{Closure, Expr, RecordIdLit};

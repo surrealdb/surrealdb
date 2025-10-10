@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use surrealdb_types::sql::ToSql;
+use surrealdb_types::ToSql;
 
 use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, NamespaceProvider,

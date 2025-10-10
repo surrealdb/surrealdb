@@ -7,7 +7,7 @@ use jsonwebtoken::{EncodingKey, Header, encode};
 use md5::Digest;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
-use surrealdb_types::sql::ToSql;
+use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::access::{

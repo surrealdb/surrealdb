@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display, Formatter};
 
 use revision::revisioned;
-use surrealdb_types::sql::ToSql;
+use surrealdb_types::ToSql;
 
 use crate::catalog::TableDefinition;
 use crate::expr::Operation;

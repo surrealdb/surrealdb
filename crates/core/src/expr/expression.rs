@@ -3,7 +3,7 @@ use std::ops::Bound;
 
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
-use surrealdb_types::sql::ToSql;
+use surrealdb_types::{ToSql, write_sql};
 
 use super::SleepStatement;
 use crate::ctx::{Context, MutableContext};
@@ -1020,7 +1020,7 @@ impl fmt::Display for Expr {
 
 impl ToSql for Expr {
 	fn fmt_sql(&self, f: &mut String) {
-		f.push_str(&self.to_string());
+		write_sql!(f, "{}", self)
 	}
 }
 

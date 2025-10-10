@@ -1,8 +1,8 @@
 use std::ops::{self, Bound};
 
-use surrealdb_types::sql::ToSql;
 use surrealdb_types::{
-	Array, Kind, Object, RecordId, RecordIdKey, RecordIdKeyRange, SurrealValue, Value, Variables,
+	Array, Kind, Object, RecordId, RecordIdKey, RecordIdKeyRange, SurrealValue, ToSql, Value,
+	Variables,
 };
 
 use crate::api::Result;
