@@ -7,8 +7,7 @@ use criterion::{BenchmarkGroup, Criterion, Throughput, criterion_group, criterio
 use flate2::read::GzDecoder;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_types::sql::ToSql;
-use surrealdb_types::{RecordId, RecordIdKey, Value};
+use surrealdb_types::{RecordId, RecordIdKey, ToSql, Value};
 use tokio::runtime::{Builder, Runtime};
 
 const EF_CONSTRUCTION: u16 = 150;

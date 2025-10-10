@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::sql::ToSql;
 use crate::utils::escape::EscapeKey;
-use crate::{SurrealValue, Value};
+use crate::{SurrealValue, Value, write_sql};
 
 /// Represents an object with key-value pairs in SurrealDB
 ///
@@ -90,8 +90,7 @@ impl ToSql for Object {
 		f.push_str("{ ");
 
 		for (i, (k, v)) in self.iter().enumerate() {
-			f.push_str(&EscapeKey(k).to_string());
-			f.push_str(": ");
+			write_sql!(f, "{}: ", EscapeKey(k));
 			v.fmt_sql(f);
 
 			if i < self.len() - 1 {

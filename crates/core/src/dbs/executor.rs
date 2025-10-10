@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{Result, anyhow, bail};
 use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
-use surrealdb_types::sql::ToSql;
+use surrealdb_types::ToSql;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tracing::instrument;

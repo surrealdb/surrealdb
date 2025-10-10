@@ -1,5 +1,5 @@
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
-use surrealdb_types::sql::ToSql;
+use surrealdb_types::{ToSql, write_sql};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId, Permissions, ViewDefinition};
@@ -122,7 +122,7 @@ impl TableDefinition {
 
 impl ToSql for TableDefinition {
 	fn fmt_sql(&self, f: &mut String) {
-		f.push_str(&self.to_sql_definition().to_string());
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }
 
@@ -159,12 +159,10 @@ impl ToSql for TableType {
 			TableType::Relation(rel) => {
 				f.push_str("RELATION");
 				if let Some(kind) = &rel.from {
-					f.push_str(" IN ");
-					f.push_str(&kind.to_string());
+					write_sql!(f, " IN {}", kind);
 				}
 				if let Some(kind) = &rel.to {
-					f.push_str(" OUT ");
-					f.push_str(&kind.to_string());
+					write_sql!(f, " OUT {}", kind);
 				}
 				if rel.enforced {
 					f.push_str(" ENFORCED");

@@ -45,7 +45,7 @@ pub use self::regex::Regex;
 pub use self::uuid::Uuid;
 use crate::sql::ToSql;
 use crate::utils::escape::QuoteStr;
-use crate::{Kind, SurrealValue};
+use crate::{Kind, SurrealValue, write_sql};
 
 /// Marker type for value conversions from Value::None
 ///
@@ -639,7 +639,8 @@ impl ToSql for Value {
 			Value::Null => f.push_str("NULL"),
 			Value::Bool(v) => v.fmt_sql(f),
 			Value::Number(v) => v.fmt_sql(f),
-			Value::String(v) => f.push_str(&QuoteStr(v).to_string()),
+			// Value::String(v) => f.push_str(&QuoteStr(v).to_string()),
+			Value::String(v) => write_sql!(f, "{}", QuoteStr(v.as_str())),
 			Value::Duration(v) => v.fmt_sql(f),
 			Value::Datetime(v) => v.fmt_sql(f),
 			Value::Uuid(v) => v.fmt_sql(f),

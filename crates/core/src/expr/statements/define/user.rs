@@ -7,7 +7,7 @@ use rand::Rng as _;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 use reblessive::tree::Stk;
-use surrealdb_types::sql::ToSql;
+use surrealdb_types::{ToSql, write_sql};
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, UserProvider};
@@ -275,6 +275,6 @@ impl Display for DefineUserStatement {
 
 impl ToSql for DefineUserStatement {
 	fn fmt_sql(&self, f: &mut String) {
-		f.push_str(&self.to_string());
+		write_sql!(f, "{}", self)
 	}
 }
