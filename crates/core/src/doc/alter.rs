@@ -301,12 +301,11 @@ impl Document {
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
-	) -> Result<Arc<Value>> {
+	) -> Result<Option<Arc<Value>>> {
 		Ok(self
 			.compute_input_data(stk, ctx, opt, stm)
 			.await?
-			.map(|x| x.value())
-			.unwrap_or_default())
+			.map(|x| x.value()))
 	}
 }
 
@@ -345,6 +344,10 @@ impl ComputedData {
 
 	pub(super) fn rid(&self) -> Value {
 		self.value_ref().pick(&*ID)
+	}
+	
+	pub(super) fn is_patch(&self) -> bool {
+		matches!(self, ComputedData::Patch(_))
 	}
 }
 
