@@ -596,8 +596,8 @@ jobs:
 
       - name: Run JavaScript tests (HTTP)
         id: test-http
-        run: bun test
         continue-on-error: true
+        run: bun test
         env:
           SURREAL_PROTOCOL: http
           SURREAL_VERSION_CHECK: "false"
@@ -605,8 +605,8 @@ jobs:
 
       - name: Run JavaScript tests (WebSocket)
         id: test-ws
-        run: bun test
         continue-on-error: true
+        run: bun test
         env:
           SURREAL_PROTOCOL: ws
           SURREAL_VERSION_CHECK: "false"
@@ -658,6 +658,7 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
+        timeout-minutes: 1
         run: |
           # Wait for SurrealDB to be ready
           for i in {1..30}; do
@@ -677,15 +678,17 @@ jobs:
 
       - name: Run Golang tests (HTTP)
         id: test-http
-        run: go test -v -cover ./...
+        timeout-minutes: 5
         continue-on-error: true
+        run: go test -v -cover ./...
         env:
           SURREALDB_URL: http://localhost:8000/rpc
 
       - name: Run Golang tests (WebSocket)
         id: test-ws
-        run: go test -v -cover ./...
+        timeout-minutes: 5
         continue-on-error: true
+        run: go test -v -cover ./...
         env:
           SURREALDB_URL: ws://localhost:8000/rpc
 
@@ -739,6 +742,7 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
+        timeout-minutes: 1
         run: |
           # Wait for SurrealDB to be ready
           for i in {1..30}; do
@@ -761,8 +765,9 @@ jobs:
 
       - name: Run Python tests (HTTP)
         id: test-http
-        run: uv run pytest
+        timeout-minutes: 5
         continue-on-error: true
+        run: uv run pytest
         env:
           PYTHONPATH: ./src
           SURREALDB_URL: http://localhost:8000
@@ -771,8 +776,9 @@ jobs:
 
       - name: Run Python tests (WebSocket)
         id: test-ws
-        run: uv run pytest
+        timeout-minutes: 5
         continue-on-error: true
+        run: uv run pytest
         env:
           PYTHONPATH: ./src
           SURREALDB_URL: ws://localhost:8000
@@ -828,6 +834,7 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
+        timeout-minutes: 1
         run: |
           # Wait for SurrealDB to be ready
           for i in {1..30}; do
@@ -847,13 +854,14 @@ jobs:
 
       - name: Run PHP tests
         id: test-php
-        run: composer test-coverage-v2
+        timeout-minutes: 5
         continue-on-error: true
+        run: composer test-coverage-v2
 
       - name: Check for test failures
         id: check-failures
         run: |
-          if [ "${{ steps.test-php.outcome }}" = "failure" ]; then
+          if [ "${{ steps.test-php.outcome }}" != "success" ]; then
             echo "failed=true" >> $GITHUB_OUTPUT
           else
             echo "failed=false" >> $GITHUB_OUTPUT
@@ -903,6 +911,7 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
+        timeout-minutes: 1
         run: |
           # Wait for SurrealDB to be ready
           for i in {1..30}; do
@@ -922,21 +931,23 @@ jobs:
 
       - name: Run .NET tests
         id: test-main
+        timeout-minutes: 5
+        continue-on-error: true
         run: >
           dotnet test
           ./SurrealDb.Net.Tests/SurrealDb.Net.Tests.csproj
           --no-restore
           --no-build
-        continue-on-error: true
 
       - name: Run .NET tests (Live Query)
         id: test-live-query
+        timeout-minutes: 5
+        continue-on-error: true
         run: >
           dotnet test
           ./SurrealDb.Net.LiveQuery.Tests/SurrealDb.Net.LiveQuery.Tests.csproj
           --no-restore
           --no-build
-        continue-on-error: true
 
       - name: Check for test failures
         id: check-failures
