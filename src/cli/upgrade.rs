@@ -7,11 +7,11 @@ use std::process::Command;
 use anyhow::{Context as _, Result, bail, ensure};
 use clap::Args;
 use semver::{Comparator, Op, Version};
+use surrealdb_core::env::{arch, os};
 
 use crate::cli::version_client;
 use crate::cli::version_client::VersionClient;
 use crate::cnf::PKG_VERSION;
-use crate::core::env::{arch, os};
 
 pub(crate) const ROOT: &str = "https://download.surrealdb.com";
 const ALPHA: &str = "alpha";

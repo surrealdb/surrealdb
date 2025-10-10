@@ -1,15 +1,15 @@
 use std::fmt;
 
 use crate::sql::{Expr, Literal};
-use crate::val::Duration;
+use crate::types::PublicDuration;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Timeout(pub Expr);
+pub(crate) struct Timeout(pub(crate) Expr);
 
 impl Default for Timeout {
 	fn default() -> Self {
-		Self(Expr::Literal(Literal::Duration(Duration::default())))
+		Self(Expr::Literal(Literal::Duration(PublicDuration::default())))
 	}
 }
 
@@ -33,6 +33,6 @@ impl From<crate::expr::Timeout> for Timeout {
 
 impl From<std::time::Duration> for Timeout {
 	fn from(v: std::time::Duration) -> Self {
-		Self(Expr::Literal(Literal::Duration(Duration::from(v))))
+		Self(Expr::Literal(Literal::Duration(PublicDuration::from(v))))
 	}
 }

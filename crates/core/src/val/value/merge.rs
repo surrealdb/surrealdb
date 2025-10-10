@@ -40,9 +40,15 @@ mod tests {
 	use super::*;
 	use crate::syn;
 
+	macro_rules! parse_val {
+		($input:expr) => {
+			crate::val::convert_public_value_to_internal(syn::value($input).unwrap())
+		};
+	}
+
 	#[tokio::test]
 	async fn merge_none() {
-		let mut res = syn::value(
+		let mut res = parse_val!(
 			"{
 				test: true,
 				name: {
@@ -50,9 +56,8 @@ mod tests {
 					last: 'Morgan Hitchcock',
 					initials: 'TMH',
 				},
-			}",
-		)
-		.unwrap();
+			}"
+		);
 		let none = Value::None;
 		match res.merge(none.clone()).unwrap_err().downcast() {
 			Ok(Error::InvalidMerge {
@@ -65,7 +70,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn merge_empty() {
-		let mut res = syn::value(
+		let mut res = parse_val!(
 			"{
 				test: true,
 				name: {
@@ -73,10 +78,9 @@ mod tests {
 					last: 'Morgan Hitchcock',
 					initials: 'TMH',
 				},
-			}",
-		)
-		.unwrap();
-		let val = syn::value(
+			}"
+		);
+		let val = parse_val!(
 			"{
 				test: true,
 				name: {
@@ -84,9 +88,8 @@ mod tests {
 					last: 'Morgan Hitchcock',
 					initials: 'TMH',
 				},
-			}",
-		)
-		.unwrap();
+			}"
+		);
 		let mrg = Value::Object(Default::default());
 		res.merge(mrg).unwrap();
 		assert_eq!(res, val);
@@ -94,7 +97,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn merge_basic() {
-		let mut res = syn::value(
+		let mut res = parse_val!(
 			"{
 				test: true,
 				name: {
@@ -102,20 +105,18 @@ mod tests {
 					last: 'Morgan Hitchcock',
 					initials: 'TMH',
 				},
-			}",
-		)
-		.unwrap();
-		let mrg = syn::value(
+			}"
+		);
+		let mrg = parse_val!(
 			"{
 				name: {
 					title: 'Mr',
 					initials: NONE,
 				},
 				tags: ['Rust', 'Golang', 'JavaScript'],
-			}",
-		)
-		.unwrap();
-		let val = syn::value(
+			}"
+		);
+		let val = parse_val!(
 			"{
 				test: true,
 				name: {
@@ -124,16 +125,15 @@ mod tests {
 					last: 'Morgan Hitchcock',
 				},
 				tags: ['Rust', 'Golang', 'JavaScript'],
-			}",
-		)
-		.unwrap();
+			}"
+		);
 		res.merge(mrg).unwrap();
 		assert_eq!(res, val);
 	}
 
 	#[tokio::test]
 	async fn merge_new_object() {
-		let mut res = syn::value(
+		let mut res = parse_val!(
 			"{
 				test: true,
 				name: 'Tobie',
@@ -141,10 +141,9 @@ mod tests {
 					a: 1,
 					b: 2,
 				}
-			}",
-		)
-		.unwrap();
-		let mrg = syn::value(
+			}"
+		);
+		let mrg = parse_val!(
 			"{
 				name: {
 					title: 'Mr',
@@ -154,10 +153,9 @@ mod tests {
 					a: 2,
 					b: NONE,
 				}
-			}",
-		)
-		.unwrap();
-		let val = syn::value(
+			}"
+		);
+		let val = parse_val!(
 			"{
 				test: true,
 				name: {
@@ -166,9 +164,8 @@ mod tests {
 				obj: {
 					a: 2,
 				},
-			}",
-		)
-		.unwrap();
+			}"
+		);
 		res.merge(mrg).unwrap();
 		assert_eq!(res, val);
 	}

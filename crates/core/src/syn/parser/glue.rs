@@ -2,7 +2,7 @@
 use super::{GluedValue, ParseResult, Parser};
 use crate::syn::lexer::compound;
 use crate::syn::token::{Glued, Token, TokenKind, t};
-use crate::val::Duration;
+use crate::types::PublicDuration;
 
 impl Parser<'_> {
 	/// Glues the next token and returns the token after.
@@ -50,7 +50,7 @@ impl Parser<'_> {
 						});
 					}
 					compound::NumericKind::Duration(x) => {
-						self.glued_value = GluedValue::Duration(Duration(x));
+						self.glued_value = GluedValue::Duration(PublicDuration::from(x));
 						self.prepend_token(Token {
 							span: value.span,
 							kind: TokenKind::Glued(Glued::Duration),
@@ -84,7 +84,7 @@ impl Parser<'_> {
 						});
 					}
 					compound::NumericKind::Duration(x) => {
-						self.glued_value = GluedValue::Duration(Duration(x));
+						self.glued_value = GluedValue::Duration(PublicDuration::from(x));
 						self.prepend_token(Token {
 							span: value.span,
 							kind: TokenKind::Glued(Glued::Duration),

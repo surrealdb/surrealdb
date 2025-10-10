@@ -84,7 +84,7 @@ pub(crate) async fn run_router(
 				let _ = route.response.send(Ok(value)).await;
 			}
 			Err(error) => {
-				let _ = route.response.send(Err(error)).await;
+				let _ = route.response.send(Err(error.into())).await;
 			}
 		}
 	}

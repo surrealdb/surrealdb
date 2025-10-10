@@ -95,7 +95,7 @@ impl<R> Connect<Db, R> {
 				// SurrealKV is already versioned, nothing to do here
 				self::VERSIONED_SCHEME => Ok(endpoint),
 				// This engine doesn't support versions
-				scheme => Err(Error::VersionsNotSupported(scheme.to_owned()).into()),
+				scheme => Err(Error::VersionsNotSupported(scheme.to_owned())),
 			}
 		};
 		self.address = self.address.and_then(replace_scheme);

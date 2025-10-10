@@ -17,7 +17,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct DefineFunctionStatement {
+pub(crate) struct DefineFunctionStatement {
 	pub kind: DefineKind,
 	pub name: String,
 	pub args: Vec<(String, Kind)>,

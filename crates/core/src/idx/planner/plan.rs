@@ -13,7 +13,6 @@ use crate::idx::planner::tree::{
 	CompoundIndexes, GroupRef, IdiomCol, IdiomPosition, IndexReference, Node, WithIndexes,
 };
 use crate::idx::planner::{GrantedPermission, RecordStrategy, ScanDirection, StatementContext};
-use crate::sql::ToSql;
 use crate::val::{Array, Number, Object, Value};
 
 /// The `PlanBuilder` struct represents a builder for constructing query plans.
@@ -556,7 +555,7 @@ impl IndexOption {
 			IndexOperator::Count => {
 				e.insert("operator", Value::from("Count"));
 				if let Index::Count(Some(c)) = &self.index_reference.index {
-					e.insert("where", Value::from(c.to_sql()));
+					e.insert("where", Value::from(c.to_string()));
 				}
 			}
 		};

@@ -30,7 +30,7 @@ use crate::val::{IndexFormat, Value};
 #[serde(rename = "$surrealdb::private::Array")]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub struct Array(pub Vec<Value>);
+pub(crate) struct Array(pub(crate) Vec<Value>);
 
 impl<T> From<Vec<T>> for Array
 where
@@ -44,6 +44,24 @@ where
 impl From<Array> for Vec<Value> {
 	fn from(s: Array) -> Self {
 		s.0
+	}
+}
+
+impl TryFrom<Array> for crate::types::PublicArray {
+	type Error = anyhow::Error;
+
+	fn try_from(s: Array) -> Result<Self, Self::Error> {
+		Ok(crate::types::PublicArray::from(
+			s.0.into_iter()
+				.map(crate::types::PublicValue::try_from)
+				.collect::<Result<Vec<_>, _>>()?,
+		))
+	}
+}
+
+impl From<crate::types::PublicArray> for Array {
+	fn from(s: crate::types::PublicArray) -> Self {
+		Array(s.into_iter().map(Value::from).collect())
 	}
 }
 
@@ -124,17 +142,6 @@ impl Array {
 		self
 	}
 
-	pub(crate) fn display<V: Display>(v: &[V], f: &mut Formatter) -> fmt::Result {
-		let mut f = Pretty::from(f);
-		f.write_char('[')?;
-		if !v.is_empty() {
-			let indent = pretty_indent();
-			write!(f, "{}", Fmt::pretty_comma_separated(v))?;
-			drop(indent);
-		}
-		f.write_char(']')
-	}
-
 	/// Stacks arrays on top of each other. This can serve as 2d array
 	/// transposition.
 	///
@@ -206,31 +213,14 @@ impl Array {
 
 impl Display for Array {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Array::display(&self.0, f)
-	}
-}
-
-// ------------------------------
-
-pub trait Abolish<T> {
-	fn abolish<F>(&mut self, f: F)
-	where
-		F: FnMut(usize) -> bool;
-}
-
-impl<T> Abolish<T> for Vec<T> {
-	fn abolish<F>(&mut self, mut f: F)
-	where
-		F: FnMut(usize) -> bool,
-	{
-		let mut i = 0;
-		// FIXME: use drain_filter once stabilized (https://github.com/rust-lang/rust/issues/43244)
-		// to avoid negation of the predicate return value.
-		self.retain(|_| {
-			let retain = !f(i);
-			i += 1;
-			retain
-		});
+		let mut f = Pretty::from(f);
+		f.write_char('[')?;
+		if !self.0.is_empty() {
+			let indent = pretty_indent();
+			write!(f, "{}", Fmt::pretty_comma_separated(&self.0))?;
+			drop(indent);
+		}
+		f.write_char(']')
 	}
 }
 
