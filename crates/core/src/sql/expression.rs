@@ -301,6 +301,52 @@ fn convert_public_record_id_key_to_internal(
 			}))
 		}
 	}
+
+	// NOTE: Changes to this function also likely require changes to
+	// crate::expr::Expr::needs_parentheses
+	/// Returns if this expression needs to be parenthesized when inside another expression.
+	fn needs_parentheses(&self) -> bool {
+		match self {
+			Expr::Literal(_)
+			| Expr::Param(_)
+			| Expr::Idiom(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Block(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::Postfix {
+				..
+			}
+			| Expr::Binary {
+				..
+			}
+			| Expr::FunctionCall(_) => false,
+			Expr::Closure(_)
+			| Expr::Break
+			| Expr::Continue
+			| Expr::Throw(_)
+			| Expr::Return(_)
+			| Expr::If(_)
+			| Expr::Select(_)
+			| Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Delete(_)
+			| Expr::Relate(_)
+			| Expr::Insert(_)
+			| Expr::Define(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Upsert(_)
+			| Expr::Alter(_)
+			| Expr::Info(_)
+			| Expr::Foreach(_)
+			| Expr::Let(_)
+			| Expr::Sleep(_) => true,
+		}
+	}
 }
 
 impl fmt::Display for Expr {
@@ -321,7 +367,10 @@ impl fmt::Display for Expr {
 			} => {
 				let expr_bp = BindingPower::for_expr(expr);
 				let op_bp = BindingPower::for_prefix_operator(op);
-				if expr_bp < op_bp || expr_bp == op_bp && matches!(expr_bp, BindingPower::Range) {
+				if expr.needs_parentheses()
+					|| expr_bp < op_bp
+					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
+				{
 					write!(f, "{op}({expr})")
 				} else {
 					write!(f, "{op}{expr}")
@@ -333,7 +382,10 @@ impl fmt::Display for Expr {
 			} => {
 				let expr_bp = BindingPower::for_expr(expr);
 				let op_bp = BindingPower::for_postfix_operator(op);
-				if expr_bp < op_bp || expr_bp == op_bp && matches!(expr_bp, BindingPower::Range) {
+				if expr.needs_parentheses()
+					|| expr_bp < op_bp
+					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
+				{
 					write!(f, "({expr}){op}")
 				} else {
 					write!(f, "{expr}{op}")
@@ -348,7 +400,8 @@ impl fmt::Display for Expr {
 				let left_bp = BindingPower::for_expr(left);
 				let right_bp = BindingPower::for_expr(right);
 
-				if left_bp < op_bp
+				if left.needs_parentheses()
+					|| left_bp < op_bp
 					|| left_bp == op_bp
 						&& matches!(left_bp, BindingPower::Range | BindingPower::Relation)
 				{
@@ -369,7 +422,8 @@ impl fmt::Display for Expr {
 					write!(f, " {op} ")?;
 				}
 
-				if right_bp < op_bp
+				if right.needs_parentheses()
+					|| right_bp < op_bp
 					|| right_bp == op_bp
 						&& matches!(right_bp, BindingPower::Range | BindingPower::Relation)
 				{
