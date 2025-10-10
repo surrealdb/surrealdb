@@ -78,6 +78,11 @@ impl CreateInfo {
 				path = Some(p);
 				ds
 			}
+			Backend::TikV => {
+				let connection = "127.0.0.1:2379";
+				let ds = Datastore::new(&format!("tikv://{connection}")).await?;
+				ds
+			}
 			Backend::Foundation => {
 				let p = self.produce_path();
 				let ds = Datastore::new(&format!("fdb://{p}")).await?;
