@@ -648,7 +648,7 @@ jobs:
         run: chmod +x ${{ github.workspace }}/artifacts/surreal
 
       - name: Setup Golang
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.version }}
           check-latest: true
