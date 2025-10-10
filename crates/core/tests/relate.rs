@@ -11,6 +11,7 @@ use crate::helpers::Test;
 #[tokio::test]
 async fn relate_with_parameters() -> Result<()> {
 	let sql = "
+		USE NS test DB test;
 		LET $tobie = person:tobie;
 		LET $jaime = person:jaime;
 		RELATE $tobie->knows->$jaime SET id = knows:test, brother = true;
@@ -18,7 +19,11 @@ async fn relate_with_parameters() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
+	assert_eq!(res.len(), 4);
+
+	// USE NS test DB test;
+	let tmp = res.remove(0).result;
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::None;
@@ -48,6 +53,7 @@ async fn relate_with_parameters() -> Result<()> {
 #[tokio::test]
 async fn relate_and_overwrite() -> Result<()> {
 	let sql = "
+		USE NS test DB test;
 		LET $tobie = person:tobie;
 		LET $jaime = person:jaime;
 		RELATE $tobie->knows->$jaime CONTENT { id: knows:test, brother: true };
@@ -57,7 +63,11 @@ async fn relate_and_overwrite() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
+	assert_eq!(res.len(), 6);
+
+	// USE NS test DB test;
+	let tmp = res.remove(0).result;
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::None;

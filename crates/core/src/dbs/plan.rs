@@ -168,7 +168,7 @@ impl ExplainItem {
 				name: "Iterate Relatable".into(),
 				details: vec![
 					("thing-1", Value::RecordId(t1.to_owned())),
-					("thing-2", Value::RecordId(t2.to_owned())),
+					("thing-2", t2.clone().into()),
 					("thing-3", Value::RecordId(t3.to_owned())),
 				],
 			},
@@ -176,7 +176,7 @@ impl ExplainItem {
 				name: "Iterate Relatable".into(),
 				details: vec![
 					("thing-1", Value::RecordId(t1.to_owned())),
-					("thing-2", Value::RecordId(t2.to_owned())),
+					("thing-2", t2.clone().into()),
 					("thing-3", Value::RecordId(t3.to_owned())),
 					("value", v.to_owned()),
 				],

@@ -16,6 +16,7 @@ use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
 use crate::expr::dir::Dir;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
+use crate::expr::statements::relate::RelateThrough;
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, record, r#ref};
@@ -80,7 +81,7 @@ pub(super) enum Collected {
 	TableKey(Key),
 	Relatable {
 		f: RecordId,
-		v: RecordId,
+		v: RelateThrough,
 		w: RecordId,
 		o: Option<Value>,
 	},
@@ -242,27 +243,48 @@ impl Collected {
 		opt: &Options,
 		txn: &Transaction,
 		f: RecordId,
-		v: RecordId,
+		v: RelateThrough,
 		w: RecordId,
 		o: Option<Value>,
 		rid_only: bool,
 	) -> Result<Processed> {
-		// if it is skippable we only need the record id
-		let val = if rid_only {
-			Operable::Value(Record::new(Value::Null.into()).into_read_only())
-		} else {
-			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-			let val = txn.get_record(ns, db, &v.table, &v.key, None).await?;
-			Operable::Relate(f, val, w, o.map(|v| v.into()))
+		let pro = match (rid_only, v) {
+			(true, RelateThrough::Table(v)) => Processed {
+				rs: RecordStrategy::KeysOnly,
+				generate: Some(v),
+				rid: None,
+				ir: None,
+				val: Operable::Value(Default::default()),
+			},
+			(false, RelateThrough::Table(v)) => Processed {
+				rs: RecordStrategy::KeysAndValues,
+				generate: Some(v),
+				rid: None,
+				ir: None,
+				val: Operable::Relate(f, Default::default(), w, None),
+			},
+			(true, RelateThrough::RecordId(v)) => Processed {
+				rs: RecordStrategy::KeysOnly,
+				generate: None,
+				rid: Some(v.into()),
+				ir: None,
+				val: Operable::Value(Default::default()),
+			},
+			(false, RelateThrough::RecordId(v)) => {
+				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+				let val = txn.get_record(ns, db, &v.table, &v.key, None).await?;
+				let val = Operable::Relate(f, val, w, o.map(|v| v.into()));
+
+				Processed {
+					rs: RecordStrategy::KeysAndValues,
+					generate: None,
+					rid: Some(v.into()),
+					ir: None,
+					val,
+				}
+			}
 		};
-		// Process the document record
-		let pro = Processed {
-			rs: RecordStrategy::KeysAndValues,
-			generate: None,
-			rid: Some(v.into()),
-			ir: None,
-			val,
-		};
+
 		Ok(pro)
 	}
 

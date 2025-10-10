@@ -27,8 +27,9 @@ impl Document {
 	pub(super) fn generate_record_id(&mut self) -> Result<()> {
 		// Check if we need to generate a record id
 		if let Some(tb) = &self.r#gen {
-			// This is a CREATE, UPSERT, UPDATE statement
-			if let Workable::Normal = &self.extras {
+			// This is a CREATE, UPSERT, UPDATE, RELATE statement
+			// INSERT not yet supported
+			if !matches!(self.extras, Workable::Insert(_)) {
 				// Check if the document already has an ID from the current data
 				let existing_id = self.current.doc.as_ref().pick(&*ID);
 				let id = if existing_id.is_some() {
@@ -59,16 +60,6 @@ impl Document {
 				);
 				// Set the document id
 				self.id = Some(Arc::new(id));
-			}
-			// This is a INSERT statement
-			else if let Workable::Insert(_) = &self.extras {
-				// TODO(tobiemh): implement last-step id generation for INSERT
-				// statements
-			}
-			// This is a RELATE statement
-			else if let Workable::Relate(_, _, _) = &self.extras {
-				// TODO(tobiemh): implement last-step id generation for RELATE
-				// statements
 			}
 		}
 		//

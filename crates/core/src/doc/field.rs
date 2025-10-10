@@ -158,7 +158,7 @@ impl Document {
 		// Get the record id
 		let rid = self.id()?;
 		// Get the user applied input
-		let inp = self.initial.doc.as_ref().changed(self.current.doc.as_ref());
+		let inp = self.compute_input_value(stk, ctx, opt, stm).await?;
 		// When set, any matching embedded object fields
 		// which are prefixed with the specified idiom
 		// will be skipped, as the parent object is optional

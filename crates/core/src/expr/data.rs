@@ -57,16 +57,6 @@ impl Data {
 	/// THIS FUNCTION IS BROKEN, DON'T USE IT ANYWHERE WHERE IT ISN'T ALREADY
 	/// BEING USED.
 	///
-	/// See [`Data::pick`] for why it is broken.
-	///
-	/// Fetch the 'id' field if one has been specified
-	pub(crate) async fn rid(&self, stk: &mut Stk, ctx: &Context, opt: &Options) -> Result<Value> {
-		self.pick(stk, ctx, opt, "id").await
-	}
-
-	/// THIS FUNCTION IS BROKEN, DON'T USE IT ANYWHERE WHERE IT ISN'T ALREADY
-	/// BEING USED.
-	///
 	/// Fetch a field path value if one is specified
 	///
 	/// This function computes the expression it has again. This is a mistake. I

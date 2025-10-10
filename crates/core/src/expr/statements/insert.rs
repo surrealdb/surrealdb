@@ -9,6 +9,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::expression::VisitExpression;
 use crate::expr::paths::{IN, OUT};
+use crate::expr::statements::relate::RelateThrough;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Datetime, RecordId, Table};
@@ -201,7 +202,8 @@ fn iterable(id: RecordId, v: Value, relation: bool) -> Result<Iterable> {
 				})
 			}
 		};
-		Ok(Iterable::Relatable(f, id, w, Some(v)))
+		// TODO(micha): Support table relations too?
+		Ok(Iterable::Relatable(f, RelateThrough::RecordId(id), w, Some(v)))
 	} else {
 		Ok(Iterable::Mergeable(id, v))
 	}

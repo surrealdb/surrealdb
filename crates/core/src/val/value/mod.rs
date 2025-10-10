@@ -1,5 +1,4 @@
 mod all;
-mod changed;
 mod clear;
 mod compare;
 mod cut;
