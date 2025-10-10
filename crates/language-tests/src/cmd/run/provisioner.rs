@@ -80,6 +80,10 @@ impl CreateInfo {
 			}
 			Backend::TikV => {
 				let connection = "127.0.0.1:2379";
+				let id = self.id_gen.fetch_add(1, Ordering::AcqRel);
+				// Use unique keyspace per test to ensure isolation
+				std::env::set_var("SURREAL_TIKV_KEYSPACE", format!("test_keyspace_{id}"));
+				std::env::set_var("SURREAL_TIKV_API_VERSION", "2");
 				let ds = Datastore::new(&format!("tikv://{connection}")).await?;
 				ds
 			}
