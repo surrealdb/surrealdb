@@ -819,7 +819,7 @@ impl Datastore {
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn get_version(&self) -> Result<MajorVersion> {
 		// Start a new writeable transaction
-		let txn = self.transaction(Write, Pessimistic).await?.enclose();
+		let txn = self.transaction(Write, Optimistic).await?.enclose();
 		// Create the key where the version is stored
 		let key = crate::key::version::new();
 		// Check if a version is already set in storage
