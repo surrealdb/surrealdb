@@ -615,7 +615,7 @@ jobs:
       - name: Check for test failures
         id: check-failures
         run: |
-          if [ "${{ steps.test-http.outcome }}" = "failure" ] || [ "${{ steps.test-ws.outcome }}" = "failure" ]; then
+          if [ "${{ steps.test-http.outcome }}" != "success" ] || [ "${{ steps.test-ws.outcome }}" != "success" ]; then
             echo "failed=true" >> $GITHUB_OUTPUT
           else
             echo "failed=false" >> $GITHUB_OUTPUT
@@ -695,7 +695,7 @@ jobs:
       - name: Check for test failures
         id: check-failures
         run: |
-          if [ "${{ steps.test-http.outcome }}" = "failure" ] || [ "${{ steps.test-ws.outcome }}" = "failure" ]; then
+          if [ "${{ steps.test-http.outcome }}" != "success" ] || [ "${{ steps.test-ws.outcome }}" != "success" ]; then
             echo "failed=true" >> $GITHUB_OUTPUT
           else
             echo "failed=false" >> $GITHUB_OUTPUT
@@ -788,7 +788,7 @@ jobs:
       - name: Check for test failures
         id: check-failures
         run: |
-          if [ "${{ steps.test-http.outcome }}" = "failure" ] || [ "${{ steps.test-ws.outcome }}" = "failure" ]; then
+          if [ "${{ steps.test-http.outcome }}" != "success" ] || [ "${{ steps.test-ws.outcome }}" != "success" ]; then
             echo "failed=true" >> $GITHUB_OUTPUT
           else
             echo "failed=false" >> $GITHUB_OUTPUT
@@ -940,7 +940,7 @@ jobs:
           --no-build
 
       - name: Run .NET tests (Live Query)
-        id: test-live-query
+        id: test-live
         timeout-minutes: 5
         continue-on-error: true
         run: >
@@ -952,7 +952,7 @@ jobs:
       - name: Check for test failures
         id: check-failures
         run: |
-          if [ "${{ steps.test-main.outcome }}" = "failure" ] || [ "${{ steps.test-live-query.outcome }}" = "failure" ]; then
+          if [ "${{ steps.test-main.outcome }}" != "success" ] || [ "${{ steps.test-live.outcome }}" != "success" ]; then
             echo "failed=true" >> $GITHUB_OUTPUT
           else
             echo "failed=false" >> $GITHUB_OUTPUT
