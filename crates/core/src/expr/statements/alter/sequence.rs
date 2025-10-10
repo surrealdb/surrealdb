@@ -15,7 +15,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct AlterSequenceStatement {
+pub(crate) struct AlterSequenceStatement {
 	pub name: String,
 	pub if_exists: bool,
 	pub timeout: Option<Timeout>,

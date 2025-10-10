@@ -1,7 +1,7 @@
 use std::future::Future;
 
-use serde::{Deserialize, Serialize};
-use surrealdb::{Connection, RecordId, Surreal};
+use surrealdb::types::{RecordId, SurrealValue};
+use surrealdb::{Connection, Surreal};
 use tokio::sync::SemaphorePermit;
 
 /// Tests for this module are defined using this macro.
@@ -52,31 +52,31 @@ const ROOT_PASS: &str = "root";
 static TEMP_DIR: std::sync::LazyLock<std::path::PathBuf> =
 	std::sync::LazyLock::new(|| temp_dir::TempDir::new().unwrap().child("sdb-test"));
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, SurrealValue)]
 struct Record {
 	name: String,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, SurrealValue)]
 struct ApiRecordId {
 	id: RecordId,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, SurrealValue)]
 struct RecordName {
 	name: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, SurrealValue)]
 struct RecordBuf {
 	id: RecordId,
 	name: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct AuthParams<'a> {
-	email: &'a str,
-	pass: &'a str,
+#[derive(Debug, SurrealValue)]
+struct AuthParams {
+	email: String,
+	pass: String,
 }
 
 /// Trait for creating a database.
@@ -112,6 +112,7 @@ mod ws {
 	use surrealdb::Surreal;
 	use surrealdb::engine::remote::ws::{Client, Ws};
 	use surrealdb::opt::auth::Root;
+	use surrealdb_types::SurrealValue;
 	use tokio::sync::{Semaphore, SemaphorePermit};
 
 	use super::{ROOT_PASS, ROOT_USER};
@@ -123,8 +124,8 @@ mod ws {
 		let permit = PERMITS.acquire().await.unwrap();
 		let db = Surreal::new::<Ws>("127.0.0.1:8000").await.unwrap();
 		db.signin(Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		})
 		.await
 		.unwrap();
@@ -163,8 +164,8 @@ mod ws {
 		// At this point the connection has already been established but the database
 		// hasn't been selected yet.
 		db.signin(Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		})
 		.await
 		.unwrap();
@@ -197,12 +198,11 @@ mod ws {
 	/// and tests various message sizes including edge cases.
 	#[test_log::test(tokio::test)]
 	async fn check_max_size() {
-		use serde::{Deserialize, Serialize};
 		use surrealdb::opt::{Config, WebsocketConfig};
 		use ulid::Ulid;
 
 		/// Test content structure for validating large message handling
-		#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+		#[derive(Debug, Clone, SurrealValue, PartialEq)]
 		struct Content {
 			content: String,
 		}
@@ -225,8 +225,8 @@ mod ws {
 		let config = Config::new().websocket(ws_config).unwrap();
 		let db = Surreal::new::<Ws>(("127.0.0.1:8000", config)).await.unwrap();
 		db.signin(Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		})
 		.await
 		.unwrap();
@@ -257,7 +257,9 @@ mod ws {
 				.await
 				.unwrap_err();
 
-			assert!(error.to_string().starts_with("The message is too long"));
+			let error_str = error.to_string();
+
+			assert!(error_str.starts_with("Internal error: Message too long: "), "{error_str}");
 		}
 	}
 
@@ -280,8 +282,8 @@ mod http {
 		let permit = PERMITS.acquire().await.unwrap();
 		let db = Surreal::new::<Http>("127.0.0.1:8000").await.unwrap();
 		db.signin(Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		})
 		.await
 		.unwrap();
@@ -300,13 +302,13 @@ mod http {
 
 #[cfg(feature = "kv-mem")]
 mod mem {
+	use surrealdb::Surreal;
 	use surrealdb::engine::local::{Db, Mem};
-	use surrealdb::error::Db as DbError;
 	use surrealdb::opt::auth::Root;
 	use surrealdb::opt::capabilities::{Capabilities, ExperimentalFeature};
 	use surrealdb::opt::{Config, Resource};
-	use surrealdb::{RecordIdKey, Surreal};
-	use surrealdb_core::iam;
+	use surrealdb::types::RecordIdKey;
+	use surrealdb_types::RecordId;
 	use tokio::sync::{Semaphore, SemaphorePermit};
 
 	use super::{ROOT_PASS, ROOT_USER};
@@ -317,10 +319,10 @@ mod mem {
 	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 		let permit = PERMITS.acquire().await.unwrap();
 		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
+		let config = Config::new().user(root.clone()).capabilities(Capabilities::all());
 		let db = Surreal::new::<Mem>(config).await.unwrap();
 		db.signin(root).await.unwrap();
 		(permit, db)
@@ -341,45 +343,47 @@ mod mem {
 	async fn signin_first_not_necessary() {
 		let db = Surreal::new::<Mem>(()).await.unwrap();
 		db.use_ns("namespace").use_db("database").await.unwrap();
-		let Some(record): Option<ApiRecordId> = db.create(("item", "foo")).await.unwrap() else {
+		let Some(record): Option<ApiRecordId> =
+			db.create(RecordId::new("item", "foo")).await.unwrap()
+		else {
 			panic!("record not found");
 		};
-		assert_eq!(*record.id.key(), RecordIdKey::from("foo".to_owned()));
+		assert_eq!(record.id.key, RecordIdKey::from("foo"));
 	}
 
 	#[test_log::test(tokio::test)]
 	async fn cant_sign_into_default_root_account() {
 		let db = Surreal::new::<Mem>(()).await.unwrap();
-		let Some(DbError::InvalidAuth) = db
-			.signin(Root {
-				username: ROOT_USER,
-				password: ROOT_PASS,
+
+		assert_eq!(
+			db.signin(Root {
+				username: ROOT_USER.to_string(),
+				password: ROOT_PASS.to_string(),
 			})
 			.await
 			.unwrap_err()
-			.downcast_ref()
-		else {
-			panic!("unexpected successful login");
-		};
+			.to_string(),
+			"Thrown error: There was a problem with authentication",
+		);
 	}
 
 	#[test_log::test(tokio::test)]
 	async fn credentials_activate_authentication() {
 		let config = Config::new().user(Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		});
 		let db = Surreal::new::<Mem>(config).await.unwrap();
 		db.use_ns("namespace").use_db("database").await.unwrap();
 		let res = db.create(Resource::from("item:foo")).await;
-		let Some(DbError::IamError(iam::Error::NotAllowed {
-			actor: _,
-			action: _,
-			resource: _,
-		})) = res.unwrap_err().downcast_ref()
-		else {
-			panic!("expected permissions error");
-		};
+		let err = res.unwrap_err();
+		let err_str = err.to_string();
+		if !err_str.contains("NotAllowed")
+			&& !err_str.contains("not allowed")
+			&& !err_str.contains("permission")
+		{
+			panic!("expected permissions error, got: {}", err_str);
+		}
 	}
 
 	#[test_log::test(tokio::test)]
@@ -433,10 +437,10 @@ mod rocksdb {
 		let permit = PERMITS.acquire().await.unwrap();
 		let path = TEMP_DIR.join(Ulid::new().to_string());
 		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
+		let config = Config::new().user(root.clone()).capabilities(Capabilities::all());
 		let db = Surreal::new::<RocksDb>((path, config)).await.unwrap();
 		db.signin(root).await.unwrap();
 		(permit, db)
@@ -478,10 +482,10 @@ mod tikv {
 	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 		let permit = PERMITS.acquire().await.unwrap();
 		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
+		let config = Config::new().user(root.clone()).capabilities(Capabilities::all());
 		let db = Surreal::new::<TiKv>(("127.0.0.1:2379", config)).await.unwrap();
 		db.signin(root).await.unwrap();
 		(permit, db)
@@ -513,10 +517,10 @@ mod fdb {
 	async fn new_db() -> (SemaphorePermit<'static>, Surreal<Db>) {
 		let permit = PERMITS.acquire().await.unwrap();
 		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
+		let config = Config::new().user(root.clone()).capabilities(Capabilities::all());
 		let path = "/etc/foundationdb/fdb.cluster";
 		surrealdb::engine::any::connect((format!("fdb://{path}"), config.clone())).await.unwrap();
 		let db = Surreal::new::<FDb>((path, config)).await.unwrap();
@@ -545,10 +549,10 @@ mod surrealkv {
 		let permit = PERMITS.acquire().await.unwrap();
 		let path = TEMP_DIR.join(Ulid::new().to_string());
 		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
+		let config = Config::new().user(root.clone()).capabilities(Capabilities::all());
 		let db = Surreal::new::<SurrealKv>((path, config)).await.unwrap();
 		db.signin(root).await.unwrap();
 		(permit, db)
@@ -594,10 +598,10 @@ mod surrealkv_versioned {
 		let permit = PERMITS.acquire().await.unwrap();
 		let path = TEMP_DIR.join(Ulid::new().to_string());
 		let root = Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		};
-		let config = Config::new().user(root).capabilities(Capabilities::all());
+		let config = Config::new().user(root.clone()).capabilities(Capabilities::all());
 		let db = Surreal::new::<SurrealKv>((path, config)).versioned().await.unwrap();
 		db.signin(root).await.unwrap();
 		(permit, db)
@@ -640,8 +644,8 @@ mod any {
 		let permit = PERMITS.acquire().await.unwrap();
 		let db = surrealdb::engine::any::connect("http://127.0.0.1:8000").await.unwrap();
 		db.signin(Root {
-			username: ROOT_USER,
-			password: ROOT_PASS,
+			username: ROOT_USER.to_string(),
+			password: ROOT_PASS.to_string(),
 		})
 		.await
 		.unwrap();

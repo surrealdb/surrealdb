@@ -59,8 +59,23 @@ pub mod rpc;
 pub mod sql;
 pub mod str;
 pub mod syn;
-pub mod val;
+mod val;
 pub mod vs;
+
+pub(crate) mod types {
+	//! Re-export the types from the types crate for internal use prefixed with Public.
+
+	pub use surrealdb_types::{
+		Action as PublicAction, Array as PublicArray, Bytes as PublicBytes,
+		Datetime as PublicDatetime, Duration as PublicDuration, File as PublicFile,
+		Geometry as PublicGeometry, GeometryKind as PublicGeometryKind, Kind as PublicKind,
+		KindLiteral as PublicKindLiteral, Notification as PublicNotification,
+		Number as PublicNumber, Object as PublicObject, Range as PublicRange,
+		RecordId as PublicRecordId, RecordIdKey as PublicRecordIdKey,
+		RecordIdKeyRange as PublicRecordIdKeyRange, Regex as PublicRegex, SurrealValue,
+		Uuid as PublicUuid, Value as PublicValue, Variables as PublicVariables,
+	};
+}
 
 #[cfg(feature = "ml")]
 pub use surrealml as ml;

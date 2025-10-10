@@ -5,7 +5,7 @@ use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Block(pub Vec<Expr>);
+pub struct Block(pub(crate) Vec<Expr>);
 
 impl From<Block> for crate::expr::Block {
 	fn from(v: Block) -> Self {

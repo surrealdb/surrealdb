@@ -332,11 +332,12 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 #[cfg(all(test, feature = "kv-mem"))]
 mod tests {
 
+	use surrealdb_types::{self, Object};
+
 	use super::*;
-	use crate::Value;
-	use crate::core::val;
 	use crate::opt::auth::Root;
 	use crate::opt::capabilities::Capabilities;
+	use crate::types::Value;
 
 	#[tokio::test]
 	async fn local_engine_without_auth() {
@@ -362,8 +363,8 @@ mod tests {
 		let users: Value = res.take("users").unwrap();
 
 		assert_eq!(
-			users.into_inner(),
-			val::Value::from(val::Object::default()),
+			users,
+			Value::Object(Object::default()),
 			"there should be no users in the system"
 		);
 	}
@@ -372,12 +373,15 @@ mod tests {
 	async fn local_engine_with_auth() {
 		// Instantiate an in-memory instance with root credentials
 		let creds = Root {
-			username: "root",
-			password: "root",
+			username: "root".to_string(),
+			password: "root".to_string(),
 		};
-		let db = connect(("memory", Config::new().user(creds).capabilities(Capabilities::all())))
-			.await
-			.unwrap();
+		let db = connect((
+			"memory",
+			Config::new().user(creds.clone()).capabilities(Capabilities::all()),
+		))
+		.await
+		.unwrap();
 		db.use_ns("N").use_db("D").await.unwrap();
 
 		// The client needs to sign in before it can access anything

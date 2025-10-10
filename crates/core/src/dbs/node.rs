@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use surrealdb_types::sql::ToSql;
 use uuid::Uuid;
 
 use crate::expr::statements::info::InfoStructure;
@@ -66,6 +67,12 @@ impl Display for Node {
 			false => write!(f, " ACTIVE")?,
 		};
 		Ok(())
+	}
+}
+
+impl ToSql for Node {
+	fn fmt_sql(&self, f: &mut String) {
+		f.push_str(&self.to_string());
 	}
 }
 

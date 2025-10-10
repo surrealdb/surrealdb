@@ -5,7 +5,7 @@ use super::unicode::byte;
 use crate::syn::error::{SyntaxError, bail, syntax_error};
 use crate::syn::lexer::Lexer;
 use crate::syn::token::Span;
-use crate::val::{Bytes, File, Uuid};
+use crate::types::{PublicBytes, PublicFile, PublicUuid};
 
 impl Lexer<'_> {
 	/// Unescapes a string slice.
@@ -289,7 +289,7 @@ impl Lexer<'_> {
 		reader.offset()
 	}
 
-	pub fn lex_uuid(str: &str) -> Result<Uuid, SyntaxError> {
+	pub fn lex_uuid(str: &str) -> Result<PublicUuid, SyntaxError> {
 		let mut uuid_buffer = [0u8; 16];
 
 		let mut reader = BytesReader::new(str.as_bytes());
@@ -378,11 +378,11 @@ impl Lexer<'_> {
 
 		eat_uuid_hex(&mut reader, &mut uuid_buffer[10..16])?;
 
-		Ok(Uuid(uuid::Uuid::from_bytes(uuid_buffer)))
+		Ok(PublicUuid::from(uuid::Uuid::from_bytes(uuid_buffer)))
 	}
 
 	/// Lex a bytes string.
-	pub fn lex_bytes(str: &str) -> Result<Bytes, SyntaxError> {
+	pub fn lex_bytes(str: &str) -> Result<PublicBytes, SyntaxError> {
 		let mut res = Vec::with_capacity(str.len() / 2);
 		let mut reader = BytesReader::new(str.as_bytes());
 		while let Some(x) = reader.next() {
@@ -417,10 +417,10 @@ impl Lexer<'_> {
 			res.push(byte1 << 4 | byte2);
 		}
 
-		Ok(Bytes(res))
+		Ok(PublicBytes::from(res))
 	}
 
-	pub fn lex_file(str: &str) -> Result<File, SyntaxError> {
+	pub fn lex_file(str: &str) -> Result<PublicFile, SyntaxError> {
 		let mut reader = BytesReader::new(str.as_bytes());
 		let mut bucket = String::new();
 		loop {
@@ -477,9 +477,6 @@ impl Lexer<'_> {
 			}
 		}
 
-		Ok(File {
-			bucket,
-			key,
-		})
+		Ok(PublicFile::new(bucket, key))
 	}
 }

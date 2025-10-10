@@ -3,12 +3,14 @@ use std::ops::{Bound, RangeBounds};
 
 use serde::{Deserialize, Serialize};
 
+use crate::sql::ToSql;
 use crate::{SurrealValue, Value};
 
 /// Represents a range of values in SurrealDB
 ///
 /// A range defines an interval between two values with inclusive or exclusive bounds.
 /// This is commonly used for range queries and comparisons.
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 pub struct Range {
 	/// The lower bound of the range
@@ -135,6 +137,30 @@ impl Ord for Range {
 		match compare_bounds(&self.start, &other.start) {
 			Ordering::Equal => compare_bounds(&self.end, &other.end),
 			x => x,
+		}
+	}
+}
+
+impl ToSql for Range {
+	fn fmt_sql(&self, f: &mut String) {
+		match self.start {
+			Bound::Unbounded => {}
+			Bound::Included(ref x) => x.fmt_sql(f),
+			Bound::Excluded(ref x) => {
+				x.fmt_sql(f);
+				f.push('>');
+			}
+		}
+		f.push_str("..");
+		match self.end {
+			Bound::Unbounded => {}
+			Bound::Included(ref x) => {
+				f.push('=');
+				x.fmt_sql(f);
+			}
+			Bound::Excluded(ref x) => {
+				x.fmt_sql(f);
+			}
 		}
 	}
 }

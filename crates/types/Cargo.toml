@@ -14,6 +14,10 @@ homepage.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = []
+js = ["dep:js"]
+
 [dependencies]
 anyhow.workspace = true
 bytes.workspace = true
@@ -21,12 +25,18 @@ chrono = { workspace = true, features = ["serde"] }
 flatbuffers.workspace = true
 geo = { workspace = true, features = ["use-serde"] }
 hex.workspace = true
+http.workspace = true
+js = { workspace = true, optional = true }
+nanoid.workspace = true
 regex.workspace = true
 rstest.workspace = true
 rust_decimal.workspace = true
 serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
 surrealdb-protocol = { workspace = true, features = ["flatbuffers"] }
 surrealdb-types-derive.workspace = true
+tracing.workspace = true
+ulid.workspace = true
 
 # WASM DEPENDENCY CONFIGURATION
 [target.'cfg(target_family = "wasm")'.dependencies]
@@ -35,6 +45,9 @@ uuid = { workspace = true, features = ["serde", "v4", "v7", "js"] }
 # NON-WASM DEPENDENCY CONFIGURATION
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+
+[dev-dependencies]
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

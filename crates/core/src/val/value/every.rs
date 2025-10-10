@@ -104,16 +104,22 @@ mod tests {
 	use super::*;
 	use crate::syn;
 
+	macro_rules! parse_val {
+		($input:expr) => {
+			crate::val::convert_public_value_to_internal(syn::value($input).unwrap())
+		};
+	}
+
 	#[test]
 	fn every_empty() {
-		let val = syn::value("{}").unwrap();
+		let val = parse_val!("{}");
 		let res: Vec<Idiom> = vec![];
 		assert_eq!(res, val.every(None, false, ArrayBehaviour::Ignore));
 	}
 
 	#[test]
 	fn every_with_empty_objects_arrays() {
-		let val = syn::value("{ test: {}, status: false, something: {age: 45}, tags: []}").unwrap();
+		let val = parse_val!("{ test: {}, status: false, something: {age: 45}, tags: []}");
 		let res: Vec<Idiom> = vec![
 			syn::idiom("something.age").unwrap().into(),
 			syn::idiom("status").unwrap().into(),
@@ -125,18 +131,18 @@ mod tests {
 
 	#[test]
 	fn every_without_array_indexes() {
-		let val = syn::value(
-			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
-		).unwrap();
+		let val = parse_val!(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
+		);
 		let res: Vec<Idiom> = vec![syn::idiom("test.something").unwrap().into()];
 		assert_eq!(res, val.every(None, false, ArrayBehaviour::Ignore));
 	}
 
 	#[test]
 	fn every_including_array_indexes() {
-		let val = syn::value(
-			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
-		).unwrap();
+		let val = parse_val!(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
+		);
 		let res: Vec<Idiom> = vec![
 			syn::idiom("test.something").unwrap().into(),
 			syn::idiom("test.something[1].age").unwrap().into(),
@@ -153,9 +159,9 @@ mod tests {
 
 	#[test]
 	fn every_including_intermediary_nodes_without_array_indexes() {
-		let val = syn::value(
-			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
-		).unwrap();
+		let val = parse_val!(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
+		);
 		let res: Vec<Idiom> =
 			vec![syn::idiom("test").unwrap().into(), syn::idiom("test.something").unwrap().into()];
 		assert_eq!(res, val.every(None, true, ArrayBehaviour::Ignore));
@@ -163,9 +169,9 @@ mod tests {
 
 	#[test]
 	fn every_including_intermediary_nodes_including_array_indexes() {
-		let val = syn::value(
-			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
-		).unwrap();
+		let val = parse_val!(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
+		);
 		let res: Vec<Idiom> = vec![
 			syn::idiom("test").unwrap().into(),
 			syn::idiom("test.something").unwrap().into(),
@@ -185,9 +191,9 @@ mod tests {
 
 	#[test]
 	fn every_given_one_path_part() {
-		let val = syn::value(
-			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
-		).unwrap();
+		let val = parse_val!(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
+		);
 
 		let val =
 			val.every(Some(&Idiom::from(syn::idiom("test").unwrap())), true, ArrayBehaviour::Full);
@@ -214,9 +220,9 @@ mod tests {
 
 	#[test]
 	fn every_given_two_path_parts() {
-		let val = syn::value(
-			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
-		).unwrap();
+		let val = parse_val!(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
+		);
 		let res: Vec<Idiom> = vec![
 			syn::idiom("test.something").unwrap().into(),
 			syn::idiom("test.something[1]").unwrap().into(),
@@ -242,9 +248,9 @@ mod tests {
 
 	#[test]
 	fn every_including_intermediary_nodes_including_array_indexes_ending_all() {
-		let val = syn::value(
-			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
-		).unwrap();
+		let val = parse_val!(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
+		);
 		let res: Vec<Idiom> = vec![
 			syn::idiom("test.something").unwrap().into(),
 			syn::idiom("test.something[1]").unwrap().into(),
@@ -270,10 +276,9 @@ mod tests {
 
 	#[test]
 	fn every_wildcards() {
-		let val = syn::value(
-			"{ test: { a: { color: 'red' }, b: { color: 'blue' }, c: { color: 'green' } } }",
-		)
-		.unwrap();
+		let val = parse_val!(
+			"{ test: { a: { color: 'red' }, b: { color: 'blue' }, c: { color: 'green' } } }"
+		);
 
 		let res: Vec<Idiom> = vec![
 			syn::idiom("test.*.color").unwrap().into(),

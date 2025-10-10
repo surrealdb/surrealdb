@@ -5,6 +5,7 @@ use async_channel::Receiver;
 use indexmap::IndexMap;
 use reqwest::ClientBuilder;
 use reqwest::header::HeaderMap;
+use surrealdb_core::cnf::SURREALDB_USER_AGENT;
 use tokio::sync::watch;
 use url::Url;
 
@@ -15,7 +16,6 @@ use crate::api::opt::Endpoint;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::api::opt::Tls;
 use crate::api::{ExtraFeatures, Result, Surreal, conn};
-use crate::core::cnf::SURREALDB_USER_AGENT;
 use crate::opt::WaitFor;
 
 impl crate::api::Connection for Client {}
@@ -79,6 +79,8 @@ pub(crate) async fn run_router(base_url: Url, client: reqwest::Client, route_rx:
 		let result =
 			super::router(route.request, &base_url, &client, &mut headers, &mut vars, &mut auth)
 				.await;
-		let _ = route.response.send(result).await;
+		// Convert api::err::Error to DbResultError
+		let db_result = result.map_err(surrealdb_core::rpc::DbResultError::from);
+		let _ = route.response.send(db_result).await;
 	}
 }

@@ -14,7 +14,7 @@ use crate::val::{
 };
 
 #[derive(Clone, Debug)]
-pub enum CoerceError {
+pub(crate) enum CoerceError {
 	// Coercion error at the end.
 	InvalidKind {
 		from: Value,
@@ -87,7 +87,7 @@ impl<T> CoerceErrorExt for Result<T, CoerceError> {
 /// Coercion rules are more strict then casting rules.
 /// Calling this method will succeed if the value can be unified with the kind
 /// of the target
-pub trait Coerce: Sized {
+pub(crate) trait Coerce: Sized {
 	/// Returns if calling coerce on the value will succeed or not.
 	///
 	/// If `T::can_coerce(&v)` returns `false` then `T::coerce(v) should not

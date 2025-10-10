@@ -1,19 +1,28 @@
 #![doc = include_str!("../README.md")]
 #![warn(missing_docs)]
 
+mod error;
 mod flatbuffers;
 mod kind;
+mod notification;
+pub mod sql;
 mod traits;
 pub(crate) mod utils;
 mod value;
+mod variables;
 
+#[doc(hidden)]
 pub use anyhow;
+pub use error::*;
 pub use flatbuffers::*;
 pub use kind::*;
+pub use notification::*;
 // Re-export the derive macro
-pub use surrealdb_types_derive::*;
+pub use surrealdb_types_derive::{SurrealValue, kind};
 pub use traits::*;
+pub use utils::either::*;
 pub use value::*;
+pub use variables::*;
 
 /// Macro for creating a SurrealDB object.
 ///
@@ -42,7 +51,7 @@ macro_rules! object {
         {
             let mut obj = $crate::Object::new();
             $(
-                $crate::object!(@insert obj, $key: $crate::Value::from($value));
+                $crate::object!(@insert obj, $key: $crate::SurrealValue::into_value($value));
             )*
             obj
         }
@@ -57,6 +66,32 @@ macro_rules! object {
     (@insert $obj:expr, $key:literal: $value:expr) => {
         $obj.insert($key.to_string(), $value);
     };
+}
+
+/// Macro for creating a SurrealDB variables struct.
+///
+/// This macro creates a SurrealDB variables struct, which is a collection of key-value pairs.
+/// All values must implement the `SurrealValue` trait.
+///
+/// # Example
+///
+/// ```rust
+/// use surrealdb_types::vars;
+///
+/// let obj = vars! {
+///     name: "John".to_string(),
+///     "user-id": 12345,
+/// };
+/// ```
+///
+/// Uses the `object!` macro to create the variables struct.
+#[macro_export]
+macro_rules! vars {
+	($($key:tt: $value:expr),* $(,)?) => {
+		$crate::Variables::from($crate::object! {
+			$($key: $value),*
+		})
+	};
 }
 
 /// Macro for creating a SurrealDB array.
@@ -83,7 +118,7 @@ macro_rules! array {
         {
             let mut arr = $crate::Array::new();
             $(
-                arr.push($crate::Value::from($value));
+                arr.push($crate::Value::from_t($value));
             )*
             arr
         }

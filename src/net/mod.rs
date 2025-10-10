@@ -35,6 +35,8 @@ use axum_server::tls_rustls::RustlsConfig;
 use http::header;
 use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
 use surrealdb_core::CommunityComposer;
+use surrealdb_core::dbs::capabilities::ExperimentalTarget;
+use surrealdb_core::kvs::Datastore;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::ServiceBuilderExt;
@@ -51,8 +53,6 @@ use tower_http::trace::TraceLayer;
 
 use crate::cli::Config;
 use crate::cnf;
-use crate::core::dbs::capabilities::ExperimentalTarget;
-use crate::core::kvs::Datastore;
 use crate::net::signals::graceful_shutdown;
 use crate::rpc::{RpcState, notifications};
 use crate::telemetry::metrics::HttpMetricsLayer;

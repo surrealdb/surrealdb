@@ -3,7 +3,7 @@ use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
-use surrealdb_core::val::Value;
+use surrealdb_types::Value;
 
 #[tokio::test]
 async fn query_basic() -> Result<()> {
@@ -27,11 +27,11 @@ async fn query_basic() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("Tobie".to_owned());
+	let val = Value::from_t("Tobie".to_owned());
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("Tobie".to_owned());
+	let val = Value::from_t("Tobie".to_owned());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -59,11 +59,11 @@ async fn query_basic_with_modification() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from(45062);
+	let val = Value::from_int(45062);
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from(45062);
+	let val = Value::from_int(45062);
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -87,15 +87,15 @@ async fn query_root_function() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("THIS IS A TEST".to_owned());
+	let val = Value::from_t("THIS IS A TEST".to_owned());
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("this is a test".to_owned());
+	let val = Value::from_t("this is a test".to_owned());
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Value::from("this-is-a-test".to_owned());
+	let val = Value::from_t("this-is-a-test".to_owned());
 	assert_eq!(tmp, val);
 	//
 	Ok(())

@@ -2,16 +2,16 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use serde::de::DeserializeOwned;
-use serde_content::Value as Content;
+use surrealdb_types::{SurrealValue, Value, Variables};
 use uuid::Uuid;
 
+use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::{PatchOp, Resource};
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
-use crate::{Surreal, Value};
+use crate::opt::PatchOps;
 
 /// A patch future
 #[derive(Debug)]
@@ -20,7 +20,7 @@ pub struct Patch<'r, C: Connection, R> {
 	pub(super) txn: Option<Uuid>,
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) resource: Result<Resource>,
-	pub(super) patches: Vec<serde_content::Result<Content<'static>>>,
+	pub(super) patches: PatchOps,
 	pub(super) upsert: bool,
 	pub(super) response_type: PhantomData<R>,
 }
@@ -40,7 +40,7 @@ where
 }
 
 macro_rules! into_future {
-	() => {
+	($method:ident) => {
 		fn into_future(self) -> Self::IntoFuture {
 			let Patch {
 				txn,
@@ -52,22 +52,32 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let mut vec = Vec::with_capacity(patches.len());
-				for result in patches {
-					let content =
-						result.map_err(|x| crate::error::Api::DeSerializeValue(x.to_string()))?;
-					let value = crate::api::value::to_core_value(content)?;
-					vec.push(value);
+				for patch in patches.into_iter() {
+					vec.push(surrealdb_types::Value::from(patch));
 				}
-				let patches = crate::core::val::Value::from(vec);
+				let patches = surrealdb_types::Value::Array(surrealdb_types::Array::from(vec));
 				let router = client.inner.router.extract()?;
-				let cmd = Command::Patch {
-					txn,
-					upsert,
-					what: resource?,
-					data: Some(patches),
+
+				let what = resource?;
+
+				let mut variables = Variables::new();
+				let what = what.for_sql_query(&mut variables)?;
+
+				let operation = if upsert {
+					"UPSERT"
+				} else {
+					"UPDATE"
 				};
 
-				router.execute_query(cmd).await?.take(0)
+				variables.insert("_patches".to_string(), patches);
+
+				let cmd = Command::RawQuery {
+					txn,
+					query: Cow::Owned(format!("{operation} {what} PATCH $_patches RETURN AFTER")),
+					variables,
+				};
+
+				router.$method(cmd).await
 			})
 		}
 	};
@@ -80,29 +90,29 @@ where
 	type Output = Result<Value>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {}
+	into_future! {execute_value}
 }
 
 impl<'r, Client, R> IntoFuture for Patch<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {}
+	into_future! {execute_opt}
 }
 
 impl<'r, Client, R> IntoFuture for Patch<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
-	into_future! {}
+	into_future! {execute_vec}
 }
 
 impl<'r, C, R> Patch<'r, C, R>
@@ -111,17 +121,22 @@ where
 {
 	/// Applies JSON Patch changes to all records, or a specific record, in the
 	/// database.
-	pub fn patch(mut self, patch: impl Into<PatchOp>) -> Patch<'r, C, R> {
-		let PatchOp(patch) = patch.into();
-		match patch {
-			Ok(Content::Seq(values)) => {
-				for value in values {
-					self.patches.push(Ok(value));
-				}
-			}
-			Ok(value) => self.patches.push(Ok(value)),
-			Err(error) => self.patches.push(Err(error)),
+	pub fn patch(self, patch: impl Into<PatchOp>) -> Self {
+		let Patch {
+			txn,
+			client,
+			resource,
+			patches,
+			upsert,
+			response_type,
+		} = self;
+		Patch {
+			txn,
+			client,
+			resource,
+			patches: patches.push(patch.into()),
+			upsert,
+			response_type,
 		}
-		self
 	}
 }

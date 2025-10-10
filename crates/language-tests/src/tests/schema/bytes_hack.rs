@@ -1,5 +1,5 @@
 use base64::{Engine, engine::general_purpose::STANDARD_NO_PAD};
-use surrealdb_core::val::{Bytes, Function, Value};
+use surrealdb_types::{Bytes, Function, Value};
 
 /// A hack for dealing with the issue that `<bytes>` is exported as a function call, which causes
 /// problems when comparing values.
