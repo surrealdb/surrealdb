@@ -43,9 +43,9 @@ pub use self::range::Range;
 pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::regex::Regex;
 pub use self::uuid::Uuid;
-use crate::sql::ToSql;
+use crate::sql::ToSqon;
 use crate::utils::escape::QuoteStr;
-use crate::{Kind, SurrealValue, write_sql};
+use crate::{Kind, SurrealValue};
 
 /// Marker type for value conversions from Value::None
 ///
@@ -632,26 +632,25 @@ impl FromIterator<Value> for Value {
 	}
 }
 
-impl ToSql for Value {
-	fn fmt_sql(&self, f: &mut String) {
+impl ToSqon for Value {
+	fn fmt_sqon(&self, f: &mut String) {
 		match self {
 			Value::None => f.push_str("NONE"),
 			Value::Null => f.push_str("NULL"),
-			Value::Bool(v) => v.fmt_sql(f),
-			Value::Number(v) => v.fmt_sql(f),
-			// Value::String(v) => f.push_str(&QuoteStr(v).to_string()),
-			Value::String(v) => write_sql!(f, "{}", QuoteStr(v.as_str())),
-			Value::Duration(v) => v.fmt_sql(f),
-			Value::Datetime(v) => v.fmt_sql(f),
-			Value::Uuid(v) => v.fmt_sql(f),
-			Value::Array(v) => v.fmt_sql(f),
-			Value::Object(v) => v.fmt_sql(f),
-			Value::Geometry(v) => v.fmt_sql(f),
-			Value::Bytes(v) => v.fmt_sql(f),
-			Value::RecordId(v) => v.fmt_sql(f),
-			Value::File(v) => v.fmt_sql(f),
-			Value::Range(v) => v.fmt_sql(f),
-			Value::Regex(v) => v.fmt_sql(f),
+			Value::Bool(v) => v.fmt_sqon(f),
+			Value::Number(v) => v.fmt_sqon(f),
+			Value::String(v) => f.push_str(&QuoteStr(v).to_string()),
+			Value::Duration(v) => v.fmt_sqon(f),
+			Value::Datetime(v) => v.fmt_sqon(f),
+			Value::Uuid(v) => v.fmt_sqon(f),
+			Value::Array(v) => v.fmt_sqon(f),
+			Value::Object(v) => v.fmt_sqon(f),
+			Value::Geometry(v) => v.fmt_sqon(f),
+			Value::Bytes(v) => v.fmt_sqon(f),
+			Value::RecordId(v) => v.fmt_sqon(f),
+			Value::File(v) => v.fmt_sqon(f),
+			Value::Range(v) => v.fmt_sqon(f),
+			Value::Regex(v) => v.fmt_sqon(f),
 		}
 	}
 }
@@ -1097,7 +1096,7 @@ mod tests {
 	#[case::regex(Value::Regex("[a-z]+".parse().unwrap()), "/[a-z]+/")]
 	#[case::regex(Value::Regex("^test$".parse().unwrap()), "/^test$/")]
 	fn test_to_sql(#[case] value: Value, #[case] expected_sql: &str) {
-		assert_eq!(&value.to_sql(), expected_sql);
+		assert_eq!(&value.to_sqon(), expected_sql);
 	}
 
 	#[rstest]

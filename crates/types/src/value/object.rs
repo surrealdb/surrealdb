@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
+use crate::sql::ToSqon;
 use crate::utils::escape::EscapeKey;
-use crate::{SurrealValue, Value, write_sql};
+use crate::{SurrealValue, Value};
 
 /// Represents an object with key-value pairs in SurrealDB
 ///
@@ -81,8 +81,8 @@ impl Object {
 	}
 }
 
-impl ToSql for Object {
-	fn fmt_sql(&self, f: &mut String) {
+impl ToSqon for Object {
+	fn fmt_sqon(&self, f: &mut String) {
 		if self.is_empty() {
 			return f.push_str("{  }");
 		}
@@ -90,8 +90,9 @@ impl ToSql for Object {
 		f.push_str("{ ");
 
 		for (i, (k, v)) in self.iter().enumerate() {
-			write_sql!(f, "{}: ", EscapeKey(k));
-			v.fmt_sql(f);
+			f.push_str(&EscapeKey(k).to_string());
+			f.push_str(": ");
+			v.fmt_sqon(f);
 
 			if i < self.len() - 1 {
 				f.push_str(", ");

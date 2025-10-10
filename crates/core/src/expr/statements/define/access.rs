@@ -4,7 +4,6 @@ use anyhow::{Result, bail};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
 use reblessive::tree::Stk;
-use surrealdb_types::{ToSql, write_sql};
 
 use super::DefineKind;
 use crate::catalog::providers::{AuthorisationProvider, NamespaceProvider};
@@ -22,6 +21,7 @@ use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{AccessType, Algorithm, Base, Expr, Idiom, JwtAccess, Literal, RecordAccess};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::{ToSql, write_sql};
 use crate::val::{self, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

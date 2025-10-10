@@ -1,11 +1,11 @@
 use std::time::Duration;
 
 use revision::revisioned;
-use surrealdb_types::{ToSql, write_sql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::{DefineKind, DefineSequenceStatement};
+use crate::sql::{ToSql, write_sql};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]

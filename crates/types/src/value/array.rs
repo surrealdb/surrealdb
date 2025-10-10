@@ -2,7 +2,7 @@ use std::ops::{Deref, DerefMut};
 
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
+use crate::sql::ToSqon;
 use crate::{SurrealValue, Value};
 
 /// Represents an array of values in SurrealDB
@@ -86,11 +86,11 @@ impl IntoIterator for Array {
 	}
 }
 
-impl ToSql for Array {
-	fn fmt_sql(&self, f: &mut String) {
+impl ToSqon for Array {
+	fn fmt_sqon(&self, f: &mut String) {
 		f.push('[');
 		for (i, v) in self.iter().enumerate() {
-			v.fmt_sql(f);
+			v.fmt_sqon(f);
 			if i < self.len() - 1 {
 				f.push_str(", ");
 			}

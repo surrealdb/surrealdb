@@ -13,7 +13,7 @@ use surrealdb_core::dbs::capabilities::{
 };
 use surrealdb_core::syn::parser::ParserSettings;
 use surrealdb_core::syn::{self};
-use surrealdb_types::{Object, RecordId, Value, ToSql};
+use surrealdb_types::{Object, RecordId, Value, sql::ToSqon};
 
 /// Root test config struct.
 #[derive(Default, Clone, Debug, Deserialize, Serialize)]
@@ -416,7 +416,7 @@ impl Serialize for SurrealConfigValue {
 	where
 		S: serde::Serializer,
 	{
-		let v = self.0.to_sql();
+		let v = self.0.to_sqon();
 		v.serialize(serializer)
 	}
 }
@@ -480,7 +480,7 @@ impl Serialize for SurrealRecordId {
 	where
 		S: serde::Serializer,
 	{
-		let v = self.0.to_sql();
+		let v = self.0.to_sqon();
 		v.serialize(serializer)
 	}
 }
@@ -524,7 +524,7 @@ impl Serialize for SurrealObject {
 	where
 		S: serde::Serializer,
 	{
-		let v = self.0.to_sql();
+		let v = self.0.to_sqon();
 		v.serialize(serializer)
 	}
 }

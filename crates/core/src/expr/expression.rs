@@ -3,7 +3,6 @@ use std::ops::Bound;
 
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
-use surrealdb_types::{ToSql, write_sql};
 
 use super::SleepStatement;
 use crate::ctx::{Context, MutableContext};
@@ -24,6 +23,7 @@ use crate::expr::{
 };
 use crate::fmt::{EscapeIdent, Pretty};
 use crate::fnc;
+use crate::sql::{ToSql, write_sql};
 use crate::types::PublicValue;
 use crate::val::{Array, Closure, Range, Table, Value};
 

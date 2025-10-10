@@ -3,7 +3,7 @@ use std::ops::{Bound, RangeBounds};
 
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
+use crate::sql::ToSqon;
 use crate::{SurrealValue, Value};
 
 /// Represents a range of values in SurrealDB
@@ -141,13 +141,13 @@ impl Ord for Range {
 	}
 }
 
-impl ToSql for Range {
-	fn fmt_sql(&self, f: &mut String) {
+impl ToSqon for Range {
+	fn fmt_sqon(&self, f: &mut String) {
 		match self.start {
 			Bound::Unbounded => {}
-			Bound::Included(ref x) => x.fmt_sql(f),
+			Bound::Included(ref x) => x.fmt_sqon(f),
 			Bound::Excluded(ref x) => {
-				x.fmt_sql(f);
+				x.fmt_sqon(f);
 				f.push('>');
 			}
 		}
@@ -156,10 +156,10 @@ impl ToSql for Range {
 			Bound::Unbounded => {}
 			Bound::Included(ref x) => {
 				f.push('=');
-				x.fmt_sql(f);
+				x.fmt_sqon(f);
 			}
 			Bound::Excluded(ref x) => {
-				x.fmt_sql(f);
+				x.fmt_sqon(f);
 			}
 		}
 	}

@@ -1,11 +1,11 @@
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use surrealdb_types::{ToSql, write_sql};
 
 use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::{DefineBucketStatement, DefineKind};
+use crate::sql::{ToSql, write_sql};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]

@@ -2,12 +2,12 @@ use std::fmt;
 use std::time::Duration;
 
 use revision::revisioned;
-use surrealdb_types::{ToSql, write_sql};
 
 use crate::catalog::schema::base::Base;
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql::{ToSql, write_sql};
 use crate::val::Value;
 
 /// The type of access methods available
