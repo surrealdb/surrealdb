@@ -3,7 +3,7 @@ use std::io::{self, IsTerminal as _};
 use std::time::{Duration, Instant};
 
 use similar::{Algorithm, TextDiff};
-use surrealdb_types::{Value as SurValue, sql::ToSql};
+use surrealdb_types::{Value as SurValue, ToSql};
 
 use super::{
 	MatchValueType, MatcherMismatch, Mismatch, MismatchKind, ResultTypeMismatchReport, TestError,

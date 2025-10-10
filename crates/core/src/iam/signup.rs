@@ -5,7 +5,7 @@ use chrono::Utc;
 use jsonwebtoken::{Header, encode};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use surrealdb_types::sql::ToSql;
+use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::access::{authenticate_record, create_refresh_token_record};

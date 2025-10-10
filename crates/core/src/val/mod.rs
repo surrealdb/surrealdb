@@ -12,7 +12,7 @@ use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
-use surrealdb_types::sql::ToSql;
+use surrealdb_types::{ToSql, write_sql};
 
 use crate::err::Error;
 use crate::expr;
@@ -538,7 +538,7 @@ impl fmt::Display for Value {
 
 impl ToSql for Value {
 	fn fmt_sql(&self, f: &mut String) {
-		f.push_str(&self.to_string());
+		write_sql!(f, "{}", self)
 	}
 }
 

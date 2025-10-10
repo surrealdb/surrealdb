@@ -5,7 +5,7 @@ use anyhow::{Result, bail};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
 use jsonwebtoken::{DecodingKey, Validation, decode};
-use surrealdb_types::sql::ToSql;
+use surrealdb_types::ToSql;
 
 use crate::catalog::providers::{
 	AuthorisationProvider, DatabaseProvider, NamespaceProvider, UserProvider,

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::sql::ToSql;
 use crate::utils::escape::QuoteStr;
+use crate::write_sql;
 
 /// Represents a datetime value in SurrealDB
 ///
@@ -81,8 +82,7 @@ impl Display for Datetime {
 
 impl ToSql for Datetime {
 	fn fmt_sql(&self, f: &mut String) {
-		f.push('d');
-		f.push_str(&QuoteStr(&self.to_string()).to_string())
+		write_sql!(f, "d{}", QuoteStr(&self.to_string()))
 	}
 }
 
