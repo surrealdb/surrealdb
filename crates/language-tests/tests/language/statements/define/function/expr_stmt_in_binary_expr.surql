@@ -9,9 +9,11 @@ value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: 
 
 [[test.results]]
 value = "[{ id: foo:v3cq5e4gkqdjz9xe4lrb }]"
+skip-record-id-key = true
 
 [[test.results]]
 value = "[{ id: foo:v3cq5e4gkqdjz9xe4lrb }]"
+skip-record-id-key = true
 
 */
 
