@@ -26,6 +26,7 @@ mod telemetry;
 use std::future::Future;
 use std::process::ExitCode;
 
+pub use cli::{Config, ConfigCheck};
 /// Re-export `RpcState` for convenience so embedders can `use surreal::RpcState`.
 pub use rpc::RpcState;
 pub use surrealdb_core as core;
@@ -39,11 +40,16 @@ use crate::net::RouterFactory;
 /// This spins up a Tokio runtime with a larger stack size and then runs the CLI
 /// entrypoint (which starts the server when the `start` subcommand is used).
 ///
-/// Generic parameters:
-/// - T: `TransactionBuilderFactory` (selects/validates the datastore backend).
-/// - R: `RouterFactory` (constructs the HTTP router).
-pub fn init<T: TransactionBuilderFactory, R: RouterFactory>() -> ExitCode {
-	with_enough_stack(cli::init::<T, R>())
+/// # Parameters
+/// - `composer`: A composer implementing the required traits for dependency injection.
+///
+/// # Generic parameters
+/// - `C`: A composer type that implements:
+///   - `TransactionBuilderFactory` (selects/validates the datastore backend)
+///   - `RouterFactory` (constructs the HTTP router)
+///   - `ConfigCheck` (validates configuration before initialization)
+pub fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(composer: C) -> ExitCode {
+	with_enough_stack(cli::init::<C>(composer))
 }
 
 /// Rust's default thread stack size of 2MiB doesn't allow sufficient recursion depth.

@@ -7,7 +7,7 @@ use clap::Args;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
 use surrealdb_core::kvs::{Datastore, TransactionBuilderFactory};
 
-use crate::cli::CF;
+use crate::cli::Config;
 use crate::core::dbs::Session;
 use crate::core::dbs::capabilities::{
 	ArbitraryQueryTarget, Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
@@ -562,7 +562,18 @@ impl From<DbsCapabilities> for Capabilities {
 
 #[instrument(level = "trace", target = "surreal::dbs", skip_all)]
 /// Initialise the database server
+///
+/// Creates and configures the datastore with the provided options.
+///
+/// # Parameters
+/// - `factory`: Transaction builder factory for datastore backend selection
+/// - `opt`: Server configuration including database path and authentication
+///
+/// # Generic parameters
+/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
 pub async fn init<F: TransactionBuilderFactory>(
+	factory: &F,
+	opt: &Config,
 	StartCommandDbsOptions {
 		strict_mode,
 		query_timeout,
@@ -576,8 +587,6 @@ pub async fn init<F: TransactionBuilderFactory>(
 		slow_log_param_deny,
 	}: StartCommandDbsOptions,
 ) -> Result<Datastore> {
-	// Get local copy of options
-	let opt = CF.get().unwrap();
 	// Log specified strict mode
 	debug!("Database strict mode is {strict_mode}");
 	// Log specified query timeout
@@ -614,7 +623,7 @@ pub async fn init<F: TransactionBuilderFactory>(
 	// Log the specified server capabilities
 	debug!("Server capabilities: {capabilities}");
 	// Parse and setup the desired kv datastore
-	let dbs = Datastore::new_with_factory::<F>(&opt.path)
+	let dbs = Datastore::new_with_factory::<F>(factory, &opt.path)
 		.await?
 		.with_notifications()
 		.with_strict_mode(strict_mode)

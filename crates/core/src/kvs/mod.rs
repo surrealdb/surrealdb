@@ -18,7 +18,7 @@
 
 pub mod export;
 
-mod api;
+pub mod api;
 mod batch;
 mod cf;
 mod clock;
@@ -43,7 +43,7 @@ pub(crate) mod cache;
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod index;
-pub(crate) mod savepoint;
+pub mod savepoint;
 pub(crate) mod sequences;
 pub(crate) mod slowlog;
 pub(crate) mod tasklease;

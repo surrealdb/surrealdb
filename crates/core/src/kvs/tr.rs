@@ -32,6 +32,27 @@ pub enum Check {
 	Error,
 }
 
+impl Check {
+	const MSG: &'static str = "A transaction was dropped without being committed or cancelled";
+
+	pub fn drop_check(&self, done: bool, write: bool) {
+		if done || !write {
+			return;
+		}
+		match self {
+			Check::None => {
+				trace!("{}", Self::MSG);
+			}
+			Check::Warn => {
+				warn!("{}", Self::MSG);
+			}
+			Check::Error => {
+				error!("{}", Self::MSG);
+			}
+		}
+	}
+}
+
 /// Specifies whether the transaction is read-only or writeable.
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum TransactionType {
