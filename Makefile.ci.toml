@@ -470,7 +470,11 @@ script = """
     else
         cargo build
     fi
-    ./target/debug/surrealql-test --color always run --no-wip -j 3 --backend ${_TEST_API_ENGINE}
+    if [ "${_TEST_API_ENGINE}" = "tikv" ] || [ "${_TEST_API_ENGINE}" = "foundation" ]; then
+        ./target/debug/surrealql-test --color always run --no-wip -j 1 --backend ${_TEST_API_ENGINE}
+    else
+        ./target/debug/surrealql-test --color always run --no-wip -j 3 --backend ${_TEST_API_ENGINE}
+    fi
 """
 
 [tasks.ci-lang-test-mem]
