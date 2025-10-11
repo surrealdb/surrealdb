@@ -10,7 +10,7 @@ use crate::api::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 #[cfg(feature = "protocol-http")]
 use crate::api::opt::Tls;
-use crate::api::opt::{Endpoint, EndpointKind, WebsocketConfig};
+use crate::api::opt::{Endpoint, EndpointKind};
 #[allow(unused_imports)] // used by the DB engines
 use crate::api::ExtraFeatures;
 use crate::api::Result;
@@ -174,6 +174,8 @@ impl Connection for Any {
 				EndpointKind::Ws | EndpointKind::Wss => {
 					#[cfg(feature = "protocol-ws")]
 					{
+						use crate::api::opt::WebsocketConfig;
+
 						let WebsocketConfig {
 							max_message_size,
 							max_write_buffer_size,

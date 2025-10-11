@@ -42,7 +42,6 @@ impl Default for WebsocketConfig {
 	/// - 128 KiB read and write buffers
 	/// - Unlimited write buffer size (no backpressure)
 	/// - 64 MiB maximum message size
-	/// - 16 MiB maximum frame size
 	///
 	/// These defaults are suitable for most applications but can be customized
 	/// based on specific performance and memory requirements.
