@@ -8,7 +8,7 @@ value = "NONE"
 value = "[{ id: user:foo }]"
 
 [[test.results]]
-value = "[{ id: activity:33teaj8bmm3mfyz2f6zw, parent: { id: user:foo }, this: { id: activity:33teaj8bmm3mfyz2f6zw } }]"
+value = "[{ id: activity:33teaj8bmm3mfyz2f6zw, parent: { id: user:foo } }]"
 skip-record-id-key = true
 
 */

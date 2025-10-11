@@ -28,9 +28,9 @@ DEFINE ACCESS account ON DATABASE TYPE RECORD
 
 DEFINE TABLE OVERWRITE something SCHEMAFULL
     PERMISSIONS
-        FOR CREATE, UPDATE
+        FOR CREATE, SELECT
             WHERE $auth = user
-        FOR SELECT, UPDATE, DELETE NONE;
+        FOR UPDATE, DELETE NONE;
 
 DEFINE FIELD OVERWRITE user ON something
     TYPE record<user>
@@ -38,4 +38,4 @@ DEFINE FIELD OVERWRITE user ON something
 
 DEFINE FIELD OVERWRITE time ON something
     TYPE datetime
-    VALUE time::now();
+    VALUE time::EPOCH;

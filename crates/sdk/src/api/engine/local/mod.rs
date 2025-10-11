@@ -637,7 +637,7 @@ async fn router(
 		}
 		| Command::ImportMl {
 			..
-		} => Err(crate::api::Error::BackupsNotSupported.into()),
+		} => Err(crate::api::Error::BackupsNotSupported),
 
 		#[cfg(not(target_family = "wasm"))]
 		Command::ExportFile {
