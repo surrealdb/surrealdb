@@ -457,6 +457,75 @@ run_task = { name = [
 ], fork = true, parallel = false }
 
 #
+# Language tests
+#
+[tasks.test-lang]
+category = "CI - LANGUAGE TESTS"
+description = "Run SurrealQL language tests with specified engine"
+script = """
+    #!/bin/bash -ex
+    cd crates/language-tests
+    if [ "${_TEST_LANG_FEATURES}" != "" ]; then
+        cargo build --features ${_TEST_LANG_FEATURES}
+    else
+        cargo build
+    fi
+    if [ "${_TEST_API_ENGINE}" = "tikv" ] || [ "${_TEST_API_ENGINE}" = "foundation" ]; then
+        ./target/debug/surrealql-test --color always run --no-wip -j 1 --backend ${_TEST_API_ENGINE}
+    else
+        ./target/debug/surrealql-test --color always run --no-wip -j 3 --backend ${_TEST_API_ENGINE}
+    fi
+"""
+
+[tasks.ci-lang-test-mem]
+category = "CI - LANGUAGE TESTS"
+env = { _TEST_API_ENGINE = "memory", _TEST_LANG_FEATURES = "" }
+run_task = { name = [
+    "test-lang",
+], fork = true, parallel = true }
+
+[tasks.ci-lang-test-rocksdb]
+category = "CI - LANGUAGE TESTS"
+env = { _TEST_API_ENGINE = "rocksdb", _TEST_LANG_FEATURES = "backend-rocksdb" }
+run_task = { name = [
+    "test-lang",
+], fork = true, parallel = true }
+
+[tasks.ci-lang-test-surrealkv]
+category = "CI - LANGUAGE TESTS"
+env = { _TEST_API_ENGINE = "surrealkv", _TEST_LANG_FEATURES = "backend-surrealkv" }
+run_task = { name = [
+    "test-lang",
+], fork = true, parallel = false }
+
+[tasks.ci-lang-test-tikv]
+category = "CI - LANGUAGE TESTS"
+env = { _TEST_API_ENGINE = "tikv", _TEST_LANG_FEATURES = "backend-tikv" }
+run_task = { name = [
+    "start-tikv",
+    "test-lang",
+    "stop-tikv",
+], fork = true, parallel = false }
+
+[tasks.ci-lang-test-fdb]
+category = "CI - LANGUAGE TESTS"
+env = { _TEST_API_ENGINE = "foundation", _TEST_LANG_FEATURES = "backend-foundation" }
+run_task = { name = [
+    "test-lang",
+], fork = true, parallel = false }
+
+[tasks.ci-lang-test-all]
+category = "CI - LANGUAGE TESTS"
+description = "Run all language tests"
+dependencies = [
+    "ci-lang-test-mem",
+    "ci-lang-test-rocksdb",
+    "ci-lang-test-surrealkv",
+    "ci-lang-test-tikv",
+    "ci-lang-test-fdb",
+]
+
+#
 # Services
 #
 [tasks.start-surrealdb]
@@ -677,7 +746,7 @@ script = """
     echo "Building SDK local tests..."
     cd tests/sdk/local
     cargo build
-    
+
     echo "Building SDK remote tests..."
     cd ../remote
     cargo build
@@ -722,10 +791,10 @@ category = "CI - ALL REQUIRED CHECKS"
 description = "Run all required CI checks including SurrealQL language tests"
 script = """
     #!/bin/bash -e
-    
+
     # Run all standard required checks
     cargo make ci-all-required
-    
+
     # Run SurrealQL language tests
     echo "Running SurrealQL language tests..."
     cd crates/language-tests

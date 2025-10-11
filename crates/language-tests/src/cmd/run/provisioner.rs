@@ -10,6 +10,8 @@ use anyhow::{Context, Result};
 use futures::FutureExt as _;
 use surrealdb_core::dbs::Capabilities;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_core::kvs::LockType;
+use surrealdb_core::kvs::TransactionType;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 
 use crate::cli::Backend;
@@ -78,9 +80,20 @@ impl CreateInfo {
 				path = Some(p);
 				ds
 			}
+			Backend::TikV => {
+				let p = "127.0.0.1:2379";
+				let ds = Datastore::new(&format!("tikv://{p}")).await?;
+				let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+				tx.delr(vec![0u8]..vec![0xffu8]).await?;
+				tx.commit().await?;
+				ds
+			}
 			Backend::Foundation => {
 				let p = self.produce_path();
 				let ds = Datastore::new(&format!("fdb://{p}")).await?;
+				let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
+				tx.delr(vec![0u8]..vec![0xffu8]).await?;
+				tx.commit().await?;
 				path = Some(p);
 				ds
 			}

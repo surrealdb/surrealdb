@@ -36,12 +36,13 @@ pub enum Backend {
 	Memory,
 	RocksDb,
 	SurrealKv,
+	TikV,
 	Foundation,
 }
 
 impl ValueEnum for Backend {
 	fn value_variants<'a>() -> &'a [Self] {
-		&[Backend::Memory, Backend::RocksDb, Backend::SurrealKv, Backend::Foundation]
+		&[Backend::Memory, Backend::RocksDb, Backend::SurrealKv, Backend::TikV, Backend::Foundation]
 	}
 
 	fn to_possible_value(&self) -> Option<PossibleValue> {
@@ -49,6 +50,7 @@ impl ValueEnum for Backend {
 			Backend::Memory => Some(PossibleValue::new("memory").alias("mem")),
 			Backend::RocksDb => Some(PossibleValue::new("rocksdb")),
 			Backend::SurrealKv => Some(PossibleValue::new("surrealkv").alias("file")),
+			Backend::TikV => Some(PossibleValue::new("tikv")),
 			Backend::Foundation => Some(PossibleValue::new("foundation")),
 		}
 	}
