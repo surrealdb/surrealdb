@@ -8,7 +8,7 @@ use helpers::new_ds;
 use rust_decimal::Decimal;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
-use surrealdb_core::val::{Geometry, Number, Value};
+use surrealdb_types::{Geometry, Number, Value};
 
 use crate::helpers::skip_ok;
 

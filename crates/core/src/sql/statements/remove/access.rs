@@ -4,7 +4,7 @@ use crate::sql::{Base, Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct RemoveAccessStatement {
+pub(crate) struct RemoveAccessStatement {
 	pub name: Expr,
 	pub base: Base,
 	pub if_exists: bool,

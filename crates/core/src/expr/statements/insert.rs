@@ -15,7 +15,7 @@ use crate::idx::planner::RecordStrategy;
 use crate::val::{Datetime, RecordIdKey, Table};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct InsertStatement {
+pub(crate) struct InsertStatement {
 	pub into: Option<Expr>,
 	pub data: Data,
 	/// Does the statement have the ignore clause.

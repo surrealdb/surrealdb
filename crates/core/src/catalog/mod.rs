@@ -18,16 +18,16 @@ mod view;
 pub(crate) use access::*;
 pub(crate) use database::*;
 pub(crate) use namespace::*;
-pub use providers::CatalogProvider;
-pub(crate) use schema::*;
-// TODO: These can be private if we move the bench tests from the sdk to the core.
-pub use schema::{ApiDefinition, ApiMethod};
-pub use schema::{Distance, FullTextParams, HnswParams, MTreeParams, Scoring, VectorType};
+pub use schema::ApiMethod;
+pub(crate) use schema::{
+	ApiDefinition, Distance, FullTextParams, HnswParams, MTreeParams, Scoring, VectorType, *,
+};
 pub(crate) use subscription::*;
 pub(crate) use table::*;
 pub(crate) use view::*;
 #[cfg(test)]
 mod test {
+	use std::collections::BTreeMap;
 	use std::str::FromStr;
 	use std::time::Duration;
 
@@ -35,6 +35,7 @@ mod test {
 	use uuid::Uuid;
 
 	use super::*;
+	use crate::catalog::schema::base::Base;
 	use crate::expr::{
 		Block, ChangeFeed, Expr, Fetch, Fetchs, Field, Fields, Filter, Groups, Idiom, Kind,
 		Literal, Tokenizer,
@@ -103,7 +104,8 @@ mod test {
         fetch: Some(Fetchs(vec![Fetch(Expr::Literal(Literal::String("fetch".to_string())))])),
         auth: Some(Auth::default()),
         session: Some(Value::default()),
-    }, 97)]
+        vars: BTreeMap::new(),
+    }, 98)]
 	#[case::access(AccessDefinition {
         name: "access".to_string(),
         access_type: AccessType::Bearer(BearerAccess {
@@ -120,12 +122,13 @@ mod test {
                 }),
             },
          }),
+        base: Base::Root,
         authenticate: Some(Expr::Literal(Literal::String("expr".to_string()))),
         grant_duration: Some(Duration::from_secs(123)),
         token_duration: Some(Duration::from_secs(123)),
         session_duration: Some(Duration::from_secs(123)),
         comment: Some("comment".to_string()),
-    }, 59)]
+    }, 61)]
 	#[case::access(AccessGrant {
         id: "access".to_string(),
         ac: "access".to_string(),
@@ -248,7 +251,8 @@ mod test {
         token_duration: Some(Duration::from_secs(123)),
         session_duration: Some(Duration::from_secs(123)),
         comment: Some("comment".to_string()),
-    }, 38)]
+        base: crate::catalog::schema::base::Base::Root,
+    }, 40)]
 	#[case::record(Record::new(Data::from(Value::Bool(true))), 5)]
 	fn test_serialize_deserialize<T>(#[case] original: T, #[case] expected_encoded_size: usize)
 	where

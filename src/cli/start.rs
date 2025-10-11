@@ -9,13 +9,11 @@ use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::{any, tasks};
 use surrealdb_core::kvs::TransactionBuilderFactory;
+use surrealdb_core::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
 
 use super::config::{CF, Config};
 use crate::cnf::LOGO;
-#[cfg(feature = "ml")]
-use crate::core::ml::execution::session::set_environment;
-use crate::core::options::EngineOptions;
 use crate::dbs::StartCommandDbsOptions;
 use crate::net::RouterFactory;
 use crate::net::client_ip::ClientIp;
@@ -218,7 +216,8 @@ pub async fn init<T: TransactionBuilderFactory, R: RouterFactory>(
 
 	// if ML feature is enabled load the ONNX runtime lib that is embedded
 	#[cfg(feature = "ml")]
-	set_environment().context("Failed to initialize ML library")?;
+	crate::core::ml::execution::session::set_environment()
+		.context("Failed to initialize ML library")?;
 
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();

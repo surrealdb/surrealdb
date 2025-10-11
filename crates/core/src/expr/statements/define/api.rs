@@ -17,7 +17,7 @@ use crate::fmt::{Fmt, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineApiStatement {
+pub(crate) struct DefineApiStatement {
 	pub kind: DefineKind,
 	pub path: Expr,
 	pub actions: Vec<ApiAction>,
@@ -135,7 +135,7 @@ impl fmt::Display for DefineApiStatement {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ApiAction {
+pub(crate) struct ApiAction {
 	pub methods: Vec<ApiMethod>,
 	pub action: Expr,
 	pub config: ApiConfig,

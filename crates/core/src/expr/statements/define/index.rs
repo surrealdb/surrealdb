@@ -1,36 +1,26 @@
 use std::fmt::{self, Display};
-#[cfg(target_family = "wasm")]
-use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::catalog::{Index, IndexDefinition, TableDefinition};
 use crate::ctx::Context;
-#[cfg(target_family = "wasm")]
-use crate::dbs::Force;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-#[cfg(target_family = "wasm")]
-use crate::expr::Idiom;
-#[cfg(target_family = "wasm")]
-use crate::expr::Output;
 use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::{expr_to_ident, exprs_to_fields};
-#[cfg(target_family = "wasm")]
-use crate::expr::statements::{RemoveIndexStatement, UpdateStatement};
 use crate::expr::{Base, Expr, Literal, Part};
 use crate::fmt::Fmt;
 use crate::iam::{Action, ResourceKind};
-use crate::sql::ToSql;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineIndexStatement {
+pub(crate) struct DefineIndexStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub what: Expr,
@@ -223,9 +213,9 @@ pub(in crate::expr::statements) async fn run_indexing(
 	{
 		{
 			// Create the remove statement
-			let stm = RemoveIndexStatement {
-				name: Expr::Idiom(Idiom::field(index.name.clone())),
-				what: Expr::Idiom(Idiom::field(index.table_name.clone())),
+			let stm = crate::expr::statements::RemoveIndexStatement {
+				name: Expr::Idiom(crate::expr::Idiom::field(index.name.clone())),
+				what: Expr::Idiom(crate::expr::Idiom::field(index.table_name.clone())),
 				if_exists: false,
 			};
 			// Execute the delete statement
@@ -233,12 +223,13 @@ pub(in crate::expr::statements) async fn run_indexing(
 		}
 		{
 			// Force queries to run
-			let opt = &opt.new_with_force(Force::Index(Arc::new([index.clone()])));
+			let opt =
+				&opt.new_with_force(crate::dbs::Force::Index(std::sync::Arc::new([index.clone()])));
 			// Update the index data
-			let stm = crate::expr::UpdateStatement {
+			let stm = crate::expr::statements::UpdateStatement {
 				what: vec![crate::expr::Expr::Table(index.table_name.clone())],
-				output: Some(Output::None),
-				..UpdateStatement::default()
+				output: Some(crate::expr::Output::None),
+				..crate::expr::statements::UpdateStatement::default()
 			};
 			stm.compute(stk, ctx, opt, doc).await?;
 			Ok(())

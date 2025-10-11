@@ -332,8 +332,10 @@ impl Collected {
 		// Try to extract the id field if present and parse as Thing
 		let rid = match &v {
 			Value::Object(obj) => match obj.get("id") {
-				Some(Value::String(strand)) => syn::record_id(strand.as_str()).ok().map(Arc::new),
-				Some(Value::RecordId(thing)) => Some(Arc::new(thing.clone())),
+				Some(Value::String(strand)) => {
+					syn::record_id(strand.as_str()).ok().map(|rid| Arc::new(rid.into()))
+				}
+				Some(Value::RecordId(record_id)) => Some(Arc::new(record_id.clone())),
 				_ => None,
 			},
 			Value::RecordId(thing) => Some(Arc::new(thing.clone())),
@@ -999,12 +1001,12 @@ pub(super) trait Collector {
 				// Everything ok
 				return Ok(());
 			} else {
-				bail!(Error::QueryNotExecutedDetail {
+				bail!(Error::QueryNotExecuted {
 					message: "No iterator has been found.".to_string(),
 				});
 			}
 		}
-		bail!(Error::QueryNotExecutedDetail {
+		bail!(Error::QueryNotExecuted {
 			message: "No QueryExecutor has been found.".to_string(),
 		})
 	}

@@ -1,10 +1,10 @@
 mod helpers;
 use anyhow::Result;
 use helpers::{new_ds, skip_ok};
-use surrealdb_core::dbs::{Response, Session};
+use surrealdb_core::dbs::{QueryResult, Session};
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
-use surrealdb_core::val::Value;
+use surrealdb_types::Value;
 
 use crate::helpers::Test;
 
@@ -145,17 +145,21 @@ async fn select_where_iterate_two_no_index() -> Result<()> {
 	Ok(())
 }
 
-async fn execute_test(dbs: &Datastore, sql: &str, expected_result: usize) -> Result<Vec<Response>> {
+async fn execute_test(
+	dbs: &Datastore,
+	sql: &str,
+	expected_result: usize,
+) -> Result<Vec<QueryResult>> {
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), expected_result);
 	Ok(res)
 }
 
-fn check_result(res: &mut Vec<Response>, expected: &str) -> Result<()> {
+fn check_result(res: &mut Vec<QueryResult>, expected: &str) -> Result<()> {
 	let tmp = res.remove(0).result?;
 	let val = syn::value(expected).unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -526,7 +530,7 @@ async fn select_with_no_index_unary_operator() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -567,7 +571,7 @@ async fn select_unsupported_unary_operator() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -697,12 +701,12 @@ async fn select_range(
 	{
 		let tmp = res.remove(0).result?;
 		let val = syn::value(explain).unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	{
 		let tmp = res.remove(0).result?;
 		let val = syn::value(result).unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	Ok(())
 }
@@ -944,12 +948,12 @@ async fn select_single_range_operator(
 	{
 		let tmp = res.remove(0).result?;
 		let val = syn::value(explain).unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	{
 		let tmp = res.remove(0).result?;
 		let val = syn::value(result).unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	Ok(())
 }
@@ -1168,7 +1172,7 @@ async fn select_with_idiom_param_value() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -1222,23 +1226,23 @@ async fn test_contains(
 	{
 		let tmp = res.remove(0).result?;
 		let val = syn::value(CONTAINS_TABLE_EXPLAIN).unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	{
 		let tmp = res.remove(0).result?;
 		let val = syn::value(result).unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	skip_ok(&mut res, 1)?;
 	{
 		let tmp = res.remove(0).result?;
 		let val = syn::value(index_explain).unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	{
 		let tmp = res.remove(0).result?;
 		let val = syn::value(result).unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	Ok(())
 }
@@ -1467,7 +1471,7 @@ async fn select_with_datetime_value() -> Result<()> {
 			]"#,
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 
 	for _ in 0..2 {
@@ -1481,7 +1485,7 @@ async fn select_with_datetime_value() -> Result<()> {
 			]"#,
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	Ok(())
 }
@@ -1532,7 +1536,7 @@ async fn select_with_uuid_value() -> Result<()> {
 			]"#,
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 
 	for _ in 0..2 {
@@ -1546,7 +1550,7 @@ async fn select_with_uuid_value() -> Result<()> {
 			]"#,
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 
 	Ok(())
@@ -1595,7 +1599,7 @@ async fn select_with_in_operator() -> Result<()> {
 			]"#,
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 
 	for _ in 0..2 {
@@ -1609,7 +1613,7 @@ async fn select_with_in_operator() -> Result<()> {
 			]"#,
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	Ok(())
 }
@@ -1636,7 +1640,7 @@ async fn select_with_in_operator_uniq_index() -> Result<()> {
 
 	let tmp = res.remove(0).result?;
 	let val = syn::value(r#"[]"#).unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 
 	for _ in 0..4 {
 		let tmp = res.remove(0).result?;
@@ -1648,7 +1652,7 @@ async fn select_with_in_operator_uniq_index() -> Result<()> {
 		]"#,
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 
 	let tmp = res.remove(0).result?;
@@ -1676,7 +1680,7 @@ async fn select_with_in_operator_uniq_index() -> Result<()> {
 		]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -1809,7 +1813,7 @@ async fn select_with_record_id_link_no_index() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -1830,7 +1834,7 @@ async fn select_with_record_id_link_no_index() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -1894,10 +1898,10 @@ async fn select_with_record_id_link_index() -> Result<()> {
 				]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	assert_eq!(tmp, expected);
 	//
 	Ok(())
 }
@@ -1961,10 +1965,10 @@ async fn select_with_record_id_link_unique_index() -> Result<()> {
 				]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	assert_eq!(tmp, expected);
 	//
 	Ok(())
 }
@@ -2030,10 +2034,10 @@ async fn select_with_record_id_link_unique_remote_index() -> Result<()> {
 				]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	assert_eq!(tmp, expected);
 	//
 	Ok(())
 }
@@ -2088,11 +2092,11 @@ async fn select_with_record_id_link_full_text_index() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(r#"[{ "id": i:A, "t": t:1}]"#)?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -2137,12 +2141,12 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<()> {
 					}
 			]"#,
 	)?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let val = syn::value(r#"[{ "id": i:A, "t": t:1}]"#)?;
 	for _ in 0..3 {
 		let tmp = res.remove(0).result?;
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	//
 	Ok(())
@@ -2187,7 +2191,7 @@ async fn select_with_record_id_index() -> Result<()> {
 	//
 	for t in ["CONTAINS", "CONTAINSANY", "IN"] {
 		let tmp = res.remove(0).result?;
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", expected), "{t}");
+		assert_eq!(tmp, expected, "{t}");
 		//
 		let tmp = res.remove(0).result?;
 		let val = syn::value(
@@ -2208,13 +2212,13 @@ async fn select_with_record_id_index() -> Result<()> {
 			]"#,
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	//
 	skip_ok(&mut res, 1)?;
 	// CONTAINS
 	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	assert_eq!(tmp, expected);
 	// CONTAINS EXPLAIN
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -2239,10 +2243,10 @@ async fn select_with_record_id_index() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	// CONTAINSANY
 	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	assert_eq!(tmp, expected);
 	// CONTAINSANY EXPLAIN
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -2269,10 +2273,10 @@ async fn select_with_record_id_index() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	// IN
 	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	assert_eq!(tmp, expected);
 	// IN EXPLAIN
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -2297,7 +2301,7 @@ async fn select_with_record_id_index() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -2332,7 +2336,7 @@ async fn select_with_exact_operator() -> Result<()> {
 		]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -2357,7 +2361,7 @@ async fn select_with_exact_operator() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	//
 	let tmp = res.remove(0).result?;
@@ -2371,7 +2375,7 @@ async fn select_with_exact_operator() -> Result<()> {
 		]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -2396,7 +2400,7 @@ async fn select_with_exact_operator() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -2591,7 +2595,7 @@ async fn select_memory_ordered_collector() -> Result<()> {
 			assert_eq!(a.len(), 1500);
 			Ok(a.to_vec())
 		} else {
-			panic!("Expected a Value::Array but get: {v}");
+			panic!("Expected a Value::Array but get: {v:#?}");
 		}
 	};
 
@@ -2666,7 +2670,7 @@ async fn select_limit_start() -> Result<()> {
 		if let Value::Array(a) = r {
 			assert_eq!(a.len(), 10);
 		} else {
-			panic!("Unexpected value: {r:#}");
+			panic!("Unexpected value: {r:#?}");
 		}
 	}
 	Ok(())
@@ -2706,7 +2710,7 @@ async fn select_limit_start_order() -> Result<()> {
 		if let Value::Array(a) = r {
 			assert_eq!(a.len(), 10);
 		} else {
-			panic!("Unexpected value: {r:#}");
+			panic!("Unexpected value: {r:#?}");
 		}
 	}
 	Ok(())

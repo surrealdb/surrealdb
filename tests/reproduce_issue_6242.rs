@@ -1,16 +1,16 @@
 #[cfg(test)]
 mod tests {
-	use serde::{Deserialize, Serialize};
+	use surrealdb::Surreal;
 	use surrealdb::engine::any;
-	use surrealdb::{RecordId, Surreal};
+	use surrealdb::types::{RecordId, SurrealValue};
 
-	#[derive(Debug, Serialize, Deserialize)]
+	#[derive(Debug, SurrealValue)]
 	struct TestRecord {
 		id: RecordId,
 		predicate: Option<String>,
 	}
 
-	#[derive(Debug, Serialize, Deserialize)]
+	#[derive(Debug, SurrealValue)]
 	struct CountResult {
 		count: u64,
 	}

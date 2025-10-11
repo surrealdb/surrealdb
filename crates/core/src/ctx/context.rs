@@ -24,7 +24,7 @@ use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::{Capabilities, Notification, Options, Session, Variables};
+use crate::dbs::{Capabilities, Options, Session, Variables};
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
@@ -36,6 +36,8 @@ use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::mem::ALLOC;
+use crate::sql::expression::convert_public_value_to_internal;
+use crate::types::{PublicNotification, PublicVariables};
 use crate::val::Value;
 
 pub type Context = Arc<MutableContext>;
@@ -54,7 +56,7 @@ pub struct MutableContext {
 	// A collection of read only values stored in this context.
 	values: HashMap<Cow<'static, str>, Arc<Value>>,
 	// Stores the notification channel if available
-	notifications: Option<Sender<Notification>>,
+	notifications: Option<Sender<PublicNotification>>,
 	// An optional query planner
 	query_planner: Option<Arc<QueryPlanner>>,
 	// An optional query executor
@@ -389,7 +391,7 @@ impl MutableContext {
 
 	/// Add the LIVE query notification channel to the context, so that we
 	/// can send notifications to any subscribers.
-	pub(crate) fn add_notifications(&mut self, chn: Option<&Sender<Notification>>) {
+	pub(crate) fn add_notifications(&mut self, chn: Option<&Sender<PublicNotification>>) {
 		self.notifications = chn.cloned()
 	}
 
@@ -432,7 +434,7 @@ impl MutableContext {
 		self.slow_log.as_ref()
 	}
 
-	pub(crate) fn notifications(&self) -> Option<Sender<Notification>> {
+	pub(crate) fn notifications(&self) -> Option<Sender<PublicNotification>> {
 		self.notifications.clone()
 	}
 
@@ -569,7 +571,7 @@ impl MutableContext {
 	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
 		self.add_values(session.values());
 		if !session.variables.is_empty() {
-			self.attach_variables(session.variables.clone())?;
+			self.attach_variables(session.variables.clone().into())?;
 		}
 		Ok(())
 	}
@@ -583,6 +585,20 @@ impl MutableContext {
 				});
 			}
 			self.add_value(key, val.into());
+		}
+		Ok(())
+	}
+
+	pub(crate) fn attach_public_variables(&mut self, vars: PublicVariables) -> Result<(), Error> {
+		for (key, val) in vars {
+			if PROTECTED_PARAM_NAMES.contains(&key.as_str()) {
+				return Err(Error::InvalidParam {
+					name: key.clone(),
+				});
+			}
+
+			let internal_val = convert_public_value_to_internal(val);
+			self.add_value(key, Arc::new(internal_val));
 		}
 		Ok(())
 	}

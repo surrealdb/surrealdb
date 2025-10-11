@@ -3,7 +3,7 @@ use std::fmt::Write;
 use std::ops::Range;
 
 use anyhow::Result;
-use surrealdb_core::val::Value as SurValue;
+use surrealdb_types::{Value as SurValue, ToSql};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 use toml_edit::{ArrayOfTables, DocumentMut, Item, Table};
@@ -121,7 +121,7 @@ pub fn apply_results(doc: &mut DocumentMut, values: &[Result<SurValue, String>])
 			if let Some(x) = arr.get_mut(idx) {
 				match r {
 					Ok(r) => {
-						x["value"] = toml_edit::value(r.to_string());
+						x["value"] = toml_edit::value(r.to_sql());
 					}
 					Err(e) => {
 						x["error"] = toml_edit::value(e.to_string());
@@ -131,7 +131,7 @@ pub fn apply_results(doc: &mut DocumentMut, values: &[Result<SurValue, String>])
 				let mut table = Table::default();
 				match r {
 					Ok(r) => {
-						table["value"] = toml_edit::value(r.to_string());
+						table["value"] = toml_edit::value(r.to_sql());
 					}
 					Err(e) => {
 						table["error"] = toml_edit::value(e.to_string());
@@ -153,7 +153,7 @@ pub fn apply_results(doc: &mut DocumentMut, values: &[Result<SurValue, String>])
 				let mut table = toml_edit::Table::new();
 				match r {
 					Ok(x) => {
-						table.insert("value", toml_edit::value(x.to_string()));
+						table.insert("value", toml_edit::value(x.to_sql()));
 					}
 					Err(e) => {
 						table.insert("error", toml_edit::value(e.to_string()));
@@ -163,7 +163,7 @@ pub fn apply_results(doc: &mut DocumentMut, values: &[Result<SurValue, String>])
 			}
 		} else {
 			for (idx, r) in values.iter().enumerate() {
-				let v = toml_edit::value(r.as_ref().unwrap().to_string()).into_value().unwrap();
+				let v = toml_edit::value(r.as_ref().unwrap().to_sql()).into_value().unwrap();
 				if let Some(x) = arr.get_mut(idx) {
 					*x = v;
 				} else {

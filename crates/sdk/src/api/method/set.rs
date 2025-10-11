@@ -1,11 +1,12 @@
 use std::borrow::Cow;
 use std::future::IntoFuture;
 
+use surrealdb_types::Value;
+
 use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result};
-use crate::core::val;
 use crate::method::OnceLockExt;
 
 /// A set future
@@ -14,7 +15,7 @@ use crate::method::OnceLockExt;
 pub struct Set<'r, C: Connection> {
 	pub(super) client: Cow<'r, Surreal<C>>,
 	pub(super) key: String,
-	pub(super) value: Result<val::Value>,
+	pub(super) value: Value,
 }
 
 impl<C> Set<'_, C>
@@ -44,7 +45,7 @@ where
 			router
 				.execute_unit(Command::Set {
 					key: self.key,
-					value: self.value?,
+					value: self.value,
 				})
 				.await
 		})

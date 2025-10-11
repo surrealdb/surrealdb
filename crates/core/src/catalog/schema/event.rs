@@ -1,20 +1,21 @@
 use revision::revisioned;
+use surrealdb_types::{ToSql, write_sql};
 
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::sql::statements::define::DefineKind;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[non_exhaustive]
 pub struct EventDefinition {
-	pub name: String,
-	pub target_table: String,
-	pub when: Expr,
-	pub then: Vec<Expr>,
-	pub comment: Option<String>,
+	pub(crate) name: String,
+	pub(crate) target_table: String,
+	pub(crate) when: Expr,
+	pub(crate) then: Vec<Expr>,
+	pub(crate) comment: Option<String>,
 }
 
 impl_kv_value_revisioned!(EventDefinition);
@@ -50,7 +51,7 @@ impl InfoStructure for EventDefinition {
 }
 
 impl ToSql for EventDefinition {
-	fn to_sql(&self) -> String {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }

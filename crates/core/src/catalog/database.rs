@@ -3,13 +3,14 @@ use std::fmt::{Display, Formatter};
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{ToSql, write_sql};
 
 use crate::catalog::NamespaceId;
 use crate::expr::ChangeFeed;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::DefineDatabaseStatement;
-use crate::sql::{Expr, Idiom, Literal, ToSql};
+use crate::sql::{Expr, Idiom, Literal};
 use crate::val::Value;
 
 #[derive(
@@ -69,16 +70,16 @@ impl From<u32> for DatabaseId {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct DatabaseDefinition {
-	pub namespace_id: NamespaceId,
-	pub database_id: DatabaseId,
-	pub name: String,
-	pub comment: Option<String>,
-	pub changefeed: Option<ChangeFeed>,
+	pub(crate) namespace_id: NamespaceId,
+	pub(crate) database_id: DatabaseId,
+	pub(crate) name: String,
+	pub(crate) comment: Option<String>,
+	pub(crate) changefeed: Option<ChangeFeed>,
 }
 impl_kv_value_revisioned!(DatabaseDefinition);
 
 impl DatabaseDefinition {
-	pub fn to_sql_definition(&self) -> DefineDatabaseStatement {
+	fn to_sql_definition(&self) -> DefineDatabaseStatement {
 		DefineDatabaseStatement {
 			name: Expr::Idiom(Idiom::field(self.name.clone())),
 			comment: self.comment.clone().map(|v| Expr::Literal(Literal::String(v))),
@@ -89,8 +90,8 @@ impl DatabaseDefinition {
 }
 
 impl ToSql for DatabaseDefinition {
-	fn to_sql(&self) -> String {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }
 

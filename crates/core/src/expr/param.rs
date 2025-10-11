@@ -17,7 +17,7 @@ use crate::iam::Action;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct Param(String);
+pub(crate) struct Param(String);
 
 impl Revisioned for Param {
 	fn revision() -> u16 {

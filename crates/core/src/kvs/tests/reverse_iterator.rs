@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
+use surrealdb_types::Value as PublicValue;
 use uuid::Uuid;
 
 use crate::dbs::node::Timestamp;
-use crate::dbs::{Response, Session};
+use crate::dbs::{QueryResult, Session};
 use crate::kvs::clock::{FakeClock, SizedClock};
 use crate::kvs::tests::CreateDs;
 use crate::syn;
-use crate::val::Value;
 
-async fn test(new_ds: impl CreateDs, index: &str) -> Vec<Response> {
+async fn test(new_ds: impl CreateDs, index: &str) -> Vec<QueryResult> {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("056804f2-b379-4397-9ceb-af8ebd527beb").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
@@ -37,22 +37,22 @@ async fn test(new_ds: impl CreateDs, index: &str) -> Vec<Response> {
 	r
 }
 
-fn check(r: &mut Vec<Response>, tmp: &str) {
+fn check(r: &mut Vec<QueryResult>, tmp: &str) {
 	let tmp = syn::value(tmp).unwrap();
 	let val = match r.remove(0).result {
 		Ok(v) => v,
 		Err(err) => panic!("{err}"),
 	};
-	assert_eq!(format!("{val:#}"), format!("{tmp:#}"));
+	assert_eq!(val, tmp);
 }
 
 /// Extract the array from a value
-fn check_array_is_sorted(v: &Value, expected_len: usize) {
-	if let Value::Array(a) = v {
+fn check_array_is_sorted(v: &PublicValue, expected_len: usize) {
+	if let PublicValue::Array(a) = v {
 		assert_eq!(a.len(), expected_len);
 		assert!(a.windows(2).all(|w| w[0] > w[1]), "Values are not sorted: {a:?}");
 	} else {
-		panic!("Expected a Value::Array but get: {v}");
+		panic!("Expected a Value::Array but got: {v:?}");
 	}
 }
 

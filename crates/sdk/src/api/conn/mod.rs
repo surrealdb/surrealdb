@@ -2,15 +2,14 @@ use std::collections::HashSet;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use async_channel::{Receiver, Sender};
-use serde::de::DeserializeOwned;
+use surrealdb_core::dbs::QueryResult;
+use surrealdb_core::rpc::DbResultError;
+use surrealdb_types::{SurrealValue, Value};
 
 use crate::api::err::Error;
 use crate::api::method::BoxFuture;
-use crate::api::method::query::Response;
 use crate::api::opt::Endpoint;
 use crate::api::{ExtraFeatures, Result, Surreal};
-use crate::core::val::Value as CoreValue;
-use crate::{Value, api, value};
 
 mod cmd;
 pub(crate) use cmd::Command;
@@ -32,7 +31,7 @@ pub(crate) struct Route {
 	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
 	pub(crate) request: RequestData,
 	#[allow(dead_code, reason = "Used in http and local non-wasm with ml features.")]
-	pub(crate) response: Sender<Result<DbResponse>>,
+	pub(crate) response: Sender<std::result::Result<Vec<QueryResult>, DbResultError>>,
 }
 
 /// Message router
@@ -50,10 +49,11 @@ impl Router {
 		self.last_id.fetch_add(1, Ordering::SeqCst)
 	}
 
-	pub(crate) fn send(
+	#[allow(clippy::type_complexity)]
+	pub(crate) fn send_command(
 		&self,
 		command: Command,
-	) -> BoxFuture<'_, Result<Receiver<Result<DbResponse>>>> {
+	) -> BoxFuture<'_, Result<Receiver<std::result::Result<Vec<QueryResult>, DbResultError>>>> {
 		Box::pin(async move {
 			let id = self.next_id();
 			let (sender, receiver) = async_channel::bounded(1);
@@ -64,61 +64,87 @@ impl Router {
 				},
 				response: sender,
 			};
-			self.sender.send(route).await?;
+			self.sender
+				.send(route)
+				.await
+				.map_err(|e| Error::InternalError(format!("Failed to send command: {}", e)))?;
 			Ok(receiver)
 		})
 	}
 
 	/// Receive responses for all methods except `query`
-	pub(crate) fn recv(
+	pub(crate) fn recv_value(
 		&self,
-		receiver: Receiver<Result<DbResponse>>,
-	) -> BoxFuture<'_, Result<CoreValue>> {
+		receiver: Receiver<std::result::Result<Vec<QueryResult>, DbResultError>>,
+	) -> BoxFuture<'_, std::result::Result<Value, Error>> {
 		Box::pin(async move {
-			let response = receiver.recv().await?;
-			match response? {
-				DbResponse::Other(value) => Ok(value),
-				DbResponse::Query(..) => unreachable!(),
+			let response = receiver.recv().await.map_err(|_| Error::ConnectionUninitialised)?;
+			// The response already uses DbResultError, so we just convert directly
+			let mut results = response.map_err(Error::from)?;
+
+			match results.len() {
+				0 => Ok(Value::None),
+				1 => {
+					let result = results.remove(0);
+					result.result.map_err(Error::from)
+				}
+				_ => Err(Error::InternalError(
+					"expected the database to return one or no results".to_string(),
+				)),
 			}
 		})
 	}
 
 	/// Receive the response of the `query` method
-	pub(crate) fn recv_query(
+	pub(crate) fn recv_results(
 		&self,
-		receiver: Receiver<Result<DbResponse>>,
-	) -> BoxFuture<'_, Result<Response>> {
+		receiver: Receiver<std::result::Result<Vec<QueryResult>, DbResultError>>,
+	) -> BoxFuture<'_, Result<Vec<QueryResult>>> {
 		Box::pin(async move {
-			let response = receiver.recv().await?;
-			match response? {
-				DbResponse::Query(results) => Ok(results),
-				DbResponse::Other(..) => unreachable!(),
-			}
+			let results = receiver.recv().await.map_err(|_| Error::ConnectionUninitialised)?;
+			results.map_err(Error::from)
 		})
 	}
 
 	/// Execute all methods except `query`
 	pub(crate) fn execute<R>(&self, command: Command) -> BoxFuture<'_, Result<R>>
 	where
-		R: DeserializeOwned,
+		R: SurrealValue,
 	{
 		Box::pin(async move {
-			let rx = self.send(command).await?;
-			let value = self.recv(rx).await?;
-			value::from_core_value(value)
+			let rx = self.send_command(command).await?;
+			let value = self.recv_value(rx).await?;
+			// Handle single-element arrays that might be returned from operations like
+			// signup/signin
+			let result = match value {
+				Value::Array(array) if array.len() == 1 => {
+					R::from_value(array.into_iter().next().unwrap())
+				}
+				v => R::from_value(v),
+			};
+			Ok(result?)
 		})
 	}
 
 	/// Execute methods that return an optional single response
 	pub(crate) fn execute_opt<R>(&self, command: Command) -> BoxFuture<'_, Result<Option<R>>>
 	where
-		R: DeserializeOwned,
+		R: SurrealValue,
 	{
 		Box::pin(async move {
-			let rx = self.send(command).await?;
-			match self.recv(rx).await? {
-				CoreValue::None | CoreValue::Null => Ok(None),
-				value => value::from_core_value(value),
+			let rx = self.send_command(command).await?;
+			match self.recv_value(rx).await? {
+				Value::None | Value::Null => Ok(None),
+				Value::Array(array) => match array.len() {
+					// Empty array means no results
+					0 => Ok(None),
+					// Single-element array: extract and return the element
+					// This happens when operating on a record ID
+					1 => Ok(Some(R::from_value(array.into_iter().next().unwrap())?)),
+					// Multiple elements should not happen for operations expecting Option<T>
+					_ => Ok(Some(R::from_value(Value::Array(array))?)),
+				},
+				value => Ok(Some(R::from_value(value)?)),
 			}
 		})
 	}
@@ -126,31 +152,32 @@ impl Router {
 	/// Execute methods that return multiple responses
 	pub(crate) fn execute_vec<R>(&self, command: Command) -> BoxFuture<'_, Result<Vec<R>>>
 	where
-		R: DeserializeOwned,
+		R: SurrealValue,
 	{
 		Box::pin(async move {
-			let rx = self.send(command).await?;
-			let value = match self.recv(rx).await? {
-				CoreValue::None | CoreValue::Null => return Ok(Vec::new()),
-				CoreValue::Array(array) => CoreValue::Array(array),
-				value => vec![value].into(),
-			};
-			value::from_core_value(value)
+			let rx = self.send_command(command).await?;
+			match self.recv_value(rx).await? {
+				Value::None | Value::Null => Ok(Vec::new()),
+				Value::Array(array) => array
+					.into_iter()
+					.map(|v| R::from_value(v).map_err(Into::into))
+					.collect::<Result<Vec<R>>>(),
+				value => Ok(vec![R::from_value(value)?]),
+			}
 		})
 	}
 
 	/// Execute methods that return nothing
 	pub(crate) fn execute_unit(&self, command: Command) -> BoxFuture<'_, Result<()>> {
 		Box::pin(async move {
-			let rx = self.send(command).await?;
-			match self.recv(rx).await? {
-				CoreValue::None | CoreValue::Null => Ok(()),
-				CoreValue::Array(array) if array.is_empty() => Ok(()),
+			let rx = self.send_command(command).await?;
+			match self.recv_value(rx).await? {
+				Value::None | Value::Null => Ok(()),
+				Value::Array(array) if array.is_empty() => Ok(()),
 				value => Err(Error::FromValue {
-					value: Value::from_inner(value),
+					value,
 					error: "expected the database to return nothing".to_owned(),
-				}
-				.into()),
+				}),
 			}
 		})
 	}
@@ -158,27 +185,21 @@ impl Router {
 	/// Execute methods that return a raw value
 	pub(crate) fn execute_value(&self, command: Command) -> BoxFuture<'_, Result<Value>> {
 		Box::pin(async move {
-			let rx = self.send(command).await?;
-			Ok(Value::from_inner(self.recv(rx).await?))
+			let rx = self.send_command(command).await?;
+			self.recv_value(rx).await
 		})
 	}
 
 	/// Execute the `query` method
-	pub(crate) fn execute_query(&self, command: Command) -> BoxFuture<'_, Result<Response>> {
+	pub(crate) fn execute_query(
+		&self,
+		command: Command,
+	) -> BoxFuture<'_, Result<Vec<QueryResult>>> {
 		Box::pin(async move {
-			let rx = self.send(command).await?;
-			self.recv_query(rx).await
+			let rx = self.send_command(command).await?;
+			self.recv_results(rx).await
 		})
 	}
-}
-
-/// The database response sent from the router to the caller
-#[derive(Debug)]
-pub enum DbResponse {
-	/// The response sent for the `query` method
-	Query(Response),
-	/// The response sent for any method except `query`
-	Other(CoreValue),
 }
 
 #[derive(Debug, Clone)]
@@ -194,5 +215,5 @@ pub trait Sealed: Sized + Send + Sync + 'static {
 	/// Connect to the server
 	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>>
 	where
-		Self: api::Connection;
+		Self: crate::api::Connection;
 }

@@ -2,6 +2,7 @@ use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::{ToSql, write_sql};
 
 use super::DefineKind;
 use crate::catalog;
@@ -18,7 +19,7 @@ use crate::expr::{Base, Expr, Idiom, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineAnalyzerStatement {
+pub(crate) struct DefineAnalyzerStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub function: Option<String>,
@@ -141,5 +142,11 @@ impl Display for DefineAnalyzerStatement {
 			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for DefineAnalyzerStatement {
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self)
 	}
 }

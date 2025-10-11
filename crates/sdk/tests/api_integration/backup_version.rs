@@ -1,7 +1,7 @@
 #![cfg(feature = "kv-surrealkv")]
 
-use serde::{Deserialize, Serialize};
 use surrealdb_core::cnf::EXPORT_BATCH_SIZE;
+use surrealdb_types::SurrealValue;
 use tokio::fs::remove_file;
 use ulid::Ulid;
 
@@ -118,7 +118,7 @@ pub async fn export_import_versions_with_inserts_updates_deletes(new_db: impl Cr
 	remove_file(export_file).await.unwrap();
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, SurrealValue)]
 struct User {
 	name: String,
 	age: i32,

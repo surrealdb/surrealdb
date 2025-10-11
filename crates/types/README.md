@@ -62,7 +62,7 @@ if value.is::<String>() {
 }
 
 // Convert from SurrealDB value to Rust type
-let string = value.into::<String>().unwrap();
+let string = value.into_t::<String>().unwrap();
 println!("Extracted string: {}", string);
 ```
 
