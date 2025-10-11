@@ -113,9 +113,13 @@ async fn get_handler(
 		// Set the potential WebSocket protocols
 		.protocols(PROTOCOLS)
 		// Set the maximum WebSocket frame size
-		.max_frame_size(*cnf::WEBSOCKET_MAX_FRAME_SIZE)
+		.max_frame_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
 		// Set the maximum WebSocket message size
 		.max_message_size(*cnf::WEBSOCKET_MAX_MESSAGE_SIZE)
+		// Configure write buffer size for outgoing data optimization
+		.write_buffer_size(*cnf::WEBSOCKET_WRITE_BUFFER_SIZE)
+		// Set maximum write buffer size to apply backpressure when needed
+		.max_write_buffer_size(*cnf::WEBSOCKET_MAX_WRITE_BUFFER_SIZE)
 		// Set an error
 		.on_failed_upgrade(|err| {
 			warn!("Failed to upgrade WebSocket connection: {err}");
