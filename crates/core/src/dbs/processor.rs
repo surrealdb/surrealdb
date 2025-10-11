@@ -23,7 +23,7 @@ use crate::key::{graph, record, r#ref};
 use crate::kvs::{KVKey, KVValue, Key, Transaction, Val};
 use crate::syn;
 use crate::val::record::Record;
-use crate::val::{RecordId, RecordIdKeyRange, Value};
+use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, Value};
 
 impl Iterable {
 	pub(super) async fn iterate(
@@ -89,7 +89,7 @@ pub(super) enum Collected {
 	Yield(String),
 	Value(Value),
 	Defer(RecordId),
-	Mergeable(RecordId, Value),
+	Mergeable(String, Option<RecordIdKey>, Value),
 	KeyVal(Key, Val),
 	Count(usize),
 	IndexItem(IndexItemRecord),
@@ -146,7 +146,7 @@ impl Collected {
 			// Deferred record processing - handles lazy evaluation scenarios
 			Self::Defer(key) => Self::process_defer(key).await,
 			// Records with merge operations - applies data merging logic
-			Self::Mergeable(v, o) => Self::process_mergeable(v, o).await,
+			Self::Mergeable(tb, id, o) => Self::process_mergeable(tb, id, o).await,
 			// Raw key-value pairs from storage layer
 			Self::KeyVal(key, val) => Ok(Self::process_key_val(key, val)?),
 			// Count aggregation results - no record processing needed
@@ -360,14 +360,24 @@ impl Collected {
 		Ok(pro)
 	}
 
-	async fn process_mergeable(v: RecordId, o: Value) -> Result<Processed> {
+	async fn process_mergeable(tb: String, id: Option<RecordIdKey>, o: Value) -> Result<Processed> {
 		// Process the document record
-		let pro = Processed {
-			rs: RecordStrategy::KeysAndValues,
-			generate: None,
-			rid: Some(v.into()),
-			ir: None,
-			val: Operable::Insert(Default::default(), o.into()),
+		let pro = if let Some(id) = id {
+			Processed {
+				rs: RecordStrategy::KeysAndValues,
+				generate: None,
+				rid: Some(RecordId::new(tb, id).into()),
+				ir: None,
+				val: Operable::Insert(Default::default(), o.into()),
+			}
+		} else {
+			Processed {
+				rs: RecordStrategy::KeysOnly,
+				generate: Some(tb),
+				rid: None,
+				ir: None,
+				val: Operable::Insert(Default::default(), o.into()),
+			}
 		};
 		// Everything ok
 		Ok(pro)
@@ -589,7 +599,9 @@ pub(super) trait Collector {
 					}
 					self.collect_index_items(ctx, opt, irf, rs).await?
 				}
-				Iterable::Mergeable(v, o) => self.collect(Collected::Mergeable(v, o)).await?,
+				Iterable::Mergeable(tb, id, o) => {
+					self.collect(Collected::Mergeable(tb, id, o)).await?
+				}
 				Iterable::Relatable(f, v, w, o) => {
 					self.collect(Collected::Relatable {
 						f,

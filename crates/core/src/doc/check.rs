@@ -142,7 +142,7 @@ impl Document {
 						)
 					}
 				}
-			}
+			};
 		}
 
 		// Don't bother checking if we generated the document id
@@ -184,7 +184,7 @@ impl Document {
 				check!(value, ID, rid);
 				check!(value, IN, l);
 				check!(value, OUT, r);
-			} 
+			}
 			// This is a INSERT RELATION statement
 			else if let Some(value) = v {
 				check!(value, ID, rid);

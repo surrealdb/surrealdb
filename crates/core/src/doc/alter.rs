@@ -28,39 +28,36 @@ impl Document {
 		// Check if we need to generate a record id
 		if let Some(tb) = &self.r#gen {
 			// This is a CREATE, UPSERT, UPDATE, RELATE statement
-			// INSERT not yet supported
-			if !matches!(self.extras, Workable::Insert(_)) {
-				// Check if the document already has an ID from the current data
-				let existing_id = self.current.doc.as_ref().pick(&*ID);
-				let id = if existing_id.is_some() {
-					// The document already has an ID, use it
-					existing_id.generate(tb.clone(), false)?
-				} else {
-					// Fetch the record id if specified
-					match &self.input_data {
-						// There is a data clause so fetch a record id
-						Some(data) => match data.rid() {
-							Value::None => RecordId::random_for_table(tb.clone()),
-							// Generate a new id from the id field
-							// TODO: Handle null byte
-							id => id.generate(tb.clone(), false)?,
-							// Generate a new random table id
-						},
-						// There is no data clause so create a record id
-						None => RecordId::random_for_table(tb.clone()),
-					}
-				};
+			// Check if the document already has an ID from the current data
+			let existing_id = self.current.doc.as_ref().pick(&*ID);
+			let id = if existing_id.is_some() {
+				// The document already has an ID, use it
+				existing_id.generate(tb.clone(), false)?
+			} else {
+				// Fetch the record id if specified
+				match &self.input_data {
+					// There is a data clause so fetch a record id
+					Some(data) => match data.rid() {
+						Value::None => RecordId::random_for_table(tb.clone()),
+						// Generate a new id from the id field
+						// TODO: Handle null byte
+						id => id.generate(tb.clone(), false)?,
+						// Generate a new random table id
+					},
+					// There is no data clause so create a record id
+					None => RecordId::random_for_table(tb.clone()),
+				}
+			};
 
-				// The id field can not be a record range
-				ensure!(
-					!id.key.is_range(),
-					Error::IdInvalid {
-						value: id.to_string(),
-					}
-				);
-				// Set the document id
-				self.id = Some(Arc::new(id));
-			}
+			// The id field can not be a record range
+			ensure!(
+				!id.key.is_range(),
+				Error::IdInvalid {
+					value: id.to_string(),
+				}
+			);
+			// Set the document id
+			self.id = Some(Arc::new(id));
 		}
 		//
 		Ok(())
@@ -302,10 +299,7 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Option<Arc<Value>>> {
-		Ok(self
-			.compute_input_data(stk, ctx, opt, stm)
-			.await?
-			.map(|x| x.value()))
+		Ok(self.compute_input_data(stk, ctx, opt, stm).await?.map(|x| x.value()))
 	}
 }
 
@@ -345,7 +339,7 @@ impl ComputedData {
 	pub(super) fn rid(&self) -> Value {
 		self.value_ref().pick(&*ID)
 	}
-	
+
 	pub(super) fn is_patch(&self) -> bool {
 		matches!(self, ComputedData::Patch(_))
 	}

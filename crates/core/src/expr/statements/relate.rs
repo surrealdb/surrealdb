@@ -10,7 +10,7 @@ use crate::err::Error;
 use crate::expr::expression::VisitExpression;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
 use crate::idx::planner::RecordStrategy;
-use crate::val::{RecordId, Table};
+use crate::val::{RecordId, RecordIdKey, Table};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct RelateStatement {
@@ -247,6 +247,16 @@ impl fmt::Display for RelateStatement {
 pub(crate) enum RelateThrough {
 	RecordId(RecordId),
 	Table(String),
+}
+
+impl From<(String, Option<RecordIdKey>)> for RelateThrough {
+	fn from((table, id): (String, Option<RecordIdKey>)) -> Self {
+		if let Some(id) = id {
+			RelateThrough::RecordId(RecordId::new(table, id))
+		} else {
+			RelateThrough::Table(table)
+		}
+	}
 }
 
 impl TryFrom<Value> for RelateThrough {
