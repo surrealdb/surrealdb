@@ -10,7 +10,7 @@ use crate::api::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 #[cfg(feature = "protocol-http")]
 use crate::api::opt::Tls;
-use crate::api::opt::{Endpoint, EndpointKind};
+use crate::api::opt::{Endpoint, EndpointKind, WebsocketConfig};
 #[allow(unused_imports)] // used by the DB engines
 use crate::api::ExtraFeatures;
 use crate::api::Result;
@@ -174,6 +174,13 @@ impl Connection for Any {
 				EndpointKind::Ws | EndpointKind::Wss => {
 					#[cfg(feature = "protocol-ws")]
 					{
+						let WebsocketConfig {
+							max_message_size,
+							max_write_buffer_size,
+							write_buffer_size,
+							read_buffer_size,
+						} = address.config.websocket;
+
 						features.insert(ExtraFeatures::LiveQueries);
 						let mut endpoint = address;
 						endpoint.url = endpoint.url.join(engine::remote::ws::PATH)?;
@@ -183,9 +190,10 @@ impl Connection for Any {
 						let maybe_connector = None;
 
 						let config = WebSocketConfig {
-							max_message_size: Some(engine::remote::ws::native::MAX_MESSAGE_SIZE),
-							max_frame_size: Some(engine::remote::ws::native::MAX_FRAME_SIZE),
-							max_write_buffer_size: engine::remote::ws::native::MAX_MESSAGE_SIZE,
+							max_message_size,
+							max_write_buffer_size,
+							write_buffer_size,
+							max_frame_size: max_message_size,
 							..Default::default()
 						};
 						let socket = engine::remote::ws::native::connect(
