@@ -59,7 +59,7 @@ where
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
 			if !router.features.contains(&ExtraFeatures::Backup) {
-				return Err(Error::BackupsNotSupported.into());
+				return Err(Error::BackupsNotSupported);
 			}
 
 			if self.is_ml {

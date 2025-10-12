@@ -4,6 +4,7 @@ use anyhow::Result;
 use async_channel::Sender;
 use chrono::TimeZone;
 use chrono::prelude::Utc;
+use surrealdb_types::{SurrealValue, ToSql};
 
 use super::Transaction;
 use crate::catalog::providers::{
@@ -17,11 +18,9 @@ use crate::expr::statements::define::{DefineAccessStatement, DefineUserStatement
 use crate::expr::{Base, DefineAnalyzerStatement};
 use crate::key::record;
 use crate::kvs::KVValue;
-use crate::sql::ToSql;
 use crate::val::record::Record;
-use crate::val::{RecordId, Value};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, SurrealValue)]
 pub struct Config {
 	pub users: bool,
 	pub accesses: bool,
@@ -50,77 +49,13 @@ impl Default for Config {
 	}
 }
 
-impl Config {
-	pub fn from_value(value: &Value) -> Result<Self, anyhow::Error> {
-		match value {
-			Value::Object(obj) => {
-				let mut config = Config::default();
-
-				macro_rules! bool_prop {
-					($prop:ident) => {{
-						match obj.get(stringify!($prop)) {
-							Some(Value::Bool(v)) => {
-								config.$prop = v.to_owned();
-							}
-							Some(v) => {
-								return Err(anyhow::Error::new(Error::InvalidExportConfig(
-									v.to_owned(),
-									"a bool".into(),
-								)));
-							}
-							_ => (),
-						}
-					}};
-				}
-
-				bool_prop!(users);
-				bool_prop!(accesses);
-				bool_prop!(params);
-				bool_prop!(functions);
-				bool_prop!(analyzers);
-				bool_prop!(versions);
-				bool_prop!(records);
-
-				if let Some(v) = obj.get("tables") {
-					config.tables = v.try_into()?;
-				}
-
-				Ok(config)
-			}
-			v => Err(anyhow::Error::new(Error::InvalidExportConfig(
-				v.to_owned(),
-				"an object".into(),
-			))),
-		}
-	}
-}
-
-impl From<Config> for Value {
-	fn from(config: Config) -> Value {
-		let obj = map!(
-			"users" => config.users.into(),
-			"accesses" => config.accesses.into(),
-			"params" => config.params.into(),
-			"functions" => config.functions.into(),
-			"analyzers" => config.analyzers.into(),
-			"versions" => config.versions.into(),
-			"records" => config.records.into(),
-			"sequences" => config.sequences.into(),
-			"tables" => match config.tables {
-				TableConfig::All => true.into(),
-				TableConfig::None => false.into(),
-				TableConfig::Some(v) => v.into_iter().map(Value::String).collect::<Vec<_>>().into()
-			},
-		);
-
-		obj.into()
-	}
-}
-
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, SurrealValue)]
+#[surreal(untagged)]
 pub enum TableConfig {
 	#[default]
+	#[surreal(value = true)]
 	All,
+	#[surreal(value = false)]
 	None,
 	Some(Vec<String>),
 }
@@ -143,38 +78,6 @@ impl From<Vec<String>> for TableConfig {
 impl From<Vec<&str>> for TableConfig {
 	fn from(value: Vec<&str>) -> Self {
 		TableConfig::Some(value.into_iter().map(ToOwned::to_owned).collect())
-	}
-}
-
-impl TryFrom<&Value> for TableConfig {
-	type Error = anyhow::Error;
-	fn try_from(value: &Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Bool(b) => {
-				if *b {
-					Ok(TableConfig::All)
-				} else {
-					Ok(TableConfig::None)
-				}
-			}
-			Value::None | Value::Null => Ok(TableConfig::None),
-			Value::Array(v) => v
-				.iter()
-				.cloned()
-				.map(|v| match v {
-					Value::String(str) => Ok(str),
-					v => Err(anyhow::Error::new(Error::InvalidExportConfig(
-						v.clone(),
-						"a string".into(),
-					))),
-				})
-				.collect::<Result<Vec<String>>>()
-				.map(TableConfig::Some),
-			v => Err(anyhow::Error::new(Error::InvalidExportConfig(
-				v.to_owned(),
-				"a bool, none, null or array<string>".into(),
-			))),
-		}
 	}
 }
 
@@ -473,7 +376,7 @@ impl Transaction {
 		version: Option<u64>,
 	) -> String {
 		// Inject the id field into the document before processing.
-		let rid = RecordId {
+		let rid = crate::val::RecordId {
 			table: k.tb.into_owned(),
 			key: k.id,
 		};
@@ -483,7 +386,7 @@ impl Transaction {
 		match (record.is_edge(), record.data.as_ref().pick(&*IN), record.data.as_ref().pick(&*OUT))
 		{
 			// If the value is a graph edge record (indicated by EDGE, IN, and OUT fields):
-			(true, Value::RecordId(_), Value::RecordId(_)) => {
+			(true, crate::val::Value::RecordId(_), crate::val::Value::RecordId(_)) => {
 				if let Some(version) = version {
 					// If a version exists, format the value as an INSERT RELATION VERSION command.
 					let ts = Utc.timestamp_nanos(version as i64);

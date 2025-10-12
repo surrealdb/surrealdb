@@ -180,7 +180,7 @@ impl Socket {
 						// Then we convert it to a SurrealQL Value.
 						let msg = surrealdb_core::rpc::format::cbor::decode(msg.as_ref())?;
 						// Then we convert the SurrealQL to JSON.
-						let msg = msg.into_json_value().unwrap();
+						let msg = msg.into_json_value();
 						// Then output the response.
 						debug!("Received message: {msg:?}");
 						Ok(Some(msg))
@@ -277,6 +277,7 @@ impl Socket {
 		method: &str,
 		params: serde_json::Value,
 	) -> Result<serde_json::Value> {
+		tracing::info!("Sending request: {method} {params:?}");
 		let (send, recv) = oneshot::channel();
 		if (self
 			.sender

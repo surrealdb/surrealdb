@@ -19,7 +19,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineDatabaseStatement {
+pub(crate) struct DefineDatabaseStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Expr,

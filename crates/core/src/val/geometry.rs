@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 
 use super::Object;
-use crate::expr::kind::GeometryKind;
 use crate::fmt::Fmt;
 use crate::val::{Array, Value};
 
@@ -22,7 +21,7 @@ use crate::val::{Array, Value};
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::Geometry")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Geometry {
+pub(crate) enum Geometry {
 	Point(Point<f64>),
 	Line(LineString<f64>),
 	Polygon(Polygon<f64>),
@@ -34,30 +33,6 @@ pub enum Geometry {
 }
 
 impl Geometry {
-	/// Check if this is a Point
-	pub fn is_point(&self) -> bool {
-		matches!(self, Self::Point(_))
-	}
-	/// Check if this is a Line
-	pub fn is_line(&self) -> bool {
-		matches!(self, Self::Line(_))
-	}
-	/// Check if this is a Polygon
-	pub fn is_polygon(&self) -> bool {
-		matches!(self, Self::Polygon(_))
-	}
-	/// Check if this is a MultiPoint
-	pub fn is_multipoint(&self) -> bool {
-		matches!(self, Self::MultiPoint(_))
-	}
-	/// Check if this is a MultiLine
-	pub fn is_multiline(&self) -> bool {
-		matches!(self, Self::MultiLine(_))
-	}
-	/// Check if this is a MultiPolygon
-	pub fn is_multipolygon(&self) -> bool {
-		matches!(self, Self::MultiPolygon(_))
-	}
 	/// Check if this is not a Collection
 	pub fn is_geometry(&self) -> bool {
 		!matches!(self, Self::Collection(_))
@@ -65,18 +40,6 @@ impl Geometry {
 	/// Check if this is a Collection
 	pub fn is_collection(&self) -> bool {
 		matches!(self, Self::Collection(_))
-	}
-
-	pub fn kind(&self) -> GeometryKind {
-		match self {
-			Geometry::Point(_) => GeometryKind::Point,
-			Geometry::Line(_) => GeometryKind::Line,
-			Geometry::Polygon(_) => GeometryKind::Polygon,
-			Geometry::MultiPoint(_) => GeometryKind::MultiPoint,
-			Geometry::MultiLine(_) => GeometryKind::MultiLine,
-			Geometry::MultiPolygon(_) => GeometryKind::MultiPolygon,
-			Geometry::Collection(_) => GeometryKind::Collection,
-		}
 	}
 
 	/// Check if this has valid latitude and longitude points:
@@ -190,7 +153,8 @@ impl Geometry {
 		obj.into()
 	}
 
-	pub fn try_from_object(object: &Object) -> Option<Geometry> {
+	#[cfg_attr(not(feature = "scripting"), expect(dead_code))]
+	pub(crate) fn try_from_object(object: &Object) -> Option<Geometry> {
 		if object.len() != 2 {
 			return None;
 		}
@@ -327,6 +291,119 @@ impl Geometry {
 			return None;
 		};
 		Some(Point::from(((*a).try_into().ok()?, (*b).try_into().ok()?)))
+	}
+
+	// -----------------------------------
+	// Value operations
+	// -----------------------------------
+
+	pub fn contains(&self, other: &Self) -> bool {
+		match self {
+			Self::Point(v) => match other {
+				Self::Point(w) => v.contains(w),
+				Self::MultiPoint(w) => w.iter().all(|x| v.contains(x)),
+				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
+				_ => false,
+			},
+			Self::Line(v) => match other {
+				Self::Point(w) => v.contains(w),
+				Self::Line(w) => v.contains(w),
+				Self::MultiLine(w) => w.iter().all(|x| w.contains(x)),
+				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
+				_ => false,
+			},
+			Self::Polygon(v) => match other {
+				Self::Point(w) => v.contains(w),
+				Self::Line(w) => v.contains(w),
+				Self::Polygon(w) => v.contains(w),
+				Self::MultiPolygon(w) => w.iter().all(|x| w.contains(x)),
+				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
+				_ => false,
+			},
+			Self::MultiPoint(v) => match other {
+				Self::Point(w) => v.contains(w),
+				Self::MultiPoint(w) => w.iter().all(|x| w.contains(x)),
+				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
+				_ => false,
+			},
+			Self::MultiLine(v) => match other {
+				Self::Point(w) => v.contains(w),
+				Self::Line(w) => v.contains(w),
+				Self::MultiLine(w) => w.iter().all(|x| w.contains(x)),
+				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
+				_ => false,
+			},
+			Self::MultiPolygon(v) => match other {
+				Self::Point(w) => v.contains(w),
+				Self::Line(w) => v.contains(w),
+				Self::Polygon(w) => v.contains(w),
+				Self::MultiPoint(w) => v.contains(w),
+				Self::MultiLine(w) => v.contains(w),
+				Self::MultiPolygon(w) => v.contains(w),
+				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
+			},
+			Self::Collection(v) => v.iter().all(|x| x.contains(other)),
+		}
+	}
+
+	pub fn intersects(&self, other: &Self) -> bool {
+		match self {
+			Self::Point(v) => match other {
+				Self::Point(w) => v.intersects(w),
+				Self::Line(w) => v.intersects(w),
+				Self::Polygon(w) => v.intersects(w),
+				Self::MultiPoint(w) => v.intersects(w),
+				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
+				Self::MultiPolygon(w) => v.intersects(w),
+				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
+			},
+			Self::Line(v) => match other {
+				Self::Point(w) => v.intersects(w),
+				Self::Line(w) => v.intersects(w),
+				Self::Polygon(w) => v.intersects(w),
+				Self::MultiPoint(w) => v.intersects(w),
+				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
+				Self::MultiPolygon(w) => v.intersects(w),
+				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
+			},
+			Self::Polygon(v) => match other {
+				Self::Point(w) => v.intersects(w),
+				Self::Line(w) => v.intersects(w),
+				Self::Polygon(w) => v.intersects(w),
+				Self::MultiPoint(w) => v.intersects(w),
+				Self::MultiLine(w) => v.intersects(w),
+				Self::MultiPolygon(w) => v.intersects(w),
+				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
+			},
+			Self::MultiPoint(v) => match other {
+				Self::Point(w) => v.intersects(w),
+				Self::Line(w) => v.intersects(w),
+				Self::Polygon(w) => v.intersects(w),
+				Self::MultiPoint(w) => v.intersects(w),
+				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
+				Self::MultiPolygon(w) => v.intersects(w),
+				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
+			},
+			Self::MultiLine(v) => match other {
+				Self::Point(w) => v.intersects(w),
+				Self::Line(w) => v.intersects(w),
+				Self::Polygon(w) => v.intersects(w),
+				Self::MultiPoint(w) => v.intersects(w),
+				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
+				Self::MultiPolygon(w) => v.intersects(w),
+				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
+			},
+			Self::MultiPolygon(v) => match other {
+				Self::Point(w) => v.intersects(w),
+				Self::Line(w) => v.intersects(w),
+				Self::Polygon(w) => v.intersects(w),
+				Self::MultiPoint(w) => v.intersects(w),
+				Self::MultiLine(w) => v.intersects(w),
+				Self::MultiPolygon(w) => v.intersects(w),
+				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
+			},
+			Self::Collection(v) => v.iter().all(|x| x.intersects(other)),
+		}
 	}
 }
 
@@ -519,117 +596,34 @@ impl FromIterator<Geometry> for geo::Geometry<f64> {
 	}
 }
 
-impl Geometry {
-	// -----------------------------------
-	// Value operations
-	// -----------------------------------
-
-	pub fn contains(&self, other: &Self) -> bool {
-		match self {
-			Self::Point(v) => match other {
-				Self::Point(w) => v.contains(w),
-				Self::MultiPoint(w) => w.iter().all(|x| v.contains(x)),
-				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
-				_ => false,
-			},
-			Self::Line(v) => match other {
-				Self::Point(w) => v.contains(w),
-				Self::Line(w) => v.contains(w),
-				Self::MultiLine(w) => w.iter().all(|x| w.contains(x)),
-				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
-				_ => false,
-			},
-			Self::Polygon(v) => match other {
-				Self::Point(w) => v.contains(w),
-				Self::Line(w) => v.contains(w),
-				Self::Polygon(w) => v.contains(w),
-				Self::MultiPolygon(w) => w.iter().all(|x| w.contains(x)),
-				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
-				_ => false,
-			},
-			Self::MultiPoint(v) => match other {
-				Self::Point(w) => v.contains(w),
-				Self::MultiPoint(w) => w.iter().all(|x| w.contains(x)),
-				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
-				_ => false,
-			},
-			Self::MultiLine(v) => match other {
-				Self::Point(w) => v.contains(w),
-				Self::Line(w) => v.contains(w),
-				Self::MultiLine(w) => w.iter().all(|x| w.contains(x)),
-				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
-				_ => false,
-			},
-			Self::MultiPolygon(v) => match other {
-				Self::Point(w) => v.contains(w),
-				Self::Line(w) => v.contains(w),
-				Self::Polygon(w) => v.contains(w),
-				Self::MultiPoint(w) => v.contains(w),
-				Self::MultiLine(w) => v.contains(w),
-				Self::MultiPolygon(w) => v.contains(w),
-				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
-			},
-			Self::Collection(v) => v.iter().all(|x| x.contains(other)),
+impl From<Geometry> for surrealdb_types::Geometry {
+	fn from(v: Geometry) -> Self {
+		match v {
+			Geometry::Point(v) => surrealdb_types::Geometry::Point(v),
+			Geometry::Line(v) => surrealdb_types::Geometry::Line(v),
+			Geometry::Polygon(v) => surrealdb_types::Geometry::Polygon(v),
+			Geometry::MultiPoint(v) => surrealdb_types::Geometry::MultiPoint(v),
+			Geometry::MultiLine(v) => surrealdb_types::Geometry::MultiLine(v),
+			Geometry::MultiPolygon(v) => surrealdb_types::Geometry::MultiPolygon(v),
+			Geometry::Collection(v) => {
+				surrealdb_types::Geometry::Collection(v.into_iter().map(Into::into).collect())
+			}
 		}
 	}
+}
 
-	pub fn intersects(&self, other: &Self) -> bool {
-		match self {
-			Self::Point(v) => match other {
-				Self::Point(w) => v.intersects(w),
-				Self::Line(w) => v.intersects(w),
-				Self::Polygon(w) => v.intersects(w),
-				Self::MultiPoint(w) => v.intersects(w),
-				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
-				Self::MultiPolygon(w) => v.intersects(w),
-				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
-			},
-			Self::Line(v) => match other {
-				Self::Point(w) => v.intersects(w),
-				Self::Line(w) => v.intersects(w),
-				Self::Polygon(w) => v.intersects(w),
-				Self::MultiPoint(w) => v.intersects(w),
-				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
-				Self::MultiPolygon(w) => v.intersects(w),
-				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
-			},
-			Self::Polygon(v) => match other {
-				Self::Point(w) => v.intersects(w),
-				Self::Line(w) => v.intersects(w),
-				Self::Polygon(w) => v.intersects(w),
-				Self::MultiPoint(w) => v.intersects(w),
-				Self::MultiLine(w) => v.intersects(w),
-				Self::MultiPolygon(w) => v.intersects(w),
-				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
-			},
-			Self::MultiPoint(v) => match other {
-				Self::Point(w) => v.intersects(w),
-				Self::Line(w) => v.intersects(w),
-				Self::Polygon(w) => v.intersects(w),
-				Self::MultiPoint(w) => v.intersects(w),
-				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
-				Self::MultiPolygon(w) => v.intersects(w),
-				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
-			},
-			Self::MultiLine(v) => match other {
-				Self::Point(w) => v.intersects(w),
-				Self::Line(w) => v.intersects(w),
-				Self::Polygon(w) => v.intersects(w),
-				Self::MultiPoint(w) => v.intersects(w),
-				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
-				Self::MultiPolygon(w) => v.intersects(w),
-				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
-			},
-			Self::MultiPolygon(v) => match other {
-				Self::Point(w) => v.intersects(w),
-				Self::Line(w) => v.intersects(w),
-				Self::Polygon(w) => v.intersects(w),
-				Self::MultiPoint(w) => v.intersects(w),
-				Self::MultiLine(w) => v.intersects(w),
-				Self::MultiPolygon(w) => v.intersects(w),
-				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
-			},
-			Self::Collection(v) => v.iter().all(|x| x.intersects(other)),
+impl From<surrealdb_types::Geometry> for Geometry {
+	fn from(v: surrealdb_types::Geometry) -> Self {
+		match v {
+			surrealdb_types::Geometry::Point(v) => Geometry::Point(v),
+			surrealdb_types::Geometry::Line(v) => Geometry::Line(v),
+			surrealdb_types::Geometry::Polygon(v) => Geometry::Polygon(v),
+			surrealdb_types::Geometry::MultiPoint(v) => Geometry::MultiPoint(v),
+			surrealdb_types::Geometry::MultiLine(v) => Geometry::MultiLine(v),
+			surrealdb_types::Geometry::MultiPolygon(v) => Geometry::MultiPolygon(v),
+			surrealdb_types::Geometry::Collection(v) => {
+				Geometry::Collection(v.into_iter().map(Into::into).collect())
+			}
 		}
 	}
 }

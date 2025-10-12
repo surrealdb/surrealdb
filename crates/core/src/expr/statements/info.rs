@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::providers::{
 	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, NamespaceProvider,
@@ -14,16 +15,13 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
-use crate::expr::{
-	Base, DefineAccessStatement, DefineAnalyzerStatement, DefineUserStatement, Expr, FlowResultExt,
-};
+use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, ResourceKind};
-use crate::sql::ToSql;
 use crate::sys::INFORMATION;
 use crate::val::{Datetime, Object, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum InfoStatement {
+pub(crate) enum InfoStatement {
 	// revision discriminant override accounting for previous behavior when adding variants and
 	// removing not at the end of the enum definition.
 	Root(bool),
@@ -69,8 +67,7 @@ impl InfoStatement {
 						"accesses".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_root_accesses().await?.iter() {
-								let def = DefineAccessStatement::from_definition(Base::Root, v).redact();
-								out.insert(v.name.clone(), def.to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -84,7 +81,7 @@ impl InfoStatement {
 						"nodes".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_nodes().await?.iter() {
-								out.insert(v.id.to_string(), v.to_string().into());
+								out.insert(v.id.to_string(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -92,7 +89,7 @@ impl InfoStatement {
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_root_users().await?.iter() {
-								out.insert(v.name.clone(),DefineUserStatement::from_definition(Base::Root,v).to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						}
@@ -120,8 +117,7 @@ impl InfoStatement {
 						"accesses".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_ns_accesses(ns).await?.iter() {
-								let def = DefineAccessStatement::from_definition(Base::Ns, v).redact();
-								out.insert(v.name.clone(), def.to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -135,7 +131,7 @@ impl InfoStatement {
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_ns_users(ns).await?.iter() {
-								out.insert(v.name.clone(),DefineUserStatement::from_definition(Base::Ns,v).to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -182,8 +178,7 @@ impl InfoStatement {
 						"accesses".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_accesses(ns, db).await?.iter() {
-								let def = DefineAccessStatement::from_definition(Base::Db, v).redact();
-								out.insert(v.name.clone(), def.to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -197,7 +192,7 @@ impl InfoStatement {
 						"analyzers".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_analyzers( ns, db).await?.iter() {
-								out.insert(v.name.clone(), DefineAnalyzerStatement::from_definition(v).to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -239,7 +234,7 @@ impl InfoStatement {
 						"users".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_users(ns, db).await?.iter() {
-								out.insert(v.name.clone(),DefineUserStatement::from_definition(Base::Db,v).to_string().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},
@@ -333,7 +328,7 @@ impl InfoStatement {
 			}
 			InfoStatement::User(user, base, structured) => {
 				// Get the base type
-				let base = base.clone().unwrap_or(opt.selected_base()?);
+				let base = (*base).unwrap_or(opt.selected_base()?);
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &base)?;
 				// Compute user name
@@ -379,7 +374,7 @@ impl InfoStatement {
 				Ok(if *structured {
 					res.as_ref().clone().structure()
 				} else {
-					Value::from(DefineUserStatement::from_definition(base, &res).to_string())
+					Value::from(res.as_ref().to_sql())
 				})
 			}
 			#[cfg_attr(target_family = "wasm", expect(unused_variables))]

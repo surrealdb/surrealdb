@@ -15,16 +15,15 @@
 //!   whitespace is collapsed so the entire log fits on one line.
 //!
 //! Note: Values considered "nullish" are not logged.
-use std::fmt::Display;
 use std::sync::Arc;
 use std::time::Duration;
 
+use surrealdb_types::ToSql;
 use trice::Instant;
 
 use crate::ctx::Context;
 use crate::expr::Expr;
 use crate::expr::expression::VisitExpression;
-use crate::sql::ToSql;
 
 #[derive(Clone)]
 /// Configuration and logic for slow query logging.
@@ -93,7 +92,7 @@ impl SlowLog {
 	///   values from the `Context`.
 	/// - Renders the SQL and parameter values, collapsing whitespace so the output is a single line
 	///   suitable for log processing.
-	pub(crate) fn check_log<S: VisitExpression + Display>(
+	pub(crate) fn check_log<S: VisitExpression + ToSql>(
 		&self,
 		ctx: &Context,
 		start: &Instant,
@@ -114,7 +113,7 @@ impl SlowLog {
 				if let Some(value) = ctx.value(name) {
 					if !value.is_nullish() {
 						let value = value.to_sql().split_whitespace().collect::<Vec<_>>().join(" ");
-						params.push(format!("${}={}", name, value));
+						params.push(format!("${name}={value}"));
 					}
 				}
 			}

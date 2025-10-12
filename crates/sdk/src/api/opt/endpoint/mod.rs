@@ -44,7 +44,7 @@ impl Endpoint {
 	#[doc(hidden)]
 	pub fn parse_kind(&self) -> Result<EndpointKind> {
 		match EndpointKind::from(self.url.scheme()) {
-			EndpointKind::Unsupported(s) => Err(Error::Scheme(s).into()),
+			EndpointKind::Unsupported(s) => Err(Error::Scheme(s)),
 			kind => Ok(kind),
 		}
 	}

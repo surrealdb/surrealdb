@@ -4,14 +4,12 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::{Arc, OnceLock};
-use std::time::Duration;
 
-use serde::Serialize;
+use surrealdb_types::{self, SurrealValue, Value, Variables};
 
 use crate::api::opt::auth::{Credentials, Jwt};
 use crate::api::opt::{IntoEndpoint, auth};
-use crate::api::{Connect, Connection, OnceLockExt, Surreal, opt};
-use crate::core::val;
+use crate::api::{Connect, Connection, OnceLockExt, Surreal};
 use crate::opt::{IntoExportDestination, WaitFor};
 
 pub(crate) mod live;
@@ -61,13 +59,11 @@ pub use health::Health;
 pub use import::Import;
 pub use insert::Insert;
 pub use invalidate::Invalidate;
-pub use live::Stream;
 pub use merge::Merge;
 pub use patch::Patch;
 pub use query::{Query, QueryStream};
 pub use run::{IntoFn, Run};
 pub use select::Select;
-use serde_content::Serializer;
 pub use set::Set;
 pub use signin::Signin;
 pub use signup::Signup;
@@ -85,14 +81,6 @@ use super::opt::{CreateResource, IntoResource};
 /// A alias for an often used type of future returned by async methods in this
 /// library.
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + Sync + 'a>>;
-
-/// Query statistics
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[non_exhaustive]
-pub struct Stats {
-	/// The time taken to execute the query
-	pub execution_time: Option<Duration>,
-}
 
 /// Machine learning model marker type for import and export types
 pub struct Model;
@@ -322,11 +310,11 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn set(&'_ self, key: impl Into<String>, value: impl Serialize + 'static) -> Set<'_, C> {
+	pub fn set(&self, key: impl Into<String>, value: impl SurrealValue) -> Set<'_, C> {
 		Set {
 			client: Cow::Borrowed(self),
 			key: key.into(),
-			value: crate::api::value::to_core_value(value),
+			value: value.into_value(),
 		}
 	}
 
@@ -423,7 +411,7 @@ where
 	pub fn signup<R>(&'_ self, credentials: impl Credentials<auth::Signup, R>) -> Signup<'_, C, R> {
 		Signup {
 			client: Cow::Borrowed(self),
-			credentials: Serializer::new().serialize(credentials),
+			credentials: credentials.into_value(),
 			response_type: PhantomData,
 		}
 	}
@@ -540,7 +528,7 @@ where
 	pub fn signin<R>(&'_ self, credentials: impl Credentials<auth::Signin, R>) -> Signin<'_, C, R> {
 		Signin {
 			client: Cow::Borrowed(self),
-			credentials: Serializer::new().serialize(credentials),
+			credentials: credentials.into_value(),
 			response_type: PhantomData,
 		}
 	}
@@ -632,12 +620,13 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn query(&'_ self, query: impl opt::IntoQuery) -> Query<'_, C> {
-		let result = query.into_query(self).0;
+	#[must_use = "queries do nothing unless you `.await` or poll them"]
+	pub fn query<'client>(&'client self, query: impl Into<Cow<'client, str>>) -> Query<'client, C> {
 		Query {
 			txn: None,
-			inner: result,
 			client: Cow::Borrowed(self),
+			query: query.into(),
+			variables: Ok(Variables::new()),
 		}
 	}
 
@@ -1260,35 +1249,6 @@ where
 		}
 	}
 
-	/// Runs a function
-	///
-	/// # Examples
-	///
-	/// ```no_run
-	/// # #[tokio::main]
-	/// # async fn main() -> surrealdb::Result<()> {
-	/// # let db = surrealdb::engine::any::connect("mem://").await?;
-	/// // Specify no args by not calling `.args()`
-	/// let foo: usize = db.run("fn::foo").await?; // fn::foo()
-	/// // A single value will be turned into one argument
-	/// let bar: usize = db.run("fn::bar").args(42).await?; // fn::bar(42)
-	/// // Arrays are treated as single arguments
-	/// let count: usize = db.run("count").args(vec![1,2,3]).await?;
-	/// // Specify multiple args using a tuple
-	/// let two: usize = db.run("math::log").args((100, 10)).await?; // math::log(100, 10)
-	///
-	/// # Ok(())
-	/// # }
-	/// ```
-	pub fn run<R>(&'_ self, function: impl IntoFn) -> Run<'_, C, R> {
-		Run {
-			client: Cow::Borrowed(self),
-			function: function.into_fn(),
-			args: Ok(serde_content::Value::Tuple(vec![])),
-			response_type: PhantomData,
-		}
-	}
-
 	/// Checks whether the server is healthy or not
 	///
 	/// # Examples
@@ -1401,10 +1361,10 @@ where
 	}
 }
 
-fn validate_data(data: &val::Value, error_message: &str) -> crate::Result<()> {
+fn validate_data(data: &Value, error_message: &str) -> crate::Result<()> {
 	match data {
-		val::Value::Object(_) => Ok(()),
-		val::Value::Array(v) if v.iter().all(val::Value::is_object) => Ok(()),
-		_ => Err(crate::api::err::Error::InvalidParams(error_message.to_owned()).into()),
+		Value::Object(_) => Ok(()),
+		Value::Array(v) if v.iter().all(Value::is_object) => Ok(()),
+		_ => Err(crate::api::err::Error::InvalidParams(error_message.to_owned())),
 	}
 }

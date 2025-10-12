@@ -11,12 +11,14 @@ members = []
 default = []
 backend-surrealkv = ["surrealdb-core/kv-surrealkv"]
 backend-rocksdb = ["surrealdb-core/kv-rocksdb"]
+backend-tikv = ["surrealdb-core/kv-tikv"]
 backend-foundation = ["surrealdb-core/kv-fdb"]
 upgrade = ["backend-surrealkv", "tokio-tungstenite", "revision"] # Upgrade test suite.
 
 [dependencies]
 # Crates for running surrealdb.
 surrealdb-core = { path = "../core/", default-features = false, features = ["scripting", "kv-mem"] }
+surrealdb-types = { path = "../types/" }
 reblessive = { version = "0.4.3" }
 rust_decimal = { version = "1.37.2", features = ["maths", "serde-str"] }
 

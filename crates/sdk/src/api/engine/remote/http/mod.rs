@@ -8,6 +8,9 @@ use indexmap::IndexMap;
 use reqwest::RequestBuilder;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
+use surrealdb_core::dbs::{QueryResult, QueryResultBuilder};
+use surrealdb_core::rpc::{self, DbResponse, DbResult};
+use surrealdb_types::{SurrealValue, Value, Variables};
 #[cfg(not(target_family = "wasm"))]
 use tokio::fs::OpenOptions;
 #[cfg(not(target_family = "wasm"))]
@@ -18,12 +21,10 @@ use url::Url;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local;
 
-use crate::api;
-use crate::api::conn::{Command, DbResponse, RequestData, RouterRequest};
+use crate::api::conn::{Command, RequestData, RouterRequest};
 use crate::api::err::Error;
 use crate::api::{Connect, Result, Surreal};
-use crate::core::{rpc, val};
-use crate::engine::remote::Response;
+// use crate::engine::remote::Response;
 use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
 use crate::opt::IntoEndpoint;
 
@@ -82,8 +83,9 @@ impl Surreal<Client> {
 
 pub(crate) fn default_headers() -> HeaderMap {
 	let mut headers = HeaderMap::new();
-	headers.insert(ACCEPT, HeaderValue::from_static("application/surrealdb"));
-	headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/surrealdb"));
+	headers.insert(ACCEPT, HeaderValue::from_static(surrealdb_core::api::format::FLATBUFFERS));
+	headers
+		.insert(CONTENT_TYPE, HeaderValue::from_static(surrealdb_core::api::format::FLATBUFFERS));
 	headers
 }
 
@@ -130,7 +132,7 @@ impl Authenticate for RequestBuilder {
 	}
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, SurrealValue)]
 struct Credentials {
 	user: String,
 	pass: String,
@@ -165,16 +167,14 @@ async fn export_file(request: RequestBuilder, path: PathBuf) -> Result<()> {
 				return Err(Error::FileOpen {
 					path,
 					error,
-				}
-				.into());
+				});
 			}
 		};
 	if let Err(error) = io::copy(&mut response, &mut file).await {
 		return Err(Error::FileRead {
 			path,
 			error,
-		}
-		.into());
+		});
 	}
 
 	Ok(())
@@ -203,20 +203,18 @@ async fn export_bytes(request: RequestBuilder, bytes: BackupSender) -> Result<()
 
 #[cfg(not(target_family = "wasm"))]
 async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
-	use crate::engine::proto::{QueryMethodResponse, Status};
-
 	let file = match OpenOptions::new().read(true).open(&path).await {
 		Ok(path) => path,
 		Err(error) => {
 			return Err(Error::FileOpen {
 				path,
 				error,
-			}
-			.into());
+			});
 		}
 	};
 
-	let res = request.header(ACCEPT, "application/surrealdb").body(file).send().await?;
+	let res =
+		request.header(ACCEPT, surrealdb_core::api::format::FLATBUFFERS).body(file).send().await?;
 
 	if res.error_for_status_ref().is_err() {
 		let res = res.text().await?;
@@ -227,21 +225,30 @@ async fn import(request: RequestBuilder, path: PathBuf) -> Result<()> {
 					"\n{}",
 					serde_json::to_string_pretty(&body).unwrap_or_else(|_| "{}".into())
 				);
-				return Err(Error::Http(error_msg).into());
+				return Err(Error::Http(error_msg));
 			}
 			Err(_) => {
-				return Err(Error::Http(res).into());
+				return Err(Error::Http(res));
 			}
 		}
-	} else {
-		let response: Vec<QueryMethodResponse> =
-			crate::core::rpc::format::bincode::decode(&res.bytes().await?)
-				.map_err(|x| format!("Failed to deserialize bincode payload: {x}"))
-				.map_err(crate::api::Error::InvalidResponse)?;
-		for res in response {
-			if let Status::Err = res.status {
-				return Err(Error::Query(res.result.0.as_raw_string()).into());
-			}
+	}
+
+	let bytes = res.bytes().await?;
+
+	let value: Value = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
+		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x:?}"))
+		.map_err(crate::api::Error::InvalidResponse)?;
+
+	// Convert Value::Array to Vec<QueryResult>
+	let Value::Array(arr) = value else {
+		return Err(Error::InvalidResponse("Expected array response from import".to_string()));
+	};
+
+	for val in arr.into_vec() {
+		let result = QueryResult::from_value(val)
+			.map_err(|e| Error::InvalidResponse(format!("Failed to parse query result: {}", e)))?;
+		if let Err(e) = result.result {
+			return Err(Error::Query(e.to_string()));
 		}
 	}
 
@@ -259,31 +266,30 @@ async fn send_request(
 	client: &reqwest::Client,
 	headers: &HeaderMap,
 	auth: &Option<Auth>,
-) -> Result<DbResponse> {
+) -> Result<Vec<QueryResult>> {
 	let url = base_url.join(RPC_PATH).unwrap();
 
-	let body = crate::core::rpc::format::bincode::encode(&req)
-		.map_err(|x| format!("Failed to serialized to bincode: {x}"))
+	let req_value = req.into_value();
+	let body = surrealdb_core::rpc::format::flatbuffers::encode(&req_value)
+		.map_err(|x| format!("Failed to serialize to flatbuffers: {x}"))
 		.map_err(crate::api::Error::UnserializableValue)?;
 
 	let http_req = client.post(url).headers(headers.clone()).auth(auth).body(body);
 	let response = http_req.send().await?.error_for_status()?;
 	let bytes = response.bytes().await?;
 
-	let response: Response = crate::core::rpc::format::bincode::decode(&bytes)
-		.map_err(|x| format!("Failed to deserialize bincode payload: {x}"))
+	let response: DbResponse = surrealdb_core::rpc::format::flatbuffers::decode(&bytes)
+		.map_err(|x| format!("Failed to deserialize flatbuffers payload: {x}"))
 		.map_err(crate::api::Error::InvalidResponse)?;
 
-	DbResponse::from_server_result(response.result)
-}
-
-fn flatten_dbresponse_array(res: DbResponse) -> DbResponse {
-	match res {
-		DbResponse::Other(val::Value::Array(array)) if array.len() == 1 => {
-			let v = array.into_iter().next().unwrap();
-			DbResponse::Other(v)
+	match response.result? {
+		DbResult::Query(results) => Ok(results),
+		DbResult::Other(value) => {
+			Ok(vec![QueryResultBuilder::started_now().finish_with_result(Ok(value))])
 		}
-		x => x,
+		DbResult::Live(notification) => Ok(vec![
+			QueryResultBuilder::started_now().finish_with_result(Ok(notification.into_value())),
+		]),
 	}
 }
 
@@ -292,25 +298,10 @@ async fn router(
 	base_url: &Url,
 	client: &reqwest::Client,
 	headers: &mut HeaderMap,
-	vars: &mut IndexMap<String, val::Value>,
+	vars: &mut IndexMap<String, Value>,
 	auth: &mut Option<Auth>,
-) -> Result<DbResponse> {
+) -> Result<Vec<QueryResult>> {
 	match req.command {
-		Command::Query {
-			txn,
-			query,
-			mut variables,
-		} => {
-			variables.extend(vars.clone());
-			let req = Command::Query {
-				txn,
-				query,
-				variables,
-			}
-			.into_router_request(None)
-			.expect("query should be valid request");
-			send_request(req, base_url, client, headers, auth).await
-		}
 		Command::Use {
 			namespace,
 			database,
@@ -345,37 +336,36 @@ async fn router(
 			.into_router_request(None)
 			.expect("signin should be a valid router request");
 
-			let DbResponse::Other(value) =
-				send_request(req, base_url, client, headers, auth).await?
-			else {
-				return Err(Error::InternalError(
-					"recieved invalid result from server".to_string(),
-				)
-				.into());
+			let results = send_request(req, base_url, client, headers, auth).await?;
+
+			let value = match results.first() {
+				Some(result) => result.clone().result?,
+				None => {
+					error!("recieved invalid result from server");
+					return Err(Error::InternalError(
+						"Recieved invalid result from server".to_string(),
+					));
+				}
 			};
 
-			match api::value::from_core_value(credentials.into()) {
-				Ok(Credentials {
-					user,
-					pass,
-					ns,
-					db,
-				}) => {
+			match Credentials::from_value(value.clone()) {
+				Ok(credentials) => {
 					*auth = Some(Auth::Basic {
-						user,
-						pass,
-						ns,
-						db,
+						user: credentials.user,
+						pass: credentials.pass,
+						ns: credentials.ns,
+						db: credentials.db,
 					});
 				}
-				_ => {
+				Err(err) => {
+					debug!("Error converting Value to Credentials: {err}");
 					*auth = Some(Auth::Bearer {
-						token: value.to_raw_string(),
+						token: value.clone().into_string()?,
 					});
 				}
 			}
 
-			Ok(DbResponse::Other(value))
+			Ok(results)
 		}
 		Command::Authenticate {
 			token,
@@ -385,30 +375,30 @@ async fn router(
 			}
 			.into_router_request(None)
 			.expect("authenticate should be a valid router request");
-			send_request(req, base_url, client, headers, auth).await?;
+			let results = send_request(req, base_url, client, headers, auth).await?;
 
 			*auth = Some(Auth::Bearer {
 				token,
 			});
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(results)
 		}
 		Command::Invalidate => {
 			*auth = None;
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		Command::Set {
 			key,
 			value,
 		} => {
-			crate::core::rpc::check_protected_param(&key)?;
+			surrealdb_core::rpc::check_protected_param(&key)?;
 			vars.insert(key, value);
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		Command::Unset {
 			key,
 		} => {
 			vars.shift_remove(&key);
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		#[cfg(target_family = "wasm")]
 		Command::ExportFile {
@@ -434,16 +424,19 @@ async fn router(
 		} => {
 			let req_path = base_url.join("export")?;
 			let config = config.unwrap_or_default();
-			let config_value: val::Value = config.into();
+			let config_value: Value = config.into_value();
 			let request = client
 				.post(req_path)
-				.body(rpc::format::json::encode_str(config_value).map_err(anyhow::Error::msg)?)
+				.body(
+					rpc::format::json::encode_str(config_value)
+						.map_err(|e| Error::SerializeValue(e.to_string()))?,
+				)
 				.headers(headers.clone())
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/json")
 				.header(ACCEPT, "application/octet-stream");
 			export_file(request, path).await?;
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		Command::ExportBytes {
 			bytes,
@@ -451,16 +444,19 @@ async fn router(
 		} => {
 			let req_path = base_url.join("export")?;
 			let config = config.unwrap_or_default();
-			let config_value: val::Value = config.into();
+			let config_value = config.into_value();
 			let request = client
 				.post(req_path)
-				.body(rpc::format::json::encode_str(config_value).map_err(anyhow::Error::msg)?)
+				.body(
+					rpc::format::json::encode_str(config_value)
+						.map_err(|e| Error::SerializeValue(e.to_string()))?,
+				)
 				.headers(headers.clone())
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/json")
 				.header(ACCEPT, "application/octet-stream");
 			export_bytes(request, bytes).await?;
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		#[cfg(not(target_family = "wasm"))]
 		Command::ExportMl {
@@ -475,7 +471,7 @@ async fn router(
 				.auth(auth)
 				.header(ACCEPT, "application/octet-stream");
 			export_file(request, path).await?;
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		Command::ExportBytesMl {
 			bytes,
@@ -489,7 +485,7 @@ async fn router(
 				.auth(auth)
 				.header(ACCEPT, "application/octet-stream");
 			export_bytes(request, bytes).await?;
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		#[cfg(not(target_family = "wasm"))]
 		Command::ImportFile {
@@ -502,7 +498,7 @@ async fn router(
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/octet-stream");
 			import(request, path).await?;
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		#[cfg(not(target_family = "wasm"))]
 		Command::ImportMl {
@@ -515,18 +511,32 @@ async fn router(
 				.auth(auth)
 				.header(CONTENT_TYPE, "application/octet-stream");
 			import(request, path).await?;
-			Ok(DbResponse::Other(val::Value::None))
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		Command::SubscribeLive {
 			..
-		} => Err(Error::LiveQueriesNotSupported.into()),
-		cmd => {
-			let needs_flatten = cmd.needs_flatten();
+		} => Err(Error::LiveQueriesNotSupported),
+		Command::RawQuery {
+			txn,
+			query,
+			variables,
+		} => {
+			// Merge stored vars with query vars
+			let mut merged_vars =
+				vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Variables>();
+			merged_vars.extend(variables);
+			let cmd = Command::RawQuery {
+				txn,
+				query,
+				variables: merged_vars,
+			};
 			let req = cmd.into_router_request(None).unwrap();
-			let mut res = send_request(req, base_url, client, headers, auth).await?;
-			if needs_flatten {
-				res = flatten_dbresponse_array(res);
-			}
+			let res = send_request(req, base_url, client, headers, auth).await?;
+			Ok(res)
+		}
+		cmd => {
+			let req = cmd.into_router_request(None).unwrap();
+			let res = send_request(req, base_url, client, headers, auth).await?;
 			Ok(res)
 		}
 	}
