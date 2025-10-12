@@ -1,6 +1,7 @@
 use std::fmt;
 
 use reblessive::tree::Stk;
+use surrealdb_types::{ToSql, write_sql};
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::{Context, MutableContext};
@@ -12,7 +13,7 @@ use crate::expr::{ControlFlow, Expr, FlowResult, Kind, Value};
 use crate::fmt::EscapeKwFreeIdent;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct SetStatement {
+pub(crate) struct SetStatement {
 	pub name: String,
 	pub what: Expr,
 	pub kind: Option<Kind>,
@@ -85,6 +86,12 @@ impl fmt::Display for SetStatement {
 		}
 		write!(f, " = {}", self.what)?;
 		Ok(())
+	}
+}
+
+impl ToSql for SetStatement {
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self)
 	}
 }
 

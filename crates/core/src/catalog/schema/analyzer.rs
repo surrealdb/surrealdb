@@ -1,4 +1,5 @@
 use revision::revisioned;
+use surrealdb_types::{ToSql, write_sql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Filter, Tokenizer};
@@ -16,6 +17,28 @@ pub struct AnalyzerDefinition {
 }
 
 impl_kv_value_revisioned!(AnalyzerDefinition);
+
+impl AnalyzerDefinition {
+	fn to_sql_definition(&self) -> crate::sql::statements::define::DefineAnalyzerStatement {
+		crate::sql::statements::define::DefineAnalyzerStatement {
+			kind: crate::sql::statements::define::DefineKind::Default,
+			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
+			function: self.function.clone(),
+			tokenizers: self.tokenizers.clone().map(|v| v.into_iter().map(|t| t.into()).collect()),
+			filters: self.filters.clone().map(|v| v.into_iter().map(|f| f.into()).collect()),
+			comment: self
+				.comment
+				.clone()
+				.map(|c| crate::sql::Expr::Literal(crate::sql::Literal::String(c))),
+		}
+	}
+}
+
+impl ToSql for &AnalyzerDefinition {
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self.to_sql_definition())
+	}
+}
 
 impl InfoStructure for AnalyzerDefinition {
 	fn structure(self) -> Value {

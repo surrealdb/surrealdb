@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::fmt::{self, Debug, Formatter};
+use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
@@ -7,12 +7,16 @@ use regex::RegexBuilder;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::sql::ToSql;
+use crate::write_sql;
+
 pub(crate) const REGEX_TOKEN: &str = "$surrealdb::public::Regex";
 
 /// Represents a regular expression in SurrealDB
 ///
 /// A regular expression is a pattern used for matching strings.
 /// This type wraps the `regex::Regex` type and provides custom serialization/deserialization.
+
 #[derive(Clone)]
 pub struct Regex(pub regex::Regex);
 
@@ -69,6 +73,19 @@ impl Debug for Regex {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		let t = self.0.to_string().replace('/', "\\/");
 		write!(f, "/{}/", &t)
+	}
+}
+
+impl Display for Regex {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		let t = self.0.to_string().replace('/', "\\/");
+		write!(f, "/{}/", &t)
+	}
+}
+
+impl ToSql for Regex {
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self)
 	}
 }
 

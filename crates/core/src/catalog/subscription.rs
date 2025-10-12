@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use revision::revisioned;
+use surrealdb_types::{ToSql, write_sql};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
@@ -8,18 +9,17 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Fetchs, Fields};
 use crate::iam::Auth;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SubscriptionDefinition {
-	pub id: Uuid,
-	pub node: Uuid,
-	pub fields: Fields,
-	pub what: Expr,
-	pub cond: Option<Expr>,
-	pub fetch: Option<Fetchs>,
+	pub(crate) id: Uuid,
+	pub(crate) node: Uuid,
+	pub(crate) fields: Fields,
+	pub(crate) what: Expr,
+	pub(crate) cond: Option<Expr>,
+	pub(crate) fetch: Option<Fetchs>,
 	// When a live query is created, we must also store the
 	// authenticated session of the user who made the query,
 	// so we can check it later when sending notifications.
@@ -64,8 +64,8 @@ impl InfoStructure for SubscriptionDefinition {
 }
 
 impl ToSql for &SubscriptionDefinition {
-	fn to_sql(&self) -> String {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }
 

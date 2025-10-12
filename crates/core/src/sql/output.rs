@@ -4,7 +4,7 @@ use crate::sql::field::Fields;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Output {
+pub(crate) enum Output {
 	None,
 	Null,
 	Diff,

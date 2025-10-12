@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use chrono::Utc;
+use surrealdb_types::ToSql;
 
-use crate::dbs::Variables;
 use crate::iam::{Auth, Level, Role};
+use crate::types::{PublicValue, PublicVariables};
 use crate::val::Value;
 
 /// Specifies the current session information when processing a query.
@@ -26,13 +27,13 @@ pub struct Session {
 	/// The current access method
 	pub ac: Option<String>,
 	/// The current authentication token
-	pub tk: Option<Value>,
+	pub tk: Option<PublicValue>,
 	/// The current record authentication data
-	pub rd: Option<Value>,
+	pub rd: Option<PublicValue>,
 	/// The current expiration time of the session
 	pub exp: Option<i64>,
 	/// The variables set
-	pub variables: Variables,
+	pub variables: PublicVariables,
 }
 
 impl Session {
@@ -85,9 +86,11 @@ impl Session {
 	}
 
 	pub(crate) fn values(&self) -> Vec<(&'static str, Value)> {
+		use crate::sql::expression::convert_public_value_to_internal;
+
 		let access = self.ac.clone().map(|x| x.into()).unwrap_or(Value::None);
-		let auth = self.rd.clone().unwrap_or(Value::None);
-		let token = self.tk.clone().unwrap_or(Value::None);
+		let auth = self.rd.clone().map(convert_public_value_to_internal).unwrap_or(Value::None);
+		let token = self.tk.clone().map(convert_public_value_to_internal).unwrap_or(Value::None);
 		let session = Value::from(map! {
 			"ac".to_string() => access.clone(),
 			"exp".to_string() => self.exp.map(Value::from).unwrap_or(Value::None),
@@ -127,10 +130,10 @@ impl Session {
 	}
 
 	/// Create a record user session for a given NS and DB
-	pub fn for_record(ns: &str, db: &str, ac: &str, rid: Value) -> Session {
+	pub fn for_record(ns: &str, db: &str, ac: &str, rid: PublicValue) -> Session {
 		Session {
 			ac: Some(ac.to_owned()),
-			au: Arc::new(Auth::for_record(rid.to_string(), ns, db, ac)),
+			au: Arc::new(Auth::for_record(rid.to_sql(), ns, db, ac)),
 			rt: false,
 			ip: None,
 			or: None,

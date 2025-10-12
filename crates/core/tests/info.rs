@@ -6,6 +6,7 @@ use regex::Regex;
 use surrealdb_core::dbs::capabilities::ExperimentalTarget;
 use surrealdb_core::dbs::{Capabilities, Session};
 use surrealdb_core::iam::{Level, Role};
+use surrealdb_types::ToSql;
 
 #[tokio::test]
 async fn info_for_root() {
@@ -18,8 +19,14 @@ async fn info_for_root() {
     "#;
 	let mut t = Test::new(sql).await.unwrap();
 	t.skip_ok(3).unwrap();
-	t.expect_regex(r"\{ accesses: \{ access: .* \}, namespaces: \{ NS: .* \}, nodes: \{ .* \}, system: \{ .* \}, users: \{ user: .* \} \}").unwrap();
-	t.expect_regex(r"\{ accesses: \[\{.* \}\], namespaces: \[\{ .* \}\], nodes: \[.*\], system: \{ .* \}, users: \[\{ .* \}\] \}").unwrap();
+	t.expect_regex(
+		r"\{ accesses: \{ access: .* \}, namespaces: \{ NS: .* \}, nodes: \{ .* \}, system: \{ .* \}, users: \{ user: .* \} \}",
+	)
+	.unwrap();
+	t.expect_regex(
+		r"\{ accesses: \[\{.*\}\], namespaces: \[\{ .* \}\], nodes: \[.*\], system: \{ .* \}, users: \[\{ .* \}\] \}",
+	)
+	.unwrap();
 }
 
 #[tokio::test]
@@ -55,7 +62,7 @@ async fn info_for_db() {
 	t.expect_regex(
 		r"\{ accesses: \{ jwt: .*, record: .* \}, analyzers: \{ analyzer: .* \}, functions: \{ greet: .* \}, params: \{ param: .* \}, tables: \{ TB: .* \}, users: \{ user: .* \} \}",
 	)
-		.unwrap();
+	.unwrap();
 }
 
 #[tokio::test]
@@ -72,7 +79,7 @@ async fn info_for_table() {
 	t.expect_regex(
 		r"\{ events: \{ event: .* \}, fields: \{ field: .* \}, indexes: \{ index: .* \}, lives: \{  \}, tables: \{  \} \}",
 	)
-		.unwrap();
+	.unwrap();
 }
 
 #[tokio::test]
@@ -94,7 +101,7 @@ async fn info_for_user() {
 	let out = res.pop().unwrap().output();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 	let output_regex = Regex::new(r"DEFINE USER user ON ROOT PASSHASH .* ROLES VIEWER").unwrap();
-	let out_str = out.unwrap().to_string();
+	let out_str = out.unwrap().into_string().unwrap();
 	assert!(
 		output_regex.is_match(&out_str),
 		"Output '{}' doesn't match regex '{}'",
@@ -109,7 +116,7 @@ async fn info_for_user() {
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 	let output_regex =
 		Regex::new(r"DEFINE USER user ON NAMESPACE PASSHASH .* ROLES VIEWER").unwrap();
-	let out_str = out.unwrap().to_string();
+	let out_str = out.unwrap().into_string().unwrap();
 	assert!(
 		output_regex.is_match(&out_str),
 		"Output '{}' doesn't match regex '{}'",
@@ -124,7 +131,7 @@ async fn info_for_user() {
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 	let output_regex =
 		Regex::new(r"DEFINE USER user ON DATABASE PASSHASH .* ROLES VIEWER").unwrap();
-	let out_str = out.unwrap().to_string();
+	let out_str = out.unwrap().into_string().unwrap();
 	assert!(
 		output_regex.is_match(&out_str),
 		"Output '{}' doesn't match regex '{}'",
@@ -139,7 +146,7 @@ async fn info_for_user() {
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 	let output_regex =
 		Regex::new(r"DEFINE USER user ON DATABASE PASSHASH .* ROLES VIEWER").unwrap();
-	let out_str = out.unwrap().to_string();
+	let out_str = out.unwrap().into_string().unwrap();
 	assert!(
 		output_regex.is_match(&out_str),
 		"Output '{}' doesn't match regex '{}'",
@@ -408,7 +415,8 @@ async fn permissions_checks_info_user_root() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check = "\"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\"".to_string();
+	let check = "\"DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""
+		.to_string();
 
 	let test_cases = [
 		// Root level
@@ -451,7 +459,8 @@ async fn permissions_checks_info_user_ns() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check = "\"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\"".to_string();
+	let check = "\"DEFINE USER user ON NAMESPACE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""
+		.to_string();
 
 	let test_cases = [
 		// Root level
@@ -494,7 +503,8 @@ async fn permissions_checks_info_user_db() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check = "\"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\"".to_string();
+	let check = "\"DEFINE USER user ON DATABASE PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 15m, FOR SESSION 6h\""
+		.to_string();
 
 	let test_cases = [
 		// Root level
@@ -544,8 +554,8 @@ async fn access_info_redacted() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-            r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, databases: {  }, users: {  } }"#.to_string();
-		let out_str = out.unwrap().to_string();
+			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, databases: {  }, users: {  } }"#.to_string();
+		let out_str = out.unwrap().to_sql();
 		assert_eq!(
 			out_str, out_expected,
 			"Output '{out_str}' doesn't match expected output '{out_expected}'",
@@ -569,8 +579,9 @@ async fn access_info_redacted() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-            r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, databases: {  }, users: {  } }"#.to_string();
-		let out_str = out.unwrap().to_string();
+			r#"{ accesses: { access: "DEFINE ACCESS access ON NAMESPACE TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, databases: {  }, users: {  } }"#
+				.to_string();
+		let out_str = out.unwrap().to_sql();
 		assert_eq!(
 			out_str, out_expected,
 			"Output '{out_str}' doesn't match expected output '{out_expected}'",
@@ -579,8 +590,7 @@ async fn access_info_redacted() {
 	// Record
 	{
 		let sql = r#"
-			DEFINE ACCESS access ON DB TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret';
-			INFO FOR DB
+			DEFINE ACCESS access ON DB TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret'; 			INFO FOR DB
 		"#;
 		let dbs = new_ds().await.unwrap().with_capabilities(
 			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
@@ -594,8 +604,9 @@ async fn access_info_redacted() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-            r#"{ accesses: { access: "DEFINE ACCESS access ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"#.to_string();
-		let out_str = out.unwrap().to_string();
+			r#"{ accesses: { access: "DEFINE ACCESS access ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"#
+				.to_string();
+		let out_str = out.unwrap().to_sql();
 		assert_eq!(
 			out_str, out_expected,
 			"Output '{out_str}' doesn't match expected output '{out_expected}'",
@@ -604,8 +615,8 @@ async fn access_info_redacted() {
 	// Record with refresh token
 	{
 		let sql = r#"
-			DEFINE ACCESS access ON DB TYPE RECORD WITH REFRESH, WITH JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret';
-			INFO FOR DB
+			DEFINE ACCESS access ON DB TYPE RECORD WITH REFRESH, WITH JWT ALGORITHM HS512 KEY 'secret'
+WITH ISSUER KEY 'secret'; 			INFO FOR DB
 		"#;
 		let dbs = new_ds().await.unwrap().with_capabilities(
 			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
@@ -620,7 +631,7 @@ async fn access_info_redacted() {
 
 		let out_expected =
 			r#"{ accesses: { access: "DEFINE ACCESS access ON DATABASE TYPE RECORD WITH REFRESH WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR GRANT 4w2d, FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"#.to_string();
-		let out_str = out.unwrap().to_string();
+		let out_str = out.unwrap().to_sql();
 		assert_eq!(
 			out_str, out_expected,
 			"Output '{out_str}' doesn't match expected output '{out_expected}'",
@@ -634,7 +645,7 @@ async fn access_info_redacted_structure() {
 	{
 		let sql = r#"
 			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM HS512 KEY 'secret' DURATION FOR TOKEN 15m, FOR SESSION 6h;
-			INFO FOR NS STRUCTURE
+            INFO FOR NS STRUCTURE
 		"#;
 		let dbs = new_ds().await.unwrap().with_capabilities(
 			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
@@ -648,8 +659,9 @@ async fn access_info_redacted_structure() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-            r#"{ accesses: [{ duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'JWT' }, name: 'access' }], databases: [], users: [] }"#.to_string();
-		let out_str = out.unwrap().to_string();
+			r#"{ accesses: [{ duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'JWT' }, name: 'access' }], databases: [], users: [] }"#
+				.to_string();
+		let out_str = out.unwrap().to_sql();
 		assert_eq!(
 			out_str, out_expected,
 			"Output '{out_str}' doesn't match expected output '{out_expected}'",
@@ -659,7 +671,7 @@ async fn access_info_redacted_structure() {
 	{
 		let sql = r#"
 			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY 'private' DURATION FOR TOKEN 15m, FOR SESSION 6h;
-			INFO FOR NS STRUCTURE
+            INFO FOR NS STRUCTURE
 		"#;
 		let dbs = new_ds().await.unwrap().with_capabilities(
 			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
@@ -673,8 +685,9 @@ async fn access_info_redacted_structure() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-            r#"{ accesses: [{ duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'PS512', key: '[REDACTED]' }, verify: { alg: 'PS512', key: 'public' } }, kind: 'JWT' }, name: 'access' }], databases: [], users: [] }"#.to_string();
-		let out_str = out.unwrap().to_string();
+			r#"{ accesses: [{ duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'PS512', key: '[REDACTED]' }, verify: { alg: 'PS512', key: 'public' } }, kind: 'JWT' }, name: 'access' }], databases: [], users: [] }"#
+				.to_string();
+		let out_str = out.unwrap().to_sql();
 		assert_eq!(
 			out_str, out_expected,
 			"Output '{out_str}' doesn't match expected output '{out_expected}'",
@@ -683,8 +696,7 @@ async fn access_info_redacted_structure() {
 	// Record
 	{
 		let sql = r#"
-			DEFINE ACCESS access ON DB TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret' DURATION FOR TOKEN 15m, FOR SESSION 6h;
-			INFO FOR DB STRUCTURE
+			DEFINE ACCESS access ON DB TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret' DURATION FOR TOKEN 15m, FOR SESSION 6h; 			INFO FOR DB STRUCTURE
 		"#;
 		let dbs = new_ds().await.unwrap().with_capabilities(
 			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
@@ -698,8 +710,9 @@ async fn access_info_redacted_structure() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-            r#"{ accesses: [{ duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'RECORD' }, name: 'access' }], analyzers: [], apis: [], buckets: [], configs: [], functions: [], models: [], params: [], sequences: [], tables: [], users: [] }"#.to_string();
-		let out_str = out.unwrap().to_string();
+			r#"{ accesses: [{ duration: { session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'RECORD' }, name: 'access' }], analyzers: [], apis: [], buckets: [], configs: [], functions: [], models: [], params: [], sequences: [], tables: [], users: [] }"#
+				.to_string();
+		let out_str = out.unwrap().to_sql();
 		assert_eq!(
 			out_str, out_expected,
 			"Output '{out_str}' doesn't match expected output '{out_expected}'",
@@ -708,8 +721,8 @@ async fn access_info_redacted_structure() {
 	// Record with refresh token
 	{
 		let sql = r#"
-			DEFINE ACCESS access ON DB TYPE RECORD WITH REFRESH, WITH JWT ALGORITHM HS512 KEY 'secret' DURATION FOR GRANT 1w, FOR TOKEN 15m, FOR SESSION 6h;
-			INFO FOR DB STRUCTURE
+			DEFINE ACCESS access ON DB TYPE RECORD WITH REFRESH, WITH JWT ALGORITHM HS512 KEY 'secret'
+DURATION FOR GRANT 1w, FOR TOKEN 15m, FOR SESSION 6h; 			INFO FOR DB STRUCTURE
 		"#;
 		let dbs = new_ds().await.unwrap().with_capabilities(
 			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
@@ -724,7 +737,7 @@ async fn access_info_redacted_structure() {
 
 		let out_expected =
 			r#"{ accesses: [{ duration: { grant: 1w, session: 6h, token: 15m }, kind: { jwt: { issuer: { alg: 'HS512', key: '[REDACTED]' }, verify: { alg: 'HS512', key: '[REDACTED]' } }, kind: 'RECORD', refresh: true }, name: 'access' }], analyzers: [], apis: [], buckets: [], configs: [], functions: [], models: [], params: [], sequences: [], tables: [], users: [] }"#.to_string();
-		let out_str = out.unwrap().to_string();
+		let out_str = out.unwrap().to_sql();
 		assert_eq!(
 			out_str, out_expected,
 			"Output '{out_str}' doesn't match expected output '{out_expected}'",
@@ -748,8 +761,9 @@ async fn function_info_structure() {
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 	let out_expected =
-        r#"{ accesses: [], analyzers: [], apis: [], buckets: [], configs: [], functions: [{ args: [['name', 'string']], block: "{ RETURN 'Hello, ' + $name + '!' }", name: 'example', permissions: true, returns: 'string' }], models: [], params: [], sequences: [], tables: [], users: [] }"#.to_string();
-	let out_str = out.unwrap().to_string();
+		r#"{ accesses: [], analyzers: [], apis: [], buckets: [], configs: [], functions: [{ args: [['name', 'string']], block: "{ RETURN 'Hello, ' + $name + '!' }", name: 'example', permissions: true, returns: 'string' }], models: [], params: [], sequences: [], tables: [], users: [] }"#
+		.to_string();
+	let out_str = out.unwrap().to_sql();
 	assert_eq!(
 		out_str, out_expected,
 		"Output '{out_str}' doesn't match expected output '{out_expected}'",

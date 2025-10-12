@@ -6,119 +6,12 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::sync::{Arc, OnceLock};
 
-use anyhow::ensure;
+// Removed anyhow::ensure - will implement custom ensure macro if needed
 use method::BoxFuture;
 use semver::{BuildMetadata, Version, VersionReq};
 use tokio::sync::watch;
 
 use crate::Result;
-
-macro_rules! transparent_wrapper{
-	(
-		$(#[$m:meta])*
-		$vis:vis struct $name:ident($field_vis:vis $inner:ty)
-	) => {
-		$(#[$m])*
-		#[repr(transparent)]
-		$vis struct $name($field_vis $inner);
-
-		#[allow(dead_code)]
-		impl $name{
-			#[doc(hidden)]
-			pub fn from_inner(inner: $inner) -> Self{
-				$name(inner)
-			}
-
-			#[doc(hidden)]
-			pub fn from_inner_ref(inner: &$inner) -> &Self{
-				unsafe{
-					std::mem::transmute::<&$inner,&$name>(inner)
-				}
-			}
-
-			#[doc(hidden)]
-			pub fn from_inner_mut(inner: &mut $inner) -> &mut Self{
-				unsafe{
-					std::mem::transmute::<&mut $inner,&mut $name>(inner)
-				}
-			}
-
-			#[doc(hidden)]
-			pub fn into_inner(self) -> $inner{
-				self.0
-			}
-
-			#[doc(hidden)]
-			pub fn into_inner_ref(&self) -> &$inner{
-				&self.0
-			}
-
-			#[doc(hidden)]
-			pub fn into_inner_mut(&mut self) -> &mut $inner{
-				&mut self.0
-			}
-		}
-
-		impl std::fmt::Display for $name{
-			fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result{
-				self.0.fmt(fmt)
-			}
-		}
-		impl std::fmt::Debug for $name{
-			fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result{
-				self.0.fmt(fmt)
-			}
-		}
-	};
-}
-
-macro_rules! impl_serialize_wrapper {
-	($ty:ty) => {
-		impl ::revision::Revisioned for $ty {
-			fn revision() -> u16 {
-				crate::core::val::Value::revision()
-			}
-		}
-
-		impl ::revision::SerializeRevisioned for $ty {
-			fn serialize_revisioned<W: std::io::Write>(
-				&self,
-				w: &mut W,
-			) -> std::result::Result<(), revision::Error> {
-				::revision::SerializeRevisioned::serialize_revisioned(&self.0, w)
-			}
-		}
-
-		impl ::revision::DeserializeRevisioned for $ty {
-			fn deserialize_revisioned<R: std::io::Read>(
-				r: &mut R,
-			) -> std::result::Result<Self, revision::Error>
-			where
-				Self: Sized,
-			{
-				::revision::DeserializeRevisioned::deserialize_revisioned(r).map(Self::from_inner)
-			}
-		}
-
-		impl ::serde::Serialize for $ty {
-			fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
-			where
-				S: ::serde::ser::Serializer,
-			{
-				self.0.serialize(serializer)
-			}
-		}
-
-		impl<'de> ::serde::de::Deserialize<'de> for $ty {
-			fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-			where
-				D: ::serde::de::Deserializer<'de>,
-			{
-				Ok(Self::from_inner(::serde::de::Deserialize::deserialize(deserializer)?))
-			}
-		}
-	};
-}
 
 pub mod engine;
 pub mod err;
@@ -126,11 +19,10 @@ pub mod err;
 pub mod headers;
 pub mod method;
 pub mod opt;
-pub mod value;
 
 mod conn;
 
-pub use method::query::Response;
+pub use method::query::IndexedResults;
 
 use self::conn::Router;
 use self::err::Error;
@@ -230,7 +122,9 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			// Avoid establishing another connection if already connected
-			ensure!(self.surreal.inner.router.get().is_none(), Error::AlreadyConnected);
+			if self.surreal.inner.router.get().is_some() {
+				return Err(Error::AlreadyConnected);
+			}
 			let endpoint = self.address?;
 			let endpoint_kind = EndpointKind::from(endpoint.url.scheme());
 			let client = Client::connect(endpoint, self.capacity).await?;
@@ -330,21 +224,19 @@ where
 		let req = VersionReq::parse(versions).expect("valid supported versions");
 		let build_meta = BuildMetadata::new(build_meta).expect("valid supported build metadata");
 		let server_build = &version.build;
-		ensure!(
-			req.matches(version),
-			Error::VersionMismatch {
+		if !req.matches(version) {
+			return Err(Error::VersionMismatch {
 				server_version: version.clone(),
 				supported_versions: versions.to_owned(),
-			}
-		);
+			});
+		}
 
-		ensure!(
-			server_build.is_empty() || server_build >= &build_meta,
-			Error::BuildMetadataMismatch {
+		if !server_build.is_empty() && server_build < &build_meta {
+			return Err(Error::BuildMetadataMismatch {
 				server_metadata: server_build.clone(),
 				supported_metadata: build_meta,
-			}
-		);
+			});
+		}
 		Ok(())
 	}
 }

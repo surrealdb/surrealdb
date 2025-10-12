@@ -2,17 +2,16 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use serde::de::DeserializeOwned;
+use surrealdb_types::{RecordIdKeyRange, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
+use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::method::BoxFuture;
 use crate::api::opt::Resource;
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
-use crate::opt::KeyRange;
-use crate::{Surreal, Value};
 
 /// A record delete future
 #[derive(Debug)]
@@ -59,10 +58,17 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let router = client.inner.router.extract()?;
+
+				let what = resource?;
+
+				let mut variables = Variables::new();
+				let what = what.for_sql_query(&mut variables)?;
+
 				router
-					.$method(Command::Delete {
+					.$method(Command::RawQuery {
 						txn,
-						what: resource?,
+						query: Cow::Owned(format!("DELETE FROM {what} RETURN BEFORE")),
+						variables,
 					})
 					.await
 			})
@@ -83,7 +89,7 @@ where
 impl<'r, Client, R> IntoFuture for Delete<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -94,7 +100,7 @@ where
 impl<'r, Client, R> IntoFuture for Delete<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -107,7 +113,7 @@ where
 	C: Connection,
 {
 	/// Restricts a range of records to delete
-	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
+	pub fn range(mut self, range: impl Into<RecordIdKeyRange>) -> Self {
 		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
 		self
 	}
@@ -118,7 +124,7 @@ where
 	C: Connection,
 {
 	/// Restricts a range of records to delete
-	pub fn range(mut self, range: impl Into<KeyRange>) -> Self {
+	pub fn range(mut self, range: impl Into<RecordIdKeyRange>) -> Self {
 		self.resource = self.resource.and_then(|x| x.with_range(range.into()));
 		self
 	}

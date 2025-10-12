@@ -17,7 +17,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = '''{ test: "DEFINE USER test ON DATABASE PASSHASH '' ROLES OWNER DURATION FOR TOKEN 1h, FOR SESSION 2h COMMENT test" }'''
+value = '''{ test: "DEFINE USER test ON DATABASE PASSHASH '' ROLES OWNER DURATION FOR TOKEN 1h, FOR SESSION 2h COMMENT 'test'" }'''
 
 [[test.results]]
 value = "NONE"

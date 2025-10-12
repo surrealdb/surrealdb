@@ -33,7 +33,14 @@ affinitypool = "0.3.1"
 dmp = "0.2.3"
 indxdb = "0.6.0"
 lexicmp = "0.2.0"
-revision = "0.13.0"
+revision = { version = "0.13.0", features = [
+    "chrono",
+    "geo",
+    "roaring",
+    "regex",
+    "rust_decimal",
+    "uuid",
+] }
 storekey = { version = "0.8.0", features = ["uuid"] }
 surrealkv = { version = "0.9.1" }
 surrealml = { version = "0.1.9", package = "surrealml-core", features = [
@@ -92,6 +99,7 @@ geo-types = "0.7.13"
 getrandom = "0.3.2"
 hex = "0.4.3"
 http = "1.1.0"
+humantime = "2.3.0"
 indexmap = "2.1.0"
 jemallocator = { version = "0.6.0", package = "tikv-jemallocator" }
 jsonwebtoken = "9.3.0"
@@ -159,7 +167,7 @@ flate2 = "1.0.28"
 hashbrown = "0.14.5"
 pprof = "0.14.0"
 rstest = "0.25.0"
-serial_test = "2.0.0"
+serial_test = "3.2.0"
 temp-dir = "0.1.11"
 test-log = "0.2.13"
 time = "0.3.36"
@@ -215,6 +223,7 @@ surrealdb = { workspace = true, features = [
     "rustls",
 ] }
 surrealdb-core.workspace = true
+surrealdb-types.workspace = true
 
 # External surreal crates
 revision = { workspace = true, features = [
@@ -341,6 +350,7 @@ test-log = { workspace = true, features = ["trace"] }
 ulid.workspace = true
 wiremock.workspace = true
 rstest.workspace = true
+surrealdb-types.workspace = true
 
 [build-dependencies]
 semver.workspace = true

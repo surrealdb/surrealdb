@@ -1545,19 +1545,6 @@ dependencies = [
 
 [[package]]
 name = "dashmap"
-version = "5.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "978747c1d849a7d2ee5e8adc0159961c48fb7e5db2f06af6723b80123bb53856"
-dependencies = [
- "cfg-if",
- "hashbrown 0.14.5",
- "lock_api",
- "once_cell",
- "parking_lot_core",
-]
-
-[[package]]
-name = "dashmap"
 version = "6.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5041cc499144891f3790297212f32a74fb938e5136a14943f338ef9e0ae276cf"
@@ -2585,9 +2572,9 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "humantime"
-version = "2.2.0"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b112acc8b3adf4b107a8ec20977da0273a8c386765a3ec0229bd500a1443f9f"
+checksum = "135b12329e5e3ce057a9f972339ea52bc954fe1e9358ef27f95e89716fbc5424"
 
 [[package]]
 name = "hyper"
@@ -5277,6 +5264,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "scc"
+version = "2.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "46e6f046b7fef48e2660c57ed794263155d713de679057f2d0c169bfc6e756cc"
+dependencies = [
+ "sdd",
+]
+
+[[package]]
 name = "schannel"
 version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5312,6 +5308,12 @@ dependencies = [
  "ring",
  "untrusted",
 ]
+
+[[package]]
+name = "sdd"
+version = "3.0.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "490dcfcbfef26be6800d11870ff2df8774fa6e86d047e3e8c8a76b25655e41ca"
 
 [[package]]
 name = "seahash"
@@ -5366,15 +5368,6 @@ checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
 dependencies = [
  "serde_core",
  "serde_derive",
-]
-
-[[package]]
-name = "serde-content"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3753ca04f350fa92d00b6146a3555e63c55388c9ef2e11e09bce2ff1c0b509c6"
-dependencies = [
- "serde",
 ]
 
 [[package]]
@@ -5456,23 +5449,23 @@ dependencies = [
 
 [[package]]
 name = "serial_test"
-version = "2.0.0"
+version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e56dd856803e253c8f298af3f4d7eb0ae5e23a737252cd90bb4f3b435033b2d"
+checksum = "1b258109f244e1d6891bf1053a55d63a5cd4f8f4c30cf9a1280989f80e7a1fa9"
 dependencies = [
- "dashmap 5.5.3",
  "futures",
- "lazy_static",
  "log",
+ "once_cell",
  "parking_lot",
+ "scc",
  "serial_test_derive",
 ]
 
 [[package]]
 name = "serial_test_derive"
-version = "2.0.0"
+version = "3.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91d129178576168c589c9ec973feedf7d3126c01ac2bf08795109aa35b69fb8f"
+checksum = "5d69265a08751de7844521fd15003ae0a888e035773ba05695c5c759a6f89eef"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5783,6 +5776,7 @@ dependencies = [
  "serial_test",
  "surrealdb",
  "surrealdb-core",
+ "surrealdb-types",
  "tempfile",
  "test-log",
  "thiserror 1.0.69",
@@ -5808,7 +5802,6 @@ dependencies = [
 name = "surrealdb"
 version = "3.0.0-alpha.10"
 dependencies = [
- "anyhow",
  "arrayvec",
  "async-channel",
  "bincode",
@@ -5824,6 +5817,7 @@ dependencies = [
  "getrandom 0.3.2",
  "hashbrown 0.14.5",
  "indexmap 2.8.0",
+ "nanoid",
  "native-tls",
  "parking_lot",
  "path-clean",
@@ -5843,10 +5837,10 @@ dependencies = [
  "rustls-pki-types",
  "semver",
  "serde",
- "serde-content",
  "serde_json",
  "serial_test",
  "surrealdb-core",
+ "surrealdb-types",
  "temp-dir",
  "test-log",
  "thiserror 1.0.69",
@@ -5889,7 +5883,7 @@ dependencies = [
  "chrono",
  "ciborium",
  "criterion",
- "dashmap 6.1.0",
+ "dashmap",
  "deunicode",
  "dmp",
  "env_logger",
@@ -5907,6 +5901,7 @@ dependencies = [
  "hashbrown 0.14.5",
  "hex",
  "http 1.3.1",
+ "humantime",
  "indxdb",
  "ipnet",
  "jsonwebtoken",
@@ -6044,12 +6039,18 @@ dependencies = [
  "flatbuffers",
  "geo",
  "hex",
+ "http 1.3.1",
+ "nanoid",
  "regex",
+ "rquickjs",
  "rstest",
  "rust_decimal",
  "serde",
+ "serde_json",
  "surrealdb-protocol",
  "surrealdb-types-derive",
+ "tracing",
+ "ulid",
  "uuid",
 ]
 

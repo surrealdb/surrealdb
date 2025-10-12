@@ -1,8 +1,10 @@
+use std::borrow::Cow;
+
 use uuid::Uuid;
 
 use crate::api::method::{Cancel, Commit, Create, Delete, Insert, Query, Select, Update, Upsert};
 use crate::api::{Connection, Surreal};
-use crate::opt::{CreateResource, IntoQuery, IntoResource};
+use crate::opt::{CreateResource, IntoResource};
 
 /// An ongoing transaction
 #[derive(Debug)]
@@ -31,7 +33,7 @@ where
 	}
 
 	/// See [Surreal::query]
-	pub fn query(&'_ self, query: impl IntoQuery) -> Query<'_, C> {
+	pub fn query<'client>(&'client self, query: impl Into<Cow<'client, str>>) -> Query<'client, C> {
 		self.client.query(query).with_transaction(self.id)
 	}
 
