@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use chrono::Utc;
-use surrealdb_types::sql::ToSql;
+use surrealdb_types::ToSql;
 
 use crate::iam::{Auth, Level, Role};
 use crate::types::{PublicValue, PublicVariables};

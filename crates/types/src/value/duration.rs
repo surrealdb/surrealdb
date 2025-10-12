@@ -6,6 +6,7 @@ use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
 use crate::sql::ToSql;
+use crate::write_sql;
 
 pub(crate) static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
 pub(crate) static SECONDS_PER_WEEK: u64 = 7 * SECONDS_PER_DAY;
@@ -337,7 +338,7 @@ impl std::fmt::Display for Duration {
 
 impl ToSql for Duration {
 	fn fmt_sql(&self, f: &mut String) {
-		f.push_str(&self.to_string())
+		write_sql!(f, "{}", self)
 	}
 }
 

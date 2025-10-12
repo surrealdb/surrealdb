@@ -652,7 +652,7 @@ pub async fn init<F: TransactionBuilderFactory>(
 mod tests {
 	use std::str::FromStr;
 
-	use surrealdb_types::sql::ToSql;
+	use surrealdb_types::ToSql;
 	use test_log::test;
 	use wiremock::matchers::{method, path};
 	use wiremock::{Mock, MockServer, ResponseTemplate};

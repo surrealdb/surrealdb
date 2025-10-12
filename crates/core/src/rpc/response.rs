@@ -3,8 +3,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use surrealdb_types::sql::ToSql;
-use surrealdb_types::{kind, object};
+use surrealdb_types::{ToSql, kind, object};
 use thiserror::Error;
 
 use crate::dbs::QueryResult;

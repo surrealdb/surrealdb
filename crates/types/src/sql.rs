@@ -1,7 +1,5 @@
 //! SQL utilities.
 
-use std::fmt::Write;
-
 use crate::utils::escape::QuoteStr;
 
 /// Trait for types that can be converted to SQL representation.
@@ -17,7 +15,7 @@ use crate::utils::escape::QuoteStr;
 ///
 /// A good example is Datetime:
 /// ```rust
-/// use surrealdb_types::sql::ToSql;
+/// use surrealdb_types::ToSql;
 /// use surrealdb_types::Datetime;
 /// use chrono::{TimeZone, Utc};
 ///
@@ -37,23 +35,34 @@ pub trait ToSql {
 	fn fmt_sql(&self, f: &mut String);
 }
 
-const EXPECT_WRITE_CANNOT_FAIL: &str = "Write cannot fail when writing to a String";
+/// Macro for writing to a SQL string.
+///
+/// This will panic if the write fails but the expectation is that it is only used in ToSql
+/// implementations which operate on a `&mut String`. `write!` cannot fail when writing to a
+/// `String`.
+#[macro_export]
+macro_rules! write_sql {
+	($f:expr, $($tt:tt)*) => {{
+		use std::fmt::Write;
+		write!($f, $($tt)*).expect("Write cannot fail when writing to a String")
+	}}
+}
 
 impl ToSql for String {
 	fn fmt_sql(&self, f: &mut String) {
-		write!(f, "{}", QuoteStr(self)).expect(EXPECT_WRITE_CANNOT_FAIL)
+		write_sql!(f, "{}", QuoteStr(self))
 	}
 }
 
 impl ToSql for &str {
 	fn fmt_sql(&self, f: &mut String) {
-		write!(f, "{}", QuoteStr(self)).expect(EXPECT_WRITE_CANNOT_FAIL)
+		write_sql!(f, "{}", QuoteStr(self))
 	}
 }
 
 impl ToSql for &&str {
 	fn fmt_sql(&self, f: &mut String) {
-		write!(f, "{}", QuoteStr(self)).expect(EXPECT_WRITE_CANNOT_FAIL)
+		write_sql!(f, "{}", QuoteStr(self))
 	}
 }
 
@@ -69,6 +78,6 @@ impl ToSql for bool {
 
 impl ToSql for i64 {
 	fn fmt_sql(&self, f: &mut String) {
-		write!(f, "{}", self).expect(EXPECT_WRITE_CANNOT_FAIL)
+		write_sql!(f, "{}", self)
 	}
 }
