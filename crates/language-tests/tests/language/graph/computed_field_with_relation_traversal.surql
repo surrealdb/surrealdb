@@ -17,10 +17,10 @@ skip-record-id-key = true
 value = "[person:two]"
 
 [[test.results]]
-value = "[{ dynamic: 'computed', id: person:two }]"
+value = "[{ id: person:two }]"
 
 [[test.results]]
-value = "[{ dynamic: 'computed', id: person:two, static: 'static' }]"
+value = "[{ id: person:two, static: 'static' }]"
 
 [[test.results]]
 value = "[person:two]"
