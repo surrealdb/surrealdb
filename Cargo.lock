@@ -2572,9 +2572,9 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "humantime"
-version = "2.2.0"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9b112acc8b3adf4b107a8ec20977da0273a8c386765a3ec0229bd500a1443f9f"
+checksum = "135b12329e5e3ce057a9f972339ea52bc954fe1e9358ef27f95e89716fbc5424"
 
 [[package]]
 name = "hyper"
@@ -5370,15 +5370,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde-content"
-version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3753ca04f350fa92d00b6146a3555e63c55388c9ef2e11e09bce2ff1c0b509c6"
-dependencies = [
- "serde",
-]
-
-[[package]]
 name = "serde_bytes"
 version = "0.11.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5783,6 +5774,7 @@ dependencies = [
  "serial_test",
  "surrealdb",
  "surrealdb-core",
+ "surrealdb-types",
  "tempfile",
  "test-log",
  "thiserror 1.0.69",
@@ -5808,7 +5800,6 @@ dependencies = [
 name = "surrealdb"
 version = "3.0.0-alpha.10"
 dependencies = [
- "anyhow",
  "arrayvec",
  "async-channel",
  "bincode",
@@ -5824,6 +5815,7 @@ dependencies = [
  "getrandom 0.3.2",
  "hashbrown 0.14.5",
  "indexmap 2.8.0",
+ "nanoid",
  "native-tls",
  "parking_lot",
  "path-clean",
@@ -5843,10 +5835,10 @@ dependencies = [
  "rustls-pki-types",
  "semver",
  "serde",
- "serde-content",
  "serde_json",
  "serial_test",
  "surrealdb-core",
+ "surrealdb-types",
  "temp-dir",
  "test-log",
  "thiserror 1.0.69",
@@ -5907,6 +5899,7 @@ dependencies = [
  "hashbrown 0.14.5",
  "hex",
  "http 1.3.1",
+ "humantime",
  "indxdb",
  "ipnet",
  "jsonwebtoken",
@@ -6044,12 +6037,18 @@ dependencies = [
  "flatbuffers",
  "geo",
  "hex",
+ "http 1.3.1",
+ "nanoid",
  "regex",
+ "rquickjs",
  "rstest",
  "rust_decimal",
  "serde",
+ "serde_json",
  "surrealdb-protocol",
  "surrealdb-types-derive",
+ "tracing",
+ "ulid",
  "uuid",
 ]
 

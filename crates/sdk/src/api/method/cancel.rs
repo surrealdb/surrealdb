@@ -2,7 +2,6 @@ use std::future::IntoFuture;
 
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Result, Surreal};
-use crate::core::expr::TopLevelExpr;
 
 /// A transaction cancellation future
 #[derive(Debug)]
@@ -20,7 +19,7 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			self.client.query(TopLevelExpr::Cancel).await?;
+			self.client.query("CANCEL").await?;
 			Ok(self.client)
 		})
 	}

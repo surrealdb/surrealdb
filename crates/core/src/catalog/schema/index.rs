@@ -4,11 +4,11 @@ use std::hash::{Hash, Hasher};
 use anyhow::Result;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{ToSql, write_sql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Idiom};
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::sql::statements::define::DefineKind;
 use crate::val::{Array, Number, Value};
 
@@ -50,19 +50,20 @@ impl From<u32> for IndexId {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[non_exhaustive]
 pub struct IndexDefinition {
-	pub index_id: IndexId,
-	pub name: String,
-	pub table_name: String,
-	pub cols: Vec<Idiom>,
-	pub index: Index,
-	pub comment: Option<String>,
+	pub(crate) index_id: IndexId,
+	pub(crate) name: String,
+	pub(crate) table_name: String,
+	pub(crate) cols: Vec<Idiom>,
+	pub(crate) index: Index,
+	pub(crate) comment: Option<String>,
 }
 
 impl_kv_value_revisioned!(IndexDefinition);
 
 impl IndexDefinition {
-	pub fn to_sql_definition(&self) -> crate::sql::DefineIndexStatement {
+	pub(crate) fn to_sql_definition(&self) -> crate::sql::DefineIndexStatement {
 		crate::sql::DefineIndexStatement {
 			kind: DefineKind::Default,
 			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
@@ -91,14 +92,14 @@ impl InfoStructure for IndexDefinition {
 }
 
 impl ToSql for IndexDefinition {
-	fn to_sql(&self) -> String {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub enum Index {
+pub(crate) enum Index {
 	/// (Basic) non unique
 	#[default]
 	Idx,
@@ -134,8 +135,8 @@ impl InfoStructure for Index {
 }
 
 impl ToSql for Index {
-	fn to_sql(&self) -> String {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }
 
@@ -216,7 +217,7 @@ impl Default for Scoring {
 /// M-Tree index parameters.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct MTreeParams {
+pub(crate) struct MTreeParams {
 	/// The dimension of the index.
 	pub dimension: u16,
 	/// The distance metric to use.
@@ -232,7 +233,7 @@ pub struct MTreeParams {
 /// Distance metric for calculating distances between vectors.
 #[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
-pub enum Distance {
+pub(crate) enum Distance {
 	/// Chebyshev distance.
 	///
 	/// <https://en.wikipedia.org/wiki/Chebyshev_distance>
@@ -334,7 +335,7 @@ impl Display for VectorType {
 /// HNSW index parameters.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct HnswParams {
+pub(crate) struct HnswParams {
 	/// The dimension of the index.
 	pub dimension: u16,
 	/// The distance metric to use.

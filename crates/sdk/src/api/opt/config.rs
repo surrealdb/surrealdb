@@ -2,8 +2,9 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::core::dbs::Capabilities as CoreCapabilities;
-use crate::core::iam::Level;
+use surrealdb_core::dbs::Capabilities as CoreCapabilities;
+use surrealdb_core::iam::Level;
+
 use crate::opt::capabilities::Capabilities;
 use crate::opt::websocket::WebsocketConfig;
 
@@ -75,7 +76,7 @@ impl Config {
 	}
 
 	/// Set the default user
-	pub fn user(mut self, user: crate::opt::auth::Root<'_>) -> Self {
+	pub fn user(mut self, user: crate::opt::auth::Root) -> Self {
 		self.auth = Level::Root;
 		user.username.clone_into(&mut self.username);
 		user.password.clone_into(&mut self.password);
@@ -115,7 +116,7 @@ impl Config {
 	/// Set the WebSocket config
 	pub fn websocket(mut self, websocket: WebsocketConfig) -> crate::Result<Self> {
 		if websocket.max_write_buffer_size <= websocket.write_buffer_size {
-			return Err(crate::api::err::Error::MaxWriteBufferSizeTooSmall.into());
+			return Err(crate::api::err::Error::MaxWriteBufferSizeTooSmall);
 		}
 		self.websocket = websocket;
 		Ok(self)

@@ -26,7 +26,7 @@ use crate::val::{
 /// surrealql rules regarding number equality are not observed, 1f != 1dec.
 
 #[derive(Clone, Debug)]
-pub enum Literal {
+pub(crate) enum Literal {
 	None,
 	Null,
 	// An unbounded range, i.e. `..` without any start or end bound.
@@ -49,6 +49,43 @@ pub enum Literal {
 	Geometry(Geometry),
 	File(File),
 	Closure(Box<Closure>),
+}
+
+impl VisitExpression for Literal {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		match self {
+			Literal::None
+			| Literal::Null
+			| Literal::UnboundedRange
+			| Literal::Bool(_)
+			| Literal::Float(_)
+			| Literal::Integer(_)
+			| Literal::Decimal(_)
+			| Literal::String(_)
+			| Literal::Bytes(_)
+			| Literal::Regex(_)
+			| Literal::Duration(_)
+			| Literal::Datetime(_)
+			| Literal::Uuid(_)
+			| Literal::Geometry(_)
+			| Literal::File(_) => {}
+			Literal::RecordId(x) => {
+				x.key.visit(visitor);
+			}
+			Literal::Array(x) => {
+				x.iter().for_each(|x| x.visit(visitor));
+			}
+			Literal::Object(x) => {
+				x.iter().for_each(|x| x.visit(visitor));
+			}
+			Literal::Closure(x) => {
+				x.visit(visitor);
+			}
+		}
+	}
 }
 
 impl Literal {
@@ -118,7 +155,7 @@ impl Literal {
 			Literal::Uuid(uuid) => Value::Uuid(*uuid),
 			Literal::Geometry(geometry) => Value::Geometry(geometry.clone()),
 			Literal::File(file) => Value::File(file.clone()),
-			Literal::Closure(closure) => Value::Closure(closure.clone()),
+			Literal::Closure(closure) => closure.compute(ctx).await?,
 		};
 		Ok(res)
 	}
@@ -249,7 +286,7 @@ impl fmt::Display for Literal {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ObjectEntry {
+pub(crate) struct ObjectEntry {
 	pub key: String,
 	pub value: Expr,
 }

@@ -3,7 +3,7 @@ use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
-use surrealdb_core::val::{Array, Value};
+use surrealdb_types::{Array, Value};
 
 use crate::helpers::{Test, skip_ok};
 
@@ -38,7 +38,7 @@ async fn select_where_matches_partial_highlight() -> Result<()> {
 		]",
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val), "{i}");
+		assert_eq!(tmp, val, "{i}");
 	}
 	//
 	let tmp = res.remove(0).result?;
@@ -51,7 +51,7 @@ async fn select_where_matches_partial_highlight() -> Result<()> {
 		]",
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	for i in 0..2 {
 		let tmp = res.remove(0).result?;
@@ -71,7 +71,7 @@ async fn select_where_matches_partial_highlight() -> Result<()> {
 				]",
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val), "{i}");
+		assert_eq!(tmp, val, "{i}");
 	}
 	//
 	let tmp = res.remove(0).result?;
@@ -91,7 +91,7 @@ async fn select_where_matches_partial_highlight() -> Result<()> {
 				]",
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -127,7 +127,7 @@ async fn select_where_matches_partial_highlight_ngram() -> Result<()> {
 		]",
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val), "{i}");
+		assert_eq!(tmp, val, "{i}");
 	}
 	//
 	let tmp = res.remove(0).result?;
@@ -140,7 +140,7 @@ async fn select_where_matches_partial_highlight_ngram() -> Result<()> {
 		]",
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	for i in 0..2 {
 		let tmp = res.remove(0).result?;
@@ -160,7 +160,7 @@ async fn select_where_matches_partial_highlight_ngram() -> Result<()> {
 				]",
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val), "{i}");
+		assert_eq!(tmp, val, "{i}");
 	}
 	//
 	let tmp = res.remove(0).result?;
@@ -180,7 +180,7 @@ async fn select_where_matches_partial_highlight_ngram() -> Result<()> {
 				]",
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -216,7 +216,7 @@ async fn select_where_matches_using_index_offsets() -> Result<()> {
 		]",
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -248,7 +248,7 @@ async fn select_where_matches_using_index_and_score() -> Result<()> {
 		]",
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -286,13 +286,13 @@ async fn select_where_matches_without_using_index_and_score() -> Result<()> {
 		]",
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 
 	// This result should be empty, as we are looking for non-existing terms (dummy1
 	// and dummy2).
 	let tmp = res.remove(0).result?;
-	let val: Value = Array::new().into();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	let val: Value = Value::Array(Array::new());
+	assert_eq!(tmp, val);
 	Ok(())
 }
 

@@ -8,12 +8,12 @@ use std::task::{Context, Poll};
 use async_channel::Receiver;
 use futures::{Stream, StreamExt};
 use semver::Version;
+use surrealdb_core::kvs::export::{Config as DbExportConfig, TableConfig};
 
 use crate::Surreal;
 use crate::api::conn::{Command, MlExportConfig};
 use crate::api::method::BoxFuture;
 use crate::api::{Connection, Error, ExtraFeatures, Result};
-use crate::core::kvs::export::{Config as DbExportConfig, TableConfig};
 use crate::method::{ExportConfig as Config, Model, OnceLockExt};
 
 /// A database export future
@@ -170,7 +170,7 @@ where
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
 			if !router.features.contains(&ExtraFeatures::Backup) {
-				return Err(Error::BackupsNotSupported.into());
+				return Err(Error::BackupsNotSupported);
 			}
 
 			if let Some(config) = self.ml_config {
@@ -203,10 +203,13 @@ where
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
 			if !router.features.contains(&ExtraFeatures::Backup) {
-				return Err(Error::BackupsNotSupported.into());
+				tracing::warn!("Backups are not supported");
+				return Err(Error::BackupsNotSupported);
 			}
 			let (tx, rx) = crate::channel::bounded(1);
 			let rx = Box::pin(rx);
+
+			tracing::info!("Exporting bytes");
 
 			if let Some(config) = self.ml_config {
 				router

@@ -17,7 +17,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct DefineModelStatement {
+pub(crate) struct DefineModelStatement {
 	pub kind: DefineKind,
 	pub hash: String,
 	pub name: String,

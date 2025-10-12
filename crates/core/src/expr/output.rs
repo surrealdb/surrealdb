@@ -1,10 +1,11 @@
 use std::fmt::{self, Display};
 
 use crate::expr::Expr;
+use crate::expr::expression::VisitExpression;
 use crate::expr::field::Fields;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Output {
+pub(crate) enum Output {
 	None,
 	Null,
 	Diff,
@@ -13,8 +14,8 @@ pub enum Output {
 	Fields(Fields),
 }
 
-impl Output {
-	pub(crate) fn visit<F>(&self, visitor: &mut F)
+impl VisitExpression for Output {
+	fn visit<F>(&self, visitor: &mut F)
 	where
 		F: FnMut(&Expr),
 	{

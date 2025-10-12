@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[allow(unused_imports)]
 use anyhow::bail;
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
@@ -44,13 +44,14 @@ use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
 use crate::dbs::node::Timestamp;
-use crate::dbs::{Capabilities, Executor, Notification, Options, Response, Session, Variables};
+use crate::dbs::{Capabilities, Executor, Options, QueryResult, QueryResultBuilder, Session};
 use crate::err::Error;
-use crate::expr::statements::DefineUserStatement;
-use crate::expr::{Base, Expr, FlowResultExt as _, LogicalPlan};
+use crate::expr::model::get_model_path;
+use crate::expr::statements::{DefineModelStatement, DefineStatement, DefineUserStatement};
+use crate::expr::{Base, Expr, FlowResultExt as _, Literal, LogicalPlan, TopLevelExpr};
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
-use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
+use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
@@ -71,9 +72,11 @@ use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::{LockType, TransactionType};
+use crate::rpc::DbResultError;
 use crate::sql::Ast;
 use crate::syn::parser::{ParserSettings, StatementStream};
-use crate::val::Value;
+use crate::types::{PublicNotification, PublicValue, PublicVariables};
+use crate::val::{Value, convert_value_to_public_value};
 use crate::{cf, syn};
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
@@ -105,7 +108,7 @@ pub struct Datastore {
 	/// The security and feature capabilities for this datastore.
 	capabilities: Arc<Capabilities>,
 	// Whether this datastore enables live query notifications to subscribers.
-	notification_channel: Option<(Sender<Notification>, Receiver<Notification>)>,
+	notification_channel: Option<(Sender<PublicNotification>, Receiver<PublicNotification>)>,
 	// The index store cache
 	index_stores: IndexStores,
 	// The cross transaction cache
@@ -1092,13 +1095,13 @@ impl Datastore {
 
 	/// Performs a database import from SQL
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn startup(&self, sql: &str, sess: &Session) -> Result<Vec<Response>> {
+	pub async fn startup(&self, sql: &str, sess: &Session) -> Result<Vec<QueryResult>> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore startup import script");
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Execute the SQL import
-		self.execute(sql, sess, None).await
+		self.execute(sql, sess, None).await.map_err(|e| anyhow::anyhow!(e))
 	}
 
 	/// Run the datastore shutdown tasks, performing any necessary cleanup
@@ -1173,10 +1176,11 @@ impl Datastore {
 		&self,
 		txt: &str,
 		sess: &Session,
-		vars: Option<Variables>,
-	) -> Result<Vec<Response>> {
+		vars: Option<PublicVariables>,
+	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
 		// Parse the SQL query text
-		let ast = syn::parse_with_capabilities(txt, &self.capabilities)?;
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities)
+			.map_err(|e| DbResultError::ParseError(e.to_string()))?;
 		// Process the AST
 		self.process(ast, sess, vars).await
 	}
@@ -1185,9 +1189,9 @@ impl Datastore {
 	pub async fn execute_import<S>(
 		&self,
 		sess: &Session,
-		vars: Option<Variables>,
+		vars: Option<PublicVariables>,
 		query: S,
-	) -> Result<Vec<Response>>
+	) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<Bytes>>,
 	{
@@ -1213,7 +1217,7 @@ impl Datastore {
 		ctx.attach_session(sess)?;
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars)?;
+			ctx.attach_variables(vars.into())?;
 		}
 		// Process all statements
 
@@ -1298,44 +1302,293 @@ impl Datastore {
 		&self,
 		ast: Ast,
 		sess: &Session,
-		vars: Option<Variables>,
-	) -> Result<Vec<Response>> {
+		vars: Option<PublicVariables>,
+	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
 		//TODO: Insert planner here.
 		self.process_plan(ast.into(), sess, vars).await
 	}
 
-	pub async fn process_plan(
+	pub(crate) async fn process_plan(
 		&self,
 		plan: LogicalPlan,
 		sess: &Session,
-		vars: Option<Variables>,
-	) -> Result<Vec<Response>> {
+		vars: Option<PublicVariables>,
+	) -> Result<Vec<QueryResult>, DbResultError> {
 		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
+		if sess.expired() {
+			return Err(DbResultError::InvalidAuth("The session has expired".to_string()));
+		}
+
 		// Check if anonymous actors can execute queries when auth is enabled
 		// TODO(sgirones): Check this as part of the authorisation layer
-		self.check_anon(sess).map_err(|_| {
-			Error::from(IamError::NotAllowed {
-				actor: "anonymous".to_string(),
-				action: "process".to_string(),
-				resource: "query".to_string(),
-			})
-		})?;
+		if let Err(e) = self.check_anon(sess) {
+			return Err(DbResultError::InvalidAuth(format!("Anonymous access not allowed: {}", e)));
+		}
 
 		// Create a new query options
 		let opt = self.setup_options(sess);
 
 		// Create a default context
-		let mut ctx = self.setup_ctx()?;
+		let mut ctx = self.setup_ctx().map_err(|e| match e.downcast_ref::<Error>() {
+			Some(Error::ExpiredSession) => {
+				DbResultError::InvalidAuth("The session has expired".to_string())
+			}
+			Some(Error::InvalidAuth) => {
+				DbResultError::InvalidAuth("Authentication failed".to_string())
+			}
+			Some(Error::UnexpectedAuth) => {
+				DbResultError::InvalidAuth("Unexpected authentication error".to_string())
+			}
+			Some(Error::MissingUserOrPass) => {
+				DbResultError::InvalidAuth("Missing username or password".to_string())
+			}
+			Some(Error::InvalidPass) => DbResultError::InvalidAuth("Invalid password".to_string()),
+			Some(Error::NoSigninTarget) => {
+				DbResultError::InvalidAuth("No signin target specified".to_string())
+			}
+			Some(Error::TokenMakingFailed) => {
+				DbResultError::InvalidAuth("Failed to create authentication token".to_string())
+			}
+			Some(Error::IamError(iam_err)) => {
+				DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
+			}
+			Some(Error::Ds(msg)) => {
+				DbResultError::InternalError(format!("Datastore error: {}", msg))
+			}
+			Some(Error::Tx(msg)) => {
+				DbResultError::InternalError(format!("Transaction error: {}", msg))
+			}
+			Some(Error::InvalidQuery(_)) => {
+				DbResultError::ParseError("Invalid query syntax".to_string())
+			}
+			Some(Error::Internal(msg)) => DbResultError::InternalError(msg.clone()),
+			Some(Error::Unimplemented(msg)) => {
+				DbResultError::InternalError(format!("Unimplemented: {}", msg))
+			}
+			Some(Error::Io(e)) => DbResultError::InternalError(format!("I/O error: {}", e)),
+			Some(Error::Http(msg)) => DbResultError::InternalError(format!("HTTP error: {}", msg)),
+			Some(Error::Channel(msg)) => {
+				DbResultError::InternalError(format!("Channel error: {}", msg))
+			}
+			Some(Error::QueryTimedout) => DbResultError::QueryTimedout,
+			Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
+			Some(Error::QueryNotExecuted {
+				message,
+			}) => DbResultError::QueryNotExecuted(message.clone()),
+			Some(Error::ScriptingNotAllowed) => {
+				DbResultError::MethodNotAllowed("Scripting functions are not allowed".to_string())
+			}
+			Some(Error::FunctionNotAllowed(func)) => {
+				DbResultError::MethodNotAllowed(format!("Function '{}' is not allowed", func))
+			}
+			Some(Error::NetTargetNotAllowed(target)) => DbResultError::MethodNotAllowed(format!(
+				"Network target '{}' is not allowed",
+				target
+			)),
+			Some(Error::Thrown(msg)) => DbResultError::Thrown(msg.clone()),
+			_ => DbResultError::InternalError(e.to_string()),
+		})?;
+
 		// Start an execution context
-		ctx.attach_session(sess)?;
+		ctx.attach_session(sess).map_err(|e| match e {
+			Error::ExpiredSession => {
+				DbResultError::InvalidAuth("The session has expired".to_string())
+			}
+			Error::InvalidAuth => DbResultError::InvalidAuth("Authentication failed".to_string()),
+			Error::UnexpectedAuth => {
+				DbResultError::InvalidAuth("Unexpected authentication error".to_string())
+			}
+			Error::IamError(iam_err) => {
+				DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
+			}
+			_ => DbResultError::InternalError(e.to_string()),
+		})?;
+
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars)?;
+			ctx.attach_variables(vars.into()).map_err(|e| match e {
+				Error::InvalidParam {
+					..
+				} => DbResultError::InvalidParams("Invalid query variables".to_string()),
+				Error::Internal(msg) => DbResultError::InternalError(msg),
+				_ => DbResultError::InternalError(e.to_string()),
+			})?;
 		}
 
 		// Process all statements
-		Executor::execute_plan(self, ctx.freeze(), opt, plan).await
+		Executor::execute_plan(self, ctx.freeze(), opt, plan).await.map_err(|e| {
+			match e.downcast_ref::<Error>() {
+				Some(Error::ExpiredSession) => {
+					DbResultError::InvalidAuth("The session has expired".to_string())
+				}
+				Some(Error::InvalidAuth) => {
+					DbResultError::InvalidAuth("Authentication failed".to_string())
+				}
+				Some(Error::UnexpectedAuth) => {
+					DbResultError::InvalidAuth("Unexpected authentication error".to_string())
+				}
+				Some(Error::MissingUserOrPass) => {
+					DbResultError::InvalidAuth("Missing username or password".to_string())
+				}
+				Some(Error::InvalidPass) => {
+					DbResultError::InvalidAuth("Invalid password".to_string())
+				}
+				Some(Error::NoSigninTarget) => {
+					DbResultError::InvalidAuth("No signin target specified".to_string())
+				}
+				Some(Error::TokenMakingFailed) => {
+					DbResultError::InvalidAuth("Failed to create authentication token".to_string())
+				}
+				Some(Error::IamError(iam_err)) => {
+					DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
+				}
+				Some(Error::Ds(msg)) => {
+					DbResultError::InternalError(format!("Datastore error: {}", msg))
+				}
+				Some(Error::Tx(msg)) => {
+					DbResultError::InternalError(format!("Transaction error: {}", msg))
+				}
+				Some(Error::TxFinished) => {
+					DbResultError::InternalError("Transaction already finished".to_string())
+				}
+				Some(Error::TxReadonly) => DbResultError::InternalError(
+					"Cannot write to read-only transaction".to_string(),
+				),
+				Some(Error::TxConditionNotMet) => {
+					DbResultError::InternalError("Transaction condition not met".to_string())
+				}
+				Some(Error::TxKeyAlreadyExists) => {
+					DbResultError::InternalError("Key already exists in transaction".to_string())
+				}
+				Some(Error::TxRetryable) => {
+					DbResultError::InternalError("Transaction conflict, retry required".to_string())
+				}
+				Some(Error::NsEmpty) => {
+					DbResultError::InvalidParams("No namespace specified".to_string())
+				}
+				Some(Error::DbEmpty) => {
+					DbResultError::InvalidParams("No database specified".to_string())
+				}
+				Some(Error::InvalidQuery(_)) => {
+					DbResultError::ParseError("Invalid query syntax".to_string())
+				}
+				Some(Error::InvalidContent {
+					..
+				}) => DbResultError::InvalidParams("Invalid content clause".to_string()),
+				Some(Error::InvalidMerge {
+					..
+				}) => DbResultError::InvalidParams("Invalid merge clause".to_string()),
+				Some(Error::InvalidPatch(_)) => {
+					DbResultError::InvalidParams("Invalid patch operation".to_string())
+				}
+				Some(Error::Internal(msg)) => DbResultError::InternalError(msg.clone()),
+				Some(Error::Unimplemented(msg)) => {
+					DbResultError::InternalError(format!("Unimplemented: {}", msg))
+				}
+				Some(Error::Io(e)) => DbResultError::InternalError(format!("I/O error: {}", e)),
+				Some(Error::Http(msg)) => {
+					DbResultError::InternalError(format!("HTTP error: {}", msg))
+				}
+				Some(Error::Channel(msg)) => {
+					DbResultError::InternalError(format!("Channel error: {}", msg))
+				}
+				Some(Error::QueryTimedout) => DbResultError::QueryTimedout,
+				Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
+				Some(Error::QueryNotExecuted {
+					message,
+				}) => DbResultError::QueryNotExecuted(message.clone()),
+				Some(Error::ScriptingNotAllowed) => DbResultError::MethodNotAllowed(
+					"Scripting functions are not allowed".to_string(),
+				),
+				Some(Error::FunctionNotAllowed(func)) => {
+					DbResultError::MethodNotAllowed(format!("Function '{}' is not allowed", func))
+				}
+				Some(Error::NetTargetNotAllowed(target)) => DbResultError::MethodNotAllowed(
+					format!("Network target '{}' is not allowed", target),
+				),
+				Some(Error::Thrown(msg)) => DbResultError::Thrown(msg.clone()),
+				Some(Error::Coerce(_)) => {
+					DbResultError::InvalidParams("Type coercion error".to_string())
+				}
+				Some(Error::Cast(_)) => {
+					DbResultError::InvalidParams("Type casting error".to_string())
+				}
+				Some(Error::TryAdd(_, _))
+				| Some(Error::TrySub(_, _))
+				| Some(Error::TryMul(_, _))
+				| Some(Error::TryDiv(_, _))
+				| Some(Error::TryRem(_, _))
+				| Some(Error::TryPow(_, _))
+				| Some(Error::TryNeg(_)) => {
+					DbResultError::InvalidParams("Arithmetic operation error".to_string())
+				}
+				Some(Error::TryFrom(_, _)) => {
+					DbResultError::InvalidParams("Type conversion error".to_string())
+				}
+				Some(Error::Unencodable) => {
+					DbResultError::SerializationError("Value cannot be serialized".to_string())
+				}
+				Some(Error::Decode(_)) => {
+					DbResultError::DeserializationError("Key decoding error".to_string())
+				}
+				Some(Error::Revision(_)) => {
+					DbResultError::DeserializationError("Versioned data error".to_string())
+				}
+				Some(Error::CorruptedIndex(_)) => {
+					DbResultError::InternalError("Index corruption detected".to_string())
+				}
+				Some(Error::NoIndexFoundForMatch {
+					..
+				}) => DbResultError::InternalError("No suitable index found".to_string()),
+				Some(Error::AnalyzerError(msg)) => {
+					DbResultError::InternalError(format!("Analyzer error: {}", msg))
+				}
+				Some(Error::HighlightError(msg)) => {
+					DbResultError::InternalError(format!("Highlight error: {}", msg))
+				}
+				Some(Error::Bincode(_)) => {
+					DbResultError::SerializationError("Bincode serialization error".to_string())
+				}
+				Some(Error::FstError(_)) => DbResultError::InternalError("FST error".to_string()),
+				Some(Error::Utf8Error(_)) => {
+					DbResultError::DeserializationError("UTF-8 decoding error".to_string())
+				}
+				Some(Error::ObsError(_)) => {
+					DbResultError::InternalError("Object store error".to_string())
+				}
+				Some(Error::DuplicatedMatchRef {
+					..
+				}) => DbResultError::InvalidParams("Duplicated match reference".to_string()),
+				Some(Error::TimestampOverflow(msg)) => {
+					DbResultError::InternalError(format!("Timestamp overflow: {}", msg))
+				}
+				Some(Error::CorruptedVersionstampInKey(_)) => {
+					DbResultError::InternalError("Corrupted versionstamp in key".to_string())
+				}
+				Some(Error::NoRecordFound) => {
+					DbResultError::InternalError("No record found".to_string())
+				}
+				Some(Error::InvalidSignup) => {
+					DbResultError::InvalidAuth("Signup failed".to_string())
+				}
+				Some(Error::ClAlreadyExists {
+					..
+				}) => DbResultError::InternalError("Cluster node already exists".to_string()),
+				Some(Error::ApAlreadyExists {
+					..
+				}) => DbResultError::InternalError("API already exists".to_string()),
+				Some(Error::AzAlreadyExists {
+					..
+				}) => DbResultError::InternalError("Analyzer already exists".to_string()),
+				Some(Error::BuAlreadyExists {
+					..
+				}) => DbResultError::InternalError("Bucket already exists".to_string()),
+				Some(Error::DbAlreadyExists {
+					..
+				}) => DbResultError::InternalError("Database already exists".to_string()),
+				_ => DbResultError::InternalError(e.to_string()),
+			}
+		})
 	}
 
 	/// Ensure a SQL [`Value`] is fully computed
@@ -1344,7 +1597,7 @@ impl Datastore {
 		&self,
 		val: Expr,
 		sess: &Session,
-		vars: Option<Variables>,
+		vars: Option<PublicVariables>,
 	) -> Result<Value> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
@@ -1378,7 +1631,7 @@ impl Datastore {
 		ctx.attach_session(sess)?;
 		// Store the query variables
 		if let Some(vars) = vars {
-			ctx.attach_variables(vars)?;
+			ctx.attach_variables(vars.into())?;
 		}
 		let txn_type = if val.read_only() {
 			TransactionType::Read
@@ -1416,8 +1669,8 @@ impl Datastore {
 		&self,
 		val: &Expr,
 		sess: &Session,
-		vars: Option<Variables>,
-	) -> Result<Value> {
+		vars: Option<PublicVariables>,
+	) -> Result<PublicValue> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Create a new memory stack
@@ -1436,12 +1689,7 @@ impl Datastore {
 		if let Some(channel) = &self.notification_channel {
 			ctx.add_notifications(Some(&channel.0));
 		}
-		// Start an execution context
-		ctx.attach_session(sess)?;
-		// Store the query variables
-		if let Some(vars) = vars {
-			ctx.attach_variables(vars)?;
-		}
+
 		let txn_type = if val.read_only() {
 			TransactionType::Read
 		} else {
@@ -1451,6 +1699,14 @@ impl Datastore {
 		let txn = self.transaction(txn_type, Optimistic).await?.enclose();
 		// Store the transaction
 		ctx.set_transaction(txn.clone());
+
+		// Start an execution context
+		ctx.attach_session(sess)?;
+		// Store the query variables
+		if let Some(vars) = vars {
+			ctx.attach_public_variables(vars)?;
+		}
+
 		// Freeze the context
 		let ctx = ctx.freeze();
 		// Compute the value
@@ -1465,7 +1721,7 @@ impl Datastore {
 			txn.cancel().await?;
 		};
 		// Return result
-		res
+		convert_value_to_public_value(res?)
 	}
 
 	/// Subscribe to live notifications
@@ -1481,29 +1737,29 @@ impl Datastore {
 	///     let ses = Session::owner();
 	/// 	if let Some(channel) = ds.notifications() {
 	///     	while let Ok(v) = channel.recv().await {
-	///     	    println!("Received notification: {v}");
+	///     	    println!("Received notification: {v:?}");
 	///     	}
 	/// 	}
 	///     Ok(())
 	/// }
 	/// ```
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub fn notifications(&self) -> Option<Receiver<Notification>> {
+	pub fn notifications(&self) -> Option<Receiver<PublicNotification>> {
 		self.notification_channel.as_ref().map(|v| v.1.clone())
 	}
 
 	/// Performs a database import from SQL
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<Response>> {
+	pub async fn import(&self, sql: &str, sess: &Session) -> Result<Vec<QueryResult>> {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Execute the SQL import
-		self.execute(sql, sess, None).await
+		self.execute(sql, sess, None).await.map_err(|e| anyhow::anyhow!(e))
 	}
 
 	/// Performs a database import from SQL
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn import_stream<S>(&self, sess: &Session, stream: S) -> Result<Vec<Response>>
+	pub async fn import_stream<S>(&self, sess: &Session, stream: S) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<Bytes>>,
 	{
@@ -1612,28 +1868,46 @@ impl Datastore {
 		session: &mut Session,
 		namespace: Option<String>,
 		database: Option<String>,
-	) -> Result<()> {
+	) -> std::result::Result<QueryResult, DbResultError> {
+		let query_result = QueryResultBuilder::started_now();
 		match (namespace, database) {
 			(Some(ns), Some(db)) => {
-				let tx = self.transaction(TransactionType::Write, LockType::Optimistic).await?;
-				tx.ensure_ns_db(&ns, &db, self.strict).await?;
-				tx.commit().await?;
+				let tx = self
+					.transaction(TransactionType::Write, LockType::Optimistic)
+					.await
+					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+				tx.ensure_ns_db(&ns, &db, self.strict)
+					.await
+					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+				tx.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))?;
 				session.ns = Some(ns);
 				session.db = Some(db);
 			}
 			(Some(ns), None) => {
-				let tx = self.transaction(TransactionType::Write, LockType::Optimistic).await?;
-				tx.get_or_add_ns(&ns, self.strict).await?;
-				tx.commit().await?;
+				let tx = self
+					.transaction(TransactionType::Write, LockType::Optimistic)
+					.await
+					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+				tx.get_or_add_ns(&ns, self.strict)
+					.await
+					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+				tx.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))?;
 				session.ns = Some(ns);
 			}
 			(None, Some(db)) => {
 				let Some(ns) = session.ns.clone() else {
-					return Err(anyhow::anyhow!("Cannot use database without namespace"));
+					return Err(DbResultError::InvalidRequest(
+						"Cannot use database without namespace".to_string(),
+					));
 				};
-				let tx = self.transaction(TransactionType::Write, LockType::Optimistic).await?;
-				tx.ensure_ns_db(&ns, &db, self.strict).await?;
-				tx.commit().await?;
+				let tx = self
+					.transaction(TransactionType::Write, LockType::Optimistic)
+					.await
+					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+				tx.ensure_ns_db(&ns, &db, self.strict)
+					.await
+					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+				tx.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))?;
 				session.db = Some(db);
 			}
 			(None, None) => {
@@ -1642,7 +1916,7 @@ impl Datastore {
 			}
 		}
 
-		Ok(())
+		Ok(query_result.finish())
 	}
 
 	/// Get a db model by name.
@@ -1706,7 +1980,7 @@ impl Datastore {
 		let res = match ApiDefinition::find_definition(apis.as_ref(), segments, method) {
 			Some((api, params)) => {
 				let invocation = ApiInvocation {
-					params,
+					params: params.try_into()?,
 					method,
 					headers,
 					query,
@@ -1737,12 +2011,52 @@ impl Datastore {
 
 		res
 	}
+
+	pub async fn put_ml_model(
+		&self,
+		session: &Session,
+		name: &str,
+		version: &str,
+		description: &str,
+		data: Vec<u8>,
+	) -> Result<()> {
+		let ns = session.ns.as_ref().context("Namespace is required")?;
+		let db = session.db.as_ref().context("Database is required")?;
+
+		self.check(session, Action::Edit, ResourceKind::Model.on_db(ns, db))?;
+
+		// Calculate the hash of the model file
+		let hash = crate::obs::hash(&data);
+		// Calculate the path of the model file
+		let path = get_model_path(ns, db, name, version, &hash);
+		// Insert the file data in to the store
+		crate::obs::put(&path, data).await?;
+		// Insert the model in to the database
+		let model = DefineModelStatement {
+			name: name.to_string(),
+			version: version.to_string(),
+			comment: Some(Expr::Literal(Literal::String(description.to_string()))),
+			hash,
+			..Default::default()
+		};
+
+		let q = LogicalPlan {
+			expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Model(
+				model,
+			))))],
+		};
+
+		self.process_plan(q, session, None).await.map_err(|e| anyhow::anyhow!(e))?;
+
+		Ok(())
+	}
 }
 
 #[cfg(test)]
 mod test {
 	use super::*;
 	use crate::iam::verify::verify_root_creds;
+	use crate::types::{PublicValue, PublicVariables};
 
 	#[tokio::test]
 	async fn test_setup_superuser() {
@@ -1893,7 +2207,7 @@ mod test {
 		res.remove(0).result.unwrap();
 		res.remove(0).result.unwrap();
 		let lqid = res.remove(0).result?;
-		assert!(matches!(lqid, Value::Uuid(_)));
+		assert!(matches!(lqid, PublicValue::Uuid(_)));
 		// Obtain the uuids after definitions
 		let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
 		let after_define = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
@@ -1916,7 +2230,7 @@ mod test {
 		KILL $lqid;
 	"
 		.to_owned();
-		let vars = Variables::from(map! { "lqid".to_string() => lqid });
+		let vars = PublicVariables::from(map! { "lqid".to_string() => lqid });
 		let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
 		assert_eq!(res.len(), 5);
 		res.remove(0).result.unwrap();

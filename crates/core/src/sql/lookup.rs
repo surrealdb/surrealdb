@@ -8,7 +8,7 @@ use crate::sql::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, S
 /// Since they both work very similarly, they also both support the same operations
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Lookup {
+pub(crate) struct Lookup {
 	pub kind: LookupKind,
 	pub expr: Option<Fields>,
 	pub what: Vec<LookupSubject>,
@@ -110,16 +110,6 @@ impl From<crate::expr::Lookup> for Lookup {
 pub enum LookupKind {
 	Graph(Dir),
 	Reference,
-}
-
-impl LookupKind {
-	pub fn is_graph(&self) -> bool {
-		matches!(self, LookupKind::Graph(_))
-	}
-
-	pub fn is_reference(&self) -> bool {
-		matches!(self, LookupKind::Reference)
-	}
 }
 
 impl Default for LookupKind {

@@ -7,7 +7,7 @@ use crate::expr::{Expr, Value};
 use crate::fmt::Fmt;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Ordering {
+pub(crate) enum Ordering {
 	Random,
 	Order(OrderList),
 }
@@ -33,7 +33,7 @@ impl fmt::Display for Ordering {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct OrderList(pub Vec<Order>);
+pub(crate) struct OrderList(pub(crate) Vec<Order>);
 
 impl Deref for OrderList {
 	type Target = Vec<Order>;
@@ -79,13 +79,13 @@ impl VisitExpression for OrderList {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct Order {
+pub(crate) struct Order {
 	/// The value to order by
-	pub value: Idiom,
-	pub collate: bool,
-	pub numeric: bool,
+	pub(crate) value: Idiom,
+	pub(crate) collate: bool,
+	pub(crate) numeric: bool,
 	/// true if the direction is ascending
-	pub direction: bool,
+	pub(crate) direction: bool,
 }
 
 impl VisitExpression for Order {
