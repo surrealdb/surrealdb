@@ -30,8 +30,8 @@ user-login = "BurntSushi"
 user-name = "Andrew Gallant"
 
 [[publisher.anyhow]]
-version = "1.0.97"
-when = "2025-03-03"
+version = "1.0.100"
+when = "2025-09-19"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
@@ -161,6 +161,13 @@ when = "2024-01-28"
 user-id = 176367
 user-login = "dodomorandi"
 user-name = "Edoardo Morandi"
+
+[[publisher.dtoa]]
+version = "1.0.10"
+when = "2025-03-03"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
 
 [[publisher.encoding_rs]]
 version = "0.8.35"
@@ -607,6 +614,13 @@ user-id = 267
 user-login = "tarcieri"
 user-name = "Tony Arcieri"
 
+[[publisher.serde]]
+version = "1.0.228"
+when = "2025-09-27"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
 [[publisher.serde_bytes]]
 version = "0.11.17"
 when = "2025-03-09"
@@ -614,9 +628,23 @@ user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
 
+[[publisher.serde_core]]
+version = "1.0.228"
+when = "2025-09-27"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
+[[publisher.serde_derive]]
+version = "1.0.228"
+when = "2025-09-27"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
 [[publisher.serde_json]]
-version = "1.0.140"
-when = "2025-03-03"
+version = "1.0.142"
+when = "2025-07-31"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
@@ -739,6 +767,20 @@ when = "2025-02-22"
 user-id = 1
 user-login = "alexcrichton"
 user-name = "Alex Crichton"
+
+[[publisher.thiserror]]
+version = "2.0.12"
+when = "2025-03-03"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
+
+[[publisher.thiserror-impl]]
+version = "2.0.12"
+when = "2025-03-03"
+user-id = 3618
+user-login = "dtolnay"
+user-name = "David Tolnay"
 
 [[publisher.tokio]]
 version = "1.44.2"
@@ -2683,6 +2725,16 @@ delta = "1.9.0 -> 1.10.0"
 who = "Ameer Ghani <inahga@divviup.org>"
 criteria = "safe-to-deploy"
 version = "1.12.1"
+
+[[audits.isrg.audits.serde_json]]
+who = "J.C. Jones <jc@divviup.org>"
+criteria = "safe-to-deploy"
+delta = "1.0.142 -> 1.0.143"
+
+[[audits.isrg.audits.serde_json]]
+who = "J.C. Jones <jc@divviup.org>"
+criteria = "safe-to-deploy"
+delta = "1.0.143 -> 1.0.145"
 
 [[audits.isrg.audits.sha2]]
 who = "David Cook <dcook@divviup.org>"
