@@ -619,7 +619,7 @@ jobs:
           SURREAL_VERSION_CHECK: "false"
           SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
 
-      - name: Check for test failures
+      - name: ${{ (steps.test-http.outcome != 'success' || steps.test-ws.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
         id: check-failures
         run: |
           if [ "${{ steps.test-http.outcome }}" != "success" ] || [ "${{ steps.test-ws.outcome }}" != "success" ]; then
@@ -699,7 +699,7 @@ jobs:
         env:
           SURREALDB_URL: ws://localhost:8000/rpc
 
-      - name: Check for test failures
+      - name: ${{ (steps.test-http.outcome != 'success' || steps.test-ws.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
         id: check-failures
         run: |
           if [ "${{ steps.test-http.outcome }}" != "success" ] || [ "${{ steps.test-ws.outcome }}" != "success" ]; then
@@ -792,7 +792,7 @@ jobs:
           SURREALDB_VERSION: ${{ matrix.version }}
           PYTHONWARNINGS: ignore::ResourceWarning,ignore::UserWarning
 
-      - name: Check for test failures
+      - name: ${{ (steps.test-http.outcome != 'success' || steps.test-ws.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
         id: check-failures
         run: |
           if [ "${{ steps.test-http.outcome }}" != "success" ] || [ "${{ steps.test-ws.outcome }}" != "success" ]; then
@@ -865,7 +865,7 @@ jobs:
         continue-on-error: true
         run: composer test-coverage-v2
 
-      - name: Check for test failures
+      - name: ${{ (steps.test-php.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
         id: check-failures
         run: |
           if [ "${{ steps.test-php.outcome }}" != "success" ]; then
@@ -956,7 +956,7 @@ jobs:
           --no-restore
           --no-build
 
-      - name: Check for test failures
+      - name: ${{ (steps.test-main.outcome != 'success' || steps.test-live.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
         id: check-failures
         run: |
           if [ "${{ steps.test-main.outcome }}" != "success" ] || [ "${{ steps.test-live.outcome }}" != "success" ]; then
