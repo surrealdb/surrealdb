@@ -22,6 +22,8 @@ pub mod range;
 pub mod record_id;
 /// Regular expression value types for SurrealDB
 pub mod regex;
+/// Table value types for SurrealDB
+pub mod table;
 /// UUID value types for SurrealDB
 pub mod uuid;
 
@@ -42,6 +44,7 @@ pub use self::object::Object;
 pub use self::range::Range;
 pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::regex::Regex;
+pub use self::table::Table;
 pub use self::uuid::Uuid;
 use crate::sql::ToSql;
 use crate::utils::escape::QuoteStr;
@@ -97,6 +100,8 @@ pub enum Value {
 	Geometry(Geometry),
 	/// Binary data
 	Bytes(Bytes),
+	/// A table value
+	Table(Table),
 	/// A record identifier
 	RecordId(RecordId),
 	/// A file reference
@@ -131,6 +136,7 @@ impl Ord for Value {
 			(Value::Object(a), Value::Object(b)) => a.cmp(b),
 			(Value::Geometry(a), Value::Geometry(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
 			(Value::Bytes(a), Value::Bytes(b)) => a.cmp(b),
+			(Value::Table(a), Value::Table(b)) => a.cmp(b),
 			(Value::RecordId(a), Value::RecordId(b)) => a.cmp(b),
 			(Value::File(a), Value::File(b)) => a.cmp(b),
 			(Value::Range(a), Value::Range(b)) => a.cmp(b),
@@ -156,6 +162,7 @@ impl Ord for Value {
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
+				| Value::Table(_)
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
@@ -171,6 +178,7 @@ impl Ord for Value {
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
+				| Value::Table(_)
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
@@ -188,6 +196,7 @@ impl Ord for Value {
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
+				| Value::Table(_)
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
@@ -202,6 +211,7 @@ impl Ord for Value {
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
+				| Value::Table(_)
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
@@ -218,6 +228,7 @@ impl Ord for Value {
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
+				| Value::Table(_)
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
@@ -231,6 +242,7 @@ impl Ord for Value {
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
+				| Value::Table(_)
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
@@ -246,6 +258,7 @@ impl Ord for Value {
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
+				| Value::Table(_)
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
@@ -258,6 +271,7 @@ impl Ord for Value {
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
+				| Value::Table(_)
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
@@ -272,6 +286,7 @@ impl Ord for Value {
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
+				| Value::Table(_)
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
@@ -283,6 +298,7 @@ impl Ord for Value {
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
+				| Value::Table(_)
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
@@ -296,6 +312,7 @@ impl Ord for Value {
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
+				| Value::Table(_)
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
@@ -306,6 +323,7 @@ impl Ord for Value {
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
+				| Value::Table(_)
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
@@ -318,6 +336,7 @@ impl Ord for Value {
 				Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
+				| Value::Table(_)
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
@@ -327,6 +346,7 @@ impl Ord for Value {
 				Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
+				| Value::Table(_)
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
@@ -338,6 +358,7 @@ impl Ord for Value {
 				Value::Object(_),
 				Value::Geometry(_)
 				| Value::Bytes(_)
+				| Value::Table(_)
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
@@ -346,6 +367,7 @@ impl Ord for Value {
 			(
 				Value::Geometry(_)
 				| Value::Bytes(_)
+				| Value::Table(_)
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
@@ -356,6 +378,7 @@ impl Ord for Value {
 			(
 				Value::Geometry(_),
 				Value::Bytes(_)
+				| Value::Table(_)
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
@@ -363,6 +386,7 @@ impl Ord for Value {
 			) => Ordering::Less,
 			(
 				Value::Bytes(_)
+				| Value::Table(_)
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
@@ -372,12 +396,28 @@ impl Ord for Value {
 
 			(
 				Value::Bytes(_),
-				Value::RecordId(_) | Value::File(_) | Value::Range(_) | Value::Regex(_),
+				Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
 			) => Ordering::Less,
 			(
-				Value::RecordId(_) | Value::File(_) | Value::Range(_) | Value::Regex(_),
+				Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_),
 				Value::Bytes(_),
 			) => Ordering::Greater,
+
+			(Value::Table(t), Value::RecordId(record_id)) => t.cmp(&record_id.table),
+			(Value::RecordId(record_id), Value::Table(t)) => record_id.table.cmp(t),
+
+			(Value::Table(_), Value::File(_) | Value::Range(_) | Value::Regex(_)) => Ordering::Less,
+			(Value::File(_) | Value::Range(_) | Value::Regex(_), Value::Table(_)) => {
+				Ordering::Greater
+			}
 
 			(Value::RecordId(_), Value::File(_) | Value::Range(_) | Value::Regex(_)) => {
 				Ordering::Less
@@ -413,6 +453,7 @@ impl Value {
 			Value::Object(_) => Kind::Object,
 			Value::Geometry(_) => Kind::Geometry(Vec::new()),
 			Value::Bytes(_) => Kind::Bytes,
+			Value::Table(_) => Kind::Table(Vec::new()),
 			Value::RecordId(_) => Kind::Record(Vec::new()),
 			Value::File(_) => Kind::File(Vec::new()),
 			Value::Range(_) => Kind::Range,
@@ -513,7 +554,10 @@ impl Value {
 			Kind::String => self.is_string(),
 			Kind::Uuid => self.is_uuid(),
 			Kind::Regex => matches!(self, Value::Regex(_)),
-			Kind::Record(table) => self.is_record_and(|r| r.is_record_type(table)),
+			Kind::Table(table) => {
+				self.is_table_and(|t| table.is_empty() || table.contains(&t.to_string()))
+			}
+			Kind::Record(table) => self.is_record_and(|r| r.is_table_type(table)),
 			Kind::Geometry(kinds) => {
 				self.is_geometry_and(|g| kinds.is_empty() || kinds.contains(&g.kind()))
 			}
@@ -648,6 +692,7 @@ impl ToSql for Value {
 			Value::Object(v) => v.fmt_sql(f),
 			Value::Geometry(v) => v.fmt_sql(f),
 			Value::Bytes(v) => v.fmt_sql(f),
+			Value::Table(v) => v.fmt_sql(f),
 			Value::RecordId(v) => v.fmt_sql(f),
 			Value::File(v) => v.fmt_sql(f),
 			Value::Range(v) => v.fmt_sql(f),
@@ -958,6 +1003,8 @@ mod tests {
 			Value::String("a".to_string()),
 			Value::Bool(false),
 			Value::Number(Number::Float(7.5)),
+			Value::Table("test".into()),
+			Value::RecordId(RecordId::new("test", "key")),
 		];
 
 		values.sort();
@@ -1058,6 +1105,8 @@ mod tests {
 	#[case::bytes(Value::Bytes(Bytes::default()), "b\"\"")]
 	#[case::bytes(Value::Bytes(Bytes::from(vec![1, 2, 3])), "b\"010203\"")]
 	#[case::bytes(Value::Bytes(Bytes::from(vec![255, 0, 128])), "b\"FF0080\"")]
+	// Tables
+	#[case::table(Value::Table("test".into()), "test")]
 	// Record IDs
 	#[case::record_id(Value::RecordId(RecordId::new("test", "key")), "test:key")]
 	#[case::record_id(Value::RecordId(RecordId::new("user", 123)), "user:123")]
@@ -1162,6 +1211,11 @@ mod tests {
 	#[case::regex(
 		Value::Regex("hello".parse().unwrap()),
 		vec![Kind::Regex, Kind::Any],
+		vec![Kind::None, Kind::Null]
+	)]
+	#[case::table(
+		Value::Table("test".into()),
+		vec![Kind::Table(vec!["test".to_string()]), Kind::Table(vec![]), Kind::Any],
 		vec![Kind::None, Kind::Null]
 	)]
 	#[case::record(

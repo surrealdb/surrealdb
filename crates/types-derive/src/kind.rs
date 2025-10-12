@@ -429,6 +429,7 @@ fn generate_simple_kind(ident: &Ident) -> TokenStream2 {
 		"uuid" => quote! { surrealdb_types::Kind::Uuid },
 		"regex" => quote! { surrealdb_types::Kind::Regex },
 		"range" => quote! { surrealdb_types::Kind::Range },
+		"table" => quote! { surrealdb_types::Kind::Table(vec![]) },
 		"record" => quote! { surrealdb_types::Kind::Record(vec![]) },
 		"geometry" => quote! { surrealdb_types::Kind::Geometry(vec![]) },
 		"set" => quote! { surrealdb_types::Kind::Set(Box::new(surrealdb_types::Kind::Any), None) },
@@ -453,6 +454,29 @@ fn generate_parameterized_kind(name: &Ident, params: &[KindParam]) -> TokenStrea
 	let name_str = name.to_string();
 
 	match name_str.as_str() {
+		"table" => {
+			let mut tables = Vec::new();
+			for param in params {
+				match param {
+					KindParam::Ident(ident) => {
+						tables.push(ident.to_string());
+					}
+					KindParam::Kind(KindExpr::Union(variants)) => {
+						// Handle union inside table parameters: table<user | post>
+						for variant in variants {
+							if let KindExpr::Ident(ident) = variant {
+								tables.push(ident.to_string());
+							}
+						}
+					}
+					_ => {} // Ignore other parameter types
+				}
+			}
+
+			quote! {
+				surrealdb_types::Kind::Table(vec![#(#tables.to_string()),*])
+			}
+		}
 		"record" => {
 			let mut tables = Vec::new();
 			for param in params {

@@ -161,7 +161,7 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 		let Value::RecordId(t) = id else {
 			panic!("should be thing {id:?}")
 		};
-		assert_eq!(t.table, "knows");
+		assert_eq!(t.table.as_str(), "knows");
 	}
 	// LET $relation = type::thing("knows:foo");
 	let tmp = res.remove(0).result?;

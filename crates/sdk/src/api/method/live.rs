@@ -55,7 +55,8 @@ where
 				// For a specific record, we need to query the table with a WHERE clause
 				// because LIVE queries don't support record IDs directly
 				let table_name = &record.table;
-				variables.insert("_table".to_string(), Value::String(table_name.clone()));
+				variables
+					.insert("_table".to_string(), Value::String(table_name.as_str().to_string()));
 				variables.insert("_record_id".to_string(), Value::RecordId(record));
 				"LIVE SELECT * FROM type::table($_table) WHERE id = $_record_id".to_string()
 			}

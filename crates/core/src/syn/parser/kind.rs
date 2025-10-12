@@ -106,6 +106,19 @@ impl Parser<'_> {
 					Ok(Kind::Record(Vec::new()))
 				}
 			}
+			t!("TABLE") => {
+				let span = self.peek().span;
+				if self.eat(t!("<")) {
+					let mut tables = vec![self.parse_ident()?];
+					while self.eat(t!("|")) {
+						tables.push(self.parse_ident()?);
+					}
+					self.expect_closing_delimiter(t!(">"), span)?;
+					Ok(Kind::Table(tables))
+				} else {
+					Ok(Kind::Table(Vec::new()))
+				}
+			}
 			t!("GEOMETRY") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
@@ -287,6 +300,9 @@ mod tests {
 	#[case::record("record", "record", Kind::Record(vec![]))]
 	#[case::record_one("record<person>", "record<person>", Kind::Record(vec!["person".to_owned()]))]
 	#[case::record_many("record<person | animal>", "record<person | animal>", Kind::Record(vec!["person".to_owned(), "animal".to_owned()]))]
+	#[case::table("table", "table", Kind::Table(vec![]))]
+	#[case::table_one("table<person>", "table<person>", Kind::Table(vec!["person".to_owned()]))]
+	#[case::table_many("table<person | animal>", "table<person | animal>", Kind::Table(vec!["person".to_owned(), "animal".to_owned()]))]
 	#[case::geometry("geometry", "geometry", Kind::Geometry(vec![]))]
 	#[case::geometry_one("geometry<point>", "geometry<point>", Kind::Geometry(vec![GeometryKind::Point]))]
 	#[case::geometry_many("geometry<point | multipoint>", "geometry<point | multipoint>", Kind::Geometry(vec![GeometryKind::Point, GeometryKind::MultiPoint]))]

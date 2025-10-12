@@ -44,6 +44,8 @@ pub enum Kind {
 	Uuid,
 	/// Regular expression type.
 	Regex,
+	/// A table type.
+	Table(Vec<String>),
 	/// A record type.
 	Record(Vec<String>),
 	/// A geometry type.
@@ -131,6 +133,13 @@ impl Display for Kind {
 			Kind::String => write!(f, "string"),
 			Kind::Uuid => write!(f, "uuid"),
 			Kind::Regex => write!(f, "regex"),
+			Kind::Table(tables) => {
+				if tables.is_empty() {
+					write!(f, "table")
+				} else {
+					write!(f, "table<{}>", join_displayable(tables, " | "))
+				}
+			}
 			Kind::Record(table) => {
 				if table.is_empty() {
 					write!(f, "record")

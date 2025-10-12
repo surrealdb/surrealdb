@@ -202,7 +202,7 @@ where
 	I: Into<RecordIdKey>,
 {
 	fn from((table, id): (T, I)) -> Self {
-		let record_id = RecordId::new(table, id.into());
+		let record_id = RecordId::new(table.into(), id.into());
 		Self::RecordId(record_id)
 	}
 }
@@ -391,7 +391,7 @@ where
 	I: Into<RecordIdKey>,
 {
 	fn into_resource(self) -> Result<Resource> {
-		let record_id = RecordId::new(self.0, self.1);
+		let record_id = RecordId::new(self.0.into(), self.1);
 		Ok(Resource::RecordId(record_id))
 	}
 }

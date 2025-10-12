@@ -124,6 +124,8 @@ pub enum Kind {
 	Uuid,
 	/// Regular expression type.
 	Regex,
+	/// A table type.
+	Table(Vec<String>),
 	/// A record type.
 	Record(Vec<String>),
 	/// A geometry type.
@@ -200,6 +202,7 @@ impl From<Kind> for crate::expr::Kind {
 			Kind::String => crate::expr::Kind::String,
 			Kind::Uuid => crate::expr::Kind::Uuid,
 			Kind::Regex => crate::expr::Kind::Regex,
+			Kind::Table(tables) => crate::expr::Kind::Table(tables),
 			Kind::Record(tables) => crate::expr::Kind::Record(tables),
 			Kind::Geometry(geometries) => {
 				crate::expr::Kind::Geometry(geometries.into_iter().map(Into::into).collect())
@@ -238,6 +241,7 @@ impl From<crate::expr::Kind> for Kind {
 			crate::expr::Kind::String => Kind::String,
 			crate::expr::Kind::Uuid => Kind::Uuid,
 			crate::expr::Kind::Regex => Kind::Regex,
+			crate::expr::Kind::Table(tables) => Kind::Table(tables),
 			crate::expr::Kind::Record(tables) => Kind::Record(tables),
 			crate::expr::Kind::Geometry(geometries) => {
 				Kind::Geometry(geometries.into_iter().map(Into::into).collect())
@@ -280,6 +284,7 @@ impl From<Kind> for crate::types::PublicKind {
 			Kind::String => crate::types::PublicKind::String,
 			Kind::Uuid => crate::types::PublicKind::Uuid,
 			Kind::Regex => crate::types::PublicKind::Regex,
+			Kind::Table(k) => crate::types::PublicKind::Table(k),
 			Kind::Record(k) => crate::types::PublicKind::Record(k),
 			Kind::Geometry(k) => {
 				crate::types::PublicKind::Geometry(k.into_iter().map(Into::into).collect())
@@ -318,6 +323,7 @@ impl From<crate::types::PublicKind> for Kind {
 			crate::types::PublicKind::String => Kind::String,
 			crate::types::PublicKind::Uuid => Kind::Uuid,
 			crate::types::PublicKind::Regex => Kind::Regex,
+			crate::types::PublicKind::Table(k) => Kind::Table(k),
 			crate::types::PublicKind::Record(k) => Kind::Record(k),
 			crate::types::PublicKind::Geometry(k) => {
 				Kind::Geometry(k.into_iter().map(Into::into).collect())
@@ -357,6 +363,13 @@ impl Display for Kind {
 			Kind::Uuid => f.write_str("uuid"),
 			Kind::Regex => f.write_str("regex"),
 			Kind::Function(_, _) => f.write_str("function"),
+			Kind::Table(k) => {
+				if k.is_empty() {
+					write!(f, "table")
+				} else {
+					write!(f, "table<{}>", Fmt::verbar_separated(k.iter().map(EscapeIdent)))
+				}
+			}
 			Kind::Record(k) => {
 				if k.is_empty() {
 					write!(f, "record")
@@ -608,6 +621,131 @@ impl From<crate::types::PublicKindLiteral> for KindLiteral {
 			crate::types::PublicKindLiteral::Object(o) => {
 				Self::Object(o.into_iter().map(|(k, v)| (k, v.into())).collect())
 			}
+		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use rstest::rstest;
+
+	use super::*;
+
+	#[rstest]
+	#[case::any(Kind::Any, "any")]
+	#[case::none(Kind::None, "none")]
+	#[case::null(Kind::Null, "null")]
+	#[case::bool(Kind::Bool, "bool")]
+	#[case::bytes(Kind::Bytes, "bytes")]
+	#[case::datetime(Kind::Datetime, "datetime")]
+	#[case::decimal(Kind::Decimal, "decimal")]
+	#[case::duration(Kind::Duration, "duration")]
+	#[case::float(Kind::Float, "float")]
+	#[case::int(Kind::Int, "int")]
+	#[case::number(Kind::Number, "number")]
+	#[case::object(Kind::Object, "object")]
+	#[case::string(Kind::String, "string")]
+	#[case::uuid(Kind::Uuid, "uuid")]
+	#[case::regex(Kind::Regex, "regex")]
+	#[case::range(Kind::Range, "range")]
+	#[case::function(Kind::Function(None, None), "function")]
+	#[case::table_empty(Kind::Table(vec![]), "table")]
+	#[case::table_single(Kind::Table(vec!["users".to_string()]), "table<users>")]
+	#[case::table_multiple(Kind::Table(vec!["users".to_string(), "posts".to_string()]), "table<users | posts>")]
+	#[case::record_empty(Kind::Record(vec![]), "record")]
+	#[case::record_single(Kind::Record(vec!["users".to_string()]), "record<users>")]
+	#[case::geometry_empty(Kind::Geometry(vec![]), "geometry")]
+	#[case::geometry_single(Kind::Geometry(vec![GeometryKind::Point]), "geometry<point>")]
+	#[case::set_any(Kind::Set(Box::new(Kind::Any), None), "set")]
+	#[case::set_typed(Kind::Set(Box::new(Kind::String), None), "set<string>")]
+	#[case::array_any(Kind::Array(Box::new(Kind::Any), None), "array")]
+	#[case::array_typed(Kind::Array(Box::new(Kind::String), Some(5)), "array<string, 5>")]
+	#[case::either(Kind::Either(vec![Kind::String, Kind::Int]), "string | int")]
+	#[case::file_empty(Kind::File(vec![]), "file")]
+	#[case::file_single(Kind::File(vec!["bucket".to_string()]), "file<bucket>")]
+	fn test_kind_display(#[case] kind: Kind, #[case] expected: &str) {
+		assert_eq!(kind.to_string(), expected);
+	}
+
+	#[rstest]
+	#[case::any(Kind::Any)]
+	#[case::none(Kind::None)]
+	#[case::null(Kind::Null)]
+	#[case::bool(Kind::Bool)]
+	#[case::bytes(Kind::Bytes)]
+	#[case::datetime(Kind::Datetime)]
+	#[case::decimal(Kind::Decimal)]
+	#[case::duration(Kind::Duration)]
+	#[case::float(Kind::Float)]
+	#[case::int(Kind::Int)]
+	#[case::number(Kind::Number)]
+	#[case::object(Kind::Object)]
+	#[case::string(Kind::String)]
+	#[case::uuid(Kind::Uuid)]
+	#[case::regex(Kind::Regex)]
+	#[case::range(Kind::Range)]
+	#[case::table(Kind::Table(vec!["users".to_string()]))]
+	#[case::record(Kind::Record(vec!["users".to_string()]))]
+	#[case::geometry(Kind::Geometry(vec![GeometryKind::Point]))]
+	#[case::set(Kind::Set(Box::new(Kind::String), None))]
+	#[case::array(Kind::Array(Box::new(Kind::String), None))]
+	#[case::either(Kind::Either(vec![Kind::String, Kind::Int]))]
+	#[case::file(Kind::File(vec!["bucket".to_string()]))]
+	fn test_kind_conversions_expr(#[case] sql_kind: Kind) {
+		let expr_kind: crate::expr::Kind = sql_kind.clone().into();
+		let back_to_sql: Kind = expr_kind.into();
+		assert_eq!(sql_kind, back_to_sql);
+	}
+
+	#[rstest]
+	#[case::any(Kind::Any)]
+	#[case::none(Kind::None)]
+	#[case::null(Kind::Null)]
+	#[case::bool(Kind::Bool)]
+	#[case::bytes(Kind::Bytes)]
+	#[case::datetime(Kind::Datetime)]
+	#[case::decimal(Kind::Decimal)]
+	#[case::duration(Kind::Duration)]
+	#[case::float(Kind::Float)]
+	#[case::int(Kind::Int)]
+	#[case::number(Kind::Number)]
+	#[case::object(Kind::Object)]
+	#[case::string(Kind::String)]
+	#[case::uuid(Kind::Uuid)]
+	#[case::regex(Kind::Regex)]
+	#[case::range(Kind::Range)]
+	#[case::table(Kind::Table(vec!["users".to_string()]))]
+	#[case::record(Kind::Record(vec!["users".to_string()]))]
+	#[case::geometry(Kind::Geometry(vec![GeometryKind::Point]))]
+	#[case::set(Kind::Set(Box::new(Kind::String), None))]
+	#[case::array(Kind::Array(Box::new(Kind::String), None))]
+	#[case::either(Kind::Either(vec![Kind::String, Kind::Int]))]
+	#[case::file(Kind::File(vec!["bucket".to_string()]))]
+	fn test_kind_conversions_public(#[case] sql_kind: Kind) {
+		let public_kind: crate::types::PublicKind = sql_kind.clone().into();
+		let back_to_sql: Kind = public_kind.into();
+		assert_eq!(sql_kind, back_to_sql);
+	}
+
+	#[rstest]
+	#[case::any(Kind::Any)]
+	#[case::table(Kind::Table(vec!["users".to_string()]))]
+	#[case::record(Kind::Record(vec!["users".to_string()]))]
+	#[case::geometry(Kind::Geometry(vec![GeometryKind::Point]))]
+	fn test_kind_flatten(#[case] kind: Kind) {
+		let flattened = kind.clone().flatten();
+		assert_eq!(flattened.len(), 1);
+		assert_eq!(flattened[0], kind);
+	}
+
+	#[test]
+	fn test_kind_either() {
+		let kinds =
+			vec![Kind::Table(vec!["users".to_string()]), Kind::Table(vec!["posts".to_string()])];
+		let either = Kind::either(kinds.clone());
+		assert!(matches!(either, Kind::Either(_)));
+		if let Kind::Either(inner) = either {
+			assert_eq!(inner.len(), 2);
 		}
 	}
 }

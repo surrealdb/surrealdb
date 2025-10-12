@@ -122,6 +122,8 @@ pub enum Kind {
 	Uuid,
 	/// Regular expression type.
 	Regex,
+	/// A table type.
+	Table(Vec<String>),
 	/// A record type.
 	Record(Vec<String>),
 	/// A geometry type.
@@ -214,6 +216,7 @@ impl Kind {
 			| Kind::String
 			| Kind::Uuid
 			| Kind::Regex
+			| Kind::Table(_)
 			| Kind::Record(_)
 			| Kind::Geometry(_)
 			| Kind::Function(_, _)
@@ -449,6 +452,13 @@ impl Display for Kind {
 			Kind::Uuid => f.write_str("uuid"),
 			Kind::Regex => f.write_str("regex"),
 			Kind::Function(_, _) => f.write_str("function"),
+			Kind::Table(k) => {
+				if k.is_empty() {
+					f.write_str("table")
+				} else {
+					write!(f, "table<{}>", Fmt::verbar_separated(k))
+				}
+			}
 			Kind::Record(k) => {
 				if k.is_empty() {
 					f.write_str("record")
@@ -518,6 +528,7 @@ impl From<crate::types::PublicKind> for Kind {
 			crate::types::PublicKind::Uuid => Kind::Uuid,
 			crate::types::PublicKind::Regex => Kind::Regex,
 			crate::types::PublicKind::Range => Kind::Range,
+			crate::types::PublicKind::Table(table) => Kind::Table(table),
 			crate::types::PublicKind::Record(tables) => Kind::Record(tables),
 			crate::types::PublicKind::Geometry(kinds) => {
 				Kind::Geometry(kinds.into_iter().map(Into::into).collect())
@@ -560,6 +571,7 @@ impl From<Kind> for crate::types::PublicKind {
 			Kind::Uuid => crate::types::PublicKind::Uuid,
 			Kind::Regex => crate::types::PublicKind::Regex,
 			Kind::Range => crate::types::PublicKind::Range,
+			Kind::Table(tables) => crate::types::PublicKind::Table(tables),
 			Kind::Record(tables) => crate::types::PublicKind::Record(tables),
 			Kind::Geometry(kinds) => {
 				crate::types::PublicKind::Geometry(kinds.into_iter().map(Into::into).collect())
