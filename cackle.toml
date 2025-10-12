@@ -1435,3 +1435,5 @@ allow_unsafe = true
 allow_unsafe = true
 allow_apis = ["fs", "process"]
 
+[pkg.sdd]
+allow_unsafe = true
