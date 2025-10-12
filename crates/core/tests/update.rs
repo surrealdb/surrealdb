@@ -1,7 +1,6 @@
 use surrealdb_core::iam::Level;
 use surrealdb_core::syn;
-use surrealdb_types::sql::ToSql;
-use surrealdb_types::{Array, Value};
+use surrealdb_types::{Array, ToSql, Value};
 mod helpers;
 use anyhow::Result;
 use helpers::new_ds;

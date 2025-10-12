@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 use anyhow::Result;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use storekey::{BorrowDecode, Encode};
-use surrealdb_types::sql::ToSql;
+use surrealdb_types::{ToSql, write_sql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Idiom};
@@ -93,7 +93,7 @@ impl InfoStructure for IndexDefinition {
 
 impl ToSql for IndexDefinition {
 	fn fmt_sql(&self, f: &mut String) {
-		f.push_str(&self.to_sql_definition().to_string());
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }
 
@@ -136,7 +136,7 @@ impl InfoStructure for Index {
 
 impl ToSql for Index {
 	fn fmt_sql(&self, f: &mut String) {
-		f.push_str(&self.to_sql_definition().to_string());
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }
 

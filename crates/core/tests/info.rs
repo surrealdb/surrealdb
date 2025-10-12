@@ -6,7 +6,7 @@ use regex::Regex;
 use surrealdb_core::dbs::capabilities::ExperimentalTarget;
 use surrealdb_core::dbs::{Capabilities, Session};
 use surrealdb_core::iam::{Level, Role};
-use surrealdb_types::sql::ToSql;
+use surrealdb_types::ToSql;
 
 #[tokio::test]
 async fn info_for_root() {

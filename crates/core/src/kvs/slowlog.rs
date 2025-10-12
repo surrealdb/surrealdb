@@ -18,7 +18,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use surrealdb_types::sql::ToSql;
+use surrealdb_types::ToSql;
 use trice::Instant;
 
 use crate::ctx::Context;

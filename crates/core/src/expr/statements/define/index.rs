@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use surrealdb_types::sql::ToSql;
+use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::DefineKind;

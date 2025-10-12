@@ -7,8 +7,7 @@ use surrealdb_core::kvs::LockType::Optimistic;
 use surrealdb_core::kvs::TransactionType::Write;
 use surrealdb_core::syn;
 use surrealdb_core::vs::VersionStamp;
-use surrealdb_types::sql::ToSql;
-use surrealdb_types::{Array, Value};
+use surrealdb_types::{Array, ToSql, Value};
 
 mod helpers;
 

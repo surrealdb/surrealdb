@@ -6,8 +6,7 @@ use regex::Regex;
 use surrealdb_core::dbs::capabilities::ExperimentalTarget;
 use surrealdb_core::dbs::{Capabilities, Session};
 use surrealdb_core::iam::{Level, Role};
-use surrealdb_types::sql::ToSql;
-use surrealdb_types::{Array, Value};
+use surrealdb_types::{Array, ToSql, Value};
 use tokio::time::Duration;
 
 struct TestLevel {

@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
-use surrealdb_types::sql::ToSql;
+use surrealdb_types::{ToSql, write_sql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
@@ -87,7 +87,7 @@ impl NamespaceDefinition {
 
 impl ToSql for NamespaceDefinition {
 	fn fmt_sql(&self, f: &mut String) {
-		f.push_str(&self.to_sql_definition().to_string());
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }
 

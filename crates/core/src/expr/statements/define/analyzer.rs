@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use surrealdb_types::sql::ToSql;
+use surrealdb_types::{ToSql, write_sql};
 
 use super::DefineKind;
 use crate::catalog;
@@ -147,6 +147,6 @@ impl Display for DefineAnalyzerStatement {
 
 impl ToSql for DefineAnalyzerStatement {
 	fn fmt_sql(&self, f: &mut String) {
-		f.push_str(&self.to_string());
+		write_sql!(f, "{}", self)
 	}
 }
