@@ -659,11 +659,7 @@ impl Cast for RecordId {
 
 impl Cast for crate::val::Table {
 	fn can_cast(v: &Value) -> bool {
-		match v {
-			Value::Table(_) => true,
-			Value::String(_) => true,
-			_ => false,
-		}
+		matches!(v, Value::Table(_) | Value::String(_))
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
