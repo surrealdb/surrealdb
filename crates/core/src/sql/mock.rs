@@ -1,6 +1,8 @@
-use std::{fmt, ops::Bound};
+use std::fmt;
+use std::ops::Bound;
 
-use crate::{fmt::EscapeIdent, val::range::TypedRange};
+use crate::fmt::EscapeIdent;
+use crate::val::range::TypedRange;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
