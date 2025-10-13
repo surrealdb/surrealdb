@@ -62,7 +62,8 @@ pub(crate) enum Iterable {
 	/// passed in to the iterable is unique for each record.
 	/// This tuples takes in:
 	/// - The table name
-	/// - The optional id key
+	/// - The optional id key. When none is provided, it will be 
+	///   generated at a later stage and no record fetch will be done.
 	/// - The value for the record
 	Mergeable(String, Option<RecordIdKey>, Value),
 	/// An iterable which fetches a record from storage, and
