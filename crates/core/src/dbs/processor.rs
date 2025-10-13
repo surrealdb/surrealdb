@@ -20,7 +20,6 @@ use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, record, r#ref};
 use crate::kvs::{KVKey, KVValue, Key, Transaction, Val};
-use crate::syn;
 use crate::val::record::Record;
 use crate::val::{RecordId, RecordIdKeyRange, Value};
 
@@ -309,13 +308,6 @@ impl Collected {
 	fn process_value(v: Value) -> Processed {
 		// Try to extract the id field if present and parse as Thing
 		let rid = match &v {
-			Value::Object(obj) => match obj.get("id") {
-				Some(Value::String(strand)) => {
-					syn::record_id(strand.as_str()).ok().map(|rid| Arc::new(rid.into()))
-				}
-				Some(Value::RecordId(record_id)) => Some(Arc::new(record_id.clone())),
-				_ => None,
-			},
 			Value::RecordId(thing) => Some(Arc::new(thing.clone())),
 			_ => None,
 		};
