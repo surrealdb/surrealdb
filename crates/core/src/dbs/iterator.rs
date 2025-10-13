@@ -19,7 +19,7 @@ use crate::idx::planner::{
 	StatementContext,
 };
 use crate::val::record::Record;
-use crate::val::{Object, RecordId, RecordIdKey, RecordIdKeyRange, Value};
+use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, Value};
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -371,29 +371,6 @@ impl Iterator {
 		Ok(())
 	}
 
-	/// Prepares a value for processing
-	pub(crate) fn prepare_object(&mut self, stm: &Statement<'_>, v: Object) -> Result<()> {
-		// Add the record to the iterator
-		match v.rid() {
-			// This object has an 'id' field
-			Some(v) => {
-				if stm.is_deferable() {
-					self.ingest(Iterable::Defer(v))
-				} else {
-					self.ingest(Iterable::Thing(v))
-				}
-			}
-			// This object has no 'id' field
-			None => {
-				bail!(Error::InvalidStatementTarget {
-					value: v.to_string(),
-				});
-			}
-		}
-		// All ingested ok
-		Ok(())
-	}
-
 	#[allow(clippy::too_many_arguments)]
 	async fn prepare_computed(
 		&mut self,
@@ -407,14 +384,34 @@ impl Iterator {
 	) -> Result<()> {
 		let v = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await.catch_return()?;
 		match v {
-			Value::Object(o) if !stm_ctx.stm.is_select() => {
-				self.prepare_object(stm_ctx.stm, o)?;
-			}
 			Value::Table(v) => {
 				self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.as_str().to_owned()).await?
 			}
 			Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
-			Value::Array(a) => a.into_iter().for_each(|x| self.ingest(Iterable::Value(x))),
+			Value::Array(a) => {
+				for v in a.into_iter() {
+					match v {
+						Value::Table(v) => {
+							self.prepare_table(
+								ctx,
+								opt,
+								stk,
+								planner,
+								stm_ctx,
+								v.as_str().to_owned(),
+							)
+							.await?
+						}
+						Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
+						v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
+						v => {
+							bail!(Error::InvalidStatementTarget {
+								value: v.to_string(),
+							})
+						}
+					}
+				}
+			}
 			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 			v => {
 				bail!(Error::InvalidStatementTarget {
