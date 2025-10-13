@@ -153,10 +153,6 @@ criteria = "safe-to-deploy"
 version = "0.3.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.atomic-waker]]
-version = "1.1.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.axum]]
 version = "0.6.20"
 criteria = "safe-to-deploy"
@@ -384,10 +380,6 @@ criteria = "safe-to-deploy"
 [[exemptions.darling_macro]]
 version = "0.20.9"
 criteria = "safe-to-deploy"
-
-[[exemptions.dashmap]]
-version = "5.5.3"
-criteria = "safe-to-run"
 
 [[exemptions.dashmap]]
 version = "6.1.0"
@@ -725,10 +717,6 @@ criteria = "safe-to-deploy"
 version = "0.35.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.matchers]]
-version = "0.2.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.matchit]]
 version = "0.7.3"
 criteria = "safe-to-deploy"
@@ -791,10 +779,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.noisy_float]]
 version = "0.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.nu-ansi-term]]
-version = "0.50.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.num-bigint]]
@@ -1145,6 +1129,10 @@ criteria = "safe-to-deploy"
 version = "0.10.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.scc]]
+version = "2.4.0"
+criteria = "safe-to-run"
+
 [[exemptions.schannel]]
 version = "0.1.27"
 criteria = "safe-to-deploy"
@@ -1156,6 +1144,10 @@ criteria = "safe-to-deploy"
 [[exemptions.sct]]
 version = "0.7.1"
 criteria = "safe-to-deploy"
+
+[[exemptions.sdd]]
+version = "3.0.10"
+criteria = "safe-to-run"
 
 [[exemptions.seahash]]
 version = "4.1.0"
@@ -1177,10 +1169,6 @@ criteria = "safe-to-deploy"
 version = "1.0.228"
 criteria = "safe-to-deploy"
 
-[[exemptions.serde-content]]
-version = "0.1.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.serde_core]]
 version = "1.0.228"
 criteria = "safe-to-deploy"
@@ -1196,6 +1184,14 @@ criteria = "safe-to-deploy"
 [[exemptions.serde_urlencoded]]
 version = "0.7.1"
 criteria = "safe-to-deploy"
+
+[[exemptions.serial_test]]
+version = "3.2.0"
+criteria = "safe-to-run"
+
+[[exemptions.serial_test_derive]]
+version = "3.2.0"
+criteria = "safe-to-run"
 
 [[exemptions.signal-hook-registry]]
 version = "1.4.2"
@@ -1375,10 +1371,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tracing-appender]]
 version = "0.2.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.tracing-log]]
-version = "0.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.tracing-opentelemetry]]

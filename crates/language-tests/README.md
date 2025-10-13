@@ -26,6 +26,24 @@ overwrite`, which will overwrite the specified results of test if they do not
 match the actual results of the test. This flag should be used sparingly and
 only after inspecting if the new results are actually valid.
 
+The `--backend` flag allows you to specify which storage engine to use for running
+the tests. By default, tests run using the in-memory storage engine (`mem` or `memory`).
+Other supported backends include:
+- `memory` or `mem` (default): In-memory storage engine, fastest for testing
+- `rocksdb`: RocksDB embedded storage engine (requires `backend-rocksdb` feature)
+- `surrealkv` or `file`: SurrealKV file-based storage engine (requires `backend-surrealkv` feature)
+- `tikv`: TiKV distributed storage engine (requires `backend-tikv` feature and a running TiKV cluster)
+- `foundation`: FoundationDB storage engine (requires `backend-foundation` feature)
+
+Note that some backends require the corresponding Cargo feature to be enabled when building:
+```bash
+# Example: Running tests with RocksDB backend
+cargo run --features backend-rocksdb run --backend rocksdb
+
+# Example: Running tests with TiKV backend (requires running TiKV cluster at 127.0.0.1:2379)
+cargo run --features backend-tikv run --backend tikv
+```
+
 ## SurrealQL Language Test Format
 
 Language test are plain surrealql files that are parse-able by the normal
