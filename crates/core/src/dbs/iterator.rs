@@ -388,7 +388,30 @@ impl Iterator {
 				self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.as_str().to_owned()).await?
 			}
 			Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
-			Value::Array(a) => a.into_iter().for_each(|x| self.ingest(Iterable::Value(x))),
+			Value::Array(a) => {
+				for v in a.into_iter() {
+					match v {
+						Value::Table(v) => {
+							self.prepare_table(
+								ctx,
+								opt,
+								stk,
+								planner,
+								stm_ctx,
+								v.as_str().to_owned(),
+							)
+							.await?
+						}
+						Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
+						v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
+						v => {
+							bail!(Error::InvalidStatementTarget {
+								value: v.to_string(),
+							})
+						}
+					}
+				}
+			}
 			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 			v => {
 				bail!(Error::InvalidStatementTarget {
