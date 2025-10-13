@@ -30,7 +30,7 @@ use crate::vs::VersionStampError;
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
 #[allow(clippy::enum_variant_names)]
-pub enum Error {
+pub(crate) enum Error {
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
 	Unreachable(String),
