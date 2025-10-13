@@ -1,7 +1,6 @@
 /**
 [test]
 reason = "Test UPSERT with SELECT and content modification - demonstrates current behavior where new IDs are generated (this is the bug being fixed)"
-wip = true # Made wip after fix was rolled back when it was found to exasterbate an other bug.
 
 [[test.results]]
 value = "NONE"

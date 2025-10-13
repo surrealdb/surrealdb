@@ -120,6 +120,11 @@ impl Value {
 	// Simple value detection
 	// -----------------------------------
 
+	/// Check if this Value is not NONE
+	pub fn is_some(&self) -> bool {
+		!matches!(self, Value::None)
+	}
+
 	/// Check if this Value is NONE or NULL
 	pub fn is_nullish(&self) -> bool {
 		matches!(self, Value::None | Value::Null)

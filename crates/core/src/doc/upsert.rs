@@ -95,7 +95,7 @@ impl Document {
 
 		// Skip generate_record_id in retry mode since the ID is already set correctly
 		if !self.retry {
-			self.generate_record_id(stk, ctx, opt, stm).await?;
+			self.generate_record_id()?;
 		}
 
 		self.upsert_update(stk, ctx, opt, stm).await
@@ -110,9 +110,10 @@ impl Document {
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
 		self.check_permissions_quick(stk, ctx, opt, stm).await?;
+		self.process_record_data(stk, ctx, opt, stm).await?;
+		self.generate_record_id()?;
 		self.check_table_type(ctx, opt, stm).await?;
 		self.check_data_fields(stk, ctx, opt, stm).await?;
-		self.process_record_data(stk, ctx, opt, stm).await?;
 		self.default_record_data(ctx, opt, stm).await?;
 		self.process_table_fields(stk, ctx, opt, stm).await?;
 		self.cleanup_table_fields(ctx, opt, stm).await?;

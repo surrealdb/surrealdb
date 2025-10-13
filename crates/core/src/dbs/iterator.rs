@@ -12,6 +12,7 @@ use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document, IgnoreError};
 use crate::err::Error;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
+use crate::expr::statements::relate::RelateThrough;
 use crate::expr::{self, ControlFlow, Expr, Fields, FlowResultExt, Literal, Lookup, Mock, Part};
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
@@ -59,7 +60,13 @@ pub(crate) enum Iterable {
 	/// which has the specific value to update the record with.
 	/// This is used in INSERT statements, where each value
 	/// passed in to the iterable is unique for each record.
-	Mergeable(RecordId, Value),
+	/// This tuples takes in:
+	/// - The table name
+	/// - The optional id key. When none is provided, it will be generated at a later stage and no
+	///   record fetch will be done. This can be NONE in a scenario like: `INSERT INTO test {
+	///   there_is: 'no id set' }`
+	/// - The value for the record
+	Mergeable(String, Option<RecordIdKey>, Value),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in RELATE statements. The optional value
@@ -69,7 +76,7 @@ pub(crate) enum Iterable {
 	/// The first field is the rid from which we create, the second is the rid
 	/// which is the relation itself and the third is the target of the
 	/// relation
-	Relatable(RecordId, RecordId, RecordId, Option<Value>),
+	Relatable(RecordId, RelateThrough, RecordId, Option<Value>),
 	/// An iterable which iterates over an index range for a
 	/// table, which then fetches the corresponding records
 	/// which are matched within the index.
