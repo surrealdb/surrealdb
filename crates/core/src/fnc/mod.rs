@@ -185,6 +185,7 @@ pub fn synchronous(
 		"array::remove" => array::remove,
 		"array::repeat" => array::repeat,
 		"array::reverse" => array::reverse,
+		"array::sequence" => array::sequence,
 		"array::shuffle" => array::shuffle,
 		"array::slice" => array::slice,
 		"array::sort" => array::sort,

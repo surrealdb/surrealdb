@@ -195,6 +195,7 @@
 "array::prepend("
 "array::push("
 "array::range("
+"array::sequence("
 "array::reduce("
 "array::remove("
 "array::repeat("
