@@ -14,7 +14,8 @@ use crate::sql::{
 	PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
 use crate::types::{
-	PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicNumber, PublicUuid, PublicValue,
+	PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicNumber, PublicRecordId,
+	PublicUuid, PublicValue,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -97,9 +98,13 @@ impl Expr {
 				Expr::Literal(Literal::Bytes(PublicBytes::from(x.into_inner())))
 			}
 			PublicValue::Regex(x) => Expr::Literal(Literal::Regex(x)),
-			PublicValue::RecordId(x) => Expr::Literal(Literal::RecordId(RecordIdLit {
-				table: x.table.clone(),
-				key: RecordIdKeyLit::from_record_id_key(x.key),
+			PublicValue::Table(x) => Expr::Table(x.into_string()),
+			PublicValue::RecordId(PublicRecordId {
+				table,
+				key,
+			}) => Expr::Literal(Literal::RecordId(RecordIdLit {
+				table: table.into_string(),
+				key: RecordIdKeyLit::from_record_id_key(key),
 			})),
 			PublicValue::Array(x) => {
 				Expr::Literal(Literal::Array(x.into_iter().map(Expr::from_public_value).collect()))
@@ -260,10 +265,14 @@ pub(crate) fn convert_public_value_to_internal(value: surrealdb_types::Value) ->
 		surrealdb_types::Value::Bytes(b) => {
 			crate::val::Value::Bytes(crate::val::Bytes(b.inner().clone()))
 		}
-		surrealdb_types::Value::RecordId(r) => {
-			let key = convert_public_record_id_key_to_internal(r.key);
+		surrealdb_types::Value::Table(t) => crate::val::Value::Table(t.into()),
+		surrealdb_types::Value::RecordId(PublicRecordId {
+			table,
+			key,
+		}) => {
+			let key = convert_public_record_id_key_to_internal(key);
 			crate::val::Value::RecordId(crate::val::RecordId {
-				table: r.table,
+				table: table.into_string(),
 				key,
 			})
 		}

@@ -59,6 +59,7 @@ impl Value {
 			Value::Bytes(bytes) => {
 				JsonValue::Array(bytes.0.into_iter().map(|x| JsonValue::Number(x.into())).collect())
 			}
+			Value::Table(table) => JsonValue::String(table.to_string()),
 			Value::RecordId(thing) => JsonValue::String(thing.to_sql()),
 			// TODO: Maybe remove
 			Value::Regex(regex) => JsonValue::String(regex.to_sql()),
