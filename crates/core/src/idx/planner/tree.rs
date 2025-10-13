@@ -617,11 +617,7 @@ impl<'a> TreeBuilder<'a> {
 					}
 				}
 				(Operator::ContainAny | Operator::ContainAll, v, IdiomPosition::Left)
-				| (
-					BinaryOperator::AnyInside | BinaryOperator::AllInside,
-					v,
-					IdiomPosition::Right,
-				) => {
+				| (Operator::AnyInside | Operator::AllInside, v, IdiomPosition::Right) => {
 					if v.is_array() && col == 0 {
 						return Some(IndexOperator::Union(v));
 					}
