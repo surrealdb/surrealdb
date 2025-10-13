@@ -14,6 +14,7 @@ value = "[{ computed: 'computed', dependent: 'computed', id: person:one, static:
 
 [[test.results]]
 value = "[{ id: knows:bny3a5xkjvex9wy8us18, in: person:one, out: person:two }]"
+skip-record-id-key = true
 
 [[test.results]]
 value = "[person:two]"
