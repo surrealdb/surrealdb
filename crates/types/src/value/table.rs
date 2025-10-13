@@ -12,8 +12,8 @@ pub struct Table(String);
 
 impl Table {
 	/// Create a new table.
-	pub fn new(s: String) -> Self {
-		Table(s)
+	pub fn new(s: impl Into<String>) -> Self {
+		Table(s.into())
 	}
 
 	/// Convert the table to a string.

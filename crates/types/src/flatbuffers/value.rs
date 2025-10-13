@@ -5,8 +5,8 @@ use surrealdb_protocol::fb::v1 as proto_fb;
 
 use super::{FromFlatbuffers, ToFlatbuffers};
 use crate::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId, Regex, Uuid,
-	Value,
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId, Regex,
+	Table, Uuid, Value,
 };
 
 impl ToFlatbuffers for Value {
@@ -57,7 +57,7 @@ impl ToFlatbuffers for Value {
 			},
 			Self::Table(t) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::Table,
-				value: Some(builder.create_string(t).as_union_value()),
+				value: Some(t.to_fb(builder)?.as_union_value()),
 			},
 			Self::RecordId(record_id) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::RecordId,
@@ -137,6 +137,11 @@ impl FromFlatbuffers for Value {
 			proto_fb::ValueType::Bytes => {
 				let bytes_value = input.value_as_bytes().expect("Guaranteed to be Bytes");
 				Ok(Value::Bytes(Bytes::from_fb(bytes_value)?))
+			}
+			proto_fb::ValueType::Table => {
+				let table_value = input.value_as_table().expect("Guaranteed to be a Table");
+				let table = Table::from_fb(table_value)?;
+				Ok(Value::Table(table))
 			}
 			proto_fb::ValueType::RecordId => {
 				let record_id_value =
