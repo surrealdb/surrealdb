@@ -22,7 +22,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand, ValueEnum};
-pub use config::CF;
+pub use config::{Config, ConfigCheck};
 use export::ExportCommandArguments;
 use fix::FixCommandArguments;
 use import::ImportCommandArguments;
@@ -203,10 +203,20 @@ impl LogFileRotation {
 
 /// CLI entrypoint.
 ///
-/// Generic over:
-/// - T: builds datastore transactions, allowing embedders to pick a storage backend.
-/// - R: constructs the HTTP router, allowing embedders to customize server routes.
-pub async fn init<T: TransactionBuilderFactory, R: RouterFactory>() -> ExitCode {
+/// Processes command-line arguments and dispatches to the appropriate subcommand handler.
+///
+/// # Parameters
+/// - `composer`: A composer implementing the required traits for dependency injection
+///
+/// # Generic parameters
+/// - `C`: A composer type that implements:
+///   - `TransactionBuilderFactory` (builds datastore transactions, allowing embedders to pick a
+///     storage backend)
+///   - `RouterFactory` (constructs the HTTP router, allowing embedders to customize server routes)
+///   - `ConfigCheck` (validates configuration before initialization)
+pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
+	composer: C,
+) -> ExitCode {
 	// Enables ANSI code support on Windows
 	#[cfg(windows)]
 	nu_ansi_term::enable_ansi_support().ok();
@@ -255,7 +265,7 @@ pub async fn init<T: TransactionBuilderFactory, R: RouterFactory>() -> ExitCode 
 	let guards = telemetry.init().expect("Unable to configure logs");
 	// After version warning we can run the respective command
 	let output = match args.command {
-		Commands::Start(args) => start::init::<T, R>(args).await,
+		Commands::Start(args) => start::init::<C>(composer, args).await,
 		Commands::Import(args) => import::init(args).await,
 		Commands::Export(args) => export::init(args).await,
 		Commands::Version(args) => version::init(args).await,
@@ -264,7 +274,7 @@ pub async fn init<T: TransactionBuilderFactory, R: RouterFactory>() -> ExitCode 
 		Commands::Ml(args) => ml::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
-		Commands::Fix(args) => fix::init::<T>(args).await,
+		Commands::Fix(args) => fix::init::<C>(args).await,
 	};
 	// Save the flamegraph and profile
 	#[cfg(feature = "performance-profiler")]

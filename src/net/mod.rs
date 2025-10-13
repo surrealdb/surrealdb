@@ -34,6 +34,7 @@ use axum_server::Handle;
 use axum_server::tls_rustls::RustlsConfig;
 use http::header;
 use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
+use surrealdb_core::CommunityComposer;
 use surrealdb_core::dbs::capabilities::ExperimentalTarget;
 use surrealdb_core::kvs::Datastore;
 use tokio_util::sync::CancellationToken;
@@ -50,7 +51,7 @@ use tower_http::sensitive_headers::{
 };
 use tower_http::trace::TraceLayer;
 
-use crate::cli::CF;
+use crate::cli::Config;
 use crate::cnf;
 use crate::net::signals::graceful_shutdown;
 use crate::rpc::{RpcState, notifications};
@@ -67,11 +68,12 @@ pub trait RouterFactory {
 	fn configure_router() -> Router<Arc<RpcState>>;
 }
 
-/// Default router that mirrors the routes shipped with the `surreal` binary.
-/// Consumers embedding SurrealDB can implement `RouterFactory` to customize routes.
-pub struct DefaultRouterFactory {}
-
-impl RouterFactory for DefaultRouterFactory {
+/// Default router implementation for the community edition.
+///
+/// Provides the standard set of HTTP routes shipped with the `surreal` binary.
+/// Consumers embedding SurrealDB can implement `RouterFactory` on their own
+/// composer to customize routes.
+impl RouterFactory for CommunityComposer {
 	fn configure_router() -> Router<Arc<RpcState>> {
 		Router::<Arc<RpcState>>::new()
 			// Redirect until we provide a UI
@@ -101,10 +103,22 @@ pub struct AppState {
 	pub datastore: Arc<Datastore>,
 }
 
-pub async fn init<F: RouterFactory>(ds: Arc<Datastore>, ct: CancellationToken) -> Result<()> {
-	// Get local copy of options
-	let opt = CF.get().unwrap();
-
+/// Initialize and start the HTTP server.
+///
+/// Sets up the Axum HTTP server with middleware, routing, and TLS configuration.
+///
+/// # Parameters
+/// - `opt`: Server configuration including bind address and TLS settings
+/// - `ds`: The datastore instance to serve
+/// - `ct`: Cancellation token for graceful shutdown
+///
+/// # Generic parameters
+/// - `F`: Router factory type implementing `RouterFactory`
+pub async fn init<F: RouterFactory>(
+	opt: &Config,
+	ds: Arc<Datastore>,
+	ct: CancellationToken,
+) -> Result<()> {
 	let app_state = AppState {
 		client_ip: opt.client_ip,
 		datastore: ds.clone(),
