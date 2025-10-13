@@ -599,12 +599,12 @@ impl<'a> TreeBuilder<'a> {
 					}
 				}
 				(Operator::Contain, v, IdiomPosition::Left) => {
-					if col == 0 {
+					if col == 0 && ixr.cols[0].contains(&Part::All) {
 						return Some(IndexOperator::Equality(v));
 					}
 				}
 				(Operator::Inside, v, IdiomPosition::Right) => {
-					if col == 0 {
+					if col == 0 && ixr.cols[0].contains(&Part::All) {
 						return Some(IndexOperator::Equality(v));
 					}
 				}
@@ -616,7 +616,12 @@ impl<'a> TreeBuilder<'a> {
 						}
 					}
 				}
-				(Operator::ContainAny | Operator::ContainAll, v, IdiomPosition::Left) => {
+				(Operator::ContainAny | Operator::ContainAll, v, IdiomPosition::Left)
+				| (
+					BinaryOperator::AnyInside | BinaryOperator::AllInside,
+					v,
+					IdiomPosition::Right,
+				) => {
 					if v.is_array() && col == 0 {
 						return Some(IndexOperator::Union(v));
 					}
