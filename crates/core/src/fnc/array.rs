@@ -656,7 +656,7 @@ pub fn sequence((offset_len, Optional(len)): (i64, Optional<i64>)) -> Result<Val
 		(0, offset_len)
 	};
 
-	if len < 0 {
+	if len <= 0 {
 		return Ok(Value::Array(Array(Vec::new())));
 	}
 
