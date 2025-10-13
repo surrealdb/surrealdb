@@ -7,7 +7,6 @@ use rand::Rng as _;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 use reblessive::tree::Stk;
-use surrealdb_types::{ToSql, write_sql};
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, UserProvider};
@@ -22,6 +21,7 @@ use crate::expr::user::UserDuration;
 use crate::expr::{Base, Expr, Idiom, Literal};
 use crate::fmt::{Fmt, QuoteStr};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::{ToSql, write_sql};
 use crate::val::{self, Duration, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

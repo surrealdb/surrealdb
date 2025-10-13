@@ -12,7 +12,6 @@ use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
-use surrealdb_types::{ToSql, write_sql};
 
 use crate::err::Error;
 use crate::expr;
@@ -20,6 +19,7 @@ use crate::expr::kind::GeometryKind;
 use crate::expr::statements::info::InfoStructure;
 use crate::fmt::{Pretty, QuoteStr};
 use crate::sql::expression::convert_public_value_to_internal;
+use crate::sql::{ToSql, write_sql};
 
 pub(crate) mod array;
 pub(crate) mod bytes;

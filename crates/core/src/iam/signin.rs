@@ -7,7 +7,6 @@ use jsonwebtoken::{EncodingKey, Header, encode};
 use md5::Digest;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
-use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::access::{
@@ -33,6 +32,7 @@ use crate::iam::{self, Auth, algorithm_to_jwt_algorithm};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
+use crate::sql::ToSql;
 use crate::types::{PublicValue, PublicVariables};
 use crate::val::{Datetime, Value};
 

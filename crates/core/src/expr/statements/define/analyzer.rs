@@ -2,7 +2,6 @@ use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use surrealdb_types::{ToSql, write_sql};
 
 use super::DefineKind;
 use crate::catalog;
@@ -17,6 +16,7 @@ use crate::expr::parameterize::expr_to_ident;
 use crate::expr::tokenizer::Tokenizer;
 use crate::expr::{Base, Expr, Idiom, Literal, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::sql::{ToSql, write_sql};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineAnalyzerStatement {

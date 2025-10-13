@@ -2,7 +2,6 @@ use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::DefineKind;
@@ -17,6 +16,7 @@ use crate::expr::parameterize::{expr_to_ident, exprs_to_fields};
 use crate::expr::{Base, Expr, Literal, Part};
 use crate::fmt::Fmt;
 use crate::iam::{Action, ResourceKind};
+use crate::sql::ToSql;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
