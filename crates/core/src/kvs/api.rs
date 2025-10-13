@@ -16,7 +16,7 @@ use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare, SavedValue};
 use crate::kvs::{KVKey, KVValue, Key, Val, Version};
 use crate::vs::VersionStamp;
 
-mod requirements {
+pub mod requirements {
 	//! This module defines the trait requirements for a transaction.
 	//!
 	//! The reason this exists is to allow for swapping out the `Send`
