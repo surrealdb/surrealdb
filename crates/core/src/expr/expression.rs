@@ -6,6 +6,7 @@ use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use surrealdb_types::sql::ToSql;
 
 use super::SleepStatement;
+use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -359,7 +360,22 @@ impl Expr {
 				// ([thing:1,thing:2,thing:3...])` so when we encounted mock outside of
 				// create we return the array here instead.
 				//
-				let record_ids = mock.clone().into_iter().map(Value::RecordId).collect();
+
+				let iter = mock.clone().into_iter();
+				if iter
+					.size_hint()
+					.1
+					.map(|x| {
+						x.saturating_mul(std::mem::size_of::<Value>())
+							> *GENERATION_ALLOCATION_LIMIT
+					})
+					.unwrap_or(true)
+				{
+					return Err(ControlFlow::Err(anyhow::Error::msg(
+						"Mock range exceeds allocation limit",
+					)));
+				}
+				let record_ids = iter.map(Value::RecordId).collect();
 				Ok(Value::Array(Array(record_ids)))
 			}
 			Expr::Block(block) => block.compute(stk, ctx, &opt, doc).await,

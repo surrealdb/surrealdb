@@ -34,6 +34,7 @@ use crate::sql::{
 };
 use crate::syn::parser::StatementStream;
 use crate::types::{PublicDatetime, PublicDuration, PublicNumber, PublicUuid};
+use crate::val::range::TypedRange;
 
 fn ident_field(name: &str) -> Expr {
 	Expr::Idiom(Idiom(vec![Part::Field(name.to_string())]))
@@ -390,7 +391,7 @@ fn statements() -> Vec<TopLevelExpr> {
 		)))),
 		TopLevelExpr::Expr(Expr::Delete(Box::new(DeleteStatement {
 			only: true,
-			what: vec![Expr::Mock(Mock::Range("foo".to_string(), 32, 64))],
+			what: vec![Expr::Mock(Mock::Range("foo".to_string(), TypedRange::from_range(32..64)))],
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Expr::Literal(Literal::Integer(2)))),
 			output: Some(Output::After),

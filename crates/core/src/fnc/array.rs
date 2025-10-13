@@ -221,10 +221,7 @@ pub fn fill(
 			message: format!("Argument 1 was the wrong type. {e}"),
 		})?;
 
-		TypedRange {
-			start: Bound::Included(start),
-			end: Bound::Excluded(end),
-		}
+		TypedRange::from_range(start..end)
 	} else if range_start.is_range() {
 		// Condition checked above, unwrap cannot trigger.
 		let range = range_start.into_range().unwrap();
@@ -237,10 +234,7 @@ pub fn fill(
 			name: String::from("array::range"),
 			message: format!("Argument 1 was the wrong type. {e}"),
 		})?;
-		TypedRange {
-			start: Bound::Included(start),
-			end: Bound::Unbounded,
-		}
+		TypedRange::from_range(start..)
 	};
 
 	let array_len = array.len() as i64;
