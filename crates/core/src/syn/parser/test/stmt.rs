@@ -43,6 +43,7 @@ use crate::sql::{
 use crate::syn;
 use crate::syn::parser::ParserSettings;
 use crate::types::{PublicDatetime, PublicDuration, PublicNumber, PublicUuid};
+use crate::val::range::TypedRange;
 
 fn ident_field(name: &str) -> Expr {
 	Expr::Idiom(Idiom(vec![Part::Field(name.to_string())]))
@@ -1949,7 +1950,7 @@ fn parse_delete() {
 		res,
 		Expr::Delete(Box::new(DeleteStatement {
 			only: true,
-			what: vec![Expr::Mock(Mock::Range("foo".to_string(), 32, 64))],
+			what: vec![Expr::Mock(Mock::Range("foo".to_string(), TypedRange::from_range(32..64)))],
 			with: Some(With::Index(vec!["index".to_string(), "index_2".to_string()])),
 			cond: Some(Cond(Expr::Literal(Literal::Integer(2)))),
 			output: Some(Output::After),

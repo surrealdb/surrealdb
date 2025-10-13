@@ -1,4 +1,5 @@
 use core::f64;
+use std::ops::Bound;
 
 use reblessive::Stk;
 
@@ -16,6 +17,7 @@ use crate::syn::parser::enter_object_recursion;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::token::{Glued, Span, TokenKind, t};
 use crate::types::{PublicDuration, PublicGeometry};
+use crate::val::range::TypedRange;
 
 impl Parser<'_> {
 	pub(super) fn parse_number_like_prime(&mut self) -> ParseResult<Expr> {
@@ -378,18 +380,60 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects the starting `|` already be eaten and its span passed as an
 	/// argument.
-	pub(super) fn parse_mock(&mut self, start: Span) -> ParseResult<Mock> {
+	pub(super) fn parse_mock(&mut self, start_span: Span) -> ParseResult<Mock> {
 		let name = self.parse_ident()?;
 		expected!(self, t!(":"));
 		// TODO: limit these to i64 range, it is weird that these can exceed normal number range.
-		let from = self.next_token_value()?;
-		let to = self.eat(t!("..")).then(|| self.next_token_value()).transpose()?;
-		self.expect_closing_delimiter(t!("|"), start)?;
-		if let Some(to) = to {
-			Ok(Mock::Range(name, from, to))
-		} else {
-			Ok(Mock::Count(name, from))
-		}
+		let start = match self.peek_kind() {
+			t!("..") => {
+				self.pop_peek();
+				Bound::Unbounded
+			}
+			_ => {
+				let from = self.next_token_value::<i64>()?;
+
+				match self.peek_kind() {
+					t!("..") => {
+						self.pop_peek();
+						Bound::Included(from)
+					}
+					t!(">") => {
+						self.pop_peek();
+						expected!(self, t!(".."));
+						Bound::Excluded(from)
+					}
+					_ => {
+						self.expect_closing_delimiter(t!("|"), start_span)?;
+						return Ok(Mock::Count(name, from));
+					}
+				}
+			}
+		};
+
+		let end = match self.peek_kind() {
+			t!("|") => {
+				self.pop_peek();
+				Bound::Unbounded
+			}
+			t!("=") => {
+				self.pop_peek();
+				let to = self.next_token_value()?;
+				self.expect_closing_delimiter(t!("|"), start_span)?;
+				Bound::Included(to)
+			}
+			_ => {
+				let to = self.next_token_value()?;
+				self.expect_closing_delimiter(t!("|"), start_span)?;
+				Bound::Excluded(to)
+			}
+		};
+		Ok(Mock::Range(
+			name,
+			TypedRange {
+				start,
+				end,
+			},
+		))
 	}
 
 	pub(super) async fn parse_closure_or_mock(
@@ -498,8 +542,8 @@ impl Parser<'_> {
 			if let Expr::Idiom(Idiom(ref idiom)) = res {
 				if idiom.len() == 1 {
 					bail!("Unexpected token `{}` expected `)`",peek.kind,
-						@token.span,
-						@peek.span => "This is a reserved keyword here and can't be an identifier");
+					@token.span,
+					@peek.span => "This is a reserved keyword here and can't be an identifier");
 				}
 			}
 		}
@@ -624,7 +668,10 @@ mod tests {
 		let sql = "|test:1..1000|";
 		let out = syn::expr(sql).unwrap();
 		assert_eq!("|test:1..1000|", format!("{}", out));
-		assert_eq!(out, Expr::Mock(Mock::Range(String::from("test"), 1, 1000)));
+		assert_eq!(
+			out,
+			Expr::Mock(Mock::Range(String::from("test"), TypedRange::from_range(1..1000)))
+		);
 	}
 
 	#[test]
