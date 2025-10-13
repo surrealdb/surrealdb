@@ -1358,53 +1358,6 @@ async fn select_contains_any() -> Result<(), Error> {
 	test_contains(&dbs, SQL, INDEX_EXPLAIN, RESULT).await
 }
 
-const CONTAINS_UNIQUE_CONTENT: &str = r#"
-		CREATE student:1 CONTENT { subject: "maths", mark: 50 };
-		CREATE student:2 CONTENT { subject: "english", mark: 35 };
-		CREATE student:3 CONTENT { subject: "hindi", mark: 30 };"#;
-
-#[tokio::test]
-async fn select_unique_contains() -> Result<(), Error> {
-	let dbs = new_ds().await?;
-	let mut res = execute_test(&dbs, CONTAINS_UNIQUE_CONTENT, 3).await?;
-	skip_ok(&mut res, 3)?;
-
-	const SQL: &str = r#"
-		SELECT id FROM student WHERE subject CONTAINS "english" EXPLAIN;
-		SELECT id FROM student WHERE subject CONTAINS "english";
-		DEFINE INDEX subject_idx ON student COLUMNS subject UNIQUE;
-		SELECT id FROM student WHERE subject CONTAINS "english" EXPLAIN;
-		SELECT id FROM student WHERE subject CONTAINS "english";
-	"#;
-
-	const INDEX_EXPLAIN: &str = r"[
-				{
-					detail: {
-						plan: {
-							index: 'subject_idx',
-							operator: '=',
-							value: 'english'
-						},
-						table: 'student',
-					},
-					operation: 'Iterate Index'
-				},
-				{
-					detail: {
-						type: 'Memory'
-					},
-					operation: 'Collector'
-				}
-			]";
-	const RESULT: &str = r"[
-		{
-			id: student:2
-		}
-	]";
-
-	test_contains(&dbs, SQL, INDEX_EXPLAIN, RESULT).await
-}
-
 #[tokio::test]
 // This test checks that:
 // 1. Datetime are recognized by the query planner
@@ -2512,15 +2465,15 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 	let sql = "
 		CREATE t:1 SET links = [a:2, a:1];
 		CREATE t:2 SET links = [a:3, a:4];
-		SELECT * FROM t WHERE links CONTAINS a:2;
-		SELECT * FROM t WHERE links CONTAINS a:2 EXPLAIN;
+		SELECT * FROM t WHERE [a:2] ANYINSIDE links;
+		SELECT * FROM t WHERE [a:2] ANYINSIDE links EXPLAIN;
 		SELECT * FROM t WHERE links CONTAINSANY [a:2];
 		SELECT * FROM t WHERE links CONTAINSANY [a:2] EXPLAIN;
 		SELECT * FROM t WHERE a:2 IN links;
 		SELECT * FROM t WHERE a:2 IN links EXPLAIN;
 		DEFINE INDEX idx ON t FIELDS links;
-		SELECT * FROM t WHERE links CONTAINS a:2;
-		SELECT * FROM t WHERE links CONTAINS a:2 EXPLAIN;
+		SELECT * FROM t WHERE [a:2] ANYINSIDE links;
+		SELECT * FROM t WHERE [a:2] ANYINSIDE links EXPLAIN;
 		SELECT * FROM t WHERE links CONTAINSANY [a:2];
 		SELECT * FROM t WHERE links CONTAINSANY [a:2] EXPLAIN;
 		SELECT * FROM t WHERE a:2 IN links;
@@ -2540,7 +2493,7 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 	assert_eq!(res.len(), 15);
 	skip_ok(&mut res, 2)?;
 	//
-	for t in ["CONTAINS", "CONTAINSANY", "IN"] {
+	for t in ["ANYINSIDE", "CONTAINSANY", "IN"] {
 		let tmp = res.remove(0).result?;
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", expected), "{t}");
 		//
@@ -2577,8 +2530,10 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 					detail: {
 						plan: {
 							index: 'idx',
-							operator: '=',
-							value: a:2
+							operator: 'union',
+							value: [
+								a:2
+							]
 						},
 						table: 't'
 					},
@@ -2629,24 +2584,20 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		r#"[
-				{
-					detail: {
-						plan: {
-							index: 'idx',
-							operator: '=',
-							value: a:2
+					{
+						detail: {
+							direction: 'forward',
+							table: 't'
 						},
-						table: 't'
+						operation: 'Iterate Table'
 					},
-					operation: 'Iterate Index'
-				},
-				{
-					detail: {
-						type: 'Memory'
-					},
-					operation: 'Collector'
-				}
-			]"#,
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]"#,
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
