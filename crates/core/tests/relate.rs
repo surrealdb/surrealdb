@@ -131,9 +131,9 @@ async fn relate_with_param_or_subquery() -> Result<()> {
         LET $relation = type::table("knows");
 		RELATE $tobie->$relation->$jaime;
 		RELATE $tobie->(type::table("knows"))->$jaime;
-        LET $relation = type::thing("knows:foo");
+        LET $relation = type::record("knows:foo");
 		RELATE $tobie->$relation->$jaime;
-		RELATE $tobie->(type::thing("knows:bar"))->$jaime;
+		RELATE $tobie->(type::record("knows:bar"))->$jaime;
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -173,7 +173,7 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 		};
 		assert_eq!(t.table.as_str(), "knows");
 	}
-	// LET $relation = type::thing("knows:foo");
+	// LET $relation = type::record("knows:foo");
 	let tmp = res.remove(0).result?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
@@ -190,7 +190,7 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 	)
 	.unwrap();
 	assert_eq!(tmp, val);
-	// LET $relation = type::thing("knows:bar");
+	// LET $relation = type::record("knows:bar");
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
 		"[

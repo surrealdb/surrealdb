@@ -26,7 +26,7 @@ CREATE test SET other = (CREATE ONLY other).id;
 SELECT count() FROM other GROUP ALL;
 
 DEFINE FUNCTION fn::increment($name: string) {
-    RETURN (UPSERT ONLY type::thing('counter', $name) SET value += 1).value;
+    RETURN (UPSERT ONLY type::record('counter', $name) SET value += 1).value;
 };
 
 CREATE test SET id = fn::increment('test');

@@ -452,7 +452,7 @@
 "type::string("
 "type::string_lossy("
 "type::table("
-"type::thing("
+"type::record("
 "type::record("
 "type::uuid("
 "type::geometry("

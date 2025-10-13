@@ -1904,7 +1904,7 @@ mod tests {
  				        WITH JWT ALGORITHM HS512 KEY '{secret}'
     					AUTHENTICATE (
 							-- Simple example increasing the record identifier by one
-							SELECT * FROM type::thing('user', record::id($auth) + 1)
+							SELECT * FROM type::record('user', record::id($auth) + 1)
     					)
     					DURATION FOR SESSION 2h
     				;
@@ -1964,7 +1964,7 @@ mod tests {
 					r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNIN (
-						SELECT * FROM type::thing('user', $id)
+						SELECT * FROM type::record('user', $id)
 					)
 					WITH JWT ALGORITHM HS512 KEY '{secret}'
 					AUTHENTICATE (
