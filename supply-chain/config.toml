@@ -405,10 +405,6 @@ criteria = "safe-to-deploy"
 version = "1.6.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.dtoa]]
-version = "1.0.10"
-criteria = "safe-to-deploy"
-
 [[exemptions.dtoa-short]]
 version = "0.3.5"
 criteria = "safe-to-deploy"
@@ -1165,18 +1161,6 @@ criteria = "safe-to-deploy"
 version = "0.6.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.serde]]
-version = "1.0.228"
-criteria = "safe-to-deploy"
-
-[[exemptions.serde_core]]
-version = "1.0.228"
-criteria = "safe-to-deploy"
-
-[[exemptions.serde_derive]]
-version = "1.0.228"
-criteria = "safe-to-deploy"
-
 [[exemptions.serde_html_form]]
 version = "0.2.7"
 criteria = "safe-to-deploy"
@@ -1284,14 +1268,6 @@ criteria = "safe-to-run"
 [[exemptions.test-log-macros]]
 version = "0.2.17"
 criteria = "safe-to-run"
-
-[[exemptions.thiserror]]
-version = "2.0.12"
-criteria = "safe-to-deploy"
-
-[[exemptions.thiserror-impl]]
-version = "2.0.12"
-criteria = "safe-to-deploy"
 
 [[exemptions.tikv-jemalloc-sys]]
 version = "0.6.0+5.3.0-1-ge13ca993e8ccb9ba9847cc330696e02839f328f7"
