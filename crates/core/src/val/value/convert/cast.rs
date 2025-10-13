@@ -826,6 +826,22 @@ impl Value {
 			},
 			Kind::Geometry(t) => match t.is_empty() {
 				true => self.cast_to::<Geometry>().map(Value::from),
+				false if t.iter().any(|t| matches!(t, GeometryKind::Point)) => {
+					// Pass on if already a point
+					if matches!(self, Value::Geometry(Geometry::Point(_))) {
+						Ok(self)
+					} else {
+					// Otherwise try from an array 
+						Ok(Value::Geometry(Geometry::Point(
+							Geometry::array_to_point(&self).ok_or_else(|| {
+								CastError::InvalidKind {
+									from: self,
+									into: "point".into(),
+								}
+							})?,
+						)))
+					}
+				}
 				false => self.cast_to_geometry(t).map(Value::from),
 			},
 			Kind::Either(k) => {
@@ -906,10 +922,6 @@ impl Value {
 
 	/// Try to convert this value to a `Geometry` of a certain type
 	fn cast_to_geometry(self, val: &[GeometryKind]) -> Result<Geometry, CastError> {
-		// An array of two numbers can be cast into a point
-		if let Some(p) = Geometry::array_to_point(&self) {
-			return Ok(Geometry::Point(p));
-		}
 		match self {
 			// Geometries are allowed if correct type
 			Value::Geometry(v) if self.is_geometry_type(val) => Ok(v),
