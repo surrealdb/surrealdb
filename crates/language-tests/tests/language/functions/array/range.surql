@@ -31,7 +31,6 @@ value = "[]"
 [[test.results]]
 error = "Incorrect arguments for function array::range(). Output must not exceed 1048576 bytes."
 
-
 */
 array::range(1, 11);
 array::range(1..11);
