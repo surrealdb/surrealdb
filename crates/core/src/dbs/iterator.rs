@@ -60,6 +60,10 @@ pub(crate) enum Iterable {
 	/// which has the specific value to update the record with.
 	/// This is used in INSERT statements, where each value
 	/// passed in to the iterable is unique for each record.
+	/// This tuples takes in:
+	/// - The table name
+	/// - The optional id key
+	/// - The value for the record
 	Mergeable(String, Option<RecordIdKey>, Value),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.

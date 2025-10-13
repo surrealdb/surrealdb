@@ -144,41 +144,6 @@ impl RelateStatement {
 
 				let through = RelateThrough::try_from(through)?;
 				i.ingest(Iterable::Relatable(f.clone(), through, t.clone(), None));
-
-				// match stk
-				// 	.run(|stk| self.through.compute(stk, &ctx, opt, doc))
-				// 	.await
-				// 	.catch_return()?
-				// {
-				// 	// The relation has a specific record id
-				// 	Value::RecordId(id) => {
-				// 		i.ingest(Iterable::Relatable(f.clone(), id.clone(), t.clone(), None))
-				// 	}
-				// 	// The relation does not have a specific record id
-				// 	Value::Table(tb) => match self.data {
-				// 		// There is a data clause so check for a record id
-				// 		Some(ref data) => {
-				// 			let id = match data.rid(stk, &ctx, opt).await? {
-				// 				Value::None => RecordId::random_for_table(tb.into_string()),
-				// 				id => id.generate(tb.as_str().to_owned(), false)?,
-				// 			};
-				// 			i.ingest(Iterable::Relatable(f.clone(), id, t.clone(), None))
-				// 		}
-				// 		// There is no data clause so create a record id
-				// 		None => i.ingest(Iterable::Relatable(
-				// 			f.clone(),
-				// 			RecordId::random_for_table(tb.into_string()),
-				// 			t.clone(),
-				// 			None,
-				// 		)),
-				// 	},
-				// 	// The relation can not be any other type
-				// 	v => {
-				// 		bail!(Error::RelateStatementOut {
-				// 			value: v.to_string(),
-				// 		})
-				// 	}
-				// };
 			}
 		}
 

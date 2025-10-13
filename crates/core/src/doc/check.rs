@@ -10,10 +10,10 @@ use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::doc::compute::DocKind;
 use crate::err::Error;
-use crate::expr::FlowResultExt as _;
 use crate::expr::paths::{ID, IN, OUT};
+use crate::expr::{FlowResultExt as _, Part};
 use crate::iam::Action;
-use crate::val::Value;
+use crate::val::{RecordId, Value};
 
 impl Document {
 	/// Checks whether this operation is allowed on
@@ -123,26 +123,25 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<()> {
-		macro_rules! check {
-			($v:ident, $p:ident, $r:ident) => {
-				match $v.pick(&*$p) {
-					Value::RecordId(v) if v.key.is_range() => {
-						bail!(Error::IdInvalid {
-							value: v.to_string(),
-						})
-					}
-					Value::RecordId(v) if v.eq(&$r) => {}
-					Value::None => {}
-					v => {
-						ensure!(
-							$r.key == v,
-							Error::IdMismatch {
-								value: v.to_string(),
-							}
-						)
-					}
+		fn check(v: &Value, p: &[Part], r: &RecordId) -> Result<()> {
+			match v.pick(p) {
+				Value::RecordId(v) if v.key.is_range() => {
+					bail!(Error::IdInvalid {
+						value: v.to_string(),
+					})
 				}
-			};
+				Value::RecordId(v) if v.eq(r) => {}
+				Value::None => {}
+				v => {
+					ensure!(
+						r.key == v,
+						Error::IdMismatch {
+							value: v.to_string()
+						}
+					)
+				}
+			}
+			Ok(())
 		}
 
 		// Don't bother checking if we generated the document id
@@ -174,22 +173,22 @@ impl Document {
 			// This is a CONTENT, MERGE or SET clause
 			if let Some(value) = value {
 				// Check if there is an id field specified
-				check!(value, ID, rid);
+				check(value.as_ref(), ID.as_ref(), rid.as_ref())?;
 			}
 		}
 		// This is a RELATE statement
 		else if let Workable::Relate(l, r, v) = &self.extras {
 			if let Some(value) = value {
 				// Check if there is an id field specified
-				check!(value, ID, rid);
-				check!(value, IN, l);
-				check!(value, OUT, r);
+				check(value.as_ref(), ID.as_ref(), rid.as_ref())?;
+				check(value.as_ref(), IN.as_ref(), l)?;
+				check(value.as_ref(), OUT.as_ref(), r)?;
 			}
 			// This is a INSERT RELATION statement
 			else if let Some(value) = v {
-				check!(value, ID, rid);
-				check!(value, IN, l);
-				check!(value, OUT, r);
+				check(value.as_ref(), ID.as_ref(), rid.as_ref())?;
+				check(value.as_ref(), IN.as_ref(), l)?;
+				check(value.as_ref(), OUT.as_ref(), r)?;
 			}
 		}
 		// Carry on
