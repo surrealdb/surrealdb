@@ -1107,6 +1107,7 @@ mod tests {
 	#[case::bytes(Value::Bytes(Bytes::from(vec![255, 0, 128])), "b\"FF0080\"")]
 	// Tables
 	#[case::table(Value::Table("test".into()), "test")]
+	#[case::table(Value::Table("escap'd".into()), "`escap'd`")]
 	// Record IDs
 	#[case::record_id(Value::RecordId(RecordId::new("test", "key")), "test:key")]
 	#[case::record_id(Value::RecordId(RecordId::new("user", 123)), "user:123")]
