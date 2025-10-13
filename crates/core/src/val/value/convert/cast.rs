@@ -831,7 +831,7 @@ impl Value {
 					if matches!(self, Value::Geometry(Geometry::Point(_))) {
 						Ok(self)
 					} else {
-					// Otherwise try from an array 
+						// Otherwise try from an array
 						Ok(Value::Geometry(Geometry::Point(
 							Geometry::array_to_point(&self).ok_or_else(|| {
 								CastError::InvalidKind {
