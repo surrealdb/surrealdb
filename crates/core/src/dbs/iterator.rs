@@ -64,6 +64,8 @@ pub(crate) enum Iterable {
 	/// - The table name
 	/// - The optional id key. When none is provided, it will be 
 	///   generated at a later stage and no record fetch will be done.
+	///   This can be NONE in a scenario like: 
+	///     `INSERT INTO test { there_is: 'no id set' }`
 	/// - The value for the record
 	Mergeable(String, Option<RecordIdKey>, Value),
 	/// An iterable which fetches a record from storage, and
