@@ -2,13 +2,13 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use serde::de::DeserializeOwned;
+use surrealdb_types::{SurrealValue, Value};
 
 use super::BoxFuture;
+use crate::Surreal;
 use crate::api::conn::Command;
 use crate::api::{Connection, Result};
 use crate::method::OnceLockExt;
-use crate::{Surreal, Value};
 
 /// An Insert Relation future
 #[derive(Debug)]
@@ -73,7 +73,7 @@ where
 impl<'r, Client, R> IntoFuture for InsertRelation<'r, Client, Option<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Option<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
@@ -84,7 +84,7 @@ where
 impl<'r, Client, R> IntoFuture for InsertRelation<'r, Client, Vec<R>>
 where
 	Client: Connection,
-	R: DeserializeOwned,
+	R: SurrealValue,
 {
 	type Output = Result<Vec<R>>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;

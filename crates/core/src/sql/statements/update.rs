@@ -1,11 +1,11 @@
 use std::fmt;
 
-use crate::sql::fmt::Fmt;
+use crate::fmt::Fmt;
 use crate::sql::{Cond, Data, Explain, Expr, Output, Timeout, With};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct UpdateStatement {
+pub(crate) struct UpdateStatement {
 	pub only: bool,
 	pub what: Vec<Expr>,
 	pub with: Option<With>,

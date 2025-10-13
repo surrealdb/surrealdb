@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use super::{ParseResult, Parser};
-use crate::sql::{Expr, Function, FunctionCall, Ident, Model};
+use crate::sql::{Expr, Function, FunctionCall, Model};
 use crate::syn::error::syntax_error;
 use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::syn::token::{TokenKind, t};
@@ -15,10 +15,10 @@ impl Parser<'_> {
 		stk: &mut Stk,
 	) -> ParseResult<FunctionCall> {
 		expected!(self, t!("::"));
-		let mut name = self.next_token_value::<Ident>()?.into_string();
+		let mut name = self.parse_ident()?;
 		while self.eat(t!("::")) {
 			name.push_str("::");
-			name.push_str(&self.next_token_value::<Ident>()?)
+			name.push_str(&self.parse_ident()?)
 		}
 		expected!(self, t!("(")).span;
 		let args = self.parse_function_args(stk).await?;
@@ -53,10 +53,10 @@ impl Parser<'_> {
 	/// Expects `ml` to already be called.
 	pub(super) async fn parse_model(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {
 		expected!(self, t!("::"));
-		let mut name = self.next_token_value::<Ident>()?.into_string();
+		let mut name = self.parse_ident()?;
 		while self.eat(t!("::")) {
 			name.push_str("::");
-			name.push_str(&self.next_token_value::<Ident>()?)
+			name.push_str(&self.parse_ident()?)
 		}
 		let start = expected!(self, t!("<")).span;
 
@@ -164,13 +164,13 @@ mod test {
 
 	#[test]
 	fn function_arguments() {
-		let sql = "string::is::numeric(null)";
+		let sql = "string::is_numeric(null)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("string::is::numeric(NULL)", format!("{}", out));
+		assert_eq!("string::is_numeric(NULL)", format!("{}", out));
 		let Expr::FunctionCall(f) = out else {
 			panic!()
 		};
-		assert_eq!(f.receiver, Function::Normal(String::from("string::is::numeric")));
+		assert_eq!(f.receiver, Function::Normal(String::from("string::is_numeric")));
 		assert_eq!(f.arguments, vec![sql::Expr::Literal(sql::Literal::Null)]);
 	}
 

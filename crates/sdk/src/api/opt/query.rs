@@ -1,331 +1,36 @@
 use std::marker::PhantomData;
 use std::mem;
 
-use anyhow::bail;
+// Removed anyhow::bail - using return Err() instead
 use futures::future::Either;
 use futures::stream::select_all;
-use serde::de::DeserializeOwned;
+use surrealdb_core::rpc::DbResultStats;
+use surrealdb_types::{self, SurrealValue, Value};
 
-use super::Raw;
 use crate::api::err::Error;
-use crate::api::{OnceLockExt, Response as QueryResponse, Result};
-use crate::core::expr::{
-	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, Expr, IfelseStatement,
-	InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement, OutputStatement,
-	RelateStatement, RemoveStatement, SelectStatement, TopLevelExpr, UpdateStatement, UseStatement,
-};
-use crate::core::sql::Ast;
-use crate::core::val;
-use crate::method::query::ValidQuery;
-use crate::method::{self, Stats, Stream};
-use crate::value::Notification;
-use crate::{Connection, Surreal, Value, api};
-
-pub struct Query(pub(crate) Result<ValidQuery>);
-/// A trait for converting inputs into SQL statements
-pub trait IntoQuery: into_query::Sealed {}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for Ast {}
-impl into_query::Sealed for Ast {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Normal {
-			query: self.expressions.into_iter().map(From::from).collect(),
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for TopLevelExpr {}
-impl into_query::Sealed for TopLevelExpr {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Normal {
-			query: vec![self],
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for UseStatement {}
-impl into_query::Sealed for UseStatement {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Normal {
-			query: vec![TopLevelExpr::Use(self)],
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for InfoStatement {}
-impl into_query::Sealed for InfoStatement {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Normal {
-			query: vec![TopLevelExpr::Expr(Expr::Info(Box::new(self)))],
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for LiveStatement {}
-impl into_query::Sealed for LiveStatement {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Normal {
-			query: vec![TopLevelExpr::Live(Box::new(self))],
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for KillStatement {}
-impl into_query::Sealed for KillStatement {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Normal {
-			query: vec![TopLevelExpr::Kill(self)],
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for OutputStatement {}
-impl into_query::Sealed for OutputStatement {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Normal {
-			query: vec![TopLevelExpr::Expr(Expr::Return(Box::new(self)))],
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for IfelseStatement {}
-impl into_query::Sealed for IfelseStatement {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Normal {
-			query: vec![TopLevelExpr::Expr(Expr::IfElse(Box::new(self)))],
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for SelectStatement {}
-impl into_query::Sealed for SelectStatement {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Normal {
-			query: vec![TopLevelExpr::Expr(Expr::Select(Box::new(self)))],
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for CreateStatement {}
-impl into_query::Sealed for CreateStatement {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Normal {
-			query: vec![TopLevelExpr::Expr(Expr::Create(Box::new(self)))],
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for UpdateStatement {}
-impl into_query::Sealed for UpdateStatement {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Normal {
-			query: vec![TopLevelExpr::Expr(Expr::Update(Box::new(self)))],
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for RelateStatement {}
-impl into_query::Sealed for RelateStatement {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Normal {
-			query: vec![TopLevelExpr::Expr(Expr::Relate(Box::new(self)))],
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for DeleteStatement {}
-impl into_query::Sealed for DeleteStatement {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Normal {
-			query: vec![TopLevelExpr::Expr(Expr::Delete(Box::new(self)))],
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for InsertStatement {}
-impl into_query::Sealed for InsertStatement {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Normal {
-			query: vec![TopLevelExpr::Expr(Expr::Insert(Box::new(self)))],
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for DefineStatement {}
-impl into_query::Sealed for DefineStatement {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Normal {
-			query: vec![TopLevelExpr::Expr(Expr::Define(Box::new(self)))],
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for AlterStatement {}
-impl into_query::Sealed for AlterStatement {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Normal {
-			query: vec![TopLevelExpr::Expr(Expr::Alter(Box::new(self)))],
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for RemoveStatement {}
-impl into_query::Sealed for RemoveStatement {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Normal {
-			query: vec![TopLevelExpr::Expr(Expr::Remove(Box::new(self)))],
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-#[diagnostic::do_not_recommend]
-#[doc(hidden)]
-impl IntoQuery for OptionStatement {}
-impl into_query::Sealed for OptionStatement {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Normal {
-			query: vec![TopLevelExpr::Option(self)],
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-pub(crate) mod into_query {
-	use crate::{Connection, Surreal};
-
-	pub trait Sealed {
-		/// Converts an input into SQL statements
-		fn into_query<C: Connection>(self, conn: &Surreal<C>) -> super::Query;
-	}
-}
-
-impl IntoQuery for &str {}
-impl into_query::Sealed for &str {
-	fn into_query<C: Connection>(self, conn: &Surreal<C>) -> Query {
-		let query = conn.inner.router.extract().and_then(|router| {
-			let capabilities = &router.config.capabilities;
-			crate::core::syn::parse_with_capabilities(self, capabilities)
-		});
-
-		Query(query.map(|x| ValidQuery::Normal {
-			//TODO: Figure out what type to actually use, core::expr, or core::sql
-			query: x.expressions.into_iter().map(From::from).collect(),
-			register_live_queries: true,
-			bindings: Default::default(),
-		}))
-	}
-}
-
-impl IntoQuery for &String {}
-impl into_query::Sealed for &String {
-	fn into_query<C: Connection>(self, conn: &Surreal<C>) -> Query {
-		self.as_str().into_query(conn)
-	}
-}
-
-impl IntoQuery for String {}
-impl into_query::Sealed for String {
-	fn into_query<C: Connection>(self, conn: &Surreal<C>) -> Query {
-		self.as_str().into_query(conn)
-	}
-}
-
-impl IntoQuery for Raw {}
-impl into_query::Sealed for Raw {
-	fn into_query<C: Connection>(self, _conn: &Surreal<C>) -> Query {
-		Query(Ok(ValidQuery::Raw {
-			query: self.0,
-			bindings: Default::default(),
-		}))
-	}
-}
+use crate::api::method::live::Stream;
+use crate::api::{IndexedResults as QueryResponse, Result};
+use crate::notification::Notification;
 
 /// Represents a way to take a single query result from a list of responses
 pub trait QueryResult<Response>: query_result::Sealed<Response>
 where
-	Response: DeserializeOwned,
+	Response: SurrealValue,
 {
 }
 
 mod query_result {
+	use surrealdb_core::rpc::DbResultStats;
+
 	pub trait Sealed<Response>
 	where
-		Response: super::DeserializeOwned,
+		Response: super::SurrealValue,
 	{
 		/// Extracts and deserializes a query result from a query response
 		fn query_result(self, response: &mut super::QueryResponse) -> super::Result<Response>;
 
 		/// Extracts the statistics from a query response
-		fn stats(&self, response: &super::QueryResponse) -> Option<super::Stats> {
+		fn stats(&self, response: &super::QueryResponse) -> Option<DbResultStats> {
 			response.results.get(&0).map(|x| x.0)
 		}
 	}
@@ -335,29 +40,28 @@ impl QueryResult<Value> for usize {}
 impl query_result::Sealed<Value> for usize {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Value> {
 		match response.results.swap_remove(&self) {
-			Some((_, result)) => Ok(Value::from_inner(result?)),
-			None => Ok(Value::from_inner(val::Value::None)),
+			Some((_, result)) => Ok(result?),
+			None => Ok(Value::None),
 		}
 	}
 
-	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
+	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
 		response.results.get(self).map(|x| x.0)
 	}
 }
 
-impl<T> QueryResult<Option<T>> for usize where T: DeserializeOwned {}
+impl<T> QueryResult<Option<T>> for usize where T: SurrealValue {}
 impl<T> query_result::Sealed<Option<T>> for usize
 where
-	T: DeserializeOwned,
+	T: SurrealValue,
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Option<T>> {
 		let value = match response.results.get_mut(&self) {
 			Some((_, result)) => match result {
 				Ok(val) => val,
-				Err(error) => {
-					let error = mem::replace(error, Error::ConnectionUninitialised.into());
+				Err(_) => {
 					response.results.swap_remove(&self);
-					return Err(error);
+					return Err(Error::ConnectionUninitialised);
 				}
 			},
 			None => {
@@ -365,28 +69,33 @@ where
 			}
 		};
 		let result = match value {
-			val::Value::Array(vec) => match &mut vec.0[..] {
+			Value::Array(vec) => match &mut vec[..] {
 				[] => Ok(None),
 				[value] => {
 					let value = mem::take(value);
-					api::value::from_core_value(value)
+					match value {
+						Value::None => Ok(None),
+						v => Ok(Some(T::from_value(v)?)),
+					}
 				}
-				_ => Err(Error::LossyTake(QueryResponse {
+				_ => Err(Error::LossyTake(Box::new(QueryResponse {
 					results: mem::take(&mut response.results),
 					live_queries: mem::take(&mut response.live_queries),
-				})
-				.into()),
+				}))),
 			},
-			_ => {
+			value => {
 				let value = mem::take(value);
-				api::value::from_core_value(value)
+				match value {
+					Value::None => Ok(None),
+					v => Ok(Some(T::from_value(v)?)),
+				}
 			}
 		};
 		response.results.swap_remove(&self);
 		result
 	}
 
-	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
+	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
 		response.results.get(self).map(|x| x.0)
 	}
 }
@@ -398,44 +107,42 @@ impl query_result::Sealed<Value> for (usize, &str) {
 		let value = match response.results.get_mut(&index) {
 			Some((_, result)) => match result {
 				Ok(val) => val,
-				Err(error) => {
-					let error = mem::replace(error, Error::ConnectionUninitialised.into());
+				Err(_) => {
 					response.results.swap_remove(&index);
-					return Err(error);
+					return Err(Error::ConnectionUninitialised);
 				}
 			},
 			None => {
-				return Ok(Value::from_inner(val::Value::None));
+				return Ok(Value::None);
 			}
 		};
 
 		let value = match value {
-			val::Value::Object(object) => object.remove(key).unwrap_or_default(),
-			_ => val::Value::None,
+			Value::Object(object) => object.remove(key).unwrap_or_default(),
+			_ => Value::None,
 		};
 
-		Ok(Value::from_inner(value))
+		Ok(value)
 	}
 
-	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
+	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
 		response.results.get(&self.0).map(|x| x.0)
 	}
 }
 
-impl<T> QueryResult<Option<T>> for (usize, &str) where T: DeserializeOwned {}
+impl<T> QueryResult<Option<T>> for (usize, &str) where T: SurrealValue {}
 impl<T> query_result::Sealed<Option<T>> for (usize, &str)
 where
-	T: DeserializeOwned,
+	T: SurrealValue,
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Option<T>> {
 		let (index, key) = self;
-		let value: &mut val::Value = match response.results.get_mut(&index) {
+		let value: &mut Value = match response.results.get_mut(&index) {
 			Some((_, result)) => match result {
 				Ok(val) => val,
-				Err(error) => {
-					let error = mem::replace(error, Error::ConnectionUninitialised.into());
+				Err(_) => {
 					response.results.swap_remove(&index);
-					return Err(error);
+					return Err(Error::ConnectionUninitialised);
 				}
 			},
 			None => {
@@ -443,28 +150,27 @@ where
 			}
 		};
 		let value = match value {
-			val::Value::Array(vec) => match &mut vec.0[..] {
+			Value::Array(vec) => match &mut vec[..] {
 				[] => {
 					response.results.swap_remove(&index);
 					return Ok(None);
 				}
 				[value] => value,
 				_ => {
-					return Err(Error::LossyTake(QueryResponse {
+					return Err(Error::LossyTake(Box::new(QueryResponse {
 						results: mem::take(&mut response.results),
 						live_queries: mem::take(&mut response.live_queries),
-					})
-					.into());
+					})));
 				}
 			},
 			value => value,
 		};
 		match value {
-			val::Value::None => {
+			Value::None => {
 				response.results.swap_remove(&index);
 				Ok(None)
 			}
-			val::Value::Object(object) => {
+			Value::Object(object) => {
 				if object.is_empty() {
 					response.results.swap_remove(&index);
 					return Ok(None);
@@ -472,81 +178,84 @@ where
 				let Some(value) = object.remove(key) else {
 					return Ok(None);
 				};
-				api::value::from_core_value(value)
+				Ok(Some(T::from_value(value)?))
 			}
 			_ => Ok(None),
 		}
 	}
 
-	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
+	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
 		response.results.get(&self.0).map(|x| x.0)
 	}
 }
 
-impl<T> QueryResult<Vec<T>> for usize where T: DeserializeOwned {}
+impl<T> QueryResult<Vec<T>> for usize where T: SurrealValue {}
 impl<T> query_result::Sealed<Vec<T>> for usize
 where
-	T: DeserializeOwned,
+	T: SurrealValue,
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Vec<T>> {
 		let vec = match response.results.swap_remove(&self) {
 			Some((_, result)) => match result? {
-				val::Value::Array(vec) => vec.0,
+				Value::Array(arr) => arr.into_vec(),
 				vec => vec![vec],
 			},
 			None => {
 				return Ok(vec![]);
 			}
 		};
-		api::value::from_core_value(vec.into())
+
+		vec.into_iter().map(|v| T::from_value(v).map_err(Into::into)).collect::<Result<Vec<T>>>()
 	}
 
-	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
+	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
 		response.results.get(self).map(|x| x.0)
 	}
 }
 
-impl<T> QueryResult<Vec<T>> for (usize, &str) where T: DeserializeOwned {}
+impl<T> QueryResult<Vec<T>> for (usize, &str) where T: SurrealValue {}
 impl<T> query_result::Sealed<Vec<T>> for (usize, &str)
 where
-	T: DeserializeOwned,
+	T: SurrealValue,
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Vec<T>> {
 		let (index, key) = self;
 		match response.results.get_mut(&index) {
 			Some((_, result)) => match result {
 				Ok(val) => match val {
-					val::Value::Array(vec) => {
+					Value::Array(vec) => {
 						let mut responses = Vec::with_capacity(vec.len());
 						for value in vec.iter_mut() {
-							if let val::Value::Object(object) = value {
+							if let Value::Object(object) = value {
 								if let Some(value) = object.remove(key) {
 									responses.push(value);
 								}
 							}
 						}
-						api::value::from_core_value(responses.into())
+						responses
+							.into_iter()
+							.map(|v| T::from_value(v).map_err(Into::into))
+							.collect::<Result<Vec<T>>>()
 					}
 					val => {
-						if let val::Value::Object(object) = val {
+						if let Value::Object(object) = val {
 							if let Some(value) = object.remove(key) {
-								return api::value::from_core_value(vec![value].into());
+								return Ok(vec![T::from_value(value)?]);
 							}
 						}
 						Ok(vec![])
 					}
 				},
-				Err(error) => {
-					let error = mem::replace(error, Error::ConnectionUninitialised.into());
+				Err(_) => {
 					response.results.swap_remove(&index);
-					Err(error)
+					Err(Error::ConnectionUninitialised)
 				}
 			},
 			None => Ok(vec![]),
 		}
 	}
 
-	fn stats(&self, response: &QueryResponse) -> Option<Stats> {
+	fn stats(&self, response: &QueryResponse) -> Option<DbResultStats> {
 		response.results.get(&self.0).map(|x| x.0)
 	}
 }
@@ -558,20 +267,20 @@ impl query_result::Sealed<Value> for &str {
 	}
 }
 
-impl<T> QueryResult<Option<T>> for &str where T: DeserializeOwned {}
+impl<T> QueryResult<Option<T>> for &str where T: SurrealValue {}
 impl<T> query_result::Sealed<Option<T>> for &str
 where
-	T: DeserializeOwned,
+	T: SurrealValue,
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Option<T>> {
 		(0, self).query_result(response)
 	}
 }
 
-impl<T> QueryResult<Vec<T>> for &str where T: DeserializeOwned {}
+impl<T> QueryResult<Vec<T>> for &str where T: SurrealValue {}
 impl<T> query_result::Sealed<Vec<T>> for &str
 where
-	T: DeserializeOwned,
+	T: SurrealValue,
 {
 	fn query_result(self, response: &mut QueryResponse) -> Result<Vec<T>> {
 		(0, self).query_result(response)
@@ -587,20 +296,24 @@ mod query_stream {
 		fn query_stream(
 			self,
 			response: &mut super::QueryResponse,
-		) -> super::Result<super::method::QueryStream<R>>;
+		) -> super::Result<crate::api::method::QueryStream<R>>;
 	}
 }
 
 impl QueryStream<Value> for usize {}
 impl query_stream::Sealed<Value> for usize {
-	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<Value>> {
+	fn query_stream(
+		self,
+		response: &mut QueryResponse,
+	) -> Result<crate::api::method::QueryStream<Value>> {
 		let stream = response
 			.live_queries
 			.swap_remove(&self)
 			.and_then(|result| match result {
 				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
-						response.results.swap_remove(&self).and_then(|x| x.1.err().map(Err))
+					if matches!(e, Error::NotLiveQuery(..)) {
+						response.results.swap_remove(&self);
+						None
 					} else {
 						Some(Err(e))
 					}
@@ -608,35 +321,34 @@ impl query_stream::Sealed<Value> for usize {
 				result => Some(result),
 			})
 			.unwrap_or_else(|| match response.results.contains_key(&self) {
-				true => Err(Error::NotLiveQuery(self).into()),
-				false => Err(Error::QueryIndexOutOfBounds(self).into()),
+				true => Err(Error::NotLiveQuery(self)),
+				false => Err(Error::QueryIndexOutOfBounds(self)),
 			})?;
-		Ok(method::QueryStream(Either::Left(stream)))
+		Ok(crate::api::method::QueryStream(Either::Left(stream)))
 	}
 }
 
 impl QueryStream<Value> for () {}
 impl query_stream::Sealed<Value> for () {
-	fn query_stream(self, response: &mut QueryResponse) -> Result<method::QueryStream<Value>> {
+	fn query_stream(
+		self,
+		response: &mut QueryResponse,
+	) -> Result<crate::api::method::QueryStream<Value>> {
 		let mut streams = Vec::with_capacity(response.live_queries.len());
 		for (index, result) in mem::take(&mut response.live_queries) {
 			match result {
 				Ok(stream) => streams.push(stream),
 				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
+					if matches!(e, Error::NotLiveQuery(..)) {
 						match response.results.swap_remove(&index) {
-							Some((stats, Err(error))) => {
-								response.results.insert(
-									index,
-									(stats, Err(Error::ResponseAlreadyTaken.into())),
-								);
-								return Err(error);
+							Some((_, Err(_))) => {
+								return Err(Error::ConnectionUninitialised);
 							}
 							Some((_, Ok(..))) => unreachable!(
 								"the internal error variant indicates that an error occurred in the `LIVE SELECT` query"
 							),
 							None => {
-								bail!(Error::ResponseAlreadyTaken);
+								return Err(Error::ResponseAlreadyTaken);
 							}
 						}
 					} else {
@@ -645,26 +357,27 @@ impl query_stream::Sealed<Value> for () {
 				}
 			}
 		}
-		Ok(method::QueryStream(Either::Right(select_all(streams))))
+		Ok(crate::api::method::QueryStream(Either::Right(select_all(streams))))
 	}
 }
 
-impl<R> QueryStream<Notification<R>> for usize where R: DeserializeOwned + Unpin {}
+impl<R> QueryStream<Notification<R>> for usize where R: SurrealValue + Unpin {}
 impl<R> query_stream::Sealed<Notification<R>> for usize
 where
-	R: DeserializeOwned + Unpin,
+	R: SurrealValue + Unpin,
 {
 	fn query_stream(
 		self,
 		response: &mut QueryResponse,
-	) -> Result<method::QueryStream<Notification<R>>> {
+	) -> Result<crate::api::method::QueryStream<Notification<R>>> {
 		let mut stream = response
 			.live_queries
 			.swap_remove(&self)
 			.and_then(|result| match result {
 				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
-						response.results.swap_remove(&self).and_then(|x| x.1.err().map(Err))
+					if matches!(e, Error::NotLiveQuery(..)) {
+						response.results.swap_remove(&self);
+						None
 					} else {
 						Some(Err(e))
 					}
@@ -672,10 +385,10 @@ where
 				result => Some(result),
 			})
 			.unwrap_or_else(|| match response.results.contains_key(&self) {
-				true => Err(Error::NotLiveQuery(self).into()),
-				false => Err(Error::QueryIndexOutOfBounds(self).into()),
+				true => Err(Error::NotLiveQuery(self)),
+				false => Err(Error::QueryIndexOutOfBounds(self)),
 			})?;
-		Ok(method::QueryStream(Either::Left(Stream {
+		Ok(crate::api::method::QueryStream(Either::Left(Stream {
 			client: stream.client.clone(),
 			id: mem::take(&mut stream.id),
 			rx: stream.rx.take(),
@@ -684,34 +397,30 @@ where
 	}
 }
 
-impl<R> QueryStream<Notification<R>> for () where R: DeserializeOwned + Unpin {}
+impl<R> QueryStream<Notification<R>> for () where R: SurrealValue + Unpin {}
 impl<R> query_stream::Sealed<Notification<R>> for ()
 where
-	R: DeserializeOwned + Unpin,
+	R: SurrealValue + Unpin,
 {
 	fn query_stream(
 		self,
 		response: &mut QueryResponse,
-	) -> Result<method::QueryStream<Notification<R>>> {
+	) -> Result<crate::api::method::QueryStream<Notification<R>>> {
 		let mut streams = Vec::with_capacity(response.live_queries.len());
 		for (index, result) in mem::take(&mut response.live_queries) {
 			let mut stream = match result {
 				Ok(stream) => stream,
 				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::NotLiveQuery(..))) {
+					if matches!(e, Error::NotLiveQuery(..)) {
 						match response.results.swap_remove(&index) {
-							Some((stats, Err(error))) => {
-								response.results.insert(
-									index,
-									(stats, Err(Error::ResponseAlreadyTaken.into())),
-								);
-								return Err(error);
+							Some((_, Err(_))) => {
+								return Err(Error::ConnectionUninitialised);
 							}
 							Some((_, Ok(..))) => unreachable!(
 								"the internal error variant indicates that an error occurred in the `LIVE SELECT` query"
 							),
 							None => {
-								bail!(Error::ResponseAlreadyTaken);
+								return Err(Error::ResponseAlreadyTaken);
 							}
 						}
 					} else {
@@ -726,6 +435,6 @@ where
 				response_type: PhantomData,
 			});
 		}
-		Ok(method::QueryStream(Either::Right(select_all(streams))))
+		Ok(crate::api::method::QueryStream(Either::Right(select_all(streams))))
 	}
 }

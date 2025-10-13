@@ -1,7 +1,6 @@
 use std::fmt::{self, Display, Write};
 
-use crate::sql::Ident;
-use crate::sql::fmt::{Fmt, Pretty, pretty_indent};
+use crate::fmt::{Fmt, Pretty, pretty_indent};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -91,13 +90,13 @@ pub enum FunctionsConfig {
 	#[default]
 	None,
 	Auto,
-	Include(Vec<Ident>),
-	Exclude(Vec<Ident>),
+	Include(Vec<String>),
+	Exclude(Vec<String>),
 }
 
 impl Display for GraphQLConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, " GRAPHQL")?;
+		write!(f, "GRAPHQL")?;
 
 		write!(f, " TABLES {}", self.tables)?;
 		write!(f, " FUNCTIONS {}", self.functions)?;
@@ -110,12 +109,8 @@ impl From<FunctionsConfig> for crate::catalog::FunctionsConfig {
 		match v {
 			FunctionsConfig::None => Self::None,
 			FunctionsConfig::Auto => Self::Auto,
-			FunctionsConfig::Include(cs) => {
-				Self::Include(cs.into_iter().map(|i| i.into_string()).collect())
-			}
-			FunctionsConfig::Exclude(cs) => {
-				Self::Exclude(cs.into_iter().map(|i| i.into_string()).collect())
-			}
+			FunctionsConfig::Include(cs) => Self::Include(cs),
+			FunctionsConfig::Exclude(cs) => Self::Exclude(cs),
 		}
 	}
 }
@@ -125,12 +120,8 @@ impl From<crate::catalog::FunctionsConfig> for FunctionsConfig {
 		match v {
 			crate::catalog::FunctionsConfig::None => Self::None,
 			crate::catalog::FunctionsConfig::Auto => Self::Auto,
-			crate::catalog::FunctionsConfig::Include(cs) => {
-				Self::Include(cs.into_iter().map(|s| unsafe { Ident::new_unchecked(s) }).collect())
-			}
-			crate::catalog::FunctionsConfig::Exclude(cs) => {
-				Self::Exclude(cs.into_iter().map(|s| unsafe { Ident::new_unchecked(s) }).collect())
-			}
+			crate::catalog::FunctionsConfig::Include(cs) => Self::Include(cs),
+			crate::catalog::FunctionsConfig::Exclude(cs) => Self::Exclude(cs),
 		}
 	}
 }

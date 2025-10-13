@@ -1,14 +1,14 @@
 #![cfg(feature = "kv-surrealkv")]
 
-use surrealdb::Value;
+use surrealdb::types::Value;
+use surrealdb_types::object;
 use ulid::Ulid;
 
 use super::CreateDb;
-use crate::api_integration::NS;
 
 pub async fn select_with_version(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
 	// Create the initial version and record its timestamp.
@@ -63,7 +63,7 @@ pub async fn select_with_version(new_db: impl CreateDb) {
 
 pub async fn create_with_version(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
 	// Create a record in the past.
@@ -108,7 +108,7 @@ pub async fn create_with_version(new_db: impl CreateDb) {
 
 pub async fn insert_with_version(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
 	// Create a record in the past.
@@ -153,7 +153,7 @@ pub async fn insert_with_version(new_db: impl CreateDb) {
 
 pub async fn info_for_db_with_versioned_tables(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
 	// Record the timestamp before creating a testing table.
@@ -168,21 +168,24 @@ pub async fn info_for_db_with_versioned_tables(new_db: impl CreateDb) {
 	// Check that historical query shows no table before it was created.
 	let q = format!("INFO FOR DB VERSION d'{}'", ts_before_create);
 	let mut response = db.query(q).await.unwrap().check().unwrap();
-	let info = response.take::<Value>(0).unwrap().to_string();
-	assert!(info.contains("tables: {  }"));
+	let info = response.take::<Value>(0).unwrap();
+	assert!(info.get("tables").is_empty());
 
 	// Now check that the table shows up later.
 	let q = format!("INFO FOR DB VERSION d'{}'", ts_after_create);
 	let mut response = db.query(q).await.unwrap().check().unwrap();
-	let info = response.take::<Value>(0).unwrap().to_string();
-	assert!(info.contains(
-		"tables: { person: 'DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE' }"
-	));
+	let info = response.take::<Value>(0).unwrap();
+	assert_eq!(
+		info.get("tables"),
+		Value::Object(object! {
+			person: "DEFINE TABLE person TYPE ANY SCHEMALESS PERMISSIONS NONE"
+		})
+	);
 }
 
 pub async fn info_for_table_with_versioned_fields(new_db: impl CreateDb) {
 	let (permit, db) = new_db.create_db().await;
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
 	// Create the testing table.
@@ -203,16 +206,19 @@ pub async fn info_for_table_with_versioned_fields(new_db: impl CreateDb) {
 	// Check that historical query shows no field before it was created.
 	let q = format!("INFO FOR TABLE person VERSION d'{}'", ts_before_field);
 	let mut response = db.query(q).await.unwrap().check().unwrap();
-	let info = response.take::<Value>(0).unwrap().to_string();
-	assert!(info.contains("fields: {  }"));
+	let info = response.take::<Value>(0).unwrap();
+	assert!(info.get("fields").is_empty());
 
 	// Now check that the field shows up later.
 	let q = format!("INFO FOR TABLE person VERSION d'{}'", ts_after_field);
 	let mut response = db.query(q).await.unwrap().check().unwrap();
-	let info = response.take::<Value>(0).unwrap().to_string();
-	assert!(info.contains(
-		"fields: { firstName: 'DEFINE FIELD firstName ON person TYPE string PERMISSIONS FULL' }"
-	));
+	let info = response.take::<Value>(0).unwrap();
+	assert_eq!(
+		info.get("fields"),
+		Value::Object(object! {
+			firstName: "DEFINE FIELD firstName ON person TYPE string PERMISSIONS FULL"
+		})
+	);
 }
 
 define_include_tests!(version => {

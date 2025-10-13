@@ -6,7 +6,7 @@ use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
 use crate::sql::{Ast, Block, Expr, Fetchs, Fields, Idiom, Kind, Output, RecordIdLit};
-use crate::val::{Datetime, Duration, RecordId, Value};
+use crate::types::{PublicDatetime, PublicDuration, PublicRecordId, PublicValue};
 
 pub mod error;
 pub mod lexer;
@@ -22,7 +22,7 @@ pub trait Parse<T> {
 mod test;
 
 use anyhow::{Result, bail, ensure};
-use lexer::{Lexer, compound};
+use lexer::Lexer;
 use parser::{ParseResult, Parser, ParserSettings};
 use reblessive::{Stack, Stk};
 use token::t;
@@ -129,7 +129,7 @@ pub fn expr_with_capabilities(input: &str, capabilities: &Capabilities) -> Resul
 
 /// Parses JSON into an inert SurrealQL [`Value`]
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn json(input: &str) -> Result<Value> {
+pub fn json(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing inert JSON value");
 
 	parse_with(input.as_bytes(), async |parser, stk| parser.parse_json(stk).await)
@@ -145,32 +145,29 @@ pub fn idiom(input: &str) -> Result<Idiom> {
 
 /// Parse a datetime without enclosing delimiters from a string.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn datetime(input: &str) -> Result<Datetime> {
+pub fn datetime(input: &str) -> Result<PublicDatetime> {
 	trace!(target: TARGET, "Parsing SurrealQL datetime");
 
 	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
-	let mut lexer = Lexer::new(input.as_bytes());
-	let res = compound::datetime_inner(&mut lexer);
-	if let Err(e) = lexer.assert_finished() {
-		bail!(Error::InvalidQuery(e.render_on(input)));
+	match Lexer::lex_datetime(input) {
+		Ok(x) => Ok(x),
+		Err(e) => {
+			bail!(Error::InvalidQuery(e.render_on(input)))
+		}
 	}
-	res.map(Datetime)
-		.map_err(|e| e.render_on(input))
-		.map_err(Error::InvalidQuery)
-		.map_err(anyhow::Error::new)
 }
 
 /// Parse a duration from a string.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn duration(input: &str) -> Result<Duration> {
+pub fn duration(input: &str) -> Result<PublicDuration> {
 	trace!(target: TARGET, "Parsing SurrealQL duration");
 
 	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
 
 	let mut parser = Parser::new(input.as_bytes());
 	parser
-		.next_token_value::<Duration>()
+		.next_token_value::<PublicDuration>()
 		.and_then(|e| parser.assert_finished().map(|_| e))
 		.map_err(|e| e.render_on(input))
 		.map_err(Error::InvalidQuery)
@@ -179,7 +176,7 @@ pub fn duration(input: &str) -> Result<Duration> {
 
 /// Parse a record id.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn record_id(input: &str) -> Result<RecordId> {
+pub fn record_id(input: &str) -> Result<PublicRecordId> {
 	trace!(target: TARGET, "Parsing SurrealQL record id");
 
 	parse_with(input.as_bytes(), async |parser, stk| parser.parse_value_record_id(stk).await)
@@ -198,19 +195,31 @@ pub fn record_id_with_range(input: &str) -> Result<RecordIdLit> {
 pub fn block(input: &str) -> Result<Block> {
 	trace!(target: TARGET, "Parsing SurrealQL block");
 
-	parse_with(input.as_bytes(), async |parser, stk| {
-		let token = parser.peek();
-		match token.kind {
-			t!("{") => {
-				let start = parser.pop_peek().span;
-				parser.parse_block(stk, start).await
+	parse_with_settings(
+		input.as_bytes(),
+		ParserSettings {
+			legacy_strands: true,
+			flexible_record_id: true,
+			references_enabled: true,
+			bearer_access_enabled: true,
+			define_api_enabled: true,
+			files_enabled: true,
+			..Default::default()
+		},
+		async |parser, stk| {
+			let token = parser.peek();
+			match token.kind {
+				t!("{") => {
+					let start = parser.pop_peek().span;
+					parser.parse_block(stk, start).await
+				}
+				found => Err(error::SyntaxError::new(format_args!(
+					"Unexpected token `{found}` expected `{{`"
+				))
+				.with_span(token.span, error::MessageKind::Error)),
 			}
-			found => Err(error::SyntaxError::new(format_args!(
-				"Unexpected token `{found}` expected `{{`"
-			))
-			.with_span(token.span, error::MessageKind::Error)),
-		}
-	})
+		},
+	)
 }
 
 /// Parses fields for a SELECT statement
@@ -270,7 +279,7 @@ pub fn expr_legacy_strand(input: &str) -> Result<Expr> {
 
 /// Parses a SurrealQL [`Value`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value(input: &str) -> Result<Value> {
+pub fn value(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {
@@ -286,7 +295,7 @@ pub fn value(input: &str) -> Result<Value> {
 
 /// Parses a SurrealQL [`Value`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn value_legacy_strand(input: &str) -> Result<Value> {
+pub fn value_legacy_strand(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {
@@ -304,7 +313,7 @@ pub fn value_legacy_strand(input: &str) -> Result<Value> {
 /// Parses JSON into an inert SurrealQL [`Value`] and parses values within
 /// strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn json_legacy_strand(input: &str) -> Result<Value> {
+pub fn json_legacy_strand(input: &str) -> Result<PublicValue> {
 	trace!(target: TARGET, "Parsing inert JSON value, with legacy strings");
 
 	let settings = ParserSettings {

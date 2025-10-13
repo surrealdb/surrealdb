@@ -4,18 +4,19 @@ use std::fmt::{Display, Formatter};
 use anyhow::Result;
 use reblessive::tree::Stk;
 
+use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Base;
-use crate::expr::ident::Ident;
 use crate::expr::statements::define::run_indexing;
+use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum RebuildStatement {
+pub(crate) enum RebuildStatement {
 	Index(RebuildIndexStatement),
 }
 
@@ -43,10 +44,11 @@ impl Display for RebuildStatement {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct RebuildIndexStatement {
-	pub name: Ident,
-	pub what: Ident,
+pub(crate) struct RebuildIndexStatement {
+	pub name: String,
+	pub what: String,
 	pub if_exists: bool,
+	pub concurrently: bool,
 }
 
 impl RebuildIndexStatement {
@@ -62,21 +64,24 @@ impl RebuildIndexStatement {
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the index definition
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		let res = ctx.tx().get_tb_index(ns, db, &self.what, &self.name).await;
+		let res = ctx.tx().get_tb_index(ns, db, &self.what, &self.name).await?;
 		let ix = match res {
-			Ok(x) => x,
-			Err(e) => {
-				if self.if_exists && matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
+			Some(x) => x,
+			None => {
+				if self.if_exists {
 					return Ok(Value::None);
 				} else {
-					return Err(e);
+					return Err(Error::IxNotFound {
+						name: self.name.to_string(),
+					}
+					.into());
 				}
 			}
 		};
 		let ix = ix.as_ref().clone();
 
 		// Rebuild the index
-		run_indexing(stk, ctx, opt, doc, &ix, false).await?;
+		run_indexing(stk, ctx, opt, doc, &ix, !self.concurrently).await?;
 		// Ok all good
 		Ok(Value::None)
 	}
@@ -88,7 +93,10 @@ impl Display for RebuildIndexStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what))?;
+		if self.concurrently {
+			write!(f, " CONCURRENTLY")?
+		}
 		Ok(())
 	}
 }

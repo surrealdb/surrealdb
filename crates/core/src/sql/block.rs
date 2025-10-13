@@ -1,11 +1,11 @@
 use std::fmt::{self, Display, Formatter, Write};
 
+use crate::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::Expr;
-use crate::sql::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Block(pub Vec<Expr>);
+pub struct Block(pub(crate) Vec<Expr>);
 
 impl From<Block> for crate::expr::Block {
 	fn from(v: Block) -> Self {

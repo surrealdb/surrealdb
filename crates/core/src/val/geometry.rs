@@ -11,17 +11,17 @@ use geo::{Coord, LineString, LinesIter, Point, Polygon};
 use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use super::Object;
-use crate::expr::fmt::Fmt;
-use crate::expr::kind::GeometryKind;
+use crate::fmt::Fmt;
 use crate::val::{Array, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename = "$surrealdb::private::Geometry")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Geometry {
+pub(crate) enum Geometry {
 	Point(Point<f64>),
 	Line(LineString<f64>),
 	Polygon(Polygon<f64>),
@@ -33,30 +33,6 @@ pub enum Geometry {
 }
 
 impl Geometry {
-	/// Check if this is a Point
-	pub fn is_point(&self) -> bool {
-		matches!(self, Self::Point(_))
-	}
-	/// Check if this is a Line
-	pub fn is_line(&self) -> bool {
-		matches!(self, Self::Line(_))
-	}
-	/// Check if this is a Polygon
-	pub fn is_polygon(&self) -> bool {
-		matches!(self, Self::Polygon(_))
-	}
-	/// Check if this is a MultiPoint
-	pub fn is_multipoint(&self) -> bool {
-		matches!(self, Self::MultiPoint(_))
-	}
-	/// Check if this is a MultiLine
-	pub fn is_multiline(&self) -> bool {
-		matches!(self, Self::MultiLine(_))
-	}
-	/// Check if this is a MultiPolygon
-	pub fn is_multipolygon(&self) -> bool {
-		matches!(self, Self::MultiPolygon(_))
-	}
 	/// Check if this is not a Collection
 	pub fn is_geometry(&self) -> bool {
 		!matches!(self, Self::Collection(_))
@@ -64,18 +40,6 @@ impl Geometry {
 	/// Check if this is a Collection
 	pub fn is_collection(&self) -> bool {
 		matches!(self, Self::Collection(_))
-	}
-
-	pub fn kind(&self) -> GeometryKind {
-		match self {
-			Geometry::Point(_) => GeometryKind::Point,
-			Geometry::Line(_) => GeometryKind::Line,
-			Geometry::Polygon(_) => GeometryKind::Polygon,
-			Geometry::MultiPoint(_) => GeometryKind::MultiPoint,
-			Geometry::MultiLine(_) => GeometryKind::MultiLine,
-			Geometry::MultiPolygon(_) => GeometryKind::MultiPolygon,
-			Geometry::Collection(_) => GeometryKind::Collection,
-		}
 	}
 
 	/// Check if this has valid latitude and longitude points:
@@ -189,12 +153,13 @@ impl Geometry {
 		obj.into()
 	}
 
-	pub fn try_from_object(object: &Object) -> Option<Geometry> {
+	#[cfg_attr(not(feature = "scripting"), expect(dead_code))]
+	pub(crate) fn try_from_object(object: &Object) -> Option<Geometry> {
 		if object.len() != 2 {
 			return None;
 		}
 
-		let Some(Value::Strand(key)) = object.get("type") else {
+		let Some(Value::String(key)) = object.get("type") else {
 			return None;
 		};
 
@@ -326,6 +291,119 @@ impl Geometry {
 			return None;
 		};
 		Some(Point::from(((*a).try_into().ok()?, (*b).try_into().ok()?)))
+	}
+
+	// -----------------------------------
+	// Value operations
+	// -----------------------------------
+
+	pub fn contains(&self, other: &Self) -> bool {
+		match self {
+			Self::Point(v) => match other {
+				Self::Point(w) => v.contains(w),
+				Self::MultiPoint(w) => w.iter().all(|x| v.contains(x)),
+				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
+				_ => false,
+			},
+			Self::Line(v) => match other {
+				Self::Point(w) => v.contains(w),
+				Self::Line(w) => v.contains(w),
+				Self::MultiLine(w) => w.iter().all(|x| w.contains(x)),
+				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
+				_ => false,
+			},
+			Self::Polygon(v) => match other {
+				Self::Point(w) => v.contains(w),
+				Self::Line(w) => v.contains(w),
+				Self::Polygon(w) => v.contains(w),
+				Self::MultiPolygon(w) => w.iter().all(|x| w.contains(x)),
+				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
+				_ => false,
+			},
+			Self::MultiPoint(v) => match other {
+				Self::Point(w) => v.contains(w),
+				Self::MultiPoint(w) => w.iter().all(|x| w.contains(x)),
+				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
+				_ => false,
+			},
+			Self::MultiLine(v) => match other {
+				Self::Point(w) => v.contains(w),
+				Self::Line(w) => v.contains(w),
+				Self::MultiLine(w) => w.iter().all(|x| w.contains(x)),
+				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
+				_ => false,
+			},
+			Self::MultiPolygon(v) => match other {
+				Self::Point(w) => v.contains(w),
+				Self::Line(w) => v.contains(w),
+				Self::Polygon(w) => v.contains(w),
+				Self::MultiPoint(w) => v.contains(w),
+				Self::MultiLine(w) => v.contains(w),
+				Self::MultiPolygon(w) => v.contains(w),
+				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
+			},
+			Self::Collection(v) => v.iter().all(|x| x.contains(other)),
+		}
+	}
+
+	pub fn intersects(&self, other: &Self) -> bool {
+		match self {
+			Self::Point(v) => match other {
+				Self::Point(w) => v.intersects(w),
+				Self::Line(w) => v.intersects(w),
+				Self::Polygon(w) => v.intersects(w),
+				Self::MultiPoint(w) => v.intersects(w),
+				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
+				Self::MultiPolygon(w) => v.intersects(w),
+				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
+			},
+			Self::Line(v) => match other {
+				Self::Point(w) => v.intersects(w),
+				Self::Line(w) => v.intersects(w),
+				Self::Polygon(w) => v.intersects(w),
+				Self::MultiPoint(w) => v.intersects(w),
+				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
+				Self::MultiPolygon(w) => v.intersects(w),
+				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
+			},
+			Self::Polygon(v) => match other {
+				Self::Point(w) => v.intersects(w),
+				Self::Line(w) => v.intersects(w),
+				Self::Polygon(w) => v.intersects(w),
+				Self::MultiPoint(w) => v.intersects(w),
+				Self::MultiLine(w) => v.intersects(w),
+				Self::MultiPolygon(w) => v.intersects(w),
+				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
+			},
+			Self::MultiPoint(v) => match other {
+				Self::Point(w) => v.intersects(w),
+				Self::Line(w) => v.intersects(w),
+				Self::Polygon(w) => v.intersects(w),
+				Self::MultiPoint(w) => v.intersects(w),
+				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
+				Self::MultiPolygon(w) => v.intersects(w),
+				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
+			},
+			Self::MultiLine(v) => match other {
+				Self::Point(w) => v.intersects(w),
+				Self::Line(w) => v.intersects(w),
+				Self::Polygon(w) => v.intersects(w),
+				Self::MultiPoint(w) => v.intersects(w),
+				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
+				Self::MultiPolygon(w) => v.intersects(w),
+				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
+			},
+			Self::MultiPolygon(v) => match other {
+				Self::Point(w) => v.intersects(w),
+				Self::Line(w) => v.intersects(w),
+				Self::Polygon(w) => v.intersects(w),
+				Self::MultiPoint(w) => v.intersects(w),
+				Self::MultiLine(w) => v.intersects(w),
+				Self::MultiPolygon(w) => v.intersects(w),
+				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
+			},
+			Self::Collection(v) => v.iter().all(|x| x.intersects(other)),
+		}
 	}
 }
 
@@ -518,117 +596,34 @@ impl FromIterator<Geometry> for geo::Geometry<f64> {
 	}
 }
 
-impl Geometry {
-	// -----------------------------------
-	// Value operations
-	// -----------------------------------
-
-	pub fn contains(&self, other: &Self) -> bool {
-		match self {
-			Self::Point(v) => match other {
-				Self::Point(w) => v.contains(w),
-				Self::MultiPoint(w) => w.iter().all(|x| v.contains(x)),
-				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
-				_ => false,
-			},
-			Self::Line(v) => match other {
-				Self::Point(w) => v.contains(w),
-				Self::Line(w) => v.contains(w),
-				Self::MultiLine(w) => w.iter().all(|x| w.contains(x)),
-				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
-				_ => false,
-			},
-			Self::Polygon(v) => match other {
-				Self::Point(w) => v.contains(w),
-				Self::Line(w) => v.contains(w),
-				Self::Polygon(w) => v.contains(w),
-				Self::MultiPolygon(w) => w.iter().all(|x| w.contains(x)),
-				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
-				_ => false,
-			},
-			Self::MultiPoint(v) => match other {
-				Self::Point(w) => v.contains(w),
-				Self::MultiPoint(w) => w.iter().all(|x| w.contains(x)),
-				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
-				_ => false,
-			},
-			Self::MultiLine(v) => match other {
-				Self::Point(w) => v.contains(w),
-				Self::Line(w) => v.contains(w),
-				Self::MultiLine(w) => w.iter().all(|x| w.contains(x)),
-				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
-				_ => false,
-			},
-			Self::MultiPolygon(v) => match other {
-				Self::Point(w) => v.contains(w),
-				Self::Line(w) => v.contains(w),
-				Self::Polygon(w) => v.contains(w),
-				Self::MultiPoint(w) => v.contains(w),
-				Self::MultiLine(w) => v.contains(w),
-				Self::MultiPolygon(w) => v.contains(w),
-				Self::Collection(w) => w.iter().all(|x| self.contains(x)),
-			},
-			Self::Collection(v) => v.iter().all(|x| x.contains(other)),
+impl From<Geometry> for surrealdb_types::Geometry {
+	fn from(v: Geometry) -> Self {
+		match v {
+			Geometry::Point(v) => surrealdb_types::Geometry::Point(v),
+			Geometry::Line(v) => surrealdb_types::Geometry::Line(v),
+			Geometry::Polygon(v) => surrealdb_types::Geometry::Polygon(v),
+			Geometry::MultiPoint(v) => surrealdb_types::Geometry::MultiPoint(v),
+			Geometry::MultiLine(v) => surrealdb_types::Geometry::MultiLine(v),
+			Geometry::MultiPolygon(v) => surrealdb_types::Geometry::MultiPolygon(v),
+			Geometry::Collection(v) => {
+				surrealdb_types::Geometry::Collection(v.into_iter().map(Into::into).collect())
+			}
 		}
 	}
+}
 
-	pub fn intersects(&self, other: &Self) -> bool {
-		match self {
-			Self::Point(v) => match other {
-				Self::Point(w) => v.intersects(w),
-				Self::Line(w) => v.intersects(w),
-				Self::Polygon(w) => v.intersects(w),
-				Self::MultiPoint(w) => v.intersects(w),
-				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
-				Self::MultiPolygon(w) => v.intersects(w),
-				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
-			},
-			Self::Line(v) => match other {
-				Self::Point(w) => v.intersects(w),
-				Self::Line(w) => v.intersects(w),
-				Self::Polygon(w) => v.intersects(w),
-				Self::MultiPoint(w) => v.intersects(w),
-				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
-				Self::MultiPolygon(w) => v.intersects(w),
-				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
-			},
-			Self::Polygon(v) => match other {
-				Self::Point(w) => v.intersects(w),
-				Self::Line(w) => v.intersects(w),
-				Self::Polygon(w) => v.intersects(w),
-				Self::MultiPoint(w) => v.intersects(w),
-				Self::MultiLine(w) => v.intersects(w),
-				Self::MultiPolygon(w) => v.intersects(w),
-				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
-			},
-			Self::MultiPoint(v) => match other {
-				Self::Point(w) => v.intersects(w),
-				Self::Line(w) => v.intersects(w),
-				Self::Polygon(w) => v.intersects(w),
-				Self::MultiPoint(w) => v.intersects(w),
-				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
-				Self::MultiPolygon(w) => v.intersects(w),
-				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
-			},
-			Self::MultiLine(v) => match other {
-				Self::Point(w) => v.intersects(w),
-				Self::Line(w) => v.intersects(w),
-				Self::Polygon(w) => v.intersects(w),
-				Self::MultiPoint(w) => v.intersects(w),
-				Self::MultiLine(w) => w.iter().any(|x| v.intersects(x)),
-				Self::MultiPolygon(w) => v.intersects(w),
-				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
-			},
-			Self::MultiPolygon(v) => match other {
-				Self::Point(w) => v.intersects(w),
-				Self::Line(w) => v.intersects(w),
-				Self::Polygon(w) => v.intersects(w),
-				Self::MultiPoint(w) => v.intersects(w),
-				Self::MultiLine(w) => v.intersects(w),
-				Self::MultiPolygon(w) => v.intersects(w),
-				Self::Collection(w) => w.iter().all(|x| self.intersects(x)),
-			},
-			Self::Collection(v) => v.iter().all(|x| x.intersects(other)),
+impl From<surrealdb_types::Geometry> for Geometry {
+	fn from(v: surrealdb_types::Geometry) -> Self {
+		match v {
+			surrealdb_types::Geometry::Point(v) => Geometry::Point(v),
+			surrealdb_types::Geometry::Line(v) => Geometry::Line(v),
+			surrealdb_types::Geometry::Polygon(v) => Geometry::Polygon(v),
+			surrealdb_types::Geometry::MultiPoint(v) => Geometry::MultiPoint(v),
+			surrealdb_types::Geometry::MultiLine(v) => Geometry::MultiLine(v),
+			surrealdb_types::Geometry::MultiPolygon(v) => Geometry::MultiPolygon(v),
+			surrealdb_types::Geometry::Collection(v) => {
+				Geometry::Collection(v.into_iter().map(Into::into).collect())
+			}
 		}
 	}
 }
@@ -789,5 +784,249 @@ impl hash::Hash for Geometry {
 				v.iter().for_each(|v| v.hash(state));
 			}
 		}
+	}
+}
+
+impl<F> Encode<F> for Geometry {
+	fn encode<W: std::io::Write>(
+		&self,
+		w: &mut storekey::Writer<W>,
+	) -> Result<(), storekey::EncodeError> {
+		match self {
+			Geometry::Point(point) => {
+				w.write_u8(2)?;
+				Encode::<F>::encode(&point.x(), w)?;
+				Encode::<F>::encode(&point.y(), w)?;
+			}
+			Geometry::Line(line_string) => {
+				w.write_u8(3)?;
+				for p in line_string.points() {
+					w.mark_terminator();
+					Encode::<F>::encode(&p.x(), w)?;
+					Encode::<F>::encode(&p.y(), w)?;
+				}
+				w.write_terminator()?;
+			}
+			Geometry::Polygon(polygon) => {
+				w.write_u8(4)?;
+				for p in polygon.exterior().points() {
+					w.mark_terminator();
+					Encode::<F>::encode(&p.x(), w)?;
+					Encode::<F>::encode(&p.y(), w)?;
+				}
+				w.write_terminator()?;
+				for l in polygon.interiors() {
+					for p in l.points() {
+						w.mark_terminator();
+						Encode::<F>::encode(&p.x(), w)?;
+						Encode::<F>::encode(&p.y(), w)?;
+					}
+					w.write_terminator()?;
+				}
+				w.write_terminator()?;
+			}
+			Geometry::MultiPoint(multi_point) => {
+				w.write_u8(5)?;
+				for p in multi_point.iter() {
+					w.mark_terminator();
+					Encode::<F>::encode(&p.x(), w)?;
+					Encode::<F>::encode(&p.y(), w)?;
+				}
+				w.write_terminator()?;
+			}
+			Geometry::MultiLine(multi_line_string) => {
+				w.write_u8(6)?;
+				for l in multi_line_string.iter() {
+					for p in l.points() {
+						w.mark_terminator();
+						Encode::<F>::encode(&p.x(), w)?;
+						Encode::<F>::encode(&p.y(), w)?;
+					}
+					w.write_terminator()?;
+				}
+				w.write_terminator()?;
+			}
+			Geometry::MultiPolygon(multi_polygon) => {
+				w.write_u8(7)?;
+				for p in multi_polygon.iter() {
+					for p in p.exterior().points() {
+						w.mark_terminator();
+						Encode::<F>::encode(&p.x(), w)?;
+						Encode::<F>::encode(&p.y(), w)?;
+					}
+					w.write_terminator()?;
+					for l in p.interiors() {
+						for p in l.points() {
+							w.mark_terminator();
+							Encode::<F>::encode(&p.x(), w)?;
+							Encode::<F>::encode(&p.y(), w)?;
+						}
+						w.write_terminator()?;
+					}
+					w.write_terminator()?;
+				}
+				w.write_terminator()?;
+			}
+			Geometry::Collection(items) => {
+				w.write_u8(8)?;
+				for g in items.iter() {
+					w.mark_terminator();
+					Encode::<F>::encode(g, w)?;
+				}
+				w.write_terminator()?;
+			}
+		}
+		Ok(())
+	}
+}
+
+impl<'de, F> BorrowDecode<'de, F> for Geometry {
+	fn borrow_decode(r: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
+		match r.read_u8()? {
+			2 => {
+				let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
+				Ok(Geometry::Point(Point::from(point)))
+			}
+			3 => {
+				let mut res = Vec::new();
+				while !r.read_terminal()? {
+					let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
+					res.push(Coord::from(point))
+				}
+				Ok(Geometry::Line(LineString::new(res)))
+			}
+			4 => {
+				let mut ext = Vec::new();
+				while !r.read_terminal()? {
+					let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
+					ext.push(Coord::from(point))
+				}
+				let ext = LineString::new(ext);
+				let mut int = Vec::new();
+				while !r.read_terminal()? {
+					let mut line = Vec::new();
+					while !r.read_terminal()? {
+						let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
+						line.push(Coord::from(point))
+					}
+					int.push(LineString::new(line))
+				}
+				Ok(Geometry::Polygon(Polygon::new(ext, int)))
+			}
+			5 => {
+				let mut res = Vec::new();
+				while !r.read_terminal()? {
+					let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
+					res.push(Point::from(point))
+				}
+				Ok(Geometry::MultiPoint(MultiPoint::new(res)))
+			}
+			6 => {
+				let mut lines = Vec::new();
+				while !r.read_terminal()? {
+					let mut res = Vec::new();
+					while !r.read_terminal()? {
+						let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
+						res.push(Coord::from(point))
+					}
+					lines.push(LineString::new(res));
+				}
+				Ok(Geometry::MultiLine(MultiLineString::new(lines)))
+			}
+			7 => {
+				let mut polygons = Vec::new();
+				while !r.read_terminal()? {
+					let mut ext = Vec::new();
+					while !r.read_terminal()? {
+						let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
+						ext.push(Coord::from(point))
+					}
+					let ext = LineString::new(ext);
+					let mut int = Vec::new();
+					while !r.read_terminal()? {
+						let mut line = Vec::new();
+						while !r.read_terminal()? {
+							let point = <(f64, f64) as BorrowDecode<'de, F>>::borrow_decode(r)?;
+							line.push(Coord::from(point))
+						}
+						int.push(LineString::new(line))
+					}
+					polygons.push(Polygon::new(ext, int));
+				}
+				Ok(Geometry::MultiPolygon(MultiPolygon::new(polygons)))
+			}
+			8 => {
+				let mut geoms = Vec::new();
+				while !r.read_terminal()? {
+					geoms.push(BorrowDecode::<'de, F>::borrow_decode(r)?)
+				}
+				Ok(Geometry::Collection(geoms))
+			}
+			_ => Err(storekey::DecodeError::InvalidFormat),
+		}
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use core::f64;
+
+	use geo::{Coord, LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
+
+	use super::Geometry;
+
+	fn round_trip(geom: Geometry) {
+		let enc = storekey::encode_vec(&geom).unwrap();
+		let dec = storekey::decode_borrow(&enc).unwrap();
+		assert_eq!(geom, dec)
+	}
+
+	#[test]
+	fn encode_decode() {
+		round_trip(Geometry::Point(Point::new(0.0, f64::INFINITY)));
+		round_trip(Geometry::Line(LineString::new(vec![
+			Coord::from((0.0, f64::INFINITY)),
+			Coord::from((f64::NEG_INFINITY, 1.0)),
+		])));
+		round_trip(Geometry::Polygon(Polygon::new(
+			LineString::new(vec![
+				Coord::from((0.0, f64::INFINITY)),
+				Coord::from((f64::NEG_INFINITY, 1.0)),
+			]),
+			vec![
+				LineString::new(vec![Coord::from((1.0, 2.0)), Coord::from((3.0, 4.0))]),
+				LineString::new(vec![Coord::from((5.0, 6.0)), Coord::from((7.0, 8.0))]),
+			],
+		)));
+		round_trip(Geometry::MultiPoint(MultiPoint::new(vec![
+			Point::from((0.0, f64::INFINITY)),
+			Point::from((f64::NEG_INFINITY, 1.0)),
+		])));
+		round_trip(Geometry::MultiLine(MultiLineString::new(vec![
+			LineString::new(vec![
+				Coord::from((0.0, f64::INFINITY)),
+				Coord::from((f64::NEG_INFINITY, 1.0)),
+			]),
+			LineString::new(vec![Coord::from((1.0, 2.0)), Coord::from((3.0, 4.0))]),
+		])));
+		round_trip(Geometry::MultiPolygon(MultiPolygon::new(vec![
+			Polygon::new(
+				LineString::new(vec![
+					Coord::from((0.0, f64::INFINITY)),
+					Coord::from((f64::NEG_INFINITY, 1.0)),
+				]),
+				vec![
+					LineString::new(vec![Coord::from((1.0, 2.0)), Coord::from((3.0, 4.0))]),
+					LineString::new(vec![Coord::from((5.0, 6.0)), Coord::from((7.0, 8.0))]),
+				],
+			),
+			Polygon::new(
+				LineString::new(vec![Coord::from((9.0, 10.0)), Coord::from((11.0, 12.0))]),
+				vec![
+					LineString::new(vec![Coord::from((13.0, 14.0)), Coord::from((15.0, 16.0))]),
+					LineString::new(vec![Coord::from((17.0, 18.0)), Coord::from((19.0, 20.0))]),
+				],
+			),
+		])));
 	}
 }

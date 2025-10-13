@@ -21,7 +21,7 @@ impl Parser<'_> {
 					Expr::Param(param)
 				}
 				_ => {
-					let table = self.next_token_value()?;
+					let table = self.parse_ident()?;
 					Expr::Table(table)
 				}
 			};
@@ -44,7 +44,7 @@ impl Parser<'_> {
 		} else {
 			None
 		};
-		let timeout = self.try_parse_timeout()?;
+		let timeout = self.try_parse_timeout(stk).await?;
 		let parallel = self.eat(t!("PARALLEL"));
 		Ok(InsertStatement {
 			into,

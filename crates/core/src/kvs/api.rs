@@ -4,7 +4,6 @@
 use std::ops::Range;
 
 use anyhow::{Context, Result, ensure};
-use async_trait::async_trait;
 
 use super::tr::Check;
 use super::util;
@@ -17,7 +16,7 @@ use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare, SavedValue};
 use crate::kvs::{KVKey, KVValue, Key, Val, Version};
 use crate::vs::VersionStamp;
 
-mod requirements {
+pub mod requirements {
 	//! This module defines the trait requirements for a transaction.
 	//!
 	//! The reason this exists is to allow for swapping out the `Send`
@@ -56,8 +55,8 @@ mod requirements {
 /// All keys and values are represented as byte arrays, encoding is handled
 /// by [`super::tr::Transactor`].
 #[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
-#[cfg_attr(target_family = "wasm", async_trait(?Send))]
-#[cfg_attr(not(target_family = "wasm"), async_trait)]
+#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 pub trait Transaction: requirements::TransactionRequirements {
 	/// Returns if the transaction supports scanning in reverse.
 	fn supports_reverse_scan(&self) -> bool;

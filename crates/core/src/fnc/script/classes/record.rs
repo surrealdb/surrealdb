@@ -1,11 +1,11 @@
 use js::JsLifetime;
 use js::class::Trace;
 
-use crate::val::{RecordId, Strand, Value};
+use crate::val::{RecordId, Value};
 
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]
-pub struct Record {
+pub(crate) struct Record {
 	#[qjs(skip_trace)]
 	pub(crate) value: RecordId,
 }
@@ -22,8 +22,7 @@ impl Record {
 					Value::Object(v) => v.into(),
 					Value::Number(v) => v.to_int().into(),
 					Value::Uuid(v) => v.into(),
-					// TODO: Null byte validity
-					v => Strand::new(v.as_raw_string()).unwrap().into(),
+					v => v.into_raw_string().into(),
 				},
 			},
 		}

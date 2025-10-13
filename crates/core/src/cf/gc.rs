@@ -1,5 +1,6 @@
 use anyhow::Result;
 
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider, TableProvider};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::change;
 use crate::key::debug::Sprintable;

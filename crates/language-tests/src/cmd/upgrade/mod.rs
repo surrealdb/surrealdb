@@ -2,32 +2,26 @@ mod binaries;
 mod process;
 mod protocol;
 
-use std::{
-	collections::HashMap,
-	net::{Ipv4Addr, SocketAddr},
-	path::Path,
-	sync::Arc,
-	thread,
-};
+use std::collections::HashMap;
+use std::net::{Ipv4Addr, SocketAddr};
+use std::path::Path;
+use std::sync::Arc;
+use std::thread;
 
 use anyhow::{Context, Result, bail};
 use clap::ArgMatches;
 use process::SurrealProcess;
 use protocol::{ProxyObject, ProxyValue};
 use semver::Version;
-use surrealdb_core::kvs::{Datastore, LockType, TransactionType};
+use surrealdb_core::kvs::Datastore;
 use tokio::task::JoinSet;
 
-use crate::{
-	cli::{ColorMode, DsVersion, ResultsMode, UpgradeBackend},
-	format::Progress,
-	temp_dir::TempDir,
-	tests::{
-		TestSet,
-		report::{TestGrade, TestReport, TestTaskResult},
-		set::TestId,
-	},
-};
+use crate::cli::{ColorMode, DsVersion, ResultsMode, UpgradeBackend};
+use crate::format::Progress;
+use crate::temp_dir::TempDir;
+use crate::tests::TestSet;
+use crate::tests::report::{TestGrade, TestReport, TestTaskResult};
+use crate::tests::set::TestId;
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 pub struct TaskId(usize);
@@ -103,14 +97,16 @@ pub fn generate_tasks(
 				}
 
 				// Ensure that the test can run on the upgrading version.
-				if let Some(ver_req) = case.config.test.as_ref().map(|x| &x.version) {
+				if let Some(ver_req) = case.config.test.as_ref().and_then(|x| x.version.as_ref()) {
 					if !ver_req.matches(to_v) {
 						continue 'include_test;
 					}
 				}
 
 				// Ensure that the test can run on the importing version.
-				if let Some(ver_req) = case.config.test.as_ref().map(|x| &x.importing_version) {
+				if let Some(ver_req) =
+					case.config.test.as_ref().and_then(|x| x.importing_version.as_ref())
+				{
 					if !ver_req.matches(from_v) {
 						continue 'include_test;
 					}
@@ -119,7 +115,7 @@ pub fn generate_tasks(
 				// Ensure that the imports can run on importing version.
 				for import in case.imports.iter() {
 					if let Some(ver_req) =
-						subset[import.id].config.test.as_ref().map(|x| &x.version)
+						subset[import.id].config.test.as_ref().and_then(|x| x.version.as_ref())
 					{
 						if !ver_req.matches(from_v) {
 							continue 'include_test;
@@ -197,9 +193,9 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		UpgradeBackend::SurrealKv => {}
 		#[cfg(not(feature = "backend-surrealkv"))]
 		UpgradeBackend::SurrealKv => bail!("SurrealKV backend feature is not enabled"),
-		#[cfg(any(feature = "backend-foundation-7_1", feature = "backend-foundation-7_1"))]
+		#[cfg(feature = "backend-foundation")]
 		UpgradeBackend::Foundation => {}
-		#[cfg(not(any(feature = "backend-foundation-7_1", feature = "backend-foundation-7_1")))]
+		#[cfg(not(feature = "backend-foundation"))]
 		UpgradeBackend::Foundation => bail!("FoundationDB backend features is not enabled"),
 	}
 
@@ -241,9 +237,10 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		.await
 		.expect("failed to create datastore for running matching expressions");
 
-	let txn = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
-	txn.ensure_ns_db("match", "match", false).await.unwrap();
-	txn.commit().await.unwrap();
+	let mut session = surrealdb_core::dbs::Session::default();
+	ds.process_use(&mut session, Some("match".to_string()), Some("match".to_string()))
+		.await
+		.unwrap();
 
 	// Port distribution variables.
 	let mut start_port = 9000u16;
@@ -380,13 +377,13 @@ async fn run_imports(
 				req.insert("method".to_owned(), ProxyValue::from("use"));
 				req.insert("params".to_owned(), ProxyValue::from(params));
 
-				let resp = connection
-					.request(req)
-					.await
-					.context("Failed to set namespace/database on importing database")?;
-				if let Err(e) = resp.result {
-					bail!("Failed to set namespace/database on importing database: {}", e.message)
-				}
+			let resp = connection
+				.request(req)
+				.await
+				.context("Failed to set namespace/database on importing database")?;
+			if let Err(e) = resp.result {
+				bail!("Failed to set namespace/database on importing database: {}", e.message())
+			}
 			}
 
 			let mut credentials = ProxyObject::default();
@@ -397,13 +394,13 @@ async fn run_imports(
 			req.insert("method".to_owned(), ProxyValue::from("signin"));
 			req.insert("params".to_owned(), ProxyValue::from(vec![ProxyValue::from(credentials)]));
 
-			let resp = connection
-				.request(req)
-				.await
-				.context("Failed to authenticate on importing database")?;
-			if let Err(e) = resp.result {
-				bail!("Failed to authenticate on importing database: {}", e.message)
-			}
+		let resp = connection
+			.request(req)
+			.await
+			.context("Failed to authenticate on importing database")?;
+		if let Err(e) = resp.result {
+			bail!("Failed to authenticate on importing database: {}", e.message())
+		}
 
 			for import in imports {
 				let Ok(source) = std::str::from_utf8(&set[import.id].source) else {
@@ -468,13 +465,13 @@ async fn run_upgrade_test(
 				req.insert("method".to_owned(), ProxyValue::from("use"));
 				req.insert("params".to_owned(), ProxyValue::from(params));
 
-				let resp = connection
-					.request(req)
-					.await
-					.context("Failed to set namespace/database on upgrading database")?;
-				if let Err(e) = resp.result {
-					bail!("Failed to set namespace/database on upgrading database: {}", e.message)
-				}
+			let resp = connection
+				.request(req)
+				.await
+				.context("Failed to set namespace/database on upgrading database")?;
+			if let Err(e) = resp.result {
+				bail!("Failed to set namespace/database on upgrading database: {}", e.message())
+			}
 			}
 
 			let mut credentials = ProxyObject::default();
@@ -485,13 +482,13 @@ async fn run_upgrade_test(
 			req.insert("method".to_owned(), ProxyValue::from("signin"));
 			req.insert("params".to_owned(), ProxyValue::from(vec![ProxyValue::from(credentials)]));
 
-			let resp = connection
-				.request(req)
-				.await
-				.context("Failed to authenticate on upgrading database")?;
-			if let Err(e) = resp.result {
-				bail!("Failed to authenticate on upgrading database: {}", e.message)
-			}
+		let resp = connection
+			.request(req)
+			.await
+			.context("Failed to authenticate on upgrading database")?;
+		if let Err(e) = resp.result {
+			bail!("Failed to authenticate on upgrading database: {}", e.message())
+		}
 
 			let source = &set[task.test].source;
 			let source = std::str::from_utf8(source).context("Text source was not valid utf-8")?;

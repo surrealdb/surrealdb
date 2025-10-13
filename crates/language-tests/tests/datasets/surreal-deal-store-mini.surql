@@ -2608,7 +2608,7 @@ DEFINE FIELD company_name
 DEFINE FIELD email
     ON TABLE person
     TYPE string
-    ASSERT string::is::email($value);
+    ASSERT string::is_email($value);
 DEFINE FIELD phone
     ON TABLE person
     TYPE string;
@@ -2671,7 +2671,7 @@ DEFINE FIELD images
 DEFINE FIELD images.*.url
     ON TABLE product
     TYPE string
-    ASSERT string::is::url($value);
+    ASSERT string::is_url($value);
 DEFINE FIELD images.*.position
     ON TABLE product
     TYPE number;
@@ -2931,7 +2931,7 @@ DEFINE ANALYZER blank_snowball
 DEFINE INDEX review_content
     ON TABLE review
     FIELDS review_text
-    SEARCH ANALYZER blank_snowball BM25 HIGHLIGHTS;
+    FULLTEXT ANALYZER blank_snowball BM25 HIGHLIGHTS;
 
 -- ------------------------------
 -- TABLE DATA: address_history

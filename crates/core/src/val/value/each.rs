@@ -28,7 +28,6 @@ impl Value {
 			Value::Object(v) => match first {
 				Part::Field(f) => {
 					if let Some(v) = v.get(&**f) {
-						// TODO: Null byte validity
 						accum.push(Part::Field(f.clone()));
 						v._each(rest, accum, build);
 						accum.pop();
@@ -36,8 +35,7 @@ impl Value {
 				}
 				Part::All => {
 					for (k, v) in v.iter() {
-						// TODO: Null byte validity
-						accum.push(Part::field(k.clone()).unwrap());
+						accum.push(Part::Field(k.clone()));
 						v._each(rest, accum, build);
 						accum.pop();
 					}
@@ -102,22 +100,25 @@ mod tests {
 	use super::*;
 	use crate::syn;
 
+	macro_rules! parse_val {
+		($input:expr) => {
+			crate::val::convert_public_value_to_internal(syn::value($input).unwrap())
+		};
+	}
+
 	#[test]
 	fn each_none() {
 		let idi: Idiom = Idiom::default();
-		let val = syn::value("{ test: { other: null, something: 123 } }").unwrap();
+		let val = parse_val!("{ test: { other: null, something: 123 } }");
 		let res: Vec<Idiom> = vec![Idiom::default()];
 		assert_eq!(res, val.each(&idi));
-		assert_eq!(
-			val.pick(&res[0]),
-			syn::value("{ test: { other: null, something: 123 } }").unwrap()
-		);
+		assert_eq!(val.pick(&res[0]), parse_val!("{ test: { other: null, something: 123 } }"));
 	}
 
 	#[test]
 	fn each_basic() {
 		let idi: Idiom = syn::idiom("test.something").unwrap().into();
-		let val = syn::value("{ test: { other: null, something: 123 } }").unwrap();
+		let val = parse_val!("{ test: { other: null, something: 123 } }");
 		let res: Vec<Idiom> = vec![syn::idiom("test.something").unwrap().into()];
 		assert_eq!(res, val.each(&idi));
 		assert_eq!(val.pick(&res[0]), Value::from(123));
@@ -126,16 +127,16 @@ mod tests {
 	#[test]
 	fn each_array() {
 		let idi: Idiom = syn::idiom("test.something").unwrap().into();
-		let val = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
+		let val = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res: Vec<Idiom> = vec![syn::idiom("test.something").unwrap().into()];
 		assert_eq!(res, val.each(&idi));
-		assert_eq!(val.pick(&res[0]), syn::value("[{ age: 34 }, { age: 36 }]").unwrap());
+		assert_eq!(val.pick(&res[0]), parse_val!("[{ age: 34 }, { age: 36 }]"));
 	}
 
 	#[test]
 	fn each_array_field() {
 		let idi: Idiom = syn::idiom("test.something[*].age").unwrap().into();
-		let val = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
+		let val = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res: Vec<Idiom> = vec![
 			syn::idiom("test.something[0].age").unwrap().into(),
 			syn::idiom("test.something[1].age").unwrap().into(),
@@ -148,24 +149,24 @@ mod tests {
 	#[test]
 	fn each_array_field_embedded() {
 		let idi: Idiom = syn::idiom("test.something[*].tags").unwrap().into();
-		let val = syn::value(
-			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
-		).unwrap();
+		let val = parse_val!(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
+		);
 		let res: Vec<Idiom> = vec![
 			syn::idiom("test.something[0].tags").unwrap().into(),
 			syn::idiom("test.something[1].tags").unwrap().into(),
 		];
 		assert_eq!(res, val.each(&idi));
-		assert_eq!(val.pick(&res[0]), syn::value("['code', 'databases']").unwrap());
-		assert_eq!(val.pick(&res[1]), syn::value("['design', 'operations']").unwrap());
+		assert_eq!(val.pick(&res[0]), parse_val!("['code', 'databases']"));
+		assert_eq!(val.pick(&res[1]), parse_val!("['design', 'operations']"));
 	}
 
 	#[test]
 	fn each_array_field_embedded_index() {
 		let idi: Idiom = syn::idiom("test.something[*].tags[1]").unwrap().into();
-		let val = syn::value(
-			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
-		).unwrap();
+		let val = parse_val!(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
+		);
 		let res: Vec<Idiom> = vec![
 			syn::idiom("test.something[0].tags[1]").unwrap().into(),
 			syn::idiom("test.something[1].tags[1]").unwrap().into(),
@@ -178,9 +179,9 @@ mod tests {
 	#[test]
 	fn each_array_field_embedded_index_all() {
 		let idi: Idiom = syn::idiom("test.something[*].tags[*]").unwrap().into();
-		let val = syn::value(
-			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }",
-		).unwrap();
+		let val = parse_val!(
+			"{ test: { something: [{ age: 34, tags: ['code', 'databases'] }, { age: 36, tags: ['design', 'operations'] }] } }"
+		);
 		let res: Vec<Idiom> = vec![
 			syn::idiom("test.something[0].tags[0]").unwrap().into(),
 			syn::idiom("test.something[0].tags[1]").unwrap().into(),
@@ -196,10 +197,9 @@ mod tests {
 
 	#[test]
 	fn each_wildcards() {
-		let val = syn::value(
-			"{ test: { a: { color: 'red' }, b: { color: 'blue' }, c: { color: 'green' } } }",
-		)
-		.unwrap();
+		let val = parse_val!(
+			"{ test: { a: { color: 'red' }, b: { color: 'blue' }, c: { color: 'green' } } }"
+		);
 
 		let res: Vec<Idiom> = vec![
 			syn::idiom("test.a.color").unwrap().into(),

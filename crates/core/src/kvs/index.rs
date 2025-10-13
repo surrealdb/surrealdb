@@ -1,10 +1,10 @@
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Result, ensure};
-use dashmap::DashMap;
-use dashmap::mapref::entry::Entry;
 use futures::channel::oneshot::{Receiver, Sender, channel};
 use reblessive::TreeStack;
 use revision::revisioned;
@@ -22,7 +22,7 @@ use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
-use crate::key::thing;
+use crate::key::record;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val, impl_kv_value_revisioned};
@@ -147,7 +147,7 @@ impl IndexKey {
 #[derive(Clone)]
 pub(crate) struct IndexBuilder {
 	tf: TransactionFactory,
-	indexes: Arc<DashMap<IndexKey, IndexBuilding>>,
+	indexes: Arc<RwLock<HashMap<IndexKey, IndexBuilding>>>,
 }
 
 impl IndexBuilder {
@@ -183,7 +183,7 @@ impl IndexBuilder {
 		Ok((building, jh))
 	}
 
-	pub(crate) fn build(
+	pub(crate) async fn build(
 		&self,
 		ctx: &Context,
 		opt: Options,
@@ -192,16 +192,16 @@ impl IndexBuilder {
 		ix: Arc<IndexDefinition>,
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<()>>>> {
-		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
+		let key = IndexKey::new(ns, db, &ix.table_name, &ix.name);
 		let (rcv, sdr) = if blocking {
 			let (s, r) = channel();
 			(Some(r), Some(s))
 		} else {
 			(None, None)
 		};
-		match self.indexes.entry(key) {
-			Entry::Occupied(e) => {
-				// If the building is currently running, we return error
+		match self.indexes.write().await.entry(key) {
+			Entry::Occupied(mut e) => {
+				// If the building is currently running, we return an error
 				ensure!(
 					e.get().1.is_finished(),
 					Error::IndexAlreadyBuilding {
@@ -209,7 +209,7 @@ impl IndexBuilder {
 					}
 				);
 				let ib = self.start_building(ctx, opt, ns, db, ix, sdr)?;
-				e.replace_entry(ib);
+				e.insert(ib);
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
@@ -229,9 +229,8 @@ impl IndexBuilder {
 		new_values: Option<Vec<Value>>,
 		rid: &RecordId,
 	) -> Result<ConsumeResult> {
-		let key = IndexKey::new(db.namespace_id, db.database_id, &ix.what, &ix.name);
-		if let Some(r) = self.indexes.get(&key) {
-			let (b, _) = r.value();
+		let key = IndexKey::new(db.namespace_id, db.database_id, &ix.table_name, &ix.name);
+		if let Some((b, _)) = self.indexes.read().await.get(&key) {
 			return b.maybe_consume(ctx, old_values, new_values, rid).await;
 		}
 		Ok(ConsumeResult::Ignored(old_values, new_values))
@@ -243,15 +242,15 @@ impl IndexBuilder {
 		db: DatabaseId,
 		ix: &IndexDefinition,
 	) -> BuildingStatus {
-		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
-		if let Some(a) = self.indexes.get(&key) {
-			a.value().0.status.read().await.clone()
+		let key = IndexKey::new(ns, db, &ix.table_name, &ix.name);
+		if let Some(a) = self.indexes.read().await.get(&key) {
+			a.0.status.read().await.clone()
 		} else {
 			BuildingStatus::default()
 		}
 	}
 
-	pub(crate) fn remove_index(
+	pub(crate) async fn remove_index(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -259,8 +258,8 @@ impl IndexBuilder {
 		ix: &str,
 	) -> Result<()> {
 		let key = IndexKey::new(ns, db, tb, ix);
-		if let Some((_, b)) = self.indexes.remove(&key) {
-			b.0.abort();
+		if let Some((b, _)) = self.indexes.write().await.remove(&key) {
+			b.abort();
 		}
 		Ok(())
 	}
@@ -343,7 +342,7 @@ impl Building {
 		db: DatabaseId,
 		ix: Arc<IndexDefinition>,
 	) -> Result<Self> {
-		let ikb = IndexKeyBase::new(ns, db, &ix.what, &ix.name);
+		let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
 		Ok(Self {
 			ctx: MutableContext::new_concurrent(ctx).freeze(),
 			opt,
@@ -429,8 +428,8 @@ impl Building {
 		}
 
 		// First iteration, we index every key
-		let beg = thing::prefix(self.ns, self.db, self.ikb.table())?;
-		let end = thing::suffix(self.ns, self.db, self.ikb.table())?;
+		let beg = record::prefix(self.ns, self.db, self.ikb.table())?;
+		let end = record::suffix(self.ns, self.db, self.ikb.table())?;
 		let mut next = Some(beg..end);
 		let mut initial_count = 0;
 		// Set the initial status
@@ -531,7 +530,7 @@ impl Building {
 		values: Vec<(Key, Val)>,
 		count: &mut usize,
 	) -> Result<()> {
-		let rc = AtomicBool::new(false);
+		let mut rc = false;
 		let mut stack = TreeStack::new();
 		// Index the records
 		for (k, v) in values.into_iter() {
@@ -539,11 +538,11 @@ impl Building {
 				return Ok(());
 			}
 			self.is_beyond_threshold(Some(*count))?;
-			let key = thing::ThingKey::decode_key(&k)?;
+			let key = record::RecordKey::decode_key(&k)?;
 			// Parse the value
 			let val = Record::kv_decode_value(v)?;
 			let rid: Arc<RecordId> = RecordId {
-				table: key.tb.to_owned(),
+				table: key.tb.into_owned(),
 				key: key.id,
 			}
 			.into();
@@ -581,7 +580,7 @@ impl Building {
 				opt_values.clone(),
 				&rid,
 			);
-			stack.enter(|stk| io.compute(stk, &rc)).finish().await?;
+			stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
 
 			// Increment the count and update the status
 			*count += 1;
@@ -593,7 +592,7 @@ impl Building {
 			.await;
 		}
 		// Check if we trigger the compaction
-		self.check_index_compaction(tx, &rc).await?;
+		self.check_index_compaction(tx, &mut rc).await?;
 		// We're done
 		Ok(())
 	}
@@ -606,7 +605,7 @@ impl Building {
 		initial: usize,
 		count: &mut usize,
 	) -> Result<()> {
-		let rc = AtomicBool::new(false);
+		let mut rc = false;
 		let mut stack = TreeStack::new();
 		for i in range {
 			if self.is_aborted().await {
@@ -630,7 +629,7 @@ impl Building {
 					a.new_values,
 					&rid,
 				);
-				stack.enter(|stk| io.compute(stk, &rc)).finish().await?;
+				stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
 
 				// We can delete the ip record if any
 				let ip = self.ikb.new_ip_key(rid.key);
@@ -646,17 +645,17 @@ impl Building {
 			}
 		}
 		// Check if we trigger the compaction
-		self.check_index_compaction(tx, &rc).await?;
+		self.check_index_compaction(tx, &mut rc).await?;
 		// We're done
 		Ok(())
 	}
 
-	async fn check_index_compaction(&self, tx: &Transaction, rc: &AtomicBool) -> Result<()> {
-		if !rc.load(Ordering::Relaxed) {
+	async fn check_index_compaction(&self, tx: &Transaction, rc: &mut bool) -> Result<()> {
+		if !*rc {
 			return Ok(());
 		}
 		FullTextIndex::trigger_compaction(&self.ikb, tx, self.opt.id()?).await?;
-		rc.store(false, Ordering::Relaxed);
+		*rc = false;
 		Ok(())
 	}
 	/// Abort the current indexing process.

@@ -1,11 +1,12 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::sql::fmt::Fmt;
+use crate::fmt::Fmt;
 use crate::sql::{AssignOperator, Expr, Idiom};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Data {
+#[allow(clippy::enum_variant_names)]
+pub(crate) enum Data {
 	EmptyExpression,
 	SetExpression(Vec<Assignment>),
 	UnsetExpression(Vec<Idiom>),
@@ -20,7 +21,7 @@ pub enum Data {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Assignment {
+pub(crate) struct Assignment {
 	pub place: Idiom,
 	pub operator: AssignOperator,
 	pub value: Expr,

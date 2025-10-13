@@ -6,7 +6,7 @@ use surrealdb_protocol::fb::v1 as proto_fb;
 use crate::expr::Kind;
 use crate::expr::kind::{GeometryKind, KindLiteral};
 use crate::protocol::{FromFlatbuffers, ToFlatbuffers};
-use crate::val::{Duration, Strand, Table};
+use crate::val::Duration;
 
 impl ToFlatbuffers for Kind {
 	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Kind<'bldr>>;
@@ -22,6 +22,10 @@ impl ToFlatbuffers for Kind {
 				kind: Some(
 					proto_fb::AnyKind::create(builder, &proto_fb::AnyKindArgs {}).as_union_value(),
 				),
+			},
+			Self::None => proto_fb::KindArgs {
+				kind_type: proto_fb::KindType::NONE,
+				kind: None,
 			},
 			Self::Null => proto_fb::KindArgs {
 				kind_type: proto_fb::KindType::Null,
@@ -114,11 +118,19 @@ impl ToFlatbuffers for Kind {
 				),
 			},
 			Self::Record(tables) => {
-				let table_offsets: Vec<_> = tables
+				let tables = tables
 					.iter()
-					.map(|t| unsafe { Table::new_unchecked(t.clone()) }.to_fb(builder))
-					.collect::<anyhow::Result<Vec<_>>>()?;
-				let tables = builder.create_vector(&table_offsets);
+					.map(|x| {
+						let name = builder.create_string(x);
+						proto_fb::TableName::create(
+							builder,
+							&proto_fb::TableNameArgs {
+								name: Some(name),
+							},
+						)
+					})
+					.collect::<Vec<_>>();
+				let tables = builder.create_vector(&tables);
 				proto_fb::KindArgs {
 					kind_type: proto_fb::KindType::Record,
 					kind: Some(
@@ -144,21 +156,6 @@ impl ToFlatbuffers for Kind {
 							builder,
 							&proto_fb::GeometryKindArgs {
 								types: Some(types),
-							},
-						)
-						.as_union_value(),
-					),
-				}
-			}
-			Self::Option(kind) => {
-				let inner = kind.to_fb(builder)?;
-				proto_fb::KindArgs {
-					kind_type: proto_fb::KindType::Option,
-					kind: Some(
-						proto_fb::OptionKind::create(
-							builder,
-							&proto_fb::OptionKindArgs {
-								inner: Some(inner),
 							},
 						)
 						.as_union_value(),
@@ -393,6 +390,7 @@ impl FromFlatbuffers for Kind {
 
 		match kind_type {
 			KindType::Any => Ok(Kind::Any),
+			KindType::NONE => Ok(Kind::None),
 			KindType::Null => Ok(Kind::Null),
 			KindType::Bool => Ok(Kind::Bool),
 			KindType::Int => Ok(Kind::Int),
@@ -467,7 +465,7 @@ impl FromFlatbuffers for Kind {
 				} else {
 					Vec::new()
 				};
-				Ok(Kind::Either(kinds))
+				Ok(Kind::either(kinds))
 			}
 			KindType::Function => {
 				let Some(function) = input.kind_as_function() else {
@@ -510,7 +508,7 @@ impl FromFlatbuffers for Kind {
 				let Some(inner) = option.inner() else {
 					return Err(anyhow::anyhow!("Missing option item kind"));
 				};
-				Ok(Kind::Option(Box::new(Kind::from_fb(inner)?)))
+				Ok(Kind::option(Kind::from_fb(inner)?))
 			}
 			KindType::Regex => Ok(Kind::Regex),
 			_ => Err(anyhow::anyhow!("Unknown kind type")),
@@ -541,7 +539,7 @@ impl FromFlatbuffers for KindLiteral {
 				let Some(value) = string_val.value() else {
 					return Err(anyhow::anyhow!("Missing string content"));
 				};
-				Ok(KindLiteral::String(Strand::from(value)))
+				Ok(KindLiteral::String(value.to_string()))
 			}
 			LiteralType::Int64 => {
 				let Some(int_val) = input.literal_as_int_64() else {
@@ -637,7 +635,7 @@ mod tests {
 
 	use super::*;
 	use crate::expr::{Kind, KindLiteral};
-	use crate::val::{Duration, Strand};
+	use crate::val::Duration;
 
 	#[rstest]
 	#[case::any(Kind::Any)]
@@ -657,7 +655,6 @@ mod tests {
 	#[case::range(Kind::Range)]
 	#[case::record(Kind::Record(vec!["test_table".to_string()]))]
 	#[case::geometry(Kind::Geometry(vec![GeometryKind::Point, GeometryKind::Polygon]))]
-	#[case::option(Kind::Option(Box::new(Kind::String)))]
 	#[case::either(Kind::Either(vec![Kind::String, Kind::Number]))]
 	#[case::set(Kind::Set(Box::new(Kind::String), Some(10)))]
 	#[case::array(Kind::Array(Box::new(Kind::String), Some(5)))]
@@ -666,7 +663,7 @@ mod tests {
 	// KindLiteral variants
 	#[case::literal_bool(Kind::Literal(KindLiteral::Bool(true)))]
 	#[case::literal_bool_false(Kind::Literal(KindLiteral::Bool(false)))]
-	#[case::literal_string(Kind::Literal(KindLiteral::String(Strand::new("test_string".to_string()).unwrap())))]
+	#[case::literal_string(Kind::Literal(KindLiteral::String("test_string".to_string())))]
 	#[case::literal_integer(Kind::Literal(KindLiteral::Integer(42)))]
 	#[case::literal_integer_min(Kind::Literal(KindLiteral::Integer(i64::MIN)))]
 	#[case::literal_integer_max(Kind::Literal(KindLiteral::Integer(i64::MAX)))]

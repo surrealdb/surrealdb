@@ -32,19 +32,7 @@ pub struct Transaction {
 
 impl Drop for Transaction {
 	fn drop(&mut self) {
-		if !self.done && self.write {
-			match self.check {
-				Check::None => {
-					trace!("A transaction was dropped without being committed or cancelled");
-				}
-				Check::Warn => {
-					warn!("A transaction was dropped without being committed or cancelled");
-				}
-				Check::Error => {
-					error!("A transaction was dropped without being committed or cancelled");
-				}
-			}
-		}
+		self.check.drop_check(self.done, self.write);
 	}
 }
 
@@ -76,19 +64,6 @@ impl Datastore {
 				db,
 			}),
 			Err(e) => Err(anyhow::Error::new(Error::Ds(e.to_string()))),
-		}
-	}
-	pub(crate) fn parse_start_string(start: &str) -> Result<(&str, bool)> {
-		let (scheme, path) = start
-			// Support conventional paths like surrealkv:///absolute/path
-			.split_once("://")
-			// Or paths like surrealkv:/absolute/path
-			.or_else(|| start.split_once(':'))
-			.unwrap_or_default();
-		match scheme {
-			"surrealkv+versioned" => Ok((path, true)),
-			"surrealkv" => Ok((path, false)),
-			_ => Err(anyhow::Error::new(Error::Ds("Invalid start string".into()))),
 		}
 	}
 

@@ -1,4 +1,3 @@
-pub mod failure;
 pub mod format;
 pub mod http;
 pub mod response;
@@ -10,13 +9,13 @@ use std::time::Duration;
 
 use futures::stream::FuturesUnordered;
 use opentelemetry::Context as TelemetryContext;
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::rpc::{DbResponse, DbResult};
 use tokio::sync::RwLock;
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::core::kvs::Datastore;
-use crate::core::rpc::Data;
 use crate::rpc::websocket::Websocket;
 use crate::telemetry::metrics::ws::NotificationContext;
 
@@ -28,20 +27,12 @@ type WebSockets = RwLock<HashMap<Uuid, WebSocket>>;
 /// Mapping of LIVE Query ID to WebSocket ID
 type LiveQueries = RwLock<HashMap<Uuid, Uuid>>;
 
+#[derive(Default)]
 pub struct RpcState {
 	/// Stores the currently connected WebSockets
 	pub web_sockets: WebSockets,
 	/// Stores the currently initiated LIVE queries
 	pub live_queries: LiveQueries,
-}
-
-impl RpcState {
-	pub fn new() -> Self {
-		RpcState {
-			web_sockets: WebSockets::default(),
-			live_queries: LiveQueries::default(),
-		}
-	}
 }
 
 /// Performs notification delivery to the WebSockets
@@ -80,7 +71,7 @@ pub(crate) async fn notifications(
 						// Ensure the specified WebSocket exists
 						if let Some(rpc) = websocket {
 							// Serialize the message to send
-							let message = response::success(None, Data::Live(notification));
+							let message = DbResponse::success(None, DbResult::Live(notification));
 							// Add telemetry metrics
 							let cx = TelemetryContext::new();
 							let not_ctx = NotificationContext::default()
@@ -91,7 +82,8 @@ pub(crate) async fn notifications(
 							// Get the WebSocket sending channel
 							let sender = rpc.channel.clone();
 							// Send the notification to the client
-							let future = message.send(cx, format, sender);
+							// let future = message.send(cx, format, sender);
+							let future = crate::rpc::response::send(message, cx, format, sender);
 							// Pus the future to the pipeline
 							futures.push(future);
 						}

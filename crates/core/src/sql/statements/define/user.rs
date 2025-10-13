@@ -7,10 +7,8 @@ use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 
 use super::DefineKind;
-use crate::sql::escape::QuoteStr;
-use crate::sql::fmt::Fmt;
-use crate::sql::{Base, Ident};
-use crate::val::{Duration, Strand};
+use crate::fmt::{EscapeIdent, Fmt, QuoteStr};
+use crate::sql::{Base, Expr, Literal};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -21,18 +19,33 @@ pub enum PassType {
 	Password(String),
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct DefineUserStatement {
+pub(crate) struct DefineUserStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: Expr,
 	pub base: Base,
 	pub pass_type: PassType,
-	pub roles: Vec<Ident>,
-	pub token_duration: Option<Duration>,
-	pub session_duration: Option<Duration>,
+	pub roles: Vec<String>,
+	pub token_duration: Option<Expr>,
+	pub session_duration: Option<Expr>,
 
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
+}
+
+impl Default for DefineUserStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			base: Base::Root,
+			pass_type: PassType::Unset,
+			roles: vec![],
+			token_duration: None,
+			session_duration: None,
+			comment: None,
+		}
+	}
 }
 
 impl Display for DefineUserStatement {
@@ -44,19 +57,19 @@ impl Display for DefineUserStatement {
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 
-		write!(f, " {} ON {}", self.name, self.base,)?;
+		write!(f, " {} ON {}", self.name, self.base)?;
 
 		match self.pass_type {
-			PassType::Unset => write!(f, "  PASSHASH \"\" ")?,
-			PassType::Hash(ref x) => write!(f, "  PASSHASH {}", QuoteStr(x))?,
-			PassType::Password(ref x) => write!(f, "  PASSWORD {}", QuoteStr(x))?,
+			PassType::Unset => write!(f, " PASSHASH \"\" ")?,
+			PassType::Hash(ref x) => write!(f, " PASSHASH {}", QuoteStr(x))?,
+			PassType::Password(ref x) => write!(f, " PASSWORD {}", QuoteStr(x))?,
 		}
 
 		write!(
 			f,
 			" ROLES {}",
 			Fmt::comma_separated(
-				&self.roles.iter().map(|r| r.to_string().to_uppercase()).collect::<Vec<String>>()
+				&self.roles.iter().map(|r| EscapeIdent(r.to_uppercase())).collect::<Vec<_>>()
 			),
 		)?;
 		// Always print relevant durations so defaults can be changed in the future
@@ -67,7 +80,7 @@ impl Display for DefineUserStatement {
 			f,
 			" FOR TOKEN {},",
 			match self.token_duration {
-				Some(dur) => format!("{}", dur),
+				Some(ref dur) => format!("{}", dur),
 				None => "NONE".to_string(),
 			}
 		)?;
@@ -75,12 +88,12 @@ impl Display for DefineUserStatement {
 			f,
 			" FOR SESSION {}",
 			match self.session_duration {
-				Some(dur) => format!("{}", dur),
+				Some(ref dur) => format!("{}", dur),
 				None => "NONE".to_string(),
 			}
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
 	}
@@ -111,12 +124,12 @@ impl From<DefineUserStatement> for crate::expr::statements::DefineUserStatement 
 			base: v.base.into(),
 			hash,
 			code,
-			roles: v.roles.into_iter().map(Into::into).collect(),
+			roles: v.roles,
 			duration: crate::expr::user::UserDuration {
-				token: v.token_duration,
-				session: v.session_duration,
+				token: v.token_duration.map(Into::into),
+				session: v.session_duration.map(Into::into),
 			},
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 		}
 	}
 }
@@ -128,10 +141,10 @@ impl From<crate::expr::statements::DefineUserStatement> for DefineUserStatement 
 			name: v.name.into(),
 			base: v.base.into(),
 			pass_type: PassType::Hash(v.hash),
-			roles: v.roles.into_iter().map(Into::into).collect(),
-			token_duration: v.duration.token,
-			session_duration: v.duration.session,
-			comment: v.comment,
+			roles: v.roles,
+			token_duration: v.duration.token.map(Into::into),
+			session_duration: v.duration.session.map(Into::into),
+			comment: v.comment.map(|x| x.into()),
 		}
 	}
 }

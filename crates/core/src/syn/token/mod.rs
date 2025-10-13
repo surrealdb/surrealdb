@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::hash::Hash;
+use std::ops::Range;
 
 mod keyword;
 pub use keyword::Keyword;
@@ -34,6 +35,20 @@ impl Span {
 		self.len == 0
 	}
 
+	pub fn from_range(r: Range<u32>) -> Self {
+		let len = r.end - r.start;
+		Span {
+			offset: r.start,
+			len,
+		}
+	}
+
+	pub fn to_range(&self) -> Range<u32> {
+		let start = self.offset;
+		let end = start + self.len;
+		start..end
+	}
+
 	/// Create a span that covers the range of both spans as well as possible
 	/// space inbetween.
 	pub fn covers(self, other: Span) -> Span {
@@ -44,6 +59,11 @@ impl Span {
 			offset: start,
 			len,
 		}
+	}
+
+	pub fn as_within(mut self, other: Span) -> Span {
+		self.offset += other.offset;
+		self
 	}
 
 	// returns a zero-length span that starts after the current span.
@@ -280,7 +300,7 @@ impl Algorithm {
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
-pub enum QouteKind {
+pub enum StringKind {
 	/// `'`
 	Plain,
 	/// `"`
@@ -307,15 +327,15 @@ pub enum QouteKind {
 	FileDouble,
 }
 
-impl QouteKind {
+impl StringKind {
 	pub fn as_str(&self) -> &'static str {
 		match self {
-			QouteKind::Plain | QouteKind::PlainDouble => "a strand",
-			QouteKind::RecordId | QouteKind::RecordIdDouble => "a record-id strand",
-			QouteKind::Uuid | QouteKind::UuidDouble => "a uuid",
-			QouteKind::DateTime | QouteKind::DateTimeDouble => "a datetime",
-			QouteKind::Bytes | QouteKind::BytesDouble => "a bytestring",
-			QouteKind::File | QouteKind::FileDouble => "a file",
+			StringKind::Plain | StringKind::PlainDouble => "a strand",
+			StringKind::RecordId | StringKind::RecordIdDouble => "a record-id strand",
+			StringKind::Uuid | StringKind::UuidDouble => "a uuid",
+			StringKind::DateTime | StringKind::DateTimeDouble => "a datetime",
+			StringKind::Bytes | StringKind::BytesDouble => "a bytestring",
+			StringKind::File | StringKind::FileDouble => "a file",
 		}
 	}
 }
@@ -324,23 +344,13 @@ impl QouteKind {
 pub enum Glued {
 	Number,
 	Duration,
-	Strand,
-	Datetime,
-	Uuid,
-	Bytes,
-	File,
 }
 
 impl Glued {
 	fn as_str(&self) -> &'static str {
 		match self {
 			Glued::Number => "a number",
-			Glued::Strand => "a strand",
-			Glued::Uuid => "a uuid",
-			Glued::Datetime => "a datetime",
 			Glued::Duration => "a duration",
-			Glued::Bytes => "a bytestring",
-			Glued::File => "a file",
 		}
 	}
 }
@@ -358,7 +368,7 @@ pub enum TokenKind {
 	OpenDelim(Delim),
 	CloseDelim(Delim),
 	/// a token denoting the opening of a string, i.e. `r"`
-	Qoute(QouteKind),
+	String(StringKind),
 	/// A parameter like `$name`.
 	Parameter,
 	Identifier,
@@ -400,6 +410,8 @@ pub enum TokenKind {
 	Digits,
 	/// The Not-A-Number number token.
 	NaN,
+	/// The infinity number token.
+	Infinity,
 	/// A token which is a compound token which has been glued together and then
 	/// put back into the token buffer. This is required for some places where
 	/// we need to look past possible compound tokens.
@@ -476,9 +488,10 @@ impl TokenKind {
 			TokenKind::Invalid => "Invalid",
 			TokenKind::Eof => "Eof",
 			TokenKind::WhiteSpace => "whitespace",
-			TokenKind::Qoute(x) => x.as_str(),
+			TokenKind::String(x) => x.as_str(),
 			TokenKind::Digits => "a number",
 			TokenKind::NaN => "NaN",
+			TokenKind::Infinity => "Infinity",
 			TokenKind::Glued(x) => x.as_str(),
 			// below are small broken up tokens which are most of the time identifiers.
 		}

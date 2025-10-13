@@ -14,7 +14,7 @@ value = "NONE"
 value = '''{ events: {  }, fields: { test: "DEFINE FIELD test ON user TYPE string VALUE $value OR 'GBR' ASSERT $value != NONE AND $value = /[A-Z0-9]{3}/ PERMISSIONS FULL" }, indexes: {  }, lives: {  }, tables: {  } }'''
 
 [[test.results]]
-error = "Couldn't coerce value for field `test` of `user:a`: Expected `string` but found `NONE`"
+value = "[{ id: user:a, test: 'GBR' }]"
 
 [[test.results]]
 value = "[{ id: user:b, test: '111' }]"

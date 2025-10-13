@@ -17,7 +17,7 @@ value = "NONE"
 */
 DEFINE ACCESS account ON DATABASE TYPE RECORD
 	SIGNUP ({
-		if(!string::is::email($email)){
+		if(!string::is_email($email)){
 			throw "Email field is not a valid email";
 		};
 		(CREATE user SET email = $email, pass = crypto::argon2::generate($pass)).id

@@ -141,7 +141,7 @@ mod cli_integration {
 			let (line1, rest) = output.split_once('\n').expect("response to have multiple lines");
 			assert!(line1.starts_with("-- Query 1"), "Expected on {line1}, and rest was {rest}");
 			assert!(line1.contains("execution time"));
-			assert_eq!(rest, "[\n\t{\n\t\tid: thing:one\n\t}\n]\n\n", "failed to send sql: {args}");
+			assert_eq!(rest, "[{ id: thing:one }]\n\n", "failed to send sql: {args}");
 		}
 
 		info!("* Advanced uncomputed variable to be computed before saving");
@@ -1065,15 +1065,15 @@ mod cli_integration {
 			let output = remove_debug_info(output).replace('\n', "");
 			let allowed = [
 				// Delete these
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 2 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 4 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 2 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 4 }]]",
 				// Keep these
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 262144 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 262144 }]]",
 			];
 			allowed
 				.into_iter()
@@ -1930,7 +1930,7 @@ mod cli_integration {
 		// Start the server
 		let (addr, mut server) = common::start_server(StartServerArguments {
 			auth: false,
-			args: "--slow-log-threshold=1s".to_owned(),
+			args: "--slow-log-threshold=1s --slow-log-param-deny=secret".to_owned(),
 			..Default::default()
 		})
 		.await
@@ -1942,8 +1942,11 @@ mod cli_integration {
 			throwaway = Ulid::new()
 		);
 
-		// Start a slow query
-		let query = "SLEEP 1200ms;\n";
+		// Start a slow query containing a line feed
+		let query = "
+			LET $public = 'foo'; LET $secret = 'bar';
+			RETURN string::concat(sleep(1200ms), '/', $public, '/', $secret);
+		";
 		let _ = common::run(&cmd).input(query).output().unwrap();
 
 		// Extract the stderr
@@ -1951,7 +1954,10 @@ mod cli_integration {
 
 		// Check the log is present
 		assert!(stderr.contains("Slow query detected - time: "));
-		assert!(stderr.contains("s - query: SLEEP 1s200ms"));
+		assert!(stderr.contains(
+			"s - query: RETURN string::concat(sleep(1s200ms), '/', $public, '/', $secret) - params: [ $public='foo' ]"
+		));
+		println!("{stderr}");
 	}
 }
 

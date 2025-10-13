@@ -1,9 +1,9 @@
 use std::fmt;
 
-use crate::expr::escape::EscapeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 use crate::val::{RecordId, RecordIdKey};
 
-pub struct IntoIter {
+pub(crate) struct IntoIter {
 	model: Mock,
 }
 
@@ -38,7 +38,7 @@ impl Iterator for IntoIter {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Mock {
+pub(crate) enum Mock {
 	Count(String, u64),
 	Range(String, u64, u64),
 	// Add new variants here
@@ -58,10 +58,10 @@ impl fmt::Display for Mock {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Mock::Count(tb, c) => {
-				write!(f, "|{}:{}|", EscapeIdent(tb), c)
+				write!(f, "|{}:{}|", EscapeKwFreeIdent(tb), c)
 			}
 			Mock::Range(tb, b, e) => {
-				write!(f, "|{}:{}..{}|", EscapeIdent(tb), b, e)
+				write!(f, "|{}:{}..{}|", EscapeKwFreeIdent(tb), b, e)
 			}
 		}
 	}

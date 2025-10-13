@@ -7,23 +7,42 @@ use crate::catalog::{ApiConfigDefinition, MiddlewareDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::fmt::Fmt;
+use crate::expr::expression::VisitExpression;
 use crate::expr::{Expr, FlowResultExt};
+use crate::fmt::Fmt;
 
 /// The api configuration as it is received from ast.
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct ApiConfig {
+pub(crate) struct ApiConfig {
 	pub middleware: Vec<Middleware>,
 	pub permissions: Permission,
+}
+
+impl VisitExpression for ApiConfig {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.middleware.iter().for_each(|m| m.visit(visitor));
+	}
 }
 
 /// The api middleware as it is received from ast.
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct Middleware {
+pub(crate) struct Middleware {
 	pub name: String,
 	pub args: Vec<Expr>,
+}
+
+impl VisitExpression for Middleware {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.args.iter().for_each(|expr| expr.visit(visitor));
+	}
 }
 
 impl ApiConfig {
@@ -51,16 +70,10 @@ impl ApiConfig {
 			permissions: self.permissions.clone(),
 		})
 	}
-
-	pub fn is_empty(&self) -> bool {
-		self.middleware.is_empty() && self.permissions.is_none()
-	}
 }
 
 impl fmt::Display for ApiConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, " API")?;
-
 		if !self.middleware.is_empty() {
 			write!(f, " MIDDLEWARE ")?;
 			write!(

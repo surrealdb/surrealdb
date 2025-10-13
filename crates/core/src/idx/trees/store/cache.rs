@@ -7,8 +7,6 @@ use anyhow::Result;
 use dashmap::DashMap;
 use dashmap::mapref::entry::Entry;
 
-use crate::idx::trees::bkeys::{FstKeys, TrieKeys};
-use crate::idx::trees::btree::{BTreeNode, BTreeStore};
 use crate::idx::trees::mtree::{MTreeNode, MTreeStore};
 use crate::idx::trees::store::lru::{CacheKey, ConcurrentLru};
 use crate::idx::trees::store::{
@@ -18,42 +16,10 @@ use crate::kvs::{Key, Transaction, TransactionType};
 
 #[derive(Default)]
 pub(crate) struct IndexTreeCaches {
-	btree_fst_caches: TreeCaches<BTreeNode<FstKeys>>,
-	btree_trie_caches: TreeCaches<BTreeNode<TrieKeys>>,
 	mtree_caches: TreeCaches<MTreeNode>,
 }
 
 impl IndexTreeCaches {
-	pub(crate) async fn get_store_btree_fst(
-		&self,
-		keys: TreeNodeProvider,
-		generation: StoreGeneration,
-		tt: TransactionType,
-		cache_size: usize,
-	) -> Result<BTreeStore<FstKeys>> {
-		let cache = self.btree_fst_caches.get_cache(generation, &keys, cache_size).await?;
-		Ok(TreeStore::new(keys, cache, tt).await)
-	}
-
-	pub(crate) fn advance_store_btree_fst(&self, new_cache: TreeCache<BTreeNode<FstKeys>>) {
-		self.btree_fst_caches.new_cache(new_cache);
-	}
-
-	pub(crate) async fn get_store_btree_trie(
-		&self,
-		keys: TreeNodeProvider,
-		generation: StoreGeneration,
-		tt: TransactionType,
-		cache_size: usize,
-	) -> Result<BTreeStore<TrieKeys>> {
-		let cache = self.btree_trie_caches.get_cache(generation, &keys, cache_size).await?;
-		Ok(TreeStore::new(keys, cache, tt).await)
-	}
-
-	pub(crate) fn advance_store_btree_trie(&self, new_cache: TreeCache<BTreeNode<TrieKeys>>) {
-		self.btree_trie_caches.new_cache(new_cache);
-	}
-
 	pub async fn get_store_mtree(
 		&self,
 		keys: TreeNodeProvider,

@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
+use surrealdb::types::{Array, Value};
+use surrealdb_core::dbs::Session;
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::rpc::{DbResult, RpcContext, RpcError, RpcProtocolV1};
 use tokio::sync::Semaphore;
 
 use crate::cnf::{PKG_NAME, PKG_VERSION};
-use crate::core::dbs::Session;
-use crate::core::kvs::Datastore;
-use crate::core::rpc::{Data, RpcContext, RpcError, RpcProtocolV1, RpcProtocolV2};
-use crate::core::val::{Array, Strand, Value};
 
-//use crate::core::gql::{Pessimistic, SchemaCache};
+//use surrealdb_core::gql::{Pessimistic, SchemaCache};
 
 pub struct Http {
 	pub kvs: Arc<Datastore>,
@@ -46,9 +46,9 @@ impl RpcContext for Http {
 		// Do nothing as HTTP is stateless
 	}
 	/// The version information for this RPC context
-	fn version_data(&self) -> Data {
-		let value = Value::from(Strand::new(format!("{PKG_NAME}-{}", *PKG_VERSION)).unwrap());
-		Data::Other(value)
+	fn version_data(&self) -> DbResult {
+		let value = Value::String(format!("{PKG_NAME}-{}", *PKG_VERSION));
+		DbResult::Other(value)
 	}
 
 	// ------------------------------
@@ -79,24 +79,12 @@ impl RpcContext for Http {
 
 impl RpcProtocolV1 for Http {
 	/// Parameters can't be set or unset on HTTP RPC context
-	async fn set(&self, _params: Array) -> Result<Data, RpcError> {
+	async fn set(&self, _params: Array) -> Result<DbResult, RpcError> {
 		Err(RpcError::MethodNotFound)
 	}
 
 	/// Parameters can't be set or unset on HTTP RPC context
-	async fn unset(&self, _params: Array) -> Result<Data, RpcError> {
-		Err(RpcError::MethodNotFound)
-	}
-}
-
-impl RpcProtocolV2 for Http {
-	/// Parameters can't be set or unset on HTTP RPC context
-	async fn set(&self, _params: Array) -> Result<Data, RpcError> {
-		Err(RpcError::MethodNotFound)
-	}
-
-	/// Parameters can't be set or unset on HTTP RPC context
-	async fn unset(&self, _params: Array) -> Result<Data, RpcError> {
+	async fn unset(&self, _params: Array) -> Result<DbResult, RpcError> {
 		Err(RpcError::MethodNotFound)
 	}
 }

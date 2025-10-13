@@ -13,9 +13,7 @@ impl Value {
 						Some(v) => v.pick(path.next()),
 						None => Value::None,
 					},
-					Part::All => {
-						v.iter().map(|(_, v)| v.pick(path.next())).collect::<Vec<_>>().into()
-					}
+					Part::All => v.values().map(|v| v.pick(path.next())).collect::<Vec<_>>().into(),
 					x => {
 						if let Some(idx) = x.as_old_index() {
 							match v.get(&idx.to_string()) {
@@ -67,10 +65,16 @@ mod tests {
 	use crate::syn;
 	use crate::val::{RecordId, RecordIdKey};
 
+	macro_rules! parse_val {
+		($input:expr) => {
+			crate::val::convert_public_value_to_internal(syn::value($input).unwrap())
+		};
+	}
+
 	#[test]
 	fn pick_none() {
 		let idi: Idiom = SqlIdiom::default().into();
-		let val = syn::value("{ test: { other: null, something: 123 } }").unwrap();
+		let val = parse_val!("{ test: { other: null, something: 123 } }");
 		let res = val.pick(&idi);
 		assert_eq!(res, val);
 	}
@@ -78,7 +82,7 @@ mod tests {
 	#[test]
 	fn pick_basic() {
 		let idi: Idiom = syn::idiom("test.something").unwrap().into();
-		let val = syn::value("{ test: { other: null, something: 123 } }").unwrap();
+		let val = parse_val!("{ test: { other: null, something: 123 } }");
 		let res = val.pick(&idi);
 		assert_eq!(res, Value::from(123));
 	}
@@ -86,7 +90,7 @@ mod tests {
 	#[test]
 	fn pick_thing() {
 		let idi: Idiom = syn::idiom("test.other").unwrap().into();
-		let val = syn::value("{ test: { other: test:tobie, something: 123 } }").unwrap();
+		let val = parse_val!("{ test: { other: test:tobie, something: 123 } }");
 		let res = val.pick(&idi);
 		assert_eq!(
 			res,
@@ -100,7 +104,7 @@ mod tests {
 	#[test]
 	fn pick_array() {
 		let idi: Idiom = syn::idiom("test.something[1]").unwrap().into();
-		let val = syn::value("{ test: { something: [123, 456, 789] } }").unwrap();
+		let val = parse_val!("{ test: { something: [123, 456, 789] } }");
 		let res = val.pick(&idi);
 		assert_eq!(res, Value::from(456));
 	}
@@ -108,7 +112,7 @@ mod tests {
 	#[test]
 	fn pick_array_thing() {
 		let idi: Idiom = syn::idiom("test.something[1]").unwrap().into();
-		let val = syn::value("{ test: { something: [test:tobie, test:jaime] } }").unwrap();
+		let val = parse_val!("{ test: { something: [test:tobie, test:jaime] } }");
 		let res = val.pick(&idi);
 		assert_eq!(
 			res,
@@ -122,7 +126,7 @@ mod tests {
 	#[test]
 	fn pick_array_field() {
 		let idi: Idiom = syn::idiom("test.something[1].age").unwrap().into();
-		let val = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
+		let val = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = val.pick(&idi);
 		assert_eq!(res, Value::from(36));
 	}
@@ -130,7 +134,7 @@ mod tests {
 	#[test]
 	fn pick_array_fields() {
 		let idi: Idiom = syn::idiom("test.something[*].age").unwrap().into();
-		let val = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
+		let val = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = val.pick(&idi);
 		assert_eq!(res, [Value::from(34i64), Value::from(36i64)].into_iter().collect::<Value>());
 	}
@@ -138,7 +142,7 @@ mod tests {
 	#[test]
 	fn pick_array_fields_flat() {
 		let idi: Idiom = syn::idiom("test.something.age").unwrap().into();
-		let val = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
+		let val = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let res = val.pick(&idi);
 		assert_eq!(res, [Value::from(34i64), Value::from(36i64)].into_iter().collect::<Value>());
 	}

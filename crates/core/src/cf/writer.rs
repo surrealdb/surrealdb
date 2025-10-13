@@ -152,6 +152,9 @@ impl Writer {
 mod tests {
 	use std::time::Duration;
 
+	use crate::catalog::providers::{
+		CatalogProvider, DatabaseProvider, NamespaceProvider, TableProvider,
+	};
 	use crate::catalog::{
 		DatabaseDefinition, DatabaseId, NamespaceDefinition, NamespaceId, TableDefinition, TableId,
 	};
@@ -504,11 +507,11 @@ mod tests {
 			}),
 			comment: None,
 		};
-		let tb_def = TableDefinition::new(namespace_id, database_id, table_id, TB.to_string())
-			.with_changefeed(ChangeFeed {
-				expiry: Duration::from_secs(10 * 60),
-				store_diff,
-			});
+		let mut tb_def = TableDefinition::new(namespace_id, database_id, table_id, TB.to_string());
+		tb_def.changefeed = Some(ChangeFeed {
+			expiry: Duration::from_secs(10 * 60),
+			store_diff,
+		});
 
 		let ds = Datastore::new("memory").await.unwrap();
 

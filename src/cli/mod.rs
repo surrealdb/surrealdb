@@ -22,7 +22,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand, ValueEnum};
-pub use config::CF;
+pub use config::{Config, ConfigCheck};
 use export::ExportCommandArguments;
 use fix::FixCommandArguments;
 use import::ImportCommandArguments;
@@ -31,6 +31,7 @@ use ml::MlCommand;
 use semver::Version;
 use sql::SqlCommandArguments;
 use start::StartCommandArguments;
+use surrealdb_core::kvs::TransactionBuilderFactory;
 use upgrade::UpgradeCommandArguments;
 use validate::ValidateCommandArguments;
 use validator::parser::tracing::{CustomFilter, CustomFilterParser};
@@ -41,6 +42,7 @@ use crate::cli::version_client::VersionClient;
 use crate::cnf::DEBUG_BUILD_WARNING;
 use crate::cnf::{LOGO, PKG_VERSION};
 use crate::env::RELEASE;
+use crate::net::RouterFactory;
 
 const INFO: &str = "
 To get started using SurrealDB, and for guides on connecting to and building applications
@@ -199,7 +201,22 @@ impl LogFileRotation {
 	}
 }
 
-pub async fn init() -> ExitCode {
+/// CLI entrypoint.
+///
+/// Processes command-line arguments and dispatches to the appropriate subcommand handler.
+///
+/// # Parameters
+/// - `composer`: A composer implementing the required traits for dependency injection
+///
+/// # Generic parameters
+/// - `C`: A composer type that implements:
+///   - `TransactionBuilderFactory` (builds datastore transactions, allowing embedders to pick a
+///     storage backend)
+///   - `RouterFactory` (constructs the HTTP router, allowing embedders to customize server routes)
+///   - `ConfigCheck` (validates configuration before initialization)
+pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
+	composer: C,
+) -> ExitCode {
 	// Enables ANSI code support on Windows
 	#[cfg(windows)]
 	nu_ansi_term::enable_ansi_support().ok();
@@ -248,7 +265,7 @@ pub async fn init() -> ExitCode {
 	let guards = telemetry.init().expect("Unable to configure logs");
 	// After version warning we can run the respective command
 	let output = match args.command {
-		Commands::Start(args) => start::init(args).await,
+		Commands::Start(args) => start::init::<C>(composer, args).await,
 		Commands::Import(args) => import::init(args).await,
 		Commands::Export(args) => export::init(args).await,
 		Commands::Version(args) => version::init(args).await,
@@ -257,7 +274,7 @@ pub async fn init() -> ExitCode {
 		Commands::Ml(args) => ml::init(args).await,
 		Commands::IsReady(args) => isready::init(args).await,
 		Commands::Validate(args) => validate::init(args).await,
-		Commands::Fix(args) => fix::init(args).await,
+		Commands::Fix(args) => fix::init::<C>(args).await,
 	};
 	// Save the flamegraph and profile
 	#[cfg(feature = "performance-profiler")]
@@ -276,7 +293,7 @@ pub async fn init() -> ExitCode {
 		profile.encode(&mut content).unwrap();
 		file.write_all(&content).unwrap();
 	};
-	// Error and exit the programme
+	// Error and exit the program
 	if let Err(e) = output {
 		// Output any error
 		error!("{}", e);

@@ -1,19 +1,17 @@
 use std::fmt::{self, Display};
 
-use crate::sql::fmt::Fmt;
+use crate::fmt::Fmt;
 use crate::sql::{Expr, Permission};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct ApiConfig {
+pub(crate) struct ApiConfig {
 	pub middleware: Vec<Middleware>,
 	pub permissions: Permission,
 }
 
 impl Display for ApiConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, " API")?;
-
 		if !self.middleware.is_empty() {
 			write!(f, " MIDDLEWARE ")?;
 			write!(
@@ -51,7 +49,7 @@ impl From<crate::expr::statements::define::config::api::ApiConfig> for ApiConfig
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Middleware {
+pub(crate) struct Middleware {
 	pub name: String,
 	pub args: Vec<Expr>,
 }

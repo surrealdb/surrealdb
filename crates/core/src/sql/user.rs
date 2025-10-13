@@ -1,15 +1,15 @@
-use crate::val::Duration;
+use crate::sql::Expr;
 
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 // Durations representing the expiration of different elements of user
 // authentication In this context, the None variant represents that the element
 // does not expire
 pub struct UserDuration {
 	// Duration after which the token obtained after authenticating with user credentials expires
-	pub token: Option<Duration>,
+	pub token: Option<Expr>,
 	// Duration after which the session authenticated with user credentials or token expires
-	pub session: Option<Duration>,
+	pub session: Option<Expr>,
 }
 
 /*
@@ -28,16 +28,16 @@ impl Default for UserDuration {
 impl From<UserDuration> for crate::expr::user::UserDuration {
 	fn from(v: UserDuration) -> Self {
 		crate::expr::user::UserDuration {
-			token: v.token,
-			session: v.session,
+			token: v.token.map(Into::into),
+			session: v.session.map(Into::into),
 		}
 	}
 }
 impl From<crate::expr::user::UserDuration> for UserDuration {
 	fn from(v: crate::expr::user::UserDuration) -> Self {
 		UserDuration {
-			token: v.token,
-			session: v.session,
+			token: v.token.map(Into::into),
+			session: v.session.map(Into::into),
 		}
 	}
 }

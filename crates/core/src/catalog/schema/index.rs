@@ -2,36 +2,78 @@ use std::fmt::{self, Display, Formatter};
 use std::hash::{Hash, Hasher};
 
 use anyhow::Result;
-use revision::revisioned;
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
+use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{ToSql, write_sql};
 
-use crate::expr::Idiom;
 use crate::expr::statements::info::InfoStructure;
+use crate::expr::{Cond, Idiom};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::DefineKind;
-use crate::sql::{Ident, ToSql};
-use crate::val::{Array, Number, Strand, Value};
+use crate::val::{Array, Number, Value};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, BorrowDecode)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[repr(transparent)]
+pub struct IndexId(pub u32);
+
+impl_kv_value_revisioned!(IndexId);
+
+impl Revisioned for IndexId {
+	fn revision() -> u16 {
+		1
+	}
+}
+
+impl SerializeRevisioned for IndexId {
+	#[inline]
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		writer: &mut W,
+	) -> Result<(), revision::Error> {
+		SerializeRevisioned::serialize_revisioned(&self.0, writer)
+	}
+}
+
+impl DeserializeRevisioned for IndexId {
+	#[inline]
+	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
+		DeserializeRevisioned::deserialize_revisioned(reader).map(IndexId)
+	}
+}
+
+impl From<u32> for IndexId {
+	fn from(value: u32) -> Self {
+		IndexId(value)
+	}
+}
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[non_exhaustive]
 pub struct IndexDefinition {
-	pub name: String,
-	pub what: String,
-	pub cols: Vec<Idiom>,
-	pub index: Index,
-	pub comment: Option<String>,
+	pub(crate) index_id: IndexId,
+	pub(crate) name: String,
+	pub(crate) table_name: String,
+	pub(crate) cols: Vec<Idiom>,
+	pub(crate) index: Index,
+	pub(crate) comment: Option<String>,
 }
 
 impl_kv_value_revisioned!(IndexDefinition);
 
 impl IndexDefinition {
-	pub fn to_sql_definition(&self) -> crate::sql::DefineIndexStatement {
+	pub(crate) fn to_sql_definition(&self) -> crate::sql::DefineIndexStatement {
 		crate::sql::DefineIndexStatement {
 			kind: DefineKind::Default,
-			name: unsafe { Ident::new_unchecked(self.name.clone()) },
-			what: unsafe { Ident::new_unchecked(self.what.clone()) },
-			cols: self.cols.iter().cloned().map(Into::into).collect(),
+			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
+			what: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.table_name.clone())),
+			cols: self.cols.iter().cloned().map(|x| crate::sql::Expr::Idiom(x.into())).collect(),
 			index: self.index.to_sql_definition(),
-			comment: self.comment.clone().map(Strand::new_lossy),
+			comment: self
+				.comment
+				.clone()
+				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
 			concurrently: false,
 		}
 	}
@@ -41,7 +83,7 @@ impl InfoStructure for IndexDefinition {
 	fn structure(self) -> Value {
 		Value::from(map! {
 			"name".to_string() => self.name.into(),
-			"what".to_string() => self.what.into(),
+			"what".to_string() => self.table_name.into(),
 			"cols".to_string() => Value::Array(Array(self.cols.into_iter().map(|x| x.structure()).collect())),
 			"index".to_string() => self.index.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
@@ -50,27 +92,27 @@ impl InfoStructure for IndexDefinition {
 }
 
 impl ToSql for IndexDefinition {
-	fn to_sql(&self) -> String {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub enum Index {
+pub(crate) enum Index {
 	/// (Basic) non unique
 	#[default]
 	Idx,
 	/// Unique index
 	Uniq,
-	/// Index with Full-Text search capabilities
-	Search(SearchParams),
 	/// M-Tree index for distance based metrics
 	MTree(MTreeParams),
-	/// HNSW index for distance based metrics
+	/// HNSW index for distance-based metrics
 	Hnsw(HnswParams),
-	/// Index with Full-Text search capabilities supporting multiple writers
+	/// Index with Full-Text search capabilities
 	FullText(FullTextParams),
+	/// Count index
+	Count(Option<Cond>),
 }
 
 impl Index {
@@ -78,10 +120,10 @@ impl Index {
 		match self {
 			Self::Idx => crate::sql::index::Index::Idx,
 			Self::Uniq => crate::sql::index::Index::Uniq,
-			Self::Search(params) => crate::sql::index::Index::Search(params.clone().into()),
 			Self::MTree(params) => crate::sql::index::Index::MTree(params.clone().into()),
 			Self::Hnsw(params) => crate::sql::index::Index::Hnsw(params.clone().into()),
 			Self::FullText(params) => crate::sql::index::Index::FullText(params.clone().into()),
+			Self::Count(cond) => crate::sql::index::Index::Count(cond.clone().map(Into::into)),
 		}
 	}
 }
@@ -93,43 +135,38 @@ impl InfoStructure for Index {
 }
 
 impl ToSql for Index {
-	fn to_sql(&self) -> String {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct SearchParams {
-	pub az: String,
-	pub hl: bool,
-	pub sc: Scoring,
-	pub doc_ids_order: u32,
-	pub doc_lengths_order: u32,
-	pub postings_order: u32,
-	pub terms_order: u32,
-	pub doc_ids_cache: u32,
-	pub doc_lengths_cache: u32,
-	pub postings_cache: u32,
-	pub terms_cache: u32,
-}
-
+/// Full-Text search parameters.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct FullTextParams {
+	/// The analyzer to use.
 	pub analyzer: String,
+	/// Whether to highlight the search results.
 	pub highlight: bool,
+	/// The scoring to use.
 	pub scoring: Scoring,
 }
 
+/// Scoring for Full-Text search.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug)]
 pub enum Scoring {
+	/// BestMatching25 scoring.
+	///
+	/// <https://en.wikipedia.org/wiki/Okapi_BM25>
 	Bm {
+		/// The k~1~ parameter.
 		k1: f32,
+		/// The b parameter.
 		b: f32,
-	}, // BestMatching25
-	Vs, // VectorSearch
+	},
+	/// VectorSearch scoring.
+	Vs,
 }
 
 impl Eq for Scoring {}
@@ -177,29 +214,58 @@ impl Default for Scoring {
 	}
 }
 
+/// M-Tree index parameters.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct MTreeParams {
+pub(crate) struct MTreeParams {
+	/// The dimension of the index.
 	pub dimension: u16,
+	/// The distance metric to use.
 	pub distance: Distance,
+	/// The vector type to use.
 	pub vector_type: VectorType,
+	/// The capacity of the index.
 	pub capacity: u16,
-	pub doc_ids_order: u32,
-	pub doc_ids_cache: u32,
+	/// The cache of the M-Tree.
 	pub mtree_cache: u32,
 }
 
+/// Distance metric for calculating distances between vectors.
 #[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
-pub enum Distance {
+pub(crate) enum Distance {
+	/// Chebyshev distance.
+	///
+	/// <https://en.wikipedia.org/wiki/Chebyshev_distance>
 	Chebyshev,
+	/// Cosine distance.
+	///
+	/// <https://en.wikipedia.org/wiki/Cosine_similarity>
 	Cosine,
+	/// Euclidean distance.
+	///
+	/// <https://en.wikipedia.org/wiki/Euclidean_distance>
 	#[default]
 	Euclidean,
+	/// Hamming distance.
+	///
+	/// <https://en.wikipedia.org/wiki/Hamming_distance>
 	Hamming,
+	/// Jaccard distance.
+	///
+	/// <https://en.wikipedia.org/wiki/Jaccard_index>
 	Jaccard,
+	/// Manhattan distance.
+	///
+	/// <https://en.wikipedia.org/wiki/Manhattan_distance>
 	Manhattan,
+	/// Minkowski distance.
+	///
+	/// <https://en.wikipedia.org/wiki/Minkowski_distance>
 	Minkowski(Number),
+	/// Pearson distance.
+	///
+	/// <https://en.wikipedia.org/wiki/Pearson_correlation_coefficient>
 	Pearson,
 }
 
@@ -237,14 +303,20 @@ impl Display for Distance {
 	}
 }
 
+/// Vector type for storing vectors.
 #[revisioned(revision = 1)]
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Hash)]
 pub enum VectorType {
+	/// 64-bit floating point.
 	#[default]
 	F64,
+	/// 32-bit floating point.
 	F32,
+	/// 64-bit signed integer.
 	I64,
+	/// 32-bit signed integer.
 	I32,
+	/// 16-bit signed integer.
 	I16,
 }
 
@@ -260,16 +332,26 @@ impl Display for VectorType {
 	}
 }
 
+/// HNSW index parameters.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct HnswParams {
+pub(crate) struct HnswParams {
+	/// The dimension of the index.
 	pub dimension: u16,
+	/// The distance metric to use.
 	pub distance: Distance,
+	/// The vector type to use.
 	pub vector_type: VectorType,
+	/// The m parameter.
 	pub m: u8,
+	/// The m0 parameter.
 	pub m0: u8,
+	/// The ml parameter.
 	pub ml: Number,
+	/// The ef_construction parameter.
 	pub ef_construction: u16,
+	/// Whether to extend candidates.
 	pub extend_candidates: bool,
+	/// Whether to keep pruned connections.
 	pub keep_pruned_connections: bool,
 }

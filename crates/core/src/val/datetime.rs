@@ -8,11 +8,12 @@ use chrono::offset::LocalResult;
 use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
-use crate::expr::escape::QuoteStr;
+use crate::fmt::QuoteStr;
 use crate::syn;
-use crate::val::{Duration, Strand, TrySub};
+use crate::val::{Duration, TrySub};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
@@ -42,32 +43,23 @@ impl From<Datetime> for DateTime<Utc> {
 	}
 }
 
+impl From<surrealdb_types::Datetime> for Datetime {
+	fn from(v: surrealdb_types::Datetime) -> Self {
+		Self(v.inner())
+	}
+}
+
+impl From<Datetime> for surrealdb_types::Datetime {
+	fn from(x: Datetime) -> Self {
+		surrealdb_types::Datetime::from(x.0)
+	}
+}
+
 impl FromStr for Datetime {
 	type Err = ();
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Self::try_from(s)
-	}
-}
-
-impl TryFrom<String> for Datetime {
-	type Error = ();
-	fn try_from(v: String) -> Result<Self, Self::Error> {
-		Self::try_from(v.as_str())
-	}
-}
-
-impl TryFrom<Strand> for Datetime {
-	type Error = ();
-	fn try_from(v: Strand) -> Result<Self, Self::Error> {
-		Self::try_from(v.as_str())
-	}
-}
-
-impl TryFrom<&str> for Datetime {
-	type Error = ();
-	fn try_from(v: &str) -> Result<Self, Self::Error> {
-		match syn::datetime(v) {
-			Ok(v) => Ok(v),
+		match syn::datetime(s) {
+			Ok(v) => Ok(v.into()),
 			_ => Err(()),
 		}
 	}
@@ -92,7 +84,7 @@ impl Deref for Datetime {
 
 impl Datetime {
 	/// Convert the Datetime to a raw String
-	pub fn into_raw_string(&self) -> String {
+	pub fn to_raw_string(&self) -> String {
 		self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)
 	}
 
@@ -118,7 +110,7 @@ impl Datetime {
 
 impl Display for Datetime {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "d{}", &QuoteStr(&self.into_raw_string()))
+		write!(f, "d{}", &QuoteStr(&self.to_raw_string()))
 	}
 }
 
@@ -140,5 +132,52 @@ impl TrySub for Datetime {
 			.map_err(|_| Error::ArithmeticNegativeOverflow(format!("{self} - {other}")))
 			.map_err(anyhow::Error::new)
 			.map(Duration::from)
+	}
+}
+
+impl<F> Encode<F> for Datetime {
+	fn encode<W: std::io::Write>(
+		&self,
+		w: &mut storekey::Writer<W>,
+	) -> std::result::Result<(), storekey::EncodeError> {
+		let encode = self.to_rfc3339_opts(SecondsFormat::AutoSi, true);
+		Encode::<F>::encode(&encode, w)
+	}
+}
+
+impl<'de, F> BorrowDecode<'de, F> for Datetime {
+	fn borrow_decode(
+		r: &mut storekey::BorrowReader<'de>,
+	) -> std::result::Result<Self, storekey::DecodeError> {
+		let s = r.read_str_cow()?;
+		DateTime::parse_from_rfc3339(s.as_ref())
+			.map_err(|_| storekey::DecodeError::InvalidFormat)
+			.map(|x| Datetime(x.to_utc()))
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use rstest::rstest;
+
+	use super::*;
+	use crate::types::PublicDatetime;
+
+	#[rstest]
+	#[case("2021-01-01T00:00:00Z", Datetime(DateTime::<Utc>::from_timestamp(1_609_459_200, 0).unwrap()), PublicDatetime::from_timestamp(1_609_459_200, 0).unwrap())]
+	fn test_from_str(
+		#[case] input: &str,
+		#[case] expected: Datetime,
+		#[case] expected_public: PublicDatetime,
+	) {
+		let internal_actual = Datetime::from_str(input).unwrap();
+		let public_actual = PublicDatetime::from_str(input).unwrap();
+
+		assert_eq!(internal_actual.timestamp(), expected.timestamp());
+
+		assert_eq!(internal_actual, expected);
+		assert_eq!(public_actual, expected_public);
+
+		assert_eq!(internal_actual.to_raw_string(), public_actual.to_string());
 	}
 }

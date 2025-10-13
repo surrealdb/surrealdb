@@ -162,6 +162,8 @@ pub enum Category {
 	IndexPrimaryAppending,
 	/// crate::key::index::is                /*{ns}*{db}*{tb}+{ix}!is{uuid}
 	IndexFullTextDocIdsSequenceState,
+	/// crate::key::index::iu                /*{ns}*{db}*{tb}+{ix}*iu{uuid}{uuid}{count}
+	IndexCountState,
 	/// crate::key::index                    /*{ns}*{db}*{tb}+{ix}*{fd}{id}
 	Index,
 	///
@@ -172,8 +174,8 @@ pub enum Category {
 	///
 	/// ------------------------------
 	///
-	/// crate::key::thing                    /*{ns}*{db}*{tb}*{id}
-	Thing,
+	/// crate::key::record                    /*{ns}*{db}*{tb}*{id}
+	Record,
 	///
 	/// ------------------------------
 	///
@@ -259,7 +261,7 @@ impl Display for Category {
 			Self::IndexPrimaryAppending => "IndexPrimaryAppending",
 			Self::Index => "Index",
 			Self::ChangeFeed => "ChangeFeed",
-			Self::Thing => "Thing",
+			Self::Record => "Record",
 			Self::Graph => "Graph",
 			Self::Ref => "Ref",
 			Self::SequenceState => "SequenceState",
@@ -270,6 +272,7 @@ impl Display for Category {
 			Self::IndexFullTextDocCountAndLength => "IndexFullTextDocCountAndLength",
 			Self::IndexTermDocuments => "IndexTermDocuments",
 			Self::IndexCompaction => "IndexCompaction",
+			Self::IndexCountState => "IndexCountState",
 		};
 		write!(f, "{}", name)
 	}

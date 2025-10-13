@@ -10,6 +10,7 @@ use regex::RegexBuilder;
 use revision::revisioned;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use storekey::{BorrowDecode, Encode};
 
 use crate::cnf::{REGEX_CACHE_SIZE, REGEX_SIZE_LIMIT};
 
@@ -22,7 +23,7 @@ pub struct Regex(pub regex::Regex);
 impl Regex {
 	// Deref would expose `regex::Regex::as_str` which wouldn't have the '/'
 	// delimiters.
-	pub fn regex(&self) -> &regex::Regex {
+	pub fn inner(&self) -> &regex::Regex {
 		&self.0
 	}
 }
@@ -97,6 +98,18 @@ impl Display for Regex {
 	}
 }
 
+impl From<surrealdb_types::Regex> for Regex {
+	fn from(v: surrealdb_types::Regex) -> Self {
+		Self(v.0)
+	}
+}
+
+impl From<Regex> for surrealdb_types::Regex {
+	fn from(x: Regex) -> Self {
+		surrealdb_types::Regex(x.0)
+	}
+}
+
 impl Serialize for Regex {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
@@ -146,6 +159,21 @@ impl<'de> Deserialize<'de> for Regex {
 		}
 
 		deserializer.deserialize_newtype_struct(REGEX_TOKEN, RegexNewtypeVisitor)
+	}
+}
+
+impl<F> Encode<F> for Regex {
+	fn encode<W: std::io::Write>(
+		&self,
+		_: &mut storekey::Writer<W>,
+	) -> Result<(), storekey::EncodeError> {
+		Err(storekey::EncodeError::message("Regex cannot be encoded"))
+	}
+}
+
+impl<'de, F> BorrowDecode<'de, F> for Regex {
+	fn borrow_decode(_: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
+		Err(storekey::DecodeError::message("Regex cannot be decoded"))
 	}
 }
 

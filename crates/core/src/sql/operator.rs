@@ -1,8 +1,8 @@
 use std::fmt;
 
-use crate::sql::fmt::Fmt;
+use crate::fmt::Fmt;
 use crate::sql::index::Distance;
-use crate::sql::{Expr, Ident, Kind};
+use crate::sql::{Expr, Kind};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -64,7 +64,7 @@ impl fmt::Display for PrefixOperator {
 pub enum PostfixOperator {
 	Range,
 	RangeSkip,
-	MethodCall(Ident, Vec<Expr>),
+	MethodCall(String, Vec<Expr>),
 	Call(Vec<Expr>),
 }
 
@@ -74,7 +74,7 @@ impl From<PostfixOperator> for crate::expr::PostfixOperator {
 			PostfixOperator::Range => crate::expr::PostfixOperator::Range,
 			PostfixOperator::RangeSkip => crate::expr::PostfixOperator::RangeSkip,
 			PostfixOperator::MethodCall(name, x) => crate::expr::PostfixOperator::MethodCall(
-				name.into(),
+				name,
 				x.into_iter().map(From::from).collect(),
 			),
 			PostfixOperator::Call(x) => {
@@ -90,7 +90,7 @@ impl From<crate::expr::PostfixOperator> for PostfixOperator {
 			crate::expr::PostfixOperator::Range => PostfixOperator::Range,
 			crate::expr::PostfixOperator::RangeSkip => PostfixOperator::RangeSkip,
 			crate::expr::PostfixOperator::MethodCall(name, args) => {
-				PostfixOperator::MethodCall(name.into(), args.into_iter().map(From::from).collect())
+				PostfixOperator::MethodCall(name, args.into_iter().map(From::from).collect())
 			}
 			crate::expr::PostfixOperator::Call(args) => {
 				PostfixOperator::Call(args.into_iter().map(From::from).collect())
@@ -112,7 +112,7 @@ impl fmt::Display for PostfixOperator {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum BinaryOperator {
+pub(crate) enum BinaryOperator {
 	/// `-`
 	Subtract,
 	/// `+`
@@ -368,7 +368,7 @@ impl From<crate::expr::BinaryOperator> for BinaryOperator {
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum NearestNeighbor {
+pub(crate) enum NearestNeighbor {
 	/// `<|k, dist|>`
 	K(u32, Distance),
 	/// `<|k|>`

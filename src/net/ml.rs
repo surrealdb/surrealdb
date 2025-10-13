@@ -15,7 +15,7 @@ where
 {
 	Router::new()
 		.route("/ml/import", post(implementation::import))
-		.route("/ml/export/:name/:version", get(implementation::export))
+		.route("/ml/export/{name}/{version}", get(implementation::export))
 		.route_layer(DefaultBodyLimit::disable())
 		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_ML_BODY_SIZE))
 }
@@ -30,15 +30,12 @@ mod implementation {
 	use bytes::Bytes;
 	use futures_util::StreamExt;
 	use http::StatusCode;
+	use surrealdb_core::dbs::Session;
+	use surrealdb_core::dbs::capabilities::RouteTarget;
+	use surrealdb_core::iam::check::check_ns_db;
+	use surrealdb_core::iam::{Action, ResourceKind};
+	use surrealdb_core::ml::storage::surml_file::SurMlFile;
 
-	use crate::core::dbs::Session;
-	use crate::core::dbs::capabilities::RouteTarget;
-	use crate::core::expr::statements::{DefineModelStatement, DefineStatement};
-	use crate::core::expr::{Expr, Ident, LogicalPlan, TopLevelExpr, get_model_path};
-	use crate::core::iam::check::check_ns_db;
-	use crate::core::iam::{Action, ResourceKind};
-	use crate::core::kvs::{LockType, TransactionType};
-	use crate::core::ml::storage::surml_file::SurMlFile;
 	use crate::net::AppState;
 	use crate::net::error::{Error as NetError, ResponseError};
 	use crate::net::output::Output;
@@ -51,16 +48,16 @@ mod implementation {
 	) -> Result<Output, ResponseError> {
 		let mut stream = body.into_data_stream();
 		// Get the datastore reference
-		let db = &state.datastore;
+		let ds = &state.datastore;
 		// Check if capabilities allow querying the requested HTTP route
-		if !db.allows_http_route(&RouteTarget::Ml) {
+		if !ds.allows_http_route(&RouteTarget::Ml) {
 			warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Ml);
 			return Err(NetError::ForbiddenRoute(RouteTarget::Ml.to_string()).into());
 		}
 		// Ensure a NS and DB are set
 		let (nsv, dbv) = check_ns_db(&session).map_err(ResponseError)?;
 		// Check the permissions level
-		db.check(&session, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))
+		ds.check(&session, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))
 			.map_err(ResponseError)?;
 		// Create a new buffer
 		let mut buffer = Vec::new();
@@ -79,35 +76,17 @@ mod implementation {
 
 		// Convert the file back in to raw bytes
 		let data = file.to_bytes();
-		// Calculate the hash of the model file
-		let hash = crate::core::obs::hash(&data);
-		// Calculate the path of the model file
-		let path = get_model_path(
-			&nsv,
-			&dbv,
+
+		ds.put_ml_model(
+			&session,
 			&file.header.name.to_string(),
 			&file.header.version.to_string(),
-			&hash,
-		);
-		// Insert the file data in to the store
-		crate::core::obs::put(&path, data).await.map_err(ResponseError)?;
-		// Insert the model in to the database
-		let model = DefineModelStatement {
-			name: Ident::new(file.header.name.to_string()).unwrap(),
-			version: file.header.version.to_string(),
-			comment: Some(file.header.description.to_string().into()),
-			hash,
-			..Default::default()
-		};
+			&file.header.description.to_string(),
+			data,
+		)
+		.await
+		.map_err(ResponseError)?;
 
-		let q = LogicalPlan {
-			expressions: vec![TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Model(
-				model,
-			))))],
-		};
-
-		db.process_plan(q, &session, None).await.map_err(ResponseError)?;
-		//
 		Ok(Output::None)
 	}
 
@@ -119,39 +98,27 @@ mod implementation {
 	) -> Result<Response, ResponseError> {
 		// Get the datastore reference
 
-		let db = &state.datastore;
+		let ds = &state.datastore;
 		// Check if capabilities allow querying the requested HTTP route
-		if !db.allows_http_route(&RouteTarget::Ml) {
+		if !ds.allows_http_route(&RouteTarget::Ml) {
 			warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Ml);
 			return Err(NetError::ForbiddenRoute(RouteTarget::Ml.to_string()).into());
 		}
 		// Ensure a NS and DB are set
 		let (nsv, dbv) = check_ns_db(&session).map_err(ResponseError)?;
 		// Check the permissions level
-		db.check(&session, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))
+		ds.check(&session, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))
 			.map_err(ResponseError)?;
 		// Start a new readonly transaction
-		let tx = db
-			.transaction(TransactionType::Read, LockType::Optimistic)
-			.await
-			.map_err(ResponseError)?;
-
-		let db = tx.ensure_ns_db(&nsv, &dbv, false).await.map_err(ResponseError)?;
-		// Attempt to get the model definition
-		let info = match tx
-			.get_db_model(db.namespace_id, db.database_id, &name, &version)
-			.await
-			.map_err(ResponseError)?
-		{
-			Some(info) => info,
-			None => {
-				return Err(NetError::NotFound(format!("Model {name} {version} not found")).into());
-			}
+		let Some(info) =
+			ds.get_db_model(&nsv, &dbv, &name, &version).await.map_err(ResponseError)?
+		else {
+			return Err(NetError::NotFound(format!("Model {name} {version} not found")).into());
 		};
 		// Calculate the path of the model file
 		let path = format!("ml/{nsv}/{dbv}/{name}-{version}-{}.surml", info.hash);
 		// Export the file data in to the store
-		let mut data = crate::core::obs::stream(path)
+		let mut data = surrealdb_core::obs::stream(path)
 			.await
 			.context("Failed to read model file")
 			.map_err(ResponseError)?;
@@ -174,9 +141,9 @@ mod implementation {
 	use axum::Extension;
 	use axum::body::Body;
 	use axum::extract::Path;
+	use surrealdb_core::dbs::Session;
+	use surrealdb_core::dbs::capabilities::RouteTarget;
 
-	use crate::core::dbs::Session;
-	use crate::core::dbs::capabilities::RouteTarget;
 	use crate::net::AppState;
 	use crate::net::error::{Error as NetError, ResponseError};
 

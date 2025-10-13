@@ -140,7 +140,7 @@ impl Socket {
 
 	fn to_msg(format: Format, message: &serde_json::Value) -> Result<Message> {
 		match format {
-			Format::Json => Ok(Message::Text(serde_json::to_string(message)?)),
+			Format::Json => Ok(Message::Text(serde_json::to_string(message)?.into())),
 			Format::Cbor => {
 				// For tests we need to convert the serde_json::Value
 				// to a SurrealQL value, so that record ids, uuids,
@@ -152,7 +152,7 @@ impl Socket {
 				// Then we convert the SurrealQL in to CBOR.
 				let cbor = surrealdb_core::rpc::format::cbor::encode(surrealql)?;
 				// THen output the message.
-				Ok(Message::Binary(cbor))
+				Ok(Message::Binary(cbor.into()))
 			}
 		}
 	}
@@ -178,9 +178,9 @@ impl Socket {
 						// a serde_json::Value so that test assertions work.
 						// First of all we deserialize the CBOR data.
 						// Then we convert it to a SurrealQL Value.
-						let msg = surrealdb_core::rpc::format::cbor::decode(msg.as_slice())?;
+						let msg = surrealdb_core::rpc::format::cbor::decode(msg.as_ref())?;
 						// Then we convert the SurrealQL to JSON.
-						let msg = msg.into_json_value().unwrap();
+						let msg = msg.into_json_value();
 						// Then output the response.
 						debug!("Received message: {msg:?}");
 						Ok(Some(msg))
@@ -277,6 +277,7 @@ impl Socket {
 		method: &str,
 		params: serde_json::Value,
 	) -> Result<serde_json::Value> {
+		tracing::info!("Sending request: {method} {params:?}");
 		let (send, recv) = oneshot::channel();
 		if (self
 			.sender

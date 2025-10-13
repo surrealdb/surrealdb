@@ -1,35 +1,62 @@
 use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
+use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::DatabaseDefinition;
+use crate::catalog::providers::{DatabaseProvider, NamespaceProvider};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
+use crate::expr::expression::VisitExpression;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Base, Ident};
+use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct DefineDatabaseStatement {
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct DefineDatabaseStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
-	pub comment: Option<Strand>,
+	pub name: Expr,
+	pub comment: Option<Expr>,
 	pub changefeed: Option<ChangeFeed>,
+}
+
+impl VisitExpression for DefineDatabaseStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.name.visit(visitor);
+		self.comment.iter().for_each(|comment| comment.visit(visitor));
+	}
+}
+
+impl Default for DefineDatabaseStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			id: None,
+			name: Expr::Literal(Literal::None),
+			comment: None,
+			changefeed: None,
+		}
+	}
 }
 
 impl DefineDatabaseStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
@@ -41,13 +68,16 @@ impl DefineDatabaseStatement {
 		let txn = ctx.tx();
 		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
 
+		// Process the name
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "database name").await?;
+
 		// Check if the definition exists
-		let database_id = if let Some(db) = txn.get_db_by_name(ns, &self.name).await? {
+		let database_id = if let Some(db) = txn.get_db_by_name(ns, &name).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::DbAlreadyExists {
-							name: self.name.to_string(),
+							name: name.clone(),
 						});
 					}
 				}
@@ -62,14 +92,12 @@ impl DefineDatabaseStatement {
 			txn.lock().await.get_next_db_id(nsv.namespace_id).await?
 		};
 
-		let name: String = self.name.to_raw_string();
-
 		// Set the database definition, keyed by namespace name and database name.
 		let db_def = DatabaseDefinition {
 			namespace_id: nsv.namespace_id,
 			database_id,
 			name: name.clone(),
-			comment: self.comment.clone().map(|s| s.into_string()),
+			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 			changefeed: self.changefeed,
 		};
 		txn.put_db(&nsv.name, db_def).await?;
@@ -96,7 +124,7 @@ impl Display for DefineDatabaseStatement {
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		if let Some(ref v) = self.changefeed {
 			write!(f, " {v}")?;
@@ -109,7 +137,7 @@ impl InfoStructure for DefineDatabaseStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {
 			"name".to_string() => self.name.structure(),
-			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"comment".to_string(), if let Some(v) = self.comment => v.structure(),
 		})
 	}
 }

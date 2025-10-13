@@ -1,12 +1,14 @@
 //! Stores a DEFINE MODEL config definition
+use std::borrow::Cow;
+
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, MlModelDefinition, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Ml<'a> {
 	__: u8,
 	_a: u8,
@@ -16,13 +18,11 @@ pub(crate) struct Ml<'a> {
 	_c: u8,
 	_d: u8,
 	_e: u8,
-	pub ml: &'a str,
-	pub vn: &'a str,
+	pub ml: Cow<'a, str>,
+	pub vn: Cow<'a, str>,
 }
 
-impl KVKey for Ml<'_> {
-	type ValueType = MlModelDefinition;
-}
+impl_kv_key_storekey!(Ml<'_> => MlModelDefinition);
 
 pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ml: &'a str, vn: &'a str) -> Ml<'a> {
 	Ml::new(ns, db, ml, vn)
@@ -57,8 +57,8 @@ impl<'a> Ml<'a> {
 			_c: b'!',
 			_d: b'm',
 			_e: b'l',
-			ml,
-			vn,
+			ml: Cow::Borrowed(ml),
+			vn: Cow::Borrowed(vn),
 		}
 	}
 }

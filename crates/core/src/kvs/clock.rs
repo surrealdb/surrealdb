@@ -19,8 +19,10 @@ pub enum SizedClock {
 }
 
 impl SizedClock {
-	#[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
-	pub(crate) fn system() -> Self {
+	/// Expose a public system clock so external `TransactionBuilderFactory`
+	/// implementations (used when embedding or customizing the server) can
+	/// easily obtain a default clock instance.
+	pub fn system() -> Self {
 		Self::System(Default::default())
 	}
 

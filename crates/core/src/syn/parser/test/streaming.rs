@@ -3,16 +3,17 @@ use chrono::offset::TimeZone;
 use chrono::{NaiveDate, Offset, Utc};
 
 use crate::sql::access::AccessDuration;
-use crate::sql::access_type::{AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey};
+use crate::sql::access_type::{
+	AccessType, JwtAccess, JwtAccessVerify, JwtAccessVerifyKey, RecordAccess,
+};
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::data::Assignment;
 use crate::sql::filter::Filter;
-use crate::sql::index::{Distance, MTreeParams, SearchParams, VectorType};
+use crate::sql::index::{Distance, FullTextParams, MTreeParams, VectorType};
 use crate::sql::language::Language;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::lookup::{LookupKind, LookupSubject};
 use crate::sql::order::{OrderList, Ordering};
-use crate::sql::statements::analyze::AnalyzeStatement;
 use crate::sql::statements::define::{DefineDefault, DefineKind};
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
@@ -21,26 +22,24 @@ use crate::sql::statements::{
 	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
 	DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement,
 	DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement, InsertStatement,
-	KillStatement, OutputStatement, RelateStatement, RemoveFieldStatement, RemoveStatement,
-	SelectStatement, SetStatement, UpdateStatement, UpsertStatement,
+	KillStatement, OutputStatement, RelateStatement, RemoveFieldStatement, RemoveFunctionStatement,
+	RemoveStatement, SelectStatement, SetStatement, UpdateStatement, UpsertStatement,
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
 	Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr, Fetch,
-	Fetchs, Field, Fields, Function, FunctionCall, Group, Groups, Ident, Idiom, Idioms, Index,
-	Kind, Limit, Literal, Lookup, Mock, Order, Output, Param, Part, Permission, Permissions,
-	RecordAccess, RecordIdKeyLit, RecordIdLit, RemoveFunctionStatement, Scoring, Script, Split,
-	Splits, Start, TableType, Timeout, TopLevelExpr, With,
+	Fetchs, Field, Fields, Function, FunctionCall, Group, Groups, Idiom, Index, Kind, Limit,
+	Literal, Lookup, Mock, Order, Output, Param, Part, Permission, Permissions, RecordIdKeyLit,
+	RecordIdLit, Scoring, Script, Split, Splits, Start, TableType, Timeout, TopLevelExpr, With,
 };
 use crate::syn::parser::StatementStream;
-use crate::val::{Datetime, Duration, Number, Regex, Strand, Uuid};
+use crate::types::{PublicDatetime, PublicDuration, PublicNumber, PublicUuid};
 
 fn ident_field(name: &str) -> Expr {
-	Expr::Idiom(Idiom(vec![Part::Field(Ident::new(name.to_string()).unwrap())]))
+	Expr::Idiom(Idiom(vec![Part::Field(name.to_string())]))
 }
 
 static SOURCE: &str = r#"
-	ANALYZE INDEX b on a;
 	BEGIN;
 	BEGIN TRANSACTION;
 	BREAK;
@@ -62,18 +61,9 @@ static SOURCE: &str = r#"
 	DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo;
 	DEFINE EVENT event ON TABLE table WHEN null THEN null,none;
 	DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true;
-	DEFINE INDEX index ON TABLE table FIELDS a,b[*] SEARCH ANALYZER ana BM25 (0.1,0.2)
-			DOC_IDS_ORDER 1
-			DOC_LENGTHS_ORDER 2
-			POSTINGS_ORDER 3
-			TERMS_ORDER 4
-			DOC_IDS_CACHE 5
-			DOC_LENGTHS_CACHE 6
-			POSTINGS_CACHE 7
-			TERMS_CACHE 8
-			HIGHLIGHTS;
+	DEFINE INDEX index ON TABLE table FIELDS a,b[*] FULLTEXT ANALYZER ana BM25 (0.1,0.2) HIGHLIGHTS;
 	DEFINE INDEX index ON TABLE table FIELDS a UNIQUE;
-	DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 DOC_IDS_ORDER 7 DOC_IDS_CACHE 8 MTREE_CACHE 9;
+	DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 MTREE_CACHE 9;
 	DEFINE ANALYZER ana FILTERS ASCII, EDGENGRAM(1,2), NGRAM(3,4), LOWERCASE, SNOWBALL(NLD), UPPERCASE TOKENIZERS BLANK, CAMEL, CLASS, PUNCT FUNCTION fn::foo::bar;
 	DELETE FROM ONLY |foo:32..64| WITH INDEX index,index_2 Where 2 RETURN AFTER TIMEOUT 1s PARALLEL EXPLAIN FULL;
 	DELETE FROM ONLY a:b->?[$][?true] WITH INDEX index,index_2 WHERE null RETURN NULL TIMEOUT 1h PARALLEL EXPLAIN FULL;
@@ -131,10 +121,6 @@ fn statements() -> Vec<TopLevelExpr> {
 		.with_timezone(&Utc);
 
 	vec![
-		TopLevelExpr::Analyze(AnalyzeStatement::Idx(
-			Ident::from_strand(strand!("a").to_owned()),
-			Ident::from_strand(strand!("b").to_owned()),
-		)),
 		TopLevelExpr::Begin,
 		TopLevelExpr::Begin,
 		TopLevelExpr::Expr(Expr::Break),
@@ -145,26 +131,24 @@ fn statements() -> Vec<TopLevelExpr> {
 		TopLevelExpr::Expr(Expr::Continue),
 		TopLevelExpr::Expr(Expr::Create(Box::new(CreateStatement {
 			only: true,
-			what: vec![Expr::Table(Ident::from_strand(strand!("foo").to_owned()))],
+			what: vec![Expr::Table("foo".to_owned())],
 			data: Some(Data::SetExpression(vec![
 				Assignment {
-					place: Idiom(vec![Part::Field(Ident::from_strand(strand!("bar").to_owned()))]),
+					place: Idiom(vec![Part::Field("bar".to_owned())]),
 					operator: AssignOperator::Assign,
 					value: Expr::Literal(Literal::Integer(3)),
 				},
 				Assignment {
-					place: Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned()))]),
+					place: Idiom(vec![Part::Field("foo".to_owned())]),
 					operator: AssignOperator::Extend,
 					value: Expr::Literal(Literal::Integer(4)),
 				},
 			])),
 			output: Some(Output::Fields(Fields::Value(Box::new(Field::Single {
 				expr: ident_field("foo"),
-				alias: Some(Idiom(vec![Part::Field(Ident::from_strand(
-					strand!("bar").to_owned(),
-				))])),
+				alias: Some(Idiom(vec![Part::Field("bar".to_owned())])),
 			})))),
-			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))))),
 			parallel: true,
 			version: None,
 		}))),
@@ -172,15 +156,15 @@ fn statements() -> Vec<TopLevelExpr> {
 			DefineNamespaceStatement {
 				kind: DefineKind::Default,
 				id: None,
-				name: Ident::from_strand(strand!("a").to_owned()),
-				comment: Some(Strand::new("test".to_string()).unwrap()),
+				name: Expr::Idiom(Idiom::field("a".to_owned())),
+				comment: Some(Expr::Literal(Literal::String("test".to_owned()))),
 			},
 		)))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Namespace(
 			DefineNamespaceStatement {
 				kind: DefineKind::Default,
 				id: None,
-				name: Ident::from_strand(strand!("a").to_owned()),
+				name: Expr::Idiom(Idiom::field("a".to_owned())),
 				comment: None,
 			},
 		)))),
@@ -188,10 +172,10 @@ fn statements() -> Vec<TopLevelExpr> {
 			DefineDatabaseStatement {
 				kind: DefineKind::Default,
 				id: None,
-				name: Ident::from_strand(strand!("a").to_owned()),
-				comment: Some(strand!("test").to_owned()),
+				name: Expr::Idiom(Idiom::field("a".to_string())),
+				comment: Some(Expr::Literal(Literal::String("test".to_string()))),
 				changefeed: Some(ChangeFeed {
-					expiry: std::time::Duration::from_secs(60) * 10,
+					expiry: PublicDuration::from_secs(60 * 10),
 					store_diff: false,
 				}),
 			},
@@ -200,7 +184,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			DefineDatabaseStatement {
 				kind: DefineKind::Default,
 				id: None,
-				name: Ident::from_strand(strand!("a").to_owned()),
+				name: Expr::Idiom(Idiom::field("a".to_string())),
 				comment: None,
 				changefeed: None,
 			},
@@ -208,19 +192,16 @@ fn statements() -> Vec<TopLevelExpr> {
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Function(
 			DefineFunctionStatement {
 				kind: DefineKind::Default,
-				name: Ident::from_strand(strand!("foo::bar").to_owned()),
+				name: "foo::bar".to_owned(),
 				args: vec![
-					(Ident::from_strand(strand!("a").to_owned()), Kind::Number),
-					(
-						Ident::from_strand(strand!("b").to_owned()),
-						Kind::Array(Box::new(Kind::Bool), Some(3)),
-					),
+					("a".to_owned(), Kind::Number),
+					("b".to_owned(), Kind::Array(Box::new(Kind::Bool), Some(3))),
 				],
 				block: Block(vec![Expr::Return(Box::new(OutputStatement {
 					what: ident_field("a"),
 					fetch: None,
 				}))]),
-				comment: Some(strand!("test").to_owned()),
+				comment: Some(Expr::Literal(Literal::String("test".to_string()))),
 				permissions: Permission::Full,
 				returns: None,
 			},
@@ -228,7 +209,7 @@ fn statements() -> Vec<TopLevelExpr> {
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Access(
 			DefineAccessStatement {
 				kind: DefineKind::Default,
-				name: Ident::from_strand(strand!("a").to_owned()),
+				name: Expr::Idiom(Idiom::field("a".to_string())),
 				base: Base::Db,
 				access_type: AccessType::Record(RecordAccess {
 					signup: None,
@@ -236,7 +217,7 @@ fn statements() -> Vec<TopLevelExpr> {
 					jwt: JwtAccess {
 						verify: JwtAccessVerify::Key(JwtAccessVerifyKey {
 							alg: Algorithm::EdDSA,
-							key: "foo".to_string(),
+							key: Expr::Literal(Literal::String("foo".to_string())),
 						}),
 						issue: None,
 					},
@@ -245,16 +226,20 @@ fn statements() -> Vec<TopLevelExpr> {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Duration::from_days(30).unwrap()),
-					token: Some(Duration::from_hours(1).unwrap()),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap(),
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap(),
+					))),
 					session: None,
 				},
-				comment: Some(strand!("bar").to_owned()),
+				comment: Some(Expr::Literal(Literal::String("bar".to_string()))),
 			},
 		)))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Param(DefineParamStatement {
 			kind: DefineKind::Default,
-			name: Ident::from_strand(strand!("a").to_owned()),
+			name: "a".to_owned(),
 			value: Expr::Literal(Literal::Object(vec![
 				ObjectEntry {
 					key: "a".to_string(),
@@ -271,7 +256,7 @@ fn statements() -> Vec<TopLevelExpr> {
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Table(DefineTableStatement {
 			kind: DefineKind::Default,
 			id: None,
-			name: Ident::from_strand(strand!("name").to_owned()),
+			name: Expr::Idiom(Idiom::field("name".to_string())),
 			drop: true,
 			full: true,
 			view: Some(crate::sql::View {
@@ -279,11 +264,9 @@ fn statements() -> Vec<TopLevelExpr> {
 					expr: ident_field("foo"),
 					alias: None,
 				}]),
-				what: vec![Ident::from_strand(strand!("bar").to_owned())],
+				what: vec!["bar".to_owned()],
 				cond: None,
-				group: Some(Groups(vec![Group(Idiom(vec![Part::Field(Ident::from_strand(
-					strand!("foo").to_owned(),
-				))]))])),
+				group: Some(Groups(vec![Group(Idiom(vec![Part::Field("foo".to_owned())]))])),
 			}),
 			permissions: Permissions {
 				select: Permission::Specific(Expr::Binary {
@@ -296,7 +279,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				delete: Permission::None,
 			},
 			changefeed: Some(ChangeFeed {
-				expiry: std::time::Duration::from_secs(1),
+				expiry: PublicDuration::from_secs(1),
 				store_diff: false,
 			}),
 			comment: None,
@@ -305,26 +288,27 @@ fn statements() -> Vec<TopLevelExpr> {
 		})))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Event(DefineEventStatement {
 			kind: DefineKind::Default,
-			name: Ident::from_strand(strand!("event").to_owned()),
-			target_table: Ident::from_strand(strand!("table").to_owned()),
+			name: Expr::Idiom(Idiom::field("event".to_string())),
+			target_table: Expr::Idiom(Idiom::field("table".to_string())),
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: None,
 		})))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Field(DefineFieldStatement {
 			kind: DefineKind::Default,
-			name: Idiom(vec![
-				Part::Field(Ident::from_strand(strand!("foo").to_owned())),
+			name: Expr::Idiom(Idiom(vec![
+				Part::Field("foo".to_string()),
 				Part::All,
 				Part::All,
 				Part::Flatten,
-			]),
-			what: Ident::from_strand(strand!("bar").to_owned()),
+			])),
+			what: Expr::Idiom(Idiom::field("bar".to_string())),
 			flex: true,
-			field_kind: Some(Kind::Option(Box::new(Kind::Either(vec![
+			field_kind: Some(Kind::Either(vec![
+				Kind::None,
 				Kind::Number,
 				Kind::Array(Box::new(Kind::Record(vec!["foo".to_owned()])), Some(10)),
-			])))),
+			])),
 			readonly: false,
 			value: Some(Expr::Literal(Literal::Null)),
 			assert: Some(Expr::Literal(Literal::Bool(true))),
@@ -341,51 +325,41 @@ fn statements() -> Vec<TopLevelExpr> {
 		})))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
 			kind: DefineKind::Default,
-			name: Ident::from_strand(strand!("index").to_owned()),
-			what: Ident::from_strand(strand!("table").to_owned()),
+			name: Expr::Idiom(Idiom::field("index".to_string())),
+			what: Expr::Idiom(Idiom::field("table".to_string())),
 			cols: vec![
-				Idiom(vec![Part::Field(Ident::from_strand(strand!("a").to_owned()))]),
-				Idiom(vec![Part::Field(Ident::from_strand(strand!("b").to_owned())), Part::All]),
+				Expr::Idiom(Idiom(vec![Part::Field("a".to_string())])),
+				Expr::Idiom(Idiom(vec![Part::Field("b".to_string()), Part::All])),
 			],
-			index: Index::Search(SearchParams {
-				az: Ident::from_strand(strand!("ana").to_owned()),
+			index: Index::FullText(FullTextParams {
+				az: "ana".to_owned(),
 				hl: true,
 				sc: Scoring::Bm {
 					k1: 0.1,
 					b: 0.2,
 				},
-				doc_ids_order: 1,
-				doc_lengths_order: 2,
-				postings_order: 3,
-				terms_order: 4,
-				doc_ids_cache: 5,
-				doc_lengths_cache: 6,
-				postings_cache: 7,
-				terms_cache: 8,
 			}),
 			comment: None,
 			concurrently: false,
 		})))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
 			kind: DefineKind::Default,
-			name: Ident::from_strand(strand!("index").to_owned()),
-			what: Ident::from_strand(strand!("table").to_owned()),
-			cols: vec![Idiom(vec![Part::Field(Ident::from_strand(strand!("a").to_owned()))])],
+			name: Expr::Idiom(Idiom::field("index".to_string())),
+			what: Expr::Idiom(Idiom::field("table".to_string())),
+			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())]))],
 			index: Index::Uniq,
 			comment: None,
 			concurrently: false,
 		})))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
 			kind: DefineKind::Default,
-			name: Ident::from_strand(strand!("index").to_owned()),
-			what: Ident::from_strand(strand!("table").to_owned()),
-			cols: vec![Idiom(vec![Part::Field(Ident::from_strand(strand!("a").to_owned()))])],
+			name: Expr::Idiom(Idiom::field("index".to_string())),
+			what: Expr::Idiom(Idiom::field("table".to_string())),
+			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())]))],
 			index: Index::MTree(MTreeParams {
 				dimension: 4,
-				distance: Distance::Minkowski(Number::Int(5)),
+				distance: Distance::Minkowski(PublicNumber::Int(5)),
 				capacity: 6,
-				doc_ids_order: 7,
-				doc_ids_cache: 8,
 				mtree_cache: 9,
 				vector_type: VectorType::F64,
 			}),
@@ -395,7 +369,7 @@ fn statements() -> Vec<TopLevelExpr> {
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Analyzer(
 			DefineAnalyzerStatement {
 				kind: DefineKind::Default,
-				name: Ident::from_strand(strand!("ana").to_owned()),
+				name: Expr::Idiom(Idiom::field("ana".to_string())),
 				tokenizers: Some(vec![
 					Tokenizer::Blank,
 					Tokenizer::Camel,
@@ -420,7 +394,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Expr::Literal(Literal::Integer(2)))),
 			output: Some(Output::After),
-			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))))),
 			parallel: true,
 			explain: Some(Explain(true)),
 		}))),
@@ -429,7 +403,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			what: vec![Expr::Idiom(Idiom(vec![
 				Part::Start(Expr::Literal(Literal::RecordId(RecordIdLit {
 					table: "a".to_owned(),
-					key: RecordIdKeyLit::String(strand!("b").to_owned()),
+					key: RecordIdKeyLit::String("b".to_owned()),
 				}))),
 				Part::Graph(Lookup {
 					kind: LookupKind::Graph(Dir::Out),
@@ -441,20 +415,22 @@ fn statements() -> Vec<TopLevelExpr> {
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Expr::Literal(Literal::Null))),
 			output: Some(Output::Null),
-			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(60 * 60)))),
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(PublicDuration::from_secs(
+				60 * 60,
+			))))),
 			parallel: true,
 			explain: Some(Explain(true)),
 		}))),
 		TopLevelExpr::Expr(Expr::Foreach(Box::new(ForeachStatement {
-			param: Param::from_strand(strand!("foo").to_owned()),
+			param: Param::new("foo".to_owned()),
 			range: Expr::Binary {
 				left: Box::new(Expr::Select(Box::new(SelectStatement {
 					expr: Fields::Select(vec![Field::Single {
 						expr: ident_field("foo"),
 						alias: None,
 					}]),
-					what: vec![Expr::Table(Ident::from_strand(strand!("bar").to_owned()))],
-					omit: None,
+					what: vec![Expr::Table("bar".to_string())],
+					omit: vec![],
 					only: false,
 					with: None,
 					cond: None,
@@ -492,7 +468,7 @@ fn statements() -> Vec<TopLevelExpr> {
 		TopLevelExpr::Expr(Expr::Info(Box::new(InfoStatement::Root(false)))),
 		TopLevelExpr::Expr(Expr::Info(Box::new(InfoStatement::Ns(false)))),
 		TopLevelExpr::Expr(Expr::Info(Box::new(InfoStatement::User(
-			Ident::from_strand(strand!("user").to_owned()),
+			Expr::Idiom(Idiom::field("user".to_string())),
 			Some(Base::Ns),
 			false,
 		)))),
@@ -500,9 +476,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			expr: Fields::Select(vec![
 				Field::Single {
 					expr: ident_field("bar"),
-					alias: Some(Idiom(vec![Part::Field(Ident::from_strand(
-						strand!("foo").to_owned(),
-					))])),
+					alias: Some(Idiom(vec![Part::Field("foo".to_owned())])),
 				},
 				Field::Single {
 					expr: Expr::Literal(Literal::Array(vec![
@@ -516,113 +490,86 @@ fn statements() -> Vec<TopLevelExpr> {
 					alias: None,
 				},
 			]),
-			omit: Some(Idioms(vec![Idiom(vec![Part::Field(Ident::from_strand(
-				strand!("bar").to_owned(),
-			))])])),
+			omit: vec![Expr::Idiom(Idiom(vec![Part::Field("bar".to_string())]))],
 			only: true,
-			what: vec![
-				Expr::Table(Ident::from_strand(strand!("a").to_owned())),
-				Expr::Literal(Literal::Integer(1)),
-			],
+			what: vec![Expr::Table("a".to_owned()), Expr::Literal(Literal::Integer(1))],
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Expr::Literal(Literal::Bool(true)))),
 			split: Some(Splits(vec![
-				Split(Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned()))])),
-				Split(Idiom(vec![Part::Field(Ident::from_strand(strand!("bar").to_owned()))])),
+				Split(Idiom(vec![Part::Field("foo".to_owned())])),
+				Split(Idiom(vec![Part::Field("bar".to_owned())])),
 			])),
 			group: Some(Groups(vec![
-				Group(Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned()))])),
-				Group(Idiom(vec![Part::Field(Ident::from_strand(strand!("bar").to_owned()))])),
+				Group(Idiom(vec![Part::Field("foo".to_owned())])),
+				Group(Idiom(vec![Part::Field("bar".to_owned())])),
 			])),
 			order: Some(Ordering::Order(OrderList(vec![Order {
-				value: Idiom(vec![Part::Field(Ident::from_strand(strand!("foo").to_owned()))]),
+				value: Idiom(vec![Part::Field("foo".to_owned())]),
 				collate: true,
 				numeric: true,
 				direction: true,
 			}]))),
 			limit: Some(Limit(Expr::Literal(Literal::RecordId(RecordIdLit {
 				table: "a".to_owned(),
-				key: RecordIdKeyLit::String(strand!("b").to_owned()),
+				key: RecordIdKeyLit::String("b".to_owned()),
 			})))),
 			start: Some(Start(Expr::Literal(Literal::Object(vec![ObjectEntry {
 				key: "a".to_owned(),
 				value: Expr::Literal(Literal::Bool(true)),
 			}])))),
 			fetch: Some(Fetchs(vec![Fetch(ident_field("foo"))])),
-			version: Some(Expr::Literal(Literal::Datetime(Datetime(expected_datetime)))),
+			version: Some(Expr::Literal(Literal::Datetime(PublicDatetime::from(
+				expected_datetime,
+			)))),
 			timeout: None,
 			parallel: false,
 			tempfiles: false,
 			explain: Some(Explain(true)),
 		}))),
 		TopLevelExpr::Expr(Expr::Let(Box::new(SetStatement {
-			name: Ident::from_strand(strand!("param").to_owned()),
+			name: "param".to_owned(),
 			what: Expr::Literal(Literal::Integer(1)),
 			kind: None,
 		}))),
 		TopLevelExpr::Show(ShowStatement {
-			table: Some(Ident::from_strand(strand!("foo").to_owned())),
+			table: Some("foo".to_owned()),
 			since: ShowSince::Versionstamp(1),
 			limit: Some(10),
 		}),
 		TopLevelExpr::Show(ShowStatement {
 			table: None,
-			since: ShowSince::Timestamp(Datetime(expected_datetime)),
+			since: ShowSince::Timestamp(PublicDatetime::from(expected_datetime)),
 			limit: None,
 		}),
 		TopLevelExpr::Expr(Expr::Sleep(Box::new(SleepStatement {
-			duration: Duration(std::time::Duration::from_secs(1)),
+			duration: PublicDuration::from_secs(1),
 		}))),
-		TopLevelExpr::Expr(Expr::Throw(Box::new(Expr::Literal(Literal::Duration(Duration(
-			std::time::Duration::from_secs(1),
-		)))))),
+		TopLevelExpr::Expr(Expr::Throw(Box::new(Expr::Literal(Literal::Duration(
+			PublicDuration::from_secs(1),
+		))))),
 		TopLevelExpr::Expr(Expr::Insert(Box::new(InsertStatement {
-			into: Some(Expr::Param(Param::from_strand(strand!("foo").to_owned()))),
+			into: Some(Expr::Param(Param::new("foo".to_owned()))),
 			data: Data::ValuesExpression(vec![
 				vec![
-					(
-						Idiom(vec![Part::Field(Ident::from_strand(strand!("a").to_owned()))]),
-						Expr::Literal(Literal::Integer(1)),
-					),
-					(
-						Idiom(vec![Part::Field(Ident::from_strand(strand!("b").to_owned()))]),
-						Expr::Literal(Literal::Integer(2)),
-					),
-					(
-						Idiom(vec![Part::Field(Ident::from_strand(strand!("c").to_owned()))]),
-						Expr::Literal(Literal::Integer(3)),
-					),
+					(Idiom(vec![Part::Field("a".to_owned())]), Expr::Literal(Literal::Integer(1))),
+					(Idiom(vec![Part::Field("b".to_owned())]), Expr::Literal(Literal::Integer(2))),
+					(Idiom(vec![Part::Field("c".to_owned())]), Expr::Literal(Literal::Integer(3))),
 				],
 				vec![
-					(
-						Idiom(vec![Part::Field(Ident::from_strand(strand!("a").to_owned()))]),
-						Expr::Literal(Literal::Integer(4)),
-					),
-					(
-						Idiom(vec![Part::Field(Ident::from_strand(strand!("b").to_owned()))]),
-						Expr::Literal(Literal::Integer(5)),
-					),
-					(
-						Idiom(vec![Part::Field(Ident::from_strand(strand!("c").to_owned()))]),
-						Expr::Literal(Literal::Integer(6)),
-					),
+					(Idiom(vec![Part::Field("a".to_owned())]), Expr::Literal(Literal::Integer(4))),
+					(Idiom(vec![Part::Field("b".to_owned())]), Expr::Literal(Literal::Integer(5))),
+					(Idiom(vec![Part::Field("c".to_owned())]), Expr::Literal(Literal::Integer(6))),
 				],
 			]),
 			ignore: true,
 			update: Some(Data::UpdateExpression(vec![
 				Assignment {
-					place: Idiom(vec![
-						Part::Field(Ident::from_strand(strand!("a").to_owned())),
-						Part::Field(Ident::from_strand(strand!("b").to_owned())),
-					]),
+					place: Idiom(vec![Part::Field("a".to_owned()), Part::Field("b".to_owned())]),
 					operator: crate::sql::AssignOperator::Extend,
 					value: Expr::Literal(Literal::Null),
 				},
 				Assignment {
-					place: Idiom(vec![
-						Part::Field(Ident::from_strand(strand!("c").to_owned())),
-						Part::Field(Ident::from_strand(strand!("d").to_owned())),
-					]),
+					place: Idiom(vec![Part::Field("c".to_owned()), Part::Field("d".to_owned())]),
 					operator: crate::sql::AssignOperator::Add,
 					value: Expr::Literal(Literal::None),
 				},
@@ -634,7 +581,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			relation: false,
 		}))),
 		TopLevelExpr::Kill(KillStatement {
-			id: Expr::Literal(Literal::Uuid(Uuid(uuid::uuid!(
+			id: Expr::Literal(Literal::Uuid(PublicUuid::from(uuid::uuid!(
 				"e72bee20-f49b-11ec-b939-0242ac120002"
 			)))),
 		}),
@@ -646,7 +593,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			only: true,
 			through: Expr::Literal(Literal::RecordId(RecordIdLit {
 				table: "a".to_owned(),
-				key: RecordIdKeyLit::String(strand!("b").to_owned()),
+				key: RecordIdKeyLit::String("b".to_owned()),
 			})),
 			from: Expr::Literal(Literal::Array(vec![
 				Expr::Literal(Literal::Integer(1)),
@@ -654,7 +601,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			])),
 			to: Expr::Create(Box::new(CreateStatement {
 				only: false,
-				what: vec![Expr::Table(Ident::from_strand(strand!("foo").to_owned()))],
+				what: vec![Expr::Table("foo".to_owned())],
 				data: None,
 				output: None,
 				timeout: None,
@@ -663,7 +610,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			})),
 			uniq: true,
 			data: Some(Data::SetExpression(vec![Assignment {
-				place: Idiom(vec![Part::Field(Ident::from_strand(strand!("a").to_owned()))]),
+				place: Idiom(vec![Part::Field("a".to_owned())]),
 				operator: AssignOperator::Add,
 				value: Expr::Literal(Literal::Integer(1)),
 			}])),
@@ -673,84 +620,74 @@ fn statements() -> Vec<TopLevelExpr> {
 		}))),
 		TopLevelExpr::Expr(Expr::Remove(Box::new(RemoveStatement::Function(
 			RemoveFunctionStatement {
-				name: Ident::new("foo::bar".to_owned()).unwrap(),
+				name: "foo::bar".to_owned(),
 				if_exists: false,
 			},
 		)))),
 		TopLevelExpr::Expr(Expr::Remove(Box::new(RemoveStatement::Field(RemoveFieldStatement {
-			name: Idiom(vec![
-				Part::Field(Ident::from_strand(strand!("foo").to_owned())),
-				Part::Field(Ident::from_strand(strand!("bar").to_owned())),
+			name: Expr::Idiom(Idiom(vec![
+				Part::Field("foo".to_string()),
+				Part::Field("bar".to_string()),
 				Part::Value(Expr::Literal(Literal::Integer(10))),
-			]),
-			what: Ident::from_strand(strand!("bar").to_owned()),
+			])),
+			what: Expr::Idiom(Idiom(vec![Part::Field("bar".to_string())])),
 			if_exists: false,
 		})))),
 		TopLevelExpr::Expr(Expr::Update(Box::new(UpdateStatement {
 			only: true,
 			what: vec![Expr::Idiom(Idiom(vec![
-				Part::Field(Ident::from_strand(strand!("a").to_owned())),
+				Part::Field("a".to_owned()),
 				Part::Graph(Lookup {
 					kind: LookupKind::Graph(Dir::Out),
-					what: vec![LookupSubject::Table(Ident::from_strand(strand!("b").to_owned()))],
+					what: vec![LookupSubject::Table("b".to_owned())],
 					..Default::default()
 				}),
 			]))],
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Expr::Literal(Literal::Bool(true)))),
 			data: Some(Data::UnsetExpression(vec![
+				Idiom(vec![Part::Field("foo".to_owned()), Part::Flatten]),
 				Idiom(vec![
-					Part::Field(Ident::from_strand(strand!("foo").to_owned())),
-					Part::Flatten,
-				]),
-				Idiom(vec![
-					Part::Field(Ident::from_strand(strand!("a").to_owned())),
+					Part::Field("a".to_owned()),
 					Part::Graph(Lookup {
 						kind: LookupKind::Graph(Dir::Out),
-						what: vec![LookupSubject::Table(Ident::from_strand(
-							strand!("b").to_owned(),
-						))],
+						what: vec![LookupSubject::Table("b".to_owned())],
 						..Default::default()
 					}),
 				]),
-				Idiom(vec![Part::Field(Ident::from_strand(strand!("c").to_owned())), Part::All]),
+				Idiom(vec![Part::Field("c".to_owned()), Part::All]),
 			])),
 			output: Some(Output::Diff),
-			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))))),
 			parallel: true,
 			explain: Some(Explain(true)),
 		}))),
 		TopLevelExpr::Expr(Expr::Upsert(Box::new(UpsertStatement {
 			only: true,
 			what: vec![Expr::Idiom(Idiom(vec![
-				Part::Field(Ident::from_strand(strand!("a").to_owned())),
+				Part::Field("a".to_owned()),
 				Part::Graph(Lookup {
 					kind: LookupKind::Graph(Dir::Out),
-					what: vec![LookupSubject::Table(Ident::from_strand(strand!("b").to_owned()))],
+					what: vec![LookupSubject::Table("b".to_owned())],
 					..Default::default()
 				}),
 			]))],
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Expr::Literal(Literal::Bool(true)))),
 			data: Some(Data::UnsetExpression(vec![
+				Idiom(vec![Part::Field("foo".to_owned()), Part::Flatten]),
 				Idiom(vec![
-					Part::Field(Ident::from_strand(strand!("foo").to_owned())),
-					Part::Flatten,
-				]),
-				Idiom(vec![
-					Part::Field(Ident::from_strand(strand!("a").to_owned())),
+					Part::Field("a".to_owned()),
 					Part::Graph(Lookup {
 						kind: LookupKind::Graph(Dir::Out),
-						what: vec![LookupSubject::Table(Ident::from_strand(
-							strand!("b").to_owned(),
-						))],
+						what: vec![LookupSubject::Table("b".to_owned())],
 						..Default::default()
 					}),
 				]),
-				Idiom(vec![Part::Field(Ident::from_strand(strand!("c").to_owned())), Part::All]),
+				Idiom(vec![Part::Field("c".to_owned()), Part::All]),
 			])),
 			output: Some(Output::Diff),
-			timeout: Some(Timeout(Duration(std::time::Duration::from_secs(1)))),
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))))),
 			parallel: true,
 			explain: Some(Explain(true)),
 		}))),
@@ -758,8 +695,8 @@ fn statements() -> Vec<TopLevelExpr> {
 			receiver: Function::Script(Script(" ((1 + 1)) ".to_owned())),
 			arguments: Vec::new(),
 		}))),
-		TopLevelExpr::Expr(Expr::Literal(Literal::Strand(strand!("a b c d e f g h").to_owned()))),
-		TopLevelExpr::Expr(Expr::Literal(Literal::Uuid(Uuid(uuid::Uuid::from_u128(
+		TopLevelExpr::Expr(Expr::Literal(Literal::String("a b c d e f g h".to_owned()))),
+		TopLevelExpr::Expr(Expr::Literal(Literal::Uuid(PublicUuid::from(uuid::Uuid::from_u128(
 			0xffffffff_ffff_ffff_ffff_ffffffffffff,
 		))))),
 		TopLevelExpr::Expr(Expr::Literal(Literal::RecordId(RecordIdLit {
@@ -772,7 +709,7 @@ fn statements() -> Vec<TopLevelExpr> {
 					.collect(),
 			),
 		}))),
-		TopLevelExpr::Expr(Expr::Literal(Literal::Regex(Regex("a b c d e f".try_into().unwrap())))),
+		TopLevelExpr::Expr(Expr::Literal(Literal::Regex("a b c d e f".parse().unwrap()))),
 		TopLevelExpr::Expr(Expr::Literal(Literal::Float(-123.456e10))),
 	]
 }

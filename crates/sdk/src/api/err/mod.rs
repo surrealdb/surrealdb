@@ -2,13 +2,18 @@ use std::io;
 use std::path::PathBuf;
 
 use serde::Serialize;
+use surrealdb_core::dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError};
+use surrealdb_core::rpc::DbResultError;
+use surrealdb_types::Value;
 use thiserror::Error;
 
-use crate::Value;
-use crate::api::Response;
-use crate::core::dbs::capabilities::{ParseFuncTargetError, ParseNetTargetError};
+use crate::api::IndexedResults;
 
-/// An error originating from a remote SurrealDB database
+/// A specialized `Result` type
+#[allow(dead_code)]
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// An error originating from a remote or local SurrealDB database.
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum Error {
@@ -16,12 +21,12 @@ pub enum Error {
 	#[error("{0}")]
 	Query(String),
 
-	/// There was an error processing a remote HTTP request
-	#[error("There was an error processing a remote HTTP request: {0}")]
+	/// There was an error processing an HTTP request
+	#[error("There was an error processing an HTTP request: {0}")]
 	Http(String),
 
-	/// There was an error processing a remote WS request
-	#[error("There was an error processing a remote WS request: {0}")]
+	/// There was an error processing a WebSocket request
+	#[error("There was an error processing a WebSocket request: {0}")]
 	Ws(String),
 
 	/// The specified scheme does not match any supported protocol or storage
@@ -38,7 +43,7 @@ pub enum Error {
 	AlreadyConnected,
 
 	/// `Query::bind` not called with an object nor a key/value tuple
-	#[error("Invalid bindings: {0}")]
+	#[error("Invalid bindings: {0:?}")]
 	InvalidBindings(Value),
 
 	/// Tried to use a range query on a record ID
@@ -60,10 +65,6 @@ pub enum Error {
 	/// Tried to use a range query on an existing range
 	#[error("Tried to add a range to a resource which was already a range")]
 	RangeOnRange,
-
-	/// Tried to use a range query on an unspecified resource
-	#[error("Tried to add a range to an unspecified resource")]
-	RangeOnUnspecified,
 
 	/// Tried to use `table:id` syntax as a method parameter when `(table, id)`
 	/// should be used instead
@@ -103,7 +104,7 @@ pub enum Error {
 	InvalidUrl(String),
 
 	/// Failed to convert a `sql::Value` to `T`
-	#[error("Failed to convert `{value}` to `T`: {error}")]
+	#[error("Failed to convert `{value:?}` to `T`: {error}")]
 	FromValue {
 		value: Value,
 		error: String,
@@ -117,7 +118,7 @@ pub enum Error {
 	},
 
 	/// Failed to serialize `sql::Value` to JSON string
-	#[error("Failed to serialize `{value}` to JSON string: {error}")]
+	#[error("Failed to serialize `{value:?}` to JSON string: {error}")]
 	ToJsonString {
 		value: Value,
 		error: String,
@@ -155,7 +156,7 @@ pub enum Error {
 	/// Tried to take only a single result when the query returned multiple
 	/// records
 	#[error("Tried to take only a single result from a query that contains multiple")]
-	LossyTake(Response),
+	LossyTake(Box<IndexedResults>),
 
 	/// The protocol or storage engine being used does not support backups on
 	/// the architecture it's running on
@@ -199,10 +200,6 @@ pub enum Error {
 	#[error("Live queries on edges not supported")]
 	LiveOnEdges,
 
-	/// Tried to use a range query on an unspecified resource
-	#[error("Live queries on unspecified resource not supported")]
-	LiveOnUnspecified,
-
 	/// Tried to access a query statement as a live query when it isn't a live
 	/// query
 	#[error("Query statement {0} is not a live query")]
@@ -233,10 +230,6 @@ pub enum Error {
 	/// Tried to insert on an edge or edges
 	#[error("Insert queries on ranges are not supported")]
 	InsertOnRange,
-
-	/// Tried to insert on an unspecified resource with no data
-	#[error("Insert queries on unspecified resource with no data are not supported")]
-	InsertOnUnspecified,
 
 	#[error("Crendentials for signin and signup should be an object")]
 	CrendentialsNotObject,
@@ -273,6 +266,33 @@ pub enum Error {
 	/// The engine used does not support data versioning
 	#[error("The '{0}' engine does not support data versioning")]
 	VersionsNotSupported(String),
+
+	/// Method not found
+	#[error("Method not found: {0}")]
+	MethodNotFound(String),
+
+	/// Method not allowed
+	#[error("Method not allowed: {0}")]
+	MethodNotAllowed(String),
+
+	/// Bad live query configuration
+	#[error("Bad live query configuration: {0}")]
+	BadLiveQueryConfig(String),
+
+	/// Bad GraphQL configuration
+	#[error("Bad GraphQL configuration: {0}")]
+	BadGraphQLConfig(String),
+
+	/// A thrown error from the database
+	#[error("Thrown error: {0}")]
+	Thrown(String),
+	/// The message is too long
+	#[error("The message is too long: {0}")]
+	MessageTooLong(usize),
+
+	/// The write buffer size is too small
+	#[error("The write buffer size is too small")]
+	MaxWriteBufferSizeTooSmall,
 }
 
 impl serde::ser::Error for Error {
@@ -294,10 +314,262 @@ impl serde::de::Error for Error {
 }
 
 impl Serialize for Error {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+	fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
 	where
 		S: serde::Serializer,
 	{
 		serializer.serialize_str(self.to_string().as_str())
+	}
+}
+
+// There is a 1:1 mapping between DbResultError and Error
+impl From<DbResultError> for Error {
+	fn from(err: DbResultError) -> Self {
+		match err {
+			DbResultError::ParseError(message) => Error::ParseError(message),
+			DbResultError::InvalidRequest(message) => Error::InvalidRequest(message),
+			DbResultError::MethodNotFound(message) => Error::MethodNotFound(message),
+			DbResultError::MethodNotAllowed(message) => Error::MethodNotAllowed(message),
+			DbResultError::InvalidParams(message) => Error::InvalidParams(message),
+			DbResultError::LiveQueryNotSupported => Error::LiveQueriesNotSupported,
+			DbResultError::BadLiveQueryConfig(message) => Error::BadLiveQueryConfig(message),
+			DbResultError::BadGraphQLConfig(message) => Error::BadGraphQLConfig(message),
+			DbResultError::InternalError(message) => Error::InternalError(message),
+			DbResultError::Thrown(message) => Error::Thrown(message),
+			DbResultError::SerializationError(message) => Error::SerializeValue(message),
+			DbResultError::DeserializationError(message) => Error::DeSerializeValue(message),
+			DbResultError::ClientSideError(message) => Error::Query(message),
+			DbResultError::InvalidAuth(message) => Error::Query(message),
+			DbResultError::QueryNotExecuted(message) => Error::Query(message),
+			DbResultError::QueryTimedout => Error::Query("Query timed out".to_string()),
+			DbResultError::QueryCancelled => Error::Query(
+				"The query was not executed due to a cancelled transaction".to_string(),
+			),
+		}
+	}
+}
+
+// Allow conversion from anyhow::Error (from surrealdb_types) to our Error
+impl From<surrealdb_types::anyhow::Error> for Error {
+	fn from(error: surrealdb_types::anyhow::Error) -> Self {
+		Error::InternalError(error.to_string())
+	}
+}
+
+// Allow conversion from async_channel::RecvError
+impl From<async_channel::RecvError> for Error {
+	fn from(error: async_channel::RecvError) -> Self {
+		Error::InternalError(format!("Channel receive error: {}", error))
+	}
+}
+
+// Allow conversion from std::io::Error
+impl From<std::io::Error> for Error {
+	fn from(error: std::io::Error) -> Self {
+		Error::InternalError(format!("I/O error: {}", error))
+	}
+}
+
+// Allow conversion from reqwest::Error
+#[cfg(feature = "protocol-http")]
+impl From<reqwest::Error> for Error {
+	fn from(error: reqwest::Error) -> Self {
+		Error::Http(error.to_string())
+	}
+}
+
+// Allow conversion from url::ParseError
+impl From<url::ParseError> for Error {
+	fn from(error: url::ParseError) -> Self {
+		Error::InvalidUrl(error.to_string())
+	}
+}
+
+// Allow conversion from semver::Error
+impl From<semver::Error> for Error {
+	fn from(error: semver::Error) -> Self {
+		Error::InvalidSemanticVersion(error.to_string())
+	}
+}
+
+// Allow conversion from RpcError from core
+impl From<surrealdb_core::rpc::RpcError> for Error {
+	fn from(error: surrealdb_core::rpc::RpcError) -> Self {
+		// Convert to DbResultError first, then to our Error
+		DbResultError::from(error).into()
+	}
+}
+
+// Allow conversion from SDK Error to DbResultError (for sending errors over the wire)
+impl From<Error> for DbResultError {
+	fn from(error: Error) -> Self {
+		match error {
+			Error::Query(msg) => DbResultError::Thrown(msg),
+			Error::Http(msg) => DbResultError::InternalError(format!("HTTP error: {}", msg)),
+			Error::Ws(msg) => DbResultError::InternalError(format!("WebSocket error: {}", msg)),
+			Error::Scheme(msg) => {
+				DbResultError::InvalidRequest(format!("Unsupported scheme: {}", msg))
+			}
+			Error::ConnectionUninitialised => {
+				DbResultError::InternalError("Connection uninitialised".to_string())
+			}
+			Error::AlreadyConnected => {
+				DbResultError::InternalError("Already connected".to_string())
+			}
+			Error::InvalidBindings(_) => {
+				DbResultError::InvalidParams("Invalid bindings".to_string())
+			}
+			Error::RangeOnRecordId => {
+				DbResultError::InvalidParams("Range on record ID not supported".to_string())
+			}
+			Error::RangeOnObject => {
+				DbResultError::InvalidParams("Range on object not supported".to_string())
+			}
+			Error::RangeOnArray => {
+				DbResultError::InvalidParams("Range on array not supported".to_string())
+			}
+			Error::RangeOnEdges => {
+				DbResultError::InvalidParams("Range on edges not supported".to_string())
+			}
+			Error::RangeOnRange => {
+				DbResultError::InvalidParams("Range on range not supported".to_string())
+			}
+			Error::TableColonId {
+				table,
+			} => DbResultError::InvalidParams(format!("Table name '{}' contains colon", table)),
+			Error::DuplicateRequestId(id) => {
+				DbResultError::InternalError(format!("Duplicate request ID: {}", id))
+			}
+			Error::InvalidRequest(msg) => DbResultError::InvalidRequest(msg),
+			Error::InvalidParams(msg) => DbResultError::InvalidParams(msg),
+			Error::InternalError(msg) => DbResultError::InternalError(msg),
+			Error::ParseError(msg) => DbResultError::ParseError(msg),
+			Error::InvalidSemanticVersion(msg) => {
+				DbResultError::InvalidParams(format!("Invalid semantic version: {}", msg))
+			}
+			Error::InvalidUrl(msg) => {
+				DbResultError::InvalidRequest(format!("Invalid URL: {}", msg))
+			}
+			Error::FromValue {
+				value: _,
+				error,
+			} => DbResultError::InvalidParams(format!("Value conversion error: {}", error)),
+			Error::ResponseFromBinary {
+				error: _,
+				..
+			} => DbResultError::DeserializationError(
+				"Binary response deserialization error".to_string(),
+			),
+			Error::ToJsonString {
+				value: _,
+				error,
+			} => DbResultError::SerializationError(format!("JSON serialization error: {}", error)),
+			Error::FromJsonString {
+				string: _,
+				error,
+			} => DbResultError::DeserializationError(format!(
+				"JSON deserialization error: {}",
+				error
+			)),
+			Error::InvalidNsName(name) => {
+				DbResultError::InvalidParams(format!("Invalid namespace name: {:?}", name))
+			}
+			Error::InvalidDbName(name) => {
+				DbResultError::InvalidParams(format!("Invalid database name: {:?}", name))
+			}
+			Error::FileOpen {
+				path,
+				error,
+			} => DbResultError::InternalError(format!("Failed to open file {:?}: {}", path, error)),
+			Error::FileRead {
+				path,
+				error,
+			} => DbResultError::InternalError(format!("Failed to read file {:?}: {}", path, error)),
+			Error::LossyTake(_) => DbResultError::InvalidParams("Lossy take operation".to_string()),
+			Error::BackupsNotSupported => {
+				DbResultError::MethodNotAllowed("Backups not supported".to_string())
+			}
+			Error::VersionMismatch {
+				server_version,
+				supported_versions,
+			} => DbResultError::InvalidRequest(format!(
+				"Version mismatch: server {} vs supported {}",
+				server_version, supported_versions
+			)),
+			Error::BuildMetadataMismatch {
+				server_metadata,
+				supported_metadata,
+			} => DbResultError::InvalidRequest(format!(
+				"Build metadata mismatch: server {} vs supported {}",
+				server_metadata, supported_metadata
+			)),
+			Error::LiveQueriesNotSupported => DbResultError::LiveQueryNotSupported,
+			Error::LiveOnObject => DbResultError::BadLiveQueryConfig(
+				"Live queries on objects not supported".to_string(),
+			),
+			Error::LiveOnArray => DbResultError::BadLiveQueryConfig(
+				"Live queries on arrays not supported".to_string(),
+			),
+			Error::LiveOnEdges => {
+				DbResultError::BadLiveQueryConfig("Live queries on edges not supported".to_string())
+			}
+			Error::NotLiveQuery(idx) => DbResultError::BadLiveQueryConfig(format!(
+				"Query statement {} is not a live query",
+				idx
+			)),
+			Error::QueryIndexOutOfBounds(idx) => {
+				DbResultError::InvalidParams(format!("Query statement {} is out of bounds", idx))
+			}
+			Error::ResponseAlreadyTaken => {
+				DbResultError::InternalError("Response already taken".to_string())
+			}
+			Error::InsertOnObject => DbResultError::InvalidParams(
+				"Insert queries on objects are not supported".to_string(),
+			),
+			Error::InsertOnArray => DbResultError::InvalidParams(
+				"Insert queries on arrays are not supported".to_string(),
+			),
+			Error::InsertOnEdges => DbResultError::InvalidParams(
+				"Insert queries on edges are not supported".to_string(),
+			),
+			Error::InsertOnRange => DbResultError::InvalidParams(
+				"Insert queries on ranges are not supported".to_string(),
+			),
+			Error::CrendentialsNotObject => DbResultError::InvalidParams(
+				"Credentials for signin and signup should be an object".to_string(),
+			),
+			Error::InvalidNetTarget(err) => {
+				DbResultError::InvalidParams(format!("Invalid network target: {}", err))
+			}
+			Error::InvalidFuncTarget(err) => {
+				DbResultError::InvalidParams(format!("Invalid function target: {}", err))
+			}
+			Error::SerializeValue(msg) => DbResultError::SerializationError(msg),
+			Error::DeSerializeValue(msg) => DbResultError::DeserializationError(msg),
+			Error::Serializer(msg) => DbResultError::SerializationError(msg),
+			Error::Deserializer(msg) => DbResultError::DeserializationError(msg),
+			Error::InvalidResponse(msg) => {
+				DbResultError::InternalError(format!("Invalid response: {}", msg))
+			}
+			Error::UnserializableValue(msg) => DbResultError::SerializationError(msg),
+			Error::ReceivedInvalidValue => {
+				DbResultError::InvalidParams("Received invalid value".to_string())
+			}
+			Error::VersionsNotSupported(engine) => DbResultError::MethodNotAllowed(format!(
+				"The '{}' engine does not support data versioning",
+				engine
+			)),
+			Error::MethodNotFound(msg) => DbResultError::MethodNotFound(msg),
+			Error::MethodNotAllowed(msg) => DbResultError::MethodNotAllowed(msg),
+			Error::BadLiveQueryConfig(msg) => DbResultError::BadLiveQueryConfig(msg),
+			Error::BadGraphQLConfig(msg) => DbResultError::BadGraphQLConfig(msg),
+			Error::Thrown(msg) => DbResultError::Thrown(msg),
+			Error::MessageTooLong(len) => {
+				DbResultError::InternalError(format!("Message too long: {}", len))
+			}
+			Error::MaxWriteBufferSizeTooSmall => {
+				DbResultError::InternalError("Write buffer size too small".to_string())
+			}
+		}
 	}
 }

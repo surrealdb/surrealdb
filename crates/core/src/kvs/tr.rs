@@ -7,7 +7,7 @@ use anyhow::Result;
 #[allow(unused_imports, reason = "Not used when none of the storage backends are enabled.")]
 use super::api::Transaction;
 use super::{Key, Val, Version};
-use crate::catalog::{DatabaseId, NamespaceId, TableDefinition, TableId};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableDefinition, TableId};
 use crate::cf;
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::doc::CursorRecord;
@@ -30,6 +30,27 @@ pub enum Check {
 	None,
 	Warn,
 	Error,
+}
+
+impl Check {
+	const MSG: &'static str = "A transaction was dropped without being committed or cancelled";
+
+	pub fn drop_check(&self, done: bool, write: bool) {
+		if done || !write {
+			return;
+		}
+		match self {
+			Check::None => {
+				trace!("{}", Self::MSG);
+			}
+			Check::Warn => {
+				warn!("{}", Self::MSG);
+			}
+			Check::Error => {
+				error!("{}", Self::MSG);
+			}
+		}
+	}
 }
 
 /// Specifies whether the transaction is read-only or writeable.
@@ -57,7 +78,7 @@ impl From<bool> for LockType {
 
 /// A set of undoable updates and requests against a dataset.
 pub struct Transactor {
-	pub(super) inner: Box<dyn super::api::Transaction>,
+	pub(super) inner: Box<dyn Transaction>,
 	pub(super) stash: Stash,
 	pub(super) cf: cf::Writer,
 }
@@ -601,7 +622,7 @@ impl Transactor {
 
 	/// Gets the next namespace id
 	pub(crate) async fn get_next_ns_id(&mut self) -> Result<NamespaceId> {
-		let key = crate::key::root::ni::Ni::default().encode_key()?;
+		let key = crate::key::root::ni::NamespaceIdGeneratorKey::default().encode_key()?;
 		let mut seq = self.get_idg(&key).await?;
 		let nid = seq.get_next_id();
 		self.stash.set(key, seq.clone());
@@ -634,6 +655,20 @@ impl Transactor {
 		let (k, v) = seq.finish().unwrap();
 		self.replace(&k, &v).await?;
 		Ok(TableId(nid))
+	}
+
+	pub(crate) async fn get_next_ix_id(
+		&mut self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<IndexId> {
+		let key = crate::key::database::ix::new(ns, db).encode_key()?;
+		let mut seq = self.get_idg(&key).await?;
+		let nid = seq.get_next_id();
+		self.stash.set(key, seq.clone());
+		let (k, v) = seq.finish().unwrap();
+		self.replace(&k, &v).await?;
+		Ok(IndexId(nid))
 	}
 
 	// complete_changes will complete the changefeed recording for the given

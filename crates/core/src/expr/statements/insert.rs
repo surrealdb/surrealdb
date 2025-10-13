@@ -7,13 +7,14 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::expression::VisitExpression;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Datetime, RecordId, Table};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct InsertStatement {
+pub(crate) struct InsertStatement {
 	pub into: Option<Expr>,
 	pub data: Data,
 	/// Does the statement have the ignore clause.
@@ -54,8 +55,9 @@ impl InsertStatement {
 		// Check if there is a timeout
 		let ctx = match self.timeout.as_ref() {
 			Some(timeout) => {
+				let x = timeout.compute(stk, ctx, opt, doc).await?.0;
 				let mut ctx = MutableContext::new(ctx);
-				ctx.add_timeout(*timeout.0)?;
+				ctx.add_timeout(x)?;
 				ctx.freeze()
 			}
 			None => ctx.clone(),
@@ -136,6 +138,19 @@ impl InsertStatement {
 	}
 }
 
+impl VisitExpression for InsertStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.into.iter().for_each(|expr| expr.visit(visitor));
+		self.data.visit(visitor);
+		self.update.iter().for_each(|data| data.visit(visitor));
+		self.output.iter().for_each(|output| output.visit(visitor));
+		self.version.iter().for_each(|expr| expr.visit(visitor));
+	}
+}
+
 impl fmt::Display for InsertStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str("INSERT")?;
@@ -194,7 +209,7 @@ fn iterable(id: RecordId, v: Value, relation: bool) -> Result<Iterable> {
 
 fn gen_id(v: &Value, into: &Option<Table>) -> Result<RecordId> {
 	match into {
-		Some(into) => v.rid().generate(into.clone().into_strand(), true),
+		Some(into) => v.rid().generate(into.clone().into_string(), true),
 		None => match v.rid() {
 			Value::RecordId(v) => Ok(v),
 			v => Err(anyhow::Error::new(Error::InsertStatementId {

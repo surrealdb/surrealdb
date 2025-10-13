@@ -2,11 +2,18 @@ use std::fmt;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
+
+use crate::val::IndexFormat;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd)]
+#[derive(
+	Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Hash, PartialOrd, Encode, BorrowDecode,
+)]
 #[serde(rename = "$surrealdb::private::File")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 pub struct File {
 	pub bucket: String,
 	pub key: String,
@@ -33,6 +40,21 @@ impl File {
 
 	pub fn display_inner(&self) -> String {
 		format!("{}:{}", fmt_inner(&self.bucket, true), fmt_inner(&self.key, false))
+	}
+}
+
+impl From<surrealdb_types::File> for File {
+	fn from(v: surrealdb_types::File) -> Self {
+		Self {
+			bucket: v.bucket().to_string(),
+			key: v.key().to_string(),
+		}
+	}
+}
+
+impl From<File> for surrealdb_types::File {
+	fn from(x: File) -> Self {
+		surrealdb_types::File::new(x.bucket, x.key)
 	}
 }
 

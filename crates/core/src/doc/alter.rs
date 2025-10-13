@@ -39,7 +39,7 @@ impl Document {
 				let existing_id = self.current.doc.as_ref().pick(&*ID);
 				if !existing_id.is_none() {
 					// The document already has an ID, use it
-					let id = existing_id.generate(tb.clone().into_strand(), false)?;
+					let id = existing_id.generate(tb.clone(), false)?;
 					self.id = Some(Arc::new(id));
 					return Ok(());
 				}
@@ -48,14 +48,14 @@ impl Document {
 				let id = match stm.data() {
 					// There is a data clause so fetch a record id
 					Some(data) => match data.rid(stk, ctx, opt).await? {
-						Value::None => RecordId::random_for_table(tb.clone().into_string()),
+						Value::None => RecordId::random_for_table(tb.clone()),
 						// Generate a new id from the id field
 						// TODO: Handle null byte
-						id => id.generate(tb.clone().into_strand(), false)?,
+						id => id.generate(tb.clone(), false)?,
 						// Generate a new random table id
 					},
 					// There is no data clause so create a record id
-					None => RecordId::random_for_table(tb.clone().into_string()),
+					None => RecordId::random_for_table(tb.clone()),
 				};
 				// The id field can not be a record range
 				ensure!(
@@ -113,7 +113,7 @@ impl Document {
 			// If this document existed before, check the `in` field
 			match (self.initial.doc.as_ref().pick(&*IN), self.is_new()) {
 				// If the document id matches, then all good
-				(Value::RecordId(id), false) if id.eq(l) => {
+				(Value::RecordId(id), false) if id == *l => {
 					self.current.doc.to_mut().put(&*IN, l.clone().into());
 				}
 				// If the document is new then all good
@@ -130,7 +130,7 @@ impl Document {
 			// If this document existed before, check the `out` field
 			match (self.initial.doc.as_ref().pick(&*OUT), self.is_new()) {
 				// If the document id matches, then all good
-				(Value::RecordId(id), false) if id.eq(r) => {
+				(Value::RecordId(id), false) if id == *r => {
 					self.current.doc.to_mut().put(&*OUT, r.clone().into());
 				}
 				// If the document is new then all good
@@ -175,8 +175,6 @@ impl Document {
 		if let Workable::Relate(_, _, Some(v)) = &self.extras {
 			self.current.doc.to_mut().merge(Value::clone(v))?;
 		}
-		// Set default field values
-		self.current.doc.to_mut().def(&rid);
 		// Carry on
 		Ok(())
 	}
@@ -509,8 +507,6 @@ impl Document {
 				x => fail!("Unexpected data clause type: {x:?}"),
 			};
 		};
-		// Set default field values
-		self.current.doc.to_mut().def(&rid);
 		// Carry on
 		Ok(())
 	}

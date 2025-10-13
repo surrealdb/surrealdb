@@ -95,11 +95,17 @@ mod tests {
 	use crate::expr::idiom::Idiom;
 	use crate::syn;
 
+	macro_rules! parse_val {
+		($input:expr) => {
+			crate::val::convert_public_value_to_internal(syn::value($input).unwrap())
+		};
+	}
+
 	#[test]
 	fn compare_none() {
 		let idi: Idiom = Default::default();
-		let one = syn::value("{ test: { other: null, something: 456 } }").unwrap();
-		let two = syn::value("{ test: { other: null, something: 123 } }").unwrap();
+		let one = parse_val!("{ test: { other: null, something: 456 } }");
+		let two = parse_val!("{ test: { other: null, something: 123 } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
@@ -107,8 +113,8 @@ mod tests {
 	#[test]
 	fn compare_basic() {
 		let idi: Idiom = syn::idiom("test.something").unwrap().into();
-		let one = syn::value("{ test: { other: null, something: 456 } }").unwrap();
-		let two = syn::value("{ test: { other: null, something: 123 } }").unwrap();
+		let one = parse_val!("{ test: { other: null, something: 456 } }");
+		let two = parse_val!("{ test: { other: null, something: 123 } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
@@ -116,8 +122,8 @@ mod tests {
 	#[test]
 	fn compare_basic_missing_left() {
 		let idi: Idiom = syn::idiom("test.something").unwrap().into();
-		let one = syn::value("{ test: { other: null } }").unwrap();
-		let two = syn::value("{ test: { other: null, something: 123 } }").unwrap();
+		let one = parse_val!("{ test: { other: null } }");
+		let two = parse_val!("{ test: { other: null, something: 123 } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Less));
 	}
@@ -125,8 +131,8 @@ mod tests {
 	#[test]
 	fn compare_basic_missing_right() {
 		let idi: Idiom = syn::idiom("test.something").unwrap().into();
-		let one = syn::value("{ test: { other: null, something: 456 } }").unwrap();
-		let two = syn::value("{ test: { other: null } }").unwrap();
+		let one = parse_val!("{ test: { other: null, something: 456 } }");
+		let two = parse_val!("{ test: { other: null } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
@@ -134,8 +140,8 @@ mod tests {
 	#[test]
 	fn compare_array() {
 		let idi: Idiom = syn::idiom("test.something.*").unwrap().into();
-		let one = syn::value("{ test: { other: null, something: [4, 5, 6] } }").unwrap();
-		let two = syn::value("{ test: { other: null, something: [1, 2, 3] } }").unwrap();
+		let one = parse_val!("{ test: { other: null, something: [4, 5, 6] } }");
+		let two = parse_val!("{ test: { other: null, something: [1, 2, 3] } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
@@ -143,8 +149,8 @@ mod tests {
 	#[test]
 	fn compare_array_longer_left() {
 		let idi: Idiom = syn::idiom("test.something.*").unwrap().into();
-		let one = syn::value("{ test: { other: null, something: [1, 2, 3, 4, 5, 6] } }").unwrap();
-		let two = syn::value("{ test: { other: null, something: [1, 2, 3] } }").unwrap();
+		let one = parse_val!("{ test: { other: null, something: [1, 2, 3, 4, 5, 6] } }");
+		let two = parse_val!("{ test: { other: null, something: [1, 2, 3] } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
@@ -152,8 +158,8 @@ mod tests {
 	#[test]
 	fn compare_array_longer_right() {
 		let idi: Idiom = syn::idiom("test.something.*").unwrap().into();
-		let one = syn::value("{ test: { other: null, something: [1, 2, 3] } }").unwrap();
-		let two = syn::value("{ test: { other: null, something: [1, 2, 3, 4, 5, 6] } }").unwrap();
+		let one = parse_val!("{ test: { other: null, something: [1, 2, 3] } }");
+		let two = parse_val!("{ test: { other: null, something: [1, 2, 3, 4, 5, 6] } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Less));
 	}
@@ -161,8 +167,8 @@ mod tests {
 	#[test]
 	fn compare_array_missing_left() {
 		let idi: Idiom = syn::idiom("test.something.*").unwrap().into();
-		let one = syn::value("{ test: { other: null, something: null } }").unwrap();
-		let two = syn::value("{ test: { other: null, something: [1, 2, 3] } }").unwrap();
+		let one = parse_val!("{ test: { other: null, something: null } }");
+		let two = parse_val!("{ test: { other: null, something: [1, 2, 3] } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Less));
 	}
@@ -170,8 +176,8 @@ mod tests {
 	#[test]
 	fn compare_array_missing_right() {
 		let idi: Idiom = syn::idiom("test.something.*").unwrap().into();
-		let one = syn::value("{ test: { other: null, something: [4, 5, 6] } }").unwrap();
-		let two = syn::value("{ test: { other: null, something: null } }").unwrap();
+		let one = parse_val!("{ test: { other: null, something: [4, 5, 6] } }");
+		let two = parse_val!("{ test: { other: null, something: null } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
@@ -179,8 +185,8 @@ mod tests {
 	#[test]
 	fn compare_array_missing_value_left() {
 		let idi: Idiom = syn::idiom("test.something.*").unwrap().into();
-		let one = syn::value("{ test: { other: null, something: [1, null, 3] } }").unwrap();
-		let two = syn::value("{ test: { other: null, something: [1, 2, 3] } }").unwrap();
+		let one = parse_val!("{ test: { other: null, something: [1, null, 3] } }");
+		let two = parse_val!("{ test: { other: null, something: [1, 2, 3] } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Less));
 	}
@@ -188,8 +194,8 @@ mod tests {
 	#[test]
 	fn compare_array_missing_value_right() {
 		let idi: Idiom = syn::idiom("test.something.*").unwrap().into();
-		let one = syn::value("{ test: { other: null, something: [1, 2, 3] } }").unwrap();
-		let two = syn::value("{ test: { other: null, something: [1, null, 3] } }").unwrap();
+		let one = parse_val!("{ test: { other: null, something: [1, 2, 3] } }");
+		let two = parse_val!("{ test: { other: null, something: [1, null, 3] } }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater));
 	}
@@ -197,8 +203,8 @@ mod tests {
 	#[test]
 	fn compare_last() {
 		let idi: Idiom = syn::idiom("test[$]").unwrap().into();
-		let one = syn::value("{ test: [1,5] }").unwrap();
-		let two = syn::value("{ test: [2,4] }").unwrap();
+		let one = parse_val!("{ test: [1,5] }");
+		let two = parse_val!("{ test: [2,4] }");
 		let res = one.compare(&two, &idi, false, false);
 		assert_eq!(res, Some(Ordering::Greater))
 	}

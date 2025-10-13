@@ -1,3 +1,4 @@
+use core::f64;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::Bound;
@@ -5,59 +6,63 @@ use std::ops::Bound;
 use reblessive::Stk;
 
 use super::{ParseResult, Parser};
-use crate::sql::Ident;
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
 use crate::syn::parser::mac::{expected, pop_glued};
 use crate::syn::parser::unexpected;
 use crate::syn::token::{Glued, Span, TokenKind, t};
-use crate::val::{
-	self, Array, Duration, Geometry, Number, Object, Range, RecordId, RecordIdKey, Strand, Value,
+use crate::types::{
+	PublicArray, PublicDuration, PublicFile, PublicGeometry, PublicNumber, PublicObject,
+	PublicRange, PublicRecordId, PublicRecordIdKey, PublicUuid, PublicValue,
 };
 
 trait ValueParseFunc {
-	async fn parse(parser: &mut Parser<'_>, stk: &mut Stk) -> ParseResult<Value>;
+	async fn parse(parser: &mut Parser<'_>, stk: &mut Stk) -> ParseResult<PublicValue>;
 }
 
 struct SurrealQL;
 struct Json;
 
 impl ValueParseFunc for SurrealQL {
-	async fn parse(parser: &mut Parser<'_>, stk: &mut Stk) -> ParseResult<Value> {
+	async fn parse(parser: &mut Parser<'_>, stk: &mut Stk) -> ParseResult<PublicValue> {
 		parser.parse_value(stk).await
 	}
 }
 
 impl ValueParseFunc for Json {
-	async fn parse(parser: &mut Parser<'_>, stk: &mut Stk) -> ParseResult<Value> {
+	async fn parse(parser: &mut Parser<'_>, stk: &mut Stk) -> ParseResult<PublicValue> {
 		parser.parse_json(stk).await
 	}
 }
 
 impl Parser<'_> {
 	/// Parse a complete value which cannot contain non-literal expressions.
-	pub async fn parse_value(&mut self, stk: &mut Stk) -> ParseResult<Value> {
+	pub async fn parse_value(&mut self, stk: &mut Stk) -> ParseResult<PublicValue> {
 		let token = self.peek();
 		let res = match token.kind {
 			t!("NONE") => {
 				self.pop_peek();
-				Value::None
+				PublicValue::None
 			}
 			t!("NULL") => {
 				self.pop_peek();
-				Value::Null
+				PublicValue::Null
 			}
 			TokenKind::NaN => {
 				self.pop_peek();
-				Value::Number(Number::Float(f64::NAN))
+				PublicValue::Number(PublicNumber::Float(f64::NAN))
+			}
+			TokenKind::Infinity => {
+				self.pop_peek();
+				PublicValue::Number(PublicNumber::Float(f64::INFINITY))
 			}
 			t!("true") => {
 				self.pop_peek();
-				Value::Bool(true)
+				PublicValue::Bool(true)
 			}
 			t!("false") => {
 				self.pop_peek();
-				Value::Bool(false)
+				PublicValue::Bool(false)
 			}
 			t!("{") => {
 				self.pop_peek();
@@ -74,47 +79,41 @@ impl Parser<'_> {
 				// an matching object. Now it no longer does that and relies on the
 				// 'planning' stage to convert it. But here we still need to do it in the
 				// parser.
-				if let Some(geom) = Geometry::try_from_object(&object) {
-					Value::Geometry(geom)
+				if let Some(geom) = PublicGeometry::try_from_object(&object) {
+					PublicValue::Geometry(geom)
 				} else {
-					Value::Object(object)
+					PublicValue::Object(object)
 				}
 			}
 			t!("[") => {
 				self.pop_peek();
-				self.parse_value_array::<SurrealQL>(stk, token.span).await.map(Value::Array)?
+				self.parse_value_array::<SurrealQL>(stk, token.span)
+					.await
+					.map(PublicValue::Array)?
 			}
 			t!("\"") | t!("'") => {
-				let strand: Strand = self.next_token_value()?;
+				let strand = self.parse_string_lit()?;
 				if self.settings.legacy_strands {
 					self.reparse_json_legacy_strand(stk, strand).await
 				} else {
-					Value::Strand(strand)
+					PublicValue::String(strand)
 				}
 			}
-			t!("d\"") | t!("d'") => {
-				let datetime = self.next_token_value()?;
-				Value::Datetime(datetime)
-			}
-			t!("u\"") | t!("u'") => {
-				let uuid = self.next_token_value()?;
-				Value::Uuid(uuid)
-			}
-			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
-				Value::Bytes(self.next_token_value()?)
-			}
+			t!("d\"") | t!("d'") => PublicValue::Datetime(self.next_token_value()?),
+			t!("u\"") | t!("u'") => PublicValue::Uuid(self.next_token_value()?),
+			t!("b\"") | t!("b'") => PublicValue::Bytes(self.next_token_value()?),
 			//TODO: Implement record id for value parsing
 			t!("f\"") | t!("f'") => {
 				if !self.settings.files_enabled {
 					unexpected!(self, token, "the experimental files feature to be enabled");
 				}
 
-				let file = self.next_token_value::<val::File>()?;
-				Value::File(file)
+				let file = self.next_token_value::<PublicFile>()?;
+				PublicValue::File(file)
 			}
 			t!("/") => {
 				let regex = self.next_token_value()?;
-				Value::Regex(regex)
+				PublicValue::Regex(regex)
 			}
 			t!("(") => {
 				let open = self.pop_peek().span;
@@ -142,15 +141,19 @@ impl Parser<'_> {
 
 							let y = self.next_token_value::<f64>()?;
 							self.expect_closing_delimiter(t!(")"), open)?;
-							Value::Geometry(crate::val::Geometry::Point(geo::Point::new(x, y)))
+							PublicValue::Geometry(PublicGeometry::Point(geo::Point::new(x, y)))
 						} else {
 							self.expect_closing_delimiter(t!(")"), open)?;
 
 							match number {
-								Numeric::Float(x) => Value::Number(Number::Float(x)),
-								Numeric::Integer(x) => Value::Number(Number::Int(x)),
-								Numeric::Decimal(x) => Value::Number(Number::Decimal(x)),
-								Numeric::Duration(duration) => Value::Duration(Duration(duration)),
+								Numeric::Float(x) => PublicValue::Number(PublicNumber::Float(x)),
+								Numeric::Integer(x) => PublicValue::Number(PublicNumber::Int(x)),
+								Numeric::Decimal(x) => {
+									PublicValue::Number(PublicNumber::Decimal(x))
+								}
+								Numeric::Duration(duration) => {
+									PublicValue::Duration(PublicDuration::from(duration))
+								}
 							}
 						}
 					}
@@ -167,18 +170,18 @@ impl Parser<'_> {
 				if peek == t!("=") {
 					self.pop_peek();
 					let v = stk.run(|stk| self.parse_value(stk)).await?;
-					Value::Range(Box::new(Range {
+					PublicValue::Range(Box::new(PublicRange {
 						start: Bound::Unbounded,
 						end: Bound::Included(v),
 					}))
 				} else if Self::kind_starts_expression(peek) {
 					let v = stk.run(|stk| self.parse_value(stk)).await?;
-					Value::Range(Box::new(Range {
+					PublicValue::Range(Box::new(PublicRange {
 						start: Bound::Unbounded,
 						end: Bound::Excluded(v),
 					}))
 				} else {
-					Value::Range(Box::new(Range {
+					PublicValue::Range(Box::new(PublicRange {
 						start: Bound::Unbounded,
 						end: Bound::Unbounded,
 					}))
@@ -188,13 +191,16 @@ impl Parser<'_> {
 				self.pop_peek();
 				let compound = self.lexer.lex_compound(token, compound::numeric)?;
 				match compound.value {
-					Numeric::Duration(x) => Value::Duration(Duration(x)),
-					Numeric::Integer(x) => Value::Number(Number::Int(x)),
-					Numeric::Float(x) => Value::Number(Number::Float(x)),
-					Numeric::Decimal(x) => Value::Number(Number::Decimal(x)),
+					Numeric::Duration(x) => PublicValue::Duration(PublicDuration::from(x)),
+					Numeric::Integer(x) => PublicValue::Number(PublicNumber::Int(x)),
+					Numeric::Float(x) => PublicValue::Number(PublicNumber::Float(x)),
+					Numeric::Decimal(x) => PublicValue::Number(PublicNumber::Decimal(x)),
 				}
 			}
-			_ => self.parse_value_record_id_inner::<SurrealQL>(stk).await.map(Value::RecordId)?,
+			_ => self
+				.parse_value_record_id_inner::<SurrealQL>(stk)
+				.await
+				.map(PublicValue::RecordId)?,
 		};
 
 		match self.peek_whitespace().kind {
@@ -205,18 +211,18 @@ impl Parser<'_> {
 				if peek == t!("=") {
 					self.pop_peek();
 					let v = stk.run(|stk| self.parse_value(stk)).await?;
-					Ok(Value::Range(Box::new(Range {
+					Ok(PublicValue::Range(Box::new(PublicRange {
 						start: Bound::Excluded(res),
 						end: Bound::Included(v),
 					})))
 				} else if Self::kind_starts_expression(peek) {
 					let v = stk.run(|stk| self.parse_value(stk)).await?;
-					Ok(Value::Range(Box::new(Range {
+					Ok(PublicValue::Range(Box::new(PublicRange {
 						start: Bound::Excluded(res),
 						end: Bound::Excluded(v),
 					})))
 				} else {
-					Ok(Value::Range(Box::new(Range {
+					Ok(PublicValue::Range(Box::new(PublicRange {
 						start: Bound::Excluded(res),
 						end: Bound::Unbounded,
 					})))
@@ -229,18 +235,18 @@ impl Parser<'_> {
 				if peek == t!("=") {
 					self.pop_peek();
 					let v = stk.run(|stk| self.parse_value(stk)).await?;
-					Ok(Value::Range(Box::new(Range {
+					Ok(PublicValue::Range(Box::new(PublicRange {
 						start: Bound::Included(res),
 						end: Bound::Included(v),
 					})))
 				} else if Self::kind_starts_expression(peek) {
 					let v = stk.run(|stk| self.parse_value(stk)).await?;
-					Ok(Value::Range(Box::new(Range {
+					Ok(PublicValue::Range(Box::new(PublicRange {
 						start: Bound::Included(res),
 						end: Bound::Excluded(v),
 					})))
 				} else {
-					Ok(Value::Range(Box::new(Range {
+					Ok(PublicValue::Range(Box::new(PublicRange {
 						start: Bound::Included(res),
 						end: Bound::Unbounded,
 					})))
@@ -250,83 +256,83 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn parse_json(&mut self, stk: &mut Stk) -> ParseResult<Value> {
+	pub async fn parse_json(&mut self, stk: &mut Stk) -> ParseResult<PublicValue> {
 		let token = self.peek();
 		match token.kind {
 			t!("NULL") => {
 				self.pop_peek();
-				Ok(Value::Null)
+				Ok(PublicValue::Null)
 			}
 			t!("true") => {
 				self.pop_peek();
-				Ok(Value::Bool(true))
+				Ok(PublicValue::Bool(true))
 			}
 			t!("false") => {
 				self.pop_peek();
-				Ok(Value::Bool(false))
+				Ok(PublicValue::Bool(false))
 			}
 			t!("{") => {
 				self.pop_peek();
-				self.parse_value_object::<Json>(stk, token.span).await.map(Value::Object)
+				self.parse_value_object::<Json>(stk, token.span).await.map(PublicValue::Object)
 			}
 			t!("[") => {
 				self.pop_peek();
-				self.parse_value_array::<Json>(stk, token.span).await.map(Value::Array)
+				self.parse_value_array::<Json>(stk, token.span).await.map(PublicValue::Array)
 			}
 			t!("\"") | t!("'") => {
-				let strand: Strand = self.next_token_value()?;
+				let strand = self.parse_string_lit()?;
 				if self.settings.legacy_strands {
 					Ok(self.reparse_json_legacy_strand(stk, strand).await)
 				} else {
-					Ok(Value::Strand(strand))
+					Ok(PublicValue::String(strand))
 				}
 			}
 			t!("-") | t!("+") | TokenKind::Digits => {
 				self.pop_peek();
 				let compound = self.lexer.lex_compound(token, compound::numeric)?;
 				match compound.value {
-					Numeric::Duration(x) => Ok(Value::Duration(Duration(x))),
-					Numeric::Integer(x) => Ok(Value::Number(Number::Int(x))),
-					Numeric::Float(x) => Ok(Value::Number(Number::Float(x))),
-					Numeric::Decimal(x) => Ok(Value::Number(Number::Decimal(x))),
+					Numeric::Duration(x) => Ok(PublicValue::Duration(PublicDuration::from(x))),
+					Numeric::Integer(x) => Ok(PublicValue::Number(PublicNumber::Int(x))),
+					Numeric::Float(x) => Ok(PublicValue::Number(PublicNumber::Float(x))),
+					Numeric::Decimal(x) => Ok(PublicValue::Number(PublicNumber::Decimal(x))),
 				}
-			}
-			TokenKind::Glued(Glued::Strand) => {
-				let glued = pop_glued!(self, Strand);
-				Ok(Value::Strand(glued))
 			}
 			TokenKind::Glued(Glued::Duration) => {
 				let glued = pop_glued!(self, Duration);
-				Ok(Value::Duration(glued))
+				Ok(PublicValue::Duration(glued))
 			}
-			_ => self.parse_value_record_id_inner::<Json>(stk).await.map(Value::RecordId),
+			_ => self.parse_value_record_id_inner::<Json>(stk).await.map(PublicValue::RecordId),
 		}
 	}
 
-	async fn reparse_json_legacy_strand(&mut self, stk: &mut Stk, strand: Strand) -> Value {
+	async fn reparse_json_legacy_strand(&mut self, stk: &mut Stk, strand: String) -> PublicValue {
 		if let Ok(x) = Parser::new(strand.as_bytes()).parse_value_record_id(stk).await {
-			return Value::RecordId(x);
+			return PublicValue::RecordId(x);
 		}
 		if let Ok(x) = Parser::new(strand.as_bytes()).next_token_value() {
-			return Value::Datetime(x);
+			return PublicValue::Datetime(x);
 		}
 		// TODO: Fix this, uuid's don't actually work since it expects a 'u"'
 		if let Ok(x) = Parser::new(strand.as_bytes()).next_token_value() {
-			return Value::Uuid(x);
+			return PublicValue::Uuid(x);
 		}
 
 		//TODO: Fix record id and others
-		Value::Strand(strand)
+		PublicValue::String(strand)
 	}
 
-	async fn parse_value_object<VP>(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Object>
+	async fn parse_value_object<VP>(
+		&mut self,
+		stk: &mut Stk,
+		start: Span,
+	) -> ParseResult<PublicObject>
 	where
 		VP: ValueParseFunc,
 	{
 		let mut obj = BTreeMap::new();
 		loop {
 			if self.eat(t!("}")) {
-				return Ok(Object(obj));
+				return Ok(PublicObject::from(obj));
 			}
 			let key = self.parse_object_key()?;
 			expected!(self, t!(":"));
@@ -335,50 +341,57 @@ impl Parser<'_> {
 
 			if !self.eat(t!(",")) {
 				self.expect_closing_delimiter(t!("}"), start)?;
-				return Ok(Object(obj));
+				return Ok(PublicObject::from(obj));
 			}
 		}
 	}
 
-	async fn parse_value_array<VP>(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Array>
+	async fn parse_value_array<VP>(
+		&mut self,
+		stk: &mut Stk,
+		start: Span,
+	) -> ParseResult<PublicArray>
 	where
 		VP: ValueParseFunc,
 	{
 		let mut array = Vec::new();
 		loop {
 			if self.eat(t!("]")) {
-				return Ok(Array(array));
+				return Ok(PublicArray::from(array));
 			}
 			let value = stk.run(|stk| VP::parse(self, stk)).await?;
 			array.push(value);
 
 			if !self.eat(t!(",")) {
 				self.expect_closing_delimiter(t!("]"), start)?;
-				return Ok(Array(array));
+				return Ok(PublicArray::from(array));
 			}
 		}
 	}
 
-	pub async fn parse_value_record_id(&mut self, stk: &mut Stk) -> ParseResult<RecordId> {
+	pub async fn parse_value_record_id(&mut self, stk: &mut Stk) -> ParseResult<PublicRecordId> {
 		self.parse_value_record_id_inner::<SurrealQL>(stk).await
 	}
 
-	async fn parse_value_record_id_inner<VP>(&mut self, stk: &mut Stk) -> ParseResult<RecordId>
+	async fn parse_value_record_id_inner<VP>(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<PublicRecordId>
 	where
 		VP: ValueParseFunc,
 	{
-		let table = self.next_token_value::<Ident>()?;
+		let table = self.parse_ident()?;
 		expected!(self, t!(":"));
 		let peek = self.peek();
 		let key = match peek.kind {
-			t!("u'") | t!("u\"") => RecordIdKey::Uuid(self.next_token_value::<val::Uuid>()?),
+			t!("u'") | t!("u\"") => PublicRecordIdKey::Uuid(self.next_token_value::<PublicUuid>()?),
 			t!("{") => {
 				let peek = self.pop_peek();
-				RecordIdKey::Object(self.parse_value_object::<VP>(stk, peek.span).await?)
+				PublicRecordIdKey::Object(self.parse_value_object::<VP>(stk, peek.span).await?)
 			}
 			t!("[") => {
 				let peek = self.pop_peek();
-				RecordIdKey::Array(self.parse_value_array::<VP>(stk, peek.span).await?)
+				PublicRecordIdKey::Array(self.parse_value_array::<VP>(stk, peek.span).await?)
 			}
 			t!("+") => {
 				self.pop_peek();
@@ -406,9 +419,9 @@ impl Parser<'_> {
 
 				let digits_str = self.lexer.span_str(digits_token.span);
 				if let Ok(number) = digits_str.parse() {
-					RecordIdKey::Number(number)
+					PublicRecordIdKey::Number(number)
 				} else {
-					RecordIdKey::String(digits_str.to_owned())
+					PublicRecordIdKey::String(digits_str.to_owned())
 				}
 			}
 			t!("-") => {
@@ -418,14 +431,15 @@ impl Parser<'_> {
 					// Parse to u64 and check if the value is equal to `-i64::MIN` via u64 as
 					// `-i64::MIN` doesn't fit in an i64
 					match number.value.cmp(&((i64::MAX as u64) + 1)) {
-						Ordering::Less => RecordIdKey::Number(-(number.value as i64)),
-						Ordering::Equal => RecordIdKey::Number(i64::MIN),
-						Ordering::Greater => {
-							RecordIdKey::String(format!("-{}", self.lexer.span_str(number.span)))
-						}
+						Ordering::Less => PublicRecordIdKey::Number(-(number.value as i64)),
+						Ordering::Equal => PublicRecordIdKey::Number(i64::MIN),
+						Ordering::Greater => PublicRecordIdKey::String(format!(
+							"-{}",
+							self.lexer.span_str(number.span)
+						)),
 					}
 				} else {
-					RecordIdKey::String(format!("-{}", self.lexer.span_str(token.span)))
+					PublicRecordIdKey::String(format!("-{}", self.lexer.span_str(token.span)))
 				}
 			}
 			TokenKind::Digits => {
@@ -433,15 +447,15 @@ impl Parser<'_> {
 					&& Self::kind_is_identifier(self.peek_whitespace1().kind)
 				{
 					let ident = self.parse_flexible_ident()?;
-					RecordIdKey::String(ident.into_string())
+					PublicRecordIdKey::String(ident)
 				} else {
 					self.pop_peek();
 
 					let digits_str = self.lexer.span_str(peek.span);
 					if let Ok(number) = digits_str.parse::<i64>() {
-						RecordIdKey::Number(number)
+						PublicRecordIdKey::Number(number)
 					} else {
-						RecordIdKey::String(digits_str.to_owned())
+						PublicRecordIdKey::String(digits_str.to_owned())
 					}
 				}
 			}
@@ -452,21 +466,18 @@ impl Parser<'_> {
 				}
 				// Should be valid utf-8 as it was already parsed by the lexer
 				let text = String::from_utf8(slice.to_vec()).unwrap();
-				RecordIdKey::String(text)
+				PublicRecordIdKey::String(text)
 			}
 			_ => {
 				let ident = if self.settings.flexible_record_id {
 					self.parse_flexible_ident()?
 				} else {
-					self.next_token_value::<Ident>()?
+					self.parse_ident()?
 				};
-				RecordIdKey::String(ident.into_string())
+				PublicRecordIdKey::String(ident)
 			}
 		};
 
-		Ok(RecordId {
-			table: table.into_string(),
-			key,
-		})
+		Ok(PublicRecordId::new(table, key))
 	}
 }

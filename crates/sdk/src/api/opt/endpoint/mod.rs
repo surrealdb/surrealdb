@@ -3,7 +3,7 @@ mod http;
 #[cfg(feature = "protocol-ws")]
 mod ws;
 
-#[cfg(kv_fdb)]
+#[cfg(feature = "kv-fdb")]
 mod fdb;
 #[cfg(feature = "kv-indxdb")]
 mod indxdb;
@@ -44,7 +44,7 @@ impl Endpoint {
 	#[doc(hidden)]
 	pub fn parse_kind(&self) -> Result<EndpointKind> {
 		match EndpointKind::from(self.url.scheme()) {
-			EndpointKind::Unsupported(s) => Err(Error::Scheme(s).into()),
+			EndpointKind::Unsupported(s) => Err(Error::Scheme(s)),
 			kind => Ok(kind),
 		}
 	}
@@ -126,7 +126,6 @@ pub enum EndpointKind {
 	IndxDb,
 	Memory,
 	RocksDb,
-	File,
 	TiKv,
 	Unsupported(String),
 	SurrealKv,
@@ -144,7 +143,6 @@ impl From<&str> for EndpointKind {
 			#[cfg(target_family = "wasm")]
 			"indxdb" => Self::IndxDb,
 			"mem" => Self::Memory,
-			"file" => Self::File,
 			"rocksdb" => Self::RocksDb,
 			"tikv" => Self::TiKv,
 			"surrealkv" => Self::SurrealKv,

@@ -7,13 +7,14 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::Fmt;
+use crate::expr::expression::VisitExpression;
 use crate::expr::{Cond, Explain, Expr, Output, Timeout, With};
+use crate::fmt::Fmt;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct DeleteStatement {
+pub(crate) struct DeleteStatement {
 	pub only: bool,
 	pub what: Vec<Expr>,
 	pub with: Option<With>,
@@ -40,7 +41,7 @@ impl DeleteStatement {
 		// Assign the statement
 		let stm = Statement::from(self);
 		// Check if there is a timeout
-		let ctx = stm.setup_timeout(ctx)?;
+		let ctx = stm.setup_timeout(stk, ctx, opt, doc).await?;
 
 		// Get a query planner
 		let mut planner = QueryPlanner::new();
@@ -83,6 +84,17 @@ impl DeleteStatement {
 			// This is standard query result
 			v => Ok(v),
 		}
+	}
+}
+
+impl VisitExpression for DeleteStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.what.iter().for_each(|expr| expr.visit(visitor));
+		self.cond.iter().for_each(|cond| cond.0.visit(visitor));
+		self.output.iter().for_each(|output| output.visit(visitor));
 	}
 }
 

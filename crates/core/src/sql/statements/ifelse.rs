@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Write};
 
+use crate::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
 use crate::sql::Expr;
-use crate::sql::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

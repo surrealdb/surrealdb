@@ -16,7 +16,7 @@ use crate::idx::ft::analyzer::tokenizer::{Tokenizer, Tokens};
 use crate::idx::ft::offset::Offset;
 use crate::idx::ft::{DocLength, TermFrequency};
 use crate::idx::trees::store::IndexStores;
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 pub(in crate::idx::ft) mod filter;
 pub(in crate::idx) mod mapper;
@@ -62,9 +62,7 @@ impl Analyzer {
 		tks: &mut Vec<Tokens>,
 	) -> Result<()> {
 		match val {
-			Value::Strand(s) => {
-				tks.push(self.generate_tokens(stk, ctx, opt, stage, s.into_string()).await?)
-			}
+			Value::String(s) => tks.push(self.generate_tokens(stk, ctx, opt, stage, s).await?),
 			Value::Number(n) => {
 				tks.push(self.generate_tokens(stk, ctx, opt, stage, n.to_string()).await?)
 			}
@@ -96,18 +94,11 @@ impl Analyzer {
 	) -> Result<Tokens> {
 		if let Some(function_name) = self.az.function.as_ref().map(|i| i.as_str().to_owned()) {
 			let val = Function::Custom(function_name.clone())
-				// TODO: Null byte check
-				.compute(
-					stk,
-					ctx,
-					opt,
-					None,
-					vec![Value::Strand(unsafe { Strand::new_unchecked(input) })],
-				)
+				.compute(stk, ctx, opt, None, vec![Value::String(input)])
 				.await
 				.catch_return()?;
-			if let Value::Strand(val) = val {
-				input = val.into_string();
+			if let Value::String(val) = val {
+				input = val;
 			} else {
 				bail!(Error::InvalidFunction {
 					name: function_name,
@@ -188,7 +179,8 @@ mod tests {
 	use crate::idx::ft::analyzer::filter::FilteringStage;
 	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
 	use crate::kvs::{Datastore, LockType, TransactionType};
-	use crate::sql::{DefineStatement, Expr};
+	use crate::sql::Expr;
+	use crate::sql::statements::DefineStatement;
 	use crate::syn;
 
 	async fn get_analyzer_tokens(def: &str, input: &str) -> Tokens {
@@ -206,18 +198,24 @@ mod tests {
 			panic!()
 		};
 
-		let a = Analyzer::new(
-			ctx.get_index_stores(),
-			Arc::new(DefineAnalyzerStatement::from(az).to_definition()),
-		)
-		.unwrap();
-
 		let mut stack = reblessive::TreeStack::new();
 
 		let opts = Options::default();
 		stack
-			.enter(|stk| {
+			.enter(|stk| async move {
+				let a = Analyzer::new(
+					ctx.get_index_stores(),
+					Arc::new(
+						DefineAnalyzerStatement::from(az)
+							.to_definition(stk, &ctx, &opts, None)
+							.await
+							.unwrap(),
+					),
+				)
+				.unwrap();
+
 				a.generate_tokens(stk, &ctx, &opts, FilteringStage::Indexing, input.to_string())
+					.await
 			})
 			.finish()
 			.await

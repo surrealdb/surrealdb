@@ -39,15 +39,16 @@ pub async fn generate_schema(
 		None => return Err(GqlError::DbError(anyhow::anyhow!("Database not found: {ns} {db}"))),
 	};
 
-	let cg = tx.get_db_config(db_def.namespace_id, db_def.database_id, "graphql").await.map_err(
-		|e| {
+	let cg = tx
+		.expect_db_config(db_def.namespace_id, db_def.database_id, "graphql")
+		.await
+		.map_err(|e| {
 			if matches!(e.downcast_ref(), Some(crate::err::Error::CgNotFound { .. })) {
 				GqlError::NotConfigured
 			} else {
 				GqlError::DbError(e)
 			}
-		},
-	)?;
+		})?;
 	let config = cg.inner.clone().try_into_graphql()?;
 
 	let tbs = tx.all_tb(db_def.namespace_id, db_def.database_id, None).await?;
@@ -210,7 +211,7 @@ pub fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> {
 			),
 			num @ SurNumber::Decimal(_) => GqlValue::String(num.to_string()),
 		},
-		SurValue::Strand(s) => GqlValue::String(s.0),
+		SurValue::String(s) => GqlValue::String(s.0),
 		d @ SurValue::Duration(_) => GqlValue::String(d.to_string()),
 		SurValue::Datetime(d) => GqlValue::String(d.to_rfc3339()),
 		SurValue::Uuid(uuid) => GqlValue::String(uuid.to_string()),
@@ -232,12 +233,10 @@ pub fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> {
 
 #[allow(clippy::result_large_err)]
 pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> {
-	let (optional, match_kind) = match kind {
-		Kind::Option(op_ty) => (true, *op_ty),
-		_ => (false, kind),
-	};
-	let out_ty = match match_kind {
+	let optional = kind.can_be_none();
+	let out_ty = match kind {
 		Kind::Any => TypeRef::named("any"),
+		Kind::None => TypeRef::named("none"),
 		Kind::Null => TypeRef::named("null"),
 		Kind::Bool => TypeRef::named(TypeRef::BOOLEAN),
 		Kind::Bytes => TypeRef::named("bytes"),
@@ -269,13 +268,6 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 			}
 		},
 		Kind::Geometry(_) => return Err(schema_error("Kind::Geometry is not yet supported")),
-		Kind::Option(t) => {
-			let mut non_op_ty = *t;
-			while let Kind::Option(inner) = non_op_ty {
-				non_op_ty = *inner;
-			}
-			kind_to_type(non_op_ty, types)?
-		}
 		Kind::Either(ks) => {
 			let (ls, others): (Vec<Kind>, Vec<Kind>) =
 				ks.into_iter().partition(|k| matches!(k, Kind::Literal(KindLiteral::String(_))));
@@ -415,8 +407,12 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 			num @ GqlValue::Number(_) => gql_to_sql_kind(num, Kind::Number),
 			GqlValue::Boolean(b) => Ok(SurValue::Bool(*b)),
 			bin @ GqlValue::Binary(_) => gql_to_sql_kind(bin, Kind::Bytes),
-			GqlValue::Enum(s) => Ok(SurValue::Strand(s.as_str().into())),
+			GqlValue::Enum(s) => Ok(SurValue::String(s.as_str().into())),
 			arr @ GqlValue::List(_) => gql_to_sql_kind(arr, Kind::Array(Box::new(Kind::Any), None)),
+		},
+		Kind::None => match val {
+			GqlValue::Null => Ok(SurValue::None),
+			_ => Err(type_error(kind, val)),
 		},
 		Kind::Null => match val {
 			GqlValue::Null => Ok(SurValue::Null),
@@ -555,8 +551,8 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::String => match val {
-			GqlValue::String(s) => Ok(SurValue::Strand(s.to_owned().into())),
-			GqlValue::Enum(s) => Ok(SurValue::Strand(s.as_str().into())),
+			GqlValue::String(s) => Ok(SurValue::String(s.to_owned().into())),
+			GqlValue::Enum(s) => Ok(SurValue::String(s.as_str().into())),
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::Uuid => match val {
@@ -578,17 +574,13 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 		},
 		// TODO: add geometry
 		Kind::Geometry(_) => Err(resolver_error("Geometry is not yet supported")),
-		Kind::Option(k) => match val {
-			GqlValue::Null => Ok(SurValue::None),
-			v => gql_to_sql_kind(v, *k),
-		},
 		// TODO: handle nested eithers
 		Kind::Either(ref ks) => {
 			use Kind::*;
 
 			match val {
 				GqlValue::Null => {
-					if ks.iter().any(|k| matches!(k, Kind::Option(_))) {
+					if ks.contains(&Kind::None) {
 						Ok(SurValue::None)
 					} else if ks.contains(&Kind::Null) {
 						Ok(SurValue::Null)

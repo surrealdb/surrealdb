@@ -1,17 +1,16 @@
 //! Stores the key prefix for all keys
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::impl_kv_key_storekey;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[allow(unused)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Kv {
 	__: u8,
 }
 
-impl KVKey for Kv {
-	type ValueType = ();
-}
+impl_kv_key_storekey!(Kv => ());
 
 pub fn kv() -> Vec<u8> {
 	vec![b'/']
@@ -40,6 +39,7 @@ impl Kv {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {

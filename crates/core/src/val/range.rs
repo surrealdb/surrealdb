@@ -4,20 +4,23 @@ use std::ops::Bound;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 
 use super::value::CoerceErrorExt;
 use crate::expr;
 use crate::expr::kind::HasKind;
 use crate::val::value::{Coerce, CoerceError};
-use crate::val::{Array, Number, Value};
+use crate::val::{Array, IndexFormat, Number, Value};
 
 /// A range of surrealql values,
 ///
 /// Can be any kind of values, "a"..1 is allowed.
 #[revisioned(revision = 1)]
-#[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone, Hash)]
+#[derive(Debug, Eq, PartialEq, Serialize, Deserialize, Clone, Hash, Encode, BorrowDecode)]
 #[serde(rename = "$surrealdb::private::Range")]
-pub struct Range {
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
+pub(crate) struct Range {
 	pub start: Bound<Value>,
 	pub end: Bound<Value>,
 }
@@ -28,15 +31,6 @@ impl Range {
 		Range {
 			start: Bound::Unbounded,
 			end: Bound::Unbounded,
-		}
-	}
-
-	/// Creates a new range with the first argument as the start bound and the
-	/// second as the end bound.
-	pub const fn new(start: Bound<Value>, end: Bound<Value>) -> Self {
-		Range {
-			start,
-			end,
 		}
 	}
 }
@@ -132,7 +126,7 @@ impl Range {
 		})
 	}
 
-	pub fn into_literal(self) -> expr::Expr {
+	pub(crate) fn into_literal(self) -> expr::Expr {
 		match (self.start, self.end) {
 			(Bound::Unbounded, Bound::Unbounded) => {
 				expr::Expr::Literal(expr::Literal::UnboundedRange)
@@ -252,6 +246,7 @@ impl TypedRange<i64> {
 		}
 	}
 
+	// TODO: Change this to return an option.
 	#[allow(clippy::len_without_is_empty)]
 	pub fn len(&self) -> usize {
 		let end = match self.end {
@@ -279,7 +274,7 @@ impl TypedRange<i64> {
 		usize::try_from(start.abs_diff(end)).unwrap_or(usize::MAX)
 	}
 
-	pub fn cast_to_array(self) -> Array {
+	pub(crate) fn cast_to_array(self) -> Array {
 		let iter = self.iter();
 		Array(iter.map(|i| Value::Number(Number::Int(i))).collect())
 	}
@@ -338,5 +333,58 @@ impl Iterator for IntegerRangeIter {
 		// handling if u64::MAX > usize::MAX
 		let upper: Option<usize> = len.try_into().ok();
 		(upper.unwrap_or(usize::MAX), upper)
+	}
+}
+
+#[cfg(test)]
+mod test {
+	use super::Range;
+	use crate::sql::expression::convert_public_value_to_internal;
+	use crate::syn;
+	use crate::val::Value;
+
+	fn r(r: &str) -> Range {
+		let Value::Range(r) = convert_public_value_to_internal(syn::value(r).unwrap()) else {
+			panic!()
+		};
+		*r
+	}
+
+	fn round_trip(r: Range) {
+		let enc = storekey::encode_vec(&r).unwrap();
+		let dec = storekey::decode_borrow(&enc).unwrap();
+		assert_eq!(r, dec)
+	}
+
+	fn ensure_order(a: Range, b: Range) {
+		let a_enc = storekey::encode_vec(&a).unwrap();
+		let b_enc = storekey::encode_vec(&b).unwrap();
+
+		assert_eq!(
+			a.cmp(&b),
+			a_enc.cmp(&b_enc),
+			"ordering of {a:?} {b:?} is not correct after encoding"
+		);
+	}
+
+	#[test]
+	fn encode_decode() {
+		round_trip(r("1..2"));
+		round_trip(r(".."));
+		round_trip(r("1>.."));
+		round_trip(r("1>..=3"));
+		round_trip(r("..3"));
+		round_trip(r("'a'..'b'"));
+	}
+
+	#[test]
+	fn encoding_ordering() {
+		ensure_order(r(".."), r(".."));
+		ensure_order(r(".."), r("1.."));
+		ensure_order(r("1.."), r("1>.."));
+		ensure_order(r(".."), r("..1"));
+		ensure_order(r(".."), r("..=1"));
+		ensure_order(r("1.."), r("2.."));
+		ensure_order(r("'a'.."), r("'b'.."));
 	}
 }

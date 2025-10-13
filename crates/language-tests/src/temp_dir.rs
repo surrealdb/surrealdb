@@ -1,9 +1,7 @@
-use std::{
-	io,
-	path::{Path, PathBuf},
-	sync::atomic::{AtomicUsize, Ordering},
-	time::SystemTime,
-};
+use std::io;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::SystemTime;
 
 pub struct TempDir {
 	path: Option<PathBuf>,
@@ -20,6 +18,7 @@ fn xorshift(state: &mut u32) -> u32 {
 }
 
 impl TempDir {
+	#[allow(dead_code)]
 	pub async fn new(prefix: &str) -> Result<Self, io::Error> {
 		let temp_dir = std::env::temp_dir();
 
@@ -43,19 +42,23 @@ impl TempDir {
 		})
 	}
 
+	#[allow(dead_code)]
 	pub fn path(&self) -> &Path {
 		self.path.as_ref().unwrap().as_path()
 	}
 
+	#[allow(dead_code)]
 	pub fn sub_dir_path(&self) -> PathBuf {
 		let id = self.id_gen.fetch_add(1, Ordering::AcqRel);
 		self.path().join(format!("sub_dir_{id}"))
 	}
 
+	#[allow(dead_code)]
 	pub async fn cleanup(mut self) -> Result<(), io::Error> {
 		tokio::fs::remove_dir_all(&self.path.take().unwrap()).await
 	}
 
+	#[allow(dead_code)]
 	pub fn keep(mut self) {
 		self.path = None;
 	}

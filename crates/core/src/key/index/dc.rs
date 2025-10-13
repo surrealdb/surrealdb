@@ -15,18 +15,19 @@
 //! - Supporting document length normalization in search results
 //! - Enabling efficient compaction of index data
 //! - Providing accurate document count information for the index
+use std::borrow::Cow;
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
+use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
-use crate::catalog::{DatabaseId, NamespaceId};
-use crate::idx::docids::DocId;
+use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::ft::fulltext::DocLengthAndCount;
+use crate::idx::seqdocids::DocId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::KVKey;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct Dc<'a> {
 	__: u8,
 	_a: u8,
@@ -34,22 +35,18 @@ pub(crate) struct Dc<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
 	pub doc_id: DocId,
-	#[serde(with = "uuid::serde::compact")]
 	pub nid: Uuid,
-	#[serde(with = "uuid::serde::compact")]
 	pub uid: Uuid,
 }
 
-impl KVKey for Dc<'_> {
-	type ValueType = DocLengthAndCount;
-}
+impl_kv_key_storekey!(Dc<'_> => DocLengthAndCount);
 
 impl Categorise for Dc<'_> {
 	fn categorise(&self) -> Category {
@@ -77,7 +74,7 @@ impl<'a> Dc<'a> {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a str,
-		ix: &'a str,
+		ix: IndexId,
 		doc_id: DocId,
 		nid: Uuid,
 		uid: Uuid,
@@ -89,7 +86,7 @@ impl<'a> Dc<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -120,7 +117,7 @@ impl<'a> Dc<'a> {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a str,
-		ix: &'a str,
+		ix: IndexId,
 	) -> Result<Vec<u8>> {
 		DcPrefix::new(ns, db, tb, ix).encode_key()
 	}
@@ -144,7 +141,7 @@ impl<'a> Dc<'a> {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &'a str,
-		ix: &'a str,
+		ix: IndexId,
 	) -> Result<(Vec<u8>, Vec<u8>)> {
 		let prefix = DcPrefix::new(ns, db, tb, ix);
 		let mut beg = prefix.encode_key()?;
@@ -155,7 +152,7 @@ impl<'a> Dc<'a> {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 struct DcPrefix<'a> {
 	__: u8,
 	_a: u8,
@@ -163,20 +160,18 @@ struct DcPrefix<'a> {
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub tb: &'a str,
+	pub tb: Cow<'a, str>,
 	_d: u8,
-	pub ix: &'a str,
+	pub ix: IndexId,
 	_e: u8,
 	_f: u8,
 	_g: u8,
 }
 
-impl KVKey for DcPrefix<'_> {
-	type ValueType = Vec<u8>;
-}
+impl_kv_key_storekey!(DcPrefix<'_> => Vec<u8>);
 
 impl<'a> DcPrefix<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: &'a str) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -184,7 +179,7 @@ impl<'a> DcPrefix<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb,
+			tb: Cow::Borrowed(tb),
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -197,6 +192,7 @@ impl<'a> DcPrefix<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::kvs::KVKey;
 
 	#[test]
 	fn key_with_ids() {
@@ -204,28 +200,28 @@ mod tests {
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			"testix",
+			IndexId(3),
 			129,
 			Uuid::from_u128(1),
 			Uuid::from_u128(2),
 		);
 		let enc = Dc::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!dc\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dc\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
 	}
 
 	#[test]
 	fn key_root() {
-		let enc = Dc::new_root(NamespaceId(1), DatabaseId(2), "testtb", "testix").unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!dc");
+		let enc = Dc::new_root(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3)).unwrap();
+		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dc");
 	}
 
 	#[test]
 	fn range() {
-		let (beg, end) = Dc::range(NamespaceId(1), DatabaseId(2), "testtb", "testix").unwrap();
-		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!dc\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
+		let (beg, end) = Dc::range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3)).unwrap();
+		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dc\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
 		assert_eq!(
 			end,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+testix\0!dc\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dc\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
 		);
 	}
 }

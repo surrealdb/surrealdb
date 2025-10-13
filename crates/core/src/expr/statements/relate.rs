@@ -7,12 +7,13 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::expression::VisitExpression;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
 use crate::idx::planner::RecordStrategy;
 use crate::val::RecordId;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct RelateStatement {
+pub(crate) struct RelateStatement {
 	pub only: bool,
 	/// The expression resulting in the table through which we create a relation
 	pub through: Expr,
@@ -43,8 +44,9 @@ impl RelateStatement {
 		// Check if there is a timeout
 		let ctx = match self.timeout.as_ref() {
 			Some(timeout) => {
+				let x = timeout.compute(stk, ctx, opt, doc).await?.0;
 				let mut ctx = MutableContext::new(ctx);
-				ctx.add_timeout(*timeout.0)?;
+				ctx.add_timeout(x)?;
 				ctx.freeze()
 			}
 			None => ctx.clone(),
@@ -150,7 +152,7 @@ impl RelateStatement {
 						Some(ref data) => {
 							let id = match data.rid(stk, &ctx, opt).await? {
 								Value::None => RecordId::random_for_table(tb.into_string()),
-								id => id.generate(tb.into_strand(), false)?,
+								id => id.generate(tb.as_str().to_owned(), false)?,
 							};
 							i.ingest(Iterable::Relatable(f.clone(), id, t.clone(), None))
 						}
@@ -191,6 +193,19 @@ impl RelateStatement {
 			// This is standard query result
 			v => Ok(v),
 		}
+	}
+}
+
+impl VisitExpression for RelateStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.through.visit(visitor);
+		self.from.visit(visitor);
+		self.to.visit(visitor);
+		self.output.iter().for_each(|output| output.visit(visitor));
+		self.data.iter().for_each(|data| data.visit(visitor));
 	}
 }
 

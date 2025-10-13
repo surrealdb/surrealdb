@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::sql::fmt::Fmt;
+use crate::fmt::Fmt;
 use crate::sql::{Data, Expr, Output, Timeout};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

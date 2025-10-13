@@ -392,6 +392,12 @@ user-id = 359 # Sean McArthur (seanmonstar)
 start = "2019-07-03"
 end = "2025-08-06"
 
+[[trusted.humantime]]
+criteria = "safe-to-deploy"
+user-id = 4556 # Dirkjan Ochtman (djc)
+start = "2025-03-12"
+end = "2026-10-09"
+
 [[trusted.hyper]]
 criteria = "safe-to-deploy"
 user-id = 359 # Sean McArthur (seanmonstar)
@@ -430,7 +436,7 @@ end = "2026-04-11"
 
 [[trusted.libc]]
 criteria = "safe-to-deploy"
-user-id = 51017 # Yuki Okushi (JohnTitor)
+user-id = 51017
 start = "2020-03-17"
 end = "2025-11-14"
 
@@ -774,7 +780,13 @@ end = "2026-05-06"
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2022-03-16"
-end = "2025-01-24"
+end = "2026-09-10"
+
+[[trusted.storekey-derive]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-09-03"
+end = "2026-09-10"
 
 [[trusted.surrealdb]]
 criteria = "safe-to-deploy"
@@ -806,12 +818,6 @@ user-id = 3987 # Rushmore Mushambi (rushmorem)
 start = "2023-08-29"
 end = "2025-01-24"
 
-[[trusted.surrealdb-macros]]
-criteria = "safe-to-deploy"
-user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
-start = "2023-01-10"
-end = "2026-07-17"
-
 [[trusted.surrealdb-protocol]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
@@ -823,6 +829,18 @@ criteria = "safe-to-deploy"
 user-id = 217605 # Yusuke Kuoka (mumoshu)
 start = "2023-06-19"
 end = "2025-07-08"
+
+[[trusted.surrealdb-types]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-09-16"
+end = "2026-09-23"
+
+[[trusted.surrealdb-types-derive]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-09-16"
+end = "2026-09-23"
 
 [[trusted.surrealkv]]
 criteria = "safe-to-deploy"

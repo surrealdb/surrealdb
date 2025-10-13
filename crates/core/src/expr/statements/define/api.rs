@@ -6,25 +6,37 @@ use reblessive::tree::Stk;
 use super::config::api::ApiConfig;
 use super::{CursorDoc, DefineKind};
 use crate::api::path::Path;
+use crate::catalog::providers::ApiProvider;
 use crate::catalog::{ApiActionDefinition, ApiDefinition, ApiMethod};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::fmt::{Fmt, pretty_indent};
+use crate::expr::expression::VisitExpression;
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
+use crate::fmt::{Fmt, pretty_indent};
 use crate::iam::{Action, ResourceKind};
-use crate::val::Strand;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineApiStatement {
+pub(crate) struct DefineApiStatement {
 	pub kind: DefineKind,
 	pub path: Expr,
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Expr>,
 	pub config: ApiConfig,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 }
 
+impl VisitExpression for DefineApiStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.path.visit(visitor);
+		self.actions.iter().for_each(|action| action.visit(visitor));
+		self.fallback.iter().for_each(|expr| expr.visit(visitor));
+		self.comment.iter().for_each(|expr| expr.visit(visitor));
+	}
+}
 impl DefineApiStatement {
 	pub(crate) async fn compute(
 		&self,
@@ -39,7 +51,7 @@ impl DefineApiStatement {
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
-		if txn.get_db_api(ns, db, &self.path.to_string()).await.is_ok() {
+		if txn.get_db_api(ns, db, &self.path.to_string()).await?.is_some() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -58,11 +70,9 @@ impl DefineApiStatement {
 		let path = stk.run(|stk| self.path.compute(stk, ctx, opt, doc)).await.catch_return()?;
 		// Process the statement
 		let path: Path = path.coerce_to::<String>()?.parse()?;
-		let name = path.to_string();
 
 		let config = self.config.compute(stk, ctx, opt, doc).await?;
 
-		let key = crate::key::database::ap::new(ns, db, &name);
 		let mut actions = Vec::new();
 		for action in self.actions.iter() {
 			actions.push(ApiActionDefinition {
@@ -77,9 +87,9 @@ impl DefineApiStatement {
 			actions,
 			fallback: self.fallback.clone(),
 			config,
-			comment: self.comment.as_ref().map(|c| c.clone().into_string()),
+			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 		};
-		txn.set(&key, &ap, None).await?;
+		txn.put_db_api(ns, db, &ap).await?;
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good
@@ -98,25 +108,25 @@ impl fmt::Display for DefineApiStatement {
 		write!(f, " {}", self.path)?;
 		let indent = pretty_indent();
 
-		write!(f, "FOR any")?;
+		write!(f, " FOR any")?;
 		{
 			let indent = pretty_indent();
 
 			write!(f, "{}", self.config)?;
 
 			if let Some(fallback) = &self.fallback {
-				write!(f, "THEN {fallback}")?;
+				write!(f, " THEN {fallback}")?;
 			}
 
 			drop(indent);
 		}
 
 		for action in &self.actions {
-			write!(f, "{action}")?;
+			write!(f, " {action}")?;
 		}
 
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?;
+			write!(f, " COMMENT {}", comment)?;
 		}
 
 		drop(indent);
@@ -125,10 +135,20 @@ impl fmt::Display for DefineApiStatement {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ApiAction {
+pub(crate) struct ApiAction {
 	pub methods: Vec<ApiMethod>,
 	pub action: Expr,
 	pub config: ApiConfig,
+}
+
+impl VisitExpression for ApiAction {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.action.visit(visitor);
+		self.config.visit(visitor);
+	}
 }
 
 impl fmt::Display for ApiAction {
@@ -136,7 +156,7 @@ impl fmt::Display for ApiAction {
 		write!(f, "FOR {}", Fmt::comma_separated(self.methods.iter()))?;
 		let indent = pretty_indent();
 		write!(f, "{}", &self.config)?;
-		write!(f, "THEN {}", self.action)?;
+		write!(f, " THEN {}", self.action)?;
 		drop(indent);
 		Ok(())
 	}

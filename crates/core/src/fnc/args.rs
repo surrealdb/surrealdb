@@ -53,13 +53,6 @@ impl Args {
 		}
 	}
 
-	pub fn peek(&mut self) -> Option<&Value> {
-		if self.next.is_none() {
-			self.next = self.iter.next();
-		}
-		self.next.as_ref()
-	}
-
 	pub fn next(&mut self) -> Option<(usize, Value)> {
 		let v = self.next.take().or_else(|| self.iter.next())?;
 		let idx = self.count;
@@ -97,13 +90,6 @@ impl<T: FromArg> FromArg for Optional<T> {
 		if !arg.has_next() {
 			return Ok(Optional(None));
 		}
-
-		if T::arity().lower == 1 {
-			if let Some(Value::None) = arg.peek() {
-				return Ok(Optional(None));
-			}
-		}
-
 		let v = T::from_arg(name, arg)?;
 		Ok(Optional(Some(v)))
 	}

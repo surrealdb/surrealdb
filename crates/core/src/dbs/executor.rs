@@ -1,40 +1,60 @@
-use std::fmt::Display;
 use std::pin::{Pin, pin};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
-use futures::{Stream, StreamExt, stream};
+use futures::{Stream, StreamExt};
 use reblessive::TreeStack;
+use surrealdb_types::ToSql;
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
-use tracing::{instrument, warn};
+use tracing::instrument;
 use trice::Instant;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
+use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
 use crate::ctx::Context;
 use crate::ctx::reason::Reason;
-use crate::dbs::response::Response;
+use crate::dbs::response::QueryResult;
 use crate::dbs::{Force, Options, QueryType};
+use crate::doc::DefaultBroker;
 use crate::err::Error;
+use crate::expr::expression::VisitExpression;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
 use crate::expr::statements::OptionStatement;
 use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
+use crate::rpc::DbResultError;
 use crate::sql::{self, Ast};
-use crate::val::Value;
+use crate::types::PublicNotification;
+use crate::val::{Value, convert_value_to_public_value};
 use crate::{err, expr};
 
 const TARGET: &str = "surrealdb::core::dbs";
 
 pub struct Executor {
 	stack: TreeStack,
-	results: Vec<Response>,
+	results: Vec<QueryResult>,
 	opt: Options,
 	ctx: Context,
+}
+
+impl Executor {
+	fn prepare_broker(&mut self) -> Option<async_channel::Receiver<PublicNotification>> {
+		if !self.ctx.has_notifications() {
+			return None;
+		}
+		// If a broker is already provided by a higher layer, don't override it here.
+		if self.opt.broker.is_some() {
+			return None;
+		}
+		let (send, recv) = async_channel::unbounded();
+		self.opt.broker = Some(DefaultBroker::new(send));
+		Some(recv)
+	}
 }
 
 impl Executor {
@@ -65,12 +85,14 @@ impl Executor {
 		Ok(())
 	}
 
-	fn check_slow_log(&self, start: &Instant, stm: &impl Display) {
-		if let Some(threshold) = self.ctx.slow_log_threshold() {
-			let elapsed = start.elapsed();
-			if elapsed > threshold {
-				warn!("Slow query detected - time: {elapsed:#?} - query: {stm}")
-			}
+	/// If slow logging is configured in the current context, evaluate whether the
+	/// statement exceeded the slow threshold and emit a log entry if so.
+	///
+	/// Generic over `S` to accept both concrete statements and wrappers that
+	/// implement `Display` and `VisitExpression`.
+	fn check_slow_log<S: VisitExpression + ToSql>(&self, start: &Instant, stm: &S) {
+		if let Some(slow_log) = self.ctx.slow_log() {
+			slow_log.check_log(&self.ctx, start, stm);
 		}
 	}
 
@@ -97,7 +119,7 @@ impl Executor {
 
 					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
 					self.opt.set_ns(Some(ns.as_str().into()));
-					session.put(NS.as_ref(), ns.into_strand().into());
+					session.put(NS.as_ref(), ns.into());
 					ctx.add_value("session", session.into());
 				}
 				if let Some(db) = stmt.db {
@@ -111,7 +133,7 @@ impl Executor {
 
 					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
 					self.opt.set_db(Some(db.as_str().into()));
-					session.put(DB.as_ref(), db.into_strand().into());
+					session.put(DB.as_ref(), db.into());
 					ctx.add_value("session", session.into());
 				}
 				Ok(Value::None)
@@ -138,9 +160,6 @@ impl Executor {
 					.finish()
 					.await;
 
-				// Check if we dump the slow log
-				self.check_slow_log(start, &stm);
-
 				let res = res?;
 				let result = match &stm.kind {
 					Some(kind) => res
@@ -155,7 +174,7 @@ impl Executor {
 
 				if stm.is_protected_set() {
 					return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidParam {
-						name: stm.name.clone().into_string(),
+						name: stm.name.clone(),
 					})));
 				}
 				// Set the parameter
@@ -164,7 +183,10 @@ impl Executor {
 						Error::unreachable("Tried to unfreeze a Context with multiple references")
 					})
 					.map_err(anyhow::Error::new)?
-					.add_value(stm.name.into_string(), result.into());
+					.add_value(stm.name.clone(), result.into());
+
+				// Check if we dump the slow log
+				self.check_slow_log(start, stm.as_ref());
 				// Finalise transaction, returning nothing unless it couldn't commit
 				Ok(Value::None)
 			}
@@ -223,17 +245,6 @@ impl Executor {
 					.map_err(anyhow::Error::new)?
 					.set_transaction(txn);
 				s.compute(&self.ctx, &self.opt, None).await.map_err(ControlFlow::Err)
-			}
-			TopLevelExpr::Analyze(s) => {
-				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| {
-						err::Error::unreachable(
-							"Tried to unfreeze a Context with multiple references",
-						)
-					})
-					.map_err(anyhow::Error::new)?
-					.set_transaction(txn);
-				s.compute(&self.ctx, &self.opt).await.map_err(ControlFlow::Err)
 			}
 			TopLevelExpr::Access(s) => {
 				Arc::get_mut(&mut self.ctx)
@@ -309,11 +320,7 @@ impl Executor {
 			TransactionType::Write
 		};
 		let txn = Arc::new(kvs.transaction(transaction_type, LockType::Optimistic).await?);
-		let receiver = self.ctx.has_notifications().then(|| {
-			let (send, recv) = async_channel::unbounded();
-			self.opt.sender = Some(send);
-			recv
-		});
+		let receiver = self.prepare_broker();
 
 		match self.execute_plan_in_transaction(txn.clone(), start, plan).await {
 			Ok(value) | Err(ControlFlow::Return(value)) => {
@@ -330,20 +337,20 @@ impl Executor {
 				if let Err(e) = lock.complete_changes(false).await {
 					let _ = lock.cancel().await;
 
-					bail!(Error::QueryNotExecutedDetail {
+					bail!(Error::QueryNotExecuted {
 						message: e.to_string(),
 					});
 				}
 
 				if let Err(e) = lock.commit().await {
-					bail!(Error::QueryNotExecutedDetail {
+					bail!(Error::QueryNotExecuted {
 						message: e.to_string(),
 					});
 				}
 
 				// flush notifications.
 				if let Some(recv) = receiver {
-					self.opt.sender = None;
+					self.opt.broker = None;
 					if let Some(sink) = self.ctx.notifications() {
 						spawn(async move {
 							while let Ok(x) = recv.recv().await {
@@ -387,9 +394,12 @@ impl Executor {
 					return Ok(());
 				}
 
-				self.results.push(Response {
+				self.results.push(QueryResult {
 					time: Duration::ZERO,
-					result: Err(anyhow!(Error::QueryNotExecuted)),
+					result: Err(DbResultError::QueryNotExecuted(
+						"Tried to start a transaction while another transaction was open"
+							.to_string(),
+					)),
 					query_type: QueryType::Other,
 				});
 			}
@@ -402,11 +412,7 @@ impl Executor {
 
 		// Create a sender for this transaction only if the context allows for
 		// notifications.
-		let receiver = self.ctx.has_notifications().then(|| {
-			let (send, recv) = async_channel::unbounded();
-			self.opt.sender = Some(send);
-			recv
-		});
+		let receiver = self.prepare_broker();
 
 		let txn = Arc::new(txn);
 		let start_results = self.results.len();
@@ -432,7 +438,7 @@ impl Executor {
 
 				for res in &mut self.results[start_results..] {
 					res.query_type = QueryType::Other;
-					res.result = Err(anyhow!(Error::QueryCancelled));
+					res.result = Err(DbResultError::QueryCancelled);
 				}
 
 				while let Some(stmt) = stream.next().await {
@@ -442,11 +448,11 @@ impl Executor {
 						return Ok(());
 					}
 
-					self.results.push(Response {
+					self.results.push(QueryResult {
 						time: Duration::ZERO,
 						result: Err(match done {
-							Reason::Timedout => anyhow!(Error::QueryTimedout),
-							Reason::Canceled => anyhow!(Error::QueryCancelled),
+							Reason::Timedout => DbResultError::QueryTimedout,
+							Reason::Canceled => DbResultError::QueryCancelled,
 						}),
 						query_type: QueryType::Other,
 					});
@@ -469,27 +475,28 @@ impl Executor {
 			};
 
 			let before = Instant::now();
-			let value = match stmt {
+			let result = match stmt {
 				TopLevelExpr::Begin => {
 					let _ = txn.cancel().await;
 					// tried to begin a transaction within a transaction.
 
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(anyhow!(Error::QueryNotExecuted));
+						res.result = Err(DbResultError::QueryNotExecuted(
+							"The query was not executed due to a failed transaction".to_string(),
+						));
 					}
 
-					self.results.push(Response {
+					self.results.push(QueryResult {
 						time: Duration::ZERO,
-						result: Err(anyhow!(Error::QueryNotExecutedDetail {
-							message:
-								"Tried to start a transaction while another transaction was open"
-									.to_string(),
-						})),
+						result: Err(DbResultError::InternalError(
+							"Tried to start a transaction while another transaction was open"
+								.to_string(),
+						)),
 						query_type: QueryType::Other,
 					});
 
-					self.opt.sender = None;
+					self.opt.broker = None;
 
 					while let Some(stmt) = stream.next().await {
 						yield_now!();
@@ -498,9 +505,12 @@ impl Executor {
 							return Ok(());
 						}
 
-						self.results.push(Response {
+						self.results.push(QueryResult {
 							time: Duration::ZERO,
-							result: Err(anyhow!(Error::QueryNotExecuted)),
+							result: Err(DbResultError::QueryNotExecuted(
+								"The query was not executed due to a failed transaction"
+									.to_string(),
+							)),
 							query_type: QueryType::Other,
 						});
 					}
@@ -514,10 +524,10 @@ impl Executor {
 					// update the results indicating cancelation.
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(anyhow!(Error::QueryCancelled));
+						res.result = Err(DbResultError::QueryCancelled);
 					}
 
-					self.opt.sender = None;
+					self.opt.broker = None;
 
 					return Ok(());
 				}
@@ -536,7 +546,7 @@ impl Executor {
 
 						// flush notifications.
 						if let Some(recv) = receiver {
-							self.opt.sender = None;
+							self.opt.broker = None;
 							if let Some(sink) = self.ctx.notifications() {
 								spawn(async move {
 									while let Ok(x) = recv.recv().await {
@@ -554,12 +564,11 @@ impl Executor {
 					// failed to commit
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(anyhow!(Error::QueryNotExecutedDetail {
-							message: e.to_string(),
-						}));
+						res.result =
+							Err(DbResultError::InternalError(format!("Query not executed: {}", e)));
 					}
 
-					self.opt.sender = None;
+					self.opt.broker = None;
 
 					return Ok(());
 				}
@@ -569,7 +578,7 @@ impl Executor {
 						// results
 						continue;
 					}
-					Err(e) => Err(e),
+					Err(e) => Err(DbResultError::InternalError(e.to_string())),
 				},
 				stmt => {
 					skip_remaining = matches!(stmt, TopLevelExpr::Expr(Expr::Return(_)));
@@ -577,53 +586,58 @@ impl Executor {
 					// reintroduce planner later.
 					let plan = stmt;
 
-					let r = match self.execute_plan_in_transaction(txn.clone(), &before, plan).await
-					{
-						Ok(x) => Ok(x),
-						Err(ControlFlow::Return(value)) => {
-							skip_remaining = true;
-							Ok(value)
-						}
-						Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
-							Err(anyhow!(Error::InvalidControlFlow))
-						}
-						Err(ControlFlow::Err(e)) => {
-							for res in &mut self.results[start_results..] {
-								res.query_type = QueryType::Other;
-								res.result = Err(anyhow!(Error::QueryNotExecuted));
+					let r =
+						match self.execute_plan_in_transaction(txn.clone(), &before, plan).await {
+							Ok(x) => Ok(x),
+							Err(ControlFlow::Return(value)) => {
+								skip_remaining = true;
+								Ok(value)
 							}
-
-							// statement return an error. Consume all the other statement until we
-							// hit a cancel or commit.
-							self.results.push(Response {
-								time: before.elapsed(),
-								result: Err(e),
-								query_type,
-							});
-
-							let _ = txn.cancel().await;
-
-							self.opt.sender = None;
-
-							while let Some(stmt) = stream.next().await {
-								yield_now!();
-								let stmt = stmt?;
-								if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
-									return Ok(());
+							Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
+								Err(anyhow!(Error::InvalidControlFlow))
+							}
+							Err(ControlFlow::Err(e)) => {
+								for res in &mut self.results[start_results..] {
+									res.query_type = QueryType::Other;
+									res.result = Err(DbResultError::QueryNotExecuted(
+										"The query was not executed due to a failed transaction"
+											.to_string(),
+									));
 								}
 
-								self.results.push(Response {
+								// statement return an error. Consume all the other statement until
+								// we hit a cancel or commit.
+								self.results.push(QueryResult {
+									time: before.elapsed(),
+									result: Err(DbResultError::InternalError(e.to_string())),
+									query_type,
+								});
+
+								let _ = txn.cancel().await;
+
+								self.opt.broker = None;
+
+								while let Some(stmt) = stream.next().await {
+									yield_now!();
+									let stmt = stmt?;
+									if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
+										return Ok(());
+									}
+
+									self.results.push(QueryResult {
 									time: Duration::ZERO,
-									result: Err(anyhow!(Error::QueryNotExecuted)),
+									result: Err(DbResultError::QueryNotExecuted(
+										"The query was not executed due to a cancelled transaction".to_string(),
+									)),
 									query_type: QueryType::Other,
 								});
-							}
+								}
 
-							// ran out of statements before the transaction ended.
-							// Just break as we have nothing else we can do.
-							return Ok(());
-						}
-					};
+								// ran out of statements before the transaction ended.
+								// Just break as we have nothing else we can do.
+								return Ok(());
+							}
+						};
 
 					if skip_remaining {
 						// If we skip the next values due to return then we need to clear the other
@@ -631,13 +645,16 @@ impl Executor {
 						self.results.truncate(start_results)
 					}
 
-					r
+					match r {
+						Ok(value) => Ok(convert_value_to_public_value(value)?),
+						Err(err) => Err(DbResultError::InternalError(err.to_string())),
+					}
 				}
 			};
 
-			self.results.push(Response {
+			self.results.push(QueryResult {
 				time: before.elapsed(),
-				result: value,
+				result,
 				query_type,
 			});
 		}
@@ -648,12 +665,10 @@ impl Executor {
 
 		for res in &mut self.results[start_results..] {
 			res.query_type = QueryType::Other;
-			res.result = Err(anyhow!(Error::QueryNotExecutedDetail {
-				message: "Missing COMMIT statement".to_string(),
-			}));
+			res.result = Err(DbResultError::InternalError("Missing COMMIT statement".to_string()));
 		}
 
-		self.opt.sender = None;
+		self.opt.broker = None;
 
 		Ok(())
 	}
@@ -664,7 +679,7 @@ impl Executor {
 		ctx: Context,
 		opt: Options,
 		qry: Ast,
-	) -> Result<Vec<Response>> {
+	) -> Result<Vec<QueryResult>> {
 		let stream = futures::stream::iter(qry.expressions.into_iter().map(Ok));
 		Self::execute_stream(kvs, ctx, opt, false, stream).await
 	}
@@ -675,18 +690,9 @@ impl Executor {
 		ctx: Context,
 		opt: Options,
 		qry: LogicalPlan,
-	) -> Result<Vec<Response>> {
+	) -> Result<Vec<QueryResult>> {
 		let stream = futures::stream::iter(qry.expressions.into_iter().map(Ok));
 		Self::execute_expr_stream(kvs, ctx, opt, false, stream).await
-	}
-
-	pub async fn execute_expr(
-		kvs: &Datastore,
-		ctx: Context,
-		opt: Options,
-		plan: TopLevelExpr,
-	) -> Result<Vec<Response>> {
-		Self::execute_expr_stream(kvs, ctx, opt, false, stream::once(async { Ok(plan) })).await
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
@@ -696,7 +702,7 @@ impl Executor {
 		opt: Options,
 		skip_success_results: bool,
 		stream: S,
-	) -> Result<Vec<Response>>
+	) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<sql::TopLevelExpr>>,
 	{
@@ -717,7 +723,7 @@ impl Executor {
 		opt: Options,
 		skip_success_results: bool,
 		stream: S,
-	) -> Result<Vec<Response>>
+	) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<TopLevelExpr>>,
 	{
@@ -728,9 +734,9 @@ impl Executor {
 			let stmt = match stmt {
 				Ok(x) => x,
 				Err(e) => {
-					this.results.push(Response {
+					this.results.push(QueryResult {
 						time: Duration::ZERO,
-						result: Err(e),
+						result: Err(DbResultError::InternalError(e.to_string())),
 						query_type: QueryType::Other,
 					});
 
@@ -743,9 +749,9 @@ impl Executor {
 				// handle option here because it doesn't produce a result.
 				TopLevelExpr::Begin => {
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
-						this.results.push(Response {
+						this.results.push(QueryResult {
 							time: Duration::ZERO,
-							result: Err(e),
+							result: Err(DbResultError::InternalError(e.to_string())),
 							query_type: QueryType::Other,
 						});
 
@@ -757,8 +763,12 @@ impl Executor {
 
 					let now = Instant::now();
 					let result = this.execute_bare_statement(kvs, &now, stmt).await;
+					let result = match result {
+						Ok(value) => Ok(convert_value_to_public_value(value)?),
+						Err(err) => Err(DbResultError::InternalError(err.to_string())),
+					};
 					if !skip_success_results || result.is_err() {
-						this.results.push(Response {
+						this.results.push(QueryResult {
 							time: now.elapsed(),
 							result,
 							query_type,

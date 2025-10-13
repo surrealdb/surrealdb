@@ -1,6 +1,7 @@
 mod geometry;
 mod literal;
 
+use std::collections::HashSet;
 use std::fmt::Display;
 
 pub use geometry::*;
@@ -46,11 +47,7 @@ pub enum Kind {
 	/// A record type.
 	Record(Vec<String>),
 	/// A geometry type.
-	/// The vec contains the geometry types as strings, for example `"point"` or
-	/// `"polygon"`. TODO(3.0): Change to use an enum
 	Geometry(Vec<GeometryKind>),
-	/// An optional type.
-	Option(Box<Kind>),
 	/// An either type.
 	/// Can be any of the kinds in the vec.
 	Either(Vec<Kind>),
@@ -79,6 +76,40 @@ pub enum Kind {
 impl Default for Kind {
 	fn default() -> Self {
 		Self::Any
+	}
+}
+
+impl Kind {
+	/// Recursively flatten a kind into a vector of kinds.
+	pub fn flatten(self) -> Vec<Kind> {
+		match self {
+			Kind::Either(x) => x.into_iter().flat_map(|k| k.flatten()).collect(),
+			_ => vec![self],
+		}
+	}
+
+	/// Create an either kind from a vector of kinds.
+	/// If after dedeplication the vector is empty, return `Kind::None`.
+	/// If after dedeplication the vector has one element, return that element.
+	/// If after dedeplication the vector has multiple elements, return an `Either` kind with the
+	/// elements.
+	pub fn either(kinds: Vec<Kind>) -> Kind {
+		let mut seen = HashSet::new();
+		let mut kinds = kinds
+			.into_iter()
+			.flat_map(|k| k.flatten())
+			.filter(|k| seen.insert(k.clone()))
+			.collect::<Vec<_>>();
+		match kinds.len() {
+			0 => Kind::None,
+			1 => kinds.remove(0),
+			_ => Kind::Either(kinds),
+		}
+	}
+
+	/// Create an option kind from a kind.
+	pub fn option(kind: Kind) -> Kind {
+		Kind::either(vec![Kind::None, kind])
 	}
 }
 
@@ -114,7 +145,6 @@ impl Display for Kind {
 					write!(f, "geometry<{}>", join_displayable(kinds, " | "))
 				}
 			}
-			Kind::Option(kind) => write!(f, "option<{}>", kind),
 			Kind::Either(kinds) => write!(f, "{}", join_displayable(kinds, " | ")),
 			Kind::Set(kind, max) => match max {
 				Some(max) => write!(f, "set<{}, {}>", kind, max),
