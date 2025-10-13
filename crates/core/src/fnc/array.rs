@@ -660,7 +660,7 @@ pub fn sequence((offset_len, Optional(len)): (i64, Optional<i64>)) -> Result<Val
 		return Ok(Value::Array(Array(Vec::new())));
 	}
 
-	let end = offset_len.saturating_add(len.saturating_sub(1));
+	let end = offset_len.saturating_add(len - 1);
 	let range = TypedRange::from_range(offset..=end);
 
 	limit("array::sequence", mem::size_of::<Value>().saturating_mul(range.len()))?;
