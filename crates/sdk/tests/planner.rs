@@ -2465,15 +2465,15 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 	let sql = "
 		CREATE t:1 SET links = [a:2, a:1];
 		CREATE t:2 SET links = [a:3, a:4];
-		SELECT * FROM t WHERE links CONTAINS a:2;
-		SELECT * FROM t WHERE links CONTAINS a:2 EXPLAIN;
+		SELECT * FROM t WHERE [a:2] ANYINSIDE links;
+		SELECT * FROM t WHERE [a:2] ANYINSIDE links EXPLAIN;
 		SELECT * FROM t WHERE links CONTAINSANY [a:2];
 		SELECT * FROM t WHERE links CONTAINSANY [a:2] EXPLAIN;
 		SELECT * FROM t WHERE a:2 IN links;
 		SELECT * FROM t WHERE a:2 IN links EXPLAIN;
 		DEFINE INDEX idx ON t FIELDS links;
-		SELECT * FROM t WHERE links CONTAINS a:2;
-		SELECT * FROM t WHERE links CONTAINS a:2 EXPLAIN;
+		SELECT * FROM t WHERE [a:2] ANYINSIDE links;
+		SELECT * FROM t WHERE [a:2] ANYINSIDE links EXPLAIN;
 		SELECT * FROM t WHERE links CONTAINSANY [a:2];
 		SELECT * FROM t WHERE links CONTAINSANY [a:2] EXPLAIN;
 		SELECT * FROM t WHERE a:2 IN links;
@@ -2493,7 +2493,7 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 	assert_eq!(res.len(), 15);
 	skip_ok(&mut res, 2)?;
 	//
-	for t in ["CONTAINS", "CONTAINSANY", "IN"] {
+	for t in ["ANYINSIDE", "CONTAINSANY", "IN"] {
 		let tmp = res.remove(0).result?;
 		assert_eq!(format!("{:#}", tmp), format!("{:#}", expected), "{t}");
 		//
@@ -2530,8 +2530,10 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 					detail: {
 						plan: {
 							index: 'idx',
-							operator: '=',
-							value: a:2
+							operator: 'union',
+							value: [
+								a:2
+							]
 						},
 						table: 't'
 					},
@@ -2582,24 +2584,20 @@ async fn select_with_record_id_index() -> Result<(), Error> {
 	let tmp = res.remove(0).result?;
 	let val = Value::parse(
 		r#"[
-				{
-					detail: {
-						plan: {
-							index: 'idx',
-							operator: '=',
-							value: a:2
+					{
+						detail: {
+							direction: 'forward',
+							table: 't'
 						},
-						table: 't'
+						operation: 'Iterate Table'
 					},
-					operation: 'Iterate Index'
-				},
-				{
-					detail: {
-						type: 'Memory'
-					},
-					operation: 'Collector'
-				}
-			]"#,
+					{
+						detail: {
+							type: 'Memory'
+						},
+						operation: 'Collector'
+					}
+				]"#,
 	);
 	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
