@@ -363,7 +363,7 @@ impl Iterator {
 		);
 		// Evaluate if we can only scan keys (rather than keys AND values), or count
 		let rs = ctx.check_record_strategy(false, p)?;
-		let sc = ctx.check_scan_direction();
+		let sc = ctx.check_scan_direction(ctx.ctx.tx().has_reverse_scan());
 		// Add the record to the iterator
 		if let (tb, RecordIdKey::Range(v)) = (v.table, v.key) {
 			self.ingest(Iterable::Range(tb, *v, rs, sc));
