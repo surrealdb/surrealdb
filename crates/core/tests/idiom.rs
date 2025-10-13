@@ -950,7 +950,7 @@ async fn idiom_recursion_repeat_recurse_nested_destructure() -> Result<()> {
 async fn idiom_recursion_limits() -> Result<()> {
 	let sql = r#"
 		FOR $i IN 1..=300 {
-			UPSERT type::thing('a', $i) SET link = type::thing('a', $i + 1);
+			UPSERT type::record('a', $i) SET link = type::record('a', $i + 1);
 		};
 
 		a:1.{0..}.link;

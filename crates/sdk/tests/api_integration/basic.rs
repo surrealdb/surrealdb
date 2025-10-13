@@ -973,10 +973,10 @@ pub async fn update_table_with_content(new_db: impl CreateDb) {
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "
-        CREATE type::thing($table, 'amos') SET name = 'Amos';
-        CREATE type::thing($table, 'jane') SET name = 'Jane';
-        CREATE type::thing($table, 'john') SET name = 'John';
-        CREATE type::thing($table, 'zoey') SET name = 'Zoey';
+        CREATE type::record($table, 'amos') SET name = 'Amos';
+        CREATE type::record($table, 'jane') SET name = 'Jane';
+        CREATE type::record($table, 'john') SET name = 'John';
+        CREATE type::record($table, 'zoey') SET name = 'Zoey';
     ";
 	let table = "user";
 	let response = db.query(sql).bind(("table", table)).await.unwrap();
@@ -1016,10 +1016,10 @@ pub async fn update_record_range_with_content(new_db: impl CreateDb) {
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "
-        CREATE type::thing($table, 'amos') SET name = 'Amos';
-        CREATE type::thing($table, 'jane') SET name = 'Jane';
-        CREATE type::thing($table, 'john') SET name = 'John';
-        CREATE type::thing($table, 'zoey') SET name = 'Zoey';
+        CREATE type::record($table, 'amos') SET name = 'Amos';
+        CREATE type::record($table, 'jane') SET name = 'Jane';
+        CREATE type::record($table, 'john') SET name = 'John';
+        CREATE type::record($table, 'zoey') SET name = 'Zoey';
     ";
 	let table = "user";
 	let response = db.query(sql).bind(("table", table)).await.unwrap();
@@ -1400,10 +1400,10 @@ pub async fn delete_record_range(new_db: impl CreateDb) {
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "
-        CREATE type::thing($table, 'amos') SET name = 'Amos';
-        CREATE type::thing($table, 'jane') SET name = 'Jane';
-        CREATE type::thing($table, 'john') SET name = 'John';
-        CREATE type::thing($table, 'zoey') SET name = 'Zoey';
+        CREATE type::record($table, 'amos') SET name = 'Amos';
+        CREATE type::record($table, 'jane') SET name = 'Jane';
+        CREATE type::record($table, 'john') SET name = 'John';
+        CREATE type::record($table, 'zoey') SET name = 'Zoey';
     ";
 	let table = "user";
 	let response = db.query(sql).bind(("table", table)).await.unwrap();

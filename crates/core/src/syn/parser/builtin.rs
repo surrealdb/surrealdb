@@ -373,7 +373,6 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("type::string") => PathKind::Function,
 		UniCase::ascii("type::string_lossy") => PathKind::Function,
 		UniCase::ascii("type::table") => PathKind::Function,
-		UniCase::ascii("type::thing") => PathKind::Function,
 		UniCase::ascii("type::uuid") => PathKind::Function,
 		UniCase::ascii("type::is_array") => PathKind::Function,
 		UniCase::ascii("type::is_bool") => PathKind::Function,

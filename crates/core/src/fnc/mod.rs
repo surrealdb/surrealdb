@@ -449,7 +449,6 @@ pub fn synchronous(
 		"type::string" => r#type::string,
 		"type::string_lossy" => r#type::string_lossy,
 		"type::table" => r#type::table,
-		"type::thing" => r#type::thing,
 		"type::uuid" => r#type::uuid,
 		"type::is_array" => r#type::is::array,
 		"type::is_bool" => r#type::is::bool,
