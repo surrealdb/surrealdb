@@ -96,7 +96,7 @@ pub(crate) mod native;
 #[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
 
-type LiveQueryMap = HashMap<Uuid, Sender<Notification<CoreValue>>>;
+type LiveQueryMap = HashMap<Uuid, Sender<Result<Notification<CoreValue>>>>;
 
 /// In-memory database
 ///

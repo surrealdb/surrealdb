@@ -1,3 +1,5 @@
+#![allow(clippy::useless_conversion)]
+
 mod helpers;
 mod parse;
 use std::time::Duration;

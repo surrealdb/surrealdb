@@ -103,7 +103,7 @@ where
 pub(crate) async fn register(
 	router: &Router,
 	id: Uuid,
-) -> Result<Receiver<Notification<CoreValue>>> {
+) -> Result<Receiver<Result<Notification<CoreValue>>>> {
 	let (tx, rx) = async_channel::unbounded();
 	router
 		.execute_unit(Command::SubscribeLive {
@@ -160,7 +160,8 @@ pub struct Stream<R> {
 	// We no longer need the lifetime and the type parameter
 	// Leaving them in for backwards compatibility
 	pub(crate) id: Uuid,
-	pub(crate) rx: Option<Pin<Box<Receiver<Notification<CoreValue>>>>>,
+	#[allow(clippy::type_complexity)]
+	pub(crate) rx: Option<Pin<Box<Receiver<Result<Notification<CoreValue>>>>>>,
 	pub(crate) response_type: PhantomData<R>,
 }
 
@@ -168,7 +169,7 @@ impl<R> Stream<R> {
 	pub(crate) fn new(
 		client: Surreal<Any>,
 		id: Uuid,
-		rx: Option<Receiver<Notification<CoreValue>>>,
+		rx: Option<Receiver<Result<Notification<CoreValue>>>>,
 	) -> Self {
 		Self {
 			id,
@@ -180,13 +181,13 @@ impl<R> Stream<R> {
 }
 
 macro_rules! poll_next {
-	($notification:ident => $body:expr) => {
+	($result:ident => $body:expr) => {
 		fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
 			let Some(ref mut rx) = self.as_mut().rx else {
 				return Poll::Ready(None);
 			};
 			match rx.poll_next_unpin(cx) {
-				Poll::Ready(Some($notification)) => $body,
+				Poll::Ready(Some($result)) => $body,
 				Poll::Ready(None) => Poll::Ready(None),
 				Poll::Pending => Poll::Pending,
 			}
@@ -198,13 +199,19 @@ impl futures::Stream for Stream<Value> {
 	type Item = Notification<Value>;
 
 	poll_next! {
-		notification => {
-			let r = Notification{
-				query_id: notification.query_id,
-				action: notification.action,
-				data: Value::from_inner(notification.data),
-			};
-			Poll::Ready(Some(r))
+		result => match result {
+			Ok(notification) => {
+				let r = Notification{
+					query_id: notification.query_id,
+					action: notification.action,
+					data: Value::from_inner(notification.data),
+				};
+				Poll::Ready(Some(r))
+			}
+			Err(error) => {
+				debug!("Live query notification error: {error}");
+				Poll::Ready(None)
+			}
 		}
 	}
 }
@@ -212,9 +219,14 @@ impl futures::Stream for Stream<Value> {
 macro_rules! poll_next_and_convert {
 	() => {
 		poll_next! {
-			notification => match notification.map_deserialize(){
-				Ok(data) => Poll::Ready(Some(Ok(data))),
-				Err(error) => Poll::Ready(Some(Err(error.into()))),
+			result => match result {
+				Ok(notification) => match notification.map_deserialize() {
+					Ok(data) => Poll::Ready(Some(Ok(data))),
+					Err(error) => Poll::Ready(Some(Err(error.into()))),
+				}
+				Err(error) => {
+					Poll::Ready(Some(Err(error)))
+				}
 			}
 		}
 	};
