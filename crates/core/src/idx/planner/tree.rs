@@ -172,7 +172,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(())
 	}
 
-	async fn eval_count(&mut self, table: &str) -> Result<(), Error> {
+	async fn eval_count(&mut self, table: &Table) -> Result<(), Error> {
 		if let Some(f) = self.ctx.fields {
 			if f.is_count_all_only() {
 				if let Some(g) = self.ctx.group {

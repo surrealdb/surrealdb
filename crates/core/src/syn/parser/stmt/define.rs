@@ -1054,8 +1054,7 @@ impl Parser<'_> {
 				}
 				t!("COUNT") => {
 					self.pop_peek();
-					let cond = self.try_parse_condition(stk).await?;
-					res.index = Index::Count(cond);
+					res.index = Index::Count;
 				}
 				t!("SEARCH") => {
 					self.pop_peek();

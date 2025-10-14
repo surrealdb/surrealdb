@@ -1,3 +1,4 @@
+use super::KeyDecode;
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
@@ -23,8 +24,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::task;
 use tokio::task::JoinHandle;
-
-use super::KeyDecode;
 
 #[derive(Debug, Clone)]
 pub(crate) enum BuildingStatus {
@@ -581,18 +580,17 @@ impl Building {
 		if !*rc {
 			return Ok(());
 		}
-		Self::trigger_compaction(&self.ikb, tx, self.opt.id()?).await?;
+		let (ns, db) = self.opt.ns_db()?;
+		IndexOperation::put_trigger_compaction(
+			ns,
+			db,
+			&self.ix.what,
+			&self.ix.name,
+			tx,
+			self.opt.id()?,
+		)
+		.await?;
 		*rc = false;
-		Ok(())
-	}
-
-	pub(crate) async fn trigger_compaction(
-		ikb: &IndexKeyBase,
-		tx: &Transaction,
-		nid: Uuid,
-	) -> Result<(), Error> {
-		let ic = ikb.new_ic_key(nid);
-		tx.put(&ic, &(), None).await?;
 		Ok(())
 	}
 

@@ -16,9 +16,9 @@ use crate::err::Error;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
-use crate::idx::IndexKeyBase;
 use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
+use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
@@ -26,8 +26,9 @@ use crate::kvs::clock::SystemClock;
 #[cfg(not(target_family = "wasm"))]
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::slowlog::SlowLog;
+use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
-use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
+use crate::sql::{statements::DefineUserStatement, Base, Index, Query, Value};
 use crate::syn;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::{cf, cnf};
@@ -783,7 +784,7 @@ impl Datastore {
 	/// * `Result<()>` - Ok if the compaction was successful or if another node is handling the
 	///   compaction, Error otherwise
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn index_compaction(&self, interval: Duration) -> Result<()> {
+	pub async fn index_compaction(&self, interval: Duration) -> Result<(), Error> {
 		let lh = LeaseHandler::new(
 			self.id,
 			self.transaction_factory.clone(),
@@ -815,28 +816,17 @@ impl Datastore {
 						continue;
 					}
 				}
-				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
-					Some(ix) => match &ix.index {
-						Index::FullText(p) => {
-							let ft = FullTextIndex::new(
-								self.id(),
-								&self.index_stores,
-								&txn,
-								IndexKeyBase::new(ic.ns, ic.db, &ix.table_name, ix.index_id),
-								p,
-							)
-							.await?;
-							ft.compaction(&txn).await?;
-						}
-						Index::Count(_) => {
+				match txn.get_tb_index(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await {
+					Ok(ix) => match &ix.index {
+						Index::Count => {
 							IndexOperation::index_count_compaction(&ic, &txn).await?;
 						}
 						_ => {
 							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);
 						}
 					},
-					None => {
-						trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ic.ix);
+					Err(e) => {
+						trace!(target: TARGET, "Index compaction error: {e} - Index {:?}", ic.ix);
 					}
 				}
 				previous = Some(ic.into_owned());

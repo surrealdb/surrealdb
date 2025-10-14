@@ -69,10 +69,6 @@ impl<'a> IndexCompactionKey<'a> {
 		}
 	}
 
-	pub(crate) fn into_owned(self) -> IndexCompactionKey<'static> {
-		IndexCompactionKey::new(self.ns, self.db, self.tb, self.ix, self.nid, self.uid)
-	}
-
 	pub(crate) fn index_matches(&self, other: &IndexCompactionKey<'_>) -> bool {
 		self.ns == other.ns && self.db == other.db && self.tb == other.tb && self.ix == other.ix
 	}

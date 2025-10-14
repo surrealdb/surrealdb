@@ -50,6 +50,7 @@ mod index;
 ))]
 mod savepoint;
 pub(crate) mod slowlog;
+pub(crate) mod tasklease;
 #[cfg(test)]
 mod tests;
 mod util;

@@ -15,6 +15,7 @@ use crate::sql::index::{HnswParams, MTreeParams, SearchParams};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Index, Part, Thing, Value};
 use reblessive::tree::Stk;
+use uuid::Uuid;
 
 pub(crate) struct IndexOperation<'a> {
 	ctx: &'a Context,
@@ -146,10 +147,10 @@ impl<'a> IndexOperation<'a> {
 			return Ok(());
 		}
 		let key = IndexCountKey::new(
-			self.ns,
-			self.db,
-			&self.ix.table_name,
-			self.ix.index_id,
+			self.opt.ns()?,
+			self.opt.db()?,
+			&self.ix.what,
+			&self.ix.name,
 			Some((self.opt.id()?, uuid::Uuid::now_v7())),
 			relative_count > 0,
 			relative_count.unsigned_abs() as u64,
@@ -194,9 +195,30 @@ impl<'a> IndexOperation<'a> {
 		}
 		ft.finish(self.ctx).await
 	}
-
 	pub(crate) async fn trigger_compaction(&self) -> Result<(), Error> {
-		FullTextIndex::trigger_compaction(&self.ikb, &self.ctx.tx(), self.opt.id()?).await
+		let (ns, db) = self.opt.ns_db()?;
+		Self::put_trigger_compaction(
+			ns,
+			db,
+			&self.ix.what,
+			&self.ix.name,
+			&self.ctx.tx(),
+			self.opt.id()?,
+		)
+		.await
+	}
+
+	pub(crate) async fn put_trigger_compaction(
+		ns: &str,
+		db: &str,
+		tb: &str,
+		ix: &str,
+		tx: &Transaction,
+		nid: Uuid,
+	) -> Result<(), Error> {
+		let ic = IndexCompactionKey::new(ns, db, tb, ix, nid, Uuid::now_v7());
+		tx.set(&ic, vec![], None).await?;
+		Ok(())
 	}
 
 	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<(), Error> {

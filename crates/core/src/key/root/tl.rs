@@ -1,12 +1,12 @@
 //! Stores a task lease to ensure only one node is running the task at a time
 
-use storekey::{BorrowDecode, Encode};
+use serde::{Deserialize, Serialize};
 
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_kv_key_storekey;
-use crate::kvs::tasklease::{TaskLease, TaskLeaseType};
+use crate::kvs::impl_key;
+use crate::kvs::tasklease::TaskLeaseType;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub(crate) struct Tl {
 	__: u8,
 	_a: u8,
@@ -15,7 +15,7 @@ pub(crate) struct Tl {
 	pub task: u16,
 }
 
-impl_kv_key_storekey!(Tl => TaskLease);
+impl_key!(Tl);
 
 impl Categorise for Tl {
 	fn categorise(&self) -> Category {
@@ -26,8 +26,7 @@ impl Categorise for Tl {
 impl Tl {
 	pub(crate) fn new(task: &TaskLeaseType) -> Self {
 		let task = match task {
-			TaskLeaseType::ChangeFeedCleanup => 1,
-			TaskLeaseType::IndexCompaction => 2,
+			TaskLeaseType::IndexCompaction => 1,
 		};
 		Self {
 			__: b'/',
@@ -42,13 +41,13 @@ impl Tl {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KVKey;
+	use crate::kvs::KeyEncode;
 
 	#[test]
 	fn key_changefeed_cleanup() {
 		#[rustfmt::skip]
-		let val = Tl::new(&TaskLeaseType::ChangeFeedCleanup);
-		let enc = Tl::encode_key(&val).unwrap();
+		let val = Tl::new(&TaskLeaseType::IndexCompaction);
+		let enc = Tl::encode(&val).unwrap();
 		assert_eq!(enc, b"/!tl\0\x01");
 	}
 }
