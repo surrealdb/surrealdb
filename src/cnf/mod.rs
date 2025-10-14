@@ -1,3 +1,4 @@
+use std::env;
 use std::sync::LazyLock;
 use std::time::Duration;
 use surrealdb::lazy_env_parse;
@@ -67,13 +68,43 @@ pub static HTTP_MAX_IMPORT_BODY_SIZE: LazyLock<usize> =
 /// Specifies the frequency with which ping messages should be sent to the client
 pub const WEBSOCKET_PING_FREQUENCY: Duration = Duration::from_secs(5);
 
-/// What is the maximum WebSocket frame size (defaults to 16 MiB)
-pub static WEBSOCKET_MAX_FRAME_SIZE: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_FRAME_SIZE", usize, 16 << 20);
-
 /// What is the maximum WebSocket message size (defaults to 128 MiB)
 pub static WEBSOCKET_MAX_MESSAGE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE", usize, 128 << 20);
+
+/// The size of the write buffer for WebSocket connections (default: 128 KiB)
+///
+/// This controls how much data can be buffered when writing to WebSocket connections.
+/// Larger values can improve performance for high-throughput connections but consume
+/// more memory per connection. The value can be configured via the
+/// `SURREAL_WEBSOCKET_WRITE_BUFFER_SIZE` environment variable.
+pub static WEBSOCKET_WRITE_BUFFER_SIZE: LazyLock<usize> =
+	lazy_env_parse!(bytes, "SURREAL_WEBSOCKET_WRITE_BUFFER_SIZE", usize, 128 * 1024);
+
+/// The maximum write buffer size before backpressure is applied (default: unlimited)
+///
+/// When the write buffer reaches this size, the WebSocket connection will apply
+/// backpressure to prevent memory exhaustion. By default, this is set to unlimited
+/// (`usize::MAX`), but it can be configured via the
+/// `SURREAL_WEBSOCKET_MAX_WRITE_BUFFER_SIZE` environment variable.
+///
+/// # Environment Variable
+///
+/// Set `SURREAL_WEBSOCKET_MAX_WRITE_BUFFER_SIZE` to configure this value. The value
+/// must be greater than `WEBSOCKET_WRITE_BUFFER_SIZE` to be effective. If not set
+/// or if the value is invalid, unlimited buffering is used.
+pub static WEBSOCKET_MAX_WRITE_BUFFER_SIZE: LazyLock<usize> = LazyLock::new(|| {
+	let buffer_size = || {
+		let var = env::var("SURREAL_WEBSOCKET_MAX_WRITE_BUFFER_SIZE").ok()?;
+		let size = var.parse().ok()?;
+		if size > *WEBSOCKET_WRITE_BUFFER_SIZE {
+			Some(size)
+		} else {
+			None
+		}
+	};
+	buffer_size().unwrap_or(usize::MAX)
+});
 
 /// How many responses can be buffered when delivering to the client (defaults to 0).
 pub static WEBSOCKET_RESPONSE_BUFFER_SIZE: LazyLock<usize> =

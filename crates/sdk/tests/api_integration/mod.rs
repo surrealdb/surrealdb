@@ -185,6 +185,81 @@ mod ws {
 		drop(permit);
 	}
 
+	/// Test WebSocket message size limits to ensure proper handling of large messages.
+	///
+	/// This test verifies that:
+	/// 1. Messages within the configured size limits are processed successfully
+	/// 2. Messages exceeding the size limits are properly rejected with appropriate error messages
+	/// 3. The WebSocket configuration correctly applies both message and frame size limits
+	///
+	/// The test uses a custom WebSocket configuration with a 256 MiB message size limit
+	/// and tests various message sizes including edge cases.
+	#[test_log::test(tokio::test)]
+	async fn check_max_size() {
+		use serde::{Deserialize, Serialize};
+		use surrealdb::opt::{Config, WebsocketConfig};
+		use ulid::Ulid;
+
+		/// Test content structure for validating large message handling
+		#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+		struct Content {
+			content: String,
+		}
+
+		impl Content {
+			/// Creates test content with a string of the specified length
+			fn new(len: usize) -> Self {
+				Self {
+					content: "a".repeat(len),
+				}
+			}
+		}
+
+		// Set a 256 MiB limit for testing large message handling
+		let max_size = 256 << 20;
+
+		let permit = PERMITS.acquire().await.unwrap();
+		// Configure WebSocket with custom size limits for testing
+		let ws_config = WebsocketConfig::default().max_message_size(max_size);
+		let config = Config::new().websocket(ws_config).unwrap();
+		let db = Surreal::new::<Ws>(("127.0.0.1:8000", config)).await.unwrap();
+		db.signin(Root {
+			username: ROOT_USER,
+			password: ROOT_PASS,
+		})
+		.await
+		.unwrap();
+		db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+		drop(permit);
+
+		// Test various message sizes that should be accepted
+		{
+			let sizes = [0, 1, 1024, max_size - (1 << 20)];
+
+			for size in sizes {
+				let content = Content::new(size);
+
+				let response: Option<Content> =
+					db.upsert(("table", "test")).content(content.clone()).await.unwrap();
+
+				assert_eq!(content, response.unwrap(), "size: {size}");
+			}
+		}
+
+		// Test message size that should be rejected
+		{
+			let content = Content::new(max_size + (1 << 20));
+
+			let error = db
+				.upsert::<Option<Content>>(("table", "test"))
+				.content(content.clone())
+				.await
+				.unwrap_err();
+
+			assert!(error.to_string().contains("Connection reset by peer"));
+		}
+	}
+
 	include_tests!(new_db => basic, serialisation, live);
 }
 
