@@ -12,5 +12,4 @@ Invalid function/constant path, did you maybe mean `string::slice`
 
 */
 
-// Typos
 string::slayce();

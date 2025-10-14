@@ -216,7 +216,6 @@ Invalid function/constant path, did you maybe mean `type::record`
 
 */
 
-// Typos
 type::thing("person", "one");
 
 // Can't add this extra assertion inside the same file

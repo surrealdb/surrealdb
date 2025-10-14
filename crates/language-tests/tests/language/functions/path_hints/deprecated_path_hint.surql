@@ -12,5 +12,4 @@ Invalid function/constant path, did you maybe mean `type::record`
 
 */
 
-// Typos
 type::thing("person", "one");
