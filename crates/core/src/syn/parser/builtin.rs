@@ -531,8 +531,8 @@ fn find_suggestion(got: &str) -> Option<&'static str> {
 		return Some(surely.into_inner());
 	}
 
-	// No deprecated paths found, now use string similarity. Don't search further if the levenshtein
-	// distance is further then 10.
+	// No deprecated paths found, now use string similarity.
+	// Don't search further if the levenshtein distance is greater than 4.
 	let mut cut_off = MAX_LEVENSTHEIN_CUT_OFF;
 	let possibly = PATHS
 		.keys()
