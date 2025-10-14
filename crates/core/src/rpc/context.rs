@@ -18,9 +18,11 @@ pub trait RpcContext {
 	/// Retrieves the modification lock for this RPC context
 	fn lock(&self) -> Arc<Semaphore>;
 	/// The current session for this RPC context
-	fn session(&self) -> Arc<Session>;
+	fn get_session(&self, id: Option<&Uuid>) -> Arc<Session>;
 	/// Mutable access to the current session for this RPC context
-	fn set_session(&self, session: Arc<Session>);
+	fn set_session(&self, id: Option<Uuid>, session: Arc<Session>);
+	/// Deletes a session
+	fn del_session(&self, id: &Uuid);
 	/// The version information for this RPC context
 	fn version_data(&self) -> DbResult;
 
@@ -67,6 +69,7 @@ pub trait RpcContext {
 		&self,
 		version: Option<u8>,
 		_txn: Option<Uuid>,
+		session: Option<Uuid>,
 		method: Method,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError>
@@ -74,8 +77,8 @@ pub trait RpcContext {
 		Self: RpcProtocolV1,
 	{
 		match version {
-			Some(1) => RpcProtocolV1::execute(self, method, params).await,
-			_ => RpcProtocolV1::execute(self, method, params).await,
+			Some(1) => RpcProtocolV1::execute(self, session, method, params).await,
+			_ => RpcProtocolV1::execute(self, session, method, params).await,
 		}
 	}
 }

@@ -6,6 +6,7 @@ use arc_swap::ArcSwap;
 use axum::extract::ws::close_code::AGAIN;
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use bytes::Bytes;
+use dashmap::DashMap;
 use futures::stream::FuturesUnordered;
 use futures::{Sink, SinkExt, StreamExt};
 use opentelemetry::Context as TelemetryContext;
@@ -54,6 +55,7 @@ pub struct Websocket {
 	pub(crate) lock: Arc<Semaphore>,
 	/// The persistent session for this WebSocket connection
 	pub(crate) session: ArcSwap<Session>,
+	pub(crate) sessions: DashMap<Uuid, Arc<Session>>,
 	/// A cancellation token called when shutting down the server
 	pub(crate) shutdown: CancellationToken,
 	/// A cancellation token for cancelling all spawned tasks
@@ -87,6 +89,7 @@ impl Websocket {
 			shutdown: CancellationToken::new(),
 			canceller: CancellationToken::new(),
 			session: ArcSwap::from(Arc::new(session)),
+			sessions: DashMap::new(),
 			channel: sender.clone(),
 			//gql_schema: SchemaCache::new(datastore.clone()),
 			datastore,
@@ -388,7 +391,16 @@ impl Websocket {
 							// Otherwise process the request message
 							else {
 								// Process the message
-								let result = Self::process_message(rpc.clone(), req.version, req.txn.map(Into::into), req.method, req.params).await;
+								let result = Self::process_message(
+									rpc.clone(),
+									req.version,
+									req.session_id.map(Into::into),
+									req.txn.map(Into::into),
+									req.method,
+									req.params,
+								)
+									.await;
+
 								crate::rpc::response::send(
 									match result {
 										Ok(result) => DbResponse::success(req.id, result),
@@ -425,6 +437,7 @@ impl Websocket {
 	async fn process_message(
 		rpc: Arc<Websocket>,
 		version: Option<u8>,
+		session_id: Option<Uuid>,
 		txn: Option<Uuid>,
 		method: Method,
 		params: Array,
@@ -435,7 +448,9 @@ impl Websocket {
 			return Err(DbResultError::MethodNotFound("Method not found".to_string()));
 		}
 		// Execute the specified method
-		RpcContext::execute(rpc.as_ref(), version, txn, method, params).await.map_err(Into::into)
+		RpcContext::execute(rpc.as_ref(), version, txn, session_id, method, params)
+			.await
+			.map_err(Into::into)
 	}
 
 	/// Reject a WebSocket message due to server overloading
@@ -468,12 +483,30 @@ impl RpcContext for Websocket {
 		self.lock.clone()
 	}
 	/// The current session for this RPC context
-	fn session(&self) -> Arc<Session> {
-		self.session.load_full()
+	fn get_session(&self, id: Option<&Uuid>) -> Arc<Session> {
+		if let Some(id) = id {
+			if let Some(session) = self.sessions.get(id) {
+				session.clone()
+			} else {
+				let session = Arc::new(Session::default());
+				self.sessions.insert(*id, session.clone());
+				session
+			}
+		} else {
+			self.session.load_full()
+		}
 	}
 	/// Mutable access to the current session for this RPC context
-	fn set_session(&self, session: Arc<Session>) {
-		self.session.store(session);
+	fn set_session(&self, id: Option<Uuid>, session: Arc<Session>) {
+		if let Some(id) = id {
+			self.sessions.insert(id, session);
+		} else {
+			self.session.store(session);
+		}
+	}
+	/// Mutable access to the current session for this RPC context
+	fn del_session(&self, id: &Uuid) {
+		self.sessions.remove(id);
 	}
 	/// The version information for this RPC context
 	fn version_data(&self) -> DbResult {

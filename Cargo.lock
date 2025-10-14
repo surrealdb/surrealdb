@@ -5743,6 +5743,7 @@ dependencies = [
  "ciborium",
  "clap",
  "console-subscriber",
+ "dashmap",
  "env_logger",
  "futures",
  "futures-util",
