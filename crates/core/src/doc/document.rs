@@ -371,9 +371,9 @@ impl Document {
 	}
 
 	/// Retrieve the record id for this document
-	pub(crate) fn id(&self) -> Result<Arc<Thing>, Error> {
-		match &self.id {
-			Some(id) => Ok(id.clone()),
+	pub fn id(&self) -> Result<Arc<Thing>, Error> {
+		match self.id.clone() {
+			Some(id) => Ok(id),
 			_ => Err(fail!("Expected a document id to be present")),
 		}
 	}

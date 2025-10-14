@@ -9,14 +9,12 @@
 //! index that needs to be compacted. The compaction thread processes these
 //! entries at regular intervals defined by the `index_compaction_interval`
 //! configuration option.
-use std::borrow::Cow;
-
-use storekey::{BorrowDecode, Encode};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::err::Error;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_kv_key_storekey;
+use crate::kvs::{impl_key, KeyDecode};
 
 /// Represents an entry in the index compaction queue
 ///
@@ -26,21 +24,21 @@ use crate::kvs::impl_kv_key_storekey;
 ///
 /// Compaction helps optimize index performance by consolidating changes and
 /// removing unnecessary data.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct IndexCompactionKey<'key> {
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub(crate) struct IndexCompactionKey<'a> {
 	__: u8,
 	_a: u8,
 	_b: u8,
 	_c: u8,
-	pub ns: NamespaceId,
-	pub db: DatabaseId,
-	pub tb: Cow<'key, str>,
-	pub ix: IndexId,
+	pub ns: &'a str,
+	pub db: &'a str,
+	pub tb: &'a str,
+	pub ix: &'a str,
 	pub nid: Uuid,
 	pub uid: Uuid,
 }
 
-impl_kv_key_storekey!(IndexCompactionKey<'_> => ());
+impl_key!(IndexCompactionKey<'a>);
 
 impl Categorise for IndexCompactionKey<'_> {
 	fn categorise(&self) -> Category {
@@ -48,12 +46,12 @@ impl Categorise for IndexCompactionKey<'_> {
 	}
 }
 
-impl<'key> IndexCompactionKey<'key> {
+impl<'a> IndexCompactionKey<'a> {
 	pub(crate) fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: Cow<'key, str>,
-		ix: IndexId,
+		ns: &'a str,
+		db: &'a str,
+		tb: &'a str,
+		ix: &'a str,
 		nid: Uuid,
 		uid: Uuid,
 	) -> Self {
@@ -72,14 +70,7 @@ impl<'key> IndexCompactionKey<'key> {
 	}
 
 	pub(crate) fn into_owned(self) -> IndexCompactionKey<'static> {
-		IndexCompactionKey::new(
-			self.ns,
-			self.db,
-			Cow::Owned(self.tb.into_owned()),
-			self.ix,
-			self.nid,
-			self.uid,
-		)
+		IndexCompactionKey::new(self.ns, self.db, self.tb, self.ix, self.nid, self.uid)
 	}
 
 	pub(crate) fn index_matches(&self, other: &IndexCompactionKey<'_>) -> bool {
@@ -90,8 +81,8 @@ impl<'key> IndexCompactionKey<'key> {
 		(b"/!ic\0".to_vec(), b"/!ic\0xff".to_vec())
 	}
 
-	pub fn decode_key(k: &[u8]) -> anyhow::Result<IndexCompactionKey<'_>> {
-		Ok(storekey::decode_borrow(k)?)
+	pub fn decode_key(k: &[u8]) -> Result<IndexCompactionKey<'_>, Error> {
+		Ok(IndexCompactionKey::decode(k)?)
 	}
 }
 
@@ -99,7 +90,7 @@ impl<'key> IndexCompactionKey<'key> {
 mod tests {
 	use super::*;
 	use crate::key::root::ic::IndexCompactionKey;
-	use crate::kvs::KVKey;
+	use crate::kvs::KeyEncode;
 
 	#[test]
 	fn range() {
@@ -109,8 +100,8 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = IndexCompactionKey::new(NamespaceId(1), DatabaseId(2), Cow::Borrowed("testtb"), IndexId(3), Uuid::from_u128(1), Uuid::from_u128(2));
-		let enc = IndexCompactionKey::encode_key(&val).unwrap();
+		let val = IndexCompactionKey::new("testns", "testdb", "testtb", "testix", Uuid::from_u128(1), Uuid::from_u128(2));
+		let enc = IndexCompactionKey::encode(&val).unwrap();
 		assert_eq!(enc, b"/!ic\x00\x00\x00\x01\x00\x00\x00\x02testtb\0\0\0\0\x03\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
 	}
 }

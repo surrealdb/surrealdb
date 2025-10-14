@@ -23,7 +23,7 @@ use std::sync::Arc;
 pub(super) struct Tree {
 	pub(super) root: Option<Node>,
 	pub(super) index_map: IndexesMap,
-	pub(super) with_indexes: WithIndexes,
+	pub(super) with_indexes: Option<Vec<IndexReference>>,
 	pub(super) knn_expressions: KnnExpressions,
 	pub(super) knn_brute_force_expressions: KnnBruteForceExpressions,
 	pub(super) knn_condition: Option<Cond>,
@@ -73,7 +73,7 @@ struct TreeBuilder<'a> {
 	resolved_expressions: HashMap<Arc<Expression>, ResolvedExpression>,
 	resolved_idioms: HashMap<Arc<Idiom>, Node>,
 	index_map: IndexesMap,
-	with_indexes: WithIndexes,
+	with_indexes: Option<Vec<IndexReference>>,
 	knn_brute_force_expressions: HashMap<Arc<Expression>, KnnBruteForceExpression>,
 	knn_expressions: KnnExpressions,
 	idioms_record_options: HashMap<Arc<Idiom>, RecordOptions>,
@@ -98,7 +98,10 @@ pub(super) type RemoteIndexRefs = Arc<Vec<(Arc<Idiom>, LocalIndexRefs)>>;
 
 impl<'a> TreeBuilder<'a> {
 	fn new(ctx: &'a StatementContext<'a>, table: &'a Table) -> Self {
-		let with_indexes = WithIndexes::with_capacity(ctx.with);
+		let with_indexes = match ctx.with {
+			Some(With::Index(ixs)) => Some(Vec::with_capacity(ixs.len())),
+			_ => None,
+		};
 		let first_order = if let Some(Ordering::Order(OrderList(o))) = ctx.order {
 			o.first()
 		} else {
@@ -131,13 +134,13 @@ impl<'a> TreeBuilder<'a> {
 		&mut self,
 		tx: &Transaction,
 		table: &Table,
-	) -> Result<(), Error> {
-		if self.schemas.contains_key(table) {
-			return Ok(());
+	) -> Result<SchemaCache, Error> {
+		if let Some(sc) = self.schemas.get(table).cloned() {
+			return Ok(sc);
 		}
-		let l = SchemaCache::new(self.ctx.opt, table, tx).await?;
-		self.schemas.insert(table.clone(), l);
-		Ok(())
+		let sc = SchemaCache::new(self.ctx.opt, table, tx).await?;
+		self.schemas.insert(table.to_owned(), sc.clone());
+		Ok(sc)
 	}
 
 	async fn eval_order(&mut self) -> Result<(), Error> {
@@ -169,7 +172,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(())
 	}
 
-	async fn eval_count(&mut self, table: &str) -> Result<()> {
+	async fn eval_count(&mut self, table: &str) -> Result<(), Error> {
 		if let Some(f) = self.ctx.fields {
 			if f.is_count_all_only() {
 				if let Some(g) = self.ctx.group {
@@ -177,8 +180,8 @@ impl<'a> TreeBuilder<'a> {
 						let tx = self.ctx.ctx.tx();
 						let schema = self.lazy_load_schema_resolver(&tx, table).await?;
 						for (pos, ix) in schema.indexes.iter().enumerate() {
-							if let Index::Count(cond) = &ix.index {
-								if self.ctx.cond.eq(&cond.as_ref()) {
+							if let Index::Count = &ix.index {
+								if self.ctx.cond.is_none() {
 									let index_reference = schema.new_reference(pos);
 									if self.check_allowed_by_with_indexes(&index_reference) {
 										self.index_map.index_count = Some(IndexOption::new(
@@ -312,8 +315,7 @@ impl<'a> TreeBuilder<'a> {
 						}
 					}
 				}
-					irs.push((ixr, idiom_index));
-				}
+				irs.push((ixr, idiom_index));
 			}
 		}
 		let i = Arc::new(i.clone());
@@ -323,27 +325,6 @@ impl<'a> TreeBuilder<'a> {
 			self.idioms_indexes.insert(t.clone(), HashMap::from([(i, irs.clone())]));
 		}
 		irs
-	}
-
-	/// Check if the index is allowed by the WITH clause
-	fn check_allowed_by_with_indexes(&mut self, ixr: &IndexReference) -> bool {
-		// Is it already allowed?
-		if self.with_indexes.allowed_index(ixr.index_id) {
-			return true;
-		}
-		// If not, let's check the list
-		if let Some(With::Index(ixs)) = &self.ctx.with {
-			if ixs.iter().any(|x| x == ixr.name.as_str()) {
-				// It is explicitly mentioned in the WITH clause
-				self.with_indexes.push(ixr.index_id);
-				return true;
-			}
-			// Not found in the WITH clause, so disallow the index
-			false
-		} else {
-			// There is no WITH clause, so we allow all indexes
-			true
-		}
 	}
 
 	async fn resolve_record_field(
@@ -360,14 +341,24 @@ impl<'a> TreeBuilder<'a> {
 						return Ok(None);
 					}
 					let local_field = Idiom::from(local_field);
-					let schema = self.lazy_load_schema_resolver(tx, self.table).await?;
-					let locals = self.resolve_indexes(self.table, &local_field, &schema);
+					self.lazy_load_schema_resolver(tx, self.table).await?;
+					let locals;
+					if let Some(shema) = self.schemas.get(self.table).cloned() {
+						locals = self.resolve_indexes(self.table, &local_field, &shema);
+					} else {
+						return Ok(None);
+					}
+
 					let remote_field = Arc::new(Idiom::from(remote_field));
 					let mut remotes = vec![];
 					for table in tables {
-						let schema = self.lazy_load_schema_resolver(tx, table).await?;
-						let remote_irs = self.resolve_indexes(table, &remote_field, &schema);
-						remotes.push((remote_field.clone(), remote_irs));
+						self.lazy_load_schema_resolver(tx, table).await?;
+						if let Some(schema) = self.schemas.get(table).cloned() {
+							let remote_irs = self.resolve_indexes(table, &remote_field, &schema);
+							remotes.push((remote_field.clone(), remote_irs));
+						} else {
+							return Ok(None);
+						}
 					}
 					let ro = RecordOptions {
 						locals,
@@ -477,9 +468,12 @@ impl<'a> TreeBuilder<'a> {
 
 	fn check_leaf_node_with_index(&mut self, io: Option<&IndexOption>) {
 		if let Some(io) = io {
-			if self.with_indexes.allowed_index(io.index_reference().index_id) {
-				self.leaf_nodes_with_index_count += 2;
+			if let Some(wi) = &self.with_indexes {
+				if !wi.contains(io.ix_ref()) {
+					return;
+				}
 			}
+			self.leaf_nodes_with_index_count += 2;
 		}
 	}
 
@@ -687,39 +681,6 @@ impl<'a> TreeBuilder<'a> {
 			Subquery::Value(v) => stk.run(|stk| self.eval_value(stk, self.group_sequence, v)).await,
 			_ => Ok(Node::Unsupported(format!("Unsupported subquery: {}", s))),
 		}
-	}
-}
-
-/// Store the list of indexes that can be used for a given expression
-/// Use a Vector rather than a Set because small vectors are faster than HashSet.
-/// We don't expect to have more than a few indexes here
-pub(super) struct WithIndexes(Option<Vec<IndexId>>);
-
-impl WithIndexes {
-	fn with_capacity(with: Option<&With>) -> Self {
-		let with_indexes = match with {
-			Some(With::Index(ixs)) => Some(Vec::with_capacity(ixs.len())),
-			_ => None,
-		};
-		Self(with_indexes)
-	}
-
-	fn push(&mut self, index_id: IndexId) {
-		if let Some(wi) = &mut self.0 {
-			wi.push(index_id);
-		} else {
-			self.0 = Some(vec![index_id]);
-		}
-	}
-
-	/// Check if an index is allowed to be used
-	pub(super) fn allowed_index(&self, index_id: IndexId) -> bool {
-		if let Some(wi) = &self.0 {
-			if !wi.contains(&index_id) {
-				return false;
-			}
-		}
-		true
 	}
 }
 

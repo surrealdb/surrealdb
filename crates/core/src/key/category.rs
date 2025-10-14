@@ -28,6 +28,10 @@ pub enum Category {
 	Namespace,
 	/// crate::key::root::us                 /!us{us}
 	User,
+	/// crate::key::root::tl                 /!tl{tl}
+	TaskLease,
+	/// crate::key::root::ic                 /!ic{ns}{db}{tb}{ix}{nid}{uuid}
+	IndexCompaction,
 	///
 	/// ------------------------------
 	///
@@ -233,9 +237,9 @@ impl Display for Category {
 			Self::Thing => "Thing",
 			Self::Graph => "Graph",
 			Self::Ref => "Ref",
-            Self::TaskLease => "TaskLease",
-            Self::IndexCompaction => "IndexCompaction",
-            Self::IndexCountState => "IndexCountState",
+			Self::TaskLease => "TaskLease",
+			Self::IndexCompaction => "IndexCompaction",
+			Self::IndexCountState => "IndexCountState",
 		};
 		write!(f, "{}", name)
 	}

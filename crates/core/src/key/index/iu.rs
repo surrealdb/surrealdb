@@ -24,16 +24,12 @@
 //! removed and a single entry with `uid = None` is written carrying the net
 //! count with the appropriate `pos` value.
 
-use std::borrow::Cow;
-use std::ops::Range;
-
-use anyhow::Result;
-use storekey::{BorrowDecode, Encode};
-use uuid::Uuid;
-
-use crate::catalog::{DatabaseId, IndexId, NamespaceId};
+use crate::err::Error;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::{KVKey, impl_kv_key_storekey};
+use crate::kvs::{impl_key, KeyDecode, KeyEncode};
+use serde::{Deserialize, Serialize};
+use std::ops::Range;
+use uuid::Uuid;
 
 /// A key representing a delta applied to the total item count of an index.
 ///
@@ -44,17 +40,17 @@ use crate::kvs::{KVKey, impl_kv_key_storekey};
 ///   specific operation. `None` is reserved for compacted/aggregated entries.
 /// - `pos`: Direction of the delta: `true` for a positive increment, `false` for a decrement.
 /// - `count`: Magnitude of the delta.
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct IndexCountKey<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: NamespaceId,
+	pub ns: &'a str,
 	_b: u8,
-	pub db: DatabaseId,
+	pub db: &'a str,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: &'a str,
 	_d: u8,
-	pub ix: IndexId,
+	pub ix: &'a str,
 	_e: u8,
 	_f: u8,
 	_g: u8,
@@ -63,7 +59,7 @@ pub(crate) struct IndexCountKey<'a> {
 	pub count: u64,
 }
 
-impl_kv_key_storekey!(IndexCountKey<'_> => ());
+impl_key!(IndexCountKey<'a>);
 
 impl Categorise for IndexCountKey<'_> {
 	fn categorise(&self) -> Category {
@@ -81,10 +77,10 @@ impl<'a> IndexCountKey<'a> {
 	/// - `pos`: `true` for a positive delta, `false` for a negative one.
 	/// - `count`: Magnitude of the delta.
 	pub(crate) fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
+		ns: &'a str,
+		db: &'a str,
 		tb: &'a str,
-		ix: IndexId,
+		ix: &'a str,
 		uid: Option<(Uuid, Uuid)>,
 		pos: bool,
 		count: u64,
@@ -96,7 +92,7 @@ impl<'a> IndexCountKey<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb: Cow::Borrowed(tb),
+			tb,
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -109,21 +105,16 @@ impl<'a> IndexCountKey<'a> {
 	}
 
 	/// Decode a borrowed key slice into an `IndexCountKey`.
-	pub(crate) fn decode_key(k: &[u8]) -> Result<IndexCountKey<'_>> {
-		Ok(storekey::decode_borrow(k)?)
+	pub(crate) fn decode_key(k: &[u8]) -> Result<IndexCountKey<'_>, Error> {
+		Ok(IndexCountKey::decode(k)?)
 	}
 
 	/// Compute the inclusive range covering all count entries for a given index.
 	///
 	/// The returned range spans all possible delta entries (including compacted
 	/// ones) under the prefix `/*{ns}*{db}*{tb}+{ix}!iu`.
-	pub(crate) fn range(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &'a str,
-		ix: IndexId,
-	) -> Result<Range<Vec<u8>>> {
-		let mut beg = Prefix::new(ns, db, tb, ix).encode_key()?;
+	pub(crate) fn range(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Range<Vec<u8>>, Error> {
+		let mut beg = Prefix::new(ns, db, tb, ix).encode()?;
 		let mut end = beg.clone();
 		beg.push(0);
 		end.push(0xff);
@@ -131,26 +122,26 @@ impl<'a> IndexCountKey<'a> {
 	}
 }
 
-#[derive(Clone, Debug, PartialEq, PartialOrd, Encode, BorrowDecode)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 struct Prefix<'a> {
 	__: u8,
 	_a: u8,
-	pub ns: NamespaceId,
+	pub ns: &'a str,
 	_b: u8,
-	pub db: DatabaseId,
+	pub db: &'a str,
 	_c: u8,
-	pub tb: Cow<'a, str>,
+	pub tb: &'a str,
 	_d: u8,
-	pub ix: IndexId,
+	pub ix: &'a str,
 	_e: u8,
 	_f: u8,
 	_g: u8,
 }
 
-impl_kv_key_storekey!(Prefix<'_> => ());
+impl_key!(Prefix<'a>);
 
 impl<'a> Prefix<'a> {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
+	fn new(ns: &'a str, db: &'a str, tb: &'a str, ix: &'a str) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -158,7 +149,7 @@ impl<'a> Prefix<'a> {
 			_b: b'*',
 			db,
 			_c: b'*',
-			tb: Cow::Borrowed(tb),
+			tb,
 			_d: b'+',
 			ix,
 			_e: b'!',
@@ -171,15 +162,14 @@ impl<'a> Prefix<'a> {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KVKey;
 
 	#[test]
 	fn key() {
 		let val = IndexCountKey::new(
-			NamespaceId(1),
-			DatabaseId(2),
+			"testns",
+			"testdb",
 			"testtb",
-			IndexId(3),
+			"testix",
 			Some((
 				Uuid::from_bytes([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
 				Uuid::from_bytes([15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]),
@@ -187,22 +177,14 @@ mod tests {
 			true,
 			65535,
 		);
-		let enc = IndexCountKey::encode_key(&val).unwrap();
+		let enc = IndexCountKey::encode(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!iu\x03\0\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x0f\x0e\x0d\x0c\x0b\x0a\x09\x08\x07\x06\x05\x04\x03\x02\x01\0\x03\0\0\0\0\0\0\xff\xff", "key");
 	}
 
 	#[test]
 	fn compacted_key() {
-		let val = IndexCountKey::new(
-			NamespaceId(1),
-			DatabaseId(2),
-			"testtb",
-			IndexId(3),
-			None,
-			true,
-			65535,
-		);
-		let enc = IndexCountKey::encode_key(&val).unwrap();
+		let val = IndexCountKey::new("testns", "testdb", "testtb", "testix", None, true, 65535);
+		let enc = IndexCountKey::encode(&val).unwrap();
 		assert_eq!(
 			enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!iu\x02\x03\0\0\0\0\0\0\xff\xff",
 			"compacted key"
@@ -211,7 +193,7 @@ mod tests {
 
 	#[test]
 	fn range() {
-		let r = IndexCountKey::range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3)).unwrap();
+		let r = IndexCountKey::range("testns", "testdb", "testtb", "testix").unwrap();
 		assert_eq!(
 			r.start, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!iu\0",
 			"start"

@@ -12,11 +12,11 @@ use crate::kvs::LockType::Optimistic;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Id, Object, Thing, Value};
-use dashmap::mapref::entry::Entry;
-use dashmap::DashMap;
+use ahash::HashMap;
 use reblessive::TreeStack;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::Entry;
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -214,7 +214,13 @@ impl IndexBuilder {
 		}
 	}
 
-	pub(crate) async fn remove_index(&self, ns: &str, db: &str, tb: &str, ix: &str) -> Result<(), Error> {
+	pub(crate) async fn remove_index(
+		&self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		ix: &str,
+	) -> Result<(), Error> {
 		let key = IndexKey::new(ns, db, tb, ix);
 		if let Some((b, _)) = self.indexes.write().await.remove(&key) {
 			b.abort();
@@ -474,6 +480,7 @@ impl Building {
 		values: Vec<(Key, Val)>,
 		count: &mut usize,
 	) -> Result<(), Error> {
+		let mut rc = false;
 		let mut stack = TreeStack::new();
 		// Index the records
 		for (k, v) in values.into_iter() {
@@ -511,7 +518,7 @@ impl Building {
 			// Index the record
 			let mut io =
 				IndexOperation::new(ctx, &self.opt, &self.ix, None, opt_values.clone(), &rid);
-			stack.enter(|stk| io.compute(stk)).finish().await?;
+			stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
 
 			// Increment the count and update the status
 			*count += 1;
@@ -536,6 +543,7 @@ impl Building {
 		initial: usize,
 		count: &mut usize,
 	) -> Result<(), Error> {
+		let mut rc = false;
 		let mut stack = TreeStack::new();
 		for i in range {
 			if self.is_aborted().await {
@@ -548,7 +556,7 @@ impl Building {
 				let rid = Thing::from((self.tb.clone(), a.id));
 				let mut io =
 					IndexOperation::new(ctx, &self.opt, &self.ix, a.old_values, a.new_values, &rid);
-				stack.enter(|stk| io.compute(stk)).finish().await?;
+				stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
 
 				// We can delete the ip record if any
 				let ip = self.new_ip_key(rid.id)?;
@@ -569,14 +577,25 @@ impl Building {
 		Ok(())
 	}
 
-	async fn check_index_compaction(&self, tx: &Transaction, rc: &mut bool) -> Result<()> {
+	async fn check_index_compaction(&self, tx: &Transaction, rc: &mut bool) -> Result<(), Error> {
 		if !*rc {
 			return Ok(());
 		}
-		FullTextIndex::trigger_compaction(&self.ikb, tx, self.opt.id()?).await?;
+		Self::trigger_compaction(&self.ikb, tx, self.opt.id()?).await?;
 		*rc = false;
 		Ok(())
 	}
+
+	pub(crate) async fn trigger_compaction(
+		ikb: &IndexKeyBase,
+		tx: &Transaction,
+		nid: Uuid,
+	) -> Result<(), Error> {
+		let ic = ikb.new_ic_key(nid);
+		tx.put(&ic, &(), None).await?;
+		Ok(())
+	}
+
 	/// Abort the current indexing process.
 	fn abort(&self) {
 		// We use `Ordering::Relaxed` as the called does not require to be synchronized.

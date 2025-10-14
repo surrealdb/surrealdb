@@ -4,6 +4,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::ft::FtIndex;
+use crate::idx::planner::iterators::IndexCountThingIterator;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::IndexKeyBase;
 use crate::key;
@@ -19,7 +20,6 @@ pub(crate) struct IndexOperation<'a> {
 	ctx: &'a Context,
 	opt: &'a Options,
 	ix: &'a DefineIndexStatement,
-	ikb: IndexKeyBase,
 	/// The old values (if existing)
 	o: Option<Vec<Value>>,
 	/// The new values (if existing)
@@ -40,7 +40,6 @@ impl<'a> IndexOperation<'a> {
 			ctx,
 			opt,
 			ix,
-			ikb: IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id),
 			o,
 			n,
 			rid,
@@ -51,7 +50,7 @@ impl<'a> IndexOperation<'a> {
 		&mut self,
 		stk: &mut Stk,
 		require_compaction: &mut bool,
-	) -> Result<()> {
+	) -> Result<(), Error> {
 		// Index operation dispatching
 		match &self.ix.index {
 			Index::Uniq => self.index_unique().await,
@@ -59,7 +58,7 @@ impl<'a> IndexOperation<'a> {
 			Index::Search(p) => self.index_full_text(stk, p).await,
 			Index::MTree(p) => self.index_mtree(stk, p).await,
 			Index::Hnsw(p) => self.index_hnsw(p).await,
-			Index::Count(c) => self.index_count(stk, c.as_ref(), require_compaction).await,
+			Index::Count => self.index_count(require_compaction).await,
 		}
 	}
 
@@ -134,30 +133,8 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	async fn index_count(
-		&mut self,
-		_stk: &mut Stk,       // Placeholder for phase 2 (Condition)
-		_cond: Option<&Cond>, // Placeholder for phase 2 (Condition)
-		require_compaction: &mut bool,
-	) -> Result<()> {
-		// Phase 2 (Condition)
-		// let is_truthy = async |stk: &mut Stk, c: &Cond, d: &CursorDoc| -> Result<bool> {
-		// 	Ok(stk.run(|stk| c.0.compute(stk, ctx, opt, Some(d))).await.catch_return()?.is_truthy())
-		// };
+	async fn index_count(&mut self, require_compaction: &mut bool) -> Result<(), Error> {
 		let mut relative_count: i8 = 0;
-		// Phase 2 - with condition
-		// if let Some(c) = cond {
-		// 	if self.o.is_some() {
-		// 		if is_truthy(stk, c, &self.doc.initial).await? {
-		// 			relative_count -= 1;
-		// 		}
-		// 	}
-		// 	if self.n.is_some() {
-		// 		if is_truthy(stk, c, &self.doc.current).await? {
-		// 			relative_count += 1;
-		// 		}
-		// 	}
-		// } else {
 		if self.o.is_some() {
 			relative_count -= 1;
 		}
@@ -185,15 +162,15 @@ impl<'a> IndexOperation<'a> {
 	pub(crate) async fn index_count_compaction(
 		ic: &IndexCompactionKey<'_>,
 		tx: &Transaction,
-	) -> Result<()> {
+	) -> Result<(), Error> {
 		IndexCountThingIterator::new(ic.ns, ic.db, ic.tb.as_ref(), ic.ix)?.compaction(ic, tx).await
 	}
 
 	/// Construct a consistent uniqueness violation error message.
 	/// Formats the conflicting value as a single value or array depending on
 	/// the number of indexed fields.
-	fn err_index_exists(&self, rid: RecordId, mut n: Array) -> Result<()> {
-		bail!(Error::IndexExists {
+	fn err_index_exists(&self, rid: Thing, mut n: Array) -> Result<(), Error> {
+		Err(Error::IndexExists {
 			thing: rid,
 			index: self.ix.name.to_string(),
 			value: match n.0.len() {
@@ -218,7 +195,7 @@ impl<'a> IndexOperation<'a> {
 		ft.finish(self.ctx).await
 	}
 
-	pub(crate) async fn trigger_compaction(&self) -> Result<()> {
+	pub(crate) async fn trigger_compaction(&self) -> Result<(), Error> {
 		FullTextIndex::trigger_compaction(&self.ikb, &self.ctx.tx(), self.opt.id()?).await
 	}
 

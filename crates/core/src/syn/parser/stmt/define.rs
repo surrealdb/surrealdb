@@ -1278,7 +1278,7 @@ impl Parser<'_> {
 				_ => break,
 			}
 		}
-		if matches!(res.index, Index::Count(_)) && !res.cols.is_empty() {
+		if matches!(res.index, Index::Count) && !res.cols.is_empty() {
 			bail!("Cannot create a count index with fields");
 		}
 		Ok(res)
