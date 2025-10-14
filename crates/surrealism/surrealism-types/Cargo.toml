@@ -1,0 +1,22 @@
+[package]
+name = "surrealism-types"
+version = "3.0.0-alpha.10"
+edition = "2021"
+authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
+description = "Types for Surrealism."
+license-file = "LICENSE"
+repository = "https://github.com/surrealdb/surrealdb"
+homepage = "https://github.com/surrealdb/surrealdb"
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+surrealdb-types.workspace = true
+chrono.workspace = true
+bytes = "1.10.1"
+flatbuffers = "25.2.10"
+surrealdb-protocol = { version = "0.4.0", default-features = false }
+rust_decimal = "1.37.2"

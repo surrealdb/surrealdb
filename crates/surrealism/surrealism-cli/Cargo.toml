@@ -1,0 +1,33 @@
+[package]
+name = "surrealism-cli"
+version = "3.0.0-alpha.10"
+edition = "2021"
+authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
+description = "CLI for Surrealism."
+license-file = "LICENSE"
+repository = "https://github.com/surrealdb/surrealdb"
+homepage = "https://github.com/surrealdb/surrealdb"
+
+[[bin]]
+name = "surrealism"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+surrealdb-types.workspace = true
+thiserror.workspace = true
+surrealism = { path = "../surrealism" }
+surrealism-types = { path = "../surrealism-types" }
+surrealism-runtime = { path = "../surrealism-runtime" }
+tempfile.workspace = true
+walrus.workspace = true
+wasm-opt.workspace = true
+surrealml-llms.workspace = true
+surrealml-tokenizers.workspace = true
+candle-core.workspace = true
+
+[lints]
+workspace = true
