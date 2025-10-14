@@ -179,7 +179,7 @@ impl<'de> Deserialize<'de> for TestExpectation {
 				ErrorTestResult::deserialize(v).map_err(to_deser_error).map(TestExpectation::Error)
 			} else {
 				Err(to_deser_error(
-					"Table does not match any the options, expected table to contain altleast one `match`, `value` or `error` field",
+					"Table does not match any the options, expected table to contain at least one `match`, `value` or `error` field",
 				))
 			}
 		} else {
