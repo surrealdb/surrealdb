@@ -24,7 +24,7 @@ use crate::api::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 #[cfg(feature = "protocol-http")]
 use crate::api::opt::Tls;
-use crate::api::opt::{Endpoint, EndpointKind, WebsocketConfig};
+use crate::api::opt::{Endpoint, EndpointKind};
 use crate::api::{Result, Surreal, conn};
 use crate::opt::WaitFor;
 impl crate::api::Connection for Any {}
@@ -158,7 +158,7 @@ impl conn::Sealed for Any {
 				EndpointKind::Ws | EndpointKind::Wss => {
 					#[cfg(feature = "protocol-ws")]
 					{
-						let WebsocketConfig {
+						let crate::api::opt::WebsocketConfig {
 							read_buffer_size,
 							max_message_size,
 							max_write_buffer_size,

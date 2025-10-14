@@ -2,6 +2,7 @@
 
 use std::time::Duration;
 
+use futures::FutureExt;
 use serde_json::json;
 use surrealdb::IndexedResults;
 use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess};
@@ -1711,6 +1712,34 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 	assert_eq!(inside.clone().into_option::<Value>().unwrap(), None);
 }
 
+pub async fn teminate_running_queries_on_connection_close(new_db: impl CreateDb) {
+	let namespace = Ulid::new().to_string();
+	let database = Ulid::new().to_string();
+	let table = "foo";
+
+	let (permit, db) = new_db.create_db().await;
+	db.use_ns(&namespace).use_db(&database).await.unwrap();
+	drop(permit);
+
+	let query = db
+		.query("SLEEP 4s; CREATE type::table($name)")
+		.bind(("name", table))
+		.into_future()
+		.map(|x| dbg!(x).unwrap().check().unwrap());
+	tokio::time::timeout(Duration::from_secs(2), query).await.ok();
+	drop(db);
+
+	tokio::time::sleep(Duration::from_secs(8)).await;
+
+	let (permit, db) = new_db.create_db().await;
+	db.use_ns(namespace).use_db(database).await.unwrap();
+	drop(permit);
+
+	let records: Vec<ApiRecordId> = db.select(table).await.unwrap();
+	let num_records = records.len();
+	assert_eq!(num_records, 0, "Expected no records in the table, found {num_records}");
+}
+
 define_include_tests!(basic => {
 	#[test_log::test(tokio::test)]
 	connect,
@@ -1814,4 +1843,6 @@ define_include_tests!(basic => {
 	multi_take,
 	#[test_log::test(tokio::test)]
 	field_and_index_methods,
+	#[test_log::test(tokio::test)]
+	teminate_running_queries_on_connection_close,
 });

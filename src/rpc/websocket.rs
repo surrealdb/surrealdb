@@ -99,6 +99,7 @@ impl Websocket {
 		}
 		// Store all concurrent spawned tasks
 		let mut tasks = JoinSet::new();
+		let canceller = &rpc.canceller;
 		// Buffer the WebSocket response stream
 		match *WEBSOCKET_RESPONSE_BUFFER_SIZE > 0 {
 			true => {
@@ -107,17 +108,41 @@ impl Websocket {
 				// Split the socket into sending and receiving streams
 				let (ws_sender, ws_receiver) = buffer.split();
 				// Spawn async tasks for the WebSocket
-				tasks.spawn(Self::ping(rpc.clone(), sender.clone()));
-				tasks.spawn(Self::read(rpc.clone(), ws_receiver, sender.clone()));
-				tasks.spawn(Self::write(rpc.clone(), ws_sender, receiver));
+				tasks.spawn(
+					canceller
+						.clone()
+						.run_until_cancelled_owned(Self::ping(rpc.clone(), sender.clone())),
+				);
+				tasks.spawn(canceller.clone().run_until_cancelled_owned(Self::read(
+					rpc.clone(),
+					ws_receiver,
+					sender.clone(),
+				)));
+				tasks.spawn(canceller.clone().run_until_cancelled_owned(Self::write(
+					rpc.clone(),
+					ws_sender,
+					receiver,
+				)));
 			}
 			false => {
 				// Split the socket into sending and receiving streams
 				let (ws_sender, ws_receiver) = ws.split();
 				// Spawn async tasks for the WebSocket
-				tasks.spawn(Self::ping(rpc.clone(), sender.clone()));
-				tasks.spawn(Self::read(rpc.clone(), ws_receiver, sender.clone()));
-				tasks.spawn(Self::write(rpc.clone(), ws_sender, receiver));
+				tasks.spawn(
+					canceller
+						.clone()
+						.run_until_cancelled_owned(Self::ping(rpc.clone(), sender.clone())),
+				);
+				tasks.spawn(canceller.clone().run_until_cancelled_owned(Self::read(
+					rpc.clone(),
+					ws_receiver,
+					sender.clone(),
+				)));
+				tasks.spawn(canceller.clone().run_until_cancelled_owned(Self::write(
+					rpc.clone(),
+					ws_sender,
+					receiver,
+				)));
 			}
 		}
 		// Wait for all tasks to finish
@@ -130,6 +155,7 @@ impl Websocket {
 		std::mem::drop(sender);
 		// Log the WebSocket disconnection
 		trace!("WebSocket {id} disconnected");
+		canceller.cancel();
 		// Cleanup the live queries for this WebSocket
 		rpc.cleanup_lqs().await;
 		// Remove this WebSocket from the list
@@ -248,7 +274,7 @@ impl Websocket {
 		// Loop, and listen for messages to write
 		loop {
 			tokio::select! {
-				// Process brances in order
+				// Process branches in order
 				biased;
 				// Remove any completed tasks
 				_ = tasks.next(), if !tasks.is_empty() => {},
@@ -257,44 +283,53 @@ impl Websocket {
 				// Check if we should teardown
 				_ = canceller.cancelled() => break,
 				// Wait for the next received message
-				Some(msg) = socket.next() => match msg {
-					// We've received a message from the client
-					Ok(msg) => match msg {
-						Message::Text(_) | Message::Binary(_) => {
-							// Clone the response sending channel
-							let chn = internal_sender.clone();
-							// Check to see whether we have available memory
-							if ALLOC.is_beyond_threshold() {
-								// Reject the message
-								Self::close_socket(rpc.clone(), chn).await;
+				option = socket.next() => match option {
+					Some(msg) => match msg {
+						// We've received a message from the client
+						Ok(msg) => match msg {
+							Message::Text(_) | Message::Binary(_) => {
+								// Clone the response sending channel
+								let chn = internal_sender.clone();
+								// Check to see whether we have available memory
+								if ALLOC.is_beyond_threshold() {
+									// Reject the message
+									Self::close_socket(rpc.clone(), chn).await;
+									// Exit out of the loop
+									break;
+								}
+								// Otherwise spawn and handle the message
+								tasks.push(Self::handle_message(&rpc, msg, chn));
+							}
+							Message::Close(_) => {
+								// Respond with a close message
+								if let Err(err) = internal_sender.send(Message::Close(None)).await {
+									trace!("WebSocket error when replying to the close message: {err}");
+								};
+								// Cancel the WebSocket tasks
+								canceller.cancel();
 								// Exit out of the loop
 								break;
 							}
-							// Otherwise spawn and handle the message
-							tasks.push(Self::handle_message(&rpc, msg, chn));
-						}
-						Message::Close(_) => {
-							// Respond with a close message
-							if let Err(err) = internal_sender.send(Message::Close(None)).await {
-								trace!("WebSocket error when replying to the close message: {err}");
-							};
+							Message::Ping(_) => {
+								// Ping messages are responded to automatically
+							}
+							Message::Pong(_) => {
+								// Pong messages are handled automatically
+							}
+						},
+						Err(err) => {
+							// There was an error with the WebSocket
+							trace!("WebSocket error: {err}");
 							// Cancel the WebSocket tasks
 							canceller.cancel();
 							// Exit out of the loop
 							break;
 						}
-						Message::Ping(_) => {
-							// Ping messages are responded to automatically
-						}
-						Message::Pong(_) => {
-							// Pong messages are handled automatically
-						}
-					},
-					Err(err) => {
-						// There was an error with the WebSocket
-						trace!("WebSocket error: {err}");
-						// Cancel the WebSocket tasks
+					}
+					None => {
+						// The WebSocket has been closed
 						canceller.cancel();
+						debug!("WebSocket closed");
 						// Exit out of the loop
 						break;
 					}
@@ -435,7 +470,13 @@ impl Websocket {
 			return Err(DbResultError::MethodNotFound("Method not found".to_string()));
 		}
 		// Execute the specified method
-		RpcContext::execute(rpc.as_ref(), version, txn, method, params).await.map_err(Into::into)
+		match rpc.canceller.run_until_cancelled(RpcContext::execute(rpc.as_ref(), version, txn, method, params)).await {
+			Some(result) => result.map_err(Into::into),
+			None => {
+				rpc.canceller.cancel();
+				Err(DbResultError::QueryCancelled)
+			}
+		}
 	}
 
 	/// Reject a WebSocket message due to server overloading

@@ -3,7 +3,9 @@ use std::path::PathBuf;
 
 use async_channel::Sender;
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_types::{Array, Notification, Object, SurrealValue, Value, Variables};
+#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
+use surrealdb_types::SurrealValue;
+use surrealdb_types::{Array, Notification, Object, Value, Variables};
 use uuid::Uuid;
 
 use super::MlExportConfig;
@@ -223,6 +225,7 @@ impl Command {
 /// used BTreeMap.
 ///
 /// This struct serializes as if it is a surrealdb_types::Value::Object.
+#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 #[derive(Clone, Debug, SurrealValue)]
 pub(crate) struct RouterRequest {
 	id: Option<i64>,
