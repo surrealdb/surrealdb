@@ -3,7 +3,6 @@ use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 use crate::vs::VersionStamp;
 
@@ -41,12 +40,6 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"!ts\xff");
 	Ok(k)
-}
-
-impl Categorise for VersionStampKey {
-	fn categorise(&self) -> Category {
-		Category::DatabaseTimestamp
-	}
 }
 
 impl VersionStampKey {

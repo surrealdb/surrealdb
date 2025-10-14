@@ -4,7 +4,6 @@ use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::sequences::SequenceBatchValue;
 
@@ -26,12 +25,6 @@ pub(crate) struct SequenceBatchKey<'a> {
 }
 
 impl_kv_key_storekey!(SequenceBatchKey<'_> => SequenceBatchValue);
-
-impl Categorise for SequenceBatchKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::SequenceBatch
-	}
-}
 
 impl<'a> SequenceBatchKey<'a> {
 	pub(crate) fn new(ns: NamespaceId, db: DatabaseId, sq: &'a str, start: i64) -> Self {

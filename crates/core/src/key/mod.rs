@@ -118,7 +118,6 @@
 //!
 //! crate::key::sequence::st             /*{ns}*{db}*{tb_name}*{sq}!st{id}
 //! crate::key::sequence::ba             /*{ns}*{db}*{tb_name}*{sq}!ba{start}
-pub(crate) mod category;
 pub(crate) mod change;
 pub(crate) mod database;
 pub(crate) mod debug;

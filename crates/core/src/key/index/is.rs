@@ -28,7 +28,6 @@ use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::sequences::SequenceState;
 
@@ -50,12 +49,6 @@ pub(crate) struct IndexSequenceStateKey<'a> {
 }
 
 impl_kv_key_storekey!(IndexSequenceStateKey<'_> => SequenceState);
-
-impl Categorise for IndexSequenceStateKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::IndexFullTextDocIdsSequenceState
-	}
-}
 
 impl<'a> IndexSequenceStateKey<'a> {
 	pub(crate) fn new(

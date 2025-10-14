@@ -5,7 +5,6 @@ use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, MlModelDefinition, NamespaceId};
-use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -43,12 +42,6 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db).encode_key()?;
 	k.extend_from_slice(b"!ml\xff");
 	Ok(k)
-}
-
-impl Categorise for MlModelDefinitionKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::DatabaseModel
-	}
 }
 
 impl<'a> MlModelDefinitionKey<'a> {

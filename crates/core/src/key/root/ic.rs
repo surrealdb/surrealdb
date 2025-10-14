@@ -15,7 +15,6 @@ use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 /// Represents an entry in the index compaction queue
@@ -41,12 +40,6 @@ pub(crate) struct IndexCompactionKey<'key> {
 }
 
 impl_kv_key_storekey!(IndexCompactionKey<'_> => ());
-
-impl Categorise for IndexCompactionKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::IndexCompaction
-	}
-}
 
 impl<'key> IndexCompactionKey<'key> {
 	pub(crate) fn new(

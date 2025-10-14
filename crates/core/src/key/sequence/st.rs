@@ -5,7 +5,6 @@ use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::sequences::SequenceState;
 
@@ -27,12 +26,6 @@ pub(crate) struct SequenceStateKey<'a> {
 }
 
 impl_kv_key_storekey!(SequenceStateKey<'_> => SequenceState);
-
-impl Categorise for SequenceStateKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::SequenceState
-	}
-}
 
 impl<'a> SequenceStateKey<'a> {
 	pub(crate) fn new(ns: NamespaceId, db: DatabaseId, sq: &'a str, nid: Uuid) -> Self {

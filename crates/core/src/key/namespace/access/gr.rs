@@ -6,7 +6,6 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog;
 use crate::catalog::NamespaceId;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -38,12 +37,6 @@ pub fn suffix(ns: NamespaceId, ac: &str) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, ac).encode_key()?;
 	k.extend_from_slice(b"!gr\xff");
 	Ok(k)
-}
-
-impl Categorise for AccessGrantKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::NamespaceAccessGrant
-	}
 }
 
 impl<'a> AccessGrantKey<'a> {

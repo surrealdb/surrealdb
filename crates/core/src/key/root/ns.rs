@@ -4,7 +4,6 @@ use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::NamespaceDefinition;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -32,12 +31,6 @@ pub fn suffix() -> Vec<u8> {
 	let mut k = super::all::kv();
 	k.extend_from_slice(b"!ns\xff");
 	k
-}
-
-impl Categorise for NamespaceKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::Namespace
-	}
 }
 
 impl<'key> NamespaceKey<'key> {

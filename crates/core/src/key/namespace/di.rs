@@ -3,7 +3,6 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::NamespaceId;
 use crate::idg::u32::U32;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -22,11 +21,6 @@ pub fn new(ns: NamespaceId) -> DatabaseIdGeneratorKey {
 	DatabaseIdGeneratorKey::new(ns)
 }
 
-impl Categorise for DatabaseIdGeneratorKey {
-	fn categorise(&self) -> Category {
-		Category::DatabaseIdentifier
-	}
-}
 impl DatabaseIdGeneratorKey {
 	pub fn new(ns: NamespaceId) -> Self {
 		Self {

@@ -24,7 +24,6 @@ use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::seqdocids::DocId;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -49,12 +48,6 @@ pub(crate) struct TermDocumentFrequencyKey<'a> {
 }
 
 impl_kv_key_storekey!(TermDocumentFrequencyKey<'_> => String);
-
-impl Categorise for TermDocumentFrequencyKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::IndexTermDocuments
-	}
-}
 
 impl<'a> TermDocumentFrequencyKey<'a> {
 	/// Creates a new term-document key

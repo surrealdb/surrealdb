@@ -5,7 +5,6 @@ use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseDefinition, NamespaceId};
-use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -35,12 +34,6 @@ pub fn suffix(ns: NamespaceId) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns).encode_key()?;
 	k.extend_from_slice(b"!db\xff");
 	Ok(k)
-}
-
-impl Categorise for DatabaseKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::DatabaseAlias
-	}
 }
 
 impl<'key> DatabaseKey<'key> {

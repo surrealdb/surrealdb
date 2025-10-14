@@ -2,7 +2,6 @@
 
 use storekey::{BorrowDecode, Encode};
 
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::tasklease::{TaskLease, TaskLeaseType};
 
@@ -16,12 +15,6 @@ pub(crate) struct TaskLeaseKey {
 }
 
 impl_kv_key_storekey!(TaskLeaseKey => TaskLease);
-
-impl Categorise for TaskLeaseKey {
-	fn categorise(&self) -> Category {
-		Category::TaskLease
-	}
-}
 
 impl TaskLeaseKey {
 	pub(crate) fn new(task: &TaskLeaseType) -> Self {

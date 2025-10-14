@@ -32,7 +32,6 @@ use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
-use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 /// A key representing a delta applied to the total item count of an index.
@@ -64,12 +63,6 @@ pub(crate) struct IndexCountKey<'a> {
 }
 
 impl_kv_key_storekey!(IndexCountKey<'_> => ());
-
-impl Categorise for IndexCountKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::IndexCountState
-	}
-}
 
 impl<'a> IndexCountKey<'a> {
 	/// Create a new index count delta entry.

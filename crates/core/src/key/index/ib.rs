@@ -36,7 +36,6 @@ use std::ops::Range;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
-use crate::key::category::{Categorise, Category};
 use crate::kvs::sequences::SequenceBatchValue;
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
@@ -58,12 +57,6 @@ pub(crate) struct SequenceBatchKey<'a> {
 }
 
 impl_kv_key_storekey!(SequenceBatchKey<'_> => SequenceBatchValue);
-
-impl Categorise for SequenceBatchKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::SequenceBatch
-	}
-}
 
 impl<'a> SequenceBatchKey<'a> {
 	pub(crate) fn new(

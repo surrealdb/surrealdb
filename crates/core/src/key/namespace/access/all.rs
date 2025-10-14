@@ -4,7 +4,6 @@ use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::NamespaceId;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -20,12 +19,6 @@ impl_kv_key_storekey!(AccessRoot<'_> => Vec<u8>);
 
 pub fn new(ns: NamespaceId, ac: &str) -> AccessRoot<'_> {
 	AccessRoot::new(ns, ac)
-}
-
-impl Categorise for AccessRoot<'_> {
-	fn categorise(&self) -> Category {
-		Category::NamespaceAccessRoot
-	}
 }
 
 impl<'a> AccessRoot<'a> {

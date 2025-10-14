@@ -2,7 +2,6 @@
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
 use crate::kvs::impl_kv_key_storekey;
 
@@ -19,12 +18,6 @@ impl_kv_key_storekey!(TableIdGeneratorKey => Vec<u8>);
 
 pub fn new(ns: NamespaceId, db: DatabaseId) -> TableIdGeneratorKey {
 	TableIdGeneratorKey::new(ns, db)
-}
-
-impl Categorise for TableIdGeneratorKey {
-	fn categorise(&self) -> Category {
-		Category::DatabaseTableIdentifier
-	}
 }
 
 impl TableIdGeneratorKey {

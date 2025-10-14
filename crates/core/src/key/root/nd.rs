@@ -3,7 +3,6 @@ use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::dbs::node::Node;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 // Represents cluster information.
@@ -34,12 +33,6 @@ pub fn suffix() -> Vec<u8> {
 	let mut k = crate::key::root::all::kv();
 	k.extend_from_slice(b"!nd\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00");
 	k
-}
-
-impl Categorise for NodeKey {
-	fn categorise(&self) -> Category {
-		Category::Node
-	}
 }
 
 impl NodeKey {

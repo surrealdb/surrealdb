@@ -40,7 +40,6 @@ use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
-use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 use crate::val::{Array, IndexFormat, RecordId, RecordIdKey};
 
@@ -147,12 +146,6 @@ impl crate::kvs::KVKey for Index<'_> {
 	fn encode_key(&self) -> ::anyhow::Result<Vec<u8>> {
 		Ok(storekey::encode_vec_format::<IndexFormat, _>(self)
 			.map_err(|_| crate::err::Error::Unencodable)?)
-	}
-}
-
-impl Categorise for Index<'_> {
-	fn categorise(&self) -> Category {
-		Category::Index
 	}
 }
 

@@ -24,7 +24,6 @@ use uuid::Uuid;
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::ft::fulltext::DocLengthAndCount;
 use crate::idx::seqdocids::DocId;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -47,12 +46,6 @@ pub(crate) struct DocumentFrequencyKey<'a> {
 }
 
 impl_kv_key_storekey!(DocumentFrequencyKey<'_> => DocLengthAndCount);
-
-impl Categorise for DocumentFrequencyKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::IndexFullTextDocCountAndLength
-	}
-}
 
 impl<'a> DocumentFrequencyKey<'a> {
 	/// Creates a new document count and length key

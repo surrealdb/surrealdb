@@ -5,7 +5,6 @@ use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -35,12 +34,6 @@ pub fn suffix(ac: &str) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ac).encode_key()?;
 	k.extend_from_slice(b"!gr\xff");
 	Ok(k)
-}
-
-impl Categorise for RootAccessGrantKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::AccessGrant
-	}
 }
 
 impl<'a> RootAccessGrantKey<'a> {

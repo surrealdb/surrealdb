@@ -6,7 +6,6 @@ use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId, SubscriptionDefinition};
-use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 /// Lv is used to track a live query and is cluster independent, i.e. it is tied
@@ -45,12 +44,6 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!lq\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00");
 	Ok(k)
-}
-
-impl Categorise for SubscriptionDefinitionKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::TableLiveQuery
-	}
 }
 
 impl<'a> SubscriptionDefinitionKey<'a> {

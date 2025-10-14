@@ -6,7 +6,6 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cf::TableMutations;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 use crate::vs::VersionStamp;
 
@@ -25,12 +24,6 @@ pub(crate) struct ChangeFeedKey<'a> {
 	pub tb: Cow<'a, str>,
 }
 impl_kv_key_storekey!(ChangeFeedKey<'_> => TableMutations);
-
-impl Categorise for ChangeFeedKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::ChangeFeed
-	}
-}
 
 impl<'a> ChangeFeedKey<'a> {
 	#[cfg(test)]

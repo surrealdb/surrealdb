@@ -21,7 +21,6 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::ft::DocLength;
 use crate::idx::seqdocids::DocId;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -42,12 +41,6 @@ pub(crate) struct DocLengthKey<'a> {
 }
 
 impl_kv_key_storekey!(DocLengthKey<'_> => DocLength);
-
-impl Categorise for DocLengthKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::IndexDocLength
-	}
-}
 
 impl<'a> DocLengthKey<'a> {
 	/// Creates a new document length key

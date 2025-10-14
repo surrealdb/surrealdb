@@ -43,7 +43,6 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::seqdocids::DocId;
-use crate::key::category::{Categorise, Category};
 use crate::val::{IndexFormat, RecordIdKey};
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
@@ -69,12 +68,6 @@ impl crate::kvs::KVKey for InvertedIndexDocIdKey<'_> {
 	fn encode_key(&self) -> anyhow::Result<Vec<u8>> {
 		Ok(storekey::encode_vec_format::<IndexFormat, _>(self)
 			.map_err(|_| crate::err::Error::Unencodable)?)
-	}
-}
-
-impl Categorise for InvertedIndexDocIdKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::IndexInvertedDocIds
 	}
 }
 

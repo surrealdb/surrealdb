@@ -5,7 +5,6 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::seqdocids::DocId;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 use crate::val::RecordIdKey;
 
@@ -28,12 +27,6 @@ pub(crate) struct InvertedIdKey<'a> {
 }
 
 impl_kv_key_storekey!(InvertedIdKey<'_> => RecordIdKey);
-
-impl Categorise for InvertedIdKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::IndexDocKeys
-	}
-}
 
 impl<'a> InvertedIdKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, id: DocId) -> Self {

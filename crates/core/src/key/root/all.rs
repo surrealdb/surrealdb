@@ -1,7 +1,6 @@
 //! Stores the key prefix for all keys
 use storekey::{BorrowDecode, Encode};
 
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 #[allow(unused)]
@@ -19,12 +18,6 @@ pub fn kv() -> Vec<u8> {
 impl Default for All {
 	fn default() -> Self {
 		Self::new()
-	}
-}
-
-impl Categorise for All {
-	fn categorise(&self) -> Category {
-		Category::Root
 	}
 }
 

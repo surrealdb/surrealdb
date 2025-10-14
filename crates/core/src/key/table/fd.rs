@@ -5,7 +5,6 @@ use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{self, DatabaseId, NamespaceId};
-use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -44,12 +43,6 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
 	let mut k = super::all::new(ns, db, tb).encode_key()?;
 	k.extend_from_slice(b"!fd\xff");
 	Ok(k)
-}
-
-impl Categorise for FieldDefinitionKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::TableField
-	}
 }
 
 impl<'a> FieldDefinitionKey<'a> {

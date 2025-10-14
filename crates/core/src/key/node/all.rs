@@ -2,7 +2,6 @@
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -16,12 +15,6 @@ impl_kv_key_storekey!(All => Vec<u8>);
 
 pub fn new(nd: Uuid) -> All {
 	All::new(nd)
-}
-
-impl Categorise for All {
-	fn categorise(&self) -> Category {
-		Category::NodeRoot
-	}
 }
 
 impl All {

@@ -22,7 +22,6 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::ft::fulltext::TermDocument;
 use crate::idx::seqdocids::DocId;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -43,12 +42,6 @@ pub(crate) struct TdRoot<'a> {
 }
 
 impl_kv_key_storekey!(TdRoot<'_> => RoaringTreemap);
-
-impl Categorise for TdRoot<'_> {
-	fn categorise(&self) -> Category {
-		Category::IndexTermDocument
-	}
-}
 
 impl<'a> TdRoot<'a> {
 	pub(crate) fn new(
@@ -95,12 +88,6 @@ pub(crate) struct TermDocumentKey<'a> {
 }
 
 impl_kv_key_storekey!(TermDocumentKey<'_> => TermDocument);
-
-impl Categorise for TermDocumentKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::IndexTermDocument
-	}
-}
 
 impl<'a> TermDocumentKey<'a> {
 	/// Creates a new term-document mapping key

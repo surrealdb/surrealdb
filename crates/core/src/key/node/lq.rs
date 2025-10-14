@@ -4,7 +4,6 @@ use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
 use crate::catalog::NodeLiveQuery;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 /// The Lq key is used to quickly discover which live queries belong to which
@@ -41,12 +40,6 @@ pub fn suffix(nd: Uuid) -> Result<Vec<u8>> {
 	let mut k = super::all::new(nd).encode_key()?;
 	k.extend_from_slice(b"!lq\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00");
 	Ok(k)
-}
-
-impl Categorise for NodeLiveQueryKey {
-	fn categorise(&self) -> Category {
-		Category::NodeLiveQuery
-	}
 }
 
 impl NodeLiveQueryKey {
