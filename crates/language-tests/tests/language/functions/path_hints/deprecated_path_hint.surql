@@ -6,7 +6,7 @@ parsing-error = """
 Invalid function/constant path, did you maybe mean `type::record`
   --> [16:1]
    |
-16 | type::thing("person", "one");
+15 | type::thing("person", "one");
    | ^^^^^^^^^^^
 """
 
