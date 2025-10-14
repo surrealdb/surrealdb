@@ -24,3 +24,4 @@ wasmtime-wasi.workspace = true
 toml.workspace = true
 bytes = "1"
 async-trait = "0.1"
+tokio.workspace = true

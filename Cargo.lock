@@ -7292,6 +7292,7 @@ dependencies = [
  "surrealdb-protocol",
  "surrealdb-tikv-client",
  "surrealdb-types",
+ "surrealism-runtime",
  "surrealkv",
  "surrealml-core",
  "sysinfo",
@@ -7424,6 +7425,7 @@ name = "surrealism-cli"
 version = "3.0.0-alpha.10"
 dependencies = [
  "anyhow",
+ "async-trait",
  "candle-core",
  "clap",
  "serde",
@@ -7464,6 +7466,7 @@ dependencies = [
  "surrealism-types",
  "tar",
  "thiserror 1.0.69",
+ "tokio",
  "toml",
  "wasmtime",
  "wasmtime-wasi",

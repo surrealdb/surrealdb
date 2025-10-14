@@ -1,5 +1,35 @@
+//! WASM execution runtime and controller.
+//!
+//! # Architecture
+//!
+//! - **`Runtime`**: Compiled WASM module. Thread-safe, shareable (Arc<Runtime>).
+//!   Compile once, instantiate many times.
+//!
+//! - **`Controller`**: Per-execution instance. Single-threaded, created from Runtime.
+//!   Cheap to create, can be done per-request or pooled.
+//!
+//! # Concurrency Patterns
+//!
+//! ```no_run
+//! use std::sync::Arc;
+//! use surrealism_runtime::{controller::Runtime, package::SurrealismPackage};
+//!
+//! // Compile once (expensive)
+//! let runtime = Arc::new(Runtime::new(package)?);
+//!
+//! // For each concurrent request:
+//! let runtime = runtime.clone();
+//! tokio::spawn(async move {
+//!     let mut controller = runtime.new_controller()?;
+//!     controller.with_context(&context, |ctrl| {
+//!         ctrl.invoke(None, args)
+//!     })
+//! });
+//! # Ok::<(), anyhow::Error>(())
+//! ```
+
 use crate::{
-    config::SurrealismConfig, host::{implement_host_functions, Host}, package::SurrealismPackage
+    config::SurrealismConfig, host::{implement_host_functions, InvocationContext}, package::SurrealismPackage
 };
 use anyhow::Result;
 use surrealism_types::{
@@ -12,23 +42,51 @@ use wasmtime::*;
 use wasmtime_wasi::preview1::{self, WasiP1Ctx};
 use std::sync::Arc;
 
+/// Wrapper for context reference that's Send (safe because WASM is single-threaded)
+/// Uses Option to avoid trait object pointer issues
+pub(crate) struct ContextRef(Option<*const dyn InvocationContext>);
+unsafe impl Send for ContextRef {}
+
+impl ContextRef {
+    pub(crate) fn none() -> Self {
+        ContextRef(None)
+    }
+    
+    pub(crate) fn is_none(&self) -> bool {
+        self.0.is_none()
+    }
+    
+    pub(crate) fn set(&mut self, ctx: &dyn InvocationContext) {
+        // SAFETY: Caller (with_context) guarantees lifetime validity
+        self.0 = Some(unsafe { std::mem::transmute(ctx as *const dyn InvocationContext) });
+    }
+    
+    pub(crate) fn get(&self) -> Option<&dyn InvocationContext> {
+        self.0.map(|ptr| unsafe { &*ptr })
+    }
+}
+
 pub struct StoreData {
     pub wasi: WasiP1Ctx,
-    pub host: Arc<dyn Host>,
-    pub config: SurrealismConfig,
+    /// Context reference, set per-call. Must be None when not executing.
+    /// SAFETY: Only valid during WASM execution, caller ensures lifetime.
+    pub(crate) context: ContextRef,
+    pub config: Arc<SurrealismConfig>,
 }
 
-pub struct Controller {
-    pub store: Store<StoreData>,
-    pub instance: Instance,
-    pub memory: Memory,
+/// Compiled WASM runtime. Thread-safe, can be shared across threads.
+/// Compile once, instantiate many times for concurrent execution.
+pub struct Runtime {
+    engine: Engine,
+    module: Module,
+    linker: Linker<StoreData>,
+    config: Arc<SurrealismConfig>,
 }
 
-impl Controller {
-    pub fn new(
-        SurrealismPackage { wasm, config }: SurrealismPackage,
-        host: Arc<dyn Host>,
-    ) -> Result<Self> {
+impl Runtime {
+    /// Compile the WASM module and prepare the runtime.
+    /// This is expensive - do it once and reuse via Arc<Runtime>.
+    pub fn new(SurrealismPackage { wasm, config }: SurrealismPackage) -> Result<Self> {
         let engine = Engine::default();
         let module =
             Module::new(&engine, wasm).prefix_err(|| "Failed to construct module from bytes")?;
@@ -40,26 +98,71 @@ impl Controller {
         implement_host_functions(&mut linker)
             .prefix_err(|| "failed to implement host functions")?;
 
-        let wasi_ctx = super::wasi_context::build(host.clone())?;
+        Ok(Self {
+            engine,
+            module,
+            linker,
+            config: Arc::new(config),
+        })
+    }
+
+    /// Create a new Controller for execution.
+    /// Cheap relative to compilation - can be done per-request or pooled.
+    pub fn new_controller(&self) -> Result<Controller> {
+        let wasi_ctx = super::wasi_context::build()?;
 
         let store_data = StoreData {
             wasi: wasi_ctx,
-            host,
-            config,
+            context: ContextRef::none(),
+            config: self.config.clone(),
         };
-        let mut store = Store::new(&engine, store_data);
-        let instance = linker
-            .instantiate(&mut store, &module)
+        let mut store = Store::new(&self.engine, store_data);
+        let instance = self.linker
+            .instantiate(&mut store, &self.module)
             .prefix_err(|| "failed to instantiate WASM module")?;
         let memory = instance
             .get_memory(&mut store, "memory")
             .prefix_err(|| "WASM module must export 'memory'")?;
 
-        Ok(Self {
+        Ok(Controller {
             store,
             instance,
             memory,
         })
+    }
+}
+
+/// Per-execution controller. Not thread-safe - create one per concurrent call.
+/// Lightweight, created from Runtime.
+pub struct Controller {
+    pub(crate) store: Store<StoreData>,
+    pub(crate) instance: Instance,
+    pub(crate) memory: Memory,
+}
+
+impl Controller {
+    /// Legacy constructor for backwards compatibility.
+    /// Consider using Runtime::new() + runtime.new_controller() instead.
+    #[deprecated(note = "Use Runtime::new() + runtime.new_controller() for better concurrency")]
+    pub fn new(package: SurrealismPackage) -> Result<Self> {
+        Runtime::new(package)?.new_controller()
+    }
+    
+    /// Execute a function with the given invocation context.
+    /// SAFETY: Context must outlive the call. Panics if context is already set.
+    pub fn with_context<R>(&mut self, context: &dyn InvocationContext, f: impl FnOnce(&mut Self) -> Result<R>) -> Result<R> {
+        assert!(self.store.data().context.is_none(), "Context already set - re-entrant calls not supported");
+        
+        // Set context
+        self.store.data_mut().context.set(context);
+        
+        // Execute
+        let result = f(self);
+        
+        // Clear context
+        self.store.data_mut().context = ContextRef::none();
+        
+        result
     }
 
     pub fn alloc(&mut self, len: u32, align: u32) -> Result<u32> {

@@ -163,6 +163,7 @@ trice.workspace = true
 ulid = { workspace = true, features = ["serde"] }
 unicase.workspace = true
 url.workspace = true
+surrealism-runtime.workspace = true
 
 # Other optional crates
 arbitrary = { workspace = true, features = ["derive"], optional = true }

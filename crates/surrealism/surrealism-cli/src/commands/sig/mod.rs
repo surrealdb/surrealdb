@@ -1,4 +1,4 @@
-use crate::{commands::SurrealismCommand, host::DemoHost};
+use crate::commands::SurrealismCommand;
 use std::path::PathBuf;
 use surrealism_runtime::package::SurrealismPackage;
 use surrealism_types::err::PrefixError;
@@ -14,8 +14,7 @@ impl SurrealismCommand for SigCommand {
             .prefix_err(|| "Failed to load Surrealism package")?;
 
         // Load the WASM module from memory
-        let host = DemoHost::new();
-        let mut controller = surrealism_runtime::controller::Controller::new(package, host)
+        let mut controller = surrealism_runtime::controller::Controller::new(package)
             .prefix_err(|| "Failed to load WASM module")?;
 
         // Invoke the function with the provided arguments

@@ -2,29 +2,31 @@ use std::collections::BTreeMap;
 use std::sync::RwLock;
 
 use anyhow::Result;
+use async_trait::async_trait;
 
 use std::ops::Bound;
 
-pub trait KVStore: Send {
-    fn get(&self, key: String) -> Result<Option<surrealdb_types::Value>>;
-    fn set(&self, key: String, value: surrealdb_types::Value) -> Result<()>;
-    fn del(&self, key: String) -> Result<()>;
-    fn exists(&self, key: String) -> Result<bool>;
+#[async_trait(?Send)]
+pub trait KVStore: Send + Sync {
+    async fn get(&self, key: String) -> Result<Option<surrealdb_types::Value>>;
+    async fn set(&self, key: String, value: surrealdb_types::Value) -> Result<()>;
+    async fn del(&self, key: String) -> Result<()>;
+    async fn exists(&self, key: String) -> Result<bool>;
 
-    fn del_rng(&self, start: Bound<String>, end: Bound<String>) -> Result<()>;
+    async fn del_rng(&self, start: Bound<String>, end: Bound<String>) -> Result<()>;
 
-    fn get_batch(&self, keys: Vec<String>) -> Result<Vec<Option<surrealdb_types::Value>>>;
-    fn set_batch(&self, entries: Vec<(String, surrealdb_types::Value)>) -> Result<()>;
-    fn del_batch(&self, keys: Vec<String>) -> Result<()>;
+    async fn get_batch(&self, keys: Vec<String>) -> Result<Vec<Option<surrealdb_types::Value>>>;
+    async fn set_batch(&self, entries: Vec<(String, surrealdb_types::Value)>) -> Result<()>;
+    async fn del_batch(&self, keys: Vec<String>) -> Result<()>;
 
-    fn keys(&self, start: Bound<String>, end: Bound<String>) -> Result<Vec<String>>;
-    fn values(&self, start: Bound<String>, end: Bound<String>) -> Result<Vec<surrealdb_types::Value>>;
-    fn entries(
+    async fn keys(&self, start: Bound<String>, end: Bound<String>) -> Result<Vec<String>>;
+    async fn values(&self, start: Bound<String>, end: Bound<String>) -> Result<Vec<surrealdb_types::Value>>;
+    async fn entries(
         &self,
         start: Bound<String>,
         end: Bound<String>,
     ) -> Result<Vec<(String, surrealdb_types::Value)>>;
-    fn count(&self, start: Bound<String>, end: Bound<String>) -> Result<u64>;
+    async fn count(&self, start: Bound<String>, end: Bound<String>) -> Result<u64>;
 }
 
 /// In-memory BTreeMap implementation of KVStore
@@ -87,8 +89,9 @@ impl Default for BTreeMapStore {
     }
 }
 
+#[async_trait(?Send)]
 impl KVStore for BTreeMapStore {
-    fn get(&self, key: String) -> Result<Option<surrealdb_types::Value>> {
+    async fn get(&self, key: String) -> Result<Option<surrealdb_types::Value>> {
         let map = self
             .inner
             .read()
@@ -96,7 +99,7 @@ impl KVStore for BTreeMapStore {
         Ok(map.get(&key).cloned())
     }
 
-    fn set(&self, key: String, value: surrealdb_types::Value) -> Result<()> {
+    async fn set(&self, key: String, value: surrealdb_types::Value) -> Result<()> {
         let mut map = self
             .inner
             .write()
@@ -105,7 +108,7 @@ impl KVStore for BTreeMapStore {
         Ok(())
     }
 
-    fn del(&self, key: String) -> Result<()> {
+    async fn del(&self, key: String) -> Result<()> {
         let mut map = self.inner.write().map_err(|_| {
             anyhow::anyhow!("Failed to delete from KV store: Could not acquire lock")
         })?;
@@ -113,14 +116,14 @@ impl KVStore for BTreeMapStore {
         Ok(())
     }
 
-    fn exists(&self, key: String) -> Result<bool> {
+    async fn exists(&self, key: String) -> Result<bool> {
         let map = self.inner.read().map_err(|_| {
             anyhow::anyhow!("Failed to check if key exists in KV store: Could not acquire lock")
         })?;
         Ok(map.contains_key(&key))
     }
 
-    fn del_rng(&self, start: Bound<String>, end: Bound<String>) -> Result<()> {
+    async fn del_rng(&self, start: Bound<String>, end: Bound<String>) -> Result<()> {
         let mut map = self.inner.write().map_err(|_| {
             anyhow::anyhow!("Failed to delete range from KV store: Could not acquire lock")
         })?;
@@ -135,7 +138,7 @@ impl KVStore for BTreeMapStore {
         Ok(())
     }
 
-    fn get_batch(&self, keys: Vec<String>) -> Result<Vec<Option<surrealdb_types::Value>>> {
+    async fn get_batch(&self, keys: Vec<String>) -> Result<Vec<Option<surrealdb_types::Value>>> {
         let map = self.inner.read().map_err(|_| {
             anyhow::anyhow!("Failed to get batch from KV store: Could not acquire lock")
         })?;
@@ -146,7 +149,7 @@ impl KVStore for BTreeMapStore {
         Ok(results)
     }
 
-    fn set_batch(&self, entries: Vec<(String, surrealdb_types::Value)>) -> Result<()> {
+    async fn set_batch(&self, entries: Vec<(String, surrealdb_types::Value)>) -> Result<()> {
         let mut map = self.inner.write().map_err(|_| {
             anyhow::anyhow!("Failed to set batch in KV store: Could not acquire lock")
         })?;
@@ -156,7 +159,7 @@ impl KVStore for BTreeMapStore {
         Ok(())
     }
 
-    fn del_batch(&self, keys: Vec<String>) -> Result<()> {
+    async fn del_batch(&self, keys: Vec<String>) -> Result<()> {
         let mut map = self.inner.write().map_err(|_| {
             anyhow::anyhow!("Failed to delete batch from KV store: Could not acquire lock")
         })?;
@@ -166,7 +169,7 @@ impl KVStore for BTreeMapStore {
         Ok(())
     }
 
-    fn keys(&self, start: Bound<String>, end: Bound<String>) -> Result<Vec<String>> {
+    async fn keys(&self, start: Bound<String>, end: Bound<String>) -> Result<Vec<String>> {
         let map = self.inner.read().map_err(|_| {
             anyhow::anyhow!("Failed to collect keys from KV store: Could not acquire lock")
         })?;
@@ -178,7 +181,7 @@ impl KVStore for BTreeMapStore {
         Ok(keys)
     }
 
-    fn values(&self, start: Bound<String>, end: Bound<String>) -> Result<Vec<surrealdb_types::Value>> {
+    async fn values(&self, start: Bound<String>, end: Bound<String>) -> Result<Vec<surrealdb_types::Value>> {
         let map = self.inner.read().map_err(|_| {
             anyhow::anyhow!("Failed to collect values from KV store: Could not acquire lock")
         })?;
@@ -190,7 +193,7 @@ impl KVStore for BTreeMapStore {
         Ok(values)
     }
 
-    fn entries(
+    async fn entries(
         &self,
         start: Bound<String>,
         end: Bound<String>,
@@ -206,7 +209,7 @@ impl KVStore for BTreeMapStore {
         Ok(entries)
     }
 
-    fn count(&self, start: Bound<String>, end: Bound<String>) -> Result<u64> {
+    async fn count(&self, start: Bound<String>, end: Bound<String>) -> Result<u64> {
         let map = self.inner.read().map_err(|_| {
             anyhow::anyhow!("Failed to get count from KV store: Could not acquire lock")
         })?;

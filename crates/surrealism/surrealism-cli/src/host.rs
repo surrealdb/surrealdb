@@ -1,11 +1,12 @@
 use anyhow::{Context, Result};
+use async_trait::async_trait;
 use candle_core::DType;
 use surrealdb_types::{SurrealValue, ToSql};
 use std::{io::BufRead, sync::Arc};
 use std::path::PathBuf;
 use surrealism_runtime::{
     config::SurrealismConfig,
-    host::Host,
+    host::InvocationContext,
     kv::{BTreeMapStore, KVStore},
 };
 use surrealml_llms::{
@@ -27,12 +28,13 @@ impl DemoHost {
     }
 }
 
-impl Host for DemoHost {
+#[async_trait(?Send)]
+impl InvocationContext for DemoHost {
     fn kv(&self) -> &dyn KVStore {
         &self.kv
     }
 
-    fn sql(&self, _config: &SurrealismConfig, query: String, vars: surrealdb_types::Object) -> Result<surrealdb_types::Value> {
+    async fn sql(&self, _config: &SurrealismConfig, query: String, vars: surrealdb_types::Object) -> Result<surrealdb_types::Value> {
         println!("The module is running a SQL query:");
         println!("SQL: {query}");
         println!("Vars: {:#}", vars.to_sql());
@@ -52,7 +54,7 @@ impl Host for DemoHost {
         }
     }
 
-    fn run(
+    async fn run(
         &self,
         _config: &SurrealismConfig,
         fnc: String,
@@ -85,7 +87,7 @@ impl Host for DemoHost {
     }
 
     // "google/gemma-7b"
-    fn ml_invoke_model(
+    async fn ml_invoke_model(
         &self,
         _config: &SurrealismConfig,
         model: String,
@@ -119,7 +121,7 @@ impl Host for DemoHost {
             .into_value())
     }
 
-    fn ml_tokenize(&self, _config: &SurrealismConfig, model: String, input: surrealdb_types::Value) -> Result<Vec<f64>> {
+    async fn ml_tokenize(&self, _config: &SurrealismConfig, model: String, input: surrealdb_types::Value) -> Result<Vec<f64>> {
         println!("The module is running a ML tokenizer:");
         println!("Model: {model}");
         println!("Input: {:}", input.to_sql());

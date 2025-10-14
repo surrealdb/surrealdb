@@ -1,4 +1,4 @@
-use crate::{commands::SurrealismCommand, host::DemoHost};
+use crate::commands::SurrealismCommand;
 use anyhow::Result;
 use std::path::PathBuf;
 use surrealdb_types::Kind;
@@ -16,8 +16,7 @@ impl SurrealismCommand for InfoCommand {
         let meta = package.config.meta.clone();
 
         // Load the WASM module from memory
-        let host = DemoHost::new();
-        let mut controller = surrealism_runtime::controller::Controller::new(package, host)
+        let mut controller = surrealism_runtime::controller::Controller::new(package)
             .prefix_err(|| "Failed to load WASM module")?;
 
         let exports = controller
