@@ -75,34 +75,17 @@ pub(crate) async fn run_router(
 	};
 
 	let kvs = match Datastore::new(endpoint).await {
-		Ok(kvs) => {
-			if let Err(error) = kvs.check_version().await {
-				conn_tx.send(Err(crate::api::Error::InternalError(error.to_string()))).await.ok();
-				return;
-			};
-			if let Err(error) = kvs.bootstrap().await {
-				conn_tx.send(Err(crate::api::Error::InternalError(error.to_string()))).await.ok();
-				return;
-			}
-			// If a root user is specified, setup the initial datastore credentials
-			if let Some(root) = &configured_root {
-				if let Err(error) = kvs.initialise_credentials(&root.username, &root.password).await
-				{
-					conn_tx
-						.send(Err(crate::api::Error::InternalError(error.to_string())))
-						.await
-						.ok();
-					return;
-				}
-			}
-			conn_tx.send(Ok(())).await.ok();
-			kvs.with_auth_enabled(configured_root.is_some())
-		}
+		Ok(kvs) => kvs.with_auth_enabled(configured_root.is_some()),
 		Err(error) => {
 			conn_tx.send(Err(crate::api::Error::InternalError(error.to_string()))).await.ok();
 			return;
 		}
 	};
+
+	if let Err(error) = kvs.init(configured_root.map(|r| (r.username, r.password))).await {
+		conn_tx.send(Err(crate::api::Error::InternalError(error.to_string()))).await.ok();
+		return;
+	}
 
 	let kvs = match address.config.capabilities.allows_live_query_notifications() {
 		true => kvs.with_notifications(),
