@@ -308,6 +308,24 @@ impl Executor {
 		self.execute_plan_impl(kvs, start, stmt).await
 	}
 
+	///
+	/// ```
+	/// USE NS ns DB db;
+	///
+	/// SELECT * FROM table;
+	/// ```
+	///
+	/// Ast {
+	///   statements: [
+	///     TopLevelExpr::Use(UseStatement {
+	///       ns: Some(ns),
+	///       db: Some(db),
+	///     }),
+	///     TopLevelExpr::Select(SelectStatement {
+	///       table: "table",
+	///     }),
+	///   ],
+	/// }
 	async fn execute_plan_impl(
 		&mut self,
 		kvs: &Datastore,

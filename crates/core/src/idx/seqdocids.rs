@@ -399,7 +399,7 @@ mod tests {
 			let (ctx, _) = new_operation(&ds, Read).await;
 			let tx = ctx.tx();
 			for id in ["Foo", "Bar", "Hello", "World"] {
-				let id = crate::key::index::id::Id::new(
+				let id = crate::key::index::id::InvertedIndexDocIdKey::new(
 					TEST_NS_ID,
 					TEST_DB_ID,
 					TEST_TB,

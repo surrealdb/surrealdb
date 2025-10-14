@@ -9,7 +9,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Pa<'a> {
+pub(crate) struct ParamDefinitionKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -21,10 +21,10 @@ pub(crate) struct Pa<'a> {
 	pub pa: Cow<'a, str>,
 }
 
-impl_kv_key_storekey!(Pa<'_> => ParamDefinition);
+impl_kv_key_storekey!(ParamDefinitionKey<'_> => ParamDefinition);
 
-pub fn new(ns: NamespaceId, db: DatabaseId, pa: &str) -> Pa<'_> {
-	Pa::new(ns, db, pa)
+pub fn new(ns: NamespaceId, db: DatabaseId, pa: &str) -> ParamDefinitionKey<'_> {
+	ParamDefinitionKey::new(ns, db, pa)
 }
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
@@ -39,13 +39,13 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Pa<'_> {
+impl Categorise for ParamDefinitionKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseParameter
 	}
 }
 
-impl<'a> Pa<'a> {
+impl<'a> ParamDefinitionKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, pa: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -68,12 +68,12 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Pa::new(
+		let val = ParamDefinitionKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testpa",
 		);
-		let enc = Pa::encode_key(&val).unwrap();
+		let enc = ParamDefinitionKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!patestpa\0");
 	}
 }

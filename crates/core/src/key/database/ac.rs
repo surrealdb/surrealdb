@@ -9,7 +9,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Ac<'a> {
+pub(crate) struct AccessDefinitionKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -21,10 +21,10 @@ pub(crate) struct Ac<'a> {
 	pub ac: Cow<'a, str>,
 }
 
-impl_kv_key_storekey!(Ac<'_> => AccessDefinition);
+impl_kv_key_storekey!(AccessDefinitionKey<'_> => AccessDefinition);
 
-pub fn new(ns: NamespaceId, db: DatabaseId, ac: &str) -> Ac<'_> {
-	Ac::new(ns, db, ac)
+pub fn new(ns: NamespaceId, db: DatabaseId, ac: &str) -> AccessDefinitionKey<'_> {
+	AccessDefinitionKey::new(ns, db, ac)
 }
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
@@ -39,13 +39,13 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Ac<'_> {
+impl Categorise for AccessDefinitionKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseAccess
 	}
 }
 
-impl<'a> Ac<'a> {
+impl<'a> AccessDefinitionKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, ac: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -68,12 +68,12 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Ac::new(
+		let val = AccessDefinitionKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testac",
 		);
-		let enc = Ac::encode_key(&val).unwrap();
+		let enc = AccessDefinitionKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!actestac\0");
 	}
 

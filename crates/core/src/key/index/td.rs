@@ -77,7 +77,7 @@ impl<'a> TdRoot<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Td<'a> {
+pub(crate) struct TermDocumentKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -94,15 +94,15 @@ pub(crate) struct Td<'a> {
 	pub id: DocId,
 }
 
-impl_kv_key_storekey!(Td<'_> => TermDocument);
+impl_kv_key_storekey!(TermDocumentKey<'_> => TermDocument);
 
-impl Categorise for Td<'_> {
+impl Categorise for TermDocumentKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::IndexTermDocument
 	}
 }
 
-impl<'a> Td<'a> {
+impl<'a> TermDocumentKey<'a> {
 	/// Creates a new term-document mapping key
 	///
 	/// This constructor creates a key that maps a term to a document ID.
@@ -157,8 +157,9 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Td::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), "term", 129);
-		let enc = Td::encode_key(&val).unwrap();
+		let val =
+			TermDocumentKey::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), "term", 129);
+		let enc = TermDocumentKey::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!tdterm\0\0\0\0\0\0\0\0\x81"

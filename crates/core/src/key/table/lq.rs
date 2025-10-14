@@ -15,7 +15,7 @@ use crate::kvs::{KVKey, impl_kv_key_storekey};
 ///
 /// The value of the lv is the statement.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Lq<'a> {
+pub(crate) struct SubscriptionDefinitionKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -29,10 +29,10 @@ pub(crate) struct Lq<'a> {
 	pub lq: Uuid,
 }
 
-impl_kv_key_storekey!(Lq<'_> => SubscriptionDefinition);
+impl_kv_key_storekey!(SubscriptionDefinitionKey<'_> => SubscriptionDefinition);
 
-pub fn new(ns: NamespaceId, db: DatabaseId, tb: &str, lq: Uuid) -> Lq<'_> {
-	Lq::new(ns, db, tb, lq)
+pub fn new(ns: NamespaceId, db: DatabaseId, tb: &str, lq: Uuid) -> SubscriptionDefinitionKey<'_> {
+	SubscriptionDefinitionKey::new(ns, db, tb, lq)
 }
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
@@ -47,13 +47,13 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Lq<'_> {
+impl Categorise for SubscriptionDefinitionKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::TableLiveQuery
 	}
 }
 
-impl<'a> Lq<'a> {
+impl<'a> SubscriptionDefinitionKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, lq: Uuid) -> Self {
 		Self {
 			__: b'/',
@@ -70,7 +70,7 @@ impl<'a> Lq<'a> {
 		}
 	}
 
-	pub fn decode_key(k: &[u8]) -> anyhow::Result<Lq<'_>> {
+	pub fn decode_key(k: &[u8]) -> anyhow::Result<SubscriptionDefinitionKey<'_>> {
 		Ok(storekey::decode_borrow(k)?)
 	}
 }
@@ -83,8 +83,9 @@ mod tests {
 	fn key() {
 		#[rustfmt::skip]
 		let live_query_id = Uuid::from_bytes([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
-		let val = Lq::new(NamespaceId(1), DatabaseId(2), "testtb", live_query_id);
-		let enc = Lq::encode_key(&val).unwrap();
+		let val =
+			SubscriptionDefinitionKey::new(NamespaceId(1), DatabaseId(2), "testtb", live_query_id);
+		let enc = SubscriptionDefinitionKey::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!lq\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10"

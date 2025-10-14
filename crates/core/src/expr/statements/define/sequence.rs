@@ -14,8 +14,8 @@ use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Timeout, Value};
 use crate::iam::{Action, ResourceKind};
-use crate::key::database::sq::Sq;
-use crate::key::sequence::Prefix;
+use crate::key::database::sq::SequenceDefinitionKey;
+use crate::key::sequence::SequencePrefix;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineSequenceStatement {
@@ -89,7 +89,7 @@ impl DefineSequenceStatement {
 		};
 
 		// Process the statement
-		let key = Sq::new(db.namespace_id, db.database_id, &name);
+		let key = SequenceDefinitionKey::new(db.namespace_id, db.database_id, &name);
 		let sq = SequenceDefinition {
 			name: name.clone(),
 			batch: compute_to!(stk, ctx, opt, doc, self.batch => i64)
@@ -102,9 +102,9 @@ impl DefineSequenceStatement {
 		txn.set(&key, &sq, None).await?;
 
 		// Clear any pre-existing sequence records
-		let ba_range = Prefix::new_ba_range(db.namespace_id, db.database_id, &sq.name)?;
+		let ba_range = SequencePrefix::new_ba_range(db.namespace_id, db.database_id, &sq.name)?;
 		txn.delr(ba_range).await?;
-		let st_range = Prefix::new_st_range(db.namespace_id, db.database_id, &sq.name)?;
+		let st_range = SequencePrefix::new_st_range(db.namespace_id, db.database_id, &sq.name)?;
 		txn.delr(st_range).await?;
 
 		// Clear the cache

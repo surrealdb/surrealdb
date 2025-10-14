@@ -15,7 +15,7 @@ use crate::kvs::{KVKey, impl_kv_key_storekey};
 /// The value is just the table of the live query as a String, which is the
 /// missing information from the key path
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Lq {
+pub(crate) struct NodeLiveQueryKey {
 	__: u8,
 	_a: u8,
 	pub nd: Uuid,
@@ -25,10 +25,10 @@ pub(crate) struct Lq {
 	pub lq: Uuid,
 }
 
-impl_kv_key_storekey!(Lq => NodeLiveQuery);
+impl_kv_key_storekey!(NodeLiveQueryKey => NodeLiveQuery);
 
-pub fn new(nd: Uuid, lq: Uuid) -> Lq {
-	Lq::new(nd, lq)
+pub fn new(nd: Uuid, lq: Uuid) -> NodeLiveQueryKey {
+	NodeLiveQueryKey::new(nd, lq)
 }
 
 pub fn prefix(nd: Uuid) -> Result<Vec<u8>> {
@@ -43,13 +43,13 @@ pub fn suffix(nd: Uuid) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Lq {
+impl Categorise for NodeLiveQueryKey {
 	fn categorise(&self) -> Category {
 		Category::NodeLiveQuery
 	}
 }
 
-impl Lq {
+impl NodeLiveQueryKey {
 	pub fn new(nd: Uuid, lq: Uuid) -> Self {
 		Self {
 			__: b'/',
@@ -77,8 +77,8 @@ mod tests {
 		let nd = Uuid::from_bytes([0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10]);
 		#[rustfmt::skip]
 		let lq = Uuid::from_bytes([0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20]);
-		let val = Lq::new(nd, lq);
-		let enc = Lq::encode_key(&val).unwrap();
+		let val = NodeLiveQueryKey::new(nd, lq);
+		let enc = NodeLiveQueryKey::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/$\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x10\

@@ -48,7 +48,7 @@ use crate::val::{IndexFormat, RecordIdKey};
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
 #[storekey(format = "IndexFormat")]
-pub(crate) struct Id<'a> {
+pub(crate) struct InvertedIndexDocIdKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -64,7 +64,7 @@ pub(crate) struct Id<'a> {
 	pub id: RecordIdKey,
 }
 
-impl crate::kvs::KVKey for Id<'_> {
+impl crate::kvs::KVKey for InvertedIndexDocIdKey<'_> {
 	type ValueType = DocId;
 	fn encode_key(&self) -> anyhow::Result<Vec<u8>> {
 		Ok(storekey::encode_vec_format::<IndexFormat, _>(self)
@@ -72,13 +72,13 @@ impl crate::kvs::KVKey for Id<'_> {
 	}
 }
 
-impl Categorise for Id<'_> {
+impl Categorise for InvertedIndexDocIdKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::IndexInvertedDocIds
 	}
 }
 
-impl<'a> Id<'a> {
+impl<'a> InvertedIndexDocIdKey<'a> {
 	#[cfg_attr(target_family = "wasm", allow(dead_code))]
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, id: RecordIdKey) -> Self {
 		Self {
@@ -106,14 +106,14 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Id::new(
+		let val = InvertedIndexDocIdKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
 			IndexId(3),
 			RecordIdKey::from("id".to_owned()),
 		);
-		let enc = Id::encode_key(&val).unwrap();
+		let enc = InvertedIndexDocIdKey::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!id\x03id\0",

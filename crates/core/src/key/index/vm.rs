@@ -9,7 +9,7 @@ use crate::idx::trees::store::NodeId;
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode, Hash)]
-pub(crate) struct VmRoot<'a> {
+pub(crate) struct MtreeStateKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -24,9 +24,9 @@ pub(crate) struct VmRoot<'a> {
 	_g: u8,
 }
 
-impl_kv_key_storekey!(VmRoot<'_> => MState);
+impl_kv_key_storekey!(MtreeStateKey<'_> => MState);
 
-impl<'a> VmRoot<'a> {
+impl<'a> MtreeStateKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
 		Self {
 			__: b'/',
@@ -47,7 +47,7 @@ impl<'a> VmRoot<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Vm<'a> {
+pub(crate) struct MtreeNodeStateKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -63,9 +63,9 @@ pub(crate) struct Vm<'a> {
 	pub node_id: NodeId,
 }
 
-impl_kv_key_storekey!(Vm<'_> => Vec<u8>);
+impl_kv_key_storekey!(MtreeNodeStateKey<'_> => Vec<u8>);
 
-impl<'a> Vm<'a> {
+impl<'a> MtreeNodeStateKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, node_id: NodeId) -> Self {
 		Self {
 			__: b'/',
@@ -92,22 +92,22 @@ mod tests {
 
 	#[test]
 	fn root() {
-		let val = VmRoot::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3));
-		let enc = VmRoot::encode_key(&val).unwrap();
+		let val = MtreeStateKey::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3));
+		let enc = MtreeStateKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!vm");
 	}
 
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Vm::new(
+		let val = MtreeNodeStateKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
 			IndexId(3),
 			8
 		);
-		let enc = Vm::encode_key(&val).unwrap();
+		let enc = MtreeNodeStateKey::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!vm\0\0\0\0\0\0\0\x08"

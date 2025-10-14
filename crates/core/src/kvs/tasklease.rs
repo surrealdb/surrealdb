@@ -8,7 +8,7 @@ use tracing::trace;
 use uuid::Uuid;
 
 use crate::err::Error;
-use crate::key::root::tl::Tl;
+use crate::key::root::tl::TaskLeaseKey;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{LockType, TransactionType, impl_kv_value_revisioned};
 
@@ -165,7 +165,7 @@ impl LeaseHandler {
 	/// * `Err` - If database operations fail
 	async fn check_valid_lease(&self, t: DateTime<Utc>) -> Result<Option<TaskLease>> {
 		let tx = self.tf.transaction(TransactionType::Read, LockType::Optimistic).await?;
-		if let Some(l) = tx.get(&Tl::new(&self.task_type), None).await? {
+		if let Some(l) = tx.get(&TaskLeaseKey::new(&self.task_type), None).await? {
 			// If the lease hasn't expired yet, return the lease object
 			if l.expiration > t {
 				// Return the lease object which contains owner information
@@ -190,7 +190,7 @@ impl LeaseHandler {
 			expiration: Utc::now() + self.lease_duration, /* Set expiration to current time plus
 			                                               * lease duration */
 		};
-		let key = Tl::new(&self.task_type);
+		let key = TaskLeaseKey::new(&self.task_type);
 		tx.set(&key, &lease, None).await?;
 		tx.commit().await?;
 		// Successfully acquired the lease

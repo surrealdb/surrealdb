@@ -10,7 +10,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Az<'a> {
+pub(crate) struct AnalyzerDefinitionKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -22,10 +22,10 @@ pub(crate) struct Az<'a> {
 	pub az: Cow<'a, str>,
 }
 
-impl_kv_key_storekey!(Az<'_> => catalog::AnalyzerDefinition);
+impl_kv_key_storekey!(AnalyzerDefinitionKey<'_> => catalog::AnalyzerDefinition);
 
-pub fn new(ns: NamespaceId, db: DatabaseId, az: &str) -> Az<'_> {
-	Az::new(ns, db, az)
+pub fn new(ns: NamespaceId, db: DatabaseId, az: &str) -> AnalyzerDefinitionKey<'_> {
+	AnalyzerDefinitionKey::new(ns, db, az)
 }
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
@@ -40,13 +40,13 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Az<'_> {
+impl Categorise for AnalyzerDefinitionKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseAnalyzer
 	}
 }
 
-impl<'a> Az<'a> {
+impl<'a> AnalyzerDefinitionKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, az: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -69,12 +69,12 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-            let val = Az::new(
+            let val = AnalyzerDefinitionKey::new(
             NamespaceId(1),
             DatabaseId(2),
             "test",
         );
-		let enc = Az::encode_key(&val).unwrap();
+		let enc = AnalyzerDefinitionKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!aztest\0");
 	}
 

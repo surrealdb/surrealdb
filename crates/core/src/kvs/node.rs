@@ -29,7 +29,7 @@ impl Datastore {
 		crate::sys::refresh().await;
 		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
-		let key = crate::key::root::nd::Nd::new(id);
+		let key = crate::key::root::nd::NodeKey::new(id);
 		let now = self.clock_now().await;
 		let node = Node::new(id, now, false);
 		let res = run!(txn, txn.put(&key, &node, None).await);
@@ -176,7 +176,10 @@ impl Datastore {
 						// Decode the data for this live query
 						let val: NodeLiveQuery = KVValue::kv_decode_value(v.clone())?;
 						// Get the key for this node live query
-						let nlq = catch!(txn, crate::key::node::lq::Lq::decode_key(k.clone()));
+						let nlq = catch!(
+							txn,
+							crate::key::node::lq::NodeLiveQueryKey::decode_key(k.clone())
+						);
 						// Check that the node for this query is archived
 						if archived.contains(&nlq.nd) {
 							// Get the key for this table live query
@@ -274,7 +277,10 @@ impl Datastore {
 							// Check that the node for this query is archived
 							if archived.contains(&stm.node) {
 								// Get the key for this node live query
-								let tlq = catch!(txn, crate::key::table::lq::Lq::decode_key(k));
+								let tlq = catch!(
+									txn,
+									crate::key::table::lq::SubscriptionDefinitionKey::decode_key(k)
+								);
 								// Get the key for this table live query
 								let nlq = crate::key::node::lq::new(nid, lid);
 								// Delete the node live query

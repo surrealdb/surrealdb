@@ -1,4 +1,4 @@
-//! Stores Things of an HNSW index
+//! Stores RecordIds of an HNSW index
 use std::borrow::Cow;
 
 use storekey::{BorrowDecode, Encode};
@@ -8,7 +8,7 @@ use crate::val::{IndexFormat, RecordIdKey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 #[storekey(format = "IndexFormat")]
-pub(crate) struct Hi<'a> {
+pub(crate) struct HnswRecordKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -24,7 +24,7 @@ pub(crate) struct Hi<'a> {
 	pub id: RecordIdKey,
 }
 
-impl crate::kvs::KVKey for Hi<'_> {
+impl crate::kvs::KVKey for HnswRecordKey<'_> {
 	type ValueType = u64;
 	fn encode_key(&self) -> ::anyhow::Result<Vec<u8>> {
 		Ok(::storekey::encode_vec_format::<IndexFormat, _>(self)
@@ -32,7 +32,7 @@ impl crate::kvs::KVKey for Hi<'_> {
 	}
 }
 
-impl<'a> Hi<'a> {
+impl<'a> HnswRecordKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, id: RecordIdKey) -> Self {
 		Self {
 			__: b'/',
@@ -59,14 +59,14 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Hi::new(
+		let val = HnswRecordKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
 			IndexId(3),
 			RecordIdKey::String("testid".into()),
 		);
-		let enc = Hi::encode_key(&val).unwrap();
+		let enc = HnswRecordKey::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hi\x03testid\0",

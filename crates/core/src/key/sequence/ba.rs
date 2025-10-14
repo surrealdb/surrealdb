@@ -6,10 +6,10 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
-use crate::kvs::sequences::BatchValue;
+use crate::kvs::sequences::SequenceBatchValue;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Ba<'a> {
+pub(crate) struct SequenceBatchKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -25,15 +25,15 @@ pub(crate) struct Ba<'a> {
 	pub start: i64,
 }
 
-impl_kv_key_storekey!(Ba<'_> => BatchValue);
+impl_kv_key_storekey!(SequenceBatchKey<'_> => SequenceBatchValue);
 
-impl Categorise for Ba<'_> {
+impl Categorise for SequenceBatchKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::SequenceBatch
 	}
 }
 
-impl<'a> Ba<'a> {
+impl<'a> SequenceBatchKey<'a> {
 	pub(crate) fn new(ns: NamespaceId, db: DatabaseId, sq: &'a str, start: i64) -> Self {
 		Self {
 			__: b'/',
@@ -60,8 +60,8 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Ba::new(NamespaceId(1), DatabaseId(2), "testsq", 100);
-		let enc = Ba::encode_key(&val).unwrap();
+		let val = SequenceBatchKey::new(NamespaceId(1), DatabaseId(2), "testsq", 100);
+		let enc = SequenceBatchKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!sqtestsq\0!ba\x80\0\0\0\0\0\0\x64");
 	}
 }

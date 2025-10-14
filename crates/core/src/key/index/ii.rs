@@ -11,7 +11,7 @@ use crate::val::RecordIdKey;
 
 /// Id inverted. DocId -> Id
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Ii<'a> {
+pub(crate) struct InvertedIdKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -27,17 +27,17 @@ pub(crate) struct Ii<'a> {
 	pub id: DocId,
 }
 
-impl_kv_key_storekey!(Ii<'_> => RecordIdKey);
+impl_kv_key_storekey!(InvertedIdKey<'_> => RecordIdKey);
 
-impl Categorise for Ii<'_> {
+impl Categorise for InvertedIdKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::IndexDocKeys
 	}
 }
 
-impl<'a> Ii<'a> {
+impl<'a> InvertedIdKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, id: DocId) -> Self {
-		Ii {
+		InvertedIdKey {
 			__: b'/',
 			_a: b'*',
 			ns,
@@ -62,8 +62,8 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Ii::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), 1);
-		let enc = Ii::encode_key(&val).unwrap();
+		let val = InvertedIdKey::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), 1);
+		let enc = InvertedIdKey::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ii\0\0\0\0\0\0\0\x01"

@@ -28,7 +28,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Tt<'a> {
+pub(crate) struct TermDocumentFrequencyKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -48,15 +48,15 @@ pub(crate) struct Tt<'a> {
 	pub add: bool,
 }
 
-impl_kv_key_storekey!(Tt<'_> => String);
+impl_kv_key_storekey!(TermDocumentFrequencyKey<'_> => String);
 
-impl Categorise for Tt<'_> {
+impl Categorise for TermDocumentFrequencyKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::IndexTermDocuments
 	}
 }
 
-impl<'a> Tt<'a> {
+impl<'a> TermDocumentFrequencyKey<'a> {
 	/// Creates a new term-document key
 	///
 	/// This constructor creates a key that represents a term occurrence in a
@@ -165,7 +165,7 @@ impl<'a> Tt<'a> {
 		Ok((beg, end))
 	}
 
-	pub fn decode_key(k: &[u8]) -> Result<Tt<'_>> {
+	pub fn decode_key(k: &[u8]) -> Result<TermDocumentFrequencyKey<'_>> {
 		Ok(storekey::decode_borrow(k)?)
 	}
 }
@@ -252,7 +252,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Tt::new(
+		let val = TermDocumentFrequencyKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
@@ -263,14 +263,20 @@ mod tests {
 			Uuid::from_u128(2),
 			true,
 		);
-		let enc = Tt::encode_key(&val).unwrap();
+		let enc = TermDocumentFrequencyKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ttterm\0\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02\x03");
 	}
 
 	#[test]
 	fn term_range() {
-		let (beg, end) =
-			Tt::term_range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), "term").unwrap();
+		let (beg, end) = TermDocumentFrequencyKey::term_range(
+			NamespaceId(1),
+			DatabaseId(2),
+			"testtb",
+			IndexId(3),
+			"term",
+		)
+		.unwrap();
 		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ttterm\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
 		assert_eq!(
 			end,
@@ -280,8 +286,13 @@ mod tests {
 
 	#[test]
 	fn terms_range() {
-		let (beg, end) =
-			Tt::terms_range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3)).unwrap();
+		let (beg, end) = TermDocumentFrequencyKey::terms_range(
+			NamespaceId(1),
+			DatabaseId(2),
+			"testtb",
+			IndexId(3),
+		)
+		.unwrap();
 		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!tt\0");
 		assert_eq!(end, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!tt\xff");
 	}

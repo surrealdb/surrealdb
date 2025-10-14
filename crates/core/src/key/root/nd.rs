@@ -10,7 +10,7 @@ use crate::kvs::impl_kv_key_storekey;
 // In the future, this could also include broadcast addresses and other
 // information.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Nd {
+pub(crate) struct NodeKey {
 	__: u8,
 	_a: u8,
 	_b: u8,
@@ -18,10 +18,10 @@ pub(crate) struct Nd {
 	pub nd: Uuid,
 }
 
-impl_kv_key_storekey!(Nd => Node);
+impl_kv_key_storekey!(NodeKey => Node);
 
-pub fn new(nd: Uuid) -> Nd {
-	Nd::new(nd)
+pub fn new(nd: Uuid) -> NodeKey {
+	NodeKey::new(nd)
 }
 
 pub fn prefix() -> Vec<u8> {
@@ -36,13 +36,13 @@ pub fn suffix() -> Vec<u8> {
 	k
 }
 
-impl Categorise for Nd {
+impl Categorise for NodeKey {
 	fn categorise(&self) -> Category {
 		Category::Node
 	}
 }
 
-impl Nd {
+impl NodeKey {
 	pub fn new(nd: Uuid) -> Self {
 		Self {
 			__: b'/',
@@ -61,7 +61,7 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Nd::new(Uuid::default());
+		let val = NodeKey::new(Uuid::default());
 		let enc = val.encode_key().unwrap();
 		assert_eq!(&enc, b"/!nd\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00");
 	}

@@ -9,7 +9,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Fc<'a> {
+pub(crate) struct FunctionDefinitionKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -21,10 +21,10 @@ pub(crate) struct Fc<'a> {
 	pub fc: Cow<'a, str>,
 }
 
-impl_kv_key_storekey!(Fc<'_> => FunctionDefinition);
+impl_kv_key_storekey!(FunctionDefinitionKey<'_> => FunctionDefinition);
 
-pub fn new(ns: NamespaceId, db: DatabaseId, fc: &str) -> Fc<'_> {
-	Fc::new(ns, db, fc)
+pub fn new(ns: NamespaceId, db: DatabaseId, fc: &str) -> FunctionDefinitionKey<'_> {
+	FunctionDefinitionKey::new(ns, db, fc)
 }
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
@@ -39,13 +39,13 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Fc<'_> {
+impl Categorise for FunctionDefinitionKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseFunction
 	}
 }
 
-impl<'a> Fc<'a> {
+impl<'a> FunctionDefinitionKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, fc: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -68,12 +68,12 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Fc::new(
+		let val = FunctionDefinitionKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testfc",
 		);
-		let enc = Fc::encode_key(&val).unwrap();
+		let enc = FunctionDefinitionKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!fntestfc\0");
 	}
 

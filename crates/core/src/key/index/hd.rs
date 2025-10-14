@@ -47,7 +47,7 @@ impl<'a> HdRoot<'a> {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Hd<'a> {
+pub(crate) struct HnswDocIdKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -63,9 +63,9 @@ pub(crate) struct Hd<'a> {
 	pub doc_id: DocId,
 }
 
-impl_kv_key_storekey!(Hd<'_> => RecordIdKey);
+impl_kv_key_storekey!(HnswDocIdKey<'_> => RecordIdKey);
 
-impl<'a> Hd<'a> {
+impl<'a> HnswDocIdKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, doc_id: DocId) -> Self {
 		Self {
 			__: b'/',
@@ -100,14 +100,14 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Hd::new(
+		let val = HnswDocIdKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
 			IndexId(3),
 			7
 		);
-		let enc = Hd::encode_key(&val).unwrap();
+		let enc = HnswDocIdKey::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hd\0\0\0\0\0\0\0\x07"

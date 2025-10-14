@@ -37,11 +37,11 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::kvs::sequences::BatchValue;
+use crate::kvs::sequences::SequenceBatchValue;
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Ib<'a> {
+pub(crate) struct SequenceBatchKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -57,15 +57,15 @@ pub(crate) struct Ib<'a> {
 	pub start: i64,
 }
 
-impl_kv_key_storekey!(Ib<'_> => BatchValue);
+impl_kv_key_storekey!(SequenceBatchKey<'_> => SequenceBatchValue);
 
-impl Categorise for Ib<'_> {
+impl Categorise for SequenceBatchKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::SequenceBatch
 	}
 }
 
-impl<'a> Ib<'a> {
+impl<'a> SequenceBatchKey<'a> {
 	pub(crate) fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -108,7 +108,9 @@ mod tests {
 
 	#[test]
 	fn ib_range() {
-		let ib_range = Ib::new_range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3)).unwrap();
+		let ib_range =
+			SequenceBatchKey::new_range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3))
+				.unwrap();
 		assert_eq!(
 			ib_range.start,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ib\0\0\0\0\0\0\0\0"

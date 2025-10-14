@@ -28,7 +28,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Dc<'a> {
+pub(crate) struct DocumentFrequencyKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -46,15 +46,15 @@ pub(crate) struct Dc<'a> {
 	pub uid: Uuid,
 }
 
-impl_kv_key_storekey!(Dc<'_> => DocLengthAndCount);
+impl_kv_key_storekey!(DocumentFrequencyKey<'_> => DocLengthAndCount);
 
-impl Categorise for Dc<'_> {
+impl Categorise for DocumentFrequencyKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::IndexFullTextDocCountAndLength
 	}
 }
 
-impl<'a> Dc<'a> {
+impl<'a> DocumentFrequencyKey<'a> {
 	/// Creates a new document count and length key
 	///
 	/// This constructor creates a key that represents document statistics for
@@ -196,7 +196,7 @@ mod tests {
 
 	#[test]
 	fn key_with_ids() {
-		let val = Dc::new(
+		let val = DocumentFrequencyKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
@@ -205,19 +205,23 @@ mod tests {
 			Uuid::from_u128(1),
 			Uuid::from_u128(2),
 		);
-		let enc = Dc::encode_key(&val).unwrap();
+		let enc = DocumentFrequencyKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dc\0\0\0\0\0\0\0\x81\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
 	}
 
 	#[test]
 	fn key_root() {
-		let enc = Dc::new_root(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3)).unwrap();
+		let enc =
+			DocumentFrequencyKey::new_root(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3))
+				.unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dc");
 	}
 
 	#[test]
 	fn range() {
-		let (beg, end) = Dc::range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3)).unwrap();
+		let (beg, end) =
+			DocumentFrequencyKey::range(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3))
+				.unwrap();
 		assert_eq!(beg, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dc\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
 		assert_eq!(
 			end,

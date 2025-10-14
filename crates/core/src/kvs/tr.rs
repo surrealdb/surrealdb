@@ -739,7 +739,7 @@ impl Transactor {
 				db,
 				k.sprint()
 			);
-			let k = crate::key::database::ts::Ts::decode_key(k)?;
+			let k = crate::key::database::ts::VersionStampKey::decode_key(k)?;
 			let latest_ts = k.ts;
 			if latest_ts >= ts {
 				warn!("ts {ts} is less than the latest ts {latest_ts}");

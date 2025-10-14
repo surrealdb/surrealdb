@@ -18,11 +18,13 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
-use crate::key::sequence::Prefix;
-use crate::key::sequence::ba::Ba;
-use crate::key::sequence::st::St;
+use crate::key::sequence::SequencePrefix;
+use crate::key::sequence::ba::SequenceBatchKey;
+use crate::key::sequence::st::SequenceStateKey;
 use crate::kvs::ds::TransactionFactory;
-use crate::kvs::{KVKey, LockType, Transaction, TransactionType, impl_kv_value_revisioned};
+use crate::kvs::{
+	KVKey, KVValue, LockType, Transaction, TransactionType, impl_kv_value_revisioned,
+};
 
 type SequencesMap = Arc<RwLock<HashMap<Arc<SequenceDomain>, Arc<Mutex<Sequence>>>>>;
 
@@ -51,21 +53,21 @@ impl SequenceDomain {
 
 	fn new_batch_range_keys(&self) -> Result<Range<Vec<u8>>> {
 		match self {
-			Self::UserName(ns, db, sq) => Prefix::new_ba_range(*ns, *db, sq),
+			Self::UserName(ns, db, sq) => SequencePrefix::new_ba_range(*ns, *db, sq),
 			Self::FullTextDocIds(ibk) => ibk.new_ib_range(),
 		}
 	}
 
 	fn new_batch_key(&self, start: i64) -> Result<Vec<u8>> {
 		match &self {
-			Self::UserName(ns, db, sq) => Ba::new(*ns, *db, sq, start).encode_key(),
+			Self::UserName(ns, db, sq) => SequenceBatchKey::new(*ns, *db, sq, start).encode_key(),
 			Self::FullTextDocIds(ikb) => ikb.new_ib_key(start).encode_key(),
 		}
 	}
 
 	fn new_state_key(&self, nid: Uuid) -> Result<Vec<u8>> {
 		match &self {
-			Self::UserName(ns, db, sq) => St::new(*ns, *db, sq, nid).encode_key(),
+			Self::UserName(ns, db, sq) => SequenceStateKey::new(*ns, *db, sq, nid).encode_key(),
 			Self::FullTextDocIds(ikb) => ikb.new_is_key(nid).encode_key(),
 		}
 	}
@@ -73,11 +75,11 @@ impl SequenceDomain {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-pub(crate) struct BatchValue {
-	to: i64,
-	owner: Uuid,
+pub(crate) struct SequenceBatchValue {
+	batch_end: i64,
+	owner_node_id: Uuid,
 }
-impl_kv_value_revisioned!(BatchValue);
+impl_kv_value_revisioned!(SequenceBatchValue);
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
@@ -285,27 +287,27 @@ impl Sequence {
 		let val = tx.getr(batch_range, None).await?;
 		let mut next_start = next;
 		// Scan every existing batches
-		for (key, val) in val.iter() {
-			let ba: BatchValue = revision::from_slice(val)?;
-			next_start = next_start.max(ba.to);
+		for (key, val) in val.into_iter() {
+			let ba: SequenceBatchValue = KVValue::kv_decode_value(val)?;
+			next_start = next_start.max(ba.batch_end);
 			// The batch belongs to this node
-			if ba.owner == nid {
+			if ba.owner_node_id == nid {
 				// If a previous batch belongs to this node, we can remove it,
 				// as we are going to create a new one
 				// If the current value is still in the batch range, we return it
-				if next < ba.to {
-					return Ok((next, ba.to));
+				if next < ba.batch_end {
+					return Ok((next, ba.batch_end));
 				}
 				// Otherwise we can remove this old batch and create a new one
-				tx.del(key).await?;
+				tx.del(&key).await?;
 			}
 		}
 		// We compute the new batch
 		let next_to = next_start + batch as i64;
 		// And store it in the KV store
-		let bv = revision::to_vec(&BatchValue {
-			to: next_to,
-			owner: nid,
+		let bv = KVValue::kv_encode_value(&SequenceBatchValue {
+			batch_end: next_to,
+			owner_node_id: nid,
 		})?;
 		let batch_key = seq.new_batch_key(next_start)?;
 		tx.set(&batch_key, &bv, None).await?;

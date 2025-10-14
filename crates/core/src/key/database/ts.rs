@@ -11,7 +11,7 @@ use crate::vs::VersionStamp;
 // Each Ts key is suffixed by a timestamp.
 // The value is the versionstamp that corresponds to the timestamp.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Ts {
+pub(crate) struct VersionStampKey {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -23,10 +23,10 @@ pub(crate) struct Ts {
 	pub ts: u64,
 }
 
-impl_kv_key_storekey!(Ts => VersionStamp);
+impl_kv_key_storekey!(VersionStampKey => VersionStamp);
 
-pub fn new(ns: NamespaceId, db: DatabaseId, ts: u64) -> Ts {
-	Ts::new(ns, db, ts)
+pub fn new(ns: NamespaceId, db: DatabaseId, ts: u64) -> VersionStampKey {
+	VersionStampKey::new(ns, db, ts)
 }
 
 /// Returns the prefix for the whole database timestamps
@@ -43,15 +43,15 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Ts {
+impl Categorise for VersionStampKey {
 	fn categorise(&self) -> Category {
 		Category::DatabaseTimestamp
 	}
 }
 
-impl Ts {
+impl VersionStampKey {
 	pub fn new(ns: NamespaceId, db: DatabaseId, ts: u64) -> Self {
-		Ts {
+		VersionStampKey {
 			__: b'/',
 			_a: b'*',
 			ns,
@@ -64,7 +64,7 @@ impl Ts {
 		}
 	}
 
-	pub fn decode_key(k: &[u8]) -> anyhow::Result<Ts> {
+	pub fn decode_key(k: &[u8]) -> anyhow::Result<VersionStampKey> {
 		Ok(storekey::decode_borrow(k)?)
 	}
 }
@@ -76,12 +76,12 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Ts::new(
+		let val = VersionStampKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			123,
 		);
-		let enc = Ts::encode_key(&val).unwrap();
+		let enc = VersionStampKey::encode_key(&val).unwrap();
 		assert_eq!(&enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!ts\0\0\0\0\0\0\0\x7b");
 	}
 }

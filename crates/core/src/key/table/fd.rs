@@ -9,7 +9,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Fd<'a> {
+pub(crate) struct FieldDefinitionKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -23,10 +23,15 @@ pub(crate) struct Fd<'a> {
 	pub fd: Cow<'a, str>,
 }
 
-impl_kv_key_storekey!(Fd<'_> => catalog::FieldDefinition);
+impl_kv_key_storekey!(FieldDefinitionKey<'_> => catalog::FieldDefinition);
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, fd: &'a str) -> Fd<'a> {
-	Fd::new(ns, db, tb, fd)
+pub fn new<'a>(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &'a str,
+	fd: &'a str,
+) -> FieldDefinitionKey<'a> {
+	FieldDefinitionKey::new(ns, db, tb, fd)
 }
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
@@ -41,13 +46,13 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Fd<'_> {
+impl Categorise for FieldDefinitionKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::TableField
 	}
 }
 
-impl<'a> Fd<'a> {
+impl<'a> FieldDefinitionKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, fd: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -72,13 +77,13 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Fd::new(
+		let val = FieldDefinitionKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
 			"testfd",
 		);
-		let enc = Fd::encode_key(&val).unwrap();
+		let enc = FieldDefinitionKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!fdtestfd\0");
 	}
 

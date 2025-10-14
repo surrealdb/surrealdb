@@ -25,7 +25,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Dl<'a> {
+pub(crate) struct DocLengthKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -41,15 +41,15 @@ pub(crate) struct Dl<'a> {
 	pub id: DocId,
 }
 
-impl_kv_key_storekey!(Dl<'_> => DocLength);
+impl_kv_key_storekey!(DocLengthKey<'_> => DocLength);
 
-impl Categorise for Dl<'_> {
+impl Categorise for DocLengthKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::IndexDocLength
 	}
 }
 
-impl<'a> Dl<'a> {
+impl<'a> DocLengthKey<'a> {
 	/// Creates a new document length key
 	///
 	/// This constructor creates a key that stores the length of an individual
@@ -89,8 +89,8 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Dl::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), 16);
-		let enc = Dl::encode_key(&val).unwrap();
+		let val = DocLengthKey::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), 16);
+		let enc = DocLengthKey::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!dl\0\0\0\0\0\0\0\x10"

@@ -12,7 +12,7 @@ use crate::err::Error;
 use crate::expr::{Base, Timeout, Value};
 use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
-use crate::key::database::sq::Sq;
+use crate::key::database::sq::SequenceDefinitionKey;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct AlterSequenceStatement {
@@ -56,7 +56,7 @@ impl AlterSequenceStatement {
 			}
 		}
 		// Set the table definition
-		let key = Sq::new(ns, db, &self.name);
+		let key = SequenceDefinitionKey::new(ns, db, &self.name);
 		txn.set(&key, &sq, None).await?;
 		// Clear the cache
 		txn.clear_cache();

@@ -12,8 +12,8 @@ use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
-use crate::key::database::sq::Sq;
-use crate::key::sequence::Prefix;
+use crate::key::database::sq::SequenceDefinitionKey;
+use crate::key::sequence::SequencePrefix;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct RemoveSequenceStatement {
@@ -71,12 +71,12 @@ impl RemoveSequenceStatement {
 			seq.sequence_removed(ns, db, &name).await;
 		}
 		// Delete any sequence records
-		let ba_range = Prefix::new_ba_range(ns, db, &sq.name)?;
+		let ba_range = SequencePrefix::new_ba_range(ns, db, &sq.name)?;
 		txn.delr(ba_range).await?;
-		let st_range = Prefix::new_st_range(ns, db, &sq.name)?;
+		let st_range = SequencePrefix::new_st_range(ns, db, &sq.name)?;
 		txn.delr(st_range).await?;
 		// Delete the definition
-		let key = Sq::new(ns, db, &name);
+		let key = SequenceDefinitionKey::new(ns, db, &name);
 		txn.del(&key).await?;
 		// Clear the cache
 		txn.clear_cache();

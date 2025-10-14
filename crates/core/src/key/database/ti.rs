@@ -8,28 +8,28 @@ use crate::kvs::impl_kv_key_storekey;
 
 // Table ID generator
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Ti {
+pub(crate) struct TableIdGeneratorKey {
 	table_root: DatabaseRoot,
 	_c: u8,
 	_d: u8,
 	_e: u8,
 }
 
-impl_kv_key_storekey!(Ti => Vec<u8>);
+impl_kv_key_storekey!(TableIdGeneratorKey => Vec<u8>);
 
-pub fn new(ns: NamespaceId, db: DatabaseId) -> Ti {
-	Ti::new(ns, db)
+pub fn new(ns: NamespaceId, db: DatabaseId) -> TableIdGeneratorKey {
+	TableIdGeneratorKey::new(ns, db)
 }
 
-impl Categorise for Ti {
+impl Categorise for TableIdGeneratorKey {
 	fn categorise(&self) -> Category {
 		Category::DatabaseTableIdentifier
 	}
 }
 
-impl Ti {
+impl TableIdGeneratorKey {
 	pub fn new(ns: NamespaceId, db: DatabaseId) -> Self {
-		Ti {
+		TableIdGeneratorKey {
 			table_root: DatabaseRoot::new(ns, db),
 			_c: b'!',
 			_d: b't',
@@ -46,11 +46,11 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Ti::new(
+		let val = TableIdGeneratorKey::new(
 			NamespaceId(123),
 			DatabaseId(234),
 		);
-		let enc = Ti::encode_key(&val).unwrap();
+		let enc = TableIdGeneratorKey::encode_key(&val).unwrap();
 		assert_eq!(&enc, b"/*\x00\x00\x00\x7b*\x00\x00\x00\xea!\x74\x69");
 	}
 }

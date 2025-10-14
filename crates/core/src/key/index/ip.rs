@@ -11,7 +11,7 @@ use crate::val::{IndexFormat, RecordIdKey};
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
 #[storekey(format = "IndexFormat")]
-pub(crate) struct Ip<'a> {
+pub(crate) struct IndexPreviousRecordIdKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -27,7 +27,7 @@ pub(crate) struct Ip<'a> {
 	pub id: RecordIdKey,
 }
 
-impl KVKey for Ip<'_> {
+impl KVKey for IndexPreviousRecordIdKey<'_> {
 	type ValueType = PrimaryAppending;
 	fn encode_key(&self) -> ::anyhow::Result<Vec<u8>> {
 		Ok(storekey::encode_vec_format::<IndexFormat, _>(self)
@@ -35,7 +35,7 @@ impl KVKey for Ip<'_> {
 	}
 }
 
-impl<'a> Ip<'a> {
+impl<'a> IndexPreviousRecordIdKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId, id: RecordIdKey) -> Self {
 		Self {
 			__: b'/',
@@ -62,14 +62,14 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Ip::new(
+		let val = IndexPreviousRecordIdKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
 			IndexId(3),
 			RecordIdKey::String("id".into()),
 		);
-		let enc = Ip::encode_key(&val).unwrap();
+		let enc = IndexPreviousRecordIdKey::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!ip\x03id\0",

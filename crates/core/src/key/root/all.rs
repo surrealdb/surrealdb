@@ -6,31 +6,31 @@ use crate::kvs::impl_kv_key_storekey;
 
 #[allow(unused)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Kv {
+pub(crate) struct All {
 	__: u8,
 }
 
-impl_kv_key_storekey!(Kv => ());
+impl_kv_key_storekey!(All => ());
 
 pub fn kv() -> Vec<u8> {
 	vec![b'/']
 }
 
-impl Default for Kv {
+impl Default for All {
 	fn default() -> Self {
 		Self::new()
 	}
 }
 
-impl Categorise for Kv {
+impl Categorise for All {
 	fn categorise(&self) -> Category {
 		Category::Root
 	}
 }
 
-impl Kv {
-	pub fn new() -> Kv {
-		Kv {
+impl All {
+	pub fn new() -> All {
+		All {
 			__: b'/',
 		}
 	}
@@ -44,8 +44,8 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Kv::new();
-		let enc = Kv::encode_key(&val).unwrap();
+		let val = All::new();
+		let enc = All::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/");
 	}
 }

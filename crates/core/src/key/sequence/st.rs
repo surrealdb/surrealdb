@@ -10,7 +10,7 @@ use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::sequences::SequenceState;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct St<'a> {
+pub(crate) struct SequenceStateKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -26,15 +26,15 @@ pub(crate) struct St<'a> {
 	pub nid: Uuid,
 }
 
-impl_kv_key_storekey!(St<'_> => SequenceState);
+impl_kv_key_storekey!(SequenceStateKey<'_> => SequenceState);
 
-impl Categorise for St<'_> {
+impl Categorise for SequenceStateKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::SequenceState
 	}
 }
 
-impl<'a> St<'a> {
+impl<'a> SequenceStateKey<'a> {
 	pub(crate) fn new(ns: NamespaceId, db: DatabaseId, sq: &'a str, nid: Uuid) -> Self {
 		Self {
 			__: b'/',
@@ -61,13 +61,13 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = St::new(
+		let val = SequenceStateKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testsq",
 			Uuid::from_bytes([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]),
 		);
-		let enc = St::encode_key(&val).unwrap();
+		let enc = SequenceStateKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!sqtestsq\0!st\0\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f");
 	}
 }

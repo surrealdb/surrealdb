@@ -83,7 +83,23 @@
 //! crate::key::index::bt                /*{ns}*{db}*{tb_name}+{ix}!bt{id}
 //! crate::key::index::bu                /*{ns}*{db}*{tb_name}+{ix}!bu{id}
 //! crate::key::index::dl                /*{ns}*{db}*{tb_name}+{ix}!dl{id}
+//! crate::key::index::hd                /*{ns}*{db}*{tb_name}+{ix}!hd{id}
+//! crate::key::index::he                /*{ns}*{db}*{tb_name}+{ix}!he{id}
+//! crate::key::index::hi                /*{ns}*{db}*{tb_name}+{ix}!hi{id}
+//! crate::key::index::hl                /*{ns}*{db}*{tb_name}+{ix}!hl{id}
+//! crate::key::index::hs                /*{ns}*{db}*{tb_name}+{ix}!hs
+//! crate::key::index::hv                /*{ns}*{db}*{tb_name}+{ix}!hv{id}
+//! crate::key::index::ia                /*{ns}*{db}*{tb_name}+{ix}!ia{id}
+//! crate::key::index::ib                /*{ns}*{db}*{tb_name}+{ix}!ib{id}
+//! crate::key::index::id                /*{ns}*{db}*{tb_name}+{ix}!id{id}
+//! crate::key::index::ii                /*{ns}*{db}*{tb_name}+{ix}!ii{id}
+//! crate::key::index::ip                /*{ns}*{db}*{tb_name}+{ix}!ip{id}
+//! crate::key::index::is                /*{ns}*{db}*{tb_name}+{ix}!is{id}
+//! crate::key::index::iu                /*{ns}*{db}*{tb_name}+{ix}!iu{id}
+//! crate::key::index::td                /*{ns}*{db}*{tb_name}+{ix}!td{id}
 //! crate::key::index::tf                /*{ns}*{db}*{tb_name}+{ix}!tf{term}{id}
+//! crate::key::index::tt                /*{ns}*{db}*{tb_name}+{ix}!tt{id}
+//! crate::key::index::vm                /*{ns}*{db}*{tb_name}+{ix}!vm{id}
 //! crate::key::index                    /*{ns}*{db}*{tb_name}+{ix}*{fd}{id}
 //!
 //! crate::key::change::vs_key_prefix    /*{ns}*{db}#

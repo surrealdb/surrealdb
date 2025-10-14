@@ -9,7 +9,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Ev<'a> {
+pub(crate) struct EventDefinitionKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -23,10 +23,15 @@ pub(crate) struct Ev<'a> {
 	pub ev: Cow<'a, str>,
 }
 
-impl_kv_key_storekey!(Ev<'_> => EventDefinition);
+impl_kv_key_storekey!(EventDefinitionKey<'_> => EventDefinition);
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, ev: &'a str) -> Ev<'a> {
-	Ev::new(ns, db, tb, ev)
+pub fn new<'a>(
+	ns: NamespaceId,
+	db: DatabaseId,
+	tb: &'a str,
+	ev: &'a str,
+) -> EventDefinitionKey<'a> {
+	EventDefinitionKey::new(ns, db, tb, ev)
 }
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
@@ -41,13 +46,13 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Ev<'_> {
+impl Categorise for EventDefinitionKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::TableEvent
 	}
 }
 
-impl<'a> Ev<'a> {
+impl<'a> EventDefinitionKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ev: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -72,13 +77,13 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Ev::new(
+		let val = EventDefinitionKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
 			"testev",
 		);
-		let enc = Ev::encode_key(&val).unwrap();
+		let enc = EventDefinitionKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!evtestev\0");
 	}
 

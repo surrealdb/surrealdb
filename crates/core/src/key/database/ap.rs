@@ -9,7 +9,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Ap<'a> {
+pub(crate) struct ApiDefinitionKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -21,10 +21,10 @@ pub(crate) struct Ap<'a> {
 	pub ap: Cow<'a, str>,
 }
 
-impl_kv_key_storekey!(Ap<'_> => ApiDefinition);
+impl_kv_key_storekey!(ApiDefinitionKey<'_> => ApiDefinition);
 
-pub fn new(ns: NamespaceId, db: DatabaseId, ap: &str) -> Ap<'_> {
-	Ap::new(ns, db, ap)
+pub fn new(ns: NamespaceId, db: DatabaseId, ap: &str) -> ApiDefinitionKey<'_> {
+	ApiDefinitionKey::new(ns, db, ap)
 }
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
@@ -39,13 +39,13 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Ap<'_> {
+impl Categorise for ApiDefinitionKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseApi
 	}
 }
 
-impl<'a> Ap<'a> {
+impl<'a> ApiDefinitionKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, ap: &'a str) -> Self {
 		Self {
 			__: b'/', // /
@@ -68,12 +68,12 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-            let val = Ap::new(
+            let val = ApiDefinitionKey::new(
             NamespaceId(1),
             DatabaseId(2),
             "test",
         );
-		let enc = Ap::encode_key(&val).unwrap();
+		let enc = ApiDefinitionKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!aptest\0");
 	}
 

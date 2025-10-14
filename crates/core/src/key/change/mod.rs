@@ -12,7 +12,7 @@ use crate::vs::VersionStamp;
 
 // Cf stands for change feeds
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Cf<'a> {
+pub(crate) struct ChangeFeedKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -24,18 +24,18 @@ pub(crate) struct Cf<'a> {
 	_c: u8,
 	pub tb: Cow<'a, str>,
 }
-impl_kv_key_storekey!(Cf<'_> => TableMutations);
+impl_kv_key_storekey!(ChangeFeedKey<'_> => TableMutations);
 
-impl Categorise for Cf<'_> {
+impl Categorise for ChangeFeedKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::ChangeFeed
 	}
 }
 
-impl<'a> Cf<'a> {
+impl<'a> ChangeFeedKey<'a> {
 	#[cfg(test)]
 	pub fn new(ns: NamespaceId, db: DatabaseId, vs: VersionStamp, tb: &'a str) -> Self {
-		Cf {
+		ChangeFeedKey {
 			__: b'/',
 			_a: b'*',
 			ns,
@@ -48,7 +48,7 @@ impl<'a> Cf<'a> {
 		}
 	}
 
-	pub fn decode_key(k: &[u8]) -> Result<Cf<'_>> {
+	pub fn decode_key(k: &[u8]) -> Result<ChangeFeedKey<'_>> {
 		Ok(storekey::decode_borrow(k)?)
 	}
 }
@@ -159,22 +159,22 @@ mod tests {
 
 	#[test]
 	fn cf_key() {
-		let val = Cf::new(
+		let val = ChangeFeedKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			VersionStamp::try_from_u128(12345).unwrap(),
 			"test",
 		);
-		let enc = Cf::encode_key(&val).unwrap();
+		let enc = ChangeFeedKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02#\x00\x00\x00\x00\x00\x00\x00\x00\x30\x39*test\x00");
 
-		let val = Cf::new(
+		let val = ChangeFeedKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			VersionStamp::try_from_u128(12346).unwrap(),
 			"test",
 		);
-		let enc = Cf::encode_key(&val).unwrap();
+		let enc = ChangeFeedKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02#\x00\x00\x00\x00\x00\x00\x00\x00\x30\x3a*test\x00");
 	}
 

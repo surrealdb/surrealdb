@@ -9,7 +9,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Ft<'a> {
+pub(crate) struct ForeignTableKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -23,10 +23,10 @@ pub(crate) struct Ft<'a> {
 	pub ft: Cow<'a, str>,
 }
 
-impl_kv_key_storekey!(Ft<'_> => TableDefinition);
+impl_kv_key_storekey!(ForeignTableKey<'_> => TableDefinition);
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, ft: &'a str) -> Ft<'a> {
-	Ft::new(ns, db, tb, ft)
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, ft: &'a str) -> ForeignTableKey<'a> {
+	ForeignTableKey::new(ns, db, tb, ft)
 }
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
@@ -41,13 +41,13 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Ft<'_> {
+impl Categorise for ForeignTableKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::TableView
 	}
 }
 
-impl<'a> Ft<'a> {
+impl<'a> ForeignTableKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ft: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -72,13 +72,13 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Ft::new(
+		let val = ForeignTableKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
 			"testft",
 		);
-		let enc = Ft::encode_key(&val).unwrap();
+		let enc = ForeignTableKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0!fttestft\0");
 	}
 

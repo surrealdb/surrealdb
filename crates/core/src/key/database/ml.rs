@@ -9,7 +9,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Ml<'a> {
+pub(crate) struct MlModelDefinitionKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -22,10 +22,15 @@ pub(crate) struct Ml<'a> {
 	pub vn: Cow<'a, str>,
 }
 
-impl_kv_key_storekey!(Ml<'_> => MlModelDefinition);
+impl_kv_key_storekey!(MlModelDefinitionKey<'_> => MlModelDefinition);
 
-pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ml: &'a str, vn: &'a str) -> Ml<'a> {
-	Ml::new(ns, db, ml, vn)
+pub fn new<'a>(
+	ns: NamespaceId,
+	db: DatabaseId,
+	ml: &'a str,
+	vn: &'a str,
+) -> MlModelDefinitionKey<'a> {
+	MlModelDefinitionKey::new(ns, db, ml, vn)
 }
 
 pub fn prefix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
@@ -40,13 +45,13 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Ml<'_> {
+impl Categorise for MlModelDefinitionKey<'_> {
 	fn categorise(&self) -> Category {
 		Category::DatabaseModel
 	}
 }
 
-impl<'a> Ml<'a> {
+impl<'a> MlModelDefinitionKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, ml: &'a str, vn: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -70,13 +75,13 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Ml::new(
+		let val = MlModelDefinitionKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testml",
 			"1.0.0",
 		);
-		let enc = Ml::encode_key(&val).unwrap();
+		let enc = MlModelDefinitionKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!mltestml\x001.0.0\0");
 	}
 
