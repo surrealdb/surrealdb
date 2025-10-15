@@ -171,7 +171,10 @@ impl Display for DefineIndexStatement {
 		if self.overwrite {
 			write!(f, " OVERWRITE")?
 		}
-		write!(f, " {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
+		write!(f, " {} ON {}", self.name, self.what)?;
+		if !self.cols.is_empty() {
+			write!(f, "FIELDS {}", self.cols)?;
+		}
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
 		}

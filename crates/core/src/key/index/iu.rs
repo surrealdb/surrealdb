@@ -178,7 +178,7 @@ mod tests {
 			65535,
 		);
 		let enc = IndexCountKey::encode(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!iu\x03\0\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\x0f\x0e\x0d\x0c\x0b\x0a\x09\x08\x07\x06\x05\x04\x03\x02\x01\0\x03\0\0\0\0\0\0\xff\xff", "key");
+		assert_eq!(enc, b"/*testns\0*testdb\0*testtb\0+testix\0!iu\x01\0\0\0\0\0\0\0\x10\0\x01\x02\x03\x04\x05\x06\x07\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f\0\0\0\0\0\0\0\x10\x0f\x0e\x0d\x0c\x0b\x0a\x09\x08\x07\x06\x05\x04\x03\x02\x01\0\x01\0\0\0\0\0\0\xff\xff", "key");
 	}
 
 	#[test]
@@ -186,7 +186,7 @@ mod tests {
 		let val = IndexCountKey::new("testns", "testdb", "testtb", "testix", None, true, 65535);
 		let enc = IndexCountKey::encode(&val).unwrap();
 		assert_eq!(
-			enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!iu\x02\x03\0\0\0\0\0\0\xff\xff",
+			enc, b"/*testns\0*testdb\0*testtb\0+testix\0!iu\x00\x01\0\0\0\0\0\0\xff\xff",
 			"compacted key"
 		);
 	}
@@ -194,10 +194,7 @@ mod tests {
 	#[test]
 	fn range() {
 		let r = IndexCountKey::range("testns", "testdb", "testtb", "testix").unwrap();
-		assert_eq!(
-			r.start, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!iu\0",
-			"start"
-		);
-		assert_eq!(r.end, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!iu\xff", "end");
+		assert_eq!(r.start, b"/*testns\0*testdb\0*testtb\0+testix\0!iu\0", "start");
+		assert_eq!(r.end, b"/*testns\0*testdb\0*testtb\0+testix\0!iu\xff", "end");
 	}
 }

@@ -4,17 +4,11 @@
 [[test.results]]
 value = "NONE"
 
-[[_test.results]]
-value = "NONE"
-
 [[test.results]]
 value = "{ events: {  }, fields: {  }, indexes: { idx: 'DEFINE INDEX idx ON t COUNT' }, lives: {  }, tables: {  } }"
 
 [[test.results]]
-value = "{ building: { initial: 0, pending: 0, status: 'ready', updated: 0 } }"
-
-[[_test.results]]
-value = "{ building: { initial: 0, pending: 0, status: 'ready', updated: 0 } }"
+value = "{ building: { status: 'ready' } }"
 
 [[test.results]]
 value = "'OK'"
@@ -52,11 +46,11 @@ value = "[{ count: 2 }]"
 [[test.results]]
 value = "None"
 
-[[_test.results]]
+[[test.results]]
 value = "None"
 
 [[test.results]]
-value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
+value = "{ building: { status: 'ready' } }"
 
 [[_test.results]]
 value = "{}"
@@ -69,10 +63,8 @@ value = "[{ count: 2 }]"
 
 */
 DEFINE INDEX idx ON t COUNT;
-//DEFINE INDEX idxw ON t COUNT WHERE b = true;
 INFO FOR TB t;
 INFO FOR INDEX idx ON t;
-//INFO FOR INDEX idxw ON t;
 BEGIN;
     CREATE t:1 SET b = true;
     CREATE t:2 SET b = true;
@@ -82,21 +74,12 @@ BEGIN;
 COMMIT;
 
 SELECT count() FROM t GROUP ALL EXPLAIN;
-// SELECT count() FROM t WHERE b = true GROUP ALL EXPLAIN;
 SELECT count() FROM t GROUP ALL;
-// SELECT count() FROM t WHERE b = true GROUP ALL;
-
-// UPDATE t:3 SET b = true;
-// SELECT count() FROM t GROUP ALL;
-// SELECT count() FROM t WHERE b = true GROUP ALL;
 
 DELETE t:2;
 SELECT count() FROM t GROUP ALL;
-// SELECT count() FROM t WHERE b = true GROUP ALL;
 
-REBUILD INDEX idx ON t;
-// REBUILD INDEX idxw ON t;
+REMOVE INDEX idx ON t;
+DEFINE INDEX idx ON t COUNT;
 INFO FOR INDEX idx ON t;
-// INFO FOR INDEX idxw ON t;
 SELECT count() FROM t GROUP ALL;
-// SELECT count() FROM t WHERE b = true GROUP ALL;

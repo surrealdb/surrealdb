@@ -111,6 +111,6 @@ mod tests {
 		#[rustfmt::skip]
 		let val = IndexCompactionKey::new(Cow::Borrowed("testns"), Cow::Borrowed("testdb"), Cow::Borrowed("testtb"), Cow::Borrowed("testix"), Uuid::from_u128(1), Uuid::from_u128(2));
 		let enc = IndexCompactionKey::encode(&val).unwrap();
-		assert_eq!(enc, b"/!ic\x00\x00\x00\x01\x00\x00\x00\x02testtb\0\0\0\0\x03\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
+		assert_eq!(enc, b"/!ictestns\0testdb\0testtb\0testix\0\0\0\0\0\0\0\0\x10\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\x10\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
 	}
 }
