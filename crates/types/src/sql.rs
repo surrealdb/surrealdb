@@ -44,7 +44,8 @@ pub trait ToSql {
 macro_rules! write_sql {
 	($f:expr, $($tt:tt)*) => {{
 		use std::fmt::Write;
-		write!($f, $($tt)*).expect("Write cannot fail when writing to a String")
+		let __f: &mut String = $f;
+		write!(__f, $($tt)*).expect("Write cannot fail when writing to a String")
 	}}
 }
 

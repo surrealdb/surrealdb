@@ -63,7 +63,8 @@ impl fmt::Display for EscapeSqonIdent<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let s = self.0;
 		// Not a keyword, any non 'normal' characters or does it start with a digit?
-		if s.starts_with(|x: char| x.is_ascii_digit())
+		if s.is_empty()
+			|| s.starts_with(|x: char| x.is_ascii_digit())
 			|| s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
 		{
 			return f.write_fmt(format_args!("`{}`", Escape::escape_str(s, '`')));
@@ -93,7 +94,8 @@ impl fmt::Display for EscapeRid<'_> {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		let s = self.0;
 		// Any non 'normal' characters or are all character digits?
-		if s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
+		if s.is_empty()
+			|| s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
 			|| !s.contains(|x: char| !x.is_ascii_digit() && x != '_')
 		{
 			// Always use brackets for display (not backticks)

@@ -8,7 +8,7 @@ pub use geometry::*;
 pub use literal::*;
 use serde::{Deserialize, Serialize};
 
-use crate::utils::display::join_displayable;
+use crate::utils::display::format_seperated;
 
 /// The kind of a SurrealDB value.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -137,24 +137,24 @@ impl Display for Kind {
 				if tables.is_empty() {
 					write!(f, "table")
 				} else {
-					write!(f, "table<{}>", join_displayable(tables, " | "))
+					write!(f, "table<{}>", format_seperated(tables, " | "))
 				}
 			}
 			Kind::Record(table) => {
 				if table.is_empty() {
 					write!(f, "record")
 				} else {
-					write!(f, "record<{}>", join_displayable(table, " | "))
+					write!(f, "record<{}>", format_seperated(table, " | "))
 				}
 			}
 			Kind::Geometry(kinds) => {
 				if kinds.is_empty() {
 					write!(f, "geometry")
 				} else {
-					write!(f, "geometry<{}>", join_displayable(kinds, " | "))
+					write!(f, "geometry<{}>", format_seperated(kinds, " | "))
 				}
 			}
-			Kind::Either(kinds) => write!(f, "{}", join_displayable(kinds, " | ")),
+			Kind::Either(kinds) => write!(f, "{}", format_seperated(kinds, " | ")),
 			Kind::Set(kind, max) => match max {
 				Some(max) => write!(f, "set<{}, {}>", kind, max),
 				None => write!(f, "set<{}>", kind),
@@ -170,7 +170,7 @@ impl Display for Kind {
 				if bucket.is_empty() {
 					write!(f, "file")
 				} else {
-					write!(f, "file<{}>", join_displayable(bucket, " | "))
+					write!(f, "file<{}>", format_seperated(bucket, " | "))
 				}
 			}
 		}
