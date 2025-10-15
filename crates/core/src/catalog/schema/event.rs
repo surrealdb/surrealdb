@@ -7,10 +7,11 @@ use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::DefineKind;
 use crate::val::Value;
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[non_exhaustive]
 pub struct EventDefinition {
+	pub(crate) is_async: bool,
 	pub(crate) name: String,
 	pub(crate) target_table: String,
 	pub(crate) when: Expr,
@@ -24,6 +25,7 @@ impl EventDefinition {
 	pub fn to_sql_definition(&self) -> crate::sql::DefineEventStatement {
 		crate::sql::DefineEventStatement {
 			kind: DefineKind::Default,
+			is_async: self.is_async,
 			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
 			target_table: crate::sql::Expr::Idiom(crate::sql::Idiom::field(
 				self.target_table.clone(),

@@ -21,6 +21,7 @@ use crate::val::Value;
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineEventStatement {
 	pub kind: DefineKind,
+	pub is_async: bool,
 	pub name: Expr,
 	pub target_table: Expr,
 	pub when: Expr,
@@ -88,6 +89,7 @@ impl DefineEventStatement {
 		txn.set(
 			&key,
 			&EventDefinition {
+				is_async: self.is_async,
 				name: name.clone(),
 				target_table: target_table.clone(),
 				when: self.when.clone(),
@@ -124,6 +126,9 @@ impl Display for DefineEventStatement {
 			DefineKind::Default => {}
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+		}
+		if self.is_async {
+			write!(f, " ASYNC")?;
 		}
 		write!(
 			f,

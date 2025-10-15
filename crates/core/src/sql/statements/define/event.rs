@@ -8,6 +8,7 @@ use crate::sql::Expr;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct DefineEventStatement {
 	pub kind: DefineKind,
+	pub is_async: bool,
 	pub name: Expr,
 	pub target_table: Expr,
 	pub when: Expr,
@@ -22,6 +23,9 @@ impl Display for DefineEventStatement {
 			DefineKind::Default => {}
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+		}
+		if self.is_async {
+			write!(f, " ASYNC")?;
 		}
 		write!(
 			f,
@@ -42,6 +46,7 @@ impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatemen
 	fn from(v: DefineEventStatement) -> Self {
 		crate::expr::statements::DefineEventStatement {
 			kind: v.kind.into(),
+			is_async: v.is_async,
 			name: v.name.into(),
 			target_table: v.target_table.into(),
 			when: v.when.into(),
@@ -56,6 +61,7 @@ impl From<crate::expr::statements::DefineEventStatement> for DefineEventStatemen
 	fn from(v: crate::expr::statements::DefineEventStatement) -> Self {
 		DefineEventStatement {
 			kind: v.kind.into(),
+			is_async: v.is_async,
 			name: v.name.into(),
 			target_table: v.target_table.into(),
 			when: v.when.into(),

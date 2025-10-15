@@ -787,6 +787,8 @@ impl Parser<'_> {
 			DefineKind::Default
 		};
 
+		let is_async = self.eat(t!("ASYNC"));
+
 		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
@@ -794,6 +796,7 @@ impl Parser<'_> {
 
 		let mut res = DefineEventStatement {
 			kind,
+			is_async,
 			name,
 			target_table: what,
 			when: Expr::Literal(Literal::Bool(true)),
