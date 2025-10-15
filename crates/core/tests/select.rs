@@ -526,7 +526,7 @@ async fn select_where_field_is_bool() -> Result<()> {
 }
 
 #[tokio::test]
-async fn select_where_field_is_thing_and_with_index() -> Result<()> {
+async fn select_where_field_is_record_and_with_index() -> Result<()> {
 	let sql = "
 		CREATE person:tobie SET name = 'Tobie';
 		DEFINE INDEX author ON TABLE post COLUMNS author;

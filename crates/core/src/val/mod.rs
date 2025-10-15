@@ -808,7 +808,7 @@ subtypes! {
 	Object(Object) => (is_object,as_object,into_object),
 	Geometry(Geometry) => (is_geometry,as_geometry,into_geometry),
 	Bytes(Bytes) => (is_bytes,as_bytes,into_bytes),
-	RecordId(RecordId) => (is_thing,as_thing,into_thing),
+	RecordId(RecordId) => (is_record,as_record,into_record),
 	Regex(Regex) => (is_regex,as_regex,into_regex),
 	Range(Box<Range>) => (is_range,as_range,into_range),
 	Closure(Box<Closure>) => (is_closure,as_closure,into_closure),
