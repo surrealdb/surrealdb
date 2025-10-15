@@ -173,7 +173,7 @@ impl Display for DefineIndexStatement {
 		}
 		write!(f, " {} ON {}", self.name, self.what)?;
 		if !self.cols.is_empty() {
-			write!(f, "FIELDS {}", self.cols)?;
+			write!(f, " FIELDS {}", self.cols)?;
 		}
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
