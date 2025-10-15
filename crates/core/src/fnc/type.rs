@@ -272,7 +272,7 @@ pub mod is {
 	pub fn record((arg, Optional(table)): (Value, Optional<String>)) -> Result<Value> {
 		let res = match table {
 			Some(tb) => arg.is_record_type(&[tb]).into(),
-			None => arg.is_thing().into(),
+			None => arg.is_record().into(),
 		};
 		Ok(res)
 	}

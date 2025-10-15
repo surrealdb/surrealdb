@@ -224,7 +224,7 @@ pub async fn process_tbs(
                         .0
                         .into_iter()
                         .map(|v| {
-                            v.try_as_thing().map(|t| {
+                            v.try_as_record().map(|t| {
                                 let erased: ErasedRecord = (gtx.clone(), t);
                                 field_val_erase_owned(erased)
                             })
