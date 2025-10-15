@@ -1,9 +1,10 @@
 use anyhow::Result;
-use reblessive::tree::Stk;
+use reblessive::tree::{Stk, TreeStack};
 
+use crate::catalog::EventDefinition;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Statement};
-use crate::doc::Document;
+use crate::doc::{CursorDoc, Document};
 use crate::expr::FlowResultExt as _;
 use crate::val::Value;
 
@@ -50,6 +51,14 @@ impl Document {
 				&mut self.current
 			};
 			// Configure the context
+			#[cfg(not(target_family = "wasm"))]
+			let mut ctx = if ev.is_async {
+				// Only available in non-wasm environments
+				MutableContext::new_concurrent(ctx)
+			} else {
+				MutableContext::new(ctx)
+			};
+			#[cfg(target_family = "wasm")]
 			let mut ctx = MutableContext::new(ctx);
 			ctx.add_value("event", evt.into());
 			ctx.add_value("value", doc.doc.as_arc());
@@ -59,24 +68,51 @@ impl Document {
 			// Freeze the context
 			let ctx = ctx.freeze();
 			// Process conditional clause
-			let val = stk
-				.run(|stk| ev.when.compute(stk, &ctx, opt, Some(doc)))
-				.await
-				.catch_return()
-				.map_err(|e| anyhow::anyhow!("Error while processing event {}: {}", ev.name, e))?;
-			// Execute event if value is truthy
-			if val.is_truthy() {
-				for v in ev.then.iter() {
-					stk.run(|stk| v.compute(stk, &ctx, opt, Some(&*doc)))
-						.await
-						.catch_return()
-						.map_err(|e| {
-							anyhow::anyhow!("Error while processing event {}: {}", ev.name, e)
-						})?;
-				}
+			#[cfg(not(target_family = "wasm"))]
+			if ev.is_async {
+				let ev = ev.clone();
+				let opt = opt.clone();
+				let doc = doc.clone();
+				tokio::spawn(async move {
+					let mut stack = TreeStack::new();
+					stack.enter(|stk| process_event(stk, &ev, ctx, &opt, &doc)).finish().await
+				});
+			} else {
+				process_event(stk, &ev, ctx, opt, doc).await?;
+			}
+			#[cfg(target_family = "wasm")]
+			{
+				warn!(
+					"ASYNC events are not supported in WASM, they will run synchronously like non-async events"
+				);
+				process_event(stk, &ev, ctx, opt, doc).await?;
 			}
 		}
 		// Carry on
 		Ok(())
 	}
+}
+
+async fn process_event(
+	stk: &mut Stk,
+	ev: &EventDefinition,
+	ctx: Context,
+	opt: &Options,
+	doc: &CursorDoc,
+) -> Result<()> {
+	let val = stk
+		.run(|stk| ev.when.compute(stk, &ctx, opt, Some(doc)))
+		.await
+		.catch_return()
+		.map_err(|e| anyhow::anyhow!("Error while processing event {}: {}", ev.name, e))?;
+	// Execute event if value is truthy
+	if val.is_truthy() {
+		for v in ev.then.iter() {
+			stk.run(|stk| v.compute(stk, &ctx, opt, Some(&*doc)))
+				.await
+				.catch_return()
+				.map_err(|e| anyhow::anyhow!("Error while processing event {}: {}", ev.name, e))?;
+		}
+	}
+	Ok(())
 }
