@@ -7,6 +7,67 @@ use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::syn::token::{TokenKind, t};
 
 impl Parser<'_> {
+	pub(crate) async fn parse_function_name(&mut self) -> ParseResult<Function> {
+		let start = self.peek();
+		let mut last_span = start.span;
+		
+		macro_rules! advance {
+			() => {{
+				let peek = self.peek();
+				if !Self::kind_is_identifier(peek.kind) {
+					unexpected!(self, peek, "an identifier")
+				}
+				self.pop_peek();
+				last_span = self.last_span();
+			}}
+		}
+
+		macro_rules! complete {
+			() => { self.lexer.span_str(start.span.covers(last_span)).to_string() }
+		}
+
+		let fnc = match start.kind {
+			t!("fn") => {
+				self.pop_peek();
+				expected!(self, t!("::"));
+				advance!();
+				while self.eat(t!("::")) {
+					advance!();
+				}
+				
+				Function::Custom(complete!())
+			}
+			t!("ml") => {
+				self.pop_peek();
+				expected!(self, t!("::"));
+				advance!();
+				while self.eat(t!("::")) {
+					advance!();
+				}
+
+				let name = complete!();
+				let (major, minor, patch) = self.parse_model_version()?;
+				let version = format!("{}.{}.{}", major, minor, patch);
+				
+				Function::Model(Model {
+					name,
+					version,
+				})
+			}
+			TokenKind::Identifier => {
+				self.pop_peek();
+				while self.eat(t!("::")) {
+					advance!();
+				}
+
+				Function::Normal(complete!())
+			}
+			_ => unexpected!(self, self.peek(), "a function name"),
+		};
+
+		Ok(fnc)
+	}
+
 	/// Parse a custom function function call
 	///
 	/// Expects `fn` to already be called.
@@ -48,16 +109,7 @@ impl Parser<'_> {
 		Ok(args)
 	}
 
-	/// Parse a model invocation
-	///
-	/// Expects `ml` to already be called.
-	pub(super) async fn parse_model(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {
-		expected!(self, t!("::"));
-		let mut name = self.parse_ident()?;
-		while self.eat(t!("::")) {
-			name.push_str("::");
-			name.push_str(&self.parse_ident()?)
-		}
+	pub(super) fn parse_model_version(&mut self) -> ParseResult<(u32, u32, u32)> {
 		let start = expected!(self, t!("<")).span;
 
 		let token = self.next();
@@ -92,6 +144,22 @@ impl Parser<'_> {
 			};
 
 		self.expect_closing_delimiter(t!(">"), start)?;
+
+		Ok((major, minor, patch))
+	}
+
+	/// Parse a model invocation
+	///
+	/// Expects `ml` to already be called.
+	pub(super) async fn parse_model(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {
+		expected!(self, t!("::"));
+		let mut name = self.parse_ident()?;
+		while self.eat(t!("::")) {
+			name.push_str("::");
+			name.push_str(&self.parse_ident()?)
+		}
+	
+		let (major, minor, patch) = self.parse_model_version()?;
 
 		let start = expected!(self, t!("(")).span;
 		let mut args = Vec::new();

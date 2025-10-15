@@ -1,4 +1,6 @@
 use async_trait::async_trait;
+use crate::expr::{Expr, FlowResultExt, FunctionCall};
+use crate::val::convert_value_to_public_value;
 use crate::syn;
 use crate::ctx::Context;
 use crate::doc::CursorDoc;
@@ -14,38 +16,52 @@ pub struct Host<'a> {
     stk: &'a mut Stk,
     ctx: &'a Context,
     opt: &'a Options,
-    doc: &'a Option<CursorDoc>,
+    doc: Option<&'a CursorDoc>,
 }
 
 #[async_trait(?Send)]
 impl<'a> InvocationContext for Host<'a> {
-    async fn sql(&self, config: &SurrealismConfig, query: String, vars: PublicObject) -> Result<PublicValue> {
-        let expr = syn::expr(&query)?;
+    async fn sql(&mut self, _config: &SurrealismConfig, query: String, _vars: PublicObject) -> Result<PublicValue> {
+        let expr: Expr = syn::expr(&query)?.into();
+        let res = expr
+            .compute(self.stk, self.ctx, self.opt, self.doc)
+            .await
+            .catch_return()?;
 
-        todo!()
+        convert_value_to_public_value(res)
     }
 
-    async fn run(&self, config: &SurrealismConfig, fnc: String, version: Option<String>, args: Vec<PublicValue>) -> Result<PublicValue> {
-        todo!()
+    async fn run(&mut self, _config: &SurrealismConfig, fnc: String, _version: Option<String>, _args: Vec<PublicValue>) -> Result<PublicValue> {
+        let expr = Expr::FunctionCall(Box::new(FunctionCall {
+            receiver: syn::function(&fnc)?.into(),
+            arguments: _args.into_iter().map(Expr::from_public_value).collect(),
+        }));
+        
+        let res = expr
+            .compute(self.stk, self.ctx, self.opt, self.doc)
+            .await
+            .catch_return()?;
+
+        convert_value_to_public_value(res)
     }
 
-    fn kv(&self) -> &dyn KVStore {
+    fn kv(&mut self) -> &dyn KVStore {
         todo!()
     }
     
-    async fn ml_invoke_model(&self, config: &SurrealismConfig, model: String, input: PublicValue, weight: i64, weight_dir: String) -> Result<PublicValue> {
+    async fn ml_invoke_model(&mut self, _config: &SurrealismConfig, _model: String, _input: PublicValue, _weight: i64, _weight_dir: String) -> Result<PublicValue> {
         todo!()
     }
 
-    async fn ml_tokenize(&self, config: &SurrealismConfig, model: String, input: PublicValue) -> Result<Vec<f64>> {
+    async fn ml_tokenize(&mut self, _config: &SurrealismConfig, _model: String, _input: PublicValue) -> Result<Vec<f64>> {
         todo!()
     }
 
-    fn stdout(&self, output: &str) -> Result<()> {
+    fn stdout(&mut self, _output: &str) -> Result<()> {
         todo!()
     }
 
-    fn stderr(&self, output: &str) -> Result<()> {
+    fn stderr(&mut self, _output: &str) -> Result<()> {
         todo!()
     }
 }

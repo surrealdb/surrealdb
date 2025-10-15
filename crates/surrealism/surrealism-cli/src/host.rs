@@ -21,20 +21,20 @@ pub struct DemoHost {
 }
 
 impl DemoHost {
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self {
+    pub fn new() -> Self {
+        Self {
             kv: BTreeMapStore::new(),
-        })
+        }
     }
 }
 
 #[async_trait(?Send)]
 impl InvocationContext for DemoHost {
-    fn kv(&self) -> &dyn KVStore {
+    fn kv(&mut self) -> &dyn KVStore {
         &self.kv
     }
 
-    async fn sql(&self, _config: &SurrealismConfig, query: String, vars: surrealdb_types::Object) -> Result<surrealdb_types::Value> {
+    async fn sql(&mut self, _config: &SurrealismConfig, query: String, vars: surrealdb_types::Object) -> Result<surrealdb_types::Value> {
         println!("The module is running a SQL query:");
         println!("SQL: {query}");
         println!("Vars: {:#}", vars.to_sql());
@@ -55,7 +55,7 @@ impl InvocationContext for DemoHost {
     }
 
     async fn run(
-        &self,
+        &mut self,
         _config: &SurrealismConfig,
         fnc: String,
         version: Option<String>,
@@ -88,7 +88,7 @@ impl InvocationContext for DemoHost {
 
     // "google/gemma-7b"
     async fn ml_invoke_model(
-        &self,
+        &mut self,
         _config: &SurrealismConfig,
         model: String,
         input: surrealdb_types::Value,
@@ -121,7 +121,7 @@ impl InvocationContext for DemoHost {
             .into_value())
     }
 
-    async fn ml_tokenize(&self, _config: &SurrealismConfig, model: String, input: surrealdb_types::Value) -> Result<Vec<f64>> {
+    async fn ml_tokenize(&mut self, _config: &SurrealismConfig, model: String, input: surrealdb_types::Value) -> Result<Vec<f64>> {
         println!("The module is running a ML tokenizer:");
         println!("Model: {model}");
         println!("Input: {:}", input.to_sql());
@@ -155,12 +155,12 @@ impl InvocationContext for DemoHost {
         }
     }
 
-    fn stdout(&self, output: &str) -> Result<()> {
+    fn stdout(&mut self, output: &str) -> Result<()> {
         println!("[surli::out] {}", output);
         Ok(())
     }
 
-    fn stderr(&self, output: &str) -> Result<()> {
+    fn stderr(&mut self, output: &str) -> Result<()> {
         eprintln!("[surli::err] {}", output);
         Ok(())
     }

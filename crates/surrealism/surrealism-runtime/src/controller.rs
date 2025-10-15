@@ -43,8 +43,10 @@ use wasmtime_wasi::preview1::{self, WasiP1Ctx};
 use std::sync::Arc;
 
 /// Wrapper for context reference that's Send (safe because WASM is single-threaded)
-/// Uses Option to avoid trait object pointer issues
-pub(crate) struct ContextRef(Option<*const dyn InvocationContext>);
+/// Stores a mutable pointer since all InvocationContext methods require &mut self.
+/// SAFETY: Only one WASM execution happens at a time (single-threaded), and lifetime
+/// is guaranteed by with_context() which clears the pointer before returning.
+pub(crate) struct ContextRef(Option<*mut dyn InvocationContext>);
 unsafe impl Send for ContextRef {}
 
 impl ContextRef {
@@ -56,13 +58,21 @@ impl ContextRef {
         self.0.is_none()
     }
     
-    pub(crate) fn set(&mut self, ctx: &dyn InvocationContext) {
-        // SAFETY: Caller (with_context) guarantees lifetime validity
-        self.0 = Some(unsafe { std::mem::transmute(ctx as *const dyn InvocationContext) });
+    pub(crate) fn set(&mut self, ctx: &mut dyn InvocationContext) {
+        // SAFETY: Caller (with_context) guarantees lifetime validity and exclusive access.
+        // The pointer is cleared before with_context returns.
+        // We explicitly cast through a raw pointer to erase the lifetime.
+        self.0 = Some(unsafe { 
+            std::mem::transmute::<*mut dyn InvocationContext, *mut dyn InvocationContext>(
+                ctx as *mut dyn InvocationContext
+            )
+        });
     }
     
-    pub(crate) fn get(&self) -> Option<&dyn InvocationContext> {
-        self.0.map(|ptr| unsafe { &*ptr })
+    pub(crate) fn get_mut(&mut self) -> Option<&mut dyn InvocationContext> {
+        // SAFETY: Pointer is only valid during WASM execution within with_context scope.
+        // Single-threaded execution guarantees no aliasing.
+        self.0.map(|ptr| unsafe { &mut *ptr })
     }
 }
 
@@ -150,7 +160,7 @@ impl Controller {
     
     /// Execute a function with the given invocation context.
     /// SAFETY: Context must outlive the call. Panics if context is already set.
-    pub fn with_context<R>(&mut self, context: &dyn InvocationContext, f: impl FnOnce(&mut Self) -> Result<R>) -> Result<R> {
+    pub fn with_context<R>(&mut self, context: &mut dyn InvocationContext, f: impl FnOnce(&mut Self) -> Result<R>) -> Result<R> {
         assert!(self.store.data().context.is_none(), "Context already set - re-entrant calls not supported");
         
         // Set context

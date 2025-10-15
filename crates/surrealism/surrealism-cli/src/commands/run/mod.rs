@@ -16,13 +16,13 @@ impl SurrealismCommand for RunCommand {
         let package = SurrealismPackage::from_file(self.file)?;
 
         // Load the WASM module
-        let host = DemoHost::new();
+        let mut host = DemoHost::new();
         let mut controller = surrealism_runtime::controller::Controller::new(package)
             .prefix_err(|| "Failed to load WASM module")?;
         controller.init()?;
 
         // Invoke the function with the provided arguments
-        let result = controller.with_context(&*host, |ctrl| {
+        let result = controller.with_context(&mut host, |ctrl| {
             ctrl.invoke(self.fnc, self.args)
         });
         
