@@ -107,6 +107,14 @@ pub(super) struct TransactionFactory {
 
 impl TransactionFactory {
 	#[allow(unreachable_code)]
+	pub(super) fn new(clock: Arc<SizedClock>, flavor: DatastoreFlavor) -> Self {
+		Self {
+			clock,
+			flavor: Arc::new(flavor),
+		}
+	}
+
+	#[allow(unreachable_code)]
 	pub async fn transaction(
 		&self,
 		write: TransactionType,

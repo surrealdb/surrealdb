@@ -1,5 +1,3 @@
-#![cfg(not(target_family = "wasm"))]
-
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;

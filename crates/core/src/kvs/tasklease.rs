@@ -291,7 +291,7 @@ mod tests {
 		// Create a fake clock for deterministic testing
 		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 		// Create a transaction factory with the specified datastore flavor
-		let tf = TransactionFactory::new(clock, Box::new(flavor));
+		let tf = TransactionFactory::new(clock, flavor);
 		// Set test to run for 3 seconds
 		let test_duration = Duration::from_secs(3);
 		// Set each lease to be valid for 1 second
@@ -376,7 +376,7 @@ mod tests {
 		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 		// Create an in-memory datastore
 		let flavor = crate::kvs::mem::Datastore::new().await.map(DatastoreFlavor::Mem).unwrap();
-		let tf = TransactionFactory::new(clock, Box::new(flavor));
+		let tf = TransactionFactory::new(clock, flavor);
 
 		// Set lease duration to 10 minutes
 		let lease_duration = Duration::from_secs(600); // 10 minutes
