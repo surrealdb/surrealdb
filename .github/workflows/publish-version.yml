@@ -266,6 +266,7 @@ jobs:
       git-ref: ${{ inputs.git-ref }}
       publish: ${{ inputs.publish }}
       nightly-release: ${{ inputs.nightly-release }}
+    secrets: inherit
 
   publish:
     name: Publish binaries
