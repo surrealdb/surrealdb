@@ -23,6 +23,8 @@ pub trait RpcContext {
 	fn set_session(&self, id: Option<Uuid>, session: Arc<Session>);
 	/// Deletes a session
 	fn del_session(&self, id: &Uuid);
+	// Lists all sessions
+	fn list_sessions(&self) -> Vec<Uuid>;
 	/// The version information for this RPC context
 	fn version_data(&self) -> DbResult;
 
@@ -34,7 +36,11 @@ pub trait RpcContext {
 	const LQ_SUPPORT: bool = false;
 
 	/// Handles the execution of a LIVE statement
-	fn handle_live(&self, _lqid: &Uuid, _session_id: Option<Uuid>) -> impl std::future::Future<Output = ()> + Send {
+	fn handle_live(
+		&self,
+		_lqid: &Uuid,
+		_session_id: Option<Uuid>,
+	) -> impl std::future::Future<Output = ()> + Send {
 		async { unimplemented!("handle_live function must be implemented if LQ_SUPPORT = true") }
 	}
 	/// Handles the execution of a KILL statement
@@ -43,7 +49,10 @@ pub trait RpcContext {
 	}
 
 	/// Handles the cleanup of live queries
-	fn cleanup_lqs(&self, session_id: Option<&Uuid>) -> impl std::future::Future<Output = ()> + Send;
+	fn cleanup_lqs(
+		&self,
+		session_id: Option<&Uuid>,
+	) -> impl std::future::Future<Output = ()> + Send;
 	fn cleanup_all_lqs(&self) -> impl std::future::Future<Output = ()> + Send;
 
 	// ------------------------------

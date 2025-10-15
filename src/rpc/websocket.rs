@@ -508,6 +508,10 @@ impl RpcContext for Websocket {
 	fn del_session(&self, id: &Uuid) {
 		self.sessions.remove(id);
 	}
+	/// Lists all sessions
+	fn list_sessions(&self) -> Vec<Uuid> {
+		self.sessions.iter().map(|x| *x.key()).collect()
+	}
 	/// The version information for this RPC context
 	fn version_data(&self) -> DbResult {
 		let value = Value::String(format!("{PKG_NAME}-{}", *PKG_VERSION));
@@ -543,7 +547,7 @@ impl RpcContext for Websocket {
 		let mut gc = Vec::new();
 		// Find all live queries for to this connection
 		self.state.live_queries.write().await.retain(|key, value| {
-			if &value.0 == &self.id && value.1.as_ref() == session_id {
+			if value.0 == self.id && value.1.as_ref() == session_id {
 				trace!("Removing live query: {key}");
 				gc.push(*key);
 				return false;
@@ -561,7 +565,7 @@ impl RpcContext for Websocket {
 		let mut gc = Vec::new();
 		// Find all live queries for to this connection
 		self.state.live_queries.write().await.retain(|key, value| {
-			if &value.0 == &self.id {
+			if value.0 == self.id {
 				trace!("Removing live query: {key}");
 				gc.push(*key);
 				return false;

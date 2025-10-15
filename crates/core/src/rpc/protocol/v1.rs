@@ -18,7 +18,7 @@ use crate::sql::{
 	InsertStatement, KillStatement, LiveStatement, Model, Output, Param, RelateStatement,
 	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
-use crate::types::{PublicArray, PublicRecordIdKey, PublicValue, PublicVariables};
+use crate::types::{PublicArray, PublicRecordIdKey, PublicUuid, PublicValue, PublicVariables};
 
 /// utility function converting a `Value::String` into a `Expr::Table`
 fn value_to_table(value: PublicValue) -> Expr {
@@ -88,8 +88,15 @@ pub trait RpcProtocolV1: RpcContext {
 			Method::Run => self.run(session, params).await,
 			Method::GraphQL => self.graphql(session, params).await,
 			Method::InsertRelation => self.insert_relation(session, params).await,
+			Method::Sessions => self.sessions().await,
 			_ => Err(RpcError::MethodNotFound),
 		}
+	}
+
+	async fn sessions(&self) -> Result<DbResult, RpcError> {
+		Ok(DbResult::Other(PublicValue::Array(
+			self.list_sessions().into_iter().map(|x| PublicValue::Uuid(PublicUuid(x))).collect(),
+		)))
 	}
 
 	// ------------------------------
@@ -1300,7 +1307,7 @@ where
 		match &response.query_type {
 			QueryType::Live => {
 				if let Ok(PublicValue::Uuid(lqid)) = &response.result {
-					this.handle_live(&lqid.0, session_id.clone()).await;
+					this.handle_live(&lqid.0, session_id).await;
 				}
 			}
 			QueryType::Kill => {

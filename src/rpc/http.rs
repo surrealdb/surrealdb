@@ -50,6 +50,10 @@ impl RpcContext for Http {
 	fn del_session(&self, _id: &Uuid) {
 		// Do nothing as HTTP is stateless
 	}
+	/// Lists all sessions
+	fn list_sessions(&self) -> Vec<Uuid> {
+		vec![]
+	}
 	/// The version information for this RPC context
 	fn version_data(&self) -> DbResult {
 		let value = Value::String(format!("{PKG_NAME}-{}", *PKG_VERSION));
