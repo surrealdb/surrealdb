@@ -134,7 +134,7 @@ impl Websocket {
 		// Log the WebSocket disconnection
 		trace!("WebSocket {id} disconnected");
 		// Cleanup the live queries for this WebSocket
-		rpc.cleanup_lqs().await;
+		rpc.cleanup_all_lqs().await;
 		// Remove this WebSocket from the list
 		state.web_sockets.write().await.remove(&id);
 		// Stop telemetry metrics for this connection
@@ -522,24 +522,46 @@ impl RpcContext for Websocket {
 	const LQ_SUPPORT: bool = true;
 
 	/// Handles the execution of a LIVE statement
-	async fn handle_live(&self, lqid: &Uuid) {
-		self.state.live_queries.write().await.insert(*lqid, self.id);
+	async fn handle_live(&self, lqid: &Uuid, session_id: Option<Uuid>) {
+		self.state.live_queries.write().await.insert(*lqid, (self.id, session_id));
 		trace!("Registered live query {lqid} on websocket {}", self.id);
 	}
 
 	/// Handles the execution of a KILL statement
 	async fn handle_kill(&self, lqid: &Uuid) {
-		if let Some(id) = self.state.live_queries.write().await.remove(lqid) {
-			trace!("Unregistered live query {lqid} on websocket {id}");
+		if let Some((id, session_id)) = self.state.live_queries.write().await.remove(lqid) {
+			if let Some(session_id) = session_id {
+				trace!("Unregistered live query {lqid} on websocket {id} for session {session_id}");
+			} else {
+				trace!("Unregistered live query {lqid} on websocket {id} for default session");
+			}
 		}
 	}
 
 	/// Handles the cleanup of live queries
-	async fn cleanup_lqs(&self) {
+	async fn cleanup_lqs(&self, session_id: Option<&Uuid>) {
 		let mut gc = Vec::new();
 		// Find all live queries for to this connection
 		self.state.live_queries.write().await.retain(|key, value| {
-			if value == &self.id {
+			if &value.0 == &self.id && value.1.as_ref() == session_id {
+				trace!("Removing live query: {key}");
+				gc.push(*key);
+				return false;
+			}
+			true
+		});
+		// Garbage collect the live queries on this connection
+		if let Err(err) = self.kvs().delete_queries(gc).await {
+			error!("Error handling RPC connection: {err}");
+		}
+	}
+
+	/// Handles the cleanup of live queries
+	async fn cleanup_all_lqs(&self) {
+		let mut gc = Vec::new();
+		// Find all live queries for to this connection
+		self.state.live_queries.write().await.retain(|key, value| {
+			if &value.0 == &self.id {
 				trace!("Removing live query: {key}");
 				gc.push(*key);
 				return false;

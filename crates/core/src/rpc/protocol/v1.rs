@@ -296,7 +296,7 @@ pub trait RpcProtocolV1: RpcContext {
 		// Drop the mutex guard
 		mem::drop(guard);
 		// Cleanup live queries
-		self.cleanup_lqs().await;
+		self.cleanup_lqs(session_id.as_ref()).await;
 		// Return nothing on success
 		Ok(DbResult::Other(PublicValue::None))
 	}
@@ -1300,7 +1300,7 @@ where
 		match &response.query_type {
 			QueryType::Live => {
 				if let Ok(PublicValue::Uuid(lqid)) = &response.result {
-					this.handle_live(&lqid.0).await;
+					this.handle_live(&lqid.0, session_id.clone()).await;
 				}
 			}
 			QueryType::Kill => {

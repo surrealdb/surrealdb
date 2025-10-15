@@ -64,7 +64,12 @@ impl RpcContext for Http {
 	const LQ_SUPPORT: bool = false;
 
 	/// Handles the cleanup of live queries
-	async fn cleanup_lqs(&self) {
+	async fn cleanup_lqs(&self, _session_id: Option<&Uuid>) {
+		// Do nothing as HTTP is stateless
+	}
+
+	/// Handles the cleanup of live queries
+	async fn cleanup_all_lqs(&self) {
 		// Do nothing as HTTP is stateless
 	}
 
