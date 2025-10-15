@@ -106,7 +106,6 @@ pub(super) struct TransactionFactory {
 }
 
 impl TransactionFactory {
-	#[allow(unreachable_code)]
 	pub(super) fn new(clock: Arc<SizedClock>, flavor: DatastoreFlavor) -> Self {
 		Self {
 			clock,
@@ -416,10 +415,7 @@ impl Datastore {
 		}?;
 		// Set the properties on the datastore
 		flavor.map(|flavor| {
-			let tf = TransactionFactory {
-				clock,
-				flavor: Arc::new(flavor),
-			};
+			let tf = TransactionFactory::new(clock, flavor);
 			Self {
 				id: Uuid::new_v4(),
 				transaction_factory: tf.clone(),
