@@ -15,6 +15,7 @@ use crate::sql::index::{HnswParams, MTreeParams, SearchParams};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Index, Part, Thing, Value};
 use reblessive::tree::Stk;
+use std::borrow::Cow;
 use uuid::Uuid;
 
 pub(crate) struct IndexOperation<'a> {
@@ -151,11 +152,11 @@ impl<'a> IndexOperation<'a> {
 			self.opt.db()?,
 			&self.ix.what,
 			&self.ix.name,
-			Some((self.opt.id()?, uuid::Uuid::now_v7())),
+			Some((self.opt.id()?, Uuid::now_v7())),
 			relative_count > 0,
 			relative_count.unsigned_abs() as u64,
 		);
-		self.ctx.tx().lock().await.put(&key, &(), None).await?;
+		self.ctx.tx().lock().await.put(&key, vec![], None).await?;
 		*require_compaction = true;
 		Ok(())
 	}
@@ -164,7 +165,7 @@ impl<'a> IndexOperation<'a> {
 		ic: &IndexCompactionKey<'_>,
 		tx: &Transaction,
 	) -> Result<(), Error> {
-		IndexCountThingIterator::new(ic.ns, ic.db, ic.tb.as_ref(), ic.ix)?.compaction(ic, tx).await
+		IndexCountThingIterator::new(&ic.ns, &ic.db, &ic.tb, &ic.ix)?.compaction(ic, tx).await
 	}
 
 	/// Construct a consistent uniqueness violation error message.
@@ -216,7 +217,14 @@ impl<'a> IndexOperation<'a> {
 		tx: &Transaction,
 		nid: Uuid,
 	) -> Result<(), Error> {
-		let ic = IndexCompactionKey::new(ns, db, tb, ix, nid, Uuid::now_v7());
+		let ic = IndexCompactionKey::new(
+			Cow::Borrowed(ns),
+			Cow::Borrowed(db),
+			Cow::Borrowed(tb),
+			Cow::Borrowed(ix),
+			nid,
+			Uuid::now_v7(),
+		);
 		tx.set(&ic, vec![], None).await?;
 		Ok(())
 	}

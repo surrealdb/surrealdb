@@ -698,12 +698,11 @@ impl Parser<'_> {
 				expected!(self, t!("ON"));
 				self.eat(t!("TABLE"));
 				let what = self.next_token_value()?;
-				let concurrently = self.eat(t!("CONCURRENTLY"));
+
 				RebuildStatement::Index(RebuildIndexStatement {
 					what,
 					name,
 					if_exists,
-					concurrently,
 				})
 			}
 			_ => unexpected!(self, next, "a rebuild statement keyword"),

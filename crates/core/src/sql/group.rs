@@ -36,6 +36,12 @@ impl Display for Groups {
 	}
 }
 
+impl Groups {
+	pub(crate) fn is_group_all_only(&self) -> bool {
+		self.0.is_empty()
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

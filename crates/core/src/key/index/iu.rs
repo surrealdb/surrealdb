@@ -106,7 +106,7 @@ impl<'a> IndexCountKey<'a> {
 
 	/// Decode a borrowed key slice into an `IndexCountKey`.
 	pub(crate) fn decode_key(k: &[u8]) -> Result<IndexCountKey<'_>, Error> {
-		Ok(IndexCountKey::decode(k)?)
+		IndexCountKey::decode(k)
 	}
 
 	/// Compute the inclusive range covering all count entries for a given index.

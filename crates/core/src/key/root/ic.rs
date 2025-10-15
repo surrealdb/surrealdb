@@ -9,7 +9,9 @@
 //! index that needs to be compacted. The compaction thread processes these
 //! entries at regular intervals defined by the `index_compaction_interval`
 //! configuration option.
+
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use uuid::Uuid;
 
 use crate::err::Error;
@@ -30,10 +32,10 @@ pub(crate) struct IndexCompactionKey<'a> {
 	_a: u8,
 	_b: u8,
 	_c: u8,
-	pub ns: &'a str,
-	pub db: &'a str,
-	pub tb: &'a str,
-	pub ix: &'a str,
+	pub ns: Cow<'a, str>,
+	pub db: Cow<'a, str>,
+	pub tb: Cow<'a, str>,
+	pub ix: Cow<'a, str>,
 	pub nid: Uuid,
 	pub uid: Uuid,
 }
@@ -48,10 +50,10 @@ impl Categorise for IndexCompactionKey<'_> {
 
 impl<'a> IndexCompactionKey<'a> {
 	pub(crate) fn new(
-		ns: &'a str,
-		db: &'a str,
-		tb: &'a str,
-		ix: &'a str,
+		ns: Cow<'a, str>,
+		db: Cow<'a, str>,
+		tb: Cow<'a, str>,
+		ix: Cow<'a, str>,
 		nid: Uuid,
 		uid: Uuid,
 	) -> Self {
@@ -69,6 +71,17 @@ impl<'a> IndexCompactionKey<'a> {
 		}
 	}
 
+	pub(crate) fn into_owned(self) -> IndexCompactionKey<'static> {
+		IndexCompactionKey::new(
+			Cow::Owned(self.ns.into_owned()),
+			Cow::Owned(self.db.into_owned()),
+			Cow::Owned(self.tb.into_owned()),
+			Cow::Owned(self.ix.into_owned()),
+			self.nid,
+			self.uid,
+		)
+	}
+
 	pub(crate) fn index_matches(&self, other: &IndexCompactionKey<'_>) -> bool {
 		self.ns == other.ns && self.db == other.db && self.tb == other.tb && self.ix == other.ix
 	}
@@ -78,7 +91,7 @@ impl<'a> IndexCompactionKey<'a> {
 	}
 
 	pub fn decode_key(k: &[u8]) -> Result<IndexCompactionKey<'_>, Error> {
-		Ok(IndexCompactionKey::decode(k)?)
+		IndexCompactionKey::decode(k)
 	}
 }
 
@@ -96,7 +109,7 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = IndexCompactionKey::new("testns", "testdb", "testtb", "testix", Uuid::from_u128(1), Uuid::from_u128(2));
+		let val = IndexCompactionKey::new(Cow::Borrowed("testns"), Cow::Borrowed("testdb"), Cow::Borrowed("testtb"), Cow::Borrowed("testix"), Uuid::from_u128(1), Uuid::from_u128(2));
 		let enc = IndexCompactionKey::encode(&val).unwrap();
 		assert_eq!(enc, b"/!ic\x00\x00\x00\x01\x00\x00\x00\x02testtb\0\0\0\0\x03\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x02");
 	}

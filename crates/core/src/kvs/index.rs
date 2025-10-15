@@ -160,7 +160,7 @@ impl IndexBuilder {
 		let (ns, db) = opt.ns_db()?;
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
 		match self.indexes.write().await.entry(key) {
-			Entry::Occupied(mut e) => {
+			Entry::Occupied(e) => {
 				// If the building is currently running, we return an error
 				if !e.get().1.is_finished() {
 					return Err(Error::IndexAlreadyBuilding {

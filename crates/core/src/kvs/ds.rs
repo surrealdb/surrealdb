@@ -816,13 +816,13 @@ impl Datastore {
 						continue;
 					}
 				}
-				match txn.get_tb_index(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await {
+				match txn.get_tb_index(&ic.ns, &ic.db, &ic.tb, &ic.ix).await {
 					Ok(ix) => match &ix.index {
 						Index::Count => {
 							IndexOperation::index_count_compaction(&ic, &txn).await?;
 						}
 						_ => {
-							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);
+							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", &ic.ix);
 						}
 					},
 					Err(e) => {

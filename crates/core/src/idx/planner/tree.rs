@@ -183,15 +183,18 @@ impl<'a> TreeBuilder<'a> {
 							if let Index::Count = &ix.index {
 								if self.ctx.cond.is_none() {
 									let index_reference = schema.new_reference(pos);
-									if self.check_allowed_by_with_indexes(&index_reference) {
-										self.index_map.index_count = Some(IndexOption::new(
-											index_reference,
-											None,
-											IdiomPosition::None,
-											IndexOperator::Count,
-										));
-										break;
+									if let Some(wi) = &self.with_indexes {
+										if !wi.contains(&index_reference) {
+											continue;
+										}
 									}
+									self.index_map.index_count = Some(IndexOption::new(
+										index_reference,
+										None,
+										IdiomPosition::None,
+										IndexOperator::Count,
+									));
+									break;
 								}
 							}
 						}

@@ -124,7 +124,7 @@ impl DefineIndexStatement {
 		// Process the index
 		#[cfg(not(target_family = "wasm"))]
 		if self.concurrently {
-			self.async_index(ctx, opt)?;
+			self.async_index(ctx, opt).await?;
 		} else {
 			self.sync_index(stk, ctx, opt, doc).await?;
 		}
@@ -154,12 +154,11 @@ impl DefineIndexStatement {
 	}
 
 	#[cfg(not(target_family = "wasm"))]
-	fn async_index(&self, ctx: &Context, opt: &Options) -> Result<(), Error> {
-		ctx.get_index_builder().ok_or_else(|| fail!("No Index Builder"))?.build(
-			ctx,
-			opt.clone(),
-			self.clone().into(),
-		)
+	async fn async_index(&self, ctx: &Context, opt: &Options) -> Result<(), Error> {
+		ctx.get_index_builder()
+			.ok_or_else(|| fail!("No Index Builder"))?
+			.build(ctx, opt.clone(), self.clone().into())
+			.await
 	}
 }
 
@@ -169,10 +168,10 @@ impl Display for DefineIndexStatement {
 		if self.if_not_exists {
 			write!(f, " IF NOT EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
-		if !self.cols.is_empty() {
-			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter()))?;
+		if self.overwrite {
+			write!(f, " OVERWRITE")?
 		}
+		write!(f, " {} ON {} FIELDS {}", self.name, self.what, self.cols)?;
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
 		}

@@ -130,7 +130,7 @@ impl InnerQueryExecutor {
 		// Create all the instances of index entries.
 		// Map them to Idioms and MatchRef
 		for (exp, io) in ios {
-			let ixr = io.index_reference();
+			let ixr = io.ix_ref();
 			match &ixr.index {
 				Index::Search(p) => {
 					let ft_entry = match ft_map.entry(ixr.clone()) {
@@ -356,7 +356,7 @@ impl QueryExecutor {
 		irf: IteratorRef,
 		io: &IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
-		match io.index_reference().index {
+		match io.ix_ref().index {
 			Index::Idx | Index::Count => Ok(self.new_index_iterator(opt, irf, io.clone()).await?),
 			Index::Uniq => Ok(self.new_unique_index_iterator(opt, irf, io.clone()).await?),
 			Index::Search {
@@ -373,7 +373,7 @@ impl QueryExecutor {
 		ir: IteratorRef,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
-		let ix = io.index_reference();
+		let ix = io.ix_ref();
 		Ok(match io.op() {
 			IndexOperator::Equality(value) => {
 				let variants = Self::get_equal_variants_from_value(value);
@@ -437,7 +437,7 @@ impl QueryExecutor {
 				opt.ns()?,
 				opt.db()?,
 				&ix.what,
-				ix.name,
+				&ix.name,
 			)?)),
 			_ => None,
 		})
@@ -854,17 +854,12 @@ impl QueryExecutor {
 			IndexOperator::Equality(values) => {
 				let variants = Self::get_equal_variants_from_value(values);
 				if variants.len() == 1 {
-					Some(Self::new_unique_equal_iterator(
-						irf,
-						opt,
-						io.index_reference(),
-						&variants[0],
-					)?)
+					Some(Self::new_unique_equal_iterator(irf, opt, io.ix_ref(), &variants[0])?)
 				} else {
 					Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(
 						irf,
 						opt,
-						io.index_reference(),
+						io.ix_ref(),
 						&variants,
 					)?))
 				}
@@ -874,7 +869,7 @@ impl QueryExecutor {
 				Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(
 					irf,
 					opt,
-					io.index_reference(),
+					io.ix_ref(),
 					&variants,
 				)?))
 			}
@@ -883,7 +878,7 @@ impl QueryExecutor {
 				let unique_join = Box::new(UniqueJoinThingIterator::new(
 					irf,
 					opt,
-					io.index_reference().clone(),
+					io.ix_ref().clone(),
 					iterators,
 				)?);
 				Some(ThingIterator::UniqueJoin(unique_join))
@@ -897,7 +892,7 @@ impl QueryExecutor {
 								irf,
 								opt.ns()?,
 								opt.db()?,
-								io.index_reference(),
+								io.ix_ref(),
 							)?,
 						))
 					}
@@ -908,7 +903,7 @@ impl QueryExecutor {
 						irf,
 						opt.ns()?,
 						opt.db()?,
-						io.index_reference(),
+						io.ix_ref(),
 					)?))
 				}
 			}
@@ -917,7 +912,7 @@ impl QueryExecutor {
 					irf,
 					opt.ns()?,
 					opt.db()?,
-					io.index_reference(),
+					io.ix_ref(),
 					prefix,
 					ranges,
 				)?))
@@ -950,7 +945,7 @@ impl QueryExecutor {
 	) -> Result<Option<ThingIterator>, Error> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
 			if let Matches(_, _) = io.op() {
-				if let Some(fti) = self.0.ft_map.get(io.index_reference()) {
+				if let Some(fti) = self.0.ft_map.get(io.ix_ref()) {
 					if let Some(fte) = self.0.exp_entries.get(exp) {
 						let it =
 							MatchesThingIterator::new(ir, fti, fte.0.terms_docs.clone()).await?;
@@ -1009,7 +1004,7 @@ impl QueryExecutor {
 		r: Value,
 	) -> Result<bool, Error> {
 		if let Some(ft) = self.0.exp_entries.get(exp) {
-			let ix = ft.0.index_option.index_reference();
+			let ix = ft.0.index_option.ix_ref();
 			if self.0.table.eq(&ix.what.0) {
 				return self.matches_with_doc_id(ctx, thg, ft).await;
 			}
@@ -1070,7 +1065,7 @@ impl QueryExecutor {
 		if !ft.0.query_terms_set.is_matchable() {
 			return Ok(false);
 		}
-		let v = match ft.0.index_option.idiom_position() {
+		let v = match ft.0.index_option.id_pos() {
 			IdiomPosition::Left => r,
 			IdiomPosition::Right => l,
 			IdiomPosition::None => return Ok(false),
@@ -1092,7 +1087,7 @@ impl QueryExecutor {
 
 	fn get_ft_entry_and_index(&self, match_ref: &Value) -> Option<(&FtEntry, &FtIndex)> {
 		if let Some(e) = self.get_ft_entry(match_ref) {
-			if let Some(ft) = self.0.ft_map.get(e.0.index_option.index_reference()) {
+			if let Some(ft) = self.0.ft_map.get(e.0.index_option.ix_ref()) {
 				return Some((e, ft));
 			}
 		}
@@ -1107,7 +1102,7 @@ impl QueryExecutor {
 		doc: &Value,
 	) -> Result<Value, Error> {
 		if let Some((e, ft)) = self.get_ft_entry_and_index(hlp.match_ref()) {
-			if let Some(id) = e.0.index_option.idiom_ref() {
+			if let Some(id) = e.0.index_option.id_ref() {
 				let tx = ctx.tx();
 				let res = ft.highlight(&tx, thg, &e.0.query_terms_list, hlp, id, doc).await;
 				return res;

@@ -6,8 +6,8 @@ use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator};
 use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
-use crate::key::index::Index;
 use crate::key::index::iu::IndexCountKey;
+use crate::key::index::Index;
 use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::{Key, Val};
 use crate::kvs::{KeyEncode, Transaction};
@@ -152,7 +152,7 @@ impl ThingIterator {
 			Self::UniqueJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 			Self::Multiples(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 			Self::IndexCount(_) => {
-				bail!(Error::unreachable("IndexCount should not be used with next_batch"))
+				Err(Error::unreachable("IndexCount should not be used with next_batch"))
 			}
 		}
 	}
@@ -1794,19 +1794,19 @@ impl MultipleIterators {
 pub(crate) struct IndexCountThingIterator(Option<Range<Key>>);
 
 impl IndexCountThingIterator {
-	pub(in crate::idx) fn new(
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &str,
-		ix: IndexId,
-	) -> Result<Self> {
+	pub(in crate::idx) fn new(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Self, Error> {
 		Ok(Self(Some(IndexCountKey::range(ns, db, tb, ix)?)))
 	}
-	async fn next_count(&mut self, ctx: &Context, txn: &Transaction, _limit: u32) -> Result<usize> {
+	async fn next_count(
+		&mut self,
+		ctx: &Context,
+		txn: &Transaction,
+		_limit: u32,
+	) -> Result<usize, Error> {
 		if let Some(range) = self.0.take() {
 			let mut count: i64 = 0;
 			for (i, key) in txn.keys(range, u32::MAX, None).await?.into_iter().enumerate() {
-				ctx.is_done(i % 1000 == 0).await?;
+				ctx.is_done(i % 1000 == 0)?;
 				let iu = IndexCountKey::decode_key(&key)?;
 				if iu.pos {
 					count += iu.count as i64;
@@ -1824,7 +1824,7 @@ impl IndexCountThingIterator {
 		&mut self,
 		ic: &IndexCompactionKey<'_>,
 		txn: &Transaction,
-	) -> Result<()> {
+	) -> Result<(), Error> {
 		let Some(range) = self.0.take() else {
 			return Ok(());
 		};
@@ -1843,8 +1843,8 @@ impl IndexCountThingIterator {
 		txn.delr(range).await?;
 		let pos = count.is_positive();
 		let count = count.unsigned_abs();
-		let compact_key = IndexCountKey::new(ic.ns, ic.db, ic.tb.as_ref(), ic.ix, None, pos, count);
-		txn.put(&compact_key, &(), None).await?;
+		let compact_key = IndexCountKey::new(&ic.ns, &ic.db, &ic.tb, &ic.ix, None, pos, count);
+		txn.put(&compact_key, vec![], None).await?;
 		Ok(())
 	}
 }

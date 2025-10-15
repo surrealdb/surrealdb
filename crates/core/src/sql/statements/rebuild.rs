@@ -57,7 +57,6 @@ pub struct RebuildIndexStatement {
 	pub name: Ident,
 	pub what: Ident,
 	pub if_exists: bool,
-	pub concurrently: bool,
 }
 
 impl RebuildIndexStatement {
@@ -105,9 +104,6 @@ impl Display for RebuildIndexStatement {
 			write!(f, " IF EXISTS")?
 		}
 		write!(f, " {} ON {}", self.name, self.what)?;
-		if self.concurrently {
-			write!(f, " CONCURRENTLY")?
-		}
 		Ok(())
 	}
 }
