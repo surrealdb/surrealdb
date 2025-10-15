@@ -15,7 +15,7 @@ use crate::expr::part::{Next, NextMethod};
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, FlowResult, Part, Value};
-use crate::fmt::{EscapeIdent, Fmt};
+use crate::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt};
 
 pub mod recursion;
 
@@ -113,11 +113,13 @@ impl Idiom {
 
 	/// Returns a raw string representation of this idiom without any escaping.
 	pub(crate) fn to_raw_string(&self) -> String {
+		use std::fmt::Write;
+
 		let mut s = String::new();
 
 		let mut iter = self.0.iter();
 		match iter.next() {
-			Some(Part::Field(v)) => s.push_str(&v.clone()),
+			Some(Part::Field(v)) => write!(&mut s, "{}", EscapeKwFreeIdent(v)).unwrap(),
 			Some(x) => s.push_str(&x.to_raw_string()),
 			None => {}
 		};

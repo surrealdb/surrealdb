@@ -5,7 +5,7 @@ use std::hash;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::utils::display::join_displayable;
+use crate::utils::display::format_seperated;
 use crate::utils::escape::QuoteStr;
 use crate::{Duration, Kind, Value};
 
@@ -202,7 +202,7 @@ impl Display for KindLiteral {
 			}
 			KindLiteral::Decimal(v) => write!(f, "{v}dec"),
 			KindLiteral::Duration(duration) => duration.fmt_internal(f),
-			KindLiteral::Array(kinds) => write!(f, "[{}]", join_displayable(kinds, ", ")),
+			KindLiteral::Array(kinds) => write!(f, "[{}]", format_seperated(kinds, ", ")),
 			KindLiteral::Object(btree_map) => write!(
 				f,
 				"{{{}}}",
