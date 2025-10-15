@@ -260,7 +260,7 @@ jobs:
 
   publish-crates:
     name: Publish crates
-    needs: [ format ]
+    needs: [ test, format, check, check-wasm, clippy, build ]
     uses: ./.github/workflows/crate.yml
     with:
       git-ref: ${{ inputs.git-ref }}
