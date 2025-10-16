@@ -30,8 +30,16 @@ pub(crate) struct TaskLease {
 impl_kv_value_revisioned!(TaskLease);
 
 impl TaskLease {
-	fn has_expired(&self, t: DateTime<Utc>) -> bool {
-		self.expiration < t
+	/// Checks if this lease has expired at the given time.
+	///
+	/// # Parameters
+	/// * `current` - The current time to compare against the lease expiration
+	///
+	/// # Returns
+	/// * `true` if the lease has expired (expiration time is before the given time)
+	/// * `false` if the lease is still valid
+	fn has_expired(&self, current: DateTime<Utc>) -> bool {
+		self.expiration < current
 	}
 }
 /// Manages distributed task leases in a multi-node environment.
@@ -168,11 +176,11 @@ impl LeaseHandler {
 	/// * `Ok(Some(TaskLease))` - If a valid lease exists, returns the lease object
 	/// * `Ok(None)` - If no valid lease exists (either no lease or it has expired)
 	/// * `Err` - If database operations fail
-	async fn check_valid_lease(&self, now: DateTime<Utc>) -> Result<Option<TaskLease>> {
+	async fn check_valid_lease(&self, current: DateTime<Utc>) -> Result<Option<TaskLease>> {
 		let tx = self.tf.transaction(TransactionType::Read, LockType::Optimistic).await?;
 		if let Some(l) = tx.get(&Tl::new(&self.task_type), None).await? {
 			// If the lease hasn't expired yet, return the lease object
-			if !l.has_expired(now) {
+			if !l.has_expired(current) {
 				// Return the lease object which contains owner information
 				return Ok(Some(l));
 			}
@@ -193,35 +201,37 @@ impl LeaseHandler {
 	/// * `Ok(true)` - If the lease was successfully acquired by this node
 	/// * `Ok(false)` - If another node owns a valid (non-expired) lease
 	/// * `Err` - If database operations fail or a race condition is detected
-	async fn acquire_new_lease(&self, now: DateTime<Utc>) -> Result<bool> {
+	async fn acquire_new_lease(&self, current: DateTime<Utc>) -> Result<bool> {
 		let key = Tl::new(&self.task_type);
 		let tx = self.tf.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		
+
 		// Read the current lease value (if any) to use as a condition for the write
 		let previous_lease = tx.get(&key, None).await?;
-		
+
 		// Optimization: If a valid (non-expired) lease already exists and we don't own it,
 		// return early without attempting to write. This avoids unnecessary transaction overhead.
 		if let Some(ref previous_lease) = previous_lease {
-			if !previous_lease.has_expired(now) {
+			if !previous_lease.has_expired(current) {
 				tx.cancel().await?;
 				return Ok(previous_lease.owner == self.node);
 			}
 		}
-		
+
 		let new_lease = TaskLease {
 			owner: self.node,
-			expiration: now + self.lease_duration,
+			expiration: current + self.lease_duration,
 		};
-		
+
 		// Use putc() (conditional put) to atomically write the lease ONLY if the current value
 		// matches what we read earlier. This prevents race conditions:
 		// - If previous_lease is None: writes succeed only if the key still doesn't exist
 		// - If previous_lease is Some(expired): writes succeed only if the value hasn't changed
-		// - If another node wrote between our get() and putc(): condition fails with TxConditionNotMet
+		// - If another node wrote between our get() and putc(): condition fails with
+		//   TxConditionNotMet
 		//
 		// This ensures mutual exclusion: only one node can successfully acquire the lease when
-		// multiple nodes attempt acquisition simultaneously (e.g., when replacing an expired lease).
+		// multiple nodes attempt acquisition simultaneously (e.g., when replacing an expired
+		// lease).
 		tx.putc(&key, &new_lease, previous_lease.as_ref()).await?;
 		tx.commit().await?;
 		Ok(true)
