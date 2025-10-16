@@ -24,8 +24,7 @@ use crate::dbs::{Force, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::expr::FlowResultExt as _;
 use crate::idx::index::IndexOperation;
-#[cfg(not(target_family = "wasm"))]
-use crate::kvs::ConsumeResult;
+use crate::kvs::index::ConsumeResult;
 use crate::val::{RecordId, Value};
 
 impl Document {
@@ -79,7 +78,6 @@ impl Document {
 		n: Option<Vec<Value>>,
 		rid: &RecordId,
 	) -> Result<()> {
-		#[cfg(not(target_family = "wasm"))]
 		let (o, n) = if let Some(ib) = ctx.get_index_builder() {
 			match ib.consume(db, ctx, ix, o, n, rid).await? {
 				// The index builder consumed the value, which means it is currently building the
