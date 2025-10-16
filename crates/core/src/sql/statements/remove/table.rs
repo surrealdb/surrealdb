@@ -33,12 +33,9 @@ impl RemoveTableStatement {
 			// Get the transaction
 			let txn = ctx.tx();
 			// Remove the index stores
-			#[cfg(not(target_family = "wasm"))]
 			ctx.get_index_stores()
 				.table_removed(ctx.get_index_builder(), &txn, ns, db, &self.name)
 				.await?;
-			#[cfg(target_family = "wasm")]
-			ctx.get_index_stores().table_removed(&txn, ns, db, &self.name).await?;
 			// Get the defined table
 			let tb = txn.get_tb(ns, db, &self.name).await?;
 			// Get the foreign tables

@@ -1,5 +1,5 @@
 use crate::ctx::Context;
-use crate::dbs::{Force, Options};
+use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::ft::FtIndex;
 use crate::idx::planner::iterators::IndexCountThingIterator;
@@ -25,8 +25,6 @@ pub(crate) struct IndexOperation<'a> {
 	/// The new values (if existing)
 	n: Option<Vec<Value>>,
 	rid: &'a Thing,
-	/// Is the index reindexed with an update?
-	is_reindex_with_update: bool,
 }
 
 impl<'a> IndexOperation<'a> {
@@ -38,7 +36,6 @@ impl<'a> IndexOperation<'a> {
 		n: Option<Vec<Value>>,
 		rid: &'a Thing,
 	) -> Self {
-		let is_reindex_with_update = matches!(opt.force, Force::Index(_));
 		Self {
 			ctx,
 			opt,
@@ -46,7 +43,6 @@ impl<'a> IndexOperation<'a> {
 			o,
 			n,
 			rid,
-			is_reindex_with_update,
 		}
 	}
 
@@ -139,7 +135,7 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_count(&mut self, require_compaction: &mut bool) -> Result<(), Error> {
 		let mut relative_count: i8 = 0;
-		if self.o.is_some() && !self.is_reindex_with_update {
+		if self.o.is_some() {
 			relative_count -= 1;
 		}
 		if self.n.is_some() {

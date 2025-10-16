@@ -40,8 +40,7 @@ mod tikv;
 
 pub(crate) mod cache;
 
-#[cfg(not(target_family = "wasm"))]
-mod index;
+pub(crate) mod index;
 #[cfg(any(
 	feature = "kv-tikv",
 	feature = "kv-fdb",
@@ -62,9 +61,6 @@ pub use ds::Datastore;
 pub use live::Live;
 pub use tr::{Check, LockType, TransactionType, Transactor};
 pub use tx::Transaction;
-
-#[cfg(not(target_family = "wasm"))]
-pub(crate) use index::{ConsumeResult, IndexBuilder};
 
 /// The key part of a key-value pair. An alias for [`Vec<u8>`].
 pub type Key = Vec<u8>;

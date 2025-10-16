@@ -1026,6 +1026,10 @@ pub enum Error {
 		name: String,
 	},
 
+	/// A database index entry for the specified table is already building
+	#[error("Index building has been cancelled")]
+	IndexingBuildingCancelled,
+
 	/// The token has expired
 	#[error("The token has expired")]
 	ExpiredToken,

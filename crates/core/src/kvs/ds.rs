@@ -23,7 +23,6 @@ use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
-#[cfg(not(target_family = "wasm"))]
 use crate::kvs::index::IndexBuilder;
 use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
@@ -87,7 +86,6 @@ pub struct Datastore {
 	// The cross transaction cache
 	cache: Arc<DatastoreCache>,
 	// The index asynchronous builder
-	#[cfg(not(target_family = "wasm"))]
 	index_builder: IndexBuilder,
 	#[cfg(feature = "jwks")]
 	// The JWKS object cache
@@ -427,7 +425,6 @@ impl Datastore {
 				notification_channel: None,
 				capabilities: Arc::new(Capabilities::default()),
 				index_stores: IndexStores::default(),
-				#[cfg(not(target_family = "wasm"))]
 				index_builder: IndexBuilder::new(tf),
 				#[cfg(feature = "jwks")]
 				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
@@ -452,7 +449,6 @@ impl Datastore {
 			capabilities: self.capabilities,
 			notification_channel: self.notification_channel,
 			index_stores: Default::default(),
-			#[cfg(not(target_family = "wasm"))]
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(Default::default()),
@@ -1363,7 +1359,6 @@ impl Datastore {
 			self.capabilities.clone(),
 			self.index_stores.clone(),
 			self.cache.clone(),
-			#[cfg(not(target_family = "wasm"))]
 			self.index_builder.clone(),
 			#[cfg(storage)]
 			self.temporary_directory.clone(),

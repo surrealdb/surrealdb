@@ -14,6 +14,7 @@ use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Id, Object, Thing, Value};
 use ahash::HashMap;
+use futures::channel::oneshot::{channel, Receiver, Sender};
 use reblessive::TreeStack;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -21,9 +22,11 @@ use std::collections::hash_map::Entry;
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+#[cfg(not(target_family = "wasm"))]
+use tokio::spawn;
 use tokio::sync::RwLock;
-use tokio::task;
-use tokio::task::JoinHandle;
+#[cfg(target_family = "wasm")]
+use wasm_bindgen_futures::spawn_local as spawn;
 
 #[derive(Debug, Clone)]
 pub(crate) enum BuildingStatus {
@@ -39,7 +42,7 @@ pub(crate) enum BuildingStatus {
 		pending: Option<usize>,
 	},
 	Aborted,
-	Error(Arc<Error>),
+	Error(String),
 }
 
 impl Default for BuildingStatus {
@@ -116,7 +119,7 @@ impl From<BuildingStatus> for Value {
 	}
 }
 
-type IndexBuilding = (Arc<Building>, JoinHandle<()>);
+type IndexBuilding = Arc<Building>;
 
 #[derive(Hash, PartialEq, Eq)]
 struct IndexKey {
@@ -151,18 +154,50 @@ impl IndexBuilder {
 		}
 	}
 
+	fn start_building(
+		&self,
+		ctx: &Context,
+		opt: Options,
+		ix: Arc<DefineIndexStatement>,
+		sdr: Option<Sender<Result<(), Error>>>,
+	) -> Result<IndexBuilding, Error> {
+		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix)?);
+		let b = building.clone();
+		spawn(async move {
+			let guard = BuildingFinishGuard(b.clone());
+			let r = b.run().await;
+			if let Err(err) = &r {
+				b.set_status(BuildingStatus::Error(err.to_string())).await;
+			}
+			if let Some(s) = sdr {
+				if s.send(r).is_err() {
+					warn!("Failed to send index building result to the consumer");
+				}
+			}
+			drop(guard);
+		});
+		Ok(building)
+	}
+
 	pub(crate) async fn build(
 		&self,
 		ctx: &Context,
 		opt: Options,
 		ix: Arc<DefineIndexStatement>,
-	) -> Result<(), Error> {
+		blocking: bool,
+	) -> Result<Option<Receiver<Result<(), Error>>>, Error> {
 		let (ns, db) = opt.ns_db()?;
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
+		let (rcv, sdr) = if blocking {
+			let (s, r) = channel();
+			(Some(r), Some(s))
+		} else {
+			(None, None)
+		};
 		match self.indexes.write().await.entry(key) {
 			Entry::Occupied(e) => {
 				// If the building is currently running, we return an error
-				if !e.get().1.is_finished() {
+				if !e.get().is_finished() {
 					return Err(Error::IndexAlreadyBuilding {
 						name: e.key().ix.clone(),
 					});
@@ -170,17 +205,11 @@ impl IndexBuilder {
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix)?);
-				let b = building.clone();
-				let jh = task::spawn(async move {
-					if let Err(err) = b.run().await {
-						b.set_status(BuildingStatus::Error(err.into())).await;
-					}
-				});
-				e.insert((building, jh));
+				let ib = self.start_building(ctx, opt, ix, sdr)?;
+				e.insert(ib);
 			}
 		}
-		Ok(())
+		Ok(rcv)
 	}
 
 	pub(crate) async fn consume(
@@ -193,7 +222,7 @@ impl IndexBuilder {
 		rid: &Thing,
 	) -> Result<ConsumeResult, Error> {
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
-		if let Some((b, _)) = self.indexes.read().await.get(&key) {
+		if let Some(b) = self.indexes.read().await.get(&key) {
 			return b.maybe_consume(ctx, old_values, new_values, rid).await;
 		}
 		Ok(ConsumeResult::Ignored(old_values, new_values))
@@ -206,8 +235,8 @@ impl IndexBuilder {
 		ix: &DefineIndexStatement,
 	) -> BuildingStatus {
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
-		if let Some(a) = self.indexes.read().await.get(&key) {
-			a.0.status.read().await.clone()
+		if let Some(b) = self.indexes.read().await.get(&key) {
+			b.status.read().await.clone()
 		} else {
 			BuildingStatus::default()
 		}
@@ -221,7 +250,7 @@ impl IndexBuilder {
 		ix: &str,
 	) -> Result<(), Error> {
 		let key = IndexKey::new(ns, db, tb, ix);
-		if let Some((b, _)) = self.indexes.write().await.remove(&key) {
+		if let Some(b) = self.indexes.write().await.remove(&key) {
 			b.abort();
 		}
 		Ok(())
@@ -290,6 +319,7 @@ struct Building {
 	status: Arc<RwLock<BuildingStatus>>,
 	queue: Arc<RwLock<QueueSequences>>,
 	aborted: AtomicBool,
+	finished: AtomicBool,
 }
 
 impl Building {
@@ -308,6 +338,7 @@ impl Building {
 			status: Arc::new(RwLock::new(BuildingStatus::Started)),
 			queue: Default::default(),
 			aborted: AtomicBool::new(false),
+			finished: AtomicBool::new(false),
 		})
 	}
 
@@ -611,5 +642,17 @@ impl Building {
 		} else {
 			false
 		}
+	}
+
+	fn is_finished(&self) -> bool {
+		self.finished.load(Ordering::Relaxed)
+	}
+}
+
+struct BuildingFinishGuard(IndexBuilding);
+
+impl Drop for BuildingFinishGuard {
+	fn drop(&mut self) {
+		self.0.finished.store(true, Ordering::Relaxed);
 	}
 }
