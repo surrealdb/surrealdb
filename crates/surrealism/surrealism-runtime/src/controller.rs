@@ -41,29 +41,25 @@ use surrealism_types::{
 use wasmtime::*;
 use wasmtime_wasi::preview1::{self, WasiP1Ctx};
 use std::sync::Arc;
-use std::pin::Pin;
+use std::cell::UnsafeCell;
 
-/// Wrapper for the context pointer that's Send.
-/// SAFETY: This is safe because Store is !Send, ensuring the pointer is only accessed
-/// from the thread that created it.
-pub(crate) struct ContextPtr(Option<*mut dyn InvocationContext>);
-unsafe impl Send for ContextPtr {}
+/// Wrapper that makes InvocationContext Send-safe for StoreData.
+/// SAFETY: This is safe because Store<StoreData> ends up being !Send due to this wrapper,
+/// ensuring single-threaded access. The InvocationContext is only accessed from the thread
+/// that created the Store.
+pub(crate) struct ContextCell(UnsafeCell<Box<dyn InvocationContext>>);
 
-impl ContextPtr {
-    fn new() -> Self {
-        Self(None)
+unsafe impl Send for ContextCell {}
+
+impl ContextCell {
+    pub fn new(context: Box<dyn InvocationContext>) -> Self {
+        Self(UnsafeCell::new(context))
     }
     
-    fn set(&mut self, ctx: *mut dyn InvocationContext) {
-        self.0 = Some(ctx);
-    }
-    
-    fn clear(&mut self) {
-        self.0 = None;
-    }
-    
-    fn get(&self) -> Option<*mut dyn InvocationContext> {
-        self.0
+    /// SAFETY: Caller must ensure no other references exist and single-threaded access.
+    /// This is guaranteed by Store being effectively !Send (due to ContextCell) and Controller taking &mut self.
+    pub unsafe fn get_mut(&self) -> &mut dyn InvocationContext {
+        &mut **self.0.get()
     }
 }
 
@@ -71,39 +67,7 @@ impl ContextPtr {
 pub struct StoreData {
     pub wasi: WasiP1Ctx,
     pub config: Arc<SurrealismConfig>,
-    /// Invocation context pointer, set during with_context execution.
-    /// SAFETY: The lifetime is erased to 'static, but Controller::with_context guarantees:
-    /// 1. The context is only set during with_context's scope
-    /// 2. It's cleared before with_context returns
-    /// 3. Each Controller has its own isolated Store, so no sharing between executions
-    /// 4. Store is !Send, ensuring single-threaded access
-    pub(crate) context: ContextPtr,
-}
-
-impl StoreData {
-    /// Access the invocation context with a callback that returns a Future.
-    /// 
-    /// SAFETY: This function performs lifetime transmutation to support async methods.
-    /// The returned Future borrows from the context, but we erase that lifetime dependency.
-    /// 
-    /// This is sound because Controller::with_context guarantees:
-    /// 1. The context pointer is set at the start and valid for the entire WASM execution
-    /// 2. All returned Futures are awaited before with_context returns  
-    /// 3. The context pointer is cleared only after all Futures complete
-    /// 4. Each Store is isolated to one Controller - no sharing
-    /// 5. Store is !Send, ensuring single-threaded access
-    pub(crate) fn with_context<F, R>(&mut self, f: F) -> impl std::future::Future<Output = R>
-    where
-        F: FnOnce(&mut dyn InvocationContext) -> Pin<Box<dyn std::future::Future<Output = R> + '_>>,
-    {
-        let ptr = self.context.get().expect("InvocationContext not set - must call Controller::with_context()");
-        
-        // SAFETY: Dereference the raw pointer and extend its lifetime to 'static.
-        // This is sound because Controller::with_context guarantees the pointer remains valid
-        // until all futures complete and are dropped.
-        let context_ref: &'static mut dyn InvocationContext = unsafe { &mut *ptr };
-        f(context_ref)
-    }
+    pub(crate) context: ContextCell,
 }
 
 /// Compiled WASM runtime. Thread-safe, can be shared across threads via Arc.
@@ -144,13 +108,13 @@ impl Runtime {
     /// This is cheap (relative to compilation) - the expensive compilation is shared.
     /// Each controller has its own mutable Store, ensuring no shared mutable state.
     /// Safe for concurrent execution: no mutable state is shared between controllers.
-    pub fn new_controller(&self) -> Result<Controller> {
+    pub fn new_controller(&self, context: Box<dyn InvocationContext>) -> Result<Controller> {
         let wasi_ctx = super::wasi_context::build()?;
 
         let store_data = StoreData {
             wasi: wasi_ctx,
             config: self.config.clone(),
-            context: ContextPtr::new(),
+            context: ContextCell::new(context),
         };
         let mut store = Store::new(&self.engine, store_data);
         let instance = self.linker
@@ -171,59 +135,12 @@ impl Runtime {
 /// Per-execution controller. Not thread-safe - create one per concurrent call.
 /// Lightweight, created from Runtime. Each controller has its own isolated Store and Instance.
 pub struct Controller {
-    pub(crate) store: Store<StoreData>,
-    pub(crate) instance: Instance,
-    pub(crate) memory: Memory,
+    pub(super) store: Store<StoreData>,
+    pub(super) instance: Instance,
+    pub(super) memory: Memory,
 }
 
 impl Controller {
-    /// Legacy constructor for backwards compatibility.
-    /// Consider using Runtime::new() + runtime.new_controller() instead.
-    #[deprecated(note = "Use Runtime::new() + runtime.new_controller() for better concurrency")]
-    pub fn new(package: SurrealismPackage) -> Result<Self> {
-        Runtime::new(package)?.new_controller()
-    }
-    
-    /// Execute a function with the given invocation context.
-    /// The context is stored in this Controller's isolated Store for the duration of the call.
-    /// 
-    /// This is safe because:
-    /// 1. We take `&mut self`, preventing concurrent access to this controller
-    /// 2. Each Controller has its own isolated Store - no sharing between controllers
-    /// 3. Store is !Send, ensuring single-threaded execution
-    /// 4. The context is set before the function and cleared after, with guaranteed cleanup
-    /// 5. Host functions access the context via a scoped callback pattern
-    pub fn with_context<R>(
-        &mut self, 
-        context: &mut dyn InvocationContext, 
-        f: impl FnOnce(&mut Self) -> Result<R>
-    ) -> Result<R> {
-        // Check for re-entrant calls
-        assert!(self.store.data().context.get().is_none(), "Context already set - re-entrant calls not supported");
-        
-        // Set the context in this controller's Store
-        // SAFETY: We erase the lifetime to 'static, but the actual lifetime is managed by this function.
-        // The pointer is cleared before this function returns, ensuring it never outlives the reference.
-        let ptr = unsafe {
-            std::mem::transmute::<*mut dyn InvocationContext, *mut dyn InvocationContext>(
-                context as *mut dyn InvocationContext
-            )
-        };
-        self.store.data_mut().context.set(ptr);
-        
-        // Execute the user function with guaranteed cleanup even on panic
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(self)));
-        
-        // Clear the context (even if panic occurred)
-        self.store.data_mut().context.clear();
-        
-        // Propagate any panic
-        match result {
-            Ok(r) => r,
-            Err(e) => std::panic::resume_unwind(e),
-        }
-    }
-
     pub fn alloc(&mut self, len: u32, align: u32) -> Result<u32> {
         let alloc = self
             .instance

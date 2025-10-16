@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use candle_core::DType;
 use surrealdb_types::{SurrealValue, ToSql};
-use std::{io::BufRead, sync::Arc};
+use std::io::BufRead;
 use std::path::PathBuf;
 use surrealism_runtime::{
     config::SurrealismConfig,
@@ -92,7 +92,7 @@ impl InvocationContext for DemoHost {
         _config: &SurrealismConfig,
         model: String,
         input: surrealdb_types::Value,
-        weight: i64,
+        _weight: i64,
         weight_dir: String,
     ) -> Result<surrealdb_types::Value> {
         let surrealdb_types::Value::String(input) = input else {
