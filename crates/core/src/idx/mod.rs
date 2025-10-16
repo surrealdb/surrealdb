@@ -24,12 +24,10 @@ use crate::key::index::hi::Hi;
 use crate::key::index::hl::Hl;
 use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
-#[cfg(not(target_family = "wasm"))]
 use crate::key::index::ia::Ia;
 use crate::key::index::ib::Ib;
 use crate::key::index::id::Id as IdKey;
 use crate::key::index::ii::Ii;
-#[cfg(not(target_family = "wasm"))]
 use crate::key::index::ip::Ip;
 use crate::key::index::is::Is;
 use crate::key::index::td::{Td, TdRoot};
@@ -109,12 +107,10 @@ impl IndexKeyBase {
 		IdKey::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, id)
 	}
 
-	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn new_ia_key(&self, i: u32) -> Ia<'_> {
 		Ia::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, i)
 	}
 
-	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn new_ip_key(&self, id: RecordIdKey) -> Ip<'_> {
 		Ip::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, id)
 	}
@@ -189,7 +185,6 @@ impl IndexKeyBase {
 		&self.0.tb
 	}
 
-	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn index(&self) -> IndexId {
 		self.0.ix
 	}
