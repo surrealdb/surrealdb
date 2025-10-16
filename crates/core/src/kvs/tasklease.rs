@@ -182,30 +182,48 @@ impl LeaseHandler {
 		Ok(None)
 	}
 
-	/// Attempts to acquire a new lease for the current node.
+	/// Attempts to acquire a new lease for the current node using atomic conditional writes.
+	///
+	/// This method implements the core lease acquisition logic with race condition protection.
+	/// It uses optimistic locking with conditional writes to ensure that only one node can
+	/// successfully acquire a lease at a time, even when multiple nodes attempt acquisition
+	/// simultaneously.
 	///
 	/// # Returns
-	/// * `Ok(true)` - If the lease was successfully acquired
-	/// * `Err` - If database operations fail
+	/// * `Ok(true)` - If the lease was successfully acquired by this node
+	/// * `Ok(false)` - If another node owns a valid (non-expired) lease
+	/// * `Err` - If database operations fail or a race condition is detected
 	async fn acquire_new_lease(&self, now: DateTime<Utc>) -> Result<bool> {
 		let key = Tl::new(&self.task_type);
-		// Attempt to acquire a new lease by writing to the datastore
 		let tx = self.tf.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		
+		// Read the current lease value (if any) to use as a condition for the write
 		let previous_lease = tx.get(&key, None).await?;
+		
+		// Optimization: If a valid (non-expired) lease already exists and we don't own it,
+		// return early without attempting to write. This avoids unnecessary transaction overhead.
 		if let Some(ref previous_lease) = previous_lease {
 			if !previous_lease.has_expired(now) {
 				tx.cancel().await?;
 				return Ok(previous_lease.owner == self.node);
 			}
 		}
+		
 		let new_lease = TaskLease {
 			owner: self.node,
-			expiration: now + self.lease_duration, /* Set expiration to current time plus
-			                                        * lease duration */
+			expiration: now + self.lease_duration,
 		};
+		
+		// Use putc() (conditional put) to atomically write the lease ONLY if the current value
+		// matches what we read earlier. This prevents race conditions:
+		// - If previous_lease is None: writes succeed only if the key still doesn't exist
+		// - If previous_lease is Some(expired): writes succeed only if the value hasn't changed
+		// - If another node wrote between our get() and putc(): condition fails with TxConditionNotMet
+		//
+		// This ensures mutual exclusion: only one node can successfully acquire the lease when
+		// multiple nodes attempt acquisition simultaneously (e.g., when replacing an expired lease).
 		tx.putc(&key, &new_lease, previous_lease.as_ref()).await?;
 		tx.commit().await?;
-		// Successfully acquired the lease
 		Ok(true)
 	}
 }
