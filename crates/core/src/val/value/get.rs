@@ -267,7 +267,7 @@ impl Value {
 						stk.scope(|scope| {
 							let futs = v.iter().map(|v| {
 								scope.run(|stk| {
-									let path = if v.is_thing() {
+									let path = if v.is_record() {
 										path
 									} else {
 										// .* applies to the elements of the array it was applied

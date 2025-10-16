@@ -24,8 +24,8 @@ static CONN_CLOSED_ERR: &str = "Connection closed normally";
 type WebSocket = Arc<Websocket>;
 /// Mapping of WebSocket ID to WebSocket
 type WebSockets = RwLock<HashMap<Uuid, WebSocket>>;
-/// Mapping of LIVE Query ID to WebSocket ID
-type LiveQueries = RwLock<HashMap<Uuid, Uuid>>;
+/// Mapping of LIVE Query ID to WebSocket ID + Session ID
+type LiveQueries = RwLock<HashMap<Uuid, (Uuid, Option<Uuid>)>>;
 
 #[derive(Default)]
 pub struct RpcState {
@@ -63,7 +63,7 @@ pub(crate) async fn notifications(
 						state.live_queries.read().await.get(id).copied()
 					};
 					// Ensure the specified WebSocket exists
-					if let Some(id) = websocket.as_ref() {
+					if let Some((id, _)) = websocket.as_ref() {
 						// Get the WebSocket for this notification
 						let websocket = {
 							state.web_sockets.read().await.get(id).cloned()
