@@ -588,8 +588,8 @@ where
 	/// // Run queries
 	/// let mut result = db
 	///     .query("CREATE person")
-	///     .query("SELECT * FROM type::table($table)")
-	///     .bind(("table", "person"))
+	///     .query("SELECT * FROM $table")
+	///     .bind(("table", Table::from("person")))
 	///     .await?;
 	///
 	/// // Get the first result from the first query

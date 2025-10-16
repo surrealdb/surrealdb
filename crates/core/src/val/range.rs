@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt;
-use std::ops::Bound;
+use std::ops::{Bound, RangeBounds};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -174,10 +174,46 @@ impl Range {
 
 /// A range of a specific type, can be converted back into a general range and
 /// coerced from a general range.
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct TypedRange<T> {
 	pub start: Bound<T>,
 	pub end: Bound<T>,
+}
+
+impl<T: PartialOrd> PartialOrd for TypedRange<T> {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		fn compare_bounds<T: PartialOrd>(a: &Bound<T>, b: &Bound<T>) -> Option<Ordering> {
+			match a {
+				Bound::Unbounded => match b {
+					Bound::Unbounded => Some(Ordering::Equal),
+					_ => Some(Ordering::Less),
+				},
+				Bound::Included(a) => match b {
+					Bound::Unbounded => Some(Ordering::Greater),
+					Bound::Included(b) => a.partial_cmp(b),
+					Bound::Excluded(_) => Some(Ordering::Less),
+				},
+				Bound::Excluded(a) => match b {
+					Bound::Excluded(b) => a.partial_cmp(b),
+					_ => Some(Ordering::Greater),
+				},
+			}
+		}
+
+		match compare_bounds(&self.start, &other.start) {
+			Some(Ordering::Equal) => compare_bounds(&self.end, &other.end),
+			x => x,
+		}
+	}
+}
+
+impl<T: Clone> TypedRange<T> {
+	pub fn from_range<R: RangeBounds<T>>(r: R) -> Self {
+		TypedRange {
+			start: r.start_bound().map(|x| x.clone()),
+			end: r.end_bound().map(|x| x.clone()),
+		}
+	}
 }
 
 impl TypedRange<i64> {

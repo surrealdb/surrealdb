@@ -19,7 +19,7 @@ FOR $test IN [1, 2, 3] {
 	IF $test == 2 {
 		BREAK;
 	};
-	UPSERT type::thing('person', $test) SET test = $test;
+	UPSERT type::record('person', $test) SET test = $test;
 };
 SELECT * FROM person;
 
@@ -27,7 +27,7 @@ FOR $test IN [4, 5, 6] {
 	IF $test == 5 {
 		CONTINUE;
 	};
-	UPSERT type::thing('person', $test) SET test = $test;
+	UPSERT type::record('person', $test) SET test = $test;
 };
 SELECT * FROM person;
 

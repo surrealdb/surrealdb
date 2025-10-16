@@ -1,5 +1,4 @@
 mod all;
-mod changed;
 mod compare;
 mod cut;
 mod decrement;

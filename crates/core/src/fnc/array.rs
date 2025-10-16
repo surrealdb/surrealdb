@@ -217,30 +217,24 @@ pub fn fill(
 
 	let range = if let Some(end) = end {
 		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::range"),
+			name: String::from("array::fill"),
 			message: format!("Argument 1 was the wrong type. {e}"),
 		})?;
 
-		TypedRange {
-			start: Bound::Included(start),
-			end: Bound::Excluded(end),
-		}
+		TypedRange::from_range(start..end)
 	} else if range_start.is_range() {
 		// Condition checked above, unwrap cannot trigger.
 		let range = range_start.into_range().unwrap();
 		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::range"),
+			name: String::from("array::fill"),
 			message: format!("Argument 1 was the wrong type. {e}"),
 		})?
 	} else {
 		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::range"),
+			name: String::from("array::fill"),
 			message: format!("Argument 1 was the wrong type. {e}"),
 		})?;
-		TypedRange {
-			start: Bound::Included(start),
-			end: Bound::Unbounded,
-		}
+		TypedRange::from_range(start..)
 	};
 
 	let array_len = array.len() as i64;
@@ -652,6 +646,24 @@ pub fn range((start_range, Optional(end)): (Value, Optional<i64>)) -> Result<Val
 
 	limit("array::range", mem::size_of::<Value>().saturating_mul(range.len()))?;
 
+	Ok(range.iter().map(Value::from).collect())
+}
+
+pub fn sequence((offset_len, Optional(len)): (i64, Optional<i64>)) -> Result<Value> {
+	let (offset, len) = if let Some(len) = len {
+		(offset_len, len)
+	} else {
+		(0, offset_len)
+	};
+
+	if len <= 0 {
+		return Ok(Value::Array(Array(Vec::new())));
+	}
+
+	let end = offset.saturating_add(len - 1);
+	let range = TypedRange::from_range(offset..=end);
+
+	limit("array::sequence", mem::size_of::<Value>().saturating_mul(range.len()))?;
 	Ok(range.iter().map(Value::from).collect())
 }
 

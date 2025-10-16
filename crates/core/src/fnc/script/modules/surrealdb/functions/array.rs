@@ -58,6 +58,7 @@ impl_module_def!(
 	"remove" => run,
 	"repeat" => run,
 	"reverse" => run,
+	"sequence" => run,
 	"shuffle" => run,
 	"slice" => run,
 	"some" => fut Async,

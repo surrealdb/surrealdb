@@ -1767,11 +1767,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNIN (
-						SELECT * FROM type::thing('user', $id)
+						SELECT * FROM type::record('user', $id)
 					)
 					AUTHENTICATE (
 						-- Simple example increasing the record identifier by one
-					    SELECT * FROM type::thing('user', record::id($auth) + 1)
+					    SELECT * FROM type::record('user', record::id($auth) + 1)
 					)
 					DURATION FOR SESSION 2h
 				;
@@ -1929,7 +1929,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNIN (
-						SELECT * FROM type::thing('user', $id)
+						SELECT * FROM type::record('user', $id)
 					)
 					AUTHENTICATE {
 					    -- Not just signin, this clause runs across signin, signup and authenticate, which makes it a nice place to centralize logic
@@ -1984,7 +1984,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNIN (
-					   SELECT * FROM type::thing('user', $id)
+					   SELECT * FROM type::record('user', $id)
 					)
 					AUTHENTICATE {}
 					DURATION FOR SESSION 2h
@@ -2124,7 +2124,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
 				SIGNIN (
-					SELECT * FROM type::thing('user', $id)
+					SELECT * FROM type::record('user', $id)
 				)
 				AUTHENTICATE {
 					-- Concurrently write to the same document

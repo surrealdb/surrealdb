@@ -429,8 +429,8 @@ impl RecordId {
 		}
 	}
 
-	pub fn is_record_type(&self, val: &[String]) -> bool {
-		val.is_empty() || val.contains(&self.table)
+	pub fn is_table_type(&self, tables: &[String]) -> bool {
+		tables.is_empty() || tables.contains(&self.table)
 	}
 
 	pub(crate) async fn select_document(
@@ -465,7 +465,7 @@ impl TryFrom<RecordId> for crate::types::PublicRecordId {
 
 	fn try_from(value: RecordId) -> Result<Self, Self::Error> {
 		Ok(crate::types::PublicRecordId {
-			table: value.table,
+			table: value.table.into(),
 			key: value.key.try_into()?,
 		})
 	}
@@ -474,7 +474,7 @@ impl TryFrom<RecordId> for crate::types::PublicRecordId {
 impl From<crate::types::PublicRecordId> for RecordId {
 	fn from(value: crate::types::PublicRecordId) -> Self {
 		RecordId {
-			table: value.table,
+			table: value.table.into_string(),
 			key: RecordIdKey::from(value.key),
 		}
 	}

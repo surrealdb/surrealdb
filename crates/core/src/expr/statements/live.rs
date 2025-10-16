@@ -218,7 +218,7 @@ mod tests {
 				live_id,
 				PublicAction::Create,
 				PublicValue::RecordId(PublicRecordId {
-					table: tb.to_owned(),
+					table: tb.into(),
 					key: PublicRecordIdKey::String("test_true".to_owned())
 				}),
 				syn::value(&format!(

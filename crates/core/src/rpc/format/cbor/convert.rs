@@ -175,7 +175,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 						let key = to_record_id_key(key)?;
 
 						Ok(PublicValue::RecordId(PublicRecordId {
-							table,
+							table: table.into(),
 							key,
 						}))
 					}
@@ -403,11 +403,14 @@ pub fn from_value(val: PublicValue) -> Result<CborValue> {
 		PublicValue::Array(v) => from_array(v),
 		PublicValue::Object(v) => from_object(v),
 		PublicValue::Bytes(v) => Ok(CborValue::Bytes(v.into())),
-		PublicValue::RecordId(v) => Ok(CborValue::Tag(
+		PublicValue::RecordId(PublicRecordId {
+			table,
+			key,
+		}) => Ok(CborValue::Tag(
 			TAG_RECORDID,
 			Box::new(CborValue::Array(vec![
-				CborValue::Text(v.table),
-				match v.key {
+				CborValue::Text(table.into_string()),
+				match key {
 					PublicRecordIdKey::Number(v) => CborValue::Integer(v.into()),
 					PublicRecordIdKey::String(v) => CborValue::Text(v),
 					PublicRecordIdKey::Uuid(v) => from_uuid(v),

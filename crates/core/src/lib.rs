@@ -54,7 +54,6 @@ pub mod kvs;
 pub mod mem;
 pub mod obs;
 pub mod options;
-pub mod protocol;
 pub mod rpc;
 pub mod sql;
 pub mod str;
@@ -73,7 +72,8 @@ pub(crate) mod types {
 		Number as PublicNumber, Object as PublicObject, Range as PublicRange,
 		RecordId as PublicRecordId, RecordIdKey as PublicRecordIdKey,
 		RecordIdKeyRange as PublicRecordIdKeyRange, Regex as PublicRegex, SurrealValue,
-		Uuid as PublicUuid, Value as PublicValue, Variables as PublicVariables,
+		Table as PublicTable, Uuid as PublicUuid, Value as PublicValue,
+		Variables as PublicVariables,
 	};
 }
 
@@ -88,3 +88,26 @@ pub mod ent;
 pub mod channel {
 	pub use async_channel::{Receiver, Sender, bounded, unbounded};
 }
+
+/// Composer for the community edition of SurrealDB.
+///
+/// This struct implements the composer pattern for dependency injection, providing
+/// default implementations of the traits required to initialize and run SurrealDB.
+///
+/// # Implemented Traits
+/// - `TransactionBuilderFactory` - Selects and validates the datastore backend
+/// - `RouterFactory` - Constructs the HTTP router with standard routes
+/// - `ConfigCheck` - Validates configuration before initialization
+///
+/// # Usage
+/// This is the default composer used by the `surreal` binary. Embedders can create
+/// their own composer structs implementing these traits to customize behavior.
+///
+/// # Example
+/// ```ignore
+/// use surrealdb_core::CommunityComposer;
+///
+/// // Pass the composer to init functions
+/// surreal::init(CommunityComposer())
+/// ```
+pub struct CommunityComposer();

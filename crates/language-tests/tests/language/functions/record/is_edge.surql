@@ -75,8 +75,8 @@ record::is_edge(table);
 -- Test 4: Invalid argument - number, not a record ID (should error)
 record::is_edge(64746);
 
--- Test 5: Non-existent record, using `type::thing` constructor
-record::is_edge(type::thing('person', 'nonexistent'));
+-- Test 5: Non-existent record, using `type::record` constructor
+record::is_edge(type::record('person', 'nonexistent'));
 
 -- Test 6: Non-existent record (before creation)
 record::is_edge(person:john);
@@ -99,8 +99,8 @@ record::is_edge(knows:person);
 -- Test 12: Check if edge record is an edge, using a string (should be true)
 record::is_edge('knows:person');
 
--- Test 13: Check if edge record is an edge, using `type::thing` constructor (should be true)
-record::is_edge(type::thing('knows', 'person'));
+-- Test 13: Check if edge record is an edge, using `type::record` constructor (should be true)
+record::is_edge(type::record('knows', 'person'));
 
 -- Test 14: JavaScript function call for a regular record (should be false)
 function() { return surrealdb.functions.record.is_edge("person:john"); };

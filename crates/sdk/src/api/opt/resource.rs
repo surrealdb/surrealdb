@@ -1,8 +1,8 @@
 use std::ops::{self, Bound};
 
 use surrealdb_types::{
-	Array, Kind, Object, RecordId, RecordIdKey, RecordIdKeyRange, SurrealValue, ToSql, Value,
-	Variables,
+	Array, Kind, Object, RecordId, RecordIdKey, RecordIdKeyRange, SurrealValue, Table, ToSql,
+	Value, Variables,
 };
 
 use crate::api::Result;
@@ -11,7 +11,7 @@ use crate::api::err::Error;
 /// A table range.
 #[derive(Debug, Clone, PartialEq)]
 pub struct QueryRange {
-	pub table: String,
+	pub table: Table,
 	pub range: RecordIdKeyRange,
 }
 
@@ -30,7 +30,7 @@ pub enum Direction {
 #[non_exhaustive]
 pub enum Resource {
 	/// Table name
-	Table(String),
+	Table(Table),
 	/// Record ID
 	RecordId(RecordId),
 	/// An object
@@ -66,8 +66,8 @@ impl Resource {
 	pub(crate) fn for_sql_query(&self, variables: &mut Variables) -> Result<&'static str> {
 		match self {
 			Resource::Table(table) => {
-				variables.insert("_table".to_string(), Value::String(table.clone()));
-				Ok("type::table($_table)")
+				variables.insert("_table".to_string(), Value::Table(table.clone()));
+				Ok("$_table")
 			}
 			Resource::RecordId(record_id) => {
 				variables.insert("_record_id".to_string(), Value::RecordId(record_id.clone()));
@@ -120,7 +120,7 @@ impl SurrealValue for Resource {
 
 	fn into_value(self) -> Value {
 		match self {
-			Resource::Table(x) => Value::String(x),
+			Resource::Table(x) => Value::Table(x),
 			Resource::RecordId(x) => Value::RecordId(x),
 			Resource::Object(x) => Value::Object(x),
 			Resource::Array(x) => Value::Array(Array::from(x)),
@@ -174,19 +174,25 @@ impl From<&[Value]> for Resource {
 
 impl From<&str> for Resource {
 	fn from(s: &str) -> Self {
-		Self::Table(s.to_string())
+		Self::Table(s.into())
 	}
 }
 
 impl From<&String> for Resource {
 	fn from(s: &String) -> Self {
-		Self::Table(s.clone())
+		Self::Table(s.clone().into())
 	}
 }
 
 impl From<String> for Resource {
 	fn from(s: String) -> Self {
-		Self::Table(s)
+		Self::Table(s.into())
+	}
+}
+
+impl From<Table> for Resource {
+	fn from(table: Table) -> Self {
+		Self::Table(table)
 	}
 }
 
@@ -202,7 +208,7 @@ where
 	I: Into<RecordIdKey>,
 {
 	fn from((table, id): (T, I)) -> Self {
-		let record_id = RecordId::new(table, id.into());
+		let record_id = RecordId::new(table.into(), id.into());
 		Self::RecordId(record_id)
 	}
 }
@@ -391,7 +397,7 @@ where
 	I: Into<RecordIdKey>,
 {
 	fn into_resource(self) -> Result<Resource> {
-		let record_id = RecordId::new(self.0, self.1);
+		let record_id = RecordId::new(self.0.into(), self.1);
 		Ok(Resource::RecordId(record_id))
 	}
 }

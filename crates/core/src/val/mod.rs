@@ -87,8 +87,8 @@ pub(crate) enum Value {
 	Object(Object),
 	Geometry(Geometry),
 	Bytes(Bytes),
-	RecordId(RecordId),
 	Table(Table),
+	RecordId(RecordId),
 	File(File),
 	#[serde(skip)]
 	Regex(Regex),
@@ -119,6 +119,11 @@ impl Value {
 	// -----------------------------------
 	// Simple value detection
 	// -----------------------------------
+
+	/// Check if this Value is not NONE
+	pub fn is_some(&self) -> bool {
+		!matches!(self, Value::None)
+	}
 
 	/// Check if this Value is NONE or NULL
 	pub fn is_nullish(&self) -> bool {
@@ -170,7 +175,7 @@ impl Value {
 	/// Check if this Value is a Thing of a specific type
 	pub fn is_record_type(&self, types: &[String]) -> bool {
 		match self {
-			Value::RecordId(v) => v.is_record_type(types),
+			Value::RecordId(v) => v.is_table_type(types),
 			_ => false,
 		}
 	}
@@ -803,7 +808,7 @@ subtypes! {
 	Object(Object) => (is_object,as_object,into_object),
 	Geometry(Geometry) => (is_geometry,as_geometry,into_geometry),
 	Bytes(Bytes) => (is_bytes,as_bytes,into_bytes),
-	RecordId(RecordId) => (is_thing,as_thing,into_thing),
+	RecordId(RecordId) => (is_record,as_record,into_record),
 	Regex(Regex) => (is_regex,as_regex,into_regex),
 	Range(Box<Range>) => (is_range,as_range,into_range),
 	Closure(Box<Closure>) => (is_closure,as_closure,into_closure),
@@ -1044,7 +1049,7 @@ fn convert_object_to_public(value: crate::val::Object) -> Result<surrealdb_types
 fn convert_record_id_to_public(value: crate::val::RecordId) -> Result<surrealdb_types::Value> {
 	let key = convert_record_id_key_to_public(value.key)?;
 	Ok(surrealdb_types::Value::RecordId(surrealdb_types::RecordId {
-		table: value.table,
+		table: value.table.into(),
 		key,
 	}))
 }
@@ -1339,9 +1344,9 @@ mod tests {
 		])),
 	)]
 	#[case::thing(
-		PublicValue::RecordId(PublicRecordId{ table: "foo".to_string(), key: PublicRecordIdKey::String("bar".into())}) ,
+		PublicValue::RecordId(PublicRecordId::new("foo", PublicRecordIdKey::String("bar".into()))) ,
 		json!("foo:bar"),
-		PublicValue::RecordId(PublicRecordId{ table: "foo".to_string(), key: PublicRecordIdKey::String("bar".into())}) ,
+		PublicValue::RecordId(PublicRecordId::new("foo", PublicRecordIdKey::String("bar".into()))) ,
 	)]
 	#[case::array(
 		PublicValue::Array(PublicArray::new()),

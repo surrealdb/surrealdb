@@ -190,6 +190,17 @@ pub fn record_id_with_range(input: &str) -> Result<RecordIdLit> {
 	parse_with(input.as_bytes(), async |parser, stk| parser.parse_record_id_with_range(stk).await)
 }
 
+/// Parse a table name from a string.
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn table(input: &str) -> Result<crate::val::Table> {
+	trace!(target: TARGET, "Parsing SurrealQL table name");
+
+	parse_with(input.as_bytes(), async |parser, _stk| {
+		let ident = parser.parse_ident()?;
+		Ok(crate::val::Table::new(ident))
+	})
+}
+
 /// Parse a block, expects the value to be wrapped in `{}`.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn block(input: &str) -> Result<Block> {

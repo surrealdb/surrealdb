@@ -48,24 +48,23 @@ where
 		// Generate the LIVE SELECT SQL based on resource type
 		let query = match what_resource {
 			Resource::Table(table) => {
-				variables.insert("_table".to_string(), Value::String(table));
+				variables.insert("_table".to_string(), Value::Table(table));
 				format!("LIVE SELECT * FROM {what}")
 			}
 			Resource::RecordId(record) => {
 				// For a specific record, we need to query the table with a WHERE clause
 				// because LIVE queries don't support record IDs directly
-				let table_name = &record.table;
-				variables.insert("_table".to_string(), Value::String(table_name.clone()));
+				variables.insert("_table".to_string(), Value::Table(record.table.clone()));
 				variables.insert("_record_id".to_string(), Value::RecordId(record));
-				"LIVE SELECT * FROM type::table($_table) WHERE id = $_record_id".to_string()
+				"LIVE SELECT * FROM $_table WHERE id = $_record_id".to_string()
 			}
 			Resource::Object(_) => return Err(Error::LiveOnObject),
 			Resource::Array(_) => return Err(Error::LiveOnArray),
 			Resource::Range(query_range) => {
 				// For live queries with ranges, we can't use the range in FROM clause
 				// We need to use the table and add WHERE conditions
-				variables.insert("_table".to_string(), Value::String(query_range.table.clone()));
-				let table_expr = "type::table($_table)";
+				variables.insert("_table".to_string(), Value::Table(query_range.table.clone()));
+				let table_expr = "$_table";
 
 				// Build WHERE clause for range queries
 				let mut conditions = Vec::new();

@@ -8,7 +8,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{FlowResultExt as _, Idiom, Kind};
+use crate::expr::{FlowResultExt as _, Idiom};
 use crate::syn;
 use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
@@ -101,35 +101,6 @@ pub fn range((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<Box<Range>>()?.into())
 }
 
-pub fn record((rid, Optional(tb)): (Value, Optional<Value>)) -> Result<Value> {
-	match tb {
-		Some(Value::String(tb)) => {
-			if tb.is_empty() {
-				Err(anyhow::Error::new(Error::TbInvalid {
-					value: tb,
-				}))
-			} else {
-				rid.cast_to_kind(&Kind::Record(vec![tb])).map_err(From::from)
-			}
-		}
-
-		Some(Value::Table(tb)) => {
-			if tb.is_empty() {
-				Err(anyhow::Error::new(Error::TbInvalid {
-					value: tb.into_string(),
-				}))
-			} else {
-				rid.cast_to_kind(&Kind::Record(vec![tb.into_string()])).map_err(From::from)
-			}
-		}
-		Some(_) => Err(anyhow::Error::new(Error::InvalidArguments {
-			name: "type::record".into(),
-			message: "The second argument must be a table name or a string.".into(),
-		})),
-		None => rid.cast_to_kind(&Kind::Record(vec![])).map_err(From::from),
-	}
-}
-
 pub fn string((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<String>()?.into())
 }
@@ -152,7 +123,7 @@ pub fn table((val,): (Value,)) -> Result<Value> {
 	Ok(Value::Table(Table::new(strand)))
 }
 
-pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> {
+pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> {
 	match (arg1, arg2) {
 		// Empty table name
 		(Value::String(arg1), _) if arg1.is_empty() => bail!(Error::TbInvalid {
@@ -301,7 +272,7 @@ pub mod is {
 	pub fn record((arg, Optional(table)): (Value, Optional<String>)) -> Result<Value> {
 		let res = match table {
 			Some(tb) => arg.is_record_type(&[tb]).into(),
-			None => arg.is_thing().into(),
+			None => arg.is_record().into(),
 		};
 		Ok(res)
 	}
@@ -337,7 +308,7 @@ mod tests {
 
 	#[test]
 	fn no_empty_thing() {
-		let value = super::thing(("".into(), Optional(None)));
+		let value = super::record(("".into(), Optional(None)));
 		let _expected = Error::TbInvalid {
 			value: "".into(),
 		};
@@ -345,7 +316,7 @@ mod tests {
 			panic!("An empty thing tb part should result in an error");
 		}
 
-		let value = super::thing(("table".into(), Optional(Some("".into()))));
+		let value = super::record(("table".into(), Optional(Some("".into()))));
 		let _expected = Error::IdInvalid {
 			value: "".into(),
 		};

@@ -8,11 +8,13 @@ pub static METHOD: &str = "method";
 pub static PARAMS: &str = "params";
 pub static VERSION: &str = "version";
 pub static TXN: &str = "txn";
+pub static SESSION_ID: &str = "session";
 
 #[derive(Debug)]
 pub struct Request {
 	pub id: Option<PublicValue>,
 	pub version: Option<u8>,
+	pub session_id: Option<PublicUuid>,
 	pub txn: Option<PublicUuid>,
 	pub method: Method,
 	pub params: PublicArray,
@@ -49,6 +51,16 @@ impl Request {
 		};
 
 		// Fetch the 'txn' argument
+		let session_id = match obj.remove(SESSION_ID) {
+			None | Some(PublicValue::None | PublicValue::Null) => None,
+			Some(PublicValue::Uuid(x)) => Some(x),
+			Some(PublicValue::String(x)) => {
+				Some(PublicUuid::from_str(x.as_str()).map_err(|_| RpcError::InvalidRequest)?)
+			}
+			_ => return Err(RpcError::InvalidRequest),
+		};
+
+		// Fetch the 'txn' argument
 		let txn = match obj.remove(TXN) {
 			None | Some(PublicValue::None | PublicValue::Null) => None,
 			Some(PublicValue::Uuid(x)) => Some(x),
@@ -77,6 +89,7 @@ impl Request {
 			params,
 			version,
 			txn,
+			session_id,
 		})
 	}
 }

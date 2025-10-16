@@ -305,6 +305,20 @@ impl MutableContext {
 	}
 
 	/// Get the namespace and database ids for the current context.
+	/// If the namespace or database does not exist, it will be try to be
+	/// created based on the `strict` option.
+	pub(crate) async fn try_ns_db_ids(
+		&self,
+		opt: &Options,
+	) -> Result<Option<(NamespaceId, DatabaseId)>> {
+		let (ns, db) = opt.ns_db()?;
+		let Some(db_def) = self.tx().get_db_by_name(ns, db).await? else {
+			return Ok(None);
+		};
+		Ok(Some((db_def.namespace_id, db_def.database_id)))
+	}
+
+	/// Get the namespace and database ids for the current context.
 	/// If the namespace or database does not exist, it will return an error.
 	pub(crate) async fn expect_ns_db_ids(
 		&self,

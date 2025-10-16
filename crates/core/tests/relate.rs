@@ -11,6 +11,7 @@ use crate::helpers::Test;
 #[tokio::test]
 async fn relate_with_parameters() -> Result<()> {
 	let sql = "
+		USE NS test DB test;
 		LET $tobie = person:tobie;
 		LET $jaime = person:jaime;
 		RELATE $tobie->knows->$jaime SET id = knows:test, brother = true;
@@ -18,7 +19,11 @@ async fn relate_with_parameters() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
+	assert_eq!(res.len(), 4);
+
+	// USE NS test DB test;
+	let tmp = res.remove(0).result;
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::None;
@@ -48,6 +53,7 @@ async fn relate_with_parameters() -> Result<()> {
 #[tokio::test]
 async fn relate_and_overwrite() -> Result<()> {
 	let sql = "
+		USE NS test DB test;
 		LET $tobie = person:tobie;
 		LET $jaime = person:jaime;
 		RELATE $tobie->knows->$jaime CONTENT { id: knows:test, brother: true };
@@ -57,7 +63,11 @@ async fn relate_and_overwrite() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
+	assert_eq!(res.len(), 6);
+
+	// USE NS test DB test;
+	let tmp = res.remove(0).result;
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::None;
@@ -121,9 +131,9 @@ async fn relate_with_param_or_subquery() -> Result<()> {
         LET $relation = type::table("knows");
 		RELATE $tobie->$relation->$jaime;
 		RELATE $tobie->(type::table("knows"))->$jaime;
-        LET $relation = type::thing("knows:foo");
+        LET $relation = type::record("knows:foo");
 		RELATE $tobie->$relation->$jaime;
-		RELATE $tobie->(type::thing("knows:bar"))->$jaime;
+		RELATE $tobie->(type::record("knows:bar"))->$jaime;
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -161,9 +171,9 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 		let Value::RecordId(t) = id else {
 			panic!("should be thing {id:?}")
 		};
-		assert_eq!(t.table, "knows");
+		assert_eq!(t.table.as_str(), "knows");
 	}
-	// LET $relation = type::thing("knows:foo");
+	// LET $relation = type::record("knows:foo");
 	let tmp = res.remove(0).result?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
@@ -180,7 +190,7 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 	)
 	.unwrap();
 	assert_eq!(tmp, val);
-	// LET $relation = type::thing("knows:bar");
+	// LET $relation = type::record("knows:bar");
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
 		"[

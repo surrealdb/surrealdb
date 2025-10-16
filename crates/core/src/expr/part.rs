@@ -136,7 +136,7 @@ impl Part {
 	pub(crate) fn to_raw_string(&self) -> String {
 		match self {
 			Part::Start(v) => v.to_raw_string(),
-			Part::Field(v) => format!(".{}", v),
+			Part::Field(v) => format!(".{}", EscapeKwFreeIdent(v)),
 			_ => self.to_string(),
 		}
 	}

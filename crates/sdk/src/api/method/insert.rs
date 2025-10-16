@@ -146,15 +146,8 @@ where
 
 			let query = match what_resource {
 				Resource::Table(_) => {
-					// For tables with content, we need to check if data is an array or single
-					// object If array, use INSERT INTO (wrapped in block to support
-					// type::table); if object, use CREATE with CONTENT
 					if data.is_array() {
-						// INSERT INTO can handle arrays of objects, but it can't accept
-						// type::table() directly so we wrap it in a block
-						Cow::Owned(format!(
-							"{{ LET $__table = {what}; INSERT INTO $__table $_data }}"
-						))
+						Cow::Owned(format!("INSERT INTO {what} $_data"))
 					} else {
 						// Single object - use CREATE with CONTENT
 						Cow::Owned(format!("CREATE {what} CONTENT $_data"))
@@ -212,14 +205,7 @@ where
 			let what = what_resource.for_sql_query(&mut variables)?;
 
 			let query = match what_resource {
-				Resource::Table(_) => {
-					// `INSERT RELATION INTO` is finicky. It cannot accept an expression for the
-					// table name, so we wrap the call in a block and use a local variable so
-					// that we still only get one returned result.
-					Cow::Owned(format!(
-						"{{ LET $__table = {what}; INSERT RELATION INTO $__table $_data; }}"
-					))
-				}
+				Resource::Table(_) => Cow::Owned(format!("INSERT RELATION INTO {what} $_data;")),
 				Resource::RecordId(record_id) => {
 					if data.is_array() {
 						return Err(Error::InvalidParams(

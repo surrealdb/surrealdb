@@ -3,9 +3,10 @@ use std::ops::Bound;
 
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{RecordId, ToSql, write_sql};
 
 use super::SleepStatement;
+use crate::cnf::GENERATION_ALLOCATION_LIMIT;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -162,8 +163,12 @@ impl Expr {
 					})
 					.collect(),
 			)),
-			surrealdb_types::Value::RecordId(r) => {
-				let key_lit = match r.key {
+			surrealdb_types::Value::Table(t) => Expr::Table(t.into_string()),
+			surrealdb_types::Value::RecordId(RecordId {
+				table,
+				key,
+			}) => {
+				let key_lit = match key {
 					surrealdb_types::RecordIdKey::Number(n) => RecordIdKeyLit::Number(n),
 					surrealdb_types::RecordIdKey::String(s) => RecordIdKeyLit::String(s),
 					surrealdb_types::RecordIdKey::Uuid(u) => {
@@ -184,7 +189,7 @@ impl Expr {
 					_ => return Expr::Literal(Literal::None), // For unsupported key types
 				};
 				Expr::Literal(Literal::RecordId(RecordIdLit {
-					table: r.table.clone(),
+					table: table.into_string(),
 					key: key_lit,
 				}))
 			}
@@ -359,7 +364,22 @@ impl Expr {
 				// ([thing:1,thing:2,thing:3...])` so when we encounted mock outside of
 				// create we return the array here instead.
 				//
-				let record_ids = mock.clone().into_iter().map(Value::RecordId).collect();
+
+				let iter = mock.clone().into_iter();
+				if iter
+					.size_hint()
+					.1
+					.map(|x| {
+						x.saturating_mul(std::mem::size_of::<Value>())
+							> *GENERATION_ALLOCATION_LIMIT
+					})
+					.unwrap_or(true)
+				{
+					return Err(ControlFlow::Err(anyhow::Error::msg(
+						"Mock range exceeds allocation limit",
+					)));
+				}
+				let record_ids = iter.map(Value::RecordId).collect();
 				Ok(Value::Array(Array(record_ids)))
 			}
 			Expr::Block(block) => block.compute(stk, ctx, &opt, doc).await,

@@ -10,7 +10,7 @@ use crate as surrealdb_types;
 use crate::error::{ConversionError, length_mismatch_error, out_of_range_error};
 use crate::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Kind, Number, Object, Range, RecordId,
-	SurrealNone, SurrealNull, Uuid, Value, kind,
+	SurrealNone, SurrealNull, Table, Uuid, Value, kind,
 };
 
 /// Trait for converting between SurrealDB values and Rust types
@@ -746,6 +746,34 @@ impl_surreal_value!(
 			return Err(conversion_error(Self::kind_of(), value));
 		};
 		Ok(bytes::Bytes::from(b))
+	}
+);
+
+impl_surreal_value!(
+	Table as kind!(table),
+	is_table(value) => {
+		matches!(value, Value::Table(_))
+	},
+	from_table(self) => Value::Table(self),
+	into_table(value) => {
+		match value {
+			Value::Table(t) => Ok(t),
+			_ => Err(conversion_error(Self::kind_of(), value)),
+		}
+	},
+	as_ty => as_table(self) => {
+		if let Value::Table(t) = self {
+			Some(t)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_table_and(self, callback) => {
+		if let Value::Table(t) = self {
+			callback(t)
+		} else {
+			false
+		}
 	}
 );
 
