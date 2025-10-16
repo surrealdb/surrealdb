@@ -3,7 +3,7 @@ use std::ops::Bound;
 
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{RecordId, ToSql, write_sql};
 
 use super::SleepStatement;
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
@@ -163,8 +163,12 @@ impl Expr {
 					})
 					.collect(),
 			)),
-			surrealdb_types::Value::RecordId(r) => {
-				let key_lit = match r.key {
+			surrealdb_types::Value::Table(t) => Expr::Table(t.into_string()),
+			surrealdb_types::Value::RecordId(RecordId {
+				table,
+				key,
+			}) => {
+				let key_lit = match key {
 					surrealdb_types::RecordIdKey::Number(n) => RecordIdKeyLit::Number(n),
 					surrealdb_types::RecordIdKey::String(s) => RecordIdKeyLit::String(s),
 					surrealdb_types::RecordIdKey::Uuid(u) => {
@@ -185,7 +189,7 @@ impl Expr {
 					_ => return Expr::Literal(Literal::None), // For unsupported key types
 				};
 				Expr::Literal(Literal::RecordId(RecordIdLit {
-					table: r.table.clone(),
+					table: table.into_string(),
 					key: key_lit,
 				}))
 			}

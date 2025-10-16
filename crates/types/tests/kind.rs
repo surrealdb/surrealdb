@@ -29,10 +29,15 @@ fn test_kind_proc_macro() {
 		(range) => Kind::Range,
 		(function) => Kind::Function(None, None),
 
-		// Records
-		(record) => Kind::Record(vec![]),
-		(record<user>) => Kind::Record(vec!["user".to_string()]),
-		(record<user | post>) => Kind::Record(vec!["user".to_string(), "post".to_string()]),
+	// Tables
+	(table) => Kind::Table(vec![]),
+	(table<user>) => Kind::Table(vec!["user".to_string()]),
+	(table<user | post>) => Kind::Table(vec!["user".to_string(), "post".to_string()]),
+
+	// Records
+	(record) => Kind::Record(vec![]),
+	(record<user>) => Kind::Record(vec!["user".to_string()]),
+	(record<user | post>) => Kind::Record(vec!["user".to_string(), "post".to_string()]),
 
 		// Geometries
 		(geometry) => Kind::Geometry(vec![]),

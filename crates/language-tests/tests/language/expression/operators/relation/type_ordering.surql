@@ -48,6 +48,6 @@ u"FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF" < [];
 [] < {};
 {} < (1,2);
 (1,2) < a:b;
-a:b < type::table("a");
+type::table("a") < a:b;
 /a/ < 1..2;
 1..2 < |$a| {};

@@ -4,6 +4,7 @@ mod kind;
 mod misc;
 mod primitives;
 mod record;
+mod table;
 mod value;
 
 use anyhow::Context;
@@ -58,8 +59,8 @@ mod tests {
 
 	use super::*;
 	use crate::{
-		Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, Regex, Uuid,
-		object,
+		Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, Regex, Table,
+		Uuid, object,
 	};
 
 	#[rstest]
@@ -90,6 +91,8 @@ mod tests {
 	// Bytes
 	#[case::bytes(Value::Bytes(Bytes::from(vec![1, 2, 3, 4, 5])))]
 	#[case::bytes(Value::Bytes(Bytes::from(vec![0; 1024])))]
+	// Table
+	#[case::table(Value::Table(Table::new("test_table")))]
 	// RecordId
 	#[case::record_id(Value::RecordId(RecordId::new("test_table", 42)))]
 	#[case::record_id(Value::RecordId(RecordId::new("test_table", "test_key")))]

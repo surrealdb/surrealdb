@@ -29,10 +29,9 @@ use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-#[cfg(not(target_family = "wasm"))]
-use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
 use crate::kvs::cache::ds::DatastoreCache;
+use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::mem::ALLOC;
@@ -68,7 +67,6 @@ pub struct MutableContext {
 	// The index store
 	index_stores: IndexStores,
 	// The index concurrent builders
-	#[cfg(not(target_family = "wasm"))]
 	index_builder: Option<IndexBuilder>,
 	// The sequences
 	sequences: Option<Sequences>,
@@ -126,7 +124,6 @@ impl MutableContext {
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::default(),
 			cache: None,
-			#[cfg(not(target_family = "wasm"))]
 			index_builder: None,
 			sequences: None,
 			#[cfg(storage)]
@@ -151,7 +148,6 @@ impl MutableContext {
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
 			cache: parent.cache.clone(),
-			#[cfg(not(target_family = "wasm"))]
 			index_builder: parent.index_builder.clone(),
 			sequences: parent.sequences.clone(),
 			#[cfg(storage)]
@@ -179,7 +175,6 @@ impl MutableContext {
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
 			cache: parent.cache.clone(),
-			#[cfg(not(target_family = "wasm"))]
 			index_builder: parent.index_builder.clone(),
 			sequences: parent.sequences.clone(),
 			#[cfg(storage)]
@@ -194,7 +189,6 @@ impl MutableContext {
 	/// Create a new context from a frozen parent context.
 	/// This context is not linked to the parent context,
 	/// and won't be cancelled if the parent is cancelled.
-	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn new_concurrent(from: &Context) -> Self {
 		Self {
 			values: HashMap::default(),
@@ -226,7 +220,7 @@ impl MutableContext {
 		slow_log: Option<SlowLog>,
 		capabilities: Arc<Capabilities>,
 		index_stores: IndexStores,
-		#[cfg(not(target_family = "wasm"))] index_builder: IndexBuilder,
+		index_builder: IndexBuilder,
 		sequences: Sequences,
 		cache: Arc<DatastoreCache>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
@@ -245,7 +239,6 @@ impl MutableContext {
 			capabilities,
 			index_stores,
 			cache: Some(cache),
-			#[cfg(not(target_family = "wasm"))]
 			index_builder: Some(index_builder),
 			sequences: Some(sequences),
 			#[cfg(storage)]
@@ -462,7 +455,6 @@ impl MutableContext {
 	}
 
 	/// Get the index_builder for this context/ds
-	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn get_index_builder(&self) -> Option<&IndexBuilder> {
 		self.index_builder.as_ref()
 	}

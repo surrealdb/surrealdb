@@ -29,7 +29,7 @@ BEGIN;
 let $len = $type_array.len();
 
 for $i in (<array> 0..$len){
-	CREATE type::thing('t',$i) SET v = array::min($type_array[$i..$len]);
+	CREATE type::record('t',$i) SET v = array::min($type_array[$i..$len]);
 };
 RETURN SELECT v,id FROM t;
 COMMIT;
