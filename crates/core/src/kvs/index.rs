@@ -31,6 +31,7 @@ use wasm_bindgen_futures::spawn_local as spawn;
 #[derive(Debug, Clone)]
 pub(crate) enum BuildingStatus {
 	Started,
+	Cleaning,
 	Indexing {
 		initial: Option<usize>,
 		updated: Option<usize>,
@@ -76,6 +77,7 @@ impl From<BuildingStatus> for Value {
 		let mut o = Object::default();
 		let s = match st {
 			BuildingStatus::Started => "started",
+			BuildingStatus::Cleaning => "cleaning",
 			BuildingStatus::Indexing {
 				initial,
 				pending,
@@ -195,13 +197,15 @@ impl IndexBuilder {
 			(None, None)
 		};
 		match self.indexes.write().await.entry(key) {
-			Entry::Occupied(e) => {
+			Entry::Occupied(mut e) => {
 				// If the building is currently running, we return an error
 				if !e.get().is_finished() {
 					return Err(Error::IndexAlreadyBuilding {
 						name: e.key().ix.clone(),
 					});
 				}
+				let ib = self.start_building(ctx, opt, ix, sdr)?;
+				e.insert(ib);
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
@@ -410,8 +414,18 @@ impl Building {
 	}
 
 	async fn run(&self) -> Result<(), Error> {
-		// First iteration, we index every keys
 		let (ns, db) = self.opt.ns_db()?;
+		// Remove the index data
+		{
+			self.set_status(BuildingStatus::Cleaning).await;
+			let ctx = self.new_write_tx_ctx().await?;
+			let key = crate::key::index::all::new(ns, db, &self.tb, &self.ix.name);
+			let tx = ctx.tx();
+			tx.delp(&key).await?;
+			tx.commit().await?;
+		}
+
+		// First iteration, we index every keys
 		let beg = thing::prefix(ns, db, &self.tb)?;
 		let end = thing::suffix(ns, db, &self.tb)?;
 		let mut next = Some(beg..end);

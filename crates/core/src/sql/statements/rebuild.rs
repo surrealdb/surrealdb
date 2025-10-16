@@ -4,7 +4,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::iam::{Action, ResourceKind};
 use crate::sql::ident::Ident;
-use crate::sql::statements::RemoveIndexStatement;
 use crate::sql::value::Value;
 use crate::sql::Base;
 
@@ -63,37 +62,35 @@ impl RebuildIndexStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		stk: &mut Stk,
+		_stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value, Error> {
-		let future = async {
-			// Allowed to run?
-			opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
-			// Get the index definition
-			let (ns, db) = opt.ns_db()?;
-			let ix = ctx.tx().get_tb_index(ns, db, &self.what, &self.name).await?;
-			// Create the remove statement
-			let stm = RemoveIndexStatement {
-				name: self.name.clone(),
-				what: self.what.clone(),
-				if_exists: false,
-			};
-			// Execute the delete statement
-			stm.compute(ctx, opt).await?;
-			// Rebuild the index
-			ix.compute(stk, ctx, opt, doc).await?;
-			// Ok all good
-			Ok(Value::None)
-		}
-		.await;
-		match future {
+		// Allowed to run?
+		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
+		// Get the index definition
+		let (ns, db) = opt.ns_db()?;
+		let res = ctx.tx().get_tb_index(ns, db, &self.what, &self.name).await;
+		let ix = match res {
+			Ok(x) => x,
 			Err(Error::IxNotFound {
-				..
-			}) if self.if_exists => Ok(Value::None),
-			v => v,
-		}
+				name,
+			}) => {
+				if self.if_exists {
+					return Ok(Value::None);
+				} else {
+					return Err(Error::IxNotFound {
+						name,
+					});
+				}
+			}
+			Err(e) => return Err(e),
+		};
+		// Rebuild the index
+		ix.run_indexing(ctx, opt, true).await?;
+		// Ok all good
+		Ok(Value::None)
 	}
 }
 

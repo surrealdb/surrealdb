@@ -122,7 +122,7 @@ impl DefineIndexStatement {
 		Ok(Value::None)
 	}
 
-	async fn run_indexing(
+	pub(crate) async fn run_indexing(
 		&self,
 		ctx: &Context,
 		opt: &Options,
