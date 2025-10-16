@@ -15,39 +15,35 @@ use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
-use surrealdb::dbs::Session;
-use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb::gql::cache::{Invalidator, SchemaCache};
-use surrealdb::gql::error::resolver_error;
-use surrealdb::kvs::Datastore;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::capabilities::RouteTarget;
+use surrealdb_core::gql::cache::GraphQLSchemaCache;
+use surrealdb_core::gql::error::resolver_error;
+use surrealdb_core::kvs::Datastore;
 use tower_service::Service;
 
 use crate::net::error::Error as NetError;
 
 /// A GraphQL service.
 #[derive(Clone)]
-pub struct GraphQL<I: Invalidator> {
-	cache: SchemaCache<I>,
-	// datastore: Arc<Datastore>,
+pub struct GraphQLService {
+	cache: GraphQLSchemaCache,
 }
 
-impl<I: Invalidator> GraphQL<I> {
+impl GraphQLService {
 	/// Create a GraphQL handler.
-	pub fn new(invalidator: I, datastore: Arc<Datastore>) -> Self {
-		let _ = invalidator;
-		GraphQL {
-			cache: SchemaCache::new(datastore),
-			// datastore,
+	pub fn new(datastore: Arc<Datastore>) -> Self {
+		GraphQLService {
+			cache: GraphQLSchemaCache::new(datastore),
 		}
 	}
 }
 
-impl<B, I> Service<HttpRequest<B>> for GraphQL<I>
+impl<B> Service<HttpRequest<B>> for GraphQLService
 where
 	B: HttpBody<Data = Bytes> + Send + 'static,
 	B::Data: Into<Bytes>,
 	B::Error: Into<BoxError>,
-	I: Invalidator,
 {
 	type Response = HttpResponse<Body>;
 	type Error = Infallible;

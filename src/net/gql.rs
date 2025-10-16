@@ -1,19 +1,15 @@
-/*
-use axum::Router;
 use std::sync::Arc;
 
+use axum::Router;
 use axum::routing::post_service;
+use surrealdb_core::kvs::Datastore;
 
-use surrealdb::gql::cache::Pessimistic;
-use surrealdb::kvs::Datastore;
-
-use crate::gql::GraphQL;
+use crate::gql::GraphQLService;
 
 pub(super) fn router<S>(ds: Arc<Datastore>) -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {
-	let service = GraphQL::new(Pessimistic, ds);
+	let service = GraphQLService::new(ds);
 	Router::new().route("/graphql", post_service(service))
 }
-*/

@@ -1,7 +1,7 @@
 use std::mem;
 use std::sync::Arc;
 
-use anyhow::{Result, ensure};
+use anyhow::{Result, anyhow, ensure};
 
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
 #[cfg(not(target_family = "wasm"))]
@@ -278,36 +278,15 @@ pub trait RpcProtocolV1: RpcContext {
 	// ------------------------------
 
 	async fn info(&self) -> Result<DbResult, RpcError> {
-		let what = vec![Expr::Param(Param::new("auth".to_owned()))];
+		let vars = Some(self.session().variables.clone());
+		let mut res = self.kvs().execute("$auth.*", &self.session(), vars).await?;
 
-		// TODO: Check if this can be replaced by just evaluating the param or a
-		// `$auth.*` expression
-		// Specify the SQL query string
-		let sql = SelectStatement {
-			expr: Fields::all(),
-			what,
-			with: None,
-			cond: None,
-			omit: vec![],
-			only: false,
-			split: None,
-			group: None,
-			order: None,
-			limit: None,
-			start: None,
-			fetch: None,
-			version: None,
-			timeout: None,
-			parallel: false,
-			explain: None,
-			tempfiles: false,
-		};
-		let ast = Ast::single_expr(Expr::Select(Box::new(sql)));
-		// Execute the query on the database
-		let mut res = self.kvs().process(ast, &self.session(), None).await?;
-		// Extract the first value from the result
-		// TODO: Move first here into the actual expression.
-		Ok(DbResult::Other(res.remove(0).result?.first().unwrap()))
+		let first = res
+			.remove(0)
+			.result?
+			.first()
+			.ok_or(RpcError::InternalError(anyhow!("No result found")))?;
+		Ok(DbResult::Other(first))
 	}
 
 	// ------------------------------
@@ -325,9 +304,6 @@ pub trait RpcProtocolV1: RpcContext {
 		else {
 			return Err(RpcError::InvalidParams("Expected (key:string, value:Value)".to_string()));
 		};
-		// TODO(3.0.0): The value inversion PR has removed the ability to set a value
-		// from an expression.
-		// Maybe reintroduce somehow.
 
 		let mutex = self.lock();
 		let guard = mutex.acquire().await.unwrap();
