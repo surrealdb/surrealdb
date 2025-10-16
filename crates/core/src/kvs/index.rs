@@ -172,6 +172,7 @@ impl IndexBuilder {
 		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ns, db, ix)?);
 		let b = building.clone();
 		spawn(async move {
+			let guard = BuildingFinishGuard(b.clone());
 			let r = b.run().await;
 			if let Err(err) = &r {
 				b.set_status(BuildingStatus::Error(err.to_string())).await;
@@ -181,7 +182,7 @@ impl IndexBuilder {
 					warn!("Failed to send index building result to the consumer");
 				}
 			}
-			b.finished.store(true, Ordering::Relaxed);
+			drop(guard);
 		});
 		Ok(building)
 	}
@@ -698,5 +699,13 @@ impl Building {
 
 	fn is_finished(&self) -> bool {
 		self.finished.load(Ordering::Relaxed)
+	}
+}
+
+struct BuildingFinishGuard(IndexBuilding);
+
+impl Drop for BuildingFinishGuard {
+	fn drop(&mut self) {
+		self.0.finished.store(true, Ordering::Relaxed);
 	}
 }
