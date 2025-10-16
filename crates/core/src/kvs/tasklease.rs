@@ -29,6 +29,11 @@ pub(crate) struct TaskLease {
 
 impl_kv_value_revisioned!(TaskLease);
 
+impl TaskLease {
+	fn has_expired(&self, t: DateTime<Utc>) -> bool {
+		self.expiration < t
+	}
+}
 /// Manages distributed task leases in a multi-node environment.
 ///
 /// The LeaseHandler provides a mechanism for coordinating tasks across multiple
@@ -153,7 +158,7 @@ impl LeaseHandler {
 		}
 
 		// If no valid lease exists or it has expired, acquire a new one
-		self.acquire_new_lease().await
+		self.acquire_new_lease(now).await
 	}
 
 	/// Checks if there's an existing valid lease and determines if the current
@@ -163,11 +168,11 @@ impl LeaseHandler {
 	/// * `Ok(Some(TaskLease))` - If a valid lease exists, returns the lease object
 	/// * `Ok(None)` - If no valid lease exists (either no lease or it has expired)
 	/// * `Err` - If database operations fail
-	async fn check_valid_lease(&self, t: DateTime<Utc>) -> Result<Option<TaskLease>> {
+	async fn check_valid_lease(&self, now: DateTime<Utc>) -> Result<Option<TaskLease>> {
 		let tx = self.tf.transaction(TransactionType::Read, LockType::Optimistic).await?;
 		if let Some(l) = tx.get(&Tl::new(&self.task_type), None).await? {
 			// If the lease hasn't expired yet, return the lease object
-			if l.expiration > t {
+			if !l.has_expired(now) {
 				// Return the lease object which contains owner information
 				return Ok(Some(l));
 			}
@@ -182,16 +187,23 @@ impl LeaseHandler {
 	/// # Returns
 	/// * `Ok(true)` - If the lease was successfully acquired
 	/// * `Err` - If database operations fail
-	async fn acquire_new_lease(&self) -> Result<bool> {
+	async fn acquire_new_lease(&self, now: DateTime<Utc>) -> Result<bool> {
+		let key = Tl::new(&self.task_type);
 		// Attempt to acquire a new lease by writing to the datastore
 		let tx = self.tf.transaction(TransactionType::Write, LockType::Optimistic).await?;
-		let lease = TaskLease {
+		let previous_lease = tx.get(&key, None).await?;
+		if let Some(ref previous_lease) = previous_lease {
+			if !previous_lease.has_expired(now) {
+				tx.cancel().await?;
+				return Ok(previous_lease.owner == self.node);
+			}
+		}
+		let new_lease = TaskLease {
 			owner: self.node,
-			expiration: Utc::now() + self.lease_duration, /* Set expiration to current time plus
-			                                               * lease duration */
+			expiration: now + self.lease_duration, /* Set expiration to current time plus
+			                                        * lease duration */
 		};
-		let key = Tl::new(&self.task_type);
-		tx.set(&key, &lease, None).await?;
+		tx.putc(&key, &new_lease, previous_lease.as_ref()).await?;
 		tx.commit().await?;
 		// Successfully acquired the lease
 		Ok(true)
