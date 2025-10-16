@@ -1,4 +1,4 @@
-//! Stores Things of an HNSW index
+//! Stores RecordIds of an HNSW index
 use std::borrow::Cow;
 use std::fmt::Debug;
 
@@ -10,7 +10,7 @@ use crate::idx::trees::vector::SerializedVector;
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
-pub(crate) struct Hv<'a> {
+pub(crate) struct HnswVectorDocsKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -26,9 +26,9 @@ pub(crate) struct Hv<'a> {
 	pub vec: Cow<'a, SerializedVector>,
 }
 
-impl_kv_key_storekey!(Hv<'_> => ElementDocs);
+impl_kv_key_storekey!(HnswVectorDocsKey<'_> => ElementDocs);
 
-impl<'a> Hv<'a> {
+impl<'a> HnswVectorDocsKey<'a> {
 	pub fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -62,8 +62,8 @@ mod tests {
 	#[test]
 	fn key() {
 		let vec = SerializedVector::I16(vec![2]);
-		let val = Hv::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), &vec);
-		let enc = Hv::encode_key(&val).unwrap();
+		let val = HnswVectorDocsKey::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), &vec);
+		let enc = HnswVectorDocsKey::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x06\x80\x02\0",

@@ -2,7 +2,6 @@
 use storekey::{BorrowDecode, Encode};
 
 use crate::idg::u32::U32;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -18,12 +17,6 @@ impl_kv_key_storekey!(NamespaceIdGeneratorKey=> U32);
 impl Default for NamespaceIdGeneratorKey {
 	fn default() -> Self {
 		Self::new()
-	}
-}
-
-impl Categorise for NamespaceIdGeneratorKey {
-	fn categorise(&self) -> Category {
-		Category::NamespaceIdentifier
 	}
 }
 

@@ -60,7 +60,7 @@ pub async fn read(
 		trace!("Reading change feed entry: {}", k.sprint());
 
 		// Decode the changefeed entry key
-		let dec = crate::key::change::Cf::decode_key(&k)?;
+		let dec = crate::key::change::ChangeFeedKey::decode_key(&k)?;
 
 		// Check the change is for the desired table
 		if tb.is_some_and(|tb| tb != dec.tb) {

@@ -5,7 +5,6 @@ use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 use crate::val::RecordIdKey;
 
@@ -224,12 +223,6 @@ pub fn fksuffix(
 	let mut k = PrefixFk::new(ns, db, tb, id, ft, fk).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
-}
-
-impl Categorise for Ref<'_> {
-	fn categorise(&self) -> Category {
-		Category::Ref
-	}
 }
 
 impl<'a> Ref<'a> {

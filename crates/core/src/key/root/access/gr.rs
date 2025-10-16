@@ -5,11 +5,10 @@ use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Gr<'a> {
+pub(crate) struct RootAccessGrantKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ac: Cow<'a, str>,
@@ -19,10 +18,10 @@ pub(crate) struct Gr<'a> {
 	pub gr: Cow<'a, str>,
 }
 
-impl_kv_key_storekey!(Gr<'_> => catalog::AccessGrant);
+impl_kv_key_storekey!(RootAccessGrantKey<'_> => catalog::AccessGrant);
 
-pub fn new<'a>(ac: &'a str, gr: &'a str) -> Gr<'a> {
-	Gr::new(ac, gr)
+pub fn new<'a>(ac: &'a str, gr: &'a str) -> RootAccessGrantKey<'a> {
+	RootAccessGrantKey::new(ac, gr)
 }
 
 pub fn prefix(ac: &str) -> Result<Vec<u8>> {
@@ -37,13 +36,7 @@ pub fn suffix(ac: &str) -> Result<Vec<u8>> {
 	Ok(k)
 }
 
-impl Categorise for Gr<'_> {
-	fn categorise(&self) -> Category {
-		Category::AccessGrant
-	}
-}
-
-impl<'a> Gr<'a> {
+impl<'a> RootAccessGrantKey<'a> {
 	pub fn new(ac: &'a str, gr: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -64,11 +57,11 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Gr::new(
+		let val = RootAccessGrantKey::new(
 			"testac",
 			"testgr",
 		);
-		let enc = Gr::encode_key(&val).unwrap();
+		let enc = RootAccessGrantKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/&testac\0!grtestgr\0");
 	}
 

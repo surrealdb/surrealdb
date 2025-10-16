@@ -9,7 +9,7 @@ use crate::idx::trees::hnsw::HnswState;
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
-pub(crate) struct Hs<'a> {
+pub(crate) struct HnswStateKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -24,9 +24,9 @@ pub(crate) struct Hs<'a> {
 	_g: u8,
 }
 
-impl_kv_key_storekey!(Hs<'_> => HnswState);
+impl_kv_key_storekey!(HnswStateKey<'_> => HnswState);
 
-impl<'a> Hs<'a> {
+impl<'a> HnswStateKey<'a> {
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> Self {
 		Self {
 			__: b'/',
@@ -52,8 +52,8 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Hs::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3));
-		let enc = Hs::encode_key(&val).unwrap();
+		let val = HnswStateKey::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3));
+		let enc = HnswStateKey::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hs",

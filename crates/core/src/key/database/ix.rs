@@ -3,7 +3,6 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::idg::u32::U32;
-use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
 use crate::kvs::impl_kv_key_storekey;
 
@@ -20,12 +19,6 @@ impl_kv_key_storekey!(IndexIdGeneratorKey => U32);
 
 pub fn new(ns: NamespaceId, db: DatabaseId) -> IndexIdGeneratorKey {
 	IndexIdGeneratorKey::new(ns, db)
-}
-
-impl Categorise for IndexIdGeneratorKey {
-	fn categorise(&self) -> Category {
-		Category::DatabaseTableIdentifier
-	}
 }
 
 impl IndexIdGeneratorKey {

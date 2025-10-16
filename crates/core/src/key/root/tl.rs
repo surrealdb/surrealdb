@@ -2,12 +2,11 @@
 
 use storekey::{BorrowDecode, Encode};
 
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::tasklease::{TaskLease, TaskLeaseType};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Tl {
+pub(crate) struct TaskLeaseKey {
 	__: u8,
 	_a: u8,
 	_b: u8,
@@ -15,15 +14,9 @@ pub(crate) struct Tl {
 	pub task: u16,
 }
 
-impl_kv_key_storekey!(Tl => TaskLease);
+impl_kv_key_storekey!(TaskLeaseKey => TaskLease);
 
-impl Categorise for Tl {
-	fn categorise(&self) -> Category {
-		Category::TaskLease
-	}
-}
-
-impl Tl {
+impl TaskLeaseKey {
 	pub(crate) fn new(task: &TaskLeaseType) -> Self {
 		let task = match task {
 			TaskLeaseType::ChangeFeedCleanup => 1,
@@ -47,8 +40,8 @@ mod tests {
 	#[test]
 	fn key_changefeed_cleanup() {
 		#[rustfmt::skip]
-		let val = Tl::new(&TaskLeaseType::ChangeFeedCleanup);
-		let enc = Tl::encode_key(&val).unwrap();
+		let val = TaskLeaseKey::new(&TaskLeaseType::ChangeFeedCleanup);
+		let enc = TaskLeaseKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/!tl\0\x01");
 	}
 }

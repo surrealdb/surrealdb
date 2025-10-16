@@ -2,7 +2,6 @@
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::NamespaceId;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -18,12 +17,6 @@ impl_kv_key_storekey!(NamespaceRoot => Vec<u8>);
 
 pub fn new(ns: NamespaceId) -> NamespaceRoot {
 	NamespaceRoot::new(ns)
-}
-
-impl Categorise for NamespaceRoot {
-	fn categorise(&self) -> Category {
-		Category::NamespaceRoot
-	}
 }
 
 impl NamespaceRoot {

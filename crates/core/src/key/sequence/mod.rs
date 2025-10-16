@@ -12,7 +12,7 @@ use crate::catalog::{DatabaseId, NamespaceId};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Prefix<'a> {
+pub(crate) struct SequencePrefix<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -27,9 +27,9 @@ pub(crate) struct Prefix<'a> {
 	_h: u8,
 }
 
-impl_kv_key_storekey!(Prefix<'_> => Vec<u8>);
+impl_kv_key_storekey!(SequencePrefix<'_> => Vec<u8>);
 
-impl<'a> Prefix<'a> {
+impl<'a> SequencePrefix<'a> {
 	fn new(ns: NamespaceId, db: DatabaseId, sq: &'a str, g: u8, h: u8) -> Self {
 		Self {
 			__: b'/',
@@ -78,7 +78,7 @@ mod tests {
 
 	#[test]
 	fn ba_range() {
-		let range = Prefix::new_ba_range(NamespaceId(1), DatabaseId(2), "testsq").unwrap();
+		let range = SequencePrefix::new_ba_range(NamespaceId(1), DatabaseId(2), "testsq").unwrap();
 		assert_eq!(
 			range.start,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02!sqtestsq\0!ba\0\0\0\0\0\0\0\0\0"

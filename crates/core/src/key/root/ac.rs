@@ -4,7 +4,6 @@ use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::AccessDefinition;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -32,12 +31,6 @@ pub fn suffix() -> Vec<u8> {
 	let mut k = crate::key::root::all::kv();
 	k.extend_from_slice(b"!ac\xff");
 	k
-}
-
-impl Categorise for RootAccessKey<'_> {
-	fn categorise(&self) -> Category {
-		Category::Access
-	}
 }
 
 impl<'a> RootAccessKey<'a> {

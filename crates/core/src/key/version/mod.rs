@@ -3,7 +3,6 @@ use std::ops::Range;
 
 use storekey::{BorrowDecode, Encode};
 
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -20,12 +19,6 @@ pub fn new() -> Version {
 
 pub fn proceeding() -> Range<Vec<u8>> {
 	vec![b'!', b'v', 0x00]..vec![0xff]
-}
-
-impl Categorise for Version {
-	fn categorise(&self) -> Category {
-		Category::Version
-	}
 }
 
 impl Version {

@@ -9,7 +9,7 @@ use crate::idx::trees::vector::SerializedVector;
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct He<'a> {
+pub(crate) struct HnswIndexKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -25,9 +25,9 @@ pub(crate) struct He<'a> {
 	pub element_id: ElementId,
 }
 
-impl_kv_key_storekey!(He<'_> => SerializedVector);
+impl_kv_key_storekey!(HnswIndexKey<'_> => SerializedVector);
 
-impl<'a> He<'a> {
+impl<'a> HnswIndexKey<'a> {
 	pub fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -61,14 +61,14 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = He::new(
+		let val = HnswIndexKey::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
 			IndexId(3),
 			7
 		);
-		let enc = He::encode_key(&val).unwrap();
+		let enc = HnswIndexKey::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!he\0\0\0\0\0\0\0\x07"

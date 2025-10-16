@@ -4,11 +4,10 @@ use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Us<'a> {
+pub(crate) struct UserDefinitionKey<'a> {
 	__: u8,
 	_a: u8,
 	_b: u8,
@@ -16,10 +15,10 @@ pub(crate) struct Us<'a> {
 	pub user: Cow<'a, str>,
 }
 
-impl_kv_key_storekey!(Us<'_> => catalog::UserDefinition);
+impl_kv_key_storekey!(UserDefinitionKey<'_> => catalog::UserDefinition);
 
-pub fn new(user: &str) -> Us<'_> {
-	Us::new(user)
+pub fn new(user: &str) -> UserDefinitionKey<'_> {
+	UserDefinitionKey::new(user)
 }
 
 pub fn prefix() -> Vec<u8> {
@@ -34,13 +33,7 @@ pub fn suffix() -> Vec<u8> {
 	k
 }
 
-impl Categorise for Us<'_> {
-	fn categorise(&self) -> Category {
-		Category::User
-	}
-}
-
-impl<'a> Us<'a> {
+impl<'a> UserDefinitionKey<'a> {
 	pub fn new(user: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -60,8 +53,8 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Us::new("testuser");
-		let enc = Us::encode_key(&val).unwrap();
+		let val = UserDefinitionKey::new("testuser");
+		let enc = UserDefinitionKey::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/!ustestuser\x00");
 	}
 

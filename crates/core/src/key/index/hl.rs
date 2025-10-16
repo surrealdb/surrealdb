@@ -8,7 +8,7 @@ use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Debug, Clone, PartialEq, Encode, BorrowDecode)]
-pub(crate) struct Hl<'a> {
+pub(crate) struct HnswChunkedLayerKey<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
@@ -25,9 +25,9 @@ pub(crate) struct Hl<'a> {
 	pub chunk: u32,
 }
 
-impl_kv_key_storekey!(Hl<'_> => Vec<u8>);
+impl_kv_key_storekey!(HnswChunkedLayerKey<'_> => Vec<u8>);
 
-impl<'a> Hl<'a> {
+impl<'a> HnswChunkedLayerKey<'a> {
 	pub fn new(
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -62,8 +62,9 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = Hl::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), 7, 8);
-		let enc = Hl::encode_key(&val).unwrap();
+		let val =
+			HnswChunkedLayerKey::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), 7, 8);
+		let enc = HnswChunkedLayerKey::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
 			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hl\0\x07\0\0\0\x08",

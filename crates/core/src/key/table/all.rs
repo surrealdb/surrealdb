@@ -4,7 +4,6 @@ use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -22,12 +21,6 @@ impl_kv_key_storekey!(TableRoot<'_> => Vec<u8>);
 
 pub fn new(ns: NamespaceId, db: DatabaseId, tb: &str) -> TableRoot<'_> {
 	TableRoot::new(ns, db, tb)
-}
-
-impl Categorise for TableRoot<'_> {
-	fn categorise(&self) -> Category {
-		Category::TableRoot
-	}
 }
 
 impl<'a> TableRoot<'a> {

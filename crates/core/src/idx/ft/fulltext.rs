@@ -36,7 +36,7 @@ use crate::idx::ft::{DocLength, Score, TermFrequency};
 use crate::idx::planner::iterators::MatchesHitsIterator;
 use crate::idx::seqdocids::{DocId, SeqDocIds};
 use crate::idx::trees::store::IndexStores;
-use crate::key::index::tt::Tt;
+use crate::key::index::tt::TermDocumentFrequencyKey;
 use crate::kvs::{Transaction, impl_kv_value_revisioned};
 use crate::val::{RecordId, Value};
 #[revisioned(revision = 1)]
@@ -421,7 +421,7 @@ impl FullTextIndex {
 
 		// Scan all term-document transaction logs for this term
 		for k in tx.keys(beg..end, u32::MAX, None).await? {
-			let tt = Tt::decode_key(&k)?;
+			let tt = TermDocumentFrequencyKey::decode_key(&k)?;
 			let entry = deltas.entry(tt.doc_id).or_default();
 			// Increment or decrement the counter based on whether we're adding or removing
 			// the term
@@ -504,7 +504,7 @@ impl FullTextIndex {
 
 		// Process all term transaction logs, grouped by term
 		for k in tx.keys(range.clone(), u32::MAX, None).await? {
-			let tt = Tt::decode_key(&k)?;
+			let tt = TermDocumentFrequencyKey::decode_key(&k)?;
 			has_log = true;
 
 			// If we've moved to a new term, consolidate the previous term's deltas

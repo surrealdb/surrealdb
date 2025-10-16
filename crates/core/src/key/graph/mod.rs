@@ -6,7 +6,6 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::expr::dir::Dir;
-use crate::key::category::{Categorise, Category};
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 use crate::val::{RecordId, RecordIdKey};
 
@@ -215,12 +214,6 @@ pub fn ftsuffix(
 	let mut k = PrefixFt::new(ns, db, tb, id, eg, ft).encode_key()?;
 	k.extend_from_slice(&[0xff]);
 	Ok(k)
-}
-
-impl Categorise for Graph<'_> {
-	fn categorise(&self) -> Category {
-		Category::Graph
-	}
 }
 
 impl<'a> Graph<'a> {

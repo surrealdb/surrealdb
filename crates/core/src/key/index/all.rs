@@ -4,7 +4,6 @@ use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -24,12 +23,6 @@ impl_kv_key_storekey!(AllIndexRoot<'_> => Vec<u8>);
 
 pub fn new<'a>(ns: NamespaceId, db: DatabaseId, tb: &'a str, ix: IndexId) -> AllIndexRoot<'a> {
 	AllIndexRoot::new(ns, db, tb, ix)
-}
-
-impl Categorise for AllIndexRoot<'_> {
-	fn categorise(&self) -> Category {
-		Category::IndexRoot
-	}
 }
 
 impl<'a> AllIndexRoot<'a> {

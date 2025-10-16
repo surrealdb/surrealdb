@@ -2,7 +2,6 @@
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 use crate::vs::VersionStamp;
 
@@ -23,12 +22,6 @@ impl_kv_key_storekey!(VsKey => VersionStamp);
 
 pub fn new(ns: NamespaceId, db: DatabaseId) -> VsKey {
 	VsKey::new(ns, db)
-}
-
-impl Categorise for VsKey {
-	fn categorise(&self) -> Category {
-		Category::DatabaseVersionstamp
-	}
 }
 
 impl VsKey {
