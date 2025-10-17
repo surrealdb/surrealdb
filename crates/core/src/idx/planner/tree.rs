@@ -48,6 +48,7 @@ impl Tree {
 			b.eval_cond(stk, cond).await?;
 		}
 		b.eval_order().await?;
+		b.eval_count(table).await?;
 		Ok(Self {
 			root: b.root,
 			index_map: b.index_map,
@@ -133,22 +134,22 @@ impl<'a> TreeBuilder<'a> {
 		&mut self,
 		tx: &Transaction,
 		table: &Table,
-	) -> Result<(), Error> {
-		if self.schemas.contains_key(table) {
-			return Ok(());
+	) -> Result<SchemaCache, Error> {
+		if let Some(sc) = self.schemas.get(table).cloned() {
+			return Ok(sc);
 		}
-		let l = SchemaCache::new(self.ctx.opt, table, tx).await?;
-		self.schemas.insert(table.clone(), l);
-		Ok(())
+		let sc = SchemaCache::new(self.ctx.opt, table, tx).await?;
+		self.schemas.insert(table.to_owned(), sc.clone());
+		Ok(sc)
 	}
 
 	async fn eval_order(&mut self) -> Result<(), Error> {
 		if let Some(o) = self.first_order {
 			if let Node::IndexedField(id, irf) = self.resolve_idiom(&o.value).await? {
-				for (ixr, id_col) in &irf {
+				for (index_reference, id_col) in &irf {
 					if *id_col == 0 {
 						self.index_map.order_limit = Some(IndexOption::new(
-							ixr.clone(),
+							index_reference.clone(),
 							Some(id),
 							IdiomPosition::None,
 							IndexOperator::Order(!o.direction),
@@ -168,6 +169,39 @@ impl<'a> TreeBuilder<'a> {
 		} else {
 			KnnConditionRewriter::build(&self.knn_expressions, cond)
 		};
+		Ok(())
+	}
+
+	async fn eval_count(&mut self, table: &Table) -> Result<(), Error> {
+		if let Some(f) = self.ctx.fields {
+			if f.is_count_all_only() {
+				if let Some(g) = self.ctx.group {
+					if g.is_group_all_only() {
+						let tx = self.ctx.ctx.tx();
+						let schema = self.lazy_load_schema_resolver(&tx, table).await?;
+						for (pos, ix) in schema.indexes.iter().enumerate() {
+							if let Index::Count = &ix.index {
+								if self.ctx.cond.is_none() {
+									let index_reference = schema.new_reference(pos);
+									if let Some(wi) = &self.with_indexes {
+										if !wi.contains(&index_reference) {
+											continue;
+										}
+									}
+									self.index_map.index_count = Some(IndexOption::new(
+										index_reference,
+										None,
+										IdiomPosition::None,
+										IndexOperator::Count,
+									));
+									break;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
 		Ok(())
 	}
 
@@ -243,10 +277,10 @@ impl<'a> TreeBuilder<'a> {
 
 	async fn resolve_idiom(&mut self, i: &Idiom) -> Result<Node, Error> {
 		let tx = self.ctx.ctx.tx();
-		self.lazy_load_schema_resolver(&tx, self.table).await?;
+		let schema = self.lazy_load_schema_resolver(&tx, self.table).await?;
 		let i = Arc::new(i.clone());
 		// Try to detect if it matches an index
-		let n = if let Some(schema) = self.schemas.get(self.table).cloned() {
+		let n = {
 			let irs = self.resolve_indexes(self.table, &i, &schema);
 			if !irs.is_empty() {
 				Node::IndexedField(i.clone(), irs)
@@ -258,8 +292,6 @@ impl<'a> TreeBuilder<'a> {
 			} else {
 				Node::NonIndexedField(i.clone())
 			}
-		} else {
-			Node::NonIndexedField(i.clone())
 		};
 		self.resolved_idioms.insert(i.clone(), n.clone());
 		Ok(n)
@@ -468,9 +500,13 @@ impl<'a> TreeBuilder<'a> {
 					return Ok(None);
 				}
 			}
-			if let Some((irf, _)) = self.lookup_join_index_ref(local_irs) {
-				let io =
-					IndexOption::new(irf, Some(id.clone()), p, IndexOperator::Join(remote_ios));
+			if let Some((index_reference, _)) = self.lookup_join_index_ref(local_irs) {
+				let io = IndexOption::new(
+					index_reference,
+					Some(id.clone()),
+					p,
+					IndexOperator::Join(remote_ios),
+				);
 				return Ok(Some(io));
 			}
 			return Ok(None);
@@ -489,10 +525,10 @@ impl<'a> TreeBuilder<'a> {
 		p: IdiomPosition,
 	) -> Result<Option<IndexOption>, Error> {
 		let mut res = None;
-		for (ixr, col) in irs.iter() {
-			let op = match &ixr.index {
-				Index::Idx => self.eval_index_operator(ixr, op, n, p, *col),
-				Index::Uniq => self.eval_index_operator(ixr, op, n, p, *col),
+		for (index_reference, col) in irs.iter() {
+			let op = match &index_reference.index {
+				Index::Idx => self.eval_index_operator(index_reference, op, n, p, *col),
+				Index::Uniq => self.eval_index_operator(index_reference, op, n, p, *col),
 				Index::Search {
 					..
 				} if *col == 0 => Self::eval_matches_operator(op, n),
@@ -502,7 +538,7 @@ impl<'a> TreeBuilder<'a> {
 			};
 			if res.is_none() {
 				if let Some(op) = op {
-					let io = IndexOption::new(ixr.clone(), Some(id.clone()), p, op);
+					let io = IndexOption::new(index_reference.clone(), Some(id.clone()), p, op);
 					self.index_map.options.push((e.clone(), io.clone()));
 					res = Some(io);
 				}
@@ -512,9 +548,9 @@ impl<'a> TreeBuilder<'a> {
 	}
 
 	fn lookup_join_index_ref(&self, irs: &LocalIndexRefs) -> Option<(IndexReference, IdiomCol)> {
-		for (ixr, id_col) in irs.iter().filter(|(_, id_col)| 0.eq(id_col)) {
-			match &ixr.index {
-				Index::Idx | Index::Uniq => return Some((ixr.clone(), *id_col)),
+		for (index_reference, id_col) in irs.iter().filter(|(_, id_col)| 0.eq(id_col)) {
+			match index_reference.index {
+				Index::Idx | Index::Uniq => return Some((index_reference.clone(), *id_col)),
 				_ => {}
 			};
 		}
@@ -653,13 +689,16 @@ impl<'a> TreeBuilder<'a> {
 
 pub(super) type CompoundIndexes = HashMap<IndexReference, Vec<Vec<IndexOperator>>>;
 
-/// For each expression a possible index option
 #[derive(Default)]
 pub(super) struct IndexesMap {
+	/// For each expression a possible index option
 	pub(super) options: Vec<(Arc<Expression>, IndexOption)>,
 	/// For each index, tells if the columns are requested
 	pub(super) compound_indexes: CompoundIndexes,
+	/// Is there an index candidate that matches order/limit?
 	pub(super) order_limit: Option<IndexOption>,
+	/// Is there an index candidate for index count?
+	pub(super) index_count: Option<IndexOption>,
 }
 
 impl IndexesMap {

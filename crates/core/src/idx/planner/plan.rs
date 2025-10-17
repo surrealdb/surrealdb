@@ -29,6 +29,7 @@ pub(super) struct PlanBuilderParameters {
 	pub(super) gp: GrantedPermission,
 	pub(super) compound_indexes: CompoundIndexes,
 	pub(super) order_limit: Option<IndexOption>,
+	pub(super) index_count: Option<IndexOption>,
 	pub(super) with_indexes: Option<Vec<IndexReference>>,
 	pub(super) all_and: bool,
 	pub(super) all_expressions_with_index: bool,
@@ -53,6 +54,12 @@ impl PlanBuilder {
 			return Self::table_iterator(ctx, Some("WITH NOINDEX"), p.has_reverse_scan, p.gp).await;
 		}
 
+		if let Some(io) = p.index_count {
+			return Ok(Plan::SingleIndex(None, io, RecordStrategy::Count));
+		}
+
+		//Analyse the query AST to discover indexable conditions and collect
+		//optimisation opportunities
 		// Browse the AST and collect information
 		if let Some(root) = &p.root {
 			if let Err(e) = b.eval_node(root) {
@@ -392,6 +399,7 @@ pub(super) enum IndexOperator {
 	Ann(Arc<Vec<Number>>, u32, u32),
 	/// false = ascending, true = descending
 	Order(bool),
+	Count,
 }
 
 impl IndexOption {
@@ -506,6 +514,9 @@ impl IndexOption {
 						"Order"
 					}),
 				);
+			}
+			IndexOperator::Count => {
+				e.insert("operator", Value::from("Count"));
 			}
 		};
 		Value::from(e)

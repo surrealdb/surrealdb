@@ -8,8 +8,6 @@ use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::slowlog::SlowLog;
-#[cfg(not(target_family = "wasm"))]
-use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
 use crate::mem::ALLOC;
 use crate::sql::value::Value;
@@ -26,6 +24,7 @@ use trice::Instant;
 
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
+use crate::kvs::index::IndexBuilder;
 #[cfg(feature = "http")]
 use url::Url;
 
@@ -58,7 +57,6 @@ pub struct MutableContext {
 	// The index store
 	index_stores: IndexStores,
 	// The index concurrent builders
-	#[cfg(not(target_family = "wasm"))]
 	index_builder: Option<IndexBuilder>,
 	// Capabilities
 	capabilities: Arc<Capabilities>,
@@ -112,7 +110,6 @@ impl MutableContext {
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::default(),
 			cache: None,
-			#[cfg(not(target_family = "wasm"))]
 			index_builder: None,
 			#[cfg(storage)]
 			temporary_directory: None,
@@ -135,7 +132,6 @@ impl MutableContext {
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
 			cache: parent.cache.clone(),
-			#[cfg(not(target_family = "wasm"))]
 			index_builder: parent.index_builder.clone(),
 			#[cfg(storage)]
 			temporary_directory: parent.temporary_directory.clone(),
@@ -161,7 +157,6 @@ impl MutableContext {
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
 			cache: parent.cache.clone(),
-			#[cfg(not(target_family = "wasm"))]
 			index_builder: parent.index_builder.clone(),
 			#[cfg(storage)]
 			temporary_directory: parent.temporary_directory.clone(),
@@ -174,7 +169,6 @@ impl MutableContext {
 	/// Create a new context from a frozen parent context.
 	/// This context is not linked to the parent context,
 	/// and won't be cancelled if the parent is cancelled.
-	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn new_concurrent(from: &Context) -> Self {
 		Self {
 			values: HashMap::default(),
@@ -204,7 +198,7 @@ impl MutableContext {
 		capabilities: Arc<Capabilities>,
 		index_stores: IndexStores,
 		cache: Arc<DatastoreCache>,
-		#[cfg(not(target_family = "wasm"))] index_builder: IndexBuilder,
+		index_builder: IndexBuilder,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 	) -> Result<MutableContext, Error> {
 		let mut ctx = Self {
@@ -220,7 +214,6 @@ impl MutableContext {
 			capabilities,
 			index_stores,
 			cache: Some(cache),
-			#[cfg(not(target_family = "wasm"))]
 			index_builder: Some(index_builder),
 			#[cfg(storage)]
 			temporary_directory,
@@ -359,7 +352,6 @@ impl MutableContext {
 	}
 
 	/// Get the index_builder for this context/ds
-	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn get_index_builder(&self) -> Option<&IndexBuilder> {
 		self.index_builder.as_ref()
 	}
