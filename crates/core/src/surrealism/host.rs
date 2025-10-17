@@ -12,11 +12,11 @@ use surrealism_runtime::host::InvocationContext;
 use surrealism_runtime::kv::KVStore;
 use anyhow::Result;
 
-pub struct Host<'a> {
-    stk: &'a mut Stk,
-    ctx: &'a Context,
-    opt: &'a Options,
-    doc: Option<&'a CursorDoc>,
+pub(crate) struct Host<'a> {
+    pub(crate) stk: &'a mut Stk,
+    pub(crate) ctx: &'a Context,
+    pub(crate) opt: &'a Options,
+    pub(crate) doc: Option<&'a CursorDoc>,
 }
 
 #[async_trait(?Send)]

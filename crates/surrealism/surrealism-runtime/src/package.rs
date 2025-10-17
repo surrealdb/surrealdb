@@ -26,7 +26,11 @@ impl SurrealismPackage {
 
         // Unpack the .tar.zst file in memory
         let archive_file = File::open(file).prefix_err(|| "Failed to open archive file")?;
-        let zstd_decoder = Decoder::new(BufReader::new(archive_file))
+        SurrealismPackage::from_reader(archive_file)
+    }
+    
+    pub fn from_reader<R: Read>(reader: R) -> Result<Self> {
+        let zstd_decoder = Decoder::new(BufReader::new(reader))
             .prefix_err(|| "Failed to create zstd decoder")?;
         let mut archive = Archive::new(zstd_decoder);
 

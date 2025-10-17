@@ -2,18 +2,16 @@ use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
 use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
-use crate::sql::{Block, Expr, Kind, Permission};
+use crate::sql::{Block, Expr, Executable, Kind, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct DefineFunctionStatement {
 	pub kind: DefineKind,
 	pub name: String,
-	pub args: Vec<(String, Kind)>,
-	pub block: Block,
+	pub executable: Executable,
 	pub comment: Option<Expr>,
 	pub permissions: Permission,
-	pub returns: Option<Kind>,
 }
 
 impl fmt::Display for DefineFunctionStatement {
@@ -24,18 +22,8 @@ impl fmt::Display for DefineFunctionStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " fn::{}(", &self.name)?;
-		for (i, (name, kind)) in self.args.iter().enumerate() {
-			if i > 0 {
-				f.write_str(", ")?;
-			}
-			write!(f, "${}: {kind}", EscapeIdent(name))?;
-		}
-		f.write_str(") ")?;
-		if let Some(ref v) = self.returns {
-			write!(f, "-> {v} ")?;
-		}
-		Display::fmt(&self.block, f)?;
+		write!(f, " fn::{}", &self.name)?;
+		Display::fmt(&self.executable, f)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {}", v)?
 		}
@@ -55,11 +43,9 @@ impl From<DefineFunctionStatement> for crate::expr::statements::DefineFunctionSt
 		Self {
 			kind: v.kind.into(),
 			name: v.name,
-			args: v.args.into_iter().map(|(i, k)| (i, k.into())).collect(),
-			block: v.block.into(),
+			executable: v.executable.into(),
 			comment: v.comment.map(|x| x.into()),
 			permissions: v.permissions.into(),
-			returns: v.returns.map(Into::into),
 		}
 	}
 }
@@ -69,11 +55,9 @@ impl From<crate::expr::statements::DefineFunctionStatement> for DefineFunctionSt
 		Self {
 			kind: v.kind.into(),
 			name: v.name,
-			args: v.args.into_iter().map(|(i, k)| (i, k.into())).collect(),
-			block: v.block.into(),
+			executable: v.executable.into(),
 			comment: v.comment.map(|x| x.into()),
 			permissions: v.permissions.into(),
-			returns: v.returns.map(Into::into),
 		}
 	}
 }

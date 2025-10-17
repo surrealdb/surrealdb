@@ -78,3 +78,9 @@ fn fmt_inner(v: &str, escape_slash: bool) -> String {
 		})
 		.collect::<String>()
 }
+
+impl<'a> PartialEq<File> for &'a File {
+	fn eq(&self, other: &File) -> bool {
+		self.bucket == other.bucket && self.key == other.key
+	}
+}

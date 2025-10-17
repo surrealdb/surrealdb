@@ -1,4 +1,4 @@
-use std::fmt::{self, Display, Write};
+use std::fmt::{self, Write};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
@@ -11,20 +11,20 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::expression::VisitExpression;
-use crate::expr::{Base, Block, Expr, Kind};
-use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
+use crate::expr::{Base, Executable, Expr};
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
+
+mod silo;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct DefineFunctionStatement {
 	pub kind: DefineKind,
 	pub name: String,
-	pub args: Vec<(String, Kind)>,
-	pub block: Block,
 	pub comment: Option<Expr>,
 	pub permissions: Permission,
-	pub returns: Option<Kind>,
+	pub executable: Executable,
 }
 
 impl VisitExpression for DefineFunctionStatement {
@@ -32,7 +32,7 @@ impl VisitExpression for DefineFunctionStatement {
 	where
 		F: FnMut(&Expr),
 	{
-		self.block.visit(visitor);
+		self.executable.visit(visitor);
 		self.comment.iter().for_each(|comment| comment.visit(visitor));
 	}
 }
@@ -78,11 +78,9 @@ impl DefineFunctionStatement {
 			db,
 			&FunctionDefinition {
 				name: self.name.clone(),
-				args: self.args.clone(),
-				block: self.block.clone(),
 				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 				permissions: self.permissions.clone(),
-				returns: self.returns.clone(),
+				executable: self.executable.clone().into(),
 			},
 		)
 		.await?;
@@ -101,18 +99,8 @@ impl fmt::Display for DefineFunctionStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " fn::{}(", &*self.name)?;
-		for (i, (name, kind)) in self.args.iter().enumerate() {
-			if i > 0 {
-				f.write_str(", ")?;
-			}
-			write!(f, "${}: {kind}", EscapeKwFreeIdent(name))?;
-		}
-		f.write_str(") ")?;
-		if let Some(ref v) = self.returns {
-			write!(f, "-> {v} ")?;
-		}
-		Display::fmt(&self.block, f)?;
+		write!(f, " fn::{}", &*self.name)?;
+		write!(f, " {}", self.executable)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {}", v)?
 		}

@@ -74,6 +74,7 @@ use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::{LockType, TransactionType};
 use crate::rpc::DbResultError;
 use crate::sql::Ast;
+use crate::surrealism::cache::SurrealismCache;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::types::{PublicNotification, PublicValue, PublicVariables};
 use crate::val::{Value, convert_value_to_public_value};
@@ -126,6 +127,8 @@ pub struct Datastore {
 	buckets: Arc<BucketConnections>,
 	// The sequences
 	sequences: Sequences,
+	// The surrealism cache
+	surrealism_cache: Arc<SurrealismCache>,
 }
 
 #[derive(Clone)]
@@ -651,6 +654,7 @@ impl Datastore {
 			cache: Arc::new(DatastoreCache::new()),
 			buckets: Arc::new(DashMap::new()),
 			sequences: Sequences::new(tf),
+			surrealism_cache: Arc::new(SurrealismCache::new()),
 		})
 	}
 
@@ -677,6 +681,7 @@ impl Datastore {
 			buckets: Arc::new(DashMap::new()),
 			sequences: Sequences::new(self.transaction_factory.clone()),
 			transaction_factory: self.transaction_factory,
+			surrealism_cache: Arc::new(SurrealismCache::new()),
 		}
 	}
 
@@ -1875,6 +1880,7 @@ impl Datastore {
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 			self.buckets.clone(),
+			self.surrealism_cache.clone(),
 		)?;
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {

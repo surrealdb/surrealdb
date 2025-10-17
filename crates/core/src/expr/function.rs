@@ -3,10 +3,10 @@ use std::fmt;
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 
-use super::{ControlFlow, FlowResult, FlowResultExt as _};
+use super::{ControlFlow, FlowResult};
 use crate::catalog::Permission;
 use crate::catalog::providers::DatabaseProvider;
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -123,11 +123,15 @@ impl Function {
 						}
 					}
 				}
+
+				let executable: crate::expr::Executable = val.as_ref().executable.clone().into();
+				let sig = executable.signature(stk, ctx, opt, doc, None).await?;
+
 				// Get the number of function arguments
-				let max_args_len = val.args.len();
+				let max_args_len = sig.args.len();
 				// Track the number of required arguments
 				// Check for any final optional arguments
-				let min_args_len = val.args.iter().rev().map(|x| &x.1).fold(0, |acc, kind| {
+				let min_args_len = sig.args.iter().rev().fold(0, |acc, kind| {
 					if kind.can_be_none() {
 						if acc == 0 {
 							0
@@ -150,25 +154,10 @@ impl Function {
 						},
 					})));
 				}
-				// Compute the function arguments
-				// Duplicate context
-				let mut ctx = MutableContext::new_isolated(ctx);
-				// Process the function arguments
-				for (val, (name, kind)) in args.into_iter().zip(&val.args) {
-					ctx.add_value(
-						name.clone(),
-						val.coerce_to_kind(kind)
-							.map_err(Error::from)
-							.map_err(anyhow::Error::new)?
-							.into(),
-					);
-				}
-				let ctx = ctx.freeze();
 				// Run the custom function
-				let result =
-					stk.run(|stk| val.block.compute(stk, &ctx, opt, doc)).await.catch_return()?;
-
-				if let Some(ref returns) = val.returns {
+				let result = executable.run(stk, ctx, opt, doc, args, None).await?;
+				
+				if let Some(ref returns) = sig.returns {
 					result
 						.coerce_to_kind(returns)
 						.map_err(|e| Error::ReturnCoerce {
