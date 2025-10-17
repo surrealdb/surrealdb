@@ -93,7 +93,6 @@ impl DefineIndexStatement {
 				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 			// Clear the index store cache
-			#[cfg(not(target_family = "wasm"))]
 			ctx.get_index_stores()
 				.index_removed(
 					ctx.get_index_builder(),
@@ -104,11 +103,6 @@ impl DefineIndexStatement {
 					&name,
 				)
 				.await?;
-			#[cfg(target_family = "wasm")]
-			ctx.get_index_stores()
-				.index_removed(&txn, tb.namespace_id, tb.database_id, &tb.name, &name)
-				.await?;
-
 			ix.index_id
 		} else {
 			txn.lock().await.get_next_ix_id(tb.namespace_id, tb.database_id).await?
@@ -169,7 +163,7 @@ impl DefineIndexStatement {
 		// Clear the cache
 		txn.clear_cache();
 		// Process the index
-		run_indexing(stk, ctx, opt, doc, &index_def, !self.concurrently).await?;
+		run_indexing(ctx, opt, &index_def, !self.concurrently).await?;
 
 		// Ok all good
 		Ok(Value::None)
@@ -202,52 +196,20 @@ impl Display for DefineIndexStatement {
 }
 
 pub(in crate::expr::statements) async fn run_indexing(
-	#[cfg_attr(not(target_family = "wasm"), expect(unused_variables))] stk: &mut Stk,
 	ctx: &Context,
 	opt: &Options,
-	#[cfg_attr(not(target_family = "wasm"), expect(unused_variables))] doc: Option<&CursorDoc>,
 	index: &IndexDefinition,
-	_blocking: bool,
+	blocking: bool,
 ) -> Result<()> {
-	#[cfg(target_family = "wasm")]
-	{
-		{
-			// Create the remove statement
-			let stm = crate::expr::statements::RemoveIndexStatement {
-				name: Expr::Idiom(crate::expr::Idiom::field(index.name.clone())),
-				what: Expr::Idiom(crate::expr::Idiom::field(index.table_name.clone())),
-				if_exists: false,
-			};
-			// Execute the delete statement
-			stm.compute(stk, ctx, opt, doc).await?;
-		}
-		{
-			// Force queries to run
-			let opt =
-				&opt.new_with_force(crate::dbs::Force::Index(std::sync::Arc::new([index.clone()])));
-			// Update the index data
-			let stm = crate::expr::statements::UpdateStatement {
-				what: vec![crate::expr::Expr::Table(index.table_name.clone())],
-				output: Some(crate::expr::Output::None),
-				..crate::expr::statements::UpdateStatement::default()
-			};
-			stm.compute(stk, ctx, opt, doc).await?;
-			Ok(())
-		}
-	}
-
-	#[cfg(not(target_family = "wasm"))]
-	{
-		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		let rcv = ctx
-			.get_index_builder()
-			.ok_or_else(|| Error::unreachable("No Index Builder"))?
-			.build(ctx, opt.clone(), ns, db, index.clone().into(), _blocking)
-			.await?;
-		if let Some(rcv) = rcv {
-			rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?
-		} else {
-			Ok(())
-		}
+	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+	let rcv = ctx
+		.get_index_builder()
+		.ok_or_else(|| Error::unreachable("No Index Builder"))?
+		.build(ctx, opt.clone(), ns, db, index.clone().into(), blocking)
+		.await?;
+	if let Some(rcv) = rcv {
+		rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?
+	} else {
+		Ok(())
 	}
 }

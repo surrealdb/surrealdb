@@ -69,12 +69,9 @@ impl RemoveNamespaceStatement {
 		};
 
 		// Remove the index stores
-		#[cfg(not(target_family = "wasm"))]
 		ctx.get_index_stores()
 			.namespace_removed(ctx.get_index_builder(), &txn, ns.namespace_id)
 			.await?;
-		#[cfg(target_family = "wasm")]
-		ctx.get_index_stores().namespace_removed(&txn, ns.namespace_id).await?;
 		// Remove the sequences
 		if let Some(seq) = ctx.get_sequences() {
 			seq.namespace_removed(&txn, ns.namespace_id).await?;

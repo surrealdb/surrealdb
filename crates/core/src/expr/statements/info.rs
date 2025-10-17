@@ -377,28 +377,23 @@ impl InfoStatement {
 					Value::from(res.as_ref().to_sql())
 				})
 			}
-			#[cfg_attr(target_family = "wasm", expect(unused_variables))]
 			InfoStatement::Index(index, table, _structured) => {
 				// Allowed to run?
 				opt.is_allowed(Action::View, ResourceKind::Actor, &Base::Db)?;
 				// Compute table & index names
 				let index = expr_to_ident(stk, ctx, opt, doc, index, "index name").await?;
 				let table = expr_to_ident(stk, ctx, opt, doc, table, "table name").await?;
-				// Output
-				#[cfg(not(target_family = "wasm"))]
-				{
-					// Get the transaction
-					let txn = ctx.tx();
+				// Get the transaction
+				let txn = ctx.tx();
 
-					if let Some(ib) = ctx.get_index_builder() {
-						// Obtain the index
-						let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-						let res = txn.expect_tb_index(ns, db, &table, &index).await?;
-						let status = ib.get_status(ns, db, &res).await;
-						let mut out = Object::default();
-						out.insert("building".to_string(), status.into());
-						return Ok(out.into());
-					}
+				if let Some(ib) = ctx.get_index_builder() {
+					// Obtain the index
+					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+					let res = txn.expect_tb_index(ns, db, &table, &index).await?;
+					let status = ib.get_status(ns, db, &res).await;
+					let mut out = Object::default();
+					out.insert("building".to_string(), status.into());
+					return Ok(out.into());
 				}
 				Ok(Object::default().into())
 			}

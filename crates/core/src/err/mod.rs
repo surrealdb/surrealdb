@@ -878,14 +878,12 @@ pub(crate) enum Error {
 
 	/// A database index entry for the specified table is already building
 	#[error("Database index `{name}` is currently building")]
-	#[cfg_attr(target_family = "wasm", expect(dead_code))]
 	IndexAlreadyBuilding {
 		name: String,
 	},
 
 	/// A database index entry for the specified table is already building
 	#[error("Index building has been cancelled")]
-	#[cfg_attr(target_family = "wasm", expect(dead_code))]
 	IndexingBuildingCancelled,
 
 	/// The token has expired

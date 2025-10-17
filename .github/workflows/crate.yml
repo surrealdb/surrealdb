@@ -18,8 +18,12 @@ on:
       rust-version:
         required: false
         type: string
-        default: "1.90.0"
+        default: "1.90"
         description: "The Rust version to use for building binaries"
+    secrets:
+      CARGO_REGISTRY_TOKEN:
+        required: true
+        description: "Token for publishing to crates.io"
 
 defaults:
   run:
@@ -41,7 +45,7 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable (Actions must be pinned by commit hash)
         with:
-          toolchain: stable
+          toolchain: ${{ inputs.rust-version }}
 
       - name: Install release-plz
         run: |
