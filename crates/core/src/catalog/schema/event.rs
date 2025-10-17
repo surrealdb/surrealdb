@@ -11,7 +11,7 @@ use crate::val::Value;
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[non_exhaustive]
 pub struct EventDefinition {
-	pub(crate) is_async: bool,
+	pub(crate) concurrently: bool,
 	pub(crate) name: String,
 	pub(crate) target_table: String,
 	pub(crate) when: Expr,
@@ -25,7 +25,6 @@ impl EventDefinition {
 	pub fn to_sql_definition(&self) -> crate::sql::DefineEventStatement {
 		crate::sql::DefineEventStatement {
 			kind: DefineKind::Default,
-			is_async: self.is_async,
 			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
 			target_table: crate::sql::Expr::Idiom(crate::sql::Idiom::field(
 				self.target_table.clone(),
@@ -36,6 +35,7 @@ impl EventDefinition {
 				.comment
 				.clone()
 				.map(|v| crate::sql::Expr::Literal(crate::sql::Literal::String(v))),
+			concurrently: self.concurrently,
 		}
 	}
 }

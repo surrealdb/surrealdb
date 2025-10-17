@@ -52,7 +52,7 @@ impl Document {
 			};
 			// Configure the context
 			#[cfg(not(target_family = "wasm"))]
-			let mut ctx = if ev.is_async {
+			let mut ctx = if ev.concurrently {
 				// Only available in non-wasm environments
 				MutableContext::new_concurrent(ctx)
 			} else {
@@ -69,7 +69,7 @@ impl Document {
 			let ctx = ctx.freeze();
 			// Process conditional clause
 			#[cfg(not(target_family = "wasm"))]
-			if ev.is_async {
+			if ev.concurrently {
 				let ev = ev.clone();
 				let opt = opt.clone();
 				let doc = doc.clone();
@@ -78,16 +78,16 @@ impl Document {
 					stack.enter(|stk| process_event(stk, &ev, ctx, &opt, &doc)).finish().await
 				});
 			} else {
-				process_event(stk, &ev, ctx, opt, doc).await?;
+				process_event(stk, ev, ctx, opt, doc).await?;
 			}
 			#[cfg(target_family = "wasm")]
 			{
-				if ev.is_async {
+				if ev.concurrently {
 					warn!(
-						"ASYNC events are not supported in WASM, they will run synchronously like non-async events"
+						"CONCURRENTLY running events are not supported in WASM, they will run synchronously like regular events"
 					);
 				}
-				process_event(stk, &ev, ctx, opt, doc).await?;
+				process_event(stk, ev, ctx, opt, doc).await?;
 			}
 		}
 		// Carry on
@@ -110,7 +110,7 @@ async fn process_event(
 	// Execute event if value is truthy
 	if val.is_truthy() {
 		for v in ev.then.iter() {
-			stk.run(|stk| v.compute(stk, &ctx, opt, Some(&*doc)))
+			stk.run(|stk| v.compute(stk, &ctx, opt, Some(doc)))
 				.await
 				.catch_return()
 				.map_err(|e| anyhow::anyhow!("Error while processing event {}: {}", ev.name, e))?;

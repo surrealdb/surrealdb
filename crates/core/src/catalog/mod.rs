@@ -182,12 +182,12 @@ mod test {
         functions: FunctionsConfig::default(),
     }), 7)]
 	#[case::event(EventDefinition {
-        is_async: false,
         name: "test".to_string(),
         target_table: "test".to_string(),
         when: Expr::Literal(Literal::String("when".to_string())),
         then: vec![Expr::Literal(Literal::String("then".to_string()))],
         comment: Some("comment".to_string()),
+        concurrently: false,
     }, 36)]
 	#[case::field(FieldDefinition {
         name: Idiom::from_str("field[0]").unwrap(),

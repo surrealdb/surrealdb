@@ -1732,17 +1732,17 @@ fn parse_define_event() {
 		res,
 		Expr::Define(Box::new(DefineStatement::Event(DefineEventStatement {
 			kind: DefineKind::Default,
-			is_async: false,
 			name: Expr::Idiom(Idiom::field("event".to_string())),
 			target_table: Expr::Idiom(Idiom::field("table".to_string())),
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: None,
+			concurrently: false,
 		})))
 	);
 
 	let res = syn::parse_with(
-		r#"DEFINE EVENT ASYNC event ON TABLE table WHEN null THEN null,none"#.as_bytes(),
+		r#"DEFINE EVENT event ON TABLE table WHEN null THEN null,none CONCURRENTLY"#.as_bytes(),
 		async |parser, stk| parser.parse_expr_inherit(stk).await,
 	)
 	.unwrap();
@@ -1751,12 +1751,12 @@ fn parse_define_event() {
 		res,
 		Expr::Define(Box::new(DefineStatement::Event(DefineEventStatement {
 			kind: DefineKind::Default,
-			is_async: true,
 			name: Expr::Idiom(Idiom::field("event".to_string())),
 			target_table: Expr::Idiom(Idiom::field("table".to_string())),
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: None,
+			concurrently: true,
 		})))
 	);
 }

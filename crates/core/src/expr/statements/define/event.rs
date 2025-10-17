@@ -21,12 +21,12 @@ use crate::val::Value;
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineEventStatement {
 	pub kind: DefineKind,
-	pub is_async: bool,
 	pub name: Expr,
 	pub target_table: Expr,
 	pub when: Expr,
 	pub then: Vec<Expr>,
 	pub comment: Option<Expr>,
+	pub concurrently: bool,
 }
 
 impl VisitExpression for DefineEventStatement {
@@ -89,7 +89,7 @@ impl DefineEventStatement {
 		txn.set(
 			&key,
 			&EventDefinition {
-				is_async: self.is_async,
+				concurrently: self.concurrently,
 				name: name.clone(),
 				target_table: target_table.clone(),
 				when: self.when.clone(),
@@ -127,8 +127,8 @@ impl Display for DefineEventStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		if self.is_async {
-			write!(f, " ASYNC")?;
+		if self.concurrently {
+			write!(f, " CONCURRENTLY")?;
 		}
 		write!(
 			f,

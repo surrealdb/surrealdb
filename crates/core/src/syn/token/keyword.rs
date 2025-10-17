@@ -36,7 +36,6 @@ keyword! {
 	Ascending => "ASCENDING",
 	Ascii => "ASCII",
 	Assert => "ASSERT",
-	Async => "ASYNC",
 	At => "AT",
 	Authenticate => "AUTHENTICATE",
 	Auto => "AUTO",

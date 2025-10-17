@@ -25,7 +25,7 @@ use crate::sql::{
 	AccessType, Expr, Index, Kind, Literal, Param, Permission, Permissions, Scoring, TableType,
 	access_type, table_type,
 };
-use crate::syn::error::{SyntaxError, bail};
+use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Token, TokenKind, t};
@@ -787,12 +787,6 @@ impl Parser<'_> {
 			DefineKind::Default
 		};
 
-		let is_async = self.eat(t!("ASYNC"));
-		#[cfg(target_family = "wasm")]
-		if is_async {
-			return Err(SyntaxError::new("ASYNC events are not supported in WASM"));
-		}
-
 		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
@@ -800,12 +794,12 @@ impl Parser<'_> {
 
 		let mut res = DefineEventStatement {
 			kind,
-			is_async,
 			name,
 			target_table: what,
 			when: Expr::Literal(Literal::Bool(true)),
 			then: Vec::new(),
 			comment: None,
+			concurrently: false,
 		};
 
 		loop {
@@ -828,6 +822,13 @@ impl Parser<'_> {
 				_ => break,
 			}
 		}
+
+		res.concurrently = self.eat(t!("CONCURRENTLY"));
+		#[cfg(target_family = "wasm")]
+		if res.concurrently {
+			return Err("CONCURRENTLY events are not supported in WASM".into());
+		}
+
 		Ok(res)
 	}
 

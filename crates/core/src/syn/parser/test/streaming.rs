@@ -289,12 +289,12 @@ fn statements() -> Vec<TopLevelExpr> {
 		})))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Event(DefineEventStatement {
 			kind: DefineKind::Default,
-			is_async: false,
 			name: Expr::Idiom(Idiom::field("event".to_string())),
 			target_table: Expr::Idiom(Idiom::field("table".to_string())),
 			when: Expr::Literal(Literal::Null),
 			then: vec![Expr::Literal(Literal::Null), Expr::Literal(Literal::None)],
 			comment: None,
+			concurrently: false,
 		})))),
 		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Field(DefineFieldStatement {
 			kind: DefineKind::Default,
