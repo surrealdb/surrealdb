@@ -117,18 +117,48 @@ impl LeaseHandler {
 		Err(Error::QueryTimedout)
 	}
 
-	/// Attempts to maintain the current lease by checking and potentially
-	/// renewing it.
+	/// Attempts to maintain the current lease by checking and potentially renewing it.
 	///
-	/// This method is a simplified wrapper around `check_lease()` that:
+	/// This is a **best-effort** lease maintenance method that allows tasks to continue
+	/// even if the lease is lost to another node. This is intentional design: once a task
+	/// has started processing, it should complete its work rather than abort mid-process.
+	///
+	/// The method performs these operations:
 	/// 1. Checks if the current node owns a valid lease
-	/// 2. Renews the lease if needed
-	/// 3. Ignores the boolean return value from `check_lease()`
+	/// 2. Renews the lease if needed and possible
+	/// 3. **Intentionally ignores** whether the node still owns the lease
+	///
+	/// # Design Rationale
+	///
+	/// When called periodically during long-running task processing (e.g., in loops processing
+	/// multiple items), this method ensures the node makes a best effort to maintain its lease.
+	/// However, if another node acquires the lease mid-process, the current task continues to
+	/// completion rather than aborting. This prevents leaving the system in an inconsistent state
+	/// and allows work that has already started to finish.
+	///
+	/// The initial lease check (via `has_lease()`) at the start of a task ensures only one node
+	/// begins processing. This method is purely for lease maintenance during execution.
 	///
 	/// # Returns
-	/// * `Ok(())` - If the lease check completed successfully (regardless of ownership)
-	/// * `Err` - If database operations fail
+	/// * `Ok(())` - Always succeeds if database operations complete (regardless of lease ownership)
+	/// * `Err` - Only if database operations fail
+	///
+	/// # Example Usage
+	/// ```ignore
+	/// // Check lease before starting work
+	/// if !lease_handler.has_lease().await? {
+	///     return Ok(()); // Another node owns the lease
+	/// }
+	///
+	/// // Process items, maintaining lease best-effort
+	/// for item in items {
+	///     lease_handler.try_maintain_lease().await?; // Continue even if lease lost
+	///     process_item(item).await?;
+	/// }
+	/// ```
 	pub(crate) async fn try_maintain_lease(&self) -> Result<(), Error> {
+		// Attempt to maintain the lease, but allow the task to continue regardless
+		// of the result. This is intentional: tasks that have started should complete.
 		self.check_lease().await?;
 		Ok(())
 	}

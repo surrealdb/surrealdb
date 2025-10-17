@@ -791,9 +791,10 @@ impl Datastore {
 			TaskLeaseType::IndexCompaction,
 			interval * 2,
 		)?;
-		// We continue without interruptions while there are keys and the lease
+		// Process all items in the queue. Once processing starts, we continue to completion
+		// even if the lease expires mid-process (see try_maintain_lease documentation).
 		loop {
-			// Attempt to acquire a lease for the ChangeFeedCleanup task
+			// Attempt to acquire a lease for the IndexCompaction task
 			// If we don't get the lease, another node is handling this task
 			if !lh.has_lease().await? {
 				return Ok(());
@@ -808,6 +809,8 @@ impl Datastore {
 			// Returns an ordered list of indexes that require compaction
 			for (k, _) in txn.getr(range.clone(), None).await? {
 				count += 1;
+				// Best-effort lease maintenance: we continue processing even if another node
+				// acquires the lease. This ensures tasks complete once started.
 				lh.try_maintain_lease().await?;
 				let ic = IndexCompactionKey::decode_key(&k)?;
 				// If the index has already been compacted, we can ignore the task
