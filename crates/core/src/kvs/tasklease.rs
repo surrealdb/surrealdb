@@ -20,6 +20,16 @@ pub(crate) enum TaskLeaseType {
 	IndexCompaction,
 }
 
+/// Represents a distributed task lease stored in the datastore.
+///
+/// A TaskLease records which node currently owns the exclusive right to perform
+/// a specific task, and when that right expires. The lease is stored in the
+/// datastore and checked/updated atomically to ensure only one node can hold
+/// the lease at any given time.
+///
+/// # Fields
+/// * `owner` - UUID of the node that currently owns this lease
+/// * `expiration` - UTC timestamp when this lease will expire
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub(crate) struct TaskLease {
@@ -29,6 +39,28 @@ pub(crate) struct TaskLease {
 
 impl_kv_value_revisioned!(TaskLease);
 
+/// Represents the current status of a lease based on its expiration time.
+///
+/// The status determines whether a lease can be used as-is, needs renewal,
+/// or has expired and can be replaced. Status is calculated by comparing
+/// the current time against the lease's expiration time and duration.
+///
+/// # Variants
+///
+/// * `Valid` - The lease has more than half its duration remaining before expiration. The owning
+///   node can continue using it without renewal.
+///
+/// * `Renewable` - The lease has less than half its duration remaining before expiration, but
+///   hasn't expired yet. The owning node should renew it to maintain ownership.
+///
+/// * `Expired` - The lease's expiration time has passed. Any node can attempt to acquire a new
+///   lease to replace it.
+///
+/// # Status Transitions
+///
+/// ```text
+/// Valid (>50% remaining) → Renewable (0-50% remaining) → Expired (past expiration)
+/// ```
 #[derive(Debug)]
 enum LeaseStatus {
 	Valid,
@@ -69,6 +101,21 @@ pub struct LeaseHandler {
 }
 
 impl LeaseHandler {
+	/// Creates a new LeaseHandler for managing distributed task leases.
+	///
+	/// This constructor initializes a lease handler that will manage leases for a specific
+	/// task type using the provided transaction factory and lease duration.
+	///
+	/// # Arguments
+	/// * `node` - UUID of the current node that will attempt to acquire leases
+	/// * `tf` - Transaction factory for performing database operations
+	/// * `task_type` - The type of task this handler will manage leases for
+	/// * `lease_duration` - How long each acquired lease should remain valid before expiring
+	///
+	/// # Returns
+	/// * `Ok(Self)` - A new LeaseHandler instance ready to manage leases
+	/// * `Err` - If the lease_duration cannot be converted to chrono::Duration (e.g., if it's too
+	///   large)
 	pub(super) fn new(
 		node: Uuid,
 		tf: TransactionFactory,
@@ -214,12 +261,40 @@ impl LeaseHandler {
 		self.acquire_new_lease(now).await
 	}
 
+	/// Convenience wrapper that creates a read-only transaction and retrieves the lease.
+	///
+	/// This method is used when checking lease status without intending to modify it.
+	/// It creates a read transaction and delegates to `get_lease()` for the actual retrieval.
+	///
+	/// # Arguments
+	/// * `current` - The current timestamp to use for determining lease status
+	///
+	/// # Returns
+	/// * `Ok(Some((lease, status)))` - If a lease exists, returns it with its current status
+	/// * `Ok(None)` - If no lease exists for this task type
+	/// * `Err` - If database operations fail
 	async fn read_lease(&self, current: DateTime<Utc>) -> Result<Option<(TaskLease, LeaseStatus)>> {
 		let tx = self.tf.transaction(TransactionType::Read, LockType::Optimistic).await?;
 		self.get_lease(&tx, current).await
 	}
 
-	/// Checks if there's an existing valid lease and determines the expiration status
+	/// Retrieves the current lease from the datastore and determines its status.
+	///
+	/// This method fetches the lease for the handler's task type and calculates its status
+	/// by comparing the current time against the lease's expiration time and duration:
+	///
+	/// - **Valid**: More than 50% of the lease duration remains (no action needed)
+	/// - **Renewable**: Between 0% and 50% of the lease duration remains (should renew soon)
+	/// - **Expired**: Past the expiration time (can be replaced by any node)
+	///
+	/// # Arguments
+	/// * `tx` - The transaction to use for database operations
+	/// * `current` - The current timestamp to use for determining lease status
+	///
+	/// # Returns
+	/// * `Ok(Some((lease, status)))` - If a lease exists, returns it with its calculated status
+	/// * `Ok(None)` - If no lease exists for this task type
+	/// * `Err` - If database operations fail
 	async fn get_lease(
 		&self,
 		tx: &Transaction,
