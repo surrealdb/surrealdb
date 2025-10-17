@@ -674,6 +674,62 @@ impl Cast for crate::val::Table {
 	}
 }
 
+impl Cast for Geometry {
+	fn can_cast(v: &Value) -> bool {
+		if matches!(v, Value::Geometry(_)) {
+			true
+		} else if Geometry::array_to_line(v).is_some()
+			| Geometry::array_to_multiline(v).is_some()
+			| Geometry::array_to_multipoint(v).is_some()
+			| Geometry::array_to_multipolygon(v).is_some()
+			| Geometry::array_to_point(v).is_some()
+			| Geometry::array_to_polygon(v).is_some()
+		{
+			true
+		} else if let Value::Object(object) = v {
+			Geometry::try_from_object(object).is_some()
+		} else {
+			false
+		}
+	}
+
+	fn cast(v: Value) -> Result<Self, CastError> {
+		
+		match v.clone() {
+			Value::Geometry(geometry) => Ok(geometry),
+			Value::Array(array) => {
+				let val = Value::Array(array);
+
+				if let Some(geo) = Geometry::array_to_point(&val)
+					.map(Geometry::from)
+					.or(Geometry::array_to_multipoint(&val).map(Geometry::from))
+					.or(Geometry::array_to_line(&val).map(Geometry::from))
+					.or(Geometry::array_to_multiline(&val).map(Geometry::from))
+					.or(Geometry::array_to_polygon(&val).map(Geometry::from))
+					.or(Geometry::array_to_multipolygon(&val).map(Geometry::from))
+				{
+					Ok(geo)
+				} else {
+					Err(CastError::InvalidKind {
+						from: v,
+						into: "Geometry".to_string(),
+					})
+				}
+			}
+			Value::Object(object) => {
+				Geometry::try_from_object(&object).ok_or_else(|| CastError::InvalidKind {
+					from: v,
+					into: "Geometry".to_string(),
+				})
+			}
+			_ => Err(CastError::InvalidKind {
+				from: v,
+				into: "Geometry".to_string(),
+			}),
+		}
+	}
+}
+
 macro_rules! impl_direct {
 	($($name:ident => $inner:ty $(= $kind:ident)?),*$(,)?) => {
 		$(
@@ -709,7 +765,6 @@ macro_rules! impl_direct {
 impl_direct! {
 	Closure => Box<Closure> = Closure,
 	Object => Object,
-	Geometry => Geometry,
 	File => File,
 }
 
@@ -860,26 +915,13 @@ impl Value {
 				true => self.cast_to::<RecordId>().map(Value::from),
 				false => self.cast_to_record(t).map(Value::from),
 			},
-			Kind::Geometry(t) => match t.is_empty() {
-				true => self.cast_to::<Geometry>().map(Value::from),
-				false if t.iter().any(|t| matches!(t, GeometryKind::Point)) => {
-					// Pass on if already a point
-					if matches!(self, Value::Geometry(Geometry::Point(_))) {
-						Ok(self)
-					} else {
-						// Otherwise try from an array
-						Ok(Value::Geometry(Geometry::Point(
-							Geometry::array_to_point(&self).ok_or_else(|| {
-								CastError::InvalidKind {
-									from: self,
-									into: "point".into(),
-								}
-							})?,
-						)))
-					}
-				}
-				false => self.cast_to_geometry(t).map(Value::from),
-			},
+			Kind::Geometry(t) => match self.clone().cast_to::<Geometry>() {
+				Ok(v) => Ok(Value::from(v)),
+				Err(_) => Err(CastError::InvalidKind {
+						from: self,
+						into: t.iter().map(|kind| kind.to_string()).collect::<Vec<String>>().join("|")
+					})
+			}
 			Kind::Either(k) => {
 				let Some(k) = k.iter().find(|x| self.can_cast_to_kind(x)) else {
 					return Err(CastError::InvalidKind {

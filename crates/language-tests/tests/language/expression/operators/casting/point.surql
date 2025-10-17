@@ -22,6 +22,15 @@ error = "Expected `point` but found a `[0f, 0f, 0f]`"
 [[test.results]]
 value = "true"
 
+[[test.results]]
+value = "true"
+
+[[test.results]]
+value = "true"
+
+[[test.results]]
+value = "false"
+
 */
 
 // Make a location with two floats
@@ -42,3 +51,8 @@ geo::distance(location:[50.0, 50.0].point, (51.0, 51.0)).floor();
 
 // GeoJSON objects work too
 (<point>{ type: "Point", coordinates: [0.0, 0.0] }).is_point();
+
+// Multi-type casting works too
+(<geometry<polygon | point>> { type: "Polygon", coordinates: [[[9.9, 9.9], [10.0, 10.0], [11.0, 11.0]]] }).is_geometry();
+(<geometry<point|polygon>> { type: "Polygon", coordinates: [[[9.9, 9.9], [10.0, 10.0], [11.0, 11.0]]] }).is_polygon();
+(<geometry<point|polygon>> { type: "Polygon", coordinates: [[[9.9, 9.9], [10.0, 10.0], [11.0, 11.0]]] }).is_point();
