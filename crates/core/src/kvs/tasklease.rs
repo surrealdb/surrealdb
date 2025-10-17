@@ -119,29 +119,31 @@ impl LeaseHandler {
 
 	/// Attempts to maintain the current lease by checking and potentially renewing it.
 	///
-	/// This is a **best-effort** lease maintenance method that allows tasks to continue
-	/// even if the lease is lost to another node. This is intentional design: once a task
-	/// has started processing, it should complete its work rather than abort mid-process.
-	///
-	/// The method performs these operations:
+	/// This method provides lease ownership status to allow callers to decide whether to
+	/// continue processing or stop. It performs these operations:
 	/// 1. Checks if the current node owns a valid lease
 	/// 2. Renews the lease if needed and possible
-	/// 3. **Intentionally ignores** whether the node still owns the lease
+	/// 3. Returns whether the node currently owns the lease
 	///
 	/// # Design Rationale
 	///
 	/// When called periodically during long-running task processing (e.g., in loops processing
 	/// multiple items), this method ensures the node makes a best effort to maintain its lease.
-	/// However, if another node acquires the lease mid-process, the current task continues to
-	/// completion rather than aborting. This prevents leaving the system in an inconsistent state
-	/// and allows work that has already started to finish.
+	/// It returns the current lease ownership status, allowing callers to decide their behavior:
+	/// - **Continue processing**: Callers may choose to complete work already started even if
+	///   the lease is lost, preventing inconsistent state
+	/// - **Stop processing**: Callers may choose to abort immediately when losing the lease to
+	///   avoid duplicate work with another node
 	///
 	/// The initial lease check (via `has_lease()`) at the start of a task ensures only one node
-	/// begins processing. This method is purely for lease maintenance during execution.
+	/// begins processing. This method is for lease maintenance and ownership verification during
+	/// execution.
 	///
 	/// # Returns
-	/// * `Ok(())` - Always succeeds if database operations complete (regardless of lease ownership)
-	/// * `Err` - Only if database operations fail
+	/// * `Ok(true)` - The node successfully maintained or renewed the lease and still owns it
+	/// * `Ok(false)` - The node lost the lease to another node (or another node acquired it
+	///   during a race condition)
+	/// * `Err` - If database operations fail
 	///
 	/// # Example Usage
 	/// ```ignore
@@ -150,17 +152,24 @@ impl LeaseHandler {
 	///     return Ok(()); // Another node owns the lease
 	/// }
 	///
-	/// // Process items, maintaining lease best-effort
+	/// // Example 1: Continue processing regardless of lease status (complete work once started)
 	/// for item in items {
-	///     lease_handler.try_maintain_lease().await?; // Continue even if lease lost
+	///     let _ = lease_handler.try_maintain_lease().await?; // Ignore lease ownership
+	///     process_item(item).await?;
+	/// }
+	///
+	/// // Example 2: Stop processing immediately if lease is lost
+	/// for item in items {
+	///     if !lease_handler.try_maintain_lease().await? {
+	///         return Ok(()); // Another node owns the lease now
+	///     }
 	///     process_item(item).await?;
 	/// }
 	/// ```
-	pub(crate) async fn try_maintain_lease(&self) -> Result<(), Error> {
-		// Attempt to maintain the lease, but allow the task to continue regardless
-		// of the result. This is intentional: tasks that have started should complete.
-		self.check_lease().await?;
-		Ok(())
+	pub(crate) async fn try_maintain_lease(&self) -> Result<bool, Error> {
+		// Check and potentially renew the lease, returning ownership status.
+		// Callers can use this information to decide whether to continue or stop processing.
+		self.check_lease().await
 	}
 
 	/// Checks if a lease exists and attempts to acquire or renew it.
@@ -238,10 +247,18 @@ impl LeaseHandler {
 	/// successfully acquire a lease at a time, even when multiple nodes attempt acquisition
 	/// simultaneously.
 	///
+	/// # Race Condition Handling
+	///
+	/// When multiple nodes attempt to acquire or renew a lease simultaneously, the conditional
+	/// write (`putc`) may fail with `TxConditionNotMet` if another node wrote to the lease
+	/// between our read and write operations. This is gracefully handled by returning `Ok(false)`
+	/// rather than propagating an error, allowing ongoing tasks to continue processing while
+	/// acknowledging that another node now owns the lease.
+	///
 	/// # Returns
 	/// * `Ok(true)` - If the lease was successfully acquired by this node
-	/// * `Ok(false)` - If another node owns a valid (non-expired) lease
-	/// * `Err` - If database operations fail or a race condition is detected
+	/// * `Ok(false)` - If another node owns a valid lease or acquired it during our attempt
+	/// * `Err` - Only if database operations fail (network errors, transaction failures, etc.)
 	async fn acquire_new_lease(&self, current: DateTime<Utc>) -> Result<bool, Error> {
 		let tx = self.tf.transaction(TransactionType::Write, LockType::Optimistic).await?;
 
@@ -274,9 +291,20 @@ impl LeaseHandler {
 		// This ensures mutual exclusion: only one node can successfully acquire the lease when
 		// multiple nodes attempt acquisition simultaneously (e.g., when replacing an expired
 		// lease).
-		tx.putc(&Tl::new(&self.task_type), new_lease, previous_lease).await?;
-		tx.commit().await?;
-		Ok(true)
+		match tx.putc(&Tl::new(&self.task_type), new_lease, previous_lease).await {
+			Ok(()) => {
+				tx.commit().await?;
+				Ok(true)
+			}
+			// CRITICAL: Convert TxConditionNotMet to Ok(false) rather than propagating as an error.
+			// This race condition occurs when another node acquires/renews the lease between our
+			// read and write operations. By returning Ok(false) instead of Err, we enable the
+			// best-effort lease maintenance behavior: try_maintain_lease() can ignore the result
+			// and allow ongoing tasks to complete even when another node takes over the lease.
+			// This prevents tasks from aborting mid-process when lease ownership changes.
+			Err(Error::TxConditionNotMet) => Ok(false),
+			Err(e) => Err(e),
+		}
 	}
 }
 
