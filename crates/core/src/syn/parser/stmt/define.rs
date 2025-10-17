@@ -790,9 +790,7 @@ impl Parser<'_> {
 		let is_async = self.eat(t!("ASYNC"));
 		#[cfg(target_family = "wasm")]
 		if is_async {
-			return Err(SyntaxError::new(
-				"ASYNC events are not supported in WASM, they will run synchronously like non-async events",
-			));
+			return Err(SyntaxError::new("ASYNC events are not supported in WASM"));
 		}
 
 		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;

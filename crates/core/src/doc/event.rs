@@ -82,9 +82,11 @@ impl Document {
 			}
 			#[cfg(target_family = "wasm")]
 			{
-				warn!(
-					"ASYNC events are not supported in WASM, they will run synchronously like non-async events"
-				);
+				if ev.is_async {
+					warn!(
+						"ASYNC events are not supported in WASM, they will run synchronously like non-async events"
+					);
+				}
 				process_event(stk, &ev, ctx, opt, doc).await?;
 			}
 		}
