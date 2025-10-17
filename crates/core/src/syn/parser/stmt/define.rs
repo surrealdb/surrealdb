@@ -22,8 +22,7 @@ use crate::sql::statements::{
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	AccessType, Expr, Index, Kind, Literal, Param, Permission, Permissions, Scoring, TableType,
-	access_type, table_type,
+	access_type, table_type, AccessType, BlockExecutable, Executable, Expr, Index, Kind, Literal, Param, Permission, Permissions, Scoring, TableType
 };
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
@@ -170,13 +169,16 @@ impl Parser<'_> {
 
 		let next = expected!(self, t!("{")).span;
 		let block = self.parse_block(stk, next).await?;
+		let executable = Executable::Block(BlockExecutable {
+			args,
+			returns,
+			block,
+		});
 
 		let mut res = DefineFunctionStatement {
 			name,
-			args,
-			block,
+			executable,
 			kind,
-			returns,
 			comment: None,
 			permissions: Permission::default(),
 		};

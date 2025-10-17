@@ -18,7 +18,7 @@ use crate::val::Value;
 
 mod silo;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineFunctionStatement {
 	pub kind: DefineKind,
 	pub name: String,

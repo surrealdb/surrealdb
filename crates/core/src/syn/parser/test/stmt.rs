@@ -35,10 +35,7 @@ use crate::sql::statements::{
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	Algorithm, AssignOperator, Base, BinaryOperator, Block, Cond, Data, Dir, Explain, Expr, Fetch,
-	Fetchs, Field, Fields, Group, Groups, Idiom, Index, Kind, Limit, Literal, Lookup, Mock, Order,
-	Output, Param, Part, Permission, Permissions, RecordIdKeyLit, RecordIdLit, Scoring, Split,
-	Splits, Start, TableType, Timeout, TopLevelExpr, With,
+	Algorithm, AssignOperator, Base, BinaryOperator, Block, BlockExecutable, Cond, Data, Dir, Executable, Explain, Expr, Fetch, Fetchs, Field, Fields, Group, Groups, Idiom, Index, Kind, Limit, Literal, Lookup, Mock, Order, Output, Param, Part, Permission, Permissions, RecordIdKeyLit, RecordIdLit, Scoring, Split, Splits, Start, TableType, Timeout, TopLevelExpr, With
 };
 use crate::syn;
 use crate::syn::parser::ParserSettings;
@@ -237,17 +234,19 @@ fn parse_define_function() {
 		Expr::Define(Box::new(DefineStatement::Function(DefineFunctionStatement {
 			kind: DefineKind::Default,
 			name: "foo::bar".to_owned(),
-			args: vec![
-				("a".to_owned(), Kind::Number),
-				("b".to_owned(), Kind::Array(Box::new(Kind::Bool), Some(3)))
-			],
-			block: Block(vec![Expr::Return(Box::new(OutputStatement {
-				what: ident_field("a"),
-				fetch: None,
-			}))]),
+			executable: Executable::Block(BlockExecutable {
+				args: vec![
+					("a".to_owned(), Kind::Number),
+					("b".to_owned(), Kind::Array(Box::new(Kind::Bool), Some(3))),
+				],
+				returns: None,
+				block: Block(vec![Expr::Return(Box::new(OutputStatement {
+					what: ident_field("a"),
+					fetch: None,
+				}))]),
+			}),
 			comment: Some(Expr::Literal(Literal::String("test".to_string()))),
 			permissions: Permission::Full,
-			returns: None,
 		})))
 	)
 }

@@ -1,10 +1,11 @@
-use crate::expr::{Block, Kind};
+use crate::sql::{Block, Kind};
 use crate::expr;
 use crate::fmt::EscapeKwFreeIdent;
 use crate::val::File;
 use std::fmt::{self, Display};
+use crate::catalog;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Executable {
 	Block(BlockExecutable),
 	Surrealism(SurrealismExecutable),
@@ -17,6 +18,16 @@ impl From<expr::Executable> for Executable {
 			expr::Executable::Block(block) => Executable::Block(block.into()),
 			expr::Executable::Surrealism(surrealism) => Executable::Surrealism(surrealism.into()),
 			expr::Executable::Silo(silo) => Executable::Silo(silo.into()),
+		}
+	}
+}
+
+impl From<catalog::Executable> for Executable {
+	fn from(executable: catalog::Executable) -> Self {
+		match executable {
+			catalog::Executable::Block(block) => Executable::Block(block.into()),
+			catalog::Executable::Surrealism(surrealism) => Executable::Surrealism(surrealism.into()),
+			catalog::Executable::Silo(silo) => Executable::Silo(silo.into()),
 		}
 	}
 }
@@ -41,7 +52,7 @@ impl fmt::Display for Executable {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct BlockExecutable {
 	pub args: Vec<(String, Kind)>,
 	pub returns: Option<Kind>,
@@ -51,9 +62,19 @@ pub(crate) struct BlockExecutable {
 impl From<expr::BlockExecutable> for BlockExecutable {
 	fn from(executable: expr::BlockExecutable) -> Self {
 		Self {
-			args: executable.args,
-			returns: executable.returns,
-			block: executable.block,
+			args: executable.args.into_iter().map(|(n, k)| (n, k.into())).collect(),
+			returns: executable.returns.map(|k| k.into()),
+			block: executable.block.into(),
+		}
+	}
+}
+
+impl From<catalog::BlockExecutable> for BlockExecutable {
+	fn from(executable: catalog::BlockExecutable) -> Self {
+		Self {
+			args: executable.args.into_iter().map(|(n, k)| (n, k.into())).collect(),
+			returns: executable.returns.map(|k| k.into()),
+			block: executable.block.into(),
 		}
 	}
 }
@@ -61,9 +82,9 @@ impl From<expr::BlockExecutable> for BlockExecutable {
 impl From<BlockExecutable> for expr::BlockExecutable {
 	fn from(executable: BlockExecutable) -> Self {
 		Self {
-			args: executable.args,
-			returns: executable.returns,
-			block: executable.block,
+			args: executable.args.into_iter().map(|(n, k)| (n, k.into())).collect(),
+			returns: executable.returns.map(|k| k.into()),
+			block: executable.block.into(),
 		}
 	}
 }
@@ -86,12 +107,18 @@ impl fmt::Display for BlockExecutable {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct SurrealismExecutable(File);
 
 impl From<expr::SurrealismExecutable> for SurrealismExecutable {
 	fn from(executable: expr::SurrealismExecutable) -> Self {
 		Self(executable.0)
+	}
+}
+
+impl From<catalog::SurrealismExecutable> for SurrealismExecutable {
+	fn from(executable: catalog::SurrealismExecutable) -> Self {
+		Self(File::new(executable.bucket, executable.key))
 	}
 }
 
@@ -107,7 +134,7 @@ impl fmt::Display for SurrealismExecutable {
 	}
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct SiloExecutable {
 	pub organisation: String,
 	pub package: String,
@@ -118,6 +145,18 @@ pub(crate) struct SiloExecutable {
 
 impl From<expr::SiloExecutable> for SiloExecutable {
 	fn from(executable: expr::SiloExecutable) -> Self {
+		Self {
+			organisation: executable.organisation,
+			package: executable.package,
+			major: executable.major,
+			minor: executable.minor,
+			patch: executable.patch,
+		}
+	}
+}
+
+impl From<catalog::SiloExecutable> for SiloExecutable {
+	fn from(executable: catalog::SiloExecutable) -> Self {
 		Self {
 			organisation: executable.organisation,
 			package: executable.package,

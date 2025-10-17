@@ -31,8 +31,12 @@ impl InfoStructure for BlockExecutable {
 	fn structure(self) -> Value {
 		Value::from(map! {
 			"type".to_string() => Value::from("block"),
-			"args".to_string() => self.args.into(),
-			"returns".to_string() => self.returns.map(|k| k.to_string()).into(),
+			"args".to_string() => self.args
+				.into_iter()
+				.map(|(n, k)| vec![n.into(), k.to_string().into()].into())
+				.collect::<Vec<Value>>()
+				.into(),
+			"returns".to_string(), if let Some(v) = self.returns => v.to_string().into(),
 			"block".to_string() => self.block.to_string().into(),
 		})
 	}

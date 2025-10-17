@@ -1,8 +1,8 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
-use crate::sql::{Block, Expr, Executable, Kind, Permission};
+use crate::fmt::{is_pretty, pretty_indent};
+use crate::sql::{Expr, Executable, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
