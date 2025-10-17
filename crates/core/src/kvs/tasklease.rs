@@ -260,13 +260,16 @@ mod tests {
 	use chrono::Utc;
 	#[cfg(feature = "kv-rocksdb")]
 	use temp_dir::TempDir;
+	#[cfg(feature = "kv-mem")]
 	use tokio::time::sleep;
 	use uuid::Uuid;
 
 	use crate::dbs::node::Timestamp;
 	use crate::kvs::clock::{FakeClock, SizedClock};
 	use crate::kvs::ds::{DatastoreFlavor, TransactionFactory};
-	use crate::kvs::tasklease::{LeaseHandler, LeaseStatus, TaskLeaseType};
+	#[cfg(feature = "kv-mem")]
+	use crate::kvs::tasklease::LeaseStatus;
+	use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 
 	/// Tracks the results of lease acquisition attempts by a node.
 	///
