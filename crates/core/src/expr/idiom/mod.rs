@@ -53,19 +53,6 @@ impl InfoStructure for Idioms {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct Idiom(pub(crate) Vec<Part>);
 
-impl Deref for Idiom {
-	type Target = [Part];
-	fn deref(&self) -> &Self::Target {
-		self.0.as_slice()
-	}
-}
-
-impl From<Vec<Part>> for Idiom {
-	fn from(v: Vec<Part>) -> Self {
-		Self(v)
-	}
-}
-
 impl Idiom {
 	/// Returns an idiom for a field of the given name.
 	pub fn field(field_name: String) -> Self {
@@ -173,6 +160,19 @@ impl Idiom {
 				None => Value::None.get(stk, ctx, opt, doc, self.next_method()).await,
 			},
 		}
+	}
+}
+
+impl Deref for Idiom {
+	type Target = [Part];
+	fn deref(&self) -> &Self::Target {
+		self.0.as_slice()
+	}
+}
+
+impl From<Vec<Part>> for Idiom {
+	fn from(v: Vec<Part>) -> Self {
+		Self(v)
 	}
 }
 

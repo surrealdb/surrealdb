@@ -88,7 +88,7 @@ mod graphql_integration {
 		{
 			let res = client
 				.post(gql_url)
-				.body(json!({"query": r#"query{foo{id, val}}"#}).to_string())
+				.body(json!({"query": r#"query{ foo { id, val } }"#}).to_string())
 				.send()
 				.await?;
 			assert_eq!(res.status(), 200);
