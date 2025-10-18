@@ -313,36 +313,11 @@ pub trait RpcProtocolV1: RpcContext {
 	// ------------------------------
 
 	async fn info(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
-		let what = vec![Expr::Param(Param::new("auth".to_owned()))];
+		let vars = Some(self.session().variables.clone());
+		let mut res = self.kvs().execute("$auth", &self.session(), vars).await?;
 
-		// TODO: Check if this can be replaced by just evaluating the param or a
-		// `$auth.*` expression
-		// Specify the SQL query string
-		let sql = SelectStatement {
-			expr: Fields::all(),
-			what,
-			with: None,
-			cond: None,
-			omit: vec![],
-			only: false,
-			split: None,
-			group: None,
-			order: None,
-			limit: None,
-			start: None,
-			fetch: None,
-			version: None,
-			timeout: None,
-			parallel: false,
-			explain: None,
-			tempfiles: false,
-		};
-		let ast = Ast::single_expr(Expr::Select(Box::new(sql)));
-		// Execute the query on the database
-		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), None).await?;
-		// Extract the first value from the result
-		// TODO: Move first here into the actual expression.
-		Ok(DbResult::Other(res.remove(0).result?.first().unwrap()))
+		let first = res.remove(0).result?;
+		Ok(DbResult::Other(first))
 	}
 
 	// ------------------------------
