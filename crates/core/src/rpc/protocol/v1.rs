@@ -1,7 +1,8 @@
 use std::mem;
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow, ensure};
+use anyhow::{Result, ensure};
+use uuid::Uuid;
 
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
 #[cfg(not(target_family = "wasm"))]
@@ -311,9 +312,10 @@ pub trait RpcProtocolV1: RpcContext {
 	// Methods for identification
 	// ------------------------------
 
-	async fn info(&self) -> Result<DbResult, RpcError> {
-		let vars = Some(self.session().variables.clone());
-		let mut res = self.kvs().execute("$auth", &self.session(), vars).await?;
+	async fn info(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
+		let session = self.get_session(session_id.as_ref());
+		let vars = Some(session.variables.clone());
+		let mut res = self.kvs().execute("$auth", &session, vars).await?;
 
 		let first = res.remove(0).result?;
 		Ok(DbResult::Other(first))
