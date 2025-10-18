@@ -184,7 +184,7 @@ pub async fn process_tbs(
 						};
 
 						tracing::warn!("generated logical plan: {plan:?}");
-						
+
 						let res = execute_plan(&kvs1, &sess1, plan).await?;
 
 						tracing::warn!("result: {res:?}");
@@ -384,8 +384,7 @@ pub async fn process_tbs(
 					match res {
 						Value::RecordId(t) => {
 							let ty = t.table.to_string();
-							let out = FieldValue::owned_any(t)
-								.with_type(ty);
+							let out = FieldValue::owned_any(t).with_type(ty);
 							Ok(Some(out))
 						}
 						_ => Ok(None),

@@ -89,20 +89,6 @@ pub async fn generate_schema(
 		}
 	};
 
-	match (&tbs, &fns) {
-		(None, None) => return Err(GqlError::NotConfigured),
-		(None, Some(fs)) if fs.is_empty() => {
-			return Err(schema_error("no functions found in database"));
-		}
-		(Some(ts), None) if ts.is_empty() => {
-			return Err(schema_error("no tables found in database"));
-		}
-		(Some(ts), Some(fs)) if ts.is_empty() && fs.is_empty() => {
-			return Err(schema_error("no items found in database"));
-		}
-		_ => {}
-	}
-
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();
 

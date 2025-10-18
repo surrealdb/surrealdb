@@ -189,6 +189,7 @@ async fn post_handler(
 				&rpc,
 				req.version,
 				req.txn.map(Into::into),
+				req.session_id.map(Into::into),
 				req.method,
 				req.params,
 			)

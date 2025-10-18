@@ -63,8 +63,7 @@ pub async fn process_fns(
 
 					let gql_res = match res {
 						Value::RecordId(rid) => {
-							let mut tmp =
-								FieldValue::owned_any(rid.clone());
+							let mut tmp = FieldValue::owned_any(rid.clone());
 							match kind1 {
 								Kind::Record(ts) if ts.len() != 1 => {
 									tmp = tmp.with_type(rid.table.clone())

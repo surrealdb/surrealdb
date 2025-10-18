@@ -87,7 +87,10 @@ mod cli_integration {
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
 			let output = common::run(&args).input("CREATE any:any;\n").output().unwrap();
-			assert!(output.contains("Development builds are not intended for production use"));
+			assert!(
+				output.contains("Development builds are not intended for production use"),
+				"{output}"
+			);
 		}
 
 		info!("* Create a record");
@@ -96,7 +99,10 @@ mod cli_integration {
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
 			let output = common::run(&args).input("CREATE thing:one;\n").output().unwrap();
-			assert!(output.contains("[[{ id: thing:one }]]\n\n"), "failed to send sql: {args}");
+			assert!(
+				output.contains("[[{ id: thing:one }]]\n\n"),
+				"failed to send sql: {args} - output: {output}"
+			);
 		}
 
 		info!("* Export to stdout");
@@ -107,8 +113,11 @@ mod cli_integration {
 			let output = common::run(&args)
 				.output()
 				.unwrap_or_else(|_| panic!("failed to run stdout export: {args}"));
-			assert!(output.contains("DEFINE TABLE thing TYPE ANY SCHEMALESS PERMISSIONS NONE;"));
-			assert!(output.contains("INSERT [ { id: thing:one } ];"));
+			assert!(
+				output.contains("DEFINE TABLE thing TYPE ANY SCHEMALESS PERMISSIONS NONE;"),
+				"{output}"
+			);
+			assert!(output.contains("INSERT [ { id: thing:one } ];"), "{output}");
 		}
 
 		info!("* Export to file");

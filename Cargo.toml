@@ -253,6 +253,7 @@ clap = { version = "4.4.11", features = [
     "wrap_help",
     "unicode",
 ] }
+dashmap.workspace = true
 glob = "0.3.1"
 http-body = "1.0.0"
 http-body-util = "0.1.1"

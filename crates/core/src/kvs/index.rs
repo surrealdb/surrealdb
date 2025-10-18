@@ -9,9 +9,11 @@ use futures::channel::oneshot::{Receiver, Sender, channel};
 use reblessive::TreeStack;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_family = "wasm"))]
+use tokio::spawn;
 use tokio::sync::RwLock;
-use tokio::task;
-use tokio::task::JoinHandle;
+#[cfg(target_family = "wasm")]
+use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::catalog::{DatabaseDefinition, DatabaseId, IndexDefinition, NamespaceId};
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
@@ -123,7 +125,7 @@ impl From<BuildingStatus> for Value {
 	}
 }
 
-type IndexBuilding = (Arc<Building>, JoinHandle<()>);
+type IndexBuilding = Arc<Building>;
 
 #[derive(Hash, PartialEq, Eq)]
 struct IndexKey {
@@ -169,7 +171,8 @@ impl IndexBuilder {
 	) -> Result<IndexBuilding> {
 		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ns, db, ix)?);
 		let b = building.clone();
-		let jh = task::spawn(async move {
+		spawn(async move {
+			let guard = BuildingFinishGuard(b.clone());
 			let r = b.run().await;
 			if let Err(err) = &r {
 				b.set_status(BuildingStatus::Error(err.to_string())).await;
@@ -179,8 +182,9 @@ impl IndexBuilder {
 					warn!("Failed to send index building result to the consumer");
 				}
 			}
+			drop(guard);
 		});
-		Ok((building, jh))
+		Ok(building)
 	}
 
 	pub(crate) async fn build(
@@ -203,7 +207,7 @@ impl IndexBuilder {
 			Entry::Occupied(mut e) => {
 				// If the building is currently running, we return an error
 				ensure!(
-					e.get().1.is_finished(),
+					e.get().is_finished(),
 					Error::IndexAlreadyBuilding {
 						name: e.key().ix.clone(),
 					}
@@ -230,7 +234,7 @@ impl IndexBuilder {
 		rid: &RecordId,
 	) -> Result<ConsumeResult> {
 		let key = IndexKey::new(db.namespace_id, db.database_id, &ix.table_name, &ix.name);
-		if let Some((b, _)) = self.indexes.read().await.get(&key) {
+		if let Some(b) = self.indexes.read().await.get(&key) {
 			return b.maybe_consume(ctx, old_values, new_values, rid).await;
 		}
 		Ok(ConsumeResult::Ignored(old_values, new_values))
@@ -243,8 +247,8 @@ impl IndexBuilder {
 		ix: &IndexDefinition,
 	) -> BuildingStatus {
 		let key = IndexKey::new(ns, db, &ix.table_name, &ix.name);
-		if let Some(a) = self.indexes.read().await.get(&key) {
-			a.0.status.read().await.clone()
+		if let Some(b) = self.indexes.read().await.get(&key) {
+			b.status.read().await.clone()
 		} else {
 			BuildingStatus::default()
 		}
@@ -258,7 +262,7 @@ impl IndexBuilder {
 		ix: &str,
 	) -> Result<()> {
 		let key = IndexKey::new(ns, db, tb, ix);
-		if let Some((b, _)) = self.indexes.write().await.remove(&key) {
+		if let Some(b) = self.indexes.write().await.remove(&key) {
 			b.abort();
 		}
 		Ok(())
@@ -331,6 +335,7 @@ struct Building {
 	status: Arc<RwLock<BuildingStatus>>,
 	queue: Arc<RwLock<QueueSequences>>,
 	aborted: AtomicBool,
+	finished: AtomicBool,
 }
 
 impl Building {
@@ -354,6 +359,7 @@ impl Building {
 			status: Arc::new(RwLock::new(BuildingStatus::Started)),
 			queue: Default::default(),
 			aborted: AtomicBool::new(false),
+			finished: AtomicBool::new(false),
 		})
 	}
 
@@ -689,5 +695,17 @@ impl Building {
 		} else {
 			Ok(())
 		}
+	}
+
+	fn is_finished(&self) -> bool {
+		self.finished.load(Ordering::Relaxed)
+	}
+}
+
+struct BuildingFinishGuard(IndexBuilding);
+
+impl Drop for BuildingFinishGuard {
+	fn drop(&mut self) {
+		self.0.finished.store(true, Ordering::Relaxed);
 	}
 }

@@ -1,3 +1,0 @@
-[submodule "crates/core/src/ent"]
-	path = crates/core/src/ent
-	url = git@github.com:surrealdb/enterprise.git
