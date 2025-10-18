@@ -183,7 +183,7 @@ mod tests {
 		ds.changefeed_process_at(None, ts.0.timestamp().try_into().unwrap()).await.unwrap();
 
 		//
-		// Write things to the table.
+		// Write records to the table.
 		//
 
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
@@ -191,7 +191,7 @@ mod tests {
 		tx.commit().await.unwrap();
 
 		let mut tx1 = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		let thing_a = RecordId {
+		let record_a = RecordId {
 			table: TB.to_owned(),
 			key: RecordIdKey::String("A".to_owned()),
 		};
@@ -201,7 +201,7 @@ mod tests {
 			tb.namespace_id,
 			tb.database_id,
 			&tb.name,
-			&thing_a,
+			&record_a,
 			previous.clone().into(),
 			value_a.into(),
 			DONT_STORE_PREVIOUS,
@@ -210,7 +210,7 @@ mod tests {
 		tx1.commit().await.unwrap();
 
 		let mut tx2 = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		let thing_c = RecordId {
+		let record_c = RecordId {
 			table: TB.to_owned(),
 			key: RecordIdKey::String("C".to_owned()),
 		};
@@ -219,7 +219,7 @@ mod tests {
 			tb.namespace_id,
 			tb.database_id,
 			&tb.name,
-			&thing_c,
+			&record_c,
 			previous.clone().into(),
 			value_c.into(),
 			DONT_STORE_PREVIOUS,
@@ -228,7 +228,7 @@ mod tests {
 		tx2.commit().await.unwrap();
 
 		let mut tx3 = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		let thing_b = RecordId {
+		let record_b = RecordId {
 			table: TB.to_owned(),
 			key: RecordIdKey::String("B".to_owned()),
 		};
@@ -237,12 +237,12 @@ mod tests {
 			tb.namespace_id,
 			tb.database_id,
 			&tb.name,
-			&thing_b,
+			&record_b,
 			previous.clone().into(),
 			value_b.into(),
 			DONT_STORE_PREVIOUS,
 		);
-		let thing_c2 = RecordId {
+		let record_c2 = RecordId {
 			table: TB.to_owned(),
 			key: RecordIdKey::String("C".to_owned()),
 		};
@@ -251,7 +251,7 @@ mod tests {
 			tb.namespace_id,
 			tb.database_id,
 			&tb.name,
-			&thing_c2,
+			&record_c2,
 			previous.clone().into(),
 			value_c2.into(),
 			DONT_STORE_PREVIOUS,

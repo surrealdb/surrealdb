@@ -307,13 +307,13 @@ mod tests {
 	}
 
 	#[test]
-	fn no_empty_thing() {
+	fn no_empty_record() {
 		let value = super::record(("".into(), Optional(None)));
 		let _expected = Error::TbInvalid {
 			value: "".into(),
 		};
 		if !matches!(value, Err(_expected)) {
-			panic!("An empty thing tb part should result in an error");
+			panic!("An empty record tb part should result in an error");
 		}
 
 		let value = super::record(("table".into(), Optional(Some("".into()))));
@@ -321,7 +321,7 @@ mod tests {
 			value: "".into(),
 		};
 		if !matches!(value, Err(_expected)) {
-			panic!("An empty thing id part should result in an error");
+			panic!("An empty record id part should result in an error");
 		}
 	}
 }

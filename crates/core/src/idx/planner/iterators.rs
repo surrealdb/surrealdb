@@ -1024,9 +1024,9 @@ impl JoinThingIterator {
 				if ctx.is_done(count % 100 == 0).await? {
 					break;
 				}
-				let thing = r.record_id();
-				let value: Value = Value::from(thing.clone());
-				let k: Key = revision::to_vec(thing)?;
+				let record = r.record_id();
+				let value: Value = Value::from(record.clone());
+				let k: Key = revision::to_vec(record)?;
 				if self.distinct.insert(k, true).is_none() {
 					self.current_local = Some(new_iter(self.ns, self.db, &self.ix, value)?);
 					return Ok(true);

@@ -379,9 +379,9 @@ impl Value {
 						Ok(res)
 					}
 				},
-				// Current value at path is a thing
+				// Current value at path is a record
 				Value::RecordId(v) => {
-					// Clone the thing
+					// Clone the record
 					let val = v.clone();
 					// Check how many path parts are remaining
 					if path.is_empty() {
