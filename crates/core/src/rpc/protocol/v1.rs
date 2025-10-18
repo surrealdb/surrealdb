@@ -15,8 +15,8 @@ use crate::rpc::args::extract_args;
 use crate::rpc::{DbResult, Method, RpcContext, RpcError};
 use crate::sql::{
 	Ast, CreateStatement, Data as SqlData, DeleteStatement, Expr, Fields, Function, FunctionCall,
-	InsertStatement, KillStatement, LiveStatement, Model, Output, Param, RelateStatement,
-	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
+	InsertStatement, KillStatement, LiveStatement, Model, Output, RelateStatement, SelectStatement,
+	TopLevelExpr, UpdateStatement, UpsertStatement,
 };
 use crate::types::{PublicArray, PublicRecordIdKey, PublicUuid, PublicValue, PublicVariables};
 
@@ -313,8 +313,9 @@ pub trait RpcProtocolV1: RpcContext {
 	// ------------------------------
 
 	async fn info(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
-		let vars = Some(self.session().variables.clone());
-		let mut res = self.kvs().execute("$auth", &self.session(), vars).await?;
+		let session = self.get_session(session_id.as_ref());
+		let vars = Some(session.variables.clone());
+		let mut res = self.kvs().execute("$auth", &session, vars).await?;
 
 		let first = res.remove(0).result?;
 		Ok(DbResult::Other(first))
