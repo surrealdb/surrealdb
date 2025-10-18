@@ -12,7 +12,6 @@ use opentelemetry::Context as TelemetryContext;
 use opentelemetry::trace::FutureExt;
 use surrealdb::types::{Array, Value};
 use surrealdb_core::dbs::Session;
-use surrealdb_core::gql::GraphQLSchemaCache;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::mem::ALLOC;
 use surrealdb_core::rpc::format::Format;
@@ -60,8 +59,6 @@ pub struct Websocket {
 	pub(crate) canceller: CancellationToken,
 	/// The channels used to send and receive WebSocket messages
 	pub(crate) channel: Sender<Message>,
-	// The GraphQL schema cache stored in advance
-	pub(crate) gql_schema: GraphQLSchemaCache,
 }
 
 impl Websocket {
@@ -88,7 +85,6 @@ impl Websocket {
 			canceller: CancellationToken::new(),
 			session: ArcSwap::from(Arc::new(session)),
 			channel: sender.clone(),
-			gql_schema: GraphQLSchemaCache::new(datastore.clone()),
 			datastore,
 		});
 		// Add this WebSocket to the list

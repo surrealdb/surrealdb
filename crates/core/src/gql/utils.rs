@@ -1,6 +1,3 @@
-use std::sync::Arc;
-
-use async_graphql::dynamic::FieldValue;
 use async_graphql::dynamic::indexmap::IndexMap;
 use async_graphql::{Name, Value as GqlValue};
 
@@ -8,7 +5,7 @@ use super::error::GqlError;
 use crate::dbs::Session;
 use crate::expr::LogicalPlan;
 use crate::kvs::Datastore;
-use crate::val::{RecordId, Value as SqlValue};
+use crate::val::Value as SqlValue;
 
 pub(crate) trait GqlValueUtils {
 	fn as_i64(&self) -> Option<i64>;
@@ -59,6 +56,8 @@ pub(crate) async fn execute_plan(
 		.process_plan(plan, sess, None)
 		.await
 		.map_err(|e| GqlError::InternalError(format!("Failed to execute query plan: {}", e)))?;
+
+	tracing::warn!("results: {results:?}");
 
 	// Take the first result
 	let first_result = results

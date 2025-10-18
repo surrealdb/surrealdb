@@ -23,19 +23,21 @@ use crate::gql::error::internal_error;
 use crate::gql::schema::{kind_to_type, unwrap_type};
 use crate::gql::utils::{GqlValueUtils, execute_plan};
 use crate::kvs::{Datastore, Transaction};
-use crate::val::{RecordId, RecordIdKey, Table, Value};
+use crate::val::{RecordId, Value};
 
 fn order_asc(field_name: String) -> expr::Order {
-	let mut tmp = expr::Order::default();
-	tmp.value = Idiom::field(field_name);
-	tmp.direction = true;
-	tmp
+	expr::Order {
+		value: Idiom::field(field_name),
+		direction: true,
+		..Default::default()
+	}
 }
 
 fn order_desc(field_name: String) -> expr::Order {
-	let mut tmp = expr::Order::default();
-	tmp.value = Idiom::field(field_name);
-	tmp
+	expr::Order {
+		value: Idiom::field(field_name),
+		..expr::Order::default()
+	}
 }
 
 fn filter_name_from_table(tb_name: impl Display) -> String {
@@ -90,145 +92,142 @@ pub async fn process_tbs(
 		let kvs1 = datastore.clone();
 
 		query = query.field(
-        Field::new(
-            tb.name.to_string(),
-            TypeRef::named_nn_list_nn(tb.name.to_string()),
-            move |ctx| {
-                let tb_name = first_tb_name.clone();
-                let sess1 = sess1.clone();
-                let fds1 = fds1.clone();
-                let kvs1 = kvs1.clone();
-                FieldFuture::new(async move {
-                    let args = ctx.args.as_index_map();
-                    trace!("received request with args: {args:?}");
+			Field::new(
+				tb.name.to_string(),
+				TypeRef::named_nn_list_nn(tb.name.to_string()),
+				move |ctx| {
+					let tb_name = first_tb_name.clone();
+					let sess1 = sess1.clone();
+					let fds1 = fds1.clone();
+					let kvs1 = kvs1.clone();
+					FieldFuture::new(async move {
+						let args = ctx.args.as_index_map();
+						trace!("received request with args: {args:?}");
 
-                    let start = args.get("start").and_then(|v| v.as_i64()).map(|s| Start(Expr::Literal(Literal::Integer(s))));
+						let start = args.get("start").and_then(|v| v.as_i64()).map(|s| Start(Expr::Literal(Literal::Integer(s))));
+						let limit = args.get("limit").and_then(|v| v.as_i64()).map(|l| Limit(Expr::Literal(Literal::Integer(l))));
+						let order = args.get("order");
+						let filter = args.get("filter");
 
-                    let limit = args.get("limit").and_then(|v| v.as_i64()).map(|l| Limit(Expr::Literal(Literal::Integer(l))));
-
-                    let order = args.get("order");
-
-                    let filter = args.get("filter");
-
-					let orders = match order {
-						Some(GqlValue::Object(o)) => {
-							let mut orders = vec![];
-							let mut current = o;
-							loop {
-								let asc = current.get("asc");
-								let desc = current.get("desc");
-								match (asc, desc) {
-									(Some(_), Some(_)) => {
-										return Err("Found both ASC and DESC in order".into());
+						let orders = match order {
+							Some(GqlValue::Object(o)) => {
+								let mut orders = vec![];
+								let mut current = o;
+								loop {
+									let asc = current.get("asc");
+									let desc = current.get("desc");
+									match (asc, desc) {
+										(Some(_), Some(_)) => {
+											return Err("Found both ASC and DESC in order".into());
+										}
+										(Some(GqlValue::Enum(a)), None) => {
+											orders.push(order_asc(a.as_str().to_string()))
+										}
+										(None, Some(GqlValue::Enum(d))) => {
+											orders.push(order_desc(d.as_str().to_string()))
+										}
+										(_, _) => {
+											break;
+										}
 									}
-									(Some(GqlValue::Enum(a)), None) => {
-										orders.push(order_asc(a.as_str().to_string()))
-									}
-									(None, Some(GqlValue::Enum(d))) => {
-										orders.push(order_desc(d.as_str().to_string()))
-									}
-									(_, _) => {
+									if let Some(GqlValue::Object(next)) = current.get("then") {
+										current = next;
+									} else {
 										break;
 									}
 								}
-								if let Some(GqlValue::Object(next)) = current.get("then") {
-									current = next;
-								} else {
-									break;
-								}
+								Some(orders)
 							}
-							Some(orders)
+							_ => None,
+						};
+
+						trace!("parsed orders: {orders:?}");
+
+						let cond = match filter {
+							Some(f) => {
+								let o = match f {
+									GqlValue::Object(o) => o,
+									f => {
+										error!("Found filter {f}, which should be object and should have been rejected by async graphql.");
+										return Err("Value in cond doesn't fit schema".into());
+									}
+								};
+
+								let cond = cond_from_filter(o, &fds1)?;
+
+								Some(cond)
+							}
+							None => None,
+						};
+
+						trace!("parsed filter: {cond:?}");
+
+						// SELECT VALUE id FROM ...
+						let expr = expr::Expr::Select(
+							Box::new(SelectStatement {
+								what: vec![Expr::Table(tb_name)],
+								expr: Fields::Value(Box::new(expr::Field::Single {
+									expr: expr::Expr::Idiom(Idiom::field("id".to_string())),
+									alias: None,
+								})),
+								order: orders.map(|x| Ordering::Order(OrderList(x))),
+								cond,
+								limit,
+								start,
+								..Default::default()
+							})
+						);
+
+						// Convert to LogicalPlan and execute
+						let plan = LogicalPlan {
+							expressions: vec![TopLevelExpr::Expr(expr)],
+						};
+
+						tracing::warn!("generated logical plan: {plan:?}");
+						
+						let res = execute_plan(&kvs1, &sess1, plan).await?;
+
+						tracing::warn!("result: {res:?}");
+
+						let res_vec =
+							match res {
+								Value::Array(a) => a,
+								v => {
+									error!("Found top level value, in result which should be array: {v:?}");
+									return Err("Internal Error".into());
+								}
+							};
+
+						let out: Result<Vec<FieldValue>, Value> = res_vec
+							.0
+							.into_iter()
+							.map(|v| {
+								match v {
+									Value::RecordId(t) => {
+										Ok(FieldValue::owned_any(t))
+									}
+									_ => {
+										error!("Found top level value, in result which should be record id: {v:?}");
+										Err("Internal Error".into())
+									}
+								}
+							})
+							.collect();
+
+						match out {
+							Ok(l) => Ok(Some(FieldValue::list(l))),
+							Err(v) => {
+								Err(internal_error(format!("expected thing, found: {v:?}")).into())
+							}
 						}
-						_ => None,
-					};
-
-                    trace!("parsed orders: {orders:?}");
-
-                    let cond = match filter {
-                        Some(f) => {
-                            let o = match f {
-                                GqlValue::Object(o) => o,
-                                f => {
-                                    error!("Found filter {f}, which should be object and should have been rejected by async graphql.");
-                                    return Err("Value in cond doesn't fit schema".into());
-                                }
-                            };
-
-                            let cond = cond_from_filter(o, &fds1)?;
-
-                            Some(cond)
-                        }
-                        None => None,
-                    };
-
-                    trace!("parsed filter: {cond:?}");
-
-                    // SELECT VALUE id FROM ...
-                    let ast = expr::Expr::Select(
-                        Box::new(SelectStatement {
-                            what: vec![Expr::Table(tb_name)].into(),
-                            expr: Fields::Value(Box::new(expr::Field::Single {
-                                expr: expr::Expr::Idiom(Idiom::field("id".to_string())),
-                                alias: None,
-                            })),
-                            order: orders.map(|x| Ordering::Order(OrderList(x))),
-                            cond,
-                            limit,
-                            start,
-                            ..Default::default()
-                        })
-                    );
-
-                    trace!("generated query ast: {ast:?}");
-
-                    // Convert to LogicalPlan and execute
-                    let plan = LogicalPlan {
-                        expressions: vec![TopLevelExpr::Expr(ast)],
-                    };
-
-                    let res = execute_plan(&kvs1, &sess1, plan).await?;
-
-                    let res_vec =
-                        match res {
-                            Value::Array(a) => a,
-                            v => {
-                                error!("Found top level value, in result which should be array: {v:?}");
-                                return Err("Internal Error".into());
-                            }
-                        };
-
-                    let out: Result<Vec<FieldValue>, Value> = res_vec
-                        .0
-                        .into_iter()
-                        .map(|v| {
-							match v {
-								Value::RecordId(t) => {
-									// let erased: ErasedRecord = (kvs1.clone(), sess1.clone(), t);
-									Ok(FieldValue::owned_any(t))
-								}
-								_ => {
-									error!("Found top level value, in result which should be record id: {v:?}");
-									Err("Internal Error".into())
-								}
-							}
-                        })
-                        .collect();
-
-                    match out {
-                        Ok(l) => Ok(Some(FieldValue::list(l))),
-                        Err(v) => {
-                            Err(internal_error(format!("expected thing, found: {v:?}")).into())
-                        }
-                    }
-                })
-            },
-        )
+					})
+				},
+			)
         .description(if let Some(c) = &tb.comment { c.to_string() } else { format!("Generated from table `{}`\nallows querying a table with filters", tb.name) })
         .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
         .argument(InputValue::new("start", TypeRef::named(TypeRef::INT)))
         .argument(InputValue::new("order", TypeRef::named(&table_order_name)))
-        .argument(InputValue::new("filter", TypeRef::named(&table_filter_name))),
-    );
+        .argument(InputValue::new("filter", TypeRef::named(&table_filter_name))));
 
 		let sess2 = session.to_owned();
 		let kvs2 = datastore.to_owned();
@@ -258,8 +257,7 @@ pub async fn process_tbs(
 
 							// Build SELECT id FROM <record_id>
 							let select_stmt = SelectStatement {
-								what: vec![Value::RecordId(record_id.clone()).into_literal()]
-									.into(),
+								what: vec![Value::RecordId(record_id.clone()).into_literal()],
 								expr: Fields::Select(vec![expr::Field::Single {
 									expr: expr::Expr::Idiom(Idiom::field("id".to_string())),
 									alias: None,
@@ -334,7 +332,7 @@ pub async fn process_tbs(
 					make_table_field_resolver(fd_name.as_str(), fd.field_kind.clone()),
 				))
 				.description(if let Some(ref c) = fd.comment {
-					format!("{c}")
+					c.to_string()
 				} else {
 					"".to_string()
 				});
@@ -369,7 +367,7 @@ pub async fn process_tbs(
 
 					// Build SELECT id FROM <record_id>
 					let select_stmt = SelectStatement {
-						what: vec![Value::RecordId(record_id.clone()).into_literal()].into(),
+						what: vec![Value::RecordId(record_id.clone()).into_literal()],
 						expr: Fields::Select(vec![expr::Field::Single {
 							expr: expr::Expr::Idiom(Idiom::field("id".to_string())),
 							alias: None,
@@ -386,7 +384,7 @@ pub async fn process_tbs(
 					match res {
 						Value::RecordId(t) => {
 							let ty = t.table.to_string();
-							let out = FieldValue::owned_any((kvs3.clone(), sess3.clone(), t))
+							let out = FieldValue::owned_any(t)
 								.with_type(ty);
 							Ok(Some(out))
 						}
@@ -421,7 +419,7 @@ fn make_table_field_resolver(
 
 				// Build SELECT <field> FROM <record_id>
 				let select_stmt = SelectStatement {
-					what: vec![Value::RecordId(rid.clone()).into_literal()].into(),
+					what: vec![Value::RecordId(rid.clone()).into_literal()],
 					expr: Fields::Select(vec![expr::Field::Single {
 						expr: expr::Expr::Idiom(Idiom::field(fd_name.clone())),
 						alias: None,
@@ -437,8 +435,7 @@ fn make_table_field_resolver(
 
 				match val {
 					Value::RecordId(rid) if fd_name != "id" => {
-						let mut tmp =
-							FieldValue::owned_any((ds.clone(), sess.clone(), rid.clone()));
+						let mut tmp = FieldValue::owned_any(rid.clone());
 						match field_kind {
 							Some(Kind::Record(ts)) if ts.len() != 1 => {
 								tmp = tmp.with_type(rid.table.clone())
@@ -636,5 +633,5 @@ fn binop(field_name: &str, val: &GqlValue, fds: &[FieldDefinition]) -> Result<Ex
 		right: Box::new(rhs.into_literal()),
 	};
 
-	Ok(expr.into())
+	Ok(expr)
 }

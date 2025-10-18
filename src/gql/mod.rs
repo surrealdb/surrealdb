@@ -1,5 +1,4 @@
 use std::convert::Infallible;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -19,7 +18,6 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_core::gql::cache::GraphQLSchemaCache;
 use surrealdb_core::gql::error::resolver_error;
-use surrealdb_core::kvs::Datastore;
 use tower_service::Service;
 
 use crate::net::error::Error as NetError;
@@ -31,10 +29,10 @@ pub struct GraphQLService {
 }
 
 impl GraphQLService {
-	/// Create a GraphQL handler.
-	pub fn new(datastore: Arc<Datastore>) -> Self {
+	/// Create a GraphQL HTTP handler.
+	pub fn new() -> Self {
 		GraphQLService {
-			cache: GraphQLSchemaCache::new(datastore),
+			cache: GraphQLSchemaCache::default(),
 		}
 	}
 }
@@ -58,8 +56,15 @@ where
 		let req = req.map(Body::new);
 
 		Box::pin(async move {
+			let state = req
+				.extensions()
+				.get::<crate::net::AppState>()
+				.expect("state extractor should always succeed");
+
+			let datastore = &state.datastore;
+
 			// Check if capabilities allow querying the requested HTTP route
-			if !cache.datastore.allows_http_route(&RouteTarget::GraphQL) {
+			if !datastore.allows_http_route(&RouteTarget::GraphQL) {
 				warn!(
 					"Capabilities denied HTTP route request attempt, target: '{}'",
 					&RouteTarget::GraphQL
@@ -79,16 +84,7 @@ where
 				return Ok(to_rejection(resolver_error("No database specified")).into_response());
 			};
 
-			#[cfg(debug_assertions)]
-			{
-				let state = req
-					.extensions()
-					.get::<crate::net::AppState>()
-					.expect("state extractor should always succeed");
-				debug_assert!(Arc::ptr_eq(&state.datastore, &cache.datastore));
-			}
-
-			let executor = match cache.get_schema(session).await {
+			let schema = match cache.get_schema(datastore, session).await {
 				Ok(e) => e,
 				Err(e) => {
 					info!(?e, "error generating schema");
@@ -107,7 +103,7 @@ where
 					Ok(req) => req,
 					Err(err) => return Ok(err.into_response()),
 				};
-				let stream = Executor::execute_stream(&executor, req.0, None);
+				let stream = Executor::execute_stream(&schema, req.0, None);
 				let body = Body::from_stream(
 					create_multipart_mixed_stream(stream, Duration::from_secs(30))
 						.map(Ok::<_, std::io::Error>),
@@ -122,7 +118,7 @@ where
 						Ok(req) => req,
 						Err(err) => return Ok(err.into_response()),
 					};
-				Ok(GraphQLResponse(executor.execute_batch(req.0).await).into_response())
+				Ok(GraphQLResponse(schema.execute_batch(req.0).await).into_response())
 			}
 		})
 	}

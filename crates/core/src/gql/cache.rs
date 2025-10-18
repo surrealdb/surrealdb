@@ -1,7 +1,5 @@
 use std::collections::BTreeMap;
 use std::fmt::Debug;
-use std::hash::Hash;
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use async_graphql::dynamic::Schema;
@@ -12,10 +10,9 @@ use super::schema::generate_schema;
 use crate::dbs::Session;
 use crate::kvs::Datastore;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct GraphQLSchemaCache {
 	ns_db_schema_cache: Arc<RwLock<BTreeMap<(String, String), Schema>>>,
-	pub datastore: Arc<Datastore>,
 }
 
 impl Debug for GraphQLSchemaCache {
@@ -25,13 +22,11 @@ impl Debug for GraphQLSchemaCache {
 }
 
 impl GraphQLSchemaCache {
-	pub fn new(datastore: Arc<Datastore>) -> Self {
-		GraphQLSchemaCache {
-			ns_db_schema_cache: Default::default(),
-			datastore,
-		}
-	}
-	pub async fn get_schema(&self, session: &Session) -> Result<Schema, GqlError> {
+	pub async fn get_schema(
+		&self,
+		datastore: &Arc<Datastore>,
+		session: &Session,
+	) -> Result<Schema, GqlError> {
 		let ns = session.ns.as_ref().ok_or(GqlError::UnspecifiedNamespace)?;
 		let db = session.db.as_ref().ok_or(GqlError::UnspecifiedDatabase)?;
 		{
@@ -41,7 +36,7 @@ impl GraphQLSchemaCache {
 			}
 		};
 
-		let schema = generate_schema(&self.datastore, session).await?;
+		let schema = generate_schema(datastore, session).await?;
 
 		{
 			let mut guard = self.ns_db_schema_cache.write().await;

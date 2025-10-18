@@ -52,7 +52,7 @@ pub async fn generate_schema(
 		})?;
 	let gql_config = (*cg).clone().try_into_graphql()?;
 
-	// Get the tables
+	// Get all tables
 	let tbs = match gql_config.tables {
 		GraphQLTablesConfig::None => None,
 		_ => {
@@ -71,16 +71,21 @@ pub async fn generate_schema(
 		}
 	};
 
-	let fns = tx.all_db_functions(db_def.namespace_id, db_def.database_id).await?;
-
+	// Get all functions
 	let fns = match gql_config.functions {
 		GraphQLFunctionsConfig::None => None,
-		GraphQLFunctionsConfig::Auto => Some(fns),
-		GraphQLFunctionsConfig::Include(inc) => {
-			Some(fns.iter().filter(|f| inc.contains(&f.name)).cloned().collect())
-		}
-		GraphQLFunctionsConfig::Exclude(exc) => {
-			Some(fns.iter().filter(|f| !exc.contains(&f.name)).cloned().collect())
+		_ => {
+			let fns = tx.all_db_functions(db_def.namespace_id, db_def.database_id).await?;
+			match gql_config.functions {
+				GraphQLFunctionsConfig::None => None,
+				GraphQLFunctionsConfig::Auto => Some(fns),
+				GraphQLFunctionsConfig::Include(inc) => {
+					Some(fns.iter().filter(|f| inc.contains(&f.name)).cloned().collect())
+				}
+				GraphQLFunctionsConfig::Exclude(exc) => {
+					Some(fns.iter().filter(|f| !exc.contains(&f.name)).cloned().collect())
+				}
+			}
 		}
 	};
 
@@ -191,8 +196,6 @@ pub async fn generate_schema(
 		Interface::new("record").field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)));
 	schema = schema.register(id_interface);
 
-	// TODO: when used get: `Result::unwrap()` on an `Err` value: SchemaError("Field \"like.in\" is
-	// not sub-type of \"relation.in\"")
 	let relation_interface = Interface::new("relation")
 		.field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)))
 		.field(InterfaceField::new("in", TypeRef::named_nn("record")))
@@ -205,7 +208,7 @@ pub async fn generate_schema(
 		.map_err(|e| schema_error(format!("there was an error generating schema: {e:?}")))
 }
 
-pub fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> {
+pub(crate) fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> {
 	let out = match v {
 		SurValue::None => GqlValue::Null,
 		SurValue::Null => GqlValue::Null,
@@ -481,7 +484,7 @@ fn convert_static_literal(lit: Literal) -> Result<SurValue, GqlError> {
 	}
 }
 
-pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError> {
+pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError> {
 	use crate::syn;
 	match kind {
 		Kind::Any => match val {
@@ -645,7 +648,7 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::String => match val {
-			GqlValue::String(s) => Ok(SurValue::String(s.to_owned().into())),
+			GqlValue::String(s) => Ok(SurValue::String(s.to_owned())),
 			GqlValue::Enum(s) => Ok(SurValue::String(s.as_str().into())),
 			_ => Err(type_error(kind, val)),
 		},

@@ -1,7 +1,7 @@
 use std::mem;
 use std::sync::Arc;
 
-use anyhow::{Result, anyhow, ensure};
+use anyhow::{anyhow, ensure, Result};
 
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
 #[cfg(not(target_family = "wasm"))]
@@ -14,7 +14,7 @@ use crate::rpc::args::extract_args;
 use crate::rpc::{DbResult, Method, RpcContext, RpcError};
 use crate::sql::{
 	Ast, CreateStatement, Data as SqlData, DeleteStatement, Expr, Fields, Function, FunctionCall,
-	InsertStatement, KillStatement, LiveStatement, Model, Output, Param, RelateStatement,
+	InsertStatement, KillStatement, LiveStatement, Model, Output, RelateStatement,
 	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
 };
 use crate::types::{PublicArray, PublicRecordIdKey, PublicValue, PublicVariables};
@@ -279,13 +279,9 @@ pub trait RpcProtocolV1: RpcContext {
 
 	async fn info(&self) -> Result<DbResult, RpcError> {
 		let vars = Some(self.session().variables.clone());
-		let mut res = self.kvs().execute("$auth.*", &self.session(), vars).await?;
+		let mut res = self.kvs().execute("$auth", &self.session(), vars).await?;
 
-		let first = res
-			.remove(0)
-			.result?
-			.first()
-			.ok_or(RpcError::InternalError(anyhow!("No result found")))?;
+		let first = res.remove(0).result?;
 		Ok(DbResult::Other(first))
 	}
 
