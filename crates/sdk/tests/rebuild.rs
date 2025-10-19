@@ -30,9 +30,9 @@ async fn rebuild_index_statement() -> Result<(), Error> {
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 14);
-	for _ in 0..3 {
+	for i in 0..3 {
 		let tmp = res.remove(0).result;
-		tmp.unwrap();
+		assert!(tmp.is_ok(), "{i}: {:?}", tmp);
 	}
 	// Check infos output
 	let tmp = res.remove(0).result?;

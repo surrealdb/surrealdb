@@ -318,7 +318,6 @@ impl InfoStatement {
 				// Get the transaction
 				let txn = ctx.tx();
 				// Output
-				#[cfg(not(target_family = "wasm"))]
 				if let Some(ib) = ctx.get_index_builder() {
 					// Obtain the index
 					let (ns, db) = opt.ns_db()?;

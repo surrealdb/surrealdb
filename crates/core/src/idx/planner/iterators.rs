@@ -6,7 +6,9 @@ use crate::idx::ft::termdocs::TermsDocs;
 use crate::idx::ft::{FtIndex, HitsIterator};
 use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
+use crate::key::index::iu::IndexCountKey;
 use crate::key::index::Index;
+use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::{Key, Val};
 use crate::kvs::{KeyEncode, Transaction};
 use crate::sql::statements::DefineIndexStatement;
@@ -114,6 +116,7 @@ pub(crate) enum ThingIterator {
 	IndexRangeReverse(IndexRangeReverseThingIterator),
 	IndexUnion(IndexUnionThingIterator),
 	IndexJoin(Box<IndexJoinThingIterator>),
+	IndexCount(IndexCountThingIterator),
 	UniqueEqual(UniqueEqualThingIterator),
 	UniqueRange(UniqueRangeThingIterator),
 	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
@@ -148,6 +151,9 @@ impl ThingIterator {
 			Self::IndexJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 			Self::Multiples(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
+			Self::IndexCount(_) => {
+				Err(Error::unreachable("IndexCount should not be used with next_batch"))
+			}
 		}
 	}
 
@@ -173,6 +179,7 @@ impl ThingIterator {
 			Self::IndexJoin(i) => Box::pin(i.next_count(ctx, txn, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_count(ctx, txn, size)).await,
 			Self::Multiples(i) => Box::pin(i.next_count(ctx, txn, size)).await,
+			Self::IndexCount(i) => i.next_count(ctx, txn, size).await,
 		}
 	}
 }
@@ -1781,5 +1788,63 @@ impl MultipleIterators {
 				return Ok(0);
 			}
 		}
+	}
+}
+
+pub(crate) struct IndexCountThingIterator(Option<Range<Key>>);
+
+impl IndexCountThingIterator {
+	pub(in crate::idx) fn new(ns: &str, db: &str, tb: &str, ix: &str) -> Result<Self, Error> {
+		Ok(Self(Some(IndexCountKey::range(ns, db, tb, ix)?)))
+	}
+	async fn next_count(
+		&mut self,
+		ctx: &Context,
+		txn: &Transaction,
+		_limit: u32,
+	) -> Result<usize, Error> {
+		if let Some(range) = self.0.take() {
+			let mut count: i64 = 0;
+			for (i, key) in txn.keys(range, u32::MAX, None).await?.into_iter().enumerate() {
+				ctx.is_done(i % 1000 == 0)?;
+				let iu = IndexCountKey::decode_key(&key)?;
+				if iu.pos {
+					count += iu.count as i64;
+				} else {
+					count -= iu.count as i64;
+				}
+			}
+			Ok(count as usize)
+		} else {
+			Ok(0)
+		}
+	}
+
+	pub(in crate::idx) async fn compaction(
+		&mut self,
+		ic: &IndexCompactionKey<'_>,
+		txn: &Transaction,
+	) -> Result<(), Error> {
+		let Some(range) = self.0.take() else {
+			return Ok(());
+		};
+		let mut count: i64 = 0;
+		for (i, key) in txn.keys(range.clone(), u32::MAX, None).await?.into_iter().enumerate() {
+			if i % 1000 == 0 {
+				yield_now!()
+			}
+			let iu = IndexCountKey::decode_key(&key)?;
+			if iu.pos {
+				count += iu.count as i64;
+			} else {
+				count -= iu.count as i64;
+			}
+		}
+		txn.delr(range).await?;
+		let pos = count.is_positive();
+		let count = count.unsigned_abs();
+		let compact_key = IndexCountKey::new(&ic.ns, &ic.db, &ic.tb, &ic.ix, None, pos, count);
+		txn.put(&compact_key, vec![], None).await?;
+		Ok(())
 	}
 }
