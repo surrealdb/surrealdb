@@ -37,9 +37,6 @@ pub enum Error {
 	#[error("The HTTP route '{0}' is not found")]
 	NotFound(String),
 
-	#[error("The datastore is '{0}' is not yet ready")]
-	NotInitialized(String),
-
 	#[error("There was a problem parsing the header {0}: {1}")]
 	InvalidHeader(HeaderName, String),
 }

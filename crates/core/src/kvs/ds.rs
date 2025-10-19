@@ -4,7 +4,6 @@ use std::fmt::{self, Display};
 use std::path::PathBuf;
 use std::pin::pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Poll, ready};
 use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
@@ -125,8 +124,6 @@ pub struct Datastore {
 	buckets: Arc<BucketConnections>,
 	// The sequences
 	sequences: Sequences,
-	// Initialized
-	initialized: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
@@ -651,23 +648,7 @@ impl Datastore {
 			cache: Arc::new(DatastoreCache::new()),
 			buckets: Arc::new(DashMap::new()),
 			sequences: Sequences::new(tf),
-			initialized: Arc::new(AtomicBool::new(false)),
 		})
-	}
-
-	pub async fn init(&self, configured_root: Option<(String, String)>) -> Result<()> {
-		self.check_version().await?;
-		self.bootstrap().await?;
-		// If a root user is specified, setup the initial datastore credentials
-		if let Some((username, password)) = configured_root {
-			self.initialise_credentials(&username, &password).await?;
-		}
-		self.initialized.store(true, Ordering::Relaxed);
-		Ok(())
-	}
-
-	pub fn is_initialized(&self) -> bool {
-		self.initialized.load(Ordering::Relaxed)
 	}
 
 	/// Create a new datastore with the same persistent data (inner), with
@@ -692,7 +673,6 @@ impl Datastore {
 			buckets: Arc::new(DashMap::new()),
 			sequences: Sequences::new(self.transaction_factory.clone()),
 			transaction_factory: self.transaction_factory,
-			initialized: Arc::new(AtomicBool::new(false)),
 		}
 	}
 

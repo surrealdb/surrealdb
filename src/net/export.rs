@@ -71,10 +71,6 @@ async fn handle_inner(
 ) -> Result<impl IntoResponse, ResponseError> {
 	// Get the datastore reference
 	let db = &state.datastore;
-	if !db.is_initialized() {
-		warn!("Datastore not yet initialized, target: '{}'", &RouteTarget::Export);
-		return Err(NetError::NotInitialized(RouteTarget::Export.to_string()).into());
-	}
 	// Check if capabilities allow querying the requested HTTP route
 	if !db.allows_http_route(&RouteTarget::Export) {
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Export);
