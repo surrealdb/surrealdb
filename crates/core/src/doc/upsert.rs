@@ -40,15 +40,15 @@ impl Document {
 				// record using the ON DUPLICATE KEY UPDATE
 				// clause with the ID received in the error
 				Ok(Error::IndexExists {
-					thing,
+					record,
 					..
-				}) if !self.is_specific_record_id() => thing,
+				}) if !self.is_specific_record_id() => record,
 				// We attempted to INSERT a document with an ID,
 				// and this ID already exists in the database,
 				// so we need to UPDATE the record instead.
 				Ok(Error::RecordExists {
-					thing,
-				}) => thing,
+					record,
+				}) => record,
 
 				// If an error was received, but this statement
 				// is potentially retryable because it might
