@@ -5733,6 +5733,7 @@ dependencies = [
  "assert_fs",
  "async-graphql",
  "async-graphql-axum",
+ "async-trait",
  "axum 0.8.5",
  "axum-extra",
  "axum-server",

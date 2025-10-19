@@ -2,7 +2,6 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use async_graphql::async_trait;
 use surrealdb_core::CommunityComposer;
 use surrealdb_core::options::EngineOptions;
 
