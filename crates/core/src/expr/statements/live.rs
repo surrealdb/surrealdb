@@ -86,7 +86,7 @@ impl LiveStatement {
 				// Ensure that the table definition exists
 				{
 					let (ns, db) = opt.ns_db()?;
-					txn.ensure_ns_db_tb(ns, db, &tb, opt.strict).await?;
+					txn.ensure_ns_db_tb(Some(ctx), ns, db, &tb, opt.strict).await?;
 				}
 				// Insert the node live query
 				let key = crate::key::node::lq::new(nid, live_query_id);

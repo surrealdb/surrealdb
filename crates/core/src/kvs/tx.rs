@@ -20,6 +20,7 @@ use crate::catalog::{
 	NamespaceDefinition, NamespaceId, TableDefinition,
 };
 use crate::cnf::NORMAL_FETCH_SIZE;
+use crate::ctx::MutableContext;
 use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::idx::planner::ScanDirection;
@@ -28,6 +29,7 @@ use crate::key::database::sq::Sq;
 use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::key::KVKey;
 use crate::kvs::scanner::Scanner;
+use crate::kvs::sequences::Sequences;
 use crate::kvs::{Transactor, cache};
 use crate::val::record::Record;
 use crate::val::{RecordId, RecordIdKey};
@@ -43,17 +45,20 @@ pub struct Transaction {
 	index_caches: IndexTreeCaches,
 	/// Does this support reverse scan?
 	has_reverse_scan: bool,
+	/// The sequences for this store
+	sequences: Sequences,
 }
 
 impl Transaction {
 	/// Create a new query store
-	pub fn new(local: bool, tx: Transactor) -> Transaction {
+	pub fn new(local: bool, tx: Transactor, sequences: Sequences) -> Transaction {
 		Transaction {
 			local,
 			has_reverse_scan: tx.inner.supports_reverse_scan(),
 			tx: Mutex::new(tx),
 			cache: TransactionCache::new(),
 			index_caches: IndexTreeCaches::default(),
+			sequences,
 		}
 	}
 
@@ -572,10 +577,6 @@ impl NamespaceProvider for Transaction {
 		}
 	}
 
-	async fn get_next_ns_id(&self) -> Result<NamespaceId> {
-		self.lock().await.get_next_ns_id().await
-	}
-
 	async fn put_ns(&self, ns: NamespaceDefinition) -> Result<Arc<NamespaceDefinition>> {
 		let key = crate::key::root::ns::new(&ns.name);
 		self.set(&key, &ns, None).await?;
@@ -588,6 +589,10 @@ impl NamespaceProvider for Transaction {
 		self.cache.insert(qey, entry);
 
 		Ok(cached_ns)
+	}
+
+	async fn get_next_ns_id(&self, ctx: Option<&MutableContext>) -> Result<NamespaceId> {
+		self.sequences.next_namespace_id(ctx, self).await
 	}
 }
 
@@ -638,9 +643,10 @@ impl DatabaseProvider for Transaction {
 
 	/// Get or add a database with a default configuration, only if we are in
 	/// dynamic mode.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self, ctx))]
 	async fn get_or_add_db_upwards(
 		&self,
+		ctx: Option<&MutableContext>,
 		ns: &str,
 		db: &str,
 		strict: bool,
@@ -663,7 +669,7 @@ impl DatabaseProvider for Transaction {
 				// Database does not exist
 				if !strict {
 					let ns_def = if upwards {
-						self.get_or_add_ns(ns, strict).await?
+						self.get_or_add_ns(ctx, ns, strict).await?
 					} else {
 						match self.get_ns_by_name(ns).await? {
 							Some(ns_def) => ns_def,
@@ -1086,9 +1092,10 @@ impl TableProvider for Transaction {
 
 	/// Get or add a table with a default configuration, only if we are in
 	/// dynamic mode.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self, ctx))]
 	async fn get_or_add_tb_upwards(
 		&self,
+		ctx: Option<&MutableContext>,
 		ns: &str,
 		db: &str,
 		tb: &str,
@@ -1102,7 +1109,7 @@ impl TableProvider for Transaction {
 			// The entry is not in the cache
 			None => {
 				let db_def = if upwards {
-					self.get_or_add_db_upwards(ns, db, strict, upwards).await?
+					self.get_or_add_db_upwards(ctx, ns, db, strict, upwards).await?
 				} else {
 					if self.get_ns_by_name(ns).await?.is_none() {
 						return Err(Error::NsNotFound {

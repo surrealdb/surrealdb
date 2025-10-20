@@ -1,3 +1,14 @@
+use crate::catalog::providers::DatabaseProvider;
+use crate::catalog::{DatabaseId, NamespaceId, TableId};
+use crate::ctx::MutableContext;
+use crate::err::Error;
+use crate::idx::IndexKeyBase;
+use crate::idx::seqdocids::DocId;
+use crate::key::sequence::Prefix;
+use crate::key::sequence::ba::Ba;
+use crate::key::sequence::st::St;
+use crate::kvs::ds::TransactionFactory;
+use crate::kvs::{KVKey, LockType, Transaction, TransactionType, impl_kv_value_revisioned};
 use anyhow::Result;
 use rand::{Rng, thread_rng};
 use revision::revisioned;
@@ -11,23 +22,12 @@ use tokio::sync::{Mutex, RwLock};
 use tokio::time::sleep;
 use uuid::Uuid;
 
-use crate::catalog::providers::DatabaseProvider;
-use crate::catalog::{DatabaseId, NamespaceId, TableId};
-use crate::ctx::Context;
-use crate::dbs::Options;
-use crate::err::Error;
-use crate::idx::IndexKeyBase;
-use crate::key::sequence::Prefix;
-use crate::key::sequence::ba::Ba;
-use crate::key::sequence::st::St;
-use crate::kvs::ds::TransactionFactory;
-use crate::kvs::{KVKey, LockType, Transaction, TransactionType, impl_kv_value_revisioned};
-
 type SequencesMap = Arc<RwLock<HashMap<Arc<SequenceDomain>, Arc<Mutex<Sequence>>>>>;
 
 #[derive(Clone)]
 pub(crate) struct Sequences {
 	tf: TransactionFactory,
+	nid: Uuid,
 	sequences: SequencesMap,
 }
 
@@ -76,6 +76,7 @@ impl SequenceDomain {
 		match self {
 			Self::UserName(ns, db, sq) => Prefix::new_ba_range(*ns, *db, sq),
 			Self::FullTextDocIds(ibk) => ibk.new_ib_range(),
+			_ => todo!(),
 		}
 	}
 
@@ -83,6 +84,7 @@ impl SequenceDomain {
 		match &self {
 			Self::UserName(ns, db, sq) => Ba::new(*ns, *db, sq, start).encode_key(),
 			Self::FullTextDocIds(ikb) => ikb.new_ib_key(start).encode_key(),
+			_ => todo!(),
 		}
 	}
 
@@ -90,6 +92,7 @@ impl SequenceDomain {
 		match &self {
 			Self::UserName(ns, db, sq) => St::new(*ns, *db, sq, nid).encode_key(),
 			Self::FullTextDocIds(ikb) => ikb.new_is_key(nid).encode_key(),
+			_ => todo!(),
 		}
 	}
 }
@@ -110,10 +113,11 @@ pub(crate) struct SequenceState {
 impl_kv_value_revisioned!(SequenceState);
 
 impl Sequences {
-	pub(super) fn new(tf: TransactionFactory) -> Self {
+	pub(super) fn new(tf: TransactionFactory, nid: Uuid) -> Self {
 		Self {
 			tf,
 			sequences: Arc::new(Default::default()),
+			nid,
 		}
 	}
 	pub(crate) async fn namespace_removed(&self, tx: &Transaction, ns: NamespaceId) -> Result<()> {
@@ -139,97 +143,64 @@ impl Sequences {
 		self.sequences.write().await.remove(&key);
 	}
 
-	async fn next_val<F>(
+	async fn next_val(
 		&self,
-		ctx: &Context,
-		nid: Uuid,
+		ctx: Option<&MutableContext>,
+		tx: &Transaction,
 		seq: Arc<SequenceDomain>,
+		start: i64,
 		batch: u32,
-		init_params: F,
-	) -> Result<i64>
-	where
-		F: FnOnce() -> (i64, Option<Duration>) + Send + Sync + 'static,
-	{
+		timeout: Option<Duration>,
+	) -> Result<i64> {
 		let sequence = self.sequences.read().await.get(&seq).cloned();
 		if let Some(s) = sequence {
-			return s.lock().await.next(ctx, nid, &seq, batch).await;
+			return s.lock().await.next(self, ctx, &seq, batch).await;
 		}
 		let s = match self.sequences.write().await.entry(seq.clone()) {
 			Entry::Occupied(e) => e.get().clone(),
 			Entry::Vacant(e) => {
-				let (start, timeout) = init_params();
 				let s = Arc::new(Mutex::new(
-					Sequence::load(self.tf.clone(), &ctx.tx(), nid, &seq, start, batch, timeout)
-						.await?,
+					Sequence::load(self, tx, &seq, start, batch, timeout).await?,
 				));
 				e.insert(s).clone()
 			}
 		};
-		s.lock().await.next(ctx, nid, &seq, batch).await
+		s.lock().await.next(self, ctx, &seq, batch).await
 	}
 
-	pub(crate) async fn next_val_user(
+	pub(crate) async fn next_namespace_id(
 		&self,
-		ctx: &Context,
-		opt: &Options,
+		ctx: Option<&MutableContext>,
+		tx: &Transaction,
+	) -> Result<NamespaceId> {
+		let domain = Arc::new(SequenceDomain::new_namespace_ids());
+		let id = self.next_val(ctx, tx, domain, 0, 100, None).await?;
+		Ok(NamespaceId(id as u32))
+	}
+
+	pub(crate) async fn next_user_sequence_id(
+		&self,
+		ctx: Option<&MutableContext>,
+		tx: &Transaction,
+		ns: NamespaceId,
+		db: DatabaseId,
 		sq: &str,
 	) -> Result<i64> {
-		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		let seq = ctx.tx().get_db_sequence(ns, db, sq).await?;
-		let key = Arc::new(SequenceDomain::new_user(ns, db, sq));
-		self.next_val(ctx, opt.id()?, key, seq.batch, move || (seq.start, seq.timeout)).await
+		let seq = tx.get_db_sequence(ns, db, sq).await?;
+		let domain = Arc::new(SequenceDomain::new_user(ns, db, sq));
+		self.next_val(ctx, tx, domain, seq.start, seq.batch, seq.timeout).await
 	}
 
-	pub(crate) async fn next_val_fts_idx(
+	pub(crate) async fn next_fts_doc_id(
 		&self,
-		ctx: &Context,
-		nid: Uuid,
-		seq: Arc<SequenceDomain>,
+		ctx: Option<&MutableContext>,
+		tx: &Transaction,
+		ikb: IndexKeyBase,
 		batch: u32,
-	) -> Result<i64> {
-		self.next_val(ctx, nid, seq, batch, move || (0, None)).await
-	}
-
-	pub(crate) async fn next_val_namespace_id(&self, ctx: &Context, nid: Uuid) -> Result<u32> {
-		let key = Arc::new(SequenceDomain::new_namespace_ids());
-		let id = self.next_val(ctx, nid, key, 100, (0, None)).await?;
-		Ok(id as u32)
-	}
-
-	pub(crate) async fn next_val_database_id(
-		&self,
-		ctx: &Context,
-		nid: Uuid,
-		ns: NamespaceId,
-	) -> Result<u32> {
-		let key = Arc::new(SequenceDomain::new_database_ids(ns));
-		let id = self.next_val(ctx, nid, key, 100, (0, None)).await?;
-		Ok(id as u32)
-	}
-
-	pub(crate) async fn next_val_table_id(
-		&self,
-		ctx: &Context,
-		nid: Uuid,
-		ns: NamespaceId,
-		db: DatabaseId,
-	) -> Result<u32> {
-		let key = Arc::new(SequenceDomain::new_table_ids(ns, db));
-		let id = self.next_val(ctx, nid, key, 100, (0, None)).await?;
-		Ok(id as u32)
-	}
-
-	pub(crate) async fn next_val_index_id(
-		&self,
-		ctx: &Context,
-		nid: Uuid,
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: TableId,
-	) -> Result<u32> {
-		let key = Arc::new(SequenceDomain::new_index_ids(ns, db, tb));
-		let id = self.next_val(ctx, nid, key, 100, (0, None)).await?;
-		Ok(id as u32)
+	) -> Result<DocId> {
+		let domain = Arc::new(SequenceDomain::new_ft_doc_ids(ikb));
+		let id = self.next_val(ctx, tx, domain, 0, batch, None).await?;
+		Ok(id as DocId)
 	}
 }
 
@@ -243,15 +214,14 @@ struct Sequence {
 
 impl Sequence {
 	async fn load(
-		tf: TransactionFactory,
+		sqs: &Sequences,
 		tx: &Transaction,
-		nid: Uuid,
 		seq: &SequenceDomain,
 		start: i64,
 		batch: u32,
 		timeout: Option<Duration>,
 	) -> Result<Self> {
-		let state_key = seq.new_state_key(nid)?;
+		let state_key = seq.new_state_key(sqs.nid)?;
 		let mut st: SequenceState = if let Some(v) = tx.get(&state_key, None).await? {
 			revision::from_slice(&v)?
 		} else {
@@ -259,10 +229,10 @@ impl Sequence {
 				next: start,
 			}
 		};
-		let (from, to) = Self::check_batch_allocation(&tf, seq, nid, st.next, batch).await?;
+		let (from, to) = Self::check_batch_allocation(sqs, seq, st.next, batch).await?;
 		st.next = from;
 		Ok(Self {
-			tf,
+			tf: sqs.tf.clone(),
 			state_key,
 			to,
 			st,
@@ -272,36 +242,29 @@ impl Sequence {
 
 	async fn next(
 		&mut self,
-		ctx: &Context,
-		nid: Uuid,
+		sqs: &Sequences,
+		ctx: Option<&MutableContext>,
 		seq: &SequenceDomain,
 		batch: u32,
 	) -> Result<i64> {
 		if self.st.next >= self.to {
-			(self.st.next, self.to) = Self::find_batch_allocation(
-				&self.tf,
-				ctx,
-				nid,
-				seq,
-				self.st.next,
-				batch,
-				self.timeout,
-			)
-			.await?;
+			(self.st.next, self.to) =
+				Self::find_batch_allocation(sqs, ctx, seq, self.st.next, batch, self.timeout)
+					.await?;
 		}
 		let v = self.st.next;
 		self.st.next += 1;
 		// write the state on the KV store
-		let tx = self.tf.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx =
+			self.tf.transaction(TransactionType::Write, LockType::Optimistic, sqs.clone()).await?;
 		tx.set(&self.state_key, &revision::to_vec(&self.st)?, None).await?;
 		tx.commit().await?;
 		Ok(v)
 	}
 
 	async fn find_batch_allocation(
-		tf: &TransactionFactory,
-		ctx: &Context,
-		nid: Uuid,
+		sqs: &Sequences,
+		ctx: Option<&MutableContext>,
 		seq: &SequenceDomain,
 		next: i64,
 		batch: u32,
@@ -318,14 +281,21 @@ impl Sequence {
 		};
 		// Loop until we have a successful allocation.
 		// We check the timeout inherited from the context
-		while !ctx.is_timedout().await? {
+		loop {
+			if let Some(ctx) = ctx {
+				if ctx.is_timedout().await? {
+					break;
+				}
+			} else {
+				yield_now!();
+			}
 			if let (Some(ref start), Some(ref to)) = (start, to) {
 				// We check the time associated with the sequence
 				if start.elapsed().ge(to) {
 					break;
 				}
 			}
-			if let Ok(r) = Self::check_batch_allocation(tf, seq, nid, next, batch).await {
+			if let Ok(r) = Self::check_batch_allocation(sqs, seq, next, batch).await {
 				return Ok(r);
 			}
 			// exponential backoff with full jitter
@@ -339,13 +309,13 @@ impl Sequence {
 	}
 
 	async fn check_batch_allocation(
-		tf: &TransactionFactory,
+		sqs: &Sequences,
 		seq: &SequenceDomain,
-		nid: Uuid,
 		next: i64,
 		batch: u32,
 	) -> Result<(i64, i64)> {
-		let tx = tf.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx =
+			sqs.tf.transaction(TransactionType::Write, LockType::Optimistic, sqs.clone()).await?;
 		let batch_range = seq.new_batch_range_keys()?;
 		let val = tx.getr(batch_range, None).await?;
 		let mut next_start = next;
@@ -354,7 +324,7 @@ impl Sequence {
 			let ba: BatchValue = revision::from_slice(val)?;
 			next_start = next_start.max(ba.to);
 			// The batch belongs to this node
-			if ba.owner == nid {
+			if ba.owner == sqs.nid {
 				// If a previous batch belongs to this node, we can remove it,
 				// as we are going to create a new one
 				// If the current value is still in the batch range, we return it
@@ -370,7 +340,7 @@ impl Sequence {
 		// And store it in the KV store
 		let bv = revision::to_vec(&BatchValue {
 			to: next_to,
-			owner: nid,
+			owner: sqs.nid,
 		})?;
 		let batch_key = seq.new_batch_key(next_start)?;
 		tx.set(&batch_key, &bv, None).await?;

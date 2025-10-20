@@ -117,7 +117,7 @@ impl SeqDocIds {
 		// If not, let's get one from the sequence
 		let new_doc_id = ctx
 			.try_get_sequences()?
-			.next_val_fts_idx(ctx, self.nid, self.domain.clone(), self.batch)
+			.next_fts_doc_id(Some(ctx), &tx, self.ikb.clone(), self.batch)
 			.await? as DocId;
 		{
 			tx.set(&id_key, &new_doc_id, None).await?;

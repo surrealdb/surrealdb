@@ -148,7 +148,12 @@ impl TransactionFactory {
 		unused_variables,
 		reason = "Some variables are unused when no backends are enabled."
 	)]
-	pub async fn transaction(&self, write: TransactionType, lock: LockType) -> Result<Transaction> {
+	pub async fn transaction(
+		&self,
+		write: TransactionType,
+		lock: LockType,
+		sequences: Sequences,
+	) -> Result<Transaction> {
 		// Specify if the transaction is writeable
 		let write = match write {
 			Read => false,
@@ -165,9 +170,9 @@ impl TransactionFactory {
 			local,
 			Transactor {
 				inner,
-				stash: super::stash::Stash::default(),
 				cf: cf::Writer::new(),
 			},
+			sequences,
 		))
 	}
 }
@@ -629,8 +634,9 @@ impl Datastore {
 		clock: Arc<SizedClock>,
 	) -> Result<Self> {
 		let tf = TransactionFactory::new(clock, builder);
+		let id = Uuid::new_v4();
 		Ok(Self {
-			id: Uuid::new_v4(),
+			id,
 			transaction_factory: tf.clone(),
 			strict: false,
 			auth_enabled: false,
@@ -647,7 +653,7 @@ impl Datastore {
 			temporary_directory: None,
 			cache: Arc::new(DatastoreCache::new()),
 			buckets: Arc::new(DashMap::new()),
-			sequences: Sequences::new(tf),
+			sequences: Sequences::new(tf, id),
 		})
 	}
 
@@ -671,7 +677,7 @@ impl Datastore {
 			temporary_directory: self.temporary_directory,
 			cache: Arc::new(DatastoreCache::new()),
 			buckets: Arc::new(DashMap::new()),
-			sequences: Sequences::new(self.transaction_factory.clone()),
+			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
 		}
 	}
@@ -800,6 +806,10 @@ impl Datastore {
 	// Used for testing live queries
 	pub fn get_cache(&self) -> Arc<DatastoreCache> {
 		self.cache.clone()
+	}
+
+	pub(crate) fn get_sequences(&self) -> Sequences {
+		self.sequences.clone()
 	}
 
 	// Initialise the cluster and run bootstrap utilities
@@ -963,6 +973,7 @@ impl Datastore {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn changefeed_process(&self, gc_interval: &Duration) -> Result<()> {
 		let lh = LeaseHandler::new(
+			self.sequences.clone(),
 			self.id,
 			self.transaction_factory.clone(),
 			TaskLeaseType::ChangeFeedCleanup,
@@ -1056,6 +1067,7 @@ impl Datastore {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn index_compaction(&self, interval: Duration) -> Result<()> {
 		let lh = LeaseHandler::new(
+			self.sequences.clone(),
 			self.id,
 			self.transaction_factory.clone(),
 			TaskLeaseType::IndexCompaction,
@@ -1159,7 +1171,7 @@ impl Datastore {
 	/// }
 	/// ```
 	pub async fn transaction(&self, write: TransactionType, lock: LockType) -> Result<Transaction> {
-		self.transaction_factory.transaction(write, lock).await
+		self.transaction_factory.transaction(write, lock, self.sequences.clone()).await
 	}
 
 	pub async fn health_check(&self) -> Result<()> {
@@ -1893,6 +1905,7 @@ impl Datastore {
 
 	pub async fn process_use(
 		&self,
+		ctx: Option<&MutableContext>,
 		session: &mut Session,
 		namespace: Option<String>,
 		database: Option<String>,
@@ -1904,7 +1917,7 @@ impl Datastore {
 					.transaction(TransactionType::Write, LockType::Optimistic)
 					.await
 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
-				tx.ensure_ns_db(&ns, &db, self.strict)
+				tx.ensure_ns_db(ctx, &ns, &db, self.strict)
 					.await
 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
 				tx.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))?;
@@ -1916,7 +1929,7 @@ impl Datastore {
 					.transaction(TransactionType::Write, LockType::Optimistic)
 					.await
 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
-				tx.get_or_add_ns(&ns, self.strict)
+				tx.get_or_add_ns(ctx, &ns, self.strict)
 					.await
 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
 				tx.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))?;
@@ -1932,7 +1945,7 @@ impl Datastore {
 					.transaction(TransactionType::Write, LockType::Optimistic)
 					.await
 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
-				tx.ensure_ns_db(&ns, &db, self.strict)
+				tx.ensure_ns_db(ctx, &ns, &db, self.strict)
 					.await
 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
 				tx.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))?;
@@ -2000,7 +2013,7 @@ impl Datastore {
 	{
 		let tx = Arc::new(self.transaction(TransactionType::Write, LockType::Optimistic).await?);
 
-		let db = tx.ensure_ns_db(ns, db, false).await?;
+		let db = tx.ensure_ns_db(None, ns, db, false).await?;
 
 		let apis = tx.all_db_apis(db.namespace_id, db.database_id).await?;
 		let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
@@ -2204,7 +2217,7 @@ mod test {
 		let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 
 		let txn = ds.transaction(TransactionType::Write, LockType::Pessimistic).await?;
-		let db = txn.ensure_ns_db("test", "test", false).await?;
+		let db = txn.ensure_ns_db(None, "test", "test", false).await?;
 		drop(txn);
 
 		// Define the table, set the initial uuids

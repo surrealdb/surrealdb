@@ -46,6 +46,8 @@ pub enum Category {
 	/// crate::key::database::ti             /+{ni}*{di}!ti
 	DatabaseTableIdentifier,
 	///
+	TableIndexIdentifier,
+	///
 	/// ------------------------------
 	///
 	/// crate::key::namespace::all           /*{ns}
@@ -273,6 +275,7 @@ impl Display for Category {
 			Self::IndexTermDocuments => "IndexTermDocuments",
 			Self::IndexCompaction => "IndexCompaction",
 			Self::IndexCountState => "IndexCountState",
+			Self::TableIndexIdentifier => "TableIndexIdentifier",
 		};
 		write!(f, "{}", name)
 	}

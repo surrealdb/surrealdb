@@ -66,7 +66,7 @@ impl DefineDatabaseStatement {
 
 		// Fetch the transaction
 		let txn = ctx.tx();
-		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
+		let nsv = txn.get_or_add_ns(Some(ctx), ns, opt.strict).await?;
 
 		// Process the name
 		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "database name").await?;
