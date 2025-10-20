@@ -319,9 +319,7 @@ pub trait RpcProtocolV1: RpcContext {
 
 		let result = res.remove(0).result?;
 
-		let first = result
-			.first()
-			.ok_or_else(|| RpcError::Thrown("Got not results from info query".to_string()))?;
+		let first = result.first().unwrap_or_default();
 		Ok(DbResult::Other(first))
 	}
 
