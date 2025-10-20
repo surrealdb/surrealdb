@@ -341,9 +341,9 @@ async fn router(
 			let value = match results.first() {
 				Some(result) => result.clone().result?,
 				None => {
-					error!("recieved invalid result from server");
+					error!("received invalid result from server");
 					return Err(Error::InternalError(
-						"Recieved invalid result from server".to_string(),
+						"Received invalid result from server".to_string(),
 					));
 				}
 			};
