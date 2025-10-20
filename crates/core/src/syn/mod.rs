@@ -108,11 +108,17 @@ pub fn parse_with_capabilities(input: &str, capabilities: &Capabilities) -> Resu
 	)
 }
 
-/// Parses a SurrealQL [`Value`].
+/// Parses a SurrealQL [`Expr`].
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn expr(input: &str) -> Result<Expr> {
+pub(crate) fn expr(input: &str) -> Result<Expr> {
 	let capabilities = Capabilities::all();
 	expr_with_capabilities(input, &capabilities)
+}
+
+/// Validates a SurrealQL [`Expr`]
+pub fn validate_expr(input: &str) -> Result<()> {
+	expr(input)?;
+	Ok(())
 }
 
 /// Parses a SurrealQL [`Value`].
@@ -137,10 +143,16 @@ pub fn json(input: &str) -> Result<PublicValue> {
 
 /// Parses a SurrealQL [`Idiom`]
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn idiom(input: &str) -> Result<Idiom> {
+pub(crate) fn idiom(input: &str) -> Result<Idiom> {
 	trace!(target: TARGET, "Parsing SurrealQL idiom");
 
 	parse_with(input.as_bytes(), async |parser, stk| parser.parse_plain_idiom(stk).await)
+}
+
+/// Validates a SurrealQL [`Idiom`]
+pub fn validate_idiom(input: &str) -> Result<()> {
+	idiom(input)?;
+	Ok(())
 }
 
 /// Parse a datetime without enclosing delimiters from a string.
