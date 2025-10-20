@@ -1,10 +1,13 @@
 //! Module containing the implementation of the surrealql tokens, lexer, and
 //! parser.
 
+use std::collections::HashSet;
+
 use crate::cnf::{MAX_OBJECT_PARSING_DEPTH, MAX_QUERY_PARSING_DEPTH};
 use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
+use crate::sql::kind::KindLiteral;
 use crate::sql::{Ast, Block, Expr, Fetchs, Fields, Idiom, Kind, Output, RecordIdLit};
 use crate::types::{PublicDatetime, PublicDuration, PublicRecordId, PublicValue};
 
@@ -357,4 +360,113 @@ pub fn kind(input: &str) -> Result<Kind> {
 	trace!(target: TARGET, "Parsing SurrealQL duration");
 
 	parse_with(input.as_bytes(), async |parser, stk| parser.parse_inner_kind(stk).await)
+}
+
+/// Extracts the tables from the given kind definition string.
+///
+/// Note: This is only used by surrealql.wasm for use in Surrealist.
+///
+/// # Examples
+///
+/// ```
+/// let tables = extract_tables_from_kind("record<users | posts>");
+/// assert_eq!(tables, vec!["posts", "users"]);
+/// ```
+#[doc(hidden)]
+pub fn extract_tables_from_kind(sql: &str) -> Result<Vec<String>> {
+	let kind = kind(sql)?;
+	let mut found_tables = HashSet::new();
+	extract_tables_from_kind_impl(&kind, &mut found_tables);
+
+	let mut tables_sorted: Vec<String> = found_tables.into_iter().collect();
+	tables_sorted.sort();
+
+	Ok(tables_sorted)
+}
+
+fn extract_tables_from_kind_impl(kind: &Kind, tables: &mut HashSet<String>) {
+	match kind {
+		Kind::Any
+		| Kind::None
+		| Kind::Null
+		| Kind::Bool
+		| Kind::Bytes
+		| Kind::Datetime
+		| Kind::Decimal
+		| Kind::Duration
+		| Kind::Float
+		| Kind::Int
+		| Kind::Number
+		| Kind::Object
+		| Kind::String
+		| Kind::Uuid
+		| Kind::Regex
+		| Kind::Geometry(_) => {}
+		Kind::Table(ts) => {
+			for table in ts {
+				tables.insert(table.clone());
+			}
+		}
+		Kind::Record(ts) => {
+			for table in ts {
+				tables.insert(table.clone());
+			}
+		}
+		Kind::Either(kinds) => {
+			for kind in kinds {
+				extract_tables_from_kind_impl(kind, tables);
+			}
+		}
+		Kind::Set(kind, _) => {
+			extract_tables_from_kind_impl(kind, tables);
+		}
+		Kind::Array(kind, _) => {
+			extract_tables_from_kind_impl(kind, tables);
+		}
+		Kind::Function(_, _) => {}
+		Kind::Range => {}
+		Kind::Literal(literal) => match literal {
+			KindLiteral::Array(kinds) => {
+				for kind in kinds {
+					extract_tables_from_kind_impl(kind, tables);
+				}
+			}
+			KindLiteral::Object(kinds) => {
+				for kind in kinds.values() {
+					extract_tables_from_kind_impl(kind, tables);
+				}
+			}
+			_ => {}
+		},
+		Kind::File(_) => {}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use rstest::rstest;
+
+	use super::*;
+
+	#[rstest]
+	#[case::record("record", vec![])]
+	#[case::record("record<users>", vec!["users"])]
+	#[case::record("record<users | posts>", vec!["posts", "users"])]
+	#[case::record("record<users | posts | users>", vec!["posts", "users"])]
+	#[case::table("table", vec![])]
+	#[case::table("table<users>", vec!["users"])]
+	#[case::option("option<record<users>>", vec!["users"])]
+	#[case::array("array<record<users>>", vec!["users"])]
+	#[case::nested_array("array<array<record<users>>>", vec!["users"])]
+	#[case::either("record<users> | record<posts>", vec!["posts", "users"])]
+	#[case::complex("record<a> | table<b> | array<record<c | d> | record<e>>", vec!["a", "b", "c", "d", "e"])]
+	fn test_extract_tables_from_expr(
+		#[case] sql: &str,
+		#[case] expected_tables: Vec<&'static str>,
+	) {
+		let expected_tables: Vec<String> =
+			expected_tables.into_iter().map(|s| s.to_string()).collect();
+		let extracted = extract_tables_from_kind(sql).unwrap();
+		assert_eq!(extracted, expected_tables);
+	}
 }
