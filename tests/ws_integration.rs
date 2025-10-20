@@ -90,8 +90,19 @@ pub async fn info(cfg_server: Option<Format>, cfg_format: Format) {
 	socket.send_message_signin("user", "pass", Some(NS), Some(DB), Some("user")).await.unwrap();
 	// Send INFO command
 	let res = socket.send_request("info", json!([])).await.unwrap();
+	// Expected result structure:
+	// ```
+	// Object {
+	//   "id": String("user:yjdbdlx2mlciaxhsv8hp"),
+	//   "pass": String("$argon2id$v=19$m=19456,t=2,p=1$DCt83IiOtOo3MW7lRB6PBg$kIUrYmZgysGzW+j5DOM7X4AsXlKK4fFkxW0vUVvMX2U"),
+	//   "user": String("user")
+	// }
+	// ```
 	assert!(res["result"].is_object(), "result: {res:?}");
 	let res = res["result"].as_object().unwrap();
+	assert!(res.contains_key("id"));
+	assert!(res.contains_key("pass"));
+	assert!(res.contains_key("user"));
 	assert_eq!(res["user"], "user", "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
