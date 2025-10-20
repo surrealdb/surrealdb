@@ -169,7 +169,7 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 		let id = o.get("id").unwrap();
 
 		let Value::RecordId(t) = id else {
-			panic!("should be thing {id:?}")
+			panic!("should be record {id:?}")
 		};
 		assert_eq!(t.table.as_str(), "knows");
 	}
