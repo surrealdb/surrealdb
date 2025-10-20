@@ -356,7 +356,7 @@ pub async fn authenticate(new_db: impl CreateDb) {
 		})
 		.await
 		.unwrap();
-	db.authenticate(token.access).await.unwrap();
+	db.authenticate(token).await.unwrap();
 }
 
 pub async fn query(new_db: impl CreateDb) {

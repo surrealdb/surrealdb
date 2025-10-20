@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use super::MlExportConfig;
 use crate::Result;
+use crate::opt::auth::Token;
 
 #[derive(Debug, Clone)]
 #[allow(dead_code)]

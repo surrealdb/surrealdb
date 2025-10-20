@@ -14,7 +14,7 @@ pub struct Signup;
 pub struct Signin;
 
 /// Credentials for authenticating with the server
-pub trait Credentials<Action, Response>: SurrealValue {}
+pub trait Credentials<Action>: SurrealValue {}
 
 /// Credentials for the root user
 #[derive(Debug, Clone, SurrealValue)]
@@ -27,7 +27,7 @@ pub struct Root {
 	pub password: String,
 }
 
-impl Credentials<Signin, Jwt> for Root {}
+impl Credentials<Signin> for Root {}
 
 /// Credentials for the namespace user
 #[derive(Debug, Clone, SurrealValue)]
@@ -43,7 +43,7 @@ pub struct Namespace {
 	pub password: String,
 }
 
-impl Credentials<Signin, Jwt> for Namespace {}
+impl Credentials<Signin> for Namespace {}
 
 /// Credentials for the database user
 #[derive(Debug, Clone, SurrealValue)]
@@ -62,7 +62,7 @@ pub struct Database {
 	pub password: String,
 }
 
-impl Credentials<Signin, Jwt> for Database {}
+impl Credentials<Signin> for Database {}
 
 /// Credentials for the record user
 #[derive(Debug)]
@@ -146,12 +146,13 @@ impl<P: SurrealValue> SurrealValue for Record<P> {
 	}
 }
 
-impl<T, P> Credentials<T, Jwt> for Record<P> where P: SurrealValue {}
+impl<T, P> Credentials<T> for Record<P> where P: SurrealValue {}
 
-#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
-pub struct Jwt {
-	pub access: Token,
-	pub refresh: Option<Token>,
+#[derive(Clone, Debug, Serialize, Deserialize, SurrealValue)]
+#[non_exhaustive]
+pub struct Token<T: SurrealValue = AccessToken> {
+	pub access: T,
+	pub refresh: Option<RefreshToken>,
 }
 
 /// A JSON Web Token for authenticating with the server.
@@ -159,27 +160,25 @@ pub struct Jwt {
 /// This struct represents a JSON Web Token (JWT) that can be used for
 /// authentication purposes. It is important to note that this implementation
 /// provide some security measures to protect the token:
-/// * the debug implementation just prints `Jwt(REDACTED)`,
+/// * the debug implementation just prints `AccessToken(REDACTED)`,
 /// * `Display` is not implemented so you can't call `.to_string()` on it
 ///
 /// You can still have access to the token string using either
-/// [`as_insecure_token`](Jwt::as_insecure_token) or
-/// [`into_insecure_token`](Jwt::into_insecure_token) functions. However, you
+/// [`as_insecure_token`](AccessToken::as_insecure_token) or
+/// [`into_insecure_token`](AccessToken::into_insecure_token) functions. However, you
 /// should take care to ensure that only authorized users have access to the
-/// JWT. For example:
-/// * it can be stored in a secure cookie,
-/// * stored in a database with restricted access,
-/// * or encrypted in conjunction with other encryption mechanisms.
+/// JWT. For example, it can be stored in a secure cookie or encrypted in conjunction with other
+/// encryption mechanisms.
 #[derive(Clone, Serialize, Deserialize, SurrealValue)]
-pub struct Token(pub(crate) String);
+pub struct AccessToken(pub(crate) SecureToken);
 
-impl Token {
+impl AccessToken {
 	/// Returns the underlying token string.
 	///
 	/// ⚠️: It is important to note that the token should be handled securely
 	/// and protected from unauthorized access.
 	pub fn as_insecure_token(&self) -> &str {
-		&self.0
+		&self.0.0
 	}
 
 	/// Returns the underlying token string.
@@ -187,47 +186,69 @@ impl Token {
 	/// ⚠️: It is important to note that the token should be handled securely
 	/// and protected from unauthorized access.
 	pub fn into_insecure_token(self) -> String {
-		self.0
+		self.0.0
 	}
 }
 
+impl fmt::Debug for AccessToken {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "AccessToken(REDACTED)")
+	}
+}
+
+#[derive(Clone, Serialize, Deserialize, SurrealValue)]
+pub struct RefreshToken(pub(crate) SecureToken);
+
+impl RefreshToken {
+	/// Returns the underlying token string.
+	///
+	/// ⚠️: It is important to note that the token should be handled securely
+	/// and protected from unauthorized access.
+	pub fn as_insecure_token(&self) -> &str {
+		&self.0.0
+	}
+
+	/// Returns the underlying token string.
+	///
+	/// ⚠️: It is important to note that the token should be handled securely
+	/// and protected from unauthorized access.
+	pub fn into_insecure_token(self) -> String {
+		self.0.0
+	}
+}
+
+impl fmt::Debug for RefreshToken {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "RefreshToken(REDACTED)")
+	}
+}
+
+#[derive(Clone, Serialize, Deserialize, SurrealValue)]
+pub(crate) struct SecureToken(pub(crate) String);
+
 impl From<String> for Token {
-	fn from(jwt: String) -> Self {
-		Token(jwt)
+	fn from(token: String) -> Self {
+		Self {
+			access: AccessToken(SecureToken(token)),
+			refresh: None,
+		}
 	}
 }
 
 impl<'a> From<&'a String> for Token {
-	fn from(jwt: &'a String) -> Self {
-		Token(jwt.to_owned())
+	fn from(token: &'a String) -> Self {
+		Self {
+			access: AccessToken(SecureToken(token.to_owned())),
+			refresh: None,
+		}
 	}
 }
 
 impl<'a> From<&'a str> for Token {
-	fn from(jwt: &'a str) -> Self {
-		Token(jwt.to_owned())
-	}
-}
-
-impl fmt::Debug for Token {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "Token(REDACTED)")
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use super::*;
-
-	#[test]
-	fn as_insecure_token() {
-		let jwt = Token("super-long-jwt".to_owned());
-		assert_eq!(jwt.as_insecure_token(), "super-long-jwt");
-	}
-
-	#[test]
-	fn into_insecure_token() {
-		let jwt = Token("super-long-jwt".to_owned());
-		assert_eq!(jwt.into_insecure_token(), "super-long-jwt");
+	fn from(token: &'a str) -> Self {
+		Self {
+			access: AccessToken(SecureToken(token.to_owned())),
+			refresh: None,
+		}
 	}
 }

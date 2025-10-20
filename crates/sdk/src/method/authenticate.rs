@@ -26,7 +26,7 @@ where
 			let router = self.client.inner.router.extract()?;
 			router
 				.execute_unit(Command::Authenticate {
-					token: self.token.0,
+					token: self.token.access.into_insecure_token(),
 				})
 				.await
 		})
