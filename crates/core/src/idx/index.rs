@@ -1,17 +1,20 @@
-#![cfg(not(target_family = "wasm"))]
-
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::idx::ft::FtIndex;
+use crate::idx::planner::iterators::IndexCountThingIterator;
 use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::IndexKeyBase;
 use crate::key;
-use crate::kvs::TransactionType;
+use crate::key::index::iu::IndexCountKey;
+use crate::key::root::ic::IndexCompactionKey;
+use crate::kvs::{Transaction, TransactionType};
 use crate::sql::index::{HnswParams, MTreeParams, SearchParams};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Array, Index, Part, Thing, Value};
 use reblessive::tree::Stk;
+use std::borrow::Cow;
+use uuid::Uuid;
 
 pub(crate) struct IndexOperation<'a> {
 	ctx: &'a Context,
@@ -43,7 +46,11 @@ impl<'a> IndexOperation<'a> {
 		}
 	}
 
-	pub(crate) async fn compute(&mut self, stk: &mut Stk) -> Result<(), Error> {
+	pub(crate) async fn compute(
+		&mut self,
+		stk: &mut Stk,
+		require_compaction: &mut bool,
+	) -> Result<(), Error> {
 		// Index operation dispatching
 		match &self.ix.index {
 			Index::Uniq => self.index_unique().await,
@@ -51,6 +58,7 @@ impl<'a> IndexOperation<'a> {
 			Index::Search(p) => self.index_full_text(stk, p).await,
 			Index::MTree(p) => self.index_mtree(stk, p).await,
 			Index::Hnsw(p) => self.index_hnsw(p).await,
+			Index::Count => self.index_count(require_compaction).await,
 		}
 	}
 
@@ -125,12 +133,47 @@ impl<'a> IndexOperation<'a> {
 		Ok(())
 	}
 
-	fn err_index_exists(&self, rid: Thing, n: Array) -> Result<(), Error> {
+	async fn index_count(&mut self, require_compaction: &mut bool) -> Result<(), Error> {
+		let mut relative_count: i8 = 0;
+		if self.o.is_some() {
+			relative_count -= 1;
+		}
+		if self.n.is_some() {
+			relative_count += 1;
+		}
+		if relative_count == 0 {
+			return Ok(());
+		}
+		let key = IndexCountKey::new(
+			self.opt.ns()?,
+			self.opt.db()?,
+			&self.ix.what,
+			&self.ix.name,
+			Some((self.opt.id()?, Uuid::now_v7())),
+			relative_count > 0,
+			relative_count.unsigned_abs() as u64,
+		);
+		self.ctx.tx().lock().await.put(&key, vec![], None).await?;
+		*require_compaction = true;
+		Ok(())
+	}
+
+	pub(crate) async fn index_count_compaction(
+		ic: &IndexCompactionKey<'_>,
+		tx: &Transaction,
+	) -> Result<(), Error> {
+		IndexCountThingIterator::new(&ic.ns, &ic.db, &ic.tb, &ic.ix)?.compaction(ic, tx).await
+	}
+
+	/// Construct a consistent uniqueness violation error message.
+	/// Formats the conflicting value as a single value or array depending on
+	/// the number of indexed fields.
+	fn err_index_exists(&self, rid: Thing, mut n: Array) -> Result<(), Error> {
 		Err(Error::IndexExists {
 			thing: rid,
 			index: self.ix.name.to_string(),
-			value: match n.len() {
-				1 => n.first().unwrap().to_string(),
+			value: match n.0.len() {
+				1 => n.0.remove(0).to_string(),
 				_ => n.to_string(),
 			},
 		})
@@ -149,6 +192,38 @@ impl<'a> IndexOperation<'a> {
 			ft.remove_document(self.ctx, self.rid).await?;
 		}
 		ft.finish(self.ctx).await
+	}
+	pub(crate) async fn trigger_compaction(&self) -> Result<(), Error> {
+		let (ns, db) = self.opt.ns_db()?;
+		Self::put_trigger_compaction(
+			ns,
+			db,
+			&self.ix.what,
+			&self.ix.name,
+			&self.ctx.tx(),
+			self.opt.id()?,
+		)
+		.await
+	}
+
+	pub(crate) async fn put_trigger_compaction(
+		ns: &str,
+		db: &str,
+		tb: &str,
+		ix: &str,
+		tx: &Transaction,
+		nid: Uuid,
+	) -> Result<(), Error> {
+		let ic = IndexCompactionKey::new(
+			Cow::Borrowed(ns),
+			Cow::Borrowed(db),
+			Cow::Borrowed(tb),
+			Cow::Borrowed(ix),
+			nid,
+			Uuid::now_v7(),
+		);
+		tx.set(&ic, vec![], None).await?;
+		Ok(())
 	}
 
 	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<(), Error> {

@@ -29,11 +29,12 @@ pub(super) struct PlanBuilderParameters {
 	pub(super) gp: GrantedPermission,
 	pub(super) compound_indexes: CompoundIndexes,
 	pub(super) order_limit: Option<IndexOption>,
+	pub(super) index_count: Option<IndexOption>,
 	pub(super) with_indexes: Option<Vec<IndexReference>>,
 	pub(super) all_and: bool,
 	pub(super) all_expressions_with_index: bool,
 	pub(super) all_and_groups: HashMap<GroupRef, bool>,
-	pub(super) reverse_scan: bool,
+	pub(super) has_reverse_scan: bool,
 }
 
 impl PlanBuilder {
@@ -50,13 +51,19 @@ impl PlanBuilder {
 		};
 
 		if let Some(With::NoIndex) = ctx.with {
-			return Self::table_iterator(ctx, Some("WITH NOINDEX"), p.gp).await;
+			return Self::table_iterator(ctx, Some("WITH NOINDEX"), p.has_reverse_scan, p.gp).await;
 		}
 
+		if let Some(io) = p.index_count {
+			return Ok(Plan::SingleIndex(None, io, RecordStrategy::Count));
+		}
+
+		//Analyse the query AST to discover indexable conditions and collect
+		//optimisation opportunities
 		// Browse the AST and collect information
 		if let Some(root) = &p.root {
 			if let Err(e) = b.eval_node(root) {
-				return Self::table_iterator(ctx, Some(&e), p.gp).await;
+				return Self::table_iterator(ctx, Some(&e), p.has_reverse_scan, p.gp).await;
 			}
 		}
 
@@ -115,7 +122,7 @@ impl PlanBuilder {
 				let record_strategy =
 					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
 				// Check compatibility with reverse-scan capability
-				if Self::check_order_scan(p.reverse_scan, o.op()) {
+				if Self::check_order_scan(p.has_reverse_scan, o.op()) {
 					// Return the plan
 					return Ok(Plan::SingleIndex(None, o.clone(), record_strategy));
 				}
@@ -136,18 +143,19 @@ impl PlanBuilder {
 			// Return the plan
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges, record_strategy));
 		}
-		Self::table_iterator(ctx, None, p.gp).await
+		Self::table_iterator(ctx, None, p.has_reverse_scan, p.gp).await
 	}
 
 	async fn table_iterator(
 		ctx: &StatementContext<'_>,
 		reason: Option<&str>,
+		has_reverse_scan: bool,
 		granted_permission: GrantedPermission,
 	) -> Result<Plan, Error> {
 		// Evaluate the record strategy
 		let rs = ctx.check_record_strategy(false, granted_permission)?;
 		// Evaluate the scan direction
-		let sc = ctx.check_scan_direction();
+		let sc = ctx.check_scan_direction(has_reverse_scan);
 		// Collect the reason if any
 		let reason = reason.map(|s| s.to_string());
 		Ok(Plan::TableIterator(reason, rs, sc))
@@ -391,6 +399,7 @@ pub(super) enum IndexOperator {
 	Ann(Arc<Vec<Number>>, u32, u32),
 	/// false = ascending, true = descending
 	Order(bool),
+	Count,
 }
 
 impl IndexOption {
@@ -505,6 +514,9 @@ impl IndexOption {
 						"Order"
 					}),
 				);
+			}
+			IndexOperator::Count => {
+				e.insert("operator", Value::from("Count"));
 			}
 		};
 		Value::from(e)

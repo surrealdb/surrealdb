@@ -11,9 +11,9 @@ use crate::idx::ft::terms::Terms;
 use crate::idx::ft::{FtIndex, MatchRef};
 use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
 use crate::idx::planner::iterators::{
-	IndexEqualThingIterator, IndexJoinThingIterator, IndexRangeThingIterator,
-	IndexUnionThingIterator, IteratorRange, IteratorRecord, IteratorRef, KnnIterator,
-	KnnIteratorResult, MatchesThingIterator, MultipleIterators, ThingIterator,
+	IndexCountThingIterator, IndexEqualThingIterator, IndexJoinThingIterator,
+	IndexRangeThingIterator, IndexUnionThingIterator, IteratorRange, IteratorRecord, IteratorRef,
+	KnnIterator, KnnIteratorResult, MatchesThingIterator, MultipleIterators, ThingIterator,
 	UniqueEqualThingIterator, UniqueJoinThingIterator, UniqueRangeThingIterator,
 	UniqueUnionThingIterator, ValueType,
 };
@@ -356,10 +356,9 @@ impl QueryExecutor {
 		irf: IteratorRef,
 		io: &IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
-		let ixr = io.ix_ref();
-		match ixr.index {
-			Index::Idx => Ok(self.new_index_iterator(opt, irf, ixr, io.clone()).await?),
-			Index::Uniq => Ok(self.new_unique_index_iterator(opt, irf, ixr, io.clone()).await?),
+		match io.ix_ref().index {
+			Index::Idx | Index::Count => Ok(self.new_index_iterator(opt, irf, io.clone()).await?),
+			Index::Uniq => Ok(self.new_unique_index_iterator(opt, irf, io.clone()).await?),
 			Index::Search {
 				..
 			} => self.new_search_index_iterator(irf, io.clone()).await,
@@ -372,9 +371,9 @@ impl QueryExecutor {
 		&self,
 		opt: &Options,
 		ir: IteratorRef,
-		ix: &IndexReference,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
+		let ix = io.ix_ref();
 		Ok(match io.op() {
 			IndexOperator::Equality(value) => {
 				let variants = Self::get_equal_variants_from_value(value);
@@ -434,6 +433,12 @@ impl QueryExecutor {
 					ranges,
 				)?))
 			}
+			IndexOperator::Count => Some(ThingIterator::IndexCount(IndexCountThingIterator::new(
+				opt.ns()?,
+				opt.db()?,
+				&ix.what,
+				&ix.name,
+			)?)),
 			_ => None,
 		})
 	}
@@ -843,30 +848,39 @@ impl QueryExecutor {
 		&self,
 		opt: &Options,
 		irf: IteratorRef,
-		ixr: &IndexReference,
 		io: IndexOption,
 	) -> Result<Option<ThingIterator>, Error> {
 		Ok(match io.op() {
 			IndexOperator::Equality(values) => {
 				let variants = Self::get_equal_variants_from_value(values);
 				if variants.len() == 1 {
-					Some(Self::new_unique_equal_iterator(irf, opt, ixr, &variants[0])?)
+					Some(Self::new_unique_equal_iterator(irf, opt, io.ix_ref(), &variants[0])?)
 				} else {
 					Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(
-						irf, opt, ixr, &variants,
+						irf,
+						opt,
+						io.ix_ref(),
+						&variants,
 					)?))
 				}
 			}
 			IndexOperator::Union(values) => {
 				let variants = Self::get_equal_variants_from_values(values);
 				Some(ThingIterator::UniqueUnion(UniqueUnionThingIterator::new(
-					irf, opt, ixr, &variants,
+					irf,
+					opt,
+					io.ix_ref(),
+					&variants,
 				)?))
 			}
 			IndexOperator::Join(ios) => {
 				let iterators = self.build_iterators(opt, irf, ios).await?;
-				let unique_join =
-					Box::new(UniqueJoinThingIterator::new(irf, opt, ixr.clone(), iterators)?);
+				let unique_join = Box::new(UniqueJoinThingIterator::new(
+					irf,
+					opt,
+					io.ix_ref().clone(),
+					iterators,
+				)?);
 				Some(ThingIterator::UniqueJoin(unique_join))
 			}
 			IndexOperator::Order(reverse) => {
@@ -878,7 +892,7 @@ impl QueryExecutor {
 								irf,
 								opt.ns()?,
 								opt.db()?,
-								ixr,
+								io.ix_ref(),
 							)?,
 						))
 					}
@@ -889,7 +903,7 @@ impl QueryExecutor {
 						irf,
 						opt.ns()?,
 						opt.db()?,
-						ixr,
+						io.ix_ref(),
 					)?))
 				}
 			}
@@ -898,7 +912,7 @@ impl QueryExecutor {
 					irf,
 					opt.ns()?,
 					opt.db()?,
-					ixr,
+					io.ix_ref(),
 					prefix,
 					ranges,
 				)?))

@@ -1,3 +1,4 @@
+use super::KeyDecode;
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
@@ -12,23 +13,25 @@ use crate::kvs::LockType::Optimistic;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::sql::statements::DefineIndexStatement;
 use crate::sql::{Id, Object, Thing, Value};
-use dashmap::mapref::entry::Entry;
-use dashmap::DashMap;
+use ahash::HashMap;
+use futures::channel::oneshot::{channel, Receiver, Sender};
 use reblessive::TreeStack;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::Entry;
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+#[cfg(not(target_family = "wasm"))]
+use tokio::spawn;
 use tokio::sync::RwLock;
-use tokio::task;
-use tokio::task::JoinHandle;
-
-use super::KeyDecode;
+#[cfg(target_family = "wasm")]
+use wasm_bindgen_futures::spawn_local as spawn;
 
 #[derive(Debug, Clone)]
 pub(crate) enum BuildingStatus {
 	Started,
+	Cleaning,
 	Indexing {
 		initial: Option<usize>,
 		updated: Option<usize>,
@@ -40,7 +43,7 @@ pub(crate) enum BuildingStatus {
 		pending: Option<usize>,
 	},
 	Aborted,
-	Error(Arc<Error>),
+	Error(String),
 }
 
 impl Default for BuildingStatus {
@@ -74,6 +77,7 @@ impl From<BuildingStatus> for Value {
 		let mut o = Object::default();
 		let s = match st {
 			BuildingStatus::Started => "started",
+			BuildingStatus::Cleaning => "cleaning",
 			BuildingStatus::Indexing {
 				initial,
 				pending,
@@ -117,7 +121,7 @@ impl From<BuildingStatus> for Value {
 	}
 }
 
-type IndexBuilding = (Arc<Building>, JoinHandle<()>);
+type IndexBuilding = Arc<Building>;
 
 #[derive(Hash, PartialEq, Eq)]
 struct IndexKey {
@@ -141,7 +145,7 @@ impl IndexKey {
 #[derive(Clone)]
 pub(crate) struct IndexBuilder {
 	tf: TransactionFactory,
-	indexes: Arc<DashMap<IndexKey, IndexBuilding>>,
+	indexes: Arc<RwLock<HashMap<IndexKey, IndexBuilding>>>,
 }
 
 impl IndexBuilder {
@@ -152,36 +156,64 @@ impl IndexBuilder {
 		}
 	}
 
-	pub(crate) fn build(
+	fn start_building(
 		&self,
 		ctx: &Context,
 		opt: Options,
 		ix: Arc<DefineIndexStatement>,
-	) -> Result<(), Error> {
+		sdr: Option<Sender<Result<(), Error>>>,
+	) -> Result<IndexBuilding, Error> {
+		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix)?);
+		let b = building.clone();
+		spawn(async move {
+			let guard = BuildingFinishGuard(b.clone());
+			let r = b.run().await;
+			if let Err(err) = &r {
+				b.set_status(BuildingStatus::Error(err.to_string())).await;
+			}
+			if let Some(s) = sdr {
+				if s.send(r).is_err() {
+					warn!("Failed to send index building result to the consumer");
+				}
+			}
+			drop(guard);
+		});
+		Ok(building)
+	}
+
+	pub(crate) async fn build(
+		&self,
+		ctx: &Context,
+		opt: Options,
+		ix: Arc<DefineIndexStatement>,
+		blocking: bool,
+	) -> Result<Option<Receiver<Result<(), Error>>>, Error> {
 		let (ns, db) = opt.ns_db()?;
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
-		match self.indexes.entry(key) {
-			Entry::Occupied(e) => {
-				// If the building is currently running, we return error
-				if !e.get().1.is_finished() {
+		let (rcv, sdr) = if blocking {
+			let (s, r) = channel();
+			(Some(r), Some(s))
+		} else {
+			(None, None)
+		};
+		match self.indexes.write().await.entry(key) {
+			Entry::Occupied(mut e) => {
+				// If the building is currently running, we return an error
+				if !e.get().is_finished() {
 					return Err(Error::IndexAlreadyBuilding {
 						name: e.key().ix.clone(),
 					});
 				}
+				let ib = self.start_building(ctx, opt, ix, sdr)?;
+				e.insert(ib);
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ix)?);
-				let b = building.clone();
-				let jh = task::spawn(async move {
-					if let Err(err) = b.run().await {
-						b.set_status(BuildingStatus::Error(err.into())).await;
-					}
-				});
-				e.insert((building, jh));
+				let ib = self.start_building(ctx, opt, ix, sdr)?;
+				e.insert(ib);
 			}
 		}
-		Ok(())
+		Ok(rcv)
 	}
 
 	pub(crate) async fn consume(
@@ -194,8 +226,7 @@ impl IndexBuilder {
 		rid: &Thing,
 	) -> Result<ConsumeResult, Error> {
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
-		if let Some(r) = self.indexes.get(&key) {
-			let (b, _) = r.value();
+		if let Some(b) = self.indexes.read().await.get(&key) {
 			return b.maybe_consume(ctx, old_values, new_values, rid).await;
 		}
 		Ok(ConsumeResult::Ignored(old_values, new_values))
@@ -208,17 +239,23 @@ impl IndexBuilder {
 		ix: &DefineIndexStatement,
 	) -> BuildingStatus {
 		let key = IndexKey::new(ns, db, &ix.what, &ix.name);
-		if let Some(a) = self.indexes.get(&key) {
-			a.value().0.status.read().await.clone()
+		if let Some(b) = self.indexes.read().await.get(&key) {
+			b.status.read().await.clone()
 		} else {
 			BuildingStatus::default()
 		}
 	}
 
-	pub(crate) fn remove_index(&self, ns: &str, db: &str, tb: &str, ix: &str) -> Result<(), Error> {
+	pub(crate) async fn remove_index(
+		&self,
+		ns: &str,
+		db: &str,
+		tb: &str,
+		ix: &str,
+	) -> Result<(), Error> {
 		let key = IndexKey::new(ns, db, tb, ix);
-		if let Some((_, b)) = self.indexes.remove(&key) {
-			b.0.abort();
+		if let Some(b) = self.indexes.write().await.remove(&key) {
+			b.abort();
 		}
 		Ok(())
 	}
@@ -286,6 +323,7 @@ struct Building {
 	status: Arc<RwLock<BuildingStatus>>,
 	queue: Arc<RwLock<QueueSequences>>,
 	aborted: AtomicBool,
+	finished: AtomicBool,
 }
 
 impl Building {
@@ -304,6 +342,7 @@ impl Building {
 			status: Arc::new(RwLock::new(BuildingStatus::Started)),
 			queue: Default::default(),
 			aborted: AtomicBool::new(false),
+			finished: AtomicBool::new(false),
 		})
 	}
 
@@ -375,8 +414,18 @@ impl Building {
 	}
 
 	async fn run(&self) -> Result<(), Error> {
-		// First iteration, we index every keys
 		let (ns, db) = self.opt.ns_db()?;
+		// Remove the index data
+		{
+			self.set_status(BuildingStatus::Cleaning).await;
+			let ctx = self.new_write_tx_ctx().await?;
+			let key = crate::key::index::all::new(ns, db, &self.tb, &self.ix.name);
+			let tx = ctx.tx();
+			tx.delp(&key).await?;
+			tx.commit().await?;
+		}
+
+		// First iteration, we index every keys
 		let beg = thing::prefix(ns, db, &self.tb)?;
 		let end = thing::suffix(ns, db, &self.tb)?;
 		let mut next = Some(beg..end);
@@ -475,6 +524,7 @@ impl Building {
 		values: Vec<(Key, Val)>,
 		count: &mut usize,
 	) -> Result<(), Error> {
+		let mut rc = false;
 		let mut stack = TreeStack::new();
 		// Index the records
 		for (k, v) in values.into_iter() {
@@ -512,7 +562,7 @@ impl Building {
 			// Index the record
 			let mut io =
 				IndexOperation::new(ctx, &self.opt, &self.ix, None, opt_values.clone(), &rid);
-			stack.enter(|stk| io.compute(stk)).finish().await?;
+			stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
 
 			// Increment the count and update the status
 			*count += 1;
@@ -523,6 +573,9 @@ impl Building {
 			})
 			.await;
 		}
+		// Check if we trigger the compaction
+		self.check_index_compaction(tx, &mut rc).await?;
+		// We're done
 		Ok(())
 	}
 
@@ -534,6 +587,7 @@ impl Building {
 		initial: usize,
 		count: &mut usize,
 	) -> Result<(), Error> {
+		let mut rc = false;
 		let mut stack = TreeStack::new();
 		for i in range {
 			if self.is_aborted().await {
@@ -546,7 +600,7 @@ impl Building {
 				let rid = Thing::from((self.tb.clone(), a.id));
 				let mut io =
 					IndexOperation::new(ctx, &self.opt, &self.ix, a.old_values, a.new_values, &rid);
-				stack.enter(|stk| io.compute(stk)).finish().await?;
+				stack.enter(|stk| io.compute(stk, &mut rc)).finish().await?;
 
 				// We can delete the ip record if any
 				let ip = self.new_ip_key(rid.id)?;
@@ -561,6 +615,27 @@ impl Building {
 				.await;
 			}
 		}
+		// Check if we trigger the compaction
+		self.check_index_compaction(tx, &mut rc).await?;
+		// We're done
+		Ok(())
+	}
+
+	async fn check_index_compaction(&self, tx: &Transaction, rc: &mut bool) -> Result<(), Error> {
+		if !*rc {
+			return Ok(());
+		}
+		let (ns, db) = self.opt.ns_db()?;
+		IndexOperation::put_trigger_compaction(
+			ns,
+			db,
+			&self.ix.what,
+			&self.ix.name,
+			tx,
+			self.opt.id()?,
+		)
+		.await?;
+		*rc = false;
 		Ok(())
 	}
 
@@ -581,5 +656,17 @@ impl Building {
 		} else {
 			false
 		}
+	}
+
+	fn is_finished(&self) -> bool {
+		self.finished.load(Ordering::Relaxed)
+	}
+}
+
+struct BuildingFinishGuard(IndexBuilding);
+
+impl Drop for BuildingFinishGuard {
+	fn drop(&mut self) {
+		self.0.finished.store(true, Ordering::Relaxed);
 	}
 }

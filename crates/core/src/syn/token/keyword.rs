@@ -61,6 +61,7 @@ keyword! {
 	Config => "CONFIG",
 	Content => "CONTENT",
 	Continue => "CONTINUE",
+	Count => "COUNT",
 	Create => "CREATE",
 	Database => "DATABASE",
 	Default => "DEFAULT",

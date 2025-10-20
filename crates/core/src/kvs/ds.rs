@@ -16,15 +16,18 @@ use crate::err::Error;
 #[cfg(feature = "jwks")]
 use crate::iam::jwks::JwksCache;
 use crate::iam::{Action, Auth, Error as IamError, Resource, Role};
+use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
+use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::cache::ds::DatastoreCache;
 use crate::kvs::clock::SizedClock;
 #[allow(unused_imports)]
 use crate::kvs::clock::SystemClock;
-#[cfg(not(target_family = "wasm"))]
 use crate::kvs::index::IndexBuilder;
+use crate::kvs::slowlog::SlowLog;
+use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::{LockType, LockType::*, TransactionType, TransactionType::*};
-use crate::sql::{statements::DefineUserStatement, Base, Query, Value};
+use crate::sql::{statements::DefineUserStatement, Base, Index, Query, Value};
 use crate::syn;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::{cf, cnf};
@@ -70,8 +73,8 @@ pub struct Datastore {
 	auth_enabled: bool,
 	/// The maximum duration timeout for running multiple statements in a query.
 	query_timeout: Option<Duration>,
-	/// The duration threshold determining when a query should be logged
-	slow_log_threshold: Option<Duration>,
+	/// The slow log configuration determining when a query should be logged
+	slow_log: Option<SlowLog>,
 	/// The maximum duration timeout for running multiple statements in a transaction.
 	transaction_timeout: Option<Duration>,
 	/// The security and feature capabilities for this datastore.
@@ -83,7 +86,6 @@ pub struct Datastore {
 	// The cross transaction cache
 	cache: Arc<DatastoreCache>,
 	// The index asynchronous builder
-	#[cfg(not(target_family = "wasm"))]
 	index_builder: IndexBuilder,
 	#[cfg(feature = "jwks")]
 	// The JWKS object cache
@@ -102,6 +104,13 @@ pub(super) struct TransactionFactory {
 }
 
 impl TransactionFactory {
+	pub(super) fn new(clock: Arc<SizedClock>, flavor: DatastoreFlavor) -> Self {
+		Self {
+			clock,
+			flavor: Arc::new(flavor),
+		}
+	}
+
 	#[allow(unreachable_code)]
 	pub async fn transaction(
 		&self,
@@ -404,22 +413,18 @@ impl Datastore {
 		}?;
 		// Set the properties on the datastore
 		flavor.map(|flavor| {
-			let tf = TransactionFactory {
-				clock,
-				flavor: Arc::new(flavor),
-			};
+			let tf = TransactionFactory::new(clock, flavor);
 			Self {
 				id: Uuid::new_v4(),
 				transaction_factory: tf.clone(),
 				strict: false,
 				auth_enabled: false,
 				query_timeout: None,
-				slow_log_threshold: None,
+				slow_log: None,
 				transaction_timeout: None,
 				notification_channel: None,
 				capabilities: Arc::new(Capabilities::default()),
 				index_stores: IndexStores::default(),
-				#[cfg(not(target_family = "wasm"))]
 				index_builder: IndexBuilder::new(tf),
 				#[cfg(feature = "jwks")]
 				jwks_cache: Arc::new(RwLock::new(JwksCache::new())),
@@ -439,12 +444,11 @@ impl Datastore {
 			strict: self.strict,
 			auth_enabled: self.auth_enabled,
 			query_timeout: self.query_timeout,
-			slow_log_threshold: self.slow_log_threshold,
+			slow_log: self.slow_log.clone(),
 			transaction_timeout: self.transaction_timeout,
 			capabilities: self.capabilities,
 			notification_channel: self.notification_channel,
 			index_stores: Default::default(),
-			#[cfg(not(target_family = "wasm"))]
 			index_builder: IndexBuilder::new(self.transaction_factory.clone()),
 			#[cfg(feature = "jwks")]
 			jwks_cache: Arc::new(Default::default()),
@@ -479,9 +483,22 @@ impl Datastore {
 		self
 	}
 
-	/// Set a global slow log threshold
-	pub fn with_slow_log_threshold(mut self, duration: Option<Duration>) -> Self {
-		self.slow_log_threshold = duration;
+	/// Set a global slow log configuration
+	///
+	/// Parameters:
+	/// - `duration`: Minimum execution time for a statement to be considered "slow". When `None`,
+	///   slow logging is disabled.
+	/// - `param_allow`: If non-empty, only parameters with names present in this list will be
+	///   logged when a query is slow.
+	/// - `param_deny`: Parameter names that should never be logged. This list always takes
+	///   precedence over `param_allow`.
+	pub fn with_slow_log(
+		mut self,
+		duration: Option<Duration>,
+		param_allow: Vec<String>,
+		param_deny: Vec<String>,
+	) -> Self {
+		self.slow_log = duration.map(|d| SlowLog::new(d, param_allow, param_deny));
 		self
 	}
 
@@ -741,6 +758,92 @@ impl Datastore {
 		self.changefeed_cleanup(ts).await?;
 		// Everything ok
 		Ok(())
+	}
+
+	/// Processes the index compaction queue
+	///
+	/// This method is called periodically by the index compaction thread to
+	/// process indexes that have been marked for compaction. It acquires a
+	/// distributed lease to ensure only one node in a cluster performs the
+	/// compaction at a time.
+	///
+	/// The method scans the index compaction queue (stored as `Ic` keys) and
+	/// processes each index that needs compaction. Currently, only full-text
+	/// indexes support compaction, which helps optimize their performance by
+	/// consolidating changes and removing unnecessary data.
+	///
+	/// After processing an index, it is removed from the compaction queue.
+	///
+	/// # Arguments
+	///
+	/// * `interval` - The time interval between compaction runs, used to calculate the lease
+	///   duration
+	///
+	/// # Returns
+	///
+	/// * `Result<()>` - Ok if the compaction was successful or if another node is handling the
+	///   compaction, Error otherwise
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
+	pub async fn index_compaction(&self, interval: Duration) -> Result<(), Error> {
+		let lh = LeaseHandler::new(
+			self.id,
+			self.transaction_factory.clone(),
+			TaskLeaseType::IndexCompaction,
+			interval * 2,
+		)?;
+		// Process all items in the queue. Once processing starts, we intentionally continue
+		// to completion even if the lease is lost mid-process. This prevents leaving work
+		// in an inconsistent state (see try_maintain_lease documentation for rationale).
+		loop {
+			// Attempt to acquire a lease for the IndexCompaction task
+			// If we don't get the lease, another node is handling this task
+			if !lh.has_lease().await? {
+				return Ok(());
+			}
+			// Create a new transaction
+			let txn = self.transaction(Write, Optimistic).await?;
+			// Collect every item in the queue
+			let (beg, end) = IndexCompactionKey::range();
+			let range = beg..end;
+			let mut previous: Option<IndexCompactionKey<'static>> = None;
+			let mut count = 0;
+			// Returns an ordered list of indexes that require compaction
+			for (k, _) in txn.getr(range.clone(), None).await? {
+				count += 1;
+				// Lease maintenance: try_maintain_lease() returns a boolean indicating lease
+				// ownership, but we intentionally ignore it and continue processing. This ensures
+				// that work completes once started, preventing inconsistent state.
+				let _ = lh.try_maintain_lease().await?;
+				let ic = IndexCompactionKey::decode_key(&k)?;
+				// If the index has already been compacted, we can ignore the task
+				if let Some(p) = &previous {
+					if p.index_matches(&ic) {
+						continue;
+					}
+				}
+				match txn.get_tb_index(&ic.ns, &ic.db, &ic.tb, &ic.ix).await {
+					Ok(ix) => match &ix.index {
+						Index::Count => {
+							IndexOperation::index_count_compaction(&ic, &txn).await?;
+						}
+						_ => {
+							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", &ic.ix);
+						}
+					},
+					Err(e) => {
+						trace!(target: TARGET, "Index compaction error: {e} - Index {:?}", ic.ix);
+					}
+				}
+				previous = Some(ic.into_owned());
+			}
+			if count > 0 {
+				txn.delr(range).await?;
+				txn.commit().await?;
+			} else {
+				txn.cancel().await?;
+				return Ok(());
+			}
+		}
 	}
 
 	/// Performs a database import from SQL
@@ -1257,11 +1360,10 @@ impl Datastore {
 	pub fn setup_ctx(&self) -> Result<MutableContext, Error> {
 		let mut ctx = MutableContext::from_ds(
 			self.query_timeout,
-			self.slow_log_threshold,
+			self.slow_log.clone(),
 			self.capabilities.clone(),
 			self.index_stores.clone(),
 			self.cache.clone(),
-			#[cfg(not(target_family = "wasm"))]
 			self.index_builder.clone(),
 			#[cfg(storage)]
 			self.temporary_directory.clone(),

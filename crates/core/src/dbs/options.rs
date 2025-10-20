@@ -2,7 +2,7 @@ use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::dbs::Notification;
 use crate::err::Error;
 use crate::iam::{Action, Auth, ResourceKind};
-use crate::sql::statements::define::{DefineIndexStatement, DefineTableStatement};
+use crate::sql::statements::define::DefineTableStatement;
 use crate::sql::Base;
 use async_channel::Sender;
 use std::sync::Arc;
@@ -54,7 +54,6 @@ pub enum Force {
 	All,
 	None,
 	Table(Arc<[DefineTableStatement]>),
-	Index(Arc<[DefineIndexStatement]>),
 }
 
 #[derive(Copy, Clone, Debug)]

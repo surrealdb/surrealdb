@@ -781,3 +781,43 @@ async fn insert_ignore() -> Result<(), Error> {
 	t.expect_vals(&["[{ id: user:1, name: 'foo' }]", "[]"])?;
 	Ok(())
 }
+
+#[tokio::test]
+async fn insert_relation_ignore_unique_index_fix_test() -> Result<(), Error> {
+	let sql = "
+        USE NS test DB test;
+        DEFINE INDEX key ON wrote FIELDS in, out UNIQUE;
+        INSERT RELATION IGNORE INTO wrote [
+            { in: author:one, out: blog:one },
+            { in: author:one, out: blog:one }
+        ];
+        INSERT RELATION IGNORE INTO wrote { in: author:one, out: blog:one };
+        SELECT * FROM wrote;
+    ";
+	let mut t = Test::new(sql).await?;
+
+	// Skip USE and DEFINE INDEX
+	t.skip_ok(2)?;
+
+	let first_result = t.next()?.result?;
+	let Value::Array(first_result_array) = first_result else {
+		panic!("Expected array")
+	};
+	assert_eq!(first_result_array.len(), 1);
+
+	t.expect_val("[]")?;
+
+	let select_result = t.next()?.result?;
+	let Value::Array(records) = select_result else {
+		panic!("Expected array")
+	};
+
+	assert_eq!(
+		records.len(),
+		1,
+		"INSERT IGNORE bug: Expected 1 record, got {}. Duplicates not ignored!",
+		records.len()
+	);
+
+	Ok(())
+}

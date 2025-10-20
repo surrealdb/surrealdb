@@ -14,7 +14,9 @@ use std::fmt::{self, Display, Formatter, Write};
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
+#[derive(Default)]
 pub enum Kind {
+	#[default]
 	Any,
 	Null,
 	Bool,
@@ -41,12 +43,6 @@ pub enum Kind {
 	Range,
 	Literal(Literal),
 	References(Option<Table>, Option<Idiom>),
-}
-
-impl Default for Kind {
-	fn default() -> Self {
-		Self::Any
-	}
 }
 
 impl Kind {

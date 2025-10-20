@@ -1,4 +1,5 @@
 use crate::opt::capabilities::Capabilities;
+use crate::opt::websocket::WebsocketConfig;
 #[cfg(storage)]
 use std::path::PathBuf;
 use std::time::Duration;
@@ -19,6 +20,7 @@ pub struct Config {
 	pub(crate) username: String,
 	pub(crate) password: String,
 	pub(crate) capabilities: CoreCapabilities,
+	pub(crate) websocket: WebsocketConfig,
 	#[cfg(storage)]
 	pub(crate) temporary_directory: Option<PathBuf>,
 	pub(crate) node_membership_refresh_interval: Option<Duration>,
@@ -103,6 +105,15 @@ impl Config {
 	pub fn capabilities(mut self, capabilities: Capabilities) -> Self {
 		self.capabilities = capabilities.into();
 		self
+	}
+
+	/// Set the WebSocket config
+	pub fn websocket(mut self, websocket: WebsocketConfig) -> crate::Result<Self> {
+		if websocket.max_write_buffer_size <= websocket.write_buffer_size {
+			return Err(crate::api::err::Error::MaxWriteBufferSizeTooSmall.into());
+		}
+		self.websocket = websocket;
+		Ok(self)
 	}
 
 	#[cfg(storage)]

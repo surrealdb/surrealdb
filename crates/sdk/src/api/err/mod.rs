@@ -249,6 +249,10 @@ pub enum Error {
 	#[doc(hidden)] // A raw query being forwarded
 	#[error("{0}")]
 	RawQuery(Cow<'static, str>),
+
+	/// The write buffer size is too small
+	#[error("The write buffer size is too small")]
+	MaxWriteBufferSizeTooSmall,
 }
 
 impl serde::ser::Error for Error {

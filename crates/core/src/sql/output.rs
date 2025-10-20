@@ -4,22 +4,17 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{self, Display};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Output {
+	#[default]
 	None,
 	Null,
 	Diff,
 	After,
 	Before,
 	Fields(Fields),
-}
-
-impl Default for Output {
-	fn default() -> Self {
-		Self::None
-	}
 }
 
 impl Display for Output {

@@ -6,19 +6,15 @@ use std::fmt;
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
+#[derive(Default)]
 pub enum Dir {
 	/// `<-`
 	In,
 	/// `->`
 	Out,
 	/// `<->`
+	#[default]
 	Both,
-}
-
-impl Default for Dir {
-	fn default() -> Self {
-		Self::Both
-	}
 }
 
 impl fmt::Display for Dir {

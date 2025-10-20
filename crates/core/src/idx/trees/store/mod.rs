@@ -12,8 +12,7 @@ use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
 use crate::idx::trees::store::mapper::Mappers;
 use crate::idx::trees::store::tree::{TreeRead, TreeWrite};
 use crate::idx::IndexKeyBase;
-#[cfg(not(target_family = "wasm"))]
-use crate::kvs::IndexBuilder;
+use crate::kvs::index::IndexBuilder;
 use crate::kvs::{Key, Transaction, TransactionType, Val};
 use crate::sql::index::HnswParams;
 use crate::sql::statements::DefineIndexStatement;
@@ -244,63 +243,55 @@ impl IndexStores {
 
 	pub(crate) async fn index_removed(
 		&self,
-		#[cfg(not(target_family = "wasm"))] ib: Option<&IndexBuilder>,
+		ib: Option<&IndexBuilder>,
 		tx: &Transaction,
 		ns: &str,
 		db: &str,
 		tb: &str,
 		ix: &str,
 	) -> Result<(), Error> {
-		#[cfg(not(target_family = "wasm"))]
 		if let Some(ib) = ib {
-			ib.remove_index(ns, db, tb, ix)?;
+			ib.remove_index(ns, db, tb, ix).await?;
 		}
 		self.remove_index(ns, db, tx.get_tb_index(ns, db, tb, ix).await?.as_ref()).await
 	}
 
 	pub(crate) async fn namespace_removed(
 		&self,
-		#[cfg(not(target_family = "wasm"))] ib: Option<&IndexBuilder>,
+		ib: Option<&IndexBuilder>,
 		tx: &Transaction,
 		ns: &str,
 	) -> Result<(), Error> {
 		for db in tx.all_db(ns).await?.iter() {
-			#[cfg(not(target_family = "wasm"))]
 			self.database_removed(ib, tx, ns, &db.name).await?;
-			#[cfg(target_family = "wasm")]
-			self.database_removed(tx, ns, &db.name).await?;
 		}
 		Ok(())
 	}
 
 	pub(crate) async fn database_removed(
 		&self,
-		#[cfg(not(target_family = "wasm"))] ib: Option<&IndexBuilder>,
+		ib: Option<&IndexBuilder>,
 		tx: &Transaction,
 		ns: &str,
 		db: &str,
 	) -> Result<(), Error> {
 		for tb in tx.all_tb(ns, db, None).await?.iter() {
-			#[cfg(not(target_family = "wasm"))]
 			self.table_removed(ib, tx, ns, db, &tb.name).await?;
-			#[cfg(target_family = "wasm")]
-			self.table_removed(tx, ns, db, &tb.name).await?;
 		}
 		Ok(())
 	}
 
 	pub(crate) async fn table_removed(
 		&self,
-		#[cfg(not(target_family = "wasm"))] ib: Option<&IndexBuilder>,
+		ib: Option<&IndexBuilder>,
 		tx: &Transaction,
 		ns: &str,
 		db: &str,
 		tb: &str,
 	) -> Result<(), Error> {
 		for ix in tx.all_tb_indexes(ns, db, tb).await?.iter() {
-			#[cfg(not(target_family = "wasm"))]
 			if let Some(ib) = ib {
-				ib.remove_index(ns, db, tb, &ix.name)?;
+				ib.remove_index(ns, db, tb, &ix.name).await?;
 			}
 			self.remove_index(ns, db, ix).await?;
 		}

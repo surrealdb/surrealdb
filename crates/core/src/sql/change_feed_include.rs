@@ -7,14 +7,10 @@ use std::fmt;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 /// ChangeFeedInclude statements are an appendix
 #[non_exhaustive]
+#[derive(Default)]
 pub enum ChangeFeedInclude {
+	#[default]
 	Original,
-}
-
-impl Default for ChangeFeedInclude {
-	fn default() -> Self {
-		Self::Original
-	}
 }
 
 impl fmt::Display for ChangeFeedInclude {

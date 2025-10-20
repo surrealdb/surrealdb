@@ -16,7 +16,9 @@ use std::fmt::{self, Display, Formatter};
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
+#[derive(Default)]
 pub enum Data {
+	#[default]
 	EmptyExpression,
 	SetExpression(Vec<(Idiom, Operator, Value)>),
 	UnsetExpression(Vec<Idiom>),
@@ -27,12 +29,6 @@ pub enum Data {
 	SingleExpression(Value),
 	ValuesExpression(Vec<Vec<(Idiom, Value)>>),
 	UpdateExpression(Vec<(Idiom, Operator, Value)>),
-}
-
-impl Default for Data {
-	fn default() -> Self {
-		Self::EmptyExpression
-	}
 }
 
 impl Data {

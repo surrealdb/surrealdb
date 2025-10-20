@@ -7,7 +7,7 @@ use std::fmt::Write;
 
 /// Binary operators.
 #[revisioned(revision = 2)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash, Default)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum Operator {
@@ -29,7 +29,8 @@ pub enum Operator {
 	Dec, // -=
 	Ext, // +?=
 	//
-	Equal,    // =
+	#[default]
+	Equal, // =
 	Exact,    // ==
 	NotEqual, // !=
 	AllEqual, // *=
@@ -65,12 +66,6 @@ pub enum Operator {
 	Ann(u32, u32), // <|{k},{ef}|>
 	//
 	Rem, // %
-}
-
-impl Default for Operator {
-	fn default() -> Self {
-		Self::Equal
-	}
 }
 
 impl Operator {

@@ -153,7 +153,7 @@ impl<'a> StatementContext<'a> {
 		// and it is not GROUP ALL, then we
 		// need to process record values.
 		let is_group_all = if let Some(g) = self.group {
-			if !g.is_empty() {
+			if !g.is_group_all_only() {
 				return Ok(RecordStrategy::KeysAndValues);
 			}
 			true
@@ -206,12 +206,15 @@ impl<'a> StatementContext<'a> {
 	/// This is used for Table and Range iterators.
 	/// The direction is reversed if the first element of order is ID descending.
 	/// Typically: `ORDER BY id DESC`
-	pub(crate) fn check_scan_direction(&self) -> ScanDirection {
+	#[allow(unused_variables)]
+	pub(crate) fn check_scan_direction(&self, has_reverse_scan: bool) -> ScanDirection {
 		#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-		if let Some(Ordering::Order(o)) = self.order {
-			if let Some(o) = o.first() {
-				if !o.direction && o.value.is_id() {
-					return ScanDirection::Backward;
+		if has_reverse_scan {
+			if let Some(Ordering::Order(o)) = self.order {
+				if let Some(o) = o.first() {
+					if !o.direction && o.value.is_id() {
+						return ScanDirection::Backward;
+					}
 				}
 			}
 		}
@@ -295,11 +298,12 @@ impl QueryPlanner {
 			gp,
 			compound_indexes: tree.index_map.compound_indexes,
 			order_limit: tree.index_map.order_limit,
+			index_count: tree.index_map.index_count,
 			with_indexes: tree.with_indexes,
 			all_and: tree.all_and,
 			all_expressions_with_index: tree.all_expressions_with_index,
 			all_and_groups: tree.all_and_groups,
-			reverse_scan: ctx.ctx.tx().reverse_scan(),
+			has_reverse_scan: ctx.ctx.tx().has_reverse_scan(),
 		};
 		match PlanBuilder::build(ctx, p).await? {
 			Plan::SingleIndex(exp, io, rs) => {

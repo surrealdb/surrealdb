@@ -12,7 +12,9 @@ use crate::sql::order::Ordering;
 use crate::sql::Value;
 use reblessive::tree::Stk;
 
+#[derive(Default)]
 pub(super) enum Results {
+	#[default]
 	None,
 	Memory(MemoryCollector),
 	MemoryRandom(MemoryRandom),
@@ -190,12 +192,6 @@ impl Results {
 				g.explain(exp);
 			}
 		}
-	}
-}
-
-impl Default for Results {
-	fn default() -> Self {
-		Self::None
 	}
 }
 
