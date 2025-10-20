@@ -315,9 +315,13 @@ pub trait RpcProtocolV1: RpcContext {
 	async fn info(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
 		let session = self.get_session(session_id.as_ref());
 		let vars = Some(session.variables.clone());
-		let mut res = self.kvs().execute("$auth", &session, vars).await?;
+		let mut res = self.kvs().execute("SELECT * FROM $auth", &session, vars).await?;
 
-		let first = res.remove(0).result?;
+		let result = res.remove(0).result?;
+
+		let first = result
+			.first()
+			.ok_or_else(|| RpcError::Thrown("Got not results from info query".to_string()))?;
 		Ok(DbResult::Other(first))
 	}
 
