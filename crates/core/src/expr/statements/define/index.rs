@@ -105,7 +105,9 @@ impl DefineIndexStatement {
 				.await?;
 			ix.index_id
 		} else {
-			txn.lock().await.get_next_ix_id(tb.namespace_id, tb.database_id).await?
+			ctx.try_get_sequences()?
+				.next_index_id(Some(ctx), &txn, tb.namespace_id, tb.database_id, tb.table_id)
+				.await?
 		};
 
 		// Compute columns

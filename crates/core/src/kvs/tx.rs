@@ -17,7 +17,7 @@ use crate::catalog::providers::{
 };
 use crate::catalog::{
 	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, IndexId,
-	NamespaceDefinition, NamespaceId, TableDefinition,
+	NamespaceDefinition, NamespaceId, TableDefinition, TableId,
 };
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::MutableContext;
@@ -684,7 +684,7 @@ impl DatabaseProvider for Transaction {
 
 					let db_def = DatabaseDefinition {
 						namespace_id: ns_def.namespace_id,
-						database_id: self.lock().await.get_next_db_id(ns_def.namespace_id).await?,
+						database_id: self.get_next_db_id(ctx, ns_def.namespace_id).await?,
 						name: db.to_string(),
 						comment: None,
 						changefeed: None,
@@ -707,6 +707,14 @@ impl DatabaseProvider for Transaction {
 				.into());
 			}
 		}
+	}
+
+	async fn get_next_db_id(
+		&self,
+		ctx: Option<&MutableContext>,
+		ns: NamespaceId,
+	) -> Result<DatabaseId> {
+		self.sequences.next_database_id(ctx, self, ns).await
 	}
 
 	async fn put_db(&self, ns: &str, db: DatabaseDefinition) -> Result<Arc<DatabaseDefinition>> {
@@ -1148,10 +1156,7 @@ impl TableProvider for Transaction {
 				let tb_def = TableDefinition::new(
 					db_def.namespace_id,
 					db_def.database_id,
-					self.lock()
-						.await
-						.get_next_tb_id(db_def.namespace_id, db_def.database_id)
-						.await?,
+					self.get_next_tb_id(ctx, db_def.namespace_id, db_def.database_id).await?,
 					tb.to_owned(),
 				);
 				self.put_tb(ns, db, &tb_def).await
@@ -1636,6 +1641,15 @@ impl TableProvider for Transaction {
 		self.cache.remove(qey);
 		// Return nothing
 		Ok(())
+	}
+
+	async fn get_next_tb_id(
+		&self,
+		ctx: Option<&MutableContext>,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<TableId> {
+		self.sequences.next_table_id(ctx, self, ns, db).await
 	}
 }
 

@@ -89,7 +89,7 @@ impl DefineDatabaseStatement {
 
 			db.database_id
 		} else {
-			txn.lock().await.get_next_db_id(nsv.namespace_id).await?
+			ctx.try_get_sequences()?.next_database_id(Some(ctx), &txn, nsv.namespace_id).await?
 		};
 
 		// Set the database definition, keyed by namespace name and database name.

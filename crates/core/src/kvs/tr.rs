@@ -7,7 +7,7 @@ use anyhow::Result;
 #[allow(unused_imports, reason = "Not used when none of the storage backends are enabled.")]
 use super::api::Transaction;
 use super::{Key, Val, Version};
-use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableDefinition, TableId};
+use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cf;
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::doc::CursorRecord;
@@ -602,49 +602,6 @@ impl Transactor {
 		dt: &TableDefinition,
 	) {
 		self.cf.define_table(ns, db, tb, dt)
-	}
-
-	/// Gets the next database id for the given namespace
-	pub(crate) async fn get_next_db_id(&mut self, _ns: NamespaceId) -> Result<DatabaseId> {
-		todo!()
-		// let key = crate::key::namespace::di::new(ns).encode_key()?;
-		// let mut seq = self.get_idg(&key).await?;
-		// let nid = seq.get_next_id();
-		// self.stash.set(key, seq.clone());
-		// let (k, v) = seq.finish().unwrap();
-		// self.replace(&k, &v).await?;
-		// Ok(DatabaseId(nid))
-	}
-
-	/// Gets the next table id for the given namespace and database
-	pub(crate) async fn get_next_tb_id(
-		&mut self,
-		_ns: NamespaceId,
-		_db: DatabaseId,
-	) -> Result<TableId> {
-		todo!()
-		// let key = crate::key::database::ti::new(ns, db).encode_key()?;
-		// let mut seq = self.get_idg(&key).await?;
-		// let nid = seq.get_next_id();
-		// self.stash.set(key, seq.clone());
-		// let (k, v) = seq.finish().unwrap();
-		// self.replace(&k, &v).await?;
-		// Ok(TableId(nid))
-	}
-
-	pub(crate) async fn get_next_ix_id(
-		&mut self,
-		_ns: NamespaceId,
-		_db: DatabaseId,
-	) -> Result<IndexId> {
-		todo!()
-		// let key = crate::key::database::ix::new(ns, db).encode_key()?;
-		// let mut seq = self.get_idg(&key).await?;
-		// let nid = seq.get_next_id();
-		// self.stash.set(key, seq.clone());
-		// let (k, v) = seq.finish().unwrap();
-		// self.replace(&k, &v).await?;
-		// Ok(IndexId(nid))
 	}
 
 	// complete_changes will complete the changefeed recording for the given

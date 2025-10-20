@@ -10,7 +10,7 @@ use uuid::Uuid;
 use crate::catalog;
 use crate::catalog::{
 	DatabaseDefinition, DatabaseId, IndexId, NamespaceDefinition, NamespaceId, TableDefinition,
-	UserDefinition,
+	TableId, UserDefinition,
 };
 use crate::ctx::MutableContext;
 use crate::dbs::node::Node;
@@ -105,6 +105,13 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		strict: bool,
 		upwards: bool,
 	) -> Result<Arc<DatabaseDefinition>>;
+
+	/// Get the next database id.
+	async fn get_next_db_id(
+		&self,
+		ctx: Option<&MutableContext>,
+		ns: NamespaceId,
+	) -> Result<DatabaseId>;
 
 	/// Put a database definition into a namespace.
 	async fn put_db(&self, ns: &str, db: DatabaseDefinition) -> Result<Arc<DatabaseDefinition>>;
@@ -306,6 +313,14 @@ pub(crate) trait TableProvider {
 		strict: bool,
 		upwards: bool,
 	) -> Result<Arc<TableDefinition>>;
+
+	/// Get the next namespace id.
+	async fn get_next_tb_id(
+		&self,
+		ctx: Option<&MutableContext>,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<TableId>;
 
 	/// Put a table definition into a database.
 	async fn put_tb(

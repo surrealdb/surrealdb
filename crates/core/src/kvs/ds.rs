@@ -808,10 +808,6 @@ impl Datastore {
 		self.cache.clone()
 	}
 
-	pub(crate) fn get_sequences(&self) -> Sequences {
-		self.sequences.clone()
-	}
-
 	// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn check_version(&self) -> Result<MajorVersion> {

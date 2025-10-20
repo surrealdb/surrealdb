@@ -1,10 +1,14 @@
 use crate::catalog::providers::DatabaseProvider;
-use crate::catalog::{DatabaseId, NamespaceId, TableId};
+use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
 use crate::ctx::MutableContext;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::seqdocids::DocId;
-use crate::key::namespace::di::DatabaseIdGeneratorStateKey;
+use crate::key::database::ix::IndexIdGeneratorStateKey;
+use crate::key::database::th::TableIdGeneratorBatchKey;
+use crate::key::database::ti::TableIdGeneratorStateKey;
+use crate::key::namespace::di::DatabaseIdGeneratorBatchKey;
+use crate::key::namespace::ds::DatabaseIdGeneratorStateKey;
 use crate::key::root::nb::NamespaceIdGeneratorBatchKey;
 use crate::key::root::ni::NamespaceIdGeneratorStateKey;
 use crate::key::sequence::Prefix;
@@ -80,6 +84,8 @@ impl SequenceDomain {
 			Self::UserName(ns, db, sq) => Prefix::new_ba_range(*ns, *db, sq),
 			Self::FullTextDocIds(ibk) => ibk.new_ib_range(),
 			Self::NameSpacesIds => NamespaceIdGeneratorBatchKey::range(),
+			Self::DatabasesIds(ns) => DatabaseIdGeneratorBatchKey::range(*ns),
+			Self::TablesIds(ns, db) => TableIdGeneratorBatchKey::range(*ns, *db),
 			_ => todo!(),
 		}
 	}
@@ -89,6 +95,8 @@ impl SequenceDomain {
 			Self::UserName(ns, db, sq) => Ba::new(*ns, *db, sq, start).encode_key(),
 			Self::FullTextDocIds(ikb) => ikb.new_ib_key(start).encode_key(),
 			Self::NameSpacesIds => NamespaceIdGeneratorBatchKey::new(start).encode_key(),
+			Self::DatabasesIds(ns) => DatabaseIdGeneratorBatchKey::new(*ns, start).encode_key(),
+			Self::TablesIds(ns, db) => TableIdGeneratorBatchKey::new(*ns, *db, start).encode_key(),
 			_ => todo!(),
 		}
 	}
@@ -99,7 +107,11 @@ impl SequenceDomain {
 			Self::FullTextDocIds(ikb) => ikb.new_is_key(nid).encode_key(),
 			Self::NameSpacesIds => NamespaceIdGeneratorStateKey::new(nid).encode_key(),
 			Self::DatabasesIds(ns) => DatabaseIdGeneratorStateKey::new(*ns, nid).encode_key(),
-			_ => todo!(),
+			Self::TablesIds(ns, db) => TableIdGeneratorStateKey::new(*ns, *db, nid).encode_key(),
+			Self::IndexIds(ns, db, tb) => {
+				todo!()
+				//IndexIdGeneratorStateKey::new(*ns, *db, *tb, nid).encode_key()
+			}
 		}
 	}
 }
@@ -183,6 +195,42 @@ impl Sequences {
 		let domain = Arc::new(SequenceDomain::new_namespace_ids());
 		let id = self.next_val(ctx, tx, domain, 0, 100, None).await?;
 		Ok(NamespaceId(id as u32))
+	}
+
+	pub(crate) async fn next_database_id(
+		&self,
+		ctx: Option<&MutableContext>,
+		tx: &Transaction,
+		ns: NamespaceId,
+	) -> Result<DatabaseId> {
+		let domain = Arc::new(SequenceDomain::new_database_ids(ns));
+		let id = self.next_val(ctx, tx, domain, 0, 100, None).await?;
+		Ok(DatabaseId(id as u32))
+	}
+
+	pub(crate) async fn next_table_id(
+		&self,
+		ctx: Option<&MutableContext>,
+		tx: &Transaction,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<TableId> {
+		let domain = Arc::new(SequenceDomain::new_table_ids(ns, db));
+		let id = self.next_val(ctx, tx, domain, 0, 100, None).await?;
+		Ok(TableId(id as u32))
+	}
+
+	pub(crate) async fn next_index_id(
+		&self,
+		ctx: Option<&MutableContext>,
+		tx: &Transaction,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: TableId,
+	) -> Result<IndexId> {
+		let domain = Arc::new(SequenceDomain::new_index_ids(ns, db, tb));
+		let id = self.next_val(ctx, tx, domain, 0, 100, None).await?;
+		Ok(IndexId(id as u32))
 	}
 
 	pub(crate) async fn next_user_sequence_id(

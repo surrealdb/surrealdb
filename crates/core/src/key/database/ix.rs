@@ -1,7 +1,7 @@
 //! Stores the next and available freed IDs for documents
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
-use crate::key::database::all::DatabaseRoot;
+use crate::key::table::all::TableRoot;
 use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::sequences::SequenceState;
 use storekey::{BorrowDecode, Encode};
@@ -9,33 +9,33 @@ use uuid::Uuid;
 
 // Index ID generator
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct IndexIdGeneratorStateKey {
-	table_root: DatabaseRoot,
+pub(crate) struct IndexIdGeneratorStateKey<'a> {
+	table_root: TableRoot<'a>,
 	_c: u8,
 	_d: u8,
 	_e: u8,
 	nid: Uuid,
 }
 
-impl_kv_key_storekey!(IndexIdGeneratorStateKey => SequenceState);
+impl_kv_key_storekey!(IndexIdGeneratorStateKey<'_> => SequenceState);
 
-pub fn new(ns: NamespaceId, db: DatabaseId, nid: Uuid) -> IndexIdGeneratorStateKey {
-	IndexIdGeneratorStateKey::new(ns, db, nid)
+pub fn new(ns: NamespaceId, db: DatabaseId, tb: &str, nid: Uuid) -> IndexIdGeneratorStateKey<'_> {
+	IndexIdGeneratorStateKey::new(ns, db, tb, nid)
 }
 
-impl Categorise for IndexIdGeneratorStateKey {
+impl<'a> Categorise for IndexIdGeneratorStateKey<'a> {
 	fn categorise(&self) -> Category {
 		Category::TableIndexIdentifier
 	}
 }
 
-impl IndexIdGeneratorStateKey {
-	pub fn new(ns: NamespaceId, db: DatabaseId, nid: Uuid) -> Self {
+impl<'a> IndexIdGeneratorStateKey<'a> {
+	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, nid: Uuid) -> Self {
 		IndexIdGeneratorStateKey {
-			table_root: DatabaseRoot::new(ns, db),
+			table_root: TableRoot::new(ns, db, tb),
 			_c: b'!',
-			_d: b't',
-			_e: b'i',
+			_d: b'i',
+			_e: b'x',
 			nid,
 		}
 	}
@@ -52,6 +52,7 @@ mod tests {
 		let val = IndexIdGeneratorStateKey::new(
 			NamespaceId(123),
 			DatabaseId(234),
+		"testtb",
 		Uuid::from_u128(15)
 		);
 		let enc = IndexIdGeneratorStateKey::encode_key(&val).unwrap();
