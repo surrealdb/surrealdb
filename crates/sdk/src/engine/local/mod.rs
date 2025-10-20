@@ -189,7 +189,7 @@ use uuid::Uuid;
 use crate::conn::MlExportConfig;
 use crate::conn::{Command, RequestData};
 use crate::opt::IntoEndpoint;
-use crate::opt::auth::{Jwt, Token};
+use crate::opt::auth::{AccessToken, RefreshToken, SecureToken, Token};
 use crate::{Connect, Result, Surreal};
 
 #[cfg(not(target_family = "wasm"))]
@@ -568,9 +568,9 @@ async fn router(
 				iam::signup::signup(kvs, &mut *session.write().await, credentials.into())
 					.await
 					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
-			let token = Jwt {
-				access: Token(signup_data.token.unwrap_or_default()),
-				refresh: signup_data.refresh.map(Token),
+			let token = Token {
+				access: signup_data.token.map(SecureToken).map(AccessToken),
+				refresh: signup_data.refresh.map(SecureToken).map(RefreshToken),
 			};
 			let result = query_result.finish_with_result(Ok(token.into_value()));
 

@@ -7,7 +7,7 @@ use std::sync::{Arc, OnceLock};
 
 use surrealdb_types::{self, SurrealValue, Value, Variables};
 
-use crate::opt::auth::{Credentials, Token};
+use crate::opt::auth::{AccessToken, Credentials, Token};
 use crate::opt::{IntoEndpoint, IntoExportDestination, WaitFor, auth};
 use crate::{Connect, Connection, OnceLockExt, Surreal};
 
@@ -407,11 +407,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signup<R>(&'_ self, credentials: impl Credentials<auth::Signup, R>) -> Signup<'_, C, R> {
+	pub fn signup(&'_ self, credentials: impl Credentials<auth::Signup>) -> Signup<'_, C> {
 		Signup {
 			client: Cow::Borrowed(self),
 			credentials: credentials.into_value(),
-			response_type: PhantomData,
 		}
 	}
 
@@ -524,11 +523,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signin<R>(&'_ self, credentials: impl Credentials<auth::Signin, R>) -> Signin<'_, C, R> {
+	pub fn signin(&'_ self, credentials: impl Credentials<auth::Signin>) -> Signin<'_, C> {
 		Signin {
 			client: Cow::Borrowed(self),
 			credentials: credentials.into_value(),
-			response_type: PhantomData,
 		}
 	}
 
