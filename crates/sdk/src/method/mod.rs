@@ -683,20 +683,17 @@ where
 	/// # Examples
 	///
 	/// ```no_run
-	/// use serde::Serialize;
-	///
-	/// # #[derive(serde::Deserialize)]
-	/// # struct Person;
+	/// # use serde::{Serialize, Deserialize};
 	/// #
-	/// #[derive(Serialize)]
+	/// #[derive(Serialize, Deserialize)]
 	/// struct Settings {
 	///     active: bool,
 	///     marketing: bool,
 	/// }
 	///
-	/// #[derive(Serialize)]
+	/// #[derive(Serialize, Deserialize)]
 	/// struct User {
-	///     name: &'static str,
+	///     name: String,
 	///     settings: Settings,
 	/// }
 	///
@@ -708,12 +705,20 @@ where
 	/// db.use_ns("namespace").use_db("database").await?;
 	///
 	/// // Create a record with a random ID
-	/// let person: Option<Person> = db.create("person").await?;
+	/// let user: Option<User> = db.create("user")
+	///     .content(User {
+	///         name: "John".to_string(),
+	///         settings: Settings {
+	///             active: true,
+	///             marketing: true,
+	///         },
+	///     })
+	///     .await?;
 	///
 	/// // Create a record with a specific ID
-	/// let record: Option<Person> = db.create(("person", "tobie"))
+	/// let record: Option<User> = db.create(("user", "tobie"))
 	///     .content(User {
-	///         name: "Tobie",
+	///         name: "Tobie".to_string(),
 	///         settings: Settings {
 	///             active: true,
 	///             marketing: true,
