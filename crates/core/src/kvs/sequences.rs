@@ -1,19 +1,18 @@
+use anyhow::Result;
+use rand::{Rng, thread_rng};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::ops::Range;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-
-use anyhow::Result;
-use rand::{Rng, thread_rng};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::sleep;
 use uuid::Uuid;
 
 use crate::catalog::providers::DatabaseProvider;
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, NamespaceId, TableId};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
@@ -38,6 +37,14 @@ pub(crate) enum SequenceDomain {
 	UserName(NamespaceId, DatabaseId, String),
 	/// A sequence generating DocIds for a FullText search index
 	FullTextDocIds(IndexKeyBase),
+	/// A sequence generating ids for namespaces
+	NameSpacesIds,
+	/// A sequence generating ids for databases
+	DatabasesIds(NamespaceId),
+	/// A sequence generating ids for tables
+	TablesIds(NamespaceId, DatabaseId),
+	/// A sequence generating ids for tables
+	IndexIds(NamespaceId, DatabaseId, TableId),
 }
 
 impl SequenceDomain {
@@ -47,6 +54,22 @@ impl SequenceDomain {
 
 	pub(crate) fn new_ft_doc_ids(ikb: IndexKeyBase) -> Self {
 		Self::FullTextDocIds(ikb)
+	}
+
+	pub(crate) fn new_namespace_ids() -> Self {
+		Self::NameSpacesIds
+	}
+
+	pub(crate) fn new_database_ids(ns: NamespaceId) -> Self {
+		Self::DatabasesIds(ns)
+	}
+
+	pub(crate) fn new_table_ids(ns: NamespaceId, db: DatabaseId) -> Self {
+		Self::TablesIds(ns, db)
+	}
+
+	pub(crate) fn new_index_ids(ns: NamespaceId, db: DatabaseId, tb: TableId) -> Self {
+		Self::IndexIds(ns, db, tb)
 	}
 
 	fn new_batch_range_keys(&self) -> Result<Range<Vec<u8>>> {
@@ -165,6 +188,48 @@ impl Sequences {
 		batch: u32,
 	) -> Result<i64> {
 		self.next_val(ctx, nid, seq, batch, move || (0, None)).await
+	}
+
+	pub(crate) async fn next_val_namespace_id(&self, ctx: &Context, nid: Uuid) -> Result<u32> {
+		let key = Arc::new(SequenceDomain::new_namespace_ids());
+		let id = self.next_val(ctx, nid, key, 100, (0, None)).await?;
+		Ok(id as u32)
+	}
+
+	pub(crate) async fn next_val_database_id(
+		&self,
+		ctx: &Context,
+		nid: Uuid,
+		ns: NamespaceId,
+	) -> Result<u32> {
+		let key = Arc::new(SequenceDomain::new_database_ids(ns));
+		let id = self.next_val(ctx, nid, key, 100, (0, None)).await?;
+		Ok(id as u32)
+	}
+
+	pub(crate) async fn next_val_table_id(
+		&self,
+		ctx: &Context,
+		nid: Uuid,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<u32> {
+		let key = Arc::new(SequenceDomain::new_table_ids(ns, db));
+		let id = self.next_val(ctx, nid, key, 100, (0, None)).await?;
+		Ok(id as u32)
+	}
+
+	pub(crate) async fn next_val_index_id(
+		&self,
+		ctx: &Context,
+		nid: Uuid,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: TableId,
+	) -> Result<u32> {
+		let key = Arc::new(SequenceDomain::new_index_ids(ns, db, tb));
+		let id = self.next_val(ctx, nid, key, 100, (0, None)).await?;
+		Ok(id as u32)
 	}
 }
 
