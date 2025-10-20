@@ -1,7 +1,9 @@
 //! Stores namespace ID generator batch value
+
 use crate::key::category::{Categorise, Category};
-use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::sequences::BatchValue;
+use crate::kvs::{KVKey, impl_kv_key_storekey};
+use std::ops::Range;
 use storekey::{BorrowDecode, Encode};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -31,6 +33,12 @@ impl NamespaceIdGeneratorBatchKey {
 			start,
 		}
 	}
+
+	pub fn range() -> anyhow::Result<Range<Vec<u8>>> {
+		let beg = Self::new(0).encode_key()?;
+		let end = Self::new(i64::MAX).encode_key()?;
+		Ok(beg..end)
+	}
 }
 
 #[cfg(test)]
@@ -43,5 +51,12 @@ mod tests {
 		let val = NamespaceIdGeneratorBatchKey::new(15);
 		let enc = NamespaceIdGeneratorBatchKey::encode_key(&val).unwrap();
 		assert_eq!(&enc, b"/!nb");
+	}
+
+	#[test]
+	fn range() {
+		let r = NamespaceIdGeneratorBatchKey::range().unwrap();
+		assert_eq!(r.start, b"/!nb");
+		assert_eq!(r.end, b"/!nb");
 	}
 }

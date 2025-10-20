@@ -4,6 +4,9 @@ use crate::ctx::MutableContext;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::seqdocids::DocId;
+use crate::key::namespace::di::DatabaseIdGeneratorStateKey;
+use crate::key::root::nb::NamespaceIdGeneratorBatchKey;
+use crate::key::root::ni::NamespaceIdGeneratorStateKey;
 use crate::key::sequence::Prefix;
 use crate::key::sequence::ba::Ba;
 use crate::key::sequence::st::St;
@@ -25,7 +28,7 @@ use uuid::Uuid;
 type SequencesMap = Arc<RwLock<HashMap<Arc<SequenceDomain>, Arc<Mutex<Sequence>>>>>;
 
 #[derive(Clone)]
-pub(crate) struct Sequences {
+pub struct Sequences {
 	tf: TransactionFactory,
 	nid: Uuid,
 	sequences: SequencesMap,
@@ -76,6 +79,7 @@ impl SequenceDomain {
 		match self {
 			Self::UserName(ns, db, sq) => Prefix::new_ba_range(*ns, *db, sq),
 			Self::FullTextDocIds(ibk) => ibk.new_ib_range(),
+			Self::NameSpacesIds => NamespaceIdGeneratorBatchKey::range(),
 			_ => todo!(),
 		}
 	}
@@ -84,6 +88,7 @@ impl SequenceDomain {
 		match &self {
 			Self::UserName(ns, db, sq) => Ba::new(*ns, *db, sq, start).encode_key(),
 			Self::FullTextDocIds(ikb) => ikb.new_ib_key(start).encode_key(),
+			Self::NameSpacesIds => NamespaceIdGeneratorBatchKey::new(start).encode_key(),
 			_ => todo!(),
 		}
 	}
@@ -92,6 +97,8 @@ impl SequenceDomain {
 		match &self {
 			Self::UserName(ns, db, sq) => St::new(*ns, *db, sq, nid).encode_key(),
 			Self::FullTextDocIds(ikb) => ikb.new_is_key(nid).encode_key(),
+			Self::NameSpacesIds => NamespaceIdGeneratorStateKey::new(nid).encode_key(),
+			Self::DatabasesIds(ns) => DatabaseIdGeneratorStateKey::new(*ns, nid).encode_key(),
 			_ => todo!(),
 		}
 	}
@@ -271,7 +278,6 @@ impl Sequence {
 		to: Option<Duration>,
 	) -> Result<(i64, i64)> {
 		// Use for exponential backoff
-		let mut rng = thread_rng();
 		let mut tempo = 4;
 		const MAX_BACKOFF: u64 = 32_768;
 		let start = if to.is_some() {
@@ -299,7 +305,7 @@ impl Sequence {
 				return Ok(r);
 			}
 			// exponential backoff with full jitter
-			let sleep_ms = rng.gen_range(1..=tempo);
+			let sleep_ms = thread_rng().gen_range(1..=tempo);
 			sleep(Duration::from_millis(sleep_ms)).await;
 			if tempo < MAX_BACKOFF {
 				tempo *= 2;
