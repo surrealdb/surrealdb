@@ -66,3 +66,9 @@ where
 		GqlError::ResolverError(format!("{value:?}"))
 	}
 }
+
+impl From<GqlError> for async_graphql::Error {
+	fn from(value: GqlError) -> Self {
+		async_graphql::Error::new(value.to_string())
+	}
+}
