@@ -8,13 +8,13 @@ use std::str::FromStr;
 
 use anyhow::bail;
 use ipnet::IpNet;
+use surrealism_runtime::capabilities::SurrealismCapabilities;
 #[cfg(all(not(target_family = "wasm"), feature = "http"))]
 use tokio::net::lookup_host;
 use url::Url;
 
 use crate::iam::{Auth, Level};
 use crate::rpc::Method;
-use surrealism_runtime::capabilities::SurrealismCapabilities;
 
 pub trait Target<Item: ?Sized = Self> {
 	fn matches(&self, elem: &Item) -> bool;
@@ -851,8 +851,12 @@ impl Capabilities {
 	}
 
 	/// Checks wether capabilities required by a Surrealism package are allowed.
-	/// The `allow_arbitrary_queries` capability is not checked as that is to be used by the runtime.
-	pub fn validate_surrealism_capabilities(&self, capabilities: SurrealismCapabilities) -> anyhow::Result<()> {
+	/// The `allow_arbitrary_queries` capability is not checked as that is to be used by the
+	/// runtime.
+	pub fn validate_surrealism_capabilities(
+		&self,
+		capabilities: SurrealismCapabilities,
+	) -> anyhow::Result<()> {
 		if capabilities.allow_scripting {
 			if !self.allows_scripting() {
 				bail!("Surrealism package requires scripting, but it is not allowed");
@@ -871,7 +875,10 @@ impl Capabilities {
 			for net in capabilities.allow_net.iter() {
 				let target = NetTarget::from_str(net)?;
 				if !self.allows_network_target(&target) {
-					bail!("Surrealism package requires network target '{}', but it is not allowed", net);
+					bail!(
+						"Surrealism package requires network target '{}', but it is not allowed",
+						net
+					);
 				}
 			}
 		}

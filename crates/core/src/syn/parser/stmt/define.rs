@@ -4,6 +4,7 @@ use crate::catalog::ApiMethod;
 use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
+use crate::sql::executable::SurrealismExecutable;
 use crate::sql::filter::Filter;
 use crate::sql::index::{Distance, HnswParams, MTreeParams, VectorType};
 use crate::sql::statements::define::config::api::{ApiConfig, Middleware};
@@ -22,13 +23,14 @@ use crate::sql::statements::{
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	access_type, table_type, AccessType, BlockExecutable, Executable, Expr, Index, Kind, Literal, Param, Permission, Permissions, Scoring, TableType
+	AccessType, BlockExecutable, Executable, Expr, Index, Kind, Literal, Param, Permission,
+	Permissions, Scoring, TableType, access_type, table_type,
 };
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Token, TokenKind, t};
-use crate::types::PublicDuration;
+use crate::types::{PublicDuration, PublicFile};
 
 impl Parser<'_> {
 	pub(crate) async fn parse_define_stmt(
@@ -143,37 +145,44 @@ impl Parser<'_> {
 			DefineKind::Default
 		};
 		let name = self.parse_custom_function_name()?;
-		let token = expected!(self, t!("(")).span;
-		let mut args = Vec::new();
-		loop {
-			if self.eat(t!(")")) {
-				break;
-			}
 
-			let param = self.next_token_value::<Param>()?.into_string();
-			expected!(self, t!(":"));
-			let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
-
-			args.push((param, kind));
-
-			if !self.eat(t!(",")) {
-				self.expect_closing_delimiter(t!(")"), token)?;
-				break;
-			}
-		}
-		let returns = if self.eat(t!("->")) {
-			Some(stk.run(|ctx| self.parse_inner_kind(ctx)).await?)
+		let executable = if self.eat(t!("AS")) {
+			// TODO add silo parsing
+			let file: PublicFile = self.next_token_value()?;
+			Executable::Surrealism(SurrealismExecutable(file.into()))
 		} else {
-			None
-		};
+			let token = expected!(self, t!("(")).span;
+			let mut args = Vec::new();
+			loop {
+				if self.eat(t!(")")) {
+					break;
+				}
 
-		let next = expected!(self, t!("{")).span;
-		let block = self.parse_block(stk, next).await?;
-		let executable = Executable::Block(BlockExecutable {
-			args,
-			returns,
-			block,
-		});
+				let param = self.next_token_value::<Param>()?.into_string();
+				expected!(self, t!(":"));
+				let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
+
+				args.push((param, kind));
+
+				if !self.eat(t!(",")) {
+					self.expect_closing_delimiter(t!(")"), token)?;
+					break;
+				}
+			}
+			let returns = if self.eat(t!("->")) {
+				Some(stk.run(|ctx| self.parse_inner_kind(ctx)).await?)
+			} else {
+				None
+			};
+
+			let next = expected!(self, t!("{")).span;
+			let block = self.parse_block(stk, next).await?;
+			Executable::Block(BlockExecutable {
+				args,
+				returns,
+				block,
+			})
+		};
 
 		let mut res = DefineFunctionStatement {
 			name,

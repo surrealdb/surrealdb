@@ -16,6 +16,7 @@ pub(crate) mod cond;
 pub(crate) mod constant;
 pub(crate) mod data;
 pub(crate) mod dir;
+pub(crate) mod executable;
 pub(crate) mod explain;
 pub(crate) mod expression;
 pub(crate) mod fetch;
@@ -33,7 +34,6 @@ pub(crate) mod mock;
 pub(crate) mod model;
 pub(crate) mod operation;
 pub(crate) mod operator;
-pub(crate) mod executable;
 pub(crate) mod order;
 pub(crate) mod output;
 pub(crate) mod param;
@@ -66,7 +66,9 @@ pub(crate) use self::cond::Cond;
 pub(crate) use self::constant::Constant;
 pub(crate) use self::data::Data;
 pub(crate) use self::dir::Dir;
-pub(crate) use self::executable::{Executable, BlockExecutable, SurrealismExecutable, SiloExecutable};
+pub(crate) use self::executable::{
+	BlockExecutable, Executable, SiloExecutable, SurrealismExecutable,
+};
 pub(crate) use self::explain::Explain;
 pub(crate) use self::expression::Expr;
 pub(crate) use self::fetch::{Fetch, Fetchs};

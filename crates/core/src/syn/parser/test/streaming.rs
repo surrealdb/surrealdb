@@ -27,7 +27,11 @@ use crate::sql::statements::{
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	Algorithm, AssignOperator, Base, BinaryOperator, Block, BlockExecutable, Cond, Data, Dir, Executable, Explain, Expr, Fetch, Fetchs, Field, Fields, Function, FunctionCall, Group, Groups, Idiom, Index, Kind, Limit, Literal, Lookup, Mock, Order, Output, Param, Part, Permission, Permissions, RecordIdKeyLit, RecordIdLit, Scoring, Script, Split, Splits, Start, TableType, Timeout, TopLevelExpr, With
+	Algorithm, AssignOperator, Base, BinaryOperator, Block, BlockExecutable, Cond, Data, Dir,
+	Executable, Explain, Expr, Fetch, Fetchs, Field, Fields, Function, FunctionCall, Group, Groups,
+	Idiom, Index, Kind, Limit, Literal, Lookup, Mock, Order, Output, Param, Part, Permission,
+	Permissions, RecordIdKeyLit, RecordIdLit, Scoring, Script, Split, Splits, Start, TableType,
+	Timeout, TopLevelExpr, With,
 };
 use crate::syn::parser::StatementStream;
 use crate::types::{PublicDatetime, PublicDuration, PublicNumber, PublicUuid};

@@ -1,9 +1,9 @@
-use crate::sql::{Block, Kind};
-use crate::expr;
-use crate::fmt::EscapeKwFreeIdent;
-use crate::val::File;
 use std::fmt::{self, Display};
-use crate::catalog;
+
+use crate::fmt::EscapeKwFreeIdent;
+use crate::sql::{Block, Kind};
+use crate::val::File;
+use crate::{catalog, expr};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Executable {
@@ -26,7 +26,9 @@ impl From<catalog::Executable> for Executable {
 	fn from(executable: catalog::Executable) -> Self {
 		match executable {
 			catalog::Executable::Block(block) => Executable::Block(block.into()),
-			catalog::Executable::Surrealism(surrealism) => Executable::Surrealism(surrealism.into()),
+			catalog::Executable::Surrealism(surrealism) => {
+				Executable::Surrealism(surrealism.into())
+			}
 			catalog::Executable::Silo(silo) => Executable::Silo(silo.into()),
 		}
 	}
@@ -103,12 +105,12 @@ impl fmt::Display for BlockExecutable {
 			write!(f, "-> {v} ")?;
 		}
 		Display::fmt(&self.block, f)?;
-        Ok(())
+		Ok(())
 	}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct SurrealismExecutable(File);
+pub(crate) struct SurrealismExecutable(pub File);
 
 impl From<expr::SurrealismExecutable> for SurrealismExecutable {
 	fn from(executable: expr::SurrealismExecutable) -> Self {
@@ -181,6 +183,10 @@ impl From<SiloExecutable> for expr::SiloExecutable {
 
 impl fmt::Display for SiloExecutable {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, " AS silo::{}::{}<{}.{}.{}>", self.organisation, self.package, self.major, self.minor, self.patch)
+		write!(
+			f,
+			" AS silo::{}::{}<{}.{}.{}>",
+			self.organisation, self.package, self.major, self.minor, self.patch
+		)
 	}
 }

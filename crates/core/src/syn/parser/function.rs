@@ -10,7 +10,7 @@ impl Parser<'_> {
 	pub(crate) async fn parse_function_name(&mut self) -> ParseResult<Function> {
 		let start = self.peek();
 		let mut last_span = start.span;
-		
+
 		macro_rules! advance {
 			() => {{
 				let peek = self.peek();
@@ -19,11 +19,13 @@ impl Parser<'_> {
 				}
 				self.pop_peek();
 				last_span = self.last_span();
-			}}
+			}};
 		}
 
 		macro_rules! complete {
-			() => { self.lexer.span_str(start.span.covers(last_span)).to_string() }
+			() => {
+				self.lexer.span_str(start.span.covers(last_span)).to_string()
+			};
 		}
 
 		let fnc = match start.kind {
@@ -34,7 +36,7 @@ impl Parser<'_> {
 				while self.eat(t!("::")) {
 					advance!();
 				}
-				
+
 				Function::Custom(complete!())
 			}
 			t!("ml") => {
@@ -48,7 +50,7 @@ impl Parser<'_> {
 				let name = complete!();
 				let (major, minor, patch) = self.parse_model_version()?;
 				let version = format!("{}.{}.{}", major, minor, patch);
-				
+
 				Function::Model(Model {
 					name,
 					version,
@@ -158,7 +160,7 @@ impl Parser<'_> {
 			name.push_str("::");
 			name.push_str(&self.parse_ident()?)
 		}
-	
+
 		let (major, minor, patch) = self.parse_model_version()?;
 
 		let start = expected!(self, t!("(")).span;

@@ -33,10 +33,10 @@ mod buc;
 mod cf;
 mod doc;
 mod exe;
-mod surrealism;
 mod fnc;
 mod idg;
 mod key;
+mod surrealism;
 mod sys;
 
 pub mod api;

@@ -249,6 +249,7 @@ keyword! {
 	Duration => "DURATION",
 	Float => "FLOAT",
 	Fn => "fn",
+	Silo => "silo",
 	Int => "INT",
 	Number => "NUMBER",
 	Object => "OBJECT",

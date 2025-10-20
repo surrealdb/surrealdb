@@ -1,5 +1,8 @@
-use crate::{expr::{statements::info::InfoStructure, Block, Kind}, val::Value};
 use revision::revisioned;
+
+use crate::expr::statements::info::InfoStructure;
+use crate::expr::{Block, Kind};
+use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -45,8 +48,8 @@ impl InfoStructure for BlockExecutable {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct SurrealismExecutable {
-    pub bucket: String,
-    pub key: String,
+	pub bucket: String,
+	pub key: String,
 }
 
 impl InfoStructure for SurrealismExecutable {

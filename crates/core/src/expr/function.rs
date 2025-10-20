@@ -156,7 +156,7 @@ impl Function {
 				}
 				// Run the custom function
 				let result = executable.run(stk, ctx, opt, doc, args, None).await?;
-				
+
 				if let Some(ref returns) = sig.returns {
 					result
 						.coerce_to_kind(returns)

@@ -35,7 +35,11 @@ use crate::sql::statements::{
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	Algorithm, AssignOperator, Base, BinaryOperator, Block, BlockExecutable, Cond, Data, Dir, Executable, Explain, Expr, Fetch, Fetchs, Field, Fields, Group, Groups, Idiom, Index, Kind, Limit, Literal, Lookup, Mock, Order, Output, Param, Part, Permission, Permissions, RecordIdKeyLit, RecordIdLit, Scoring, Split, Splits, Start, TableType, Timeout, TopLevelExpr, With
+	Algorithm, AssignOperator, Base, BinaryOperator, Block, BlockExecutable, Cond, Data, Dir,
+	Executable, Explain, Expr, Fetch, Fetchs, Field, Fields, Group, Groups, Idiom, Index, Kind,
+	Limit, Literal, Lookup, Mock, Order, Output, Param, Part, Permission, Permissions,
+	RecordIdKeyLit, RecordIdLit, Scoring, Split, Splits, Start, TableType, Timeout, TopLevelExpr,
+	With,
 };
 use crate::syn;
 use crate::syn::parser::ParserSettings;

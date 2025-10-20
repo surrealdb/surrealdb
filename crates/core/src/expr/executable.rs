@@ -1,20 +1,20 @@
 use std::fmt::{self, Display};
 
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use crate::surrealism::host::Host;
-use crate::catalog;
 
+use crate::catalog;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Block, Expr, FlowResultExt, Kind, Value};
 use crate::expr::expression::VisitExpression;
+use crate::expr::{Block, Expr, FlowResultExt, Kind, Value};
 use crate::fmt::EscapeKwFreeIdent;
-use crate::surrealism::cache::SurrealismCacheLookup;
 use crate::surrealism::InternalSurrealismController;
+use crate::surrealism::cache::SurrealismCacheLookup;
+use crate::surrealism::host::Host;
 use crate::val::File;
-use anyhow::{bail, Result};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum Executable {
@@ -27,7 +27,9 @@ impl From<catalog::Executable> for Executable {
 	fn from(executable: catalog::Executable) -> Self {
 		match executable {
 			catalog::Executable::Block(block) => Executable::Block(block.into()),
-			catalog::Executable::Surrealism(surrealism) => Executable::Surrealism(surrealism.into()),
+			catalog::Executable::Surrealism(surrealism) => {
+				Executable::Surrealism(surrealism.into())
+			}
 			catalog::Executable::Silo(silo) => Executable::Silo(silo.into()),
 		}
 	}
@@ -37,24 +39,45 @@ impl From<Executable> for catalog::Executable {
 	fn from(executable: Executable) -> Self {
 		match executable {
 			Executable::Block(block) => catalog::Executable::Block(block.into()),
-			Executable::Surrealism(surrealism) => catalog::Executable::Surrealism(surrealism.into()),
+			Executable::Surrealism(surrealism) => {
+				catalog::Executable::Surrealism(surrealism.into())
+			}
 			Executable::Silo(silo) => catalog::Executable::Silo(silo.into()),
 		}
 	}
 }
 impl Executable {
-	pub(crate) async fn signature(&self, stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>, sub: Option<&str>) -> Result<Signature> {
+	pub(crate) async fn signature(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+		sub: Option<&str>,
+	) -> Result<Signature> {
 		match self {
 			Executable::Block(block) => block.signature(stk, ctx, opt, doc, sub).await,
-			Executable::Surrealism(surrealism) => surrealism.signature(stk, ctx, opt, doc, sub).await,
+			Executable::Surrealism(surrealism) => {
+				surrealism.signature(stk, ctx, opt, doc, sub).await
+			}
 			Executable::Silo(silo) => silo.signature(stk, ctx, opt, doc, sub).await,
 		}
 	}
 
-	pub(crate) async fn run(&self, stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>, args: Vec<Value>, sub: Option<&str>) -> Result<Value> {
+	pub(crate) async fn run(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+		args: Vec<Value>,
+		sub: Option<&str>,
+	) -> Result<Value> {
 		match self {
 			Executable::Block(block) => block.run(stk, ctx, opt, doc, args, sub).await,
-			Executable::Surrealism(surrealism) => surrealism.run(stk, ctx, opt, doc, args, sub).await,
+			Executable::Surrealism(surrealism) => {
+				surrealism.run(stk, ctx, opt, doc, args, sub).await
+			}
 			Executable::Silo(silo) => silo.run(stk, ctx, opt, doc, args, sub).await,
 		}
 	}
@@ -116,7 +139,14 @@ impl From<BlockExecutable> for catalog::BlockExecutable {
 }
 
 impl BlockExecutable {
-	pub(crate) async fn signature(&self, _stk: &mut Stk, _ctx: &Context, _opt: &Options, _doc: Option<&CursorDoc>, sub: Option<&str>) -> Result<Signature> {
+	pub(crate) async fn signature(
+		&self,
+		_stk: &mut Stk,
+		_ctx: &Context,
+		_opt: &Options,
+		_doc: Option<&CursorDoc>,
+		sub: Option<&str>,
+	) -> Result<Signature> {
 		if sub.is_some() {
 			bail!("Sub-functions are not supported for block functions");
 		}
@@ -124,10 +154,21 @@ impl BlockExecutable {
 		let args = self.args.iter().map(|(_, kind)| kind.clone()).collect();
 		let returns = self.returns.clone();
 
-		Ok(Signature { args, returns })
+		Ok(Signature {
+			args,
+			returns,
+		})
 	}
 
-	pub(crate) async fn run(&self, stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>, args: Vec<Value>, sub: Option<&str>) -> Result<Value> {
+	pub(crate) async fn run(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+		args: Vec<Value>,
+		sub: Option<&str>,
+	) -> Result<Value> {
 		if sub.is_some() {
 			bail!("Sub-functions are not supported for block functions");
 		}
@@ -139,10 +180,7 @@ impl BlockExecutable {
 		for (val, (name, kind)) in args.into_iter().zip(&self.args) {
 			ctx.add_value(
 				name.clone(),
-				val.coerce_to_kind(kind)
-					.map_err(Error::from)
-					.map_err(anyhow::Error::new)?
-					.into(),
+				val.coerce_to_kind(kind).map_err(Error::from).map_err(anyhow::Error::new)?.into(),
 			);
 		}
 		// Freeze the context
@@ -198,40 +236,77 @@ impl From<SurrealismExecutable> for catalog::SurrealismExecutable {
 }
 
 impl fmt::Display for SurrealismExecutable {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, " AS {}", self.0)
-    }
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, " AS {}", self.0)
+	}
 }
 
 // Nothing to visit, but required by the trait
 impl VisitExpression for SurrealismExecutable {
-    fn visit<F>(&self, _visitor: &mut F)
-    where
-        F: FnMut(&Expr),
-    {}
+	fn visit<F>(&self, _visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+	}
 }
 
 impl SurrealismExecutable {
-    pub(crate) async fn signature(&self, stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>, sub: Option<&str>) -> Result<Signature> {
+	pub(crate) async fn signature(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+		sub: Option<&str>,
+	) -> Result<Signature> {
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let lookup = SurrealismCacheLookup::File(&ns, &db, &self.0);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
-		let controller = runtime.new_controller(Box::new(Host { stk, ctx, opt, doc }))?;
+		let mut controller = runtime.new_controller()?;
+		let mut host = Host {
+			stk,
+			ctx,
+			opt,
+			doc,
+		};
 
-		let args = controller.args(sub.map(String::from)).await?;
-		let returns = controller.returns(sub.map(String::from)).await.map(Some)?;
+		let args =
+			InternalSurrealismController::args(&mut controller, &mut host, sub.map(String::from))?;
+		let returns = InternalSurrealismController::returns(
+			&mut controller,
+			&mut host,
+			sub.map(String::from),
+		)
+		.map(Some)?;
 
-		Ok(Signature { args, returns })
-    }
+		Ok(Signature {
+			args,
+			returns,
+		})
+	}
 
-    pub(crate) async fn run(&self, stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>, args: Vec<Value>, sub: Option<&str>) -> Result<Value> {
-        let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+	pub(crate) async fn run(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+		args: Vec<Value>,
+		sub: Option<&str>,
+	) -> Result<Value> {
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let lookup = SurrealismCacheLookup::File(&ns, &db, &self.0);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
-		let controller = runtime.new_controller(Box::new(Host { stk, ctx, opt, doc }))?;
+		let mut controller = runtime.new_controller()?;
+		let mut host = Host {
+			stk,
+			ctx,
+			opt,
+			doc,
+		};
 
-		controller.run(sub.map(String::from), args).await
-    }
+		InternalSurrealismController::run(&mut controller, &mut host, sub.map(String::from), args)
+	}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -268,36 +343,89 @@ impl From<SiloExecutable> for catalog::SiloExecutable {
 }
 
 impl fmt::Display for SiloExecutable {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, " AS silo::{}::{}<{}.{}.{}>", self.organisation, self.package, self.major, self.minor, self.patch)
-    }
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(
+			f,
+			" AS silo::{}::{}<{}.{}.{}>",
+			self.organisation, self.package, self.major, self.minor, self.patch
+		)
+	}
 }
 
 // Nothing to visit, but required by the trait
 impl VisitExpression for SiloExecutable {
-    fn visit<F>(&self, _visitor: &mut F)
-    where
-        F: FnMut(&Expr),
-    {}
+	fn visit<F>(&self, _visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+	}
 }
 
 impl SiloExecutable {
-    pub(crate) async fn signature(&self, stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>, sub: Option<&str>) -> Result<Signature> {
-		let lookup = SurrealismCacheLookup::Silo(&self.organisation, &self.package, self.major, self.minor, self.patch);
+	pub(crate) async fn signature(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+		sub: Option<&str>,
+	) -> Result<Signature> {
+		let lookup = SurrealismCacheLookup::Silo(
+			&self.organisation,
+			&self.package,
+			self.major,
+			self.minor,
+			self.patch,
+		);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
-		let controller = runtime.new_controller(Box::new(Host { stk, ctx, opt, doc }))?;
+		let mut controller = runtime.new_controller()?;
+		let mut host = Host {
+			stk,
+			ctx,
+			opt,
+			doc,
+		};
 
-		let args = controller.args(sub.map(String::from)).await?;
-		let returns = controller.returns(sub.map(String::from)).await.map(Some)?;
+		let args =
+			InternalSurrealismController::args(&mut controller, &mut host, sub.map(String::from))?;
+		let returns = InternalSurrealismController::returns(
+			&mut controller,
+			&mut host,
+			sub.map(String::from),
+		)
+		.map(Some)?;
 
-		Ok(Signature { args, returns })
-    }
+		Ok(Signature {
+			args,
+			returns,
+		})
+	}
 
-    pub(crate) async fn run(&self, stk: &mut Stk, ctx: &Context, opt: &Options, doc: Option<&CursorDoc>, args: Vec<Value>, sub: Option<&str>) -> Result<Value> {
-		let lookup = SurrealismCacheLookup::Silo(&self.organisation, &self.package, self.major, self.minor, self.patch);
+	pub(crate) async fn run(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+		args: Vec<Value>,
+		sub: Option<&str>,
+	) -> Result<Value> {
+		let lookup = SurrealismCacheLookup::Silo(
+			&self.organisation,
+			&self.package,
+			self.major,
+			self.minor,
+			self.patch,
+		);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
-		let controller = runtime.new_controller(Box::new(Host { stk, ctx, opt, doc }))?;
+		let mut controller = runtime.new_controller()?;
+		let mut host = Host {
+			stk,
+			ctx,
+			opt,
+			doc,
+		};
 
-		controller.run(sub.map(String::from), args).await
-    }
+		InternalSurrealismController::run(&mut controller, &mut host, sub.map(String::from), args)
+	}
 }

@@ -4,5 +4,5 @@ pub mod run;
 pub mod sig;
 
 pub trait SurrealismCommand {
-    fn run(self) -> anyhow::Result<()>;
+	fn run(self) -> anyhow::Result<()>;
 }

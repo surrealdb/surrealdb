@@ -766,37 +766,39 @@ impl MutableContext {
 	}
 
 	pub(crate) async fn get_surrealism_runtime(
-        &self,
-        lookup: SurrealismCacheLookup<'_>,
-    ) -> Result<Arc<Runtime>> {
-        let Some(cache) = self.get_surrealism_cache() else {
-            bail!("Surrealism cache is not available");
-        };
+		&self,
+		lookup: SurrealismCacheLookup<'_>,
+	) -> Result<Arc<Runtime>> {
+		let Some(cache) = self.get_surrealism_cache() else {
+			bail!("Surrealism cache is not available");
+		};
 
-        if let Some(value) = cache.get(&lookup) {
-            return Ok(value.runtime.clone());
-        } else {
-            let SurrealismCacheLookup::File(ns, db, file) = lookup else {
-                bail!("silo lookups are not supported yet");
-            };
-            let bucket = self.get_bucket_store(*ns, *db, &file.bucket).await?;
-            let key = ObjectKey::new(file.key.clone());
-            let surli = bucket
-                .get(&key)
-                .await
-                .map_err(|e| anyhow::anyhow!("failed to get file: {}", e))?;
-            
-            let Some(surli) = surli else {
-                bail!("file not found");
-            };
+		if let Some(value) = cache.get(&lookup) {
+			return Ok(value.runtime.clone());
+		} else {
+			let SurrealismCacheLookup::File(ns, db, file) = lookup else {
+				bail!("silo lookups are not supported yet");
+			};
+			let bucket = self.get_bucket_store(*ns, *db, &file.bucket).await?;
+			let key = ObjectKey::new(file.key.clone());
+			let surli =
+				bucket.get(&key).await.map_err(|e| anyhow::anyhow!("failed to get file: {}", e))?;
 
-            let package = SurrealismPackage::from_reader(std::io::Cursor::new(surli))?;
-            let runtime = Arc::new(Runtime::new(package)?);
+			let Some(surli) = surli else {
+				bail!("file not found");
+			};
 
-            cache.insert(lookup.into(), SurrealismCacheValue { runtime: runtime.clone() });
-            Ok(runtime)
-        }
-    }
+			let package = SurrealismPackage::from_reader(std::io::Cursor::new(surli))?;
+			let runtime = Arc::new(Runtime::new(package)?);
+			cache.insert(
+				lookup.into(),
+				SurrealismCacheValue {
+					runtime: runtime.clone(),
+				},
+			);
+			Ok(runtime)
+		}
+	}
 }
 
 #[cfg(test)]
