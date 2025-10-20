@@ -67,7 +67,7 @@ impl Document {
 						return Err(IgnoreError::Error(e));
 					}
 					let Ok(Error::IndexExists {
-						thing,
+						record: thing,
 						..
 					}) = e.downcast()
 					else {
@@ -95,7 +95,7 @@ impl Document {
 						return Err(IgnoreError::Error(e));
 					}
 					let Ok(Error::RecordExists {
-						thing,
+						record: thing,
 						..
 					}) = e.downcast()
 					else {

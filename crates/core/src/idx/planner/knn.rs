@@ -24,10 +24,10 @@ impl KnnPriorityList {
 		})))
 	}
 
-	pub(super) async fn add(&self, dist: Number, thing: &RecordId) {
+	pub(super) async fn add(&self, dist: Number, record: &RecordId) {
 		let mut i = self.0.lock().await;
 		if i.check_add(&dist) {
-			i.add(dist, thing);
+			i.add(dist, record);
 		}
 		drop(i);
 	}
@@ -135,21 +135,21 @@ impl From<std::collections::HashMap<String, KnnBruteForceResult>> for KnnBruteFo
 	}
 }
 impl KnnBruteForceResults {
-	pub(super) fn contains(&self, exp: &Expr, thg: &RecordId) -> bool {
-		if let Some(result) = self.0.get(thg.table.as_str()) {
+	pub(super) fn contains(&self, exp: &Expr, record: &RecordId) -> bool {
+		if let Some(result) = self.0.get(record.table.as_str()) {
 			if let Some(&pos) = result.exp.get(exp) {
-				if let Some(things) = result.res.get(pos) {
-					return things.contains_key(thg);
+				if let Some(records) = result.res.get(pos) {
+					return records.contains_key(record);
 				}
 			}
 		}
 		false
 	}
 
-	pub(crate) fn get_dist(&self, pos: usize, thg: &RecordId) -> Option<Number> {
-		if let Some(result) = self.0.get(thg.table.as_str()) {
-			if let Some(things) = result.res.get(pos) {
-				return things.get(thg).copied();
+	pub(crate) fn get_dist(&self, pos: usize, record: &RecordId) -> Option<Number> {
+		if let Some(result) = self.0.get(record.table.as_str()) {
+			if let Some(records) = result.res.get(pos) {
+				return records.get(record).copied();
 			}
 		}
 		None

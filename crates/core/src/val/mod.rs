@@ -172,7 +172,7 @@ impl Value {
 		matches!(self, Value::Number(Number::Decimal(_)))
 	}
 
-	/// Check if this Value is a Thing of a specific type
+	/// Check if this Value is a RecordId of a specific type
 	pub fn is_record_type(&self, types: &[String]) -> bool {
 		match self {
 			Value::RecordId(v) => v.is_table_type(types),
@@ -238,9 +238,6 @@ impl Value {
 	/// This function is not fully implement for all variants, make sure you
 	/// don't accidentally use it where it can return an invalid value.
 	pub fn kind_of(&self) -> &'static str {
-		// TODO: Look at this function, there are a whole bunch of options for which
-		// this returns "incorrect type" which might sneak into the results where it
-		// shouldn.t
 		match self {
 			Self::None => "none",
 			Self::Null => "null",
@@ -266,8 +263,7 @@ impl Value {
 			Self::File(_) => "file",
 			Self::Bytes(_) => "bytes",
 			Self::Range(_) => "range",
-			Self::RecordId(_) => "thing",
-			// TODO: Dubious types
+			Self::RecordId(_) => "record",
 			Self::Table(_) => "table",
 		}
 	}
@@ -1343,7 +1339,7 @@ mod tests {
 			PublicValue::Number(PublicNumber::Int(111)),
 		])),
 	)]
-	#[case::thing(
+	#[case::record_id(
 		PublicValue::RecordId(PublicRecordId::new("foo", PublicRecordIdKey::String("bar".into()))) ,
 		json!("foo:bar"),
 		PublicValue::RecordId(PublicRecordId::new("foo", PublicRecordIdKey::String("bar".into()))) ,

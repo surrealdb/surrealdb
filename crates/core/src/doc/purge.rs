@@ -117,14 +117,14 @@ impl Document {
 							ReferenceDeleteStrategy::Ignore => (),
 							// Reject the delete operation, as indicated by the reference
 							ReferenceDeleteStrategy::Reject => {
-								let thing = RecordId {
+								let record = RecordId {
 									table: ref_key.ft.into_owned(),
 									key: ref_key.fk.into_owned(),
 								};
 
 								bail!(Error::DeleteRejectedByReference(
 									rid.to_string(),
-									thing.to_string(),
+									record.to_string(),
 								));
 							}
 							// Delete the remote record which referenced this record
@@ -151,7 +151,7 @@ impl Document {
 							}
 							// Delete only the reference on the remote record
 							ReferenceDeleteStrategy::Unset => {
-								let thing = RecordId {
+								let record = RecordId {
 									table: ref_key.ft.into_owned(),
 									key: ref_key.fk.into_owned(),
 								};
@@ -175,7 +175,7 @@ impl Document {
 								// Setup the delete statement
 								let stm = UpdateStatement {
 									what: vec![Expr::Literal(Literal::RecordId(
-										thing.into_literal(),
+										record.into_literal(),
 									))],
 									data: Some(data),
 									..UpdateStatement::default()

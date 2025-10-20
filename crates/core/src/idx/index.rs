@@ -240,7 +240,7 @@ impl<'a> IndexOperation<'a> {
 	/// the number of indexed fields.
 	fn err_index_exists(&self, rid: RecordId, mut n: Array) -> Result<()> {
 		bail!(Error::IndexExists {
-			thing: rid,
+			record: rid,
 			index: self.ix.name.to_string(),
 			value: match n.0.len() {
 				1 => n.0.remove(0).to_string(),
