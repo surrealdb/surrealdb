@@ -7,7 +7,7 @@ use std::sync::{Arc, OnceLock};
 
 use surrealdb_types::{self, SurrealValue, Value, Variables};
 
-use crate::opt::auth::{Credentials, Jwt};
+use crate::opt::auth::{Credentials, Token};
 use crate::opt::{IntoEndpoint, IntoExportDestination, WaitFor, auth};
 use crate::{Connect, Connection, OnceLockExt, Surreal};
 
@@ -563,7 +563,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn authenticate(&'_ self, token: impl Into<Jwt>) -> Authenticate<'_, C> {
+	pub fn authenticate(&'_ self, token: impl Into<Token>) -> Authenticate<'_, C> {
 		Authenticate {
 			client: Cow::Borrowed(self),
 			token: token.into(),
