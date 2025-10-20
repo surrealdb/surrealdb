@@ -90,7 +90,7 @@ impl fmt::Display for SetStatement {
 }
 
 impl ToSql for SetStatement {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
 		write_sql!(f, "{}", self)
 	}
 }

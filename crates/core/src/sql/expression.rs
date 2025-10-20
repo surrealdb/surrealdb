@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::fmt::{EscapeIdent, Pretty};
+use crate::fmt::{EscapeIdent};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::operator::BindingPower;
 use crate::sql::statements::{
@@ -464,6 +464,12 @@ impl fmt::Display for Expr {
 			Expr::Let(s) => write!(f, "{s}"),
 			Expr::Sleep(s) => write!(f, "{s}"),
 		}
+	}
+}
+
+impl surrealdb_types::ToSql for Expr {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
+		surrealdb_types::write_sql!(f, "{}", self)
 	}
 }
 

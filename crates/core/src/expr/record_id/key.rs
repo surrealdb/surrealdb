@@ -10,7 +10,7 @@ use crate::doc::CursorDoc;
 use crate::expr::expression::VisitExpression;
 use crate::expr::literal::ObjectEntry;
 use crate::expr::{Expr, FlowResultExt as _, Kind, KindLiteral, RecordIdKeyRangeLit};
-use crate::fmt::{EscapeKey, EscapeRid, Fmt, Pretty, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKey, EscapeRid, Fmt};
 use crate::val::{Array, Object, RecordIdKey, Uuid};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

@@ -1,5 +1,7 @@
 use std::fmt::{self, Display};
 
+use surrealdb_types::{ToSql, write_sql};
+
 use super::DefineKind;
 use crate::fmt::Fmt;
 use crate::sql::Expr;
@@ -35,6 +37,12 @@ impl Display for DefineEventStatement {
 			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for DefineEventStatement {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
+		write_sql!(f, "{}", self)
 	}
 }
 

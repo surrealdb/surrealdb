@@ -18,7 +18,7 @@ use crate::err::Error;
 use crate::expr;
 use crate::expr::kind::GeometryKind;
 use crate::expr::statements::info::InfoStructure;
-use crate::fmt::{Pretty, QuoteStr};
+use crate::fmt::QuoteStr;
 use crate::sql::expression::convert_public_value_to_internal;
 
 pub(crate) mod array;
@@ -542,8 +542,12 @@ impl fmt::Display for Value {
 }
 
 impl ToSql for Value {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, pretty: PrettyMode) {
+		if pretty {
+			write_sql!(f, "{:#}", self)
+		} else {
+			write_sql!(f, "{}", self)
+		}
 	}
 }
 

@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::{ToSql, write_sql};
 use uuid::Uuid;
 
 use super::DefineKind;
@@ -20,7 +21,7 @@ use crate::expr::parameterize::expr_to_ident;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::UpdateStatement;
 use crate::expr::{Base, Expr, Idiom, Kind, Literal, Output, View};
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
+use crate::fmt::{EscapeIdent};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::Value;
@@ -316,5 +317,11 @@ impl Display for DefineTableStatement {
 		};
 		write!(f, "{}", self.permissions)?;
 		Ok(())
+	}
+}
+
+impl ToSql for DefineTableStatement {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
+		write_sql!(f, "{}", self)
 	}
 }

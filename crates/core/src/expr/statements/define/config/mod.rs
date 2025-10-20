@@ -5,6 +5,7 @@ use std::fmt::{self, Display};
 use anyhow::{Result, bail};
 use api::ApiConfig;
 use reblessive::tree::Stk;
+use surrealdb_types::{ToSql, write_sql};
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{ConfigDefinition, GraphQLConfig};
@@ -102,5 +103,11 @@ impl Display for ConfigInner {
 				Display::fmt(v, f)
 			}
 		}
+	}
+}
+
+impl ToSql for DefineConfigStatement {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
+		write_sql!(f, "{}", self)
 	}
 }

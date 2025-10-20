@@ -1,5 +1,5 @@
 use revision::revisioned;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{PrettyMode, ToSql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Filter, Tokenizer};
@@ -35,8 +35,8 @@ impl AnalyzerDefinition {
 }
 
 impl ToSql for &AnalyzerDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, pretty: PrettyMode) {
+		self.to_sql_definition().fmt_sql(f, pretty)
 	}
 }
 

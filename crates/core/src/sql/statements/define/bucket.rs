@@ -1,5 +1,7 @@
 use std::fmt::{self, Display};
 
+use surrealdb_types::{ToSql, write_sql};
+
 use super::DefineKind;
 use crate::sql::{Expr, Literal, Permission};
 
@@ -52,6 +54,12 @@ impl Display for DefineBucketStatement {
 		}
 
 		Ok(())
+	}
+}
+
+impl ToSql for DefineBucketStatement {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
+		write_sql!(f, "{}", self)
 	}
 }
 

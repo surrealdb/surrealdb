@@ -46,7 +46,7 @@ pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::regex::Regex;
 pub use self::table::Table;
 pub use self::uuid::Uuid;
-use crate::sql::ToSql;
+use crate::sql::{PrettyMode, ToSql};
 use crate::utils::escape::QuoteStr;
 use crate::{Kind, SurrealValue, write_sql};
 
@@ -677,26 +677,26 @@ impl FromIterator<Value> for Value {
 }
 
 impl ToSql for Value {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, pretty: PrettyMode) {
 		match self {
 			Value::None => f.push_str("NONE"),
 			Value::Null => f.push_str("NULL"),
-			Value::Bool(v) => v.fmt_sql(f),
-			Value::Number(v) => v.fmt_sql(f),
+			Value::Bool(v) => v.fmt_sql(f, pretty),
+			Value::Number(v) => v.fmt_sql(f, pretty),
 			// Value::String(v) => f.push_str(&QuoteStr(v).to_string()),
 			Value::String(v) => write_sql!(f, "{}", QuoteStr(v.as_str())),
-			Value::Duration(v) => v.fmt_sql(f),
-			Value::Datetime(v) => v.fmt_sql(f),
-			Value::Uuid(v) => v.fmt_sql(f),
-			Value::Array(v) => v.fmt_sql(f),
-			Value::Object(v) => v.fmt_sql(f),
-			Value::Geometry(v) => v.fmt_sql(f),
-			Value::Bytes(v) => v.fmt_sql(f),
-			Value::Table(v) => v.fmt_sql(f),
-			Value::RecordId(v) => v.fmt_sql(f),
-			Value::File(v) => v.fmt_sql(f),
-			Value::Range(v) => v.fmt_sql(f),
-			Value::Regex(v) => v.fmt_sql(f),
+			Value::Duration(v) => v.fmt_sql(f, pretty),
+			Value::Datetime(v) => v.fmt_sql(f, pretty),
+			Value::Uuid(v) => v.fmt_sql(f, pretty),
+			Value::Array(v) => v.fmt_sql(f, pretty),
+			Value::Object(v) => v.fmt_sql(f, pretty),
+			Value::Geometry(v) => v.fmt_sql(f, pretty),
+			Value::Bytes(v) => v.fmt_sql(f, pretty),
+			Value::Table(v) => v.fmt_sql(f, pretty),
+			Value::RecordId(v) => v.fmt_sql(f, pretty),
+			Value::File(v) => v.fmt_sql(f, pretty),
+			Value::Range(v) => v.fmt_sql(f, pretty),
+			Value::Regex(v) => v.fmt_sql(f, pretty),
 		}
 	}
 }

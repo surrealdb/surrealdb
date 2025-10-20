@@ -1,7 +1,9 @@
 use std::fmt::{self, Display, Write};
 
+use surrealdb_types::{ToSql, write_sql};
+
 use super::DefineKind;
-use crate::fmt::{is_pretty, pretty_indent};
+
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::{Expr, Kind, Literal, Permissions, TableType, View};
 
@@ -105,6 +107,12 @@ impl Display for DefineTableStatement {
 		};
 		write!(f, "{}", self.permissions)?;
 		Ok(())
+	}
+}
+
+impl ToSql for DefineTableStatement {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
+		write_sql!(f, "{}", self)
 	}
 }
 

@@ -5,6 +5,7 @@ use argon2::password_hash::{PasswordHasher, SaltString};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
+use surrealdb_types::{ToSql, write_sql};
 
 use super::DefineKind;
 use crate::fmt::{EscapeIdent, Fmt, QuoteStr};
@@ -96,6 +97,12 @@ impl Display for DefineUserStatement {
 			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for DefineUserStatement {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
+		write_sql!(f, "{}", self)
 	}
 }
 

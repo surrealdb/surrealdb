@@ -2,7 +2,7 @@ use std::fmt;
 use std::time::Duration;
 
 use revision::revisioned;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{write_sql, PrettyMode, ToSql};
 
 use crate::catalog::schema::base::Base;
 use crate::expr::Expr;
@@ -213,7 +213,7 @@ impl fmt::Display for Algorithm {
 }
 
 impl ToSql for Algorithm {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
 		write_sql!(f, "{}", self)
 	}
 }
@@ -351,8 +351,8 @@ impl InfoStructure for AccessDefinition {
 }
 
 impl ToSql for AccessDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, pretty: PrettyMode) {
+		self.to_sql_definition().fmt_sql(f, pretty)
 	}
 }
 

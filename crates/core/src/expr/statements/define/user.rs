@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use anyhow::{Result, bail};
 use argon2::Argon2;
 use argon2::password_hash::{PasswordHasher, SaltString};
@@ -228,53 +226,48 @@ impl DefineUserStatement {
 	}
 }
 
-impl Display for DefineUserStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE USER")?;
+impl ToSql for DefineUserStatement {
+	fn fmt_sql(&self, f: &mut String, pretty: PrettyMode) {
+		write_sql!(f, "DEFINE USER");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => write_sql!(f, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, " IF NOT EXISTS"),
 		}
-		write!(
+		write_sql!(f, " ");
+		self.name.fmt_sql(f, pretty);
+		write_sql!(
 			f,
-			" {} ON {} PASSHASH {} ROLES {}",
-			self.name,
+			" ON {} PASSHASH {} ROLES {}",
 			self.base,
 			QuoteStr(&self.hash),
 			Fmt::comma_separated(
 				&self.roles.iter().map(|r| r.to_string().to_uppercase()).collect::<Vec<_>>()
 			),
-		)?;
+		);
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible
 		// None values need to be printed, as they are different from the default values
-		write!(f, " DURATION")?;
-		write!(
+		write_sql!(f, " DURATION");
+		write_sql!(
 			f,
 			" FOR TOKEN {},",
 			match self.duration.token {
 				Some(ref dur) => format!("{}", dur),
 				None => "NONE".to_string(),
 			}
-		)?;
-		write!(
+		);
+		write_sql!(
 			f,
 			" FOR SESSION {}",
 			match self.duration.session {
 				Some(ref dur) => format!("{}", dur),
 				None => "NONE".to_string(),
 			}
-		)?;
+		);
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?
+			write_sql!(f, " COMMENT ");
+			comment.fmt_sql(f, pretty);
 		}
-		Ok(())
-	}
-}
-
-impl ToSql for DefineUserStatement {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
 	}
 }

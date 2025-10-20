@@ -5,7 +5,7 @@ use hex;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
+use crate::sql::{PrettyMode, ToSql};
 use crate::write_sql;
 
 /// Represents binary data in SurrealDB
@@ -66,13 +66,13 @@ impl Deref for Bytes {
 
 impl Display for Bytes {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		write!(f, "b\"{}\"", hex::encode_upper(&self.0))
+		write!(f, "{}", hex::encode_upper(&self.0))
 	}
 }
 
 impl ToSql for crate::Bytes {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
+		write_sql!(f, "b\"{}\"", hex::encode_upper(&self.0))
 	}
 }
 

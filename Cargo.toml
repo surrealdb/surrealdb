@@ -14,7 +14,7 @@ homepage = "https://github.com/surrealdb/surrealdb"
 keywords = [
     "database",
     "embedded-database",
-    "key-value",
+"key-value",
     "key-value-store",
     "kv-store",
 ]

@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use surrealdb_types::ToSql;
+use surrealdb_types::{ToSql, write_sql};
 use uuid::Uuid;
 
 use super::DefineKind;
@@ -211,5 +211,11 @@ pub(in crate::expr::statements) async fn run_indexing(
 		rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?
 	} else {
 		Ok(())
+	}
+}
+
+impl ToSql for DefineIndexStatement {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
+		write_sql!(f, "{}", self)
 	}
 }

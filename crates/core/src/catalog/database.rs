@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{PrettyMode, ToSql};
 
 use crate::catalog::NamespaceId;
 use crate::expr::ChangeFeed;
@@ -90,8 +90,8 @@ impl DatabaseDefinition {
 }
 
 impl ToSql for DatabaseDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, pretty: PrettyMode) {
+		self.to_sql_definition().fmt_sql(f, pretty)
 	}
 }
 

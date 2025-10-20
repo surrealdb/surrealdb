@@ -5,6 +5,7 @@ use std::fmt::{self, Display};
 
 use api::ApiConfig;
 use graphql::GraphQLConfig;
+use surrealdb_types::{ToSql, write_sql};
 
 use super::DefineKind;
 
@@ -64,6 +65,18 @@ impl Display for ConfigInner {
 				Display::fmt(v, f)
 			}
 		}
+	}
+}
+
+impl ToSql for DefineConfigStatement {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
+		write_sql!(f, "{}", self)
+	}
+}
+
+impl ToSql for ConfigInner {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
+		write_sql!(f, "{}", self)
 	}
 }
 

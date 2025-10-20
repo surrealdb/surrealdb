@@ -1,9 +1,11 @@
 use std::fmt::{self, Display};
 
+use surrealdb_types::{ToSql, write_sql};
+
 use super::DefineKind;
 use super::config::api::ApiConfig;
 use crate::catalog::ApiMethod;
-use crate::fmt::{Fmt, pretty_indent};
+use crate::fmt::{Fmt};
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -64,6 +66,12 @@ impl Display for DefineApiStatement {
 
 		drop(indent);
 		Ok(())
+	}
+}
+
+impl ToSql for DefineApiStatement {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
+		write_sql!(f, "{}", self)
 	}
 }
 

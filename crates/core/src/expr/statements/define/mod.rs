@@ -15,8 +15,6 @@ mod sequence;
 mod table;
 mod user;
 
-use std::fmt::{self, Display};
-
 pub(crate) use access::DefineAccessStatement;
 pub(crate) use analyzer::DefineAnalyzerStatement;
 use anyhow::Result;
@@ -128,25 +126,32 @@ impl VisitExpression for DefineStatement {
 	}
 }
 
-impl Display for DefineStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl std::fmt::Display for DefineStatement {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		use surrealdb_types::ToSql;
+		write!(f, "{}", self.to_sql())
+	}
+}
+
+impl surrealdb_types::ToSql for DefineStatement {
+	fn fmt_sql(&self, f: &mut String, pretty: PrettyMode) {
 		match self {
-			Self::Namespace(v) => Display::fmt(v, f),
-			Self::Database(v) => Display::fmt(v, f),
-			Self::Function(v) => Display::fmt(v, f),
-			Self::User(v) => Display::fmt(v, f),
-			Self::Param(v) => Display::fmt(v, f),
-			Self::Table(v) => Display::fmt(v, f),
-			Self::Event(v) => Display::fmt(v, f),
-			Self::Field(v) => Display::fmt(v, f),
-			Self::Index(v) => Display::fmt(v, f),
-			Self::Analyzer(v) => Display::fmt(v, f),
-			Self::Model(v) => Display::fmt(v, f),
-			Self::Access(v) => Display::fmt(v, f),
-			Self::Config(v) => Display::fmt(v, f),
-			Self::Api(v) => Display::fmt(v, f),
-			Self::Bucket(v) => Display::fmt(v, f),
-			Self::Sequence(v) => Display::fmt(v, f),
+			Self::Namespace(v) => v.fmt_sql(f, pretty),
+			Self::Database(v) => v.fmt_sql(f, pretty),
+			Self::Function(v) => v.fmt_sql(f, pretty),
+			Self::User(v) => v.fmt_sql(f, pretty),
+			Self::Param(v) => v.fmt_sql(f, pretty),
+			Self::Table(v) => v.fmt_sql(f, pretty),
+			Self::Event(v) => v.fmt_sql(f, pretty),
+			Self::Field(v) => v.fmt_sql(f, pretty),
+			Self::Index(v) => v.fmt_sql(f, pretty),
+			Self::Analyzer(v) => v.fmt_sql(f, pretty),
+			Self::Model(v) => v.fmt_sql(f, pretty),
+			Self::Access(v) => v.fmt_sql(f, pretty),
+			Self::Config(v) => v.fmt_sql(f, pretty),
+			Self::Api(v) => v.fmt_sql(f, pretty),
+			Self::Bucket(v) => v.fmt_sql(f, pretty),
+			Self::Sequence(v) => v.fmt_sql(f, pretty),
 		}
 	}
 }

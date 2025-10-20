@@ -3,6 +3,7 @@ use std::ops::Deref;
 
 use serde::{Deserialize, Serialize};
 
+use crate::sql::PrettyMode;
 use crate::utils::escape::EscapeSqonIdent;
 use crate::{ToSql, write_sql};
 
@@ -42,7 +43,7 @@ impl Display for Table {
 }
 
 impl ToSql for Table {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
 		write_sql!(f, "{}", EscapeSqonIdent(&self.0))
 	}
 }

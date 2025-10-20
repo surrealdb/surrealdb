@@ -1,7 +1,9 @@
 use std::fmt::{self, Display, Write};
 
+use surrealdb_types::{ToSql, write_sql};
+
 use super::DefineKind;
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
+use crate::fmt::{EscapeIdent};
 use crate::sql::{Expr, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -34,6 +36,12 @@ impl Display for DefineParamStatement {
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
 		Ok(())
+	}
+}
+
+impl ToSql for DefineParamStatement {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
+		write_sql!(f, "{}", self)
 	}
 }
 

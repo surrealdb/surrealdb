@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use revision::revisioned;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{PrettyMode, ToSql};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId};
@@ -64,8 +64,8 @@ impl InfoStructure for SubscriptionDefinition {
 }
 
 impl ToSql for &SubscriptionDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, pretty: PrettyMode) {
+		self.to_sql_definition().fmt_sql(f, pretty)
 	}
 }
 

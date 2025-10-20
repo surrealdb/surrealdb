@@ -31,7 +31,7 @@ pub struct SqlCommandArguments {
 	level: LevelSelectionArguments,
 	/// Whether database responses should be pretty printed
 	#[arg(long)]
-	pretty: bool,
+	pretty: PrettyMode,
 	/// Whether to emit results in JSON
 	#[arg(long)]
 	json: bool,
@@ -264,7 +264,7 @@ pub async fn init(
 }
 
 fn process(
-	pretty: bool,
+	pretty: PrettyMode,
 	json: bool,
 	res: surrealdb::Result<WithStats<IndexedResults>>,
 ) -> Result<String> {

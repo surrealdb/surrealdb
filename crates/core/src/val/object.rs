@@ -10,7 +10,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
 use crate::expr::literal::ObjectEntry;
-use crate::fmt::{EscapeKey, Fmt, Pretty, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKey, Fmt};
 use crate::val::{IndexFormat, RecordId, Value};
 
 /// Invariant: Keys never contain NUL bytes.

@@ -9,6 +9,7 @@ use std::fmt::{self, Display, Formatter, Write};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 pub use escape::{EscapeIdent, EscapeKey, EscapeKwFreeIdent, EscapeRid, QuoteStr};
+use surrealdb_types::{write_sql, ToSql, PrettyMode};
 
 /// Implements fmt::Display by calling formatter on contents.
 pub(crate) struct Fmt<T, F> {
@@ -16,7 +17,7 @@ pub(crate) struct Fmt<T, F> {
 	formatter: F,
 }
 
-impl<T, F: Fn(T, &mut Formatter) -> fmt::Result> Fmt<T, F> {
+impl<T, F: Fn(T, &mut String, bool)> Fmt<T, F> {
 	pub(crate) fn new(t: T, formatter: F) -> Self {
 		Self {
 			contents: Cell::new(Some(t)),
@@ -25,15 +26,15 @@ impl<T, F: Fn(T, &mut Formatter) -> fmt::Result> Fmt<T, F> {
 	}
 }
 
-impl<T, F: Fn(T, &mut Formatter) -> fmt::Result> Display for Fmt<T, F> {
+impl<T, F: Fn(T, &mut String, bool)> ToSql for Fmt<T, F> {
 	/// fmt is single-use only.
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+	fn fmt_sql(&self, f: &mut String, pretty: PrettyMode) {
 		let contents = self.contents.replace(None).expect("only call Fmt::fmt once");
-		(self.formatter)(contents, f)
+		(self.formatter)(contents, f, pretty)
 	}
 }
 
-impl<I: IntoIterator<Item = T>, T: Display> Fmt<I, fn(I, &mut Formatter) -> fmt::Result> {
+impl<I: IntoIterator<Item = T>, T: ToSql> Fmt<I, fn(I, &mut String, bool)> {
 	/// Formats values with a comma and a space separating them.
 	pub(crate) fn comma_separated(into_iter: I) -> Self {
 		Self::new(into_iter, fmt_comma_separated)
@@ -61,231 +62,181 @@ impl<I: IntoIterator<Item = T>, T: Display> Fmt<I, fn(I, &mut Formatter) -> fmt:
 	}
 }
 
-fn fmt_comma_separated<T: Display, I: IntoIterator<Item = T>>(
+fn fmt_comma_separated<T: ToSql, I: IntoIterator<Item = T>>(
 	into_iter: I,
-	f: &mut Formatter,
-) -> fmt::Result {
+	f: &mut String,
+	pretty: PrettyMode,
+) {
 	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
-			f.write_str(", ")?;
+			f.push_str(", ");
 		}
-		Display::fmt(&v, f)?;
+		v.fmt_sql(f, pretty);
 	}
-	Ok(())
 }
 
-fn fmt_verbar_separated<T: Display, I: IntoIterator<Item = T>>(
+fn fmt_verbar_separated<T: ToSql, I: IntoIterator<Item = T>>(
 	into_iter: I,
-	f: &mut Formatter,
-) -> fmt::Result {
+	f: &mut String,
+	pretty: PrettyMode,
+) {
 	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
-			f.write_str(" | ")?;
+			f.push_str(" | ");
 		}
-		Display::fmt(&v, f)?;
+		v.fmt_sql(f, pretty);
 	}
-	Ok(())
 }
 
-fn fmt_pretty_comma_separated<T: Display, I: IntoIterator<Item = T>>(
+fn fmt_pretty_comma_separated<T: ToSql, I: IntoIterator<Item = T>>(
 	into_iter: I,
-	f: &mut Formatter,
-) -> fmt::Result {
+	f: &mut String,
+	pretty: PrettyMode,
+) {
 	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
-			if is_pretty() {
-				f.write_char(',')?;
+			if pretty {
+				f.push(',');
 				pretty_sequence_item();
 			} else {
-				f.write_str(", ")?;
+				f.push_str(", ");
 			}
 		}
-		Display::fmt(&v, f)?;
+		v.fmt_sql(f, pretty);
 	}
-	Ok(())
 }
 
-fn fmt_one_line_separated<T: Display, I: IntoIterator<Item = T>>(
+fn fmt_one_line_separated<T: ToSql, I: IntoIterator<Item = T>>(
 	into_iter: I,
-	f: &mut Formatter,
-) -> fmt::Result {
+	f: &mut String,
+	pretty: PrettyMode,
+) {
 	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
-			if is_pretty() {
+			if pretty {
 				pretty_sequence_item();
 			} else {
-				f.write_char('\n')?;
+				f.push('\n');
 			}
 		}
-		Display::fmt(&v, f)?;
+		v.fmt_sql(f, pretty);
 	}
-	Ok(())
 }
 
-fn fmt_two_line_separated<T: Display, I: IntoIterator<Item = T>>(
+fn fmt_two_line_separated<T: ToSql, I: IntoIterator<Item = T>>(
 	into_iter: I,
-	f: &mut Formatter,
-) -> fmt::Result {
+	f: &mut String,
+	pretty: PrettyMode,
+) {
 	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
-			if is_pretty() {
-				f.write_char('\n')?;
+			if pretty {
+				f.push('\n');
 				pretty_sequence_item();
 			} else {
-				f.write_char('\n')?;
-				f.write_char('\n')?;
+				f.push('\n');
+				f.push('\n');
 			}
 		}
-		Display::fmt(&v, f)?;
+		v.fmt_sql(f, pretty);
 	}
-	Ok(())
 }
 
 /// Creates a formatting function that joins iterators with an arbitrary
 /// separator.
-pub fn fmt_separated_by<T: Display, I: IntoIterator<Item = T>>(
+pub fn fmt_separated_by<T: ToSql, I: IntoIterator<Item = T>>(
 	separator: impl Display,
-) -> impl Fn(I, &mut Formatter) -> fmt::Result {
-	move |into_iter: I, f: &mut Formatter| {
+) -> impl Fn(I, &mut String, bool)  {
+	move |into_iter: I, f: &mut String, pretty: PrettyMode| {
 		for (i, v) in into_iter.into_iter().enumerate() {
 			if i > 0 {
-				Display::fmt(&separator, f)?;
+				write_sql!(f, "{}", separator);
 			}
-			Display::fmt(&v, f)?;
-		}
-		Ok(())
-	}
-}
-
-thread_local! {
-	// Avoid `RefCell`/`UnsafeCell` by using atomic types. Access is synchronized due to
-	// `thread_local!` so all accesses can use `Ordering::Relaxed`.
-
-	/// Whether pretty-printing.
-	static PRETTY: AtomicBool = const {AtomicBool::new(false)};
-	/// The current level of indentation, in units of tabs.
-	static INDENT: AtomicU32 = const{AtomicU32::new(0)};
-	/// Whether the next formatting action should be preceded by a newline and indentation.
-	static NEW_LINE: AtomicBool = const{AtomicBool::new(false)};
-}
-
-/// An adapter that, if enabled, adds pretty print formatting.
-pub(crate) struct Pretty<W: std::fmt::Write> {
-	inner: W,
-	/// This is the active pretty printer, responsible for injecting formatting.
-	active: bool,
-}
-
-impl<W: std::fmt::Write> Pretty<W> {
-	#[expect(unused)]
-	pub fn new(inner: W) -> Self {
-		Self::conditional(inner, true)
-	}
-
-	pub fn conditional(inner: W, enable: bool) -> Self {
-		let pretty_started_here = enable
-			&& PRETTY.with(|pretty| {
-				// Evaluates to true if PRETTY was false and is now true.
-				pretty.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed).is_ok()
-			});
-		if pretty_started_here {
-			// Clean slate.
-			NEW_LINE.with(|new_line| new_line.store(false, Ordering::Relaxed));
-			INDENT.with(|indent| indent.store(0, Ordering::Relaxed));
-		}
-		Self {
-			inner,
-			// Don't want multiple active pretty printers, although they wouldn't necessarily
-			// misbehave.
-			active: pretty_started_here,
+			v.fmt_sql(f, pretty);
 		}
 	}
 }
 
-impl<'a, 'b> From<&'a mut Formatter<'b>> for Pretty<&'a mut Formatter<'b>> {
-	fn from(f: &'a mut Formatter<'b>) -> Self {
-		Self::conditional(f, f.alternate())
-	}
-}
+// thread_local! {
+// 	// Avoid `RefCell`/`UnsafeCell` by using atomic types. Access is synchronized due to
+// 	// `thread_local!` so all accesses can use `Ordering::Relaxed`.
 
-impl<W: std::fmt::Write> Drop for Pretty<W> {
-	fn drop(&mut self) {
-		if self.active {
-			PRETTY.with(|pretty| {
-				debug_assert!(pretty.load(Ordering::Relaxed), "pretty status changed unexpectedly");
-				pretty.store(false, Ordering::Relaxed);
-			});
-		}
-	}
-}
+// 	/// Whether pretty-printing.
+// 	static PRETTY: AtomicBool = const {AtomicBool::new(false)};
+// 	/// The current level of indentation, in units of tabs.
+// 	static INDENT: AtomicU32 = const{AtomicU32::new(0)};
+// 	/// Whether the next formatting action should be preceded by a newline and indentation.
+// 	static NEW_LINE: AtomicBool = const{AtomicBool::new(false)};
+// }
 
-/// Returns whether pretty printing is in effect.
-pub(crate) fn is_pretty() -> bool {
-	PRETTY.with(|pretty| pretty.load(Ordering::Relaxed))
-}
 
-/// If pretty printing is in effect, increments the indentation level (until the
-/// return value is dropped).
-#[must_use = "hold for the span of the indent, then drop"]
-pub(crate) fn pretty_indent() -> PrettyGuard {
-	PrettyGuard::new(1)
-}
+// /// Returns whether pretty printing is in effect.
+// pub(crate) fn is_pretty() -> bool {
+// 	PRETTY.with(|pretty| pretty.load(Ordering::Relaxed))
+// }
 
-/// Marks the end of an item in the sequence, after which indentation will
-/// follow if pretty printing is in effect.
-pub(crate) fn pretty_sequence_item() {
-	// List items need a new line, but no additional indentation.
-	NEW_LINE.with(|new_line| new_line.store(true, Ordering::Relaxed));
-}
+// /// If pretty printing is in effect, increments the indentation level (until the
+// /// return value is dropped).
+// #[must_use = "hold for the span of the indent, then drop"]
+// pub(crate) fn pretty_indent() -> PrettyGuard {
+// 	PrettyGuard::new(1)
+// }
 
-/// When dropped, applies the opposite increment to the current indentation
-/// level.
-pub(crate) struct PrettyGuard {
-	increment: i8,
-}
+// /// Marks the end of an item in the sequence, after which indentation will
+// /// follow if pretty printing is in effect.
+// pub(crate) fn pretty_sequence_item() {
+// 	// List items need a new line, but no additional indentation.
+// 	NEW_LINE.with(|new_line| new_line.store(true, Ordering::Relaxed));
+// }
 
-impl PrettyGuard {
-	fn new(increment: i8) -> Self {
-		Self::raw(increment);
-		PrettyGuard {
-			increment,
-		}
-	}
+// /// When dropped, applies the opposite increment to the current indentation
+// /// level.
+// pub(crate) struct PrettyGuard {
+// 	increment: i8,
+// }
 
-	fn raw(increment: i8) {
-		INDENT.with(|indent| {
-			// Equivalent to `indent += increment` if signed numbers could be added to
-			// unsigned numbers in stable, atomic Rust.
-			if increment >= 0 {
-				indent.fetch_add(increment as u32, Ordering::Relaxed);
-			} else {
-				indent.fetch_sub(increment.unsigned_abs() as u32, Ordering::Relaxed);
-			}
-		});
-		NEW_LINE.with(|new_line| new_line.store(true, Ordering::Relaxed));
-	}
-}
+// impl PrettyGuard {
+// 	fn new(increment: i8) -> Self {
+// 		Self::raw(increment);
+// 		PrettyGuard {
+// 			increment,
+// 		}
+// 	}
 
-impl Drop for PrettyGuard {
-	fn drop(&mut self) {
-		Self::raw(-self.increment)
-	}
-}
+// 	fn raw(increment: i8) {
+// 		INDENT.with(|indent| {
+// 			// Equivalent to `indent += increment` if signed numbers could be added to
+// 			// unsigned numbers in stable, atomic Rust.
+// 			if increment >= 0 {
+// 				indent.fetch_add(increment as u32, Ordering::Relaxed);
+// 			} else {
+// 				indent.fetch_sub(increment.unsigned_abs() as u32, Ordering::Relaxed);
+// 			}
+// 		});
+// 		NEW_LINE.with(|new_line| new_line.store(true, Ordering::Relaxed));
+// 	}
+// }
 
-impl<W: std::fmt::Write> std::fmt::Write for Pretty<W> {
-	fn write_str(&mut self, s: &str) -> std::fmt::Result {
-		if self.active && NEW_LINE.with(|new_line| new_line.swap(false, Ordering::Relaxed)) {
-			// Newline.
-			self.inner.write_char('\n')?;
-			for _ in 0..INDENT.with(|indent| indent.load(Ordering::Relaxed)) {
-				// One level of indentation.
-				self.inner.write_char('\t')?;
-			}
-		}
-		// What we were asked to write.
-		self.inner.write_str(s)
-	}
-}
+// impl Drop for PrettyGuard {
+// 	fn drop(&mut self) {
+// 		Self::raw(-self.increment)
+// 	}
+// }
+
+// impl<W: std::fmt::Write> std::fmt::Write for Pretty<W> {
+// 	fn write_str(&mut self, s: &str) -> std::fmt::Result {
+// 		if self.active && NEW_LINE.with(|new_line| new_line.swap(false, Ordering::Relaxed)) {
+// 			// Newline.
+// 			self.inner.write_char('\n')?;
+// 			for _ in 0..INDENT.with(|indent| indent.load(Ordering::Relaxed)) {
+// 				// One level of indentation.
+// 				self.inner.write_char('\t')?;
+// 			}
+// 		}
+// 		// What we were asked to write.
+// 		self.inner.write_str(s)
+// 	}
+// }
 
 #[cfg(test)]
 mod tests {

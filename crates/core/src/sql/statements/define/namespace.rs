@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{ToSql, write_sql};
 
 use super::DefineKind;
 use crate::sql::{Expr, Literal};
@@ -23,19 +23,20 @@ impl Default for DefineNamespaceStatement {
 	}
 }
 
-impl Display for DefineNamespaceStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE NAMESPACE")?;
+impl ToSql for DefineNamespaceStatement {
+	fn fmt_sql(&self, f: &mut String, pretty: PrettyMode) {
+		write_sql!(f, "DEFINE NAMESPACE");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => write_sql!(f, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, " IF NOT EXISTS"),
 		}
-		write!(f, " {}", self.name)?;
+		write_sql!(f, " ");
+		self.name.fmt_sql(f, pretty);
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+			write_sql!(f, " COMMENT ");
+			v.fmt_sql(f, pretty);
 		}
-		Ok(())
 	}
 }
 

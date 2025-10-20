@@ -1,4 +1,4 @@
-use std::fmt;
+use surrealdb_types::{write_sql, ToSql};
 
 use crate::fmt::Fmt;
 use crate::sql::order::Ordering;
@@ -30,15 +30,18 @@ pub struct SelectStatement {
 	pub tempfiles: bool,
 }
 
-impl fmt::Display for SelectStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "SELECT {}", self.expr)?;
+impl ToSql for SelectStatement {
+	fn fmt_sql(&self, f: &mut String, pretty: PrettyMode) {
+		write_sql!(f, "SELECT {}", self.expr);
 		if !self.omit.is_empty() {
-			write!(f, " OMIT {}", Fmt::comma_separated(self.omit.iter()))?
+			write_sql!(f, " OMIT ");
+			Fmt::comma_separated(self.omit.iter()).fmt_sql(f, pretty);
+
 		}
-		write!(f, " FROM")?;
+
+		f.push_str(" FROM");
 		if self.only {
-			f.write_str(" ONLY")?
+			f.push_str(" ONLY");
 		}
 		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
 		if let Some(ref v) = self.with {

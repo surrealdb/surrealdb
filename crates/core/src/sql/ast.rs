@@ -1,7 +1,9 @@
 use std::fmt::{self, Display};
 
+use surrealdb_types::{write_sql, ToSql};
+
 use crate::expr;
-use crate::fmt::{Fmt, Pretty};
+use crate::fmt::{Fmt};
 use crate::sql::statements::{
 	AccessStatement, KillStatement, LiveStatement, OptionStatement, ShowStatement, UseStatement,
 };
@@ -60,14 +62,23 @@ impl Ast {
 
 impl Display for Ast {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use std::fmt::Write;
-		write!(
-			Pretty::from(f),
-			"{}",
-			&Fmt::one_line_separated(
-				self.expressions.iter().map(|v| Fmt::new(v, |v, f| write!(f, "{v};"))),
-			),
-		)
+		if f.alternate() {
+			write!(f, "{}", self.to_sql_pretty())
+		} else {
+			write!(f, "{}", self.to_sql())
+		}
+	}
+}
+
+impl ToSql for Ast {
+	fn fmt_sql(&self, f: &mut String, pretty: PrettyMode) {
+		Fmt::one_line_separated(
+			self.expressions.iter().map(|v| Fmt::new(v, |v, f, pretty| {
+				v.fmt_sql(f, pretty);
+				f.push(';');
+			})),
+		).fmt_sql(f, pretty)
+		
 	}
 }
 

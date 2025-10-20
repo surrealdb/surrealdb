@@ -11,7 +11,7 @@ use crate::doc::CursorDoc;
 use crate::expr::expression::VisitExpression;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Value};
-use crate::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
+use crate::fmt::{Fmt};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct Block(pub(crate) Vec<Expr>);

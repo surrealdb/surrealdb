@@ -3,6 +3,7 @@ use std::ops::Deref;
 use std::str::FromStr;
 
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
+use surrealdb_types::{write_sql, PrettyMode, ToSql};
 
 use crate::err::Error;
 use crate::expr::Kind;
@@ -70,9 +71,15 @@ impl IntoIterator for Path {
 }
 
 impl Display for Path {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "/")?;
-		Display::fmt(&Fmt::new(self.iter(), fmt_separated_by("/")), f)
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		write!(f, "{}", self.to_sql())
+	}
+}
+
+impl ToSql for Path {
+	fn fmt_sql(&self, f: &mut String, pretty: PrettyMode) {
+		f.push('/');
+		Fmt::new(self.iter(), fmt_separated_by("/")).fmt_sql(f, pretty);
 	}
 }
 
@@ -296,19 +303,31 @@ impl Segment {
 	}
 }
 
+
+
 impl Display for Segment {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			Self::Fixed(v) => write!(f, "{v}"),
-			Self::Dynamic(v, k) => {
-				write!(f, ":{v}")?;
-				if let Some(k) = k {
-					write!(f, "<{k}>")?;
-				}
+		write!(f, "{}", self.to_sql())
+	}
+}
 
-				Ok(())
+impl ToSql for Segment {
+	fn fmt_sql(&self, f: &mut String, pretty: PrettyMode) {
+		match self {
+			Self::Fixed(v) => v.fmt_sql(f, pretty),
+			Self::Dynamic(v, k) => {
+				f.push(':');
+				v.fmt_sql(f, pretty);
+				if let Some(k) = k {
+					f.push('<');
+					k.fmt_sql(f, pretty);
+					f.push('>');
+				}
 			}
-			Self::Rest(v) => write!(f, "*{v}"),
+			Self::Rest(v) => {
+				f.push('*');
+				v.fmt_sql(f, pretty);
+			},
 		}
 	}
 }

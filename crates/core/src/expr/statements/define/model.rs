@@ -2,6 +2,7 @@ use std::fmt::{self, Write};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::{ToSql, write_sql};
 
 use super::DefineKind;
 use crate::catalog::providers::DatabaseProvider;
@@ -12,7 +13,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::expression::VisitExpression;
 use crate::expr::{Base, Expr};
-use crate::fmt::{is_pretty, pretty_indent};
+
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -105,5 +106,11 @@ impl fmt::Display for DefineModelStatement {
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
 		Ok(())
+	}
+}
+
+impl ToSql for DefineModelStatement {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
+		write_sql!(f, "{}", self)
 	}
 }

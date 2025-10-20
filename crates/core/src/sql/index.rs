@@ -282,6 +282,12 @@ impl Display for Index {
 	}
 }
 
+impl surrealdb_types::ToSql for Index {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
+		surrealdb_types::write_sql!(f, "{}", self)
+	}
+}
+
 impl From<VectorType> for crate::catalog::VectorType {
 	fn from(v: VectorType) -> Self {
 		match v {

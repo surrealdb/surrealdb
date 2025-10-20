@@ -6,11 +6,11 @@ use std::str::FromStr;
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;
 use rust_decimal::Decimal;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{write_sql, PrettyMode, ToSql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
-use crate::fmt::{EscapeIdent, EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
+use crate::fmt::{EscapeIdent, EscapeKey, Fmt, QuoteStr};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
 	Regex, Uuid,
@@ -498,7 +498,7 @@ impl Display for Kind {
 }
 
 impl ToSql for Kind {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
 		write_sql!(f, "{}", self)
 	}
 }

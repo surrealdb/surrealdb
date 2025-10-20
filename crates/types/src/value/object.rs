@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
+use crate::sql::{PrettyMode, ToSql};
 use crate::utils::escape::EscapeKey;
 use crate::{SurrealValue, Value, write_sql};
 
@@ -82,7 +82,7 @@ impl Object {
 }
 
 impl ToSql for Object {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, pretty: PrettyMode) {
 		if self.is_empty() {
 			return f.push_str("{  }");
 		}
@@ -91,7 +91,7 @@ impl ToSql for Object {
 
 		for (i, (k, v)) in self.iter().enumerate() {
 			write_sql!(f, "{}: ", EscapeKey(k));
-			v.fmt_sql(f);
+			v.fmt_sql(f, pretty);
 
 			if i < self.len() - 1 {
 				f.push_str(", ");

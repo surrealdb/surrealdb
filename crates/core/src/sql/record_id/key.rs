@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Formatter, Write as _};
 use std::ops::Bound;
 
-use crate::fmt::{EscapeKey, EscapeRid, Fmt, Pretty, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKey, EscapeRid, Fmt};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{Expr, RecordIdKeyRangeLit};
 use crate::types::{PublicRecordIdKey, PublicUuid};

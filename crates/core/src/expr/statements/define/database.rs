@@ -2,6 +2,7 @@ use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::{ToSql, write_sql};
 
 use super::DefineKind;
 use crate::catalog::DatabaseDefinition;
@@ -139,5 +140,11 @@ impl InfoStructure for DefineDatabaseStatement {
 			"name".to_string() => self.name.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.structure(),
 		})
+	}
+}
+
+impl ToSql for DefineDatabaseStatement {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
+		write_sql!(f, "{}", self)
 	}
 }

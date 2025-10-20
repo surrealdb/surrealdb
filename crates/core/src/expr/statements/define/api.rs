@@ -2,6 +2,7 @@ use std::fmt;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::{write_sql, PrettyMode, ToSql};
 
 use super::config::api::ApiConfig;
 use super::{CursorDoc, DefineKind};
@@ -13,7 +14,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::expression::VisitExpression;
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
-use crate::fmt::{Fmt, pretty_indent};
+use crate::fmt::{Fmt};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -153,11 +154,21 @@ impl VisitExpression for ApiAction {
 
 impl fmt::Display for ApiAction {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "FOR {}", Fmt::comma_separated(self.methods.iter()))?;
-		let indent = pretty_indent();
-		write!(f, "{}", &self.config)?;
-		write!(f, " THEN {}", self.action)?;
-		drop(indent);
-		Ok(())
+		if f.alternate() {
+			write!(f, "{}", self.to_sql_pretty())
+		} else {
+			write!(f, "{}", self.to_sql())
+		}
+	}
+}
+
+impl ToSql for DefineApiStatement {
+	fn fmt_sql(&self, f: &mut String, pretty: PrettyMode) {
+		f.push_str("FOR ");
+		Fmt::comma_separated(self.methods.iter()).fmt_sql(f, pretty);
+		let indent = pretty.indent();
+		self.config.fmt_sql(f, indent);
+		f.push_str(" THEN ");
+		self.action.fmt_sql(f, indent);
 	}
 }

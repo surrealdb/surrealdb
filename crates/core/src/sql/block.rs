@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Formatter, Write};
 
-use crate::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
+use crate::fmt::{Fmt};
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

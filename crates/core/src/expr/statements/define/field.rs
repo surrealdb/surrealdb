@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::{ToSql, write_sql};
 use uuid::Uuid;
 
 use super::DefineKind;
@@ -20,7 +21,7 @@ use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::reference::Reference;
 use crate::expr::{Base, Expr, Kind, KindLiteral, Literal, Part, RecordIdKeyLit};
-use crate::fmt::{is_pretty, pretty_indent};
+
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::Value;
@@ -543,5 +544,11 @@ impl Display for DefineFieldStatement {
 		// Additionally, including the permission will cause a parsing error in 3.0.0
 		write!(f, "{:#}", self.permissions)?;
 		Ok(())
+	}
+}
+
+impl ToSql for DefineFieldStatement {
+	fn fmt_sql(&self, f: &mut String, _pretty: PrettyMode) {
+		write_sql!(f, "{}", self)
 	}
 }

@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Write};
 
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
+use crate::fmt::{EscapeIdent};
 use crate::sql::Timeout;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
