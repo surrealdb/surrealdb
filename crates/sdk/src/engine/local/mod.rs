@@ -174,7 +174,7 @@ use surrealdb_core::{
 	iam::{Action, ResourceKind, check::check_ns_db},
 	ml::storage::surml_file::SurMlFile,
 };
-use surrealdb_types::{Notification, ToSql, Value, Variables};
+use surrealdb_types::{Notification, SurrealValue, ToSql, Value, Variables};
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
@@ -189,6 +189,7 @@ use uuid::Uuid;
 use crate::conn::MlExportConfig;
 use crate::conn::{Command, RequestData};
 use crate::opt::IntoEndpoint;
+use crate::opt::auth::{Jwt, Token};
 use crate::{Connect, Result, Surreal};
 
 #[cfg(not(target_family = "wasm"))]
@@ -567,8 +568,11 @@ async fn router(
 				iam::signup::signup(kvs, &mut *session.write().await, credentials.into())
 					.await
 					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
-			let token = signup_data.token.map(Value::String).unwrap_or(Value::None);
-			let result = query_result.finish_with_result(Ok(token));
+			let token = Jwt {
+				access: Token(signup_data.token.unwrap_or_default()),
+				refresh: signup_data.refresh.map(Token),
+			};
+			let result = query_result.finish_with_result(Ok(token.into_value()));
 
 			Ok(vec![result])
 		}

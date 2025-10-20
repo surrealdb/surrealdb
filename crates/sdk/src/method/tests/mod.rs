@@ -14,7 +14,7 @@ use surrealdb_types::Variables;
 use types::{USER, User};
 
 use crate::opt::PatchOp;
-use crate::opt::auth::{Database, Jwt, Namespace, Record, Root};
+use crate::opt::auth::{Database, Jwt, Namespace, Record, Root, Token};
 use crate::{IndexedResults as QueryResponse, Surreal};
 
 static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
@@ -80,7 +80,7 @@ async fn api() {
 		.unwrap();
 
 	// authenticate
-	let _: () = DB.authenticate(Jwt(String::new())).await.unwrap();
+	let _: () = DB.authenticate(Token(String::new())).await.unwrap();
 
 	// query
 	let _: QueryResponse = DB.query("SELECT * FROM user").await.unwrap();

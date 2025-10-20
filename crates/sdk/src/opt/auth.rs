@@ -148,6 +148,12 @@ impl<P: SurrealValue> SurrealValue for Record<P> {
 
 impl<T, P> Credentials<T, Jwt> for Record<P> where P: SurrealValue {}
 
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
+pub struct Jwt {
+	pub access: Token,
+	pub refresh: Option<Token>,
+}
+
 /// A JSON Web Token for authenticating with the server.
 ///
 /// This struct represents a JSON Web Token (JWT) that can be used for
@@ -165,9 +171,9 @@ impl<T, P> Credentials<T, Jwt> for Record<P> where P: SurrealValue {}
 /// * stored in a database with restricted access,
 /// * or encrypted in conjunction with other encryption mechanisms.
 #[derive(Clone, Serialize, Deserialize, SurrealValue)]
-pub struct Jwt(pub(crate) String);
+pub struct Token(pub(crate) String);
 
-impl Jwt {
+impl Token {
 	/// Returns the underlying token string.
 	///
 	/// ⚠️: It is important to note that the token should be handled securely
@@ -185,27 +191,27 @@ impl Jwt {
 	}
 }
 
-impl From<String> for Jwt {
+impl From<String> for Token {
 	fn from(jwt: String) -> Self {
-		Jwt(jwt)
+		Token(jwt)
 	}
 }
 
-impl<'a> From<&'a String> for Jwt {
+impl<'a> From<&'a String> for Token {
 	fn from(jwt: &'a String) -> Self {
-		Jwt(jwt.to_owned())
+		Token(jwt.to_owned())
 	}
 }
 
-impl<'a> From<&'a str> for Jwt {
+impl<'a> From<&'a str> for Token {
 	fn from(jwt: &'a str) -> Self {
-		Jwt(jwt.to_owned())
+		Token(jwt.to_owned())
 	}
 }
 
-impl fmt::Debug for Jwt {
+impl fmt::Debug for Token {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "Jwt(REDACTED)")
+		write!(f, "Token(REDACTED)")
 	}
 }
 
@@ -215,13 +221,13 @@ mod tests {
 
 	#[test]
 	fn as_insecure_token() {
-		let jwt = Jwt("super-long-jwt".to_owned());
+		let jwt = Token("super-long-jwt".to_owned());
 		assert_eq!(jwt.as_insecure_token(), "super-long-jwt");
 	}
 
 	#[test]
 	fn into_insecure_token() {
-		let jwt = Jwt("super-long-jwt".to_owned());
+		let jwt = Token("super-long-jwt".to_owned());
 		assert_eq!(jwt.into_insecure_token(), "super-long-jwt");
 	}
 }

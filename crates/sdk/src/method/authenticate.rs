@@ -3,7 +3,7 @@ use std::future::IntoFuture;
 
 use crate::conn::Command;
 use crate::method::{BoxFuture, OnceLockExt};
-use crate::opt::auth::Jwt;
+use crate::opt::auth::Token;
 use crate::{Connection, Result, Surreal};
 
 /// An authentication future
@@ -11,7 +11,7 @@ use crate::{Connection, Result, Surreal};
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Authenticate<'r, C: Connection> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) token: Jwt,
+	pub(super) token: Token,
 }
 
 impl<'r, Client> IntoFuture for Authenticate<'r, Client>
