@@ -584,9 +584,11 @@ async fn router(
 				iam::signin::signin(kvs, &mut *session.write().await, credentials.into())
 					.await
 					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
-
-			let result = query_result.finish_with_result(Ok(Value::String(signin_data.token)));
-
+			let token = Token {
+				access: AccessToken(SecureToken(signin_data.token)),
+				refresh: signin_data.refresh.map(SecureToken).map(RefreshToken),
+			};
+			let result = query_result.finish_with_result(Ok(token.into_value()));
 			Ok(vec![result])
 		}
 		Command::Authenticate {

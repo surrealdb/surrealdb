@@ -7,7 +7,7 @@ use std::sync::{Arc, OnceLock};
 
 use surrealdb_types::{self, SurrealValue, Value, Variables};
 
-use crate::opt::auth::{AccessToken, Credentials, Token};
+use crate::opt::auth::{Credentials, Token};
 use crate::opt::{IntoEndpoint, IntoExportDestination, WaitFor, auth};
 use crate::{Connect, Connection, OnceLockExt, Surreal};
 
