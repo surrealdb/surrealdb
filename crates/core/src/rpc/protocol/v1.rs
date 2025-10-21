@@ -15,8 +15,8 @@ use crate::rpc::args::extract_args;
 use crate::rpc::{DbResult, Method, RpcContext, RpcError};
 use crate::sql::{
 	Ast, CreateStatement, Data as SqlData, DeleteStatement, Expr, Fields, Function, FunctionCall,
-	InsertStatement, KillStatement, LiveStatement, Model, Output, Param, RelateStatement,
-	SelectStatement, TopLevelExpr, UpdateStatement, UpsertStatement,
+	InsertStatement, KillStatement, LiveStatement, Model, Output, RelateStatement, SelectStatement,
+	TopLevelExpr, UpdateStatement, UpsertStatement,
 };
 use crate::types::{PublicArray, PublicRecordIdKey, PublicUuid, PublicValue, PublicVariables};
 
@@ -313,36 +313,14 @@ pub trait RpcProtocolV1: RpcContext {
 	// ------------------------------
 
 	async fn info(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
-		let what = vec![Expr::Param(Param::new("auth".to_owned()))];
+		let session = self.get_session(session_id.as_ref());
+		let vars = Some(session.variables.clone());
+		let mut res = self.kvs().execute("SELECT * FROM $auth", &session, vars).await?;
 
-		// TODO: Check if this can be replaced by just evaluating the param or a
-		// `$auth.*` expression
-		// Specify the SQL query string
-		let sql = SelectStatement {
-			expr: Fields::all(),
-			what,
-			with: None,
-			cond: None,
-			omit: vec![],
-			only: false,
-			split: None,
-			group: None,
-			order: None,
-			limit: None,
-			start: None,
-			fetch: None,
-			version: None,
-			timeout: None,
-			parallel: false,
-			explain: None,
-			tempfiles: false,
-		};
-		let ast = Ast::single_expr(Expr::Select(Box::new(sql)));
-		// Execute the query on the database
-		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), None).await?;
-		// Extract the first value from the result
-		// TODO: Move first here into the actual expression.
-		Ok(DbResult::Other(res.remove(0).result?.first().unwrap()))
+		let result = res.remove(0).result?;
+
+		let first = result.first().unwrap_or_default();
+		Ok(DbResult::Other(first))
 	}
 
 	// ------------------------------
