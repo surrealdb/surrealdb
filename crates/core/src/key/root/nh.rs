@@ -31,6 +31,10 @@ impl Categorise for NamespaceIdGeneratorBatchKey {
 }
 
 impl NamespaceIdGeneratorBatchKey {
+	/// Creates a new namespace ID generator batch key.
+	///
+	/// # Arguments
+	/// * `start` - The starting value for this batch allocation
 	pub fn new(start: i64) -> Self {
 		Self {
 			__: b'/',
@@ -41,6 +45,10 @@ impl NamespaceIdGeneratorBatchKey {
 		}
 	}
 
+	/// Returns the key range for all namespace ID generator batches.
+	///
+	/// # Returns
+	/// A range of encoded keys covering all possible batch allocations
 	pub fn range() -> anyhow::Result<Range<Vec<u8>>> {
 		let beg = Self::new(i64::MIN).encode_key()?;
 		let end = Self::new(i64::MAX).encode_key()?;

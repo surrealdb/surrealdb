@@ -1,4 +1,4 @@
-//! Stores the next and available freed IDs for Tables
+//! Stores table ID generator state per node
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
@@ -8,7 +8,11 @@ use crate::key::database::all::DatabaseRoot;
 use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::sequences::SequenceState;
 
-// Table ID generator
+/// Key structure for storing table ID generator state.
+///
+/// This key is used to track the state of table ID generation for a specific node
+/// within a database. Each node maintains its own state to coordinate with batch
+/// allocations when generating table identifiers.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct TableIdGeneratorStateKey {
 	table_root: DatabaseRoot,
@@ -27,6 +31,12 @@ impl Categorise for TableIdGeneratorStateKey {
 }
 
 impl TableIdGeneratorStateKey {
+	/// Creates a new table ID generator state key.
+	///
+	/// # Arguments
+	/// * `ns` - The namespace ID
+	/// * `db` - The database ID
+	/// * `nid` - The node ID that owns this state
 	pub fn new(ns: NamespaceId, db: DatabaseId, nid: Uuid) -> Self {
 		TableIdGeneratorStateKey {
 			table_root: DatabaseRoot::new(ns, db),

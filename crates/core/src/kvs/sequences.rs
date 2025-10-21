@@ -1,3 +1,23 @@
+//! Distributed sequence and ID generation management.
+//!
+//! This module provides a distributed ID generation system that uses a batch allocation
+//! strategy to efficiently generate unique identifiers across multiple nodes. The system
+//! maintains both state (per-node tracking) and batch allocations (reserved ID ranges)
+//! to ensure uniqueness while minimizing coordination overhead.
+//!
+//! # Key Components
+//!
+//! - **Sequences**: Main coordinator for all sequence operations
+//! - **SequenceDomain**: Defines different types of sequences (namespace IDs, database IDs, etc.)
+//! - **BatchValue**: Represents a batch allocation of IDs owned by a specific node
+//! - **SequenceState**: Tracks the next available ID for a node
+//!
+//! # ID Generation Strategy
+//!
+//! Each node maintains local state and coordinates with other nodes through batch allocations
+//! stored in the key-value store. When a node needs IDs, it allocates a batch and uses those
+//! IDs locally until the batch is exhausted, then allocates a new batch.
+
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::ops::Range;
@@ -34,6 +54,11 @@ use crate::kvs::{KVKey, LockType, Transaction, TransactionType, impl_kv_value_re
 
 type SequencesMap = Arc<RwLock<HashMap<Arc<SequenceDomain>, Arc<Mutex<Sequence>>>>>;
 
+/// Manager for all sequence operations in the system.
+///
+/// The Sequences struct coordinates ID generation across different domains
+/// (namespaces, databases, tables, indexes, and user sequences) and manages
+/// the lifecycle of sequence allocations.
 #[derive(Clone)]
 pub struct Sequences {
 	tf: TransactionFactory,
@@ -41,6 +66,10 @@ pub struct Sequences {
 	sequences: SequencesMap,
 }
 
+/// Defines the different types of sequences supported by the system.
+///
+/// Each variant represents a distinct ID generation domain with its own
+/// namespace and allocation strategy.
 #[derive(Hash, PartialEq, Eq)]
 enum SequenceDomain {
 	/// A user sequence in a namespace

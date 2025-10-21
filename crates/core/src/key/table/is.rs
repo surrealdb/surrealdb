@@ -1,4 +1,4 @@
-//! Stores the index ID generator state
+//! Stores index ID generator state per node
 
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
@@ -9,7 +9,11 @@ use crate::key::table::all::TableRoot;
 use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::sequences::SequenceState;
 
-// Index ID generator
+/// Key structure for storing index ID generator state.
+///
+/// This key is used to track the state of index ID generation for a specific node
+/// within a table. Each node maintains its own state to coordinate with batch
+/// allocations when generating index identifiers.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct IndexIdGeneratorStateKey<'a> {
 	table_root: TableRoot<'a>,
@@ -28,6 +32,13 @@ impl<'a> Categorise for IndexIdGeneratorStateKey<'a> {
 }
 
 impl<'a> IndexIdGeneratorStateKey<'a> {
+	/// Creates a new index ID generator state key.
+	///
+	/// # Arguments
+	/// * `ns` - The namespace ID
+	/// * `db` - The database ID
+	/// * `tb` - The table name
+	/// * `nid` - The node ID that owns this state
 	pub fn new(ns: NamespaceId, db: DatabaseId, tb: &'a str, nid: Uuid) -> Self {
 		IndexIdGeneratorStateKey {
 			table_root: TableRoot::new(ns, db, tb),

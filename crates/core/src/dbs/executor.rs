@@ -117,10 +117,10 @@ impl Executor {
 		}
 		let res = match plan {
 			TopLevelExpr::Use(stmt) => {
-				if let Some(ns) = stmt.ns {
-					// Avoid moving in and out of the context via Arc::get_mut
-					let ctx = ctx_mut!();
+				// Avoid moving in and out of the context via Arc::get_mut
+				let ctx = ctx_mut!();
 
+				if let Some(ns) = stmt.ns {
 					txn.get_or_add_ns(Some(ctx), &ns, self.opt.strict).await?;
 
 					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
@@ -134,9 +134,6 @@ impl Executor {
 							"Cannot use database without namespace"
 						)));
 					};
-
-					// Avoid moving in and out of the context via Arc::get_mut
-					let ctx = ctx_mut!();
 
 					txn.ensure_ns_db(Some(ctx), ns, &db, self.opt.strict).await?;
 

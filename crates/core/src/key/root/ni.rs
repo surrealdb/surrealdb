@@ -1,4 +1,4 @@
-//! Stores namespace ID generator state
+//! Stores namespace ID generator state per node
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
@@ -6,6 +6,11 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::sequences::SequenceState;
 
+/// Key structure for storing namespace ID generator state.
+///
+/// This key is used to track the state of namespace ID generation for a specific node
+/// at the root level. Each node maintains its own state to coordinate with batch
+/// allocations when generating namespace identifiers.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct NamespaceIdGeneratorStateKey {
 	__: u8,
@@ -24,6 +29,10 @@ impl Categorise for NamespaceIdGeneratorStateKey {
 }
 
 impl NamespaceIdGeneratorStateKey {
+	/// Creates a new namespace ID generator state key.
+	///
+	/// # Arguments
+	/// * `nid` - The node ID that owns this state
 	pub fn new(nid: Uuid) -> Self {
 		Self {
 			__: b'/',

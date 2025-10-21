@@ -1,4 +1,4 @@
-//! Stores a database ID generator state
+//! Stores database ID generator state per node
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
@@ -7,6 +7,11 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::sequences::SequenceState;
 
+/// Key structure for storing database ID generator state.
+///
+/// This key is used to track the state of database ID generation for a specific node
+/// within a namespace. Each node maintains its own state to coordinate with batch
+/// allocations when generating database identifiers.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct DatabaseIdGeneratorStateKey {
 	__: u8,
@@ -26,6 +31,11 @@ impl Categorise for DatabaseIdGeneratorStateKey {
 	}
 }
 impl DatabaseIdGeneratorStateKey {
+	/// Creates a new database ID generator state key.
+	///
+	/// # Arguments
+	/// * `ns` - The namespace ID
+	/// * `nid` - The node ID that owns this state
 	pub fn new(ns: NamespaceId, nid: Uuid) -> Self {
 		Self {
 			__: b'/',
