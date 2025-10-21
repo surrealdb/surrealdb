@@ -1031,9 +1031,12 @@ mod tests {
 				scoring: Default::default(),
 				highlight: true,
 			});
+			let nid = Uuid::new_v4();
 			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t", IndexId(3));
-			let opt =
-				Options::default().with_ns(Some("testns".into())).with_db(Some("testdb".into()));
+			let opt = Options::default()
+				.with_id(nid)
+				.with_ns(Some("testns".into()))
+				.with_db(Some("testdb".into()));
 			let fti = Arc::new(
 				FullTextIndex::with_analyzer(
 					ctx.get_index_stores(),
@@ -1047,7 +1050,7 @@ mod tests {
 			Self {
 				ctx,
 				opt,
-				nid: Uuid::new_v4(),
+				nid,
 				ikb,
 				start,
 				ds,
