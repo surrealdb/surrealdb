@@ -1,5 +1,7 @@
 use std::fmt::{self, Display};
 
+use surrealdb_types::{ToSql, write_sql};
+
 use crate::expr;
 use crate::fmt::{Fmt, Pretty};
 use crate::sql::statements::{
@@ -68,6 +70,12 @@ impl Display for Ast {
 				self.expressions.iter().map(|v| Fmt::new(v, |v, f| write!(f, "{v};"))),
 			),
 		)
+	}
+}
+
+impl ToSql for Ast {
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self)
 	}
 }
 

@@ -130,7 +130,7 @@ impl fmt::Display for Literal {
 				}
 			}
 			Literal::Duration(duration) => write!(f, "{duration}"),
-			Literal::Datetime(datetime) => write!(f, "{datetime}"),
+			Literal::Datetime(datetime) => write!(f, "d{}", &QuoteStr(&datetime.to_string())),
 			Literal::Uuid(uuid) => write!(f, "{uuid}"),
 			Literal::Geometry(geometry) => write!(f, "{geometry}"),
 			Literal::File(file) => write!(f, "{}", file.to_sql()),
