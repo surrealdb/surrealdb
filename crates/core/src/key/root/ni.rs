@@ -1,9 +1,10 @@
 //! Stores namespace ID generator state
+use storekey::{BorrowDecode, Encode};
+use uuid::Uuid;
+
 use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::sequences::SequenceState;
-use storekey::{BorrowDecode, Encode};
-use uuid::Uuid;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct NamespaceIdGeneratorStateKey {

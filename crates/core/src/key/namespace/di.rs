@@ -1,11 +1,13 @@
 //! Stores a database ID generator batch value
+use std::ops::Range;
+
+use anyhow::Result;
+use storekey::{BorrowDecode, Encode};
+
 use crate::catalog::NamespaceId;
 use crate::key::category::{Categorise, Category};
 use crate::kvs::sequences::SequenceState;
 use crate::kvs::{KVKey, impl_kv_key_storekey};
-use anyhow::Result;
-use std::ops::Range;
-use storekey::{BorrowDecode, Encode};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct DatabaseIdGeneratorBatchKey {

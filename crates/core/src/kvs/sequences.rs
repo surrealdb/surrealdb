@@ -1,3 +1,17 @@
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
+use std::ops::Range;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use anyhow::Result;
+use rand::{Rng, thread_rng};
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+use tokio::sync::{Mutex, RwLock};
+use tokio::time::sleep;
+use uuid::Uuid;
+
 use crate::catalog::providers::DatabaseProvider;
 use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableId};
 use crate::ctx::MutableContext;
@@ -16,18 +30,6 @@ use crate::key::sequence::ba::Ba;
 use crate::key::sequence::st::St;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KVKey, LockType, Transaction, TransactionType, impl_kv_value_revisioned};
-use anyhow::Result;
-use rand::{Rng, thread_rng};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
-use std::ops::Range;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use tokio::sync::{Mutex, RwLock};
-use tokio::time::sleep;
-use uuid::Uuid;
 
 type SequencesMap = Arc<RwLock<HashMap<Arc<SequenceDomain>, Arc<Mutex<Sequence>>>>>;
 

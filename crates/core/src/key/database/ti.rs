@@ -1,11 +1,12 @@
 //! Stores the next and available freed IDs for Tables
+use storekey::{BorrowDecode, Encode};
+use uuid::Uuid;
+
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
 use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::sequences::SequenceState;
-use storekey::{BorrowDecode, Encode};
-use uuid::Uuid;
 
 // Table ID generator
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]

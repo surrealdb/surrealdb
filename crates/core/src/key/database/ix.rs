@@ -1,11 +1,12 @@
 //! Stores the next and available freed IDs for documents
+use storekey::{BorrowDecode, Encode};
+use uuid::Uuid;
+
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::key::table::all::TableRoot;
 use crate::kvs::impl_kv_key_storekey;
 use crate::kvs::sequences::SequenceState;
-use storekey::{BorrowDecode, Encode};
-use uuid::Uuid;
 
 // Index ID generator
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]

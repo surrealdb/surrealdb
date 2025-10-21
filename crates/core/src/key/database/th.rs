@@ -1,6 +1,7 @@
 //! Stores the next and available freed IDs for Tables batch value
 
 use std::ops::Range;
+
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};

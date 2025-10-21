@@ -1,10 +1,12 @@
 //! Stores namespace ID generator batch value
 
+use std::ops::Range;
+
+use storekey::{BorrowDecode, Encode};
+
 use crate::key::category::{Categorise, Category};
 use crate::kvs::sequences::BatchValue;
 use crate::kvs::{KVKey, impl_kv_key_storekey};
-use std::ops::Range;
-use storekey::{BorrowDecode, Encode};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct NamespaceIdGeneratorBatchKey {
