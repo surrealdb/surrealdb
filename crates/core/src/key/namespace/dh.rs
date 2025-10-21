@@ -6,7 +6,7 @@ use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::NamespaceId;
 use crate::key::category::{Categorise, Category};
-use crate::kvs::sequences::{BatchValue, SequenceState};
+use crate::kvs::sequences::BatchValue;
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -31,7 +31,7 @@ impl DatabaseIdGeneratorBatchKey {
 	pub fn new(ns: NamespaceId, start: i64) -> Self {
 		Self {
 			__: b'/',
-			_a: b'+',
+			_a: b'*',
 			ns,
 			_b: b'!',
 			_c: b'd',
@@ -41,7 +41,7 @@ impl DatabaseIdGeneratorBatchKey {
 	}
 
 	pub fn range(ns: NamespaceId) -> Result<Range<Vec<u8>>> {
-		let beg = Self::new(ns, 0).encode_key()?;
+		let beg = Self::new(ns, i64::MIN).encode_key()?;
 		let end = Self::new(ns, i64::MAX).encode_key()?;
 		Ok(beg..end)
 	}
@@ -50,7 +50,6 @@ impl DatabaseIdGeneratorBatchKey {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::key::root::nb::NamespaceIdGeneratorBatchKey;
 	use crate::kvs::KVKey;
 
 	#[test]
@@ -60,13 +59,13 @@ mod tests {
 			NamespaceId(123),42
 		);
 		let enc = DatabaseIdGeneratorBatchKey::encode_key(&val).unwrap();
-		assert_eq!(enc, vec![0x2f, 0x2b, 0, 0, 0, 0x7b, 0x21, 0x64, 0x69]);
+		assert_eq!(enc, b"/*\0\0\0\x7B!dh\x80\0\0\0\0\0\0\x2A");
 	}
 
 	#[test]
 	fn range() {
-		let r = NamespaceIdGeneratorBatchKey::range().unwrap();
-		assert_eq!(r.start, b"/!dh");
-		assert_eq!(r.end, b"/!dh");
+		let r = DatabaseIdGeneratorBatchKey::range(NamespaceId(123)).unwrap();
+		assert_eq!(r.start, b"/*\0\0\0\x7B!dh\0\0\0\0\0\0\0\0");
+		assert_eq!(r.end, b"/*\0\0\0\x7B!dh\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF");
 	}
 }

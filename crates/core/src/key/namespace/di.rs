@@ -29,7 +29,7 @@ impl DatabaseIdGeneratorStateKey {
 	pub fn new(ns: NamespaceId, nid: Uuid) -> Self {
 		Self {
 			__: b'/',
-			_a: b'+',
+			_a: b'*',
 			ns,
 			_b: b'!',
 			_c: b'd',
@@ -51,6 +51,6 @@ mod tests {
 			NamespaceId(123),Uuid::from_u128(15)
 		);
 		let enc = DatabaseIdGeneratorStateKey::encode_key(&val).unwrap();
-		assert_eq!(enc, vec![0x2f, 0x2b, 0, 0, 0, 0x7b, 0x21, 0x64, 0x69]);
+		assert_eq!(enc, b"/*\0\0\0\x7B!di\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x0F");
 	}
 }

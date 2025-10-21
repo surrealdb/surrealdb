@@ -31,13 +31,13 @@ impl NamespaceIdGeneratorBatchKey {
 			__: b'/',
 			_a: b'!',
 			_b: b'n',
-			_c: b'b',
+			_c: b'h',
 			start,
 		}
 	}
 
 	pub fn range() -> anyhow::Result<Range<Vec<u8>>> {
-		let beg = Self::new(0).encode_key()?;
+		let beg = Self::new(i64::MIN).encode_key()?;
 		let end = Self::new(i64::MAX).encode_key()?;
 		Ok(beg..end)
 	}
@@ -50,15 +50,15 @@ mod tests {
 
 	#[test]
 	fn key() {
-		let val = NamespaceIdGeneratorBatchKey::new(15);
+		let val = NamespaceIdGeneratorBatchKey::new(123);
 		let enc = NamespaceIdGeneratorBatchKey::encode_key(&val).unwrap();
-		assert_eq!(&enc, b"/!nb");
+		assert_eq!(&enc, b"/!nh\x80\0\0\0\0\0\0\x7B");
 	}
 
 	#[test]
 	fn range() {
 		let r = NamespaceIdGeneratorBatchKey::range().unwrap();
-		assert_eq!(r.start, b"/!nb");
-		assert_eq!(r.end, b"/!nb");
+		assert_eq!(r.start, b"/!nh\0\0\0\0\0\0\0\0");
+		assert_eq!(r.end, b"/!nh\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF");
 	}
 }

@@ -44,6 +44,6 @@ mod tests {
 	fn key() {
 		let val = NamespaceIdGeneratorStateKey::new(Uuid::from_u128(1));
 		let enc = NamespaceIdGeneratorStateKey::encode_key(&val).unwrap();
-		assert_eq!(&enc, b"/!ni");
+		assert_eq!(&enc, b"/!ni\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x01");
 	}
 }

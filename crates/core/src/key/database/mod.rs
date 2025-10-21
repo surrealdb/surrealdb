@@ -6,8 +6,6 @@ pub mod az;
 pub mod bu;
 pub mod cg;
 pub mod fc;
-pub mod ih;
-pub mod is;
 pub mod ml;
 pub mod pa;
 pub mod sq;

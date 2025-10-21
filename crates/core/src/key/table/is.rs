@@ -45,7 +45,7 @@ mod tests {
 	use crate::kvs::KVKey;
 
 	#[test]
-	fn state_key() {
+	fn key() {
 		#[rustfmt::skip]
 		let val = IndexIdGeneratorStateKey::new(
 			NamespaceId(123),
@@ -54,12 +54,6 @@ mod tests {
 		Uuid::from_u128(15)
 		);
 		let enc = IndexIdGeneratorStateKey::encode_key(&val).unwrap();
-		assert_eq!(
-			enc,
-			vec![
-				47, 42, 0, 0, 0, 123, 42, 0, 0, 0, 234, 42, 116, 101, 115, 116, 116, 98, 0, 33,
-				105, 115, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 15
-			]
-		);
+		assert_eq!(enc, b"/*\0\0\0\x7B*\0\0\0\xEA*testtb\0!is\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x0F");
 	}
 }

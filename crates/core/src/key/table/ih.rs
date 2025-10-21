@@ -40,7 +40,7 @@ impl<'a> IndexIdGeneratorBatchKey<'a> {
 	}
 
 	pub fn range(ns: NamespaceId, db: DatabaseId, tb: &'a str) -> anyhow::Result<Range<Vec<u8>>> {
-		let beg = Self::new(ns, db, tb, 0).encode_key()?;
+		let beg = Self::new(ns, db, tb, i64::MIN).encode_key()?;
 		let end = Self::new(ns, db, tb, i64::MAX).encode_key()?;
 		Ok(beg..end)
 	}
@@ -52,41 +52,23 @@ mod tests {
 	use crate::kvs::KVKey;
 
 	#[test]
-	fn batch_key() {
+	fn key() {
 		#[rustfmt::skip]
 		let val = IndexIdGeneratorBatchKey::new(
 			NamespaceId(123),
 			DatabaseId(234),
 			"testtb",
-			42
+			15
 		);
 		let enc = IndexIdGeneratorBatchKey::encode_key(&val).unwrap();
-		assert_eq!(
-			enc,
-			vec![
-				47, 42, 0, 0, 0, 123, 42, 0, 0, 0, 234, 42, 116, 101, 115, 116, 116, 98, 0, 33,
-				105, 104, 128, 0, 0, 0, 0, 0, 0, 42
-			]
-		);
+		assert_eq!(enc, b"/*\0\0\0\x7B*\0\0\0\xEA*testtb\0!ih\x80\0\0\0\0\0\0\x0F");
 	}
 
 	#[test]
-	fn batch_range() {
+	fn range() {
 		let r =
 			IndexIdGeneratorBatchKey::range(NamespaceId(123), DatabaseId(234), "testtb").unwrap();
-		assert_eq!(
-			r.start,
-			vec![
-				47, 42, 0, 0, 0, 123, 42, 0, 0, 0, 234, 42, 116, 101, 115, 116, 116, 98, 0, 33,
-				105, 104, 128, 0, 0, 0, 0, 0, 0, 0
-			]
-		);
-		assert_eq!(
-			r.end,
-			vec![
-				47, 42, 0, 0, 0, 123, 42, 0, 0, 0, 234, 42, 116, 101, 115, 116, 116, 98, 0, 33,
-				105, 104, 255, 255, 255, 255, 255, 255, 255, 255
-			]
-		);
+		assert_eq!(r.start, b"/*\0\0\0\x7B*\0\0\0\xEA*testtb\0!ih\0\0\0\0\0\0\0\0");
+		assert_eq!(r.end, b"/*\0\0\0\x7B*\0\0\0\xEA*testtb\0!ih\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF");
 	}
 }
