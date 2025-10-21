@@ -29,10 +29,10 @@ skip-record-id-key=true
 value = "[{ id: cat:one }, { id: wolf:one }]"
 
 [[test.results]]
-value = "[person:rand, person:mat]"
+value = "true"
 
 [[test.results]]
-value = "[person:rand, person:mat]"
+value = "true"
 
 [[test.results]]
 value = "true"
@@ -52,9 +52,9 @@ RELATE person:mat->likes->cat:one;
 RELATE person:perrin->likes->wolf:one;
 CREATE cat:one, wolf:one;
 
-SELECT VALUE <-likes<-person FROM ONLY cat:one;
+(SELECT VALUE <-likes<-person FROM ONLY cat:one) ALLINSIDE [person:rand, person:mat];
 -- Note: same records, different order from above
-SELECT VALUE <~person FROM ONLY cat:one;
+(SELECT VALUE <~person FROM ONLY cat:one) ALLINSIDE [person:rand, person:mat];
 
 (SELECT VALUE <-(SELECT * FROM likes WHERE in.name = "Rand" LIMIT 1)<-person FROM ONLY cat:one)
     = (SELECT VALUE <~(SELECT VALUE id FROM person WHERE name = "Rand" LIMIT 1) FROM ONLY cat:one);
