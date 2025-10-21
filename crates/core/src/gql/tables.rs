@@ -234,7 +234,7 @@ pub async fn process_tbs(
                     match out {
                         Ok(l) => Ok(Some(FieldValue::list(l))),
                         Err(v) => {
-                            Err(internal_error(format!("expected thing, found: {v:?}")).into())
+                            Err(internal_error(format!("expected record, found: {v:?}")).into())
                         }
                     }
                 })

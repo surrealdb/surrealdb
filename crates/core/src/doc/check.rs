@@ -36,7 +36,7 @@ impl Document {
 				ensure!(
 					tb.allows_normal(),
 					Error::TableCheck {
-						thing: self.id()?.to_string(),
+						record: self.id()?.to_string(),
 						relation: false,
 						target_type: tb.table_type.to_sql(),
 					}
@@ -46,7 +46,7 @@ impl Document {
 				ensure!(
 					tb.allows_normal(),
 					Error::TableCheck {
-						thing: self.id()?.to_string(),
+						record: self.id()?.to_string(),
 						relation: false,
 						target_type: tb.table_type.to_sql(),
 					}
@@ -56,7 +56,7 @@ impl Document {
 				ensure!(
 					tb.allows_relation(),
 					Error::TableCheck {
-						thing: self.id()?.to_string(),
+						record: self.id()?.to_string(),
 						relation: true,
 						target_type: tb.table_type.to_sql(),
 					}
@@ -67,7 +67,7 @@ impl Document {
 					ensure!(
 						tb.allows_relation(),
 						Error::TableCheck {
-							thing: self.id()?.to_string(),
+							record: self.id()?.to_string(),
 							relation: true,
 							target_type: tb.table_type.to_sql(),
 						}
@@ -77,7 +77,7 @@ impl Document {
 					ensure!(
 						tb.allows_normal(),
 						Error::TableCheck {
-							thing: self.id()?.to_string(),
+							record: self.id()?.to_string(),
 							relation: false,
 							target_type: tb.table_type.to_sql(),
 						}
