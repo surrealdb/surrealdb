@@ -33,6 +33,7 @@ pub async fn timestamp_to_versionstamp(new_ds: impl CreateDs) {
 	// Give the current versionstamp a timestamp of 0
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	let db = tx.ensure_ns_db(None, "myns", "mydb", false).await.unwrap();
+	tx.commit().await.unwrap();
 
 	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	tr.set_timestamp_for_versionstamp(0, db.namespace_id, db.database_id).await.unwrap();
@@ -84,6 +85,7 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	let db = tx.get_or_add_db(None, "myns", "mydb", false).await.unwrap();
+	tx.commit().await.unwrap();
 
 	// Give the current versionstamp a timestamp of 0
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();

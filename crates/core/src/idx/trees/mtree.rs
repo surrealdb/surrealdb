@@ -1476,7 +1476,7 @@ mod tests {
 	async fn get_db(ds: &Datastore) -> Arc<DatabaseDefinition> {
 		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
 		let def = tx.ensure_ns_db(None, "myns", "mydb", false).await.unwrap();
-		tx.cancel().await.unwrap();
+		tx.commit().await.unwrap();
 		def
 	}
 
