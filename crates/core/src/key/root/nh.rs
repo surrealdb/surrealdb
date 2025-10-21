@@ -8,6 +8,11 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::sequences::BatchValue;
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
+/// Key structure for storing namespace ID generator batch allocations.
+///
+/// This key is used to track batch allocations of namespace IDs at the root level.
+/// Each batch allocation represents a range of IDs that have been reserved
+/// by a particular node for generating namespace identifiers.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct NamespaceIdGeneratorBatchKey {
 	__: u8,

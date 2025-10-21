@@ -9,6 +9,11 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::sequences::BatchValue;
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
+/// Key structure for storing database ID generator batch allocations.
+///
+/// This key is used to track batch allocations of database IDs within a namespace.
+/// Each batch allocation represents a range of IDs that have been reserved
+/// by a particular node for generating database identifiers.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct DatabaseIdGeneratorBatchKey {
 	__: u8,
@@ -28,6 +33,11 @@ impl Categorise for DatabaseIdGeneratorBatchKey {
 	}
 }
 impl DatabaseIdGeneratorBatchKey {
+	/// Creates a new database ID generator batch key.
+	///
+	/// # Arguments
+	/// * `ns` - The namespace ID
+	/// * `start` - The starting value for this batch allocation
 	pub fn new(ns: NamespaceId, start: i64) -> Self {
 		Self {
 			__: b'/',
@@ -40,6 +50,13 @@ impl DatabaseIdGeneratorBatchKey {
 		}
 	}
 
+	/// Returns the key range for all database ID generator batches in a namespace.
+	///
+	/// # Arguments
+	/// * `ns` - The namespace ID
+	///
+	/// # Returns
+	/// A range of encoded keys covering all possible batch allocations
 	pub fn range(ns: NamespaceId) -> Result<Range<Vec<u8>>> {
 		let beg = Self::new(ns, i64::MIN).encode_key()?;
 		let end = Self::new(ns, i64::MAX).encode_key()?;

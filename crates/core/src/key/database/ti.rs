@@ -52,6 +52,9 @@ mod tests {
 		Uuid::from_u128(15)
 		);
 		let enc = TableIdGeneratorStateKey::encode_key(&val).unwrap();
-		assert_eq!(&enc, b"/*\x00\x00\x00\x7b*\x00\x00\x00\xea!\x74\x69");
+		assert_eq!(
+			&enc,
+			b"/*\x00\x00\x00\x7B*\x00\x00\x00\xEA!ti\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\x0F"
+		);
 	}
 }

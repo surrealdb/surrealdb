@@ -11,7 +11,11 @@ use crate::key::database::all::DatabaseRoot;
 use crate::kvs::sequences::SequenceState;
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
-// Table ID generator
+/// Key structure for storing table ID generator batch allocations.
+///
+/// This key is used to track batch allocations of table IDs within a database.
+/// Each batch allocation represents a range of IDs that have been reserved
+/// by a particular node for generating table identifiers.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct TableIdGeneratorBatchKey {
 	table_root: DatabaseRoot,
@@ -30,6 +34,12 @@ impl Categorise for TableIdGeneratorBatchKey {
 }
 
 impl TableIdGeneratorBatchKey {
+	/// Creates a new table ID generator batch key.
+	///
+	/// # Arguments
+	/// * `ns` - The namespace ID
+	/// * `db` - The database ID
+	/// * `start` - The starting value for this batch allocation
 	pub fn new(ns: NamespaceId, db: DatabaseId, start: i64) -> Self {
 		TableIdGeneratorBatchKey {
 			table_root: DatabaseRoot::new(ns, db),
@@ -40,6 +50,14 @@ impl TableIdGeneratorBatchKey {
 		}
 	}
 
+	/// Returns the key range for all table ID generator batches in a database.
+	///
+	/// # Arguments
+	/// * `ns` - The namespace ID
+	/// * `db` - The database ID
+	///
+	/// # Returns
+	/// A range of encoded keys covering all possible batch allocations
 	pub fn range(ns: NamespaceId, db: DatabaseId) -> Result<Range<Vec<u8>>> {
 		let beg = Self::new(ns, db, i64::MIN).encode_key()?;
 		let end = Self::new(ns, db, i64::MAX).encode_key()?;
@@ -61,7 +79,7 @@ mod tests {
 			42
 		);
 		let enc = TableIdGeneratorBatchKey::encode_key(&val).unwrap();
-		assert_eq!(&enc, b"/*\0\0\0\x7B*\0\0\0\xEA!th\0\0\0\0\0\0\0\x2A");
+		assert_eq!(&enc, b"/*\0\0\0\x7B*\0\0\0\xEA!th\x80\0\0\0\0\0\0\x2A");
 	}
 
 	#[test]
