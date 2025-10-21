@@ -1,4 +1,5 @@
 //! Stores the next and available freed IDs for documents
+
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
@@ -32,7 +33,7 @@ impl<'a> IndexIdGeneratorStateKey<'a> {
 			table_root: TableRoot::new(ns, db, tb),
 			_c: b'!',
 			_d: b'i',
-			_e: b'x',
+			_e: b's',
 			nid,
 		}
 	}
@@ -44,7 +45,7 @@ mod tests {
 	use crate::kvs::KVKey;
 
 	#[test]
-	fn key() {
+	fn state_key() {
 		#[rustfmt::skip]
 		let val = IndexIdGeneratorStateKey::new(
 			NamespaceId(123),
@@ -53,6 +54,12 @@ mod tests {
 		Uuid::from_u128(15)
 		);
 		let enc = IndexIdGeneratorStateKey::encode_key(&val).unwrap();
-		assert_eq!(&enc, b"/*\x00\x00\x00\x7b*\x00\x00\x00\xea!\x74\x69");
+		assert_eq!(
+			enc,
+			vec![
+				47, 42, 0, 0, 0, 123, 42, 0, 0, 0, 234, 42, 116, 101, 115, 116, 116, 98, 0, 33,
+				105, 115, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 15
+			]
+		);
 	}
 }

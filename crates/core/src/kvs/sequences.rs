@@ -18,7 +18,8 @@ use crate::ctx::MutableContext;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::seqdocids::DocId;
-use crate::key::database::ix::IndexIdGeneratorStateKey;
+use crate::key::database::ih::IndexIdGeneratorBatchKey;
+use crate::key::database::is::IndexIdGeneratorStateKey;
 use crate::key::database::th::TableIdGeneratorBatchKey;
 use crate::key::database::ti::TableIdGeneratorStateKey;
 use crate::key::namespace::di::DatabaseIdGeneratorBatchKey;
@@ -88,7 +89,7 @@ impl SequenceDomain {
 			Self::NameSpacesIds => NamespaceIdGeneratorBatchKey::range(),
 			Self::DatabasesIds(ns) => DatabaseIdGeneratorBatchKey::range(*ns),
 			Self::TablesIds(ns, db) => TableIdGeneratorBatchKey::range(*ns, *db),
-			_ => todo!(),
+			Self::IndexIds(ns, db, tb) => IndexIdGeneratorBatchKey::range(*ns, *db, tb),
 		}
 	}
 
@@ -99,7 +100,9 @@ impl SequenceDomain {
 			Self::NameSpacesIds => NamespaceIdGeneratorBatchKey::new(start).encode_key(),
 			Self::DatabasesIds(ns) => DatabaseIdGeneratorBatchKey::new(*ns, start).encode_key(),
 			Self::TablesIds(ns, db) => TableIdGeneratorBatchKey::new(*ns, *db, start).encode_key(),
-			_ => todo!(),
+			Self::IndexIds(ns, db, tb) => {
+				IndexIdGeneratorBatchKey::new(*ns, *db, tb, start).encode_key()
+			}
 		}
 	}
 
