@@ -1905,95 +1905,104 @@ impl Datastore {
 		namespace: Option<String>,
 		database: Option<String>,
 	) -> std::result::Result<QueryResult, DbResultError> {
+		let new_tx = |tt: TransactionType| async move {
+			self.transaction(tt, Optimistic)
+				.await
+				.map_err(|err| DbResultError::InternalError(err.to_string()))
+		};
+		let cancel_tx = |txn: Transaction| async move {
+			txn.cancel().await.map_err(|err| DbResultError::InternalError(err.to_string()))
+		};
+		let commit_tx = |txn: Transaction| async move {
+			txn.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))
+		};
+
 		let query_result = QueryResultBuilder::started_now();
 		match (namespace, database) {
- 		(Some(ns), Some(db)) => {
- 			// First check if database exists with a Read transaction to avoid conflicts
- 			let tx = self
- 				.transaction(TransactionType::Read, LockType::Optimistic)
- 				.await
- 				.map_err(|err| DbResultError::InternalError(err.to_string()))?;
- 			let exists = tx.get_db_by_name(&ns, &db).await
- 				.map_err(|err| DbResultError::InternalError(err.to_string()))?
- 				.is_some();
- 			tx.cancel().await.map_err(|err| DbResultError::InternalError(err.to_string()))?;
-			
- 			// If database doesn't exist and not strict, create it with Write transaction
- 			if !exists {
- 				if self.strict {
- 					return Err(DbResultError::InternalError(format!("Database '{}/{}' not found", ns, db)));
- 				}
- 				let tx = self
- 					.transaction(TransactionType::Write, LockType::Optimistic)
- 					.await
- 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
- 				tx.ensure_ns_db(ctx, &ns, &db, self.strict)
- 					.await
- 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
- 				tx.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))?;
- 			}
- 			session.ns = Some(ns);
- 			session.db = Some(db);
- 		}
- 		(Some(ns), None) => {
- 			// First check if namespace exists with a Read transaction to avoid conflicts
- 			let tx = self
- 				.transaction(TransactionType::Read, LockType::Optimistic)
- 				.await
- 				.map_err(|err| DbResultError::InternalError(err.to_string()))?;
- 			let exists = tx.get_ns_by_name(&ns).await
- 				.map_err(|err| DbResultError::InternalError(err.to_string()))?
- 				.is_some();
- 			tx.cancel().await.map_err(|err| DbResultError::InternalError(err.to_string()))?;
-			
- 			// If namespace doesn't exist and not strict, create it with Write transaction
- 			if !exists {
- 				if self.strict {
- 					return Err(DbResultError::InternalError(format!("Namespace '{}' not found", ns)));
- 				}
- 				let tx = self
- 					.transaction(TransactionType::Write, LockType::Optimistic)
- 					.await
- 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
- 				tx.get_or_add_ns(ctx, &ns, self.strict)
- 					.await
- 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
- 				tx.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))?;
- 			}
- 			session.ns = Some(ns);
- 		}
- 		(None, Some(db)) => {
- 			let Some(ns) = session.ns.clone() else {
- 				return Err(DbResultError::InvalidRequest(
- 					"Cannot use database without namespace".to_string(),
- 				));
- 			};
- 			// First check if database exists with a Read transaction to avoid conflicts
- 			let tx = self
- 				.transaction(TransactionType::Read, LockType::Optimistic)
- 				.await
- 				.map_err(|err| DbResultError::InternalError(err.to_string()))?;
- 			let exists = tx.get_db_by_name(&ns, &db).await
- 				.map_err(|err| DbResultError::InternalError(err.to_string()))?
- 				.is_some();
- 			tx.cancel().await.map_err(|err| DbResultError::InternalError(err.to_string()))?;
-			
- 			// If database doesn't exist and not strict, create it with Write transaction
- 			if !exists {
- 				if self.strict {
- 					return Err(DbResultError::InternalError(format!("Database '{}/{}' not found", ns, db)));
- 				}
- 				let tx = self
- 					.transaction(TransactionType::Write, LockType::Optimistic)
- 					.await
- 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
- 				tx.ensure_ns_db(ctx, &ns, &db, self.strict)
- 					.await
- 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
- 				tx.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))?;
- 			}
- 			session.db = Some(db);
- 		}
+			(Some(ns), Some(db)) => {
+				// First check if database exists with a Read transaction to avoid conflicts
+				let tx = new_tx(Read).await?;
+				let exists = tx
+					.get_db_by_name(&ns, &db)
+					.await
+					.map_err(|err| DbResultError::InternalError(err.to_string()))?
+					.is_some();
+				cancel_tx(tx).await?;
+
+				// If database doesn't exist and not strict, create it with Write transaction
+				if !exists {
+					if self.strict {
+						return Err(DbResultError::InternalError(format!(
+							"Database '{}/{}' not found",
+							ns, db
+						)));
+					}
+					let tx = new_tx(Write).await?;
+					tx.ensure_ns_db(ctx, &ns, &db, self.strict)
+						.await
+						.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+					commit_tx(tx).await?;
+				}
+				session.ns = Some(ns);
+				session.db = Some(db);
+			}
+			(Some(ns), None) => {
+				// First check if namespace exists with a Read transaction to avoid conflicts
+				let tx = new_tx(Read).await?;
+				let exists = tx
+					.get_ns_by_name(&ns)
+					.await
+					.map_err(|err| DbResultError::InternalError(err.to_string()))?
+					.is_some();
+				cancel_tx(tx).await?;
+
+				// If namespace doesn't exist and not strict, create it with Write transaction
+				if !exists {
+					if self.strict {
+						return Err(DbResultError::InternalError(format!(
+							"Namespace '{}' not found",
+							ns
+						)));
+					}
+					let tx = new_tx(Write).await?;
+					tx.get_or_add_ns(ctx, &ns, self.strict)
+						.await
+						.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+					commit_tx(tx).await?;
+				}
+				session.ns = Some(ns);
+			}
+			(None, Some(db)) => {
+				let Some(ns) = session.ns.clone() else {
+					return Err(DbResultError::InvalidRequest(
+						"Cannot use database without namespace".to_string(),
+					));
+				};
+				// First check if database exists with a Read transaction to avoid conflicts
+				let tx = new_tx(Read).await?;
+				let exists = tx
+					.get_db_by_name(&ns, &db)
+					.await
+					.map_err(|err| DbResultError::InternalError(err.to_string()))?
+					.is_some();
+				cancel_tx(tx).await?;
+
+				// If database doesn't exist and not strict, create it with Write transaction
+				if !exists {
+					if self.strict {
+						return Err(DbResultError::InternalError(format!(
+							"Database '{}/{}' not found",
+							ns, db
+						)));
+					}
+					let tx = new_tx(Write).await?;
+					tx.ensure_ns_db(ctx, &ns, &db, self.strict)
+						.await
+						.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+					commit_tx(tx).await?;
+				}
+				session.db = Some(db);
+			}
 			(None, None) => {
 				session.ns = None;
 				session.db = None;
