@@ -478,33 +478,33 @@ pub(crate) enum Error {
 	},
 
 	/// A database entry for the specified record already exists
-	#[error("Database record `{thing}` already exists")]
+	#[error("Database record `{record}` already exists")]
 	RecordExists {
-		thing: RecordId,
+		record: RecordId,
 	},
 
 	/// A database index entry for the specified record already exists
-	#[error("Database index `{index}` already contains {value}, with record `{thing}`")]
+	#[error("Database index `{index}` already contains {value}, with record `{record}`")]
 	IndexExists {
-		thing: RecordId,
+		record: RecordId,
 		index: String,
 		value: String,
 	},
 
 	/// The specified table is not configured for the type of record being added
-	#[error("Found record: `{thing}` which is {}a relation, but expected a {target_type}", if *relation { "not " } else { "" })]
+	#[error("Found record: `{record}` which is {}a relation, but expected a {target_type}", if *relation { "not " } else { "" })]
 	TableCheck {
-		thing: String,
+		record: String,
 		relation: bool,
 		target_type: String,
 	},
 
 	/// The specified field did not conform to the field ASSERT clause
 	#[error(
-		"Found {value} for field `{field}`, with record `{thing}`, but field must conform to: {check}"
+		"Found {value} for field `{field}`, with record `{record}`, but field must conform to: {check}"
 	)]
 	FieldValue {
-		thing: String,
+		record: String,
 		value: String,
 		field: Idiom,
 		check: String,
@@ -525,19 +525,19 @@ pub(crate) enum Error {
 	},
 
 	/// The specified value did not conform to the LET type check
-	#[error("Couldn't coerce value for field `{field_name}` of `{thing}`: {error}")]
+	#[error("Couldn't coerce value for field `{field_name}` of `{record}`: {error}")]
 	FieldCoerce {
-		thing: String,
+		record: String,
 		field_name: String,
 		error: Box<CoerceError>,
 	},
 
 	/// The specified field did not conform to the field ASSERT clause
 	#[error(
-		"Found changed value for field `{field}`, with record `{thing}`, but field is readonly"
+		"Found changed value for field `{field}`, with record `{record}`, but field is readonly"
 	)]
 	FieldReadonly {
-		thing: String,
+		record: String,
 		field: Idiom,
 	},
 
