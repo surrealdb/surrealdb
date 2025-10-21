@@ -20,10 +20,6 @@ pub(crate) struct DatabaseIdGeneratorStateKey {
 
 impl_kv_key_storekey!(DatabaseIdGeneratorStateKey => SequenceState);
 
-pub fn new(ns: NamespaceId, nid: Uuid) -> DatabaseIdGeneratorStateKey {
-	DatabaseIdGeneratorStateKey::new(ns, nid)
-}
-
 impl Categorise for DatabaseIdGeneratorStateKey {
 	fn categorise(&self) -> Category {
 		Category::DatabaseIdentifier

@@ -150,36 +150,31 @@ impl InnerQueryExecutor {
 			let index_reference = io.index_reference();
 			match &index_reference.index {
 				Index::FullText(p) => {
-					let fulltext_entry: Option<FullTextEntry> =
-						match ir_map.entry(index_reference.clone()) {
-							Entry::Occupied(e) => {
-								if let PerIndexReferenceIndex::FullText(fti) = e.get() {
-									FullTextEntry::new(stk, ctx, opt, fti, io).await?
-								} else {
-									None
-								}
+					let fulltext_entry: Option<FullTextEntry> = match ir_map
+						.entry(index_reference.clone())
+					{
+						Entry::Occupied(e) => {
+							if let PerIndexReferenceIndex::FullText(fti) = e.get() {
+								FullTextEntry::new(stk, ctx, opt, fti, io).await?
+							} else {
+								None
 							}
-							Entry::Vacant(e) => {
-								let ix: &IndexDefinition = e.key();
-								let ikb = IndexKeyBase::new(
-									db.namespace_id,
-									db.database_id,
-									&ix.table_name,
-									ix.index_id,
-								);
-								let ft = FullTextIndex::new(
-									opt.id()?,
-									ctx.get_index_stores(),
-									&ctx.tx(),
-									ikb,
-									p,
-								)
+						}
+						Entry::Vacant(e) => {
+							let ix: &IndexDefinition = e.key();
+							let ikb = IndexKeyBase::new(
+								db.namespace_id,
+								db.database_id,
+								&ix.table_name,
+								ix.index_id,
+							);
+							let ft = FullTextIndex::new(ctx.get_index_stores(), &ctx.tx(), ikb, p)
 								.await?;
-								let fte = FullTextEntry::new(stk, ctx, opt, &ft, io).await?;
-								e.insert(PerIndexReferenceIndex::FullText(ft));
-								fte
-							}
-						};
+							let fte = FullTextEntry::new(stk, ctx, opt, &ft, io).await?;
+							e.insert(PerIndexReferenceIndex::FullText(ft));
+							fte
+						}
+					};
 					if let Some(e) = fulltext_entry {
 						if let Matches(
 							_,
@@ -232,8 +227,7 @@ impl InnerQueryExecutor {
 								);
 								let tx = ctx.tx();
 								let mti =
-									MTreeIndex::new(&tx, ikb, p, TransactionType::Read, opt.id()?)
-										.await?;
+									MTreeIndex::new(&tx, ikb, p, TransactionType::Read).await?;
 								drop(tx);
 								let entry = MtEntry::new(
 									db,

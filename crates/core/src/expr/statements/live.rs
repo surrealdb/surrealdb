@@ -161,7 +161,7 @@ mod tests {
 		let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
 
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let db = tx.ensure_ns_db(ns, db, false).await.unwrap();
+		let db = tx.ensure_ns_db(None, ns, db, false).await.unwrap();
 		tx.commit().await.unwrap();
 
 		// Create a new transaction and verify that there are no tables defined.
@@ -239,7 +239,7 @@ mod tests {
 		let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
 
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let db = tx.ensure_ns_db(ns, db, false).await.unwrap();
+		let db = tx.ensure_ns_db(None, ns, db, false).await.unwrap();
 		tx.commit().await.unwrap();
 
 		// Create a new transaction and verify that there are no tables defined.

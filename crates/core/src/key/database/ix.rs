@@ -20,10 +20,6 @@ pub(crate) struct IndexIdGeneratorStateKey<'a> {
 
 impl_kv_key_storekey!(IndexIdGeneratorStateKey<'_> => SequenceState);
 
-pub fn new(ns: NamespaceId, db: DatabaseId, tb: &str, nid: Uuid) -> IndexIdGeneratorStateKey<'_> {
-	IndexIdGeneratorStateKey::new(ns, db, tb, nid)
-}
-
 impl<'a> Categorise for IndexIdGeneratorStateKey<'a> {
 	fn categorise(&self) -> Category {
 		Category::TableIndexIdentifier

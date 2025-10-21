@@ -106,7 +106,7 @@ impl DefineIndexStatement {
 			ix.index_id
 		} else {
 			ctx.try_get_sequences()?
-				.next_index_id(Some(ctx), &txn, tb.namespace_id, tb.database_id, tb.table_id)
+				.next_index_id(Some(ctx), &txn, tb.namespace_id, tb.database_id, tb.name.clone())
 				.await?
 		};
 

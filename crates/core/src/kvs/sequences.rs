@@ -41,7 +41,7 @@ pub struct Sequences {
 }
 
 #[derive(Hash, PartialEq, Eq)]
-pub(crate) enum SequenceDomain {
+enum SequenceDomain {
 	/// A user sequence in a namespace
 	UserName(NamespaceId, DatabaseId, String),
 	/// A sequence generating DocIds for a FullText search index
@@ -53,7 +53,7 @@ pub(crate) enum SequenceDomain {
 	/// A sequence generating ids for tables
 	TablesIds(NamespaceId, DatabaseId),
 	/// A sequence generating ids for tables
-	IndexIds(NamespaceId, DatabaseId, TableId),
+	IndexIds(NamespaceId, DatabaseId, String),
 }
 
 impl SequenceDomain {
@@ -77,7 +77,7 @@ impl SequenceDomain {
 		Self::TablesIds(ns, db)
 	}
 
-	pub(crate) fn new_index_ids(ns: NamespaceId, db: DatabaseId, tb: TableId) -> Self {
+	pub(crate) fn new_index_ids(ns: NamespaceId, db: DatabaseId, tb: String) -> Self {
 		Self::IndexIds(ns, db, tb)
 	}
 
@@ -111,8 +111,7 @@ impl SequenceDomain {
 			Self::DatabasesIds(ns) => DatabaseIdGeneratorStateKey::new(*ns, nid).encode_key(),
 			Self::TablesIds(ns, db) => TableIdGeneratorStateKey::new(*ns, *db, nid).encode_key(),
 			Self::IndexIds(ns, db, tb) => {
-				todo!()
-				//IndexIdGeneratorStateKey::new(*ns, *db, *tb, nid).encode_key()
+				IndexIdGeneratorStateKey::new(*ns, *db, tb, nid).encode_key()
 			}
 		}
 	}
@@ -228,7 +227,7 @@ impl Sequences {
 		tx: &Transaction,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: TableId,
+		tb: String,
 	) -> Result<IndexId> {
 		let domain = Arc::new(SequenceDomain::new_index_ids(ns, db, tb));
 		let id = self.next_val(ctx, tx, domain, 0, 100, None).await?;

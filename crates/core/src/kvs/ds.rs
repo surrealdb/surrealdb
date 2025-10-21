@@ -1098,7 +1098,6 @@ impl Datastore {
 					Some(ix) => match &ix.index {
 						Index::FullText(p) => {
 							let ft = FullTextIndex::new(
-								self.id(),
 								&self.index_stores,
 								&txn,
 								IndexKeyBase::new(ic.ns, ic.db, &ix.table_name, ix.index_id),
