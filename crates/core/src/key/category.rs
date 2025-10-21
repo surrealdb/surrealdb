@@ -51,9 +51,9 @@ pub enum Category {
 	DatabaseTableIdentifierBatch,
 	/// crate::key::database::ti             /*{ns}*{db}!ti
 	DatabaseTableIdentifierState,
-	/// crate::key::database::ih             /*{ns}*{db}*{tb}!ih
+	/// crate::key::table::ih                /*{ns}*{db}*{tb}!ih
 	TableIndexIdentifierBatch,
-	/// crate::key::database::is             /*{ns}*{db}*{tb}!is
+	/// crate::key::table::is                /*{ns}*{db}*{tb}!is
 	TableIndexIdentifierState,
 	///
 	/// ------------------------------
