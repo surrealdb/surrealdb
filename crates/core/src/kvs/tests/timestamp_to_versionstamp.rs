@@ -33,7 +33,7 @@ pub async fn timestamp_to_versionstamp(new_ds: impl CreateDs) {
 	// Give the current versionstamp a timestamp of 0
 	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	let db = tx.ensure_ns_db(None, "myns", "mydb", false).await.unwrap();
-	tx.commit().await.unwrap();
+	tx.cancel().await.unwrap();
 
 	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	tr.set_timestamp_for_versionstamp(0, db.namespace_id, db.database_id).await.unwrap();
