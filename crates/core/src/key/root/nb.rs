@@ -21,7 +21,7 @@ impl_kv_key_storekey!(NamespaceIdGeneratorBatchKey=> BatchValue);
 
 impl Categorise for NamespaceIdGeneratorBatchKey {
 	fn categorise(&self) -> Category {
-		Category::NamespaceIdentifier
+		Category::NamespaceIdentifierBatch
 	}
 }
 

@@ -19,7 +19,7 @@ impl_kv_key_storekey!(NamespaceIdGeneratorStateKey=> SequenceState);
 
 impl Categorise for NamespaceIdGeneratorStateKey {
 	fn categorise(&self) -> Category {
-		Category::NamespaceIdentifier
+		Category::NamespaceIdentifierState
 	}
 }
 

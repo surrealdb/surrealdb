@@ -24,7 +24,7 @@ impl_kv_key_storekey!(IndexIdGeneratorBatchKey<'_> => SequenceState);
 
 impl<'a> Categorise for IndexIdGeneratorBatchKey<'a> {
 	fn categorise(&self) -> Category {
-		Category::TableIndexIdentifier
+		Category::TableIndexIdentifierBatch
 	}
 }
 

@@ -24,7 +24,7 @@ impl_kv_key_storekey!(TableIdGeneratorBatchKey => SequenceState);
 
 impl Categorise for TableIdGeneratorBatchKey {
 	fn categorise(&self) -> Category {
-		Category::DatabaseTableIdentifier
+		Category::DatabaseTableIdentifierBatch
 	}
 }
 

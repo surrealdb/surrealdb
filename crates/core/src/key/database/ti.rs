@@ -22,7 +22,7 @@ impl_kv_key_storekey!(TableIdGeneratorStateKey => SequenceState);
 
 impl Categorise for TableIdGeneratorStateKey {
 	fn categorise(&self) -> Category {
-		Category::DatabaseTableIdentifier
+		Category::DatabaseTableIdentifierState
 	}
 }
 

@@ -23,7 +23,7 @@ impl_kv_key_storekey!(IndexIdGeneratorStateKey<'_> => SequenceState);
 
 impl<'a> Categorise for IndexIdGeneratorStateKey<'a> {
 	fn categorise(&self) -> Category {
-		Category::TableIndexIdentifier
+		Category::TableIndexIdentifierState
 	}
 }
 
