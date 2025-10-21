@@ -148,11 +148,45 @@ impl<P: SurrealValue> SurrealValue for Record<P> {
 
 impl<T, P> Credentials<T> for Record<P> where P: SurrealValue {}
 
-#[derive(Clone, Debug, Serialize, Deserialize, SurrealValue)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Token<T: SurrealValue = AccessToken> {
 	pub access: T,
 	pub refresh: Option<RefreshToken>,
+}
+
+impl<T: SurrealValue> SurrealValue for Token<T> {
+	fn kind_of() -> Kind {
+		kind!({ access: any, refresh: any })
+	}
+
+	fn into_value(self) -> Value {
+		let mut obj = Object::new();
+		obj.insert("access".to_string(), self.access.into_value());
+		obj.insert("refresh".to_string(), self.refresh.into_value());
+		Value::Object(obj)
+	}
+
+	fn from_value(value: Value) -> surrealdb_types::anyhow::Result<Self> {
+		match value {
+			value @ Value::String(_) => Ok(Token {
+				access: T::from_value(value)?,
+				refresh: None,
+			}),
+			value => {
+				let mut obj = Object::from_value(value)?;
+				let access = T::from_value(obj.remove("access").unwrap_or_default())?;
+				let refresh = match obj.remove("refresh") {
+					Some(value) => Some(RefreshToken::from_value(value)?),
+					None => None,
+				};
+				Ok(Token {
+					access,
+					refresh,
+				})
+			}
+		}
+	}
 }
 
 /// A JSON Web Token for authenticating with the server.
