@@ -9,6 +9,7 @@ use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
 use crate::kvs::sequences::SequenceState;
 use crate::kvs::{KVKey, impl_kv_key_storekey};
+use anyhow::Result;
 
 // Table ID generator
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
@@ -39,8 +40,8 @@ impl TableIdGeneratorBatchKey {
 		}
 	}
 
-	pub fn range(ns: NamespaceId, db: DatabaseId) -> anyhow::Result<Range<Vec<u8>>> {
-		let beg = Self::new(ns, db, 0).encode_key()?;
+	pub fn range(ns: NamespaceId, db: DatabaseId) -> Result<Range<Vec<u8>>> {
+		let beg = Self::new(ns, db, i64::MIN).encode_key()?;
 		let end = Self::new(ns, db, i64::MAX).encode_key()?;
 		Ok(beg..end)
 	}
@@ -60,13 +61,13 @@ mod tests {
 			42
 		);
 		let enc = TableIdGeneratorBatchKey::encode_key(&val).unwrap();
-		assert_eq!(&enc, b"/*\x00\x00\x00\x7b*\x00\x00\x00\xea!\x74\x69");
+		assert_eq!(&enc, b"/*\0\0\0\x7B*\0\0\0\xEA!th\0\0\0\0\0\0\0\x2A");
 	}
 
 	#[test]
 	fn range() {
 		let r = TableIdGeneratorBatchKey::range(NamespaceId(123), DatabaseId(234)).unwrap();
-		assert_eq!(r.start, b"/!th");
-		assert_eq!(r.end, b"/!th");
+		assert_eq!(r.start, b"/*\0\0\0\x7B*\0\0\0\xEA!th\0\0\0\0\0\0\0\0");
+		assert_eq!(r.end, b"/*\0\0\0\x7B*\0\0\0\xEA!th\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF");
 	}
 }

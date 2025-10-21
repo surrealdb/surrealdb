@@ -53,7 +53,7 @@ enum SequenceDomain {
 	DatabasesIds(NamespaceId),
 	/// A sequence generating ids for tables
 	TablesIds(NamespaceId, DatabaseId),
-	/// A sequence generating ids for tables
+	/// A sequence generating ids for indexes
 	IndexIds(NamespaceId, DatabaseId, String),
 }
 

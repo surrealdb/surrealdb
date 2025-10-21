@@ -1,4 +1,4 @@
-//! Stores the next and available freed IDs for documents
+//! Stores the index ID generator state
 
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
