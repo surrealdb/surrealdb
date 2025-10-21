@@ -2,6 +2,7 @@
 
 use std::ops::Range;
 
+use anyhow::Result;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, NamespaceId};
@@ -9,7 +10,6 @@ use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
 use crate::kvs::sequences::SequenceState;
 use crate::kvs::{KVKey, impl_kv_key_storekey};
-use anyhow::Result;
 
 // Table ID generator
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
