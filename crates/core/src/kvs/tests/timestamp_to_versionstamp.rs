@@ -3,7 +3,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::CreateDs;
-use crate::catalog::providers::CatalogProvider;
+use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
 use crate::dbs::Session;
 use crate::dbs::node::Timestamp;
 use crate::kvs::KVKey;
@@ -83,9 +83,10 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 	// Declare ns/db
 	ds.execute("USE NS myns; USE DB mydb; CREATE record", &Session::owner(), None).await.unwrap();
 
-	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	let db = tx.ensure_ns_db(None, "myns", "mydb", false).await.unwrap();
-	tx.commit().await.unwrap();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
+	// The ns and db should already exist, but we need to get the versionstamp for the db
+	let db = tx.get_db_by_name("myns", "mydb").await.unwrap().unwrap();
+	tx.cancel().await.unwrap();
 
 	// Give the current versionstamp a timestamp of 0
 	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
