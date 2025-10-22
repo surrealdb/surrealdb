@@ -177,7 +177,7 @@ impl<T: SurrealValue> SurrealValue for Token<T> {
 				let mut obj = Object::from_value(value)?;
 				let access = T::from_value(obj.remove("access").unwrap_or_default())?;
 				let refresh = match obj.remove("refresh") {
-					Some(value) => Some(RefreshToken::from_value(value)?),
+					Some(value) => SurrealValue::from_value(value)?,
 					None => None,
 				};
 				Ok(Token {
