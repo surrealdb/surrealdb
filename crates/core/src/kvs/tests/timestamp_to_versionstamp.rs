@@ -30,14 +30,19 @@ pub async fn timestamp_to_versionstamp(new_ds: impl CreateDs) {
 	let node_id = Uuid::parse_str("A905CA25-56ED-49FB-B759-696AEA87C342").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
-	// Give the current versionstamp a timestamp of 0
+
+	// Declare ns/db
+	ds.execute("USE NS myns; USE DB mydb; CREATE record", &Session::owner(), None).await.unwrap();
+
 	let db = {
-		let tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let db = tx.ensure_ns_db(None, "myns", "mydb", false).await.unwrap();
-		tx.commit().await.unwrap();
+		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		// The ns and db should already exist, but we need to get the versionstamp for the db
+		let db = tx.get_db_by_name("myns", "mydb").await.unwrap().unwrap();
+		tx.cancel().await.unwrap();
 		db
 	};
 
+	// Give the current versionstamp a timestamp of 0
 	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	tr.set_timestamp_for_versionstamp(0, db.namespace_id, db.database_id).await.unwrap();
 	tr.commit().await.unwrap();
