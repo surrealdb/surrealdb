@@ -136,15 +136,18 @@ impl Datastore {
 }
 
 impl Transaction {
-	/// FoundationDB transactions should use standard (non-snapshot) reads
-	/// to ensure that read transactions can see recently committed data.
-	/// Snapshot reads in FoundationDB can miss data that was committed
-	/// after the transaction was created, which causes issues with catalog
-	/// lookups (namespaces, databases) not being visible to subsequent
-	/// read transactions.
+	/// Each transaction uses `lock=true` to behave similarly to pessimistic
+	/// locks in the same way that pessimistic transactions work in TiKV.
+	/// Standard transactions in FoundationDB (where `snapshot=false`) behave
+	/// behaves like a TiKV pessimistic transaction, by automatically retrying
+	/// on commit conflicts at the client layer. In FoundationDB we assume
+	/// that `lock=true` is effectively specifying that we should ensure
+	/// transactions are serializable. If the transaction is writeable, we also
+	/// assume that the user never wants to lose serializability, so we go with
+	/// the standard FoundationDB serializable more in that scenario.
 	#[inline(always)]
 	fn snapshot(&self) -> bool {
-		false
+		!self.write && !self.lock
 	}
 }
 

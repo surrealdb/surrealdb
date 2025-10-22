@@ -55,6 +55,7 @@ pub(crate) enum Error {
 	#[error("Couldn't write to a read only transaction")]
 	TxReadonly,
 
+	#[cfg(feature = "kv-rocksdb")]
 	/// The datastore is read-only due to disk saturation
 	#[error(
 		"The datastore is read-only due to disk saturation. Please free up disk space and restart the instance to enable write operations"
