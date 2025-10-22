@@ -8,12 +8,11 @@ use rust_decimal::Decimal;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::expression::VisitExpression;
+
 use crate::expr::{Expr, FlowResult, RecordIdLit};
 use crate::fmt::{EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::val::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, Regex, Uuid,
-	Value,
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, Regex, Uuid, Value,
 };
 
 /// A literal value, should be computed to get an actual value.
@@ -48,44 +47,6 @@ pub(crate) enum Literal {
 	Uuid(Uuid),
 	Geometry(Geometry),
 	File(File),
-	Closure(Box<Closure>),
-}
-
-impl VisitExpression for Literal {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		match self {
-			Literal::None
-			| Literal::Null
-			| Literal::UnboundedRange
-			| Literal::Bool(_)
-			| Literal::Float(_)
-			| Literal::Integer(_)
-			| Literal::Decimal(_)
-			| Literal::String(_)
-			| Literal::Bytes(_)
-			| Literal::Regex(_)
-			| Literal::Duration(_)
-			| Literal::Datetime(_)
-			| Literal::Uuid(_)
-			| Literal::Geometry(_)
-			| Literal::File(_) => {}
-			Literal::RecordId(x) => {
-				x.key.visit(visitor);
-			}
-			Literal::Array(x) => {
-				x.iter().for_each(|x| x.visit(visitor));
-			}
-			Literal::Object(x) => {
-				x.iter().for_each(|x| x.visit(visitor));
-			}
-			Literal::Closure(x) => {
-				x.visit(visitor);
-			}
-		}
-	}
 }
 
 impl Literal {
@@ -109,7 +70,6 @@ impl Literal {
 			Literal::RecordId(record_id_lit) => record_id_lit.is_static(),
 			Literal::Array(exprs) => exprs.iter().all(|x| x.is_static()),
 			Literal::Object(items) => items.iter().all(|x| x.value.is_static()),
-			Literal::Closure(_) => false,
 		}
 	}
 
@@ -155,7 +115,6 @@ impl Literal {
 			Literal::Uuid(uuid) => Value::Uuid(*uuid),
 			Literal::Geometry(geometry) => Value::Geometry(geometry.clone()),
 			Literal::File(file) => Value::File(file.clone()),
-			Literal::Closure(closure) => closure.compute(ctx).await?,
 		};
 		Ok(res)
 	}
@@ -181,7 +140,6 @@ impl PartialEq for Literal {
 			(Literal::Uuid(a), Literal::Uuid(b)) => a == b,
 			(Literal::Geometry(a), Literal::Geometry(b)) => a == b,
 			(Literal::File(a), Literal::File(b)) => a == b,
-			(Literal::Closure(a), Literal::Closure(b)) => a == b,
 			_ => false,
 		}
 	}
@@ -210,7 +168,6 @@ impl Hash for Literal {
 			Literal::Uuid(x) => x.hash(state),
 			Literal::Geometry(x) => x.hash(state),
 			Literal::File(x) => x.hash(state),
-			Literal::Closure(x) => x.hash(state),
 		}
 	}
 }
@@ -280,7 +237,6 @@ impl fmt::Display for Literal {
 			Literal::Uuid(uuid) => write!(f, "{uuid}"),
 			Literal::Geometry(geometry) => write!(f, "{geometry}"),
 			Literal::File(file) => write!(f, "{file}"),
-			Literal::Closure(closure) => write!(f, "{closure}"),
 		}
 	}
 }
@@ -289,15 +245,6 @@ impl fmt::Display for Literal {
 pub(crate) struct ObjectEntry {
 	pub key: String,
 	pub value: Expr,
-}
-
-impl VisitExpression for ObjectEntry {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.value.visit(visitor);
-	}
 }
 
 impl fmt::Display for ObjectEntry {

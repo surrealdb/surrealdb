@@ -179,6 +179,13 @@ pub(crate) enum Error {
 		message: String,
 	},
 
+	#[error(
+		"Incorrect selector for aggregate selection, expression `{expr}` within in selector cannot be aggregated in a group."
+	)]
+	InvalidAggregationSelector {
+		expr: String,
+	},
+
 	/// The URL is invalid
 	#[error("The URL `{0}` is invalid")]
 	#[cfg_attr(not(feature = "http"), expect(dead_code))]
@@ -1165,6 +1172,7 @@ pub(crate) enum Error {
 }
 
 impl Error {
+	#[cold]
 	#[track_caller]
 	pub fn unreachable<T: fmt::Display>(message: T) -> Error {
 		let location = std::panic::Location::caller();

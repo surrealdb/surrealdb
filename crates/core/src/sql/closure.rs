@@ -1,6 +1,5 @@
 use std::fmt;
 
-use crate::dbs::Variables;
 use crate::sql::{Expr, Kind, Param};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,19 +31,18 @@ impl fmt::Display for Closure {
 	}
 }
 
-impl From<Closure> for crate::val::Closure {
+impl From<Closure> for crate::expr::ClosureExpr {
 	fn from(v: Closure) -> Self {
 		Self {
 			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
 			returns: v.returns.map(Into::into),
 			body: v.body.into(),
-			vars: Variables::new(),
 		}
 	}
 }
 
-impl From<crate::val::Closure> for Closure {
-	fn from(v: crate::val::Closure) -> Self {
+impl From<crate::expr::ClosureExpr> for Closure {
+	fn from(v: crate::expr::ClosureExpr) -> Self {
 		Self {
 			args: v.args.into_iter().map(|(i, k)| (i.into(), k.into())).collect(),
 			returns: v.returns.map(Into::into),

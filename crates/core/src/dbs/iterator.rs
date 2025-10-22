@@ -913,7 +913,7 @@ impl Iterator {
 		let mut distinct = SyncDistinct::new(ctx);
 		// Process all prepared values
 		for (count, v) in mem::take(&mut self.entries).into_iter().enumerate() {
-			v.iterate(stk, ctx, &opt, stm, self, distinct.as_mut()).await?;
+			dbg!(v).iterate(stk, ctx, &opt, stm, self, distinct.as_mut()).await?;
 			// MOCK can create a large collection of iterators,
 			// we need to make space for possible cancellations
 			if ctx.is_done(count % 100 == 0).await? {
