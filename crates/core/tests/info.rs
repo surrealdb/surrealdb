@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use helpers::*;
 use regex::Regex;
-use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_types::ToSql;
 

@@ -19,6 +19,7 @@ use crate::sql::{
 	TopLevelExpr, UpdateStatement, UpsertStatement,
 };
 use crate::types::{PublicArray, PublicRecordIdKey, PublicUuid, PublicValue, PublicVariables};
+use crate::val::Value;
 
 /// utility function converting a `Value::String` into a `Expr::Table`
 fn value_to_table(value: PublicValue) -> Expr {
@@ -174,9 +175,6 @@ pub trait RpcProtocolV1: RpcContext {
 		Ok(DbResult::Other(PublicValue::None))
 	}
 
-	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of
-	// a string. This will allow returning refresh tokens as well as any additional
-	// credential resulting from signing up.
 	async fn signup(
 		&self,
 		session_id: Option<Uuid>,
@@ -196,7 +194,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let out: Result<PublicValue> =
 			crate::iam::signup::signup(self.kvs(), &mut session, params.into())
 				.await
-				.map(|v| v.token.clone().map(PublicValue::String).unwrap_or(PublicValue::None));
+				.and_then(|v| Value::from(v).try_into());
 
 		// Store the updated session
 		self.set_session(session_id, Arc::new(session));
@@ -206,9 +204,6 @@ pub trait RpcProtocolV1: RpcContext {
 		out.map(DbResult::Other).map_err(Into::into)
 	}
 
-	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of
-	// a string. This will allow returning refresh tokens as well as any additional
-	// credential resulting from signing in.
 	async fn signin(
 		&self,
 		session_id: Option<Uuid>,
@@ -228,7 +223,7 @@ pub trait RpcProtocolV1: RpcContext {
 		let out: Result<PublicValue> =
 			crate::iam::signin::signin(self.kvs(), &mut session, params.into())
 				.await
-				.map(|v| PublicValue::String(v.token.clone()));
+				.and_then(|v| Value::from(v).try_into());
 		// Store the updated session
 		self.set_session(session_id, Arc::new(session));
 		// Drop the mutex guard

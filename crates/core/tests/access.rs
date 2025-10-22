@@ -3,7 +3,7 @@
 mod helpers;
 use helpers::new_ds;
 use regex::Regex;
-use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_types::{Array, ToSql, Value};
 use tokio::time::Duration;
@@ -756,11 +756,7 @@ the database name matches", 			),
 			);
 
 			{
-				let ds = new_ds()
-					.await
-					.unwrap()
-					.with_auth_enabled(true)
-					;
+				let ds = new_ds().await.unwrap().with_auth_enabled(true);
 
 				let mut resp = ds.execute(&statement_setup, &sess_setup, None).await.unwrap();
 				let res = resp.remove(0).output();
