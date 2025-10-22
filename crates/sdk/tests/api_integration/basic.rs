@@ -77,7 +77,7 @@ pub async fn signup_record(new_db: impl CreateDb) {
 	let namespace = Ulid::new().to_string();
 	let database = Ulid::new().to_string();
 	db.use_ns(&namespace).use_db(&database).await.unwrap();
-	let access = Ulid::new().to_string();
+	let access = Ulid::new();
 	let sql = format!(
 		"
         DEFINE ACCESS `{access}` ON DB TYPE RECORD
@@ -150,7 +150,7 @@ pub async fn signin_record(new_db: impl CreateDb) {
 	let namespace = Ulid::new().to_string();
 	let database = Ulid::new().to_string();
 	db.use_ns(&namespace).use_db(&database).await.unwrap();
-	let access = Ulid::new().to_string();
+	let access = Ulid::new();
 	let email = format!("{access}@example.com");
 	let pass = "password123";
 	let sql = format!(
@@ -1766,13 +1766,59 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 }
 
 pub async fn refresh_tokens(new_db: impl CreateDb) {
+	// Enable the bearer access capability
+	// This only makes a difference for local engines. For remote engines, enable on the server.
 	let capabilities =
 		Capabilities::new().with_experimental_feature_allowed(ExperimentalFeature::BearerAccess);
 	let config = Config::new().capabilities(capabilities);
 	let (permit, db) = new_db.create_db(config).await;
-	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+	let namespace = Ulid::new().to_string();
+	let database = Ulid::new().to_string();
+	db.use_ns(&namespace).use_db(&database).await.unwrap();
+	let access = Ulid::new();
+	let email = format!("{access}@example.com");
+	let pass = "password123";
+	// Define the access grant with refresh tokens enabled
+	let sql = format!(
+		"
+        DEFINE ACCESS `{access}` ON DATABASE TYPE RECORD
+        SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+        SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+		WITH REFRESH
+		DURATION FOR SESSION 1d FOR TOKEN 15s
+    "
+	);
+	let response = db.query(sql).await.unwrap();
 	drop(permit);
-	db.query("RETURN true").await.unwrap().check().unwrap();
+	response.check().unwrap();
+	// Ensure signup returns a refresh token
+	let token = db
+		.signup(RecordAccess {
+			namespace: namespace.clone(),
+			database: database.clone(),
+			access: access.to_string(),
+			params: AuthParams {
+				pass: pass.to_string(),
+				email: email.clone(),
+			},
+		})
+		.await
+		.unwrap();
+	assert!(token.refresh.is_some());
+	// Ensure signin returns a refresh token
+	let token = db
+		.signin(RecordAccess {
+			namespace,
+			database,
+			access: access.to_string(),
+			params: AuthParams {
+				pass: pass.to_string(),
+				email,
+			},
+		})
+		.await
+		.unwrap();
+	assert!(token.refresh.is_some());
 }
 
 define_include_tests!(basic => {
