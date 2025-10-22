@@ -701,10 +701,10 @@ impl DatabaseProvider for Transaction {
 					.into());
 				}
 
-				return Err(Error::DbNotFound {
+				Err(Error::DbNotFound {
 					name: db.to_owned(),
 				}
-				.into());
+				.into())
 			}
 		}
 	}

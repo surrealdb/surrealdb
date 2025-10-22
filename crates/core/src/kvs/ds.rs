@@ -1496,9 +1496,9 @@ impl Datastore {
 				Some(Error::TxKeyAlreadyExists) => {
 					DbResultError::InternalError("Key already exists in transaction".to_string())
 				}
-				Some(Error::TxRetryable) => {
-					DbResultError::InternalError("Transaction conflict, retry required".to_string())
-				}
+				Some(Error::TxRetryable(e)) => DbResultError::InternalError(format!(
+					"Transaction conflict: {e} - retry required"
+				)),
 				Some(Error::NsEmpty) => {
 					DbResultError::InvalidParams("No namespace specified".to_string())
 				}
