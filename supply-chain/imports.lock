@@ -43,6 +43,41 @@ user-id = 267
 user-login = "tarcieri"
 user-name = "Tony Arcieri"
 
+[[publisher.async-graphql]]
+version = "7.0.17"
+when = "2025-05-24"
+user-id = 66052
+user-login = "sunli829"
+user-name = "Sunli"
+
+[[publisher.async-graphql-axum]]
+version = "7.0.17"
+when = "2025-05-24"
+user-id = 66052
+user-login = "sunli829"
+user-name = "Sunli"
+
+[[publisher.async-graphql-derive]]
+version = "7.0.17"
+when = "2025-05-24"
+user-id = 66052
+user-login = "sunli829"
+user-name = "Sunli"
+
+[[publisher.async-graphql-parser]]
+version = "7.0.17"
+when = "2025-05-24"
+user-id = 66052
+user-login = "sunli829"
+user-name = "Sunli"
+
+[[publisher.async-graphql-value]]
+version = "7.0.17"
+when = "2025-05-24"
+user-id = 66052
+user-login = "sunli829"
+user-name = "Sunli"
+
 [[publisher.async-trait]]
 version = "0.1.88"
 when = "2025-03-15"
@@ -699,22 +734,22 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb]]
-version = "3.0.0-alpha.10"
-when = "2025-09-23"
+version = "3.0.0-alpha.11"
+when = "2025-10-15"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-core]]
-version = "3.0.0-alpha.10"
-when = "2025-09-23"
+version = "3.0.0-alpha.11"
+when = "2025-10-15"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-protocol]]
-version = "0.4.0"
-when = "2025-08-21"
+version = "0.5.1"
+when = "2025-10-13"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -727,15 +762,15 @@ user-login = "mumoshu"
 user-name = "Yusuke Kuoka"
 
 [[publisher.surrealdb-types]]
-version = "3.0.0-alpha.10"
-when = "2025-09-23"
+version = "3.0.0-alpha.11"
+when = "2025-10-15"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-types-derive]]
-version = "3.0.0-alpha.10"
-when = "2025-09-23"
+version = "3.0.0-alpha.11"
+when = "2025-10-15"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
