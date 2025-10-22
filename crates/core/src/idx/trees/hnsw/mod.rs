@@ -9,7 +9,7 @@ use anyhow::Result;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use reblessive::tree::Stk;
-use revision::{Revisioned, revisioned};
+use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::{DatabaseDefinition, HnswParams};
@@ -54,13 +54,13 @@ impl KVValue for HnswState {
 	#[inline]
 	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
 		let mut val = Vec::new();
-		self.serialize_revisioned(&mut val)?;
+		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
 		Ok(val)
 	}
 
 	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
-		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
+		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
 
@@ -452,8 +452,8 @@ mod tests {
 	};
 	use crate::ctx::{Context, MutableContext};
 	use crate::idx::IndexKeyBase;
-	use crate::idx::docids::DocId;
 	use crate::idx::planner::checker::HnswConditionChecker;
+	use crate::idx::seqdocids::DocId;
 	use crate::idx::trees::hnsw::flavor::HnswFlavor;
 	use crate::idx::trees::hnsw::index::HnswIndex;
 	use crate::idx::trees::hnsw::{ElementId, HnswSearch};

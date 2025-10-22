@@ -1,4 +1,5 @@
 use std::fmt::{self, Display, Formatter, Write as _};
+use std::ops::Bound;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -6,11 +7,11 @@ use reblessive::tree::Stk;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::escape::{EscapeKey, EscapeRid};
-use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
+use crate::expr::expression::VisitExpression;
 use crate::expr::literal::ObjectEntry;
-use crate::expr::{Expr, FlowResultExt as _, RecordIdKeyRangeLit};
-use crate::val::{Array, Object, RecordIdKey, Strand, Uuid};
+use crate::expr::{Expr, FlowResultExt as _, Kind, KindLiteral, RecordIdKeyRangeLit};
+use crate::fmt::{EscapeKey, EscapeRid, Fmt, Pretty, is_pretty, pretty_indent};
+use crate::val::{Array, Object, RecordIdKey, Uuid};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RecordIdKeyGen {
@@ -20,7 +21,7 @@ pub enum RecordIdKeyGen {
 }
 
 impl RecordIdKeyGen {
-	pub fn compute(&self) -> RecordIdKey {
+	pub(crate) fn compute(&self) -> RecordIdKey {
 		match self {
 			RecordIdKeyGen::Rand => RecordIdKey::rand(),
 			RecordIdKeyGen::Ulid => RecordIdKey::ulid(),
@@ -30,9 +31,9 @@ impl RecordIdKeyGen {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum RecordIdKeyLit {
+pub(crate) enum RecordIdKeyLit {
 	Number(i64),
-	String(Strand),
+	String(String),
 	Uuid(Uuid),
 	Array(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
@@ -40,9 +41,53 @@ pub enum RecordIdKeyLit {
 	Range(Box<RecordIdKeyRangeLit>),
 }
 
+impl RecordIdKeyLit {
+	pub(crate) fn kind_supported(kind: &Kind) -> bool {
+		match kind {
+			Kind::Any => true,
+			Kind::Number => true,
+			Kind::Int => true,
+			Kind::String => true,
+			Kind::Uuid => true,
+			Kind::Array(_, _) => true,
+			Kind::Set(_, _) => true,
+			Kind::Object => true,
+			Kind::Literal(l) => matches!(
+				l,
+				KindLiteral::Integer(_)
+					| KindLiteral::String(_)
+					| KindLiteral::Array(_)
+					| KindLiteral::Object(_)
+			),
+			Kind::Either(x) => x.iter().all(RecordIdKeyLit::kind_supported),
+			_ => false,
+		}
+	}
+}
+
 impl From<RecordIdKeyRangeLit> for RecordIdKeyLit {
 	fn from(v: RecordIdKeyRangeLit) -> Self {
 		Self::Range(Box::new(v))
+	}
+}
+
+impl VisitExpression for RecordIdKeyLit {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		match self {
+			RecordIdKeyLit::Array(array) => {
+				array.iter().for_each(|expr| expr.visit(visitor));
+			}
+			RecordIdKeyLit::Object(object) => {
+				object.iter().for_each(|entry| entry.visit(visitor));
+			}
+			RecordIdKeyLit::Range(range) => {
+				range.visit(visitor);
+			}
+			_ => {}
+		}
 	}
 }
 
@@ -120,7 +165,7 @@ impl RecordIdKeyLit {
 	) -> Result<RecordIdKey> {
 		match self {
 			RecordIdKeyLit::Number(v) => Ok(RecordIdKey::Number(*v)),
-			RecordIdKeyLit::String(v) => Ok(RecordIdKey::String(v.clone().into_string())),
+			RecordIdKeyLit::String(v) => Ok(RecordIdKey::String(v.clone())),
 			RecordIdKeyLit::Uuid(v) => Ok(RecordIdKey::Uuid(*v)),
 			RecordIdKeyLit::Array(v) => {
 				let mut res = Vec::new();
@@ -145,6 +190,41 @@ impl RecordIdKeyLit {
 			RecordIdKeyLit::Range(v) => {
 				let range = v.compute(stk, ctx, opt, doc).await?;
 				Ok(RecordIdKey::Range(Box::new(range)))
+			}
+		}
+	}
+}
+
+impl From<crate::types::PublicRecordIdKey> for RecordIdKeyLit {
+	fn from(value: crate::types::PublicRecordIdKey) -> Self {
+		match value {
+			crate::types::PublicRecordIdKey::Number(x) => Self::Number(x),
+			crate::types::PublicRecordIdKey::String(x) => Self::String(x),
+			crate::types::PublicRecordIdKey::Uuid(x) => Self::Uuid(x.into()),
+			crate::types::PublicRecordIdKey::Array(x) => {
+				Self::Array(x.into_iter().map(Expr::from_public_value).collect())
+			}
+			crate::types::PublicRecordIdKey::Object(x) => Self::Object(
+				x.into_iter()
+					.map(|(k, v)| ObjectEntry {
+						key: k,
+						value: Expr::from_public_value(v),
+					})
+					.collect(),
+			),
+			crate::types::PublicRecordIdKey::Range(x) => {
+				Self::Range(Box::new(RecordIdKeyRangeLit {
+					start: match x.start {
+						Bound::Included(x) => Bound::Included(Self::from(x)),
+						Bound::Excluded(x) => Bound::Excluded(Self::from(x)),
+						Bound::Unbounded => Bound::Unbounded,
+					},
+					end: match x.end {
+						Bound::Included(x) => Bound::Included(Self::from(x)),
+						Bound::Excluded(x) => Bound::Excluded(Self::from(x)),
+						Bound::Unbounded => Bound::Unbounded,
+					},
+				}))
 			}
 		}
 	}

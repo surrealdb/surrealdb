@@ -20,7 +20,7 @@ use crate::val::record::Record;
 /// SurrealDB Node provider.
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-pub trait NodeProvider {
+pub(crate) trait NodeProvider {
 	/// Retrieve all node definitions in a datastore.
 	async fn all_nodes(&self) -> Result<Arc<[Node]>>;
 
@@ -31,7 +31,7 @@ pub trait NodeProvider {
 /// Namespace data access provider.
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-pub trait NamespaceProvider {
+pub(crate) trait NamespaceProvider {
 	/// Retrieve all namespace definitions in a datastore.
 	async fn all_ns(&self) -> Result<Arc<[NamespaceDefinition]>>;
 
@@ -84,7 +84,7 @@ pub trait NamespaceProvider {
 /// Database data access provider.
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-pub trait DatabaseProvider: NamespaceProvider {
+pub(crate) trait DatabaseProvider: NamespaceProvider {
 	/// Retrieve all database definitions in a namespace.
 	async fn all_db(&self, ns: NamespaceId) -> Result<Arc<[DatabaseDefinition]>>;
 
@@ -250,7 +250,7 @@ pub trait DatabaseProvider: NamespaceProvider {
 /// Table data access provider.
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-pub trait TableProvider {
+pub(crate) trait TableProvider {
 	/// Retrieve all table definitions for a specific database.
 	async fn all_tb(
 		&self,
@@ -517,7 +517,7 @@ pub trait TableProvider {
 /// User data access provider.
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-pub trait UserProvider {
+pub(crate) trait UserProvider {
 	/// Retrieve all user definitions in a namespace.
 	async fn all_root_users(&self) -> Result<Arc<[UserDefinition]>>;
 
@@ -595,7 +595,7 @@ pub trait UserProvider {
 
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-pub trait AuthorisationProvider {
+pub(crate) trait AuthorisationProvider {
 	/// Retrieve all ROOT level accesses in a datastore.
 	async fn all_root_accesses(&self) -> Result<Arc<[catalog::AccessDefinition]>>;
 
@@ -692,7 +692,7 @@ pub trait AuthorisationProvider {
 /// API data access provider.
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-pub trait ApiProvider {
+pub(crate) trait ApiProvider {
 	/// Retrieve all api definitions for a specific database.
 	async fn all_db_apis(
 		&self,
@@ -706,7 +706,7 @@ pub trait ApiProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ap: &str,
-	) -> Result<Arc<catalog::ApiDefinition>>;
+	) -> Result<Option<Arc<catalog::ApiDefinition>>>;
 
 	/// Put an api definition into a database.
 	async fn put_db_api(
@@ -720,7 +720,7 @@ pub trait ApiProvider {
 /// Bucket data access provider.
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-pub trait BucketProvider {
+pub(crate) trait BucketProvider {
 	/// Retrieve all bucket definitions for a specific database.
 	async fn all_db_buckets(
 		&self,
@@ -755,7 +755,7 @@ pub trait BucketProvider {
 /// The catalog provider is a trait that provides access to the catalog of the datastore.
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-pub trait CatalogProvider:
+pub(crate) trait CatalogProvider:
 	NodeProvider
 	+ NamespaceProvider
 	+ DatabaseProvider

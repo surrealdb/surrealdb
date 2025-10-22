@@ -48,11 +48,13 @@ enum SocketMsg {
 	SendAwait {
 		method: String,
 		args: serde_json::Value,
+		session_id: Option<String>,
 		channel: oneshot::Sender<serde_json::Value>,
 	},
 	Send {
 		method: String,
 		args: serde_json::Value,
+		session_id: Option<String>,
 	},
 	Close {
 		channel: oneshot::Sender<()>,
@@ -140,7 +142,7 @@ impl Socket {
 
 	fn to_msg(format: Format, message: &serde_json::Value) -> Result<Message> {
 		match format {
-			Format::Json => Ok(Message::Text(serde_json::to_string(message)?)),
+			Format::Json => Ok(Message::Text(serde_json::to_string(message)?.into())),
 			Format::Cbor => {
 				// For tests we need to convert the serde_json::Value
 				// to a SurrealQL value, so that record ids, uuids,
@@ -152,7 +154,7 @@ impl Socket {
 				// Then we convert the SurrealQL in to CBOR.
 				let cbor = surrealdb_core::rpc::format::cbor::encode(surrealql)?;
 				// THen output the message.
-				Ok(Message::Binary(cbor))
+				Ok(Message::Binary(cbor.into()))
 			}
 		}
 	}
@@ -178,9 +180,9 @@ impl Socket {
 						// a serde_json::Value so that test assertions work.
 						// First of all we deserialize the CBOR data.
 						// Then we convert it to a SurrealQL Value.
-						let msg = surrealdb_core::rpc::format::cbor::decode(msg.as_slice())?;
+						let msg = surrealdb_core::rpc::format::cbor::decode(msg.as_ref())?;
 						// Then we convert the SurrealQL to JSON.
-						let msg = msg.into_json_value().unwrap();
+						let msg = msg.into_json_value();
 						// Then output the response.
 						debug!("Received message: {msg:?}");
 						Ok(Some(msg))
@@ -215,6 +217,30 @@ impl Socket {
 		}
 	}
 
+	async fn send_msg_with_session(
+		stream: &mut WsStream,
+		id: u64,
+		format: Format,
+		method: &str,
+		args: serde_json::Value,
+		session_id: &str,
+	) -> Result<()> {
+		let msg = json!({
+			"id": id,
+			"method": method,
+			"params": args,
+			"session": session_id,
+		});
+
+		let msg = Self::to_msg(format, &msg)?;
+
+		match tokio::time::timeout(Duration::from_millis(500), stream.send(msg)).await {
+			Ok(Ok(_)) => Ok(()),
+			Ok(Err(e)) => Err(format!("error sending message: {e}").into()),
+			Err(_) => Err("sending message timed-out".to_string().into()),
+		}
+	}
+
 	async fn ws_task(
 		mut recv: Receiver<SocketMsg>,
 		mut stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
@@ -232,16 +258,24 @@ impl Socket {
 						return Ok(());
 					};
 					match msg{
-						SocketMsg::SendAwait { method, args, channel } => {
+						SocketMsg::SendAwait { method, args, session_id, channel } => {
 							let id = next_id;
 							next_id += 1;
 							awaiting.insert(id,channel);
-							Self::send_msg(&mut stream,id,format,&method, args).await?;
+							if let Some(session_id) = session_id {
+								Self::send_msg_with_session(&mut stream,id,format,&method, args, &session_id).await?;
+							} else {
+								Self::send_msg(&mut stream,id,format,&method, args).await?;
+							}
 						},
-						SocketMsg::Send { method, args } => {
+						SocketMsg::Send { method, args, session_id } => {
 							let id = next_id;
 							next_id += 1;
-							Self::send_msg(&mut stream,id,format,&method, args).await?;
+							if let Some(session_id) = session_id {
+								Self::send_msg_with_session(&mut stream,id,format,&method, args, &session_id).await?;
+							} else {
+								Self::send_msg(&mut stream,id,format,&method, args).await?;
+							}
 						},
 						SocketMsg::Close{ channel } => {
 							stream.close(None).await?;
@@ -277,12 +311,44 @@ impl Socket {
 		method: &str,
 		params: serde_json::Value,
 	) -> Result<serde_json::Value> {
+		tracing::info!("Sending request: {method} {params:?}");
 		let (send, recv) = oneshot::channel();
 		if (self
 			.sender
 			.send(SocketMsg::SendAwait {
 				method: method.to_string(),
 				args: params,
+				session_id: None,
+				channel: send,
+			})
+			.await)
+			.is_err()
+		{
+			return Err("websocket task quit unexpectedly".to_string().into());
+		}
+
+		match recv.await {
+			Ok(x) => Ok(x),
+			Err(_) => Err("websocket task dropped request unexpectedly".to_string().into()),
+		}
+	}
+
+	/// Send a text or binary message with a session ID and receive a response from the WebSocket
+	/// server
+	pub async fn send_request_with_session(
+		&self,
+		method: &str,
+		params: serde_json::Value,
+		session_id: &str,
+	) -> Result<serde_json::Value> {
+		tracing::info!("Sending request with session {session_id}: {method} {params:?}");
+		let (send, recv) = oneshot::channel();
+		if (self
+			.sender
+			.send(SocketMsg::SendAwait {
+				method: method.to_string(),
+				args: params,
+				session_id: Some(session_id.to_string()),
 				channel: send,
 			})
 			.await)

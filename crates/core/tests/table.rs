@@ -2,7 +2,7 @@ mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::err::Error;
+use surrealdb_core::rpc::DbResultError;
 use surrealdb_core::syn;
 
 use crate::helpers::skip_ok;
@@ -73,7 +73,7 @@ async fn define_foreign_table() -> Result<()> {
 		"[
 			{
 				age: 39,
-				average: 72,
+				average: 72dec,
 				count: 1,
 				id: person_by_age:[39],
 				max: 72,
@@ -83,7 +83,7 @@ async fn define_foreign_table() -> Result<()> {
 		]",
 	)
 	.unwrap();
-	assert_ne!(tmp, val); // Temporarily ignore checking metadata fields
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -113,7 +113,7 @@ async fn define_foreign_table() -> Result<()> {
 		]",
 	)
 	.unwrap();
-	assert_ne!(tmp, val); // Temporarily ignore checking metadata fields
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -143,10 +143,10 @@ async fn define_foreign_table() -> Result<()> {
 		]",
 	)
 	.unwrap();
-	assert_ne!(tmp, val); // Temporarily ignore checking metadata fields
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result.unwrap_err();
-	assert!(matches!(tmp.downcast_ref(), Some(Error::InvalidAggregation { .. })));
+	assert_eq!(tmp, DbResultError::InternalError("Incorrect arguments for aggregate function math::mean() on table 'person_by_age'. This function expects a number but found 'test'".to_string()));
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -163,7 +163,7 @@ async fn define_foreign_table() -> Result<()> {
 		]",
 	)
 	.unwrap();
-	assert_ne!(tmp, val); // Temporarily ignore checking metadata fields
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }

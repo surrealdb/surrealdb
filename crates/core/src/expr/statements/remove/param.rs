@@ -6,12 +6,13 @@ use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Value};
+use crate::expr::{Base, Value};
+use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct RemoveParamStatement {
-	pub name: Ident,
+pub(crate) struct RemoveParamStatement {
+	pub name: String,
 	pub if_exists: bool,
 }
 
@@ -50,7 +51,7 @@ impl Display for RemoveParamStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " ${}", self.name)?;
+		write!(f, " ${}", EscapeKwFreeIdent(&self.name))?;
 		Ok(())
 	}
 }

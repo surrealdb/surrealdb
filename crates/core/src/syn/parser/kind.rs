@@ -5,12 +5,12 @@ use reblessive::Stk;
 use super::basic::NumberToken;
 use super::mac::unexpected;
 use super::{ParseResult, Parser};
+use crate::sql::Kind;
 use crate::sql::kind::{GeometryKind, KindLiteral};
-use crate::sql::{Ident, Kind};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::expected;
 use crate::syn::token::{Glued, Keyword, Span, TokenKind, t};
-use crate::val::{Duration, Strand};
+use crate::types::PublicDuration;
 
 impl Parser<'_> {
 	/// Parse a kind production.
@@ -27,14 +27,13 @@ impl Parser<'_> {
 	pub(crate) async fn parse_inner_kind(&mut self, stk: &mut Stk) -> ParseResult<Kind> {
 		match self.parse_inner_single_kind(stk).await? {
 			Kind::Any => Ok(Kind::Any),
-			Kind::Option(k) => Ok(Kind::Option(k)),
 			first => {
 				if self.peek_kind() == t!("|") {
 					let mut kind = vec![first];
 					while self.eat(t!("|")) {
 						kind.push(stk.run(|ctx| self.parse_concrete_kind(ctx)).await?);
 					}
-					let kind = Kind::Either(kind);
+					let kind = Kind::either(kind);
 					Ok(kind)
 				} else {
 					Ok(first)
@@ -54,17 +53,15 @@ impl Parser<'_> {
 				self.pop_peek();
 
 				let delim = expected!(self, t!("<")).span;
-				let mut first = stk.run(|ctx| self.parse_concrete_kind(ctx)).await?;
+				let mut kinds =
+					vec![Kind::None, stk.run(|ctx| self.parse_concrete_kind(ctx)).await?];
 				if self.peek_kind() == t!("|") {
-					let mut kind = vec![first];
 					while self.eat(t!("|")) {
-						kind.push(stk.run(|ctx| self.parse_concrete_kind(ctx)).await?);
+						kinds.push(stk.run(|ctx| self.parse_concrete_kind(ctx)).await?);
 					}
-
-					first = Kind::Either(kind);
 				}
 				self.expect_closing_delimiter(t!(">"), delim)?;
-				Ok(Kind::Option(Box::new(first)))
+				Ok(Kind::either(kinds))
 			}
 			_ => stk.run(|ctx| self.parse_concrete_kind(ctx)).await,
 		}
@@ -80,6 +77,7 @@ impl Parser<'_> {
 		let next = self.next();
 		match next.kind {
 			t!("BOOL") => Ok(Kind::Bool),
+			t!("NONE") => Ok(Kind::None),
 			t!("NULL") => Ok(Kind::Null),
 			t!("BYTES") => Ok(Kind::Bytes),
 			t!("DATETIME") => Ok(Kind::Datetime),
@@ -98,15 +96,27 @@ impl Parser<'_> {
 			t!("RECORD") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
-					let mut tables =
-						vec![self.next_token_value::<Ident>().map(|i| i.into_string())?];
+					let mut tables = vec![self.parse_ident()?];
 					while self.eat(t!("|")) {
-						tables.push(self.next_token_value::<Ident>().map(|i| i.into_string())?);
+						tables.push(self.parse_ident()?);
 					}
 					self.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::Record(tables))
 				} else {
 					Ok(Kind::Record(Vec::new()))
+				}
+			}
+			t!("TABLE") => {
+				let span = self.peek().span;
+				if self.eat(t!("<")) {
+					let mut tables = vec![self.parse_ident()?];
+					while self.eat(t!("|")) {
+						tables.push(self.parse_ident()?);
+					}
+					self.expect_closing_delimiter(t!(">"), span)?;
+					Ok(Kind::Table(tables))
+				} else {
+					Ok(Kind::Table(Vec::new()))
 				}
 			}
 			t!("GEOMETRY") => {
@@ -144,16 +154,12 @@ impl Parser<'_> {
 					Ok(Kind::Set(Box::new(Kind::Any), None))
 				}
 			}
-			t!("NONE") => {
-				unexpected!(self, next, "a kind name.", => "to define a field that can be NONE, use option<type_name> instead.")
-			}
 			t!("FILE") => {
 				let span = self.peek().span;
 				if self.eat(t!("<")) {
-					let mut buckets =
-						vec![self.next_token_value::<Ident>().map(|i| i.into_string())?];
+					let mut buckets = vec![self.parse_ident()?];
 					while self.eat(t!("|")) {
-						buckets.push(self.next_token_value::<Ident>().map(|i| i.into_string())?);
+						buckets.push(self.parse_ident()?);
 					}
 					self.expect_closing_delimiter(t!(">"), span)?;
 					Ok(Kind::File(buckets))
@@ -195,8 +201,8 @@ impl Parser<'_> {
 				self.pop_peek();
 				Ok(KindLiteral::Bool(false))
 			}
-			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
-				let s = self.next_token_value::<Strand>()?;
+			t!("'") | t!("\"") => {
+				let s = self.parse_string_lit()?;
 				Ok(KindLiteral::String(s))
 			}
 			t!("+") | t!("-") | TokenKind::Glued(Glued::Number) => {
@@ -216,7 +222,9 @@ impl Parser<'_> {
 					compound::Numeric::Integer(x) => KindLiteral::Integer(x),
 					compound::Numeric::Float(x) => KindLiteral::Float(x),
 					compound::Numeric::Decimal(x) => KindLiteral::Decimal(x),
-					compound::Numeric::Duration(x) => KindLiteral::Duration(Duration(x)),
+					compound::Numeric::Duration(x) => {
+						KindLiteral::Duration(PublicDuration::from_std(x))
+					}
 				};
 				Ok(v)
 			}
@@ -253,7 +261,7 @@ impl Parser<'_> {
 				| t!("false")
 				| t!("'") | t!("\"")
 				| t!("+") | t!("-")
-				| TokenKind::Glued(Glued::Duration | Glued::Strand | Glued::Number)
+				| TokenKind::Glued(Glued::Duration | Glued::Number)
 				| TokenKind::Digits
 				| t!("{") | t!("[")
 		)
@@ -263,6 +271,7 @@ impl Parser<'_> {
 #[cfg(test)]
 mod tests {
 	use reblessive::Stack;
+	use rstest::rstest;
 
 	use super::*;
 
@@ -272,306 +281,56 @@ mod tests {
 		stack.enter(|ctx| parser.parse_inner_kind(ctx)).finish()
 	}
 
-	#[test]
-	fn kind_any() {
-		let sql = "any";
+	#[rstest]
+	#[case::any("any", "any", Kind::Any)]
+	#[case::none("none", "none", Kind::None)]
+	#[case::null("null", "null", Kind::Null)]
+	#[case::bool("bool", "bool", Kind::Bool)]
+	#[case::bytes("bytes", "bytes", Kind::Bytes)]
+	#[case::datetime("datetime", "datetime", Kind::Datetime)]
+	#[case::decimal("decimal", "decimal", Kind::Decimal)]
+	#[case::duration("duration", "duration", Kind::Duration)]
+	#[case::float("float", "float", Kind::Float)]
+	#[case::number("number", "number", Kind::Number)]
+	#[case::object("object", "object", Kind::Object)]
+	#[case::point("point", "geometry<point>", Kind::Geometry(vec![GeometryKind::Point]))]
+	#[case::string("string", "string", Kind::String)]
+	#[case::uuid("uuid", "uuid", Kind::Uuid)]
+	#[case::either("int | float", "int | float", Kind::Either(vec![Kind::Int, Kind::Float]))]
+	#[case::record("record", "record", Kind::Record(vec![]))]
+	#[case::record_one("record<person>", "record<person>", Kind::Record(vec!["person".to_owned()]))]
+	#[case::record_many("record<person | animal>", "record<person | animal>", Kind::Record(vec!["person".to_owned(), "animal".to_owned()]))]
+	#[case::table("table", "table", Kind::Table(vec![]))]
+	#[case::table_one("table<person>", "table<person>", Kind::Table(vec!["person".to_owned()]))]
+	#[case::table_many("table<person | animal>", "table<person | animal>", Kind::Table(vec!["person".to_owned(), "animal".to_owned()]))]
+	#[case::geometry("geometry", "geometry", Kind::Geometry(vec![]))]
+	#[case::geometry_one("geometry<point>", "geometry<point>", Kind::Geometry(vec![GeometryKind::Point]))]
+	#[case::geometry_many("geometry<point | multipoint>", "geometry<point | multipoint>", Kind::Geometry(vec![GeometryKind::Point, GeometryKind::MultiPoint]))]
+	#[case::option_one("option<int>", "none | int", Kind::Either(vec![Kind::None, Kind::Int]))]
+	#[case::option_many("option<int | float>", "none | int | float", Kind::Either(vec![Kind::None, Kind::Int, Kind::Float]))]
+	#[case::none_tuple("none | int | float", "none | int | float", Kind::Either(vec![Kind::None, Kind::Int, Kind::Float]))]
+	#[case::array_any("array", "array", Kind::Array(Box::new(Kind::Any), None))]
+	#[case::array_some("array<float>", "array<float>", Kind::Array(Box::new(Kind::Float), None))]
+	#[case::array_some_size(
+		"array<float, 10>",
+		"array<float, 10>",
+		Kind::Array(Box::new(Kind::Float), Some(10))
+	)]
+	#[case::set_any("set", "set", Kind::Set(Box::new(Kind::Any), None))]
+	#[case::set_some("set<float>", "set<float>", Kind::Set(Box::new(Kind::Float), None))]
+	#[case::set_some_size(
+		"set<float, 10>",
+		"set<float, 10>",
+		Kind::Set(Box::new(Kind::Float), Some(10))
+	)]
+	#[case::function_any("function", "function", Kind::Function(None, None))]
+	#[case::file_record_any("file", "file", Kind::File(vec![]))]
+	#[case::file_record_one("file<one>", "file<one>", Kind::File(vec!["one".to_owned()]))]
+	#[case::file_record_many("file<one | two>", "file<one | two>", Kind::File(vec!["one".to_string(), "two".to_string()]))]
+	fn test_kind(#[case] sql: &str, #[case] expected_str: &str, #[case] expected_kind: Kind) {
 		let res = kind(sql);
 		let out = res.unwrap();
-		assert_eq!("any", format!("{}", out));
-		assert_eq!(out, Kind::Any);
-	}
-
-	#[test]
-	fn kind_null() {
-		let sql = "null";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("null", format!("{}", out));
-		assert_eq!(out, Kind::Null);
-	}
-
-	#[test]
-	fn kind_bool() {
-		let sql = "bool";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("bool", format!("{}", out));
-		assert_eq!(out, Kind::Bool);
-	}
-
-	#[test]
-	fn kind_bytes() {
-		let sql = "bytes";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("bytes", format!("{}", out));
-		assert_eq!(out, Kind::Bytes);
-	}
-
-	#[test]
-	fn kind_datetime() {
-		let sql = "datetime";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("datetime", format!("{}", out));
-		assert_eq!(out, Kind::Datetime);
-	}
-
-	#[test]
-	fn kind_decimal() {
-		let sql = "decimal";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("decimal", format!("{}", out));
-		assert_eq!(out, Kind::Decimal);
-	}
-
-	#[test]
-	fn kind_duration() {
-		let sql = "duration";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("duration", format!("{}", out));
-		assert_eq!(out, Kind::Duration);
-	}
-
-	#[test]
-	fn kind_float() {
-		let sql = "float";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("float", format!("{}", out));
-		assert_eq!(out, Kind::Float);
-	}
-
-	#[test]
-	fn kind_number() {
-		let sql = "number";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("number", format!("{}", out));
-		assert_eq!(out, Kind::Number);
-	}
-
-	#[test]
-	fn kind_object() {
-		let sql = "object";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("object", format!("{}", out));
-		assert_eq!(out, Kind::Object);
-	}
-
-	#[test]
-	fn kind_point() {
-		let sql = "point";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("geometry<point>", format!("{}", out));
-		assert_eq!(out, Kind::Geometry(vec![GeometryKind::Point]));
-	}
-
-	#[test]
-	fn kind_string() {
-		let sql = "string";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("string", format!("{}", out));
-		assert_eq!(out, Kind::String);
-	}
-
-	#[test]
-	fn kind_uuid() {
-		let sql = "uuid";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("uuid", format!("{}", out));
-		assert_eq!(out, Kind::Uuid);
-	}
-
-	#[test]
-	fn kind_either() {
-		let sql = "int | float";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("int | float", format!("{}", out));
-		assert_eq!(out, Kind::Either(vec![Kind::Int, Kind::Float]));
-	}
-
-	#[test]
-	fn kind_record_any() {
-		let sql = "record";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("record", format!("{}", out));
-		assert_eq!(out, Kind::Record(vec![]));
-	}
-
-	#[test]
-	fn kind_record_one() {
-		let sql = "record<person>";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("record<person>", format!("{}", out));
-		assert_eq!(out, Kind::Record(vec!["person".to_owned()]));
-	}
-
-	#[test]
-	fn kind_record_many() {
-		let sql = "record<person | animal>";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("record<person | animal>", format!("{}", out));
-		assert_eq!(out, Kind::Record(vec!["person".to_owned(), "animal".to_owned()]));
-	}
-
-	#[test]
-	fn kind_geometry_any() {
-		let sql = "geometry";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("geometry", format!("{}", out));
-		assert_eq!(out, Kind::Geometry(vec![]));
-	}
-
-	#[test]
-	fn kind_geometry_one() {
-		let sql = "geometry<point>";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("geometry<point>", format!("{}", out));
-		assert_eq!(out, Kind::Geometry(vec![GeometryKind::Point]));
-	}
-
-	#[test]
-	fn kind_geometry_many() {
-		let sql = "geometry<point | multipoint>";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("geometry<point | multipoint>", format!("{}", out));
-		assert_eq!(out, Kind::Geometry(vec![GeometryKind::Point, GeometryKind::MultiPoint]));
-	}
-
-	#[test]
-	fn kind_option_one() {
-		let sql = "option<int>";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("option<int>", format!("{}", out));
-		assert_eq!(out, Kind::Option(Box::new(Kind::Int)));
-	}
-
-	#[test]
-	fn kind_option_many() {
-		let sql = "option<int | float>";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("option<int | float>", format!("{}", out));
-		assert_eq!(out, Kind::Option(Box::new(Kind::Either(vec![Kind::Int, Kind::Float]))));
-	}
-
-	#[test]
-	fn kind_array_any() {
-		let sql = "array";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("array", format!("{}", out));
-		assert_eq!(out, Kind::Array(Box::new(Kind::Any), None));
-	}
-
-	#[test]
-	fn kind_array_some() {
-		let sql = "array<float>";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("array<float>", format!("{}", out));
-		assert_eq!(out, Kind::Array(Box::new(Kind::Float), None));
-	}
-
-	#[test]
-	fn kind_array_some_size() {
-		let sql = "array<float, 10>";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("array<float, 10>", format!("{}", out));
-		assert_eq!(out, Kind::Array(Box::new(Kind::Float), Some(10)));
-	}
-
-	#[test]
-	fn kind_set_any() {
-		let sql = "set";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("set", format!("{}", out));
-		assert_eq!(out, Kind::Set(Box::new(Kind::Any), None));
-	}
-
-	#[test]
-	fn kind_set_some() {
-		let sql = "set<float>";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("set<float>", format!("{}", out));
-		assert_eq!(out, Kind::Set(Box::new(Kind::Float), None));
-	}
-
-	#[test]
-	fn kind_set_some_size() {
-		let sql = "set<float, 10>";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("set<float, 10>", format!("{}", out));
-		assert_eq!(out, Kind::Set(Box::new(Kind::Float), Some(10)));
-	}
-
-	#[test]
-	fn kind_union_literal_object() {
-		let sql = "{ status: 'ok', data: object } | { status: string, message: string }";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!(
-			"{ data: object, status: 'ok' } | { message: string, status: string }",
-			format!("{}", out)
-		);
-		assert_eq!(
-			out,
-			Kind::Either(vec![
-				Kind::Literal(KindLiteral::Object(map! {
-					"status".to_string() => Kind::Literal(KindLiteral::String("ok".into())),
-					"data".to_string() => Kind::Object,
-				})),
-				Kind::Literal(KindLiteral::Object(map! {
-					"status".to_string() => Kind::String,
-					"message".to_string() => Kind::String,
-				})),
-			])
-		);
-	}
-
-	#[test]
-	fn file_record_any() {
-		let sql = "file";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("file", format!("{}", out));
-		assert_eq!(out, Kind::File(vec![]));
-	}
-
-	#[test]
-	fn file_record_one() {
-		let sql = "file<one>";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("file<one>", format!("{}", out));
-		assert_eq!(out, Kind::File(vec!["one".to_owned()]));
-	}
-
-	#[test]
-	fn file_record_many() {
-		let sql = "file<one | two>";
-		let res = kind(sql);
-		let out = res.unwrap();
-		assert_eq!("file<one | two>", format!("{}", out));
-		assert_eq!(out, Kind::File(vec!["one".to_string(), "two".to_string()]));
+		assert_eq!(expected_str, format!("{}", out));
+		assert_eq!(expected_kind, out);
 	}
 }

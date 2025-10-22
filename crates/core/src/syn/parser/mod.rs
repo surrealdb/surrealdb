@@ -69,7 +69,7 @@ use crate::syn::error::{SyntaxError, bail};
 use crate::syn::lexer::Lexer;
 use crate::syn::lexer::compound::NumberKind;
 use crate::syn::token::{Span, Token, TokenKind, t};
-use crate::val::{Bytes, Datetime, Duration, File, Strand, Uuid};
+use crate::types::{PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicUuid};
 
 mod basic;
 mod builtin;
@@ -117,15 +117,14 @@ pub enum PartialResult<T> {
 
 #[derive(Default)]
 pub enum GluedValue {
-	Duration(Duration),
-	Datetime(Datetime),
-	Uuid(Uuid),
+	Duration(PublicDuration),
+	Datetime(PublicDatetime),
+	Uuid(PublicUuid),
 	Number(NumberKind),
-	Strand(Strand),
 	#[default]
 	None,
-	Bytes(Bytes),
-	File(File),
+	Bytes(PublicBytes),
+	File(PublicFile),
 }
 
 #[derive(Clone, Debug)]
@@ -191,6 +190,7 @@ pub struct Parser<'a> {
 	glued_value: GluedValue,
 	pub(crate) table_as_field: bool,
 	settings: ParserSettings,
+	unscape_buffer: Vec<u8>,
 }
 
 impl<'a> Parser<'a> {
@@ -213,6 +213,7 @@ impl<'a> Parser<'a> {
 			glued_value: GluedValue::None,
 			table_as_field: true,
 			settings,
+			unscape_buffer: Vec::new(),
 		}
 	}
 
@@ -426,7 +427,7 @@ impl<'a> Parser<'a> {
 	}
 
 	/// Parse a single statement.
-	pub async fn parse_statement(&mut self, stk: &mut Stk) -> ParseResult<sql::TopLevelExpr> {
+	async fn parse_statement(&mut self, stk: &mut Stk) -> ParseResult<sql::TopLevelExpr> {
 		self.parse_top_level_expr(stk).await
 	}
 
@@ -484,7 +485,7 @@ impl StatementStream {
 	/// If the function returns Ok(None), not enough data was in the buffer to
 	/// fully parse a statement, the function might still consume data from the
 	/// buffer, like whitespace between statements, when a none is returned.
-	pub fn parse_partial(
+	pub(crate) fn parse_partial(
 		&mut self,
 		buffer: &mut BytesMut,
 	) -> Result<Option<sql::TopLevelExpr>, RenderedError> {
@@ -567,7 +568,7 @@ impl StatementStream {
 	}
 
 	/// Parse remaining statements once the buffer is complete.
-	pub fn parse_complete(
+	pub(crate) fn parse_complete(
 		&mut self,
 		buffer: &mut BytesMut,
 	) -> Result<Option<sql::TopLevelExpr>, RenderedError> {

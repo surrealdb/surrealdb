@@ -10,9 +10,10 @@ use super::paths::ID;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::fmt::Fmt;
+use crate::expr::expression::VisitExpression;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, FlowResultExt as _, Function, Idiom, Part};
+use crate::fmt::Fmt;
 use crate::fnc::args::FromArgs;
 use crate::syn;
 use crate::val::{Array, Value};
@@ -20,7 +21,7 @@ use crate::val::{Array, Value};
 /// The `foo,bar,*` part of statements like `SELECT foo,bar.* FROM faz`.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Fields {
+pub(crate) enum Fields {
 	/// Fields had the `VALUE` clause and should only return the given selector
 	///
 	/// This variant should not contain Field::All
@@ -76,7 +77,7 @@ impl Fields {
 	}
 
 	/// Get all fields which are not an `*` projection
-	pub fn iter_fields(&self) -> FieldsIter {
+	pub fn iter_fields(&self) -> FieldsIter<'_> {
 		match self {
 			Fields::Value(field) => FieldsIter::Single(Some(field)),
 			Fields::Select(fields) => FieldsIter::Multiple(fields.iter()),
@@ -84,7 +85,7 @@ impl Fields {
 	}
 
 	/// Returns an iterator which returns all fields which are not `Field::All`.
-	pub fn iter_non_all_fields(&self) -> impl Iterator<Item = &'_ Field> {
+	pub(crate) fn iter_non_all_fields(&self) -> impl Iterator<Item = &'_ Field> {
 		self.iter_fields().filter(|x| !matches!(x, Field::All))
 	}
 
@@ -353,7 +354,19 @@ impl Fields {
 	}
 }
 
-pub enum FieldsIter<'a> {
+impl VisitExpression for Fields {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		match self {
+			Fields::Value(field) => field.visit(visitor),
+			Fields::Select(fields) => fields.iter().for_each(|f| f.visit(visitor)),
+		}
+	}
+}
+
+pub(crate) enum FieldsIter<'a> {
 	Single(Option<&'a Field>),
 	Multiple(Iter<'a, Field>),
 }
@@ -385,7 +398,7 @@ impl ExactSizeIterator for FieldsIter<'_> {}
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub enum Field {
+pub(crate) enum Field {
 	/// The `*` in `SELECT * FROM ...`
 	#[default]
 	All,
@@ -410,6 +423,20 @@ impl Field {
 	}
 }
 
+impl VisitExpression for Field {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		if let Field::Single {
+			expr,
+			..
+		} = self
+		{
+			expr.visit(visitor);
+		}
+	}
+}
 impl Display for Field {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {

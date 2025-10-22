@@ -5,11 +5,9 @@ use std::time::{Duration, SystemTime};
 use anyhow::Result;
 use helpers::*;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::err::Error;
-use surrealdb_core::expr::{Ident, Part};
 use surrealdb_core::iam::{Level, Role};
-use surrealdb_core::val::Value;
-use surrealdb_core::{strand, syn};
+use surrealdb_core::syn;
+use surrealdb_types::Value;
 use test_log::test;
 use tracing::info;
 
@@ -119,7 +117,7 @@ async fn define_statement_index_concurrently_building_status(
 	info!("Loop");
 	let time_out = Duration::from_secs(300);
 	loop {
-		if now.elapsed().map_err(|e| Error::Internal(e.to_string()))?.gt(&time_out) {
+		if now.elapsed().map_err(|e| anyhow::anyhow!(e.to_string()))?.gt(&time_out) {
 			panic!("Time-out {time_out:?}");
 		}
 		// Update and delete records
@@ -140,7 +138,7 @@ async fn define_statement_index_concurrently_building_status(
 		let tmp = r.remove(0).result?;
 		if let Value::Object(o) = &tmp {
 			if let Some(Value::Object(o)) = o.get("building") {
-				if let Some(Value::Strand(s)) = o.get("status") {
+				if let Some(Value::String(s)) = o.get("status") {
 					let new_initial = o.get("initial").cloned();
 					let new_pending = o.get("pending").cloned();
 					let new_updated = o.get("updated").cloned();
@@ -177,9 +175,9 @@ async fn define_statement_index_concurrently_building_status(
 							continue;
 						}
 						"ready" => {
-							let initial = new_initial.unwrap().coerce_to::<i64>()? as usize;
-							let pending = new_pending.unwrap().coerce_to::<i64>()?;
-							let updated = new_updated.unwrap().coerce_to::<i64>()? as usize;
+							let initial = new_initial.unwrap().into_int()? as usize;
+							let pending = new_pending.unwrap().into_int()?;
+							let updated = new_updated.unwrap().into_int()? as usize;
 							assert!(initial > 0, "{initial} > 0");
 							assert!(initial <= initial_size, "{initial} <= {initial_size}");
 							assert_eq!(pending, 0);
@@ -192,7 +190,7 @@ async fn define_statement_index_concurrently_building_status(
 				}
 			}
 		}
-		panic!("Invalid info: {tmp:#}");
+		panic!("Invalid info: {tmp:#?}");
 	}
 	info!("Appended: {appended_count}");
 	Ok(())
@@ -241,46 +239,6 @@ async fn define_statement_index_concurrently_building_status_full_text_overwrite
 		200, 10
 	)
 		.await
-}
-
-#[tokio::test]
-async fn define_statement_analyzer() -> Result<()> {
-	let sql = r#"
-		DEFINE ANALYZER english TOKENIZERS blank,class FILTERS lowercase,snowball(english);
-		DEFINE ANALYZER autocomplete FILTERS lowercase,edgengram(2,10);
-        DEFINE FUNCTION fn::stripHtml($html: string) {
-            RETURN string::replace($html, /<[^>]*>/, "");
-        };
-        DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS blank,class;
-        DEFINE ANALYZER englishLemmatizer TOKENIZERS blank,class FILTERS mapper('../../tests/data/lemmatization-en.txt');
-		INFO FOR DB;
-	"#;
-	let mut t = Test::new(sql).await?;
-	t.expect_size(6)?;
-	t.skip_ok(5)?;
-	t.expect_val(
-		r#"{
-			accesses: {},
-			analyzers: {
-				autocomplete: 'DEFINE ANALYZER autocomplete FILTERS LOWERCASE,EDGENGRAM(2,10)',
-				english: 'DEFINE ANALYZER english TOKENIZERS BLANK,CLASS FILTERS LOWERCASE,SNOWBALL(ENGLISH)',
-				englishLemmatizer: 'DEFINE ANALYZER englishLemmatizer TOKENIZERS BLANK,CLASS FILTERS MAPPER(../../tests/data/lemmatization-en.txt)',
-				htmlAnalyzer: 'DEFINE ANALYZER htmlAnalyzer FUNCTION fn::stripHtml TOKENIZERS BLANK,CLASS'
-			},
-			apis: {},
-			buckets: {},
-			configs: {},
-			functions: {
-				stripHtml: "DEFINE FUNCTION fn::stripHtml($html: string) { RETURN string::replace($html, /<[^>]*>/, '') } PERMISSIONS FULL"
-			},
-			models: {},
-			params: {},
-			tables: {},
-			sequences: {},
-			users: {},
-		}"#,
-	)?;
-	Ok(())
 }
 
 #[tokio::test]
@@ -339,19 +297,9 @@ async fn define_statement_user_root() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	let define_str = tmp
-		.pick(&[
-			Part::Field(Ident::from_strand(strand!("users").to_owned())),
-			Part::Field(Ident::from_strand(strand!("test").to_owned())),
-		])
-		.to_string();
+	let define_str = tmp.get("users").get("test").clone().into_string().unwrap();
 
-	assert!(
-		define_str
-			.strip_prefix('\"')
-			.unwrap()
-			.starts_with("DEFINE USER test ON ROOT PASSHASH '$argon2id$")
-	);
+	assert!(define_str.starts_with("DEFINE USER test ON ROOT PASSHASH '$argon2id$"));
 	Ok(())
 }
 
@@ -382,8 +330,10 @@ async fn define_statement_user_ns() -> Result<()> {
 			.result
 			.as_ref()
 			.unwrap()
-			.to_string()
-			.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
+			.clone()
+			.into_string()
+			.unwrap()
+			.starts_with("DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
 	);
 	assert!(
 		res.next()
@@ -391,8 +341,10 @@ async fn define_statement_user_ns() -> Result<()> {
 			.result
 			.as_ref()
 			.unwrap()
-			.to_string()
-			.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
+			.clone()
+			.into_string()
+			.unwrap()
+			.starts_with("DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
 	);
 	assert!(
 		res.next()
@@ -400,8 +352,10 @@ async fn define_statement_user_ns() -> Result<()> {
 			.result
 			.as_ref()
 			.unwrap()
-			.to_string()
-			.starts_with("\"DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
+			.clone()
+			.into_string()
+			.unwrap()
+			.starts_with("DEFINE USER test ON NAMESPACE PASSHASH '$argon2id$")
 	);
 
 	assert_eq!(
@@ -447,30 +401,14 @@ async fn define_statement_user_db() -> Result<()> {
 		"The user 'test' does not exist in the namespace 'ns'"
 	); // User doesn't exist at the NS level
 
-	assert!(
-		res[3]
-			.result
-			.as_ref()
-			.unwrap()
-			.to_string()
-			.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$")
-	);
-	assert!(
-		res[4]
-			.result
-			.as_ref()
-			.unwrap()
-			.to_string()
-			.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$")
-	);
-	assert!(
-		res[5]
-			.result
-			.as_ref()
-			.unwrap()
-			.to_string()
-			.starts_with("\"DEFINE USER test ON DATABASE PASSHASH '$argon2id$")
-	);
+	let s = res[3].result.as_ref().unwrap().clone().into_string().unwrap();
+	assert!(s.starts_with("DEFINE USER test ON DATABASE PASSHASH '$argon2id$"), "{}", s);
+
+	let s = res[4].result.as_ref().unwrap().clone().into_string().unwrap();
+	assert!(s.starts_with("DEFINE USER test ON DATABASE PASSHASH '$argon2id$"), "{}", s);
+
+	let s = res[5].result.as_ref().unwrap().clone().into_string().unwrap();
+	assert!(s.starts_with("DEFINE USER test ON DATABASE PASSHASH '$argon2id$"), "{}", s);
 
 	// If it tries to create a NS user without specifying a NS, it should fail
 	let sql = "

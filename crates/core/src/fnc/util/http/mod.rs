@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
+#[cfg(not(target_family = "wasm"))]
 use dashmap::DashMap;
 use reqwest::header::CONTENT_TYPE;
 #[cfg(not(target_family = "wasm"))]
@@ -11,6 +12,14 @@ use reqwest::redirect::Attempt;
 use reqwest::redirect::Policy;
 use reqwest::{Client, Method, RequestBuilder, Response};
 use url::Url;
+
+use crate::cnf::SURREALDB_USER_AGENT;
+use crate::ctx::Context;
+use crate::err::Error;
+use crate::sql::expression::convert_public_value_to_internal;
+use crate::syn;
+use crate::types::{PublicBytes, PublicValue};
+use crate::val::{Object, Value};
 
 /// Global HTTP client manager for connection pooling and reuse.
 #[cfg(not(target_family = "wasm"))]
@@ -115,34 +124,23 @@ async fn get_http_client(
 	manager.get_or_create_client(capabilities, redirect_checker).await
 }
 
-use crate::cnf::SURREALDB_USER_AGENT;
-use crate::ctx::Context;
-use crate::err::Error;
-use crate::syn;
-use crate::val::{Bytes, Object, Strand, Value};
-
 pub(crate) fn uri_is_valid(uri: &str) -> bool {
 	reqwest::Url::parse(uri).is_ok()
 }
 
-fn encode_body(req: RequestBuilder, body: Value) -> Result<RequestBuilder> {
+fn encode_body(req: RequestBuilder, body: PublicValue) -> Result<RequestBuilder> {
 	let res = match body {
-		Value::Bytes(v) => req.body(v.into_inner()),
-		Value::Strand(v) => req.body(v.into_string()),
+		PublicValue::Bytes(v) => req.body(v.into_inner()),
+		PublicValue::String(v) => req.body(v),
 		//TODO: Improve the handling here. We should check if this value can be send as a json
 		//value.
-		_ if !body.is_nullish() => req.json(&body.into_json_value().ok_or_else(|| {
-			anyhow::Error::new(Error::Thrown(
-				"tried to send request with surealql value body which cannot be encoded into json"
-					.to_owned(),
-			))
-		})?),
+		_ if !body.is_nullish() => req.json(&body.into_json_value()),
 		_ => req,
 	};
 	Ok(res)
 }
 
-async fn decode_response(res: Response) -> Result<Value> {
+async fn decode_response(res: Response) -> Result<PublicValue> {
 	match res.error_for_status() {
 		Ok(res) => match res.headers().get(CONTENT_TYPE) {
 			Some(mime) => match mime.to_str() {
@@ -155,16 +153,16 @@ async fn decode_response(res: Response) -> Result<Value> {
 				}
 				Ok(v) if v.starts_with("application/octet-stream") => {
 					let bytes = res.bytes().await.map_err(Error::from)?;
-					Ok(Value::Bytes(Bytes(bytes.into())))
+					Ok(PublicValue::Bytes(PublicBytes::from(bytes.to_vec())))
 				}
 				Ok(v) if v.starts_with("text") => {
 					let txt = res.text().await.map_err(Error::from)?;
-					let val = txt.into();
+					let val = PublicValue::String(txt);
 					Ok(val)
 				}
-				_ => Ok(Value::None),
+				_ => Ok(PublicValue::None),
 			},
-			_ => Ok(Value::None),
+			_ => Ok(PublicValue::None),
 		},
 		Err(err) => match err.status() {
 			Some(s) => bail!(Error::Http(format!(
@@ -180,13 +178,18 @@ async fn decode_response(res: Response) -> Result<Value> {
 async fn request(
 	ctx: &Context,
 	method: Method,
-	uri: Strand,
+	uri: String,
 	body: Option<Value>,
 	opts: impl Into<Object>,
 ) -> Result<Value> {
 	// Check if the URI is valid and allowed
 	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.to_string()))?;
 	ctx.check_allowed_net(&url).await?;
+
+	let body = match body {
+		Some(v) => Some(crate::val::convert_value_to_public_value(v)?),
+		None => None,
+	};
 
 	// Get or create a shared HTTP client for better connection reuse
 	#[cfg(not(target_family = "wasm"))]
@@ -261,21 +264,22 @@ async fn request(
 		}
 	} else {
 		// Receive the response as a value
-		decode_response(res).await
+		let val = decode_response(res).await?;
+		Ok(convert_public_value_to_internal(val))
 	}
 }
 
-pub async fn head(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value> {
+pub async fn head(ctx: &Context, uri: String, opts: impl Into<Object>) -> Result<Value> {
 	request(ctx, Method::HEAD, uri, None, opts).await
 }
 
-pub async fn get(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value> {
+pub async fn get(ctx: &Context, uri: String, opts: impl Into<Object>) -> Result<Value> {
 	request(ctx, Method::GET, uri, None, opts).await
 }
 
 pub async fn put(
 	ctx: &Context,
-	uri: Strand,
+	uri: String,
 	body: Value,
 	opts: impl Into<Object>,
 ) -> Result<Value> {
@@ -284,7 +288,7 @@ pub async fn put(
 
 pub async fn post(
 	ctx: &Context,
-	uri: Strand,
+	uri: String,
 	body: Value,
 	opts: impl Into<Object>,
 ) -> Result<Value> {
@@ -293,13 +297,13 @@ pub async fn post(
 
 pub async fn patch(
 	ctx: &Context,
-	uri: Strand,
+	uri: String,
 	body: Value,
 	opts: impl Into<Object>,
 ) -> Result<Value> {
 	request(ctx, Method::PATCH, uri, Some(body), opts).await
 }
 
-pub async fn delete(ctx: &Context, uri: Strand, opts: impl Into<Object>) -> Result<Value> {
+pub async fn delete(ctx: &Context, uri: String, opts: impl Into<Object>) -> Result<Value> {
 	request(ctx, Method::DELETE, uri, None, opts).await
 }

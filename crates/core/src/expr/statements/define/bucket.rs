@@ -10,18 +10,44 @@ use crate::catalog::{BucketDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::{Base, Expr, FlowResultExt, Ident};
+use crate::expr::expression::VisitExpression;
+use crate::expr::parameterize::expr_to_ident;
+use crate::expr::{Base, Expr, FlowResultExt, Literal};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct DefineBucketStatement {
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct DefineBucketStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: Expr,
 	pub backend: Option<Expr>,
 	pub permissions: Permission,
 	pub readonly: bool,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
+}
+
+impl VisitExpression for DefineBucketStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.name.visit(visitor);
+		self.backend.iter().for_each(|action| action.visit(visitor));
+		self.comment.iter().for_each(|expr| expr.visit(visitor));
+	}
+}
+
+impl Default for DefineBucketStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			backend: None,
+			permissions: Permission::default(),
+			readonly: false,
+			comment: None,
+		}
+	}
 }
 
 impl DefineBucketStatement {
@@ -34,11 +60,13 @@ impl DefineBucketStatement {
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Bucket, &Base::Db)?;
+		// Process the name
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "bucket name").await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
-		if let Some(bucket) = txn.get_db_bucket(ns, db, &self.name).await? {
+		if let Some(bucket) = txn.get_db_bucket(ns, db, &name).await? {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
@@ -66,7 +94,6 @@ impl DefineBucketStatement {
 		};
 
 		// Validate the store
-		let name = self.name.to_string();
 		let store = if let Some(ref backend) = backend {
 			buc::connect(backend, false, self.readonly).await?
 		} else {
@@ -83,11 +110,11 @@ impl DefineBucketStatement {
 		let key = crate::key::database::bu::new(ns, db, &name);
 		let ap = BucketDefinition {
 			id: None,
-			name: self.name.to_raw_string(),
+			name: name.clone(),
 			backend,
 			permissions: self.permissions.clone(),
 			readonly: self.readonly,
-			comment: self.comment.as_ref().map(|c| c.to_raw_string()),
+			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 		};
 		txn.set(&key, &ap, None).await?;
 		// Clear the cache
@@ -118,7 +145,7 @@ impl Display for DefineBucketStatement {
 		write!(f, " PERMISSIONS {}", self.permissions)?;
 
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?;
+			write!(f, " COMMENT {}", comment)?;
 		}
 
 		Ok(())

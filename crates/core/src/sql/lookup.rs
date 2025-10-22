@@ -1,7 +1,6 @@
 use std::fmt::{self, Display, Formatter, Write};
 
-use super::Ident;
-use crate::sql::fmt::Fmt;
+use crate::fmt::{EscapeIdent, Fmt};
 use crate::sql::order::Ordering;
 use crate::sql::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits, Start};
 
@@ -9,7 +8,7 @@ use crate::sql::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, S
 /// Since they both work very similarly, they also both support the same operations
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Lookup {
+pub(crate) struct Lookup {
 	pub kind: LookupKind,
 	pub expr: Option<Fields>,
 	pub what: Vec<LookupSubject>,
@@ -113,16 +112,6 @@ pub enum LookupKind {
 	Reference,
 }
 
-impl LookupKind {
-	pub fn is_graph(&self) -> bool {
-		matches!(self, LookupKind::Graph(_))
-	}
-
-	pub fn is_reference(&self) -> bool {
-		matches!(self, LookupKind::Reference)
-	}
-}
-
 impl Default for LookupKind {
 	fn default() -> Self {
 		Self::Graph(Dir::Both)
@@ -160,15 +149,15 @@ impl From<crate::expr::lookup::LookupKind> for LookupKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum LookupSubject {
-	Table(Ident),
-	Range(Ident, RecordIdKeyRangeLit),
+	Table(String),
+	Range(String, RecordIdKeyRangeLit),
 }
 
 impl Display for LookupSubject {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Self::Table(tb) => Display::fmt(&tb, f),
-			Self::Range(tb, rng) => write!(f, "{tb}:{rng}"),
+			Self::Table(tb) => Display::fmt(&EscapeIdent(tb), f),
+			Self::Range(tb, rng) => write!(f, "{}:{rng}", EscapeIdent(tb)),
 		}
 	}
 }
@@ -176,9 +165,9 @@ impl Display for LookupSubject {
 impl From<LookupSubject> for crate::expr::lookup::LookupSubject {
 	fn from(v: LookupSubject) -> Self {
 		match v {
-			LookupSubject::Table(tb) => Self::Table(tb.into()),
+			LookupSubject::Table(tb) => Self::Table(tb),
 			LookupSubject::Range(table, range) => Self::Range {
-				table: table.into(),
+				table,
 				range: range.into(),
 			},
 		}
@@ -188,11 +177,11 @@ impl From<LookupSubject> for crate::expr::lookup::LookupSubject {
 impl From<crate::expr::lookup::LookupSubject> for LookupSubject {
 	fn from(v: crate::expr::lookup::LookupSubject) -> Self {
 		match v {
-			crate::expr::lookup::LookupSubject::Table(tb) => Self::Table(tb.into()),
+			crate::expr::lookup::LookupSubject::Table(tb) => Self::Table(tb),
 			crate::expr::lookup::LookupSubject::Range {
 				table,
 				range,
-			} => Self::Range(table.into(), range.into()),
+			} => Self::Range(table, range.into()),
 		}
 	}
 }

@@ -1,6 +1,5 @@
 /**
 [test]
-wip = true
 
 [[test.results]]
 value = "NONE"
@@ -16,12 +15,15 @@ value = "[]"
 
 [[test.results]]
 value = "[{ a: 1, id: test:crc7qde29bwmdde48eyo }]"
+skip-record-id-key = true
 
 [[test.results]]
 value = "[{ a: 2, id: test:g2ojc7en7dunuc3i2ywk }]"
+skip-record-id-key = true
 
 [[test.results]]
 value = "[{ a: 1, id: test:crc7qde29bwmdde48eyo }, { a: 2, id: test:g2ojc7en7dunuc3i2ywk }]"
+skip-record-id-key = true
 
 [[test.results]]
 value = "[{ count: 2, id: view:[] }]"
@@ -47,11 +49,11 @@ SELECT * FROM view;
 create test SET a = 1;
 create test SET a = 2;
 
-SELECT * FROM test;
+SELECT * FROM test ORDER BY a ASC;
 SELECT * FROM view;
 
 REMOVE TABLE test;
 
-SELECT * FROM test;
+SELECT * FROM test ORDER BY a ASC;
 SELECT * FROM view;
 

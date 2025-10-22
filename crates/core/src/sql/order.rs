@@ -1,8 +1,8 @@
 use std::fmt;
 use std::ops::Deref;
 
+use crate::fmt::Fmt;
 use crate::sql::Idiom;
-use crate::sql::fmt::Fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

@@ -1,15 +1,17 @@
+use std::fmt::Debug;
+use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
-use async_channel::Sender;
 use uuid::Uuid;
 
 use crate::catalog;
+use crate::catalog::SubscriptionDefinition;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
-use crate::dbs::Notification;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::iam::{Action, Auth, ResourceKind};
+use crate::types::PublicNotification;
 
 /// An Options is passed around when processing a set of query
 /// statements.
@@ -45,8 +47,8 @@ pub struct Options {
 	pub(crate) import: bool,
 	/// The data version as nanosecond timestamp
 	pub(crate) version: Option<u64>,
-	/// The channel over which we send notifications
-	pub(crate) sender: Option<Sender<Notification>>,
+	/// Optional message broker for live notifications
+	pub(crate) broker: Option<Arc<dyn MessageBroker>>,
 }
 
 #[derive(Clone, Debug)]
@@ -54,7 +56,19 @@ pub enum Force {
 	All,
 	None,
 	Table(Arc<[catalog::TableDefinition]>),
-	Index(Arc<[catalog::IndexDefinition]>),
+}
+
+/// Trait for a pluggable message broker used to forward live query events across nodes.
+/// Default implementation can be a no-op. Implementations should be cheap to clone behind Arc.
+pub trait MessageBroker: Send + Sync + Debug {
+	fn can_be_sent(&self, opt: &Options, subscription: &SubscriptionDefinition) -> Result<bool>;
+
+	/// Forward a live query event for the given subscription to its owning node.
+	/// The concrete implementation decides how to encode and route this request.
+	fn send(
+		&self,
+		notification: PublicNotification,
+	) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
 }
 
 impl Default for Options {
@@ -77,7 +91,7 @@ impl Options {
 			strict: false,
 			import: false,
 			auth_enabled: true,
-			sender: None,
+			broker: None,
 			auth: Arc::new(Auth::default()),
 			version: None,
 		}
@@ -187,7 +201,7 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn new_with_auth(&self, auth: Arc<Auth>) -> Self {
 		Self {
-			sender: self.sender.clone(),
+			broker: self.broker.clone(),
 			auth,
 			ns: self.ns.clone(),
 			db: self.db.clone(),
@@ -200,7 +214,7 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn new_with_perms(&self, perms: bool) -> Self {
 		Self {
-			sender: self.sender.clone(),
+			broker: self.broker.clone(),
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
@@ -213,7 +227,7 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn new_with_force(&self, force: Force) -> Self {
 		Self {
-			sender: self.sender.clone(),
+			broker: self.broker.clone(),
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
@@ -225,7 +239,7 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn new_with_strict(&self, strict: bool) -> Self {
 		Self {
-			sender: self.sender.clone(),
+			broker: self.broker.clone(),
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
@@ -238,7 +252,7 @@ impl Options {
 	/// Create a new Options object for a subquery
 	pub fn new_with_import(&self, import: bool) -> Self {
 		Self {
-			sender: self.sender.clone(),
+			broker: self.broker.clone(),
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
@@ -249,19 +263,19 @@ impl Options {
 	}
 
 	/// Create a new Options object for a subquery
-	pub fn new_with_sender(&self, sender: Sender<Notification>) -> Self {
+	pub fn new_with_broker(&self, sender: Arc<dyn MessageBroker>) -> Self {
 		Self {
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force: self.force.clone(),
-			sender: Some(sender),
+			broker: Some(sender),
 			..*self
 		}
 	}
 
 	// Get currently selected base
-	pub fn selected_base(&self) -> Result<Base, Error> {
+	pub(crate) fn selected_base(&self) -> Result<Base, Error> {
 		match (self.ns.as_ref(), self.db.as_ref()) {
 			(None, None) => Ok(Base::Root),
 			(Some(_), None) => Ok(Base::Ns),
@@ -274,12 +288,12 @@ impl Options {
 	///
 	/// The parameter is the approximate cost of the operation (more concretely, the size of the
 	/// stack frame it uses relative to a simple function call). When in doubt, use a value of 1.
-	pub fn dive(&self, cost: u8) -> Result<Self, Error> {
+	pub(crate) fn dive(&self, cost: u8) -> Result<Self, Error> {
 		if self.dive < cost as u32 {
 			return Err(Error::ComputationDepthExceeded);
 		}
 		Ok(Self {
-			sender: self.sender.clone(),
+			broker: self.broker.clone(),
 			auth: self.auth.clone(),
 			ns: self.ns.clone(),
 			db: self.db.clone(),
@@ -364,10 +378,7 @@ impl Options {
 			return Ok(());
 		}
 
-		self.auth.is_allowed(action, &res).map_err(|x| match x.downcast() {
-			Ok(x) => anyhow::Error::new(Error::IamError(x)),
-			Err(e) => e,
-		})
+		self.auth.is_allowed(action, &res)
 	}
 
 	/// Checks the current server configuration, and

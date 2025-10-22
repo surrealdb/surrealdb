@@ -224,7 +224,7 @@ pub async fn process_tbs(
                         .0
                         .into_iter()
                         .map(|v| {
-                            v.try_as_thing().map(|t| {
+                            v.try_as_record().map(|t| {
                                 let erased: ErasedRecord = (gtx.clone(), t);
                                 field_val_erase_owned(erased)
                             })
@@ -234,7 +234,7 @@ pub async fn process_tbs(
                     match out {
                         Ok(l) => Ok(Some(FieldValue::list(l))),
                         Err(v) => {
-                            Err(internal_error(format!("expected thing, found: {v:?}")).into())
+                            Err(internal_error(format!("expected record, found: {v:?}")).into())
                         }
                     }
                 })
@@ -477,6 +477,7 @@ fn filter_from_type(
 
 	match kind {
 		Kind::Any => {}
+		Kind::None => {}
 		Kind::Null => {}
 		Kind::Bool => {}
 		Kind::Bytes => {}
@@ -492,7 +493,6 @@ fn filter_from_type(
 		Kind::Regex => {}
 		Kind::Record(_) => {}
 		Kind::Geometry(_) => {}
-		Kind::Option(_) => {}
 		Kind::Either(_) => {}
 		Kind::Set(_, _) => {}
 		Kind::Array(_, _) => {}

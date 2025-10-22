@@ -8,11 +8,11 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{FlowResultExt as _, Idiom, Kind};
+use crate::expr::{FlowResultExt as _, Idiom};
 use crate::syn;
 use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
-	RecordIdKeyRange, Strand, Table, Uuid, Value,
+	RecordIdKeyRange, Table, Uuid, Value,
 };
 
 pub fn array((val,): (Value,)) -> Result<Value> {
@@ -101,37 +101,8 @@ pub fn range((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<Box<Range>>()?.into())
 }
 
-pub fn record((rid, Optional(tb)): (Value, Optional<Value>)) -> Result<Value> {
-	match tb {
-		Some(Value::Strand(tb)) => {
-			if tb.is_empty() {
-				Err(anyhow::Error::new(Error::TbInvalid {
-					value: tb.into_string(),
-				}))
-			} else {
-				rid.cast_to_kind(&Kind::Record(vec![tb.into_string()])).map_err(From::from)
-			}
-		}
-
-		Some(Value::Table(tb)) => {
-			if tb.is_empty() {
-				Err(anyhow::Error::new(Error::TbInvalid {
-					value: tb.into_string(),
-				}))
-			} else {
-				rid.cast_to_kind(&Kind::Record(vec![tb.into_string()])).map_err(From::from)
-			}
-		}
-		Some(_) => Err(anyhow::Error::new(Error::InvalidArguments {
-			name: "type::record".into(),
-			message: "The second argument must be a table name or a string.".into(),
-		})),
-		None => rid.cast_to_kind(&Kind::Record(vec![])).map_err(From::from),
-	}
-}
-
 pub fn string((val,): (Value,)) -> Result<Value> {
-	Ok(val.cast_to::<Strand>()?.into())
+	Ok(val.cast_to::<String>()?.into())
 }
 
 pub fn string_lossy((val,): (Value,)) -> Result<Value> {
@@ -146,19 +117,17 @@ pub fn string_lossy((val,): (Value,)) -> Result<Value> {
 
 pub fn table((val,): (Value,)) -> Result<Value> {
 	let strand = match val {
-		// TODO: null byte check.
-		Value::RecordId(t) => unsafe { Strand::new_unchecked(t.table) },
-		// TODO: Handle null byte
-		v => unsafe { Strand::new_unchecked(v.as_raw_string()) },
+		Value::RecordId(t) => t.table,
+		v => v.into_raw_string(),
 	};
-	Ok(Value::Table(Table::from_strand(strand)))
+	Ok(Value::Table(Table::new(strand)))
 }
 
-pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> {
+pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> {
 	match (arg1, arg2) {
 		// Empty table name
-		(Value::Strand(arg1), _) if arg1.is_empty() => bail!(Error::TbInvalid {
-			value: arg1.into_string(),
+		(Value::String(arg1), _) if arg1.is_empty() => bail!(Error::TbInvalid {
+			value: arg1,
 		}),
 
 		// Handle second argument
@@ -170,15 +139,15 @@ pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> 
 				Value::Number(v) => match v {
 					Number::Int(x) => x.into(),
 					// Safety: float -> string conversion cannot contain a null byte.
-					Number::Float(x) => unsafe { Strand::new_unchecked(x.to_string()) }.into(),
+					Number::Float(x) => x.to_string().into(),
 					// Safety: decimal -> string conversion cannot contain a null byte.
-					Number::Decimal(x) => unsafe { Strand::new_unchecked(x.to_string()) }.into(),
+					Number::Decimal(x) => x.to_string().into(),
 				},
 				Value::Range(v) => {
 					let res =
 						RecordIdKeyRange::from_value_range((*v).clone()).ok_or_else(|| {
 							Error::IdInvalid {
-								value: Value::Range(v).as_raw_string(),
+								value: Value::Range(v).into_raw_string(),
 							}
 						})?;
 					RecordIdKey::Range(Box::new(res))
@@ -189,13 +158,13 @@ pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> 
 					ensure!(
 						!s.is_empty(),
 						Error::IdInvalid {
-							value: arg2.as_raw_string(),
+							value: arg2.into_raw_string(),
 						}
 					);
 					RecordIdKey::String(s)
 				}
 			},
-			table: arg1.as_raw_string(),
+			table: arg1.into_raw_string(),
 		})),
 
 		(arg1, None) => arg1
@@ -214,7 +183,7 @@ pub mod is {
 	use anyhow::Result;
 
 	use crate::fnc::args::Optional;
-	use crate::val::{Geometry, Strand, Value};
+	use crate::val::{Geometry, Value};
 
 	pub fn array((arg,): (Value,)) -> Result<Value> {
 		Ok((arg).is_array().into())
@@ -300,10 +269,10 @@ pub mod is {
 		Ok(arg.is_range().into())
 	}
 
-	pub fn record((arg, Optional(table)): (Value, Optional<Strand>)) -> Result<Value> {
+	pub fn record((arg, Optional(table)): (Value, Optional<String>)) -> Result<Value> {
 		let res = match table {
-			Some(tb) => arg.is_record_type(&[tb.into_string()]).into(),
-			None => arg.is_thing().into(),
+			Some(tb) => arg.is_record_type(&[tb]).into(),
+			None => arg.is_record().into(),
 		};
 		Ok(res)
 	}
@@ -321,13 +290,13 @@ pub mod is {
 mod tests {
 	use crate::err::Error;
 	use crate::fnc::args::Optional;
-	use crate::val::{Strand, Value};
+	use crate::val::Value;
 
 	#[test]
 	fn is_array() {
 		let value = super::is::array((vec![
-			Value::Strand(Strand::new("hello".to_owned()).unwrap()),
-			Value::Strand(Strand::new("world".to_owned()).unwrap()),
+			Value::String("hello".to_owned()),
+			Value::String("world".to_owned()),
 		]
 		.into(),))
 		.unwrap();
@@ -338,21 +307,21 @@ mod tests {
 	}
 
 	#[test]
-	fn no_empty_thing() {
-		let value = super::thing(("".into(), Optional(None)));
+	fn no_empty_record() {
+		let value = super::record(("".into(), Optional(None)));
 		let _expected = Error::TbInvalid {
 			value: "".into(),
 		};
 		if !matches!(value, Err(_expected)) {
-			panic!("An empty thing tb part should result in an error");
+			panic!("An empty record tb part should result in an error");
 		}
 
-		let value = super::thing(("table".into(), Optional(Some("".into()))));
+		let value = super::record(("table".into(), Optional(Some("".into()))));
 		let _expected = Error::IdInvalid {
 			value: "".into(),
 		};
 		if !matches!(value, Err(_expected)) {
-			panic!("An empty thing id part should result in an error");
+			panic!("An empty record id part should result in an error");
 		}
 	}
 }

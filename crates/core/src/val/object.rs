@@ -9,13 +9,11 @@ use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 
 use crate::err::Error;
-use crate::expr::escape::EscapeKey;
-use crate::expr::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::expr::literal::ObjectEntry;
+use crate::fmt::{EscapeKey, Fmt, Pretty, is_pretty, pretty_indent};
 use crate::val::{IndexFormat, RecordId, Value};
 
 /// Invariant: Keys never contain NUL bytes.
-/// TODO: Null byte validity
 #[revisioned(revision = 1)]
 #[derive(
 	Clone,
@@ -34,7 +32,7 @@ use crate::val::{IndexFormat, RecordId, Value};
 #[serde(rename = "$surrealdb::private::Object")]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub struct Object(pub BTreeMap<String, Value>);
+pub(crate) struct Object(pub(crate) BTreeMap<String, Value>);
 
 impl From<BTreeMap<&str, Value>> for Object {
 	fn from(v: BTreeMap<&str, Value>) -> Self {
@@ -75,6 +73,22 @@ impl From<HashMap<String, Value>> for Object {
 impl From<Option<Self>> for Object {
 	fn from(v: Option<Self>) -> Self {
 		v.unwrap_or_default()
+	}
+}
+
+impl TryFrom<Object> for crate::types::PublicObject {
+	type Error = anyhow::Error;
+
+	fn try_from(s: Object) -> Result<Self, Self::Error> {
+		s.0.into_iter()
+			.map(|(k, v)| crate::types::PublicValue::try_from(v).map(|v| (k, v)))
+			.collect()
+	}
+}
+
+impl From<crate::types::PublicObject> for Object {
+	fn from(s: crate::types::PublicObject) -> Self {
+		s.into_iter().map(|(k, v)| (k, Value::from(v))).collect()
 	}
 }
 
@@ -121,10 +135,6 @@ impl TryInto<HeaderMap> for Object {
 }
 
 impl Object {
-	pub fn new() -> Self {
-		Object(BTreeMap::new())
-	}
-
 	/// Fetch the record id if there is one
 	pub fn rid(&self) -> Option<RecordId> {
 		match self.get("id") {

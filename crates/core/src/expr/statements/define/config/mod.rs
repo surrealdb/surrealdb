@@ -17,7 +17,7 @@ use crate::expr::{Base, Value};
 use crate::iam::{Action, ConfigKind, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineConfigStatement {
+pub(crate) struct DefineConfigStatement {
 	pub kind: DefineKind,
 	pub inner: ConfigInner,
 }
@@ -25,7 +25,7 @@ pub struct DefineConfigStatement {
 /// The config struct as a computation target.
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum ConfigInner {
+pub(crate) enum ConfigInner {
 	GraphQL(GraphQLConfig),
 	Api(ApiConfig),
 }
@@ -87,7 +87,7 @@ impl Display for DefineConfigStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, "{}", self.inner)?;
+		write!(f, " {}", self.inner)?;
 
 		Ok(())
 	}
@@ -97,7 +97,10 @@ impl Display for ConfigInner {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self {
 			ConfigInner::GraphQL(v) => Display::fmt(v, f),
-			ConfigInner::Api(v) => Display::fmt(v, f),
+			ConfigInner::Api(v) => {
+				write!(f, "API")?;
+				Display::fmt(v, f)
+			}
 		}
 	}
 }

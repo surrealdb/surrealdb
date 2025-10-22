@@ -115,19 +115,27 @@ impl ToFlatbuffers for Kind {
 						.as_union_value(),
 				),
 			},
-			Self::Record(tables) => {
-				let table_offsets: Vec<_> = tables
-					.iter()
-					.map(|t| {
-						let name = builder.create_string(t.as_str());
-						proto_fb::TableName::create(
+			Self::Table(tables) => {
+				let table_offsets: Vec<_> =
+					tables.iter().map(|t| builder.create_string(t.as_str())).collect::<Vec<_>>();
+				let tables = builder.create_vector(&table_offsets);
+
+				proto_fb::KindArgs {
+					kind_type: proto_fb::KindType::Table,
+					kind: Some(
+						proto_fb::TableKind::create(
 							builder,
-							&proto_fb::TableNameArgs {
-								name: Some(name),
+							&proto_fb::TableKindArgs {
+								tables: Some(tables),
 							},
 						)
-					})
-					.collect::<Vec<_>>();
+						.as_union_value(),
+					),
+				}
+			}
+			Self::Record(tables) => {
+				let table_offsets: Vec<_> =
+					tables.iter().map(|t| builder.create_string(t.as_str())).collect::<Vec<_>>();
 				let tables = builder.create_vector(&table_offsets);
 				proto_fb::KindArgs {
 					kind_type: proto_fb::KindType::Record,
@@ -154,21 +162,6 @@ impl ToFlatbuffers for Kind {
 							builder,
 							&proto_fb::GeometryKindArgs {
 								types: Some(types),
-							},
-						)
-						.as_union_value(),
-					),
-				}
-			}
-			Self::Option(kind) => {
-				let inner = kind.to_fb(builder)?;
-				proto_fb::KindArgs {
-					kind_type: proto_fb::KindType::Option,
-					kind: Some(
-						proto_fb::OptionKind::create(
-							builder,
-							&proto_fb::OptionKindArgs {
-								inner: Some(inner),
 							},
 						)
 						.as_union_value(),
@@ -416,20 +409,23 @@ impl FromFlatbuffers for Kind {
 			KindType::Uuid => Ok(Kind::Uuid),
 			KindType::Bytes => Ok(Kind::Bytes),
 			KindType::Object => Ok(Kind::Object),
+			KindType::Table => {
+				let Some(table) = input.kind_as_table() else {
+					return Err(anyhow::anyhow!("Missing table kind"));
+				};
+				let tables = if let Some(tables) = table.tables() {
+					tables.iter().map(|t| t.to_string()).collect::<Vec<_>>()
+				} else {
+					Vec::new()
+				};
+				Ok(Kind::Table(tables))
+			}
 			KindType::Record => {
 				let Some(record) = input.kind_as_record() else {
 					return Err(anyhow::anyhow!("Missing record kind"));
 				};
 				let tables = if let Some(tables) = record.tables() {
-					tables
-						.iter()
-						.map(|t| {
-							let Some(name) = t.name() else {
-								return Err(anyhow::anyhow!("Missing table name"));
-							};
-							Ok(name.to_string())
-						})
-						.collect::<anyhow::Result<Vec<_>>>()?
+					tables.iter().map(|t| t.to_string()).collect::<Vec<_>>()
 				} else {
 					Vec::new()
 				};
@@ -475,7 +471,7 @@ impl FromFlatbuffers for Kind {
 				} else {
 					Vec::new()
 				};
-				Ok(Kind::Either(kinds))
+				Ok(Kind::either(kinds))
 			}
 			KindType::Function => {
 				let Some(function) = input.kind_as_function() else {
@@ -518,7 +514,7 @@ impl FromFlatbuffers for Kind {
 				let Some(inner) = option.inner() else {
 					return Err(anyhow::anyhow!("Missing option item kind"));
 				};
-				Ok(Kind::Option(Box::new(Kind::from_fb(inner)?)))
+				Ok(Kind::option(Kind::from_fb(inner)?))
 			}
 			KindType::Regex => Ok(Kind::Regex),
 			_ => Err(anyhow::anyhow!("Unknown kind type")),
@@ -662,9 +658,11 @@ mod tests {
 	#[case::uuid(Kind::Uuid)]
 	#[case::regex(Kind::Regex)]
 	#[case::range(Kind::Range)]
+	#[case::table(Kind::Table(vec!["test_table".to_string()]))]
+	#[case::table_empty(Kind::Table(vec![]))]
+	#[case::table_multiple(Kind::Table(vec!["users".to_string(), "posts".to_string()]))]
 	#[case::record(Kind::Record(vec!["test_table".to_string()]))]
 	#[case::geometry(Kind::Geometry(vec![GeometryKind::Point, GeometryKind::Polygon]))]
-	#[case::option(Kind::Option(Box::new(Kind::String)))]
 	#[case::either(Kind::Either(vec![Kind::String, Kind::Number]))]
 	#[case::set(Kind::Set(Box::new(Kind::String), Some(10)))]
 	#[case::array(Kind::Array(Box::new(Kind::String), Some(5)))]

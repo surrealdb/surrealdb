@@ -6,14 +6,14 @@ use crate::sql::changefeed::ChangeFeed;
 use crate::sql::index::{Distance, VectorType};
 use crate::sql::reference::{Reference, ReferenceDeleteStrategy};
 use crate::sql::{
-	Base, Cond, Data, Explain, Expr, Fetch, Fetchs, Field, Fields, Group, Groups, Ident, Idiom,
-	Output, Permission, Permissions, Timeout, View, With,
+	Base, Cond, Data, Explain, Expr, Fetch, Fetchs, Field, Fields, Group, Groups, Idiom, Output,
+	Permission, Permissions, Timeout, View, With,
 };
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{DistanceKind, Span, TokenKind, VectorTypeKind, t};
-use crate::val::Duration;
+use crate::types::PublicDuration;
 
 pub(crate) enum MissingKind {
 	Split,
@@ -24,7 +24,7 @@ pub(crate) enum MissingKind {
 impl Parser<'_> {
 	/// Parses a data production if the next token is a data keyword.
 	/// Otherwise returns None
-	pub async fn try_parse_data(&mut self, stk: &mut Stk) -> ParseResult<Option<Data>> {
+	pub(crate) async fn try_parse_data(&mut self, stk: &mut Stk) -> ParseResult<Option<Data>> {
 		let res = match self.peek().kind {
 			t!("SET") => {
 				self.pop_peek();
@@ -65,7 +65,7 @@ impl Parser<'_> {
 	}
 
 	/// Parses a statement output if the next token is `return`.
-	pub async fn try_parse_output(&mut self, stk: &mut Stk) -> ParseResult<Option<Output>> {
+	pub(crate) async fn try_parse_output(&mut self, stk: &mut Stk) -> ParseResult<Option<Output>> {
 		if !self.eat(t!("RETURN")) {
 			return Ok(None);
 		}
@@ -74,7 +74,7 @@ impl Parser<'_> {
 
 	/// Needed because some part of the RPC needs to call into the parser for
 	/// this specific part.
-	pub async fn parse_output(&mut self, stk: &mut Stk) -> ParseResult<Output> {
+	pub(crate) async fn parse_output(&mut self, stk: &mut Stk) -> ParseResult<Output> {
 		let res = match self.peek_kind() {
 			t!("NONE") => {
 				self.pop_peek();
@@ -102,22 +102,25 @@ impl Parser<'_> {
 	}
 
 	/// Parses a statement timeout if the next token is `TIMEOUT`.
-	pub fn try_parse_timeout(&mut self) -> ParseResult<Option<Timeout>> {
+	pub(crate) async fn try_parse_timeout(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<Option<Timeout>> {
 		if !self.eat(t!("TIMEOUT")) {
 			return Ok(None);
 		}
-		let duration = self.next_token_value()?;
+		let duration = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		Ok(Some(Timeout(duration)))
 	}
 
-	pub async fn try_parse_fetch(&mut self, stk: &mut Stk) -> ParseResult<Option<Fetchs>> {
+	pub(crate) async fn try_parse_fetch(&mut self, stk: &mut Stk) -> ParseResult<Option<Fetchs>> {
 		if !self.eat(t!("FETCH")) {
 			return Ok(None);
 		}
 		Ok(Some(self.parse_fetchs(stk).await?))
 	}
 
-	pub async fn parse_fetchs(&mut self, stk: &mut Stk) -> ParseResult<Fetchs> {
+	pub(crate) async fn parse_fetchs(&mut self, stk: &mut Stk) -> ParseResult<Fetchs> {
 		let mut fetchs = self.try_parse_param_or_idiom_or_fields(stk).await?;
 		while self.eat(t!(",")) {
 			fetchs.append(&mut self.try_parse_param_or_idiom_or_fields(stk).await?);
@@ -125,7 +128,7 @@ impl Parser<'_> {
 		Ok(Fetchs(fetchs))
 	}
 
-	pub async fn try_parse_param_or_idiom_or_fields(
+	pub(crate) async fn try_parse_param_or_idiom_or_fields(
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<Vec<Fetch>> {
@@ -160,7 +163,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn try_parse_condition(&mut self, stk: &mut Stk) -> ParseResult<Option<Cond>> {
+	pub(crate) async fn try_parse_condition(&mut self, stk: &mut Stk) -> ParseResult<Option<Cond>> {
 		if !self.eat(t!("WHERE")) {
 			return Ok(None);
 		}
@@ -270,7 +273,7 @@ impl Parser<'_> {
 		Ok(())
 	}
 
-	pub async fn try_parse_group(
+	pub(crate) async fn try_parse_group(
 		&mut self,
 		stk: &mut Stk,
 		fields: &Fields,
@@ -313,7 +316,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the parser to have just eaten the `PERMISSIONS` keyword.
-	pub async fn parse_permission(
+	pub(crate) async fn parse_permission(
 		&mut self,
 		stk: &mut Stk,
 		field: bool,
@@ -348,7 +351,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the parser to just have eaten the `FOR` keyword.
-	pub async fn parse_specific_permission(
+	pub(crate) async fn parse_specific_permission(
 		&mut self,
 		stk: &mut Stk,
 		permissions: &mut Permissions,
@@ -412,7 +415,10 @@ impl Parser<'_> {
 	///
 	/// Expects the parser to just have eaten either `SELECT`, `CREATE`,
 	/// `UPDATE` or `DELETE`.
-	pub async fn parse_permission_value(&mut self, stk: &mut Stk) -> ParseResult<Permission> {
+	pub(crate) async fn parse_permission_value(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<Permission> {
 		let next = self.next();
 		match next.kind {
 			t!("NONE") => Ok(Permission::None),
@@ -450,7 +456,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects the parser to have already eating the `CHANGEFEED` keyword
 	pub fn parse_changefeed(&mut self) -> ParseResult<ChangeFeed> {
-		let expiry = self.next_token_value::<Duration>()?.0;
+		let expiry = self.next_token_value::<PublicDuration>()?;
 		let store_diff = if self.eat(t!("INCLUDE")) {
 			expected!(self, t!("ORIGINAL"));
 			true
@@ -468,7 +474,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the parser to have already eating the `REFERENCE` keyword
-	pub async fn parse_reference(&mut self, stk: &mut Stk) -> ParseResult<Reference> {
+	pub(crate) async fn parse_reference(&mut self, stk: &mut Stk) -> ParseResult<Reference> {
 		let on_delete = if self.eat(t!("ON")) {
 			expected!(self, t!("DELETE"));
 			let next = self.next();
@@ -498,15 +504,15 @@ impl Parser<'_> {
 	/// # Parse State
 	/// Expects the parser to have already eaten the possible `(` if the view
 	/// was wrapped in parens. Expects the next keyword to be `SELECT`.
-	pub async fn parse_view(&mut self, stk: &mut Stk) -> ParseResult<View> {
+	pub(crate) async fn parse_view(&mut self, stk: &mut Stk) -> ParseResult<View> {
 		expected!(self, t!("SELECT"));
 		let before_fields = self.peek().span;
 		let fields = self.parse_fields(stk).await?;
 		let fields_span = before_fields.covers(self.recent_span());
 		expected!(self, t!("FROM"));
-		let mut from = vec![self.next_token_value()?];
+		let mut from = vec![self.parse_ident()?];
 		while self.eat(t!(",")) {
-			from.push(self.next_token_value()?);
+			from.push(self.parse_ident()?);
 		}
 
 		let cond = self.try_parse_condition(stk).await?;
@@ -520,7 +526,7 @@ impl Parser<'_> {
 		})
 	}
 
-	pub fn parse_distance(&mut self) -> ParseResult<Distance> {
+	pub(crate) fn parse_distance(&mut self) -> ParseResult<Distance> {
 		let next = self.next();
 		match next.kind {
 			TokenKind::Distance(k) => {
@@ -533,7 +539,7 @@ impl Parser<'_> {
 					DistanceKind::Jaccard => Distance::Jaccard,
 
 					DistanceKind::Minkowski => {
-						let distance = self.next_token_value()?;
+						let distance: surrealdb_types::Number = self.next_token_value()?;
 						Distance::Minkowski(distance)
 					}
 					DistanceKind::Pearson => Distance::Pearson,
@@ -558,17 +564,17 @@ impl Parser<'_> {
 		}
 	}
 
-	pub fn parse_custom_function_name(&mut self) -> ParseResult<Ident> {
+	pub fn parse_custom_function_name(&mut self) -> ParseResult<String> {
 		expected!(self, t!("fn"));
 		expected!(self, t!("::"));
-		let mut name = self.next_token_value::<Ident>()?.into_string();
+		let mut name = self.parse_ident()?;
 		while self.eat(t!("::")) {
-			let part = self.next_token_value::<Ident>()?.into_string();
+			let part = self.parse_ident()?;
 			name.push_str("::");
 			name.push_str(part.as_str());
 		}
 		// Safety: Parser guarentees no null bytes.
-		Ok(unsafe { Ident::new_unchecked(name) })
+		Ok(name)
 	}
 	pub(super) fn try_parse_explain(&mut self) -> ParseResult<Option<Explain>> {
 		Ok(self.eat(t!("EXPLAIN")).then(|| Explain(self.eat(t!("FULL")))))
@@ -586,9 +592,9 @@ impl Parser<'_> {
 				With::NoIndex
 			}
 			t!("INDEX") => {
-				let mut index = vec![self.next_token_value::<Ident>()?.into_string()];
+				let mut index = vec![self.parse_ident()?];
 				while self.eat(t!(",")) {
-					index.push(self.next_token_value::<Ident>()?.into_string());
+					index.push(self.parse_ident()?);
 				}
 				With::Index(index)
 			}

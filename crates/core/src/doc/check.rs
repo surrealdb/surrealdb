@@ -1,5 +1,6 @@
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use super::IgnoreError;
 use crate::catalog::Permission;
@@ -9,11 +10,10 @@ use crate::doc::Document;
 use crate::doc::Permitted::*;
 use crate::doc::compute::DocKind;
 use crate::err::Error;
-use crate::expr::FlowResultExt as _;
 use crate::expr::paths::{ID, IN, OUT};
+use crate::expr::{FlowResultExt as _, Part};
 use crate::iam::Action;
-use crate::sql::ToSql;
-use crate::val::Value;
+use crate::val::{RecordId, Value};
 
 impl Document {
 	/// Checks whether this operation is allowed on
@@ -36,7 +36,7 @@ impl Document {
 				ensure!(
 					tb.allows_normal(),
 					Error::TableCheck {
-						thing: self.id()?.to_string(),
+						record: self.id()?.to_string(),
 						relation: false,
 						target_type: tb.table_type.to_sql(),
 					}
@@ -46,7 +46,7 @@ impl Document {
 				ensure!(
 					tb.allows_normal(),
 					Error::TableCheck {
-						thing: self.id()?.to_string(),
+						record: self.id()?.to_string(),
 						relation: false,
 						target_type: tb.table_type.to_sql(),
 					}
@@ -56,7 +56,7 @@ impl Document {
 				ensure!(
 					tb.allows_relation(),
 					Error::TableCheck {
-						thing: self.id()?.to_string(),
+						record: self.id()?.to_string(),
 						relation: true,
 						target_type: tb.table_type.to_sql(),
 					}
@@ -67,7 +67,7 @@ impl Document {
 					ensure!(
 						tb.allows_relation(),
 						Error::TableCheck {
-							thing: self.id()?.to_string(),
+							record: self.id()?.to_string(),
 							relation: true,
 							target_type: tb.table_type.to_sql(),
 						}
@@ -77,7 +77,7 @@ impl Document {
 					ensure!(
 						tb.allows_normal(),
 						Error::TableCheck {
-							thing: self.id()?.to_string(),
+							record: self.id()?.to_string(),
 							relation: false,
 							target_type: tb.table_type.to_sql(),
 						}
@@ -117,18 +117,40 @@ impl Document {
 	/// statement, or present in any record which
 	/// is being updated.
 	pub(super) async fn check_data_fields(
-		&self,
+		&mut self,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<()> {
-		// Get the record id
-		let rid = self.id()?;
+		fn check(v: &Value, p: &[Part], r: &RecordId) -> Result<()> {
+			match v.pick(p) {
+				Value::RecordId(v) if v.key.is_range() => {
+					bail!(Error::IdInvalid {
+						value: v.to_string(),
+					})
+				}
+				Value::RecordId(v) if v.eq(r) => {}
+				Value::None => {}
+				v => {
+					ensure!(
+						r.key == v,
+						Error::IdMismatch {
+							value: v.to_string()
+						}
+					)
+				}
+			}
+			Ok(())
+		}
+
 		// Don't bother checking if we generated the document id
 		if self.r#gen.is_some() {
 			return Ok(());
 		}
+		// Get the record id
+		let rid = self.id()?;
+
 		// You cannot store a range id as the id field on a document
 		ensure!(
 			!rid.key.is_range(),
@@ -136,159 +158,37 @@ impl Document {
 				value: rid.to_string(),
 			}
 		);
+
+		// Get the input data, needs to happen before the workable::relate borrow from self.extras
+		let data = self.compute_input_data(stk, ctx, opt, stm).await?;
+		if data.is_some_and(|x| x.is_patch()) {
+			return Ok(());
+		}
+
+		// Get value from data
+		let value = data.map(|x| x.value());
+
 		// This is a CREATE, UPSERT, UPDATE statement
 		if let Workable::Normal = &self.extras {
 			// This is a CONTENT, MERGE or SET clause
-			if let Some(data) = stm.data() {
+			if let Some(value) = value {
 				// Check if there is an id field specified
-				match data.pick(stk, ctx, opt, "id").await? {
-					// You cannot store a range id as the id field on a document
-					Value::RecordId(v) if v.key.is_range() => {
-						bail!(Error::IdInvalid {
-							value: v.to_string(),
-						})
-					}
-					// The id is a match, so don't error
-					Value::RecordId(v) if v.eq(&rid) => {}
-					Value::None => {}
-					v => {
-						ensure!(
-							rid.key == v,
-							Error::IdMismatch {
-								value: v.to_string(),
-							}
-						)
-					}
-				}
+				check(value.as_ref(), ID.as_ref(), rid.as_ref())?;
 			}
 		}
 		// This is a RELATE statement
 		else if let Workable::Relate(l, r, v) = &self.extras {
-			// This is a RELATE statement
-			if let Some(data) = stm.data() {
-				// Check that the 'id' field matches
-				match data.pick(stk, ctx, opt, "id").await? {
-					// You cannot store a range id as the id field on a document
-					Value::RecordId(v) if v.key.is_range() => {
-						bail!(Error::IdInvalid {
-							value: v.to_string(),
-						})
-					}
-					// The id field is a match, so don't error
-					Value::RecordId(v) if v.eq(&rid) => (),
-					// There was no id field specified
-					Value::None => {}
-					v => {
-						ensure!(
-							rid.key == v,
-							Error::IdMismatch {
-								value: v.to_string(),
-							}
-						)
-					}
-				}
-				// Check that the 'in' field matches
-				match data.pick(stk, ctx, opt, "in").await? {
-					// You cannot store a range id as the in field on a document
-					Value::RecordId(v) if v.key.is_range() => {
-						bail!(Error::InInvalid {
-							value: v.to_string(),
-						})
-					}
-					// The in field is a match, so don't error
-					Value::RecordId(v) if v.eq(l) => (),
-					Value::None => {}
-					v => {
-						ensure!(
-							l.key == v,
-							Error::InMismatch {
-								value: v.to_string(),
-							}
-						)
-					}
-				}
-				// Check that the 'out' field matches
-				match data.pick(stk, ctx, opt, "out").await? {
-					// You cannot store a range id as the out field on a document
-					Value::RecordId(v) if v.key.is_range() => {
-						bail!(Error::OutInvalid {
-							value: v.to_string(),
-						})
-					}
-					// The out field is a match, so don't error
-					Value::RecordId(v) if v.eq(r) => {}
-					Value::None => {}
-					v => {
-						ensure!(
-							r.key == v,
-							Error::OutMismatch {
-								value: v.to_string(),
-							}
-						)
-					}
-				}
+			if let Some(value) = value {
+				// Check if there is an id field specified
+				check(value.as_ref(), ID.as_ref(), rid.as_ref())?;
+				check(value.as_ref(), IN.as_ref(), l)?;
+				check(value.as_ref(), OUT.as_ref(), r)?;
 			}
 			// This is a INSERT RELATION statement
-			else if let Some(data) = v {
-				// Check that the 'id' field matches
-				match data.pick(&*ID) {
-					// You cannot store a range id as the id field on a document
-					Value::RecordId(v) if v.key.is_range() => {
-						bail!(Error::IdInvalid {
-							value: v.to_string(),
-						})
-					}
-					// The id field is a match, so don't error
-					Value::RecordId(v) if v.eq(&rid) => (),
-					// The id is a match, so don't error
-					v if rid.key == v => (),
-					// There was no id field specified
-					v if v.is_none() => (),
-					// The id field does not match
-					v => {
-						bail!(Error::IdMismatch {
-							value: v.to_string(),
-						})
-					}
-				}
-				// Check that the 'in' field matches
-				match data.pick(&*IN) {
-					// You cannot store a range id as the in field on a document
-					Value::RecordId(v) if v.key.is_range() => {
-						bail!(Error::InInvalid {
-							value: v.to_string(),
-						})
-					}
-					// The in field is a match, so don't error
-					Value::RecordId(v) if v.eq(l) => (),
-					// The in is a match, so don't error
-					v if l.key == v => (),
-					// The in field does not match
-					v => {
-						bail!(Error::InMismatch {
-							value: v.to_string(),
-						})
-					}
-				}
-				// Check that the 'out' field matches
-				match data.pick(&*OUT) {
-					// You cannot store a range id as the out field on a document
-					Value::RecordId(v) if v.key.is_range() => {
-						bail!(Error::OutInvalid {
-							value: v.to_string(),
-						})
-					}
-					// The out field is a match, so don't error
-					Value::RecordId(v) if v.eq(r) => (),
-					// The out is a match, so don't error
-					v if r.key == v => (),
-					// The out field does not match
-					v => {
-						bail!(Error::OutMismatch {
-							value: v.to_string(),
-						})
-					}
-				}
+			else if let Some(value) = v {
+				check(value.as_ref(), ID.as_ref(), rid.as_ref())?;
+				check(value.as_ref(), IN.as_ref(), l)?;
+				check(value.as_ref(), OUT.as_ref(), r)?;
 			}
 		}
 		// Carry on

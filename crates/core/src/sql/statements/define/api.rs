@@ -3,19 +3,31 @@ use std::fmt::{self, Display};
 use super::DefineKind;
 use super::config::api::ApiConfig;
 use crate::catalog::ApiMethod;
-use crate::sql::Expr;
-use crate::sql::fmt::{Fmt, pretty_indent};
-use crate::val::Strand;
+use crate::fmt::{Fmt, pretty_indent};
+use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct DefineApiStatement {
+pub(crate) struct DefineApiStatement {
 	pub kind: DefineKind,
 	pub path: Expr,
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Expr>,
 	pub config: ApiConfig,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
+}
+
+impl Default for DefineApiStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			path: Expr::Literal(Literal::None),
+			actions: Vec::new(),
+			fallback: None,
+			config: ApiConfig::default(),
+			comment: None,
+		}
+	}
 }
 
 impl Display for DefineApiStatement {
@@ -29,21 +41,21 @@ impl Display for DefineApiStatement {
 		write!(f, " {}", self.path)?;
 		let indent = pretty_indent();
 
-		write!(f, "FOR any")?;
+		write!(f, " FOR any")?;
 		{
 			let indent = pretty_indent();
 
 			write!(f, "{}", self.config)?;
 
 			if let Some(fallback) = &self.fallback {
-				write!(f, "THEN {}", fallback)?;
+				write!(f, " THEN {}", fallback)?;
 			}
 
 			drop(indent);
 		}
 
 		for action in &self.actions {
-			write!(f, "{}", action)?;
+			write!(f, " {}", action)?;
 		}
 
 		if let Some(ref comment) = self.comment {
@@ -63,7 +75,7 @@ impl From<DefineApiStatement> for crate::expr::statements::DefineApiStatement {
 			actions: v.actions.into_iter().map(Into::into).collect(),
 			fallback: v.fallback.map(Into::into),
 			config: v.config.into(),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 		}
 	}
 }
@@ -76,14 +88,14 @@ impl From<crate::expr::statements::DefineApiStatement> for DefineApiStatement {
 			actions: v.actions.into_iter().map(Into::into).collect(),
 			fallback: v.fallback.map(Into::into),
 			config: v.config.into(),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 		}
 	}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct ApiAction {
+pub(crate) struct ApiAction {
 	pub methods: Vec<ApiMethod>,
 	pub action: Expr,
 	pub config: ApiConfig,
@@ -94,7 +106,7 @@ impl Display for ApiAction {
 		write!(f, "FOR {}", Fmt::comma_separated(self.methods.iter()))?;
 		let _indent = pretty_indent();
 		write!(f, "{}", self.config)?;
-		write!(f, "THEN {}", self.action)?;
+		write!(f, " THEN {}", self.action)?;
 		Ok(())
 	}
 }

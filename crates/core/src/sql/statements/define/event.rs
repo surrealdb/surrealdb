@@ -1,19 +1,18 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::fmt::Fmt;
-use crate::sql::{Expr, Ident};
-use crate::val::Strand;
+use crate::fmt::Fmt;
+use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct DefineEventStatement {
+pub(crate) struct DefineEventStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
-	pub target_table: Ident,
+	pub name: Expr,
+	pub target_table: Expr,
 	pub when: Expr,
 	pub then: Vec<Expr>,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 }
 
 impl Display for DefineEventStatement {
@@ -33,7 +32,7 @@ impl Display for DefineEventStatement {
 			Fmt::comma_separated(&self.then)
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
 	}
@@ -47,11 +46,12 @@ impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatemen
 			target_table: v.target_table.into(),
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 		}
 	}
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<crate::expr::statements::DefineEventStatement> for DefineEventStatement {
 	fn from(v: crate::expr::statements::DefineEventStatement) -> Self {
 		DefineEventStatement {
@@ -60,7 +60,7 @@ impl From<crate::expr::statements::DefineEventStatement> for DefineEventStatemen
 			target_table: v.target_table.into(),
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 		}
 	}
 }

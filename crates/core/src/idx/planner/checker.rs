@@ -12,9 +12,9 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Cond, Expr, FlowResultExt as _, Literal};
-use crate::idx::docids::DocId;
-use crate::idx::docids::btdocids::BTreeDocIds;
+use crate::idx::IndexKeyBase;
 use crate::idx::planner::iterators::KnnIteratorResult;
+use crate::idx::seqdocids::{DocId, SeqDocIds};
 use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::knn::Ids64;
 use crate::kvs::Transaction;
@@ -85,22 +85,29 @@ impl<'a> HnswConditionChecker<'a> {
 }
 
 impl<'a> MTreeConditionChecker<'a> {
-	pub fn new_cond(ctx: &'a Context, opt: &'a Options, cond: Arc<Cond>) -> Self {
+	pub(in crate::idx) fn new_cond(
+		ctx: &'a Context,
+		opt: &'a Options,
+		cond: Arc<Cond>,
+		ikb: IndexKeyBase,
+	) -> Self {
 		if Expr::Literal(Literal::Bool(true)) != cond.0 {
 			Self::MTreeCondition(MTreeCondChecker {
 				ctx,
 				opt,
 				cond,
 				cache: Default::default(),
+				ikb,
 			})
 		} else {
-			Self::new(ctx)
+			Self::new(ctx, ikb)
 		}
 	}
 
-	pub fn new(ctx: &'a Context) -> Self {
+	pub fn new(ctx: &'a Context, ikb: IndexKeyBase) -> Self {
 		Self::MTree(MTreeChecker {
 			ctx,
+			ikb,
 		})
 	}
 
@@ -108,11 +115,10 @@ impl<'a> MTreeConditionChecker<'a> {
 		&mut self,
 		db: &DatabaseDefinition,
 		stk: &mut Stk,
-		doc_ids: &BTreeDocIds,
 		doc_id: DocId,
 	) -> Result<bool> {
 		match self {
-			Self::MTreeCondition(c) => c.check_truthy(db, stk, doc_ids, doc_id).await,
+			Self::MTreeCondition(c) => c.check_truthy(db, stk, doc_id).await,
 			Self::MTree(_) => Ok(true),
 		}
 	}
@@ -125,11 +131,10 @@ impl<'a> MTreeConditionChecker<'a> {
 
 	pub(in crate::idx) async fn convert_result(
 		&mut self,
-		doc_ids: &BTreeDocIds,
 		res: VecDeque<(DocId, f64)>,
 	) -> Result<VecDeque<KnnIteratorResult>> {
 		match self {
-			Self::MTree(c) => c.convert_result(doc_ids, res).await,
+			Self::MTree(c) => c.convert_result(res).await,
 			Self::MTreeCondition(c) => Ok(c.convert_result(res)),
 		}
 	}
@@ -137,12 +142,12 @@ impl<'a> MTreeConditionChecker<'a> {
 
 pub struct MTreeChecker<'a> {
 	ctx: &'a Context,
+	ikb: IndexKeyBase,
 }
 
 impl MTreeChecker<'_> {
 	async fn convert_result(
 		&self,
-		doc_ids: &BTreeDocIds,
 		res: VecDeque<(DocId, f64)>,
 	) -> Result<VecDeque<KnnIteratorResult>> {
 		if res.is_empty() {
@@ -151,8 +156,12 @@ impl MTreeChecker<'_> {
 		let mut result = VecDeque::with_capacity(res.len());
 		let txn = self.ctx.tx();
 		for (doc_id, dist) in res {
-			if let Some(key) = doc_ids.get_doc_key(&txn, doc_id).await? {
-				result.push_back((key.into(), dist, None));
+			if let Some(key) = SeqDocIds::get_id(&self.ikb, &txn, doc_id).await? {
+				result.push_back((
+					Arc::new(RecordId::new(self.ikb.table().to_owned(), key)),
+					dist,
+					None,
+				));
 			}
 		}
 		Ok(result)
@@ -227,6 +236,7 @@ pub struct MTreeCondChecker<'a> {
 	ctx: &'a Context,
 	opt: &'a Options,
 	cond: Arc<Cond>,
+	ikb: IndexKeyBase,
 	cache: HashMap<DocId, CheckerCacheEntry>,
 }
 
@@ -235,14 +245,15 @@ impl MTreeCondChecker<'_> {
 		&mut self,
 		db: &DatabaseDefinition,
 		stk: &mut Stk,
-		doc_ids: &BTreeDocIds,
 		doc_id: u64,
 	) -> Result<bool> {
 		match self.cache.entry(doc_id) {
 			Entry::Occupied(e) => Ok(e.get().truthy),
 			Entry::Vacant(e) => {
 				let txn = self.ctx.tx();
-				let rid = doc_ids.get_doc_key(&txn, doc_id).await?;
+				let rid = SeqDocIds::get_id(&self.ikb, &txn, doc_id)
+					.await?
+					.map(|key| RecordId::new(self.ikb.table().to_owned(), key));
 				let ent =
 					CheckerCacheEntry::build(stk, db, self.ctx, self.opt, rid, self.cond.as_ref())
 						.await?;

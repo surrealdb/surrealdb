@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt;
 
 use anyhow::{Result, bail};
@@ -7,62 +8,23 @@ use uuid::Uuid;
 use crate::catalog::providers::CatalogProvider;
 use crate::catalog::{NodeLiveQuery, SubscriptionDefinition};
 use crate::ctx::Context;
-use crate::dbs::Options;
+use crate::dbs::{Options, Variables};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _, Literal};
-use crate::iam::Auth;
+use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct LiveStatement {
+pub(crate) struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,
 	pub fields: Fields,
 	pub what: Expr,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
-	// When a live query is created, we must also store the
-	// authenticated session of the user who made the query,
-	// so we can check it later when sending notifications.
-	// This is optional as it is only set by the database
-	// runtime when storing the live query to storage.
-	pub(crate) auth: Option<Auth>,
-	// When a live query is created, we must also store the
-	// authenticated session of the user who made the query,
-	// so we can check it later when sending notifications.
-	// This is optional as it is only set by the database
-	// runtime when storing the live query to storage.
-	pub(crate) session: Option<Value>,
 }
 
 impl LiveStatement {
-	pub fn new(expr: Fields) -> Self {
-		LiveStatement {
-			id: Uuid::new_v4(),
-			node: Uuid::new_v4(),
-			fields: expr,
-			what: Expr::Literal(Literal::Null),
-			cond: None,
-			fetch: None,
-			auth: None,
-			session: None,
-		}
-	}
-
-	pub fn new_from_what_expr(expr: Fields, what: Expr) -> Self {
-		LiveStatement {
-			id: Uuid::new_v4(),
-			node: Uuid::new_v4(),
-			what,
-			fields: expr,
-			cond: None,
-			auth: None,
-			session: None,
-			fetch: None,
-		}
-	}
-
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -77,6 +39,17 @@ impl LiveStatement {
 		opt.valid_for_db()?;
 		// Get the Node ID
 		let nid = opt.id()?;
+
+		let mut vars = BTreeMap::new();
+		vars.extend(Variables::from_expr(&self.fields, ctx));
+		vars.extend(Variables::from_expr(&self.what, ctx));
+		if let Some(cond) = &self.cond {
+			vars.extend(Variables::from_expr(cond, ctx));
+		}
+		if let Some(fetch) = &self.fetch {
+			vars.extend(Variables::from_expr(fetch, ctx));
+		}
+
 		// Check that auth has been set
 		let mut subscription_definition = SubscriptionDefinition {
 			id: self.id,
@@ -92,6 +65,8 @@ impl LiveStatement {
 			// Use the current session authentication
 			// for when we store the LIVE Statement
 			session: ctx.value("session").cloned(),
+			// Add the variables to the subscription definition
+			vars,
 		};
 		// Get the id
 		let live_query_id = subscription_definition.id;
@@ -163,13 +138,14 @@ mod tests {
 	use anyhow::Result;
 
 	use crate::catalog::providers::{CatalogProvider, TableProvider};
-	use crate::dbs::{Action, Capabilities, Notification, Session};
-	use crate::expr::Value;
+	use crate::dbs::{Capabilities, Session};
 	use crate::kvs::Datastore;
 	use crate::kvs::LockType::Optimistic;
 	use crate::kvs::TransactionType::Write;
 	use crate::syn;
-	use crate::val::{RecordId, RecordIdKey};
+	use crate::types::{
+		PublicAction, PublicNotification, PublicRecordId, PublicRecordIdKey, PublicValue,
+	};
 
 	pub async fn new_ds() -> Result<Datastore> {
 		Ok(Datastore::new("memory")
@@ -200,7 +176,7 @@ mod tests {
 
 		let live_id = live_query_response.remove(0).result.unwrap();
 		let live_id = match live_id {
-			Value::Uuid(id) => id,
+			PublicValue::Uuid(id) => id,
 			_ => panic!("expected uuid"),
 		};
 
@@ -215,7 +191,7 @@ mod tests {
 		let create_statement = format!("CREATE {tb}:test_true SET condition = true");
 		let create_response = &mut dbs.execute(&create_statement, &ses, None).await.unwrap();
 		assert_eq!(create_response.len(), 1);
-		let expected_record: Value = syn::value(&format!(
+		let expected_record: PublicValue = syn::value(&format!(
 			"[{{
 				id: {tb}:test_true,
 				condition: true,
@@ -238,12 +214,12 @@ mod tests {
 		let notification = notifications.recv().await.unwrap();
 		assert_eq!(
 			notification,
-			Notification::new(
+			PublicNotification::new(
 				live_id,
-				Action::Create,
-				Value::RecordId(RecordId {
-					table: tb.to_owned(),
-					key: RecordIdKey::String("test_true".to_owned())
+				PublicAction::Create,
+				PublicValue::RecordId(PublicRecordId {
+					table: tb.into(),
+					key: PublicRecordIdKey::String("test_true".to_owned())
 				}),
 				syn::value(&format!(
 					"{{

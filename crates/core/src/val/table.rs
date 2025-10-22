@@ -5,9 +5,8 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 
-use crate::expr::Ident;
-use crate::expr::escape::EscapeIdent;
-use crate::val::{IndexFormat, Strand};
+use crate::fmt::EscapeIdent;
+use crate::val::IndexFormat;
 
 /// A value type referencing a specific table.
 #[revisioned(revision = 1)]
@@ -33,31 +32,8 @@ pub struct Table(String);
 
 impl Table {
 	/// Create a new strand, returns None if the string contains a null byte.
-	pub fn new(s: String) -> Option<Table> {
-		if s.contains('\0') {
-			None
-		} else {
-			Some(Table(s))
-		}
-	}
-
-	/// Create a new strand, without checking the string.
-	///
-	/// # Safety
-	/// Caller must ensure that string handed as an argument does not contain
-	/// any null bytes.
-	pub unsafe fn new_unchecked(s: String) -> Table {
-		// Check in debug mode if the variants
-		debug_assert!(!s.contains('\0'));
+	pub fn new(s: String) -> Table {
 		Table(s)
-	}
-
-	pub fn from_strand(s: Strand) -> Table {
-		Table(s.into_string())
-	}
-
-	pub fn into_strand(self) -> Strand {
-		unsafe { Strand::new_unchecked(self.0) }
 	}
 
 	pub fn into_string(self) -> String {
@@ -66,6 +42,10 @@ impl Table {
 
 	pub fn as_str(&self) -> &str {
 		&self.0
+	}
+
+	pub fn is_table_type(&self, tables: &[String]) -> bool {
+		tables.is_empty() || tables.contains(&self.0)
 	}
 }
 
@@ -76,14 +56,20 @@ impl Deref for Table {
 	}
 }
 
-impl From<Ident> for Table {
-	fn from(value: Ident) -> Self {
+impl fmt::Display for Table {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		EscapeIdent(&self.0).fmt(f)
+	}
+}
+
+impl From<surrealdb_types::Table> for Table {
+	fn from(value: surrealdb_types::Table) -> Self {
 		Table(value.into_string())
 	}
 }
 
-impl fmt::Display for Table {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		EscapeIdent(&self.0).fmt(f)
+impl From<Table> for surrealdb_types::Table {
+	fn from(value: Table) -> Self {
+		surrealdb_types::Table::new(value.0)
 	}
 }

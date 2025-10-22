@@ -1,0 +1,48 @@
+coverage:
+  status:
+    project:
+      default:
+        informational: true # don't fail PRs on project coverage
+    patch:
+      default:
+        informational: true # don't fail PRs on patch coverage
+
+comment:
+  behavior: default
+
+component_management:
+  default_rules:  # default rules inherited by all components
+    statuses:
+      - type: project
+        target: auto
+        informational: true  # don't fail PRs based on component coverage
+      - type: patch
+        target: auto
+        informational: true
+  
+  individual_components:
+    - component_id: surrealdb_core
+      name: surrealdb-core
+      paths:
+        - crates/core/**
+
+    - component_id: surrealdb_types
+      name: surrealdb-types
+      paths:
+        - crates/types/**
+        - crates/types-derive/**
+
+    - component_id: surrealdb_sdk
+      name: surrealdb-sdk
+      paths:
+        - crates/sdk/**
+
+    - component_id: surrealdb_bin
+      name: surrealdb-bin
+      paths:
+        - src/**
+
+    - component_id: surrealdb_tests
+      name: integration-tests
+      paths:
+        - tests/**

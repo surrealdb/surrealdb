@@ -4,8 +4,9 @@ use std::sync::LazyLock;
 use jsonwebtoken::{Algorithm, Header};
 use serde::{Deserialize, Serialize};
 
+use crate::sql::expression::convert_public_value_to_internal;
 use crate::syn;
-use crate::val::{Object, Strand, Value};
+use crate::val::{Object, Value};
 
 pub static HEADER: LazyLock<Header> = LazyLock::new(|| Header::new(Algorithm::HS512));
 
@@ -74,10 +75,9 @@ pub struct Claims {
 }
 
 impl Claims {
-	pub fn into_claims_object(self) -> Object {
+	pub(crate) fn into_claims_object(self) -> Object {
 		// Set default value
 		let mut out = Object::default();
-		// TODO: Null byte validity
 		// Add iss field if set
 		if let Some(iss) = self.iss {
 			out.insert("iss".to_string(), iss.into());
@@ -89,15 +89,10 @@ impl Claims {
 		// Add aud field if set
 		if let Some(aud) = self.aud {
 			match aud {
-				Audience::Single(v) => {
-					out.insert("aud".to_string(), Value::Strand(Strand::new(v).unwrap()))
-				}
+				Audience::Single(v) => out.insert("aud".to_string(), Value::String(v)),
 				Audience::Multiple(v) => out.insert(
 					"aud".to_string(),
-					v.into_iter()
-						.map(|s| Value::Strand(Strand::new(s).unwrap()))
-						.collect::<Vec<_>>()
-						.into(),
+					v.into_iter().map(Value::String).collect::<Vec<_>>().into(),
 				),
 			};
 		}
@@ -137,10 +132,7 @@ impl Claims {
 		if let Some(role) = self.roles {
 			out.insert(
 				"RL".to_string(),
-				role.into_iter()
-					.map(|x| Value::from(Strand::new(x).unwrap()))
-					.collect::<Vec<_>>()
-					.into(),
+				role.into_iter().map(Value::from).collect::<Vec<_>>().into(),
 			);
 		}
 		// Add custom claims if set
@@ -162,6 +154,7 @@ impl Claims {
 						continue;
 					}
 				};
+				let claim_value = convert_public_value_to_internal(claim_value);
 				out.insert(claim.clone(), claim_value);
 			}
 		}

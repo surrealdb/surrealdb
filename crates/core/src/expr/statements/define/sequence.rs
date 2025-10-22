@@ -1,41 +1,78 @@
 use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
+use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::SequenceDefinition;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Timeout, Value};
+use crate::expr::expression::VisitExpression;
+use crate::expr::parameterize::expr_to_ident;
+use crate::expr::{Base, Expr, Literal, Timeout, Value};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct DefineSequenceStatement {
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct DefineSequenceStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
-	pub batch: u32,
-	pub start: i64,
+	pub name: Expr,
+	pub batch: Expr,
+	pub start: Expr,
 	pub timeout: Option<Timeout>,
 }
 
+impl VisitExpression for DefineSequenceStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.name.visit(visitor);
+		self.batch.visit(visitor);
+		self.start.visit(visitor);
+	}
+}
+
+impl Default for DefineSequenceStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			batch: Expr::Literal(Literal::Integer(0)),
+			start: Expr::Literal(Literal::Integer(0)),
+			timeout: None,
+		}
+	}
+}
+
 impl DefineSequenceStatement {
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
+		// Compute name
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "sequence name").await?;
+		// Compute timeout
+		let timeout = map_opt!(x as &self.timeout => x.compute(stk, ctx, opt, doc).await?.0);
 		// Fetch the transaction
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
-		if txn.get_db_sequence(ns, db, &self.name).await.is_ok() {
+		if txn.get_db_sequence(ns, db, &name).await.is_ok() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::SeqAlreadyExists {
-							name: self.name.to_string(),
+							name: name.to_string(),
 						});
 					}
 				}
@@ -52,12 +89,14 @@ impl DefineSequenceStatement {
 		};
 
 		// Process the statement
-		let key = Sq::new(db.namespace_id, db.database_id, &self.name);
+		let key = Sq::new(db.namespace_id, db.database_id, &name);
 		let sq = SequenceDefinition {
-			name: self.name.to_raw_string(),
-			batch: self.batch,
-			start: self.start,
-			timeout: self.timeout.as_ref().map(|t| *t.as_std_duration()),
+			name: name.clone(),
+			batch: compute_to!(stk, ctx, opt, doc, self.batch => i64)
+				.try_into()
+				.map_err(|_| anyhow::anyhow!("batch must be a u32"))?,
+			start: compute_to!(stk, ctx, opt, doc, self.start => i64),
+			timeout,
 		};
 		// Set the definition
 		txn.set(&key, &sq, None).await?;
@@ -83,7 +122,7 @@ impl Display for DefineSequenceStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} BATCH {} START {}", self.name, self.batch, self.start)?;
+		write!(f, " {} BATCH {} START {}", &self.name, self.batch, self.start)?;
 		if let Some(ref v) = self.timeout {
 			write!(f, " {v}")?
 		}

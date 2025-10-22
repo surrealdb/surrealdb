@@ -1,8 +1,8 @@
 use std::fmt;
 
 use crate::catalog::Distance;
-use crate::expr::fmt::Fmt;
-use crate::expr::{Expr, Ident, Kind};
+use crate::expr::{Expr, Kind};
+use crate::fmt::Fmt;
 use crate::idx::ft::MatchRef;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -34,11 +34,11 @@ impl fmt::Display for PrefixOperator {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum PostfixOperator {
+pub(crate) enum PostfixOperator {
 	Range,
 	RangeSkip,
 	/// Not used as of yet but will be once the idiom is properly restructured.
-	MethodCall(Ident, Vec<Expr>),
+	MethodCall(String, Vec<Expr>),
 	Call(Vec<Expr>),
 }
 
@@ -58,7 +58,7 @@ impl fmt::Display for PostfixOperator {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum BinaryOperator {
+pub(crate) enum BinaryOperator {
 	/// `-`
 	Subtract,
 	/// `+`
@@ -142,7 +142,7 @@ pub enum BinaryOperator {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct MatchesOperator {
+pub(crate) struct MatchesOperator {
 	pub rf: Option<MatchRef>,
 	pub operator: BooleanOperator,
 }
@@ -181,7 +181,7 @@ impl fmt::Display for BooleanOperator {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum NearestNeighbor {
+pub(crate) enum NearestNeighbor {
 	/// `<|k, dist|>`
 	K(u32, Distance),
 	/// `<|k|>`

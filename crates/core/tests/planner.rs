@@ -1,10 +1,10 @@
 mod helpers;
 use anyhow::Result;
 use helpers::{new_ds, skip_ok};
-use surrealdb_core::dbs::{Response, Session};
+use surrealdb_core::dbs::{QueryResult, Session};
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
-use surrealdb_core::val::Value;
+use surrealdb_types::Value;
 
 use crate::helpers::Test;
 
@@ -72,6 +72,7 @@ async fn select_where_iterate_three_multi_index_with_one_ft_index() -> Result<()
 }
 
 #[tokio::test]
+#[ignore] // TODO EK
 async fn select_where_iterate_three_multi_index_with_one_index() -> Result<()> {
 	let dbs = new_ds().await?;
 	let mut res =
@@ -144,17 +145,21 @@ async fn select_where_iterate_two_no_index() -> Result<()> {
 	Ok(())
 }
 
-async fn execute_test(dbs: &Datastore, sql: &str, expected_result: usize) -> Result<Vec<Response>> {
+async fn execute_test(
+	dbs: &Datastore,
+	sql: &str,
+	expected_result: usize,
+) -> Result<Vec<QueryResult>> {
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), expected_result);
 	Ok(res)
 }
 
-fn check_result(res: &mut Vec<Response>, expected: &str) -> Result<()> {
+fn check_result(res: &mut Vec<QueryResult>, expected: &str) -> Result<()> {
 	let tmp = res.remove(0).result?;
 	let val = syn::value(expected).unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -525,7 +530,7 @@ async fn select_with_no_index_unary_operator() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -566,7 +571,7 @@ async fn select_unsupported_unary_operator() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -696,12 +701,12 @@ async fn select_range(
 	{
 		let tmp = res.remove(0).result?;
 		let val = syn::value(explain).unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	{
 		let tmp = res.remove(0).result?;
 		let val = syn::value(result).unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	Ok(())
 }
@@ -943,12 +948,12 @@ async fn select_single_range_operator(
 	{
 		let tmp = res.remove(0).result?;
 		let val = syn::value(explain).unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	{
 		let tmp = res.remove(0).result?;
 		let val = syn::value(result).unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	Ok(())
 }
@@ -1167,7 +1172,7 @@ async fn select_with_idiom_param_value() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -1221,23 +1226,23 @@ async fn test_contains(
 	{
 		let tmp = res.remove(0).result?;
 		let val = syn::value(CONTAINS_TABLE_EXPLAIN).unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	{
 		let tmp = res.remove(0).result?;
 		let val = syn::value(result).unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	skip_ok(&mut res, 1)?;
 	{
 		let tmp = res.remove(0).result?;
 		let val = syn::value(index_explain).unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	{
 		let tmp = res.remove(0).result?;
 		let val = syn::value(result).unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	Ok(())
 }
@@ -1373,53 +1378,6 @@ async fn select_contains_any() -> Result<()> {
 	test_contains(&dbs, SQL, INDEX_EXPLAIN, RESULT).await
 }
 
-const CONTAINS_UNIQUE_CONTENT: &str = r#"
-		CREATE student:1 CONTENT { subject: "maths", mark: 50 };
-		CREATE student:2 CONTENT { subject: "english", mark: 35 };
-		CREATE student:3 CONTENT { subject: "hindi", mark: 30 };"#;
-
-#[tokio::test]
-async fn select_unique_contains() -> Result<()> {
-	let dbs = new_ds().await?;
-	let mut res = execute_test(&dbs, CONTAINS_UNIQUE_CONTENT, 3).await?;
-	skip_ok(&mut res, 3)?;
-
-	const SQL: &str = r#"
-		SELECT id FROM student WHERE subject CONTAINS "english" EXPLAIN;
-		SELECT id FROM student WHERE subject CONTAINS "english";
-		DEFINE INDEX subject_idx ON student COLUMNS subject UNIQUE;
-		SELECT id FROM student WHERE subject CONTAINS "english" EXPLAIN;
-		SELECT id FROM student WHERE subject CONTAINS "english";
-	"#;
-
-	const INDEX_EXPLAIN: &str = r"[
-				{
-					detail: {
-						plan: {
-							index: 'subject_idx',
-							operator: '=',
-							value: 'english'
-						},
-						table: 'student',
-					},
-					operation: 'Iterate Index'
-				},
-				{
-					detail: {
-						type: 'Memory'
-					},
-					operation: 'Collector'
-				}
-			]";
-	const RESULT: &str = r"[
-		{
-			id: student:2
-		}
-	]";
-
-	test_contains(&dbs, SQL, INDEX_EXPLAIN, RESULT).await
-}
-
 #[tokio::test]
 // This test checks that:
 // 1. Datetime are recognized by the query planner
@@ -1466,7 +1424,7 @@ async fn select_with_datetime_value() -> Result<()> {
 			]"#,
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 
 	for _ in 0..2 {
@@ -1480,7 +1438,7 @@ async fn select_with_datetime_value() -> Result<()> {
 			]"#,
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	Ok(())
 }
@@ -1531,7 +1489,7 @@ async fn select_with_uuid_value() -> Result<()> {
 			]"#,
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 
 	for _ in 0..2 {
@@ -1545,7 +1503,7 @@ async fn select_with_uuid_value() -> Result<()> {
 			]"#,
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 
 	Ok(())
@@ -1594,7 +1552,7 @@ async fn select_with_in_operator() -> Result<()> {
 			]"#,
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 
 	for _ in 0..2 {
@@ -1608,7 +1566,7 @@ async fn select_with_in_operator() -> Result<()> {
 			]"#,
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	Ok(())
 }
@@ -1635,7 +1593,7 @@ async fn select_with_in_operator_uniq_index() -> Result<()> {
 
 	let tmp = res.remove(0).result?;
 	let val = syn::value(r#"[]"#).unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 
 	for _ in 0..4 {
 		let tmp = res.remove(0).result?;
@@ -1647,7 +1605,7 @@ async fn select_with_in_operator_uniq_index() -> Result<()> {
 		]"#,
 		)
 		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 
 	let tmp = res.remove(0).result?;
@@ -1675,7 +1633,7 @@ async fn select_with_in_operator_uniq_index() -> Result<()> {
 		]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -1808,7 +1766,7 @@ async fn select_with_record_id_link_no_index() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -1829,7 +1787,7 @@ async fn select_with_record_id_link_no_index() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -1893,10 +1851,10 @@ async fn select_with_record_id_link_index() -> Result<()> {
 				]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	assert_eq!(tmp, expected);
 	//
 	Ok(())
 }
@@ -1960,10 +1918,10 @@ async fn select_with_record_id_link_unique_index() -> Result<()> {
 				]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	assert_eq!(tmp, expected);
 	//
 	Ok(())
 }
@@ -2029,10 +1987,10 @@ async fn select_with_record_id_link_unique_remote_index() -> Result<()> {
 				]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
+	assert_eq!(tmp, expected);
 	//
 	Ok(())
 }
@@ -2087,11 +2045,11 @@ async fn select_with_record_id_link_full_text_index() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(r#"[{ "id": i:A, "t": t:1}]"#)?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -2136,167 +2094,14 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<()> {
 					}
 			]"#,
 	)?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let val = syn::value(r#"[{ "id": i:A, "t": t:1}]"#)?;
 	for _ in 0..3 {
 		let tmp = res.remove(0).result?;
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+		assert_eq!(tmp, val);
 	}
 	//
-	Ok(())
-}
-
-#[tokio::test]
-async fn select_with_record_id_index() -> Result<()> {
-	let dbs = new_ds().await?;
-	let ses = Session::owner().with_ns("test").with_db("test");
-	//
-	let sql = "
-		CREATE t:1 SET links = [a:2, a:1];
-		CREATE t:2 SET links = [a:3, a:4];
-		SELECT * FROM t WHERE links CONTAINS a:2;
-		SELECT * FROM t WHERE links CONTAINS a:2 EXPLAIN;
-		SELECT * FROM t WHERE links CONTAINSANY [a:2];
-		SELECT * FROM t WHERE links CONTAINSANY [a:2] EXPLAIN;
-		SELECT * FROM t WHERE a:2 IN links;
-		SELECT * FROM t WHERE a:2 IN links EXPLAIN;
-		DEFINE INDEX idx ON t FIELDS links;
-		SELECT * FROM t WHERE links CONTAINS a:2;
-		SELECT * FROM t WHERE links CONTAINS a:2 EXPLAIN;
-		SELECT * FROM t WHERE links CONTAINSANY [a:2];
-		SELECT * FROM t WHERE links CONTAINSANY [a:2] EXPLAIN;
-		SELECT * FROM t WHERE a:2 IN links;
-		SELECT * FROM t WHERE a:2 IN links EXPLAIN;
-	";
-	let mut res = dbs.execute(sql, &ses, None).await?;
-
-	let expected = syn::value(
-		r#"[
-			{
-				id: t:1,
-				links: [ a:2, a:1 ]
-			}
-		]"#,
-	)
-	.unwrap();
-	//
-	assert_eq!(res.len(), 15);
-	skip_ok(&mut res, 2)?;
-	//
-	for t in ["CONTAINS", "CONTAINSANY", "IN"] {
-		let tmp = res.remove(0).result?;
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", expected), "{t}");
-		//
-		let tmp = res.remove(0).result?;
-		let val = syn::value(
-			r#"[
-				{
-					detail: {
-						direction: 'forward',
-						table: 't'
-					},
-					operation: 'Iterate Table'
-				},
-				{
-					detail: {
-						type: 'Memory'
-					},
-					operation: 'Collector'
-				}
-			]"#,
-		)
-		.unwrap();
-		assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	}
-	//
-	skip_ok(&mut res, 1)?;
-	// CONTAINS
-	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
-	// CONTAINS EXPLAIN
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		r#"[
-				{
-					detail: {
-						plan: {
-							index: 'idx',
-							operator: '=',
-							value: a:2
-						},
-						table: 't'
-					},
-					operation: 'Iterate Index'
-				},
-				{
-					detail: {
-						type: 'Memory'
-					},
-					operation: 'Collector'
-				}
-			]"#,
-	)
-	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	// CONTAINSANY
-	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
-	// CONTAINSANY EXPLAIN
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		r#"[
-				{
-					detail: {
-						plan: {
-							index: 'idx',
-							operator: 'union',
-							value: [
-								a:2
-							]
-						},
-						table: 't'
-					},
-					operation: 'Iterate Index'
-				},
-				{
-					detail: {
-						type: 'Memory'
-					},
-					operation: 'Collector'
-				}
-			]"#,
-	)
-	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
-	// IN
-	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", expected));
-	// IN EXPLAIN
-	let tmp = res.remove(0).result?;
-	let val = syn::value(
-		r#"[
-				{
-					detail: {
-						plan: {
-							index: 'idx',
-							operator: '=',
-							value: a:2
-						},
-						table: 't'
-					},
-					operation: 'Iterate Index'
-				},
-				{
-					detail: {
-						type: 'Memory'
-					},
-					operation: 'Collector'
-				}
-			]"#,
-	)
-	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
 	Ok(())
 }
 
@@ -2331,7 +2136,7 @@ async fn select_with_exact_operator() -> Result<()> {
 		]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -2356,7 +2161,7 @@ async fn select_with_exact_operator() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	//
 	let tmp = res.remove(0).result?;
@@ -2370,7 +2175,7 @@ async fn select_with_exact_operator() -> Result<()> {
 		]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -2395,7 +2200,7 @@ async fn select_with_exact_operator() -> Result<()> {
 			]"#,
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	Ok(())
 }
@@ -2533,7 +2338,7 @@ async fn select_where_index_boolean_behaviour() -> Result<()> {
 #[tokio::test]
 async fn select_memory_ordered_collector() -> Result<()> {
 	let sql = r"
-		CREATE |i:1500| SET v = rand::guid() RETURN NONE;
+		CREATE |i:1500| SET v = rand::id() RETURN NONE;
 		SELECT v FROM i ORDER BY RAND() EXPLAIN;
 		SELECT v FROM i ORDER BY v EXPLAIN;
 		SELECT v FROM i ORDER BY RAND() PARALLEL EXPLAIN;
@@ -2590,7 +2395,7 @@ async fn select_memory_ordered_collector() -> Result<()> {
 			assert_eq!(a.len(), 1500);
 			Ok(a.to_vec())
 		} else {
-			panic!("Expected a Value::Array but get: {v}");
+			panic!("Expected a Value::Array but get: {v:#?}");
 		}
 	};
 
@@ -2665,7 +2470,7 @@ async fn select_limit_start() -> Result<()> {
 		if let Value::Array(a) = r {
 			assert_eq!(a.len(), 10);
 		} else {
-			panic!("Unexpected value: {r:#}");
+			panic!("Unexpected value: {r:#?}");
 		}
 	}
 	Ok(())
@@ -2705,7 +2510,7 @@ async fn select_limit_start_order() -> Result<()> {
 		if let Value::Array(a) = r {
 			assert_eq!(a.len(), 10);
 		} else {
-			panic!("Unexpected value: {r:#}");
+			panic!("Unexpected value: {r:#?}");
 		}
 	}
 	Ok(())

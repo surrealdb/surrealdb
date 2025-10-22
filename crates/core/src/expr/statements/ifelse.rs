@@ -5,11 +5,11 @@ use reblessive::tree::Stk;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
 use crate::expr::{Expr, FlowResult, Value};
+use crate::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct IfelseStatement {
+pub(crate) struct IfelseStatement {
 	/// The first if condition followed by a body, followed by any number of
 	/// else if's
 	pub exprs: Vec<(Expr, Expr)>,

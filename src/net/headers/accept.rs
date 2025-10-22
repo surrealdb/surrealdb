@@ -9,17 +9,19 @@ pub enum Accept {
 	ApplicationJson,
 	ApplicationCbor,
 	ApplicationOctetStream,
-	Surrealdb,
+	ApplicationFlatbuffers,
 }
 
 impl std::fmt::Display for Accept {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
-			Accept::TextPlain => write!(f, "text/plain"),
-			Accept::ApplicationJson => write!(f, "application/json"),
-			Accept::ApplicationCbor => write!(f, "application/cbor"),
-			Accept::ApplicationOctetStream => write!(f, "application/octet-stream"),
-			Accept::Surrealdb => write!(f, "application/surrealdb"),
+			Accept::TextPlain => f.write_str(surrealdb_core::api::format::PLAIN),
+			Accept::ApplicationJson => f.write_str(surrealdb_core::api::format::JSON),
+			Accept::ApplicationCbor => f.write_str(surrealdb_core::api::format::CBOR),
+			Accept::ApplicationOctetStream => {
+				f.write_str(surrealdb_core::api::format::OCTET_STREAM)
+			}
+			Accept::ApplicationFlatbuffers => f.write_str(surrealdb_core::api::format::FLATBUFFERS),
 		}
 	}
 }
@@ -38,12 +40,11 @@ impl Header for Accept {
 			value.to_str().map_err(|_| headers::Error::invalid())?.split(';').collect();
 
 		match parts[0] {
-			"text/plain" => Ok(Accept::TextPlain),
-			"application/json" => Ok(Accept::ApplicationJson),
-			"application/cbor" => Ok(Accept::ApplicationCbor),
-			"application/octet-stream" => Ok(Accept::ApplicationOctetStream),
-			"application/surrealdb" => Ok(Accept::Surrealdb),
-			// TODO: Support more (all?) mime-types
+			surrealdb_core::api::format::PLAIN => Ok(Accept::TextPlain),
+			surrealdb_core::api::format::JSON => Ok(Accept::ApplicationJson),
+			surrealdb_core::api::format::CBOR => Ok(Accept::ApplicationCbor),
+			surrealdb_core::api::format::OCTET_STREAM => Ok(Accept::ApplicationOctetStream),
+			surrealdb_core::api::format::FLATBUFFERS => Ok(Accept::ApplicationFlatbuffers),
 			_ => Err(headers::Error::invalid()),
 		}
 	}

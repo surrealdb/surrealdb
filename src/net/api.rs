@@ -8,28 +8,28 @@ use axum::routing::any;
 use axum::{Extension, Router};
 use futures::StreamExt;
 use http::header::CONTENT_TYPE;
+use surrealdb::types::Value;
+use surrealdb_core::api::err::ApiError;
+use surrealdb_core::api::response::ResponseInstruction;
+use surrealdb_core::catalog::ApiMethod;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::capabilities::{ExperimentalTarget, RouteTarget};
+use surrealdb_core::rpc::RpcError;
+use surrealdb_core::rpc::format::{Format, cbor, flatbuffers, json};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
 use super::error::ResponseError;
-use super::params::Params;
 use crate::cnf::HTTP_MAX_API_BODY_SIZE;
-use crate::core::api::err::ApiError;
-use crate::core::api::response::ResponseInstruction;
-use crate::core::catalog::ApiMethod;
-use crate::core::dbs::Session;
-use crate::core::dbs::capabilities::{ExperimentalTarget, RouteTarget};
-use crate::core::rpc::RpcError;
-use crate::core::rpc::format::{Format, cbor, json, revision};
-use crate::core::val::Value;
 use crate::net::error::Error as NetError;
+use crate::net::params::Params;
 
 pub(super) fn router<S>() -> Router<S>
 where
 	S: Clone + Send + Sync + 'static,
 {
 	Router::new()
-		.route("/api/:ns/:db/*path", any(handler))
+		.route("/api/{ns}/{db}/{*path}", any(handler))
 		.route_layer(DefaultBodyLimit::disable())
 		.layer(RequestBodyLimitLayer::new(*HTTP_MAX_API_BODY_SIZE))
 }
@@ -95,31 +95,31 @@ async fn handler(
 
 	let res_body: Vec<u8> = if let Some(body) = res.body {
 		match res_instruction {
-			ResponseInstruction::Raw => {
-				match body {
-					Value::Strand(v) => {
-						res.headers.entry(CONTENT_TYPE).or_insert("text/plain".parse().map_err(
-							|_| ApiError::Unreachable("Expected a valid format".into()),
-						)?);
-						v.into_string().into_bytes()
-					}
-					Value::Bytes(v) => {
-						res.headers.entry(CONTENT_TYPE).or_insert(
-							"application/octet-stream".parse().map_err(|_| {
-								ApiError::Unreachable("Expected a valid format".into())
-							})?,
-						);
-						v.into()
-					}
-					v => {
-						return Err(ApiError::InvalidApiResponse(format!(
-							"Expected bytes or string, found {}",
-							v.kind_of()
-						))
-						.into());
-					}
+			ResponseInstruction::Raw => match body {
+				Value::String(v) => {
+					res.headers.entry(CONTENT_TYPE).or_insert(
+						surrealdb_core::api::format::PLAIN
+							.parse()
+							.map_err(|_| ApiError::Unreachable("Expected a valid format".into()))?,
+					);
+					v.into_bytes()
 				}
-			}
+				Value::Bytes(v) => {
+					res.headers.entry(CONTENT_TYPE).or_insert(
+						surrealdb_core::api::format::OCTET_STREAM
+							.parse()
+							.map_err(|_| ApiError::Unreachable("Expected a valid format".into()))?,
+					);
+					v.into()
+				}
+				v => {
+					return Err(ApiError::InvalidApiResponse(format!(
+						"Expected bytes or string, found {}",
+						v.kind()
+					))
+					.into());
+				}
+			},
 			ResponseInstruction::Format(format) => {
 				if res.headers.contains_key("Content-Type") {
 					return Err(ApiError::InvalidApiResponse(
@@ -129,15 +129,17 @@ async fn handler(
 				}
 
 				let (header, val) = match format {
-					Format::Json => {
-						("application/json", json::encode(body).map_err(|_| RpcError::ParseError)?)
-					}
-					Format::Cbor => {
-						("application/cbor", cbor::encode(body).map_err(|_| RpcError::ParseError)?)
-					}
-					Format::Revision => (
-						"application/surrealdb",
-						revision::encode(&body).map_err(|_| RpcError::ParseError)?,
+					Format::Json => (
+						surrealdb_core::api::format::JSON,
+						json::encode(body).map_err(|_| RpcError::ParseError)?,
+					),
+					Format::Cbor => (
+						surrealdb_core::api::format::CBOR,
+						cbor::encode(body).map_err(|_| RpcError::ParseError)?,
+					),
+					Format::Flatbuffers => (
+						surrealdb_core::api::format::FLATBUFFERS,
+						flatbuffers::encode(&body).map_err(|_| RpcError::ParseError)?,
 					),
 					_ => return Err(ApiError::Unreachable("Expected a valid format".into()).into()),
 				};

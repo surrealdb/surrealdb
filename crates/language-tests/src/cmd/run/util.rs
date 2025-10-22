@@ -1,6 +1,6 @@
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::{Capabilities, Targets};
-use surrealdb_core::val::Value as SurValue;
+use surrealdb_types::Value as SurValue;
 
 use crate::tests::schema::{AuthLevel, BoolOr, SchemaTarget, TestAuth, TestConfig};
 
@@ -109,7 +109,7 @@ pub fn session_from_test_config(config: &TestConfig) -> Session {
 				rid,
 			} => {
 				let v = SurValue::RecordId(rid.0.clone());
-				Session::for_record(&namespace, &database, &access, v)
+				Session::for_record(&namespace, &database, &access, v.into())
 			}
 		}
 	} else if env.signin.is_none() && env.signin.is_none() {

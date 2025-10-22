@@ -1,25 +1,62 @@
 use std::fmt::{self, Display};
 
-use crate::expr;
-use crate::sql::Expr;
-use crate::sql::fmt::{Fmt, Pretty};
-use crate::sql::statements::{
-	AccessStatement, AnalyzeStatement, KillStatement, LiveStatement, OptionStatement,
-	ShowStatement, UseStatement,
-};
+use surrealdb_types::{ToSql, write_sql};
 
-#[derive(Debug)]
+use crate::expr;
+use crate::fmt::{Fmt, Pretty};
+use crate::sql::statements::{
+	AccessStatement, KillStatement, LiveStatement, OptionStatement, ShowStatement, UseStatement,
+};
+use crate::sql::{Expr, Param};
+
+#[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Ast {
-	pub expressions: Vec<TopLevelExpr>,
+	pub(crate) expressions: Vec<TopLevelExpr>,
 }
 
 impl Ast {
 	/// Creates an ast with a signle expression
-	pub fn single_expr(expr: Expr) -> Self {
+	pub(crate) fn single_expr(expr: Expr) -> Self {
 		Ast {
 			expressions: vec![TopLevelExpr::Expr(expr)],
 		}
+	}
+
+	pub fn num_statements(&self) -> usize {
+		self.expressions.len()
+	}
+
+	pub fn get_used_namespace(&self) -> Option<String> {
+		for expr in &self.expressions {
+			if let TopLevelExpr::Use(stmt) = expr {
+				return stmt.ns.clone();
+			}
+		}
+		None
+	}
+
+	pub fn get_used_database(&self) -> Option<String> {
+		for expr in &self.expressions {
+			if let TopLevelExpr::Use(stmt) = expr {
+				return stmt.db.clone();
+			}
+		}
+		None
+	}
+
+	pub fn get_let_statements(&self) -> Vec<String> {
+		let mut let_var_names = Vec::new();
+		for expr in &self.expressions {
+			if let TopLevelExpr::Expr(Expr::Let(stmt)) = expr {
+				let_var_names.push(stmt.name.clone());
+			}
+		}
+		let_var_names
+	}
+
+	pub fn add_param(&mut self, name: String) {
+		self.expressions.push(TopLevelExpr::Expr(Expr::Param(Param::new(name))));
 	}
 }
 
@@ -33,6 +70,12 @@ impl Display for Ast {
 				self.expressions.iter().map(|v| Fmt::new(v, |v, f| write!(f, "{v};"))),
 			),
 		)
+	}
+}
+
+impl ToSql for Ast {
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self)
 	}
 }
 
@@ -51,9 +94,9 @@ impl From<Ast> for expr::LogicalPlan {
 	}
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum TopLevelExpr {
+pub(crate) enum TopLevelExpr {
 	Begin,
 	Cancel,
 	Commit,
@@ -63,7 +106,6 @@ pub enum TopLevelExpr {
 	Option(OptionStatement),
 	Use(UseStatement),
 	Show(ShowStatement),
-	Analyze(AnalyzeStatement),
 	Expr(Expr),
 }
 
@@ -90,9 +132,6 @@ impl From<TopLevelExpr> for crate::expr::TopLevelExpr {
 			}
 			TopLevelExpr::Show(show_statement) => {
 				crate::expr::TopLevelExpr::Show(show_statement.into())
-			}
-			TopLevelExpr::Analyze(analyze_statement) => {
-				crate::expr::TopLevelExpr::Analyze(analyze_statement.into())
 			}
 			TopLevelExpr::Expr(expr) => crate::expr::TopLevelExpr::Expr(expr.into()),
 		}
@@ -123,9 +162,6 @@ impl From<crate::expr::TopLevelExpr> for TopLevelExpr {
 			crate::expr::TopLevelExpr::Show(show_statement) => {
 				TopLevelExpr::Show(show_statement.into())
 			}
-			crate::expr::TopLevelExpr::Analyze(analyze_statement) => {
-				TopLevelExpr::Analyze(analyze_statement.into())
-			}
 			crate::expr::TopLevelExpr::Expr(expr) => TopLevelExpr::Expr(expr.into()),
 		}
 	}
@@ -143,7 +179,6 @@ impl fmt::Display for TopLevelExpr {
 			TopLevelExpr::Option(s) => s.fmt(f),
 			TopLevelExpr::Use(s) => s.fmt(f),
 			TopLevelExpr::Show(s) => s.fmt(f),
-			TopLevelExpr::Analyze(s) => s.fmt(f),
 			TopLevelExpr::Expr(e) => e.fmt(f),
 		}
 	}

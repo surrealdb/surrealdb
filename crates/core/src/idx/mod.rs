@@ -1,7 +1,7 @@
-pub mod docids;
 pub(crate) mod ft;
 pub(crate) mod index;
 pub mod planner;
+pub(super) mod seqdocids;
 pub mod trees;
 
 use std::borrow::Cow;
@@ -12,12 +12,10 @@ use anyhow::Result;
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
-use crate::idx::docids::DocId;
+use crate::idx::seqdocids::DocId;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::store::NodeId;
 use crate::idx::trees::vector::SerializedVector;
-use crate::key::index::bd::{Bd, BdRoot};
-use crate::key::index::bi::Bi;
 use crate::key::index::dc::Dc;
 use crate::key::index::dl::Dl;
 use crate::key::index::hd::{Hd, HdRoot};
@@ -26,12 +24,10 @@ use crate::key::index::hi::Hi;
 use crate::key::index::hl::Hl;
 use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
-#[cfg(not(target_family = "wasm"))]
 use crate::key::index::ia::Ia;
 use crate::key::index::ib::Ib;
 use crate::key::index::id::Id as IdKey;
 use crate::key::index::ii::Ii;
-#[cfg(not(target_family = "wasm"))]
 use crate::key::index::ip::Ip;
 use crate::key::index::is::Is;
 use crate::key::index::td::{Td, TdRoot};
@@ -65,14 +61,6 @@ impl IndexKeyBase {
 			tb: tb.to_string(),
 			ix: ix.into(),
 		}))
-	}
-
-	fn new_bd_root_key(&self) -> BdRoot<'_> {
-		BdRoot::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
-	}
-
-	fn new_bd_key(&self, node_id: NodeId) -> Bd<'_> {
-		Bd::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, node_id)
 	}
 
 	fn new_hd_root_key(&self) -> HdRoot<'_> {
@@ -111,25 +99,19 @@ impl IndexKeyBase {
 		Vm::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, node_id)
 	}
 
-	fn new_bi_key(&self, doc_id: DocId) -> Bi<'_> {
-		Bi::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, doc_id)
-	}
-
 	fn new_ii_key(&self, doc_id: DocId) -> Ii<'_> {
 		Ii::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, doc_id)
 	}
 
-	fn new_id_key(&self, id: RecordIdKey) -> IdKey {
+	fn new_id_key(&self, id: RecordIdKey) -> IdKey<'_> {
 		IdKey::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, id)
 	}
 
-	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn new_ia_key(&self, i: u32) -> Ia<'_> {
 		Ia::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, i)
 	}
 
-	#[cfg(not(target_family = "wasm"))]
-	pub(crate) fn new_ip_key(&self, id: RecordIdKey) -> Ip {
+	pub(crate) fn new_ip_key(&self, id: RecordIdKey) -> Ip<'_> {
 		Ip::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, id)
 	}
 
@@ -137,7 +119,7 @@ impl IndexKeyBase {
 		Ib::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, start)
 	}
 
-	pub(crate) fn new_ic_key(&self, nid: Uuid) -> IndexCompactionKey {
+	pub(crate) fn new_ic_key(&self, nid: Uuid) -> IndexCompactionKey<'_> {
 		IndexCompactionKey::new(
 			self.0.ns,
 			self.0.db,
@@ -183,7 +165,7 @@ impl IndexKeyBase {
 		Tt::terms_range(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
-	fn new_dc_with_id(&self, doc_id: DocId, nid: Uuid, uid: Uuid) -> Dc {
+	fn new_dc_with_id(&self, doc_id: DocId, nid: Uuid, uid: Uuid) -> Dc<'_> {
 		Dc::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, doc_id, nid, uid)
 	}
 
@@ -203,7 +185,6 @@ impl IndexKeyBase {
 		&self.0.tb
 	}
 
-	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn index(&self) -> IndexId {
 		self.0.ix
 	}

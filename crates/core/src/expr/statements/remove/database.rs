@@ -1,38 +1,68 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
+use reblessive::tree::Stk;
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Value};
+use crate::expr::expression::VisitExpression;
+use crate::expr::parameterize::expr_to_ident;
+use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct RemoveDatabaseStatement {
-	pub name: Ident,
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct RemoveDatabaseStatement {
+	pub name: Expr,
 	pub if_exists: bool,
 	pub expunge: bool,
 }
 
+impl VisitExpression for RemoveDatabaseStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.name.visit(visitor);
+	}
+}
+impl Default for RemoveDatabaseStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			if_exists: false,
+			expunge: false,
+		}
+	}
+}
+
 impl RemoveDatabaseStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Database, &Base::Ns)?;
 		// Get the transaction
 		let txn = ctx.tx();
 
+		// Compute the name
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "database name").await?;
 		let ns = opt.ns()?;
-		let db = match txn.get_db_by_name(ns, &self.name).await? {
+		let db = match txn.get_db_by_name(ns, &name).await? {
 			Some(x) => x,
 			None => {
 				if self.if_exists {
 					return Ok(Value::None);
 				} else {
 					return Err(Error::DbNotFound {
-						name: self.name.to_string(),
+						name,
 					}
 					.into());
 				}
@@ -40,12 +70,9 @@ impl RemoveDatabaseStatement {
 		};
 
 		// Remove the index stores
-		#[cfg(not(target_family = "wasm"))]
 		ctx.get_index_stores()
 			.database_removed(ctx.get_index_builder(), &txn, db.namespace_id, db.database_id)
 			.await?;
-		#[cfg(target_family = "wasm")]
-		ctx.get_index_stores().database_removed(&txn, db.namespace_id, db.database_id).await?;
 		// Remove the sequences
 		if let Some(seq) = ctx.get_sequences() {
 			seq.database_removed(&txn, db.namespace_id, db.database_id).await?;

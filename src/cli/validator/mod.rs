@@ -1,29 +1,15 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::time::Duration;
 
-use crate::core::dbs::capabilities::{
+use surrealdb::types::Duration;
+use surrealdb_core::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
 	Targets,
 };
-use crate::core::kvs::export::TableConfig;
-use crate::core::val;
+use surrealdb_core::kvs::export::TableConfig;
 
 pub(crate) mod parser;
-
-pub(crate) fn path_valid(v: &str) -> Result<String, String> {
-	match v {
-		"memory" => Ok(v.to_string()),
-		v if v.starts_with("file:") => Ok(v.to_string()),
-		v if v.starts_with("rocksdb:") => Ok(v.to_string()),
-		v if v.starts_with("surrealkv:") => Ok(v.to_string()),
-		v if v.starts_with("surrealkv+versioned:") => Ok(v.to_string()),
-		v if v.starts_with("tikv:") => Ok(v.to_string()),
-		v if v.starts_with("fdb:") => Ok(v.to_string()),
-		_ => Err(String::from("Provide a valid database path parameter")),
-	}
-}
 
 pub(crate) fn path_exists(path: &str) -> Result<PathBuf, String> {
 	let path = Path::new(path);
@@ -86,8 +72,8 @@ pub(crate) fn key_valid(v: &str) -> Result<String, String> {
 	}
 }
 
-pub(crate) fn duration(v: &str) -> Result<Duration, String> {
-	val::Duration::from_str(v).map(|d| d.0).map_err(|_| String::from("invalid duration"))
+pub(crate) fn duration(v: &str) -> Result<std::time::Duration, String> {
+	Duration::from_str(v).map(|d| d.inner()).map_err(|_| String::from("invalid duration"))
 }
 
 pub(crate) fn net_targets(value: &str) -> Result<Targets<NetTarget>, String> {

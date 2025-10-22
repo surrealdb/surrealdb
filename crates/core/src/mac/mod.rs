@@ -77,6 +77,25 @@ macro_rules! map {
     }};
 }
 
+/// Maps an optional value to a new value if the optional value is some, otherwise returns none.
+/// Useful when the computation is async
+macro_rules! map_opt {
+	($x:ident as $opt:expr => $exp:expr) => {
+		match $opt {
+			Some($x) => Some($exp),
+			None => None,
+		}
+	};
+}
+
+/// Computes a value and coerces it to a type
+macro_rules! compute_to {
+	($stk:ident, $ctx:ident, $opt:ident, $doc:ident, $x:expr => $t:ty) => {{
+		use crate::expr::FlowResultExt;
+		$stk.run(|stk| $x.compute(stk, $ctx, $opt, $doc)).await.catch_return()?.coerce_to::<$t>()?
+	}};
+}
+
 /// Extends a b-tree map of key-value pairs.
 ///
 /// This macro extends the supplied map, by cloning
@@ -160,26 +179,6 @@ macro_rules! run {
 	};
 }
 
-/// Macro which creates a StrandRef a str like type which is guarenteed to not
-/// contain null bytes.
-#[macro_export]
-macro_rules! strand {
-	($e:expr) => {
-		const {
-			let s: &str = $e;
-			let mut len = s.len();
-			while len > 0 {
-				len -= 1;
-				if s.as_bytes()[len] == 0 {
-					panic!("used strand! macro on strand with null bytes")
-				}
-			}
-			// Safe as the condition is checked above
-			unsafe { $crate::val::StrandRef::new_unchecked(s) }
-		}
-	};
-}
-
 #[cfg(test)]
 mod test {
 	use crate::err::Error;
@@ -197,7 +196,7 @@ mod test {
 		let Ok(Error::Unreachable(msg)) = fail_func().unwrap_err().downcast() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:188: Reached unreachable code", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:187: Reached unreachable code", msg);
 	}
 
 	#[test]
@@ -205,7 +204,7 @@ mod test {
 		let Error::Unreachable(msg) = Error::unreachable("Reached unreachable code") else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:205: Reached unreachable code", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:204: Reached unreachable code", msg);
 	}
 
 	#[test]
@@ -213,6 +212,6 @@ mod test {
 		let Ok(Error::Unreachable(msg)) = fail_func_args().unwrap_err().downcast() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:192: Found test but expected other", msg);
+		assert_eq!("crates/core/src/mac/mod.rs:191: Found test but expected other", msg);
 	}
 }

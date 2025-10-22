@@ -5,10 +5,10 @@ use anyhow::Result;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Base, Ident, Value};
+use crate::expr::{Base, Value};
+use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Datetime;
-use crate::vs::VersionStamp;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ShowSince {
@@ -16,24 +16,11 @@ pub enum ShowSince {
 	Versionstamp(u64),
 }
 
-impl ShowSince {
-	pub fn versionstamp(vs: &VersionStamp) -> ShowSince {
-		ShowSince::Versionstamp(vs.into_u64_lossy())
-	}
-
-	pub fn as_versionstamp(&self) -> Option<VersionStamp> {
-		match self {
-			ShowSince::Timestamp(_) => None,
-			ShowSince::Versionstamp(v) => Some(VersionStamp::from_u64(*v)),
-		}
-	}
-}
-
 /// A SHOW CHANGES statement for displaying changes made to a table or database.
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ShowStatement {
-	pub table: Option<Ident>,
+pub(crate) struct ShowStatement {
+	pub table: Option<String>,
 	pub since: ShowSince,
 	pub limit: Option<u32>,
 }
@@ -65,7 +52,7 @@ impl fmt::Display for ShowStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SHOW CHANGES FOR")?;
 		match self.table {
-			Some(ref v) => write!(f, " TABLE {}", v)?,
+			Some(ref v) => write!(f, " TABLE {}", EscapeKwFreeIdent(v))?,
 			None => write!(f, " DATABASE")?,
 		}
 		match self.since {

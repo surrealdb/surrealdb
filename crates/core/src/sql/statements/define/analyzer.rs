@@ -1,20 +1,32 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::Ident;
 use crate::sql::filter::Filter;
 use crate::sql::tokenizer::Tokenizer;
-use crate::val::Strand;
+use crate::sql::{Expr, Literal};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct DefineAnalyzerStatement {
+pub(crate) struct DefineAnalyzerStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
+	pub name: Expr,
 	pub function: Option<String>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
+}
+
+impl Default for DefineAnalyzerStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			name: Expr::Literal(Literal::None),
+			function: None,
+			tokenizers: None,
+			filters: None,
+			comment: None,
+		}
+	}
 }
 
 impl Display for DefineAnalyzerStatement {
@@ -38,7 +50,7 @@ impl Display for DefineAnalyzerStatement {
 			write!(f, " FILTERS {}", tokens.join(","))?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
 	}
@@ -52,7 +64,7 @@ impl From<DefineAnalyzerStatement> for crate::expr::statements::DefineAnalyzerSt
 			function: v.function,
 			tokenizers: v.tokenizers.map(|v| v.into_iter().map(Into::into).collect()),
 			filters: v.filters.map(|v| v.into_iter().map(Into::into).collect()),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 		}
 	}
 }
@@ -65,7 +77,7 @@ impl From<crate::expr::statements::DefineAnalyzerStatement> for DefineAnalyzerSt
 			function: v.function,
 			tokenizers: v.tokenizers.map(|v| v.into_iter().map(Into::into).collect()),
 			filters: v.filters.map(|v| v.into_iter().map(Into::into).collect()),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 		}
 	}
 }

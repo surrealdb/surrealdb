@@ -2,25 +2,33 @@ use std::fmt::{self, Display, Write};
 use std::ops::Deref;
 
 use anyhow::Result;
+use reblessive::tree::Stk;
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::{Base, Ident, Timeout, Value};
+use crate::expr::{Base, Timeout, Value};
+use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct AlterSequenceStatement {
-	pub name: Ident,
+pub(crate) struct AlterSequenceStatement {
+	pub name: String,
 	pub if_exists: bool,
 	pub timeout: Option<Timeout>,
 }
 
 impl AlterSequenceStatement {
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
 		// Get the NS and DB
@@ -40,10 +48,11 @@ impl AlterSequenceStatement {
 		};
 		// Process the statement
 		if let Some(timeout) = &self.timeout {
+			let timeout = timeout.compute(stk, ctx, opt, doc).await?.0;
 			if timeout.is_zero() {
 				sq.timeout = None;
 			} else {
-				sq.timeout = Some(*timeout.as_std_duration());
+				sq.timeout = Some(timeout);
 			}
 		}
 		// Set the table definition
@@ -62,7 +71,7 @@ impl Display for AlterSequenceStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", EscapeIdent(&self.name))?;
 		if let Some(ref timeout) = self.timeout {
 			write!(f, " TIMEOUT {timeout}")?;
 		}

@@ -19,7 +19,7 @@ use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::expr::order::Ordering;
 use crate::expr::with::With;
-use crate::expr::{Cond, Fields, Groups, Ident};
+use crate::expr::{Cond, Fields, Groups};
 use crate::idx::planner::executor::{InnerQueryExecutor, IteratorEntry, QueryExecutor};
 use crate::idx::planner::iterators::IteratorRef;
 use crate::idx::planner::knn::KnnBruteForceResults;
@@ -49,7 +49,7 @@ pub(crate) enum RecordStrategy {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) enum ScanDirection {
+pub enum ScanDirection {
 	Forward,
 	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 	Backward,
@@ -153,7 +153,7 @@ impl<'a> StatementContext<'a> {
 		// and it is not GROUP ALL, then we
 		// need to process record values.
 		let is_group_all = if let Some(g) = self.group {
-			if !g.is_empty() {
+			if !g.is_group_all_only() {
 				return Ok(RecordStrategy::KeysAndValues);
 			}
 			true
@@ -211,12 +211,15 @@ impl<'a> StatementContext<'a> {
 	/// On backends that support reverse scans (e.g., RocksDB/TiKV), we reverse
 	/// the direction when the first ORDER BY is `id DESC`. Otherwise, we
 	/// default to forward.
-	pub(crate) fn check_scan_direction(&self) -> ScanDirection {
+	#[allow(unused_variables)]
+	pub(crate) fn check_scan_direction(&self, has_reverse_scan: bool) -> ScanDirection {
 		#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-		if let Some(Ordering::Order(o)) = self.order {
-			if let Some(o) = o.first() {
-				if !o.direction && o.value.is_id() {
-					return ScanDirection::Backward;
+		if has_reverse_scan {
+			if let Some(Ordering::Order(o)) = self.order {
+				if let Some(o) = o.first() {
+					if !o.direction && o.value.is_id() {
+						return ScanDirection::Backward;
+					}
 				}
 			}
 		}
@@ -276,7 +279,7 @@ impl QueryPlanner {
 		db: &DatabaseDefinition,
 		stk: &mut Stk,
 		ctx: &StatementContext<'_>,
-		t: Ident,
+		t: String,
 		gp: GrantedPermission,
 		it: &mut Iterator,
 	) -> Result<()> {
@@ -301,11 +304,12 @@ impl QueryPlanner {
 			gp,
 			compound_indexes: tree.index_map.compound_indexes,
 			order_limit: tree.index_map.order_limit,
+			index_count: tree.index_map.index_count,
 			with_indexes: tree.with_indexes,
 			all_and: tree.all_and,
 			all_expressions_with_index: tree.all_expressions_with_index,
 			all_and_groups: tree.all_and_groups,
-			reverse_scan: ctx.ctx.tx().reverse_scan(),
+			has_reverse_scan: ctx.ctx.tx().has_reverse_scan(),
 		};
 		match PlanBuilder::build(ctx, p).await? {
 			Plan::SingleIndex(exp, io, rs) => {
@@ -360,13 +364,13 @@ impl QueryPlanner {
 
 	fn add(
 		&mut self,
-		tb: Ident,
+		tb: String,
 		irf: Option<IteratorRef>,
 		exe: InnerQueryExecutor,
 		it: &mut Iterator,
 		rs: RecordStrategy,
 	) {
-		self.executors.insert(tb.clone().into_string(), exe.into());
+		self.executors.insert(tb.clone(), exe.into());
 		if let Some(irf) = irf {
 			it.ingest(Iterable::Index(tb, irf, rs));
 		}

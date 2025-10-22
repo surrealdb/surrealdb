@@ -1,24 +1,40 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::sql::changefeed::ChangeFeed;
-use crate::sql::fmt::{is_pretty, pretty_indent};
-use crate::sql::{Ident, Kind, Permissions, TableType, View};
-use crate::val::Strand;
+use crate::sql::{Expr, Kind, Literal, Permissions, TableType, View};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct DefineTableStatement {
+pub(crate) struct DefineTableStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
-	pub name: Ident,
+	pub name: Expr,
 	pub drop: bool,
 	pub full: bool,
 	pub view: Option<View>,
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 	pub table_type: TableType,
+}
+
+impl Default for DefineTableStatement {
+	fn default() -> Self {
+		Self {
+			kind: DefineKind::Default,
+			id: None,
+			name: Expr::Literal(Literal::None),
+			drop: false,
+			full: false,
+			view: None,
+			permissions: Permissions::none(),
+			changefeed: None,
+			comment: None,
+			table_type: TableType::default(),
+		}
+	}
 }
 
 impl Display for DefineTableStatement {
@@ -73,7 +89,7 @@ impl Display for DefineTableStatement {
 			" SCHEMALESS"
 		})?;
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {comment}")?
+			write!(f, " COMMENT {}", comment)?
 		}
 		if let Some(ref v) = self.view {
 			write!(f, " {v}")?
@@ -103,12 +119,13 @@ impl From<DefineTableStatement> for crate::expr::statements::DefineTableStatemen
 			view: v.view.map(Into::into),
 			permissions: v.permissions.into(),
 			changefeed: v.changefeed.map(Into::into),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 			table_type: v.table_type.into(),
 		}
 	}
 }
 
+#[allow(clippy::fallible_impl_from)]
 impl From<crate::expr::statements::DefineTableStatement> for DefineTableStatement {
 	fn from(v: crate::expr::statements::DefineTableStatement) -> Self {
 		DefineTableStatement {
@@ -120,7 +137,7 @@ impl From<crate::expr::statements::DefineTableStatement> for DefineTableStatemen
 			view: v.view.map(Into::into),
 			permissions: v.permissions.into(),
 			changefeed: v.changefeed.map(Into::into),
-			comment: v.comment,
+			comment: v.comment.map(|x| x.into()),
 			table_type: v.table_type.into(),
 		}
 	}

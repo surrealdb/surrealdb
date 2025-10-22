@@ -12,7 +12,7 @@ use crate::expr::FlowResultExt as _;
 
 mod classes;
 
-pub use classes::Query;
+pub(crate) use classes::Query;
 
 use crate::ctx::MutableContext;
 

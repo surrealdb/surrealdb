@@ -1,6 +1,7 @@
 use std::fmt::{self, Write};
 
 use anyhow::{Result, bail};
+use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::providers::DatabaseProvider;
@@ -9,28 +10,39 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::{Base, Ident};
+use crate::expr::expression::VisitExpression;
+use crate::expr::{Base, Expr};
+use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct DefineModelStatement {
+pub(crate) struct DefineModelStatement {
 	pub kind: DefineKind,
 	pub hash: String,
-	pub name: Ident,
+	pub name: String,
 	pub version: String,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 	pub permissions: Permission,
+}
+
+impl VisitExpression for DefineModelStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.comment.iter().for_each(|expr| expr.visit(visitor));
+	}
 }
 
 impl DefineModelStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Model, &Base::Db)?;
@@ -58,9 +70,9 @@ impl DefineModelStatement {
 			&key,
 			&MlModelDefinition {
 				hash: self.hash.clone(),
-				name: self.name.to_raw_string(),
+				name: self.name.clone(),
 				version: self.version.clone(),
-				comment: self.comment.clone().map(|x| x.to_raw_string()),
+				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 				permissions: self.permissions.clone(),
 			},
 			None,

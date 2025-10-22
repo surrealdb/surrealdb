@@ -253,19 +253,19 @@ impl<'a> Graph<'a> {
 mod tests {
 	use super::*;
 	use crate::syn;
-	use crate::val::Value;
+	use crate::types::PublicValue;
 
 	#[test]
 	fn key() {
-		let Ok(Value::RecordId(fk)) = syn::value("other:test") else {
+		let Ok(PublicValue::RecordId(fk)) = syn::value("other:test") else {
 			panic!()
 		};
-		#[rustfmt::skip]
+		let fk = fk.clone().into();
 		let val = Graph::new(
 			NamespaceId(1),
 			DatabaseId(2),
 			"testtb",
-			strand!("testid").to_owned().into(),
+			"testid".to_owned().into(),
 			Dir::Out,
 			&fk,
 		);

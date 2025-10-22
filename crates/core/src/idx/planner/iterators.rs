@@ -9,11 +9,13 @@ use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId};
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::expr::BinaryOperator;
-use crate::idx::docids::DocId;
 use crate::idx::ft::fulltext::FullTextHitsIterator;
 use crate::idx::planner::plan::RangeValue;
 use crate::idx::planner::tree::IndexReference;
+use crate::idx::seqdocids::DocId;
 use crate::key::index::Index;
+use crate::key::index::iu::IndexCountKey;
+use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::{KVKey, Key, Transaction, Val};
 use crate::val::record::Record;
 use crate::val::{Array, RecordId, Value};
@@ -121,6 +123,7 @@ pub(crate) enum ThingIterator {
 	IndexRangeReverse(IndexRangeReverseThingIterator),
 	IndexUnion(IndexUnionThingIterator),
 	IndexJoin(Box<IndexJoinThingIterator>),
+	IndexCount(IndexCountThingIterator),
 	UniqueEqual(UniqueEqualThingIterator),
 	UniqueRange(UniqueRangeThingIterator),
 	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
@@ -158,6 +161,9 @@ impl ThingIterator {
 			Self::Knn(i) => i.next_batch(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_batch(ctx, txn, size)).await,
+			Self::IndexCount(_) => {
+				bail!(Error::unreachable("IndexCount should not be used with next_batch"))
+			}
 		}
 	}
 
@@ -186,6 +192,7 @@ impl ThingIterator {
 			Self::Knn(i) => i.next_count(ctx, size).await,
 			Self::IndexJoin(i) => Box::pin(i.next_count(ctx, txn, size)).await,
 			Self::UniqueJoin(i) => Box::pin(i.next_count(ctx, txn, size)).await,
+			Self::IndexCount(i) => i.next_count(ctx, txn, size).await,
 		}
 	}
 }
@@ -211,7 +218,8 @@ impl IndexItemRecord {
 	fn new_key(t: RecordId, ir: IteratorRecord) -> Self {
 		Self::Key(Arc::new(t), ir)
 	}
-	fn thing(&self) -> &RecordId {
+
+	fn record_id(&self) -> &RecordId {
 		match self {
 			Self::Key(t, _) => t,
 			Self::KeyValue(t, _, _) => t,
@@ -1016,9 +1024,9 @@ impl JoinThingIterator {
 				if ctx.is_done(count % 100 == 0).await? {
 					break;
 				}
-				let thing = r.thing();
-				let value: Value = Value::from(thing.clone());
-				let k: Key = revision::to_vec(thing)?;
+				let record = r.record_id();
+				let value: Value = Value::from(record.clone());
+				let k: Key = revision::to_vec(record)?;
 				if self.distinct.insert(k, true).is_none() {
 					self.current_local = Some(new_iter(self.ns, self.db, &self.ix, value)?);
 					return Ok(true);
@@ -1661,5 +1669,63 @@ impl KnnIterator {
 			}
 		}
 		Ok(count)
+	}
+}
+
+pub(crate) struct IndexCountThingIterator(Option<Range<Key>>);
+
+impl IndexCountThingIterator {
+	pub(in crate::idx) fn new(
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		ix: IndexId,
+	) -> Result<Self> {
+		Ok(Self(Some(IndexCountKey::range(ns, db, tb, ix)?)))
+	}
+	async fn next_count(&mut self, ctx: &Context, txn: &Transaction, _limit: u32) -> Result<usize> {
+		if let Some(range) = self.0.take() {
+			let mut count: i64 = 0;
+			for (i, key) in txn.keys(range, u32::MAX, None).await?.into_iter().enumerate() {
+				ctx.is_done(i % 1000 == 0).await?;
+				let iu = IndexCountKey::decode_key(&key)?;
+				if iu.pos {
+					count += iu.count as i64;
+				} else {
+					count -= iu.count as i64;
+				}
+			}
+			Ok(count as usize)
+		} else {
+			Ok(0)
+		}
+	}
+
+	pub(in crate::idx) async fn compaction(
+		&mut self,
+		ic: &IndexCompactionKey<'_>,
+		txn: &Transaction,
+	) -> Result<()> {
+		let Some(range) = self.0.take() else {
+			return Ok(());
+		};
+		let mut count: i64 = 0;
+		for (i, key) in txn.keys(range.clone(), u32::MAX, None).await?.into_iter().enumerate() {
+			if i % 1000 == 0 {
+				yield_now!()
+			}
+			let iu = IndexCountKey::decode_key(&key)?;
+			if iu.pos {
+				count += iu.count as i64;
+			} else {
+				count -= iu.count as i64;
+			}
+		}
+		txn.delr(range).await?;
+		let pos = count.is_positive();
+		let count = count.unsigned_abs();
+		let compact_key = IndexCountKey::new(ic.ns, ic.db, ic.tb.as_ref(), ic.ix, None, pos, count);
+		txn.put(&compact_key, &(), None).await?;
+		Ok(())
 	}
 }

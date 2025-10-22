@@ -1,11 +1,11 @@
 use std::time::Duration;
 
 use revision::revisioned;
+use surrealdb_types::{ToSql, write_sql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::{DefineKind, DefineSequenceStatement};
-use crate::sql::{Ident, ToSql};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
@@ -23,9 +23,9 @@ impl SequenceDefinition {
 	fn to_sql_definition(&self) -> DefineSequenceStatement {
 		DefineSequenceStatement {
 			kind: DefineKind::Default,
-			name: unsafe { Ident::new_unchecked(self.name.clone()) },
-			batch: self.batch,
-			start: self.start,
+			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
+			batch: crate::sql::Expr::Literal(crate::sql::Literal::Integer(self.batch as i64)),
+			start: crate::sql::Expr::Literal(crate::sql::Literal::Integer(self.start)),
 			timeout: self.timeout.map(|t| t.into()),
 		}
 	}
@@ -45,7 +45,7 @@ impl InfoStructure for SequenceDefinition {
 }
 
 impl ToSql for &SequenceDefinition {
-	fn to_sql(&self) -> String {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }

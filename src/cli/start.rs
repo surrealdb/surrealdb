@@ -8,14 +8,15 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::{any, tasks};
+use surrealdb_core::kvs::TransactionBuilderFactory;
+use surrealdb_core::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
 
-use super::config::{CF, Config};
+use super::config::Config;
+use crate::cli::ConfigCheck;
 use crate::cnf::LOGO;
-#[cfg(feature = "ml")]
-use crate::core::ml::execution::session::set_environment;
-use crate::core::options::EngineOptions;
 use crate::dbs::StartCommandDbsOptions;
+use crate::net::RouterFactory;
 use crate::net::client_ip::ClientIp;
 use crate::{dbs, env, net};
 
@@ -24,7 +25,6 @@ pub struct StartCommandArguments {
 	#[arg(help = "Database path used for storing data")]
 	#[arg(env = "SURREAL_PATH", index = 1)]
 	#[arg(default_value = "memory")]
-	#[arg(value_parser = super::validator::path_valid)]
 	path: String,
 	#[arg(help = "Whether to hide the startup banner")]
 	#[arg(env = "SURREAL_NO_BANNER", long)]
@@ -148,7 +148,20 @@ struct StartCommandWebTlsOptions {
 	web_key: Option<PathBuf>,
 }
 
-pub async fn init(
+/// Start the server.
+///
+/// Initializes and starts the SurrealDB server with the provided configuration.
+///
+/// # Parameters
+/// - `composer`: A composer implementing the required traits for dependency injection
+///
+/// # Generic parameters
+/// - `C`: A composer type that implements:
+///   - `TransactionBuilderFactory` (datastore transaction builder for storage/backend selection)
+///   - `RouterFactory` (HTTP router factory for route/middleware customization)
+///   - `ConfigCheck` (validates configuration before initialization)
+pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
+	mut composer: C,
 	StartCommandArguments {
 		path,
 		username: user,
@@ -167,6 +180,8 @@ pub async fn init(
 		..
 	}: StartCommandArguments,
 ) -> Result<()> {
+	// Check the path is valid
+	C::path_valid(&path)?;
 	// Check if we should output a banner
 	if !no_banner {
 		println!("{LOGO}");
@@ -203,23 +218,25 @@ pub async fn init(
 		crt,
 		key,
 	};
+	composer.check_config(&config).await?;
 	// Setup the command-line options
-	let _ = CF.set(config);
 	// Initiate environment
 	env::init()?;
 
 	// if ML feature is enabled load the ONNX runtime lib that is embedded
 	#[cfg(feature = "ml")]
-	set_environment().context("Failed to initialize ML library")?;
+	crate::core::ml::execution::session::set_environment()
+		.context("Failed to initialize ML library")?;
 
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();
 	// Start the datastore
-	let datastore = Arc::new(dbs::init(dbs).await?);
+	let datastore = Arc::new(dbs::init::<C>(&composer, &config, dbs).await?);
 	// Start the node agent
-	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &CF.get().unwrap().engine);
+	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &config.engine);
 	// Start the web server
-	net::init(datastore.clone(), canceller.clone()).await?;
+	// Build and run the HTTP server using the provided RouterFactory implementation
+	net::init::<C>(&config, datastore.clone(), canceller.clone()).await?;
 	// Shutdown and stop closed tasks
 	canceller.cancel();
 	// Wait for background tasks to finish

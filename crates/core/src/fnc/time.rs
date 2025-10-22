@@ -284,7 +284,7 @@ pub mod from {
 		match DateTime::from_timestamp(seconds, nanoseconds) {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(anyhow::Error::new(Error::InvalidArguments {
-				name: String::from("time::from::nanos"),
+				name: String::from("time::from_nanos"),
 				message: String::from(
 					"The argument must be a number of nanoseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
 				),
@@ -296,7 +296,7 @@ pub mod from {
 		match DateTime::from_timestamp_micros(val) {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(anyhow::Error::new(Error::InvalidArguments {
-				name: String::from("time::from::micros"),
+				name: String::from("time::from_micros"),
 				message: String::from(
 					"The argument must be a number of microseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
 				),
@@ -308,7 +308,7 @@ pub mod from {
 		match DateTime::from_timestamp_millis(val) {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(anyhow::Error::new(Error::InvalidArguments {
-				name: String::from("time::from::millis"),
+				name: String::from("time::from_millis"),
 				message: String::from(
 					"The argument must be a number of milliseconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
 				),
@@ -320,7 +320,7 @@ pub mod from {
 		match DateTime::from_timestamp(val, 0) {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(anyhow::Error::new(Error::InvalidArguments {
-				name: String::from("time::from::secs"),
+				name: String::from("time::from_secs"),
 				message: String::from(
 					"The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
 				),
@@ -332,7 +332,7 @@ pub mod from {
 		match DateTime::from_timestamp(val, 0) {
 			Some(v) => Ok(Datetime::from(v).into()),
 			None => Err(anyhow::Error::new(Error::InvalidArguments {
-				name: String::from("time::from::unix"),
+				name: String::from("time::from_unix"),
 				message: String::from(
 					"The argument must be a number of seconds relative to January 1, 1970 0:00:00 UTC that produces a datetime between -262143-01-01T00:00:00Z and +262142-12-31T23:59:59Z.",
 				),
@@ -344,7 +344,7 @@ pub mod from {
 		match Ulid::from_string(&val) {
 			Ok(v) => Ok(Datetime::from(DateTime::from(v.datetime())).into()),
 			_ => Err(anyhow::Error::new(Error::InvalidArguments {
-				name: String::from("time::from::ulid"),
+				name: String::from("time::from_ulid"),
 				message: String::from(
 					"The first argument must be a string, containing a valid ULID.",
 				),
@@ -362,7 +362,7 @@ pub mod from {
 				}
 			}
 			None => Err(anyhow::Error::new(Error::InvalidArguments {
-				name: String::from("time::from::uuid"),
+				name: String::from("time::from_uuid"),
 				message: String::from("The first argument must be a v1, v6 or v7 UUID."),
 			})),
 		}

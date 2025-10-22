@@ -10,13 +10,25 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
-use crate::expr::field::{Field, Fields};
+use crate::expr::field::Fields;
 use crate::expr::idiom::recursion::{Recursion, compute_idiom_recursion};
 use crate::expr::part::{FindRecursionPlan, Next, NextMethod, Part, SplitByRepeatRecurse};
 use crate::expr::statements::select::SelectStatement;
 use crate::expr::{ControlFlow, Expr, FlowResult, FlowResultExt as _, Idiom, Literal, Lookup};
 use crate::fnc::idiom;
 use crate::val::{RecordIdKey, Value};
+
+macro_rules! fallback_function {
+	(if $first:expr => InvalidFunction($e:ident) then $second:expr) => {
+		match $first {
+			Err(e) if matches!(e.downcast_ref(), Some(Error::InvalidFunction { .. })) => {
+				let $e = e;
+				$second
+			}
+			x => x,
+		}
+	};
+}
 
 impl Value {
 	/// Asynchronous method for getting a local or remote field from a `Value`
@@ -123,17 +135,17 @@ impl Value {
 				// Current value at path is a geometry
 				Value::Geometry(v) => match p {
 					// If this is the 'type' field then continue
-					Part::Field(f) if f.is_type() => {
+					Part::Field(f) if f == "type" => {
 						let v = Value::from(v.as_type());
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
 					// If this is the 'coordinates' field then continue
-					Part::Field(f) if f.is_coordinates() && v.is_geometry() => {
+					Part::Field(f) if f == "coordinates" && v.is_geometry() => {
 						let v = v.as_coordinates();
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
 					// If this is the 'geometries' field then continue
-					Part::Field(f) if f.is_geometries() && v.is_collection() => {
+					Part::Field(f) if f == "geometries" && v.is_collection() => {
 						let v = v.as_coordinates();
 						stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 					}
@@ -190,7 +202,7 @@ impl Value {
 									.await
 							}
 						},
-						Value::Strand(f) => match v.get(f.as_str()) {
+						Value::String(f) => match v.get(f.as_str()) {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
@@ -207,7 +219,7 @@ impl Value {
 						for p in p.iter() {
 							let idiom = p.idiom();
 							obj.insert(
-								p.field().to_raw_string(),
+								p.field().to_owned(),
 								stk.run(|stk| idiom.compute(stk, ctx, opt, Some(&cur_doc))).await?,
 							);
 						}
@@ -225,15 +237,21 @@ impl Value {
 							})
 							.await?;
 
-						let res = if let Some(Value::Closure(x)) = v.get(name) {
-							let v = x.compute(stk, ctx, opt, doc, args).await?;
-							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await?
-						} else {
-							stk.run(|stk| {
+						let res = stk
+							.run(|stk| {
 								idiom(stk, ctx, opt, doc, v.clone().into(), name, args.clone())
 							})
-							.await?
-						};
+							.await;
+
+						let res = fallback_function! {
+							if res => InvalidFunction(e) then {
+								if let Some(Value::Closure(x)) = v.get(name) {
+									x.invoke(stk, ctx, opt, doc, args).await
+								} else {
+									Err(e)
+								}
+							}
+						}?;
 
 						stk.run(|stk| res.get(stk, ctx, opt, doc, path.next())).await
 					}
@@ -249,7 +267,7 @@ impl Value {
 						stk.scope(|scope| {
 							let futs = v.iter().map(|v| {
 								scope.run(|stk| {
-									let path = if v.is_thing() {
+									let path = if v.is_record() {
 										path
 									} else {
 										// .* applies to the elements of the array it was applied
@@ -361,9 +379,9 @@ impl Value {
 						Ok(res)
 					}
 				},
-				// Current value at path is a thing
+				// Current value at path is a record
 				Value::RecordId(v) => {
-					// Clone the thing
+					// Clone the record
 					let val = v.clone();
 					// Check how many path parts are remaining
 					if path.is_empty() {
@@ -422,10 +440,14 @@ impl Value {
 									)
 								})
 								.await?;
-							let v = stk
-								.run(|stk| idiom(stk, ctx, opt, doc, v.clone().into(), name, a))
+
+							let res = stk
+								.run(|stk| {
+									idiom(stk, ctx, opt, doc, v.clone().into(), name, a.clone())
+								})
 								.await?;
-							stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
+
+							stk.run(|stk| res.get(stk, ctx, opt, doc, path.next())).await
 						}
 						Part::Optional => {
 							stk.run(|stk| self.get(stk, ctx, opt, doc, path.next())).await
@@ -468,12 +490,11 @@ impl Value {
 							};
 
 							// Fetch the record id's contents
-							let stm = SelectStatement {
-								expr: Fields::Select(vec![Field::All]),
-								what: vec![Expr::Literal(Literal::RecordId(val.into_literal()))],
-								..SelectStatement::default()
-							};
-							let v = stk.run(|stk| stm.compute(stk, ctx, opt, None)).await?.first();
+							let v = val
+								.select_document(stk, ctx, opt, doc)
+								.await?
+								.map(Value::Object)
+								.unwrap_or(Value::None);
 
 							// Continue processing the path on the now fetched record
 							stk.run(|stk| v.get(stk, ctx, opt, None, next)).await
@@ -529,11 +550,17 @@ mod tests {
 	use crate::syn;
 	use crate::val::RecordId;
 
+	macro_rules! parse_val {
+		($input:expr) => {
+			crate::val::convert_public_value_to_internal(syn::value($input).unwrap())
+		};
+	}
+
 	#[tokio::test]
 	async fn get_none() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = SqlIdiom::default().into();
-		let val: Value = syn::value("{ test: { other: null, something: 123 } }").unwrap();
+		let val: Value = parse_val!("{ test: { other: null, something: 123 } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, val);
@@ -543,7 +570,7 @@ mod tests {
 	async fn get_basic() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.something").unwrap().into();
-		let val: Value = syn::value("{ test: { other: null, something: 123 } }").unwrap();
+		let val: Value = parse_val!("{ test: { other: null, something: 123 } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(123));
@@ -554,12 +581,11 @@ mod tests {
 		let (ctx, opt) = mock().await;
 		let depth = 20;
 		let idi: Idiom = syn::idiom(&format!("{}something", "test.".repeat(depth))).unwrap().into();
-		let val: Value = syn::value(&format!(
+		let val: Value = parse_val!(&format!(
 			"{} {{ other: null, something: 123 {} }}",
 			"{ test: ".repeat(depth),
 			"}".repeat(depth)
-		))
-		.unwrap();
+		));
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(123));
@@ -570,7 +596,7 @@ mod tests {
 		let (ctx, opt) = mock().await;
 		let depth = 2000;
 		let idi: Idiom = syn::idiom(&format!("{}something", "test.".repeat(depth))).unwrap().into();
-		let val: Value = syn::value("{}").unwrap(); // A deep enough object cannot be parsed.
+		let val: Value = parse_val!("{}"); // A deep enough object cannot be parsed.
 		let mut stack = reblessive::tree::TreeStack::new();
 		let err = stack
 			.enter(|stk| val.get(stk, &ctx, &opt, None, &idi))
@@ -590,7 +616,7 @@ mod tests {
 	async fn get_thing() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.other").unwrap().into();
-		let val: Value = syn::value("{ test: { other: test:tobie, something: 123 } }").unwrap();
+		let val: Value = parse_val!("{ test: { other: test:tobie, something: 123 } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(
@@ -606,7 +632,7 @@ mod tests {
 	async fn get_array() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.something[1]").unwrap().into();
-		let val: Value = syn::value("{ test: { something: [123, 456, 789] } }").unwrap();
+		let val: Value = parse_val!("{ test: { something: [123, 456, 789] } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(456));
@@ -616,7 +642,7 @@ mod tests {
 	async fn get_array_thing() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.something[1]").unwrap().into();
-		let val: Value = syn::value("{ test: { something: [test:tobie, test:jaime] } }").unwrap();
+		let val: Value = parse_val!("{ test: { something: [test:tobie, test:jaime] } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(
@@ -632,7 +658,7 @@ mod tests {
 	async fn get_array_field() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.something[1].age").unwrap().into();
-		let val: Value = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
+		let val: Value = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(36));
@@ -642,7 +668,7 @@ mod tests {
 	async fn get_array_fields() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.something[*].age").unwrap().into();
-		let val: Value = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
+		let val: Value = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, [Value::from(34i64), Value::from(36i64)].into_iter().collect::<Value>());
@@ -652,7 +678,7 @@ mod tests {
 	async fn get_array_fields_flat() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.something.age").unwrap().into();
-		let val: Value = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
+		let val: Value = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, [Value::from(34i64), Value::from(36i64)].into_iter().collect::<Value>());
@@ -662,7 +688,7 @@ mod tests {
 	async fn get_array_where_field() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.something[WHERE age > 35].age").unwrap().into();
-		let val: Value = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
+		let val: Value = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, [Value::from(36i64)].into_iter().collect::<Value>());
@@ -672,7 +698,7 @@ mod tests {
 	async fn get_array_where_fields() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.something[WHERE age > 35]").unwrap().into();
-		let val: Value = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
+		let val: Value = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(
@@ -687,7 +713,7 @@ mod tests {
 	async fn get_array_where_fields_array_index() {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test.something[WHERE age > 30][0]").unwrap().into();
-		let val: Value = syn::value("{ test: { something: [{ age: 34 }, { age: 36 }] } }").unwrap();
+		let val: Value = parse_val!("{ test: { something: [{ age: 34 }, { age: 36 }] } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(
@@ -703,8 +729,7 @@ mod tests {
 		let (ctx, opt) = mock().await;
 		let idi: Idiom = syn::idiom("test[city:london]").unwrap().into();
 		let val: Value =
-			syn::value("{ test: { 'city:london': true, other: test:tobie, something: 123 } }")
-				.unwrap();
+			parse_val!("{ test: { 'city:london': true, other: test:tobie, something: 123 } }");
 		let mut stack = reblessive::tree::TreeStack::new();
 		let res = stack.enter(|stk| val.get(stk, &ctx, &opt, None, &idi)).finish().await.unwrap();
 		assert_eq!(res, Value::from(true));

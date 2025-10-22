@@ -6,7 +6,7 @@ use anyhow::Result;
 use crate::api::context::InvocationContext;
 use crate::val::Duration;
 
-pub fn timeout(context: &mut InvocationContext, (timeout,): (Duration,)) -> Result<()> {
+pub(crate) fn timeout(context: &mut InvocationContext, (timeout,): (Duration,)) -> Result<()> {
 	context.timeout = Some(timeout);
 	Ok(())
 }

@@ -15,7 +15,7 @@ impl Uuid {
 	#[qjs(constructor)]
 	pub fn new(value: String) -> Self {
 		Self {
-			value: SqlUuid::try_from(value).ok(),
+			value: value.parse().ok(),
 		}
 	}
 	#[qjs(get)]

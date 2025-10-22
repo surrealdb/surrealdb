@@ -1,13 +1,13 @@
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
-use crate::sql::fmt::{Fmt, fmt_separated_by};
-use crate::sql::{Ident, Part};
+use crate::fmt::{EscapeIdent, Fmt};
+use crate::sql::{Expr, Part};
 
 // TODO: Remove unnessacry newtype.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Idioms(pub Vec<Idiom>);
+pub(crate) struct Idioms(pub(crate) Vec<Idiom>);
 
 impl Deref for Idioms {
 	type Target = Vec<Idiom>;
@@ -43,7 +43,7 @@ impl From<crate::expr::Idioms> for Idioms {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Idiom(pub Vec<Part>);
+pub(crate) struct Idiom(pub(crate) Vec<Part>);
 
 impl Idiom {
 	/// Simplifies this Idiom for use in object keys
@@ -57,7 +57,7 @@ impl Idiom {
 		)
 	}
 
-	pub fn field(name: Ident) -> Self {
+	pub fn field(name: String) -> Self {
 		Idiom(vec![Part::Field(name)])
 	}
 }
@@ -76,17 +76,26 @@ impl From<crate::expr::Idiom> for Idiom {
 
 impl Display for Idiom {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		Display::fmt(
-			&Fmt::new(
-				self.0.iter().enumerate().map(|args| {
-					Fmt::new(args, |(i, p), f| match (i, p) {
-						(0, Part::Field(v)) => Display::fmt(v, f),
-						_ => Display::fmt(p, f),
-					})
-				}),
-				fmt_separated_by(""),
-			),
-			f,
-		)
+		let mut iter = self.0.iter();
+		match iter.next() {
+			Some(Part::Field(v)) => EscapeIdent(v).fmt(f)?,
+			Some(Part::Start(x)) => match x {
+				Expr::Block(_)
+				| Expr::Literal(_)
+				| Expr::Table(_)
+				| Expr::Mock(_)
+				| Expr::Constant(_)
+				| Expr::Param(_) => x.fmt(f)?,
+				_ => {
+					write!(f, "({x})")?;
+				}
+			},
+			Some(x) => x.fmt(f)?,
+			None => {}
+		};
+		for p in iter {
+			p.fmt(f)?;
+		}
+		Ok(())
 	}
 }

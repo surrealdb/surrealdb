@@ -29,8 +29,8 @@ jobs:
     name: Prepare nightly release
     uses: ./.github/workflows/publish-version.yml
     with:
-      release-type: nightly
+      nightly-release: true
       git-ref: main
-      extra-features: storage-tikv,http-compression,jwks,ml
+      extra-features: storage-tikv,jwks,ml
       publish: ${{ inputs.publish || github.event_name == 'schedule' }}
     secrets: inherit

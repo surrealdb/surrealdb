@@ -1,6 +1,7 @@
 use std::fmt::{self, Display, Write};
 
 use anyhow::{Result, bail};
+use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
@@ -9,29 +10,41 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::fmt::{is_pretty, pretty_indent};
-use crate::expr::{Base, Block, Ident, Kind};
+use crate::expr::expression::VisitExpression;
+use crate::expr::{Base, Block, Expr, Kind};
+use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct DefineFunctionStatement {
+pub(crate) struct DefineFunctionStatement {
 	pub kind: DefineKind,
-	pub name: Ident,
-	pub args: Vec<(Ident, Kind)>,
+	pub name: String,
+	pub args: Vec<(String, Kind)>,
 	pub block: Block,
-	pub comment: Option<Strand>,
+	pub comment: Option<Expr>,
 	pub permissions: Permission,
 	pub returns: Option<Kind>,
+}
+
+impl VisitExpression for DefineFunctionStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.block.visit(visitor);
+		self.comment.iter().for_each(|comment| comment.visit(visitor));
+	}
 }
 
 impl DefineFunctionStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
+		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_doc: Option<&CursorDoc>,
+		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
@@ -64,10 +77,10 @@ impl DefineFunctionStatement {
 			ns,
 			db,
 			&FunctionDefinition {
-				name: self.name.to_raw_string(),
-				args: self.args.clone().into_iter().map(|(n, k)| (n.to_raw_string(), k)).collect(),
+				name: self.name.clone(),
+				args: self.args.clone(),
 				block: self.block.clone(),
-				comment: self.comment.clone().map(|c| c.into_string()),
+				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 				permissions: self.permissions.clone(),
 				returns: self.returns.clone(),
 			},
@@ -93,7 +106,7 @@ impl fmt::Display for DefineFunctionStatement {
 			if i > 0 {
 				f.write_str(", ")?;
 			}
-			write!(f, "${name}: {kind}")?;
+			write!(f, "${}: {kind}", EscapeKwFreeIdent(name))?;
 		}
 		f.write_str(") ")?;
 		if let Some(ref v) = self.returns {
@@ -101,7 +114,7 @@ impl fmt::Display for DefineFunctionStatement {
 		}
 		Display::fmt(&self.block, f)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", v)?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

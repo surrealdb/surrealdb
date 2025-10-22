@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
-use crate::idx::docids::DocId;
+use crate::idx::seqdocids::DocId;
 use crate::idx::trees::hnsw::docs::HnswDocsState;
 use crate::kvs::impl_kv_key_storekey;
 use crate::val::RecordIdKey;

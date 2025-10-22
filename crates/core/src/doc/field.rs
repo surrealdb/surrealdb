@@ -158,7 +158,7 @@ impl Document {
 		// Get the record id
 		let rid = self.id()?;
 		// Get the user applied input
-		let inp = self.initial.doc.as_ref().changed(self.current.doc.as_ref());
+		let inp = self.compute_input_value(stk, ctx, opt, stm).await?.unwrap_or_default();
 		// When set, any matching embedded object fields
 		// which are prefixed with the specified idiom
 		// will be skipped, as the parent object is optional
@@ -191,7 +191,7 @@ impl Document {
 						self.is_new() || val == *old,
 						Error::FieldReadonly {
 							field: fd.name.clone(),
-							thing: rid.to_string(),
+							record: rid.to_string(),
 						}
 					);
 
@@ -232,7 +232,7 @@ impl Document {
 							_ => {
 								bail!(Error::FieldReadonly {
 									field: fd.name.clone(),
-									thing: rid.to_string(),
+									record: rid.to_string(),
 								});
 							}
 						}
@@ -397,7 +397,7 @@ impl FieldEditContext<'_> {
 
 						// Check the type of the ID part
 						inner.coerce_to_kind(kind).map_err(|e| Error::FieldCoerce {
-							thing: self.rid.to_string(),
+							record: self.rid.to_string(),
 							field_name: self.def.name.to_string(),
 							error: Box::new(e),
 						})?;
@@ -407,7 +407,7 @@ impl FieldEditContext<'_> {
 				else {
 					// There was a field check error
 					bail!(Error::FieldCoerce {
-						thing: self.rid.to_string(),
+						record: self.rid.to_string(),
 						field_name: "id".to_string(),
 						error: Box::new(CoerceError::InvalidKind {
 							from: val,
@@ -420,7 +420,7 @@ impl FieldEditContext<'_> {
 			else {
 				// Check the type of the field value
 				let val = val.coerce_to_kind(kind).map_err(|e| Error::FieldCoerce {
-					thing: self.rid.to_string(),
+					record: self.rid.to_string(),
 					field_name: self.def.name.to_string(),
 					error: Box::new(e),
 				})?;
@@ -563,7 +563,7 @@ impl FieldEditContext<'_> {
 			ensure!(
 				res.is_truthy(),
 				Error::FieldValue {
-					thing: self.rid.to_string(),
+					record: self.rid.to_string(),
 					field: self.def.name.clone(),
 					check: expr.to_string(),
 					value: now.to_string(),

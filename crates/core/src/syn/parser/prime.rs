@@ -1,3 +1,6 @@
+use core::f64;
+use std::ops::Bound;
+
 use reblessive::Stk;
 
 use super::basic::NumberToken;
@@ -5,15 +8,16 @@ use super::mac::pop_glued;
 use super::{ParseResult, Parser};
 use crate::sql::lookup::LookupKind;
 use crate::sql::{
-	Closure, Dir, Expr, Function, FunctionCall, Ident, Idiom, Kind, Literal, Mock, Param, Part,
-	Script,
+	Closure, Dir, Expr, Function, FunctionCall, Idiom, Kind, Literal, Mock, Param, Part, Script,
 };
-use crate::syn::error::bail;
+use crate::syn::error::{SyntaxError, bail};
+use crate::syn::lexer::Lexer;
 use crate::syn::lexer::compound::{self, Numeric};
 use crate::syn::parser::enter_object_recursion;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::token::{Glued, Span, TokenKind, t};
-use crate::val::{Duration, Strand};
+use crate::types::{PublicDuration, PublicGeometry};
+use crate::val::range::TypedRange;
 
 impl Parser<'_> {
 	pub(super) fn parse_number_like_prime(&mut self) -> ParseResult<Expr> {
@@ -31,17 +35,21 @@ impl Parser<'_> {
 					NumberToken::Decimal(d) => Ok(Expr::Literal(Literal::Decimal(d))),
 				}
 			}
-			_ => {
+			TokenKind::Infinity => Ok(Expr::Literal(Literal::Float(f64::INFINITY))),
+			t!("+") | t!("-") | TokenKind::Digits => {
 				self.pop_peek();
 				let value = self.lexer.lex_compound(token, compound::numeric)?;
 				let v = match value.value {
 					compound::Numeric::Float(x) => Expr::Literal(Literal::Float(x)),
 					compound::Numeric::Integer(x) => Expr::Literal(Literal::Integer(x)),
 					compound::Numeric::Decimal(x) => Expr::Literal(Literal::Decimal(x)),
-					compound::Numeric::Duration(x) => Expr::Literal(Literal::Duration(Duration(x))),
+					compound::Numeric::Duration(x) => {
+						Expr::Literal(Literal::Duration(PublicDuration::from(x)))
+					}
 				};
 				Ok(v)
 			}
+			_ => unexpected!(self, token, "a number"),
 		}
 	}
 
@@ -103,29 +111,32 @@ impl Parser<'_> {
 					unexpected!(self, token, "expected either a `<-` or a future")
 				}
 			}
-			t!("r\"") => {
+			t!("r\"") | t!("r'") => {
 				self.pop_peek();
-				let record_id = self.parse_record_string(stk, true).await?;
+				let source_str = self.lexer.span_str(token.span);
+				let str =
+					Lexer::unescape_string_span(source_str, token.span, &mut self.unscape_buffer)?;
+				let mut inner_parser = Parser::new(str.as_bytes());
+				let record_id = match stk.run(|stk| inner_parser.parse_record_id(stk)).await {
+					Ok(x) => x,
+					Err(e) => {
+						let e = e.update_spans(|span| {
+							let range = span.to_range();
+							let start = Lexer::escaped_string_offset(source_str, range.start);
+							let end = Lexer::escaped_string_offset(source_str, range.end);
+							*span = Span::from_range(
+								(token.span.offset + start)..(token.span.offset + end),
+							)
+						});
+						return Err(e);
+					}
+				};
 				Expr::Literal(Literal::RecordId(record_id))
 			}
-			t!("r'") => {
-				self.pop_peek();
-				let record_id = self.parse_record_string(stk, false).await?;
-				Expr::Literal(Literal::RecordId(record_id))
-			}
-			t!("d\"") | t!("d'") | TokenKind::Glued(Glued::Datetime) => {
-				let datetime = self.next_token_value()?;
-				Expr::Literal(Literal::Datetime(datetime))
-			}
-			t!("u\"") | t!("u'") | TokenKind::Glued(Glued::Uuid) => {
-				let datetime = self.next_token_value()?;
-				Expr::Literal(Literal::Uuid(datetime))
-			}
-			t!("b\"") | t!("b'") | TokenKind::Glued(Glued::Bytes) => {
-				let bytes = self.next_token_value()?;
-				Expr::Literal(Literal::Bytes(bytes))
-			}
-			t!("f\"") | t!("f'") | TokenKind::Glued(Glued::File) => {
+			t!("d\"") | t!("d'") => Expr::Literal(Literal::Datetime(self.next_token_value()?)),
+			t!("u\"") | t!("u'") => Expr::Literal(Literal::Uuid(self.next_token_value()?)),
+			t!("b\"") | t!("b'") => Expr::Literal(Literal::Bytes(self.next_token_value()?)),
+			t!("f\"") | t!("f'") => {
 				if !self.settings.files_enabled {
 					unexpected!(self, token, "the experimental files feature to be enabled");
 				}
@@ -133,18 +144,22 @@ impl Parser<'_> {
 				let file = self.next_token_value()?;
 				Expr::Literal(Literal::File(file))
 			}
-			t!("'") | t!("\"") | TokenKind::Glued(Glued::Strand) => {
-				let s = self.next_token_value::<Strand>()?;
+			t!("'") | t!("\"") => {
 				if self.settings.legacy_strands {
-					Expr::Literal(self.reparse_legacy_strand(stk, s).await)
+					Expr::Literal(self.reparse_legacy_strand(stk).await?)
 				} else {
-					Expr::Literal(Literal::Strand(s))
+					let s = self.parse_string_lit()?;
+					Expr::Literal(Literal::String(s))
 				}
 			}
 			t!("+")
 			| t!("-")
 			| TokenKind::Digits
 			| TokenKind::Glued(Glued::Number | Glued::Duration) => self.parse_number_like_prime()?,
+			TokenKind::Infinity => {
+				self.pop_peek();
+				Expr::Literal(Literal::Float(f64::INFINITY))
+			}
 			TokenKind::NaN => {
 				self.pop_peek();
 				Expr::Literal(Literal::Float(f64::NAN))
@@ -299,16 +314,16 @@ impl Parser<'_> {
 						self.parse_builtin(stk, token.span).await?
 					}
 					t!(":") => {
-						let str = self.next_token_value::<Ident>()?;
+						let str = self.parse_ident()?;
 						self.parse_record_id_or_range(stk, str)
 							.await
 							.map(|x| Expr::Literal(Literal::RecordId(x)))?
 					}
 					_ => {
 						if self.table_as_field {
-							Expr::Idiom(Idiom(vec![Part::Field(self.next_token_value()?)]))
+							Expr::Idiom(Idiom(vec![Part::Field(self.parse_ident()?)]))
 						} else {
-							Expr::Table(self.next_token_value()?)
+							Expr::Table(self.parse_ident()?)
 						}
 					}
 				}
@@ -365,17 +380,60 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects the starting `|` already be eaten and its span passed as an
 	/// argument.
-	pub(super) fn parse_mock(&mut self, start: Span) -> ParseResult<Mock> {
-		let name = self.next_token_value::<Ident>()?.into_string();
+	pub(super) fn parse_mock(&mut self, start_span: Span) -> ParseResult<Mock> {
+		let name = self.parse_ident()?;
 		expected!(self, t!(":"));
-		let from = self.next_token_value()?;
-		let to = self.eat(t!("..")).then(|| self.next_token_value()).transpose()?;
-		self.expect_closing_delimiter(t!("|"), start)?;
-		if let Some(to) = to {
-			Ok(Mock::Range(name, from, to))
-		} else {
-			Ok(Mock::Count(name, from))
-		}
+		// TODO: limit these to i64 range, it is weird that these can exceed normal number range.
+		let start = match self.peek_kind() {
+			t!("..") => {
+				self.pop_peek();
+				Bound::Unbounded
+			}
+			_ => {
+				let from = self.next_token_value::<i64>()?;
+
+				match self.peek_kind() {
+					t!("..") => {
+						self.pop_peek();
+						Bound::Included(from)
+					}
+					t!(">") => {
+						self.pop_peek();
+						expected!(self, t!(".."));
+						Bound::Excluded(from)
+					}
+					_ => {
+						self.expect_closing_delimiter(t!("|"), start_span)?;
+						return Ok(Mock::Count(name, from));
+					}
+				}
+			}
+		};
+
+		let end = match self.peek_kind() {
+			t!("|") => {
+				self.pop_peek();
+				Bound::Unbounded
+			}
+			t!("=") => {
+				self.pop_peek();
+				let to = self.next_token_value()?;
+				self.expect_closing_delimiter(t!("|"), start_span)?;
+				Bound::Included(to)
+			}
+			_ => {
+				let to = self.next_token_value()?;
+				self.expect_closing_delimiter(t!("|"), start_span)?;
+				Bound::Excluded(to)
+			}
+		};
+		Ok(Mock::Range(
+			name,
+			TypedRange {
+				start,
+				end,
+			},
+		))
 	}
 
 	pub(super) async fn parse_closure_or_mock(
@@ -396,7 +454,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let param = self.next_token_value::<Param>()?.ident();
+			let param = self.next_token_value::<Param>()?;
 			let kind = if self.eat(t!(":")) {
 				if self.eat(t!("<")) {
 					let delim = self.last_span();
@@ -422,7 +480,7 @@ impl Parser<'_> {
 	pub(super) async fn parse_closure_after_args(
 		&mut self,
 		stk: &mut Stk,
-		args: Vec<(Ident, Kind)>,
+		args: Vec<(Param, Kind)>,
 	) -> ParseResult<Expr> {
 		let (returns, body) = if self.eat(t!("->")) {
 			let returns = Some(stk.run(|ctx| self.parse_inner_kind(ctx)).await?);
@@ -470,7 +528,7 @@ impl Parser<'_> {
 
 					let y = self.next_token_value::<f64>()?;
 					self.expect_closing_delimiter(t!(")"), start)?;
-					return Ok(Expr::Literal(Literal::Geometry(crate::val::Geometry::Point(
+					return Ok(Expr::Literal(Literal::Geometry(PublicGeometry::Point(
 						geo::Point::new(x, y),
 					))));
 				} else {
@@ -484,8 +542,8 @@ impl Parser<'_> {
 			if let Expr::Idiom(Idiom(ref idiom)) = res {
 				if idiom.len() == 1 {
 					bail!("Unexpected token `{}` expected `)`",peek.kind,
-						@token.span,
-						@peek.span => "This is a reserved keyword here and can't be an identifier");
+					@token.span,
+					@peek.span => "This is a reserved keyword here and can't be an identifier");
 				}
 			}
 		}
@@ -495,17 +553,26 @@ impl Parser<'_> {
 
 	/// Parses a strand with legacy rules, parsing to a record id, datetime or
 	/// uuid if the string matches.
-	pub(super) async fn reparse_legacy_strand(&mut self, stk: &mut Stk, text: Strand) -> Literal {
-		if let Ok(x) = Parser::new(text.as_bytes()).parse_record_id(stk).await {
-			return Literal::RecordId(x);
+	pub(super) async fn reparse_legacy_strand(
+		&mut self,
+		stk: &mut Stk,
+	) -> Result<Literal, SyntaxError> {
+		let token = self.next();
+		assert!(matches!(token.kind, t!("'") | t!("\"")));
+
+		let str = self.lexer.span_str(token.span);
+		let str = Lexer::unescape_string_span(str, token.span, &mut self.unscape_buffer)?;
+
+		if let Ok(x) = Lexer::lex_uuid(str) {
+			return Ok(Literal::Uuid(x));
 		}
-		if let Ok(x) = Parser::new(text.as_bytes()).next_token_value() {
-			return Literal::Datetime(x);
+		if let Ok(x) = Lexer::lex_datetime(str) {
+			return Ok(Literal::Datetime(x));
 		}
-		if let Ok(x) = Parser::new(text.as_bytes()).next_token_value() {
-			return Literal::Uuid(x);
+		if let Ok(x) = Parser::new(str.as_bytes()).parse_record_id(stk).await {
+			return Ok(Literal::RecordId(x));
 		}
-		Literal::Strand(text)
+		Ok(Literal::String(str.to_owned()))
 	}
 
 	async fn parse_script(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {
@@ -601,7 +668,10 @@ mod tests {
 		let sql = "|test:1..1000|";
 		let out = syn::expr(sql).unwrap();
 		assert_eq!("|test:1..1000|", format!("{}", out));
-		assert_eq!(out, Expr::Mock(Mock::Range(String::from("test"), 1, 1000)));
+		assert_eq!(
+			out,
+			Expr::Mock(Mock::Range(String::from("test"), TypedRange::from_range(1..1000)))
+		);
 	}
 
 	#[test]

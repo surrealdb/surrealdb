@@ -1,31 +1,31 @@
 use std::fmt::{self, Display};
 
-use anyhow::Result;
 use revision::revisioned;
+use surrealdb_types::{SurrealValue, ToSql, write_sql};
 
 use crate::api::path::Path;
 use crate::catalog::Permission;
 use crate::expr::Expr;
-use crate::expr::fmt::Fmt;
 use crate::expr::statements::info::InfoStructure;
+use crate::fmt::Fmt;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
-use crate::val::{Array, Object, Strand, Value};
+use crate::val::{Array, Object, Value};
 
 /// The API definition.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[non_exhaustive]
 pub struct ApiDefinition {
 	/// The URL path of the API.
-	pub path: Path,
+	pub(crate) path: Path,
 	/// The actions of the API.
-	pub actions: Vec<ApiActionDefinition>,
+	pub(crate) actions: Vec<ApiActionDefinition>,
 	/// The fallback expression of the API.
-	pub fallback: Option<Expr>,
+	pub(crate) fallback: Option<Expr>,
 	/// The config of the API.
-	pub config: ApiConfigDefinition,
+	pub(crate) config: ApiConfigDefinition,
 	/// An optional comment for the definition.
-	pub comment: Option<String>,
+	pub(crate) comment: Option<String>,
 }
 
 impl_kv_value_revisioned!(ApiDefinition);
@@ -33,7 +33,7 @@ impl_kv_value_revisioned!(ApiDefinition);
 impl ApiDefinition {
 	/// Finds the api definition which most closely matches the segments of the
 	/// path.
-	pub fn find_definition<'a>(
+	pub(crate) fn find_definition<'a>(
 		definitions: &'a [ApiDefinition],
 		segments: Vec<&str>,
 		method: ApiMethod,
@@ -59,28 +59,28 @@ impl ApiDefinition {
 	fn to_sql_definition(&self) -> crate::sql::statements::DefineApiStatement {
 		crate::sql::statements::DefineApiStatement {
 			kind: crate::sql::statements::define::DefineKind::Default,
-			path: crate::sql::Expr::Literal(crate::sql::Literal::Strand(unsafe {
-				Strand::new_unchecked(self.path.to_string())
-			})),
+			path: crate::sql::Expr::Literal(crate::sql::Literal::String(self.path.to_string())),
 			actions: self.actions.iter().map(|x| x.to_sql_action()).collect(),
 			fallback: self.fallback.clone().map(|x| x.into()),
 			config: self.config.to_sql_config(),
-			comment: self.comment.clone().map(|x| unsafe { Strand::new_unchecked(x) }),
+			comment: self
+				.comment
+				.clone()
+				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
 		}
 	}
 }
 
 impl ToSql for ApiDefinition {
-	fn to_sql(&self) -> String {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }
 
 impl InfoStructure for ApiDefinition {
 	fn structure(self) -> Value {
 		Value::from(Object(map! {
-			// TODO: Null byte validity
-			"path".to_string() => Strand::new(self.path.to_string()).unwrap().into(),
+			"path".to_string() => self.path.to_string().into(),
 			"config".to_string() => self.config.structure(),
 			"fallback".to_string(), if let Some(fallback) = self.fallback => fallback.structure(),
 			"actions".to_string() => Value::from(self.actions.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
@@ -91,8 +91,9 @@ impl InfoStructure for ApiDefinition {
 
 /// REST API method.
 #[revisioned(revision = 1)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(SurrealValue, Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[surreal(untagged, lowercase)]
 pub enum ApiMethod {
 	/// REST DELETE method.
 	Delete,
@@ -106,24 +107,6 @@ pub enum ApiMethod {
 	Put,
 	/// REST TRACE method.
 	Trace,
-}
-
-impl TryFrom<&Value> for ApiMethod {
-	type Error = anyhow::Error;
-	fn try_from(value: &Value) -> Result<Self, Self::Error> {
-		match value {
-			Value::Strand(s) => match s.to_ascii_lowercase().as_str() {
-				"delete" => Ok(Self::Delete),
-				"get" => Ok(Self::Get),
-				"patch" => Ok(Self::Patch),
-				"post" => Ok(Self::Post),
-				"put" => Ok(Self::Put),
-				"trace" => Ok(Self::Trace),
-				unexpected => Err(anyhow::anyhow!("method does not match: {unexpected}")),
-			},
-			_ => Err(anyhow::anyhow!("method does not match: {value}")),
-		}
-	}
 }
 
 impl Display for ApiMethod {
@@ -180,9 +163,9 @@ impl InfoStructure for ApiActionDefinition {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct ApiConfigDefinition {
 	/// The middleware of the API.
-	pub middleware: Vec<MiddlewareDefinition>,
+	pub(crate) middleware: Vec<MiddlewareDefinition>,
 	/// The permissions of the API.
-	pub permissions: Permission,
+	pub(crate) permissions: Permission,
 }
 
 impl ApiConfigDefinition {
@@ -206,7 +189,7 @@ impl InfoStructure for ApiConfigDefinition {
 						.map(|m| {
 							let value = m.args
 								.iter()
-								.map(|x| Value::Strand(Strand::new(x.to_string()).unwrap()))
+								.map(|x| Value::String(x.to_string()))
 								.collect();
 
 							(m.name.clone(), Value::Array(Array(value)))
@@ -220,7 +203,7 @@ impl InfoStructure for ApiConfigDefinition {
 
 impl Display for ApiConfigDefinition {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, " API")?;
+		write!(f, "API")?;
 
 		if !self.middleware.is_empty() {
 			write!(f, " MIDDLEWARE ")?;
@@ -243,7 +226,7 @@ impl Display for ApiConfigDefinition {
 /// API Middleware definition.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct MiddlewareDefinition {
+pub(crate) struct MiddlewareDefinition {
 	/// The name of function to invoke.
 	pub name: String,
 	/// The arguments to pass to the function.
@@ -254,7 +237,15 @@ impl MiddlewareDefinition {
 	fn to_sql_middleware(&self) -> crate::sql::statements::define::config::api::Middleware {
 		crate::sql::statements::define::config::api::Middleware {
 			name: self.name.clone(),
-			args: self.args.clone().into_iter().map(crate::sql::Expr::from_value).collect(),
+			args: self
+				.args
+				.clone()
+				.into_iter()
+				.map(|v| {
+					let public_val: crate::types::PublicValue = v.try_into().unwrap();
+					crate::sql::Expr::from_public_value(public_val)
+				})
+				.collect(),
 		}
 	}
 }

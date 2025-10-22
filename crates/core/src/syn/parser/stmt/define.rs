@@ -22,14 +22,14 @@ use crate::sql::statements::{
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	AccessType, Expr, Ident, Index, Kind, Literal, Param, Permission, Permissions, Scoring,
-	TableType, access_type, table_type,
+	AccessType, Expr, Index, Kind, Literal, Param, Permission, Permissions, Scoring, TableType,
+	access_type, table_type,
 };
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Token, TokenKind, t};
-use crate::val::{Duration, Strand};
+use crate::types::PublicDuration;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_define_stmt(
@@ -38,10 +38,12 @@ impl Parser<'_> {
 	) -> ParseResult<DefineStatement> {
 		let next = self.next();
 		match next.kind {
-			t!("NAMESPACE") => self.parse_define_namespace().map(DefineStatement::Namespace),
-			t!("DATABASE") => self.parse_define_database().map(DefineStatement::Database),
+			t!("NAMESPACE") => {
+				self.parse_define_namespace(stk).await.map(DefineStatement::Namespace)
+			}
+			t!("DATABASE") => self.parse_define_database(stk).await.map(DefineStatement::Database),
 			t!("FUNCTION") => self.parse_define_function(stk).await.map(DefineStatement::Function),
-			t!("USER") => self.parse_define_user().map(DefineStatement::User),
+			t!("USER") => self.parse_define_user(stk).await.map(DefineStatement::User),
 			t!("PARAM") => self.parse_define_param(stk).await.map(DefineStatement::Param),
 			t!("TABLE") => self.parse_define_table(stk).await.map(DefineStatement::Table),
 			t!("API") => self.parse_define_api(stk).await.map(DefineStatement::Api),
@@ -54,16 +56,19 @@ impl Parser<'_> {
 			t!("INDEX") => {
 				stk.run(|stk| self.parse_define_index(stk)).await.map(DefineStatement::Index)
 			}
-			t!("ANALYZER") => self.parse_define_analyzer().map(DefineStatement::Analyzer),
+			t!("ANALYZER") => self.parse_define_analyzer(stk).await.map(DefineStatement::Analyzer),
 			t!("ACCESS") => self.parse_define_access(stk).await.map(DefineStatement::Access),
 			t!("CONFIG") => self.parse_define_config(stk).await.map(DefineStatement::Config),
 			t!("BUCKET") => self.parse_define_bucket(stk, next).await.map(DefineStatement::Bucket),
-			t!("SEQUENCE") => self.parse_define_sequence().map(DefineStatement::Sequence),
+			t!("SEQUENCE") => self.parse_define_sequence(stk).await.map(DefineStatement::Sequence),
 			_ => unexpected!(self, next, "a define statement keyword"),
 		}
 	}
 
-	pub(crate) fn parse_define_namespace(&mut self) -> ParseResult<DefineNamespaceStatement> {
+	pub(crate) async fn parse_define_namespace(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineNamespaceStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -73,7 +78,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		let mut res = DefineNamespaceStatement {
 			id: None,
 			name,
@@ -83,13 +88,16 @@ impl Parser<'_> {
 
 		while let t!("COMMENT") = self.peek_kind() {
 			self.pop_peek();
-			res.comment = Some(self.next_token_value()?);
+			res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 		}
 
 		Ok(res)
 	}
 
-	pub fn parse_define_database(&mut self) -> ParseResult<DefineDatabaseStatement> {
+	pub(crate) async fn parse_define_database(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineDatabaseStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -99,7 +107,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		let mut res = DefineDatabaseStatement {
 			name,
 			kind,
@@ -109,7 +117,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("CHANGEFEED") => {
 					self.pop_peek();
@@ -122,7 +130,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_function(
+	pub(crate) async fn parse_define_function(
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineFunctionStatement> {
@@ -143,7 +151,7 @@ impl Parser<'_> {
 				break;
 			}
 
-			let param = self.next_token_value::<Param>()?.ident();
+			let param = self.next_token_value::<Param>()?.into_string();
 			expected!(self, t!(":"));
 			let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
 
@@ -177,7 +185,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
@@ -190,7 +198,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub fn parse_define_user(&mut self) -> ParseResult<DefineUserStatement> {
+	pub(crate) async fn parse_define_user(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineUserStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -200,7 +211,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		let base = self.parse_base()?;
 
@@ -209,11 +220,11 @@ impl Parser<'_> {
 			name,
 			base,
 			// Safety: "Viewer" does not contain a null byte
-			roles: vec![unsafe { Ident::new_unchecked("Viewer".to_owned()) }], /* New users get
-			                                                                    * the viewer role
-			                                                                    * by default */
+			roles: vec!["Viewer".to_owned()], /* New users get
+			                                   * the viewer role
+			                                   * by default */
 			// TODO: Move out of the parser
-			token_duration: Some(Duration::from_secs(3600)), // defaults to 1 hour.
+			token_duration: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(3600)))), /* defaults to 1 hour. */
 			..DefineUserStatement::default()
 		};
 
@@ -221,30 +232,28 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("PASSWORD") => {
 					let token = self.pop_peek();
 					if let PassType::Hash(_) = res.pass_type {
 						bail!("Unexpected token `PASSWORD`", @token.span => "Can't set both a passhash and a password");
 					}
-					res.pass_type =
-						PassType::Password(self.next_token_value::<Strand>()?.into_string());
+					res.pass_type = PassType::Password(self.parse_string_lit()?);
 				}
 				t!("PASSHASH") => {
 					let token = self.pop_peek();
 					if let PassType::Password(_) = res.pass_type {
 						bail!("Unexpected token `PASSHASH`", @token.span => "Can't set both a passhash and a password");
 					}
-					res.pass_type =
-						PassType::Hash(self.next_token_value::<Strand>()?.into_string());
+					res.pass_type = PassType::Hash(self.parse_string_lit()?);
 				}
 				t!("ROLES") => {
 					self.pop_peek();
 					let mut roles = Vec::new();
 					loop {
 						let token = self.peek();
-						let role = self.next_token_value::<Ident>()?;
+						let role = self.parse_ident()?;
 						// NOTE(gguillemas): This hardcoded list is a temporary fix in order
 						// to avoid making breaking changes to the DefineUserStatement structure
 						// while still providing parsing feedback to users referencing unexistent
@@ -277,7 +286,10 @@ impl Parser<'_> {
 										// duration must be set.
 										unexpected!(self, peek, "a token duration");
 									}
-									_ => res.token_duration = Some(self.next_token_value()?),
+									_ => {
+										res.token_duration =
+											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+									}
 								}
 							}
 							t!("SESSION") => {
@@ -287,7 +299,10 @@ impl Parser<'_> {
 										self.pop_peek();
 										res.session_duration = None;
 									}
-									_ => res.session_duration = Some(self.next_token_value()?),
+									_ => {
+										res.session_duration =
+											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+									}
 								}
 							}
 							_ => unexpected!(self, token, "`TOKEN` or `SESSION`"),
@@ -307,7 +322,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_access(
+	pub(crate) async fn parse_define_access(
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineAccessStatement> {
@@ -320,7 +335,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		// TODO: Parse base should no longer take an argument.
 		let base = self.parse_base()?;
@@ -339,7 +354,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("TYPE") => {
 					self.pop_peek();
@@ -347,7 +362,7 @@ impl Parser<'_> {
 					match peek.kind {
 						t!("JWT") => {
 							self.pop_peek();
-							res.access_type = AccessType::Jwt(self.parse_jwt()?);
+							res.access_type = AccessType::Jwt(self.parse_jwt(stk).await?);
 						}
 						t!("RECORD") => {
 							let token = self.pop_peek();
@@ -377,7 +392,7 @@ impl Parser<'_> {
 								match token.kind {
 									t!("JWT") => {
 										self.pop_peek();
-										let jwt = self.parse_jwt()?;
+										let jwt = self.parse_jwt(stk).await?;
 										ac.jwt = jwt.clone();
 										// Use same issuer for refreshed tokens.
 										if let Some(mut bearer) = ac.bearer {
@@ -452,7 +467,7 @@ impl Parser<'_> {
 							}
 							if self.eat(t!("WITH")) {
 								expected!(self, t!("JWT"));
-								ac.jwt = self.parse_jwt()?;
+								ac.jwt = self.parse_jwt(stk).await?;
 							}
 							res.access_type = AccessType::Bearer(ac);
 						}
@@ -475,7 +490,10 @@ impl Parser<'_> {
 										self.pop_peek();
 										res.duration.grant = None
 									}
-									_ => res.duration.grant = Some(self.next_token_value()?),
+									_ => {
+										res.duration.grant =
+											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+									}
 								}
 							}
 							t!("TOKEN") => {
@@ -491,7 +509,10 @@ impl Parser<'_> {
 										// parties that support it.
 										unexpected!(self, peek, "a token duration");
 									}
-									_ => res.duration.token = Some(self.next_token_value()?),
+									_ => {
+										res.duration.token =
+											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+									}
 								}
 							}
 							t!("SESSION") => {
@@ -501,7 +522,10 @@ impl Parser<'_> {
 										self.pop_peek();
 										res.duration.session = None
 									}
-									_ => res.duration.session = Some(self.next_token_value()?),
+									_ => {
+										res.duration.session =
+											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
+									}
 								}
 							}
 							_ => unexpected!(self, peek, "GRANT, TOKEN or SESSIONS"),
@@ -516,7 +540,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_param(&mut self, stk: &mut Stk) -> ParseResult<DefineParamStatement> {
+	pub(crate) async fn parse_define_param(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineParamStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -526,7 +553,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value::<Param>()?.ident();
+		let name = self.next_token_value::<Param>()?.into_string();
 
 		let mut res = DefineParamStatement {
 			name,
@@ -544,7 +571,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("PERMISSIONS") => {
 					self.pop_peek();
@@ -556,7 +583,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_table(&mut self, stk: &mut Stk) -> ParseResult<DefineTableStatement> {
+	pub(crate) async fn parse_define_table(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineTableStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -566,7 +596,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		let mut res = DefineTableStatement {
 			name,
 			permissions: Permissions::none(),
@@ -579,7 +609,7 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("DROP") => {
 					self.pop_peek();
@@ -647,7 +677,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_api(&mut self, stk: &mut Stk) -> ParseResult<DefineApiStatement> {
+	pub(crate) async fn parse_define_api(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineApiStatement> {
 		if !self.settings.define_api_enabled {
 			bail!("Cannot define an API, as the experimental define api capability is not enabled", @self.last_span);
 		}
@@ -734,13 +767,16 @@ impl Parser<'_> {
 		}
 
 		if self.eat(t!("COMMENT")) {
-			res.comment = Some(self.next_token_value()?);
+			res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 		}
 
 		Ok(res)
 	}
 
-	pub async fn parse_define_event(&mut self, stk: &mut Stk) -> ParseResult<DefineEventStatement> {
+	pub(crate) async fn parse_define_event(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineEventStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -751,10 +787,10 @@ impl Parser<'_> {
 			DefineKind::Default
 		};
 
-		let name = self.next_token_value()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = self.next_token_value()?;
+		let what = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 
 		let mut res = DefineEventStatement {
 			kind,
@@ -780,7 +816,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				_ => break,
 			}
@@ -788,7 +824,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_field(&mut self, stk: &mut Stk) -> ParseResult<DefineFieldStatement> {
+	pub(crate) async fn parse_define_field(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineFieldStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -798,10 +837,10 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.parse_local_idiom(stk).await?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = self.next_token_value()?;
+		let what = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 
 		let mut res = DefineFieldStatement {
 			name,
@@ -849,7 +888,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("REFERENCE") => {
 					if !self.settings.references_enabled {
@@ -873,7 +912,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_index(&mut self, stk: &mut Stk) -> ParseResult<DefineIndexStatement> {
+	pub(crate) async fn parse_define_index(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineIndexStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -883,10 +925,10 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
-		let what = self.next_token_value()?;
+		let what = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 
 		let mut res = DefineIndexStatement {
 			name,
@@ -903,18 +945,23 @@ impl Parser<'_> {
 				// COLUMNS and FIELDS are the same tokenkind
 				t!("FIELDS") => {
 					self.pop_peek();
-					res.cols = vec![self.parse_local_idiom(stk).await?];
+					res.cols = vec![stk.run(|ctx| self.parse_expr_field(ctx)).await?];
 					while self.eat(t!(",")) {
-						res.cols.push(self.parse_local_idiom(stk).await?);
+						res.cols.push(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 					}
 				}
 				t!("UNIQUE") => {
 					self.pop_peek();
 					res.index = Index::Uniq;
 				}
+				t!("COUNT") => {
+					self.pop_peek();
+					let cond = self.try_parse_condition(stk).await?;
+					res.index = Index::Count(cond);
+				}
 				t!("FULLTEXT") => {
 					self.pop_peek();
-					let mut analyzer: Option<Ident> = None;
+					let mut analyzer: Option<String> = None;
 					let mut scoring = None;
 					let mut hl = false;
 
@@ -922,7 +969,7 @@ impl Parser<'_> {
 						match self.peek_kind() {
 							t!("ANALYZER") => {
 								self.pop_peek();
-								analyzer = Some(self.next_token_value()).transpose()?;
+								analyzer = Some(self.parse_ident()).transpose()?;
 							}
 							t!("BM25") => {
 								self.pop_peek();
@@ -948,7 +995,7 @@ impl Parser<'_> {
 						}
 					}
 					res.index = Index::FullText(crate::sql::index::FullTextParams {
-						az: analyzer.unwrap_or_else(|| Ident::from(strand!("like").to_owned())),
+						az: analyzer.unwrap_or_else(|| "like".to_owned()),
 						sc: scoring.unwrap_or_else(Default::default),
 						hl,
 					});
@@ -960,8 +1007,6 @@ impl Parser<'_> {
 					let mut distance = Distance::Euclidean;
 					let mut vector_type = VectorType::F64;
 					let mut capacity = 40;
-					let mut doc_ids_cache = 100;
-					let mut doc_ids_order = 100;
 					let mut mtree_cache = 100;
 					loop {
 						match self.peek_kind() {
@@ -977,14 +1022,6 @@ impl Parser<'_> {
 								self.pop_peek();
 								capacity = self.next_token_value()?
 							}
-							t!("DOC_IDS_CACHE") => {
-								self.pop_peek();
-								doc_ids_cache = self.next_token_value()?
-							}
-							t!("DOC_IDS_ORDER") => {
-								self.pop_peek();
-								doc_ids_order = self.next_token_value()?
-							}
 							t!("MTREE_CACHE") => {
 								self.pop_peek();
 								mtree_cache = self.next_token_value()?
@@ -997,8 +1034,6 @@ impl Parser<'_> {
 						distance,
 						vector_type,
 						capacity,
-						doc_ids_order,
-						doc_ids_cache,
 						mtree_cache,
 					})
 				}
@@ -1075,16 +1110,21 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				_ => break,
 			}
 		}
-
+		if matches!(res.index, Index::Count(_)) && !res.cols.is_empty() {
+			bail!("Cannot create a count index with fields");
+		}
 		Ok(res)
 	}
 
-	pub fn parse_define_analyzer(&mut self) -> ParseResult<DefineAnalyzerStatement> {
+	pub(crate) async fn parse_define_analyzer(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineAnalyzerStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -1094,7 +1134,7 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		let mut res = DefineAnalyzerStatement {
 			name,
 
@@ -1146,9 +1186,9 @@ impl Parser<'_> {
 							}
 							t!("MAPPER") => {
 								let open_span = expected!(self, t!("(")).span;
-								let path: Strand = self.next_token_value()?;
+								let path: String = self.parse_string_lit()?;
 								self.expect_closing_delimiter(t!(")"), open_span)?;
-								filters.push(Filter::Mapper(path.into_string()))
+								filters.push(Filter::Mapper(path))
 							}
 							_ => unexpected!(self, next, "a filter"),
 						}
@@ -1183,9 +1223,9 @@ impl Parser<'_> {
 					self.pop_peek();
 					expected!(self, t!("fn"));
 					expected!(self, t!("::"));
-					let mut ident = self.next_token_value::<Ident>()?.into_string();
+					let mut ident = self.parse_ident()?;
 					while self.eat(t!("::")) {
-						let value = self.next_token_value::<Ident>()?;
+						let value = self.parse_ident()?;
 						ident.push_str("::");
 						ident.push_str(&value);
 					}
@@ -1193,7 +1233,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				_ => break,
 			}
@@ -1201,7 +1241,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_bucket(
+	pub(crate) async fn parse_define_bucket(
 		&mut self,
 		stk: &mut Stk,
 		token: Token,
@@ -1220,7 +1260,7 @@ impl Parser<'_> {
 			DefineKind::Default
 		};
 
-		let name = self.next_token_value()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 
 		let mut res = DefineBucketStatement {
 			name,
@@ -1244,7 +1284,7 @@ impl Parser<'_> {
 				}
 				t!("COMMENT") => {
 					self.pop_peek();
-					res.comment = Some(self.next_token_value()?);
+					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				_ => {
 					break;
@@ -1255,7 +1295,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub fn parse_define_sequence(&mut self) -> ParseResult<DefineSequenceStatement> {
+	pub(crate) async fn parse_define_sequence(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineSequenceStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -1265,18 +1308,18 @@ impl Parser<'_> {
 		} else {
 			DefineKind::Default
 		};
-		let name = self.next_token_value()?;
+		let name = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 		let batch = if self.eat(t!("BATCH")) {
-			self.next_token_value()?
+			stk.run(|ctx| self.parse_expr_field(ctx)).await?
 		} else {
-			1000
+			Expr::Literal(Literal::Integer(1000))
 		};
 		let start = if self.eat(t!("START")) {
-			self.next_token_value()?
+			stk.run(|ctx| self.parse_expr_field(ctx)).await?
 		} else {
-			0
+			Expr::Literal(Literal::Integer(0))
 		};
-		let timeout = self.try_parse_timeout()?;
+		let timeout = self.try_parse_timeout(stk).await?;
 		Ok(DefineSequenceStatement {
 			name,
 			kind,
@@ -1286,7 +1329,7 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_define_config(
+	pub(crate) async fn parse_define_config(
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineConfigStatement> {
@@ -1313,7 +1356,7 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_api_config(&mut self, stk: &mut Stk) -> ParseResult<ApiConfig> {
+	pub(crate) async fn parse_api_config(&mut self, stk: &mut Stk) -> ParseResult<ApiConfig> {
 		let mut config = ApiConfig::default();
 		loop {
 			match self.peek_kind() {
@@ -1341,11 +1384,11 @@ impl Parser<'_> {
 							}
 						};
 
-						let part = self.next_token_value::<Ident>()?.into_string();
+						let part = self.parse_ident()?;
 						name.push_str(part.to_lowercase().as_str());
 
 						while self.eat(t!("::")) {
-							let part = self.next_token_value::<Ident>()?;
+							let part = self.parse_ident()?;
 							name.push_str("::");
 							name.push_str(part.to_lowercase().as_str());
 						}
@@ -1442,9 +1485,9 @@ impl Parser<'_> {
 		loop {
 			match self.peek_kind() {
 				x if Self::kind_is_identifier(x) => {
-					let name: Ident = self.next_token_value()?;
+					let name = self.parse_ident()?;
 					acc.push(TableConfig {
-						name: name.into_string(),
+						name,
 					});
 				}
 				_ => unexpected!(self, self.next(), "a table config"),
@@ -1484,14 +1527,14 @@ impl Parser<'_> {
 	}
 
 	pub fn parse_tables(&mut self) -> ParseResult<Kind> {
-		let mut names = vec![self.next_token_value::<Ident>()?.into_string()];
+		let mut names = vec![self.parse_ident()?];
 		while self.eat(t!("|")) {
-			names.push(self.next_token_value::<Ident>()?.into_string());
+			names.push(self.parse_ident()?);
 		}
 		Ok(Kind::Record(names))
 	}
 
-	pub fn parse_jwt(&mut self) -> ParseResult<access_type::JwtAccess> {
+	async fn parse_jwt(&mut self, stk: &mut Stk) -> ParseResult<access_type::JwtAccess> {
 		let mut res = access_type::JwtAccess {
 			// By default, a JWT access method is only used to verify.
 			issue: None,
@@ -1510,7 +1553,7 @@ impl Parser<'_> {
 						let next = self.next();
 						match next.kind {
 							t!("KEY") => {
-								let key = self.next_token_value::<Strand>()?.into_string();
+								let key = stk.run(|stk| self.parse_expr_field(stk)).await?;
 								res.verify = access_type::JwtAccessVerify::Key(
 									access_type::JwtAccessVerifyKey {
 										alg,
@@ -1540,7 +1583,7 @@ impl Parser<'_> {
 			}
 			t!("URL") => {
 				self.pop_peek();
-				let url = self.next_token_value::<Strand>()?.into_string();
+				let url = stk.run(|stk| self.parse_expr_field(stk)).await?;
 				res.verify = access_type::JwtAccessVerify::Jwks(access_type::JwtAccessVerifyJwks {
 					url,
 				});
@@ -1576,7 +1619,7 @@ impl Parser<'_> {
 					}
 					t!("KEY") => {
 						self.pop_peek();
-						let key = self.next_token_value::<Strand>()?.into_string();
+						let key = stk.run(|stk| self.parse_expr_field(stk)).await?;
 						// If the algorithm is symmetric and a key is already defined, a different
 						// key is not expected.
 						if let JwtAccessVerify::Key(ref ver) = res.verify {

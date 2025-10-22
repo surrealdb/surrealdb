@@ -42,6 +42,7 @@ impl Document {
 			};
 			let after = self.current.doc.as_arc();
 			let before = self.initial.doc.as_arc();
+			let input = self.compute_input_value(stk, ctx, opt, stm).await?;
 			// Depending on type of event, how do we populate the document
 			let doc = if stm.is_delete() {
 				&mut self.initial
@@ -54,15 +55,24 @@ impl Document {
 			ctx.add_value("value", doc.doc.as_arc());
 			ctx.add_value("after", after);
 			ctx.add_value("before", before);
+			ctx.add_value("input", input.unwrap_or_default());
 			// Freeze the context
 			let ctx = ctx.freeze();
 			// Process conditional clause
-			let val =
-				stk.run(|stk| ev.when.compute(stk, &ctx, opt, Some(doc))).await.catch_return()?;
+			let val = stk
+				.run(|stk| ev.when.compute(stk, &ctx, opt, Some(doc)))
+				.await
+				.catch_return()
+				.map_err(|e| anyhow::anyhow!("Error while processing event {}: {}", ev.name, e))?;
 			// Execute event if value is truthy
 			if val.is_truthy() {
 				for v in ev.then.iter() {
-					stk.run(|stk| v.compute(stk, &ctx, opt, Some(&*doc))).await.catch_return()?;
+					stk.run(|stk| v.compute(stk, &ctx, opt, Some(&*doc)))
+						.await
+						.catch_return()
+						.map_err(|e| {
+							anyhow::anyhow!("Error while processing event {}: {}", ev.name, e)
+						})?;
 				}
 			}
 		}

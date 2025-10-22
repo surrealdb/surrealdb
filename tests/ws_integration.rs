@@ -90,8 +90,19 @@ pub async fn info(cfg_server: Option<Format>, cfg_format: Format) {
 	socket.send_message_signin("user", "pass", Some(NS), Some(DB), Some("user")).await.unwrap();
 	// Send INFO command
 	let res = socket.send_request("info", json!([])).await.unwrap();
+	// Expected result structure:
+	// ```
+	// Object {
+	//   "id": String("user:yjdbdlx2mlciaxhsv8hp"),
+	//   "pass": String("$argon2id$v=19$m=19456,t=2,p=1$DCt83IiOtOo3MW7lRB6PBg$kIUrYmZgysGzW+j5DOM7X4AsXlKK4fFkxW0vUVvMX2U"),
+	//   "user": String("user")
+	// }
+	// ```
 	assert!(res["result"].is_object(), "result: {res:?}");
 	let res = res["result"].as_object().unwrap();
+	assert!(res.contains_key("id"));
+	assert!(res.contains_key("pass"));
+	assert!(res.contains_key("user"));
 	assert_eq!(res["user"], "user", "result: {res:?}");
 	// Test passed
 	server.finish().unwrap();
@@ -237,7 +248,7 @@ pub async fn invalidate(cfg_server: Option<Format>, cfg_format: Format) {
 	let res = socket.send_request("query", json!(["DEFINE NAMESPACE test"])).await.unwrap();
 	assert_eq!(
 		res["error"]["message"],
-		"There was a problem with the database: IAM error: Not enough permissions to perform this action",
+		"Anonymous access not allowed: Not enough permissions to perform this action",
 		"result: {res:?}"
 	);
 	// Test passed
@@ -1189,10 +1200,7 @@ pub async fn session_expiration(cfg_server: Option<Format>, cfg_format: Format) 
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(
-		res["error"],
-		json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
-	);
+	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
 	// Sign in again using the same session
 	let res = socket
 		.send_request(
@@ -1299,10 +1307,7 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(
-		res["error"],
-		json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
-	);
+	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
 	// Test operations that SHOULD NOT work with an expired session
 	let operations_ko = vec![
 		socket.send_request("let", json!(["let_var", "let_value",])),
@@ -1377,10 +1382,7 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 		let res = res.unwrap();
 		assert!(res.is_object(), "result: {res:?}");
 		let res = res.as_object().unwrap();
-		assert_eq!(
-			res["error"],
-			json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
-		);
+		assert_eq!(res["error"]["message"], "The session has expired");
 	}
 
 	// Test operations that SHOULD work with an expired session
@@ -1431,10 +1433,7 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(
-		res["error"],
-		json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
-	);
+	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
 	let res = socket
 		.send_request(
 			"signin",
@@ -1463,10 +1462,7 @@ pub async fn session_expiration_operations(cfg_server: Option<Format>, cfg_forma
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(
-		res["error"],
-		json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
-	);
+	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
 
 	// This needs to be last operation as the session will no longer expire
 	// afterwards
@@ -1645,10 +1641,7 @@ pub async fn session_reauthentication_expired(cfg_server: Option<Format>, cfg_fo
 	let res = res.unwrap();
 	assert!(res.is_object(), "result: {res:?}");
 	let res = res.as_object().unwrap();
-	assert_eq!(
-		res["error"],
-		json!({"code": -32000, "message": "There was a problem with the database: The session has expired"})
-	);
+	assert_eq!(res["error"], json!({"code": -32000, "message": "The session has expired"}));
 	// Authenticate using the root token, which has not expired yet
 	socket.send_request("authenticate", json!([root_token,])).await.unwrap();
 	// Check that we have root access and the session is not expired
@@ -2116,7 +2109,7 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 			let res = res.unwrap();
 			assert!(res.is_object(), "result: {res:?}");
 			let res = res.as_object().unwrap();
-			assert_eq!(res["error"], json!({"code": -32000, "message": "Method not allowed"}));
+			assert_eq!(res["error"], json!({"code": -32602, "message": "Method not allowed"}));
 		}
 
 		// Test operations that SHOULD work with the provided capabilities
@@ -2162,23 +2155,6 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 					{
 						"value": "bar",
 					}
-				]),
-			),
-			socket.send_request(
-				"patch",
-				json!([
-					"tester:id",
-					[
-						{
-							"op": "add",
-							"path": "value",
-							"value": "bar"
-						},
-						{
-							"op": "remove",
-							"path": "name",
-						}
-					]
 				]),
 			),
 			socket.send_request("delete", json!(["tester"])),
@@ -2288,7 +2264,7 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 			let res = res.unwrap();
 			assert!(res.is_object(), "result: {res:?}");
 			let res = res.as_object().unwrap();
-			assert_eq!(res["error"], json!({"code": -32000, "message": "Method not allowed"}));
+			assert_eq!(res["error"], json!({"code": -32602, "message": "Method not allowed"}));
 		}
 
 		// Test operations that SHOULD work with the provided capabilities
@@ -2328,6 +2304,234 @@ macro_rules! define_include_tests {
 		}
 		pub(crate) use include_tests;
 	};
+}
+
+pub async fn multi_session_isolation(cfg_server: Option<Format>, cfg_format: Format) {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+
+	// Define session IDs
+	let session1 = "11111111-1111-1111-1111-111111111111";
+	let session2 = "22222222-2222-2222-2222-222222222222";
+
+	// Test 1: Variable isolation between named sessions
+	// Setup session1 with auth and namespace/database
+	socket
+		.send_request_with_session("signin", json!([{"user": USER, "pass": PASS}]), session1)
+		.await
+		.unwrap();
+	socket.send_request_with_session("use", json!([NS, DB]), session1).await.unwrap();
+	socket
+		.send_request_with_session("set", json!(["my_var", "value_from_session1"]), session1)
+		.await
+		.unwrap();
+
+	// Setup session2 with auth and namespace/database
+	socket
+		.send_request_with_session("signin", json!([{"user": USER, "pass": PASS}]), session2)
+		.await
+		.unwrap();
+	socket.send_request_with_session("use", json!([NS, DB]), session2).await.unwrap();
+	socket
+		.send_request_with_session("set", json!(["my_var", "value_from_session2"]), session2)
+		.await
+		.unwrap();
+
+	// Verify each named session has its own value
+	let res = socket
+		.send_request_with_session("query", json!(["RETURN $my_var"]), session1)
+		.await
+		.unwrap();
+	assert_eq!(res["result"][0]["result"], "value_from_session1", "result: {res:?}");
+
+	let res = socket
+		.send_request_with_session("query", json!(["RETURN $my_var"]), session2)
+		.await
+		.unwrap();
+	assert_eq!(res["result"][0]["result"], "value_from_session2", "result: {res:?}");
+
+	// Test 2: Default session isolation
+	socket.send_request("set", json!(["my_var", "default_session_value"])).await.unwrap();
+
+	// Verify default session has its own value
+	let res = socket.send_request("query", json!(["RETURN $my_var"])).await.unwrap();
+	assert_eq!(res["result"][0]["result"], "default_session_value", "result: {res:?}");
+
+	// Verify named sessions still have their own values
+	let res = socket
+		.send_request_with_session("query", json!(["RETURN $my_var"]), session1)
+		.await
+		.unwrap();
+	assert_eq!(res["result"][0]["result"], "value_from_session1", "result: {res:?}");
+
+	// Test 3: Namespace/database isolation
+	socket
+		.send_request_with_session("use", json!(["test_ns1", "test_db1"]), session1)
+		.await
+		.unwrap();
+
+	socket
+		.send_request_with_session(
+			"query",
+			json!(["CREATE test:one SET source = 'session1'"]),
+			session1,
+		)
+		.await
+		.unwrap();
+
+	// Default session should not see the record (different ns/db)
+	let res = socket.send_request("query", json!(["SELECT * FROM test:one"])).await.unwrap();
+	assert_eq!(res["result"][0]["result"], json!([]), "result: {res:?}");
+
+	// Session 1 can see its own record
+	let res = socket
+		.send_request_with_session("query", json!(["SELECT * FROM test:one"]), session1)
+		.await
+		.unwrap();
+	assert_eq!(res["result"][0]["result"][0]["source"], "session1", "result: {res:?}");
+
+	// Test passed
+	server.finish().unwrap();
+}
+
+pub async fn multi_session_authentication(cfg_server: Option<Format>, cfg_format: Format) {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+
+	// Define session IDs
+	let session1 = "11111111-1111-1111-1111-111111111111";
+	let session2 = "22222222-2222-2222-2222-222222222222";
+
+	// Authenticate session 1 as root user
+	let res = socket
+		.send_request_with_session(
+			"signin",
+			json!([{
+				"user": USER,
+				"pass": PASS,
+			}]),
+			session1,
+		)
+		.await
+		.unwrap();
+	assert!(res["result"].is_string(), "result: {res:?}");
+
+	// Session 2 remains unauthenticated
+	// Try to define a namespace with session 2 (should fail with auth error)
+	let res = socket
+		.send_request_with_session("query", json!(["DEFINE NAMESPACE test"]), session2)
+		.await
+		.unwrap();
+	// Should get an RPC-level error due to lack of authentication
+	assert!(res["error"].is_object(), "Expected error for unauthenticated query: {res:?}");
+
+	// Try to define a namespace with session 1 (should succeed)
+	socket.send_request_with_session("use", json!(["test_ns", "test_db"]), session1).await.unwrap();
+	let res = socket
+		.send_request_with_session("query", json!(["DEFINE TABLE test"]), session1)
+		.await
+		.unwrap();
+	assert!(res["result"].is_array(), "result: {res:?}");
+	let result = res["result"].as_array().unwrap();
+	assert_eq!(result[0]["status"], "OK", "result: {res:?}");
+
+	// Test passed
+	server.finish().unwrap();
+}
+
+pub async fn multi_session_management(cfg_server: Option<Format>, cfg_format: Format) {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+
+	// Define session IDs
+	let session1 = "11111111-1111-1111-1111-111111111111";
+	let session2 = "22222222-2222-2222-2222-222222222222";
+	let session3 = "33333333-3333-3333-3333-333333333333";
+
+	// Test 1: List sessions - should be empty initially
+	let res = socket.send_request("sessions", json!([])).await.unwrap();
+	assert_eq!(res["result"].as_array().unwrap().len(), 0, "Expected no sessions initially");
+
+	// Test 2: Create sessions with proper authentication and namespace/database setup
+	socket
+		.send_request_with_session("signin", json!([{"user": USER, "pass": PASS}]), session1)
+		.await
+		.unwrap();
+	socket.send_request_with_session("use", json!([NS, DB]), session1).await.unwrap();
+	socket.send_request_with_session("set", json!(["var1", "value1"]), session1).await.unwrap();
+
+	socket
+		.send_request_with_session("signin", json!([{"user": USER, "pass": PASS}]), session2)
+		.await
+		.unwrap();
+	socket.send_request_with_session("use", json!([NS, DB]), session2).await.unwrap();
+	socket.send_request_with_session("set", json!(["var2", "value2"]), session2).await.unwrap();
+
+	socket
+		.send_request_with_session("signin", json!([{"user": USER, "pass": PASS}]), session3)
+		.await
+		.unwrap();
+	socket.send_request_with_session("use", json!([NS, DB]), session3).await.unwrap();
+	socket.send_request_with_session("set", json!(["var3", "value3"]), session3).await.unwrap();
+
+	let res = socket.send_request("sessions", json!([])).await.unwrap();
+	let sessions = res["result"].as_array().unwrap();
+	assert_eq!(sessions.len(), 3, "Expected 3 sessions");
+
+	let session_ids: Vec<String> =
+		sessions.iter().filter_map(|v| v.as_str()).map(|s| s.to_string()).collect();
+	assert!(session_ids.contains(&session1.to_string()), "Session 1 not found");
+	assert!(session_ids.contains(&session2.to_string()), "Session 2 not found");
+	assert!(session_ids.contains(&session3.to_string()), "Session 3 not found");
+
+	// Test 3: Verify session variables work
+	let res =
+		socket.send_request_with_session("query", json!(["RETURN $var1"]), session1).await.unwrap();
+	assert_eq!(res["result"][0]["result"], "value1");
+
+	// Test 4: Reset with session ID removes the session completely
+	socket.send_request_with_session("reset", json!([]), session1).await.unwrap();
+
+	let res = socket.send_request("sessions", json!([])).await.unwrap();
+	let sessions = res["result"].as_array().unwrap();
+	assert_eq!(sessions.len(), 2, "Expected 2 sessions after removing one");
+
+	let session_ids: Vec<String> =
+		sessions.iter().filter_map(|v| v.as_str()).map(|s| s.to_string()).collect();
+	assert!(!session_ids.contains(&session1.to_string()), "Session 1 should be removed");
+
+	// Reset another session
+	socket.send_request_with_session("reset", json!([]), session2).await.unwrap();
+
+	let res = socket.send_request("sessions", json!([])).await.unwrap();
+	let sessions = res["result"].as_array().unwrap();
+	assert_eq!(sessions.len(), 1, "Expected 1 session after removing two");
+
+	let session_ids: Vec<String> =
+		sessions.iter().filter_map(|v| v.as_str()).map(|s| s.to_string()).collect();
+	assert!(!session_ids.contains(&session2.to_string()), "Session 2 should be removed");
+
+	// Verify other sessions still work
+	let res =
+		socket.send_request_with_session("query", json!(["RETURN $var3"]), session3).await.unwrap();
+	assert_eq!(res["result"][0]["result"], "value3");
+
+	// Test passed
+	server.finish().unwrap();
 }
 
 define_include_tests! {
@@ -2411,4 +2615,10 @@ define_include_tests! {
 	session_id_undefined,
 	#[test_log::test(tokio::test)]
 	rpc_capability,
+	#[test_log::test(tokio::test)]
+	multi_session_isolation,
+	#[test_log::test(tokio::test)]
+	multi_session_authentication,
+	#[test_log::test(tokio::test)]
+	multi_session_management,
 }

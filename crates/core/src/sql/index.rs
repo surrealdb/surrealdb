@@ -1,13 +1,14 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use crate::sql::ident::Ident;
+use crate::fmt::EscapeIdent;
+use crate::sql::Cond;
 use crate::sql::scoring::Scoring;
-use crate::val::Number;
+use crate::types::PublicNumber;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Index {
+pub(crate) enum Index {
 	/// (Basic) non unique
 	Idx,
 	/// Unique index
@@ -18,6 +19,8 @@ pub enum Index {
 	Hnsw(HnswParams),
 	/// Index with Full-Text search capabilities - single writer
 	FullText(FullTextParams),
+	/// Count index
+	Count(Option<Cond>),
 }
 
 impl From<Index> for crate::catalog::Index {
@@ -28,6 +31,7 @@ impl From<Index> for crate::catalog::Index {
 			Index::MTree(p) => Self::MTree(p.into()),
 			Index::Hnsw(p) => Self::Hnsw(p.into()),
 			Index::FullText(p) => Self::FullText(p.into()),
+			Index::Count(c) => Self::Count(c.map(Into::into)),
 		}
 	}
 }
@@ -40,6 +44,7 @@ impl From<crate::catalog::Index> for Index {
 			crate::catalog::Index::MTree(p) => Self::MTree(p.into()),
 			crate::catalog::Index::Hnsw(p) => Self::Hnsw(p.into()),
 			crate::catalog::Index::FullText(p) => Self::FullText(p.into()),
+			crate::catalog::Index::Count(c) => Self::Count(c.map(Into::into)),
 		}
 	}
 }
@@ -47,7 +52,7 @@ impl From<crate::catalog::Index> for Index {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct FullTextParams {
-	pub az: Ident,
+	pub az: String,
 	pub hl: bool,
 	pub sc: Scoring,
 }
@@ -55,7 +60,7 @@ pub struct FullTextParams {
 impl From<FullTextParams> for crate::catalog::FullTextParams {
 	fn from(v: FullTextParams) -> Self {
 		crate::catalog::FullTextParams {
-			analyzer: v.az.clone().into_string(),
+			analyzer: v.az.clone(),
 			highlight: v.hl,
 			scoring: v.sc.into(),
 		}
@@ -64,7 +69,7 @@ impl From<FullTextParams> for crate::catalog::FullTextParams {
 impl From<crate::catalog::FullTextParams> for FullTextParams {
 	fn from(v: crate::catalog::FullTextParams) -> Self {
 		Self {
-			az: unsafe { Ident::new_unchecked(v.analyzer) },
+			az: v.analyzer,
 			hl: v.highlight,
 			sc: v.scoring.into(),
 		}
@@ -73,13 +78,11 @@ impl From<crate::catalog::FullTextParams> for FullTextParams {
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct MTreeParams {
+pub(crate) struct MTreeParams {
 	pub dimension: u16,
 	pub distance: Distance,
 	pub vector_type: VectorType,
 	pub capacity: u16,
-	pub doc_ids_order: u32,
-	pub doc_ids_cache: u32,
 	pub mtree_cache: u32,
 }
 
@@ -90,8 +93,6 @@ impl From<MTreeParams> for crate::catalog::MTreeParams {
 			distance: v.distance.into(),
 			vector_type: v.vector_type.into(),
 			capacity: v.capacity,
-			doc_ids_order: v.doc_ids_order,
-			doc_ids_cache: v.doc_ids_cache,
 			mtree_cache: v.mtree_cache,
 		}
 	}
@@ -104,8 +105,6 @@ impl From<crate::catalog::MTreeParams> for MTreeParams {
 			distance: v.distance.into(),
 			vector_type: v.vector_type.into(),
 			capacity: v.capacity,
-			doc_ids_order: v.doc_ids_order,
-			doc_ids_cache: v.doc_ids_cache,
 			mtree_cache: v.mtree_cache,
 		}
 	}
@@ -113,7 +112,7 @@ impl From<crate::catalog::MTreeParams> for MTreeParams {
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct HnswParams {
+pub(crate) struct HnswParams {
 	pub dimension: u16,
 	pub distance: Distance,
 	pub vector_type: VectorType,
@@ -122,7 +121,7 @@ pub struct HnswParams {
 	pub ef_construction: u16,
 	pub extend_candidates: bool,
 	pub keep_pruned_connections: bool,
-	pub ml: Number,
+	pub ml: PublicNumber,
 }
 
 impl From<HnswParams> for crate::catalog::HnswParams {
@@ -134,7 +133,7 @@ impl From<HnswParams> for crate::catalog::HnswParams {
 			m: v.m,
 			m0: v.m0,
 			ef_construction: v.ef_construction,
-			ml: v.ml,
+			ml: v.ml.into(),
 			extend_candidates: v.extend_candidates,
 			keep_pruned_connections: v.keep_pruned_connections,
 		}
@@ -150,7 +149,7 @@ impl From<crate::catalog::HnswParams> for HnswParams {
 			m: v.m,
 			m0: v.m0,
 			ef_construction: v.ef_construction,
-			ml: v.ml,
+			ml: v.ml.into(),
 			extend_candidates: v.extend_candidates,
 			keep_pruned_connections: v.keep_pruned_connections,
 		}
@@ -159,7 +158,7 @@ impl From<crate::catalog::HnswParams> for HnswParams {
 
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Distance {
+pub(crate) enum Distance {
 	Chebyshev,
 	Cosine,
 	#[default]
@@ -167,7 +166,7 @@ pub enum Distance {
 	Hamming,
 	Jaccard,
 	Manhattan,
-	Minkowski(Number),
+	Minkowski(PublicNumber),
 	Pearson,
 }
 
@@ -195,7 +194,7 @@ impl From<Distance> for crate::catalog::Distance {
 			Distance::Hamming => crate::catalog::Distance::Hamming,
 			Distance::Jaccard => crate::catalog::Distance::Jaccard,
 			Distance::Manhattan => crate::catalog::Distance::Manhattan,
-			Distance::Minkowski(n) => crate::catalog::Distance::Minkowski(n),
+			Distance::Minkowski(n) => crate::catalog::Distance::Minkowski(n.into()),
 			Distance::Pearson => crate::catalog::Distance::Pearson,
 		}
 	}
@@ -210,7 +209,7 @@ impl From<crate::catalog::Distance> for Distance {
 			crate::catalog::Distance::Hamming => Self::Hamming,
 			crate::catalog::Distance::Jaccard => Self::Jaccard,
 			crate::catalog::Distance::Manhattan => Self::Manhattan,
-			crate::catalog::Distance::Minkowski(n) => Self::Minkowski(n),
+			crate::catalog::Distance::Minkowski(n) => Self::Minkowski(n.into()),
 			crate::catalog::Distance::Pearson => Self::Pearson,
 		}
 	}
@@ -244,8 +243,15 @@ impl Display for Index {
 		match self {
 			Self::Idx => Ok(()),
 			Self::Uniq => f.write_str("UNIQUE"),
+			Self::Count(c) => {
+				f.write_str("COUNT")?;
+				if let Some(v) = c {
+					write!(f, " {v}")?
+				}
+				Ok(())
+			}
 			Self::FullText(p) => {
-				write!(f, "FULLTEXT ANALYZER {} {}", p.az, p.sc,)?;
+				write!(f, "FULLTEXT ANALYZER {} {}", EscapeIdent(&p.az), p.sc,)?;
 				if p.hl {
 					f.write_str(" HIGHLIGHTS")?
 				}
@@ -254,14 +260,8 @@ impl Display for Index {
 			Self::MTree(p) => {
 				write!(
 					f,
-					"MTREE DIMENSION {} DIST {} TYPE {} CAPACITY {} DOC_IDS_ORDER {} DOC_IDS_CACHE {} MTREE_CACHE {}",
-					p.dimension,
-					p.distance,
-					p.vector_type,
-					p.capacity,
-					p.doc_ids_order,
-					p.doc_ids_cache,
-					p.mtree_cache
+					"MTREE DIMENSION {} DIST {} TYPE {} CAPACITY {} MTREE_CACHE {}",
+					p.dimension, p.distance, p.vector_type, p.capacity, p.mtree_cache
 				)
 			}
 			Self::Hnsw(p) => {

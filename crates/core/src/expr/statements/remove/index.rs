@@ -1,42 +1,71 @@
 use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
+use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
+use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Ident, Value};
+use crate::expr::expression::VisitExpression;
+use crate::expr::parameterize::expr_to_ident;
+use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct RemoveIndexStatement {
-	pub name: Ident,
-	pub what: Ident,
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) struct RemoveIndexStatement {
+	pub name: Expr,
+	pub what: Expr,
 	pub if_exists: bool,
+}
+
+impl VisitExpression for RemoveIndexStatement {
+	fn visit<F>(&self, visitor: &mut F)
+	where
+		F: FnMut(&Expr),
+	{
+		self.name.visit(visitor);
+		self.what.visit(visitor);
+	}
+}
+impl Default for RemoveIndexStatement {
+	fn default() -> Self {
+		Self {
+			name: Expr::Literal(Literal::None),
+			what: Expr::Literal(Literal::None),
+			if_exists: false,
+		}
+	}
 }
 
 impl RemoveIndexStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
+		// Compute the name
+		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "index name").await?;
+		// Compute the what
+		let what = expr_to_ident(stk, ctx, opt, doc, &self.what, "what").await?;
 		// Get the NS and DB
 		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
 		// Clear the index store cache
-		#[cfg(not(target_family = "wasm"))]
 		let err = ctx
 			.get_index_stores()
-			.index_removed(ctx.get_index_builder(), &txn, ns, db, &self.what, &self.name)
+			.index_removed(ctx.get_index_builder(), &txn, ns, db, &what, &name)
 			.await;
-		#[cfg(target_family = "wasm")]
-		let err = ctx.get_index_stores().index_removed(&txn, ns, db, &self.what, &self.name).await;
-
 		if let Err(e) = err {
 			if self.if_exists && matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
 				return Ok(Value::None);
@@ -45,12 +74,12 @@ impl RemoveIndexStatement {
 		}
 
 		// Delete the index data.
-		txn.del_tb_index(ns, db, &self.what, &self.name).await?;
+		txn.del_tb_index(ns, db, &what, &name).await?;
 
 		// Refresh the table cache for indexes
-		let Some(tb) = txn.get_tb(ns, db, &self.what).await? else {
+		let Some(tb) = txn.get_tb(ns, db, &what).await? else {
 			return Err(Error::TbNotFound {
-				name: self.what.to_string(),
+				name: what,
 			}
 			.into());
 		};
@@ -66,7 +95,7 @@ impl RemoveIndexStatement {
 		.await?;
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
-			cache.clear_tb(ns, db, &self.what);
+			cache.clear_tb(ns, db, &what);
 		}
 		// Clear the cache
 		txn.clear_cache();

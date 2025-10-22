@@ -2,15 +2,15 @@ use std::fmt::{self, Display, Formatter};
 use std::hash::{Hash, Hasher};
 
 use anyhow::Result;
-use revision::{Revisioned, revisioned};
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{ToSql, write_sql};
 
-use crate::expr::Idiom;
 use crate::expr::statements::info::InfoStructure;
+use crate::expr::{Cond, Idiom};
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::DefineKind;
-use crate::sql::{Ident, ToSql};
-use crate::val::{Array, Number, Strand, Value};
+use crate::val::{Array, Number, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Encode, BorrowDecode)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -23,18 +23,22 @@ impl Revisioned for IndexId {
 	fn revision() -> u16 {
 		1
 	}
+}
 
+impl SerializeRevisioned for IndexId {
 	#[inline]
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		self.0.serialize_revisioned(writer)
+		SerializeRevisioned::serialize_revisioned(&self.0, writer)
 	}
+}
 
+impl DeserializeRevisioned for IndexId {
 	#[inline]
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		Revisioned::deserialize_revisioned(reader).map(IndexId)
+		DeserializeRevisioned::deserialize_revisioned(reader).map(IndexId)
 	}
 }
 
@@ -46,26 +50,30 @@ impl From<u32> for IndexId {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[non_exhaustive]
 pub struct IndexDefinition {
-	pub index_id: IndexId,
-	pub name: String,
-	pub table_name: String,
-	pub cols: Vec<Idiom>,
-	pub index: Index,
-	pub comment: Option<String>,
+	pub(crate) index_id: IndexId,
+	pub(crate) name: String,
+	pub(crate) table_name: String,
+	pub(crate) cols: Vec<Idiom>,
+	pub(crate) index: Index,
+	pub(crate) comment: Option<String>,
 }
 
 impl_kv_value_revisioned!(IndexDefinition);
 
 impl IndexDefinition {
-	pub fn to_sql_definition(&self) -> crate::sql::DefineIndexStatement {
+	pub(crate) fn to_sql_definition(&self) -> crate::sql::DefineIndexStatement {
 		crate::sql::DefineIndexStatement {
 			kind: DefineKind::Default,
-			name: unsafe { Ident::new_unchecked(self.name.clone()) },
-			what: unsafe { Ident::new_unchecked(self.table_name.clone()) },
-			cols: self.cols.iter().cloned().map(Into::into).collect(),
+			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
+			what: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.table_name.clone())),
+			cols: self.cols.iter().cloned().map(|x| crate::sql::Expr::Idiom(x.into())).collect(),
 			index: self.index.to_sql_definition(),
-			comment: self.comment.clone().map(Strand::new_lossy),
+			comment: self
+				.comment
+				.clone()
+				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
 			concurrently: false,
 		}
 	}
@@ -84,14 +92,14 @@ impl InfoStructure for IndexDefinition {
 }
 
 impl ToSql for IndexDefinition {
-	fn to_sql(&self) -> String {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub enum Index {
+pub(crate) enum Index {
 	/// (Basic) non unique
 	#[default]
 	Idx,
@@ -103,6 +111,8 @@ pub enum Index {
 	Hnsw(HnswParams),
 	/// Index with Full-Text search capabilities
 	FullText(FullTextParams),
+	/// Count index
+	Count(Option<Cond>),
 }
 
 impl Index {
@@ -113,6 +123,7 @@ impl Index {
 			Self::MTree(params) => crate::sql::index::Index::MTree(params.clone().into()),
 			Self::Hnsw(params) => crate::sql::index::Index::Hnsw(params.clone().into()),
 			Self::FullText(params) => crate::sql::index::Index::FullText(params.clone().into()),
+			Self::Count(cond) => crate::sql::index::Index::Count(cond.clone().map(Into::into)),
 		}
 	}
 }
@@ -124,8 +135,8 @@ impl InfoStructure for Index {
 }
 
 impl ToSql for Index {
-	fn to_sql(&self) -> String {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }
 
@@ -206,7 +217,7 @@ impl Default for Scoring {
 /// M-Tree index parameters.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct MTreeParams {
+pub(crate) struct MTreeParams {
 	/// The dimension of the index.
 	pub dimension: u16,
 	/// The distance metric to use.
@@ -215,10 +226,6 @@ pub struct MTreeParams {
 	pub vector_type: VectorType,
 	/// The capacity of the index.
 	pub capacity: u16,
-	/// The order of the document IDs.
-	pub doc_ids_order: u32,
-	/// The cache of the document IDs.
-	pub doc_ids_cache: u32,
 	/// The cache of the M-Tree.
 	pub mtree_cache: u32,
 }
@@ -226,7 +233,7 @@ pub struct MTreeParams {
 /// Distance metric for calculating distances between vectors.
 #[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
-pub enum Distance {
+pub(crate) enum Distance {
 	/// Chebyshev distance.
 	///
 	/// <https://en.wikipedia.org/wiki/Chebyshev_distance>
@@ -328,7 +335,7 @@ impl Display for VectorType {
 /// HNSW index parameters.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct HnswParams {
+pub(crate) struct HnswParams {
 	/// The dimension of the index.
 	pub dimension: u16,
 	/// The distance metric to use.

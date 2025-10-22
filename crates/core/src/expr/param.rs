@@ -3,6 +3,7 @@ use std::{fmt, str};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 
 use super::FlowResultExt as _;
 use crate::catalog::Permission;
@@ -11,51 +12,63 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::escape::EscapeKwFreeIdent;
-use crate::expr::ident::Ident;
+use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::Action;
-use crate::val::{Strand, Value};
+use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct Param(String);
+pub(crate) struct Param(String);
+
+impl Revisioned for Param {
+	fn revision() -> u16 {
+		String::revision()
+	}
+}
+
+impl SerializeRevisioned for Param {
+	fn serialize_revisioned<W: std::io::Write>(
+		&self,
+		w: &mut W,
+	) -> std::result::Result<(), revision::Error> {
+		SerializeRevisioned::serialize_revisioned(&self.0, w)
+	}
+}
+
+impl DeserializeRevisioned for Param {
+	fn deserialize_revisioned<R: std::io::Read>(
+		r: &mut R,
+	) -> std::result::Result<Self, revision::Error>
+	where
+		Self: Sized,
+	{
+		DeserializeRevisioned::deserialize_revisioned(r).map(Param)
+	}
+}
 
 impl Param {
 	/// Create a new identifier
 	///
 	/// This function checks if the string has a null byte, returns None if it
 	/// has.
-	pub fn new(str: String) -> Option<Self> {
-		if str.contains('\0') {
-			return None;
-		}
-		Some(Self(str))
+	pub fn new(str: String) -> Self {
+		Self(str)
 	}
 
-	/// Create a new identifier
-	///
-	/// # Safety
-	/// Caller should ensure that the string does not contain a null byte.
-	pub unsafe fn new_unchecked(str: String) -> Self {
-		Self(str)
+	// Convert into a string.
+	pub fn into_string(self) -> String {
+		self.0
 	}
 
 	/// returns the identifier section of the parameter,
 	/// i.e. `$foo` without the `$` so: `foo`
-	pub fn ident(self) -> Ident {
-		// Safety: Param guarentees no null bytes within it's internal string.
-		unsafe { Ident::new_unchecked(self.0) }
+	pub fn as_str(&self) -> &str {
+		&self.0
 	}
 }
 
-impl From<Ident> for Param {
-	fn from(v: Ident) -> Self {
-		Self(v.to_string())
-	}
-}
-
-impl From<Strand> for Param {
-	fn from(v: Strand) -> Self {
-		Self(v.into_string())
+impl From<String> for Param {
+	fn from(v: String) -> Self {
+		Self(v)
 	}
 }
 
@@ -93,7 +106,12 @@ impl Param {
 					// Ensure a database is set
 					opt.valid_for_db()?;
 					// Fetch a defined param if set
-					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+					let Some((ns, db)) = ctx.try_ns_db_ids(opt).await? else {
+						// If the database does not exist, then a defined param won't exist either
+						// No need to create an ns/db for this, let's just return None
+						return Ok(Value::None);
+					};
+
 					let val = ctx.tx().get_db_param(ns, db, v).await;
 					// Check if the param has been set globally
 					let val = match val {

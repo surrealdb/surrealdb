@@ -24,17 +24,19 @@ use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::{Capabilities, Notification, Options, Session, Variables};
+use crate::dbs::{Capabilities, Options, Session, Variables};
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-#[cfg(not(target_family = "wasm"))]
-use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
 use crate::kvs::cache::ds::DatastoreCache;
+use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
+use crate::kvs::slowlog::SlowLog;
 use crate::mem::ALLOC;
+use crate::sql::expression::convert_public_value_to_internal;
+use crate::types::{PublicNotification, PublicVariables};
 use crate::val::Value;
 
 pub type Context = Arc<MutableContext>;
@@ -44,14 +46,16 @@ pub struct MutableContext {
 	parent: Option<Context>,
 	// An optional deadline.
 	deadline: Option<Instant>,
-	// An optional slow log threshold
-	slow_log_threshold: Option<Duration>,
+	// An optional slow log configuration used by the executor to log statements
+	// that exceed a given duration threshold. This configuration is propagated
+	// from the datastore into the context for the lifetime of a request.
+	slow_log: Option<SlowLog>,
 	// Whether or not this context is cancelled.
 	cancelled: Arc<AtomicBool>,
 	// A collection of read only values stored in this context.
 	values: HashMap<Cow<'static, str>, Arc<Value>>,
 	// Stores the notification channel if available
-	notifications: Option<Sender<Notification>>,
+	notifications: Option<Sender<PublicNotification>>,
 	// An optional query planner
 	query_planner: Option<Arc<QueryPlanner>>,
 	// An optional query executor
@@ -63,7 +67,6 @@ pub struct MutableContext {
 	// The index store
 	index_stores: IndexStores,
 	// The index concurrent builders
-	#[cfg(not(target_family = "wasm"))]
 	index_builder: Option<IndexBuilder>,
 	// The sequences
 	sequences: Option<Sequences>,
@@ -112,7 +115,7 @@ impl MutableContext {
 			values: HashMap::default(),
 			parent: None,
 			deadline: None,
-			slow_log_threshold: None,
+			slow_log: None,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: None,
 			query_planner: None,
@@ -121,7 +124,6 @@ impl MutableContext {
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::default(),
 			cache: None,
-			#[cfg(not(target_family = "wasm"))]
 			index_builder: None,
 			sequences: None,
 			#[cfg(storage)]
@@ -137,7 +139,7 @@ impl MutableContext {
 		MutableContext {
 			values: HashMap::default(),
 			deadline: parent.deadline,
-			slow_log_threshold: parent.slow_log_threshold,
+			slow_log: parent.slow_log.clone(),
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: parent.notifications.clone(),
 			query_planner: parent.query_planner.clone(),
@@ -146,7 +148,6 @@ impl MutableContext {
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
 			cache: parent.cache.clone(),
-			#[cfg(not(target_family = "wasm"))]
 			index_builder: parent.index_builder.clone(),
 			sequences: parent.sequences.clone(),
 			#[cfg(storage)]
@@ -165,7 +166,7 @@ impl MutableContext {
 		Self {
 			values: HashMap::default(),
 			deadline: parent.deadline,
-			slow_log_threshold: parent.slow_log_threshold,
+			slow_log: parent.slow_log.clone(),
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: parent.notifications.clone(),
 			query_planner: parent.query_planner.clone(),
@@ -174,7 +175,6 @@ impl MutableContext {
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
 			cache: parent.cache.clone(),
-			#[cfg(not(target_family = "wasm"))]
 			index_builder: parent.index_builder.clone(),
 			sequences: parent.sequences.clone(),
 			#[cfg(storage)]
@@ -189,12 +189,11 @@ impl MutableContext {
 	/// Create a new context from a frozen parent context.
 	/// This context is not linked to the parent context,
 	/// and won't be cancelled if the parent is cancelled.
-	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn new_concurrent(from: &Context) -> Self {
 		Self {
 			values: HashMap::default(),
 			deadline: None,
-			slow_log_threshold: from.slow_log_threshold,
+			slow_log: from.slow_log.clone(),
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: from.notifications.clone(),
 			query_planner: from.query_planner.clone(),
@@ -218,10 +217,10 @@ impl MutableContext {
 	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn from_ds(
 		time_out: Option<Duration>,
-		slow_log_threshold: Option<Duration>,
+		slow_log: Option<SlowLog>,
 		capabilities: Arc<Capabilities>,
 		index_stores: IndexStores,
-		#[cfg(not(target_family = "wasm"))] index_builder: IndexBuilder,
+		index_builder: IndexBuilder,
 		sequences: Sequences,
 		cache: Arc<DatastoreCache>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
@@ -231,7 +230,7 @@ impl MutableContext {
 			values: HashMap::default(),
 			parent: None,
 			deadline: None,
-			slow_log_threshold,
+			slow_log,
 			cancelled: Arc::new(AtomicBool::new(false)),
 			notifications: None,
 			query_planner: None,
@@ -240,7 +239,6 @@ impl MutableContext {
 			capabilities,
 			index_stores,
 			cache: Some(cache),
-			#[cfg(not(target_family = "wasm"))]
 			index_builder: Some(index_builder),
 			sequences: Some(sequences),
 			#[cfg(storage)]
@@ -297,6 +295,20 @@ impl MutableContext {
 		let (ns, db) = opt.ns_db()?;
 		let db_def = self.tx().ensure_ns_db(ns, db, opt.strict).await?;
 		Ok((db_def.namespace_id, db_def.database_id))
+	}
+
+	/// Get the namespace and database ids for the current context.
+	/// If the namespace or database does not exist, it will be try to be
+	/// created based on the `strict` option.
+	pub(crate) async fn try_ns_db_ids(
+		&self,
+		opt: &Options,
+	) -> Result<Option<(NamespaceId, DatabaseId)>> {
+		let (ns, db) = opt.ns_db()?;
+		let Some(db_def) = self.tx().get_db_by_name(ns, db).await? else {
+			return Ok(None);
+		};
+		Ok(Some((db_def.namespace_id, db_def.database_id)))
 	}
 
 	/// Get the namespace and database ids for the current context.
@@ -372,7 +384,7 @@ impl MutableContext {
 
 	/// Add the LIVE query notification channel to the context, so that we
 	/// can send notifications to any subscribers.
-	pub(crate) fn add_notifications(&mut self, chn: Option<&Sender<Notification>>) {
+	pub(crate) fn add_notifications(&mut self, chn: Option<&Sender<PublicNotification>>) {
 		self.notifications = chn.cloned()
 	}
 
@@ -409,11 +421,13 @@ impl MutableContext {
 		self.deadline.map(|v| v.saturating_duration_since(Instant::now()))
 	}
 
-	pub(crate) fn slow_log_threshold(&self) -> Option<Duration> {
-		self.slow_log_threshold
+	/// Returns the slow log configuration, if any, attached to this context.
+	/// The executor consults this to decide whether to emit slow-query log lines.
+	pub(crate) fn slow_log(&self) -> Option<&SlowLog> {
+		self.slow_log.as_ref()
 	}
 
-	pub(crate) fn notifications(&self) -> Option<Sender<Notification>> {
+	pub(crate) fn notifications(&self) -> Option<Sender<PublicNotification>> {
 		self.notifications.clone()
 	}
 
@@ -441,7 +455,6 @@ impl MutableContext {
 	}
 
 	/// Get the index_builder for this context/ds
-	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn get_index_builder(&self) -> Option<&IndexBuilder> {
 		self.index_builder.as_ref()
 	}
@@ -550,7 +563,7 @@ impl MutableContext {
 	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
 		self.add_values(session.values());
 		if !session.variables.is_empty() {
-			self.attach_variables(session.variables.clone())?;
+			self.attach_variables(session.variables.clone().into())?;
 		}
 		Ok(())
 	}
@@ -564,6 +577,20 @@ impl MutableContext {
 				});
 			}
 			self.add_value(key, val.into());
+		}
+		Ok(())
+	}
+
+	pub(crate) fn attach_public_variables(&mut self, vars: PublicVariables) -> Result<(), Error> {
+		for (key, val) in vars {
+			if PROTECTED_PARAM_NAMES.contains(&key.as_str()) {
+				return Err(Error::InvalidParam {
+					name: key.clone(),
+				});
+			}
+
+			let internal_val = convert_public_value_to_internal(val);
+			self.add_value(key, Arc::new(internal_val));
 		}
 		Ok(())
 	}

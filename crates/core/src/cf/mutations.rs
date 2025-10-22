@@ -2,13 +2,13 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display, Formatter};
 
 use revision::revisioned;
+use surrealdb_types::ToSql;
 
 use crate::catalog::TableDefinition;
 use crate::expr::Operation;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
-use crate::val::{Array, Number, Object, RecordId, Strand, Value};
+use crate::val::{Array, Number, Object, RecordId, Value};
 use crate::vs::VersionStamp;
 
 // Mutation is a single mutation to a table.
@@ -35,7 +35,7 @@ impl From<TableDefinition> for Value {
 	fn from(v: TableDefinition) -> Self {
 		let mut h = HashMap::<&str, Value>::new();
 		h.insert("id", Value::Number(Number::Int(v.table_id.0 as i64)));
-		h.insert("name", Value::Strand(Strand::from(v.name.clone())));
+		h.insert("name", Value::String(v.name.clone()));
 		Value::Object(Object::from(h))
 	}
 }
@@ -155,7 +155,9 @@ impl Display for TableMutation {
 			TableMutation::SetWithDiff(id, _previous, v) => write!(f, "SET {} {:?}", id, v),
 			TableMutation::Del(id) => write!(f, "DEL {}", id),
 			TableMutation::DelWithOriginal(id, _) => write!(f, "DEL {}", id),
-			TableMutation::Def(t) => write!(f, "{}", t.to_sql()),
+			TableMutation::Def(t) => {
+				write!(f, "{}", t.to_sql())
+			}
 		}
 	}
 }
@@ -197,6 +199,7 @@ mod tests {
 
 	use super::*;
 	use crate::catalog::{DatabaseId, NamespaceId, TableId};
+	use crate::val::convert_value_to_public_value;
 
 	#[test]
 	fn serialization() {
@@ -206,22 +209,16 @@ mod tests {
 				"mytb".to_string(),
 				vec![
 					TableMutation::Set(
-						RecordId::new("mytb".to_string(), strand!("tobie").to_owned()),
+						RecordId::new("mytb".to_string(), "tobie".to_owned()),
 						Value::Object(Object::from(HashMap::from([
 							(
 								"id",
-								Value::from(RecordId::new(
-									"mytb".to_owned(),
-									strand!("tobie").to_owned(),
-								)),
+								Value::from(RecordId::new("mytb".to_owned(), "tobie".to_owned())),
 							),
 							("note", Value::from("surreal")),
 						]))),
 					),
-					TableMutation::Del(RecordId::new(
-						"mytb".to_owned(),
-						strand!("tobie").to_owned(),
-					)),
+					TableMutation::Del(RecordId::new("mytb".to_owned(), "tobie".to_owned())),
 					TableMutation::Def(TableDefinition::new(
 						NamespaceId(1),
 						DatabaseId(2),
@@ -231,7 +228,7 @@ mod tests {
 				],
 			)]),
 		);
-		let v = cs.into_value().into_json_value().unwrap();
+		let v = convert_value_to_public_value(cs.into_value()).unwrap().into_json_value();
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,
@@ -247,14 +244,11 @@ mod tests {
 				"mytb".to_string(),
 				vec![
 					TableMutation::SetWithDiff(
-						RecordId::new("mytb".to_owned(), strand!("tobie").to_owned()),
+						RecordId::new("mytb".to_owned(), "tobie".to_owned()),
 						Value::Object(Object::from(HashMap::from([
 							(
 								"id",
-								Value::from(RecordId::new(
-									"mytb".to_owned(),
-									strand!("tobie").to_owned(),
-								)),
+								Value::from(RecordId::new("mytb".to_owned(), "tobie".to_owned())),
 							),
 							("note", Value::from("surreal")),
 						]))),
@@ -264,14 +258,11 @@ mod tests {
 						}],
 					),
 					TableMutation::SetWithDiff(
-						RecordId::new("mytb".to_owned(), strand!("tobie").to_owned()),
+						RecordId::new("mytb".to_owned(), "tobie".to_owned()),
 						Value::Object(Object::from(HashMap::from([
 							(
 								"id",
-								Value::from(RecordId::new(
-									"mytb".to_owned(),
-									strand!("tobie2").to_owned(),
-								)),
+								Value::from(RecordId::new("mytb".to_owned(), "tobie2".to_owned())),
 							),
 							("note", Value::from("surreal")),
 						]))),
@@ -279,14 +270,11 @@ mod tests {
 							path: vec!["temp".to_owned()],
 						}],
 					),
-					TableMutation::Del(RecordId::new(
-						"mytb".to_owned(),
-						strand!("tobie").to_owned(),
-					)),
+					TableMutation::Del(RecordId::new("mytb".to_owned(), "tobie".to_owned())),
 					TableMutation::DelWithOriginal(
-						RecordId::new("mytb".to_owned(), strand!("tobie").to_owned()),
+						RecordId::new("mytb".to_owned(), "tobie".to_owned()),
 						Value::Object(Object::from(map! {
-								"id" => Value::from(RecordId::new("mytb".to_owned(),strand!("tobie").to_owned())),
+								"id" => Value::from(RecordId::new("mytb".to_owned(),"tobie".to_owned())),
 								"note" => Value::from("surreal"),
 						})),
 					),
@@ -299,7 +287,7 @@ mod tests {
 				],
 			)]),
 		);
-		let v = cs.into_value().into_json_value().unwrap();
+		let v = convert_value_to_public_value(cs.into_value()).unwrap().into_json_value();
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,

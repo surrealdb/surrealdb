@@ -1,8 +1,9 @@
 /// Manual implementations of the oldest revision of surrealdb structs for backwards
-/// compatibility. Only the variants that are needed to controll surrealdb are implemented.
+/// compatibility. Only the variants that are needed to control surrealdb are implemented.
 use std::collections::BTreeMap;
 
 use revision::revisioned;
+use surrealdb_types::{Value, Number, Object, Array};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash)]
@@ -24,10 +25,6 @@ impl std::ops::Deref for ProxyObject {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash)]
-pub struct ProxyStrand(pub String);
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash)]
 pub struct ProxyArray(pub Vec<ProxyValue>);
 
 #[revisioned(revision = 1)]
@@ -42,7 +39,7 @@ pub enum ProxyValue {
 	#[revision(override(revision = 1, discriminant = 3))]
 	Number(ProxyNumber),
 	#[revision(override(revision = 1, discriminant = 4))]
-	Strand(ProxyStrand),
+	Strand(String),
 	#[revision(override(revision = 1, discriminant = 8))]
 	Array(ProxyArray),
 	#[revision(override(revision = 1, discriminant = 9))]
@@ -51,7 +48,7 @@ pub enum ProxyValue {
 
 impl From<&str> for ProxyValue {
 	fn from(value: &str) -> Self {
-		ProxyValue::Strand(ProxyStrand(value.to_owned()))
+		ProxyValue::Strand(value.to_owned())
 	}
 }
 
@@ -70,5 +67,31 @@ impl From<ProxyObject> for ProxyValue {
 impl From<i64> for ProxyValue {
 	fn from(value: i64) -> Self {
 		ProxyValue::Number(ProxyNumber::Int(value))
+	}
+}
+
+impl ProxyValue {
+	/// Convert this ProxyValue to a surrealdb_types::Value
+	pub fn to_value(self) -> Value {
+		match self {
+			ProxyValue::Number(ProxyNumber::Int(i)) => Value::Number(Number::Int(i)),
+			ProxyValue::Strand(s) => Value::String(s.into()),
+			ProxyValue::Array(arr) => {
+				let values: Vec<Value> = arr.0.into_iter().map(|v| v.to_value()).collect();
+				Value::Array(Array::from(values))
+			}
+			ProxyValue::Object(obj) => obj.to_value(),
+		}
+	}
+}
+
+impl ProxyObject {
+	/// Convert this ProxyObject to a surrealdb_types::Value
+	pub fn to_value(self) -> Value {
+		let mut object = Object::default();
+		for (k, v) in self.0 {
+			object.insert(k, v.to_value());
+		}
+		Value::Object(object)
 	}
 }

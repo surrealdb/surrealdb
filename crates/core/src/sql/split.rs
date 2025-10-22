@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
-use crate::sql::fmt::Fmt;
+use crate::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -28,7 +28,7 @@ impl From<crate::expr::Splits> for Splits {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Split(pub Idiom);
+pub(crate) struct Split(pub(crate) Idiom);
 
 impl Deref for Split {
 	type Target = Idiom;

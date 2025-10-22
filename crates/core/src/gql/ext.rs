@@ -124,12 +124,12 @@ impl ValidatorExt for Scalar {
 }
 
 pub trait TryAsExt {
-	fn try_as_thing(self) -> Result<RecordId, Self>
+	fn try_as_record(self) -> Result<RecordId, Self>
 	where
 		Self: Sized;
 }
 impl TryAsExt for Value {
-	fn try_as_thing(self) -> Result<RecordId, Self> {
+	fn try_as_record(self) -> Result<RecordId, Self> {
 		match self {
 			Value::RecordId(t) => Ok(t),
 			v => Err(v),

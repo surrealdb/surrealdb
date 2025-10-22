@@ -2,8 +2,8 @@ mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::val::Value;
-use surrealdb_core::{strand, syn};
+use surrealdb_core::syn;
+use surrealdb_types::Value;
 
 #[tokio::test]
 async fn return_subquery_only() -> Result<()> {
@@ -90,7 +90,7 @@ async fn return_subquery_only() -> Result<()> {
 	assert_eq!(tmp, val);
 	// SELECT VALUE name FROM person:tobie;
 	let tmp = res.remove(0).result?;
-	let val = Value::from(strand!("Tobie").to_owned());
+	let val = Value::from_t("Tobie".to_owned());
 	assert_eq!(tmp, val);
 	// SELECT name FROM $single;
 	let tmp = res.remove(0).result?;
@@ -106,7 +106,7 @@ async fn return_subquery_only() -> Result<()> {
 	assert_eq!(tmp, val);
 	// SELECT name FROM ONLY $single;
 	let tmp = res.remove(0).result?;
-	let val = Value::from(strand!("Tobie").to_owned());
+	let val = Value::from_t("Tobie".to_owned());
 	assert_eq!(tmp, val);
 	// SELECT VALUE name FROM ONLY $single;
 	let tmp = res.remove(0).result?;
@@ -142,7 +142,7 @@ async fn return_subquery_only() -> Result<()> {
 	assert_eq!(tmp, val);
 	// RETURN SELECT name FROM ONLY person:tobie;
 	let tmp = res.remove(0).result?;
-	let val = Value::from(strand!("Tobie").to_owned());
+	let val = Value::from_t("Tobie".to_owned());
 	assert_eq!(tmp, val);
 	// RETURN SELECT VALUE name FROM ONLY person:tobie;
 	let tmp = res.remove(0).result?;
@@ -158,7 +158,7 @@ async fn return_subquery_only() -> Result<()> {
 	assert_eq!(tmp, val);
 	// RETURN SELECT VALUE name FROM ONLY $single;
 	let tmp = res.remove(0).result?;
-	let val = Value::from(strand!("Tobie").to_owned());
+	let val = Value::from_t("Tobie".to_owned());
 	assert_eq!(tmp, val);
 	//
 	Ok(())

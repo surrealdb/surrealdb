@@ -3,22 +3,27 @@ use axum_extra::headers::Header;
 use http::{HeaderName, HeaderValue};
 
 /// Typed header implementation for the `ContentType` header.
+#[derive(Debug)]
 pub enum ContentType {
 	TextPlain,
 	ApplicationJson,
 	ApplicationCbor,
 	ApplicationOctetStream,
-	Surrealdb,
+	ApplicationSurrealDBFlatbuffers,
 }
 
 impl std::fmt::Display for ContentType {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
-			ContentType::TextPlain => write!(f, "text/plain"),
-			ContentType::ApplicationJson => write!(f, "application/json"),
-			ContentType::ApplicationCbor => write!(f, "application/cbor"),
-			ContentType::ApplicationOctetStream => write!(f, "application/octet-stream"),
-			ContentType::Surrealdb => write!(f, "application/surrealdb"),
+			ContentType::TextPlain => f.write_str(surrealdb_core::api::format::PLAIN),
+			ContentType::ApplicationJson => f.write_str(surrealdb_core::api::format::JSON),
+			ContentType::ApplicationCbor => f.write_str(surrealdb_core::api::format::CBOR),
+			ContentType::ApplicationOctetStream => {
+				f.write_str(surrealdb_core::api::format::OCTET_STREAM)
+			}
+			ContentType::ApplicationSurrealDBFlatbuffers => {
+				f.write_str(surrealdb_core::api::format::FLATBUFFERS)
+			}
 		}
 	}
 }
@@ -37,12 +42,13 @@ impl Header for ContentType {
 			value.to_str().map_err(|_| headers::Error::invalid())?.split(';').collect();
 
 		match parts[0] {
-			"text/plain" => Ok(ContentType::TextPlain),
-			"application/json" => Ok(ContentType::ApplicationJson),
-			"application/cbor" => Ok(ContentType::ApplicationCbor),
-			"application/octet-stream" => Ok(ContentType::ApplicationOctetStream),
-			"application/surrealdb" => Ok(ContentType::Surrealdb),
-			// TODO: Support more (all?) mime-types
+			surrealdb_core::api::format::PLAIN => Ok(ContentType::TextPlain),
+			surrealdb_core::api::format::JSON => Ok(ContentType::ApplicationJson),
+			surrealdb_core::api::format::CBOR => Ok(ContentType::ApplicationCbor),
+			surrealdb_core::api::format::OCTET_STREAM => Ok(ContentType::ApplicationOctetStream),
+			surrealdb_core::api::format::FLATBUFFERS => {
+				Ok(ContentType::ApplicationSurrealDBFlatbuffers)
+			}
 			_ => Err(headers::Error::invalid()),
 		}
 	}

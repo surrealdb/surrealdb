@@ -12,16 +12,15 @@ use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document, IgnoreError};
 use crate::err::Error;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
-use crate::expr::{
-	self, ControlFlow, Expr, Fields, FlowResultExt, Ident, Literal, Lookup, Mock, Part,
-};
+use crate::expr::statements::relate::RelateThrough;
+use crate::expr::{self, ControlFlow, Expr, Fields, FlowResultExt, Literal, Lookup, Mock, Part};
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
 	StatementContext,
 };
 use crate::val::record::Record;
-use crate::val::{Object, RecordId, RecordIdKey, RecordIdKeyRange, Value};
+use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, Value};
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -40,7 +39,7 @@ pub(crate) enum Iterable {
 	/// before processing. This is used in CREATE statements
 	/// when generating a new id, or generating an id based
 	/// on the id field which is specified within the data.
-	Yield(Ident),
+	Yield(String),
 	/// An iterable which needs to fetch the data of a
 	/// specific record before processing the document.
 	Thing(RecordId),
@@ -53,7 +52,7 @@ pub(crate) enum Iterable {
 	},
 	/// An iterable which needs to iterate over the records
 	/// in a table before processing each document.
-	Table(Ident, RecordStrategy, ScanDirection),
+	Table(String, RecordStrategy, ScanDirection),
 	/// An iterable which fetches a specific range of records
 	/// from storage, used in range and time-series scenarios.
 	Range(String, RecordIdKeyRange, RecordStrategy, ScanDirection),
@@ -61,7 +60,13 @@ pub(crate) enum Iterable {
 	/// which has the specific value to update the record with.
 	/// This is used in INSERT statements, where each value
 	/// passed in to the iterable is unique for each record.
-	Mergeable(RecordId, Value),
+	/// This tuples takes in:
+	/// - The table name
+	/// - The optional id key. When none is provided, it will be generated at a later stage and no
+	///   record fetch will be done. This can be NONE in a scenario like: `INSERT INTO test {
+	///   there_is: 'no id set' }`
+	/// - The value for the record
+	Mergeable(String, Option<RecordIdKey>, Value),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in RELATE statements. The optional value
@@ -71,12 +76,12 @@ pub(crate) enum Iterable {
 	/// The first field is the rid from which we create, the second is the rid
 	/// which is the relation itself and the third is the target of the
 	/// relation
-	Relatable(RecordId, RecordId, RecordId, Option<Value>),
+	Relatable(RecordId, RelateThrough, RecordId, Option<Value>),
 	/// An iterable which iterates over an index range for a
 	/// table, which then fetches the corresponding records
 	/// which are matched within the index.
 	/// When the 3rd argument is true, we iterate over keys only.
-	Index(Ident, IteratorRef, RecordStrategy),
+	Index(String, IteratorRef, RecordStrategy),
 }
 
 #[derive(Debug)]
@@ -99,7 +104,7 @@ pub(crate) struct Processed {
 	/// Whether this document only fetched keys or just count
 	pub(crate) rs: RecordStrategy,
 	/// Whether this document needs to have an ID generated
-	pub(crate) generate: Option<Ident>,
+	pub(crate) generate: Option<String>,
 	/// The record id for this document that should be processed
 	pub(crate) rid: Option<Arc<RecordId>>,
 	/// The record data for this document that should be processed
@@ -128,6 +133,11 @@ pub(crate) struct Iterator {
 	guaranteed: Option<Iterable>,
 	/// Set if the iterator can be cancelled once it reaches start/limit
 	cancel_on_limit: Option<u32>,
+	/// Precomputed number of accepted results after which we can stop iterating early.
+	/// - When storage-level START skip is active (`start_skip.is_some()`), this is just `limit`.
+	/// - Otherwise, we must collect `start + limit` results so that the final START can be applied
+	///   in post-processing without starving the LIMIT.
+	cancel_threshold: Option<usize>,
 }
 
 impl Clone for Iterator {
@@ -142,6 +152,7 @@ impl Clone for Iterator {
 			entries: self.entries.clone(),
 			guaranteed: None,
 			cancel_on_limit: None,
+			cancel_threshold: None,
 		}
 	}
 }
@@ -232,7 +243,7 @@ impl Iterator {
 		stk: &mut Stk,
 		planner: &mut QueryPlanner,
 		stm_ctx: &StatementContext<'_>,
-		table: Ident,
+		table: String,
 	) -> Result<()> {
 		// We add the iterable only if we have a permission
 		let p = planner.check_table_permission(stm_ctx, &table).await?;
@@ -358,33 +369,10 @@ impl Iterator {
 		);
 		// Evaluate if we can only scan keys (rather than keys AND values), or count
 		let rs = ctx.check_record_strategy(false, p)?;
-		let sc = ctx.check_scan_direction();
+		let sc = ctx.check_scan_direction(ctx.ctx.tx().has_reverse_scan());
 		// Add the record to the iterator
 		if let (tb, RecordIdKey::Range(v)) = (v.table, v.key) {
 			self.ingest(Iterable::Range(tb, *v, rs, sc));
-		}
-		// All ingested ok
-		Ok(())
-	}
-
-	/// Prepares a value for processing
-	pub(crate) fn prepare_object(&mut self, stm: &Statement<'_>, v: Object) -> Result<()> {
-		// Add the record to the iterator
-		match v.rid() {
-			// This object has an 'id' field
-			Some(v) => {
-				if stm.is_deferable() {
-					self.ingest(Iterable::Defer(v))
-				} else {
-					self.ingest(Iterable::Thing(v))
-				}
-			}
-			// This object has no 'id' field
-			None => {
-				bail!(Error::InvalidStatementTarget {
-					value: v.to_string(),
-				});
-			}
 		}
 		// All ingested ok
 		Ok(())
@@ -403,14 +391,34 @@ impl Iterator {
 	) -> Result<()> {
 		let v = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await.catch_return()?;
 		match v {
-			Value::Object(o) if !stm_ctx.stm.is_select() => {
-				self.prepare_object(stm_ctx.stm, o)?;
-			}
 			Value::Table(v) => {
-				self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.into()).await?
+				self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.as_str().to_owned()).await?
 			}
 			Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
-			Value::Array(a) => a.into_iter().for_each(|x| self.ingest(Iterable::Value(x))),
+			Value::Array(a) => {
+				for v in a.into_iter() {
+					match v {
+						Value::Table(v) => {
+							self.prepare_table(
+								ctx,
+								opt,
+								stk,
+								planner,
+								stm_ctx,
+								v.as_str().to_owned(),
+							)
+							.await?
+						}
+						Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
+						v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
+						v => {
+							bail!(Error::InvalidStatementTarget {
+								value: v.to_string(),
+							})
+						}
+					}
+				}
+			}
 			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 			v => {
 				bail!(Error::InvalidStatementTarget {
@@ -644,112 +652,100 @@ impl Iterator {
 		Ok(())
 	}
 
-	/// Determines whether START/LIMIT clauses can be optimized at the storage
-	/// level.
+	/// Returns true if START can be applied as a storage-level skip (start_skip)
+	/// without changing the semantics of the query.
 	///
-	/// This method enables a critical performance optimization where START and
-	/// LIMIT clauses can be applied directly at the storage/iterator level
-	/// (using `start_skip` and `cancel_on_limit`) rather than after all query
-	/// processing is complete.
+	/// What this actually checks (mirrors the code below):
+	/// - GROUP BY: disallowed, because grouping changes the result count/order. → false
+	/// - Multiple iterators: disallowed, because START must apply to the merged set. → false
+	/// - WHERE: allowed only if the sole iterator is an index whose executor applies the WHERE
+	///   predicate at the iterator level (`exe.is_iterator_condition`). Otherwise, START must apply
+	///   to the filtered set and cannot be pushed down. → conditional
+	/// - ORDER BY absent: allowed, natural storage order is fine. → true
+	/// - ORDER BY present: allowed only if the sole iterator is a sorted index that provides the
+	///   requested order (`qp.is_order`). → conditional
 	///
-	/// ## The Optimization
-	///
-	/// When this method returns `true`, the query engine can:
-	/// - Skip records at the storage level before any processing (`start_skip`)
-	/// - Cancel iteration early when the limit is reached (`cancel_on_limit`)
-	///
-	/// This provides significant performance benefits for queries with large
-	/// result sets, as it avoids unnecessary processing of records that would
-	/// be filtered out anyway.
-	///
-	/// ## Safety Conditions
-	///
-	/// The optimization is only safe when the order of records at the storage
-	/// level matches the order of records in the final result set. This method
-	/// returns `false` when any of the following conditions would change the
-	/// record order or filtering:
-	///
-	/// ### GROUP BY clauses
-	/// Grouping operations fundamentally change the result structure and record
-	/// count, making storage-level limiting meaningless.
-	///
-	/// ### Multiple iterators
-	/// When multiple iterators are involved (e.g., JOINs, UNIONs), records from
-	/// different sources need to be merged, so individual iterator limits
-	/// would be incorrect.
-	///
-	/// ### WHERE clauses
-	/// Filtering operations change which records appear in the final result
-	/// set. START should skip records from the filtered set, not from the raw
-	/// storage.
-	///
-	/// Example problem:
-	/// ```sql
-	/// -- Given: t:1(f=true), t:2(f=true), t:3(f=false), t:4(f=false)
-	/// SELECT * FROM t WHERE !f START 1;
-	/// -- Correct: Skip first filtered record → [t:4]
-	/// -- Wrong with optimization: Skip t:1 at storage, then filter → [t:3, t:4]
-	/// ```
-	///
-	/// ### ORDER BY clauses (conditional)
-	/// When there's an ORDER BY clause, the optimization is only safe if:
-	/// - There's exactly one iterator
-	/// - The iterator is backed by a sorted index
-	/// - The index sort order matches the ORDER BY clause
-	///
-	/// ## Performance Impact
-	///
-	/// - **When enabled**: Significant performance improvement for large result sets
-	/// - **When disabled**: Slight performance cost as all records must be processed before
-	///   START/LIMIT is applied
-	///
-	/// ## Returns
-	///
-	/// - `true`: Safe to apply START/LIMIT optimization at storage level
-	/// - `false`: Must apply START/LIMIT after all query processing is complete
-	fn check_set_start_limit(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
-		// GROUP BY operations change the result structure and count, making
-		// storage-level limiting meaningless
+	/// In short: push START down to storage only for a single iterator where any filtering is
+	/// performed by the index itself and, if ORDER BY is used, the iterator natively yields
+	/// rows in the required order.
+	fn can_start_skip(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
+		// GROUP BY operations change the result structure and count
 		if stm.group().is_some() {
 			return false;
 		}
-
-		// Multiple iterators require merging records from different sources,
-		// so individual iterator limits would be incorrect
+		// Only safe when a single iterator is used
 		if self.entries.len() != 1 {
 			return false;
 		}
-
-		// Check for WHERE clause
+		// START must apply to the filtered set. Therefore, disallow with WHERE
+		// unless the iterator itself applies the condition (index executor).
 		if let Some(cond) = stm.cond() {
-			// WHERE clauses filter records, so START should skip from the filtered set,
-			// not from the raw storage. However, if there's exactly one index iterator
-			// and the index is handling both the WHERE condition and ORDER BY clause,
-			// then the optimization is safe because the index iterator is already
-			// doing the appropriate filtering and ordering.
 			if let Some(Iterable::Index(t, irf, _)) = self.entries.first() {
 				if let Some(qp) = ctx.get_query_planner() {
 					if let Some(exe) = qp.get_query_executor(t) {
 						if exe.is_iterator_expression(*irf, &cond.0) {
-							return true;
+							// Allowed: index handles the filtering
+						} else {
+							return false;
 						}
+					} else {
+						return false;
 					}
+				} else {
+					return false;
 				}
+			} else {
+				// WHERE exists but iterator is not an index -> cannot start-skip
+				return false;
 			}
-			return false;
 		}
-
-		// Without ORDER BY, the natural storage order is acceptable for START/LIMIT
+		// Without ORDER BY, natural order is acceptable
 		if stm.order().is_none() {
 			return true;
 		}
-
-		// With ORDER BY, optimization is only safe if the iterator is backed by
-		// a sorted index that matches the ORDER BY clause exactly
+		// With ORDER BY, only safe if iterator is a sorted index matching ORDER
 		if let Some(Iterable::Index(_, irf, _)) = self.entries.first() {
 			if let Some(qp) = ctx.get_query_planner() {
 				if qp.is_order(irf) {
 					return true;
+				}
+			}
+		}
+		false
+	}
+
+	/// Returns true if iteration can be cancelled early on LIMIT (cancel_on_limit)
+	/// without changing the semantics of the query.
+	///
+	/// What this actually checks (mirrors the code below):
+	/// - GROUP BY: disallowed; grouping can change the number of output rows and needs to see all
+	///   inputs. → false
+	/// - ORDER BY absent: allowed; we count accepted rows after WHERE filtering, so we can stop as
+	///   soon as we have enough outputs. → true
+	/// - ORDER BY present: allowed only if there's exactly one iterator and it is a sorted index
+	///   that matches the ORDER BY (`qp.is_order`). Otherwise we must iterate all rows to sort
+	///   correctly. → conditional
+	///
+	/// Note: WHERE filtering is fine here because cancellation is based on the number of
+	/// accepted results after filtering, not on the raw scanned rows.
+	fn can_cancel_on_limit(&self, ctx: &Context, stm: &Statement<'_>) -> bool {
+		// GROUP BY changes result count post-iteration.
+		// Cannot cancel early as we need to evalute every records.
+		if stm.group().is_some() {
+			return false;
+		}
+		// WHERE is allowed: we count accepted results after filtering
+		// ORDER requires special handling
+		if stm.order().is_none() {
+			return true;
+		}
+		// With ORDER BY, only safe if the only iterator is backed by a sorted index
+		if self.entries.len() == 1 {
+			if let Some(Iterable::Index(_, irf, _)) = self.entries.first() {
+				if let Some(qp) = ctx.get_query_planner() {
+					if qp.is_order(irf) {
+						return true;
+					}
 				}
 			}
 		}
@@ -762,19 +758,33 @@ impl Iterator {
 		stm: &Statement<'_>,
 		is_specific_permission: bool,
 	) {
-		if self.check_set_start_limit(ctx, stm) {
-			if let Some(l) = self.limit {
-				// If we have a LIMIT, allow the collector to cancel the iteration once
-				// this many items have been produced. This keeps long scans bounded.
-				self.cancel_on_limit = Some(l);
+		// Determine if we can skip records at the storage level for START
+		if !is_specific_permission && self.can_start_skip(ctx, stm) {
+			let s = self.start.unwrap_or(0) as usize;
+			if s > 0 {
+				self.start_skip = Some(s);
 			}
-			// Only skip over the first N records (START/OFFSET) when there are no
-			// specific per-record permission checks. When specific permissions are in play,
-			// each record must be evaluated and cannot be blindly skipped.
-			if !is_specific_permission {
-				let s = self.start.unwrap_or(0) as usize;
-				if s > 0 {
-					self.start_skip = Some(s);
+		}
+		// Determine if we can stop iteration early once enough results are accepted
+		//
+		// We precompute a single cancellation threshold because the condition that
+		// influences it (whether START is applied at storage-level via `start_skip`)
+		// is fixed for the whole iteration. Even though `start_skip`'s internal
+		// counter is decremented during scanning, the fact that the initial START
+		// was applied at the storage level does not change — therefore the threshold
+		// does not need to be recomputed per result.
+		if self.can_cancel_on_limit(ctx, stm) {
+			if let Some(l) = self.limit {
+				self.cancel_on_limit = Some(l);
+				if self.start_skip.is_some() {
+					// START is applied by the storage iterator. We are only collecting
+					// post-START results, so we can cancel as soon as we accepted `limit`.
+					self.cancel_threshold = Some(l as usize)
+				} else {
+					// START cannot be applied by the storage iterator. We must accumulate
+					// enough accepted results to later drop `start` of them during
+					// post-processing and still return `limit` items. Hence `start + limit`.
+					self.cancel_threshold = Some((l + self.start.unwrap_or(0)) as usize);
 				}
 			}
 		}
@@ -983,9 +993,12 @@ impl Iterator {
 				}
 			}
 		}
-		// Check if we have enough results
-		if let Some(l) = self.cancel_on_limit {
-			if self.results.len() == l as usize {
+		// Check if we have collected enough accepted results to stop.
+		// We use equality here because results are appended one-by-one; once the
+		// threshold is reached, further work would be wasted as START/LIMIT
+		// post-processing (if any) already has enough input to produce the final output.
+		if let Some(l) = self.cancel_threshold {
+			if self.results.len() == l {
 				self.run.cancel()
 			}
 		}
