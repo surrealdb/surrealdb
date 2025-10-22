@@ -5,7 +5,7 @@ use std::sync::RwLock;
 use anyhow::Result;
 use async_trait::async_trait;
 
-#[async_trait(?Send)]
+#[async_trait]
 pub trait KVStore: Send + Sync {
 	async fn get(&self, key: String) -> Result<Option<surrealdb_types::Value>>;
 	async fn set(&self, key: String, value: surrealdb_types::Value) -> Result<()>;
@@ -92,7 +92,7 @@ impl Default for BTreeMapStore {
 	}
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl KVStore for BTreeMapStore {
 	async fn get(&self, key: String) -> Result<Option<surrealdb_types::Value>> {
 		let map = self

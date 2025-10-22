@@ -20,7 +20,13 @@ pub(crate) struct Host<'a> {
 	pub(crate) doc: Option<&'a CursorDoc>,
 }
 
-#[async_trait(?Send)]
+// SAFETY: Host is never actually sent across threads. The Send bound is required by 
+// Wasmtime's func_wrap_async, but WASM execution is single-threaded and Host stays
+// on the same thread throughout the call. The Stk, Context, Options, and CursorDoc
+// are all accessed only from the thread that created them.
+unsafe impl<'a> Send for Host<'a> {}
+
+#[async_trait]
 impl<'a> InvocationContext for Host<'a> {
 	async fn sql(
 		&mut self,

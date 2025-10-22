@@ -24,49 +24,80 @@ macro_rules! host_try_or_return {
 	};
 }
 
+// Helper macro to convert any type to u32 for argument repetition
+macro_rules! force_u32 {
+	($ty:ty) => {
+		u32
+	}
+}
+
 /// Macro to register an async host function with automatic argument conversion and error handling.
 /// Returns -1 on error (logged to stderr), positive values are valid pointers.
-/// Uses tokio::runtime::Handle::block_on to bridge async functions to sync WASM bindings.
+/// Uses Wasmtime's native async support with func_wrap_async.
 #[macro_export]
 macro_rules! register_host_function {
-    // Async version with mutable controller
-    ($linker:expr, $name:expr, |mut $controller:ident : $controller_ty:ty, $($arg:ident : $arg_ty:ty),*| -> Result<$ret:ty> $body:tt) => {{
+    // Async version with mutable controller - single argument
+    ($linker:expr, $name:expr, |mut $controller:ident : $controller_ty:ty, $arg:ident : $arg_ty:ty| -> Result<$ret:ty> $body:tt) => {{
         $linker
-            .func_wrap(
+            .func_wrap_async(
                 "env",
                 $name,
-                |caller: Caller<'_, StoreData>, $($arg: u32),*| -> i32 {
-                    let mut $controller: $controller_ty = HostController::from(caller);
-
-                    // Handle argument receiving errors gracefully
-                    $(let $arg = host_try_or_return!("Failed to receive argument", <$arg_ty>::receive($arg.into(), &mut $controller));)*
-
-                    // Execute the async function body using a lightweight executor
-                    // This avoids "runtime within runtime" errors by using a separate executor
-                    let result = futures::executor::block_on(async $body);
-
-                    (*host_try_or_return!("Transfer error", result.transfer(&mut $controller))) as i32
+                |caller: Caller<'_, StoreData>, ($arg,): (u32,)| {
+                    Box::new(async move {
+                        eprintln!("🔵 Host function called: {}", $name);
+                        let mut $controller: $controller_ty = HostController::from(caller);
+                        let $arg = host_try_or_return!("Failed to receive argument", <$arg_ty>::receive($arg.into(), &mut $controller));
+                        
+                        eprintln!("🟡 Executing async body for: {}", $name);
+                        let result = $body;
+                        eprintln!("🟢 Async body completed for: {}", $name);
+                        
+                        (*host_try_or_return!("Transfer error", result.transfer(&mut $controller))) as i32
+                    })
                 }
             )
             .prefix_err(|| "failed to register host function")?
     }};
-    // Async version without mutable controller (for backwards compatibility)
-    ($linker:expr, $name:expr, |$controller:ident : $controller_ty:ty, $($arg:ident : $arg_ty:ty),*| -> Result<$ret:ty> $body:tt) => {{
+    // Async version with mutable controller - multiple arguments
+    ($linker:expr, $name:expr, |mut $controller:ident : $controller_ty:ty, $($arg:ident : $arg_ty:ty),+| -> Result<$ret:ty> $body:tt) => {{
         $linker
-            .func_wrap(
+            .func_wrap_async(
                 "env",
                 $name,
-                |caller: Caller<'_, StoreData>, $($arg: u32),*| -> i32 {
-                    let mut $controller: $controller_ty = HostController::from(caller);
-
-                    // Handle argument receiving errors gracefully
-                    $(let $arg = host_try_or_return!("Failed to receive argument", <$arg_ty>::receive($arg.into(), &mut $controller));)*
-
-                    // Execute the async function body using a lightweight executor
-                    // This avoids "runtime within runtime" errors by using a separate executor
-                    let result = futures::executor::block_on(async $body);
-
-                    (*host_try_or_return!("Transfer error", result.transfer(&mut $controller))) as i32
+                |caller: Caller<'_, StoreData>, ($($arg),+): ($(force_u32!($arg_ty)),+)| {
+                    Box::new(async move {
+                        eprintln!("🔵 Host function called: {}", $name);
+                        let mut $controller: $controller_ty = HostController::from(caller);
+                        $(let $arg = host_try_or_return!("Failed to receive argument", <$arg_ty>::receive($arg.into(), &mut $controller));)+
+                        
+                        eprintln!("🟡 Executing async body for: {}", $name);
+                        let result = $body;
+                        eprintln!("🟢 Async body completed for: {}", $name);
+                        
+                        (*host_try_or_return!("Transfer error", result.transfer(&mut $controller))) as i32
+                    })
+                }
+            )
+            .prefix_err(|| "failed to register host function")?
+    }};
+    // Async version without mutable controller
+    ($linker:expr, $name:expr, |$controller:ident : $controller_ty:ty, $($arg:ident : $arg_ty:ty),+| -> Result<$ret:ty> $body:tt) => {{
+        $linker
+            .func_wrap_async(
+                "env",
+                $name,
+                |caller: Caller<'_, StoreData>, ($($arg),+): ($(force_u32!($arg_ty)),+)| {
+                    Box::new(async move {
+                        eprintln!("🔵 Host function called: {}", $name);
+                        let mut $controller: $controller_ty = HostController::from(caller);
+                        $(let $arg = host_try_or_return!("Failed to receive argument", <$arg_ty>::receive($arg.into(), &mut $controller));)+
+                        
+                        eprintln!("🟡 Executing async body for: {}", $name);
+                        let result = $body;
+                        eprintln!("🟢 Async body completed for: {}", $name);
+                        
+                        (*host_try_or_return!("Transfer error", result.transfer(&mut $controller))) as i32
+                    })
                 }
             )
             .prefix_err(|| "failed to register host function")?
@@ -75,7 +106,7 @@ macro_rules! register_host_function {
 
 /// Context provided for each WASM function invocation.
 /// Created per-call with borrowed execution context (stack, query context, etc).
-#[async_trait(?Send)]
+#[async_trait]
 pub trait InvocationContext {
 	async fn sql(
 		&mut self,

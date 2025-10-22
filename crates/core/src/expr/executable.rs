@@ -262,7 +262,7 @@ impl SurrealismExecutable {
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let lookup = SurrealismCacheLookup::File(&ns, &db, &self.0);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
-		let mut controller = runtime.new_controller()?;
+		let mut controller = runtime.new_controller().await?;
 		let mut host = Host {
 			stk,
 			ctx,
@@ -297,7 +297,7 @@ impl SurrealismExecutable {
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let lookup = SurrealismCacheLookup::File(&ns, &db, &self.0);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
-		let mut controller = runtime.new_controller()?;
+		let mut controller = runtime.new_controller().await?;
 		let mut host = Host {
 			stk,
 			ctx,
@@ -378,7 +378,7 @@ impl SiloExecutable {
 			self.patch,
 		);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
-		let mut controller = runtime.new_controller()?;
+		let mut controller = runtime.new_controller().await?;
 		let mut host = Host {
 			stk,
 			ctx,
@@ -418,7 +418,7 @@ impl SiloExecutable {
 			self.patch,
 		);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
-		let mut controller = runtime.new_controller()?;
+		let mut controller = runtime.new_controller().await?;
 		let mut host = Host {
 			stk,
 			ctx,

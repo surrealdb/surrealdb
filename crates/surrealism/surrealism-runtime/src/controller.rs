@@ -35,7 +35,6 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use surrealism_types::args::Args;
-use surrealism_types::controller::MemoryController;
 use surrealism_types::err::PrefixError;
 use surrealism_types::transfer::Transfer;
 use wasmtime::*;
@@ -126,6 +125,8 @@ impl Runtime {
 			// Optimize for runtime performance in release builds
 			engine_config.cranelift_opt_level(OptLevel::Speed);
 		}
+		// Enable async support for native async host functions
+		engine_config.async_support(true);
         
 		let engine = Engine::new(&engine_config)?;
 		let module =
@@ -149,7 +150,7 @@ impl Runtime {
 	/// This is cheap (relative to compilation) - the expensive compilation is shared.
 	/// Each controller has its own mutable Store, ensuring no shared mutable state.
 	/// Safe for concurrent execution: no mutable state is shared between controllers.
-	pub fn new_controller(&self) -> Result<Controller> {
+	pub async fn new_controller(&self) -> Result<Controller> {
 		let wasi_ctx = super::wasi_context::build()?;
 
 		let store_data = StoreData {
@@ -160,7 +161,8 @@ impl Runtime {
 		let mut store = Store::new(&self.engine, store_data);
 		let instance = self
 			.linker
-			.instantiate(&mut store, &self.module)
+			.instantiate_async(&mut store, &self.module)
+			.await
 			.prefix_err(|| "failed to instantiate WASM module")?;
 		let memory = instance
 			.get_memory(&mut store, "memory")
@@ -294,7 +296,7 @@ impl Controller {
 	}
 }
 
-impl MemoryController for Controller {
+impl surrealism_types::controller::MemoryController for Controller {
 	fn alloc(&mut self, len: u32, align: u32) -> Result<u32> {
 		Controller::alloc(self, len, align)
 	}
