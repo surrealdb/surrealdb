@@ -7,7 +7,7 @@ use crate::sql::{Expr, Idiom, Model, Script};
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Function {
 	Normal(String),
-	Custom(String),
+	Custom(String, Option<String>),
 	Script(Script),
 	Model(Model),
 }
@@ -18,7 +18,8 @@ impl Function {
 			// Safety: "function" does not contain null bytes"
 			Self::Script(_) => Idiom::field("function".to_owned()),
 			Self::Normal(f) => Idiom::field(f.to_owned()),
-			Self::Custom(f) => Idiom::field(format!("fn::{f}")),
+			Self::Custom(name, None) => Idiom::field(format!("fn::{name}")),
+			Self::Custom(name, Some(sub)) => Idiom::field(format!("fn::{name}<_>::{sub}")),
 			Self::Model(m) => Idiom::field(m.to_string()),
 		}
 	}
@@ -28,7 +29,7 @@ impl From<Function> for crate::expr::Function {
 	fn from(v: Function) -> Self {
 		match v {
 			Function::Normal(s) => crate::expr::Function::Normal(s),
-			Function::Custom(s) => crate::expr::Function::Custom(s),
+			Function::Custom(s, sub) => crate::expr::Function::Custom(s, sub),
 			Function::Script(s) => crate::expr::Function::Script(s.into()),
 			Function::Model(m) => crate::expr::Function::Model(m.into()),
 		}
@@ -39,7 +40,7 @@ impl From<crate::expr::Function> for Function {
 	fn from(v: crate::expr::Function) -> Self {
 		match v {
 			crate::expr::Function::Normal(s) => Self::Normal(s),
-			crate::expr::Function::Custom(s) => Self::Custom(s),
+			crate::expr::Function::Custom(s, sub) => Self::Custom(s, sub),
 			crate::expr::Function::Script(s) => Self::Script(s.into()),
 			crate::expr::Function::Model(m) => Self::Model(m.into()),
 		}
@@ -78,8 +79,11 @@ impl fmt::Display for FunctionCall {
 			Function::Normal(ref s) => {
 				write!(f, "{s}({})", Fmt::comma_separated(self.arguments.iter()))
 			}
-			Function::Custom(ref s) => {
+			Function::Custom(ref s, None) => {
 				write!(f, "fn::{s}({})", Fmt::comma_separated(self.arguments.iter()))
+			}
+			Function::Custom(ref s, Some(ref sub)) => {
+				write!(f, "fn::{s}<_>::{sub}({})", Fmt::comma_separated(self.arguments.iter()))
 			}
 			Function::Script(ref s) => {
 				write!(f, "function({}) {{{s}}}", Fmt::comma_separated(self.arguments.iter()))

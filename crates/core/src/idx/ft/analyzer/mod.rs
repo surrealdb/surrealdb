@@ -93,7 +93,8 @@ impl Analyzer {
 		mut input: String,
 	) -> Result<Tokens> {
 		if let Some(function_name) = self.az.function.as_ref().map(|i| i.as_str().to_owned()) {
-			let val = Function::Custom(function_name.clone())
+			// TODO(micha) should sub functions be supported here?
+			let val = Function::Custom(function_name.clone(), None)
 				.compute(stk, ctx, opt, None, vec![Value::String(input)])
 				.await
 				.catch_return()?;

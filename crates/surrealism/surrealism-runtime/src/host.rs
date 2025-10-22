@@ -41,8 +41,9 @@ macro_rules! register_host_function {
                     // Handle argument receiving errors gracefully
                     $(let $arg = host_try_or_return!("Failed to receive argument", <$arg_ty>::receive($arg.into(), &mut $controller));)*
 
-                    // Execute the async function body in a blocking context
-                    let result = tokio::runtime::Handle::current().block_on(async $body);
+                    // Execute the async function body using a lightweight executor
+                    // This avoids "runtime within runtime" errors by using a separate executor
+                    let result = futures::executor::block_on(async $body);
 
                     (*host_try_or_return!("Transfer error", result.transfer(&mut $controller))) as i32
                 }
@@ -61,8 +62,9 @@ macro_rules! register_host_function {
                     // Handle argument receiving errors gracefully
                     $(let $arg = host_try_or_return!("Failed to receive argument", <$arg_ty>::receive($arg.into(), &mut $controller));)*
 
-                    // Execute the async function body in a blocking context
-                    let result = tokio::runtime::Handle::current().block_on(async $body);
+                    // Execute the async function body using a lightweight executor
+                    // This avoids "runtime within runtime" errors by using a separate executor
+                    let result = futures::executor::block_on(async $body);
 
                     (*host_try_or_return!("Transfer error", result.transfer(&mut $controller))) as i32
                 }

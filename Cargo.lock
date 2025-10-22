@@ -7458,6 +7458,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
+ "futures",
  "semver",
  "serde",
  "serde_json",

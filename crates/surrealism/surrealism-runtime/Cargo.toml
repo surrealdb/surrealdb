@@ -25,3 +25,4 @@ toml.workspace = true
 bytes = "1"
 async-trait = "0.1"
 tokio.workspace = true
+futures.workspace = true

@@ -18,7 +18,7 @@ use crate::iam::Action;
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum Function {
 	Normal(String),
-	Custom(String),
+	Custom (String, Option<String>),
 	Script(Script),
 	Model(Model),
 }
@@ -30,14 +30,15 @@ impl Function {
 			// Safety: "function" does not contain null bytes"
 			Self::Script(_) => Idiom::field("function".to_owned()),
 			Self::Normal(f) => Idiom::field(f.to_owned()),
-			Self::Custom(f) => Idiom::field(format!("fn::{f}")),
+			Self::Custom(name, None) => Idiom::field(format!("fn::{name}")),
+			Self::Custom(name, Some(sub)) => Idiom::field(format!("fn::{name}<_>::{sub}")),
 			Self::Model(m) => Idiom::field(m.to_string()),
 		}
 	}
 	/// Checks if this function invocation is writable
 	pub fn read_only(&self) -> bool {
 		match self {
-			Self::Custom(_) | Self::Script(_) => false,
+			Self::Custom(_, _) | Self::Script(_) => false,
 			Self::Normal(f) => f != "api::invoke",
 			Self::Model(_) => true,
 		}
@@ -90,14 +91,14 @@ impl Function {
 				// Run the normal function
 				Ok(fnc::run(stk, ctx, opt, doc, s, args).await?)
 			}
-			Function::Custom(s) => {
+			Function::Custom(raw_name, sub) => {
 				// Get the full name of this function
-				let name = format!("fn::{s}");
+				let name = format!("fn::{raw_name}");
 				// Check this function is allowed
 				ctx.check_allowed_function(name.as_str())?;
 				// Get the function definition
 				let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-				let val = ctx.tx().get_db_function(ns, db, s).await?;
+				let val = ctx.tx().get_db_function(ns, db, raw_name).await?;
 				// Check permissions
 				if opt.check_perms(Action::View)? {
 					match &val.permissions {
@@ -105,7 +106,7 @@ impl Function {
 						Permission::None => {
 							return Err(ControlFlow::from(anyhow::Error::new(
 								Error::FunctionPermissions {
-									name: s.to_owned(),
+									name: raw_name.to_owned(),
 								},
 							)));
 						}
@@ -116,7 +117,7 @@ impl Function {
 							if !stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?.is_truthy() {
 								return Err(ControlFlow::from(anyhow::Error::new(
 									Error::FunctionPermissions {
-										name: s.to_owned(),
+										name: raw_name.to_owned(),
 									},
 								)));
 							}
@@ -125,7 +126,7 @@ impl Function {
 				}
 
 				let executable: crate::expr::Executable = val.as_ref().executable.clone().into();
-				let sig = executable.signature(stk, ctx, opt, doc, None).await?;
+				let sig = executable.signature(stk, ctx, opt, doc, sub.as_deref()).await?;
 
 				// Get the number of function arguments
 				let max_args_len = sig.args.len();
@@ -155,7 +156,7 @@ impl Function {
 					})));
 				}
 				// Run the custom function
-				let result = executable.run(stk, ctx, opt, doc, args, None).await?;
+				let result = executable.run(stk, ctx, opt, doc, args, sub.as_deref()).await?;
 
 				if let Some(ref returns) = sig.returns {
 					result
@@ -217,8 +218,11 @@ impl fmt::Display for FunctionCall {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self.receiver {
 			Function::Normal(ref s) => write!(f, "{s}({})", Fmt::comma_separated(&self.arguments)),
-			Function::Custom(ref s) => {
+			Function::Custom(ref s, None) => {
 				write!(f, "fn::{s}({})", Fmt::comma_separated(&self.arguments))
+			}
+			Function::Custom(ref s, Some(ref sub)) => {
+				write!(f, "fn::{s}<_>::{sub}({})", Fmt::comma_separated(&self.arguments))
 			}
 			Function::Script(ref s) => {
 				write!(f, "function({}) {{{s}}}", Fmt::comma_separated(&self.arguments))

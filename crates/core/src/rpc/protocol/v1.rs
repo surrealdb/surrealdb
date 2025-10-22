@@ -1013,7 +1013,8 @@ pub trait RpcProtocolV1: RpcContext {
 		};
 
 		let name = if let Some(rest) = name.strip_prefix("fn::") {
-			Function::Custom(rest.to_owned())
+			// TODO(micha) should sub functions be supported here?
+			Function::Custom(rest.to_owned(), None)
 		} else if let Some(rest) = name.strip_prefix("ml::") {
 			let name = rest.to_owned();
 			Function::Model(Model {
