@@ -23,6 +23,8 @@ const TARGET: &str = "surrealdb::core::kvs::rocksdb";
 
 pub struct Datastore {
 	db: Pin<Arc<OptimisticTransactionDB>>,
+	/// Whether the database is in read-only mode due to OOD (Out of Disk) condition
+	ood_readonly: bool,
 }
 
 pub struct Transaction {
@@ -205,52 +207,93 @@ impl Datastore {
 				bail!(Error::Ds(format!("Invalid storage engine log level specified: {l}")));
 			}
 		});
-		// Configure background WAL flush behaviour
-		let db = match *cnf::ROCKSDB_BACKGROUND_FLUSH {
-			// Beckground flush is disabled which
-			// means that the WAL will be flushed
-			// whenever a transaction is committed.
-			false => {
-				// Dispay the configuration setting
-				info!(target: TARGET, "Background write-ahead-log flushing: disabled");
-				// Enable manual WAL flush
-				opts.set_manual_wal_flush(false);
-				// Create the optimistic datastore
-				Arc::pin(OptimisticTransactionDB::open(&opts, path)?)
+		// TODO: Background error recovery options are not yet available in rocksdb crate v0.23.0
+		// These would help handle Out of Disk (OOD) errors gracefully by allowing automatic resume
+		// after background errors. When available, uncomment the following:
+		// info!(target: TARGET, "Maximum background error resume count: {}",
+		// *cnf::ROCKSDB_MAX_BGERROR_RESUME_COUNT); opts.set_max_bgerror_resume_count(*
+		// cnf::ROCKSDB_MAX_BGERROR_RESUME_COUNT); info!(target: TARGET, "Background error resume
+		// retry interval: {}μs", *cnf::ROCKSDB_BGERROR_RESUME_RETRY_INTERVAL);
+		// opts.set_bgerror_resume_retry_interval(*cnf::ROCKSDB_BGERROR_RESUME_RETRY_INTERVAL);
+		// Configure background WAL flush behaviour and handle OOD errors during startup
+		let (db, ood_readonly) = match Self::open(opts.clone(), false, path).await {
+			Ok(db) => {
+				// Database opened successfully - no OOD condition
+				(db, false)
 			}
-			// Background flush is enabled so we
-			// spawn a background worker thread to
-			// flush the WAL to disk periodically.
-			true => {
-				// Dispay the configuration setting
-				info!(target: TARGET, "Background write-ahead-log flushing: enabled every {}ms", *cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL);
-				// Enable manual WAL flush
-				opts.set_manual_wal_flush(true);
-				// Create the optimistic datastore
-				let db = Arc::pin(OptimisticTransactionDB::open(&opts, path)?);
-				// Clone the database reference
-				let dbc = db.clone();
-				// Create a new background thread
-				thread::spawn(move || {
-					loop {
-						// Get the specified flush interval
-						let wait = *cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL;
-						// Wait for the specified interval
-						thread::sleep(Duration::from_millis(wait));
-						// Flush the WAL to disk periodically
-						if let Err(err) = dbc.flush_wal(*cnf::SYNC_DATA) {
-							error!("Failed to flush WAL: {err}");
+			Err(err) => {
+				// Check if this is an OOD error during startup
+				if Transaction::is_ood_error(&err) {
+					Transaction::log_ood_error(&err, "database startup");
+					warn!(target: TARGET, "OOD detected during startup - attempting to open with background flush disabled");
+					match Self::open(opts, true, path).await {
+						Ok(db) => {
+							warn!(target: TARGET, "Database opened with background flush disabled due to OOD condition. Write operations will be blocked at application level.");
+							(db, true) // Mark as OOD read-only mode
+						}
+						Err(_) => {
+							error!(target: TARGET, "Failed to open database even with background flush disabled due to OOD");
+							return Err(err);
 						}
 					}
-				});
-				// Return the datastore
-				db
+				} else {
+					// Not an OOD error, return immediately
+					return Err(err);
+				}
 			}
 		};
+
 		// Return the datastore
 		Ok(Datastore {
 			db,
+			ood_readonly,
 		})
+	}
+
+	/// Open database with normal configuration
+	async fn open(
+		mut opts: Options,
+		force_disabling_flush: bool,
+		path: &str,
+	) -> Result<Pin<Arc<OptimisticTransactionDB>>> {
+		if !*cnf::ROCKSDB_BACKGROUND_FLUSH || force_disabling_flush {
+			// Background flush is disabled which
+			// means that the WAL will be flushed
+			// whenever a transaction is committed.
+			// Display the configuration setting
+			info!(target: TARGET, "Background write-ahead-log flushing: disabled");
+			// Enable manual WAL flush
+			opts.set_manual_wal_flush(false);
+			// Create the optimistic datastore
+			Ok(Arc::pin(OptimisticTransactionDB::open(&opts, path)?))
+		} else {
+			// Background flush is enabled so we
+			// spawn a background worker thread to
+			// flush the WAL to disk periodically.
+			// Display the configuration setting
+			info!(target: TARGET, "Background write-ahead-log flushing: enabled every {}ms", *cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL);
+			// Enable manual WAL flush
+			opts.set_manual_wal_flush(true);
+			// Create the optimistic datastore
+			let db = Arc::pin(OptimisticTransactionDB::open(&opts, path)?);
+			// Clone the database reference
+			let dbc = db.clone();
+			// Create a new background thread
+			thread::spawn(move || {
+				loop {
+					// Get the specified flush interval
+					let wait = *cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL;
+					// Wait for the specified interval
+					thread::sleep(Duration::from_millis(wait));
+					// Flush the WAL to disk periodically
+					if let Err(err) = dbc.flush_wal(*cnf::SYNC_DATA) {
+						error!("Failed to flush WAL: {err}");
+					}
+				}
+			});
+			// Return the datastore
+			Ok(db)
+		}
 	}
 
 	/// Shutdown the database
@@ -261,11 +304,11 @@ impl Datastore {
 		opts.set_wait(true);
 		// Flush the WAL to storage
 		if let Err(e) = self.db.flush_wal(true) {
-			error!("An error occured flushing the WAL buffer to disk: {e}");
+			error!("An error occurred flushing the WAL buffer to disk: {e}");
 		}
 		// Flush the memtables to SST
 		if let Err(e) = self.db.flush_opt(&opts) {
-			error!("An error occured flushing memtables to SST files: {e}");
+			error!("An error occurred flushing memtables to SST files: {e}");
 		}
 		// All good
 		Ok(())
@@ -277,6 +320,12 @@ impl Datastore {
 		write: bool,
 		_: bool,
 	) -> Result<Box<dyn crate::kvs::api::Transaction>> {
+		// Check if database is in OOD read-only mode and a write transaction is requested
+		if self.ood_readonly && write {
+			warn!(target: TARGET, "Write transaction requested but database is in OOD read-only mode");
+			return Err(Error::DbReadOnly.into());
+		}
+
 		// Set the transaction options
 		let mut to = OptimisticTransactionOptions::default();
 		to.set_snapshot(true);
@@ -718,5 +767,20 @@ impl Transaction {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		Ok(rng)
+	}
+
+	/// Check if an error is related to Out of Disk (OOD) conditions
+	fn is_ood_error(error: &anyhow::Error) -> bool {
+		let error_msg = error.to_string().to_lowercase();
+		error_msg.contains("no space left on device")
+			|| error_msg.contains("disk full")
+			|| error_msg.contains("out of space")
+			|| error_msg.contains("enospc")
+	}
+
+	/// Log OOD error with appropriate context
+	fn log_ood_error(error: &anyhow::Error, context: &str) {
+		error!(target: TARGET, "Out of Disk error during {}: {}", context, error);
+		warn!(target: TARGET, "Database may enter read-only mode until disk space is available");
 	}
 }
