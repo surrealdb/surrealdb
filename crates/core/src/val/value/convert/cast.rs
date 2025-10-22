@@ -676,26 +676,20 @@ impl Cast for crate::val::Table {
 
 impl Cast for Geometry {
 	fn can_cast(v: &Value) -> bool {
-		if matches!(v, Value::Geometry(_)) {
-			true
-		} else if Geometry::array_to_line(v).is_some()
-			| Geometry::array_to_multiline(v).is_some()
-			| Geometry::array_to_multipoint(v).is_some()
-			| Geometry::array_to_multipolygon(v).is_some()
-			| Geometry::array_to_point(v).is_some()
-			| Geometry::array_to_polygon(v).is_some()
-		{
-			true
-		} else if let Value::Object(object) = v {
-			Geometry::try_from_object(object).is_some()
-		} else {
-			false
-		}
+		matches!(v, Value::Geometry(_))
+			|| Geometry::array_to_point(v).is_some()
+			|| Geometry::array_to_multipoint(v).is_some()
+			|| Geometry::array_to_line(v).is_some()
+			|| Geometry::array_to_multiline(v).is_some()
+			|| Geometry::array_to_polygon(v).is_some()
+			|| Geometry::array_to_multipolygon(v).is_some()
+			|| matches!(v, Value::Object(object) if Geometry::try_from_object(object).is_some())
 	}
 
 	fn cast(v: Value) -> Result<Self, CastError> {
-		
-		match v.clone() {
+		let kind_of = v.kind_of();
+
+		match v {
 			Value::Geometry(geometry) => Ok(geometry),
 			Value::Array(array) => {
 				let val = Value::Array(array);
@@ -711,20 +705,20 @@ impl Cast for Geometry {
 					Ok(geo)
 				} else {
 					Err(CastError::InvalidKind {
-						from: v,
-						into: "Geometry".to_string(),
+						from: kind_of.into(),
+						into: "geometry".to_string(),
 					})
 				}
 			}
 			Value::Object(object) => {
 				Geometry::try_from_object(&object).ok_or_else(|| CastError::InvalidKind {
-					from: v,
-					into: "Geometry".to_string(),
+					from: kind_of.into(),
+					into: "geometry".to_string(),
 				})
 			}
 			_ => Err(CastError::InvalidKind {
-				from: v,
-				into: "Geometry".to_string(),
+				from: kind_of.into(),
+				into: "geometry".to_string(),
 			}),
 		}
 	}
@@ -918,10 +912,10 @@ impl Value {
 			Kind::Geometry(t) => match self.clone().cast_to::<Geometry>() {
 				Ok(v) => Ok(Value::from(v)),
 				Err(_) => Err(CastError::InvalidKind {
-						from: self,
-						into: t.iter().map(|kind| kind.to_string()).collect::<Vec<String>>().join("|")
-					})
-			}
+					from: self,
+					into: t.iter().map(|kind| kind.to_string()).collect::<Vec<String>>().join("|"),
+				}),
+			},
 			Kind::Either(k) => {
 				let Some(k) = k.iter().find(|x| self.can_cast_to_kind(x)) else {
 					return Err(CastError::InvalidKind {
@@ -1038,19 +1032,6 @@ impl Value {
 					into: kind,
 				})
 			}
-		}
-	}
-
-	/// Try to convert this value to a `Geometry` of a certain type
-	fn cast_to_geometry(self, val: &[GeometryKind]) -> Result<Geometry, CastError> {
-		match self {
-			// Geometries are allowed if correct type
-			Value::Geometry(v) if self.is_geometry_type(val) => Ok(v),
-			// Anything else raises an error
-			_ => Err(CastError::InvalidKind {
-				from: self,
-				into: "geometry".into(),
-			}),
 		}
 	}
 
