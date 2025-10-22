@@ -260,6 +260,33 @@ impl fmt::Debug for RefreshToken {
 #[derive(Clone, Serialize, Deserialize, SurrealValue)]
 pub(crate) struct SecureToken(pub(crate) String);
 
+impl From<AccessToken> for Token {
+	fn from(access: AccessToken) -> Self {
+		Self {
+			access,
+			refresh: None,
+		}
+	}
+}
+
+impl From<(AccessToken, RefreshToken)> for Token {
+	fn from(token: (AccessToken, RefreshToken)) -> Self {
+		Self {
+			access: token.0,
+			refresh: Some(token.1),
+		}
+	}
+}
+
+impl From<(Option<AccessToken>, Option<RefreshToken>)> for Token<Option<AccessToken>> {
+	fn from(token: (Option<AccessToken>, Option<RefreshToken>)) -> Self {
+		Self {
+			access: token.0,
+			refresh: token.1,
+		}
+	}
+}
+
 impl From<String> for Token {
 	fn from(token: String) -> Self {
 		Self {
@@ -284,5 +311,41 @@ impl<'a> From<&'a str> for Token {
 			access: AccessToken(SecureToken(token.to_owned())),
 			refresh: None,
 		}
+	}
+}
+
+impl From<String> for AccessToken {
+	fn from(token: String) -> Self {
+		Self(SecureToken(token))
+	}
+}
+
+impl<'a> From<&'a String> for AccessToken {
+	fn from(token: &'a String) -> Self {
+		Self(SecureToken(token.to_owned()))
+	}
+}
+
+impl<'a> From<&'a str> for AccessToken {
+	fn from(token: &'a str) -> Self {
+		Self(SecureToken(token.to_owned()))
+	}
+}
+
+impl From<String> for RefreshToken {
+	fn from(token: String) -> Self {
+		Self(SecureToken(token))
+	}
+}
+
+impl<'a> From<&'a String> for RefreshToken {
+	fn from(token: &'a String) -> Self {
+		Self(SecureToken(token.to_owned()))
+	}
+}
+
+impl<'a> From<&'a str> for RefreshToken {
+	fn from(token: &'a str) -> Self {
+		Self(SecureToken(token.to_owned()))
 	}
 }
