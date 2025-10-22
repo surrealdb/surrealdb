@@ -225,14 +225,14 @@ impl Datastore {
 				// Check if this is an OOD error during startup
 				if Transaction::is_ood_error(&err) {
 					Transaction::log_ood_error(&err, "database startup");
-					warn!(target: TARGET, "OOD detected during startup - attempting to open in read-only mode");
+					warn!(target: TARGET, "OOD detected during startup - attempting to open with background flush disabled");
 					match Self::open(opts, true, path).await {
 						Ok(db) => {
-							warn!(target: TARGET, "Database opened in read-only mode due to OOD condition");
+							warn!(target: TARGET, "Database opened with background flush disabled due to OOD condition. Write operations will be blocked at application level.");
 							(db, true) // Mark as OOD read-only mode
 						}
 						Err(_) => {
-							error!(target: TARGET, "Failed to open database even in read-only mode due to OOD");
+							error!(target: TARGET, "Failed to open database even with background flush disabled due to OOD");
 							return Err(err);
 						}
 					}
@@ -253,10 +253,10 @@ impl Datastore {
 	/// Open database with normal configuration
 	async fn open(
 		mut opts: Options,
-		read_only: bool,
+		force_disabling_flush: bool,
 		path: &str,
 	) -> Result<Pin<Arc<OptimisticTransactionDB>>> {
-		if !*cnf::ROCKSDB_BACKGROUND_FLUSH || read_only {
+		if !*cnf::ROCKSDB_BACKGROUND_FLUSH || force_disabling_flush {
 			// Background flush is disabled which
 			// means that the WAL will be flushed
 			// whenever a transaction is committed.
@@ -304,11 +304,11 @@ impl Datastore {
 		opts.set_wait(true);
 		// Flush the WAL to storage
 		if let Err(e) = self.db.flush_wal(true) {
-			error!("An error occured flushing the WAL buffer to disk: {e}");
+			error!("An error occurred flushing the WAL buffer to disk: {e}");
 		}
 		// Flush the memtables to SST
 		if let Err(e) = self.db.flush_opt(&opts) {
-			error!("An error occured flushing memtables to SST files: {e}");
+			error!("An error occurred flushing memtables to SST files: {e}");
 		}
 		// All good
 		Ok(())
@@ -323,7 +323,7 @@ impl Datastore {
 		// Check if database is in OOD read-only mode and a write transaction is requested
 		if self.ood_readonly && write {
 			warn!(target: TARGET, "Write transaction requested but database is in OOD read-only mode");
-			return Err(Error::TxReadonly.into());
+			return Err(Error::DbReadOnly.into());
 		}
 
 		// Set the transaction options

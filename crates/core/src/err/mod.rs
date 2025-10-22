@@ -55,6 +55,12 @@ pub(crate) enum Error {
 	#[error("Couldn't write to a read only transaction")]
 	TxReadonly,
 
+	/// The datastore is read-only due to disk saturation
+	#[error(
+		"The datastore is read-only due to disk saturation. Please free up disk space and restart the instance to enable write operations"
+	)]
+	DbReadOnly,
+
 	/// The conditional value in the request was not equal
 	#[error("Value being checked was not correct")]
 	TxConditionNotMet,
