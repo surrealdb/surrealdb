@@ -33,12 +33,23 @@ use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::types::{PublicValue, PublicVariables};
-use crate::val::{Datetime, Value};
+use crate::val::{Datetime, Object, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SigninData {
 	pub token: String,
 	pub refresh: Option<String>,
+}
+
+impl From<SigninData> for Value {
+	fn from(v: SigninData) -> Value {
+		let mut out = Object::default();
+		out.insert("token".to_string(), v.token.into());
+		if let Some(refresh) = v.refresh {
+			out.insert("refresh".to_string(), refresh.into());
+		}
+		out.into()
+	}
 }
 
 pub async fn signin(
