@@ -7,7 +7,6 @@ use std::time::Duration;
 use serde_json::json;
 use surrealdb::IndexedResults;
 use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess};
-use surrealdb::opt::capabilities::{Capabilities, ExperimentalFeature};
 use surrealdb::opt::{Config, PatchOp, PatchOps, Resource};
 use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, Value, array, object};
 use surrealdb_core::syn;
@@ -1766,11 +1765,7 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 }
 
 pub async fn refresh_tokens(new_db: impl CreateDb) {
-	// Enable the bearer access capability
-	// This only makes a difference for local engines. For remote engines, enable on the server.
-	let capabilities =
-		Capabilities::new().with_experimental_feature_allowed(ExperimentalFeature::BearerAccess);
-	let config = Config::new().capabilities(capabilities);
+	let config = Config::new();
 	let (permit, db) = new_db.create_db(config).await;
 	let namespace = Ulid::new().to_string();
 	let database = Ulid::new().to_string();

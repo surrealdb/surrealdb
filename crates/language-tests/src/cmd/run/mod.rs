@@ -404,9 +404,6 @@ async fn run_test_with_dbs(
 		references_enabled: dbs
 			.get_capabilities()
 			.allows_experimental(&ExperimentalTarget::RecordReferences),
-		bearer_access_enabled: dbs
-			.get_capabilities()
-			.allows_experimental(&ExperimentalTarget::BearerAccess),
 		define_api_enabled: dbs
 			.get_capabilities()
 			.allows_experimental(&ExperimentalTarget::DefineApi),

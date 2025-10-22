@@ -147,9 +147,7 @@ pub struct ParserSettings {
 	pub query_recursion_limit: usize,
 	/// Whether record references are enabled.
 	pub references_enabled: bool,
-	/// Whether bearer access is enabled
-	pub bearer_access_enabled: bool,
-	/// Whether bearer access is enabled
+	/// Whether define api is enabled
 	pub define_api_enabled: bool,
 	/// Whether the files feature is enabled
 	pub files_enabled: bool,
@@ -163,7 +161,6 @@ impl Default for ParserSettings {
 			object_recursion_limit: 100,
 			query_recursion_limit: 20,
 			references_enabled: false,
-			bearer_access_enabled: false,
 			define_api_enabled: false,
 			files_enabled: false,
 		}
@@ -174,7 +171,6 @@ impl ParserSettings {
 	pub fn default_with_experimental(enabled: bool) -> Self {
 		ParserSettings {
 			references_enabled: enabled,
-			bearer_access_enabled: enabled,
 			define_api_enabled: enabled,
 			files_enabled: enabled,
 			..Self::default()

@@ -13,7 +13,6 @@ use crate::catalog;
 use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
 use crate::iam::token::Claims;
@@ -160,27 +159,10 @@ pub async fn db_access(
 			}
 			// Create refresh token if defined for the record access method
 			let refresh = match &at.bearer {
-				Some(_) => {
-					// TODO(gguillemas): Remove this once bearer access is no longer experimental
-					if !kvs
-						.get_capabilities()
-						.allows_experimental(&ExperimentalTarget::BearerAccess)
-					{
-						debug!("Will not create refresh token with disabled bearer access feature");
-						None
-					} else {
-						Some(
-							create_refresh_token_record(
-								kvs,
-								av.name.clone(),
-								&ns,
-								&db,
-								rid.clone().into(),
-							)
-							.await?,
-						)
-					}
-				}
+				Some(_) => Some(
+					create_refresh_token_record(kvs, av.name.clone(), &ns, &db, rid.clone().into())
+						.await?,
+				),
 				None => None,
 			};
 			// Log the authenticated access method info
@@ -242,7 +224,6 @@ mod tests {
 	use chrono::Duration;
 
 	use super::*;
-	use crate::dbs::Capabilities;
 	use crate::iam::Role;
 
 	#[tokio::test]
@@ -421,9 +402,7 @@ mod tests {
 		}
 		// Test with refresh
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"

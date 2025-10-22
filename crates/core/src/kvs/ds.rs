@@ -1260,9 +1260,6 @@ impl Datastore {
 			references_enabled: ctx
 				.get_capabilities()
 				.allows_experimental(&ExperimentalTarget::RecordReferences),
-			bearer_access_enabled: ctx
-				.get_capabilities()
-				.allows_experimental(&ExperimentalTarget::BearerAccess),
 			define_api_enabled: ctx
 				.get_capabilities()
 				.allows_experimental(&ExperimentalTarget::DefineApi),
