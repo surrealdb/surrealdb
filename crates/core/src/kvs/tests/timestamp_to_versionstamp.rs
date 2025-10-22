@@ -3,7 +3,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use super::CreateDs;
-use crate::catalog::providers::DatabaseProvider;
+use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
 use crate::dbs::Session;
 use crate::dbs::node::Timestamp;
 use crate::kvs::KVKey;
@@ -31,14 +31,11 @@ pub async fn timestamp_to_versionstamp(new_ds: impl CreateDs) {
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 
-	// Declare ns/db
-	ds.execute("USE NS myns; USE DB mydb; CREATE record", &Session::owner(), None).await.unwrap();
-
 	let db = {
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		// The ns and db should already exist, but we need to get the versionstamp for the db
-		let db = tx.get_db_by_name("myns", "mydb").await.unwrap().unwrap();
-		tx.cancel().await.unwrap();
+		let db = tx.ensure_ns_db(None, "myns", "mydb", false).await.unwrap();
+		tx.commit().await.unwrap();
 		db
 	};
 
@@ -94,8 +91,8 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 	let db = {
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		// The ns and db should already exist, but we need to get the versionstamp for the db
-		let db = tx.get_db_by_name("myns", "mydb").await.unwrap().unwrap();
-		tx.cancel().await.unwrap();
+		let db = tx.get_or_add_db(None, "myns", "mydb", false).await.unwrap();
+		tx.commit().await.unwrap();
 		db
 	};
 
