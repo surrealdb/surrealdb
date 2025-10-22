@@ -5,21 +5,11 @@ use revision::revisioned;
 use super::Value;
 use super::statements::info::InfoStructure;
 use crate::expr::Expr;
-use crate::expr::expression::VisitExpression;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct Reference {
 	pub(crate) on_delete: ReferenceDeleteStrategy,
-}
-
-impl VisitExpression for Reference {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.on_delete.visit(visitor);
-	}
 }
 
 impl fmt::Display for Reference {
@@ -47,16 +37,6 @@ pub(crate) enum ReferenceDeleteStrategy {
 	Custom(Expr),
 }
 
-impl VisitExpression for ReferenceDeleteStrategy {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		if let Self::Custom(expr) = self {
-			expr.visit(visitor);
-		}
-	}
-}
 impl fmt::Display for ReferenceDeleteStrategy {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {

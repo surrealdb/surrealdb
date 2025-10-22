@@ -1,7 +1,5 @@
 use std::fmt::{self, Display};
 
-use crate::expr::Expr;
-use crate::expr::expression::VisitExpression;
 use crate::expr::field::Fields;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -12,17 +10,6 @@ pub(crate) enum Output {
 	After,
 	Before,
 	Fields(Fields),
-}
-
-impl VisitExpression for Output {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		if let Self::Fields(f) = self {
-			f.visit(visitor);
-		}
-	}
 }
 
 impl Default for Output {

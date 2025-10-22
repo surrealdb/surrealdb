@@ -15,7 +15,7 @@ use crate::dbs::{Force, Options};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
-use crate::expr::expression::VisitExpression;
+
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::UpdateStatement;
@@ -37,17 +37,6 @@ pub(crate) struct DefineTableStatement {
 	pub changefeed: Option<ChangeFeed>,
 	pub comment: Option<Expr>,
 	pub table_type: TableType,
-}
-
-impl VisitExpression for DefineTableStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.view.iter().for_each(|view| view.visit(visitor));
-		self.comment.iter().for_each(|comment| comment.visit(visitor));
-	}
 }
 
 impl Default for DefineTableStatement {
