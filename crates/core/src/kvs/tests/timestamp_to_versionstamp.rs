@@ -92,7 +92,7 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 	ds.execute("USE NS myns; USE DB mydb; CREATE record", &Session::owner(), None).await.unwrap();
 
 	let db = {
-		let tx = ds.transaction(Read, Optimistic).await.unwrap();
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		// The ns and db should already exist, but we need to get the versionstamp for the db
 		let db = tx.get_db_by_name("myns", "mydb").await.unwrap().unwrap();
 		tx.cancel().await.unwrap();

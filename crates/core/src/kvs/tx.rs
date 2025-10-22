@@ -577,10 +577,6 @@ impl NamespaceProvider for Transaction {
 		}
 	}
 
-	async fn get_next_ns_id(&self, ctx: Option<&MutableContext>) -> Result<NamespaceId> {
-		self.sequences.next_namespace_id(ctx, self).await
-	}
-
 	async fn put_ns(&self, ns: NamespaceDefinition) -> Result<Arc<NamespaceDefinition>> {
 		let key = crate::key::root::ns::new(&ns.name);
 		self.set(&key, &ns, None).await?;
@@ -593,6 +589,10 @@ impl NamespaceProvider for Transaction {
 		self.cache.insert(qey, entry);
 
 		Ok(cached_ns)
+	}
+
+	async fn get_next_ns_id(&self, ctx: Option<&MutableContext>) -> Result<NamespaceId> {
+		self.sequences.next_namespace_id(ctx, self).await
 	}
 }
 
@@ -625,11 +625,13 @@ impl DatabaseProvider for Transaction {
 			Some(val) => val.try_into_type().map(Some),
 			None => {
 				let Some(ns) = self.get_ns_by_name(ns).await? else {
+					warn!("No namespace found for name {}", ns);
 					return Ok(None);
 				};
 
 				let key = crate::key::namespace::db::new(ns.namespace_id, db);
 				let Some(db_def) = self.get(&key, None).await? else {
+					warn!("No database found for namespace {} and name {}", ns.name, db);
 					return Ok(None);
 				};
 
@@ -657,10 +659,6 @@ impl DatabaseProvider for Transaction {
 			// The entry is in the cache
 			Some(val) => {
 				let t = val.try_into_type()?;
-				// When upwards is true, ensure the namespace is also cached
-				if upwards {
-					self.get_ns_by_name(ns).await?;
-				}
 				Ok(t)
 			}
 			// The entry is not in the cache
