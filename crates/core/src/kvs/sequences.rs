@@ -212,7 +212,7 @@ impl Sequences {
 			Entry::Occupied(e) => e.get().clone(),
 			Entry::Vacant(e) => {
 				let s = Arc::new(Mutex::new(
-					Sequence::load(self, tx, &seq, start, batch, timeout).await?,
+					Sequence::load(ctx, self, tx, &seq, start, batch, timeout).await?,
 				));
 				e.insert(s).clone()
 			}
@@ -302,6 +302,7 @@ struct Sequence {
 
 impl Sequence {
 	async fn load(
+		ctx: Option<&MutableContext>,
 		sqs: &Sequences,
 		tx: &Transaction,
 		seq: &SequenceDomain,
@@ -317,7 +318,8 @@ impl Sequence {
 				next: start,
 			}
 		};
-		let (from, to) = Self::check_batch_allocation(sqs, seq, st.next, batch).await?;
+		let (from, to) =
+			Self::find_batch_allocation(sqs, ctx, seq, st.next, batch, timeout).await?;
 		st.next = from;
 		Ok(Self {
 			tf: sqs.tf.clone(),
@@ -345,9 +347,18 @@ impl Sequence {
 		// write the state on the KV store
 		let tx =
 			self.tf.transaction(TransactionType::Write, LockType::Optimistic, sqs.clone()).await?;
-		tx.set(&self.state_key, &revision::to_vec(&self.st)?, None).await?;
-		tx.commit().await?;
-		Ok(v)
+
+		// Execute operations and ensure transaction is cancelled on error
+		match tx.set(&self.state_key, &revision::to_vec(&self.st)?, None).await {
+			Ok(_) => {
+				tx.commit().await?;
+				Ok(v)
+			}
+			Err(e) => {
+				tx.cancel().await?;
+				Err(e)
+			}
+		}
 	}
 
 	async fn find_batch_allocation(
@@ -403,35 +414,50 @@ impl Sequence {
 	) -> Result<(i64, i64)> {
 		let tx =
 			sqs.tf.transaction(TransactionType::Write, LockType::Optimistic, sqs.clone()).await?;
-		let batch_range = seq.new_batch_range_keys()?;
-		let val = tx.getr(batch_range, None).await?;
-		let mut next_start = next;
-		// Scan every existing batches
-		for (key, val) in val.iter() {
-			let ba: BatchValue = revision::from_slice(val)?;
-			next_start = next_start.max(ba.to);
-			// The batch belongs to this node
-			if ba.owner == sqs.nid {
-				// If a previous batch belongs to this node, we can remove it,
-				// as we are going to create a new one
-				// If the current value is still in the batch range, we return it
-				if next < ba.to {
-					return Ok((next, ba.to));
+
+		// Execute operations and ensure transaction is cancelled on error
+		let result = async {
+			let batch_range = seq.new_batch_range_keys()?;
+			let val = tx.getr(batch_range, None).await?;
+			let mut next_start = next;
+			// Scan every existing batches
+			for (key, val) in val.iter() {
+				let ba: BatchValue = revision::from_slice(val)?;
+				next_start = next_start.max(ba.to);
+				// The batch belongs to this node
+				if ba.owner == sqs.nid {
+					// If a previous batch belongs to this node, we can remove it,
+					// as we are going to create a new one
+					// If the current value is still in the batch range, we return it
+					if next < ba.to {
+						return Ok((next, ba.to));
+					}
+					// Otherwise we can remove this old batch and create a new one
+					tx.del(key).await?;
 				}
-				// Otherwise we can remove this old batch and create a new one
-				tx.del(key).await?;
+			}
+			// We compute the new batch
+			let next_to = next_start + batch as i64;
+			// And store it in the KV store
+			let bv = revision::to_vec(&BatchValue {
+				to: next_to,
+				owner: sqs.nid,
+			})?;
+			let batch_key = seq.new_batch_key(next_start)?;
+			tx.set(&batch_key, &bv, None).await?;
+			Ok::<(i64, i64), anyhow::Error>((next_start, next_to))
+		}
+		.await;
+
+		match result {
+			Ok(res) => {
+				tx.commit().await?;
+				Ok(res)
+			}
+			Err(e) => {
+				tx.cancel().await?;
+				Err(e)
 			}
 		}
-		// We compute the new batch
-		let next_to = next_start + batch as i64;
-		// And store it in the KV store
-		let bv = revision::to_vec(&BatchValue {
-			to: next_to,
-			owner: sqs.nid,
-		})?;
-		let batch_key = seq.new_batch_key(next_start)?;
-		tx.set(&batch_key, &bv, None).await?;
-		tx.commit().await?;
-		Ok((next_start, next_to))
 	}
 }
