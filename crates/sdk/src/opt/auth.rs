@@ -150,32 +150,34 @@ impl<T, P> Credentials<T> for Record<P> where P: SurrealValue {}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[non_exhaustive]
-pub struct Token<T: SurrealValue = AccessToken> {
-	pub access: T,
+pub struct Token {
+	pub access: AccessToken,
 	pub refresh: Option<RefreshToken>,
 }
 
-impl<T: SurrealValue> SurrealValue for Token<T> {
+impl SurrealValue for Token {
 	fn kind_of() -> Kind {
-		kind!({ token: any, refresh: any })
+		kind!(string | { token: string, refresh: none | string })
 	}
 
 	fn into_value(self) -> Value {
-		let mut obj = Object::new();
-		obj.insert("token".to_string(), self.access.into_value());
-		obj.insert("refresh".to_string(), self.refresh.into_value());
-		Value::Object(obj)
+		match self.refresh {
+			Some(refresh) => {
+				let mut obj = Object::new();
+				obj.insert("token".to_string(), self.access.into_value());
+				obj.insert("refresh".to_string(), refresh.into_value());
+				Value::Object(obj)
+			}
+			None => self.access.into_value(),
+		}
 	}
 
 	fn from_value(value: Value) -> surrealdb_types::anyhow::Result<Self> {
 		match value {
-			value @ Value::String(_) => Ok(Token {
-				access: T::from_value(value)?,
-				refresh: None,
-			}),
+			Value::String(string) => Ok(Token::from(string)),
 			value => {
 				let mut obj = Object::from_value(value)?;
-				let access = T::from_value(obj.remove("token").unwrap_or_default())?;
+				let access = AccessToken::from_value(obj.remove("token").unwrap_or_default())?;
 				let refresh = match obj.remove("refresh") {
 					Some(value) => SurrealValue::from_value(value)?,
 					None => None,
@@ -278,8 +280,8 @@ impl From<(AccessToken, RefreshToken)> for Token {
 	}
 }
 
-impl From<(Option<AccessToken>, Option<RefreshToken>)> for Token<Option<AccessToken>> {
-	fn from(token: (Option<AccessToken>, Option<RefreshToken>)) -> Self {
+impl From<(AccessToken, Option<RefreshToken>)> for Token {
+	fn from(token: (AccessToken, Option<RefreshToken>)) -> Self {
 		Self {
 			access: token.0,
 			refresh: token.1,

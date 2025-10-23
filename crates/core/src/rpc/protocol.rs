@@ -17,8 +17,9 @@ use crate::sql::{
 	InsertStatement, KillStatement, LiveStatement, Model, Output, RelateStatement, SelectStatement,
 	TopLevelExpr, UpdateStatement, UpsertStatement,
 };
-use crate::types::{PublicArray, PublicRecordIdKey, PublicUuid, PublicValue, PublicVariables};
-use crate::val::Value;
+use crate::types::{
+	PublicArray, PublicRecordIdKey, PublicUuid, PublicValue, PublicVariables, SurrealValue,
+};
 
 /// utility function converting a `Value::String` into a `Expr::Table`
 fn value_to_table(value: PublicValue) -> Expr {
@@ -246,7 +247,7 @@ pub trait RpcProtocol {
 		let out: Result<PublicValue> =
 			crate::iam::signup::signup(self.kvs(), &mut session, params.into())
 				.await
-				.and_then(|v| Value::from(v).try_into());
+				.map(SurrealValue::into_value);
 
 		// Store the updated session
 		self.set_session(session_id, Arc::new(session));
@@ -275,7 +276,7 @@ pub trait RpcProtocol {
 		let out: Result<PublicValue> =
 			crate::iam::signin::signin(self.kvs(), &mut session, params.into())
 				.await
-				.and_then(|v| Value::from(v).try_into());
+				.map(SurrealValue::into_value);
 		// Store the updated session
 		self.set_session(session_id, Arc::new(session));
 		// Drop the mutex guard

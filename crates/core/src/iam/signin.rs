@@ -32,26 +32,18 @@ use crate::iam::{self, Auth, algorithm_to_jwt_algorithm};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::types::{PublicValue, PublicVariables};
-use crate::val::{Datetime, Object, Value};
+use crate::types::{PublicValue, PublicVariables, SurrealValue};
+use crate::val::{Datetime, Value};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct SigninData {
-	pub token: String,
-	pub refresh: Option<String>,
+#[derive(Clone, Debug, SurrealValue, Eq, PartialEq, Hash)]
+#[surreal(untagged)]
+pub enum SigninData {
+	Token(String),
+	WithRefresh {
+		token: String,
+		refresh: String,
+	},
 }
-
-impl From<SigninData> for Value {
-	fn from(v: SigninData) -> Value {
-		let mut out = Object::default();
-		out.insert("token".to_string(), v.token.into());
-		if let Some(refresh) = v.refresh {
-			out.insert("refresh".to_string(), refresh.into());
-		}
-		out.into()
-	}
-}
-
 pub async fn signin(
 	kvs: &Datastore,
 	session: &mut Session,
@@ -294,9 +286,12 @@ pub async fn db_access(
 											// Check the authentication token
 											match enc {
 												// The auth token was created successfully
-												Ok(token) => Ok(SigninData {
-													token,
-													refresh,
+												Ok(token) => Ok(match refresh {
+													Some(refresh) => SigninData::WithRefresh {
+														token,
+														refresh,
+													},
+													None => SigninData::Token(token),
 												}),
 												_ => Err(anyhow::Error::new(
 													Error::TokenMakingFailed,
@@ -408,10 +403,7 @@ pub async fn db_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(SigninData {
-					token: tk,
-					refresh: None,
-				}),
+				Ok(tk) => Ok(SigninData::Token(tk)),
 				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 			}
 		}
@@ -502,10 +494,7 @@ pub async fn ns_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(SigninData {
-					token: tk,
-					refresh: None,
-				}),
+				Ok(tk) => Ok(SigninData::Token(tk)),
 				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 			}
 		}
@@ -556,10 +545,7 @@ pub async fn root_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(SigninData {
-					token: tk,
-					refresh: None,
-				}),
+				Ok(tk) => Ok(SigninData::Token(tk)),
 				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 			}
 		}
@@ -821,9 +807,12 @@ pub async fn signin_bearer(
 	};
 	// Return the authentication token.
 	match enc {
-		Ok(token) => Ok(SigninData {
-			token,
-			refresh,
+		Ok(token) => Ok(match refresh {
+			Some(refresh) => SigninData::WithRefresh {
+				token,
+				refresh,
+			},
+			None => SigninData::Token(token),
 		}),
 		_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 	}
@@ -1088,7 +1077,10 @@ mod tests {
 
 			match res {
 				Ok(data) => {
-					assert!(data.refresh.is_none(), "Refresh token was unexpectedly returned")
+					assert!(
+						matches!(data, SigninData::WithRefresh { .. }),
+						"Refresh token was unexpectedly returned"
+					)
 				}
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			}
@@ -1139,9 +1131,12 @@ mod tests {
 
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
 			let refresh = match res {
-				Ok(data) => match data.refresh {
-					Some(refresh) => refresh,
-					None => panic!("Refresh token was not returned"),
+				Ok(data) => match data {
+					SigninData::WithRefresh {
+						refresh,
+						..
+					} => refresh,
+					SigninData::Token(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
@@ -1179,12 +1174,15 @@ mod tests {
 			.await;
 			// Authentication should be identical as with user credentials
 			match res {
-				Ok(data) => match data.refresh {
-					Some(new_refresh) => assert!(
+				Ok(data) => match data {
+					SigninData::WithRefresh {
+						refresh: new_refresh,
+						..
+					} => assert!(
 						new_refresh != refresh,
 						"New refresh token is identical to used one"
 					),
-					None => panic!("Refresh token was not returned"),
+					SigninData::Token(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
@@ -1271,9 +1269,12 @@ mod tests {
 			)
 			.await;
 			let refresh = match res {
-				Ok(data) => match data.refresh {
-					Some(refresh) => refresh,
-					None => panic!("Refresh token was not returned"),
+				Ok(data) => match data {
+					SigninData::WithRefresh {
+						refresh,
+						..
+					} => refresh,
+					SigninData::Token(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
@@ -1344,9 +1345,12 @@ mod tests {
 
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
 			let refresh = match res {
-				Ok(data) => match data.refresh {
-					Some(refresh) => refresh,
-					None => panic!("Refresh token was not returned"),
+				Ok(data) => match data {
+					SigninData::WithRefresh {
+						refresh,
+						..
+					} => refresh,
+					SigninData::Token(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
@@ -1494,11 +1498,18 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Decode token and check that it has been issued as intended
 			if let Ok(sd) = res {
+				let token = match &sd {
+					SigninData::Token(token) => token,
+					SigninData::WithRefresh {
+						token,
+						..
+					} => token,
+				};
 				// Check that token can be verified with the defined algorithm
 				let val = Validation::new(Algorithm::RS256);
 				// Check that token can be verified with the defined public key
 				let token_data = decode::<Claims>(
-					&sd.token,
+					token,
 					&DecodingKey::from_rsa_pem(public_key.as_ref()).unwrap(),
 					&val,
 				)
@@ -1703,9 +1714,16 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 					// Check issued token
 					if let Ok(sd) = res {
+						let token = match &sd {
+							SigninData::Token(token) => token,
+							SigninData::WithRefresh {
+								token,
+								..
+							} => token,
+						};
 						// Decode token without validation
 						let token_data =
-							decode::<Claims>(&sd.token, &DecodingKey::from_secret(&[]), &{
+							decode::<Claims>(token, &DecodingKey::from_secret(&[]), &{
 								let mut validation =
 									Validation::new(jsonwebtoken::Algorithm::HS256);
 								validation.insecure_disable_signature_validation();

@@ -8,7 +8,7 @@ use serde::Serialize;
 use surrealdb::types::Value;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::RouteTarget;
-use surrealdb_core::iam::signin::signin;
+use surrealdb_core::iam::signin::{SigninData, signin};
 use surrealdb_core::syn;
 use surrealdb_types::SurrealValue;
 use tower_http::limit::RequestBodyLimitLayer;
@@ -71,10 +71,35 @@ async fn handler(
 		Ok(Value::Object(vars)) => {
 			match signin(kvs, &mut session, vars.into()).await {
 				// Authentication was successful
-				Ok(v) => match accept.as_deref() {
-					// Simple serialization
-					Some(Accept::ApplicationJson) => {
-						Ok(Output::json_other(&Success::new(v.token, v.refresh)))
+				Ok(v) => {
+					let (token, refresh) = match v {
+						SigninData::Token(token) => (token, None),
+						SigninData::WithRefresh {
+							token,
+							refresh,
+						} => (token, Some(refresh)),
+					};
+					match accept.as_deref() {
+						// Simple serialization
+						Some(Accept::ApplicationJson) => {
+							Ok(Output::json_other(&Success::new(token, refresh)))
+						}
+						Some(Accept::ApplicationCbor) => {
+							let success = Success::new(token, refresh).into_value();
+							Ok(Output::cbor(&success))
+						}
+						// Text serialization
+						// NOTE: Only the token is returned in a plain text response.
+						Some(Accept::TextPlain) => Ok(Output::Text(token)),
+						// Internal serialization
+						Some(Accept::ApplicationFlatbuffers) => {
+							let success = Success::new(token, refresh).into_value();
+							Ok(Output::flatbuffers(&success))
+						}
+						// Return nothing
+						None => Ok(Output::None),
+						// An incorrect content-type was requested
+						_ => Err(NetError::InvalidType.into()),
 					}
 					Some(Accept::ApplicationCbor) => {
 						let success = Success::new(v.token, v.refresh).into_value();

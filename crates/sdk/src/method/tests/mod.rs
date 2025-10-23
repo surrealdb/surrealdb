@@ -14,7 +14,7 @@ use surrealdb_types::Variables;
 use types::{USER, User};
 
 use crate::opt::PatchOp;
-use crate::opt::auth::{AccessToken, Database, Namespace, Record, Root, Token};
+use crate::opt::auth::{Database, Namespace, Record, Root, Token};
 use crate::{IndexedResults as QueryResponse, Surreal};
 
 static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
@@ -34,7 +34,7 @@ async fn api() {
 	let _: () = DB.use_ns("test-ns").use_db("test-db").await.unwrap();
 
 	// signup
-	let _: Token<Option<AccessToken>> = DB
+	let _: Token = DB
 		.signup(Record {
 			namespace: "test-ns".to_string(),
 			database: "test-db".to_string(),

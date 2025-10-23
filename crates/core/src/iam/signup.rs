@@ -20,28 +20,19 @@ use crate::iam::{Actor, Auth, Level, algorithm_to_jwt_algorithm};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::types::PublicVariables;
-use crate::val::{Object, Value};
+use crate::types::{PublicVariables, SurrealValue};
+use crate::val::Value;
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, SurrealValue, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[surreal(untagged)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct SignupData {
-	pub token: Option<String>,
-	pub refresh: Option<String>,
-}
-
-impl From<SignupData> for Value {
-	fn from(v: SignupData) -> Value {
-		let mut out = Object::default();
-		if let Some(token) = v.token {
-			out.insert("token".to_string(), token.into());
-		}
-		if let Some(refresh) = v.refresh {
-			out.insert("refresh".to_string(), refresh.into());
-		}
-		out.into()
-	}
+pub enum SignupData {
+	Token(String),
+	WithRefresh {
+		token: String,
+		refresh: String,
+	},
 }
 
 pub async fn signup(
@@ -190,9 +181,12 @@ pub async fn db_access(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(token) => Ok(SignupData {
-					token: Some(token),
-					refresh,
+				Ok(token) => Ok(match refresh {
+					Some(refresh) => SignupData::WithRefresh {
+						token,
+						refresh,
+					},
+					None => SignupData::Token(token),
 				}),
 				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 			}
@@ -345,7 +339,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_signup_record_with_refresh() {
-		use crate::iam::signin;
+		use crate::iam::signin::{self, SigninData};
+		use crate::iam::signup::SignupData;
 
 		// Test without refresh
 		{
@@ -395,7 +390,10 @@ mod tests {
 
 			match res {
 				Ok(data) => {
-					assert!(data.refresh.is_none(), "Refresh token was unexpectedly returned")
+					assert!(
+						matches!(data, SignupData::WithRefresh { .. }),
+						"Refresh token was unexpectedly returned"
+					)
 				}
 				Err(e) => panic!("Failed to signup with credentials: {e}"),
 			}
@@ -449,9 +447,12 @@ mod tests {
 
 			assert!(res.is_ok(), "Failed to signup with credentials: {:?}", res);
 			let refresh = match res {
-				Ok(data) => match data.refresh {
-					Some(refresh) => refresh,
-					None => panic!("Refresh token was not returned"),
+				Ok(data) => match data {
+					SignupData::WithRefresh {
+						refresh,
+						..
+					} => refresh,
+					SignupData::Token(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signup with credentials: {e}"),
 			};
@@ -489,12 +490,15 @@ mod tests {
 			.await;
 			// Authentication should be identical as with user credentials
 			match res {
-				Ok(data) => match data.refresh {
-					Some(new_refresh) => assert!(
+				Ok(data) => match data {
+					SigninData::WithRefresh {
+						refresh: new_refresh,
+						..
+					} => assert!(
 						new_refresh != refresh,
 						"New refresh token is identical to used one"
 					),
-					None => panic!("Refresh token was not returned"),
+					SigninData::Token(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
@@ -656,16 +660,19 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			);
 
 			// Decode token and check that it has been issued as intended
-			if let Ok(SignupData {
-				token: Some(tk),
-				..
-			}) = res
-			{
+			if let Ok(sd) = res {
+				let token = match &sd {
+					SignupData::Token(token) => token,
+					SignupData::WithRefresh {
+						token,
+						..
+					} => token,
+				};
 				// Check that token can be verified with the defined algorithm
 				let val = Validation::new(Algorithm::RS256);
 				// Check that token can be verified with the defined public key
 				let token_data = decode::<Claims>(
-					&tk,
+					token,
 					&DecodingKey::from_rsa_pem(public_key.as_ref()).unwrap(),
 					&val,
 				)
