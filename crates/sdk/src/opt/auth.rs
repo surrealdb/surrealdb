@@ -162,7 +162,7 @@ impl<T: SurrealValue> SurrealValue for Token<T> {
 
 	fn into_value(self) -> Value {
 		let mut obj = Object::new();
-		obj.insert("access".to_string(), self.access.into_value());
+		obj.insert("token".to_string(), self.access.into_value());
 		obj.insert("refresh".to_string(), self.refresh.into_value());
 		Value::Object(obj)
 	}
@@ -175,7 +175,7 @@ impl<T: SurrealValue> SurrealValue for Token<T> {
 			}),
 			value => {
 				let mut obj = Object::from_value(value)?;
-				let access = T::from_value(obj.remove("access").unwrap_or_default())?;
+				let access = T::from_value(obj.remove("token").unwrap_or_default())?;
 				let refresh = match obj.remove("refresh") {
 					Some(value) => SurrealValue::from_value(value)?,
 					None => None,
