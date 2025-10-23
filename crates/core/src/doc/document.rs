@@ -7,7 +7,7 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use crate::catalog::providers::{CatalogProvider, TableProvider};
-use crate::catalog::{self, DatabaseDefinition, Permission, TableDefinition};
+use crate::catalog::{self, Data, DatabaseDefinition, Permission, Record, TableDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Workable};
 use crate::doc::alter::ComputedData;
@@ -16,7 +16,6 @@ use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
 use crate::kvs::cache;
-use crate::val::record::{Data, Record};
 use crate::val::{RecordId, Value};
 
 pub(crate) struct Document {

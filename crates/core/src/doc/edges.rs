@@ -1,14 +1,13 @@
 use anyhow::{Result, ensure};
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{Relation, TableType};
+use crate::catalog::{RecordType, Relation, TableType};
 use crate::ctx::Context;
 use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::expr::Dir;
 use crate::expr::paths::{IN, OUT};
-use crate::val::record::RecordType;
 
 impl Document {
 	pub(super) async fn store_edges_data(

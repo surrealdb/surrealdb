@@ -17,7 +17,7 @@ use crate::catalog::providers::{
 };
 use crate::catalog::{
 	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, IndexId,
-	NamespaceDefinition, NamespaceId, TableDefinition,
+	NamespaceDefinition, NamespaceId, Record, TableDefinition,
 };
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::dbs::node::Node;
@@ -29,7 +29,6 @@ use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::key::KVKey;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::{Transactor, cache};
-use crate::val::record::Record;
 use crate::val::{RecordId, RecordIdKey};
 
 pub struct Transaction {

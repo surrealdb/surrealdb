@@ -31,7 +31,6 @@ pub(crate) mod geometry;
 pub(crate) mod number;
 pub(crate) mod object;
 pub(crate) mod range;
-pub(crate) mod record;
 pub(crate) mod record_id;
 pub(crate) mod regex;
 pub(crate) mod table;

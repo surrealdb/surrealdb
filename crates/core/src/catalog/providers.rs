@@ -9,13 +9,12 @@ use uuid::Uuid;
 
 use crate::catalog;
 use crate::catalog::{
-	DatabaseDefinition, DatabaseId, IndexId, NamespaceDefinition, NamespaceId, TableDefinition,
-	UserDefinition,
+	DatabaseDefinition, DatabaseId, IndexId, NamespaceDefinition, NamespaceId, Record,
+	TableDefinition, UserDefinition,
 };
 use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::val::RecordIdKey;
-use crate::val::record::Record;
 
 /// SurrealDB Node provider.
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]

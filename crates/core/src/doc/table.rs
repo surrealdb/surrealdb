@@ -7,7 +7,7 @@ use reblessive::tree::Stk;
 use rust_decimal::Decimal;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{TableDefinition, ViewDefinition};
+use crate::catalog::{FieldStats, TableDefinition, ViewDefinition};
 use crate::ctx::Context;
 use crate::dbs::{Force, Options, Statement};
 use crate::doc::{CursorDoc, Document};
@@ -22,7 +22,6 @@ use crate::expr::{
 	AssignOperator, BinaryOperator, Cond, Data, Expr, Field, Fields, FlowResultExt as _, Function,
 	FunctionCall, Groups, Idiom, Literal, Part,
 };
-use crate::val::record::FieldStats;
 use crate::val::{Array, RecordId, RecordIdKey, TryAdd, TrySub, Value};
 
 /// Represents a change to field statistics
