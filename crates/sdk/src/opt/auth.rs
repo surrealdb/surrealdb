@@ -157,7 +157,7 @@ pub struct Token<T: SurrealValue = AccessToken> {
 
 impl<T: SurrealValue> SurrealValue for Token<T> {
 	fn kind_of() -> Kind {
-		kind!({ access: any, refresh: any })
+		kind!({ token: any, refresh: any })
 	}
 
 	fn into_value(self) -> Value {
