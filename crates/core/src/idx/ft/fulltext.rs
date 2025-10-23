@@ -146,7 +146,6 @@ impl FullTextIndex {
 	/// This method retrieves the analyzer from the database and then calls
 	/// `with_analyzer`
 	pub(crate) async fn new(
-		nid: Uuid,
 		ixs: &IndexStores,
 		tx: &Transaction,
 		ikb: IndexKeyBase,
@@ -154,7 +153,7 @@ impl FullTextIndex {
 	) -> Result<Self> {
 		let az = tx.get_db_analyzer(ikb.0.ns, ikb.0.db, &p.analyzer).await?;
 		ixs.mappers().check(&az).await?;
-		Self::with_analyzer(nid, ixs, az, ikb, p)
+		Self::with_analyzer(ixs, az, ikb, p)
 	}
 
 	/// Creates a new full-text index with the specified analyzer
@@ -162,7 +161,6 @@ impl FullTextIndex {
 	/// This method initializes the index with the provided analyzer and
 	/// parameters
 	fn with_analyzer(
-		nid: Uuid,
 		ixs: &IndexStores,
 		az: Arc<catalog::AnalyzerDefinition>,
 		ikb: IndexKeyBase,
@@ -183,7 +181,7 @@ impl FullTextIndex {
 		Ok(Self {
 			analyzer,
 			highlighting: p.highlight,
-			doc_ids: SeqDocIds::new(nid, ikb.clone()),
+			doc_ids: SeqDocIds::new(ikb.clone()),
 			ikb,
 			bm25,
 		})
@@ -1033,7 +1031,7 @@ mod tests {
 				scoring: Default::default(),
 				highlight: true,
 			});
-			let nid = Uuid::from_u128(1);
+			let nid = Uuid::new_v4();
 			let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "t", IndexId(3));
 			let opt = Options::default()
 				.with_id(nid)
@@ -1041,7 +1039,6 @@ mod tests {
 				.with_db(Some("testdb".into()));
 			let fti = Arc::new(
 				FullTextIndex::with_analyzer(
-					nid,
 					ctx.get_index_stores(),
 					az.clone(),
 					ikb.clone(),

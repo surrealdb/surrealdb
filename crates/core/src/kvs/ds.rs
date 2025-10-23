@@ -148,7 +148,12 @@ impl TransactionFactory {
 		unused_variables,
 		reason = "Some variables are unused when no backends are enabled."
 	)]
-	pub async fn transaction(&self, write: TransactionType, lock: LockType) -> Result<Transaction> {
+	pub async fn transaction(
+		&self,
+		write: TransactionType,
+		lock: LockType,
+		sequences: Sequences,
+	) -> Result<Transaction> {
 		// Specify if the transaction is writeable
 		let write = match write {
 			Read => false,
@@ -165,9 +170,9 @@ impl TransactionFactory {
 			local,
 			Transactor {
 				inner,
-				stash: super::stash::Stash::default(),
 				cf: cf::Writer::new(),
 			},
+			sequences,
 		))
 	}
 }
@@ -629,8 +634,9 @@ impl Datastore {
 		clock: Arc<SizedClock>,
 	) -> Result<Self> {
 		let tf = TransactionFactory::new(clock, builder);
+		let id = Uuid::new_v4();
 		Ok(Self {
-			id: Uuid::new_v4(),
+			id,
 			transaction_factory: tf.clone(),
 			strict: false,
 			auth_enabled: false,
@@ -647,7 +653,7 @@ impl Datastore {
 			temporary_directory: None,
 			cache: Arc::new(DatastoreCache::new()),
 			buckets: Arc::new(DashMap::new()),
-			sequences: Sequences::new(tf),
+			sequences: Sequences::new(tf, id),
 		})
 	}
 
@@ -671,7 +677,7 @@ impl Datastore {
 			temporary_directory: self.temporary_directory,
 			cache: Arc::new(DatastoreCache::new()),
 			buckets: Arc::new(DashMap::new()),
-			sequences: Sequences::new(self.transaction_factory.clone()),
+			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
 		}
 	}
@@ -963,6 +969,7 @@ impl Datastore {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn changefeed_process(&self, gc_interval: &Duration) -> Result<()> {
 		let lh = LeaseHandler::new(
+			self.sequences.clone(),
 			self.id,
 			self.transaction_factory.clone(),
 			TaskLeaseType::ChangeFeedCleanup,
@@ -1056,6 +1063,7 @@ impl Datastore {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn index_compaction(&self, interval: Duration) -> Result<()> {
 		let lh = LeaseHandler::new(
+			self.sequences.clone(),
 			self.id,
 			self.transaction_factory.clone(),
 			TaskLeaseType::IndexCompaction,
@@ -1090,7 +1098,6 @@ impl Datastore {
 					Some(ix) => match &ix.index {
 						Index::FullText(p) => {
 							let ft = FullTextIndex::new(
-								self.id(),
 								&self.index_stores,
 								&txn,
 								IndexKeyBase::new(ic.ns, ic.db, &ix.table_name, ix.index_id),
@@ -1159,7 +1166,7 @@ impl Datastore {
 	/// }
 	/// ```
 	pub async fn transaction(&self, write: TransactionType, lock: LockType) -> Result<Transaction> {
-		self.transaction_factory.transaction(write, lock).await
+		self.transaction_factory.transaction(write, lock, self.sequences.clone()).await
 	}
 
 	pub async fn health_check(&self) -> Result<()> {
@@ -1489,9 +1496,9 @@ impl Datastore {
 				Some(Error::TxKeyAlreadyExists) => {
 					DbResultError::InternalError("Key already exists in transaction".to_string())
 				}
-				Some(Error::TxRetryable) => {
-					DbResultError::InternalError("Transaction conflict, retry required".to_string())
-				}
+				Some(Error::TxRetryable(e)) => DbResultError::InternalError(format!(
+					"Transaction conflict: {e} - retry required"
+				)),
 				Some(Error::NsEmpty) => {
 					DbResultError::InvalidParams("No namespace specified".to_string())
 				}
@@ -1893,33 +1900,37 @@ impl Datastore {
 
 	pub async fn process_use(
 		&self,
+		ctx: Option<&MutableContext>,
 		session: &mut Session,
 		namespace: Option<String>,
 		database: Option<String>,
 	) -> std::result::Result<QueryResult, DbResultError> {
+		let new_tx = || async {
+			self.transaction(Write, Optimistic)
+				.await
+				.map_err(|err| DbResultError::InternalError(err.to_string()))
+		};
+		let commit_tx = |txn: Transaction| async move {
+			txn.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))
+		};
+
 		let query_result = QueryResultBuilder::started_now();
 		match (namespace, database) {
 			(Some(ns), Some(db)) => {
-				let tx = self
-					.transaction(TransactionType::Write, LockType::Optimistic)
+				let tx = new_tx().await?;
+				tx.ensure_ns_db(ctx, &ns, &db, self.strict)
 					.await
 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
-				tx.ensure_ns_db(&ns, &db, self.strict)
-					.await
-					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
-				tx.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+				commit_tx(tx).await?;
 				session.ns = Some(ns);
 				session.db = Some(db);
 			}
 			(Some(ns), None) => {
-				let tx = self
-					.transaction(TransactionType::Write, LockType::Optimistic)
+				let tx = new_tx().await?;
+				tx.get_or_add_ns(ctx, &ns, self.strict)
 					.await
 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
-				tx.get_or_add_ns(&ns, self.strict)
-					.await
-					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
-				tx.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+				commit_tx(tx).await?;
 				session.ns = Some(ns);
 			}
 			(None, Some(db)) => {
@@ -1928,14 +1939,11 @@ impl Datastore {
 						"Cannot use database without namespace".to_string(),
 					));
 				};
-				let tx = self
-					.transaction(TransactionType::Write, LockType::Optimistic)
+				let tx = new_tx().await?;
+				tx.ensure_ns_db(ctx, &ns, &db, self.strict)
 					.await
 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
-				tx.ensure_ns_db(&ns, &db, self.strict)
-					.await
-					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
-				tx.commit().await.map_err(|err| DbResultError::InternalError(err.to_string()))?;
+				commit_tx(tx).await?;
 				session.db = Some(db);
 			}
 			(None, None) => {
@@ -2000,7 +2008,7 @@ impl Datastore {
 	{
 		let tx = Arc::new(self.transaction(TransactionType::Write, LockType::Optimistic).await?);
 
-		let db = tx.ensure_ns_db(ns, db, false).await?;
+		let db = tx.ensure_ns_db(None, ns, db, false).await?;
 
 		let apis = tx.all_db_apis(db.namespace_id, db.database_id).await?;
 		let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
@@ -2203,81 +2211,98 @@ mod test {
 		let cache = ds.get_cache();
 		let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 
-		let txn = ds.transaction(TransactionType::Write, LockType::Pessimistic).await?;
-		let db = txn.ensure_ns_db("test", "test", false).await?;
-		drop(txn);
+		let db = {
+			let txn = ds.transaction(TransactionType::Write, LockType::Pessimistic).await?;
+			let db = txn.ensure_ns_db(None, "test", "test", false).await?;
+			txn.commit().await?;
+			db
+		};
 
 		// Define the table, set the initial uuids
-		let sql = r"DEFINE TABLE test;".to_owned();
-		let res = &mut ds.execute(&sql, &ses, None).await?;
-		assert_eq!(res.len(), 1);
-		res.remove(0).result.unwrap();
-		// Obtain the initial uuids
-		let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
-		let initial = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
-		let initial_live_query_version =
-			cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
-		txn.cancel().await?;
+		let (initial, initial_live_query_version) = {
+			let sql = r"DEFINE TABLE test;".to_owned();
+			let res = &mut ds.execute(&sql, &ses, None).await?;
+			assert_eq!(res.len(), 1);
+			res.remove(0).result.unwrap();
+			// Obtain the initial uuids
+			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+			let initial = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+			let initial_live_query_version =
+				cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
+			txn.cancel().await?;
+			(initial, initial_live_query_version)
+		};
 
 		// Define some resources to refresh the UUIDs
-		let sql = r"
+		let lqid = {
+			let sql = r"
 		DEFINE FIELD test ON test;
 		DEFINE EVENT test ON test WHEN {} THEN {};
 		DEFINE TABLE view AS SELECT * FROM test;
 		DEFINE INDEX test ON test FIELDS test;
 		LIVE SELECT * FROM test;
 	"
-		.to_owned();
-		let res = &mut ds.execute(&sql, &ses, None).await?;
-		assert_eq!(res.len(), 5);
-		res.remove(0).result.unwrap();
-		res.remove(0).result.unwrap();
-		res.remove(0).result.unwrap();
-		res.remove(0).result.unwrap();
-		let lqid = res.remove(0).result?;
-		assert!(matches!(lqid, PublicValue::Uuid(_)));
+			.to_owned();
+			let res = &mut ds.execute(&sql, &ses, None).await?;
+			assert_eq!(res.len(), 5);
+			res.remove(0).result.unwrap();
+			res.remove(0).result.unwrap();
+			res.remove(0).result.unwrap();
+			res.remove(0).result.unwrap();
+			let lqid = res.remove(0).result?;
+			assert!(matches!(lqid, PublicValue::Uuid(_)));
+			lqid
+		};
+
 		// Obtain the uuids after definitions
-		let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
-		let after_define = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
-		let after_define_live_query_version =
-			cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
-		txn.cancel().await?;
-		// Compare uuids after definitions
-		assert_ne!(initial.cache_indexes_ts, after_define.cache_indexes_ts);
-		assert_ne!(initial.cache_tables_ts, after_define.cache_tables_ts);
-		assert_ne!(initial.cache_events_ts, after_define.cache_events_ts);
-		assert_ne!(initial.cache_fields_ts, after_define.cache_fields_ts);
-		assert_ne!(initial_live_query_version, after_define_live_query_version);
+		let (after_define, after_define_live_query_version) = {
+			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+			let after_define = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+			let after_define_live_query_version =
+				cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
+			txn.cancel().await?;
+			// Compare uuids after definitions
+			assert_ne!(initial.cache_indexes_ts, after_define.cache_indexes_ts);
+			assert_ne!(initial.cache_tables_ts, after_define.cache_tables_ts);
+			assert_ne!(initial.cache_events_ts, after_define.cache_events_ts);
+			assert_ne!(initial.cache_fields_ts, after_define.cache_fields_ts);
+			assert_ne!(initial_live_query_version, after_define_live_query_version);
+			(after_define, after_define_live_query_version)
+		};
 
 		// Remove the defined resources to refresh the UUIDs
-		let sql = r"
+		{
+			let sql = r"
 		REMOVE FIELD test ON test;
 		REMOVE EVENT test ON test;
 		REMOVE TABLE view;
 		REMOVE INDEX test ON test;
 		KILL $lqid;
 	"
-		.to_owned();
-		let vars = PublicVariables::from(map! { "lqid".to_string() => lqid });
-		let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
-		assert_eq!(res.len(), 5);
-		res.remove(0).result.unwrap();
-		res.remove(0).result.unwrap();
-		res.remove(0).result.unwrap();
-		res.remove(0).result.unwrap();
-		res.remove(0).result.unwrap();
+			.to_owned();
+			let vars = PublicVariables::from(map! { "lqid".to_string() => lqid });
+			let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
+			assert_eq!(res.len(), 5);
+			res.remove(0).result.unwrap();
+			res.remove(0).result.unwrap();
+			res.remove(0).result.unwrap();
+			res.remove(0).result.unwrap();
+			res.remove(0).result.unwrap();
+		}
 		// Obtain the uuids after definitions
-		let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
-		let after_remove = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
-		let after_remove_live_query_version =
-			cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
-		drop(txn);
-		// Compare uuids after definitions
-		assert_ne!(after_define.cache_fields_ts, after_remove.cache_fields_ts);
-		assert_ne!(after_define.cache_events_ts, after_remove.cache_events_ts);
-		assert_ne!(after_define.cache_tables_ts, after_remove.cache_tables_ts);
-		assert_ne!(after_define.cache_indexes_ts, after_remove.cache_indexes_ts);
-		assert_ne!(after_define_live_query_version, after_remove_live_query_version);
+		{
+			let txn = ds.transaction(TransactionType::Read, LockType::Pessimistic).await?;
+			let after_remove = txn.get_tb(db.namespace_id, db.database_id, "test").await?.unwrap();
+			let after_remove_live_query_version =
+				cache.get_live_queries_version(db.namespace_id, db.database_id, "test")?;
+			drop(txn);
+			// Compare uuids after definitions
+			assert_ne!(after_define.cache_fields_ts, after_remove.cache_fields_ts);
+			assert_ne!(after_define.cache_events_ts, after_remove.cache_events_ts);
+			assert_ne!(after_define.cache_tables_ts, after_remove.cache_tables_ts);
+			assert_ne!(after_define.cache_indexes_ts, after_remove.cache_indexes_ts);
+			assert_ne!(after_define_live_query_version, after_remove_live_query_version);
+		}
 		//
 		Ok(())
 	}
