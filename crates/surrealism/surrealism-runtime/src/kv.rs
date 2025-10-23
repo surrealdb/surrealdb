@@ -173,11 +173,8 @@ impl KVStore for BTreeMapStore {
 		let map = self.inner.read().map_err(|_| {
 			anyhow::anyhow!("Failed to collect keys from KV store: Could not acquire lock")
 		})?;
-		let keys: Vec<String> = map
-			.keys()
-			.filter(|key| self.in_range(key, &start, &end))
-			.map(|key| key.clone())
-			.collect();
+		let keys: Vec<String> =
+			map.keys().filter(|key| self.in_range(key, &start, &end)).cloned().collect();
 		Ok(keys)
 	}
 

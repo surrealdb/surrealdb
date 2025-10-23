@@ -1,5 +1,4 @@
 use anyhow::Result;
-
 #[cfg(feature = "host")]
 use async_trait::async_trait;
 

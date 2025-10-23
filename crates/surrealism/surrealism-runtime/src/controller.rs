@@ -101,7 +101,7 @@ impl Runtime {
 			.prefix_err(|| "failed to add WASI to linker")?;
 		implement_host_functions(&mut linker)
 			.prefix_err(|| "failed to implement host functions")?;
-        
+
 		Ok(Self {
 			engine,
 			module,

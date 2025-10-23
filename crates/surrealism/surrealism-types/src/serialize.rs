@@ -1,19 +1,18 @@
 use std::ops::Bound;
 
 use anyhow::Result;
+#[cfg(feature = "host")]
+use async_trait::async_trait;
 use surrealdb_protocol::fb::v1 as proto_fb;
 use surrealdb_types::{FromFlatbuffers, SurrealValue, ToFlatbuffers};
 
-#[cfg(feature = "host")]
-use async_trait::async_trait;
-
 use crate::arg::SerializableArg;
-use crate::controller::MemoryController;
-use crate::transfer::{Ptr, Transfer};
 #[cfg(feature = "host")]
 use crate::controller::AsyncMemoryController;
+use crate::controller::MemoryController;
 #[cfg(feature = "host")]
 use crate::transfer::AsyncTransfer;
+use crate::transfer::{Ptr, Transfer};
 
 pub struct Serialized(pub bytes::Bytes);
 
@@ -32,7 +31,7 @@ impl Transfer for Serialized {
 		let mem = controller.mut_mem(*ptr, 4);
 		let len = u32::from_le_bytes(mem[0..4].try_into()?);
 		let data = controller.mut_mem(*ptr + 4, len).to_vec();
-		controller.free(*ptr, 4 + len as u32)?;
+		controller.free(*ptr, 4 + len)?;
 		Ok(Serialized(data.into()))
 	}
 }
@@ -45,7 +44,7 @@ impl AsyncTransfer for Serialized {
 		let len = 4 + self.0.len();
 		let ptr = controller.alloc(len as u32, 8).await?;
 		let mem = controller.mut_mem(ptr, len as u32);
-		mem[0..4].copy_from_slice(&(self.0.len() as u32).to_le_bytes());
+		mem[0..4].copy_from_slice((self.0.len() as u32).to_le_bytes().as_slice());
 		mem[4..len].copy_from_slice(&self.0);
 		Ok(ptr.into())
 	}
@@ -54,7 +53,7 @@ impl AsyncTransfer for Serialized {
 		let mem = controller.mut_mem(*ptr, 4);
 		let len = u32::from_le_bytes(mem[0..4].try_into()?);
 		let data = controller.mut_mem(*ptr + 4, len).to_vec();
-		controller.free(*ptr, 4 + len as u32).await?;
+		controller.free(*ptr, 4 + len).await?;
 		Ok(Serialized(data.into()))
 	}
 }
@@ -179,7 +178,7 @@ impl Serializable for surrealdb_types::Kind {
 
 	fn deserialize(serialized: Serialized) -> Result<Self> {
 		let value = flatbuffers::root::<proto_fb::Kind>(&serialized.0)?;
-		Ok(surrealdb_types::Kind::from_fb(value)?)
+		surrealdb_types::Kind::from_fb(value)
 	}
 }
 
@@ -193,7 +192,7 @@ impl Serializable for surrealdb_types::Value {
 
 	fn deserialize(serialized: Serialized) -> Result<Self> {
 		let value = flatbuffers::root::<proto_fb::Value>(&serialized.0)?;
-		Ok(surrealdb_types::Value::from_fb(value)?)
+		surrealdb_types::Value::from_fb(value)
 	}
 }
 

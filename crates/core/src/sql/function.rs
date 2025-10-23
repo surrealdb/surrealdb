@@ -13,7 +13,7 @@ pub enum Function {
 }
 
 impl Function {
-	pub fn to_idiom(&self) -> Idiom {
+	pub(crate) fn to_idiom(&self) -> Idiom {
 		match self {
 			// Safety: "function" does not contain null bytes"
 			Self::Script(_) => Idiom::field("function".to_owned()),

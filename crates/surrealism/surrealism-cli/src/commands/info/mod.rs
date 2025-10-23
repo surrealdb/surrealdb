@@ -22,7 +22,8 @@ impl SurrealismCommand for InfoCommand {
 		let mut controller =
 			runtime.new_controller(host).await.prefix_err(|| "Failed to load WASM module")?;
 
-		let exports = controller.list().prefix_err(|| "Failed to list functions in the WASM module")?;
+		let exports =
+			controller.list().prefix_err(|| "Failed to list functions in the WASM module")?;
 
 		let mut results = Vec::new();
 		for name in exports {
@@ -30,14 +31,15 @@ impl SurrealismCommand for InfoCommand {
 				.args(Some(name.clone()))
 				.await
 				.prefix_err(|| format!("Failed to collect arguments for function '{name}'"))?;
-			
-			let returns = controller.returns(Some(name.clone()))
+
+			let returns = controller
+				.returns(Some(name.clone()))
 				.await
 				.prefix_err(|| format!("Failed to collect return type for function '{name}'"))?;
 
 			results.push((name, args, returns));
 		}
-		
+
 		let exports = results;
 
 		let title = format!("Info for @{}/{}@{}", meta.organisation, meta.name, meta.version,);

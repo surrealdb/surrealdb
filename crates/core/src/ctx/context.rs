@@ -774,7 +774,7 @@ impl MutableContext {
 		};
 
 		if let Some(value) = cache.get(&lookup) {
-			return Ok(value.runtime.clone());
+			Ok(value.runtime.clone())
 		} else {
 			let SurrealismCacheLookup::File(ns, db, file) = lookup else {
 				bail!("silo lookups are not supported yet");

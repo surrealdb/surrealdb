@@ -857,10 +857,8 @@ impl Capabilities {
 		&self,
 		capabilities: SurrealismCapabilities,
 	) -> anyhow::Result<()> {
-		if capabilities.allow_scripting {
-			if !self.allows_scripting() {
-				bail!("Surrealism package requires scripting, but it is not allowed");
-			}
+		if capabilities.allow_scripting && !self.allows_scripting() {
+			bail!("Surrealism package requires scripting, but it is not allowed");
 		}
 
 		if !capabilities.allow_functions.is_empty() {

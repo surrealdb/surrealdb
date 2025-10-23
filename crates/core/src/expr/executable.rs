@@ -270,12 +270,14 @@ impl SurrealismExecutable {
 			let host = Box::new(Host::new(&ctx, &opt, doc.as_ref()));
 			let mut controller = runtime.new_controller(host).await?;
 
-			let args = controller.args(sub.map(String::from)).await?
+			let args = controller
+				.args(sub.map(String::from))
+				.await?
 				.into_iter()
 				.map(|x| x.into())
 				.collect();
-			let returns = controller.returns(sub.map(String::from)).await
-				.map(|x| Some(x.into()))?;
+			let returns =
+				controller.returns(sub.map(String::from)).await.map(|x| Some(x.into()))?;
 
 			Ok(Signature {
 				args,
@@ -389,12 +391,14 @@ impl SiloExecutable {
 			let host = Box::new(Host::new(&ctx, &opt, doc.as_ref()));
 			let mut controller = runtime.new_controller(host).await?;
 
-			let args = controller.args(sub.map(String::from)).await?
+			let args = controller
+				.args(sub.map(String::from))
+				.await?
 				.into_iter()
 				.map(|x| x.into())
 				.collect();
-			let returns = controller.returns(sub.map(String::from)).await
-				.map(|x| Some(x.into()))?;
+			let returns =
+				controller.returns(sub.map(String::from)).await.map(|x| Some(x.into()))?;
 
 			Ok(Signature {
 				args,
@@ -437,7 +441,7 @@ impl SiloExecutable {
 }
 
 /// Spawn a dedicated thread to run async operations.
-/// 
+///
 /// Uses scoped threads to allow safe borrowing from the current scope without requiring
 /// 'static lifetime bounds. Creates a single-threaded tokio runtime in the thread to
 /// handle async operations. The function blocks until the spawned thread completes.

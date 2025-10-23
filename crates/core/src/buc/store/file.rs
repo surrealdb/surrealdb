@@ -198,7 +198,6 @@ impl FileStore {
 
 /// Check if a path is allowed according to the allowlist
 fn is_path_allowed(path_to_check: &std::path::Path, lowercase_paths: bool) -> bool {
-
 	println!("BUCKET_FOLDER_ALLOWLIST: {:?}", *BUCKET_FOLDER_ALLOWLIST);
 
 	// If the allowlist is empty, nothing is allowed

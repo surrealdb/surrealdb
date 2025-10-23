@@ -1,13 +1,12 @@
 use std::ops::{Deref, DerefMut};
 
 use anyhow::Result;
-
 #[cfg(feature = "host")]
 use async_trait::async_trait;
 
-use crate::controller::MemoryController;
 #[cfg(feature = "host")]
 use crate::controller::AsyncMemoryController;
+use crate::controller::MemoryController;
 
 // Guest side (sync trait for WASM guest code)
 pub trait Transfer {

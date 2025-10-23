@@ -88,7 +88,7 @@ where
 	}
 
 	fn from_values(values: Vec<surrealdb_types::Value>) -> Result<Self> {
-		Ok(values.into_iter().map(|x| T::from_value(x)).collect::<Result<Vec<T>>>()?.into())
+		values.into_iter().map(|x| T::from_value(x)).collect::<Result<Vec<T>>>()
 	}
 
 	// This implementation is only used to dynamically transfer arguments, not to annotate them

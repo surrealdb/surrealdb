@@ -18,7 +18,7 @@ use crate::iam::Action;
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum Function {
 	Normal(String),
-	Custom (String, Option<String>),
+	Custom(String, Option<String>),
 	Script(Script),
 	Model(Model),
 }

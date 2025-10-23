@@ -24,8 +24,12 @@ impl SurrealismCommand for SigCommand {
 			runtime.new_controller(host).await.prefix_err(|| "Failed to load WASM module")?;
 
 		// Invoke the function with the provided arguments
-		let args = controller.args(self.fnc.clone()).await.prefix_err(|| "Failed to collect arguments")?;
-		let returns = controller.returns(self.fnc.clone()).await.prefix_err(|| "Failed to collect return type")?;
+		let args =
+			controller.args(self.fnc.clone()).await.prefix_err(|| "Failed to collect arguments")?;
+		let returns = controller
+			.returns(self.fnc.clone())
+			.await
+			.prefix_err(|| "Failed to collect return type")?;
 
 		println!(
 			"\nSignature:\n - {}({}) -> {}",

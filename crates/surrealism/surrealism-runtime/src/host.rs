@@ -28,7 +28,7 @@ macro_rules! host_try_or_return {
 macro_rules! force_u32 {
 	($ty:ty) => {
 		u32
-	}
+	};
 }
 
 /// Macro to register an async host function with automatic argument conversion and error handling.
@@ -47,11 +47,11 @@ macro_rules! register_host_function {
                         eprintln!("🔵 Host function called: {}", $name);
                         let mut $controller: $controller_ty = HostController::from(caller);
                         let $arg = host_try_or_return!("Failed to receive argument", <$arg_ty>::receive($arg.into(), &mut $controller).await);
-                        
+
                         eprintln!("🟡 Executing async body for: {}", $name);
                         let result = $body;
                         eprintln!("🟢 Async body completed for: {}", $name);
-                        
+
                         (*host_try_or_return!("Transfer error", result.transfer(&mut $controller).await)) as i32
                     })
                 }
@@ -69,11 +69,11 @@ macro_rules! register_host_function {
                         eprintln!("🔵 Host function called: {}", $name);
                         let mut $controller: $controller_ty = HostController::from(caller);
                         $(let $arg = host_try_or_return!("Failed to receive argument", <$arg_ty>::receive($arg.into(), &mut $controller).await);)+
-                        
+
                         eprintln!("🟡 Executing async body for: {}", $name);
                         let result = $body;
                         eprintln!("🟢 Async body completed for: {}", $name);
-                        
+
                         (*host_try_or_return!("Transfer error", result.transfer(&mut $controller).await)) as i32
                     })
                 }
@@ -91,11 +91,11 @@ macro_rules! register_host_function {
                         eprintln!("🔵 Host function called: {}", $name);
                         let mut $controller: $controller_ty = HostController::from(caller);
                         $(let $arg = host_try_or_return!("Failed to receive argument", <$arg_ty>::receive($arg.into(), &mut $controller).await);)+
-                        
+
                         eprintln!("🟡 Executing async body for: {}", $name);
                         let result = $body;
                         eprintln!("🟢 Async body completed for: {}", $name);
-                        
+
                         (*host_try_or_return!("Transfer error", result.transfer(&mut $controller).await)) as i32
                     })
                 }
@@ -291,8 +291,10 @@ impl<'a> AsyncMemoryController for HostController<'a> {
 			.ok_or_else(|| anyhow::anyhow!("Export __sr_alloc not found"))?
 			.into_func()
 			.ok_or_else(|| anyhow::anyhow!("Export __sr_alloc is not a function"))?;
-		let result =
-			alloc_func.typed::<(u32, u32), i32>(&mut self.0)?.call_async(&mut self.0, (len, align)).await?;
+		let result = alloc_func
+			.typed::<(u32, u32), i32>(&mut self.0)?
+			.call_async(&mut self.0, (len, align))
+			.await?;
 		if result == -1 {
 			anyhow::bail!("Memory allocation failed");
 		}
@@ -305,8 +307,10 @@ impl<'a> AsyncMemoryController for HostController<'a> {
 			.ok_or_else(|| anyhow::anyhow!("Export __sr_free not found"))?
 			.into_func()
 			.ok_or_else(|| anyhow::anyhow!("Export __sr_free is not a function"))?;
-		let result =
-			free_func.typed::<(u32, u32), i32>(&mut self.0)?.call_async(&mut self.0, (ptr, len)).await?;
+		let result = free_func
+			.typed::<(u32, u32), i32>(&mut self.0)?
+			.call_async(&mut self.0, (ptr, len))
+			.await?;
 		if result == -1 {
 			anyhow::bail!("Memory deallocation failed");
 		}

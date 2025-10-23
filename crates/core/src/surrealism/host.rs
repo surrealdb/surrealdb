@@ -40,7 +40,8 @@ impl InvocationContext for Host {
 		_vars: PublicObject,
 	) -> Result<PublicValue> {
 		let expr: Expr = syn::expr(&query)?.into();
-		let res = self.stk
+		let res = self
+			.stk
 			.enter(|stk| expr.compute(stk, &self.ctx, &self.opt, self.doc.as_ref()))
 			.finish()
 			.await
@@ -61,7 +62,8 @@ impl InvocationContext for Host {
 			arguments: _args.into_iter().map(Expr::from_public_value).collect(),
 		}));
 
-		let res = self.stk
+		let res = self
+			.stk
 			.enter(|stk| expr.compute(stk, &self.ctx, &self.opt, self.doc.as_ref()))
 			.finish()
 			.await

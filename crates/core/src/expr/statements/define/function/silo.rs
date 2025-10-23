@@ -5,6 +5,7 @@ use crate::expr::statements::define::DefineKind;
 use crate::expr::{Expr, SiloExecutable};
 use crate::fmt::{is_pretty, pretty_indent};
 
+#[allow(dead_code)]
 pub struct DefineSiloFunction {
 	pub kind: DefineKind,
 	pub comment: Option<Expr>,
