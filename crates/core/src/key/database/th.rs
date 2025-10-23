@@ -1,4 +1,4 @@
-//! Stores the next and available freed IDs for Tables batch value
+//! Stores table ID generator batch allocations
 
 use std::ops::Range;
 
@@ -18,7 +18,7 @@ use crate::kvs::{KVKey, impl_kv_key_storekey};
 /// by a particular node for generating table identifiers.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct TableIdGeneratorBatchKey {
-	table_root: DatabaseRoot,
+	database_root: DatabaseRoot,
 	_c: u8,
 	_d: u8,
 	_e: u8,
@@ -42,7 +42,7 @@ impl TableIdGeneratorBatchKey {
 	/// * `start` - The starting value for this batch allocation
 	pub fn new(ns: NamespaceId, db: DatabaseId, start: i64) -> Self {
 		TableIdGeneratorBatchKey {
-			table_root: DatabaseRoot::new(ns, db),
+			database_root: DatabaseRoot::new(ns, db),
 			_c: b'!',
 			_d: b't',
 			_e: b'h',

@@ -15,7 +15,7 @@ use crate::kvs::sequences::SequenceState;
 /// allocations when generating table identifiers.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
 pub(crate) struct TableIdGeneratorStateKey {
-	table_root: DatabaseRoot,
+	database_root: DatabaseRoot,
 	_c: u8,
 	_d: u8,
 	_e: u8,
@@ -39,7 +39,7 @@ impl TableIdGeneratorStateKey {
 	/// * `nid` - The node ID that owns this state
 	pub fn new(ns: NamespaceId, db: DatabaseId, nid: Uuid) -> Self {
 		TableIdGeneratorStateKey {
-			table_root: DatabaseRoot::new(ns, db),
+			database_root: DatabaseRoot::new(ns, db),
 			_c: b'!',
 			_d: b't',
 			_e: b'i',

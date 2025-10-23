@@ -243,6 +243,13 @@ impl Sequences {
 		s.lock().await.next(self, ctx, &seq, batch).await
 	}
 
+	/// Generates the next namespace ID.
+	///
+	/// # Arguments
+	/// * `ctx` - Optional mutable context for transaction operations
+	///
+	/// # Returns
+	/// A new unique namespace ID
 	pub(crate) async fn next_namespace_id(
 		&self,
 		ctx: Option<&MutableContext>,
@@ -252,6 +259,14 @@ impl Sequences {
 		Ok(NamespaceId(id as u32))
 	}
 
+	/// Generates the next database ID within a namespace.
+	///
+	/// # Arguments
+	/// * `ctx` - Optional mutable context for transaction operations
+	/// * `ns` - The namespace ID to generate the database ID within
+	///
+	/// # Returns
+	/// A new unique database ID for the given namespace
 	pub(crate) async fn next_database_id(
 		&self,
 		ctx: Option<&MutableContext>,
@@ -262,6 +277,15 @@ impl Sequences {
 		Ok(DatabaseId(id as u32))
 	}
 
+	/// Generates the next table ID within a database.
+	///
+	/// # Arguments
+	/// * `ctx` - Optional mutable context for transaction operations
+	/// * `ns` - The namespace ID
+	/// * `db` - The database ID to generate the table ID within
+	///
+	/// # Returns
+	/// A new unique table ID for the given database
 	pub(crate) async fn next_table_id(
 		&self,
 		ctx: Option<&MutableContext>,
@@ -273,6 +297,16 @@ impl Sequences {
 		Ok(TableId(id as u32))
 	}
 
+	/// Generates the next index ID within a table.
+	///
+	/// # Arguments
+	/// * `ctx` - Optional mutable context for transaction operations
+	/// * `ns` - The namespace ID
+	/// * `db` - The database ID
+	/// * `tb` - The table name to generate the index ID within
+	///
+	/// # Returns
+	/// A new unique index ID for the given table
 	pub(crate) async fn next_index_id(
 		&self,
 		ctx: Option<&MutableContext>,
@@ -285,6 +319,17 @@ impl Sequences {
 		Ok(IndexId(id as u32))
 	}
 
+	/// Generates the next value for a user-defined sequence.
+	///
+	/// # Arguments
+	/// * `ctx` - Optional mutable context for transaction operations
+	/// * `tx` - The transaction to use for accessing sequence configuration
+	/// * `ns` - The namespace ID
+	/// * `db` - The database ID
+	/// * `sq` - The sequence name
+	///
+	/// # Returns
+	/// The next value in the user-defined sequence
 	pub(crate) async fn next_user_sequence_id(
 		&self,
 		ctx: Option<&MutableContext>,
@@ -298,6 +343,15 @@ impl Sequences {
 		self.next_val(ctx, domain, seq.start, seq.batch, seq.timeout).await
 	}
 
+	/// Generates the next document ID for a full-text search index.
+	///
+	/// # Arguments
+	/// * `ctx` - Optional mutable context for transaction operations
+	/// * `ikb` - The index key base identifying the full-text index
+	/// * `batch` - The batch size for ID allocation
+	///
+	/// # Returns
+	/// A new unique document ID for the full-text search index
 	pub(crate) async fn next_fts_doc_id(
 		&self,
 		ctx: Option<&MutableContext>,
