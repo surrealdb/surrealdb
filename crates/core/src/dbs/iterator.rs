@@ -4,6 +4,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 
+use crate::catalog::Record;
 use crate::ctx::{Canceller, Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
@@ -19,7 +20,6 @@ use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
 	StatementContext,
 };
-use crate::val::record::Record;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, Value};
 
 const TARGET: &str = "surrealdb::core::dbs";

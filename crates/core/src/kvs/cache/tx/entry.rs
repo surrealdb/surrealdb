@@ -3,9 +3,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use crate::catalog;
+use crate::catalog::{self, Record};
 use crate::dbs::node::Node;
-use crate::val::record::Record;
 
 #[derive(Clone)]
 pub(crate) enum Entry {

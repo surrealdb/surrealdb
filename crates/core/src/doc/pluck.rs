@@ -106,11 +106,17 @@ impl Document {
 						self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
 						&self.current
 					};
-					// Process the SELECT statement fields
-					stmt.expr
-						.compute(stk, ctx, opt, Some(current), stmt.group.is_some())
-						.await
-						.map_err(IgnoreError::from)
+
+					if stmt.group.is_some() {
+						// Field computation with groups is defered to collection.
+						Ok(current.doc.data.as_ref().clone())
+					} else {
+						// Process the SELECT statement fields
+						stmt.expr
+							.compute(stk, ctx, opt, Some(current), stmt.group.is_some())
+							.await
+							.map_err(IgnoreError::from)
+					}
 				}
 				Statement::Create(_)
 				| Statement::Upsert(_)

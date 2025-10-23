@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use radix_trie::Trie;
 
-use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId};
+use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId, Record};
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::expr::BinaryOperator;
@@ -17,7 +17,6 @@ use crate::key::index::Index;
 use crate::key::index::iu::IndexCountKey;
 use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::{KVKey, Key, Transaction, Val};
-use crate::val::record::Record;
 use crate::val::{Array, RecordId, Value};
 
 pub(crate) type IteratorRef = usize;

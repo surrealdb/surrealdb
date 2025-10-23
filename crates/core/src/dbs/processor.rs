@@ -8,7 +8,7 @@ use futures::StreamExt;
 use reblessive::tree::Stk;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, NamespaceId, Record};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
@@ -21,7 +21,6 @@ use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, record, r#ref};
 use crate::kvs::{KVKey, KVValue, Key, Transaction, Val};
-use crate::val::record::Record;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, Value};
 
 impl Iterable {

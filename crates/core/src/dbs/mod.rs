@@ -21,7 +21,7 @@ mod variables;
 pub mod capabilities;
 pub mod node;
 
-pub(crate) use variables::Variables;
+pub(crate) use variables::{ParameterCapturePass, Variables};
 
 pub use self::capabilities::Capabilities;
 pub(crate) use self::executor::Executor;

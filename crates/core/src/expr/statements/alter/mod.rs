@@ -17,9 +17,6 @@ pub(crate) use field::{AlterDefault, AlterFieldStatement};
 pub(crate) use sequence::AlterSequenceStatement;
 pub(crate) use table::AlterTableStatement;
 
-use crate::expr::Expr;
-use crate::expr::expression::VisitExpression;
-
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) enum AlterKind<T> {
 	#[default]
@@ -98,21 +95,6 @@ impl AlterStatement {
 			Self::Table(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Field(v) => v.compute(stk, ctx, opt, doc).await,
-		}
-	}
-}
-
-impl VisitExpression for AlterStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		if let AlterStatement::Field(AlterFieldStatement {
-			name,
-			..
-		}) = self
-		{
-			name.visit(visitor);
 		}
 	}
 }
