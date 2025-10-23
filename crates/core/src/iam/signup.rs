@@ -3,7 +3,6 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use chrono::Utc;
 use jsonwebtoken::{Header, encode};
-use serde::{Deserialize, Serialize};
 use surrealdb_types::ToSql;
 use uuid::Uuid;
 
@@ -14,30 +13,19 @@ use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
-use crate::iam::token::Claims;
+use crate::iam::token::{Claims, Token};
 use crate::iam::{Actor, Auth, Level, algorithm_to_jwt_algorithm};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::types::{PublicVariables, SurrealValue};
+use crate::types::PublicVariables;
 use crate::val::Value;
-
-#[derive(Clone, Debug, SurrealValue, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[surreal(untagged)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum SignupData {
-	Token(String),
-	WithRefresh {
-		token: String,
-		refresh: String,
-	},
-}
 
 pub async fn signup(
 	kvs: &Datastore,
 	session: &mut Session,
 	vars: PublicVariables,
-) -> Result<SignupData> {
+) -> Result<Token> {
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns")).cloned();
 	let db = vars.get("DB").or_else(|| vars.get("db")).cloned();
@@ -64,7 +52,7 @@ pub async fn db_access(
 	db: String,
 	ac: String,
 	vars: PublicVariables,
-) -> Result<SignupData> {
+) -> Result<Token> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	let db_def = match tx.get_db_by_name(&ns, &db).await? {
@@ -180,11 +168,11 @@ pub async fn db_access(
 			match enc {
 				// The auth token was created successfully
 				Ok(token) => Ok(match refresh {
-					Some(refresh) => SignupData::WithRefresh {
-						token,
+					Some(refresh) => Token::WithRefresh {
+						access: token,
 						refresh,
 					},
-					None => SignupData::Token(token),
+					None => Token::Access(token),
 				}),
 				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 			}
@@ -337,8 +325,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_signup_record_with_refresh() {
-		use crate::iam::signin::{self, SigninData};
-		use crate::iam::signup::SignupData;
+		use crate::iam::{Token, signin};
 
 		// Test without refresh
 		{
@@ -389,7 +376,7 @@ mod tests {
 			match res {
 				Ok(data) => {
 					assert!(
-						matches!(data, SignupData::WithRefresh { .. }),
+						matches!(data, Token::WithRefresh { .. }),
 						"Refresh token was unexpectedly returned"
 					)
 				}
@@ -446,11 +433,11 @@ mod tests {
 			assert!(res.is_ok(), "Failed to signup with credentials: {:?}", res);
 			let refresh = match res {
 				Ok(data) => match data {
-					SignupData::WithRefresh {
+					Token::WithRefresh {
 						refresh,
 						..
 					} => refresh,
-					SignupData::Token(_) => panic!("Refresh token was not returned"),
+					Token::Access(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signup with credentials: {e}"),
 			};
@@ -489,14 +476,14 @@ mod tests {
 			// Authentication should be identical as with user credentials
 			match res {
 				Ok(data) => match data {
-					SigninData::WithRefresh {
+					Token::WithRefresh {
 						refresh: new_refresh,
 						..
 					} => assert!(
 						new_refresh != refresh,
 						"New refresh token is identical to used one"
 					),
-					SigninData::Token(_) => panic!("Refresh token was not returned"),
+					Token::Access(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
@@ -660,9 +647,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			// Decode token and check that it has been issued as intended
 			if let Ok(sd) = res {
 				let token = match &sd {
-					SignupData::Token(token) => token,
-					SignupData::WithRefresh {
-						token,
+					Token::Access(token) => token,
+					Token::WithRefresh {
+						access: token,
 						..
 					} => token,
 				};

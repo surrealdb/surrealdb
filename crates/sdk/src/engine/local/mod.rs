@@ -569,12 +569,12 @@ async fn router(
 					.await
 					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
 			let token = match signup_data {
-				iam::signup::SignupData::Token(token) => Token {
+				iam::Token::Access(token) => Token {
 					access: AccessToken(SecureToken(token)),
 					refresh: None,
 				},
-				iam::signup::SignupData::WithRefresh {
-					token,
+				iam::Token::WithRefresh {
+					access: token,
 					refresh,
 				} => Token {
 					access: AccessToken(SecureToken(token)),
@@ -594,12 +594,12 @@ async fn router(
 					.await
 					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
 			let token = match signin_data {
-				iam::signin::SigninData::Token(token) => Token {
+				iam::Token::Access(token) => Token {
 					access: AccessToken(SecureToken(token)),
 					refresh: None,
 				},
-				iam::signin::SigninData::WithRefresh {
-					token,
+				iam::Token::WithRefresh {
+					access: token,
 					refresh,
 				} => Token {
 					access: AccessToken(SecureToken(token)),

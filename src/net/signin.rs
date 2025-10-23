@@ -8,7 +8,8 @@ use serde::Serialize;
 use surrealdb::types::Value;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::RouteTarget;
-use surrealdb_core::iam::signin::{SigninData, signin};
+use surrealdb_core::iam::Token;
+use surrealdb_core::iam::signin::signin;
 use surrealdb_core::syn;
 use surrealdb_types::SurrealValue;
 use tower_http::limit::RequestBodyLimitLayer;
@@ -73,9 +74,9 @@ async fn handler(
 				// Authentication was successful
 				Ok(v) => {
 					let (token, refresh) = match v {
-						SigninData::Token(token) => (token, None),
-						SigninData::WithRefresh {
-							token,
+						Token::Access(token) => (token, None),
+						Token::WithRefresh {
+							access: token,
 							refresh,
 						} => (token, Some(refresh)),
 					};
