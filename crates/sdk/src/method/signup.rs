@@ -5,7 +5,7 @@ use surrealdb_types::Value;
 
 use crate::conn::Command;
 use crate::method::{BoxFuture, OnceLockExt};
-use crate::opt::auth::{AccessToken, Token};
+use crate::opt::auth::Token;
 use crate::{Connection, Result, Surreal};
 
 /// A signup future
@@ -34,7 +34,7 @@ impl<'r, Client> IntoFuture for Signup<'r, Client>
 where
 	Client: Connection,
 {
-	type Output = Result<Token<Option<AccessToken>>>;
+	type Output = Result<Token>;
 	type IntoFuture = BoxFuture<'r, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {

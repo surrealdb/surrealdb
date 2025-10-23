@@ -568,9 +568,18 @@ async fn router(
 				iam::signup::signup(kvs, &mut *session.write().await, credentials.into())
 					.await
 					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
-			let token = Token {
-				access: signup_data.token.map(SecureToken).map(AccessToken),
-				refresh: signup_data.refresh.map(SecureToken).map(RefreshToken),
+			let token = match signup_data {
+				iam::signup::SignupData::Token(token) => Token {
+					access: AccessToken(SecureToken(token)),
+					refresh: None,
+				},
+				iam::signup::SignupData::WithRefresh {
+					token,
+					refresh,
+				} => Token {
+					access: AccessToken(SecureToken(token)),
+					refresh: Some(RefreshToken(SecureToken(refresh))),
+				},
 			};
 			let result = query_result.finish_with_result(Ok(token.into_value()));
 
@@ -584,9 +593,18 @@ async fn router(
 				iam::signin::signin(kvs, &mut *session.write().await, credentials.into())
 					.await
 					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
-			let token = Token {
-				access: AccessToken(SecureToken(signin_data.token)),
-				refresh: signin_data.refresh.map(SecureToken).map(RefreshToken),
+			let token = match signin_data {
+				iam::signin::SigninData::Token(token) => Token {
+					access: AccessToken(SecureToken(token)),
+					refresh: None,
+				},
+				iam::signin::SigninData::WithRefresh {
+					token,
+					refresh,
+				} => Token {
+					access: AccessToken(SecureToken(token)),
+					refresh: Some(RefreshToken(SecureToken(refresh))),
+				},
 			};
 			let result = query_result.finish_with_result(Ok(token.into_value()));
 			Ok(vec![result])
