@@ -304,20 +304,25 @@ impl Sequence {
 	async fn load(
 		ctx: Option<&MutableContext>,
 		sqs: &Sequences,
-		tx: &Transaction,
+		_tx: &Transaction,
 		seq: &SequenceDomain,
 		start: i64,
 		batch: u32,
 		timeout: Option<Duration>,
 	) -> Result<Self> {
 		let state_key = seq.new_state_key(sqs.nid)?;
-		let mut st: SequenceState = if let Some(v) = tx.get(&state_key, None).await? {
+		// Create a separate transaction for reading sequence state to avoid conflicts
+		// with the parent transaction in strict serialization mode (e.g., FDB)
+		let seq_tx =
+			sqs.tf.transaction(TransactionType::Read, LockType::Optimistic, sqs.clone()).await?;
+		let mut st: SequenceState = if let Some(v) = seq_tx.get(&state_key, None).await? {
 			revision::from_slice(&v)?
 		} else {
 			SequenceState {
 				next: start,
 			}
 		};
+		seq_tx.cancel().await?;
 		let (from, to) =
 			Self::find_batch_allocation(sqs, ctx, seq, st.next, batch, timeout).await?;
 		st.next = from;
