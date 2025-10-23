@@ -18,7 +18,7 @@ pub struct BuildCommand {
 }
 
 impl SurrealismCommand for BuildCommand {
-	fn run(self) -> Result<()> {
+	async fn run(self) -> Result<()> {
 		// Ensure all requirements are met
 		let path = self.path.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
 		let config = load_config(&path)?;

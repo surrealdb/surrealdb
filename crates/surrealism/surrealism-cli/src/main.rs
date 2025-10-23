@@ -71,7 +71,8 @@ fn parse_value(_s: &str) -> Result<surrealdb_types::Value, String> {
 	// surrealdb::syn::value(s).map_err(|e| format!("Invalid value: {e}"))
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
 	let cli = Cli::parse();
 
 	match cli.command {
@@ -86,7 +87,7 @@ fn main() {
 				args,
 			};
 
-			if let Err(e) = run_command.run() {
+			if let Err(e) = run_command.run().await {
 				eprintln!("Error: {e}");
 				std::process::exit(1);
 			}
@@ -100,7 +101,7 @@ fn main() {
 				fnc,
 			};
 
-			if let Err(e) = run_command.run() {
+			if let Err(e) = run_command.run().await {
 				eprintln!("Error: {e}");
 				std::process::exit(1);
 			}
@@ -111,7 +112,7 @@ fn main() {
 			let info_command = InfoCommand {
 				file,
 			};
-			if let Err(e) = info_command.run() {
+			if let Err(e) = info_command.run().await {
 				eprintln!("Error: {e}");
 				std::process::exit(1);
 			}
@@ -124,7 +125,7 @@ fn main() {
 				path,
 				out,
 			};
-			if let Err(e) = build_command.run() {
+			if let Err(e) = build_command.run().await {
 				eprintln!("Error: {e}");
 				std::process::exit(1);
 			}

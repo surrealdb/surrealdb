@@ -1,4 +1,5 @@
 use std::fmt::{self, Display};
+use std::thread;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
@@ -11,7 +12,6 @@ use crate::err::Error;
 use crate::expr::expression::VisitExpression;
 use crate::expr::{Block, Expr, FlowResultExt, Kind, Value};
 use crate::fmt::EscapeKwFreeIdent;
-use crate::surrealism::InternalSurrealismController;
 use crate::surrealism::cache::SurrealismCacheLookup;
 use crate::surrealism::host::Host;
 use crate::val::File;
@@ -253,7 +253,7 @@ impl VisitExpression for SurrealismExecutable {
 impl SurrealismExecutable {
 	pub(crate) async fn signature(
 		&self,
-		stk: &mut Stk,
+		_stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
@@ -262,32 +262,31 @@ impl SurrealismExecutable {
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let lookup = SurrealismCacheLookup::File(&ns, &db, &self.0);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
-		let mut controller = runtime.new_controller().await?;
-		let mut host = Host {
-			stk,
-			ctx,
-			opt,
-			doc,
-		};
 
-		let args =
-			InternalSurrealismController::args(&mut controller, &mut host, sub.map(String::from))?;
-		let returns = InternalSurrealismController::returns(
-			&mut controller,
-			&mut host,
-			sub.map(String::from),
-		)
-		.map(Some)?;
+		let ctx = ctx.clone();
+		let opt = opt.clone();
+		let doc = doc.cloned();
+		spawn_thread(move || async move {
+			let host = Box::new(Host::new(&ctx, &opt, doc.as_ref()));
+			let mut controller = runtime.new_controller(host).await?;
 
-		Ok(Signature {
-			args,
-			returns,
+			let args = controller.args(sub.map(String::from)).await?
+				.into_iter()
+				.map(|x| x.into())
+				.collect();
+			let returns = controller.returns(sub.map(String::from)).await
+				.map(|x| Some(x.into()))?;
+
+			Ok(Signature {
+				args,
+				returns,
+			})
 		})
 	}
 
 	pub(crate) async fn run(
 		&self,
-		stk: &mut Stk,
+		_stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
@@ -297,15 +296,19 @@ impl SurrealismExecutable {
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let lookup = SurrealismCacheLookup::File(&ns, &db, &self.0);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
-		let mut controller = runtime.new_controller().await?;
-		let mut host = Host {
-			stk,
-			ctx,
-			opt,
-			doc,
-		};
 
-		InternalSurrealismController::run(&mut controller, &mut host, sub.map(String::from), args)
+		let ctx = ctx.clone();
+		let opt = opt.clone();
+		let doc = doc.cloned();
+		spawn_thread(move || async move {
+			let host = Box::new(Host::new(&ctx, &opt, doc.as_ref()));
+			let mut controller = runtime.new_controller(host).await?;
+
+			let args: Result<Vec<crate::types::PublicValue>, _> =
+				args.into_iter().map(|x| x.try_into()).collect();
+			let args = args?;
+			controller.invoke(sub.map(String::from), args).await.map(|x| x.into())
+		})
 	}
 }
 
@@ -364,7 +367,7 @@ impl VisitExpression for SiloExecutable {
 impl SiloExecutable {
 	pub(crate) async fn signature(
 		&self,
-		stk: &mut Stk,
+		_stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
@@ -378,32 +381,31 @@ impl SiloExecutable {
 			self.patch,
 		);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
-		let mut controller = runtime.new_controller().await?;
-		let mut host = Host {
-			stk,
-			ctx,
-			opt,
-			doc,
-		};
 
-		let args =
-			InternalSurrealismController::args(&mut controller, &mut host, sub.map(String::from))?;
-		let returns = InternalSurrealismController::returns(
-			&mut controller,
-			&mut host,
-			sub.map(String::from),
-		)
-		.map(Some)?;
+		let ctx = ctx.clone();
+		let opt = opt.clone();
+		let doc = doc.cloned();
+		spawn_thread(move || async move {
+			let host = Box::new(Host::new(&ctx, &opt, doc.as_ref()));
+			let mut controller = runtime.new_controller(host).await?;
 
-		Ok(Signature {
-			args,
-			returns,
+			let args = controller.args(sub.map(String::from)).await?
+				.into_iter()
+				.map(|x| x.into())
+				.collect();
+			let returns = controller.returns(sub.map(String::from)).await
+				.map(|x| Some(x.into()))?;
+
+			Ok(Signature {
+				args,
+				returns,
+			})
 		})
 	}
 
 	pub(crate) async fn run(
 		&self,
-		stk: &mut Stk,
+		_stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
@@ -418,14 +420,42 @@ impl SiloExecutable {
 			self.patch,
 		);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
-		let mut controller = runtime.new_controller().await?;
-		let mut host = Host {
-			stk,
-			ctx,
-			opt,
-			doc,
-		};
 
-		InternalSurrealismController::run(&mut controller, &mut host, sub.map(String::from), args)
+		let ctx = ctx.clone();
+		let opt = opt.clone();
+		let doc = doc.cloned();
+		spawn_thread(move || async move {
+			let host = Box::new(Host::new(&ctx, &opt, doc.as_ref()));
+			let mut controller = runtime.new_controller(host).await?;
+
+			let args: Result<Vec<crate::types::PublicValue>, _> =
+				args.into_iter().map(|x| x.try_into()).collect();
+			let args = args?;
+			controller.invoke(sub.map(String::from), args).await.map(|x| x.into())
+		})
 	}
+}
+
+/// Spawn a dedicated thread to run async operations.
+/// 
+/// Uses scoped threads to allow safe borrowing from the current scope without requiring
+/// 'static lifetime bounds. Creates a single-threaded tokio runtime in the thread to
+/// handle async operations. The function blocks until the spawned thread completes.
+fn spawn_thread<F, Fut, R>(f: F) -> Result<R>
+where
+	F: FnOnce() -> Fut + Send,
+	Fut: std::future::Future<Output = Result<R>> + Send,
+	R: Send,
+{
+	thread::scope(|s| {
+		let handle = s.spawn(|| {
+			// Create a single-threaded tokio runtime for async operations
+			let rt = tokio::runtime::Builder::new_current_thread()
+				.enable_all()
+				.build()
+				.map_err(|e| anyhow::anyhow!("Failed to create runtime: {e}"))?;
+			rt.block_on(f())
+		});
+		handle.join().map_err(|_| anyhow::anyhow!("Thread panicked"))?
+	})
 }

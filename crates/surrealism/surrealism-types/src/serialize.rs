@@ -4,12 +4,20 @@ use anyhow::Result;
 use surrealdb_protocol::fb::v1 as proto_fb;
 use surrealdb_types::{FromFlatbuffers, SurrealValue, ToFlatbuffers};
 
+#[cfg(feature = "host")]
+use async_trait::async_trait;
+
 use crate::arg::SerializableArg;
 use crate::controller::MemoryController;
 use crate::transfer::{Ptr, Transfer};
+#[cfg(feature = "host")]
+use crate::controller::AsyncMemoryController;
+#[cfg(feature = "host")]
+use crate::transfer::AsyncTransfer;
 
 pub struct Serialized(pub bytes::Bytes);
 
+// Guest side implementation (sync)
 impl Transfer for Serialized {
 	fn transfer(self, controller: &mut dyn MemoryController) -> Result<Ptr> {
 		let len = 4 + self.0.len();
@@ -29,13 +37,49 @@ impl Transfer for Serialized {
 	}
 }
 
+// Host side implementation (async)
+#[cfg(feature = "host")]
+#[async_trait]
+impl AsyncTransfer for Serialized {
+	async fn transfer(self, controller: &mut dyn AsyncMemoryController) -> Result<Ptr> {
+		let len = 4 + self.0.len();
+		let ptr = controller.alloc(len as u32, 8).await?;
+		let mem = controller.mut_mem(ptr, len as u32);
+		mem[0..4].copy_from_slice(&(self.0.len() as u32).to_le_bytes());
+		mem[4..len].copy_from_slice(&self.0);
+		Ok(ptr.into())
+	}
+
+	async fn receive(ptr: Ptr, controller: &mut dyn AsyncMemoryController) -> Result<Self> {
+		let mem = controller.mut_mem(*ptr, 4);
+		let len = u32::from_le_bytes(mem[0..4].try_into()?);
+		let data = controller.mut_mem(*ptr + 4, len).to_vec();
+		controller.free(*ptr, 4 + len as u32).await?;
+		Ok(Serialized(data.into()))
+	}
+}
+
+// Guest side implementation for Serializable (sync)
 impl<T: Serializable> Transfer for T {
 	fn transfer(self, controller: &mut dyn MemoryController) -> Result<Ptr> {
-		self.serialize()?.transfer(controller)
+		Transfer::transfer(self.serialize()?, controller)
 	}
 
 	fn receive(ptr: Ptr, controller: &mut dyn MemoryController) -> Result<Self> {
-		Self::deserialize(Serialized::receive(ptr, controller)?)
+		Self::deserialize(Transfer::receive(ptr, controller)?)
+	}
+}
+
+// Host side implementation for Serializable (async)
+#[cfg(feature = "host")]
+#[async_trait]
+impl<T: Serializable + Send> AsyncTransfer for T {
+	async fn transfer(self, controller: &mut dyn AsyncMemoryController) -> Result<Ptr> {
+		AsyncTransfer::transfer(self.serialize()?, controller).await
+	}
+
+	async fn receive(ptr: Ptr, controller: &mut dyn AsyncMemoryController) -> Result<Self> {
+		Self::deserialize(AsyncTransfer::receive(ptr, controller).await?)
 	}
 }
 

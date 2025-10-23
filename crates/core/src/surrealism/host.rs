@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use reblessive::tree::Stk;
+use reblessive::TreeStack;
 use surrealism_runtime::config::SurrealismConfig;
 use surrealism_runtime::host::InvocationContext;
 use surrealism_runtime::kv::KVStore;
@@ -13,21 +13,26 @@ use crate::syn;
 use crate::types::{PublicObject, PublicValue};
 use crate::val::convert_value_to_public_value;
 
-pub(crate) struct Host<'a> {
-	pub(crate) stk: &'a mut Stk,
-	pub(crate) ctx: &'a Context,
-	pub(crate) opt: &'a Options,
-	pub(crate) doc: Option<&'a CursorDoc>,
+pub(crate) struct Host {
+	pub(crate) stk: TreeStack,
+	pub(crate) ctx: Context,
+	pub(crate) opt: Options,
+	pub(crate) doc: Option<CursorDoc>,
 }
 
-// SAFETY: Host is never actually sent across threads. The Send bound is required by 
-// Wasmtime's func_wrap_async, but WASM execution is single-threaded and Host stays
-// on the same thread throughout the call. The Stk, Context, Options, and CursorDoc
-// are all accessed only from the thread that created them.
-unsafe impl<'a> Send for Host<'a> {}
+impl Host {
+	pub(crate) fn new(ctx: &Context, opt: &Options, doc: Option<&CursorDoc>) -> Self {
+		Self {
+			stk: TreeStack::new(),
+			ctx: ctx.clone(),
+			opt: opt.clone(),
+			doc: doc.cloned(),
+		}
+	}
+}
 
 #[async_trait]
-impl<'a> InvocationContext for Host<'a> {
+impl InvocationContext for Host {
 	async fn sql(
 		&mut self,
 		_config: &SurrealismConfig,
@@ -35,7 +40,11 @@ impl<'a> InvocationContext for Host<'a> {
 		_vars: PublicObject,
 	) -> Result<PublicValue> {
 		let expr: Expr = syn::expr(&query)?.into();
-		let res = expr.compute(self.stk, self.ctx, self.opt, self.doc).await.catch_return()?;
+		let res = self.stk
+			.enter(|stk| expr.compute(stk, &self.ctx, &self.opt, self.doc.as_ref()))
+			.finish()
+			.await
+			.catch_return()?;
 
 		convert_value_to_public_value(res)
 	}
@@ -52,7 +61,11 @@ impl<'a> InvocationContext for Host<'a> {
 			arguments: _args.into_iter().map(Expr::from_public_value).collect(),
 		}));
 
-		let res = expr.compute(self.stk, self.ctx, self.opt, self.doc).await.catch_return()?;
+		let res = self.stk
+			.enter(|stk| expr.compute(stk, &self.ctx, &self.opt, self.doc.as_ref()))
+			.finish()
+			.await
+			.catch_return()?;
 
 		convert_value_to_public_value(res)
 	}

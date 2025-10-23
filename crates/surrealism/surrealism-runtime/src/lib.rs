@@ -4,4 +4,4 @@ pub mod controller;
 pub mod host;
 pub mod kv;
 pub mod package;
-pub mod wasi_context;
+mod wasi_context;

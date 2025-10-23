@@ -2,14 +2,33 @@ use std::ops::{Deref, DerefMut};
 
 use anyhow::Result;
 
-use crate::controller::MemoryController;
+#[cfg(feature = "host")]
+use async_trait::async_trait;
 
+use crate::controller::MemoryController;
+#[cfg(feature = "host")]
+use crate::controller::AsyncMemoryController;
+
+// Guest side (sync trait for WASM guest code)
 pub trait Transfer {
 	/// Transfers the value into WASM memory, returns a `Transferred` handle
 	fn transfer(self, controller: &mut dyn MemoryController) -> Result<Ptr>;
 
 	/// Default implementation of `accept`, does nothing unless overridden
 	fn receive(ptr: Ptr, controller: &mut dyn MemoryController) -> Result<Self>
+	where
+		Self: Sized;
+}
+
+// Host side (async trait for Wasmtime runtime)
+#[cfg(feature = "host")]
+#[async_trait]
+pub trait AsyncTransfer: Send {
+	/// Transfers the value into WASM memory, returns a `Transferred` handle
+	async fn transfer(self, controller: &mut dyn AsyncMemoryController) -> Result<Ptr>;
+
+	/// Default implementation of `accept`, does nothing unless overridden
+	async fn receive(ptr: Ptr, controller: &mut dyn AsyncMemoryController) -> Result<Self>
 	where
 		Self: Sized;
 }

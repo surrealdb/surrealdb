@@ -10,19 +10,20 @@ homepage = "https://github.com/surrealdb/surrealdb"
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
+crossbeam-channel = "0.5"
+reblessive = { workspace = true, features = ["tree"] }
 serde.workspace = true
 serde_json.workspace = true
-thiserror.workspace = true
-wasmtime.workspace = true
 surrealdb-types.workspace = true
-surrealism-types = { path = "../surrealism-types" }
-surrealism = { path = "../surrealism" }
+thiserror.workspace = true
+tokio.workspace = true
+wasmtime.workspace = true
+surrealism-types = { path = "../surrealism-types", features = ["host"] }
 tar.workspace = true
 zstd.workspace = true
 semver.workspace = true
 wasmtime-wasi.workspace = true
 toml.workspace = true
 bytes = "1"
-async-trait = "0.1"
-tokio.workspace = true
 futures.workspace = true

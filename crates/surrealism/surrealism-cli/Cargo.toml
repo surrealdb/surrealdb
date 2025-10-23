@@ -21,9 +21,10 @@ serde_json.workspace = true
 surrealdb-types.workspace = true
 thiserror.workspace = true
 surrealism = { path = "../surrealism" }
-surrealism-types = { path = "../surrealism-types" }
+surrealism-types = { path = "../surrealism-types", features = ["host"] }
 surrealism-runtime = { path = "../surrealism-runtime" }
 tempfile.workspace = true
+tokio.workspace = true
 walrus.workspace = true
 wasm-opt.workspace = true
 surrealml-llms.workspace = true

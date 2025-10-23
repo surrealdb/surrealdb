@@ -20,23 +20,21 @@
 //! // For each concurrent request:
 //! let runtime = runtime.clone();
 //! tokio::spawn(async move {
-//!     let mut controller = runtime.new_controller()?;
-//!     controller.with_context(&context, |ctrl| {
-//!         ctrl.invoke(None, args)
-//!     })
+//!     let context = Box::new(MyContext::new());
+//!     let mut controller = runtime.new_controller(context).await?;
+//!     controller.invoke(None, args).await
 //! });
 //! # Ok::<(), anyhow::Error>(())
 //! ```
 
-use std::cell::UnsafeCell;
 use std::fmt;
-use std::ptr::NonNull;
 use std::sync::Arc;
 
 use anyhow::Result;
+use async_trait::async_trait;
 use surrealism_types::args::Args;
 use surrealism_types::err::PrefixError;
-use surrealism_types::transfer::Transfer;
+use surrealism_types::transfer::AsyncTransfer;
 use wasmtime::*;
 use wasmtime_wasi::preview1::{self, WasiP1Ctx};
 
@@ -44,44 +42,11 @@ use crate::config::SurrealismConfig;
 use crate::host::{implement_host_functions, InvocationContext};
 use crate::package::SurrealismPackage;
 
-/// Wrapper that stores a raw pointer to InvocationContext.
-/// SAFETY: The context pointer is only valid during `with_context` calls.
-/// The Controller must never outlive the borrowed context.
-pub(crate) struct ContextCell(UnsafeCell<Option<NonNull<dyn InvocationContext>>>);
-
-unsafe impl Send for ContextCell {}
-
-impl ContextCell {
-	pub fn new() -> Self {
-		Self(UnsafeCell::new(None))
-	}
-
-	/// SAFETY: Caller must ensure the context outlives any access to it through get_mut.
-	/// The context must remain valid until `clear` is called.
-	pub unsafe fn set_raw(&self, context: *mut dyn InvocationContext) {
-		*self.0.get() = NonNull::new(context);
-	}
-
-	pub fn clear(&self) {
-		unsafe {
-			*self.0.get() = None;
-		}
-	}
-
-	/// SAFETY: Caller must ensure no other references exist and single-threaded access.
-	/// This is guaranteed by Store being effectively !Send (due to ContextCell) and Controller
-	/// taking &mut self. The context pointer must still be valid (set_raw was called and clear
-	/// wasn't called yet).
-	pub unsafe fn get_mut(&self) -> &mut dyn InvocationContext {
-		(*self.0.get()).expect("context not set").as_mut()
-	}
-}
-
 /// Store data for WASM execution. Each Controller has its own isolated StoreData.
 pub struct StoreData {
 	pub wasi: WasiP1Ctx,
 	pub config: Arc<SurrealismConfig>,
-	pub(crate) context: ContextCell,
+	pub(crate) context: Box<dyn InvocationContext>,
 }
 
 impl fmt::Debug for StoreData {
@@ -114,6 +79,8 @@ impl Runtime {
 	) -> Result<Self> {
 		// Configure engine for fast compilation in debug, optimized runtime in release
 		let mut engine_config = Config::new();
+		// Enable async support for async host functions
+		engine_config.async_support(true);
 		#[cfg(debug_assertions)]
 		{
 			// Use Winch baseline compiler for extremely fast compilation in debug builds
@@ -125,15 +92,12 @@ impl Runtime {
 			// Optimize for runtime performance in release builds
 			engine_config.cranelift_opt_level(OptLevel::Speed);
 		}
-		// Enable async support for native async host functions
-		engine_config.async_support(true);
-        
 		let engine = Engine::new(&engine_config)?;
 		let module =
 			Module::new(&engine, wasm).prefix_err(|| "Failed to construct module from bytes")?;
 
 		let mut linker: Linker<StoreData> = Linker::new(&engine);
-		preview1::add_to_linker_sync(&mut linker, |data| &mut data.wasi)
+		preview1::add_to_linker_async(&mut linker, |data| &mut data.wasi)
 			.prefix_err(|| "failed to add WASI to linker")?;
 		implement_host_functions(&mut linker)
 			.prefix_err(|| "failed to implement host functions")?;
@@ -150,13 +114,13 @@ impl Runtime {
 	/// This is cheap (relative to compilation) - the expensive compilation is shared.
 	/// Each controller has its own mutable Store, ensuring no shared mutable state.
 	/// Safe for concurrent execution: no mutable state is shared between controllers.
-	pub async fn new_controller(&self) -> Result<Controller> {
+	pub async fn new_controller(&self, context: Box<dyn InvocationContext>) -> Result<Controller> {
 		let wasi_ctx = super::wasi_context::build()?;
 
 		let store_data = StoreData {
 			wasi: wasi_ctx,
 			config: self.config.clone(),
-			context: ContextCell::new(),
+			context,
 		};
 		let mut store = Store::new(&self.engine, store_data);
 		let instance = self
@@ -186,79 +150,59 @@ pub struct Controller {
 }
 
 impl Controller {
-	/// Run a closure with a temporary context. The context will be cleaned up after the closure
-	/// returns. SAFETY: The context must not escape the closure - it's only valid during the
-	/// closure execution.
-	pub fn with_context<F, R>(&mut self, context: &mut dyn InvocationContext, f: F) -> R
-	where
-		F: FnOnce(&mut Self) -> R,
-	{
-		// SAFETY: We're storing a raw pointer to the context, which is valid for the duration
-		// of this function call. The context is cleared before returning, ensuring no dangling
-		// pointers. We use transmute to erase the lifetime without the compiler inferring
-		// 'static.
-		unsafe {
-			let ptr: *mut dyn InvocationContext = std::mem::transmute(context);
-			self.store.data().context.set_raw(ptr);
-		}
-		let result = f(self);
-		self.store.data().context.clear();
-		result
-	}
-
-	pub fn alloc(&mut self, len: u32, align: u32) -> Result<u32> {
+	pub async fn alloc(&mut self, len: u32, align: u32) -> Result<u32> {
 		let alloc =
 			self.instance.get_typed_func::<(u32, u32), i32>(&mut self.store, "__sr_alloc")?;
-		let result = alloc.call(&mut self.store, (len, align))?;
+		let result = alloc.call_async(&mut self.store, (len, align)).await?;
 		if result == -1 {
 			anyhow::bail!("Memory allocation failed");
 		}
 		Ok(result as u32)
 	}
 
-	pub fn free(&mut self, ptr: u32, len: u32) -> Result<()> {
+	pub async fn free(&mut self, ptr: u32, len: u32) -> Result<()> {
 		let free = self.instance.get_typed_func::<(u32, u32), i32>(&mut self.store, "__sr_free")?;
-		let result = free.call(&mut self.store, (ptr, len))?;
+		let result = free.call_async(&mut self.store, (ptr, len)).await?;
 		if result == -1 {
 			anyhow::bail!("Memory deallocation failed");
 		}
 		Ok(())
 	}
 
-	pub fn init(&mut self) -> Result<()> {
+	pub async fn init(&mut self) -> Result<()> {
 		let init = self.instance.get_export(&mut self.store, "__sr_init");
 		if init.is_none() {
 			return Ok(());
 		}
 
 		let init = self.instance.get_typed_func::<(), ()>(&mut self.store, "__sr_init")?;
-		init.call(&mut self.store, ())
+		init.call_async(&mut self.store, ()).await
 	}
 
-	pub fn invoke<A: Args>(
+	pub async fn invoke<A: Args>(
 		&mut self,
 		name: Option<String>,
 		args: A,
 	) -> Result<surrealdb_types::Value> {
 		let name = format!("__sr_fnc__{}", name.unwrap_or_default());
-		let args = args.to_values().transfer(self)?;
+		let args = AsyncTransfer::transfer(args.to_values(), self).await?;
 		let invoke = self.instance.get_typed_func::<(u32,), (i32,)>(&mut self.store, &name)?;
-		let (ptr,) = invoke.call(&mut self.store, (*args,))?;
-		Result::<surrealdb_types::Value>::receive(ptr.try_into()?, self)?
+		let (ptr,) = invoke.call_async(&mut self.store, (*args,)).await?;
+		AsyncTransfer::receive(ptr.try_into()?, self).await
 	}
 
-	pub fn args(&mut self, name: Option<String>) -> Result<Vec<surrealdb_types::Kind>> {
+	pub async fn args(&mut self, name: Option<String>) -> Result<Vec<surrealdb_types::Kind>> {
 		let name = format!("__sr_args__{}", name.unwrap_or_default());
 		let args = self.instance.get_typed_func::<(), (i32,)>(&mut self.store, &name)?;
-		let (ptr,) = args.call(&mut self.store, ())?;
-		Vec::<surrealdb_types::Kind>::receive(ptr.try_into()?, self)
+		let (ptr,) = args.call_async(&mut self.store, ()).await?;
+		AsyncTransfer::receive(ptr.try_into()?, self).await
 	}
 
-	pub fn returns(&mut self, name: Option<String>) -> Result<surrealdb_types::Kind> {
+	pub async fn returns(&mut self, name: Option<String>) -> Result<surrealdb_types::Kind> {
 		let name = format!("__sr_returns__{}", name.unwrap_or_default());
 		let returns = self.instance.get_typed_func::<(), (i32,)>(&mut self.store, &name)?;
-		let (ptr,) = returns.call(&mut self.store, ())?;
-		surrealdb_types::Kind::receive(ptr.try_into()?, self)
+		let (ptr,) = returns.call_async(&mut self.store, ()).await?;
+		AsyncTransfer::receive(ptr.try_into()?, self).await
 	}
 
 	pub fn list(&mut self) -> Result<Vec<String>> {
@@ -296,13 +240,14 @@ impl Controller {
 	}
 }
 
-impl surrealism_types::controller::MemoryController for Controller {
-	fn alloc(&mut self, len: u32, align: u32) -> Result<u32> {
-		Controller::alloc(self, len, align)
+#[async_trait]
+impl surrealism_types::controller::AsyncMemoryController for Controller {
+	async fn alloc(&mut self, len: u32, align: u32) -> Result<u32> {
+		Controller::alloc(self, len, align).await
 	}
 
-	fn free(&mut self, ptr: u32, len: u32) -> Result<()> {
-		Controller::free(self, ptr, len)
+	async fn free(&mut self, ptr: u32, len: u32) -> Result<()> {
+		Controller::free(self, ptr, len).await
 	}
 
 	fn mut_mem(&mut self, ptr: u32, len: u32) -> &mut [u8] {

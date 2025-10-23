@@ -13,23 +13,19 @@ pub struct SigCommand {
 }
 
 impl SurrealismCommand for SigCommand {
-	fn run(self) -> anyhow::Result<()> {
+	async fn run(self) -> anyhow::Result<()> {
 		let package = SurrealismPackage::from_file(self.file)
 			.prefix_err(|| "Failed to load Surrealism package")?;
 
 		// Load the WASM module from memory
 		let runtime = Runtime::new(package)?;
+		let host = Box::new(DemoHost::new());
 		let mut controller =
-			runtime.new_controller().prefix_err(|| "Failed to load WASM module")?;
-		let mut host = DemoHost::new();
+			runtime.new_controller(host).await.prefix_err(|| "Failed to load WASM module")?;
 
 		// Invoke the function with the provided arguments
-		let args = controller.with_context(&mut host, |controller| {
-			controller.args(self.fnc.clone()).prefix_err(|| "Failed to collect arguments")
-		})?;
-		let returns = controller.with_context(&mut host, |controller| {
-			controller.returns(self.fnc.clone()).prefix_err(|| "Failed to collect return type")
-		})?;
+		let args = controller.args(self.fnc.clone()).await.prefix_err(|| "Failed to collect arguments")?;
+		let returns = controller.returns(self.fnc.clone()).await.prefix_err(|| "Failed to collect return type")?;
 
 		println!(
 			"\nSignature:\n - {}({}) -> {}",

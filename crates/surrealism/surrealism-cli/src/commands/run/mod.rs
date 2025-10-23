@@ -16,20 +16,19 @@ pub struct RunCommand {
 }
 
 impl SurrealismCommand for RunCommand {
-	fn run(self) -> Result<()> {
+	async fn run(self) -> Result<()> {
 		let package = SurrealismPackage::from_file(self.file)?;
 
 		// Load the WASM module
 		let runtime = Runtime::new(package)?;
+		let host = Box::new(DemoHost::new());
 		let mut controller =
-			runtime.new_controller().prefix_err(|| "Failed to load WASM module")?;
-		let mut host = DemoHost::new();
+			runtime.new_controller(host).await.prefix_err(|| "Failed to load WASM module")?;
 
-		controller.with_context(&mut host, |controller| controller.init())?;
+		controller.init().await?;
 
 		// Invoke the function with the provided arguments
-		let result =
-			controller.with_context(&mut host, |controller| controller.invoke(self.fnc, self.args));
+		let result = controller.invoke(self.fnc, self.args).await;
 
 		match result {
 			Ok(result) => {

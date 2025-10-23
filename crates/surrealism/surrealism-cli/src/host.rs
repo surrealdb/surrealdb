@@ -27,7 +27,7 @@ impl DemoHost {
 	}
 }
 
-#[async_trait(?Send)]
+#[async_trait]
 impl InvocationContext for DemoHost {
 	fn kv(&mut self) -> &dyn KVStore {
 		&self.kv

@@ -7438,6 +7438,7 @@ dependencies = [
  "surrealml-tokenizers",
  "tempfile",
  "thiserror 1.0.69",
+ "tokio",
  "walrus",
  "wasm-opt",
 ]
@@ -7458,12 +7459,13 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
+ "crossbeam-channel",
  "futures",
+ "reblessive",
  "semver",
  "serde",
  "serde_json",
  "surrealdb-types",
- "surrealism",
  "surrealism-types",
  "tar",
  "thiserror 1.0.69",
@@ -7479,6 +7481,7 @@ name = "surrealism-types"
 version = "3.0.0-alpha.10"
 dependencies = [
  "anyhow",
+ "async-trait",
  "bytes",
  "chrono",
  "flatbuffers",

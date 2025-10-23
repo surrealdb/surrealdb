@@ -1,0 +1,18 @@
+# Configuration for rust-analyzer to properly handle conditional compilation
+# across the surrealism guest/host split
+
+[check]
+# Use the same target for all workspace members to ensure consistent feature resolution
+allTargets = false
+
+[cargo]
+# Ensure rust-analyzer checks packages with their default features
+# This prevents feature unification across the entire workspace
+unsetTest = []
+
+# Per-crate feature configuration
+[cargo.cfgs]
+# These are the conditional compilation flags that are used in the codebase
+
+
+

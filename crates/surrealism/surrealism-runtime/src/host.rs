@@ -2,10 +2,10 @@ use std::ops::{Deref, DerefMut};
 
 use anyhow::Result;
 use async_trait::async_trait;
-use surrealism_types::controller::MemoryController;
+use surrealism_types::controller::AsyncMemoryController;
 use surrealism_types::err::PrefixError;
 use surrealism_types::serialize::SerializableRange;
-use surrealism_types::transfer::Transfer;
+use surrealism_types::transfer::AsyncTransfer;
 use wasmtime::{Caller, Linker};
 
 use crate::config::SurrealismConfig;
@@ -46,13 +46,13 @@ macro_rules! register_host_function {
                     Box::new(async move {
                         eprintln!("🔵 Host function called: {}", $name);
                         let mut $controller: $controller_ty = HostController::from(caller);
-                        let $arg = host_try_or_return!("Failed to receive argument", <$arg_ty>::receive($arg.into(), &mut $controller));
+                        let $arg = host_try_or_return!("Failed to receive argument", <$arg_ty>::receive($arg.into(), &mut $controller).await);
                         
                         eprintln!("🟡 Executing async body for: {}", $name);
                         let result = $body;
                         eprintln!("🟢 Async body completed for: {}", $name);
                         
-                        (*host_try_or_return!("Transfer error", result.transfer(&mut $controller))) as i32
+                        (*host_try_or_return!("Transfer error", result.transfer(&mut $controller).await)) as i32
                     })
                 }
             )
@@ -68,13 +68,13 @@ macro_rules! register_host_function {
                     Box::new(async move {
                         eprintln!("🔵 Host function called: {}", $name);
                         let mut $controller: $controller_ty = HostController::from(caller);
-                        $(let $arg = host_try_or_return!("Failed to receive argument", <$arg_ty>::receive($arg.into(), &mut $controller));)+
+                        $(let $arg = host_try_or_return!("Failed to receive argument", <$arg_ty>::receive($arg.into(), &mut $controller).await);)+
                         
                         eprintln!("🟡 Executing async body for: {}", $name);
                         let result = $body;
                         eprintln!("🟢 Async body completed for: {}", $name);
                         
-                        (*host_try_or_return!("Transfer error", result.transfer(&mut $controller))) as i32
+                        (*host_try_or_return!("Transfer error", result.transfer(&mut $controller).await)) as i32
                     })
                 }
             )
@@ -90,13 +90,13 @@ macro_rules! register_host_function {
                     Box::new(async move {
                         eprintln!("🔵 Host function called: {}", $name);
                         let mut $controller: $controller_ty = HostController::from(caller);
-                        $(let $arg = host_try_or_return!("Failed to receive argument", <$arg_ty>::receive($arg.into(), &mut $controller));)+
+                        $(let $arg = host_try_or_return!("Failed to receive argument", <$arg_ty>::receive($arg.into(), &mut $controller).await);)+
                         
                         eprintln!("🟡 Executing async body for: {}", $name);
                         let result = $body;
                         eprintln!("🟢 Async body completed for: {}", $name);
                         
-                        (*host_try_or_return!("Transfer error", result.transfer(&mut $controller))) as i32
+                        (*host_try_or_return!("Transfer error", result.transfer(&mut $controller).await)) as i32
                     })
                 }
             )
@@ -107,7 +107,7 @@ macro_rules! register_host_function {
 /// Context provided for each WASM function invocation.
 /// Created per-call with borrowed execution context (stack, query context, etc).
 #[async_trait]
-pub trait InvocationContext {
+pub trait InvocationContext: Send + Sync {
 	async fn sql(
 		&mut self,
 		config: &SurrealismConfig,
@@ -255,10 +255,8 @@ struct HostController<'a>(Caller<'a, StoreData>);
 
 impl<'a> HostController<'a> {
 	/// Get mutable reference to the invocation context.
-	/// SAFETY: This is safe because Store is effectively !Send and each Controller has its own
-	/// isolated context.
 	pub fn context_mut(&mut self) -> &mut dyn InvocationContext {
-		unsafe { self.0.data().context.get_mut() }
+		&mut *self.0.data_mut().context
 	}
 
 	pub fn config(&self) -> &SurrealismConfig {
@@ -285,29 +283,30 @@ impl<'a> DerefMut for HostController<'a> {
 	}
 }
 
-impl<'a> MemoryController for HostController<'a> {
-	fn alloc(&mut self, len: u32, align: u32) -> Result<u32> {
+#[async_trait]
+impl<'a> AsyncMemoryController for HostController<'a> {
+	async fn alloc(&mut self, len: u32, align: u32) -> Result<u32> {
 		let alloc_func = self
 			.get_export("__sr_alloc")
 			.ok_or_else(|| anyhow::anyhow!("Export __sr_alloc not found"))?
 			.into_func()
 			.ok_or_else(|| anyhow::anyhow!("Export __sr_alloc is not a function"))?;
 		let result =
-			alloc_func.typed::<(u32, u32), i32>(&mut self.0)?.call(&mut self.0, (len, align))?;
+			alloc_func.typed::<(u32, u32), i32>(&mut self.0)?.call_async(&mut self.0, (len, align)).await?;
 		if result == -1 {
 			anyhow::bail!("Memory allocation failed");
 		}
 		Ok(result as u32)
 	}
 
-	fn free(&mut self, ptr: u32, len: u32) -> Result<()> {
+	async fn free(&mut self, ptr: u32, len: u32) -> Result<()> {
 		let free_func = self
 			.get_export("__sr_free")
 			.ok_or_else(|| anyhow::anyhow!("Export __sr_free not found"))?
 			.into_func()
 			.ok_or_else(|| anyhow::anyhow!("Export __sr_free is not a function"))?;
 		let result =
-			free_func.typed::<(u32, u32), i32>(&mut self.0)?.call(&mut self.0, (ptr, len))?;
+			free_func.typed::<(u32, u32), i32>(&mut self.0)?.call_async(&mut self.0, (ptr, len)).await?;
 		if result == -1 {
 			anyhow::bail!("Memory deallocation failed");
 		}
