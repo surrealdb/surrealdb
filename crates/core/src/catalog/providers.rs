@@ -9,14 +9,18 @@ use uuid::Uuid;
 
 use crate::catalog;
 use crate::catalog::{
+<<<<<<< HEAD
 	DatabaseDefinition, DatabaseId, IndexId, NamespaceDefinition, NamespaceId, TableDefinition,
 	TableId, UserDefinition,
+=======
+	DatabaseDefinition, DatabaseId, IndexId, NamespaceDefinition, NamespaceId, Record,
+	TableDefinition, UserDefinition,
+>>>>>>> a26f6dbdd (Group by in normal select fixed)
 };
 use crate::ctx::MutableContext;
 use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::val::RecordIdKey;
-use crate::val::record::Record;
 
 /// SurrealDB Node provider.
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]

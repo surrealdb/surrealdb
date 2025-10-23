@@ -5,7 +5,7 @@ use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::ctx::Context;
 #[cfg(storage)]
 use crate::dbs::file::FileCollector;
-use crate::dbs::group::{GroupCollector, GroupsCollector};
+use crate::dbs::group::GroupCollector;
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::{MemoryCollector, MemoryOrdered, MemoryOrderedLimit, MemoryRandom};
 use crate::dbs::{Options, Statement};

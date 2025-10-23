@@ -10,7 +10,7 @@ use super::Transaction;
 use crate::catalog::providers::{
 	AuthorisationProvider, DatabaseProvider, TableProvider, UserProvider,
 };
-use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
+use crate::catalog::{DatabaseId, NamespaceId, Record, TableDefinition};
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
@@ -19,7 +19,6 @@ use crate::expr::{Base, DefineAnalyzerStatement};
 use crate::key::record;
 use crate::kvs::KVValue;
 use crate::sql::statements::OptionStatement;
-use crate::val::record::Record;
 
 #[derive(Clone, Debug, SurrealValue)]
 #[surreal(default)]

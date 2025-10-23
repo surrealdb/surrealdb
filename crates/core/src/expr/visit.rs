@@ -212,7 +212,9 @@ implement_visitor! {
 			Expr::Literal(literal) => {
 				this.visit_literal(literal)?;
 			}
-			Expr::Param(_) |
+			Expr::Param(p) => {
+				this.visit_param(p)?;
+			}
 			Expr::Table(_) |
 			Expr::Mock(_) |
 			Expr::Constant(_) |
@@ -1630,7 +1632,9 @@ implement_visitor_mut! {
 			Expr::Literal(literal) => {
 				this.visit_mut_liter_mutal(literal)?;
 			}
-			Expr::Param(_) |
+			Expr::Param(p) => {
+				this.visit_mut_param(p)?;
+			}
 			Expr::Table(_) |
 			Expr::Mock(_) |
 			Expr::Constant(_) |
