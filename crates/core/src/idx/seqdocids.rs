@@ -48,12 +48,9 @@ pub(crate) struct SeqDocIds {
 impl SeqDocIds {
 	/// Creates a new SeqDocIds instance
 	///
-	/// Initializes a new document ID manager with the specified node ID and
-	/// index key base. Sets up the sequence domain for generating unique
-	/// document IDs.
+	/// Initializes a new document ID manager for the specified index.
 	///
 	/// # Arguments
-	/// * `nid` - The node ID used for distributed sequence generation
 	/// * `ikb` - The index key base containing namespace, database, table, and index information
 	pub(in crate::idx) fn new(ikb: IndexKeyBase) -> Self {
 		Self {

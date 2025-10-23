@@ -76,13 +76,13 @@ enum SequenceDomain {
 	UserName(NamespaceId, DatabaseId, String),
 	/// A sequence generating DocIds for a FullText search index
 	FullTextDocIds(IndexKeyBase),
-	/// A sequence generating ids for namespaces
+	/// A sequence generating IDs for namespaces
 	NameSpacesIds,
-	/// A sequence generating ids for databases
+	/// A sequence generating IDs for databases
 	DatabasesIds(NamespaceId),
-	/// A sequence generating ids for tables
+	/// A sequence generating IDs for tables
 	TablesIds(NamespaceId, DatabaseId),
-	/// A sequence generating ids for indexes
+	/// A sequence generating IDs for indexes
 	IndexIds(NamespaceId, DatabaseId, String),
 }
 
@@ -219,6 +219,21 @@ impl Sequences {
 		self.sequences.write().await.remove(&key);
 	}
 
+	/// Core internal method for retrieving the next value from a sequence.
+	///
+	/// This method coordinates sequence loading, caching, and value generation.
+	/// It ensures that only one Sequence instance exists per domain by checking
+	/// the cache first, then loading if needed.
+	///
+	/// # Arguments
+	/// * `ctx` - Optional mutable context for timeout checking
+	/// * `seq` - The sequence domain to generate values from
+	/// * `start` - The starting value if the sequence hasn't been initialized
+	/// * `batch` - The batch size for ID allocations
+	/// * `timeout` - Optional timeout for batch allocation operations
+	///
+	/// # Returns
+	/// The next sequential value
 	async fn next_val(
 		&self,
 		ctx: Option<&MutableContext>,
@@ -560,7 +575,7 @@ impl Sequence {
 			let batch_range = seq.new_batch_range_keys()?;
 			let val = tx.getr(batch_range, None).await?;
 			let mut next_start = next;
-			// Scan every existing batches
+			// Scan every existing batch
 			for (key, val) in val.iter() {
 				let ba: BatchValue = revision::from_slice(val)?;
 				next_start = next_start.max(ba.to);

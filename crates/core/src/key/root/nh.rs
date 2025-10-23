@@ -22,7 +22,7 @@ pub(crate) struct NamespaceIdGeneratorBatchKey {
 	pub start: i64,
 }
 
-impl_kv_key_storekey!(NamespaceIdGeneratorBatchKey=> BatchValue);
+impl_kv_key_storekey!(NamespaceIdGeneratorBatchKey => BatchValue);
 
 impl Categorise for NamespaceIdGeneratorBatchKey {
 	fn categorise(&self) -> Category {
