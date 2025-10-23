@@ -89,7 +89,7 @@ impl Results {
 				e.push(val).await?;
 			}
 			Self::Groups(g) => {
-				g.push(stk, ctx, opt, stm, rs, val).await?;
+				g.push(stk, ctx, opt, rs, val).await?;
 			}
 		}
 		Ok(())

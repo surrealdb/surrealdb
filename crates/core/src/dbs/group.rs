@@ -1,18 +1,18 @@
 use core::f64;
-use std::collections::{BTreeMap, HashMap};
-use std::fmt::Write;
+use std::collections::BTreeMap;
 
-use anyhow::{Result, bail, ensure};
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
+use crate::catalog::AggregationStat;
 use crate::ctx::Context;
+use crate::dbs::aggregation::{self, AggregateFields, AggregationAnalysis};
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::visit::{MutVisitor, VisitMut};
-use crate::expr::{Expr, Field, Fields, FlowResultExt as _, Function, Groups, Idiom, Part};
+use crate::expr::{Expr, FlowResultExt as _, Idiom};
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Datetime, Number, TryAdd, TryFloatDiv, Value};
 
@@ -70,191 +70,14 @@ pub enum CollectorFields {
 /// calcualted.
 #[derive(Debug)]
 pub struct GroupCollector {
-	/// A list of expressions that must be calculated for the calculation of the aggregate value pushed into the collector.
-	exprs: Vec<Expr>,
-	/// The list of aggregate expressions found.
-	aggregates: Vec<Aggregate>,
-	/// The modified expressions which can be used to construct the final value.
-	fields: CollectorFields,
-	/// The group expressions that define the group of a record.
-	groups: Vec<Expr>,
+	analysis: AggregationAnalysis,
 
 	/// buffers reused during pushing
 	exprs_buffer: Vec<Value>,
 	group_buffer: Vec<Value>,
 
 	/// The results of the group by.
-	results: BTreeMap<Vec<Value>, Vec<Aggregate>>,
-}
-
-/// Visitor which walks an expression to pull out the aggregate expressions to calculate.
-pub struct AggregateExprCollector<'a> {
-	within_aggregate_argument: bool,
-	exprs_map: &'a mut HashMap<Expr, usize>,
-	aggregates: &'a mut Vec<Aggregate>,
-	groups: &'a Groups,
-}
-
-fn write_aggregate_field_name(s: &mut String, idx: usize) {
-	// Writing into a string cannot error.
-	write!(s, "_a{}", idx).unwrap();
-}
-
-fn write_group_field_name(s: &mut String, idx: usize) {
-	// Writing into a string cannot error.
-	write!(s, "_g{}", idx).unwrap();
-}
-
-fn aggregate_field_name(idx: usize) -> String {
-	let mut res = String::new();
-	write_aggregate_field_name(&mut res, idx);
-	res
-}
-
-fn group_field_name(idx: usize) -> String {
-	let mut res = String::new();
-	write_group_field_name(&mut res, idx);
-	res
-}
-
-impl MutVisitor for AggregateExprCollector<'_> {
-	type Error = anyhow::Error;
-
-	fn visit_mut_idiom(&mut self, idiom: &mut Idiom) -> Result<(), Self::Error> {
-		if !self.within_aggregate_argument {
-			if let Some(Part::Field(_)) = idiom.0.first() {
-				bail!(Error::InvalidAggregationSelector {
-					expr: idiom.to_string(),
-				})
-			}
-		}
-		idiom.visit_mut(self)
-	}
-
-	fn visit_mut_expr(&mut self, s: &mut Expr) -> Result<(), Self::Error> {
-		fn get_aggregate_argument<'a>(name: &str, args: &'a [Expr]) -> Result<&'a Expr> {
-			ensure!(
-				args.len() == 1,
-				Error::InvalidArguments {
-					name: name.to_string(),
-					message: "Expected 1 argument".to_string()
-				}
-			);
-			Ok(&args[0])
-		}
-
-		match s {
-			Expr::FunctionCall(f) => {
-				if let Function::Normal(x) = &f.receiver {
-					match x.as_str() {
-						"count" => {
-							if f.arguments.is_empty() {
-								self.aggregates.push(Aggregate::Count {
-									count: 0,
-								});
-							} else {
-								let expr = get_aggregate_argument("count", &f.arguments)?;
-								let len = self.exprs_map.len();
-								let arg =
-									*self.exprs_map.entry(expr.clone()).or_insert_with(|| len);
-								self.aggregates.push(Aggregate::CountFn {
-									arg,
-									count: 0,
-								})
-							}
-						}
-						"math::max" => {
-							let expr = get_aggregate_argument("math::max", &f.arguments)?;
-							let len = self.exprs_map.len();
-							let arg = *self.exprs_map.entry(expr.clone()).or_insert_with(|| len);
-							self.aggregates.push(Aggregate::NumMax {
-								arg,
-								max: f64::NEG_INFINITY.into(),
-							})
-						}
-						"math::min" => {
-							let expr = get_aggregate_argument("math::min", &f.arguments)?;
-							let len = self.exprs_map.len();
-							let arg = *self.exprs_map.entry(expr.clone()).or_insert_with(|| len);
-							self.aggregates.push(Aggregate::NumMin {
-								arg,
-								min: f64::INFINITY.into(),
-							})
-						}
-						"math::sum" => {
-							let expr = get_aggregate_argument("math::sum", &f.arguments)?;
-							let len = self.exprs_map.len();
-							let arg = *self.exprs_map.entry(expr.clone()).or_insert_with(|| len);
-							self.aggregates.push(Aggregate::NumSum {
-								arg,
-								sum: Number::Int(0),
-							})
-						}
-						"math::mean" => {
-							let expr = get_aggregate_argument("math::mean", &f.arguments)?;
-							let len = self.exprs_map.len();
-							let arg = *self.exprs_map.entry(expr.clone()).or_insert_with(|| len);
-							self.aggregates.push(Aggregate::NumMean {
-								arg,
-								sum: Number::Int(0),
-								count: 0,
-							})
-						}
-						"time::max" => {
-							let expr = get_aggregate_argument("time::max", &f.arguments)?;
-							let len = self.exprs_map.len();
-							let arg = *self.exprs_map.entry(expr.clone()).or_insert_with(|| len);
-							self.aggregates.push(Aggregate::TimeMax {
-								arg,
-								max: Datetime::MIN_UTC,
-							});
-						}
-						"time::min" => {
-							let expr = get_aggregate_argument("math::min", &f.arguments)?;
-							let len = self.exprs_map.len();
-							let arg = *self.exprs_map.entry(expr.clone()).or_insert_with(|| len);
-							self.aggregates.push(Aggregate::TimeMin {
-								arg,
-								min: Datetime::MAX_UTC,
-							});
-						}
-						_ => {
-							return f.visit_mut(self);
-						}
-					}
-				} else {
-					return f.visit_mut(self);
-				}
-				self.within_aggregate_argument = true;
-				for a in f.arguments.iter_mut() {
-					a.visit_mut(self)?;
-				}
-				self.within_aggregate_argument = false;
-				// HACK: We replace the aggregate expression here with an field so that we can later
-				// inject the value via the current doc.
-				*s = Expr::Idiom(Idiom::field(aggregate_field_name(self.aggregates.len() - 1)));
-				Ok(())
-			}
-			Expr::Idiom(i) => {
-				if !self.within_aggregate_argument {
-					if let Some(group_idx) = self.groups.0.iter().position(|x| x.0 == *i) {
-						i.visit_mut(self)?;
-						// HACK: We replace the idioms which refer to the grouping expression here with an field so
-						// that we can later inject the value via the current doc.
-						*s = Expr::Idiom(Idiom::field(group_field_name(group_idx)));
-					} else if let Some(Part::Field(_)) = i.0.first() {
-						bail!(Error::InvalidAggregationSelector {
-							expr: i.to_string(),
-						})
-					}
-					Ok(())
-				} else {
-					i.visit_mut(self)
-				}
-			}
-			x => x.visit_mut(self),
-		}
-	}
+	results: BTreeMap<Vec<Value>, Vec<AggregationStat>>,
 }
 
 impl GroupCollector {
@@ -266,106 +89,10 @@ impl GroupCollector {
 			fail!("Tried to group a statement without a group");
 		};
 
-		// Find all the aggregates within the select statement.
-		let mut aggregates = Vec::new();
-		let mut exprs_map = HashMap::new();
-		let mut aggr_groups = Vec::with_capacity(groups.len());
-
-		for g in groups.0.iter() {
-			aggr_groups.push(Expr::Idiom(g.0.clone()))
-		}
-
-		let mut collect = AggregateExprCollector {
-			within_aggregate_argument: false,
-			exprs_map: &mut exprs_map,
-			aggregates: &mut aggregates,
-			groups,
-		};
-
-		// Collect the expressions which calculate the fields of the final object after
-		// aggregation.
-		let fields = match fields {
-			Fields::Value(field) => {
-				// alias is unused when using a value selector.
-				let Field::Single {
-					expr,
-					..
-				} = field.as_ref()
-				else {
-					// all is not a valid aggregate selector.
-					bail!(Error::InvalidAggregationSelector {
-						expr: field.to_string()
-					})
-				};
-				let mut expr = expr.clone();
-				// TODO: Check out other places where I might have mistakenly switched
-				// a.visit_mut(b) for b.visit_mut_*(a)
-				collect.visit_mut_expr(&mut expr)?;
-				CollectorFields::Value(expr)
-			}
-			Fields::Select(fields) => {
-				let mut collect_fields = Vec::with_capacity(fields.len());
-				for f in fields.iter() {
-					let Field::Single {
-						expr,
-						alias,
-					} = f
-					else {
-						// all is not a valid aggregate selector.
-						bail!(Error::InvalidAggregationSelector {
-							expr: f.to_string()
-						})
-					};
-
-					if let Some(alias) = alias
-						&& let Some(x) = aggr_groups.iter().position(|x| {
-							if let Expr::Idiom(i) = x {
-								*i == *alias
-							} else {
-								false
-							}
-						}) {
-						// The alias is used within the group statement, therefore this expression
-						// is a group expression. i.e. year in the statement:
-						// `SELECT time::year(time) as year FROM table GROUP BY year`;
-						// Replace the calculated group with the expression and then add it to the
-						// collected fields via a retrieval from the group.
-						aggr_groups[x] = expr.clone();
-						collect_fields
-							.push((alias.clone(), Expr::Idiom(Idiom::field(group_field_name(x)))));
-					} else {
-						let name = alias.clone().unwrap_or_else(|| expr.to_idiom());
-						let mut expr = expr.clone();
-						collect.visit_mut_expr(&mut expr)?;
-						collect_fields.push((name, expr))
-					}
-				}
-				CollectorFields::Fields(collect_fields)
-			}
-		};
-
-		// Place the expression which need to be calculated for the aggregate in the right index.
-		let mut exprs = Vec::with_capacity(exprs_map.len());
-		for (k, v) in exprs_map.into_iter() {
-			if exprs.len() == v {
-				exprs.push(k);
-			} else if exprs.len() > v {
-				exprs[v] = k
-			} else {
-				for _ in 0..v {
-					// push a temp expression that will be overwritten while we collect all the
-					// expressions.
-					exprs.push(Expr::Break)
-				}
-				exprs.push(k)
-			}
-		}
+		let analysis = AggregationAnalysis::analyze_fields_groups(fields, groups)?;
 
 		Ok(dbg!(GroupCollector {
-			exprs,
-			aggregates,
-			fields,
-			groups: aggr_groups,
+			analysis,
 
 			exprs_buffer: Vec::new(),
 			group_buffer: Vec::new(),
@@ -395,14 +122,13 @@ impl GroupCollector {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		stm: &Statement<'_>,
 		rs: RecordStrategy,
 		obj: Value,
 	) -> Result<()> {
 		// compute the group expressions
 		let doc = obj.into();
 		self.group_buffer.clear();
-		for g in self.groups.iter() {
+		for g in self.analysis.group_expressions.iter() {
 			let v = stk.run(|stk| g.compute(stk, ctx, opt, Some(&doc))).await.catch_return()?;
 			self.group_buffer.push(v);
 		}
@@ -411,7 +137,9 @@ impl GroupCollector {
 		let aggragates = if let Some(x) = self.results.get_mut(&self.group_buffer) {
 			x
 		} else {
-			self.results.entry(self.group_buffer.clone()).or_insert_with(|| self.aggregates.clone())
+			self.results.entry(self.group_buffer.clone()).or_insert_with(|| {
+				self.analysis.aggregations.iter().map(|x| x.into_stat()).collect()
+			})
 		};
 
 		if let RecordStrategy::Count = rs {
@@ -420,17 +148,17 @@ impl GroupCollector {
 			};
 
 			for a in aggragates.iter_mut() {
-				if let Aggregate::Count {
+				if let AggregationStat::Count {
 					count,
 				} = a
 				{
-					*count = n.as_int() as u64;
+					*count = n.as_int();
 				}
 			}
 		} else {
 			// calculate the arguments for the aggregate functions
 			self.exprs_buffer.clear();
-			for v in self.exprs.iter() {
+			for v in self.analysis.aggregate_arguments.iter() {
 				let v = stk.run(|stk| v.compute(stk, ctx, opt, Some(&doc))).await.catch_return()?;
 				self.exprs_buffer.push(v);
 			}
@@ -438,18 +166,18 @@ impl GroupCollector {
 			// update all aggregates
 			for a in aggragates {
 				match a {
-					Aggregate::Count {
+					AggregationStat::Count {
 						count,
 					} => {
 						*count += 1;
 					}
-					Aggregate::CountFn {
+					AggregationStat::CountFn {
 						arg,
 						count,
 					} => {
-						*count += self.exprs_buffer[*arg].is_truthy() as u64;
+						*count += self.exprs_buffer[*arg].is_truthy() as i64;
 					}
-					Aggregate::NumMax {
+					AggregationStat::NumMax {
 						arg,
 						max,
 					} => {
@@ -466,7 +194,7 @@ impl GroupCollector {
 							*max = *n
 						}
 					}
-					Aggregate::NumMin {
+					AggregationStat::NumMin {
 						arg,
 						min,
 					} => {
@@ -483,7 +211,7 @@ impl GroupCollector {
 							*min = *n
 						}
 					}
-					Aggregate::NumSum {
+					AggregationStat::NumSum {
 						arg,
 						sum,
 					} => {
@@ -498,7 +226,7 @@ impl GroupCollector {
 						};
 						*sum = (*sum).try_add(*n)?;
 					}
-					Aggregate::NumMean {
+					AggregationStat::NumMean {
 						arg,
 						sum,
 						count,
@@ -516,7 +244,7 @@ impl GroupCollector {
 						*sum = (*sum).try_add(*n)?;
 						*count += 1;
 					}
-					Aggregate::TimeMax {
+					AggregationStat::TimeMax {
 						arg,
 						max,
 					} => {
@@ -534,7 +262,7 @@ impl GroupCollector {
 							*max = d.clone();
 						}
 					}
-					Aggregate::TimeMin {
+					AggregationStat::TimeMin {
 						arg,
 						min,
 					} => {
@@ -564,7 +292,6 @@ impl GroupCollector {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		stm: &Statement<'_>,
 	) -> Result<MemoryCollector> {
 		let mut collector = MemoryCollector::default();
 
@@ -576,41 +303,42 @@ impl GroupCollector {
 				// We create the document above as a object so it must be an object.
 				unreachable!()
 			};
-			//setup the document
+
+			//setup the document for final value calculation
 			for (idx, a) in result.iter().enumerate() {
 				field_buffer.clear();
-				write_aggregate_field_name(&mut field_buffer, idx);
+				aggregation::write_aggregate_field_name(&mut field_buffer, idx);
 
 				let value = match a {
-					Aggregate::Count {
+					AggregationStat::Count {
 						count,
 					}
-					| Aggregate::CountFn {
+					| AggregationStat::CountFn {
 						count,
 						..
-					} => Value::from(Number::from(*count as i64)),
-					Aggregate::NumMax {
+					} => Value::from(Number::from(*count)),
+					AggregationStat::NumMax {
 						max,
 						..
 					} => (*max).into(),
-					Aggregate::NumMin {
+					AggregationStat::NumMin {
 						min,
 						..
 					} => (*min).into(),
-					Aggregate::NumSum {
+					AggregationStat::NumSum {
 						sum,
 						..
 					} => (*sum).into(),
-					Aggregate::NumMean {
+					AggregationStat::NumMean {
 						sum,
 						count,
 						..
-					} => sum.try_float_div((*count as i64).into()).unwrap_or(f64::NAN.into()).into(),
-					Aggregate::TimeMax {
+					} => sum.try_float_div((*count).into()).unwrap_or(f64::NAN.into()).into(),
+					AggregationStat::TimeMax {
 						max,
 						..
 					} => max.clone().into(),
-					Aggregate::TimeMin {
+					AggregationStat::TimeMin {
 						min,
 						..
 					} => min.clone().into(),
@@ -625,7 +353,7 @@ impl GroupCollector {
 			}
 			for (idx, g) in group.into_iter().enumerate() {
 				field_buffer.clear();
-				write_group_field_name(&mut field_buffer, idx);
+				aggregation::write_group_field_name(&mut field_buffer, idx);
 
 				// Optimize for the common case where the field is already in the document.
 				if let Some(x) = doc_obj.get_mut(&field_buffer) {
@@ -636,15 +364,15 @@ impl GroupCollector {
 			}
 
 			// Calculate the final value for the fields.
-			match &self.fields {
-				CollectorFields::Value(expr) => {
+			match &self.analysis.fields {
+				AggregateFields::Value(expr) => {
 					let res = stk
 						.run(|stk| expr.compute(stk, ctx, opt, Some(&doc)))
 						.await
 						.catch_return()?;
 					collector.push(res);
 				}
-				CollectorFields::Fields(items) => {
+				AggregateFields::Fields(items) => {
 					let mut obj = Value::empty_object();
 					for (name, expr) in items {
 						let res = stk

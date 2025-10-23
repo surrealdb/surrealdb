@@ -33,6 +33,7 @@ impl fmt::Display for View {
 impl From<View> for crate::expr::View {
 	fn from(v: View) -> Self {
 		crate::expr::View {
+			materialize: true,
 			expr: v.expr.into(),
 			what: v.what.clone(),
 			cond: v.cond.map(Into::into),

@@ -104,7 +104,7 @@ impl DefineTableStatement {
 			drop: self.drop,
 			schemafull: self.full,
 			table_type: self.table_type.clone(),
-			view: self.view.clone().map(|v| v.to_definition()),
+			view: self.view.clone().map(|v| v.to_definition()).transpose()?,
 			permissions: self.permissions.clone(),
 			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 			changefeed: self.changefeed,
