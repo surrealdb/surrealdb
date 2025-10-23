@@ -1,19 +1,14 @@
-use surrealdb::opt::auth::Token;
+use surrealdb::opt::auth::{AccessToken, RefreshToken, Token};
 use surrealdb_types::{Object, SurrealValue, Value};
 
 // Helper function to create a Token with both access and refresh tokens
 fn create_token_with_refresh(access_str: &str, refresh_str: &str) -> Token {
-	let mut obj = Object::new();
-	obj.insert("token".to_string(), access_str.to_owned().into_value());
-	obj.insert("refresh".to_string(), refresh_str.to_owned().into_value());
-	let value = Value::Object(obj);
-	Token::from_value(value).unwrap()
+	Token::from((AccessToken::from(access_str), RefreshToken::from(refresh_str)))
 }
 
 // Helper function to create a Token with only access token
 fn create_token_without_refresh(access_str: &str) -> Token {
-	let value = access_str.to_owned().into_value();
-	Token::from_value(value).unwrap()
+	Token::from(access_str)
 }
 
 #[test]
