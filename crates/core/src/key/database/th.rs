@@ -8,7 +8,7 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::key::database::all::DatabaseRoot;
-use crate::kvs::sequences::SequenceState;
+use crate::kvs::sequences::BatchValue;
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 /// Key structure for storing table ID generator batch allocations.
@@ -25,7 +25,7 @@ pub(crate) struct TableIdGeneratorBatchKey {
 	start: i64,
 }
 
-impl_kv_key_storekey!(TableIdGeneratorBatchKey => SequenceState);
+impl_kv_key_storekey!(TableIdGeneratorBatchKey => BatchValue);
 
 impl Categorise for TableIdGeneratorBatchKey {
 	fn categorise(&self) -> Category {

@@ -1,4 +1,4 @@
-//! Stores namespace ID generator batch value
+//! Stores namespace ID generator batch allocations
 
 use std::ops::Range;
 

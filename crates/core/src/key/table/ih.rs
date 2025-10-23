@@ -7,7 +7,7 @@ use storekey::{BorrowDecode, Encode};
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::category::{Categorise, Category};
 use crate::key::table::all::TableRoot;
-use crate::kvs::sequences::SequenceState;
+use crate::kvs::sequences::BatchValue;
 use crate::kvs::{KVKey, impl_kv_key_storekey};
 
 /// Key structure for storing index ID generator batch allocations.
@@ -24,7 +24,7 @@ pub(crate) struct IndexIdGeneratorBatchKey<'a> {
 	start: i64,
 }
 
-impl_kv_key_storekey!(IndexIdGeneratorBatchKey<'_> => SequenceState);
+impl_kv_key_storekey!(IndexIdGeneratorBatchKey<'_> => BatchValue);
 
 impl<'a> Categorise for IndexIdGeneratorBatchKey<'a> {
 	fn categorise(&self) -> Category {

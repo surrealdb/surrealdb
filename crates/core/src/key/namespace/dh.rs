@@ -1,4 +1,4 @@
-//! Stores a database ID generator batch value
+//! Stores database ID generator batch allocations
 use std::ops::Range;
 
 use anyhow::Result;

@@ -72,7 +72,7 @@ pub struct Sequences {
 /// namespace and allocation strategy.
 #[derive(Hash, PartialEq, Eq)]
 enum SequenceDomain {
-	/// A user sequence in a namespace
+	/// A user-defined sequence in a database
 	UserName(NamespaceId, DatabaseId, String),
 	/// A sequence generating DocIds for a FullText search index
 	FullTextDocIds(IndexKeyBase),
@@ -149,17 +149,29 @@ impl SequenceDomain {
 	}
 }
 
+/// Represents a batch allocation of IDs in the key-value store.
+///
+/// A batch allocation reserves a range of IDs for a specific node (identified by `owner`).
+/// The range is from some starting value (stored in the key) up to (but not including) `to`.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub(crate) struct BatchValue {
+	/// The exclusive upper bound of the batch allocation
 	to: i64,
+	/// The UUID of the node that owns this batch allocation
 	owner: Uuid,
 }
 impl_kv_value_revisioned!(BatchValue);
 
+/// Tracks the next available ID for a specific node in a sequence.
+///
+/// Each node maintains its own `SequenceState` which tracks the next ID it will
+/// allocate from its current batch. This state is persisted to coordinate with
+/// batch allocations and ensure no ID is used twice.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 pub(crate) struct SequenceState {
+	/// The next ID to be allocated by this node
 	next: i64,
 }
 impl_kv_value_revisioned!(SequenceState);
@@ -172,12 +184,21 @@ impl Sequences {
 			nid,
 		}
 	}
+	/// Cleans up all sequences associated with a removed namespace.
+	///
+	/// This method is called when a namespace is deleted to remove all cached
+	/// sequence state for databases within that namespace.
 	pub(crate) async fn namespace_removed(&self, tx: &Transaction, ns: NamespaceId) -> Result<()> {
 		for db in tx.all_db(ns).await?.iter() {
 			self.database_removed(tx, ns, db.database_id).await?;
 		}
 		Ok(())
 	}
+
+	/// Cleans up all sequences associated with a removed database.
+	///
+	/// This method is called when a database is deleted to remove all cached
+	/// sequence state for user-defined sequences within that database.
 	pub(crate) async fn database_removed(
 		&self,
 		tx: &Transaction,
@@ -190,6 +211,9 @@ impl Sequences {
 		Ok(())
 	}
 
+	/// Removes a specific user-defined sequence from the cache.
+	///
+	/// This method is called when a sequence is deleted to clean up its cached state.
 	pub(crate) async fn sequence_removed(&self, ns: NamespaceId, db: DatabaseId, sq: &str) {
 		let key = SequenceDomain::new_user(ns, db, sq);
 		self.sequences.write().await.remove(&key);
@@ -286,15 +310,38 @@ impl Sequences {
 	}
 }
 
+/// Internal per-node sequence state manager.
+///
+/// This struct manages the local state for a specific sequence on a specific node.
+/// It tracks the current position within an allocated batch and coordinates with
+/// the distributed batch allocation system when the current batch is exhausted.
 struct Sequence {
+	/// Transaction factory for creating transactions to persist state
 	tf: TransactionFactory,
+	/// The current state tracking the next ID to allocate
 	st: SequenceState,
+	/// Optional timeout for batch allocation operations
 	timeout: Option<Duration>,
+	/// The exclusive upper bound of the current batch allocation
 	to: i64,
+	/// The key used to persist this sequence's state
 	state_key: Vec<u8>,
 }
 
 impl Sequence {
+	/// Loads or initializes a sequence instance for the current node.
+	///
+	/// This method reads the persisted state for this sequence (if it exists) and
+	/// allocates an initial batch of IDs. If no state exists, it starts from the
+	/// provided `start` value.
+	///
+	/// # Arguments
+	/// * `ctx` - Optional mutable context for timeout checking
+	/// * `sqs` - The sequences manager
+	/// * `seq` - The sequence domain identifying which sequence to load
+	/// * `start` - The starting value if no state exists
+	/// * `batch` - The batch size for ID allocations
+	/// * `timeout` - Optional timeout for batch allocation operations
 	async fn load(
 		ctx: Option<&MutableContext>,
 		sqs: &Sequences,
@@ -328,6 +375,17 @@ impl Sequence {
 		})
 	}
 
+	/// Gets the next ID from this sequence.
+	///
+	/// If the current batch is exhausted, this method will allocate a new batch
+	/// before returning the next ID. The state is persisted to the key-value store
+	/// after each allocation.
+	///
+	/// # Arguments
+	/// * `sqs` - The sequences manager
+	/// * `ctx` - Optional mutable context for timeout checking
+	/// * `seq` - The sequence domain
+	/// * `batch` - The batch size for new allocations if needed
 	async fn next(
 		&mut self,
 		sqs: &Sequences,
@@ -359,6 +417,22 @@ impl Sequence {
 		}
 	}
 
+	/// Finds and allocates a batch of IDs with retry logic and exponential backoff.
+	///
+	/// This method repeatedly attempts to allocate a batch until successful or until
+	/// a timeout is reached. It uses exponential backoff with jitter to reduce
+	/// contention when multiple nodes are competing for batch allocations.
+	///
+	/// # Arguments
+	/// * `sqs` - The sequences manager
+	/// * `ctx` - Optional mutable context for timeout checking
+	/// * `seq` - The sequence domain
+	/// * `next` - The next ID that needs to be allocated
+	/// * `batch` - The batch size to allocate
+	/// * `to` - Optional timeout duration for the entire operation
+	///
+	/// # Returns
+	/// A tuple of (start, end) representing the allocated batch range [start, end)
 	async fn find_batch_allocation(
 		sqs: &Sequences,
 		ctx: Option<&MutableContext>,
@@ -404,6 +478,20 @@ impl Sequence {
 		Err(anyhow::Error::new(Error::QueryTimedout))
 	}
 
+	/// Attempts to allocate a batch of IDs in a single transaction.
+	///
+	/// This method scans existing batch allocations to find the highest allocated ID,
+	/// reuses existing batches owned by this node if available, and creates a new
+	/// batch allocation if needed. The entire operation is atomic within a transaction.
+	///
+	/// # Arguments
+	/// * `sqs` - The sequences manager
+	/// * `seq` - The sequence domain
+	/// * `next` - The next ID that needs to be allocated
+	/// * `batch` - The batch size to allocate
+	///
+	/// # Returns
+	/// A tuple of (start, end) representing the allocated batch range [start, end)
 	async fn check_batch_allocation(
 		sqs: &Sequences,
 		seq: &SequenceDomain,
