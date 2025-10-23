@@ -359,8 +359,25 @@ async fn router(
 				}
 				Err(err) => {
 					debug!("Error converting Value to Credentials: {err}");
+					let error = || {
+						Error::InvalidResponse(
+							"Expected string or object with a token field".to_string(),
+						)
+					};
+					let token = match value {
+						Value::String(token) => token,
+						Value::Object(mut obj) => match obj.remove("token") {
+							Some(Value::String(token)) => token,
+							_ => {
+								return Err(error());
+							}
+						},
+						_ => {
+							return Err(error());
+						}
+					};
 					*auth = Some(Auth::Bearer {
-						token: value.into_string()?,
+						token,
 					});
 				}
 			}
