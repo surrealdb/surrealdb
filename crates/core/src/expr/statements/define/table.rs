@@ -102,7 +102,7 @@ impl DefineTableStatement {
 
 			tb.table_id
 		} else {
-			ctx.try_get_sequences()?.next_table_id(Some(ctx), &txn, ns, db).await?
+			ctx.try_get_sequences()?.next_table_id(Some(ctx), ns, db).await?
 		};
 
 		// Process the statement

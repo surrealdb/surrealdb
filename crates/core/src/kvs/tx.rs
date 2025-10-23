@@ -592,7 +592,7 @@ impl NamespaceProvider for Transaction {
 	}
 
 	async fn get_next_ns_id(&self, ctx: Option<&MutableContext>) -> Result<NamespaceId> {
-		self.sequences.next_namespace_id(ctx, self).await
+		self.sequences.next_namespace_id(ctx).await
 	}
 }
 
@@ -625,13 +625,11 @@ impl DatabaseProvider for Transaction {
 			Some(val) => val.try_into_type().map(Some),
 			None => {
 				let Some(ns) = self.get_ns_by_name(ns).await? else {
-					warn!("No namespace found for name {}", ns);
 					return Ok(None);
 				};
 
 				let key = crate::key::namespace::db::new(ns.namespace_id, db);
 				let Some(db_def) = self.get(&key, None).await? else {
-					warn!("No database found for namespace {} and name {}", ns.name, db);
 					return Ok(None);
 				};
 
@@ -716,7 +714,7 @@ impl DatabaseProvider for Transaction {
 		ctx: Option<&MutableContext>,
 		ns: NamespaceId,
 	) -> Result<DatabaseId> {
-		self.sequences.next_database_id(ctx, self, ns).await
+		self.sequences.next_database_id(ctx, ns).await
 	}
 
 	async fn put_db(&self, ns: &str, db: DatabaseDefinition) -> Result<Arc<DatabaseDefinition>> {
@@ -1651,7 +1649,7 @@ impl TableProvider for Transaction {
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<TableId> {
-		self.sequences.next_table_id(ctx, self, ns, db).await
+		self.sequences.next_table_id(ctx, ns, db).await
 	}
 }
 

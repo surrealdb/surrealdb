@@ -198,7 +198,6 @@ impl Sequences {
 	async fn next_val(
 		&self,
 		ctx: Option<&MutableContext>,
-		tx: &Transaction,
 		seq: Arc<SequenceDomain>,
 		start: i64,
 		batch: u32,
@@ -212,7 +211,7 @@ impl Sequences {
 			Entry::Occupied(e) => e.get().clone(),
 			Entry::Vacant(e) => {
 				let s = Arc::new(Mutex::new(
-					Sequence::load(ctx, self, tx, &seq, start, batch, timeout).await?,
+					Sequence::load(ctx, self, &seq, start, batch, timeout).await?,
 				));
 				e.insert(s).clone()
 			}
@@ -223,46 +222,42 @@ impl Sequences {
 	pub(crate) async fn next_namespace_id(
 		&self,
 		ctx: Option<&MutableContext>,
-		tx: &Transaction,
 	) -> Result<NamespaceId> {
 		let domain = Arc::new(SequenceDomain::new_namespace_ids());
-		let id = self.next_val(ctx, tx, domain, 0, 100, None).await?;
+		let id = self.next_val(ctx, domain, 0, 100, None).await?;
 		Ok(NamespaceId(id as u32))
 	}
 
 	pub(crate) async fn next_database_id(
 		&self,
 		ctx: Option<&MutableContext>,
-		tx: &Transaction,
 		ns: NamespaceId,
 	) -> Result<DatabaseId> {
 		let domain = Arc::new(SequenceDomain::new_database_ids(ns));
-		let id = self.next_val(ctx, tx, domain, 0, 100, None).await?;
+		let id = self.next_val(ctx, domain, 0, 100, None).await?;
 		Ok(DatabaseId(id as u32))
 	}
 
 	pub(crate) async fn next_table_id(
 		&self,
 		ctx: Option<&MutableContext>,
-		tx: &Transaction,
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<TableId> {
 		let domain = Arc::new(SequenceDomain::new_table_ids(ns, db));
-		let id = self.next_val(ctx, tx, domain, 0, 100, None).await?;
+		let id = self.next_val(ctx, domain, 0, 100, None).await?;
 		Ok(TableId(id as u32))
 	}
 
 	pub(crate) async fn next_index_id(
 		&self,
 		ctx: Option<&MutableContext>,
-		tx: &Transaction,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: String,
 	) -> Result<IndexId> {
 		let domain = Arc::new(SequenceDomain::new_index_ids(ns, db, tb));
-		let id = self.next_val(ctx, tx, domain, 0, 100, None).await?;
+		let id = self.next_val(ctx, domain, 0, 100, None).await?;
 		Ok(IndexId(id as u32))
 	}
 
@@ -276,18 +271,17 @@ impl Sequences {
 	) -> Result<i64> {
 		let seq = tx.get_db_sequence(ns, db, sq).await?;
 		let domain = Arc::new(SequenceDomain::new_user(ns, db, sq));
-		self.next_val(ctx, tx, domain, seq.start, seq.batch, seq.timeout).await
+		self.next_val(ctx, domain, seq.start, seq.batch, seq.timeout).await
 	}
 
 	pub(crate) async fn next_fts_doc_id(
 		&self,
 		ctx: Option<&MutableContext>,
-		tx: &Transaction,
 		ikb: IndexKeyBase,
 		batch: u32,
 	) -> Result<DocId> {
 		let domain = Arc::new(SequenceDomain::new_ft_doc_ids(ikb));
-		let id = self.next_val(ctx, tx, domain, 0, batch, None).await?;
+		let id = self.next_val(ctx, domain, 0, batch, None).await?;
 		Ok(id as DocId)
 	}
 }
@@ -304,7 +298,6 @@ impl Sequence {
 	async fn load(
 		ctx: Option<&MutableContext>,
 		sqs: &Sequences,
-		_tx: &Transaction,
 		seq: &SequenceDomain,
 		start: i64,
 		batch: u32,
@@ -313,16 +306,16 @@ impl Sequence {
 		let state_key = seq.new_state_key(sqs.nid)?;
 		// Create a separate transaction for reading sequence state to avoid conflicts
 		// with the parent transaction in strict serialization mode (e.g., FDB)
-		let seq_tx =
+		let tx =
 			sqs.tf.transaction(TransactionType::Read, LockType::Optimistic, sqs.clone()).await?;
-		let mut st: SequenceState = if let Some(v) = seq_tx.get(&state_key, None).await? {
+		let mut st: SequenceState = if let Some(v) = tx.get(&state_key, None).await? {
 			revision::from_slice(&v)?
 		} else {
 			SequenceState {
 				next: start,
 			}
 		};
-		seq_tx.cancel().await?;
+		tx.cancel().await?;
 		let (from, to) =
 			Self::find_batch_allocation(sqs, ctx, seq, st.next, batch, timeout).await?;
 		st.next = from;

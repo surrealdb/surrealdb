@@ -76,7 +76,7 @@ impl DefineNamespaceStatement {
 			}
 			ns.namespace_id
 		} else {
-			ctx.try_get_sequences()?.next_namespace_id(Some(ctx), &txn).await?
+			ctx.try_get_sequences()?.next_namespace_id(Some(ctx)).await?
 		};
 
 		// Process the statement
