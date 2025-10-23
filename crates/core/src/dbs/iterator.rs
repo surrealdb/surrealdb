@@ -859,7 +859,7 @@ impl Iterator {
 	) -> Result<()> {
 		// Process any GROUP clause
 		if let Results::Groups(g) = &mut self.results {
-			self.results = Results::Memory(g.output(stk, ctx, opt, stm).await?);
+			self.results = Results::Memory(g.output(stk, ctx, opt).await?);
 		}
 		// Everything ok
 		Ok(())

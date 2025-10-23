@@ -17,7 +17,7 @@ use serde::de::Deserializer;
 use serde::{Deserialize, Serialize, Serializer};
 
 use crate::kvs::impl_kv_value_revisioned;
-use crate::val::Value;
+use crate::val::{Datetime, Number, Value};
 
 /// Represents a record stored in the database
 ///
@@ -121,6 +121,7 @@ impl Record {
 				*metadata = Some(Metadata {
 					record_type: rtype,
 					stats: HashMap::new(),
+					aggregation_stats: Vec::new(),
 				});
 			}
 		}
@@ -336,6 +337,45 @@ pub(crate) enum FieldStats {
 	},
 }
 
+/// A enum containing the data for an aggregation.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AggregationStat {
+	Count {
+		count: i64,
+	},
+	CountFn {
+		/// Index into the exprs field on the view definition.
+		arg: usize,
+		count: i64,
+	},
+	NumMax {
+		arg: usize,
+		max: Number,
+	},
+	NumMin {
+		arg: usize,
+		min: Number,
+	},
+	NumSum {
+		arg: usize,
+		sum: Number,
+	},
+	NumMean {
+		arg: usize,
+		sum: Number,
+		count: i64,
+	},
+	TimeMax {
+		arg: usize,
+		max: Datetime,
+	},
+	TimeMin {
+		arg: usize,
+		min: Datetime,
+	},
+}
+
 /// Types of records that can be stored in the database
 ///
 /// This enum defines the different types of records that can be stored.
@@ -364,6 +404,10 @@ pub(crate) struct Metadata {
 	record_type: RecordType,
 	/// Aggregation statistics for materialized view records
 	stats: HashMap<String, FieldStats>,
+	/// Statistics related to running aggregations for this record.
+	/// These do not directly correspond to a feild but must be used in conjunction with the field
+	/// definition to calculate the final value for this record.
+	aggregation_stats: Vec<AggregationStat>,
 }
 
 impl Record {
@@ -393,6 +437,7 @@ impl Record {
 		let metadata = self.metadata.get_or_insert_with(|| Metadata {
 			record_type: RecordType::default(),
 			stats: HashMap::new(),
+			aggregation_stats: Vec::new(),
 		});
 
 		metadata.stats.insert(field_name, stats);
