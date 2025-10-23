@@ -27,28 +27,19 @@ use crate::err::Error;
 use crate::expr::access_type;
 use crate::expr::statements::access;
 use crate::iam::issue::{config, expiration};
-use crate::iam::token::{Claims, HEADER};
+use crate::iam::token::{Claims, HEADER, Token};
 use crate::iam::{self, Auth, algorithm_to_jwt_algorithm};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::types::{PublicValue, PublicVariables, SurrealValue};
+use crate::types::{PublicValue, PublicVariables};
 use crate::val::{Datetime, Value};
 
-#[derive(Clone, Debug, SurrealValue, Eq, PartialEq, Hash)]
-#[surreal(untagged)]
-pub enum SigninData {
-	Token(String),
-	WithRefresh {
-		token: String,
-		refresh: String,
-	},
-}
 pub async fn signin(
 	kvs: &Datastore,
 	session: &mut Session,
 	vars: PublicVariables,
-) -> Result<SigninData> {
+) -> Result<Token> {
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns")).cloned();
 	let db = vars.get("DB").or_else(|| vars.get("db")).cloned();
@@ -140,7 +131,7 @@ pub async fn db_access(
 	db: String,
 	ac: String,
 	vars: PublicVariables,
-) -> Result<SigninData> {
+) -> Result<Token> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 
@@ -287,11 +278,11 @@ pub async fn db_access(
 											match enc {
 												// The auth token was created successfully
 												Ok(token) => Ok(match refresh {
-													Some(refresh) => SigninData::WithRefresh {
-														token,
+													Some(refresh) => Token::WithRefresh {
+														access: token,
 														refresh,
 													},
-													None => SigninData::Token(token),
+													None => Token::Access(token),
 												}),
 												_ => Err(anyhow::Error::new(
 													Error::TokenMakingFailed,
@@ -367,7 +358,7 @@ pub async fn db_user(
 	db: String,
 	user: String,
 	pass: String,
-) -> Result<SigninData> {
+) -> Result<Token> {
 	match verify_db_creds(kvs, &ns, &db, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -402,7 +393,7 @@ pub async fn db_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(SigninData::Token(tk)),
+				Ok(tk) => Ok(Token::Access(tk)),
 				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 			}
 		}
@@ -422,7 +413,7 @@ pub async fn ns_access(
 	ns: String,
 	ac: String,
 	vars: PublicVariables,
-) -> Result<SigninData> {
+) -> Result<Token> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	let ns_def = tx.expect_ns_by_name(&ns).await?;
@@ -458,7 +449,7 @@ pub async fn ns_user(
 	ns: String,
 	user: String,
 	pass: String,
-) -> Result<SigninData> {
+) -> Result<Token> {
 	match verify_ns_creds(kvs, &ns, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -492,7 +483,7 @@ pub async fn ns_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(SigninData::Token(tk)),
+				Ok(tk) => Ok(Token::Access(tk)),
 				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 			}
 		}
@@ -511,7 +502,7 @@ pub async fn root_user(
 	session: &mut Session,
 	user: String,
 	pass: String,
-) -> Result<SigninData> {
+) -> Result<Token> {
 	match verify_root_creds(kvs, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -542,7 +533,7 @@ pub async fn root_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(SigninData::Token(tk)),
+				Ok(tk) => Ok(Token::Access(tk)),
 				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 			}
 		}
@@ -559,7 +550,7 @@ pub async fn root_access(
 	session: &mut Session,
 	ac: String,
 	vars: PublicVariables,
-) -> Result<SigninData> {
+) -> Result<Token> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
@@ -597,7 +588,7 @@ pub async fn signin_bearer(
 	av: Arc<catalog::AccessDefinition>,
 	at: &catalog::BearerAccess,
 	key: String,
-) -> Result<SigninData> {
+) -> Result<Token> {
 	// Check if the bearer access method supports issuing tokens.
 	let iss = match &at.jwt.issue {
 		Some(iss) => iss.clone(),
@@ -802,11 +793,11 @@ pub async fn signin_bearer(
 	// Return the authentication token.
 	match enc {
 		Ok(token) => Ok(match refresh {
-			Some(refresh) => SigninData::WithRefresh {
-				token,
+			Some(refresh) => Token::WithRefresh {
+				access: token,
 				refresh,
 			},
-			None => SigninData::Token(token),
+			None => Token::Access(token),
 		}),
 		_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 	}
@@ -1072,7 +1063,7 @@ mod tests {
 			match res {
 				Ok(data) => {
 					assert!(
-						matches!(data, SigninData::WithRefresh { .. }),
+						matches!(data, Token::WithRefresh { .. }),
 						"Refresh token was unexpectedly returned"
 					)
 				}
@@ -1126,11 +1117,11 @@ mod tests {
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
 			let refresh = match res {
 				Ok(data) => match data {
-					SigninData::WithRefresh {
+					Token::WithRefresh {
 						refresh,
 						..
 					} => refresh,
-					SigninData::Token(_) => panic!("Refresh token was not returned"),
+					Token::Access(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
@@ -1169,14 +1160,14 @@ mod tests {
 			// Authentication should be identical as with user credentials
 			match res {
 				Ok(data) => match data {
-					SigninData::WithRefresh {
+					Token::WithRefresh {
 						refresh: new_refresh,
 						..
 					} => assert!(
 						new_refresh != refresh,
 						"New refresh token is identical to used one"
 					),
-					SigninData::Token(_) => panic!("Refresh token was not returned"),
+					Token::Access(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
@@ -1264,11 +1255,11 @@ mod tests {
 			.await;
 			let refresh = match res {
 				Ok(data) => match data {
-					SigninData::WithRefresh {
+					Token::WithRefresh {
 						refresh,
 						..
 					} => refresh,
-					SigninData::Token(_) => panic!("Refresh token was not returned"),
+					Token::Access(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
@@ -1340,11 +1331,11 @@ mod tests {
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
 			let refresh = match res {
 				Ok(data) => match data {
-					SigninData::WithRefresh {
+					Token::WithRefresh {
 						refresh,
 						..
 					} => refresh,
-					SigninData::Token(_) => panic!("Refresh token was not returned"),
+					Token::Access(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
@@ -1493,9 +1484,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			// Decode token and check that it has been issued as intended
 			if let Ok(sd) = res {
 				let token = match &sd {
-					SigninData::Token(token) => token,
-					SigninData::WithRefresh {
-						token,
+					Token::Access(token) => token,
+					Token::WithRefresh {
+						access: token,
 						..
 					} => token,
 				};
@@ -1709,9 +1700,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					// Check issued token
 					if let Ok(sd) = res {
 						let token = match &sd {
-							SigninData::Token(token) => token,
-							SigninData::WithRefresh {
-								token,
+							Token::Access(token) => token,
+							Token::WithRefresh {
+								access: token,
 								..
 							} => token,
 						};
