@@ -3,7 +3,6 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use chrono::Utc;
 use jsonwebtoken::{Header, encode};
-use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use surrealdb_types::ToSql;
 use uuid::Uuid;
@@ -23,7 +22,6 @@ use crate::kvs::TransactionType::*;
 use crate::types::{PublicVariables, SurrealValue};
 use crate::val::Value;
 
-#[revisioned(revision = 1)]
 #[derive(Clone, Debug, SurrealValue, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[surreal(untagged)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
