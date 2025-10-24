@@ -13,7 +13,7 @@ use super::error::{GqlError, resolver_error};
 #[cfg(debug_assertions)]
 use super::ext::ValidatorExt;
 use crate::catalog::providers::{DatabaseProvider, TableProvider};
-use crate::catalog::{GraphQLFunctionsConfig, GraphQLTablesConfig};
+use crate::catalog::{GraphQLConfig, GraphQLFunctionsConfig, GraphQLTablesConfig};
 use crate::dbs::Session;
 use crate::expr::kind::KindLiteral;
 use crate::expr::{Expr, Kind, Literal};
@@ -29,6 +29,7 @@ use crate::val::{
 pub async fn generate_schema(
 	datastore: &Arc<Datastore>,
 	session: &Session,
+	gql_config: GraphQLConfig,
 ) -> Result<Schema, GqlError> {
 	let kvs = datastore;
 	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
@@ -37,20 +38,8 @@ pub async fn generate_schema(
 
 	let db_def = match tx.get_db_by_name(ns, db).await? {
 		Some(db) => db,
-		None => return Err(GqlError::DbError(anyhow::anyhow!("Database not found: {ns} {db}"))),
+		None => return Err(GqlError::NotConfigured),
 	};
-
-	let cg = tx
-		.expect_db_config(db_def.namespace_id, db_def.database_id, "graphql")
-		.await
-		.map_err(|e| {
-			if matches!(e.downcast_ref(), Some(crate::err::Error::CgNotFound { .. })) {
-				GqlError::NotConfigured
-			} else {
-				GqlError::DbError(e)
-			}
-		})?;
-	let gql_config = (*cg).clone().try_into_graphql()?;
 
 	// Get all tables
 	let tbs = match gql_config.tables {
@@ -93,6 +82,16 @@ pub async fn generate_schema(
 	let mut types: Vec<Type> = Vec::new();
 
 	trace!(ns, db, ?tbs, ?fns, "generating schema");
+
+	let has_tables = tbs.as_ref().is_some_and(|t| !t.is_empty());
+	let has_fns = fns.as_ref().is_some_and(|f| !f.is_empty());
+
+	// Check if there's anything to expose via GraphQL
+	if !has_tables && !has_fns {
+		return Err(schema_error(
+			"no items found in database: GraphQL requires at least one table or function",
+		));
+	}
 
 	match tbs {
 		Some(tbs) if !tbs.is_empty() => {

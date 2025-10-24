@@ -27,7 +27,6 @@ pub async fn process_fns(
 		let sess1 = session.clone();
 		let kvs1 = datastore.clone();
 		let fnd1 = fnd.clone();
-		let kind1 = kind.clone();
 		let mut field = Field::new(
 			format!("fn_{}", fnd.name),
 			kind_to_type(kind.clone(), types)?,
@@ -35,7 +34,6 @@ pub async fn process_fns(
 				let sess1 = sess1.clone();
 				let kvs1 = kvs1.clone();
 				let fnd1 = fnd1.clone();
-				let kind1 = kind1.clone();
 				FieldFuture::new(async move {
 					let gql_args = ctx.args.as_index_map();
 					let mut args = Vec::new();
@@ -63,14 +61,21 @@ pub async fn process_fns(
 
 					let gql_res = match res {
 						Value::RecordId(rid) => {
-							let mut tmp = FieldValue::owned_any(rid.clone());
-							match kind1 {
-								Kind::Record(ts) if ts.len() != 1 => {
-									tmp = tmp.with_type(rid.table.clone())
+							// For interface types (record with multiple possible tables),
+							// we need .with_type() to specify the concrete type
+							let field_val = FieldValue::owned_any(rid.clone());
+							let field_val = match &fnd1.returns {
+								Some(Kind::Record(ts)) if ts.is_empty() => {
+									// record (no specific table) - interface type, needs
+									// .with_type()
+									field_val.with_type(rid.table.to_string())
 								}
-								_ => {}
-							}
-							Some(tmp)
+								_ => {
+									// record<foo> - concrete type, no .with_type() needed
+									field_val
+								}
+							};
+							Some(field_val)
 						}
 						Value::None => None,
 						_ => Some(FieldValue::value(sql_value_to_gql_value(res)?)),

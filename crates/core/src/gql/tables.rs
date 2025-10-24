@@ -52,7 +52,7 @@ pub async fn process_tbs(
 	tx: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
-	session: &Session,
+	_session: &Session,
 	datastore: &Arc<Datastore>,
 ) -> Result<Object, GqlError> {
 	for tb in tbs.iter() {
@@ -86,21 +86,21 @@ pub async fn process_tbs(
 			.field(InputValue::new("not", TypeRef::named(&table_filter_name)));
 		types.push(Type::InputObject(filter_id()));
 
-		let sess1 = session.to_owned();
 		let fds = tx.all_tb_fields(ns, db, &tb.name, None).await?;
 		let fds1 = fds.clone();
 		let kvs1 = datastore.clone();
 
 		query = query.field(
-			Field::new(
-				tb.name.to_string(),
-				TypeRef::named_nn_list_nn(tb.name.to_string()),
-				move |ctx| {
-					let tb_name = first_tb_name.clone();
-					let sess1 = sess1.clone();
-					let fds1 = fds1.clone();
-					let kvs1 = kvs1.clone();
-					FieldFuture::new(async move {
+		Field::new(
+			tb.name.to_string(),
+			TypeRef::named_nn_list_nn(tb.name.to_string()),
+			move |ctx| {
+				let tb_name = first_tb_name.clone();
+				let fds1 = fds1.clone();
+				let kvs1 = kvs1.clone();
+				FieldFuture::new(async move {
+					// Get session from GraphQL context (has proper user permissions)
+					let sess1 = ctx.data::<Arc<Session>>()?;
 						let args = ctx.args.as_index_map();
 						trace!("received request with args: {args:?}");
 
@@ -160,23 +160,21 @@ pub async fn process_tbs(
 							None => None,
 						};
 
-						trace!("parsed filter: {cond:?}");
+					trace!("parsed filter: {cond:?}");
 
-						// SELECT VALUE id FROM ...
-						let expr = expr::Expr::Select(
-							Box::new(SelectStatement {
-								what: vec![Expr::Table(tb_name)],
-								expr: Fields::Value(Box::new(expr::Field::Single {
-									expr: expr::Expr::Idiom(Idiom::field("id".to_string())),
-									alias: None,
-								})),
-								order: orders.map(|x| Ordering::Order(OrderList(x))),
-								cond,
-								limit,
-								start,
-								..Default::default()
-							})
-						);
+					// SELECT * FROM ...
+					// Note: We select * (not just id) so that permissions are properly checked
+					let expr = expr::Expr::Select(
+						Box::new(SelectStatement {
+							what: vec![Expr::Table(tb_name)],
+							expr: Fields::all(),
+							order: orders.map(|x| Ordering::Order(OrderList(x))),
+							cond,
+							limit,
+							start,
+							..Default::default()
+						})
+					);
 
 						// Convert to LogicalPlan and execute
 						let plan = LogicalPlan {
@@ -185,34 +183,43 @@ pub async fn process_tbs(
 
 						tracing::warn!("generated logical plan: {plan:?}");
 
-						let res = execute_plan(&kvs1, &sess1, plan).await?;
+						let res = execute_plan(&kvs1, sess1, plan).await?;
 
-						tracing::warn!("result: {res:?}");
+					tracing::warn!("result: {res:?}");
 
-						let res_vec =
-							match res {
-								Value::Array(a) => a,
-								v => {
-									error!("Found top level value, in result which should be array: {v:?}");
-									return Err("Internal Error".into());
-								}
-							};
+					let res_vec =
+						match res {
+							Value::Array(a) => a,
+							v => {
+								error!("Found top level value, in result which should be array: {v:?}");
+								return Err("Internal Error".into());
+							}
+						};
 
-						let out: Result<Vec<FieldValue>, Value> = res_vec
-							.0
-							.into_iter()
-							.map(|v| {
-								match v {
-									Value::RecordId(t) => {
-										Ok(FieldValue::owned_any(t))
+					let out: Result<Vec<FieldValue>, Value> = res_vec
+						.0
+						.into_iter()
+						.map(|v| {
+							match v {
+								Value::Object(obj) => {
+									// Extract the 'id' field which should be a RecordId
+									match obj.get("id") {
+										Some(Value::RecordId(rid)) => {
+											Ok(FieldValue::owned_any(rid.clone()))
+										}
+										_ => {
+											error!("Object missing 'id' field or id is not a RecordId: {obj:?}");
+											Err("Internal Error".into())
+										}
 									}
-									_ => {
-										error!("Found top level value, in result which should be record id: {v:?}");
-										Err("Internal Error".into())
-									}
 								}
-							})
-							.collect();
+								_ => {
+									error!("Found top level value, in result which should be object: {v:?}");
+									Err("Internal Error".into())
+								}
+							}
+						})
+						.collect();
 
 						match out {
 							Ok(l) => Ok(Some(FieldValue::list(l))),
@@ -229,7 +236,6 @@ pub async fn process_tbs(
         .argument(InputValue::new("order", TypeRef::named(&table_order_name)))
         .argument(InputValue::new("filter", TypeRef::named(&table_filter_name))));
 
-		let sess2 = session.to_owned();
 		let kvs2 = datastore.to_owned();
 		query = query.field(
 			Field::new(
@@ -239,8 +245,9 @@ pub async fn process_tbs(
 					let tb_name = second_tb_name.clone();
 					let kvs2 = kvs2.clone();
 					FieldFuture::new({
-						let sess2 = sess2.clone();
 						async move {
+							// Get session from GraphQL context (has proper user permissions)
+							let sess2 = ctx.data::<Arc<Session>>()?;
 							let args = ctx.args.as_index_map();
 							let id = match args.get("id").and_then(GqlValueUtils::as_string) {
 								Some(i) => i,
@@ -255,13 +262,14 @@ pub async fn process_tbs(
 							// TODO: STU: Parse record id.
 							let record_id = RecordId::new(tb_name, id);
 
-							// Build SELECT id FROM <record_id>
+							// Build SELECT VALUE id FROM ONLY <record_id>
 							let select_stmt = SelectStatement {
 								what: vec![Value::RecordId(record_id.clone()).into_literal()],
-								expr: Fields::Select(vec![expr::Field::Single {
+								expr: Fields::Value(Box::new(expr::Field::Single {
 									expr: expr::Expr::Idiom(Idiom::field("id".to_string())),
 									alias: None,
-								}]),
+								})),
+								only: true,
 								..Default::default()
 							};
 
@@ -271,7 +279,7 @@ pub async fn process_tbs(
 								)))],
 							};
 
-							let res = execute_plan(&kvs2, &sess2, plan).await?;
+							let res = execute_plan(&kvs2, sess2, plan).await?;
 
 							match res {
 								Value::RecordId(t) => {
@@ -344,14 +352,14 @@ pub async fn process_tbs(
 		types.push(Type::InputObject(table_filter));
 	}
 
-	let sess3 = session.to_owned();
 	let kvs3 = datastore.to_owned();
 	query = query.field(
 		Field::new("_get", TypeRef::named("record"), move |ctx| {
 			FieldFuture::new({
-				let sess3 = sess3.clone();
 				let kvs3 = kvs3.clone();
 				async move {
+					// Get session from GraphQL context (has proper user permissions)
+					let sess3 = ctx.data::<Arc<Session>>()?;
 					let args = ctx.args.as_index_map();
 					let id = match args.get("id").and_then(GqlValueUtils::as_string) {
 						Some(i) => i,
@@ -365,13 +373,14 @@ pub async fn process_tbs(
 
 					let record_id = RecordId::new("TODO: STU".to_string(), id); // TODO: STU: Parse record id.
 
-					// Build SELECT id FROM <record_id>
+					// Build SELECT VALUE id FROM ONLY <record_id>
 					let select_stmt = SelectStatement {
 						what: vec![Value::RecordId(record_id.clone()).into_literal()],
-						expr: Fields::Select(vec![expr::Field::Single {
+						expr: Fields::Value(Box::new(expr::Field::Single {
 							expr: expr::Expr::Idiom(Idiom::field("id".to_string())),
 							alias: None,
-						}]),
+						})),
+						only: true,
 						..Default::default()
 					};
 
@@ -379,13 +388,14 @@ pub async fn process_tbs(
 						expressions: vec![TopLevelExpr::Expr(Expr::Select(Box::new(select_stmt)))],
 					};
 
-					let res = execute_plan(&kvs3, &sess3, plan).await?;
+					let res = execute_plan(&kvs3, sess3, plan).await?;
 
 					match res {
 						Value::RecordId(t) => {
-							let ty = t.table.to_string();
-							let out = FieldValue::owned_any(t).with_type(ty);
-							Ok(Some(out))
+							// Generic _get returns interface type "record", needs .with_type()
+							Ok(Some(
+								FieldValue::owned_any(t.clone()).with_type(t.table.to_string()),
+							))
 						}
 						_ => Ok(None),
 					}
@@ -411,18 +421,16 @@ fn make_table_field_resolver(
 			async move {
 				let ds = ctx.data::<Arc<Datastore>>()?;
 				let sess = ctx.data::<Arc<Session>>()?;
-				let rid = ctx
-					.parent_value
-					.downcast_ref::<RecordId>()
-					.ok_or_else(|| internal_error("failed to downcast"))?;
+				let rid = ctx.parent_value.try_downcast_ref::<RecordId>()?;
 
-				// Build SELECT <field> FROM <record_id>
+				// Build SELECT VALUE <field> FROM ONLY <record_id>
 				let select_stmt = SelectStatement {
 					what: vec![Value::RecordId(rid.clone()).into_literal()],
-					expr: Fields::Select(vec![expr::Field::Single {
+					expr: Fields::Value(Box::new(expr::Field::Single {
 						expr: expr::Expr::Idiom(Idiom::field(fd_name.clone())),
 						alias: None,
-					}]),
+					})),
+					only: true,
 					..Default::default()
 				};
 
@@ -434,14 +442,19 @@ fn make_table_field_resolver(
 
 				match val {
 					Value::RecordId(rid) if fd_name != "id" => {
-						let mut tmp = FieldValue::owned_any(rid.clone());
-						match field_kind {
-							Some(Kind::Record(ts)) if ts.len() != 1 => {
-								tmp = tmp.with_type(rid.table.clone())
+						// Check if this is an interface/union type that needs .with_type()
+						let field_val = FieldValue::owned_any(rid.clone());
+						let field_val = match field_kind {
+							Some(Kind::Record(ts)) if ts.is_empty() || ts.len() > 1 => {
+								// Interface or union type, needs .with_type()
+								field_val.with_type(rid.table.to_string())
 							}
-							_ => {}
-						}
-						Ok(Some(tmp))
+							_ => {
+								// Concrete type, no .with_type() needed
+								field_val
+							}
+						};
+						Ok(Some(field_val))
 					}
 					Value::None | Value::Null => Ok(None),
 					v => {

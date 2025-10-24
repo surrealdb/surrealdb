@@ -91,6 +91,11 @@ where
 					return Ok(to_rejection(e).into_response());
 				}
 			};
+
+			// Clone Arc's before moving req (needed for GraphQL context)
+			let datastore_ctx = datastore.clone();
+			let session_ctx = std::sync::Arc::new(session.clone());
+
 			let is_accept_multipart_mixed = req
 				.headers()
 				.get("accept")
@@ -99,11 +104,14 @@ where
 				.unwrap_or_default();
 
 			if is_accept_multipart_mixed {
-				let req = match GraphQLRequest::<GraphQLRejection>::from_request(req, &()).await {
-					Ok(req) => req,
+				let gql_req = match GraphQLRequest::<GraphQLRejection>::from_request(req, &()).await
+				{
+					Ok(r) => r,
 					Err(err) => return Ok(err.into_response()),
 				};
-				let stream = Executor::execute_stream(&schema, req.0, None);
+				// Add Datastore and Session to the GraphQL context
+				let req_with_data = gql_req.into_inner().data(datastore_ctx).data(session_ctx);
+				let stream = Executor::execute_stream(&schema, req_with_data, None);
 				let body = Body::from_stream(
 					create_multipart_mixed_stream(stream, Duration::from_secs(30))
 						.map(Ok::<_, std::io::Error>),
@@ -111,14 +119,16 @@ where
 				Ok(HttpResponse::builder()
 					.header("content-type", "multipart/mixed; boundary=graphql")
 					.body(body)
-					.expect("BUG: invalid response"))
+					.unwrap())
 			} else {
-				let req =
+				let gql_req =
 					match GraphQLBatchRequest::<GraphQLRejection>::from_request(req, &()).await {
-						Ok(req) => req,
+						Ok(r) => r,
 						Err(err) => return Ok(err.into_response()),
 					};
-				Ok(GraphQLResponse(schema.execute_batch(req.0).await).into_response())
+				// Add Datastore and Session to the GraphQL context
+				let req_with_data = gql_req.into_inner().data(datastore_ctx).data(session_ctx);
+				Ok(GraphQLResponse(schema.execute_batch(req_with_data).await).into_response())
 			}
 		})
 	}
