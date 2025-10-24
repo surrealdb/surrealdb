@@ -31,6 +31,7 @@ impl_module_def!(
 	"record" => run,
 	"uuid" => run,
 	"geometry" => run,
+	"of" => run,
 	"is_array" => run,
 	"is_bool" => run,
 	"is_bytes" => run,
