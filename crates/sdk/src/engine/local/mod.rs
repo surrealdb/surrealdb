@@ -174,7 +174,7 @@ use surrealdb_core::{
 	iam::{Action, ResourceKind, check::check_ns_db},
 	ml::storage::surml_file::SurMlFile,
 };
-use surrealdb_types::{Notification, Value, Variables};
+use surrealdb_types::{Notification, ToSql, Value, Variables};
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
@@ -951,9 +951,23 @@ async fn router(
 		}
 
 		Command::Run {
-			name: _name,
-			version: _version,
-			args: _args,
-		} => Err(crate::Error::InternalError("Run command not implemented".to_string())),
+			name,
+			version,
+			args,
+		} => {
+			// Format arguments as comma-separated SQL values
+			let formatted_args = args.iter().map(|v| v.to_sql()).collect::<Vec<_>>().join(", ");
+
+			// Build SQL query: name<version>(args) or name(args)
+			let sql = match version {
+				Some(v) => format!("{name}<{v}>({formatted_args})"),
+				None => format!("{name}({formatted_args})"),
+			};
+
+			// Execute the query
+			let results =
+				kvs.execute(&sql, &*session.read().await, Some(vars.read().await.clone())).await?;
+			Ok(results)
+		}
 	}
 }

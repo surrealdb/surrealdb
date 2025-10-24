@@ -12,7 +12,7 @@ use crate::syn;
 use crate::types::{
 	PublicArray, PublicDatetime, PublicDuration, PublicFile, PublicGeometry, PublicNumber,
 	PublicObject, PublicRange, PublicRecordId, PublicRecordIdKey, PublicRecordIdKeyRange,
-	PublicUuid, PublicValue,
+	PublicTable, PublicUuid, PublicValue,
 };
 use crate::val::DecimalExt;
 
@@ -185,7 +185,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 				},
 				// A literal table
 				TAG_TABLE => match *v {
-					CborValue::Text(v) => Ok(PublicValue::String(v)),
+					CborValue::Text(v) => Ok(PublicValue::Table(PublicTable::new(v))),
 					_ => Err(anyhow!("Expected a CBOR text data type")),
 				},
 				// A range

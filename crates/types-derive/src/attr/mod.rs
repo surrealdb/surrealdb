@@ -9,3 +9,6 @@ pub use field::*;
 
 mod unnamed_fields;
 pub use unnamed_fields::*;
+
+mod named_fields;
+pub use named_fields::*;
