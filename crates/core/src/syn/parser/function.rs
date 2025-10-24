@@ -8,7 +8,7 @@ use crate::syn::token::{TokenKind, t};
 
 impl Parser<'_> {
 	pub(crate) async fn parse_function_name(&mut self) -> ParseResult<Function> {
-		let start = self.peek();
+		let mut start = self.peek();
 		let mut last_span = start.span;
 
 		macro_rules! advance {
@@ -32,6 +32,7 @@ impl Parser<'_> {
 			t!("fn") => {
 				self.pop_peek();
 				expected!(self, t!("::"));
+				start = self.peek();
 				advance!();
 				while self.eat(t!("::")) {
 					advance!();
@@ -58,6 +59,7 @@ impl Parser<'_> {
 			t!("ml") => {
 				self.pop_peek();
 				expected!(self, t!("::"));
+				start = self.peek();
 				advance!();
 				while self.eat(t!("::")) {
 					advance!();
