@@ -403,6 +403,9 @@ pub fn from_value(val: PublicValue) -> Result<CborValue> {
 		PublicValue::Array(v) => from_array(v),
 		PublicValue::Object(v) => from_object(v),
 		PublicValue::Bytes(v) => Ok(CborValue::Bytes(v.into())),
+		PublicValue::Table(v) => {
+			Ok(CborValue::Tag(TAG_TABLE, Box::new(CborValue::Text(v.into_string()))))
+		}
 		PublicValue::RecordId(PublicRecordId {
 			table,
 			key,
