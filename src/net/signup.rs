@@ -4,7 +4,6 @@ use axum::routing::options;
 use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
-use serde::Serialize;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_core::iam::Token;
@@ -20,19 +19,17 @@ use crate::cnf::HTTP_MAX_SIGNIN_BODY_SIZE;
 use crate::net::error::Error as NetError;
 use crate::net::input::bytes_to_utf8;
 
-#[derive(Serialize, SurrealValue)]
+#[derive(SurrealValue)]
 struct Success {
 	code: u16,
 	details: String,
-	token: Option<String>,
-	refresh: Option<String>,
+	token: Token,
 }
 
 impl Success {
-	fn new(token: Option<String>, refresh: Option<String>) -> Success {
+	fn new(token: Token) -> Success {
 		Success {
 			token,
-			refresh,
 			code: 200,
 			details: String::from("Authentication succeeded"),
 		}
@@ -70,29 +67,32 @@ async fn handler(
 		Ok(Value::Object(vars)) => {
 			match surrealdb_core::iam::signup::signup(kvs, &mut session, vars.into()).await {
 				// Authentication was successful
-				Ok(v) => {
-					let (token, refresh) = match v {
-						Token::Access(token) => (token, None),
-						Token::WithRefresh {
-							access: token,
-							refresh,
-						} => (token, Some(refresh)),
-					};
+				Ok(token) => {
 					match accept.as_deref() {
 						// Simple serialization
 						Some(Accept::ApplicationJson) => {
-							Ok(Output::json_other(&Success::new(Some(token), refresh)))
+							let success = Success::new(token).into_value().into_json_value();
+							Ok(Output::json_other(&success))
 						}
 						Some(Accept::ApplicationCbor) => {
-							let success = Success::new(Some(token), refresh).into_value();
+							let success = Success::new(token).into_value();
 							Ok(Output::cbor(&success))
 						}
 						// Text serialization
 						// NOTE: Only the token is returned in a plain text response.
-						Some(Accept::TextPlain) => Ok(Output::Text(token)),
+						Some(Accept::TextPlain) => {
+							let token = match token {
+								Token::Access(token) => token,
+								Token::WithRefresh {
+									access: token,
+									..
+								} => token,
+							};
+							Ok(Output::Text(token))
+						}
 						// Internal serialization
 						Some(Accept::ApplicationFlatbuffers) => {
-							let success = Success::new(Some(token), refresh).into_value();
+							let success = Success::new(token).into_value();
 							Ok(Output::flatbuffers(&success))
 						}
 						// Return nothing

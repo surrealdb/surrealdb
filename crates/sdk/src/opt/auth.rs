@@ -157,14 +157,14 @@ pub struct Token {
 
 impl SurrealValue for Token {
 	fn kind_of() -> Kind {
-		kind!(string | { token: string, refresh: none | string })
+		kind!(string | { access: string, refresh: string })
 	}
 
 	fn into_value(self) -> Value {
 		match self.refresh {
 			Some(refresh) => {
 				let mut obj = Object::new();
-				obj.insert("token".to_string(), self.access.into_value());
+				obj.insert("access".to_string(), self.access.into_value());
 				obj.insert("refresh".to_string(), refresh.into_value());
 				Value::Object(obj)
 			}
@@ -177,15 +177,9 @@ impl SurrealValue for Token {
 			Value::String(string) => Ok(Token::from(string)),
 			value => {
 				let mut obj = Object::from_value(value)?;
-				let access = AccessToken::from_value(obj.remove("token").unwrap_or_default())?;
-				let refresh = match obj.remove("refresh") {
-					Some(value) => SurrealValue::from_value(value)?,
-					None => None,
-				};
-				Ok(Token {
-					access,
-					refresh,
-				})
+				let access = AccessToken::from_value(obj.remove("access").unwrap_or_default())?;
+				let refresh = RefreshToken::from_value(obj.remove("refresh").unwrap_or_default())?;
+				Ok(Token::from((access, refresh)))
 			}
 		}
 	}

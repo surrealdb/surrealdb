@@ -18,11 +18,11 @@ fn test_token_into_value_with_refresh() {
 
 	match value {
 		Value::Object(obj) => {
-			assert!(obj.get("token").is_some());
+			assert!(obj.get("access").is_some());
 			assert!(obj.get("refresh").is_some());
 
 			// Check that access token is serialized as a string
-			if let Some(Value::String(access_str)) = obj.get("token") {
+			if let Some(Value::String(access_str)) = obj.get("access") {
 				assert_eq!(access_str, "access_token_123");
 			} else {
 				panic!("Access token should be serialized as a string");
@@ -55,7 +55,7 @@ fn test_token_into_value_without_refresh() {
 #[test]
 fn test_token_from_value_with_refresh() {
 	let mut obj = Object::new();
-	obj.insert("token".to_string(), Value::String("access_token_123".to_string()));
+	obj.insert("access".to_string(), Value::String("access_token_123".to_string()));
 	obj.insert("refresh".to_string(), Value::String("refresh_token_456".to_string()));
 	let value = Value::Object(obj);
 
@@ -90,7 +90,7 @@ fn test_token_from_value_missing_access_field() {
 #[test]
 fn test_token_from_value_invalid_access_type() {
 	let mut obj = Object::new();
-	obj.insert("token".to_string(), Value::Number(surrealdb_types::Number::Int(123)));
+	obj.insert("access".to_string(), Value::Number(surrealdb_types::Number::Int(123)));
 	obj.insert("refresh".to_string(), Value::String("refresh_token_456".to_string()));
 	let value = Value::Object(obj);
 
@@ -101,7 +101,7 @@ fn test_token_from_value_invalid_access_type() {
 #[test]
 fn test_token_from_value_invalid_refresh_type() {
 	let mut obj = Object::new();
-	obj.insert("token".to_string(), Value::String("access_token_123".to_string()));
+	obj.insert("access".to_string(), Value::String("access_token_123".to_string()));
 	obj.insert("refresh".to_string(), Value::Number(surrealdb_types::Number::Int(123)));
 	let value = Value::Object(obj);
 

@@ -26,6 +26,7 @@ use crate::err::Error;
 // use crate::engine::remote::Response;
 use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
 use crate::opt::IntoEndpoint;
+use crate::opt::auth::Token;
 use crate::{Connect, Result, Surreal};
 
 #[cfg(not(target_family = "wasm"))]
@@ -359,25 +360,9 @@ async fn router(
 				}
 				Err(err) => {
 					debug!("Error converting Value to Credentials: {err}");
-					let error = || {
-						Error::InvalidResponse(
-							"Expected string or object with a token field".to_string(),
-						)
-					};
-					let token = match value {
-						Value::String(token) => token,
-						Value::Object(mut obj) => match obj.remove("token") {
-							Some(Value::String(token)) => token,
-							_ => {
-								return Err(error());
-							}
-						},
-						_ => {
-							return Err(error());
-						}
-					};
+					let token = Token::from_value(value)?;
 					*auth = Some(Auth::Bearer {
-						token,
+						token: token.access.into_insecure_token(),
 					});
 				}
 			}
