@@ -4,8 +4,8 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 use uuid::Uuid;
 
-use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
+use crate::catalog::{TableDefinition, ViewDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -100,8 +100,21 @@ impl RemoveTableStatement {
 		}
 		// Check if this is a foreign table
 		if let Some(view) = &tb.view {
+			let (ViewDefinition::Materialized {
+				tables,
+				..
+			}
+			| ViewDefinition::Aggregated {
+				tables,
+				..
+			}
+			| ViewDefinition::Select {
+				tables,
+				..
+			}) = &view;
+
 			// Process each foreign table
-			for ft in view.what.iter() {
+			for ft in tables.iter() {
 				// Save the view config
 				let key = crate::key::table::ft::new(ns, db, ft, &name);
 				txn.del(&key).await?;

@@ -1,5 +1,5 @@
+use std::collections::HashMap;
 use std::fmt::{self, Display, Write};
-use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
@@ -8,22 +8,27 @@ use uuid::Uuid;
 use super::DefineKind;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{
-	DatabaseId, FieldDefinition, NamespaceId, Permissions, TableDefinition, TableType,
+	AggregationStat, DatabaseId, FieldDefinition, Metadata, NamespaceId, Permissions, Record,
+	RecordType, TableDefinition, TableType, ViewDefinition,
 };
 use crate::ctx::Context;
-use crate::dbs::{Force, Options};
+use crate::dbs::aggregation::{AggregateFields, Aggregation, AggregationAnalysis};
+use crate::dbs::{Options, aggregation};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
 
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::paths::{IN, OUT};
-use crate::expr::statements::UpdateStatement;
-use crate::expr::{Base, Expr, Idiom, Kind, Literal, Output, View};
+use crate::expr::{
+	Base, Cond, Expr, Field, Fields, FlowResultExt, Function, FunctionCall, Group, Groups, Idiom,
+	Kind, Literal, SelectStatement, View,
+};
 use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
+use crate::key;
 use crate::kvs::Transaction;
-use crate::val::Value;
+use crate::val::{Array, Number, RecordIdKey, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineTableStatement {
@@ -133,14 +138,26 @@ impl DefineTableStatement {
 		// Clear the cache
 		txn.clear_cache();
 		// Check if table is a view
-		if let Some(view) = &self.view {
-			// Force queries to run
-			let opt = &opt.new_with_force(Force::Table(Arc::new([tb_def.clone()])));
+		if let Some(view) = &tb_def.view {
 			// Remove the table data
 			let key = crate::key::table::all::new(ns, db, &name);
 			txn.delp(&key).await?;
+
+			let (ViewDefinition::Materialized {
+				tables,
+				..
+			}
+			| ViewDefinition::Aggregated {
+				tables,
+				..
+			}
+			| ViewDefinition::Select {
+				tables,
+				..
+			}) = &view;
+
 			// Process each foreign table
-			for ft in view.what.iter() {
+			for ft in tables.iter() {
 				// Save the view config
 				let key = crate::key::table::ft::new(ns, db, ft, &name);
 				txn.set(&key, &tb_def, None).await?;
@@ -167,14 +184,9 @@ impl DefineTableStatement {
 				}
 				// Clear the cache
 				txn.clear_cache();
-				// Process the view data
-				let stm = UpdateStatement {
-					what: vec![Expr::Table(ft.to_owned())],
-					output: Some(Output::None),
-					..UpdateStatement::default()
-				};
-				stm.compute(stk, ctx, opt, doc).await?;
 			}
+
+			Self::initialize_view(stk, ctx, opt, &name, view).await?;
 		}
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
@@ -185,9 +197,386 @@ impl DefineTableStatement {
 		// Ok all good
 		Ok(Value::None)
 	}
-}
 
-impl DefineTableStatement {
+	async fn initialize_view(
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		view_table_name: &str,
+		view: &ViewDefinition,
+	) -> Result<()> {
+		match view {
+			ViewDefinition::Select {
+				..
+			} => {}
+			ViewDefinition::Materialized {
+				fields,
+				tables,
+				condition,
+			} => {
+				Self::initialize_materialized_view(
+					stk,
+					ctx,
+					opt,
+					view_table_name,
+					fields,
+					tables,
+					condition.as_ref(),
+				)
+				.await?;
+			}
+			ViewDefinition::Aggregated {
+				analysis,
+				tables,
+				condition,
+				..
+			} => {
+				Self::initialize_aggregate_view(
+					stk,
+					ctx,
+					opt,
+					view_table_name,
+					analysis,
+					condition.as_ref(),
+					tables,
+				)
+				.await?;
+			}
+		}
+		Ok(())
+	}
+
+	async fn initialize_materialized_view(
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		view_table_name: &str,
+		fields: &Fields,
+		tables: &[String],
+		condition: Option<&Expr>,
+	) -> Result<()> {
+		let select = SelectStatement {
+			expr: fields.clone(),
+			what: tables.iter().map(|x| Expr::Table(x.clone())).collect(),
+			cond: condition.cloned().map(Cond),
+			..Default::default()
+		};
+
+		let Value::Array(Array(v)) = select.compute(stk, ctx, opt, None).await? else {
+			fail!("initial select for view did not return an array");
+		};
+
+		let tx = ctx.tx();
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+
+		for v in v {
+			let Value::Object(mut o) = v else {
+				fail!("initial select for view did not return an array of objects");
+			};
+
+			let Some(Value::RecordId(id)) = o.remove("id") else {
+				fail!("select results did not contain a record id");
+			};
+
+			let key = key::record::new(ns, db, view_table_name, &id.key);
+			tx.put(&key, &Record::new(Value::Object(o).into()), None).await?;
+
+			yield_now!();
+		}
+
+		Ok(())
+	}
+
+	async fn initialize_aggregate_view(
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		view_table_name: &str,
+		analysis: &AggregationAnalysis,
+		condition: Option<&Expr>,
+		tables: &[String],
+	) -> Result<()> {
+		// To initialize the materialized aggregate view we not only need to initialize records in
+		// the view but also find the AggregationStat values.
+		// For math::max, and count this is easy, just run a select with the same aggregate.
+		// However for mean we don't need to know the mean itself but actually the sum and count.
+
+		// Find out what we need to calculate to initialize the aggregation stats.
+		let mut required_values = HashMap::new();
+		for aggregation in analysis.aggregations.iter() {
+			match aggregation {
+				Aggregation::Count => {
+					let len = required_values.len();
+					required_values.entry(Aggregation::Count).or_insert(len);
+				}
+				Aggregation::CountValue(arg) => {
+					let len = required_values.len();
+					required_values.entry(Aggregation::CountValue(*arg)).or_insert(len);
+				}
+				Aggregation::NumberMax(arg) => {
+					let len = required_values.len();
+					required_values.entry(Aggregation::NumberMax(*arg)).or_insert(len);
+				}
+				Aggregation::NumberMin(arg) => {
+					let len = required_values.len();
+					required_values.entry(Aggregation::NumberMin(*arg)).or_insert(len);
+				}
+				Aggregation::Sum(arg) => {
+					let len = required_values.len();
+					required_values.entry(Aggregation::Sum(*arg)).or_insert(len);
+				}
+				Aggregation::Mean(arg) => {
+					// So here for example we need to know 2 things. First the sum for argument
+					// `arg` and the record count for the group.
+					let len = required_values.len();
+					required_values.entry(Aggregation::Sum(*arg)).or_insert(len);
+					let len = required_values.len();
+					required_values.entry(Aggregation::Count).or_insert(len);
+				}
+				Aggregation::DatetimeMax(arg) => {
+					let len = required_values.len();
+					required_values.entry(Aggregation::DatetimeMax(*arg)).or_insert(len);
+				}
+				Aggregation::DatetimeMin(arg) => {
+					let len = required_values.len();
+					required_values.entry(Aggregation::DatetimeMin(*arg)).or_insert(len);
+				}
+			}
+		}
+
+		let mut aggregate_value_expr = Vec::with_capacity(required_values.len());
+		for (aggreagation, idx) in required_values.iter() {
+			let expr = Expr::FunctionCall(Box::new(match aggreagation {
+				Aggregation::Count => FunctionCall {
+					receiver: Function::Normal("count".to_string()),
+					arguments: Vec::new(),
+				},
+				Aggregation::CountValue(arg) => FunctionCall {
+					receiver: Function::Normal("count".to_string()),
+					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+				},
+				Aggregation::NumberMax(arg) => FunctionCall {
+					receiver: Function::Normal("math::max".to_string()),
+					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+				},
+				Aggregation::NumberMin(arg) => FunctionCall {
+					receiver: Function::Normal("math::min".to_string()),
+					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+				},
+				Aggregation::Sum(arg) => FunctionCall {
+					receiver: Function::Normal("math::sum".to_string()),
+					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+				},
+				Aggregation::Mean(arg) => FunctionCall {
+					receiver: Function::Normal("math::mean".to_string()),
+					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+				},
+				Aggregation::DatetimeMax(arg) => FunctionCall {
+					receiver: Function::Normal("time::max".to_string()),
+					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+				},
+				Aggregation::DatetimeMin(arg) => FunctionCall {
+					receiver: Function::Normal("time::min".to_string()),
+					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+				},
+			}));
+
+			if aggregate_value_expr.len() > *idx {
+				aggregate_value_expr[*idx] = expr;
+			} else {
+				for _ in aggregate_value_expr.len()..*idx {
+					// Temp value, overwritten later
+					aggregate_value_expr.push(Expr::Break);
+				}
+				aggregate_value_expr.push(expr)
+			}
+		}
+
+		let mut fields = Vec::new();
+
+		let mut groups = Vec::new();
+		for (idx, g) in analysis.group_expressions.iter().enumerate() {
+			let alias = format!("g{}", idx);
+			fields.push(Field::Single {
+				expr: g.clone(),
+				alias: Some(Idiom::field(alias.clone())),
+			});
+			groups.push(Group(Idiom::field(alias)));
+		}
+
+		// calculated aggregations return in field g
+		fields.push(Field::Single {
+			expr: Expr::Literal(Literal::Array(aggregate_value_expr)),
+			alias: Some(Idiom::field("a".to_string())),
+		});
+
+		let stmt = SelectStatement {
+			// SELECT [aggregate1, aggregate2, ..] as a, group_expr1 as g0, group_expr2 as g1, ..
+			expr: Fields::Select(fields),
+			// WHERE cond
+			cond: condition.cloned().map(Cond),
+			// GROUP BY g0,g1,..
+			group: Some(Groups(groups)),
+			what: tables.iter().map(|x| Expr::Table(x.clone())).collect(),
+			..Default::default()
+		};
+		let res = stmt.compute(stk, ctx, opt, None).await?;
+		let Value::Array(res) = res else {
+			fail!("initial select for view did not return an array");
+		};
+
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		let tx = ctx.tx();
+
+		for r in res {
+			let Value::Object(mut obj) = r else {
+				fail!("select without VALUE did not return an object");
+			};
+
+			let mut group = Vec::with_capacity(analysis.group_expressions.len());
+			for g in 0..analysis.group_expressions.len() {
+				let Some(x) = obj.remove(&format!("g{g}")) else {
+					fail!("select result did not contain a field for a selection");
+				};
+				group.push(x);
+			}
+
+			let Some(Value::Array(Array(aggregate_stats))) = obj.remove("a") else {
+				fail!("select result did not contain a field for a selection");
+			};
+
+			let mut stats = Vec::with_capacity(analysis.aggregations.len());
+			for a in analysis.aggregations.iter() {
+				match *a {
+					Aggregation::Count => {
+						let idx = required_values[&Aggregation::Count];
+						let Value::Number(Number::Int(i)) = &aggregate_stats[idx] else {
+							fail!("initial select statement did not return the right value")
+						};
+						stats.push(AggregationStat::Count {
+							count: *i,
+						});
+					}
+					Aggregation::CountValue(arg) => {
+						let idx = required_values[&Aggregation::CountValue(arg)];
+						let Value::Number(Number::Int(i)) = &aggregate_stats[idx] else {
+							fail!("initial select statement did not return the right value")
+						};
+						stats.push(AggregationStat::CountFn {
+							arg,
+							count: *i,
+						});
+					}
+					Aggregation::NumberMax(arg) => {
+						let idx = required_values[&Aggregation::NumberMax(arg)];
+						let Value::Number(n) = &aggregate_stats[idx] else {
+							fail!("initial select statement did not return the right value")
+						};
+						stats.push(AggregationStat::NumMax {
+							arg,
+							max: *n,
+						});
+					}
+					Aggregation::NumberMin(arg) => {
+						let idx = required_values[&Aggregation::NumberMin(arg)];
+						let Value::Number(n) = &aggregate_stats[idx] else {
+							fail!("initial select statement did not return the right value")
+						};
+						stats.push(AggregationStat::NumMin {
+							arg,
+							min: *n,
+						});
+					}
+					Aggregation::Sum(arg) => {
+						let idx = required_values[&Aggregation::Sum(arg)];
+						let Value::Number(n) = &aggregate_stats[idx] else {
+							fail!("initial select statement did not return the right value")
+						};
+
+						stats.push(AggregationStat::NumSum {
+							arg,
+							sum: *n,
+						});
+					}
+					Aggregation::Mean(arg) => {
+						let idx = required_values[&Aggregation::Sum(arg)];
+						let Value::Number(n) = &aggregate_stats[idx] else {
+							fail!("initial select statement did not return the right value")
+						};
+						let idx = required_values[&Aggregation::Count];
+						let Value::Number(Number::Int(i)) = &aggregate_stats[idx] else {
+							fail!("initial select statement did not return the right value")
+						};
+
+						stats.push(AggregationStat::NumMean {
+							arg,
+							sum: *n,
+							count: *i,
+						});
+					}
+					Aggregation::DatetimeMax(arg) => {
+						let idx = required_values[&Aggregation::DatetimeMax(arg)];
+						let Value::Datetime(d) = &aggregate_stats[idx] else {
+							fail!("initial select statement did not return the right value")
+						};
+
+						stats.push(AggregationStat::TimeMax {
+							arg,
+							max: d.clone(),
+						});
+					}
+					Aggregation::DatetimeMin(arg) => {
+						let idx = required_values[&Aggregation::DatetimeMax(arg)];
+						let Value::Datetime(d) = &aggregate_stats[idx] else {
+							fail!("initial select statement did not return the right value")
+						};
+
+						stats.push(AggregationStat::TimeMax {
+							arg,
+							max: d.clone(),
+						});
+					}
+				}
+			}
+
+			// We have no computed the aggregation stats so now we need to insert the record.
+			// first calculate the actual value for the record.
+
+			let doc = Value::Object(aggregation::create_field_document(&group, &stats)).into();
+
+			let mut data = Value::empty_object();
+
+			match &analysis.fields {
+				AggregateFields::Value(_) => {
+					fail!("Value selectors are not supported on views");
+				}
+				AggregateFields::Fields(items) => {
+					for (name, expr) in items {
+						let res = stk
+							.run(|stk| expr.compute(stk, ctx, opt, Some(&doc)))
+							.await
+							.catch_return()?;
+						data.set(stk, ctx, opt, name.as_ref(), res).await?;
+					}
+				}
+			};
+
+			let record = Record {
+				metadata: Some(Metadata {
+					record_type: RecordType::Table,
+					stats: HashMap::new(),
+					aggregation_stats: stats,
+				}),
+				data: data.into(),
+			};
+
+			let id = RecordIdKey::Array(Array(group));
+			tx.put_record(ns, db, view_table_name, &id, record.into(), None).await?;
+		}
+
+		Ok(())
+	}
+
 	/// Used to add relational fields to existing table records
 	///
 	/// Returns the cache key ts.

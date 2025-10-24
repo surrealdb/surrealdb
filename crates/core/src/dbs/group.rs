@@ -1,7 +1,7 @@
 use core::f64;
 use std::collections::BTreeMap;
 
-use anyhow::{Result, bail};
+use anyhow::Result;
 use reblessive::tree::Stk;
 
 use crate::catalog::AggregationStat;
@@ -11,53 +11,9 @@ use crate::dbs::plan::Explanation;
 use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
 use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::{Expr, FlowResultExt as _, Idiom};
+use crate::expr::FlowResultExt as _;
 use crate::idx::planner::RecordStrategy;
-use crate::val::{Datetime, Number, TryAdd, TryFloatDiv, Value};
-
-#[derive(Eq, Hash, PartialEq, Debug, Clone)]
-pub enum Aggregate {
-	Count {
-		count: u64,
-	},
-	CountFn {
-		/// Index into the exprs field on GroupCollector.
-		arg: usize,
-		count: u64,
-	},
-	NumMax {
-		arg: usize,
-		max: Number,
-	},
-	NumMin {
-		arg: usize,
-		min: Number,
-	},
-	NumSum {
-		arg: usize,
-		sum: Number,
-	},
-	NumMean {
-		arg: usize,
-		sum: Number,
-		count: u64,
-	},
-	TimeMax {
-		arg: usize,
-		max: Datetime,
-	},
-	TimeMin {
-		arg: usize,
-		min: Datetime,
-	},
-}
-
-#[derive(Debug)]
-pub enum CollectorFields {
-	Value(Expr),
-	Fields(Vec<(Idiom, Expr)>),
-}
+use crate::val::{Number, TryFloatDiv, Value};
 
 /// A collector for statements which have a group by clause.
 ///
@@ -89,16 +45,16 @@ impl GroupCollector {
 			fail!("Tried to group a statement without a group");
 		};
 
-		let analysis = AggregationAnalysis::analyze_fields_groups(fields, groups)?;
+		let analysis = AggregationAnalysis::analyze_fields_groups(fields, groups, false)?;
 
-		Ok(dbg!(GroupCollector {
+		Ok(GroupCollector {
 			analysis,
 
 			exprs_buffer: Vec::new(),
 			group_buffer: Vec::new(),
 
 			results: BTreeMap::new(),
-		}))
+		})
 	}
 
 	pub fn len(&self) -> usize {
@@ -137,9 +93,9 @@ impl GroupCollector {
 		let aggragates = if let Some(x) = self.results.get_mut(&self.group_buffer) {
 			x
 		} else {
-			self.results.entry(self.group_buffer.clone()).or_insert_with(|| {
-				self.analysis.aggregations.iter().map(|x| x.into_stat()).collect()
-			})
+			self.results
+				.entry(self.group_buffer.clone())
+				.or_insert_with(|| self.analysis.aggregations.iter().map(|x| x.to_stat()).collect())
 		};
 
 		if let RecordStrategy::Count = rs {
@@ -163,125 +119,7 @@ impl GroupCollector {
 				self.exprs_buffer.push(v);
 			}
 
-			// update all aggregates
-			for a in aggragates {
-				match a {
-					AggregationStat::Count {
-						count,
-					} => {
-						*count += 1;
-					}
-					AggregationStat::CountFn {
-						arg,
-						count,
-					} => {
-						*count += self.exprs_buffer[*arg].is_truthy() as i64;
-					}
-					AggregationStat::NumMax {
-						arg,
-						max,
-					} => {
-						let Value::Number(ref n) = self.exprs_buffer[*arg] else {
-							bail!(Error::InvalidArguments {
-								name: "math::max".to_string(),
-								message: format!(
-									"Argument 1 was the wrong type. Expected `number` but found `{}`",
-									self.exprs_buffer[*arg]
-								),
-							})
-						};
-						if *max < *n {
-							*max = *n
-						}
-					}
-					AggregationStat::NumMin {
-						arg,
-						min,
-					} => {
-						let Value::Number(ref n) = self.exprs_buffer[*arg] else {
-							bail!(Error::InvalidArguments {
-								name: "math::min".to_string(),
-								message: format!(
-									"Argument 1 was the wrong type. Expected `number` but found `{}`",
-									self.exprs_buffer[*arg]
-								),
-							})
-						};
-						if *min > *n {
-							*min = *n
-						}
-					}
-					AggregationStat::NumSum {
-						arg,
-						sum,
-					} => {
-						let Value::Number(ref n) = self.exprs_buffer[*arg] else {
-							bail!(Error::InvalidArguments {
-								name: "math::sum".to_string(),
-								message: format!(
-									"Argument 1 was the wrong type. Expected `number` but found `{}`",
-									self.exprs_buffer[*arg]
-								),
-							})
-						};
-						*sum = (*sum).try_add(*n)?;
-					}
-					AggregationStat::NumMean {
-						arg,
-						sum,
-						count,
-					} => {
-						let Value::Number(ref n) = self.exprs_buffer[*arg] else {
-							bail!(Error::InvalidArguments {
-								name: "math::mean".to_string(),
-								message: format!(
-									"Argument 1 was the wrong type. Expected `number` but found `{}`",
-									self.exprs_buffer[*arg]
-								),
-							})
-						};
-
-						*sum = (*sum).try_add(*n)?;
-						*count += 1;
-					}
-					AggregationStat::TimeMax {
-						arg,
-						max,
-					} => {
-						let Value::Datetime(ref d) = self.exprs_buffer[*arg] else {
-							bail!(Error::InvalidArguments {
-								name: "time::max".to_string(),
-								message: format!(
-									"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
-									self.exprs_buffer[*arg]
-								),
-							})
-						};
-
-						if *max < *d {
-							*max = d.clone();
-						}
-					}
-					AggregationStat::TimeMin {
-						arg,
-						min,
-					} => {
-						let Value::Datetime(ref d) = self.exprs_buffer[*arg] else {
-							bail!(Error::InvalidArguments {
-								name: "time::min".to_string(),
-								message: format!(
-									"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
-									self.exprs_buffer[*arg]
-								),
-							})
-						};
-
-						if *min > *d {
-							*min = d.clone();
-						}
-					}
-				}
-			}
+			aggregation::add_to_aggregation_stats(&self.exprs_buffer, aggragates)?;
 		}
 
 		Ok(())

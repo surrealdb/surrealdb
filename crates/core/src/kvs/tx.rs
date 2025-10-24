@@ -1518,6 +1518,8 @@ impl TableProvider for Transaction {
 	}
 
 	/// Fetch a specific record value.
+	///
+	/// This function will return a new default initialized record if non exists.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_record(
 		&self,

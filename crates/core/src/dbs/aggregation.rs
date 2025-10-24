@@ -1,3 +1,42 @@
+//! Common code related to aggregation calculations.
+//!
+//! Uses in aggergate views and group by selects.
+//!
+//! # Basic overview.
+//!
+//! Aggregation calculation works in 3 steps.
+//!
+//! - First on view definition, or when issued a select we analyse the group and selector
+//!   expressions to find the aggregate functions, the agruments for those functions, the expression
+//!   which defines the group of an entry, and the expression to generate a result for that group.
+//! - Then we accumulate all the records the aggregation needs to be calculated over, run the
+//!   expressions which generate the agruments for the aggregate functions and then manually update
+//!   the computation for the aggregation functions.
+//! - Finally when all the values have been consumed we construct a document which has all the
+//!   values for the computed aggregates as fields and run the expression we generated in the first
+//!   step to compute the final result for the aggregation.
+//!
+//! Example:
+//! ```txt
+//!    SELECT foo, math::pow(math::mean(v),2), math::max(v), math::min(x + 1) FROM foo GROUP foo.
+//!
+//!    the aggregate argument expressions are,
+//!        1: v,
+//!        2: x + 1,
+//!
+//!    The aggregates functions are:
+//!        ag1: math::mean operating on expression 1
+//!        ag2: math::max operating on expression 1
+//!        ag3: math::min operating on expression 2
+//!
+//!    the final expression to calculate the result is:
+//!        g1, math::pow(ag1,2), ag2, ag3
+//!
+//!        her `g1` refers to the group.
+//!
+//!```
+//!
+
 use ahash::HashMap;
 use anyhow::{Result, bail, ensure};
 use revision::revisioned;
@@ -9,7 +48,7 @@ use crate::{
 		Expr, Field, Fields, Function, Groups, Idiom, Part,
 		visit::{MutVisitor, VisitMut},
 	},
-	val::Datetime,
+	val::{Datetime, Number, Object, TryAdd as _, TryFloatDiv, Value},
 };
 use std::fmt::Write;
 
@@ -20,49 +59,49 @@ pub enum Aggregation {
 	Count,
 	/// The usizes are index into the exprs field on the aggregate collector and represent the
 	/// expression which was fed as an argument to the aggregate expression
-	CountFn(usize),
-	NumMax(usize),
-	NumMin(usize),
-	NumSum(usize),
-	NumMean(usize),
-	TimeMax(usize),
-	TimeMin(usize),
+	CountValue(usize),
+	NumberMax(usize),
+	NumberMin(usize),
+	Sum(usize),
+	Mean(usize),
+	DatetimeMax(usize),
+	DatetimeMin(usize),
 }
 
 impl Aggregation {
-	pub fn into_stat(&self) -> AggregationStat {
+	pub fn to_stat(&self) -> AggregationStat {
 		match *self {
 			Aggregation::Count => AggregationStat::Count {
 				count: 0,
 			},
-			Aggregation::CountFn(arg) => AggregationStat::CountFn {
+			Aggregation::CountValue(arg) => AggregationStat::CountFn {
 				arg,
 				count: 0,
 			},
-			Aggregation::NumMax(arg) => AggregationStat::NumMax {
+			Aggregation::NumberMax(arg) => AggregationStat::NumMax {
 				arg,
 				max: f64::NEG_INFINITY.into(),
 			},
-			Aggregation::NumMin(arg) => AggregationStat::NumMin {
+			Aggregation::NumberMin(arg) => AggregationStat::NumMin {
 				arg,
 				min: f64::INFINITY.into(),
 			},
-			Aggregation::NumSum(arg) => AggregationStat::NumSum {
+			Aggregation::Sum(arg) => AggregationStat::NumSum {
 				arg,
 				sum: 0.0.into(),
 			},
-			Aggregation::NumMean(arg) => AggregationStat::NumMean {
+			Aggregation::Mean(arg) => AggregationStat::NumMean {
 				arg,
 				count: 0,
 				sum: 0.0.into(),
 			},
-			Aggregation::TimeMax(arg) => AggregationStat::TimeMax {
+			Aggregation::DatetimeMax(arg) => AggregationStat::TimeMax {
 				arg,
 				max: Datetime::MIN_UTC,
 			},
-			Aggregation::TimeMin(arg) => AggregationStat::TimeMax {
+			Aggregation::DatetimeMin(arg) => AggregationStat::TimeMin {
 				arg,
-				max: Datetime::MAX_UTC,
+				min: Datetime::MAX_UTC,
 			},
 		}
 	}
@@ -87,6 +126,175 @@ pub fn aggregate_field_name(idx: usize) -> String {
 pub fn group_field_name(idx: usize) -> String {
 	let mut res = String::new();
 	write_group_field_name(&mut res, idx);
+	res
+}
+
+pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationStat]) -> Result<()> {
+	for stat in stats {
+		match stat {
+			AggregationStat::Count {
+				count,
+			} => {
+				*count += 1;
+			}
+			AggregationStat::CountFn {
+				arg,
+				count,
+			} => {
+				*count += arguments[*arg].is_truthy() as i64;
+			}
+			AggregationStat::NumMax {
+				arg,
+				max,
+			} => {
+				let Value::Number(ref n) = arguments[*arg] else {
+					bail!(Error::InvalidArguments {
+						name: "math::max".to_string(),
+						message: format!(
+							"Argument 1 was the wrong type. Expected `number` but found `{}`",
+							arguments[*arg]
+						),
+					})
+				};
+				if *max < *n {
+					*max = *n
+				}
+			}
+			AggregationStat::NumMin {
+				arg,
+				min,
+			} => {
+				let Value::Number(ref n) = arguments[*arg] else {
+					bail!(Error::InvalidArguments {
+						name: "math::min".to_string(),
+						message: format!(
+							"Argument 1 was the wrong type. Expected `number` but found `{}`",
+							arguments[*arg]
+						),
+					})
+				};
+				if *min > *n {
+					*min = *n
+				}
+			}
+			AggregationStat::NumSum {
+				arg,
+				sum,
+			} => {
+				let Value::Number(ref n) = arguments[*arg] else {
+					bail!(Error::InvalidArguments {
+						name: "math::sum".to_string(),
+						message: format!(
+							"Argument 1 was the wrong type. Expected `number` but found `{}`",
+							arguments[*arg]
+						),
+					})
+				};
+				*sum = (*sum).try_add(*n)?;
+			}
+			AggregationStat::NumMean {
+				arg,
+				sum,
+				count,
+			} => {
+				let Value::Number(ref n) = arguments[*arg] else {
+					bail!(Error::InvalidArguments {
+						name: "math::mean".to_string(),
+						message: format!(
+							"Argument 1 was the wrong type. Expected `number` but found `{}`",
+							arguments[*arg]
+						),
+					})
+				};
+
+				*sum = (*sum).try_add(*n)?;
+				*count += 1;
+			}
+			AggregationStat::TimeMax {
+				arg,
+				max,
+			} => {
+				let Value::Datetime(ref d) = arguments[*arg] else {
+					bail!(Error::InvalidArguments {
+						name: "time::max".to_string(),
+						message: format!(
+							"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
+							arguments[*arg]
+						),
+					})
+				};
+
+				if *max < *d {
+					*max = d.clone();
+				}
+			}
+			AggregationStat::TimeMin {
+				arg,
+				min,
+			} => {
+				let Value::Datetime(ref d) = arguments[*arg] else {
+					bail!(Error::InvalidArguments {
+						name: "time::min".to_string(),
+						message: format!(
+							"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
+							arguments[*arg]
+						),
+					})
+				};
+
+				if *min > *d {
+					*min = d.clone();
+				}
+			}
+		}
+	}
+	Ok(())
+}
+
+/// Creates object that can act as a document to calculate the final value for an aggregated statement.
+pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Object {
+	let mut res = Object::default();
+	//setup the document for final value calculation
+	for (idx, a) in stats.iter().enumerate() {
+		let value = match a {
+			AggregationStat::Count {
+				count,
+			}
+			| AggregationStat::CountFn {
+				count,
+				..
+			} => Value::from(Number::from(*count)),
+			AggregationStat::NumMax {
+				max,
+				..
+			} => (*max).into(),
+			AggregationStat::NumMin {
+				min,
+				..
+			} => (*min).into(),
+			AggregationStat::NumSum {
+				sum,
+				..
+			} => (*sum).into(),
+			AggregationStat::NumMean {
+				sum,
+				count,
+				..
+			} => sum.try_float_div((*count).into()).unwrap_or(f64::NAN.into()).into(),
+			AggregationStat::TimeMax {
+				max,
+				..
+			} => max.clone().into(),
+			AggregationStat::TimeMin {
+				min,
+				..
+			} => min.clone().into(),
+		};
+		res.0.insert(aggregate_field_name(idx), value);
+	}
+	for (idx, g) in group.iter().enumerate() {
+		res.0.insert(group_field_name(idx), g.clone());
+	}
 	res
 }
 
@@ -146,7 +354,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 								self.push_aggregate_function(
 									"count",
 									&f.arguments,
-									Aggregation::CountFn,
+									Aggregation::CountValue,
 								)?;
 							}
 						}
@@ -154,42 +362,42 @@ impl MutVisitor for AggregateExprCollector<'_> {
 							self.push_aggregate_function(
 								"math::max",
 								&f.arguments,
-								Aggregation::NumMax,
+								Aggregation::NumberMax,
 							)?;
 						}
 						"math::min" => {
 							self.push_aggregate_function(
 								"math::min",
 								&f.arguments,
-								Aggregation::NumMin,
+								Aggregation::NumberMin,
 							)?;
 						}
 						"math::sum" => {
 							self.push_aggregate_function(
 								"math::sum",
 								&f.arguments,
-								Aggregation::NumSum,
+								Aggregation::Sum,
 							)?;
 						}
 						"math::mean" => {
 							self.push_aggregate_function(
 								"math::mean",
 								&f.arguments,
-								Aggregation::NumMean,
+								Aggregation::Mean,
 							)?;
 						}
 						"time::max" => {
 							self.push_aggregate_function(
 								"time::max",
 								&f.arguments,
-								Aggregation::TimeMax,
+								Aggregation::DatetimeMax,
 							)?;
 						}
 						"time::min" => {
 							self.push_aggregate_function(
 								"time::min",
 								&f.arguments,
-								Aggregation::TimeMin,
+								Aggregation::DatetimeMin,
 							)?;
 						}
 						_ => {
@@ -256,7 +464,16 @@ pub struct AggregationAnalysis {
 }
 
 impl AggregationAnalysis {
-	pub fn analyze_fields_groups(fields: &Fields, groups: &Groups) -> Result<Self> {
+	/// Analyze the groups and fields and produce a analysis for how to run the aggregate
+	/// expressions.
+	///
+	/// if the `force_count` argument is true the function will add a `Count` aggregation when
+	/// there is no aggregate which maintains a per group record count.
+	pub fn analyze_fields_groups(
+		fields: &Fields,
+		groups: &Groups,
+		force_count: bool,
+	) -> Result<Self> {
 		// Find all the aggregates within the select statement.
 		let mut aggregations = Vec::new();
 		let mut exprs_map = HashMap::default();
@@ -350,6 +567,12 @@ impl AggregationAnalysis {
 				}
 				aggregate_arguments.push(k)
 			}
+		}
+
+		if force_count
+			&& !aggregations.iter().any(|x| matches!(x, Aggregation::Count | Aggregation::Mean(_)))
+		{
+			aggregations.push(Aggregation::Count)
 		}
 
 		Ok(Self {

@@ -66,7 +66,6 @@ impl Results {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		stm: &Statement<'_>,
 		rs: RecordStrategy,
 		val: Value,
 	) -> Result<()> {

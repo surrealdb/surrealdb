@@ -172,10 +172,8 @@ pub(crate) enum Error {
 
 	/// The wrong quantity or magnitude of arguments was given for the specified
 	/// function
-	#[error("Incorrect arguments for aggregate function {name}() on table '{table}'. {message}")]
+	#[error("Invalid aggregation: {message}")]
 	InvalidAggregation {
-		name: String,
-		table: String,
 		message: String,
 	},
 
