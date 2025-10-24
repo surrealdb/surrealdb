@@ -11,6 +11,12 @@ pub struct Closure {
 	pub body: Expr,
 }
 
+#[cfg(feature = "arbitrary")]
+mod arb {
+	use super::*;
+	impl<'a> Arbitrary<'a> for Closure {}
+}
+
 impl fmt::Display for Closure {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str("|")?;

@@ -181,7 +181,9 @@ impl fmt::Display for Part {
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
 			Part::Lookup(v) => write!(f, "{v}"),
 			Part::Value(v) => write!(f, "[{v}]"),
-			Part::Method(v, a) => write!(f, ".{v}({})", Fmt::comma_separated(a)),
+			Part::Method(v, a) => {
+				write!(f, ".{}({})", EscapeKwFreeIdent(v), Fmt::comma_separated(a))
+			}
 			Part::Destructure(v) => {
 				f.write_str(".{")?;
 				if !is_pretty() {

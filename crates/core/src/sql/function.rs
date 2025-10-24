@@ -1,6 +1,6 @@
-use std::fmt;
+use std::fmt::{self, Write};
 
-use crate::fmt::Fmt;
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 use crate::sql::{Expr, Idiom, Model, Script};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -79,7 +79,12 @@ impl fmt::Display for FunctionCall {
 				write!(f, "{s}({})", Fmt::comma_separated(self.arguments.iter()))
 			}
 			Function::Custom(ref s) => {
-				write!(f, "fn::{s}({})", Fmt::comma_separated(self.arguments.iter()))
+				f.write_str("fn")?;
+				for s in s.split("::") {
+					f.write_str("::")?;
+					EscapeKwFreeIdent(s).fmt(f)?;
+				}
+				write!(f, "({})", Fmt::comma_separated(self.arguments.iter()))
 			}
 			Function::Script(ref s) => {
 				write!(f, "function({}) {{{s}}}", Fmt::comma_separated(self.arguments.iter()))
