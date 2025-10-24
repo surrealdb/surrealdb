@@ -34,7 +34,6 @@ mod cf;
 mod doc;
 mod exe;
 mod fnc;
-mod idg;
 mod key;
 mod sys;
 

@@ -218,7 +218,7 @@ pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
 		crt,
 		key,
 	};
-	composer.check_config(&config)?;
+	composer.check_config(&config).await?;
 	// Setup the command-line options
 	// Initiate environment
 	env::init()?;

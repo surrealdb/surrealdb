@@ -411,11 +411,17 @@ impl Building {
 	}
 
 	async fn new_read_tx(&self) -> Result<Transaction> {
-		self.tf.transaction(TransactionType::Read, Optimistic).await
+		self.tf
+			.transaction(TransactionType::Read, Optimistic, self.ctx.try_get_sequences()?.clone())
+			.await
 	}
 
 	async fn new_write_tx_ctx(&self) -> Result<Context> {
-		let tx = self.tf.transaction(TransactionType::Write, Optimistic).await?.into();
+		let tx = self
+			.tf
+			.transaction(TransactionType::Write, Optimistic, self.ctx.try_get_sequences()?.clone())
+			.await?
+			.into();
 		let mut ctx = MutableContext::new(&self.ctx);
 		ctx.set_transaction(tx);
 		Ok(ctx.freeze())
