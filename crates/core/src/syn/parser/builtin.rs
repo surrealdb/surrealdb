@@ -355,7 +355,6 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("time::from_uuid") => PathKind::Function,
 		UniCase::ascii("time::is_leap_year") => PathKind::Function,
 		//
-		UniCase::ascii("type_of") => PathKind::Function,
 		UniCase::ascii("type::array") => PathKind::Function,
 		UniCase::ascii("type::bool") => PathKind::Function,
 		UniCase::ascii("type::bytes") => PathKind::Function,
@@ -369,6 +368,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("type::geometry") => PathKind::Function,
 		UniCase::ascii("type::int") => PathKind::Function,
 		UniCase::ascii("type::number") => PathKind::Function,
+		UniCase::ascii("type::of") => PathKind::Function,
 		UniCase::ascii("type::point") => PathKind::Function,
 		UniCase::ascii("type::range") => PathKind::Function,
 		UniCase::ascii("type::record") => PathKind::Function,

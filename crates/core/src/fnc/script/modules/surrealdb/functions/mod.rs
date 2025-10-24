@@ -61,7 +61,6 @@ impl_module_def!(
 	"string" => (string::Package),
 	"time" => (time::Package),
 	"type" => (r#type::Package),
-	"type_of" => run,
 	"value" => (value::Package),
 	"vector" => (vector::Package),
 	"schema" => (schema::Package)
