@@ -21,6 +21,61 @@ use crate::kvs::TransactionType::*;
 use crate::types::PublicVariables;
 use crate::val::Value;
 
+/// Registers a new user and returns an authentication token.
+///
+/// This function handles user registration for SurrealDB and returns a token
+/// that can be used for subsequent API requests. The token may include both
+/// access and refresh tokens depending on the registration method and
+/// configuration.
+///
+/// # Parameters
+///
+/// - `kvs`: The datastore instance for database operations
+/// - `session`: The current session context
+/// - `vars`: Public variables containing registration credentials
+///
+/// # Returns
+///
+/// Returns a `Token` that can be either:
+/// - An access token only (legacy mode)
+/// - An access token with an optional refresh token (modern mode)
+///
+/// # Registration Methods
+///
+/// The function supports multiple registration methods based on the provided variables:
+/// - **Database access method**: When `NS`, `DB`, and `AC` are provided
+/// - **Database user credentials**: When `NS`, `DB`, `user`, and `pass` are provided
+/// - **Namespace user credentials**: When `NS`, `user`, and `pass` are provided
+/// - **Root user credentials**: When `user` and `pass` are provided
+///
+/// # Examples
+///
+/// ```rust
+/// use surrealdb_core::iam::signup;
+/// use surrealdb_core::kvs::Datastore;
+/// use surrealdb_core::dbs::Session;
+/// use surrealdb_core::types::PublicVariables;
+///
+/// // Database access method registration
+/// let vars = PublicVariables::from([
+///     ("NS".to_string(), "test_namespace".into()),
+///     ("DB".to_string(), "test_database".into()),
+///     ("AC".to_string(), "my_access_method".into()),
+///     ("email".to_string(), "user@example.com".into()),
+///     ("pass".to_string(), "password123".into()),
+/// ]);
+///
+/// let token = signup(&kvs, &mut session, vars).await?;
+/// match token {
+///     Token::Access(access_token) => {
+///         // Use access token for API requests
+///     }
+///     Token::WithRefresh { access, refresh } => {
+///         // Use access token for API requests
+///         // Store refresh token for token renewal
+///     }
+/// }
+/// ```
 pub async fn signup(
 	kvs: &Datastore,
 	session: &mut Session,

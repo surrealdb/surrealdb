@@ -148,10 +148,61 @@ impl<P: SurrealValue> SurrealValue for Record<P> {
 
 impl<T, P> Credentials<T> for Record<P> where P: SurrealValue {}
 
+/// A token containing both access and optional refresh token for authentication.
+///
+/// This struct represents the complete authentication token response from
+/// SurrealDB's signin and signup operations. It contains an access token
+/// (required) and an optional refresh token for enhanced security.
+///
+/// The token structure supports both legacy single-token authentication
+/// and modern refresh token flows:
+/// - **Legacy mode**: Only `access` token is present, `refresh` is `None`
+/// - **Refresh mode**: Both `access` and `refresh` tokens are present
+///
+/// # Security
+///
+/// Both access and refresh tokens are wrapped in secure containers that:
+/// - Redact token values in debug output
+/// - Prevent accidental exposure in logs
+/// - Require explicit methods to access token strings
+///
+/// # Examples
+///
+/// ```rust
+/// use surrealdb::opt::auth::{Token, AccessToken, RefreshToken};
+///
+/// // Create a token with only access token (legacy mode)
+/// let legacy_token = Token {
+///     access: AccessToken::from("access_token_string"),
+///     refresh: None,
+/// };
+///
+/// // Create a token with both access and refresh tokens
+/// let modern_token = Token {
+///     access: AccessToken::from("access_token_string"),
+///     refresh: Some(RefreshToken::from("refresh_token_string")),
+/// };
+///
+/// // Access token values securely
+/// let access_value = modern_token.access.as_insecure_token();
+/// if let Some(refresh_token) = &modern_token.refresh {
+///     let refresh_value = refresh_token.as_insecure_token();
+///     // Use refresh token to get new access token
+/// }
+/// ```
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Token {
+	/// The access token used for API authentication.
+	///
+	/// This token is required and used to authenticate API requests.
+	/// It typically has a shorter expiration time for security.
 	pub access: AccessToken,
+	/// An optional refresh token used to obtain new access tokens.
+	///
+	/// When present, this token can be used to refresh the access token
+	/// without requiring the user to re-authenticate. This enables
+	/// seamless long-term sessions while maintaining security.
 	pub refresh: Option<RefreshToken>,
 }
 
@@ -226,6 +277,40 @@ impl fmt::Debug for AccessToken {
 	}
 }
 
+/// A refresh token used to obtain new access tokens without re-authentication.
+///
+/// Refresh tokens are long-lived tokens that can be used to obtain new access
+/// tokens when the current access token expires. This enables seamless user
+/// sessions while maintaining security through short-lived access tokens.
+///
+/// # Security Features
+///
+/// - **Debug Protection**: Token values are redacted in debug output
+/// - **Secure Storage**: Wrapped in a secure container to prevent accidental exposure
+/// - **Explicit Access**: Requires explicit method calls to access the token string
+///
+/// # Usage
+///
+/// Refresh tokens are typically used in the following flow:
+/// 1. User authenticates and receives both access and refresh tokens
+/// 2. Access token is used for API requests
+/// 3. When access token expires, refresh token is used to get a new access token
+/// 4. Process repeats until refresh token expires or user logs out
+///
+/// # Examples
+///
+/// ```rust
+/// use surrealdb::opt::auth::RefreshToken;
+///
+/// // Create a refresh token
+/// let refresh_token = RefreshToken::from("refresh_token_string");
+///
+/// // Access the token string securely
+/// let token_string = refresh_token.as_insecure_token();
+///
+/// // Use the token string to request a new access token
+/// // (implementation depends on your authentication flow)
+/// ```
 #[derive(Clone, Serialize, Deserialize, SurrealValue)]
 pub struct RefreshToken(pub(crate) SecureToken);
 
@@ -253,6 +338,15 @@ impl fmt::Debug for RefreshToken {
 	}
 }
 
+/// A secure wrapper for token strings that prevents accidental exposure.
+///
+/// This internal struct wraps token strings to provide security features:
+/// - Prevents accidental exposure in debug output
+/// - Requires explicit method calls to access the underlying string
+/// - Provides a clear API for secure token handling
+///
+/// The struct is marked as `pub(crate)` to keep it internal to the crate
+/// while still allowing access from other modules within the same crate.
 #[derive(Clone, Serialize, Deserialize, SurrealValue)]
 pub(crate) struct SecureToken(pub(crate) String);
 
