@@ -42,13 +42,13 @@ use crate::vs::VersionStamp;
 	name: "test".to_string(),
 	drop: false,
 	schemafull: false,
-	view: Some(ViewDefinition {
+	view: Some(ViewDefinition::Select {
 		fields: Fields::Select(vec![Field::All, Field::Single {
 			expr: Expr::Literal(Literal::String("expr".to_string())),
 			alias: Some(Idiom::from_str("field[0]").unwrap()),
 		}]),
-		what: vec!["what".to_string()],
-		cond: Some(Expr::Literal(Literal::String("cond".to_string()))),
+		tables: vec!["what".to_string()],
+		condition: Some(Expr::Literal(Literal::String("cond".to_string()))),
 		groups: Some(Groups::default()),
 	}),
 	permissions: Permissions::default(),

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 
-use crate::catalog::{self, FieldDefinition, Record};
+use crate::catalog::{self, FieldDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Options, Statement};

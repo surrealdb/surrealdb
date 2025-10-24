@@ -376,6 +376,22 @@ pub enum AggregationStat {
 	},
 }
 
+impl AggregationStat {
+	/// Returns a per group record count this aggregation list keeps track of, if any.
+	pub fn get_count(aggregation_stats: &[AggregationStat]) -> Option<i64> {
+		aggregation_stats.iter().find_map(|x| match x {
+			AggregationStat::Count {
+				count,
+			}
+			| AggregationStat::NumMean {
+				count,
+				..
+			} => Some(*count),
+			_ => None,
+		})
+	}
+}
+
 /// Types of records that can be stored in the database
 ///
 /// This enum defines the different types of records that can be stored.
@@ -401,85 +417,9 @@ pub(crate) enum RecordType {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub(crate) struct Metadata {
 	/// The type of the record (e.g., Edge for graph edges)
-	record_type: RecordType,
-	/// Aggregation statistics for materialized view records
-	stats: HashMap<String, FieldStats>,
+	pub(crate) record_type: RecordType,
 	/// Statistics related to running aggregations for this record.
 	/// These do not directly correspond to a feild but must be used in conjunction with the field
 	/// definition to calculate the final value for this record.
-	aggregation_stats: Vec<AggregationStat>,
-}
-
-impl Record {
-	/// Gets the aggregation statistics for a specific field
-	///
-	/// # Arguments
-	///
-	/// * `field_name` - The name of the field to get statistics for
-	///
-	/// # Returns
-	///
-	/// An optional reference to the field statistics
-	pub(crate) fn get_field_stats(&self, field_name: &str) -> Option<&FieldStats> {
-		self.metadata.as_ref()?.stats.get(field_name)
-	}
-
-	/// Sets aggregation statistics for a specific field
-	///
-	/// This method updates or creates the metadata to include the specified
-	/// field statistics. If metadata or stats don't exist, they will be created.
-	///
-	/// # Arguments
-	///
-	/// * `field_name` - The name of the field to set statistics for
-	/// * `stats` - The field statistics to set
-	pub(crate) fn set_field_stats(&mut self, field_name: String, stats: FieldStats) {
-		let metadata = self.metadata.get_or_insert_with(|| Metadata {
-			record_type: RecordType::default(),
-			stats: HashMap::new(),
-			aggregation_stats: Vec::new(),
-		});
-
-		metadata.stats.insert(field_name, stats);
-	}
-
-	/// Removes aggregation statistics for a specific field
-	///
-	/// # Arguments
-	///
-	/// * `field_name` - The name of the field to remove statistics for
-	///
-	/// # Returns
-	///
-	/// The removed field statistics, if they existed
-	pub(crate) fn remove_field_stats(&mut self, field_name: &str) -> Option<FieldStats> {
-		self.metadata.as_mut()?.stats.remove(field_name)
-	}
-
-	/// Checks if any count field has become zero (indicating the record should be deleted)
-	///
-	/// # Returns
-	///
-	/// `true` if any field has a count of 0, indicating the record should be purged
-	pub(crate) fn has_zero_count(&self) -> bool {
-		if let Some(metadata) = &self.metadata {
-			for stats in metadata.stats.values() {
-				match stats {
-					FieldStats::Count(count) if *count == 0 => return true,
-					FieldStats::Sum {
-						count,
-					} if *count == 0 => return true,
-					FieldStats::Mean {
-						count,
-						..
-					} if *count == 0 => return true,
-					FieldStats::MinMax {
-						count,
-					} if *count == 0 => return true,
-					_ => {}
-				}
-			}
-		}
-		false
-	}
+	pub(crate) aggregation_stats: Vec<AggregationStat>,
 }

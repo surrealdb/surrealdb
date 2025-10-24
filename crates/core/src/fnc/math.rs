@@ -1,7 +1,6 @@
 use core::f64;
 
 use anyhow::{Result, bail, ensure};
-use rust_decimal::Decimal;
 
 use crate::err::Error;
 use crate::fnc::util;
@@ -16,7 +15,7 @@ use crate::fnc::util::math::spread::Spread;
 use crate::fnc::util::math::top::Top;
 use crate::fnc::util::math::trimean::Trimean;
 use crate::val::number::Sort;
-use crate::val::{Number, TryAdd, TryPow, Value};
+use crate::val::{Number, TryPow, Value};
 
 pub fn abs((arg,): (Number,)) -> Result<Value> {
 	let Some(x) = arg.checked_abs() else {
