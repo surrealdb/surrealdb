@@ -8,6 +8,7 @@ use crate::sql::Expr;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct DefineEventStatement {
 	pub kind: DefineKind,
+	pub concurrently: bool,
 	pub name: Expr,
 	pub target_table: Expr,
 	pub when: Expr,
@@ -34,6 +35,9 @@ impl Display for DefineEventStatement {
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {}", v)?
 		}
+		if self.concurrently {
+			write!(f, " CONCURRENTLY")?;
+		}
 		Ok(())
 	}
 }
@@ -47,6 +51,7 @@ impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatemen
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
 			comment: v.comment.map(|x| x.into()),
+			concurrently: v.concurrently,
 		}
 	}
 }
@@ -61,6 +66,7 @@ impl From<crate::expr::statements::DefineEventStatement> for DefineEventStatemen
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
 			comment: v.comment.map(|x| x.into()),
+			concurrently: v.concurrently,
 		}
 	}
 }
