@@ -341,6 +341,9 @@ impl DefineTableStatement {
 					let len = required_values.len();
 					required_values.entry(Aggregation::DatetimeMin(*arg)).or_insert(len);
 				}
+				Aggregation::Accumulate(_) => {
+					fail!("Accumulate aggregation is not supported in materialized views")
+				}
 			}
 		}
 
@@ -379,6 +382,9 @@ impl DefineTableStatement {
 					receiver: Function::Normal("time::min".to_string()),
 					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
 				},
+				Aggregation::Accumulate(_) => {
+					fail!("Accumulate aggregation is not supported in materialized views")
+				}
 			}));
 
 			if aggregate_value_expr.len() > *idx {
@@ -536,10 +542,13 @@ impl DefineTableStatement {
 							max: d.clone(),
 						});
 					}
+					Aggregation::Accumulate {
+						..
+					} => fail!("Accumulate aggregation is not supported in materialized views"),
 				}
 			}
 
-			// We have no computed the aggregation stats so now we need to insert the record.
+			// We have now computed the aggregation stats so now we need to insert the record.
 			// first calculate the actual value for the record.
 
 			let doc = Value::Object(aggregation::create_field_document(&group, &stats)).into();
@@ -564,7 +573,6 @@ impl DefineTableStatement {
 			let record = Record {
 				metadata: Some(Metadata {
 					record_type: RecordType::Table,
-					stats: HashMap::new(),
 					aggregation_stats: stats,
 				}),
 				data: data.into(),

@@ -48,9 +48,9 @@ use crate::{
 		Expr, Field, Fields, Function, Groups, Idiom, Part,
 		visit::{MutVisitor, VisitMut},
 	},
-	val::{Datetime, Number, Object, TryAdd as _, TryFloatDiv, Value},
+	val::{Array, Datetime, Number, Object, TryAdd as _, TryFloatDiv, Value},
 };
-use std::fmt::Write;
+use std::{fmt::Write, mem};
 
 /// An expression which will be aggregated over for each group.
 #[revisioned(revision = 1)]
@@ -66,6 +66,7 @@ pub enum Aggregation {
 	Mean(usize),
 	DatetimeMax(usize),
 	DatetimeMin(usize),
+	Accumulate(usize),
 }
 
 impl Aggregation {
@@ -102,6 +103,10 @@ impl Aggregation {
 			Aggregation::DatetimeMin(arg) => AggregationStat::TimeMin {
 				arg,
 				min: Datetime::MAX_UTC,
+			},
+			Aggregation::Accumulate(arg) => AggregationStat::Accumulate {
+				arg,
+				values: Vec::new(),
 			},
 		}
 	}
@@ -246,6 +251,12 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 					*min = d.clone();
 				}
 			}
+			AggregationStat::Accumulate {
+				arg,
+				values,
+			} => {
+				values.push(arguments[*arg].clone());
+			}
 		}
 	}
 	Ok(())
@@ -289,6 +300,10 @@ pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Obje
 				min,
 				..
 			} => min.clone().into(),
+			AggregationStat::Accumulate {
+				values,
+				..
+			} => Value::Array(Array(values.clone())),
 		};
 		res.0.insert(aggregate_field_name(idx), value);
 	}
@@ -300,6 +315,7 @@ pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Obje
 
 /// Visitor which walks an expression to pull out the aggregate expressions to calculate.
 struct AggregateExprCollector<'a> {
+	support_acummulate: bool,
 	within_aggregate_argument: bool,
 	exprs_map: &'a mut HashMap<Expr, usize>,
 	aggregations: &'a mut Vec<Aggregation>,
@@ -330,17 +346,6 @@ impl AggregateExprCollector<'_> {
 
 impl MutVisitor for AggregateExprCollector<'_> {
 	type Error = anyhow::Error;
-
-	fn visit_mut_idiom(&mut self, idiom: &mut Idiom) -> Result<(), Self::Error> {
-		if !self.within_aggregate_argument {
-			if let Some(Part::Field(_)) = idiom.0.first() {
-				bail!(Error::InvalidAggregationSelector {
-					expr: idiom.to_string(),
-				})
-			}
-		}
-		idiom.visit_mut(self)
-	}
 
 	fn visit_mut_expr(&mut self, s: &mut Expr) -> Result<(), Self::Error> {
 		match s {
@@ -425,9 +430,21 @@ impl MutVisitor for AggregateExprCollector<'_> {
 						// that we can later inject the value via the current doc.
 						*s = Expr::Idiom(Idiom::field(group_field_name(group_idx)));
 					} else if let Some(Part::Field(_)) = i.0.first() {
-						bail!(Error::InvalidAggregationSelector {
-							expr: i.to_string(),
-						})
+						if self.support_acummulate {
+							let expr = mem::replace(
+								s,
+								Expr::Idiom(Idiom::field(aggregate_field_name(
+									self.aggregations.len(),
+								))),
+							);
+							let len = self.exprs_map.len();
+							let arg = *self.exprs_map.entry(expr).or_insert_with(|| len);
+							self.aggregations.push(Aggregation::Accumulate(arg))
+						} else {
+							bail!(Error::InvalidAggregationSelector {
+								expr: i.to_string(),
+							})
+						}
 					}
 					Ok(())
 				} else {
@@ -472,7 +489,7 @@ impl AggregationAnalysis {
 	pub fn analyze_fields_groups(
 		fields: &Fields,
 		groups: &Groups,
-		force_count: bool,
+		materialized_view: bool,
 	) -> Result<Self> {
 		// Find all the aggregates within the select statement.
 		let mut aggregations = Vec::new();
@@ -484,6 +501,7 @@ impl AggregationAnalysis {
 		}
 
 		let mut collect = AggregateExprCollector {
+			support_acummulate: !materialized_view,
 			within_aggregate_argument: false,
 			exprs_map: &mut exprs_map,
 			aggregations: &mut aggregations,
@@ -555,12 +573,10 @@ impl AggregationAnalysis {
 		// Place the expression which need to be calculated for the aggregate in the right index.
 		let mut aggregate_arguments = Vec::with_capacity(exprs_map.len());
 		for (k, v) in exprs_map.into_iter() {
-			if aggregate_arguments.len() == v {
-				aggregate_arguments.push(k);
-			} else if aggregate_arguments.len() > v {
+			if aggregate_arguments.len() > v {
 				aggregate_arguments[v] = k
 			} else {
-				for _ in 0..v {
+				for _ in aggregate_arguments.len()..v {
 					// push a temp expression that will be overwritten while we collect all the
 					// expressions.
 					aggregate_arguments.push(Expr::Break)
@@ -569,7 +585,7 @@ impl AggregationAnalysis {
 			}
 		}
 
-		if force_count
+		if materialized_view
 			&& !aggregations.iter().any(|x| matches!(x, Aggregation::Count | Aggregation::Mean(_)))
 		{
 			aggregations.push(Aggregation::Count)

@@ -120,7 +120,6 @@ impl Record {
 			metadata => {
 				*metadata = Some(Metadata {
 					record_type: rtype,
-					stats: HashMap::new(),
 					aggregation_stats: Vec::new(),
 				});
 			}
@@ -373,6 +372,10 @@ pub enum AggregationStat {
 	TimeMin {
 		arg: usize,
 		min: Datetime,
+	},
+	Accumulate {
+		arg: usize,
+		values: Vec<Value>,
 	},
 }
 
