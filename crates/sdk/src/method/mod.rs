@@ -60,7 +60,7 @@ pub use insert::Insert;
 pub use invalidate::Invalidate;
 pub use merge::Merge;
 pub use patch::Patch;
-pub use query::{Query, QueryStream};
+pub use query::{IntoVariables, Query, QueryStream};
 pub use run::{IntoFn, Run};
 pub use select::Select;
 pub use set::Set;

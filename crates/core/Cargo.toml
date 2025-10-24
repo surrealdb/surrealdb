@@ -196,7 +196,7 @@ ws_stream_wasm.workspace = true
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 rust-s3 = { workspace = true, optional = true }
 surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers", "rpc"] }
-surrealdb-types = { workspace = true, features = ["js"] }
+surrealdb-types = { workspace = true }
 tokio = { workspace = true, default-features = false, features = [
     "macros",
     "io-util",
