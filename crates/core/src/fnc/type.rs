@@ -15,6 +15,11 @@ use crate::val::{
 	RecordIdKeyRange, Table, Uuid, Value,
 };
 
+/// Returns the type of the value as a string.
+pub fn type_of((val,): (Value,)) -> Result<Value> {
+	Ok(Value::String(val.kind_of().to_string()))
+}
+
 pub fn array((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<Array>()?.into())
 }

@@ -444,6 +444,7 @@ pub fn synchronous(
 		"type::geometry" => r#type::geometry,
 		"type::int" => r#type::int,
 		"type::number" => r#type::number,
+		"type::of" => r#type::type_of,
 		"type::point" => r#type::point,
 		"type::range" => r#type::range,
 		"type::record" => r#type::record,
@@ -702,7 +703,7 @@ pub async fn idiom(
 				"vector_similarity_pearson" => vector::similarity::pearson,
 				"vector_similarity_spearman" => vector::similarity::spearman,
 
-
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -762,6 +763,7 @@ pub async fn idiom(
 				//
 				"len" => bytes::len,
 
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -829,6 +831,7 @@ pub async fn idiom(
 				"weeks" => duration::weeks,
 				"years" => duration::years,
 
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -895,7 +898,7 @@ pub async fn idiom(
 				"hash_encode" => geo::hash::encode,
 				"is_valid" => geo::is::valid,
 
-
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -959,6 +962,7 @@ pub async fn idiom(
 				"table" => record::tb,
 				"tb" => record::tb,
 
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -1025,6 +1029,7 @@ pub async fn idiom(
 				"values" => object::values,
 
 
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -1102,7 +1107,7 @@ pub async fn idiom(
 				"sin" => math::sin,
 				"tan" => math::tan,
 
-
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -1219,7 +1224,7 @@ pub async fn idiom(
 				"semver_set_minor" => string::semver::set::minor,
 				"semver_set_patch" => string::semver::set::patch,
 
-
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -1292,7 +1297,7 @@ pub async fn idiom(
 				"yday" => time::yday,
 				"year" => time::year,
 
-
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -1364,7 +1369,7 @@ pub async fn idiom(
 				exp(Files) "rename_if_not_exists" => file::rename_if_not_exists((stk, ctx, opt, doc)).await,
 				exp(Files) "exists" => file::exists((stk, ctx, opt, doc)).await,
 
-
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -1423,6 +1428,7 @@ pub async fn idiom(
 				args,
 				message,
 				//
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
