@@ -192,7 +192,8 @@ impl Controller {
 			anyhow::bail!("WASM function returned error (-1)");
 		}
 		let ptr_u32: u32 = ptr.try_into()?;
-		let result: Result<surrealdb_types::Value, String> = AsyncTransfer::receive(ptr_u32.into(), self).await?;
+		let result: Result<surrealdb_types::Value, String> =
+			AsyncTransfer::receive(ptr_u32.into(), self).await?;
 		result.map_err(|e| anyhow::anyhow!("WASM function returned error: {}", e))
 	}
 
