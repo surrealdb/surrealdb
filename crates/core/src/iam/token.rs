@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::LazyLock;
 
 use jsonwebtoken::{Algorithm, Header};
@@ -34,7 +35,7 @@ pub static HEADER: LazyLock<Header> = LazyLock::new(|| Header::new(Algorithm::HS
 ///     refresh: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...".to_string(),
 /// };
 /// ```
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, SurrealValue, Hash)]
+#[derive(Clone, Eq, PartialEq, PartialOrd, SurrealValue, Hash)]
 #[surreal(untagged)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Token {
@@ -54,6 +55,17 @@ pub enum Token {
 		/// The refresh token used to obtain new access tokens
 		refresh: String,
 	},
+}
+
+impl fmt::Debug for Token {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Token::Access(_) => write!(f, "Token::Access(REDACTED)"),
+			Token::WithRefresh {
+				..
+			} => write!(f, "Token::WithRefresh {{ access: REDACTED, refresh: REDACTED }}"),
+		}
+	}
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
