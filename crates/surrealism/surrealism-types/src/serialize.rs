@@ -1,3 +1,32 @@
+//! Core serialization traits and binary wire format implementations.
+//!
+//! This module defines the [`Serializable`] trait and implements it for common Rust types,
+//! providing a language-agnostic binary protocol for WASM guest-host communication.
+//!
+//! # Wire Format
+//!
+//! The serialization format is designed to be:
+//! - **Compact**: Minimal overhead for small types
+//! - **Deterministic**: Same input always produces same output
+//! - **Language-agnostic**: Can be implemented in any language
+//! - **Little-endian**: All multi-byte integers use little-endian byte order
+//!
+//! ## Transfer Layout
+//!
+//! When transferred across WASM boundaries, all serialized data is prefixed with a length:
+//! ```text
+//! [4-byte length (u32, LE)][serialized data]
+//! ```
+//!
+//! ## Type Formats
+//!
+//! - **Primitives**: Direct byte encoding (String: UTF-8, numbers: LE bytes, bool: 0/1)
+//! - **Enums**: Tag byte + optional payload (Option, Result, Bound)
+//! - **Collections**: Length-prefixed elements (Vec, tuples)
+//! - **Complex**: FlatBuffers protocol (Value, Kind)
+//!
+//! See individual type implementations for detailed format specifications.
+
 use std::ops::Bound;
 
 use anyhow::Result;
@@ -14,6 +43,17 @@ use crate::controller::MemoryController;
 use crate::transfer::AsyncTransfer;
 use crate::transfer::{Ptr, Transfer};
 
+/// A wrapper around serialized binary data.
+///
+/// This type holds the raw bytes of a serialized value and can be transferred
+/// across WASM boundaries using the [`Transfer`] trait.
+///
+/// # Memory Layout
+///
+/// When transferred, `Serialized` data uses this layout:
+/// ```text
+/// [4-byte length (u32, LE)][data bytes]
+/// ```
 pub struct Serialized(pub bytes::Bytes);
 
 // Guest side implementation (sync)
@@ -85,8 +125,53 @@ impl<T: Serializable + Send> AsyncTransfer for T {
 	}
 }
 
+/// A trait for types that can be serialized to and deserialized from a binary format.
+///
+/// This trait defines the core serialization protocol used for cross-language communication
+/// in the Surrealism ecosystem. Unlike Serde, this provides complete control over the wire
+/// format, ensuring compatibility across different programming languages.
+///
+/// # Implementation Requirements
+///
+/// Implementers must ensure:
+/// - **Deterministic**: Same input always produces same output
+/// - **Round-trip safe**: `deserialize(serialize(x))` == `x`
+/// - **Little-endian**: All multi-byte integers use little-endian byte order
+/// - **Documented**: Wire format must be clearly documented
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use surrealism_types::serialize::{Serializable, Serialized};
+///
+/// impl Serializable for MyType {
+///     fn serialize(self) -> Result<Serialized> {
+///         // Convert to bytes...
+///         Ok(Serialized(bytes))
+///     }
+///
+///     fn deserialize(serialized: Serialized) -> Result<Self> {
+///         // Convert from bytes...
+///         Ok(my_value)
+///     }
+/// }
+/// ```
 pub trait Serializable: Sized {
+	/// Serialize this value into binary format.
+	///
+	/// # Errors
+	///
+	/// Returns an error if serialization fails (e.g., invalid UTF-8, allocation failure).
 	fn serialize(self) -> Result<Serialized>;
+
+	/// Deserialize a value from binary format.
+	///
+	/// # Errors
+	///
+	/// Returns an error if:
+	/// - The data is malformed or truncated
+	/// - The data doesn't match the expected format
+	/// - Type-specific validation fails
 	fn deserialize(serialized: Serialized) -> Result<Self>;
 }
 
@@ -100,9 +185,16 @@ impl<T: SurrealValue> Serializable for SerializableArg<T> {
 	}
 }
 
-// string
-// first byte indicates the length of the string
-// followed by the string bytes
+// ============================================================================
+// Primitive Type Implementations
+// ============================================================================
+
+/// String serialization.
+///
+/// Wire format: Raw UTF-8 bytes (no null terminator)
+/// ```text
+/// [UTF-8 bytes...]
+/// ```
 impl Serializable for String {
 	fn serialize(self) -> Result<Serialized> {
 		Ok(Serialized(self.as_bytes().to_vec().into()))
@@ -114,7 +206,12 @@ impl Serializable for String {
 	}
 }
 
-// f64
+/// f64 (64-bit floating point) serialization.
+///
+/// Wire format: 8 bytes, little-endian IEEE 754
+/// ```text
+/// [8 bytes: f64 LE]
+/// ```
 impl Serializable for f64 {
 	fn serialize(self) -> Result<Serialized> {
 		Ok(Serialized(self.to_le_bytes().to_vec().into()))
@@ -129,7 +226,12 @@ impl Serializable for f64 {
 	}
 }
 
-//u64
+/// u64 (64-bit unsigned integer) serialization.
+///
+/// Wire format: 8 bytes, little-endian
+/// ```text
+/// [8 bytes: u64 LE]
+/// ```
 impl Serializable for u64 {
 	fn serialize(self) -> Result<Serialized> {
 		Ok(Serialized(self.to_le_bytes().to_vec().into()))
@@ -144,7 +246,12 @@ impl Serializable for u64 {
 	}
 }
 
-// i64
+/// i64 (64-bit signed integer) serialization.
+///
+/// Wire format: 8 bytes, little-endian two's complement
+/// ```text
+/// [8 bytes: i64 LE]
+/// ```
 impl Serializable for i64 {
 	fn serialize(self) -> Result<Serialized> {
 		Ok(Serialized(self.to_le_bytes().to_vec().into()))
@@ -159,7 +266,12 @@ impl Serializable for i64 {
 	}
 }
 
-//bool
+/// bool (boolean) serialization.
+///
+/// Wire format: 1 byte (0 = false, 1 = true, other values accepted as true)
+/// ```text
+/// [1 byte: 0x00 or 0x01]
+/// ```
 impl Serializable for bool {
 	fn serialize(self) -> Result<Serialized> {
 		Ok(Serialized(vec![self as u8].into()))
@@ -170,6 +282,16 @@ impl Serializable for bool {
 	}
 }
 
+// ============================================================================
+// SurrealDB Type Implementations (FlatBuffers-based)
+// ============================================================================
+
+/// [`surrealdb_types::Kind`] serialization using FlatBuffers.
+///
+/// Wire format: FlatBuffers-encoded Kind schema
+/// ```text
+/// [FlatBuffers data...]
+/// ```
 impl Serializable for surrealdb_types::Kind {
 	fn serialize(self) -> Result<Serialized> {
 		let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
@@ -185,6 +307,15 @@ impl Serializable for surrealdb_types::Kind {
 	}
 }
 
+/// [`surrealdb_types::Value`] serialization using FlatBuffers.
+///
+/// Wire format: FlatBuffers-encoded Value schema
+/// ```text
+/// [FlatBuffers data...]
+/// ```
+///
+/// This leverages the `surrealdb-protocol` FlatBuffers schema, which supports
+/// all SurrealDB types including records, geometries, durations, etc.
 impl Serializable for surrealdb_types::Value {
 	fn serialize(self) -> Result<Serialized> {
 		let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
@@ -199,8 +330,17 @@ impl Serializable for surrealdb_types::Value {
 	}
 }
 
-// First byte to be 0 for Ok, followed by the serialized value.
-// First byte to be 1 for Err, followed by the serialized error string.
+// ============================================================================
+// Standard Library Type Implementations
+// ============================================================================
+
+/// [`Result<T, E>`] serialization with tag-based discrimination.
+///
+/// Wire format:
+/// ```text
+/// Ok(T):  [0x00][serialized T]
+/// Err(E): [0x01][serialized E]
+/// ```
 impl<T: Serializable, E: Serializable> Serializable for Result<T, E> {
 	fn serialize(self) -> Result<Serialized> {
 		match self {
@@ -244,8 +384,13 @@ impl<T: Serializable, E: Serializable> Serializable for Result<T, E> {
 	}
 }
 
-// anyhow::Result
-// depends on rust's standard result type
+/// [`anyhow::Result<T>`] serialization.
+///
+/// Wire format: Same as `Result<T, String>` (error converted to string)
+/// ```text
+/// Ok(T):        [0x00][serialized T]
+/// Err(String):  [0x01][error message as UTF-8]
+/// ```
 impl<T: Serializable> Serializable for anyhow::Result<T> {
 	fn serialize(self) -> Result<Serialized> {
 		self.map_err(|e| e.to_string()).serialize()
@@ -256,9 +401,13 @@ impl<T: Serializable> Serializable for anyhow::Result<T> {
 	}
 }
 
-// Option
-// first byte to be 0 for Some, followed by the serialized value.
-// first byte to be 1 for None.
+/// [`Option<T>`] serialization with tag-based discrimination.
+///
+/// Wire format:
+/// ```text
+/// Some(T): [0x00][serialized T]
+/// None:    [0x01]
+/// ```
 impl<T: Serializable> Serializable for Option<T> {
 	fn serialize(self) -> Result<Serialized> {
 		match self {
@@ -294,9 +443,15 @@ impl<T: Serializable> Serializable for Option<T> {
 	}
 }
 
-// Vec
-// first byte indicates the length of the vector
-// followed by the serialized values, all prefixed with the length of the value
+/// [`Vec<T>`] serialization with length-prefixed elements.
+///
+/// Wire format:
+/// ```text
+/// [4-byte count (u32 LE)]
+/// [4-byte len1 (u32 LE)][element1 data]
+/// [4-byte len2 (u32 LE)][element2 data]
+/// ...
+/// ```
 impl<T: Serializable> Serializable for Vec<T> {
 	fn serialize(self) -> Result<Serialized> {
 		let mut result = (self.len() as u32).to_le_bytes().to_vec();
@@ -327,9 +482,14 @@ impl<T: Serializable> Serializable for Vec<T> {
 	}
 }
 
-// Bound
-// First byte indicates the bound type (0 for Unbounded, 1 for Included, 2 for Excluded)
-// followed by the serialized value
+/// [`std::ops::Bound<T>`] serialization for range bounds.
+///
+/// Wire format:
+/// ```text
+/// Unbounded:    [0x00]
+/// Included(T):  [0x01][serialized T]
+/// Excluded(T):  [0x02][serialized T]
+/// ```
 impl<T: Serializable> Serializable for Bound<T> {
 	fn serialize(self) -> Result<Serialized> {
 		let bytes = match self {
@@ -372,18 +532,33 @@ impl<T: Serializable> Serializable for Bound<T> {
 	}
 }
 
-// Range
-// Starts with two u32 values, which indicate how many bytes the start and end are
-// followed by the serialized start and end, if any
+/// A serializable range type that can represent any Rust range.
+///
+/// Wire format:
+/// ```text
+/// [4-byte beg_len (u32 LE)]
+/// [4-byte end_len (u32 LE)]
+/// [beg_bound data (beg_len bytes)]
+/// [end_bound data (end_len bytes)]
+/// ```
+///
+/// This allows representing `..`, `start..`, `..end`, `start..end`,
+/// `start..=end`, etc. by encoding the start and end bounds.
 #[derive(Debug)]
 pub struct SerializableRange<T: Serializable> {
+	/// The start bound of the range.
 	pub beg: Bound<T>,
+	/// The end bound of the range.
 	pub end: Bound<T>,
 }
 
 impl<T: Serializable + Clone> SerializableRange<T> {
-	/// FYI: IntoBounds is unstable, so we're left with RangeBounds which causes this function to
-	/// clone.
+	/// Convert any range type into a `SerializableRange`.
+	///
+	/// # Note
+	///
+	/// This function clones the bounds because Rust's `IntoBounds` trait is unstable.
+	/// Once stabilized, this could avoid the clone.
 	pub fn from_range_bounds(range: impl std::ops::RangeBounds<T>) -> Result<Self> {
 		Ok(SerializableRange {
 			beg: range.start_bound().cloned(),
@@ -428,8 +603,16 @@ impl<T: Serializable> std::ops::RangeBounds<T> for SerializableRange<T> {
 	}
 }
 
-// Tuples
-// Each element is prefixed with the length of the element
+/// Tuple serialization with length-prefixed elements.
+///
+/// Wire format for tuple `(A, B, ...)`:
+/// ```text
+/// [4-byte lenA (u32 LE)][element A data]
+/// [4-byte lenB (u32 LE)][element B data]
+/// ...
+/// ```
+///
+/// Tuples from 1 to 10 elements are supported.
 macro_rules! impl_tuple {
     ($(($($name:ident),+)),+ $(,)?) => {
         $(impl<$($name: Serializable),+> Serializable for ($($name,)+) {
@@ -471,6 +654,12 @@ impl_tuple! {
 	(A, B, C, D, E, F, G, H, I, J),
 }
 
+/// Unit type `()` serialization.
+///
+/// Wire format: Empty (0 bytes)
+/// ```text
+/// []
+/// ```
 impl Serializable for () {
 	fn serialize(self) -> Result<Serialized> {
 		Ok(Serialized(vec![].into()))
