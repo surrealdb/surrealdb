@@ -20,6 +20,7 @@ impl_module_def!(
 	"float" => run,
 	"int" => run,
 	"number" => run,
+	"of" => run,
 	"point" => run,
 	"regex" => run,
 	"string" => run,
