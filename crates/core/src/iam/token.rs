@@ -10,7 +10,7 @@ use crate::syn;
 use crate::val::{Object, Value};
 pub static HEADER: LazyLock<Header> = LazyLock::new(|| Header::new(Algorithm::HS512));
 
-#[derive(Clone, Debug, SurrealValue, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, SurrealValue, Hash)]
 #[surreal(untagged)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Token {
