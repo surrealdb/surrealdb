@@ -433,6 +433,7 @@ pub fn synchronous(
 		"time::from_uuid" => time::from::uuid,
 		"time::is_leap_year" => time::is::leap_year,
 		//
+		"type_of" => r#type::type_of,
 		"type::array" => r#type::array,
 		"type::bool" => r#type::bool,
 		"type::bytes" => r#type::bytes,
