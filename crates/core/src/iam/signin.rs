@@ -1069,7 +1069,7 @@ mod tests {
 			match res {
 				Ok(data) => {
 					assert!(
-						matches!(data, Token::WithRefresh { .. }),
+						!matches!(data, Token::WithRefresh { .. }),
 						"Refresh token was unexpectedly returned"
 					)
 				}
