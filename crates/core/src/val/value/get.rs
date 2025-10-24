@@ -46,9 +46,14 @@ impl Value {
 		if path.len() > (*MAX_COMPUTATION_DEPTH).try_into().unwrap_or(usize::MAX) {
 			return Err(ControlFlow::from(anyhow::Error::new(Error::ComputationDepthExceeded)));
 		}
-		match path.first() {
+
+		let Some(first) = path.first() else {
+			return Ok(self.clone());
+		};
+
+		match first {
 			// The knowledge of the current value is not relevant to Part::Recurse
-			Some(Part::Recurse(recurse, inner_path, instruction)) => {
+			Part::Recurse(recurse, inner_path, instruction) => {
 				// Find the path to recurse and what path to process after the recursion is
 				// finished
 				let (path, after) = match inner_path {
@@ -115,10 +120,10 @@ impl Value {
 			// ensure we can process them efficiently. When encountering a
 			// recursion part, it will find the repeat recurse part and handle
 			// it. If we find one in any unsupported scenario, we throw an error.
-			Some(Part::RepeatRecurse) => {
+			Part::RepeatRecurse => {
 				Err(ControlFlow::Err(anyhow::Error::new(Error::UnsupportedRepeatRecurse)))
 			}
-			Some(Part::Doc) => {
+			Part::Doc => {
 				// Try to obtain a Record ID from the document, otherwise we'll operate on NONE
 				let v = match doc {
 					Some(doc) => match &doc.rid {
@@ -131,7 +136,7 @@ impl Value {
 				stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await
 			}
 			// Get the current value at the path
-			Some(p) => match self {
+			p => match self {
 				// Current value at path is a geometry
 				Value::Geometry(v) => match p {
 					// If this is the 'type' field then continue
@@ -534,8 +539,6 @@ impl Value {
 					}
 				}
 			},
-			// No more parts so get the value
-			None => Ok(self.clone()),
 		}
 	}
 }

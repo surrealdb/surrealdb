@@ -312,7 +312,6 @@ impl Document {
 				data: Data::Mutable(Value::None),
 				metadata: Some(Metadata {
 					record_type: RecordType::Table,
-					stats: HashMap::new(),
 					aggregation_stats: aggr.aggregations.iter().map(|x| x.to_stat()).collect(),
 				}),
 			}
@@ -500,6 +499,9 @@ impl Document {
 						});
 					}
 				}
+				AggregationStat::Accumulate {
+					..
+				} => fail!("Accumulate aggregation is not supported in materialized views"),
 			}
 		}
 
@@ -826,6 +828,9 @@ impl Document {
 						});
 					}
 				}
+				AggregationStat::Accumulate {
+					..
+				} => fail!("Accumulate aggregation is not supported in materialized views"),
 			}
 		}
 

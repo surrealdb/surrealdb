@@ -13,7 +13,7 @@ use crate::dbs::{Options, Statement};
 use crate::doc::CursorDoc;
 use crate::expr::FlowResultExt as _;
 use crate::idx::planner::RecordStrategy;
-use crate::val::{Number, TryFloatDiv, Value};
+use crate::val::{Array, Number, TryFloatDiv, Value};
 
 /// A collector for statements which have a group by clause.
 ///
@@ -143,7 +143,7 @@ impl GroupCollector {
 			};
 
 			//setup the document for final value calculation
-			for (idx, a) in result.iter().enumerate() {
+			for (idx, a) in result.into_iter().enumerate() {
 				field_buffer.clear();
 				aggregation::write_aggregate_field_name(&mut field_buffer, idx);
 
@@ -154,32 +154,36 @@ impl GroupCollector {
 					| AggregationStat::CountFn {
 						count,
 						..
-					} => Value::from(Number::from(*count)),
+					} => Value::from(Number::from(count)),
 					AggregationStat::NumMax {
 						max,
 						..
-					} => (*max).into(),
+					} => max.into(),
 					AggregationStat::NumMin {
 						min,
 						..
-					} => (*min).into(),
+					} => min.into(),
 					AggregationStat::NumSum {
 						sum,
 						..
-					} => (*sum).into(),
+					} => sum.into(),
 					AggregationStat::NumMean {
 						sum,
 						count,
 						..
-					} => sum.try_float_div((*count).into()).unwrap_or(f64::NAN.into()).into(),
+					} => sum.try_float_div(count.into()).unwrap_or(f64::NAN.into()).into(),
 					AggregationStat::TimeMax {
 						max,
 						..
-					} => max.clone().into(),
+					} => max.into(),
 					AggregationStat::TimeMin {
 						min,
 						..
-					} => min.clone().into(),
+					} => min.into(),
+					AggregationStat::Accumulate {
+						values,
+						..
+					} => values.into(),
 				};
 
 				// Optimize for the common case where the field is already in the document.
