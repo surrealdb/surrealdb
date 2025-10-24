@@ -605,7 +605,7 @@ async fn router(
 			};
 			Ok(vec![result])
 		}
-		Command::RawQuery {
+		Command::Query {
 			txn: _,
 			query,
 			variables,

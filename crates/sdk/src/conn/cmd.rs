@@ -28,7 +28,7 @@ pub(crate) enum Command {
 		token: String,
 	},
 	Invalidate,
-	RawQuery {
+	Query {
 		txn: Option<Uuid>,
 		query: Cow<'static, str>,
 		variables: Variables,
@@ -127,7 +127,7 @@ impl Command {
 				params: None,
 				transaction: None,
 			},
-			Command::RawQuery {
+			Command::Query {
 				txn,
 				query,
 				variables,

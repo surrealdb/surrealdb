@@ -46,7 +46,7 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				Command::Set {
 					..
 				} => query_result,
-				Command::RawQuery {
+				Command::Query {
 					..
 				} => query_result,
 				Command::Run {

@@ -232,7 +232,7 @@ where
 		}
 	}
 
-	pub fn transaction(&self) -> Begin<C> {
+	pub fn begin(&self) -> Begin<C> {
 		Begin {
 			client: self.clone(),
 		}

@@ -157,9 +157,9 @@ async fn router_handle_route(
 		return HandleResult::Ok;
 	};
 
-	// Merge stored vars with query vars for RawQuery
+	// Merge stored vars with query vars for Query
 	let command = match command {
-		Command::RawQuery {
+		Command::Query {
 			txn,
 			query,
 			variables,
@@ -167,7 +167,7 @@ async fn router_handle_route(
 			let mut merged_vars =
 				state.vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Variables>();
 			merged_vars.extend(variables);
-			Command::RawQuery {
+			Command::Query {
 				txn,
 				query,
 				variables: merged_vars,

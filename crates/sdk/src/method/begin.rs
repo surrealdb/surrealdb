@@ -2,7 +2,7 @@ use std::future::IntoFuture;
 use std::ops::Deref;
 
 use crate::method::{BoxFuture, Cancel, Commit};
-use crate::{Connection, Result, Surreal};
+use crate::{Connection, OnceLockExt, Result, Surreal};
 
 /// A beginning of a transaction
 #[derive(Debug)]
@@ -19,8 +19,10 @@ where
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
+		let client = self.client;
 		Box::pin(async move {
-			self.client.query("BEGIN").await?;
+			let router = client.inner.router.extract()?;
+			let result = router.execute(Command::Begin).await?;
 			Ok(Transaction {
 				client: self.client,
 			})
