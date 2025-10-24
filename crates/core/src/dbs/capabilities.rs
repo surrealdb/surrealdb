@@ -122,6 +122,7 @@ pub enum ExperimentalTarget {
 	BearerAccess,
 	DefineApi,
 	Files,
+	Surrealism,
 }
 
 impl fmt::Display for ExperimentalTarget {
@@ -132,6 +133,7 @@ impl fmt::Display for ExperimentalTarget {
 			Self::BearerAccess => write!(f, "bearer_access"),
 			Self::DefineApi => write!(f, "define_api"),
 			Self::Files => write!(f, "files"),
+			Self::Surrealism => write!(f, "surrealism"),
 		}
 	}
 }
@@ -150,6 +152,7 @@ impl Target<str> for ExperimentalTarget {
 			Self::BearerAccess => elem.eq_ignore_ascii_case("bearer_access"),
 			Self::DefineApi => elem.eq_ignore_ascii_case("define_api"),
 			Self::Files => elem.eq_ignore_ascii_case("files"),
+			Self::Surrealism => elem.eq_ignore_ascii_case("surrealism"),
 		}
 	}
 }
@@ -180,6 +183,7 @@ impl std::str::FromStr for ExperimentalTarget {
 			"bearer_access" => Ok(ExperimentalTarget::BearerAccess),
 			"define_api" => Ok(ExperimentalTarget::DefineApi),
 			"files" => Ok(ExperimentalTarget::Files),
+			"surrealism" => Ok(ExperimentalTarget::Surrealism),
 			_ => Err(ParseExperimentalTargetError::InvalidName),
 		}
 	}

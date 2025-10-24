@@ -24,6 +24,7 @@ use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
+use crate::dbs::capabilities::ExperimentalTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, Options, Session, Variables};
@@ -769,6 +770,12 @@ impl MutableContext {
 		&self,
 		lookup: SurrealismCacheLookup<'_>,
 	) -> Result<Arc<Runtime>> {
+		if !self.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
+			bail!(
+				"Failed to get surrealism runtime: Experimental capability `surrealism` is not enabled"
+			);
+		}
+
 		let Some(cache) = self.get_surrealism_cache() else {
 			bail!("Surrealism cache is not available");
 		};

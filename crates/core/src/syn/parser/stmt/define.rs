@@ -147,6 +147,13 @@ impl Parser<'_> {
 		let name = self.parse_custom_function_name()?;
 
 		let executable = if self.eat(t!("AS")) {
+			if !self.settings.surrealism_enabled {
+				bail!(
+					"Experimental capability `surrealism` is not enabled",
+					@self.last_span() => "Use of `AS <file pointer>` is still experimental"
+				)
+			}
+
 			// TODO add silo parsing
 			let file: PublicFile = self.next_token_value()?;
 			Executable::Surrealism(SurrealismExecutable(file.into()))

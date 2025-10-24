@@ -67,6 +67,7 @@ pub fn settings_from_capabilities(cap: &Capabilities) -> ParserSettings {
 		bearer_access_enabled: cap.allows_experimental(&ExperimentalTarget::BearerAccess),
 		define_api_enabled: cap.allows_experimental(&ExperimentalTarget::DefineApi),
 		files_enabled: cap.allows_experimental(&ExperimentalTarget::Files),
+		surrealism_enabled: cap.allows_experimental(&ExperimentalTarget::Surrealism),
 		..Default::default()
 	}
 }
@@ -223,6 +224,7 @@ pub fn block(input: &str) -> Result<Block> {
 			bearer_access_enabled: true,
 			define_api_enabled: true,
 			files_enabled: true,
+			surrealism_enabled: true,
 			..Default::default()
 		},
 		async |parser, stk| {

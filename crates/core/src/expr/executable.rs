@@ -7,6 +7,7 @@ use reblessive::tree::Stk;
 use crate::catalog;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
+use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::expression::VisitExpression;
@@ -259,6 +260,12 @@ impl SurrealismExecutable {
 		doc: Option<&CursorDoc>,
 		sub: Option<&str>,
 	) -> Result<Signature> {
+		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
+			bail!(
+				"Failed to get surrealism function signature: Experimental capability `surrealism` is not enabled"
+			);
+		}
+
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let lookup = SurrealismCacheLookup::File(&ns, &db, &self.0);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
@@ -295,6 +302,12 @@ impl SurrealismExecutable {
 		args: Vec<Value>,
 		sub: Option<&str>,
 	) -> Result<Value> {
+		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
+			bail!(
+				"Failed to run surrealism function: Experimental capability `surrealism` is not enabled"
+			);
+		}
+
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let lookup = SurrealismCacheLookup::File(&ns, &db, &self.0);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
@@ -375,6 +388,12 @@ impl SiloExecutable {
 		doc: Option<&CursorDoc>,
 		sub: Option<&str>,
 	) -> Result<Signature> {
+		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
+			bail!(
+				"Failed to get silo function signature: Experimental capability `surrealism` is not enabled"
+			);
+		}
+
 		let lookup = SurrealismCacheLookup::Silo(
 			&self.organisation,
 			&self.package,
@@ -416,6 +435,12 @@ impl SiloExecutable {
 		args: Vec<Value>,
 		sub: Option<&str>,
 	) -> Result<Value> {
+		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
+			bail!(
+				"Failed to run silo function: Experimental capability `surrealism` is not enabled"
+			);
+		}
+
 		let lookup = SurrealismCacheLookup::Silo(
 			&self.organisation,
 			&self.package,

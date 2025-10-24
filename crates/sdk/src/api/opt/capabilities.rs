@@ -16,6 +16,7 @@ pub enum ExperimentalFeature {
 	GraphQl,
 	BearerAccess,
 	DefineApi,
+	Surrealism,
 }
 
 /// Not public API
@@ -27,6 +28,7 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 			ExperimentalFeature::GraphQl => ExperimentalTarget::GraphQL,
 			ExperimentalFeature::BearerAccess => ExperimentalTarget::BearerAccess,
 			ExperimentalFeature::DefineApi => ExperimentalTarget::DefineApi,
+			ExperimentalFeature::Surrealism => ExperimentalTarget::Surrealism,
 		}
 	}
 }

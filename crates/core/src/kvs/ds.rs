@@ -1270,6 +1270,9 @@ impl Datastore {
 				.get_capabilities()
 				.allows_experimental(&ExperimentalTarget::DefineApi),
 			files_enabled: ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
+			surrealism_enabled: ctx
+				.get_capabilities()
+				.allows_experimental(&ExperimentalTarget::Surrealism),
 			..Default::default()
 		};
 		let mut statements_stream = StatementStream::new_with_settings(parser_settings);
