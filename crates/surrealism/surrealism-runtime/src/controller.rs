@@ -188,7 +188,12 @@ impl Controller {
 		let args = AsyncTransfer::transfer(args.to_values(), self).await?;
 		let invoke = self.instance.get_typed_func::<(u32,), (i32,)>(&mut self.store, &name)?;
 		let (ptr,) = invoke.call_async(&mut self.store, (*args,)).await?;
-		AsyncTransfer::receive(ptr.try_into()?, self).await
+		if ptr == -1 {
+			anyhow::bail!("WASM function returned error (-1)");
+		}
+		let ptr_u32: u32 = ptr.try_into()?;
+		let result: Result<surrealdb_types::Value, String> = AsyncTransfer::receive(ptr_u32.into(), self).await?;
+		result.map_err(|e| anyhow::anyhow!("WASM function returned error: {}", e))
 	}
 
 	pub async fn args(&mut self, name: Option<String>) -> Result<Vec<surrealdb_types::Kind>> {
@@ -202,6 +207,9 @@ impl Controller {
 		let name = format!("__sr_returns__{}", name.unwrap_or_default());
 		let returns = self.instance.get_typed_func::<(), (i32,)>(&mut self.store, &name)?;
 		let (ptr,) = returns.call_async(&mut self.store, ()).await?;
+		if ptr == -1 {
+			anyhow::bail!("WASM function returned error (-1)");
+		}
 		AsyncTransfer::receive(ptr.try_into()?, self).await
 	}
 

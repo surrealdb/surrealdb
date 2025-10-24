@@ -31,7 +31,8 @@ impl Transfer for Serialized {
 		let mem = controller.mut_mem(*ptr, 4);
 		let len = u32::from_le_bytes(mem[0..4].try_into()?);
 		let data = controller.mut_mem(*ptr + 4, len).to_vec();
-		controller.free(*ptr, 4 + len)?;
+		#[allow(clippy::unnecessary_cast)]
+		controller.free(*ptr, 4 + len as u32)?;
 		Ok(Serialized(data.into()))
 	}
 }
@@ -44,7 +45,8 @@ impl AsyncTransfer for Serialized {
 		let len = 4 + self.0.len();
 		let ptr = controller.alloc(len as u32, 8).await?;
 		let mem = controller.mut_mem(ptr, len as u32);
-		mem[0..4].copy_from_slice((self.0.len() as u32).to_le_bytes().as_slice());
+		let len_bytes = (self.0.len() as u32).to_le_bytes();
+		mem[0..4].copy_from_slice(&len_bytes);
 		mem[4..len].copy_from_slice(&self.0);
 		Ok(ptr.into())
 	}
@@ -53,7 +55,8 @@ impl AsyncTransfer for Serialized {
 		let mem = controller.mut_mem(*ptr, 4);
 		let len = u32::from_le_bytes(mem[0..4].try_into()?);
 		let data = controller.mut_mem(*ptr + 4, len).to_vec();
-		controller.free(*ptr, 4 + len).await?;
+		#[allow(clippy::unnecessary_cast)]
+		controller.free(*ptr, 4 + len as u32).await?;
 		Ok(Serialized(data.into()))
 	}
 }
