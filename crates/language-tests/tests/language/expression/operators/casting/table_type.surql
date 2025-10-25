@@ -2,22 +2,23 @@
 [test]
 
 [[test.results]]
-value = "'users'"
+match = "$result == type::table('users')"
 
 [[test.results]]
-value = "'posts'"
+match = "$result == type::table('posts')"
 
 [[test.results]]
 error = "Expected `table<users>` but found a `'posts'`"
 
 [[test.results]]
-value = "'users'"
+match = "$result == type::table('users')"
 
 [[test.results]]
-value = "'posts'"
+match = "$result == type::table('posts')"
 
 [[test.results]]
-value = "'admin'"
+match = "$result == type::table('admin')"
+error = false
 
 */
 -- Cast string to generic table

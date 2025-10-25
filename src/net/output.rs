@@ -40,10 +40,9 @@ impl Output {
 	}
 
 	#[deprecated]
-	pub fn cbor(val: &Value) -> Output {
-		let mut out = Vec::new();
-		match ciborium::into_writer(&val, &mut out) {
-			Ok(_) => Output::Cbor(out),
+	pub fn cbor(val: Value) -> Output {
+		match surrealdb_core::rpc::format::cbor::encode(val) {
+			Ok(bytes) => Output::Cbor(bytes),
 			Err(_) => Output::Fail,
 		}
 	}
