@@ -7,7 +7,10 @@ use quote::quote;
 use syn::Attribute;
 pub use unnamed::*;
 
-use crate::{FieldAttributes, Strategy, UnitAttributes, UnitValue, UnnamedFieldsAttributes, With};
+use crate::{
+	FieldAttributes, NamedFieldsAttributes, Strategy, UnitAttributes, UnitValue,
+	UnnamedFieldsAttributes, With,
+};
 
 #[derive(Debug)]
 pub enum Fields {
@@ -20,6 +23,7 @@ impl Fields {
 	pub fn parse(fields: &syn::Fields, attrs: &[Attribute]) -> Self {
 		match fields {
 			syn::Fields::Named(named_fields) => {
+				let container_attrs = NamedFieldsAttributes::parse(attrs);
 				let fields = named_fields
 					.named
 					.iter()
@@ -34,7 +38,10 @@ impl Fields {
 					})
 					.collect();
 
-				Fields::Named(NamedFields(fields))
+				Fields::Named(NamedFields {
+					fields,
+					default: container_attrs.default,
+				})
 			}
 			syn::Fields::Unnamed(unnamed_fields) => {
 				let unnamed_field_attrs = UnnamedFieldsAttributes::parse(attrs);
@@ -56,8 +63,9 @@ impl Fields {
 
 	pub fn match_fields(&self) -> TokenStream2 {
 		match self {
-			Fields::Named(fields) => {
-				let fields = fields.0.iter().map(|field| &field.ident).collect::<Vec<_>>();
+			Fields::Named(named_fields) => {
+				let fields =
+					named_fields.fields.iter().map(|field| &field.ident).collect::<Vec<_>>();
 				quote! {{ #(#fields),* }}
 			}
 			Fields::Unnamed(fields) => {
@@ -249,6 +257,12 @@ impl Fields {
 			Fields::Named(fields) => {
 				let map_retrievals = fields.map_retrievals(name);
 
+				let final_ok = if fields.default {
+					quote!(Ok(result))
+				} else {
+					ok.clone()
+				};
+
 				match strategy {
 					Strategy::VariantKey {
 						variant,
@@ -256,7 +270,7 @@ impl Fields {
 						if let Some(value) = map.remove(#variant) {
 							if let surrealdb_types::Value::Object(mut map) = value {
 								#(#map_retrievals)*
-								#ok
+								#final_ok
 							} else {
 								let err = surrealdb_types::ConversionError::from_value(
 									surrealdb_types::Kind::Object,
@@ -272,7 +286,7 @@ impl Fields {
 					} => With::Map(quote! {{
 						if map.get(#tag).is_some_and(|v| v == Value::String(#variant.to_string())) {
 							#(#map_retrievals)*
-							#ok
+							#final_ok
 						}
 					}}),
 					Strategy::TagContentKeys {
@@ -283,7 +297,7 @@ impl Fields {
 						if map.get(#tag).is_some_and(|v| v == Value::String(#variant.to_string())) {
 							if let Some(surrealdb_types::Value::Object(mut map)) = map.remove(#content) {
 								#(#map_retrievals)*
-								#ok
+								#final_ok
 							} else {
 								let err = surrealdb_types::TypeError::Invalid(
 									format!("Expected object under content key '{}' for variant '{}'", #content, #variant)
@@ -304,7 +318,7 @@ impl Fields {
 
 							if valid {
 								#(#map_retrievals)*
-								#ok
+								#final_ok
 							}
 						}})
 					}
@@ -313,7 +327,7 @@ impl Fields {
 						variant: None,
 					} => With::Map(quote! {{
 						#(#map_retrievals)*
-						#ok
+						#final_ok
 					}}),
 				}
 			}
