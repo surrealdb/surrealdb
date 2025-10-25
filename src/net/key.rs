@@ -96,7 +96,7 @@ async fn execute_and_return(
 				let v = Value::Array(Array::from(
 					res.into_iter().map(|x| x.into_value()).collect::<Vec<Value>>(),
 				));
-				Ok(Output::cbor(&v))
+				Ok(Output::cbor(v))
 			}
 			// Internal serialization
 			Some(Accept::ApplicationFlatbuffers) => {

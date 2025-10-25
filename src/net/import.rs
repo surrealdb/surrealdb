@@ -63,7 +63,7 @@ async fn handler(
 					// TODO(3.0): This code here is using the wrong serialization method which might
 					// result in some values of the code being serialized wrong.
 					let res = res.into_value();
-					Ok(Output::cbor(&res))
+					Ok(Output::cbor(res))
 				}
 				// Return nothing
 				Some(Accept::ApplicationOctetStream) => Ok(Output::None),
