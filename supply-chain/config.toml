@@ -113,26 +113,6 @@ criteria = "safe-to-deploy"
 version = "1.9.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.async-graphql]]
-version = "7.0.16"
-criteria = "safe-to-deploy"
-
-[[exemptions.async-graphql-axum]]
-version = "7.0.13"
-criteria = "safe-to-deploy"
-
-[[exemptions.async-graphql-derive]]
-version = "7.0.16"
-criteria = "safe-to-deploy"
-
-[[exemptions.async-graphql-parser]]
-version = "7.0.16"
-criteria = "safe-to-deploy"
-
-[[exemptions.async-graphql-value]]
-version = "7.0.16"
-criteria = "safe-to-deploy"
-
 [[exemptions.async-lock]]
 version = "3.4.0"
 criteria = "safe-to-deploy"

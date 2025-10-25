@@ -37,28 +37,36 @@ pub enum TablesConfig {
 	Exclude(Vec<TableConfig>),
 }
 
-impl From<TablesConfig> for crate::catalog::TablesConfig {
+impl From<TablesConfig> for crate::catalog::GraphQLTablesConfig {
 	fn from(v: TablesConfig) -> Self {
 		match v {
 			TablesConfig::None => Self::None,
 			TablesConfig::Auto => Self::Auto,
-			TablesConfig::Include(cs) => Self::Include(cs.into_iter().map(Into::into).collect()),
-			TablesConfig::Exclude(cs) => Self::Exclude(cs.into_iter().map(Into::into).collect()),
+			TablesConfig::Include(cs) => Self::Include(cs.into_iter().map(|t| t.name).collect()),
+			TablesConfig::Exclude(cs) => Self::Exclude(cs.into_iter().map(|t| t.name).collect()),
 		}
 	}
 }
 
-impl From<crate::catalog::TablesConfig> for TablesConfig {
-	fn from(v: crate::catalog::TablesConfig) -> Self {
+impl From<crate::catalog::GraphQLTablesConfig> for TablesConfig {
+	fn from(v: crate::catalog::GraphQLTablesConfig) -> Self {
 		match v {
-			crate::catalog::TablesConfig::None => Self::None,
-			crate::catalog::TablesConfig::Auto => Self::Auto,
-			crate::catalog::TablesConfig::Include(cs) => {
-				Self::Include(cs.into_iter().map(Into::<TableConfig>::into).collect())
-			}
-			crate::catalog::TablesConfig::Exclude(cs) => {
-				Self::Exclude(cs.into_iter().map(Into::<TableConfig>::into).collect())
-			}
+			crate::catalog::GraphQLTablesConfig::None => Self::None,
+			crate::catalog::GraphQLTablesConfig::Auto => Self::Auto,
+			crate::catalog::GraphQLTablesConfig::Include(cs) => Self::Include(
+				cs.into_iter()
+					.map(|t| TableConfig {
+						name: t,
+					})
+					.collect(),
+			),
+			crate::catalog::GraphQLTablesConfig::Exclude(cs) => Self::Exclude(
+				cs.into_iter()
+					.map(|t| TableConfig {
+						name: t,
+					})
+					.collect(),
+			),
 		}
 	}
 }
@@ -67,21 +75,6 @@ impl From<crate::catalog::TablesConfig> for TablesConfig {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct TableConfig {
 	pub name: String,
-}
-
-impl From<TableConfig> for crate::catalog::TableConfig {
-	fn from(v: TableConfig) -> Self {
-		crate::catalog::TableConfig {
-			name: v.name,
-		}
-	}
-}
-impl From<crate::catalog::TableConfig> for TableConfig {
-	fn from(v: crate::catalog::TableConfig) -> Self {
-		TableConfig {
-			name: v.name,
-		}
-	}
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
@@ -104,7 +97,7 @@ impl Display for GraphQLConfig {
 	}
 }
 
-impl From<FunctionsConfig> for crate::catalog::FunctionsConfig {
+impl From<FunctionsConfig> for crate::catalog::GraphQLFunctionsConfig {
 	fn from(v: FunctionsConfig) -> Self {
 		match v {
 			FunctionsConfig::None => Self::None,
@@ -115,13 +108,13 @@ impl From<FunctionsConfig> for crate::catalog::FunctionsConfig {
 	}
 }
 
-impl From<crate::catalog::FunctionsConfig> for FunctionsConfig {
-	fn from(v: crate::catalog::FunctionsConfig) -> Self {
+impl From<crate::catalog::GraphQLFunctionsConfig> for FunctionsConfig {
+	fn from(v: crate::catalog::GraphQLFunctionsConfig) -> Self {
 		match v {
-			crate::catalog::FunctionsConfig::None => Self::None,
-			crate::catalog::FunctionsConfig::Auto => Self::Auto,
-			crate::catalog::FunctionsConfig::Include(cs) => Self::Include(cs),
-			crate::catalog::FunctionsConfig::Exclude(cs) => Self::Exclude(cs),
+			crate::catalog::GraphQLFunctionsConfig::None => Self::None,
+			crate::catalog::GraphQLFunctionsConfig::Auto => Self::Auto,
+			crate::catalog::GraphQLFunctionsConfig::Include(cs) => Self::Include(cs),
+			crate::catalog::GraphQLFunctionsConfig::Exclude(cs) => Self::Exclude(cs),
 		}
 	}
 }

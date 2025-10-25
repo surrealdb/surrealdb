@@ -1,5 +1,4 @@
 use std::convert::Infallible;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -15,39 +14,34 @@ use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
-use surrealdb::dbs::Session;
-use surrealdb::dbs::capabilities::RouteTarget;
-use surrealdb::gql::cache::{Invalidator, SchemaCache};
-use surrealdb::gql::error::resolver_error;
-use surrealdb::kvs::Datastore;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::capabilities::RouteTarget;
+use surrealdb_core::gql::cache::GraphQLSchemaCache;
+use surrealdb_core::gql::error::resolver_error;
 use tower_service::Service;
 
 use crate::net::error::Error as NetError;
 
 /// A GraphQL service.
 #[derive(Clone)]
-pub struct GraphQL<I: Invalidator> {
-	cache: SchemaCache<I>,
-	// datastore: Arc<Datastore>,
+pub struct GraphQLService {
+	cache: GraphQLSchemaCache,
 }
 
-impl<I: Invalidator> GraphQL<I> {
-	/// Create a GraphQL handler.
-	pub fn new(invalidator: I, datastore: Arc<Datastore>) -> Self {
-		let _ = invalidator;
-		GraphQL {
-			cache: SchemaCache::new(datastore),
-			// datastore,
+impl GraphQLService {
+	/// Create a GraphQL HTTP handler.
+	pub fn new() -> Self {
+		GraphQLService {
+			cache: GraphQLSchemaCache::default(),
 		}
 	}
 }
 
-impl<B, I> Service<HttpRequest<B>> for GraphQL<I>
+impl<B> Service<HttpRequest<B>> for GraphQLService
 where
 	B: HttpBody<Data = Bytes> + Send + 'static,
 	B::Data: Into<Bytes>,
 	B::Error: Into<BoxError>,
-	I: Invalidator,
 {
 	type Response = HttpResponse<Body>;
 	type Error = Infallible;
@@ -62,8 +56,15 @@ where
 		let req = req.map(Body::new);
 
 		Box::pin(async move {
+			let state = req
+				.extensions()
+				.get::<crate::net::AppState>()
+				.expect("state extractor should always succeed");
+
+			let datastore = &state.datastore;
+
 			// Check if capabilities allow querying the requested HTTP route
-			if !cache.datastore.allows_http_route(&RouteTarget::GraphQL) {
+			if !datastore.allows_http_route(&RouteTarget::GraphQL) {
 				warn!(
 					"Capabilities denied HTTP route request attempt, target: '{}'",
 					&RouteTarget::GraphQL
@@ -83,22 +84,18 @@ where
 				return Ok(to_rejection(resolver_error("No database specified")).into_response());
 			};
 
-			#[cfg(debug_assertions)]
-			{
-				let state = req
-					.extensions()
-					.get::<crate::net::AppState>()
-					.expect("state extractor should always succeed");
-				debug_assert!(Arc::ptr_eq(&state.datastore, &cache.datastore));
-			}
-
-			let executor = match cache.get_schema(session).await {
+			let schema = match cache.get_schema(datastore, session).await {
 				Ok(e) => e,
 				Err(e) => {
 					info!(?e, "error generating schema");
 					return Ok(to_rejection(e).into_response());
 				}
 			};
+
+			// Clone Arc's before moving req (needed for GraphQL context)
+			let datastore_ctx = datastore.clone();
+			let session_ctx = std::sync::Arc::new(session.clone());
+
 			let is_accept_multipart_mixed = req
 				.headers()
 				.get("accept")
@@ -107,11 +104,14 @@ where
 				.unwrap_or_default();
 
 			if is_accept_multipart_mixed {
-				let req = match GraphQLRequest::<GraphQLRejection>::from_request(req, &()).await {
-					Ok(req) => req,
+				let gql_req = match GraphQLRequest::<GraphQLRejection>::from_request(req, &()).await
+				{
+					Ok(r) => r,
 					Err(err) => return Ok(err.into_response()),
 				};
-				let stream = Executor::execute_stream(&executor, req.0, None);
+				// Add Datastore and Session to the GraphQL context
+				let req_with_data = gql_req.into_inner().data(datastore_ctx).data(session_ctx);
+				let stream = Executor::execute_stream(&schema, req_with_data, None);
 				let body = Body::from_stream(
 					create_multipart_mixed_stream(stream, Duration::from_secs(30))
 						.map(Ok::<_, std::io::Error>),
@@ -119,14 +119,16 @@ where
 				Ok(HttpResponse::builder()
 					.header("content-type", "multipart/mixed; boundary=graphql")
 					.body(body)
-					.expect("BUG: invalid response"))
+					.unwrap())
 			} else {
-				let req =
+				let gql_req =
 					match GraphQLBatchRequest::<GraphQLRejection>::from_request(req, &()).await {
-						Ok(req) => req,
+						Ok(r) => r,
 						Err(err) => return Ok(err.into_response()),
 					};
-				Ok(GraphQLResponse(executor.execute_batch(req.0).await).into_response())
+				// Add Datastore and Session to the GraphQL context
+				let req_with_data = gql_req.into_inner().data(datastore_ctx).data(session_ctx);
+				Ok(GraphQLResponse(schema.execute_batch(req_with_data).await).into_response())
 			}
 		})
 	}

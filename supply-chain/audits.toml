@@ -188,6 +188,36 @@ user-id = 267 # Tony Arcieri (tarcieri)
 start = "2021-01-29"
 end = "2026-05-06"
 
+[[trusted.async-graphql]]
+criteria = "safe-to-deploy"
+user-id = 66052 # Sunli (sunli829)
+start = "2020-03-03"
+end = "2026-10-22"
+
+[[trusted.async-graphql-axum]]
+criteria = "safe-to-deploy"
+user-id = 66052 # Sunli (sunli829)
+start = "2021-09-01"
+end = "2026-10-22"
+
+[[trusted.async-graphql-derive]]
+criteria = "safe-to-deploy"
+user-id = 66052 # Sunli (sunli829)
+start = "2020-03-03"
+end = "2026-10-22"
+
+[[trusted.async-graphql-parser]]
+criteria = "safe-to-deploy"
+user-id = 66052 # Sunli (sunli829)
+start = "2020-05-10"
+end = "2026-10-22"
+
+[[trusted.async-graphql-value]]
+criteria = "safe-to-deploy"
+user-id = 66052 # Sunli (sunli829)
+start = "2020-10-11"
+end = "2026-10-22"
+
 [[trusted.async-trait]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
