@@ -3,8 +3,7 @@ use std::collections::HashMap;
 
 use helpers::*;
 use regex::Regex;
-use surrealdb_core::dbs::capabilities::ExperimentalTarget;
-use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_types::ToSql;
 
@@ -542,9 +541,7 @@ async fn access_info_redacted() {
 			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret';
 			INFO FOR NS
 		"#;
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds().await.unwrap();
 		let ses = Session::owner().with_ns("ns");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -567,9 +564,7 @@ async fn access_info_redacted() {
 			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY 'private';
 			INFO FOR NS
 		"#;
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds().await.unwrap();
 		let ses = Session::owner().with_ns("ns");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -592,9 +587,7 @@ async fn access_info_redacted() {
 		let sql = r#"
 			DEFINE ACCESS access ON DB TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret' WITH ISSUER KEY 'secret'; 			INFO FOR DB
 		"#;
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds().await.unwrap();
 		let ses = Session::owner().with_ns("ns").with_db("test");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -618,9 +611,7 @@ async fn access_info_redacted() {
 			DEFINE ACCESS access ON DB TYPE RECORD WITH REFRESH, WITH JWT ALGORITHM HS512 KEY 'secret'
 WITH ISSUER KEY 'secret'; 			INFO FOR DB
 		"#;
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds().await.unwrap();
 		let ses = Session::owner().with_ns("ns").with_db("test");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -647,9 +638,7 @@ async fn access_info_redacted_structure() {
 			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM HS512 KEY 'secret' DURATION FOR TOKEN 15m, FOR SESSION 6h;
             INFO FOR NS STRUCTURE
 		"#;
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds().await.unwrap();
 		let ses = Session::owner().with_ns("ns");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -673,9 +662,7 @@ async fn access_info_redacted_structure() {
 			DEFINE ACCESS access ON NS TYPE JWT ALGORITHM PS512 KEY 'public' WITH ISSUER KEY 'private' DURATION FOR TOKEN 15m, FOR SESSION 6h;
             INFO FOR NS STRUCTURE
 		"#;
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds().await.unwrap();
 		let ses = Session::owner().with_ns("ns");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -698,9 +685,7 @@ async fn access_info_redacted_structure() {
 		let sql = r#"
 			DEFINE ACCESS access ON DB TYPE RECORD WITH JWT ALGORITHM HS512 KEY 'secret' DURATION FOR TOKEN 15m, FOR SESSION 6h; 			INFO FOR DB STRUCTURE
 		"#;
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds().await.unwrap();
 		let ses = Session::owner().with_ns("ns").with_db("db");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
@@ -724,9 +709,7 @@ async fn access_info_redacted_structure() {
 			DEFINE ACCESS access ON DB TYPE RECORD WITH REFRESH, WITH JWT ALGORITHM HS512 KEY 'secret'
 DURATION FOR GRANT 1w, FOR TOKEN 15m, FOR SESSION 6h; 			INFO FOR DB STRUCTURE
 		"#;
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds().await.unwrap();
 		let ses = Session::owner().with_ns("ns").with_db("db");
 
 		let mut res = dbs.execute(sql, &ses, None).await.unwrap();

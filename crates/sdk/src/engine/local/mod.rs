@@ -174,7 +174,7 @@ use surrealdb_core::{
 	iam::{Action, ResourceKind, check::check_ns_db},
 	ml::storage::surml_file::SurMlFile,
 };
-use surrealdb_types::{Notification, ToSql, Value, Variables};
+use surrealdb_types::{Notification, SurrealValue, ToSql, Value, Variables};
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
@@ -189,6 +189,7 @@ use uuid::Uuid;
 use crate::conn::MlExportConfig;
 use crate::conn::{Command, RequestData};
 use crate::opt::IntoEndpoint;
+use crate::opt::auth::{AccessToken, RefreshToken, SecureToken, Token};
 use crate::{Connect, Result, Surreal};
 
 #[cfg(not(target_family = "wasm"))]
@@ -567,8 +568,20 @@ async fn router(
 				iam::signup::signup(kvs, &mut *session.write().await, credentials.into())
 					.await
 					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
-			let token = signup_data.token.map(Value::String).unwrap_or(Value::None);
-			let result = query_result.finish_with_result(Ok(token));
+			let token = match signup_data {
+				iam::Token::Access(token) => Token {
+					access: AccessToken(SecureToken(token)),
+					refresh: None,
+				},
+				iam::Token::WithRefresh {
+					access: token,
+					refresh,
+				} => Token {
+					access: AccessToken(SecureToken(token)),
+					refresh: Some(RefreshToken(SecureToken(refresh))),
+				},
+			};
+			let result = query_result.finish_with_result(Ok(token.into_value()));
 
 			Ok(vec![result])
 		}
@@ -580,9 +593,20 @@ async fn router(
 				iam::signin::signin(kvs, &mut *session.write().await, credentials.into())
 					.await
 					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
-
-			let result = query_result.finish_with_result(Ok(Value::String(signin_data.token)));
-
+			let token = match signin_data {
+				iam::Token::Access(token) => Token {
+					access: AccessToken(SecureToken(token)),
+					refresh: None,
+				},
+				iam::Token::WithRefresh {
+					access: token,
+					refresh,
+				} => Token {
+					access: AccessToken(SecureToken(token)),
+					refresh: Some(RefreshToken(SecureToken(refresh))),
+				},
+			};
+			let result = query_result.finish_with_result(Ok(token.into_value()));
 			Ok(vec![result])
 		}
 		Command::Authenticate {

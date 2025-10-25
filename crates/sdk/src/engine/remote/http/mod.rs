@@ -26,6 +26,7 @@ use crate::err::Error;
 // use crate::engine::remote::Response;
 use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
 use crate::opt::IntoEndpoint;
+use crate::opt::auth::Token;
 use crate::{Connect, Result, Surreal};
 
 #[cfg(not(target_family = "wasm"))]
@@ -341,9 +342,9 @@ async fn router(
 			let value = match results.first() {
 				Some(result) => result.clone().result?,
 				None => {
-					error!("recieved invalid result from server");
+					error!("received invalid result from server");
 					return Err(Error::InternalError(
-						"Recieved invalid result from server".to_string(),
+						"Received invalid result from server".to_string(),
 					));
 				}
 			};
@@ -359,8 +360,9 @@ async fn router(
 				}
 				Err(err) => {
 					debug!("Error converting Value to Credentials: {err}");
+					let token = Token::from_value(value)?;
 					*auth = Some(Auth::Bearer {
-						token: value.clone().into_string()?,
+						token: token.access.into_insecure_token(),
 					});
 				}
 			}

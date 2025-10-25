@@ -20,7 +20,6 @@ pub(crate) fn random_key() -> String {
 pub(crate) enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
-	// TODO(gguillemas): Document once bearer access is no longer experimental.
 	Bearer(BearerAccess),
 }
 

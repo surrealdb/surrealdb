@@ -23,12 +23,11 @@ use crate::catalog::providers::{
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
 use crate::dbs::Session;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
 use crate::expr::access_type;
 use crate::expr::statements::access;
 use crate::iam::issue::{config, expiration};
-use crate::iam::token::{Claims, HEADER};
+use crate::iam::token::{Claims, HEADER, Token};
 use crate::iam::{self, Auth, algorithm_to_jwt_algorithm};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
@@ -36,17 +35,65 @@ use crate::kvs::TransactionType::*;
 use crate::types::{PublicValue, PublicVariables};
 use crate::val::{Datetime, Value};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct SigninData {
-	pub token: String,
-	pub refresh: Option<String>,
-}
-
+/// Authenticates a user and returns an authentication token.
+///
+/// This function handles user authentication for SurrealDB and returns a token
+/// that can be used for subsequent API requests. The token may include both
+/// access and refresh tokens depending on the authentication method and
+/// configuration.
+///
+/// # Parameters
+///
+/// - `kvs`: The datastore instance for database operations
+/// - `session`: The current session context
+/// - `vars`: Public variables containing authentication credentials
+///
+/// # Returns
+///
+/// Returns a `Token` that can be either:
+/// - An access token only
+/// - An access token and a refresh token
+///
+/// # Authentication Methods
+///
+/// The function supports multiple authentication methods based on the provided variables:
+/// - **Database access method**: When `NS`, `DB`, and `AC` are provided
+/// - **Database user credentials**: When `NS`, `DB`, `user`, and `pass` are provided
+/// - **Namespace user credentials**: When `NS`, `user`, and `pass` are provided
+/// - **Root user credentials**: When `user` and `pass` are provided
+///
+/// # Examples
+///
+/// ```rust
+/// use surrealdb_core::iam::signin;
+/// use surrealdb_core::kvs::Datastore;
+/// use surrealdb_core::dbs::Session;
+/// use surrealdb_core::types::PublicVariables;
+///
+/// // Database access method
+/// let vars = PublicVariables::from([
+///     ("NS".to_string(), "test_namespace".into()),
+///     ("DB".to_string(), "test_database".into()),
+///     ("AC".to_string(), "my_access_method".into()),
+///     // ... other access method parameters
+/// ]);
+///
+/// let token = signin(&kvs, &mut session, vars).await?;
+/// match token {
+///     Token::Access(access_token) => {
+///         // Use access token for API requests
+///     }
+///     Token::WithRefresh { access, refresh } => {
+///         // Use access token for API requests
+///         // Store refresh token for token renewal
+///     }
+/// }
+/// ```
 pub async fn signin(
 	kvs: &Datastore,
 	session: &mut Session,
 	vars: PublicVariables,
-) -> Result<SigninData> {
+) -> Result<Token> {
 	// Parse the specified variables
 	let ns = vars.get("NS").or_else(|| vars.get("ns")).cloned();
 	let db = vars.get("DB").or_else(|| vars.get("db")).cloned();
@@ -131,6 +178,70 @@ pub async fn signin(
 	}
 }
 
+/// Authenticates a user using a database access method.
+///
+/// This function handles authentication for users who have been granted access
+/// through a specific access method defined on the database. It supports both
+/// traditional access tokens and refresh token flows.
+///
+/// # Parameters
+///
+/// - `kvs`: The datastore instance for database operations
+/// - `session`: The current session context
+/// - `ns`: The namespace name
+/// - `db`: The database name
+/// - `ac`: The access method name
+/// - `vars`: Public variables containing authentication parameters
+///
+/// # Returns
+///
+/// Returns a `Token` that may include both access and refresh tokens
+/// depending on the access method configuration.
+///
+/// # Access Method Configuration
+///
+/// The access method must be defined with the `DEFINE ACCESS` statement
+/// and can include refresh token support with the `WITH REFRESH` clause:
+///
+/// ```sql
+/// DEFINE ACCESS my_access ON DATABASE TYPE RECORD
+/// SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+/// SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+/// WITH REFRESH
+/// DURATION FOR SESSION 1d FOR TOKEN 15s
+/// ```
+///
+/// # Examples
+///
+/// ```rust
+/// use surrealdb_core::iam::signin::db_access;
+/// use surrealdb_core::kvs::Datastore;
+/// use surrealdb_core::dbs::Session;
+/// use surrealdb_core::types::PublicVariables;
+///
+/// let vars = PublicVariables::from([
+///     ("email".to_string(), "user@example.com".into()),
+///     ("pass".to_string(), "password123".into()),
+/// ]);
+///
+/// let token = db_access(
+///     &kvs,
+///     &mut session,
+///     "test_namespace".to_string(),
+///     "test_database".to_string(),
+///     "my_access".to_string(),
+///     vars
+/// ).await?;
+///
+/// match token {
+///     Token::Access(access_token) => {
+///         // Traditional access token
+///     }
+///     Token::WithRefresh { access, refresh } => {
+///         // Access token with refresh capability
+///     }
+/// }
+/// ```
 pub async fn db_access(
 	kvs: &Datastore,
 	session: &mut Session,
@@ -138,7 +249,7 @@ pub async fn db_access(
 	db: String,
 	ac: String,
 	vars: PublicVariables,
-) -> Result<SigninData> {
+) -> Result<Token> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 
@@ -235,29 +346,16 @@ pub async fn db_access(
 											// Create refresh token if defined for the record access
 											// method
 											let refresh = match &at.bearer {
-												Some(_) => {
-													// TODO(gguillemas): Remove this once bearer
-													// access is no longer experimental
-													if !kvs.get_capabilities().allows_experimental(
-														&ExperimentalTarget::BearerAccess,
-													) {
-														debug!(
-															"Will not create refresh token with disabled bearer access feature"
-														);
-														None
-													} else {
-														Some(
-															create_refresh_token_record(
-																kvs,
-																av.name.clone(),
-																&ns,
-																&db,
-																rid.clone().into(),
-															)
-															.await?,
-														)
-													}
-												}
+												Some(_) => Some(
+													create_refresh_token_record(
+														kvs,
+														av.name.clone(),
+														&ns,
+														&db,
+														rid.clone().into(),
+													)
+													.await?,
+												),
 												None => None,
 											};
 											// Log the authenticated access method info
@@ -297,9 +395,12 @@ pub async fn db_access(
 											// Check the authentication token
 											match enc {
 												// The auth token was created successfully
-												Ok(token) => Ok(SigninData {
-													token,
-													refresh,
+												Ok(token) => Ok(match refresh {
+													Some(refresh) => Token::WithRefresh {
+														access: token,
+														refresh,
+													},
+													None => Token::Access(token),
 												}),
 												_ => Err(anyhow::Error::new(
 													Error::TokenMakingFailed,
@@ -375,7 +476,7 @@ pub async fn db_user(
 	db: String,
 	user: String,
 	pass: String,
-) -> Result<SigninData> {
+) -> Result<Token> {
 	match verify_db_creds(kvs, &ns, &db, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -410,10 +511,7 @@ pub async fn db_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(SigninData {
-					token: tk,
-					refresh: None,
-				}),
+				Ok(tk) => Ok(Token::Access(tk)),
 				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 			}
 		}
@@ -433,7 +531,7 @@ pub async fn ns_access(
 	ns: String,
 	ac: String,
 	vars: PublicVariables,
-) -> Result<SigninData> {
+) -> Result<Token> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	let ns_def = tx.expect_ns_by_name(&ns).await?;
@@ -469,7 +567,7 @@ pub async fn ns_user(
 	ns: String,
 	user: String,
 	pass: String,
-) -> Result<SigninData> {
+) -> Result<Token> {
 	match verify_ns_creds(kvs, &ns, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -503,10 +601,7 @@ pub async fn ns_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(SigninData {
-					token: tk,
-					refresh: None,
-				}),
+				Ok(tk) => Ok(Token::Access(tk)),
 				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 			}
 		}
@@ -525,7 +620,7 @@ pub async fn root_user(
 	session: &mut Session,
 	user: String,
 	pass: String,
-) -> Result<SigninData> {
+) -> Result<Token> {
 	match verify_root_creds(kvs, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -556,10 +651,7 @@ pub async fn root_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(SigninData {
-					token: tk,
-					refresh: None,
-				}),
+				Ok(tk) => Ok(Token::Access(tk)),
 				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 			}
 		}
@@ -576,7 +668,7 @@ pub async fn root_access(
 	session: &mut Session,
 	ac: String,
 	vars: PublicVariables,
-) -> Result<SigninData> {
+) -> Result<Token> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
@@ -614,13 +706,7 @@ pub async fn signin_bearer(
 	av: Arc<catalog::AccessDefinition>,
 	at: &catalog::BearerAccess,
 	key: String,
-) -> Result<SigninData> {
-	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-	if !kvs.get_capabilities().allows_experimental(&ExperimentalTarget::BearerAccess) {
-		// Return opaque error to avoid leaking the existence of the feature.
-		debug!("Error attempting to authenticate with disabled bearer access feature");
-		bail!(Error::InvalidAuth);
-	}
+) -> Result<Token> {
 	// Check if the bearer access method supports issuing tokens.
 	let iss = match &at.jwt.issue {
 		Some(iss) => iss.clone(),
@@ -824,9 +910,12 @@ pub async fn signin_bearer(
 	};
 	// Return the authentication token.
 	match enc {
-		Ok(token) => Ok(SigninData {
-			token,
-			refresh,
+		Ok(token) => Ok(match refresh {
+			Some(refresh) => Token::WithRefresh {
+				access: token,
+				refresh,
+			},
+			None => Token::Access(token),
 		}),
 		_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 	}
@@ -904,7 +993,6 @@ mod tests {
 
 	use super::*;
 	use crate::catalog::{DatabaseId, NamespaceId};
-	use crate::dbs::Capabilities;
 	use crate::iam::Role;
 	use crate::sql::statements::define::DefineKind;
 	use crate::sql::statements::define::user::PassType;
@@ -1092,16 +1180,17 @@ mod tests {
 
 			match res {
 				Ok(data) => {
-					assert!(data.refresh.is_none(), "Refresh token was unexpectedly returned")
+					assert!(
+						!matches!(data, Token::WithRefresh { .. }),
+						"Refresh token was unexpectedly returned"
+					)
 				}
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			}
 		}
 		// Test with refresh
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
@@ -1145,9 +1234,12 @@ mod tests {
 
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
 			let refresh = match res {
-				Ok(data) => match data.refresh {
-					Some(refresh) => refresh,
-					None => panic!("Refresh token was not returned"),
+				Ok(data) => match data {
+					Token::WithRefresh {
+						refresh,
+						..
+					} => refresh,
+					Token::Access(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
@@ -1185,12 +1277,15 @@ mod tests {
 			.await;
 			// Authentication should be identical as with user credentials
 			match res {
-				Ok(data) => match data.refresh {
-					Some(new_refresh) => assert!(
+				Ok(data) => match data {
+					Token::WithRefresh {
+						refresh: new_refresh,
+						..
+					} => assert!(
 						new_refresh != refresh,
 						"New refresh token is identical to used one"
 					),
-					None => panic!("Refresh token was not returned"),
+					Token::Access(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
@@ -1235,9 +1330,7 @@ mod tests {
 		}
 		// Test with expired refresh
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
@@ -1279,9 +1372,12 @@ mod tests {
 			)
 			.await;
 			let refresh = match res {
-				Ok(data) => match data.refresh {
-					Some(refresh) => refresh,
-					None => panic!("Refresh token was not returned"),
+				Ok(data) => match data {
+					Token::WithRefresh {
+						refresh,
+						..
+					} => refresh,
+					Token::Access(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
@@ -1308,9 +1404,7 @@ mod tests {
 		}
 		// Test that only the hash of the refresh token is stored
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
@@ -1354,9 +1448,12 @@ mod tests {
 
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
 			let refresh = match res {
-				Ok(data) => match data.refresh {
-					Some(refresh) => refresh,
-					None => panic!("Refresh token was not returned"),
+				Ok(data) => match data {
+					Token::WithRefresh {
+						refresh,
+						..
+					} => refresh,
+					Token::Access(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
@@ -1504,11 +1601,18 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Decode token and check that it has been issued as intended
 			if let Ok(sd) = res {
+				let token = match &sd {
+					Token::Access(token) => token,
+					Token::WithRefresh {
+						access: token,
+						..
+					} => token,
+				};
 				// Check that token can be verified with the defined algorithm
 				let val = Validation::new(Algorithm::RS256);
 				// Check that token can be verified with the defined public key
 				let token_data = decode::<Claims>(
-					&sd.token,
+					token,
 					&DecodingKey::from_rsa_pem(public_key.as_ref()).unwrap(),
 					&val,
 				)
@@ -1713,9 +1817,16 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 					// Check issued token
 					if let Ok(sd) = res {
+						let token = match &sd {
+							Token::Access(token) => token,
+							Token::WithRefresh {
+								access: token,
+								..
+							} => token,
+						};
 						// Decode token without validation
 						let token_data =
-							decode::<Claims>(&sd.token, &DecodingKey::from_secret(&[]), &{
+							decode::<Claims>(token, &DecodingKey::from_secret(&[]), &{
 								let mut validation =
 									Validation::new(jsonwebtoken::Algorithm::HS256);
 								validation.insecure_disable_signature_validation();
@@ -2228,10 +2339,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with correct bearer key
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2335,10 +2443,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with correct bearer key and AUTHENTICATE clause succeeding
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2445,10 +2550,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with correct bearer key and AUTHENTICATE clause failing
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2523,10 +2625,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with expired grant
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2601,10 +2700,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with revoked grant
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2688,10 +2784,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with removed access method
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2768,10 +2861,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with missing key
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2845,10 +2935,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with incorrect bearer key prefix part
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2925,10 +3012,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with incorrect bearer key length
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -3005,10 +3089,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with incorrect bearer key identifier part
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -3085,10 +3166,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with incorrect bearer key value
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -3165,10 +3243,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test that only the key hash is stored
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -3247,9 +3322,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 	async fn test_signin_bearer_for_record() {
 		// Test with correct bearer key and existing record
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3316,9 +3389,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 		// Test with correct bearer key and non-existing record
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3385,9 +3456,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 		// Test with correct bearer key and AUTHENTICATE clause succeeding
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3458,9 +3527,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with correct bearer key and AUTHENTICATE clause failing
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3515,9 +3582,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with expired grant
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3572,9 +3637,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with revoked grant
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3634,9 +3697,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with removed access method
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3691,9 +3752,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with missing key
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3746,9 +3805,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with incorrect bearer key prefix part
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3805,9 +3862,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with incorrect bearer key length
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3864,9 +3919,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with incorrect bearer key identifier part
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3923,9 +3976,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with incorrect bearer key value
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3982,9 +4033,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test that only the key hash is stored
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(

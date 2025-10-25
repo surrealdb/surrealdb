@@ -1,14 +1,72 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::LazyLock;
 
 use jsonwebtoken::{Algorithm, Header};
 use serde::{Deserialize, Serialize};
+use surrealdb_types::SurrealValue;
 
 use crate::sql::expression::convert_public_value_to_internal;
 use crate::syn;
 use crate::val::{Object, Value};
-
 pub static HEADER: LazyLock<Header> = LazyLock::new(|| Header::new(Algorithm::HS512));
+
+/// A token that can be either an access token alone or an access token with a refresh token.
+///
+/// This enum supports two authentication scenarios:
+/// - **Access-only**: A single access token for basic authentication
+/// - **With refresh**: An access token paired with a refresh token for enhanced security
+///
+/// The enum uses untagged serialization, meaning it will serialize as either:
+/// - A string (for access-only tokens)
+/// - An object with `access` and `refresh` fields (for tokens with refresh)
+///
+/// # Examples
+///
+/// ```rust
+/// use surrealdb_core::iam::token::Token;
+///
+/// // Access-only token
+/// let access_token = Token::Access("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...".to_string());
+///
+/// // Token with refresh capability
+/// let token_with_refresh = Token::WithRefresh {
+///     access: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...".to_string(),
+///     refresh: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...".to_string(),
+/// };
+/// ```
+#[derive(Clone, Eq, PartialEq, PartialOrd, SurrealValue, Hash)]
+#[surreal(untagged)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub enum Token {
+	/// An access token without a refresh token.
+	///
+	/// This variant represents the traditional authentication model where
+	/// only a single access token is provided.
+	Access(String),
+	/// An access token paired with a refresh token.
+	///
+	/// This variant enables the refresh token flow, allowing clients to
+	/// obtain new access tokens without re-authenticating when the access
+	/// token expires.
+	WithRefresh {
+		/// The access token used for API authentication
+		access: String,
+		/// The refresh token used to obtain new access tokens
+		refresh: String,
+	},
+}
+
+impl fmt::Debug for Token {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		match self {
+			Token::Access(_) => write!(f, "Token::Access(REDACTED)"),
+			Token::WithRefresh {
+				..
+			} => write!(f, "Token::WithRefresh {{ access: REDACTED, refresh: REDACTED }}"),
+		}
+	}
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(untagged)]
