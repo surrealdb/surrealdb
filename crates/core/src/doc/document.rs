@@ -454,10 +454,19 @@ impl Document {
 
 	/// Get the table for this document
 	pub async fn tb(&self, ctx: &Context, opt: &Options) -> Result<Arc<TableDefinition>> {
+		let id = self.id()?;
+		self.tb_name(ctx, opt, &id.table).await
+	}
+
+	/// Get the table for this document
+	pub async fn tb_name(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+		table: &str,
+	) -> Result<Arc<TableDefinition>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		// Get the record id
-		let id = self.id()?;
 		// Get transaction
 		let txn = ctx.tx();
 		// Get the table definition
@@ -465,20 +474,19 @@ impl Document {
 			// A cache is present on the context
 			Some(cache) if txn.local() => {
 				// Get the cache entry key
-				let key = cache::ds::Lookup::Tb(ns, db, &id.table);
+				let key = cache::ds::Lookup::Tb(ns, db, &table);
 				// Get or update the cache entry
 				match cache.get(&key) {
 					Some(val) => val.try_into_type(),
 					None => {
-						let val = match txn.get_tb(ns, db, &id.table).await? {
+						let val = match txn.get_tb(ns, db, &table).await? {
 							Some(tb) => tb,
 							None => {
 								// Allowed to run?
 								opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 								// We can create the table automatically
 								let (ns, db) = opt.ns_db()?;
-								txn.ensure_ns_db_tb(Some(ctx), ns, db, &id.table, opt.strict)
-									.await?
+								txn.ensure_ns_db_tb(Some(ctx), ns, db, &table, opt.strict).await?
 							}
 						};
 						let val = cache::ds::Entry::Any(val.clone());
@@ -490,14 +498,14 @@ impl Document {
 			// No cache is present on the context
 			_ => {
 				// Return the table or attempt to define it
-				match txn.get_tb(ns, db, &id.table).await? {
+				match txn.get_tb(ns, db, &table).await? {
 					Some(tb) => Ok(tb),
 					None => {
 						// Allowed to run?
 						opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 						// We can create the table automatically
 						let (ns, db) = opt.ns_db()?;
-						txn.ensure_ns_db_tb(Some(ctx), ns, db, &id.table, opt.strict).await
+						txn.ensure_ns_db_tb(Some(ctx), ns, db, &table, opt.strict).await
 					}
 				}
 			}
@@ -538,6 +546,40 @@ impl Document {
 		&self,
 		ctx: &Context,
 		opt: &Options,
+	) -> Result<Arc<[catalog::EventDefinition]>> {
+		// Get the NS + DB
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		// Get the document table
+		let tb = self.tb(ctx, opt).await?;
+		// Get the cache from the context
+		match ctx.get_cache() {
+			// A cache is present on the context
+			Some(cache) => {
+				// Get the cache entry key
+				let key = cache::ds::Lookup::Evs(ns, db, &tb.name, tb.cache_events_ts);
+				// Get or update the cache entry
+				match cache.get(&key) {
+					Some(val) => val,
+					None => {
+						let val = ctx.tx().all_tb_events(ns, db, &tb.name).await?;
+						let val = cache::ds::Entry::Evs(val.clone());
+						cache.insert(key, val.clone());
+						val
+					}
+				}
+			}
+			.try_into_evs(),
+			// No cache is present on the context
+			None => ctx.tx().all_tb_events(ns, db, &tb.name).await,
+		}
+	}
+
+	/// Get the events for this document
+	pub async fn ev_tb(
+		&self,
+		ctx: &Context,
+		opt: &Options,
+		table: &str,
 	) -> Result<Arc<[catalog::EventDefinition]>> {
 		// Get the NS + DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::{self, Display, Write};
+use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
@@ -14,7 +15,7 @@ use crate::catalog::{
 use crate::ctx::Context;
 use crate::dbs::aggregation::{AggregateFields, Aggregation, AggregationAnalysis};
 use crate::dbs::{Options, aggregation};
-use crate::doc::CursorDoc;
+use crate::doc::{self, CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
 
@@ -25,10 +26,11 @@ use crate::expr::{
 	Groups, Idiom, Kind, Literal, SelectStatement, View,
 };
 use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
+use crate::fnc::record;
 use crate::iam::{Action, ResourceKind};
 use crate::key;
 use crate::kvs::Transaction;
-use crate::val::{Array, Number, RecordIdKey, Value};
+use crate::val::{Array, Number, RecordId, RecordIdKey, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineTableStatement {
@@ -279,7 +281,19 @@ impl DefineTableStatement {
 			};
 
 			let key = key::record::new(ns, db, view_table_name, &id.key);
-			tx.put(&key, &Record::new(Value::Object(o).into()), None).await?;
+			let record = Arc::new(Record::new(Value::Object(o).into()));
+			tx.put(&key, &record, None).await?;
+
+			Document::run_triggers(
+				stk,
+				ctx,
+				opt,
+				id.into(),
+				doc::Action::Create,
+				None,
+				Some(record),
+			)
+			.await?;
 
 			yield_now!();
 		}
@@ -654,16 +668,25 @@ impl DefineTableStatement {
 				}
 			};
 
-			let record = Record {
+			let record = Arc::new(Record {
 				metadata: Some(Metadata {
 					record_type: RecordType::Table,
 					aggregation_stats: stats,
 				}),
 				data: data.into(),
-			};
+			});
 
-			let id = RecordIdKey::Array(Array(group));
-			tx.put_record(ns, db, view_table_name, &id, record.into(), None).await?;
+			let key = RecordIdKey::Array(Array(group));
+			tx.put_record(ns, db, view_table_name, &key, record.clone(), None).await?;
+
+			let id = Arc::new(RecordId {
+				table: view_table_name.to_owned(),
+				key,
+			});
+			Document::run_triggers(stk, ctx, opt, id, doc::Action::Create, None, Some(record))
+				.await?;
+
+			yield_now!();
 		}
 
 		Ok(())

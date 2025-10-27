@@ -7,22 +7,22 @@ use crate::catalog::providers::TableProvider;
 use crate::catalog::{AggregationStat, Data, Metadata, Record, RecordType, ViewDefinition};
 use crate::ctx::Context;
 use crate::dbs::aggregation::{self, AggregateFields, AggregationAnalysis};
-use crate::dbs::{Force, Options, Statement};
-use crate::doc::Document;
+use crate::dbs::{Options, Statement, Workable};
+use crate::doc::{Action, CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::statements::SelectStatement;
 use crate::expr::{
 	BinaryOperator, Cond, Expr, Field, Fields, FlowResultExt as _, Function, FunctionCall, Groups,
 	Literal,
 };
+use crate::idx::planner::RecordStrategy;
 use crate::key;
-use crate::val::{Array, Number, RecordIdKey, TryAdd, TryMul, TryPow, Value};
+use crate::val::{Array, Number, RecordId, RecordIdKey, TryAdd, TryMul, TryPow, Value};
 
-#[derive(Clone, Debug, Eq, PartialEq, Copy)]
-enum Action {
-	Create,
-	Update,
-	Delete,
+struct Recalculation {
+	function: String,
+	stat: usize,
+	arg: usize,
 }
 
 impl Document {
@@ -46,13 +46,6 @@ impl Document {
 			return Ok(());
 		}
 
-		// Was this force targeted at a specific foreign table?
-		let _targeted_force = matches!(opt.force, Force::Table(_));
-		// Collect foreign tables or skip
-
-		let fts = self.ft(ctx, opt).await?;
-		// Don't run permissions
-		let opt = &opt.new_with_perms(false);
 		// Get the query action
 		let act = if stm.is_delete() {
 			Action::Delete
@@ -61,6 +54,21 @@ impl Document {
 		} else {
 			Action::Update
 		};
+
+		self.process_views(stk, ctx, opt, act).await
+	}
+
+	async fn process_views(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		act: Action,
+	) -> Result<()> {
+		let fts = self.ft(ctx, opt).await?;
+		// Don't run permissions
+		let opt = &opt.new_with_perms(false);
+		// Get the query action
 
 		// Loop through all foreign table statements
 		for ft in fts.iter() {
@@ -300,9 +308,11 @@ impl Document {
 		let tx = ctx.tx();
 
 		let k = key::record::new(ns, db, view_table_name, &key);
+		let mut action = Action::Update;
 		let mut record = if let Some(record) = tx.get(&k, None).await? {
 			record
 		} else {
+			action = Action::Create;
 			Record {
 				data: Data::Mutable(Value::None),
 				metadata: Some(Metadata {
@@ -311,6 +321,8 @@ impl Document {
 				}),
 			}
 		};
+
+		let record_before = record.clone();
 
 		let Some(meta) = record.metadata.as_mut() else {
 			fail!("Record for a view table had no valid metadata")
@@ -345,8 +357,26 @@ impl Document {
 		};
 
 		record.data = data.into();
+		let record = Arc::new(record);
 
-		tx.set_record(ns, db, view_table_name, &key, record.into(), None).await?;
+		tx.set_record(ns, db, view_table_name, &key, record.clone(), None).await?;
+
+		let id = Arc::new(RecordId {
+			table: view_table_name.to_string(),
+			key,
+		});
+
+		Self::run_triggers(
+			stk,
+			ctx,
+			opt,
+			id.into(),
+			action,
+			Some(record_before.into()),
+			Some(record),
+		)
+		.await?;
+
 		Ok(())
 	}
 
@@ -371,6 +401,8 @@ impl Document {
 			fail!("Deletion for a view but no record exists for that view")
 		};
 
+		let record_before = record.clone();
+
 		let Some(meta) = record.metadata.as_mut() else {
 			fail!("Record for a view table had no valid metadata")
 		};
@@ -382,6 +414,13 @@ impl Document {
 		if count == 1 {
 			// Only one record, we can just delete the record.
 			tx.del(&k).await?;
+
+			let id = RecordId {
+				table: view_table_name.to_string(),
+				key,
+			};
+			Self::run_triggers(stk, ctx, opt, id.into(), Action::Delete, Some(record.into()), None)
+				.await?;
 			return Ok(());
 		}
 
@@ -635,8 +674,24 @@ impl Document {
 		};
 
 		record.data = data.into();
+		let record = Arc::new(record);
 
-		tx.set_record(ns, db, view_table_name, &key, record.into(), None).await?;
+		tx.set_record(ns, db, view_table_name, &key, record.clone(), None).await?;
+
+		let id = RecordId {
+			table: view_table_name.to_string(),
+			key,
+		};
+		Self::run_triggers(
+			stk,
+			ctx,
+			opt,
+			id.into(),
+			Action::Update,
+			Some(record_before.into()),
+			Some(record),
+		)
+		.await?;
 		Ok(())
 	}
 
@@ -662,6 +717,7 @@ impl Document {
 		} else {
 			fail!("Deletion for a view but no record exists for that view")
 		};
+		let record_before = record.clone();
 
 		let Some(meta) = record.metadata.as_mut() else {
 			fail!("Record for a view table had no valid metadata")
@@ -989,14 +1045,64 @@ impl Document {
 		};
 
 		record.data = data.into();
+		let record = Arc::new(record);
 
-		tx.set_record(ns, db, view_table_name, &key, record.into(), None).await?;
+		tx.set_record(ns, db, view_table_name, &key, record.clone(), None).await?;
+
+		let id = RecordId {
+			table: view_table_name.to_owned(),
+			key,
+		};
+		Self::run_triggers(
+			stk,
+			ctx,
+			opt,
+			Arc::new(id),
+			Action::Update,
+			Some(record_before.into()),
+			Some(record),
+		)
+		.await?;
 		Ok(())
 	}
-}
 
-struct Recalculation {
-	function: String,
-	stat: usize,
-	arg: usize,
+	pub(crate) async fn run_triggers(
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		id: Arc<RecordId>,
+		action: Action,
+		initial: Option<Arc<Record>>,
+		current: Option<Arc<Record>>,
+	) -> Result<()> {
+		// HACK: We can't insert data the normal way as we have to set the metadata which we can't
+		// do via statements. So instead we create a document and pretend to run be the right
+		// statement query and just run events immediatly.
+		// Updating views prevents premissions from being run anyway so there shouldn't be a
+		// probelm.
+		//
+		// Generate a document so that we can run the events.
+		let mut document = Document {
+			r#gen: None,
+			retry: false,
+			extras: Workable::Normal,
+			current: current
+				.map(|x| CursorDoc::new(Some(id.clone()), None, x))
+				.unwrap_or_else(|| CursorDoc::new(None, None, Value::None)),
+			initial: initial
+				.map(|x| CursorDoc::new(Some(id.clone()), None, x))
+				.unwrap_or_else(|| CursorDoc::new(None, None, Value::None)),
+			// unused
+			current_reduced: CursorDoc::new(None, None, Value::None),
+			initial_reduced: CursorDoc::new(None, None, Value::None),
+			record_strategy: RecordStrategy::KeysAndValues,
+			input_data: None,
+			id: Some(id),
+		};
+
+		stk.run(|stk| document.process_views(stk, ctx, opt, action)).await?;
+		stk.run(|stk| document.process_events(stk, ctx, opt, action, None)).await?;
+
+		Ok(())
+	}
 }
