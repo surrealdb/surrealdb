@@ -16,7 +16,7 @@ mod cli;
 mod cnf;
 mod dbs;
 mod env;
-// mod gql; // currently disabled in binary too
+mod gql;
 pub mod net;
 /// Make `rpc` public so embedders can access RpcState and related router definitions
 /// when running SurrealDB as a library.

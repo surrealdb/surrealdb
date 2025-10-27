@@ -954,11 +954,7 @@ pub(crate) fn convert_value_to_public_value(
 		crate::val::Value::File(value) => convert_file_to_public(value),
 		crate::val::Value::Range(value) => convert_range_to_public(*value),
 		crate::val::Value::Regex(value) => convert_regex_to_public(value),
-		crate::val::Value::Table(value) => {
-			let s = value.into_string();
-			tracing::debug!("Converting table value to public value: {s}");
-			Ok(surrealdb_types::Value::String(s))
-		}
+		crate::val::Value::Table(value) => Ok(surrealdb_types::Value::Table(value.into())),
 		crate::val::Value::Closure(_) => {
 			Err(anyhow::anyhow!("Closure values cannot be converted to public value"))
 		}

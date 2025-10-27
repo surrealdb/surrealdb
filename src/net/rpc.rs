@@ -176,7 +176,7 @@ async fn post_handler(
 		}
 	}
 	// Create a new HTTP instance
-	let rpc = Http::new(&state.datastore, session);
+	let rpc = Http::new(Arc::clone(&state.datastore), session);
 	// Check to see available memory
 	if ALLOC.is_beyond_threshold() {
 		return Err(NetError::ServerOverloaded.into());
