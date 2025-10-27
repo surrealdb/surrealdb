@@ -11,34 +11,25 @@ impl Parser<'_> {
 		let mut start = self.peek();
 		let mut last_span = start.span;
 
-		macro_rules! advance {
-			() => {{
-				let peek = self.peek();
-				if !Self::kind_is_identifier(peek.kind) {
-					unexpected!(self, peek, "an identifier")
-				}
-				self.pop_peek();
-				last_span = self.last_span();
-			}};
-		}
-
-		macro_rules! complete {
-			() => {
-				self.lexer.span_str(start.span.covers(last_span)).to_string()
-			};
-		}
-
 		let fnc = match start.kind {
 			t!("fn") => {
 				self.pop_peek();
 				expected!(self, t!("::"));
 				start = self.peek();
-				advance!();
-				while self.eat(t!("::")) {
-					advance!();
+				let peek = self.peek();
+				if !Self::kind_is_identifier(peek.kind) {
+					unexpected!(self, peek, "an identifier")
 				}
-
-				let name = complete!();
+				last_span = self.pop_peek().span;
+				while self.eat(t!("::")) {
+					let peek = self.peek();
+					if !Self::kind_is_identifier(peek.kind) {
+						unexpected!(self, peek, "an identifier")
+					}
+					last_span = self.pop_peek().span;
+				}
+				
+				let name = self.lexer.span_str(start.span.covers(last_span)).to_string();
 				let sub = if self.eat(t!("<")) {
 					let start = self.last_span();
 					let next = self.next();
@@ -60,12 +51,20 @@ impl Parser<'_> {
 				self.pop_peek();
 				expected!(self, t!("::"));
 				start = self.peek();
-				advance!();
+				let peek = self.peek();
+				if !Self::kind_is_identifier(peek.kind) {
+					unexpected!(self, peek, "an identifier")
+				}
+				last_span = self.pop_peek().span;
 				while self.eat(t!("::")) {
-					advance!();
+					let peek = self.peek();
+					if !Self::kind_is_identifier(peek.kind) {
+						unexpected!(self, peek, "an identifier")
+					}
+					last_span = self.pop_peek().span;
 				}
 
-				let name = complete!();
+				let name = self.lexer.span_str(start.span.covers(last_span)).to_string();
 				let (major, minor, patch) = self.parse_model_version()?;
 				let version = format!("{}.{}.{}", major, minor, patch);
 
@@ -77,10 +76,15 @@ impl Parser<'_> {
 			TokenKind::Identifier => {
 				self.pop_peek();
 				while self.eat(t!("::")) {
-					advance!();
+					let peek = self.peek();
+					if !Self::kind_is_identifier(peek.kind) {
+						unexpected!(self, peek, "an identifier")
+					}
+					last_span = self.pop_peek().span;
 				}
 
-				Function::Normal(complete!())
+				let name = self.lexer.span_str(start.span.covers(last_span)).to_string();
+				Function::Normal(name)
 			}
 			_ => unexpected!(self, self.peek(), "a function name"),
 		};

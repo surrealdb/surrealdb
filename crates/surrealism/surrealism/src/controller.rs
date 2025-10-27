@@ -30,10 +30,10 @@ impl MemoryController for Controller {
 	/// implementation, it assumes success and wraps the result in `Ok`).
 	fn alloc(&mut self, len: u32) -> Result<u32> {
 		let result = __sr_alloc(len);
-		if result == -1 {
+		if result == 0 {
 			anyhow::bail!("Memory allocation failed");
 		}
-		Ok(result as u32)
+		Ok(result)
 	}
 
 	/// Frees a previously allocated block of memory.
@@ -53,7 +53,7 @@ impl MemoryController for Controller {
 	/// errors from the underlying free function are not propagated.
 	fn free(&mut self, ptr: u32, len: u32) -> Result<()> {
 		let result = __sr_free(ptr, len);
-		if result == -1 {
+		if result == 0 {
 			anyhow::bail!("Memory deallocation failed");
 		}
 		Ok(())

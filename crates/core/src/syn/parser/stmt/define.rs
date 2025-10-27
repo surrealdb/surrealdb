@@ -196,20 +196,20 @@ impl Parser<'_> {
 			}
 			#[cfg(target_arch = "wasm32")]
 			t!("AS") => {
-				bail!("Unexpected token `AS`", @self.last_span() => "Expected `(`. Hint: Surrealism functions are not supported in WASM environments")
+				unexpected!(self, self.peek(), "`AS`", => "Expected `(`. Hint: Surrealism functions are not supported in WASM environments")
 			}
 
 			#[cfg(not(target_arch = "wasm32"))]
 			x => {
 				if self.settings.surrealism_enabled {
-					bail!("Unexpected token `{x}`", @self.last_span() => "Expected `(`")
+					unexpected!(self, self.peek(), format!("`{x}`"), => "Expected `(`")
 				} else {
-					bail!("Unexpected token `{x}`", @self.last_span() => "Expected `(` or `AS <file pointer>`")
+					unexpected!(self, self.peek(), format!("`{x}`"), => "Expected `(` or `AS <file pointer>`")
 				}
 			}
 			#[cfg(target_arch = "wasm32")]
 			x => {
-				bail!("Unexpected token `{x}`", @self.last_span() => "Expected `(`")
+				unexpected!(self, self.peek(), format!("`{x}`"), => "Expected `(`")
 			}
 		};
 

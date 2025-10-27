@@ -292,13 +292,13 @@ impl<'a> AsyncMemoryController for HostController<'a> {
 			.into_func()
 			.ok_or_else(|| anyhow::anyhow!("Export __sr_alloc is not a function"))?;
 		let result = alloc_func
-			.typed::<(u32,), i32>(&mut self.0)?
+			.typed::<(u32,), u32>(&mut self.0)?
 			.call_async(&mut self.0, (len,))
 			.await?;
-		if result == -1 {
+		if result == 0 {
 			anyhow::bail!("Memory allocation failed");
 		}
-		Ok(result as u32)
+		Ok(result)
 	}
 
 	async fn free(&mut self, ptr: u32, len: u32) -> Result<()> {
@@ -308,10 +308,10 @@ impl<'a> AsyncMemoryController for HostController<'a> {
 			.into_func()
 			.ok_or_else(|| anyhow::anyhow!("Export __sr_free is not a function"))?;
 		let result = free_func
-			.typed::<(u32, u32), i32>(&mut self.0)?
+			.typed::<(u32, u32), u32>(&mut self.0)?
 			.call_async(&mut self.0, (ptr, len))
 			.await?;
-		if result == -1 {
+		if result == 0 {
 			anyhow::bail!("Memory deallocation failed");
 		}
 		Ok(())

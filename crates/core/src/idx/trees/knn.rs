@@ -196,11 +196,6 @@ pub(in crate::idx) enum Ids64 {
 	Bits(RoaringTreemap),
 }
 
-// SAFETY: Ids64 and its iterator are used only within the query planner in a single-threaded
-// context. The Send bound is required by async trait bounds when called from WASM host functions,
-// but the actual data never crosses thread boundaries during query execution.
-unsafe impl Send for Ids64 {}
-
 impl Ids64 {
 	fn len(&self) -> u64 {
 		match self {
