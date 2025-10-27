@@ -33,9 +33,7 @@ impl Document {
 		// Don't run permissions
 		let opt = &opt.new_with_perms(false);
 
-		let table = &self.id()?.table;
-
-		if self.ev_tb(ctx, opt, table).await?.is_empty() {
+		if self.ev(ctx, opt).await?.is_empty() {
 			return Ok(());
 		}
 

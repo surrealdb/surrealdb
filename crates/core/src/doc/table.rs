@@ -170,15 +170,16 @@ impl Document {
 					.await?;
 			}
 			Action::Update => {
-				let group_before = if let Some(cond) = condition
-					&& !cond
-						.compute(stk, ctx, opt, Some(&self.initial))
+				let before_cond = if let Some(cond) = condition {
+					cond.compute(stk, ctx, opt, Some(&self.initial))
 						.await
 						.catch_return()?
 						.is_truthy()
-				{
-					None
 				} else {
+					true
+				};
+
+				let group_before = if before_cond {
 					let mut group = Vec::with_capacity(aggr.group_expressions.len());
 					for g in aggr.group_expressions.iter() {
 						group.push(
@@ -186,17 +187,20 @@ impl Document {
 						);
 					}
 					Some(group)
+				} else {
+					None
 				};
 
-				let group_after = if let Some(cond) = condition
-					&& !cond
-						.compute(stk, ctx, opt, Some(&self.current))
+				let after_cond = if let Some(cond) = condition {
+					cond.compute(stk, ctx, opt, Some(&self.initial))
 						.await
 						.catch_return()?
 						.is_truthy()
-				{
-					None
 				} else {
+					true
+				};
+
+				let group_after = if after_cond {
 					let mut group = Vec::with_capacity(aggr.group_expressions.len());
 					for g in aggr.group_expressions.iter() {
 						group.push(
@@ -204,6 +208,8 @@ impl Document {
 						);
 					}
 					Some(group)
+				} else {
+					None
 				};
 
 				match (group_before, group_after) {

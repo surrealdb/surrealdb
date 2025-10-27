@@ -642,14 +642,18 @@ impl AggregationAnalysis {
 						})
 					};
 
-					if let Some(alias) = alias
-						&& let Some(x) = group_expressions.iter().position(|x| {
-							if let Expr::Idiom(i) = x {
-								*i == *alias
-							} else {
-								false
-							}
-						}) {
+					if let Some((alias, x)) = alias.as_ref().and_then(|alias| {
+						group_expressions
+							.iter()
+							.position(|x| {
+								if let Expr::Idiom(i) = x {
+									*i == *alias
+								} else {
+									false
+								}
+							})
+							.map(|x| (alias, x))
+					}) {
 						// The alias is used within the group statement, therefore this expression
 						// is a group expression. i.e. year in the statement:
 						// `SELECT time::year(time) as year FROM table GROUP BY year`;

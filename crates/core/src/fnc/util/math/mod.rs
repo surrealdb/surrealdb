@@ -15,7 +15,6 @@ pub mod percentile;
 pub mod spread;
 pub mod top;
 pub mod trimean;
-pub mod variance;
 pub mod vector;
 
 pub(crate) trait ToFloat {
