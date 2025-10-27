@@ -73,6 +73,7 @@ use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::{LockType, TransactionType};
 use crate::rpc::DbResultError;
 use crate::sql::Ast;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::surrealism::cache::SurrealismCache;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::types::{PublicNotification, PublicValue, PublicVariables};
@@ -126,6 +127,7 @@ pub struct Datastore {
 	// The sequences
 	sequences: Sequences,
 	// The surrealism cache
+	#[cfg(not(target_arch = "wasm32"))]
 	surrealism_cache: Arc<SurrealismCache>,
 }
 
@@ -657,6 +659,7 @@ impl Datastore {
 			cache: Arc::new(DatastoreCache::new()),
 			buckets: Arc::new(DashMap::new()),
 			sequences: Sequences::new(tf, id),
+			#[cfg(not(target_arch = "wasm32"))]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
 		})
 	}
@@ -683,6 +686,7 @@ impl Datastore {
 			buckets: Arc::new(DashMap::new()),
 			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
+			#[cfg(not(target_arch = "wasm32"))]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
 		}
 	}
@@ -1885,6 +1889,7 @@ impl Datastore {
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 			self.buckets.clone(),
+			#[cfg(not(target_arch = "wasm32"))]
 			self.surrealism_cache.clone(),
 		)?;
 		// Setup the notification channel

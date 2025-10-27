@@ -13,7 +13,9 @@ use crate::err::Error;
 use crate::expr::expression::VisitExpression;
 use crate::expr::{Block, Expr, FlowResultExt, Kind, Value};
 use crate::fmt::EscapeKwFreeIdent;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::surrealism::cache::SurrealismCacheLookup;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::surrealism::host::Host;
 use crate::val::File;
 
@@ -251,6 +253,7 @@ impl VisitExpression for SurrealismExecutable {
 	}
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl SurrealismExecutable {
 	pub(crate) async fn signature(
 		&self,
@@ -327,6 +330,32 @@ impl SurrealismExecutable {
 	}
 }
 
+#[cfg(target_arch = "wasm32")]
+impl SurrealismExecutable {
+	pub(crate) async fn signature(
+		&self,
+		_stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+		sub: Option<&str>,
+	) -> Result<Signature> {
+		bail!("Surrealism functions are not supported in WASM environments")
+	}
+
+	pub(crate) async fn run(
+		&self,
+		_stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+		args: Vec<Value>,
+		sub: Option<&str>,
+	) -> Result<Value> {
+		bail!("Surrealism functions are not supported in WASM environments")
+	}
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct SiloExecutable {
 	pub organisation: String,
@@ -379,6 +408,7 @@ impl VisitExpression for SiloExecutable {
 	}
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl SiloExecutable {
 	pub(crate) async fn signature(
 		&self,
@@ -462,6 +492,32 @@ impl SiloExecutable {
 			let args = args?;
 			controller.invoke(sub.map(String::from), args).await.map(|x| x.into())
 		})
+	}
+}
+
+#[cfg(target_arch = "wasm32")]
+impl SiloExecutable {
+	pub(crate) async fn signature(
+		&self,
+		_stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+		sub: Option<&str>,
+	) -> Result<Signature> {
+		bail!("Surrealism functions are not supported in WASM environments")
+	}
+
+	pub(crate) async fn run(
+		&self,
+		_stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+		args: Vec<Value>,
+		sub: Option<&str>,
+	) -> Result<Value> {
+		bail!("Surrealism functions are not supported in WASM environments")
 	}
 }
 

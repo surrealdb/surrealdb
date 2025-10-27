@@ -146,49 +146,71 @@ impl Parser<'_> {
 		};
 		let name = self.parse_custom_function_name()?;
 
-		let executable = if self.eat(t!("AS")) {
-			if !self.settings.surrealism_enabled {
-				bail!(
-					"Experimental capability `surrealism` is not enabled",
-					@self.last_span() => "Use of `AS <file pointer>` is still experimental"
-				)
+		let executable = match self.peek_kind() {
+			t!("(") => {
+				let token = expected!(self, t!("(")).span;
+				let mut args = Vec::new();
+				loop {
+					if self.eat(t!(")")) {
+						break;
+					}
+
+					let param = self.next_token_value::<Param>()?.into_string();
+					expected!(self, t!(":"));
+					let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
+
+					args.push((param, kind));
+
+					if !self.eat(t!(",")) {
+						self.expect_closing_delimiter(t!(")"), token)?;
+						break;
+					}
+				}
+				let returns = if self.eat(t!("->")) {
+					Some(stk.run(|ctx| self.parse_inner_kind(ctx)).await?)
+				} else {
+					None
+				};
+
+				let next = expected!(self, t!("{")).span;
+				let block = self.parse_block(stk, next).await?;
+				Executable::Block(BlockExecutable {
+					args,
+					returns,
+					block,
+				})
 			}
 
-			// TODO add silo parsing
-			let file: PublicFile = self.next_token_value()?;
-			Executable::Surrealism(SurrealismExecutable(file.into()))
-		} else {
-			let token = expected!(self, t!("(")).span;
-			let mut args = Vec::new();
-			loop {
-				if self.eat(t!(")")) {
-					break;
+			#[cfg(not(target_arch = "wasm32"))]
+			t!("AS") => {
+				if !self.settings.surrealism_enabled {
+					bail!(
+						"Experimental capability `surrealism` is not enabled",
+						@self.last_span() => "Use of `AS <file pointer>` is still experimental"
+					)
 				}
 
-				let param = self.next_token_value::<Param>()?.into_string();
-				expected!(self, t!(":"));
-				let kind = stk.run(|ctx| self.parse_inner_kind(ctx)).await?;
+				// TODO add silo parsing
+				let file: PublicFile = self.next_token_value()?;
+				Executable::Surrealism(SurrealismExecutable(file.into()))
+			}
+			#[cfg(target_arch = "wasm32")]
+			t!("AS") => {
+				bail!("Unexpected token `AS`", @self.last_span() => "Expected `(`. Hint: Surrealism functions are not supported in WASM environments")
+			}
 
-				args.push((param, kind));
-
-				if !self.eat(t!(",")) {
-					self.expect_closing_delimiter(t!(")"), token)?;
-					break;
+			#[cfg(not(target_arch = "wasm32"))]
+			x => {
+				if self.settings.surrealism_enabled {
+					bail!("Unexpected token `{x}`", @self.last_span() => "Expected `(`")
+				} else {
+					bail!("Unexpected token `{x}`", @self.last_span() => "Expected `(` or `AS <file pointer>`")
 				}
 			}
-			let returns = if self.eat(t!("->")) {
-				Some(stk.run(|ctx| self.parse_inner_kind(ctx)).await?)
-			} else {
-				None
-			};
-
-			let next = expected!(self, t!("{")).span;
-			let block = self.parse_block(stk, next).await?;
-			Executable::Block(BlockExecutable {
-				args,
-				returns,
-				block,
-			})
+			#[cfg(target_arch = "wasm32")]
+			x => {
+				bail!("Unexpected token `{x}`", @self.last_span() => "Expected `(`")
+			}
 		};
 
 		let mut res = DefineFunctionStatement {

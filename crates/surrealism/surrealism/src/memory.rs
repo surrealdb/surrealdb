@@ -54,8 +54,8 @@ pub extern "C" fn __sr_alloc(len: u32, align: u32) -> i32 {
 /// This function is unsafe because it performs raw deallocation. The caller must ensure:
 /// - The `ptr` is a valid pointer previously returned by `__sr_alloc`.
 /// - The `len` matches the originally allocated size.
-/// - No further access to the memory occurs after deallocation.
-/// Incorrect usage may lead to undefined behavior, such as double-free or use-after-free.
+/// - No further access to the memory occurs after deallocation. Incorrect usage may lead to
+///   undefined behavior, such as double-free or use-after-free.
 #[unsafe(no_mangle)]
 pub extern "C" fn __sr_free(ptr: u32, len: u32) -> i32 {
 	let layout = match std::alloc::Layout::from_size_align(len as usize, 8) {

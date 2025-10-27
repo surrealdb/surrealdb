@@ -35,6 +35,7 @@ mod doc;
 mod exe;
 mod fnc;
 mod key;
+#[cfg(not(target_arch = "wasm32"))]
 mod surrealism;
 mod sys;
 

@@ -163,7 +163,6 @@ trice.workspace = true
 ulid = { workspace = true, features = ["serde"] }
 unicase.workspace = true
 url.workspace = true
-surrealism-runtime.workspace = true
 
 # Other optional crates
 arbitrary = { workspace = true, features = ["derive"], optional = true }
@@ -209,6 +208,7 @@ tokio = { workspace = true, default-features = false, features = [
 ] }
 tokio-tungstenite = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+surrealism-runtime.workspace = true
 
 # OS-SPECIFIC ALLOCATOR DEPENDENCIES
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]
