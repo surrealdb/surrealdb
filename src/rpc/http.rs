@@ -3,7 +3,7 @@ use std::sync::Arc;
 use surrealdb::types::{Array, Value};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::rpc::{DbResult, RpcContext, RpcError};
+use surrealdb_core::rpc::{DbResult, RpcError, RpcProtocol};
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
@@ -25,7 +25,7 @@ impl Http {
 	}
 }
 
-impl RpcContext for Http {
+impl RpcProtocol for Http {
 	/// The datastore for this RPC interface
 	fn kvs(&self) -> &Datastore {
 		&self.kvs

@@ -16,7 +16,7 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::mem::ALLOC;
 use surrealdb_core::rpc::format::Format;
-use surrealdb_core::rpc::{DbResponse, DbResult, DbResultError, Method, RpcContext};
+use surrealdb_core::rpc::{DbResponse, DbResult, DbResultError, Method, RpcProtocol};
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinSet;
@@ -442,7 +442,9 @@ impl Websocket {
 			return Err(DbResultError::MethodNotFound("Method not found".to_string()));
 		}
 		// Execute the specified method
-		RpcContext::execute(rpc.as_ref(), txn, session_id, method, params).await.map_err(Into::into)
+		RpcProtocol::execute(rpc.as_ref(), txn, session_id, method, params)
+			.await
+			.map_err(Into::into)
 	}
 
 	/// Reject a WebSocket message due to server overloading
@@ -463,7 +465,7 @@ impl Websocket {
 	}
 }
 
-impl RpcContext for Websocket {
+impl RpcProtocol for Websocket {
 	/// The datastore for this RPC interface
 	fn kvs(&self) -> &Datastore {
 		&self.datastore

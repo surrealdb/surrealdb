@@ -40,7 +40,7 @@ fn singular(value: &PublicValue) -> bool {
 }
 
 #[expect(async_fn_in_trait)]
-pub trait RpcContext {
+pub trait RpcProtocol {
 	/// The datastore for this RPC interface
 	fn kvs(&self) -> &Datastore;
 	/// Retrieves the modification lock for this RPC context
@@ -1183,7 +1183,7 @@ async fn run_query<T>(
 	vars: Option<PublicVariables>,
 ) -> Result<Vec<QueryResult>>
 where
-	T: RpcContext + ?Sized,
+	T: RpcProtocol + ?Sized,
 {
 	let session = this.get_session(session_id.as_ref());
 	ensure!(T::LQ_SUPPORT || !session.rt, RpcError::BadLQConfig);
