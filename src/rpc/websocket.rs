@@ -16,7 +16,7 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::mem::ALLOC;
 use surrealdb_core::rpc::format::Format;
-use surrealdb_core::rpc::{DbResponse, DbResult, DbResultError, Method, RpcContext, RpcProtocolV1};
+use surrealdb_core::rpc::{DbResponse, DbResult, DbResultError, Method, RpcProtocol};
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinSet;
@@ -389,7 +389,6 @@ impl Websocket {
 								// Process the message
 								let result = Self::process_message(
 									rpc.clone(),
-									req.version,
 									req.session_id.map(Into::into),
 									req.txn.map(Into::into),
 									req.method,
@@ -432,7 +431,6 @@ impl Websocket {
 	/// Process a WebSocket message and generate a response
 	async fn process_message(
 		rpc: Arc<Websocket>,
-		version: Option<u8>,
 		session_id: Option<Uuid>,
 		txn: Option<Uuid>,
 		method: Method,
@@ -444,7 +442,7 @@ impl Websocket {
 			return Err(DbResultError::MethodNotFound("Method not found".to_string()));
 		}
 		// Execute the specified method
-		RpcContext::execute(rpc.as_ref(), version, txn, session_id, method, params)
+		RpcProtocol::execute(rpc.as_ref(), txn, session_id, method, params)
 			.await
 			.map_err(Into::into)
 	}
@@ -467,17 +465,27 @@ impl Websocket {
 	}
 }
 
-impl RpcProtocolV1 for Websocket {}
-
-impl RpcContext for Websocket {
+impl RpcProtocol for Websocket {
 	/// The datastore for this RPC interface
 	fn kvs(&self) -> &Datastore {
 		&self.datastore
 	}
+
 	/// Retrieves the modification lock for this RPC context
 	fn lock(&self) -> Arc<Semaphore> {
 		self.lock.clone()
 	}
+
+	/// The version information for this RPC context
+	fn version_data(&self) -> DbResult {
+		let value = Value::String(format!("{PKG_NAME}-{}", *PKG_VERSION));
+		DbResult::Other(value)
+	}
+
+	// ------------------------------
+	// Sessions
+	// ------------------------------
+
 	/// The current session for this RPC context
 	fn get_session(&self, id: Option<&Uuid>) -> Arc<Session> {
 		if let Some(id) = id {
@@ -492,6 +500,7 @@ impl RpcContext for Websocket {
 			self.session.load_full()
 		}
 	}
+
 	/// Mutable access to the current session for this RPC context
 	fn set_session(&self, id: Option<Uuid>, session: Arc<Session>) {
 		if let Some(id) = id {
@@ -500,18 +509,15 @@ impl RpcContext for Websocket {
 			self.session.store(session);
 		}
 	}
+
 	/// Mutable access to the current session for this RPC context
 	fn del_session(&self, id: &Uuid) {
 		self.sessions.remove(id);
 	}
+
 	/// Lists all sessions
 	fn list_sessions(&self) -> Vec<Uuid> {
 		self.sessions.iter().map(|x| *x.key()).collect()
-	}
-	/// The version information for this RPC context
-	fn version_data(&self) -> DbResult {
-		let value = Value::String(format!("{PKG_NAME}-{}", *PKG_VERSION));
-		DbResult::Other(value)
 	}
 
 	// ------------------------------
@@ -573,15 +579,4 @@ impl RpcContext for Websocket {
 			error!("Error handling RPC connection: {err}");
 		}
 	}
-
-	// ------------------------------
-	// GraphQL
-	// ------------------------------
-
-	// GraphQL queries are enabled on WebSockets
-	//const GQL_SUPPORT: bool = true;
-
-	//fn graphql_schema_cache(&self) -> &SchemaCache {
-	//&self.gql_schema
-	//}
 }
