@@ -24,7 +24,7 @@ value = "''"
 value = "NONE"
 
 [[test.results]]
-©value = "'users'"
+value = "'users'"
 
 [[test.results]]
 value = "'user_accounts'"
