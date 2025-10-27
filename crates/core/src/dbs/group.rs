@@ -62,15 +62,61 @@ impl GroupCollector {
 	}
 
 	pub(super) fn explain(&self, exp: &mut Explanation) {
+		let aggr_agrs = self
+			.analysis
+			.aggregate_arguments
+			.iter()
+			.enumerate()
+			.map(|(idx, x)| (format!("expr{idx}"), Value::from(x.to_string())))
+			.collect::<Value>();
 
-		/*
-		let mut explain = BTreeMap::new();
-		let idioms: Vec<String> = self.idioms.iter().cloned().map(|i| i.to_string()).collect();
-		for (i, a) in idioms.into_iter().zip(&self.base) {
-		explain.insert(i, a.explain());
-		}
-		exp.add_collector("Group", vec![("idioms", explain.into())]);
-		*/
+		let group_expr = self
+			.analysis
+			.group_expressions
+			.iter()
+			.enumerate()
+			.map(|(idx, x)| (format!("_g{idx}"), Value::from(x.to_string())))
+			.collect::<Value>();
+
+		let selector = match &self.analysis.fields {
+			AggregateFields::Value(expr) => Value::from(expr.to_string()),
+			AggregateFields::Fields(items) => {
+				items.iter().map(|(k, v)| (k.to_string(), Value::from(v.to_string()))).collect()
+			}
+		};
+
+		let aggregates = self
+			.analysis
+			.aggregations
+			.iter()
+			.enumerate()
+			.map(|(idx, x)| {
+				let res = match x {
+					aggregation::Aggregation::Count => "Count".to_string(),
+					aggregation::Aggregation::CountValue(x) => format!("CountValue(expr{x})"),
+					aggregation::Aggregation::NumberMax(x) => format!("NumberMax(expr{x})"),
+					aggregation::Aggregation::NumberMin(x) => format!("NumberMin(expr{x})"),
+					aggregation::Aggregation::Sum(x) => format!("Sum(expr{x})"),
+					aggregation::Aggregation::Mean(x) => format!("Mean(expr{x})"),
+					aggregation::Aggregation::StdDev(x) => format!("StdDev(expr{x})"),
+					aggregation::Aggregation::Variance(x) => format!("Variance(expr{x})"),
+					aggregation::Aggregation::DatetimeMax(x) => format!("DatetimeMax(expr{x})"),
+					aggregation::Aggregation::DatetimeMin(x) => format!("DatetimeMin(expr{x})"),
+					aggregation::Aggregation::Accumulate(x) => format!("Accumulate(expr{x})"),
+				};
+				(format!("_a{idx}"), Value::from(res))
+			})
+			.collect();
+
+		exp.add_collector(
+			"Group",
+			vec![
+				("Aggregate expressions", aggr_agrs),
+				("Group expressions", group_expr),
+				("Aggregations", aggregates),
+				("Select expression", selector),
+			],
+		);
 	}
 
 	pub async fn push(

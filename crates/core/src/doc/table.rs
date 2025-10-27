@@ -16,7 +16,7 @@ use crate::expr::{
 	Literal,
 };
 use crate::key;
-use crate::val::{Array, Number, RecordIdKey, TryAdd, TryPow, Value};
+use crate::val::{Array, Number, RecordIdKey, TryAdd, TryMul, TryPow, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Copy)]
 enum Action {
@@ -128,6 +128,7 @@ impl Document {
 		}
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	async fn process_aggregate_view(
 		&self,
 		stk: &mut Stk,
@@ -863,9 +864,9 @@ impl Document {
 					};
 
 					*sum = *sum - *before;
-					*sum_of_squares = *sum_of_squares - before.try_pow(Number::from(2))?;
+					*sum_of_squares = *sum_of_squares - before.try_mul(*before)?;
 					*sum = *sum + *after;
-					*sum_of_squares = *sum_of_squares + after.try_pow(Number::from(2))?;
+					*sum_of_squares = *sum_of_squares + after.try_mul(*after)?;
 				}
 				AggregationStat::Accumulate {
 					..

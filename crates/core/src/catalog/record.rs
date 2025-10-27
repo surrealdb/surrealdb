@@ -400,6 +400,14 @@ impl AggregationStat {
 			| AggregationStat::Mean {
 				count,
 				..
+			}
+			| AggregationStat::Variance {
+				count,
+				..
+			}
+			| AggregationStat::StdDev {
+				count,
+				..
 			} => Some(*count),
 			_ => None,
 		})

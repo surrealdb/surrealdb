@@ -246,7 +246,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				};
 
 				*sum = (*sum).try_add(*n)?;
-				*sum_of_squares = (*sum).try_add(n.try_mul(*n)?)?;
+				*sum_of_squares = (*sum_of_squares).try_add(n.try_mul(*n)?)?;
 				*count += 1;
 			}
 			AggregationStat::Variance {
@@ -266,7 +266,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				};
 
 				*sum = (*sum).try_add(*n)?;
-				*sum_of_squares = (*sum).try_add(n.try_mul(*n)?)?;
+				*sum_of_squares = (*sum_of_squares).try_add(n.try_mul(*n)?)?;
 				*count += 1;
 			}
 			AggregationStat::TimeMax {
@@ -478,6 +478,20 @@ impl MutVisitor for AggregateExprCollector<'_> {
 								Aggregation::Mean,
 							)?;
 						}
+						"math::stddev" => {
+							self.push_aggregate_function(
+								"math::stddev",
+								&f.arguments,
+								Aggregation::StdDev,
+							)?;
+						}
+						"math::variance" => {
+							self.push_aggregate_function(
+								"math::variance",
+								&f.arguments,
+								Aggregation::Variance,
+							)?;
+						}
 						"time::max" => {
 							self.push_aggregate_function(
 								"time::max",
@@ -672,9 +686,18 @@ impl AggregationAnalysis {
 			}
 		}
 
+		// Ensure there is atleast one count aggregation to delete the record when the number of
+		// entries reaches zero.
 		if materialized_view
-			&& !aggregations.iter().any(|x| matches!(x, Aggregation::Count | Aggregation::Mean(_)))
-		{
+			&& !aggregations.iter().any(|x| {
+				matches!(
+					x,
+					Aggregation::Count
+						| Aggregation::Mean(_)
+						| Aggregation::StdDev(_)
+						| Aggregation::Variance(_)
+				)
+			}) {
 			aggregations.push(Aggregation::Count)
 		}
 
