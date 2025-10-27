@@ -32,8 +32,7 @@ use std::ops::Bound;
 use anyhow::Result;
 #[cfg(feature = "host")]
 use async_trait::async_trait;
-use surrealdb_protocol::fb::v1 as proto_fb;
-use surrealdb_types::{FromFlatbuffers, SurrealValue, ToFlatbuffers};
+use surrealdb_types::SurrealValue;
 
 use crate::arg::SerializableArg;
 #[cfg(feature = "host")]
@@ -86,7 +85,7 @@ impl AsyncTransfer for Serialized {
 		let ptr = controller.alloc(len as u32, 8).await?;
 		let mem = controller.mut_mem(ptr, len as u32);
 		let len_bytes = (self.0.len() as u32).to_le_bytes();
-		mem[0..4].copy_from_slice(&len_bytes);
+		mem[0..4].copy_from_slice(len_bytes.as_slice());
 		mem[4..len].copy_from_slice(&self.0);
 		Ok(ptr.into())
 	}
@@ -294,16 +293,12 @@ impl Serializable for bool {
 /// ```
 impl Serializable for surrealdb_types::Kind {
 	fn serialize(self) -> Result<Serialized> {
-		let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
-		let root = self.to_fb(&mut builder)?;
-		builder.finish(root, None);
-		let data = builder.finished_data().to_vec();
-		Ok(Serialized(data.into()))
+		let x = surrealdb_types::encode_kind(&self)?;
+		Ok(Serialized(x.into()))
 	}
 
 	fn deserialize(serialized: Serialized) -> Result<Self> {
-		let value = flatbuffers::root::<proto_fb::Kind>(&serialized.0)?;
-		surrealdb_types::Kind::from_fb(value)
+		surrealdb_types::decode_kind(&serialized.0)
 	}
 }
 
@@ -318,15 +313,12 @@ impl Serializable for surrealdb_types::Kind {
 /// all SurrealDB types including records, geometries, durations, etc.
 impl Serializable for surrealdb_types::Value {
 	fn serialize(self) -> Result<Serialized> {
-		let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
-		let root = self.to_fb(&mut builder)?;
-		builder.finish(root, None);
-		Ok(Serialized(builder.finished_data().to_vec().into()))
+		let x = surrealdb_types::encode(&self)?;
+		Ok(Serialized(x.into()))
 	}
 
 	fn deserialize(serialized: Serialized) -> Result<Self> {
-		let value = flatbuffers::root::<proto_fb::Value>(&serialized.0)?;
-		surrealdb_types::Value::from_fb(value)
+		surrealdb_types::decode(&serialized.0)
 	}
 }
 

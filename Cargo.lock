@@ -7291,7 +7291,7 @@ dependencies = [
  "storekey",
  "strsim",
  "subtle",
- "surrealdb-protocol 0.5.1",
+ "surrealdb-protocol",
  "surrealdb-tikv-client",
  "surrealdb-types",
  "surrealism-runtime",
@@ -7318,24 +7318,6 @@ dependencies = [
  "wasmtimer",
  "wiremock",
  "ws_stream_wasm",
-]
-
-[[package]]
-name = "surrealdb-protocol"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8219a53e8a4948025993f9ecd29397dc643f87057b334d0dd134eb2623e4d8bf"
-dependencies = [
- "anyhow",
- "async-trait",
- "bytes",
- "chrono",
- "geo",
- "rust_decimal",
- "semver",
- "serde",
- "serde_json",
- "uuid",
 ]
 
 [[package]]
@@ -7408,7 +7390,7 @@ dependencies = [
  "rust_decimal",
  "serde",
  "serde_json",
- "surrealdb-protocol 0.5.1",
+ "surrealdb-protocol",
  "surrealdb-types-derive",
  "tracing",
  "ulid",
@@ -7508,7 +7490,6 @@ dependencies = [
  "rust_decimal",
  "serde",
  "serde_json",
- "surrealdb-protocol 0.4.0",
  "surrealdb-types",
  "thiserror 1.0.69",
  "uuid",
