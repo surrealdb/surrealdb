@@ -128,7 +128,7 @@ fn test_kv() -> Result<()> {
 	assert_eq!(tmp, Some(0), "get test value");
 	surrealism::kv::del("test").expect("del test");
 	let exists = surrealism::kv::exists("test").expect("exists test");
-	assert_eq!(exists, false, "test should not exist after delete");
+	assert!(!exists, "test should not exist after delete");
 
 	// set multiple
 	surrealism::kv::set("test1", 1).expect("set test1");

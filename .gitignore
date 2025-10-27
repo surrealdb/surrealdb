@@ -60,4 +60,6 @@ surreal
 history.txt
 /doc/tla/states/
 
-/surrealism/
+crates/surrealism/test/demo.surli
+crates/surrealism/test/surrealism
+
