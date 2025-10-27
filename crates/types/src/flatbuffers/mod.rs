@@ -51,7 +51,7 @@ pub fn decode<T: SurrealValue>(value: &[u8]) -> anyhow::Result<T> {
 	T::from_value(value).context("Failed to decode T from value")
 }
 
-/// Encode a value to a flatbuffers vector.
+/// Encode a kind to a flatbuffers vector.
 pub fn encode_kind(kind: &Kind) -> anyhow::Result<Vec<u8>> {
 	let mut fbb = flatbuffers::FlatBufferBuilder::new();
 	let value = kind.to_fb(&mut fbb)?;
@@ -60,7 +60,7 @@ pub fn encode_kind(kind: &Kind) -> anyhow::Result<Vec<u8>> {
 	Ok(data)
 }
 
-/// Decode a flatbuffers vector to a public value.
+/// Decode a flatbuffers vector to a public kind.
 pub fn decode_kind(value: &[u8]) -> anyhow::Result<Kind> {
 	let value_fb = flatbuffers::root::<surrealdb_protocol::fb::v1::Kind>(value)
 		.context("Failed to decode fb kind")?;
