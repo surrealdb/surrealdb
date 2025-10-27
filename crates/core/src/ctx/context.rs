@@ -17,7 +17,9 @@ use trice::Instant;
 #[cfg(feature = "http")]
 use url::Url;
 
-use crate::buc::store::{ObjectKey, ObjectStore};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::buc::store::ObjectKey;
+use crate::buc::store::ObjectStore;
 use crate::buc::{self, BucketConnectionKey, BucketConnections};
 use crate::catalog::providers::{
 	BucketProvider, CatalogProvider, DatabaseProvider, NamespaceProvider,

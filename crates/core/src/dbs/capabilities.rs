@@ -8,6 +8,7 @@ use std::str::FromStr;
 
 use anyhow::bail;
 use ipnet::IpNet;
+#[cfg(not(target_arch = "wasm32"))]
 use surrealism_runtime::capabilities::SurrealismCapabilities;
 #[cfg(all(not(target_family = "wasm"), feature = "http"))]
 use tokio::net::lookup_host;
@@ -857,6 +858,7 @@ impl Capabilities {
 	/// Checks wether capabilities required by a Surrealism package are allowed.
 	/// The `allow_arbitrary_queries` capability is not checked as that is to be used by the
 	/// runtime.
+	#[cfg(not(target_arch = "wasm32"))]
 	pub fn validate_surrealism_capabilities(
 		&self,
 		capabilities: SurrealismCapabilities,

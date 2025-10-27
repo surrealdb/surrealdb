@@ -7,6 +7,7 @@ use reblessive::tree::Stk;
 use crate::catalog;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -335,10 +336,10 @@ impl SurrealismExecutable {
 	pub(crate) async fn signature(
 		&self,
 		_stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-		sub: Option<&str>,
+		_ctx: &Context,
+		_opt: &Options,
+		_doc: Option<&CursorDoc>,
+		_sub: Option<&str>,
 	) -> Result<Signature> {
 		bail!("Surrealism functions are not supported in WASM environments")
 	}
@@ -346,11 +347,11 @@ impl SurrealismExecutable {
 	pub(crate) async fn run(
 		&self,
 		_stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-		args: Vec<Value>,
-		sub: Option<&str>,
+		_ctx: &Context,
+		_opt: &Options,
+		_doc: Option<&CursorDoc>,
+		_args: Vec<Value>,
+		_sub: Option<&str>,
 	) -> Result<Value> {
 		bail!("Surrealism functions are not supported in WASM environments")
 	}
@@ -500,10 +501,10 @@ impl SiloExecutable {
 	pub(crate) async fn signature(
 		&self,
 		_stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-		sub: Option<&str>,
+		_ctx: &Context,
+		_opt: &Options,
+		_doc: Option<&CursorDoc>,
+		_sub: Option<&str>,
 	) -> Result<Signature> {
 		bail!("Surrealism functions are not supported in WASM environments")
 	}
@@ -511,11 +512,11 @@ impl SiloExecutable {
 	pub(crate) async fn run(
 		&self,
 		_stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-		args: Vec<Value>,
-		sub: Option<&str>,
+		_ctx: &Context,
+		_opt: &Options,
+		_doc: Option<&CursorDoc>,
+		_args: Vec<Value>,
+		_sub: Option<&str>,
 	) -> Result<Value> {
 		bail!("Surrealism functions are not supported in WASM environments")
 	}
