@@ -1711,6 +1711,28 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 	assert_eq!(inside.clone().into_option::<Value>().unwrap(), None);
 }
 
+pub async fn client_side_transactions(new_db: impl CreateDb) {
+    #[derive(Debug, Clone, SurrealValue)]
+    struct User {
+        name: String,
+        email: String,
+    }
+
+
+	let (permit, db) = new_db.create_db().await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	let txn = db.begin().await.unwrap();
+	let user: Option<User> = txn.create("user").content(User {
+		name: "John".to_owned(),
+		email: "john@example.com".to_owned(),
+	}).await.unwrap();
+	txn.commit().await.unwrap();
+
+	let user: Option<User> = txn.select("user").await.unwrap();
+	assert!(user.is_some());
+}
+
 define_include_tests!(basic => {
 	#[test_log::test(tokio::test)]
 	connect,
@@ -1814,4 +1836,6 @@ define_include_tests!(basic => {
 	multi_take,
 	#[test_log::test(tokio::test)]
 	field_and_index_methods,
+	#[test_log::test(tokio::test)]
+	client_side_transactions,
 });

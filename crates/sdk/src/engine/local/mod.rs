@@ -165,7 +165,7 @@ use futures::StreamExt;
 use futures::stream::poll_fn;
 use surrealdb_core::dbs::{QueryResult, QueryResultBuilder, Session};
 use surrealdb_core::iam;
-use surrealdb_core::kvs::Datastore;
+use surrealdb_core::kvs::{Datastore, LockType, TransactionType};
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
 use surrealdb_core::rpc::DbResultError;
@@ -188,6 +188,7 @@ use uuid::Uuid;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use crate::conn::MlExportConfig;
 use crate::conn::{Command, RequestData};
+use crate::engine::local::native::RouterState;
 use crate::opt::IntoEndpoint;
 use crate::{Connect, Result, Surreal};
 
@@ -545,10 +546,13 @@ async fn router(
 		command,
 		..
 	}: RequestData,
-	kvs: &Arc<Datastore>,
-	session: &Arc<RwLock<Session>>,
-	vars: &Arc<RwLock<Variables>>,
-	live_queries: &Arc<RwLock<LiveQueryMap>>,
+	RouterState {
+		kvs,
+		session,
+		vars,
+		live_queries,
+		transactions,
+	}: RouterState,
 ) -> std::result::Result<Vec<QueryResult>, crate::Error> {
 	match command {
 		Command::Use {
@@ -564,7 +568,7 @@ async fn router(
 		} => {
 			let query_result = QueryResultBuilder::started_now();
 			let signup_data =
-				iam::signup::signup(kvs, &mut *session.write().await, credentials.into())
+				iam::signup::signup(&kvs, &mut *session.write().await, credentials.into())
 					.await
 					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
 			let token = signup_data.token.map(Value::String).unwrap_or(Value::None);
@@ -577,7 +581,7 @@ async fn router(
 		} => {
 			let query_result = QueryResultBuilder::started_now();
 			let signin_data =
-				iam::signin::signin(kvs, &mut *session.write().await, credentials.into())
+				iam::signin::signin(&kvs, &mut *session.write().await, credentials.into())
 					.await
 					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
 
@@ -589,7 +593,7 @@ async fn router(
 			token,
 		} => {
 			let query_result = QueryResultBuilder::started_now();
-			let result = match iam::verify::token(kvs, &mut *session.write().await, &token).await {
+			let result = match iam::verify::token(&kvs, &mut *session.write().await, &token).await {
 				Ok(_) => query_result.finish_with_result(Ok(Value::None)),
 				Err(error) => query_result
 					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
@@ -604,6 +608,32 @@ async fn router(
 					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
 			};
 			Ok(vec![result])
+		}
+		Command::Begin => {
+			let query_result = QueryResultBuilder::started_now();
+			let result = match kvs.transaction(TransactionType::Write, LockType::Optimistic).await {
+				Ok(txn) => {
+					let id = Uuid::now_v7();
+					transactions.write().await.insert(id, txn);
+					query_result.finish_with_result(Ok(Value::Uuid(id.into())))},
+				Err(error) => query_result
+					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
+			};
+			Ok(vec![result])
+		}
+		Command::Rollback {
+			txn,
+		} => {
+			let txn = transactions.read().await.get(&txn).unwrap();
+			txn.cancel().await?;
+			Ok(vec![QueryResultBuilder::instant_none()])
+		}
+		Command::Commit {
+			txn,
+		} => {
+			let txn = transactions.read().await.get(&txn).unwrap();
+			txn.commit().await?;
+			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		Command::Query {
 			txn: _,
@@ -650,7 +680,7 @@ async fn router(
 
 			// Write to channel.
 			let session = session.read().await.clone();
-			let export = export_file(kvs, &session, tx, config);
+			let export = export_file(&kvs, &session, tx, config);
 
 			// Read from channel and write to pipe.
 			let bridge = async move {
@@ -945,7 +975,7 @@ async fn router(
 		} => {
 			live_queries.write().await.remove(&uuid);
 			let results =
-				kill_live_query(kvs, uuid, &*session.read().await, vars.read().await.clone())
+				kill_live_query(&kvs, uuid, &*session.read().await, vars.read().await.clone())
 					.await?;
 			Ok(results)
 		}

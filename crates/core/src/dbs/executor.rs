@@ -10,6 +10,7 @@ use surrealdb_types::ToSql;
 use tokio::spawn;
 use tracing::instrument;
 use trice::Instant;
+use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
@@ -649,9 +650,10 @@ impl Executor {
 		ctx: Context,
 		opt: Options,
 		qry: Ast,
+		txn: Option<Uuid>,
 	) -> Result<Vec<QueryResult>> {
 		let stream = futures::stream::iter(qry.expressions.into_iter().map(Ok));
-		Self::execute_stream(kvs, ctx, opt, false, stream).await
+		Self::execute_stream(kvs, ctx, opt, false, stream, txn).await
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
@@ -660,9 +662,10 @@ impl Executor {
 		ctx: Context,
 		opt: Options,
 		qry: LogicalPlan,
+		txn: Option<Uuid>,
 	) -> Result<Vec<QueryResult>> {
 		let stream = futures::stream::iter(qry.expressions.into_iter().map(Ok));
-		Self::execute_expr_stream(kvs, ctx, opt, false, stream).await
+		Self::execute_expr_stream(kvs, ctx, opt, false, stream, txn).await
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
@@ -672,6 +675,7 @@ impl Executor {
 		opt: Options,
 		skip_success_results: bool,
 		stream: S,
+		txn: Option<Uuid>,
 	) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<sql::TopLevelExpr>>,
@@ -682,6 +686,7 @@ impl Executor {
 			opt,
 			skip_success_results,
 			stream.map(|x| x.map(expr::TopLevelExpr::from)),
+			txn,
 		)
 		.await
 	}
@@ -693,6 +698,7 @@ impl Executor {
 		opt: Options,
 		skip_success_results: bool,
 		stream: S,
+		txn: Option<Uuid>,
 	) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<TopLevelExpr>>,

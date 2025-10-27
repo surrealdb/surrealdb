@@ -1,6 +1,7 @@
 use std::future::IntoFuture;
 use std::ops::Deref;
 
+use crate::conn::Command;
 use crate::method::{BoxFuture, Cancel, Commit};
 use crate::{Connection, OnceLockExt, Result, Surreal};
 

@@ -1137,7 +1137,7 @@ impl Datastore {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Execute the SQL import
-		self.execute(sql, sess, None).await.map_err(|e| anyhow::anyhow!(e))
+		self.execute(sql, sess, None, None).await.map_err(|e| anyhow::anyhow!(e))
 	}
 
 	/// Run the datastore shutdown tasks, performing any necessary cleanup
@@ -1213,12 +1213,13 @@ impl Datastore {
 		txt: &str,
 		sess: &Session,
 		vars: Option<PublicVariables>,
+		txn: Option<Uuid>,
 	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
 		// Parse the SQL query text
 		let ast = syn::parse_with_capabilities(txt, &self.capabilities)
 			.map_err(|e| DbResultError::ParseError(e.to_string()))?;
 		// Process the AST
-		self.process(ast, sess, vars).await
+		self.process(ast, sess, vars, txn).await
 	}
 
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
@@ -1329,7 +1330,7 @@ impl Datastore {
 			}
 		});
 
-		Executor::execute_stream(self, Arc::new(ctx), opt, true, stream).await
+		Executor::execute_stream(self, Arc::new(ctx), opt, true, stream, None).await
 	}
 
 	/// Execute a pre-parsed SQL query
@@ -1339,9 +1340,10 @@ impl Datastore {
 		ast: Ast,
 		sess: &Session,
 		vars: Option<PublicVariables>,
+		txn: Option<Uuid>,
 	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
 		//TODO: Insert planner here.
-		self.process_plan(ast.into(), sess, vars).await
+		self.process_plan(ast.into(), sess, vars, txn).await
 	}
 
 	pub(crate) async fn process_plan(
@@ -1349,6 +1351,7 @@ impl Datastore {
 		plan: LogicalPlan,
 		sess: &Session,
 		vars: Option<PublicVariables>,
+		txn: Option<Uuid>,
 	) -> Result<Vec<QueryResult>, DbResultError> {
 		// Check if the session has expired
 		if sess.expired() {
@@ -1452,7 +1455,7 @@ impl Datastore {
 		}
 
 		// Process all statements
-		Executor::execute_plan(self, ctx.freeze(), opt, plan).await.map_err(|e| {
+		Executor::execute_plan(self, ctx.freeze(), opt, plan, txn).await.map_err(|e| {
 			match e.downcast_ref::<Error>() {
 				Some(Error::ExpiredSession) => {
 					DbResultError::InvalidAuth("The session has expired".to_string())
@@ -1790,7 +1793,7 @@ impl Datastore {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Execute the SQL import
-		self.execute(sql, sess, None).await.map_err(|e| anyhow::anyhow!(e))
+		self.execute(sql, sess, None, None).await.map_err(|e| anyhow::anyhow!(e))
 	}
 
 	/// Performs a database import from SQL
@@ -2082,7 +2085,7 @@ impl Datastore {
 			))))],
 		};
 
-		self.process_plan(q, session, None).await.map_err(|e| anyhow::anyhow!(e))?;
+		self.process_plan(q, session, None, None).await.map_err(|e| anyhow::anyhow!(e))?;
 
 		Ok(())
 	}

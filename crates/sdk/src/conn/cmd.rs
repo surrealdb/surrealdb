@@ -28,6 +28,13 @@ pub(crate) enum Command {
 		token: String,
 	},
 	Invalidate,
+	Begin,
+	Rollback {
+		txn: Uuid,
+	},
+	Commit {
+		txn: Uuid,
+	},
 	Query {
 		txn: Option<Uuid>,
 		query: Cow<'static, str>,
