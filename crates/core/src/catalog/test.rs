@@ -6,6 +6,7 @@ use rstest::rstest;
 use uuid::Uuid;
 
 use super::*;
+use crate::catalog::record::{Data, Record};
 use crate::catalog::schema::base::Base;
 use crate::expr::{
 	Block, ChangeFeed, Expr, Fetch, Fetchs, Field, Fields, Filter, Groups, Idiom, Kind, Literal,
@@ -14,7 +15,6 @@ use crate::expr::{
 use crate::iam::Auth;
 use crate::kvs::KVValue;
 use crate::kvs::version::MajorVersion;
-use crate::val::record::{Data, Record};
 use crate::val::{Datetime, Value};
 use crate::vs::VersionStamp;
 

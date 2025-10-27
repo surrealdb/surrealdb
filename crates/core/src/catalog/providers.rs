@@ -9,13 +9,8 @@ use uuid::Uuid;
 
 use crate::catalog;
 use crate::catalog::{
-<<<<<<< HEAD
-	DatabaseDefinition, DatabaseId, IndexId, NamespaceDefinition, NamespaceId, TableDefinition,
-	TableId, UserDefinition,
-=======
 	DatabaseDefinition, DatabaseId, IndexId, NamespaceDefinition, NamespaceId, Record,
-	TableDefinition, UserDefinition,
->>>>>>> a26f6dbdd (Group by in normal select fixed)
+	TableDefinition, TableId, UserDefinition,
 };
 use crate::ctx::MutableContext;
 use crate::dbs::node::Node;
