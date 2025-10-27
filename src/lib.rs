@@ -26,7 +26,7 @@ mod telemetry;
 use std::future::Future;
 use std::process::ExitCode;
 
-pub use cli::{Config, ConfigCheck};
+pub use cli::{Config, ConfigCheck, ConfigCheckRequirements};
 /// Re-export `RpcState` for convenience so embedders can `use surreal::RpcState`.
 pub use rpc::RpcState;
 pub use surrealdb_core as core;

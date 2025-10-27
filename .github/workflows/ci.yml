@@ -1003,6 +1003,7 @@ jobs:
   required-checks:
     name: Required checks
     runs-on: ubuntu-latest
+    if: always()
     needs:
       # Server build
       - build
@@ -1035,5 +1036,48 @@ jobs:
       - lang-tests
       - upgrade-tests
     steps:
-      - name: All required checks passed
-        run: echo "All required CI checks have passed successfully!"
+      - name: Check for failures
+        run: |
+          echo "Checking results of all required jobs..."
+
+          # List of all job results
+          results=(
+            "${{ needs.build.result }}"
+            "${{ needs.format.result }}"
+            "${{ needs.clippy.result }}"
+            "${{ needs.clippy-release.result }}"
+            "${{ needs.check.result }}"
+            "${{ needs.check-release.result }}"
+            "${{ needs.check-msrv.result }}"
+            "${{ needs.check-wasm.result }}"
+            "${{ needs.check-revision.result }}"
+            "${{ needs.check-docs.result }}"
+            "${{ needs.cli-integration.result }}"
+            "${{ needs.http-integration.result }}"
+            "${{ needs.ws-integration.result }}"
+            "${{ needs.ml-integration.result }}"
+            "${{ needs.graphql-integration.result }}"
+            "${{ needs.test.result }}"
+            "${{ needs.sdk-build.result }}"
+            "${{ needs.sdk-engines.result }}"
+            "${{ needs.kvs-engines.result }}"
+            "${{ needs.db-upgrade.result }}"
+            "${{ needs.lang-tests.result }}"
+            "${{ needs.upgrade-tests.result }}"
+          )
+
+          # Check if any job failed
+          failed=false
+          for result in "${results[@]}"; do
+            if [[ "$result" != "success" ]]; then
+              echo "❌ A required job had result: $result"
+              failed=true
+            fi
+          done
+
+          if [[ "$failed" == "true" ]]; then
+            echo "❌ One or more required checks failed"
+            exit 1
+          else
+            echo "✅ All required CI checks have passed successfully!"
+          fi

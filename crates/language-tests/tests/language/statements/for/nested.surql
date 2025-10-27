@@ -86,7 +86,7 @@ value = """[
 
 FOR $i IN [1,2,3,4,5] {
 	FOR $j IN [6,7,8,9,0] {
-		CREATE type::thing('person', [$i, $j]);
+		CREATE type::record('person', [$i, $j]);
 	}
 };
 SELECT * FROM person;

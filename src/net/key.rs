@@ -293,8 +293,8 @@ async fn select_one(
 	let _ = check_ns_db(&session).map_err(ResponseError)?;
 	// Specify the request statement
 	let sql = match query.fields {
-		None => "SELECT * FROM type::thing($table, $id)",
-		_ => "SELECT type::fields($fields) FROM type::thing($table, $id)",
+		None => "SELECT * FROM type::record($table, $id)",
+		_ => "SELECT type::fields($fields) FROM type::record($table, $id)",
 	};
 	// Parse the Record ID as a SurrealQL value
 	let rid = match syn::json(&id) {
@@ -336,7 +336,7 @@ async fn create_one(
 	};
 
 	// Specify the request statement
-	let sql = "CREATE type::thing($table, $id) CONTENT $data";
+	let sql = "CREATE type::record($table, $id) CONTENT $data";
 	// Specify the request variables
 	let vars = Variables::from(map! {
 		String::from("table") => Value::String(table),
@@ -372,7 +372,7 @@ async fn update_one(
 	};
 
 	// Specify the request statement
-	let sql = "UPSERT type::thing($table, $id) CONTENT $data";
+	let sql = "UPSERT type::record($table, $id) CONTENT $data";
 	// Specify the request variables
 	let vars = Variables::from(map! {
 		String::from("table") => Value::String(table),
@@ -408,7 +408,7 @@ async fn modify_one(
 	};
 
 	// Specify the request statement
-	let sql = "UPSERT type::thing($table, $id) MERGE $data";
+	let sql = "UPSERT type::record($table, $id) MERGE $data";
 	// Specify the request variables
 	let vars = Variables::from(map! {
 		String::from("table") => Value::String(table),
@@ -434,7 +434,7 @@ async fn delete_one(
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session).map_err(ResponseError)?;
 	// Specify the request statement
-	let sql = "DELETE type::thing($table, $id) RETURN BEFORE";
+	let sql = "DELETE type::record($table, $id) RETURN BEFORE";
 	// Parse the Record ID as a SurrealQL value
 	let rid = match syn::json(&id) {
 		Ok(id) => id,

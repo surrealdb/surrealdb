@@ -87,8 +87,8 @@ pub(crate) enum Value {
 	Object(Object),
 	Geometry(Geometry),
 	Bytes(Bytes),
-	RecordId(RecordId),
 	Table(Table),
+	RecordId(RecordId),
 	File(File),
 	#[serde(skip)]
 	Regex(Regex),
@@ -172,10 +172,10 @@ impl Value {
 		matches!(self, Value::Number(Number::Decimal(_)))
 	}
 
-	/// Check if this Value is a Thing of a specific type
+	/// Check if this Value is a RecordId of a specific type
 	pub fn is_record_type(&self, types: &[String]) -> bool {
 		match self {
-			Value::RecordId(v) => v.is_record_type(types),
+			Value::RecordId(v) => v.is_table_type(types),
 			_ => false,
 		}
 	}
@@ -238,9 +238,6 @@ impl Value {
 	/// This function is not fully implement for all variants, make sure you
 	/// don't accidentally use it where it can return an invalid value.
 	pub fn kind_of(&self) -> &'static str {
-		// TODO: Look at this function, there are a whole bunch of options for which
-		// this returns "incorrect type" which might sneak into the results where it
-		// shouldn.t
 		match self {
 			Self::None => "none",
 			Self::Null => "null",
@@ -266,8 +263,7 @@ impl Value {
 			Self::File(_) => "file",
 			Self::Bytes(_) => "bytes",
 			Self::Range(_) => "range",
-			Self::RecordId(_) => "thing",
-			// TODO: Dubious types
+			Self::RecordId(_) => "record",
 			Self::Table(_) => "table",
 		}
 	}
@@ -808,7 +804,7 @@ subtypes! {
 	Object(Object) => (is_object,as_object,into_object),
 	Geometry(Geometry) => (is_geometry,as_geometry,into_geometry),
 	Bytes(Bytes) => (is_bytes,as_bytes,into_bytes),
-	RecordId(RecordId) => (is_thing,as_thing,into_thing),
+	RecordId(RecordId) => (is_record,as_record,into_record),
 	Regex(Regex) => (is_regex,as_regex,into_regex),
 	Range(Box<Range>) => (is_range,as_range,into_range),
 	Closure(Box<Closure>) => (is_closure,as_closure,into_closure),
@@ -1049,7 +1045,7 @@ fn convert_object_to_public(value: crate::val::Object) -> Result<surrealdb_types
 fn convert_record_id_to_public(value: crate::val::RecordId) -> Result<surrealdb_types::Value> {
 	let key = convert_record_id_key_to_public(value.key)?;
 	Ok(surrealdb_types::Value::RecordId(surrealdb_types::RecordId {
-		table: value.table,
+		table: value.table.into(),
 		key,
 	}))
 }
@@ -1343,10 +1339,10 @@ mod tests {
 			PublicValue::Number(PublicNumber::Int(111)),
 		])),
 	)]
-	#[case::thing(
-		PublicValue::RecordId(PublicRecordId{ table: "foo".to_string(), key: PublicRecordIdKey::String("bar".into())}) ,
+	#[case::record_id(
+		PublicValue::RecordId(PublicRecordId::new("foo", PublicRecordIdKey::String("bar".into()))) ,
 		json!("foo:bar"),
-		PublicValue::RecordId(PublicRecordId{ table: "foo".to_string(), key: PublicRecordIdKey::String("bar".into())}) ,
+		PublicValue::RecordId(PublicRecordId::new("foo", PublicRecordIdKey::String("bar".into()))) ,
 	)]
 	#[case::array(
 		PublicValue::Array(PublicArray::new()),

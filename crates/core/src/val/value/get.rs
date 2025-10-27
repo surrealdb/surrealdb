@@ -267,7 +267,7 @@ impl Value {
 						stk.scope(|scope| {
 							let futs = v.iter().map(|v| {
 								scope.run(|stk| {
-									let path = if v.is_thing() {
+									let path = if v.is_record() {
 										path
 									} else {
 										// .* applies to the elements of the array it was applied
@@ -379,9 +379,9 @@ impl Value {
 						Ok(res)
 					}
 				},
-				// Current value at path is a thing
+				// Current value at path is a record
 				Value::RecordId(v) => {
-					// Clone the thing
+					// Clone the record
 					let val = v.clone();
 					// Check how many path parts are remaining
 					if path.is_empty() {

@@ -22,7 +22,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand, ValueEnum};
-pub use config::{Config, ConfigCheck};
+pub use config::{Config, ConfigCheck, ConfigCheckRequirements};
 use export::ExportCommandArguments;
 use fix::FixCommandArguments;
 use import::ImportCommandArguments;

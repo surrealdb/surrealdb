@@ -48,6 +48,9 @@ pub(crate) mod user;
 pub(crate) mod view;
 pub(crate) mod with;
 
+#[cfg(test)]
+mod test_to_sql;
+
 pub mod index;
 pub mod statements;
 

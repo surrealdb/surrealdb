@@ -3080,11 +3080,11 @@ async fn function_type_table() -> Result<()> {
 async fn function_type_thing() -> Result<()> {
 	let sql = r#"
 		USE NS test DB test;
-		CREATE type::thing('person', 'test');
-		CREATE type::thing('person', 1434619);
-		CREATE type::thing(<string> person:john);
-		CREATE type::thing('city', '8e60244d-95f6-4f95-9e30-09a98977efb0');
-		CREATE type::thing('temperature', ['London', '2022-09-30T20:25:01.406828Z']);
+		CREATE type::record('person', 'test');
+		CREATE type::record('person', 1434619);
+		CREATE type::record(<string> person:john);
+		CREATE type::record('city', '8e60244d-95f6-4f95-9e30-09a98977efb0');
+		CREATE type::record('temperature', ['London', '2022-09-30T20:25:01.406828Z']);
 	"#;
 	let mut test = Test::new(sql).await?;
 	// USE NS test DB test;

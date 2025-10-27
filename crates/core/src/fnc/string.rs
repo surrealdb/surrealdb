@@ -156,7 +156,7 @@ pub fn slice(
 
 	let range = if let Some(end) = end {
 		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::range"),
+			name: String::from("array::slice"),
 			message: format!("Argument 1 was the wrong type. {e}"),
 		})?;
 
@@ -168,12 +168,12 @@ pub fn slice(
 		// Condition checked above, unwrap cannot trigger.
 		let range = range_start.into_range().unwrap();
 		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::range"),
+			name: String::from("array::slice"),
 			message: format!("Argument 1 was the wrong type. {e}"),
 		})?
 	} else {
 		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::range"),
+			name: String::from("array::slice"),
 			message: format!("Argument 1 was the wrong type. {e}"),
 		})?;
 		TypedRange {

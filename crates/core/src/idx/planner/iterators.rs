@@ -218,7 +218,8 @@ impl IndexItemRecord {
 	fn new_key(t: RecordId, ir: IteratorRecord) -> Self {
 		Self::Key(Arc::new(t), ir)
 	}
-	fn thing(&self) -> &RecordId {
+
+	fn record_id(&self) -> &RecordId {
 		match self {
 			Self::Key(t, _) => t,
 			Self::KeyValue(t, _, _) => t,
@@ -1023,9 +1024,9 @@ impl JoinThingIterator {
 				if ctx.is_done(count % 100 == 0).await? {
 					break;
 				}
-				let thing = r.thing();
-				let value: Value = Value::from(thing.clone());
-				let k: Key = revision::to_vec(thing)?;
+				let record = r.record_id();
+				let value: Value = Value::from(record.clone());
+				let k: Key = revision::to_vec(record)?;
 				if self.distinct.insert(k, true).is_none() {
 					self.current_local = Some(new_iter(self.ns, self.db, &self.ix, value)?);
 					return Ok(true);

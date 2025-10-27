@@ -14,8 +14,8 @@
 //!
 //! ## Feature Flags
 //!
-//! - `host`: Enables async traits for host-side (runtime) implementations. Without this flag,
-//!   all operations are synchronous, suitable for WASM guest modules.
+//! - `host`: Enables async traits for host-side (runtime) implementations. Without this flag, all
+//!   operations are synchronous, suitable for WASM guest modules.
 //!
 //! ## Dual-Mode Architecture
 //!

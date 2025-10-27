@@ -13,6 +13,6 @@ FOR $test IN 1..4 {
 	IF $test == 2 {
 		BREAK;
 	};
-	UPSERT type::thing('person', $test) SET test = $test;
+	UPSERT type::record('person', $test) SET test = $test;
 };
 SELECT * FROM person;

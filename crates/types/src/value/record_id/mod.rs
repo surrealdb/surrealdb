@@ -8,6 +8,8 @@ pub use range::*;
 use serde::{Deserialize, Serialize};
 
 use crate::sql::ToSql;
+use crate::utils::escape::EscapeSqonIdent;
+use crate::{Table, write_sql};
 
 /// Represents a record identifier in SurrealDB
 ///
@@ -17,14 +19,14 @@ use crate::sql::ToSql;
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct RecordId {
 	/// The name of the table containing the record
-	pub table: String,
+	pub table: Table,
 	/// The key that uniquely identifies the record within the table
 	pub key: RecordIdKey,
 }
 
 impl RecordId {
 	/// Creates a new record id from the given table and key
-	pub fn new(table: impl Into<String>, key: impl Into<RecordIdKey>) -> Self {
+	pub fn new(table: impl Into<Table>, key: impl Into<RecordIdKey>) -> Self {
 		RecordId {
 			table: table.into(),
 			key: key.into(),
@@ -32,8 +34,8 @@ impl RecordId {
 	}
 
 	/// Checks if the record id is of the specified type.
-	pub fn is_record_type(&self, val: &[String]) -> bool {
-		val.is_empty() || val.contains(&self.table)
+	pub fn is_table_type(&self, tables: &[String]) -> bool {
+		tables.is_empty() || tables.contains(&self.table)
 	}
 
 	/// Parses a record id which must be in the format of `table:key`.
@@ -46,8 +48,7 @@ impl RecordId {
 
 impl ToSql for RecordId {
 	fn fmt_sql(&self, f: &mut String) {
-		f.push_str(&self.table);
-		f.push(':');
+		write_sql!(f, "{}:", EscapeSqonIdent(self.table.as_str()));
 		self.key.fmt_sql(f);
 	}
 }

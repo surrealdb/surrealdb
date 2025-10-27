@@ -34,7 +34,6 @@ mod cf;
 mod doc;
 mod exe;
 mod fnc;
-mod idg;
 mod key;
 mod surrealism;
 mod sys;
@@ -55,7 +54,6 @@ pub mod kvs;
 pub mod mem;
 pub mod obs;
 pub mod options;
-pub mod protocol;
 pub mod rpc;
 pub mod sql;
 pub mod str;
@@ -74,7 +72,8 @@ pub(crate) mod types {
 		Number as PublicNumber, Object as PublicObject, Range as PublicRange,
 		RecordId as PublicRecordId, RecordIdKey as PublicRecordIdKey,
 		RecordIdKeyRange as PublicRecordIdKeyRange, Regex as PublicRegex, SurrealValue,
-		Uuid as PublicUuid, Value as PublicValue, Variables as PublicVariables,
+		Table as PublicTable, Uuid as PublicUuid, Value as PublicValue,
+		Variables as PublicVariables,
 	};
 }
 

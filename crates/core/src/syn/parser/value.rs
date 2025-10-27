@@ -13,7 +13,7 @@ use crate::syn::parser::unexpected;
 use crate::syn::token::{Glued, Span, TokenKind, t};
 use crate::types::{
 	PublicArray, PublicDuration, PublicFile, PublicGeometry, PublicNumber, PublicObject,
-	PublicRange, PublicRecordId, PublicRecordIdKey, PublicUuid, PublicValue,
+	PublicRange, PublicRecordId, PublicRecordIdKey, PublicTable, PublicUuid, PublicValue,
 };
 
 trait ValueParseFunc {
@@ -301,7 +301,16 @@ impl Parser<'_> {
 				let glued = pop_glued!(self, Duration);
 				Ok(PublicValue::Duration(glued))
 			}
-			_ => self.parse_value_record_id_inner::<Json>(stk).await.map(PublicValue::RecordId),
+			_ => {
+				match self.parse_value_record_id_inner::<Json>(stk).await.map(PublicValue::RecordId)
+				{
+					Ok(x) => Ok(x),
+					Err(err) => {
+						tracing::debug!("Error parsing record id: {err:?}");
+						self.parse_value_table().await.map(PublicValue::Table)
+					}
+				}
+			}
 		}
 	}
 
@@ -367,6 +376,11 @@ impl Parser<'_> {
 				return Ok(PublicArray::from(array));
 			}
 		}
+	}
+
+	async fn parse_value_table(&mut self) -> ParseResult<PublicTable> {
+		let table = self.parse_ident()?;
+		Ok(PublicTable::new(table))
 	}
 
 	pub async fn parse_value_record_id(&mut self, stk: &mut Stk) -> ParseResult<PublicRecordId> {

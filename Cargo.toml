@@ -18,7 +18,7 @@ authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 edition = "2024"
 license-file = "LICENSE"
 publish = false
-version = "3.0.0-alpha.10"
+version = "3.0.0-alpha.11"
 rust-version = "1.87.0"
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
@@ -34,16 +34,16 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # workspace internal dependencies
-surrealdb = { version = "=3.0.0-alpha.10", path = "crates/sdk" }
-surrealdb-core = { version = "=3.0.0-alpha.10", path = "crates/core", default-features = false }
-surrealdb-macros = { version = "=3.0.0-alpha.10", path = "crates/macros" }
-surrealdb-types = { version = "=3.0.0-alpha.10", path = "crates/types" }
-surrealdb-types-derive = { version = "=3.0.0-alpha.10", path = "crates/types-derive" }
-surrealism = { version = "=3.0.0-alpha.10", path = "crates/surrealism/surrealism" }
-surrealism-cli = { version = "=3.0.0-alpha.10", path = "crates/surrealism/surrealism-cli" }
-surrealism-macros = { version = "=3.0.0-alpha.10", path = "crates/surrealism/surrealism-macros" }
-surrealism-runtime = { version = "=3.0.0-alpha.10", path = "crates/surrealism/surrealism-runtime" }
-surrealism-types = { version = "=3.0.0-alpha.10", path = "crates/surrealism/surrealism-types" }
+surrealdb = { version = "=3.0.0-alpha.11", path = "crates/sdk" }
+surrealdb-core = { version = "=3.0.0-alpha.11", path = "crates/core", default-features = false }
+surrealdb-macros = { version = "=3.0.0-alpha.11", path = "crates/macros" }
+surrealdb-types = { version = "=3.0.0-alpha.11", path = "crates/types" }
+surrealdb-types-derive = { version = "=3.0.0-alpha.11", path = "crates/types-derive" }
+surrealism = { version = "=3.0.0-alpha.11", path = "crates/surrealism/surrealism" }
+surrealism-cli = { version = "=3.0.0-alpha.11", path = "crates/surrealism/surrealism-cli" }
+surrealism-macros = { version = "=3.0.0-alpha.11", path = "crates/surrealism/surrealism-macros" }
+surrealism-runtime = { version = "=3.0.0-alpha.11", path = "crates/surrealism/surrealism-runtime" }
+surrealism-types = { version = "=3.0.0-alpha.11", path = "crates/surrealism/surrealism-types" }
 
 # External surreal crates
 affinitypool = "0.3.1"
@@ -160,7 +160,7 @@ sha2 = "0.10.8"
 snap = "1.1.0"
 strsim = "0.11.1"
 subtle = "2.6"
-surrealdb-protocol = { version = "0.4.0", default-features = false }
+surrealdb-protocol = { version = "0.5.1", default-features = false }
 sysinfo = "0.33.0"
 tempfile = "3.10.1"
 thiserror = "1.0.63"
@@ -268,6 +268,7 @@ revision = { workspace = true, features = [
 # Crates only used by the root surrealdb crate
 anyhow.workspace = true
 arc-swap = "1.7.1"
+async-trait.workspace = true
 axum = { version = "0.8.5", features = ["tracing", "ws"] }
 axum-extra = { version = "0.10.2", features = [
     "query",
@@ -283,6 +284,7 @@ clap = { version = "4.4.11", features = [
     "wrap_help",
     "unicode",
 ] }
+dashmap.workspace = true
 glob = "0.3.1"
 http-body = "1.0.0"
 http-body-util = "0.1.1"
