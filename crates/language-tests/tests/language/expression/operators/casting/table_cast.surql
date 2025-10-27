@@ -15,7 +15,7 @@ match = "$result == type::table('users')"
 match = "$result == type::table('posts')"
 
 [[test.results]]
-error = "Expected `table<users|posts>` but found a `'comments'`"
+error = "Could not cast into `table<users|posts>` using input `'comments'`"
 
 [[test.results]]
 match = "$result == type::table('')"
