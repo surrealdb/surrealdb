@@ -479,7 +479,7 @@ impl Parser<'_> {
 					unexpected!(self, peek, "a identifier");
 				}
 				// Should be valid utf-8 as it was already parsed by the lexer
-				let text = String::from_utf8(slice.to_vec()).unwrap();
+				let text = String::from_utf8(slice.to_vec()).expect("parser validated utf8");
 				PublicRecordIdKey::String(text)
 			}
 			_ => {

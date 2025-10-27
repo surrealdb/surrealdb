@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used)]
 #![cfg(feature = "kv-surrealkv")]
 
 use surrealdb_core::cnf::EXPORT_BATCH_SIZE;
