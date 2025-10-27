@@ -2,17 +2,16 @@ use std::mem;
 use std::sync::Arc;
 
 use anyhow::{Result, ensure};
+use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
-#[cfg(not(target_family = "wasm"))]
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::capabilities::MethodTarget;
-use crate::dbs::{QueryResult, QueryType};
+use crate::dbs::{QueryResult, QueryType, Session};
 use crate::err::Error;
-use crate::kvs::{LockType, TransactionType};
+use crate::kvs::{Datastore, LockType, TransactionType};
 use crate::rpc::args::extract_args;
-use crate::rpc::{DbResult, Method, RpcContext, RpcError};
+use crate::rpc::{DbResult, Method, RpcError};
 use crate::sql::{
 	Ast, CreateStatement, Data as SqlData, DeleteStatement, Expr, Fields, Function, FunctionCall,
 	InsertStatement, KillStatement, LiveStatement, Model, Output, RelateStatement, SelectStatement,
@@ -41,7 +40,66 @@ fn singular(value: &PublicValue) -> bool {
 }
 
 #[expect(async_fn_in_trait)]
-pub trait RpcProtocolV1: RpcContext {
+pub trait RpcProtocol {
+	/// The datastore for this RPC interface
+	fn kvs(&self) -> &Datastore;
+	/// Retrieves the modification lock for this RPC context
+	fn lock(&self) -> Arc<Semaphore>;
+	/// The version information for this RPC context
+	fn version_data(&self) -> DbResult;
+
+	// ------------------------------
+	// Sessions
+	// ------------------------------
+
+	/// The current session for this RPC context
+	fn get_session(&self, id: Option<&Uuid>) -> Arc<Session>;
+	/// Mutable access to the current session for this RPC context
+	fn set_session(&self, id: Option<Uuid>, session: Arc<Session>);
+	/// Deletes a session
+	fn del_session(&self, id: &Uuid);
+	// Lists all sessions
+	fn list_sessions(&self) -> Vec<Uuid>;
+
+	// ------------------------------
+	// Realtime
+	// ------------------------------
+
+	/// Live queries are disabled by default
+	const LQ_SUPPORT: bool = false;
+
+	/// Handles the execution of a LIVE statement
+	fn handle_live(
+		&self,
+		_lqid: &Uuid,
+		_session_id: Option<Uuid>,
+	) -> impl std::future::Future<Output = ()> + Send {
+		async { unimplemented!("handle_live function must be implemented if LQ_SUPPORT = true") }
+	}
+	/// Handles the execution of a KILL statement
+	fn handle_kill(&self, _lqid: &Uuid) -> impl std::future::Future<Output = ()> + Send {
+		async { unimplemented!("handle_kill function must be implemented if LQ_SUPPORT = true") }
+	}
+
+	/// Handles the cleanup of live queries
+	fn cleanup_lqs(
+		&self,
+		session_id: Option<&Uuid>,
+	) -> impl std::future::Future<Output = ()> + Send;
+
+	/// Handles the cleanup of all live queries
+	fn cleanup_all_lqs(&self) -> impl std::future::Future<Output = ()> + Send;
+
+	// ------------------------------
+	// Fetch sessions
+	// ------------------------------
+
+	async fn sessions(&self) -> Result<DbResult, RpcError> {
+		Ok(DbResult::Other(PublicValue::Array(
+			self.list_sessions().into_iter().map(|x| PublicValue::Uuid(PublicUuid(x))).collect(),
+		)))
+	}
+
 	// ------------------------------
 	// Method execution
 	// ------------------------------
@@ -49,6 +107,7 @@ pub trait RpcProtocolV1: RpcContext {
 	/// Executes a method on this RPC implementation
 	async fn execute(
 		&self,
+		_txn: Option<Uuid>,
 		session: Option<Uuid>,
 		method: Method,
 		params: PublicArray,
@@ -86,17 +145,10 @@ pub trait RpcProtocolV1: RpcContext {
 			Method::Query => self.query(session, params).await,
 			Method::Relate => self.relate(session, params).await,
 			Method::Run => self.run(session, params).await,
-			Method::GraphQL => self.graphql(session, params).await,
 			Method::InsertRelation => self.insert_relation(session, params).await,
 			Method::Sessions => self.sessions().await,
 			_ => Err(RpcError::MethodNotFound),
 		}
-	}
-
-	async fn sessions(&self) -> Result<DbResult, RpcError> {
-		Ok(DbResult::Other(PublicValue::Array(
-			self.list_sessions().into_iter().map(|x| PublicValue::Uuid(PublicUuid(x))).collect(),
-		)))
 	}
 
 	// ------------------------------
@@ -197,7 +249,6 @@ pub trait RpcProtocolV1: RpcContext {
 			crate::iam::signup::signup(self.kvs(), &mut session, params.into())
 				.await
 				.map(|v| v.token.clone().map(PublicValue::String).unwrap_or(PublicValue::None));
-
 		// Store the updated session
 		self.set_session(session_id, Arc::new(session));
 		// Drop the mutex guard
@@ -258,8 +309,6 @@ pub trait RpcProtocolV1: RpcContext {
 			crate::iam::verify::token(self.kvs(), &mut session, token.as_str())
 				.await
 				.map(|_| PublicValue::None);
-
-		tracing::debug!("authenticate out: {out:?}");
 		// Store the updated session
 		self.set_session(session_id, Arc::new(session));
 		// Drop the mutex guard
@@ -1120,138 +1169,6 @@ pub trait RpcProtocolV1: RpcContext {
 		let res = res.remove(0).result?;
 		Ok(DbResult::Other(res))
 	}
-
-	// ------------------------------
-	// Methods for querying with GraphQL
-	// ------------------------------
-
-	#[cfg(target_family = "wasm")]
-	async fn graphql(
-		&self,
-		_session_id: Option<Uuid>,
-		_: PublicArray,
-	) -> Result<DbResult, RpcError> {
-		Err(RpcError::MethodNotFound)
-	}
-
-	#[cfg(not(target_family = "wasm"))]
-	async fn graphql(
-		&self,
-		session_id: Option<Uuid>,
-		_params: PublicArray,
-	) -> Result<DbResult, RpcError> {
-		//use crate::gql;
-
-		// Check if the user is allowed to query
-		if !self.kvs().allows_query_by_subject(self.get_session(session_id.as_ref()).au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
-		}
-		if !self.kvs().get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
-			return Err(RpcError::BadGQLConfig);
-		}
-
-		// TODO(3.0.0): Reimplement GraphQL.
-		Err(RpcError::from(anyhow::Error::new(Error::Unimplemented("graphql".to_owned()))))
-
-		/*
-		if !Self::GQL_SUPPORT {
-			return Err(RpcError::BadGQLConfig);
-		}
-
-		let Ok((query, options)) = params.needs_one_or_two() else {
-			return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.into_vec())));
-		};
-
-		enum GraphQLFormat {
-			Json,
-		}
-
-		// Default to compressed output
-		let mut pretty = false;
-		// Default to graphql json format
-		let mut format = GraphQLFormat::Json;
-		// Process any secondary config options
-		match options {
-			// A config object was passed
-			SqlValue::Object(o) => {
-				for (k, v) in o {
-					match (k.as_str(), v) {
-						("pretty", SqlValue::Bool(b)) => pretty = b,
-						("format", SqlValue::String(s)) => match s.as_str() {
-							"json" => format = GraphQLFormat::Json,
-							_ => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.into_vec()))),
-						},
-						_ => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.into_vec()))),
-					}
-				}
-			}
-			// The config argument was not supplied
-			SqlValue::None => (),
-			// An invalid config argument was received
-			_ => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.into_vec()))),
-		}
-		// Process the graphql query argument
-		let req = match query {
-			// It is a string, so parse the query
-			SqlValue::String(s) => match format {
-				GraphQLFormat::Json => {
-					let tmp: BatchRequest =
-						serde_json::from_str(s.as_str()).map_err(|_| RpcError::ParseError)?;
-					tmp.into_single().map_err(|_| RpcError::ParseError)?
-				}
-			},
-			// It is an object, so build the query
-			SqlValue::Object(mut o) => {
-				// We expect a `query` key with the graphql query
-				let mut tmp = match o.remove("query") {
-					Some(SqlValue::String(s)) => async_graphql::Request::new(s),
-					_ => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.into_vec()))),
-				};
-				// We can accept a `variables` key with graphql variables
-				match o.remove("variables").or(o.remove("vars")) {
-					Some(obj @ SqlValue::Object(_)) => {
-						let gql_vars = gql::schema::sql_value_to_gql_value(obj.into())
-							.map_err(|_| RpcError::InvalidRequest)?;
-
-						tmp = tmp.variables(async_graphql::Variables::from_value(gql_vars));
-					}
-					Some(_) => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.into_vec()))),
-					None => {}
-				}
-				// We can accept an `operation` key with a graphql operation name
-				match o.remove("operationName").or(o.remove("operation")) {
-					Some(SqlValue::String(s)) => tmp = tmp.operation_name(s),
-					Some(_) => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.into_vec()))),
-					None => {}
-				}
-				// Return the graphql query object
-				tmp
-			}
-			// We received an invalid graphql query
-			_ => return Err(RpcError::InvalidParams(format!("Expected (query, options) got {:?}", params.into_vec()))),
-		};
-		// Process and cache the graphql schema
-		let schema = self
-			.graphql_schema_cache()
-			.get_schema(&self.get_session(session_id.as_ref()))
-			.await
-			.map_err(|e| RpcError::Thrown(e.to_string()))?;
-		// Execute the request against the schema
-		let res = schema.execute(req).await;
-		// Serialize the graphql response
-		let out = if pretty {
-			let mut buf = Vec::new();
-			let formatter = serde_json::ser::PrettyFormatter::with_indent(b"    ");
-			let mut ser = serde_json::Serializer::with_formatter(&mut buf, formatter);
-			res.serialize(&mut ser).ok().and_then(|_| String::from_utf8(buf).ok())
-		} else {
-			serde_json::to_string(&res).ok()
-		}
-		.ok_or(RpcError::Thrown("Serialization Error".to_string()))?;
-		// Output the graphql response
-		Ok(PublicValue::String(out.into()).into())
-			*/
-	}
 }
 
 enum QueryForm<'a> {
@@ -1266,7 +1183,7 @@ async fn run_query<T>(
 	vars: Option<PublicVariables>,
 ) -> Result<Vec<QueryResult>>
 where
-	T: RpcContext + ?Sized,
+	T: RpcProtocol + ?Sized,
 {
 	let session = this.get_session(session_id.as_ref());
 	ensure!(T::LQ_SUPPORT || !session.rt, RpcError::BadLQConfig);
