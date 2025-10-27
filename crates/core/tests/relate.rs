@@ -18,7 +18,7 @@ async fn relate_with_parameters() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 4);
 
 	// USE NS test DB test;
@@ -62,7 +62,7 @@ async fn relate_and_overwrite() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 6);
 
 	// USE NS test DB test;
@@ -137,7 +137,7 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 9);
 
 	// USE NS test DB test;
@@ -216,7 +216,7 @@ async fn relate_with_complex_table() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;

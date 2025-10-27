@@ -21,7 +21,7 @@ async fn strict_typing_inline() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 9);
 	//
 	let tmp = res.remove(0).result;
@@ -137,7 +137,7 @@ async fn strict_typing_defined() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 8);
 	//
 	let tmp = res.remove(0).result;

@@ -77,7 +77,7 @@ async fn delete_update_mtree_index() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 9);
 	//
 	for _ in 0..8 {
@@ -125,7 +125,7 @@ async fn index_embedding() -> Result<()> {
 
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let _ = res.remove(0).result?;
@@ -318,7 +318,7 @@ async fn select_mtree_knn_with_condition() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	skip_ok(res, 3)?;
@@ -392,7 +392,7 @@ async fn select_hnsw_knn_with_condition() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	skip_ok(res, 3)?;
@@ -465,7 +465,7 @@ async fn select_bruteforce_knn_with_condition() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	skip_ok(res, 2)?;

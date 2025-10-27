@@ -34,7 +34,7 @@ async fn define_foreign_table() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 11);
 	//
 	let tmp = res.remove(0).result;
@@ -182,7 +182,7 @@ async fn define_foreign_table_no_doubles() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 7);
 	//
 	skip_ok(res, 5)?;
@@ -269,7 +269,7 @@ async fn define_foreign_table_group(cond: bool, agr: &str) -> Result<()> {
 	);
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(&sql, &ses, None).await?;
+	let res = &mut dbs.execute(&sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 29);
 	//
 	skip_ok(res, 2)?;

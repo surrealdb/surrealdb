@@ -668,6 +668,49 @@ impl Executor {
 		Self::execute_expr_stream(kvs, ctx, opt, false, stream, txn).await
 	}
 
+	/// Execute a logical plan with an existing transaction
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	pub async fn execute_plan_with_transaction(
+		_kvs: &Datastore,
+		ctx: Context,
+		opt: Options,
+		qry: LogicalPlan,
+	) -> Result<Vec<QueryResult>> {
+		// The transaction is already set in the context
+		// Execute each expression with the transaction
+		let tx = ctx.tx();
+		let mut executor = Executor::new(ctx, opt);
+		let mut results = Vec::new();
+
+		for expr in qry.expressions {
+			let start = Instant::now();
+			let result = executor.execute_plan_in_transaction(tx.clone(), &start, expr).await;
+
+			let time = start.elapsed();
+			let query_result = match result {
+				Ok(value) | Err(ControlFlow::Return(value)) => QueryResult {
+					time,
+					result: crate::val::convert_value_to_public_value(value)
+						.map_err(|e| crate::rpc::DbResultError::InternalError(e.to_string())),
+					query_type: QueryType::Other,
+				},
+				Err(ControlFlow::Err(e)) => QueryResult {
+					time,
+					result: Err(DbResultError::InternalError(e.to_string())),
+					query_type: QueryType::Other,
+				},
+				Err(ControlFlow::Continue) | Err(ControlFlow::Break) => QueryResult {
+					time,
+					result: Err(DbResultError::InternalError("Invalid control flow".to_string())),
+					query_type: QueryType::Other,
+				},
+			};
+			results.push(query_result);
+		}
+
+		Ok(results)
+	}
+
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	pub async fn execute_stream<S>(
 		kvs: &Datastore,
@@ -698,7 +741,7 @@ impl Executor {
 		opt: Options,
 		skip_success_results: bool,
 		stream: S,
-		txn: Option<Uuid>,
+		_txn: Option<Uuid>,
 	) -> Result<Vec<QueryResult>>
 	where
 		S: Stream<Item = Result<TopLevelExpr>>,
@@ -899,7 +942,7 @@ mod tests {
 			{
 				let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(true);
 
-				let res = ds.execute(statement, session, None).await;
+				let res = ds.execute(statement, session, None, None).await;
 
 				if *should_succeed {
 					assert!(res.is_ok(), "{}: {:?}", msg, res);
@@ -919,8 +962,9 @@ mod tests {
 		{
 			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(true);
 
-			let res =
-				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			let res = ds
+				.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None, None)
+				.await;
 
 			let err = res.unwrap_err().to_string();
 			assert!(
@@ -934,8 +978,9 @@ mod tests {
 		{
 			let ds = Datastore::new("memory").await.unwrap().with_auth_enabled(false);
 
-			let res =
-				ds.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			let res = ds
+				.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None, None)
+				.await;
 
 			assert!(
 				res.is_ok(),
@@ -951,21 +996,24 @@ mod tests {
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let stmt = "UPDATE test TIMEOUT 2s";
-			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			let res =
+				ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None, None).await;
 			assert!(res.is_ok(), "Failed to execute statement with small timeout: {:?}", res);
 		}
 		// With large timeout
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let stmt = "UPDATE test TIMEOUT 31540000s"; // 1 year
-			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			let res =
+				ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None, None).await;
 			assert!(res.is_ok(), "Failed to execute statement with large timeout: {:?}", res);
 		}
 		// With very large timeout
 		{
 			let ds = Datastore::new("memory").await.unwrap();
 			let stmt = "UPDATE test TIMEOUT 9460800000000000000s"; // 300 billion years
-			let res = ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None).await;
+			let res =
+				ds.execute(stmt, &Session::default().with_ns("NS").with_db("DB"), None, None).await;
 			assert!(res.is_ok(), "Failed to execute statement with very large timeout: {:?}", res);
 			let err = res.unwrap()[0].result.as_ref().unwrap_err().to_string();
 			assert!(

@@ -267,6 +267,7 @@ mod tests {
 				"#,
 				&sess,
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -334,6 +335,7 @@ mod tests {
 				"#,
 				&sess,
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -387,6 +389,7 @@ mod tests {
 				}
 				"#,
 				&sess,
+				None,
 				None,
 			)
 			.await
@@ -443,6 +446,7 @@ mod tests {
 				}
 				"#,
 				&sess,
+				None,
 				None,
 			)
 			.await
@@ -628,6 +632,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				),
 				&sess,
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -740,6 +745,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"#,
 				&sess,
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -835,6 +841,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"#,
 				&sess,
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -905,11 +912,12 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					DURATION FOR SESSION 2h
 				;
 				"#,
-				&sess,
-				None,
-			)
-			.await
-			.unwrap();
+			&sess,
+			None,
+			None,
+		)
+		.await
+		.unwrap();
 
 			// Signin with the user
 			let mut sess = Session {
@@ -951,6 +959,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				;
 				"#,
 				&sess,
+				None,
 				None,
 			)
 			.await
@@ -1010,6 +1019,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				;
 				"#,
 				&sess,
+				None,
 				None,
 			)
 			.await
@@ -1091,6 +1101,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				;
 				"#,
 				&sess,
+				None,
 				None,
 			)
 			.await

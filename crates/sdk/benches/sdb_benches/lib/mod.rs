@@ -27,7 +27,7 @@ pub(super) async fn init(target: &str) {
 			);
 			println!("\n### Using path: {} ###\n", path);
 			let ds = Datastore::new(&path).await.unwrap();
-			ds.execute("INFO FOR DB", &Session::owner().with_ns("ns").with_db("db"), None)
+			ds.execute("INFO FOR DB", &Session::owner().with_ns("ns").with_db("db"), None, None)
 				.await
 				.expect("Unable to execute the query");
 			let _ = DB.set(Arc::new(ds));
@@ -43,7 +43,7 @@ pub(super) async fn init(target: &str) {
 			);
 			println!("\n### Using path: {} ###\n", path);
 			let ds = Datastore::new(&path).await.unwrap();
-			ds.execute("INFO FOR DB", &Session::owner().with_ns("ns").with_db("db"), None)
+			ds.execute("INFO FOR DB", &Session::owner().with_ns("ns").with_db("db"), None, None)
 				.await
 				.expect("Unable to execute the query");
 			let _ = DB.set(Arc::new(ds));

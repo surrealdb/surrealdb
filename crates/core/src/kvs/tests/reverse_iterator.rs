@@ -28,7 +28,7 @@ async fn test(new_ds: impl CreateDs, index: &str) -> Vec<QueryResult> {
 		SELECT v FROM i ORDER BY v DESC;"
 	);
 
-	let mut r = ds.execute(&sql, &Session::owner(), None).await.unwrap();
+	let mut r = ds.execute(&sql, &Session::owner(), None, None).await.unwrap();
 	assert_eq!(r.len(), 10);
 	// Check the first statements are successful
 	for _ in 0..4 {
@@ -230,7 +230,7 @@ pub async fn range(new_ds: impl CreateDs) {
 		SELECT * FROM t:[500]..[550] ORDER BY id DESC LIMIT 3;
 		SELECT * FROM t:[500]..=[550] ORDER BY id DESC LIMIT 3 EXPLAIN;
 	";
-	let mut r = ds.execute(sql, &Session::owner(), None).await.unwrap();
+	let mut r = ds.execute(sql, &Session::owner(), None, None).await.unwrap();
 	//Check the result
 	for _ in 0..3 {
 		check(&mut r, "NONE");

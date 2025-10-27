@@ -20,7 +20,7 @@ async fn field_definition_value_reference() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result;
@@ -125,7 +125,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 	";
 	let dbs = new_ds().await?.with_auth_enabled(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result;
@@ -180,7 +180,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 		"test",
 		Value::RecordId(RecordId::new("user", "one".to_string())),
 	);
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -214,7 +214,7 @@ async fn field_definition_readonly() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;

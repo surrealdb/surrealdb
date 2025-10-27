@@ -134,6 +134,28 @@ impl Command {
 				params: None,
 				transaction: None,
 			},
+			Command::Begin => RouterRequest {
+				id,
+				method: "begin",
+				params: None,
+				transaction: None,
+			},
+			Command::Commit {
+				txn,
+			} => RouterRequest {
+				id,
+				method: "commit",
+				params: Some(Value::Array(Array::from(vec![Value::Uuid(Uuid(txn))]))),
+				transaction: None,
+			},
+			Command::Rollback {
+				txn,
+			} => RouterRequest {
+				id,
+				method: "cancel",
+				params: Some(Value::Array(Array::from(vec![Value::Uuid(Uuid(txn))]))),
+				transaction: None,
+			},
 			Command::Query {
 				txn,
 				query,

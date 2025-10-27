@@ -17,6 +17,15 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 
 			let query_result = match cmd {
 				Command::Invalidate | Command::Health => query_result,
+				Command::Begin => {
+					query_result.with_result(Ok(Value::Uuid(uuid::Uuid::now_v7().into())))
+				}
+				Command::Commit {
+					..
+				}
+				| Command::Rollback {
+					..
+				} => query_result,
 				Command::Authenticate {
 					..
 				}

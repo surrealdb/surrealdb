@@ -33,7 +33,7 @@ async fn concurrency() -> Result<()> {
 		let sql = query(limit, MILLIS);
 		let dbs = new_ds().await?;
 		let ses = Session::owner().with_ns("test").with_db("test");
-		let res = dbs.execute(&sql, &ses, None).await;
+		let res = dbs.execute(&sql, &ses, None, None).await;
 
 		match res {
 			Err(err) => {

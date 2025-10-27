@@ -74,7 +74,7 @@ async fn execute_and_return(
 	expr: Option<String>,
 ) -> Result<Output, anyhow::Error> {
 	let vars = if let Some(expr) = expr {
-		let mut value = db.execute(&expr, session, Some(vars.clone())).await?;
+		let mut value = db.execute(&expr, session, Some(vars.clone()), None).await?;
 		if let Some(resp) = value.pop() {
 			vars.insert("data".to_owned(), resp.result?);
 		}
@@ -83,7 +83,7 @@ async fn execute_and_return(
 		vars
 	};
 
-	match db.execute(sql, session, Some(vars)).await {
+	match db.execute(sql, session, Some(vars), None).await {
 		Ok(res) => match accept {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => {

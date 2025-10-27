@@ -62,7 +62,7 @@ pub(crate) struct RouterState {
 	pub(crate) vars: Arc<RwLock<Variables>>,
 	pub(crate) live_queries: Arc<RwLock<LiveQueryMap>>,
 	pub(crate) session: Arc<RwLock<Session>>,
-	pub(crate) transactions: Arc<RwLock<HashMap<Uuid, Transaction>>>,
+	pub(crate) transactions: Arc<RwLock<HashMap<Uuid, Arc<Transaction>>>>,
 }
 
 pub(crate) async fn run_router(
@@ -130,10 +130,10 @@ pub(crate) async fn run_router(
 	let session = Arc::new(RwLock::new(Session::default().with_rt(true)));
 
 	let router_state = RouterState {
-		kvs,
-		vars,
-		live_queries,
-		session,
+		kvs: kvs.clone(),
+		vars: vars.clone(),
+		live_queries: live_queries.clone(),
+		session: session.clone(),
 		transactions: Arc::new(RwLock::new(HashMap::new())),
 	};
 
@@ -254,14 +254,18 @@ pub(crate) async fn run_router(
 					continue
 				};
 
+				let kvs_clone = kvs.clone();
+				let vars_clone = vars.clone();
+				let session_clone = session.clone();
+				let live_queries_clone = live_queries.clone();
 				tokio::spawn(async move {
 					let id = notification.id.0;
-					if let Some(sender) = live_queries.read().await.get(&id) {
+					if let Some(sender) = live_queries_clone.read().await.get(&id) {
 
 						if sender.send(Ok(notification)).await.is_err() {
-							live_queries.write().await.remove(&id);
+							live_queries_clone.write().await.remove(&id);
 							if let Err(error) =
-								super::kill_live_query(&kvs, id, &*session.read().await, vars.read().await.clone()).await
+								super::kill_live_query(&kvs_clone, id, &*session_clone.read().await, vars_clone.read().await.clone()).await
 							{
 								warn!("Failed to kill live query '{id}'; {error}");
 							}

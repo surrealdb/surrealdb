@@ -16,7 +16,7 @@ async fn select_field_value() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
@@ -80,7 +80,7 @@ async fn select_field_and_omit() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
@@ -171,7 +171,7 @@ async fn select_expression_value() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
@@ -288,7 +288,7 @@ async fn select_dynamic_array_keys_and_object_keys() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 8);
 	//
 	let tmp = res.remove(0).result;
@@ -392,7 +392,7 @@ async fn select_writeable_subqueries() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result;
@@ -439,7 +439,7 @@ async fn select_where_field_is_bool() -> Result<()> {
 
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result?;
@@ -537,7 +537,7 @@ async fn select_where_field_is_record_and_with_index() -> Result<()> {
 		SELECT * FROM post WHERE author = person:tobie;";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let _ = res.remove(0).result?;
@@ -635,7 +635,7 @@ async fn select_where_and_with_index() -> Result<()> {
 		SELECT name FROM person WHERE name = 'Tobie' AND genre = 'm';";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let _ = res.remove(0).result?;
@@ -690,7 +690,7 @@ async fn select_where_and_with_unique_index() -> Result<()> {
 		SELECT name FROM person WHERE name = 'Jaime' AND genre = 'm';";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let _ = res.remove(0).result?;
@@ -745,7 +745,7 @@ async fn select_where_explain() -> Result<()> {
 		SELECT * FROM person,software EXPLAIN FULL;";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let _ = res.remove(0).result?;
@@ -828,7 +828,7 @@ async fn select_with_function_field() -> Result<()> {
 	let sql = "SELECT *, function() { return this.a } AS b FROM [{ a: 1 }];";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	let tmp = res.remove(0).result?;
 	let val = syn::value("[{ a: 1, b: 1 }]").unwrap();
 	assert_eq!(tmp, val);
@@ -975,7 +975,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 			// Prepare datastore
 			let mut resp = ds
-				.execute("CREATE person", &Session::owner().with_ns("NS").with_db("DB"), None)
+				.execute("CREATE person", &Session::owner().with_ns("NS").with_db("DB"), None, None)
 				.await
 				.unwrap();
 			let res = resp.remove(0).output();
@@ -984,7 +984,12 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				"unexpected error creating person record"
 			);
 			let mut resp = ds
-				.execute("CREATE person", &Session::owner().with_ns("OTHER_NS").with_db("DB"), None)
+				.execute(
+					"CREATE person",
+					&Session::owner().with_ns("OTHER_NS").with_db("DB"),
+					None,
+					None,
+				)
 				.await
 				.unwrap();
 			let res = resp.remove(0).output();
@@ -993,7 +998,12 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				"unexpected error creating person record"
 			);
 			let mut resp = ds
-				.execute("CREATE person", &Session::owner().with_ns("NS").with_db("OTHER_DB"), None)
+				.execute(
+					"CREATE person",
+					&Session::owner().with_ns("NS").with_db("OTHER_DB"),
+					None,
+					None,
+				)
 				.await
 				.unwrap();
 			let res = resp.remove(0).output();
@@ -1003,7 +1013,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			);
 
 			// Run the test
-			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
+			let mut resp = ds.execute(statement, &sess, None, None).await.unwrap();
 			let res = resp.remove(0).output();
 
 			// Select always succeeds, but the result may be empty
@@ -1040,6 +1050,7 @@ async fn check_permissions_auth_enabled() {
 				"DEFINE TABLE person PERMISSIONS NONE; CREATE person;",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -1047,7 +1058,12 @@ async fn check_permissions_auth_enabled() {
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 
 		let mut resp = ds
-			.execute("SELECT * FROM person", &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute(
+				"SELECT * FROM person",
+				&Session::default().with_ns("NS").with_db("DB"),
+				None,
+				None,
+			)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -1068,6 +1084,7 @@ async fn check_permissions_auth_enabled() {
 				"DEFINE TABLE person PERMISSIONS FULL; CREATE person;",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -1075,7 +1092,12 @@ async fn check_permissions_auth_enabled() {
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 
 		let mut resp = ds
-			.execute("SELECT * FROM person", &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute(
+				"SELECT * FROM person",
+				&Session::default().with_ns("NS").with_db("DB"),
+				None,
+				None,
+			)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -1110,6 +1132,7 @@ async fn check_permissions_auth_disabled() {
 				"DEFINE TABLE person PERMISSIONS NONE; CREATE person;",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -1117,7 +1140,12 @@ async fn check_permissions_auth_disabled() {
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 
 		let mut resp = ds
-			.execute("SELECT * FROM person", &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute(
+				"SELECT * FROM person",
+				&Session::default().with_ns("NS").with_db("DB"),
+				None,
+				None,
+			)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -1138,6 +1166,7 @@ async fn check_permissions_auth_disabled() {
 				"DEFINE TABLE person PERMISSIONS FULL; CREATE person;",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -1145,7 +1174,12 @@ async fn check_permissions_auth_disabled() {
 		assert!(res.is_ok(), "failed to create table: {:?}", res);
 
 		let mut resp = ds
-			.execute("SELECT * FROM person", &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute(
+				"SELECT * FROM person",
+				&Session::default().with_ns("NS").with_db("DB"),
+				None,
+				None,
+			)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -1168,7 +1202,7 @@ async fn select_issue_3510() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let _ = res.remove(0).result?;
@@ -1201,7 +1235,7 @@ async fn select_destructure() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 3);
 	//
 	let tmp = res.remove(0).result?;
@@ -1276,7 +1310,7 @@ async fn select_field_from_graph_no_flattening() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
@@ -1354,7 +1388,7 @@ async fn select_field_value_permissions() -> Result<()> {
 		CREATE user:1;
 	"#;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 6);
 	//
 	let _ = res.remove(0).result?;
@@ -1394,7 +1428,7 @@ async fn select_field_value_permissions() -> Result<()> {
 		SELECT VALUE private FROM data WHERE id = data:1;
 	"#;
 	let ses = Session::for_record("test", "test", "user", syn::value("user:1").unwrap());
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result?;
@@ -1440,7 +1474,7 @@ async fn select_order_by_rand_large() -> Result<()> {
 		SELECT * FROM $array ORDER BY RAND()
 	"#;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 2);
 	let _ = res.remove(0).result?;
 

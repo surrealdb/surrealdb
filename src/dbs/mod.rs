@@ -1031,7 +1031,7 @@ mod tests {
 
 		for (idx, (ds, sess, query, succeeds, contains)) in cases.into_iter().enumerate() {
 			info!("Test case {idx}: query={query}, succeeds={succeeds}");
-			let res = ds.execute(&query, &sess, None).await;
+			let res = ds.execute(&query, &sess, None, None).await;
 
 			if !succeeds && res.is_err() {
 				let res = res.unwrap_err();

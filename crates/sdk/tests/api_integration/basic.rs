@@ -1712,25 +1712,77 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 }
 
 pub async fn client_side_transactions(new_db: impl CreateDb) {
-    #[derive(Debug, Clone, SurrealValue)]
-    struct User {
-        name: String,
-        email: String,
-    }
-
+	#[derive(Debug, Clone, SurrealValue, PartialEq)]
+	struct User {
+		name: String,
+		email: String,
+	}
 
 	let (permit, db) = new_db.create_db().await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 
+	// Test 1: Commit a transaction
 	let txn = db.begin().await.unwrap();
-	let user: Option<User> = txn.create("user").content(User {
-		name: "John".to_owned(),
-		email: "john@example.com".to_owned(),
-	}).await.unwrap();
+	let user: Option<User> = txn
+		.create("user")
+		.content(User {
+			name: "John".to_owned(),
+			email: "john@example.com".to_owned(),
+		})
+		.await
+		.unwrap();
+	assert!(user.is_some());
 	txn.commit().await.unwrap();
 
-	let user: Option<User> = txn.select("user").await.unwrap();
-	assert!(user.is_some());
+	// Verify the user was created by querying through the main db connection
+	let users: Vec<User> = db.select("user").await.unwrap();
+	assert_eq!(users.len(), 1);
+	assert_eq!(users[0].name, "John");
+	assert_eq!(users[0].email, "john@example.com");
+
+	// Test 2: Cancel a transaction (rollback)
+	let txn = db.begin().await.unwrap();
+	let _: Option<User> = txn
+		.create("user")
+		.content(User {
+			name: "Jane".to_owned(),
+			email: "jane@example.com".to_owned(),
+		})
+		.await
+		.unwrap();
+	// Cancel the transaction - the user should not be persisted
+	txn.cancel().await.unwrap();
+
+	// Verify Jane was not created
+	let users: Vec<User> = db.select("user").await.unwrap();
+	assert_eq!(users.len(), 1); // Still only John
+	assert_eq!(users[0].name, "John");
+
+	// Test 3: Multiple operations in a single transaction
+	let txn = db.begin().await.unwrap();
+	let _: Option<User> = txn
+		.create(("user", "alice"))
+		.content(User {
+			name: "Alice".to_owned(),
+			email: "alice@example.com".to_owned(),
+		})
+		.await
+		.unwrap();
+	let _: Option<User> = txn
+		.create(("user", "bob"))
+		.content(User {
+			name: "Bob".to_owned(),
+			email: "bob@example.com".to_owned(),
+		})
+		.await
+		.unwrap();
+	txn.commit().await.unwrap();
+
+	// Verify all users were created
+	let users: Vec<User> = db.select("user").await.unwrap();
+	assert_eq!(users.len(), 3); // John, Alice, Bob
+
+	drop(permit);
 }
 
 define_include_tests!(basic => {

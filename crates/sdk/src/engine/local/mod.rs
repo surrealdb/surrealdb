@@ -152,7 +152,6 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 #[cfg(not(target_family = "wasm"))]
 use std::pin::pin;
-use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
 use std::task::{Poll, ready};
 #[cfg(not(target_family = "wasm"))]
@@ -165,9 +164,9 @@ use futures::StreamExt;
 use futures::stream::poll_fn;
 use surrealdb_core::dbs::{QueryResult, QueryResultBuilder, Session};
 use surrealdb_core::iam;
-use surrealdb_core::kvs::{Datastore, LockType, TransactionType};
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
+use surrealdb_core::kvs::{Datastore, LockType, TransactionType};
 use surrealdb_core::rpc::DbResultError;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::{
@@ -175,7 +174,6 @@ use surrealdb_core::{
 	ml::storage::surml_file::SurMlFile,
 };
 use surrealdb_types::{Notification, ToSql, Value, Variables};
-use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
 	fs::OpenOptions,
@@ -537,7 +535,7 @@ async fn kill_live_query(
 ) -> std::result::Result<Vec<QueryResult>, DbResultError> {
 	let sql = format!("KILL {id}");
 
-	let results = kvs.execute(&sql, session, Some(vars)).await?;
+	let results = kvs.execute(&sql, session, Some(vars), None).await?;
 	Ok(results)
 }
 
@@ -614,8 +612,9 @@ async fn router(
 			let result = match kvs.transaction(TransactionType::Write, LockType::Optimistic).await {
 				Ok(txn) => {
 					let id = Uuid::now_v7();
-					transactions.write().await.insert(id, txn);
-					query_result.finish_with_result(Ok(Value::Uuid(id.into())))},
+					transactions.write().await.insert(id, std::sync::Arc::new(txn));
+					query_result.finish_with_result(Ok(Value::Uuid(id.into())))
+				}
 				Err(error) => query_result
 					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
 			};
@@ -624,25 +623,53 @@ async fn router(
 		Command::Rollback {
 			txn,
 		} => {
-			let txn = transactions.read().await.get(&txn).unwrap();
-			txn.cancel().await?;
+			let tx = transactions.write().await.remove(&txn);
+			if let Some(tx) = tx {
+				tx.cancel().await?;
+			}
 			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		Command::Commit {
 			txn,
 		} => {
-			let txn = transactions.read().await.get(&txn).unwrap();
-			txn.commit().await?;
+			let tx = transactions.write().await.remove(&txn);
+			if let Some(tx) = tx {
+				tx.commit().await?;
+			}
 			Ok(vec![QueryResultBuilder::instant_none()])
 		}
 		Command::Query {
-			txn: _,
+			txn,
 			query,
 			variables,
 		} => {
 			let mut vars = vars.read().await.clone();
 			vars.extend(variables);
-			let response = kvs.execute(query.as_ref(), &*session.read().await, Some(vars)).await?;
+
+			// If a transaction UUID is provided, we need to retrieve it and use it
+			let response = if let Some(txn_id) = txn {
+				// Retrieve the transaction from storage
+				let tx_option = transactions.read().await.get(&txn_id).cloned();
+				if let Some(tx) = tx_option {
+					// Execute with the existing transaction
+					kvs.execute_with_transaction(
+						query.as_ref(),
+						&*session.read().await,
+						Some(vars),
+						tx,
+					)
+					.await?
+				} else {
+					// Transaction not found - return error
+					return Ok(vec![QueryResultBuilder::started_now().finish_with_result(Err(
+						DbResultError::InternalError("Transaction not found".to_string()),
+					))]);
+				}
+			} else {
+				// No transaction - use normal execution
+				kvs.execute(query.as_ref(), &*session.read().await, Some(vars), None).await?
+			};
+
 			Ok(response)
 		}
 
@@ -728,7 +755,7 @@ async fn router(
 
 			// Write to channel.
 			let session = session.read().await;
-			let export = export_ml(kvs, &session, tx, config);
+			let export = export_ml(&kvs, &session, tx, config);
 
 			// Read from channel and write to pipe.
 			let bridge = async move {
@@ -995,8 +1022,9 @@ async fn router(
 			};
 
 			// Execute the query
-			let results =
-				kvs.execute(&sql, &*session.read().await, Some(vars.read().await.clone())).await?;
+			let results = kvs
+				.execute(&sql, &*session.read().await, Some(vars.read().await.clone()), None)
+				.await?;
 			Ok(results)
 		}
 	}

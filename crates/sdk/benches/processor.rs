@@ -62,7 +62,7 @@ async fn prepare_data() -> Input {
 		DEFINE ANALYZER simple TOKENIZERS blank,class;
 		DEFINE INDEX search ON item FIELDS label SEARCH ANALYZER simple BM25"
 		.to_owned();
-	let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
+	let res = &mut dbs.execute(&sql, &ses, None, None).await.unwrap();
 	for _ in 0..3 {
 		res.remove(0).result.unwrap();
 	}
@@ -87,7 +87,7 @@ async fn prepare_data() -> Input {
 		CREATE item SET id = {d}, name = '{d}', number = 3, label='delta';
 		CREATE item SET id = {e}, name = '{e}', number = 4, label='echo';",
 		);
-		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
+		let res = &mut dbs.execute(&sql, &ses, None, None).await.unwrap();
 		for _ in 0..5 {
 			res.remove(0).result.unwrap();
 		}
@@ -100,7 +100,7 @@ async fn prepare_data() -> Input {
 }
 
 async fn run(i: &Input, q: &str, expected: usize) {
-	let mut r = i.dbs.execute(black_box(q), &i.ses, None).await.unwrap();
+	let mut r = i.dbs.execute(black_box(q), &i.ses, None, None).await.unwrap();
 	if cfg!(debug_assertions) {
 		assert_eq!(r.len(), 1);
 		if let Value::Array(a) = r.remove(0).result.unwrap() {

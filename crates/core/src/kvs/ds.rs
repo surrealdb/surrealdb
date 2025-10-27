@@ -1222,6 +1222,76 @@ impl Datastore {
 		self.process(ast, sess, vars, txn).await
 	}
 
+	/// Execute a query with an existing transaction
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn execute_with_transaction(
+		&self,
+		txt: &str,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		tx: Arc<Transaction>,
+	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+		// Parse the SQL query text
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities)
+			.map_err(|e| DbResultError::ParseError(e.to_string()))?;
+		// Process the AST with the transaction
+		self.process_with_transaction(ast, sess, vars, tx).await
+	}
+
+	/// Process an AST with an existing transaction
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn process_with_transaction(
+		&self,
+		ast: Ast,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		tx: Arc<Transaction>,
+	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(DbResultError::InvalidAuth("The session has expired".to_string()));
+		}
+
+		// Check if anonymous actors can execute queries when auth is enabled
+		if let Err(e) = self.check_anon(sess) {
+			return Err(DbResultError::InvalidAuth(format!("Anonymous access not allowed: {}", e)));
+		}
+
+		// Create a new query options
+		let opt = self.setup_options(sess);
+
+		// Create a default context
+		let mut ctx = self.setup_ctx().map_err(|e| match e.downcast_ref::<Error>() {
+			Some(Error::ExpiredSession) => {
+				DbResultError::InvalidAuth("The session has expired".to_string())
+			}
+			_ => DbResultError::InternalError(e.to_string()),
+		})?;
+
+		// Store the query variables
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars.into()).map_err(|e| match e {
+				Error::InvalidParam {
+					..
+				} => DbResultError::InvalidParams("Invalid query variables".to_string()),
+				_ => DbResultError::InternalError(e.to_string()),
+			})?;
+		}
+
+		// Set the transaction in the context
+		ctx.set_transaction(tx);
+
+		// Process all statements with the transaction
+		Executor::execute_plan_with_transaction(self, ctx.freeze(), opt, ast.into()).await.map_err(
+			|e| match e.downcast_ref::<Error>() {
+				Some(Error::ExpiredSession) => {
+					DbResultError::InvalidAuth("The session has expired".to_string())
+				}
+				_ => DbResultError::InternalError(e.to_string()),
+			},
+		)
+	}
+
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn execute_import<S>(
 		&self,
@@ -2119,7 +2189,7 @@ mod test {
 		// Test the scenario by making sure the custom password doesn't change.
 		let sql = "DEFINE USER root ON ROOT PASSWORD 'test' ROLES OWNER";
 		let sess = Session::owner();
-		ds.execute(sql, &sess, None).await.unwrap();
+		ds.execute(sql, &sess, None, None).await.unwrap();
 		let pass_hash = ds
 			.transaction(Read, Optimistic)
 			.await
@@ -2224,7 +2294,7 @@ mod test {
 		// Define the table, set the initial uuids
 		let (initial, initial_live_query_version) = {
 			let sql = r"DEFINE TABLE test;".to_owned();
-			let res = &mut ds.execute(&sql, &ses, None).await?;
+			let res = &mut ds.execute(&sql, &ses, None, None).await?;
 			assert_eq!(res.len(), 1);
 			res.remove(0).result.unwrap();
 			// Obtain the initial uuids
@@ -2246,7 +2316,7 @@ mod test {
 		LIVE SELECT * FROM test;
 	"
 			.to_owned();
-			let res = &mut ds.execute(&sql, &ses, None).await?;
+			let res = &mut ds.execute(&sql, &ses, None, None).await?;
 			assert_eq!(res.len(), 5);
 			res.remove(0).result.unwrap();
 			res.remove(0).result.unwrap();
@@ -2284,7 +2354,7 @@ mod test {
 	"
 			.to_owned();
 			let vars = PublicVariables::from(map! { "lqid".to_string() => lqid });
-			let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
+			let res = &mut ds.execute(&sql, &ses, Some(vars), None).await?;
 			assert_eq!(res.len(), 5);
 			res.remove(0).result.unwrap();
 			res.remove(0).result.unwrap();

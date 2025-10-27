@@ -47,7 +47,7 @@ async fn query_timeout() -> Result<()> {
 	let ds = new_ds().await?.with_query_timeout(Some(Duration::from_millis(500)));
 	let session = Session::owner();
 	let before = Instant::now();
-	let mut res = ds.execute(sql, &session, None).await.unwrap();
+	let mut res = ds.execute(sql, &session, None, None).await.unwrap();
 	if before.elapsed() > Duration::from_millis(7050) {
 		panic!("Query did not properly timeout");
 	}

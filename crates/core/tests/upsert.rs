@@ -21,7 +21,7 @@ async fn upsert_merge_and_content() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result?;
@@ -109,7 +109,7 @@ async fn upsert_simple_with_input() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 8);
 	//
 	let tmp = res.remove(0).result;
@@ -226,7 +226,7 @@ async fn upsert_with_return_clause() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
@@ -305,7 +305,7 @@ async fn upsert_new_record_with_table() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -341,7 +341,7 @@ async fn upsert_new_records_with_table_and_unique_index() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result;
@@ -391,7 +391,7 @@ async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fiel
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 9);
 	//
 	let tmp = res.remove(0).result;
@@ -617,7 +617,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
-			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
+			let mut resp = ds.execute(statement, &sess, None, None).await.unwrap();
 			let res = resp.remove(0).output();
 
 			if should_succeed {
@@ -642,7 +642,12 @@ async fn common_permissions_checks(auth_enabled: bool) {
 
 			// Prepare datastore
 			let mut resp = ds
-				.execute("CREATE person:test", &Session::owner().with_ns("NS").with_db("DB"), None)
+				.execute(
+					"CREATE person:test",
+					&Session::owner().with_ns("NS").with_db("DB"),
+					None,
+					None,
+				)
 				.await
 				.unwrap();
 			let res = resp.remove(0).output();
@@ -654,6 +659,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.execute(
 					"CREATE person:test",
 					&Session::owner().with_ns("OTHER_NS").with_db("DB"),
+					None,
 					None,
 				)
 				.await
@@ -668,6 +674,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					"CREATE person:test",
 					&Session::owner().with_ns("NS").with_db("OTHER_DB"),
 					None,
+					None,
 				)
 				.await
 				.unwrap();
@@ -678,7 +685,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			);
 
 			// Run the test
-			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
+			let mut resp = ds.execute(statement, &sess, None, None).await.unwrap();
 			let res = resp.remove(0).output();
 
 			if should_succeed {
@@ -689,6 +696,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					.execute(
 						"SELECT name FROM person:test",
 						&Session::owner().with_ns("NS").with_db("DB"),
+						None,
 						None,
 					)
 					.await
@@ -705,6 +713,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 					.execute(
 						"SELECT name FROM person:test",
 						&Session::owner().with_ns("NS").with_db("DB"),
+						None,
 						None,
 					)
 					.await
@@ -737,7 +746,7 @@ async fn check_permissions_auth_enabled() {
 		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
-			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None, None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -759,6 +768,7 @@ async fn check_permissions_auth_enabled() {
 				"DEFINE TABLE person PERMISSIONS NONE; CREATE person:test;",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -772,7 +782,7 @@ async fn check_permissions_auth_enabled() {
 		);
 
 		let mut resp = ds
-			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None, None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -789,6 +799,7 @@ async fn check_permissions_auth_enabled() {
 			.execute(
 				"SELECT name FROM person:test",
 				&Session::owner().with_ns("NS").with_db("DB"),
+				None,
 				None,
 			)
 			.await
@@ -812,6 +823,7 @@ async fn check_permissions_auth_enabled() {
 				"DEFINE TABLE person PERMISSIONS FULL; CREATE person:test;",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -825,7 +837,7 @@ async fn check_permissions_auth_enabled() {
 		);
 
 		let mut resp = ds
-			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None, None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -841,6 +853,7 @@ async fn check_permissions_auth_enabled() {
 			.execute(
 				"SELECT name FROM person:test",
 				&Session::owner().with_ns("NS").with_db("DB"),
+				None,
 				None,
 			)
 			.await
@@ -876,7 +889,7 @@ async fn check_permissions_auth_disabled() {
 		let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 		let mut resp = ds
-			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None, None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -897,6 +910,7 @@ async fn check_permissions_auth_disabled() {
 				"DEFINE TABLE person PERMISSIONS NONE; CREATE person:test;",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -910,7 +924,7 @@ async fn check_permissions_auth_disabled() {
 		);
 
 		let mut resp = ds
-			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None, None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -926,6 +940,7 @@ async fn check_permissions_auth_disabled() {
 			.execute(
 				"SELECT name FROM person:test",
 				&Session::owner().with_ns("NS").with_db("DB"),
+				None,
 				None,
 			)
 			.await
@@ -949,6 +964,7 @@ async fn check_permissions_auth_disabled() {
 				"DEFINE TABLE person PERMISSIONS FULL; CREATE person:test;",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -962,7 +978,7 @@ async fn check_permissions_auth_disabled() {
 		);
 
 		let mut resp = ds
-			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None)
+			.execute(statement, &Session::default().with_ns("NS").with_db("DB"), None, None)
 			.await
 			.unwrap();
 		let res = resp.remove(0).output();
@@ -978,6 +994,7 @@ async fn check_permissions_auth_disabled() {
 			.execute(
 				"SELECT name FROM person:test",
 				&Session::owner().with_ns("NS").with_db("DB"),
+				None,
 				None,
 			)
 			.await
@@ -1026,7 +1043,7 @@ async fn upsert_none_removes_field() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result?;

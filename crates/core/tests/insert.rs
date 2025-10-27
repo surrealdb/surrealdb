@@ -20,7 +20,7 @@ async fn insert_statement_object_single() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -48,7 +48,7 @@ async fn insert_statement_object_multiple() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -71,7 +71,7 @@ async fn insert_statement_values_single() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -88,7 +88,7 @@ async fn insert_statement_values_multiple() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -111,7 +111,7 @@ async fn insert_statement_values_retable_id() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -135,7 +135,7 @@ async fn insert_statement_on_duplicate_key() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result?;
@@ -222,7 +222,7 @@ async fn insert_statement_output() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -242,7 +242,7 @@ async fn insert_statement_duplicate_key_update() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 4);
 	//
 	let tmp = res.remove(0).result;
@@ -400,7 +400,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 		{
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
-			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
+			let mut resp = ds.execute(statement, &sess, None, None).await.unwrap();
 			let res = resp.remove(0).output();
 
 			if should_succeed {
@@ -424,7 +424,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let ds = new_ds().await.unwrap().with_auth_enabled(auth_enabled);
 
 			let mut resp = ds
-				.execute("CREATE person", &Session::owner().with_ns("NS").with_db("DB"), None)
+				.execute("CREATE person", &Session::owner().with_ns("NS").with_db("DB"), None, None)
 				.await
 				.unwrap();
 			let res = resp.remove(0).output();
@@ -434,7 +434,12 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			);
 
 			let mut resp = ds
-				.execute("CREATE person", &Session::owner().with_ns("OTHER_NS").with_db("DB"), None)
+				.execute(
+					"CREATE person",
+					&Session::owner().with_ns("OTHER_NS").with_db("DB"),
+					None,
+					None,
+				)
 				.await
 				.unwrap();
 			let res = resp.remove(0).output();
@@ -444,7 +449,12 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			);
 
 			let mut resp = ds
-				.execute("CREATE person", &Session::owner().with_ns("NS").with_db("OTHER_DB"), None)
+				.execute(
+					"CREATE person",
+					&Session::owner().with_ns("NS").with_db("OTHER_DB"),
+					None,
+					None,
+				)
 				.await
 				.unwrap();
 			let res = resp.remove(0).output();
@@ -454,7 +464,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			);
 
 			// Run the test
-			let mut resp = ds.execute(statement, &sess, None).await.unwrap();
+			let mut resp = ds.execute(statement, &sess, None, None).await.unwrap();
 			let res = resp.remove(0).output();
 
 			if should_succeed {
@@ -497,6 +507,7 @@ async fn check_permissions_auth_enabled() {
 				"INSERT INTO person (id) VALUES ('id')",
 				&Session::default().with_ns("NS").with_db("DB"),
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -519,6 +530,7 @@ async fn check_permissions_auth_enabled() {
 				"DEFINE TABLE person PERMISSIONS NONE",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -529,6 +541,7 @@ async fn check_permissions_auth_enabled() {
 			.execute(
 				"INSERT INTO person (id) VALUES ('id')",
 				&Session::default().with_ns("NS").with_db("DB"),
+				None,
 				None,
 			)
 			.await
@@ -551,6 +564,7 @@ async fn check_permissions_auth_enabled() {
 				"DEFINE TABLE person PERMISSIONS FULL",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -561,6 +575,7 @@ async fn check_permissions_auth_enabled() {
 			.execute(
 				"INSERT INTO person (id) VALUES ('id')",
 				&Session::default().with_ns("NS").with_db("DB"),
+				None,
 				None,
 			)
 			.await
@@ -596,6 +611,7 @@ async fn check_permissions_auth_disabled() {
 				"INSERT INTO person (id) VALUES ('id')",
 				&Session::default().with_ns("NS").with_db("DB"),
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -617,6 +633,7 @@ async fn check_permissions_auth_disabled() {
 				"DEFINE TABLE person PERMISSIONS NONE",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -627,6 +644,7 @@ async fn check_permissions_auth_disabled() {
 			.execute(
 				"INSERT INTO person (id) VALUES ('id')",
 				&Session::default().with_ns("NS").with_db("DB"),
+				None,
 				None,
 			)
 			.await
@@ -649,6 +667,7 @@ async fn check_permissions_auth_disabled() {
 				"DEFINE TABLE person PERMISSIONS FULL",
 				&Session::owner().with_ns("NS").with_db("DB"),
 				None,
+				None,
 			)
 			.await
 			.unwrap();
@@ -659,6 +678,7 @@ async fn check_permissions_auth_disabled() {
 			.execute(
 				"INSERT INTO person (id) VALUES ('id')",
 				&Session::default().with_ns("NS").with_db("DB"),
+				None,
 				None,
 			)
 			.await
@@ -704,7 +724,7 @@ async fn insert_relation() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None, None).await?;
 	assert_eq!(res.len(), 5);
 	//
 	let tmp = res.remove(0).result?;
