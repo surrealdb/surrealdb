@@ -28,7 +28,7 @@ impl Parser<'_> {
 					}
 					last_span = self.pop_peek().span;
 				}
-				
+
 				let name = self.lexer.span_str(start.span.covers(last_span)).to_string();
 				let sub = if self.eat(t!("<")) {
 					let start = self.last_span();

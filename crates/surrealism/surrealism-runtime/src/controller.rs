@@ -151,8 +151,7 @@ pub struct Controller {
 
 impl Controller {
 	pub async fn alloc(&mut self, len: u32) -> Result<u32> {
-		let alloc =
-			self.instance.get_typed_func::<(u32,), i32>(&mut self.store, "__sr_alloc")?;
+		let alloc = self.instance.get_typed_func::<(u32,), i32>(&mut self.store, "__sr_alloc")?;
 		let result = alloc.call_async(&mut self.store, (len,)).await?;
 		if result == -1 {
 			anyhow::bail!("Memory allocation failed");

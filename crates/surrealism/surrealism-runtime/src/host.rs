@@ -291,10 +291,8 @@ impl<'a> AsyncMemoryController for HostController<'a> {
 			.ok_or_else(|| anyhow::anyhow!("Export __sr_alloc not found"))?
 			.into_func()
 			.ok_or_else(|| anyhow::anyhow!("Export __sr_alloc is not a function"))?;
-		let result = alloc_func
-			.typed::<(u32,), u32>(&mut self.0)?
-			.call_async(&mut self.0, (len,))
-			.await?;
+		let result =
+			alloc_func.typed::<(u32,), u32>(&mut self.0)?.call_async(&mut self.0, (len,)).await?;
 		if result == 0 {
 			anyhow::bail!("Memory allocation failed");
 		}
