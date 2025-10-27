@@ -342,9 +342,6 @@ pub trait RpcProtocolV1: RpcContext {
 		else {
 			return Err(RpcError::InvalidParams("Expected (key:string, value:Value)".to_string()));
 		};
-		// TODO(3.0.0): The value inversion PR has removed the ability to set a value
-		// from an expression.
-		// Maybe reintroduce somehow.
 
 		let mutex = self.lock();
 		let guard = mutex.acquire().await.unwrap();

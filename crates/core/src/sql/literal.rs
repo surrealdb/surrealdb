@@ -23,7 +23,6 @@ pub enum Literal {
 	Bool(bool),
 	Float(f64),
 	Integer(i64),
-	//TODO: Possibly remove wrapper.
 	Decimal(Decimal),
 	Duration(PublicDuration),
 
@@ -33,7 +32,6 @@ pub enum Literal {
 	Uuid(PublicUuid),
 	Regex(PublicRegex),
 
-	//TODO: Possibly remove wrapper.
 	Array(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
 	Geometry(PublicGeometry),

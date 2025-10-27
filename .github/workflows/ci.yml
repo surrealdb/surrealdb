@@ -350,8 +350,8 @@ jobs:
       - name: Install tools
         uses: ./.github/actions/install-tools
 
-      #- name: Run GraphQL integration tests
-        #run: cargo make ci-graphql-integration
+      - name: Run GraphQL integration tests
+        run: cargo make ci-graphql-integration
 
   # ----------------------------------------
   # Workspace tests
