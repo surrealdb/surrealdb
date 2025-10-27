@@ -1,48 +1,45 @@
-use crate::{
-	catalog::{Permission, Permissions, Relation, TableType},
-	expr::{
-		AccessType, Block, ClosureExpr, Data, Expr, Field, Fields, Function, FunctionCall, Idiom,
-		JwtAccess, Kind, KindLiteral, Literal, Lookup, Model, Output, Param, Part, RecordAccess,
-		RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit, TopLevelExpr, View,
-		access_type::{BearerAccess, JwtAccessVerify},
-		data::Assignment,
-		lookup::LookupSubject,
-		order::Ordering,
-		part::{DestructurePart, Recurse, RecurseInstruction},
-		reference::{Reference, ReferenceDeleteStrategy},
-		statements::{
-			AccessStatement, AlterStatement, CreateStatement, DefineAccessStatement,
-			DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement,
-			DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-			DefineIndexStatement, DefineModelStatement, DefineNamespaceStatement,
-			DefineParamStatement, DefineStatement, DefineTableStatement, DefineUserStatement,
-			DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement, InsertStatement,
-			KillStatement, LiveStatement, OptionStatement, OutputStatement, RelateStatement,
-			RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement,
-			RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement,
-			RemoveIndexStatement, RemoveModelStatement, RemoveNamespaceStatement,
-			RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
-			SelectStatement, SetStatement, ShowStatement, SleepStatement, UpdateStatement,
-			UpsertStatement, UseStatement,
-			access::{
-				AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
-				AccessStatementShow, Subject,
-			},
-			alter::{
-				AlterDefault, AlterFieldStatement, AlterKind, AlterSequenceStatement,
-				AlterTableStatement,
-			},
-			define::{
-				ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault,
-				DefineSequenceStatement,
-				config::{ConfigInner, api::ApiConfig},
-			},
-			rebuild::RebuildStatement,
-			remove::{RemoveApiStatement, RemoveBucketStatement, RemoveSequenceStatement},
-		},
-	},
-};
 use std::ops::Bound;
+
+use crate::catalog::{Permission, Permissions, Relation, TableType};
+use crate::expr::access_type::{BearerAccess, JwtAccessVerify};
+use crate::expr::data::Assignment;
+use crate::expr::lookup::LookupSubject;
+use crate::expr::order::Ordering;
+use crate::expr::part::{DestructurePart, Recurse, RecurseInstruction};
+use crate::expr::reference::{Reference, ReferenceDeleteStrategy};
+use crate::expr::statements::access::{
+	AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke, AccessStatementShow, Subject,
+};
+use crate::expr::statements::alter::{
+	AlterDefault, AlterFieldStatement, AlterKind, AlterSequenceStatement, AlterTableStatement,
+};
+use crate::expr::statements::define::config::ConfigInner;
+use crate::expr::statements::define::config::api::ApiConfig;
+use crate::expr::statements::define::{
+	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault, DefineSequenceStatement,
+};
+use crate::expr::statements::rebuild::RebuildStatement;
+use crate::expr::statements::remove::{
+	RemoveApiStatement, RemoveBucketStatement, RemoveSequenceStatement,
+};
+use crate::expr::statements::{
+	AccessStatement, AlterStatement, CreateStatement, DefineAccessStatement,
+	DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement, DefineEventStatement,
+	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
+	DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement,
+	DefineUserStatement, DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement,
+	InsertStatement, KillStatement, LiveStatement, OptionStatement, OutputStatement,
+	RelateStatement, RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement,
+	RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
+	RemoveModelStatement, RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement,
+	RemoveTableStatement, RemoveUserStatement, SelectStatement, SetStatement, ShowStatement,
+	SleepStatement, UpdateStatement, UpsertStatement, UseStatement,
+};
+use crate::expr::{
+	AccessType, Block, ClosureExpr, Data, Expr, Field, Fields, Function, FunctionCall, Idiom,
+	JwtAccess, Kind, KindLiteral, Literal, Lookup, Model, Output, Param, Part, RecordAccess,
+	RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit, TopLevelExpr, View,
+};
 
 macro_rules! implement_visitor{
 	($(fn $name:ident($this:ident, $value:ident: &$ty:ty) {

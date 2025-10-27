@@ -7,7 +7,6 @@ use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
 use crate::expr::Param;
 use crate::expr::visit::{Visit, Visitor};
-
 use crate::sql::expression::convert_public_value_to_internal;
 use crate::types::PublicVariables;
 use crate::val::{Object, Value};

@@ -9,7 +9,6 @@ use super::FlowResultExt as _;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Function, Idiom};
 use crate::fmt::Fmt;

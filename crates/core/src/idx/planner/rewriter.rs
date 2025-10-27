@@ -16,9 +16,9 @@ impl<'a> MutVisitor for KnnConditionRewriter<'a> {
 		match e {
 			// Ignore most statements.
 			//
-			// TODO: This is probably incorrect, most statements have parts which are evaluated within
-			// the current context, like the `FROM` part of select. This is currently replicating
-			// old behavior from before this pass was written with a visitor.
+			// TODO: This is probably incorrect, most statements have parts which are evaluated
+			// within the current context, like the `FROM` part of select. This is currently
+			// replicating old behavior from before this pass was written with a visitor.
 			Expr::Param(_)
 			| Expr::Table(_)
 			| Expr::Mock(_)

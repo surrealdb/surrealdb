@@ -11,7 +11,6 @@ use crate::catalog::{ApiActionDefinition, ApiDefinition, ApiMethod};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
 use crate::fmt::{Fmt, pretty_indent};
 use crate::iam::{Action, ResourceKind};

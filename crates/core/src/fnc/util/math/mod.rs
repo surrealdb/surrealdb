@@ -1,9 +1,9 @@
 use core::f64;
 
+use anyhow::Result;
 use rust_decimal::{Decimal, MathematicalOps};
 
 use crate::val::{Number, TryAdd, TryPow};
-use anyhow::Result;
 
 pub mod bottom;
 pub mod interquartile;

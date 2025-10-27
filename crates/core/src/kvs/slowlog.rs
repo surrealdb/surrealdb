@@ -24,7 +24,6 @@ use trice::Instant;
 
 use crate::catalog::{Permission, Permissions};
 use crate::ctx::Context;
-
 use crate::expr::visit::{Visit, Visitor};
 
 #[derive(Clone)]

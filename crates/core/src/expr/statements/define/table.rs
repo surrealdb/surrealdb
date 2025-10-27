@@ -18,7 +18,6 @@ use crate::dbs::{Options, aggregation};
 use crate::doc::{self, CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
-
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::{

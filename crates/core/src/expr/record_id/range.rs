@@ -8,7 +8,6 @@ use super::RecordIdKeyLit;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-
 use crate::val::RecordIdKeyRange;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

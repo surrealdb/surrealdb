@@ -11,7 +11,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
-
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Literal};

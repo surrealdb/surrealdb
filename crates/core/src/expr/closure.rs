@@ -5,7 +5,6 @@ use anyhow::Result;
 
 use crate::ctx::Context;
 use crate::dbs::ParameterCapturePass;
-
 use crate::expr::{Expr, Kind, Param};
 use crate::val::{Closure, Value};
 

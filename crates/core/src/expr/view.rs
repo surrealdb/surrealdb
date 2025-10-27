@@ -1,9 +1,9 @@
-use anyhow::{Result, bail};
 use std::fmt;
 use std::fmt::Debug;
 
-use crate::catalog::ViewDefinition;
+use anyhow::{Result, bail};
 
+use crate::catalog::ViewDefinition;
 use crate::dbs::aggregation::{AggregateFields, AggregationAnalysis};
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;

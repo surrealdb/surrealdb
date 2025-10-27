@@ -8,7 +8,6 @@ use rust_decimal::Decimal;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-
 use crate::expr::{Expr, FlowResult, RecordIdLit};
 use crate::fmt::{EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::val::{

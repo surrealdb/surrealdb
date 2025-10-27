@@ -10,7 +10,6 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Variables};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-
 use crate::expr::{Expr, FlowResultExt, Kind, Param};
 use crate::val::Value;
 

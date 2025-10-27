@@ -33,24 +33,20 @@
 //!        g1, math::pow(ag1,2), ag2, ag3
 //!
 //!        her `g1` refers to the group.
-//!
-//!```
-//!
+//! ```
+
+use std::fmt::Write;
+use std::mem;
 
 use ahash::HashMap;
 use anyhow::{Result, bail, ensure};
 use revision::revisioned;
 
-use crate::{
-	catalog::AggregationStat,
-	err::Error,
-	expr::{
-		Expr, Field, Fields, Function, Groups, Idiom, Part,
-		visit::{MutVisitor, VisitMut},
-	},
-	val::{Array, Datetime, Number, Object, TryAdd as _, TryFloatDiv, TryMul, Value},
-};
-use std::{fmt::Write, mem};
+use crate::catalog::AggregationStat;
+use crate::err::Error;
+use crate::expr::visit::{MutVisitor, VisitMut};
+use crate::expr::{Expr, Field, Fields, Function, Groups, Idiom, Part};
+use crate::val::{Array, Datetime, Number, Object, TryAdd as _, TryFloatDiv, TryMul, Value};
 
 /// An expression which will be aggregated over for each group.
 #[revisioned(revision = 1)]
@@ -316,7 +312,8 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 	Ok(())
 }
 
-/// Creates object that can act as a document to calculate the final value for an aggregated statement.
+/// Creates object that can act as a document to calculate the final value for an aggregated
+/// statement.
 pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Object {
 	let mut res = Object::default();
 	//setup the document for final value calculation
@@ -527,8 +524,9 @@ impl MutVisitor for AggregateExprCollector<'_> {
 				if !self.within_aggregate_argument {
 					if let Some(group_idx) = self.groups.0.iter().position(|x| x.0 == *i) {
 						i.visit_mut(self)?;
-						// HACK: We replace the idioms which refer to the grouping expression here with an field so
-						// that we can later inject the value via the current doc.
+						// HACK: We replace the idioms which refer to the grouping expression here
+						// with an field so that we can later inject the value via the current
+						// doc.
 						*s = Expr::Idiom(Idiom::field(group_field_name(group_idx)));
 					} else if let Some(Part::Field(_)) = i.0.first() {
 						if self.support_acummulate {

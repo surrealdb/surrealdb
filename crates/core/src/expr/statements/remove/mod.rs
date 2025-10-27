@@ -37,7 +37,6 @@ pub(crate) use user::RemoveUserStatement;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-
 use crate::expr::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

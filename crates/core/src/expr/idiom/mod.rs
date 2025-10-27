@@ -10,7 +10,6 @@ use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-
 use crate::expr::part::{Next, NextMethod};
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::statements::info::InfoStructure;
