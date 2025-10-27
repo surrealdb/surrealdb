@@ -47,7 +47,7 @@ impl fmt::Display for CastError {
 				from,
 				into,
 			} => {
-				write!(f, "Expected `{into}` but found a `{from}`")
+				write!(f, "Could not cast into `{into}` using input `{from}`")
 			}
 			CastError::ElementOf {
 				inner,

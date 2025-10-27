@@ -15,7 +15,7 @@ value = "'users'"
 value = "'posts'"
 
 [[test.results]]
-error = "Expected `table<users|posts>` but found a `'comments'`"
+error = "Could not cast into `table<users|posts>` using input `'comments'`"
 
 [[test.results]]
 value = "''"
@@ -24,7 +24,7 @@ value = "''"
 value = "NONE"
 
 [[test.results]]
-value = "'users'"
+©value = "'users'"
 
 [[test.results]]
 value = "'user_accounts'"

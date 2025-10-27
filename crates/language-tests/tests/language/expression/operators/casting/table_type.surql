@@ -8,7 +8,7 @@ value = "'users'"
 value = "'posts'"
 
 [[test.results]]
-error = "Expected `table<users>` but found a `'posts'`"
+error = "Could not cast into `table<users>` using input `'posts'`"
 
 [[test.results]]
 value = "'users'"
