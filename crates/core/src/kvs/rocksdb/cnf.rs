@@ -219,3 +219,11 @@ pub(super) static ROCKSDB_DELETION_FACTORY_DELETE_COUNT: LazyLock<usize> =
 /// The ratio of deletions to track in the window (default: 0.5)
 pub(super) static ROCKSDB_DELETION_FACTORY_RATIO: LazyLock<f64> =
 	lazy_env_parse!("SURREAL_ROCKSDB_DELETION_FACTORY_RATIO", f64, 0.5);
+
+/// The maximum allowed space usage for SST files in bytes (default: 0, meaning unlimited)
+pub(super) static ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE: LazyLock<u64> =
+	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE", u64, 0);
+
+/// The compaction buffer size for SST file manager in bytes (default: 0)
+pub(super) static ROCKSDB_SST_COMPACTION_BUFFER_SIZE: LazyLock<u64> =
+	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_SST_COMPACTION_BUFFER_SIZE", u64, 0);

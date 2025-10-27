@@ -10,8 +10,9 @@ use std::time::Duration;
 
 use anyhow::{Result, bail, ensure};
 use rocksdb::{
-	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel,
-	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
+	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, Env, FlushOptions, LogLevel,
+	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, SstFileManager,
+	WriteOptions,
 };
 
 use super::savepoint::SavePoints;
@@ -215,6 +216,24 @@ impl Datastore {
 		// cnf::ROCKSDB_MAX_BGERROR_RESUME_COUNT); info!(target: TARGET, "Background error resume
 		// retry interval: {}μs", *cnf::ROCKSDB_BGERROR_RESUME_RETRY_INTERVAL);
 		// opts.set_bgerror_resume_retry_interval(*cnf::ROCKSDB_BGERROR_RESUME_RETRY_INTERVAL);
+		// Configure SST file manager
+		if *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE > 0
+			|| *cnf::ROCKSDB_SST_COMPACTION_BUFFER_SIZE > 0
+		{
+			let env = Env::new()?;
+			let sst_file_manager = SstFileManager::new(&env);
+			if *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE > 0 {
+				info!(target: TARGET, "SST file manager max allowed space usage: {}", *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE);
+				sst_file_manager
+					.set_max_allowed_space_usage(*cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE);
+			}
+			if *cnf::ROCKSDB_SST_COMPACTION_BUFFER_SIZE > 0 {
+				info!(target: TARGET, "SST file manager compaction buffer size: {}", *cnf::ROCKSDB_SST_COMPACTION_BUFFER_SIZE);
+				sst_file_manager
+					.set_compaction_buffer_size(*cnf::ROCKSDB_SST_COMPACTION_BUFFER_SIZE);
+			}
+			opts.set_sst_file_manager(&sst_file_manager);
+		}
 		// Configure background WAL flush behaviour and handle OOD errors during startup
 		let (db, ood_readonly) = match Self::open(opts.clone(), false, path).await {
 			Ok(db) => {
