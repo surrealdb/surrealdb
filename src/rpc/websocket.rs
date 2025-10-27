@@ -573,15 +573,4 @@ impl RpcContext for Websocket {
 			error!("Error handling RPC connection: {err}");
 		}
 	}
-
-	// ------------------------------
-	// GraphQL
-	// ------------------------------
-
-	// GraphQL queries are enabled on WebSockets
-	//const GQL_SUPPORT: bool = true;
-
-	//fn graphql_schema_cache(&self) -> &SchemaCache {
-	//&self.gql_schema
-	//}
 }

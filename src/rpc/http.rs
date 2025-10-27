@@ -74,17 +74,9 @@ impl RpcContext for Http {
 	}
 
 	// ------------------------------
-	// GraphQL
+	// Overrides
 	// ------------------------------
 
-	// GraphQL queries are enabled on HTTP
-	//const GQL_SUPPORT: bool = true;
-
-	/*
-	fn graphql_schema_cache(&self) -> &SchemaCache {
-		&self.gql_schema
-	}
-	*/
 }
 
 impl RpcProtocolV1 for Http {

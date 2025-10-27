@@ -8,8 +8,6 @@ use crate::dbs::Session;
 use crate::kvs::Datastore;
 use crate::types::PublicArray;
 
-//#[cfg(not(target_family = "wasm"))]
-//use crate::gql::SchemaCache;
 
 #[expect(async_fn_in_trait)]
 pub trait RpcContext {
@@ -55,20 +53,7 @@ pub trait RpcContext {
 	) -> impl std::future::Future<Output = ()> + Send;
 	fn cleanup_all_lqs(&self) -> impl std::future::Future<Output = ()> + Send;
 
-	// ------------------------------
-	// GraphQL
-	// ------------------------------
 
-	// GraphQL queries are disabled by default
-	//#[cfg(not(target_family = "wasm"))]
-	//const GQL_SUPPORT: bool = false;
-
-	// Returns the GraphQL schema cache used in GraphQL queries
-	//#[cfg(not(target_family = "wasm"))]
-	//fn graphql_schema_cache(&self) -> &SchemaCache {
-	//unimplemented!("graphql_schema_cache function must be implemented if
-	// GQL_SUPPORT = true")
-	//}
 
 	// ------------------------------
 	// Method execution
