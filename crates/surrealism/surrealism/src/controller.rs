@@ -28,8 +28,8 @@ impl MemoryController for Controller {
 	/// # Errors
 	/// Returns an error if the underlying allocation function fails (though in this
 	/// implementation, it assumes success and wraps the result in `Ok`).
-	fn alloc(&mut self, len: u32, align: u32) -> Result<u32> {
-		let result = __sr_alloc(len, align);
+	fn alloc(&mut self, len: u32) -> Result<u32> {
+		let result = __sr_alloc(len);
 		if result == -1 {
 			anyhow::bail!("Memory allocation failed");
 		}

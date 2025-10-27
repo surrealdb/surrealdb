@@ -82,7 +82,7 @@ pub trait MemoryController {
 	/// - Allocation fails (out of memory)
 	/// - Alignment is invalid (not a power of 2)
 	/// - Memory limit would be exceeded
-	fn alloc(&mut self, len: u32, align: u32) -> Result<u32>;
+	fn alloc(&mut self, len: u32) -> Result<u32>;
 
 	/// Free a previously allocated region of memory.
 	///
@@ -180,7 +180,7 @@ pub trait AsyncMemoryController: Send {
 	/// - Allocation fails (out of memory)
 	/// - Alignment is invalid (not a power of 2)
 	/// - WASM function call fails
-	async fn alloc(&mut self, len: u32, align: u32) -> Result<u32>;
+	async fn alloc(&mut self, len: u32) -> Result<u32>;
 
 	/// Free a previously allocated region of memory (async).
 	///

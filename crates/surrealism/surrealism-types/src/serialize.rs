@@ -59,7 +59,7 @@ pub struct Serialized(pub bytes::Bytes);
 impl Transfer for Serialized {
 	fn transfer(self, controller: &mut dyn MemoryController) -> Result<Ptr> {
 		let len = 4 + self.0.len();
-		let ptr = controller.alloc(len as u32, 8)?;
+		let ptr = controller.alloc(len as u32)?;
 		let mem = controller.mut_mem(ptr, len as u32);
 		mem[0..4].copy_from_slice(&(self.0.len() as u32).to_le_bytes());
 		mem[4..len].copy_from_slice(&self.0);
@@ -82,7 +82,7 @@ impl Transfer for Serialized {
 impl AsyncTransfer for Serialized {
 	async fn transfer(self, controller: &mut dyn AsyncMemoryController) -> Result<Ptr> {
 		let len = 4 + self.0.len();
-		let ptr = controller.alloc(len as u32, 8).await?;
+		let ptr = controller.alloc(len as u32).await?;
 		let mem = controller.mut_mem(ptr, len as u32);
 		let len_bytes = (self.0.len() as u32).to_le_bytes();
 		mem[0..4].copy_from_slice(len_bytes.as_slice());

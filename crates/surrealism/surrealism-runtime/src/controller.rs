@@ -150,10 +150,10 @@ pub struct Controller {
 }
 
 impl Controller {
-	pub async fn alloc(&mut self, len: u32, align: u32) -> Result<u32> {
+	pub async fn alloc(&mut self, len: u32) -> Result<u32> {
 		let alloc =
-			self.instance.get_typed_func::<(u32, u32), i32>(&mut self.store, "__sr_alloc")?;
-		let result = alloc.call_async(&mut self.store, (len, align)).await?;
+			self.instance.get_typed_func::<(u32,), i32>(&mut self.store, "__sr_alloc")?;
+		let result = alloc.call_async(&mut self.store, (len,)).await?;
 		if result == -1 {
 			anyhow::bail!("Memory allocation failed");
 		}
@@ -170,7 +170,7 @@ impl Controller {
 	}
 
 	pub async fn init(&mut self) -> Result<()> {
-		let init = self.instance.get_export(&mut self.store, "__sr_init");
+		let init: Option<Extern> = self.instance.get_export(&mut self.store, "__sr_init");
 		if init.is_none() {
 			return Ok(());
 		}
@@ -251,8 +251,8 @@ impl Controller {
 
 #[async_trait]
 impl surrealism_types::controller::AsyncMemoryController for Controller {
-	async fn alloc(&mut self, len: u32, align: u32) -> Result<u32> {
-		Controller::alloc(self, len, align).await
+	async fn alloc(&mut self, len: u32) -> Result<u32> {
+		Controller::alloc(self, len).await
 	}
 
 	async fn free(&mut self, ptr: u32, len: u32) -> Result<()> {

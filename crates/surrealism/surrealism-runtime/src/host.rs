@@ -285,15 +285,15 @@ impl<'a> DerefMut for HostController<'a> {
 
 #[async_trait]
 impl<'a> AsyncMemoryController for HostController<'a> {
-	async fn alloc(&mut self, len: u32, align: u32) -> Result<u32> {
+	async fn alloc(&mut self, len: u32) -> Result<u32> {
 		let alloc_func = self
 			.get_export("__sr_alloc")
 			.ok_or_else(|| anyhow::anyhow!("Export __sr_alloc not found"))?
 			.into_func()
 			.ok_or_else(|| anyhow::anyhow!("Export __sr_alloc is not a function"))?;
 		let result = alloc_func
-			.typed::<(u32, u32), i32>(&mut self.0)?
-			.call_async(&mut self.0, (len, align))
+			.typed::<(u32,), i32>(&mut self.0)?
+			.call_async(&mut self.0, (len,))
 			.await?;
 		if result == -1 {
 			anyhow::bail!("Memory allocation failed");

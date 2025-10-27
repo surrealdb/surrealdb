@@ -6,7 +6,6 @@
 ///
 /// # Parameters
 /// - `len`: The size of the memory block to allocate, in bytes.
-/// - `align`: The alignment requirement for the allocated memory, in bytes.
 ///
 /// # Returns
 /// A `u32` representing the starting offset (pointer) of the allocated memory.
@@ -21,8 +20,8 @@
 /// proper deallocation using `__sr_free` to avoid memory leaks. The returned pointer must
 /// be valid for the WASM linear memory context if used in such environments.
 #[unsafe(no_mangle)]
-pub extern "C" fn __sr_alloc(len: u32, align: u32) -> i32 {
-	let layout = match std::alloc::Layout::from_size_align(len as usize, align as usize) {
+pub extern "C" fn __sr_alloc(len: u32) -> i32 {
+	let layout = match std::alloc::Layout::from_size_align(len as usize, 8) {
 		Ok(layout) => layout,
 		Err(_) => return -1, // invalid layout
 	};
