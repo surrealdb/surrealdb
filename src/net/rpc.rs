@@ -187,7 +187,6 @@ async fn post_handler(
 			// Execute the specified method
 			let res = RpcContext::execute(
 				&rpc,
-				req.version,
 				req.txn.map(Into::into),
 				req.session_id.map(Into::into),
 				req.method,

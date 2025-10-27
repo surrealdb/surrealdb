@@ -3,7 +3,7 @@ use std::sync::Arc;
 use surrealdb::types::{Array, Value};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::rpc::{DbResult, RpcContext, RpcError, RpcProtocolV1};
+use surrealdb_core::rpc::{DbResult, RpcContext, RpcError};
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
@@ -30,10 +30,22 @@ impl RpcContext for Http {
 	fn kvs(&self) -> &Datastore {
 		&self.kvs
 	}
+
 	/// Retrieves the modification lock for this RPC context
 	fn lock(&self) -> Arc<Semaphore> {
 		self.lock.clone()
 	}
+
+	/// The version information for this RPC context
+	fn version_data(&self) -> DbResult {
+		let value = Value::String(format!("{PKG_NAME}-{}", *PKG_VERSION));
+		DbResult::Other(value)
+	}
+
+	// ------------------------------
+	// Sessions
+	// ------------------------------
+
 	/// The current session for this RPC context
 	fn get_session(&self, _id: Option<&Uuid>) -> Arc<Session> {
 		self.session.clone()
@@ -49,11 +61,6 @@ impl RpcContext for Http {
 	/// Lists all sessions
 	fn list_sessions(&self) -> Vec<Uuid> {
 		vec![]
-	}
-	/// The version information for this RPC context
-	fn version_data(&self) -> DbResult {
-		let value = Value::String(format!("{PKG_NAME}-{}", *PKG_VERSION));
-		DbResult::Other(value)
 	}
 
 	// ------------------------------
@@ -77,9 +84,6 @@ impl RpcContext for Http {
 	// Overrides
 	// ------------------------------
 
-}
-
-impl RpcProtocolV1 for Http {
 	/// Parameters can't be set or unset on HTTP RPC context
 	async fn set(&self, _session_id: Option<Uuid>, _params: Array) -> Result<DbResult, RpcError> {
 		Err(RpcError::MethodNotFound)
