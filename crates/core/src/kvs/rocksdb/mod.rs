@@ -24,8 +24,8 @@ const TARGET: &str = "surrealdb::core::kvs::rocksdb";
 
 pub struct Datastore {
 	db: Pin<Arc<OptimisticTransactionDB>>,
-	/// Whether the database is in read-only mode due to OOD (Out of Disk) condition
-	ood_readonly: bool,
+	/// Optional SST file manager for monitoring space usage
+	sst_file_manager: Option<Arc<SstFileManager>>,
 }
 
 pub struct Transaction {
@@ -208,16 +208,8 @@ impl Datastore {
 				bail!(Error::Ds(format!("Invalid storage engine log level specified: {l}")));
 			}
 		});
-		// TODO: Background error recovery options are not yet available in rocksdb crate v0.23.0
-		// These would help handle Out of Disk (OOD) errors gracefully by allowing automatic resume
-		// after background errors. When available, uncomment the following:
-		// info!(target: TARGET, "Maximum background error resume count: {}",
-		// *cnf::ROCKSDB_MAX_BGERROR_RESUME_COUNT); opts.set_max_bgerror_resume_count(*
-		// cnf::ROCKSDB_MAX_BGERROR_RESUME_COUNT); info!(target: TARGET, "Background error resume
-		// retry interval: {}μs", *cnf::ROCKSDB_BGERROR_RESUME_RETRY_INTERVAL);
-		// opts.set_bgerror_resume_retry_interval(*cnf::ROCKSDB_BGERROR_RESUME_RETRY_INTERVAL);
 		// Configure SST file manager
-		if *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE > 0
+		let sst_file_manager = if *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE > 0
 			|| *cnf::ROCKSDB_SST_COMPACTION_BUFFER_SIZE > 0
 		{
 			let env = Env::new()?;
@@ -233,39 +225,16 @@ impl Datastore {
 					.set_compaction_buffer_size(*cnf::ROCKSDB_SST_COMPACTION_BUFFER_SIZE);
 			}
 			opts.set_sst_file_manager(&sst_file_manager);
-		}
-		// Configure background WAL flush behaviour and handle OOD errors during startup
-		let (db, ood_readonly) = match Self::open(opts.clone(), false, path).await {
-			Ok(db) => {
-				// Database opened successfully - no OOD condition
-				(db, false)
-			}
-			Err(err) => {
-				// Check if this is an OOD error during startup
-				if Transaction::is_ood_error(&err) {
-					Transaction::log_ood_error(&err, "database startup");
-					warn!(target: TARGET, "OOD detected during startup - attempting to open with background flush disabled");
-					match Self::open(opts, true, path).await {
-						Ok(db) => {
-							warn!(target: TARGET, "Database opened with background flush disabled due to OOD condition. Write operations will be blocked at application level.");
-							(db, true) // Mark as OOD read-only mode
-						}
-						Err(_) => {
-							error!(target: TARGET, "Failed to open database even with background flush disabled due to OOD");
-							return Err(err);
-						}
-					}
-				} else {
-					// Not an OOD error, return immediately
-					return Err(err);
-				}
-			}
+			Some(Arc::new(sst_file_manager))
+		} else {
+			None
 		};
-
+		// Open the database
+		let db = Self::open(opts.clone(), false, path).await?;
 		// Return the datastore
 		Ok(Datastore {
 			db,
-			ood_readonly,
+			sst_file_manager,
 		})
 	}
 
@@ -333,6 +302,10 @@ impl Datastore {
 		Ok(())
 	}
 
+	fn is_max_allowed_spaced_reached(&self) -> bool {
+		self.sst_file_manager.as_ref().map(|f| f.is_max_allowed_space_reached()).unwrap_or(false)
+	}
+
 	/// Start a new transaction
 	pub(crate) async fn transaction(
 		&self,
@@ -340,7 +313,7 @@ impl Datastore {
 		_: bool,
 	) -> Result<Box<dyn crate::kvs::api::Transaction>> {
 		// Check if database is in OOD read-only mode and a write transaction is requested
-		if self.ood_readonly && write {
+		if write && self.is_max_allowed_spaced_reached() {
 			warn!(target: TARGET, "Write transaction requested but database is in OOD read-only mode");
 			return Err(Error::DbReadOnly.into());
 		}
@@ -786,20 +759,5 @@ impl Transaction {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		Ok(rng)
-	}
-
-	/// Check if an error is related to Out of Disk (OOD) conditions
-	fn is_ood_error(error: &anyhow::Error) -> bool {
-		let error_msg = error.to_string().to_lowercase();
-		error_msg.contains("no space left on device")
-			|| error_msg.contains("disk full")
-			|| error_msg.contains("out of space")
-			|| error_msg.contains("enospc")
-	}
-
-	/// Log OOD error with appropriate context
-	fn log_ood_error(error: &anyhow::Error, context: &str) {
-		error!(target: TARGET, "Out of Disk error during {}: {}", context, error);
-		warn!(target: TARGET, "Database may enter read-only mode until disk space is available");
 	}
 }
