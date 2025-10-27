@@ -5,7 +5,6 @@
 //! The data can be stored in either mutable or read-only form for performance optimization.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::mem;
 use std::sync::Arc;
@@ -343,26 +342,38 @@ pub enum AggregationStat {
 	Count {
 		count: i64,
 	},
-	CountFn {
+	CountValue {
 		/// Index into the exprs field on the view definition.
 		arg: usize,
 		count: i64,
 	},
-	NumMax {
+	NumberMax {
 		arg: usize,
 		max: Number,
 	},
-	NumMin {
+	NumberMin {
 		arg: usize,
 		min: Number,
 	},
-	NumSum {
+	Sum {
 		arg: usize,
 		sum: Number,
 	},
-	NumMean {
+	Mean {
 		arg: usize,
 		sum: Number,
+		count: i64,
+	},
+	StdDev {
+		arg: usize,
+		sum: Number,
+		sum_of_squares: Number,
+		count: i64,
+	},
+	Variance {
+		arg: usize,
+		sum: Number,
+		sum_of_squares: Number,
 		count: i64,
 	},
 	TimeMax {
@@ -386,7 +397,7 @@ impl AggregationStat {
 			AggregationStat::Count {
 				count,
 			}
-			| AggregationStat::NumMean {
+			| AggregationStat::Mean {
 				count,
 				..
 			} => Some(*count),

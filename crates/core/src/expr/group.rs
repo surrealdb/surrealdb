@@ -18,10 +18,6 @@ impl Groups {
 	pub(crate) fn len(&self) -> usize {
 		self.0.len()
 	}
-
-	pub(crate) fn iter(&self) -> impl Iterator<Item = &Group> {
-		self.0.iter()
-	}
 }
 
 // Note: IntoIterator trait intentionally not implemented to avoid exposing private Group type

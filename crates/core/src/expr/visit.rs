@@ -461,7 +461,7 @@ implement_visitor! {
 			}
 		}
 		if let Some(v) = s.version.as_ref(){
-			this.visit_expr(&v)?;
+			this.visit_expr(v)?;
 		}
 
 		Ok(())

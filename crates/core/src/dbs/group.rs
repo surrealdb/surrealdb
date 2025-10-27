@@ -13,7 +13,7 @@ use crate::dbs::{Options, Statement};
 use crate::doc::CursorDoc;
 use crate::expr::FlowResultExt as _;
 use crate::idx::planner::RecordStrategy;
-use crate::val::{Array, Number, TryFloatDiv, Value};
+use crate::val::{Number, TryFloatDiv, Value};
 
 /// A collector for statements which have a group by clause.
 ///
@@ -151,23 +151,23 @@ impl GroupCollector {
 					AggregationStat::Count {
 						count,
 					}
-					| AggregationStat::CountFn {
+					| AggregationStat::CountValue {
 						count,
 						..
 					} => Value::from(Number::from(count)),
-					AggregationStat::NumMax {
+					AggregationStat::NumberMax {
 						max,
 						..
 					} => max.into(),
-					AggregationStat::NumMin {
+					AggregationStat::NumberMin {
 						min,
 						..
 					} => min.into(),
-					AggregationStat::NumSum {
+					AggregationStat::Sum {
 						sum,
 						..
 					} => sum.into(),
-					AggregationStat::NumMean {
+					AggregationStat::Mean {
 						sum,
 						count,
 						..
@@ -184,6 +184,40 @@ impl GroupCollector {
 						values,
 						..
 					} => values.into(),
+					AggregationStat::StdDev {
+						sum,
+						sum_of_squares,
+						count,
+						..
+					} => {
+						let num = if count <= 1 {
+							Number::from(0.0)
+						} else {
+							let mean = sum / Number::from(count);
+							let variance =
+								(sum_of_squares - (sum * mean)) / Number::from(count - 1);
+							if variance == Number::from(0.0) {
+								Number::from(0.0)
+							} else {
+								variance.sqrt()
+							}
+						};
+						num.into()
+					}
+					AggregationStat::Variance {
+						sum,
+						sum_of_squares,
+						count,
+						..
+					} => {
+						let num = if count <= 1 {
+							Number::from(0.0)
+						} else {
+							let mean = sum / Number::from(count);
+							(sum_of_squares - (sum * mean)) / Number::from(count - 1)
+						};
+						num.into()
+					}
 				};
 
 				// Optimize for the common case where the field is already in the document.

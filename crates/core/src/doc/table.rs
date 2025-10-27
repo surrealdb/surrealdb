@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
@@ -17,18 +16,13 @@ use crate::expr::{
 	Literal,
 };
 use crate::key;
-use crate::val::{Array, RecordIdKey, TryAdd, Value};
+use crate::val::{Array, Number, RecordIdKey, TryAdd, TryPow, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Copy)]
 enum Action {
 	Create,
 	Update,
 	Delete,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Copy)]
-enum UpdateAction {
-	Deleted,
 }
 
 impl Document {
@@ -403,7 +397,7 @@ impl Document {
 				} => {
 					*count -= 1;
 				}
-				AggregationStat::CountFn {
+				AggregationStat::CountValue {
 					arg,
 					count,
 				} => {
@@ -411,7 +405,7 @@ impl Document {
 						*count -= 1;
 					}
 				}
-				AggregationStat::NumMax {
+				AggregationStat::NumberMax {
 					arg,
 					max,
 				} => {
@@ -429,7 +423,7 @@ impl Document {
 						})
 					}
 				}
-				AggregationStat::NumMin {
+				AggregationStat::NumberMin {
 					arg,
 					min,
 				} => {
@@ -445,7 +439,7 @@ impl Document {
 						})
 					}
 				}
-				AggregationStat::NumSum {
+				AggregationStat::Sum {
 					arg,
 					sum,
 				} => {
@@ -455,7 +449,7 @@ impl Document {
 
 					*sum = *sum - *n;
 				}
-				AggregationStat::NumMean {
+				AggregationStat::Mean {
 					arg,
 					sum,
 					count,
@@ -498,6 +492,26 @@ impl Document {
 							arg: *arg,
 						});
 					}
+				}
+				AggregationStat::Variance {
+					arg,
+					sum,
+					sum_of_squares,
+					count,
+				}
+				| AggregationStat::StdDev {
+					arg,
+					sum,
+					sum_of_squares,
+					count,
+				} => {
+					let Value::Number(n) = &args[*arg] else {
+						fail!("Old record wasn't a number but was created with a number");
+					};
+
+					*count -= 1;
+					*sum = *sum - *n;
+					*sum_of_squares = *sum_of_squares - n.try_pow(Number::from(2))?;
 				}
 				AggregationStat::Accumulate {
 					..
@@ -579,11 +593,11 @@ impl Document {
 						*stat = d;
 					}
 
-					AggregationStat::NumMin {
+					AggregationStat::NumberMin {
 						min: stat,
 						..
 					}
-					| AggregationStat::NumMax {
+					| AggregationStat::NumberMax {
 						max: stat,
 						..
 					} => {
@@ -668,7 +682,7 @@ impl Document {
 				AggregationStat::Count {
 					..
 				} => {}
-				AggregationStat::CountFn {
+				AggregationStat::CountValue {
 					arg,
 					count,
 				} => {
@@ -679,7 +693,7 @@ impl Document {
 						*count += 1;
 					}
 				}
-				AggregationStat::NumMax {
+				AggregationStat::NumberMax {
 					arg,
 					max,
 				} => {
@@ -707,7 +721,7 @@ impl Document {
 						})
 					}
 				}
-				AggregationStat::NumMin {
+				AggregationStat::NumberMin {
 					arg,
 					min,
 				} => {
@@ -732,7 +746,7 @@ impl Document {
 						})
 					}
 				}
-				AggregationStat::NumSum {
+				AggregationStat::Sum {
 					arg,
 					sum,
 				} => {
@@ -754,7 +768,7 @@ impl Document {
 					*sum = sum.try_add(*after)?;
 				}
 
-				AggregationStat::NumMean {
+				AggregationStat::Mean {
 					arg,
 					sum,
 					..
@@ -827,6 +841,31 @@ impl Document {
 							arg: *arg,
 						});
 					}
+				}
+				AggregationStat::Variance {
+					arg,
+					sum,
+					sum_of_squares,
+					..
+				}
+				| AggregationStat::StdDev {
+					arg,
+					sum,
+					sum_of_squares,
+					..
+				} => {
+					let Value::Number(before) = &before_args[*arg] else {
+						fail!("Old record wasn't a number but was created with a number");
+					};
+
+					let Value::Number(after) = &after_args[*arg] else {
+						fail!("Old record wasn't a number but was created with a number");
+					};
+
+					*sum = *sum - *before;
+					*sum_of_squares = *sum_of_squares - before.try_pow(Number::from(2))?;
+					*sum = *sum + *after;
+					*sum_of_squares = *sum_of_squares + after.try_pow(Number::from(2))?;
 				}
 				AggregationStat::Accumulate {
 					..
@@ -908,11 +947,11 @@ impl Document {
 						*stat = d;
 					}
 
-					AggregationStat::NumMin {
+					AggregationStat::NumberMin {
 						min: stat,
 						..
 					}
-					| AggregationStat::NumMax {
+					| AggregationStat::NumberMax {
 						max: stat,
 						..
 					} => {

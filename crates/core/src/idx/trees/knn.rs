@@ -521,7 +521,7 @@ where
 	}
 }
 
-pub(super) struct KnnResultBuilder {
+pub(super) struct KnnResultBuilde {
 	knn: u64,
 	docs: RoaringTreemap,
 	priority_list: BTreeMap<FloatKey, Ids64>,

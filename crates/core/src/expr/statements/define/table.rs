@@ -21,8 +21,8 @@ use crate::expr::changefeed::ChangeFeed;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::{
-	Base, Cond, Expr, Field, Fields, FlowResultExt, Function, FunctionCall, Group, Groups, Idiom,
-	Kind, Literal, SelectStatement, View,
+	Base, BinaryOperator, Cond, Expr, Field, Fields, FlowResultExt, Function, FunctionCall, Group,
+	Groups, Idiom, Kind, Literal, SelectStatement, View,
 };
 use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
@@ -301,45 +301,70 @@ impl DefineTableStatement {
 		// For math::max, and count this is easy, just run a select with the same aggregate.
 		// However for mean we don't need to know the mean itself but actually the sum and count.
 
+		#[derive(Clone, Eq, PartialEq, Hash)]
+		pub enum SelectAggr {
+			// Only used to do initial select.
+			PowSum(usize),
+			Base(Aggregation),
+		}
+
 		// Find out what we need to calculate to initialize the aggregation stats.
 		let mut required_values = HashMap::new();
 		for aggregation in analysis.aggregations.iter() {
 			match aggregation {
 				Aggregation::Count => {
 					let len = required_values.len();
-					required_values.entry(Aggregation::Count).or_insert(len);
+					required_values.entry(SelectAggr::Base(Aggregation::Count)).or_insert(len);
 				}
 				Aggregation::CountValue(arg) => {
 					let len = required_values.len();
-					required_values.entry(Aggregation::CountValue(*arg)).or_insert(len);
+					required_values
+						.entry(SelectAggr::Base(Aggregation::CountValue(*arg)))
+						.or_insert(len);
 				}
 				Aggregation::NumberMax(arg) => {
 					let len = required_values.len();
-					required_values.entry(Aggregation::NumberMax(*arg)).or_insert(len);
+					required_values
+						.entry(SelectAggr::Base(Aggregation::NumberMax(*arg)))
+						.or_insert(len);
 				}
 				Aggregation::NumberMin(arg) => {
 					let len = required_values.len();
-					required_values.entry(Aggregation::NumberMin(*arg)).or_insert(len);
+					required_values
+						.entry(SelectAggr::Base(Aggregation::NumberMin(*arg)))
+						.or_insert(len);
 				}
 				Aggregation::Sum(arg) => {
 					let len = required_values.len();
-					required_values.entry(Aggregation::Sum(*arg)).or_insert(len);
+					required_values.entry(SelectAggr::Base(Aggregation::Sum(*arg))).or_insert(len);
 				}
 				Aggregation::Mean(arg) => {
 					// So here for example we need to know 2 things. First the sum for argument
 					// `arg` and the record count for the group.
 					let len = required_values.len();
-					required_values.entry(Aggregation::Sum(*arg)).or_insert(len);
+					required_values.entry(SelectAggr::Base(Aggregation::Sum(*arg))).or_insert(len);
 					let len = required_values.len();
-					required_values.entry(Aggregation::Count).or_insert(len);
+					required_values.entry(SelectAggr::Base(Aggregation::Count)).or_insert(len);
 				}
 				Aggregation::DatetimeMax(arg) => {
 					let len = required_values.len();
-					required_values.entry(Aggregation::DatetimeMax(*arg)).or_insert(len);
+					required_values
+						.entry(SelectAggr::Base(Aggregation::DatetimeMax(*arg)))
+						.or_insert(len);
 				}
 				Aggregation::DatetimeMin(arg) => {
 					let len = required_values.len();
-					required_values.entry(Aggregation::DatetimeMin(*arg)).or_insert(len);
+					required_values
+						.entry(SelectAggr::Base(Aggregation::DatetimeMin(*arg)))
+						.or_insert(len);
+				}
+				Aggregation::StdDev(arg) | Aggregation::Variance(arg) => {
+					let len = required_values.len();
+					required_values.entry(SelectAggr::Base(Aggregation::Sum(*arg))).or_insert(len);
+					let len = required_values.len();
+					required_values.entry(SelectAggr::PowSum(*arg)).or_insert(len);
+					let len = required_values.len();
+					required_values.entry(SelectAggr::Base(Aggregation::Count)).or_insert(len);
 				}
 				Aggregation::Accumulate(_) => {
 					fail!("Accumulate aggregation is not supported in materialized views")
@@ -348,43 +373,60 @@ impl DefineTableStatement {
 		}
 
 		let mut aggregate_value_expr = Vec::with_capacity(required_values.len());
-		for (aggreagation, idx) in required_values.iter() {
-			let expr = Expr::FunctionCall(Box::new(match aggreagation {
-				Aggregation::Count => FunctionCall {
-					receiver: Function::Normal("count".to_string()),
-					arguments: Vec::new(),
-				},
-				Aggregation::CountValue(arg) => FunctionCall {
-					receiver: Function::Normal("count".to_string()),
-					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
-				},
-				Aggregation::NumberMax(arg) => FunctionCall {
-					receiver: Function::Normal("math::max".to_string()),
-					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
-				},
-				Aggregation::NumberMin(arg) => FunctionCall {
-					receiver: Function::Normal("math::min".to_string()),
-					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
-				},
-				Aggregation::Sum(arg) => FunctionCall {
-					receiver: Function::Normal("math::sum".to_string()),
-					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
-				},
-				Aggregation::Mean(arg) => FunctionCall {
-					receiver: Function::Normal("math::mean".to_string()),
-					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
-				},
-				Aggregation::DatetimeMax(arg) => FunctionCall {
-					receiver: Function::Normal("time::max".to_string()),
-					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
-				},
-				Aggregation::DatetimeMin(arg) => FunctionCall {
-					receiver: Function::Normal("time::min".to_string()),
-					arguments: vec![analysis.aggregate_arguments[*arg].clone()],
-				},
-				Aggregation::Accumulate(_) => {
-					fail!("Accumulate aggregation is not supported in materialized views")
+		for (aggregation, idx) in required_values.iter() {
+			let expr = Expr::FunctionCall(Box::new(match aggregation {
+				SelectAggr::PowSum(arg) => {
+					let expr = Expr::Binary {
+						left: Box::new(analysis.aggregate_arguments[*arg].clone()),
+						op: BinaryOperator::Power,
+						right: Box::new(Expr::Literal(Literal::Integer(2))),
+					};
+					FunctionCall {
+						receiver: Function::Normal("count".to_string()),
+						arguments: vec![expr],
+					}
 				}
+				SelectAggr::Base(aggregation) => match aggregation {
+					Aggregation::Count => FunctionCall {
+						receiver: Function::Normal("count".to_string()),
+						arguments: Vec::new(),
+					},
+					Aggregation::CountValue(arg) => FunctionCall {
+						receiver: Function::Normal("count".to_string()),
+						arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+					},
+					Aggregation::NumberMax(arg) => FunctionCall {
+						receiver: Function::Normal("math::max".to_string()),
+						arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+					},
+					Aggregation::NumberMin(arg) => FunctionCall {
+						receiver: Function::Normal("math::min".to_string()),
+						arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+					},
+					Aggregation::Sum(arg) => FunctionCall {
+						receiver: Function::Normal("math::sum".to_string()),
+						arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+					},
+					Aggregation::Mean(arg) => FunctionCall {
+						receiver: Function::Normal("math::mean".to_string()),
+						arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+					},
+					Aggregation::DatetimeMax(arg) => FunctionCall {
+						receiver: Function::Normal("time::max".to_string()),
+						arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+					},
+					Aggregation::DatetimeMin(arg) => FunctionCall {
+						receiver: Function::Normal("time::min".to_string()),
+						arguments: vec![analysis.aggregate_arguments[*arg].clone()],
+					},
+					Aggregation::StdDev(_) | Aggregation::Variance(_) => {
+						// Not used for initialization.
+						unreachable!()
+					}
+					Aggregation::Accumulate(_) => {
+						fail!("Accumulate aggregation is not supported in materialized views")
+					}
+				},
 			}));
 
 			if aggregate_value_expr.len() > *idx {
@@ -410,7 +452,7 @@ impl DefineTableStatement {
 			groups.push(Group(Idiom::field(alias)));
 		}
 
-		// calculated aggregations return in field g
+		// calculated aggregations return in field 'a'
 		fields.push(Field::Single {
 			expr: Expr::Literal(Literal::Array(aggregate_value_expr)),
 			alias: Some(Idiom::field("a".to_string())),
@@ -455,7 +497,7 @@ impl DefineTableStatement {
 			for a in analysis.aggregations.iter() {
 				match *a {
 					Aggregation::Count => {
-						let idx = required_values[&Aggregation::Count];
+						let idx = required_values[&SelectAggr::Base(Aggregation::Count)];
 						let Value::Number(Number::Int(i)) = &aggregate_stats[idx] else {
 							fail!("initial select statement did not return the right value")
 						};
@@ -464,64 +506,64 @@ impl DefineTableStatement {
 						});
 					}
 					Aggregation::CountValue(arg) => {
-						let idx = required_values[&Aggregation::CountValue(arg)];
+						let idx = required_values[&SelectAggr::Base(Aggregation::CountValue(arg))];
 						let Value::Number(Number::Int(i)) = &aggregate_stats[idx] else {
 							fail!("initial select statement did not return the right value")
 						};
-						stats.push(AggregationStat::CountFn {
+						stats.push(AggregationStat::CountValue {
 							arg,
 							count: *i,
 						});
 					}
 					Aggregation::NumberMax(arg) => {
-						let idx = required_values[&Aggregation::NumberMax(arg)];
+						let idx = required_values[&SelectAggr::Base(Aggregation::NumberMax(arg))];
 						let Value::Number(n) = &aggregate_stats[idx] else {
 							fail!("initial select statement did not return the right value")
 						};
-						stats.push(AggregationStat::NumMax {
+						stats.push(AggregationStat::NumberMax {
 							arg,
 							max: *n,
 						});
 					}
 					Aggregation::NumberMin(arg) => {
-						let idx = required_values[&Aggregation::NumberMin(arg)];
+						let idx = required_values[&SelectAggr::Base(Aggregation::NumberMin(arg))];
 						let Value::Number(n) = &aggregate_stats[idx] else {
 							fail!("initial select statement did not return the right value")
 						};
-						stats.push(AggregationStat::NumMin {
+						stats.push(AggregationStat::NumberMin {
 							arg,
 							min: *n,
 						});
 					}
 					Aggregation::Sum(arg) => {
-						let idx = required_values[&Aggregation::Sum(arg)];
+						let idx = required_values[&SelectAggr::Base(Aggregation::Sum(arg))];
 						let Value::Number(n) = &aggregate_stats[idx] else {
 							fail!("initial select statement did not return the right value")
 						};
 
-						stats.push(AggregationStat::NumSum {
+						stats.push(AggregationStat::Sum {
 							arg,
 							sum: *n,
 						});
 					}
 					Aggregation::Mean(arg) => {
-						let idx = required_values[&Aggregation::Sum(arg)];
+						let idx = required_values[&SelectAggr::Base(Aggregation::Sum(arg))];
 						let Value::Number(n) = &aggregate_stats[idx] else {
 							fail!("initial select statement did not return the right value")
 						};
-						let idx = required_values[&Aggregation::Count];
+						let idx = required_values[&SelectAggr::Base(Aggregation::Count)];
 						let Value::Number(Number::Int(i)) = &aggregate_stats[idx] else {
 							fail!("initial select statement did not return the right value")
 						};
 
-						stats.push(AggregationStat::NumMean {
+						stats.push(AggregationStat::Mean {
 							arg,
 							sum: *n,
 							count: *i,
 						});
 					}
 					Aggregation::DatetimeMax(arg) => {
-						let idx = required_values[&Aggregation::DatetimeMax(arg)];
+						let idx = required_values[&SelectAggr::Base(Aggregation::DatetimeMax(arg))];
 						let Value::Datetime(d) = &aggregate_stats[idx] else {
 							fail!("initial select statement did not return the right value")
 						};
@@ -532,7 +574,7 @@ impl DefineTableStatement {
 						});
 					}
 					Aggregation::DatetimeMin(arg) => {
-						let idx = required_values[&Aggregation::DatetimeMax(arg)];
+						let idx = required_values[&SelectAggr::Base(Aggregation::DatetimeMax(arg))];
 						let Value::Datetime(d) = &aggregate_stats[idx] else {
 							fail!("initial select statement did not return the right value")
 						};
@@ -540,6 +582,48 @@ impl DefineTableStatement {
 						stats.push(AggregationStat::TimeMax {
 							arg,
 							max: d.clone(),
+						});
+					}
+					Aggregation::StdDev(arg) => {
+						let idx = required_values[&SelectAggr::Base(Aggregation::Sum(arg))];
+						let Value::Number(sum) = &aggregate_stats[idx] else {
+							fail!("initial select statement did not return the right value")
+						};
+						let idx = required_values[&SelectAggr::PowSum(arg)];
+						let Value::Number(sum_of_squares) = &aggregate_stats[idx] else {
+							fail!("initial select statement did not return the right value")
+						};
+						let idx = required_values[&SelectAggr::Base(Aggregation::Count)];
+						let Value::Number(Number::Int(count)) = &aggregate_stats[idx] else {
+							fail!("initial select statement did not return the right value")
+						};
+
+						stats.push(AggregationStat::StdDev {
+							arg,
+							sum: *sum,
+							sum_of_squares: *sum_of_squares,
+							count: *count,
+						});
+					}
+					Aggregation::Variance(arg) => {
+						let idx = required_values[&SelectAggr::Base(Aggregation::Sum(arg))];
+						let Value::Number(sum) = &aggregate_stats[idx] else {
+							fail!("initial select statement did not return the right value")
+						};
+						let idx = required_values[&SelectAggr::PowSum(arg)];
+						let Value::Number(sum_of_squares) = &aggregate_stats[idx] else {
+							fail!("initial select statement did not return the right value")
+						};
+						let idx = required_values[&SelectAggr::Base(Aggregation::Count)];
+						let Value::Number(Number::Int(count)) = &aggregate_stats[idx] else {
+							fail!("initial select statement did not return the right value")
+						};
+
+						stats.push(AggregationStat::Variance {
+							arg,
+							sum: *sum,
+							sum_of_squares: *sum_of_squares,
+							count: *count,
 						});
 					}
 					Aggregation::Accumulate {

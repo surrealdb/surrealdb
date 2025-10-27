@@ -48,7 +48,7 @@ use crate::{
 		Expr, Field, Fields, Function, Groups, Idiom, Part,
 		visit::{MutVisitor, VisitMut},
 	},
-	val::{Array, Datetime, Number, Object, TryAdd as _, TryFloatDiv, Value},
+	val::{Array, Datetime, Number, Object, TryAdd as _, TryFloatDiv, TryMul, Value},
 };
 use std::{fmt::Write, mem};
 
@@ -64,6 +64,8 @@ pub enum Aggregation {
 	NumberMin(usize),
 	Sum(usize),
 	Mean(usize),
+	StdDev(usize),
+	Variance(usize),
 	DatetimeMax(usize),
 	DatetimeMin(usize),
 	Accumulate(usize),
@@ -75,26 +77,38 @@ impl Aggregation {
 			Aggregation::Count => AggregationStat::Count {
 				count: 0,
 			},
-			Aggregation::CountValue(arg) => AggregationStat::CountFn {
+			Aggregation::CountValue(arg) => AggregationStat::CountValue {
 				arg,
 				count: 0,
 			},
-			Aggregation::NumberMax(arg) => AggregationStat::NumMax {
+			Aggregation::NumberMax(arg) => AggregationStat::NumberMax {
 				arg,
 				max: f64::NEG_INFINITY.into(),
 			},
-			Aggregation::NumberMin(arg) => AggregationStat::NumMin {
+			Aggregation::NumberMin(arg) => AggregationStat::NumberMin {
 				arg,
 				min: f64::INFINITY.into(),
 			},
-			Aggregation::Sum(arg) => AggregationStat::NumSum {
+			Aggregation::Sum(arg) => AggregationStat::Sum {
 				arg,
 				sum: 0.0.into(),
 			},
-			Aggregation::Mean(arg) => AggregationStat::NumMean {
+			Aggregation::Mean(arg) => AggregationStat::Mean {
 				arg,
 				count: 0,
 				sum: 0.0.into(),
+			},
+			Aggregation::StdDev(arg) => AggregationStat::StdDev {
+				arg,
+				sum: 0.0.into(),
+				sum_of_squares: 0.0.into(),
+				count: 0,
+			},
+			Aggregation::Variance(arg) => AggregationStat::Variance {
+				arg,
+				sum: 0.0.into(),
+				sum_of_squares: 0.0.into(),
+				count: 0,
 			},
 			Aggregation::DatetimeMax(arg) => AggregationStat::TimeMax {
 				arg,
@@ -142,13 +156,13 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 			} => {
 				*count += 1;
 			}
-			AggregationStat::CountFn {
+			AggregationStat::CountValue {
 				arg,
 				count,
 			} => {
 				*count += arguments[*arg].is_truthy() as i64;
 			}
-			AggregationStat::NumMax {
+			AggregationStat::NumberMax {
 				arg,
 				max,
 			} => {
@@ -165,7 +179,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 					*max = *n
 				}
 			}
-			AggregationStat::NumMin {
+			AggregationStat::NumberMin {
 				arg,
 				min,
 			} => {
@@ -182,7 +196,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 					*min = *n
 				}
 			}
-			AggregationStat::NumSum {
+			AggregationStat::Sum {
 				arg,
 				sum,
 			} => {
@@ -197,7 +211,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				};
 				*sum = (*sum).try_add(*n)?;
 			}
-			AggregationStat::NumMean {
+			AggregationStat::Mean {
 				arg,
 				sum,
 				count,
@@ -213,6 +227,46 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 				};
 
 				*sum = (*sum).try_add(*n)?;
+				*count += 1;
+			}
+			AggregationStat::StdDev {
+				arg,
+				sum,
+				sum_of_squares,
+				count,
+			} => {
+				let Value::Number(ref n) = arguments[*arg] else {
+					bail!(Error::InvalidArguments {
+						name: "math::stddev".to_string(),
+						message: format!(
+							"Argument 1 was the wrong type. Expected `number` but found `{}`",
+							arguments[*arg]
+						),
+					})
+				};
+
+				*sum = (*sum).try_add(*n)?;
+				*sum_of_squares = (*sum).try_add(n.try_mul(*n)?)?;
+				*count += 1;
+			}
+			AggregationStat::Variance {
+				arg,
+				sum,
+				sum_of_squares,
+				count,
+			} => {
+				let Value::Number(ref n) = arguments[*arg] else {
+					bail!(Error::InvalidArguments {
+						name: "math::variance".to_string(),
+						message: format!(
+							"Argument 1 was the wrong type. Expected `number` but found `{}`",
+							arguments[*arg]
+						),
+					})
+				};
+
+				*sum = (*sum).try_add(*n)?;
+				*sum_of_squares = (*sum).try_add(n.try_mul(*n)?)?;
 				*count += 1;
 			}
 			AggregationStat::TimeMax {
@@ -271,27 +325,60 @@ pub fn create_field_document(group: &[Value], stats: &[AggregationStat]) -> Obje
 			AggregationStat::Count {
 				count,
 			}
-			| AggregationStat::CountFn {
+			| AggregationStat::CountValue {
 				count,
 				..
 			} => Value::from(Number::from(*count)),
-			AggregationStat::NumMax {
+			AggregationStat::NumberMax {
 				max,
 				..
 			} => (*max).into(),
-			AggregationStat::NumMin {
+			AggregationStat::NumberMin {
 				min,
 				..
 			} => (*min).into(),
-			AggregationStat::NumSum {
+			AggregationStat::Sum {
 				sum,
 				..
 			} => (*sum).into(),
-			AggregationStat::NumMean {
+			AggregationStat::Mean {
 				sum,
 				count,
 				..
 			} => sum.try_float_div((*count).into()).unwrap_or(f64::NAN.into()).into(),
+			AggregationStat::StdDev {
+				sum,
+				sum_of_squares,
+				count,
+				..
+			} => {
+				let num = if *count <= 1 {
+					Number::from(0.0)
+				} else {
+					let mean = *sum / Number::from(*count);
+					let variance = (*sum_of_squares - (*sum * mean)) / Number::from(*count - 1);
+					if variance == Number::from(0.0) {
+						Number::from(0.0)
+					} else {
+						variance.sqrt()
+					}
+				};
+				num.into()
+			}
+			AggregationStat::Variance {
+				sum,
+				sum_of_squares,
+				count,
+				..
+			} => {
+				let num = if *count <= 1 {
+					Number::from(0.0)
+				} else {
+					let mean = *sum / Number::from(*count);
+					(*sum_of_squares - (*sum * mean)) / Number::from(*count - 1)
+				};
+				num.into()
+			}
 			AggregationStat::TimeMax {
 				max,
 				..
