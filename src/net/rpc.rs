@@ -16,7 +16,7 @@ use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::mem::ALLOC;
 use surrealdb_core::rpc::format::{Format, PROTOCOLS};
-use surrealdb_core::rpc::{DbResponse, RpcContext};
+use surrealdb_core::rpc::{DbResponse, RpcProtocol};
 use tower_http::limit::RequestBodyLimitLayer;
 use tower_http::request_id::RequestId;
 use uuid::Uuid;
@@ -185,9 +185,8 @@ async fn post_handler(
 	match fmt.req_http(body) {
 		Ok(req) => {
 			// Execute the specified method
-			let res = RpcContext::execute(
+			let res = RpcProtocol::execute(
 				&rpc,
-				req.version,
 				req.txn.map(Into::into),
 				req.session_id.map(Into::into),
 				req.method,
