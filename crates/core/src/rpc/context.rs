@@ -6,12 +6,10 @@ use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
-use crate::dbs::Session;
 use crate::dbs::capabilities::MethodTarget;
-use crate::dbs::{QueryResult, QueryType};
+use crate::dbs::{QueryResult, QueryType, Session};
 use crate::err::Error;
-use crate::kvs::Datastore;
-use crate::kvs::{LockType, TransactionType};
+use crate::kvs::{Datastore, LockType, TransactionType};
 use crate::rpc::args::extract_args;
 use crate::rpc::{DbResult, Method, RpcError};
 use crate::sql::{
