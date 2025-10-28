@@ -104,6 +104,15 @@ macro_rules! register_host_function {
     }};
 }
 
+macro_rules! map_ok {
+	($expr:expr => |$x:ident| $body:expr) => {
+		match $expr {
+			Ok($x) => $body,
+			Err(e) => Err(e),
+		}
+	};
+}
+
 /// Context provided for each WASM function invocation.
 /// Created per-call with borrowed execution context (stack, query context, etc).
 #[async_trait]
@@ -122,7 +131,7 @@ pub trait InvocationContext: Send + Sync {
 		args: Vec<surrealdb_types::Value>,
 	) -> Result<surrealdb_types::Value>;
 
-	fn kv(&mut self) -> &dyn KVStore;
+	fn kv(&mut self) -> Result<&dyn KVStore>;
 
 	async fn ml_invoke_model(
 		&mut self,
@@ -176,62 +185,62 @@ pub fn implement_host_functions(linker: &mut Linker<StoreData>) -> Result<()> {
 	// KV functions
 	#[rustfmt::skip]
     register_host_function!(linker, "__sr_kv_get", |mut controller: HostController, key: String| -> Result<Option<surrealdb_types::Value>> {
-        controller.context_mut().kv().get(key).await
+        map_ok!(controller.context_mut().kv() => |kv| kv.get(key).await)
     });
 
 	#[rustfmt::skip]
     register_host_function!(linker, "__sr_kv_set", |mut controller: HostController, key: String, value: surrealdb_types::Value| -> Result<()> {
-        controller.context_mut().kv().set(key, value).await
+        map_ok!(controller.context_mut().kv() => |kv| kv.set(key, value).await)
     });
 
 	#[rustfmt::skip]
     register_host_function!(linker, "__sr_kv_del", |mut controller: HostController, key: String| -> Result<()> {
-        controller.context_mut().kv().del(key).await
+        map_ok!(controller.context_mut().kv() => |kv| kv.del(key).await)
     });
 
 	#[rustfmt::skip]
     register_host_function!(linker, "__sr_kv_exists", |mut controller: HostController, key: String| -> Result<bool> {
-        controller.context_mut().kv().exists(key).await
+        map_ok!(controller.context_mut().kv() => |kv| kv.exists(key).await)
     });
 
 	#[rustfmt::skip]
     register_host_function!(linker, "__sr_kv_del_rng", |mut controller: HostController, range: SerializableRange<String>| -> Result<()> {
-        controller.context_mut().kv().del_rng(range.beg, range.end).await
+        map_ok!(controller.context_mut().kv() => |kv| kv.del_rng(range.beg, range.end).await)
     });
 
 	#[rustfmt::skip]
     register_host_function!(linker, "__sr_kv_get_batch", |mut controller: HostController, keys: Vec<String>| -> Result<Vec<Option<surrealdb_types::Value>>> {
-        controller.context_mut().kv().get_batch(keys).await
+        map_ok!(controller.context_mut().kv() => |kv| kv.get_batch(keys).await)
     });
 
 	#[rustfmt::skip]
     register_host_function!(linker, "__sr_kv_set_batch", |mut controller: HostController, entries: Vec<(String, surrealdb_types::Value)>| -> Result<()> {
-        controller.context_mut().kv().set_batch(entries).await
+        map_ok!(controller.context_mut().kv() => |kv| kv.set_batch(entries).await)
     });
 
 	#[rustfmt::skip]
     register_host_function!(linker, "__sr_kv_del_batch", |mut controller: HostController, keys: Vec<String>| -> Result<()> {
-        controller.context_mut().kv().del_batch(keys).await
+        map_ok!(controller.context_mut().kv() => |kv| kv.del_batch(keys).await)
     });
 
 	#[rustfmt::skip]
     register_host_function!(linker, "__sr_kv_keys", |mut controller: HostController, range: SerializableRange<String>| -> Result<Vec<String>> {
-        controller.context_mut().kv().keys(range.beg, range.end).await
+        map_ok!(controller.context_mut().kv() => |kv| kv.keys(range.beg, range.end).await)
     });
 
 	#[rustfmt::skip]
     register_host_function!(linker, "__sr_kv_values", |mut controller: HostController, range: SerializableRange<String>| -> Result<Vec<surrealdb_types::Value>> {
-        controller.context_mut().kv().values(range.beg, range.end).await
+        map_ok!(controller.context_mut().kv() => |kv| kv.values(range.beg, range.end).await)
     });
 
 	#[rustfmt::skip]
     register_host_function!(linker, "__sr_kv_entries", |mut controller: HostController, range: SerializableRange<String>| -> Result<Vec<(String, surrealdb_types::Value)>> {
-        controller.context_mut().kv().entries(range.beg, range.end).await
+        map_ok!(controller.context_mut().kv() => |kv| kv.entries(range.beg, range.end).await)
     });
 
 	#[rustfmt::skip]
     register_host_function!(linker, "__sr_kv_count", |mut controller: HostController, range: SerializableRange<String>| -> Result<u64> {
-        controller.context_mut().kv().count(range.beg, range.end).await
+        map_ok!(controller.context_mut().kv() => |kv| kv.count(range.beg, range.end).await)
     });
 
 	// ML invoke model function

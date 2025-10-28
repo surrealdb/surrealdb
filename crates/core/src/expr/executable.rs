@@ -5,6 +5,8 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use crate::catalog;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 #[cfg(not(target_arch = "wasm32"))]
@@ -18,6 +20,8 @@ use crate::fmt::EscapeKwFreeIdent;
 use crate::surrealism::cache::SurrealismCacheLookup;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::surrealism::host::Host;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::surrealism::host::SignatureHost;
 use crate::val::File;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -53,18 +57,15 @@ impl From<Executable> for catalog::Executable {
 impl Executable {
 	pub(crate) async fn signature(
 		&self,
-		stk: &mut Stk,
 		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
+		ns: &NamespaceId,
+		db: &DatabaseId,
 		sub: Option<&str>,
 	) -> Result<Signature> {
 		match self {
-			Executable::Block(block) => block.signature(stk, ctx, opt, doc, sub).await,
-			Executable::Surrealism(surrealism) => {
-				surrealism.signature(stk, ctx, opt, doc, sub).await
-			}
-			Executable::Silo(silo) => silo.signature(stk, ctx, opt, doc, sub).await,
+			Executable::Block(block) => block.signature(sub).await,
+			Executable::Surrealism(surrealism) => surrealism.signature(ctx, ns, db, sub).await,
+			Executable::Silo(silo) => silo.signature(ctx, sub).await,
 		}
 	}
 
@@ -110,9 +111,46 @@ impl VisitExpression for Executable {
 	}
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct Signature {
-	pub(crate) args: Vec<Kind>,
+	pub(crate) args: Arguments,
 	pub(crate) returns: Option<Kind>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) enum Arguments {
+	Named(Vec<(String, Kind)>),
+	Unnamed(Vec<Kind>),
+}
+
+impl Arguments {
+	pub(crate) fn to_named(&self) -> Vec<(String, Kind)> {
+		match self {
+			Arguments::Named(args) => args.clone(),
+			Arguments::Unnamed(args) => {
+				args.iter().enumerate().map(|(i, k)| (format!("arg{}", i), k.clone())).collect()
+			}
+		}
+	}
+
+	pub(crate) fn to_unnamed(&self) -> Vec<Kind> {
+		match self {
+			Arguments::Named(args) => args.iter().map(|(_, k)| k.clone()).collect(),
+			Arguments::Unnamed(args) => args.clone(),
+		}
+	}
+}
+
+impl From<Vec<(String, Kind)>> for Arguments {
+	fn from(args: Vec<(String, Kind)>) -> Self {
+		Arguments::Named(args)
+	}
+}
+
+impl From<Vec<Kind>> for Arguments {
+	fn from(args: Vec<Kind>) -> Self {
+		Arguments::Unnamed(args)
+	}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -143,19 +181,12 @@ impl From<BlockExecutable> for catalog::BlockExecutable {
 }
 
 impl BlockExecutable {
-	pub(crate) async fn signature(
-		&self,
-		_stk: &mut Stk,
-		_ctx: &Context,
-		_opt: &Options,
-		_doc: Option<&CursorDoc>,
-		sub: Option<&str>,
-	) -> Result<Signature> {
+	pub(crate) async fn signature(&self, sub: Option<&str>) -> Result<Signature> {
 		if sub.is_some() {
 			bail!("Sub-functions are not supported for block functions");
 		}
 
-		let args = self.args.iter().map(|(_, kind)| kind.clone()).collect();
+		let args = Arguments::from(self.args.clone());
 		let returns = self.returns.clone();
 
 		Ok(Signature {
@@ -258,10 +289,9 @@ impl VisitExpression for SurrealismExecutable {
 impl SurrealismExecutable {
 	pub(crate) async fn signature(
 		&self,
-		_stk: &mut Stk,
 		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
+		ns: &NamespaceId,
+		db: &DatabaseId,
 		sub: Option<&str>,
 	) -> Result<Signature> {
 		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
@@ -270,23 +300,21 @@ impl SurrealismExecutable {
 			);
 		}
 
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		let lookup = SurrealismCacheLookup::File(&ns, &db, &self.0);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
 
-		let ctx = ctx.clone();
-		let opt = opt.clone();
-		let doc = doc.cloned();
 		spawn_thread(move || async move {
-			let host = Box::new(Host::new(&ctx, &opt, doc.as_ref()));
+			let host = Box::new(SignatureHost::new());
 			let mut controller = runtime.new_controller(host).await?;
 
-			let args = controller
+			let args: Vec<Kind> = controller
 				.args(sub.map(String::from))
 				.await?
 				.into_iter()
 				.map(|x| x.into())
 				.collect();
+
+			let args = Arguments::from(args);
 			let returns =
 				controller.returns(sub.map(String::from)).await.map(|x| Some(x.into()))?;
 
@@ -411,14 +439,7 @@ impl VisitExpression for SiloExecutable {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl SiloExecutable {
-	pub(crate) async fn signature(
-		&self,
-		_stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-		sub: Option<&str>,
-	) -> Result<Signature> {
+	pub(crate) async fn signature(&self, ctx: &Context, sub: Option<&str>) -> Result<Signature> {
 		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
 			bail!(
 				"Failed to get silo function signature: Experimental capability `surrealism` is not enabled"
@@ -434,19 +455,18 @@ impl SiloExecutable {
 		);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
 
-		let ctx = ctx.clone();
-		let opt = opt.clone();
-		let doc = doc.cloned();
 		spawn_thread(move || async move {
-			let host = Box::new(Host::new(&ctx, &opt, doc.as_ref()));
+			let host = Box::new(SignatureHost::new());
 			let mut controller = runtime.new_controller(host).await?;
 
-			let args = controller
+			let args: Vec<Kind> = controller
 				.args(sub.map(String::from))
 				.await?
 				.into_iter()
 				.map(|x| x.into())
 				.collect();
+
+			let args = Arguments::from(args);
 			let returns =
 				controller.returns(sub.map(String::from)).await.map(|x| Some(x.into()))?;
 

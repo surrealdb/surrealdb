@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Result, bail};
 use async_trait::async_trait;
 use reblessive::TreeStack;
 use surrealism_runtime::config::SurrealismConfig;
@@ -72,7 +72,7 @@ impl InvocationContext for Host {
 		convert_value_to_public_value(res)
 	}
 
-	fn kv(&mut self) -> &dyn KVStore {
+	fn kv(&mut self) -> Result<&dyn KVStore> {
 		todo!()
 	}
 
@@ -94,6 +94,68 @@ impl InvocationContext for Host {
 		_input: PublicValue,
 	) -> Result<Vec<f64>> {
 		todo!()
+	}
+
+	fn stdout(&mut self, _output: &str) -> Result<()> {
+		todo!()
+	}
+
+	fn stderr(&mut self, _output: &str) -> Result<()> {
+		todo!()
+	}
+}
+
+pub(crate) struct SignatureHost {}
+
+impl SignatureHost {
+	pub(crate) fn new() -> Self {
+		Self {}
+	}
+}
+
+#[async_trait]
+impl InvocationContext for SignatureHost {
+	async fn sql(
+		&mut self,
+		_config: &SurrealismConfig,
+		_query: String,
+		_vars: PublicObject,
+	) -> Result<PublicValue> {
+		bail!("SQL is not supported in signature host")
+	}
+
+	async fn run(
+		&mut self,
+		_config: &SurrealismConfig,
+		_fnc: String,
+		_version: Option<String>,
+		_args: Vec<PublicValue>,
+	) -> Result<PublicValue> {
+		bail!("Run is not supported in signature host")
+	}
+
+	fn kv(&mut self) -> Result<&dyn KVStore> {
+		bail!("Run is not supported in signature host")
+	}
+
+	async fn ml_invoke_model(
+		&mut self,
+		_config: &SurrealismConfig,
+		_model: String,
+		_input: PublicValue,
+		_weight: i64,
+		_weight_dir: String,
+	) -> Result<PublicValue> {
+		bail!("Run is not supported in signature host")
+	}
+
+	async fn ml_tokenize(
+		&mut self,
+		_config: &SurrealismConfig,
+		_model: String,
+		_input: PublicValue,
+	) -> Result<Vec<f64>> {
+		bail!("Run is not supported in signature host")
 	}
 
 	fn stdout(&mut self, _output: &str) -> Result<()> {

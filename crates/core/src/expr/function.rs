@@ -126,13 +126,14 @@ impl Function {
 				}
 
 				let executable: crate::expr::Executable = val.as_ref().executable.clone().into();
-				let sig = executable.signature(stk, ctx, opt, doc, sub.as_deref()).await?;
+				let sig = executable.signature(ctx, &ns, &db, sub.as_deref()).await?;
+				let arg_kinds = sig.args.to_unnamed();
 
 				// Get the number of function arguments
-				let max_args_len = sig.args.len();
+				let max_args_len = arg_kinds.len();
 				// Track the number of required arguments
 				// Check for any final optional arguments
-				let min_args_len = sig.args.iter().rev().fold(0, |acc, kind| {
+				let min_args_len = arg_kinds.iter().rev().fold(0, |acc, kind| {
 					if kind.can_be_none() {
 						if acc == 0 {
 							0

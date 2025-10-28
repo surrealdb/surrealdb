@@ -29,8 +29,8 @@ impl DemoHost {
 
 #[async_trait]
 impl InvocationContext for DemoHost {
-	fn kv(&mut self) -> &dyn KVStore {
-		&self.kv
+	fn kv(&mut self) -> Result<&dyn KVStore> {
+		Ok(&self.kv)
 	}
 
 	async fn sql(

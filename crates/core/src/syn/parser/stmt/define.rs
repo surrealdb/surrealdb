@@ -190,6 +190,8 @@ impl Parser<'_> {
 					)
 				}
 
+				self.pop_peek();
+
 				// TODO add silo parsing
 				let file: PublicFile = self.next_token_value()?;
 				Executable::Surrealism(SurrealismExecutable(file.into()))
