@@ -202,13 +202,21 @@ mod ws {
 	/// and tests various message sizes including edge cases.
 	#[test_log::test(tokio::test)]
 	async fn check_max_size() {
+		use std::fmt;
+
 		use surrealdb::opt::{Config, WebsocketConfig};
 		use ulid::Ulid;
 
 		/// Test content structure for validating large message handling
-		#[derive(Debug, Clone, SurrealValue, PartialEq)]
+		#[derive(Clone, SurrealValue, PartialEq)]
 		struct Content {
 			content: String,
+		}
+
+		impl fmt::Debug for Content {
+			fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+				write!(f, "Content {{ content: \"...\" }}")
+			}
 		}
 
 		impl Content {

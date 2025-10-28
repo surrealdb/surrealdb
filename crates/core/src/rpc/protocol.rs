@@ -9,6 +9,7 @@ use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
 use crate::dbs::capabilities::MethodTarget;
 use crate::dbs::{QueryResult, QueryType, Session};
 use crate::err::Error;
+use crate::iam::token::Token;
 use crate::kvs::{Datastore, LockType, TransactionType};
 use crate::rpc::args::extract_args;
 use crate::rpc::{DbResult, Method, RpcError};
@@ -129,6 +130,7 @@ pub trait RpcProtocol {
 			Method::Signup => self.signup(session, params).await,
 			Method::Signin => self.signin(session, params).await,
 			Method::Authenticate => self.authenticate(session, params).await,
+			Method::Refresh => self.refresh(session, params).await,
 			Method::Invalidate => self.invalidate(session).await,
 			Method::Reset => self.reset(session).await,
 			Method::Kill => self.kill(session, params).await,
@@ -306,6 +308,37 @@ pub trait RpcProtocol {
 			crate::iam::verify::token(self.kvs(), &mut session, token.as_str())
 				.await
 				.map(|_| PublicValue::None);
+		// Store the updated session
+		self.set_session(session_id, Arc::new(session));
+		// Drop the mutex guard
+		mem::drop(guard);
+		// Return nothing on success
+		out.map(DbResult::Other).map_err(From::from)
+	}
+
+	async fn refresh(
+		&self,
+		session_id: Option<Uuid>,
+		params: PublicArray,
+	) -> Result<DbResult, RpcError> {
+		tracing::debug!("refresh");
+		// Process the method arguments
+		let unexpected = || RpcError::InvalidParams("Expected (token:Token)".to_string());
+		let Some(value) = extract_args(params.into_vec()) else {
+			return Err(unexpected());
+		};
+		let Ok(token) = Token::from_value(value) else {
+			return Err(unexpected());
+		};
+		// Get the context lock
+		let mutex = self.lock().clone();
+		// Lock the context for update
+		let guard = mutex.acquire().await;
+		// Clone the current session
+		let mut session = self.get_session(session_id.as_ref()).as_ref().clone();
+		// Attempt authentication, mutating the session
+		let out: Result<PublicValue> =
+			token.refresh(self.kvs(), &mut session).await.map(Token::into_value);
 		// Store the updated session
 		self.set_session(session_id, Arc::new(session));
 		// Drop the mutex guard

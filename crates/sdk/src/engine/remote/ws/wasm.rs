@@ -8,8 +8,9 @@ use futures::stream::{SplitSink, SplitStream};
 use futures::{FutureExt, SinkExt, StreamExt};
 use pharos::{Channel, Events, Observable, ObserveConfig};
 use surrealdb_core::dbs::QueryResultBuilder;
+use surrealdb_core::iam::Token;
 use surrealdb_core::rpc::{DbResponse, DbResult};
-use surrealdb_types::{SurrealValue, Value, Variables, object};
+use surrealdb_types::{Array, SurrealValue, Value, Variables, object};
 use tokio::sync::watch;
 use trice::Instant;
 use wasm_bindgen_futures::spawn_local;
@@ -18,7 +19,7 @@ use wasmtimer::tokio::MissedTickBehavior;
 use ws_stream_wasm::{WsEvent, WsMessage as Message, WsMeta, WsStream};
 
 use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
-use crate::conn::{self, Command, RequestData, Route, Router};
+use crate::conn::{self, Command, RequestData, Route, Router, RouterRequest};
 use crate::engine::IntervalStream;
 use crate::engine::remote::ws::{Client, PING_INTERVAL};
 use crate::err::Error;
@@ -164,8 +165,11 @@ async fn router_handle_request(
 			state.replay.insert(ReplayMethod::Invalidate, command.clone());
 		}
 		Command::Authenticate {
-			..
+			ref token,
 		} => {
+			effect = RequestEffect::Authenticate {
+				token: Some(token.clone()),
+			};
 			state.replay.insert(ReplayMethod::Authenticate, command.clone());
 		}
 		_ => {}
@@ -216,7 +220,7 @@ async fn router_handle_response(
 					Some(id) => {
 						if let Ok(id) = id.into_int() {
 							// We can only route responses with IDs
-							if let Some(pending) = state.pending_requests.remove(&id) {
+							if let Some(mut pending) = state.pending_requests.remove(&id) {
 								match response.result {
 									Ok(DbResult::Query(results)) => {
 										// Apply effect only on success
@@ -233,6 +237,7 @@ async fn router_handle_response(
 											} => {
 												state.vars.shift_remove(&key);
 											}
+											_ => {}
 										}
 										let _res = pending.response_channel.send(Ok(results)).await;
 									}
@@ -255,6 +260,9 @@ async fn router_handle_response(
 											} => {
 												state.vars.shift_remove(&key);
 											}
+											RequestEffect::Authenticate {
+												token,
+											} => {}
 										}
 										// Other results should be converted to a single result vec
 										let _res = pending
@@ -263,9 +271,50 @@ async fn router_handle_response(
 											.await;
 									}
 									Err(error) => {
-										// Don't apply effect on error
-										let _res =
-											pending.response_channel.send(Err(error.into())).await;
+										if let RequestEffect::Authenticate {
+											token: Some(token),
+										} = pending.effect && let Token::WithRefresh {
+											..
+										} = &token && error
+											.to_string()
+											.contains("token has expired")
+										{
+											let request = RouterRequest {
+												id: Some(id),
+												method: "authenticate",
+												params: Some(Value::Array(Array::from(vec![
+													token.into_value(),
+												]))),
+												transaction: None,
+											};
+											let request_value = request.into_value();
+											let value =
+												surrealdb_core::rpc::format::flatbuffers::encode(
+													&request_value,
+												)
+												.expect("router request should serialize");
+											let message = Message::Binary(value.into());
+											match state.sink.send(message).await {
+												Err(send_error) => {
+													trace!(
+														"failed to send refresh query to the server; {send_error:?}"
+													);
+													pending
+														.response_channel
+														.send(Err(error))
+														.await
+														.ok();
+												}
+												Ok(..) => {
+													pending.effect = RequestEffect::Authenticate {
+														token: None,
+													};
+													state.pending_requests.insert(id, pending);
+												}
+											}
+										} else {
+											pending.response_channel.send(Err(error)).await.ok();
+										}
 									}
 								}
 							} else {

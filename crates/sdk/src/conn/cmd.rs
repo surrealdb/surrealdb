@@ -240,11 +240,11 @@ impl Command {
 #[derive(Clone, Debug, SurrealValue)]
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 pub(crate) struct RouterRequest {
-	id: Option<i64>,
-	method: &'static str,
-	params: Option<Value>,
+	pub(crate) id: Option<i64>,
+	pub(crate) method: &'static str,
+	pub(crate) params: Option<Value>,
 	#[allow(dead_code)]
-	transaction: Option<Uuid>,
+	pub(crate) transaction: Option<Uuid>,
 }
 
 #[cfg(test)]

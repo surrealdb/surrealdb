@@ -9,7 +9,7 @@ use reqwest::RequestBuilder;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use surrealdb_core::dbs::{QueryResult, QueryResultBuilder};
-use surrealdb_core::iam;
+use surrealdb_core::iam::Token as CoreToken;
 use surrealdb_core::rpc::{self, DbResponse, DbResult};
 use surrealdb_types::{SurrealValue, Value, Variables};
 #[cfg(not(target_family = "wasm"))]
@@ -27,7 +27,7 @@ use crate::err::Error;
 // use crate::engine::remote::Response;
 use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};
 use crate::opt::IntoEndpoint;
-use crate::opt::auth::Token;
+use crate::opt::auth::{AccessToken, Token};
 use crate::{Connect, Result, Surreal};
 
 #[cfg(not(target_family = "wasm"))]
@@ -100,7 +100,7 @@ enum Auth {
 		db: Option<String>,
 	},
 	Bearer {
-		token: String,
+		token: AccessToken,
 	},
 }
 
@@ -128,7 +128,7 @@ impl Authenticate for RequestBuilder {
 			}
 			Some(Auth::Bearer {
 				token,
-			}) => self.bearer_auth(token),
+			}) => self.bearer_auth(token.as_insecure_token()),
 			None => self,
 		}
 	}
@@ -138,6 +138,7 @@ impl Authenticate for RequestBuilder {
 struct Credentials {
 	user: String,
 	pass: String,
+	ac: Option<String>,
 	ns: Option<String>,
 	db: Option<String>,
 }
@@ -147,7 +148,7 @@ struct Credentials {
 struct AuthResponse {
 	code: u16,
 	details: String,
-	token: Option<String>,
+	token: Option<Token>,
 }
 
 type BackupSender = async_channel::Sender<Result<Vec<u8>>>;
@@ -295,6 +296,29 @@ async fn send_request(
 	}
 }
 
+async fn refresh_token(
+	token: CoreToken,
+	base_url: &Url,
+	client: &reqwest::Client,
+	headers: &HeaderMap,
+	auth: &Option<Auth>,
+) -> Result<(Value, Vec<QueryResult>)> {
+	let req = Command::Refresh {
+		token,
+	}
+	.into_router_request(None)
+	.expect("refresh should be a valid router request");
+	let results = send_request(req, base_url, client, headers, auth).await?;
+	let value = match results.first() {
+		Some(result) => result.clone().result?,
+		None => {
+			error!("received invalid result from server");
+			return Err(Error::InternalError("Received invalid result from server".to_string()));
+		}
+	};
+	Ok((value, results))
+}
+
 async fn router(
 	req: RequestData,
 	base_url: &Url,
@@ -363,7 +387,7 @@ async fn router(
 					debug!("Error converting Value to Credentials: {err}");
 					let token = Token::from_value(value)?;
 					*auth = Some(Auth::Bearer {
-						token: token.access.into_insecure_token(),
+						token: token.access,
 					});
 				}
 			}
@@ -378,16 +402,39 @@ async fn router(
 			}
 			.into_router_request(None)
 			.expect("authenticate should be a valid router request");
-			let results = send_request(req, base_url, client, headers, auth).await?;
-
+			let mut results = send_request(req, base_url, client, headers, auth).await?;
+			if let Some(result) = results.first_mut() {
+				match &mut result.result {
+					Ok(result) => {
+						let value = token.into_value();
+						*auth = Some(Auth::Bearer {
+							token: Token::from_value(value.clone())?.access,
+						});
+						*result = value;
+					}
+					Err(error) => {
+						if let CoreToken::WithRefresh {
+							..
+						} = &token && error.to_string().contains("token has expired")
+						{
+							let (value, refresh_results) =
+								refresh_token(token, base_url, client, headers, auth).await?;
+							*auth = Some(Auth::Bearer {
+								token: Token::from_value(value)?.access,
+							});
+							results = refresh_results;
+						}
+					}
+				}
+			}
+			Ok(results)
+		}
+		Command::Refresh {
+			token,
+		} => {
+			let (value, results) = refresh_token(token, base_url, client, headers, auth).await?;
 			*auth = Some(Auth::Bearer {
-				token: match token {
-					iam::Token::Access(token) => token,
-					iam::Token::WithRefresh {
-						access,
-						refresh,
-					} => access,
-				},
+				token: Token::from_value(value)?.access,
 			});
 			Ok(results)
 		}

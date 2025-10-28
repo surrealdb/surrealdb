@@ -7,8 +7,9 @@ use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 use surrealdb_core::dbs::QueryResultBuilder;
+use surrealdb_core::iam::token::Token;
 use surrealdb_core::rpc::{DbResponse, DbResult};
-use surrealdb_types::SurrealValue;
+use surrealdb_types::{Array, SurrealValue};
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tokio::time;
@@ -23,7 +24,7 @@ use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use trice::Instant;
 
 use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
-use crate::conn::{self, Command, RequestData, Route, Router};
+use crate::conn::{self, Command, RequestData, Route, Router, RouterRequest};
 use crate::engine::IntervalStream;
 use crate::engine::remote::ws::{Client, PING_INTERVAL};
 use crate::err::Error;
@@ -230,8 +231,11 @@ async fn router_handle_route(
 			state.replay.insert(ReplayMethod::Invalidate, command.clone());
 		}
 		Command::Authenticate {
-			token: _,
+			ref token,
 		} => {
+			effect = RequestEffect::Authenticate {
+				token: Some(token.clone()),
+			};
 			state.replay.insert(ReplayMethod::Authenticate, command.clone());
 		}
 		_ => {}
@@ -242,7 +246,6 @@ async fn router_handle_route(
 			let _ = response.send(Err(Error::BackupsNotSupported.into())).await;
 			return HandleResult::Ok;
 		};
-		trace!("Request {:?}", request);
 
 		let request_value = request.into_value();
 
@@ -285,7 +288,6 @@ async fn router_handle_route(
 async fn router_handle_response(message: Message, state: &mut RouterState) -> HandleResult {
 	match db_response_from_message(&message) {
 		Ok(response) => {
-			trace!("{response:?}");
 			let Some(response) = response else {
 				return HandleResult::Ok;
 			};
@@ -296,7 +298,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 					// Try to extract i64 from Value
 					if let Value::Number(surrealdb_types::Number::Int(id_num)) = id {
 						match state.pending_requests.remove(&id_num) {
-							Some(pending) => {
+							Some(mut pending) => {
 								// We can only route responses with IDs
 								match response.result {
 									Ok(DbResult::Query(results)) => {
@@ -314,6 +316,10 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 											} => {
 												state.vars.shift_remove(&key);
 											}
+											RequestEffect::Authenticate {
+												..
+											} => { /* Authenticate responses are handled in the `DBResult::Other` variant */
+											}
 										}
 										if let Err(err) =
 											pending.response_channel.send(Ok(results)).await
@@ -326,7 +332,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 									Ok(DbResult::Live(_notification)) => {
 										tracing::error!("Unexpected live query result in response");
 									}
-									Ok(DbResult::Other(value)) => {
+									Ok(DbResult::Other(mut value)) => {
 										// Apply effect only on success
 										match pending.effect {
 											RequestEffect::None => {}
@@ -341,6 +347,13 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 											} => {
 												state.vars.shift_remove(&key);
 											}
+											RequestEffect::Authenticate {
+												token,
+											} => {
+												if let Some(token) = token {
+													value = token.into_value();
+												}
+											}
 										}
 										let result = QueryResultBuilder::started_now()
 											.finish_with_result(Ok(value));
@@ -353,8 +366,50 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 										}
 									}
 									Err(error) => {
-										// Don't apply effect on error
-										let _res = pending.response_channel.send(Err(error)).await;
+										if let RequestEffect::Authenticate {
+											token: Some(token),
+										} = pending.effect && let Token::WithRefresh {
+											..
+										} = &token && error
+											.to_string()
+											.contains("token has expired")
+										{
+											let request = RouterRequest {
+												id: Some(id_num),
+												method: "authenticate",
+												params: Some(Value::Array(Array::from(vec![
+													token.into_value(),
+												]))),
+												transaction: None,
+											};
+											let request_value = request.into_value();
+											let value =
+												surrealdb_core::rpc::format::flatbuffers::encode(
+													&request_value,
+												)
+												.expect("router request should serialize");
+											let message = Message::Binary(value.into());
+											match state.sink.send(message).await {
+												Err(send_error) => {
+													trace!(
+														"failed to send refresh query to the server; {send_error:?}"
+													);
+													pending
+														.response_channel
+														.send(Err(error))
+														.await
+														.ok();
+												}
+												Ok(..) => {
+													pending.effect = RequestEffect::Authenticate {
+														token: None,
+													};
+													state.pending_requests.insert(id_num, pending);
+												}
+											}
+										} else {
+											pending.response_channel.send(Err(error)).await.ok();
+										}
 									}
 								}
 							}
