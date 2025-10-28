@@ -256,7 +256,7 @@ impl<'a> Parser<'a> {
 	///
 	/// Should only be called after peeking a value.
 	pub fn pop_peek(&mut self) -> Token {
-		let res = self.token_buffer.pop().unwrap();
+		let res = self.token_buffer.pop().expect("token buffer is non-empty");
 		self.last_span = res.span;
 		res
 	}
@@ -313,7 +313,7 @@ impl<'a> Parser<'a> {
 			};
 			self.token_buffer.push(r);
 		}
-		self.token_buffer.at(at).unwrap()
+		self.token_buffer.at(at).expect("token exists at index")
 	}
 
 	pub fn peek1(&mut self) -> Token {
@@ -331,7 +331,7 @@ impl<'a> Parser<'a> {
 			let r = self.lexer.next_token();
 			self.token_buffer.push(r);
 		}
-		self.token_buffer.at(at).unwrap()
+		self.token_buffer.at(at).expect("token exists at index")
 	}
 
 	pub fn peek_whitespace1(&mut self) -> Token {
@@ -465,8 +465,12 @@ impl StatementStream {
 		// The parser should have ensured that bytes is a valid utf-8 string.
 		// TODO: Maybe change this to unsafe cast once we have more convidence in the
 		// parsers correctness.
-		let (line_num, remaining) =
-			std::str::from_utf8(bytes).unwrap().lines().enumerate().last().unwrap_or((0, ""));
+		let (line_num, remaining) = std::str::from_utf8(bytes)
+			.expect("parser validated utf8")
+			.lines()
+			.enumerate()
+			.last()
+			.unwrap_or((0, ""));
 
 		self.line_offset += line_num;
 		if line_num > 0 {

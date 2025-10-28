@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use surrealdb::types::SurrealValue;
 use ulid::Ulid;
 
