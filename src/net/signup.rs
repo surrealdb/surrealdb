@@ -76,7 +76,7 @@ async fn handler(
 						}
 						Some(Accept::ApplicationCbor) => {
 							let success = Success::new(token).into_value();
-							Ok(Output::cbor(&success))
+							Ok(Output::cbor(success))
 						}
 						// Text serialization
 						// NOTE: Only the token is returned in a plain text response.
@@ -100,23 +100,7 @@ async fn handler(
 						// An incorrect content-type was requested
 						_ => Err(NetError::InvalidType.into()),
 					}
-					Some(Accept::ApplicationCbor) => {
-						let success = Success::new(v.token, v.refresh).into_value();
-						Ok(Output::cbor(success))
-					}
-					// Text serialization
-					// NOTE: Only the token is returned in a plain text response.
-					Some(Accept::TextPlain) => Ok(Output::Text(v.token.unwrap_or_default())),
-					// Internal serialization
-					Some(Accept::ApplicationFlatbuffers) => {
-						let success = Success::new(v.token, v.refresh).into_value();
-						Ok(Output::flatbuffers(&success))
-					}
-					// Return nothing
-					None => Ok(Output::None),
-					// An incorrect content-type was requested
-					_ => Err(NetError::InvalidType.into()),
-				},
+				}
 				// There was an error with authentication
 				Err(err) => Err(ResponseError(err)),
 			}
