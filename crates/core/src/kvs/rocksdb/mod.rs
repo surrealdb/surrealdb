@@ -13,7 +13,7 @@ use anyhow::{Result, bail, ensure};
 use rocksdb::{
 	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, Env, FlushOptions, LogLevel,
 	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, SstFileManager,
-	WaitForCompactOptions, WriteOptions,
+	WriteOptions,
 };
 
 use super::savepoint::SavePoints;
@@ -266,9 +266,21 @@ impl Datastore {
 			let sst_file_manager = SstFileManager::new(&env)?;
 			// Set the maximum space limit for SST files
 			if *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE > 0 {
-				info!(target: TARGET, "SST file manager max allowed space usage: {}", *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE);
-				sst_file_manager
-					.set_max_allowed_space_usage(*cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE);
+				// If deletion-only threshold is configured, disable RocksDB's hard limit (set to 0
+				// = unlimited) This allows the application to manage space restrictions through
+				// state transitions without RocksDB stopping writes due to buffering causing
+				// size spikes
+				if *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE_DELETION_ONLY > 0 {
+					info!(target: TARGET, "SST file manager: Application-managed space limits (primary: {}, deletion-only: {})", 
+						*cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE, *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE_DELETION_ONLY);
+					// Set RocksDB limit to 0 (unlimited) - app will manage restrictions
+					sst_file_manager.set_max_allowed_space_usage(0);
+				} else {
+					// No deletion-only mode configured, use primary limit as RocksDB's hard limit
+					info!(target: TARGET, "SST file manager max allowed space usage: {}", *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE);
+					sst_file_manager
+						.set_max_allowed_space_usage(*cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE);
+				}
 			}
 			// Reserve buffer space for compaction operations
 			if *cnf::ROCKSDB_SST_COMPACTION_BUFFER_SIZE > 0 {
@@ -377,23 +389,23 @@ impl Datastore {
 		};
 		match self.state.load() {
 			StoreState::Normal => {
-				if sst_file_manager.is_max_allowed_space_reached() {
-					if *ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE_DELETION_ONLY != 0 {
-						// Transition to read-and-deletion-only mode with a higher threshold
-						sst_file_manager.set_max_allowed_space_usage(
-							*ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE_DELETION_ONLY,
-						);
-						if let Err(e) = self.db.resume() {
-							warn!(target: TARGET, "{e}");
-						}
-						self.state.store(StoreState::ReadAndDeletionOnly);
-						// Return error to signal the transition occurred
-						Err(Error::DbReadAndDeleteOnly.into())
-					} else {
-						// Transition to read-only mode
-						self.state.store(StoreState::ReadOnly);
-						Ok(StoreState::ReadOnly)
-					}
+				// Check current size against the application limit
+				let current_size = sst_file_manager.get_total_size();
+
+				// Transition to read-and-deletion-only mode when the primary limit is exceeded
+				if current_size >= *ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE
+					&& *ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE_DELETION_ONLY != 0
+				{
+					self.state.store(StoreState::ReadAndDeletionOnly);
+					// Return error to signal the transition occurred
+					Err(Error::DbReadAndDeleteOnly.into())
+				} else if sst_file_manager.is_max_allowed_space_reached()
+					&& *ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE_DELETION_ONLY == 0
+				{
+					// Transition to read-only mode if deletion-only mode is not configured
+					// This happens when RocksDB's limit (same as primary limit) is reached
+					self.state.store(StoreState::ReadOnly);
+					Ok(StoreState::ReadOnly)
 				} else {
 					Ok(StoreState::Normal)
 				}
@@ -401,9 +413,8 @@ impl Datastore {
 			StoreState::ReadOnly => Ok(StoreState::ReadOnly),
 			StoreState::ReadAndDeletionOnly => {
 				// Check if space has been freed up enough to return to normal mode
-				if sst_file_manager.get_total_size() < *ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE {
-					sst_file_manager
-						.set_max_allowed_space_usage(*ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE);
+				let current_size = sst_file_manager.get_total_size();
+				if current_size < *ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE {
 					self.state.store(StoreState::Normal);
 					Ok(StoreState::Normal)
 				} else {
@@ -579,9 +590,6 @@ impl super::api::Transaction for Transaction {
 		// If we are in read-and-deletion-only mode, compact the entire key range (None, None)
 		if matches!(self.state, StoreState::ReadAndDeletionOnly) {
 			self.db.compact_range::<&[u8], &[u8]>(None, None);
-			let mut opt = WaitForCompactOptions::default();
-			opt.set_timeout(5000);
-			self.db.wait_for_compact(&opt)?;
 		}
 		// Continue
 		Ok(())
