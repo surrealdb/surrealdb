@@ -62,6 +62,13 @@ pub(crate) enum Error {
 	)]
 	DbReadOnly,
 
+	#[cfg(feature = "kv-rocksdb")]
+	/// The datastore is read-and-deletion-only due to disk saturation
+	#[error(
+		"The datastore is read-and-deletion-only due to disk saturation. Please free up disk space to restore normal operations"
+	)]
+	DbReadAndDeleteOnly,
+
 	/// The conditional value in the request was not equal
 	#[error("Value being checked was not correct")]
 	TxConditionNotMet,

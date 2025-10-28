@@ -5,6 +5,7 @@ mod cnf;
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -18,6 +19,9 @@ use rocksdb::{
 use super::savepoint::SavePoints;
 use crate::err::Error;
 use crate::key::debug::Sprintable;
+use crate::kvs::rocksdb::cnf::{
+	ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE, ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE_DELETION_ONLY,
+};
 use crate::kvs::{Check, Key, Val};
 
 const TARGET: &str = "surrealdb::core::kvs::rocksdb";
@@ -26,6 +30,38 @@ pub struct Datastore {
 	db: Pin<Arc<OptimisticTransactionDB>>,
 	/// Optional SST file manager for monitoring space usage
 	sst_file_manager: Option<Arc<SstFileManager>>,
+	/// The store state depends on configured space limitations
+	state: AtomicStoreState,
+}
+
+struct AtomicStoreState(AtomicU8);
+
+/// Defines the transaction limit depending on disk space limitations
+enum StoreState {
+	/// The datastore operates normally
+	Normal = 0,
+	/// The datastore is read-only
+	ReadOnly = 1,
+	/// The datastore accepts only reads and deletions
+	ReadAndDeletionOnly = 2,
+}
+
+impl AtomicStoreState {
+	fn new(state: StoreState) -> Self {
+		Self(AtomicU8::new(state as u8))
+	}
+
+	fn load(&self) -> StoreState {
+		match self.0.load(Ordering::Relaxed) {
+			1 => StoreState::ReadOnly,
+			2 => StoreState::ReadAndDeletionOnly,
+			_ => StoreState::Normal,
+		}
+	}
+
+	fn store(&self, state: StoreState) {
+		self.0.store(state as u8, Ordering::Relaxed);
+	}
 }
 
 pub struct Transaction {
@@ -44,6 +80,8 @@ pub struct Transaction {
 	// the memory is kept alive. This pointer must
 	// be declared last, so that it is dropped last.
 	_db: Pin<Arc<OptimisticTransactionDB>>,
+	/// Defines the behaviour of the transaction
+	state: StoreState,
 }
 
 impl Drop for Transaction {
@@ -213,7 +251,7 @@ impl Datastore {
 			|| *cnf::ROCKSDB_SST_COMPACTION_BUFFER_SIZE > 0
 		{
 			let env = Env::new()?;
-			let sst_file_manager = SstFileManager::new(&env);
+			let sst_file_manager = SstFileManager::new(&env)?;
 			if *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE > 0 {
 				info!(target: TARGET, "SST file manager max allowed space usage: {}", *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE);
 				sst_file_manager
@@ -235,6 +273,7 @@ impl Datastore {
 		Ok(Datastore {
 			db,
 			sst_file_manager,
+			state: AtomicStoreState::new(StoreState::Normal),
 		})
 	}
 
@@ -302,8 +341,40 @@ impl Datastore {
 		Ok(())
 	}
 
-	fn is_max_allowed_spaced_reached(&self) -> bool {
-		self.sst_file_manager.as_ref().map(|f| f.is_max_allowed_space_reached()).unwrap_or(false)
+	fn check_store_state(&self) -> Result<StoreState> {
+		let Some(sst_file_manager) = self.sst_file_manager.as_ref() else {
+			return Ok(StoreState::Normal);
+		};
+		match self.state.load() {
+			StoreState::Normal => {
+				if sst_file_manager.is_max_allowed_space_reached() {
+					if *ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE_DELETION_ONLY != 0 {
+						sst_file_manager.set_max_allowed_space_usage(
+							*ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE_DELETION_ONLY,
+						);
+						self.db.resume()?;
+						self.state.store(StoreState::ReadAndDeletionOnly);
+						Err(Error::DbReadAndDeleteOnly.into())
+					} else {
+						self.state.store(StoreState::ReadOnly);
+						Ok(StoreState::ReadOnly)
+					}
+				} else {
+					Ok(StoreState::Normal)
+				}
+			}
+			StoreState::ReadOnly => Ok(StoreState::ReadOnly),
+			StoreState::ReadAndDeletionOnly => {
+				if sst_file_manager.get_total_size() < *ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE {
+					sst_file_manager
+						.set_max_allowed_space_usage(*ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE);
+					self.state.store(StoreState::Normal);
+					Ok(StoreState::Normal)
+				} else {
+					Ok(StoreState::ReadAndDeletionOnly)
+				}
+			}
+		}
 	}
 
 	/// Start a new transaction
@@ -313,11 +384,11 @@ impl Datastore {
 		_: bool,
 	) -> Result<Box<dyn crate::kvs::api::Transaction>> {
 		// Check if database is in OOD read-only mode and a write transaction is requested
-		if write && self.is_max_allowed_spaced_reached() {
+		let state = self.check_store_state()?;
+		if write && matches!(state, StoreState::ReadOnly) {
 			warn!(target: TARGET, "Write transaction requested but database is in OOD read-only mode");
 			return Err(Error::DbReadOnly.into());
 		}
-
 		// Set the transaction options
 		let mut to = OptimisticTransactionOptions::default();
 		to.set_snapshot(true);
@@ -356,7 +427,35 @@ impl Datastore {
 			inner: Some(inner),
 			ro,
 			_db: self.db.clone(),
+			state,
 		}))
+	}
+}
+
+impl Transaction {
+	fn ensure_write(&self, version: Option<u64>) -> Result<()> {
+		match self.state {
+			StoreState::Normal => {}
+			StoreState::ReadOnly => return Err(Error::DbReadOnly.into()),
+			StoreState::ReadAndDeletionOnly => return Err(Error::DbReadAndDeleteOnly.into()),
+		}
+		// RocksDB does not support versioned queries.
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
+		// Check to see if transaction is writable
+		ensure!(self.write, Error::TxReadonly);
+		//
+		Ok(())
+	}
+
+	fn ensure_read(&self, version: Option<u64>) -> Result<()> {
+		// RocksDB does not support versioned queries.
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
+		//
+		Ok(())
 	}
 }
 
@@ -417,10 +516,7 @@ impl super::api::Transaction for Transaction {
 	/// Check if a key exists
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn exists(&mut self, key: Key, version: Option<u64>) -> Result<bool> {
-		// RocksDB does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		self.ensure_read(version)?;
 		// Get the key
 		let res = self.inner.as_ref().unwrap().get_pinned_opt(key, &self.ro)?.is_some();
 		// Return result
@@ -430,10 +526,7 @@ impl super::api::Transaction for Transaction {
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn get(&mut self, key: Key, version: Option<u64>) -> Result<Option<Val>> {
-		// RocksDB does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		self.ensure_read(version)?;
 		// Get the key
 		let res = self.inner.as_ref().unwrap().get_opt(key, &self.ro)?;
 		// Return result
@@ -443,10 +536,7 @@ impl super::api::Transaction for Transaction {
 	/// Fetch many keys from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.sprint()))]
 	async fn getm(&mut self, keys: Vec<Key>) -> Result<Vec<Option<Val>>> {
-		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		self.ensure_read(None)?;
 		// Get the keys
 		let res = self.inner.as_ref().unwrap().multi_get_opt(keys, &self.ro);
 		// Convert result
@@ -458,12 +548,7 @@ impl super::api::Transaction for Transaction {
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
-		// RocksDB does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
-		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		self.ensure_write(version)?;
 		// Set the key
 		self.inner.as_ref().unwrap().put(key, val)?;
 		// Return result
@@ -473,12 +558,7 @@ impl super::api::Transaction for Transaction {
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
-		// RocksDB does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
-		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		self.ensure_write(version)?;
 		// Set the key if empty
 		match self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)? {
 			None => self.inner.as_ref().unwrap().put(key, val)?,
@@ -491,10 +571,7 @@ impl super::api::Transaction for Transaction {
 	/// Insert a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<()> {
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
-		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		self.ensure_write(None)?;
 		// Set the key if empty
 		match (self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)?, chk) {
 			(Some(v), Some(w)) if v.eq(&w) => self.inner.as_ref().unwrap().put(key, val)?,
@@ -508,10 +585,7 @@ impl super::api::Transaction for Transaction {
 	/// Delete a key
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn del(&mut self, key: Key) -> Result<()> {
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
-		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		self.ensure_write(None)?;
 		// Remove the key
 		self.inner.as_ref().unwrap().delete(key)?;
 		// Return result
@@ -521,10 +595,7 @@ impl super::api::Transaction for Transaction {
 	/// Delete a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<()> {
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
-		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		self.ensure_write(None)?;
 		// Delete the key if valid
 		match (self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)?, chk) {
 			(Some(v), Some(w)) if v.eq(&w) => self.inner.as_ref().unwrap().delete(key)?,
@@ -543,7 +614,7 @@ impl super::api::Transaction for Transaction {
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
-		let rng = self.prepare_scan(rng, version).await?;
+		self.ensure_read(version)?;
 		// Execute on the blocking threadpool
 		let res = affinitypool::spawn_local(move || {
 			// Create result set
@@ -594,7 +665,7 @@ impl super::api::Transaction for Transaction {
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<Key>> {
-		let rng = self.prepare_scan(rng, version).await?;
+		self.ensure_read(version)?;
 		// Get the transaction
 		let inner = self.inner.as_ref().unwrap();
 		// Create result set
@@ -639,7 +710,7 @@ impl super::api::Transaction for Transaction {
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
-		let rng = self.prepare_scan(rng, version).await?;
+		self.ensure_read(version)?;
 		// Execute on the blocking threadpool
 		let res = affinitypool::spawn_local(move || {
 			// Create result set
@@ -689,7 +760,7 @@ impl super::api::Transaction for Transaction {
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
-		let rng = self.prepare_scan(rng, version).await?;
+		self.ensure_read(version)?;
 		// Get the transaction
 		let inner = self.inner.as_ref().unwrap();
 		// Create result set
@@ -727,7 +798,7 @@ impl super::api::Transaction for Transaction {
 	}
 
 	fn get_save_points(&mut self) -> &mut SavePoints {
-		unimplemented!("Get save points not implemented for for the RocksDB backend");
+		unimplemented!("Get save points not implemented for the RocksDB backend");
 	}
 
 	fn new_save_point(&mut self) {
@@ -748,16 +819,5 @@ impl super::api::Transaction for Transaction {
 
 	fn release_last_save_point(&mut self) -> Result<()> {
 		Ok(())
-	}
-}
-
-impl Transaction {
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn prepare_scan(&mut self, rng: Range<Key>, version: Option<u64>) -> Result<Range<Key>> {
-		// RocksDB does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
-		Ok(rng)
 	}
 }

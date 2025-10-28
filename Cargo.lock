@@ -844,7 +844,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -864,7 +864,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.11.0",
  "proc-macro2",
  "quote",
  "regex",
@@ -3133,8 +3133,8 @@ dependencies = [
 
 [[package]]
 name = "librocksdb-sys"
-version = "0.17.3+10.4.2"
-source = "git+https://github.com/emmanuel-keller/rust-rocksdb.git?branch=sst-file-manager#cbcac7dc9a01aa17402e8593b1ed22d51c00f4f9"
+version = "0.17.3+10.6.2"
+source = "git+https://github.com/surrealdb/rust-rocksdb.git?branch=emmanuel%2Fsst_file_manager_resume#84656021c52b57d4c28cf555c105bf968ef62032"
 dependencies = [
  "bindgen 0.72.1",
  "bzip2-sys",
@@ -4870,7 +4870,7 @@ checksum = "cbf4a6aa5f6d6888f39e980649f3ad6b666acdce1d78e95b8a2cb076e687ae30"
 [[package]]
 name = "rocksdb"
 version = "0.24.0"
-source = "git+https://github.com/emmanuel-keller/rust-rocksdb.git?branch=sst-file-manager#cbcac7dc9a01aa17402e8593b1ed22d51c00f4f9"
+source = "git+https://github.com/surrealdb/rust-rocksdb.git?branch=emmanuel%2Fsst_file_manager_resume#84656021c52b57d4c28cf555c105bf968ef62032"
 dependencies = [
  "libc",
  "librocksdb-sys",

@@ -61,7 +61,7 @@ foundationdb = { version = "0.9.2", default-features = false, features = [
     "fdb-7_3",
 ] }
 #rocksdb = { version = "0.24.0", features = ["lz4", "snappy"] }
-rocksdb = { git = "https://github.com/emmanuel-keller/rust-rocksdb.git", branch = "sst-file-manager", features = ["lz4", "snappy"] }
+rocksdb = { git = "https://github.com/surrealdb/rust-rocksdb.git", branch = "emmanuel/sst_file_manager_resume", features = ["lz4", "snappy"] }
 
 # Managed by surreal but mostly external code
 tikv = { version = "0.3.0-surreal.3", default-features = false, package = "surrealdb-tikv-client" }
