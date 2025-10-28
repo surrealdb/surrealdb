@@ -11,7 +11,7 @@ pub fn encode_str(value: PublicValue) -> anyhow::Result<String> {
 	let v = value.into_json_value();
 	// Because we convert to serde_json::Value first we can guarantee that
 	// serialization wont fail.
-	Ok(serde_json::to_string(&v).unwrap())
+	Ok(serde_json::to_string(&v).expect("serialization to json string should not fail"))
 }
 
 pub fn decode(value: &[u8]) -> anyhow::Result<PublicValue> {

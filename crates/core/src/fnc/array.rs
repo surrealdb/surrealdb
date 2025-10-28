@@ -223,8 +223,8 @@ pub fn fill(
 
 		TypedRange::from_range(start..end)
 	} else if range_start.is_range() {
-		// Condition checked above, unwrap cannot trigger.
-		let range = range_start.into_range().unwrap();
+		// Condition checked above, cannot fail
+		let range = range_start.into_range().expect("is_range() check passed");
 		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
 			name: String::from("array::fill"),
 			message: format!("Argument 1 was the wrong type. {e}"),
@@ -627,8 +627,8 @@ pub fn range((start_range, Optional(end)): (Value, Optional<i64>)) -> Result<Val
 			end: Bound::Excluded(end),
 		}
 	} else if start_range.is_range() {
-		// Condition checked above, unwrap cannot trigger.
-		let range = start_range.into_range().unwrap();
+		// Condition checked above, cannot fail
+		let range = start_range.into_range().expect("is_range() check passed");
 		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
 			name: String::from("array::range"),
 			message: format!("Argument 1 was the wrong type. {e}"),
@@ -756,8 +756,8 @@ pub fn slice(
 			end: Bound::Excluded(end),
 		}
 	} else if range_start.is_range() {
-		// Condition checked above, unwrap cannot trigger.
-		let range = range_start.into_range().unwrap();
+		// Condition checked above, cannot fail
+		let range = range_start.into_range().expect("is_range() check passed");
 		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
 			name: String::from("array::range"),
 			message: format!("Argument 1 was the wrong type. {e}"),

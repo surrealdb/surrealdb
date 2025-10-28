@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 mod sdb_benches;
 
 use criterion::{Criterion, criterion_group, criterion_main};

@@ -219,13 +219,13 @@ impl Lexer<'_> {
 				break;
 			};
 			match b {
-				b'\\' => match reader.next().unwrap() {
+				b'\\' => match reader.next().expect("lexer validated input") {
 					b'u' => {
 						if reader.eat(b'{') {
 							let mut accum = 0;
 							let mut at_end = false;
 							for _ in 0..6 {
-								match reader.next().unwrap() {
+								match reader.next().expect("lexer validated input") {
 									c @ b'a'..=b'f' => {
 										accum <<= 4;
 										accum += (c - b'a') as u32 + 10;
@@ -250,12 +250,14 @@ impl Lexer<'_> {
 								reader.next();
 							}
 
-							offset_idx +=
-								char::from_u32(accum).unwrap().encode_utf8(&mut bytes).len() as u32;
+							offset_idx += char::from_u32(accum)
+								.expect("valid unicode codepoint")
+								.encode_utf8(&mut bytes)
+								.len() as u32;
 						} else {
 							let mut accum = 0;
 							for _ in 0..4 {
-								match reader.next().unwrap() {
+								match reader.next().expect("lexer validated input") {
 									c @ b'a'..=b'f' => {
 										accum <<= 4;
 										accum += (c - b'a') as u32 + 10;
@@ -272,8 +274,10 @@ impl Lexer<'_> {
 								}
 							}
 
-							offset_idx +=
-								char::from_u32(accum).unwrap().encode_utf8(&mut bytes).len() as u32;
+							offset_idx += char::from_u32(accum)
+								.expect("valid unicode codepoint")
+								.encode_utf8(&mut bytes)
+								.len() as u32;
 						}
 					}
 					_ => {
@@ -333,9 +337,9 @@ impl Lexer<'_> {
 			};
 			let Some(res) = ascii_to_hex(peek) else {
 				let offset = reader.offset();
-				let char = reader.next().unwrap();
+				let char = reader.next().expect("lexer validated input");
 				// Source is a string, so there can't be invalid characters.
-				let char = reader.convert_to_char(char).unwrap();
+				let char = reader.convert_to_char(char).expect("lexer validated input");
 				let span = reader.span_since(offset);
 				bail!("Unexpected character `{char}` expected hexidecimal digit",@span);
 			};
@@ -350,7 +354,7 @@ impl Lexer<'_> {
 				Some(x) => {
 					// This function operates on a valid string so this function can never error.
 					let span = reader.span_since(before);
-					let c = reader.convert_to_char(x).unwrap();
+					let c = reader.convert_to_char(x).expect("lexer validated input");
 					bail!("Unexpected character `{c}`, expected byte seperator `-`", @span);
 				}
 				None => {
@@ -393,7 +397,7 @@ impl Lexer<'_> {
 				x => {
 					let before = reader.offset() - 1;
 					// Source is a string, so there can't be invalid characters.
-					let c = reader.convert_to_char(x).unwrap();
+					let c = reader.convert_to_char(x).expect("lexer validated input");
 					let span = reader.span_since(before);
 					bail!("Unexpected character `{c}`, expected a hexidecimal digit", @span);
 				}
@@ -409,7 +413,7 @@ impl Lexer<'_> {
 				x => {
 					let before = reader.offset() - 1;
 					// Source is a string, so there can't be invalid characters.
-					let c = reader.convert_to_char(x).unwrap();
+					let c = reader.convert_to_char(x).expect("lexer validated input");
 					let span = reader.span_since(before);
 					bail!("Unexpected character `{c}`, expected a hexidecimal digit", @span);
 				}
@@ -438,7 +442,7 @@ impl Lexer<'_> {
 				x => {
 					let span = reader.span_since(before);
 					// Reader operates on a valid string so unwrap shouldn't trigger.
-					let c = reader.convert_to_char(x).unwrap();
+					let c = reader.convert_to_char(x).expect("lexer validated input");
 					bail!("Unexpected character `{c}`, file strings buckets only allow alpha numeric characters and `_`, `-`, and `.`", @span);
 				}
 			}
@@ -450,7 +454,7 @@ impl Lexer<'_> {
 			Some(x) => {
 				let span = reader.span_since(before);
 				// Reader operates on a valid string so unwrap shouldn't trigger.
-				let c = reader.convert_to_char(x).unwrap();
+				let c = reader.convert_to_char(x).expect("lexer validated input");
 				bail!("Unexpected character `{c}`, expected `/`", @span);
 			}
 			None => {
@@ -471,7 +475,7 @@ impl Lexer<'_> {
 				x => {
 					let before = reader.offset() - 1;
 					let span = reader.span_since(before);
-					let c = reader.convert_to_char(x).unwrap();
+					let c = reader.convert_to_char(x).expect("lexer validated input");
 					bail!("Unexpected character `{c}`, file strings key's only allow alpha numeric characters and `_`, `-`, `.`, and `/`", @span);
 				}
 			}

@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 mod helpers;
 use anyhow::Result;
 use helpers::{new_ds, skip_ok};

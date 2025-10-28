@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 // Tests common to all protocols and storage engines
 
 use std::time::Duration;

@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use std::collections::BTreeMap;
 use std::time::Duration;
 

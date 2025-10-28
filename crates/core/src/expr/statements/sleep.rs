@@ -46,6 +46,7 @@ impl fmt::Display for SleepStatement {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
 	use std::time::{self, SystemTime};
 

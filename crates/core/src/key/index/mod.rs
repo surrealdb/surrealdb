@@ -258,7 +258,7 @@ impl<'a> Index<'a> {
 		fd: &Array,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
-		*beg.last_mut().unwrap() = 0x00; // set trailing sentinel to 0x00 -> inclusive lower bound within composite tuple
+		*beg.last_mut().expect("prefix buffer is non-empty") = 0x00; // set trailing sentinel to 0x00 -> inclusive lower bound within composite tuple
 		Ok(beg)
 	}
 
@@ -274,7 +274,7 @@ impl<'a> Index<'a> {
 		fd: &Array,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
-		*beg.last_mut().unwrap() = 0xff; // set trailing sentinel to 0xFF -> exclusive upper bound within composite tuple
+		*beg.last_mut().expect("prefix buffer is non-empty") = 0xff; // set trailing sentinel to 0xFF -> exclusive upper bound within composite tuple
 		Ok(beg)
 	}
 }

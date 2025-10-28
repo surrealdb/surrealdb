@@ -230,7 +230,7 @@ where
 							)
 							.await?
 							{
-								f_dist = w.peek_last_dist().unwrap(); // w can't be empty
+								f_dist = w.peek_last_dist().expect("w is non-empty"); // w can't be empty
 							}
 						}
 					}

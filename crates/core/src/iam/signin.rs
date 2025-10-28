@@ -220,13 +220,13 @@ pub async fn db_access(
 													crate::val::convert_value_to_public_value(
 														Value::RecordId(rid.clone().into()),
 													)
-													.unwrap(),
+													.expect("record id conversion should succeed"),
 												);
 												sess.tk = Some(
 													crate::val::convert_value_to_public_value(
 														claims.clone().into_claims_object().into(),
 													)
-													.unwrap(),
+													.expect("claims conversion should succeed"),
 												);
 												sess.ip.clone_from(&session.ip);
 												sess.or.clone_from(&session.or);
@@ -276,7 +276,7 @@ pub async fn db_access(
 												crate::val::convert_value_to_public_value(
 													claims.into_claims_object().into(),
 												)
-												.unwrap(),
+												.expect("claims conversion should succeed"),
 											);
 											session.ns = Some(ns.clone());
 											session.db = Some(db.clone());
@@ -285,7 +285,7 @@ pub async fn db_access(
 												crate::val::convert_value_to_public_value(
 													Value::RecordId(rid.clone().into()),
 												)
-												.unwrap(),
+												.expect("record id conversion should succeed"),
 											);
 											session.exp =
 												iam::issue::expiration(av.session_duration)?;
@@ -401,7 +401,8 @@ pub async fn db_user(
 
 			// Set the authentication on the session
 			session.tk = Some(
-				crate::val::convert_value_to_public_value(val.into_claims_object().into()).unwrap(),
+				crate::val::convert_value_to_public_value(val.into_claims_object().into())
+					.expect("claims conversion should succeed"),
 			);
 			session.ns = Some(ns.clone());
 			session.db = Some(db.clone());
@@ -495,7 +496,8 @@ pub async fn ns_user(
 
 			// Set the authentication on the session
 			session.tk = Some(
-				crate::val::convert_value_to_public_value(val.into_claims_object().into()).unwrap(),
+				crate::val::convert_value_to_public_value(val.into_claims_object().into())
+					.expect("claims conversion should succeed"),
 			);
 			session.ns = Some(ns.clone());
 			session.exp = expiration(u.session_duration)?;
@@ -549,7 +551,8 @@ pub async fn root_user(
 
 			// Set the authentication on the session
 			session.tk = Some(
-				crate::val::convert_value_to_public_value(val.into_claims_object().into()).unwrap(),
+				crate::val::convert_value_to_public_value(val.into_claims_object().into())
+					.expect("claims conversion should succeed"),
 			);
 			session.exp = expiration(u.session_duration)?;
 			session.au = Arc::new(au);
@@ -728,7 +731,7 @@ pub async fn signin_bearer(
 		};
 		sess.tk = Some(
 			crate::val::convert_value_to_public_value(claims.clone().into_claims_object().into())
-				.unwrap(),
+				.expect("claims conversion should succeed"),
 		);
 		sess.ip.clone_from(&session.ip);
 		sess.or.clone_from(&session.or);
@@ -782,7 +785,8 @@ pub async fn signin_bearer(
 	let enc = encode(&Header::new(algorithm_to_jwt_algorithm(iss.alg)), &claims, &key);
 	// Set the authentication on the session.
 	session.tk = Some(
-		crate::val::convert_value_to_public_value(claims.into_claims_object().into()).unwrap(),
+		crate::val::convert_value_to_public_value(claims.into_claims_object().into())
+			.expect("claims conversion should succeed"),
 	);
 	session.ns.clone_from(&ns.map(|ns| ns.name.clone()));
 	session.db.clone_from(&db.map(|db| db.name.clone()));
@@ -818,8 +822,10 @@ pub async fn signin_bearer(
 					bail!(Error::InvalidAuth);
 				},
 			)));
-			session.rd =
-				Some(crate::val::convert_value_to_public_value(Value::from(rid.clone())).unwrap());
+			session.rd = Some(
+				crate::val::convert_value_to_public_value(Value::from(rid.clone()))
+					.expect("value conversion should succeed"),
+			);
 		}
 	};
 	// Return the authentication token.

@@ -82,7 +82,17 @@ impl ForeachStatement {
 				// Compute each block entry
 				let res = match v {
 					Expr::Let(x) => x.compute(stk, &mut ctx, opt, doc).await,
-					v => stk.run(|stk| v.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await,
+					v => {
+						stk.run(|stk| {
+							v.compute(
+								stk,
+								ctx.as_ref().expect("context should be initialized"),
+								opt,
+								doc,
+							)
+						})
+						.await
+					}
 				};
 				// Catch any special errors
 				match res {

@@ -290,8 +290,8 @@ impl Vector {
 	where
 		T: ToFloat + Clone + FromPrimitive + Add<Output = T> + Div<Output = T> + Zero,
 	{
-		let mean_x = x.mean().unwrap().to_float();
-		let mean_y = y.mean().unwrap().to_float();
+		let mean_x = x.mean().expect("mean should be computable").to_float();
+		let mean_y = y.mean().expect("mean should be computable").to_float();
 
 		let mut sum_xy = 0.0;
 		let mut sum_x2 = 0.0;

@@ -26,7 +26,7 @@ pub fn r#enum(Any(mut args): Any) -> Result<Value> {
 			Value::Array(v) => v.into_iter().choose(&mut rand::thread_rng()).unwrap_or(Value::None),
 			v => v,
 		},
-		_ => args.into_iter().choose(&mut rand::thread_rng()).unwrap(),
+		_ => args.into_iter().choose(&mut rand::thread_rng()).expect("non-empty args"),
 	})
 }
 

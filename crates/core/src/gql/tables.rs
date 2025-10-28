@@ -550,7 +550,7 @@ fn val_from_filter(
 		return Err(resolver_error("Table Filter must have one item"));
 	}
 
-	let (k, v) = filter.iter().next().unwrap();
+	let (k, v) = filter.iter().next().expect("filter has exactly one item");
 
 	match k.as_str().to_lowercase().as_str() {
 		"or" => aggregate(v, AggregateOp::Or, fds),
@@ -634,7 +634,7 @@ fn binop(field_name: &str, val: &GqlValue, fds: &[FieldDefinition]) -> Result<Ex
 
 	let lhs = Expr::Idiom(Idiom::field(field_name.to_string()));
 
-	let (k, v) = obj.iter().next().unwrap();
+	let (k, v) = obj.iter().next().expect("field filter has exactly one item");
 	let op = parse_op(k)?;
 
 	let rhs = gql_to_sql_kind(v, fd.field_kind.clone().unwrap_or_default())?;

@@ -7,7 +7,7 @@ pub fn encode(v: Value) -> anyhow::Result<Vec<u8>> {
 	let encoding = convert::from_value(v).map_err(|e| anyhow::anyhow!(e))?;
 	let mut res = Vec::new();
 	//TODO: Check if this can ever panic.
-	ciborium::into_writer(&encoding, &mut res).unwrap();
+	ciborium::into_writer(&encoding, &mut res).expect("writing to vec should not fail");
 	Ok(res)
 }
 

@@ -452,6 +452,10 @@ lossy_float_literal = "warn"
 # Warning or denying this lint can cause unexpected errors.
 unused_async = "allow"
 
+# Checks for `.unwrap()` or `.unwrap_err()` calls on Results and `.unwrap()` call on `Option`s.
+# https://rust-lang.github.io/rust-clippy/master/index.html#unwrap_used
+unwrap_used = "warn"
+
 # Profiles
 [profile.release]
 codegen-units = 1

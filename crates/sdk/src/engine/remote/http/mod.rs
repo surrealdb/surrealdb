@@ -267,7 +267,7 @@ async fn send_request(
 	headers: &HeaderMap,
 	auth: &Option<Auth>,
 ) -> Result<Vec<QueryResult>> {
-	let url = base_url.join(RPC_PATH).unwrap();
+	let url = base_url.join(RPC_PATH).expect("valid RPC path");
 
 	let req_value = req.into_value();
 	let body = surrealdb_core::rpc::format::flatbuffers::encode(&req_value)
@@ -311,7 +311,7 @@ async fn router(
 				database: database.clone(),
 			}
 			.into_router_request(None)
-			.unwrap();
+			.expect("USE command should convert to router request");
 			// process request to check permissions
 			let out = send_request(req, base_url, client, headers, auth).await?;
 			if let Some(ns) = namespace {
@@ -530,12 +530,14 @@ async fn router(
 				query,
 				variables: merged_vars,
 			};
-			let req = cmd.into_router_request(None).unwrap();
+			let req =
+				cmd.into_router_request(None).expect("command should convert to router request");
 			let res = send_request(req, base_url, client, headers, auth).await?;
 			Ok(res)
 		}
 		cmd => {
-			let req = cmd.into_router_request(None).unwrap();
+			let req =
+				cmd.into_router_request(None).expect("command should convert to router request");
 			let res = send_request(req, base_url, client, headers, auth).await?;
 			Ok(res)
 		}

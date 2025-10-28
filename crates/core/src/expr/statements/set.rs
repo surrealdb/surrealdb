@@ -50,7 +50,16 @@ impl SetStatement {
 			})));
 		}
 
-		let result = stk.run(|stk| self.what.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await?;
+		let result = stk
+			.run(|stk| {
+				self.what.compute(
+					stk,
+					ctx.as_ref().expect("context should be initialized"),
+					opt,
+					doc,
+				)
+			})
+			.await?;
 		let result = match &self.kind {
 			Some(kind) => result
 				.coerce_to_kind(kind)
@@ -62,7 +71,7 @@ impl SetStatement {
 			None => result,
 		};
 
-		let mut c = MutableContext::unfreeze(ctx.take().unwrap())?;
+		let mut c = MutableContext::unfreeze(ctx.take().expect("context should be initialized"))?;
 		c.add_value(self.name.clone(), result.into());
 		*ctx = Some(c.freeze());
 		Ok(Value::None)

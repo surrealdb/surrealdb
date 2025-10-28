@@ -1537,6 +1537,6 @@ impl SurrealValue for http::StatusCode {
 		let Value::Number(Number::Int(n)) = value else {
 			return Err(conversion_error(Self::kind_of(), value));
 		};
-		Ok(http::StatusCode::from_u16(n as u16).unwrap())
+		http::StatusCode::from_u16(n as u16).context("Failed to convert status code")
 	}
 }

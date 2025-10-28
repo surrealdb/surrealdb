@@ -70,7 +70,18 @@ impl Block {
 		for v in self.iter() {
 			match v {
 				Expr::Let(x) => res = x.compute(stk, &mut ctx, opt, doc).await?,
-				v => res = stk.run(|stk| v.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await?,
+				v => {
+					res = stk
+						.run(|stk| {
+							v.compute(
+								stk,
+								ctx.as_ref().expect("context should be initialized"),
+								opt,
+								doc,
+							)
+						})
+						.await?
+				}
 			}
 		}
 		// Return nothing

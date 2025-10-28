@@ -24,7 +24,8 @@ impl ParamDefinition {
 			kind: DefineKind::Default,
 			name: self.name.clone(),
 			value: {
-				let public_val: crate::types::PublicValue = self.value.clone().try_into().unwrap();
+				let public_val: crate::types::PublicValue =
+					self.value.clone().try_into().expect("value conversion should succeed");
 				crate::sql::Expr::from_public_value(public_val)
 			},
 			comment: self

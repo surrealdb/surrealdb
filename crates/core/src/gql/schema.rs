@@ -210,12 +210,19 @@ pub(crate) fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> 
 		d @ SurValue::Duration(_) => GqlValue::String(d.to_string()),
 		SurValue::Datetime(d) => GqlValue::String(d.to_rfc3339()),
 		SurValue::Uuid(uuid) => GqlValue::String(uuid.to_string()),
-		SurValue::Array(a) => {
-			GqlValue::List(a.into_iter().map(|v| sql_value_to_gql_value(v).unwrap()).collect())
-		}
+		SurValue::Array(a) => GqlValue::List(
+			a.into_iter()
+				.map(|v| sql_value_to_gql_value(v).expect("value conversion should succeed"))
+				.collect(),
+		),
 		SurValue::Object(o) => GqlValue::Object(
 			o.0.into_iter()
-				.map(|(k, v)| (Name::new(k), sql_value_to_gql_value(v).unwrap()))
+				.map(|(k, v)| {
+					(
+						Name::new(k),
+						sql_value_to_gql_value(v).expect("value conversion should succeed"),
+					)
+				})
 				.collect(),
 		),
 		SurValue::Geometry(_) => return Err(resolver_error("unimplemented: Geometry types")),
@@ -247,7 +254,7 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		Kind::Table(ref _t) => TypeRef::named(kind.to_string()),
 		Kind::Record(mut tables) => match tables.len() {
 			0 => TypeRef::named("record"),
-			1 => TypeRef::named(tables.pop().unwrap()),
+			1 => TypeRef::named(tables.pop().expect("single table in record kind")),
 			_ => {
 				let ty_name = tables.join("_or_");
 

@@ -246,8 +246,9 @@ async fn router_handle_route(
 
 		let request_value = request.into_value();
 
-		// Unwrap because a router request cannot fail to serialize.
-		let payload = surrealdb_core::rpc::format::flatbuffers::encode(&request_value).unwrap();
+		// Router request should not fail to serialize
+		let payload = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
+			.expect("router request should serialize");
 
 		Message::Binary(payload.into())
 	};
@@ -380,14 +381,14 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 										uuid: live_query_id,
 									}
 									.into_router_request(None)
-									.unwrap();
+									.expect("KILL command should convert to router request");
 
 									let request_value = request.into_value();
 
 									let value = surrealdb_core::rpc::format::flatbuffers::encode(
 										&request_value,
 									)
-									.unwrap();
+									.expect("router request should serialize");
 									Message::Binary(value.into())
 								};
 								if let Err(error) = state.sink.send(kill).await {
@@ -485,8 +486,8 @@ async fn router_reconnect(
 
 					let request_value = request.into_value();
 
-					let message =
-						surrealdb_core::rpc::format::flatbuffers::encode(&request_value).unwrap();
+					let message = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
+						.expect("router request should serialize");
 
 					if let Err(error) = state.sink.send(Message::Binary(message.into())).await {
 						trace!("{error}");
@@ -500,11 +501,11 @@ async fn router_reconnect(
 						value: value.clone(),
 					}
 					.into_router_request(None)
-					.unwrap();
+					.expect("SET command should convert to router request");
 					trace!("Request {:?}", request);
 					let request_value = request.into_value();
-					let payload =
-						surrealdb_core::rpc::format::flatbuffers::encode(&request_value).unwrap();
+					let payload = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
+						.expect("router request should serialize");
 
 					if let Err(error) = state.sink.send(Message::Binary(payload.into())).await {
 						trace!("{error}");
@@ -532,9 +533,12 @@ pub(crate) async fn run_router(
 	route_rx: Receiver<Route>,
 ) {
 	let ping = {
-		let request = Command::Health.into_router_request(None).unwrap();
+		let request = Command::Health
+			.into_router_request(None)
+			.expect("HEALTH command should convert to router request");
 		let request_value = request.into_value();
-		let value = surrealdb_core::rpc::format::flatbuffers::encode(&request_value).unwrap();
+		let value = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
+			.expect("router request should serialize");
 		Message::Binary(value.into())
 	};
 

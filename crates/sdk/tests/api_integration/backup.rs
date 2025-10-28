@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used)]
 #![cfg(any(
 	feature = "kv-mem",
 	feature = "kv-rocksdb",

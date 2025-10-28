@@ -146,13 +146,13 @@ pub async fn db_access(
 				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 				sess.rd = Some(
 					crate::val::convert_value_to_public_value(Value::RecordId(rid.clone().into()))
-						.unwrap(),
+						.expect("record id conversion should succeed"),
 				);
 				sess.tk = Some(
 					crate::val::convert_value_to_public_value(
 						claims.clone().into_claims_object().into(),
 					)
-					.unwrap(),
+					.expect("claims conversion should succeed"),
 				);
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
@@ -190,14 +190,14 @@ pub async fn db_access(
 			// Set the authentication on the session
 			session.tk = Some(
 				crate::val::convert_value_to_public_value(claims.into_claims_object().into())
-					.unwrap(),
+					.expect("claims conversion should succeed"),
 			);
 			session.ns = Some(ns.clone());
 			session.db = Some(db.clone());
 			session.ac = Some(ac.clone());
 			session.rd = Some(
 				crate::val::convert_value_to_public_value(Value::RecordId(rid.clone().into()))
-					.unwrap(),
+					.expect("record id conversion should succeed"),
 			);
 			session.exp = expiration(av.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
@@ -237,6 +237,7 @@ pub async fn db_access(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
 	use chrono::Duration;
 
