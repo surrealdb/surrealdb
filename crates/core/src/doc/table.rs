@@ -192,7 +192,7 @@ impl Document {
 				};
 
 				let after_cond = if let Some(cond) = condition {
-					cond.compute(stk, ctx, opt, Some(&self.initial))
+					cond.compute(stk, ctx, opt, Some(&self.current))
 						.await
 						.catch_return()?
 						.is_truthy()

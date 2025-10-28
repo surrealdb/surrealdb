@@ -2549,10 +2549,13 @@ async fn select_count_group_all_with_or_without_index() -> Result<()> {
 			},
 			{
 				detail: {
-					idioms: {
-						count: [
-							'count'
-						]
+					'Aggregate expressions': {},
+					Aggregations: {
+						_a0: 'Count',
+					},
+					'Group expressions': {},
+					'Select expression': {
+						count: '_a0'
 					},
 					type: 'Group'
 				},
@@ -2582,10 +2585,13 @@ async fn select_count_group_all_with_or_without_index() -> Result<()> {
 			},
 			{
 				detail: {
-					idioms: {
-						count: [
-							'count'
-						]
+					'Aggregate expressions': {},
+					Aggregations: {
+						_a0: 'Count',
+					},
+					'Group expressions': {},
+					'Select expression': {
+						count: '_a0'
 					},
 					type: 'Group'
 				},
