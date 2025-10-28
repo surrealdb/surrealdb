@@ -25,7 +25,6 @@ use crate::expr::{
 	Groups, Idiom, Kind, Literal, SelectStatement, View,
 };
 use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
-use crate::fnc::record;
 use crate::iam::{Action, ResourceKind};
 use crate::key;
 use crate::kvs::Transaction;

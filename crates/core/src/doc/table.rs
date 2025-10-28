@@ -372,16 +372,8 @@ impl Document {
 			key,
 		});
 
-		Self::run_triggers(
-			stk,
-			ctx,
-			opt,
-			id.into(),
-			action,
-			Some(record_before.into()),
-			Some(record),
-		)
-		.await?;
+		Self::run_triggers(stk, ctx, opt, id, action, Some(record_before.into()), Some(record))
+			.await?;
 
 		Ok(())
 	}
@@ -774,7 +766,9 @@ impl Document {
 						fail!("Old record wasn't a number but was created with a number");
 					};
 
-					if *before == *max && *after != *max {
+					if *after >= *max {
+						*max = *after
+					} else if *before == *max {
 						// Collect all the things we need to recalculate into a list so
 						// that we can recalculate them in a single query.
 						recalculations.push(Recalculation {
@@ -801,7 +795,9 @@ impl Document {
 						fail!("Old record wasn't a number but was created with a number");
 					};
 
-					if *before == *min && *after != *min {
+					if *after <= *min {
+						*min = *after
+					} else if *before == *min {
 						recalculations.push(Recalculation {
 							function: "math::min".to_string(),
 							stat: idx,
@@ -871,7 +867,9 @@ impl Document {
 						fail!("Old record wasn't a datetime but was created with a number");
 					};
 
-					if *before == *max && *after != *max {
+					if *after >= *max {
+						*max = after.clone();
+					} else if *before == *max {
 						recalculations.push(Recalculation {
 							function: "time::max".to_string(),
 							stat: idx,
@@ -897,7 +895,9 @@ impl Document {
 						fail!("Old record wasn't a datetime but was created with a number");
 					};
 
-					if *before == *min && *after != *min {
+					if *after <= *min {
+						*min = after.clone();
+					} else if *before == *min && *after != *min {
 						recalculations.push(Recalculation {
 							function: "time::min".to_string(),
 							stat: idx,

@@ -10,7 +10,7 @@ use crate::catalog::providers::TableProvider;
 use crate::catalog::{self, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId};
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
-use crate::expr::visit::VisitMut;
+use crate::expr::visit::MutVisitor;
 use crate::expr::{
 	BinaryOperator, Cond, Expr, FlowResultExt as _, Idiom, Kind, Literal, Order, Part, With,
 };
@@ -168,7 +168,7 @@ impl<'a> TreeBuilder<'a> {
 			None
 		} else {
 			let mut cond = cond.0.clone();
-			let _ = cond.visit_mut(&mut KnnConditionRewriter(&self.knn_expressions));
+			let _ = KnnConditionRewriter(&self.knn_expressions).visit_mut_expr(&mut cond);
 			Some(Cond(cond))
 		};
 		Ok(())
