@@ -164,6 +164,7 @@ use futures::StreamExt;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
 use surrealdb_core::dbs::{QueryResult, QueryResultBuilder, Session};
+use surrealdb_core::err::Error as CoreError;
 use surrealdb_core::iam;
 use surrealdb_core::kvs::Datastore;
 #[cfg(not(target_family = "wasm"))]
@@ -599,10 +600,10 @@ async fn router(
 					refresh: None,
 				},
 				iam::Token::WithRefresh {
-					access: token,
+					access,
 					refresh,
 				} => Token {
-					access: AccessToken(SecureToken(token)),
+					access: AccessToken(SecureToken(access)),
 					refresh: Some(RefreshToken(SecureToken(refresh))),
 				},
 			};
@@ -613,10 +614,56 @@ async fn router(
 			token,
 		} => {
 			let query_result = QueryResultBuilder::started_now();
-			let result = match iam::verify::token(kvs, &mut *session.write().await, &token).await {
-				Ok(_) => query_result.finish_with_result(Ok(Value::None)),
-				Err(error) => query_result
-					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
+			let (access, with_refresh) = match &token {
+				iam::Token::Access(access) => (access, false),
+				iam::Token::WithRefresh {
+					access,
+					..
+				} => (access, true),
+			};
+			// Try to authenticate with the access token
+			let result = match iam::verify::token(kvs, &mut *session.write().await, &access).await {
+				// If the access token is valid, return the token
+				Ok(_) => query_result.finish_with_result(Ok(token.into_value())),
+				Err(error) => {
+					// If the access token is expired and we have a refresh token, try to refresh it
+					if with_refresh {
+						// If the error is an expired token, try to refresh it
+						if let Some(CoreError::ExpiredToken) = error.downcast_ref::<CoreError>() {
+							let result = match token.refresh(kvs, &mut *session.write().await).await
+							{
+								Ok(token) => {
+									query_result.finish_with_result(Ok(token.into_value()))
+								}
+								Err(error) => query_result.finish_with_result(Err(
+									DbResultError::InternalError(error.to_string()),
+								)),
+							};
+							return Ok(vec![result]);
+						}
+					}
+					// If the access token is invalid and we don't have a refresh token, return an
+					// error
+					query_result
+						.finish_with_result(Err(DbResultError::InternalError(error.to_string())))
+				}
+			};
+			Ok(vec![result])
+		}
+		Command::Refresh {
+			token,
+		} => {
+			let query_result = QueryResultBuilder::started_now();
+			let result = match token {
+				iam::Token::Access(..) => query_result
+					.finish_with_result(Err(crate::err::Error::MissingRefreshToken.into())),
+				token @ iam::Token::WithRefresh {
+					..
+				} => match token.refresh(kvs, &mut *session.write().await).await {
+					Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
+					Err(error) => query_result
+						.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
+				},
 			};
 			Ok(vec![result])
 		}

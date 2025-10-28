@@ -111,50 +111,50 @@ fn test_token_from_value_invalid_refresh_type() {
 
 #[test]
 fn test_token_roundtrip_with_refresh() {
-	let original_token = create_token_with_refresh("access_token_123", "refresh_token_456");
+	let original_token = || create_token_with_refresh("access_token_123", "refresh_token_456");
 
-	let value = original_token.clone().into_value();
+	let value = original_token().into_value();
 	let deserialized_token = Token::from_value(value).unwrap();
 
 	assert_eq!(
-		original_token.access.as_insecure_token(),
+		original_token().access.as_insecure_token(),
 		deserialized_token.access.as_insecure_token()
 	);
-	assert!(original_token.refresh.is_some());
+	assert!(original_token().refresh.is_some());
 	assert!(deserialized_token.refresh.is_some());
 	assert_eq!(
-		original_token.refresh.as_ref().unwrap().as_insecure_token(),
+		original_token().refresh.as_ref().unwrap().as_insecure_token(),
 		deserialized_token.refresh.unwrap().as_insecure_token()
 	);
 }
 
 #[test]
 fn test_token_roundtrip_without_refresh() {
-	let original_token = create_token_without_refresh("access_token_123");
+	let original_token = || create_token_without_refresh("access_token_123");
 
-	let value = original_token.clone().into_value();
+	let value = original_token().into_value();
 	let deserialized_token = Token::from_value(value).unwrap();
 
 	assert_eq!(
-		original_token.access.as_insecure_token(),
+		original_token().access.as_insecure_token(),
 		deserialized_token.access.as_insecure_token()
 	);
-	assert!(original_token.refresh.is_none());
+	assert!(original_token().refresh.is_none());
 	assert!(deserialized_token.refresh.is_none());
 }
 
 #[test]
 fn test_token_roundtrip_legacy_string() {
-	let original_token = Token::from("legacy_token_123".to_string());
+	let original_token = || Token::from("legacy_token_123".to_string());
 
-	let value = original_token.clone().into_value();
+	let value = original_token().into_value();
 	let deserialized_token = Token::from_value(value).unwrap();
 
 	assert_eq!(
-		original_token.access.as_insecure_token(),
+		original_token().access.as_insecure_token(),
 		deserialized_token.access.as_insecure_token()
 	);
-	assert!(original_token.refresh.is_none());
+	assert!(original_token().refresh.is_none());
 	assert!(deserialized_token.refresh.is_none());
 }
 
@@ -198,21 +198,6 @@ fn test_token_debug_implementation() {
 	assert!(debug_output.contains("REDACTED"));
 	assert!(!debug_output.contains("secret_token"));
 	assert!(!debug_output.contains("secret_refresh"));
-}
-
-#[test]
-fn test_token_clone() {
-	let original_token = create_token_with_refresh("access_token_123", "refresh_token_456");
-
-	let cloned_token = original_token.clone();
-
-	assert_eq!(original_token.access.as_insecure_token(), cloned_token.access.as_insecure_token());
-	assert!(original_token.refresh.is_some());
-	assert!(cloned_token.refresh.is_some());
-	assert_eq!(
-		original_token.refresh.as_ref().unwrap().as_insecure_token(),
-		cloned_token.refresh.unwrap().as_insecure_token()
-	);
 }
 
 #[test]

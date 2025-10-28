@@ -1814,6 +1814,11 @@ pub async fn refresh_tokens(new_db: impl CreateDb) {
 		.await
 		.unwrap();
 	assert!(token.refresh.is_some());
+	// Tokens can be refreshed
+	let old_token = token.access.as_insecure_token().to_owned();
+	let token = db.authenticate(token).refresh().await.unwrap();
+	assert!(token.refresh.is_some());
+	assert_ne!(old_token, token.access.as_insecure_token());
 }
 
 define_include_tests!(basic => {

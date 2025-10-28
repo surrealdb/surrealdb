@@ -20,6 +20,9 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				Command::Authenticate {
 					..
 				}
+				| Command::Refresh {
+					..
+				}
 				| Command::Kill {
 					..
 				}

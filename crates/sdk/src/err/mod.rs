@@ -293,6 +293,10 @@ pub enum Error {
 	/// The write buffer size is too small
 	#[error("The write buffer size is too small")]
 	MaxWriteBufferSizeTooSmall,
+
+	/// Tried to refresh a token without a refresh token
+	#[error("Missing refresh token")]
+	MissingRefreshToken,
 }
 
 impl serde::ser::Error for Error {
@@ -569,6 +573,9 @@ impl From<Error> for DbResultError {
 			}
 			Error::MaxWriteBufferSizeTooSmall => {
 				DbResultError::InternalError("Write buffer size too small".to_string())
+			}
+			Error::MissingRefreshToken => {
+				DbResultError::InvalidParams("Missing refresh token".to_string())
 			}
 		}
 	}

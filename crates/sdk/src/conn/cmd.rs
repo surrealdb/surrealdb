@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::path::PathBuf;
 
 use async_channel::Sender;
+use surrealdb_core::iam::token::Token;
 use surrealdb_core::kvs::export::Config as DbExportConfig;
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 use surrealdb_types::SurrealValue;
@@ -25,7 +26,10 @@ pub(crate) enum Command {
 		credentials: Object,
 	},
 	Authenticate {
-		token: String,
+		token: Token,
+	},
+	Refresh {
+		token: Token,
 	},
 	Invalidate,
 	RawQuery {
@@ -118,6 +122,14 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "authenticate",
+				params: Some(Value::Array(Array::from(vec![Value::from_t(token)]))),
+				transaction: None,
+			},
+			Command::Refresh {
+				token,
+			} => RouterRequest {
+				id,
+				method: "refresh",
 				params: Some(Value::Array(Array::from(vec![Value::from_t(token)]))),
 				transaction: None,
 			},

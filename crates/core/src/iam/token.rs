@@ -2,13 +2,18 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::LazyLock;
 
-use jsonwebtoken::{Algorithm, Header};
+use anyhow::{Result, bail};
+use jsonwebtoken::{Algorithm, Header, decode};
 use serde::{Deserialize, Serialize};
 use surrealdb_types::SurrealValue;
 
+use crate::dbs::Session;
+use crate::err::Error;
+use crate::iam::verify::{DUD, KEY};
+use crate::kvs::Datastore;
 use crate::sql::expression::convert_public_value_to_internal;
-use crate::syn;
-use crate::val::{Object, Value};
+use crate::val::{Object, Value, convert_object_to_public_map};
+use crate::{iam, syn};
 pub static HEADER: LazyLock<Header> = LazyLock::new(|| Header::new(Algorithm::HS512));
 
 /// A token that can be either an access token alone or an access token with a refresh token.
@@ -55,6 +60,24 @@ pub enum Token {
 		/// The refresh token used to obtain new access tokens
 		refresh: String,
 	},
+}
+
+impl Token {
+	pub async fn refresh(self, kvs: &Datastore, session: &mut Session) -> Result<Self> {
+		match self {
+			Token::Access(_) => bail!(Error::InvalidAuth),
+			Token::WithRefresh {
+				access,
+				refresh,
+			} => {
+				let token_data = decode::<Claims>(&access, &KEY, &DUD)?;
+				let claims = token_data.claims.into_claims_object();
+				let mut vars = convert_object_to_public_map(claims)?;
+				vars.insert("refresh".to_string(), refresh.into_value());
+				iam::signin::signin(kvs, session, vars.into()).await
+			}
+		}
+	}
 }
 
 impl fmt::Debug for Token {

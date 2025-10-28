@@ -190,7 +190,7 @@ impl<T, P> Credentials<T> for Record<P> where P: SurrealValue {}
 ///     // Use refresh token to get new access token
 /// }
 /// ```
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Token {
 	/// The access token used for API authentication.
@@ -250,7 +250,7 @@ impl SurrealValue for Token {
 /// should take care to ensure that only authorized users have access to the
 /// JWT. For example, it can be stored in a secure cookie or encrypted in conjunction with other
 /// encryption mechanisms.
-#[derive(Clone, Serialize, Deserialize, SurrealValue)]
+#[derive(Serialize, Deserialize, SurrealValue)]
 pub struct AccessToken(pub(crate) SecureToken);
 
 impl AccessToken {
@@ -311,7 +311,7 @@ impl fmt::Debug for AccessToken {
 /// // Use the token string to request a new access token
 /// // (implementation depends on your authentication flow)
 /// ```
-#[derive(Clone, Serialize, Deserialize, SurrealValue)]
+#[derive(Serialize, Deserialize, SurrealValue)]
 pub struct RefreshToken(pub(crate) SecureToken);
 
 impl RefreshToken {

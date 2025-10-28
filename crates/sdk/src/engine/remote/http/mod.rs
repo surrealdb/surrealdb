@@ -9,6 +9,7 @@ use reqwest::RequestBuilder;
 use reqwest::header::{ACCEPT, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use surrealdb_core::dbs::{QueryResult, QueryResultBuilder};
+use surrealdb_core::iam;
 use surrealdb_core::rpc::{self, DbResponse, DbResult};
 use surrealdb_types::{SurrealValue, Value, Variables};
 #[cfg(not(target_family = "wasm"))]
@@ -380,7 +381,13 @@ async fn router(
 			let results = send_request(req, base_url, client, headers, auth).await?;
 
 			*auth = Some(Auth::Bearer {
-				token,
+				token: match token {
+					iam::Token::Access(token) => token,
+					iam::Token::WithRefresh {
+						access,
+						refresh,
+					} => access,
+				},
 			});
 			Ok(results)
 		}

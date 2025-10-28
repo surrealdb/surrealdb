@@ -80,7 +80,7 @@ async fn api() {
 		.unwrap();
 
 	// authenticate
-	let _: () = DB.authenticate(String::new()).await.unwrap();
+	let _: Token = DB.authenticate(String::new()).await.unwrap();
 
 	// query
 	let _: QueryResponse = DB.query("SELECT * FROM user").await.unwrap();

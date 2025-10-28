@@ -565,6 +565,7 @@ where
 		Authenticate {
 			client: Cow::Borrowed(self),
 			token: token.into(),
+			token_type: PhantomData,
 		}
 	}
 
