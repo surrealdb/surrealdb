@@ -24,12 +24,7 @@ impl super::Routine for Read {
 		self.runtime.block_on(async {
 			// Create table
 			let mut res = ds
-				.execute(
-					format!("DEFINE TABLE {}", &self.table_name).as_str(),
-					&session,
-					None,
-					None,
-				)
+				.execute(format!("DEFINE TABLE {}", &self.table_name).as_str(), &session, None)
 				.await
 				.expect("[setup] define table failed");
 			let _ = res.remove(0).output().expect("[setup] the create operation returned no value");
@@ -53,7 +48,6 @@ impl super::Routine for Read {
 								)
 								.as_str(),
 								&session,
-								None,
 								None,
 							)
 							.await
@@ -98,7 +92,6 @@ impl super::Routine for Read {
 								.as_str(),
 								&session,
 								None,
-								None,
 							)
 							.await
 							.expect("[run] select operation failed"),
@@ -124,7 +117,7 @@ impl super::Routine for Read {
 	fn cleanup(&self, ds: Arc<Datastore>, session: Session, _num_ops: usize) {
 		self.runtime.block_on(async {
 			let mut res = ds
-				.execute(format!("REMOVE TABLE {}", self.table_name).as_str(), &session, None, None)
+				.execute(format!("REMOVE TABLE {}", self.table_name).as_str(), &session, None)
 				.await
 				.expect("[cleanup] remove table failed");
 			let _ =

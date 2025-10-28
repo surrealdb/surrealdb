@@ -1659,7 +1659,7 @@ mod tests {
 					.unwrap()
 					.with_capabilities(Capabilities::all());
 				let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
-				let res = &mut dbs.execute(&sql, &ses, None, None).await.unwrap();
+				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 				let tmp = res.remove(0).result.unwrap();
 				if tmp == crate::types::PublicValue::String("object".to_owned()) {
 					// Assume this function is superseded by a module of the

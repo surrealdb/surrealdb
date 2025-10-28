@@ -41,19 +41,19 @@ pub async fn iam_run_case(
 
 	if use_ns {
 		if let Some(ns) = &sess.ns {
-			ds.execute(&format!("USE NS {ns}"), &owner_sess, None, None).await.unwrap();
+			ds.execute(&format!("USE NS {ns}"), &owner_sess, None).await.unwrap();
 		}
 	}
 	if use_db {
 		if let Some(db) = &sess.db {
-			ds.execute(&format!("USE DB {db}"), &owner_sess, None, None).await.unwrap();
+			ds.execute(&format!("USE DB {db}"), &owner_sess, None).await.unwrap();
 		}
 	}
 
 	// Prepare statement
 	{
 		if !prepare.is_empty() {
-			let resp = ds.execute(prepare, &owner_sess, None, None).await.unwrap();
+			let resp = ds.execute(prepare, &owner_sess, None).await.unwrap();
 			for r in resp.into_iter() {
 				let tmp = r.output();
 				ensure!(tmp.is_ok(), "Prepare statement failed: {}", tmp.unwrap_err());
@@ -62,11 +62,11 @@ pub async fn iam_run_case(
 	}
 
 	// Execute statement
-	let mut resp = ds.execute(test, sess, None, None).await.unwrap();
+	let mut resp = ds.execute(test, sess, None).await.unwrap();
 
 	// Check datastore state first
 	{
-		let mut resp = ds.execute(check, &owner_sess, None, None).await.unwrap();
+		let mut resp = ds.execute(check, &owner_sess, None).await.unwrap();
 		assert_eq!(
 			resp.len(),
 			1,
@@ -303,7 +303,7 @@ impl Debug for Test {
 impl Test {
 	#[allow(dead_code)]
 	pub async fn new_ds_session(ds: Datastore, session: Session, sql: &str) -> Result<Self> {
-		let responses = ds.execute(sql, &session, None, None).await?;
+		let responses = ds.execute(sql, &session, None).await?;
 		Ok(Self {
 			ds,
 			session,

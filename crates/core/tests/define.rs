@@ -19,7 +19,7 @@ async fn define_statement_namespace() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result;
@@ -61,7 +61,7 @@ async fn define_statement_database() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
 	let tmp = res.remove(0).result;
@@ -97,14 +97,13 @@ async fn define_statement_index_concurrently_building_status(
 				&format!("CREATE user:{i} SET email = 'test{i}@surrealdb.com';"),
 				&session,
 				None,
-				None,
 			)
 			.await?;
 		skip_ok(&mut responses, 1)?;
 	}
 	// Create the index concurrently
 	info!("Indexing starts");
-	let mut r = ds.execute(def_index, &session, None, None).await?;
+	let mut r = ds.execute(def_index, &session, None).await?;
 	assert_eq!(r.len(), skip_def);
 	skip_ok(&mut r, skip_def)?;
 	//
@@ -130,12 +129,12 @@ async fn define_statement_index_concurrently_building_status(
 			} else {
 				format!("DELETE user:{appended_count}")
 			};
-			let mut responses = ds.execute(&sql, &session, None, None).await?;
+			let mut responses = ds.execute(&sql, &session, None).await?;
 			skip_ok(&mut responses, 1)?;
 			appended_count += 1;
 		}
 		// We monitor the status
-		let mut r = ds.execute("INFO FOR INDEX test ON user", &session, None, None).await?;
+		let mut r = ds.execute("INFO FOR INDEX test ON user", &session, None).await?;
 		let tmp = r.remove(0).result?;
 		if let Value::Object(o) = &tmp {
 			if let Some(Value::Object(o)) = o.get("building") {
@@ -256,7 +255,7 @@ async fn define_statement_search_index() -> Result<()> {
 
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
 	for i in 0..6 {
@@ -289,7 +288,7 @@ async fn define_statement_user_root() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner();
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 2);
 	//
@@ -319,7 +318,7 @@ async fn define_statement_user_ns() -> Result<()> {
 		INFO FOR USER test ON NAMESPACE;
 		INFO FOR USER test ON ROOT;
 	";
-	let res = dbs.execute(sql, &ses, None, None).await?;
+	let res = dbs.execute(sql, &ses, None).await?;
 
 	let mut res = res.into_iter();
 	res.next().unwrap().result.unwrap();
@@ -368,7 +367,7 @@ async fn define_statement_user_ns() -> Result<()> {
 	let sql = "
 		DEFINE USER test ON NS PASSWORD 'test';
 	";
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 
 	assert!(res.remove(0).result.is_err());
 
@@ -391,7 +390,7 @@ async fn define_statement_user_db() -> Result<()> {
 		INFO FOR USER test ON DATABASE;
 		INFO FOR USER test ON NS;
 	";
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 
 	res[2].result.as_ref().unwrap();
 	res[3].result.as_ref().unwrap();
@@ -415,7 +414,7 @@ async fn define_statement_user_db() -> Result<()> {
 	let sql = "
 		DEFINE USER test ON DB PASSWORD 'test';
 	";
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 
 	assert!(res.remove(0).result.is_err());
 

@@ -17,7 +17,7 @@ async fn strict_mode_no_namespace() -> Result<()> {
 	";
 	let dbs = new_ds().await?.with_strict_mode(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, None)
+	let res = &mut dbs.execute(sql, &ses, None)
 			.await?;
 	assert_eq!(res.len(), 5);
 	//
@@ -76,7 +76,7 @@ async fn strict_mode_no_database() -> Result<()> {
 	";
 	let dbs = new_ds().await?.with_strict_mode(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, None)
+	let res = &mut dbs.execute(sql, &ses, None)
 			.await?;
 	assert_eq!(res.len(), 5);
 	//
@@ -130,7 +130,7 @@ async fn strict_mode_no_table() -> Result<()> {
 	";
 	let dbs = new_ds().await?.with_strict_mode(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, None)
+	let res = &mut dbs.execute(sql, &ses, None)
 			.await?;
 	assert_eq!(res.len(), 5);
 	//
@@ -180,7 +180,7 @@ async fn strict_mode_all_ok() -> Result<()> {
 	";
 	let dbs = new_ds().await?.with_strict_mode(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	//
 	let tmp = res.remove(0).result;
@@ -219,7 +219,7 @@ async fn loose_mode_all_ok() -> Result<()> {
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 7);
 	//
 	let tmp = res.remove(0).result;
@@ -303,6 +303,6 @@ async fn strict_define_in_transaction() -> Result<()> {
 	";
 	let dbs = new_ds().await?.with_strict_mode(true);
 	let ses = Session::owner().with_ns("test").with_db("test");
-	dbs.execute(sql, &ses, None, None).await?;
+	dbs.execute(sql, &ses, None).await?;
 	Ok(())
 }

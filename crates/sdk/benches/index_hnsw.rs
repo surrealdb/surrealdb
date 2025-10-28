@@ -148,7 +148,7 @@ async fn init_datastore(session: &Session, with_index: bool) -> Datastore {
 		let sql = format!(
 			"DEFINE INDEX ix ON e FIELDS r HNSW DIMENSION {DIMENSION} DIST EUCLIDEAN TYPE F32 EFC {EF_CONSTRUCTION} M {M};"
 		);
-		ds.execute(&sql, session, None, None).await.expect(&sql);
+		ds.execute(&sql, session, None).await.expect(&sql);
 	}
 	ds
 }
@@ -156,14 +156,14 @@ async fn init_datastore(session: &Session, with_index: bool) -> Datastore {
 async fn insert_objects_db(session: &Session, create_index: bool, inserts: &[String]) -> Datastore {
 	let ds = init_datastore(session, create_index).await;
 	for sql in inserts {
-		ds.execute(sql, session, None, None).await.expect(sql);
+		ds.execute(sql, session, None).await.expect(sql);
 	}
 	ds
 }
 
 async fn knn_lookup_objects_db(ds: &Datastore, session: &Session, selects: &[String]) {
 	for sql in selects {
-		let mut res = ds.execute(sql, session, None, None).await.expect(sql);
+		let mut res = ds.execute(sql, session, None).await.expect(sql);
 		let res = res.remove(0).result.expect(sql);
 		if let Value::Array(a) = &res {
 			assert_eq!(a.len(), NN);

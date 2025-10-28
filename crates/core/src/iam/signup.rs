@@ -267,7 +267,6 @@ mod tests {
 				"#,
 				&sess,
 				None,
-				None,
 			)
 			.await
 			.unwrap();
@@ -335,7 +334,6 @@ mod tests {
 				"#,
 				&sess,
 				None,
-				None,
 			)
 			.await
 			.unwrap();
@@ -389,7 +387,6 @@ mod tests {
 				}
 				"#,
 				&sess,
-				None,
 				None,
 			)
 			.await
@@ -446,7 +443,6 @@ mod tests {
 				}
 				"#,
 				&sess,
-				None,
 				None,
 			)
 			.await
@@ -632,7 +628,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				),
 				&sess,
 				None,
-				None,
 			)
 			.await
 			.unwrap();
@@ -745,7 +740,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"#,
 				&sess,
 				None,
-				None,
 			)
 			.await
 			.unwrap();
@@ -841,7 +835,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"#,
 				&sess,
 				None,
-				None,
 			)
 			.await
 			.unwrap();
@@ -914,7 +907,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"#,
 			&sess,
 			None,
-			None,
 		)
 		.await
 		.unwrap();
@@ -959,7 +951,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				;
 				"#,
 				&sess,
-				None,
 				None,
 			)
 			.await
@@ -1019,7 +1010,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				;
 				"#,
 				&sess,
-				None,
 				None,
 			)
 			.await
@@ -1101,7 +1091,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				;
 				"#,
 				&sess,
-				None,
 				None,
 			)
 			.await

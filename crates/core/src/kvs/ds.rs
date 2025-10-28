@@ -1137,7 +1137,7 @@ impl Datastore {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Execute the SQL import
-		self.execute(sql, sess, None, None).await.map_err(|e| anyhow::anyhow!(e))
+		self.execute(sql, sess, None).await.map_err(|e| anyhow::anyhow!(e))
 	}
 
 	/// Run the datastore shutdown tasks, performing any necessary cleanup
@@ -1213,13 +1213,12 @@ impl Datastore {
 		txt: &str,
 		sess: &Session,
 		vars: Option<PublicVariables>,
-		txn: Option<Uuid>,
 	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
 		// Parse the SQL query text
 		let ast = syn::parse_with_capabilities(txt, &self.capabilities)
 			.map_err(|e| DbResultError::ParseError(e.to_string()))?;
 		// Process the AST
-		self.process(ast, sess, vars, txn).await
+		self.process(ast, sess, vars).await
 	}
 
 	/// Execute a query with an existing transaction
@@ -1400,7 +1399,7 @@ impl Datastore {
 			}
 		});
 
-		Executor::execute_stream(self, Arc::new(ctx), opt, true, stream, None).await
+		Executor::execute_stream(self, Arc::new(ctx), opt, true, stream).await
 	}
 
 	/// Execute a pre-parsed SQL query
@@ -1410,10 +1409,9 @@ impl Datastore {
 		ast: Ast,
 		sess: &Session,
 		vars: Option<PublicVariables>,
-		txn: Option<Uuid>,
 	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
 		//TODO: Insert planner here.
-		self.process_plan(ast.into(), sess, vars, txn).await
+		self.process_plan(ast.into(), sess, vars).await
 	}
 
 	pub(crate) async fn process_plan(
@@ -1421,7 +1419,6 @@ impl Datastore {
 		plan: LogicalPlan,
 		sess: &Session,
 		vars: Option<PublicVariables>,
-		txn: Option<Uuid>,
 	) -> Result<Vec<QueryResult>, DbResultError> {
 		// Check if the session has expired
 		if sess.expired() {
@@ -1525,7 +1522,7 @@ impl Datastore {
 		}
 
 		// Process all statements
-		Executor::execute_plan(self, ctx.freeze(), opt, plan, txn).await.map_err(|e| {
+		Executor::execute_plan(self, ctx.freeze(), opt, plan).await.map_err(|e| {
 			match e.downcast_ref::<Error>() {
 				Some(Error::ExpiredSession) => {
 					DbResultError::InvalidAuth("The session has expired".to_string())
@@ -1863,7 +1860,7 @@ impl Datastore {
 		// Check if the session has expired
 		ensure!(!sess.expired(), Error::ExpiredSession);
 		// Execute the SQL import
-		self.execute(sql, sess, None, None).await.map_err(|e| anyhow::anyhow!(e))
+		self.execute(sql, sess, None).await.map_err(|e| anyhow::anyhow!(e))
 	}
 
 	/// Performs a database import from SQL
@@ -2155,7 +2152,7 @@ impl Datastore {
 			))))],
 		};
 
-		self.process_plan(q, session, None, None).await.map_err(|e| anyhow::anyhow!(e))?;
+		self.process_plan(q, session, None).await.map_err(|e| anyhow::anyhow!(e))?;
 
 		Ok(())
 	}
@@ -2189,7 +2186,7 @@ mod test {
 		// Test the scenario by making sure the custom password doesn't change.
 		let sql = "DEFINE USER root ON ROOT PASSWORD 'test' ROLES OWNER";
 		let sess = Session::owner();
-		ds.execute(sql, &sess, None, None).await.unwrap();
+		ds.execute(sql, &sess, None).await.unwrap();
 		let pass_hash = ds
 			.transaction(Read, Optimistic)
 			.await
@@ -2294,7 +2291,7 @@ mod test {
 		// Define the table, set the initial uuids
 		let (initial, initial_live_query_version) = {
 			let sql = r"DEFINE TABLE test;".to_owned();
-			let res = &mut ds.execute(&sql, &ses, None, None).await?;
+			let res = &mut ds.execute(&sql, &ses, None).await?;
 			assert_eq!(res.len(), 1);
 			res.remove(0).result.unwrap();
 			// Obtain the initial uuids
@@ -2316,7 +2313,7 @@ mod test {
 		LIVE SELECT * FROM test;
 	"
 			.to_owned();
-			let res = &mut ds.execute(&sql, &ses, None, None).await?;
+			let res = &mut ds.execute(&sql, &ses, None).await?;
 			assert_eq!(res.len(), 5);
 			res.remove(0).result.unwrap();
 			res.remove(0).result.unwrap();
@@ -2354,7 +2351,7 @@ mod test {
 	"
 			.to_owned();
 			let vars = PublicVariables::from(map! { "lqid".to_string() => lqid });
-			let res = &mut ds.execute(&sql, &ses, Some(vars), None).await?;
+			let res = &mut ds.execute(&sql, &ses, Some(vars)).await?;
 			assert_eq!(res.len(), 5);
 			res.remove(0).result.unwrap();
 			res.remove(0).result.unwrap();

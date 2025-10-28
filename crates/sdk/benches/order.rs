@@ -60,7 +60,7 @@ async fn prepare_data(n: usize, n_value: usize) -> Input {
 	let dbs = Datastore::new("memory").await.unwrap();
 	let ses = Session::owner().with_ns("bench").with_db("bench");
 	let sql = format!(" CREATE |i:{n}| SET v = rand::id(), d = {value} RETURN NONE");
-	let res = &mut dbs.execute(&sql, &ses, None, None).await.unwrap();
+	let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 	let _ = res.remove(0).result.is_ok();
 	Input {
 		dbs,
@@ -69,7 +69,7 @@ async fn prepare_data(n: usize, n_value: usize) -> Input {
 }
 
 async fn run(i: &Input, q: &str, expected: usize) {
-	let mut r = i.dbs.execute(black_box(q), &i.ses, None, None).await.unwrap();
+	let mut r = i.dbs.execute(black_box(q), &i.ses, None).await.unwrap();
 	if cfg!(debug_assertions) {
 		assert_eq!(r.len(), 1);
 		match r.remove(0).result.unwrap() {

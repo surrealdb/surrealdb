@@ -51,7 +51,7 @@ async fn post_handler(
 	// Convert the received sql query
 	let sql = bytes_to_utf8(&sql).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Execute the received sql query
-	match db.execute(sql, &session, Some(vars), None).await {
+	match db.execute(sql, &session, Some(vars)).await {
 		Ok(res) => match output.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => {
@@ -97,7 +97,7 @@ async fn handle_socket(state: AppState, ws: WebSocket, session: Session) {
 				// Get a database reference
 				let db = &state.datastore;
 				// Execute the received sql query
-				let _ = match db.execute(sql, &session, None, None).await {
+				let _ = match db.execute(sql, &session, None).await {
 					// Convert the response to JSON
 					Ok(v) => match surrealdb_core::rpc::format::json::encode_str(Value::Array(
 						Array::from(v.into_iter().map(|x| x.into_value()).collect::<Vec<_>>()),

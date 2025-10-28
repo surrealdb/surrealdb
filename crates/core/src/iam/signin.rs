@@ -946,7 +946,6 @@ mod tests {
 				"#,
 				&sess,
 				None,
-				None,
 			)
 			.await
 			.unwrap();
@@ -1019,7 +1018,6 @@ mod tests {
 				"#,
 				&sess,
 				None,
-				None,
 			)
 			.await
 			.unwrap();
@@ -1068,7 +1066,6 @@ mod tests {
 				}
 				"#,
 				&sess,
-				None,
 				None,
 			)
 			.await
@@ -1122,7 +1119,6 @@ mod tests {
 				}
 				"#,
 				&sess,
-				None,
 				None,
 			)
 			.await
@@ -1260,7 +1256,6 @@ mod tests {
 				"#,
 				&sess,
 				None,
-				None,
 			)
 			.await
 			.unwrap();
@@ -1333,7 +1328,6 @@ mod tests {
 				}
 				"#,
 				&sess,
-				None,
 				None,
 			)
 			.await
@@ -1461,7 +1455,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"#
 				),
 				&sess,
-				None,
 				None,
 			)
 			.await
@@ -1643,7 +1636,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					level.level, roles_clause, duration_clause,
 				);
 
-				ds.execute(&define_user_query, &sess, None, None).await.unwrap();
+				ds.execute(&define_user_query, &sess, None).await.unwrap();
 
 				let mut sess = Session {
 					ns: level.ns.map(String::from),
@@ -1787,7 +1780,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"#,
 				&sess,
 				None,
-				None,
 			)
 			.await
 			.unwrap();
@@ -1882,7 +1874,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"#,
 				&sess,
 				None,
-				None,
 			)
 			.await
 			.unwrap();
@@ -1956,7 +1947,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"#,
 			&sess,
 			None,
-			None,
 		)
 		.await
 		.unwrap();
@@ -2003,7 +1993,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				CREATE user:1;
 				"#,
 				&sess,
-				None,
 				None,
 			)
 			.await
@@ -2068,7 +2057,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				}
 				"#,
 				&sess,
-				None,
 				None,
 			)
 			.await
@@ -2152,7 +2140,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				CREATE user:1;
 				"#,
 				&sess,
-				None,
 				None,
 			)
 			.await
@@ -2259,7 +2246,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.level, level.level, level.level
 						),
 						&sess,
-						None,
 						None,
 					)
 					.await
@@ -2371,7 +2357,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 						),
 						&sess,
 						None,
-						None,
 					)
 					.await
 					.unwrap();
@@ -2482,7 +2467,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 						),
 						&sess,
 						None,
-						None,
 					)
 					.await
 					.unwrap();
@@ -2557,7 +2541,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.level, level.level, level.level
 						),
 						&sess,
-						None,
 						None,
 					)
 					.await
@@ -2637,7 +2620,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 						),
 						&sess,
 						None,
-						None,
 					)
 					.await
 					.unwrap();
@@ -2658,7 +2640,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				ds.execute(
 					&format!("ACCESS api ON {} REVOKE GRANT {kid}", level.level),
 					&sess,
-					None,
 					None,
 				)
 				.await
@@ -2726,7 +2707,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 						),
 						&sess,
 						None,
-						None,
 					)
 					.await
 					.unwrap();
@@ -2741,14 +2721,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 				// Remove bearer access method
-				ds.execute(
-					format!("REMOVE ACCESS api ON {}", level.level).as_str(),
-					&sess,
-					None,
-					None,
-				)
-				.await
-				.unwrap();
+				ds.execute(format!("REMOVE ACCESS api ON {}", level.level).as_str(), &sess, None)
+					.await
+					.unwrap();
 
 				// Sign in with the bearer key
 				let mut sess = Session {
@@ -2811,7 +2786,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.level, level.level, level.level
 						),
 						&sess,
-						None,
 						None,
 					)
 					.await
@@ -2889,7 +2863,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.level, level.level, level.level
 						),
 						&sess,
-						None,
 						None,
 					)
 					.await
@@ -2971,7 +2944,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 						),
 						&sess,
 						None,
-						None,
 					)
 					.await
 					.unwrap();
@@ -3051,7 +3023,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.level, level.level, level.level
 						),
 						&sess,
-						None,
 						None,
 					)
 					.await
@@ -3133,7 +3104,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 						),
 						&sess,
 						None,
-						None,
 					)
 					.await
 					.unwrap();
@@ -3214,7 +3184,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 						),
 						&sess,
 						None,
-						None,
 					)
 					.await
 					.unwrap();
@@ -3293,7 +3262,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"#,
 					&sess,
 					None,
-					None,
 				)
 				.await
 				.unwrap();
@@ -3361,7 +3329,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
 					"#,
 					&sess,
-					None,
 					None,
 				)
 				.await
@@ -3434,7 +3401,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
 					"#,
 					&sess,
-					None,
 					None,
 				)
 				.await
@@ -3509,7 +3475,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"#,
 					&sess,
 					None,
-					None,
 				)
 				.await
 				.unwrap();
@@ -3563,7 +3528,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
 					"#,
 					&sess,
-					None,
 					None,
 				)
 				.await
@@ -3622,7 +3586,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"#,
 					&sess,
 					None,
-					None,
 				)
 				.await
 				.unwrap();
@@ -3640,7 +3603,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			let kid = key.split("-").collect::<Vec<&str>>()[2];
 
 			// Revoke grant
-			ds.execute(&format!("ACCESS api ON DATABASE REVOKE GRANT {kid}"), &sess, None, None)
+			ds.execute(&format!("ACCESS api ON DATABASE REVOKE GRANT {kid}"), &sess, None)
 				.await
 				.unwrap();
 
@@ -3685,7 +3648,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"#,
 					&sess,
 					None,
-					None,
 				)
 				.await
 				.unwrap();
@@ -3700,7 +3662,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Remove bearer access method
-			ds.execute("REMOVE ACCESS api ON DATABASE", &sess, None, None).await.unwrap();
+			ds.execute("REMOVE ACCESS api ON DATABASE", &sess, None).await.unwrap();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3742,7 +3704,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
 					"#,
 					&sess,
-					None,
 					None,
 				)
 				.await
@@ -3798,7 +3759,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
 					"#,
 					&sess,
-					None,
 					None,
 				)
 				.await
@@ -3859,7 +3819,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"#,
 					&sess,
 					None,
-					None,
 				)
 				.await
 				.unwrap();
@@ -3918,7 +3877,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
 					"#,
 					&sess,
-					None,
 					None,
 				)
 				.await
@@ -3979,7 +3937,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"#,
 					&sess,
 					None,
-					None,
 				)
 				.await
 				.unwrap();
@@ -4038,7 +3995,6 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					ACCESS api ON DATABASE GRANT FOR RECORD user:test;
 					"#,
 					&sess,
-					None,
 					None,
 				)
 				.await
@@ -4134,7 +4090,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			};
 
 			// Use pre-parsed definition, which bypasses the existent role check during parsing.
-			ds.process(ast, &sess, None, None).await.unwrap();
+			ds.process(ast, &sess, None).await.unwrap();
 
 			let mut sess = Session {
 				ns: level.ns.map(String::from),

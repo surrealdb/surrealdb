@@ -20,7 +20,7 @@ async fn live_permissions() -> Result<()> {
 				FOR delete WHERE { THROW 'delete' };
 			CREATE test:1;
 		";
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
 	skip_ok(res, 1)?;
@@ -47,7 +47,7 @@ async fn live_permissions() -> Result<()> {
 		LIVE SELECT * FROM type::table('test');
 		CREATE test:2;
 	";
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	//
 	skip_ok(res, 1)?;
@@ -58,7 +58,7 @@ async fn live_permissions() -> Result<()> {
 	//
 	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
 	let sql = "CREATE test:3;";
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -99,7 +99,7 @@ async fn live_document_reduction() -> Result<()> {
 			DEFINE FIELD visible ON test PERMISSIONS FULL;
 			DEFINE FIELD hidden ON test PERMISSIONS NONE;
 		";
-	let res = &mut dbs.execute(sql, &ses_owner, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses_owner, None).await?;
 	assert_eq!(res.len(), 3);
 	skip_ok(res, 3)?;
 
@@ -107,7 +107,7 @@ async fn live_document_reduction() -> Result<()> {
 
 	// Create a simple live query
 	let sql = "LIVE SELECT * FROM test;";
-	let res = &mut dbs.execute(sql, &ses_record, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses_record, None).await?;
 	assert_eq!(res.len(), 1);
 	let lqid = res.remove(0).result?;
 	assert_eq!(lqid.kind(), Kind::Uuid);
@@ -116,7 +116,7 @@ async fn live_document_reduction() -> Result<()> {
 
 	// Create a record
 	let sql = "CREATE test:1 SET hidden = 123, visible = 'abc';";
-	let res = &mut dbs.execute(sql, &ses_owner, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses_owner, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -150,7 +150,7 @@ async fn live_document_reduction() -> Result<()> {
 
 	// Update the record
 	let sql = "UPDATE test:1 SET hidden = 456, visible = 'def';";
-	let res = &mut dbs.execute(sql, &ses_owner, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses_owner, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -184,7 +184,7 @@ async fn live_document_reduction() -> Result<()> {
 
 	// Delete the record
 	let sql = "DELETE test:1;";
-	let res = &mut dbs.execute(sql, &ses_owner, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses_owner, None).await?;
 	assert_eq!(res.len(), 1);
 	skip_ok(res, 1)?;
 
@@ -206,7 +206,7 @@ async fn live_document_reduction() -> Result<()> {
 
 	// Kill the live query
 	let sql = "KILL $uuid";
-	let res = &mut dbs.execute(sql, &ses_owner, Some(vars! { uuid: lqid }), None).await?;
+	let res = &mut dbs.execute(sql, &ses_owner, Some(vars! { uuid: lqid })).await?;
 	assert_eq!(res.len(), 1);
 	skip_ok(res, 1)?;
 
@@ -216,7 +216,7 @@ async fn live_document_reduction() -> Result<()> {
 
 	// Create a live query with a WHERE clause
 	let sql = "LIVE SELECT * FROM test WHERE hidden = 123;";
-	let res = &mut dbs.execute(sql, &ses_record, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses_record, None).await?;
 	assert_eq!(res.len(), 1);
 	let lqid = res.remove(0).result?;
 	assert_eq!(lqid.kind(), Kind::Uuid);
@@ -225,7 +225,7 @@ async fn live_document_reduction() -> Result<()> {
 
 	// Create a record
 	let sql = "CREATE test:2 SET hidden = 123, visible = 'abc';";
-	let res = &mut dbs.execute(sql, &ses_owner, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses_owner, None).await?;
 	assert_eq!(res.len(), 1);
 	//
 	let tmp = res.remove(0).result?;
@@ -266,32 +266,32 @@ async fn test_live_with_variables() -> Result<()> {
 		DEFINE FIELD num ON test TYPE number;
 	";
 
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
 	skip_ok(res, 2)?;
 
 	// Start live query
 	let sql = "LIVE SELECT * FROM test WHERE num = $num;";
-	let res = &mut dbs.execute(sql, &ses, Some(vars!("num": 123)), None).await?;
+	let res = &mut dbs.execute(sql, &ses, Some(vars!("num": 123))).await?;
 	assert_eq!(res.len(), 1);
 	let lqid = res.remove(0).result?;
 	assert_eq!(lqid.kind(), Kind::Uuid);
 
 	// Triggers notification
 	let sql = "CREATE test:1 SET num = 123;";
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	skip_ok(res, 1)?;
 
 	// Does not trigger notification
 	let sql = "UPDATE test:1 SET num = 456;";
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 1);
 	skip_ok(res, 1)?;
 
 	// Kill live query
 	let sql = "KILL $uuid";
-	let res = &mut dbs.execute(sql, &ses, Some(vars!("uuid": lqid)), None).await?;
+	let res = &mut dbs.execute(sql, &ses, Some(vars!("uuid": lqid))).await?;
 	assert_eq!(res.len(), 1);
 	skip_ok(res, 1)?;
 

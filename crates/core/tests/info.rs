@@ -92,12 +92,12 @@ async fn info_for_user() {
 	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner().with_ns("ns").with_db("db");
 
-	let res = dbs.execute(sql, &ses, None, None).await.unwrap();
+	let res = dbs.execute(sql, &ses, None).await.unwrap();
 	assert_eq!(res.len(), 3);
 
 	// Info for ROOT user
 	let sql = "INFO FOR USER user ON ROOT";
-	let mut res = dbs.execute(sql, &ses, None, None).await.unwrap();
+	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 	let out = res.pop().unwrap().output();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 	let output_regex = Regex::new(r"DEFINE USER user ON ROOT PASSHASH .* ROLES VIEWER").unwrap();
@@ -111,7 +111,7 @@ async fn info_for_user() {
 
 	// Info for NS user
 	let sql = "INFO FOR USER user ON NS";
-	let mut res = dbs.execute(sql, &ses, None, None).await.unwrap();
+	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 	let out = res.pop().unwrap().output();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 	let output_regex =
@@ -126,7 +126,7 @@ async fn info_for_user() {
 
 	// Info for DB user
 	let sql = "INFO FOR USER user ON DB";
-	let mut res = dbs.execute(sql, &ses, None, None).await.unwrap();
+	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 	let out = res.pop().unwrap().output();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 	let output_regex =
@@ -141,7 +141,7 @@ async fn info_for_user() {
 
 	// Info for user on selected level
 	let sql = "INFO FOR USER user";
-	let mut res = dbs.execute(sql, &ses, None, None).await.unwrap();
+	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 	let out = res.pop().unwrap().output();
 	assert!(out.is_ok(), "Unexpected error: {:?}", out);
 	let output_regex =
@@ -547,7 +547,7 @@ async fn access_info_redacted() {
 		);
 		let ses = Session::owner().with_ns("ns");
 
-		let mut res = dbs.execute(sql, &ses, None, None).await.unwrap();
+		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 2);
 
 		let out = res.pop().unwrap().output();
@@ -572,7 +572,7 @@ async fn access_info_redacted() {
 		);
 		let ses = Session::owner().with_ns("ns");
 
-		let mut res = dbs.execute(sql, &ses, None, None).await.unwrap();
+		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 2);
 
 		let out = res.pop().unwrap().output();
@@ -597,7 +597,7 @@ async fn access_info_redacted() {
 		);
 		let ses = Session::owner().with_ns("ns").with_db("test");
 
-		let mut res = dbs.execute(sql, &ses, None, None).await.unwrap();
+		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 2);
 
 		let out = res.pop().unwrap().output();
@@ -623,7 +623,7 @@ WITH ISSUER KEY 'secret'; 			INFO FOR DB
 		);
 		let ses = Session::owner().with_ns("ns").with_db("test");
 
-		let mut res = dbs.execute(sql, &ses, None, None).await.unwrap();
+		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 2);
 
 		let out = res.pop().unwrap().output();
@@ -652,7 +652,7 @@ async fn access_info_redacted_structure() {
 		);
 		let ses = Session::owner().with_ns("ns");
 
-		let mut res = dbs.execute(sql, &ses, None, None).await.unwrap();
+		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 2);
 
 		let out = res.pop().unwrap().output();
@@ -678,7 +678,7 @@ async fn access_info_redacted_structure() {
 		);
 		let ses = Session::owner().with_ns("ns");
 
-		let mut res = dbs.execute(sql, &ses, None, None).await.unwrap();
+		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 2);
 
 		let out = res.pop().unwrap().output();
@@ -703,7 +703,7 @@ async fn access_info_redacted_structure() {
 		);
 		let ses = Session::owner().with_ns("ns").with_db("db");
 
-		let mut res = dbs.execute(sql, &ses, None, None).await.unwrap();
+		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 2);
 
 		let out = res.pop().unwrap().output();
@@ -729,7 +729,7 @@ DURATION FOR GRANT 1w, FOR TOKEN 15m, FOR SESSION 6h; 			INFO FOR DB STRUCTURE
 		);
 		let ses = Session::owner().with_ns("ns").with_db("db");
 
-		let mut res = dbs.execute(sql, &ses, None, None).await.unwrap();
+		let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 2);
 
 		let out = res.pop().unwrap().output();
@@ -754,7 +754,7 @@ async fn function_info_structure() {
 	let dbs = new_ds().await.unwrap();
 	let ses = Session::owner().with_ns("ns").with_db("db");
 
-	let mut res = dbs.execute(sql, &ses, None, None).await.unwrap();
+	let mut res = dbs.execute(sql, &ses, None).await.unwrap();
 	assert_eq!(res.len(), 2);
 
 	let out = res.pop().unwrap().output();

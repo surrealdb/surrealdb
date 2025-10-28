@@ -136,7 +136,7 @@ pub trait RpcProtocol {
 		// Execute the desired method
 		match method {
 			Method::Ping => Ok(DbResult::Other(PublicValue::None)),
-			Method::Info => self.info(txn, session).await,
+			Method::Info => self.info(session).await,
 			Method::Use => self.yuse(session, params).await,
 			Method::Signup => self.signup(session, params).await,
 			Method::Signin => self.signin(session, params).await,
@@ -378,14 +378,10 @@ pub trait RpcProtocol {
 	// Methods for identification
 	// ------------------------------
 
-	async fn info(
-		&self,
-		txn: Option<Uuid>,
-		session_id: Option<Uuid>,
-	) -> Result<DbResult, RpcError> {
+	async fn info(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
 		let session = self.get_session(session_id.as_ref());
 		let vars = Some(session.variables.clone());
-		let mut res = self.kvs().execute("SELECT * FROM $auth", &session, vars, txn).await?;
+		let mut res = self.kvs().execute("SELECT * FROM $auth", &session, vars).await?;
 
 		let result = res.remove(0).result?;
 
@@ -591,8 +587,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let vars = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let mut res =
-			self.kvs().process(ast, &self.get_session(session_id.as_ref()), vars, None).await?;
+		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), vars).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		Ok(DbResult::Other(res))
@@ -637,8 +632,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let mut res =
-			self.kvs().process(ast, &self.get_session(session_id.as_ref()), var, None).await?;
+		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), var).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		Ok(DbResult::Other(res))
@@ -681,8 +675,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let mut res =
-			self.kvs().process(ast, &self.get_session(session_id.as_ref()), var, None).await?;
+		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), var).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		Ok(DbResult::Other(res))
@@ -733,8 +726,7 @@ pub trait RpcProtocol {
 		};
 		let ast = Ast::single_expr(Expr::Create(Box::new(sql)));
 		// Execute the query on the database
-		let mut res =
-			self.kvs().process(ast, &self.get_session(session_id.as_ref()), None, None).await?;
+		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), None).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		Ok(DbResult::Other(res))
@@ -788,8 +780,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let mut res =
-			self.kvs().process(ast, &self.get_session(session_id.as_ref()), var, None).await?;
+		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), var).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		Ok(DbResult::Other(res))
@@ -842,8 +833,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let mut res =
-			self.kvs().process(ast, &self.get_session(session_id.as_ref()), var, None).await?;
+		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), var).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		Ok(DbResult::Other(res))
@@ -892,8 +882,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let mut res =
-			self.kvs().process(ast, &self.get_session(session_id.as_ref()), var, None).await?;
+		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), var).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		Ok(DbResult::Other(res))
@@ -960,7 +949,7 @@ pub trait RpcProtocol {
 		// Execute the query on the database
 		let mut res = self
 			.kvs()
-			.process(Ast::single_expr(expr), &self.get_session(session_id.as_ref()), var, None)
+			.process(Ast::single_expr(expr), &self.get_session(session_id.as_ref()), var)
 			.await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
@@ -1019,7 +1008,7 @@ pub trait RpcProtocol {
 		// Execute the query on the database
 		let mut res = self
 			.kvs()
-			.process(Ast::single_expr(expr), &self.get_session(session_id.as_ref()), var, None)
+			.process(Ast::single_expr(expr), &self.get_session(session_id.as_ref()), var)
 			.await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
@@ -1057,8 +1046,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let mut res =
-			self.kvs().process(ast, &self.get_session(session_id.as_ref()), var, None).await?;
+		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), var).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		Ok(DbResult::Other(res))
@@ -1196,8 +1184,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the function on the database
-		let mut res =
-			self.kvs().process(ast, &self.get_session(session_id.as_ref()), var, None).await?;
+		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), var).await?;
 		// Extract the first query result
 		let res = res.remove(0).result?;
 		Ok(DbResult::Other(res))
@@ -1273,18 +1260,16 @@ where
 			Err(_) => {
 				// Transaction not found - execute normally (will create its own transaction)
 				match query {
-					QueryForm::Text(query) => {
-						this.kvs().execute(query, &session, vars, None).await?
-					}
-					QueryForm::Parsed(ast) => this.kvs().process(ast, &session, vars, None).await?,
+					QueryForm::Text(query) => this.kvs().execute(query, &session, vars).await?,
+					QueryForm::Parsed(ast) => this.kvs().process(ast, &session, vars).await?,
 				}
 			}
 		}
 	} else {
 		// No transaction - execute normally
 		match query {
-			QueryForm::Text(query) => this.kvs().execute(query, &session, vars, None).await?,
-			QueryForm::Parsed(ast) => this.kvs().process(ast, &session, vars, None).await?,
+			QueryForm::Text(query) => this.kvs().execute(query, &session, vars).await?,
+			QueryForm::Parsed(ast) => this.kvs().process(ast, &session, vars).await?,
 		}
 	};
 

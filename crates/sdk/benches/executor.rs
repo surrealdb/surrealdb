@@ -16,14 +16,14 @@ macro_rules! query {
 				let ses = Session::owner().with_ns("test").with_db("test");
 				let setup = $setup;
 				if !setup.is_empty() {
-					dbs.execute(setup, &ses, None, None).await.unwrap();
+					dbs.execute(setup, &ses, None).await.unwrap();
 				}
 				(dbs, ses)
 			});
 
 			b.iter(|| {
 				block_on(async {
-					black_box(dbs.execute(black_box($query), &ses, None, None).await).unwrap();
+					black_box(dbs.execute(black_box($query), &ses, None).await).unwrap();
 				});
 			})
 		});

@@ -53,7 +53,7 @@ pub(crate) async fn execute_plan(
 	plan: LogicalPlan,
 ) -> Result<SqlValue, GqlError> {
 	let results = ds
-		.process_plan(plan, sess, None, None)
+		.process_plan(plan, sess, None)
 		.await
 		.map_err(|e| GqlError::InternalError(format!("Failed to execute query plan: {}", e)))?;
 

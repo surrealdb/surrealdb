@@ -46,7 +46,7 @@ async fn database_change_feeds() -> Result<()> {
 	let ses = Session::owner().with_ns(ns.as_str()).with_db(db.as_str());
 	let mut current_time = 0u64;
 	dbs.changefeed_process_at(None, current_time).await?;
-	let res = &mut dbs.execute(sql.as_str(), &ses, None, None).await?;
+	let res = &mut dbs.execute(sql.as_str(), &ses, None).await?;
 	// Increment by a second (sic)
 	current_time += 1;
 	dbs.changefeed_process_at(None, current_time).await?;
@@ -92,7 +92,7 @@ async fn database_change_feeds() -> Result<()> {
 		ses: &Session,
 		cf_val_arr: &[Value],
 	) -> Result<()> {
-		let res = &mut dbs.execute(sql2, ses, None, None).await?;
+		let res = &mut dbs.execute(sql2, ses, None).await?;
 		assert_eq!(res.len(), 3);
 		// UPDATE CONTENT
 		let tmp = res.remove(0).result?;
@@ -162,7 +162,7 @@ async fn database_change_feeds() -> Result<()> {
 	let tx = dbs.transaction(Write, Optimistic).await?;
 	tx.cancel().await?;
 
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	assert!(potential_show_changes_values.contains(&tmp));
 	// GC after 1hs
@@ -170,7 +170,7 @@ async fn database_change_feeds() -> Result<()> {
 	current_time += one_hour_in_secs;
 	current_time += 1;
 	dbs.changefeed_process_at(None, current_time).await?;
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	let val: Value = Value::Array(Array::new());
 	assert_eq!(val, tmp);
@@ -210,7 +210,7 @@ async fn table_change_feeds() -> Result<()> {
 	let start_ts = 0u64;
 	let end_ts = start_ts + 1;
 	dbs.changefeed_process_at(None, start_ts).await?;
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	dbs.changefeed_process_at(None, end_ts).await?;
 	assert_eq!(res.len(), 10);
 	// DEFINE TABLE
@@ -329,7 +329,7 @@ async fn table_change_feeds() -> Result<()> {
         SHOW CHANGES FOR TABLE person SINCE 0;
 	";
 	dbs.changefeed_process_at(None, end_ts + 3599).await?;
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	assert!(
 		allowed_values.contains(&tmp),
@@ -339,7 +339,7 @@ async fn table_change_feeds() -> Result<()> {
 	);
 	// GC after 1hs
 	dbs.changefeed_process_at(None, end_ts + 3600).await?;
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
 	let val = Value::Array(Array::new());
 	assert_eq!(tmp, val);
@@ -355,7 +355,7 @@ async fn changefeed_with_ts() -> Result<()> {
 	let sql = "
 	DEFINE TABLE user CHANGEFEED 1h;
 	";
-	db.execute(sql, &ses, None, None).await?.remove(0).result?;
+	db.execute(sql, &ses, None).await?.remove(0).result?;
 	// Save timestamp 1
 	let ts1_dt = "2023-08-01T00:00:00Z";
 	let ts1 = DateTime::parse_from_rfc3339(ts1_dt).unwrap();
@@ -367,12 +367,12 @@ async fn changefeed_with_ts() -> Result<()> {
         UPDATE user:amos SET name = 'AMOS';
     ";
 	let table = "user";
-	let res = db.execute(sql, &ses, None, None).await?;
+	let res = db.execute(sql, &ses, None).await?;
 	for res in res {
 		res.result?;
 	}
 	let sql = format!("UPDATE {table} SET name = 'Doe'");
-	let users = db.execute(&sql, &ses, None, None).await?.remove(0).result?;
+	let users = db.execute(&sql, &ses, None).await?.remove(0).result?;
 	let expected = syn::value(
 		"[
 		{
@@ -388,12 +388,12 @@ async fn changefeed_with_ts() -> Result<()> {
 	.unwrap();
 	assert_eq!(users, expected);
 	let sql = format!("SELECT * FROM {table}");
-	let users = db.execute(&sql, &ses, None, None).await?.remove(0).result?;
+	let users = db.execute(&sql, &ses, None).await?.remove(0).result?;
 	assert_eq!(users, expected);
 	let sql = "
         SHOW CHANGES FOR TABLE user SINCE 0 LIMIT 10;
     ";
-	let value: Value = db.execute(sql, &ses, None, None).await?.remove(0).result?;
+	let value: Value = db.execute(sql, &ses, None).await?.remove(0).result?;
 	let Value::Array(array) = value.clone() else {
 		unreachable!()
 	};
@@ -544,7 +544,7 @@ async fn changefeed_with_ts() -> Result<()> {
 	// Show changes using timestamp 1
 	//
 	let sql = format!("SHOW CHANGES FOR TABLE user SINCE d'{ts1_dt}' LIMIT 10; ");
-	let value: Value = db.execute(&sql, &ses, None, None).await?.remove(0).result?;
+	let value: Value = db.execute(&sql, &ses, None).await?.remove(0).result?;
 	let Value::Array(array) = value.clone() else {
 		unreachable!()
 	};
@@ -581,7 +581,7 @@ async fn changefeed_with_ts() -> Result<()> {
 	// Show changes using timestamp 3
 	//
 	let sql = format!("SHOW CHANGES FOR TABLE user SINCE d'{ts3_dt}' LIMIT 10; ");
-	let value: Value = db.execute(&sql, &ses, None, None).await?.remove(0).result?;
+	let value: Value = db.execute(&sql, &ses, None).await?.remove(0).result?;
 	let Value::Array(array) = value.clone() else {
 		unreachable!()
 	};

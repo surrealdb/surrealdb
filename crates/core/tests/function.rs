@@ -40,7 +40,7 @@ async fn error_on_invalid_function() -> Result<()> {
 	let dbs = new_ds().await?;
 	let query = "`this is an invalid function name`()";
 	let session = Session::owner().with_ns("test").with_db("test");
-	let err = dbs.execute(query, &session, None, None).await.unwrap_err();
+	let err = dbs.execute(query, &session, None).await.unwrap_err();
 	assert_eq!(
 		err.to_string(),
 		"Parse error: Invalid function/constant path\n --> [1:1]\n  |\n1 | `this is an invalid function name`()\n  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n"
@@ -3878,7 +3878,7 @@ async fn function_outside_database() -> Result<()> {
 	let sql = "RETURN fn::does_not_exist();";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test");
-	let res = &mut dbs.execute(sql, &ses, None, None).await?;
+	let res = &mut dbs.execute(sql, &ses, None).await?;
 
 	assert_eq!(
 		res.remove(0).result.unwrap_err(),

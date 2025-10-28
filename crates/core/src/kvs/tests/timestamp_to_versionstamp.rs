@@ -86,9 +86,7 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 
 	// Declare ns/db
-	ds.execute("USE NS myns; USE DB mydb; CREATE record", &Session::owner(), None, None)
-		.await
-		.unwrap();
+	ds.execute("USE NS myns; USE DB mydb; CREATE record", &Session::owner(), None).await.unwrap();
 
 	let db = {
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();

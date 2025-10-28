@@ -535,7 +535,7 @@ async fn kill_live_query(
 ) -> std::result::Result<Vec<QueryResult>, DbResultError> {
 	let sql = format!("KILL {id}");
 
-	let results = kvs.execute(&sql, session, Some(vars), None).await?;
+	let results = kvs.execute(&sql, session, Some(vars)).await?;
 	Ok(results)
 }
 
@@ -667,7 +667,7 @@ async fn router(
 				}
 			} else {
 				// No transaction - use normal execution
-				kvs.execute(query.as_ref(), &*session.read().await, Some(vars), None).await?
+				kvs.execute(query.as_ref(), &*session.read().await, Some(vars)).await?
 			};
 
 			Ok(response)
@@ -1022,9 +1022,8 @@ async fn router(
 			};
 
 			// Execute the query
-			let results = kvs
-				.execute(&sql, &*session.read().await, Some(vars.read().await.clone()), None)
-				.await?;
+			let results =
+				kvs.execute(&sql, &*session.read().await, Some(vars.read().await.clone())).await?;
 			Ok(results)
 		}
 	}

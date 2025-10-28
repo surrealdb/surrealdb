@@ -151,7 +151,7 @@ async fn execute_test(
 	expected_result: usize,
 ) -> Result<Vec<QueryResult>> {
 	let ses = Session::owner().with_ns("test").with_db("test");
-	let res = dbs.execute(sql, &ses, None, None).await?;
+	let res = dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), expected_result);
 	Ok(res)
 }
@@ -502,7 +502,6 @@ async fn select_with_no_index_unary_operator() -> Result<()> {
 			"DEFINE TABLE table; SELECT * FROM table WITH NOINDEX WHERE !param.subparam EXPLAIN",
 			&ses,
 			None,
-			None,
 		)
 		.await?;
 	assert_eq!(res.len(), 2);
@@ -543,7 +542,6 @@ async fn select_unsupported_unary_operator() -> Result<()> {
 		.execute(
 			"DEFINE TABLE table; SELECT * FROM table WHERE !param.subparam EXPLAIN",
 			&ses,
-			None,
 			None,
 		)
 		.await?;
@@ -1148,7 +1146,7 @@ async fn select_with_idiom_param_value() -> Result<()> {
 		LET $nameObj = {{name:'Tobie'}};
 		SELECT name FROM person WHERE name = $nameObj.name EXPLAIN;"
 		.to_owned();
-	let mut res = dbs.execute(&sql, &ses, None, None).await?;
+	let mut res = dbs.execute(&sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
 	skip_ok(&mut res, 5)?;
 	let tmp = res.remove(0).result?;
@@ -1397,7 +1395,7 @@ async fn select_with_datetime_value() -> Result<()> {
 		SELECT * FROM test_user WHERE created_at = d'2023-12-25T17:13:01.940183014Z' EXPLAIN;
 		SELECT * FROM test_user WHERE created_at = $now;
 		SELECT * FROM test_user WHERE created_at = d'2023-12-25T17:13:01.940183014Z';";
-	let mut res = dbs.execute(sql, &ses, None, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 8);
 	skip_ok(&mut res, 4)?;
@@ -1462,7 +1460,7 @@ async fn select_with_uuid_value() -> Result<()> {
 		SELECT * FROM sessions WHERE sessionUid = u'00ad70db-f435-442e-9012-1cd853102084';
 		SELECT * FROM sessions WHERE sessionUid = $sess.uuid;
 	";
-	let mut res = dbs.execute(sql, &ses, None, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 7);
 	skip_ok(&mut res, 3)?;
@@ -1525,7 +1523,7 @@ async fn select_with_in_operator() -> Result<()> {
 		SELECT * FROM user WHERE email IN ['a@b', 'e@f'];
 		SELECT * FROM user WHERE email INSIDE ['a@b', 'e@f'];
 		";
-	let mut res = dbs.execute(sql, &ses, None, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 7);
 	skip_ok(&mut res, 3)?;
@@ -1588,7 +1586,7 @@ async fn select_with_in_operator_uniq_index() -> Result<()> {
 		SELECT apprenantUid FROM apprenants WHERE apprenantUid IN ["99999999-aaaa-1111-8888-abcdef012345", "00013483-fedd-43e3-a94e-80728d896f6e", "99999999-aaaa-1111-8888-abcdef012345"];
 		SELECT apprenantUid FROM apprenants WHERE apprenantUid IN ["00013483-fedd-43e3-a94e-80728d896f6e"] EXPLAIN;
 	"#;
-	let mut res = dbs.execute(sql, &ses, None, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 8);
 	skip_ok(&mut res, 2)?;
@@ -1755,7 +1753,7 @@ async fn select_with_record_id_link_no_index() -> Result<()> {
 		SELECT * FROM i WHERE t.name = 'h';
 		SELECT * FROM i WHERE t.name = 'h' EXPLAIN;
 	";
-	let mut res = dbs.execute(sql, &ses, None, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 	//
 	assert_eq!(res.len(), 8);
 	skip_ok(&mut res, 6)?;
@@ -1811,7 +1809,7 @@ async fn select_with_record_id_link_index() -> Result<()> {
 		SELECT * FROM i WHERE t.name = 'h' EXPLAIN;
 		SELECT * FROM i WHERE t.name = 'h';
 	";
-	let mut res = dbs.execute(sql, &ses, None, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 	//
 	assert_eq!(res.len(), 10);
 	skip_ok(&mut res, 8)?;
@@ -1878,7 +1876,7 @@ async fn select_with_record_id_link_unique_index() -> Result<()> {
 		SELECT * FROM i WHERE t.name = 'h' EXPLAIN;
 		SELECT * FROM i WHERE t.name = 'h';
 	";
-	let mut res = dbs.execute(sql, &ses, None, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 	//
 	assert_eq!(res.len(), 10);
 	skip_ok(&mut res, 8)?;
@@ -1944,7 +1942,7 @@ async fn select_with_record_id_link_unique_remote_index() -> Result<()> {
 		SELECT * FROM i WHERE t.name IN ['a', 'b'] EXPLAIN;
 		SELECT * FROM i WHERE t.name IN ['a', 'b'];
 	";
-	let mut res = dbs.execute(sql, &ses, None, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 	//
 	assert_eq!(res.len(), 10);
 	skip_ok(&mut res, 8)?;
@@ -2013,7 +2011,7 @@ async fn select_with_record_id_link_full_text_index() -> Result<()> {
 		SELECT * FROM i WHERE t.name @@ 'world' EXPLAIN;
 		SELECT * FROM i WHERE t.name @@ 'world';
 	";
-	let mut res = dbs.execute(sql, &ses, None, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 9);
 	skip_ok(&mut res, 7)?;
@@ -2073,7 +2071,7 @@ async fn select_with_record_id_link_full_text_no_record_index() -> Result<()> {
 		SELECT * FROM i WHERE t.name @OR@ 'world dummy';
 		SELECT * FROM i WHERE t.name @AND@ 'world hello';
 	";
-	let mut res = dbs.execute(sql, &ses, None, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 
 	assert_eq!(res.len(), 10);
 	skip_ok(&mut res, 6)?;
@@ -2122,7 +2120,7 @@ async fn select_with_exact_operator() -> Result<()> {
 		SELECT * FROM t WHERE i == 2;
 		SELECT * FROM t WHERE i == 2 EXPLAIN;
 	";
-	let mut res = dbs.execute(sql, &ses, None, None).await?;
+	let mut res = dbs.execute(sql, &ses, None).await?;
 	//
 	assert_eq!(res.len(), 8);
 	skip_ok(&mut res, 4)?;

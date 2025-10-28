@@ -984,7 +984,7 @@ mod tests {
 			level.level, roles_clause, duration_clause,
 		);
 
-		ds.execute(&define_user_query, &sess, None, None).await.unwrap();
+		ds.execute(&define_user_query, &sess, None).await.unwrap();
 
 		let mut sess = Session {
 			ns: level.ns.map(String::from),
@@ -1089,7 +1089,7 @@ mod tests {
 			};
 
 			// Use pre-parsed definition, which bypasses the existent role check during parsing.
-			ds.process(ast, &sess, None, None).await.unwrap();
+			ds.process(ast, &sess, None).await.unwrap();
 
 			let mut sess = Session {
 				ns: level.ns.map(String::from),
@@ -1162,7 +1162,6 @@ mod tests {
 			)
 			.as_str(),
 			&sess,
-			None,
 			None,
 		)
 		.await
@@ -1251,7 +1250,6 @@ mod tests {
 			.as_str(),
 			&sess,
 			None,
-			None,
 		)
 		.await
 		.unwrap();
@@ -1320,7 +1318,6 @@ mod tests {
 			)
 			.as_str(),
 			&sess,
-			None,
 			None,
 		)
 		.await
@@ -1507,7 +1504,6 @@ mod tests {
 			.as_str(),
 			&sess,
 			None,
-			None,
 		)
 		.await
 		.unwrap();
@@ -1624,13 +1620,13 @@ mod tests {
 			let sess = Session::owner();
 
 			let sql = "DEFINE USER root ON ROOT PASSWORD 'root'";
-			ds.execute(sql, &sess, None, None).await.unwrap();
+			ds.execute(sql, &sess, None).await.unwrap();
 
 			let sql = "USE NS N; DEFINE USER ns ON NS PASSWORD 'ns'";
-			ds.execute(sql, &sess, None, None).await.unwrap();
+			ds.execute(sql, &sess, None).await.unwrap();
 
 			let sql = "USE NS N DB D; DEFINE USER db ON DB PASSWORD 'db'";
-			ds.execute(sql, &sess, None, None).await.unwrap();
+			ds.execute(sql, &sess, None).await.unwrap();
 		}
 
 		// Accept ROOT user
@@ -1670,11 +1666,9 @@ mod tests {
 
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::owner().with_ns("test").with_db("test");
-		ds.execute(
-			format!("DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{secret}' DURATION FOR SESSION 30d, FOR TOKEN 30d")
+		ds.execute(format!("DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{secret}' DURATION FOR SESSION 30d, FOR TOKEN 30d")
 				.as_str(),
 			&sess,
-			None,
 			None,
 		)
 		.await
@@ -1808,7 +1802,6 @@ mod tests {
 					.as_str(),
 					&sess,
 					None,
-					None,
 				)
 				.await
 				.unwrap();
@@ -1921,7 +1914,6 @@ mod tests {
 				.as_str(),
 				&sess,
 				None,
-				None,
 			)
 			.await
 			.unwrap();
@@ -1985,7 +1977,6 @@ mod tests {
 				)
 				.as_str(),
 				&sess,
-				None,
 				None,
 			)
 			.await
@@ -2079,7 +2070,6 @@ mod tests {
 				"#).as_str(),
 			&sess,
 			None,
-			None,
 		)
 		.await
 		.unwrap();
@@ -2132,7 +2122,6 @@ mod tests {
 				)
 				.as_str(),
 				&sess,
-				None,
 				None,
 			)
 			.await
