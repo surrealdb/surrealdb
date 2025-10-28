@@ -78,7 +78,7 @@ async fn handler(
 					}
 					Some(Accept::ApplicationCbor) => {
 						let success = Success::new(v.token, v.refresh).into_value();
-						Ok(Output::cbor(&success))
+						Ok(Output::cbor(success))
 					}
 					// Text serialization
 					// NOTE: Only the token is returned in a plain text response.

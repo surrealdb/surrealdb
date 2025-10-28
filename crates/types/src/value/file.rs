@@ -48,7 +48,7 @@ impl File {
 
 impl ToSql for crate::File {
 	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}:{}", fmt_inner(&self.bucket, true), fmt_inner(&self.key, false));
+		write_sql!(f, "f\"{}:{}\"", fmt_inner(&self.bucket, true), fmt_inner(&self.key, false));
 	}
 }
 

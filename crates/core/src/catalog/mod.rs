@@ -178,8 +178,8 @@ mod test {
         permissions: Permission::Full,
     }, 32)]
 	#[case::config(ConfigDefinition::GraphQL(GraphQLConfig {
-        tables: TablesConfig::default(),
-        functions: FunctionsConfig::default(),
+        tables: GraphQLTablesConfig::default(),
+        functions: GraphQLFunctionsConfig::default(),
     }), 7)]
 	#[case::event(EventDefinition {
         name: "test".to_string(),

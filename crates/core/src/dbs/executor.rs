@@ -105,17 +105,23 @@ impl Executor {
 		start: &Instant,
 		plan: TopLevelExpr,
 	) -> FlowResult<Value> {
-		let res = match plan {
-			TopLevelExpr::Use(stmt) => {
-				// Avoid moving in and out of the context via Arc::get_mut
-				let ctx = Arc::get_mut(&mut self.ctx)
+		/// Helper method to get mutable access to the context
+		macro_rules! ctx_mut {
+			() => {
+				Arc::get_mut(&mut self.ctx)
 					.ok_or_else(|| {
 						Error::unreachable("Tried to unfreeze a Context with multiple references")
 					})
-					.map_err(anyhow::Error::new)?;
+					.map_err(anyhow::Error::new)?
+			};
+		}
+		let res = match plan {
+			TopLevelExpr::Use(stmt) => {
+				// Avoid moving in and out of the context via Arc::get_mut
+				let ctx = ctx_mut!();
 
 				if let Some(ns) = stmt.ns {
-					txn.get_or_add_ns(&ns, self.opt.strict).await?;
+					txn.get_or_add_ns(Some(ctx), &ns, self.opt.strict).await?;
 
 					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
 					self.opt.set_ns(Some(ns.as_str().into()));
@@ -129,7 +135,7 @@ impl Executor {
 						)));
 					};
 
-					txn.ensure_ns_db(ns, &db, self.opt.strict).await?;
+					txn.ensure_ns_db(Some(ctx), ns, &db, self.opt.strict).await?;
 
 					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
 					self.opt.set_db(Some(db.as_str().into()));
@@ -146,12 +152,7 @@ impl Executor {
 
 			TopLevelExpr::Expr(Expr::Let(stm)) => {
 				// Avoid moving in and out of the context via Arc::get_mut
-				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| {
-						Error::unreachable("Tried to unfreeze a Context with multiple references")
-					})
-					.map_err(anyhow::Error::new)?
-					.set_transaction(txn);
+				ctx_mut!().set_transaction(txn);
 
 				// Run the statement
 				let res = self
@@ -178,12 +179,7 @@ impl Executor {
 					})));
 				}
 				// Set the parameter
-				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| {
-						Error::unreachable("Tried to unfreeze a Context with multiple references")
-					})
-					.map_err(anyhow::Error::new)?
-					.add_value(stm.name.clone(), result.into());
+				ctx_mut!().add_value(stm.name.clone(), result.into());
 
 				// Check if we dump the slow log
 				self.check_slow_log(start, stm.as_ref());
@@ -221,14 +217,7 @@ impl Executor {
 					.map_err(ControlFlow::Err)
 			}
 			TopLevelExpr::Live(s) => {
-				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| {
-						err::Error::unreachable(
-							"Tried to unfreeze a Context with multiple references",
-						)
-					})
-					.map_err(anyhow::Error::new)?
-					.set_transaction(txn);
+				ctx_mut!().set_transaction(txn);
 				self.stack
 					.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None))
 					.finish()
@@ -236,36 +225,17 @@ impl Executor {
 					.map_err(ControlFlow::Err)
 			}
 			TopLevelExpr::Show(s) => {
-				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| {
-						err::Error::unreachable(
-							"Tried to unfreeze a Context with multiple references",
-						)
-					})
-					.map_err(anyhow::Error::new)?
-					.set_transaction(txn);
+				ctx_mut!().set_transaction(txn);
 				s.compute(&self.ctx, &self.opt, None).await.map_err(ControlFlow::Err)
 			}
 			TopLevelExpr::Access(s) => {
-				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| {
-						err::Error::unreachable(
-							"Tried to unfreeze a Context with multiple references",
-						)
-					})
-					.map_err(anyhow::Error::new)?
-					.set_transaction(txn);
+				ctx_mut!().set_transaction(txn);
 				self.stack.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None)).finish().await
 			}
 			// Process all other normal statements
 			TopLevelExpr::Expr(e) => {
 				// The transaction began successfully
-				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| {
-						Error::unreachable("Tried to unfreeze a Context with multiple references")
-					})
-					.map_err(anyhow::Error::new)?
-					.set_transaction(txn);
+				ctx_mut!().set_transaction(txn);
 				// Process the statement
 				let res = self
 					.stack

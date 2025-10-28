@@ -15,6 +15,11 @@ use crate::val::{
 	RecordIdKeyRange, Table, Uuid, Value,
 };
 
+/// Returns the type of the value as a string.
+pub fn type_of((val,): (Value,)) -> Result<Value> {
+	Ok(Value::String(val.kind_of().to_string()))
+}
+
 pub fn array((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<Array>()?.into())
 }
@@ -272,7 +277,7 @@ pub mod is {
 	pub fn record((arg, Optional(table)): (Value, Optional<String>)) -> Result<Value> {
 		let res = match table {
 			Some(tb) => arg.is_record_type(&[tb]).into(),
-			None => arg.is_thing().into(),
+			None => arg.is_record().into(),
 		};
 		Ok(res)
 	}
@@ -307,13 +312,13 @@ mod tests {
 	}
 
 	#[test]
-	fn no_empty_thing() {
+	fn no_empty_record() {
 		let value = super::record(("".into(), Optional(None)));
 		let _expected = Error::TbInvalid {
 			value: "".into(),
 		};
 		if !matches!(value, Err(_expected)) {
-			panic!("An empty thing tb part should result in an error");
+			panic!("An empty record tb part should result in an error");
 		}
 
 		let value = super::record(("table".into(), Optional(Some("".into()))));
@@ -321,7 +326,7 @@ mod tests {
 			value: "".into(),
 		};
 		if !matches!(value, Err(_expected)) {
-			panic!("An empty thing id part should result in an error");
+			panic!("An empty record id part should result in an error");
 		}
 	}
 }

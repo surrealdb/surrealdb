@@ -15,7 +15,7 @@ use crate::expr::part::{Next, NextMethod};
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, FlowResult, Part, Value};
-use crate::fmt::{EscapeIdent, Fmt};
+use crate::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt};
 
 pub mod recursion;
 
@@ -52,19 +52,6 @@ impl InfoStructure for Idioms {
 /// An idiom defines a way to reference a field, reference, or other part of the document graph.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct Idiom(pub(crate) Vec<Part>);
-
-impl Deref for Idiom {
-	type Target = [Part];
-	fn deref(&self) -> &Self::Target {
-		self.0.as_slice()
-	}
-}
-
-impl From<Vec<Part>> for Idiom {
-	fn from(v: Vec<Part>) -> Self {
-		Self(v)
-	}
-}
 
 impl Idiom {
 	/// Returns an idiom for a field of the given name.
@@ -113,11 +100,13 @@ impl Idiom {
 
 	/// Returns a raw string representation of this idiom without any escaping.
 	pub(crate) fn to_raw_string(&self) -> String {
+		use std::fmt::Write;
+
 		let mut s = String::new();
 
 		let mut iter = self.0.iter();
 		match iter.next() {
-			Some(Part::Field(v)) => s.push_str(&v.clone()),
+			Some(Part::Field(v)) => write!(&mut s, "{}", EscapeKwFreeIdent(v)).unwrap(),
 			Some(x) => s.push_str(&x.to_raw_string()),
 			None => {}
 		};
@@ -171,6 +160,19 @@ impl Idiom {
 				None => Value::None.get(stk, ctx, opt, doc, self.next_method()).await,
 			},
 		}
+	}
+}
+
+impl Deref for Idiom {
+	type Target = [Part];
+	fn deref(&self) -> &Self::Target {
+		self.0.as_slice()
+	}
+}
+
+impl From<Vec<Part>> for Idiom {
+	fn from(v: Vec<Part>) -> Self {
+		Self(v)
 	}
 }
 

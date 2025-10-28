@@ -56,7 +56,6 @@ pub enum Force {
 	All,
 	None,
 	Table(Arc<[catalog::TableDefinition]>),
-	Index(Arc<[catalog::IndexDefinition]>),
 }
 
 /// Trait for a pluggable message broker used to forward live query events across nodes.

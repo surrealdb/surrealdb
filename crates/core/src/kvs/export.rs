@@ -18,9 +18,11 @@ use crate::expr::statements::define::{DefineAccessStatement, DefineUserStatement
 use crate::expr::{Base, DefineAnalyzerStatement};
 use crate::key::record;
 use crate::kvs::KVValue;
+use crate::sql::statements::OptionStatement;
 use crate::val::record::Record;
 
 #[derive(Clone, Debug, SurrealValue)]
+#[surreal(default)]
 pub struct Config {
 	pub users: bool,
 	pub accesses: bool,
@@ -157,7 +159,7 @@ impl Transaction {
 		db: DatabaseId,
 	) -> Result<()> {
 		// Output OPTIONS
-		self.export_section("OPTION", ["OPTION IMPORT"].iter(), chn).await?;
+		self.export_section("OPTION", [OptionStatement::import()].into_iter(), chn).await?;
 
 		// Output USERS
 		if cfg.users {

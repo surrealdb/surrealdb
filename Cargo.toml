@@ -74,8 +74,8 @@ argon2 = "0.5.2"
 arrayvec = "0.7.6"
 async-channel = "2.3.1"
 async-executor = "1.13.1"
-async-graphql = { version = "7.0.9", default-features = false }
-async-graphql-axum = "=7.0.13"
+async-graphql = { version = "7.0.17", default-features = false, features = ["custom-error-conversion"] }
+async-graphql-axum = "7.0.17"
 async-trait = "0.1.88"
 base64 = "0.21.5"
 bcrypt = "0.15.0"
@@ -238,6 +238,7 @@ revision = { workspace = true, features = [
 # Crates only used by the root surrealdb crate
 anyhow.workspace = true
 arc-swap = "1.7.1"
+async-trait.workspace = true
 axum = { version = "0.8.5", features = ["tracing", "ws"] }
 axum-extra = { version = "0.10.2", features = [
     "query",
@@ -253,6 +254,7 @@ clap = { version = "4.4.11", features = [
     "wrap_help",
     "unicode",
 ] }
+dashmap.workspace = true
 glob = "0.3.1"
 http-body = "1.0.0"
 http-body-util = "0.1.1"

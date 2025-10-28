@@ -5,6 +5,7 @@ mod enum_tagged_variant;
 mod enum_unit_value;
 mod enum_untagged;
 
+use rstest::rstest;
 use surrealdb_types::{Array, Object, SurrealValue, Uuid, Value, object};
 
 ////////////////////////////////////////////////////
@@ -312,4 +313,32 @@ fn test_test_optional() {
 	let optional_value = TestOptional::from_value(value.clone()).unwrap();
 	assert_eq!(optional_value.id, 1);
 	assert_eq!(optional_value.name, None);
+}
+
+#[derive(Clone, Debug, SurrealValue, PartialEq)]
+#[surreal(default)]
+struct TestDefault {
+	str: String,
+	boolean: bool,
+	optional: Option<String>,
+}
+
+impl Default for TestDefault {
+	fn default() -> Self {
+		TestDefault {
+			str: "default".to_string(),
+			boolean: true,
+			optional: None,
+		}
+	}
+}
+
+#[rstest]
+#[case(Value::Object(object! {}), TestDefault::default())]
+#[case(Value::Object(object! { str: "test".to_string() }), TestDefault { str: "test".to_string(), boolean: true, optional: None })]
+#[case(Value::Object(object! { str: "test".to_string(), boolean: false }), TestDefault { str: "test".to_string(), boolean: false, optional: None })]
+#[case(Value::Object(object! { str: "test".to_string(), boolean: false, optional: Some("test".to_string()) }), TestDefault { str: "test".to_string(), boolean: false, optional: Some("test".to_string()) })]
+fn test_test_default(#[case] value: Value, #[case] expected: TestDefault) {
+	let parsed = TestDefault::from_value(value).unwrap();
+	assert_eq!(parsed, expected);
 }

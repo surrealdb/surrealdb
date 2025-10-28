@@ -16,7 +16,7 @@ mod cli;
 mod cnf;
 mod dbs;
 mod env;
-// mod gql; // currently disabled in binary too
+mod gql;
 pub mod net;
 /// Make `rpc` public so embedders can access RpcState and related router definitions
 /// when running SurrealDB as a library.
@@ -26,7 +26,7 @@ mod telemetry;
 use std::future::Future;
 use std::process::ExitCode;
 
-pub use cli::{Config, ConfigCheck};
+pub use cli::{Config, ConfigCheck, ConfigCheckRequirements};
 /// Re-export `RpcState` for convenience so embedders can `use surreal::RpcState`.
 pub use rpc::RpcState;
 pub use surrealdb_core as core;

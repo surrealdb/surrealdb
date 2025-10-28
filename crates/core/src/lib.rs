@@ -34,7 +34,6 @@ mod cf;
 mod doc;
 mod exe;
 mod fnc;
-mod idg;
 mod key;
 mod sys;
 
@@ -46,8 +45,8 @@ pub mod dbs;
 pub mod env;
 pub mod err;
 pub mod expr;
-//pub mod gql;
 mod fmt;
+pub mod gql;
 pub mod iam;
 pub mod idx;
 pub mod kvs;

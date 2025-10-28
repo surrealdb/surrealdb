@@ -373,6 +373,7 @@ pub(crate) static PATHS: phf::Map<
 		UniCase::ascii("type::geometry") => (PathKind::Function, None),
 		UniCase::ascii("type::int") => (PathKind::Function, None),
 		UniCase::ascii("type::number") => (PathKind::Function, None),
+		UniCase::ascii("type::of") => (PathKind::Function, None),
 		UniCase::ascii("type::point") => (PathKind::Function, None),
 		UniCase::ascii("type::range") => (PathKind::Function, None),
 		UniCase::ascii("type::record") => (PathKind::Function, Some(UniCase::ascii("type::thing"))),

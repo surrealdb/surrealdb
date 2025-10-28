@@ -6,17 +6,17 @@ use arc_swap::ArcSwap;
 use axum::extract::ws::close_code::AGAIN;
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use bytes::Bytes;
+use dashmap::DashMap;
 use futures::stream::FuturesUnordered;
 use futures::{Sink, SinkExt, StreamExt};
 use opentelemetry::Context as TelemetryContext;
 use opentelemetry::trace::FutureExt;
 use surrealdb::types::{Array, Value};
 use surrealdb_core::dbs::Session;
-//use surrealdb::gql::{Pessimistic, SchemaCache};
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::mem::ALLOC;
 use surrealdb_core::rpc::format::Format;
-use surrealdb_core::rpc::{DbResponse, DbResult, DbResultError, Method, RpcContext, RpcProtocolV1};
+use surrealdb_core::rpc::{DbResponse, DbResult, DbResultError, Method, RpcProtocol};
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinSet;
@@ -54,14 +54,13 @@ pub struct Websocket {
 	pub(crate) lock: Arc<Semaphore>,
 	/// The persistent session for this WebSocket connection
 	pub(crate) session: ArcSwap<Session>,
+	pub(crate) sessions: DashMap<Uuid, Arc<Session>>,
 	/// A cancellation token called when shutting down the server
 	pub(crate) shutdown: CancellationToken,
 	/// A cancellation token for cancelling all spawned tasks
 	pub(crate) canceller: CancellationToken,
 	/// The channels used to send and receive WebSocket messages
 	pub(crate) channel: Sender<Message>,
-	// The GraphQL schema cache stored in advance
-	//pub(crate) gql_schema: SchemaCache<Pessimistic>,
 }
 
 impl Websocket {
@@ -87,8 +86,8 @@ impl Websocket {
 			shutdown: CancellationToken::new(),
 			canceller: CancellationToken::new(),
 			session: ArcSwap::from(Arc::new(session)),
+			sessions: DashMap::new(),
 			channel: sender.clone(),
-			//gql_schema: SchemaCache::new(datastore.clone()),
 			datastore,
 		});
 		// Add this WebSocket to the list
@@ -131,7 +130,7 @@ impl Websocket {
 		// Log the WebSocket disconnection
 		trace!("WebSocket {id} disconnected");
 		// Cleanup the live queries for this WebSocket
-		rpc.cleanup_lqs().await;
+		rpc.cleanup_all_lqs().await;
 		// Remove this WebSocket from the list
 		state.web_sockets.write().await.remove(&id);
 		// Stop telemetry metrics for this connection
@@ -388,7 +387,15 @@ impl Websocket {
 							// Otherwise process the request message
 							else {
 								// Process the message
-								let result = Self::process_message(rpc.clone(), req.version, req.txn.map(Into::into), req.method, req.params).await;
+								let result = Self::process_message(
+									rpc.clone(),
+									req.session_id.map(Into::into),
+									req.txn.map(Into::into),
+									req.method,
+									req.params,
+								)
+									.await;
+
 								crate::rpc::response::send(
 									match result {
 										Ok(result) => DbResponse::success(req.id, result),
@@ -424,7 +431,7 @@ impl Websocket {
 	/// Process a WebSocket message and generate a response
 	async fn process_message(
 		rpc: Arc<Websocket>,
-		version: Option<u8>,
+		session_id: Option<Uuid>,
 		txn: Option<Uuid>,
 		method: Method,
 		params: Array,
@@ -435,7 +442,9 @@ impl Websocket {
 			return Err(DbResultError::MethodNotFound("Method not found".to_string()));
 		}
 		// Execute the specified method
-		RpcContext::execute(rpc.as_ref(), version, txn, method, params).await.map_err(Into::into)
+		RpcProtocol::execute(rpc.as_ref(), txn, session_id, method, params)
+			.await
+			.map_err(Into::into)
 	}
 
 	/// Reject a WebSocket message due to server overloading
@@ -456,29 +465,59 @@ impl Websocket {
 	}
 }
 
-impl RpcProtocolV1 for Websocket {}
-
-impl RpcContext for Websocket {
+impl RpcProtocol for Websocket {
 	/// The datastore for this RPC interface
 	fn kvs(&self) -> &Datastore {
 		&self.datastore
 	}
+
 	/// Retrieves the modification lock for this RPC context
 	fn lock(&self) -> Arc<Semaphore> {
 		self.lock.clone()
 	}
-	/// The current session for this RPC context
-	fn session(&self) -> Arc<Session> {
-		self.session.load_full()
-	}
-	/// Mutable access to the current session for this RPC context
-	fn set_session(&self, session: Arc<Session>) {
-		self.session.store(session);
-	}
+
 	/// The version information for this RPC context
 	fn version_data(&self) -> DbResult {
 		let value = Value::String(format!("{PKG_NAME}-{}", *PKG_VERSION));
 		DbResult::Other(value)
+	}
+
+	// ------------------------------
+	// Sessions
+	// ------------------------------
+
+	/// The current session for this RPC context
+	fn get_session(&self, id: Option<&Uuid>) -> Arc<Session> {
+		if let Some(id) = id {
+			if let Some(session) = self.sessions.get(id) {
+				session.clone()
+			} else {
+				let session = Arc::new(Session::default());
+				self.sessions.insert(*id, session.clone());
+				session
+			}
+		} else {
+			self.session.load_full()
+		}
+	}
+
+	/// Mutable access to the current session for this RPC context
+	fn set_session(&self, id: Option<Uuid>, session: Arc<Session>) {
+		if let Some(id) = id {
+			self.sessions.insert(id, session);
+		} else {
+			self.session.store(session);
+		}
+	}
+
+	/// Mutable access to the current session for this RPC context
+	fn del_session(&self, id: &Uuid) {
+		self.sessions.remove(id);
+	}
+
+	/// Lists all sessions
+	fn list_sessions(&self) -> Vec<Uuid> {
+		self.sessions.iter().map(|x| *x.key()).collect()
 	}
 
 	// ------------------------------
@@ -489,24 +528,28 @@ impl RpcContext for Websocket {
 	const LQ_SUPPORT: bool = true;
 
 	/// Handles the execution of a LIVE statement
-	async fn handle_live(&self, lqid: &Uuid) {
-		self.state.live_queries.write().await.insert(*lqid, self.id);
+	async fn handle_live(&self, lqid: &Uuid, session_id: Option<Uuid>) {
+		self.state.live_queries.write().await.insert(*lqid, (self.id, session_id));
 		trace!("Registered live query {lqid} on websocket {}", self.id);
 	}
 
 	/// Handles the execution of a KILL statement
 	async fn handle_kill(&self, lqid: &Uuid) {
-		if let Some(id) = self.state.live_queries.write().await.remove(lqid) {
-			trace!("Unregistered live query {lqid} on websocket {id}");
+		if let Some((id, session_id)) = self.state.live_queries.write().await.remove(lqid) {
+			if let Some(session_id) = session_id {
+				trace!("Unregistered live query {lqid} on websocket {id} for session {session_id}");
+			} else {
+				trace!("Unregistered live query {lqid} on websocket {id} for default session");
+			}
 		}
 	}
 
 	/// Handles the cleanup of live queries
-	async fn cleanup_lqs(&self) {
+	async fn cleanup_lqs(&self, session_id: Option<&Uuid>) {
 		let mut gc = Vec::new();
 		// Find all live queries for to this connection
 		self.state.live_queries.write().await.retain(|key, value| {
-			if value == &self.id {
+			if value.0 == self.id && value.1.as_ref() == session_id {
 				trace!("Removing live query: {key}");
 				gc.push(*key);
 				return false;
@@ -519,14 +562,21 @@ impl RpcContext for Websocket {
 		}
 	}
 
-	// ------------------------------
-	// GraphQL
-	// ------------------------------
-
-	// GraphQL queries are enabled on WebSockets
-	//const GQL_SUPPORT: bool = true;
-
-	//fn graphql_schema_cache(&self) -> &SchemaCache {
-	//&self.gql_schema
-	//}
+	/// Handles the cleanup of live queries
+	async fn cleanup_all_lqs(&self) {
+		let mut gc = Vec::new();
+		// Find all live queries for to this connection
+		self.state.live_queries.write().await.retain(|key, value| {
+			if value.0 == self.id {
+				trace!("Removing live query: {key}");
+				gc.push(*key);
+				return false;
+			}
+			true
+		});
+		// Garbage collect the live queries on this connection
+		if let Err(err) = self.kvs().delete_queries(gc).await {
+			error!("Error handling RPC connection: {err}");
+		}
+	}
 }
