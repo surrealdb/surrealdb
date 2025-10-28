@@ -1231,9 +1231,10 @@ impl From<ToStrError> for Error {
 #[cfg(feature = "kv-mem")]
 impl From<surrealmx::Error> for Error {
 	fn from(e: surrealmx::Error) -> Error {
+		let s = e.to_string();
 		match e {
-			surrealmx::Error::KeyReadConflict => Error::TxRetryable,
-			surrealmx::Error::KeyWriteConflict => Error::TxRetryable,
+			surrealmx::Error::KeyReadConflict => Error::TxRetryable(s),
+			surrealmx::Error::KeyWriteConflict => Error::TxRetryable(s),
 			_ => Error::Tx(e.to_string()),
 		}
 	}
@@ -1244,7 +1245,6 @@ impl From<surrealkv::Error> for Error {
 	fn from(e: surrealkv::Error) -> Error {
 		let s = e.to_string();
 		match e {
-			surrealkv::Error::TransactionReadConflict => Error::TxRetryable(s),
 			surrealkv::Error::TransactionWriteConflict => Error::TxRetryable(s),
 			_ => Error::Tx(s),
 		}
@@ -1266,10 +1266,11 @@ impl From<rocksdb::Error> for Error {
 #[cfg(feature = "kv-indxdb")]
 impl From<indxdb::err::Error> for Error {
 	fn from(e: indxdb::err::Error) -> Error {
+		let s = e.to_string();
 		match e {
 			indxdb::err::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
 			indxdb::err::Error::ValNotExpectedValue => Error::TxConditionNotMet,
-			_ => Error::Tx(e.to_string()),
+			_ => Error::Tx(s),
 		}
 	}
 }
