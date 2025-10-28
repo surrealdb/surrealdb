@@ -392,7 +392,14 @@ impl super::api::Transaction for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Retrieve the scan range
-		let res = Vec::new();
+		let res = inner
+			.scan_all_versions(beg..end, None, Some(limit as usize))?
+			.into_iter()
+			.map(|(k, ts, v)| match v {
+				Some(v) => (k.to_vec(), v.to_vec(), ts, false),
+				None => (k.to_vec(), vec![], ts, true),
+			})
+			.collect::<Result<_>>()?;
 		// Return result
 		Ok(res)
 	}
