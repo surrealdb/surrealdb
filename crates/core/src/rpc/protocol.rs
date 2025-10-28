@@ -531,10 +531,11 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let vars = Some(self.get_session(session_id.as_ref()).variables.clone());
 
-		let res = run_query(self, txn, session_id, QueryForm::Parsed(ast), vars).await?;
+		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), vars).await?;
 
 		// Extract the first query result
-		Ok(DbResult::Other(res.into_iter().next().expect("single result expected").result?))
+		let first = res.remove(0).result?;
+		Ok(DbResult::Other(first))
 	}
 
 	// ------------------------------
@@ -593,9 +594,10 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let vars = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let res = run_query(self, txn, session_id, QueryForm::Parsed(ast), vars).await?;
+		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), vars).await?;
 		// Extract the first query result
-		Ok(DbResult::Other(res.into_iter().next().unwrap().result?))
+		let first = res.remove(0).result?;
+		Ok(DbResult::Other(first))
 	}
 
 	// ------------------------------
@@ -638,9 +640,10 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
+		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
 		// Extract the first query result
-		Ok(DbResult::Other(res.into_iter().next().unwrap().result?))
+		let first = res.remove(0).result?;
+		Ok(DbResult::Other(first))
 	}
 
 	async fn insert_relation(
@@ -681,9 +684,10 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
+		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
 		// Extract the first query result
-		Ok(DbResult::Other(res.into_iter().next().unwrap().result?))
+		let first = res.remove(0).result?;
+		Ok(DbResult::Other(first))
 	}
 
 	// ------------------------------
@@ -732,9 +736,10 @@ pub trait RpcProtocol {
 		};
 		let ast = Ast::single_expr(Expr::Create(Box::new(sql)));
 		// Execute the query on the database
-		let res = run_query(self, txn, session_id, QueryForm::Parsed(ast), None).await?;
+		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), None).await?;
 		// Extract the first query result
-		Ok(DbResult::Other(res.into_iter().next().unwrap().result?))
+		let first = res.remove(0).result?;
+		Ok(DbResult::Other(first))
 	}
 
 	// ------------------------------
@@ -786,9 +791,10 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
+		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
 		// Extract the first query result
-		Ok(DbResult::Other(res.into_iter().next().unwrap().result?))
+		let first = res.remove(0).result?;
+		Ok(DbResult::Other(first))
 	}
 
 	// ------------------------------
@@ -841,8 +847,8 @@ pub trait RpcProtocol {
 		// Execute the query on the database
 		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
-		Ok(DbResult::Other(res))
+		let first = res.remove(0).result?;
+		Ok(DbResult::Other(first))
 	}
 
 	// ------------------------------
@@ -889,9 +895,10 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
+		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
 		// Extract the first query result
-		Ok(DbResult::Other(res.into_iter().next().unwrap().result?))
+		let first = res.remove(0).result?;
+		Ok(DbResult::Other(first))
 	}
 
 	// ------------------------------
@@ -959,8 +966,8 @@ pub trait RpcProtocol {
 			.process(Ast::single_expr(expr), &self.get_session(session_id.as_ref()), var)
 			.await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
-		Ok(DbResult::Other(res))
+		let first = res.remove(0).result?;
+		Ok(DbResult::Other(first))
 	}
 
 	// ------------------------------
@@ -1019,8 +1026,8 @@ pub trait RpcProtocol {
 			.process(Ast::single_expr(expr), &self.get_session(session_id.as_ref()), var)
 			.await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
-		Ok(DbResult::Other(res))
+		let first = res.remove(0).result?;
+		Ok(DbResult::Other(first))
 	}
 
 	// ------------------------------
@@ -1055,9 +1062,10 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
+		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
 		// Extract the first query result
-		Ok(DbResult::Other(res.into_iter().next().unwrap().result?))
+		let first = res.remove(0).result?;
+		Ok(DbResult::Other(first))
 	}
 
 	// ------------------------------
@@ -1193,9 +1201,10 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the function on the database
-		let res = run_query(self, None, session_id, QueryForm::Parsed(ast), var).await?;
+		let mut res = run_query(self, None, session_id, QueryForm::Parsed(ast), var).await?;
 		// Extract the first query result
-		Ok(DbResult::Other(res.into_iter().next().unwrap().result?))
+		let first = res.remove(0).result?;
+		Ok(DbResult::Other(first))
 	}
 
 	// ------------------------------
