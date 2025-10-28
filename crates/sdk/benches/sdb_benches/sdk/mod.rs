@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use std::sync::LazyLock;
 use std::time::Duration;
 

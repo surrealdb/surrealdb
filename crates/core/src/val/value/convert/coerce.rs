@@ -300,8 +300,8 @@ impl<T: Coerce + HasKind> Coerce for Vec<T> {
 				into: <Self as HasKind>::kind().to_string(),
 			});
 		}
-		// Unwrap checked above
-		let array = v.into_array().unwrap();
+		// checked above
+		let array = v.into_array().expect("value type checked above");
 
 		let mut res = Vec::with_capacity(array.0.len());
 		for x in array.0 {
@@ -327,8 +327,8 @@ impl<T: Coerce + HasKind> Coerce for BTreeMap<String, T> {
 				into: Object::kind().to_string(),
 			});
 		};
-		// Unwrap checked above
-		let obj = v.into_object().unwrap();
+		// checked above
+		let obj = v.into_object().expect("value type checked above");
 
 		let mut res = BTreeMap::new();
 		for (k, v) in obj.0 {
@@ -359,8 +359,8 @@ impl<T: Coerce + HasKind, S: BuildHasher + Default> Coerce for HashMap<String, T
 				into: Kind::of::<Object>().to_string(),
 			});
 		};
-		// Unwrap checked above
-		let obj = v.into_object().unwrap();
+		// checked above
+		let obj = v.into_object().expect("value type checked above");
 
 		let mut res = HashMap::default();
 		for (k, v) in obj.0 {

@@ -272,7 +272,7 @@ impl Parser<'_> {
 					unexpected!(self, token, "a identifier");
 				}
 				// Should be valid utf-8 as it was already parsed by the lexer
-				let text = String::from_utf8(slice.to_vec()).unwrap();
+				let text = String::from_utf8(slice.to_vec()).expect("parser validated utf8");
 				// Safety: Parser guarentees no null bytes present in string.
 				Ok(RecordIdKeyLit::String(text))
 			}

@@ -69,7 +69,7 @@ impl DefineUserStatement {
 			name: Expr::Idiom(Idiom::field(user)),
 			hash: Argon2::default()
 				.hash_password(pass.as_ref(), &SaltString::generate(&mut OsRng))
-				.unwrap()
+				.expect("password hashing should not fail")
 				.to_string(),
 			code: rand::thread_rng()
 				.sample_iter(&Alphanumeric)

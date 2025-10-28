@@ -106,7 +106,9 @@ impl Idiom {
 
 		let mut iter = self.0.iter();
 		match iter.next() {
-			Some(Part::Field(v)) => write!(&mut s, "{}", EscapeKwFreeIdent(v)).unwrap(),
+			Some(Part::Field(v)) => {
+				write!(&mut s, "{}", EscapeKwFreeIdent(v)).expect("writing to string")
+			}
 			Some(x) => s.push_str(&x.to_raw_string()),
 			None => {}
 		};
