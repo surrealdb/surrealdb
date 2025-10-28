@@ -220,14 +220,23 @@ pub(super) static ROCKSDB_DELETION_FACTORY_DELETE_COUNT: LazyLock<usize> =
 pub(super) static ROCKSDB_DELETION_FACTORY_RATIO: LazyLock<f64> =
 	lazy_env_parse!("SURREAL_ROCKSDB_DELETION_FACTORY_RATIO", f64, 0.5);
 
-/// The maximum allowed space usage for SST files in bytes (default: 0, meaning unlimited)
+/// The maximum allowed space usage for SST files in bytes (default: 0, meaning unlimited).
+/// When this limit is reached, the datastore enters read-only mode to prevent further disk usage.
+/// Set to 0 to disable space monitoring.
 pub(super) static ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE: LazyLock<u64> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE", u64, 0);
 
-/// The maximum allowed space usage for SST files in bytes (default: 0, meaning unlimited)
+/// The maximum allowed space usage threshold for read-and-deletion-only mode in bytes (default: 0,
+/// meaning disabled). When ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE is reached and this is set, the
+/// datastore transitions to read-and-deletion-only mode instead of read-only mode, allowing
+/// deletions to free up space. The datastore automatically returns to normal mode when space usage
+/// drops below ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE. Set to 0 to disable this feature (datastore
+/// will be fully read-only when limit is reached).
 pub(super) static ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE_DELETION_ONLY: LazyLock<u64> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE_DELETION_ONLY", u64, 0);
 
-/// The compaction buffer size for SST file manager in bytes (default: 0)
+/// The compaction buffer size for SST file manager in bytes (default: 0).
+/// This reserves extra space for compaction operations to prevent write stalls.
+/// Set to 0 to disable compaction buffer.
 pub(super) static ROCKSDB_SST_COMPACTION_BUFFER_SIZE: LazyLock<u64> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_SST_COMPACTION_BUFFER_SIZE", u64, 0);
