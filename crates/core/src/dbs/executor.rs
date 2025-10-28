@@ -668,7 +668,6 @@ impl Executor {
 	/// Execute a logical plan with an existing transaction
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	pub async fn execute_plan_with_transaction(
-		_kvs: &Datastore,
 		ctx: Context,
 		opt: Options,
 		qry: LogicalPlan,

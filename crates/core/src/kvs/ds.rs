@@ -1281,14 +1281,14 @@ impl Datastore {
 		ctx.set_transaction(tx);
 
 		// Process all statements with the transaction
-		Executor::execute_plan_with_transaction(self, ctx.freeze(), opt, ast.into()).await.map_err(
-			|e| match e.downcast_ref::<Error>() {
+		Executor::execute_plan_with_transaction(ctx.freeze(), opt, ast.into()).await.map_err(|e| {
+			match e.downcast_ref::<Error>() {
 				Some(Error::ExpiredSession) => {
 					DbResultError::InvalidAuth("The session has expired".to_string())
 				}
 				_ => DbResultError::InternalError(e.to_string()),
-			},
-		)
+			}
+		})
 	}
 
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
