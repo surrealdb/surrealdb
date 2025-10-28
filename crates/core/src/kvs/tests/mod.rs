@@ -31,6 +31,8 @@ mod raw;
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 mod reverse_iterator;
 mod snapshot;
+#[cfg(feature = "kv-rocksdb")]
+mod sst_file_manager;
 mod timestamp_to_versionstamp;
 
 #[derive(Clone, Debug)]

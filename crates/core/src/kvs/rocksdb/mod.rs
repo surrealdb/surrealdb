@@ -13,7 +13,7 @@ use anyhow::{Result, bail, ensure};
 use rocksdb::{
 	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, Env, FlushOptions, LogLevel,
 	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, SstFileManager,
-	WriteOptions,
+	WaitForCompactOptions, WriteOptions,
 };
 
 use super::savepoint::SavePoints;
@@ -88,7 +88,7 @@ pub struct Transaction {
 	// actually points here, so we need to ensure
 	// the memory is kept alive. This pointer must
 	// be declared last, so that it is dropped last.
-	_db: Pin<Arc<OptimisticTransactionDB>>,
+	db: Pin<Arc<OptimisticTransactionDB>>,
 	/// The operational state when this transaction was created.
 	/// Determines which write operations are allowed (all writes, no writes, or deletions only).
 	state: StoreState,
@@ -383,7 +383,9 @@ impl Datastore {
 						sst_file_manager.set_max_allowed_space_usage(
 							*ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE_DELETION_ONLY,
 						);
-						self.db.resume()?;
+						if let Err(e) = self.db.resume() {
+							warn!(target: TARGET, "{e}");
+						}
 						self.state.store(StoreState::ReadAndDeletionOnly);
 						// Return error to signal the transition occurred
 						Err(Error::DbReadAndDeleteOnly.into())
@@ -460,7 +462,7 @@ impl Datastore {
 			check,
 			inner: Some(inner),
 			ro,
-			_db: self.db.clone(),
+			db: self.db.clone(),
 			state,
 		}))
 	}
@@ -481,6 +483,21 @@ impl Transaction {
 			StoreState::Normal => {}
 			StoreState::ReadOnly => return Err(Error::DbReadOnly.into()),
 			StoreState::ReadAndDeletionOnly => return Err(Error::DbReadAndDeleteOnly.into()),
+		}
+		// RocksDB does not support versioned queries.
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
+		// Check to see if transaction is writable
+		ensure!(self.write, Error::TxReadonly);
+		//
+		Ok(())
+	}
+
+	fn ensure_deletion(&self, version: Option<u64>) -> Result<()> {
+		match self.state {
+			StoreState::Normal | StoreState::ReadAndDeletionOnly => {}
+			StoreState::ReadOnly => return Err(Error::DbReadOnly.into()),
 		}
 		// RocksDB does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
@@ -559,6 +576,13 @@ impl super::api::Transaction for Transaction {
 		self.done = true;
 		// Commit this transaction
 		self.inner.take().unwrap().commit()?;
+		// If we are in read-and-deletion-only mode, compact the entire key range (None, None)
+		if matches!(self.state, StoreState::ReadAndDeletionOnly) {
+			self.db.compact_range::<&[u8], &[u8]>(None, None);
+			let mut opt = WaitForCompactOptions::default();
+			opt.set_timeout(5000);
+			self.db.wait_for_compact(&opt)?;
+		}
 		// Continue
 		Ok(())
 	}
@@ -635,7 +659,7 @@ impl super::api::Transaction for Transaction {
 	/// Delete a key
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn del(&mut self, key: Key) -> Result<()> {
-		self.ensure_write(None)?;
+		self.ensure_deletion(None)?;
 		// Remove the key
 		self.inner.as_ref().unwrap().delete(key)?;
 		// Return result
@@ -645,7 +669,7 @@ impl super::api::Transaction for Transaction {
 	/// Delete a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<()> {
-		self.ensure_write(None)?;
+		self.ensure_deletion(None)?;
 		// Delete the key if valid
 		match (self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)?, chk) {
 			(Some(v), Some(w)) if v.eq(&w) => self.inner.as_ref().unwrap().delete(key)?,
