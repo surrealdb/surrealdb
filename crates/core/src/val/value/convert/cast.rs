@@ -12,7 +12,7 @@ use crate::syn;
 use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Null, Number, Object,
-	Range, RecordId, Regex, SqlNone, Uuid, Value,
+	Range, RecordId, Regex, Set, SqlNone, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -516,6 +516,26 @@ impl Cast for Array {
 			_ => Err(CastError::InvalidKind {
 				from: v,
 				into: "array".into(),
+			}),
+		}
+	}
+}
+
+impl Cast for Set {
+	fn can_cast(v: &Value) -> bool {
+		matches!(v, Value::Set(_) | Value::Array(_))
+	}
+
+	fn cast(v: Value) -> Result<Self, CastError> {
+		match v {
+			Value::Set(x) => Ok(x),
+			Value::Array(x) => {
+				// Convert array to set, automatically deduplicating
+				Ok(Set::from(x.0))
+			}
+			_ => Err(CastError::InvalidKind {
+				from: v,
+				into: "set".into(),
 			}),
 		}
 	}
