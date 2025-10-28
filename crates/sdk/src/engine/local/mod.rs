@@ -152,6 +152,7 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 #[cfg(not(target_family = "wasm"))]
 use std::pin::pin;
+use std::sync::Arc;
 #[cfg(not(target_family = "wasm"))]
 use std::task::{Poll, ready};
 #[cfg(not(target_family = "wasm"))]
@@ -166,7 +167,7 @@ use surrealdb_core::dbs::{QueryResult, QueryResultBuilder, Session};
 use surrealdb_core::iam;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
-use surrealdb_core::kvs::{Datastore, LockType, TransactionType};
+use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
 use surrealdb_core::rpc::DbResultError;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::{
@@ -174,6 +175,7 @@ use surrealdb_core::{
 	ml::storage::surml_file::SurMlFile,
 };
 use surrealdb_types::{Notification, ToSql, Value, Variables};
+use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
 	fs::OpenOptions,
@@ -186,16 +188,24 @@ use uuid::Uuid;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use crate::conn::MlExportConfig;
 use crate::conn::{Command, RequestData};
-use crate::engine::local::native::RouterState;
 use crate::opt::IntoEndpoint;
 use crate::{Connect, Result, Surreal};
+
+type LiveQueryMap = HashMap<Uuid, Sender<Result<Notification>>>;
+
+#[derive(Clone)]
+pub(crate) struct RouterState {
+	pub(crate) kvs: Arc<Datastore>,
+	pub(crate) vars: Arc<RwLock<Variables>>,
+	pub(crate) live_queries: Arc<RwLock<LiveQueryMap>>,
+	pub(crate) session: Arc<RwLock<Session>>,
+	pub(crate) transactions: Arc<RwLock<HashMap<Uuid, Arc<Transaction>>>>,
+}
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;
 #[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
-
-type LiveQueryMap = HashMap<Uuid, Sender<Result<Notification>>>;
 
 /// In-memory database
 ///

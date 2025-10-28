@@ -136,7 +136,7 @@ pub trait RpcProtocol {
 		// Execute the desired method
 		match method {
 			Method::Ping => Ok(DbResult::Other(PublicValue::None)),
-			Method::Info => self.info(session).await,
+			Method::Info => self.info(txn, session).await,
 			Method::Use => self.yuse(session, params).await,
 			Method::Signup => self.signup(session, params).await,
 			Method::Signin => self.signin(session, params).await,
@@ -147,23 +147,24 @@ pub trait RpcProtocol {
 			Method::Live => self.live(txn, session, params).await,
 			Method::Set => self.set(session, params).await,
 			Method::Unset => self.unset(session, params).await,
-			Method::Select => self.select(session, params).await,
-			Method::Insert => self.insert(session, params).await,
-			Method::Create => self.create(session, params).await,
-			Method::Upsert => self.upsert(session, params).await,
-			Method::Update => self.update(session, params).await,
-			Method::Merge => self.merge(session, params).await,
-			Method::Patch => self.patch(session, params).await,
-			Method::Delete => self.delete(session, params).await,
-			Method::Version => self.version(txn, params).await,
 			Method::Query => self.query(txn, session, params).await,
-			Method::Relate => self.relate(session, params).await,
-			Method::Run => self.run(session, params).await,
-			Method::InsertRelation => self.insert_relation(session, params).await,
-			Method::Sessions => self.sessions().await,
+			Method::Version => self.version(txn, params).await,
 			Method::Begin => self.begin(txn, session).await,
 			Method::Commit => self.commit(txn, session, params).await,
 			Method::Cancel => self.cancel(txn, session, params).await,
+			Method::Sessions => self.sessions().await,
+			// Deprecated methods
+			Method::Select => self.select(txn, session, params).await,
+			Method::Insert => self.insert(txn, session, params).await,
+			Method::Create => self.create(txn, session, params).await,
+			Method::Upsert => self.upsert(txn, session, params).await,
+			Method::Update => self.update(txn, session, params).await,
+			Method::Merge => self.merge(txn, session, params).await,
+			Method::Patch => self.patch(txn, session, params).await,
+			Method::Delete => self.delete(txn, session, params).await,
+			Method::Relate => self.relate(txn, session, params).await,
+			Method::Run => self.run(txn, session, params).await,
+			Method::InsertRelation => self.insert_relation(txn, session, params).await,
 			_ => Err(RpcError::MethodNotFound),
 		}
 	}
@@ -378,7 +379,11 @@ pub trait RpcProtocol {
 	// Methods for identification
 	// ------------------------------
 
-	async fn info(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
+	async fn info(
+		&self,
+		_txn: Option<Uuid>,
+		session_id: Option<Uuid>,
+	) -> Result<DbResult, RpcError> {
 		let session = self.get_session(session_id.as_ref());
 		let vars = Some(session.variables.clone());
 		let mut res = self.kvs().execute("SELECT * FROM $auth", &session, vars).await?;
@@ -538,6 +543,7 @@ pub trait RpcProtocol {
 
 	async fn select(
 		&self,
+		txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
@@ -587,10 +593,9 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let vars = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), vars).await?;
+		let res = run_query(self, txn, session_id, QueryForm::Parsed(ast), vars).await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
-		Ok(DbResult::Other(res))
+		Ok(DbResult::Other(res.into_iter().next().unwrap().result?))
 	}
 
 	// ------------------------------
@@ -599,6 +604,7 @@ pub trait RpcProtocol {
 
 	async fn insert(
 		&self,
+		txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
@@ -632,14 +638,14 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), var).await?;
+		let res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
-		Ok(DbResult::Other(res))
+		Ok(DbResult::Other(res.into_iter().next().unwrap().result?))
 	}
 
 	async fn insert_relation(
 		&self,
+		txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
@@ -675,10 +681,9 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), var).await?;
+		let res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
-		Ok(DbResult::Other(res))
+		Ok(DbResult::Other(res.into_iter().next().unwrap().result?))
 	}
 
 	// ------------------------------
@@ -687,6 +692,7 @@ pub trait RpcProtocol {
 
 	async fn create(
 		&self,
+		txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
@@ -726,10 +732,9 @@ pub trait RpcProtocol {
 		};
 		let ast = Ast::single_expr(Expr::Create(Box::new(sql)));
 		// Execute the query on the database
-		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), None).await?;
+		let res = run_query(self, txn, session_id, QueryForm::Parsed(ast), None).await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
-		Ok(DbResult::Other(res))
+		Ok(DbResult::Other(res.into_iter().next().unwrap().result?))
 	}
 
 	// ------------------------------
@@ -738,6 +743,7 @@ pub trait RpcProtocol {
 
 	async fn upsert(
 		&self,
+		txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
@@ -780,10 +786,9 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), var).await?;
+		let res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
-		Ok(DbResult::Other(res))
+		Ok(DbResult::Other(res.into_iter().next().unwrap().result?))
 	}
 
 	// ------------------------------
@@ -792,6 +797,7 @@ pub trait RpcProtocol {
 
 	async fn update(
 		&self,
+		_txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
@@ -845,6 +851,7 @@ pub trait RpcProtocol {
 
 	async fn merge(
 		&self,
+		txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
@@ -882,10 +889,9 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), var).await?;
+		let res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
-		Ok(DbResult::Other(res))
+		Ok(DbResult::Other(res.into_iter().next().unwrap().result?))
 	}
 
 	// ------------------------------
@@ -894,6 +900,7 @@ pub trait RpcProtocol {
 
 	async fn patch(
 		&self,
+		_txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
@@ -962,6 +969,7 @@ pub trait RpcProtocol {
 
 	async fn relate(
 		&self,
+		_txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
@@ -1021,6 +1029,7 @@ pub trait RpcProtocol {
 
 	async fn delete(
 		&self,
+		txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
@@ -1046,10 +1055,9 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), var).await?;
+		let res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
-		Ok(DbResult::Other(res))
+		Ok(DbResult::Other(res.into_iter().next().unwrap().result?))
 	}
 
 	// ------------------------------
@@ -1114,6 +1122,7 @@ pub trait RpcProtocol {
 
 	async fn run(
 		&self,
+		_txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
@@ -1184,10 +1193,9 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(self.get_session(session_id.as_ref()).variables.clone());
 		// Execute the function on the database
-		let mut res = self.kvs().process(ast, &self.get_session(session_id.as_ref()), var).await?;
+		let res = run_query(self, None, session_id, QueryForm::Parsed(ast), var).await?;
 		// Extract the first query result
-		let res = res.remove(0).result?;
-		Ok(DbResult::Other(res))
+		Ok(DbResult::Other(res.into_iter().next().unwrap().result?))
 	}
 
 	// ------------------------------

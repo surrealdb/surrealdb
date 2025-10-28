@@ -8,15 +8,14 @@ use futures::StreamExt;
 use futures::stream::poll_fn;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::Level;
-use surrealdb_core::kvs::{Datastore, Transaction};
+use surrealdb_core::kvs::Datastore;
 use surrealdb_core::options::EngineOptions;
 use surrealdb_types::Variables;
 use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
-use uuid::Uuid;
 
 use crate::conn::{self, Route, Router};
-use crate::engine::local::{Db, LiveQueryMap};
+use crate::engine::local::Db;
 use crate::engine::tasks;
 use crate::method::BoxFuture;
 use crate::opt::auth::Root;
@@ -54,15 +53,6 @@ impl conn::Sealed for Db {
 			Ok((router, waiter).into())
 		})
 	}
-}
-
-#[derive(Clone)]
-pub(crate) struct RouterState {
-	pub(crate) kvs: Arc<Datastore>,
-	pub(crate) vars: Arc<RwLock<Variables>>,
-	pub(crate) live_queries: Arc<RwLock<LiveQueryMap>>,
-	pub(crate) session: Arc<RwLock<Session>>,
-	pub(crate) transactions: Arc<RwLock<HashMap<Uuid, Arc<Transaction>>>>,
 }
 
 pub(crate) async fn run_router(
@@ -126,10 +116,10 @@ pub(crate) async fn run_router(
 
 	let kvs = Arc::new(kvs);
 	let vars = Arc::new(RwLock::new(Variables::default()));
-	let live_queries = Arc::new(RwLock::new(HashMap::new()));
+	let live_queries = Arc::new(RwLock::new(super::LiveQueryMap::new()));
 	let session = Arc::new(RwLock::new(Session::default().with_rt(true)));
 
-	let router_state = RouterState {
+	let router_state = super::RouterState {
 		kvs: kvs.clone(),
 		vars: vars.clone(),
 		live_queries: live_queries.clone(),
