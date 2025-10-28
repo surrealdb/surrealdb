@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use futures::Future;
 use pprof::criterion::{Output, PProfProfiler};

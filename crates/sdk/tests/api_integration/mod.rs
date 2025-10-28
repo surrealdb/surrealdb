@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use std::future::Future;
 
 use surrealdb::types::{RecordId, SurrealValue};
