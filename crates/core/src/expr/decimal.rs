@@ -386,7 +386,8 @@ impl DecimalLexEncoder {
 		// The function returns an error when the number has more significant bits then can fit
 		// into the amount of bits of a u128 which seems impossible for a function which takes a
 		// u128.
-		let abs = U128::from_u128(mantissa.unsigned_abs()).unwrap();
+		let abs =
+			U128::from_u128(mantissa.unsigned_abs()).expect("u128 conversion should not fail");
 		D128::from_parts(abs, -(scale as i32), sign, Context::default())
 	}
 

@@ -199,7 +199,7 @@ pub trait RpcProtocol {
 			PublicValue::None => (),
 			PublicValue::Null => session.db = None,
 			PublicValue::String(db) => {
-				let ns = session.ns.clone().unwrap();
+				let ns = session.ns.clone().expect("namespace should be set");
 				let tx =
 					self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await?;
 				tx.ensure_ns_db(None, &ns, &db, self.kvs().is_strict_mode()).await?;
@@ -393,7 +393,7 @@ pub trait RpcProtocol {
 		};
 
 		let mutex = self.lock();
-		let guard = mutex.acquire().await.unwrap();
+		let guard = mutex.acquire().await.expect("mutex should not be poisoned");
 		let mut session = self.get_session(session_id.as_ref()).as_ref().clone();
 
 		if session.expired() {
@@ -510,7 +510,7 @@ pub trait RpcProtocol {
 		let res = run_query(self, session_id, QueryForm::Parsed(ast), vars).await?;
 
 		// Extract the first query result
-		Ok(DbResult::Other(res.into_iter().next().unwrap().result?))
+		Ok(DbResult::Other(res.into_iter().next().expect("single result expected").result?))
 	}
 
 	// ------------------------------

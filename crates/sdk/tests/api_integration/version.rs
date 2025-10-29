@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used)]
 #![cfg(feature = "kv-surrealkv")]
 
 use surrealdb::types::Value;

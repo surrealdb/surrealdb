@@ -271,7 +271,7 @@ impl Datastore {
 				// state transitions without RocksDB stopping writes due to buffering causing
 				// size spikes
 				if *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE_DELETION_ONLY > 0 {
-					info!(target: TARGET, "SST file manager: Application-managed space limits (primary: {}, deletion-only: {})", 
+					info!(target: TARGET, "SST file manager: Application-managed space limits (primary: {}, deletion-only: {})",
 						*cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE, *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE_DELETION_ONLY);
 					// Set RocksDB limit to 0 (unlimited) - app will manage restrictions
 					sst_file_manager.set_max_allowed_space_usage(0);
@@ -571,7 +571,7 @@ impl super::api::Transaction for Transaction {
 		// Mark this transaction as done
 		self.done = true;
 		// Cancel this transaction
-		self.inner.as_ref().unwrap().rollback()?;
+		self.inner.as_ref().expect("transaction should have inner").rollback()?;
 		// Continue
 		Ok(())
 	}
@@ -586,7 +586,7 @@ impl super::api::Transaction for Transaction {
 		// Mark this transaction as done
 		self.done = true;
 		// Commit this transaction
-		self.inner.take().unwrap().commit()?;
+		self.inner.take().expect("transaction should have inner").commit()?;
 		// If we are in read-and-deletion-only mode, compact the entire key range (None, None)
 		if matches!(self.state, StoreState::ReadAndDeletionOnly) {
 			self.db.compact_range::<&[u8], &[u8]>(None, None);
@@ -600,7 +600,12 @@ impl super::api::Transaction for Transaction {
 	async fn exists(&mut self, key: Key, version: Option<u64>) -> Result<bool> {
 		self.ensure_read(version)?;
 		// Get the key
-		let res = self.inner.as_ref().unwrap().get_pinned_opt(key, &self.ro)?.is_some();
+		let res = self
+			.inner
+			.as_ref()
+			.expect("transaction should have inner")
+			.get_pinned_opt(key, &self.ro)?
+			.is_some();
 		// Return result
 		Ok(res)
 	}
@@ -610,7 +615,8 @@ impl super::api::Transaction for Transaction {
 	async fn get(&mut self, key: Key, version: Option<u64>) -> Result<Option<Val>> {
 		self.ensure_read(version)?;
 		// Get the key
-		let res = self.inner.as_ref().unwrap().get_opt(key, &self.ro)?;
+		let res =
+			self.inner.as_ref().expect("transaction should have inner").get_opt(key, &self.ro)?;
 		// Return result
 		Ok(res)
 	}
@@ -620,7 +626,11 @@ impl super::api::Transaction for Transaction {
 	async fn getm(&mut self, keys: Vec<Key>) -> Result<Vec<Option<Val>>> {
 		self.ensure_read(None)?;
 		// Get the keys
-		let res = self.inner.as_ref().unwrap().multi_get_opt(keys, &self.ro);
+		let res = self
+			.inner
+			.as_ref()
+			.expect("transaction should have inner")
+			.multi_get_opt(keys, &self.ro);
 		// Convert result
 		let res = res.into_iter().collect::<Result<_, _>>()?;
 		// Return result
@@ -632,7 +642,7 @@ impl super::api::Transaction for Transaction {
 	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
 		self.ensure_write(version)?;
 		// Set the key
-		self.inner.as_ref().unwrap().put(key, val)?;
+		self.inner.as_ref().expect("transaction should have inner").put(key, val)?;
 		// Return result
 		Ok(())
 	}
@@ -642,8 +652,13 @@ impl super::api::Transaction for Transaction {
 	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
 		self.ensure_write(version)?;
 		// Set the key if empty
-		match self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)? {
-			None => self.inner.as_ref().unwrap().put(key, val)?,
+		match self
+			.inner
+			.as_ref()
+			.expect("transaction should have inner")
+			.get_pinned_opt(&key, &self.ro)?
+		{
+			None => self.inner.as_ref().expect("transaction should have inner").put(key, val)?,
 			_ => bail!(Error::TxKeyAlreadyExists),
 		};
 		// Return result
@@ -655,9 +670,19 @@ impl super::api::Transaction for Transaction {
 	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<()> {
 		self.ensure_write(None)?;
 		// Set the key if empty
-		match (self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)?, chk) {
-			(Some(v), Some(w)) if v.eq(&w) => self.inner.as_ref().unwrap().put(key, val)?,
-			(None, None) => self.inner.as_ref().unwrap().put(key, val)?,
+		match (
+			self.inner
+				.as_ref()
+				.expect("transaction should have inner")
+				.get_pinned_opt(&key, &self.ro)?,
+			chk,
+		) {
+			(Some(v), Some(w)) if v.eq(&w) => {
+				self.inner.as_ref().expect("transaction should have inner").put(key, val)?
+			}
+			(None, None) => {
+				self.inner.as_ref().expect("transaction should have inner").put(key, val)?
+			}
 			_ => bail!(Error::TxConditionNotMet),
 		};
 		// Return result
@@ -669,7 +694,7 @@ impl super::api::Transaction for Transaction {
 	async fn del(&mut self, key: Key) -> Result<()> {
 		self.ensure_deletion(None)?;
 		// Remove the key
-		self.inner.as_ref().unwrap().delete(key)?;
+		self.inner.as_ref().expect("transaction should have inner").delete(key)?;
 		// Return result
 		Ok(())
 	}
@@ -679,9 +704,19 @@ impl super::api::Transaction for Transaction {
 	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<()> {
 		self.ensure_deletion(None)?;
 		// Delete the key if valid
-		match (self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)?, chk) {
-			(Some(v), Some(w)) if v.eq(&w) => self.inner.as_ref().unwrap().delete(key)?,
-			(None, None) => self.inner.as_ref().unwrap().delete(key)?,
+		match (
+			self.inner
+				.as_ref()
+				.expect("transaction should have inner")
+				.get_pinned_opt(&key, &self.ro)?,
+			chk,
+		) {
+			(Some(v), Some(w)) if v.eq(&w) => {
+				self.inner.as_ref().expect("transaction should have inner").delete(key)?
+			}
+			(None, None) => {
+				self.inner.as_ref().expect("transaction should have inner").delete(key)?
+			}
 			_ => bail!(Error::TxConditionNotMet),
 		};
 		// Return result
@@ -706,13 +741,16 @@ impl super::api::Transaction for Transaction {
 			let end = rng.end.as_slice();
 			// Set the ReadOptions with the snapshot
 			let mut ro = ReadOptions::default();
-			ro.set_snapshot(&self.inner.as_ref().unwrap().snapshot());
+			ro.set_snapshot(
+				&self.inner.as_ref().expect("transaction should have inner").snapshot(),
+			);
 			ro.set_iterate_lower_bound(beg);
 			ro.set_iterate_upper_bound(end);
 			ro.set_async_io(true);
 			ro.fill_cache(true);
 			// Create the iterator
-			let mut iter = self.inner.as_ref().unwrap().raw_iterator_opt(ro);
+			let mut iter =
+				self.inner.as_ref().expect("transaction should have inner").raw_iterator_opt(ro);
 			// Seek to the start key
 			iter.seek(&rng.start);
 			// Check the scan limit
@@ -749,7 +787,7 @@ impl super::api::Transaction for Transaction {
 	) -> Result<Vec<Key>> {
 		self.ensure_read(version)?;
 		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
+		let inner = self.inner.as_ref().expect("transaction should have inner");
 		// Create result set
 		let mut res = vec![];
 		// Set the key range
@@ -802,13 +840,16 @@ impl super::api::Transaction for Transaction {
 			let end = rng.end.as_slice();
 			// Set the ReadOptions with the snapshot
 			let mut ro = ReadOptions::default();
-			ro.set_snapshot(&self.inner.as_ref().unwrap().snapshot());
+			ro.set_snapshot(
+				&self.inner.as_ref().expect("transaction should have inner").snapshot(),
+			);
 			ro.set_iterate_lower_bound(beg);
 			ro.set_iterate_upper_bound(end);
 			ro.set_async_io(true);
 			ro.fill_cache(true);
 			// Create the iterator
-			let mut iter = self.inner.as_ref().unwrap().raw_iterator_opt(ro);
+			let mut iter =
+				self.inner.as_ref().expect("transaction should have inner").raw_iterator_opt(ro);
 			// Seek to the start key
 			iter.seek(&rng.start);
 			// Check the scan limit
@@ -844,7 +885,7 @@ impl super::api::Transaction for Transaction {
 	) -> Result<Vec<(Key, Val)>> {
 		self.ensure_read(version)?;
 		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
+		let inner = self.inner.as_ref().expect("transaction should have inner");
 		// Create result set
 		let mut res = vec![];
 		// Set the key range
@@ -885,14 +926,14 @@ impl super::api::Transaction for Transaction {
 
 	fn new_save_point(&mut self) {
 		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
+		let inner = self.inner.as_ref().expect("transaction should have inner");
 		// Set the save point
 		inner.set_savepoint();
 	}
 
 	async fn rollback_to_save_point(&mut self) -> Result<()> {
 		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
+		let inner = self.inner.as_ref().expect("transaction should have inner");
 		// Rollback
 		inner.rollback_to_savepoint()?;
 		//
