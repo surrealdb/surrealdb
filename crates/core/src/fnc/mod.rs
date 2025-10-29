@@ -640,22 +640,22 @@ pub async fn idiom(
 		Value::Set(x) => {
 			args.insert(0, Value::Set(x));
 			dispatch!(
-					ctx,
-					name,
-					args.clone(),
-					"no such method found for the set type",
-					//
-					"add" => set::add,
-					"all" => set::all((stk, ctx, Some(opt), doc)).await,
-					"any" => set::any((stk, ctx, Some(opt), doc)).await,
-					"complement" => set::complement,
-					"contains" => set::contains,
-					"difference" => set::difference,
-					"intersect" => set::intersect,
-					"is_empty" => set::is_empty,
-					"len" => set::len,
-					"remove" => set::remove,
-					"union" => set::union,
+				ctx,
+				name,
+				args.clone(),
+				"no such method found for the set type",
+				//
+				"add" => set::add,
+				"all" => set::all((stk, ctx, Some(opt), doc)).await,
+				"any" => set::any((stk, ctx, Some(opt), doc)).await,
+				"complement" => set::complement,
+				"contains" => set::contains,
+				"difference" => set::difference,
+				"intersect" => set::intersect,
+				"is_empty" => set::is_empty,
+				"len" => set::len,
+				"remove" => set::remove,
+				"union" => set::union,
 			)
 		}
 		Value::Array(x) => {
