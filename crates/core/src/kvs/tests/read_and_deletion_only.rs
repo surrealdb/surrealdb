@@ -34,7 +34,7 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 	// - The error message indicates that deleting data will free space
 	// - When space drops below the limit (after deletions and compaction), normal mode is restored
 
-	// This test relies ont the following environment variable to be set
+	// This test relies on the following environment variables to be set
 	// Set space limit of 10MB - When the limit is reached, it transitions to read-and-deletion-only
 	// SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE = 10485760
 	// SURREAL_ROCKSDB_WRITE_BUFFER_SIZE = 10240
@@ -71,7 +71,7 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 	}
 	assert!(count_err > 50, "Count error: {}", count_err);
 
-	// More write should not be possible
+	// More writes should not be possible
 	{
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		let res = tx.put(&"other_key", &"other_value".as_bytes().to_vec(), None).await;

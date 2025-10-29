@@ -30,6 +30,12 @@ pub struct Datastore {
 	disk_space_manager: Option<DiskSpaceManager>,
 }
 
+/// Manages disk space monitoring and enforces space limits for the RocksDB datastore.
+///
+/// This manager tracks SST file space usage and implements a state machine to transition
+/// the datastore between normal operation and read-and-deletion-only mode based on
+/// configured space limits. It provides gradual degradation of service rather than
+/// abrupt failures when disk space is constrained.
 struct DiskSpaceManager {
 	/// SST file manager for monitoring space usage
 	sst_file_manager: Arc<SstFileManager>,
@@ -69,6 +75,17 @@ impl Drop for Transaction {
 }
 
 impl DiskSpaceManager {
+	/// Creates a new disk space manager with the specified space limit.
+	///
+	/// # Parameters
+	/// - `limit`: The maximum allowed SST file space usage in bytes
+	/// - `opts`: RocksDB options to configure with the SST file manager
+	///
+	/// # Implementation Details
+	/// This method disables RocksDB's built-in hard limit enforcement and instead
+	/// implements application-level space management at the transaction level.
+	/// This approach provides more graceful degradation and allows deletions to
+	/// free space even when the limit is reached.
 	fn new(limit: u64, opts: &mut Options) -> Result<Self> {
 		let env = Env::new()?;
 		let sst_file_manager = SstFileManager::new(&env)?;
@@ -106,9 +123,14 @@ impl DiskSpaceManager {
 			self.warn_80_percent_logged.store(false, Ordering::Relaxed);
 			return false;
 		}
-		if !self.warn_80_percent_logged.load(Ordering::Relaxed) {
+		// Use compare_exchange to atomically check and set the flag, ensuring only one thread logs
+		// the warning
+		if self
+			.warn_80_percent_logged
+			.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+			.is_ok()
+		{
 			warn!(target: TARGET, "SST file space usage is at 80% of the limit ({})", current_size);
-			self.warn_80_percent_logged.store(true, Ordering::Relaxed);
 		}
 		// Check current size against the application limit
 		// Transition to read-and-deletion-only mode when the primary limit is exceeded
