@@ -22,7 +22,8 @@ use url::Url;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local;
 
-use crate::conn::{Command, RequestData, RouterRequest};
+use crate::conn::cmd::RouterRequest;
+use crate::conn::{Command, RequestData};
 use crate::err::Error;
 // use crate::engine::remote::Response;
 use crate::headers::{AUTH_DB, AUTH_NS, DB, NS};

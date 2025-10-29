@@ -11,8 +11,8 @@ use crate::method::BoxFuture;
 use crate::opt::Endpoint;
 use crate::{ExtraFeatures, Result, Surreal};
 
-mod cmd;
-pub(crate) use cmd::{Command, RouterRequest};
+pub(crate) mod cmd;
+pub(crate) use cmd::Command;
 
 use super::opt::Config;
 

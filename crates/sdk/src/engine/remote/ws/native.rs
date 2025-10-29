@@ -24,7 +24,8 @@ use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use trice::Instant;
 
 use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
-use crate::conn::{self, Command, RequestData, Route, Router, RouterRequest};
+use crate::conn::cmd::RouterRequest;
+use crate::conn::{self, Command, RequestData, Route, Router};
 use crate::engine::IntervalStream;
 use crate::engine::remote::ws::{Client, PING_INTERVAL};
 use crate::err::Error;
