@@ -12,7 +12,7 @@ use crate::syn;
 use crate::types::{
 	PublicArray, PublicDatetime, PublicDuration, PublicFile, PublicGeometry, PublicNumber,
 	PublicObject, PublicRange, PublicRecordId, PublicRecordIdKey, PublicRecordIdKeyRange,
-	PublicTable, PublicUuid, PublicValue, PublicSet,
+	PublicSet, PublicTable, PublicUuid, PublicValue,
 };
 use crate::val::DecimalExt;
 
@@ -351,7 +351,9 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 					}
 				},
 				TAG_SET => match *v {
-					CborValue::Array(v) => Ok(PublicValue::Set(PublicSet::from(v.into_iter().map(to_value).collect::<Result<BTreeSet<PublicValue>>>()?))),
+					CborValue::Array(v) => Ok(PublicValue::Set(PublicSet::from(
+						v.into_iter().map(to_value).collect::<Result<BTreeSet<PublicValue>>>()?,
+					))),
 					_ => Err(anyhow!("Expected a CBOR array with Set values")),
 				},
 				// An unknown tag
