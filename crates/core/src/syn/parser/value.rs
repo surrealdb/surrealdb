@@ -338,29 +338,6 @@ impl Parser<'_> {
 	where
 		VP: ValueParseFunc,
 	{
-		// Check for empty object
-		if self.eat(t!("}")) {
-			return Ok(PublicObject::default());
-		}
-
-		// Check if object (has `:` after first key)
-		if self.glue_and_peek1()?.kind == t!(":") {
-			return self.parse_value_object_inner::<VP>(stk, start).await;
-		}
-
-		// Not an object, must be a set - but we can't return a set from this function
-		// This shouldn't happen in normal parse_value flow since we check earlier
-		unexpected!(self, self.peek(), "an object key followed by ':'")
-	}
-
-	async fn parse_value_object_inner<VP>(
-		&mut self,
-		stk: &mut Stk,
-		start: Span,
-	) -> ParseResult<PublicObject>
-	where
-		VP: ValueParseFunc,
-	{
 		let mut obj = BTreeMap::new();
 		loop {
 			if self.eat(t!("}")) {

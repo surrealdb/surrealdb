@@ -12,7 +12,6 @@ use crate::val::{IndexFormat, Value};
 /// Internal Set type that stores unique values
 ///
 /// Sets use BTreeSet internally to maintain uniqueness and sorted order.
-/// The storage traits (Encode/Decode) are derived and work with BTreeSet.
 #[revisioned(revision = 1)]
 #[derive(
 	Clone,
@@ -35,13 +34,11 @@ pub(crate) struct Set(pub(crate) BTreeSet<Value>);
 
 impl Set {
 	/// Create a new empty set
-	#[allow(dead_code)]
 	pub fn new() -> Self {
 		Set(BTreeSet::new())
 	}
 
 	/// Get the number of elements in the set
-	#[allow(dead_code)]
 	pub fn len(&self) -> usize {
 		self.0.len()
 	}
@@ -58,7 +55,6 @@ impl Set {
 
 	/// Insert a value into the set
 	/// Returns true if the value was newly inserted
-	#[allow(dead_code)]
 	pub fn insert(&mut self, value: Value) -> bool {
 		self.0.insert(value)
 	}
@@ -70,7 +66,6 @@ impl Set {
 
 	/// Remove a value from the set
 	/// Returns true if the value was present
-	#[allow(dead_code)]
 	pub fn remove(&mut self, value: &Value) -> bool {
 		self.0.remove(value)
 	}
