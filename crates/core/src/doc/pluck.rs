@@ -107,7 +107,7 @@ impl Document {
 						&self.current
 					};
 
-					if (&stmt.group).is_some() {
+					if stmt.group.is_some() {
 						// Field computation with groups is defered to collection.
 						Ok(current.doc.data.as_ref().clone())
 					} else {

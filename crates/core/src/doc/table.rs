@@ -58,6 +58,7 @@ impl Document {
 		self.process_views(stk, ctx, opt, act).await
 	}
 
+	// process views but without needing the `Statement<'_>` type.
 	async fn process_views(
 		&self,
 		stk: &mut Stk,
@@ -82,6 +83,7 @@ impl Document {
 		Ok(())
 	}
 
+	/// Runs the computation for a single view.
 	async fn process_view(
 		&self,
 		stk: &mut Stk,
@@ -94,8 +96,11 @@ impl Document {
 		match view {
 			ViewDefinition::Select {
 				..
-			} => Ok(()), // nothing to do.
-			// Probably shouldn't even define it as a foreign table.
+			} => {
+				// Nothing to do
+				// Probably shouldn't even define it as a foreign table.
+				Ok(())
+			}
 			ViewDefinition::Materialized {
 				fields,
 				condition,
@@ -136,6 +141,7 @@ impl Document {
 		}
 	}
 
+	/// Run the computations for an aggregated materialized view.
 	#[allow(clippy::too_many_arguments)]
 	async fn process_aggregate_view(
 		&self,
@@ -299,6 +305,8 @@ impl Document {
 		Ok(())
 	}
 
+	/// Run the computation for when a new record within the table on which the view is generated
+	/// is created.
 	async fn process_view_record_create(
 		&self,
 		stk: &mut Stk,
@@ -378,6 +386,8 @@ impl Document {
 		Ok(())
 	}
 
+	/// Run the computation for when a record within the table on which the view is generated
+	/// is deleted.
 	async fn process_view_record_delete(
 		&self,
 		stk: &mut Stk,
@@ -693,7 +703,7 @@ impl Document {
 		Ok(())
 	}
 
-	/// Process an update to a entry in the materialized, aggergated view.
+	/// Process an update to a entry in the materialized, aggregated view.
 	/// Only called for updates to values that remain within the same group.
 	async fn process_view_record_update(
 		&self,
@@ -1072,6 +1082,7 @@ impl Document {
 		Ok(())
 	}
 
+	/// Run triggers which are defined on the view, like events and second order views.
 	pub(crate) async fn run_triggers(
 		stk: &mut Stk,
 		ctx: &Context,

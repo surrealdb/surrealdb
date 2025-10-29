@@ -46,11 +46,17 @@ macro_rules! implement_visitor{
 	    $($t:tt)*
 	})*) => {
 
+		/// A trait for types which can be visited with the `expr` visitor
 		#[allow(dead_code)]
 		pub(crate) trait Visit<V: Visitor>{
 			fn visit(&self, v: &mut V) -> Result<(), V::Error>;
 		}
 
+		/// A visitor which can visit types from `expr`
+		///
+		/// Implementing a visitor is as simple as just implementing the trait and only defining
+		/// the error type. All visiting functions have default implementations so to visit a
+		/// specific type you just need to implement only the `visit_{type}` function.
 		#[allow(dead_code)]
 		pub(crate) trait Visitor: Sized {
 			type Error;
@@ -79,11 +85,17 @@ macro_rules! implement_visitor_mut{
 	    $($t:tt)*
 	})*) => {
 
+		/// A trait for types which can be visited with mutable access with the `expr` visitor
 		#[allow(dead_code)]
 		pub(crate) trait VisitMut<V: MutVisitor>{
 			fn visit_mut(&mut self, v: &mut V) -> Result<(), V::Error>;
 		}
 
+		/// A mutable visitor which can visit types from `expr`
+		///
+		/// Implementing a visitor is as simple as just implementing the trait and only defining
+		/// the error type. All visiting functions have default implementations so to visit a
+		/// specific type you just need to implement only the `visit_mut_{type}` function.
 		#[allow(dead_code)]
 		pub(crate) trait MutVisitor: Sized {
 			type Error;
@@ -1186,17 +1198,6 @@ implement_visitor! {
 		this.visit_expr(&a.value)?;
 		Ok(())
 	}
-
-
-	/*fn visit_refs(this, r: &Refs){
-		for (_,i) in r.0.iter(){
-			if let Some(i) = i.as_ref(){
-				this.visit_idiom(i)?;
-			}
-		}
-		Ok(())
-	}*/
-
 
 	fn visit_closure(this, c: &ClosureExpr){
 		for (_,k) in c.args.iter(){

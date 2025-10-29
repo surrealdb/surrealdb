@@ -21,18 +21,21 @@
 //!    SELECT foo, math::pow(math::mean(v),2), math::max(v), math::min(x + 1) FROM foo GROUP foo.
 //!
 //!    the aggregate argument expressions are,
-//!        1: v,
-//!        2: x + 1,
+//!        0: v,
+//!        1: x + 1,
+//!
+//!    the group expressions are,
+//!        0: foo,
 //!
 //!    The aggregates functions are:
-//!        ag1: math::mean operating on expression 1
-//!        ag2: math::max operating on expression 1
-//!        ag3: math::min operating on expression 2
+//!        _a0: math::mean operating on expression 0
+//!        _a1: math::max operating on expression 0
+//!        _a2: math::min operating on expression 1
 //!
 //!    the final expression to calculate the result is:
-//!        g1, math::pow(ag1,2), ag2, ag3
+//!        _g0, math::pow(_a0,2), _a1, _a2
 //!
-//!        her `g1` refers to the group.
+//!        here `_g0` refers to the group.
 //! ```
 
 use std::fmt::Write;
@@ -124,26 +127,34 @@ impl Aggregation {
 
 pub fn write_aggregate_field_name(s: &mut String, idx: usize) {
 	// Writing into a string cannot error.
-	write!(s, "_a{}", idx).unwrap();
+	write!(s, "_a{}", idx).expect("writing into a string cannot fail");
 }
 
 pub fn write_group_field_name(s: &mut String, idx: usize) {
 	// Writing into a string cannot error.
-	write!(s, "_g{}", idx).unwrap();
+	write!(s, "_g{}", idx).expect("writing into a string cannot fail");
 }
 
+/// Returns the name of aggregate n used within the fields expression to calculate the result for
+/// the aggregate analysis
 pub fn aggregate_field_name(idx: usize) -> String {
 	let mut res = String::new();
 	write_aggregate_field_name(&mut res, idx);
 	res
 }
 
+/// Returns the name of group expression n used within the fields expression to calculate the result for
+/// the aggregate analysis.
 pub fn group_field_name(idx: usize) -> String {
 	let mut res = String::new();
 	write_group_field_name(&mut res, idx);
 	res
 }
 
+/// Updates the aggregation states from the results in the arguments array.
+///
+/// Assumes the correct number of arguments are in the arguments array as required by the
+/// aggregation stats.
 pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationStat]) -> Result<()> {
 	for stat in stats {
 		match stat {
@@ -407,6 +418,7 @@ struct AggregateExprCollector<'a> {
 }
 
 impl AggregateExprCollector<'_> {
+	/// Convenience function to add an aggreagtion which takes a single argument.
 	fn push_aggregate_function<F: Fn(usize) -> Aggregation>(
 		&mut self,
 		name: &str,
@@ -528,16 +540,19 @@ impl MutVisitor for AggregateExprCollector<'_> {
 						// with an field so that we can later inject the value via the current
 						// doc.
 						*s = Expr::Idiom(Idiom::field(group_field_name(group_idx)));
-					} else if let Some(Part::Field(_)) = i.0.first() {
+					} else if let Some(Part::Field(field)) = i.0.first_mut() {
 						if self.support_acummulate {
-							let expr = mem::replace(
-								s,
-								Expr::Idiom(Idiom::field(aggregate_field_name(
-									self.aggregations.len(),
-								))),
+							let field_name = mem::replace(
+								field,
+								// HACK: We replace the aggregate expression here with an field so that we can later
+								// inject the value via the current doc.
+								aggregate_field_name(self.aggregations.len()),
 							);
 							let len = self.exprs_map.len();
-							let arg = *self.exprs_map.entry(expr).or_insert_with(|| len);
+							let arg = *self
+								.exprs_map
+								.entry(Expr::Idiom(Idiom::field(field_name)))
+								.or_insert_with(|| len);
 							self.aggregations.push(Aggregation::Accumulate(arg))
 						} else {
 							bail!(Error::InvalidAggregationSelector {
@@ -583,8 +598,10 @@ impl AggregationAnalysis {
 	/// Analyze the groups and fields and produce a analysis for how to run the aggregate
 	/// expressions.
 	///
-	/// if the `force_count` argument is true the function will add a `Count` aggregation when
-	/// there is no aggregate which maintains a per group record count.
+	/// if the `materialized_view` argument is true the function will add a `Count` aggregation when
+	/// there is no aggregate which maintains a per group record count and will reject any
+	/// accumulate aggregations as we currently don't have a way to support them on
+	/// materialized views.
 	pub fn analyze_fields_groups(
 		fields: &Fields,
 		groups: &Groups,
@@ -623,8 +640,6 @@ impl AggregationAnalysis {
 					})
 				};
 				let mut expr = expr.clone();
-				// TODO: Check out other places where I might have mistakenly switched
-				// a.visit_mut(b) for b.visit_mut_*(a)
 				collect.visit_mut_expr(&mut expr)?;
 				AggregateFields::Value(expr)
 			}
