@@ -101,6 +101,68 @@ impl Parser<'_> {
 		})
 	}
 
+	/// Parse a module function function call
+	///
+	/// Expects `mod` to already be called.
+	pub(super) async fn parse_module_function(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<FunctionCall> {
+		expected!(self, t!("::"));
+		let name = self.parse_ident()?;
+		let sub = if self.eat(t!("::")) {
+			Some(self.parse_ident()?)
+		} else {
+			None
+		};
+
+		expected!(self, t!("(")).span;
+		let args = self.parse_function_args(stk).await?;
+		let name = Function::Module(name, sub);
+		Ok(FunctionCall {
+			receiver: name,
+			arguments: args,
+		})
+	}
+
+	/// Parse a silo function function call
+	///
+	/// Expects `silo` to already be called.
+	pub(super) async fn parse_silo_function(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {
+		expected!(self, t!("::"));
+		let org = self.parse_ident()?;
+		expected!(self, t!("::"));
+		let pkg = self.parse_ident()?;
+		expected!(self, t!("<"));
+		let major = self.next_token_value::<u32>()?;
+		expected!(self, t!("."));
+		let minor = self.next_token_value::<u32>()?;
+		expected!(self, t!("."));
+		let patch = self.next_token_value::<u32>()?;
+		expected!(self, t!(">"));
+		let sub = if self.eat(t!("::")) {
+			Some(self.parse_ident()?)
+		} else {
+			None
+		};
+
+		expected!(self, t!("(")).span;
+		let args = self.parse_function_args(stk).await?;
+		let name = Function::Silo {
+			org,
+			pkg,
+			major,
+			minor,
+			patch,
+			sub,
+		};
+
+		Ok(FunctionCall {
+			receiver: name,
+			arguments: args,
+		})
+	}
+
 	pub(super) async fn parse_function_args(&mut self, stk: &mut Stk) -> ParseResult<Vec<Expr>> {
 		let start = self.last_span();
 		let mut args = Vec::new();
