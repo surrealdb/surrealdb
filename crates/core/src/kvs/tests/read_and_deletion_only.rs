@@ -8,15 +8,17 @@
 //! - Automatically recovers to normal mode when space drops below the limit after deletions and
 //!   compaction
 
-use temp_dir::TempDir;
+use std::sync::Arc;
 
-use crate::kvs::Datastore;
+use crate::dbs::node::Timestamp;
 use crate::kvs::LockType::Optimistic;
+use crate::kvs::SizedClock;
 use crate::kvs::TransactionType::*;
+use crate::kvs::clock::FakeClock;
+use crate::kvs::tests::CreateDs;
+use crate::val::Uuid;
 
-#[tokio::test]
-#[serial_test::serial]
-async fn test_sst_file_manager_read_and_deletion_only_mode() {
+pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 	// This test demonstrates the read-and-deletion-only mode behavior.
 	// When SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE is set, the datastore transitions
 	// to read-and-deletion-only mode when SST file space usage reaches the configured limit.
@@ -32,22 +34,15 @@ async fn test_sst_file_manager_read_and_deletion_only_mode() {
 	// - The error message indicates that deleting data will free space
 	// - When space drops below the limit (after deletions and compaction), normal mode is restored
 
-	let temp_dir = TempDir::new().unwrap();
-	let path = format!("rocksdb:{}", temp_dir.path().to_string_lossy());
-
+	// This test relies ont the following environment variable to be set
 	// Set space limit of 10MB - When the limit is reached, it transitions to read-and-deletion-only
-	// mode
-	unsafe {
-		std::env::set_var("SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE", "10485760");
-		// Set a small write buffer size (10KB) to force frequent flushes to SST files
-		// This ensures the SST file manager can track the data
-		std::env::set_var("SURREAL_ROCKSDB_WRITE_BUFFER_SIZE", "10240");
-		// Set a small WAL size limit (1MB) to force data to flush to SST files
-		std::env::set_var("SURREAL_ROCKSDB_WAL_SIZE_LIMIT", "1");
-	}
+	// SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE = 10485760
+	// SURREAL_ROCKSDB_WRITE_BUFFER_SIZE = 10240
+	// SURREAL_ROCKSDB_WAL_SIZE_LIMIT = 1
 
 	// Create datastore with read-and-deletion-only mode configured
-	let ds = Datastore::new(&path).await.unwrap();
+	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
+	let (ds, _) = new_ds.create_ds(Uuid::new_v7().into(), clock).await;
 
 	// Perform some initial writes that should succeed
 	{
@@ -112,11 +107,15 @@ async fn test_sst_file_manager_read_and_deletion_only_mode() {
 		tx.put(&"other_key", &"other_value".as_bytes().to_vec(), None).await.unwrap();
 		tx.commit().await.unwrap();
 	}
-
-	// Clean up
-	unsafe {
-		std::env::remove_var("SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE");
-		std::env::remove_var("SURREAL_ROCKSDB_WRITE_BUFFER_SIZE");
-		std::env::remove_var("SURREAL_ROCKSDB_WAL_SIZE_LIMIT");
-	}
 }
+
+macro_rules! define_tests {
+	($new_ds:ident) => {
+		#[tokio::test]
+		#[serial_test::serial]
+		async fn read_and_deletion_only() {
+			super::read_and_deletion_only::read_and_deletion_only($new_ds).await;
+		}
+	};
+}
+pub(crate) use define_tests;

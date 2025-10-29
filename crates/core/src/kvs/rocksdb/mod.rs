@@ -5,6 +5,7 @@ mod cnf;
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -25,8 +26,19 @@ const TARGET: &str = "surrealdb::core::kvs::rocksdb";
 
 pub struct Datastore {
 	db: Pin<Arc<OptimisticTransactionDB>>,
-	/// Optional SST file manager for monitoring space usage
-	sst_file_manager: Option<Arc<SstFileManager>>,
+	/// Disk space manager for monitoring space usage
+	disk_space_manager: Option<DiskSpaceManager>,
+}
+
+struct DiskSpaceManager {
+	/// SST file manager for monitoring space usage
+	sst_file_manager: Arc<SstFileManager>,
+	/// The maximum space usage allowed for the database.
+	read_and_deletion_limit: u64,
+	/// The number of bytes for 80% of the allowed space usage.
+	limit_80: u64,
+	/// Indicates if the warning for 80% full has been logged
+	warn_80_percent_logged: AtomicBool,
 }
 
 pub struct Transaction {
@@ -53,6 +65,62 @@ pub struct Transaction {
 impl Drop for Transaction {
 	fn drop(&mut self) {
 		self.check.drop_check(self.done, self.write);
+	}
+}
+
+impl DiskSpaceManager {
+	fn new(limit: u64, opts: &mut Options) -> Result<Self> {
+		let env = Env::new()?;
+		let sst_file_manager = SstFileManager::new(&env)?;
+		// Disable RocksDB's built-in hard limit (set to 0 = unlimited).
+		// This prevents RocksDB from blocking writes due to temporary size spikes from
+		// write buffering and pending compactions. Instead, the application manages space
+		// restrictions at the transaction level through state transitions, providing more
+		// graceful handling and allowing deletions to free space.
+		sst_file_manager.set_max_allowed_space_usage(0);
+		opts.set_sst_file_manager(&sst_file_manager);
+		Ok(Self {
+			sst_file_manager: Arc::new(sst_file_manager),
+			read_and_deletion_limit: limit,
+			limit_80: (limit as f64 * 0.8) as u64,
+			warn_80_percent_logged: AtomicBool::new(false),
+		})
+	}
+
+	/// Checks the datastore operational state based on SST file space usage.
+	///
+	/// This method implements a state machine that transitions between two modes:
+	/// - Normal: All operations allowed (write, read, delete)
+	/// - ReadAndDeletionOnly: Only read and delete operations allowed, writes are blocked
+	///
+	/// State transitions:
+	/// - Normal → ReadAndDeletionOnly: When SST file space usage reaches the configured limit
+	/// - ReadAndDeletionOnly → Normal: When space usage drops below the configured limit (after
+	///   deletions and compaction free up space)
+	///
+	/// Returns `true` if the datastore is in read-and-deletion-only mode, `false` otherwise.
+	/// When `true`, write operations will be rejected with `Error::DbReadAndDeleteOnly`.
+	fn is_deletion_only(&self) -> bool {
+		let current_size = self.sst_file_manager.get_total_size();
+		if current_size < self.limit_80 {
+			self.warn_80_percent_logged.store(false, Ordering::Relaxed);
+			return false;
+		}
+		if !self.warn_80_percent_logged.load(Ordering::Relaxed) {
+			warn!(target: TARGET, "SST file space usage is at 80% of the limit ({})", current_size);
+			self.warn_80_percent_logged.store(true, Ordering::Relaxed);
+		}
+		// Check current size against the application limit
+		// Transition to read-and-deletion-only mode when the primary limit is exceeded
+		if current_size < self.read_and_deletion_limit {
+			return false;
+		}
+		warn!(
+			target: TARGET,
+			"Transitioning to read-and-deletion-only mode due to primary limit ({}) being reached",
+			current_size
+		);
+		true
 	}
 }
 
@@ -215,17 +283,8 @@ impl Datastore {
 		// Configure SST file manager for disk space monitoring and management.
 		// The SST file manager tracks SST file sizes in real-time. When the configured
 		// space limit is reached, the application transitions to read-and-deletion-only mode.
-		let sst_file_manager = if *ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE > 0 {
-			let env = Env::new()?;
-			let sst_file_manager = SstFileManager::new(&env)?;
-			// Disable RocksDB's built-in hard limit (set to 0 = unlimited).
-			// This prevents RocksDB from blocking writes due to temporary size spikes from
-			// write buffering and pending compactions. Instead, the application manages space
-			// restrictions at the transaction level through state transitions, providing more
-			// graceful handling and allowing deletions to free space.
-			sst_file_manager.set_max_allowed_space_usage(0);
-			opts.set_sst_file_manager(&sst_file_manager);
-			Some(Arc::new(sst_file_manager))
+		let disk_space_manager = if *ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE > 0 {
+			Some(DiskSpaceManager::new(*ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE, &mut opts)?)
 		} else {
 			None
 		};
@@ -234,7 +293,7 @@ impl Datastore {
 		// Return the datastore
 		Ok(Datastore {
 			db,
-			sst_file_manager,
+			disk_space_manager,
 		})
 	}
 
@@ -302,42 +361,14 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Checks the datastore operational state based on SST file space usage.
-	///
-	/// This method implements a state machine that transitions between two modes:
-	/// - Normal: All operations allowed (write, read, delete)
-	/// - ReadAndDeletionOnly: Only read and delete operations allowed, writes are blocked
-	///
-	/// State transitions:
-	/// - Normal → ReadAndDeletionOnly: When SST file space usage reaches the configured limit
-	/// - ReadAndDeletionOnly → Normal: When space usage drops below the configured limit (after
-	///   deletions and compaction free up space)
-	///
-	/// Returns `true` if the datastore is in read-and-deletion-only mode, `false` otherwise.
-	/// When `true`, write operations will be rejected with `Error::DbReadAndDeleteOnly`.
-	fn is_deletion_only(&self) -> bool {
-		if let Some(sst_file_manager) = self.sst_file_manager.as_ref() {
-			// Check current size against the application limit
-			// Transition to read-and-deletion-only mode when the primary limit is exceeded
-			let current_size = sst_file_manager.get_total_size();
-			if current_size >= *ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE {
-				info!(
-					target: TARGET,
-					"Transitioning to read-and-deletion-only mode due to primary limit ({}) being reached",
-					current_size
-				);
-				return true;
-			}
-		}
-		false
-	}
-
 	/// Start a new transaction
 	pub(crate) async fn transaction(
 		&self,
 		write: bool,
 		_: bool,
 	) -> Result<Box<dyn crate::kvs::api::Transaction>> {
+		let deletion_only =
+			self.disk_space_manager.as_ref().map(|dsm| dsm.is_deletion_only()).unwrap_or(false);
 		// Set the transaction options
 		let mut to = OptimisticTransactionOptions::default();
 		to.set_snapshot(true);
@@ -376,7 +407,7 @@ impl Datastore {
 			inner: Some(inner),
 			ro,
 			db: self.db.clone(),
-			deletion_only: self.is_deletion_only(),
+			deletion_only,
 		}))
 	}
 }
