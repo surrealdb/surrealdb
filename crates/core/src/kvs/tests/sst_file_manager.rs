@@ -7,8 +7,6 @@
 //! - Supports read-and-deletion-only mode for gradual space recovery (with deletion-only threshold)
 //! - Automatically recovers to normal mode when space is freed
 
-use std::time::Instant;
-
 use temp_dir::TempDir;
 
 use crate::kvs::Datastore;
@@ -36,18 +34,19 @@ async fn test_sst_file_manager_read_and_deletion_only_mode() {
 	let temp_dir = TempDir::new().unwrap();
 	let path = format!("rocksdb:{}", temp_dir.path().to_string_lossy());
 
-	// Set space limit of 100KB and deletion-only threshold of 150KB
-	// When 100KB is reached, it transitions to deletion-only mode with 150KB limit
+	// Set space limit of 10MB - When the limit is reached, it transitions to deletion-only mode
 	unsafe {
-		std::env::set_var("SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE", "102400");
-		std::env::set_var("SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE_DELETION_ONLY", "153600");
+		std::env::set_var("SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE", "10485760");
+		// Set a small write buffer size (10KB) to force frequent flushes to SST files
+		// This ensures the SST file manager can track the data
+		std::env::set_var("SURREAL_ROCKSDB_WRITE_BUFFER_SIZE", "10240");
+		// Set a small WAL size limit (1MB) to force data to flush to SST files
+		std::env::set_var("SURREAL_ROCKSDB_WAL_SIZE_LIMIT", "1");
 	}
 
 	// Create datastore with read-and-deletion-only mode configured
 	let ds = Datastore::new(&path).await.unwrap();
 
-	let t = Instant::now();
-	println!("{} Insert initial data", t.elapsed().as_secs_f32());
 	// Perform some initial writes that should succeed
 	{
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
@@ -56,32 +55,25 @@ async fn test_sst_file_manager_read_and_deletion_only_mode() {
 	}
 
 	// This loop should reach the size limit and transition to deletion-only mode
-	println!("{} Insert data until size limit is reached", t.elapsed().as_secs_f32());
-	let mut res = Ok(());
-	let mut final_j = 0;
-	for j in 0..1000 {
-		let mut tx = match ds.transaction(Write, Optimistic).await {
-			Ok(tx) => tx.inner(),
-			Err(e) => {
-				final_j = j;
+	let mut count_err = 0;
+	for j in 0..200 {
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		for i in 0..100 {
+			// 100KB per transaction
+			let key = format!("unlimited_key_{}_{}", i, j);
+			let value = vec![0u8; 1024]; // 1KB per value
+			if let Err(e) = tx.set(&key, &value, None).await {
 				assert!(
 					e.to_string().starts_with("The datastore is in read-and-deletion-only mode"),
 					"{e}"
 				);
-				res = Err(e);
-				break;
+				count_err += 1;
 			}
-		};
-		for i in 0..100 {
-			let key = format!("unlimited_key_{}_{}", i, j);
-			let value = vec![0u8; 10240]; // 1KB per value
-			tx.set(&key, &value, None).await.unwrap();
 		}
 		tx.commit().await.unwrap();
 	}
-	assert!(res.is_err(), "{res:?}");
+	assert!(count_err > 50, "Count error: {}", count_err);
 
-	println!("{} Verify writes fail", t.elapsed().as_secs_f32());
 	// More write should not be possible
 	{
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
@@ -94,7 +86,6 @@ async fn test_sst_file_manager_read_and_deletion_only_mode() {
 		tx.cancel().await.unwrap();
 	}
 
-	println!("{} Verify reads work", t.elapsed().as_secs_f32());
 	// Verify reads work
 	{
 		let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
@@ -103,9 +94,8 @@ async fn test_sst_file_manager_read_and_deletion_only_mode() {
 		tx.cancel().await.unwrap();
 	}
 
-	println!("{} Delete data until space limit is freed", t.elapsed().as_secs_f32());
 	// Verify we can delete data
-	for j in 0..final_j {
+	for j in 0..200 {
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		for i in 0..100 {
 			let key = format!("unlimited_key_{}_{}", i, j);
@@ -114,7 +104,6 @@ async fn test_sst_file_manager_read_and_deletion_only_mode() {
 		tx.commit().await.unwrap();
 	}
 
-	println!("{} Verify writes work again", t.elapsed().as_secs_f32());
 	// More writes should be possible again
 	{
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
@@ -122,10 +111,10 @@ async fn test_sst_file_manager_read_and_deletion_only_mode() {
 		tx.commit().await.unwrap();
 	}
 
-	println!("{} End", t.elapsed().as_secs_f32());
 	// Clean up
 	unsafe {
 		std::env::remove_var("SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE");
-		std::env::remove_var("SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE_DELETION_ONLY");
+		std::env::remove_var("SURREAL_ROCKSDB_WRITE_BUFFER_SIZE");
+		std::env::remove_var("SURREAL_ROCKSDB_WAL_SIZE_LIMIT");
 	}
 }
