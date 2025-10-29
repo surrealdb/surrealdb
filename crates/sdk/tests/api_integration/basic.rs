@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use serde_json::json;
 use surrealdb::IndexedResults;
-use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess};
+use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess, Token};
 use surrealdb::opt::{Config, PatchOp, PatchOps, Resource};
 use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, Value, array, object};
 use surrealdb_core::syn;
@@ -1819,6 +1819,16 @@ pub async fn refresh_tokens(new_db: impl CreateDb) {
 	let token = db.authenticate(token).refresh().await.unwrap();
 	assert!(token.refresh.is_some());
 	assert_ne!(old_token, token.access.as_insecure_token());
+	// Revoke a refresh token
+	let value = token.into_value();
+	let token = Token::from_value(value.clone()).unwrap();
+	db.invalidate().refresh(token).await.unwrap();
+	// The access token is still valid
+	let token = Token::from_value(value.clone()).unwrap();
+	db.authenticate(token).await.unwrap();
+	// The refresh token is revoked
+	let token = Token::from_value(value).unwrap();
+	db.authenticate(token).refresh().await.unwrap_err();
 }
 
 define_include_tests!(basic => {

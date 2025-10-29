@@ -17,7 +17,11 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 			let query_result = QueryResultBuilder::started_now();
 
 			let query_result = match cmd {
-				Command::Invalidate | Command::Health => query_result,
+				Command::Invalidate
+				| Command::Health
+				| Command::Revoke {
+					..
+				} => query_result,
 				Command::Authenticate {
 					token,
 				}

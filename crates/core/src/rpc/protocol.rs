@@ -132,6 +132,7 @@ pub trait RpcProtocol {
 			Method::Authenticate => self.authenticate(session, params).await,
 			Method::Refresh => self.refresh(session, params).await,
 			Method::Invalidate => self.invalidate(session).await,
+			Method::Revoke => self.revoke(params).await,
 			Method::Reset => self.reset(session).await,
 			Method::Kill => self.kill(session, params).await,
 			Method::Live => self.live(session, params).await,
@@ -360,6 +361,22 @@ pub trait RpcProtocol {
 		self.set_session(session_id, Arc::new(session));
 		// Drop the mutex guard
 		mem::drop(guard);
+		// Return nothing on success
+		Ok(DbResult::Other(PublicValue::None))
+	}
+
+	async fn revoke(&self, params: PublicArray) -> Result<DbResult, RpcError> {
+		tracing::debug!("revoke");
+		// Process the method arguments
+		let unexpected = || RpcError::InvalidParams("Expected (token:Token)".to_string());
+		let Some(value) = extract_args(params.into_vec()) else {
+			return Err(unexpected());
+		};
+		let Ok(token) = Token::from_value(value) else {
+			return Err(unexpected());
+		};
+		// Attempt to revoke the refresh token
+		token.revoke_refresh_token(self.kvs()).await?;
 		// Return nothing on success
 		Ok(DbResult::Other(PublicValue::None))
 	}

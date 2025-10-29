@@ -647,22 +647,27 @@ async fn router(
 			token,
 		} => {
 			let query_result = QueryResultBuilder::started_now();
-			let result = match token {
-				iam::Token::Access(..) => query_result
-					.finish_with_result(Err(crate::err::Error::MissingRefreshToken.into())),
-				token @ iam::Token::WithRefresh {
-					..
-				} => match token.refresh(kvs, &mut *session.write().await).await {
-					Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
-					Err(error) => query_result
-						.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
-				},
+			let result = match token.refresh(kvs, &mut *session.write().await).await {
+				Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
+				Err(error) => query_result
+					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
 			};
 			Ok(vec![result])
 		}
 		Command::Invalidate => {
 			let query_result = QueryResultBuilder::started_now();
 			let result = match iam::clear::clear(&mut *session.write().await) {
+				Ok(_) => query_result.finish_with_result(Ok(Value::None)),
+				Err(error) => query_result
+					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
+			};
+			Ok(vec![result])
+		}
+		Command::Revoke {
+			token,
+		} => {
+			let query_result = QueryResultBuilder::started_now();
+			let result = match token.revoke_refresh_token(kvs).await {
 				Ok(_) => query_result.finish_with_result(Ok(Value::None)),
 				Err(error) => query_result
 					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),

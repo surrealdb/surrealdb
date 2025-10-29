@@ -250,7 +250,7 @@ impl SurrealValue for Token {
 /// should take care to ensure that only authorized users have access to the
 /// JWT. For example, it can be stored in a secure cookie or encrypted in conjunction with other
 /// encryption mechanisms.
-#[derive(Serialize, Deserialize, SurrealValue)]
+#[derive(Debug, Serialize, Deserialize, SurrealValue)]
 pub struct AccessToken(pub(crate) SecureToken);
 
 impl AccessToken {
@@ -268,12 +268,6 @@ impl AccessToken {
 	/// and protected from unauthorized access.
 	pub fn into_insecure_token(self) -> String {
 		self.0.0
-	}
-}
-
-impl fmt::Debug for AccessToken {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "AccessToken(REDACTED)")
 	}
 }
 
@@ -311,7 +305,7 @@ impl fmt::Debug for AccessToken {
 /// // Use the token string to request a new access token
 /// // (implementation depends on your authentication flow)
 /// ```
-#[derive(Serialize, Deserialize, SurrealValue)]
+#[derive(Debug, Serialize, Deserialize, SurrealValue)]
 pub struct RefreshToken(pub(crate) SecureToken);
 
 impl RefreshToken {
@@ -332,12 +326,6 @@ impl RefreshToken {
 	}
 }
 
-impl fmt::Debug for RefreshToken {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "RefreshToken(REDACTED)")
-	}
-}
-
 /// A secure wrapper for token strings that prevents accidental exposure.
 ///
 /// This internal struct wraps token strings to provide security features:
@@ -349,6 +337,12 @@ impl fmt::Debug for RefreshToken {
 /// while still allowing access from other modules within the same crate.
 #[derive(Clone, Serialize, Deserialize, SurrealValue)]
 pub(crate) struct SecureToken(pub(crate) String);
+
+impl fmt::Debug for SecureToken {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		write!(f, "REDACTED")
+	}
+}
 
 impl From<AccessToken> for Token {
 	fn from(access: AccessToken) -> Self {
@@ -437,5 +431,11 @@ impl<'a> From<&'a String> for RefreshToken {
 impl<'a> From<&'a str> for RefreshToken {
 	fn from(token: &'a str) -> Self {
 		Self(SecureToken(token.to_owned()))
+	}
+}
+
+impl From<RefreshToken> for SecureToken {
+	fn from(token: RefreshToken) -> Self {
+		token.0
 	}
 }

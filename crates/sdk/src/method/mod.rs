@@ -545,6 +545,8 @@ where
 	pub fn invalidate(&'_ self) -> Invalidate<'_, C> {
 		Invalidate {
 			client: Cow::Borrowed(self),
+			token: Value::None,
+			typ: PhantomData,
 		}
 	}
 

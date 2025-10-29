@@ -32,6 +32,9 @@ pub(crate) enum Command {
 		token: Token,
 	},
 	Invalidate,
+	Revoke {
+		token: Token,
+	},
 	RawQuery {
 		txn: Option<Uuid>,
 		query: Cow<'static, str>,
@@ -122,7 +125,13 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "authenticate",
-				params: Some(Value::Array(Array::from(vec![Value::from_t(token)]))),
+				params: Some(Value::Array(Array::from(vec![match token {
+					Token::Access(access) => access.into_value(),
+					Token::WithRefresh {
+						access,
+						..
+					} => access.into_value(),
+				}]))),
 				transaction: None,
 			},
 			Command::Refresh {
@@ -137,6 +146,14 @@ impl Command {
 				id,
 				method: "invalidate",
 				params: None,
+				transaction: None,
+			},
+			Command::Revoke {
+				token,
+			} => RouterRequest {
+				id,
+				method: "revoke",
+				params: Some(Value::Array(Array::from(vec![token.into_value()]))),
 				transaction: None,
 			},
 			Command::RawQuery {

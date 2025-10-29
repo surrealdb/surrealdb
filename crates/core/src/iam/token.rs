@@ -138,7 +138,10 @@ impl Token {
 	/// ```
 	pub async fn refresh(self, kvs: &Datastore, session: &mut Session) -> Result<Self> {
 		match self {
-			Token::Access(_) => bail!(Error::InvalidAuth),
+			Token::Access(_) => bail!(Error::InvalidArguments {
+				name: "refresh".into(),
+				message: "Token is an access token, cannot refresh".into(),
+			}),
 			Token::WithRefresh {
 				access,
 				refresh,
@@ -163,6 +166,36 @@ impl Token {
 				// 3. Create a new access token and refresh token
 				// 4. Update the session with the original authentication scope
 				iam::signin::signin(kvs, session, vars.into()).await
+			}
+		}
+	}
+
+	pub async fn revoke_refresh_token(self, kvs: &Datastore) -> Result<()> {
+		match self {
+			Token::Access(_) => bail!(Error::InvalidArguments {
+				name: "refresh".into(),
+				message: "Token is an access token, cannot revoke refresh token".into(),
+			}),
+			Token::WithRefresh {
+				access,
+				refresh,
+			} => {
+				let grant_id = iam::signin::validate_grant_bearer(&refresh)?;
+				let token_data = decode::<Claims>(&access, &KEY, &DUD)?;
+				let ns = token_data.claims.ns.ok_or_else(|| Error::InvalidArguments {
+					name: "ns".into(),
+					message: "Token does not contain a namespace".into(),
+				})?;
+				let db = token_data.claims.db.ok_or_else(|| Error::InvalidArguments {
+					name: "db".into(),
+					message: "Token does not contain a database".into(),
+				})?;
+				let ac = token_data.claims.ac.ok_or_else(|| Error::InvalidArguments {
+					name: "ac".into(),
+					message: "Token does not contain an access name".into(),
+				})?;
+				iam::access::revoke_refresh_token_record(kvs, grant_id, ac, &ns, &db).await?;
+				Ok(())
 			}
 		}
 	}
