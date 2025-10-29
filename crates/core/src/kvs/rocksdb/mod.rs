@@ -73,6 +73,7 @@ pub struct Transaction {
 	/// - `None`: No write operations have been performed yet
 	/// - `Some(true)`: Only deletion operations have been performed
 	/// - `Some(false)`: At least one non-deletion write operation has been performed
+	///
 	/// Used during commit to validate transactions started before the datastore entered
 	/// deletion-only mode.
 	contains_only_deletions: Option<bool>,
@@ -571,10 +572,9 @@ impl super::api::Transaction for Transaction {
 		// This is used for long duration transactions that would have started before disk
 		// conditions changed
 		if let Some(disk_space_manager) = self.disk_space_manager.as_ref() {
-			if disk_space_manager.is_deletion_only() {
-				if self.contains_only_deletions == Some(false) {
-					bail!(Error::DbReadAndDeleteOnly);
-				}
+			if disk_space_manager.is_deletion_only() && self.contains_only_deletions == Some(false)
+			{
+				bail!(Error::DbReadAndDeleteOnly);
 			}
 		}
 		// Commit this transaction
