@@ -25,8 +25,9 @@ use crate::kvs::{Check, Key, Val};
 const TARGET: &str = "surrealdb::core::kvs::rocksdb";
 
 pub struct Datastore {
+	/// The underlying RocksDB optimistic transaction database
 	db: Pin<Arc<OptimisticTransactionDB>>,
-	/// Disk space manager for monitoring space usage
+	/// Disk space manager for monitoring space usage and enforcing space limits
 	disk_space_manager: Option<DiskSpaceManager>,
 }
 
@@ -36,6 +37,7 @@ pub struct Datastore {
 /// the datastore between normal operation and read-and-deletion-only mode based on
 /// configured space limits. It provides gradual degradation of service rather than
 /// abrupt failures when disk space is constrained.
+#[derive(Clone)]
 struct DiskSpaceManager {
 	/// SST file manager for monitoring space usage
 	sst_file_manager: Arc<SstFileManager>,
@@ -44,7 +46,7 @@ struct DiskSpaceManager {
 	/// The number of bytes for 80% of the allowed space usage.
 	limit_80: u64,
 	/// Indicates if the warning for 80% full has been logged
-	warn_80_percent_logged: AtomicBool,
+	warn_80_percent_logged: Arc<AtomicBool>,
 }
 
 pub struct Transaction {
@@ -64,8 +66,18 @@ pub struct Transaction {
 	// be declared last, so that it is dropped last.
 	db: Pin<Arc<OptimisticTransactionDB>>,
 	/// The operational state when this transaction was created.
-	/// Determines which write operations are allowed (all writes, no writes, or deletions only).
+	/// If `true`, the datastore was in read-and-deletion-only mode, so only deletions are allowed.
+	/// If `false`, all write operations are permitted.
 	deletion_only: bool,
+	/// Tracks the types of write operations performed in this transaction.
+	/// - `None`: No write operations have been performed yet
+	/// - `Some(true)`: Only deletion operations have been performed
+	/// - `Some(false)`: At least one non-deletion write operation has been performed
+	/// Used during commit to validate transactions started before the datastore entered
+	/// deletion-only mode.
+	contains_only_deletions: Option<bool>,
+	/// Reference to the disk space manager for checking current operational state during commit.
+	disk_space_manager: Option<DiskSpaceManager>,
 }
 
 impl Drop for Transaction {
@@ -100,7 +112,7 @@ impl DiskSpaceManager {
 			sst_file_manager: Arc::new(sst_file_manager),
 			read_and_deletion_limit: limit,
 			limit_80: (limit as f64 * 0.8) as u64,
-			warn_80_percent_logged: AtomicBool::new(false),
+			warn_80_percent_logged: Arc::new(AtomicBool::new(false)),
 		})
 	}
 
@@ -383,14 +395,20 @@ impl Datastore {
 		Ok(())
 	}
 
+	/// Checks if the datastore is currently in read-and-deletion-only mode.
+	///
+	/// Returns `true` if the SST file space usage has exceeded the configured limit,
+	/// `false` otherwise. When no space limit is configured, always returns `false`.
+	fn is_deletion_only(&self) -> bool {
+		self.disk_space_manager.as_ref().map(|dsm| dsm.is_deletion_only()).unwrap_or(false)
+	}
+
 	/// Start a new transaction
 	pub(crate) async fn transaction(
 		&self,
 		write: bool,
 		_: bool,
 	) -> Result<Box<dyn crate::kvs::api::Transaction>> {
-		let deletion_only =
-			self.disk_space_manager.as_ref().map(|dsm| dsm.is_deletion_only()).unwrap_or(false);
 		// Set the transaction options
 		let mut to = OptimisticTransactionOptions::default();
 		to.set_snapshot(true);
@@ -429,7 +447,9 @@ impl Datastore {
 			inner: Some(inner),
 			ro,
 			db: self.db.clone(),
-			deletion_only,
+			deletion_only: self.is_deletion_only(),
+			contains_only_deletions: None,
+			disk_space_manager: self.disk_space_manager.clone(),
 		}))
 	}
 }
@@ -444,7 +464,7 @@ impl Transaction {
 	/// 4. Transaction was created as writable
 	///
 	/// Returns an appropriate error if any validation fails.
-	fn ensure_write(&self, version: Option<u64>) -> Result<()> {
+	fn ensure_write(&mut self, version: Option<u64>) -> Result<()> {
 		ensure!(!self.deletion_only, Error::DbReadAndDeleteOnly);
 		// RocksDB does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
@@ -452,7 +472,8 @@ impl Transaction {
 		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
 		ensure!(self.write, Error::TxReadonly);
-		//
+		// Mark this transaction as containing non-deletion operations
+		self.contains_only_deletions = Some(false);
 		Ok(())
 	}
 
@@ -468,14 +489,17 @@ impl Transaction {
 	/// when the datastore is in a restricted state due to space limits.
 	///
 	/// Returns an appropriate error if any validation fails.
-	fn ensure_deletion(&self, version: Option<u64>) -> Result<()> {
+	fn ensure_deletion(&mut self, version: Option<u64>) -> Result<()> {
 		// RocksDB does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Check to see if transaction is writable
 		ensure!(self.write, Error::TxReadonly);
-		//
+		// Mark this transaction as containing only deletions if no writes have been performed yet
+		if self.contains_only_deletions.is_none() {
+			self.contains_only_deletions = Some(true);
+		}
 		Ok(())
 	}
 
@@ -491,7 +515,6 @@ impl Transaction {
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
-		//
 		Ok(())
 	}
 }
@@ -544,9 +567,21 @@ impl super::api::Transaction for Transaction {
 		ensure!(self.write, Error::TxReadonly);
 		// Mark this transaction as done
 		self.done = true;
+		// Check if we are in read-and-deletion-only mode
+		// This is used for long duration transactions that would have started before disk
+		// conditions changed
+		if let Some(disk_space_manager) = self.disk_space_manager.as_ref() {
+			if disk_space_manager.is_deletion_only() {
+				if self.contains_only_deletions == Some(false) {
+					bail!(Error::DbReadAndDeleteOnly);
+				}
+			}
+		}
 		// Commit this transaction
 		self.inner.take().expect("transaction should have inner").commit()?;
-		// If we are in read-and-deletion-only mode, compact the entire key range (None, None)
+		// If transaction was created in read-and-deletion-only mode, trigger compaction to reclaim
+		// disk space from deleted keys. This helps the datastore transition back to normal mode
+		// when space usage drops below the limit.
 		if self.deletion_only {
 			self.db.compact_range::<&[u8], &[u8]>(None, None);
 		}
