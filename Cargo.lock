@@ -3134,7 +3134,7 @@ dependencies = [
 [[package]]
 name = "librocksdb-sys"
 version = "0.17.3+10.6.2"
-source = "git+https://github.com/surrealdb/rust-rocksdb.git?branch=10_6_2_sst_file_manager#ecf0046292fee68f8bf84ccb278b848c2df06af8"
+source = "git+https://github.com/surrealdb/rust-rocksdb.git?rev=ecf0046292fee68f8bf84ccb278b848c2df06af8#ecf0046292fee68f8bf84ccb278b848c2df06af8"
 dependencies = [
  "bindgen 0.72.1",
  "bzip2-sys",
@@ -4870,7 +4870,7 @@ checksum = "cbf4a6aa5f6d6888f39e980649f3ad6b666acdce1d78e95b8a2cb076e687ae30"
 [[package]]
 name = "rocksdb"
 version = "0.24.0"
-source = "git+https://github.com/surrealdb/rust-rocksdb.git?branch=10_6_2_sst_file_manager#ecf0046292fee68f8bf84ccb278b848c2df06af8"
+source = "git+https://github.com/surrealdb/rust-rocksdb.git?rev=ecf0046292fee68f8bf84ccb278b848c2df06af8#ecf0046292fee68f8bf84ccb278b848c2df06af8"
 dependencies = [
  "libc",
  "librocksdb-sys",
