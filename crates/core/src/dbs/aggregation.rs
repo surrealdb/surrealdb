@@ -143,8 +143,8 @@ pub fn aggregate_field_name(idx: usize) -> String {
 	res
 }
 
-/// Returns the name of group expression n used within the fields expression to calculate the result for
-/// the aggregate analysis.
+/// Returns the name of group expression n used within the fields expression to calculate the result
+/// for the aggregate analysis.
 pub fn group_field_name(idx: usize) -> String {
 	let mut res = String::new();
 	write_group_field_name(&mut res, idx);
@@ -544,8 +544,8 @@ impl MutVisitor for AggregateExprCollector<'_> {
 						if self.support_acummulate {
 							let field_name = mem::replace(
 								field,
-								// HACK: We replace the aggregate expression here with an field so that we can later
-								// inject the value via the current doc.
+								// HACK: We replace the aggregate expression here with an field so
+								// that we can later inject the value via the current doc.
 								aggregate_field_name(self.aggregations.len()),
 							);
 							let len = self.exprs_map.len();
