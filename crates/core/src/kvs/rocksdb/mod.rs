@@ -213,15 +213,16 @@ impl Datastore {
 			}
 		});
 		// Configure SST file manager for disk space monitoring and management.
-		// The SST file manager tracks SST file sizes and can enforce space limits,
-		// triggering read-only or read-and-deletion-only modes when thresholds are exceeded.
+		// The SST file manager tracks SST file sizes in real-time. When the configured
+		// space limit is reached, the application transitions to read-and-deletion-only mode.
 		let sst_file_manager = if *ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE > 0 {
 			let env = Env::new()?;
 			let sst_file_manager = SstFileManager::new(&env)?;
-			// Disable RocksDB's hard limit (set to 0 = unlimited)
-			// This allows the application to manage space restrictions through
-			// state transitions without RocksDB stopping writes due to buffering causing
-			// size spikes
+			// Disable RocksDB's built-in hard limit (set to 0 = unlimited).
+			// This prevents RocksDB from blocking writes due to temporary size spikes from
+			// write buffering and pending compactions. Instead, the application manages space
+			// restrictions at the transaction level through state transitions, providing more
+			// graceful handling and allowing deletions to free space.
 			sst_file_manager.set_max_allowed_space_usage(0);
 			opts.set_sst_file_manager(&sst_file_manager);
 			Some(Arc::new(sst_file_manager))
@@ -301,22 +302,19 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Checks and updates the datastore operational state based on SST file space usage.
+	/// Checks the datastore operational state based on SST file space usage.
 	///
-	/// This method implements a state machine that transitions between three modes:
-	/// - Normal: All operations allowed
-	/// - ReadOnly: Only read operations allowed (when space limit is reached)
-	/// - ReadAndDeletionOnly: Read and delete operations allowed (to free up space)
+	/// This method implements a state machine that transitions between two modes:
+	/// - Normal: All operations allowed (write, read, delete)
+	/// - ReadAndDeletionOnly: Only read and delete operations allowed, writes are blocked
 	///
 	/// State transitions:
-	/// - Normal → ReadOnly: When max space is reached and deletion-only mode is not configured
-	/// - Normal → ReadAndDeletionOnly: When max space is reached and deletion-only threshold is
-	///   configured
-	/// - ReadAndDeletionOnly → Normal: When space usage drops below the original limit
+	/// - Normal → ReadAndDeletionOnly: When SST file space usage reaches the configured limit
+	/// - ReadAndDeletionOnly → Normal: When space usage drops below the configured limit
+	///   (after deletions and compaction free up space)
 	///
-	/// Returns an error when transitioning to ReadAndDeletionOnly to notify the caller,
-	/// but returns Ok for ReadOnly state to allow the transaction to proceed with restricted
-	/// access.
+	/// Returns `true` if the datastore is in read-and-deletion-only mode, `false` otherwise.
+	/// When `true`, write operations will be rejected with `Error::DbReadAndDeleteOnly`.
 	fn is_deletion_only(&self) -> bool {
 		if let Some(sst_file_manager) = self.sst_file_manager.as_ref() {
 			// Check current size against the application limit
@@ -405,6 +403,18 @@ impl Transaction {
 		Ok(())
 	}
 
+	/// Validates that a delete operation can be performed in the current transaction.
+	///
+	/// This method checks conditions before allowing a deletion:
+	/// 1. Version parameter is None (RocksDB doesn't support versioned queries)
+	/// 2. Transaction is still open (not committed or cancelled)
+	/// 3. Transaction was created as writable
+	///
+	/// Unlike `ensure_write()`, this method does NOT check the `deletion_only` flag,
+	/// allowing deletions even in read-and-deletion-only mode. This enables space recovery
+	/// when the datastore is in a restricted state due to space limits.
+	///
+	/// Returns an appropriate error if any validation fails.
 	fn ensure_deletion(&self, version: Option<u64>) -> Result<()> {
 		// RocksDB does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);

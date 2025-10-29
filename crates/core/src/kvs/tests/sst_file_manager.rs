@@ -1,11 +1,10 @@
 //! Tests for RocksDB SST file manager feature
 //!
-//! This module showcases the SST file manager space monitoring feature that:
-//! - Limits disk space usage for SST files via environment variables
-//! - Configures compaction buffer to prevent write stalls
-//! - Transitions to read-only mode when space limit is reached (without deletion-only threshold)
-//! - Supports read-and-deletion-only mode for gradual space recovery (with deletion-only threshold)
-//! - Automatically recovers to normal mode when space is freed
+//! This module tests the SST file manager space monitoring feature that:
+//! - Limits disk space usage for SST files via the `SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE` environment variable
+//! - Transitions to read-and-deletion-only mode when the space limit is reached
+//! - Allows read and delete operations during read-and-deletion-only mode (but blocks writes)
+//! - Automatically recovers to normal mode when space drops below the limit after deletions and compaction
 
 use temp_dir::TempDir;
 
@@ -15,26 +14,25 @@ use crate::kvs::TransactionType::*;
 
 #[tokio::test]
 async fn test_sst_file_manager_read_and_deletion_only_mode() {
-	// This test demonstrates the read-and-deletion-only mode configuration.
-	// When both MAX_ALLOWED_SPACE_USAGE and MAX_ALLOWED_SPACE_USAGE_DELETION_ONLY
-	// are set, the datastore transitions to read-and-deletion-only mode instead
-	// of read-only mode when the initial limit is reached.
+	// This test demonstrates the read-and-deletion-only mode behavior.
+	// When SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE is set, the datastore transitions
+	// to read-and-deletion-only mode when SST file space usage reaches the configured limit.
 	//
 	// State Machine:
-	// Normal -> ReadAndDeletionOnly (when max space is reached and deletion-only threshold is set)
-	// ReadAndDeletionOnly -> Normal (when space drops below original limit)
+	// Normal -> ReadAndDeletionOnly (when SST space usage reaches the configured limit)
+	// ReadAndDeletionOnly -> Normal (when space usage drops below the limit after deletions)
 	//
 	// In ReadAndDeletionOnly mode:
 	// - Read operations are allowed
+	// - Delete operations are allowed (to free up space)
 	// - Write operations return Error::DbReadAndDeleteOnly
-	// - The error message indicates that deleting data would help free space
-	// - RocksDB automatically resumes with increased threshold
-	// - When space drops below the original limit, normal mode is restored
+	// - The error message indicates that deleting data will free space
+	// - When space drops below the limit (after deletions and compaction), normal mode is restored
 
 	let temp_dir = TempDir::new().unwrap();
 	let path = format!("rocksdb:{}", temp_dir.path().to_string_lossy());
 
-	// Set space limit of 10MB - When the limit is reached, it transitions to deletion-only mode
+	// Set space limit of 10MB - When the limit is reached, it transitions to read-and-deletion-only mode
 	unsafe {
 		std::env::set_var("SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE", "10485760");
 		// Set a small write buffer size (10KB) to force frequent flushes to SST files
