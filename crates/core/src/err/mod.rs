@@ -31,7 +31,7 @@ use crate::vs::VersionStampError;
 #[derive(Error, Debug)]
 #[allow(clippy::enum_variant_names)]
 #[allow(dead_code, reason = "Some variants are only used by specific KV stores")]
-pub enum Error {
+pub(crate) enum Error {
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
 	Unreachable(String),

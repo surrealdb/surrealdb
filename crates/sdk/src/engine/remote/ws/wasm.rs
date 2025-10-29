@@ -19,7 +19,8 @@ use wasmtimer::tokio::MissedTickBehavior;
 use ws_stream_wasm::{WsEvent, WsMessage as Message, WsMeta, WsStream};
 
 use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
-use crate::conn::{self, Command, RequestData, Route, Router, RouterRequest};
+use crate::conn::cmd::RouterRequest;
+use crate::conn::{self, Command, RequestData, Route, Router};
 use crate::engine::IntervalStream;
 use crate::engine::remote::ws::{Client, PING_INTERVAL};
 use crate::err::Error;
@@ -261,7 +262,7 @@ async fn router_handle_response(
 												state.vars.shift_remove(&key);
 											}
 											RequestEffect::Authenticate {
-												token,
+												..
 											} => {}
 										}
 										// Other results should be converted to a single result vec

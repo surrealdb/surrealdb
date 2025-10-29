@@ -164,7 +164,6 @@ use futures::StreamExt;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
 use surrealdb_core::dbs::{QueryResult, QueryResultBuilder, Session};
-use surrealdb_core::err::Error as CoreError;
 use surrealdb_core::iam;
 use surrealdb_core::kvs::Datastore;
 #[cfg(not(target_family = "wasm"))]
@@ -622,25 +621,19 @@ async fn router(
 				} => (access, true),
 			};
 			// Try to authenticate with the access token
-			let result = match iam::verify::token(kvs, &mut *session.write().await, &access).await {
+			let result = match iam::verify::token(kvs, &mut *session.write().await, access).await {
 				// If the access token is valid, return the token
 				Ok(_) => query_result.finish_with_result(Ok(token.into_value())),
 				Err(error) => {
 					// If the access token is expired and we have a refresh token, try to refresh it
-					if with_refresh {
-						// If the error is an expired token, try to refresh it
-						if let Some(CoreError::ExpiredToken) = error.downcast_ref::<CoreError>() {
-							let result = match token.refresh(kvs, &mut *session.write().await).await
-							{
-								Ok(token) => {
-									query_result.finish_with_result(Ok(token.into_value()))
-								}
-								Err(error) => query_result.finish_with_result(Err(
-									DbResultError::InternalError(error.to_string()),
-								)),
-							};
-							return Ok(vec![result]);
-						}
+					if with_refresh && error.to_string().contains("token has expired") {
+						let result = match token.refresh(kvs, &mut *session.write().await).await {
+							Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
+							Err(error) => query_result.finish_with_result(Err(
+								DbResultError::InternalError(error.to_string()),
+							)),
+						};
+						return Ok(vec![result]);
 					}
 					// If the access token is invalid and we don't have a refresh token, return an
 					// error
