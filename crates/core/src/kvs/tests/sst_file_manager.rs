@@ -15,6 +15,7 @@ use crate::kvs::LockType::Optimistic;
 use crate::kvs::TransactionType::*;
 
 #[tokio::test]
+#[serial_test::serial]
 async fn test_sst_file_manager_read_and_deletion_only_mode() {
 	// This test demonstrates the read-and-deletion-only mode behavior.
 	// When SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE is set, the datastore transitions
