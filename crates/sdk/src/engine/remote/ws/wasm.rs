@@ -274,48 +274,56 @@ async fn router_handle_response(
 									Err(error) => {
 										if let RequestEffect::Authenticate {
 											token: Some(token),
-										} = pending.effect && let Token::WithRefresh {
-											..
-										} = &token && error
-											.to_string()
-											.contains("token has expired")
+										} = pending.effect
 										{
-											let request = RouterRequest {
-												id: Some(id),
-												method: "authenticate",
-												params: Some(Value::Array(Array::from(vec![
-													token.into_value(),
-												]))),
-												transaction: None,
-											};
-											let request_value = request.into_value();
-											let value =
+											if let Token::WithRefresh {
+												..
+											} = &token
+											{
+												if error.to_string().contains("token has expired") {
+													let request = RouterRequest {
+														id: Some(id),
+														method: "authenticate",
+														params: Some(Value::Array(Array::from(
+															vec![token.into_value()],
+														))),
+														transaction: None,
+													};
+													let request_value = request.into_value();
+													let value =
 												surrealdb_core::rpc::format::flatbuffers::encode(
 													&request_value,
 												)
 												.expect("router request should serialize");
-											let message = Message::Binary(value.into());
-											match state.sink.send(message).await {
-												Err(send_error) => {
-													trace!(
-														"failed to send refresh query to the server; {send_error:?}"
-													);
-													pending
-														.response_channel
-														.send(Err(error))
-														.await
-														.ok();
-												}
-												Ok(..) => {
-													pending.effect = RequestEffect::Authenticate {
-														token: None,
-													};
-													state.pending_requests.insert(id, pending);
+													let message = Message::Binary(value.into());
+													match state.sink.send(message).await {
+														Err(send_error) => {
+															trace!(
+																"failed to send refresh query to the server; {send_error:?}"
+															);
+															pending
+																.response_channel
+																.send(Err(error))
+																.await
+																.ok();
+														}
+														Ok(..) => {
+															pending.effect =
+																RequestEffect::Authenticate {
+																	token: None,
+																};
+															state
+																.pending_requests
+																.insert(id, pending);
+														}
+													}
+
+													return HandleResult::Ok;
 												}
 											}
-										} else {
-											pending.response_channel.send(Err(error)).await.ok();
 										}
+
+										pending.response_channel.send(Err(error)).await.ok();
 									}
 								}
 							} else {

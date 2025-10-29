@@ -416,14 +416,16 @@ async fn router(
 					Err(error) => {
 						if let CoreToken::WithRefresh {
 							..
-						} = &token && error.to_string().contains("token has expired")
+						} = &token
 						{
-							let (value, refresh_results) =
-								refresh_token(token, base_url, client, headers, auth).await?;
-							*auth = Some(Auth::Bearer {
-								token: Token::from_value(value)?.access,
-							});
-							results = refresh_results;
+							if error.to_string().contains("token has expired") {
+								let (value, refresh_results) =
+									refresh_token(token, base_url, client, headers, auth).await?;
+								*auth = Some(Auth::Bearer {
+									token: Token::from_value(value)?.access,
+								});
+								results = refresh_results;
+							}
 						}
 					}
 				}
