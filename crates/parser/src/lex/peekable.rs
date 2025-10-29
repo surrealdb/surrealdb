@@ -138,7 +138,7 @@ impl<'source, const SIZE: usize> PeekableLexer<'source, SIZE> {
 		let remaining = self.lexer.remainder().len();
 		let source = self.lexer.source();
 		let used = source.len() - remaining;
-		let lexed_source = source[..used];
+		let lexed_source = &source[..used];
 
 		let slice = lexed_source
 			.get((span.start as usize)..(span.end as usize))
