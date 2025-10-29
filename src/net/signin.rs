@@ -5,12 +5,11 @@ use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use serde::Serialize;
-use surrealdb::types::Value;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_core::iam::signin::signin;
 use surrealdb_core::syn;
-use surrealdb_types::SurrealValue;
+use surrealdb_types::{SurrealValue, Value};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;

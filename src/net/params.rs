@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use serde::Deserialize;
-use surrealdb::types::Value;
+use surrealdb_types::Value;
 
 #[derive(Default, Deserialize, Debug, Clone)]
 pub struct Params {

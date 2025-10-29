@@ -26,6 +26,7 @@ mod schema;
 mod search;
 mod sequence;
 mod session;
+mod set;
 mod string;
 mod time;
 mod r#type;
@@ -57,6 +58,7 @@ impl_module_def!(
 	"search" => (search::Package),
 	"sequence" => (sequence::Package),
 	"session" => (session::Package),
+	"set" => (set::Package),
 	"sleep" => fut Async,
 	"string" => (string::Package),
 	"time" => (time::Package),

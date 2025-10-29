@@ -248,6 +248,18 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("search::highlight") => PathKind::Function,
 		UniCase::ascii("search::offsets") => PathKind::Function,
 		//
+		UniCase::ascii("set::add") => PathKind::Function,
+		UniCase::ascii("set::all") => PathKind::Function,
+		UniCase::ascii("set::any") => PathKind::Function,
+		UniCase::ascii("set::complement") => PathKind::Function,
+		UniCase::ascii("set::contains") => PathKind::Function,
+		UniCase::ascii("set::difference") => PathKind::Function,
+		UniCase::ascii("set::intersect") => PathKind::Function,
+		UniCase::ascii("set::is_empty") => PathKind::Function,
+		UniCase::ascii("set::len") => PathKind::Function,
+		UniCase::ascii("set::remove") => PathKind::Function,
+		UniCase::ascii("set::union") => PathKind::Function,
+		//
 		UniCase::ascii("sequence::nextval") => PathKind::Function,
 		//
 		UniCase::ascii("session::ac") => PathKind::Function,
@@ -372,6 +384,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("type::point") => PathKind::Function,
 		UniCase::ascii("type::range") => PathKind::Function,
 		UniCase::ascii("type::record") => PathKind::Function,
+		UniCase::ascii("type::set") => PathKind::Function,
 		UniCase::ascii("type::string") => PathKind::Function,
 		UniCase::ascii("type::string_lossy") => PathKind::Function,
 		UniCase::ascii("type::table") => PathKind::Function,
@@ -398,6 +411,7 @@ pub(crate) static PATHS: phf::Map<UniCase<&'static str>, PathKind> = phf_map! {
 		UniCase::ascii("type::is_polygon") => PathKind::Function,
 		UniCase::ascii("type::is_range") => PathKind::Function,
 		UniCase::ascii("type::is_record") => PathKind::Function,
+		UniCase::ascii("type::is_set") => PathKind::Function,
 		UniCase::ascii("type::is_string") => PathKind::Function,
 		UniCase::ascii("type::is_uuid") => PathKind::Function,
 		//

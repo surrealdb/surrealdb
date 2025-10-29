@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display, Formatter, Write};
 use std::ops::{Deref, DerefMut};
 
 use revision::revisioned;
@@ -79,6 +79,26 @@ impl Set {
 	pub fn into_literal(self) -> Vec<Expr> {
 		self.0.into_iter().map(Value::into_literal).collect()
 	}
+
+	/// Return the union of this set with another (A ∪ B)
+	pub fn union(self, other: Set) -> Set {
+		Set(self.0.union(&other.0).cloned().collect())
+	}
+
+	/// Return the intersection of this set with another (A ∩ B)
+	pub fn intersection(&self, other: &Set) -> Set {
+		Set(self.0.intersection(&other.0).cloned().collect())
+	}
+
+	/// Return the symmetric difference (A △ B) - elements in either but not both
+	pub fn symmetric_difference(self, other: Set) -> Set {
+		Set(self.0.symmetric_difference(&other.0).cloned().collect())
+	}
+
+	/// Return the relative complement (A \ B) - elements in self but not in other
+	pub fn complement(self, other: Set) -> Set {
+		Set(self.0.difference(&other.0).cloned().collect())
+	}
 }
 
 impl<T> From<Vec<T>> for Set
@@ -147,14 +167,14 @@ impl IntoIterator for Set {
 
 impl Display for Set {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		// Format as type::set([...]) since there's no set literal syntax
-		f.write_str("type::set([")?;
+		// Format as Python-style set literal: {val, val, val}
+		f.write_char('{')?;
 		for (i, v) in self.iter().enumerate() {
 			if i > 0 {
 				f.write_str(", ")?;
 			}
 			Display::fmt(v, f)?;
 		}
-		f.write_str("])")
+		f.write_char('}')
 	}
 }

@@ -104,14 +104,14 @@ impl DerefMut for Set {
 
 impl ToSql for Set {
 	fn fmt_sql(&self, f: &mut String) {
-		// Since there's no set literal syntax yet, format as type::set([...])
-		f.push_str("type::set([");
+		// Format as Python-style set literal: {val, val, val}
+		f.push('{');
 		for (i, v) in self.iter().enumerate() {
 			v.fmt_sql(f);
 			if i < self.len() - 1 {
 				f.push_str(", ");
 			}
 		}
-		f.push_str("])");
+		f.push('}');
 	}
 }
