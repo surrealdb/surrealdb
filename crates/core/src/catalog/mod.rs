@@ -8,7 +8,6 @@
 
 mod access;
 mod database;
-mod executable;
 mod namespace;
 pub(crate) mod providers;
 mod schema;
@@ -18,7 +17,6 @@ mod view;
 
 pub(crate) use access::*;
 pub(crate) use database::*;
-pub(crate) use executable::*;
 pub(crate) use namespace::*;
 pub use schema::ApiMethod;
 pub(crate) use schema::{
@@ -208,13 +206,9 @@ mod test {
     }, 39)]
 	#[case::function(FunctionDefinition {
         name: "function".to_string(),
-        executable: Executable::Block(BlockExecutable {
-            args: vec![],
-            returns: Some(Kind::Any),
-            block: Block(vec![
-                Expr::Literal(Literal::String("expr".to_string())),
-            ]),
-        }),
+        args: vec![(String::from("arg"), Kind::Any)],
+        returns: Some(Kind::Any),
+        block: Block(vec![Expr::Literal(Literal::String("expr".to_string()))]),
         comment: Some("comment".to_string()),
         permissions: Permission::Full,
     }, 36)]

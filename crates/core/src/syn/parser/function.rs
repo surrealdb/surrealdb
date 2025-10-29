@@ -30,22 +30,8 @@ impl Parser<'_> {
 				}
 
 				let name = self.lexer.span_str(start.span.covers(last_span)).to_string();
-				let sub = if self.eat(t!("<")) {
-					let start = self.last_span();
-					let next = self.next();
-					let next_str = self.lexer.span_str(next.span);
-					if next_str != "_" {
-						todo!("throw proper error here")
-					}
 
-					self.expect_closing_delimiter(t!(">"), start)?;
-					expected!(self, t!("::"));
-					Some(self.parse_ident()?)
-				} else {
-					None
-				};
-
-				Function::Custom(name, sub)
+				Function::Custom(name)
 			}
 			t!("ml") => {
 				self.pop_peek();
@@ -105,24 +91,10 @@ impl Parser<'_> {
 			name.push_str("::");
 			name.push_str(&self.parse_ident()?)
 		}
-		let sub = if self.eat(t!("<")) {
-			let start = self.last_span();
-			let next = self.next();
-			let next_str = self.lexer.span_str(next.span);
-			if next_str != "_" {
-				todo!("throw proper error here")
-			}
-
-			self.expect_closing_delimiter(t!(">"), start)?;
-			expected!(self, t!("::"));
-			Some(self.parse_ident()?)
-		} else {
-			None
-		};
 
 		expected!(self, t!("(")).span;
 		let args = self.parse_function_args(stk).await?;
-		let name = Function::Custom(name, sub);
+		let name = Function::Custom(name);
 		Ok(FunctionCall {
 			receiver: name,
 			arguments: args,

@@ -1092,9 +1092,9 @@ pub trait RpcProtocolV1: RpcContext {
 			}
 		};
 
+		// TODO support silo & mod here
 		let name = if let Some(rest) = name.strip_prefix("fn::") {
-			// TODO(micha) should sub functions be supported here?
-			Function::Custom(rest.to_owned(), None)
+			Function::Custom(rest.to_owned())
 		} else if let Some(rest) = name.strip_prefix("ml::") {
 			let name = rest.to_owned();
 			Function::Model(Model {

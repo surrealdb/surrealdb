@@ -1,5 +1,4 @@
-use std::fmt::{self, Display};
-use std::thread;
+use std::{fmt, thread};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
@@ -7,15 +6,12 @@ use reblessive::tree::Stk;
 use crate::catalog;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::catalog::{DatabaseId, NamespaceId};
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::Context;
 use crate::dbs::Options;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
-use crate::err::Error;
-use crate::expr::expression::VisitExpression;
-use crate::expr::{Block, Expr, FlowResultExt, Kind, Value};
-use crate::fmt::EscapeKwFreeIdent;
+use crate::expr::{Kind, Value};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::surrealism::cache::SurrealismCacheLookup;
 #[cfg(not(target_arch = "wasm32"))]
@@ -25,36 +21,34 @@ use crate::surrealism::host::SignatureHost;
 use crate::val::File;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum Executable {
-	Block(BlockExecutable),
+pub(crate) enum ModuleExecutable {
 	Surrealism(SurrealismExecutable),
 	Silo(SiloExecutable),
 }
 
-impl From<catalog::Executable> for Executable {
-	fn from(executable: catalog::Executable) -> Self {
+impl From<catalog::ModuleExecutable> for ModuleExecutable {
+	fn from(executable: catalog::ModuleExecutable) -> Self {
 		match executable {
-			catalog::Executable::Block(block) => Executable::Block(block.into()),
-			catalog::Executable::Surrealism(surrealism) => {
-				Executable::Surrealism(surrealism.into())
+			catalog::ModuleExecutable::Surrealism(surrealism) => {
+				ModuleExecutable::Surrealism(surrealism.into())
 			}
-			catalog::Executable::Silo(silo) => Executable::Silo(silo.into()),
+			catalog::ModuleExecutable::Silo(silo) => ModuleExecutable::Silo(silo.into()),
 		}
 	}
 }
 
-impl From<Executable> for catalog::Executable {
-	fn from(executable: Executable) -> Self {
+impl From<ModuleExecutable> for catalog::ModuleExecutable {
+	fn from(executable: ModuleExecutable) -> Self {
 		match executable {
-			Executable::Block(block) => catalog::Executable::Block(block.into()),
-			Executable::Surrealism(surrealism) => {
-				catalog::Executable::Surrealism(surrealism.into())
+			ModuleExecutable::Surrealism(surrealism) => {
+				catalog::ModuleExecutable::Surrealism(surrealism.into())
 			}
-			Executable::Silo(silo) => catalog::Executable::Silo(silo.into()),
+			ModuleExecutable::Silo(silo) => catalog::ModuleExecutable::Silo(silo.into()),
 		}
 	}
 }
-impl Executable {
+
+impl ModuleExecutable {
 	pub(crate) async fn signature(
 		&self,
 		ctx: &Context,
@@ -63,9 +57,10 @@ impl Executable {
 		sub: Option<&str>,
 	) -> Result<Signature> {
 		match self {
-			Executable::Block(block) => block.signature(sub).await,
-			Executable::Surrealism(surrealism) => surrealism.signature(ctx, ns, db, sub).await,
-			Executable::Silo(silo) => silo.signature(ctx, sub).await,
+			ModuleExecutable::Surrealism(surrealism) => {
+				surrealism.signature(ctx, ns, db, sub).await
+			}
+			ModuleExecutable::Silo(silo) => silo.signature(ctx, sub).await,
 		}
 	}
 
@@ -79,177 +74,27 @@ impl Executable {
 		sub: Option<&str>,
 	) -> Result<Value> {
 		match self {
-			Executable::Block(block) => block.run(stk, ctx, opt, doc, args, sub).await,
-			Executable::Surrealism(surrealism) => {
+			ModuleExecutable::Surrealism(surrealism) => {
 				surrealism.run(stk, ctx, opt, doc, args, sub).await
 			}
-			Executable::Silo(silo) => silo.run(stk, ctx, opt, doc, args, sub).await,
+			ModuleExecutable::Silo(silo) => silo.run(stk, ctx, opt, doc, args, sub).await,
 		}
 	}
 }
 
-impl fmt::Display for Executable {
+impl fmt::Display for ModuleExecutable {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Executable::Block(block) => block.fmt(f),
-			Executable::Surrealism(surrealism) => surrealism.fmt(f),
-			Executable::Silo(silo) => silo.fmt(f),
-		}
-	}
-}
-
-impl VisitExpression for Executable {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		match self {
-			Executable::Block(block) => block.visit(visitor),
-			Executable::Surrealism(surrealism) => surrealism.visit(visitor),
-			Executable::Silo(silo) => silo.visit(visitor),
+			ModuleExecutable::Surrealism(surrealism) => surrealism.fmt(f),
+			ModuleExecutable::Silo(silo) => silo.fmt(f),
 		}
 	}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct Signature {
-	pub(crate) args: Arguments,
+	pub(crate) args: Vec<Kind>,
 	pub(crate) returns: Option<Kind>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum Arguments {
-	Named(Vec<(String, Kind)>),
-	Unnamed(Vec<Kind>),
-}
-
-impl Arguments {
-	pub(crate) fn to_named(&self) -> Vec<(String, Kind)> {
-		match self {
-			Arguments::Named(args) => args.clone(),
-			Arguments::Unnamed(args) => {
-				args.iter().enumerate().map(|(i, k)| (format!("arg{}", i), k.clone())).collect()
-			}
-		}
-	}
-
-	pub(crate) fn to_unnamed(&self) -> Vec<Kind> {
-		match self {
-			Arguments::Named(args) => args.iter().map(|(_, k)| k.clone()).collect(),
-			Arguments::Unnamed(args) => args.clone(),
-		}
-	}
-}
-
-impl From<Vec<(String, Kind)>> for Arguments {
-	fn from(args: Vec<(String, Kind)>) -> Self {
-		Arguments::Named(args)
-	}
-}
-
-impl From<Vec<Kind>> for Arguments {
-	fn from(args: Vec<Kind>) -> Self {
-		Arguments::Unnamed(args)
-	}
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct BlockExecutable {
-	pub args: Vec<(String, Kind)>,
-	pub returns: Option<Kind>,
-	pub block: Block,
-}
-
-impl From<catalog::BlockExecutable> for BlockExecutable {
-	fn from(executable: catalog::BlockExecutable) -> Self {
-		Self {
-			args: executable.args,
-			returns: executable.returns,
-			block: executable.block,
-		}
-	}
-}
-
-impl From<BlockExecutable> for catalog::BlockExecutable {
-	fn from(executable: BlockExecutable) -> Self {
-		Self {
-			args: executable.args,
-			returns: executable.returns,
-			block: executable.block,
-		}
-	}
-}
-
-impl BlockExecutable {
-	pub(crate) async fn signature(&self, sub: Option<&str>) -> Result<Signature> {
-		if sub.is_some() {
-			bail!("Sub-functions are not supported for block functions");
-		}
-
-		let args = Arguments::from(self.args.clone());
-		let returns = self.returns.clone();
-
-		Ok(Signature {
-			args,
-			returns,
-		})
-	}
-
-	pub(crate) async fn run(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-		args: Vec<Value>,
-		sub: Option<&str>,
-	) -> Result<Value> {
-		if sub.is_some() {
-			bail!("Sub-functions are not supported for block functions");
-		}
-
-		// Compute the function arguments
-		// Duplicate context
-		let mut ctx = MutableContext::new_isolated(ctx);
-		// Process the function arguments
-		for (val, (name, kind)) in args.into_iter().zip(&self.args) {
-			ctx.add_value(
-				name.clone(),
-				val.coerce_to_kind(kind).map_err(Error::from).map_err(anyhow::Error::new)?.into(),
-			);
-		}
-		// Freeze the context
-		let ctx = ctx.freeze();
-		// Run the block
-		self.block.compute(stk, &ctx, opt, doc).await.catch_return()
-	}
-}
-
-impl fmt::Display for BlockExecutable {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "(")?;
-		for (i, (name, kind)) in self.args.iter().enumerate() {
-			if i > 0 {
-				f.write_str(", ")?;
-			}
-			write!(f, "${}: {kind}", EscapeKwFreeIdent(name))?;
-		}
-		f.write_str(") ")?;
-		if let Some(ref v) = self.returns {
-			write!(f, "-> {v} ")?;
-		}
-		Display::fmt(&self.block, f)?;
-		Ok(())
-	}
-}
-
-impl VisitExpression for BlockExecutable {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.block.visit(visitor);
-	}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -272,16 +117,7 @@ impl From<SurrealismExecutable> for catalog::SurrealismExecutable {
 
 impl fmt::Display for SurrealismExecutable {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, " AS {}", self.0)
-	}
-}
-
-// Nothing to visit, but required by the trait
-impl VisitExpression for SurrealismExecutable {
-	fn visit<F>(&self, _visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
+		self.0.fmt(f)
 	}
 }
 
@@ -307,14 +143,13 @@ impl SurrealismExecutable {
 			let host = Box::new(SignatureHost::new());
 			let mut controller = runtime.new_controller(host).await?;
 
-			let args: Vec<Kind> = controller
+			let args = controller
 				.args(sub.map(String::from))
 				.await?
 				.into_iter()
 				.map(|x| x.into())
 				.collect();
 
-			let args = Arguments::from(args);
 			let returns =
 				controller.returns(sub.map(String::from)).await.map(|x| Some(x.into()))?;
 
@@ -422,18 +257,9 @@ impl fmt::Display for SiloExecutable {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(
 			f,
-			" AS silo::{}::{}<{}.{}.{}>",
+			"silo::{}::{}<{}.{}.{}>",
 			self.organisation, self.package, self.major, self.minor, self.patch
 		)
-	}
-}
-
-// Nothing to visit, but required by the trait
-impl VisitExpression for SiloExecutable {
-	fn visit<F>(&self, _visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
 	}
 }
 
@@ -459,14 +285,13 @@ impl SiloExecutable {
 			let host = Box::new(SignatureHost::new());
 			let mut controller = runtime.new_controller(host).await?;
 
-			let args: Vec<Kind> = controller
+			let args = controller
 				.args(sub.map(String::from))
 				.await?
 				.into_iter()
 				.map(|x| x.into())
 				.collect();
 
-			let args = Arguments::from(args);
 			let returns =
 				controller.returns(sub.map(String::from)).await.map(|x| Some(x.into()))?;
 

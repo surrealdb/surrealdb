@@ -5,39 +5,51 @@ use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
-use crate::catalog::{FunctionDefinition, Permission};
+use crate::catalog::{ModuleDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::expression::VisitExpression;
-use crate::expr::{Base, Executable, Expr};
+use crate::expr::{Base, Expr};
 use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
-mod silo;
+mod executable;
+pub(crate) use executable::*;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct DefineFunctionStatement {
+pub(crate) struct DefineModuleStatement {
 	pub kind: DefineKind,
-	pub name: String,
+	pub name: Option<String>,
+	pub executable: ModuleExecutable,
 	pub comment: Option<Expr>,
 	pub permissions: Permission,
-	pub executable: Executable,
 }
 
-impl VisitExpression for DefineFunctionStatement {
+impl VisitExpression for DefineModuleStatement {
 	fn visit<F>(&self, visitor: &mut F)
 	where
 		F: FnMut(&Expr),
 	{
-		self.executable.visit(visitor);
 		self.comment.iter().for_each(|comment| comment.visit(visitor));
 	}
 }
 
-impl DefineFunctionStatement {
+impl DefineModuleStatement {
+	fn get_storage_name(&self) -> Result<String> {
+		if let Some(name) = &self.name {
+			Ok(format!("mod::{}", name))
+		} else if let ModuleExecutable::Silo(silo) = &self.executable {
+			Ok(format!(
+				"silo::{}::{}<{}.{}.{}>",
+				silo.organisation, silo.package, silo.major, silo.minor, silo.patch
+			))
+		} else {
+			bail!("A module without a name cannot be stored")
+		}
+	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -52,12 +64,13 @@ impl DefineFunctionStatement {
 		let txn = ctx.tx();
 		// Check if the definition exists
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-		if txn.get_db_function(ns, db, &self.name).await.is_ok() {
+		let storage_name = self.get_storage_name()?;
+		if txn.get_db_module(ns, db, &storage_name).await.is_ok() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::FcAlreadyExists {
-							name: self.name.to_string(),
+							name: storage_name,
 						});
 					}
 				}
@@ -73,14 +86,14 @@ impl DefineFunctionStatement {
 			txn.get_or_add_db(Some(ctx), ns, db, opt.strict).await?
 		};
 
-		txn.put_db_function(
+		txn.put_db_module(
 			ns,
 			db,
-			&FunctionDefinition {
+			&ModuleDefinition {
 				name: self.name.clone(),
+				executable: self.executable.clone().into(),
 				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 				permissions: self.permissions.clone(),
-				executable: self.executable.clone().into(),
 			},
 		)
 		.await?;
@@ -91,15 +104,17 @@ impl DefineFunctionStatement {
 	}
 }
 
-impl fmt::Display for DefineFunctionStatement {
+impl fmt::Display for DefineModuleStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE FUNCTION")?;
+		write!(f, "DEFINE MODULE")?;
 		match self.kind {
 			DefineKind::Default => {}
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " fn::{}", &*self.name)?;
+		if let Some(name) = &self.name {
+			write!(f, " mod::{name} AS")?;
+		}
 		write!(f, " {}", self.executable)?;
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {}", v)?

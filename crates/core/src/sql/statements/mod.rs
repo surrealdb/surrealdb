@@ -28,8 +28,8 @@ pub(crate) use self::create::CreateStatement;
 pub(crate) use self::define::{
 	DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement,
 	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-	DefineTableStatement, DefineUserStatement,
+	DefineModelStatement, DefineModuleStatement, DefineNamespaceStatement, DefineParamStatement,
+	DefineStatement, DefineTableStatement, DefineUserStatement,
 };
 pub(crate) use self::delete::DeleteStatement;
 pub(crate) use self::foreach::ForeachStatement;

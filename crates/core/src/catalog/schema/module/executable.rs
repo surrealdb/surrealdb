@@ -1,47 +1,21 @@
 use revision::revisioned;
 
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Block, Kind};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) enum Executable {
-	Block(BlockExecutable),
+pub(crate) enum ModuleExecutable {
 	Surrealism(SurrealismExecutable),
 	Silo(SiloExecutable),
 }
 
-impl InfoStructure for Executable {
+impl InfoStructure for ModuleExecutable {
 	fn structure(self) -> Value {
 		match self {
-			Executable::Block(block) => block.structure(),
-			Executable::Surrealism(surrealism) => surrealism.structure(),
-			Executable::Silo(silo) => silo.structure(),
+			ModuleExecutable::Surrealism(surrealism) => surrealism.structure(),
+			ModuleExecutable::Silo(silo) => silo.structure(),
 		}
-	}
-}
-
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct BlockExecutable {
-	pub args: Vec<(String, Kind)>,
-	pub returns: Option<Kind>,
-	pub block: Block,
-}
-
-impl InfoStructure for BlockExecutable {
-	fn structure(self) -> Value {
-		Value::from(map! {
-			"type".to_string() => Value::from("block"),
-			"args".to_string() => self.args
-				.into_iter()
-				.map(|(n, k)| vec![n.into(), k.to_string().into()].into())
-				.collect::<Vec<Value>>()
-				.into(),
-			"returns".to_string(), if let Some(v) = self.returns => v.to_string().into(),
-			"block".to_string() => self.block.to_string().into(),
-		})
 	}
 }
 

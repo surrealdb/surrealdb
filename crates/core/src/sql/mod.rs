@@ -12,7 +12,6 @@ pub(crate) mod cond;
 pub(crate) mod constant;
 pub(crate) mod data;
 pub(crate) mod dir;
-pub(crate) mod executable;
 pub(crate) mod explain;
 pub(crate) mod expression;
 pub(crate) mod fetch;
@@ -68,7 +67,6 @@ pub(crate) use self::cond::Cond;
 pub(crate) use self::constant::Constant;
 pub(crate) use self::data::Data;
 pub(crate) use self::dir::Dir;
-pub(crate) use self::executable::{BlockExecutable, Executable};
 pub(crate) use self::explain::Explain;
 pub(crate) use self::expression::Expr;
 pub(crate) use self::fetch::{Fetch, Fetchs};
@@ -96,10 +94,12 @@ pub(crate) use self::scoring::Scoring;
 pub(crate) use self::script::Script;
 pub(crate) use self::split::{Split, Splits};
 pub(crate) use self::start::Start;
+pub(crate) use self::statements::define::{ModuleExecutable, SiloExecutable, SurrealismExecutable};
 pub(crate) use self::statements::{
 	CreateStatement, DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-	DefineIndexStatement, DefineModelStatement, DeleteStatement, InsertStatement, KillStatement,
-	LiveStatement, RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
+	DefineIndexStatement, DefineModelStatement, DefineModuleStatement, DeleteStatement,
+	InsertStatement, KillStatement, LiveStatement, RelateStatement, SelectStatement,
+	UpdateStatement, UpsertStatement,
 };
 pub(crate) use self::table_type::TableType;
 pub(crate) use self::timeout::Timeout;
