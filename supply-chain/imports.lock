@@ -1250,6 +1250,16 @@ criteria = "safe-to-deploy"
 version = "1.0.0"
 notes = "I am the author of this crate."
 
+[[audits.bytecode-alliance.audits.ciborium-io]]
+who = "Pat Hickey <phickey@fastly.com>"
+criteria = "safe-to-deploy"
+version = "0.2.0"
+
+[[audits.bytecode-alliance.audits.ciborium-ll]]
+who = "Pat Hickey <phickey@fastly.com>"
+criteria = "safe-to-deploy"
+version = "0.2.0"
+
 [[audits.bytecode-alliance.audits.cipher]]
 who = "Andrew Brown <andrew.brown@intel.com>"
 criteria = "safe-to-deploy"
@@ -1323,6 +1333,16 @@ who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
 delta = "2.1.1 -> 2.3.0"
 notes = "Minor refactoring, nothing new."
+
+[[audits.bytecode-alliance.audits.fixedbitset]]
+who = "Nick Fitzgerald <fitzgen@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.4.2"
+notes = """
+No ambient I/O. Uses some `unsafe`, but the uses look good and are guarded by
+relevant assertions, although could use some comments and some slight
+refactoring into helpers to dedupe unsafe blocks in my personal opinion.
+"""
 
 [[audits.bytecode-alliance.audits.foldhash]]
 who = "Alex Crichton <alex@alexcrichton.com>"
@@ -2927,6 +2947,55 @@ delta = "0.7.2 -> 0.7.6"
 notes = "Manually verified new unsafe pointer arithmetic."
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
+[[audits.mozilla.audits.bindgen]]
+who = "Emilio Cobos Álvarez <emilio@crisal.io>"
+criteria = "safe-to-deploy"
+version = "0.59.2"
+notes = "I'm the primary author and maintainer of the crate."
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.bindgen]]
+who = "Emilio Cobos Álvarez <emilio@crisal.io>"
+criteria = "safe-to-deploy"
+delta = "0.59.2 -> 0.63.0"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.bindgen]]
+who = "Mike Hommey <mh+mozilla@glandium.org>"
+criteria = "safe-to-deploy"
+delta = "0.63.0 -> 0.64.0"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.bindgen]]
+who = "Mike Hommey <mh+mozilla@glandium.org>"
+criteria = "safe-to-deploy"
+delta = "0.64.0 -> 0.66.1"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.bindgen]]
+who = "Mike Hommey <mh+mozilla@glandium.org>"
+criteria = "safe-to-deploy"
+delta = "0.66.1 -> 0.68.1"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.bindgen]]
+who = "Andreas Pehrson <apehrson@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.68.1 -> 0.69.1"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.bindgen]]
+who = "Mike Hommey <mh+mozilla@glandium.org>"
+criteria = "safe-to-deploy"
+delta = "0.69.1 -> 0.69.2"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.bindgen]]
+who = "Emilio Cobos Álvarez <emilio@crisal.io>"
+criteria = "safe-to-deploy"
+delta = "0.69.2 -> 0.69.4"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
 [[audits.mozilla.audits.bitflags]]
 who = "Alex Franchuk <afranchuk@mozilla.com>"
 criteria = "safe-to-deploy"
@@ -3021,6 +3090,64 @@ aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-ch
 who = "Mike Hommey <mh+mozilla@glandium.org>"
 criteria = "safe-to-deploy"
 delta = "0.1.3 -> 0.1.6"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.cssparser]]
+who = "Emilio Cobos Álvarez <emilio@crisal.io>"
+criteria = "safe-to-deploy"
+version = "0.29.6"
+notes = """
+I've reviewed or authored most of the recent changes to this library, and it
+was developed by other mozilla folks. Unsafe code there is reasonable (utf-8
+casts for serialization and parsing).
+"""
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.cssparser]]
+who = "Bobby Holley <bobbyholley@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.29.6 -> 0.31.0"
+notes = """
+All the changes in this release were authored by Mozilla staff, except the
+uninit_array stuff, which looks fine.
+"""
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.cssparser]]
+who = "Mike Hommey <mh+mozilla@glandium.org>"
+criteria = "safe-to-deploy"
+delta = "0.31.0 -> 0.31.2"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.cssparser]]
+who = "Emilio Cobos Álvarez <emilio@crisal.io>"
+criteria = "safe-to-deploy"
+delta = "0.31.2 -> 0.32.0"
+notes = "All changes were either authored or reviewed by Mozilla employees."
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.cssparser]]
+who = "Emilio Cobos Álvarez <emilio@crisal.io>"
+criteria = "safe-to-deploy"
+delta = "0.32.0 -> 0.33.0"
+notes = """
+Mozilla authored. Breaking changes from 0.32 involve splitting color APIs into
+their own crate and removing an unused line number offset mechanism.
+"""
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.cssparser]]
+who = "Emilio Cobos Álvarez <emilio@crisal.io>"
+criteria = "safe-to-deploy"
+delta = "0.33.0 -> 0.34.0"
+notes = "I'm the publisher of the crate, and either myself or other Mozilla folks have been authors or reviewers of all the changes."
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.cssparser]]
+who = "Emilio Cobos Álvarez <emilio@crisal.io>"
+criteria = "safe-to-deploy"
+delta = "0.34.0 -> 0.35.0"
+notes = "All non-trivial changes authored or reviewed by Mozilla employees."
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.cssparser-macros]]
@@ -3804,6 +3931,13 @@ criteria = "safe-to-deploy"
 delta = "0.2.1 -> 0.2.2"
 aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supply-chain/audits.toml"
 
+[[audits.mozilla.audits.windows-link]]
+who = "Mark Hammond <mhammond@skippinet.com.au>"
+criteria = "safe-to-deploy"
+version = "0.1.1"
+notes = "A microsoft crate allowing unsafe calls to windows apis."
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
 [[audits.mozilla.audits.write16]]
 who = "Henri Sivonen <hsivonen@hsivonen.fi>"
 criteria = "safe-to-deploy"
@@ -3951,12 +4085,34 @@ criteria = "safe-to-deploy"
 delta = "0.21.5 -> 0.21.7"
 aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
 
+[[audits.zcash.audits.bindgen]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.69.4 -> 0.69.5"
+notes = """
+Change to `unsafe` block is to switch from `clang_getSpellingLocation` to
+`clang_getFileLocation`; I confirmed these have the same arguments.
+"""
+aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
+
 [[audits.zcash.audits.block-buffer]]
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.10.3 -> 0.10.4"
 notes = "Adds panics to prevent a block size of zero from causing unsoundness."
 aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
+
+[[audits.zcash.audits.ciborium-io]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.2.0 -> 0.2.2"
+aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
+
+[[audits.zcash.audits.ciborium-ll]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.2.0 -> 0.2.2"
+aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
 
 [[audits.zcash.audits.constant_time_eq]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -4156,6 +4312,18 @@ delta = "0.1.4 -> 0.1.7"
 notes = "Only change to an `unsafe` block is to fix a clippy lint."
 aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
 
+[[audits.zcash.audits.sync_wrapper]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.1.2 -> 1.0.1"
+aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
+
+[[audits.zcash.audits.sync_wrapper]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "1.0.1 -> 1.0.2"
+aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
+
 [[audits.zcash.audits.thread_local]]
 who = "Jack Grigg <jack@z.cash>"
 criteria = "safe-to-deploy"
@@ -4244,3 +4412,9 @@ It uses `#![forbid(unsafe_code, unstable_features)]`, and does not have any
 powerful imports.
 """
 aggregated-from = "https://raw.githubusercontent.com/zcash/wallet/main/supply-chain/audits.toml"
+
+[[audits.zcash.audits.windows-link]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.1.1 -> 0.1.3"
+aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
