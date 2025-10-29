@@ -1,124 +1,125 @@
 use core::fmt;
 use std::{
 	fmt::{Debug, Display},
-	ptr::NonNull,
+	ops::{Deref, DerefMut},
+	result::Result as StdResult,
 };
 
 mod code;
 pub use code::ErrorCode;
+mod raw;
+use raw::{RawError, RawTypedError};
 
-type ErrorPtr<T> = NonNull<ErrorImpl<T>>;
-
-struct ErrorVTable {
-	drop_in_place: unsafe fn(ErrorPtr<()>),
-	error_code: unsafe fn(ErrorPtr<()>) -> ErrorCode,
-	debug: unsafe fn(ErrorPtr<()>, &mut fmt::Formatter) -> fmt::Result,
-	display: unsafe fn(ErrorPtr<()>, &mut fmt::Formatter) -> fmt::Result,
-}
-
-impl ErrorVTable {
-	unsafe fn drop_in_place<T: ErrorTrait>(ptr: ErrorPtr<()>) {
-		let ptr = ptr.cast::<ErrorImpl<T>>();
-		unsafe { Box::from_raw(ptr.as_ptr()) };
-	}
-
-	unsafe fn error_code<T: ErrorTrait>(ptr: ErrorPtr<()>) -> ErrorCode {
-		let ptr = ptr.cast::<ErrorImpl<T>>();
-		unsafe { ptr.as_ref().t.error_code() }
-	}
-
-	unsafe fn debug<T: ErrorTrait>(ptr: ErrorPtr<()>, f: &mut fmt::Formatter) -> fmt::Result {
-		let ptr = ptr.cast::<ErrorImpl<T>>();
-		unsafe { fmt::Debug::fmt(&ptr.as_ref().t, f) }
-	}
-
-	unsafe fn display<T: ErrorTrait>(ptr: ErrorPtr<()>, f: &mut fmt::Formatter) -> fmt::Result {
-		let ptr = ptr.cast::<ErrorImpl<T>>();
-		unsafe { fmt::Display::fmt(&ptr.as_ref().t, f) }
-	}
-
-	pub fn for_error<E>() -> &'static Self
-	where
-		E: ErrorTrait,
-	{
-		trait HasVTable {
-			const VTABLE: ErrorVTable;
-		}
-
-		impl<E: ErrorTrait> HasVTable for E {
-			const VTABLE: ErrorVTable = ErrorVTable {
-				drop_in_place: ErrorVTable::drop_in_place::<E>,
-				error_code: ErrorVTable::error_code::<E>,
-				debug: ErrorVTable::debug::<E>,
-				display: ErrorVTable::display::<E>,
-			};
-		}
-
-		&<E as HasVTable>::VTABLE
-	}
-}
-
-pub trait ErrorTrait: Display + Debug {
+pub trait ErrorTrait: Display + Debug + 'static {
 	fn error_code(&self) -> ErrorCode {
 		ErrorCode::default()
 	}
 }
 
-impl<E: std::error::Error> ErrorTrait for E {}
+impl<E: std::error::Error + 'static> ErrorTrait for E {}
 
-#[repr(C)]
-struct ErrorImpl<T> {
-	vtable: &'static ErrorVTable,
-	t: T,
-}
+pub type Result<T, E = Error> = StdResult<T, E>;
 
-pub struct Error(ErrorPtr<()>);
+/// Generic error type, optimized to have little overhead on the happy path.
+///
+/// This error will always be the size of a pointer, regardless of the errors it might contain.
+pub struct Error(RawError);
 
 impl Error {
+	#[cold]
 	pub fn new<E>(e: E) -> Self
 	where
 		E: ErrorTrait,
 	{
-		let vtable = ErrorVTable::for_error::<E>();
-		let ptr = Box::new(ErrorImpl {
-			vtable,
-			t: e,
-		});
-		let ptr = unsafe { NonNull::new_unchecked(Box::into_raw(ptr)) };
-		Error(ptr.cast())
+		Error(RawError::new(e))
 	}
 
 	pub fn error_code(&self) -> ErrorCode {
-		unsafe {
-			let error_code_fn = self.0.as_ref().vtable.error_code;
-			(error_code_fn)(self.0)
+		self.0.error_code()
+	}
+
+	pub fn downcast_ref<T: ErrorTrait>(&self) -> Option<&T> {
+		self.0.is::<T>().then(|| unsafe { self.0.unchecked_ref() })
+	}
+
+	pub fn downcast_mut<T: ErrorTrait>(&mut self) -> Option<&mut T> {
+		self.0.is::<T>().then(|| unsafe { self.0.unchecked_mut() })
+	}
+
+	pub fn into_inner<T: ErrorTrait>(self) -> Result<T, Self> {
+		if self.0.is::<T>() {
+			Ok(unsafe { self.0.unchecked_into_inner() })
+		} else {
+			Err(self)
+		}
+	}
+
+	pub fn downcast<T: ErrorTrait>(self) -> Result<TypedError<T>, Self> {
+		if self.0.is::<T>() {
+			Ok(TypedError(unsafe { self.0.unchecked_cast() }))
+		} else {
+			Err(self)
 		}
 	}
 }
 
 impl fmt::Debug for Error {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		unsafe {
-			let debug = self.0.as_ref().vtable.debug;
-			(debug)(self.0, f)
-		}
+		self.0.debug(f)
 	}
 }
 
 impl fmt::Display for Error {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		unsafe {
-			let display = self.0.as_ref().vtable.display;
-			(display)(self.0, f)
-		}
+		self.0.display(f)
 	}
 }
 
-impl Drop for Error {
-	fn drop(&mut self) {
-		unsafe {
-			let drop = self.0.as_ref().vtable.drop_in_place;
-			(drop)(self.0)
-		}
+/// Error type, optimized to have little overhead on the happy path.
+///
+/// This error can be efficiently cast into	[`Error`] without any allocation.
+///
+/// This error will always be the size of a pointer, regardless of the errors it might contain.
+pub struct TypedError<T: ErrorTrait>(RawTypedError<T>);
+
+impl<T: ErrorTrait> TypedError<T> {
+	#[cold]
+	pub fn new(e: T) -> Self {
+		TypedError(RawTypedError::new(e))
+	}
+
+	/// Convert the error into a type erased version.
+	pub fn erase(self) -> Error {
+		Error(self.0.erase())
+	}
+
+	pub fn into_inner(self) -> T {
+		self.0.into_inner()
+	}
+}
+
+impl<T: ErrorTrait> Deref for TypedError<T> {
+	type Target = T;
+
+	fn deref(&self) -> &Self::Target {
+		self.0.deref()
+	}
+}
+
+impl<T: ErrorTrait> DerefMut for TypedError<T> {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		self.0.deref_mut()
+	}
+}
+
+impl<T: ErrorTrait> fmt::Debug for TypedError<T> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		Debug::fmt(self.0.deref(), f)
+	}
+}
+
+impl<T: ErrorTrait> fmt::Display for TypedError<T> {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		Display::fmt(self.0.deref(), f)
 	}
 }

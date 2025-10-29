@@ -33,18 +33,21 @@ pub trait ParseSync: Sized {
 #[derive(Debug, Clone, Copy)]
 pub struct Config {
 	depth_limit: usize,
+
+	flexible_record_ids: bool,
+	generate_warnings: bool,
+
 	feature_references: bool,
 	feature_bearer_access: bool,
 	feature_define_api: bool,
 	feature_files: bool,
 	legacy_strands: bool,
-	flexible_record_ids: bool,
 }
 
 bitflags! {
-	pub struct ParserFeatures: u8 {
+	pub struct ParserSettings: u8 {
 		const LEGACY_STRAND =      1 << 0;
-		const FLEXIBLE_RECORD_ID = 1 << 1;
+		const WARNINGS         =   1 << 1;
 		const FEAT_REFERENCES =    1 << 2;
 		const FEAT_BEARER_ACCESS = 1 << 3;
 		const FEAT_DEFINE_API =    1 << 4;
@@ -64,8 +67,7 @@ bitflags! {
 pub struct Parser<'source, 'ast> {
 	lex: PeekableLexer<'source, 4>,
 	ast: &'ast mut Ast,
-	config: Config,
-	features: ParserFeatures,
+	features: ParserSettings,
 	state: ParserState,
 }
 
@@ -87,25 +89,38 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		let lex = BaseTokenKind::lexer(source);
 		let lex = PeekableLexer::new(lex);
 
-		let mut features = ParserFeatures::empty();
+		let mut features = ParserSettings::empty();
 
 		if config.legacy_strands {
-			features |= ParserFeatures::LEGACY_STRAND;
+			features |= ParserSettings::LEGACY_STRAND;
 		}
+		if config.generate_warnings {
+			features |= ParserSettings::WARNINGS;
+		}
+
+		if config.feature_references {
+			features |= ParserSettings::FEAT_REFERENCES;
+		}
+		if config.feature_define_api {
+			features |= ParserSettings::FEAT_DEFINE_API;
+		}
+		if config.feature_files {
+			features |= ParserSettings::FEAT_FILES;
+		}
+		if config.legacy_strands {
+			features |= ParserSettings::LEGACY_STRAND;
+		}
+
+		let mut parser = Parser {
+			lex,
+			ast,
+			features,
+			state: ParserState::empty(),
+		};
 
 		// We ignore the stk which is mostly just to ensure the no accidental panics or infinite
 		// loops because we can maintain it's savety guarentees within the parser.
-		let mut runner = stack.enter(async |_stk| {
-			Parser {
-				lex,
-				ast,
-				config,
-				features,
-				state: ParserState::empty(),
-			}
-			.parse()
-			.await
-		});
+		let mut runner = stack.enter(|_| parser.parse());
 
 		loop {
 			if let Some(x) = runner.step() {
@@ -229,7 +244,7 @@ impl<'source, 'ast> Parser<'source, 'ast> {
 		};
 		if token.token != kind {
 			return Err(self.error(format_args!(
-				"Unexpected token `{;?}`, expected `{:?}`",
+				"Unexpected token `{:?}`, expected `{:?}`",
 				token.token, kind
 			)));
 		}
