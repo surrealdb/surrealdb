@@ -310,8 +310,8 @@ impl Datastore {
 	///
 	/// State transitions:
 	/// - Normal → ReadAndDeletionOnly: When SST file space usage reaches the configured limit
-	/// - ReadAndDeletionOnly → Normal: When space usage drops below the configured limit
-	///   (after deletions and compaction free up space)
+	/// - ReadAndDeletionOnly → Normal: When space usage drops below the configured limit (after
+	///   deletions and compaction free up space)
 	///
 	/// Returns `true` if the datastore is in read-and-deletion-only mode, `false` otherwise.
 	/// When `true`, write operations will be rejected with `Error::DbReadAndDeleteOnly`.

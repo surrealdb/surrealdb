@@ -1,10 +1,12 @@
 //! Tests for RocksDB SST file manager feature
 //!
 //! This module tests the SST file manager space monitoring feature that:
-//! - Limits disk space usage for SST files via the `SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE` environment variable
+//! - Limits disk space usage for SST files via the `SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE`
+//!   environment variable
 //! - Transitions to read-and-deletion-only mode when the space limit is reached
 //! - Allows read and delete operations during read-and-deletion-only mode (but blocks writes)
-//! - Automatically recovers to normal mode when space drops below the limit after deletions and compaction
+//! - Automatically recovers to normal mode when space drops below the limit after deletions and
+//!   compaction
 
 use temp_dir::TempDir;
 
@@ -32,7 +34,8 @@ async fn test_sst_file_manager_read_and_deletion_only_mode() {
 	let temp_dir = TempDir::new().unwrap();
 	let path = format!("rocksdb:{}", temp_dir.path().to_string_lossy());
 
-	// Set space limit of 10MB - When the limit is reached, it transitions to read-and-deletion-only mode
+	// Set space limit of 10MB - When the limit is reached, it transitions to read-and-deletion-only
+	// mode
 	unsafe {
 		std::env::set_var("SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE", "10485760");
 		// Set a small write buffer size (10KB) to force frequent flushes to SST files
