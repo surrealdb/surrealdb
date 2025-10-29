@@ -870,6 +870,13 @@ pub async fn signin_bearer(
 	// Create the authentication token.
 	let enc = encode(&Header::new(algorithm_to_jwt_algorithm(iss.alg)), &claims, &key);
 	// Set the authentication on the session.
+	//
+	// IMPORTANT: These assignments overwrite the session's working context (ns, db, ac).
+	// This is intentional behavior, especially during token refresh operations.
+	// When refreshing, the session is restored to the original authentication scope
+	// from the bearer grant (which comes from the expired access token's claims),
+	// not the current session's working context that may have been modified by USE commands.
+	// This maintains proper authentication boundaries and prevents scope confusion.
 	session.tk = Some(
 		crate::val::convert_value_to_public_value(claims.into_claims_object().into())
 			.expect("claims conversion should succeed"),

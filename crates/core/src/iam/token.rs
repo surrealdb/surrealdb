@@ -26,6 +26,21 @@ pub static HEADER: LazyLock<Header> = LazyLock::new(|| Header::new(Algorithm::HS
 /// - A string (for access-only tokens)
 /// - An object with `access` and `refresh` fields (for tokens with refresh)
 ///
+/// # Refresh Token Flow
+///
+/// When using the `WithRefresh` variant, the token can be refreshed to obtain a new access token
+/// without requiring the user to re-authenticate. The refresh process:
+///
+/// 1. Extracts the authentication scope (namespace, database, access method) from the expired
+///    access token's JWT claims
+/// 2. Uses the refresh token to authenticate and validate the request
+/// 3. Revokes the old refresh token (refresh tokens are single-use)
+/// 4. Issues a new access token and refresh token pair
+/// 5. Restores the session to the original authentication scope
+///
+/// This ensures that refresh maintains the original authentication boundaries and prevents
+/// scope confusion or escalation.
+///
 /// # Examples
 ///
 /// ```rust
@@ -63,6 +78,64 @@ pub enum Token {
 }
 
 impl Token {
+	/// Refreshes an access token using a refresh token.
+	///
+	/// This method exchanges an expired (or soon-to-expire) access token for a new one
+	/// using the provided refresh token. The refresh process follows OAuth2/JWT best practices
+	/// by maintaining the original authentication scope from the access token claims.
+	///
+	/// # Authentication Scope vs Working Context
+	///
+	/// It's important to understand the distinction between authentication scope and working
+	/// context:
+	///
+	/// - **Authentication Scope** (from token claims): The namespace, database, and access method
+	///   that were used during the original signin. This represents *what you're authenticated as*.
+	///
+	/// - **Working Context** (from session fields): The current namespace and database set by the
+	///   `USE` command. This represents *where you're currently working*.
+	///
+	/// During refresh, the authentication scope from the expired access token is used to create
+	/// the new token, and the session is restored to match this original scope. This means:
+	///
+	/// 1. If you signin to `ns1/db1`, then call `USE ns2 db2`, then refresh:
+	///    - The session will be restored to `ns1/db1` (original authentication scope)
+	///    - You can call `USE ns2 db2` again after refresh if needed
+	///
+	/// 2. The refresh token is validated against the namespace/database from the original signin,
+	///    not the current session working context.
+	///
+	/// This behavior is intentional and follows security best practices:
+	/// - Prevents scope confusion or escalation
+	/// - Maintains predictable authentication boundaries
+	/// - Aligns with OAuth2/OIDC refresh token standards
+	///
+	/// # Arguments
+	///
+	/// * `kvs` - The datastore to validate the refresh token against
+	/// * `session` - The session to update with the new authentication state
+	///
+	/// # Returns
+	///
+	/// Returns a new `Token` with fresh access and refresh tokens on success.
+	///
+	/// # Errors
+	///
+	/// Returns an error if:
+	/// - The token is an `Access` variant without a refresh token
+	/// - The refresh token is invalid, expired, or revoked
+	/// - The access token cannot be decoded
+	/// - The signin process fails
+	///
+	/// # Example
+	///
+	/// ```ignore
+	/// // Signin and get tokens
+	/// let token = iam::signin::signin(kvs, session, credentials).await?;
+	///
+	/// // Later, when the access token expires...
+	/// let new_token = token.refresh(kvs, session).await?;
+	/// ```
 	pub async fn refresh(self, kvs: &Datastore, session: &mut Session) -> Result<Self> {
 		match self {
 			Token::Access(_) => bail!(Error::InvalidAuth),
@@ -70,10 +143,25 @@ impl Token {
 				access,
 				refresh,
 			} => {
+				// Decode the expired access token to extract its claims.
+				// We don't verify the signature or expiration here because we're only
+				// extracting the authentication scope (NS, DB, AC, ID, etc.) to pass
+				// to the signin function. The refresh token itself will be validated
+				// during the signin process.
 				let token_data = decode::<Claims>(&access, &KEY, &DUD)?;
 				let claims = token_data.claims.into_claims_object();
+				// Convert token claims to signin variables. These claims contain the
+				// original authentication scope (namespace, database, access method)
+				// that will be used to create the new tokens.
 				let mut vars = convert_object_to_public_map(claims)?;
+				// Add the refresh token to the variables. The signin function will
+				// use this to perform bearer authentication and validate the refresh token.
 				vars.insert("refresh".to_string(), refresh.into_value());
+				// Perform signin using the refresh token. This will:
+				// 1. Validate the refresh token against the stored grant
+				// 2. Revoke the old refresh token (single-use)
+				// 3. Create a new access token and refresh token
+				// 4. Update the session with the original authentication scope
 				iam::signin::signin(kvs, session, vars.into()).await
 			}
 		}
