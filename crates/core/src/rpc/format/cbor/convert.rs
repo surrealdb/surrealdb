@@ -445,7 +445,7 @@ pub fn from_value(val: PublicValue) -> Result<CborValue> {
 				v.into_iter().map(from_value).collect::<Result<Vec<CborValue>>>()?,
 			)),
 		)),
-		PublicValue::Regex(v) => {
+		PublicValue::Regex(_) => {
 			// Uncborrable value type
 			Err(anyhow!("Unsupported value type: Regex"))
 		}
