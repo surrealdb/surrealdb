@@ -18,20 +18,22 @@ use crate::sql::statements::access::{
 	self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke, AccessStatementShow,
 };
 use crate::sql::statements::define::user::PassType;
-use crate::sql::statements::define::{DefineDefault, DefineKind};
+use crate::sql::statements::define::{
+	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineDefault,
+	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
+	DefineKind, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
+	DefineTableStatement,
+};
 use crate::sql::statements::remove::RemoveAnalyzerStatement;
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
-	AccessStatement, CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
-	DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-	DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-	DefineTableStatement, DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement,
-	InsertStatement, KillStatement, OptionStatement, OutputStatement, RelateStatement,
-	RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
-	RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement, RemoveParamStatement,
-	RemoveStatement, RemoveTableStatement, RemoveUserStatement, SelectStatement, UpdateStatement,
-	UpsertStatement, UseStatement,
+	AccessStatement, CreateStatement, DeleteStatement, ForeachStatement, IfelseStatement,
+	InfoStatement, InsertStatement, KillStatement, OptionStatement, OutputStatement,
+	RelateStatement, RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement,
+	RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement,
+	RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
+	SelectStatement, UpdateStatement, UpsertStatement, UseStatement,
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
@@ -1783,37 +1785,11 @@ fn parse_define_field() {
 
 	// Invalid DELETE permission
 	{
-		// TODO(gguillemas): Providing the DELETE permission should return a parse error
-		// in 3.0.0. Currently, the DELETE permission is just ignored to maintain
-		// backward compatibility.
-		let res = syn::parse_with(
+		syn::parse_with(
 			r#"DEFINE FIELD foo ON TABLE bar PERMISSIONS FOR DELETE NONE"#.as_bytes(),
 			async |parser, stk| parser.parse_expr_inherit(stk).await,
 		)
-		.unwrap();
-		assert_eq!(
-			res,
-			Expr::Define(Box::new(DefineStatement::Field(DefineFieldStatement {
-				kind: DefineKind::Default,
-				name: Expr::Idiom(Idiom(vec![Part::Field("foo".to_string())])),
-				what: Expr::Idiom(Idiom::field("bar".to_string())),
-				flex: false,
-				field_kind: None,
-				readonly: false,
-				value: None,
-				assert: None,
-				default: DefineDefault::None,
-				permissions: Permissions {
-					delete: Permission::Full,
-					update: Permission::Full,
-					create: Permission::Full,
-					select: Permission::Full,
-				},
-				comment: None,
-				reference: None,
-				computed: None,
-			})))
-		)
+		.unwrap_err();
 	}
 }
 

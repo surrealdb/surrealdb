@@ -14,16 +14,19 @@ use crate::sql::language::Language;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::lookup::{LookupKind, LookupSubject};
 use crate::sql::order::{OrderList, Ordering};
-use crate::sql::statements::define::{DefineDefault, DefineKind};
+use crate::sql::statements::define::{
+	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineDefault,
+	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
+	DefineKind, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
+	DefineTableStatement,
+};
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
-	CreateStatement, DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
-	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement,
-	DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement, InsertStatement,
-	KillStatement, OutputStatement, RelateStatement, RemoveFieldStatement, RemoveFunctionStatement,
-	RemoveStatement, SelectStatement, SetStatement, UpdateStatement, UpsertStatement,
+	CreateStatement, DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement,
+	InsertStatement, KillStatement, OutputStatement, RelateStatement, RemoveFieldStatement,
+	RemoveFunctionStatement, RemoveStatement, SelectStatement, SetStatement, UpdateStatement,
+	UpsertStatement,
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{

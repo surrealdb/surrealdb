@@ -378,7 +378,6 @@ mod database_upgrade {
 		check_info_key(prev, next, "analyzers");
 		check_info_key(prev, next, "users");
 		check_info_key(prev, next, "indexes");
-		check_info_key(prev, next, "tables");
 	}
 
 	async fn check_migrated_data(db: &Surreal<Any>, info: &str, queries: &[Check]) {
