@@ -134,7 +134,7 @@ impl SelectStatement {
 						Ok(Value::None)
 					} else {
 						ensure!(array.len() == 1, Error::SingleOnlyOutput);
-						Ok(array.0.pop().unwrap())
+						Ok(array.0.pop().expect("array has exactly one element"))
 					}
 				}
 				x => Ok(x),

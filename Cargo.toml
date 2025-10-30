@@ -77,7 +77,8 @@ foundationdb = { version = "0.9.2", default-features = false, features = [
     "embedded-fdb-include",
     "fdb-7_3",
 ] }
-rocksdb = { version = "0.24.0", features = ["lz4", "snappy"] }
+rocksdb = { version = "0.24.0", git = "https://github.com/surrealdb/rust-rocksdb.git", rev = "ecf0046292fee68f8bf84ccb278b848c2df06af8", features = ["lz4", "snappy"] }
+
 # Managed by surreal but mostly external code
 tikv = { version = "0.3.0-surreal.3", default-features = false, package = "surrealdb-tikv-client" }
 
@@ -481,6 +482,10 @@ lossy_float_literal = "warn"
 # SurrealDB relies on async functions in the AST parser and executor to avoid stack overflows.
 # Warning or denying this lint can cause unexpected errors.
 unused_async = "allow"
+
+# Checks for `.unwrap()` or `.unwrap_err()` calls on Results and `.unwrap()` call on `Option`s.
+# https://rust-lang.github.io/rust-clippy/master/index.html#unwrap_used
+unwrap_used = "warn"
 
 # Profiles
 [profile.release]

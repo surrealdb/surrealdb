@@ -195,7 +195,9 @@ impl IntoEndpoint for &str {}
 impl into_endpoint::Sealed for &str {
 	fn into_endpoint(self) -> Result<Endpoint> {
 		let (url, path) = match self {
-			"memory" | "mem://" => (Url::parse("mem://").unwrap(), "memory".to_owned()),
+			"memory" | "mem://" => {
+				(Url::parse("mem://").expect("valid memory url"), "memory".to_owned())
+			}
 			url if url.starts_with("ws") | url.starts_with("http") | url.starts_with("tikv") => {
 				(Url::parse(url).map_err(|_| Error::InvalidUrl(self.to_owned()))?, String::new())
 			}
@@ -329,6 +331,7 @@ pub fn connect(address: impl IntoEndpoint) -> Connect<Any, Surreal<Any>> {
 }
 
 #[cfg(all(test, feature = "kv-mem"))]
+#[allow(clippy::unwrap_used)]
 mod tests {
 
 	use surrealdb_types::{self, Object};

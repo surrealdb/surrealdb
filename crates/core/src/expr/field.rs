@@ -195,7 +195,7 @@ impl Fields {
 							}
 							// Assign each fetched yield to the output
 							for (p, x) in res {
-								match p.last().unwrap().alias() {
+								match p.last().expect("idiom is non-empty").alias() {
 									// This is an alias expression part
 									Some(a) => {
 										if let Some(i) = alias {

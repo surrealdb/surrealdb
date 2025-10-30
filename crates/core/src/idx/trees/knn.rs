@@ -86,7 +86,7 @@ impl DoublePriorityQueue {
 	pub(super) fn peek_first(&self) -> Option<(f64, ElementId)> {
 		self.0.first_key_value().map(|(k, q)| {
 			let k = k.0;
-			let v = *q.iter().next().unwrap(); // By design the contains always contains one element
+			let v = *q.iter().next().expect("contains always has one element"); // By design the contains always contains one element
 			(k, v)
 		})
 	}

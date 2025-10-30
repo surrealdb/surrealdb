@@ -165,8 +165,8 @@ pub fn slice(
 			end: Bound::Excluded(end),
 		}
 	} else if range_start.is_range() {
-		// Condition checked above, unwrap cannot trigger.
-		let range = range_start.into_range().unwrap();
+		// Condition checked above, cannot fail
+		let range = range_start.into_range().expect("is_range() check passed");
 		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
 			name: String::from("array::slice"),
 			message: format!("Argument 1 was the wrong type. {e}"),
@@ -348,8 +348,8 @@ pub mod is {
 	use crate::syn;
 	use crate::val::{Datetime, Value};
 
-	#[rustfmt::skip] static LATITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
-	#[rustfmt::skip] static LONGITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?(180(\\.0+)?|((1[0-7]\\d)|([1-9]?\\d))(\\.\\d+)?)$").unwrap());
+	#[rustfmt::skip] static LATITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").expect("valid regex pattern"));
+	#[rustfmt::skip] static LONGITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?(180(\\.0+)?|((1[0-7]\\d)|([1-9]?\\d))(\\.\\d+)?)$").expect("valid regex pattern"));
 
 	pub fn alphanum((arg,): (String,)) -> Result<Value> {
 		if arg.is_empty() {
