@@ -26,6 +26,7 @@ pub(crate) struct DefineEventStatement {
 	pub when: Expr,
 	pub then: Vec<Expr>,
 	pub comment: Option<Expr>,
+	pub concurrently: bool,
 }
 
 impl VisitExpression for DefineEventStatement {
@@ -88,6 +89,7 @@ impl DefineEventStatement {
 		txn.set(
 			&key,
 			&EventDefinition {
+				concurrently: self.concurrently,
 				name: name.clone(),
 				target_table: target_table.clone(),
 				when: self.when.clone(),
@@ -124,6 +126,9 @@ impl Display for DefineEventStatement {
 			DefineKind::Default => {}
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+		}
+		if self.concurrently {
+			write!(f, " CONCURRENTLY")?;
 		}
 		write!(
 			f,

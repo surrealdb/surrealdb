@@ -7,10 +7,11 @@ use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::define::DefineKind;
 use crate::val::Value;
 
-#[revisioned(revision = 1)]
+#[revisioned(revision = 2)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[non_exhaustive]
 pub struct EventDefinition {
+	pub(crate) concurrently: bool,
 	pub(crate) name: String,
 	pub(crate) target_table: String,
 	pub(crate) when: Expr,
@@ -34,6 +35,7 @@ impl EventDefinition {
 				.comment
 				.clone()
 				.map(|v| crate::sql::Expr::Literal(crate::sql::Literal::String(v))),
+			concurrently: self.concurrently,
 		}
 	}
 }

@@ -772,6 +772,7 @@ impl Parser<'_> {
 			when: Expr::Literal(Literal::Bool(true)),
 			then: Vec::new(),
 			comment: None,
+			concurrently: false,
 		};
 
 		loop {
@@ -794,6 +795,13 @@ impl Parser<'_> {
 				_ => break,
 			}
 		}
+
+		res.concurrently = self.eat(t!("CONCURRENTLY"));
+		#[cfg(target_family = "wasm")]
+		if res.concurrently {
+			return Err("CONCURRENTLY events are not supported in WASM".into());
+		}
+
 		Ok(res)
 	}
 

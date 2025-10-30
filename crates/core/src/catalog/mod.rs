@@ -187,7 +187,8 @@ mod test {
         when: Expr::Literal(Literal::String("when".to_string())),
         then: vec![Expr::Literal(Literal::String("then".to_string()))],
         comment: Some("comment".to_string()),
-    }, 35)]
+        concurrently: false,
+    }, 36)]
 	#[case::field(FieldDefinition {
         name: Idiom::from_str("field[0]").unwrap(),
         what: "what".to_string(),
