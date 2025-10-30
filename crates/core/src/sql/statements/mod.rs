@@ -26,9 +26,8 @@ pub(crate) use self::access::AccessStatement;
 pub(crate) use self::alter::{AlterStatement, AlterTableStatement};
 pub(crate) use self::create::CreateStatement;
 pub(crate) use self::define::{
-	DefineApiStatement,
-	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineModelStatement, DefineModuleStatement, DefineNamespaceStatement,
+	DefineApiStatement, DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
+	DefineIndexStatement, DefineModelStatement, DefineModuleStatement, DefineNamespaceStatement,
 	DefineStatement, DefineTableStatement,
 };
 pub(crate) use self::delete::DeleteStatement;
