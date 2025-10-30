@@ -398,16 +398,6 @@ impl Parser<'_> {
 										}
 									}
 									t!("REFRESH") => {
-										// TODO(gguillemas): Remove this once bearer access is no
-										// longer experimental.
-										if !self.settings.bearer_access_enabled {
-											unexpected!(
-												self,
-												peek,
-												"the experimental bearer access feature to be enabled"
-											);
-										}
-
 										self.pop_peek();
 										ac.bearer = Some(access_type::BearerAccess {
 											kind: access_type::BearerAccessType::Refresh,
@@ -417,11 +407,7 @@ impl Parser<'_> {
 										});
 									}
 									_ => {
-										if self.settings.bearer_access_enabled {
-											unexpected!(self, token, "JWT or REFRESH")
-										} else {
-											unexpected!(self, token, "JWT")
-										}
+										unexpected!(self, token, "JWT or REFRESH")
 									}
 								}
 								self.eat(t!(","));
@@ -429,16 +415,6 @@ impl Parser<'_> {
 							res.access_type = AccessType::Record(ac);
 						}
 						t!("BEARER") => {
-							// TODO(gguillemas): Remove this once bearer access is no longer
-							// experimental.
-							if !self.settings.bearer_access_enabled {
-								unexpected!(
-									self,
-									peek,
-									"the experimental bearer access feature to be enabled"
-								);
-							}
-
 							self.pop_peek();
 							let mut ac = access_type::BearerAccess {
 								..Default::default()

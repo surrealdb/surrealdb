@@ -14,7 +14,7 @@ use surrealdb_types::Variables;
 use types::{USER, User};
 
 use crate::opt::PatchOp;
-use crate::opt::auth::{Database, Jwt, Namespace, Record, Root};
+use crate::opt::auth::{Database, Namespace, Record, Root, Token};
 use crate::{IndexedResults as QueryResponse, Surreal};
 
 static DB: LazyLock<Surreal<Client>> = LazyLock::new(Surreal::init);
@@ -34,7 +34,7 @@ async fn api() {
 	let _: () = DB.use_ns("test-ns").use_db("test-db").await.unwrap();
 
 	// signup
-	let _: Jwt = DB
+	let _: Token = DB
 		.signup(Record {
 			namespace: "test-ns".to_string(),
 			database: "test-db".to_string(),
@@ -45,14 +45,14 @@ async fn api() {
 		.unwrap();
 
 	// signin
-	let _: Jwt = DB
+	let _: Token = DB
 		.signin(Root {
 			username: "root".to_string(),
 			password: "root".to_string(),
 		})
 		.await
 		.unwrap();
-	let _: Jwt = DB
+	let _: Token = DB
 		.signin(Namespace {
 			namespace: "test-ns".to_string(),
 			username: "user".to_string(),
@@ -60,7 +60,7 @@ async fn api() {
 		})
 		.await
 		.unwrap();
-	let _: Jwt = DB
+	let _: Token = DB
 		.signin(Database {
 			namespace: "test-ns".to_string(),
 			database: "test-db".to_string(),
@@ -69,7 +69,7 @@ async fn api() {
 		})
 		.await
 		.unwrap();
-	let _: Jwt = DB
+	let _: Token = DB
 		.signin(Record {
 			namespace: "test-ns".to_string(),
 			database: "test-db".to_string(),
@@ -80,7 +80,7 @@ async fn api() {
 		.unwrap();
 
 	// authenticate
-	let _: () = DB.authenticate(Jwt(String::new())).await.unwrap();
+	let _: Token = DB.authenticate(String::new()).await.unwrap();
 
 	// query
 	let _: QueryResponse = DB.query("SELECT * FROM user").await.unwrap();

@@ -3,8 +3,7 @@
 mod helpers;
 use helpers::new_ds;
 use regex::Regex;
-use surrealdb_core::dbs::capabilities::ExperimentalTarget;
-use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_types::{Array, ToSql, Value};
 use tokio::time::Duration;
@@ -53,9 +52,7 @@ async fn access_bearer_grant() {
 			ACCESS srv GRANT FOR RECORD user:tobie;
 		"
 		);
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds().await.unwrap();
 		let ses = match level.base.as_str() {
 			"ROOT" => Session::owner(),
 			"NAMESPACE" => Session::owner().with_ns(level.ns.unwrap()),
@@ -200,9 +197,7 @@ async fn access_bearer_revoke() {
 			ACCESS srv ON {base} GRANT FOR USER jaime;
 		"
 		);
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds().await.unwrap();
 		let ses = match level.base.as_str() {
 			"ROOT" => Session::owner(),
 			"NAMESPACE" => Session::owner().with_ns(level.ns.unwrap()),
@@ -338,9 +333,7 @@ async fn access_bearer_show() {
 			ACCESS srv ON {base} GRANT FOR USER jaime;
 		"
 		);
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds().await.unwrap();
 		let ses = match level.base.as_str() {
 			"ROOT" => Session::owner(),
 			"NAMESPACE" => Session::owner().with_ns(level.ns.unwrap()),
@@ -497,9 +490,7 @@ async fn access_bearer_purge() {
 			ACCESS srv ON {base} GRANT FOR USER jaime;
 		"
 		);
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
+		let dbs = new_ds().await.unwrap();
 		let ses = match level.base.as_str() {
 			"ROOT" => Session::owner(),
 			"NAMESPACE" => Session::owner().with_ns(level.ns.unwrap()),
@@ -765,10 +756,7 @@ the database name matches", 			),
 			);
 
 			{
-				let ds = new_ds().await.unwrap().with_auth_enabled(true).with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = new_ds().await.unwrap().with_auth_enabled(true);
 
 				let mut resp = ds.execute(&statement_setup, &sess_setup, None).await.unwrap();
 				let res = resp.remove(0).output();
