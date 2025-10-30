@@ -12,7 +12,7 @@ use crate::expr::{FlowResultExt as _, Idiom};
 use crate::syn;
 use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
-	RecordIdKeyRange, Table, Uuid, Value,
+	RecordIdKeyRange, Set, Table, Uuid, Value,
 };
 
 /// Returns the type of the value as a string.
@@ -22,6 +22,10 @@ pub fn type_of((val,): (Value,)) -> Result<Value> {
 
 pub fn array((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<Array>()?.into())
+}
+
+pub fn set((val,): (Value,)) -> Result<Value> {
+	Ok(val.cast_to::<Set>()?.into())
 }
 
 pub fn bool((val,): (Value,)) -> Result<Value> {
@@ -192,6 +196,10 @@ pub mod is {
 
 	pub fn array((arg,): (Value,)) -> Result<Value> {
 		Ok((arg).is_array().into())
+	}
+
+	pub fn set((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.is_set().into())
 	}
 
 	pub fn bool((arg,): (Value,)) -> Result<Value> {

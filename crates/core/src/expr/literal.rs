@@ -40,6 +40,7 @@ pub(crate) enum Literal {
 	Regex(Regex),
 	RecordId(RecordIdLit),
 	Array(Vec<Expr>),
+	Set(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
 	Duration(Duration),
 	Datetime(Datetime),
@@ -68,6 +69,7 @@ impl Literal {
 			| Literal::Geometry(_) => true,
 			Literal::RecordId(record_id_lit) => record_id_lit.is_static(),
 			Literal::Array(exprs) => exprs.iter().all(|x| x.is_static()),
+			Literal::Set(exprs) => exprs.iter().all(|x| x.is_static()),
 			Literal::Object(items) => items.iter().all(|x| x.value.is_static()),
 		}
 	}
@@ -101,6 +103,14 @@ impl Literal {
 				}
 				Value::Array(Array(array))
 			}
+			Literal::Set(exprs) => {
+				let mut set = crate::val::Set::new();
+				for e in exprs.iter() {
+					let v = stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?;
+					set.insert(v);
+				}
+				Value::Set(set)
+			}
 			Literal::Object(items) => {
 				let mut map = BTreeMap::new();
 				for i in items.iter() {
@@ -133,6 +143,7 @@ impl PartialEq for Literal {
 			(Literal::Regex(a), Literal::Regex(b)) => a == b,
 			(Literal::RecordId(a), Literal::RecordId(b)) => a == b,
 			(Literal::Array(a), Literal::Array(b)) => a == b,
+			(Literal::Set(a), Literal::Set(b)) => a == b,
 			(Literal::Object(a), Literal::Object(b)) => a == b,
 			(Literal::Duration(a), Literal::Duration(b)) => a == b,
 			(Literal::Datetime(a), Literal::Datetime(b)) => a == b,
@@ -161,6 +172,7 @@ impl Hash for Literal {
 			Literal::Regex(x) => x.hash(state),
 			Literal::RecordId(x) => x.hash(state),
 			Literal::Array(x) => x.hash(state),
+			Literal::Set(x) => x.hash(state),
 			Literal::Object(x) => x.hash(state),
 			Literal::Duration(x) => x.hash(state),
 			Literal::Datetime(x) => x.hash(state),
@@ -206,6 +218,15 @@ impl fmt::Display for Literal {
 					drop(indent);
 				}
 				f.write_char(']')
+			}
+			Literal::Set(exprs) => {
+				f.write_char('{')?;
+				if !exprs.is_empty() {
+					let indent = pretty_indent();
+					write!(f, "{}", Fmt::pretty_comma_separated(exprs.as_slice()))?;
+					drop(indent);
+				}
+				f.write_char('}')
 			}
 			Literal::Object(items) => {
 				if is_pretty() {
