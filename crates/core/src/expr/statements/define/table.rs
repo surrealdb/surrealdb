@@ -7,14 +7,16 @@ use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use super::DefineKind;
+use crate::catalog::aggregation::{
+	self, AggregateFields, Aggregation, AggregationAnalysis, AggregationStat,
+};
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{
-	AggregationStat, DatabaseId, FieldDefinition, Metadata, NamespaceId, Permissions, Record,
-	RecordType, TableDefinition, TableType, ViewDefinition,
+	DatabaseId, FieldDefinition, Metadata, NamespaceId, Permissions, Record, RecordType,
+	TableDefinition, TableType, ViewDefinition,
 };
 use crate::ctx::Context;
-use crate::dbs::aggregation::{AggregateFields, Aggregation, AggregationAnalysis};
-use crate::dbs::{Options, aggregation};
+use crate::dbs::Options;
 use crate::doc::{self, CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;

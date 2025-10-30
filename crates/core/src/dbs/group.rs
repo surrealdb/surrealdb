@@ -4,9 +4,8 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::AggregationStat;
+use crate::catalog::aggregation::{self, AggregateFields, AggregationAnalysis, AggregationStat};
 use crate::ctx::Context;
-use crate::dbs::aggregation::{self, AggregateFields, AggregationAnalysis};
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};

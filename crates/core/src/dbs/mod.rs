@@ -4,7 +4,6 @@
 //! we use channels as a transport layer and executors to process the
 //! operations. This module also gives a `context` to the transaction.
 
-pub(crate) mod aggregation;
 mod distinct;
 pub mod executor;
 mod group;

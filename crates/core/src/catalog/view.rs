@@ -1,7 +1,7 @@
 use revision::revisioned;
 use surrealdb_types::{ToSql, write_sql};
 
-use crate::dbs::aggregation::AggregationAnalysis;
+use crate::catalog::aggregation::AggregationAnalysis;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Fields, Groups};
 use crate::sql::{Cond, View};

@@ -44,8 +44,8 @@ use std::mem;
 use ahash::HashMap;
 use anyhow::{Result, bail, ensure};
 use revision::revisioned;
+use serde::{Deserialize, Serialize};
 
-use crate::catalog::AggregationStat;
 use crate::err::Error;
 use crate::expr::visit::{MutVisitor, VisitMut};
 use crate::expr::{Expr, Field, Fields, Function, Groups, Idiom, Part};
@@ -122,6 +122,85 @@ impl Aggregation {
 				values: Vec::new(),
 			},
 		}
+	}
+}
+
+/// A enum containing the data for an aggregation.
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum AggregationStat {
+	Count {
+		count: i64,
+	},
+	CountValue {
+		/// Index into the exprs field on the view definition.
+		arg: usize,
+		count: i64,
+	},
+	NumberMax {
+		arg: usize,
+		max: Number,
+	},
+	NumberMin {
+		arg: usize,
+		min: Number,
+	},
+	Sum {
+		arg: usize,
+		sum: Number,
+	},
+	Mean {
+		arg: usize,
+		sum: Number,
+		count: i64,
+	},
+	StdDev {
+		arg: usize,
+		sum: Number,
+		sum_of_squares: Number,
+		count: i64,
+	},
+	Variance {
+		arg: usize,
+		sum: Number,
+		sum_of_squares: Number,
+		count: i64,
+	},
+	TimeMax {
+		arg: usize,
+		max: Datetime,
+	},
+	TimeMin {
+		arg: usize,
+		min: Datetime,
+	},
+	Accumulate {
+		arg: usize,
+		values: Vec<Value>,
+	},
+}
+
+impl AggregationStat {
+	/// Returns a per group record count this aggregation list keeps track of, if any.
+	pub fn get_count(aggregation_stats: &[AggregationStat]) -> Option<i64> {
+		aggregation_stats.iter().find_map(|x| match x {
+			AggregationStat::Count {
+				count,
+			}
+			| AggregationStat::Mean {
+				count,
+				..
+			}
+			| AggregationStat::Variance {
+				count,
+				..
+			}
+			| AggregationStat::StdDev {
+				count,
+				..
+			} => Some(*count),
+			_ => None,
+		})
 	}
 }
 

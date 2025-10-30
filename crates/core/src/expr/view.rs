@@ -4,7 +4,7 @@ use std::fmt::Debug;
 use anyhow::{Result, bail};
 
 use crate::catalog::ViewDefinition;
-use crate::dbs::aggregation::{AggregateFields, AggregationAnalysis};
+use crate::catalog::aggregation::{AggregateFields, AggregationAnalysis};
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Fields, Groups, Value};

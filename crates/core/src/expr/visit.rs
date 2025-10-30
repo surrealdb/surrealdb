@@ -1,6 +1,6 @@
 use std::ops::Bound;
 
-use crate::catalog::{Permission, Permissions, Relation, TableType};
+use crate::catalog::{GraphQLConfig, Permission, Permissions, Relation, TableType};
 use crate::expr::access_type::{BearerAccess, JwtAccessVerify};
 use crate::expr::data::Assignment;
 use crate::expr::lookup::LookupSubject;
@@ -248,7 +248,6 @@ implement_visitor! {
 			Expr::FunctionCall(f) => {
 				this.visit_function_call(f)?;
 			},
-			// TODO: Figure out why there are 2 versions of closure?
 			Expr::Closure(c) => {
 				this.visit_closure(c)?;
 			},
@@ -814,8 +813,7 @@ implement_visitor! {
 	fn visit_config_inner(this, d: &ConfigInner){
 		match d {
 			ConfigInner::GraphQL(graph_qlconfig) => {
-				// TODO: Reintroduce once graphql is fixed.
-				//this.visit_graphql_config(graph_qlconfig)?;
+				this.visit_graphql_config(graph_qlconfig)?;
 			},
 			ConfigInner::Api(api_config) => {
 				this.visit_api_config(api_config)?;
@@ -823,6 +821,11 @@ implement_visitor! {
 		}
 		Ok(())
 	}
+
+	fn visit_graphql_config(this, d: &GraphQLConfig){
+		Ok(())
+	}
+
 
 	fn visit_api_config(this, d: &ApiConfig){
 		for m in d.middleware.iter(){
@@ -833,11 +836,6 @@ implement_visitor! {
 		this.visit_permission(&d.permissions)?;
 		Ok(())
 	}
-
-	//fn visit_graphql_config(this, d: &GraphQLConfig){
-		//Ok(())
-	//}
-
 
 	fn visit_define_access(this, d: &DefineAccessStatement) {
 		this.visit_expr(&d.name)?;
@@ -1657,7 +1655,6 @@ implement_visitor_mut! {
 			Expr::FunctionCall(f) => {
 				this.visit_mut_function_call(f)?;
 			},
-			// TODO: Figure out why there are 2 versions of closure?
 			Expr::Closure(c) => {
 				this.visit_mut_closure(c)?;
 			},
@@ -2242,11 +2239,6 @@ implement_visitor_mut! {
 		this.visit_mut_permission(&mut d.permissions)?;
 		Ok(())
 	}
-
-	//fn visit_mut_graphql_config(this, d: &mut GraphQLConfig){
-		//Ok(())
-	//}
-
 
 	fn visit_mut_define_access(this, d: &mut DefineAccessStatement) {
 		this.visit_mut_expr(&mut d.name)?;

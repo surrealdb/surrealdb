@@ -3,10 +3,10 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
+use crate::catalog::aggregation::{self, AggregateFields, AggregationAnalysis, AggregationStat};
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{AggregationStat, Data, Metadata, Record, RecordType, ViewDefinition};
+use crate::catalog::{Data, Metadata, Record, RecordType, ViewDefinition};
 use crate::ctx::Context;
-use crate::dbs::aggregation::{self, AggregateFields, AggregationAnalysis};
 use crate::dbs::{Options, Statement, Workable};
 use crate::doc::{Action, CursorDoc, Document};
 use crate::err::Error;

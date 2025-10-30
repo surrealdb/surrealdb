@@ -15,6 +15,7 @@ use rust_decimal::Decimal;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize, Serializer};
 
+use crate::catalog::aggregation::AggregationStat;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Datetime, Number, Value};
 
@@ -295,122 +296,6 @@ impl From<Value> for Data {
 impl From<Arc<Value>> for Data {
 	fn from(value: Arc<Value>) -> Self {
 		Self::ReadOnly(value)
-	}
-}
-
-/// Statistics for aggregated fields in materialized views
-///
-/// This enum represents different types of aggregation statistics that are
-/// maintained for fields in materialized views. Each variant contains the
-/// necessary metadata to support incremental updates and deletions.
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Serialize, Deserialize, Hash)]
-pub(crate) enum FieldStats {
-	/// Simple counter for count() aggregations
-	Count(u64),
-	/// Sum aggregation with count for potential purging
-	Sum {
-		count: u64,
-	},
-	/// Mean calculation metadata with running sum and count
-	Mean {
-		sum: Decimal,
-		count: u64,
-	},
-	/// Min/Max aggregation with count for recalculation when values are removed
-	MinMax {
-		count: u64,
-	},
-	/// Standard deviation calculation metadata with running sum, sum of squares and count
-	StdDev {
-		sum: Decimal,
-		sum_of_squares: Decimal,
-		count: u64,
-	},
-	/// Variance calculation metadata with running sum, sum of squares and count
-	Variance {
-		sum: Decimal,
-		sum_of_squares: Decimal,
-		count: u64,
-	},
-}
-
-/// A enum containing the data for an aggregation.
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub enum AggregationStat {
-	Count {
-		count: i64,
-	},
-	CountValue {
-		/// Index into the exprs field on the view definition.
-		arg: usize,
-		count: i64,
-	},
-	NumberMax {
-		arg: usize,
-		max: Number,
-	},
-	NumberMin {
-		arg: usize,
-		min: Number,
-	},
-	Sum {
-		arg: usize,
-		sum: Number,
-	},
-	Mean {
-		arg: usize,
-		sum: Number,
-		count: i64,
-	},
-	StdDev {
-		arg: usize,
-		sum: Number,
-		sum_of_squares: Number,
-		count: i64,
-	},
-	Variance {
-		arg: usize,
-		sum: Number,
-		sum_of_squares: Number,
-		count: i64,
-	},
-	TimeMax {
-		arg: usize,
-		max: Datetime,
-	},
-	TimeMin {
-		arg: usize,
-		min: Datetime,
-	},
-	Accumulate {
-		arg: usize,
-		values: Vec<Value>,
-	},
-}
-
-impl AggregationStat {
-	/// Returns a per group record count this aggregation list keeps track of, if any.
-	pub fn get_count(aggregation_stats: &[AggregationStat]) -> Option<i64> {
-		aggregation_stats.iter().find_map(|x| match x {
-			AggregationStat::Count {
-				count,
-			}
-			| AggregationStat::Mean {
-				count,
-				..
-			}
-			| AggregationStat::Variance {
-				count,
-				..
-			}
-			| AggregationStat::StdDev {
-				count,
-				..
-			} => Some(*count),
-			_ => None,
-		})
 	}
 }
 
