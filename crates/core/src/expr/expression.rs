@@ -154,6 +154,13 @@ impl Expr {
 			surrealdb_types::Value::Array(a) => Expr::Literal(Literal::Array(
 				a.inner().iter().cloned().map(Expr::from_public_value).collect(),
 			)),
+			surrealdb_types::Value::Set(s) => {
+				// Convert set to array for literal representation since there's no set literal
+				// syntax
+				Expr::Literal(Literal::Array(
+					s.iter().cloned().map(Expr::from_public_value).collect(),
+				))
+			}
 			surrealdb_types::Value::Object(o) => Expr::Literal(Literal::Object(
 				o.inner()
 					.iter()

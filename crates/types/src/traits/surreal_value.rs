@@ -9,7 +9,7 @@ use rust_decimal::Decimal;
 use crate as surrealdb_types;
 use crate::error::{ConversionError, length_mismatch_error, out_of_range_error};
 use crate::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Kind, Number, Object, Range, RecordId,
+	Array, Bytes, Datetime, Duration, File, Geometry, Kind, Number, Object, Range, RecordId, Set,
 	SurrealNone, SurrealNull, Table, Uuid, Value, kind,
 };
 
@@ -647,6 +647,32 @@ impl_surreal_value!(
 	is_ty_and => is_array_and(self, callback) => {
 		if let Value::Array(a) = self {
 			callback(a)
+		} else {
+			false
+		}
+	}
+);
+
+impl_surreal_value!(
+	Set as kind!(set),
+	is_set(value) => matches!(value, Value::Set(_)),
+	from_set(self) => Value::Set(self),
+	into_set(value) => {
+		let Value::Set(s) = value else {
+			return Err(conversion_error(Self::kind_of(), value));
+		};
+		Ok(s)
+	},
+	as_ty => as_set(self) => {
+		if let Value::Set(s) = self {
+			Some(s)
+		} else {
+			None
+		}
+	},
+	is_ty_and => is_set_and(self, callback) => {
+		if let Value::Set(s) = self {
+			callback(s)
 		} else {
 			false
 		}

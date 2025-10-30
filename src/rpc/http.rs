@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use surrealdb::types::{Array, Value};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::{DbResult, RpcError, RpcProtocol};
+use surrealdb_types::{Array, Value};
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 

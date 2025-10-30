@@ -33,6 +33,7 @@ pub enum Literal {
 	Regex(PublicRegex),
 
 	Array(Vec<Expr>),
+	Set(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
 	Geometry(PublicGeometry),
 	File(PublicFile),
@@ -54,6 +55,7 @@ impl PartialEq for Literal {
 			(Literal::Regex(a), Literal::Regex(b)) => a == b,
 			(Literal::RecordId(a), Literal::RecordId(b)) => a == b,
 			(Literal::Array(a), Literal::Array(b)) => a == b,
+			(Literal::Set(a), Literal::Set(b)) => a == b,
 			(Literal::Object(a), Literal::Object(b)) => a == b,
 			(Literal::Duration(a), Literal::Duration(b)) => a == b,
 			(Literal::Datetime(a), Literal::Datetime(b)) => a == b,
@@ -102,6 +104,15 @@ impl fmt::Display for Literal {
 					drop(indent);
 				}
 				f.write_char(']')
+			}
+			Literal::Set(exprs) => {
+				f.write_char('{')?;
+				if !exprs.is_empty() {
+					let indent = pretty_indent();
+					write!(f, "{}", Fmt::pretty_comma_separated(exprs.as_slice()))?;
+					drop(indent);
+				}
+				f.write_char('}')
 			}
 			Literal::Object(items) => {
 				if is_pretty() {
@@ -158,6 +169,9 @@ impl From<Literal> for crate::expr::Literal {
 			Literal::Array(exprs) => {
 				crate::expr::Literal::Array(exprs.into_iter().map(From::from).collect())
 			}
+			Literal::Set(exprs) => {
+				crate::expr::Literal::Set(exprs.into_iter().map(From::from).collect())
+			}
 			Literal::Object(items) => convert_geometry(items),
 			Literal::Geometry(geometry) => crate::expr::Literal::Geometry(geometry.into()),
 			Literal::File(file) => crate::expr::Literal::File(file.into()),
@@ -187,6 +201,9 @@ impl From<crate::expr::Literal> for Literal {
 			crate::expr::Literal::Regex(regex) => Literal::Regex(regex.into()),
 			crate::expr::Literal::Array(exprs) => {
 				Literal::Array(exprs.into_iter().map(From::from).collect())
+			}
+			crate::expr::Literal::Set(exprs) => {
+				Literal::Set(exprs.into_iter().map(From::from).collect())
 			}
 			crate::expr::Literal::Object(items) => {
 				Literal::Object(items.into_iter().map(From::from).collect())

@@ -9,10 +9,10 @@ use serde_json::ser::PrettyFormatter;
 use surrealdb::engine::any::{self, connect};
 use surrealdb::method::WithStats;
 use surrealdb::opt::Config;
-use surrealdb::types::{SurrealValue, ToSql, Value, object};
 use surrealdb::{IndexedResults, Notification};
 use surrealdb_core::dbs::Capabilities as CoreCapabilities;
 use surrealdb_core::rpc::DbResultStats;
+use surrealdb_types::{SurrealValue, ToSql, Value, object};
 
 use crate::cli::abstraction::auth::{CredentialsBuilder, CredentialsLevel};
 use crate::cli::abstraction::{

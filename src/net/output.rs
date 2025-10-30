@@ -2,7 +2,7 @@ use axum::response::{IntoResponse, Response};
 use http::StatusCode;
 use http::header::{CONTENT_TYPE, HeaderValue};
 use serde::Serialize;
-use surrealdb::types::Value;
+use surrealdb_types::Value;
 
 use super::headers::Accept;
 

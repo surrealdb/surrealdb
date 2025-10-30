@@ -41,7 +41,7 @@ revision = { version = "0.13.0", features = [
     "rust_decimal",
     "uuid",
 ] }
-storekey = { version = "0.8.0", features = ["uuid"] }
+storekey = { version = "0.9.0", features = ["uuid"] }
 surrealkv = { version = "0.9.1" }
 surrealml = { version = "0.1.9", package = "surrealml-core", features = [
     "dynamic",
@@ -144,7 +144,7 @@ sha2 = "0.10.8"
 snap = "1.1.0"
 strsim = "0.11.1"
 subtle = "2.6"
-surrealdb-protocol = { version = "0.5.1", default-features = false }
+surrealdb-protocol = { version = "0.6.0", default-features = false }
 sysinfo = "0.33.0"
 tempfile = "3.10.1"
 thiserror = "1.0.63"

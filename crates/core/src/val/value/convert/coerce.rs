@@ -10,7 +10,7 @@ use crate::expr::kind::{GeometryKind, HasKind, KindLiteral};
 use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Null, Number, Object, Range,
-	RecordId, Regex, SqlNone, Uuid, Value,
+	RecordId, Regex, Set, SqlNone, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -419,6 +419,7 @@ impl_direct! {
 	Bytes => Bytes,
 	Object => Object,
 	Array => Array,
+	Set => Set,
 	RecordId => RecordId,
 	String => String,
 	Geometry => Geometry,

@@ -2,10 +2,10 @@ use axum::extract::ws::Message;
 use axum::response::Response as AxumResponse;
 use bytes::Bytes;
 use http::header::CONTENT_TYPE;
-use surrealdb::types::{SurrealValue, Value};
 use surrealdb_core::rpc::format::Format;
 use surrealdb_core::rpc::request::Request;
 use surrealdb_core::rpc::{DbResponse, DbResultError, RpcError};
+use surrealdb_types::{SurrealValue, Value};
 
 use crate::net::headers::{Accept, ContentType};
 
