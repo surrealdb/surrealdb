@@ -1494,3 +1494,7 @@ allow_proc_macro = true
 
 [pkg.walrus-macro]
 allow_proc_macro = true
+
+[pkg.find-msvc-tools]
+allow_unsafe = true
+from.build.allow_apis = ["fs", "process"]
