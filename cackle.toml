@@ -1504,3 +1504,6 @@ build.allow_apis = ["fs"]
 
 [pkg.pulley-interpreter]
 allow_unsafe = true
+
+[pkg.target-lexicon]
+build.allow_apis = ["fs", "process"]
