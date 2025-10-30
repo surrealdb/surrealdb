@@ -47,12 +47,9 @@ impl RemoveModuleStatement {
 		#[cfg(not(target_arch = "wasm32"))]
 		if let Some(cache) = ctx.get_surrealism_cache() {
 			let lookup = match &md.executable {
-				ModuleExecutable::Surrealism(surrealism) => SurrealismCacheLookup::File(
-					&ns,
-					&db,
-					&surrealism.bucket,
-					&surrealism.key,
-				),
+				ModuleExecutable::Surrealism(surrealism) => {
+					SurrealismCacheLookup::File(&ns, &db, &surrealism.bucket, &surrealism.key)
+				}
 				ModuleExecutable::Silo(silo) => SurrealismCacheLookup::Silo(
 					&silo.organisation,
 					&silo.package,
