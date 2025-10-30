@@ -144,7 +144,7 @@ pub async fn any(
 pub fn at((set, i): (Set, i64)) -> Result<Value> {
 	let mut idx = i;
 	if idx < 0 {
-		idx = set.len() as i64 + idx;
+		idx += set.len() as i64;
 	}
 	if idx < 0 {
 		return Ok(Value::None);
