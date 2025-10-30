@@ -1092,6 +1092,7 @@ allow_unsafe = true
 
 [pkg.object]
 allow_unsafe = true
+from.build.allow_apis = ["process"]
 
 [pkg.findshlibs]
 allow_unsafe = true
@@ -1482,6 +1483,7 @@ allow_proc_macro = true
 
 [pkg.wasmtime-versioned-export-macros]
 allow_proc_macro = true
+allow_unsafe = true
 
 [pkg.macro_rules_attribute-proc_macro]
 allow_proc_macro = true
@@ -1500,6 +1502,7 @@ allow_unsafe = true
 from.build.allow_apis = ["fs", "process"]
 
 [pkg.cranelift-isle]
+allow_apis = ["fs"]
 build.allow_apis = ["fs"]
 
 [pkg.pulley-interpreter]
@@ -1507,3 +1510,174 @@ allow_unsafe = true
 
 [pkg.target-lexicon]
 build.allow_apis = ["fs", "process"]
+
+[pkg.cranelift-codegen-meta]
+allow_unsafe = true
+allow_apis = ["fs"]
+build.allow_apis = ["fs"]
+
+# Wasmtime/Cranelift ecosystem - added proactively
+[pkg.cranelift-codegen]
+allow_unsafe = true
+build.allow_apis = ["fs", "process"]
+
+[pkg.cranelift-frontend]
+allow_unsafe = true
+
+[pkg.cranelift-entity]
+allow_unsafe = true
+
+[pkg.cranelift-bforest]
+allow_unsafe = true
+
+[pkg.cranelift-control]
+allow_unsafe = true
+
+[pkg.cranelift-native]
+allow_unsafe = true
+
+[pkg.cranelift-codegen-shared]
+allow_unsafe = true
+
+[pkg.cranelift-assembler-x64]
+allow_unsafe = true
+build.allow_apis = ["fs"]
+
+[pkg.cranelift-assembler-x64-meta]
+allow_unsafe = true
+allow_apis = ["fs"]
+build.allow_apis = ["fs"]
+
+[pkg.cranelift-srcgen]
+allow_unsafe = true
+allow_apis = ["fs"]
+
+[pkg.wasmtime]
+allow_unsafe = true
+build.allow_apis = ["process"]
+
+[pkg.wasmtime-environ]
+allow_unsafe = true
+
+[pkg.wasmtime-cranelift]
+allow_unsafe = true
+
+[pkg.wasmtime-winch]
+allow_unsafe = true
+
+[pkg.wasmtime-fiber]
+allow_unsafe = true
+
+[pkg.wasmtime-jit-icache-coherence]
+allow_unsafe = true
+
+[pkg.wasmtime-asm-macros]
+allow_unsafe = true
+
+[pkg.wasmtime-slab]
+allow_unsafe = true
+
+[pkg.wasmtime-component-util]
+allow_unsafe = true
+
+[pkg.wasmtime-math]
+allow_unsafe = true
+
+[pkg.wasmtime-wasi-io]
+allow_unsafe = true
+
+[pkg.wasmtime-wit-bindgen]
+allow_unsafe = true
+
+[pkg.wiggle]
+allow_unsafe = true
+
+[pkg.wiggle-generate]
+allow_unsafe = true
+
+[pkg.winch-codegen]
+allow_unsafe = true
+
+[pkg.regalloc2]
+allow_unsafe = true
+
+[pkg.wast]
+allow_unsafe = true
+
+[pkg.wasmtime-wasi]
+allow_unsafe = true
+allow_apis = ["fs", "net"]
+
+[pkg.wasmtime-runtime]
+allow_unsafe = true
+
+[pkg.wasmtime-jit]
+allow_unsafe = true
+
+[pkg.wasmtime-cache]
+allow_unsafe = true
+allow_apis = ["fs"]
+
+[pkg.wasmtime-profiling]
+allow_unsafe = true
+
+[pkg.wasmparser]
+allow_unsafe = true
+from.build.allow_apis = ["process"]
+
+[pkg.io-lifetimes]
+allow_unsafe = true
+from.build.allow_apis = ["process"]
+
+[pkg.wasm-encoder]
+allow_unsafe = true
+from.build.allow_apis = ["process"]
+
+[pkg.io-extras]
+allow_unsafe = true
+from.build.allow_apis = ["process"]
+
+[pkg.postcard]
+allow_unsafe = true
+
+# cap-std ecosystem (capability-based security for filesystem/network)
+[pkg.cap-primitives]
+allow_unsafe = true
+from.build.allow_apis = ["process"]
+
+[pkg.cap-std]
+allow_unsafe = true
+from.build.allow_apis = ["process"]
+
+[pkg.cap-fs-ext]
+allow_unsafe = true
+from.build.allow_apis = ["process"]
+
+[pkg.cap-net-ext]
+allow_unsafe = true
+from.build.allow_apis = ["process"]
+
+[pkg.cap-time-ext]
+allow_unsafe = true
+from.build.allow_apis = ["process"]
+
+[pkg.cap-rand]
+allow_unsafe = true
+from.build.allow_apis = ["process"]
+
+[pkg.fs-set-times]
+allow_unsafe = true
+from.build.allow_apis = ["process"]
+
+[pkg.system-interface]
+allow_unsafe = true
+from.build.allow_apis = ["process"]
+
+[pkg.winx]
+allow_unsafe = true
+
+[pkg.rustix-linux-procfs]
+allow_unsafe = true
+
+[pkg.memfd]
+allow_unsafe = true
