@@ -11,13 +11,12 @@ use std::sync::Arc;
 
 use revision::error::Error;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
-use rust_decimal::Decimal;
 use serde::de::Deserializer;
 use serde::{Deserialize, Serialize, Serializer};
 
 use crate::catalog::aggregation::AggregationStat;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::val::{Datetime, Number, Value};
+use crate::val::Value;
 
 /// Represents a record stored in the database
 ///
