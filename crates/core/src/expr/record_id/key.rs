@@ -7,7 +7,6 @@ use reblessive::tree::Stk;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::expression::VisitExpression;
 use crate::expr::literal::ObjectEntry;
 use crate::expr::{Expr, FlowResultExt as _, Kind, KindLiteral, RecordIdKeyRangeLit};
 use crate::fmt::{EscapeKey, EscapeRid, Fmt, Pretty, is_pretty, pretty_indent};
@@ -68,26 +67,6 @@ impl RecordIdKeyLit {
 impl From<RecordIdKeyRangeLit> for RecordIdKeyLit {
 	fn from(v: RecordIdKeyRangeLit) -> Self {
 		Self::Range(Box::new(v))
-	}
-}
-
-impl VisitExpression for RecordIdKeyLit {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		match self {
-			RecordIdKeyLit::Array(array) => {
-				array.iter().for_each(|expr| expr.visit(visitor));
-			}
-			RecordIdKeyLit::Object(object) => {
-				object.iter().for_each(|entry| entry.visit(visitor));
-			}
-			RecordIdKeyLit::Range(range) => {
-				range.visit(visitor);
-			}
-			_ => {}
-		}
 	}
 }
 

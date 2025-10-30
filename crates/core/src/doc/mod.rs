@@ -47,3 +47,11 @@ impl From<anyhow::Error> for IgnoreError {
 		IgnoreError::Error(value)
 	}
 }
+
+/// A type of action that triggers an even or view update
+#[derive(Clone, Debug, Eq, PartialEq, Copy)]
+pub(crate) enum Action {
+	Create,
+	Update,
+	Delete,
+}

@@ -15,9 +15,9 @@ use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{ToSql, write_sql};
 
 use crate::err::Error;
-use crate::expr;
 use crate::expr::kind::GeometryKind;
 use crate::expr::statements::info::InfoStructure;
+use crate::expr::{self, ClosureExpr};
 use crate::fmt::{Pretty, QuoteStr};
 use crate::sql::expression::convert_public_value_to_internal;
 
@@ -31,7 +31,6 @@ pub(crate) mod geometry;
 pub(crate) mod number;
 pub(crate) mod object;
 pub(crate) mod range;
-pub(crate) mod record;
 pub(crate) mod record_id;
 pub(crate) mod regex;
 pub(crate) mod set;
@@ -519,7 +518,11 @@ impl Value {
 			}
 			Value::Regex(regex) => expr::Expr::Literal(expr::Literal::Regex(regex)),
 			Value::File(file) => expr::Expr::Literal(expr::Literal::File(file)),
-			Value::Closure(closure) => expr::Expr::Literal(expr::Literal::Closure(closure)),
+			Value::Closure(closure) => expr::Expr::Closure(Box::new(ClosureExpr {
+				returns: closure.returns.clone(),
+				args: closure.args.clone(),
+				body: closure.body.clone(),
+			})),
 			Value::Range(range) => range.into_literal(),
 			Value::Table(t) => expr::Expr::Table(t.into_string()),
 		}

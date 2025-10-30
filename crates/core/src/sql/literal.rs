@@ -6,7 +6,7 @@ use rust_decimal::Decimal;
 use surrealdb_types::ToSql;
 
 use crate::fmt::{EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
-use crate::sql::{Closure, Expr, RecordIdLit};
+use crate::sql::{Expr, RecordIdLit};
 use crate::types::{
 	PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicGeometry, PublicRegex,
 	PublicUuid,
@@ -38,7 +38,6 @@ pub enum Literal {
 	Geometry(PublicGeometry),
 	File(PublicFile),
 	Bytes(PublicBytes),
-	Closure(Box<Closure>),
 }
 
 impl PartialEq for Literal {
@@ -62,7 +61,6 @@ impl PartialEq for Literal {
 			(Literal::Uuid(a), Literal::Uuid(b)) => a == b,
 			(Literal::Geometry(a), Literal::Geometry(b)) => a == b,
 			(Literal::File(a), Literal::File(b)) => a == b,
-			(Literal::Closure(a), Literal::Closure(b)) => a == b,
 			_ => false,
 		}
 	}
@@ -143,7 +141,6 @@ impl fmt::Display for Literal {
 			Literal::Uuid(uuid) => write!(f, "{uuid}"),
 			Literal::Geometry(geometry) => write!(f, "{geometry}"),
 			Literal::File(file) => write!(f, "{}", file.to_sql()),
-			Literal::Closure(closure) => write!(f, "{closure}"),
 		}
 	}
 }
@@ -176,7 +173,6 @@ impl From<Literal> for crate::expr::Literal {
 			Literal::Geometry(geometry) => crate::expr::Literal::Geometry(geometry.into()),
 			Literal::File(file) => crate::expr::Literal::File(file.into()),
 			Literal::Bytes(bytes) => crate::expr::Literal::Bytes(bytes.into()),
-			Literal::Closure(closure) => crate::expr::Literal::Closure(Box::new((*closure).into())),
 		}
 	}
 }
@@ -211,7 +207,6 @@ impl From<crate::expr::Literal> for Literal {
 			crate::expr::Literal::Geometry(geometry) => Literal::Geometry(geometry.into()),
 			crate::expr::Literal::File(file) => Literal::File(file.into()),
 			crate::expr::Literal::Bytes(bytes) => Literal::Bytes(bytes.into()),
-			crate::expr::Literal::Closure(closure) => Literal::Closure(Box::new((*closure).into())),
 		}
 	}
 }

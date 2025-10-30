@@ -477,7 +477,6 @@ fn convert_static_literal(lit: Literal) -> Result<SurValue, GqlError> {
 		Literal::UnboundedRange => {
 			Err(resolver_error("Unbounded ranges are not supported in GraphQL"))
 		}
-		Literal::Closure(_) => Err(resolver_error("Closures are not supported in GraphQL")),
 	}
 }
 
