@@ -174,7 +174,7 @@ use surrealdb_core::{
 	iam::{Action, ResourceKind, check::check_ns_db},
 	ml::storage::surml_file::SurMlFile,
 };
-use surrealdb_types::{Notification, ToSql, Value, Variables};
+use surrealdb_types::{Notification, SurrealValue, ToSql, Value, Variables};
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
@@ -189,6 +189,7 @@ use uuid::Uuid;
 use crate::conn::MlExportConfig;
 use crate::conn::{Command, RequestData};
 use crate::opt::IntoEndpoint;
+use crate::opt::auth::{AccessToken, RefreshToken, SecureToken, Token};
 use crate::{Connect, Result, Surreal};
 
 #[cfg(not(target_family = "wasm"))]
@@ -567,8 +568,20 @@ async fn router(
 				iam::signup::signup(kvs, &mut *session.write().await, credentials.into())
 					.await
 					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
-			let token = signup_data.token.map(Value::String).unwrap_or(Value::None);
-			let result = query_result.finish_with_result(Ok(token));
+			let token = match signup_data {
+				iam::Token::Access(token) => Token {
+					access: AccessToken(SecureToken(token)),
+					refresh: None,
+				},
+				iam::Token::WithRefresh {
+					access: token,
+					refresh,
+				} => Token {
+					access: AccessToken(SecureToken(token)),
+					refresh: Some(RefreshToken(SecureToken(refresh))),
+				},
+			};
+			let result = query_result.finish_with_result(Ok(token.into_value()));
 
 			Ok(vec![result])
 		}
@@ -580,17 +593,66 @@ async fn router(
 				iam::signin::signin(kvs, &mut *session.write().await, credentials.into())
 					.await
 					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
-
-			let result = query_result.finish_with_result(Ok(Value::String(signin_data.token)));
-
+			let token = match signin_data {
+				iam::Token::Access(token) => Token {
+					access: AccessToken(SecureToken(token)),
+					refresh: None,
+				},
+				iam::Token::WithRefresh {
+					access,
+					refresh,
+				} => Token {
+					access: AccessToken(SecureToken(access)),
+					refresh: Some(RefreshToken(SecureToken(refresh))),
+				},
+			};
+			let result = query_result.finish_with_result(Ok(token.into_value()));
 			Ok(vec![result])
 		}
 		Command::Authenticate {
 			token,
 		} => {
 			let query_result = QueryResultBuilder::started_now();
-			let result = match iam::verify::token(kvs, &mut *session.write().await, &token).await {
-				Ok(_) => query_result.finish_with_result(Ok(Value::None)),
+			// Extract the access token and check if this token supports refresh
+			let (access, with_refresh) = match &token {
+				iam::Token::Access(access) => (access, false),
+				iam::Token::WithRefresh {
+					access,
+					..
+				} => (access, true),
+			};
+			// Attempt to authenticate with the access token
+			let result = match iam::verify::token(kvs, &mut *session.write().await, access).await {
+				// Authentication successful - return the original token
+				Ok(_) => query_result.finish_with_result(Ok(token.into_value())),
+				Err(error) => {
+					// Automatic refresh token handling:
+					// If the access token is expired and we have a refresh token,
+					// automatically attempt to refresh and return new tokens.
+					if with_refresh && error.to_string().contains("token has expired") {
+						let result = match token.refresh(kvs, &mut *session.write().await).await {
+							Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
+							Err(error) => query_result.finish_with_result(Err(
+								DbResultError::InternalError(error.to_string()),
+							)),
+						};
+						return Ok(vec![result]);
+					}
+					// If authentication failed and automatic refresh isn't applicable,
+					// return the authentication error
+					query_result
+						.finish_with_result(Err(DbResultError::InternalError(error.to_string())))
+				}
+			};
+			Ok(vec![result])
+		}
+		Command::Refresh {
+			token,
+		} => {
+			// Refresh command: Exchange a refresh token for new access and refresh tokens
+			let query_result = QueryResultBuilder::started_now();
+			let result = match token.refresh(kvs, &mut *session.write().await).await {
+				Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
 				Err(error) => query_result
 					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
 			};
@@ -599,6 +661,18 @@ async fn router(
 		Command::Invalidate => {
 			let query_result = QueryResultBuilder::started_now();
 			let result = match iam::clear::clear(&mut *session.write().await) {
+				Ok(_) => query_result.finish_with_result(Ok(Value::None)),
+				Err(error) => query_result
+					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
+			};
+			Ok(vec![result])
+		}
+		Command::Revoke {
+			token,
+		} => {
+			// Revoke command: Explicitly invalidate a refresh token to prevent future use
+			let query_result = QueryResultBuilder::started_now();
+			let result = match token.revoke_refresh_token(kvs).await {
 				Ok(_) => query_result.finish_with_result(Ok(Value::None)),
 				Err(error) => query_result
 					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
