@@ -1440,3 +1440,57 @@ allow_unsafe = true
 
 [pkg.sdd]
 allow_unsafe = true
+
+[pkg.wasmtime-component-macro]
+allow_proc_macro = true
+
+[pkg.dyn-stack-macros]
+allow_proc_macro = true
+
+[pkg.openssl-macros]
+allow_proc_macro = true
+
+[pkg.monostate-impl]
+allow_proc_macro = true
+
+[pkg.enum-as-inner]
+allow_proc_macro = true
+
+[pkg.seq-macro]
+allow_proc_macro = true
+
+[pkg.num_enum_derive]
+allow_proc_macro = true
+
+[pkg.trait-variant]
+allow_proc_macro = true
+
+[pkg.cxxbridge-macro]
+allow_proc_macro = true
+
+[pkg.surrealism-macros]
+allow_proc_macro = true
+
+[pkg.wiggle-macro]
+allow_proc_macro = true
+
+[pkg.bytemuck_derive]
+allow_proc_macro = true
+
+[pkg.derive_builder_macro]
+allow_proc_macro = true
+
+[pkg.wasmtime-versioned-export-macros]
+allow_proc_macro = true
+
+[pkg.macro_rules_attribute-proc_macro]
+allow_proc_macro = true
+
+[pkg.pulley-macros]
+allow_proc_macro = true
+
+[pkg.derive_arbitrary]
+allow_proc_macro = true
+
+[pkg.walrus-macro]
+allow_proc_macro = true
