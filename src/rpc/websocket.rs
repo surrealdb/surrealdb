@@ -532,9 +532,22 @@ impl RpcProtocol for Websocket {
 		&self,
 		id: Uuid,
 	) -> Result<Arc<surrealdb_core::kvs::Transaction>, surrealdb_core::rpc::RpcError> {
-		self.transactions.get(&id).map(|tx| tx.clone()).ok_or_else(|| {
-			surrealdb_core::rpc::RpcError::InvalidParams("Transaction not found".to_string())
-		})
+		debug!("WebSocket get_tx called for transaction {id}");
+		let result = self
+			.transactions
+			.get(&id)
+			.map(|tx| {
+				debug!("Transaction {id} found in WebSocket transactions map");
+				tx.clone()
+			})
+			.ok_or_else(|| {
+				warn!(
+					"Transaction {id} not found in WebSocket transactions map (have {} transactions)",
+					self.transactions.len()
+				);
+				surrealdb_core::rpc::RpcError::InvalidParams("Transaction not found".to_string())
+			});
+		result
 	}
 
 	/// Stores a transaction
@@ -621,8 +634,13 @@ impl RpcProtocol for Websocket {
 		let tx = self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await?;
 		// Generate a unique transaction ID
 		let id = Uuid::now_v7();
+		debug!("WebSocket begin: created transaction {id}");
 		// Store the transaction in the map
 		self.transactions.insert(id, Arc::new(tx));
+		debug!(
+			"WebSocket begin: stored transaction {id}, map now has {} transactions",
+			self.transactions.len()
+		);
 		// Return the transaction ID to the client
 		Ok(DbResult::Other(Value::Uuid(surrealdb::types::Uuid(id))))
 	}

@@ -1261,25 +1261,15 @@ where
 
 	// If a transaction UUID is provided, retrieve it and execute with it
 	let res = if let Some(txn_id) = txn {
-		// Try to retrieve the transaction
-		match this.get_tx(txn_id).await {
-			Ok(tx) => {
-				// Execute with the existing transaction by passing it through context
-				match query {
-					QueryForm::Text(query) => {
-						this.kvs().execute_with_transaction(query, &session, vars, tx).await?
-					}
-					QueryForm::Parsed(ast) => {
-						this.kvs().process_with_transaction(ast, &session, vars, tx).await?
-					}
-				}
+		// Retrieve the transaction - fail if not found
+		let tx = this.get_tx(txn_id).await?;
+		// Execute with the existing transaction by passing it through context
+		match query {
+			QueryForm::Text(query) => {
+				this.kvs().execute_with_transaction(query, &session, vars, tx).await?
 			}
-			Err(_) => {
-				// Transaction not found - execute normally (will create its own transaction)
-				match query {
-					QueryForm::Text(query) => this.kvs().execute(query, &session, vars).await?,
-					QueryForm::Parsed(ast) => this.kvs().process(ast, &session, vars).await?,
-				}
+			QueryForm::Parsed(ast) => {
+				this.kvs().process_with_transaction(ast, &session, vars, tx).await?
 			}
 		}
 	} else {

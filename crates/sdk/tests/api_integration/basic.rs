@@ -1713,6 +1713,7 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 	assert_eq!(inside.clone().into_option::<Value>().unwrap(), None);
 }
 
+#[cfg(not(feature = "protocol-http"))]
 pub async fn client_side_transactions(new_db: impl CreateDb) {
 	#[derive(Debug, Clone, SurrealValue, PartialEq)]
 	struct User {
@@ -1785,6 +1786,11 @@ pub async fn client_side_transactions(new_db: impl CreateDb) {
 	assert_eq!(users.len(), 3); // John, Alice, Bob
 
 	drop(permit);
+}
+
+#[cfg(feature = "protocol-http")]
+pub async fn client_side_transactions(_new_db: impl CreateDb) {
+	// Client-side transactions are not supported on HTTP
 }
 
 define_include_tests!(basic => {
