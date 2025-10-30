@@ -369,8 +369,8 @@ pub(crate) enum Error {
 	RealtimeDisabled,
 
 	/// Reached excessive computation depth due to functions, subqueries, or
-	/// futures
-	#[error("Reached excessive computation depth due to functions, subqueries, or futures")]
+	/// computed values
+	#[error("Reached excessive computation depth due to functions, subqueries, or computed values")]
 	ComputationDepthExceeded,
 
 	/// Tried to execute a statement that can't be used here
