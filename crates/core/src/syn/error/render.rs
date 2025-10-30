@@ -95,7 +95,7 @@ impl Snippet {
 		explain: Option<&'static str>,
 		kind: MessageKind,
 	) -> Self {
-		let line = source.split('\n').nth(location.line - 1).unwrap();
+		let line = source.split('\n').nth(location.line - 1).expect("line exists in source");
 		let (line, truncation, offset) = Self::truncate_line(line, location.column - 1);
 
 		Snippet {
@@ -115,7 +115,7 @@ impl Snippet {
 		explain: Option<&str>,
 		kind: MessageKind,
 	) -> Self {
-		let line = source.split('\n').nth(location.start.line - 1).unwrap();
+		let line = source.split('\n').nth(location.start.line - 1).expect("line exists in source");
 		let (line, truncation, offset) = Self::truncate_line(line, location.start.column - 1);
 		let length = if location.start.line == location.end.line {
 			(location.end.column - location.start.column).max(1)
@@ -178,7 +178,7 @@ impl Snippet {
 			}
 
 			// Unwrap because we just checked if the line length is longer then this.
-			let truncate_index = line.char_indices().nth(size).unwrap().0;
+			let truncate_index = line.char_indices().nth(size).expect("character index exists").0;
 			line = &line[..truncate_index];
 		}
 

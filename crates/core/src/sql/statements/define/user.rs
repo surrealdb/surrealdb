@@ -108,7 +108,7 @@ impl From<DefineUserStatement> for crate::expr::statements::DefineUserStatement 
 			// TODO: Move out of AST.
 			PassType::Password(p) => Argon2::default()
 				.hash_password(p.as_bytes(), &SaltString::generate(&mut OsRng))
-				.unwrap()
+				.expect("password hashing should not fail")
 				.to_string(),
 		};
 

@@ -11,10 +11,8 @@ use crate::method::BoxFuture;
 use crate::opt::Endpoint;
 use crate::{ExtraFeatures, Result, Surreal};
 
-mod cmd;
+pub(crate) mod cmd;
 pub(crate) use cmd::Command;
-#[cfg(feature = "protocol-http")]
-pub(crate) use cmd::RouterRequest;
 
 use super::opt::Config;
 
@@ -118,7 +116,7 @@ impl Router {
 			// signup/signin
 			let result = match value {
 				Value::Array(array) if array.len() == 1 => {
-					R::from_value(array.into_iter().next().unwrap())
+					R::from_value(array.into_iter().next().expect("array has exactly one element"))
 				}
 				v => R::from_value(v),
 			};
@@ -140,7 +138,9 @@ impl Router {
 					0 => Ok(None),
 					// Single-element array: extract and return the element
 					// This happens when operating on a record ID
-					1 => Ok(Some(R::from_value(array.into_iter().next().unwrap())?)),
+					1 => Ok(Some(R::from_value(
+						array.into_iter().next().expect("array has exactly one element"),
+					)?)),
 					// Multiple elements should not happen for operations expecting Option<T>
 					_ => Ok(Some(R::from_value(Value::Array(array))?)),
 				},

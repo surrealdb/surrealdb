@@ -1,5 +1,6 @@
 use async_channel::Receiver;
 use surrealdb_core::dbs::QueryResultBuilder;
+use surrealdb_types::SurrealValue;
 
 use crate::conn::{Command, Route};
 use crate::types::Value;
@@ -16,11 +17,18 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 			let query_result = QueryResultBuilder::started_now();
 
 			let query_result = match cmd {
-				Command::Invalidate | Command::Health => query_result,
-				Command::Authenticate {
+				Command::Invalidate
+				| Command::Health
+				| Command::Revoke {
 					..
+				} => query_result,
+				Command::Authenticate {
+					token,
 				}
-				| Command::Kill {
+				| Command::Refresh {
+					token,
+				} => query_result.with_result(Ok(token.into_value())),
+				Command::Kill {
 					..
 				}
 				| Command::Unset {

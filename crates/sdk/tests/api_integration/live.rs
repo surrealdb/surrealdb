@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used)]
 #![cfg(any(
 	feature = "protocol-ws",
 	feature = "kv-mem",
@@ -15,7 +16,7 @@ use std::time::Duration;
 
 use futures::{Stream, StreamExt};
 use surrealdb::method::QueryStream;
-use surrealdb::opt::Resource;
+use surrealdb::opt::{Config, Resource};
 use surrealdb::types::{Action, RecordId, SurrealValue, Value, object};
 use surrealdb::{Notification, Result};
 use tokio::sync::RwLock;
@@ -29,7 +30,8 @@ const LQ_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_NOTIFICATIONS: usize = 100;
 
 pub async fn live_select_table(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 
@@ -94,7 +96,8 @@ pub async fn live_select_table(new_db: impl CreateDb) {
 }
 
 pub async fn live_select_record_id(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 
@@ -164,7 +167,8 @@ pub async fn live_select_record_id(new_db: impl CreateDb) {
 }
 
 pub async fn live_select_record_ranges(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 
@@ -261,7 +265,8 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 }
 
 pub async fn live_select_query(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	{
@@ -424,7 +429,8 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 }
 
 pub async fn live_query_delete_notifications(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 
@@ -475,7 +481,8 @@ struct UpdateContent {
 }
 
 pub async fn live_select_with_fetch(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 

@@ -293,7 +293,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 			path.to_string()
 		};
 		// Initiate the desired datastore
-		let (datastore_flavour, clock) = match (flavour, path) {
+		match (flavour, path) {
 			// Initiate an in-memory datastore
 			(flavour @ "memory", _) => {
 				#[cfg(feature = "kv-mem")]
@@ -302,7 +302,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store in {flavour}");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-mem"))]
 				bail!(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -324,7 +324,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 						.map(DatastoreFlavor::RocksDB)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
 				bail!(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -342,7 +342,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 						.map(DatastoreFlavor::RocksDB)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
 				bail!(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -359,7 +359,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 						.map(DatastoreFlavor::SurrealKV)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store with versions enabled");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
 				bail!(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -377,7 +377,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 						.map(DatastoreFlavor::SurrealKV)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store with versions not enabled");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
 				bail!(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -390,7 +390,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 						super::indxdb::Datastore::new(&path).await.map(DatastoreFlavor::IndxDB)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
 				bail!(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -402,7 +402,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 					let v = super::tikv::Datastore::new(&path).await.map(DatastoreFlavor::TiKV)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
 				bail!(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -416,7 +416,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 						.map(DatastoreFlavor::FoundationDB)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-fdb"))]
 				bail!(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -426,8 +426,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 				info!(target: TARGET, "Unable to load the specified datastore {flavour}{}", path);
 				bail!(Error::Ds("Unable to load the specified datastore".into()))
 			}
-		};
-		Ok((Box::<DatastoreFlavor>::new(datastore_flavour), clock))
+		}
 	}
 
 	fn path_valid(v: &str) -> Result<String> {
@@ -1261,9 +1260,6 @@ impl Datastore {
 			references_enabled: ctx
 				.get_capabilities()
 				.allows_experimental(&ExperimentalTarget::RecordReferences),
-			bearer_access_enabled: ctx
-				.get_capabilities()
-				.allows_experimental(&ExperimentalTarget::BearerAccess),
 			define_api_enabled: ctx
 				.get_capabilities()
 				.allows_experimental(&ExperimentalTarget::DefineApi),

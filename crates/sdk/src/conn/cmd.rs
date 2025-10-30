@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::path::PathBuf;
 
 use async_channel::Sender;
+use surrealdb_core::iam::token::Token;
 use surrealdb_core::kvs::export::Config as DbExportConfig;
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 use surrealdb_types::SurrealValue;
@@ -25,9 +26,15 @@ pub(crate) enum Command {
 		credentials: Object,
 	},
 	Authenticate {
-		token: String,
+		token: Token,
+	},
+	Refresh {
+		token: Token,
 	},
 	Invalidate,
+	Revoke {
+		token: Token,
+	},
 	RawQuery {
 		txn: Option<Uuid>,
 		query: Cow<'static, str>,
@@ -118,6 +125,25 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "authenticate",
+				// Extract only the access token for authentication.
+				// If the token has a refresh component, we ignore it here
+				// as authentication only needs the access token.
+				params: Some(Value::Array(Array::from(vec![match token {
+					Token::Access(access) => access.into_value(),
+					Token::WithRefresh {
+						access,
+						..
+					} => access.into_value(),
+				}]))),
+				transaction: None,
+			},
+			Command::Refresh {
+				token,
+			} => RouterRequest {
+				id,
+				method: "refresh",
+				// Send the entire token structure (both access and refresh tokens)
+				// to the server for the refresh operation.
 				params: Some(Value::Array(Array::from(vec![Value::from_t(token)]))),
 				transaction: None,
 			},
@@ -125,6 +151,14 @@ impl Command {
 				id,
 				method: "invalidate",
 				params: None,
+				transaction: None,
+			},
+			Command::Revoke {
+				token,
+			} => RouterRequest {
+				id,
+				method: "revoke",
+				params: Some(Value::Array(Array::from(vec![token.into_value()]))),
 				transaction: None,
 			},
 			Command::RawQuery {
@@ -228,11 +262,11 @@ impl Command {
 #[derive(Clone, Debug, SurrealValue)]
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 pub(crate) struct RouterRequest {
-	id: Option<i64>,
-	method: &'static str,
-	params: Option<Value>,
+	pub(crate) id: Option<i64>,
+	pub(crate) method: &'static str,
+	pub(crate) params: Option<Value>,
 	#[allow(dead_code)]
-	transaction: Option<Uuid>,
+	pub(crate) transaction: Option<Uuid>,
 }
 
 #[cfg(test)]

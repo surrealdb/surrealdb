@@ -411,7 +411,8 @@ impl Transaction {
 					} else {
 						// If the record is not a tombstone and a version exists, format it as an
 						// INSERT VERSION command.
-						let ts = Utc.timestamp_nanos(version.unwrap() as i64);
+						let ts =
+							Utc.timestamp_nanos(version.expect("version should be set") as i64);
 						format!("INSERT {} VERSION d'{:?}';", record.data.as_ref(), ts)
 					}
 				} else {

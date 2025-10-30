@@ -312,9 +312,7 @@ pub fn slice(
 			start: Bound::Included(start),
 			end: Bound::Excluded(end),
 		}
-	} else if range_start.is_range() {
-		// Condition checked above, unwrap cannot trigger.
-		let range = range_start.into_range().unwrap();
+	} else if let Value::Range(range) = range_start {
 		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
 			name: String::from("set::slice"),
 			message: format!("Range was the wrong type. {e}"),

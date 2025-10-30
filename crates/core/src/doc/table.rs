@@ -1000,7 +1000,9 @@ impl Document {
 					if !all_metadata_deltas.is_empty() || !all_set_ops.is_empty() {
 						// Use current_group_ids if available, otherwise use
 						// initial_group_ids
-						let group_ids = current_group_ids.or(initial_group_ids).unwrap();
+						let group_ids = current_group_ids
+							.or(initial_group_ids)
+							.expect("group_ids should be set for grouping");
 						let rid = RecordId {
 							table: ft.name.clone(),
 							key: RecordIdKey::Array(Array(group_ids)),
