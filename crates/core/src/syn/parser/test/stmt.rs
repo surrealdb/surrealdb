@@ -19,11 +19,11 @@ use crate::sql::statements::access::{
 };
 use crate::sql::statements::define::user::PassType;
 use crate::sql::statements::define::{
-	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,
-	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
-	DefineParamStatement, DefineStatement, DefineTableStatement,
+	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineDefault,
+	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
+	DefineKind, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
+	DefineTableStatement,
 };
-use crate::sql::statements::define::{DefineDefault, DefineKind};
 use crate::sql::statements::remove::RemoveAnalyzerStatement;
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
