@@ -76,9 +76,9 @@ fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Valid
 	Ok((dec, val))
 }
 
-static KEY: LazyLock<DecodingKey> = LazyLock::new(|| DecodingKey::from_secret(&[]));
+pub(crate) static KEY: LazyLock<DecodingKey> = LazyLock::new(|| DecodingKey::from_secret(&[]));
 
-static DUD: LazyLock<Validation> = LazyLock::new(|| {
+pub(crate) static DUD: LazyLock<Validation> = LazyLock::new(|| {
 	let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
 	validation.insecure_disable_signature_validation();
 	validation.validate_nbf = false;
@@ -1060,8 +1060,7 @@ mod tests {
 	#[tokio::test]
 	async fn test_basic_nonexistent_role() {
 		use crate::iam::Error as IamError;
-		use crate::sql::statements::DefineUserStatement;
-		use crate::sql::statements::define::DefineStatement;
+		use crate::sql::statements::define::{DefineStatement, DefineUserStatement};
 		use crate::sql::{Base, Expr, TopLevelExpr};
 		let test_levels = vec![
 			TestLevel {

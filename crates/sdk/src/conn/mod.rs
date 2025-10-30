@@ -11,10 +11,8 @@ use crate::method::BoxFuture;
 use crate::opt::Endpoint;
 use crate::{ExtraFeatures, Result, Surreal};
 
-mod cmd;
+pub(crate) mod cmd;
 pub(crate) use cmd::Command;
-#[cfg(feature = "protocol-http")]
-pub(crate) use cmd::RouterRequest;
 
 use super::opt::Config;
 

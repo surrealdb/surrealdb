@@ -18,7 +18,7 @@ use crate::types::PublicNotification;
 ///
 /// An Options contains specific information for how
 /// to process each particular statement, including the record
-/// version to retrieve, whether futures should be processed, and
+/// version to retrieve, whether computed values should be processed, and
 /// whether field/event/table queries should be processed (useful
 /// when importing data, where these queries might fail).
 #[derive(Clone, Debug)]
@@ -284,7 +284,7 @@ impl Options {
 		}
 	}
 
-	/// Create a new Options object for a function/subquery/future/etc.
+	/// Create a new Options object for a function/subquery/computed/etc.
 	///
 	/// The parameter is the approximate cost of the operation (more concretely, the size of the
 	/// stack frame it uses relative to a simple function call). When in doubt, use a value of 1.

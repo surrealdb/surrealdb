@@ -116,7 +116,6 @@ impl std::str::FromStr for FuncTarget {
 pub enum ExperimentalTarget {
 	RecordReferences,
 	GraphQL,
-	BearerAccess,
 	DefineApi,
 	Files,
 }
@@ -126,7 +125,6 @@ impl fmt::Display for ExperimentalTarget {
 		match self {
 			Self::RecordReferences => write!(f, "record_references"),
 			Self::GraphQL => write!(f, "graphql"),
-			Self::BearerAccess => write!(f, "bearer_access"),
 			Self::DefineApi => write!(f, "define_api"),
 			Self::Files => write!(f, "files"),
 		}
@@ -144,7 +142,6 @@ impl Target<str> for ExperimentalTarget {
 		match self {
 			Self::RecordReferences => elem.eq_ignore_ascii_case("record_references"),
 			Self::GraphQL => elem.eq_ignore_ascii_case("graphql"),
-			Self::BearerAccess => elem.eq_ignore_ascii_case("bearer_access"),
 			Self::DefineApi => elem.eq_ignore_ascii_case("define_api"),
 			Self::Files => elem.eq_ignore_ascii_case("files"),
 		}
@@ -174,7 +171,6 @@ impl std::str::FromStr for ExperimentalTarget {
 		match s.trim().to_ascii_lowercase().as_str() {
 			"record_references" => Ok(ExperimentalTarget::RecordReferences),
 			"graphql" => Ok(ExperimentalTarget::GraphQL),
-			"bearer_access" => Ok(ExperimentalTarget::BearerAccess),
 			"define_api" => Ok(ExperimentalTarget::DefineApi),
 			"files" => Ok(ExperimentalTarget::Files),
 			_ => Err(ParseExperimentalTargetError::InvalidName),

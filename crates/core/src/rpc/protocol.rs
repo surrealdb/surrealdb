@@ -9,6 +9,7 @@ use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
 use crate::dbs::capabilities::MethodTarget;
 use crate::dbs::{QueryResult, QueryType, Session};
 use crate::err::Error;
+use crate::iam::token::Token;
 use crate::kvs::{Datastore, LockType, TransactionType};
 use crate::rpc::args::extract_args;
 use crate::rpc::{DbResult, Method, RpcError};
@@ -17,7 +18,9 @@ use crate::sql::{
 	InsertStatement, KillStatement, LiveStatement, Model, Output, RelateStatement, SelectStatement,
 	TopLevelExpr, UpdateStatement, UpsertStatement,
 };
-use crate::types::{PublicArray, PublicRecordIdKey, PublicUuid, PublicValue, PublicVariables};
+use crate::types::{
+	PublicArray, PublicRecordIdKey, PublicUuid, PublicValue, PublicVariables, SurrealValue,
+};
 
 /// utility function converting a `Value::String` into a `Expr::Table`
 fn value_to_table(value: PublicValue) -> Expr {
@@ -127,7 +130,9 @@ pub trait RpcProtocol {
 			Method::Signup => self.signup(session, params).await,
 			Method::Signin => self.signin(session, params).await,
 			Method::Authenticate => self.authenticate(session, params).await,
+			Method::Refresh => self.refresh(session, params).await,
 			Method::Invalidate => self.invalidate(session).await,
+			Method::Revoke => self.revoke(params).await,
 			Method::Reset => self.reset(session).await,
 			Method::Kill => self.kill(session, params).await,
 			Method::Live => self.live(session, params).await,
@@ -226,9 +231,6 @@ pub trait RpcProtocol {
 		Ok(DbResult::Other(PublicValue::None))
 	}
 
-	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of
-	// a string. This will allow returning refresh tokens as well as any additional
-	// credential resulting from signing up.
 	async fn signup(
 		&self,
 		session_id: Option<Uuid>,
@@ -248,7 +250,8 @@ pub trait RpcProtocol {
 		let out: Result<PublicValue> =
 			crate::iam::signup::signup(self.kvs(), &mut session, params.into())
 				.await
-				.map(|v| v.token.clone().map(PublicValue::String).unwrap_or(PublicValue::None));
+				.map(SurrealValue::into_value);
+
 		// Store the updated session
 		self.set_session(session_id, Arc::new(session));
 		// Drop the mutex guard
@@ -257,9 +260,6 @@ pub trait RpcProtocol {
 		out.map(DbResult::Other).map_err(Into::into)
 	}
 
-	// TODO(gguillemas): Update this method in 3.0.0 to return an object instead of
-	// a string. This will allow returning refresh tokens as well as any additional
-	// credential resulting from signing in.
 	async fn signin(
 		&self,
 		session_id: Option<Uuid>,
@@ -279,7 +279,7 @@ pub trait RpcProtocol {
 		let out: Result<PublicValue> =
 			crate::iam::signin::signin(self.kvs(), &mut session, params.into())
 				.await
-				.map(|v| PublicValue::String(v.token.clone()));
+				.map(SurrealValue::into_value);
 		// Store the updated session
 		self.set_session(session_id, Arc::new(session));
 		// Drop the mutex guard
@@ -317,6 +317,67 @@ pub trait RpcProtocol {
 		out.map(DbResult::Other).map_err(From::from)
 	}
 
+	/// Refreshes an access token using a refresh token.
+	///
+	/// This RPC method implements the token refresh flow, allowing clients to
+	/// obtain a new access token without re-authenticating. The method:
+	///
+	/// 1. Validates the provided token contains both access and refresh components
+	/// 2. Uses the refresh token to authenticate and create new tokens
+	/// 3. Revokes the old refresh token (single-use security model)
+	/// 4. Updates the session with the new authentication state
+	/// 5. Returns the new token pair to the client
+	///
+	/// # Arguments
+	///
+	/// * `session_id` - Optional session identifier for stateful connections
+	/// * `params` - Array containing the token with both access and refresh components
+	///
+	/// # Returns
+	///
+	/// A new token containing fresh access and refresh tokens.
+	///
+	/// # Errors
+	///
+	/// Returns an error if:
+	/// - The token parameter is missing or invalid
+	/// - The token doesn't contain a refresh component
+	/// - The refresh token is invalid, expired, or already revoked
+	async fn refresh(
+		&self,
+		session_id: Option<Uuid>,
+		params: PublicArray,
+	) -> Result<DbResult, RpcError> {
+		tracing::debug!("refresh");
+		// Process the method arguments
+		let unexpected = || RpcError::InvalidParams("Expected (token:Token)".to_string());
+		let Some(value) = extract_args(params.into_vec()) else {
+			return Err(unexpected());
+		};
+		let Ok(token) = Token::from_value(value) else {
+			return Err(unexpected());
+		};
+		// Get the context lock
+		let mutex = self.lock().clone();
+		// Lock the context for update
+		let guard = mutex.acquire().await;
+		// Clone the current session
+		let mut session = self.get_session(session_id.as_ref()).as_ref().clone();
+		// Attempt token refresh, which will:
+		// - Validate the refresh token
+		// - Revoke the old refresh token
+		// - Create new access and refresh tokens
+		// - Update the session with the new authentication state
+		let out: Result<PublicValue> =
+			token.refresh(self.kvs(), &mut session).await.map(Token::into_value);
+		// Store the updated session
+		self.set_session(session_id, Arc::new(session));
+		// Drop the mutex guard
+		mem::drop(guard);
+		// Return the new token pair
+		out.map(DbResult::Other).map_err(From::from)
+	}
+
 	async fn invalidate(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
 		// Get the context lock
 		let mutex = self.lock().clone();
@@ -330,6 +391,50 @@ pub trait RpcProtocol {
 		self.set_session(session_id, Arc::new(session));
 		// Drop the mutex guard
 		mem::drop(guard);
+		// Return nothing on success
+		Ok(DbResult::Other(PublicValue::None))
+	}
+
+	/// Revokes a refresh token, preventing it from being used to obtain new access tokens.
+	///
+	/// This RPC method explicitly invalidates a refresh token without affecting the
+	/// current session. This is useful for:
+	///
+	/// - Logout operations where you want to prevent future token refreshes
+	/// - Security events requiring immediate token invalidation
+	/// - Explicit token lifecycle management
+	///
+	/// Unlike `invalidate()`, which clears the entire session, `revoke()` only
+	/// invalidates the specific refresh token, allowing other sessions using
+	/// different tokens to remain active.
+	///
+	/// # Arguments
+	///
+	/// * `params` - Array containing the token with the refresh token to revoke
+	///
+	/// # Returns
+	///
+	/// Returns nothing on success.
+	///
+	/// # Errors
+	///
+	/// Returns an error if:
+	/// - The token parameter is missing or invalid
+	/// - The token doesn't contain a refresh component
+	/// - The token doesn't contain valid namespace/database/access information
+	async fn revoke(&self, params: PublicArray) -> Result<DbResult, RpcError> {
+		tracing::debug!("revoke");
+		// Process the method arguments
+		let unexpected = || RpcError::InvalidParams("Expected (token:Token)".to_string());
+		let Some(value) = extract_args(params.into_vec()) else {
+			return Err(unexpected());
+		};
+		let Ok(token) = Token::from_value(value) else {
+			return Err(unexpected());
+		};
+		// Revoke the refresh token by removing the grant record from the database.
+		// This prevents the refresh token from being used to obtain new access tokens.
+		token.revoke_refresh_token(self.kvs()).await?;
 		// Return nothing on success
 		Ok(DbResult::Other(PublicValue::None))
 	}
