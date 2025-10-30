@@ -6,7 +6,7 @@ use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
-use crate::dbs::capabilities::MethodTarget;
+use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget};
 use crate::dbs::{QueryResult, QueryType, Session};
 use crate::err::Error;
 use crate::kvs::{Datastore, LockType, TransactionType};
