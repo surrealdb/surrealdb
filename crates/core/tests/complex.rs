@@ -214,7 +214,7 @@ fn excessive_cast_chain_depth() -> Result<()> {
 		assert_eq!(
 			err,
 			DbResultError::InternalError(
-				"Reached excessive computation depth due to functions, subqueries, or futures"
+				"Reached excessive computation depth due to functions, subqueries, or computed values"
 					.to_string()
 			)
 		);
