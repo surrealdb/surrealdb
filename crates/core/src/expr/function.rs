@@ -10,8 +10,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::statements::define::ModuleExecutable;
-use crate::expr::{Expr, Idiom, Kind, Model, Script, Value};
+use crate::expr::{Expr, Idiom, Kind, Model, ModuleExecutable, Script, Value};
 use crate::fmt::Fmt;
 use crate::fnc;
 
@@ -339,26 +338,26 @@ async fn check_perms(
 	match permissions {
 		Permission::Full => Ok(()),
 		Permission::None => {
-			return Err(ControlFlow::from(anyhow::Error::new(Error::FunctionPermissions {
+			Err(ControlFlow::from(anyhow::Error::new(Error::FunctionPermissions {
 				name: name.to_string(),
-			})));
+			})))
 		}
 		Permission::Specific(e) => {
 			// Disable permissions
 			let opt = &opt.new_with_perms(false);
 			// Process the PERMISSION clause
 			if !stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?.is_truthy() {
-				return Err(ControlFlow::from(anyhow::Error::new(Error::FunctionPermissions {
+				Err(ControlFlow::from(anyhow::Error::new(Error::FunctionPermissions {
 					name: name.to_string(),
-				})));
+				})))
+			} else {
+				Ok(())
 			}
-
-			Ok(())
 		}
 	}
 }
 
-fn validate_args(name: &str, args: &Vec<Value>, sig: &Vec<Kind>) -> FlowResult<()> {
+fn validate_args(name: &str, args: &[Value], sig: &[Kind]) -> FlowResult<()> {
 	// Get the number of function arguments
 	let max_args_len = sig.len();
 	// Track the number of required arguments

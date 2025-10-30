@@ -200,10 +200,29 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
+	#[cfg(target_arch = "wasm32")]
+	pub(crate) async fn parse_define_module(
+		&mut self,
+		_stk: &mut Stk,
+	) -> ParseResult<DefineModuleStatement> {
+		bail!(
+			"Surrealism modules are not supported in WASM environments",
+			@self.last_span() => "Use of `DEFINE MODULE` is not supported in WASM environments"
+		)
+	}
+
+	#[cfg(not(target_arch = "wasm32"))]
 	pub(crate) async fn parse_define_module(
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineModuleStatement> {
+		if !self.settings.surrealism_enabled {
+			bail!(
+				"Experimental capability `surrealism` is not enabled",
+				@self.last_span() => "Use of `DEFINE MODULE` is still experimental"
+			)
+		}
+
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));

@@ -29,9 +29,7 @@ pub(crate) use field::{DefineDefault, DefineFieldStatement};
 pub(crate) use function::DefineFunctionStatement;
 pub(crate) use index::DefineIndexStatement;
 pub(crate) use model::DefineModelStatement;
-pub(crate) use module::{
-	DefineModuleStatement, ModuleExecutable, SiloExecutable, SurrealismExecutable,
-};
+pub(crate) use module::DefineModuleStatement;
 pub(crate) use namespace::DefineNamespaceStatement;
 pub(crate) use param::DefineParamStatement;
 pub(crate) use sequence::DefineSequenceStatement;

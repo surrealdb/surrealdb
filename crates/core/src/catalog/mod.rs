@@ -8,6 +8,7 @@
 
 mod access;
 mod database;
+mod module;
 mod namespace;
 pub(crate) mod providers;
 mod schema;
@@ -17,6 +18,7 @@ mod view;
 
 pub(crate) use access::*;
 pub(crate) use database::*;
+pub(crate) use module::*;
 pub(crate) use namespace::*;
 pub use schema::ApiMethod;
 pub(crate) use schema::{

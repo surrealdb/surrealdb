@@ -31,9 +31,7 @@ pub(crate) use function::DefineFunctionStatement;
 pub(crate) use index::DefineIndexStatement;
 pub(in crate::expr::statements) use index::run_indexing;
 pub(crate) use model::DefineModelStatement;
-pub(crate) use module::{
-	DefineModuleStatement, ModuleExecutable, SiloExecutable, SurrealismExecutable,
-};
+pub(crate) use module::DefineModuleStatement;
 pub(crate) use namespace::DefineNamespaceStatement;
 pub(crate) use param::DefineParamStatement;
 use reblessive::tree::Stk;

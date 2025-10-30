@@ -1023,7 +1023,7 @@ impl DatabaseProvider for Transaction {
 			Some(val) => val.try_into_type(),
 			None => {
 				let key = crate::key::database::md::new(ns, db, md);
-				let val = self.get(&key, None).await?.ok_or_else(|| Error::FcNotFound {
+				let val = self.get(&key, None).await?.ok_or_else(|| Error::MdNotFound {
 					name: md.to_owned(),
 				})?;
 				let val = Arc::new(val);

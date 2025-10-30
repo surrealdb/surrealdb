@@ -136,7 +136,7 @@ impl SurrealismExecutable {
 			);
 		}
 
-		let lookup = SurrealismCacheLookup::File(&ns, &db, &self.0);
+		let lookup = SurrealismCacheLookup::File(ns, db, &self.0);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
 
 		spawn_thread(move || async move {

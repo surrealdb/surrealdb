@@ -2,10 +2,7 @@ use std::fmt::{self, Write};
 
 use super::DefineKind;
 use crate::fmt::{is_pretty, pretty_indent};
-use crate::sql::{Expr, Permission};
-
-mod executable;
-pub(crate) use executable::*;
+use crate::sql::{Expr, ModuleExecutable, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

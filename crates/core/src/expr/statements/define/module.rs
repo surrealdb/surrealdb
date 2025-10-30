@@ -5,19 +5,16 @@ use reblessive::tree::Stk;
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
-use crate::catalog::{ModuleDefinition, Permission};
+use crate::catalog::{ModuleDefinition, ModuleName, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::expression::VisitExpression;
-use crate::expr::{Base, Expr};
+use crate::expr::{Base, Expr, ModuleExecutable};
 use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
-
-mod executable;
-pub(crate) use executable::*;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineModuleStatement {
@@ -38,18 +35,6 @@ impl VisitExpression for DefineModuleStatement {
 }
 
 impl DefineModuleStatement {
-	fn get_storage_name(&self) -> Result<String> {
-		if let Some(name) = &self.name {
-			Ok(format!("mod::{}", name))
-		} else if let ModuleExecutable::Silo(silo) = &self.executable {
-			Ok(format!(
-				"silo::{}::{}<{}.{}.{}>",
-				silo.organisation, silo.package, silo.major, silo.minor, silo.patch
-			))
-		} else {
-			bail!("A module without a name cannot be stored")
-		}
-	}
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -59,17 +44,17 @@ impl DefineModuleStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Function, &Base::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Module, &Base::Db)?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Check if the definition exists
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-		let storage_name = self.get_storage_name()?;
+		let storage_name = ModuleName::try_from(self)?.get_storage_name();
 		if txn.get_db_module(ns, db, &storage_name).await.is_ok() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
-						bail!(Error::FcAlreadyExists {
+						bail!(Error::MdAlreadyExists {
 							name: storage_name,
 						});
 					}

@@ -28,6 +28,10 @@ impl SurrealismCache {
 	pub fn insert(&self, key: SurrealismCacheKey, value: SurrealismCacheValue) {
 		self.cache.insert(key, value);
 	}
+
+	pub fn remove(&self, lookup: &SurrealismCacheLookup) {
+		self.cache.remove(lookup);
+	}
 }
 
 #[derive(Hash, Eq, PartialEq)]

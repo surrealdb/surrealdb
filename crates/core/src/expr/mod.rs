@@ -52,6 +52,7 @@ pub(crate) mod view;
 pub(crate) mod with;
 
 pub(crate) mod decimal;
+pub(crate) mod module;
 
 pub(crate) mod statements;
 
@@ -79,6 +80,7 @@ pub(crate) use self::literal::{Literal, ObjectEntry};
 pub(crate) use self::lookup::Lookup;
 pub(crate) use self::mock::Mock;
 pub(crate) use self::model::Model;
+pub(crate) use self::module::{ModuleExecutable, SiloExecutable, SurrealismExecutable};
 pub(crate) use self::operation::Operation;
 pub(crate) use self::operator::{AssignOperator, BinaryOperator, PostfixOperator, PrefixOperator};
 pub(crate) use self::order::Order;
@@ -92,7 +94,6 @@ pub(crate) use self::record_id::{
 pub(crate) use self::script::Script;
 pub(crate) use self::split::{Split, Splits};
 pub(crate) use self::start::Start;
-pub(crate) use self::statements::define::{ModuleExecutable, SiloExecutable, SurrealismExecutable};
 pub(crate) use self::statements::{DefineAnalyzerStatement, SelectStatement, SleepStatement};
 pub(crate) use self::timeout::Timeout;
 pub(crate) use self::tokenizer::Tokenizer;

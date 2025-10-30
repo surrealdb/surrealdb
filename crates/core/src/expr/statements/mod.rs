@@ -47,8 +47,8 @@ pub(crate) use self::relate::RelateStatement;
 pub(crate) use self::remove::{
 	RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
 	RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement,
-	RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement,
-	RemoveUserStatement,
+	RemoveModuleStatement, RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement,
+	RemoveTableStatement, RemoveUserStatement,
 };
 pub(crate) use self::select::SelectStatement;
 pub(crate) use self::set::SetStatement;

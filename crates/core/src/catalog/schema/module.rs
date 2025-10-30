@@ -1,11 +1,8 @@
-mod executable;
-
 use anyhow::bail;
-pub(crate) use executable::*;
 use revision::revisioned;
 use surrealdb_types::{ToSql, write_sql};
 
-use crate::catalog::Permission;
+use crate::catalog::{ModuleExecutable, Permission};
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::DefineModuleStatement;

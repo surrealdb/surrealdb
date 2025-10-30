@@ -8,6 +8,7 @@ mod field;
 mod function;
 mod index;
 mod model;
+mod module;
 mod namespace;
 mod param;
 mod sequence;
@@ -27,6 +28,7 @@ pub(crate) use field::RemoveFieldStatement;
 pub(crate) use function::RemoveFunctionStatement;
 pub(crate) use index::RemoveIndexStatement;
 pub(crate) use model::RemoveModelStatement;
+pub(crate) use module::RemoveModuleStatement;
 pub(crate) use namespace::RemoveNamespaceStatement;
 pub(crate) use param::RemoveParamStatement;
 use reblessive::tree::Stk;
@@ -57,6 +59,7 @@ pub(crate) enum RemoveStatement {
 	Api(RemoveApiStatement),
 	Bucket(RemoveBucketStatement),
 	Sequence(RemoveSequenceStatement),
+	Module(RemoveModuleStatement),
 }
 
 impl RemoveStatement {
@@ -84,6 +87,7 @@ impl RemoveStatement {
 			Self::Api(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Bucket(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Module(v) => v.compute(ctx, opt).await,
 		}
 	}
 }
@@ -107,6 +111,7 @@ impl VisitExpression for RemoveStatement {
 			RemoveStatement::Bucket(bucket) => bucket.visit(visitor),
 			RemoveStatement::Sequence(sequence) => sequence.visit(visitor),
 			RemoveStatement::Model(_)
+			| RemoveStatement::Module(_)
 			| RemoveStatement::Function(_)
 			| RemoveStatement::Param(_) => {}
 		}
@@ -131,6 +136,7 @@ impl Display for RemoveStatement {
 			Self::Api(v) => Display::fmt(v, f),
 			Self::Bucket(v) => Display::fmt(v, f),
 			Self::Sequence(v) => Display::fmt(v, f),
+			Self::Module(v) => Display::fmt(v, f),
 		}
 	}
 }

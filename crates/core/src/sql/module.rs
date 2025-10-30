@@ -1,7 +1,47 @@
-use std::fmt::{self, Debug, Display};
+use std::fmt::{self, Display};
 
 use crate::val::File;
 use crate::{catalog, expr};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub(crate) enum ModuleName {
+	Module(String),
+	Silo(String, String, u32, u32, u32),
+}
+
+impl Display for ModuleName {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			ModuleName::Module(name) => write!(f, "mod::{}", name),
+			ModuleName::Silo(org, pkg, major, minor, patch) => {
+				write!(f, "silo::{org}::{pkg}<{major}.{minor}.{patch}>")
+			}
+		}
+	}
+}
+
+impl From<ModuleName> for crate::catalog::ModuleName {
+	fn from(v: ModuleName) -> Self {
+		match v {
+			ModuleName::Module(name) => crate::catalog::ModuleName::Module(name),
+			ModuleName::Silo(org, pkg, major, minor, patch) => {
+				crate::catalog::ModuleName::Silo(org, pkg, major, minor, patch)
+			}
+		}
+	}
+}
+
+impl From<crate::catalog::ModuleName> for ModuleName {
+	fn from(v: crate::catalog::ModuleName) -> Self {
+		match v {
+			crate::catalog::ModuleName::Module(name) => ModuleName::Module(name),
+			crate::catalog::ModuleName::Silo(org, pkg, major, minor, patch) => {
+				ModuleName::Silo(org, pkg, major, minor, patch)
+			}
+		}
+	}
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum ModuleExecutable {
