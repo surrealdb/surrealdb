@@ -34,7 +34,7 @@ pub async fn timestamp_to_versionstamp(new_ds: impl CreateDs) {
 	let db = {
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		// The ns and db should already exist, but we need to get the versionstamp for the db
-		let db = tx.ensure_ns_db(None, "myns", "mydb", false).await.unwrap();
+		let db = tx.ensure_ns_db(None, "myns", "mydb").await.unwrap();
 		tx.commit().await.unwrap();
 		db
 	};
@@ -91,7 +91,7 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 	let db = {
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		// The ns and db should already exist, but we need to get the versionstamp for the db
-		let db = tx.get_or_add_db(None, "myns", "mydb", false).await.unwrap();
+		let db = tx.get_or_add_db(None, "myns", "mydb").await.unwrap();
 		tx.commit().await.unwrap();
 		db
 	};

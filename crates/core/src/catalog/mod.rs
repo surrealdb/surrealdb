@@ -63,7 +63,8 @@ mod test {
             expiry: Duration::from_secs(123),
             store_diff: false,
         }),
-    }, 24)]
+        strict: false,
+    }, 25)]
 	#[case::table(TableDefinition {
         namespace_id: NamespaceId(123),
         database_id: DatabaseId(456),

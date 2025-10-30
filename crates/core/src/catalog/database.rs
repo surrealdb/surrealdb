@@ -75,6 +75,7 @@ pub struct DatabaseDefinition {
 	pub(crate) name: String,
 	pub(crate) comment: Option<String>,
 	pub(crate) changefeed: Option<ChangeFeed>,
+	pub(crate) strict: bool,
 }
 impl_kv_value_revisioned!(DatabaseDefinition);
 

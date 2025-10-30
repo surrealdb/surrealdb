@@ -12,7 +12,6 @@ use crate::opt::websocket::WebsocketConfig;
 /// query_timeout, transaction_timeout
 #[derive(Debug, Clone, Default)]
 pub struct Config {
-	pub(crate) strict: bool,
 	pub(crate) ast_payload: bool,
 	pub(crate) query_timeout: Option<Duration>,
 	pub(crate) transaction_timeout: Option<Duration>,
@@ -37,18 +36,6 @@ impl Config {
 	/// Create a default config that can be modified to configure a connection
 	pub fn new() -> Self {
 		Default::default()
-	}
-
-	/// Set the strict value of the config to the supplied value
-	pub fn set_strict(mut self, strict: bool) -> Self {
-		self.strict = strict;
-		self
-	}
-
-	/// Enables `strict` server mode
-	pub fn strict(mut self) -> Self {
-		self.strict = true;
-		self
 	}
 
 	/// Whether to send queries as AST

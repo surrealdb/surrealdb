@@ -169,13 +169,13 @@ async fn strict_mode_no_table() -> Result<()> {
 async fn strict_mode_all_ok() -> Result<()> {
 	let sql = "
 		DEFINE NAMESPACE test;
-		DEFINE DATABASE test;
+		DEFINE DATABASE test STRICT;
 		DEFINE TABLE test;
 		DEFINE FIELD extra ON test VALUE true;
 		CREATE test:tester;
 		SELECT * FROM test;
 	";
-	let dbs = new_ds().await?.with_strict_mode(true);
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 6);
@@ -291,14 +291,14 @@ async fn loose_mode_all_ok() -> Result<()> {
 #[tokio::test]
 async fn strict_define_in_transaction() -> Result<()> {
 	let sql = r"
-		DEFINE NS test; DEFINE DB test;
+		DEFINE NS test; DEFINE DB test STRICT;
 		USE NS test DB test;
 		BEGIN;
 		DEFINE TABLE test;
 		DEFINE FIELD test ON test; -- Panic used to be caused when you add this query within the transaction
 		COMMIT;
 	";
-	let dbs = new_ds().await?.with_strict_mode(true);
+	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	dbs.execute(sql, &ses, None).await?;
 	Ok(())

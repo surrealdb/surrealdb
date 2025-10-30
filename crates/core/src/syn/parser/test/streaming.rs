@@ -177,6 +177,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				kind: DefineKind::Default,
 				id: None,
 				name: Expr::Idiom(Idiom::field("a".to_string())),
+				strict: false,
 				comment: Some(Expr::Literal(Literal::String("test".to_string()))),
 				changefeed: Some(ChangeFeed {
 					expiry: PublicDuration::from_secs(60 * 10),
@@ -189,6 +190,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				kind: DefineKind::Default,
 				id: None,
 				name: Expr::Idiom(Idiom::field("a".to_string())),
+				strict: false,
 				comment: None,
 				changefeed: None,
 			},

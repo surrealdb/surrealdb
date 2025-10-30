@@ -101,33 +101,19 @@ impl Document {
 
 						// This field is not explicitly defined in the schema or it is not a child
 						// of a flex field.
-						ensure!(
-							!opt.strict,
-							// If strict, then throw an error on an undefined field
-							Error::FieldUndefined {
-								table: tb.name.clone(),
-								field: current_doc_field_idiom.to_owned(),
-							}
-						);
-
-						// Otherwise, delete the field silently and don't error
-						self.current.doc.to_mut().cut(current_doc_field_idiom);
+						bail!(Error::FieldUndefined {
+							table: tb.name.clone(),
+							field: current_doc_field_idiom.to_owned(),
+						});
 					}
 
 					IdiomTrieContains::None => {
 						// This field is not explicitly defined in the schema or it is not a child
 						// of a flex field.
-						ensure!(
-							!opt.strict,
-							// If strict, then throw an error on an undefined field
-							Error::FieldUndefined {
-								table: tb.name.clone(),
-								field: current_doc_field_idiom.to_owned(),
-							}
-						);
-
-						// Otherwise, delete the field silently and don't error
-						self.current.doc.to_mut().cut(current_doc_field_idiom);
+						bail!(Error::FieldUndefined {
+							table: tb.name.clone(),
+							field: current_doc_field_idiom.to_owned(),
+						});
 					}
 				}
 			}

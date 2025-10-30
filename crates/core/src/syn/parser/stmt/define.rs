@@ -120,6 +120,10 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.changefeed = Some(self.parse_changefeed()?);
 				}
+				t!("STRICT") => {
+					self.pop_peek();
+					res.strict = true;
+				}
 				_ => break,
 			}
 		}
