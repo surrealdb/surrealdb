@@ -100,6 +100,70 @@ pub async fn signup(
 	}
 }
 
+/// Registers a new user using a database access method.
+///
+/// This function handles user registration for users who will be granted access
+/// through a specific access method defined on the database. It supports both
+/// traditional access tokens and refresh token flows.
+///
+/// # Parameters
+///
+/// - `kvs`: The datastore instance for database operations
+/// - `session`: The current session context
+/// - `ns`: The namespace name
+/// - `db`: The database name
+/// - `ac`: The access method name
+/// - `vars`: Public variables containing registration parameters
+///
+/// # Returns
+///
+/// Returns a `Token` that may include both access and refresh tokens
+/// depending on the access method configuration.
+///
+/// # Access Method Configuration
+///
+/// The access method must be defined with the `DEFINE ACCESS` statement
+/// and can include refresh token support with the `WITH REFRESH` clause:
+///
+/// ```sql
+/// DEFINE ACCESS my_access ON DATABASE TYPE RECORD
+/// SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+/// SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+/// WITH REFRESH
+/// DURATION FOR SESSION 1d FOR TOKEN 15m
+/// ```
+///
+/// # Examples
+///
+/// ```rust
+/// use surrealdb_core::iam::signup::db_access;
+/// use surrealdb_core::kvs::Datastore;
+/// use surrealdb_core::dbs::Session;
+/// use surrealdb_core::types::PublicVariables;
+///
+/// let vars = PublicVariables::from([
+///     ("email".to_string(), "user@example.com".into()),
+///     ("pass".to_string(), "password123".into()),
+/// ]);
+///
+/// let token = db_access(
+///     &kvs,
+///     &mut session,
+///     "test_namespace".to_string(),
+///     "test_database".to_string(),
+///     "my_access".to_string(),
+///     vars
+/// ).await?;
+///
+/// match token {
+///     Token::Access(access_token) => {
+///         // Traditional access token
+///     }
+///     Token::WithRefresh { access, refresh } => {
+///         // Access token with refresh capability
+///     }
+/// }
+/// ```
 pub async fn db_access(
 	kvs: &Datastore,
 	session: &mut Session,

@@ -51,6 +51,29 @@ impl<'r, Client> Invalidate<'r, Client>
 where
 	Client: Connection,
 {
+	/// Converts this invalidation future into a token revocation operation.
+	///
+	/// This method changes the invalidation mode from session invalidation to
+	/// explicit refresh token revocation. This is useful when you want to revoke
+	/// a specific refresh token without invalidating the entire session.
+	///
+	/// # Arguments
+	///
+	/// * `token` - The token containing the refresh token to revoke
+	///
+	/// # Returns
+	///
+	/// An `Invalidate` future configured for token revocation.
+	///
+	/// # Examples
+	///
+	/// ```ignore
+	/// // Get a token from signin
+	/// let token = db.signin(credentials).await?;
+	///
+	/// // Later, explicitly revoke the refresh token
+	/// db.invalidate().refresh(token).await?;
+	/// ```
 	pub fn refresh(self, token: Token) -> Invalidate<'r, Client, Token> {
 		Invalidate {
 			client: self.client,

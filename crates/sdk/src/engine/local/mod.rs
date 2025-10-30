@@ -613,6 +613,7 @@ async fn router(
 			token,
 		} => {
 			let query_result = QueryResultBuilder::started_now();
+			// Extract the access token and check if this token supports refresh
 			let (access, with_refresh) = match &token {
 				iam::Token::Access(access) => (access, false),
 				iam::Token::WithRefresh {
@@ -620,12 +621,14 @@ async fn router(
 					..
 				} => (access, true),
 			};
-			// Try to authenticate with the access token
+			// Attempt to authenticate with the access token
 			let result = match iam::verify::token(kvs, &mut *session.write().await, access).await {
-				// If the access token is valid, return the token
+				// Authentication successful - return the original token
 				Ok(_) => query_result.finish_with_result(Ok(token.into_value())),
 				Err(error) => {
-					// If the access token is expired and we have a refresh token, try to refresh it
+					// Automatic refresh token handling:
+					// If the access token is expired and we have a refresh token,
+					// automatically attempt to refresh and return new tokens.
 					if with_refresh && error.to_string().contains("token has expired") {
 						let result = match token.refresh(kvs, &mut *session.write().await).await {
 							Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
@@ -635,8 +638,8 @@ async fn router(
 						};
 						return Ok(vec![result]);
 					}
-					// If the access token is invalid and we don't have a refresh token, return an
-					// error
+					// If authentication failed and automatic refresh isn't applicable,
+					// return the authentication error
 					query_result
 						.finish_with_result(Err(DbResultError::InternalError(error.to_string())))
 				}
@@ -646,6 +649,7 @@ async fn router(
 		Command::Refresh {
 			token,
 		} => {
+			// Refresh command: Exchange a refresh token for new access and refresh tokens
 			let query_result = QueryResultBuilder::started_now();
 			let result = match token.refresh(kvs, &mut *session.write().await).await {
 				Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
@@ -666,6 +670,7 @@ async fn router(
 		Command::Revoke {
 			token,
 		} => {
+			// Revoke command: Explicitly invalidate a refresh token to prevent future use
 			let query_result = QueryResultBuilder::started_now();
 			let result = match token.revoke_refresh_token(kvs).await {
 				Ok(_) => query_result.finish_with_result(Ok(Value::None)),

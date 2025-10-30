@@ -701,6 +701,43 @@ pub async fn root_access(
 	}
 }
 
+/// Authenticates a user using bearer token authentication (refresh token flow).
+///
+/// This function handles authentication for refresh tokens, which are long-lived
+/// bearer tokens that can be used to obtain new access tokens without re-authentication.
+/// This is the core function that validates refresh tokens and issues new token pairs.
+///
+/// # Parameters
+///
+/// - `kvs`: The datastore instance for database operations
+/// - `session`: The current session context to be updated with authentication state
+/// - `ns`: Optional namespace definition for scoped authentication
+/// - `db`: Optional database definition for scoped authentication
+/// - `av`: The access method definition
+/// - `at`: The bearer access configuration
+/// - `key`: The bearer token (refresh token) to validate
+///
+/// # Returns
+///
+/// Returns a new `Token` containing both access and refresh tokens.
+///
+/// # Security
+///
+/// This function implements several security measures:
+/// - Validates the bearer token format and extracts the grant identifier
+/// - Checks if the grant exists and hasn't been revoked or expired
+/// - Uses constant-time comparison to prevent timing attacks
+/// - Revokes the old refresh token after successful authentication (single-use model)
+/// - Issues a new refresh token for the next refresh cycle
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The bearer access method doesn't support issuing tokens
+/// - The grant identifier is invalid
+/// - The grant doesn't exist, is revoked, or is expired
+/// - The bearer token doesn't match the stored grant
+/// - User roles cannot be retrieved (for system user grants)
 pub async fn signin_bearer(
 	kvs: &Datastore,
 	session: &mut Session,
@@ -934,6 +971,44 @@ pub async fn signin_bearer(
 	}
 }
 
+/// Validates a bearer token and extracts the grant identifier.
+///
+/// This function parses and validates the structure of a bearer token (refresh token)
+/// and returns the grant identifier that can be used to look up the grant record
+/// in the database.
+///
+/// # Bearer Token Format
+///
+/// Bearer tokens follow this format: `{prefix}-{type}-{identifier}-{key}`
+///
+/// - `prefix`: Always "sdb" for SurrealDB tokens
+/// - `type`: The bearer access type (e.g., "refresh")
+/// - `identifier`: A unique identifier for the grant (used as database key)
+/// - `key`: The actual secret key value
+///
+/// # Parameters
+///
+/// - `key`: The bearer token string to validate
+///
+/// # Returns
+///
+/// Returns the grant identifier on success, which can be used to fetch
+/// the grant record from the database.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The token doesn't have exactly 4 parts separated by "-"
+/// - The bearer access type is invalid
+/// - The identifier length doesn't match the expected length
+/// - The key length doesn't match the expected length
+///
+/// # Examples
+///
+/// ```ignore
+/// let grant_id = validate_grant_bearer("sdb-refresh-abc123def456-xyz789uvw012")?;
+/// // grant_id == "abc123def456"
+/// ```
 pub fn validate_grant_bearer(key: &str) -> Result<String> {
 	let parts: Vec<&str> = key.split("-").collect();
 	ensure!(parts.len() == 4, Error::AccessGrantBearerInvalid);

@@ -55,6 +55,25 @@ impl<'r, Client> Authenticate<'r, Client>
 where
 	Client: Connection,
 {
+	/// Converts this authentication future into a token refresh operation.
+	///
+	/// This method changes the authentication mode from standard authentication
+	/// to token refresh. When awaited, the future will use the refresh token
+	/// to obtain a new access token instead of authenticating with the access token.
+	///
+	/// # Returns
+	///
+	/// An `Authenticate` future configured for token refresh.
+	///
+	/// # Examples
+	///
+	/// ```ignore
+	/// // Get a token from signin
+	/// let token = db.signin(credentials).await?;
+	///
+	/// // Later, refresh the token
+	/// let new_token = db.authenticate(token).refresh().await?;
+	/// ```
 	pub fn refresh(self) -> Authenticate<'r, Client, RefreshToken> {
 		Authenticate {
 			client: self.client,
@@ -74,12 +93,15 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
+			// Validate that the token has a refresh component.
+			// If not, return an error since we can't perform a refresh.
 			let token = match self.token.refresh.is_some() {
 				true => self.token.into_value(),
 				false => {
 					return Err(Error::MissingRefreshToken);
 				}
 			};
+			// Execute the refresh command to obtain new tokens.
 			let value = router
 				.execute_value(Command::Refresh {
 					token: SurrealValue::from_value(token)?,

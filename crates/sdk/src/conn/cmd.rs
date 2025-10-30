@@ -125,6 +125,9 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "authenticate",
+				// Extract only the access token for authentication.
+				// If the token has a refresh component, we ignore it here
+				// as authentication only needs the access token.
 				params: Some(Value::Array(Array::from(vec![match token {
 					Token::Access(access) => access.into_value(),
 					Token::WithRefresh {
@@ -139,6 +142,8 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "refresh",
+				// Send the entire token structure (both access and refresh tokens)
+				// to the server for the refresh operation.
 				params: Some(Value::Array(Array::from(vec![Value::from_t(token)]))),
 				transaction: None,
 			},

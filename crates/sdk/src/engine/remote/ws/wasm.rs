@@ -272,15 +272,25 @@ async fn router_handle_response(
 											.await;
 									}
 									Err(error) => {
+										// Automatic refresh token handling:
+										// If a request fails with "token has expired" and we have a
+										// refresh token, automatically attempt to refresh
+										// the authentication and retry the request.
 										if let RequestEffect::Authenticate {
 											token: Some(token),
 										} = pending.effect
 										{
+											// Check if this is a token with refresh capability
 											if let Token::WithRefresh {
 												..
 											} = &token
 											{
+												// If the error is due to token expiration, attempt
+												// automatic refresh
 												if error.to_string().contains("token has expired") {
+													// Construct a new authentication request with
+													// the token (which includes the
+													// refresh token for automatic renewal)
 													let request = RouterRequest {
 														id: Some(id),
 														method: "authenticate",
@@ -291,16 +301,19 @@ async fn router_handle_response(
 													};
 													let request_value = request.into_value();
 													let value =
-												surrealdb_core::rpc::format::flatbuffers::encode(
-													&request_value,
-												)
-												.expect("router request should serialize");
+											surrealdb_core::rpc::format::flatbuffers::encode(
+												&request_value,
+											)
+											.expect("router request should serialize");
 													let message = Message::Binary(value.into());
+													// Send the refresh request
 													match state.sink.send(message).await {
 														Err(send_error) => {
 															trace!(
 																"failed to send refresh query to the server; {send_error:?}"
 															);
+															// If we can't send the refresh request,
+															// return the original error
 															pending
 																.response_channel
 																.send(Err(error))
@@ -308,6 +321,12 @@ async fn router_handle_response(
 																.ok();
 														}
 														Ok(..) => {
+															// Successfully queued the refresh
+															// request.
+															// Clear the token from the effect to
+															// prevent infinite retry loops,
+															// and keep the request pending for
+															// retry after refresh succeeds.
 															pending.effect =
 																RequestEffect::Authenticate {
 																	token: None,
@@ -323,6 +342,8 @@ async fn router_handle_response(
 											}
 										}
 
+										// For all other errors, or if automatic refresh isn't
+										// applicable, return the error to the caller
 										pending.response_channel.send(Err(error)).await.ok();
 									}
 								}

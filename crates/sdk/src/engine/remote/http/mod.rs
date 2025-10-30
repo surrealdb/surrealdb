@@ -414,16 +414,24 @@ async fn router(
 						*result = value;
 					}
 					Err(error) => {
+						// Automatic refresh token handling:
+						// If authentication fails with "token has expired" and we have a refresh
+						// token, automatically attempt to refresh the authentication and
+						// update the stored auth.
 						if let CoreToken::WithRefresh {
 							..
 						} = &token
 						{
+							// If the error is due to token expiration, attempt automatic refresh
 							if error.to_string().contains("token has expired") {
+								// Call the refresh_token helper to get new tokens
 								let (value, refresh_results) =
 									refresh_token(token, base_url, client, headers, auth).await?;
+								// Update the stored authentication with the new access token
 								*auth = Some(Auth::Bearer {
 									token: Token::from_value(value)?.access,
 								});
+								// Use the refresh results (which include the new token)
 								results = refresh_results;
 							}
 						}
