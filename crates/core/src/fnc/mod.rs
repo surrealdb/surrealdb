@@ -79,6 +79,13 @@ pub async fn run(
 		|| name.eq("file::list")
 		|| name.eq("record::exists")
 		|| name.eq("record::is_edge")
+		|| name.eq("set::all")
+		|| name.eq("set::any")
+		|| name.eq("set::filter")
+		|| name.eq("set::find")
+		|| name.eq("set::fold")
+		|| name.eq("set::map")
+		|| name.eq("set::reduce")
 		|| name.eq("type::field")
 		|| name.eq("type::fields")
 		|| name.eq("value::diff")
@@ -340,13 +347,21 @@ pub fn synchronous(
 		"session::token" => session::token(ctx),
 		//
 		"set::add" => set::add,
+		"set::at" => set::at,
 		"set::complement" => set::complement,
 		"set::contains" => set::contains,
 		"set::difference" => set::difference,
+		"set::first" => set::first,
+		"set::flatten" => set::flatten,
 		"set::intersect" => set::intersect,
 		"set::is_empty" => set::is_empty,
+		"set::join" => set::join,
+		"set::last" => set::last,
 		"set::len" => set::len,
+		"set::max" => set::max,
+		"set::min" => set::min,
 		"set::remove" => set::remove,
+		"set::slice" => set::slice,
 		"set::union" => set::union,
 		//
 		"string::capitalize" => string::capitalize,
@@ -600,17 +615,13 @@ pub async fn asynchronous(
 		"search::highlight" => search::highlight((ctx, doc)).await,
 		"search::offsets" => search::offsets((ctx, doc)).await,
 		//
-		"set::add" => set::add,
 		"set::all" => set::all((stk, ctx, Some(opt), doc)).await,
 		"set::any" => set::any((stk, ctx, Some(opt), doc)).await,
-		"set::complement" => set::complement,
-		"set::contains" => set::contains,
-		"set::difference" => set::difference,
-		"set::intersect" => set::intersect,
-		"set::is_empty" => set::is_empty,
-		"set::len" => set::len,
-		"set::remove" => set::remove,
-		"set::union" => set::union,
+		"set::filter" => set::filter((stk, ctx, Some(opt), doc)).await,
+		"set::find" => set::find((stk, ctx, Some(opt), doc)).await,
+		"set::fold" => set::fold((stk, ctx, Some(opt), doc)).await,
+		"set::map" => set::map((stk, ctx, Some(opt), doc)).await,
+		"set::reduce" => set::reduce((stk, ctx, Some(opt), doc)).await,
 		//
 		"sleep" => sleep::sleep(ctx).await,
 		//

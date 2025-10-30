@@ -94,6 +94,29 @@ impl Set {
 	pub fn complement(self, other: Set) -> Set {
 		Set(self.0.difference(&other.0).cloned().collect())
 	}
+
+	/// Flatten nested sets and arrays into a single set
+	pub fn flatten(self) -> Set {
+		let mut out = Set::new();
+		for v in self.into_iter() {
+			match v {
+				Value::Array(arr) => {
+					for item in arr.0 {
+						out.insert(item);
+					}
+				}
+				Value::Set(set) => {
+					for item in set.0 {
+						out.insert(item);
+					}
+				}
+				_ => {
+					out.insert(v);
+				}
+			}
+		}
+		out
+	}
 }
 
 impl<T> From<Vec<T>> for Set
