@@ -790,11 +790,11 @@ impl MutableContext {
 		if let Some(value) = cache.get(&lookup) {
 			Ok(value.runtime.clone())
 		} else {
-			let SurrealismCacheLookup::File(ns, db, file) = lookup else {
+			let SurrealismCacheLookup::File(ns, db, bucket, key) = lookup else {
 				bail!("silo lookups are not supported yet");
 			};
-			let bucket = self.get_bucket_store(*ns, *db, &file.bucket).await?;
-			let key = ObjectKey::new(file.key.clone());
+			let bucket = self.get_bucket_store(*ns, *db, bucket).await?;
+			let key = ObjectKey::new(key);
 			let surli =
 				bucket.get(&key).await.map_err(|e| anyhow::anyhow!("failed to get file: {}", e))?;
 

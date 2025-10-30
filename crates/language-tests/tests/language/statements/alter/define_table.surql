@@ -5,19 +5,19 @@
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { test: "DEFINE TABLE test TYPE NORMAL SCHEMALESS COMMENT 'test' CHANGEFEED 1d PERMISSIONS FOR select, update, delete NONE, FOR create FULL" }, users: {  } }'''
+value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: { test: "DEFINE TABLE test TYPE NORMAL SCHEMALESS COMMENT 'test' CHANGEFEED 1d PERMISSIONS FOR select, update, delete NONE, FOR create FULL" }, users: {  } }'''
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE' }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMAFULL PERMISSIONS NONE' }, users: {  } }"
 
 */
 

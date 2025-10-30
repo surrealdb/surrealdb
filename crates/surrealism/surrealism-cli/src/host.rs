@@ -46,7 +46,7 @@ impl InvocationContext for DemoHost {
 
 		loop {
 			#[allow(clippy::unwrap_used)]
-			match parse_value(&mut std::io::stdin().lock().lines().next().unwrap().unwrap()) {
+			match parse_value(&std::io::stdin().lock().lines().next().unwrap().unwrap()) {
 				Ok(x) => {
 					println!(" ");
 					return Ok(x);
@@ -76,7 +76,7 @@ impl InvocationContext for DemoHost {
 
 		loop {
 			#[allow(clippy::unwrap_used)]
-			match parse_value(&mut std::io::stdin().lock().lines().next().unwrap().unwrap()) {
+			match parse_value(&std::io::stdin().lock().lines().next().unwrap().unwrap()) {
 				Ok(x) => {
 					println!(" ");
 					return Ok(x);
@@ -135,7 +135,7 @@ impl InvocationContext for DemoHost {
 
 		loop {
 			#[allow(clippy::unwrap_used)]
-			match parse_value(&mut std::io::stdin().lock().lines().next().unwrap().unwrap()) {
+			match parse_value(&std::io::stdin().lock().lines().next().unwrap().unwrap()) {
 				Ok(x) => {
 					if let surrealdb_types::Value::Array(x) = x {
 						let arr = x

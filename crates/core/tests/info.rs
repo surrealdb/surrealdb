@@ -286,7 +286,7 @@ async fn permissions_checks_info_db() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }";
+	let check = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }";
 
 	let test_cases = [
 		// Root level
@@ -604,7 +604,7 @@ async fn access_info_redacted() {
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: { access: "DEFINE ACCESS access ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"#
+			r#"{ accesses: { access: "DEFINE ACCESS access ON DATABASE TYPE RECORD WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"#
 				.to_string();
 		let out_str = out.unwrap().to_sql();
 		assert_eq!(
@@ -630,7 +630,7 @@ WITH ISSUER KEY 'secret'; 			INFO FOR DB
 		assert!(out.is_ok(), "Unexpected error: {:?}", out);
 
 		let out_expected =
-			r#"{ accesses: { access: "DEFINE ACCESS access ON DATABASE TYPE RECORD WITH REFRESH WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR GRANT 4w2d, FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"#.to_string();
+			r#"{ accesses: { access: "DEFINE ACCESS access ON DATABASE TYPE RECORD WITH REFRESH WITH JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR GRANT 4w2d, FOR TOKEN 1h, FOR SESSION NONE" }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"#.to_string();
 		let out_str = out.unwrap().to_sql();
 		assert_eq!(
 			out_str, out_expected,

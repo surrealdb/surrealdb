@@ -135,7 +135,7 @@ impl SurrealismExecutable {
 			);
 		}
 
-		let lookup = SurrealismCacheLookup::File(ns, db, &self.0);
+		let lookup = SurrealismCacheLookup::File(ns, db, &self.0.bucket, &self.0.key);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
 
 		spawn_thread(move || async move {
@@ -175,7 +175,7 @@ impl SurrealismExecutable {
 		}
 
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-		let lookup = SurrealismCacheLookup::File(&ns, &db, &self.0);
+		let lookup = SurrealismCacheLookup::File(&ns, &db, &self.0.bucket, &self.0.key);
 		let runtime = ctx.get_surrealism_runtime(lookup).await?;
 
 		let ctx = ctx.clone();

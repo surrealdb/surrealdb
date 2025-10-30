@@ -11,7 +11,6 @@ use crate::expr::{Base, Value};
 use crate::iam::{Action, ResourceKind};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::surrealism::cache::SurrealismCacheLookup;
-use crate::val::File;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct RemoveModuleStatement {
@@ -51,7 +50,8 @@ impl RemoveModuleStatement {
 				ModuleExecutable::Surrealism(surrealism) => SurrealismCacheLookup::File(
 					&ns,
 					&db,
-					&File::new(surrealism.bucket.clone(), surrealism.key.clone()),
+					&surrealism.bucket,
+					&surrealism.key,
 				),
 				ModuleExecutable::Silo(silo) => SurrealismCacheLookup::Silo(
 					&silo.organisation,
