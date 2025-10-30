@@ -1501,3 +1501,6 @@ from.build.allow_apis = ["fs", "process"]
 
 [pkg.cranelift-isle]
 build.allow_apis = ["fs"]
+
+[pkg.pulley-interpreter]
+allow_unsafe = true
