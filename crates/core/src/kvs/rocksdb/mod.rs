@@ -6,22 +6,46 @@ use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::{Check, Key, Val};
 use rocksdb::{
-	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel,
-	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
+    BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, Env, FlushOptions, LogLevel,
+    OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, SstFileManager,
+    WriteOptions,
 };
 use std::fmt::Debug;
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
 use super::KeyEncode;
 
 const TARGET: &str = "surrealdb::core::kvs::rocksdb";
+use crate::kvs::rocksdb::cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE;
 
 pub struct Datastore {
+	/// The underlying RocksDB optimistic transaction database
 	db: Pin<Arc<OptimisticTransactionDB>>,
+	/// Disk space manager for monitoring space usage and enforcing space limits
+	disk_space_manager: Option<DiskSpaceManager>,
+}
+
+/// Manages disk space monitoring and enforces space limits for the RocksDB datastore.
+///
+/// This manager tracks SST file space usage and implements a state machine to transition
+/// the datastore between normal operation and read-and-deletion-only mode based on
+/// configured space limits. It provides gradual degradation of service rather than
+/// abrupt failures when disk space is constrained.
+#[derive(Clone)]
+struct DiskSpaceManager {
+	/// SST file manager for monitoring space usage
+	sst_file_manager: Arc<SstFileManager>,
+	/// The maximum space usage allowed for the database.
+	read_and_deletion_limit: u64,
+	/// The number of bytes for 80% of the allowed space usage.
+	limit_80: u64,
+	/// Indicates if the warning for 80% full has been logged
+	warn_80_percent_logged: Arc<AtomicBool>,
 }
 
 pub struct Transaction {
@@ -39,7 +63,21 @@ pub struct Transaction {
 	// actually points here, so we need to ensure
 	// the memory is kept alive. This pointer must
 	// be declared last, so that it is dropped last.
-	_db: Pin<Arc<OptimisticTransactionDB>>,
+	db: Pin<Arc<OptimisticTransactionDB>>,
+	/// The operational state when this transaction was created.
+	/// If `true`, the datastore was in read-and-deletion-only mode, so only deletions are allowed.
+	/// If `false`, all write operations are permitted.
+	deletion_only: bool,
+	/// Tracks the types of write operations performed in this transaction.
+	/// - `None`: No write operations have been performed yet
+	/// - `Some(true)`: Only deletion operations have been performed
+	/// - `Some(false)`: At least one non-deletion write operation has been performed
+	///
+	/// Used during commit to validate transactions started before the datastore entered
+	/// deletion-only mode.
+	contains_only_deletions: Option<bool>,
+	/// Reference to the disk space manager for checking current operational state during commit.
+	disk_space_manager: Option<DiskSpaceManager>,
 }
 
 impl Drop for Transaction {
@@ -57,6 +95,78 @@ impl Drop for Transaction {
 				}
 			}
 		}
+	}
+}
+
+impl DiskSpaceManager {
+	/// Creates a new disk space manager with the specified space limit.
+	///
+	/// # Parameters
+	/// - `limit`: The maximum allowed SST file space usage in bytes
+	/// - `opts`: RocksDB options to configure with the SST file manager
+	///
+	/// # Implementation Details
+	/// This method disables RocksDB's built-in hard limit enforcement and instead
+	/// implements application-level space management at the transaction level.
+	/// This approach provides more graceful degradation and allows deletions to
+	/// free space even when the limit is reached.
+	fn new(limit: u64, opts: &mut Options) -> Result<Self> {
+		let env = Env::new()?;
+		let sst_file_manager = SstFileManager::new(&env)?;
+		// Disable RocksDB's built-in hard limit (set to 0 = unlimited).
+		// This prevents RocksDB from blocking writes due to temporary size spikes from
+		// write buffering and pending compactions. Instead, the application manages space
+		// restrictions at the transaction level through state transitions, providing more
+		// graceful handling and allowing deletions to free space.
+		sst_file_manager.set_max_allowed_space_usage(0);
+		opts.set_sst_file_manager(&sst_file_manager);
+		Ok(Self {
+			sst_file_manager: Arc::new(sst_file_manager),
+			read_and_deletion_limit: limit,
+			limit_80: (limit as f64 * 0.8) as u64,
+			warn_80_percent_logged: Arc::new(AtomicBool::new(false)),
+		})
+	}
+
+	/// Checks the datastore operational state based on SST file space usage.
+	///
+	/// This method implements a state machine that transitions between two modes:
+	/// - Normal: All operations allowed (write, read, delete)
+	/// - ReadAndDeletionOnly: Only read and delete operations allowed, writes are blocked
+	///
+	/// State transitions:
+	/// - Normal → ReadAndDeletionOnly: When SST file space usage reaches the configured limit
+	/// - ReadAndDeletionOnly → Normal: When space usage drops below the configured limit (after
+	///   deletions and compaction free up space)
+	///
+	/// Returns `true` if the datastore is in read-and-deletion-only mode, `false` otherwise.
+	/// When `true`, write operations will be rejected with `Error::DbReadAndDeleteOnly`.
+	fn is_deletion_only(&self) -> bool {
+		let current_size = self.sst_file_manager.get_total_size();
+		if current_size < self.limit_80 {
+			self.warn_80_percent_logged.store(false, Ordering::Relaxed);
+			return false;
+		}
+		// Use compare_exchange to atomically check and set the flag, ensuring only one thread logs
+		// the warning
+		if self
+			.warn_80_percent_logged
+			.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
+			.is_ok()
+		{
+			warn!(target: TARGET, "SST file space usage is at 80% of the limit ({})", current_size);
+		}
+		// Check current size against the application limit
+		// Transition to read-and-deletion-only mode when the primary limit is exceeded
+		if current_size < self.read_and_deletion_limit {
+			return false;
+		}
+		warn!(
+			target: TARGET,
+			"Transitioning to read-and-deletion-only mode due to primary limit ({}) being reached",
+			current_size
+		);
+		true
 	}
 }
 
@@ -219,6 +329,31 @@ impl Datastore {
 		// Configure background WAL flush behaviour
 		let db = match *cnf::ROCKSDB_BACKGROUND_FLUSH {
 			// Beckground flush is disabled which
+		// Configure SST file manager for disk space monitoring and management.
+		// The SST file manager tracks SST file sizes in real-time. When the configured
+		// space limit is reached, the application transitions to read-and-deletion-only mode.
+		let disk_space_manager = if *ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE > 0 {
+			Some(DiskSpaceManager::new(*ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE, &mut opts)?)
+		} else {
+			None
+		};
+		// Open the database
+		let db = Self::open(opts.clone(), false, path).await?;
+		// Return the datastore
+		Ok(Datastore {
+			db,
+			disk_space_manager,
+		})
+	}
+
+	/// Open database with normal configuration
+	async fn open(
+		mut opts: Options,
+		force_disabling_flush: bool,
+		path: &str,
+	) -> Result<Pin<Arc<OptimisticTransactionDB>>> {
+		if !*cnf::ROCKSDB_BACKGROUND_FLUSH || force_disabling_flush {
+			// Background flush is disabled which
 			// means that the WAL will be flushed
 			// whenever a transaction is committed.
 			false => {
@@ -278,8 +413,22 @@ impl Datastore {
 		// All good
 		Ok(())
 	}
+
+	/// Checks if the datastore is currently in read-and-deletion-only mode.
+	///
+	/// Returns `true` if the SST file space usage has exceeded the configured limit,
+	/// `false` otherwise. When no space limit is configured, always returns `false`.
+	fn is_deletion_only(&self) -> bool {
+		self.disk_space_manager.as_ref().map(|dsm| dsm.is_deletion_only()).unwrap_or(false)
+	}
+
 	/// Start a new transaction
 	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Transaction, Error> {
+	pub(crate) async fn transaction(
+		&self,
+		write: bool,
+		_: bool,
+	) -> Result<Box<dyn crate::kvs::api::Transaction>> {
 		// Set the transaction options
 		let mut to = OptimisticTransactionOptions::default();
 		to.set_snapshot(true);
@@ -317,8 +466,76 @@ impl Datastore {
 			check,
 			inner: Some(inner),
 			ro,
-			_db: self.db.clone(),
+			db: self.db.clone(),
+			deletion_only: self.is_deletion_only(),
+			contains_only_deletions: None,
+			disk_space_manager: self.disk_space_manager.clone(),
 		})
+	}
+}
+
+impl Transaction {
+	/// Validates that a write operation can be performed in the current transaction.
+	///
+	/// This method checks multiple conditions before allowing a write:
+	/// 1. Datastore state allows writes (not in read-only or read-and-deletion-only mode)
+	/// 2. Version parameter is None (RocksDB doesn't support versioned queries)
+	/// 3. Transaction is still open (not committed or cancelled)
+	/// 4. Transaction was created as writable
+	///
+	/// Returns an appropriate error if any validation fails.
+	fn ensure_write(&mut self, version: Option<u64>) -> Result<()> {
+		ensure!(!self.deletion_only, Error::DbReadAndDeleteOnly);
+		// RocksDB does not support versioned queries.
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
+		// Check to see if transaction is writable
+		ensure!(self.write, Error::TxReadonly);
+		// Mark this transaction as containing non-deletion operations
+		self.contains_only_deletions = Some(false);
+		Ok(())
+	}
+
+	/// Validates that a delete operation can be performed in the current transaction.
+	///
+	/// This method checks conditions before allowing a deletion:
+	/// 1. Version parameter is None (RocksDB doesn't support versioned queries)
+	/// 2. Transaction is still open (not committed or cancelled)
+	/// 3. Transaction was created as writable
+	///
+	/// Unlike `ensure_write()`, this method does NOT check the `deletion_only` flag,
+	/// allowing deletions even in read-and-deletion-only mode. This enables space recovery
+	/// when the datastore is in a restricted state due to space limits.
+	///
+	/// Returns an appropriate error if any validation fails.
+	fn ensure_deletion(&mut self, version: Option<u64>) -> Result<()> {
+		// RocksDB does not support versioned queries.
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
+		// Check to see if transaction is writable
+		ensure!(self.write, Error::TxReadonly);
+		// Mark this transaction as containing only deletions if no writes have been performed yet
+		if self.contains_only_deletions.is_none() {
+			self.contains_only_deletions = Some(true);
+		}
+		Ok(())
+	}
+
+	/// Validates that a read operation can be performed in the current transaction.
+	///
+	/// This method checks:
+	/// 1. Version parameter is None (RocksDB doesn't support versioned queries)
+	/// 2. Transaction is still open (not committed or cancelled)
+	///
+	/// Read operations are allowed in all datastore states, so no state checking is needed.
+	fn ensure_read(&self, version: Option<u64>) -> Result<()> {
+		// RocksDB does not support versioned queries.
+		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		// Check to see if transaction is closed
+		ensure!(!self.done, Error::TxFinished);
+		Ok(())
 	}
 }
 
@@ -370,28 +587,31 @@ impl super::api::Transaction for Transaction {
 		}
 		// Mark this transaction as done
 		self.done = true;
+		// Check if we are in read-and-deletion-only mode
+		// This is used for long duration transactions that would have started before disk
+		// conditions changed
+		if let Some(disk_space_manager) = self.disk_space_manager.as_ref() {
+			if disk_space_manager.is_deletion_only() && self.contains_only_deletions == Some(false)
+			{
+				bail!(Error::DbReadAndDeleteOnly);
+			}
+		}
 		// Commit this transaction
 		self.inner.take().unwrap().commit()?;
+		// If transaction was created in read-and-deletion-only mode, trigger compaction to reclaim
+		// disk space from deleted keys. This helps the datastore transition back to normal mode
+		// when space usage drops below the limit.
+		if self.deletion_only {
+			self.db.compact_range::<&[u8], &[u8]>(None, None);
+		}
 		// Continue
 		Ok(())
 	}
 
 	/// Check if a key exists
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn exists<K>(&mut self, key: K, version: Option<u64>) -> Result<bool, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
-		// RocksDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Get the arguments
-		let key = key.encode_owned()?;
+	async fn exists(&mut self, key: Key, version: Option<u64>) -> Result<bool> {
+		self.ensure_read(version)?;
 		// Get the key
 		let res = self.inner.as_ref().unwrap().get_pinned_opt(key, &self.ro)?.is_some();
 		// Return result
@@ -400,20 +620,8 @@ impl super::api::Transaction for Transaction {
 
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get<K>(&mut self, key: K, version: Option<u64>) -> Result<Option<Val>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
-		// RocksDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Get the arguments
-		let key = key.encode_owned()?;
+	async fn get(&mut self, key: Key, version: Option<u64>) -> Result<Option<Val>> {
+		self.ensure_read(version)?;
 		// Get the key
 		let res = self.inner.as_ref().unwrap().get_opt(key, &self.ro)?;
 		// Return result
@@ -422,20 +630,8 @@ impl super::api::Transaction for Transaction {
 
 	/// Fetch many keys from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.sprint()))]
-	async fn getm<K>(&mut self, keys: Vec<K>) -> Result<Vec<Option<Val>>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
-		// Check to see if transaction is closed
-		if self.closed() {
-			return Err(Error::TxFinished);
-		}
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Get the arguments
-		let keys: Vec<Key> = keys.into_iter().map(K::encode_owned).collect::<Result<_, _>>()?;
+	async fn getm(&mut self, keys: Vec<Key>) -> Result<Vec<Option<Val>>> {
+		self.ensure_read(None)?;
 		// Get the keys
 		let res = self.inner.as_ref().unwrap().multi_get_opt(keys, &self.ro);
 		// Convert result
@@ -446,26 +642,8 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn set<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-		V: Into<Val> + Debug,
-	{
-		// RocksDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
-		// Get the arguments
-		let key = key.encode_owned()?;
-		let val = val.into();
+	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
+		self.ensure_write(version)?;
 		// Set the key
 		self.inner.as_ref().unwrap().put(key, val)?;
 		// Return result
@@ -474,26 +652,8 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn put<K, V>(&mut self, key: K, val: V, version: Option<u64>) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-		V: Into<Val> + Debug,
-	{
-		// RocksDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
-		// Get the arguments
-		let key = key.encode_owned()?;
-		let val = val.into();
+	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
+		self.ensure_write(version)?;
 		// Set the key if empty
 		match self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)? {
 			None => self.inner.as_ref().unwrap().put(key, val)?,
@@ -505,23 +665,8 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn putc<K, V>(&mut self, key: K, val: V, chk: Option<V>) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-		V: Into<Val> + Debug,
-	{
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
-		// Get the arguments
-		let key = key.encode_owned()?;
-		let val = val.into();
-		let chk = chk.map(Into::into);
+	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<()> {
+		self.ensure_write(None)?;
 		// Set the key if empty
 		match (self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)?, chk) {
 			(Some(v), Some(w)) if v.eq(&w) => self.inner.as_ref().unwrap().put(key, val)?,
@@ -534,20 +679,8 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete a key
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn del<K>(&mut self, key: K) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
-		// Get the arguments
-		let key = key.encode_owned()?;
+	async fn del(&mut self, key: Key) -> Result<()> {
+		self.ensure_deletion(None)?;
 		// Remove the key
 		self.inner.as_ref().unwrap().delete(key)?;
 		// Return result
@@ -556,22 +689,8 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn delc<K, V>(&mut self, key: K, chk: Option<V>) -> Result<(), Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-		V: Into<Val> + Debug,
-	{
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TxReadonly);
-		}
-		// Get the arguments
-		let key = key.encode_owned()?;
-		let chk = chk.map(Into::into);
+	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<()> {
+		self.ensure_deletion(None)?;
 		// Delete the key if valid
 		match (self.inner.as_ref().unwrap().get_pinned_opt(&key, &self.ro)?, chk) {
 			(Some(v), Some(w)) if v.eq(&w) => self.inner.as_ref().unwrap().delete(key)?,
@@ -593,7 +712,7 @@ impl super::api::Transaction for Transaction {
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
-		let rng = self.prepare_scan(rng, version).await?;
+		self.ensure_read(version)?;
 		// Execute on the blocking threadpool
 		let res = affinitypool::spawn_local(move || {
 			// Create result set
@@ -647,7 +766,7 @@ impl super::api::Transaction for Transaction {
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
-		let rng = self.prepare_scan(rng, version).await?;
+		self.ensure_read(version)?;
 		// Get the transaction
 		let inner = self.inner.as_ref().unwrap();
 		// Create result set
@@ -695,7 +814,7 @@ impl super::api::Transaction for Transaction {
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
-		let rng = self.prepare_scan(rng, version).await?;
+		self.ensure_read(version)?;
 		// Execute on the blocking threadpool
 		let res = affinitypool::spawn_local(move || {
 			// Create result set
@@ -748,7 +867,7 @@ impl super::api::Transaction for Transaction {
 	where
 		K: KeyEncode + Sprintable + Debug,
 	{
-		let rng = self.prepare_scan(rng, version).await?;
+		self.ensure_read(version)?;
 		// Get the transaction
 		let inner = self.inner.as_ref().unwrap();
 		// Create result set
@@ -786,30 +905,8 @@ impl super::api::Transaction for Transaction {
 	}
 }
 
-impl Transaction {
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn prepare_scan<K>(
-		&mut self,
-		rng: Range<K>,
-		version: Option<u64>,
-	) -> Result<Range<Key>, Error>
-	where
-		K: KeyEncode + Sprintable + Debug,
-	{
-		// RocksDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
-		}
-		// Check to see if transaction is closed
-		if self.done {
-			return Err(Error::TxFinished);
-		}
-		// Convert the range to bytes
-		let rng: Range<Key> = Range {
-			start: rng.start.encode_owned()?,
-			end: rng.end.encode_owned()?,
-		};
-		Ok(rng)
+	fn get_save_points(&mut self) -> &mut SavePoints {
+		unimplemented!("Get save points not implemented for the RocksDB backend");
 	}
 
 	pub(crate) fn new_save_point(&mut self) {

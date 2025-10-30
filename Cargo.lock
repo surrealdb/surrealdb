@@ -774,7 +774,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -794,7 +794,7 @@ dependencies = [
  "bitflags 2.9.0",
  "cexpr",
  "clang-sys",
- "itertools 0.13.0",
+ "itertools 0.10.5",
  "proc-macro2",
  "quote",
  "regex",
@@ -3079,9 +3079,8 @@ dependencies = [
 
 [[package]]
 name = "librocksdb-sys"
-version = "0.17.1+9.9.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b7869a512ae9982f4d46ba482c2a304f1efd80c6412a3d4bf57bb79a619679f"
+version = "0.17.3+10.6.2"
+source = "git+https://github.com/surrealdb/rust-rocksdb.git?rev=ecf0046292fee68f8bf84ccb278b848c2df06af8#ecf0046292fee68f8bf84ccb278b848c2df06af8"
 dependencies = [
  "bindgen 0.69.5",
  "bzip2-sys",
@@ -4787,9 +4786,8 @@ checksum = "cbf4a6aa5f6d6888f39e980649f3ad6b666acdce1d78e95b8a2cb076e687ae30"
 
 [[package]]
 name = "rocksdb"
-version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26ec73b20525cb235bad420f911473b69f9fe27cc856c5461bccd7e4af037f43"
+version = "0.24.0"
+source = "git+https://github.com/surrealdb/rust-rocksdb.git?rev=ecf0046292fee68f8bf84ccb278b848c2df06af8#ecf0046292fee68f8bf84ccb278b848c2df06af8"
 dependencies = [
  "libc",
  "librocksdb-sys",
