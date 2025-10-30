@@ -324,22 +324,20 @@ impl<'a> AsyncMemoryController for HostController<'a> {
 		Ok(())
 	}
 
-	fn mut_mem(&mut self, ptr: u32, len: u32) -> &mut [u8] {
+	fn mut_mem(&mut self, ptr: u32, len: u32) -> Result<&mut [u8]> {
 		let memory = self
 			.get_export("memory")
-			.ok_or_else(|| anyhow::anyhow!("Export memory not found"))
-			.unwrap()
+			.ok_or_else(|| anyhow::anyhow!("Export memory not found"))?
 			.into_memory()
-			.ok_or_else(|| anyhow::anyhow!("Export memory is not a memory"))
-			.unwrap();
+			.ok_or_else(|| anyhow::anyhow!("Export memory is not a memory"))?;
 		let mem = memory.data_mut(&mut self.0);
 		if (ptr as usize) + (len as usize) > mem.len() {
-			println!(
+			anyhow::bail!(
 				"[ERROR] Out of bounds: ptr + len = {} > mem.len() = {}",
 				(ptr as usize) + (len as usize),
 				mem.len()
 			);
 		}
-		&mut mem[(ptr as usize)..(ptr as usize) + (len as usize)]
+		Ok(&mut mem[(ptr as usize)..(ptr as usize) + (len as usize)])
 	}
 }

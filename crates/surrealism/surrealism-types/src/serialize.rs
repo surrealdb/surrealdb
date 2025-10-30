@@ -83,7 +83,7 @@ impl AsyncTransfer for Serialized {
 	async fn transfer(self, controller: &mut dyn AsyncMemoryController) -> Result<Ptr> {
 		let len = 4 + self.0.len();
 		let ptr = controller.alloc(len as u32).await?;
-		let mem = controller.mut_mem(ptr, len as u32);
+		let mem = controller.mut_mem(ptr, len as u32)?;
 		let len_bytes = (self.0.len() as u32).to_le_bytes();
 		mem[0..4].copy_from_slice(len_bytes.as_slice());
 		mem[4..len].copy_from_slice(&self.0);
@@ -91,9 +91,9 @@ impl AsyncTransfer for Serialized {
 	}
 
 	async fn receive(ptr: Ptr, controller: &mut dyn AsyncMemoryController) -> Result<Self> {
-		let mem = controller.mut_mem(*ptr, 4);
+		let mem = controller.mut_mem(*ptr, 4)?;
 		let len = u32::from_le_bytes(mem[0..4].try_into()?);
-		let data = controller.mut_mem(*ptr + 4, len).to_vec();
+		let data = controller.mut_mem(*ptr + 4, len)?.to_vec();
 		#[allow(clippy::unnecessary_cast)]
 		controller.free(*ptr, 4 + len as u32).await?;
 		Ok(Serialized(data.into()))

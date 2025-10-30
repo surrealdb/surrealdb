@@ -215,5 +215,5 @@ pub trait AsyncMemoryController: Send {
 	/// # Panics
 	///
 	/// May panic if the pointer or length are out of bounds.
-	fn mut_mem(&mut self, ptr: u32, len: u32) -> &mut [u8];
+	fn mut_mem(&mut self, ptr: u32, len: u32) -> Result<&mut [u8]>;
 }

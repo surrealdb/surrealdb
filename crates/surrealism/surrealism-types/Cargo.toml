@@ -24,3 +24,6 @@ chrono.workspace = true
 bytes = "1.10.1"
 flatbuffers = "25.2.10"
 rust_decimal = "1.37.2"
+
+[lints]
+workspace = true

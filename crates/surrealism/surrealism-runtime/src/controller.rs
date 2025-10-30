@@ -258,8 +258,17 @@ impl surrealism_types::controller::AsyncMemoryController for Controller {
 		Controller::free(self, ptr, len).await
 	}
 
-	fn mut_mem(&mut self, ptr: u32, len: u32) -> &mut [u8] {
+	fn mut_mem(&mut self, ptr: u32, len: u32) -> Result<&mut [u8]> {
 		let mem = self.memory.data_mut(&mut self.store);
-		&mut mem[(ptr as usize)..(ptr as usize) + (len as usize)]
+		let start = ptr as usize;
+		let end = start
+			.checked_add(len as usize)
+			.ok_or_else(|| anyhow::anyhow!("Memory access overflow: ptr={ptr}, len={len}"))?;
+
+		if end > mem.len() {
+			anyhow::bail!("Memory access out of bounds: attempting to access [{start}..{end}), but memory size is {}", mem.len());
+		}
+
+		Ok(&mut mem[start..end])
 	}
 }
