@@ -4,7 +4,7 @@ version = "3.0.0-alpha.11"
 edition = "2021"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 description = "Runtime for Surrealism."
-license-file = "LICENSE"
+license = "BUSL-1.1"
 repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"
 
@@ -19,7 +19,7 @@ surrealdb-types.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 wasmtime.workspace = true
-surrealism-types = { path = "../surrealism-types", features = ["host"] }
+surrealism-types = { workspace = true, features = ["host"] }
 tar.workspace = true
 zstd.workspace = true
 semver.workspace = true

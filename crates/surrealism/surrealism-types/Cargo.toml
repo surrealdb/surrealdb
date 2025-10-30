@@ -4,7 +4,7 @@ version = "3.0.0-alpha.11"
 edition = "2021"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 description = "Types for Surrealism."
-license-file = "LICENSE"
+license = "BUSL-1.1"
 repository = "https://github.com/surrealdb/surrealdb"
 homepage = "https://github.com/surrealdb/surrealdb"
 
