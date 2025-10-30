@@ -60,7 +60,8 @@ foundationdb = { version = "0.9.2", default-features = false, features = [
     "embedded-fdb-include",
     "fdb-7_3",
 ] }
-rocksdb = { version = "0.24.0", features = ["lz4", "snappy"] }
+rocksdb = { version = "0.24.0", git = "https://github.com/surrealdb/rust-rocksdb.git", rev = "ecf0046292fee68f8bf84ccb278b848c2df06af8", features = ["lz4", "snappy"] }
+
 # Managed by surreal but mostly external code
 tikv = { version = "0.3.0-surreal.3", default-features = false, package = "surrealdb-tikv-client" }
 
