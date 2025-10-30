@@ -11,14 +11,11 @@ use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig
 use crate::sql::statements::define::config::{ConfigInner, graphql};
 use crate::sql::statements::define::user::PassType;
 use crate::sql::statements::define::{
-	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault, DefineKind,
-	DefineSequenceStatement,
-};
-use crate::sql::statements::{
-	DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement,
+	ApiAction, DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement,
+	DefineBucketStatement, DefineConfigStatement, DefineDatabaseStatement, DefineDefault,
 	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement,
-	DefineUserStatement,
+	DefineKind, DefineNamespaceStatement, DefineParamStatement, DefineSequenceStatement,
+	DefineStatement, DefineTableStatement, DefineUserStatement,
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
