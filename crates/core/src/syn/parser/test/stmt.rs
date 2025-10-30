@@ -18,20 +18,22 @@ use crate::sql::statements::access::{
 	self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke, AccessStatementShow,
 };
 use crate::sql::statements::define::user::PassType;
+use crate::sql::statements::define::{
+	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineEventStatement,
+	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineNamespaceStatement,
+	DefineParamStatement, DefineStatement, DefineTableStatement,
+};
 use crate::sql::statements::define::{DefineDefault, DefineKind};
 use crate::sql::statements::remove::RemoveAnalyzerStatement;
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
-	AccessStatement, CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
-	DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-	DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-	DefineTableStatement, DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement,
-	InsertStatement, KillStatement, OptionStatement, OutputStatement, RelateStatement,
-	RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
-	RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement, RemoveParamStatement,
-	RemoveStatement, RemoveTableStatement, RemoveUserStatement, SelectStatement, UpdateStatement,
-	UpsertStatement, UseStatement,
+	AccessStatement, CreateStatement, DeleteStatement, ForeachStatement, IfelseStatement,
+	InfoStatement, InsertStatement, KillStatement, OptionStatement, OutputStatement,
+	RelateStatement, RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement,
+	RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement,
+	RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
+	SelectStatement, UpdateStatement, UpsertStatement, UseStatement,
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
