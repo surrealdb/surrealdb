@@ -4043,8 +4043,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 	async fn test_signin_nonexistent_role() {
 		use crate::iam::Error as IamError;
 		use crate::sql::Base;
-		use crate::sql::statements::DefineUserStatement;
-		use crate::sql::statements::define::DefineStatement;
+		use crate::sql::statements::define::{DefineStatement, DefineUserStatement};
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",
