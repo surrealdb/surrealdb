@@ -215,13 +215,6 @@ impl FunctionCall {
 	pub fn read_only(&self) -> bool {
 		self.receiver.read_only() && self.arguments.iter().all(|x| x.read_only())
 	}
-
-	pub(crate) fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.arguments.iter().for_each(visitor);
-	}
 }
 
 impl fmt::Display for FunctionCall {

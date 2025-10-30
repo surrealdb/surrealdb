@@ -11,7 +11,6 @@ use crate::catalog::{ApiActionDefinition, ApiDefinition, ApiMethod};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
 use crate::fmt::{Fmt, pretty_indent};
 use crate::iam::{Action, ResourceKind};
@@ -26,17 +25,6 @@ pub(crate) struct DefineApiStatement {
 	pub comment: Option<Expr>,
 }
 
-impl VisitExpression for DefineApiStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.path.visit(visitor);
-		self.actions.iter().for_each(|action| action.visit(visitor));
-		self.fallback.iter().for_each(|expr| expr.visit(visitor));
-		self.comment.iter().for_each(|expr| expr.visit(visitor));
-	}
-}
 impl DefineApiStatement {
 	pub(crate) async fn compute(
 		&self,
@@ -139,16 +127,6 @@ pub(crate) struct ApiAction {
 	pub methods: Vec<ApiMethod>,
 	pub action: Expr,
 	pub config: ApiConfig,
-}
-
-impl VisitExpression for ApiAction {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.action.visit(visitor);
-		self.config.visit(visitor);
-	}
 }
 
 impl fmt::Display for ApiAction {

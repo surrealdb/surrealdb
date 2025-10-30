@@ -13,7 +13,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt};
 use crate::iam::{Action, ResourceKind};
@@ -396,25 +395,6 @@ impl InfoStatement {
 					return Ok(out.into());
 				}
 				Ok(Object::default().into())
-			}
-		}
-	}
-}
-
-impl VisitExpression for InfoStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		match self {
-			InfoStatement::Root(_) | InfoStatement::Ns(_) => {}
-			InfoStatement::Db(_, expr) | InfoStatement::Tb(_, _, expr) => {
-				expr.iter().for_each(|expr| expr.visit(visitor))
-			}
-			InfoStatement::User(expr, _, _) => expr.visit(visitor),
-			InfoStatement::Index(expr1, expr2, _) => {
-				expr1.visit(visitor);
-				expr2.visit(visitor);
 			}
 		}
 	}

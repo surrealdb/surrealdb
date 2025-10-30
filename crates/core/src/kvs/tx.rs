@@ -17,7 +17,7 @@ use crate::catalog::providers::{
 };
 use crate::catalog::{
 	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, IndexId,
-	NamespaceDefinition, NamespaceId, TableDefinition, TableId,
+	NamespaceDefinition, NamespaceId, Record, TableDefinition, TableId,
 };
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::MutableContext;
@@ -31,7 +31,6 @@ use crate::kvs::key::KVKey;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::{Transactor, cache};
-use crate::val::record::Record;
 use crate::val::{RecordId, RecordIdKey};
 
 pub struct Transaction {
@@ -1519,6 +1518,8 @@ impl TableProvider for Transaction {
 	}
 
 	/// Fetch a specific record value.
+	///
+	/// This function will return a new default initialized record if non exists.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn get_record(
 		&self,

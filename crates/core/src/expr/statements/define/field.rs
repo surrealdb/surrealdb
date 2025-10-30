@@ -16,7 +16,6 @@ use crate::dbs::Options;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::reference::Reference;
 use crate::expr::{Base, Expr, Kind, KindLiteral, Literal, Part, RecordIdKeyLit};
@@ -50,20 +49,6 @@ pub(crate) struct DefineFieldStatement {
 	pub permissions: Permissions,
 	pub comment: Option<Expr>,
 	pub reference: Option<Reference>,
-}
-
-impl VisitExpression for DefineFieldStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.value.iter().for_each(|expr| expr.visit(visitor));
-		self.assert.iter().for_each(|expr| expr.visit(visitor));
-		self.computed.iter().for_each(|expr| expr.visit(visitor));
-		self.name.visit(visitor);
-		self.comment.iter().for_each(|expr| expr.visit(visitor));
-		self.reference.iter().for_each(|reference| reference.visit(visitor));
-	}
 }
 
 impl Default for DefineFieldStatement {

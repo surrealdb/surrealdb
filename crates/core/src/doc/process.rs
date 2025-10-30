@@ -1,12 +1,12 @@
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
+use crate::catalog::Record;
 use crate::ctx::Context;
 use crate::dbs::{Operable, Options, Processed, Statement, Workable};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::val::Value;
-use crate::val::record::Record;
 
 impl Document {
 	pub(crate) async fn process(

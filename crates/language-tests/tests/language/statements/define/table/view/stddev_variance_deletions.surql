@@ -2,28 +2,16 @@
 [test]
 
 [[test.results]]
-value = "NONE"
+value = "'OK'"
 
 [[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "[{ age: 25, id: person:alice, score: 80 }]"
-
-[[test.results]]
-value = "[{ age: 25, id: person:bob, score: 90 }]"
-
-[[test.results]]
-value = "[{ age: 25, id: person:charlie, score: 70 }]"
-
-[[test.results]]
-value = "[{ age: 25, count: 3, id: person_stats:[25], score_stddev: 10.000000000000000000000000000dec, score_variance: 100dec }]"
+value = "[{ age: 25, count: 3, id: person_stats:[25], score_stddev: 10f, score_variance: 100f }]"
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = "[{ age: 25, count: 2, id: person_stats:[25], score_stddev: 7.071067811865475244008443621dec, score_variance: 50dec }]"
+value = "[{ age: 25, count: 2, id: person_stats:[25], score_stddev: 7.0710678118654755f, score_variance: 50f }]"
 
 [[test.results]]
 value = "[]"
@@ -53,25 +41,25 @@ value = "[{ age: 30, id: person:d4, score: 130 }]"
 value = "[{ age: 30, id: person:d5, score: 140 }]"
 
 [[test.results]]
-value = "[{ age: 30, count: 5, id: person_stats:[30], score_stddev: 15.811388300841896659994467722dec, score_variance: 250dec }]"
+value = "[{ age: 30, count: 5, id: person_stats:[30], score_stddev: 15.811388300841896f, score_variance: 250f }]"
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = "[{ age: 30, count: 4, id: person_stats:[30], score_stddev: 17.078251276599330638701731134dec, score_variance: 291.66666666666666666666666667dec }]"
+value = "[{ age: 30, count: 4, id: person_stats:[30], score_stddev: 17.07825127659933f, score_variance: 291.6666666666667f }]"
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = "[{ age: 30, count: 3, id: person_stats:[30], score_stddev: 20.000000000000000000000000000dec, score_variance: 400dec }]"
+value = "[{ age: 30, count: 3, id: person_stats:[30], score_stddev: 20f, score_variance: 400f }]"
 
 [[test.results]]
 value = "[]"
 
 [[test.results]]
-value = "[{ age: 30, count: 2, id: person_stats:[30], score_stddev: 14.142135623730950488016887242dec, score_variance: 200dec }]"
+value = "[{ age: 30, count: 2, id: person_stats:[30], score_stddev: 14.142135623730951f, score_variance: 200f }]"
 
 [[test.results]]
 value = "[]"
@@ -98,29 +86,33 @@ value = "[{ age: 60, id: person:updater, score: 300 }]"
 value = "[{ age: 60, id: person:updater2, score: 310 }]"
 
 [[test.results]]
-value = "[{ age: 60, count: 2, id: person_stats:[60], score_stddev: 7.071067811865475244008443621dec, score_variance: 50dec }]"
+value = "[{ age: 60, count: 2, id: person_stats:[60], score_stddev: 7.0710678118654755f, score_variance: 50f }]"
 
 [[test.results]]
 value = "[{ age: 60, id: person:updater, score: 350 }]"
 
 [[test.results]]
-value = "[{ age: 60, count: 2, id: person_stats:[60], score_stddev: 28.284271247461900976033774484dec, score_variance: 800dec }]"
+value = "[{ age: 60, count: 2, id: person_stats:[60], score_stddev: 28.284271247461902f, score_variance: 800f }]"
 */
-DEFINE TABLE person SCHEMALESS;
-DEFINE TABLE person_stats AS
-	SELECT
-		count(),
-		age,
-		math::stddev(score) AS score_stddev,
-		math::variance(score) AS score_variance
-	FROM person
-	GROUP BY age
-;
+{
+	DEFINE TABLE person SCHEMALESS;
+	DEFINE TABLE person_stats AS
+		SELECT
+			count(),
+			age,
+			math::stddev(score) AS score_stddev,
+			math::variance(score) AS score_variance
+		FROM person
+		GROUP BY age
+	;
 
--- Setup: Add multiple records to establish statistics
-UPSERT person:alice SET age = 25, score = 80;
-UPSERT person:bob SET age = 25, score = 90;
-UPSERT person:charlie SET age = 25, score = 70;
+	-- Setup: Add multiple records to establish statistics
+	UPSERT person:alice SET age = 25, score = 80;
+	UPSERT person:bob SET age = 25, score = 90;
+	UPSERT person:charlie SET age = 25, score = 70;
+	"OK";
+};
+
 SELECT * FROM person_stats WHERE age = 25;
 
 -- Test 1: Delete one record from middle of dataset

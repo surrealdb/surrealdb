@@ -11,7 +11,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Literal};
@@ -25,16 +24,6 @@ pub(crate) struct DefineDatabaseStatement {
 	pub name: Expr,
 	pub comment: Option<Expr>,
 	pub changefeed: Option<ChangeFeed>,
-}
-
-impl VisitExpression for DefineDatabaseStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.comment.iter().for_each(|comment| comment.visit(visitor));
-	}
 }
 
 impl Default for DefineDatabaseStatement {

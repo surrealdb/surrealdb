@@ -10,7 +10,6 @@ use super::paths::ID;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::expression::VisitExpression;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, FlowResultExt as _, Function, Idiom, Part};
 use crate::fmt::Fmt;
@@ -354,18 +353,6 @@ impl Fields {
 	}
 }
 
-impl VisitExpression for Fields {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		match self {
-			Fields::Value(field) => field.visit(visitor),
-			Fields::Select(fields) => fields.iter().for_each(|f| f.visit(visitor)),
-		}
-	}
-}
-
 pub(crate) enum FieldsIter<'a> {
 	Single(Option<&'a Field>),
 	Multiple(Iter<'a, Field>),
@@ -423,20 +410,6 @@ impl Field {
 	}
 }
 
-impl VisitExpression for Field {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		if let Field::Single {
-			expr,
-			..
-		} = self
-		{
-			expr.visit(visitor);
-		}
-	}
-}
 impl Display for Field {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {

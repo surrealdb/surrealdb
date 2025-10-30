@@ -15,7 +15,7 @@ use tokio::sync::RwLock;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
-use crate::catalog::{DatabaseDefinition, DatabaseId, IndexDefinition, NamespaceId};
+use crate::catalog::{DatabaseDefinition, DatabaseId, IndexDefinition, NamespaceId, Record};
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
@@ -29,7 +29,6 @@ use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val, impl_kv_value_revisioned};
 use crate::mem::ALLOC;
-use crate::val::record::Record;
 use crate::val::{Object, RecordId, RecordIdKey, Value};
 
 #[derive(Debug, Clone)]

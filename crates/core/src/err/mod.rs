@@ -173,11 +173,16 @@ pub(crate) enum Error {
 
 	/// The wrong quantity or magnitude of arguments was given for the specified
 	/// function
-	#[error("Incorrect arguments for aggregate function {name}() on table '{table}'. {message}")]
+	#[error("Invalid aggregation: {message}")]
 	InvalidAggregation {
-		name: String,
-		table: String,
 		message: String,
+	},
+
+	#[error(
+		"Incorrect selector for aggregate selection, expression `{expr}` within in selector cannot be aggregated in a group."
+	)]
+	InvalidAggregationSelector {
+		expr: String,
 	},
 
 	/// The URL is invalid
@@ -1166,6 +1171,7 @@ pub(crate) enum Error {
 }
 
 impl Error {
+	#[cold]
 	#[track_caller]
 	pub fn unreachable<T: fmt::Display>(message: T) -> Error {
 		let location = std::panic::Location::caller();
