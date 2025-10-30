@@ -7,7 +7,6 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::relate::RelateThrough;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
@@ -136,19 +135,6 @@ impl InsertStatement {
 		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
 		// Output the results
 		Ok(res)
-	}
-}
-
-impl VisitExpression for InsertStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.into.iter().for_each(|expr| expr.visit(visitor));
-		self.data.visit(visitor);
-		self.update.iter().for_each(|data| data.visit(visitor));
-		self.output.iter().for_each(|output| output.visit(visitor));
-		self.version.iter().for_each(|expr| expr.visit(visitor));
 	}
 }
 

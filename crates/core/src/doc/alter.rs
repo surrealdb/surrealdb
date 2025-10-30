@@ -3,6 +3,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 
+use crate::catalog::RecordType;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Statement, Workable};
 use crate::doc::Document;
@@ -11,7 +12,6 @@ use crate::err::Error;
 use crate::expr::data::Data;
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::{AssignOperator, FlowResultExt, Idiom};
-use crate::val::record::RecordType;
 use crate::val::{RecordId, Value};
 
 impl Document {
