@@ -66,10 +66,6 @@ version = "0.2.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.ammonia]]
-version = "4.0.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.ammonia]]
 version = "4.1.2"
 criteria = "safe-to-deploy"
 
@@ -173,10 +169,6 @@ criteria = "safe-to-deploy"
 version = "0.3.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.atomic-waker]]
-version = "1.1.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.axum]]
 version = "0.6.20"
 criteria = "safe-to-deploy"
@@ -226,7 +218,7 @@ version = "0.70.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.bindgen]]
-version = "0.71.1"
+version = "0.72.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.bitvec]]
@@ -485,14 +477,6 @@ criteria = "safe-to-deploy"
 version = "0.10.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.fixedbitset]]
-version = "0.4.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.flate2]]
-version = "1.1.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.float_next_after]]
 version = "1.0.0"
 criteria = "safe-to-deploy"
@@ -598,10 +582,6 @@ version = "0.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.html5ever]]
-version = "0.27.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.html5ever]]
 version = "0.35.0"
 criteria = "safe-to-deploy"
 
@@ -651,10 +631,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.itertools]]
 version = "0.11.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.itertools]]
-version = "0.13.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.jiff]]
@@ -742,19 +718,11 @@ version = "1.0.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.markup5ever]]
-version = "0.12.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.markup5ever]]
 version = "0.35.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.match_token]]
 version = "0.35.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.matchers]]
-version = "0.2.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.matchit]]
@@ -831,10 +799,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.noisy_float]]
 version = "0.2.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.nu-ansi-term]]
-version = "0.50.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.num-bigint]]
@@ -1162,7 +1126,7 @@ version = "1.1.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rocksdb]]
-version = "0.23.0@git:ecf0046292fee68f8bf84ccb278b848c2df06af8"
+version = "0.24.0@git:ecf0046292fee68f8bf84ccb278b848c2df06af8"
 criteria = "safe-to-deploy"
 
 [[exemptions.rquickjs]]
@@ -1453,10 +1417,6 @@ criteria = "safe-to-deploy"
 version = "0.24.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.tokio-tungstenite]]
-version = "0.28.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.toml_datetime]]
 version = "0.6.8"
 criteria = "safe-to-deploy"
@@ -1497,10 +1457,6 @@ criteria = "safe-to-deploy"
 version = "0.2.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.tracing-log]]
-version = "0.2.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.tracing-opentelemetry]]
 version = "0.25.0"
 criteria = "safe-to-deploy"
@@ -1515,10 +1471,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.tungstenite]]
 version = "0.24.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.tungstenite]]
-version = "0.28.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.typenum]]

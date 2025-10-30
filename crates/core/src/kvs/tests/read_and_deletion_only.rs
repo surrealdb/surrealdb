@@ -8,15 +8,13 @@
 //! - Automatically recovers to normal mode when space drops below the limit after deletions and
 //!   compaction
 
-use std::sync::Arc;
-
 use crate::dbs::node::Timestamp;
-use crate::kvs::LockType::Optimistic;
-use crate::kvs::SizedClock;
-use crate::kvs::TransactionType::*;
-use crate::kvs::clock::FakeClock;
+use crate::kvs::clock::{FakeClock, SizedClock};
 use crate::kvs::tests::CreateDs;
-use crate::val::Uuid;
+use crate::kvs::LockType::Optimistic;
+use crate::kvs::TransactionType::*;
+use std::sync::Arc;
+use uuid::Uuid;
 
 pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 	// This test demonstrates the read-and-deletion-only mode behavior.
@@ -41,18 +39,18 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 
 	// Create datastore (read-and-deletion-only mode is triggered by environment variables)
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
-	let (ds, _) = new_ds.create_ds(Uuid::new_v7().into(), clock).await;
+	let (ds, _) = new_ds.create_ds(Uuid::now_v7(), clock).await;
 
 	// Phase 1: Initial writes in normal mode (before reaching space limit)
 	{
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		tx.set(&"initial_key", &"initial_value".as_bytes().to_vec(), None).await.unwrap();
+		tx.set(&"initial_key", "initial_value".as_bytes().to_vec(), None).await.unwrap();
 		tx.commit().await.unwrap();
 	}
 
 	// Start a transaction that will be left uncommitted until after mode transition
 	let mut ongoing_tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	ongoing_tx.set(&"ongoing_key", &"ongoing_value".as_bytes().to_vec(), None).await.unwrap();
+	ongoing_tx.set(&"ongoing_key", "ongoing_value".as_bytes().to_vec(), None).await.unwrap();
 
 	// Phase 2: Write data until space limit is reached and mode transitions to
 	// read-and-deletion-only Write ~20MB of data (200 transactions × 100 keys × 1KB each)
@@ -61,9 +59,9 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 	for j in 0..200 {
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		for i in 0..100 {
-			let key = format!("unlimited_key_{}_{}", i, j);
+			let key = format!("unlimited_key_{}_{}", i, j).as_bytes().to_vec();
 			let value = vec![0u8; 1024]; // 1KB per value
-			if let Err(e) = tx.set(&key, &value, None).await {
+			if let Err(e) = tx.set(key, value, None).await {
 				assert!(
 					e.to_string().starts_with("The datastore is in read-and-deletion-only mode"),
 					"{e}"
@@ -87,23 +85,21 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 	// Confirm new write transactions are blocked
 	{
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		let res = tx.put(&"other_key", &"other_value".as_bytes().to_vec(), None).await;
-		assert!(
-			res.unwrap_err()
-				.to_string()
-				.starts_with("The datastore is in read-and-deletion-only mode")
-		);
+		let res = tx.put(&"other_key", "other_value".as_bytes().to_vec(), None).await;
+		assert!(res
+			.unwrap_err()
+			.to_string()
+			.starts_with("The datastore is in read-and-deletion-only mode"));
 		tx.cancel().await.unwrap();
 	}
 
 	// Confirm pre-existing uncommitted transaction is rejected on commit
 	{
 		let res = ongoing_tx.commit().await;
-		assert!(
-			res.unwrap_err()
-				.to_string()
-				.starts_with("The datastore is in read-and-deletion-only mode")
-		);
+		assert!(res
+			.unwrap_err()
+			.to_string()
+			.starts_with("The datastore is in read-and-deletion-only mode"));
 	}
 
 	// Confirm read operations still work
@@ -119,8 +115,8 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 	for j in 0..200 {
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
 		for i in 0..100 {
-			let key = format!("unlimited_key_{}_{}", i, j);
-			tx.del(&key).await.unwrap();
+			let key = format!("unlimited_key_{}_{}", i, j).as_bytes().to_vec();
+			tx.del(key).await.unwrap();
 		}
 		tx.commit().await.unwrap();
 	}
@@ -129,7 +125,7 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 	// Confirm writes are allowed again after space usage drops below limit
 	{
 		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-		tx.put(&"other_key", &"other_value".as_bytes().to_vec(), None).await.unwrap();
+		tx.put(&"other_key", "other_value".as_bytes().to_vec(), None).await.unwrap();
 		tx.commit().await.unwrap();
 	}
 }
