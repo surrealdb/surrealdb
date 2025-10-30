@@ -387,34 +387,28 @@ mod tests {
 		db.use_ns("N").use_db("D").await.unwrap();
 
 		// The client needs to sign in before it can access anything
-		assert!(
-			db.query("INFO FOR ROOT").await.unwrap().check().is_err(),
-			"client should not have access to KV"
-		);
-		assert!(
-			db.query("INFO FOR NS").await.unwrap().check().is_err(),
-			"client should not have access to NS"
-		);
-		assert!(
-			db.query("INFO FOR DB").await.unwrap().check().is_err(),
-			"client should not have access to DB"
-		);
+		db.query("INFO FOR ROOT")
+			.await
+			.unwrap()
+			.check()
+			.expect_err("client should not have access to KV");
+		db.query("INFO FOR NS")
+			.await
+			.unwrap()
+			.check()
+			.expect_err("client should not have access to NS");
+		db.query("INFO FOR DB")
+			.await
+			.unwrap()
+			.check()
+			.expect_err("client should not have access to DB");
 
 		// It can sign in
-		assert!(db.signin(creds).await.is_ok(), "client should be able to sign in");
+		db.signin(creds).await.expect("client should be able to sign in");
 
 		// After the sign in, the client has access to everything
-		assert!(
-			db.query("INFO FOR ROOT").await.unwrap().check().is_ok(),
-			"client should have access to KV"
-		);
-		assert!(
-			db.query("INFO FOR NS").await.unwrap().check().is_ok(),
-			"client should have access to NS"
-		);
-		assert!(
-			db.query("INFO FOR DB").await.unwrap().check().is_ok(),
-			"client should have access to DB"
-		);
+		db.query("INFO FOR ROOT").await.unwrap().check().expect("client should have access to KV");
+		db.query("INFO FOR NS").await.unwrap().check().expect("client should have access to NS");
+		db.query("INFO FOR DB").await.unwrap().check().expect("client should have access to DB");
 	}
 }

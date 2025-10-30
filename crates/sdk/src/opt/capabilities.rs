@@ -14,7 +14,6 @@ use surrealdb_core::dbs::capabilities::{
 pub enum ExperimentalFeature {
 	RecordReferences,
 	GraphQl,
-	BearerAccess,
 	DefineApi,
 }
 
@@ -25,7 +24,6 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 		match feature {
 			ExperimentalFeature::RecordReferences => ExperimentalTarget::RecordReferences,
 			ExperimentalFeature::GraphQl => ExperimentalTarget::GraphQL,
-			ExperimentalFeature::BearerAccess => ExperimentalTarget::BearerAccess,
 			ExperimentalFeature::DefineApi => ExperimentalTarget::DefineApi,
 		}
 	}

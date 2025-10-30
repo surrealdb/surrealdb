@@ -1,5 +1,6 @@
 pub use entities::Level;
 use thiserror::Error;
+pub use token::Token;
 
 pub mod access;
 pub mod auth;

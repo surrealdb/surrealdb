@@ -14,7 +14,6 @@ use crate::expr::{Algorithm, Expr, Literal};
 pub(crate) enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
-	// TODO(gguillemas): Document once bearer access is no longer experimental.
 	Bearer(BearerAccess),
 }
 

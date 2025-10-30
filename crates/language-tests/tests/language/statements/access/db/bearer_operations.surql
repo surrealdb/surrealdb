@@ -1,6 +1,5 @@
 /**
 [env.capabilities]
-allow-experimental = ["bearer_access"]
 
 [test]
 

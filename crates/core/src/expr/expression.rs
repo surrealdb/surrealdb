@@ -1073,7 +1073,6 @@ impl DeserializeRevisioned for Expr {
 			query.as_bytes(),
 			crate::syn::parser::ParserSettings {
 				references_enabled: true,
-				bearer_access_enabled: true,
 				define_api_enabled: true,
 				files_enabled: true,
 				..Default::default()

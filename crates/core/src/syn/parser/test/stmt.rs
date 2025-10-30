@@ -957,10 +957,7 @@ fn parse_define_access_record() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH REFRESH DURATION FOR GRANT 10d"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap();
@@ -1171,10 +1168,7 @@ fn parse_define_access_record() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH REFRESH WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p,s| p.parse_expr_inherit(s).await,
 		)
 			.unwrap();
@@ -1231,10 +1225,7 @@ fn parse_define_access_record() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" WITH REFRESH DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p,s| p.parse_expr_inherit(s).await,
 		).unwrap();
 		assert_eq!(
@@ -1357,10 +1348,7 @@ fn parse_define_access_bearer() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR USER COMMENT "foo""#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap();
@@ -1403,10 +1391,7 @@ fn parse_define_access_bearer() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON NS TYPE BEARER FOR USER COMMENT "foo""#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap();
@@ -1449,10 +1434,7 @@ fn parse_define_access_bearer() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON ROOT TYPE BEARER FOR USER COMMENT "foo""#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap();
@@ -1495,10 +1477,7 @@ fn parse_define_access_bearer() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR RECORD COMMENT "foo""#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap();
@@ -1540,10 +1519,7 @@ fn parse_define_access_bearer() {
 	{
 		syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON NS TYPE BEARER FOR RECORD COMMENT "foo""#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap_err();
@@ -1552,10 +1528,7 @@ fn parse_define_access_bearer() {
 	{
 		syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON ROOT TYPE BEARER FOR RECORD COMMENT "foo""#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap_err();
@@ -1564,10 +1537,7 @@ fn parse_define_access_bearer() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR USER WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR GRANT 90d, FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p,s| p.parse_expr_inherit(s).await,
 		).unwrap();
 		assert_eq!(
@@ -1608,10 +1578,7 @@ fn parse_define_access_bearer() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR RECORD WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR GRANT 90d, FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p,s| p.parse_expr_inherit(s).await,
 		).unwrap();
 		assert_eq!(
@@ -2851,10 +2818,7 @@ fn parse_access_grant() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON NAMESPACE GRANT FOR USER b"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2871,10 +2835,7 @@ fn parse_access_grant() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON NAMESPACE GRANT FOR RECORD b:c"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2898,10 +2859,7 @@ fn parse_access_show() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE SHOW ALL"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2919,10 +2877,7 @@ fn parse_access_show() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE SHOW GRANT b"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2940,10 +2895,7 @@ fn parse_access_show() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE SHOW WHERE true"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2965,10 +2917,7 @@ fn parse_access_revoke() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE REVOKE ALL"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2986,10 +2935,7 @@ fn parse_access_revoke() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE REVOKE GRANT b"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3007,10 +2953,7 @@ fn parse_access_revoke() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE REVOKE WHERE true"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3032,10 +2975,7 @@ fn parse_access_purge() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE EXPIRED, REVOKED"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3054,10 +2994,7 @@ fn parse_access_purge() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE EXPIRED"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3076,10 +3013,7 @@ fn parse_access_purge() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE REVOKED"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3098,10 +3032,7 @@ fn parse_access_purge() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE EXPIRED FOR 90d"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3120,10 +3051,7 @@ fn parse_access_purge() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE REVOKED FOR 90d"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3142,10 +3070,7 @@ fn parse_access_purge() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE REVOKED, EXPIRED FOR 90d"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();

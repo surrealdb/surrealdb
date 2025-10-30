@@ -1030,12 +1030,14 @@ fn convert_array_to_public(value: crate::val::Array) -> Result<surrealdb_types::
 }
 
 fn convert_object_to_public(value: crate::val::Object) -> Result<surrealdb_types::Value> {
-	let converted: Result<std::collections::BTreeMap<_, _>> = value
-		.0
-		.into_iter()
-		.map(|(k, v)| convert_value_to_public_value(v).map(|v| (k, v)))
-		.collect();
-	Ok(surrealdb_types::Value::Object(surrealdb_types::Object::from_map(converted?)))
+	let converted = convert_object_to_public_map(value)?;
+	Ok(surrealdb_types::Value::Object(surrealdb_types::Object::from_map(converted)))
+}
+
+pub(crate) fn convert_object_to_public_map(
+	value: crate::val::Object,
+) -> Result<BTreeMap<String, surrealdb_types::Value>> {
+	value.0.into_iter().map(|(k, v)| convert_value_to_public_value(v).map(|v| (k, v))).collect()
 }
 
 fn convert_record_id_to_public(value: crate::val::RecordId) -> Result<surrealdb_types::Value> {
