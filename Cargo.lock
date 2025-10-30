@@ -5625,9 +5625,9 @@ checksum = "d7beae5182595e9a8b683fa98c4317f956c9a2dec3b9716990d20023cc60c766"
 
 [[package]]
 name = "storekey"
-version = "0.8.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f66e6afe371dcd16739ae7f7ba020f7ca429ee650698e9a909ec728d6e08920e"
+checksum = "79f0a20b9cc597130e6b3ae22f2bc0892095c0def0361b4b86e64a609ef222ef"
 dependencies = [
  "storekey-derive",
  "uuid",
@@ -5635,9 +5635,9 @@ dependencies = [
 
 [[package]]
 name = "storekey-derive"
-version = "0.8.1"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4d11b8e63d4d628a76a6435837d356287e5d999ebab0ab6e8e8c1173a3ff197"
+checksum = "4b17310dd353bab243079e8669927142cc4bde8e6b91bc966c65e347e78563a3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -5967,9 +5967,9 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-protocol"
-version = "0.5.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2be23d580dc3bca14ec3ed8e9f3d530d43c9841251ad22690736b66852c1ea18"
+checksum = "663f743d93821325a41f87fd400b773c7e6bb66359a5326cdff638d68d21a401"
 dependencies = [
  "anyhow",
  "async-trait",

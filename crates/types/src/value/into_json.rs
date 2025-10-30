@@ -48,6 +48,9 @@ impl Value {
 			Value::Array(array) => JsonValue::Array(
 				array.0.into_iter().map(Value::into_json_value).collect::<Vec<JsonValue>>(),
 			),
+			Value::Set(set) => JsonValue::Array(
+				set.0.into_iter().map(Value::into_json_value).collect::<Vec<JsonValue>>(),
+			),
 			Value::Object(object) => {
 				let mut map = Map::with_capacity(object.len());
 				for (k, v) in object.0 {
