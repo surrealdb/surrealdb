@@ -317,6 +317,11 @@ implement_visitor! {
 					this.visit_expr(expr)?;
 				}
 			},
+			Literal::Set(exprs) => {
+				for expr in exprs.iter() {
+					this.visit_expr(expr)?;
+				}
+			},
 			Literal::Object(items) => {
 				for entry in items{
 					this.visit_expr(&entry.value)?
@@ -1720,6 +1725,11 @@ implement_visitor_mut! {
 				this.visit_mut_record_id(r)?;
 			},
 			Literal::Array(exprs) => {
+				for expr in exprs.iter_mut() {
+					this.visit_mut_expr(expr)?;
+				}
+			},
+			Literal::Set(exprs) => {
 				for expr in exprs.iter_mut() {
 					this.visit_mut_expr(expr)?;
 				}
