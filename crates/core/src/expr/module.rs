@@ -4,7 +4,6 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use crate::catalog;
-#[cfg(not(target_arch = "wasm32"))]
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -198,13 +197,12 @@ impl SurrealismExecutable {
 impl SurrealismExecutable {
 	pub(crate) async fn signature(
 		&self,
-		_stk: &mut Stk,
 		_ctx: &Context,
-		_opt: &Options,
-		_doc: Option<&CursorDoc>,
+		_ns: &NamespaceId,
+		_db: &DatabaseId,
 		_sub: Option<&str>,
 	) -> Result<Signature> {
-		bail!("Surrealism functions are not supported in WASM environments")
+		bail!("Surrealism modules are not supported in WASM environments")
 	}
 
 	pub(crate) async fn run(
@@ -343,14 +341,7 @@ impl SiloExecutable {
 
 #[cfg(target_arch = "wasm32")]
 impl SiloExecutable {
-	pub(crate) async fn signature(
-		&self,
-		_stk: &mut Stk,
-		_ctx: &Context,
-		_opt: &Options,
-		_doc: Option<&CursorDoc>,
-		_sub: Option<&str>,
-	) -> Result<Signature> {
+	pub(crate) async fn signature(&self, _ctx: &Context, _sub: Option<&str>) -> Result<Signature> {
 		bail!("Surrealism functions are not supported in WASM environments")
 	}
 

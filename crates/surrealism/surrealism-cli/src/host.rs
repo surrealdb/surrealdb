@@ -45,6 +45,7 @@ impl InvocationContext for DemoHost {
 		println!("Please enter the result:");
 
 		loop {
+			#[allow(clippy::unwrap_used)]
 			match parse_value(&mut std::io::stdin().lock().lines().next().unwrap().unwrap()) {
 				Ok(x) => {
 					println!(" ");
@@ -69,11 +70,12 @@ impl InvocationContext for DemoHost {
 		println!("The module is running a function:");
 		println!(
 			" - {fnc}{version}({})",
-			args.iter().map(|x| format!("{:}", x.to_sql())).collect::<Vec<String>>().join(", ")
+			args.iter().map(|x| x.to_sql().to_string()).collect::<Vec<String>>().join(", ")
 		);
 		println!("\nPlease enter the result:");
 
 		loop {
+			#[allow(clippy::unwrap_used)]
 			match parse_value(&mut std::io::stdin().lock().lines().next().unwrap().unwrap()) {
 				Ok(x) => {
 					println!(" ");
@@ -132,6 +134,7 @@ impl InvocationContext for DemoHost {
 		println!("Please enter the result:");
 
 		loop {
+			#[allow(clippy::unwrap_used)]
 			match parse_value(&mut std::io::stdin().lock().lines().next().unwrap().unwrap()) {
 				Ok(x) => {
 					if let surrealdb_types::Value::Array(x) = x {

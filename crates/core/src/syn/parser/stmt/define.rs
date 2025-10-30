@@ -22,15 +22,18 @@ use crate::sql::statements::{
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	AccessType, DefineModuleStatement, Expr, Index, Kind, Literal, ModuleExecutable, Param,
-	Permission, Permissions, Scoring, SiloExecutable, SurrealismExecutable, TableType, access_type,
-	table_type,
+	AccessType, DefineModuleStatement, Expr, Index, Kind, Literal, Param, Permission, Permissions,
+	Scoring, TableType, access_type, table_type,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use crate::sql::{ModuleExecutable, SiloExecutable, SurrealismExecutable};
 use crate::syn::error::bail;
-use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
+use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Token, TokenKind, t};
-use crate::types::{PublicDuration, PublicFile};
+use crate::types::PublicDuration;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::types::PublicFile;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_define_stmt(
@@ -234,7 +237,7 @@ impl Parser<'_> {
 		};
 
 		let name = if self.eat(t!("mod")) {
-			expected_whitespace!(self, t!("::"));
+			expected!(self, t!("::"));
 			let name = self.parse_ident()?;
 			expected!(self, t!("AS"));
 			Some(name)
@@ -246,17 +249,17 @@ impl Parser<'_> {
 		let executable = match peek.kind {
 			t!("silo") => {
 				self.pop_peek();
-				expected_whitespace!(self, t!("::"));
+				expected!(self, t!("::"));
 				let organisation = self.parse_ident()?;
-				expected_whitespace!(self, t!("::"));
+				expected!(self, t!("::"));
 				let package = self.parse_ident()?;
-				expected_whitespace!(self, t!("<"));
+				expected!(self, t!("<"));
 				let major = self.next_token_value::<u32>()?;
-				expected_whitespace!(self, t!("."));
+				expected!(self, t!("."));
 				let minor = self.next_token_value::<u32>()?;
-				expected_whitespace!(self, t!("."));
+				expected!(self, t!("."));
 				let patch = self.next_token_value::<u32>()?;
-				expected_whitespace!(self, t!(">"));
+				expected!(self, t!(">"));
 
 				ModuleExecutable::Silo(SiloExecutable {
 					organisation,

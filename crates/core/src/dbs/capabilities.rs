@@ -4,8 +4,10 @@ use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 #[cfg(all(target_family = "wasm", feature = "http"))]
 use std::net::ToSocketAddrs;
+#[cfg(not(target_arch = "wasm32"))]
 use std::str::FromStr;
 
+#[cfg(not(target_arch = "wasm32"))]
 use anyhow::bail;
 use ipnet::IpNet;
 #[cfg(not(target_arch = "wasm32"))]

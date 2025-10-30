@@ -9,6 +9,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Value};
 use crate::iam::{Action, ResourceKind};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::surrealism::cache::SurrealismCacheLookup;
 use crate::val::File;
 
@@ -43,6 +44,8 @@ impl RemoveModuleStatement {
 		txn.del(&key).await?;
 		// Clear the cache
 		txn.clear_cache();
+		// Remove the module from the cache
+		#[cfg(not(target_arch = "wasm32"))]
 		if let Some(cache) = ctx.get_surrealism_cache() {
 			let lookup = match &md.executable {
 				ModuleExecutable::Surrealism(surrealism) => SurrealismCacheLookup::File(

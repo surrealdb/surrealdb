@@ -36,7 +36,7 @@ impl SurrealismCommand for RunCommand {
 			}
 			Err(e) => {
 				eprintln!("❌ {}", e);
-				return Err(e.into());
+				return Err(e);
 			}
 		}
 
