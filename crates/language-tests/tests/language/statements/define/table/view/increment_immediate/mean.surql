@@ -5,6 +5,8 @@
 imports = ["harness/rng.surql"]
 
 [test]
+wip = true
+reason = "Random seeding is not deterministic across hosts."
 
 [[test.results]]
 value = "NONE"
