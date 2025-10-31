@@ -263,6 +263,7 @@ async fn loose_mode_all_ok() -> Result<()> {
 			configs: {},
 			functions: {},
 			models: {},
+			modules: {},
 			params: {},
 			sequences: {},
 			tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE' },

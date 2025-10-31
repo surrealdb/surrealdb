@@ -41,6 +41,7 @@ async fn remove_statement_table() -> Result<()> {
 			configs: {},
 			functions: {},
 			models: {},
+			modules: {},
 			params: {},
 			sequences: {},
 			tables: {},
