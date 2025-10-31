@@ -60,3 +60,28 @@ build: check-deps
 .PHONY: release
 release: check-deps
 	cargo make release
+
+.PHONY: cackle-macos
+cackle-macos:
+	@echo "Building cackle Docker image with Rust nightly..."
+	@docker build -f cackle.Dockerfile -t surrealdb-cackle:latest .
+	@echo "Running cargo-acl in Docker with 32GB memory..."
+	@docker run --rm \
+		--memory=32g \
+		--memory-swap=32g \
+		-v "$(PWD)":/workspace \
+		-v surrealdb-cackle-target:/workspace/target \
+		-w /workspace \
+		surrealdb-cackle:latest
+
+.PHONY: cackle-macos-quick
+cackle-macos-quick:
+	@echo "Running cargo-acl in Docker with 32GB memory (using cached image)..."
+	@docker run --rm \
+		--memory=32g \
+		--memory-swap=32g \
+		-e CARGO_BUILD_JOBS=2 \
+		-v "$(PWD)":/workspace \
+		-v surrealdb-cackle-target:/workspace/target \
+		-w /workspace \
+		surrealdb-cackle:latest

@@ -1560,7 +1560,7 @@ allow_apis = ["fs"]
 [pkg.wasmtime]
 allow_unsafe = true
 build.allow_apis = ["process"]
-allow_apis = ["fs"]
+allow_apis = ["fs", "process", "net"]
 
 [pkg.wasmtime-environ]
 allow_unsafe = true
@@ -1609,6 +1609,7 @@ allow_unsafe = true
 
 [pkg.regalloc2]
 allow_unsafe = true
+allow_apis = ["net"]
 
 [pkg.wast]
 allow_unsafe = true
