@@ -1444,6 +1444,8 @@ allow_unsafe = true
 
 [pkg.wasmtime-component-macro]
 allow_proc_macro = true
+allow_unsafe = true
+allow_apis = ["fs", "process"]
 
 [pkg.dyn-stack-macros]
 allow_proc_macro = true
@@ -1681,3 +1683,11 @@ allow_unsafe = true
 
 [pkg.memfd]
 allow_unsafe = true
+
+[pkg.wit-parser]
+allow_unsafe = true
+allow_apis = ["fs"]
+
+[pkg.wasmtime-wit-bindgen]
+allow_unsafe = true
+allow_apis = ["process"]
