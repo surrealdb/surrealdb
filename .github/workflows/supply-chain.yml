@@ -104,11 +104,12 @@ jobs:
     name: Check dependencies for unauthorized access
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Install nightly toolchain
+        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) nightly
         with:
-          toolchain: ${{ env.RUST_VERSION }}
+          toolchain: nightly-2025-08-07
           components: rustfmt
+          targets: wasm32-unknown-unknown
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
@@ -136,7 +137,11 @@ jobs:
           sudo systemctl reload apparmor
 
       - name: Check dependencies for unauthorized access
-        run: cargo acl -n
+        run: |
+          # Temporarily remove rust-toolchain.toml to use nightly
+          mv rust-toolchain.toml rust-toolchain.toml.bak
+          cargo acl -n
+          mv rust-toolchain.toml.bak rust-toolchain.toml
 
       - name: Dependency check failure
         if: failure()
