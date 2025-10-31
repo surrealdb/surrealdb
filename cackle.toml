@@ -1524,6 +1524,7 @@ build.allow_apis = ["fs"]
 [pkg.cranelift-codegen]
 allow_unsafe = true
 build.allow_apis = ["fs", "process"]
+allow_apis = ["net"]
 
 [pkg.cranelift-frontend]
 allow_unsafe = true
@@ -1559,12 +1560,14 @@ allow_apis = ["fs"]
 [pkg.wasmtime]
 allow_unsafe = true
 build.allow_apis = ["process"]
+allow_apis = ["fs"]
 
 [pkg.wasmtime-environ]
 allow_unsafe = true
 
 [pkg.wasmtime-cranelift]
 allow_unsafe = true
+allow_apis = ["fs"]
 
 [pkg.wasmtime-winch]
 allow_unsafe = true
@@ -1650,14 +1653,17 @@ allow_unsafe = true
 [pkg.cap-primitives]
 allow_unsafe = true
 from.build.allow_apis = ["process"]
+allow_apis = ["fs"]
 
 [pkg.cap-std]
 allow_unsafe = true
 from.build.allow_apis = ["process"]
+allow_apis = ["fs"]
 
 [pkg.cap-fs-ext]
 allow_unsafe = true
 from.build.allow_apis = ["process"]
+allow_apis = ["fs"]
 
 [pkg.cap-net-ext]
 allow_unsafe = true
@@ -1674,19 +1680,23 @@ from.build.allow_apis = ["process"]
 [pkg.fs-set-times]
 allow_unsafe = true
 from.build.allow_apis = ["process"]
+allow_apis = ["fs"]
 
 [pkg.system-interface]
 allow_unsafe = true
 from.build.allow_apis = ["process"]
+allow_apis = ["fs"]
 
 [pkg.winx]
 allow_unsafe = true
 
 [pkg.rustix-linux-procfs]
 allow_unsafe = true
+allow_apis = ["fs"]
 
 [pkg.memfd]
 allow_unsafe = true
+allow_apis = ["fs"]
 
 [pkg.wit-parser]
 allow_unsafe = true
