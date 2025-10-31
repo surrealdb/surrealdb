@@ -38,7 +38,7 @@ vart = "0.8.1"
 foundationdb = { version = "0.9.0", default-features = false, features = [
     "embedded-fdb-include",
 ] }
-rocksdb = { version = "0.23.0", features = ["lz4", "snappy"] }
+rocksdb = { version = "0.24.0-surreal.1", package = "surrealdb-rocksdb", features = ["lz4", "snappy"] }
 # Managed by surreal but mostly external code
 tikv = { version = "0.3.0-surreal.3", default-features = false, package = "surrealdb-tikv-client" }
 
