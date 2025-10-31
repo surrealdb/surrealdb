@@ -62,7 +62,7 @@ release: check-deps
 	cargo make release
 
 .PHONY: cackle
-cackle-macos:
+cackle:
 	@echo "Building cackle Docker image with Rust nightly..."
 	@docker build -f cackle.Dockerfile -t surrealdb-cackle:latest .
 	@echo "Running cargo-acl in Docker with 32GB memory..."
