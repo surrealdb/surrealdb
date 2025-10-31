@@ -5,7 +5,7 @@ use crate::cnf::MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE;
 use crate::ctx::Context;
 #[cfg(storage)]
 use crate::dbs::file::FileCollector;
-use crate::dbs::group::GroupsCollector;
+use crate::dbs::group::GroupCollector;
 use crate::dbs::plan::Explanation;
 use crate::dbs::store::{MemoryCollector, MemoryOrdered, MemoryOrderedLimit, MemoryRandom};
 use crate::dbs::{Options, Statement};
@@ -21,7 +21,7 @@ pub(super) enum Results {
 	MemoryOrderedLimit(MemoryOrderedLimit),
 	#[cfg(storage)]
 	File(Box<FileCollector>),
-	Groups(GroupsCollector),
+	Groups(GroupCollector),
 }
 
 impl Results {
@@ -33,7 +33,7 @@ impl Results {
 		limit: Option<u32>,
 	) -> Result<Self> {
 		if stm.expr().is_some() && stm.group().is_some() {
-			return Ok(Self::Groups(GroupsCollector::new(stm)));
+			return Ok(Self::Groups(GroupCollector::new(stm)?));
 		}
 		#[cfg(storage)]
 		if stm.tempfiles() {
@@ -66,7 +66,6 @@ impl Results {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		stm: &Statement<'_>,
 		rs: RecordStrategy,
 		val: Value,
 	) -> Result<()> {
@@ -89,7 +88,7 @@ impl Results {
 				e.push(val).await?;
 			}
 			Self::Groups(g) => {
-				g.push(stk, ctx, opt, stm, rs, val).await?;
+				g.push(stk, ctx, opt, rs, val).await?;
 			}
 		}
 		Ok(())

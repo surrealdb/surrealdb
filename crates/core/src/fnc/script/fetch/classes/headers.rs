@@ -58,13 +58,13 @@ impl Headers {
 		for (k, v) in self.inner.iter() {
 			let k = k.as_str();
 			if Some(k) == res.last().map(|x| x.0.0.as_str()) {
-				let ent = res.last_mut().unwrap();
+				let ent = res.last_mut().expect("last element exists");
 				ent.0.1.push_str(", ");
 				// Header value came from a string, so it should also be able to be cast back
 				// to a string
-				ent.0.1.push_str(v.to_str().unwrap());
+				ent.0.1.push_str(v.to_str().expect("valid header value"));
 			} else {
-				res.push(List((k.to_owned(), v.to_str().unwrap().to_owned())));
+				res.push(List((k.to_owned(), v.to_str().expect("valid header value").to_owned())));
 			}
 		}
 
@@ -86,7 +86,7 @@ impl Headers {
 			if idx != 0 {
 				res.push_str(", ");
 			}
-			res.push_str(v.to_str().unwrap());
+			res.push_str(v.to_str().expect("valid header value"));
 		}
 
 		if res.is_empty() {
@@ -99,8 +99,12 @@ impl Headers {
 	#[qjs(rename = "getSetCookie")]
 	pub fn get_set_cookie(&self) -> Vec<String> {
 		// This should always be a correct cookie;
-		let key = HeaderName::from_str("set-cookie").unwrap();
-		self.inner.get_all(key).iter().map(|x| x.to_str().unwrap().to_owned()).collect()
+		let key = HeaderName::from_str("set-cookie").expect("valid header name");
+		self.inner
+			.get_all(key)
+			.iter()
+			.map(|x| x.to_str().expect("valid header value").to_owned())
+			.collect()
 	}
 
 	// Checks to see if the header set contains a header
@@ -140,12 +144,12 @@ impl Headers {
 		let mut pref = None;
 		for (k, v) in self.inner.iter() {
 			if Some(k) == pref {
-				let ent = res.last_mut().unwrap();
+				let ent = res.last_mut().expect("last element exists");
 				ent.push_str(", ");
-				ent.push_str(v.to_str().unwrap())
+				ent.push_str(v.to_str().expect("valid header value"))
 			} else {
 				pref = Some(k);
-				res.push(v.to_str().unwrap().to_owned());
+				res.push(v.to_str().expect("valid header value").to_owned());
 			}
 		}
 

@@ -4,7 +4,6 @@ use revision::revisioned;
 use surrealdb_types::{ToSql, write_sql};
 
 use super::Expr;
-use super::expression::VisitExpression;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -19,14 +18,5 @@ impl fmt::Display for Cond {
 impl ToSql for Cond {
 	fn fmt_sql(&self, f: &mut String) {
 		write_sql!(f, "WHERE {}", self.0);
-	}
-}
-
-impl VisitExpression for Cond {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.0.visit(visitor);
 	}
 }

@@ -87,7 +87,7 @@ pub async fn read(
 	// Collect all mutations together
 	if !buf.is_empty() {
 		let db_mut = DatabaseMutation(buf);
-		res.push(ChangeSet(vs.unwrap(), db_mut));
+		res.push(ChangeSet(vs.expect("versionstamp should be set when mutations exist"), db_mut));
 	}
 	// Return the results
 	Ok(res)

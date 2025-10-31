@@ -23,8 +23,8 @@ fn initialize_store(env_var: &str, default_dir: &str) -> Arc<dyn ObjectStore> {
 			if url.scheme() == "file" {
 				#[cfg(not(target_family = "wasm"))]
 				{
-					let path_buf = url.to_file_path().unwrap();
-					let path = path_buf.to_str().unwrap();
+					let path_buf = url.to_file_path().expect("valid file path");
+					let path = path_buf.to_str().expect("valid utf8 path");
 					if !path_buf.as_path().exists() {
 						fs::create_dir_all(path_buf.as_path())
 							.unwrap_or_else(|_| panic!("Failed to create directory {:?}", path));
@@ -48,7 +48,9 @@ fn initialize_store(env_var: &str, default_dir: &str) -> Arc<dyn ObjectStore> {
 				"No {} environment variable found, using default directory {}",
 				env_var, default_dir
 			);
-			let path = env::current_dir().unwrap().join(default_dir);
+			let path = env::current_dir()
+				.expect("current directory should be accessible")
+				.join(default_dir);
 			if !path.exists() || !path.is_dir() {
 				fs::create_dir_all(&path)
 					.unwrap_or_else(|_| panic!("Failed to create directory {:?}", path));
@@ -56,7 +58,10 @@ fn initialize_store(env_var: &str, default_dir: &str) -> Arc<dyn ObjectStore> {
 			#[cfg(not(target_family = "wasm"))]
 			{
 				// As long as the provided path is correct, the following should never panic
-				Arc::new(object_store::local::LocalFileSystem::new_with_prefix(path).unwrap())
+				Arc::new(
+					object_store::local::LocalFileSystem::new_with_prefix(path)
+						.expect("valid local filesystem path"),
+				)
 			}
 			#[cfg(target_family = "wasm")]
 			{

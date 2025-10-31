@@ -12,7 +12,7 @@ use crate::syn;
 use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Null, Number, Object,
-	Range, RecordId, Regex, SqlNone, Uuid, Value,
+	Range, RecordId, Regex, Set, SqlNone, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -47,7 +47,7 @@ impl fmt::Display for CastError {
 				from,
 				into,
 			} => {
-				write!(f, "Expected `{into}` but found a `{from}`")
+				write!(f, "Could not cast into `{into}` using input `{from}`")
 			}
 			CastError::ElementOf {
 				inner,
@@ -466,8 +466,8 @@ impl Cast for Bytes {
 				let mut res = Vec::new();
 
 				for v in x.0.into_iter() {
-					// Unwrap condition checked above.
-					let x = v.clone().cast_to::<i64>().unwrap();
+					// Condition checked above
+					let x = v.clone().cast_to::<i64>().expect("value checked to be castable above");
 					// TODO: Fix truncation.
 					res.push(x as u8);
 				}
@@ -501,8 +501,8 @@ impl Cast for Array {
 						into: "array".to_string(),
 					});
 				}
-				// unwrap checked above
-				let range = range.coerce_to_typed::<i64>().unwrap();
+				// checked above
+				let range = range.coerce_to_typed::<i64>().expect("range type checked above");
 				if range.len() > *GENERATION_ALLOCATION_LIMIT {
 					return Err(CastError::RangeSizeLimit {
 						value: Box::new(Range::from(range)),
@@ -516,6 +516,26 @@ impl Cast for Array {
 			_ => Err(CastError::InvalidKind {
 				from: v,
 				into: "array".into(),
+			}),
+		}
+	}
+}
+
+impl Cast for Set {
+	fn can_cast(v: &Value) -> bool {
+		matches!(v, Value::Set(_) | Value::Array(_))
+	}
+
+	fn cast(v: Value) -> Result<Self, CastError> {
+		match v {
+			Value::Set(x) => Ok(x),
+			Value::Array(x) => {
+				// Convert array to set, automatically deduplicating
+				Ok(Set::from(x.0))
+			}
+			_ => Err(CastError::InvalidKind {
+				from: v,
+				into: "set".into(),
 			}),
 		}
 	}
@@ -569,10 +589,10 @@ impl Cast for Box<Range> {
 				}
 
 				let mut iter = x.into_iter();
-				// unwrap checked above.
-				let beg = iter.next().unwrap();
-				// unwrap checked above.
-				let end = iter.next().unwrap();
+				// checked above
+				let beg = iter.next().expect("array length checked above");
+				// checked above
+				let end = iter.next().expect("array length checked above");
 
 				Ok(Box::new(Range {
 					start: Bound::Included(beg),
@@ -615,10 +635,18 @@ impl Cast for Point<f64> {
 				}
 
 				let mut iter = x.into_iter();
-				// Both unwraps checked above.
-				let x = iter.next().unwrap().cast_to::<f64>().unwrap();
-				// Both unwraps checked above.
-				let y = iter.next().unwrap().cast_to::<f64>().unwrap();
+				// checked above
+				let x = iter
+					.next()
+					.expect("array length checked above")
+					.cast_to::<f64>()
+					.expect("value type checked above");
+				// checked above
+				let y = iter
+					.next()
+					.expect("array length checked above")
+					.cast_to::<f64>()
+					.expect("value type checked above");
 
 				Ok(Point::new(x, y))
 			}

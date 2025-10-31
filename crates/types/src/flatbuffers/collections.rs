@@ -4,6 +4,7 @@ use anyhow::Context;
 use surrealdb_protocol::fb::v1 as proto_fb;
 
 use super::{FromFlatbuffers, ToFlatbuffers};
+use crate::set::Set;
 use crate::{Array, Kind, Object, Value};
 
 impl ToFlatbuffers for BTreeMap<String, Kind> {
@@ -145,5 +146,41 @@ impl FromFlatbuffers for Array {
 			vec.push(Value::from_fb(value)?);
 		}
 		Ok(Array::from(vec))
+	}
+}
+
+impl ToFlatbuffers for Set {
+	type Output<'bldr> = flatbuffers::WIPOffset<proto_fb::Set<'bldr>>;
+
+	#[inline]
+	fn to_fb<'bldr>(
+		&self,
+		builder: &mut flatbuffers::FlatBufferBuilder<'bldr>,
+	) -> anyhow::Result<Self::Output<'bldr>> {
+		let mut values = Vec::with_capacity(self.len());
+		for value in self.iter() {
+			values.push(value.to_fb(builder)?);
+		}
+		let values_vector = builder.create_vector(&values);
+		Ok(proto_fb::Set::create(
+			builder,
+			&proto_fb::SetArgs {
+				values: Some(values_vector),
+			},
+		))
+	}
+}
+
+impl FromFlatbuffers for Set {
+	type Input<'a> = proto_fb::Set<'a>;
+
+	#[inline]
+	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
+		let mut set = Set::new();
+		let values = input.values().context("Values is not set")?;
+		for value in values {
+			set.insert(Value::from_fb(value)?);
+		}
+		Ok(set)
 	}
 }

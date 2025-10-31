@@ -91,7 +91,7 @@ impl RouterFactory for CommunityComposer {
 			.merge(key::router())
 			.merge(ml::router())
 			.merge(api::router())
-		//.merge(gql::router(ds.clone()))
+			.merge(gql::router())
 	}
 }
 

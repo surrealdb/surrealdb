@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::RefCell;
 use std::hint::black_box;

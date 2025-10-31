@@ -6,7 +6,7 @@ use rust_decimal::Decimal;
 use surrealdb_types::ToSql;
 
 use crate::fmt::{EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
-use crate::sql::{Closure, Expr, RecordIdLit};
+use crate::sql::{Expr, RecordIdLit};
 use crate::types::{
 	PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicGeometry, PublicRegex,
 	PublicUuid,
@@ -23,7 +23,6 @@ pub enum Literal {
 	Bool(bool),
 	Float(f64),
 	Integer(i64),
-	//TODO: Possibly remove wrapper.
 	Decimal(Decimal),
 	Duration(PublicDuration),
 
@@ -33,13 +32,12 @@ pub enum Literal {
 	Uuid(PublicUuid),
 	Regex(PublicRegex),
 
-	//TODO: Possibly remove wrapper.
 	Array(Vec<Expr>),
+	Set(Vec<Expr>),
 	Object(Vec<ObjectEntry>),
 	Geometry(PublicGeometry),
 	File(PublicFile),
 	Bytes(PublicBytes),
-	Closure(Box<Closure>),
 }
 
 impl PartialEq for Literal {
@@ -56,13 +54,13 @@ impl PartialEq for Literal {
 			(Literal::Regex(a), Literal::Regex(b)) => a == b,
 			(Literal::RecordId(a), Literal::RecordId(b)) => a == b,
 			(Literal::Array(a), Literal::Array(b)) => a == b,
+			(Literal::Set(a), Literal::Set(b)) => a == b,
 			(Literal::Object(a), Literal::Object(b)) => a == b,
 			(Literal::Duration(a), Literal::Duration(b)) => a == b,
 			(Literal::Datetime(a), Literal::Datetime(b)) => a == b,
 			(Literal::Uuid(a), Literal::Uuid(b)) => a == b,
 			(Literal::Geometry(a), Literal::Geometry(b)) => a == b,
 			(Literal::File(a), Literal::File(b)) => a == b,
-			(Literal::Closure(a), Literal::Closure(b)) => a == b,
 			_ => false,
 		}
 	}
@@ -105,6 +103,15 @@ impl fmt::Display for Literal {
 				}
 				f.write_char(']')
 			}
+			Literal::Set(exprs) => {
+				f.write_char('{')?;
+				if !exprs.is_empty() {
+					let indent = pretty_indent();
+					write!(f, "{}", Fmt::pretty_comma_separated(exprs.as_slice()))?;
+					drop(indent);
+				}
+				f.write_char('}')
+			}
 			Literal::Object(items) => {
 				if is_pretty() {
 					f.write_char('{')?;
@@ -134,7 +141,6 @@ impl fmt::Display for Literal {
 			Literal::Uuid(uuid) => write!(f, "{uuid}"),
 			Literal::Geometry(geometry) => write!(f, "{geometry}"),
 			Literal::File(file) => write!(f, "{}", file.to_sql()),
-			Literal::Closure(closure) => write!(f, "{closure}"),
 		}
 	}
 }
@@ -160,11 +166,13 @@ impl From<Literal> for crate::expr::Literal {
 			Literal::Array(exprs) => {
 				crate::expr::Literal::Array(exprs.into_iter().map(From::from).collect())
 			}
+			Literal::Set(exprs) => {
+				crate::expr::Literal::Set(exprs.into_iter().map(From::from).collect())
+			}
 			Literal::Object(items) => convert_geometry(items),
 			Literal::Geometry(geometry) => crate::expr::Literal::Geometry(geometry.into()),
 			Literal::File(file) => crate::expr::Literal::File(file.into()),
 			Literal::Bytes(bytes) => crate::expr::Literal::Bytes(bytes.into()),
-			Literal::Closure(closure) => crate::expr::Literal::Closure(Box::new((*closure).into())),
 		}
 	}
 }
@@ -190,13 +198,15 @@ impl From<crate::expr::Literal> for Literal {
 			crate::expr::Literal::Array(exprs) => {
 				Literal::Array(exprs.into_iter().map(From::from).collect())
 			}
+			crate::expr::Literal::Set(exprs) => {
+				Literal::Set(exprs.into_iter().map(From::from).collect())
+			}
 			crate::expr::Literal::Object(items) => {
 				Literal::Object(items.into_iter().map(From::from).collect())
 			}
 			crate::expr::Literal::Geometry(geometry) => Literal::Geometry(geometry.into()),
 			crate::expr::Literal::File(file) => Literal::File(file.into()),
 			crate::expr::Literal::Bytes(bytes) => Literal::Bytes(bytes.into()),
-			crate::expr::Literal::Closure(closure) => Literal::Closure(Box::new((*closure).into())),
 		}
 	}
 }
