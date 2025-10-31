@@ -995,7 +995,7 @@ allow_apis = ["fs", "process"]
 allow_unsafe = true
 allow_apis = ["net"]
 
-[pkg.surreal-rocksdb]
+[pkg.surrealdb-rocksdb]
 allow_unsafe = true
 allow_apis = ["fs"]
 
