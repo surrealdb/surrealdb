@@ -42,8 +42,6 @@ pub(crate) use user::DefineUserStatement;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::Expr;
-use crate::expr::expression::VisitExpression;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
@@ -102,33 +100,6 @@ impl DefineStatement {
 			Self::Bucket(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Module(v) => v.compute(stk, ctx, opt, doc).await,
-		}
-	}
-}
-
-impl VisitExpression for DefineStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		match self {
-			DefineStatement::Namespace(namespace) => namespace.visit(visitor),
-			DefineStatement::Database(database) => database.visit(visitor),
-			DefineStatement::Function(function) => function.visit(visitor),
-			DefineStatement::Analyzer(analyzer) => analyzer.visit(visitor),
-			DefineStatement::Param(param) => param.visit(visitor),
-			DefineStatement::Table(table) => table.visit(visitor),
-			DefineStatement::Event(event) => event.visit(visitor),
-			DefineStatement::Field(field) => field.visit(visitor),
-			DefineStatement::Index(index) => index.visit(visitor),
-			DefineStatement::User(user) => user.visit(visitor),
-			DefineStatement::Model(model) => model.visit(visitor),
-			DefineStatement::Access(access) => access.visit(visitor),
-			DefineStatement::Config(_) => {}
-			DefineStatement::Api(api) => api.visit(visitor),
-			DefineStatement::Bucket(bucket) => bucket.visit(visitor),
-			DefineStatement::Sequence(sequence) => sequence.visit(visitor),
-			DefineStatement::Module(module) => module.visit(visitor),
 		}
 	}
 }

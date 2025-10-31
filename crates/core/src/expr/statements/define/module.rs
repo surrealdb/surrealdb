@@ -10,7 +10,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::{Base, Expr, ModuleExecutable};
 use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
@@ -23,15 +22,6 @@ pub(crate) struct DefineModuleStatement {
 	pub executable: ModuleExecutable,
 	pub comment: Option<Expr>,
 	pub permissions: Permission,
-}
-
-impl VisitExpression for DefineModuleStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.comment.iter().for_each(|comment| comment.visit(visitor));
-	}
 }
 
 impl DefineModuleStatement {

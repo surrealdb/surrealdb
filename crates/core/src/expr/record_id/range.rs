@@ -8,24 +8,12 @@ use super::RecordIdKeyLit;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::Expr;
-use crate::expr::expression::VisitExpression;
 use crate::val::RecordIdKeyRange;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct RecordIdKeyRangeLit {
 	pub(crate) start: Bound<RecordIdKeyLit>,
 	pub(crate) end: Bound<RecordIdKeyLit>,
-}
-
-impl VisitExpression for RecordIdKeyRangeLit {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.start.as_ref().map(|start| start.visit(visitor));
-		self.end.as_ref().map(|end| end.visit(visitor));
-	}
 }
 
 impl fmt::Display for RecordIdKeyRangeLit {

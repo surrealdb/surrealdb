@@ -1,6 +1,6 @@
 [package]
 name = "surrealism-types"
-version = "3.0.0-alpha.11"
+version = "3.0.0-alpha.12"
 edition = "2021"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 description = "Types for Surrealism."

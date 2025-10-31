@@ -54,7 +54,9 @@ pub(crate) mod with;
 pub(crate) mod decimal;
 pub(crate) mod module;
 
+mod closure;
 pub(crate) mod statements;
+pub mod visit;
 
 pub(crate) use self::access_type::{AccessType, JwtAccess, RecordAccess};
 pub(crate) use self::algorithm::Algorithm;
@@ -62,6 +64,7 @@ pub(crate) use self::base::Base;
 pub(crate) use self::block::Block;
 pub(crate) use self::bytesize::Bytesize;
 pub(crate) use self::changefeed::ChangeFeed;
+pub(crate) use self::closure::ClosureExpr;
 pub(crate) use self::cond::Cond;
 pub(crate) use self::constant::Constant;
 pub(crate) use self::data::Data;
