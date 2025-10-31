@@ -422,8 +422,8 @@ mod mem {
 		let db = Surreal::new::<Mem>(()).await.unwrap();
 		db.query(surql).await.unwrap_err();
 		// Experimental features can be allowed
-		let capabilities = Capabilities::new()
-			.with_experimental_feature_allowed(ExperimentalFeature::RecordReferences);
+		let capabilities =
+			Capabilities::new().with_experimental_feature_allowed(ExperimentalFeature::GraphQl);
 		let config = Config::new().capabilities(capabilities);
 		let db = Surreal::new::<Mem>(config).await.unwrap();
 		db.query(surql).await.unwrap().check().unwrap();

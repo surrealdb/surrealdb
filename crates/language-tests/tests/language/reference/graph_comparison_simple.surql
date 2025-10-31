@@ -22,9 +22,6 @@ value = "true"
 [[test.results]]
 value = "true"
 
-[env.capabilities]
-allow-experimental = ["record_references"]
-
 */
 
 

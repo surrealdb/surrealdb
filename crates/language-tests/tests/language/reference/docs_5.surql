@@ -26,9 +26,6 @@ value = "[]"
 [[test.results]]
 value = "[]"
 
-[env.capabilities]
-allow-experimental = ["record_references"]
-
 */
 
 DEFINE FIELD author ON comment TYPE record<person> REFERENCE ON DELETE CASCADE;

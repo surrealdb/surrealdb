@@ -20,9 +20,6 @@ value = "[]"
 [[test.results]]
 value = "{ friended_by: [], id: person:two }"
 
-[env.capabilities]
-allow-experimental = ["record_references"]
-
 */
 
 -- Default, behaviour, so identical to:

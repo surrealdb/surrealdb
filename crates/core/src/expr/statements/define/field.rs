@@ -13,7 +13,6 @@ use crate::catalog::{
 };
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
@@ -372,11 +371,7 @@ impl DefineFieldStatement {
 		Ok(())
 	}
 
-	pub(crate) fn validate_reference_options(&self, ctx: &Context) -> Result<()> {
-		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-			return Ok(());
-		}
-
+	pub(crate) fn validate_reference_options(&self, _ctx: &Context) -> Result<()> {
 		// If a reference is defined, the field must be a record
 		if self.reference.is_some() {
 			fn valid(kind: &Kind, outer: bool) -> bool {
