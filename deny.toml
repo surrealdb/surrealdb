@@ -74,6 +74,7 @@ allow = [
     "CC0-1.0",
     "MPL-2.0",
     "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
     "Unlicense",
@@ -113,6 +114,14 @@ allow = ["BUSL-1.1"]
 name = "surrealdb-types-derive"
 allow = ["BUSL-1.1"]
 
+[[licenses.exceptions]]
+name = "surrealism-runtime"
+allow = ["BUSL-1.1"]
+
+[[licenses.exceptions]]
+name = "surrealism-types"
+allow = ["BUSL-1.1"]
+
 # Specify overrides for crates where licenses are hard to guess.
 
 [[licenses.clarify]]
@@ -142,6 +151,16 @@ license-files = []
 
 [[licenses.clarify]]
 name = "surrealdb-types-derive"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealism-runtime"
+expression = "BUSL-1.1"
+license-files = []
+
+[[licenses.clarify]]
+name = "surrealism-types"
 expression = "BUSL-1.1"
 license-files = []
 

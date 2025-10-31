@@ -1,0 +1,32 @@
+[package]
+name = "surrealism-runtime"
+version = "0.1.0"
+edition = "2021"
+authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
+description = "Runtime for Surrealism."
+license = "BUSL-1.1"
+repository = "https://github.com/surrealdb/surrealdb"
+homepage = "https://github.com/surrealdb/surrealdb"
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+crossbeam-channel = "0.5"
+reblessive = { workspace = true, features = ["tree"] }
+serde.workspace = true
+serde_json.workspace = true
+surrealdb-types.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+wasmtime.workspace = true
+surrealism-types = { workspace = true, features = ["host"] }
+tar.workspace = true
+zstd.workspace = true
+semver.workspace = true
+wasmtime-wasi.workspace = true
+toml.workspace = true
+bytes = "1"
+futures.workspace = true
+
+[lints]
+workspace = true

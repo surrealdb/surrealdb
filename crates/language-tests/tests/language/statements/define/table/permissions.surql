@@ -19,6 +19,7 @@ value = """{
 	configs: {},
 	functions: {},
 	models: {},
+	modules: {},
 	params: {},
 	sequences: {},
 	tables: {

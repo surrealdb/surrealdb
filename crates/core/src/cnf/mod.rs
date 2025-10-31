@@ -62,6 +62,11 @@ pub static TRANSACTION_CACHE_SIZE: LazyLock<usize> =
 pub static DATASTORE_CACHE_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_DATASTORE_CACHE_SIZE", usize, 1_000);
 
+/// Specifies the number of surrealism modules which can be cached across transactions
+/// (default: 100)
+pub static SURREALISM_CACHE_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_SURREALISM_CACHE_SIZE", usize, 100);
+
 /// The maximum number of keys that should be scanned at once in general queries
 /// (default: 500)
 pub static NORMAL_FETCH_SIZE: LazyLock<u32> =

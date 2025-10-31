@@ -9,6 +9,7 @@ mod field;
 mod function;
 mod index;
 mod model;
+mod module;
 mod namespace;
 mod param;
 mod sequence;
@@ -28,6 +29,7 @@ pub(crate) use field::{DefineDefault, DefineFieldStatement};
 pub(crate) use function::DefineFunctionStatement;
 pub(crate) use index::DefineIndexStatement;
 pub(crate) use model::DefineModelStatement;
+pub(crate) use module::DefineModuleStatement;
 pub(crate) use namespace::DefineNamespaceStatement;
 pub(crate) use param::DefineParamStatement;
 pub(crate) use sequence::DefineSequenceStatement;
@@ -82,6 +84,7 @@ pub(crate) enum DefineStatement {
 	Api(DefineApiStatement),
 	Bucket(DefineBucketStatement),
 	Sequence(DefineSequenceStatement),
+	Module(DefineModuleStatement),
 }
 
 impl Display for DefineStatement {
@@ -103,6 +106,7 @@ impl Display for DefineStatement {
 			Self::Api(v) => Display::fmt(v, f),
 			Self::Bucket(v) => Display::fmt(v, f),
 			Self::Sequence(v) => Display::fmt(v, f),
+			Self::Module(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -126,6 +130,7 @@ impl From<DefineStatement> for crate::expr::statements::DefineStatement {
 			DefineStatement::Api(v) => Self::Api(v.into()),
 			DefineStatement::Bucket(v) => Self::Bucket(v.into()),
 			DefineStatement::Sequence(v) => Self::Sequence(v.into()),
+			DefineStatement::Module(v) => Self::Module(v.into()),
 		}
 	}
 }
@@ -149,6 +154,7 @@ impl From<crate::expr::statements::DefineStatement> for DefineStatement {
 			crate::expr::statements::DefineStatement::Api(v) => Self::Api(v.into()),
 			crate::expr::statements::DefineStatement::Bucket(v) => Self::Bucket(v.into()),
 			crate::expr::statements::DefineStatement::Sequence(v) => Self::Sequence(v.into()),
+			crate::expr::statements::DefineStatement::Module(v) => Self::Module(v.into()),
 		}
 	}
 }

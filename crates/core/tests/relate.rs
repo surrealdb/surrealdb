@@ -316,6 +316,7 @@ async fn relate_enforced() -> Result<()> {
 	configs: {},
 	functions: {},
 	models: {},
+	modules: {},
 	params: {},
 	sequences: {},
 	tables: {
