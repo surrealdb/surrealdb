@@ -1260,9 +1260,6 @@ impl Datastore {
 			references_enabled: ctx
 				.get_capabilities()
 				.allows_experimental(&ExperimentalTarget::RecordReferences),
-			define_api_enabled: ctx
-				.get_capabilities()
-				.allows_experimental(&ExperimentalTarget::DefineApi),
 			files_enabled: ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
 			..Default::default()
 		};
