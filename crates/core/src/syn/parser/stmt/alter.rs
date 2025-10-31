@@ -4,7 +4,6 @@ use crate::sql::TableType;
 use crate::sql::statements::alter::field::AlterDefault;
 use crate::sql::statements::alter::{AlterFieldStatement, AlterKind, AlterSequenceStatement};
 use crate::sql::statements::{AlterStatement, AlterTableStatement};
-use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;
@@ -158,13 +157,6 @@ impl Parser<'_> {
 							res.comment = AlterKind::Drop;
 						}
 						t!("REFERENCE") => {
-							if !self.settings.references_enabled {
-								bail!(
-									"Experimental capability `record_references` is not enabled",
-									@self.last_span() => "Use of `REFERENCE` keyword is still experimental"
-								)
-							}
-
 							self.pop_peek();
 							res.reference = AlterKind::Drop;
 						}
@@ -216,13 +208,6 @@ impl Parser<'_> {
 					res.comment = AlterKind::Set(self.parse_string_lit()?);
 				}
 				t!("REFERENCE") => {
-					if !self.settings.references_enabled {
-						bail!(
-							"Experimental capability `record_references` is not enabled",
-							@self.last_span() => "Use of `REFERENCE` keyword is still experimental"
-						)
-					}
-
 					self.pop_peek();
 					res.reference = AlterKind::Set(self.parse_reference(stk).await?);
 				}

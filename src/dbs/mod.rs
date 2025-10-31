@@ -807,30 +807,8 @@ mod tests {
 				true,
 				"1".to_string(),
 			),
-			// 7 - Specific experimental feature enabled
-			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::RecordReferences.into()),
-				),
-				Session::owner().with_ns("test").with_db("test"),
-				"DEFINE FIELD a ON allow_record TYPE record REFERENCE".to_string(),
-				true,
-				"NONE".to_string(),
-			),
-			// 8 - Specific experimental feature disabled
-			(
-				Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.without_experimental(ExperimentalTarget::RecordReferences.into()),
-				),
-				Session::owner().with_ns("test").with_db("test"),
-				"DEFINE FIELD a ON deny_record TYPE record REFERENCE".to_string(),
-				false,
-				"Experimental capability `record_references` is not enabled".to_string(),
-			),
 			//
-			// 9 - Some functions are not allowed
+			// 7 - Some functions are not allowed
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -846,7 +824,7 @@ mod tests {
 				false,
 				"Function 'string::len' is not allowed".to_string(),
 			),
-			// 10 -
+			// 8 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -862,7 +840,7 @@ mod tests {
 				true,
 				"a".to_string(),
 			),
-			// 11 -
+			// 9 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -879,7 +857,7 @@ mod tests {
 				"Function 'time::now' is not allowed".to_string(),
 			),
 			//
-			// 12 - Some net targets are not allowed
+			// 10 - Some net targets are not allowed
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -900,7 +878,7 @@ mod tests {
 				false,
 				format!("Access to network target '{}' is not allowed", server1.address()),
 			),
-			// 13 -
+			// 11 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -921,7 +899,7 @@ mod tests {
 				false,
 				"Access to network target '1.1.1.1:80' is not allowed".to_string(),
 			),
-			// 14 -
+			// 12 -
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
@@ -942,8 +920,9 @@ mod tests {
 				true,
 				"SUCCESS".to_string(),
 			),
+			// 13 -
 			(
-				// 15 - Ensure redirect fails
+				// Ensure redirect fails
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
@@ -962,8 +941,9 @@ mod tests {
 					server3.uri()
 				),
 			),
+			// 14 -
 			(
-				// 16 - Ensure connecting via localhost succeed
+				// Ensure connecting via localhost succeed
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()
 						.with_functions(Targets::<FuncTarget>::All)
@@ -974,7 +954,7 @@ mod tests {
 				true,
 				"SUCCESS".to_string(),
 			),
-			// - 17
+			// 15 -
 			(
 				// Ensure redirect fails
 				Datastore::new("memory").await.unwrap().with_capabilities(
@@ -990,7 +970,7 @@ mod tests {
 				false,
 				"Access to network target '127.0.0.1/32' is not allowed".to_string(),
 			),
-			// 18 - Ensure redirect succeed
+			// 16 - Ensure redirect succeed
 			(
 				Datastore::new("memory").await.unwrap().with_capabilities(
 					Capabilities::default()

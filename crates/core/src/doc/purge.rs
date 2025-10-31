@@ -4,7 +4,6 @@ use reblessive::tree::Stk;
 
 use crate::catalog::providers::TableProvider;
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, CursorRecord, Document};
 use crate::err::Error;
@@ -86,7 +85,7 @@ impl Document {
 				}
 			}
 			// Process any record references
-			if ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
+			{
 				let prefix = crate::key::r#ref::prefix(ns, db, &rid.table, &rid.key)?;
 				let suffix = crate::key::r#ref::suffix(ns, db, &rid.table, &rid.key)?;
 				let range = prefix..suffix;

@@ -43,9 +43,6 @@ value = "{ id: country:canada, next: [{ id: province:alberta, next: [{ id: city:
 [[test.results]]
 value = "{ id: country:canada, next: [{ id: province:alberta, next: [{ id: city:calgary, next: [] }] }] }"
 
-[env.capabilities]
-allow-experimental = ["record_references"]
-
 */
 
 DEFINE FIELD next ON country TYPE array<record<province>> REFERENCE;
