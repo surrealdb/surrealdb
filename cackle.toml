@@ -1590,6 +1590,7 @@ allow_unsafe = true
 
 [pkg.wasmtime-wit-bindgen]
 allow_unsafe = true
+allow_apis = ["process"]
 
 [pkg.wiggle]
 allow_unsafe = true
@@ -1687,7 +1688,3 @@ allow_unsafe = true
 [pkg.wit-parser]
 allow_unsafe = true
 allow_apis = ["fs"]
-
-[pkg.wasmtime-wit-bindgen]
-allow_unsafe = true
-allow_apis = ["process"]
