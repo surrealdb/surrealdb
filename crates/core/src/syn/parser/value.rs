@@ -5,6 +5,7 @@ use std::ops::Bound;
 
 use reblessive::Stk;
 
+use super::basic::NumberToken;
 use super::{ParseResult, Parser};
 use crate::syn::error::bail;
 use crate::syn::lexer::compound::{self, Numeric};
@@ -13,7 +14,8 @@ use crate::syn::parser::unexpected;
 use crate::syn::token::{Glued, Span, TokenKind, t};
 use crate::types::{
 	PublicArray, PublicDuration, PublicFile, PublicGeometry, PublicNumber, PublicObject,
-	PublicRange, PublicRecordId, PublicRecordIdKey, PublicTable, PublicUuid, PublicValue,
+	PublicRange, PublicRecordId, PublicRecordIdKey, PublicSet, PublicTable, PublicUuid,
+	PublicValue,
 };
 
 trait ValueParseFunc {
@@ -66,23 +68,66 @@ impl Parser<'_> {
 			}
 			t!("{") => {
 				self.pop_peek();
-				let object = self.parse_value_object::<SurrealQL>(stk, token.span).await?;
-				//HACK: This is an annoying hack to have geometries work.
-				//
-				// Geometries look exactly like objects and are a strict subsect of objects.
-				// However in code they are distinct and in surrealql the have different
-				// behavior.
-				//
-				// Geom functions don't work with objects and vice-versa.
-				//
-				// The previous parse automatically converted an object to geometry if it found
-				// an matching object. Now it no longer does that and relies on the
-				// 'planning' stage to convert it. But here we still need to do it in the
-				// parser.
-				if let Some(geom) = PublicGeometry::try_from_object(&object) {
-					PublicValue::Geometry(geom)
-				} else {
-					PublicValue::Object(object)
+
+				if self.eat(t!("}")) {
+					return Ok(PublicValue::Object(PublicObject::new()));
+				}
+
+				// First, check if it's an empty set. `{,}` is an empty set.
+				if self.eat(t!(",")) && self.eat(t!("}")) {
+					return Ok(PublicValue::Set(PublicSet::new()));
+				}
+
+				// Determine if it's an object or set by looking at the first token
+				// If it starts with `{`, it must be a set (objects can't have object values as
+				// keys)
+				match self.peek().kind {
+					t!("{") | t!("[") => {
+						let set = self.parse_value_set::<SurrealQL>(stk, token.span).await?;
+						return Ok(PublicValue::Set(set));
+					}
+					_ => {}
+				}
+
+				// Use glue_and_peek1 for simple tokens
+				match self.glue_and_peek1()?.kind {
+					t!(",") => {
+						// It's a set with multiple elements
+						let set = self.parse_value_set::<SurrealQL>(stk, token.span).await?;
+						PublicValue::Set(set)
+					}
+					t!(":") => {
+						// It's an object
+						let object = self.parse_value_object::<SurrealQL>(stk, token.span).await?;
+						//HACK: This is an annoying hack to have geometries work.
+						//
+						// Geometries look exactly like objects and are a strict subsect of objects.
+						// However in code they are distinct and in surrealql the have different
+						// behavior.
+						//
+						// Geom functions don't work with objects and vice-versa.
+						//
+						// The previous parse automatically converted an object to geometry if it
+						// found an matching object. Now it no longer does that and relies on
+						// the 'planning' stage to convert it. But here we still need to do it
+						// in the parser.
+						if let Some(geom) = PublicGeometry::try_from_object(&object) {
+							PublicValue::Geometry(geom)
+						} else {
+							PublicValue::Object(object)
+						}
+					}
+					t!("}") => {
+						// Single-element set: {value,}
+						let value = stk.run(|stk| self.parse_value(stk)).await?;
+						self.expect_closing_delimiter(t!("}"), token.span)?;
+						let mut set = PublicSet::new();
+						set.insert(value);
+						PublicValue::Set(set)
+					}
+					_ => {
+						unexpected!(self, token, "a set or object");
+					}
 				}
 			}
 			t!("[") => {
@@ -197,6 +242,18 @@ impl Parser<'_> {
 					Numeric::Decimal(x) => PublicValue::Number(PublicNumber::Decimal(x)),
 				}
 			}
+			TokenKind::Glued(Glued::Number) => {
+				let number = self.next_token_value()?;
+				match number {
+					NumberToken::Integer(i) => PublicValue::Number(PublicNumber::Int(i)),
+					NumberToken::Float(f) => PublicValue::Number(PublicNumber::Float(f)),
+					NumberToken::Decimal(d) => PublicValue::Number(PublicNumber::Decimal(d)),
+				}
+			}
+			TokenKind::Glued(Glued::Duration) => {
+				let duration = pop_glued!(self, Duration);
+				PublicValue::Duration(duration)
+			}
 			_ => self
 				.parse_value_record_id_inner::<SurrealQL>(stk)
 				.await
@@ -273,7 +330,50 @@ impl Parser<'_> {
 			}
 			t!("{") => {
 				self.pop_peek();
-				self.parse_value_object::<Json>(stk, token.span).await.map(PublicValue::Object)
+
+				if self.eat(t!("}")) {
+					return Ok(PublicValue::Object(PublicObject::new()));
+				}
+
+				// First, check if it's an empty set. `{,}` is an empty set.
+				if self.eat(t!(",")) && self.eat(t!("}")) {
+					return Ok(PublicValue::Set(PublicSet::new()));
+				}
+
+				// Determine if it's an object or set by looking at the first token
+				// If it starts with `{`, it must be a set (objects can't have object values as
+				// keys)
+				if self.peek().kind == t!("{") {
+					return self
+						.parse_value_set::<Json>(stk, token.span)
+						.await
+						.map(PublicValue::Set);
+				}
+
+				// Use glue_and_peek1 for simple tokens
+				match self.glue_and_peek1()?.kind {
+					t!(",") => {
+						// It's a set with multiple elements
+						self.parse_value_set::<Json>(stk, token.span).await.map(PublicValue::Set)
+					}
+					t!(":") => {
+						// It's an object
+						self.parse_value_object::<Json>(stk, token.span)
+							.await
+							.map(PublicValue::Object)
+					}
+					t!("}") => {
+						// Single-element set: {value,}
+						let value = stk.run(|stk| self.parse_json(stk)).await?;
+						self.expect_closing_delimiter(t!("}"), token.span)?;
+						let mut set = PublicSet::new();
+						set.insert(value);
+						Ok(PublicValue::Set(set))
+					}
+					_ => {
+						unexpected!(self, token, "a set or object")
+					}
+				}
 			}
 			t!("[") => {
 				self.pop_peek();
@@ -351,6 +451,25 @@ impl Parser<'_> {
 			if !self.eat(t!(",")) {
 				self.expect_closing_delimiter(t!("}"), start)?;
 				return Ok(PublicObject::from(obj));
+			}
+		}
+	}
+
+	async fn parse_value_set<VP>(&mut self, stk: &mut Stk, start: Span) -> ParseResult<PublicSet>
+	where
+		VP: ValueParseFunc,
+	{
+		let mut set = PublicSet::new();
+		loop {
+			if self.eat(t!("}")) {
+				return Ok(set);
+			}
+			let value = stk.run(|stk| VP::parse(self, stk)).await?;
+			set.insert(value);
+
+			if !self.eat(t!(",")) {
+				self.expect_closing_delimiter(t!("}"), start)?;
+				return Ok(set);
 			}
 		}
 	}

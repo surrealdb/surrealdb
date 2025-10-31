@@ -185,6 +185,10 @@ impl IntoIterator for Set {
 
 impl Display for Set {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		if self.is_empty() {
+			return f.write_str("{,}");
+		}
+
 		// Format as Python-style set literal: {val, val, val}
 		f.write_char('{')?;
 		for (i, v) in self.iter().enumerate() {

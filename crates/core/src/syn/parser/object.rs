@@ -17,20 +17,81 @@ impl Parser<'_> {
 		stk: &mut Stk,
 		start: Span,
 	) -> ParseResult<Expr> {
-		if self.eat(t!("}")) {
-			// empty object, just return
-			enter_object_recursion!(_this = self => {
-				return Ok(Expr::Literal(Literal::Object(Vec::new())))
-			})
+		// First, check if it's an empty set. `{,}` is an empty set.
+		if self.eat(t!(",")) && self.eat(t!("}")) {
+			return Ok(Expr::Literal(Literal::Set(Vec::new())));
 		}
 
-		// Now check first if it can be an object.
+	if self.eat(t!("}")) {
+		// empty object
+		enter_object_recursion!(_this = self => {
+			return Ok(Expr::Literal(Literal::Object(Vec::new())))
+		})
+	}
+
+	// Try to determine what this is by looking ahead
+		// If we can determine it's an object key (via glue), parse as object
 		if self.glue_and_peek1()?.kind == t!(":") {
 			return self.parse_object(stk, start).await.map(Literal::Object).map(Expr::Literal);
 		}
 
-		// not an object so instead parse as a block.
-		self.parse_block(stk, start).await.map(Box::new).map(Expr::Block)
+	// Otherwise, parse the first element/statement to determine the type
+	let before_first = self.recent_span();
+	let first_elem = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+	let first_span = before_first.covers(self.last_span());
+	
+	// Now check what follows to determine if it's a set or block
+	match self.peek().kind {
+		t!(",") => {
+			// It's a set. Parse remaining elements.
+			self.pop_peek();
+			let mut elements = vec![first_elem];
+			loop {
+				if self.eat(t!("}")) {
+					return Ok(Expr::Literal(Literal::Set(elements)));
+				}
+				let elem = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+				elements.push(elem);
+				if !self.eat(t!(",")) {
+					self.expect_closing_delimiter(t!("}"), start)?;
+					return Ok(Expr::Literal(Literal::Set(elements)));
+				}
+			}
+		}
+	t!("}") => {
+		// Single statement block: {expr}
+		Self::reject_letless_let(&first_elem, first_span)?;
+		self.pop_peek();
+		return Ok(Expr::Block(Box::new(Block(vec![first_elem]))));
+	}
+	t!(";") => {
+		// Block with semicolons - need to check first statement and continue parsing
+		Self::reject_letless_let(&first_elem, first_span)?;
+			
+			self.pop_peek();
+			let mut statements = vec![first_elem];
+			// Continue parsing the rest of the block
+			loop {
+				while self.eat(t!(";")) {}
+				if self.eat(t!("}")) {
+					return Ok(Expr::Block(Box::new(Block(statements))));
+				}
+				let before = self.recent_span();
+				let stmt = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+				let span = before.covers(self.last_span());
+				Self::reject_letless_let(&stmt, span)?;
+				statements.push(stmt);
+				if !self.eat(t!(";")) {
+					self.expect_closing_delimiter(t!("}"), start)?;
+					return Ok(Expr::Block(Box::new(Block(statements))));
+				}
+			}
+		}
+			_ => {
+				// Unexpected token after first element
+				return self.parse_block(stk, start).await.map(Box::new).map(Expr::Block);
+			}
+		}
 	}
 
 	/// Parses an object.
