@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use uuid::Uuid;
 
@@ -66,6 +66,25 @@ impl RemoveTableStatement {
 
 		// Get the foreign tables
 		let fts = txn.all_tb_views(ns, db, &name).await?;
+
+		if !fts.is_empty() {
+			let mut message =
+				format!("Cannot delete table `{name}` on which a view is defined, table(s) `")
+					.to_string();
+			for (idx, f) in fts.iter().enumerate() {
+				if idx != 0 {
+					message.push_str("`, `")
+				}
+				message.push_str(&f.name);
+			}
+
+			message.push_str("` are defined as a view on this table.");
+
+			bail!(Error::Query {
+				message
+			});
+		}
+
 		// Get the live queries
 		let lvs = txn.all_tb_lives(ns, db, &name).await?;
 
@@ -83,20 +102,6 @@ impl RemoveTableStatement {
 		} else {
 			txn.delp(&key).await?
 		};
-		// Process each attached foreign table
-		for ft in fts.iter() {
-			// Refresh the table cache
-			let foreign_tb = txn.expect_tb(ns, db, &ft.name).await?;
-			txn.put_tb(
-				ns_name,
-				db_name,
-				&TableDefinition {
-					cache_tables_ts: Uuid::now_v7(),
-					..foreign_tb.as_ref().clone()
-				},
-			)
-			.await?;
-		}
 		// Check if this is a foreign table
 		if let Some(view) = &tb.view {
 			let (ViewDefinition::Materialized {

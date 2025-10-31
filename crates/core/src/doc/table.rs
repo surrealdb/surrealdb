@@ -1117,6 +1117,7 @@ impl Document {
 			id: Some(id),
 		};
 
+		stk.run(|stk| document.store_index_data(stk, ctx, opt)).await?;
 		stk.run(|stk| document.process_views(stk, ctx, opt, action)).await?;
 		stk.run(|stk| document.process_events(stk, ctx, opt, action, None)).await?;
 

@@ -78,19 +78,19 @@ impl SelectStatement {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc>,
+		parent_doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		// Valid options?
 		opt.valid_for_db()?;
 		// Assign the statement
-		let stm = Statement::from_select(stk, ctx, opt, doc, self).await?;
+		let stm = Statement::from_select(stk, ctx, opt, parent_doc, self).await?;
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Ensure futures are stored and the version is set if specified
 
 		let version = match &self.version {
 			Some(v) => Some(
-				stk.run(|stk| v.compute(stk, ctx, opt, doc))
+				stk.run(|stk| v.compute(stk, ctx, opt, parent_doc))
 					.await
 					.catch_return()?
 					.cast_to::<Datetime>()?
@@ -108,7 +108,8 @@ impl SelectStatement {
 			Error::SingleOnlyOutput
 		);
 		// Check if there is a timeout
-		let ctx = stm.setup_timeout(stk, ctx, &opt, doc).await?;
+		// This is calculated on the parent doc
+		let ctx = stm.setup_timeout(stk, ctx, &opt, parent_doc).await?;
 
 		// Get a query planner
 		let mut planner = QueryPlanner::new();
@@ -116,31 +117,36 @@ impl SelectStatement {
 		let stm_ctx = StatementContext::new(&ctx, &opt, &stm)?;
 		// Loop over the select targets
 		for w in self.what.iter() {
-			i.prepare(stk, &ctx, &opt, doc, &mut planner, &stm_ctx, w).await?;
+			// The target is also calculated on the parent doc
+			i.prepare(stk, &ctx, &opt, parent_doc, &mut planner, &stm_ctx, w).await?;
 		}
-		// Attach the query planner to the context
-		let ctx = stm.setup_query_planner(planner, ctx);
 
-		// Process the statement
-		let res = i.output(stk, &ctx, &opt, &stm, RecordStrategy::KeysAndValues).await?;
-		// Catch statement timeout
-		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
+		CursorDoc::update_parent(&ctx, parent_doc, async |ctx| {
+			// Attach the query planner to the context
+			let ctx = stm.setup_query_planner(planner, ctx);
+			// Process the statement
+			let res =
+				i.output(stk, ctx.as_ref(), &opt, &stm, RecordStrategy::KeysAndValues).await?;
+			// Catch statement timeout
+			ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
 
-		if self.only {
-			match res {
-				Value::Array(mut array) => {
-					if array.is_empty() {
-						Ok(Value::None)
-					} else {
-						ensure!(array.len() == 1, Error::SingleOnlyOutput);
-						Ok(array.0.pop().expect("array has exactly one element"))
+			if self.only {
+				match res {
+					Value::Array(mut array) => {
+						if array.is_empty() {
+							Ok(Value::None)
+						} else {
+							ensure!(array.len() == 1, Error::SingleOnlyOutput);
+							Ok(array.0.pop().expect("array has exactly one element"))
+						}
 					}
+					x => Ok(x),
 				}
-				x => Ok(x),
+			} else {
+				Ok(res)
 			}
-		} else {
-			Ok(res)
-		}
+		})
+		.await
 	}
 }
 

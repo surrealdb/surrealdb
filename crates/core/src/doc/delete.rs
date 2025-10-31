@@ -20,7 +20,7 @@ impl Document {
 		self.check_permissions_table(stk, ctx, opt, stm).await?;
 		self.cleanup_table_references(stk, ctx, opt).await?;
 		self.clear_record_data();
-		self.store_index_data(stk, ctx, opt, stm).await?;
+		self.store_index_data(stk, ctx, opt).await?;
 		self.purge(stk, ctx, opt, stm).await?;
 		self.process_table_views(stk, ctx, opt, stm).await?;
 		self.process_table_lives(stk, ctx, opt, stm).await?;
