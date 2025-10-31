@@ -561,7 +561,7 @@ pub async fn asynchronous(
 		args,
 		"no such builtin function found",
 		//
-		exp(DefineApi) "api::invoke" => api::invoke((stk, ctx, opt)).await,
+		"api::invoke" => api::invoke((stk, ctx, opt)).await,
 		//
 		"array::all" => array::all((stk, ctx, Some(opt), doc)).await,
 		"array::any" => array::any((stk, ctx, Some(opt), doc)).await,
@@ -1673,7 +1673,6 @@ mod tests {
 	use regex::Regex;
 
 	use crate::dbs::Capabilities;
-	use crate::dbs::capabilities::ExperimentalTarget;
 	use crate::sql::{Expr, Function};
 
 	#[tokio::test]
@@ -1707,10 +1706,8 @@ mod tests {
 			let (quote, _) = line.split_once("=>").unwrap();
 			let name = quote.trim().trim_matches('"');
 
-			let res = crate::syn::expr_with_capabilities(
-				&format!("{}()", name),
-				&Capabilities::all().with_experimental(ExperimentalTarget::DefineApi.into()),
-			);
+			let res =
+				crate::syn::expr_with_capabilities(&format!("{}()", name), &Capabilities::all());
 
 			if let Ok(Expr::FunctionCall(call)) = res {
 				match call.receiver {

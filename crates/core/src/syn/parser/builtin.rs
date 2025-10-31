@@ -4,7 +4,7 @@ use unicase::UniCase;
 
 use super::{ParseResult, Parser};
 use crate::sql::{Constant, Expr, Function, FunctionCall};
-use crate::syn::error::{MessageKind, bail};
+use crate::syn::error::MessageKind;
 use crate::syn::parser::mac::expected;
 use crate::syn::parser::{SyntaxError, unexpected};
 use crate::syn::token::{Span, t};
@@ -585,16 +585,10 @@ impl Parser<'_> {
 
 		match PATHS.get_entry(&UniCase::ascii(str)) {
 			Some((_, PathKind::Constant(x))) => Ok(Expr::Constant(x.clone())),
-			Some((k, PathKind::Function)) => {
-				// TODO: Move this out of the parser.
-				if k == &UniCase::ascii("api::invoke") && !self.settings.define_api_enabled {
-					bail!("Cannot use the `api::invoke` method, as the experimental define api capability is not enabled", @span);
-				}
-
-				stk.run(|ctx| self.parse_builtin_function(ctx, k.into_inner().to_owned()))
-					.await
-					.map(|x| Expr::FunctionCall(Box::new(x)))
-			}
+			Some((k, PathKind::Function)) => stk
+				.run(|ctx| self.parse_builtin_function(ctx, k.into_inner().to_owned()))
+				.await
+				.map(|x| Expr::FunctionCall(Box::new(x))),
 			None => {
 				if let Some(suggest) = find_suggestion(str) {
 					Err(SyntaxError::new(format_args!(

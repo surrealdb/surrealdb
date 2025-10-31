@@ -67,7 +67,6 @@ pub fn settings_from_capabilities(cap: &Capabilities) -> ParserSettings {
 		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
 		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
 		references_enabled: cap.allows_experimental(&ExperimentalTarget::RecordReferences),
-		define_api_enabled: cap.allows_experimental(&ExperimentalTarget::DefineApi),
 		files_enabled: cap.allows_experimental(&ExperimentalTarget::Files),
 		..Default::default()
 	}
@@ -226,7 +225,6 @@ pub fn block(input: &str) -> Result<Block> {
 			legacy_strands: true,
 			flexible_record_id: true,
 			references_enabled: true,
-			define_api_enabled: true,
 			files_enabled: true,
 			..Default::default()
 		},

@@ -433,7 +433,6 @@ impl<'de> Deserialize<'de> for SurrealConfigValue {
 			legacy_strands: false,
 			flexible_record_id: true,
 			references_enabled: true,
-			define_api_enabled: true,
 			files_enabled: true,
 		};
 
@@ -496,7 +495,6 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			legacy_strands: false,
 			flexible_record_id: true,
 			references_enabled: true,
-			define_api_enabled: true,
 			files_enabled: true,
 		};
 
@@ -539,7 +537,6 @@ impl<'de> Deserialize<'de> for SurrealObject {
 			legacy_strands: false,
 			flexible_record_id: true,
 			references_enabled: true,
-			define_api_enabled: true,
 			files_enabled: true,
 		};
 

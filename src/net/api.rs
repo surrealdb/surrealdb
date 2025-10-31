@@ -12,7 +12,7 @@ use surrealdb_core::api::err::ApiError;
 use surrealdb_core::api::response::ResponseInstruction;
 use surrealdb_core::catalog::ApiMethod;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::dbs::capabilities::{ExperimentalTarget, RouteTarget};
+use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_core::rpc::RpcError;
 use surrealdb_core::rpc::format::{Format, cbor, flatbuffers, json};
 use surrealdb_types::Value;
@@ -49,11 +49,6 @@ async fn handler(
 	let ds = &state.datastore;
 	// Update the session with the NS & DB
 	let session = session.with_ns(&ns).with_db(&db);
-	// Check if the experimental capability is enabled
-	if !state.datastore.get_capabilities().allows_experimental(&ExperimentalTarget::DefineApi) {
-		warn!("Experimental capability for API routes is not enabled");
-		return Err(NetError::NotFound(url).into());
-	}
 	// Check if capabilities allow querying the requested HTTP route
 	if !ds.allows_http_route(&RouteTarget::Api) {
 		warn!("Capabilities denied HTTP route request attempt, target: '{}'", &RouteTarget::Api);
