@@ -1476,6 +1476,8 @@ allow_proc_macro = true
 
 [pkg.wiggle-macro]
 allow_proc_macro = true
+allow_unsafe = true
+allow_apis = ["fs", "process"]
 
 [pkg.bytemuck_derive]
 allow_proc_macro = true
@@ -1597,6 +1599,7 @@ allow_unsafe = true
 
 [pkg.wiggle-generate]
 allow_unsafe = true
+allow_apis = ["fs"]
 
 [pkg.winch-codegen]
 allow_unsafe = true
@@ -1686,5 +1689,9 @@ allow_unsafe = true
 allow_unsafe = true
 
 [pkg.wit-parser]
+allow_unsafe = true
+allow_apis = ["fs"]
+
+[pkg.witx]
 allow_unsafe = true
 allow_apis = ["fs"]
