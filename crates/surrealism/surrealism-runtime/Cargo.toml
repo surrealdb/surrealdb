@@ -1,6 +1,6 @@
 [package]
 name = "surrealism-runtime"
-version = "3.0.0-alpha.12"
+version = "0.1.0"
 edition = "2021"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 description = "Runtime for Surrealism."

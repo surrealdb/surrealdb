@@ -1,6 +1,6 @@
 [package]
 name = "surrealism"
-version = "3.0.0-alpha.12"
+version = "0.1.0"
 edition = "2021"
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 description = "A scalable, distributed, collaborative, document-graph database."
