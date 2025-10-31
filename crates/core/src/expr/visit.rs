@@ -23,7 +23,17 @@ use crate::expr::statements::remove::{
 	RemoveApiStatement, RemoveBucketStatement, RemoveSequenceStatement,
 };
 use crate::expr::statements::{
-	AccessStatement, AlterStatement, CreateStatement, DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement, DefineModuleStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement, DefineUserStatement, DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement, OutputStatement, RelateStatement, RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveModelStatement, RemoveModuleStatement, RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement, SelectStatement, SetStatement, ShowStatement, SleepStatement, UpdateStatement, UpsertStatement, UseStatement
+	AccessStatement, AlterStatement, CreateStatement, DefineAccessStatement,
+	DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement, DefineEventStatement,
+	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
+	DefineModuleStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
+	DefineTableStatement, DefineUserStatement, DeleteStatement, ForeachStatement, IfelseStatement,
+	InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement, OutputStatement,
+	RelateStatement, RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement,
+	RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
+	RemoveModelStatement, RemoveModuleStatement, RemoveNamespaceStatement, RemoveParamStatement,
+	RemoveStatement, RemoveTableStatement, RemoveUserStatement, SelectStatement, SetStatement,
+	ShowStatement, SleepStatement, UpdateStatement, UpsertStatement, UseStatement,
 };
 use crate::expr::{
 	AccessType, Block, ClosureExpr, Data, Expr, Field, Fields, Function, FunctionCall, Idiom,
