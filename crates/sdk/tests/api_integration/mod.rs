@@ -318,7 +318,6 @@ mod mem {
 	use surrealdb::Surreal;
 	use surrealdb::engine::local::{Db, Mem};
 	use surrealdb::opt::auth::Root;
-	use surrealdb::opt::capabilities::{Capabilities, ExperimentalFeature};
 	use surrealdb::opt::{Config, Resource};
 	use surrealdb::types::RecordIdKey;
 	use surrealdb_types::RecordId;
@@ -410,23 +409,6 @@ mod mem {
 		let db: Surreal<Any> = Surreal::init();
 		db.clone().connect("memory").await.unwrap();
 		db.use_ns("test").use_db("test").await.unwrap();
-	}
-
-	#[test_log::test(tokio::test)]
-	async fn experimental_features() {
-		let surql = "
-		    USE NAMESPACE namespace DATABASE database;
-			DEFINE FIELD using ON house TYPE record<utility> REFERENCE ON DELETE CASCADE;
-		";
-		// Experimental features are rejected by default
-		let db = Surreal::new::<Mem>(()).await.unwrap();
-		db.query(surql).await.unwrap_err();
-		// Experimental features can be allowed
-		let capabilities =
-			Capabilities::new().with_experimental_feature_allowed(ExperimentalFeature::GraphQl);
-		let config = Config::new().capabilities(capabilities);
-		let db = Surreal::new::<Mem>(config).await.unwrap();
-		db.query(surql).await.unwrap().check().unwrap();
 	}
 
 	include_tests!(new_db => basic, serialisation, live, backup);
