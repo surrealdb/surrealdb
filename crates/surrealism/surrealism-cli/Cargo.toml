@@ -27,8 +27,6 @@ tempfile.workspace = true
 tokio.workspace = true
 walrus.workspace = true
 wasm-opt.workspace = true
-surrealml-llms.workspace = true
-surrealml-tokenizers.workspace = true
 candle-core.workspace = true
 
 [lints]

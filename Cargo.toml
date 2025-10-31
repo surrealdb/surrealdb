@@ -201,8 +201,6 @@ wasmtime = { version = "34.0.1", default-features = false, features = ["cranelif
 wasmtime-wasi = "34.0.1"
 walrus = "0.20.3"
 wasm-opt = "0.116.0"
-surrealml-llms = { git = "https://github.com/surrealdb/surrealml.git", branch = "llm-integration", package = "surrealml-llms" }
-surrealml-tokenizers = { git = "https://github.com/surrealdb/surrealml.git", branch = "llm-integration", package = "surrealml-tokenizers" }
 candle-core = "0.9.1"
 
 [package]

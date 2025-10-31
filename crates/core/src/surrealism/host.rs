@@ -76,26 +76,6 @@ impl InvocationContext for Host {
 		todo!()
 	}
 
-	async fn ml_invoke_model(
-		&mut self,
-		_config: &SurrealismConfig,
-		_model: String,
-		_input: PublicValue,
-		_weight: i64,
-		_weight_dir: String,
-	) -> Result<PublicValue> {
-		todo!()
-	}
-
-	async fn ml_tokenize(
-		&mut self,
-		_config: &SurrealismConfig,
-		_model: String,
-		_input: PublicValue,
-	) -> Result<Vec<f64>> {
-		todo!()
-	}
-
 	fn stdout(&mut self, _output: &str) -> Result<()> {
 		todo!()
 	}
@@ -135,26 +115,6 @@ impl InvocationContext for SignatureHost {
 	}
 
 	fn kv(&mut self) -> Result<&dyn KVStore> {
-		bail!("Run is not supported in signature host")
-	}
-
-	async fn ml_invoke_model(
-		&mut self,
-		_config: &SurrealismConfig,
-		_model: String,
-		_input: PublicValue,
-		_weight: i64,
-		_weight_dir: String,
-	) -> Result<PublicValue> {
-		bail!("Run is not supported in signature host")
-	}
-
-	async fn ml_tokenize(
-		&mut self,
-		_config: &SurrealismConfig,
-		_model: String,
-		_input: PublicValue,
-	) -> Result<Vec<f64>> {
 		bail!("Run is not supported in signature host")
 	}
 

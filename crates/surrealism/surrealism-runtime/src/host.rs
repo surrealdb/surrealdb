@@ -133,21 +133,6 @@ pub trait InvocationContext: Send + Sync {
 
 	fn kv(&mut self) -> Result<&dyn KVStore>;
 
-	async fn ml_invoke_model(
-		&mut self,
-		config: &SurrealismConfig,
-		model: String,
-		input: surrealdb_types::Value,
-		weight: i64,
-		weight_dir: String,
-	) -> Result<surrealdb_types::Value>;
-	async fn ml_tokenize(
-		&mut self,
-		config: &SurrealismConfig,
-		model: String,
-		input: surrealdb_types::Value,
-	) -> Result<Vec<f64>>;
-
 	/// Handle stdout output from the WASM module
 	fn stdout(&mut self, output: &str) -> Result<()> {
 		// Default implementation: print to standard output
@@ -241,20 +226,6 @@ pub fn implement_host_functions(linker: &mut Linker<StoreData>) -> Result<()> {
 	#[rustfmt::skip]
     register_host_function!(linker, "__sr_kv_count", |mut controller: HostController, range: SerializableRange<String>| -> Result<u64> {
         map_ok!(controller.context_mut().kv() => |kv| kv.count(range.beg, range.end).await)
-    });
-
-	// ML invoke model function
-	#[rustfmt::skip]
-    register_host_function!(linker, "__sr_ml_invoke_model", |mut controller: HostController, model: String, input: surrealdb_types::Value, weight: i64, weight_dir: String| -> Result<surrealdb_types::Value> {
-        let config = controller.config().clone();
-        controller.context_mut().ml_invoke_model(&config, model, input, weight, weight_dir).await
-    });
-
-	// ML tokenize function
-	#[rustfmt::skip]
-    register_host_function!(linker, "__sr_ml_tokenize", |mut controller: HostController, model: String, input: surrealdb_types::Value| -> Result<Vec<f64>> {
-        let config = controller.config().clone();
-        controller.context_mut().ml_tokenize(&config, model, input).await
     });
 
 	Ok(())
