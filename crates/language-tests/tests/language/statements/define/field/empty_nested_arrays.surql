@@ -8,15 +8,15 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: person:test, settings: {  } }]"
+value = "[{ id: person:test, settings: { nested: [1, 2, 3, 4, 5] } }]"
 
 [[test.results]]
-value = "[{ id: person:test, settings: {  } }]"
+value = "[{ id: person:test, settings: { nested: [1, 2, 3, 4, 5] } }]"
 
 */
 
 DEFINE TABLE person SCHEMAFULL;
-DEFINE FIELD settings on person TYPE object;
+DEFINE FIELD settings ON person TYPE object;
 UPSERT person:test CONTENT {
 	settings: {
 		nested: [

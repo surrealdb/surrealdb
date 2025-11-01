@@ -55,19 +55,42 @@ impl Document {
 			// Prune unspecified fields from the document that are not defined via
 			// `DefineFieldStatement`s.
 
-			// Create a vector to store the keys
+			// Create a trie to store which fields are defined and allow nested fields
 			let mut defined_field_names = IdiomTrie::new();
+			// Create a set to track explicitly defined fields
+			let mut explicitly_defined = std::collections::HashSet::new();
+			// Create a set to track which fields preserve their nested values
+			let mut preserve_nested = std::collections::HashSet::new();
 
 			// Loop through all field definitions
 			for fd in self.fd(ctx, opt).await?.iter() {
 				let is_flex = fd.flexible;
 				let is_literal = fd.field_kind.as_ref().is_some_and(Kind::contains_literal);
+				let allows_nested = fd.field_kind.as_ref().is_some_and(Kind::allows_any_nested);
+				// Preserve nested fields if flex, literal, object, or any
+				// This makes object/any behave like FLEXIBLE
+				let should_preserve = is_flex || is_literal || allows_nested;
 				for k in self.current.doc.as_ref().each(&fd.name).into_iter() {
-					defined_field_names.insert(&k, is_flex || is_literal);
+					// Insert the field - mark as allowing nested if flex/literal/object/any
+					defined_field_names.insert(&k, is_flex || is_literal || allows_nested);
+					// Track this as an explicitly defined field
+					explicitly_defined.insert(k.clone());
+					// Track if this field preserves nested values
+					if should_preserve {
+						preserve_nested.insert(k.clone());
+					}
+					// Also insert all ancestor paths to mark them as having defined children
+					for i in 1..k.len() {
+						defined_field_names.insert(&k[..i], is_flex || is_literal || allows_nested);
+						if should_preserve {
+							preserve_nested.insert(k[..i].to_vec().into());
+						}
+					}
 				}
 			}
 
 			// Loop over every field in the document
+			let mut fields_to_remove = Vec::new();
 			for current_doc_field_idiom in
 				self.current.doc.as_ref().every(None, true, ArrayBehaviour::Full).iter()
 			{
@@ -79,16 +102,60 @@ impl Document {
 				// Check if the field is defined in the schema
 				match defined_field_names.contains(current_doc_field_idiom) {
 					IdiomTrieContains::Exact(_) => {
-						// This field is defined in the schema, so we can skip it.
+						// This field exists in the trie. Check if it's explicitly defined.
+						if !explicitly_defined.contains(current_doc_field_idiom) {
+							// This is an ancestor path, not an explicit field definition.
+							// Check if we should preserve it:
+							// 1. If any ancestor preserves nested fields
+							// 2. If this field has explicitly defined descendants
+							let mut should_preserve = false;
+
+							// Check ancestors
+							for i in 1..=current_doc_field_idiom.len() {
+								let ancestor = Idiom(current_doc_field_idiom[..i].to_vec());
+								if preserve_nested.contains(&ancestor) {
+									should_preserve = true;
+									break;
+								}
+							}
+
+							// Check if this field has explicitly defined descendants
+							if !should_preserve {
+								for explicit_field in explicitly_defined.iter() {
+									if explicit_field.starts_with(current_doc_field_idiom)
+										&& explicit_field.len() > current_doc_field_idiom.len()
+									{
+										should_preserve = true;
+										break;
+									}
+								}
+							}
+
+							if !should_preserve {
+								// Ancestor field is not preserved and has no defined children -
+								// remove it
+								fields_to_remove.push(current_doc_field_idiom.clone());
+							}
+						}
+						// Otherwise, it's explicitly defined, keep it
 						continue;
 					}
 					IdiomTrieContains::Ancestor(true) => {
-						// This field is not explicitly defined in the schema, but it is a child of
-						// a flex or literal field. If the field is a child of a flex field,
-						// then any nested fields are allowed. If the field is a child of a
-						// literal field, then allow any fields as they will be caught during
-						// coercion.
-						continue;
+						// This field is not explicitly defined, but it is a child of a field
+						// that allows nested values. Check if the parent preserves nested fields.
+						// Look for any ancestor in preserve_nested set
+						let mut should_preserve = false;
+						for i in 1..=current_doc_field_idiom.len() {
+							let ancestor = Idiom(current_doc_field_idiom[..i].to_vec());
+							if preserve_nested.contains(&ancestor) {
+								should_preserve = true;
+								break;
+							}
+						}
+						if !should_preserve {
+							// Nested fields are allowed but not preserved - remove them
+							fields_to_remove.push(current_doc_field_idiom.clone());
+						}
 					}
 					IdiomTrieContains::Ancestor(false) => {
 						if let Some(part) = current_doc_field_idiom.last() {
@@ -116,6 +183,11 @@ impl Document {
 						});
 					}
 				}
+			}
+
+			// Remove fields that were marked for removal
+			for field in fields_to_remove {
+				self.current.doc.to_mut().cut(&field);
 			}
 		}
 

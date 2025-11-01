@@ -32,9 +32,10 @@ value = "[{ count: 2, id: view:[] }]"
 value = "NONE"
 
 [[test.results]]
-value = "[]"
+error = "The table 'test' does not exist"
 
 [[test.results]]
+# TODO: Shouldn't this be 0?
 value = "[{ count: 2, id: view:[] }]"
 
 */

@@ -26,6 +26,9 @@ error = "Couldn't coerce value for field `age` of `person:test`: Expected `numbe
 error = "Found 0 for field `age`, with record `person:test`, but field must conform to: $value > 0"
 
 [[test.results]]
+error = "Found field 'other', but no such field exists for table 'person'"
+
+[[test.results]]
 value = "[{ age: 13, email: 'info@surrealdb.com', id: person:test, name: 'No name' }]"
 
 */
@@ -39,3 +42,4 @@ CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = NON
 CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = NULL;
 CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = 0;
 CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = 13;
+CREATE person:test SET email = 'info@surrealdb.com', age = 13;

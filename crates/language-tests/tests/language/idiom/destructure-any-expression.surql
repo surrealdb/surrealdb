@@ -9,8 +9,6 @@ value = "{ doc: { id: place:{ name: 'Earth' }, level: 1 }, double_level: 2, rels
 
 */
 {
-    DELETE place, contains;
-
     UPSERT place:{ name: "Earth" } SET level = 1;
     UPSERT place:{ name: "US" } SET level = 2;
     UPSERT place:{ name: "NYC" } SET level = 3;

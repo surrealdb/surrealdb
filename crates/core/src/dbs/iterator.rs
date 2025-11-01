@@ -5,6 +5,7 @@ use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 
 use crate::catalog::Record;
+use crate::catalog::providers::{CatalogProvider, TableProvider};
 use crate::ctx::{Canceller, Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
@@ -258,8 +259,20 @@ impl Iterator {
 			if stm_ctx.stm.is_guaranteed() {
 				self.guaranteed = Some(Iterable::Yield(table.clone()));
 			}
-			let db = ctx.get_db(opt).await?;
 
+			// For UPSERT statements, ensure the table exists before planning
+			if matches!(stm_ctx.stm, Statement::Upsert(_)) {
+				let (ns, db_id) = ctx.expect_ns_db_ids(opt).await?;
+				let txn = ctx.tx();
+				// Check if table exists, if not create it
+				if txn.get_tb(ns, db_id, &table).await?.is_none() {
+					// Table doesn't exist, create it
+					let (ns_name, db_name) = opt.ns_db()?;
+					txn.ensure_ns_db_tb(Some(ctx), ns_name, db_name, &table).await?;
+				}
+			}
+
+			let db = ctx.get_db(opt).await?;
 			planner.add_iterables(&db, stk, stm_ctx, table, p, self).await?;
 		}
 		// All ingested ok

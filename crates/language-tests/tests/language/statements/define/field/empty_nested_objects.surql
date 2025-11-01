@@ -8,10 +8,10 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: person:test, settings: {  } }]"
+value = "[{ id: person:test, settings: { nested: { object: { thing: 'test' } } } }]"
 
 [[test.results]]
-value = "[{ id: person:test, settings: {  } }]"
+value = "[{ id: person:test, settings: { nested: { object: { thing: 'test' } } } }]"
 
 */
 

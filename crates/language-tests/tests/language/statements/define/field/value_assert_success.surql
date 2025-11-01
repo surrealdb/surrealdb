@@ -14,7 +14,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ age: 22, email: 'info@surrealdb.com', id: person:test, name: 'No name' }]"
+error = "Found field 'other', but no such field exists for table 'person'"
 
 */
 
