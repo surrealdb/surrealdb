@@ -1772,7 +1772,8 @@ pub async fn client_side_transactions(new_db: impl CreateDb) {
 		email: String,
 	}
 
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 
 	// Test 1: Commit a transaction
