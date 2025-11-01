@@ -104,7 +104,7 @@ where
 			let router = client.inner.router.extract()?;
 
 			let results = router
-				.execute_query(Command::RawQuery {
+				.execute_query(Command::Query {
 					query: Cow::Owned(query.into_owned()),
 					txn,
 					variables: variables?,

@@ -12,7 +12,7 @@ use futures::{Sink, SinkExt, StreamExt};
 use opentelemetry::Context as TelemetryContext;
 use opentelemetry::trace::FutureExt;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::kvs::Datastore;
+use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
 use surrealdb_core::mem::ALLOC;
 use surrealdb_core::rpc::format::Format;
 use surrealdb_core::rpc::{DbResponse, DbResult, DbResultError, Method, RpcProtocol};
@@ -55,6 +55,8 @@ pub struct Websocket {
 	/// The persistent session for this WebSocket connection
 	pub(crate) session: ArcSwap<Session>,
 	pub(crate) sessions: DashMap<Uuid, Arc<Session>>,
+	/// The active transactions for this WebSocket connection
+	pub(crate) transactions: DashMap<Uuid, Arc<Transaction>>,
 	/// A cancellation token called when shutting down the server
 	pub(crate) shutdown: CancellationToken,
 	/// A cancellation token for cancelling all spawned tasks
@@ -87,6 +89,7 @@ impl Websocket {
 			canceller: CancellationToken::new(),
 			session: ArcSwap::from(Arc::new(session)),
 			sessions: DashMap::new(),
+			transactions: DashMap::new(),
 			channel: sender.clone(),
 			datastore,
 		});
@@ -521,6 +524,41 @@ impl RpcProtocol for Websocket {
 	}
 
 	// ------------------------------
+	// Transactions
+	// ------------------------------
+
+	/// Retrieves a transaction by ID
+	async fn get_tx(
+		&self,
+		id: Uuid,
+	) -> Result<Arc<surrealdb_core::kvs::Transaction>, surrealdb_core::rpc::RpcError> {
+		debug!("WebSocket get_tx called for transaction {id}");
+		self.transactions
+			.get(&id)
+			.map(|tx| {
+				debug!("Transaction {id} found in WebSocket transactions map");
+				tx.clone()
+			})
+			.ok_or_else(|| {
+				warn!(
+					"Transaction {id} not found in WebSocket transactions map (have {} transactions)",
+					self.transactions.len()
+				);
+				surrealdb_core::rpc::RpcError::InvalidParams("Transaction not found".to_string())
+			})
+	}
+
+	/// Stores a transaction
+	async fn set_tx(
+		&self,
+		id: Uuid,
+		tx: Arc<surrealdb_core::kvs::Transaction>,
+	) -> Result<(), surrealdb_core::rpc::RpcError> {
+		self.transactions.insert(id, tx);
+		Ok(())
+	}
+
+	// ------------------------------
 	// Realtime
 	// ------------------------------
 
@@ -578,5 +616,88 @@ impl RpcProtocol for Websocket {
 		if let Err(err) = self.kvs().delete_queries(gc).await {
 			error!("Error handling RPC connection: {err}");
 		}
+	}
+
+	// ------------------------------
+	// Methods for transactions
+	// ------------------------------
+
+	/// Begin a new transaction
+	async fn begin(
+		&self,
+		_txn: Option<Uuid>,
+		_session_id: Option<Uuid>,
+	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
+		// Create a new transaction
+		let tx = self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await?;
+		// Generate a unique transaction ID
+		let id = Uuid::now_v7();
+		debug!("WebSocket begin: created transaction {id}");
+		// Store the transaction in the map
+		self.transactions.insert(id, Arc::new(tx));
+		debug!(
+			"WebSocket begin: stored transaction {id}, map now has {} transactions",
+			self.transactions.len()
+		);
+		// Return the transaction ID to the client
+		Ok(DbResult::Other(Value::Uuid(surrealdb::types::Uuid(id))))
+	}
+
+	/// Commit a transaction
+	async fn commit(
+		&self,
+		_txn: Option<Uuid>,
+		_session_id: Option<Uuid>,
+		params: Array,
+	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
+		// Extract the transaction ID from params
+		let mut params_vec = params.into_vec();
+		let Some(Value::Uuid(surrealdb::types::Uuid(txn_id))) = params_vec.pop() else {
+			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
+				"Expected transaction UUID".to_string(),
+			));
+		};
+
+		// Retrieve and remove the transaction from the map
+		let Some((_, tx)) = self.transactions.remove(&txn_id) else {
+			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
+				"Transaction not found".to_string(),
+			));
+		};
+
+		// Commit the transaction
+		tx.commit().await?;
+
+		// Return success
+		Ok(DbResult::Other(Value::None))
+	}
+
+	/// Cancel a transaction
+	async fn cancel(
+		&self,
+		_txn: Option<Uuid>,
+		_session_id: Option<Uuid>,
+		params: Array,
+	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
+		// Extract the transaction ID from params
+		let mut params_vec = params.into_vec();
+		let Some(Value::Uuid(surrealdb::types::Uuid(txn_id))) = params_vec.pop() else {
+			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
+				"Expected transaction UUID".to_string(),
+			));
+		};
+
+		// Retrieve and remove the transaction from the map
+		let Some((_, tx)) = self.transactions.remove(&txn_id) else {
+			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
+				"Transaction not found".to_string(),
+			));
+		};
+
+		// Cancel the transaction
+		tx.cancel().await?;
+
+		// Return success
+		Ok(DbResult::Other(Value::None))
 	}
 }

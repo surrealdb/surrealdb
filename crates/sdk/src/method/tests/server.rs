@@ -17,8 +17,16 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 			let query_result = QueryResultBuilder::started_now();
 
 			let query_result = match cmd {
-				Command::Invalidate
-				| Command::Health
+				Command::Invalidate | Command::Health => query_result,
+				Command::Begin => {
+					query_result.with_result(Ok(Value::Uuid(uuid::Uuid::now_v7().into())))
+				}
+				Command::Commit {
+					..
+				}
+				| Command::Rollback {
+					..
+				}
 				| Command::Revoke {
 					..
 				} => query_result,
@@ -54,7 +62,7 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				Command::Set {
 					..
 				} => query_result,
-				Command::RawQuery {
+				Command::Query {
 					..
 				} => query_result,
 				Command::Run {

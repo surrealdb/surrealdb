@@ -68,7 +68,7 @@ macro_rules! into_future {
 
 				variables.insert("_patches".to_string(), patches);
 
-				let cmd = Command::RawQuery {
+				let cmd = Command::Query {
 					txn,
 					query: Cow::Owned(format!("{operation} {what} PATCH $_patches RETURN AFTER")),
 					variables,

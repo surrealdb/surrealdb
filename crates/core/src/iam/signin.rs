@@ -2144,11 +2144,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 				CREATE user:1 SET enabled = false;
 				"#,
-				&sess,
-				None,
-			)
-			.await
-			.unwrap();
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
 
 			// Signin with the user
 			let mut sess = Session {

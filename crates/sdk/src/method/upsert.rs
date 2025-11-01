@@ -64,7 +64,7 @@ macro_rules! into_future {
 				let what = what.for_sql_query(&mut variables)?;
 
 				router
-					.$method(Command::RawQuery {
+					.$method(Command::Query {
 						txn,
 						query: Cow::Owned(format!("UPSERT {what}")),
 						variables,
@@ -165,7 +165,7 @@ where
 				}
 			};
 
-			Ok(Command::RawQuery {
+			Ok(Command::Query {
 				txn: self.txn,
 				query,
 				variables,

@@ -13,6 +13,7 @@ use surrealdb_core::options::EngineOptions;
 use surrealdb_types::Variables;
 use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 
 use crate::conn::{Route, Router};
@@ -104,8 +105,10 @@ pub(crate) async fn run_router(
 
 	let kvs = Arc::new(kvs);
 	let vars = Arc::new(RwLock::new(Variables::new()));
-	let live_queries = Arc::new(RwLock::new(HashMap::new()));
+	let live_queries = Arc::new(RwLock::new(super::LiveQueryMap::new()));
 	let session = Arc::new(RwLock::new(Session::default().with_rt(true)));
+	let transactions =
+		Arc::new(RwLock::new(HashMap::<Uuid, Arc<surrealdb_core::kvs::Transaction>>::new()));
 
 	let canceller = CancellationToken::new();
 
@@ -139,14 +142,17 @@ pub(crate) async fn run_router(
 					break
 				};
 
-				match super::router(
-					route.request,
-					&kvs,
-					&session,
-					&vars,
-					&live_queries,
-				)
-				.await
+			match super::router(
+				route.request,
+				super::RouterState {
+					kvs: kvs.clone(),
+					session: session.clone(),
+					vars: vars.clone(),
+					live_queries: live_queries.clone(),
+					transactions: transactions.clone(),
+				},
+			)
+			.await
 				{
 					Ok(value) => {
 						route.response.send(Ok(value)).await.ok();

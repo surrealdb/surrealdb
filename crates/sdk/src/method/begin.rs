@@ -1,8 +1,8 @@
 use std::future::IntoFuture;
-use std::ops::Deref;
 
-use crate::method::{BoxFuture, Cancel, Commit};
-use crate::{Connection, Result, Surreal};
+use crate::conn::Command;
+use crate::method::{BoxFuture, Transaction};
+use crate::{Connection, OnceLockExt, Result, Surreal};
 
 /// A beginning of a transaction
 #[derive(Debug)]
@@ -19,48 +19,16 @@ where
 	type IntoFuture = BoxFuture<'static, Self::Output>;
 
 	fn into_future(self) -> Self::IntoFuture {
+		let client = self.client;
 		Box::pin(async move {
-			self.client.query("BEGIN").await?;
+			let router = client.inner.router.extract()?;
+			let result: surrealdb_types::Value = router.execute(Command::Begin).await?;
+			// Extract the UUID from the result
+			let uuid = result.into_uuid()?;
 			Ok(Transaction {
-				client: self.client,
+				id: uuid.into(),
+				client,
 			})
 		})
-	}
-}
-
-/// An ongoing transaction
-#[derive(Debug)]
-#[must_use = "transactions must be committed or cancelled to complete them"]
-pub struct Transaction<C: Connection> {
-	client: Surreal<C>,
-}
-
-impl<C> Transaction<C>
-where
-	C: Connection,
-{
-	/// Creates a commit future
-	pub fn commit(self) -> Commit<C> {
-		Commit {
-			client: self.client,
-		}
-	}
-
-	/// Creates a cancel future
-	pub fn cancel(self) -> Cancel<C> {
-		Cancel {
-			client: self.client,
-		}
-	}
-}
-
-impl<C> Deref for Transaction<C>
-where
-	C: Connection,
-{
-	type Target = Surreal<C>;
-
-	fn deref(&self) -> &Self::Target {
-		&self.client
 	}
 }

@@ -62,7 +62,7 @@ macro_rules! into_future {
 				let mut variables = Variables::new();
 				let what = what.for_sql_query(&mut variables)?;
 
-				let cmd = Command::RawQuery {
+				let cmd = Command::Query {
 					txn,
 					query: Cow::Owned(format!("CREATE {what}")),
 					variables,
@@ -117,7 +117,7 @@ where
 			let what = what.for_sql_query(&mut variables)?;
 			variables.insert("_content".to_string(), content);
 
-			Ok(Command::RawQuery {
+			Ok(Command::Query {
 				txn: self.txn,
 				query: Cow::Owned(format!("CREATE {what} CONTENT $_content")),
 				variables,
@@ -156,7 +156,7 @@ where
 				}
 			};
 
-			Ok(Command::RawQuery {
+			Ok(Command::Query {
 				txn: self.txn,
 				query,
 				variables,
