@@ -2,28 +2,7 @@
 [test]
 
 [[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "[{ awards: 0, department: 'Engineering', id: employee:EMP001 }, { awards: 0, department: 'Engineering', id: employee:EMP003 }]"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
 value = "'OK'"
-
-[[test.results]]
-value = "NONE"
 
 [[test.results]]
 value = "[{ department: 'Engineering', id: department:['Engineering'], totalAwards: 0f }]"
@@ -60,7 +39,7 @@ value = "[]"
 
 */
 
-BEGIN;
+{
 	DEFINE TABLE employee SCHEMAFULL;
 	DEFINE FIELD department ON employee TYPE string;
 	DEFINE FIELD awards ON employee TYPE number;
@@ -87,7 +66,7 @@ BEGIN;
 		PERMISSIONS FOR select FULL, FOR create, update, delete NONE;
 
 	RETURN "OK";
-COMMIT;
+};
 
 
 SELECT * FROM department;

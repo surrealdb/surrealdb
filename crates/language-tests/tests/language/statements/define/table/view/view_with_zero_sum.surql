@@ -2,31 +2,7 @@
 [test]
 
 [[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "[{ awards: 0, department: 'Engineering', id: employee:EMP001, salary: 75000.5f }, { awards: 1, department: 'Marketing', id: employee:EMP002, salary: 65000f }, { awards: 0, department: 'Engineering', id: employee:EMP003, salary: 75700.5f }, { awards: 1, department: 'Marketing', id: employee:EMP004, salary: 85000f }]"
-
-[[test.results]]
 value = "'OK'"
-
-[[test.results]]
-value = "NONE"
 
 [[test.results]]
 value = "NONE"
@@ -42,7 +18,7 @@ value = "[{ avgSalary: 77850.25f, department: 'Engineering', employeeCount: 2, i
 
 */
 
-BEGIN;
+{
 	DEFINE TABLE employee SCHEMAFULL;
 	DEFINE FIELD id ON employee TYPE string;
 	DEFINE FIELD department ON employee TYPE string;
@@ -76,16 +52,16 @@ BEGIN;
 	  }
 	];
 	RETURN "OK";
-COMMIT;
+};
 
 DEFINE TABLE department TYPE NORMAL AS
-		SELECT
-			department,
-			math::mean(salary) AS avgSalary,
-			math::sum(awards) AS totalAwards,
-			count() AS employeeCount
-		FROM employee
-		GROUP BY department;
+	SELECT
+		department,
+		math::mean(salary) AS avgSalary,
+		math::sum(awards) AS totalAwards,
+		count() AS employeeCount
+	FROM employee
+	GROUP BY department;
 
 SELECT * FROM department;
 

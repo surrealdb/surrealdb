@@ -2,28 +2,7 @@
 [test]
 
 [[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "[{ id: a:1 }, { id: a:2 }, { id: a:3 }]"
-
-[[test.results]]
-value = "[{ bar: true, foo: 123, id: edge:1, in: a:1, out: a:2 }]"
-
-[[test.results]]
-value = "[{ bar: true, foo: 123, id: edge:2, in: a:1, out: a:2 }]"
-
-[[test.results]]
-value = "[{ bar: true, foo: 456, id: edge:3, in: a:2, out: a:3 }]"
-
-[[test.results]]
-value = "[{ bar: false, foo: 456, id: edge:4, in: a:2, out: a:3 }]"
-
-[[test.results]]
 value = "'OK'"
-
-[[test.results]]
-value = "NONE"
 
 [[test.results]]
 value = "[{ edges: [edge:1, edge:2] }, { edges: [edge:3, edge:4] }, { edges: [] }]"
@@ -51,7 +30,7 @@ value = "[{ edges: [edge:2] }, { edges: [edge:4] }, { edges: [] }]"
 
 */
 
-BEGIN;
+{
 	CREATE a:1, a:2, a:3;
 
 	RELATE a:1->edge:1->a:2 SET foo = 123, bar = true;
@@ -59,7 +38,7 @@ BEGIN;
 	RELATE a:2->edge:3->a:3 SET foo = 456, bar = true;
 	RELATE a:2->edge:4->a:3 SET foo = 456, bar = false;
 	RETURN "OK";
-COMMIT;
+};
 
 SELECT ->edge AS edges FROM a;
 SELECT ->(SELECT foo FROM edge) AS edges FROM a;
