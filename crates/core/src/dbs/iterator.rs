@@ -260,6 +260,8 @@ impl Iterator {
 				self.guaranteed = Some(Iterable::Yield(table.clone()));
 			}
 
+			let db = ctx.get_db(opt).await?;
+
 			// For UPSERT statements, ensure the table exists before planning
 			if matches!(stm_ctx.stm, Statement::Upsert(_)) {
 				let (ns, db_id) = ctx.expect_ns_db_ids(opt).await?;
@@ -272,7 +274,6 @@ impl Iterator {
 				}
 			}
 
-			let db = ctx.get_db(opt).await?;
 			planner.add_iterables(&db, stk, stm_ctx, table, p, self).await?;
 		}
 		// All ingested ok

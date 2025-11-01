@@ -1716,7 +1716,7 @@ fn parse_define_event() {
 fn parse_define_field() {
 	// General
 	{
-		let res = syn::parse_with(r#"DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+		let res = syn::parse_with(r#"DEFINE FIELD foo.*[*]... ON TABLE bar TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
 
 		assert_eq!(
 			res,

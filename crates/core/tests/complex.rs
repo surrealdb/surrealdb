@@ -131,7 +131,7 @@ fn ok_future_graph_subquery_recursion_depth() -> Result<()> {
 fn ok_graph_traversal_depth() -> Result<()> {
 	// Build the SQL traversal query
 	fn graph_traversal(n: usize) -> String {
-		let mut ret = String::from("DELETE node;\n");
+		let mut ret = String::from("DEFINE DB test; REMOVE TABLE IF EXISTS node;\n");
 		ret.push_str("CREATE node:0;\n");
 		for i in 1..=n {
 			let prev = i - 1;
