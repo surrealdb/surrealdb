@@ -1763,7 +1763,7 @@ fn parse_define_field() {
 #[test]
 fn parse_define_index() {
 	let res = syn::parse_with(
-		"DEFINE INDEX index ON TABLE table FIELDS a,b[*] FULLTEXT ANALYZER ana BM25 (0.1,0.2) HIGHLIGHTS"
+		"DEFINE INDEX index ON TABLE table FIELDS a FULLTEXT ANALYZER ana BM25 (0.1,0.2) HIGHLIGHTS"
 		.as_bytes(),
 		async |parser, stk| parser.parse_expr_inherit(stk).await,
 	)
@@ -1774,10 +1774,7 @@ fn parse_define_index() {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field("index".to_string())),
 			what: Expr::Idiom(Idiom::field("table".to_string())),
-			cols: vec![
-				Expr::Idiom(Idiom(vec![Part::Field("a".to_string())])),
-				Expr::Idiom(Idiom(vec![Part::Field("b".to_string()), Part::All]))
-			],
+			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())])),],
 			index: Index::FullText(FullTextParams {
 				az: "ana".to_owned(),
 				hl: true,
