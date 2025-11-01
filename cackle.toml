@@ -117,7 +117,7 @@ build.allow_build_instructions = [
     "cargo:rustc-link-search=native=*",
 ]
 
-[pkg.librocksdb-sys]
+[pkg.surrealdb-librocksdb-sys]
 allow_unsafe = true
 build.sandbox.allow_network = true
 build.sandbox.make_writable = ["target"]
@@ -995,7 +995,7 @@ allow_apis = ["fs", "process"]
 allow_unsafe = true
 allow_apis = ["net"]
 
-[pkg.rocksdb]
+[pkg.surrealdb-rocksdb]
 allow_unsafe = true
 allow_apis = ["fs"]
 
