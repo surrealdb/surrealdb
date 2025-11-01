@@ -387,13 +387,13 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 													// the token (which includes the
 													// refresh token for automatic renewal)
 													let request = RouterRequest {
-													id: Some(id_num),
-													method: "authenticate",
-													params: Some(Value::Array(Array::from(
-														vec![token.into_value()],
-													))),
-													txn: None,
-												};
+														id: Some(id_num),
+														method: "authenticate",
+														params: Some(Value::Array(Array::from(
+															vec![token.into_value()],
+														))),
+														txn: None,
+													};
 													let request_value = request.into_value();
 													let value =
 											surrealdb_core::rpc::format::flatbuffers::encode(

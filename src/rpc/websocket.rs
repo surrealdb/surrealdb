@@ -533,8 +533,7 @@ impl RpcProtocol for Websocket {
 		id: Uuid,
 	) -> Result<Arc<surrealdb_core::kvs::Transaction>, surrealdb_core::rpc::RpcError> {
 		debug!("WebSocket get_tx called for transaction {id}");
-		self
-			.transactions
+		self.transactions
 			.get(&id)
 			.map(|tx| {
 				debug!("Transaction {id} found in WebSocket transactions map");
