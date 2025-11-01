@@ -219,6 +219,25 @@ impl<W: std::fmt::Write> Drop for Pretty<W> {
 	}
 }
 
+/// Struct which implementes display for floats to format them as SurrealQL needs.
+pub struct Float(pub f64);
+
+impl fmt::Display for Float {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		if self.0.is_nan() {
+			f.write_str("NaN")?;
+		} else if self.0.is_infinite() {
+			if self.0 < 0.0 {
+				f.write_str("-")?;
+			}
+			f.write_str("Infinity")?;
+		} else {
+			write!(f, "{}", self.0)?;
+		}
+		Ok(())
+	}
+}
+
 /// Returns whether pretty printing is in effect.
 pub(crate) fn is_pretty() -> bool {
 	PRETTY.with(|pretty| pretty.load(Ordering::Relaxed))

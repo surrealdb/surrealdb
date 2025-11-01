@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 
 use super::Object;
-use crate::fmt::Fmt;
+use crate::fmt::{Float as FF, Fmt};
 use crate::val::{Array, Value};
 
 #[revisioned(revision = 1)]
@@ -632,7 +632,7 @@ impl fmt::Display for Geometry {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Point(v) => {
-				write!(f, "({}, {})", v.x(), v.y())
+				write!(f, "({}f, {}f)", FF(v.x()), FF(v.y()))
 			}
 			Self::Line(v) => write!(
 				f,
@@ -640,8 +640,8 @@ impl fmt::Display for Geometry {
 				Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f| write!(
 					f,
 					"[{}, {}]",
-					v.x(),
-					v.y()
+					FF(v.x()),
+					FF(v.y())
 				))))
 			),
 			Self::Polygon(v) => write!(
@@ -655,8 +655,8 @@ impl fmt::Display for Geometry {
 						Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f| write!(
 							f,
 							"[{}, {}]",
-							v.x(),
-							v.y()
+							FF(v.x()),
+							FF(v.y())
 						))))
 					)
 				)))
@@ -668,8 +668,8 @@ impl fmt::Display for Geometry {
 					Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| write!(
 						f,
 						"[{}, {}]",
-						v.x(),
-						v.y()
+						FF(v.x()),
+						FF(v.y())
 					))))
 				)
 			}
@@ -682,8 +682,8 @@ impl fmt::Display for Geometry {
 					Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f| write!(
 						f,
 						"[{}, {}]",
-						v.x(),
-						v.y()
+						FF(v.x()),
+						FF(v.y())
 					))))
 				))))
 			),
@@ -701,7 +701,7 @@ impl fmt::Display for Geometry {
 									"[{}]",
 									Fmt::comma_separated(v.points().map(|v| Fmt::new(
 										v,
-										|v, f| write!(f, "[{}, {}]", v.x(), v.y())
+										|v, f| write!(f, "[{}, {}]", FF(v.x()), FF(v.y()))
 									)))
 								))
 							))
