@@ -11,7 +11,7 @@ value = "NONE"
 value = "{ events: { }, fields: { primary: 'DEFINE FIELD primary ON product TYPE number DEFAULT ALWAYS 123.456f PERMISSIONS FULL' }, indexes: { }, lives: { }, tables: { } }"
 
 [[test.results]]
-value = "{ events: [ ], fields: [ { default: '123.456f', default_always: true, flex: false, kind: 'number', name: 'primary', permissions: { create: true, select: true, update: true }, readonly: false, what: 'product' } ], indexes: [ ], lives: [ ], tables: [ ] }"
+value = "{ events: [ ], fields: [ { default: '123.456f', default_always: true, kind: 'number', name: 'primary', permissions: { create: true, select: true, update: true }, readonly: false, what: 'product' } ], indexes: [ ], lives: [ ], tables: [ ] }"
 
 [[test.results]]
 error = "Couldn't coerce value for field `primary` of `product:test`: Expected `number` but found `NULL`"

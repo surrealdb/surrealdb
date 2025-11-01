@@ -22,8 +22,9 @@ skip-record-id-key = true
 
 
 [[test.results]]
-# Statement 6: SELECT * FROM item;
-value = "[]"
+# Statement 6: SELECT * FROM article;
+value = "[{ author: 'Jane Smith', content: 'This is a completely different article content with updated information.', feed_title: 'Science News', fetched_full: true, id: article:54d6j987q3orc52vpjvb, link: 'https://example.com/news/123', name: 'Breaking News Article', read: true, starred: true }]"
+skip-record-id-key = true
 */
 
 DEFINE INDEX article_name_link_index ON TABLE article COLUMNS name, link UNIQUE;
@@ -58,4 +59,4 @@ UPDATE content = "This is a completely different article content with updated in
     fetched_full = true;
 COMMIT;
 
-SELECT * FROM item;
+SELECT * FROM article;

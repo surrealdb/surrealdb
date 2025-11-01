@@ -41,8 +41,6 @@ pub struct Options {
 	pub(crate) force: Force,
 	/// Should we run permissions checks?
 	pub(crate) perms: bool,
-	/// Should we error if tables don't exist?
-	pub(crate) strict: bool,
 	/// Should we process field queries?
 	pub(crate) import: bool,
 	/// The data version as nanosecond timestamp
@@ -88,7 +86,6 @@ impl Options {
 			live: false,
 			perms: true,
 			force: Force::None,
-			strict: false,
 			import: false,
 			auth_enabled: true,
 			broker: None,
@@ -167,12 +164,6 @@ impl Options {
 		self
 	}
 
-	/// Sepecify if we should error when a table does not exist
-	pub fn with_strict(mut self, strict: bool) -> Self {
-		self.strict = strict;
-		self
-	}
-
 	/// Specify if we are currently importing data
 	pub fn with_import(mut self, import: bool) -> Self {
 		self.set_import(import);
@@ -232,19 +223,6 @@ impl Options {
 			ns: self.ns.clone(),
 			db: self.db.clone(),
 			force,
-			..*self
-		}
-	}
-
-	/// Create a new Options object for a subquery
-	pub fn new_with_strict(&self, strict: bool) -> Self {
-		Self {
-			broker: self.broker.clone(),
-			auth: self.auth.clone(),
-			ns: self.ns.clone(),
-			db: self.db.clone(),
-			force: self.force.clone(),
-			strict,
 			..*self
 		}
 	}

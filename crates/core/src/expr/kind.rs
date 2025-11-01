@@ -172,6 +172,11 @@ impl Kind {
 		matches!(self, Kind::Any)
 	}
 
+	/// Returns true if this type allows nested fields
+	pub(crate) fn allows_any_nested(&self) -> bool {
+		matches!(self, Kind::Any | Kind::Object)
+	}
+
 	/// Returns true if this type is a record
 	pub(crate) fn is_record(&self) -> bool {
 		matches!(self, Kind::Record(_))

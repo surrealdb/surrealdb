@@ -22,6 +22,7 @@ pub(crate) struct DefineDatabaseStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Expr,
+	pub strict: bool,
 	pub comment: Option<Expr>,
 	pub changefeed: Option<ChangeFeed>,
 }
@@ -34,6 +35,7 @@ impl Default for DefineDatabaseStatement {
 			name: Expr::Literal(Literal::None),
 			comment: None,
 			changefeed: None,
+			strict: false,
 		}
 	}
 }
@@ -55,7 +57,7 @@ impl DefineDatabaseStatement {
 
 		// Fetch the transaction
 		let txn = ctx.tx();
-		let nsv = txn.get_or_add_ns(Some(ctx), ns, opt.strict).await?;
+		let nsv = txn.get_or_add_ns(Some(ctx), ns).await?;
 
 		// Process the name
 		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "database name").await?;
@@ -88,6 +90,7 @@ impl DefineDatabaseStatement {
 			name: name.clone(),
 			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 			changefeed: self.changefeed,
+			strict: self.strict,
 		};
 		txn.put_db(&nsv.name, db_def).await?;
 
@@ -112,6 +115,9 @@ impl Display for DefineDatabaseStatement {
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {}", self.name)?;
+		if self.strict {
+			write!(f, " STRICT")?;
+		}
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {}", v)?
 		}

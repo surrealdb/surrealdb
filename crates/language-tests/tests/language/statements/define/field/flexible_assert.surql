@@ -13,6 +13,6 @@ error = "Found 1 for field `a`, with record `t:1`, but field must conform to: $v
 */
 
 DEFINE TABLE t;
-DEFINE FIELD a ON t FLEXIBLE ASSERT $value != 1;
+DEFINE FIELD a ON t TYPE any ASSERT $value != 1;
 
 CREATE t:1 SET a = 1;

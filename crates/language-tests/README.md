@@ -194,7 +194,7 @@ Examples:
 
 ```toml
 [test.results]
-parse-error = "foo"
+parsing-error = "foo"
 ```
 
 This tests if the test returns a parsing error with the text `foo`. A test is
@@ -205,10 +205,10 @@ Note that the following are also allowed:
 
 ```toml
 [test.results]
-parse-error = true
+parsing-error = true
 
 [test.results]
-parse-error = false
+parsing-error = false
 ```
 
 Specifying a boolean will check for the presence or absence of a parsing error

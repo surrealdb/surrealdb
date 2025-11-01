@@ -170,7 +170,7 @@ impl DefineUserStatement {
 
 				let ns = {
 					let ns = opt.ns()?;
-					txn.get_or_add_ns(Some(ctx), ns, opt.strict).await?
+					txn.get_or_add_ns(Some(ctx), ns).await?
 				};
 
 				// Process the statement
@@ -203,7 +203,7 @@ impl DefineUserStatement {
 
 				let db = {
 					let (ns, db) = opt.ns_db()?;
-					txn.get_or_add_db(Some(ctx), ns, db, opt.strict).await?
+					txn.get_or_add_db(Some(ctx), ns, db).await?
 				};
 
 				// Process the statement

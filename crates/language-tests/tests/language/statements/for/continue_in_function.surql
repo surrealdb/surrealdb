@@ -8,7 +8,7 @@ value = "NONE"
 error = "Invalid control flow statement, break or continue statement found outside of loop."
 
 [[test.results]]
-value = "[]"
+error = "The table 'test' does not exist"
 
 */
 DEFINE FUNCTION fn::continue(){

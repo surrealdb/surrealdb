@@ -10,6 +10,7 @@ pub(crate) struct DefineDatabaseStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Expr,
+	pub strict: bool,
 	pub comment: Option<Expr>,
 	pub changefeed: Option<ChangeFeed>,
 }
@@ -22,6 +23,7 @@ impl Default for DefineDatabaseStatement {
 			name: Expr::Literal(Literal::None),
 			comment: None,
 			changefeed: None,
+			strict: false,
 		}
 	}
 }
@@ -35,6 +37,9 @@ impl Display for DefineDatabaseStatement {
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {}", self.name)?;
+		if self.strict {
+			write!(f, " STRICT")?;
+		}
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {}", v)?;
 		}
@@ -53,6 +58,7 @@ impl From<DefineDatabaseStatement> for crate::expr::statements::DefineDatabaseSt
 			name: v.name.into(),
 			comment: v.comment.map(|x| x.into()),
 			changefeed: v.changefeed.map(Into::into),
+			strict: v.strict,
 		}
 	}
 }
@@ -64,6 +70,7 @@ impl From<crate::expr::statements::DefineDatabaseStatement> for DefineDatabaseSt
 			kind: v.kind.into(),
 			id: v.id,
 			name: v.name.into(),
+			strict: v.strict,
 			comment: v.comment.map(|x| x.into()),
 			changefeed: v.changefeed.map(Into::into),
 		}
