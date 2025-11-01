@@ -23,7 +23,7 @@ value = "[{ custom: [{ key: 'sometext' }], id: user:three }]"
 
 DEFINE TABLE user SCHEMAFULL;
 DEFINE FIELD custom ON user TYPE option<array>;
-DEFINE FIELD OVERWRITE custom.* ON user FLEXIBLE TYPE any;
+DEFINE FIELD OVERWRITE custom.* ON user TYPE any;
 CREATE user:one CONTENT { custom: ['sometext'] };
 CREATE user:two CONTENT { custom: [ ['sometext'] ] };
 CREATE user:three CONTENT { custom: [ { key: 'sometext' } ] };

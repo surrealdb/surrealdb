@@ -6,7 +6,7 @@ imports = ["upgrade/define/field_simple_clauses_import.surql"]
 upgrade = true
 
 [[test.results]]
-value = '''{ events: {  }, fields: { assert: 'DEFINE FIELD assert ON tab ASSERT true PERMISSIONS FULL', comment: "DEFINE FIELD comment ON tab COMMENT 'a comment' PERMISSIONS FULL", default: 'DEFINE FIELD default ON tab DEFAULT 1 PERMISSIONS FULL', flexible: 'DEFINE FIELD flexible ON tab FLEXIBLE PERMISSIONS FULL', readonly: 'DEFINE FIELD readonly ON tab READONLY PERMISSIONS FULL', type: 'DEFINE FIELD type ON tab TYPE any PERMISSIONS FULL', value: 'DEFINE FIELD `value` ON tab VALUE 1 PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }'''
+value = '''{ events: {  }, fields: { assert: 'DEFINE FIELD assert ON tab ASSERT true PERMISSIONS FULL', comment: "DEFINE FIELD comment ON tab COMMENT 'a comment' PERMISSIONS FULL", default: 'DEFINE FIELD default ON tab DEFAULT 1 PERMISSIONS FULL', readonly: 'DEFINE FIELD readonly ON tab READONLY PERMISSIONS FULL', type: 'DEFINE FIELD type ON tab TYPE any PERMISSIONS FULL', value: 'DEFINE FIELD `value` ON tab VALUE 1 PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }'''
 
 */
 INFO FOR TABLE tab;

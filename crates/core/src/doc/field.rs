@@ -64,15 +64,13 @@ impl Document {
 
 			// Loop through all field definitions
 			for fd in self.fd(ctx, opt).await?.iter() {
-				let is_flex = fd.flexible;
 				let is_literal = fd.field_kind.as_ref().is_some_and(Kind::contains_literal);
 				let allows_nested = fd.field_kind.as_ref().is_some_and(Kind::allows_any_nested);
-				// Preserve nested fields if flex, literal, object, or any
-				// This makes object/any behave like FLEXIBLE
-				let should_preserve = is_flex || is_literal || allows_nested;
+				// Preserve nested fields if literal, object, or any
+				let should_preserve = is_literal || allows_nested;
 				for k in self.current.doc.as_ref().each(&fd.name).into_iter() {
-					// Insert the field - mark as allowing nested if flex/literal/object/any
-					defined_field_names.insert(&k, is_flex || is_literal || allows_nested);
+					// Insert the field - mark as allowing nested if literal/object/any
+					defined_field_names.insert(&k, is_literal || allows_nested);
 					// Track this as an explicitly defined field
 					explicitly_defined.insert(k.clone());
 					// Track if this field preserves nested values
@@ -81,7 +79,7 @@ impl Document {
 					}
 					// Also insert all ancestor paths to mark them as having defined children
 					for i in 1..k.len() {
-						defined_field_names.insert(&k[..i], is_flex || is_literal || allows_nested);
+						defined_field_names.insert(&k[..i], is_literal || allows_nested);
 						if should_preserve {
 							preserve_nested.insert(k[..i].to_vec().into());
 						}

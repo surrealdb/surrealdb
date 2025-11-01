@@ -831,7 +831,7 @@ impl Parser<'_> {
 				// FLEX, FLEXI and FLEXIBLE are all the same token type.
 				t!("FLEXIBLE") => {
 					self.pop_peek();
-					res.flex = true;
+					bail!("`FLEXIBLE` is no longer supported, use `TYPE any` or `TYPE object` instead", @self.last_span);
 				}
 				t!("TYPE") => {
 					self.pop_peek();

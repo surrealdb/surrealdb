@@ -22,7 +22,7 @@ value = "[{ age: 18, id: person:test, metadata: false }]"
 */
 DEFINE TABLE person SCHEMAFULL;
 DEFINE FIELD age ON person TYPE number;
-DEFINE FIELD metadata ON person FLEXIBLE TYPE any;
+DEFINE FIELD metadata ON person TYPE any;
 
 CREATE person:test CONTENT { age: 18 };
 UPSERT person:test SET metadata = true;

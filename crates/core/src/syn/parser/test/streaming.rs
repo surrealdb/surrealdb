@@ -309,7 +309,6 @@ fn statements() -> Vec<TopLevelExpr> {
 				Part::Flatten,
 			])),
 			what: Expr::Idiom(Idiom::field("bar".to_string())),
-			flex: true,
 			field_kind: Some(Kind::Either(vec![
 				Kind::None,
 				Kind::Number,

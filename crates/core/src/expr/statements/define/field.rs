@@ -37,9 +37,6 @@ pub(crate) struct DefineFieldStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub what: Expr,
-	/// Whether the field is marked as flexible.
-	/// Flexible allows the field to be schemaless even if the table is marked as schemafull.
-	pub flex: bool,
 	pub field_kind: Option<Kind>,
 	pub readonly: bool,
 	pub value: Option<Expr>,
@@ -57,7 +54,6 @@ impl Default for DefineFieldStatement {
 			kind: DefineKind::Default,
 			name: Expr::Literal(Literal::None),
 			what: Expr::Literal(Literal::None),
-			flex: false,
 			field_kind: None,
 			readonly: false,
 			value: None,
@@ -90,7 +86,6 @@ impl DefineFieldStatement {
 		Ok(catalog::FieldDefinition {
 			name: expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?,
 			what: expr_to_ident(stk, ctx, opt, doc, &self.what, "table name").await?,
-			flexible: self.flex,
 			field_kind: self.field_kind.clone(),
 			readonly: self.readonly,
 			value: self.value.clone(),
@@ -296,7 +291,6 @@ impl DefineFieldStatement {
 					FieldDefinition {
 						name: name.clone(),
 						what: definition.what.to_string(),
-						flexible: definition.flexible,
 						field_kind: Some(cur_kind),
 						reference: definition.reference.clone(),
 						..Default::default()
@@ -342,7 +336,6 @@ impl DefineFieldStatement {
 				matches!(self.default, DefineDefault::None),
 				Error::ComputedKeywordConflict("DEFAULT".into())
 			);
-			ensure!(!self.flex, Error::ComputedKeywordConflict("FLEXIBLE".into()));
 			ensure!(!self.readonly, Error::ComputedKeywordConflict("READONLY".into()));
 
 			// Ensure no nested fields exist
@@ -487,9 +480,6 @@ impl Display for DefineFieldStatement {
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {} ON {}", self.name, self.what)?;
-		if self.flex {
-			write!(f, " FLEXIBLE")?
-		}
 		if let Some(ref v) = self.field_kind {
 			write!(f, " TYPE {v}")?
 		}

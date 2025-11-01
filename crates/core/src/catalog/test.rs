@@ -163,7 +163,6 @@ use crate::vs::VersionStamp;
 #[case::field(FieldDefinition {
 	name: Idiom::from_str("field[0]").unwrap(),
 	what: "what".to_string(),
-	flexible: false,
 	field_kind: None,
 	readonly: false,
 	value: None,
@@ -175,7 +174,7 @@ use crate::vs::VersionStamp;
 	update_permission: Permission::Full,
 	comment: Some("comment".to_string()),
 	reference: None,
-}, 39)]
+}, 38)]
 #[case::function(FunctionDefinition {
 	name: "function".to_string(),
 	args: vec![],
