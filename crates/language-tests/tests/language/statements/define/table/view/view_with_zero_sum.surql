@@ -2,19 +2,43 @@
 [test]
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ awards: 0, department: 'Engineering', id: employee:EMP001, salary: 75000.5f }, { awards: 1, department: 'Marketing', id: employee:EMP002, salary: 65000f }, { awards: 0, department: 'Engineering', id: employee:EMP003, salary: 75700.5f }, { awards: 1, department: 'Marketing', id: employee:EMP004, salary: 85000f }]"
+
+[[test.results]]
 value = "'OK'"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "[{ avgSalary: 75350.5dec, department: 'Engineering', employeeCount: 2, id: department:['Engineering'], totalAwards: 0 }, { avgSalary: 75000dec, department: 'Marketing', employeeCount: 2, id: department:['Marketing'], totalAwards: 2 }]"
+value = "NONE"
+
+[[test.results]]
+value = "[{ avgSalary: 75350.5f, department: 'Engineering', employeeCount: 2, id: department:['Engineering'], totalAwards: 0f }, { avgSalary: 75000f, department: 'Marketing', employeeCount: 2, id: department:['Marketing'], totalAwards: 2f }]"
 
 [[test.results]]
 value = "[{ awards: 0, department: 'Engineering', id: employee:EMP001, salary: 80000f }]"
 
 [[test.results]]
-value = "[{ avgSalary: 77850.250dec, department: 'Engineering', employeeCount: 2, id: department:['Engineering'], totalAwards: 0 }, { avgSalary: 75000dec, department: 'Marketing', employeeCount: 2, id: department:['Marketing'], totalAwards: 2 }]"
+value = "[{ avgSalary: 77850.25f, department: 'Engineering', employeeCount: 2, id: department:['Engineering'], totalAwards: 0f }, { avgSalary: 75000f, department: 'Marketing', employeeCount: 2, id: department:['Marketing'], totalAwards: 2f }]"
 
 */
 

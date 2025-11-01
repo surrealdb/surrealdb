@@ -11,7 +11,25 @@ value = "{ events: {  }, fields: {  }, indexes: { idx: 'DEFINE INDEX idx ON t CO
 value = "{ building: { initial: 0, pending: 0, status: 'ready', updated: 0 } }"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ b: true, id: t:1 }]"
+
+[[test.results]]
+value = "[{ b: true, id: t:2 }]"
+
+[[test.results]]
+value = "[{ b: false, id: t:3 }]"
+
+[[test.results]]
+value = "[{ b: false, id: t:4 }]"
+
+[[test.results]]
 value = "'OK'"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = '''[{ detail: { plan: { index: 'idx', operator: 'Count' }, table: 't' }, operation: 'Iterate Index Count' }, { detail: { "Aggregate expressions": {  }, Aggregations: { _a0: 'Count' }, "Group expressions": {  }, "Select expression": { count: '_a0' }, type: 'Group' }, operation: 'Collector' }]'''

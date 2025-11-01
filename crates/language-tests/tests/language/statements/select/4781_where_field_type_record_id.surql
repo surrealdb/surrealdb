@@ -3,7 +3,34 @@
 issue = 4781
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ color: NONE, group: UserTagGroup:⟨utg-1⟩, id: UserTag:⟨tag-1⟩ }, { color: NONE, group: UserTagGroup:⟨utg-1⟩, id: UserTag:⟨tag-2⟩ }, { color: NONE, group: UserTagGroup:⟨utg-2⟩, id: UserTag:⟨tag-3⟩ }, { color: NONE, id: UserTag:⟨tag-4⟩ }]"
+
+[[test.results]]
+value = "[{ id: Color:yellow }, { id: Color:blue }, { id: Color:red }]"
+
+[[test.results]]
+value = "[{ color: Color:yellow, id: UserTagGroup:⟨utg-1⟩ }, { color: Color:blue, id: UserTagGroup:⟨utg-2⟩ }]"
+
+[[test.results]]
 value = "'OK'"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "[Color:yellow, Color:yellow, Color:blue, NONE]"

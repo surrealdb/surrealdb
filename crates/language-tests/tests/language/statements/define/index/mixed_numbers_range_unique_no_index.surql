@@ -2,7 +2,31 @@
 [test]
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: test:int0, number: 0 }]"
+
+[[test.results]]
+value = "[{ id: test:float0, number: 0.5f }]"
+
+[[test.results]]
+value = "[{ id: test:int1, number: 1 }]"
+
+[[test.results]]
+value = "[{ id: test:float1, number: 1.5f }]"
+
+[[test.results]]
+value = "[{ id: test:int2, number: 2 }]"
+
+[[test.results]]
 value = "'OK'"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, { id: test:int1, number: 1 }]"

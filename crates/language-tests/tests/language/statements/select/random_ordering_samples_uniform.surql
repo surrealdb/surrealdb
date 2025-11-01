@@ -8,7 +8,31 @@ timeout = 8000
 reason = "Check that ORDER BY RAND() returns  uniform samples"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "'OK'"
+
+[[test.results]]
+value = "NONE"
 
 */
 

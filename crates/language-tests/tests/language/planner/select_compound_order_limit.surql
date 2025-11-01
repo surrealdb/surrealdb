@@ -2,7 +2,19 @@
 [test]
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "'OK'"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "[{ detail: { plan: { index: 'idx_k1_k2', operator: '=', value: ['key1', 'key2'] }, table: 'test' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 5 }, operation: 'Fetch' }]"

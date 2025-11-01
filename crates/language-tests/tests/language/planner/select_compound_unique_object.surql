@@ -2,7 +2,13 @@
 [test]
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "'OK'"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "[{ id: t:{ id: 3, r: o:1 } }]"
@@ -24,6 +30,7 @@ value = "[{ detail: { plan: { index: 'idx', prefix: [o:2], ranges: [{ operator: 
 
 */
 BEGIN;
+{
     DEFINE INDEX idx ON t FIELDS id.id().r,b UNIQUE;
     CREATE t:{ id: 1, r: o:1 } SET b=2021;
     CREATE t:{ id: 2, r: o:2 } SET b=2021;
@@ -31,6 +38,7 @@ BEGIN;
     CREATE t:{ id: 4, r: o:2 } SET b=2025;
     CREATE t:{ id: 5, r: o:3 } SET b=2025;
     RETURN "OK";
+};
 COMMIT;
 
 SELECT id FROM t WHERE id.id().r=o:1 AND b=2025;

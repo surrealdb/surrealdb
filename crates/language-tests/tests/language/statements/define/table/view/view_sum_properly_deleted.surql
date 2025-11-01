@@ -2,10 +2,31 @@
 [test]
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ awards: 0, department: 'Engineering', id: employee:EMP001 }, { awards: 0, department: 'Engineering', id: employee:EMP003 }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "'OK'"
 
 [[test.results]]
-value = "[{ department: 'Engineering', id: department:['Engineering'], totalAwards: 0 }]"
+value = "NONE"
+
+[[test.results]]
+value = "[{ department: 'Engineering', id: department:['Engineering'], totalAwards: 0f }]"
 
 [[test.results]]
 value = "[{ awards: 0, department: 'Engineering', id: employee:EMP001 }, { awards: 0, department: 'Engineering', id: employee:EMP003 }]"
@@ -29,7 +50,7 @@ value = "[{ awards: 1, department: 'Engineering', id: employee:EMP004 }]"
 value = "[{ awards: 1, department: 'Engineering', id: employee:EMP004 }]"
 
 [[test.results]]
-value = "[{ department: 'Engineering', id: department:['Engineering'], totalAwards: 1 }]"
+value = "[{ department: 'Engineering', id: department:['Engineering'], totalAwards: 1f }]"
 
 [[test.results]]
 value = "[]"

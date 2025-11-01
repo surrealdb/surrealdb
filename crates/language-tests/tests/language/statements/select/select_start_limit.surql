@@ -2,7 +2,31 @@
 [test]
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ b: true, id: i:0 }]"
+
+[[test.results]]
+value = "[{ b: true, id: i:1 }]"
+
+[[test.results]]
+value = "[{ b: true, id: i:2 }]"
+
+[[test.results]]
+value = "[{ b: true, id: i:3 }]"
+
+[[test.results]]
+value = "[{ b: true, id: i:4 }]"
+
+[[test.results]]
+value = "[{ b: true, id: i:5 }]"
+
+[[test.results]]
 value = "'OK'"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "[{ detail: { direction: 'forward', table: 'i' }, operation: 'Iterate Table' }, { detail: { type: 'Memory' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { CancelOnLimit: 3, SkipStart: 2 }, operation: 'StartLimitStrategy' }, { detail: { count: 3 }, operation: 'Fetch' }]"

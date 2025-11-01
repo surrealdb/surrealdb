@@ -2,7 +2,31 @@
 [test]
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ b: 2021, id: t:{ id: 1, r: o:1 } }]"
+
+[[test.results]]
+value = "[{ b: 2021, id: t:{ id: 2, r: o:2 } }]"
+
+[[test.results]]
+value = "[{ b: 2025, id: t:{ id: 3, r: o:1 } }]"
+
+[[test.results]]
+value = "[{ b: 2025, id: t:{ id: 4, r: o:2 } }]"
+
+[[test.results]]
+value = "[{ b: 2025, id: t:{ id: 5, r: o:3 } }]"
+
+[[test.results]]
 value = "'OK'"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "[{ id: t:{ id: 3, r: o:1 } }]"

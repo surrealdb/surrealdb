@@ -2,7 +2,40 @@
 [test]
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: notes:1, kind: 1, pubkey: 123, published: 2021 }]"
+
+[[test.results]]
+value = "[{ id: notes:2, kind: 2, pubkey: 123, published: 2022 }]"
+
+[[test.results]]
+value = "[{ id: notes:3, kind: 1, pubkey: 123, published: 2023 }]"
+
+[[test.results]]
+value = "[{ id: notes:4, kind: 2, pubkey: 123, published: 2024 }]"
+
+[[test.results]]
+value = "[{ id: notes:5, kind: 1, pubkey: 123, published: 2025 }]"
+
+[[test.results]]
 value = "'OK'"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "[{ detail: { plan: { index: 'index_note_kind', operator: 'union', value: [1, 2] }, table: 'notes' }, operation: 'Iterate Index' }, { detail: { plan: { index: 'index_note_pubkey', operator: 'union', value: [123] }, table: 'notes' }, operation: 'Iterate Index' }, { detail: { plan: { direction: 'forward', from: { inclusive: false, value: 2022 }, index: 'index_note_published', to: { inclusive: false, value: NONE } }, table: 'notes' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"

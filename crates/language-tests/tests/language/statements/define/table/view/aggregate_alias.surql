@@ -7,25 +7,67 @@
 issue = 4881
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ created_at: d'2025-10-04T10:20:30Z', entitlement_usage: 1, id: resource:1, organisation: organisation:one, resource_type: resource_type:seat }]"
+
+[[test.results]]
+value = "[{ created_at: d'2025-10-04T10:20:31Z', entitlement_usage: 1, id: resource:2, organisation: organisation:one, resource_type: resource_type:seat }]"
+
+[[test.results]]
+value = "[{ created_at: d'2025-10-04T10:30:30Z', entitlement_usage: 1, id: resource:3, organisation: organisation:one, resource_type: resource_type:seat }]"
+
+[[test.results]]
+value = "[{ created_at: d'2025-10-04T12:20:30Z', entitlement_usage: 1, id: resource:4, organisation: organisation:one, resource_type: resource_type:seat }]"
+
+[[test.results]]
+value = "[{ created_at: d'2025-10-05T10:20:30Z', entitlement_usage: 1, id: resource:5, organisation: organisation:one, resource_type: resource_type:seat }]"
+
+[[test.results]]
+value = "[{ created_at: d'2025-10-05T10:20:31Z', entitlement_usage: 1, id: resource:6, organisation: organisation:one, resource_type: resource_type:seat }]"
+
+[[test.results]]
+value = "[{ created_at: d'2025-10-05T10:30:30Z', entitlement_usage: 1, id: resource:7, organisation: organisation:one, resource_type: resource_type:seat }]"
+
+[[test.results]]
+value = "[{ created_at: d'2025-10-05T12:20:30Z', entitlement_usage: 1, id: resource:8, organisation: organisation:one, resource_type: resource_type:seat }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "'OK'"
 
 [[test.results]]
-value = """[
-	{
-		day: d'2025-10-04T00:00:00Z',
-		id: daily_resource_usage:[organisation:one, resource_type:seat, d'2025-10-04T00:00:00Z'],
-		organisation: organisation:one,
-		resource_type: resource_type:seat,
-		total_count: 4f
-	},
-	{
-		day: d'2025-10-05T00:00:00Z',
-		id: daily_resource_usage:[organisation:one, resource_type:seat, d'2025-10-05T00:00:00Z'],
-		organisation: organisation:one,
-		resource_type: resource_type:seat,
-		total_count: 4f
-	}
-]"""
+value = "NONE"
+
+[[test.results]]
+value = "[{ day: d'2025-10-04T00:00:00Z', id: daily_resource_usage:[organisation:one, resource_type:seat, d'2025-10-04T00:00:00Z'], organisation: organisation:one, resource_type: resource_type:seat, total_count: 4f }, { day: d'2025-10-05T00:00:00Z', id: daily_resource_usage:[organisation:one, resource_type:seat, d'2025-10-05T00:00:00Z'], organisation: organisation:one, resource_type: resource_type:seat, total_count: 4f }]"
 
 */
 

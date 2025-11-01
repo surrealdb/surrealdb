@@ -2,7 +2,28 @@
 [test]
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "[{ id: a:1 }, { id: a:2 }, { id: a:3 }]"
+
+[[test.results]]
+value = "[{ bar: true, foo: 123, id: edge:1, in: a:1, out: a:2 }]"
+
+[[test.results]]
+value = "[{ bar: true, foo: 123, id: edge:2, in: a:1, out: a:2 }]"
+
+[[test.results]]
+value = "[{ bar: true, foo: 456, id: edge:3, in: a:2, out: a:3 }]"
+
+[[test.results]]
+value = "[{ bar: false, foo: 456, id: edge:4, in: a:2, out: a:3 }]"
+
+[[test.results]]
 value = "'OK'"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "[{ edges: [edge:1, edge:2] }, { edges: [edge:3, edge:4] }, { edges: [] }]"
