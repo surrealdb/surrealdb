@@ -5,7 +5,16 @@ imports = ["datasets/type_order.surql","harness/assert.surql"]
 [test]
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "'OK'"
+
+[[test.results]]
+value = "NONE"
 */
 
 BEGIN;

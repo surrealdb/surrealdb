@@ -10,34 +10,33 @@ value = "[{ id: test:-1000000 }, { id: test:-1 }, { id: test:1 }, { id: test:100
 
 */
 
-BEGIN;
+{
+    create test:1;
+    create test:1000000;
+    create test:A;
+    create test:Z;
+    create test:a;
+    create test:z;
+    create test:-1;
+    create test:-1000000;
+    create test:-100000000000000000000;
+    create test:100000000000000000000;
+    create test:[1,2,3];
+    create test:["a"];
+    create test:[NULL];
+    create test:[NONE];
+    create test:{a: 1};
+    create test:{a: "a"};
+    create test:{a: NULL};
+    create test:{a: NONE};
+    create test:{z: 1};
+    create test:{z: "a"};
+    create test:{z: NULL};
+    create test:{z: NONE};
+    create test:u"00000000-0000-0000-0000-000000000000";
+    create test:u"ffffffff-ffff-ffff-ffff-ffffffffffff";
 
-create test:1;
-create test:1000000;
-create test:A;
-create test:Z;
-create test:a;
-create test:z;
-create test:-1;
-create test:-1000000;
-create test:-100000000000000000000;
-create test:100000000000000000000;
-create test:[1,2,3];
-create test:["a"];
-create test:[NULL];
-create test:[NONE];
-create test:{a: 1};
-create test:{a: "a"};
-create test:{a: NULL};
-create test:{a: NONE};
-create test:{z: 1};
-create test:{z: "a"};
-create test:{z: NULL};
-create test:{z: NONE};
-create test:u"00000000-0000-0000-0000-000000000000";
-create test:u"ffffffff-ffff-ffff-ffff-ffffffffffff";
-
-RETURN "OK";
-COMMIT;
+    RETURN "OK";
+};
 
 SELECT * FROM test;

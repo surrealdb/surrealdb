@@ -3,6 +3,9 @@
 reason = "Test transaction error handling with THROW statements and RETURN behavior"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 error = "The query was not executed due to a failed transaction"
 
 [[test.results]]
@@ -10,6 +13,9 @@ error = "The query was not executed due to a failed transaction"
 
 [[test.results]]
 error = "An error occurred: Some error"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 error = "The query was not executed due to a failed transaction"

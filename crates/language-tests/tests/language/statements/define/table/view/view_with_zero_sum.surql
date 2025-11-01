@@ -8,17 +8,17 @@ value = "'OK'"
 value = "NONE"
 
 [[test.results]]
-value = "[{ avgSalary: 75350.5dec, department: 'Engineering', employeeCount: 2, id: department:['Engineering'], totalAwards: 0 }, { avgSalary: 75000dec, department: 'Marketing', employeeCount: 2, id: department:['Marketing'], totalAwards: 2 }]"
+value = "[{ avgSalary: 75350.5f, department: 'Engineering', employeeCount: 2, id: department:['Engineering'], totalAwards: 0f }, { avgSalary: 75000f, department: 'Marketing', employeeCount: 2, id: department:['Marketing'], totalAwards: 2f }]"
 
 [[test.results]]
 value = "[{ awards: 0, department: 'Engineering', id: employee:EMP001, salary: 80000f }]"
 
 [[test.results]]
-value = "[{ avgSalary: 77850.250dec, department: 'Engineering', employeeCount: 2, id: department:['Engineering'], totalAwards: 0 }, { avgSalary: 75000dec, department: 'Marketing', employeeCount: 2, id: department:['Marketing'], totalAwards: 2 }]"
+value = "[{ avgSalary: 77850.25f, department: 'Engineering', employeeCount: 2, id: department:['Engineering'], totalAwards: 0f }, { avgSalary: 75000f, department: 'Marketing', employeeCount: 2, id: department:['Marketing'], totalAwards: 2f }]"
 
 */
 
-BEGIN;
+{
 	DEFINE TABLE employee SCHEMAFULL;
 	DEFINE FIELD id ON employee TYPE string;
 	DEFINE FIELD department ON employee TYPE string;
@@ -52,16 +52,16 @@ BEGIN;
 	  }
 	];
 	RETURN "OK";
-COMMIT;
+};
 
 DEFINE TABLE department TYPE NORMAL AS
-		SELECT
-			department,
-			math::mean(salary) AS avgSalary,
-			math::sum(awards) AS totalAwards,
-			count() AS employeeCount
-		FROM employee
-		GROUP BY department;
+	SELECT
+		department,
+		math::mean(salary) AS avgSalary,
+		math::sum(awards) AS totalAwards,
+		count() AS employeeCount
+	FROM employee
+	GROUP BY department;
 
 SELECT * FROM department;
 

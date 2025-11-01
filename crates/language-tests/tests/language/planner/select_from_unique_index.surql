@@ -38,11 +38,11 @@ value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, tim
 value = "[{ detail: { direction: 'forward', table: 'session' }, operation: 'Iterate Table' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 6 }, operation: 'Fetch' }]"
 
 [[test.results]]
-value = " [{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:4, time: NULL }, { id: session:3, other: 'test' }]"
+value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:4, time: NULL }, { id: session:3, other: 'test' }]"
 
 */
 
-BEGIN;
+{
     DEFINE INDEX time ON TABLE session COLUMNS time UNIQUE;
     CREATE session:1 SET time = d'2024-07-01T01:00:00Z';
     CREATE session:2 SET time = d'2024-06-30T23:00:00Z';
@@ -51,7 +51,7 @@ BEGIN;
     CREATE session:5 SET time = d'2024-07-01T02:00:00Z';
     CREATE session:6 SET time = d'2024-06-30T23:30:00Z';
     RETURN "OK";
-COMMIT;
+};
 
 SELECT * FROM session WHERE time > d'2000-01-01T00:00:00Z' ORDER BY time ASC LIMIT 3 EXPLAIN FULL;
 SELECT * FROM session WHERE time > d'2000-01-01T00:00:00Z' ORDER BY time ASC LIMIT 3;

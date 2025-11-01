@@ -8,10 +8,10 @@ value = "'OK'"
 value = "[{ detail: { plan: { direction: 'forward', from: { inclusive: false, value: d'2000-01-01T00:00:00Z' }, index: 'time', to: { inclusive: false, value: NONE } }, table: 'session' }, operation: 'Iterate Index' }, { detail: { limit: 4, type: 'MemoryOrderedLimit' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { CancelOnLimit: 4 }, operation: 'StartLimitStrategy' }, { detail: { count: 0 }, operation: 'Fetch' }]"
 
 [[test.results]]
-value = " [{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:5, time: d'2024-07-01T02:00:00Z' }]"
+value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:5, time: d'2024-07-01T02:00:00Z' }]"
 
 [[test.results]]
-value = " [{ detail: { plan: { direction: 'forward', from: { inclusive: false, value: d'2000-01-01T00:00:00Z' }, index: 'time', to: { inclusive: false, value: NONE } }, table: 'session' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 4 }, operation: 'Fetch' }]"
+value = "[{ detail: { plan: { direction: 'forward', from: { inclusive: false, value: d'2000-01-01T00:00:00Z' }, index: 'time', to: { inclusive: false, value: NONE } }, table: 'session' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 4 }, operation: 'Fetch' }]"
 
 [[test.results]]
 value = "[{ id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:5, time: d'2024-07-01T02:00:00Z' }]"
@@ -42,7 +42,7 @@ value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, tim
 
 */
 
-BEGIN;
+{
     DEFINE INDEX time ON TABLE session COLUMNS time;
     CREATE session:1 SET time = d'2024-07-01T01:00:00Z';
     CREATE session:2 SET time = d'2024-06-30T23:00:00Z';
@@ -51,7 +51,7 @@ BEGIN;
     CREATE session:5 SET time = d'2024-07-01T02:00:00Z';
     CREATE session:6 SET time = d'2024-06-30T23:30:00Z';
     RETURN "OK";
-COMMIT;
+};
 
 SELECT * FROM session WHERE time > d'2000-01-01T00:00:00Z' ORDER BY time ASC LIMIT 4 EXPLAIN FULL;
 SELECT * FROM session WHERE time > d'2000-01-01T00:00:00Z' ORDER BY time ASC LIMIT 4;

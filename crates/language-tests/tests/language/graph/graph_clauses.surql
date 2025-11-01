@@ -30,7 +30,7 @@ value = "[{ edges: [edge:2] }, { edges: [edge:4] }, { edges: [] }]"
 
 */
 
-BEGIN;
+{
 	CREATE a:1, a:2, a:3;
 
 	RELATE a:1->edge:1->a:2 SET foo = 123, bar = true;
@@ -38,7 +38,7 @@ BEGIN;
 	RELATE a:2->edge:3->a:3 SET foo = 456, bar = true;
 	RELATE a:2->edge:4->a:3 SET foo = 456, bar = false;
 	RETURN "OK";
-COMMIT;
+};
 
 SELECT ->edge AS edges FROM a;
 SELECT ->(SELECT foo FROM edge) AS edges FROM a;

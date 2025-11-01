@@ -2,10 +2,16 @@
 [test]
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 error = "The query was not executed due to a cancelled transaction"
 
 [[test.results]]
 error = "The query was not executed due to a cancelled transaction"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "1"

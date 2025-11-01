@@ -24,7 +24,7 @@ value = "[{ detail: { plan: { index: 'idx', prefix: [o:2], ranges: [{ operator: 
 
 
 */
-BEGIN;
+{
     DEFINE INDEX idx ON t FIELDS id[1],b;
     CREATE t:[ 1, o:1 ] SET b=2021;
     CREATE t:[ 2, o:2 ] SET b=2021;
@@ -32,7 +32,7 @@ BEGIN;
     CREATE t:[ 4, o:2 ] SET b=2025;
     CREATE t:[ 5, o:3 ] SET b=2025;
     RETURN "OK";
-COMMIT;
+};
 
 SELECT id FROM t WITH NO INDEX WHERE id[1]=o:1 AND b=2025;
 SELECT id FROM t WHERE id[1]=o:1 AND b=2025;

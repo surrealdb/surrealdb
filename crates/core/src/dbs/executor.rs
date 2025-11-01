@@ -499,6 +499,13 @@ impl Executor {
 
 					self.opt.broker = None;
 
+					// CANCEL returns NONE
+					self.results.push(QueryResult {
+						time: before.elapsed(),
+						result: Ok(convert_value_to_public_value(Value::None)?),
+						query_type: QueryType::Other,
+					});
+
 					return Ok(());
 				}
 				TopLevelExpr::Commit => {
@@ -528,6 +535,13 @@ impl Executor {
 							}
 						}
 
+						// COMMIT returns NONE
+						self.results.push(QueryResult {
+							time: before.elapsed(),
+							result: Ok(convert_value_to_public_value(Value::None)?),
+							query_type: QueryType::Other,
+						});
+
 						return Ok(());
 					};
 
@@ -544,15 +558,17 @@ impl Executor {
 				}
 				TopLevelExpr::Option(stmt) => match self.execute_option_statement(stmt) {
 					Ok(_) => {
-						// skip adding the value as executing an option statement doesn't produce
-						// results
+						// OPTION returns NONE
+						self.results.push(QueryResult {
+							time: before.elapsed(),
+							result: Ok(convert_value_to_public_value(Value::None)?),
+							query_type: QueryType::Other,
+						});
 						continue;
 					}
 					Err(e) => Err(DbResultError::InternalError(e.to_string())),
 				},
 				stmt => {
-					skip_remaining = matches!(stmt, TopLevelExpr::Expr(Expr::Return(_)));
-
 					// reintroduce planner later.
 					let plan = stmt;
 
@@ -608,12 +624,6 @@ impl Executor {
 								return Ok(());
 							}
 						};
-
-					if skip_remaining {
-						// If we skip the next values due to return then we need to clear the other
-						// results.
-						self.results.truncate(start_results)
-					}
 
 					match r {
 						Ok(value) => Ok(convert_value_to_public_value(value)?),
@@ -715,9 +725,23 @@ impl Executor {
 			};
 
 			match stmt {
-				TopLevelExpr::Option(stmt) => this.execute_option_statement(stmt)?,
-				// handle option here because it doesn't produce a result.
+				TopLevelExpr::Option(stmt) => {
+					this.execute_option_statement(stmt)?;
+					// OPTION returns NONE
+					this.results.push(QueryResult {
+						time: Duration::ZERO,
+						result: Ok(convert_value_to_public_value(Value::None)?),
+						query_type: QueryType::Other,
+					});
+				}
 				TopLevelExpr::Begin => {
+					// BEGIN returns NONE
+					this.results.push(QueryResult {
+						time: Duration::ZERO,
+						result: Ok(convert_value_to_public_value(Value::None)?),
+						query_type: QueryType::Other,
+					});
+
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
 						this.results.push(QueryResult {
 							time: Duration::ZERO,
