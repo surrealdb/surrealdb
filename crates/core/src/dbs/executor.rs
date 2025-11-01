@@ -20,12 +20,12 @@ use crate::dbs::response::QueryResult;
 use crate::dbs::{Force, Options, QueryType};
 use crate::doc::DefaultBroker;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
 use crate::expr::statements::OptionStatement;
 use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::slowlog::SlowLogVisit;
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::rpc::DbResultError;
 use crate::sql::{self, Ast};
@@ -90,7 +90,7 @@ impl Executor {
 	///
 	/// Generic over `S` to accept both concrete statements and wrappers that
 	/// implement `Display` and `VisitExpression`.
-	fn check_slow_log<S: VisitExpression + ToSql>(&self, start: &Instant, stm: &S) {
+	fn check_slow_log<S: SlowLogVisit + ToSql>(&self, start: &Instant, stm: &S) {
 		if let Some(slow_log) = self.ctx.slow_log() {
 			slow_log.check_log(&self.ctx, start, stm);
 		}

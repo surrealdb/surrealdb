@@ -13,6 +13,7 @@ use std::time::Duration;
 use async_channel::Sender;
 use indexmap::IndexMap;
 use surrealdb_core::dbs::QueryResult;
+use surrealdb_core::iam::token::Token;
 use surrealdb_types::{Notification, Value};
 use trice::Instant;
 use uuid::Uuid;
@@ -33,6 +34,13 @@ enum RequestEffect {
 	/// Completing this request sets a variable to a give value.
 	Clear {
 		key: String,
+	},
+	/// Completing this request either returns the same token to the caller or a new token if the
+	/// caller provided a refresh token and the old token is expired.
+	Authenticate {
+		/// This is set to `Some(token)` in the initial request and `None` in the response if the
+		/// old token is silently refreshed.
+		token: Option<Token>,
 	},
 	/// No effect
 	None,

@@ -2,12 +2,12 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use surrealdb::types::Duration;
 use surrealdb_core::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget, RouteTarget,
 	Targets,
 };
 use surrealdb_core::kvs::export::TableConfig;
+use surrealdb_types::Duration;
 
 pub(crate) mod parser;
 

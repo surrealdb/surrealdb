@@ -11,7 +11,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::filter::Filter;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::tokenizer::Tokenizer;
@@ -26,16 +25,6 @@ pub(crate) struct DefineAnalyzerStatement {
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
 	pub comment: Option<Expr>,
-}
-
-impl VisitExpression for DefineAnalyzerStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.comment.iter().for_each(|comment| comment.visit(visitor));
-	}
 }
 
 impl Default for DefineAnalyzerStatement {

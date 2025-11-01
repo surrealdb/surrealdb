@@ -11,12 +11,12 @@ use futures::stream::FuturesUnordered;
 use futures::{Sink, SinkExt, StreamExt};
 use opentelemetry::Context as TelemetryContext;
 use opentelemetry::trace::FutureExt;
-use surrealdb::types::{Array, Value};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
 use surrealdb_core::mem::ALLOC;
 use surrealdb_core::rpc::format::Format;
 use surrealdb_core::rpc::{DbResponse, DbResult, DbResultError, Method, RpcProtocol};
+use surrealdb_types::{Array, Value};
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinSet;
@@ -533,7 +533,7 @@ impl RpcProtocol for Websocket {
 		id: Uuid,
 	) -> Result<Arc<surrealdb_core::kvs::Transaction>, surrealdb_core::rpc::RpcError> {
 		debug!("WebSocket get_tx called for transaction {id}");
-		let result = self
+		self
 			.transactions
 			.get(&id)
 			.map(|tx| {
@@ -546,8 +546,7 @@ impl RpcProtocol for Websocket {
 					self.transactions.len()
 				);
 				surrealdb_core::rpc::RpcError::InvalidParams("Transaction not found".to_string())
-			});
-		result
+			})
 	}
 
 	/// Stores a transaction

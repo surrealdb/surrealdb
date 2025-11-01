@@ -23,7 +23,7 @@ use crate::gql::tables::process_tbs;
 use crate::kvs::{Datastore, LockType, TransactionType};
 use crate::val::{
 	Array as SurArray, Number as SurNumber, Object as SurObject, RecordId as SurRecordId,
-	RecordIdKey as SurRecordIdKey, Table, Value as SurValue,
+	RecordIdKey as SurRecordIdKey, Set as SurSet, Table, Value as SurValue,
 };
 
 pub async fn generate_schema(
@@ -457,6 +457,11 @@ fn convert_static_literal(lit: Literal) -> Result<SurValue, GqlError> {
 				exprs.into_iter().map(convert_static_expr).collect();
 			Ok(SurValue::Array(SurArray(vals?)))
 		}
+		Literal::Set(exprs) => {
+			let vals: Result<Vec<SurValue>, GqlError> =
+				exprs.into_iter().map(convert_static_expr).collect();
+			Ok(SurValue::Set(SurSet::from(vals?)))
+		}
 		Literal::Object(entries) => {
 			let mut map = BTreeMap::new();
 			for entry in entries {
@@ -472,7 +477,6 @@ fn convert_static_literal(lit: Literal) -> Result<SurValue, GqlError> {
 		Literal::UnboundedRange => {
 			Err(resolver_error("Unbounded ranges are not supported in GraphQL"))
 		}
-		Literal::Closure(_) => Err(resolver_error("Closures are not supported in GraphQL")),
 	}
 }
 

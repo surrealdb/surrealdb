@@ -5,7 +5,6 @@ namespace = false
 database = false
 
 [env.capabilities]
-allow-experimental = ["bearer_access"]
 
 [test]
 

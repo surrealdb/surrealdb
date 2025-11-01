@@ -32,7 +32,7 @@ impl<'a> Arbitrary<'a> for Regex {
 impl<'a> Arbitrary<'a> for ChangeFeed {
 	fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
 		Ok(Self {
-			expiry: time::Duration::new(u64::arbitrary(u)?, u32::arbitrary(u)?),
+			expiry: time::Duration::new(u64::arbitrary(u)?, u32::arbitrary(u)?).into(),
 			store_diff: bool::arbitrary(u)?,
 		})
 	}

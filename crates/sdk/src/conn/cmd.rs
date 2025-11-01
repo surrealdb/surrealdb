@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::path::PathBuf;
 
 use async_channel::Sender;
+use surrealdb_core::iam::token::Token;
 use surrealdb_core::kvs::export::Config as DbExportConfig;
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 use surrealdb_types::SurrealValue;
@@ -25,7 +26,10 @@ pub(crate) enum Command {
 		credentials: Object,
 	},
 	Authenticate {
-		token: String,
+		token: Token,
+	},
+	Refresh {
+		token: Token,
 	},
 	Invalidate,
 	Begin,
@@ -34,6 +38,9 @@ pub(crate) enum Command {
 	},
 	Commit {
 		txn: Uuid,
+	},
+	Revoke {
+		token: Token,
 	},
 	Query {
 		txn: Option<Uuid>,
@@ -125,6 +132,25 @@ impl Command {
 			} => RouterRequest {
 				id,
 				method: "authenticate",
+				// Extract only the access token for authentication.
+				// If the token has a refresh component, we ignore it here
+				// as authentication only needs the access token.
+				params: Some(Value::Array(Array::from(vec![match token {
+					Token::Access(access) => access.into_value(),
+					Token::WithRefresh {
+						access,
+						..
+					} => access.into_value(),
+				}]))),
+				txn: None,
+			},
+			Command::Refresh {
+				token,
+			} => RouterRequest {
+				id,
+				method: "refresh",
+				// Send the entire token structure (both access and refresh tokens)
+				// to the server for the refresh operation.
 				params: Some(Value::Array(Array::from(vec![Value::from_t(token)]))),
 				txn: None,
 			},
@@ -154,6 +180,14 @@ impl Command {
 				id,
 				method: "cancel",
 				params: Some(Value::Array(Array::from(vec![Value::Uuid(Uuid(txn))]))),
+				txn: None,
+			},
+			Command::Revoke {
+				token,
+			} => RouterRequest {
+				id,
+				method: "revoke",
+				params: Some(Value::Array(Array::from(vec![token.into_value()]))),
 				txn: None,
 			},
 			Command::Query {
@@ -257,10 +291,10 @@ impl Command {
 #[derive(Clone, Debug, SurrealValue)]
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 pub(crate) struct RouterRequest {
-	id: Option<i64>,
-	method: &'static str,
-	params: Option<Value>,
-	txn: Option<Uuid>,
+	pub(crate) id: Option<i64>,
+	pub(crate) method: &'static str,
+	pub(crate) params: Option<Value>,
+	pub(crate) txn: Option<Uuid>,
 }
 
 #[cfg(test)]

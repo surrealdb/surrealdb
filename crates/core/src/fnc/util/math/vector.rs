@@ -3,9 +3,22 @@ use std::collections::HashSet;
 use anyhow::{Result, ensure};
 
 use crate::err::Error;
-use crate::fnc::util::math::deviation::deviation;
-use crate::fnc::util::math::mean::Mean;
+use crate::fnc::util::math::ToFloat;
 use crate::val::Number;
+
+pub(crate) fn deviation<T>(v: &[T], mean: f64, sample: bool) -> f64
+where
+	T: ToFloat,
+{
+	match v.len() {
+		0 => f64::NAN,
+		1 => 0.0,
+		len => {
+			let len = (len - sample as usize) as f64;
+			(v.iter().map(|x| (x.to_float() - mean).powi(2)).sum::<f64>() / len).sqrt()
+		}
+	}
+}
 
 pub(crate) fn check_same_dimension<T>(fnc: &str, a: &[T], b: &[T]) -> Result<()> {
 	ensure!(
@@ -119,8 +132,8 @@ pub trait PearsonSimilarity {
 impl PearsonSimilarity for Vec<Number> {
 	fn pearson_similarity(&self, other: &Self) -> Result<Number> {
 		check_same_dimension("vector::similarity::pearson", self, other)?;
-		let m1 = self.mean();
-		let m2 = other.mean();
+		let m1 = super::mean(self)?.to_float();
+		let m2 = super::mean(other)?.to_float();
 		let covar: f64 = self
 			.iter()
 			.zip(other.iter())

@@ -13,7 +13,8 @@ use crate::syn::parser::unexpected;
 use crate::syn::token::{Glued, Span, TokenKind, t};
 use crate::types::{
 	PublicArray, PublicDuration, PublicFile, PublicGeometry, PublicNumber, PublicObject,
-	PublicRange, PublicRecordId, PublicRecordIdKey, PublicTable, PublicUuid, PublicValue,
+	PublicRange, PublicRecordId, PublicRecordIdKey, PublicTable, PublicUuid,
+	PublicValue,
 };
 
 trait ValueParseFunc {
