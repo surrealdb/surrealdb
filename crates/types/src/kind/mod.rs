@@ -37,7 +37,13 @@ pub enum Kind {
 	/// This is the most generic type for numbers.
 	Number,
 	/// Object type.
-	Object,
+	/// When schemafull is true, only explicitly defined nested fields are allowed.
+	/// When schemafull is false (default), any nested fields are allowed.
+	Object {
+		/// When true, only explicitly defined nested fields are allowed.
+		/// When false (default), any nested fields are allowed.
+		schemafull: bool,
+	},
 	/// String type.
 	String,
 	/// UUID type.
@@ -129,7 +135,15 @@ impl Display for Kind {
 			Kind::Float => write!(f, "float"),
 			Kind::Int => write!(f, "int"),
 			Kind::Number => write!(f, "number"),
-			Kind::Object => write!(f, "object"),
+			Kind::Object {
+				schemafull,
+			} => {
+				if *schemafull {
+					write!(f, "object<schemafull>")
+				} else {
+					write!(f, "object")
+				}
+			}
 			Kind::String => write!(f, "string"),
 			Kind::Uuid => write!(f, "uuid"),
 			Kind::Regex => write!(f, "regex"),

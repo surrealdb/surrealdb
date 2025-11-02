@@ -99,7 +99,9 @@ impl SurrealValue for Resource {
 		Kind::Either(vec![
 			Kind::String,
 			Kind::Record(vec![]),
-			Kind::Object,
+			Kind::Object {
+				schemafull: false,
+			},
 			Kind::Array(Box::new(Kind::Any), None),
 			Kind::Range,
 			Kind::None,

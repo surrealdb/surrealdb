@@ -517,7 +517,9 @@ fn filter_from_type(
 		Kind::Float => {}
 		Kind::Int => {}
 		Kind::Number => {}
-		Kind::Object => {}
+		Kind::Object {
+			..
+		} => {}
 		Kind::String => {}
 		Kind::Uuid => {}
 		Kind::Regex => {}

@@ -273,7 +273,7 @@ impl Fields {
 								#final_ok
 							} else {
 								let err = surrealdb_types::ConversionError::from_value(
-									surrealdb_types::Kind::Object,
+									surrealdb_types::Kind::Object { schemafull: false },
 									&value
 								).with_context(format!("variant '{}'", #variant));
 								return Err(err.into())

@@ -16,7 +16,7 @@ pub fn impl_struct(name: &Ident, generics: &Generics, fields: Fields) -> TokenSt
 				#x
 			} else {
 				let err = surrealdb_types::ConversionError::from_value(
-					surrealdb_types::Kind::Object,
+					surrealdb_types::Kind::Object { schemafull: false },
 					&value
 				);
 				Err(err.into())

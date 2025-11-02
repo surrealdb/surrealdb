@@ -424,7 +424,7 @@ fn generate_simple_kind(ident: &Ident) -> TokenStream2 {
 		"float" => quote! { surrealdb_types::Kind::Float },
 		"int" => quote! { surrealdb_types::Kind::Int },
 		"number" => quote! { surrealdb_types::Kind::Number },
-		"object" => quote! { surrealdb_types::Kind::Object },
+		"object" => quote! { surrealdb_types::Kind::Object { schemafull: false } },
 		"string" => quote! { surrealdb_types::Kind::String },
 		"uuid" => quote! { surrealdb_types::Kind::Uuid },
 		"regex" => quote! { surrealdb_types::Kind::Regex },

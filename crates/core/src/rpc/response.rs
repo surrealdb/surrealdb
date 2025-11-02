@@ -329,7 +329,9 @@ impl DbResponse {
 
 impl SurrealValue for DbResponse {
 	fn kind_of() -> PublicKind {
-		PublicKind::Object
+		PublicKind::Object {
+			schemafull: false,
+		}
 	}
 
 	fn is_value(value: &PublicValue) -> bool {

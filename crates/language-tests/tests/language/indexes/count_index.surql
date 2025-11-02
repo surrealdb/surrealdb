@@ -34,39 +34,6 @@ value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
 [[test.results]]
 value = "[{ count: 3 }]"
 
-[[_test.results]]
-value = "NONE"
-
-[[_test.results]]
-value = "{ building: { initial: 0, pending: 0, status: 'ready', updated: 0 } }"
-
-[[_test.results]]
-value = "[{ detail: { plan: { index: 'idxw', operator: 'Count', where: 'WHERE b = true' }, table: 't' }, operation: 'Iterate Index Count' }, { detail: { idioms: { count: ['count'] }, type: 'Group' }, operation: 'Collector' }]"
-
-[[_test.results]]
-value = "[{ count: 2 }]"
-
-[[_test.results]]
-value = "[{ b: true, id: t:3 }]"
-
-[[_test.results]]
-value = "[{ count: 4 }]"
-
-[[_test.results]]
-value = "[{ count: 3 }]"
-
-[[_test.results]]
-value = "[{ count: 2 }]"
-
-[[_test.results]]
-value = "None"
-
-[[_test.results]]
-value = "{}"
-
-[[_test.results]]
-value = "[{ count: 2 }]"
-
 */
 DEFINE INDEX idx ON t COUNT;
 //DEFINE INDEX idxw ON t COUNT WHERE b = true;

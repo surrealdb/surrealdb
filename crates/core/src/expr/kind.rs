@@ -12,8 +12,8 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
 use crate::fmt::{EscapeIdent, EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::val::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
-	Regex, Set, Uuid,
+	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Range, RecordId, Regex, Set,
+	Uuid,
 };
 
 #[revisioned(revision = 1)]
@@ -115,7 +115,11 @@ pub enum Kind {
 	/// This is the most generic type for numbers.
 	Number,
 	/// Object type.
-	Object,
+	/// When schemafull is true, only explicitly defined nested fields are allowed.
+	/// When schemafull is false (default), any nested fields are allowed.
+	Object {
+		schemafull: bool,
+	},
 	/// String type.
 	String,
 	/// UUID type.
@@ -174,7 +178,13 @@ impl Kind {
 
 	/// Returns true if this type allows nested fields
 	pub(crate) fn allows_any_nested(&self) -> bool {
-		matches!(self, Kind::Any | Kind::Object)
+		matches!(
+			self,
+			Kind::Any
+				| Kind::Object {
+					schemafull: false
+				}
+		)
 	}
 
 	/// Returns true if this type is a record
@@ -217,7 +227,9 @@ impl Kind {
 			| Kind::Float
 			| Kind::Int
 			| Kind::Number
-			| Kind::Object
+			| Kind::Object {
+				..
+			}
 			| Kind::String
 			| Kind::Uuid
 			| Kind::Regex
@@ -250,7 +262,9 @@ impl Kind {
 
 		if !path.is_empty() {
 			match self {
-				Kind::Object => return matches!(path.first(), Some(Part::Field(_) | Part::All)),
+				Kind::Object {
+					..
+				} => return matches!(path.first(), Some(Part::Field(_) | Part::All)),
 				Kind::Either(kinds) => {
 					return kinds
 						.iter()
@@ -413,8 +427,15 @@ impl_basic_has_kind! {
 	Datetime => Datetime,
 	Duration => Duration,
 	Uuid => Uuid,
-	Object => Object,
 	Range => Range,
+}
+
+impl HasKind for crate::val::Object {
+	fn kind() -> Kind {
+		Kind::Object {
+			schemafull: false,
+		}
+	}
 }
 
 macro_rules! impl_geometry_has_kind{
@@ -458,7 +479,15 @@ impl Display for Kind {
 			Kind::Float => f.write_str("float"),
 			Kind::Int => f.write_str("int"),
 			Kind::Number => f.write_str("number"),
-			Kind::Object => f.write_str("object"),
+			Kind::Object {
+				schemafull,
+			} => {
+				if *schemafull {
+					f.write_str("object<schemafull>")
+				} else {
+					f.write_str("object")
+				}
+			}
 			Kind::String => f.write_str("string"),
 			Kind::Uuid => f.write_str("uuid"),
 			Kind::Regex => f.write_str("regex"),
@@ -534,7 +563,11 @@ impl From<crate::types::PublicKind> for Kind {
 			crate::types::PublicKind::Float => Kind::Float,
 			crate::types::PublicKind::Int => Kind::Int,
 			crate::types::PublicKind::Number => Kind::Number,
-			crate::types::PublicKind::Object => Kind::Object,
+			crate::types::PublicKind::Object {
+				schemafull,
+			} => Kind::Object {
+				schemafull,
+			},
 			crate::types::PublicKind::String => Kind::String,
 			crate::types::PublicKind::Uuid => Kind::Uuid,
 			crate::types::PublicKind::Regex => Kind::Regex,
@@ -577,7 +610,11 @@ impl From<Kind> for crate::types::PublicKind {
 			Kind::Float => crate::types::PublicKind::Float,
 			Kind::Int => crate::types::PublicKind::Int,
 			Kind::Number => crate::types::PublicKind::Number,
-			Kind::Object => crate::types::PublicKind::Object,
+			Kind::Object {
+				schemafull,
+			} => crate::types::PublicKind::Object {
+				schemafull,
+			},
 			Kind::String => crate::types::PublicKind::String,
 			Kind::Uuid => crate::types::PublicKind::Uuid,
 			Kind::Regex => crate::types::PublicKind::Regex,
@@ -771,8 +808,10 @@ impl KindLiteral {
 
 				Kind::Array(Box::new(Kind::Any), None)
 			}
-			Self::Object(_) => Kind::Object,
-			//Self::DiscriminatedObject(_, _) => Kind::Object,
+			Self::Object(_) => Kind::Object {
+				schemafull: false,
+			},
+			//Self::DiscriminatedObject(_, _) => Kind::Object { schemafull: false },
 			Self::Bool(_) => Kind::Bool,
 		}
 	}

@@ -22,7 +22,7 @@ fn test_kind_proc_macro() {
 		(float) => Kind::Float,
 		(int) => Kind::Int,
 		(number) => Kind::Number,
-		(object) => Kind::Object,
+		(object) => Kind::Object { schemafull: false },
 		(string) => Kind::String,
 		(uuid) => Kind::Uuid,
 		(regex) => Kind::Regex,

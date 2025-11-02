@@ -117,7 +117,11 @@ pub enum Kind {
 	/// This is the most generic type for numbers.
 	Number,
 	/// Object type.
-	Object,
+	/// When schemafull is true, only explicitly defined nested fields are allowed.
+	/// When schemafull is false (default), any nested fields are allowed.
+	Object {
+		schemafull: bool,
+	},
 	/// String type.
 	String,
 	/// UUID type.
@@ -198,7 +202,11 @@ impl From<Kind> for crate::expr::Kind {
 			Kind::Float => crate::expr::Kind::Float,
 			Kind::Int => crate::expr::Kind::Int,
 			Kind::Number => crate::expr::Kind::Number,
-			Kind::Object => crate::expr::Kind::Object,
+			Kind::Object {
+				schemafull,
+			} => crate::expr::Kind::Object {
+				schemafull,
+			},
 			Kind::String => crate::expr::Kind::String,
 			Kind::Uuid => crate::expr::Kind::Uuid,
 			Kind::Regex => crate::expr::Kind::Regex,
@@ -237,7 +245,11 @@ impl From<crate::expr::Kind> for Kind {
 			crate::expr::Kind::Float => Kind::Float,
 			crate::expr::Kind::Int => Kind::Int,
 			crate::expr::Kind::Number => Kind::Number,
-			crate::expr::Kind::Object => Kind::Object,
+			crate::expr::Kind::Object {
+				schemafull,
+			} => Kind::Object {
+				schemafull,
+			},
 			crate::expr::Kind::String => Kind::String,
 			crate::expr::Kind::Uuid => Kind::Uuid,
 			crate::expr::Kind::Regex => Kind::Regex,
@@ -280,7 +292,11 @@ impl From<Kind> for crate::types::PublicKind {
 			Kind::Float => crate::types::PublicKind::Float,
 			Kind::Int => crate::types::PublicKind::Int,
 			Kind::Number => crate::types::PublicKind::Number,
-			Kind::Object => crate::types::PublicKind::Object,
+			Kind::Object {
+				schemafull,
+			} => crate::types::PublicKind::Object {
+				schemafull,
+			},
 			Kind::String => crate::types::PublicKind::String,
 			Kind::Uuid => crate::types::PublicKind::Uuid,
 			Kind::Regex => crate::types::PublicKind::Regex,
@@ -319,7 +335,11 @@ impl From<crate::types::PublicKind> for Kind {
 			crate::types::PublicKind::Float => Kind::Float,
 			crate::types::PublicKind::Int => Kind::Int,
 			crate::types::PublicKind::Number => Kind::Number,
-			crate::types::PublicKind::Object => Kind::Object,
+			crate::types::PublicKind::Object {
+				schemafull,
+			} => Kind::Object {
+				schemafull,
+			},
 			crate::types::PublicKind::String => Kind::String,
 			crate::types::PublicKind::Uuid => Kind::Uuid,
 			crate::types::PublicKind::Regex => Kind::Regex,
@@ -358,7 +378,15 @@ impl Display for Kind {
 			Kind::Float => f.write_str("float"),
 			Kind::Int => f.write_str("int"),
 			Kind::Number => f.write_str("number"),
-			Kind::Object => f.write_str("object"),
+			Kind::Object {
+				schemafull,
+			} => {
+				if *schemafull {
+					f.write_str("object<schemafull>")
+				} else {
+					f.write_str("object")
+				}
+			}
 			Kind::String => f.write_str("string"),
 			Kind::Uuid => f.write_str("uuid"),
 			Kind::Regex => f.write_str("regex"),
@@ -643,7 +671,7 @@ mod tests {
 	#[case::float(Kind::Float, "float")]
 	#[case::int(Kind::Int, "int")]
 	#[case::number(Kind::Number, "number")]
-	#[case::object(Kind::Object, "object")]
+	#[case::object(Kind::Object { schemafull: false }, "object")]
 	#[case::string(Kind::String, "string")]
 	#[case::uuid(Kind::Uuid, "uuid")]
 	#[case::regex(Kind::Regex, "regex")]
@@ -679,7 +707,7 @@ mod tests {
 	#[case::float(Kind::Float)]
 	#[case::int(Kind::Int)]
 	#[case::number(Kind::Number)]
-	#[case::object(Kind::Object)]
+	#[case::object(Kind::Object { schemafull: false })]
 	#[case::string(Kind::String)]
 	#[case::uuid(Kind::Uuid)]
 	#[case::regex(Kind::Regex)]
@@ -709,7 +737,7 @@ mod tests {
 	#[case::float(Kind::Float)]
 	#[case::int(Kind::Int)]
 	#[case::number(Kind::Number)]
-	#[case::object(Kind::Object)]
+	#[case::object(Kind::Object { schemafull: false })]
 	#[case::string(Kind::String)]
 	#[case::uuid(Kind::Uuid)]
 	#[case::regex(Kind::Regex)]

@@ -87,7 +87,9 @@ impl ToFlatbuffers for Kind {
 						.as_union_value(),
 				),
 			},
-			Self::Object => proto_fb::KindArgs {
+			Self::Object {
+				..
+			} => proto_fb::KindArgs {
 				kind_type: proto_fb::KindType::Object,
 				kind: Some(
 					proto_fb::ObjectKind::create(builder, &proto_fb::ObjectKindArgs {})
@@ -408,7 +410,9 @@ impl FromFlatbuffers for Kind {
 			KindType::Datetime => Ok(Kind::Datetime),
 			KindType::Uuid => Ok(Kind::Uuid),
 			KindType::Bytes => Ok(Kind::Bytes),
-			KindType::Object => Ok(Kind::Object),
+			KindType::Object => Ok(Kind::Object {
+				schemafull: false,
+			}),
 			KindType::Table => {
 				let Some(table) = input.kind_as_table() else {
 					return Err(anyhow::anyhow!("Missing table kind"));
@@ -653,7 +657,7 @@ mod tests {
 	#[case::float(Kind::Float)]
 	#[case::int(Kind::Int)]
 	#[case::number(Kind::Number)]
-	#[case::object(Kind::Object)]
+	#[case::object(Kind::Object { schemafull: false })]
 	#[case::string(Kind::String)]
 	#[case::uuid(Kind::Uuid)]
 	#[case::regex(Kind::Regex)]

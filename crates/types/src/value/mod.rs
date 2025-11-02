@@ -494,7 +494,9 @@ impl Value {
 			Value::Uuid(_) => Kind::Uuid,
 			Value::Array(_) => Kind::Array(Box::new(Kind::Any), None),
 			Value::Set(_) => Kind::Set(Box::new(Kind::Any), None),
-			Value::Object(_) => Kind::Object,
+			Value::Object(_) => Kind::Object {
+				schemafull: false,
+			},
 			Value::Geometry(_) => Kind::Geometry(Vec::new()),
 			Value::Bytes(_) => Kind::Bytes,
 			Value::Table(_) => Kind::Table(Vec::new()),
@@ -595,7 +597,9 @@ impl Value {
 			Kind::Float => self.is_float(),
 			Kind::Int => self.is_int(),
 			Kind::Number => self.is_number(),
-			Kind::Object => self.is_object(),
+			Kind::Object {
+				..
+			} => self.is_object(),
 			Kind::String => self.is_string(),
 			Kind::Uuid => self.is_uuid(),
 			Kind::Regex => matches!(self, Value::Regex(_)),
@@ -1370,13 +1374,13 @@ mod tests {
 	)]
 	#[case::object_empty(
 		Value::Object(Object::default()),
-		vec![Kind::Object, Kind::Any, Kind::Literal(KindLiteral::Object(BTreeMap::new()))],
+		vec![Kind::Object { schemafull: false }, Kind::Any, Kind::Literal(KindLiteral::Object(BTreeMap::new()))],
 		vec![Kind::None, Kind::Null]
 	)]
 	#[case::object_with_fields(
 		Value::Object(object! { key: "value".to_string() }),
 		vec![
-			Kind::Object,
+			Kind::Object { schemafull: false },
 			Kind::Any,
 			Kind::Literal(KindLiteral::Object(BTreeMap::from([(
 				"key".to_string(),
