@@ -17,6 +17,7 @@ pub struct SubscriptionDefinition {
 	pub(crate) id: Uuid,
 	pub(crate) node: Uuid,
 	pub(crate) fields: Fields,
+	pub(crate) diff: bool,
 	pub(crate) what: Expr,
 	pub(crate) cond: Option<Expr>,
 	pub(crate) fetch: Option<Fetchs>,
@@ -43,6 +44,7 @@ impl SubscriptionDefinition {
 	fn to_sql_definition(&self) -> crate::sql::LiveStatement {
 		crate::sql::LiveStatement {
 			fields: self.fields.clone().into(),
+			diff: self.diff,
 			what: self.what.clone().into(),
 			cond: self.cond.clone().map(|c| crate::sql::Cond(c.into())),
 			fetch: self.fetch.clone().map(|f| f.into()),
@@ -55,7 +57,8 @@ impl InfoStructure for SubscriptionDefinition {
 		Value::from(map! {
 			"id".to_string() => crate::val::Uuid(self.id).into(),
 			"node".to_string() => crate::val::Uuid(self.node).into(),
-			"expr".to_string() => self.fields.structure(),
+			"fields".to_string() => self.fields.structure(),
+			"diff".to_string() => self.diff.into(),
 			"what".to_string() => self.what.structure(),
 			"cond".to_string(), if let Some(v) = self.cond => v.structure(),
 			"fetch".to_string(), if let Some(v) = self.fetch => v.structure(),
