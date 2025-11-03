@@ -132,11 +132,14 @@ impl Parser<'_> {
 		self.parse_block_remaining(stk, start, Vec::new()).await
 	}
 
-	/// Parses a block of statements
+	/// Parses the remaining statements in a block.
 	///
 	/// # Parser State
 	/// Expects the starting `{` to have already been eaten and its span to be
 	/// handed to this functions as the `start` parameter.
+	///
+	/// Any statements which have already been parsed can be passed in as the `existing_stmts`
+	/// parameter.
 	async fn parse_block_remaining(
 		&mut self,
 		stk: &mut Stk,
