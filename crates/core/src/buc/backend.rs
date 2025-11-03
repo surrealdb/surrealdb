@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::store::ObjectStore;
-#[cfg(feature = "surrealism")]
+#[cfg(not(target_arch = "wasm32"))]
 use super::store::file::FileStore;
 use super::store::memory::MemoryStore;
 use crate::err::Error;
@@ -15,7 +15,7 @@ pub(crate) async fn connect(
 		return Ok(Arc::new(MemoryStore::new()));
 	}
 
-	#[cfg(feature = "surrealism")]
+	#[cfg(not(target_arch = "wasm32"))]
 	if let Some(opts) = FileStore::parse_url(url).await? {
 		return Ok(Arc::new(FileStore::new(opts)));
 	}
