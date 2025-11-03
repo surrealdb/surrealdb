@@ -235,10 +235,6 @@ impl_roughly_eq_delegate!(
 	i64, bool, String, Geometry, Bytes, Range, Regex, Duration, File
 );
 
-// impl_roughly_eq_struct!(Array, 0);
-// impl_roughly_eq_struct!(Set, 0);
-// impl_roughly_eq_struct!(Object, 0);
-
 impl RoughlyEq for Array {
 	fn roughly_equal(&self, other: &Self, config: &RoughlyEqConfig) -> bool {
 		if self.len() != other.len() {

@@ -19,7 +19,7 @@ use crate::sql::statements::define::{
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	AccessType, Block, Expr, Index, Kind, Literal, Param, Permission, Permissions, Scoring,
+	AccessType, Expr, Index, Kind, Literal, Param, Permission, Permissions, Scoring,
 	TableType, access_type, table_type,
 };
 use crate::syn::error::bail;
@@ -876,16 +876,7 @@ impl Parser<'_> {
 				}
 				t!("COMPUTED") => {
 					self.pop_peek();
-
-					if self.eat(t!("{")) {
-						let span = self.last_span();
-						res.computed = Some(Expr::Block(Box::new(
-							stk.run(|stk| self.parse_block(stk, span)).await?,
-						)));
-					} else {
-						let expr = stk.run(|stk| self.parse_expr_field(stk)).await?;
-						res.computed = Some(Expr::Block(Box::new(Block(vec![expr]))));
-					}
+					res.computed = Some(stk.run(|stk| self.parse_expr_field(stk)).await?);
 				}
 				_ => break,
 			}
