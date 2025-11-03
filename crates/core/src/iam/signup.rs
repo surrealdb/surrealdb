@@ -996,11 +996,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					DURATION FOR SESSION 2h
 				;
 				"#,
-				&sess,
-				None,
-			)
-			.await
-			.unwrap();
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
 
 			// Signin with the user
 			let mut sess = Session {

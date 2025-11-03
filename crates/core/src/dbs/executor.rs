@@ -675,6 +675,48 @@ impl Executor {
 		Self::execute_expr_stream(kvs, ctx, opt, false, stream).await
 	}
 
+	/// Execute a logical plan with an existing transaction
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	pub async fn execute_plan_with_transaction(
+		ctx: Context,
+		opt: Options,
+		qry: LogicalPlan,
+	) -> Result<Vec<QueryResult>> {
+		// The transaction is already set in the context
+		// Execute each expression with the transaction
+		let tx = ctx.tx();
+		let mut executor = Executor::new(ctx, opt);
+		let mut results = Vec::new();
+
+		for expr in qry.expressions {
+			let start = Instant::now();
+			let result = executor.execute_plan_in_transaction(tx.clone(), &start, expr).await;
+
+			let time = start.elapsed();
+			let query_result = match result {
+				Ok(value) | Err(ControlFlow::Return(value)) => QueryResult {
+					time,
+					result: crate::val::convert_value_to_public_value(value)
+						.map_err(|e| crate::rpc::DbResultError::InternalError(e.to_string())),
+					query_type: QueryType::Other,
+				},
+				Err(ControlFlow::Err(e)) => QueryResult {
+					time,
+					result: Err(DbResultError::InternalError(e.to_string())),
+					query_type: QueryType::Other,
+				},
+				Err(ControlFlow::Continue) | Err(ControlFlow::Break) => QueryResult {
+					time,
+					result: Err(DbResultError::InternalError("Invalid control flow".to_string())),
+					query_type: QueryType::Other,
+				},
+			};
+			results.push(query_result);
+		}
+
+		Ok(results)
+	}
+
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
 	pub async fn execute_stream<S>(
 		kvs: &Datastore,

@@ -82,7 +82,7 @@ macro_rules! into_future {
 					}
 				};
 
-				let cmd = Command::RawQuery {
+				let cmd = Command::Query {
 					txn,
 					query,
 					variables,
