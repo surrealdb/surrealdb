@@ -254,6 +254,8 @@ args = [
     "--features",
     "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
     "--workspace",
+    "--exclude", "surrealism-cli",
+    "--exclude", "demo",
     "--no-fail-fast",
     "--",
     "--skip",
