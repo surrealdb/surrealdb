@@ -595,13 +595,16 @@ pub trait RpcProtocol {
 			x => Expr::from_public_value(x),
 		};
 
+		let (diff, fields) = if diff.unwrap_or_default().is_true() {
+			(true, Fields::none())
+		} else {
+			(false, Fields::all())
+		};
+
 		// Specify the SQL query string
 		let sql = LiveStatement {
-			fields: if diff.unwrap_or(PublicValue::None).is_true() {
-				Fields::none()
-			} else {
-				Fields::all()
-			},
+			fields,
+			diff,
 			what,
 			cond: None,
 			fetch: None,
