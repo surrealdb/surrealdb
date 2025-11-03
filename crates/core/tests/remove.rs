@@ -177,6 +177,7 @@ async fn remove_statement_analyzer() -> Result<()> {
 			configs: {},
 			functions: {},
 			models: {},
+			modules: {},
 			params: {},
 			sequences: {},
 			tables: {},
