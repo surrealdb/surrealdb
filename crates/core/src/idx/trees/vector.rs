@@ -328,11 +328,11 @@ impl Vector {
 
 	fn mem_size(&self) -> usize {
 		let s = match self {
-			Self::F64(arr) => arr.len() * size_of::<f64>(),
-			Self::F32(arr) => arr.len() * size_of::<f32>(),
-			Self::I64(arr) => arr.len() * size_of::<i64>(),
-			Self::I32(arr) => arr.len() * size_of::<i32>(),
-			Self::I16(arr) => arr.len() * size_of::<i16>(),
+			Self::F64(arr) => arr.len() * std::mem::size_of::<f64>(),
+			Self::F32(arr) => arr.len() * std::mem::size_of::<f32>(),
+			Self::I64(arr) => arr.len() * std::mem::size_of::<i64>(),
+			Self::I32(arr) => arr.len() * std::mem::size_of::<i32>(),
+			Self::I16(arr) => arr.len() * std::mem::size_of::<i16>(),
 		};
 		// Array1 overhead (approximately 24 bytes for ndarray metadata)
 		s + 24
@@ -401,10 +401,8 @@ impl<'de> Deserialize<'de> for SharedVector {
 
 impl SharedVector {
 	pub(super) fn mem_size(&self) -> usize {
-		// - Vector size
-		// - Arc pointer (8 bytes)
-		// - Cached hash (8 bytes)
-		self.0.mem_size() + 8 + 8
+		// SharedVector stack size + Vector heap size + Arc heap overhead
+		std::mem::size_of::<Self>() + self.0.mem_size() + 16
 	}
 }
 

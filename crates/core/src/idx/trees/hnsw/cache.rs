@@ -20,7 +20,7 @@ type VectorCacheKey = (IndexId, ElementId);
 impl Weighter<VectorCacheKey, SharedVector> for VectorWeighter {
 	fn weight(&self, key: &(IndexId, ElementId), val: &SharedVector) -> u64 {
 		// Calculate total memory: vector (including Arc + hash) + IndexId + ElementId
-		(val.mem_size() + size_of_val(&key.0) + size_of_val(&key.1)) as u64
+		(val.mem_size() + std::mem::size_of_val(&key.0) + std::mem::size_of_val(&key.1)) as u64
 	}
 }
 
