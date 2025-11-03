@@ -1,5 +1,17 @@
 [workspace]
-members = [".", "crates/core", "crates/sdk", "crates/types", "crates/types-derive"]
+members = [
+    ".", 
+    "crates/core", 
+    "crates/sdk", 
+    "crates/types", 
+    "crates/types-derive", 
+    "crates/surrealism/surrealism", 
+    "crates/surrealism/surrealism-cli", 
+    "crates/surrealism/surrealism-macros", 
+    "crates/surrealism/surrealism-runtime", 
+    "crates/surrealism/surrealism-types",
+    "crates/surrealism/demo"
+]
 
 [workspace.package]
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
@@ -27,6 +39,11 @@ surrealdb-core = { version = "=3.0.0-alpha.12", path = "crates/core", default-fe
 surrealdb-macros = { version = "=3.0.0-alpha.12", path = "crates/macros" }
 surrealdb-types = { version = "=3.0.0-alpha.12", path = "crates/types" }
 surrealdb-types-derive = { version = "=3.0.0-alpha.12", path = "crates/types-derive" }
+surrealism = { version = "=0.1.0", path = "crates/surrealism/surrealism" }
+surrealism-cli = { version = "=0.1.0", path = "crates/surrealism/surrealism-cli" }
+surrealism-macros = { version = "=0.1.0", path = "crates/surrealism/surrealism-macros", default-features = false }
+surrealism-runtime = { version = "=0.1.0", path = "crates/surrealism/surrealism-runtime" }
+surrealism-types = { version = "=0.1.0", path = "crates/surrealism/surrealism-types", default-features = false }
 
 # External surreal crates
 affinitypool = "0.3.1"
@@ -175,6 +192,17 @@ time = "0.3.36"
 tracing-subscriber = "0.3.18"
 wiremock = "0.6.0"
 
+# Surrealism specific dependencies
+clap = { version = "4.5.40", features = ["derive"] }
+toml = "0.8.10"
+tar = "0.4.40"
+zstd = "0.13.0"
+wasmtime = { version = "34.0.1", default-features = false, features = ["cranelift", "winch"] }
+wasmtime-wasi = "34.0.1"
+walrus = "0.20.3"
+wasm-opt = "0.116.0"
+candle-core = "0.9.1"
+
 [package]
 name = "surreal"
 publish = false
@@ -201,12 +229,14 @@ default = [
     "storage-rocksdb",
     "scripting",
     "http",
+    "surrealism",
 ]
 http = ["surrealdb/http"]
 jwks = ["surrealdb/jwks"]
 ml = ["surrealdb/ml"]
 performance-profiler = ["dep:pprof"]
 scripting = ["surrealdb/scripting"]
+surrealism = ["surrealdb-core/surrealism"]
 storage-mem = ["surrealdb/kv-mem"]
 storage-indxdb = ["surrealdb/kv-indxdb"]
 storage-rocksdb = ["surrealdb/kv-rocksdb"]

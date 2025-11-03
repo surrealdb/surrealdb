@@ -6,7 +6,7 @@ use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
-use crate::dbs::capabilities::MethodTarget;
+use crate::dbs::capabilities::{ExperimentalTarget, MethodTarget};
 use crate::dbs::{QueryResult, QueryType, Session};
 use crate::err::Error;
 use crate::iam::token::Token;
@@ -1286,18 +1286,90 @@ pub trait RpcProtocol {
 			}
 		};
 
-		let name = if let Some(rest) = name.strip_prefix("fn::") {
-			Function::Custom(rest.to_owned())
-		} else if let Some(rest) = name.strip_prefix("ml::") {
-			let name = rest.to_owned();
-			Function::Model(Model {
-				name,
-				version: version.ok_or(RpcError::InvalidParams(
-					"Expected version to be set for model function".to_string(),
-				))?,
-			})
-		} else {
-			Function::Normal(name)
+		let segments = name.split("::").collect::<Vec<&str>>();
+		let name = match segments.first() {
+			Some(&"fn") => Function::Custom(segments[1..].join("::")),
+			Some(&"mod") => {
+				if !self
+					.kvs()
+					.get_capabilities()
+					.allows_experimental(&ExperimentalTarget::Surrealism)
+				{
+					return Err(RpcError::InvalidParams(
+						"Experimental capability `surrealism` is not enabled".to_string(),
+					));
+				}
+
+				let Some(name) = segments.get(1).map(|x| (*x).to_string()) else {
+					return Err(RpcError::InvalidParams("Expected module name".to_string()));
+				};
+
+				let sub = segments.get(2).map(|x| (*x).to_string());
+
+				Function::Module(name, sub)
+			}
+			Some(&"silo") => {
+				if !self
+					.kvs()
+					.get_capabilities()
+					.allows_experimental(&ExperimentalTarget::Surrealism)
+				{
+					return Err(RpcError::InvalidParams(
+						"Experimental capability `surrealism` is not enabled".to_string(),
+					));
+				}
+
+				let Some(org) = segments.get(1).map(|x| (*x).to_string()) else {
+					return Err(RpcError::InvalidParams(
+						"Expected silo organisation name".to_string(),
+					));
+				};
+
+				let Some(pkg) = segments.get(2).map(|x| (*x).to_string()) else {
+					return Err(RpcError::InvalidParams("Expected silo package name".to_string()));
+				};
+
+				let Some(version) = version else {
+					return Err(RpcError::InvalidParams("Expected silo version".to_string()));
+				};
+				let mut split = version.split('.');
+				let major = split.next().and_then(|s| s.parse::<u32>().ok()).ok_or_else(|| {
+					RpcError::InvalidParams(
+						"Expected major version (u32) in version string".to_string(),
+					)
+				})?;
+				let minor = split.next().and_then(|s| s.parse::<u32>().ok()).ok_or_else(|| {
+					RpcError::InvalidParams(
+						"Expected minor version (u32) in version string".to_string(),
+					)
+				})?;
+				let patch = split.next().and_then(|s| s.parse::<u32>().ok()).ok_or_else(|| {
+					RpcError::InvalidParams(
+						"Expected patch version (u32) in version string".to_string(),
+					)
+				})?;
+
+				let sub = segments.get(3).map(|x| (*x).to_string());
+
+				Function::Silo {
+					org,
+					pkg,
+					major,
+					minor,
+					patch,
+					sub,
+				}
+			}
+			Some(&"ml") => {
+				let name = segments[1..].join("::");
+				Function::Model(Model {
+					name,
+					version: version.ok_or(RpcError::InvalidParams(
+						"Expected version to be set for model function".to_string(),
+					))?,
+				})
+			}
+			_ => Function::Normal(name),
 		};
 
 		let expr = Expr::FunctionCall(Box::new(FunctionCall {

@@ -73,6 +73,8 @@ use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::{LockType, TransactionType};
 use crate::rpc::DbResultError;
 use crate::sql::Ast;
+#[cfg(feature = "surrealism")]
+use crate::surrealism::cache::SurrealismCache;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::types::{PublicNotification, PublicValue, PublicVariables};
 use crate::val::{Value, convert_value_to_public_value};
@@ -124,6 +126,9 @@ pub struct Datastore {
 	buckets: Arc<BucketConnections>,
 	// The sequences
 	sequences: Sequences,
+	// The surrealism cache
+	#[cfg(feature = "surrealism")]
+	surrealism_cache: Arc<SurrealismCache>,
 }
 
 #[derive(Clone)]
@@ -653,6 +658,8 @@ impl Datastore {
 			cache: Arc::new(DatastoreCache::new()),
 			buckets: Arc::new(DashMap::new()),
 			sequences: Sequences::new(tf, id),
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: Arc::new(SurrealismCache::new()),
 		})
 	}
 
@@ -678,6 +685,8 @@ impl Datastore {
 			buckets: Arc::new(DashMap::new()),
 			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: Arc::new(SurrealismCache::new()),
 		}
 	}
 
@@ -1334,6 +1343,9 @@ impl Datastore {
 				.get_capabilities()
 				.allows_experimental(&ExperimentalTarget::DefineApi),
 			files_enabled: ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
+			surrealism_enabled: ctx
+				.get_capabilities()
+				.allows_experimental(&ExperimentalTarget::Surrealism),
 			..Default::default()
 		};
 		let mut statements_stream = StatementStream::new_with_settings(parser_settings);
@@ -1943,6 +1955,8 @@ impl Datastore {
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 			self.buckets.clone(),
+			#[cfg(feature = "surrealism")]
+			self.surrealism_cache.clone(),
 		)?;
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {

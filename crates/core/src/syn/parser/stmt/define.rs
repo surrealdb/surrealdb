@@ -19,14 +19,18 @@ use crate::sql::statements::define::{
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	AccessType, Expr, Index, Kind, Literal, Param, Permission, Permissions, Scoring, TableType,
-	access_type, table_type,
+	AccessType, DefineModuleStatement, Expr, Index, Kind, Literal, Param, Permission, Permissions,
+	Scoring, TableType, access_type, table_type,
 };
+#[cfg(feature = "surrealism")]
+use crate::sql::{ModuleExecutable, SiloExecutable, SurrealismExecutable};
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Token, TokenKind, t};
 use crate::types::PublicDuration;
+#[cfg(feature = "surrealism")]
+use crate::types::PublicFile;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_define_stmt(
@@ -58,6 +62,7 @@ impl Parser<'_> {
 			t!("CONFIG") => self.parse_define_config(stk).await.map(DefineStatement::Config),
 			t!("BUCKET") => self.parse_define_bucket(stk, next).await.map(DefineStatement::Bucket),
 			t!("SEQUENCE") => self.parse_define_sequence(stk).await.map(DefineStatement::Sequence),
+			t!("MODULE") => self.parse_define_module(stk).await.map(DefineStatement::Module),
 			_ => unexpected!(self, next, "a define statement keyword"),
 		}
 	}
@@ -193,6 +198,107 @@ impl Parser<'_> {
 		}
 
 		Ok(res)
+	}
+
+	#[cfg(not(feature = "surrealism"))]
+	pub(crate) async fn parse_define_module(
+		&mut self,
+		_stk: &mut Stk,
+	) -> ParseResult<DefineModuleStatement> {
+		bail!(
+			"Surrealism modules are not supported in WASM environments",
+			@self.last_span() => "Use of `DEFINE MODULE` is not supported in WASM environments"
+		)
+	}
+
+	#[cfg(feature = "surrealism")]
+	pub(crate) async fn parse_define_module(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineModuleStatement> {
+		if !self.settings.surrealism_enabled {
+			bail!(
+				"Experimental capability `surrealism` is not enabled",
+				@self.last_span() => "Use of `DEFINE MODULE` is still experimental"
+			)
+		}
+
+		let kind = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			DefineKind::IfNotExists
+		} else if self.eat(t!("OVERWRITE")) {
+			DefineKind::Overwrite
+		} else {
+			DefineKind::Default
+		};
+
+		let name = if self.eat(t!("mod")) {
+			expected!(self, t!("::"));
+			let name = self.parse_ident()?;
+			expected!(self, t!("AS"));
+			Some(name)
+		} else {
+			None
+		};
+
+		let peek = self.peek();
+		let executable = match peek.kind {
+			t!("silo") => {
+				self.pop_peek();
+				expected!(self, t!("::"));
+				let organisation = self.parse_ident()?;
+				expected!(self, t!("::"));
+				let package = self.parse_ident()?;
+				expected!(self, t!("<"));
+				let major = self.next_token_value::<u32>()?;
+				expected!(self, t!("."));
+				let minor = self.next_token_value::<u32>()?;
+				expected!(self, t!("."));
+				let patch = self.next_token_value::<u32>()?;
+				expected!(self, t!(">"));
+
+				ModuleExecutable::Silo(SiloExecutable {
+					organisation,
+					package,
+					major,
+					minor,
+					patch,
+				})
+			}
+			t!("f\"") | t!("f'") => {
+				let file = self.next_token_value::<PublicFile>()?;
+				ModuleExecutable::Surrealism(SurrealismExecutable(file.into()))
+			}
+			_ => {
+				unexpected!(self, peek, "a module executable");
+			}
+		};
+
+		let mut definition = DefineModuleStatement {
+			kind,
+			name,
+			executable,
+			comment: None,
+			permissions: Permission::default(),
+		};
+
+		loop {
+			match self.peek_kind() {
+				t!("COMMENT") => {
+					self.pop_peek();
+					definition.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
+				}
+				t!("PERMISSIONS") => {
+					self.pop_peek();
+					definition.permissions =
+						stk.run(|ctx| self.parse_permission_value(ctx)).await?;
+				}
+				_ => break,
+			}
+		}
+
+		Ok(definition)
 	}
 
 	pub(crate) async fn parse_define_user(

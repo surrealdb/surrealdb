@@ -361,7 +361,7 @@ impl Ids64 {
 		}
 	}
 
-	pub(in crate::idx) fn iter(&self) -> Box<dyn Iterator<Item = DocId> + '_> {
+	pub(in crate::idx) fn iter(&self) -> Box<dyn Iterator<Item = DocId> + Send + '_> {
 		match &self {
 			Self::Empty => Box::new(EmptyIterator {}),
 			Self::One(d) => Box::new(OneDocIterator(Some(*d))),

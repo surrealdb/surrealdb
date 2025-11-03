@@ -164,6 +164,7 @@ impl InfoStatement {
 						"analyzers".to_string() => process(txn.all_db_analyzers(ns, db).await?),
 						"buckets".to_string() => process(txn.all_db_buckets(ns, db).await?),
 						"functions".to_string() => process(txn.all_db_functions(ns, db).await?),
+						"modules".to_string() => process(txn.all_db_modules(ns, db).await?),
 						"models".to_string() => process(txn.all_db_models(ns, db).await?),
 						"params".to_string() => process(txn.all_db_params(ns, db).await?),
 						"tables".to_string() => process(txn.all_tb(ns, db, version).await?),
@@ -206,6 +207,13 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_db_functions(ns, db).await?.iter() {
 								out.insert(v.name.clone(), v.to_sql().into());
+							}
+							out.into()
+						},
+						"modules".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_db_modules(ns, db).await?.iter() {
+								out.insert(v.get_storage_name()?, v.to_sql().into());
 							}
 							out.into()
 						},

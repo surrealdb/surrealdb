@@ -35,6 +35,8 @@ mod doc;
 mod exe;
 mod fnc;
 mod key;
+#[cfg(feature = "surrealism")]
+mod surrealism;
 mod sys;
 
 pub mod api;

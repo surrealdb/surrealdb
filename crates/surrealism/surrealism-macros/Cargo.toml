@@ -1,0 +1,20 @@
+[package]
+name = "surrealism-macros"
+version = "0.1.0"
+edition = "2021"
+authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
+description = "Macros for Surrealism."
+license-file = "LICENSE"
+repository = "https://github.com/surrealdb/surrealdb"
+homepage = "https://github.com/surrealdb/surrealdb"
+
+[dependencies]
+quote = "1.0"
+syn = { version = "2.0", features = ["full"] }
+proc-macro2 = "1.0"
+
+[lib]
+proc-macro = true
+
+[lints]
+workspace = true
