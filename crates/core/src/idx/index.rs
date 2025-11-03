@@ -139,7 +139,8 @@ impl<'a> IndexOperation<'a> {
 					let key = self.get_unique_index_key(&n)?;
 					if txn.putc(&key, self.rid, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;
-						let rid: RecordId = txn.get(&key, None).await?.unwrap();
+						let rid: RecordId =
+							txn.get(&key, None).await?.expect("record should exist");
 						return self.err_index_exists(rid, n);
 					}
 				}

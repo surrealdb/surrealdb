@@ -7,7 +7,6 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::{Cond, Data, Explain, Expr, Output, Timeout, With};
 use crate::fmt::Fmt;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
@@ -89,18 +88,6 @@ impl UpsertStatement {
 			// This is standard query result
 			v => Ok(v),
 		}
-	}
-}
-
-impl VisitExpression for UpsertStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.what.iter().for_each(|expr| expr.visit(visitor));
-		self.data.iter().for_each(|data| data.visit(visitor));
-		self.cond.iter().for_each(|cond| cond.0.visit(visitor));
-		self.output.iter().for_each(|output| output.visit(visitor));
 	}
 }
 

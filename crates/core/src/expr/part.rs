@@ -10,7 +10,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::exe::try_join_all_buffered;
-use crate::expr::expression::VisitExpression;
 use crate::expr::idiom::recursion::{
 	self, Recursion, clean_iteration, compute_idiom_recursion, is_final,
 };
@@ -138,33 +137,6 @@ impl Part {
 			Part::Start(v) => v.to_raw_string(),
 			Part::Field(v) => format!(".{}", EscapeKwFreeIdent(v)),
 			_ => self.to_string(),
-		}
-	}
-}
-
-impl VisitExpression for Part {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		match self {
-			Part::Lookup(lookup) => {
-				lookup.visit(visitor);
-			}
-			Part::Value(expr) | Part::Start(expr) | Part::Where(expr) => {
-				expr.visit(visitor);
-			}
-			Part::Method(_, x) => {
-				x.iter().for_each(|expr| expr.visit(visitor));
-			}
-			Part::Destructure(x) => {
-				x.iter().for_each(|part| part.visit(visitor));
-			}
-			Part::Recurse(_, idiom, instruction) => {
-				idiom.iter().for_each(|idiom| idiom.visit(visitor));
-				instruction.iter().for_each(|instruction| instruction.visit(visitor));
-			}
-			_ => {}
 		}
 	}
 }
@@ -448,18 +420,6 @@ impl DestructurePart {
 	}
 }
 
-impl VisitExpression for DestructurePart {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		match self {
-			Self::Aliased(_, idiom) => idiom.visit(visitor),
-			Self::Destructure(_, parts) => parts.iter().for_each(|part| part.visit(visitor)),
-			_ => {}
-		}
-	}
-}
 impl fmt::Display for DestructurePart {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
@@ -541,21 +501,6 @@ pub(crate) enum RecurseInstruction {
 		// Do we include the starting point in the collection?
 		inclusive: bool,
 	},
-}
-
-impl VisitExpression for RecurseInstruction {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		if let RecurseInstruction::Shortest {
-			expects,
-			..
-		} = self
-		{
-			expects.visit(visitor);
-		}
-	}
 }
 
 #[allow(clippy::too_many_arguments)]

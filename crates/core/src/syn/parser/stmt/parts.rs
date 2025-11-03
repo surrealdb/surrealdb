@@ -375,11 +375,8 @@ impl Parser<'_> {
 					update = true;
 				}
 				t!("DELETE") => {
-					// TODO(gguillemas): Return a parse error instead of logging a warning in 3.0.0.
 					if field {
-						warn!(
-							"The DELETE permission has no effect on fields and is deprecated, but was found in a DEFINE FIELD statement."
-						);
+						bail!("Can't define permission DELETE for fields")
 					} else {
 						delete = true;
 					}

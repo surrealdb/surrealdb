@@ -8,7 +8,6 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::order::Ordering;
 use crate::expr::{
 	Cond, Explain, Expr, Fetchs, Fields, FlowResultExt as _, Groups, Limit, Splits, Start, Timeout,
@@ -134,7 +133,7 @@ impl SelectStatement {
 						Ok(Value::None)
 					} else {
 						ensure!(array.len() == 1, Error::SingleOnlyOutput);
-						Ok(array.0.pop().unwrap())
+						Ok(array.0.pop().expect("array has exactly one element"))
 					}
 				}
 				x => Ok(x),
@@ -142,17 +141,6 @@ impl SelectStatement {
 		} else {
 			Ok(res)
 		}
-	}
-}
-
-impl VisitExpression for SelectStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.expr.visit(visitor);
-		self.what.iter().for_each(|expr| expr.visit(visitor));
-		self.cond.iter().for_each(|cond| cond.0.visit(visitor));
 	}
 }
 

@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use std::sync::{LazyLock, OnceLock};
 
 use criterion::Criterion;

@@ -12,7 +12,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::{expr_to_ident, exprs_to_fields};
 use crate::expr::{Base, Expr, Literal, Part};
 use crate::fmt::Fmt;
@@ -28,18 +27,6 @@ pub(crate) struct DefineIndexStatement {
 	pub index: Index,
 	pub comment: Option<Expr>,
 	pub concurrently: bool,
-}
-
-impl VisitExpression for DefineIndexStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.what.visit(visitor);
-		self.cols.iter().for_each(|expr| expr.visit(visitor));
-		self.comment.iter().for_each(|expr| expr.visit(visitor));
-	}
 }
 
 impl Default for DefineIndexStatement {

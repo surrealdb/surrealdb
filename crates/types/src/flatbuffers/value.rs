@@ -5,7 +5,7 @@ use surrealdb_protocol::fb::v1 as proto_fb;
 
 use super::{FromFlatbuffers, ToFlatbuffers};
 use crate::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId, Regex,
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId, Regex, Set,
 	Table, Uuid, Value,
 };
 
@@ -82,6 +82,10 @@ impl ToFlatbuffers for Value {
 			Self::Array(arr) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::Array,
 				value: Some(arr.to_fb(builder)?.as_union_value()),
+			},
+			Self::Set(set) => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::Set,
+				value: Some(set.to_fb(builder)?.as_union_value()),
 			},
 			Self::Geometry(geometry) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::Geometry,
@@ -175,6 +179,11 @@ impl FromFlatbuffers for Value {
 				let array_value = input.value_as_array().expect("Guaranteed to be an Array");
 				let array = Array::from_fb(array_value)?;
 				Ok(Value::Array(array))
+			}
+			proto_fb::ValueType::Set => {
+				let set_value = input.value_as_set().expect("Guaranteed to be a Set");
+				let set = Set::from_fb(set_value)?;
+				Ok(Value::Set(set))
 			}
 			proto_fb::ValueType::Geometry => {
 				let geometry_value =

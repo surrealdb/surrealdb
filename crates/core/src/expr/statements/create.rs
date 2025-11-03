@@ -7,7 +7,6 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout};
 use crate::fmt::Fmt;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
@@ -107,18 +106,6 @@ impl CreateStatement {
 			// This is standard query result
 			v => Ok(v),
 		}
-	}
-}
-
-impl VisitExpression for CreateStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.what.iter().for_each(|expr| expr.visit(visitor));
-		self.data.iter().for_each(|data| data.visit(visitor));
-		self.output.iter().for_each(|output| output.visit(visitor));
-		self.version.iter().for_each(|expr| expr.visit(visitor));
 	}
 }
 

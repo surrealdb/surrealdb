@@ -4,29 +4,44 @@
 [[test.results]]
 value = "NONE"
 
-[[_test.results]]
-value = "NONE"
-
 [[test.results]]
 value = "{ events: {  }, fields: {  }, indexes: { idx: 'DEFINE INDEX idx ON t COUNT' }, lives: {  }, tables: {  } }"
 
 [[test.results]]
 value = "{ building: { initial: 0, pending: 0, status: 'ready', updated: 0 } }"
 
-[[_test.results]]
-value = "{ building: { initial: 0, pending: 0, status: 'ready', updated: 0 } }"
-
 [[test.results]]
 value = "'OK'"
 
 [[test.results]]
-value = "[{ detail: { plan: { index: 'idx', operator: 'Count' }, table: 't' }, operation: 'Iterate Index Count' }, { detail: { idioms: { count: ['count'] }, type: 'Group' }, operation: 'Collector' }]"
-
-[[_test.results]]
-value = "[{ detail: { plan: { index: 'idxw', operator: 'Count', where: 'WHERE b = true' }, table: 't' }, operation: 'Iterate Index Count' }, { detail: { idioms: { count: ['count'] }, type: 'Group' }, operation: 'Collector' }]"
+value = '''[{ detail: { plan: { index: 'idx', operator: 'Count' }, table: 't' }, operation: 'Iterate Index Count' }, { detail: { "Aggregate expressions": {  }, Aggregations: { _a0: 'Count' }, "Group expressions": {  }, "Select expression": { count: '_a0' }, type: 'Group' }, operation: 'Collector' }]'''
 
 [[test.results]]
 value = "[{ count: 4 }]"
+
+[[test.results]]
+value = "[]"
+
+[[test.results]]
+value = "[{ count: 3 }]"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
+
+[[test.results]]
+value = "[{ count: 3 }]"
+
+[[_test.results]]
+value = "NONE"
+
+[[_test.results]]
+value = "{ building: { initial: 0, pending: 0, status: 'ready', updated: 0 } }"
+
+[[_test.results]]
+value = "[{ detail: { plan: { index: 'idxw', operator: 'Count', where: 'WHERE b = true' }, table: 't' }, operation: 'Iterate Index Count' }, { detail: { idioms: { count: ['count'] }, type: 'Group' }, operation: 'Collector' }]"
 
 [[_test.results]]
 value = "[{ count: 2 }]"
@@ -40,29 +55,14 @@ value = "[{ count: 4 }]"
 [[_test.results]]
 value = "[{ count: 3 }]"
 
-[[test.results]]
-value = "[]"
-
-[[test.results]]
-value = "[{ count: 3 }]"
-
 [[_test.results]]
 value = "[{ count: 2 }]"
 
-[[test.results]]
-value = "None"
-
 [[_test.results]]
 value = "None"
-
-[[test.results]]
-value = "{ building: { initial: 3, pending: 0, status: 'ready', updated: 0 } }"
 
 [[_test.results]]
 value = "{}"
-
-[[test.results]]
-value = "[{ count: 3 }]"
 
 [[_test.results]]
 value = "[{ count: 2 }]"

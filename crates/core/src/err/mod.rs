@@ -30,6 +30,7 @@ use crate::vs::VersionStampError;
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
 #[allow(clippy::enum_variant_names)]
+#[allow(dead_code, reason = "Some variants are only used by specific KV stores")]
 pub(crate) enum Error {
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
@@ -56,11 +57,11 @@ pub(crate) enum Error {
 	TxReadonly,
 
 	#[cfg(feature = "kv-rocksdb")]
-	/// The datastore is read-only due to disk saturation
+	/// The datastore is read-and-deletion-only due to disk saturation
 	#[error(
-		"The datastore is read-only due to disk saturation. Please free up disk space and restart the instance to enable write operations"
+		"The datastore is in read-and-deletion-only mode due to disk space limitations. Only read and delete operations are allowed. Deleting data will free up space and automatically restore normal operations when usage drops below the threshold"
 	)]
-	DbReadOnly,
+	DbReadAndDeleteOnly,
 
 	/// The conditional value in the request was not equal
 	#[error("Value being checked was not correct")]
@@ -172,11 +173,16 @@ pub(crate) enum Error {
 
 	/// The wrong quantity or magnitude of arguments was given for the specified
 	/// function
-	#[error("Incorrect arguments for aggregate function {name}() on table '{table}'. {message}")]
+	#[error("Invalid aggregation: {message}")]
 	InvalidAggregation {
-		name: String,
-		table: String,
 		message: String,
+	},
+
+	#[error(
+		"Incorrect selector for aggregate selection, expression `{expr}` within in selector cannot be aggregated in a group."
+	)]
+	InvalidAggregationSelector {
+		expr: String,
 	},
 
 	/// The URL is invalid
@@ -369,8 +375,8 @@ pub(crate) enum Error {
 	RealtimeDisabled,
 
 	/// Reached excessive computation depth due to functions, subqueries, or
-	/// futures
-	#[error("Reached excessive computation depth due to functions, subqueries, or futures")]
+	/// computed values
+	#[error("Reached excessive computation depth due to functions, subqueries, or computed values")]
 	ComputationDepthExceeded,
 
 	/// Tried to execute a statement that can't be used here
@@ -1165,6 +1171,7 @@ pub(crate) enum Error {
 }
 
 impl Error {
+	#[cold]
 	#[track_caller]
 	pub fn unreachable<T: fmt::Display>(message: T) -> Error {
 		let location = std::panic::Location::caller();
