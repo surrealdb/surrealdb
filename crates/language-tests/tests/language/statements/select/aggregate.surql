@@ -35,7 +35,7 @@ value = "[{ country: 'GBP', id: temperature:1, time: d'2020-01-01T08:00:00Z', ye
 value = "[{ count: 1, country: 'AUD', max: d'2021-01-01T08:00:00Z', min: d'2021-01-01T08:00:00Z', year: 2021 }, { count: 1, country: 'CHF', max: d'2023-01-01T08:00:00Z', min: d'2023-01-01T08:00:00Z', year: 2023 }, { count: 1, country: 'EUR', max: d'2021-01-01T08:00:00Z', min: d'2021-01-01T08:00:00Z', year: 2021 }, { count: 3, country: 'GBP', max: d'2020-03-01T08:00:00Z', min: d'2020-01-01T08:00:00Z', year: 2020 }, { count: 2, country: 'GBP', max: d'2021-01-01T08:00:00Z', min: d'2021-01-01T08:00:00Z', year: 2021 }, { count: 1, country: 'USD', max: d'2021-01-01T08:00:00Z', min: d'2021-01-01T08:00:00Z', year: 2021 }]"
 
 [[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'temperature' }, operation: 'Iterate Table' }, { detail: { idioms: { count: ['count'], country: ['first'], max: ['time::max'], min: ['time::min'], year: ['array'] }, type: 'Group' }, operation: 'Collector' }]"
+value = '''[{ detail: { direction: 'forward', table: 'temperature' }, operation: 'Iterate Table' }, { detail: { "Aggregate expressions": { expr0: 'time' }, Aggregations: { _a0: 'Count', _a1: 'DatetimeMin(expr0)', _a2: 'DatetimeMax(expr0)' }, "Group expressions": { _g0: 'country', _g1: 'time::year(time)' }, "Select expression": { count: '_a0', country: '_g0', max: '_a2', min: '_a1', year: '_g1' }, type: 'Group' }, operation: 'Collector' }]'''
 
 */
 CREATE temperature:1 SET country = 'GBP', time = d'2020-01-01T08:00:00Z';

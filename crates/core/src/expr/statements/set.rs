@@ -8,7 +8,6 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::{ControlFlow, Expr, FlowResult, Kind, Value};
 use crate::fmt::EscapeKwFreeIdent;
 
@@ -50,7 +49,16 @@ impl SetStatement {
 			})));
 		}
 
-		let result = stk.run(|stk| self.what.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await?;
+		let result = stk
+			.run(|stk| {
+				self.what.compute(
+					stk,
+					ctx.as_ref().expect("context should be initialized"),
+					opt,
+					doc,
+				)
+			})
+			.await?;
 		let result = match &self.kind {
 			Some(kind) => result
 				.coerce_to_kind(kind)
@@ -62,19 +70,10 @@ impl SetStatement {
 			None => result,
 		};
 
-		let mut c = MutableContext::unfreeze(ctx.take().unwrap())?;
+		let mut c = MutableContext::unfreeze(ctx.take().expect("context should be initialized"))?;
 		c.add_value(self.name.clone(), result.into());
 		*ctx = Some(c.freeze());
 		Ok(Value::None)
-	}
-}
-
-impl VisitExpression for SetStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.what.visit(visitor);
 	}
 }
 

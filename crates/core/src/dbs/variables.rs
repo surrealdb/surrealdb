@@ -1,14 +1,51 @@
 use std::collections::BTreeMap;
+use std::convert::Infallible;
 
 use serde::{Deserialize, Serialize};
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::Context;
-use crate::expr::Expr;
-use crate::expr::expression::VisitExpression;
+use crate::expr::Param;
+use crate::expr::visit::{Visit, Visitor};
 use crate::sql::expression::convert_public_value_to_internal;
 use crate::types::PublicVariables;
 use crate::val::{Object, Value};
+
+/// A visitor pass which will capture the value of parameters in the visited expression from the
+/// context.
+pub(crate) struct ParameterCapturePass<'a, 'b> {
+	pub context: &'a Context,
+	pub captures: &'b mut Variables,
+}
+
+impl ParameterCapturePass<'_, '_> {
+	pub fn capture<V: for<'a, 'b> Visit<ParameterCapturePass<'a, 'b>>>(
+		context: &Context,
+		v: &V,
+	) -> Variables {
+		let mut captures = Variables::new();
+
+		let _ = v.visit(&mut ParameterCapturePass {
+			context,
+			captures: &mut captures,
+		});
+
+		captures
+	}
+}
+
+impl Visitor for ParameterCapturePass<'_, '_> {
+	type Error = Infallible;
+
+	fn visit_param(&mut self, param: &Param) -> Result<(), Self::Error> {
+		if !PROTECTED_PARAM_NAMES.contains(&param.as_str()) {
+			if let Some(v) = self.context.value(param.as_str()) {
+				self.captures.0.entry(param.clone().into_string()).or_insert_with(|| v.clone());
+			}
+		}
+		Ok(())
+	}
+}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[repr(transparent)]
@@ -25,28 +62,6 @@ impl Variables {
 	#[allow(dead_code)]
 	pub fn insert(&mut self, key: String, value: Value) {
 		self.0.insert(key, value);
-	}
-
-	/// Extend the variables map with the contents of another variables map.
-	pub fn extend(&mut self, other: Variables) {
-		self.0.extend(other.0);
-	}
-
-	/// Create a new variables map from an expression and a context.
-	pub(crate) fn from_expr<T: VisitExpression>(expr: &T, ctx: &Context) -> Self {
-		let mut vars = BTreeMap::new();
-		let mut visitor = |x: &Expr| {
-			if let Expr::Param(param) = x {
-				if !PROTECTED_PARAM_NAMES.contains(&param.as_str()) {
-					if let Some(v) = ctx.value(param.as_str()) {
-						vars.insert(param.clone().into_string(), v.clone());
-					}
-				}
-			}
-		};
-
-		expr.visit(&mut visitor);
-		Self(vars)
 	}
 }
 

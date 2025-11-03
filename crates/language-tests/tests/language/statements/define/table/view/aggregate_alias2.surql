@@ -12,7 +12,7 @@ value = "NONE"
 value = "[]"
 
 [[test.results]]
-value = "{ average_temp: 27.4dec, city: 'London', id: temperatures_by_month:['London', 10], month: 10, total: 1 }"
+value = "{ average_temp: 27.4f, city: 'London', id: temperatures_by_month:['London', 10], month: 10, total: 1 }"
 
 */
 DEFINE TABLE reading DROP;

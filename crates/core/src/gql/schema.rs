@@ -23,7 +23,7 @@ use crate::gql::tables::process_tbs;
 use crate::kvs::{Datastore, LockType, TransactionType};
 use crate::val::{
 	Array as SurArray, Number as SurNumber, Object as SurObject, RecordId as SurRecordId,
-	RecordIdKey as SurRecordIdKey, Table, Value as SurValue,
+	RecordIdKey as SurRecordIdKey, Set as SurSet, Table, Value as SurValue,
 };
 
 pub async fn generate_schema(
@@ -210,12 +210,19 @@ pub(crate) fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> 
 		d @ SurValue::Duration(_) => GqlValue::String(d.to_string()),
 		SurValue::Datetime(d) => GqlValue::String(d.to_rfc3339()),
 		SurValue::Uuid(uuid) => GqlValue::String(uuid.to_string()),
-		SurValue::Array(a) => {
-			GqlValue::List(a.into_iter().map(|v| sql_value_to_gql_value(v).unwrap()).collect())
-		}
+		SurValue::Array(a) => GqlValue::List(
+			a.into_iter()
+				.map(|v| sql_value_to_gql_value(v).expect("value conversion should succeed"))
+				.collect(),
+		),
 		SurValue::Object(o) => GqlValue::Object(
 			o.0.into_iter()
-				.map(|(k, v)| (Name::new(k), sql_value_to_gql_value(v).unwrap()))
+				.map(|(k, v)| {
+					(
+						Name::new(k),
+						sql_value_to_gql_value(v).expect("value conversion should succeed"),
+					)
+				})
 				.collect(),
 		),
 		SurValue::Geometry(_) => return Err(resolver_error("unimplemented: Geometry types")),
@@ -247,7 +254,7 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		Kind::Table(ref _t) => TypeRef::named(kind.to_string()),
 		Kind::Record(mut tables) => match tables.len() {
 			0 => TypeRef::named("record"),
-			1 => TypeRef::named(tables.pop().unwrap()),
+			1 => TypeRef::named(tables.pop().expect("single table in record kind")),
 			_ => {
 				let ty_name = tables.join("_or_");
 
@@ -450,6 +457,11 @@ fn convert_static_literal(lit: Literal) -> Result<SurValue, GqlError> {
 				exprs.into_iter().map(convert_static_expr).collect();
 			Ok(SurValue::Array(SurArray(vals?)))
 		}
+		Literal::Set(exprs) => {
+			let vals: Result<Vec<SurValue>, GqlError> =
+				exprs.into_iter().map(convert_static_expr).collect();
+			Ok(SurValue::Set(SurSet::from(vals?)))
+		}
 		Literal::Object(entries) => {
 			let mut map = BTreeMap::new();
 			for entry in entries {
@@ -465,7 +477,6 @@ fn convert_static_literal(lit: Literal) -> Result<SurValue, GqlError> {
 		Literal::UnboundedRange => {
 			Err(resolver_error("Unbounded ranges are not supported in GraphQL"))
 		}
-		Literal::Closure(_) => Err(resolver_error("Closures are not supported in GraphQL")),
 	}
 }
 

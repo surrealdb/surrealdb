@@ -109,6 +109,11 @@ impl Expr {
 			PublicValue::Array(x) => {
 				Expr::Literal(Literal::Array(x.into_iter().map(Expr::from_public_value).collect()))
 			}
+			PublicValue::Set(x) => {
+				// Convert set to array for literal representation since there's no set literal
+				// syntax
+				Expr::Literal(Literal::Array(x.into_iter().map(Expr::from_public_value).collect()))
+			}
 			PublicValue::Object(x) => Expr::Literal(Literal::Object(
 				x.into_iter()
 					.map(|(k, v)| ObjectEntry {
@@ -252,6 +257,11 @@ pub(crate) fn convert_public_value_to_internal(value: surrealdb_types::Value) ->
 		surrealdb_types::Value::Array(a) => crate::val::Value::Array(crate::val::Array(
 			a.inner().clone().into_iter().map(convert_public_value_to_internal).collect(),
 		)),
+		surrealdb_types::Value::Set(s) => {
+			let values: Vec<crate::val::Value> =
+				s.into_iter().map(convert_public_value_to_internal).collect();
+			crate::val::Value::Set(crate::val::Set::from(values))
+		}
 		surrealdb_types::Value::Object(o) => crate::val::Value::Object(crate::val::Object(
 			o.inner()
 				.clone()

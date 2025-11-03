@@ -10,7 +10,7 @@ use super::Transaction;
 use crate::catalog::providers::{
 	AuthorisationProvider, DatabaseProvider, TableProvider, UserProvider,
 };
-use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
+use crate::catalog::{DatabaseId, NamespaceId, Record, TableDefinition};
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
@@ -19,7 +19,6 @@ use crate::expr::{Base, DefineAnalyzerStatement};
 use crate::key::record;
 use crate::kvs::KVValue;
 use crate::sql::statements::OptionStatement;
-use crate::val::record::Record;
 
 #[derive(Clone, Debug, SurrealValue)]
 #[surreal(default)]
@@ -411,7 +410,8 @@ impl Transaction {
 					} else {
 						// If the record is not a tombstone and a version exists, format it as an
 						// INSERT VERSION command.
-						let ts = Utc.timestamp_nanos(version.unwrap() as i64);
+						let ts =
+							Utc.timestamp_nanos(version.expect("version should be set") as i64);
 						format!("INSERT {} VERSION d'{:?}';", record.data.as_ref(), ts)
 					}
 				} else {

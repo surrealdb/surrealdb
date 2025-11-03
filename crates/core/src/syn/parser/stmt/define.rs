@@ -11,14 +11,11 @@ use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig
 use crate::sql::statements::define::config::{ConfigInner, graphql};
 use crate::sql::statements::define::user::PassType;
 use crate::sql::statements::define::{
-	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault, DefineKind,
-	DefineSequenceStatement,
-};
-use crate::sql::statements::{
-	DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement,
+	ApiAction, DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement,
+	DefineBucketStatement, DefineConfigStatement, DefineDatabaseStatement, DefineDefault,
 	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement,
-	DefineUserStatement,
+	DefineKind, DefineNamespaceStatement, DefineParamStatement, DefineSequenceStatement,
+	DefineStatement, DefineTableStatement, DefineUserStatement,
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
@@ -401,16 +398,6 @@ impl Parser<'_> {
 										}
 									}
 									t!("REFRESH") => {
-										// TODO(gguillemas): Remove this once bearer access is no
-										// longer experimental.
-										if !self.settings.bearer_access_enabled {
-											unexpected!(
-												self,
-												peek,
-												"the experimental bearer access feature to be enabled"
-											);
-										}
-
 										self.pop_peek();
 										ac.bearer = Some(access_type::BearerAccess {
 											kind: access_type::BearerAccessType::Refresh,
@@ -420,11 +407,7 @@ impl Parser<'_> {
 										});
 									}
 									_ => {
-										if self.settings.bearer_access_enabled {
-											unexpected!(self, token, "JWT or REFRESH")
-										} else {
-											unexpected!(self, token, "JWT")
-										}
+										unexpected!(self, token, "JWT or REFRESH")
 									}
 								}
 								self.eat(t!(","));
@@ -432,16 +415,6 @@ impl Parser<'_> {
 							res.access_type = AccessType::Record(ac);
 						}
 						t!("BEARER") => {
-							// TODO(gguillemas): Remove this once bearer access is no longer
-							// experimental.
-							if !self.settings.bearer_access_enabled {
-								unexpected!(
-									self,
-									peek,
-									"the experimental bearer access feature to be enabled"
-								);
-							}
-
 							self.pop_peek();
 							let mut ac = access_type::BearerAccess {
 								..Default::default()

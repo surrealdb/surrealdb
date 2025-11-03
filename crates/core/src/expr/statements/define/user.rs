@@ -16,7 +16,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::user::UserDuration;
 use crate::expr::{Base, Expr, Idiom, Literal};
@@ -34,16 +33,6 @@ pub(crate) struct DefineUserStatement {
 	pub roles: Vec<String>,
 	pub duration: UserDuration,
 	pub comment: Option<Expr>,
-}
-
-impl VisitExpression for DefineUserStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.comment.iter().for_each(|expr| expr.visit(visitor));
-	}
 }
 
 impl Default for DefineUserStatement {
@@ -69,7 +58,7 @@ impl DefineUserStatement {
 			name: Expr::Idiom(Idiom::field(user)),
 			hash: Argon2::default()
 				.hash_password(pass.as_ref(), &SaltString::generate(&mut OsRng))
-				.unwrap()
+				.expect("password hashing should not fail")
 				.to_string(),
 			code: rand::thread_rng()
 				.sample_iter(&Alphanumeric)
