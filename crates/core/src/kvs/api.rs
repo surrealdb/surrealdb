@@ -13,6 +13,7 @@ use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 use crate::kvs::{KVKey, KVValue, Key, Val, Version};
 use crate::vs::VersionStamp;
+use std::time::SystemTime;
 
 pub mod requirements {
 	//! This module defines the trait requirements for a transaction.
@@ -75,6 +76,11 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// allows data to be modified, and if not then the function
 	/// will return an [`Error::TxReadonly`] error.
 	fn writeable(&self) -> bool;
+
+	/// Get the current timestamp
+	async fn get_timestamp(&self) -> Result<SystemTime> {
+		Ok(SystemTime::now())
+	}
 
 	/// Cancel a transaction.
 	///
@@ -457,7 +463,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// the transaction commit. That is to keep other transactions commit
 	/// delay(pessimistic) or conflict(optimistic) as less as possible.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn get_timestamp(&mut self, key: VsKey) -> Result<VersionStamp> {
+	async fn get_versionstamp(&mut self, key: VsKey) -> Result<VersionStamp> {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 
@@ -489,7 +495,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		// Check to see if transaction is writable
 		ensure!(self.writeable(), Error::TxReadonly);
 		// Continue with function logic
-		let ts = self.get_timestamp(ts_key).await?;
+		let ts = self.get_versionstamp(ts_key).await?;
 		let mut k: Vec<u8> = prefix;
 		k.extend_from_slice(&ts.as_bytes());
 		k.extend_from_slice(&suffix);

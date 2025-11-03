@@ -518,8 +518,8 @@ impl Transactor {
 	/// entries for this transaction, which should be done immediately before
 	/// the transaction commit. That is to keep other transactions commit
 	/// delay(pessimistic) or conflict(optimistic) as less as possible.
-	pub(crate) async fn get_timestamp(&mut self, key: VsKey) -> Result<VersionStamp> {
-		self.inner.get_timestamp(key).await
+	pub(crate) async fn get_versionstamp(&mut self, key: VsKey) -> Result<VersionStamp> {
+		self.inner.get_versionstamp(key).await
 	}
 
 	/// Insert or update a key in the datastore.
@@ -637,7 +637,7 @@ impl Transactor {
 		// on other concurrent transactions that can write to the ts_key or the keys
 		// after it.
 		let key = crate::key::database::vs::new(ns, db);
-		let vst = self.get_timestamp(key).await?;
+		let vst = self.get_versionstamp(key).await?;
 		trace!(
 			target: TARGET,
 			"Setting timestamp {} for versionstamp {:?} in ns: {}, db: {}",

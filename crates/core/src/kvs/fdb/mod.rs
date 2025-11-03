@@ -561,7 +561,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Obtain a new change timestamp for a key
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn get_timestamp(&mut self, _key: VsKey) -> Result<VersionStamp> {
+	async fn get_versionstamp(&mut self, _key: VsKey) -> Result<VersionStamp> {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Lock the inner transaction
