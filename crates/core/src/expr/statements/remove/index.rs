@@ -62,8 +62,10 @@ impl RemoveIndexStatement {
 			}
 			Ok(ix) => ix,
 		};
+		// Get the table definition
+		let tb = txn.expect_tb(ns, db, &what).await?;
 		// Clear the index store cache
-		ctx.get_index_stores().index_removed(ctx.get_index_builder(), ns, db, &what, &ix).await?;
+		ctx.get_index_stores().index_removed(ctx.get_index_builder(), ns, db, &tb, &ix).await?;
 		// Delete the index data.
 		txn.del_tb_index(ns, db, &what, &name).await?;
 

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::RwLock;
 
-use crate::catalog::HnswParams;
+use crate::catalog::{HnswParams, TableId};
 use crate::ctx::Context;
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::index::HnswIndex;
@@ -25,7 +25,7 @@ impl HnswIndexes {
 	pub(super) async fn get(
 		&self,
 		ctx: &Context,
-		tb: &str,
+		tb: TableId,
 		ikb: &IndexKeyBase,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex> {
@@ -43,7 +43,7 @@ impl HnswIndexes {
 						ctx.get_index_stores().vector_cache().clone(),
 						&ctx.tx(),
 						ikb.clone(),
-						tb.to_string(),
+						tb,
 						p,
 					)
 					.await?,

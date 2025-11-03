@@ -16,7 +16,7 @@ use tokio::sync::RwLock;
 use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::catalog::{
-	DatabaseDefinition, DatabaseId, IndexDefinition, IndexId, NamespaceId, Record,
+	DatabaseDefinition, DatabaseId, IndexDefinition, IndexId, NamespaceId, Record, TableDefinition,
 };
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
@@ -167,10 +167,11 @@ impl IndexBuilder {
 		opt: Options,
 		ns: NamespaceId,
 		db: DatabaseId,
+		tb: Arc<TableDefinition>,
 		ix: Arc<IndexDefinition>,
 		sdr: Option<Sender<Result<()>>>,
 	) -> Result<IndexBuilding> {
-		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ns, db, ix)?);
+		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ns, db, tb, ix)?);
 		let b = building.clone();
 		spawn(async move {
 			let guard = BuildingFinishGuard(b.clone());
@@ -194,6 +195,7 @@ impl IndexBuilder {
 		opt: Options,
 		ns: NamespaceId,
 		db: DatabaseId,
+		tb: Arc<TableDefinition>,
 		ix: Arc<IndexDefinition>,
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<()>>>> {
@@ -213,12 +215,12 @@ impl IndexBuilder {
 						name: ix.name.clone(),
 					}
 				);
-				let ib = self.start_building(ctx, opt, ns, db, ix, sdr)?;
+				let ib = self.start_building(ctx, opt, ns, db, tb, ix, sdr)?;
 				e.insert(ib);
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let ib = self.start_building(ctx, opt, ns, db, ix, sdr)?;
+				let ib = self.start_building(ctx, opt, ns, db, tb, ix, sdr)?;
 				e.insert(ib);
 			}
 		};
@@ -330,6 +332,7 @@ struct Building {
 	opt: Options,
 	ns: NamespaceId,
 	db: DatabaseId,
+	tb: Arc<TableDefinition>,
 	ikb: IndexKeyBase,
 	tf: TransactionFactory,
 	ix: Arc<IndexDefinition>,
@@ -346,6 +349,7 @@ impl Building {
 		opt: Options,
 		ns: NamespaceId,
 		db: DatabaseId,
+		tb: Arc<TableDefinition>,
 		ix: Arc<IndexDefinition>,
 	) -> Result<Self> {
 		let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
@@ -354,6 +358,7 @@ impl Building {
 			opt,
 			ns,
 			db,
+			tb,
 			ikb,
 			tf,
 			ix,
@@ -588,6 +593,7 @@ impl Building {
 				&self.opt,
 				self.ns,
 				self.db,
+				self.tb.table_id,
 				&self.ix,
 				None,
 				opt_values.clone(),
@@ -637,6 +643,7 @@ impl Building {
 					&self.opt,
 					self.ns,
 					self.db,
+					self.tb.table_id,
 					&self.ix,
 					a.old_values,
 					a.new_values,

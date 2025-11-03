@@ -1,4 +1,5 @@
 use std::fmt::{self, Display};
+use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
@@ -81,13 +82,7 @@ impl DefineIndexStatement {
 			}
 			// Clear the index store cache
 			ctx.get_index_stores()
-				.index_removed(
-					ctx.get_index_builder(),
-					tb.namespace_id,
-					tb.database_id,
-					&tb.name,
-					&ix,
-				)
+				.index_removed(ctx.get_index_builder(), tb.namespace_id, tb.database_id, &tb, &ix)
 				.await?;
 			ix.index_id
 		} else {
@@ -151,7 +146,7 @@ impl DefineIndexStatement {
 		// Clear the cache
 		txn.clear_cache();
 		// Process the index
-		run_indexing(ctx, opt, &index_def, !self.concurrently).await?;
+		run_indexing(ctx, opt, tb, index_def.into(), !self.concurrently).await?;
 
 		// Ok all good
 		Ok(Value::None)
@@ -186,14 +181,15 @@ impl Display for DefineIndexStatement {
 pub(in crate::expr::statements) async fn run_indexing(
 	ctx: &Context,
 	opt: &Options,
-	index: &IndexDefinition,
+	tb: Arc<TableDefinition>,
+	ix: Arc<IndexDefinition>,
 	blocking: bool,
 ) -> Result<()> {
 	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 	let rcv = ctx
 		.get_index_builder()
 		.ok_or_else(|| Error::unreachable("No Index Builder"))?
-		.build(ctx, opt.clone(), ns, db, index.clone().into(), blocking)
+		.build(ctx, opt.clone(), ns, db, tb, ix, blocking)
 		.await?;
 	if let Some(rcv) = rcv {
 		rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?

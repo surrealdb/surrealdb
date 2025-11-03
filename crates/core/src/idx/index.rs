@@ -18,6 +18,7 @@ use reblessive::tree::Stk;
 
 use crate::catalog::{
 	DatabaseId, FullTextParams, HnswParams, Index, IndexDefinition, MTreeParams, NamespaceId,
+	TableId,
 };
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -38,6 +39,7 @@ pub(crate) struct IndexOperation<'a> {
 	opt: &'a Options,
 	ns: NamespaceId,
 	db: DatabaseId,
+	tb: TableId,
 	ix: &'a IndexDefinition,
 	ikb: IndexKeyBase,
 	/// The old values (if existing)
@@ -54,6 +56,7 @@ impl<'a> IndexOperation<'a> {
 		opt: &'a Options,
 		ns: NamespaceId,
 		db: DatabaseId,
+		tb: TableId,
 		ix: &'a IndexDefinition,
 		o: Option<Vec<Value>>,
 		n: Option<Vec<Value>>,
@@ -64,6 +67,7 @@ impl<'a> IndexOperation<'a> {
 			opt,
 			ns,
 			db,
+			tb,
 			ix,
 			ikb: IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id),
 			o,
@@ -307,7 +311,7 @@ impl<'a> IndexOperation<'a> {
 		let hnsw = self
 			.ctx
 			.get_index_stores()
-			.get_index_hnsw(self.ns, self.db, self.ctx, self.ix, p)
+			.get_index_hnsw(self.ns, self.db, self.ctx, self.tb, self.ix, p)
 			.await?;
 		let mut hnsw = hnsw.write().await;
 		// Delete the old index data

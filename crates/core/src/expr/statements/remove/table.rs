@@ -50,8 +50,6 @@ impl RemoveTableStatement {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
-		// Remove the index stores
-		ctx.get_index_stores().table_removed(ctx.get_index_builder(), &txn, ns, db, &name).await?;
 		// Get the defined table
 		let Some(tb) = txn.get_tb(ns, db, &name).await? else {
 			if self.if_exists {
@@ -63,6 +61,8 @@ impl RemoveTableStatement {
 			}
 			.into());
 		};
+		// Remove the index stores
+		ctx.get_index_stores().table_removed(ctx.get_index_builder(), &txn, ns, db, &tb).await?;
 
 		// Get the foreign tables
 		let fts = txn.all_tb_views(ns, db, &name).await?;

@@ -5,7 +5,7 @@ use ahash::HashMap;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::{DatabaseDefinition, HnswParams, VectorType};
+use crate::catalog::{DatabaseDefinition, HnswParams, TableId, VectorType};
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;
@@ -78,14 +78,14 @@ impl HnswIndex {
 		vector_cache: VectorCache,
 		tx: &Transaction,
 		ikb: IndexKeyBase,
-		tb: String,
+		tb: TableId,
 		p: &HnswParams,
 	) -> Result<Self> {
 		Ok(Self {
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
-			hnsw: HnswFlavor::new(ikb.clone(), p, vector_cache)?,
-			docs: HnswDocs::new(tx, tb, ikb.clone()).await?,
+			hnsw: HnswFlavor::new(tb, ikb.clone(), p, vector_cache)?,
+			docs: HnswDocs::new(tx, ikb.table().to_string(), ikb.clone()).await?,
 			vec_docs: VecDocs::new(ikb),
 		})
 	}

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{
 	DatabaseDefinition, DatabaseId, Distance, Index, IndexDefinition, NamespaceId,
 };
@@ -273,12 +274,21 @@ impl InnerQueryExecutor {
 								}
 							}
 							Entry::Vacant(e) => {
+								let tb = ctx
+									.tx()
+									.expect_tb(
+										db.namespace_id,
+										db.database_id,
+										&index_reference.table_name,
+									)
+									.await?;
 								let hi = ctx
 									.get_index_stores()
 									.get_index_hnsw(
 										db.namespace_id,
 										db.database_id,
 										ctx,
+										tb.table_id,
 										index_reference,
 										p,
 									)

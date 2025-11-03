@@ -10,7 +10,9 @@ use std::sync::Arc;
 use anyhow::Result;
 
 use crate::catalog::providers::{DatabaseProvider, TableProvider};
-use crate::catalog::{DatabaseId, HnswParams, Index, IndexDefinition, NamespaceId};
+use crate::catalog::{
+	DatabaseId, HnswParams, Index, IndexDefinition, NamespaceId, TableDefinition, TableId,
+};
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
@@ -227,11 +229,12 @@ impl IndexStores {
 		ns: NamespaceId,
 		db: DatabaseId,
 		ctx: &Context,
+		tb: TableId,
 		ix: &IndexDefinition,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex> {
 		let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
-		self.0.hnsw_indexes.get(ctx, &ix.table_name, &ikb, p).await
+		self.0.hnsw_indexes.get(ctx, tb, &ikb, p).await
 	}
 
 	pub(crate) async fn index_removed(
@@ -239,13 +242,13 @@ impl IndexStores {
 		ib: Option<&IndexBuilder>,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableDefinition,
 		ix: &IndexDefinition,
 	) -> Result<()> {
 		if let Some(ib) = ib {
-			ib.remove_index(ns, db, tb, ix.index_id).await?;
+			ib.remove_index(ns, db, &tb.name, ix.index_id).await?;
 		}
-		self.remove_index(ns, db, ix).await
+		self.remove_index(ns, db, tb.table_id, ix).await
 	}
 
 	pub(crate) async fn namespace_removed(
@@ -268,7 +271,7 @@ impl IndexStores {
 		db: DatabaseId,
 	) -> Result<()> {
 		for tb in tx.all_tb(ns, db, None).await?.iter() {
-			self.table_removed(ib, tx, ns, db, &tb.name).await?;
+			self.table_removed(ib, tx, ns, db, tb).await?;
 		}
 		Ok(())
 	}
@@ -279,13 +282,13 @@ impl IndexStores {
 		tx: &Transaction,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
+		tb: &TableDefinition,
 	) -> Result<()> {
-		for ix in tx.all_tb_indexes(ns, db, tb).await?.iter() {
+		for ix in tx.all_tb_indexes(ns, db, &tb.name).await?.iter() {
 			if let Some(ib) = ib {
-				ib.remove_index(ns, db, tb, ix.index_id).await?;
+				ib.remove_index(ns, db, &tb.name, ix.index_id).await?;
 			}
-			self.remove_index(ns, db, ix).await?;
+			self.remove_index(ns, db, tb.table_id, ix).await?;
 		}
 		Ok(())
 	}
@@ -294,18 +297,19 @@ impl IndexStores {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
+		tb: TableId,
 		ix: &IndexDefinition,
 	) -> Result<()> {
 		if matches!(ix.index, Index::Hnsw(_)) {
 			let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
-			self.remove_hnsw_index(ikb).await?;
+			self.remove_hnsw_index(tb, ikb).await?;
 		}
 		Ok(())
 	}
 
-	async fn remove_hnsw_index(&self, ikb: IndexKeyBase) -> Result<()> {
+	async fn remove_hnsw_index(&self, tb: TableId, ikb: IndexKeyBase) -> Result<()> {
 		self.0.hnsw_indexes.remove(&ikb).await?;
-		self.0.vector_cache.remove_index(ikb.index()).await;
+		self.0.vector_cache.remove_index(tb, ikb.index()).await;
 		Ok(())
 	}
 
