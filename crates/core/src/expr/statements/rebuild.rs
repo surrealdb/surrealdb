@@ -75,7 +75,7 @@ impl RebuildIndexStatement {
 		let tb = ctx.tx().expect_tb(ns, db, &self.what).await?;
 
 		// Rebuild the index
-		run_indexing(ctx, opt, tb, ix, !self.concurrently).await?;
+		run_indexing(ctx, opt, tb.table_id, ix, !self.concurrently).await?;
 		// Ok all good
 		Ok(Value::None)
 	}

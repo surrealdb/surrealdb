@@ -434,7 +434,7 @@ impl Iterator {
 		for v in v {
 			match v {
 				Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
-				Expr::Table(v) => self.prepare_table(ctx, opt, stk, planner, stm_ctx, &v).await?,
+				Expr::Table(v) => self.prepare_table(ctx, opt, stk, planner, stm_ctx, v).await?,
 				Expr::Idiom(x) => {
 					// match against what previously would be an edge.
 					if x.len() != 2 {

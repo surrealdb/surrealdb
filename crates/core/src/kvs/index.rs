@@ -16,7 +16,7 @@ use tokio::sync::RwLock;
 use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::catalog::{
-	DatabaseDefinition, DatabaseId, IndexDefinition, IndexId, NamespaceId, Record, TableDefinition,
+	DatabaseDefinition, DatabaseId, IndexDefinition, IndexId, NamespaceId, Record, TableId,
 };
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
@@ -161,13 +161,14 @@ impl IndexBuilder {
 		}
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	fn start_building(
 		&self,
 		ctx: &Context,
 		opt: Options,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: Arc<TableDefinition>,
+		tb: TableId,
 		ix: Arc<IndexDefinition>,
 		sdr: Option<Sender<Result<()>>>,
 	) -> Result<IndexBuilding> {
@@ -193,12 +194,11 @@ impl IndexBuilder {
 		&self,
 		ctx: &Context,
 		opt: Options,
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: Arc<TableDefinition>,
+		tb: TableId,
 		ix: Arc<IndexDefinition>,
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<()>>>> {
+		let (ns, db) = ctx.expect_ns_db_ids(&opt).await?;
 		let key = IndexKey::new(ns, db, &ix.table_name, ix.index_id);
 		let (rcv, sdr) = if blocking {
 			let (s, r) = channel();
@@ -332,7 +332,7 @@ struct Building {
 	opt: Options,
 	ns: NamespaceId,
 	db: DatabaseId,
-	tb: Arc<TableDefinition>,
+	tb: TableId,
 	ikb: IndexKeyBase,
 	tf: TransactionFactory,
 	ix: Arc<IndexDefinition>,
@@ -349,7 +349,7 @@ impl Building {
 		opt: Options,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: Arc<TableDefinition>,
+		tb: TableId,
 		ix: Arc<IndexDefinition>,
 	) -> Result<Self> {
 		let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
@@ -593,7 +593,7 @@ impl Building {
 				&self.opt,
 				self.ns,
 				self.db,
-				self.tb.table_id,
+				self.tb,
 				&self.ix,
 				None,
 				opt_values.clone(),
@@ -643,7 +643,7 @@ impl Building {
 					&self.opt,
 					self.ns,
 					self.db,
-					self.tb.table_id,
+					self.tb,
 					&self.ix,
 					a.old_values,
 					a.new_values,
