@@ -67,14 +67,15 @@ impl Parser<'_> {
 				PublicValue::Bool(false)
 			}
 			t!("{") => {
-				self.pop_peek();
+				let open = self.pop_peek().span;
 
 				if self.eat(t!("}")) {
 					return Ok(PublicValue::Object(PublicObject::new()));
 				}
 
 				// First, check if it's an empty set. `{,}` is an empty set.
-				if self.eat(t!(",")) && self.eat(t!("}")) {
+				if self.eat(t!(",")) {
+					self.expect_closing_delimiter(t!("}"), open)?;
 					return Ok(PublicValue::Set(PublicSet::new()));
 				}
 
@@ -109,7 +110,8 @@ impl Parser<'_> {
 						unexpected!(
 							self,
 							token,
-							"Ambiguous set syntax. Use `{value,}` instead of `{value}`"
+							"`,`",
+							=> "Sets with a single value must have at least a single comma"
 						);
 					}
 					_ => {

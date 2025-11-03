@@ -109,11 +109,14 @@ impl ToSql for Set {
 			return;
 		}
 
-		// Format as Python-style set literal: {val, val, val}
+		// Format as Python-style set literal: `{,}`, `{val,}`, `{val, val, val}`
 		f.push('{');
+		let len = self.len();
 		for (i, v) in self.iter().enumerate() {
 			v.fmt_sql(f);
-			if i < self.len() - 1 {
+			if len == 1 {
+				f.push(',');
+			} else if i < len - 1 {
 				f.push_str(", ");
 			}
 		}

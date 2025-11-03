@@ -22,7 +22,8 @@ impl Parser<'_> {
 			return Ok(Expr::Literal(Literal::Object(Vec::new())));
 		}
 
-		if self.eat(t!(",")) && self.eat(t!("}")) {
+		if self.eat(t!(",")) {
+			self.expect_closing_delimiter(t!("}"), start)?;
 			return Ok(Expr::Literal(Literal::Set(Vec::new())));
 		}
 
@@ -49,10 +50,8 @@ impl Parser<'_> {
 					}
 					_ => {
 						self.pop_peek();
-						// Parse the rest of the block and then insert the first expression at the
-						// beginning.
-						let mut block = self.parse_block(stk, start).await?;
-						block.0.insert(0, first_expr);
+						let block =
+							self.parse_block_remaining(stk, start, vec![first_expr]).await?;
 						Ok(Expr::Block(Box::new(block)))
 					}
 				}
@@ -124,13 +123,26 @@ impl Parser<'_> {
 		}
 	}
 
-	/// Parses a block of statements
+	/// Parses a block of statements.
 	///
 	/// # Parser State
 	/// Expects the starting `{` to have already been eaten and its span to be
 	/// handed to this functions as the `start` parameter.
 	pub async fn parse_block(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Block> {
-		let mut statements = Vec::new();
+		self.parse_block_remaining(stk, start, Vec::new()).await
+	}
+
+	/// Parses a block of statements
+	///
+	/// # Parser State
+	/// Expects the starting `{` to have already been eaten and its span to be
+	/// handed to this functions as the `start` parameter.
+	async fn parse_block_remaining(
+		&mut self,
+		stk: &mut Stk,
+		start: Span,
+		mut existing_stmts: Vec<Expr>,
+	) -> ParseResult<Block> {
 		loop {
 			// Eat empty statements.
 			while self.eat(t!(";")) {}
@@ -140,14 +152,14 @@ impl Parser<'_> {
 			}
 
 			let stmt = self.parse_block_expr(stk).await?;
-			statements.push(stmt);
+			existing_stmts.push(stmt);
 
 			if !self.eat(t!(";")) {
 				self.expect_closing_delimiter(t!("}"), start)?;
 				break;
 			}
 		}
-		Ok(Block(statements))
+		Ok(Block(existing_stmts))
 	}
 
 	async fn parse_block_expr(&mut self, stk: &mut Stk) -> ParseResult<Expr> {

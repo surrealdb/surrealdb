@@ -22,7 +22,7 @@ impl Display for Block {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
 		match self.0.len() {
-			0 => f.write_str("{}"),
+			0 => f.write_str("{;}"),
 			1 => {
 				let v = &self.0[0];
 				write!(f, "{{ {v} }}")

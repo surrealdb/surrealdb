@@ -189,13 +189,18 @@ impl Display for Set {
 			return f.write_str("{,}");
 		}
 
-		// Format as Python-style set literal: {val, val, val}
+		// Format as Python-style set literal: `{,}`, `{val,}`, `{val, val, val}`
 		f.write_char('{')?;
+		let len = self.len();
 		for (i, v) in self.iter().enumerate() {
-			if i > 0 {
+			Display::fmt(v, f)?;
+			// If this is not the last element, add a comma.
+			// If this is the first element, add a comma.
+			if len == 1 {
+				f.write_str(",")?;
+			} else if i < len - 1 {
 				f.write_str(", ")?;
 			}
-			Display::fmt(v, f)?;
 		}
 		f.write_char('}')
 	}
