@@ -8,13 +8,13 @@ value = "{2, 4}"
 value = "{4, 5}"
 
 [[test.results]]
-value = "{2}"
+value = "{2,}"
 
 [[test.results]]
 value = "{,}"
 
 [[test.results]]
-value = "{'banana'}"
+value = "{'banana',}"
 
 */
 

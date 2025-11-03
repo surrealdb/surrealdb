@@ -14,7 +14,7 @@ value = "'set'"
 value = "{1, 2, 3}"
 
 [[test.results]]
-value = "42"
+value = "{42,}"
 
 [[test.results]]
 value = "true"
@@ -39,7 +39,7 @@ RETURN type::of($set);
 RETURN {1, 2, 3};
 
 -- Single element set
-RETURN {42};
+RETURN {42,};
 
 -- Sets maintain sorted order
 RETURN {3, 1, 2} == {1, 2, 3};

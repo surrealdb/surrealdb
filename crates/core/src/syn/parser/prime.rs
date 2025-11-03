@@ -375,27 +375,6 @@ impl Parser<'_> {
 		Ok(exprs)
 	}
 
-	// pub(crate) async fn parse_set(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Vec<Expr>> {
-	// 	let mut exprs = Vec::new();
-	// 	enter_object_recursion!(this = self => {
-	// 		loop {
-	// 			if this.eat(t!("}")) {
-	// 				break;
-	// 			}
-
-	// 			let value = stk.run(|ctx| this.parse_expr_inherit(ctx)).await?;
-	// 			exprs.push(value);
-
-	// 			if !this.eat(t!(",")) {
-	// 				this.expect_closing_delimiter(t!("}"), start)?;
-	// 				break;
-	// 			}
-	// 		}
-	// 	});
-
-	// 	Ok(exprs)
-	// }
-
 	/// Parse a mock `|foo:1..3|`
 	///
 	/// # Parser State

@@ -19,7 +19,8 @@ use crate::sql::statements::define::{
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	AccessType, Block, Expr, Index, Kind, Literal, Param, Permission, Permissions, Scoring, TableType, access_type, table_type
+	AccessType, Block, Expr, Index, Kind, Literal, Param, Permission, Permissions, Scoring,
+	TableType, access_type, table_type,
 };
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
@@ -883,9 +884,7 @@ impl Parser<'_> {
 						)));
 					} else {
 						let expr = stk.run(|stk| self.parse_expr_field(stk)).await?;
-						res.computed = Some(Expr::Block(Box::new(
-							Block(vec![expr]),
-						)));
+						res.computed = Some(Expr::Block(Box::new(Block(vec![expr]))));
 					}
 				}
 				_ => break,

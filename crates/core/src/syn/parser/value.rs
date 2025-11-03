@@ -78,24 +78,8 @@ impl Parser<'_> {
 					return Ok(PublicValue::Set(PublicSet::new()));
 				}
 
-				// Determine if it's an object or set by looking at the first token
-				// If it starts with `{`, it must be a set (objects can't have object values as
-				// keys)
-				match self.peek().kind {
-					t!("{") | t!("[") => {
-						let set = self.parse_value_set::<SurrealQL>(stk, token.span).await?;
-						return Ok(PublicValue::Set(set));
-					}
-					_ => {}
-				}
-
 				// Use glue_and_peek1 for simple tokens
 				match self.glue_and_peek1()?.kind {
-					t!(",") => {
-						// It's a set with multiple elements
-						let set = self.parse_value_set::<SurrealQL>(stk, token.span).await?;
-						PublicValue::Set(set)
-					}
 					t!(":") => {
 						// It's an object
 						let object = self.parse_value_object::<SurrealQL>(stk, token.span).await?;
@@ -118,15 +102,20 @@ impl Parser<'_> {
 						}
 					}
 					t!("}") => {
-						// Single-element set: {value,}
-						let value = stk.run(|stk| self.parse_value(stk)).await?;
-						self.expect_closing_delimiter(t!("}"), token.span)?;
-						let mut set = PublicSet::new();
-						set.insert(value);
-						PublicValue::Set(set)
+						// Single-element object: `{value}`
+						// We could parse this in SQON, but in SurrealQL this is a block statement.
+						// So we instead throw an error and require the user to add a trailing
+						// comma for a set.
+						unexpected!(
+							self,
+							token,
+							"Ambiguous set syntax. Use `{value,}` instead of `{value}`"
+						);
 					}
 					_ => {
-						unexpected!(self, token, "a set or object");
+						// It must be a set: `{1, 2, 3}` or `{value}`
+						let set = self.parse_value_set::<SurrealQL>(stk, token.span).await?;
+						PublicValue::Set(set)
 					}
 				}
 			}
@@ -330,50 +319,7 @@ impl Parser<'_> {
 			}
 			t!("{") => {
 				self.pop_peek();
-
-				if self.eat(t!("}")) {
-					return Ok(PublicValue::Object(PublicObject::new()));
-				}
-
-				// First, check if it's an empty set. `{,}` is an empty set.
-				if self.eat(t!(",")) && self.eat(t!("}")) {
-					return Ok(PublicValue::Set(PublicSet::new()));
-				}
-
-				// Determine if it's an object or set by looking at the first token
-				// If it starts with `{`, it must be a set (objects can't have object values as
-				// keys)
-				if self.peek().kind == t!("{") {
-					return self
-						.parse_value_set::<Json>(stk, token.span)
-						.await
-						.map(PublicValue::Set);
-				}
-
-				// Use glue_and_peek1 for simple tokens
-				match self.glue_and_peek1()?.kind {
-					t!(",") => {
-						// It's a set with multiple elements
-						self.parse_value_set::<Json>(stk, token.span).await.map(PublicValue::Set)
-					}
-					t!(":") => {
-						// It's an object
-						self.parse_value_object::<Json>(stk, token.span)
-							.await
-							.map(PublicValue::Object)
-					}
-					t!("}") => {
-						// Single-element set: {value,}
-						let value = stk.run(|stk| self.parse_json(stk)).await?;
-						self.expect_closing_delimiter(t!("}"), token.span)?;
-						let mut set = PublicSet::new();
-						set.insert(value);
-						Ok(PublicValue::Set(set))
-					}
-					_ => {
-						unexpected!(self, token, "a set or object")
-					}
-				}
+				self.parse_value_object::<Json>(stk, token.span).await.map(PublicValue::Object)
 			}
 			t!("[") => {
 				self.pop_peek();
@@ -464,6 +410,7 @@ impl Parser<'_> {
 			if self.eat(t!("}")) {
 				return Ok(set);
 			}
+
 			let value = stk.run(|stk| VP::parse(self, stk)).await?;
 			set.insert(value);
 

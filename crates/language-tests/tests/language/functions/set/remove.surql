@@ -14,10 +14,10 @@ value = "{1, 2, 3}"
 value = "{1, 2}"
 
 [[test.results]]
-value = "{1}"
+value = "{1,}"
 
 [[test.results]]
-value = "{1}"
+value = "{1,}"
 
 [[test.results]]
 value = "{,}"

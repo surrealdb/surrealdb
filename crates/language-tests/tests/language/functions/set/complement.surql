@@ -8,7 +8,7 @@ value = "{,}"
 error = "Incorrect arguments for function set::complement(). Argument 1 was the wrong type. Expected `set` but found `3`"
 
 [[test.results]]
-value = "{1}"
+value = "{1,}"
 
 [[test.results]]
 value = "{1, 2}"

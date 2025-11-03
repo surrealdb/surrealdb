@@ -11,7 +11,7 @@ error = "Incorrect arguments for function set::intersect(). Argument 1 was the w
 value = "{2, 3}"
 
 [[test.results]]
-value = "{6}"
+value = "{6,}"
 
 [[test.results]]
 value = "{,}"

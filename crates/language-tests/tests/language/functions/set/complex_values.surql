@@ -8,7 +8,7 @@ value = "{{ foo: 1 }, { foo: 2 }}"
 value = "{ person: NONE }"
 
 [[test.results]]
-value = "{1, {,}, {1, 2, 3}, {2}, {{5}, {{3, 4}}}}"
+value = "{{,}, {1,}, {1, 2, 3}, {2,}, {{5,}, {{3, 4}}}}"
 
 [[test.results]]
 value = "{{ foo: 1 }, { foo: 2 }, { foo: 3 }}"
@@ -29,16 +29,19 @@ value = "{1f, 1h, 1d}"
 value = "NONE"
 
 [[test.results]]
-value = "{ 'param value' }"
+value = "NONE"
 
 [[test.results]]
-value = "{ 'param value', 'param value' }"
+value = "{'param value',}"
 
 [[test.results]]
-value = "{ [1, 2, 3] }"
+value = "{'param value', 55}"
 
 [[test.results]]
-value = "{ [1, 2], [3, 4] }"
+value = "{[1, 2, 3],}"
+
+[[test.results]]
+value = "{[1, 2], [3, 4]}"
 
 */
 
@@ -49,7 +52,7 @@ RETURN {{ foo: 1 }, { foo: 2 }, { foo: 1 }};
 RETURN {person:john, person:jane, person:john};
 
 -- Sets with sets
-RETURN {{,}, {1}, {2,}, {1,2,3}, {{{3,4},},{5,}}};
+RETURN {{,}, {1,}, {2,}, {1,2,3}, {{{3,4},},{5,}}};
 
 -- Union with objects
 RETURN set::union({{ foo: 1 }, { foo: 2 }}, {{ foo: 2 }, { foo: 3 }});
@@ -66,9 +69,10 @@ RETURN {1d, 1f, 1h, 1d};
 
 -- Sets with params
 DEFINE PARAM $a VALUE "param value";
-RETURN { $a };
-RETURN {$a,$a};
+DEFINE PARAM $b VALUE 55;
+RETURN { $a, };
+RETURN {$a,$b};
 
 -- Sets with arrays
-RETURN { [1, 2, 3] };
+RETURN { [1, 2, 3], };
 RETURN { [1, 2], [3, 4] };

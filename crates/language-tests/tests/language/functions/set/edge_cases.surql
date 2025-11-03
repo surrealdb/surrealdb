@@ -2,16 +2,16 @@
 [test]
 
 [[test.results]]
-value = "{NONE}"
+value = "{NONE,}"
 
 [[test.results]]
-value = "{NULL}"
+value = "{NULL,}"
 
 [[test.results]]
 value = "{NONE, NULL}"
 
 [[test.results]]
-value = "{NONE}"
+value = "{NONE,}"
 
 [[test.results]]
 value = "true"

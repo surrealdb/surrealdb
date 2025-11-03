@@ -17,7 +17,7 @@ value = "{1, 2}"
 value = "{1, 2, 3, 4, 5}"
 
 [[test.results]]
-value = "{3}"
+value = "{3,}"
 
 [[test.results]]
 value = "{1, 2, 4, 5}"
