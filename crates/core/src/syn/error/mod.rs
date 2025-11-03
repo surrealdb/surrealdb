@@ -14,6 +14,15 @@ pub enum MessageKind {
 	Error,
 }
 
+impl MessageKind {
+	pub fn as_str(&self) -> &str {
+		match self {
+			MessageKind::Suggestion => "suggestion",
+			MessageKind::Error => "error",
+		}
+	}
+}
+
 #[derive(Debug)]
 enum DiagnosticKind {
 	Cause(String),
@@ -129,7 +138,7 @@ impl SyntaxError {
 				ref label,
 				ref kind,
 			} => {
-				let locations = Location::range_of_span(source, *span);
+				let locations = Location::from_span(source, *span);
 				let snippet = Snippet::from_source_location_range(
 					source,
 					locations,

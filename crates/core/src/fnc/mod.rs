@@ -19,6 +19,7 @@ pub mod encoding;
 pub mod geo;
 pub mod http;
 pub mod math;
+mod migration;
 pub mod not;
 pub mod object;
 pub mod operate;
@@ -72,6 +73,7 @@ pub async fn run(
 		|| name.starts_with("crypto::bcrypt")
 		|| name.starts_with("crypto::pbkdf2")
 		|| name.starts_with("crypto::scrypt")
+		|| name.starts_with("migration")
 	{
 		stk.run(|stk| asynchronous(stk, ctx, opt, doc, name, args)).await
 	} else {
@@ -518,6 +520,8 @@ pub async fn asynchronous(
 		"http::post" =>  http::post(ctx).await,
 		"http::patch" => http::patch(ctx).await,
 		"http::delete" => http::delete(ctx).await,
+
+		"migration::diagnose" => migration::diagnose((ctx,opt)).await,
 		//
 		"record::exists" => record::exists((stk, ctx, Some(opt), doc)).await,
 		"record::refs" => record::refs((stk, ctx, opt, doc)).await,

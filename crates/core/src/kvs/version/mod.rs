@@ -3,6 +3,7 @@ use crate::err::Error;
 use std::sync::Arc;
 
 mod fixes;
+pub mod v3;
 
 #[derive(Copy, Debug, Clone)]
 pub struct Version(u16);

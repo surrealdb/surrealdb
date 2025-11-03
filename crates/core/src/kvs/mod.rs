@@ -28,7 +28,7 @@ mod stash;
 mod threadpool;
 mod tr;
 mod tx;
-mod version;
+pub(crate) mod version;
 
 mod fdb;
 mod indxdb;
