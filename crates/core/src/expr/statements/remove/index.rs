@@ -52,17 +52,18 @@ impl RemoveIndexStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Get the index definition
-		let ix = txn.expect_tb_index(ns, db, &what, &name).await?;
-		// Clear the index store cache
-		let err =
-			ctx.get_index_stores().index_removed(ctx.get_index_builder(), ns, db, &what, &ix).await;
-		if let Err(e) = err {
-			if self.if_exists && matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
-				return Ok(Value::None);
+		let res = txn.expect_tb_index(ns, db, &what, &name).await;
+		let ix = match res {
+			Err(e) => {
+				if self.if_exists && matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
+					return Ok(Value::None);
+				}
+				return Err(e);
 			}
-			return Err(e);
-		}
-
+			Ok(ix) => ix,
+		};
+		// Clear the index store cache
+		ctx.get_index_stores().index_removed(ctx.get_index_builder(), ns, db, &what, &ix).await?;
 		// Delete the index data.
 		txn.del_tb_index(ns, db, &what, &name).await?;
 

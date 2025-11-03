@@ -29,7 +29,9 @@ pub(crate) struct VectorCache(Arc<Inner>);
 struct Inner {
 	/// For each index/element pair, the vector
 	vectors: Cache<VectorCacheKey, SharedVector, VectorWeighter>,
-	/// For each index, the set of element ids that have been cached
+	/// For each index, the set of element ids that have been cached.
+	/// This allows efficient bulk removal of all vectors for an index without
+	/// iterating through the entire cache.
 	indexes: DashMap<IndexId, RwLock<RoaringTreemap>>,
 }
 
@@ -72,16 +74,19 @@ impl VectorCache {
 	}
 
 	pub(super) async fn remove(&self, index_id: IndexId, element_id: ElementId) {
+		// Remove from the indexes tracking structure first
 		if let Entry::Occupied(mut entry) = self.0.indexes.entry(index_id) {
 			let is_empty = {
 				let mut elements_ids = entry.get_mut().write().await;
 				elements_ids.remove(element_id);
 				elements_ids.is_empty()
 			};
+			// Clean up the index entry if no elements remain
 			if is_empty {
 				entry.remove_entry();
 			}
 		}
+		// Remove from the vectors cache
 		self.0.vectors.remove(&(index_id, element_id));
 	}
 
@@ -90,6 +95,8 @@ impl VectorCache {
 		if let Some((_key, elements_ids)) = self.0.indexes.remove(&index_id) {
 			for element_id in elements_ids.read().await.iter() {
 				self.0.vectors.remove(&(index_id, element_id));
+				// Yield control every 1000 removals to prevent blocking other async tasks
+				// during bulk operations
 				if count % 1000 == 0 {
 					yield_now!()
 				}
