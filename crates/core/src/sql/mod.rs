@@ -28,6 +28,7 @@ pub(crate) mod literal;
 pub(crate) mod lookup;
 pub(crate) mod mock;
 pub(crate) mod model;
+pub(crate) mod module;
 pub(crate) mod operator;
 pub(crate) mod order;
 pub(crate) mod output;
@@ -41,14 +42,13 @@ pub(crate) mod script;
 pub(crate) mod split;
 pub(crate) mod start;
 pub(crate) mod table_type;
+#[cfg(test)]
+mod test_to_sql;
 pub(crate) mod timeout;
 pub(crate) mod tokenizer;
 pub(crate) mod user;
 pub(crate) mod view;
 pub(crate) mod with;
-
-#[cfg(test)]
-mod test_to_sql;
 
 pub mod index;
 pub mod statements;
@@ -81,6 +81,8 @@ pub(crate) use self::literal::Literal;
 pub(crate) use self::lookup::Lookup;
 pub(crate) use self::mock::Mock;
 pub(crate) use self::model::Model;
+#[cfg_attr(not(feature = "surrealism"), allow(unused_imports))]
+pub(crate) use self::module::{ModuleExecutable, ModuleName, SiloExecutable, SurrealismExecutable};
 pub(crate) use self::operator::{AssignOperator, BinaryOperator, PostfixOperator, PrefixOperator};
 pub(crate) use self::order::Order;
 pub(crate) use self::output::Output;
@@ -96,8 +98,9 @@ pub(crate) use self::split::{Split, Splits};
 pub(crate) use self::start::Start;
 pub(crate) use self::statements::{
 	CreateStatement, DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-	DefineIndexStatement, DefineModelStatement, DeleteStatement, InsertStatement, KillStatement,
-	LiveStatement, RelateStatement, SelectStatement, UpdateStatement, UpsertStatement,
+	DefineIndexStatement, DefineModelStatement, DefineModuleStatement, DeleteStatement,
+	InsertStatement, KillStatement, LiveStatement, RelateStatement, SelectStatement,
+	UpdateStatement, UpsertStatement,
 };
 pub(crate) use self::table_type::TableType;
 pub(crate) use self::timeout::Timeout;
