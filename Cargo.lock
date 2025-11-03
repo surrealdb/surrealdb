@@ -7094,6 +7094,7 @@ dependencies = [
  "clap",
  "serde",
  "serde_json",
+ "surrealdb-core",
  "surrealdb-types",
  "surrealism",
  "surrealism-runtime",

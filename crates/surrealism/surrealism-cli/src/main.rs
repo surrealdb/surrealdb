@@ -65,10 +65,9 @@ enum Commands {
 	},
 }
 
-/// Custom parser for `surrealdb::sql::Value`
-fn parse_value(_s: &str) -> Result<surrealdb_types::Value, String> {
-	panic!("no value parsing for now");
-	// surrealdb::syn::value(s).map_err(|e| format!("Invalid value: {e}"))
+/// Custom parser for `surrealdb_types::Value`
+fn parse_value(s: &str) -> Result<surrealdb_types::Value, String> {
+	surrealdb_core::syn::value(s).map_err(|e| format!("Invalid value: {e}"))
 }
 
 #[tokio::main]

@@ -38,9 +38,19 @@ impl InvocationContext for DemoHost {
 		println!("Vars: {:#}", vars.to_sql());
 		println!("Please enter the result:");
 
+		let stdin = std::io::stdin();
 		loop {
-			#[allow(clippy::unwrap_used)]
-			match parse_value(&std::io::stdin().lock().lines().next().unwrap().unwrap()) {
+			let line = match stdin.lock().lines().next() {
+				Some(Ok(line)) => line,
+				Some(Err(e)) => {
+					anyhow::bail!("Failed to read from stdin: {e}");
+				}
+				None => {
+					anyhow::bail!("stdin closed unexpectedly");
+				}
+			};
+
+			match parse_value(&line) {
 				Ok(x) => {
 					println!(" ");
 					return Ok(x);
@@ -68,9 +78,19 @@ impl InvocationContext for DemoHost {
 		);
 		println!("\nPlease enter the result:");
 
+		let stdin = std::io::stdin();
 		loop {
-			#[allow(clippy::unwrap_used)]
-			match parse_value(&std::io::stdin().lock().lines().next().unwrap().unwrap()) {
+			let line = match stdin.lock().lines().next() {
+				Some(Ok(line)) => line,
+				Some(Err(e)) => {
+					anyhow::bail!("Failed to read from stdin: {e}");
+				}
+				None => {
+					anyhow::bail!("stdin closed unexpectedly");
+				}
+			};
+
+			match parse_value(&line) {
 				Ok(x) => {
 					println!(" ");
 					return Ok(x);
