@@ -422,7 +422,7 @@ where
 			);
 			assert!(!f_ids.contains(e_id), "!f_ids.contains(e_id) - el: {e_id} - f_ids: {f_ids:?}");
 			assert!(
-				elements.contains(e_id),
+				elements.contains(*e_id),
 				"h.elements.contains_key(e_id) - el: {e_id} - f_ids: {f_ids:?}"
 			);
 		}

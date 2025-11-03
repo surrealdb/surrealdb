@@ -43,7 +43,7 @@ pub enum SerializedVector {
 
 impl KVValue for SerializedVector {
 	#[inline]
-	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+	fn kv_encode_value(&self) -> Result<Vec<u8>> {
 		let mut val = Vec::new();
 		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
 		Ok(val)
@@ -325,6 +325,18 @@ impl Vector {
 			_ => f64::NAN,
 		}
 	}
+
+	fn mem_size(&self) -> usize {
+		let s = match self {
+			Self::F64(arr) => arr.len() * size_of::<f64>(),
+			Self::F32(arr) => arr.len() * size_of::<f32>(),
+			Self::I64(arr) => arr.len() * size_of::<i64>(),
+			Self::I32(arr) => arr.len() * size_of::<i32>(),
+			Self::I16(arr) => arr.len() * size_of::<i16>(),
+		};
+		// Array1 overhead (approximately 24 bytes for ndarray metadata)
+		s + 24
+	}
 }
 
 /// For vectors, as we want to support very large vectors, we want to avoid copy
@@ -384,6 +396,15 @@ impl<'de> Deserialize<'de> for SharedVector {
 		// We deserialize into a vector and construct the struct
 		let v: Vector = SerializedVector::deserialize(deserializer)?.into();
 		Ok(v.into())
+	}
+}
+
+impl SharedVector {
+	pub(super) fn mem_size(&self) -> usize {
+		// - Vector size
+		// - Arc pointer (8 bytes)
+		// - Cached hash (8 bytes)
+		self.0.mem_size() + 8 + 8
 	}
 }
 

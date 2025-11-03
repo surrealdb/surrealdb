@@ -1,3 +1,4 @@
+pub(crate) mod cache;
 pub(crate) mod docs;
 mod elements;
 mod flavor;
@@ -16,6 +17,7 @@ use crate::catalog::{DatabaseDefinition, HnswParams};
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
+use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
 use crate::idx::trees::hnsw::elements::HnswElements;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
@@ -52,14 +54,14 @@ pub(crate) struct HnswState {
 
 impl KVValue for HnswState {
 	#[inline]
-	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+	fn kv_encode_value(&self) -> Result<Vec<u8>> {
 		let mut val = Vec::new();
 		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
 		Ok(val)
 	}
 
 	#[inline]
-	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
+	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
 		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
@@ -88,7 +90,7 @@ where
 	L0: DynamicSet,
 	L: DynamicSet,
 {
-	fn new(ikb: IndexKeyBase, p: &HnswParams) -> Result<Self> {
+	fn new(ikb: IndexKeyBase, p: &HnswParams, vector_cache: VectorCache) -> Result<Self> {
 		let m0 = p.m0 as usize;
 		Ok(Self {
 			state: Default::default(),
@@ -97,7 +99,7 @@ where
 			ml: p.ml.to_float(),
 			layer0: HnswLayer::new(ikb.clone(), 0, m0),
 			layers: Vec::default(),
-			elements: HnswElements::new(ikb.clone(), p.distance.clone()),
+			elements: HnswElements::new(ikb.clone(), p.distance.clone(), vector_cache),
 			rng: SmallRng::from_entropy(),
 			heuristic: p.into(),
 			ikb,
@@ -536,9 +538,12 @@ mod tests {
 
 	async fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut h =
-			HnswFlavor::new(IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)), p)
-				.unwrap();
+		let mut h = HnswFlavor::new(
+			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
+			p,
+			ds.get_vector_cache(),
+		)
+		.unwrap();
 		let map = {
 			let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
 			let map = insert_collection_hnsw(&tx, &mut h, collection).await;
@@ -737,6 +742,7 @@ mod tests {
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
 			let mut h = HnswIndex::new(
+				ctx.get_vector_cache(),
 				&tx,
 				IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
 				"test".to_string(),
@@ -829,8 +835,8 @@ mod tests {
 		]);
 		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3));
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true);
-		let mut h = HnswFlavor::new(ikb, &p).unwrap();
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let mut h = HnswFlavor::new(ikb, &p, ds.get_vector_cache()).unwrap();
 		{
 			let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
 			insert_collection_hnsw(&tx, &mut h, &collection).await;
@@ -869,6 +875,7 @@ mod tests {
 		let ctx = new_ctx(&ds, TransactionType::Write).await;
 		let tx = ctx.tx();
 		let mut h = HnswIndex::new(
+			ctx.get_vector_cache(),
 			&tx,
 			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
 			"Index".to_string(),

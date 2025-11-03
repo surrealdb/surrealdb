@@ -1,24 +1,25 @@
-use anyhow::Result;
-use dashmap::DashMap;
-
-use crate::catalog::Distance;
+use crate::catalog::{Distance, IndexId};
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::ElementId;
+use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::kvs::Transaction;
+use anyhow::Result;
 
 pub(super) struct HnswElements {
+	index_id: IndexId,
 	ikb: IndexKeyBase,
-	elements: DashMap<ElementId, SharedVector>,
+	vector_cache: VectorCache,
 	next_element_id: ElementId,
 	dist: Distance,
 }
 
 impl HnswElements {
-	pub(super) fn new(ikb: IndexKeyBase, dist: Distance) -> Self {
+	pub(super) fn new(ikb: IndexKeyBase, dist: Distance, vector_cache: VectorCache) -> Self {
 		Self {
+			index_id: ikb.index(),
 			ikb,
-			elements: Default::default(),
+			vector_cache,
 			next_element_id: 0,
 			dist,
 		}
@@ -39,12 +40,12 @@ impl HnswElements {
 
 	#[cfg(test)]
 	pub(super) fn len(&self) -> usize {
-		self.elements.len()
+		self.vector_cache.len()
 	}
 
 	#[cfg(test)]
-	pub(super) fn contains(&self, e_id: &ElementId) -> bool {
-		self.elements.contains_key(e_id)
+	pub(super) fn contains(&self, e_id: ElementId) -> bool {
+		self.vector_cache.contains(self.index_id, e_id)
 	}
 
 	pub(super) async fn insert(
@@ -57,7 +58,7 @@ impl HnswElements {
 		let key = self.ikb.new_he_key(id);
 		tx.set(&key, ser_vec, None).await?;
 		let pt: SharedVector = vec.into();
-		self.elements.insert(id, pt.clone());
+		self.vector_cache.insert(self.index_id, id, pt.clone());
 		Ok(pt)
 	}
 
@@ -66,8 +67,8 @@ impl HnswElements {
 		tx: &Transaction,
 		e_id: &ElementId,
 	) -> Result<Option<SharedVector>> {
-		if let Some(r) = self.elements.get(e_id) {
-			return Ok(Some(r.value().clone()));
+		if let Some(v) = self.vector_cache.get(self.index_id, *e_id) {
+			return Ok(Some(v));
 		}
 		let key = self.ikb.new_he_key(*e_id);
 		match tx.get(&key, None).await? {
@@ -75,7 +76,7 @@ impl HnswElements {
 			Some(vec) => {
 				let vec = Vector::from(vec);
 				let vec: SharedVector = vec.into();
-				self.elements.insert(*e_id, vec.clone());
+				self.vector_cache.insert(self.index_id, *e_id, vec.clone());
 				Ok(Some(vec))
 			}
 		}
@@ -95,7 +96,7 @@ impl HnswElements {
 	}
 
 	pub(super) async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<()> {
-		self.elements.remove(&e_id);
+		self.vector_cache.remove(self.index_id, e_id);
 		let key = self.ikb.new_he_key(e_id);
 		tx.del(&key).await?;
 		Ok(())

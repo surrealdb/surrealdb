@@ -9,6 +9,7 @@ use crate::catalog::{DatabaseDefinition, HnswParams, VectorType};
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;
+use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
 use crate::idx::trees::hnsw::elements::HnswElements;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
@@ -74,6 +75,7 @@ impl<'a> HnswCheckedSearchContext<'a> {
 
 impl HnswIndex {
 	pub(crate) async fn new(
+		vector_cache: VectorCache,
 		tx: &Transaction,
 		ikb: IndexKeyBase,
 		tb: String,
@@ -82,7 +84,7 @@ impl HnswIndex {
 		Ok(Self {
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
-			hnsw: HnswFlavor::new(ikb.clone(), p)?,
+			hnsw: HnswFlavor::new(ikb.clone(), p, vector_cache)?,
 			docs: HnswDocs::new(tx, tb, ikb.clone()).await?,
 			vec_docs: VecDocs::new(ikb),
 		})

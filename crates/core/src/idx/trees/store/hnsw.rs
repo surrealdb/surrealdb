@@ -39,7 +39,14 @@ impl HnswIndexes {
 			Entry::Occupied(e) => e.get().clone(),
 			Entry::Vacant(e) => {
 				let h = Arc::new(RwLock::new(
-					HnswIndex::new(&ctx.tx(), ikb.clone(), tb.to_string(), p).await?,
+					HnswIndex::new(
+						ctx.get_vector_cache(),
+						&ctx.tx(),
+						ikb.clone(),
+						tb.to_string(),
+						p,
+					)
+					.await?,
 				));
 				e.insert(h.clone());
 				h

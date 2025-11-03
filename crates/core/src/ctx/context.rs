@@ -28,6 +28,7 @@ use crate::dbs::{Capabilities, Options, Session, Variables};
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
+use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::store::IndexStores;
 use crate::kvs::Transaction;
 use crate::kvs::cache::ds::DatastoreCache;
@@ -81,6 +82,8 @@ pub struct MutableContext {
 	isolated: bool,
 	// A map of bucket connections
 	buckets: Option<Arc<BucketConnections>>,
+	// The vector cache for HNSW Indexes
+	vector_cache: VectorCache,
 }
 
 impl Default for MutableContext {
@@ -131,6 +134,7 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			buckets: None,
+			vector_cache: VectorCache::default(),
 		}
 	}
 
@@ -156,6 +160,7 @@ impl MutableContext {
 			isolated: false,
 			parent: Some(parent.clone()),
 			buckets: parent.buckets.clone(),
+			vector_cache: parent.vector_cache.clone(),
 		}
 	}
 
@@ -183,6 +188,7 @@ impl MutableContext {
 			isolated: true,
 			parent: Some(parent.clone()),
 			buckets: parent.buckets.clone(),
+			vector_cache: parent.vector_cache.clone(),
 		}
 	}
 
@@ -210,6 +216,7 @@ impl MutableContext {
 			isolated: false,
 			parent: None,
 			buckets: from.buckets.clone(),
+			vector_cache: from.vector_cache.clone(),
 		}
 	}
 
@@ -225,6 +232,7 @@ impl MutableContext {
 		cache: Arc<DatastoreCache>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: Arc<BucketConnections>,
+		vector_cache: VectorCache,
 	) -> Result<MutableContext> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -246,6 +254,7 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			buckets: Some(buckets),
+			vector_cache,
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -741,6 +750,10 @@ impl MutableContext {
 		} else {
 			bail!(Error::BucketUnavailable(bu.into()))
 		}
+	}
+
+	pub(crate) fn get_vector_cache(&self) -> VectorCache {
+		self.vector_cache.clone()
 	}
 }
 
