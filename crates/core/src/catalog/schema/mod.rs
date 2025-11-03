@@ -11,10 +11,10 @@ mod field;
 mod function;
 mod index;
 mod ml;
+mod module;
 mod param;
 mod sequence;
 mod user;
-
 use std::fmt::{Display, Formatter};
 
 pub use access::*;
@@ -27,6 +27,7 @@ pub use field::*;
 pub use function::*;
 pub use index::*;
 pub use ml::*;
+pub use module::*;
 pub(crate) use param::*;
 pub use sequence::*;
 pub use user::*;

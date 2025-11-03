@@ -42,7 +42,7 @@ value = "[2]"
 
 */
 
-BEGIN;
+{
     DEFINE INDEX idx_k1_k2 ON TABLE test COLUMNS k1,k2;
     FOR $i in 1..6 {
     CREATE test CONTENT {
@@ -52,7 +52,7 @@ BEGIN;
         };
     };
     RETURN "OK";
-COMMIT;
+};
 
 SELECT * FROM test WHERE k1 = 'key1' AND k2="key2" ORDER BY i DESC EXPLAIN FULL;
 (SELECT * FROM test WHERE k1 = 'key1' AND k2="key2" ORDER BY i DESC).i;
