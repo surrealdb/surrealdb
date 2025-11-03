@@ -5,6 +5,9 @@
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "{ in: 'DEFINE FIELD in ON test TYPE record<a> PERMISSIONS FULL', out: 'DEFINE FIELD out ON test TYPE record<b> PERMISSIONS FULL' }"
 
 [[test.results]]

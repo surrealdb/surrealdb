@@ -53,15 +53,15 @@ value = "[{ id: test:float0, number: 0.5f }, { id: test:float1, number: 1.5f }, 
 value = "[{ detail: { direction: 'forward', table: 'test' }, operation: 'Iterate Table' }, { detail: { reason: 'WITH NOINDEX' }, operation: 'Fallback' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
 
 */
-BEGIN;
-DEFINE INDEX index ON TABLE test COLUMNS number;
-CREATE test:int0 SET number = 0;
-CREATE test:float0 SET number = 0.5;
-CREATE test:int1 SET number = 1;
-CREATE test:float1 SET number = 1.5;
-CREATE test:int2 SET number = 2;
-RETURN "OK";
-COMMIT;
+{
+    DEFINE INDEX index ON TABLE test COLUMNS number;
+    CREATE test:int0 SET number = 0;
+    CREATE test:float0 SET number = 0.5;
+    CREATE test:int1 SET number = 1;
+    CREATE test:float1 SET number = 1.5;
+    CREATE test:int2 SET number = 2;
+    RETURN "OK";
+};
 
 SELECT * FROM test WITH NOINDEX WHERE number > 0 AND number < 2 ORDER BY id;
 SELECT * FROM test WITH NOINDEX WHERE number > 0 AND number < 2 ORDER BY id EXPLAIN;
