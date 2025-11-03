@@ -28,6 +28,13 @@ impl Fields {
 			Fields::Select(fields) => fields.iter().all(|x| matches!(x, Field::All)),
 		}
 	}
+
+	pub fn is_empty(&self) -> bool {
+		match self {
+			Fields::Value(_field) => false,
+			Fields::Select(fields) => fields.is_empty(),
+		}
+	}
 }
 
 impl From<Fields> for crate::expr::field::Fields {
