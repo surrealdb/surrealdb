@@ -151,6 +151,8 @@ pub struct ParserSettings {
 	pub define_api_enabled: bool,
 	/// Whether the files feature is enabled
 	pub files_enabled: bool,
+	/// Whether the surrealism feature is enabled
+	pub surrealism_enabled: bool,
 }
 
 impl Default for ParserSettings {
@@ -163,6 +165,7 @@ impl Default for ParserSettings {
 			references_enabled: false,
 			define_api_enabled: false,
 			files_enabled: false,
+			surrealism_enabled: false,
 		}
 	}
 }
@@ -173,6 +176,7 @@ impl ParserSettings {
 			references_enabled: enabled,
 			define_api_enabled: enabled,
 			files_enabled: enabled,
+			surrealism_enabled: enabled,
 			..Self::default()
 		}
 	}
