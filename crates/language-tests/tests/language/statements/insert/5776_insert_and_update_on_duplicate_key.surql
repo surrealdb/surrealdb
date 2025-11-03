@@ -8,21 +8,23 @@ issue = 5776
 run = true
 
 [[test.results]]
-# Statement 1: DEFINE INDEX;
 value = "NONE"
 
 [[test.results]]
-value = "[{ author: 'John Doe', content: 'This is the first version of the article content.', feed_title: 'Tech News', fetched_full: false, id: article:17nsonsrgam0yz6usery, link: 'https://example.com/news/123', name: 'Breaking News Article', read: false, starred: false }]"
+value = "NONE"
+
+[[test.results]]
+value = "[{ author: 'John Doe', content: 'This is the first version of the article content.', feed_title: 'Tech News', fetched_full: false, id: article:hb57sw2anrqfoqgpp56o, link: 'https://example.com/news/123', name: 'Breaking News Article', read: false, starred: false }]"
 skip-record-id-key = true
 
 [[test.results]]
-# Statement 2: BEGIN;
-value = "[{ author: 'Jane Smith', content: 'This is a completely different article content with updated information.', feed_title: 'Science News', fetched_full: true, id: article:17nsonsrgam0yz6usery, link: 'https://example.com/news/123', name: 'Breaking News Article', read: true, starred: true }]"
+value = "[{ author: 'Jane Smith', content: 'This is a completely different article content with updated information.', feed_title: 'Science News', fetched_full: true, id: article:hb57sw2anrqfoqgpp56o, link: 'https://example.com/news/123', name: 'Breaking News Article', read: true, starred: true }]"
 skip-record-id-key = true
 
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
-# Statement 6: SELECT * FROM item;
 value = "[]"
 */
 

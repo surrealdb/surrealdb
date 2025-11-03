@@ -1057,7 +1057,7 @@ mod cli_integration {
 			let output = remove_debug_info(output);
 			assert_eq!(
 				output,
-				"[[{ id: thing:one }]]\n\n".to_owned(),
+				"[NONE, [{ id: thing:one }], NONE]\n\n".to_owned(),
 				"failed to send sql: {args}"
 			);
 		}
