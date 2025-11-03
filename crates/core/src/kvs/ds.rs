@@ -55,7 +55,6 @@ use crate::iam::{Action, Auth, Error as IamError, Resource, ResourceKind, Role};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
-use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::LockType::*;
@@ -125,8 +124,6 @@ pub struct Datastore {
 	buckets: Arc<BucketConnections>,
 	// The sequences
 	sequences: Sequences,
-	// The vector cache
-	vector_cache: VectorCache,
 }
 
 #[derive(Clone)]
@@ -656,7 +653,6 @@ impl Datastore {
 			cache: Arc::new(DatastoreCache::new()),
 			buckets: Arc::new(DashMap::new()),
 			sequences: Sequences::new(tf, id),
-			vector_cache: VectorCache::default(),
 		})
 	}
 
@@ -682,7 +678,6 @@ impl Datastore {
 			buckets: Arc::new(DashMap::new()),
 			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
-			vector_cache: VectorCache::default(),
 		}
 	}
 
@@ -811,11 +806,6 @@ impl Datastore {
 	#[cfg(test)]
 	pub(crate) fn get_cache(&self) -> Arc<DatastoreCache> {
 		self.cache.clone()
-	}
-
-	#[cfg(test)]
-	pub(crate) fn get_vector_cache(&self) -> VectorCache {
-		self.vector_cache.clone()
 	}
 
 	// Initialise the cluster and run bootstrap utilities
@@ -1884,7 +1874,6 @@ impl Datastore {
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 			self.buckets.clone(),
-			self.vector_cache.clone(),
 		)?;
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {

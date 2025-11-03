@@ -51,11 +51,11 @@ impl RemoveIndexStatement {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
+		// Get the index definition
+		let ix = txn.expect_tb_index(ns, db, &what, &name).await?;
 		// Clear the index store cache
-		let err = ctx
-			.get_index_stores()
-			.index_removed(ctx.get_index_builder(), &txn, ns, db, &what, &name)
-			.await;
+		let err =
+			ctx.get_index_stores().index_removed(ctx.get_index_builder(), ns, db, &what, &ix).await;
 		if let Err(e) = err {
 			if self.if_exists && matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
 				return Ok(Value::None);

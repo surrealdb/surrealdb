@@ -40,13 +40,13 @@ impl HnswElements {
 	}
 
 	#[cfg(test)]
-	pub(super) fn len(&self) -> usize {
-		self.vector_cache.len()
+	pub(super) async fn len(&self) -> usize {
+		self.vector_cache.len(&self.index_id).await as usize
 	}
 
 	#[cfg(test)]
-	pub(super) fn contains(&self, e_id: ElementId) -> bool {
-		self.vector_cache.contains(self.index_id, e_id)
+	pub(super) async fn contains(&self, e_id: ElementId) -> bool {
+		self.vector_cache.contains(self.index_id, e_id).await
 	}
 
 	pub(super) async fn insert(
@@ -59,7 +59,7 @@ impl HnswElements {
 		let key = self.ikb.new_he_key(id);
 		tx.set(&key, ser_vec, None).await?;
 		let pt: SharedVector = vec.into();
-		self.vector_cache.insert(self.index_id, id, pt.clone());
+		self.vector_cache.insert(self.index_id, id, pt.clone()).await;
 		Ok(pt)
 	}
 
@@ -68,7 +68,7 @@ impl HnswElements {
 		tx: &Transaction,
 		e_id: &ElementId,
 	) -> Result<Option<SharedVector>> {
-		if let Some(v) = self.vector_cache.get(self.index_id, *e_id) {
+		if let Some(v) = self.vector_cache.get(self.index_id, *e_id).await {
 			return Ok(Some(v));
 		}
 		let key = self.ikb.new_he_key(*e_id);
@@ -77,7 +77,7 @@ impl HnswElements {
 			Some(vec) => {
 				let vec = Vector::from(vec);
 				let vec: SharedVector = vec.into();
-				self.vector_cache.insert(self.index_id, *e_id, vec.clone());
+				self.vector_cache.insert(self.index_id, *e_id, vec.clone()).await;
 				Ok(Some(vec))
 			}
 		}
@@ -97,7 +97,7 @@ impl HnswElements {
 	}
 
 	pub(super) async fn remove(&mut self, tx: &Transaction, e_id: ElementId) -> Result<()> {
-		self.vector_cache.remove(self.index_id, e_id);
+		self.vector_cache.remove(self.index_id, e_id).await;
 		let key = self.ikb.new_he_key(e_id);
 		tx.del(&key).await?;
 		Ok(())

@@ -225,22 +225,22 @@ impl HnswFlavor {
 		}
 	}
 	#[cfg(test)]
-	pub(super) fn check_hnsw_properties(&self, expected_count: usize) {
+	pub(super) async fn check_hnsw_properties(&self, expected_count: usize) {
 		match self {
-			HnswFlavor::H5_9(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H5_17(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H5_25(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H5set(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H9_17(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H9_25(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H9set(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H13_25(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H13set(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H17set(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H21set(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H25set(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::H29set(h) => h.check_hnsw_properties(expected_count),
-			HnswFlavor::Hset(h) => h.check_hnsw_properties(expected_count),
+			HnswFlavor::H5_9(h) => h.check_hnsw_properties(expected_count).await,
+			HnswFlavor::H5_17(h) => h.check_hnsw_properties(expected_count).await,
+			HnswFlavor::H5_25(h) => h.check_hnsw_properties(expected_count).await,
+			HnswFlavor::H5set(h) => h.check_hnsw_properties(expected_count).await,
+			HnswFlavor::H9_17(h) => h.check_hnsw_properties(expected_count).await,
+			HnswFlavor::H9_25(h) => h.check_hnsw_properties(expected_count).await,
+			HnswFlavor::H9set(h) => h.check_hnsw_properties(expected_count).await,
+			HnswFlavor::H13_25(h) => h.check_hnsw_properties(expected_count).await,
+			HnswFlavor::H13set(h) => h.check_hnsw_properties(expected_count).await,
+			HnswFlavor::H17set(h) => h.check_hnsw_properties(expected_count).await,
+			HnswFlavor::H21set(h) => h.check_hnsw_properties(expected_count).await,
+			HnswFlavor::H25set(h) => h.check_hnsw_properties(expected_count).await,
+			HnswFlavor::H29set(h) => h.check_hnsw_properties(expected_count).await,
+			HnswFlavor::Hset(h) => h.check_hnsw_properties(expected_count).await,
 		}
 	}
 }

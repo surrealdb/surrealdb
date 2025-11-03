@@ -40,7 +40,7 @@ impl HnswIndexes {
 			Entry::Vacant(e) => {
 				let h = Arc::new(RwLock::new(
 					HnswIndex::new(
-						ctx.get_vector_cache(),
+						ctx.get_index_stores().vector_cache().clone(),
 						&ctx.tx(),
 						ikb.clone(),
 						tb.to_string(),

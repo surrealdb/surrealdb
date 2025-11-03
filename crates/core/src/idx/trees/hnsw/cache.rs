@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
+use dashmap::{DashMap, Entry};
 use quick_cache::Weighter;
 use quick_cache::sync::Cache;
+use roaring::RoaringTreemap;
+use tokio::sync::RwLock;
 
 use crate::catalog::IndexId;
 use crate::cnf;
@@ -21,7 +24,14 @@ impl Weighter<VectorCacheKey, SharedVector> for VectorWeighter {
 }
 
 #[derive(Clone)]
-pub(crate) struct VectorCache(Arc<Cache<VectorCacheKey, SharedVector, VectorWeighter>>);
+pub(crate) struct VectorCache(Arc<Inner>);
+
+struct Inner {
+	/// For each index/element pair, the vector
+	vectors: Cache<VectorCacheKey, SharedVector, VectorWeighter>,
+	/// For each index, the set of element ids that have been cached
+	indexes: DashMap<IndexId, RwLock<RoaringTreemap>>,
+}
 
 impl Default for VectorCache {
 	fn default() -> Self {
@@ -30,33 +40,74 @@ impl Default for VectorCache {
 }
 impl VectorCache {
 	fn new(cache_size: u64) -> Self {
-		let cache = Cache::with_weighter(
-			cache_size as usize, // estimated_items_capacity (rough estimate)
-			cache_size,          // weight_capacity in bytes
-			VectorWeighter,
-		);
-		Self(Arc::new(cache))
+		Self(Arc::new(Inner {
+			vectors: Cache::with_weighter(
+				// estimated_items_capacity (rough estimate)
+				(cache_size / 256) as usize,
+				// weight_capacity in bytes
+				cache_size,
+				VectorWeighter,
+			),
+			indexes: DashMap::new(),
+		}))
 	}
 
-	pub(super) fn insert(&self, index_id: IndexId, element_id: ElementId, vector: SharedVector) {
-		self.0.insert((index_id, element_id), vector);
+	pub(super) async fn insert(
+		&self,
+		index_id: IndexId,
+		element_id: ElementId,
+		vector: SharedVector,
+	) {
+		self.0.vectors.insert((index_id, element_id), vector);
+		self.0.indexes.entry(index_id).or_default().write().await.insert(element_id);
 	}
 
-	pub(super) fn get(&self, index_id: IndexId, element_id: ElementId) -> Option<SharedVector> {
-		self.0.get(&(index_id, element_id))
+	pub(super) async fn get(
+		&self,
+		index_id: IndexId,
+		element_id: ElementId,
+	) -> Option<SharedVector> {
+		let key = (index_id, element_id);
+		self.0.vectors.get(&key)
 	}
 
-	pub(super) fn remove(&self, index_id: IndexId, element_id: ElementId) {
-		self.0.remove(&(index_id, element_id));
+	pub(super) async fn remove(&self, index_id: IndexId, element_id: ElementId) {
+		if let Entry::Occupied(mut entry) = self.0.indexes.entry(index_id) {
+			let is_empty = {
+				let mut elements_ids = entry.get_mut().write().await;
+				elements_ids.remove(element_id);
+				elements_ids.is_empty()
+			};
+			if is_empty {
+				entry.remove_entry();
+			}
+		}
+		self.0.vectors.remove(&(index_id, element_id));
+	}
+
+	pub(crate) async fn remove_index(&self, index_id: IndexId) {
+		let mut count = 0;
+		if let Some((_key, elements_ids)) = self.0.indexes.remove(&index_id) {
+			for element_id in elements_ids.read().await.iter() {
+				self.0.vectors.remove(&(index_id, element_id));
+				if count % 1000 == 0 {
+					yield_now!()
+				}
+				count += 1;
+			}
+		}
+	}
+	#[cfg(test)]
+	pub(super) async fn len(&self, index_id: &IndexId) -> u64 {
+		if let Some(elements_ids) = self.0.indexes.get(index_id) {
+			elements_ids.read().await.len()
+		} else {
+			0
+		}
 	}
 
 	#[cfg(test)]
-	pub(super) fn len(&self) -> usize {
-		self.0.len()
-	}
-
-	#[cfg(test)]
-	pub(super) fn contains(&self, index_id: IndexId, element_id: ElementId) -> bool {
-		self.0.contains_key(&(index_id, element_id))
+	pub(super) async fn contains(&self, index_id: IndexId, element_id: ElementId) -> bool {
+		self.0.vectors.contains_key(&(index_id, element_id))
 	}
 }

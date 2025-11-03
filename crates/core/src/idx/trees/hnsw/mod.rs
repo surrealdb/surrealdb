@@ -418,20 +418,20 @@ where
 		self.elements.get_vector(tx, e_id).await
 	}
 	#[cfg(test)]
-	fn check_hnsw_properties(&self, expected_count: usize) {
-		check_hnsw_props(self, expected_count);
+	async fn check_hnsw_properties(&self, expected_count: usize) {
+		check_hnsw_props(self, expected_count).await;
 	}
 }
 
 #[cfg(test)]
-fn check_hnsw_props<L0, L>(h: &Hnsw<L0, L>, expected_count: usize)
+async fn check_hnsw_props<L0, L>(h: &Hnsw<L0, L>, expected_count: usize)
 where
 	L0: DynamicSet,
 	L: DynamicSet,
 {
-	assert_eq!(h.elements.len(), expected_count);
+	assert_eq!(h.elements.len().await, expected_count);
 	for layer in h.layers.iter() {
-		layer.check_props(&h.elements);
+		layer.check_props(&h.elements).await;
 	}
 }
 
@@ -476,7 +476,7 @@ mod tests {
 			let obj: SharedVector = obj.clone();
 			let e_id = h.insert(tx, obj.clone_vector()).await.unwrap();
 			map.insert(e_id, obj);
-			h.check_hnsw_properties(map.len());
+			h.check_hnsw_properties(map.len()).await;
 		}
 		map
 	}
@@ -532,7 +532,7 @@ mod tests {
 		for e_id in element_ids {
 			assert!(h.remove(tx, e_id).await.unwrap());
 			map.remove(&e_id);
-			h.check_hnsw_properties(map.len());
+			h.check_hnsw_properties(map.len()).await;
 		}
 	}
 
@@ -541,7 +541,7 @@ mod tests {
 		let mut h = HnswFlavor::new(
 			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
 			p,
-			ds.get_vector_cache(),
+			ds.index_store().vector_cache().clone(),
 		)
 		.unwrap();
 		let map = {
@@ -650,7 +650,7 @@ mod tests {
 					e.insert(HashSet::from_iter([*doc_id]));
 				}
 			}
-			h.check_hnsw_properties(map.len());
+			h.check_hnsw_properties(map.len()).await;
 		}
 		Ok(map)
 	}
@@ -712,7 +712,7 @@ mod tests {
 				}
 			}
 			// Check properties
-			h.check_hnsw_properties(map.len());
+			h.check_hnsw_properties(map.len()).await;
 		}
 		Ok(())
 	}
@@ -742,7 +742,7 @@ mod tests {
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
 			let mut h = HnswIndex::new(
-				ctx.get_vector_cache(),
+				ctx.get_index_stores().vector_cache().clone(),
 				&tx,
 				IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
 				"test".to_string(),
@@ -836,7 +836,7 @@ mod tests {
 		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3));
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true);
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
-		let mut h = HnswFlavor::new(ikb, &p, ds.get_vector_cache()).unwrap();
+		let mut h = HnswFlavor::new(ikb, &p, ds.index_store().vector_cache().clone()).unwrap();
 		{
 			let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
 			insert_collection_hnsw(&tx, &mut h, &collection).await;
@@ -875,7 +875,7 @@ mod tests {
 		let ctx = new_ctx(&ds, TransactionType::Write).await;
 		let tx = ctx.tx();
 		let mut h = HnswIndex::new(
-			ctx.get_vector_cache(),
+			ctx.get_index_stores().vector_cache().clone(),
 			&tx,
 			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
 			"Index".to_string(),

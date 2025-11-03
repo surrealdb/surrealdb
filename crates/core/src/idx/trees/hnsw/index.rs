@@ -204,7 +204,7 @@ impl HnswIndex {
 	}
 
 	#[cfg(test)]
-	pub(super) fn check_hnsw_properties(&self, expected_count: usize) {
-		self.hnsw.check_hnsw_properties(expected_count)
+	pub(super) async fn check_hnsw_properties(&self, expected_count: usize) {
+		self.hnsw.check_hnsw_properties(expected_count).await
 	}
 }

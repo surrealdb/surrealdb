@@ -14,6 +14,7 @@ use crate::catalog::{DatabaseId, HnswParams, Index, IndexDefinition, NamespaceId
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::idx::IndexKeyBase;
+use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::store::cache::TreeCache;
 use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
 use crate::idx::trees::store::mapper::Mappers;
@@ -207,6 +208,7 @@ pub struct IndexStores(Arc<Inner>);
 struct Inner {
 	hnsw_indexes: HnswIndexes,
 	mappers: Mappers,
+	vector_cache: VectorCache,
 }
 
 impl Default for IndexStores {
@@ -214,6 +216,7 @@ impl Default for IndexStores {
 		Self(Arc::new(Inner {
 			hnsw_indexes: HnswIndexes::default(),
 			mappers: Mappers::default(),
+			vector_cache: VectorCache::default(),
 		}))
 	}
 }
@@ -234,16 +237,15 @@ impl IndexStores {
 	pub(crate) async fn index_removed(
 		&self,
 		ib: Option<&IndexBuilder>,
-		tx: &Transaction,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &str,
-		ix: &str,
+		ix: &IndexDefinition,
 	) -> Result<()> {
 		if let Some(ib) = ib {
-			ib.remove_index(ns, db, tb, ix).await?;
+			ib.remove_index(ns, db, tb, ix.index_id).await?;
 		}
-		self.remove_index(ns, db, tx.expect_tb_index(ns, db, tb, ix).await?.as_ref()).await
+		self.remove_index(ns, db, ix).await
 	}
 
 	pub(crate) async fn namespace_removed(
@@ -281,7 +283,7 @@ impl IndexStores {
 	) -> Result<()> {
 		for ix in tx.all_tb_indexes(ns, db, tb).await?.iter() {
 			if let Some(ib) = ib {
-				ib.remove_index(ns, db, tb, &ix.name).await?;
+				ib.remove_index(ns, db, tb, ix.index_id).await?;
 			}
 			self.remove_index(ns, db, ix).await?;
 		}
@@ -303,10 +305,15 @@ impl IndexStores {
 
 	async fn remove_hnsw_index(&self, ikb: IndexKeyBase) -> Result<()> {
 		self.0.hnsw_indexes.remove(&ikb).await?;
+		self.0.vector_cache.remove_index(ikb.index()).await;
 		Ok(())
 	}
 
 	pub(crate) fn mappers(&self) -> &Mappers {
 		&self.0.mappers
+	}
+
+	pub(crate) fn vector_cache(&self) -> &VectorCache {
+		&self.0.vector_cache
 	}
 }

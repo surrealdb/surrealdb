@@ -83,11 +83,10 @@ impl DefineIndexStatement {
 			ctx.get_index_stores()
 				.index_removed(
 					ctx.get_index_builder(),
-					&txn,
 					tb.namespace_id,
 					tb.database_id,
 					&tb.name,
-					&name,
+					&ix,
 				)
 				.await?;
 			ix.index_id
