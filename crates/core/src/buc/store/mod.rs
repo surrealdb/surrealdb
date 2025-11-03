@@ -7,7 +7,7 @@ use bytes::Bytes;
 use crate::err::Error;
 use crate::val::{Datetime, File, Object, Value};
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 pub(crate) mod file;
 pub(crate) mod memory;
 pub(crate) mod prefixed;

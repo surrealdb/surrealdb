@@ -1,4 +1,6 @@
-use std::{fmt, thread};
+use std::fmt;
+#[cfg(feature = "surrealism")]
+use std::thread;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
@@ -7,15 +9,15 @@ use crate::catalog;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::Options;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::expr::{Kind, Value};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCacheLookup;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 use crate::surrealism::host::Host;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 use crate::surrealism::host::SignatureHost;
 use crate::val::File;
 
@@ -120,7 +122,7 @@ impl fmt::Display for SurrealismExecutable {
 	}
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 impl SurrealismExecutable {
 	pub(crate) async fn signature(
 		&self,
@@ -193,7 +195,7 @@ impl SurrealismExecutable {
 	}
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(not(feature = "surrealism"))]
 impl SurrealismExecutable {
 	pub(crate) async fn signature(
 		&self,
@@ -261,7 +263,7 @@ impl fmt::Display for SiloExecutable {
 	}
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 impl SiloExecutable {
 	pub(crate) async fn signature(&self, ctx: &Context, sub: Option<&str>) -> Result<Signature> {
 		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
@@ -339,7 +341,7 @@ impl SiloExecutable {
 	}
 }
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(not(feature = "surrealism"))]
 impl SiloExecutable {
 	pub(crate) async fn signature(&self, _ctx: &Context, _sub: Option<&str>) -> Result<Signature> {
 		bail!("Surrealism functions are not supported in WASM environments")
@@ -363,6 +365,7 @@ impl SiloExecutable {
 /// Uses scoped threads to allow safe borrowing from the current scope without requiring
 /// 'static lifetime bounds. Creates a single-threaded tokio runtime in the thread to
 /// handle async operations. The function blocks until the spawned thread completes.
+#[cfg(feature = "surrealism")]
 fn spawn_thread<F, Fut, R>(f: F) -> Result<R>
 where
 	F: FnOnce() -> Fut + Send,

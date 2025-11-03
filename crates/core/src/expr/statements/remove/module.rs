@@ -3,13 +3,14 @@ use std::fmt::{self, Display};
 use anyhow::Result;
 
 use crate::catalog::providers::DatabaseProvider;
+#[cfg_attr(not(feature = "surrealism"), allow(unused_imports))]
 use crate::catalog::{ModuleExecutable, ModuleName};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Value};
 use crate::iam::{Action, ResourceKind};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 use crate::surrealism::cache::SurrealismCacheLookup;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -28,6 +29,7 @@ impl RemoveModuleStatement {
 		// Get the definition
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		let storage_name = self.name.get_storage_name();
+		#[cfg_attr(not(feature = "surrealism"), allow(unused_variables))]
 		let md = match txn.get_db_module(ns, db, &storage_name).await {
 			Ok(x) => x,
 			Err(e) => {
@@ -44,7 +46,7 @@ impl RemoveModuleStatement {
 		// Clear the cache
 		txn.clear_cache();
 		// Remove the module from the cache
-		#[cfg(not(target_arch = "wasm32"))]
+		#[cfg(feature = "surrealism")]
 		if let Some(cache) = ctx.get_surrealism_cache() {
 			let lookup = match &md.executable {
 				ModuleExecutable::Surrealism(surrealism) => {

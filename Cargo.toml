@@ -229,12 +229,14 @@ default = [
     "storage-rocksdb",
     "scripting",
     "http",
+    "surrealism",
 ]
 http = ["surrealdb/http"]
 jwks = ["surrealdb/jwks"]
 ml = ["surrealdb/ml"]
 performance-profiler = ["dep:pprof"]
 scripting = ["surrealdb/scripting"]
+surrealism = ["surrealdb-core/surrealism"]
 storage-mem = ["surrealdb/kv-mem"]
 storage-indxdb = ["surrealdb/kv-indxdb"]
 storage-rocksdb = ["surrealdb/kv-rocksdb"]

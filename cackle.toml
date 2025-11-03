@@ -1,12 +1,19 @@
 #
 # General Configuration
 #
+# NOTE: If cackle hangs with infinite warnings about wasmtime-wasi/cap-std/cap-primitives,
+# the surrealism ecosystem uses wasmtime which has complex module structures that
+# can cause static analysis tools to loop indefinitely.
+#
+# To run cackle without surrealism packages, disable the surrealism feature:
+#   cargo cackle --no-default-features --features "storage-mem,scripting,http,jwks"
 
 [common]
 version = 2
 import_std = ["fs", "net", "process"]
-features = ["default"]
-build_flags = ["--tests"]
+# Disable surrealism feature to avoid wasmtime complexity
+features = ["storage-mem", "scripting", "http", "jwks"]
+build_flags = ["--tests", "--no-default-features"]
 
 [sandbox]
 kind = "Disabled"

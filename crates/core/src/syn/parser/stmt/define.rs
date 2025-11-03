@@ -22,14 +22,14 @@ use crate::sql::{
 	AccessType, DefineModuleStatement, Expr, Index, Kind, Literal, Param, Permission, Permissions,
 	Scoring, TableType, access_type, table_type,
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 use crate::sql::{ModuleExecutable, SiloExecutable, SurrealismExecutable};
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Token, TokenKind, t};
 use crate::types::PublicDuration;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 use crate::types::PublicFile;
 
 impl Parser<'_> {
@@ -200,7 +200,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	#[cfg(target_arch = "wasm32")]
+	#[cfg(not(feature = "surrealism"))]
 	pub(crate) async fn parse_define_module(
 		&mut self,
 		_stk: &mut Stk,
@@ -211,7 +211,7 @@ impl Parser<'_> {
 		)
 	}
 
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(feature = "surrealism")]
 	pub(crate) async fn parse_define_module(
 		&mut self,
 		stk: &mut Stk,

@@ -4,13 +4,13 @@ use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 #[cfg(all(target_family = "wasm", feature = "http"))]
 use std::net::ToSocketAddrs;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 use std::str::FromStr;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 use anyhow::bail;
 use ipnet::IpNet;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 use surrealism_runtime::capabilities::SurrealismCapabilities;
 #[cfg(all(not(target_family = "wasm"), feature = "http"))]
 use tokio::net::lookup_host;
@@ -856,7 +856,7 @@ impl Capabilities {
 	/// Checks wether capabilities required by a Surrealism package are allowed.
 	/// The `allow_arbitrary_queries` capability is not checked as that is to be used by the
 	/// runtime.
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(feature = "surrealism")]
 	pub fn validate_surrealism_capabilities(
 		&self,
 		capabilities: SurrealismCapabilities,

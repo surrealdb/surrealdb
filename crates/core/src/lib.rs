@@ -35,7 +35,7 @@ mod doc;
 mod exe;
 mod fnc;
 mod key;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 mod surrealism;
 mod sys;
 

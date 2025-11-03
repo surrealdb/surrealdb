@@ -9,15 +9,15 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 use async_channel::Sender;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 use surrealism_runtime::controller::Runtime;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 use surrealism_runtime::package::SurrealismPackage;
 use trice::Instant;
 #[cfg(feature = "http")]
 use url::Url;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 use crate::buc::store::ObjectKey;
 use crate::buc::store::ObjectStore;
 use crate::buc::{self, BucketConnectionKey, BucketConnections};
@@ -28,7 +28,7 @@ use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 use crate::dbs::capabilities::ExperimentalTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
@@ -44,7 +44,7 @@ use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::mem::ALLOC;
 use crate::sql::expression::convert_public_value_to_internal;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(feature = "surrealism")]
 use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup, SurrealismCacheValue};
 use crate::types::{PublicNotification, PublicVariables};
 use crate::val::Value;
@@ -92,7 +92,7 @@ pub struct MutableContext {
 	// A map of bucket connections
 	buckets: Option<Arc<BucketConnections>>,
 	// The surrealism cache
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(feature = "surrealism")]
 	surrealism_cache: Option<Arc<SurrealismCache>>,
 }
 
@@ -144,7 +144,7 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			buckets: None,
-			#[cfg(not(target_arch = "wasm32"))]
+			#[cfg(feature = "surrealism")]
 			surrealism_cache: None,
 		}
 	}
@@ -171,7 +171,7 @@ impl MutableContext {
 			isolated: false,
 			parent: Some(parent.clone()),
 			buckets: parent.buckets.clone(),
-			#[cfg(not(target_arch = "wasm32"))]
+			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
 		}
 	}
@@ -200,7 +200,7 @@ impl MutableContext {
 			isolated: true,
 			parent: Some(parent.clone()),
 			buckets: parent.buckets.clone(),
-			#[cfg(not(target_arch = "wasm32"))]
+			#[cfg(feature = "surrealism")]
 			surrealism_cache: parent.surrealism_cache.clone(),
 		}
 	}
@@ -229,7 +229,7 @@ impl MutableContext {
 			isolated: false,
 			parent: None,
 			buckets: from.buckets.clone(),
-			#[cfg(not(target_arch = "wasm32"))]
+			#[cfg(feature = "surrealism")]
 			surrealism_cache: from.surrealism_cache.clone(),
 		}
 	}
@@ -246,7 +246,7 @@ impl MutableContext {
 		cache: Arc<DatastoreCache>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: Arc<BucketConnections>,
-		#[cfg(not(target_arch = "wasm32"))] surrealism_cache: Arc<SurrealismCache>,
+		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
 	) -> Result<MutableContext> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -268,7 +268,7 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			buckets: Some(buckets),
-			#[cfg(not(target_arch = "wasm32"))]
+			#[cfg(feature = "surrealism")]
 			surrealism_cache: Some(surrealism_cache),
 		};
 		if let Some(timeout) = time_out {
@@ -767,12 +767,12 @@ impl MutableContext {
 		}
 	}
 
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(feature = "surrealism")]
 	pub(crate) fn get_surrealism_cache(&self) -> Option<Arc<SurrealismCache>> {
 		self.surrealism_cache.as_ref().map(|sc| sc.clone())
 	}
 
-	#[cfg(not(target_arch = "wasm32"))]
+	#[cfg(feature = "surrealism")]
 	pub(crate) async fn get_surrealism_runtime(
 		&self,
 		lookup: SurrealismCacheLookup<'_>,

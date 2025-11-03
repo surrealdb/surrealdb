@@ -81,6 +81,7 @@ pub(crate) use self::literal::Literal;
 pub(crate) use self::lookup::Lookup;
 pub(crate) use self::mock::Mock;
 pub(crate) use self::model::Model;
+#[cfg_attr(not(feature = "surrealism"), allow(unused_imports))]
 pub(crate) use self::module::{ModuleExecutable, ModuleName, SiloExecutable, SurrealismExecutable};
 pub(crate) use self::operator::{AssignOperator, BinaryOperator, PostfixOperator, PrefixOperator};
 pub(crate) use self::order::Order;
