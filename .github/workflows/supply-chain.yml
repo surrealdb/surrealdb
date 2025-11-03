@@ -142,8 +142,8 @@ jobs:
         run: |
           # Temporarily remove rust-toolchain.toml to use nightly
           mv rust-toolchain.toml rust-toolchain.toml.bak
-          # Run without surrealism feature to avoid wasmtime complexity
-          cargo acl -n --no-default-features --features storage-mem,scripting,http,jwks
+          # Configuration in cackle.toml disables surrealism to avoid wasmtime complexity
+          cargo acl -n
           mv rust-toolchain.toml.bak rust-toolchain.toml
 
       - name: Dependency check failure
