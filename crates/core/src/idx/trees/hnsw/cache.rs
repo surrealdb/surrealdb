@@ -1,14 +1,15 @@
 use std::sync::Arc;
 
-use crate::catalog::IndexId;
-use crate::cnf;
-use crate::idx::trees::hnsw::ElementId;
-use crate::idx::trees::vector::SharedVector;
 use dashmap::{DashMap, Entry};
 use quick_cache::sync::Cache;
 use quick_cache::{DefaultHashBuilder, Lifecycle, Weighter};
 use roaring::RoaringTreemap;
 use tokio::sync::RwLock;
+
+use crate::catalog::IndexId;
+use crate::cnf;
+use crate::idx::trees::hnsw::ElementId;
+use crate::idx::trees::vector::SharedVector;
 
 /// Custom weighter for SharedVector that calculates memory usage
 /// based on a vector type and dimensions.
@@ -52,26 +53,20 @@ impl ElementsPerIndex {
 				elements_ids.remove(element_id);
 				elements_ids.is_empty()
 			};
-			// Clean up the index entry if no elements remain
+			// Clean up the index entry if no elements remain to prevent memory leaks
 			if is_empty {
 				entry.remove_entry();
 			}
 		}
 	}
 
-	fn remove_element_sync(&self, index_id: IndexId, element_id: ElementId) {
+	fn evict_element(&self, index_id: IndexId, element_id: ElementId) {
 		if let Entry::Occupied(mut entry) = self.0.entry(index_id) {
-			let is_empty = {
-				// Use blocking_write() because on_evict is called from cache's synchronous context.
-				// This is safe as evictions happen during cache operations that don't hold async locks.
-				let mut elements_ids = entry.get_mut().blocking_write();
-				elements_ids.remove(element_id);
-				elements_ids.is_empty()
-			};
-			// Clean up the index entry if no elements remain
-			if is_empty {
-				entry.remove_entry();
-			}
+			// Use blocking_write() because on_evict is called from cache's synchronous context.
+			// This is safe as evictions happen during cache operations that don't hold async locks.
+			entry.get_mut().blocking_write().remove(element_id);
+			// Note: We intentionally don't clean up empty index entries here to avoid potential
+			// race conditions. Empty entries are cleaned up during async remove_element() calls.
 		}
 	}
 }
@@ -89,7 +84,7 @@ impl Lifecycle<VectorCacheKey, SharedVector> for VectorCacheLifecycle {
 	fn on_evict(&self, _state: &mut Self::RequestState, key: VectorCacheKey, _val: SharedVector) {
 		// Called synchronously by quick_cache during eviction.
 		// We use the sync variant to maintain consistency without async overhead.
-		self.0.remove_element_sync(key.0, key.1)
+		self.0.evict_element(key.0, key.1)
 	}
 }
 
@@ -144,8 +139,11 @@ impl VectorCache {
 		element_id: ElementId,
 		vector: SharedVector,
 	) {
-		self.0.vectors.insert((index_id, element_id), vector);
+		// Update indexes tracking first, before inserting into cache.
+		// This prevents a race condition where eviction could occur immediately after
+		// cache insertion but before index tracking is updated, leaving an inconsistent state.
 		self.0.indexes.insert(index_id, element_id).await;
+		self.0.vectors.insert((index_id, element_id), vector);
 	}
 
 	pub(super) async fn get(
