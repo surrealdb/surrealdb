@@ -403,6 +403,11 @@ allow_attributes = "allow"
 # https://rust-lang.github.io/rust-clippy/master/#assigning_clones
 assigning_clones = "warn"
 
+# This lint allows boolean comparisons in assert-like macros.
+# It is fine to use `assert_eq!(val, true)` in tests and is often more readable than `assert!(val)`.
+# https://rust-lang.github.io/rust-clippy/master/#bool_assert_comparison
+bool_assert_comparison = "allow"
+
 # Checks for the usage of `as _` conversion using inferred type.
 # https://rust-lang.github.io/rust-clippy/master/#cloned_instead_of_copied
 cloned_instead_of_copied = "warn"
