@@ -1,10 +1,12 @@
+use std::sync::Arc;
+
+use quick_cache::Weighter;
+use quick_cache::sync::Cache;
+
 use crate::catalog::IndexId;
 use crate::cnf;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::vector::SharedVector;
-use quick_cache::Weighter;
-use quick_cache::sync::Cache;
-use std::sync::Arc;
 
 /// Custom weighter for SharedVector that calculates memory usage
 /// based on a vector type and dimensions

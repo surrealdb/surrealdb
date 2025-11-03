@@ -1,10 +1,11 @@
+use anyhow::Result;
+
 use crate::catalog::{Distance, IndexId};
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::ElementId;
 use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::vector::{SerializedVector, SharedVector, Vector};
 use crate::kvs::Transaction;
-use anyhow::Result;
 
 pub(super) struct HnswElements {
 	index_id: IndexId,
