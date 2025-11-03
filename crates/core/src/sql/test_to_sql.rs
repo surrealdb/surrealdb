@@ -4,17 +4,21 @@ use geo::Point;
 use rstest::rstest;
 
 use crate::sql::literal::ObjectEntry;
+use crate::sql::statements::access::{AccessStatementGrant, Subject};
 use crate::sql::statements::alter::AlterKind;
 use crate::sql::statements::rebuild::RebuildIndexStatement;
+use crate::sql::statements::show::ShowSince;
 use crate::sql::statements::{
-	AlterStatement, AlterTableStatement, CreateStatement, DefineStatement, DefineTableStatement,
-	DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement, InsertStatement,
-	OutputStatement, RebuildStatement, RelateStatement, RemoveStatement, RemoveTableStatement,
-	SelectStatement, SetStatement, SleepStatement, UpdateStatement, UpsertStatement,
+	AccessStatement, AlterStatement, AlterTableStatement, CreateStatement, DefineStatement,
+	DefineTableStatement, DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement,
+	InsertStatement, OptionStatement, OutputStatement, RebuildStatement, RelateStatement,
+	RemoveStatement, RemoveTableStatement, SelectStatement, SetStatement, ShowStatement,
+	SleepStatement, UpdateStatement, UpsertStatement, UseStatement,
 };
 use crate::sql::{
 	BinaryOperator, Block, Closure, Constant, Data, Expr, Fields, Function, FunctionCall, Idiom,
-	Literal, Mock, Param, PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
+	KillStatement, Literal, LiveStatement, Mock, Param, PostfixOperator, PrefixOperator,
+	RecordIdKeyLit, RecordIdLit, TopLevelExpr,
 };
 use crate::types::{PublicBytes, PublicDuration, PublicFile, PublicGeometry};
 use crate::val::range::TypedRange;
@@ -299,6 +303,22 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Valu
     "{ user: { name: 'Alice', settings: { theme: 'dark', notifications: { email: true, push: false } }, tags: ['admin', 'premium'] } }",
     "{\n\tuser: {\n\t\tname: 'Alice',\n\t\tsettings: {\n\t\t\ttheme: 'dark',\n\t\t\tnotifications: {\n\t\t\t\temail: true,\n\t\t\t\tpush: false\n\t\t\t}\n\t\t},\n\t\ttags: [\n\t\t\t'admin',\n\t\t\t'premium'\n\t\t]\n\t}\n}"
 )]
+#[case::top_level_begin(TopLevelExpr::Begin, "BEGIN", "BEGIN")]
+#[case::top_level_cancel(TopLevelExpr::Cancel, "CANCEL", "CANCEL")]
+#[case::top_level_commit(TopLevelExpr::Commit, "COMMIT", "COMMIT")]
+#[case::top_level_access(TopLevelExpr::Access(Box::new(AccessStatement::Grant(
+    AccessStatementGrant {
+        ac: "user".to_string(),
+        base: None,
+        subject: Subject::Record(RecordIdLit { table: "user".to_string(), key: RecordIdKeyLit::Number(123) }),
+    }))), "ACCESS user GRANT FOR RECORD user:123", "ACCESS user GRANT FOR RECORD user:123")]
+#[case::top_level_kill(TopLevelExpr::Kill(KillStatement { id: Expr::Param(Param::new("id".to_string())) }), "KILL $id", "KILL $id")]
+#[case::top_level_live(TopLevelExpr::Live(Box::new(LiveStatement { fields: Fields::all(), diff: false, what: Expr::Table("user".to_string()), cond: None, fetch: None })), "LIVE SELECT * FROM user", "LIVE SELECT * FROM user")]
+#[case::top_level_live_diff(TopLevelExpr::Live(Box::new(LiveStatement { fields: Fields::none(), diff: true, what: Expr::Table("user".to_string()), cond: None, fetch: None })), "LIVE SELECT DIFF FROM user", "LIVE SELECT DIFF FROM user")]
+#[case::top_level_option(TopLevelExpr::Option(OptionStatement { name: "IMPORT".to_string(), what: true }), "OPTION IMPORT", "OPTION IMPORT")]
+#[case::top_level_use(TopLevelExpr::Use(UseStatement { ns: Some("ns".to_string()), db: Some("db".to_string()) }), "USE NS ns DB db", "USE NS ns DB db")]
+#[case::top_level_show(TopLevelExpr::Show(ShowStatement { table: Some("user".to_string()), since: ShowSince::Versionstamp(123), limit: Some(10) }), "SHOW CHANGES FOR TABLE user SINCE 123 LIMIT 10", "SHOW CHANGES FOR TABLE user SINCE 123 LIMIT 10")]
+#[case::top_level_expr(TopLevelExpr::Expr(Expr::Literal(Literal::Integer(1))), "1", "1")]
 fn test_to_sql(#[case] v: impl Display, #[case] expected: &str, #[case] expected_pretty: &str) {
 	assert_eq!(format!("{v}"), expected);
 	assert_eq!(format!("{v:#}"), expected_pretty);

@@ -1690,8 +1690,7 @@ mod tests {
 
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::owner().with_ns("test").with_db("test");
-		ds.execute(
-			format!("DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{secret}' DURATION FOR SESSION 30d, FOR TOKEN 30d")
+		ds.execute(format!("DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{secret}' DURATION FOR SESSION 30d, FOR TOKEN 30d")
 				.as_str(),
 			&sess,
 			None,
@@ -2093,11 +2092,11 @@ mod tests {
 
     				CREATE user:1 SET enabled = false;
 				"#).as_str(),
-				&sess,
-				None,
-			)
-			.await
-			.unwrap();
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
 
 			// Prepare the claims object
 			let mut claims = claims.clone();

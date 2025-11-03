@@ -77,7 +77,7 @@ macro_rules! into_future {
 				};
 
 				router
-					.$method(Command::RawQuery {
+					.$method(Command::Query {
 						txn,
 						query,
 						variables,
@@ -171,7 +171,7 @@ where
 
 			variables.insert("_data".to_string(), data);
 
-			Ok(Command::RawQuery {
+			Ok(Command::Query {
 				txn: self.txn,
 				query,
 				variables,
@@ -224,7 +224,7 @@ where
 
 			variables.insert("_data".to_string(), data);
 
-			Ok(Command::RawQuery {
+			Ok(Command::Query {
 				txn: self.txn,
 				query,
 				variables,
