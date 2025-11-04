@@ -283,7 +283,7 @@ impl Document {
 						apply_assignments(stk, ctx, opt, &mut input, assignments.clone()).await?;
 
 						ComputedData::Set(assignments, Arc::new(input))
-					},
+					}
 					x => bail!("Unexpected data clause type: {x:?}"),
 				});
 			}
