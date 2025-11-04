@@ -10,12 +10,13 @@ use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
+use crate::expr::data::Assignment;
 use crate::expr::dir::Dir;
 use crate::expr::lookup::LookupKind;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::reference::ReferenceDeleteStrategy;
 use crate::expr::statements::{DeleteStatement, UpdateStatement};
-use crate::expr::{Data, Expr, FlowResultExt as _, Idiom, Literal, Lookup, Part};
+use crate::expr::{AssignOperator, Data, Expr, FlowResultExt as _, Idiom, Literal, Lookup, Part};
 use crate::idx::planner::ScanDirection;
 use crate::key::r#ref::Ref;
 use crate::val::{RecordId, Value};
@@ -182,25 +183,56 @@ impl Document {
 						}
 						// Delete only the reference on the remote record
 						ReferenceDeleteStrategy::Unset => {
+							let opt = opt.clone().with_perms(false);
 							let record = RecordId {
 								table: ref_key.ft.into_owned(),
 								key: ref_key.fk.into_owned(),
 							};
 
-							// Setup the delete statement
-							let stm = UpdateStatement {
-								what: vec![Expr::Literal(Literal::RecordId(record.into_literal()))],
-								data: Some(Data::UnsetReference(fd.name.clone(), rid.clone())),
-								..UpdateStatement::default()
-							};
+							if let Some(doc) =
+								record.clone().select_document(stk, ctx, &opt, None).await?
+							{
+								let doc = Value::Object(doc);
+								let data = match doc.pick(&fd.name) {
+									Value::RecordId(_) => {
+										Some(Data::UnsetExpression(vec![fd.name.clone()]))
+									}
+									Value::Array(_) | Value::Set(_) => {
+										Some(Data::SetExpression(vec![Assignment {
+											place: fd.name.clone(),
+											operator: AssignOperator::Subtract,
+											value: Expr::Literal(Literal::RecordId(
+												rid.clone().into_literal(),
+											)),
+										}]))
+									}
+									Value::None => None,
+									v => {
+										fail!(
+											"Expected either a record id, array, set or none, found {v}"
+										)
+									}
+								};
 
-							// Execute the delete statement
-							stm.compute(stk, ctx, &opt.clone().with_perms(false), None)
-								.await
-								// Wrap any error in an error explaining what went wrong
-								.map_err(|e| {
-									Error::RefsUpdateFailure(rid.to_string(), e.to_string())
-								})?;
+								if data.is_some() {
+									// Setup the update statement
+									let stm = UpdateStatement {
+										what: vec![Expr::Literal(Literal::RecordId(
+											record.into_literal(),
+										))],
+										data,
+										..UpdateStatement::default()
+									};
+
+									// Execute the update statement
+									stm.compute(stk, ctx, &opt, None)
+										.await
+										// Wrap any error in an error explaining what went wrong
+										.map_err(|e| {
+											Error::RefsUpdateFailure(rid.to_string(), e.to_string())
+										})?;
+								}
+							}
 						}
 						// Process a custom delete strategy
 						ReferenceDeleteStrategy::Custom(v) => {

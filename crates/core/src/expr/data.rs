@@ -2,7 +2,6 @@ use std::fmt::{self, Display, Formatter};
 
 use crate::expr::{AssignOperator, Expr, Idiom};
 use crate::fmt::Fmt;
-use crate::val::RecordId;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[allow(clippy::enum_variant_names)]
@@ -17,8 +16,6 @@ pub(crate) enum Data {
 	SingleExpression(Expr),
 	ValuesExpression(Vec<Vec<(Idiom, Expr)>>),
 	UpdateExpression(Vec<Assignment>),
-	// Internal data clause
-	UnsetReference(Idiom, RecordId),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -69,9 +66,6 @@ impl Display for Data {
 			),
 			Self::UpdateExpression(v) => {
 				write!(f, "ON DUPLICATE KEY UPDATE {}", Fmt::comma_separated(v.iter()))
-			}
-			Self::UnsetReference(idiom, rid) => {
-				write!(f, "SET {idiom} = IF {idiom}.is_record() THEN NONE ELSE {idiom} - {rid} END")
 			}
 		}
 	}

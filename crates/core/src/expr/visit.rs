@@ -1192,8 +1192,6 @@ implement_visitor! {
 					this.visit_expr(v)?;
 				}
 			},
-			// This is an internal data clause, we don't need to visit it
-			Data::UnsetReference(_, _) => {},
 		}
 		Ok(())
 	}
@@ -2602,8 +2600,6 @@ implement_visitor_mut! {
 					this.visit_mut_expr(v)?;
 				}
 			},
-			// This is an internal data clause, we don't need to visit it
-			Data::UnsetReference(_, _) => {},
 		}
 		Ok(())
 	}

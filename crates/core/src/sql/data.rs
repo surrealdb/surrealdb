@@ -2,7 +2,6 @@ use std::fmt::{self, Display, Formatter};
 
 use crate::fmt::Fmt;
 use crate::sql::{AssignOperator, Expr, Idiom};
-use crate::val::RecordId;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -18,8 +17,6 @@ pub(crate) enum Data {
 	SingleExpression(Expr),
 	ValuesExpression(Vec<Vec<(Idiom, Expr)>>),
 	UpdateExpression(Vec<Assignment>),
-	// Internal data clause
-	UnsetReference(Idiom, RecordId),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,9 +96,6 @@ impl Display for Data {
 					arg.place, arg.operator, arg.value
 				))))
 			),
-			Self::UnsetReference(idiom, rid) => {
-				write!(f, "SET {idiom} = IF {idiom}.is_record() THEN NONE ELSE {idiom} - {rid} END")
-			}
 		}
 	}
 }
@@ -127,7 +121,6 @@ impl From<Data> for crate::expr::Data {
 			Data::UpdateExpression(v) => {
 				Self::UpdateExpression(v.into_iter().map(Into::into).collect())
 			}
-			Data::UnsetReference(idiom, rid) => Self::UnsetReference(idiom.into(), rid),
 		}
 	}
 }
@@ -153,9 +146,6 @@ impl From<crate::expr::Data> for Data {
 			),
 			crate::expr::Data::UpdateExpression(v) => {
 				Self::UpdateExpression(v.into_iter().map(Into::into).collect())
-			}
-			crate::expr::Data::UnsetReference(idiom, rid) => {
-				Self::UnsetReference(idiom.into(), rid)
 			}
 		}
 	}

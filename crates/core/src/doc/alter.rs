@@ -284,32 +284,6 @@ impl Document {
 
 						ComputedData::Set(assignments, Arc::new(input))
 					}),
-					Data::UnsetReference(idiom, rid) => match doc.doc.as_ref().pick(idiom) {
-						Value::RecordId(_) => Some(ComputedData::Unset(vec![idiom.clone()])),
-						Value::Array(_) | Value::Set(_) => {
-							let input = if self.reduced(stk, ctx, opt, Current).await? {
-								self.initial_reduced.doc.as_ref().clone()
-							} else {
-								self.initial.doc.as_ref().clone()
-							};
-
-							let assignments = vec![ComputedAssignment {
-								place: idiom.clone(),
-								operator: AssignOperator::Subtract,
-								value: Value::RecordId(rid.clone()),
-							}];
-
-							Some(ComputedData::Set(assignments, Arc::new(input)))
-						}
-						Value::None => None,
-						v => {
-							fail!(
-								"Unexpected value type `{}` while trying to unset reference `{}`",
-								v.kind_of(),
-								idiom
-							)
-						}
-					},
 					x => bail!("Unexpected data clause type: {x:?}"),
 				};
 			}
