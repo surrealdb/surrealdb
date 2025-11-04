@@ -1015,10 +1015,7 @@ mod tests {
 					b.add(d, Ids64::One(*doc_id));
 				}
 			}
-			b.build(
-				#[cfg(debug_assertions)]
-				HashMap::default(),
-			)
+			b.build()
 		}
 	}
 

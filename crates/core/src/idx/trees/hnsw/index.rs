@@ -1,7 +1,5 @@
 use std::collections::VecDeque;
 
-#[cfg(debug_assertions)]
-use ahash::HashMap;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
@@ -197,10 +195,7 @@ impl HnswIndex {
 				}
 			}
 		}
-		Ok(builder.build(
-			#[cfg(debug_assertions)]
-			HashMap::default(),
-		))
+		Ok(builder.build())
 	}
 
 	#[cfg(test)]

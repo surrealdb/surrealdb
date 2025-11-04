@@ -1,5 +1,6 @@
 use std::cmp::PartialEq;
 use std::hash::{Hash, Hasher};
+use std::io::Write;
 use std::ops::{Add, Deref, Div, Sub};
 use std::sync::Arc;
 
@@ -12,7 +13,7 @@ use num_traits::Zero;
 use revision::specialised::{RevisionSpecialisedVecF32, RevisionSpecialisedVecF64};
 use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use rust_decimal::prelude::FromPrimitive;
-use storekey::{BorrowDecode, Encode};
+use storekey::{BorrowDecode, BorrowReader, DecodeError, Encode, EncodeError, Writer};
 
 use crate::catalog::{Distance, VectorType};
 use crate::err::Error;
@@ -30,7 +31,7 @@ pub enum Vector {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Encode, BorrowDecode)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum SerializedVector {
 	F64(RevisionSpecialisedVecF64),
 	F32(RevisionSpecialisedVecF32),
@@ -42,14 +43,32 @@ pub enum SerializedVector {
 impl KVValue for SerializedVector {
 	#[inline]
 	fn kv_encode_value(&self) -> Result<Vec<u8>> {
-		let mut val = Vec::new();
-		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
-		Ok(val)
+		let mut vec = Vec::new();
+		SerializeRevisioned::serialize_revisioned(self, &mut vec)?;
+		Ok(vec)
 	}
 
 	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
 		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val.as_slice())?)
+	}
+}
+
+impl<F> Encode<F> for SerializedVector {
+	#[inline]
+	fn encode<W: Write>(&self, w: &mut Writer<W>) -> std::result::Result<(), EncodeError> {
+		let mut vec = Vec::new();
+		SerializeRevisioned::serialize_revisioned(self, &mut vec).map_err(EncodeError::custom)?;
+		w.write_slice(&vec)?;
+		Ok(())
+	}
+}
+
+impl<'de, F> BorrowDecode<'de, F> for SerializedVector {
+	fn borrow_decode(r: &mut BorrowReader<'de>) -> std::result::Result<Self, DecodeError> {
+		let slice = r.read_cow()?;
+		DeserializeRevisioned::deserialize_revisioned(&mut slice.as_ref())
+			.map_err(DecodeError::custom)
 	}
 }
 

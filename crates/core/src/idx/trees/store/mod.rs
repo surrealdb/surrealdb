@@ -1,8 +1,6 @@
 pub(crate) mod hnsw;
-mod lru;
 mod mapper;
 
-use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -16,44 +14,8 @@ use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
 use crate::idx::trees::store::mapper::Mappers;
+use crate::kvs::Transaction;
 use crate::kvs::index::IndexBuilder;
-use crate::kvs::{Key, Transaction};
-
-pub type NodeId = u64;
-
-#[derive(Debug)]
-pub struct StoredNode<N>
-where
-	N: Clone + Display,
-{
-	pub(super) n: N,
-	pub(super) id: NodeId,
-	pub(super) key: Key,
-	pub(super) size: u32,
-}
-
-impl<N> StoredNode<N>
-where
-	N: Clone + Display,
-{
-	pub(super) fn new(n: N, id: NodeId, key: Key, size: u32) -> Self {
-		Self {
-			n,
-			id,
-			key,
-			size,
-		}
-	}
-}
-
-impl<N> Display for StoredNode<N>
-where
-	N: Clone + Display,
-{
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		write!(f, "node_id: {} - {}", self.id, self.n)
-	}
-}
 
 #[derive(Clone)]
 pub struct IndexStores(Arc<Inner>);
