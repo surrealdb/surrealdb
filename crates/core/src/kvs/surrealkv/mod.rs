@@ -6,7 +6,7 @@ use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Result, bail, ensure};
-use surrealkv::{Durability, Mode, Options, Store, Transaction as Tx};
+use surrealkv::{Durability, Mode, Transaction as Tx, Tree, TreeBuilder};
 use tokio::sync::RwLock;
 
 use crate::err::Error;
@@ -16,7 +16,7 @@ use crate::kvs::{Key, Val, Version};
 const TARGET: &str = "surrealdb::core::kvs::surrealkv";
 
 pub struct Datastore {
-	db: Store,
+	db: Tree,
 }
 
 pub struct Transaction {
@@ -31,27 +31,32 @@ pub struct Transaction {
 impl Datastore {
 	/// Open a new database
 	pub(crate) async fn new(path: &str, enable_versions: bool) -> Result<Datastore> {
-		// Create new configuration options
-		let mut opts = Options::new();
-		// Configure versions
-		opts.enable_versions = enable_versions;
-		// Ensure persistence is enabled
-		opts.disk_persistence = true;
-		// Set the data storage directory
-		opts.dir = path.to_string().into();
-		// Set the maximum segment size
+		// Configure custom options
+		let builder = TreeBuilder::new();
+		// Enable separated keys and values
 		info!(target: TARGET, "Setting maximum segment size: {}", *cnf::SURREALKV_MAX_SEGMENT_SIZE);
-		opts.max_segment_size = *cnf::SURREALKV_MAX_SEGMENT_SIZE;
-		// Set the maximum value threshold
-		info!(target: TARGET, "Setting maximum value threshold: {}", *cnf::SURREALKV_MAX_VALUE_THRESHOLD);
-		opts.max_value_threshold = *cnf::SURREALKV_MAX_VALUE_THRESHOLD;
-		// Set the maximum value cache size
-		info!(target: TARGET, "Setting maximum value cache size: {}", *cnf::SURREALKV_MAX_VALUE_CACHE_SIZE);
-		opts.max_value_cache_size = *cnf::SURREALKV_MAX_VALUE_CACHE_SIZE;
+		let builder = builder.with_enable_vlog(true);
+		// Configure the maximum value log file size
+		info!(target: TARGET, "Setting maximum segment size: {}", *cnf::SURREALKV_MAX_SEGMENT_SIZE);
+		let builder = builder.with_vlog_max_file_size(0);
+		// Configure the value cache capacity
+		info!(target: TARGET, "Setting maximum segment size: {}", *cnf::SURREALKV_MAX_SEGMENT_SIZE);
+		let builder = builder.with_vlog_cache_capacity(0);
+		// Enable the block cache capacity
+		info!(target: TARGET, "Setting maximum segment size: {}", *cnf::SURREALKV_MAX_SEGMENT_SIZE);
+		let builder = builder.with_block_cache_capacity(0);
+		// Disable versioned queries
+		info!(target: TARGET, "Setting maximum segment size: {}", *cnf::SURREALKV_MAX_SEGMENT_SIZE);
+		let builder = builder.with_versioning(enable_versions, 0);
+		// Set the block size to 64 KiB
+		info!(target: TARGET, "Setting maximum segment size: {}", *cnf::SURREALKV_MAX_SEGMENT_SIZE);
+		let builder = builder.with_block_size(64 * 1024);
 		// Log if writes should be synced
 		info!(target: TARGET, "Wait for disk sync acknowledgement: {}", *cnf::SYNC_DATA);
+		// Set the data storage directory
+		let builder = builder.with_path(path.to_string().into());
 		// Create a new datastore
-		match Store::new(opts) {
+		match builder.build() {
 			Ok(db) => Ok(Datastore {
 				db,
 			}),
@@ -62,7 +67,7 @@ impl Datastore {
 	/// Shutdown the database
 	pub(crate) async fn shutdown(&self) -> Result<()> {
 		// Shutdown the database
-		if let Err(e) = self.db.close() {
+		if let Err(e) = self.db.close().await {
 			error!("An error occured closing the database: {e}");
 		}
 		// Nothing to do here
@@ -138,7 +143,7 @@ impl super::api::Transaction for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Commit this transaction
-		inner.commit()?;
+		inner.commit().await?;
 		// Continue
 		Ok(())
 	}
@@ -149,7 +154,7 @@ impl super::api::Transaction for Transaction {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Load the inner transaction
-		let mut inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Get the key
 		let res = match version {
 			Some(ts) => inner.get_at_version(&key, ts)?.is_some(),
@@ -165,14 +170,14 @@ impl super::api::Transaction for Transaction {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Load the inner transaction
-		let mut inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Get the key
 		let res = match version {
 			Some(ts) => inner.get_at_version(&key, ts)?,
 			None => inner.get(&key)?,
 		};
 		// Return result
-		Ok(res)
+		Ok(res.map(|v| v.to_vec()))
 	}
 
 	/// Insert or update a key in the database.
@@ -186,7 +191,7 @@ impl super::api::Transaction for Transaction {
 		let mut inner = self.inner.write().await;
 		// Set the key
 		match version {
-			Some(ts) => inner.set_at_ts(&key, &val, ts)?,
+			Some(ts) => inner.set_at_version(&key, &val, ts)?,
 			None => inner.set(&key, &val)?,
 		}
 		// Return result
@@ -203,7 +208,7 @@ impl super::api::Transaction for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Replace the key
-		inner.insert_or_replace(&key, &val)?;
+		inner.replace(&key, &val)?;
 		// Return result
 		Ok(())
 	}
@@ -219,7 +224,7 @@ impl super::api::Transaction for Transaction {
 		let mut inner = self.inner.write().await;
 		// Set the key if empty
 		if let Some(ts) = version {
-			inner.set_at_ts(&key, &val, ts)?;
+			inner.set_at_version(&key, &val, ts)?;
 		} else {
 			match inner.get(&key)? {
 				None => inner.set(&key, &val)?,
@@ -331,17 +336,17 @@ impl super::api::Transaction for Transaction {
 		let beg = rng.start;
 		let end = rng.end;
 		// Load the inner transaction
-		let inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Retrieve the scan range
 		let res = match version {
 			Some(ts) => inner
-				.keys_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
-				.map(Key::from)
-				.collect(),
+				.keys_at_version(beg, end, ts, Some(limit as usize))?
+				.map(|r| r.map(Key::from).map_err(Into::into))
+				.collect::<Result<_>>()?,
 			None => inner
-				.keys(beg.as_slice()..end.as_slice(), Some(limit as usize))
-				.map(Key::from)
-				.collect(),
+				.keys(beg, end, Some(limit as usize))?
+				.map(|r| r.map(Key::from).map_err(Into::into))
+				.collect::<Result<_>>()?,
 		};
 		// Return result
 		Ok(res)
@@ -361,19 +366,19 @@ impl super::api::Transaction for Transaction {
 		let beg = rng.start;
 		let end = rng.end;
 		// Load the inner transaction
-		let inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Retrieve the scan range
 		let res = match version {
 			Some(ts) => inner
-				.keys_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
+				.keys_at_version(beg, end, ts, Some(limit as usize))?
 				.rev()
-				.map(Key::from)
-				.collect(),
+				.map(|r| r.map(Key::from).map_err(Into::into))
+				.collect::<Result<_>>()?,
 			None => inner
-				.keys(beg.as_slice()..end.as_slice(), Some(limit as usize))
+				.keys(beg, end, Some(limit as usize))?
 				.rev()
-				.map(Key::from)
-				.collect(),
+				.map(|r| r.map(Key::from).map_err(Into::into))
+				.collect::<Result<_>>()?,
 		};
 		// Return result
 		Ok(res)
@@ -393,22 +398,16 @@ impl super::api::Transaction for Transaction {
 		let beg = rng.start;
 		let end = rng.end;
 		// Load the inner transaction
-		let mut inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Retrieve the scan range
 		let res = match version {
 			Some(ts) => inner
-				.scan_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
-				.map(|r| {
-					r.map(|(k, v)| (k.to_vec(), v)).map_err(Error::from).map_err(anyhow::Error::new)
-				})
+				.range_at_version(beg, end, ts, Some(limit as usize))?
+				.map(|r| r.map(|(k, v)| (k.to_vec(), v.to_vec())).map_err(Into::into))
 				.collect::<Result<_>>()?,
 			None => inner
-				.scan(beg.as_slice()..end.as_slice(), Some(limit as usize))
-				.map(|r| {
-					r.map(|(k, v, _)| (k.to_vec(), v))
-						.map_err(Error::from)
-						.map_err(anyhow::Error::new)
-				})
+				.range(beg, end, Some(limit as usize))?
+				.map(|r| r.map(|(k, v)| (k.to_vec(), v.to_vec())).map_err(Into::into))
 				.collect::<Result<_>>()?,
 		};
 		// Return result
@@ -429,20 +428,18 @@ impl super::api::Transaction for Transaction {
 		let beg = rng.start;
 		let end = rng.end;
 		// Load the inner transaction
-		let mut inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Retrieve the scan range
 		let res = match version {
 			Some(ts) => inner
-				.scan_at_version(beg.as_slice()..end.as_slice(), ts, Some(limit as usize))
+				.range_at_version(beg, end, ts, Some(limit as usize))?
 				.rev()
-				.map(|r| {
-					r.map(|(k, v)| (k.to_vec(), v)).map_err(Error::from).map_err(anyhow::Error::new)
-				})
+				.map(|r| r.map(|(k, v)| (k.to_vec(), v.to_vec())).map_err(Into::into))
 				.collect::<Result<_>>()?,
 			None => inner
-				.scan(beg.as_slice()..end.as_slice(), Some(limit as usize))
+				.range(beg, end, Some(limit as usize))?
 				.rev()
-				.map(|r| r.map(|(k, v, _)| (k.to_vec(), v)).map_err(Into::into))
+				.map(|r| r.map(|(k, v)| (k.to_vec(), v.to_vec())).map_err(Into::into))
 				.collect::<Result<_>>()?,
 		};
 		// Return result
@@ -465,9 +462,10 @@ impl super::api::Transaction for Transaction {
 		let inner = self.inner.write().await;
 		// Retrieve the scan range
 		let res = inner
-			.scan_all_versions(beg.as_slice()..end.as_slice(), Some(limit as usize))
-			.map(|r| r.map(|(k, v, ts, del)| (k.to_vec(), v, ts, del)).map_err(Into::into))
-			.collect::<Result<_>>()?;
+			.scan_all_versions(beg, end, Some(limit as usize))?
+			.into_iter()
+			.map(|(k, v, ts, del)| (k.to_vec(), v.to_vec(), ts, del))
+			.collect();
 		// Return result
 		Ok(res)
 	}

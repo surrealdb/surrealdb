@@ -12,7 +12,7 @@ use crate::key::debug::Sprintable;
 use crate::kvs::{Key, Val, Version};
 
 pub struct Datastore {
-	db: Database<Vec<u8>, Vec<u8>>,
+	db: Database,
 }
 
 pub struct Transaction {
@@ -21,7 +21,7 @@ pub struct Transaction {
 	/// Is the transaction writeable?
 	write: bool,
 	/// The underlying datastore transaction
-	inner: RwLock<Tx<Vec<u8>, Vec<u8>>>,
+	inner: RwLock<Tx>,
 }
 
 impl Datastore {
@@ -122,8 +122,8 @@ impl super::api::Transaction for Transaction {
 		let mut inner = self.inner.write().await;
 		// Get the key
 		let res = match version {
-			Some(ts) => inner.get_at_version(key.clone(), ts)?.is_some(),
-			None => inner.get(key.clone())?.is_some(),
+			Some(ts) => inner.get_at_version(key, ts)?.is_some(),
+			None => inner.get(key)?.is_some(),
 		};
 		// Return result
 		Ok(res)
@@ -138,11 +138,11 @@ impl super::api::Transaction for Transaction {
 		let mut inner = self.inner.write().await;
 		// Get the key
 		let res = match version {
-			Some(ts) => inner.get_at_version(key.clone(), ts)?,
-			None => inner.get(key.clone())?,
+			Some(ts) => inner.get_at_version(key, ts)?,
+			None => inner.get(key)?,
 		};
 		// Return result
-		Ok(res)
+		Ok(res.map(Val::from))
 	}
 
 	/// Insert or update a key in the database.
@@ -157,7 +157,7 @@ impl super::api::Transaction for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Set the key
-		inner.set(key.clone(), val.clone())?;
+		inner.set(key, val)?;
 		// Return result
 		Ok(())
 	}
@@ -171,8 +171,8 @@ impl super::api::Transaction for Transaction {
 		ensure!(self.writeable(), Error::TxReadonly);
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
-		// Replace the key (use set since insert_or_replace doesn't exist in SurrealMX)
-		inner.set(key.clone(), val.clone())?;
+		// Replace the key
+		inner.set(key, val)?;
 		// Return result
 		Ok(())
 	}
@@ -189,7 +189,7 @@ impl super::api::Transaction for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Set the key if empty
-		inner.put(key.clone(), val.clone())?;
+		inner.put(key, val)?;
 		// Return result
 		Ok(())
 	}
@@ -204,9 +204,9 @@ impl super::api::Transaction for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Set the key if valid
-		match (inner.get(key.clone())?, chk) {
-			(Some(v), Some(w)) if v == w => inner.set(key.clone(), val.clone())?,
-			(None, None) => inner.set(key.clone(), val.clone())?,
+		match (inner.get(&key)?, chk) {
+			(Some(v), Some(w)) if v == w => inner.set(key, val)?,
+			(None, None) => inner.set(key, val)?,
 			_ => bail!(Error::TxConditionNotMet),
 		};
 		// Return result
@@ -223,7 +223,7 @@ impl super::api::Transaction for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Remove the key
-		inner.del(key.clone())?;
+		inner.del(key)?;
 		// Return result
 		Ok(())
 	}
@@ -238,9 +238,9 @@ impl super::api::Transaction for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Delete the key if valid
-		match (inner.get(key.clone())?, chk) {
-			(Some(v), Some(w)) if v == w => inner.del(key.clone())?,
-			(None, None) => inner.del(key.clone())?,
+		match (inner.get(&key)?, chk) {
+			(Some(v), Some(w)) if v == w => inner.del(key)?,
+			(None, None) => inner.del(key)?,
 			_ => bail!(Error::TxConditionNotMet),
 		};
 		// Return result
@@ -257,7 +257,7 @@ impl super::api::Transaction for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Remove the key (use del since delete doesn't exist in SurrealMX)
-		inner.del(key.clone())?;
+		inner.del(key)?;
 		// Return result
 		Ok(())
 	}
@@ -272,9 +272,9 @@ impl super::api::Transaction for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Delete the key if valid
-		match (inner.get(key.clone())?, chk) {
-			(Some(v), Some(w)) if v == w => inner.del(key.clone())?,
-			(None, None) => inner.del(key.clone())?,
+		match (inner.get(&key)?, chk) {
+			(Some(v), Some(w)) if v == w => inner.del(key)?,
+			(None, None) => inner.del(key)?,
 			_ => bail!(Error::TxConditionNotMet),
 		};
 		// Return result
@@ -302,7 +302,7 @@ impl super::api::Transaction for Transaction {
 			None => inner.keys(beg..end, None, Some(limit as usize))?,
 		};
 		// Return result
-		Ok(res)
+		Ok(res.into_iter().map(Key::from).collect())
 	}
 
 	/// Retrieve a range of keys, in reverse.
@@ -326,7 +326,7 @@ impl super::api::Transaction for Transaction {
 			None => inner.keys_reverse(beg..end, None, Some(limit as usize))?,
 		};
 		// Return result
-		Ok(res)
+		Ok(res.into_iter().map(Key::from).collect())
 	}
 
 	/// Retrieve a range of key-value pairs.
@@ -350,7 +350,7 @@ impl super::api::Transaction for Transaction {
 			None => inner.scan(beg..end, None, Some(limit as usize))?,
 		};
 		// Return result
-		Ok(res)
+		Ok(res.into_iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect())
 	}
 
 	/// Retrieve a range of key-value pairs, in reverse.
@@ -374,7 +374,7 @@ impl super::api::Transaction for Transaction {
 			None => inner.scan_reverse(beg..end, None, Some(limit as usize))?,
 		};
 		// Return result
-		Ok(res)
+		Ok(res.into_iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect())
 	}
 
 	/// Retrieve all the versions from a range of keys.
@@ -399,7 +399,7 @@ impl super::api::Transaction for Transaction {
 				Some(v) => (k.to_vec(), v.to_vec(), ts, false),
 				None => (k.to_vec(), vec![], ts, true),
 			})
-			.collect::<Result<_>>()?;
+			.collect::<Vec<_>>();
 		// Return result
 		Ok(res)
 	}

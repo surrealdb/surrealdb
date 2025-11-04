@@ -46,9 +46,14 @@ pub struct Transaction {
 	/// Is the transaction writeable?
 	write: bool,
 	/// The underlying datastore transaction
-	inner: RwLock<Option<Tx>>,
-	/// The save point implementation
-	save_points: SavePoints,
+	inner: RwLock<TransactionInner>,
+}
+
+struct TransactionInner {
+	/// The underlying datastore transaction
+	tx: Option<Tx>,
+	/// The savepoints for this transaction
+	sp: SavePoints,
 }
 
 impl Datastore {
@@ -198,9 +203,13 @@ impl super::api::Transaction for Transaction {
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
+		// Lock the inner transaction
+		let inner = self.inner.read().await;
+		// Get the inner transaction
+		let inner =
+			inner.as_ref().ok_or_else(|| Error::Unreachable("expected a transaction".into()))?;
 		// Check the key
-		let res =
-			self.inner.read().await.as_ref().unwrap().get(&key, self.snapshot()).await?.is_some();
+		let res = inner.get(&key, self.snapshot()).await?.is_some();
 		// Return result
 		Ok(res)
 	}
@@ -611,8 +620,56 @@ impl super::api::Transaction for Transaction {
 		Ok(())
 	}
 
-	/// Get the save points for this transaction.
-	fn get_save_points(&mut self) -> &mut SavePoints {
-		&mut self.save_points
+	/// Set a new save point on the transaction.
+	async fn new_save_point(&self) -> Result<()> {
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
+		// Create a new savepoint
+		inner.sp.new_save_point();
+		// All ok
+		Ok(())
+	}
+
+	/// Release the last save point.
+	async fn release_last_save_point(&self) -> Result<()> {
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
+		// Release the last savepoint
+		inner.sp.pop();
+		// All ok
+		Ok(())
+	}
+
+	/// Rollback to the last save point.
+	async fn rollback_to_save_point(&self) -> Result<()> {
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
+		// Release the last savepoint
+		let sp = inner.sp.pop()?;
+		// Loop over the savepoint entries
+		for (key, val) in sp {
+			match val.last_operation {
+				SaveOperation::Set | SaveOperation::Put => {
+					if let Some(initial_value) = val.saved_val {
+						// If the last operation was a SET or PUT
+						// then we just have set back the key to its initial value
+						inner.tx.set(key, initial_value)?;
+					} else {
+						// If the last operation on this key was not a DEL operation,
+						// then we have to delete the key
+						inner.tx.del(key)?;
+					}
+				}
+				SaveOperation::Del => {
+					if let Some(initial_value) = val.saved_val {
+						// If the last operation was a DEL,
+						// then we have to put back the initial value
+						inner.tx.put(key, initial_value)?;
+					}
+				}
+			}
+		}
+		// All ok
+		Ok(())
 	}
 }

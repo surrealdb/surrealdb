@@ -84,7 +84,15 @@ mod mem {
 		(ds, Kvs::Mem)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
+	include_tests!(new_ds =>
+		raw,
+		snapshot,
+		multireader,
+		multiwriter_different_keys,
+		multiwriter_same_keys_conflict,
+		timestamp_to_versionstamp,
+		reverse_iterator,
+	);
 }
 
 #[cfg(feature = "kv-rocksdb")]
@@ -109,7 +117,15 @@ mod rocksdb {
 		(ds, Kvs::Rocksdb)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp,reverse_iterator);
+	include_tests!(new_ds =>
+		raw,
+		snapshot,
+		multireader,
+		multiwriter_different_keys,
+		multiwriter_same_keys_conflict,
+		timestamp_to_versionstamp,
+		reverse_iterator,
+	);
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -134,7 +150,15 @@ mod surrealkv {
 		(ds, Kvs::SurrealKV)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
+	include_tests!(new_ds =>
+		raw,
+		snapshot,
+		multireader,
+		multiwriter_different_keys,
+		multiwriter_same_keys_conflict,
+		timestamp_to_versionstamp,
+		reverse_iterator,
+	);
 }
 
 #[cfg(feature = "kv-tikv")]
@@ -161,7 +185,15 @@ mod tikv {
 		(ds, Kvs::Tikv)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_allow,timestamp_to_versionstamp,reverse_iterator);
+	include_tests!(new_ds =>
+		raw,
+		snapshot,
+		multireader,
+		multiwriter_different_keys,
+		multiwriter_same_keys_allow,
+		timestamp_to_versionstamp,
+		reverse_iterator,
+	);
 }
 
 #[cfg(feature = "kv-fdb")]
@@ -188,5 +220,13 @@ mod fdb {
 		(ds, Kvs::Fdb)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_allow,timestamp_to_versionstamp);
+	include_tests!(new_ds =>
+		raw,
+		snapshot,
+		multireader,
+		multiwriter_different_keys,
+		multiwriter_same_keys_allow,
+		timestamp_to_versionstamp,
+		reverse_iterator,
+	);
 }
