@@ -10,16 +10,42 @@ pub enum Function {
 	Custom(String),
 	Script(Script),
 	Model(Model),
+	Module(String, Option<String>),
+	Silo {
+		org: String,
+		pkg: String,
+		major: u32,
+		minor: u32,
+		patch: u32,
+		sub: Option<String>,
+	},
 }
 
 impl Function {
-	pub fn to_idiom(&self) -> Idiom {
+	pub(crate) fn to_idiom(&self) -> Idiom {
 		match self {
 			// Safety: "function" does not contain null bytes"
 			Self::Script(_) => Idiom::field("function".to_owned()),
 			Self::Normal(f) => Idiom::field(f.to_owned()),
-			Self::Custom(f) => Idiom::field(format!("fn::{f}")),
+			Self::Custom(name) => Idiom::field(format!("fn::{name}")),
 			Self::Model(m) => Idiom::field(m.to_string()),
+			Self::Module(m, s) => match s {
+				Some(s) => Idiom::field(format!("mod::{m}::{s}")),
+				None => Idiom::field(format!("mod::{m}")),
+			},
+			Self::Silo {
+				org,
+				pkg,
+				major,
+				minor,
+				patch,
+				sub,
+			} => match sub {
+				Some(s) => {
+					Idiom::field(format!("silo::{org}::{pkg}<{major}.{minor}.{patch}>::{s}"))
+				}
+				None => Idiom::field(format!("silo::{org}::{pkg}<{major}.{minor}.{patch}>")),
+			},
 		}
 	}
 }
@@ -31,6 +57,22 @@ impl From<Function> for crate::expr::Function {
 			Function::Custom(s) => crate::expr::Function::Custom(s),
 			Function::Script(s) => crate::expr::Function::Script(s.into()),
 			Function::Model(m) => crate::expr::Function::Model(m.into()),
+			Function::Module(m, s) => crate::expr::Function::Module(m, s),
+			Function::Silo {
+				org,
+				pkg,
+				major,
+				minor,
+				patch,
+				sub,
+			} => crate::expr::Function::Silo {
+				org,
+				pkg,
+				major,
+				minor,
+				patch,
+				sub,
+			},
 		}
 	}
 }
@@ -42,6 +84,22 @@ impl From<crate::expr::Function> for Function {
 			crate::expr::Function::Custom(s) => Self::Custom(s),
 			crate::expr::Function::Script(s) => Self::Script(s.into()),
 			crate::expr::Function::Model(m) => Self::Model(m.into()),
+			crate::expr::Function::Module(m, s) => Self::Module(m, s),
+			crate::expr::Function::Silo {
+				org,
+				pkg,
+				major,
+				minor,
+				patch,
+				sub,
+			} => Self::Silo {
+				org,
+				pkg,
+				major,
+				minor,
+				patch,
+				sub,
+			},
 		}
 	}
 }
@@ -87,6 +145,31 @@ impl fmt::Display for FunctionCall {
 			Function::Model(ref m) => {
 				write!(f, "{m}({})", Fmt::comma_separated(self.arguments.iter()))
 			}
+			Function::Module(ref m, ref s) => match s {
+				Some(s) => {
+					write!(f, "mod::{m}::{s}({})", Fmt::comma_separated(self.arguments.iter()))
+				}
+				None => write!(f, "mod::{m}({})", Fmt::comma_separated(self.arguments.iter())),
+			},
+			Function::Silo {
+				ref org,
+				ref pkg,
+				ref major,
+				ref minor,
+				ref patch,
+				ref sub,
+			} => match sub {
+				Some(s) => write!(
+					f,
+					"silo::{org}::{pkg}<{major}.{minor}.{patch}>::{s}({})",
+					Fmt::comma_separated(self.arguments.iter())
+				),
+				None => write!(
+					f,
+					"silo::{org}::{pkg}<{major}.{minor}.{patch}>({})",
+					Fmt::comma_separated(self.arguments.iter())
+				),
+			},
 		}
 	}
 }

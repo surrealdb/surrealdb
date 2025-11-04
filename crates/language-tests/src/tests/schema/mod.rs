@@ -435,6 +435,7 @@ impl<'de> Deserialize<'de> for SurrealConfigValue {
 			references_enabled: true,
 			define_api_enabled: true,
 			files_enabled: true,
+			surrealism_enabled: true,
 		};
 
 		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
@@ -498,6 +499,7 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			references_enabled: true,
 			define_api_enabled: true,
 			files_enabled: true,
+			surrealism_enabled: true,
 		};
 
 		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {
@@ -541,6 +543,7 @@ impl<'de> Deserialize<'de> for SurrealObject {
 			references_enabled: true,
 			define_api_enabled: true,
 			files_enabled: true,
+			surrealism_enabled: true,
 		};
 
 		let v = syn::parse_with_settings(source.as_bytes(), settings, async |parser, stk| {

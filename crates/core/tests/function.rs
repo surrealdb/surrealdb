@@ -3924,7 +3924,7 @@ async fn function_custom_typed_returns() -> Result<()> {
 		RETURN fn::two();
 		RETURN fn::two_bad_type();
 	"#;
-	let error = "Couldn't coerce return value from function `two_bad_type`: Expected `string` but found `2`";
+	let error = "Couldn't coerce return value from function `fn::two_bad_type`: Expected `string` but found `2`";
 	Test::new(sql)
 		.await?
 		.expect_val("None")?

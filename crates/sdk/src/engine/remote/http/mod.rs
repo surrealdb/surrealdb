@@ -583,7 +583,7 @@ async fn router(
 		Command::SubscribeLive {
 			..
 		} => Err(Error::LiveQueriesNotSupported),
-		Command::RawQuery {
+		Command::Query {
 			txn,
 			query,
 			variables,
@@ -592,7 +592,7 @@ async fn router(
 			let mut merged_vars =
 				vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Variables>();
 			merged_vars.extend(variables);
-			let cmd = Command::RawQuery {
+			let cmd = Command::Query {
 				txn,
 				query,
 				variables: merged_vars,

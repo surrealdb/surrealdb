@@ -1,0 +1,26 @@
+[package]
+name = "surrealism"
+version = "0.1.0"
+edition = "2021"
+authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
+description = "A scalable, distributed, collaborative, document-graph database."
+license-file = "LICENSE"
+repository = "https://github.com/surrealdb/surrealdb"
+homepage = "https://github.com/surrealdb/surrealdb"
+keywords = ["database", "embedded-database", "key-value", "key-value-store", "kv-store"]
+categories = ["database-implementations", "data-structures", "embedded"]
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+wasmtime.workspace = true
+surrealdb-types.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+surrealism-macros = { workspace = true, default-features = false }
+surrealism-types = { workspace = true, default-features = false }
+
+[lints]
+workspace = true

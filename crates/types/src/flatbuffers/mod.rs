@@ -9,7 +9,7 @@ mod value;
 
 use anyhow::Context;
 
-use crate::{SurrealValue, Value};
+use crate::{Kind, SurrealValue, Value};
 
 /// Trait for converting a type to a flatbuffers builder type.
 pub trait ToFlatbuffers {
@@ -49,6 +49,23 @@ pub fn decode<T: SurrealValue>(value: &[u8]) -> anyhow::Result<T> {
 		.context("Failed to decode fb value")?;
 	let value = Value::from_fb(value_fb).context("Failed to decode value from fb value")?;
 	T::from_value(value).context("Failed to decode T from value")
+}
+
+/// Encode a kind to a flatbuffers vector.
+pub fn encode_kind(kind: &Kind) -> anyhow::Result<Vec<u8>> {
+	let mut fbb = flatbuffers::FlatBufferBuilder::new();
+	let value = kind.to_fb(&mut fbb)?;
+	fbb.finish(value, None);
+	let data = fbb.finished_data().to_vec();
+	Ok(data)
+}
+
+/// Decode a flatbuffers vector to a public kind.
+pub fn decode_kind(value: &[u8]) -> anyhow::Result<Kind> {
+	let value_fb = flatbuffers::root::<surrealdb_protocol::fb::v1::Kind>(value)
+		.context("Failed to decode fb kind")?;
+	let kind = Kind::from_fb(value_fb).context("Failed to decode kind from fb kind")?;
+	Ok(kind)
 }
 
 #[cfg(test)]
