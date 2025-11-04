@@ -22,7 +22,7 @@ use crate::sql::{
 };
 use crate::types::{PublicBytes, PublicDuration, PublicFile, PublicGeometry};
 use crate::val::range::TypedRange;
-use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Value};
+use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set, Value};
 
 #[rstest]
 // Values
@@ -35,6 +35,9 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Valu
 #[case::value_number_decimal(Value::Number(Number::Decimal(1.into())), "1dec", "1dec")]
 #[case::value_string(Value::String("hello".to_string()), "'hello'", "'hello'")]
 #[case::value_array(Value::Array(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))].into()), "[1, 2]", "[\n\t1,\n\t2\n]")]
+#[case::value_set(Value::Set(Set::new()), "{,}", "{,}")]
+#[case::value_set_one(Value::Set(Set::from(vec![Value::Number(Number::Int(1))])), "{1,}", "{1,}")]
+#[case::value_set_two(Value::Set(Set::from(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))])), "{1, 2}", "{1, 2}")]
 #[case::value_object(Value::Object(Object::from_iter(vec![(String::from("key"), Value::Number(Number::Int(1)))].into_iter())), "{ key: 1 }", "{\n\tkey: 1\n}")]
 #[case::value_geometry(Value::Geometry(Geometry::Point(Point::new(1.0, 2.0))), "(1, 2)", "(1, 2)")]
 #[case::value_bytes(Value::Bytes(Bytes(b"hello".to_vec())), "b\"68656C6C6F\"", "b\"68656C6C6F\"")]
@@ -90,6 +93,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Valu
 #[case::expr_mock_count(Expr::Mock(Mock::Count("table".to_string(), 1)), "|`table`:1|", "|`table`:1|")]
 #[case::expr_mock_range(Expr::Mock(Mock::Range("table".to_string(), TypedRange::from_range(1..10))), "|`table`:1..10|", "|`table`:1..10|")]
 // Expression: Block
+#[case::expr_block_empty(Expr::Block(Box::new(Block(vec![]))), "{;}", "{;}")]
 #[case::expr_block(Expr::Block(Box::new(Block(vec![
     Expr::Literal(Literal::Integer(1)),
     Expr::Literal(Literal::Integer(2))

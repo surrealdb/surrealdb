@@ -1,7 +1,17 @@
 /**
 [test]
-wip = true
-reason = "Test set::first function for getting the first (minimum) element"
+
+[[test.results]]
+value = "1"
+
+[[test.results]]
+value = "'apple'"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "1"
 
 */
 

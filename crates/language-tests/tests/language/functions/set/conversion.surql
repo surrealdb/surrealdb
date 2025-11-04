@@ -1,7 +1,27 @@
 /**
 [test]
-wip = true
-reason = "Set literals are not yet supported"
+
+[[test.results]]
+value = "{1, 2, 3}"
+
+[[test.results]]
+value = "{1, 2, 3}"
+
+[[test.results]]
+value = "{1, 2, 3}"
+
+[[test.results]]
+value = "{'bar', 'baz', 'foo'}"
+
+[[test.results]]
+value = "true"
+
+[[test.results]]
+value = "true"
+
+[[test.results]]
+value = "false"
+
 */
 
 -- Create set literal with duplicates (deduplicates)

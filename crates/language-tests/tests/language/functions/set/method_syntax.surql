@@ -1,7 +1,42 @@
 /**
 [test]
-wip = true
-reason = "Set literals are not yet supported"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{1, 2, 3, 4}"
+
+[[test.results]]
+value = "{1, 2}"
+
+[[test.results]]
+value = "{1, 2, 3, 4, 5}"
+
+[[test.results]]
+value = "{3,}"
+
+[[test.results]]
+value = "{1, 2, 4, 5}"
+
+[[test.results]]
+value = "{1, 2}"
+
+[[test.results]]
+value = "true"
+
+[[test.results]]
+value = "false"
+
+[[test.results]]
+value = "3"
+
+[[test.results]]
+value = "false"
+
 */
 
 LET $set1 = {1, 2, 3};

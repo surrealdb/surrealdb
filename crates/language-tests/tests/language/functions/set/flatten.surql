@@ -1,7 +1,20 @@
 /**
 [test]
-wip = true
-reason = "Test set::flatten function for flattening nested sets and arrays"
+
+[[test.results]]
+value = "{1, 2, 3, 4, 5, 6}"
+
+[[test.results]]
+value = "{1, 2, 3}"
+
+[[test.results]]
+value = "{,}"
+
+[[test.results]]
+value = "{1, 2, 3, 4}"
+
+[[test.results]]
+value = "{'a', 'b', 'c', 'd'}"
 
 */
 

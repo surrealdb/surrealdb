@@ -1,7 +1,20 @@
 /**
 [test]
-wip = true
-reason = "Test set::reduce function for reducing a set to a single value"
+
+[[test.results]]
+value = "15"
+
+[[test.results]]
+value = "120"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "5"
+
+[[test.results]]
+value = "5"
 
 */
 
