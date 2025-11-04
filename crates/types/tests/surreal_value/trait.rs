@@ -292,7 +292,7 @@ test_surreal_value!(
 	object<Object>(
 		Object::new() => (
 			Value::Object(_),
-			Kind::Object { .. }
+			Kind::Object
 		),
 		is(is_object),
 		into(into_object),
@@ -421,7 +421,7 @@ test_surreal_value!(
 	btreemap<BTreeMap<String, i64>>(
 		BTreeMap::<String, i64>::new() => (
 			Value::Object(_),
-			Kind::Object { .. }
+			Kind::Object
 		),
 		into(into_btreemap<i64>),
 		from(from_btreemap<i64>),
@@ -432,7 +432,7 @@ test_surreal_value!(
 	hashmap<HashMap<String, i64>>(
 		HashMap::<String, i64>::new() => (
 			Value::Object(_),
-			Kind::Object { .. }
+			Kind::Object
 		),
 		into(into_hashmap<i64>),
 		from(from_hashmap<i64>),

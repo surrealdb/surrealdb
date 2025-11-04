@@ -86,24 +86,7 @@ impl Parser<'_> {
 			t!("FLOAT") => Ok(Kind::Float),
 			t!("INT") => Ok(Kind::Int),
 			t!("NUMBER") => Ok(Kind::Number),
-			t!("OBJECT") => {
-				let span = self.peek().span;
-				let schemafull = if self.eat(t!("<")) {
-					let next = self.next();
-					let is_schemafull = match next.kind {
-						t!("SCHEMAFULL") => true,
-						t!("STRICT") => true, // alias for schemafull
-						_ => unexpected!(self, next, "`schemafull` or `strict`"),
-					};
-					self.expect_closing_delimiter(t!(">"), span)?;
-					is_schemafull
-				} else {
-					false // default is schemaless
-				};
-				Ok(Kind::Object {
-					schemafull,
-				})
-			}
+			t!("OBJECT") => Ok(Kind::Object),
 			t!("POINT") => Ok(Kind::Geometry(vec![GeometryKind::Point])),
 			t!("STRING") => Ok(Kind::String),
 			t!("UUID") => Ok(Kind::Uuid),
@@ -309,7 +292,7 @@ mod tests {
 	#[case::duration("duration", "duration", Kind::Duration)]
 	#[case::float("float", "float", Kind::Float)]
 	#[case::number("number", "number", Kind::Number)]
-	#[case::object("object", "object", Kind::Object { schemafull: false })]
+	#[case::object("object", "object", Kind::Object)]
 	#[case::point("point", "geometry<point>", Kind::Geometry(vec![GeometryKind::Point]))]
 	#[case::string("string", "string", Kind::String)]
 	#[case::uuid("uuid", "uuid", Kind::Uuid)]

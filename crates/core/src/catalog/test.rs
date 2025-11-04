@@ -165,6 +165,7 @@ use crate::vs::VersionStamp;
 	what: "what".to_string(),
 	field_kind: None,
 	readonly: false,
+	flexible: false,
 	value: None,
 	assert: None,
 	computed: None,
@@ -174,7 +175,7 @@ use crate::vs::VersionStamp;
 	update_permission: Permission::Full,
 	comment: Some("comment".to_string()),
 	reference: None,
-}, 38)]
+}, 39)]
 #[case::function(FunctionDefinition {
 	name: "function".to_string(),
 	args: vec![],

@@ -3,7 +3,7 @@
 
 [test.results]
 parsing-error = """
-`FLEXIBLE` is no longer supported, use `TYPE any` or `TYPE object` instead
+FLEXIBLE must be specified after TYPE
   --> [17:21]
    |
 17 | DEFINE FIELD a ON t FLEXIBLE TYPE number;

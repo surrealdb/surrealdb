@@ -88,7 +88,7 @@ DEFINE TABLE test3 SCHEMAFULL; # ✅
 DEFINE FIELD any ON test1 TYPE any; # ✅
 
 -- This should allow any subfields to be defined.
-DEFINE FIELD obj_any ON test2 TYPE object; # ✅
+DEFINE FIELD obj_any ON test2 TYPE object FLEXIBLE; # ✅
 
 -- This should not allow setting `a`, `b` or `c` explicitly
 -- OR setting `obj_limited` to an object with (`a` and `b`) and optionally `c`.

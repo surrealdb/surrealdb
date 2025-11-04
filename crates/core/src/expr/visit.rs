@@ -1252,7 +1252,7 @@ implement_visitor! {
 				Kind::Float |
 				Kind::Int |
 				Kind::Number |
-				Kind::Object { .. } |
+				Kind::Object |
 				Kind::String |
 				Kind::Uuid |
 				Kind::Regex |
@@ -2671,7 +2671,7 @@ implement_visitor_mut! {
 				Kind::Float |
 				Kind::Int |
 				Kind::Number |
-				Kind::Object { .. } |
+				Kind::Object |
 				Kind::String |
 				Kind::Uuid |
 				Kind::Regex |

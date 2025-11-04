@@ -395,9 +395,7 @@ fn extract_tables_from_kind_impl(kind: &Kind, tables: &mut HashSet<String>) {
 		| Kind::Float
 		| Kind::Int
 		| Kind::Number
-		| Kind::Object {
-			..
-		}
+		| Kind::Object
 		| Kind::String
 		| Kind::Uuid
 		| Kind::Regex

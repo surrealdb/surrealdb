@@ -174,13 +174,7 @@ pub async fn generate_schema(
 	scalar_debug_validated!(schema, "null", Kind::Null);
 	scalar_debug_validated!(schema, "datetime", Kind::Datetime);
 	scalar_debug_validated!(schema, "duration", Kind::Duration);
-	scalar_debug_validated!(
-		schema,
-		"object",
-		Kind::Object {
-			schemafull: false
-		}
-	);
+	scalar_debug_validated!(schema, "object", Kind::Object);
 	scalar_debug_validated!(schema, "any", Kind::Any);
 
 	let id_interface =
@@ -253,9 +247,7 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		Kind::Float => TypeRef::named(TypeRef::FLOAT),
 		Kind::Int => TypeRef::named(TypeRef::INT),
 		Kind::Number => TypeRef::named("number"),
-		Kind::Object {
-			..
-		} => TypeRef::named("object"),
+		Kind::Object => TypeRef::named("object"),
 		Kind::Regex => return Err(schema_error("Kind::Regex is not yet supported")),
 		Kind::String => TypeRef::named(TypeRef::STRING),
 		Kind::Uuid => TypeRef::named("uuid"),
@@ -499,12 +491,7 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 				convert_static_expr(expr.into())
 			}
 			GqlValue::Null => Ok(SurValue::Null),
-			obj @ GqlValue::Object(_) => gql_to_sql_kind(
-				obj,
-				Kind::Object {
-					schemafull: false,
-				},
-			),
+			obj @ GqlValue::Object(_) => gql_to_sql_kind(obj, Kind::Object),
 			num @ GqlValue::Number(_) => gql_to_sql_kind(num, Kind::Number),
 			GqlValue::Boolean(b) => Ok(SurValue::Bool(*b)),
 			bin @ GqlValue::Binary(_) => gql_to_sql_kind(bin, Kind::Bytes),
@@ -631,9 +618,7 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 			}
 			_ => Err(type_error(kind, val)),
 		},
-		Kind::Object {
-			..
-		} => match val {
+		Kind::Object => match val {
 			GqlValue::Object(o) => {
 				let out: Result<BTreeMap<String, SurValue>, GqlError> = o
 					.iter()
@@ -722,13 +707,7 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 					either_try_kinds!(
 						ks, string, Datetime, Duration, AllNumbers, Uuid, Array, Any, String
 					);
-					either_try_kind!(
-						ks,
-						string,
-						Kind::Object {
-							schemafull: false
-						}
-					);
+					either_try_kind!(ks, string, Kind::Object);
 					Err(type_error(kind, val))
 				}
 				bool @ GqlValue::Boolean(_) => {
@@ -748,13 +727,7 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 				}
 				// TODO: consider geometry and other types that can come from objects
 				obj @ GqlValue::Object(_) => {
-					either_try_kind!(
-						ks,
-						obj,
-						Kind::Object {
-							schemafull: false
-						}
-					);
+					either_try_kind!(ks, obj, Kind::Object);
 					Err(type_error(kind, val))
 				}
 			}

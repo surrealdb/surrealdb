@@ -38,6 +38,7 @@ pub(crate) struct DefineFieldStatement {
 	pub name: Expr,
 	pub what: Expr,
 	pub field_kind: Option<Kind>,
+	pub flexible: bool,
 	pub readonly: bool,
 	pub value: Option<Expr>,
 	pub assert: Option<Expr>,
@@ -55,6 +56,7 @@ impl Default for DefineFieldStatement {
 			name: Expr::Literal(Literal::None),
 			what: Expr::Literal(Literal::None),
 			field_kind: None,
+			flexible: false,
 			readonly: false,
 			value: None,
 			assert: None,
@@ -87,6 +89,7 @@ impl DefineFieldStatement {
 			name: expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?,
 			what: expr_to_ident(stk, ctx, opt, doc, &self.what, "table name").await?,
 			field_kind: self.field_kind.clone(),
+			flexible: self.flexible,
 			readonly: self.readonly,
 			value: self.value.clone(),
 			assert: self.assert.clone(),
@@ -132,6 +135,9 @@ impl DefineFieldStatement {
 
 		// Validate id field restrictions
 		self.validate_id_restrictions(&definition)?;
+
+		// Validate FLEXIBLE restrictions
+		self.validate_flexible_restrictions(ctx, ns, db, &definition).await?;
 
 		// Fetch the transaction
 		let txn = ctx.tx();
@@ -469,6 +475,32 @@ impl DefineFieldStatement {
 
 		Ok(())
 	}
+
+	pub(crate) async fn validate_flexible_restrictions(
+		&self,
+		ctx: &Context,
+		ns: NamespaceId,
+		db: DatabaseId,
+		definition: &catalog::FieldDefinition,
+	) -> Result<()> {
+		if self.flexible {
+			// Get the table definition
+			let txn = ctx.tx();
+			let Some(tb) = txn.get_tb(ns, db, &definition.what).await? else {
+				bail!(Error::TbNotFound {
+					name: definition.what.to_string(),
+				});
+			};
+
+			// FLEXIBLE can only be used in SCHEMAFULL tables
+			ensure!(
+				tb.schemafull,
+				Error::Thrown("FLEXIBLE can only be used in SCHEMAFULL tables".into())
+			);
+		}
+
+		Ok(())
+	}
 }
 
 impl Display for DefineFieldStatement {
@@ -481,7 +513,10 @@ impl Display for DefineFieldStatement {
 		}
 		write!(f, " {} ON {}", self.name, self.what)?;
 		if let Some(ref v) = self.field_kind {
-			write!(f, " TYPE {v}")?
+			write!(f, " TYPE {v}")?;
+			if self.flexible {
+				write!(f, " FLEXIBLE")?;
+			}
 		}
 		match self.default {
 			DefineDefault::None => {}

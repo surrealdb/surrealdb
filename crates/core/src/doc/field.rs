@@ -50,26 +50,8 @@ impl Document {
 		// Get the table
 		let tb = self.tb(ctx, opt).await?;
 
-		// Check if we need to validate fields
-		// Either the table is schemafull OR there are schemafull object fields
-		let has_schemafull_objects =
-			self.fd(ctx, opt).await?.iter().any(|fd| match &fd.field_kind {
-				Some(Kind::Object {
-					schemafull: true,
-				}) => true,
-				Some(Kind::Either(kinds)) => kinds.iter().any(|k| {
-					matches!(
-						k,
-						Kind::Object {
-							schemafull: true
-						}
-					)
-				}),
-				_ => false,
-			});
-
-		// This table is schemafull OR has schemafull object fields
-		if tb.schemafull || has_schemafull_objects {
+		// This table is schemafull
+		if tb.schemafull {
 			// Prune unspecified fields from the document that are not defined via
 			// `DefineFieldStatement`s.
 
@@ -79,8 +61,6 @@ impl Document {
 			let mut explicitly_defined = std::collections::HashSet::new();
 			// Create a set to track which fields preserve their nested values
 			let mut preserve_nested = std::collections::HashSet::new();
-			// Track which fields are under schemafull object constraints
-			let mut schemafull_object_roots = std::collections::HashSet::new();
 
 			// First pass: collect all explicitly defined field names
 			let mut explicit_field_names = std::collections::HashSet::new();
@@ -91,37 +71,35 @@ impl Document {
 			// Loop through all field definitions
 			for fd in self.fd(ctx, opt).await?.iter() {
 				let is_literal = fd.field_kind.as_ref().is_some_and(Kind::contains_literal);
-				let allows_nested = fd.field_kind.as_ref().is_some_and(Kind::allows_any_nested);
+				let is_any = fd.field_kind.as_ref().is_some_and(Kind::is_any);
 
-				// Check if this field is a schemafull object
-				let is_schemafull_object = match &fd.field_kind {
-					Some(Kind::Object {
-						schemafull: true,
-					}) => true,
-					Some(Kind::Either(kinds)) => kinds.iter().any(|k| {
-						matches!(
-							k,
-							Kind::Object {
-								schemafull: true
-							}
-						)
-					}),
-					_ => false,
-				};
-
-				if is_schemafull_object {
-					schemafull_object_roots.insert(fd.name.clone());
+				// Check if the kind contains object (including option<object>, array<object>, etc.)
+				fn kind_contains_object(kind: &Kind) -> bool {
+					match kind {
+						Kind::Object => true,
+						Kind::Either(kinds) => kinds.iter().any(kind_contains_object),
+						Kind::Array(inner, _) | Kind::Set(inner, _) => kind_contains_object(inner),
+						_ => false,
+					}
 				}
+				let contains_object = fd.field_kind.as_ref().is_some_and(kind_contains_object);
 
-				// Preserve nested fields if literal, schemaless object, or any
-				// Note: schemafull objects do NOT preserve arbitrary nested fields
-				let should_preserve = is_literal || allows_nested;
+				// In SCHEMAFULL tables:
+				// - TYPE any: allows nested (inherent)
+				// - TYPE containing object without FLEXIBLE: strict (does NOT allow arbitrary
+				//   nested)
+				// - TYPE containing object with FLEXIBLE: allows nested
+				// - Literal types: allow nested
+				let allows_nested = is_any || is_literal || (contains_object && fd.flexible);
+
+				// Preserve nested fields if they allow nested
+				let should_preserve = allows_nested;
 
 				// Expand the field name to actual document values (handles array wildcards)
 				// and insert each into the trie
 				for k in self.current.doc.as_ref().each(&fd.name).into_iter() {
-					// Insert the field - mark as allowing nested if literal/object/any
-					defined_field_names.insert(&k, is_literal || allows_nested);
+					// Insert the field - mark as allowing nested based on calculation above
+					defined_field_names.insert(&k, allows_nested);
 					// Track this as an explicitly defined field
 					explicitly_defined.insert(k.clone());
 					// Track if this field preserves nested values
@@ -222,47 +200,21 @@ impl Document {
 							}
 						}
 
-						// This field has an ancestor that's defined but doesn't allow nested fields
-						// Check if we should error or just skip:
-						// - In SCHEMAFULL tables: always error
-						// - In schemaless tables: only error if under a schemafull object
-						let should_error = tb.schemafull || {
-							// Check if this field is under a schemafull object
-							schemafull_object_roots
-								.iter()
-								.any(|root| current_doc_field_idiom.starts_with(root))
-						};
-
-						if should_error {
-							bail!(Error::FieldUndefined {
-								table: tb.name.clone(),
-								field: current_doc_field_idiom.to_owned(),
-							});
-						}
-						// In schemaless table, not under schemafull object - skip this field
-						continue;
+						// This field is not explicitly defined in the schema or it is not a child
+						// of a flex field.
+						bail!(Error::FieldUndefined {
+							table: tb.name.clone(),
+							field: current_doc_field_idiom.to_owned(),
+						});
 					}
 
 					IdiomTrieContains::None => {
-						// This field is not explicitly defined in the schema
-						// Check if we should error or just skip:
-						// - In SCHEMAFULL tables: always error
-						// - In schemaless tables: only error if under a schemafull object
-						let should_error = tb.schemafull || {
-							// Check if this field is under a schemafull object
-							schemafull_object_roots
-								.iter()
-								.any(|root| current_doc_field_idiom.starts_with(root))
-						};
-
-						if should_error {
-							bail!(Error::FieldUndefined {
-								table: tb.name.clone(),
-								field: current_doc_field_idiom.to_owned(),
-							});
-						}
-						// In schemaless table, not under schemafull object - skip this field
-						continue;
+						// This field is not explicitly defined in the schema or it is not a child
+						// of a flex field.
+						bail!(Error::FieldUndefined {
+							table: tb.name.clone(),
+							field: current_doc_field_idiom.to_owned(),
+						});
 					}
 				}
 			}

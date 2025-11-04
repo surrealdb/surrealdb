@@ -27,6 +27,7 @@ pub struct FieldDefinition {
 	pub(crate) what: String,
 	// TODO: Optionally also be a seperate type from expr::Kind
 	pub(crate) field_kind: Option<Kind>,
+	pub(crate) flexible: bool,
 	pub(crate) readonly: bool,
 	pub(crate) value: Option<Expr>,
 	pub(crate) assert: Option<Expr>,
@@ -49,6 +50,7 @@ impl FieldDefinition {
 			name: Expr::Idiom(self.name.clone()).into(),
 			what: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.what.clone())),
 			field_kind: self.field_kind.clone().map(|x| x.into()),
+			flexible: self.flexible,
 			readonly: self.readonly,
 			value: self.value.clone().map(|x| x.into()),
 			assert: self.assert.clone().map(|x| x.into()),
@@ -83,6 +85,7 @@ impl InfoStructure for FieldDefinition {
 			"name".to_string() => self.name.structure(),
 			"what".to_string() => Value::from(self.what.clone()),
 			"kind".to_string(), if let Some(v) = self.field_kind => v.structure(),
+			"flexible".to_string(), if self.flexible => true.into(),
 			"value".to_string(), if let Some(v) = self.value => v.structure(),
 			"assert".to_string(), if let Some(v) = self.assert => v.structure(),
 			"computed".to_string(), if let Some(v) = self.computed => v.structure(),

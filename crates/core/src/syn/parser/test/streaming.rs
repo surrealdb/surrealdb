@@ -314,6 +314,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				Kind::Number,
 				Kind::Array(Box::new(Kind::Record(vec!["foo".to_owned()])), Some(10)),
 			])),
+			flexible: false,
 			readonly: false,
 			value: Some(Expr::Literal(Literal::Null)),
 			assert: Some(Expr::Literal(Literal::Bool(true))),

@@ -1,6 +1,6 @@
 /**
 [test]
-reason = "Test object<strict> as alias for object<schemafull>"
+reason = "Test that object in SCHEMAFULL table is strict by default (no FLEXIBLE)"
 
 [[test.results]]
 value = "NONE"
@@ -19,9 +19,9 @@ error = "Found field 'a.c', but no such field exists for table 'test'"
 
 */
 
--- Test object<strict> is an alias for object<schemafull>
+-- Object in SCHEMAFULL table is strict by default
 DEFINE TABLE test SCHEMAFULL;
-DEFINE FIELD a ON test TYPE object<strict>;
+DEFINE FIELD a ON test TYPE object;
 DEFINE FIELD a.b ON test TYPE number;
 
 CREATE test:1 SET a = { b: 1 };
