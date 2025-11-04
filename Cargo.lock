@@ -5664,8 +5664,7 @@ dependencies = [
 [[package]]
 name = "revision"
 version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9dcd5731a0eb50c0e4d183d5a0e1affc42139c05954f8bc57c386ca1df246ed"
+source = "git+https://github.com/surrealdb/revision?branch=emmanuel%2Fspecialised_vec_i16_i32_i64#6feb4698b0ecd55582b06e2551a7744ffc3fb847"
 dependencies = [
  "chrono",
  "geo",
@@ -5690,8 +5689,7 @@ dependencies = [
 [[package]]
 name = "revision-derive"
 version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e5babe1bdb35dda70850e128e2932f3e3f99a2203ff2686ee0c2d17b1ab7ed10"
+source = "git+https://github.com/surrealdb/revision?branch=emmanuel%2Fspecialised_vec_i16_i32_i64#6feb4698b0ecd55582b06e2551a7744ffc3fb847"
 dependencies = [
  "proc-macro2",
  "quote",

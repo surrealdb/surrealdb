@@ -1,14 +1,14 @@
 [workspace]
 members = [
-    ".", 
-    "crates/core", 
-    "crates/sdk", 
-    "crates/types", 
-    "crates/types-derive", 
-    "crates/surrealism/surrealism", 
-    "crates/surrealism/surrealism-cli", 
-    "crates/surrealism/surrealism-macros", 
-    "crates/surrealism/surrealism-runtime", 
+    ".",
+    "crates/core",
+    "crates/sdk",
+    "crates/types",
+    "crates/types-derive",
+    "crates/surrealism/surrealism",
+    "crates/surrealism/surrealism-cli",
+    "crates/surrealism/surrealism-macros",
+    "crates/surrealism/surrealism-runtime",
     "crates/surrealism/surrealism-types",
     "crates/surrealism/demo"
 ]
@@ -50,7 +50,15 @@ affinitypool = "0.3.1"
 dmp = "0.2.3"
 indxdb = "0.6.0"
 lexicmp = "0.2.0"
-revision = { version = "0.13.0", features = [
+#revision = { version = "0.13.0", features = [
+#    "chrono",
+#    "geo",
+#    "roaring",
+#    "regex",
+#    "rust_decimal",
+#    "uuid",
+#] }
+revision = { version = "0.13.0", git = "https://github.com/surrealdb/revision", branch = "emmanuel/specialised_vec_i16_i32_i64", features = [
     "chrono",
     "geo",
     "roaring",

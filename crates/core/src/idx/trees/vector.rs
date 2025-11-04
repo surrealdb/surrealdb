@@ -10,7 +10,10 @@ use linfa_linalg::norm::Norm;
 use ndarray::{Array1, LinalgScalar, Zip};
 use ndarray_stats::DeviationExt;
 use num_traits::Zero;
-use revision::specialised::{RevisionSpecialisedVecF32, RevisionSpecialisedVecF64};
+use revision::specialised::{
+	RevisionSpecialisedVecF32, RevisionSpecialisedVecF64, RevisionSpecialisedVecI16,
+	RevisionSpecialisedVecI32, RevisionSpecialisedVecI64,
+};
 use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use rust_decimal::prelude::FromPrimitive;
 use storekey::{BorrowDecode, BorrowReader, DecodeError, Encode, EncodeError, Writer};
@@ -35,9 +38,9 @@ pub enum Vector {
 pub enum SerializedVector {
 	F64(RevisionSpecialisedVecF64),
 	F32(RevisionSpecialisedVecF32),
-	I64(Vec<i64>),
-	I32(Vec<i32>),
-	I16(Vec<i16>),
+	I64(RevisionSpecialisedVecI64),
+	I32(RevisionSpecialisedVecI32),
+	I16(RevisionSpecialisedVecI16),
 }
 
 impl KVValue for SerializedVector {
@@ -85,9 +88,9 @@ impl From<&Vector> for SerializedVector {
 		match value {
 			Vector::F64(v) => Self::F64(RevisionSpecialisedVecF64::from_vec(v.to_vec())),
 			Vector::F32(v) => Self::F32(RevisionSpecialisedVecF32::from_vec(v.to_vec())),
-			Vector::I64(v) => Self::I64(v.to_vec()),
-			Vector::I32(v) => Self::I32(v.to_vec()),
-			Vector::I16(v) => Self::I16(v.to_vec()),
+			Vector::I64(v) => Self::I64(RevisionSpecialisedVecI64::from_vec(v.to_vec())),
+			Vector::I32(v) => Self::I32(RevisionSpecialisedVecI32::from_vec(v.to_vec())),
+			Vector::I16(v) => Self::I16(RevisionSpecialisedVecI16::from_vec(v.to_vec())),
 		}
 	}
 }
@@ -97,9 +100,9 @@ impl From<SerializedVector> for Vector {
 		match value {
 			SerializedVector::F64(v) => Self::F64(Array1::from_vec(v.into_inner())),
 			SerializedVector::F32(v) => Self::F32(Array1::from_vec(v.into_inner())),
-			SerializedVector::I64(v) => Self::I64(Array1::from_vec(v)),
-			SerializedVector::I32(v) => Self::I32(Array1::from_vec(v)),
-			SerializedVector::I16(v) => Self::I16(Array1::from_vec(v)),
+			SerializedVector::I64(v) => Self::I64(Array1::from_vec(v.into_inner())),
+			SerializedVector::I32(v) => Self::I32(Array1::from_vec(v.into_inner())),
+			SerializedVector::I16(v) => Self::I16(Array1::from_vec(v.into_inner())),
 		}
 	}
 }
