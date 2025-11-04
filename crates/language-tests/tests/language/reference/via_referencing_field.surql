@@ -47,10 +47,10 @@ CREATE person:john SET born_in = city:london, lives_in = city:newyork;
 CREATE person:mary SET born_in = city:london, lives_in = city:london;
 
 city:london<~person;
-city:london<~(person.born_in);
-city:london<~(person.lives_in);
+city:london<~(person VIA born_in);
+city:london<~(person VIA lives_in);
 
 city:newyork<~person;
-city:newyork<~(person.born_in);
-city:newyork<~(person.lives_in);
+city:newyork<~(person VIA born_in);
+city:newyork<~(person VIA lives_in);
 

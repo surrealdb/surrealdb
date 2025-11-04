@@ -235,9 +235,7 @@ pub fn refprefix(
 	ff: &str,
 	fk: &RecordIdKey,
 ) -> Result<Vec<u8>> {
-	let mut k = Ref::new(ns, db, tb, id, ft, ff, fk).encode_key()?;
-	k.extend_from_slice(&[0x00]);
-	Ok(k)
+	Ref::new(ns, db, tb, id, ft, ff, fk).encode_key()
 }
 
 pub fn refsuffix(

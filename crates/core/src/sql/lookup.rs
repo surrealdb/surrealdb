@@ -24,6 +24,10 @@ pub(crate) struct Lookup {
 impl Display for Lookup {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		if self.what.len() <= 1
+			// When the singular lookup subject has a referencing field, it needs to be wrapped in parentheses
+			// Otherwise <~table.field will be parsed as [Lookup(<~table), Field(.field)]
+			// Whereas <~(table.field) will be parsed as [Lookup(<~table.field)]
+			&& self.what.iter().all(|v| v.referencing_field().is_none())
 			&& self.cond.is_none()
 			&& self.alias.is_none()
 			&& self.expr.is_none()
@@ -160,6 +164,15 @@ pub enum LookupSubject {
 	},
 }
 
+impl LookupSubject {
+	pub fn referencing_field(&self) -> Option<&String> {
+		match self {
+			LookupSubject::Table { referencing_field, .. } => referencing_field.as_ref(),
+			LookupSubject::Range { referencing_field, .. } => referencing_field.as_ref(),
+		}
+	}
+}
+
 impl Display for LookupSubject {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
@@ -169,7 +182,7 @@ impl Display for LookupSubject {
 			} => {
 				Display::fmt(&EscapeIdent(table), f)?;
 				if let Some(referencing_field) = referencing_field {
-					write!(f, ".{}", EscapeIdent(referencing_field))?;
+					write!(f, " VIA {}", EscapeIdent(referencing_field))?;
 				}
 				Ok(())
 			}
@@ -180,7 +193,7 @@ impl Display for LookupSubject {
 			} => {
 				write!(f, "{}:{range}", EscapeIdent(table))?;
 				if let Some(referencing_field) = referencing_field {
-					write!(f, ".{}", EscapeIdent(referencing_field))?;
+					write!(f, " VIA {}", EscapeIdent(referencing_field))?;
 				}
 				Ok(())
 			}

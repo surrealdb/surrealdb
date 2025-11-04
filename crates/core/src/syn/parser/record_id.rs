@@ -147,7 +147,7 @@ impl Parser<'_> {
 				self.parse_referencing_field(supports_referencing_field).await?;
 
 			if supports_referencing_field && referencing_field.is_none() {
-				unexpected!(self, self.peek_whitespace(), "a referencing field", => "Cannot scan a record reference range without a referencing field");
+				unexpected!(self, self.peek(), "a referencing field", => "Cannot scan a record reference range without a referencing field");
 			}
 
 			Ok(LookupSubject::Range {
@@ -167,7 +167,7 @@ impl Parser<'_> {
 		&mut self,
 		supports_referencing_field: bool,
 	) -> ParseResult<Option<String>> {
-		if supports_referencing_field && self.eat_whitespace(t!(".")) {
+		if supports_referencing_field && self.eat(t!("VIA")) {
 			Ok(Some(self.parse_ident()?))
 		} else {
 			Ok(None)
