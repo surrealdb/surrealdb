@@ -28,7 +28,7 @@ pub(crate) use namespace::*;
 pub(crate) use record::*;
 pub use schema::ApiMethod;
 pub(crate) use schema::{
-	ApiDefinition, Distance, FullTextParams, HnswParams, MTreeParams, Scoring, VectorType, *,
+	ApiDefinition, Distance, FullTextParams, HnswParams, Scoring, VectorType, *,
 };
 pub(crate) use subscription::*;
 pub(crate) use table::*;

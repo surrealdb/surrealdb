@@ -20,8 +20,6 @@ use crate::fnc::util::math::ToFloat;
 use crate::kvs::KVValue;
 use crate::val::{Number, Value};
 
-/// In the context of a Symmetric MTree index, the term object refers to a
-/// vector, representing the indexed item.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Vector {
 	F64(Array1<f64>),

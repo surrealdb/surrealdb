@@ -74,40 +74,6 @@ impl From<crate::catalog::FullTextParams> for FullTextParams {
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub(crate) struct MTreeParams {
-	pub dimension: u16,
-	pub distance: Distance,
-	pub vector_type: VectorType,
-	pub capacity: u16,
-	pub mtree_cache: u32,
-}
-
-impl From<MTreeParams> for crate::catalog::MTreeParams {
-	fn from(v: MTreeParams) -> Self {
-		crate::catalog::MTreeParams {
-			dimension: v.dimension,
-			distance: v.distance.into(),
-			vector_type: v.vector_type.into(),
-			capacity: v.capacity,
-			mtree_cache: v.mtree_cache,
-		}
-	}
-}
-
-impl From<crate::catalog::MTreeParams> for MTreeParams {
-	fn from(v: crate::catalog::MTreeParams) -> Self {
-		Self {
-			dimension: v.dimension,
-			distance: v.distance.into(),
-			vector_type: v.vector_type.into(),
-			capacity: v.capacity,
-			mtree_cache: v.mtree_cache,
-		}
-	}
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct HnswParams {
 	pub dimension: u16,
 	pub distance: Distance,

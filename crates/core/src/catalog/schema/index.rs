@@ -211,22 +211,6 @@ impl Default for Scoring {
 	}
 }
 
-/// M-Tree index parameters.
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct MTreeParams {
-	/// The dimension of the index.
-	pub dimension: u16,
-	/// The distance metric to use.
-	pub distance: Distance,
-	/// The vector type to use.
-	pub vector_type: VectorType,
-	/// The capacity of the index.
-	pub capacity: u16,
-	/// The cache of the M-Tree.
-	pub mtree_cache: u32,
-}
-
 /// Distance metric for calculating distances between vectors.
 #[revisioned(revision = 1)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, Hash)]
