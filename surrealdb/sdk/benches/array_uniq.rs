@@ -7,7 +7,7 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use surrealdb_types::{Array, Number, Value};
 
 // Current implementation as of https://github.com/surrealdb/surrealdb/pull/6047
-// crates/core/src/expr/array.rs#L439
+// surrealdb/core/src/expr/array.rs#L439
 #[allow(clippy::mutable_key_type)]
 fn array_uniq(array: Array) -> Array {
 	let mut set = HashSet::with_capacity(array.len());
