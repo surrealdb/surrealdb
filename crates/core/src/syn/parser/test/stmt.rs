@@ -2750,7 +2750,10 @@ fn parse_update() {
 				Part::Field("a".to_owned()),
 				Part::Graph(Lookup {
 					kind: LookupKind::Graph(Dir::Out),
-					what: vec![LookupSubject::Table("b".to_owned())],
+					what: vec![LookupSubject::Table {
+						table: "b".to_owned(),
+						referencing_field: None
+					}],
 					..Default::default()
 				})
 			]))],
@@ -2762,7 +2765,10 @@ fn parse_update() {
 					Part::Field("a".to_owned()),
 					Part::Graph(Lookup {
 						kind: LookupKind::Graph(Dir::Out),
-						what: vec![LookupSubject::Table("b".to_owned())],
+						what: vec![LookupSubject::Table {
+							table: "b".to_owned(),
+							referencing_field: None
+						}],
 						..Default::default()
 					})
 				]),
@@ -2787,7 +2793,10 @@ fn parse_upsert() {
 				Part::Field("a".to_owned()),
 				Part::Graph(Lookup {
 					kind: LookupKind::Graph(Dir::Out),
-					what: vec![LookupSubject::Table("b".to_owned())],
+					what: vec![LookupSubject::Table {
+						table: "b".to_owned(),
+						referencing_field: None
+					}],
 					..Default::default()
 				})
 			]))],
@@ -2799,7 +2808,10 @@ fn parse_upsert() {
 					Part::Field("a".to_owned()),
 					Part::Graph(Lookup {
 						kind: LookupKind::Graph(Dir::Out),
-						what: vec![LookupSubject::Table("b".to_owned())],
+						what: vec![LookupSubject::Table {
+							table: "b".to_owned(),
+							referencing_field: None
+						}],
 						..Default::default()
 					})
 				]),

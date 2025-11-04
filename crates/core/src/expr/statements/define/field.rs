@@ -130,7 +130,7 @@ impl DefineFieldStatement {
 		self.validate_computed_options(ns, db, ctx.tx(), &definition).await?;
 
 		// Validate reference options
-		self.validate_reference_options(ctx)?;
+		self.validate_reference_options(ctx, &definition)?;
 
 		// Disallow mismatched types
 		self.disallow_mismatched_types(ctx, ns, db, &definition).await?;
@@ -289,7 +289,6 @@ impl DefineFieldStatement {
 				{
 					FieldDefinition {
 						field_kind: Some(cur_kind),
-						//reference: self.reference.clone(),
 						..existing.clone()
 					}
 				} else {
@@ -298,7 +297,6 @@ impl DefineFieldStatement {
 						what: definition.what.to_string(),
 						flexible: definition.flexible,
 						field_kind: Some(cur_kind),
-						reference: definition.reference.clone(),
 						..Default::default()
 					}
 				};
@@ -372,13 +370,22 @@ impl DefineFieldStatement {
 		Ok(())
 	}
 
-	pub(crate) fn validate_reference_options(&self, ctx: &Context) -> Result<()> {
+	pub(crate) fn validate_reference_options(
+		&self,
+		ctx: &Context,
+		definition: &catalog::FieldDefinition,
+	) -> Result<()> {
 		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
 			return Ok(());
 		}
 
 		// If a reference is defined, the field must be a record
 		if self.reference.is_some() {
+			ensure!(
+				definition.name.len() == 1,
+				Error::ReferenceNestedField(definition.name.to_string())
+			);
+
 			fn valid(kind: &Kind, outer: bool) -> bool {
 				match kind {
 					Kind::None | Kind::Record(_) => true,

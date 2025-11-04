@@ -227,21 +227,21 @@ impl Document {
 					false => &self.current,
 				};
 
-				self.input_data = Some(match data {
-					Data::PatchExpression(data) => ComputedData::Patch(Arc::new(
+				self.input_data = match data {
+					Data::PatchExpression(data) => Some(ComputedData::Patch(Arc::new(
 						data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
-					)),
-					Data::MergeExpression(data) => ComputedData::Merge(Arc::new(
+					))),
+					Data::MergeExpression(data) => Some(ComputedData::Merge(Arc::new(
 						data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
-					)),
-					Data::ReplaceExpression(data) => ComputedData::Replace(Arc::new(
+					))),
+					Data::ReplaceExpression(data) => Some(ComputedData::Replace(Arc::new(
 						data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
-					)),
-					Data::ContentExpression(data) => ComputedData::Content(Arc::new(
+					))),
+					Data::ContentExpression(data) => Some(ComputedData::Content(Arc::new(
 						data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
-					)),
-					Data::UnsetExpression(data) => ComputedData::Unset(data.clone()),
-					x @ Data::SetExpression(data) | x @ Data::UpdateExpression(data) => {
+					))),
+					Data::UnsetExpression(data) => Some(ComputedData::Unset(data.clone())),
+					x @ Data::SetExpression(data) | x @ Data::UpdateExpression(data) => Some({
 						let assignments = {
 							let ctx = if matches!(x, Data::UpdateExpression(_)) {
 								// Duplicate context
@@ -283,9 +283,35 @@ impl Document {
 						apply_assignments(stk, ctx, opt, &mut input, assignments.clone()).await?;
 
 						ComputedData::Set(assignments, Arc::new(input))
-					}
+					}),
+					Data::UnsetReference(idiom, rid) => match doc.doc.as_ref().pick(idiom) {
+						Value::RecordId(_) => Some(ComputedData::Unset(vec![idiom.clone()])),
+						Value::Array(_) | Value::Set(_) => {
+							let input = if self.reduced(stk, ctx, opt, Current).await? {
+								self.initial_reduced.doc.as_ref().clone()
+							} else {
+								self.initial.doc.as_ref().clone()
+							};
+
+							let assignments = vec![ComputedAssignment {
+								place: idiom.clone(),
+								operator: AssignOperator::Subtract,
+								value: Value::RecordId(rid.clone()),
+							}];
+
+							Some(ComputedData::Set(assignments, Arc::new(input)))
+						}
+						Value::None => None,
+						v => {
+							fail!(
+								"Unexpected value type `{}` while trying to unset reference `{}`",
+								v.kind_of(),
+								idiom
+							)
+						}
+					},
 					x => bail!("Unexpected data clause type: {x:?}"),
-				});
+				};
 			}
 		}
 

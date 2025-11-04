@@ -1097,6 +1097,11 @@ pub(crate) enum Error {
 	)]
 	ReferenceTypeConflict(String),
 
+	#[error(
+		"Cannot use the `REFERENCE` keyword on nested field `{0}`. Specify a referincing field at the root level instead."
+	)]
+	ReferenceNestedField(String),
+
 	/// Something went wrong while updating references
 	#[error("An error occured while updating references for `{0}`: {1}")]
 	RefsUpdateFailure(String, String),

@@ -149,15 +149,41 @@ impl From<crate::expr::lookup::LookupKind> for LookupKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum LookupSubject {
-	Table(String),
-	Range(String, RecordIdKeyRangeLit),
+	Table {
+		table: String,
+		referencing_field: Option<String>,
+	},
+	Range {
+		table: String,
+		range: RecordIdKeyRangeLit,
+		referencing_field: Option<String>,
+	},
 }
 
 impl Display for LookupSubject {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Self::Table(tb) => Display::fmt(&EscapeIdent(tb), f),
-			Self::Range(tb, rng) => write!(f, "{}:{rng}", EscapeIdent(tb)),
+			Self::Table {
+				table,
+				referencing_field,
+			} => {
+				Display::fmt(&EscapeIdent(table), f)?;
+				if let Some(referencing_field) = referencing_field {
+					write!(f, ".{}", EscapeIdent(referencing_field))?;
+				}
+				Ok(())
+			}
+			Self::Range {
+				table,
+				range,
+				referencing_field,
+			} => {
+				write!(f, "{}:{range}", EscapeIdent(table))?;
+				if let Some(referencing_field) = referencing_field {
+					write!(f, ".{}", EscapeIdent(referencing_field))?;
+				}
+				Ok(())
+			}
 		}
 	}
 }
@@ -165,10 +191,21 @@ impl Display for LookupSubject {
 impl From<LookupSubject> for crate::expr::lookup::LookupSubject {
 	fn from(v: LookupSubject) -> Self {
 		match v {
-			LookupSubject::Table(tb) => Self::Table(tb),
-			LookupSubject::Range(table, range) => Self::Range {
+			LookupSubject::Table {
+				table,
+				referencing_field,
+			} => Self::Table {
+				table: table.clone(),
+				referencing_field,
+			},
+			LookupSubject::Range {
+				table,
+				range,
+				referencing_field,
+			} => Self::Range {
 				table,
 				range: range.into(),
+				referencing_field,
 			},
 		}
 	}
@@ -177,11 +214,22 @@ impl From<LookupSubject> for crate::expr::lookup::LookupSubject {
 impl From<crate::expr::lookup::LookupSubject> for LookupSubject {
 	fn from(v: crate::expr::lookup::LookupSubject) -> Self {
 		match v {
-			crate::expr::lookup::LookupSubject::Table(tb) => Self::Table(tb),
+			crate::expr::lookup::LookupSubject::Table {
+				table,
+				referencing_field,
+			} => Self::Table {
+				table: table.clone(),
+				referencing_field,
+			},
 			crate::expr::lookup::LookupSubject::Range {
 				table,
 				range,
-			} => Self::Range(table, range.into()),
+				referencing_field,
+			} => Self::Range {
+				table,
+				range: range.into(),
+				referencing_field,
+			},
 		}
 	}
 }
