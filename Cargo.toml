@@ -6,10 +6,10 @@ members = [
     "surrealdb/types", 
     "surrealdb/types-derive", 
     "surrealism/surrealism", 
-    "surrealism/surrealism-cli", 
-    "surrealism/surrealism-macros", 
-    "surrealism/surrealism-runtime", 
-    "surrealism/surrealism-types",
+    "surrealism/cli", 
+    "surrealism/macros", 
+    "surrealism/runtime", 
+    "surrealism/types",
     "surrealism/demo"
 ]
 
@@ -40,10 +40,10 @@ surrealdb-macros = { version = "=3.0.0-alpha.12", path = "surrealdb/macros" }
 surrealdb-types = { version = "=3.0.0-alpha.12", path = "surrealdb/types" }
 surrealdb-types-derive = { version = "=3.0.0-alpha.12", path = "surrealdb/types-derive" }
 surrealism = { version = "=0.1.0", path = "surrealism/surrealism" }
-surrealism-cli = { version = "=0.1.0", path = "surrealism/surrealism-cli" }
-surrealism-macros = { version = "=0.1.0", path = "surrealism/surrealism-macros", default-features = false }
-surrealism-runtime = { version = "=0.1.0", path = "surrealism/surrealism-runtime" }
-surrealism-types = { version = "=0.1.0", path = "surrealism/surrealism-types", default-features = false }
+surrealism-cli = { version = "=0.1.0", path = "surrealism/cli" }
+surrealism-macros = { version = "=0.1.0", path = "surrealism/macros", default-features = false }
+surrealism-runtime = { version = "=0.1.0", path = "surrealism/runtime" }
+surrealism-types = { version = "=0.1.0", path = "surrealism/types", default-features = false }
 
 # External surreal crates
 affinitypool = "0.3.1"
