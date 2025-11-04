@@ -227,21 +227,21 @@ impl Document {
 					false => &self.current,
 				};
 
-				self.input_data = match data {
-					Data::PatchExpression(data) => Some(ComputedData::Patch(Arc::new(
+				self.input_data = Some(match data {
+					Data::PatchExpression(data) => ComputedData::Patch(Arc::new(
 						data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
-					))),
-					Data::MergeExpression(data) => Some(ComputedData::Merge(Arc::new(
+					)),
+					Data::MergeExpression(data) => ComputedData::Merge(Arc::new(
 						data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
-					))),
-					Data::ReplaceExpression(data) => Some(ComputedData::Replace(Arc::new(
+					)),
+					Data::ReplaceExpression(data) => ComputedData::Replace(Arc::new(
 						data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
-					))),
-					Data::ContentExpression(data) => Some(ComputedData::Content(Arc::new(
+					)),
+					Data::ContentExpression(data) => ComputedData::Content(Arc::new(
 						data.compute(stk, ctx, opt, Some(doc)).await.catch_return()?,
-					))),
-					Data::UnsetExpression(data) => Some(ComputedData::Unset(data.clone())),
-					x @ Data::SetExpression(data) | x @ Data::UpdateExpression(data) => Some({
+					)),
+					Data::UnsetExpression(data) => ComputedData::Unset(data.clone()),
+					x @ Data::SetExpression(data) | x @ Data::UpdateExpression(data) => {
 						let assignments = {
 							let ctx = if matches!(x, Data::UpdateExpression(_)) {
 								// Duplicate context
@@ -283,9 +283,9 @@ impl Document {
 						apply_assignments(stk, ctx, opt, &mut input, assignments.clone()).await?;
 
 						ComputedData::Set(assignments, Arc::new(input))
-					}),
+					},
 					x => bail!("Unexpected data clause type: {x:?}"),
-				};
+				});
 			}
 		}
 
