@@ -1,7 +1,30 @@
 /**
 [test]
-wip = true
-reason = "Set literals are not yet supported"
+
+[[test.results]]
+value = "{NONE,}"
+
+[[test.results]]
+value = "{NULL,}"
+
+[[test.results]]
+value = "{NONE, NULL}"
+
+[[test.results]]
+value = "{NONE,}"
+
+[[test.results]]
+value = "true"
+
+[[test.results]]
+value = "true"
+
+[[test.results]]
+value = "{,}"
+
+[[test.results]]
+value = "{,}"
+
 */
 
 -- Set with NONE

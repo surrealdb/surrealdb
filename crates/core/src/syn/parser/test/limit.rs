@@ -1,237 +1,86 @@
 use reblessive::Stack;
+use rstest::rstest;
 
 use crate::syn::parser::{Parser, ParserSettings};
 
-#[test]
-fn object_depth() {
-	let mut stack = Stack::new();
-
-	let source = r#"
-		RETURN {
-			a: {
-				b: {
-					c: {
-						d: {
-						}
-					}
-				}
-			}
-		}
-	"#;
-	let mut parser = Parser::new_with_settings(
-		source.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: 5,
-			..Default::default()
-		},
-	);
-	stack
-		.enter(|stk| parser.parse_query(stk))
-		.finish()
-		.expect("recursion limit of 5 couldn't parse 5 deep object");
-
-	let source = r#"
-		RETURN {
-			a: {
-				b: {
-					c: {
-						d: {
-							e: {
-							}
-						}
-					}
-				}
-			}
-		}
-	"#;
-	let mut parser = Parser::new_with_settings(
-		source.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: 5,
-			..Default::default()
-		},
-	);
-	stack
-		.enter(|stk| parser.parse_query(stk))
-		.finish()
-		.expect_err("recursion limit of 5 didn't trigger on 6 deep object");
-}
-
-#[test]
-fn array_depth() {
-	let mut stack = Stack::new();
-
-	let source = r#"
-		RETURN [ [ [ [ [ ] ] ] ] ]
-	"#;
-	let mut parser = Parser::new_with_settings(
-		source.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: 5,
-			..Default::default()
-		},
-	);
-	stack
-		.enter(|stk| parser.parse_query(stk))
-		.finish()
-		.expect("recursion limit of 5 couldn't parse 5 deep object");
-
-	let source = r#"
-		RETURN [ [ [ [ [ [ ] ] ] ] ] ]
-	"#;
-	let mut parser = Parser::new_with_settings(
-		source.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: 5,
-			..Default::default()
-		},
-	);
-	stack
-		.enter(|stk| parser.parse_query(stk))
-		.finish()
-		.expect_err("recursion limit of 5 didn't trigger on 6 deep object");
-}
-
-#[test]
-fn object_depth_succeed_then_fail() {
-	let mut stack = Stack::new();
-	let source = r#"
-		RETURN {
-			a: {
-				b: {
-					c: {
-						d: {
-						}
-					}
-				}
-			}
-		};
+#[rstest]
+#[case::object_depth(
+	ParserSettings { object_recursion_limit: 5, ..Default::default() },
+	r#"
 	RETURN {
 		a: {
 			b: {
 				c: {
 					d: {
+						e: 1
 					}
 				}
 			}
 		}
-	};
-	"#;
-
-	let mut parser = Parser::new_with_settings(
-		source.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: 5,
-			..Default::default()
-		},
-	);
-	stack
-		.enter(|stk| parser.parse_query(stk))
-		.finish()
-		.expect("recursion limit of 5 couldn't parse 5 deep object");
-
-	let mut stack = Stack::new();
-	let source = r#"
-		RETURN {
-			a: {
-				b: {
-					c: {
-						d: {
-						}
-					}
-				}
-			}
-		};
+	}
+	"#,
+	true
+)]
+#[case::object_depth_fail(
+	ParserSettings { object_recursion_limit: 5, ..Default::default() },
+	r#"
 	RETURN {
 		a: {
 			b: {
 				c: {
 					d: {
 						e: {
+							f: 1
 						}
 					}
 				}
 			}
 		}
-	};
-	"#;
-
-	let mut parser = Parser::new_with_settings(
-		source.as_bytes(),
-		ParserSettings {
-			object_recursion_limit: 5,
-			..Default::default()
-		},
-	);
-	stack
-		.enter(|stk| parser.parse_query(stk))
-		.finish()
-		.expect_err("recursion limit of 5 didn't trigger on 6 deep object");
-}
-
-#[test]
-fn query_depth_subquery() {
-	let mut stack = Stack::new();
-
-	let source = r#"
-		RETURN select (select foo from bar ) from bar
-		"#;
-	let mut parser = Parser::new_with_settings(
-		source.as_bytes(),
-		ParserSettings {
-			query_recursion_limit: 5,
-			..Default::default()
-		},
-	);
-	stack
-		.enter(|stk| parser.parse_query(stk))
-		.finish()
-		.expect("recursion limit of 5 couldn't parse 5 deep query");
-
-	let source = r#"
-		RETURN select (select (select (select foo from bar) from bar ) from bar) from bar
-		"#;
-	let mut parser = Parser::new_with_settings(
-		source.as_bytes(),
-		ParserSettings {
-			query_recursion_limit: 5,
-			..Default::default()
-		},
-	);
-	stack
-		.enter(|stk| parser.parse_query(stk))
-		.finish()
-		.expect_err("recursion limit of 5 didn't trigger on 6 deep query");
-}
-
-#[test]
-fn query_depth_block() {
-	let mut stack = Stack::new();
-
-	let source = r#"
+	}
+	"#,
+	false
+)]
+#[case::array_depth(
+	ParserSettings { object_recursion_limit: 5, ..Default::default() },
+	"RETURN [ [ [ [ [ ] ] ] ] ]",
+	true
+)]
+#[case::array_depth_fail(
+	ParserSettings { object_recursion_limit: 5, ..Default::default() },
+	"RETURN [ [ [ [ [ [ ] ] ] ] ] ]",
+	false
+)]
+#[case::set_depth(
+	ParserSettings { object_recursion_limit: 5, ..Default::default() },
+	"RETURN { { { { { } } } } }",
+	true
+)]
+#[case::query_depth_subquery(
+	ParserSettings { query_recursion_limit: 5, ..Default::default() },
+	"RETURN select (select foo from bar ) from bar",
+	true
+)]
+#[case::query_depth_subquery_fail(
+	ParserSettings { query_recursion_limit: 5, ..Default::default() },
+	"RETURN select (select (select (select foo from bar) from bar ) from bar) from bar",
+	false
+)]
+#[case::query_depth_block(
+	ParserSettings { query_recursion_limit: 5, ..Default::default() },
+	r#"
 	{
 		{
 			{
-				{
-					RETURN "foo";
-				}
+				RETURN "foo";
 			}
 		}
 	}
-	"#;
-	let mut parser = Parser::new_with_settings(
-		source.as_bytes(),
-		ParserSettings {
-			query_recursion_limit: 5,
-			..Default::default()
-		},
-	);
-	stack
-		.enter(|stk| parser.parse_query(stk))
-		.finish()
-		.expect("recursion limit of 5 couldn't parse 5 deep query");
-
-	let source = r#"
+	"#,
+	true
+)]
+#[case::query_depth_block_fail(
+	ParserSettings { query_recursion_limit: 5, ..Default::default() },
+	r#"
 	{
 		{
 			{
@@ -243,51 +92,27 @@ fn query_depth_block() {
 			}
 		}
 	}
-	"#;
-	let mut parser = Parser::new_with_settings(
-		source.as_bytes(),
-		ParserSettings {
-			query_recursion_limit: 5,
-			..Default::default()
-		},
-	);
-	stack
-		.enter(|stk| parser.parse_query(stk))
-		.finish()
-		.expect_err("recursion limit of 5 didn't trigger on 6 deep query");
-}
-
-#[test]
-fn query_depth_if() {
+	"#,
+	false
+)]
+#[case::query_depth_if(
+	ParserSettings { query_recursion_limit: 5, ..Default::default() },
+	"IF IF IF IF IF true THEN false END { false } { false } { false } { false }",
+	true
+)]
+#[case::query_depth_if_fail(
+	ParserSettings { query_recursion_limit: 5, ..Default::default() },
+	"IF IF IF IF IF IF true THEN false END { false } { false } { false } { false } { false }",
+	false
+)]
+fn test_parse_depth(
+	#[case] parser_settings: ParserSettings,
+	#[case] source: &str,
+	#[case] expected: bool,
+) {
 	let mut stack = Stack::new();
 
-	let source = r#"
-		IF IF IF IF IF true THEN false END { false } { false } { false } { false }
-	"#;
-	let mut parser = Parser::new_with_settings(
-		source.as_bytes(),
-		ParserSettings {
-			query_recursion_limit: 5,
-			..Default::default()
-		},
-	);
-	stack
-		.enter(|stk| parser.parse_query(stk))
-		.finish()
-		.expect("recursion limit of 5 couldn't parse 5 deep query");
-
-	let source = r#"
-		IF IF IF IF IF IF true THEN false END { false } { false } { false } { false } { false }
-	"#;
-	let mut parser = Parser::new_with_settings(
-		source.as_bytes(),
-		ParserSettings {
-			query_recursion_limit: 5,
-			..Default::default()
-		},
-	);
-	stack
-		.enter(|stk| parser.parse_query(stk))
-		.finish()
-		.expect_err("recursion limit of 5 didn't trigger on 6 deep query");
+	let mut parser = Parser::new_with_settings(source.as_bytes(), parser_settings);
+	let result = stack.enter(|stk| parser.parse_query(stk)).finish();
+	assert_eq!(result.is_ok(), expected);
 }
