@@ -58,17 +58,43 @@ impl<'a> Hv<'a> {
 mod tests {
 	use super::*;
 	use crate::kvs::KVKey;
+	use revision::specialised::{RevisionSpecialisedVecF32, RevisionSpecialisedVecF64};
 
 	#[test]
-	fn key() {
-		let vec = SerializedVector::I16(vec![2]);
-		let val = Hv::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), &vec);
-		let enc = Hv::encode_key(&val).unwrap();
-		assert_eq!(
-			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x06\x80\x02\0",
-			"{}",
-			String::from_utf8_lossy(&enc)
+	fn test_key() {
+		let test = |vec: SerializedVector, expected: &[u8], info: &str| {
+			let val = Hv::new(NamespaceId(1), DatabaseId(2), "testtb", IndexId(3), &vec);
+			let enc = Hv::encode_key(&val).unwrap();
+			assert_eq!(enc, expected, "{info}: {}", String::from_utf8_lossy(&enc));
+		};
+		test(
+			SerializedVector::I16(vec![2]),
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x04\x01\x01\x04\0",
+			"i16",
+		);
+
+		test(
+			SerializedVector::I32(vec![2]),
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x03\x01\x01\x04\0",
+			"i32",
+		);
+
+		test(
+			SerializedVector::I64(vec![2]),
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x02\x01\x01\x04\0",
+			"i64",
+		);
+
+		test(
+			SerializedVector::F32(RevisionSpecialisedVecF32::from_vec(vec![2.0])),
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x01\x01\x01\x01\x01\0\x01\0\x01\0\x40\0",
+			"f32",
+		);
+
+		test(
+			SerializedVector::F64(RevisionSpecialisedVecF64::from_vec(vec![2.0])),
+			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02*testtb\0+\0\0\0\x03!hv\x01\x01\x01\0\x01\x01\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x01\0\x40\0",
+			"f64",
 		);
 	}
 }

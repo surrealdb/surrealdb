@@ -43,9 +43,9 @@ pub enum SerializedVector {
 impl KVValue for SerializedVector {
 	#[inline]
 	fn kv_encode_value(&self) -> Result<Vec<u8>> {
-		let mut vec = Vec::new();
-		SerializeRevisioned::serialize_revisioned(self, &mut vec)?;
-		Ok(vec)
+		let mut val = Vec::new();
+		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
+		Ok(val)
 	}
 
 	#[inline]
@@ -57,9 +57,17 @@ impl KVValue for SerializedVector {
 impl<F> Encode<F> for SerializedVector {
 	#[inline]
 	fn encode<W: Write>(&self, w: &mut Writer<W>) -> std::result::Result<(), EncodeError> {
-		let mut vec = Vec::new();
-		SerializeRevisioned::serialize_revisioned(self, &mut vec).map_err(EncodeError::custom)?;
-		w.write_slice(&vec)?;
+		// Capacity hint: payload bytes + small overhead for revision header/length.
+		let cap = match self {
+			SerializedVector::F64(v) => v.len() * 8 + 16,
+			SerializedVector::F32(v) => v.len() * 4 + 16,
+			SerializedVector::I64(v) => v.len() * 8 + 16,
+			SerializedVector::I32(v) => v.len() * 4 + 16,
+			SerializedVector::I16(v) => v.len() * 2 + 16,
+		};
+		let mut buf = Vec::with_capacity(cap);
+		SerializeRevisioned::serialize_revisioned(self, &mut buf).map_err(EncodeError::custom)?;
+		w.write_slice(&buf)?;
 		Ok(())
 	}
 }
