@@ -13,8 +13,6 @@ pub(crate) enum Index {
 	Idx,
 	/// Unique index
 	Uniq,
-	/// M-Tree index for distance-based metrics
-	MTree(MTreeParams),
 	/// HNSW index for distance based metrics
 	Hnsw(HnswParams),
 	/// Index with Full-Text search capabilities - single writer
@@ -28,7 +26,6 @@ impl From<Index> for crate::catalog::Index {
 		match v {
 			Index::Idx => Self::Idx,
 			Index::Uniq => Self::Uniq,
-			Index::MTree(p) => Self::MTree(p.into()),
 			Index::Hnsw(p) => Self::Hnsw(p.into()),
 			Index::FullText(p) => Self::FullText(p.into()),
 			Index::Count(c) => Self::Count(c.map(Into::into)),
@@ -41,7 +38,6 @@ impl From<crate::catalog::Index> for Index {
 		match v {
 			crate::catalog::Index::Idx => Self::Idx,
 			crate::catalog::Index::Uniq => Self::Uniq,
-			crate::catalog::Index::MTree(p) => Self::MTree(p.into()),
 			crate::catalog::Index::Hnsw(p) => Self::Hnsw(p.into()),
 			crate::catalog::Index::FullText(p) => Self::FullText(p.into()),
 			crate::catalog::Index::Count(c) => Self::Count(c.map(Into::into)),
@@ -256,13 +252,6 @@ impl Display for Index {
 					f.write_str(" HIGHLIGHTS")?
 				}
 				Ok(())
-			}
-			Self::MTree(p) => {
-				write!(
-					f,
-					"MTREE DIMENSION {} DIST {} TYPE {} CAPACITY {} MTREE_CACHE {}",
-					p.dimension, p.distance, p.vector_type, p.capacity, p.mtree_cache
-				)
 			}
 			Self::Hnsw(p) => {
 				write!(

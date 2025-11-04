@@ -519,7 +519,6 @@ impl<'a> TreeBuilder<'a> {
 				Index::FullText {
 					..
 				} if *col == 0 => Self::eval_matches_operator(op, n),
-				Index::MTree(_) if *col == 0 => self.eval_mtree_knn(e, op, n)?,
 				Index::Hnsw(_) if *col == 0 => self.eval_hnsw_knn(e, op, n)?,
 				_ => None,
 			};

@@ -105,8 +105,6 @@ pub(crate) enum Index {
 	Idx,
 	/// Unique index
 	Uniq,
-	/// M-Tree index for distance based metrics
-	MTree(MTreeParams),
 	/// HNSW index for distance-based metrics
 	Hnsw(HnswParams),
 	/// Index with Full-Text search capabilities
@@ -120,7 +118,6 @@ impl Index {
 		match self {
 			Self::Idx => crate::sql::index::Index::Idx,
 			Self::Uniq => crate::sql::index::Index::Uniq,
-			Self::MTree(params) => crate::sql::index::Index::MTree(params.clone().into()),
 			Self::Hnsw(params) => crate::sql::index::Index::Hnsw(params.clone().into()),
 			Self::FullText(params) => crate::sql::index::Index::FullText(params.clone().into()),
 			Self::Count(cond) => crate::sql::index::Index::Count(cond.clone().map(Into::into)),

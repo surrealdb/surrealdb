@@ -9,9 +9,9 @@ use linfa_linalg::norm::Norm;
 use ndarray::{Array1, LinalgScalar, Zip};
 use ndarray_stats::DeviationExt;
 use num_traits::Zero;
+use revision::specialised::{RevisionSpecialisedVecF32, RevisionSpecialisedVecF64};
 use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use rust_decimal::prelude::FromPrimitive;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use storekey::{BorrowDecode, Encode};
 
 use crate::catalog::{Distance, VectorType};
@@ -32,10 +32,10 @@ pub enum Vector {
 }
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Encode, BorrowDecode)]
+#[derive(Clone, Debug, PartialEq, Encode, BorrowDecode)]
 pub enum SerializedVector {
-	F64(Vec<f64>),
-	F32(Vec<f32>),
+	F64(RevisionSpecialisedVecF64),
+	F32(RevisionSpecialisedVecF32),
 	I64(Vec<i64>),
 	I32(Vec<i32>),
 	I16(Vec<i16>),
@@ -58,8 +58,8 @@ impl KVValue for SerializedVector {
 impl From<&Vector> for SerializedVector {
 	fn from(value: &Vector) -> Self {
 		match value {
-			Vector::F64(v) => Self::F64(v.to_vec()),
-			Vector::F32(v) => Self::F32(v.to_vec()),
+			Vector::F64(v) => Self::F64(RevisionSpecialisedVecF64::from_vec(v.to_vec())),
+			Vector::F32(v) => Self::F32(RevisionSpecialisedVecF32::from_vec(v.to_vec())),
 			Vector::I64(v) => Self::I64(v.to_vec()),
 			Vector::I32(v) => Self::I32(v.to_vec()),
 			Vector::I16(v) => Self::I16(v.to_vec()),
@@ -70,8 +70,8 @@ impl From<&Vector> for SerializedVector {
 impl From<SerializedVector> for Vector {
 	fn from(value: SerializedVector) -> Self {
 		match value {
-			SerializedVector::F64(v) => Self::F64(Array1::from_vec(v)),
-			SerializedVector::F32(v) => Self::F32(Array1::from_vec(v)),
+			SerializedVector::F64(v) => Self::F64(Array1::from_vec(v.into_inner())),
+			SerializedVector::F32(v) => Self::F32(Array1::from_vec(v.into_inner())),
 			SerializedVector::I64(v) => Self::I64(Array1::from_vec(v)),
 			SerializedVector::I32(v) => Self::I32(Array1::from_vec(v)),
 			SerializedVector::I16(v) => Self::I16(Array1::from_vec(v)),
@@ -376,28 +376,6 @@ impl PartialEq for SharedVector {
 	}
 }
 impl Eq for SharedVector {}
-
-impl Serialize for SharedVector {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-	where
-		S: Serializer,
-	{
-		// We only serialize the vector part, not the u64
-		let ser: SerializedVector = self.0.as_ref().into();
-		ser.serialize(serializer)
-	}
-}
-
-impl<'de> Deserialize<'de> for SharedVector {
-	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-	where
-		D: Deserializer<'de>,
-	{
-		// We deserialize into a vector and construct the struct
-		let v: Vector = SerializedVector::deserialize(deserializer)?.into();
-		Ok(v.into())
-	}
-}
 
 impl SharedVector {
 	pub(super) fn mem_size(&self) -> usize {

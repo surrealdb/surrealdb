@@ -5,15 +5,14 @@ use std::sync::Arc;
 use anyhow::Result;
 use tokio::sync::RwLock;
 
-use crate::catalog::{HnswParams, TableId};
+use crate::catalog::{HnswParams, IndexId, TableId};
 use crate::ctx::Context;
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::index::HnswIndex;
-use crate::kvs::{KVKey, Key};
 
 pub(crate) type SharedHnswIndex = Arc<RwLock<HnswIndex>>;
 
-pub(crate) struct HnswIndexes(Arc<RwLock<HashMap<Key, SharedHnswIndex>>>);
+pub(crate) struct HnswIndexes(Arc<RwLock<HashMap<(TableId, IndexId), SharedHnswIndex>>>);
 
 impl Default for HnswIndexes {
 	fn default() -> Self {
@@ -29,7 +28,7 @@ impl HnswIndexes {
 		ikb: &IndexKeyBase,
 		p: &HnswParams,
 	) -> Result<SharedHnswIndex> {
-		let key = ikb.new_vm_root_key().encode_key()?;
+		let key = (tb, ikb.index());
 		let h = self.0.read().await.get(&key).cloned();
 		if let Some(h) = h {
 			return Ok(h);
@@ -55,8 +54,8 @@ impl HnswIndexes {
 		Ok(ix)
 	}
 
-	pub(super) async fn remove(&self, ikb: &IndexKeyBase) -> Result<()> {
-		let key = ikb.new_vm_root_key().encode_key()?;
+	pub(super) async fn remove(&self, tb: TableId, ikb: &IndexKeyBase) -> Result<()> {
+		let key = (tb, ikb.index());
 		self.0.write().await.remove(&key);
 		Ok(())
 	}

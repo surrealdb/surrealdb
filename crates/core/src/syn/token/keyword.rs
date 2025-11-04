@@ -132,8 +132,6 @@ keyword! {
 	Merge => "MERGE",
 	Model => "MODEL",
 	Module => "MODULE",
-	MTree => "MTREE",
-	MTreeCache => "MTREE_CACHE",
 	Namespace => "NAMESPACE",
 	Ngram => "NGRAM",
 	No => "NO",

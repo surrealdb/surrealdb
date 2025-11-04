@@ -1,8 +1,6 @@
-pub mod cache;
 pub(crate) mod hnsw;
 mod lru;
 mod mapper;
-pub(crate) mod tree;
 
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
@@ -14,153 +12,14 @@ use crate::catalog::{
 	DatabaseId, HnswParams, Index, IndexDefinition, NamespaceId, TableDefinition, TableId,
 };
 use crate::ctx::Context;
-use crate::err::Error;
 use crate::idx::IndexKeyBase;
 use crate::idx::trees::hnsw::cache::VectorCache;
-use crate::idx::trees::store::cache::TreeCache;
 use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
 use crate::idx::trees::store::mapper::Mappers;
-use crate::idx::trees::store::tree::{TreeRead, TreeWrite};
 use crate::kvs::index::IndexBuilder;
-use crate::kvs::{KVKey, Key, Transaction, TransactionType, Val};
+use crate::kvs::{Key, Transaction};
 
 pub type NodeId = u64;
-pub type StoreGeneration = u64;
-
-#[expect(clippy::large_enum_variant)]
-pub enum TreeStore<N>
-where
-	N: TreeNode + Debug + Clone,
-{
-	/// caches every read nodes, and keeps track of updated and created nodes
-	Write(TreeWrite<N>),
-	/// caches read nodes in an LRU cache
-	Read(TreeRead<N>),
-}
-
-impl<N> TreeStore<N>
-where
-	N: TreeNode + Debug + Display + Clone,
-{
-	pub async fn new(np: TreeNodeProvider, cache: Arc<TreeCache<N>>, tt: TransactionType) -> Self {
-		match tt {
-			TransactionType::Read => Self::Read(TreeRead::new(cache)),
-			TransactionType::Write => Self::Write(TreeWrite::new(np, cache)),
-		}
-	}
-
-	pub(in crate::idx) async fn get_node_mut(
-		&mut self,
-		tx: &Transaction,
-		node_id: NodeId,
-	) -> Result<StoredNode<N>> {
-		match self {
-			Self::Write(w) => w.get_node_mut(tx, node_id).await,
-			_ => fail!("TreeStore::get_node_mut"),
-		}
-	}
-
-	#[cfg(test)]
-	pub(in crate::idx) async fn get_node(
-		&self,
-		tx: &Transaction,
-		node_id: NodeId,
-	) -> Result<Arc<StoredNode<N>>> {
-		match self {
-			Self::Read(r) => r.get_node(tx, node_id).await,
-			_ => fail!("TreeStore::get_node"),
-		}
-	}
-
-	pub(in crate::idx) async fn get_node_txn(
-		&self,
-		ctx: &Context,
-		node_id: NodeId,
-	) -> Result<Arc<StoredNode<N>>> {
-		match self {
-			Self::Read(r) => {
-				let tx = ctx.tx();
-				r.get_node(&tx, node_id).await
-			}
-			_ => fail!("TreeStore::get_node_txn"),
-		}
-	}
-
-	pub(in crate::idx) async fn set_node(
-		&mut self,
-		node: StoredNode<N>,
-		updated: bool,
-	) -> Result<()> {
-		match self {
-			Self::Write(w) => w.set_node(node, updated),
-			_ => fail!("TreeStore::set_node"),
-		}
-	}
-
-	pub(in crate::idx) fn new_node(&mut self, id: NodeId, node: N) -> Result<StoredNode<N>> {
-		match self {
-			Self::Write(w) => Ok(w.new_node(id, node)?),
-			_ => fail!("TreeStore::new_node"),
-		}
-	}
-
-	pub(in crate::idx) async fn remove_node(
-		&mut self,
-		node_id: NodeId,
-		node_key: Key,
-	) -> Result<()> {
-		match self {
-			Self::Write(w) => w.remove_node(node_id, node_key),
-			_ => fail!("TreeStore::remove_node"),
-		}
-	}
-
-	pub async fn finish(&mut self, tx: &Transaction) -> Result<Option<TreeCache<N>>> {
-		match self {
-			Self::Write(w) => w.finish(tx).await,
-			_ => Ok(None),
-		}
-	}
-}
-
-#[derive(Clone)]
-pub enum TreeNodeProvider {
-	Vector(IndexKeyBase),
-	Debug,
-}
-
-impl TreeNodeProvider {
-	pub fn get_key(&self, node_id: NodeId) -> Result<Key> {
-		match self {
-			TreeNodeProvider::Vector(ikb) => ikb.new_vm_key(node_id).encode_key(),
-			TreeNodeProvider::Debug => Ok(node_id.to_be_bytes().to_vec()),
-		}
-	}
-
-	async fn load<N>(&self, tx: &Transaction, id: NodeId) -> Result<StoredNode<N>>
-	where
-		N: TreeNode + Clone,
-	{
-		let key = self.get_key(id)?;
-		if let Some(val) = tx.get(&key, None).await? {
-			let size = val.len() as u32;
-			let node = N::try_from_val(val)?;
-			Ok(StoredNode::new(node, id, key, size))
-		} else {
-			Err(anyhow::Error::new(Error::CorruptedIndex("TreeStore::load")))
-		}
-	}
-
-	async fn save<N>(&self, tx: &Transaction, node: &mut StoredNode<N>) -> Result<()>
-	where
-		N: TreeNode + Clone + Display,
-	{
-		let val = node.n.try_into_val()?;
-		node.size = val.len() as u32;
-		tx.set(&node.key, &val, None).await?;
-		Ok(())
-	}
-}
 
 #[derive(Debug)]
 pub struct StoredNode<N>
@@ -194,14 +53,6 @@ where
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		write!(f, "node_id: {} - {}", self.id, self.n)
 	}
-}
-
-pub trait TreeNode: Debug + Clone + Display {
-	fn prepare_save(&mut self) {}
-	fn try_from_val(val: Val) -> Result<Self>
-	where
-		Self: Sized;
-	fn try_into_val(&self) -> Result<Val>;
 }
 
 #[derive(Clone)]
@@ -308,7 +159,7 @@ impl IndexStores {
 	}
 
 	async fn remove_hnsw_index(&self, tb: TableId, ikb: IndexKeyBase) -> Result<()> {
-		self.0.hnsw_indexes.remove(&ikb).await?;
+		self.0.hnsw_indexes.remove(tb, &ikb).await?;
 		self.0.vector_cache.remove_index(tb, ikb.index()).await;
 		Ok(())
 	}

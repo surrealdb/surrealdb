@@ -30,7 +30,6 @@ pub mod is;
 pub mod iu;
 pub mod td;
 pub mod tt;
-pub mod vm;
 
 use std::borrow::Cow;
 
