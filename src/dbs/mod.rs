@@ -826,7 +826,7 @@ mod tests {
 				Session::owner().with_ns("test").with_db("test"),
 				"DEFINE API \"/\" FOR any THEN {};".to_string(),
 				false,
-				"Experimental capability `define_api` is not enabled".to_string(),
+				"the experimental define api capability is not enabled".to_string(),
 			),
 			//
 			// 9 - Some functions are not allowed
