@@ -1,5 +1,3 @@
-use std::fmt::{Debug, Formatter};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
 
