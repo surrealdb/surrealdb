@@ -49,9 +49,12 @@ impl Results {
 				Ordering::Order(orders) => {
 					if let Some(limit) = limit {
 						let limit = start.unwrap_or(0) + limit;
-						//  we can't use a priority queue for this case if:
-						// 1. the limit is too high
-						// 2. there is a Split clause, as it changes the number of records
+						// Use the priority-queue optimization only when both conditions hold:
+						// - the effective limit (start + limit) does not exceed
+						//   MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE
+						// - there is no SPLIT clause (SPLIT can change the number of produced
+						//   records)
+						// Otherwise, fall back to full in-memory ordering.
 						if stm.split().is_none() && limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE {
 							return Ok(Self::MemoryOrderedLimit(MemoryOrderedLimit::new(
 								limit as usize,
@@ -207,19 +210,5 @@ impl Default for Results {
 impl From<Vec<Value>> for Results {
 	fn from(value: Vec<Value>) -> Self {
 		Results::Memory(value.into())
-	}
-}
-
-impl Debug for Results {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		match self {
-			Results::None => write!(f, "None"),
-			Results::Memory(v) => write!(f, "Memory ({} values)", v.len()),
-			Results::MemoryRandom(v) => write!(f, "MemoryRandom ({} values)", v.len()),
-			Results::MemoryOrdered(v) => write!(f, "MemoryOrdered ({} values)", v.len()),
-			Results::MemoryOrderedLimit(v) => write!(f, "MemoryOrderedLimit ({} values)", v.len()),
-			Results::File(v) => write!(f, "File ({} values)", v.len()),
-			Results::Groups(v) => write!(f, "Groups ({} values)", v.len()),
-		}
 	}
 }
