@@ -37,6 +37,7 @@ pub mod set;
 pub mod sleep;
 pub mod string;
 pub mod time;
+pub mod number;
 pub mod r#type;
 pub mod util;
 pub mod value;
@@ -299,6 +300,8 @@ pub fn synchronous(
 		"meta::tb" => record::tb,
 		//
 		"not" => not::not,
+		//
+		"number::format" => number::format,
 		//
 		"object::entries" => object::entries,
 		"object::extend" => object::extend,
@@ -1217,6 +1220,7 @@ pub async fn idiom(
 				"cot" => math::cot,
 				"deg2rad" => math::deg2rad,
 				"floor" => math::floor,
+				"format" => number::format,
 				"ln" => math::ln,
 				"log" => math::log,
 				"log10" => math::log10,
@@ -1659,7 +1663,10 @@ fn idiom_name_to_normal(kind: &str, name: &str) -> String {
 			"is_valid" => return "geo::is::valid".to_string(),
 			_ => ("geo", name),
 		},
-		"number" => ("math", name),
+		"number" => match name {
+			"format" => return "number::format".to_string(),
+			_ => ("math", name),
+		},
 		"string" => match name {
 			"distance_damerau_levenshtein" => {
 				return "string::distance::damerau_levenshtein".to_string();
