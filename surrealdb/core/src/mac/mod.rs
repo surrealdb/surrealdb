@@ -196,7 +196,7 @@ mod test {
 		let Ok(Error::Unreachable(msg)) = fail_func().unwrap_err().downcast() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:187: Reached unreachable code", msg);
+		assert_eq!("surrealdb/core/src/mac/mod.rs:187: Reached unreachable code", msg);
 	}
 
 	#[test]
@@ -204,7 +204,7 @@ mod test {
 		let Error::Unreachable(msg) = Error::unreachable("Reached unreachable code") else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:204: Reached unreachable code", msg);
+		assert_eq!("surrealdb/core/src/mac/mod.rs:204: Reached unreachable code", msg);
 	}
 
 	#[test]
@@ -212,6 +212,6 @@ mod test {
 		let Ok(Error::Unreachable(msg)) = fail_func_args().unwrap_err().downcast() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:191: Found test but expected other", msg);
+		assert_eq!("surrealdb/core/src/mac/mod.rs:191: Found test but expected other", msg);
 	}
 }

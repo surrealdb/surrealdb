@@ -8,15 +8,18 @@ use rand::Rng;
 use surrealdb_types::{Array, Number, Value};
 
 // Current implementation as of https://github.com/surrealdb/surrealdb/pull/6047
-// crates/core/src/expr/array.rs
+// surrealdb/core/src/expr/array.rs
 #[allow(clippy::mutable_key_type)]
-fn array_difference(first: Array, other: Array) -> Array {
-	let mut out = Array::with_capacity(first.len() + other.len());
+fn array_intersect(first: Array, other: Array) -> Array {
+	let len = match (first.len(), other.len()) {
+		(first_len, other_len) if first_len > other_len => first_len,
+		(_, other_len) => other_len,
+	};
+	let mut out = Array::with_capacity(len);
 	let mut other = VecDeque::from(other.into_vec());
 	for v in first.into_iter() {
 		if let Some(pos) = other.iter().position(|w| v == *w) {
 			other.remove(pos);
-		} else {
 			out.push(v);
 		}
 	}
@@ -36,8 +39,8 @@ fn criterion_benchmark(c: &mut Criterion) {
 		second.push(Value::Number(Number::Int(rng.gen_range(0..=5000))));
 		second.push(Value::String(char::from_u32(rng.gen_range(0..=5000)).unwrap().to_string()));
 	}
-	c.bench_function("array_difference", |b| {
-		b.iter(|| array_difference(black_box(first.clone()), black_box(second.clone())))
+	c.bench_function("array_intersect", |b| {
+		b.iter(|| array_intersect(black_box(first.clone()), black_box(second.clone())))
 	});
 }
 

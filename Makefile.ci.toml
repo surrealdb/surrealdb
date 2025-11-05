@@ -471,7 +471,7 @@ category = "CI - LANGUAGE TESTS"
 description = "Run SurrealQL language tests with specified engine"
 script = """
     #!/bin/bash -ex
-    cd crates/language-tests
+    cd surrealdb/language-tests
     if [ "${_TEST_LANG_FEATURES}" != "" ]; then
         cargo build --features ${_TEST_LANG_FEATURES}
     else
@@ -804,7 +804,7 @@ script = """
 
     # Run SurrealQL language tests
     echo "Running SurrealQL language tests..."
-    cd crates/language-tests
+    cd surrealdb/language-tests
     cargo build
     ./target/debug/surrealql-test --color always run --no-wip -j 3
 """
