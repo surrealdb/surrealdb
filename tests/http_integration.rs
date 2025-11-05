@@ -1990,7 +1990,7 @@ mod http_integration {
 		{
 			// Start server disallowing routes for queries, exporting and importing
 			let (addr, _server) = common::start_server(StartServerArguments {
-				args: "--deny-experimental * --allow-experimental record_references".to_string(),
+				args: "--deny-experimental * --allow-experimental define_api".to_string(),
 				// Auth disabled to ensure unauthorized errors are due to capabilities
 				auth: false,
 				..Default::default()
@@ -2016,7 +2016,7 @@ mod http_integration {
 			let res = client
 				.post(format!("{base_url}/sql"))
 				.basic_auth(USER, Some(PASS))
-				.body("DEFINE FIELD a ON deny_all_allow_references TYPE record REFERENCE")
+				.body("DEFINE API \"/\" FOR any THEN {}")
 				.send()
 				.await
 				.unwrap();
@@ -2029,7 +2029,7 @@ mod http_integration {
 		{
 			// Start server disallowing routes for queries, exporting and importing
 			let (addr, _server) = common::start_server(StartServerArguments {
-				args: "--deny-experimental record_references --allow-experimental *".to_string(),
+				args: "--deny-experimental define_api --allow-experimental *".to_string(),
 				// Auth disabled to ensure unauthorized errors are due to capabilities
 				auth: false,
 				..Default::default()
@@ -2055,13 +2055,13 @@ mod http_integration {
 			let res = client
 				.post(format!("{base_url}/sql"))
 				.basic_auth(USER, Some(PASS))
-				.body("DEFINE FIELD a ON deny_all_allow_references TYPE record REFERENCE")
+				.body("DEFINE API \"/\" FOR any THEN {}")
 				.send()
 				.await
 				.unwrap();
 			let res = res.text().await.unwrap();
 			assert!(
-				res.contains("Experimental capability `record_references` is not enabled"),
+				res.contains("the experimental define api capability is not enabled"),
 				"body: {}",
 				res
 			);
