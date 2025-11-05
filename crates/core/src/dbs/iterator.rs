@@ -9,6 +9,7 @@ use crate::ctx::{Canceller, Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
 use crate::dbs::result::Results;
+use crate::dbs::store::MemoryCollector;
 use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document, IgnoreError};
 use crate::err::Error;
@@ -581,8 +582,6 @@ impl Iterator {
 					self.iterate(stk, ctx, opt, stm, is_specific_permission, None).await?;
 				}
 			}
-			// Process any SPLIT AT clause
-			self.output_split(stk, ctx, opt, stm, rs).await?;
 			// Process any GROUP BY clause
 			self.output_group(stk, ctx, opt).await?;
 			// Process any ORDER BY clause
@@ -594,6 +593,8 @@ impl Iterator {
 			}
 			// Process any START & LIMIT clause
 			self.results.start_limit(self.start_skip, self.start, self.limit).await?;
+			// Process any SPLIT AT clause
+			self.output_split(stk, ctx, opt, stm, rs).await?;
 			// Process any FETCH clause
 			if let Some(e) = &mut plan.explanation {
 				e.add_fetch(self.results.len());
@@ -819,6 +820,7 @@ impl Iterator {
 			for split in splits.iter() {
 				// Get the query result
 				let res = self.results.take().await?;
+				self.results = Results::Memory(MemoryCollector::default());
 				// Loop over each value
 				for obj in &res {
 					// Get the value at the path
