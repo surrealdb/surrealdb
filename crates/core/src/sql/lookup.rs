@@ -167,8 +167,14 @@ pub enum LookupSubject {
 impl LookupSubject {
 	pub fn referencing_field(&self) -> Option<&String> {
 		match self {
-			LookupSubject::Table { referencing_field, .. } => referencing_field.as_ref(),
-			LookupSubject::Range { referencing_field, .. } => referencing_field.as_ref(),
+			LookupSubject::Table {
+				referencing_field,
+				..
+			} => referencing_field.as_ref(),
+			LookupSubject::Range {
+				referencing_field,
+				..
+			} => referencing_field.as_ref(),
 		}
 	}
 }
