@@ -5,11 +5,11 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
+use crate::commands::SurrealismCommand;
 use crate::commands::build::BuildCommand;
 use crate::commands::info::InfoCommand;
 use crate::commands::run::RunCommand;
 use crate::commands::sig::SigCommand;
-use crate::commands::SurrealismCommand;
 
 /// CLI definition
 #[derive(Debug, Parser)]

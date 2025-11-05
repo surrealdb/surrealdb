@@ -39,7 +39,7 @@ use wasmtime::*;
 use wasmtime_wasi::preview1::{self, WasiP1Ctx};
 
 use crate::config::SurrealismConfig;
-use crate::host::{implement_host_functions, InvocationContext};
+use crate::host::{InvocationContext, implement_host_functions};
 use crate::package::SurrealismPackage;
 
 /// Store data for WASM execution. Each Controller has its own isolated StoreData.
@@ -266,7 +266,10 @@ impl surrealism_types::controller::AsyncMemoryController for Controller {
 			.ok_or_else(|| anyhow::anyhow!("Memory access overflow: ptr={ptr}, len={len}"))?;
 
 		if end > mem.len() {
-			anyhow::bail!("Memory access out of bounds: attempting to access [{start}..{end}), but memory size is {}", mem.len());
+			anyhow::bail!(
+				"Memory access out of bounds: attempting to access [{start}..{end}), but memory size is {}",
+				mem.len()
+			);
 		}
 
 		Ok(&mut mem[start..end])
