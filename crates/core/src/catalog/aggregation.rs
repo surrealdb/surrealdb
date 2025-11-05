@@ -38,7 +38,6 @@
 //!        here `_g0` refers to the group.
 //! ```
 
-use std::convert::Infallible;
 use std::fmt::Write;
 use std::mem;
 
@@ -55,7 +54,7 @@ use crate::expr::statements::{
 	UpdateStatement, UpsertStatement,
 };
 use crate::expr::visit::{MutVisitor, VisitMut};
-use crate::expr::{Expr, Field, Fields, Function, Groups, Idiom, Literal, Part, SelectStatement};
+use crate::expr::{Expr, Field, Fields, Function, Groups, Idiom, Part, SelectStatement};
 use crate::val::{Array, Datetime, Number, Object, TryAdd as _, TryFloatDiv, TryMul, Value};
 
 /// An expression which will be aggregated over for each group.
@@ -620,7 +619,10 @@ impl MutVisitor for AggregateExprCollector<'_> {
 			}
 			Expr::Param(p) => {
 				if p.as_str() == "this" {
-					*s = Expr::Literal(Literal::None);
+					bail!(Error::Query{
+						message: "Found a `$this` parameter refering to the document of a group by select statement\n\
+							Select statments with a group by currently have no defined document to refer to".to_string()
+					});
 				}
 				Ok(())
 			}
@@ -647,8 +649,11 @@ impl MutVisitor for AggregateExprCollector<'_> {
 								.or_insert_with(|| len);
 							self.aggregations.push(Aggregation::Accumulate(arg))
 						} else {
-							bail!(Error::InvalidAggregationSelector {
-								expr: i.to_string(),
+							bail!(Error::Query {
+								message: format!(
+									"Found idiom `{i}` within the selector of a materialized aggregate view.\n\
+											 Selection of document fields which are not used within the argument of an optimized aggregate function is currently not supported"
+								)
 							})
 						}
 					}
@@ -689,7 +694,6 @@ impl MutVisitor for AggregateExprCollector<'_> {
 	}
 
 	fn visit_mut_select(&mut self, s: &mut SelectStatement) -> Result<(), Self::Error> {
-		self.visit_mut_fields(&mut s.expr)?;
 		for v in s.what.iter_mut() {
 			self.visit_mut_expr(v)?;
 		}
@@ -700,6 +704,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 			self.visit_mut_expr(v)?;
 		}
 
+		ParentRewritor.visit_mut_fields(&mut s.expr)?;
 		for o in s.omit.iter_mut() {
 			ParentRewritor.visit_mut_expr(o)?;
 		}
@@ -861,12 +866,15 @@ impl MutVisitor for AggregateExprCollector<'_> {
 struct ParentRewritor;
 
 impl MutVisitor for ParentRewritor {
-	type Error = Infallible;
+	type Error = Error;
 
 	fn visit_mut_expr(&mut self, e: &mut Expr) -> Result<(), Self::Error> {
 		if let Expr::Param(p) = e {
 			if p.as_str() == "parent" {
-				*e = Expr::Literal(Literal::None)
+				return Err(Error::Query{
+					message: "Found a `$parent` parameter refering to the document of a GROUP select statement\n\
+						Select statments with a GROUP BY or GROUP ALL currently have no defined document to refer to".to_string()
+				});
 			}
 		}
 		Ok(())

@@ -14,7 +14,14 @@ value = "[{ g: 2, id: a:3, v: 3 }]"
 value = "[{ g: 2, id: a:4, v: 4 }]"
 
 [[test.results]]
-value = '[{ g: 1, "math::mean": 1.5f, parent: [] }, { g: 2, "math::mean": 3.5f, parent: [] }]'
+error = """
+Invalid query: Found a `$this` parameter refering to the document of a group by select statement
+Select statments with a group by currently have no defined document to refer to"""
+
+[[test.results]]
+error = """
+Invalid query: Found a `$this` parameter refering to the document of a group by select statement
+Select statments with a group by currently have no defined document to refer to"""
 
 */
 
@@ -23,5 +30,6 @@ create a:2 set v = 2, g = 1;
 create a:3 set v = 3, g = 2;
 create a:4 set v = 4, g = 2;
 
-SELECT (SELECT * FROM $parent) as parent,g,math::mean(v) FROM a GROUP BY g;
+SELECT $this,g,math::mean(v) FROM a GROUP BY g;
+SELECT g,math::mean($this.v) FROM a GROUP BY g;
 

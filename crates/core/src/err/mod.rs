@@ -105,7 +105,7 @@ pub(crate) enum Error {
 	#[error("The JSON Patch contains invalid operations. {0}")]
 	InvalidPatch(PatchError),
 
-	#[error("Invalid query: {message}, ")]
+	#[error("Invalid query: {message}")]
 	Query {
 		message: String,
 	},

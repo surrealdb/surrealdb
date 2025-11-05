@@ -121,7 +121,7 @@ impl Document {
 				};
 
 				if set {
-					let data = fields.compute(stk, ctx, opt, Some(&self.current), false).await?;
+					let data = fields.compute(stk, ctx, opt, Some(&self.current)).await?;
 					let record = Arc::new(Record::new(data.into()));
 
 					ctx.tx().set_record(ns, db, table_name, id, record, None).await?;

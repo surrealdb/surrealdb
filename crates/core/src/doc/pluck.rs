@@ -87,7 +87,7 @@ impl Document {
 					ctx.add_value("before", initial.doc.as_arc());
 					let ctx = ctx.freeze();
 					// Output the specified fields
-					v.compute(stk, &ctx, opt, Some(current), false).await.map_err(IgnoreError::from)
+					v.compute(stk, &ctx, opt, Some(current)).await.map_err(IgnoreError::from)
 				}
 			},
 			None => match stm {
@@ -113,7 +113,7 @@ impl Document {
 					} else {
 						// Process the SELECT statement fields
 						stmt.expr
-							.compute(stk, ctx, opt, Some(current), stmt.group.is_some())
+							.compute(stk, ctx, opt, Some(current))
 							.await
 							.map_err(IgnoreError::from)
 					}
