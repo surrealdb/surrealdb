@@ -2,19 +2,28 @@
 [test]
 
 [[test.results]]
-value = "[{ arr: [1, 2, 3], id: test:a }]"
+value = "[{ a: [1], id: t:a }]"
 
 [[test.results]]
-value = "[{ arr: [4, 5, 6], id: test:b }]"
+value = "[{ a: 1, id: t:a }]"
 
 [[test.results]]
-value = "[{ arr: 1, id: test:a }, { arr: 2, id: test:a }, { arr: 3, id: test:a }, { arr: 4, id: test:b }, { arr: 5, id: test:b }, { arr: 6, id: test:b }]"
+value = "[{ a: [2, 3, 4], id: t:b }]"
 
 [[test.results]]
-value = "[{ arr: 1, id: test:a }, { arr: 2, id: test:a }, { arr: 3, id: test:a }, { arr: 4, id: test:b }, { arr: 5, id: test:b }, { arr: 6, id: test:b }]"
+value = "[{ a: 1, id: t:a }, { a: 2, id: t:b }, { a: 3, id: t:b }, { a: 4, id: t:b }]"
+
+[[test.results]]
+value = "[{ a: 1, id: t:a }, { a: 2, id: t:b }, { a: 3, id: t:b }, { a: 4, id: t:b }]"
+
+[[test.results]]
+value = "[{ a: 2, id: t:b }, { a: 3, id: t:b }]"
+
 
 */
-CREATE test:a SET arr = [1, 2, 3];
-CREATE test:b SET arr = [4, 5, 6];
-SELECT * FROM test SPLIT arr;
-SELECT * FROM test SPLIT arr ORDER BY id;
+CREATE t:a SET a = [1];
+SELECT * FROM t SPLIT a ORDER BY rand();
+CREATE t:b SET a = [2, 3, 4];
+SELECT * FROM t SPLIT a;
+SELECT * FROM t SPLIT a ORDER BY id;
+SELECT * FROM t SPLIT a ORDER BY id START 1 LIMIT 2;

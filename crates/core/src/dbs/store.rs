@@ -165,7 +165,12 @@ impl MemoryRandom {
 	}
 
 	pub(in crate::dbs) fn take_vec(&mut self) -> Vec<Value> {
-		self.result.take().unwrap_or_default()
+		if let Some(result) = self.result.take() {
+			return result;
+		}
+		let mut vec = mem::take(&mut self.values);
+		vec.append(&mut mem::take(&mut self.batch));
+		vec
 	}
 
 	pub(in crate::dbs) fn explain(&self, exp: &mut Explanation) {
@@ -269,7 +274,12 @@ impl MemoryOrdered {
 	}
 
 	pub(super) fn take_vec(&mut self) -> Vec<Value> {
-		self.result.take().unwrap_or_default()
+		if let Some(result) = self.result.take() {
+			return result;
+		}
+		let mut vec = mem::take(&mut self.values);
+		vec.append(&mut mem::take(&mut self.batch));
+		vec
 	}
 
 	pub(super) fn explain(&self, exp: &mut Explanation) {
