@@ -26,9 +26,6 @@ value = "[]"
 [[test.results]]
 value = "[{ author: [person:one], id: comment:one, text: 'Estonia is bigger than I expected!' }]"
 
-[env.capabilities]
-allow-experimental = ["record_references"]
-
 */
 
 DEFINE FIELD comments ON person TYPE option<array<record<comment>>> REFERENCE ON DELETE UNSET;

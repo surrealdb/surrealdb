@@ -13,7 +13,6 @@ use crate::catalog::{
 };
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
@@ -130,7 +129,7 @@ impl DefineFieldStatement {
 		self.validate_computed_options(ns, db, ctx.tx(), &definition).await?;
 
 		// Validate reference options
-		self.validate_reference_options(ctx, &definition)?;
+		self.validate_reference_options(&definition)?;
 
 		// Disallow mismatched types
 		self.disallow_mismatched_types(ctx, ns, db, &definition).await?;
@@ -372,13 +371,8 @@ impl DefineFieldStatement {
 
 	pub(crate) fn validate_reference_options(
 		&self,
-		ctx: &Context,
 		definition: &catalog::FieldDefinition,
 	) -> Result<()> {
-		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-			return Ok(());
-		}
-
 		// If a reference is defined, the field must be a record
 		if self.reference.is_some() {
 			ensure!(

@@ -1327,9 +1327,6 @@ impl Datastore {
 		// Process all statements
 
 		let parser_settings = ParserSettings {
-			references_enabled: ctx
-				.get_capabilities()
-				.allows_experimental(&ExperimentalTarget::RecordReferences),
 			define_api_enabled: ctx
 				.get_capabilities()
 				.allows_experimental(&ExperimentalTarget::DefineApi),

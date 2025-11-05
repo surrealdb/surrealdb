@@ -113,15 +113,9 @@ impl Parser<'_> {
 					if peek.kind == t!("~") {
 						self.pop_peek();
 						self.pop_peek();
-						if !self.settings.references_enabled {
-							bail!(
-								"Experimental capability `record_references` is not enabled",
-								@self.last_span() => "Use of `<~` reference lookup is still experimental"
-							)
-						}
-
 						let lookup =
 							stk.run(|stk| self.parse_lookup(stk, LookupKind::Reference)).await?;
+
 						res.push(Part::Graph(lookup))
 					} else if peek.kind == t!("-") {
 						self.pop_peek();
@@ -194,13 +188,6 @@ impl Parser<'_> {
 					if peek.kind == t!("~") {
 						self.pop_peek();
 						self.pop_peek();
-						if !self.settings.references_enabled {
-							bail!(
-								"Experimental capability `record_references` is not enabled",
-								@self.last_span() => "Use of `<~` reference lookup is still experimental"
-							)
-						}
-
 						let lookup = self.parse_lookup(stk, LookupKind::Reference).await?;
 						res.push(Part::Graph(lookup))
 					} else if peek.kind == t!("-") {
@@ -240,13 +227,6 @@ impl Parser<'_> {
 			t!("<") => {
 				let t = self.pop_peek();
 				let lookup = if self.eat_whitespace(t!("~")) {
-					if !self.settings.references_enabled {
-						bail!(
-							"Experimental capability `record_references` is not enabled",
-							@self.last_span() => "Use of `<~` reference lookup is still experimental"
-						)
-					}
-
 					stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Reference)).await?
 				} else if self.eat_whitespace(t!("-")) {
 					stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::In))).await?

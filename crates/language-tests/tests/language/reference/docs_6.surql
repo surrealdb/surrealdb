@@ -29,9 +29,6 @@ value = "[{ connected_to: [], id: utility:water }]"
 [[test.results]]
 value = "[{ id: house:one, using: [] }]"
 
-[env.capabilities]
-allow-experimental = ["record_references"]
-
 */ 
 
 DEFINE FIELD connected_to ON utility TYPE option<array<record<house>>> REFERENCE ON DELETE REJECT;

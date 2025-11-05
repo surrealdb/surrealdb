@@ -85,8 +85,6 @@ value = "[]"
 [[test.results]]
 value = "[]"
 
-[env.capabilities]
-allow-experimental = ["record_references"]
 */
 
 // 0

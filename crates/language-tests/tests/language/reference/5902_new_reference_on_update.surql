@@ -36,9 +36,6 @@ value = "[{ author: person:one, id: comment:2, text: 'two' }]"
 [[test.results]]
 value = "[{ author: person:two, id: comment:1, text: 'one' }]"
 
-[env.capabilities]
-allow-experimental = ["record_references"]
-
 */
 DEFINE FIELD author ON comment TYPE record<person> REFERENCE ON DELETE CASCADE;
 DEFINE FIELD comments ON person COMPUTED <~comment;

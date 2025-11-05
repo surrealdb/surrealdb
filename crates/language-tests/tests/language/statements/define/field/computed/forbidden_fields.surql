@@ -22,9 +22,6 @@ error = "Cannot use the `REFERENCE` keyword with `COMPUTED`."
 [[test.results]]
 error = "Cannot use the `READONLY` keyword with `COMPUTED`."
 
-[env.capabilities]
-allow-experimental = ["record_references"]
-
 */
 DEFINE FIELD id ON a COMPUTED 1;
 DEFINE FIELD a ON a VALUE 1 COMPUTED 1;

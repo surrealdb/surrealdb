@@ -6,7 +6,6 @@ use reblessive::tree::Stk;
 
 use crate::catalog::providers::TableProvider;
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::err::Error;
@@ -120,161 +119,157 @@ impl Document {
 		// Get the namespace / database
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 
-		if ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-			let prefix = crate::key::r#ref::prefix(ns, db, &rid.table, &rid.key)?;
-			let suffix = crate::key::r#ref::suffix(ns, db, &rid.table, &rid.key)?;
-			let range = prefix..suffix;
+		let prefix = crate::key::r#ref::prefix(ns, db, &rid.table, &rid.key)?;
+		let suffix = crate::key::r#ref::suffix(ns, db, &rid.table, &rid.key)?;
+		let range = prefix..suffix;
 
-			// Obtain a stream of keys
-			let mut stream = txn.stream_keys(range.clone(), None, ScanDirection::Forward);
-			// Loop until no more entries
-			while let Some(res) = stream.next().await {
-				yield_now!();
-				// Decode the key
-				let key = res?;
-				let ref_key = Ref::decode_key(&key)?;
-				// Obtain the remote field definition
-				let Some(fd) =
-					txn.get_tb_field(ns, db, ref_key.ft.as_ref(), ref_key.ff.as_ref()).await?
-				else {
-					return Err(Error::FdNotFound {
-						name: ref_key.ff.to_string(),
+		// Obtain a stream of keys
+		let mut stream = txn.stream_keys(range.clone(), None, ScanDirection::Forward);
+		// Loop until no more entries
+		while let Some(res) = stream.next().await {
+			yield_now!();
+			// Decode the key
+			let key = res?;
+			let ref_key = Ref::decode_key(&key)?;
+			// Obtain the remote field definition
+			let Some(fd) =
+				txn.get_tb_field(ns, db, ref_key.ft.as_ref(), ref_key.ff.as_ref()).await?
+			else {
+				return Err(Error::FdNotFound {
+					name: ref_key.ff.to_string(),
+				}
+				.into());
+			};
+			// Check if there is a reference defined on the field
+			if let Some(reference) = &fd.reference {
+				match &reference.on_delete {
+					// Ignore this reference
+					ReferenceDeleteStrategy::Ignore => (),
+					// Reject the delete operation, as indicated by the reference
+					ReferenceDeleteStrategy::Reject => {
+						let record = RecordId {
+							table: ref_key.ft.into_owned(),
+							key: ref_key.fk.into_owned(),
+						};
+
+						bail!(Error::DeleteRejectedByReference(
+							rid.to_string(),
+							record.to_string(),
+						));
 					}
-					.into());
-				};
-				// Check if there is a reference defined on the field
-				if let Some(reference) = &fd.reference {
-					match &reference.on_delete {
-						// Ignore this reference
-						ReferenceDeleteStrategy::Ignore => (),
-						// Reject the delete operation, as indicated by the reference
-						ReferenceDeleteStrategy::Reject => {
-							let record = RecordId {
-								table: ref_key.ft.into_owned(),
-								key: ref_key.fk.into_owned(),
+					// Delete the remote record which referenced this record
+					ReferenceDeleteStrategy::Cascade => {
+						let record_id = RecordId {
+							table: ref_key.ft.into_owned(),
+							key: ref_key.fk.into_owned(),
+						};
+
+						// Setup the delete statement
+						let stm = DeleteStatement {
+							what: vec![Expr::Literal(Literal::RecordId(record_id.into_literal()))],
+							..DeleteStatement::default()
+						};
+						// Execute the delete statement
+						stm.compute(stk, ctx, &opt.clone().with_perms(false), None)
+							.await
+							// Wrap any error in an error explaining what went wrong
+							.map_err(|e| {
+								Error::RefsUpdateFailure(rid.to_string(), e.to_string())
+							})?;
+					}
+					// Delete only the reference on the remote record
+					ReferenceDeleteStrategy::Unset => {
+						let opt = opt.clone().with_perms(false);
+						let record = RecordId {
+							table: ref_key.ft.into_owned(),
+							key: ref_key.fk.into_owned(),
+						};
+
+						if let Some(doc) =
+							record.clone().select_document(stk, ctx, &opt, None).await?
+						{
+							let doc = Value::Object(doc);
+							let data = match doc.pick(&fd.name) {
+								Value::RecordId(_) => {
+									Some(Data::UnsetExpression(vec![fd.name.clone()]))
+								}
+								Value::Array(_) | Value::Set(_) => {
+									Some(Data::SetExpression(vec![Assignment {
+										place: fd.name.clone(),
+										operator: AssignOperator::Subtract,
+										value: Expr::Literal(Literal::RecordId(
+											rid.clone().into_literal(),
+										)),
+									}]))
+								}
+								Value::None => None,
+								v => {
+									fail!(
+										"Expected either a record id, array, set or none, found {v}"
+									)
+								}
 							};
 
-							bail!(Error::DeleteRejectedByReference(
-								rid.to_string(),
-								record.to_string(),
-							));
-						}
-						// Delete the remote record which referenced this record
-						ReferenceDeleteStrategy::Cascade => {
-							let record_id = RecordId {
-								table: ref_key.ft.into_owned(),
-								key: ref_key.fk.into_owned(),
-							};
-
-							// Setup the delete statement
-							let stm = DeleteStatement {
-								what: vec![Expr::Literal(Literal::RecordId(
-									record_id.into_literal(),
-								))],
-								..DeleteStatement::default()
-							};
-							// Execute the delete statement
-							stm.compute(stk, ctx, &opt.clone().with_perms(false), None)
-								.await
-								// Wrap any error in an error explaining what went wrong
-								.map_err(|e| {
-									Error::RefsUpdateFailure(rid.to_string(), e.to_string())
-								})?;
-						}
-						// Delete only the reference on the remote record
-						ReferenceDeleteStrategy::Unset => {
-							let opt = opt.clone().with_perms(false);
-							let record = RecordId {
-								table: ref_key.ft.into_owned(),
-								key: ref_key.fk.into_owned(),
-							};
-
-							if let Some(doc) =
-								record.clone().select_document(stk, ctx, &opt, None).await?
-							{
-								let doc = Value::Object(doc);
-								let data = match doc.pick(&fd.name) {
-									Value::RecordId(_) => {
-										Some(Data::UnsetExpression(vec![fd.name.clone()]))
-									}
-									Value::Array(_) | Value::Set(_) => {
-										Some(Data::SetExpression(vec![Assignment {
-											place: fd.name.clone(),
-											operator: AssignOperator::Subtract,
-											value: Expr::Literal(Literal::RecordId(
-												rid.clone().into_literal(),
-											)),
-										}]))
-									}
-									Value::None => None,
-									v => {
-										fail!(
-											"Expected either a record id, array, set or none, found {v}"
-										)
-									}
+							if data.is_some() {
+								// Setup the update statement
+								let stm = UpdateStatement {
+									what: vec![Expr::Literal(Literal::RecordId(
+										record.into_literal(),
+									))],
+									data,
+									..UpdateStatement::default()
 								};
 
-								if data.is_some() {
-									// Setup the update statement
-									let stm = UpdateStatement {
-										what: vec![Expr::Literal(Literal::RecordId(
-											record.into_literal(),
-										))],
-										data,
-										..UpdateStatement::default()
-									};
-
-									// Execute the update statement
-									stm.compute(stk, ctx, &opt, None)
-										.await
-										// Wrap any error in an error explaining what went wrong
-										.map_err(|e| {
-											Error::RefsUpdateFailure(rid.to_string(), e.to_string())
-										})?;
-								}
+								// Execute the update statement
+								stm.compute(stk, ctx, &opt, None)
+									.await
+									// Wrap any error in an error explaining what went wrong
+									.map_err(|e| {
+										Error::RefsUpdateFailure(rid.to_string(), e.to_string())
+									})?;
 							}
 						}
-						// Process a custom delete strategy
-						ReferenceDeleteStrategy::Custom(v) => {
-							// Value for the `$reference` variable is the current record
-							let reference = Value::from(rid.clone());
-							// Value for the document is the remote record
-							let this = RecordId {
-								table: ref_key.ft.into_owned(),
-								key: ref_key.fk.into_owned(),
-							};
+					}
+					// Process a custom delete strategy
+					ReferenceDeleteStrategy::Custom(v) => {
+						// Value for the `$reference` variable is the current record
+						let reference = Value::from(rid.clone());
+						// Value for the document is the remote record
+						let this = RecordId {
+							table: ref_key.ft.into_owned(),
+							key: ref_key.fk.into_owned(),
+						};
 
-							// Set the `$reference` variable in the context
-							let mut ctx = MutableContext::new(ctx);
-							ctx.add_value("reference", reference.into());
-							let ctx = ctx.freeze();
+						// Set the `$reference` variable in the context
+						let mut ctx = MutableContext::new(ctx);
+						ctx.add_value("reference", reference.into());
+						let ctx = ctx.freeze();
 
-							// Disable permissions
-							let opt = opt.clone().with_perms(false);
+						// Disable permissions
+						let opt = opt.clone().with_perms(false);
 
-							// Construct the document for the compute method
-							let doc = CursorDoc::new(
-								Some(Arc::new(this.clone())),
-								None,
-								Value::RecordId(this),
-							);
+						// Construct the document for the compute method
+						let doc = CursorDoc::new(
+							Some(Arc::new(this.clone())),
+							None,
+							Value::RecordId(this),
+						);
 
-							// Compute the custom instruction.
-							stk.run(|stk| v.compute(stk, &ctx, &opt, Some(&doc)))
-								.await
-								.catch_return()
-								// Wrap any error in an error explaining what went wrong
-								.map_err(|e| {
-									Error::RefsUpdateFailure(rid.to_string(), e.to_string())
-								})?;
-						}
+						// Compute the custom instruction.
+						stk.run(|stk| v.compute(stk, &ctx, &opt, Some(&doc)))
+							.await
+							.catch_return()
+							// Wrap any error in an error explaining what went wrong
+							.map_err(|e| {
+								Error::RefsUpdateFailure(rid.to_string(), e.to_string())
+							})?;
 					}
 				}
 			}
-
-			// After all references have been processed, delete them
-			txn.delr(range).await?;
 		}
+
+		// After all references have been processed, delete them
+		txn.delr(range).await?;
 
 		// Carry on
 		Ok(())

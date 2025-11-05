@@ -34,9 +34,6 @@ value = "[]"
 [[test.results]]
 value = "[person:john]"
 
-[env.capabilities]
-allow-experimental = ["record_references"]
-
 */
 
 DEFINE FIELD born_in ON person TYPE record<city> REFERENCE;

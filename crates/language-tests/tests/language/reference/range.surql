@@ -28,9 +28,6 @@ value = "['Second message', 'Third message', 'Fourth message', 'Fifth message']"
 [[test.results]]
 value = "['First message', 'Second message', 'Third message', 'Fourth message', 'Fifth message']"
 
-[env.capabilities]
-allow-experimental = ["record_references"]
-
 */
 
 CREATE chat:bla RETURN NONE;

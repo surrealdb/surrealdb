@@ -87,13 +87,6 @@ impl Parser<'_> {
 				let peek = self.peek_whitespace();
 				if peek.kind == t!("~") {
 					self.pop_peek();
-					if !self.settings.references_enabled {
-						bail!(
-							"Experimental capability `record_references` is not enabled",
-							@self.last_span() => "Use of `<~` reference lookup is still experimental"
-						)
-					}
-
 					let lookup =
 						stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Reference)).await?;
 					Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))

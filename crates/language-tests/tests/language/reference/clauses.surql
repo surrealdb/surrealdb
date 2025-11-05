@@ -63,9 +63,6 @@ value = "[{ author: user:alice, count: 2 }, { author: user:bob, count: 1 }]"
 [[test.results]]
 value = "[{ id: message:3, priority: 3 }, { id: message:1, priority: 1 }]"
 
-[env.capabilities]
-allow-experimental = ["record_references"]
-
 */
 
 -- 0, 1

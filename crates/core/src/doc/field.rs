@@ -5,7 +5,6 @@ use reblessive::tree::Stk;
 
 use crate::catalog::{self, FieldDefinition};
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err::Error;
@@ -657,10 +656,6 @@ impl FieldEditContext<'_> {
 	}
 	/// Process any REFERENCE clause for the field definition
 	async fn process_reference_clause(&mut self, val: &Value) -> Result<()> {
-		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-			return Ok(());
-		}
-
 		// Is there a `REFERENCE` clause?
 		if self.def.reference.is_some() {
 			// Check if the value has actually changed
