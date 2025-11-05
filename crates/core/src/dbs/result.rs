@@ -47,7 +47,13 @@ impl Results {
 				Ordering::Order(orders) => {
 					if let Some(limit) = limit {
 						let limit = start.unwrap_or(0) + limit;
-						if limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE {
+						// Use the priority-queue optimization only when both conditions hold:
+						// - the effective limit (start + limit) does not exceed
+						//   MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE
+						// - there is no SPLIT clause (SPLIT can change the number of produced
+						//   records)
+						// Otherwise, fall back to full in-memory ordering.
+						if stm.split().is_none() && limit <= *MAX_ORDER_LIMIT_PRIORITY_QUEUE_SIZE {
 							return Ok(Self::MemoryOrderedLimit(MemoryOrderedLimit::new(
 								limit as usize,
 								orders.clone(),
