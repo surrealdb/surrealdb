@@ -126,7 +126,7 @@ chat:general<~(SELECT id FROM message VIA chat ORDER BY id START 1);
 chat:general<~(SELECT id FROM message VIA chat ORDER BY id START 1 LIMIT 1);
 
 -- 15
-chat:general<~(SELECT id, tags FROM message VIA chat SPLIT tags ORDER BY id);
+chat:general<~(SELECT id, tags FROM message VIA chat SPLIT tags);
 
 -- 16
 chat:general<~(SELECT author, count() AS count FROM message VIA chat GROUP BY author ORDER BY author);
