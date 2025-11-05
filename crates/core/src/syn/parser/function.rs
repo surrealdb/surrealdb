@@ -2,11 +2,136 @@ use reblessive::Stk;
 
 use super::{ParseResult, Parser};
 use crate::sql::{Expr, Function, FunctionCall, Model};
-use crate::syn::error::syntax_error;
+use crate::syn::error::{bail, syntax_error};
 use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::syn::token::{TokenKind, t};
 
 impl Parser<'_> {
+	pub(crate) async fn parse_function_name(&mut self) -> ParseResult<Function> {
+		let mut start = self.peek();
+		let mut last_span = start.span;
+
+		let fnc = match start.kind {
+			t!("fn") => {
+				self.pop_peek();
+				expected!(self, t!("::"));
+				start = self.peek();
+				let peek = self.peek();
+				if !Self::kind_is_identifier(peek.kind) {
+					unexpected!(self, peek, "an identifier")
+				}
+				last_span = self.pop_peek().span;
+				while self.eat(t!("::")) {
+					let peek = self.peek();
+					if !Self::kind_is_identifier(peek.kind) {
+						unexpected!(self, peek, "an identifier")
+					}
+					last_span = self.pop_peek().span;
+				}
+
+				let name = self.lexer.span_str(start.span.covers(last_span)).to_string();
+
+				Function::Custom(name)
+			}
+			t!("mod") => {
+				self.pop_peek();
+				if !self.settings.surrealism_enabled {
+					bail!(
+						"Experimental capability `surrealism` is not enabled",
+						@self.last_span() => "Use of `mod::` is still experimental"
+					)
+				}
+
+				expected!(self, t!("::"));
+				let name = self.parse_ident()?;
+				let sub = if self.eat(t!("::")) {
+					Some(self.parse_ident()?)
+				} else {
+					None
+				};
+
+				Function::Module(name, sub)
+			}
+			t!("silo") => {
+				self.pop_peek();
+				if !self.settings.surrealism_enabled {
+					bail!(
+						"Experimental capability `surrealism` is not enabled",
+						@self.last_span() => "Use of `silo::` is still experimental"
+					)
+				}
+
+				expected!(self, t!("::"));
+				let org = self.parse_ident()?;
+				expected!(self, t!("::"));
+				let pkg = self.parse_ident()?;
+				expected!(self, t!("<"));
+				let major = self.next_token_value::<u32>()?;
+				expected!(self, t!("."));
+				let minor = self.next_token_value::<u32>()?;
+				expected!(self, t!("."));
+				let patch = self.next_token_value::<u32>()?;
+				expected!(self, t!(">"));
+				let sub = if self.eat(t!("::")) {
+					Some(self.parse_ident()?)
+				} else {
+					None
+				};
+
+				Function::Silo {
+					org,
+					pkg,
+					major,
+					minor,
+					patch,
+					sub,
+				}
+			}
+			t!("ml") => {
+				self.pop_peek();
+				expected!(self, t!("::"));
+				start = self.peek();
+				let peek = self.peek();
+				if !Self::kind_is_identifier(peek.kind) {
+					unexpected!(self, peek, "an identifier")
+				}
+				last_span = self.pop_peek().span;
+				while self.eat(t!("::")) {
+					let peek = self.peek();
+					if !Self::kind_is_identifier(peek.kind) {
+						unexpected!(self, peek, "an identifier")
+					}
+					last_span = self.pop_peek().span;
+				}
+
+				let name = self.lexer.span_str(start.span.covers(last_span)).to_string();
+				let (major, minor, patch) = self.parse_model_version()?;
+				let version = format!("{}.{}.{}", major, minor, patch);
+
+				Function::Model(Model {
+					name,
+					version,
+				})
+			}
+			TokenKind::Identifier => {
+				self.pop_peek();
+				while self.eat(t!("::")) {
+					let peek = self.peek();
+					if !Self::kind_is_identifier(peek.kind) {
+						unexpected!(self, peek, "an identifier")
+					}
+					last_span = self.pop_peek().span;
+				}
+
+				let name = self.lexer.span_str(start.span.covers(last_span)).to_string();
+				Function::Normal(name)
+			}
+			_ => unexpected!(self, self.peek(), "a function name"),
+		};
+
+		Ok(fnc)
+	}
+
 	/// Parse a custom function function call
 	///
 	/// Expects `fn` to already be called.
@@ -20,9 +145,86 @@ impl Parser<'_> {
 			name.push_str("::");
 			name.push_str(&self.parse_ident()?)
 		}
+
 		expected!(self, t!("(")).span;
 		let args = self.parse_function_args(stk).await?;
 		let name = Function::Custom(name);
+		Ok(FunctionCall {
+			receiver: name,
+			arguments: args,
+		})
+	}
+
+	/// Parse a module function function call
+	///
+	/// Expects `mod` to already be called.
+	pub(super) async fn parse_module_function(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<FunctionCall> {
+		if !self.settings.surrealism_enabled {
+			bail!(
+				"Experimental capability `surrealism` is not enabled",
+				@self.last_span() => "Use of `mod::` is still experimental"
+			)
+		}
+
+		expected!(self, t!("::"));
+		let name = self.parse_ident()?;
+		let sub = if self.eat(t!("::")) {
+			Some(self.parse_ident()?)
+		} else {
+			None
+		};
+
+		expected!(self, t!("(")).span;
+		let args = self.parse_function_args(stk).await?;
+		let name = Function::Module(name, sub);
+		Ok(FunctionCall {
+			receiver: name,
+			arguments: args,
+		})
+	}
+
+	/// Parse a silo function function call
+	///
+	/// Expects `silo` to already be called.
+	pub(super) async fn parse_silo_function(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {
+		if !self.settings.surrealism_enabled {
+			bail!(
+				"Experimental capability `surrealism` is not enabled",
+				@self.last_span() => "Use of `silo::` is still experimental"
+			)
+		}
+
+		expected!(self, t!("::"));
+		let org = self.parse_ident()?;
+		expected!(self, t!("::"));
+		let pkg = self.parse_ident()?;
+		expected!(self, t!("<"));
+		let major = self.next_token_value::<u32>()?;
+		expected!(self, t!("."));
+		let minor = self.next_token_value::<u32>()?;
+		expected!(self, t!("."));
+		let patch = self.next_token_value::<u32>()?;
+		expected!(self, t!(">"));
+		let sub = if self.eat(t!("::")) {
+			Some(self.parse_ident()?)
+		} else {
+			None
+		};
+
+		expected!(self, t!("(")).span;
+		let args = self.parse_function_args(stk).await?;
+		let name = Function::Silo {
+			org,
+			pkg,
+			major,
+			minor,
+			patch,
+			sub,
+		};
+
 		Ok(FunctionCall {
 			receiver: name,
 			arguments: args,
@@ -48,16 +250,7 @@ impl Parser<'_> {
 		Ok(args)
 	}
 
-	/// Parse a model invocation
-	///
-	/// Expects `ml` to already be called.
-	pub(super) async fn parse_model(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {
-		expected!(self, t!("::"));
-		let mut name = self.parse_ident()?;
-		while self.eat(t!("::")) {
-			name.push_str("::");
-			name.push_str(&self.parse_ident()?)
-		}
+	pub(super) fn parse_model_version(&mut self) -> ParseResult<(u32, u32, u32)> {
 		let start = expected!(self, t!("<")).span;
 
 		let token = self.next();
@@ -92,6 +285,22 @@ impl Parser<'_> {
 			};
 
 		self.expect_closing_delimiter(t!(">"), start)?;
+
+		Ok((major, minor, patch))
+	}
+
+	/// Parse a model invocation
+	///
+	/// Expects `ml` to already be called.
+	pub(super) async fn parse_model(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {
+		expected!(self, t!("::"));
+		let mut name = self.parse_ident()?;
+		while self.eat(t!("::")) {
+			name.push_str("::");
+			name.push_str(&self.parse_ident()?)
+		}
+
+		let (major, minor, patch) = self.parse_model_version()?;
 
 		let start = expected!(self, t!("(")).span;
 		let mut args = Vec::new();

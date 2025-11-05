@@ -966,6 +966,7 @@ impl DeserializeRevisioned for Expr {
 			crate::syn::parser::ParserSettings {
 				define_api_enabled: true,
 				files_enabled: true,
+				surrealism_enabled: true,
 				..Default::default()
 			},
 			async |p, stk| p.parse_expr(stk).await,

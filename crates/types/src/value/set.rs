@@ -104,11 +104,19 @@ impl DerefMut for Set {
 
 impl ToSql for Set {
 	fn fmt_sql(&self, f: &mut String) {
-		// Format as Python-style set literal: {val, val, val}
+		if self.is_empty() {
+			f.push_str("{,}");
+			return;
+		}
+
+		// Format as Python-style set literal: `{,}`, `{val,}`, `{val, val, val}`
 		f.push('{');
+		let len = self.len();
 		for (i, v) in self.iter().enumerate() {
 			v.fmt_sql(f);
-			if i < self.len() - 1 {
+			if len == 1 {
+				f.push(',');
+			} else if i < len - 1 {
 				f.push_str(", ");
 			}
 		}

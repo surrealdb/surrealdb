@@ -14,6 +14,7 @@ use surrealdb_core::dbs::capabilities::{
 pub enum ExperimentalFeature {
 	GraphQl,
 	DefineApi,
+	Surrealism,
 }
 
 /// Not public API
@@ -23,6 +24,7 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 		match feature {
 			ExperimentalFeature::GraphQl => ExperimentalTarget::GraphQL,
 			ExperimentalFeature::DefineApi => ExperimentalTarget::DefineApi,
+			ExperimentalFeature::Surrealism => ExperimentalTarget::Surrealism,
 		}
 	}
 }
