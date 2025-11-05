@@ -173,6 +173,7 @@ impl MemoryRandom {
 		// the current values and any pending batch into a single vector.
 		let mut vec = mem::take(&mut self.values);
 		vec.append(&mut mem::take(&mut self.batch));
+		self.ordered.clear();
 		vec
 	}
 
@@ -284,6 +285,7 @@ impl MemoryOrdered {
 		// any collected values along with the pending batch into a single vector.
 		let mut vec = mem::take(&mut self.values);
 		vec.append(&mut mem::take(&mut self.batch));
+		self.ordered.clear();
 		vec
 	}
 
