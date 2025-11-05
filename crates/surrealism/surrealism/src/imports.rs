@@ -504,7 +504,7 @@ pub mod kv {
 		let range = SerializableRange::from_range_bounds(range)?.transfer(&mut controller)?;
 		let result = unsafe { __sr_kv_entries(*range) };
 		Result::<Vec<(String, SerializableArg<T>)>>::receive(result.try_into()?, &mut controller)?
-			.map(|x| x.into_iter().map(|x| (x.0, x.1 .0)).collect())
+			.map(|x| x.into_iter().map(|x| (x.0, x.1.0)).collect())
 	}
 
 	/// Counts the number of key-value pairs within a specified key range.

@@ -115,7 +115,7 @@ jobs:
         uses: ./.github/actions/install-tools
 
       - name: Run clippy
-        run: cargo make ci-clippy
+        run: cargo +${{ env.RUST_VERSION }} make ci-clippy
 
   clippy-release:
     name: Check clippy (release)
@@ -135,7 +135,7 @@ jobs:
         uses: ./.github/actions/install-tools
 
       - name: Run clippy release
-        run: cargo make ci-clippy-release
+        run: cargo +${{ env.RUST_VERSION }} make ci-clippy-release
 
   check:
     name: Check workspace
