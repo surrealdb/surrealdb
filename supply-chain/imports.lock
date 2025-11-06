@@ -1019,15 +1019,15 @@ user-login = "cfallin"
 user-name = "Chris Fallin"
 
 [[publisher.regex]]
-version = "1.11.1"
-when = "2024-10-24"
+version = "1.12.2"
+when = "2025-10-13"
 user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
 
 [[publisher.regex-automata]]
-version = "0.4.9"
-when = "2024-11-11"
+version = "0.4.13"
+when = "2025-10-13"
 user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
@@ -3751,28 +3751,6 @@ type/value always.
 """
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
-[[audits.google.audits.rust_decimal]]
-who = "Lukasz Anforowicz <lukasza@chromium.org>"
-criteria = "safe-to-deploy"
-version = "1.36.0"
-notes = '''
-Grepped for `-i cipher`, `-i crypto`, `'\bfs\b'`, `'\bnet\b'`, `'\bunsafe\b'`
-and there were no hits except:
-
-* Some reasonable `fs` usage in `build.rs`, under `make/scripts`, in one test
-* A single `unsafe` usage in one test.  I think this still qualifies this crate
-  as `ub-risk-0`.  FWIW the test usage seems sound - see:
-  https://chromium-review.googlesource.com/c/chromium/src/+/6187726/2/third_party/rust/chromium_crates_io/vendor/rust_decimal-1.36.0/tests/decimal_tests.rs
-'''
-aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
-
-[[audits.google.audits.rust_decimal]]
-who = "Chris Palmer <palmer@google.com>"
-criteria = "safe-to-deploy"
-delta = "1.36.0 -> 1.37.0"
-notes = "New `unsafe` in a test."
-aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
-
 [[audits.google.audits.rustversion]]
 who = "Lukasz Anforowicz <lukasza@chromium.org>"
 criteria = "safe-to-deploy"
@@ -5692,6 +5670,16 @@ criteria = "safe-to-deploy"
 delta = "0.1.3 -> 0.1.4"
 aggregated-from = "https://raw.githubusercontent.com/zcash/wallet/main/supply-chain/audits.toml"
 
+[[audits.zcash.audits.ipnet]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "2.10.1 -> 2.11.0"
+notes = """
+Introduces an implicit MSRV of 1.81 for no-std usage, but does not declare it as
+std usage continues to work with earlier Rust versions.
+"""
+aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
+
 [[audits.zcash.audits.num-conv]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
@@ -5743,12 +5731,6 @@ aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/sup
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.13.4 -> 0.13.5"
-aggregated-from = "https://raw.githubusercontent.com/zcash/wallet/main/supply-chain/audits.toml"
-
-[[audits.zcash.audits.rust_decimal]]
-who = "Jack Grigg <jack@electriccoin.co>"
-criteria = "safe-to-deploy"
-delta = "1.37.0 -> 1.37.2"
 aggregated-from = "https://raw.githubusercontent.com/zcash/wallet/main/supply-chain/audits.toml"
 
 [[audits.zcash.audits.rustc_version]]

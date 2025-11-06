@@ -1713,3 +1713,6 @@ allow_apis = ["fs"]
 [pkg.witx]
 allow_unsafe = true
 allow_apis = ["fs"]
+
+[pkg.i_shape]
+allow_unsafe = true

@@ -37,6 +37,9 @@ audit-as-crates-io = true
 [policy.surrealdb-types-derive]
 audit-as-crates-io = true
 
+[policy.surrealism]
+audit-as-crates-io = true
+
 [policy.surrealism-cli]
 audit-as-crates-io = true
 
@@ -521,8 +524,12 @@ criteria = "safe-to-deploy"
 version = "0.28.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.geo]]
+version = "0.31.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.geo-types]]
-version = "0.7.15"
+version = "0.7.17"
 criteria = "safe-to-deploy"
 
 [[exemptions.geographiclib-rs]]
@@ -589,12 +596,32 @@ criteria = "safe-to-deploy"
 version = "0.5.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.i_float]]
+version = "1.15.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.i_key_sort]]
+version = "0.6.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.i_overlay]]
+version = "4.0.6"
+criteria = "safe-to-deploy"
+
+[[exemptions.i_shape]]
+version = "1.14.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.i_tree]]
+version = "0.16.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.inferno]]
 version = "0.11.21"
 criteria = "safe-to-deploy"
 
 [[exemptions.ipnet]]
-version = "2.11.0"
+version = "2.10.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.itertools]]
@@ -990,7 +1017,7 @@ version = "0.7.45"
 criteria = "safe-to-deploy"
 
 [[exemptions.roaring]]
-version = "0.10.10"
+version = "0.11.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.robust]]
@@ -1019,6 +1046,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.rust-stemmers]]
 version = "1.2.0"
+criteria = "safe-to-deploy"
+
+[[exemptions.rust_decimal]]
+version = "1.39.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.rustls]]
@@ -1167,6 +1198,10 @@ criteria = "safe-to-deploy"
 
 [[exemptions.surrealdb-rocksdb]]
 version = "0.24.0-surreal.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.surrealism]]
+version = "0.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.surrealism-cli]]
