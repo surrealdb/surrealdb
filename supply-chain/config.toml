@@ -1172,6 +1172,10 @@ criteria = "safe-to-deploy"
 version = "0.24.0-surreal.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.surrealism]]
+version = "0.1.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.surrealism-cli]]
 version = "0.1.1"
 criteria = "safe-to-deploy"
