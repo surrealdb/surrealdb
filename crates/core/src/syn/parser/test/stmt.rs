@@ -9,7 +9,7 @@ use crate::sql::access_type::{
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::data::Assignment;
 use crate::sql::filter::Filter;
-use crate::sql::index::{Distance, FullTextParams, HnswParams, MTreeParams, VectorType};
+use crate::sql::index::{Distance, FullTextParams, HnswParams, VectorType};
 use crate::sql::language::Language;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::lookup::{LookupKind, LookupSubject};
@@ -44,7 +44,7 @@ use crate::sql::{
 };
 use crate::syn;
 use crate::syn::parser::ParserSettings;
-use crate::types::{PublicDatetime, PublicDuration, PublicNumber, PublicUuid};
+use crate::types::{PublicDatetime, PublicDuration, PublicUuid};
 use crate::val::range::TypedRange;
 
 fn ident_field(name: &str) -> Expr {
@@ -1804,28 +1804,6 @@ fn parse_define_index() {
 			index: Index::Uniq,
 			comment: None,
 			concurrently: false
-		})))
-	);
-
-	let res =
-		syn::parse_with( r#"DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 TYPE I16 MTREE_CACHE 9"#.as_bytes(),async |parser,stk| parser.parse_expr_inherit(stk).await).unwrap();
-
-	assert_eq!(
-		res,
-		Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
-			kind: DefineKind::Default,
-			name: Expr::Idiom(Idiom::field("index".to_string())),
-			what: Expr::Idiom(Idiom::field("table".to_string())),
-			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())]))],
-			index: Index::MTree(MTreeParams {
-				dimension: 4,
-				distance: Distance::Minkowski(PublicNumber::Int(5)),
-				capacity: 6,
-				mtree_cache: 9,
-				vector_type: VectorType::I16,
-			}),
-			comment: None,
-			concurrently: false,
 		})))
 	);
 

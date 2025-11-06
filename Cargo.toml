@@ -1,14 +1,14 @@
 [workspace]
 members = [
-    ".", 
-    "crates/core", 
-    "crates/sdk", 
-    "crates/types", 
-    "crates/types-derive", 
-    "crates/surrealism/surrealism", 
-    "crates/surrealism/surrealism-cli", 
-    "crates/surrealism/surrealism-macros", 
-    "crates/surrealism/surrealism-runtime", 
+    ".",
+    "crates/core",
+    "crates/sdk",
+    "crates/types",
+    "crates/types-derive",
+    "crates/surrealism/surrealism",
+    "crates/surrealism/surrealism-cli",
+    "crates/surrealism/surrealism-macros",
+    "crates/surrealism/surrealism-runtime",
     "crates/surrealism/surrealism-types",
     "crates/surrealism/demo"
 ]
@@ -50,7 +50,7 @@ affinitypool = "0.3.1"
 dmp = "0.2.3"
 indxdb = "0.6.0"
 lexicmp = "0.2.0"
-revision = { version = "0.13.0", features = [
+revision = { version = "0.14.0", features = [
     "chrono",
     "geo",
     "roaring",
@@ -69,7 +69,7 @@ vart = "0.9.3"
 js = { version = "0.9.0", package = "rquickjs" }
 reblessive = "0.4.3"
 ## Maintained by @rushmorem
-ipnet = "2.9.0"
+ipnet = "2.11.0"
 serde-content = "0.1.0"
 
 # External Kv stores
@@ -146,9 +146,9 @@ regex = "1.10.6"
 regex-syntax = "0.8.4"
 reqwest = { version = "0.12.7", default-features = false }
 ring = "0.17.13"
-roaring = "0.10.6"
+roaring = "0.11.2"
 rustls = { version = "0.23.12", default-features = false }
-rust_decimal = { version = "1.37.2" }
+rust_decimal = { version = "1.39.0" }
 rust-s3 = "0.35.1"
 # TODO: Look at dependency, 5 years old seems unmaintained.
 rust-stemmers = "1.2.0"

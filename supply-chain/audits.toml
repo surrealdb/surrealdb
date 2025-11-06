@@ -1044,13 +1044,13 @@ end = "2025-08-06"
 criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
 start = "2019-02-27"
-end = "2025-08-31"
+end = "2026-11-06"
 
 [[trusted.regex-automata]]
 criteria = "safe-to-deploy"
 user-id = 189 # Andrew Gallant (BurntSushi)
 start = "2019-02-25"
-end = "2025-08-31"
+end = "2026-11-06"
 
 [[trusted.regex-syntax]]
 criteria = "safe-to-deploy"

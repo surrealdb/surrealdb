@@ -396,8 +396,8 @@ impl InfoStatement {
 				if let Some(ib) = ctx.get_index_builder() {
 					// Obtain the index
 					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-					let res = txn.expect_tb_index(ns, db, &table, &index).await?;
-					let status = ib.get_status(ns, db, &res).await;
+					let ix = txn.expect_tb_index(ns, db, &table, &index).await?;
+					let status = ib.get_status(ns, db, &ix).await;
 					let mut out = Object::default();
 					out.insert("building".to_string(), status.into());
 					return Ok(out.into());

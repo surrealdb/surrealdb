@@ -5,7 +5,7 @@ use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
 use crate::sql::filter::Filter;
-use crate::sql::index::{Distance, HnswParams, MTreeParams, VectorType};
+use crate::sql::index::{Distance, HnswParams, VectorType};
 use crate::sql::statements::define::config::api::{ApiConfig, Middleware};
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::config::{ConfigInner, graphql};
@@ -1081,43 +1081,6 @@ impl Parser<'_> {
 						hl,
 					});
 				}
-				t!("MTREE") => {
-					self.pop_peek();
-					expected!(self, t!("DIMENSION"));
-					let dimension = self.next_token_value()?;
-					let mut distance = Distance::Euclidean;
-					let mut vector_type = VectorType::F64;
-					let mut capacity = 40;
-					let mut mtree_cache = 100;
-					loop {
-						match self.peek_kind() {
-							t!("DISTANCE") => {
-								self.pop_peek();
-								distance = self.parse_distance()?
-							}
-							t!("TYPE") => {
-								self.pop_peek();
-								vector_type = self.parse_vector_type()?
-							}
-							t!("CAPACITY") => {
-								self.pop_peek();
-								capacity = self.next_token_value()?
-							}
-							t!("MTREE_CACHE") => {
-								self.pop_peek();
-								mtree_cache = self.next_token_value()?
-							}
-							_ => break,
-						}
-					}
-					res.index = Index::MTree(MTreeParams {
-						dimension,
-						distance,
-						vector_type,
-						capacity,
-						mtree_cache,
-					})
-				}
 				t!("HNSW") => {
 					self.pop_peek();
 					expected!(self, t!("DIMENSION"));
@@ -1202,7 +1165,7 @@ impl Parser<'_> {
 					bail!("Cannot create a count index with fields", @field_span);
 				}
 			}
-			(field_span, Index::FullText(_) | Index::Hnsw(_) | Index::MTree(_)) => {
+			(field_span, Index::FullText(_) | Index::Hnsw(_)) => {
 				if res.cols.len() != 1 {
 					if let Some(field_span) = field_span {
 						bail!("Expected one column, found {}", res.cols.len(), @field_span);
