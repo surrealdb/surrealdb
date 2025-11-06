@@ -459,7 +459,8 @@ mod tests {
 		test_duration: Duration,
 		lease_duration: Duration,
 	) -> NodeResult {
-		let lh = LeaseHandler::new(sequences, id, tf, TaskLeaseType::IndexCompaction, lease_duration)
+		let lh =
+			LeaseHandler::new(sequences, id, tf, TaskLeaseType::IndexCompaction, lease_duration)
 				.unwrap();
 		let mut result = NodeResult::default();
 		let start_time = Instant::now();
