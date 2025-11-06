@@ -1716,3 +1716,6 @@ allow_apis = ["fs"]
 
 [pkg.i_shape]
 allow_unsafe = true
+
+[pkg.i_tree]
+allow_unsafe = true
