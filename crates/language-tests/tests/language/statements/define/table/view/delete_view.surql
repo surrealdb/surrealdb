@@ -11,25 +11,25 @@ value = "[]"
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE', test_view: 'DEFINE TABLE test_view TYPE ANY SCHEMALESS AS SELECT math::mean(num) AS mean, group FROM test GROUP BY group PERMISSIONS NONE' }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE', test_view: 'DEFINE TABLE test_view TYPE ANY SCHEMALESS AS SELECT math::mean(num) AS mean, group FROM test GROUP BY group PERMISSIONS NONE' }, users: {  } }"
 
 [[test.results]]
-error = "Invalid query: Cannot delete table `test` on which a view is defined, table(s) `test_view` are defined as a view on this table., "
+error = "Invalid query: Cannot delete table `test` on which a view is defined, table(s) `test_view` are defined as a view on this table."
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE', test_view: 'DEFINE TABLE test_view TYPE ANY SCHEMALESS AS SELECT math::mean(num) AS mean, group FROM test GROUP BY group PERMISSIONS NONE' }, users: {  } }"
-
-[[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE', test_view: 'DEFINE TABLE test_view TYPE ANY SCHEMALESS AS SELECT math::mean(num) AS mean, group FROM test GROUP BY group PERMISSIONS NONE' }, users: {  } }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: { test: 'DEFINE TABLE test TYPE ANY SCHEMALESS PERMISSIONS NONE' }, users: {  } }"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs: {  }, functions: {  }, models: {  }, modules: {  }, params: {  }, sequences: {  }, tables: {  }, users: {  } }"
 
 */
 

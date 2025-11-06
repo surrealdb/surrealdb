@@ -26,7 +26,7 @@ value = "[{ a: 1, id: test:1 }, { a: 2, id: test:2 }]"
 value = "[{ count: 2, id: view:[] }]"
 
 [[test.results]]
-error = "Invalid query: Cannot delete table `test` on which a view is defined, table(s) `view` are defined as a view on this table., "
+error = "Invalid query: Cannot delete table `test` on which a view is defined, table(s) `view` are defined as a view on this table."
 
 [[test.results]]
 value = "[{ a: 1, id: test:1 }, { a: 2, id: test:2 }]"
