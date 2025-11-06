@@ -1,3 +1,7 @@
+// A lot of the code here will be expanded on later.
+// So we allow dead code for now.
+#![allow(dead_code)]
+
 use crate::{sql::Object, syn::error::Snippet};
 
 mod pass;
@@ -11,7 +15,7 @@ pub enum Severity {
 }
 
 impl Severity {
-	pub fn to_str(&self) -> &str {
+	pub fn as_str(&self) -> &str {
 		match self {
 			Severity::MightBreak => "might_break",
 			Severity::WillBreak => "will_break",
@@ -26,7 +30,7 @@ pub enum IssueKind {
 }
 
 impl IssueKind {
-	pub fn to_str(&self) -> &str {
+	pub fn as_str(&self) -> &str {
 		match *self {
 			Self::IncompatibleFuture => "incompatible future",
 		}
@@ -53,9 +57,9 @@ pub struct MigrationIssue {
 impl MigrationIssue {
 	pub fn to_object(&self) -> Object {
 		let mut obj = Object::default();
-		obj.insert("severity".to_string(), self.severity.to_str().to_string().into());
+		obj.insert("severity".to_string(), self.severity.as_str().to_string().into());
 		obj.insert("error".to_string(), self.error.clone().into());
-		obj.insert("kind".to_string(), self.kind.to_str().into());
+		obj.insert("kind".to_string(), self.kind.as_str().into());
 		obj.insert("origin".to_string(), self.origin.clone().into());
 
 		if let Some(x) = &self.error_location {

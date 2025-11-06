@@ -75,7 +75,7 @@ async fn diagnose_ns_db(
 
 	for f in tx.all_db_functions(ns, db).await?.iter() {
 		let mut pass = MigratorPass::new(issues, export, &mut path, PassState::default());
-		let _ = pass.visit_define_function(&f);
+		let _ = pass.visit_define_function(f);
 	}
 
 	// TODO: No versioning at the moment,
@@ -83,9 +83,9 @@ async fn diagnose_ns_db(
 	for t in tx.all_tb(ns, db, None).await?.iter() {
 		{
 			let mut pass = MigratorPass::new(issues, export, &mut path, PassState::default());
-			let _ = pass.visit_define_table(&t);
+			let _ = pass.visit_define_table(t);
 			for f in tx.all_tb_fields(ns, db, &t.name.0, None).await?.iter() {
-				let _ = pass.visit_define_field(&f);
+				let _ = pass.visit_define_field(f);
 			}
 		}
 
@@ -114,7 +114,7 @@ async fn diagnose_ns_db(
 				);
 				let _ = pass.visit_value(&v);
 				for f in tx.all_tb_fields(ns, db, &t.name.0, None).await?.iter() {
-					let _ = pass.visit_define_field(&f);
+					let _ = pass.visit_define_field(f);
 				}
 			}
 

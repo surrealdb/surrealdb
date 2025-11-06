@@ -73,13 +73,13 @@ impl<'a> PassWriter<'a> {
 	}
 }
 
-impl<'a> Drop for PassWriter<'a> {
+impl Drop for PassWriter<'_> {
 	fn drop(&mut self) {
 		self.target.push_str(&self.buffer)
 	}
 }
 
-impl<'a> fmt::Write for PassWriter<'a> {
+impl fmt::Write for PassWriter<'_> {
 	fn write_str(&mut self, mut s: &str) -> fmt::Result {
 		while let Some(l) = s.find('\n') {
 			self.target.push_str(&self.buffer);
@@ -93,7 +93,7 @@ impl<'a> fmt::Write for PassWriter<'a> {
 			s = &s[(l + 1)..]
 		}
 
-		self.buffer.push_str(&s);
+		self.buffer.push_str(s);
 		Ok(())
 	}
 }
@@ -101,6 +101,7 @@ impl<'a> fmt::Write for PassWriter<'a> {
 #[derive(Clone, Copy, Default)]
 pub struct PassState {
 	pub breaking_futures: bool,
+	pub _tmp: (),
 }
 
 pub struct MigratorPass<'a> {
@@ -714,9 +715,9 @@ impl Visitor for MigratorPass<'_> {
 					self.w.write_str(" ELSE ")?;
 				}
 				self.w.write_str("IF ")?;
-				self.visit_value(&cond)?;
+				self.visit_value(cond)?;
 				self.w.write_str(" ")?;
-				self.visit_value(&then)?;
+				self.visit_value(then)?;
 			}
 			if let Some(x) = i.close.as_ref() {
 				self.w.write_str(" ELSE ")?;
@@ -728,9 +729,9 @@ impl Visitor for MigratorPass<'_> {
 					self.w.write_str(" ELSE ")?;
 				}
 				self.w.write_str("IF ")?;
-				self.visit_value(&cond)?;
+				self.visit_value(cond)?;
 				self.w.write_str(" THEN ")?;
-				self.visit_value(&then)?;
+				self.visit_value(then)?;
 			}
 			if let Some(x) = i.close.as_ref() {
 				self.w.write_str(" ELSE ")?;
@@ -1425,7 +1426,7 @@ impl Visitor for MigratorPass<'_> {
 					if idx != 0 {
 						self.w.write_str(", ")?;
 					}
-					self.visit_idiom(&v)?;
+					self.visit_idiom(v)?;
 				}
 			}
 			Data::PatchExpression(value) => {
