@@ -1107,13 +1107,13 @@ impl Parser<'_> {
 					if let Some(field_span) = field_span {
 						bail!("Expected one column, found {}", res.cols.len(), @field_span);
 					} else {
-						bail!("Expected one column, found none");
+						bail!("Expected one column, found none", @self.recent_span() => "Full text, Hnsw, or MTree indecies require a single column.").;
 					}
 				}
 			}
 			(None, Index::Uniq | Index::Idx) => {
 				if res.cols.is_empty() {
-					bail!("Expected at least one column - Use FIELDS to define columns");
+					bail!("Expected at least one column - Use FIELDS to define columns", @self.recent_span());
 				}
 			}
 			(_, _) => {}
