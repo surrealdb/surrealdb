@@ -379,11 +379,11 @@ mod test {
 
 		let error_string = format!("{}", error);
 		let expected = r#"some_error
-			--> [4:10]
-			|
-			4 | ...hallo error...
-			|          ^^^^^ this is wrong
-			"#;
+ --> [4:10]
+  |
+4 | ...hallo error...
+  |          ^^^^^ this is wrong
+"#;
 		assert_eq!(error_string, expected)
 	}
 }

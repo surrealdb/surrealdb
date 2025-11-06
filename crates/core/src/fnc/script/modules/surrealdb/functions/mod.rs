@@ -17,6 +17,7 @@ mod geo;
 mod http;
 mod math;
 mod meta;
+mod migration;
 mod object;
 mod parse;
 mod rand;
@@ -58,7 +59,8 @@ impl_module_def!(
 	"time" => (time::Package),
 	"type" => (r#type::Package),
 	"value" => (value::Package),
-	"vector" => (vector::Package)
+	"vector" => (vector::Package),
+	"migration" => (migration::Package)
 );
 
 fn run(js_ctx: js::Ctx<'_>, name: &str, args: Vec<Value>) -> Result<Value> {
