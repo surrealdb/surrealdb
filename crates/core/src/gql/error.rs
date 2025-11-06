@@ -1,4 +1,3 @@
-#![allow(clippy::result_large_err)]
 use std::backtrace;
 use std::fmt::Debug;
 
@@ -11,18 +10,25 @@ use crate::expr::Kind;
 pub enum GqlError {
 	#[error("Database error: {0}")]
 	DbError(#[from] anyhow::Error),
+
 	#[error("Error generating schema: {0}")]
 	SchemaError(String),
+
 	#[error("Error resolving request: {0}")]
 	ResolverError(String),
+
 	#[error("No Namespace specified")]
 	UnspecifiedNamespace,
+
 	#[error("No Database specified")]
 	UnspecifiedDatabase,
+
 	#[error("GraphQL has not been configured for this database")]
 	NotConfigured,
+
 	#[error("Internal Error: {0}")]
 	InternalError(String),
+
 	#[error("Error converting value: {val} to type: {target}")]
 	TypeError {
 		target: Kind,
@@ -58,5 +64,11 @@ where
 {
 	fn from(value: InputValueError<T>) -> Self {
 		GqlError::ResolverError(format!("{value:?}"))
+	}
+}
+
+impl From<GqlError> for async_graphql::Error {
+	fn from(value: GqlError) -> Self {
+		async_graphql::Error::new(value.to_string())
 	}
 }

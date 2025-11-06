@@ -9,22 +9,18 @@ use uuid::Uuid;
 
 use crate::cnf::{PKG_NAME, PKG_VERSION};
 
-//use surrealdb_core::gql::{Pessimistic, SchemaCache};
-
 pub struct Http {
 	pub kvs: Arc<Datastore>,
 	pub lock: Arc<Semaphore>,
 	pub session: Arc<Session>,
-	//pub gql_schema: SchemaCache<Pessimistic>,
 }
 
 impl Http {
-	pub fn new(kvs: &Arc<Datastore>, session: Session) -> Self {
+	pub fn new(kvs: Arc<Datastore>, session: Session) -> Self {
 		Self {
-			kvs: kvs.clone(),
+			kvs,
 			lock: Arc::new(Semaphore::new(1)),
 			session: Arc::new(session),
-			//gql_schema: SchemaCache::new(kvs.clone()),
 		}
 	}
 }
