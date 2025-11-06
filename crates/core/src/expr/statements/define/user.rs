@@ -7,6 +7,7 @@ use rand::Rng as _;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 use reblessive::tree::Stk;
+use surrealdb_types::{ToSql, write_sql};
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, UserProvider};
@@ -23,7 +24,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Duration, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineUserStatement {
+pub(crate) struct DefineUserStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub base: Base,
@@ -57,7 +58,7 @@ impl DefineUserStatement {
 			name: Expr::Idiom(Idiom::field(user)),
 			hash: Argon2::default()
 				.hash_password(pass.as_ref(), &SaltString::generate(&mut OsRng))
-				.unwrap()
+				.expect("password hashing should not fail")
 				.to_string(),
 			code: rand::thread_rng()
 				.sample_iter(&Alphanumeric)
@@ -85,6 +86,7 @@ impl DefineUserStatement {
 			token_duration: map_opt!(x as &self.duration.token => compute_to!(stk, ctx, opt, doc, x => Duration).0),
 			session_duration: map_opt!(x as &self.duration.session => compute_to!(stk, ctx, opt, doc, x => Duration).0),
 			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			base: self.base.into(),
 		})
 	}
 
@@ -168,7 +170,7 @@ impl DefineUserStatement {
 
 				let ns = {
 					let ns = opt.ns()?;
-					txn.get_or_add_ns(ns, opt.strict).await?
+					txn.get_or_add_ns(Some(ctx), ns, opt.strict).await?
 				};
 
 				// Process the statement
@@ -201,7 +203,7 @@ impl DefineUserStatement {
 
 				let db = {
 					let (ns, db) = opt.ns_db()?;
-					txn.get_or_add_db(ns, db, opt.strict).await?
+					txn.get_or_add_db(Some(ctx), ns, db, opt.strict).await?
 				};
 
 				// Process the statement
@@ -257,5 +259,11 @@ impl Display for DefineUserStatement {
 			write!(f, " COMMENT {}", comment)?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for DefineUserStatement {
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self)
 	}
 }

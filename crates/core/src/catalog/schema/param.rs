@@ -1,28 +1,33 @@
 use revision::revisioned;
+use surrealdb_types::{ToSql, write_sql};
 
 use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::sql::statements::define::{DefineKind, DefineParamStatement};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[non_exhaustive]
 pub struct ParamDefinition {
-	pub name: String,
-	pub value: Value,
-	pub comment: Option<String>,
-	pub permissions: Permission,
+	pub(crate) name: String,
+	pub(crate) value: Value,
+	pub(crate) comment: Option<String>,
+	pub(crate) permissions: Permission,
 }
 impl_kv_value_revisioned!(ParamDefinition);
 
 impl ParamDefinition {
-	pub fn to_sql_definition(&self) -> DefineParamStatement {
+	fn to_sql_definition(&self) -> DefineParamStatement {
 		DefineParamStatement {
 			kind: DefineKind::Default,
 			name: self.name.clone(),
-			value: crate::sql::Expr::from_value(self.value.clone()),
+			value: {
+				let public_val: crate::types::PublicValue =
+					self.value.clone().try_into().expect("value conversion should succeed");
+				crate::sql::Expr::from_public_value(public_val)
+			},
 			comment: self
 				.comment
 				.clone()
@@ -33,8 +38,8 @@ impl ParamDefinition {
 }
 
 impl ToSql for &ParamDefinition {
-	fn to_sql(&self) -> String {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }
 

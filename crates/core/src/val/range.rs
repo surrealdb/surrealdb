@@ -1,6 +1,6 @@
 use std::cmp::Ordering;
 use std::fmt;
-use std::ops::Bound;
+use std::ops::{Bound, RangeBounds};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ use crate::val::{Array, IndexFormat, Number, Value};
 #[serde(rename = "$surrealdb::private::Range")]
 #[storekey(format = "()")]
 #[storekey(format = "IndexFormat")]
-pub struct Range {
+pub(crate) struct Range {
 	pub start: Bound<Value>,
 	pub end: Bound<Value>,
 }
@@ -31,15 +31,6 @@ impl Range {
 		Range {
 			start: Bound::Unbounded,
 			end: Bound::Unbounded,
-		}
-	}
-
-	/// Creates a new range with the first argument as the start bound and the
-	/// second as the end bound.
-	pub const fn new(start: Bound<Value>, end: Bound<Value>) -> Self {
-		Range {
-			start,
-			end,
 		}
 	}
 }
@@ -135,7 +126,7 @@ impl Range {
 		})
 	}
 
-	pub fn into_literal(self) -> expr::Expr {
+	pub(crate) fn into_literal(self) -> expr::Expr {
 		match (self.start, self.end) {
 			(Bound::Unbounded, Bound::Unbounded) => {
 				expr::Expr::Literal(expr::Literal::UnboundedRange)
@@ -183,10 +174,46 @@ impl Range {
 
 /// A range of a specific type, can be converted back into a general range and
 /// coerced from a general range.
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug, Eq, PartialEq, Clone, Hash)]
 pub struct TypedRange<T> {
 	pub start: Bound<T>,
 	pub end: Bound<T>,
+}
+
+impl<T: PartialOrd> PartialOrd for TypedRange<T> {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		fn compare_bounds<T: PartialOrd>(a: &Bound<T>, b: &Bound<T>) -> Option<Ordering> {
+			match a {
+				Bound::Unbounded => match b {
+					Bound::Unbounded => Some(Ordering::Equal),
+					_ => Some(Ordering::Less),
+				},
+				Bound::Included(a) => match b {
+					Bound::Unbounded => Some(Ordering::Greater),
+					Bound::Included(b) => a.partial_cmp(b),
+					Bound::Excluded(_) => Some(Ordering::Less),
+				},
+				Bound::Excluded(a) => match b {
+					Bound::Excluded(b) => a.partial_cmp(b),
+					_ => Some(Ordering::Greater),
+				},
+			}
+		}
+
+		match compare_bounds(&self.start, &other.start) {
+			Some(Ordering::Equal) => compare_bounds(&self.end, &other.end),
+			x => x,
+		}
+	}
+}
+
+impl<T: Clone> TypedRange<T> {
+	pub fn from_range<R: RangeBounds<T>>(r: R) -> Self {
+		TypedRange {
+			start: r.start_bound().map(|x| x.clone()),
+			end: r.end_bound().map(|x| x.clone()),
+		}
+	}
 }
 
 impl TypedRange<i64> {
@@ -283,7 +310,7 @@ impl TypedRange<i64> {
 		usize::try_from(start.abs_diff(end)).unwrap_or(usize::MAX)
 	}
 
-	pub fn cast_to_array(self) -> Array {
+	pub(crate) fn cast_to_array(self) -> Array {
 		let iter = self.iter();
 		Array(iter.map(|i| Value::Number(Number::Int(i))).collect())
 	}
@@ -348,11 +375,12 @@ impl Iterator for IntegerRangeIter {
 #[cfg(test)]
 mod test {
 	use super::Range;
+	use crate::sql::expression::convert_public_value_to_internal;
 	use crate::syn;
 	use crate::val::Value;
 
 	fn r(r: &str) -> Range {
-		let Value::Range(r) = syn::value(r).unwrap() else {
+		let Value::Range(r) = convert_public_value_to_internal(syn::value(r).unwrap()) else {
 			panic!()
 		};
 		*r

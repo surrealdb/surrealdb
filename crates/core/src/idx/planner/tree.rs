@@ -10,6 +10,7 @@ use crate::catalog::providers::TableProvider;
 use crate::catalog::{self, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId};
 use crate::expr::operator::NearestNeighbor;
 use crate::expr::order::{OrderList, Ordering};
+use crate::expr::visit::MutVisitor;
 use crate::expr::{
 	BinaryOperator, Cond, Expr, FlowResultExt as _, Idiom, Kind, Literal, Order, Part, With,
 };
@@ -166,7 +167,9 @@ impl<'a> TreeBuilder<'a> {
 		self.knn_condition = if self.knn_expressions.is_empty() {
 			None
 		} else {
-			KnnConditionRewriter::build(&self.knn_expressions, cond)
+			let mut cond = cond.0.clone();
+			let _ = KnnConditionRewriter(&self.knn_expressions).visit_mut_expr(&mut cond);
+			Some(Cond(cond))
 		};
 		Ok(())
 	}
@@ -636,12 +639,12 @@ impl<'a> TreeBuilder<'a> {
 					}
 				}
 				(BinaryOperator::Contain, v, IdiomPosition::Left) => {
-					if col == 0 {
+					if col == 0 && ixr.cols[0].contains(&Part::All) {
 						return Some(IndexOperator::Equality(v));
 					}
 				}
 				(BinaryOperator::Inside, v, IdiomPosition::Right) => {
-					if col == 0 {
+					if col == 0 && ixr.cols[0].contains(&Part::All) {
 						return Some(IndexOperator::Equality(v));
 					}
 				}
@@ -657,6 +660,11 @@ impl<'a> TreeBuilder<'a> {
 					BinaryOperator::ContainAny | BinaryOperator::ContainAll,
 					v,
 					IdiomPosition::Left,
+				)
+				| (
+					BinaryOperator::AnyInside | BinaryOperator::AllInside,
+					v,
+					IdiomPosition::Right,
 				) => {
 					if v.is_array() && col == 0 {
 						return Some(IndexOperator::Union(v));

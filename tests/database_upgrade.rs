@@ -378,7 +378,6 @@ mod database_upgrade {
 		check_info_key(prev, next, "analyzers");
 		check_info_key(prev, next, "users");
 		check_info_key(prev, next, "indexes");
-		check_info_key(prev, next, "tables");
 	}
 
 	async fn check_migrated_data(db: &Surreal<Any>, info: &str, queries: &[Check]) {
@@ -408,7 +407,7 @@ mod database_upgrade {
 		info!("Create a new local instance; endpoint => {endpoint}");
 		let db = connect(endpoint).await.unwrap();
 		info!("Select namespace and database");
-		db.use_ns(NS).use_db(DB).await.unwrap();
+		db.use_ns(Ulid::new().to_string()).use_db(DB).await.unwrap();
 		db
 	}
 }

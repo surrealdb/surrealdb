@@ -1,10 +1,12 @@
+#![allow(clippy::unwrap_used)]
+
 mod helpers;
 use anyhow::Result;
 use helpers::{Test, new_ds};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_core::syn;
-use surrealdb_core::val::{Array, Number, Value};
+use surrealdb_types::{Array, Number, Value};
 
 #[tokio::test]
 async fn select_field_value() -> Result<()> {
@@ -526,7 +528,7 @@ async fn select_where_field_is_bool() -> Result<()> {
 }
 
 #[tokio::test]
-async fn select_where_field_is_thing_and_with_index() -> Result<()> {
+async fn select_where_field_is_record_and_with_index() -> Result<()> {
 	let sql = "
 		CREATE person:tobie SET name = 'Tobie';
 		DEFINE INDEX author ON TABLE post COLUMNS author;
@@ -1053,7 +1055,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() == Array::new().into(),
+			res.unwrap() == Value::Array(Array::new()),
 			"{}",
 			"anonymous user should not be able to select if the table has no permissions"
 		);
@@ -1081,7 +1083,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Array::new().into(),
+			res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"anonymous user should be able to select if the table has full permissions"
 		);
@@ -1123,7 +1125,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Array::new().into(),
+			res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"anonymous user should be able to select if the table has no permissions"
 		);
@@ -1151,7 +1153,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Array::new().into(),
+			res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"anonymous user should be able to select if the table has full permissions"
 		);
@@ -1185,10 +1187,10 @@ async fn select_issue_3510() -> Result<()> {
 			]",
 	)
 	.unwrap();
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(format!("{:#}", tmp), format!("{:#}", val));
+	assert_eq!(tmp, val);
 	Ok(())
 }
 
@@ -1421,7 +1423,7 @@ async fn select_field_value_permissions() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Array::new().into();
+	let val = Value::Array(Array::new());
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;

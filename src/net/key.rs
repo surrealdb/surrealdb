@@ -9,6 +9,12 @@ use axum_extra::TypedHeader;
 use axum_extra::extract::Query;
 use bytes::Bytes;
 use serde::Deserialize;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::capabilities::RouteTarget;
+use surrealdb_core::iam::check::check_ns_db;
+use surrealdb_core::kvs::Datastore;
+use surrealdb_core::syn;
+use surrealdb_types::{Array, SurrealValue, Value, Variables, vars};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
@@ -16,12 +22,6 @@ use super::error::ResponseError;
 use super::headers::Accept;
 use super::output::Output;
 use crate::cnf::HTTP_MAX_KEY_BODY_SIZE;
-use crate::core::dbs::capabilities::RouteTarget;
-use crate::core::dbs::{Session, Variables};
-use crate::core::iam::check::check_ns_db;
-use crate::core::kvs::Datastore;
-use crate::core::val::Value;
-use crate::core::{sql, syn};
 use crate::net::error::Error as NetError;
 use crate::net::input::bytes_to_utf8;
 use crate::net::params::Params;
@@ -39,7 +39,7 @@ where
 {
 	Router::new()
 		.route(
-			"/key/:table",
+			"/key/{table}",
 			options(|| async {})
 				.get(select_all)
 				.post(create_all)
@@ -52,7 +52,7 @@ where
 		.merge(
 			Router::new()
 				.route(
-					"/key/:table/:key",
+					"/key/{table}/{key}",
 					options(|| async {})
 						.get(select_one)
 						.post(create_one)
@@ -71,11 +71,10 @@ async fn execute_and_return(
 	session: &Session,
 	mut vars: Variables,
 	accept: Option<&Accept>,
-	expr: Option<sql::Expr>,
+	expr: Option<String>,
 ) -> Result<Output, anyhow::Error> {
 	let vars = if let Some(expr) = expr {
-		let mut value =
-			db.process(sql::Ast::single_expr(expr), session, Some(vars.clone())).await?;
+		let mut value = db.execute(&expr, session, Some(vars.clone())).await?;
 		if let Some(resp) = value.pop() {
 			vars.insert("data".to_owned(), resp.result?);
 		}
@@ -88,21 +87,29 @@ async fn execute_and_return(
 		Ok(res) => match accept {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => {
-				let v = res.into_iter().map(|x| x.into_value()).collect::<Value>();
+				let v = Value::Array(Array::from(
+					res.into_iter().map(|x| x.into_value()).collect::<Vec<Value>>(),
+				));
 				Ok(Output::json_value(&v))
 			}
 			Some(Accept::ApplicationCbor) => {
-				let v = res.into_iter().map(|x| x.into_value()).collect::<Value>();
-				Ok(Output::cbor(&v))
+				let v = Value::Array(Array::from(
+					res.into_iter().map(|x| x.into_value()).collect::<Vec<Value>>(),
+				));
+				Ok(Output::cbor(v))
 			}
 			// Internal serialization
-			// TODO: remove format in 2.0.0
-			Some(Accept::Surrealdb) => Ok(Output::bincode(&res)),
+			Some(Accept::ApplicationFlatbuffers) => {
+				let v = Value::Array(Array::from(
+					res.into_iter().map(|x| x.into_value()).collect::<Vec<Value>>(),
+				));
+				Ok(Output::flatbuffers(&v))
+			}
 			// An incorrect content-type was requested
-			_ => Err(anyhow::Error::new(NetError::InvalidType)),
+			_ => Err(NetError::InvalidType.into()),
 		},
 		// There was an error when executing the query
-		Err(err) => Err(err),
+		Err(err) => Err(err.into()),
 	}
 }
 
@@ -145,12 +152,12 @@ async fn select_all(
 		_ => "SELECT type::fields($fields) FROM type::table($table) LIMIT $limit START $start",
 	};
 	// Specify the request variables
-	let vars = Variables::from(map! {
-		String::from("table") => Value::from(table),
-		String::from("start") => Value::from(query.start.unwrap_or(0)),
-		String::from("limit") => Value::from(query.limit.unwrap_or(100)),
-		String::from("fields") => query.fields.unwrap_or_default().into_iter().map(Value::from).collect(),
-	});
+	let vars = vars! {
+		"table": table,
+		"start": query.start.unwrap_or(0),
+		"limit": query.limit.unwrap_or(100),
+		"fields": Value::Array(Array::from(query.fields.unwrap_or_default().into_iter().map(SurrealValue::into_value).collect::<Vec<Value>>())),
+	};
 	execute_and_return(ds, sql, &session, vars, accept.as_deref(), None)
 		.await
 		.map_err(ResponseError)
@@ -172,23 +179,17 @@ async fn create_all(
 	let _ = check_ns_db(&session).map_err(ResponseError)?;
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
-	// Parse the request body as JSON
-	match syn::expr(data) {
-		Ok(data) => {
-			// Specify the request statement
-			let sql = "CREATE type::table($table) CONTENT $data";
-			// Specify the request variables
-			let vars = Variables::from(map! {
-				String::from("table") => Value::from(table),
-				=> params.parse()
-			});
+	// Specify the request statement
+	let sql = "CREATE type::table($table) CONTENT $data";
+	// Specify the request variables
+	let vars = Variables::from(map! {
+		String::from("table") => Value::String(table),
+		=> params.parse()
+	});
 
-			execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data))
-				.await
-				.map_err(ResponseError)
-		}
-		Err(_) => Err(NetError::Request.into()),
-	}
+	execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data.to_string()))
+		.await
+		.map_err(ResponseError)
 }
 
 async fn update_all(
@@ -207,22 +208,16 @@ async fn update_all(
 	let _ = check_ns_db(&session).map_err(ResponseError)?;
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
-	// Parse the request body as JSON
-	match syn::expr(data) {
-		Ok(data) => {
-			// Specify the request statement
-			let sql = "UPDATE type::table($table) CONTENT $data";
-			// Specify the request variables
-			let vars = Variables::from(map! {
-				String::from("table") => Value::from(table),
-				=> params.parse()
-			});
-			execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data))
-				.await
-				.map_err(ResponseError)
-		}
-		Err(_) => Err(NetError::Request.into()),
-	}
+	// Specify the request statement
+	let sql = "UPDATE type::table($table) CONTENT $data";
+	// Specify the request variables
+	let vars = Variables::from(map! {
+		String::from("table") => Value::String(table),
+		=> params.parse()
+	});
+	execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data.to_string()))
+		.await
+		.map_err(ResponseError)
 }
 
 async fn modify_all(
@@ -241,22 +236,16 @@ async fn modify_all(
 	let _ = check_ns_db(&session).map_err(ResponseError)?;
 	// Convert the HTTP request body
 	let data = bytes_to_utf8(&body).context("Non UTF-8 request body").map_err(ResponseError)?;
-	// Parse the request body as JSON
-	match syn::expr(data) {
-		Ok(data) => {
-			// Specify the request statement
-			let sql = "UPDATE type::table($table) MERGE $data";
-			// Specify the request variables
-			let vars = Variables::from(map! {
-				String::from("table") => table.into(),
-				=> params.parse()
-			});
-			execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data))
-				.await
-				.map_err(ResponseError)
-		}
-		Err(_) => Err(NetError::Request.into()),
-	}
+	// Specify the request statement
+	let sql = "UPDATE type::table($table) MERGE $data";
+	// Specify the request variables
+	let vars = Variables::from(map! {
+		String::from("table") => Value::String(table),
+		=> params.parse()
+	});
+	execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data.to_string()))
+		.await
+		.map_err(ResponseError)
 }
 
 async fn delete_all(
@@ -276,7 +265,7 @@ async fn delete_all(
 	let sql = "DELETE type::table($table) RETURN BEFORE";
 	// Specify the request variables
 	let vars = Variables::from(map! {
-		String::from("table") => Value::from(table),
+		String::from("table") => Value::String(table),
 		=> params.parse()
 	});
 	// Execute the query and return the result
@@ -304,19 +293,19 @@ async fn select_one(
 	let _ = check_ns_db(&session).map_err(ResponseError)?;
 	// Specify the request statement
 	let sql = match query.fields {
-		None => "SELECT * FROM type::thing($table, $id)",
-		_ => "SELECT type::fields($fields) FROM type::thing($table, $id)",
+		None => "SELECT * FROM type::record($table, $id)",
+		_ => "SELECT type::fields($fields) FROM type::record($table, $id)",
 	};
 	// Parse the Record ID as a SurrealQL value
 	let rid = match syn::json(&id) {
 		Ok(id) => id,
-		Err(_) => id.into(),
+		Err(_) => Value::String(id),
 	};
 	// Specify the request variables
 	let vars = Variables::from(map! {
-		String::from("table") => Value::from(table),
+		String::from("table") => Value::String(table),
 		String::from("id") => rid,
-		String::from("fields") => query.fields.unwrap_or_default().into_iter().map(Value::from).collect::<Value>(),
+		String::from("fields") => Value::Array(Array::from(query.fields.unwrap_or_default().into_iter().map(SurrealValue::into_value).collect::<Vec<Value>>())),
 	});
 	// Execute the query and return the result
 	execute_and_return(db, sql, &session, vars, accept.as_deref(), None)
@@ -343,26 +332,21 @@ async fn create_one(
 	// Parse the Record ID as a SurrealQL value
 	let rid = match syn::json(&id) {
 		Ok(id) => id,
-		Err(_) => id.into(),
+		Err(_) => Value::String(id),
 	};
-	// Parse the request body as JSON
-	match syn::expr(data) {
-		Ok(data) => {
-			// Specify the request statement
-			let sql = "CREATE type::thing($table, $id) CONTENT $data";
-			// Specify the request variables
-			let vars = Variables::from(map! {
-				String::from("table") => Value::from(table),
-				String::from("id") => rid,
-				=> params.parse()
-			});
-			// Execute the query and return the result
-			execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data))
-				.await
-				.map_err(ResponseError)
-		}
-		Err(_) => Err(NetError::Request.into()),
-	}
+
+	// Specify the request statement
+	let sql = "CREATE type::record($table, $id) CONTENT $data";
+	// Specify the request variables
+	let vars = Variables::from(map! {
+		String::from("table") => Value::String(table),
+		String::from("id") => rid,
+		=> params.parse()
+	});
+	// Execute the query and return the result
+	execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data.to_string()))
+		.await
+		.map_err(ResponseError)
 }
 
 async fn update_one(
@@ -384,26 +368,21 @@ async fn update_one(
 	// Parse the Record ID as a SurrealQL value
 	let rid = match syn::json(&id) {
 		Ok(id) => id,
-		Err(_) => id.into(),
+		Err(_) => Value::String(id),
 	};
-	// Parse the request body as JSON
-	match syn::expr(data) {
-		Ok(data) => {
-			// Specify the request statement
-			let sql = "UPSERT type::thing($table, $id) CONTENT $data";
-			// Specify the request variables
-			let vars = Variables::from(map! {
-				String::from("table") => Value::from(table),
-				String::from("id") => rid,
-				=> params.parse()
-			});
-			// Execute the query and return the result
-			execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data))
-				.await
-				.map_err(ResponseError)
-		}
-		Err(_) => Err(NetError::Request.into()),
-	}
+
+	// Specify the request statement
+	let sql = "UPSERT type::record($table, $id) CONTENT $data";
+	// Specify the request variables
+	let vars = Variables::from(map! {
+		String::from("table") => Value::String(table),
+		String::from("id") => rid,
+		=> params.parse()
+	});
+	// Execute the query and return the result
+	execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data.to_string()))
+		.await
+		.map_err(ResponseError)
 }
 
 async fn modify_one(
@@ -425,26 +404,21 @@ async fn modify_one(
 	// Parse the Record ID as a SurrealQL value
 	let rid = match syn::json(&id) {
 		Ok(id) => id,
-		Err(_) => id.into(),
+		Err(_) => Value::String(id),
 	};
-	// Parse the request body as JSON
-	match syn::expr(data) {
-		Ok(data) => {
-			// Specify the request statement
-			let sql = "UPSERT type::thing($table, $id) MERGE $data";
-			// Specify the request variables
-			let vars = Variables::from(map! {
-				String::from("table") => Value::from(table),
-				String::from("id") => rid,
-				=> params.parse()
-			});
-			// Execute the query and return the result
-			execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data))
-				.await
-				.map_err(ResponseError)
-		}
-		Err(_) => Err(NetError::Request.into()),
-	}
+
+	// Specify the request statement
+	let sql = "UPSERT type::record($table, $id) MERGE $data";
+	// Specify the request variables
+	let vars = Variables::from(map! {
+		String::from("table") => Value::String(table),
+		String::from("id") => rid,
+		=> params.parse()
+	});
+	// Execute the query and return the result
+	execute_and_return(db, sql, &session, vars, accept.as_deref(), Some(data.to_string()))
+		.await
+		.map_err(ResponseError)
 }
 
 async fn delete_one(
@@ -460,15 +434,15 @@ async fn delete_one(
 	// Ensure a NS and DB are set
 	let _ = check_ns_db(&session).map_err(ResponseError)?;
 	// Specify the request statement
-	let sql = "DELETE type::thing($table, $id) RETURN BEFORE";
+	let sql = "DELETE type::record($table, $id) RETURN BEFORE";
 	// Parse the Record ID as a SurrealQL value
 	let rid = match syn::json(&id) {
 		Ok(id) => id,
-		Err(_) => id.into(),
+		Err(_) => Value::String(id),
 	};
 	// Specify the request variables
 	let vars = Variables::from(map! {
-		String::from("table") => Value::from(table),
+		String::from("table") => Value::String(table),
 		String::from("id") => rid,
 	});
 	// Execute the query and return the result

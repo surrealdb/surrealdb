@@ -20,7 +20,7 @@ use crate::val::{Array, Value};
 /// The `foo,bar,*` part of statements like `SELECT foo,bar.* FROM faz`.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Fields {
+pub(crate) enum Fields {
 	/// Fields had the `VALUE` clause and should only return the given selector
 	///
 	/// This variant should not contain Field::All
@@ -84,7 +84,7 @@ impl Fields {
 	}
 
 	/// Returns an iterator which returns all fields which are not `Field::All`.
-	pub fn iter_non_all_fields(&self) -> impl Iterator<Item = &'_ Field> {
+	pub(crate) fn iter_non_all_fields(&self) -> impl Iterator<Item = &'_ Field> {
 		self.iter_fields().filter(|x| !matches!(x, Field::All))
 	}
 
@@ -194,7 +194,7 @@ impl Fields {
 							}
 							// Assign each fetched yield to the output
 							for (p, x) in res {
-								match p.last().unwrap().alias() {
+								match p.last().expect("idiom is non-empty").alias() {
 									// This is an alias expression part
 									Some(a) => {
 										if let Some(i) = alias {
@@ -353,7 +353,7 @@ impl Fields {
 	}
 }
 
-pub enum FieldsIter<'a> {
+pub(crate) enum FieldsIter<'a> {
 	Single(Option<&'a Field>),
 	Multiple(Iter<'a, Field>),
 }
@@ -385,7 +385,7 @@ impl ExactSizeIterator for FieldsIter<'_> {}
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub enum Field {
+pub(crate) enum Field {
 	/// The `*` in `SELECT * FROM ...`
 	#[default]
 	All,

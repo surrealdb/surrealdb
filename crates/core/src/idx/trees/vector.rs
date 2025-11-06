@@ -9,7 +9,7 @@ use linfa_linalg::norm::Norm;
 use ndarray::{Array1, LinalgScalar, Zip};
 use ndarray_stats::DeviationExt;
 use num_traits::Zero;
-use revision::{Revisioned, revisioned};
+use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use rust_decimal::prelude::FromPrimitive;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use storekey::{BorrowDecode, Encode};
@@ -45,13 +45,13 @@ impl KVValue for SerializedVector {
 	#[inline]
 	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
 		let mut val = Vec::new();
-		self.serialize_revisioned(&mut val)?;
+		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
 		Ok(val)
 	}
 
 	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
-		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
+		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
 
@@ -290,8 +290,8 @@ impl Vector {
 	where
 		T: ToFloat + Clone + FromPrimitive + Add<Output = T> + Div<Output = T> + Zero,
 	{
-		let mean_x = x.mean().unwrap().to_float();
-		let mean_y = y.mean().unwrap().to_float();
+		let mean_x = x.mean().expect("mean should be computable").to_float();
+		let mean_y = y.mean().expect("mean should be computable").to_float();
 
 		let mut sum_xy = 0.0;
 		let mut sum_x2 = 0.0;
@@ -486,7 +486,7 @@ impl Vector {
 		}
 	}
 
-	pub fn try_from_vector(t: VectorType, v: &[Number]) -> Result<Self> {
+	pub(super) fn try_from_vector(t: VectorType, v: &[Number]) -> Result<Self> {
 		let res = match t {
 			VectorType::F64 => {
 				let mut vec = Vec::with_capacity(v.len());

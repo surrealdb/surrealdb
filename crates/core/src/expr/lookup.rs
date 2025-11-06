@@ -19,17 +19,17 @@ use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
 /// A lookup is a unified way of looking up graph edges and record references.
 /// Since they both work very similarly, they also both support the same operations
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct Lookup {
-	pub kind: LookupKind,
-	pub expr: Option<Fields>,
-	pub what: Vec<LookupSubject>,
-	pub cond: Option<Cond>,
-	pub split: Option<Splits>,
-	pub group: Option<Groups>,
-	pub order: Option<Ordering>,
-	pub limit: Option<Limit>,
-	pub start: Option<Start>,
-	pub alias: Option<Idiom>,
+pub(crate) struct Lookup {
+	pub(crate) kind: LookupKind,
+	pub(crate) expr: Option<Fields>,
+	pub(crate) what: Vec<LookupSubject>,
+	pub(crate) cond: Option<Cond>,
+	pub(crate) split: Option<Splits>,
+	pub(crate) group: Option<Groups>,
+	pub(crate) order: Option<Ordering>,
+	pub(crate) limit: Option<Limit>,
+	pub(crate) start: Option<Start>,
+	pub(crate) alias: Option<Idiom>,
 }
 
 impl Lookup {
@@ -111,7 +111,7 @@ impl Display for LookupKind {
 
 /// This enum instructs whether we scan all edges on a table or just a specific range
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum LookupSubject {
+pub(crate) enum LookupSubject {
 	Table(String),
 	Range {
 		table: String,

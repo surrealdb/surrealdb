@@ -5,8 +5,8 @@ use surrealdb_protocol::fb::v1 as proto_fb;
 
 use super::{FromFlatbuffers, ToFlatbuffers};
 use crate::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId, Regex, Uuid,
-	Value,
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId, Regex, Set,
+	Table, Uuid, Value,
 };
 
 impl ToFlatbuffers for Value {
@@ -55,9 +55,13 @@ impl ToFlatbuffers for Value {
 				value_type: proto_fb::ValueType::Bytes,
 				value: Some(b.to_fb(builder)?.as_union_value()),
 			},
-			Self::RecordId(thing) => proto_fb::ValueArgs {
+			Self::Table(t) => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::Table,
+				value: Some(t.to_fb(builder)?.as_union_value()),
+			},
+			Self::RecordId(record_id) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::RecordId,
-				value: Some(thing.to_fb(builder)?.as_union_value()),
+				value: Some(record_id.to_fb(builder)?.as_union_value()),
 			},
 			Self::Duration(d) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::Duration,
@@ -78,6 +82,10 @@ impl ToFlatbuffers for Value {
 			Self::Array(arr) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::Array,
 				value: Some(arr.to_fb(builder)?.as_union_value()),
+			},
+			Self::Set(set) => proto_fb::ValueArgs {
+				value_type: proto_fb::ValueType::Set,
+				value: Some(set.to_fb(builder)?.as_union_value()),
 			},
 			Self::Geometry(geometry) => proto_fb::ValueArgs {
 				value_type: proto_fb::ValueType::Geometry,
@@ -134,6 +142,11 @@ impl FromFlatbuffers for Value {
 				let bytes_value = input.value_as_bytes().expect("Guaranteed to be Bytes");
 				Ok(Value::Bytes(Bytes::from_fb(bytes_value)?))
 			}
+			proto_fb::ValueType::Table => {
+				let table_value = input.value_as_table().expect("Guaranteed to be a Table");
+				let table = Table::from_fb(table_value)?;
+				Ok(Value::Table(table))
+			}
 			proto_fb::ValueType::RecordId => {
 				let record_id_value =
 					input.value_as_record_id().expect("Guaranteed to be a RecordId");
@@ -166,6 +179,11 @@ impl FromFlatbuffers for Value {
 				let array_value = input.value_as_array().expect("Guaranteed to be an Array");
 				let array = Array::from_fb(array_value)?;
 				Ok(Value::Array(array))
+			}
+			proto_fb::ValueType::Set => {
+				let set_value = input.value_as_set().expect("Guaranteed to be a Set");
+				let set = Set::from_fb(set_value)?;
+				Ok(Value::Set(set))
 			}
 			proto_fb::ValueType::Geometry => {
 				let geometry_value =
@@ -230,8 +248,8 @@ mod tests {
 	#[case::uuid(Value::Uuid(Uuid::default()))]
 	#[case::string(Value::String("Hello, World!".to_string()))]
 	#[case::bytes(Value::Bytes(Bytes(vec![1, 2, 3, 4, 5])))]
-	#[case::thing(Value::RecordId(RecordId{ table: "test_table".to_string(), key: RecordIdKey::Number(42) }))] // Example Thing
-	#[case::thing_range(Value::RecordId(RecordId{ table: "test_table".to_string(), key: RecordIdKey::Range(Box::new(RecordIdKeyRange { start: Bound::Included(RecordIdKey::String("a".to_string())), end: Bound::Unbounded })) }))]
+	#[case::thing(Value::RecordId(RecordId::new("test_table", RecordIdKey::Number(42))))] // Example Thing
+	#[case::thing_range(Value::RecordId(RecordId::new("test_table", RecordIdKey::Range(Box::new(RecordIdKeyRange { start: Bound::Included(RecordIdKey::String("a".to_string())), end: Bound::Unbounded })))))]
 	#[case::object(Value::Object(Object(BTreeMap::from([("key".to_string(), Value::String("value".to_owned()))]))))]
 	#[case::array(Value::Array(Array::from(vec![Value::Number(Number::Int(1)), Value::Number(Number::Float(2.0))])))]
 	#[case::geometry::point(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))))]

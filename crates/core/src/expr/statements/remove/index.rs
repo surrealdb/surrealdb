@@ -15,7 +15,7 @@ use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct RemoveIndexStatement {
+pub(crate) struct RemoveIndexStatement {
 	pub name: Expr,
 	pub what: Expr,
 	pub if_exists: bool,
@@ -52,14 +52,10 @@ impl RemoveIndexStatement {
 		// Get the transaction
 		let txn = ctx.tx();
 		// Clear the index store cache
-		#[cfg(not(target_family = "wasm"))]
 		let err = ctx
 			.get_index_stores()
 			.index_removed(ctx.get_index_builder(), &txn, ns, db, &what, &name)
 			.await;
-		#[cfg(target_family = "wasm")]
-		let err = ctx.get_index_stores().index_removed(&txn, ns, db, &what, &name).await;
-
 		if let Err(e) = err {
 			if self.if_exists && matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
 				return Ok(Value::None);

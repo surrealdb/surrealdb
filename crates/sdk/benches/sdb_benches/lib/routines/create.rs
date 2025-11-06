@@ -1,8 +1,9 @@
+#![allow(clippy::unwrap_used)]
+
 use std::sync::Arc;
 
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::val::RecordIdKey;
 use tokio::runtime::Runtime;
 use tokio::task::JoinSet;
 
@@ -15,7 +16,7 @@ impl Create {
 	pub fn new(runtime: &'static Runtime) -> Self {
 		Self {
 			runtime,
-			table_name: format!("table_{}", RecordIdKey::rand()),
+			table_name: format!("table_{}", super::rand_id()),
 		}
 	}
 }
@@ -48,7 +49,7 @@ impl super::Routine for Create {
 								format!(
 									"CREATE {} SET field = '{}'",
 									&table_name,
-									RecordIdKey::rand()
+									super::rand_id()
 								)
 								.as_str(),
 								&session,

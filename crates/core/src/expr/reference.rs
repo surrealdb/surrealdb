@@ -8,8 +8,8 @@ use crate::expr::Expr;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Reference {
-	pub on_delete: ReferenceDeleteStrategy,
+pub(crate) struct Reference {
+	pub(crate) on_delete: ReferenceDeleteStrategy,
 }
 
 impl fmt::Display for Reference {
@@ -29,7 +29,7 @@ impl InfoStructure for Reference {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum ReferenceDeleteStrategy {
+pub(crate) enum ReferenceDeleteStrategy {
 	Reject,
 	Ignore,
 	Cascade,

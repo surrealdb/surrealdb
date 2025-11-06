@@ -4,6 +4,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 
+use crate::catalog::Record;
 use crate::ctx::{Canceller, Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
@@ -12,14 +13,14 @@ use crate::dbs::{Options, Statement};
 use crate::doc::{CursorDoc, Document, IgnoreError};
 use crate::err::Error;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
+use crate::expr::statements::relate::RelateThrough;
 use crate::expr::{self, ControlFlow, Expr, Fields, FlowResultExt, Literal, Lookup, Mock, Part};
 use crate::idx::planner::iterators::{IteratorRecord, IteratorRef};
 use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
 	StatementContext,
 };
-use crate::val::record::Record;
-use crate::val::{Object, RecordId, RecordIdKey, RecordIdKeyRange, Value};
+use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, Value};
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -59,7 +60,13 @@ pub(crate) enum Iterable {
 	/// which has the specific value to update the record with.
 	/// This is used in INSERT statements, where each value
 	/// passed in to the iterable is unique for each record.
-	Mergeable(RecordId, Value),
+	/// This tuples takes in:
+	/// - The table name
+	/// - The optional id key. When none is provided, it will be generated at a later stage and no
+	///   record fetch will be done. This can be NONE in a scenario like: `INSERT INTO test {
+	///   there_is: 'no id set' }`
+	/// - The value for the record
+	Mergeable(String, Option<RecordIdKey>, Value),
 	/// An iterable which fetches a record from storage, and
 	/// which has the specific value to update the record with.
 	/// This is used in RELATE statements. The optional value
@@ -69,7 +76,7 @@ pub(crate) enum Iterable {
 	/// The first field is the rid from which we create, the second is the rid
 	/// which is the relation itself and the third is the target of the
 	/// relation
-	Relatable(RecordId, RecordId, RecordId, Option<Value>),
+	Relatable(RecordId, RelateThrough, RecordId, Option<Value>),
 	/// An iterable which iterates over an index range for a
 	/// table, which then fetches the corresponding records
 	/// which are matched within the index.
@@ -362,33 +369,10 @@ impl Iterator {
 		);
 		// Evaluate if we can only scan keys (rather than keys AND values), or count
 		let rs = ctx.check_record_strategy(false, p)?;
-		let sc = ctx.check_scan_direction();
+		let sc = ctx.check_scan_direction(ctx.ctx.tx().has_reverse_scan());
 		// Add the record to the iterator
 		if let (tb, RecordIdKey::Range(v)) = (v.table, v.key) {
 			self.ingest(Iterable::Range(tb, *v, rs, sc));
-		}
-		// All ingested ok
-		Ok(())
-	}
-
-	/// Prepares a value for processing
-	pub(crate) fn prepare_object(&mut self, stm: &Statement<'_>, v: Object) -> Result<()> {
-		// Add the record to the iterator
-		match v.rid() {
-			// This object has an 'id' field
-			Some(v) => {
-				if stm.is_deferable() {
-					self.ingest(Iterable::Defer(v))
-				} else {
-					self.ingest(Iterable::Thing(v))
-				}
-			}
-			// This object has no 'id' field
-			None => {
-				bail!(Error::InvalidStatementTarget {
-					value: v.to_string(),
-				});
-			}
 		}
 		// All ingested ok
 		Ok(())
@@ -407,14 +391,34 @@ impl Iterator {
 	) -> Result<()> {
 		let v = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await.catch_return()?;
 		match v {
-			Value::Object(o) if !stm_ctx.stm.is_select() => {
-				self.prepare_object(stm_ctx.stm, o)?;
-			}
 			Value::Table(v) => {
 				self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.as_str().to_owned()).await?
 			}
 			Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
-			Value::Array(a) => a.into_iter().for_each(|x| self.ingest(Iterable::Value(x))),
+			Value::Array(a) => {
+				for v in a.into_iter() {
+					match v {
+						Value::Table(v) => {
+							self.prepare_table(
+								ctx,
+								opt,
+								stk,
+								planner,
+								stm_ctx,
+								v.as_str().to_owned(),
+							)
+							.await?
+						}
+						Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
+						v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
+						v => {
+							bail!(Error::InvalidStatementTarget {
+								value: v.to_string(),
+							})
+						}
+					}
+				}
+			}
 			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 			v => {
 				bail!(Error::InvalidStatementTarget {
@@ -580,7 +584,7 @@ impl Iterator {
 			// Process any SPLIT AT clause
 			self.output_split(stk, ctx, opt, stm, rs).await?;
 			// Process any GROUP BY clause
-			self.output_group(stk, ctx, opt, stm).await?;
+			self.output_group(stk, ctx, opt).await?;
 			// Process any ORDER BY clause
 			if let Some(orders) = stm.order() {
 				#[cfg(not(target_family = "wasm"))]
@@ -828,7 +832,7 @@ impl Iterator {
 								// Set the value at the path
 								obj.set(stk, ctx, opt, split, val).await?;
 								// Add the object to the results
-								self.results.push(stk, ctx, opt, stm, rs, obj).await?;
+								self.results.push(stk, ctx, opt, rs, obj).await?;
 							}
 						}
 						_ => {
@@ -837,7 +841,7 @@ impl Iterator {
 							// Set the value at the path
 							obj.set(stk, ctx, opt, split, val).await?;
 							// Add the object to the results
-							self.results.push(stk, ctx, opt, stm, rs, obj).await?;
+							self.results.push(stk, ctx, opt, rs, obj).await?;
 						}
 					}
 				}
@@ -846,16 +850,10 @@ impl Iterator {
 		Ok(())
 	}
 
-	async fn output_group(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		stm: &Statement<'_>,
-	) -> Result<()> {
+	async fn output_group(&mut self, stk: &mut Stk, ctx: &Context, opt: &Options) -> Result<()> {
 		// Process any GROUP clause
 		if let Results::Groups(g) = &mut self.results {
-			self.results = Results::Memory(g.output(stk, ctx, opt, stm).await?);
+			self.results = Results::Memory(g.output(stk, ctx, opt).await?);
 		}
 		// Everything ok
 		Ok(())
@@ -933,7 +931,7 @@ impl Iterator {
 		// Extract the value
 		let res = Self::extract_value(stk, ctx, opt, stm, pro).await;
 		// Process the result
-		self.result(stk, ctx, opt, stm, rs, res).await;
+		self.result(stk, ctx, opt, rs, res).await;
 		// Everything ok
 		Ok(())
 	}
@@ -965,7 +963,6 @@ impl Iterator {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		stm: &Statement<'_>,
 		rs: RecordStrategy,
 		res: Result<Value, IgnoreError>,
 	) {
@@ -982,7 +979,7 @@ impl Iterator {
 				return;
 			}
 			Ok(v) => {
-				if let Err(e) = self.results.push(stk, ctx, opt, stm, rs, v).await {
+				if let Err(e) = self.results.push(stk, ctx, opt, rs, v).await {
 					self.error = Some(e);
 					self.run.cancel();
 					return;

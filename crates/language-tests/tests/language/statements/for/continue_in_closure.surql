@@ -13,6 +13,6 @@ FOR $test in 1..10{
 	if $test == 5 {
 		(|| { continue; })();
 	};
-	CREATE type::thing('test',$test);
+	CREATE type::record('test',$test);
 };
 SELECT * FROM test;

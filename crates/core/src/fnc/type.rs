@@ -8,15 +8,24 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{FlowResultExt as _, Idiom, Kind};
+use crate::expr::{FlowResultExt as _, Idiom};
 use crate::syn;
 use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Range, RecordId, RecordIdKey,
-	RecordIdKeyRange, Table, Uuid, Value,
+	RecordIdKeyRange, Set, Table, Uuid, Value,
 };
+
+/// Returns the type of the value as a string.
+pub fn type_of((val,): (Value,)) -> Result<Value> {
+	Ok(Value::String(val.kind_of().to_string()))
+}
 
 pub fn array((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<Array>()?.into())
+}
+
+pub fn set((val,): (Value,)) -> Result<Value> {
+	Ok(val.cast_to::<Set>()?.into())
 }
 
 pub fn bool((val,): (Value,)) -> Result<Value> {
@@ -101,35 +110,6 @@ pub fn range((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<Box<Range>>()?.into())
 }
 
-pub fn record((rid, Optional(tb)): (Value, Optional<Value>)) -> Result<Value> {
-	match tb {
-		Some(Value::String(tb)) => {
-			if tb.is_empty() {
-				Err(anyhow::Error::new(Error::TbInvalid {
-					value: tb,
-				}))
-			} else {
-				rid.cast_to_kind(&Kind::Record(vec![tb])).map_err(From::from)
-			}
-		}
-
-		Some(Value::Table(tb)) => {
-			if tb.is_empty() {
-				Err(anyhow::Error::new(Error::TbInvalid {
-					value: tb.into_string(),
-				}))
-			} else {
-				rid.cast_to_kind(&Kind::Record(vec![tb.into_string()])).map_err(From::from)
-			}
-		}
-		Some(_) => Err(anyhow::Error::new(Error::InvalidArguments {
-			name: "type::record".into(),
-			message: "The second argument must be a table name or a string.".into(),
-		})),
-		None => rid.cast_to_kind(&Kind::Record(vec![])).map_err(From::from),
-	}
-}
-
 pub fn string((val,): (Value,)) -> Result<Value> {
 	Ok(val.cast_to::<String>()?.into())
 }
@@ -146,15 +126,13 @@ pub fn string_lossy((val,): (Value,)) -> Result<Value> {
 
 pub fn table((val,): (Value,)) -> Result<Value> {
 	let strand = match val {
-		// TODO: null byte check.
 		Value::RecordId(t) => t.table,
-		// TODO: Handle null byte
-		v => v.as_raw_string(),
+		v => v.into_raw_string(),
 	};
 	Ok(Value::Table(Table::new(strand)))
 }
 
-pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> {
+pub fn record((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> {
 	match (arg1, arg2) {
 		// Empty table name
 		(Value::String(arg1), _) if arg1.is_empty() => bail!(Error::TbInvalid {
@@ -178,7 +156,7 @@ pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> 
 					let res =
 						RecordIdKeyRange::from_value_range((*v).clone()).ok_or_else(|| {
 							Error::IdInvalid {
-								value: Value::Range(v).as_raw_string(),
+								value: Value::Range(v).into_raw_string(),
 							}
 						})?;
 					RecordIdKey::Range(Box::new(res))
@@ -189,13 +167,13 @@ pub fn thing((arg1, Optional(arg2)): (Value, Optional<Value>)) -> Result<Value> 
 					ensure!(
 						!s.is_empty(),
 						Error::IdInvalid {
-							value: arg2.as_raw_string(),
+							value: arg2.into_raw_string(),
 						}
 					);
 					RecordIdKey::String(s)
 				}
 			},
-			table: arg1.as_raw_string(),
+			table: arg1.into_raw_string(),
 		})),
 
 		(arg1, None) => arg1
@@ -218,6 +196,10 @@ pub mod is {
 
 	pub fn array((arg,): (Value,)) -> Result<Value> {
 		Ok((arg).is_array().into())
+	}
+
+	pub fn set((arg,): (Value,)) -> Result<Value> {
+		Ok(arg.is_set().into())
 	}
 
 	pub fn bool((arg,): (Value,)) -> Result<Value> {
@@ -303,7 +285,7 @@ pub mod is {
 	pub fn record((arg, Optional(table)): (Value, Optional<String>)) -> Result<Value> {
 		let res = match table {
 			Some(tb) => arg.is_record_type(&[tb]).into(),
-			None => arg.is_thing().into(),
+			None => arg.is_record().into(),
 		};
 		Ok(res)
 	}
@@ -338,21 +320,21 @@ mod tests {
 	}
 
 	#[test]
-	fn no_empty_thing() {
-		let value = super::thing(("".into(), Optional(None)));
+	fn no_empty_record() {
+		let value = super::record(("".into(), Optional(None)));
 		let _expected = Error::TbInvalid {
 			value: "".into(),
 		};
 		if !matches!(value, Err(_expected)) {
-			panic!("An empty thing tb part should result in an error");
+			panic!("An empty record tb part should result in an error");
 		}
 
-		let value = super::thing(("table".into(), Optional(Some("".into()))));
+		let value = super::record(("table".into(), Optional(Some("".into()))));
 		let _expected = Error::IdInvalid {
 			value: "".into(),
 		};
 		if !matches!(value, Err(_expected)) {
-			panic!("An empty thing id part should result in an error");
+			panic!("An empty record id part should result in an error");
 		}
 	}
 }

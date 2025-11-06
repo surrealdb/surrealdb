@@ -18,7 +18,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineEventStatement {
+pub(crate) struct DefineEventStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub target_table: Expr,
@@ -66,7 +66,7 @@ impl DefineEventStatement {
 		// Ensure the table exists
 		let tb = {
 			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_tb(ns, db, &target_table, opt.strict).await?
+			txn.get_or_add_tb(Some(ctx), ns, db, &target_table, opt.strict).await?
 		};
 
 		// Process the statement

@@ -18,7 +18,7 @@ use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::{Datetime, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct SelectStatement {
+pub(crate) struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
 	pub expr: Fields,
 	pub omit: Vec<Expr>,
@@ -133,7 +133,7 @@ impl SelectStatement {
 						Ok(Value::None)
 					} else {
 						ensure!(array.len() == 1, Error::SingleOnlyOutput);
-						Ok(array.0.pop().unwrap())
+						Ok(array.0.pop().expect("array has exactly one element"))
 					}
 				}
 				x => Ok(x),

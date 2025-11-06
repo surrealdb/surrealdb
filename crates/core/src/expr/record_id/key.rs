@@ -1,4 +1,5 @@
 use std::fmt::{self, Display, Formatter, Write as _};
+use std::ops::Bound;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -19,7 +20,7 @@ pub enum RecordIdKeyGen {
 }
 
 impl RecordIdKeyGen {
-	pub fn compute(&self) -> RecordIdKey {
+	pub(crate) fn compute(&self) -> RecordIdKey {
 		match self {
 			RecordIdKeyGen::Rand => RecordIdKey::rand(),
 			RecordIdKeyGen::Ulid => RecordIdKey::ulid(),
@@ -29,7 +30,7 @@ impl RecordIdKeyGen {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum RecordIdKeyLit {
+pub(crate) enum RecordIdKeyLit {
 	Number(i64),
 	String(String),
 	Uuid(Uuid),
@@ -168,6 +169,41 @@ impl RecordIdKeyLit {
 			RecordIdKeyLit::Range(v) => {
 				let range = v.compute(stk, ctx, opt, doc).await?;
 				Ok(RecordIdKey::Range(Box::new(range)))
+			}
+		}
+	}
+}
+
+impl From<crate::types::PublicRecordIdKey> for RecordIdKeyLit {
+	fn from(value: crate::types::PublicRecordIdKey) -> Self {
+		match value {
+			crate::types::PublicRecordIdKey::Number(x) => Self::Number(x),
+			crate::types::PublicRecordIdKey::String(x) => Self::String(x),
+			crate::types::PublicRecordIdKey::Uuid(x) => Self::Uuid(x.into()),
+			crate::types::PublicRecordIdKey::Array(x) => {
+				Self::Array(x.into_iter().map(Expr::from_public_value).collect())
+			}
+			crate::types::PublicRecordIdKey::Object(x) => Self::Object(
+				x.into_iter()
+					.map(|(k, v)| ObjectEntry {
+						key: k,
+						value: Expr::from_public_value(v),
+					})
+					.collect(),
+			),
+			crate::types::PublicRecordIdKey::Range(x) => {
+				Self::Range(Box::new(RecordIdKeyRangeLit {
+					start: match x.start {
+						Bound::Included(x) => Bound::Included(Self::from(x)),
+						Bound::Excluded(x) => Bound::Excluded(Self::from(x)),
+						Bound::Unbounded => Bound::Unbounded,
+					},
+					end: match x.end {
+						Bound::Included(x) => Bound::Included(Self::from(x)),
+						Bound::Excluded(x) => Bound::Excluded(Self::from(x)),
+						Bound::Unbounded => Bound::Unbounded,
+					},
+				}))
 			}
 		}
 	}

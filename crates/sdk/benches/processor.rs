@@ -1,9 +1,11 @@
+#![allow(clippy::unwrap_used)]
+
 use std::time::Duration;
 
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::val::Value;
+use surrealdb_types::Value;
 use tokio::runtime::Runtime;
 
 fn bench_processor(c: &mut Criterion) {

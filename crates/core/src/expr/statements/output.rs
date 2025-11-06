@@ -10,7 +10,7 @@ use crate::expr::{ControlFlow, Expr, FlowResult};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct OutputStatement {
+pub(crate) struct OutputStatement {
 	pub what: Expr,
 	pub fetch: Option<Fetchs>,
 }
@@ -20,6 +20,7 @@ impl OutputStatement {
 	pub(crate) fn read_only(&self) -> bool {
 		self.what.read_only()
 	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

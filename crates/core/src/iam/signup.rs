@@ -3,58 +3,95 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use chrono::Utc;
 use jsonwebtoken::{Header, encode};
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
+use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::access::{authenticate_record, create_refresh_token_record};
 use crate::catalog;
 use crate::catalog::providers::{AuthorisationProvider, DatabaseProvider};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
-use crate::dbs::capabilities::ExperimentalTarget;
-use crate::dbs::{Session, Variables};
+use crate::dbs::Session;
 use crate::err::Error;
 use crate::iam::issue::{config, expiration};
-use crate::iam::token::Claims;
+use crate::iam::token::{Claims, Token};
 use crate::iam::{Actor, Auth, Level, algorithm_to_jwt_algorithm};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::val::{Object, Value};
+use crate::types::PublicVariables;
+use crate::val::Value;
 
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct SignupData {
-	pub token: Option<String>,
-	pub refresh: Option<String>,
-}
-
-impl From<SignupData> for Value {
-	fn from(v: SignupData) -> Value {
-		let mut out = Object::default();
-		if let Some(token) = v.token {
-			out.insert("token".to_string(), token.into());
-		}
-		if let Some(refresh) = v.refresh {
-			out.insert("refresh".to_string(), refresh.into());
-		}
-		out.into()
-	}
-}
-
-pub async fn signup(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<SignupData> {
+/// Registers a new user and returns an authentication token.
+///
+/// This function handles user registration for SurrealDB and returns a token
+/// that can be used for subsequent API requests. The token may include both
+/// access and refresh tokens depending on the registration method and
+/// configuration.
+///
+/// # Parameters
+///
+/// - `kvs`: The datastore instance for database operations
+/// - `session`: The current session context
+/// - `vars`: Public variables containing registration credentials
+///
+/// # Returns
+///
+/// Returns a `Token` that can be either:
+/// - An access token only (legacy mode)
+/// - An access token with an optional refresh token (modern mode)
+///
+/// # Registration Methods
+///
+/// The function supports multiple registration methods based on the provided variables:
+/// - **Database access method**: When `NS`, `DB`, and `AC` are provided
+/// - **Database user credentials**: When `NS`, `DB`, `user`, and `pass` are provided
+/// - **Namespace user credentials**: When `NS`, `user`, and `pass` are provided
+/// - **Root user credentials**: When `user` and `pass` are provided
+///
+/// # Examples
+///
+/// ```rust
+/// use surrealdb_core::iam::signup;
+/// use surrealdb_core::kvs::Datastore;
+/// use surrealdb_core::dbs::Session;
+/// use surrealdb_core::types::PublicVariables;
+///
+/// // Database access method registration
+/// let vars = PublicVariables::from([
+///     ("NS".to_string(), "test_namespace".into()),
+///     ("DB".to_string(), "test_database".into()),
+///     ("AC".to_string(), "my_access_method".into()),
+///     ("email".to_string(), "user@example.com".into()),
+///     ("pass".to_string(), "password123".into()),
+/// ]);
+///
+/// let token = signup(&kvs, &mut session, vars).await?;
+/// match token {
+///     Token::Access(access_token) => {
+///         // Use access token for API requests
+///     }
+///     Token::WithRefresh { access, refresh } => {
+///         // Use access token for API requests
+///         // Store refresh token for token renewal
+///     }
+/// }
+/// ```
+pub async fn signup(
+	kvs: &Datastore,
+	session: &mut Session,
+	vars: PublicVariables,
+) -> Result<Token> {
 	// Parse the specified variables
-	let ns = vars.get("NS").or_else(|| vars.get("ns"));
-	let db = vars.get("DB").or_else(|| vars.get("db"));
-	let ac = vars.get("AC").or_else(|| vars.get("ac"));
+	let ns = vars.get("NS").or_else(|| vars.get("ns")).cloned();
+	let db = vars.get("DB").or_else(|| vars.get("db")).cloned();
+	let ac = vars.get("AC").or_else(|| vars.get("ac")).cloned();
 	// Check if the parameters exist
 	match (ns, db, ac) {
 		(Some(ns), Some(db), Some(ac)) => {
 			// Process the provided values
-			let ns = ns.to_raw_string();
-			let db = db.to_raw_string();
-			let ac = ac.to_raw_string();
+			let ns = ns.into_string()?;
+			let db = db.into_string()?;
+			let ac = ac.into_string()?;
 			// Attempt to signup using specified access method
 			// Currently, signup is only supported at the database level
 			super::signup::db_access(kvs, session, ns, db, ac, vars).await
@@ -63,14 +100,78 @@ pub async fn signup(kvs: &Datastore, session: &mut Session, vars: Object) -> Res
 	}
 }
 
+/// Registers a new user using a database access method.
+///
+/// This function handles user registration for users who will be granted access
+/// through a specific access method defined on the database. It supports both
+/// traditional access tokens and refresh token flows.
+///
+/// # Parameters
+///
+/// - `kvs`: The datastore instance for database operations
+/// - `session`: The current session context
+/// - `ns`: The namespace name
+/// - `db`: The database name
+/// - `ac`: The access method name
+/// - `vars`: Public variables containing registration parameters
+///
+/// # Returns
+///
+/// Returns a `Token` that may include both access and refresh tokens
+/// depending on the access method configuration.
+///
+/// # Access Method Configuration
+///
+/// The access method must be defined with the `DEFINE ACCESS` statement
+/// and can include refresh token support with the `WITH REFRESH` clause:
+///
+/// ```sql
+/// DEFINE ACCESS my_access ON DATABASE TYPE RECORD
+/// SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+/// SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+/// WITH REFRESH
+/// DURATION FOR SESSION 1d FOR TOKEN 15m
+/// ```
+///
+/// # Examples
+///
+/// ```rust
+/// use surrealdb_core::iam::signup::db_access;
+/// use surrealdb_core::kvs::Datastore;
+/// use surrealdb_core::dbs::Session;
+/// use surrealdb_core::types::PublicVariables;
+///
+/// let vars = PublicVariables::from([
+///     ("email".to_string(), "user@example.com".into()),
+///     ("pass".to_string(), "password123".into()),
+/// ]);
+///
+/// let token = db_access(
+///     &kvs,
+///     &mut session,
+///     "test_namespace".to_string(),
+///     "test_database".to_string(),
+///     "my_access".to_string(),
+///     vars
+/// ).await?;
+///
+/// match token {
+///     Token::Access(access_token) => {
+///         // Traditional access token
+///     }
+///     Token::WithRefresh { access, refresh } => {
+///         // Access token with refresh capability
+///     }
+/// }
+/// ```
 pub async fn db_access(
 	kvs: &Datastore,
 	session: &mut Session,
 	ns: String,
 	db: String,
 	ac: String,
-	vars: Object,
-) -> Result<SignupData> {
+	vars: PublicVariables,
+) -> Result<Token> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	let db_def = match tx.get_db_by_name(&ns, &db).await? {
@@ -107,17 +208,16 @@ pub async fn db_access(
 		bail!(Error::AccessRecordNoSignup);
 	};
 	// Setup the query params
-	let vars = Some(Variables::from(vars));
 	// Setup the system session for finding the signup record
 	let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 	sess.ip.clone_from(&session.ip);
 	sess.or.clone_from(&session.or);
 	// Compute the value with the params
-	match kvs.evaluate(val, &sess, vars).await {
+	match kvs.evaluate(val, &sess, Some(vars)).await {
 		// The signup value succeeded
 		Ok(val) => {
 			// There is a record returned
-			let Some(mut rid) = val.record() else {
+			let Ok(mut rid) = val.into_record() else {
 				bail!(Error::NoRecordFound)
 			};
 			// Create the authentication key
@@ -132,42 +232,33 @@ pub async fn db_access(
 				ns: Some(ns.clone()),
 				db: Some(db.clone()),
 				ac: Some(ac.clone()),
-				id: Some(rid.to_string()),
+				id: Some(rid.to_sql()),
 				..Claims::default()
 			};
 			// AUTHENTICATE clause
 			if let Some(au) = &av.authenticate {
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(&ns).with_db(&db);
-				sess.rd = Some(rid.clone().into());
-				sess.tk = Some(claims.clone().into_claims_object().into());
+				sess.rd = Some(
+					crate::val::convert_value_to_public_value(Value::RecordId(rid.clone().into()))
+						.expect("record id conversion should succeed"),
+				);
+				sess.tk = Some(
+					crate::val::convert_value_to_public_value(
+						claims.clone().into_claims_object().into(),
+					)
+					.expect("claims conversion should succeed"),
+				);
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
 				rid = authenticate_record(kvs, &sess, au).await?;
 			}
 			// Create refresh token if defined for the record access method
 			let refresh = match &at.bearer {
-				Some(_) => {
-					// TODO(gguillemas): Remove this once bearer access is no longer experimental
-					if !kvs
-						.get_capabilities()
-						.allows_experimental(&ExperimentalTarget::BearerAccess)
-					{
-						debug!("Will not create refresh token with disabled bearer access feature");
-						None
-					} else {
-						Some(
-							create_refresh_token_record(
-								kvs,
-								av.name.clone(),
-								&ns,
-								&db,
-								rid.clone(),
-							)
-							.await?,
-						)
-					}
-				}
+				Some(_) => Some(
+					create_refresh_token_record(kvs, av.name.clone(), &ns, &db, rid.clone().into())
+						.await?,
+				),
 				None => None,
 			};
 			// Log the authenticated access method info
@@ -175,23 +266,32 @@ pub async fn db_access(
 			// Create the authentication token
 			let enc = encode(&Header::new(algorithm_to_jwt_algorithm(iss.alg)), &claims, &key);
 			// Set the authentication on the session
-			session.tk = Some(claims.into_claims_object().into());
+			session.tk = Some(
+				crate::val::convert_value_to_public_value(claims.into_claims_object().into())
+					.expect("claims conversion should succeed"),
+			);
 			session.ns = Some(ns.clone());
 			session.db = Some(db.clone());
 			session.ac = Some(ac.clone());
-			session.rd = Some(Value::from(rid.clone()));
+			session.rd = Some(
+				crate::val::convert_value_to_public_value(Value::RecordId(rid.clone().into()))
+					.expect("record id conversion should succeed"),
+			);
 			session.exp = expiration(av.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
-				rid.to_string(),
+				rid.to_sql(),
 				Default::default(),
-				Level::Record(ns, db, rid.to_string()),
+				Level::Record(ns, db, rid.to_sql()),
 			)));
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(token) => Ok(SignupData {
-					token: Some(token),
-					refresh,
+				Ok(token) => Ok(match refresh {
+					Some(refresh) => Token::WithRefresh {
+						access: token,
+						refresh,
+					},
+					None => Token::Access(token),
 				}),
 				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 			}
@@ -201,13 +301,12 @@ pub async fn db_access(
 			Some(Error::Thrown(_)) => Err(e),
 			// If the SIGNUP clause failed due to an unexpected error, be more specific
 			// This allows clients to handle these errors, which may be retryable
-			Some(Error::Tx(_) | Error::TxFailure | Error::TxRetryable) => {
+			Some(Error::Tx(_) | Error::TxRetryable(_)) => {
 				debug!("Unexpected error found while executing a SIGNUP clause: {e}");
 				Err(anyhow::Error::new(Error::UnexpectedAuth))
 			}
 			// Otherwise, return a generic error unless it should be forwarded
 			_ => {
-				debug!("Record user signup query failed: {e}");
 				if *INSECURE_FORWARD_ACCESS_ERRORS {
 					Err(e)
 				} else {
@@ -219,13 +318,11 @@ pub async fn db_access(
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
-	use std::collections::HashMap;
-
 	use chrono::Duration;
 
 	use super::*;
-	use crate::dbs::Capabilities;
 	use crate::iam::Role;
 
 	#[tokio::test]
@@ -261,16 +358,16 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "pass".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -328,16 +425,16 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
+			let mut vars = PublicVariables::new();
 			// Password is missing
-			vars.insert("user", "user".into());
+			vars.insert("user", "user");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -347,7 +444,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_signup_record_with_refresh() {
-		use crate::iam::signin;
+		use crate::iam::{Token, signin};
 
 		// Test without refresh
 		{
@@ -382,31 +479,32 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "pass".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
 			match res {
 				Ok(data) => {
-					assert!(data.refresh.is_none(), "Refresh token was unexpectedly returned")
+					assert!(
+						!matches!(data, Token::WithRefresh { .. }),
+						"Refresh token was unexpectedly returned"
+					)
 				}
 				Err(e) => panic!("Failed to signup with credentials: {e}"),
 			}
 		}
 		// Test with refresh
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
@@ -438,24 +536,27 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "pass".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
 			assert!(res.is_ok(), "Failed to signup with credentials: {:?}", res);
 			let refresh = match res {
-				Ok(data) => match data.refresh {
-					Some(refresh) => refresh,
-					None => panic!("Refresh token was not returned"),
+				Ok(data) => match data {
+					Token::WithRefresh {
+						refresh,
+						..
+					} => refresh,
+					Token::Access(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signup with credentials: {e}"),
 			};
@@ -480,25 +581,28 @@ mod tests {
 				"Session expiration is expected to follow the defined duration"
 			);
 			// Signin with the refresh token
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("refresh", refresh.clone().into());
+			let mut vars = PublicVariables::new();
+			vars.insert("refresh", refresh.clone());
 			let res = signin::db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 			// Authentication should be identical as with user credentials
 			match res {
-				Ok(data) => match data.refresh {
-					Some(new_refresh) => assert!(
+				Ok(data) => match data {
+					Token::WithRefresh {
+						refresh: new_refresh,
+						..
+					} => assert!(
 						new_refresh != refresh,
 						"New refresh token is identical to used one"
 					),
-					None => panic!("Refresh token was not returned"),
+					Token::Access(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
@@ -523,15 +627,15 @@ mod tests {
 				"Session expiration is expected to follow the defined duration"
 			);
 			// Attempt to sign in with the original refresh token
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("refresh", refresh.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("refresh", refresh);
 			let res = signin::db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 			let e = res.unwrap_err();
@@ -622,16 +726,16 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "pass".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -660,16 +764,19 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			);
 
 			// Decode token and check that it has been issued as intended
-			if let Ok(SignupData {
-				token: Some(tk),
-				..
-			}) = res
-			{
+			if let Ok(sd) = res {
+				let token = match &sd {
+					Token::Access(token) => token,
+					Token::WithRefresh {
+						access: token,
+						..
+					} => token,
+				};
 				// Check that token can be verified with the defined algorithm
 				let val = Validation::new(Algorithm::RS256);
 				// Check that token can be verified with the defined public key
 				let token_data = decode::<Claims>(
-					&tk,
+					token,
 					&DecodingKey::from_rsa_pem(public_key.as_ref()).unwrap(),
 					&val,
 				)
@@ -711,11 +818,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNUP (
-						CREATE type::thing('user', $id)
+						CREATE type::record('user', $id)
 					)
 					AUTHENTICATE (
 						-- Simple example increasing the record identifier by one
-					    SELECT * FROM type::thing('user', record::id($auth) + 1)
+					    SELECT * FROM type::record('user', record::id($auth) + 1)
 					)
 					DURATION FOR SESSION 2h
 				;
@@ -734,15 +841,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("id", 1.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("id", 1);
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -829,16 +936,16 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("email", "info@example.com".into());
-			vars.insert("pass", "company-password".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("email", "info@example.com");
+			vars.insert("pass", "company-password");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"owner".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -875,7 +982,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNUP (
-					   CREATE type::thing('user', $id)
+					   CREATE type::record('user', $id)
 					)
 					AUTHENTICATE {
 					    -- Not just signin, this clause runs across signin, signup and authenticate, which makes it a nice place to centralize logic
@@ -889,11 +996,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					DURATION FOR SESSION 2h
 				;
 				"#,
-				&sess,
-				None,
-			)
-			.await
-			.unwrap();
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
 
 			// Signin with the user
 			let mut sess = Session {
@@ -901,15 +1008,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("id", 1.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("id", 1);
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -928,7 +1035,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNUP (
-					   CREATE type::thing('user', $id)
+					   CREATE type::record('user', $id)
 					)
 					AUTHENTICATE {}
 					DURATION FOR SESSION 2h
@@ -946,15 +1053,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("id", 1.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("id", 1);
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -1010,9 +1117,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "pass".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
 
 			let (res1, res2) = tokio::join!(
 				db_access(
@@ -1021,7 +1128,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"test".to_string(),
 					"test".to_string(),
 					"user".to_string(),
-					vars.clone().into(),
+					vars.clone(),
 				),
 				db_access(
 					&ds,
@@ -1029,7 +1136,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"test".to_string(),
 					"test".to_string(),
 					"user".to_string(),
-					vars.into(),
+					vars,
 				)
 			);
 
@@ -1061,7 +1168,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNUP (
-						CREATE type::thing('user', $id)
+						CREATE type::record('user', $id)
 					)
 					AUTHENTICATE {
 						-- Concurrently write to the same document
@@ -1091,8 +1198,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("id", 1.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("id", 1);
 
 			let (res1, res2) = tokio::join!(
 				db_access(
@@ -1101,7 +1208,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"test".to_string(),
 					"test".to_string(),
 					"user".to_string(),
-					vars.clone().into(),
+					vars.clone(),
 				),
 				db_access(
 					&ds,
@@ -1109,7 +1216,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"test".to_string(),
 					"test".to_string(),
 					"user".to_string(),
-					vars.into(),
+					vars,
 				)
 			);
 

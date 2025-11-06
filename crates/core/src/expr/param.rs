@@ -3,7 +3,7 @@ use std::{fmt, str};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use revision::Revisioned;
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 
 use super::FlowResultExt as _;
 use crate::catalog::Permission;
@@ -17,27 +17,31 @@ use crate::iam::Action;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct Param(String);
+pub(crate) struct Param(String);
 
 impl Revisioned for Param {
 	fn revision() -> u16 {
 		String::revision()
 	}
+}
 
+impl SerializeRevisioned for Param {
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		w: &mut W,
 	) -> std::result::Result<(), revision::Error> {
-		String::serialize_revisioned(&self.0, w)
+		SerializeRevisioned::serialize_revisioned(&self.0, w)
 	}
+}
 
+impl DeserializeRevisioned for Param {
 	fn deserialize_revisioned<R: std::io::Read>(
 		r: &mut R,
 	) -> std::result::Result<Self, revision::Error>
 	where
 		Self: Sized,
 	{
-		String::deserialize_revisioned(r).map(Param)
+		DeserializeRevisioned::deserialize_revisioned(r).map(Param)
 	}
 }
 
@@ -102,7 +106,12 @@ impl Param {
 					// Ensure a database is set
 					opt.valid_for_db()?;
 					// Fetch a defined param if set
-					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+					let Some((ns, db)) = ctx.try_ns_db_ids(opt).await? else {
+						// If the database does not exist, then a defined param won't exist either
+						// No need to create an ns/db for this, let's just return None
+						return Ok(Value::None);
+					};
+
 					let val = ctx.tx().get_db_param(ns, db, v).await;
 					// Check if the param has been set globally
 					let val = match val {

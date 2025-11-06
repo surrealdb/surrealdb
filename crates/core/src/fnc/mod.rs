@@ -33,6 +33,7 @@ pub mod script;
 pub mod search;
 pub mod sequence;
 pub mod session;
+pub mod set;
 pub mod sleep;
 pub mod string;
 pub mod time;
@@ -78,6 +79,13 @@ pub async fn run(
 		|| name.eq("file::list")
 		|| name.eq("record::exists")
 		|| name.eq("record::is_edge")
+		|| name.eq("set::all")
+		|| name.eq("set::any")
+		|| name.eq("set::filter")
+		|| name.eq("set::find")
+		|| name.eq("set::fold")
+		|| name.eq("set::map")
+		|| name.eq("set::reduce")
 		|| name.eq("type::field")
 		|| name.eq("type::fields")
 		|| name.eq("value::diff")
@@ -185,6 +193,7 @@ pub fn synchronous(
 		"array::remove" => array::remove,
 		"array::repeat" => array::repeat,
 		"array::reverse" => array::reverse,
+		"array::sequence" => array::sequence,
 		"array::shuffle" => array::shuffle,
 		"array::slice" => array::slice,
 		"array::sort" => array::sort,
@@ -315,7 +324,7 @@ pub fn synchronous(
 		"rand::duration" => rand::duration,
 		"rand::enum" => rand::r#enum,
 		"rand::float" => rand::float,
-		"rand::guid" => rand::guid,
+		"rand::id" => rand::id,
 		"rand::int" => rand::int,
 		"rand::string" => rand::string,
 		"rand::time" => rand::time,
@@ -337,6 +346,25 @@ pub fn synchronous(
 		"session::rd" => session::rd(ctx),
 		"session::token" => session::token(ctx),
 		//
+		"set::add" => set::add,
+		"set::at" => set::at,
+		"set::complement" => set::complement,
+		"set::contains" => set::contains,
+		"set::difference" => set::difference,
+		"set::first" => set::first,
+		"set::flatten" => set::flatten,
+		"set::intersect" => set::intersect,
+		"set::is_empty" => set::is_empty,
+		"set::join" => set::join,
+		"set::last" => set::last,
+		"set::len" => set::len,
+		"set::max" => set::max,
+		"set::min" => set::min,
+		"set::remove" => set::remove,
+		"set::slice" => set::slice,
+		"set::union" => set::union,
+		//
+		"string::capitalize" => string::capitalize,
 		"string::concat" => string::concat,
 		"string::contains" => string::contains,
 		"string::ends_with" => string::ends_with,
@@ -442,13 +470,14 @@ pub fn synchronous(
 		"type::geometry" => r#type::geometry,
 		"type::int" => r#type::int,
 		"type::number" => r#type::number,
+		"type::of" => r#type::type_of,
 		"type::point" => r#type::point,
 		"type::range" => r#type::range,
 		"type::record" => r#type::record,
+		"type::set" => r#type::set,
 		"type::string" => r#type::string,
 		"type::string_lossy" => r#type::string_lossy,
 		"type::table" => r#type::table,
-		"type::thing" => r#type::thing,
 		"type::uuid" => r#type::uuid,
 		"type::is_array" => r#type::is::array,
 		"type::is_bool" => r#type::is::bool,
@@ -472,6 +501,7 @@ pub fn synchronous(
 		"type::is_polygon" => r#type::is::polygon,
 		"type::is_range" => r#type::is::range,
 		"type::is_record" => r#type::is::record,
+		"type::is_set" => r#type::is::set,
 		"type::is_string" => r#type::is::string,
 		"type::is_uuid" => r#type::is::uuid,
 		//
@@ -585,6 +615,14 @@ pub async fn asynchronous(
 		"search::highlight" => search::highlight((ctx, doc)).await,
 		"search::offsets" => search::offsets((ctx, doc)).await,
 		//
+		"set::all" => set::all((stk, ctx, Some(opt), doc)).await,
+		"set::any" => set::any((stk, ctx, Some(opt), doc)).await,
+		"set::filter" => set::filter((stk, ctx, Some(opt), doc)).await,
+		"set::find" => set::find((stk, ctx, Some(opt), doc)).await,
+		"set::fold" => set::fold((stk, ctx, Some(opt), doc)).await,
+		"set::map" => set::map((stk, ctx, Some(opt), doc)).await,
+		"set::reduce" => set::reduce((stk, ctx, Some(opt), doc)).await,
+		//
 		"sleep" => sleep::sleep(ctx).await,
 		//
 		"sequence::nextval" => sequence::nextval((ctx, opt)).await,
@@ -610,6 +648,78 @@ pub async fn idiom(
 ) -> Result<Value> {
 	ctx.check_allowed_function(&idiom_name_to_normal(value.kind_of(), name))?;
 	match value {
+		Value::Set(x) => {
+			args.insert(0, Value::Set(x));
+			dispatch!(
+				ctx,
+				name,
+				args.clone(),
+				"no such method found for the set type",
+				//
+				"add" => set::add,
+				"all" => set::all((stk, ctx, Some(opt), doc)).await,
+				"any" => set::any((stk, ctx, Some(opt), doc)).await,
+				"complement" => set::complement,
+				"contains" => set::contains,
+				"difference" => set::difference,
+				"intersect" => set::intersect,
+				"is_empty" => set::is_empty,
+				"len" => set::len,
+				"remove" => set::remove,
+				"union" => set::union,
+				//
+				"type_of" => r#type::type_of,
+				"is_array" => r#type::is::array,
+				"is_bool" => r#type::is::bool,
+				"is_bytes" => r#type::is::bytes,
+				"is_collection" => r#type::is::collection,
+				"is_datetime" => r#type::is::datetime,
+				"is_decimal" => r#type::is::decimal,
+				"is_duration" => r#type::is::duration,
+				"is_float" => r#type::is::float,
+				"is_geometry" => r#type::is::geometry,
+				"is_int" => r#type::is::int,
+				"is_line" => r#type::is::line,
+				"is_none" => r#type::is::none,
+				"is_null" => r#type::is::null,
+				"is_multiline" => r#type::is::multiline,
+				"is_multipoint" => r#type::is::multipoint,
+				"is_multipolygon" => r#type::is::multipolygon,
+				"is_number" => r#type::is::number,
+				"is_object" => r#type::is::object,
+				"is_point" => r#type::is::point,
+				"is_polygon" => r#type::is::polygon,
+				"is_range" => r#type::is::range,
+				"is_record" => r#type::is::record,
+				"is_set" => r#type::is::set,
+				"is_string" => r#type::is::string,
+				"is_uuid" => r#type::is::uuid,
+				//
+				"to_array" => r#type::array,
+				"to_bool" => r#type::bool,
+				"to_bytes" => r#type::bytes,
+				"to_datetime" => r#type::datetime,
+				"to_decimal" => r#type::decimal,
+				"to_duration" => r#type::duration,
+				"to_float" => r#type::float,
+				"to_geometry" => r#type::geometry,
+				"to_int" => r#type::int,
+				"to_number" => r#type::number,
+				"to_point" => r#type::point,
+				"to_range" => r#type::range,
+				"to_record" => r#type::record,
+				"to_set" => r#type::set,
+				"to_string" => r#type::string,
+				"to_string_lossy" => r#type::string_lossy,
+				"to_uuid" => r#type::uuid,
+				//
+				"chain" => value::chain((stk, ctx, Some(opt), doc)).await,
+				"diff" => value::diff.await,
+				"patch" => value::patch.await,
+				//
+				"repeat" => array::repeat,
+			)
+		}
 		Value::Array(x) => {
 			args.insert(0, Value::Array(x));
 			dispatch!(
@@ -701,7 +811,7 @@ pub async fn idiom(
 				"vector_similarity_pearson" => vector::similarity::pearson,
 				"vector_similarity_spearman" => vector::similarity::spearman,
 
-
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -724,6 +834,7 @@ pub async fn idiom(
 				"is_polygon" => r#type::is::polygon,
 				"is_range" => r#type::is::range,
 				"is_record" => r#type::is::record,
+				"is_set" => r#type::is::set,
 				"is_string" => r#type::is::string,
 				"is_uuid" => r#type::is::uuid,
 				//
@@ -740,6 +851,7 @@ pub async fn idiom(
 				"to_point" => r#type::point,
 				"to_range" => r#type::range,
 				"to_record" => r#type::record,
+				"to_set" => r#type::set,
 				"to_string" => r#type::string,
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
@@ -761,6 +873,7 @@ pub async fn idiom(
 				//
 				"len" => bytes::len,
 
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -783,6 +896,7 @@ pub async fn idiom(
 				"is_polygon" => r#type::is::polygon,
 				"is_range" => r#type::is::range,
 				"is_record" => r#type::is::record,
+				"is_set" => r#type::is::set,
 				"is_string" => r#type::is::string,
 				"is_uuid" => r#type::is::uuid,
 				//
@@ -799,6 +913,7 @@ pub async fn idiom(
 				"to_point" => r#type::point,
 				"to_range" => r#type::range,
 				"to_record" => r#type::record,
+				"to_set" => r#type::set,
 				"to_string" => r#type::string,
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
@@ -828,6 +943,7 @@ pub async fn idiom(
 				"weeks" => duration::weeks,
 				"years" => duration::years,
 
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -850,6 +966,7 @@ pub async fn idiom(
 				"is_polygon" => r#type::is::polygon,
 				"is_range" => r#type::is::range,
 				"is_record" => r#type::is::record,
+				"is_set" => r#type::is::set,
 				"is_string" => r#type::is::string,
 				"is_uuid" => r#type::is::uuid,
 				//
@@ -866,6 +983,7 @@ pub async fn idiom(
 				"to_point" => r#type::point,
 				"to_range" => r#type::range,
 				"to_record" => r#type::record,
+				"to_set" => r#type::set,
 				"to_string" => r#type::string,
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
@@ -894,7 +1012,7 @@ pub async fn idiom(
 				"hash_encode" => geo::hash::encode,
 				"is_valid" => geo::is::valid,
 
-
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -917,6 +1035,7 @@ pub async fn idiom(
 				"is_polygon" => r#type::is::polygon,
 				"is_range" => r#type::is::range,
 				"is_record" => r#type::is::record,
+				"is_set" => r#type::is::set,
 				"is_string" => r#type::is::string,
 				"is_uuid" => r#type::is::uuid,
 				//
@@ -933,6 +1052,7 @@ pub async fn idiom(
 				"to_point" => r#type::point,
 				"to_range" => r#type::range,
 				"to_record" => r#type::record,
+				"to_set" => r#type::set,
 				"to_string" => r#type::string,
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
@@ -953,10 +1073,12 @@ pub async fn idiom(
 				"no such method found for the record type",
 				//
 				"exists" => record::exists((stk, ctx, Some(opt), doc)).await,
+				"is_edge" => record::is::edge((stk, ctx, Some(opt), doc)).await,
 				"id" => record::id,
 				"table" => record::tb,
 				"tb" => record::tb,
 
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -979,6 +1101,7 @@ pub async fn idiom(
 				"is_polygon" => r#type::is::polygon,
 				"is_range" => r#type::is::range,
 				"is_record" => r#type::is::record,
+				"is_set" => r#type::is::set,
 				"is_string" => r#type::is::string,
 				"is_uuid" => r#type::is::uuid,
 				//
@@ -995,6 +1118,7 @@ pub async fn idiom(
 				"to_point" => r#type::point,
 				"to_range" => r#type::range,
 				"to_record" => r#type::record,
+				"to_set" => r#type::set,
 				"to_string" => r#type::string,
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
@@ -1023,6 +1147,7 @@ pub async fn idiom(
 				"values" => object::values,
 
 
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -1045,6 +1170,7 @@ pub async fn idiom(
 				"is_polygon" => r#type::is::polygon,
 				"is_range" => r#type::is::range,
 				"is_record" => r#type::is::record,
+				"is_set" => r#type::is::set,
 				"is_string" => r#type::is::string,
 				"is_uuid" => r#type::is::uuid,
 				//
@@ -1061,6 +1187,7 @@ pub async fn idiom(
 				"to_point" => r#type::point,
 				"to_range" => r#type::range,
 				"to_record" => r#type::record,
+				"to_set" => r#type::set,
 				"to_string" => r#type::string,
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
@@ -1100,7 +1227,7 @@ pub async fn idiom(
 				"sin" => math::sin,
 				"tan" => math::tan,
 
-
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -1123,6 +1250,7 @@ pub async fn idiom(
 				"is_polygon" => r#type::is::polygon,
 				"is_range" => r#type::is::range,
 				"is_record" => r#type::is::record,
+				"is_set" => r#type::is::set,
 				"is_string" => r#type::is::string,
 				"is_uuid" => r#type::is::uuid,
 				//
@@ -1139,6 +1267,7 @@ pub async fn idiom(
 				"to_point" => r#type::point,
 				"to_range" => r#type::range,
 				"to_record" => r#type::record,
+				"to_set" => r#type::set,
 				"to_string" => r#type::string,
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
@@ -1158,6 +1287,7 @@ pub async fn idiom(
 				args.clone(),
 				"no such method found for the string type",
 				//
+				"capitalize" => string::capitalize,
 				"concat" => string::concat,
 				"contains" => string::contains,
 				"ends_with" => string::ends_with,
@@ -1216,7 +1346,7 @@ pub async fn idiom(
 				"semver_set_minor" => string::semver::set::minor,
 				"semver_set_patch" => string::semver::set::patch,
 
-
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -1252,6 +1382,7 @@ pub async fn idiom(
 				"to_point" => r#type::point,
 				"to_range" => r#type::range,
 				"to_record" => r#type::record,
+				"to_set" => r#type::set,
 				"to_string" => r#type::string,
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
@@ -1289,7 +1420,7 @@ pub async fn idiom(
 				"yday" => time::yday,
 				"year" => time::year,
 
-
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -1312,6 +1443,7 @@ pub async fn idiom(
 				"is_polygon" => r#type::is::polygon,
 				"is_range" => r#type::is::range,
 				"is_record" => r#type::is::record,
+				"is_set" => r#type::is::set,
 				"is_string" => r#type::is::string,
 				"is_uuid" => r#type::is::uuid,
 				//
@@ -1328,6 +1460,7 @@ pub async fn idiom(
 				"to_point" => r#type::point,
 				"to_range" => r#type::range,
 				"to_record" => r#type::record,
+				"to_set" => r#type::set,
 				"to_string" => r#type::string,
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
@@ -1361,7 +1494,7 @@ pub async fn idiom(
 				exp(Files) "rename_if_not_exists" => file::rename_if_not_exists((stk, ctx, opt, doc)).await,
 				exp(Files) "exists" => file::exists((stk, ctx, opt, doc)).await,
 
-
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -1384,6 +1517,7 @@ pub async fn idiom(
 				"is_polygon" => r#type::is::polygon,
 				"is_range" => r#type::is::range,
 				"is_record" => r#type::is::record,
+				"is_set" => r#type::is::set,
 				"is_string" => r#type::is::string,
 				"is_uuid" => r#type::is::uuid,
 				//
@@ -1400,6 +1534,7 @@ pub async fn idiom(
 				"to_point" => r#type::point,
 				"to_range" => r#type::range,
 				"to_record" => r#type::record,
+				"to_set" => r#type::set,
 				"to_string" => r#type::string,
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
@@ -1420,6 +1555,7 @@ pub async fn idiom(
 				args,
 				message,
 				//
+				"type_of" => r#type::type_of,
 				"is_array" => r#type::is::array,
 				"is_bool" => r#type::is::bool,
 				"is_bytes" => r#type::is::bytes,
@@ -1442,6 +1578,7 @@ pub async fn idiom(
 				"is_polygon" => r#type::is::polygon,
 				"is_range" => r#type::is::range,
 				"is_record" => r#type::is::record,
+				"is_set" => r#type::is::set,
 				"is_string" => r#type::is::string,
 				"is_uuid" => r#type::is::uuid,
 				//
@@ -1458,6 +1595,7 @@ pub async fn idiom(
 				"to_point" => r#type::point,
 				"to_range" => r#type::range,
 				"to_record" => r#type::record,
+				"to_set" => r#type::set,
 				"to_string" => r#type::string,
 				"to_string_lossy" => r#type::string_lossy,
 				"to_uuid" => r#type::uuid,
@@ -1642,8 +1780,6 @@ mod tests {
 
 			#[cfg(all(feature = "scripting", feature = "kv-mem"))]
 			{
-				use crate::val::Value;
-
 				let name = name.replace("::", ".");
 				let sql =
 					format!("RETURN function() {{ return typeof surrealdb.functions.{name}; }}");
@@ -1654,10 +1790,10 @@ mod tests {
 				let ses = crate::dbs::Session::owner().with_ns("test").with_db("test");
 				let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 				let tmp = res.remove(0).result.unwrap();
-				if tmp == Value::String("object".to_owned()) {
+				if tmp == crate::types::PublicValue::String("object".to_owned()) {
 					// Assume this function is superseded by a module of the
 					// same name.
-				} else if tmp != Value::String("function".to_owned()) {
+				} else if tmp != crate::types::PublicValue::String("function".to_owned()) {
 					problems.push(format!("function {name} not exported to JavaScript: {tmp:?}"));
 				}
 			}

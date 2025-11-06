@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use criterion::Bencher;
 use criterion::measurement::WallTime;
 use surrealdb::Surreal;
@@ -7,6 +9,10 @@ mod create;
 pub(super) use create::*;
 mod read;
 pub(super) use read::*;
+
+fn rand_id() -> String {
+	nanoid::nanoid!(20, &surrealdb_core::cnf::ID_CHARS)
+}
 
 /// Routine trait for the benchmark routines.
 ///

@@ -8,17 +8,18 @@ use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use http::StatusCode;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::capabilities::RouteTarget;
+use surrealdb_core::iam::Action::View;
+use surrealdb_core::iam::ResourceKind::Any;
+use surrealdb_core::iam::check::check_ns_db;
+use surrealdb_core::kvs::export;
+use surrealdb_core::rpc::format::Format;
+use surrealdb_types::SurrealValue;
 
 use super::AppState;
 use super::error::ResponseError;
 use super::headers::ContentType;
-use crate::core::dbs::Session;
-use crate::core::dbs::capabilities::RouteTarget;
-use crate::core::iam::Action::View;
-use crate::core::iam::ResourceKind::Any;
-use crate::core::iam::check::check_ns_db;
-use crate::core::kvs::export;
-use crate::core::rpc::format::Format;
 use crate::net::error::Error as NetError;
 
 pub(super) fn router<S>() -> Router<S>
@@ -45,23 +46,21 @@ async fn post_handler(
 	let fmt = content_type.deref();
 	let fmt: Format = fmt.into();
 	let val = match fmt {
-		Format::Json => crate::core::rpc::format::json::decode(&body)
+		Format::Json => surrealdb_core::rpc::format::json::decode(&body)
 			.map_err(anyhow::Error::msg)
 			.map_err(ResponseError)?,
-		Format::Cbor => crate::core::rpc::format::cbor::decode(&body)
+		Format::Cbor => surrealdb_core::rpc::format::cbor::decode(&body)
 			.map_err(anyhow::Error::msg)
 			.map_err(ResponseError)?,
-		Format::Bincode => crate::core::rpc::format::bincode::decode(&body)
-			.map_err(anyhow::Error::msg)
-			.map_err(ResponseError)?,
-		Format::Revision => crate::core::rpc::format::revision::decode(&body)
+		Format::Flatbuffers => surrealdb_core::rpc::format::flatbuffers::decode(&body)
 			.map_err(anyhow::Error::msg)
 			.map_err(ResponseError)?,
 		Format::Unsupported => {
 			return Err(ResponseError(anyhow::Error::msg("unsupported body format")));
 		}
 	};
-	let cfg = export::Config::from_value(&val).map_err(ResponseError)?;
+
+	let cfg = export::Config::from_value(val).map_err(ResponseError)?;
 	handle_inner(state, session, cfg).await
 }
 
@@ -93,7 +92,9 @@ async fn handle_inner(
 	// Process all chunk values
 	tokio::spawn(async move {
 		while let Ok(v) = rcv.recv().await {
-			let _ = chn.send(Ok(Bytes::from(v))).await;
+			if let Err(err) = chn.send(Ok(Bytes::from(v))).await {
+				tracing::warn!("Error sending bytes: {:?}", err);
+			}
 		}
 	});
 	// Return the chunked body

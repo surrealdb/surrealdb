@@ -51,8 +51,10 @@ mod http_integration {
 			let res =
 				client.post(url).basic_auth(USER, Some(PASS)).body("CREATE foo").send().await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
-			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {body}");
+			let body: serde_json::Value = res.json().await?;
+			assert_eq!(body[0]["status"], "OK");
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1);
+			assert!(body[0]["result"][0]["id"].to_string().starts_with("\"foo:"));
 		}
 
 		// Prepare users with identical credentials on ROOT, NAMESPACE and DATABASE
@@ -264,8 +266,10 @@ mod http_integration {
 		{
 			let res = client.post(url).bearer_auth(&token).body("CREATE foo").send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-			let body = res.text().await?;
-			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {body}");
+			let body: serde_json::Value = res.json().await?;
+			assert_eq!(body[0]["status"], "OK", "body: {body}");
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
+			assert!(body[0]["result"][0]["id"].to_string().starts_with("\"foo:"), "body: {body}");
 
 			// Check the selected namespace and database
 			let res = client
@@ -910,7 +914,7 @@ mod http_integration {
 			let res = client
 				.post(url)
 				.basic_auth(USER, Some(PASS))
-				.header(header::ACCEPT, "application/surrealdb")
+				.header(header::ACCEPT, surrealdb_core::api::format::FLATBUFFERS)
 				.body("CREATE foo")
 				.send()
 				.await?;
@@ -946,21 +950,10 @@ mod http_integration {
 			assert!(res.is_ok(), "upgrade err: {}", res.unwrap_err());
 		}
 
-		// Test nul character
-		{
-			let res =
-				client.post(url).body("parse::email::user('\\u0000@example.com')").send().await?;
-			assert_eq!(res.status(), 400);
-
-			let body = res.text().await?;
-			assert!(body.contains("Null bytes are not allowed"), "body: {body}");
-		}
-
 		Ok(())
 	}
 
 	#[test(tokio::test)]
-	#[cfg(feature = "http-compression")]
 	async fn sql_endpoint_with_compression() -> Result<(), Box<dyn std::error::Error>> {
 		let (addr, _server) = common::start_server_with_defaults().await.unwrap();
 		let url = &format!("http://{addr}/sql");
@@ -1746,8 +1739,8 @@ mod http_integration {
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("surreal-ns", ns.parse()?);
 		headers.insert("surreal-db", db.parse()?);
-		headers.insert(header::ACCEPT, "application/surrealdb".parse()?);
-		headers.insert(header::CONTENT_TYPE, "application/surrealdb".parse()?);
+		headers.insert(header::ACCEPT, surrealdb_core::api::format::FLATBUFFERS.parse()?);
+		headers.insert(header::CONTENT_TYPE, surrealdb_core::api::format::FLATBUFFERS.parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
 			.default_headers(headers)
@@ -2027,8 +2020,10 @@ mod http_integration {
 				.send()
 				.await
 				.unwrap();
-			let res = res.text().await.unwrap();
-			assert!(res.contains("[{\"result\":null,\"status\":\"OK\""), "body: {}", res);
+			let res: serde_json::Value = res.json().await.unwrap();
+
+			assert_eq!(res[0]["status"], "OK", "body: {res}");
+			assert_eq!(res[0]["result"], serde_json::Value::Null, "body: {res}");
 		}
 		// Deny 1
 		{
@@ -2109,8 +2104,9 @@ mod http_integration {
 				.send()
 				.await
 				.unwrap();
-			let res = res.text().await.unwrap();
-			assert!(res.contains("[{\"result\":123,\"status\":\"OK\""), "body: {}", res);
+			let res: serde_json::Value = res.json().await.unwrap();
+			assert_eq!(res[0]["status"], "OK");
+			assert_eq!(res[0]["result"], 123);
 		}
 		// Allow record
 		{

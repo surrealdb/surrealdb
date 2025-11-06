@@ -1,6 +1,7 @@
 use std::fmt;
 
 use reblessive::tree::Stk;
+use surrealdb_types::{ToSql, write_sql};
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::{Context, MutableContext};
@@ -11,7 +12,7 @@ use crate::expr::{ControlFlow, Expr, FlowResult, Kind, Value};
 use crate::fmt::EscapeKwFreeIdent;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct SetStatement {
+pub(crate) struct SetStatement {
 	pub name: String,
 	pub what: Expr,
 	pub kind: Option<Kind>,
@@ -48,7 +49,16 @@ impl SetStatement {
 			})));
 		}
 
-		let result = stk.run(|stk| self.what.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await?;
+		let result = stk
+			.run(|stk| {
+				self.what.compute(
+					stk,
+					ctx.as_ref().expect("context should be initialized"),
+					opt,
+					doc,
+				)
+			})
+			.await?;
 		let result = match &self.kind {
 			Some(kind) => result
 				.coerce_to_kind(kind)
@@ -60,7 +70,7 @@ impl SetStatement {
 			None => result,
 		};
 
-		let mut c = MutableContext::unfreeze(ctx.take().unwrap())?;
+		let mut c = MutableContext::unfreeze(ctx.take().expect("context should be initialized"))?;
 		c.add_value(self.name.clone(), result.into());
 		*ctx = Some(c.freeze());
 		Ok(Value::None)
@@ -75,6 +85,12 @@ impl fmt::Display for SetStatement {
 		}
 		write!(f, " = {}", self.what)?;
 		Ok(())
+	}
+}
+
+impl ToSql for SetStatement {
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self)
 	}
 }
 

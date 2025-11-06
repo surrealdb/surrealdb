@@ -18,8 +18,7 @@ use crate::idx::trees::store::cache::TreeCache;
 use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
 use crate::idx::trees::store::mapper::Mappers;
 use crate::idx::trees::store::tree::{TreeRead, TreeWrite};
-#[cfg(not(target_family = "wasm"))]
-use crate::kvs::IndexBuilder;
+use crate::kvs::index::IndexBuilder;
 use crate::kvs::{KVKey, Key, Transaction, TransactionType, Val};
 
 pub type NodeId = u64;
@@ -234,14 +233,13 @@ impl IndexStores {
 
 	pub(crate) async fn index_removed(
 		&self,
-		#[cfg(not(target_family = "wasm"))] ib: Option<&IndexBuilder>,
+		ib: Option<&IndexBuilder>,
 		tx: &Transaction,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &str,
 		ix: &str,
 	) -> Result<()> {
-		#[cfg(not(target_family = "wasm"))]
 		if let Some(ib) = ib {
 			ib.remove_index(ns, db, tb, ix).await?;
 		}
@@ -250,45 +248,38 @@ impl IndexStores {
 
 	pub(crate) async fn namespace_removed(
 		&self,
-		#[cfg(not(target_family = "wasm"))] ib: Option<&IndexBuilder>,
+		ib: Option<&IndexBuilder>,
 		tx: &Transaction,
 		ns: NamespaceId,
 	) -> Result<()> {
 		for db in tx.all_db(ns).await?.iter() {
-			#[cfg(not(target_family = "wasm"))]
 			self.database_removed(ib, tx, ns, db.database_id).await?;
-			#[cfg(target_family = "wasm")]
-			self.database_removed(tx, ns, db.database_id).await?;
 		}
 		Ok(())
 	}
 
 	pub(crate) async fn database_removed(
 		&self,
-		#[cfg(not(target_family = "wasm"))] ib: Option<&IndexBuilder>,
+		ib: Option<&IndexBuilder>,
 		tx: &Transaction,
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<()> {
 		for tb in tx.all_tb(ns, db, None).await?.iter() {
-			#[cfg(not(target_family = "wasm"))]
 			self.table_removed(ib, tx, ns, db, &tb.name).await?;
-			#[cfg(target_family = "wasm")]
-			self.table_removed(tx, ns, db, &tb.name).await?;
 		}
 		Ok(())
 	}
 
 	pub(crate) async fn table_removed(
 		&self,
-		#[cfg(not(target_family = "wasm"))] ib: Option<&IndexBuilder>,
+		ib: Option<&IndexBuilder>,
 		tx: &Transaction,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &str,
 	) -> Result<()> {
 		for ix in tx.all_tb_indexes(ns, db, tb).await?.iter() {
-			#[cfg(not(target_family = "wasm"))]
 			if let Some(ib) = ib {
 				ib.remove_index(ns, db, tb, &ix.name).await?;
 			}

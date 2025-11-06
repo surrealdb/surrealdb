@@ -16,7 +16,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineBucketStatement {
+pub(crate) struct DefineBucketStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub backend: Option<Expr>,

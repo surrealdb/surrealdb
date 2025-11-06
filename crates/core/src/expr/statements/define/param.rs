@@ -16,7 +16,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineParamStatement {
+pub(crate) struct DefineParamStatement {
 	pub kind: DefineKind,
 	pub name: String,
 	pub value: Expr,
@@ -59,7 +59,7 @@ impl DefineParamStatement {
 
 		let db = {
 			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_db(ns, db, opt.strict).await?
+			txn.get_or_add_db(Some(ctx), ns, db, opt.strict).await?
 		};
 
 		// Process the statement

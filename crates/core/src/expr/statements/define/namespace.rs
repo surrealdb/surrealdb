@@ -16,7 +16,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineNamespaceStatement {
+pub(crate) struct DefineNamespaceStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Expr,
@@ -65,7 +65,7 @@ impl DefineNamespaceStatement {
 			}
 			ns.namespace_id
 		} else {
-			txn.lock().await.get_next_ns_id().await?
+			ctx.try_get_sequences()?.next_namespace_id(Some(ctx)).await?
 		};
 
 		// Process the statement

@@ -16,7 +16,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct DefineFunctionStatement {
+pub(crate) struct DefineFunctionStatement {
 	pub kind: DefineKind,
 	pub name: String,
 	pub args: Vec<(String, Kind)>,
@@ -59,7 +59,7 @@ impl DefineFunctionStatement {
 		// Process the statement
 		{
 			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_db(ns, db, opt.strict).await?
+			txn.get_or_add_db(Some(ctx), ns, db, opt.strict).await?
 		};
 
 		txn.put_db_function(

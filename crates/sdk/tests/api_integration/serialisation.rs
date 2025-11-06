@@ -1,17 +1,20 @@
-use serde::{Deserialize, Serialize};
+#![allow(clippy::unwrap_used)]
+
+use surrealdb::opt::Config;
+use surrealdb::types::SurrealValue;
 use ulid::Ulid;
 
 use super::CreateDb;
-use crate::api_integration::NS;
 
 pub async fn serialise_uuid(new_db: impl CreateDb) {
 	use uuid::Uuid;
-	#[derive(Debug, Serialize, Deserialize)]
+	#[derive(Debug, SurrealValue)]
 	struct Record {
 		uuid: Uuid,
 	}
-	let (permit, db) = new_db.create_db().await;
-	db.use_ns(NS).use_db(Ulid::new().to_string()).await.unwrap();
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let record = Record {
 		uuid: Uuid::new_v4(),

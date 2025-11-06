@@ -1,5 +1,8 @@
 //! SurrealQL formatting utilities.
 
+#[cfg(test)]
+mod test;
+
 mod escape;
 use std::cell::Cell;
 use std::fmt::{self, Display, Formatter, Write};

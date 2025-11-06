@@ -8,6 +8,7 @@ mod field;
 mod function;
 mod index;
 mod model;
+mod module;
 mod namespace;
 mod param;
 mod sequence;
@@ -16,25 +17,26 @@ mod user;
 
 use std::fmt::{self, Display, Formatter};
 
-pub use access::RemoveAccessStatement;
-pub use analyzer::RemoveAnalyzerStatement;
-pub use api::RemoveApiStatement;
-pub use bucket::RemoveBucketStatement;
-pub use database::RemoveDatabaseStatement;
-pub use event::RemoveEventStatement;
-pub use field::RemoveFieldStatement;
-pub use function::RemoveFunctionStatement;
-pub use index::RemoveIndexStatement;
-pub use model::RemoveModelStatement;
-pub use namespace::RemoveNamespaceStatement;
-pub use param::RemoveParamStatement;
-pub use sequence::RemoveSequenceStatement;
-pub use table::RemoveTableStatement;
-pub use user::RemoveUserStatement;
+pub(crate) use access::RemoveAccessStatement;
+pub(crate) use analyzer::RemoveAnalyzerStatement;
+pub(crate) use api::RemoveApiStatement;
+pub(crate) use bucket::RemoveBucketStatement;
+pub(crate) use database::RemoveDatabaseStatement;
+pub(crate) use event::RemoveEventStatement;
+pub(crate) use field::RemoveFieldStatement;
+pub(crate) use function::RemoveFunctionStatement;
+pub(crate) use index::RemoveIndexStatement;
+pub(crate) use model::RemoveModelStatement;
+pub(crate) use module::RemoveModuleStatement;
+pub(crate) use namespace::RemoveNamespaceStatement;
+pub(crate) use param::RemoveParamStatement;
+pub(crate) use sequence::RemoveSequenceStatement;
+pub(crate) use table::RemoveTableStatement;
+pub(crate) use user::RemoveUserStatement;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum RemoveStatement {
+pub(crate) enum RemoveStatement {
 	Namespace(RemoveNamespaceStatement),
 	Database(RemoveDatabaseStatement),
 	Function(RemoveFunctionStatement),
@@ -50,6 +52,7 @@ pub enum RemoveStatement {
 	Api(RemoveApiStatement),
 	Bucket(RemoveBucketStatement),
 	Sequence(RemoveSequenceStatement),
+	Module(RemoveModuleStatement),
 }
 
 impl Display for RemoveStatement {
@@ -70,6 +73,7 @@ impl Display for RemoveStatement {
 			Self::Api(v) => Display::fmt(v, f),
 			Self::Bucket(v) => Display::fmt(v, f),
 			Self::Sequence(v) => Display::fmt(v, f),
+			Self::Module(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -92,6 +96,7 @@ impl From<RemoveStatement> for crate::expr::statements::RemoveStatement {
 			RemoveStatement::Api(v) => Self::Api(v.into()),
 			RemoveStatement::Bucket(v) => Self::Bucket(v.into()),
 			RemoveStatement::Sequence(v) => Self::Sequence(v.into()),
+			RemoveStatement::Module(v) => Self::Module(v.into()),
 		}
 	}
 }
@@ -114,6 +119,7 @@ impl From<crate::expr::statements::RemoveStatement> for RemoveStatement {
 			crate::expr::statements::RemoveStatement::Api(v) => Self::Api(v.into()),
 			crate::expr::statements::RemoveStatement::Bucket(v) => Self::Bucket(v.into()),
 			crate::expr::statements::RemoveStatement::Sequence(v) => Self::Sequence(v.into()),
+			crate::expr::statements::RemoveStatement::Module(v) => Self::Module(v.into()),
 		}
 	}
 }

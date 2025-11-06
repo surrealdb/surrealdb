@@ -1,16 +1,17 @@
 use revision::revisioned;
+use surrealdb_types::{ToSql, write_sql};
 
 use super::Permission;
 use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Idiom, Kind};
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::{DefineFieldStatement, ToSql};
+use crate::sql::DefineFieldStatement;
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub enum DefineDefault {
+pub(crate) enum DefineDefault {
 	#[default]
 	None,
 	Always(Expr),
@@ -22,25 +23,25 @@ pub enum DefineDefault {
 pub struct FieldDefinition {
 	// TODO: Needs to be it's own type.
 	// Idiom::Value/Idiom::Start are for example not allowed.
-	pub name: Idiom,
-	pub what: String,
+	pub(crate) name: Idiom,
+	pub(crate) what: String,
 	/// Whether the field is marked as flexible.
 	/// Flexible allows the field to be schemaless even if the table is marked as schemafull.
-	pub flexible: bool,
+	pub(crate) flexible: bool,
 	// TODO: Optionally also be a seperate type from expr::Kind
-	pub field_kind: Option<Kind>,
-	pub readonly: bool,
-	pub value: Option<Expr>,
-	pub assert: Option<Expr>,
-	pub computed: Option<Expr>,
-	pub default: DefineDefault,
+	pub(crate) field_kind: Option<Kind>,
+	pub(crate) readonly: bool,
+	pub(crate) value: Option<Expr>,
+	pub(crate) assert: Option<Expr>,
+	pub(crate) computed: Option<Expr>,
+	pub(crate) default: DefineDefault,
 
-	pub select_permission: Permission,
-	pub create_permission: Permission,
-	pub update_permission: Permission,
+	pub(crate) select_permission: Permission,
+	pub(crate) create_permission: Permission,
+	pub(crate) update_permission: Permission,
 
-	pub comment: Option<String>,
-	pub reference: Option<Reference>,
+	pub(crate) comment: Option<String>,
+	pub(crate) reference: Option<Reference>,
 }
 impl_kv_value_revisioned!(FieldDefinition);
 
@@ -105,7 +106,7 @@ impl InfoStructure for FieldDefinition {
 }
 
 impl ToSql for FieldDefinition {
-	fn to_sql(&self) -> String {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }

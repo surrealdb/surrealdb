@@ -13,7 +13,7 @@ use crate::fmt::Fmt;
 /// The api configuration as it is received from ast.
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct ApiConfig {
+pub(crate) struct ApiConfig {
 	pub middleware: Vec<Middleware>,
 	pub permissions: Permission,
 }
@@ -21,7 +21,7 @@ pub struct ApiConfig {
 /// The api middleware as it is received from ast.
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct Middleware {
+pub(crate) struct Middleware {
 	pub name: String,
 	pub args: Vec<Expr>,
 }
@@ -50,10 +50,6 @@ impl ApiConfig {
 			middleware,
 			permissions: self.permissions.clone(),
 		})
-	}
-
-	pub fn is_empty(&self) -> bool {
-		self.middleware.is_empty() && self.permissions.is_none()
 	}
 }
 

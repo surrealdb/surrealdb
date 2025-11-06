@@ -21,8 +21,33 @@ fn limit(name: &str, n: usize) -> Result<()> {
 	Ok(())
 }
 
+pub fn capitalize((string,): (String,)) -> Result<Value> {
+	if string.is_empty() {
+		return Ok(string.into());
+	}
+
+	let mut new_str = String::with_capacity(string.len());
+	let mut is_previous_whitespace = true;
+
+	for c in string.chars() {
+		if is_previous_whitespace && c.is_lowercase() {
+			// Capitalize the character
+			for upper_c in c.to_uppercase() {
+				new_str.push(upper_c);
+			}
+		} else {
+			// Keep the character as-is
+			new_str.push(c);
+		}
+
+		is_previous_whitespace = c.is_whitespace();
+	}
+
+	Ok(new_str.into())
+}
+
 pub fn concat(Any(args): Any) -> Result<Value> {
-	let strings = args.into_iter().map(Value::as_raw_string).collect::<Vec<_>>();
+	let strings = args.into_iter().map(Value::into_raw_string).collect::<Vec<_>>();
 	limit("string::concat", strings.iter().map(String::len).sum::<usize>())?;
 	Ok(strings.concat().into())
 }
@@ -36,7 +61,7 @@ pub fn ends_with((val, chr): (String, String)) -> Result<Value> {
 }
 
 pub fn join(Any(args): Any) -> Result<Value> {
-	let mut args = args.into_iter().map(Value::as_raw_string);
+	let mut args = args.into_iter().map(Value::into_raw_string);
 	let chr = args.next().ok_or_else(|| Error::InvalidArguments {
 		name: String::from("string::join"),
 		message: String::from("Expected at least one argument"),
@@ -131,7 +156,7 @@ pub fn slice(
 
 	let range = if let Some(end) = end {
 		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::range"),
+			name: String::from("array::slice"),
 			message: format!("Argument 1 was the wrong type. {e}"),
 		})?;
 
@@ -140,15 +165,15 @@ pub fn slice(
 			end: Bound::Excluded(end),
 		}
 	} else if range_start.is_range() {
-		// Condition checked above, unwrap cannot trigger.
-		let range = range_start.into_range().unwrap();
+		// Condition checked above, cannot fail
+		let range = range_start.into_range().expect("is_range() check passed");
 		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::range"),
+			name: String::from("array::slice"),
 			message: format!("Argument 1 was the wrong type. {e}"),
 		})?
 	} else {
 		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::range"),
+			name: String::from("array::slice"),
 			message: format!("Argument 1 was the wrong type. {e}"),
 		})?;
 		TypedRange {
@@ -323,8 +348,8 @@ pub mod is {
 	use crate::syn;
 	use crate::val::{Datetime, Value};
 
-	#[rustfmt::skip] static LATITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").unwrap());
-	#[rustfmt::skip] static LONGITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?(180(\\.0+)?|((1[0-7]\\d)|([1-9]?\\d))(\\.\\d+)?)$").unwrap());
+	#[rustfmt::skip] static LATITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?([1-8]?\\d(\\.\\d+)?|90(\\.0+)?)$").expect("valid regex pattern"));
+	#[rustfmt::skip] static LONGITUDE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new("^[-+]?(180(\\.0+)?|((1[0-7]\\d)|([1-9]?\\d))(\\.\\d+)?)$").expect("valid regex pattern"));
 
 	pub fn alphanum((arg,): (String,)) -> Result<Value> {
 		if arg.is_empty() {

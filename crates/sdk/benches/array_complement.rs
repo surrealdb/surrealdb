@@ -1,8 +1,10 @@
+#![allow(clippy::unwrap_used)]
+
 use std::collections::BTreeSet;
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use surrealdb_core::val::{Array, Number, Value};
+use surrealdb_types::{Array, Number, Value};
 
 // Current implementation as of https://github.com/surrealdb/surrealdb/pull/6047
 // crates/core/src/expr/array.rs
@@ -25,12 +27,12 @@ fn criterion_benchmark(c: &mut Criterion) {
 	let mut first = Array::new();
 	for i in 0..5000 {
 		first.push(Value::Number(Number::Int(i)));
-		first.push(i.to_string().into());
+		first.push(Value::String(i.to_string()));
 	}
 	let mut second = Array::new();
 	for i in 0..2500 {
 		second.push(Value::Number(Number::Int(i)));
-		second.push(i.to_string().into());
+		second.push(Value::String(i.to_string()));
 	}
 	c.bench_function("array_complement", |b| {
 		b.iter(|| array_complement(black_box(first.clone()), black_box(second.clone())))

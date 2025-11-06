@@ -20,6 +20,7 @@ impl_module_def!(
 	"float" => run,
 	"int" => run,
 	"number" => run,
+	"of" => run,
 	"point" => run,
 	"regex" => run,
 	"string" => run,
@@ -28,8 +29,10 @@ impl_module_def!(
 	"thing" => run,
 	"range" => run,
 	"record" => run,
+	"set" => run,
 	"uuid" => run,
 	"geometry" => run,
+	"of" => run,
 	"is_array" => run,
 	"is_bool" => run,
 	"is_bytes" => run,
@@ -52,6 +55,7 @@ impl_module_def!(
 	"is_polygon" => run,
 	"is_range" => run,
 	"is_record" => run,
+	"is_set" => run,
 	"is_string" => run,
 	"is_uuid" => run
 );

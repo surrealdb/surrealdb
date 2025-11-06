@@ -5,7 +5,8 @@ use crate::sql::{AssignOperator, Expr, Idiom};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Data {
+#[allow(clippy::enum_variant_names)]
+pub(crate) enum Data {
 	EmptyExpression,
 	SetExpression(Vec<Assignment>),
 	UnsetExpression(Vec<Idiom>),
@@ -20,7 +21,7 @@ pub enum Data {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Assignment {
+pub(crate) struct Assignment {
 	pub place: Idiom,
 	pub operator: AssignOperator,
 	pub value: Expr,
@@ -77,7 +78,9 @@ impl Display for Data {
 			Self::ValuesExpression(v) => write!(
 				f,
 				"({}) VALUES {}",
-				Fmt::comma_separated(v.first().unwrap().iter().map(|(v, _)| v)),
+				Fmt::comma_separated(
+					v.first().expect("values expression is non-empty").iter().map(|(v, _)| v)
+				),
 				Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| write!(
 					f,
 					"({})",

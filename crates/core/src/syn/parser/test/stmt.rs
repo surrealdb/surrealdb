@@ -18,16 +18,19 @@ use crate::sql::statements::access::{
 	self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke, AccessStatementShow,
 };
 use crate::sql::statements::define::user::PassType;
-use crate::sql::statements::define::{DefineDefault, DefineKind};
+use crate::sql::statements::define::{
+	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineDefault,
+	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
+	DefineKind, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
+	DefineTableStatement,
+};
+use crate::sql::statements::remove::RemoveAnalyzerStatement;
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
-	AccessStatement, CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
-	DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-	DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-	DefineTableStatement, DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement,
-	InsertStatement, KillStatement, OptionStatement, OutputStatement, RelateStatement,
-	RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement, RemoveEventStatement,
+	AccessStatement, CreateStatement, DeleteStatement, ForeachStatement, IfelseStatement,
+	InfoStatement, InsertStatement, KillStatement, OptionStatement, OutputStatement,
+	RelateStatement, RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement,
 	RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement,
 	RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
 	SelectStatement, UpdateStatement, UpsertStatement, UseStatement,
@@ -41,7 +44,8 @@ use crate::sql::{
 };
 use crate::syn;
 use crate::syn::parser::ParserSettings;
-use crate::val::{Datetime, Duration, Number, Uuid};
+use crate::types::{PublicDatetime, PublicDuration, PublicNumber, PublicUuid};
+use crate::val::range::TypedRange;
 
 fn ident_field(name: &str) -> Expr {
 	Expr::Idiom(Idiom(vec![Part::Field(name.to_string())]))
@@ -142,9 +146,7 @@ fn parse_create() {
 				expr: ident_field("foo"),
 				alias: Some(Idiom(vec![Part::Field("bar".to_string())])),
 			})))),
-			timeout: Some(Timeout(Expr::Literal(Literal::Duration(Duration(
-				std::time::Duration::from_secs(1)
-			))))),
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))))),
 			parallel: true,
 			version: None,
 		})),
@@ -198,7 +200,7 @@ fn parse_define_database() {
 			name: Expr::Idiom(Idiom::field("a".to_string())),
 			comment: Some(Expr::Literal(Literal::String("test".to_string()))),
 			changefeed: Some(ChangeFeed {
-				expiry: std::time::Duration::from_secs(60) * 10,
+				expiry: PublicDuration::from_secs(60 * 10),
 				store_diff: true,
 			}),
 		})))
@@ -277,7 +279,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.comment, Some(Expr::Literal(Literal::String("*******".to_string()))));
 		assert_eq!(
 			stmt.token_duration,
-			Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap())))
+			Some(Expr::Literal(Literal::Duration(PublicDuration::from_hours(1).unwrap())))
 		);
 		assert_eq!(stmt.session_duration, None);
 	}
@@ -304,7 +306,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.comment, Some(Expr::Literal(Literal::String("*******".to_string()))));
 		assert_eq!(
 			stmt.token_duration,
-			Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap())))
+			Some(Expr::Literal(Literal::Duration(PublicDuration::from_hours(1).unwrap())))
 		);
 		assert_eq!(stmt.session_duration, None);
 	}
@@ -330,7 +332,7 @@ fn parse_define_user() {
 		assert_eq!(stmt.roles, vec!["editor".to_string(), "OWNER".to_string()]);
 		assert_eq!(
 			stmt.token_duration,
-			Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap())))
+			Some(Expr::Literal(Literal::Duration(PublicDuration::from_hours(1).unwrap())))
 		);
 		assert_eq!(stmt.session_duration, None);
 	}
@@ -356,11 +358,11 @@ fn parse_define_user() {
 		assert_eq!(stmt.roles, vec!["Viewer".to_string()]);
 		assert_eq!(
 			stmt.token_duration,
-			Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap())))
+			Some(Expr::Literal(Literal::Duration(PublicDuration::from_hours(1).unwrap())))
 		);
 		assert_eq!(
 			stmt.session_duration,
-			Some(Expr::Literal(Literal::Duration(Duration::from_hours(6).unwrap())))
+			Some(Expr::Literal(Literal::Duration(PublicDuration::from_hours(6).unwrap())))
 		);
 	}
 	// With session and token duration.
@@ -384,11 +386,11 @@ fn parse_define_user() {
 		assert_eq!(stmt.roles, vec!["Viewer".to_string()]);
 		assert_eq!(
 			stmt.token_duration,
-			Some(Expr::Literal(Literal::Duration(Duration::from_mins(15).unwrap())))
+			Some(Expr::Literal(Literal::Duration(PublicDuration::from_mins(15).unwrap())))
 		);
 		assert_eq!(
 			stmt.session_duration,
-			Some(Expr::Literal(Literal::Duration(Duration::from_hours(6).unwrap())))
+			Some(Expr::Literal(Literal::Duration(PublicDuration::from_hours(6).unwrap())))
 		);
 	}
 	// With none token duration.
@@ -445,8 +447,12 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: Some(Expr::Literal(Literal::String("bar".to_string()))),
@@ -475,8 +481,12 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: None,
@@ -505,8 +515,12 @@ fn parse_define_access_jwt_key() {
 				authenticate: Some(Expr::Literal(Literal::Bool(true))),
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: None,
@@ -539,8 +553,12 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: None,
@@ -568,8 +586,10 @@ fn parse_define_access_jwt_key() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
 					session: None,
 				},
 				comment: None,
@@ -598,8 +618,12 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: None,
@@ -650,8 +674,12 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: Some(Expr::Literal(Literal::String("bar".to_string()))),
@@ -682,8 +710,12 @@ fn parse_define_access_jwt_key() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: Some(Expr::Literal(Literal::String("bar".to_string()))),
@@ -714,8 +746,12 @@ fn parse_define_access_jwt_jwks() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: Some(Expr::Literal(Literal::String("bar".to_string()))),
@@ -745,8 +781,12 @@ fn parse_define_access_jwt_jwks() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: None,
@@ -775,8 +815,10 @@ fn parse_define_access_jwt_jwks() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
 					session: None,
 				},
 				comment: None,
@@ -806,8 +848,12 @@ fn parse_define_access_jwt_jwks() {
 				authenticate: None,
 				// Default durations.
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_hours(1).unwrap()
+					))),
 					session: None,
 				},
 				comment: None,
@@ -836,10 +882,12 @@ fn parse_define_access_jwt_jwks() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
 					session: Some(Expr::Literal(Literal::Duration(
-						Duration::from_days(2).unwrap()
+						PublicDuration::from_days(2).unwrap()
 					))),
 				},
 				comment: None,
@@ -875,8 +923,12 @@ fn parse_define_access_record() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-				token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+				grant: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_days(30).unwrap()
+				))),
+				token: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_hours(1).unwrap()
+				))),
 				session: None,
 			}
 		);
@@ -905,10 +957,7 @@ fn parse_define_access_record() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH REFRESH DURATION FOR GRANT 10d"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap();
@@ -930,8 +979,12 @@ fn parse_define_access_record() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(10).unwrap()))),
-				token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+				grant: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_days(10).unwrap()
+				))),
+				token: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_hours(1).unwrap()
+				))),
 				session: None,
 			}
 		);
@@ -999,9 +1052,15 @@ fn parse_define_access_record() {
 		assert_eq!(
 			stmt.duration,
 			AccessDuration {
-				grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-				token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
-				session: Some(Expr::Literal(Literal::Duration(Duration::from_days(7).unwrap()))),
+				grant: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_days(30).unwrap()
+				))),
+				token: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_hours(1).unwrap()
+				))),
+				session: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_days(7).unwrap()
+				))),
 			}
 		);
 		assert_eq!(stmt.comment, None);
@@ -1053,10 +1112,12 @@ fn parse_define_access_record() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
 					session: Some(Expr::Literal(Literal::Duration(
-						Duration::from_mins(15).unwrap()
+						PublicDuration::from_mins(15).unwrap()
 					))),
 				},
 				comment: None,
@@ -1090,10 +1151,12 @@ fn parse_define_access_record() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
 					session: Some(Expr::Literal(Literal::Duration(
-						Duration::from_mins(15).unwrap()
+						PublicDuration::from_mins(15).unwrap()
 					))),
 				},
 				comment: None,
@@ -1105,10 +1168,7 @@ fn parse_define_access_record() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH REFRESH WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p,s| p.parse_expr_inherit(s).await,
 		)
 			.unwrap();
@@ -1148,10 +1208,12 @@ fn parse_define_access_record() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(10).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(10).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
 					session: Some(Expr::Literal(Literal::Duration(
-						Duration::from_mins(15).unwrap()
+						PublicDuration::from_mins(15).unwrap()
 					))),
 				},
 				comment: None,
@@ -1163,10 +1225,7 @@ fn parse_define_access_record() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" WITH REFRESH DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p,s| p.parse_expr_inherit(s).await,
 		).unwrap();
 		assert_eq!(
@@ -1205,10 +1264,12 @@ fn parse_define_access_record() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(10).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(10).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
 					session: Some(Expr::Literal(Literal::Duration(
-						Duration::from_mins(15).unwrap()
+						PublicDuration::from_mins(15).unwrap()
 					))),
 				},
 				comment: None,
@@ -1242,10 +1303,12 @@ fn parse_define_access_record() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(30).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
 					session: Some(Expr::Literal(Literal::Duration(
-						Duration::from_mins(15).unwrap()
+						PublicDuration::from_mins(15).unwrap()
 					))),
 				},
 				comment: None,
@@ -1285,10 +1348,7 @@ fn parse_define_access_bearer() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR USER COMMENT "foo""#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap();
@@ -1310,8 +1370,12 @@ fn parse_define_access_bearer() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-				token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+				grant: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_days(30).unwrap()
+				))),
+				token: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_hours(1).unwrap()
+				))),
 				session: None,
 			}
 		);
@@ -1327,10 +1391,7 @@ fn parse_define_access_bearer() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON NS TYPE BEARER FOR USER COMMENT "foo""#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap();
@@ -1352,8 +1413,12 @@ fn parse_define_access_bearer() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-				token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+				grant: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_days(30).unwrap()
+				))),
+				token: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_hours(1).unwrap()
+				))),
 				session: None,
 			}
 		);
@@ -1369,10 +1434,7 @@ fn parse_define_access_bearer() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON ROOT TYPE BEARER FOR USER COMMENT "foo""#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap();
@@ -1394,8 +1456,12 @@ fn parse_define_access_bearer() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-				token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+				grant: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_days(30).unwrap()
+				))),
+				token: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_hours(1).unwrap()
+				))),
 				session: None,
 			}
 		);
@@ -1411,10 +1477,7 @@ fn parse_define_access_bearer() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR RECORD COMMENT "foo""#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap();
@@ -1435,8 +1498,12 @@ fn parse_define_access_bearer() {
 			stmt.duration,
 			// Default durations.
 			AccessDuration {
-				grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(30).unwrap()))),
-				token: Some(Expr::Literal(Literal::Duration(Duration::from_hours(1).unwrap()))),
+				grant: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_days(30).unwrap()
+				))),
+				token: Some(Expr::Literal(Literal::Duration(
+					PublicDuration::from_hours(1).unwrap()
+				))),
 				session: None,
 			}
 		);
@@ -1452,10 +1519,7 @@ fn parse_define_access_bearer() {
 	{
 		syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON NS TYPE BEARER FOR RECORD COMMENT "foo""#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap_err();
@@ -1464,10 +1528,7 @@ fn parse_define_access_bearer() {
 	{
 		syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON ROOT TYPE BEARER FOR RECORD COMMENT "foo""#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap_err();
@@ -1476,10 +1537,7 @@ fn parse_define_access_bearer() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR USER WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR GRANT 90d, FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p,s| p.parse_expr_inherit(s).await,
 		).unwrap();
 		assert_eq!(
@@ -1506,9 +1564,11 @@ fn parse_define_access_bearer() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(90).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
-					session: Some(Expr::Literal(Literal::Duration(Duration::from_secs(900)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(90).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
+					session: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(900)))),
 				},
 				comment: None,
 			}))),
@@ -1518,10 +1578,7 @@ fn parse_define_access_bearer() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR RECORD WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR GRANT 90d, FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p,s| p.parse_expr_inherit(s).await,
 		).unwrap();
 		assert_eq!(
@@ -1548,9 +1605,11 @@ fn parse_define_access_bearer() {
 				}),
 				authenticate: None,
 				duration: AccessDuration {
-					grant: Some(Expr::Literal(Literal::Duration(Duration::from_days(90).unwrap()))),
-					token: Some(Expr::Literal(Literal::Duration(Duration::from_secs(10)))),
-					session: Some(Expr::Literal(Literal::Duration(Duration::from_secs(900)))),
+					grant: Some(Expr::Literal(Literal::Duration(
+						PublicDuration::from_days(90).unwrap()
+					))),
+					token: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(10)))),
+					session: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(900)))),
 				},
 				comment: None,
 			}))),
@@ -1620,7 +1679,7 @@ fn parse_define_table() {
 				delete: Permission::Full,
 			},
 			changefeed: Some(ChangeFeed {
-				expiry: std::time::Duration::from_secs(1),
+				expiry: PublicDuration::from_secs(1),
 				store_diff: true,
 			}),
 			comment: None,
@@ -1693,37 +1752,11 @@ fn parse_define_field() {
 
 	// Invalid DELETE permission
 	{
-		// TODO(gguillemas): Providing the DELETE permission should return a parse error
-		// in 3.0.0. Currently, the DELETE permission is just ignored to maintain
-		// backward compatibility.
-		let res = syn::parse_with(
+		syn::parse_with(
 			r#"DEFINE FIELD foo ON TABLE bar PERMISSIONS FOR DELETE NONE"#.as_bytes(),
 			async |parser, stk| parser.parse_expr_inherit(stk).await,
 		)
-		.unwrap();
-		assert_eq!(
-			res,
-			Expr::Define(Box::new(DefineStatement::Field(DefineFieldStatement {
-				kind: DefineKind::Default,
-				name: Expr::Idiom(Idiom(vec![Part::Field("foo".to_string())])),
-				what: Expr::Idiom(Idiom::field("bar".to_string())),
-				flex: false,
-				field_kind: None,
-				readonly: false,
-				value: None,
-				assert: None,
-				default: DefineDefault::None,
-				permissions: Permissions {
-					delete: Permission::Full,
-					update: Permission::Full,
-					create: Permission::Full,
-					select: Permission::Full,
-				},
-				comment: None,
-				reference: None,
-				computed: None,
-			})))
-		)
+		.unwrap_err();
 	}
 }
 
@@ -1786,7 +1819,7 @@ fn parse_define_index() {
 			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())]))],
 			index: Index::MTree(MTreeParams {
 				dimension: 4,
-				distance: Distance::Minkowski(Number::Int(5)),
+				distance: Distance::Minkowski(PublicNumber::Int(5)),
 				capacity: 6,
 				mtree_cache: 9,
 				vector_type: VectorType::I16,
@@ -1857,13 +1890,11 @@ fn parse_delete() {
 		res,
 		Expr::Delete(Box::new(DeleteStatement {
 			only: true,
-			what: vec![Expr::Mock(Mock::Range("foo".to_string(), 32, 64))],
+			what: vec![Expr::Mock(Mock::Range("foo".to_string(), TypedRange::from_range(32..64)))],
 			with: Some(With::Index(vec!["index".to_string(), "index_2".to_string()])),
 			cond: Some(Cond(Expr::Literal(Literal::Integer(2)))),
 			output: Some(Output::After),
-			timeout: Some(Timeout(Expr::Literal(Literal::Duration(Duration(
-				std::time::Duration::from_secs(1)
-			))))),
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))))),
 			parallel: true,
 			explain: Some(Explain(true)),
 		}))
@@ -1892,8 +1923,8 @@ fn parse_delete_2() {
 			with: Some(With::Index(vec!["index".to_owned(), "index_2".to_owned()])),
 			cond: Some(Cond(Expr::Literal(Literal::Null))),
 			output: Some(Output::Null),
-			timeout: Some(Timeout(Expr::Literal(Literal::Duration(Duration(
-				std::time::Duration::from_secs(60 * 60)
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(PublicDuration::from_secs(
+				60 * 60
 			))))),
 			parallel: true,
 			explain: Some(Explain(false)),
@@ -2129,7 +2160,9 @@ fn parse_select() {
 				value: Expr::Literal(Literal::Bool(true))
 			}])))),
 			fetch: Some(Fetchs(vec![Fetch(ident_field("foo"))])),
-			version: Some(Expr::Literal(Literal::Datetime(Datetime(expected_datetime)))),
+			version: Some(Expr::Literal(Literal::Datetime(PublicDatetime::from(
+				expected_datetime
+			)))),
 			timeout: None,
 			parallel: false,
 			tempfiles: false,
@@ -2179,7 +2212,7 @@ fn parse_show() {
 		res,
 		TopLevelExpr::Show(ShowStatement {
 			table: None,
-			since: ShowSince::Timestamp(Datetime(expected_datetime)),
+			since: ShowSince::Timestamp(PublicDatetime::from(expected_datetime)),
 			limit: None
 		})
 	)
@@ -2193,7 +2226,7 @@ fn parse_sleep() {
 	.unwrap();
 
 	let expect = Expr::Sleep(Box::new(SleepStatement {
-		duration: Duration(std::time::Duration::from_secs(1)),
+		duration: PublicDuration::from_secs(1),
 	}));
 	assert_eq!(res, expect)
 }
@@ -2290,7 +2323,7 @@ fn parse_value_stmt() {
 	let res =
 		syn::parse_with(r"1s".as_bytes(), async |parser, stk| parser.parse_expr_inherit(stk).await)
 			.unwrap();
-	let expect = Expr::Literal(Literal::Duration(Duration(std::time::Duration::from_secs(1))));
+	let expect = Expr::Literal(Literal::Duration(PublicDuration::from_secs(1)));
 	assert_eq!(res, expect);
 }
 
@@ -2301,9 +2334,8 @@ fn parse_throw() {
 	})
 	.unwrap();
 
-	let expect = Expr::Throw(Box::new(Expr::Literal(Literal::Duration(Duration(
-		std::time::Duration::from_secs(1),
-	)))));
+	let expect =
+		Expr::Throw(Box::new(Expr::Literal(Literal::Duration(PublicDuration::from_secs(1)))));
 	assert_eq!(res, expect)
 }
 
@@ -2422,7 +2454,7 @@ fn parse_kill() {
 	assert_eq!(
 		res,
 		TopLevelExpr::Kill(KillStatement {
-			id: Expr::Literal(Literal::Uuid(Uuid(uuid::uuid!(
+			id: Expr::Literal(Literal::Uuid(PublicUuid::from(uuid::uuid!(
 				"e72bee20-f49b-11ec-b939-0242ac120002"
 			))))
 		})
@@ -2438,7 +2470,8 @@ fn parse_live() {
 	let TopLevelExpr::Live(stmt) = res else {
 		panic!()
 	};
-	assert_eq!(stmt.fields, Fields::Select(vec![Field::All]));
+	assert_eq!(stmt.fields, Fields::Select(vec![]));
+	assert_eq!(stmt.diff, true);
 	assert_eq!(stmt.what, Expr::Param(Param::new("foo".to_owned())));
 
 	let res = syn::parse_with(
@@ -2733,9 +2766,7 @@ fn parse_update() {
 				Idiom(vec![Part::Field("c".to_owned()), Part::All])
 			])),
 			output: Some(Output::Diff),
-			timeout: Some(Timeout(Expr::Literal(Literal::Duration(Duration(
-				std::time::Duration::from_secs(1)
-			))))),
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))))),
 			parallel: true,
 			explain: Some(Explain(true))
 		}))
@@ -2772,9 +2803,7 @@ fn parse_upsert() {
 				Idiom(vec![Part::Field("c".to_owned()), Part::All])
 			])),
 			output: Some(Output::Diff),
-			timeout: Some(Timeout(Expr::Literal(Literal::Duration(Duration(
-				std::time::Duration::from_secs(1)
-			))))),
+			timeout: Some(Timeout(Expr::Literal(Literal::Duration(PublicDuration::from_secs(1))))),
 			parallel: true,
 			explain: Some(Explain(false))
 		}))
@@ -2787,10 +2816,7 @@ fn parse_access_grant() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON NAMESPACE GRANT FOR USER b"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2807,10 +2833,7 @@ fn parse_access_grant() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON NAMESPACE GRANT FOR RECORD b:c"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2834,10 +2857,7 @@ fn parse_access_show() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE SHOW ALL"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2855,10 +2875,7 @@ fn parse_access_show() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE SHOW GRANT b"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2876,10 +2893,7 @@ fn parse_access_show() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE SHOW WHERE true"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2901,10 +2915,7 @@ fn parse_access_revoke() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE REVOKE ALL"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2922,10 +2933,7 @@ fn parse_access_revoke() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE REVOKE GRANT b"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2943,10 +2951,7 @@ fn parse_access_revoke() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE REVOKE WHERE true"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2968,10 +2973,7 @@ fn parse_access_purge() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE EXPIRED, REVOKED"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2982,7 +2984,7 @@ fn parse_access_purge() {
 				base: Some(Base::Db),
 				expired: true,
 				revoked: true,
-				grace: Duration::from_millis(0),
+				grace: PublicDuration::from_millis(0),
 			})))
 		);
 	}
@@ -2990,10 +2992,7 @@ fn parse_access_purge() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE EXPIRED"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3004,7 +3003,7 @@ fn parse_access_purge() {
 				base: Some(Base::Db),
 				expired: true,
 				revoked: false,
-				grace: Duration::from_millis(0),
+				grace: PublicDuration::from_millis(0),
 			})))
 		);
 	}
@@ -3012,10 +3011,7 @@ fn parse_access_purge() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE REVOKED"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3026,7 +3022,7 @@ fn parse_access_purge() {
 				base: Some(Base::Db),
 				expired: false,
 				revoked: true,
-				grace: Duration::from_millis(0),
+				grace: PublicDuration::from_millis(0),
 			})))
 		);
 	}
@@ -3034,10 +3030,7 @@ fn parse_access_purge() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE EXPIRED FOR 90d"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3048,7 +3041,7 @@ fn parse_access_purge() {
 				base: Some(Base::Db),
 				expired: true,
 				revoked: false,
-				grace: Duration::from_days(90).unwrap(),
+				grace: PublicDuration::from_days(90).unwrap(),
 			})))
 		);
 	}
@@ -3056,10 +3049,7 @@ fn parse_access_purge() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE REVOKED FOR 90d"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3070,7 +3060,7 @@ fn parse_access_purge() {
 				base: Some(Base::Db),
 				expired: false,
 				revoked: true,
-				grace: Duration::from_days(90).unwrap(),
+				grace: PublicDuration::from_days(90).unwrap(),
 			})))
 		);
 	}
@@ -3078,10 +3068,7 @@ fn parse_access_purge() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE REVOKED, EXPIRED FOR 90d"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3092,7 +3079,7 @@ fn parse_access_purge() {
 				base: Some(Base::Db),
 				expired: true,
 				revoked: true,
-				grace: Duration::from_days(90).unwrap(),
+				grace: PublicDuration::from_days(90).unwrap(),
 			})))
 		);
 	}

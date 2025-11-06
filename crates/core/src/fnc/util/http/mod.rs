@@ -13,6 +13,14 @@ use reqwest::redirect::Policy;
 use reqwest::{Client, Method, RequestBuilder, Response};
 use url::Url;
 
+use crate::cnf::SURREALDB_USER_AGENT;
+use crate::ctx::Context;
+use crate::err::Error;
+use crate::sql::expression::convert_public_value_to_internal;
+use crate::syn;
+use crate::types::{PublicBytes, PublicValue};
+use crate::val::{Object, Value};
+
 /// Global HTTP client manager for connection pooling and reuse.
 #[cfg(not(target_family = "wasm"))]
 static HTTP_CLIENT_MANAGER: tokio::sync::OnceCell<HttpClientManager> =
@@ -116,34 +124,23 @@ async fn get_http_client(
 	manager.get_or_create_client(capabilities, redirect_checker).await
 }
 
-use crate::cnf::SURREALDB_USER_AGENT;
-use crate::ctx::Context;
-use crate::err::Error;
-use crate::syn;
-use crate::val::{Bytes, Object, Value};
-
 pub(crate) fn uri_is_valid(uri: &str) -> bool {
 	reqwest::Url::parse(uri).is_ok()
 }
 
-fn encode_body(req: RequestBuilder, body: Value) -> Result<RequestBuilder> {
+fn encode_body(req: RequestBuilder, body: PublicValue) -> Result<RequestBuilder> {
 	let res = match body {
-		Value::Bytes(v) => req.body(v.into_inner()),
-		Value::String(v) => req.body(v),
+		PublicValue::Bytes(v) => req.body(v.into_inner()),
+		PublicValue::String(v) => req.body(v),
 		//TODO: Improve the handling here. We should check if this value can be send as a json
 		//value.
-		_ if !body.is_nullish() => req.json(&body.into_json_value().ok_or_else(|| {
-			anyhow::Error::new(Error::Thrown(
-				"tried to send request with surealql value body which cannot be encoded into json"
-					.to_owned(),
-			))
-		})?),
+		_ if !body.is_nullish() => req.json(&body.into_json_value()),
 		_ => req,
 	};
 	Ok(res)
 }
 
-async fn decode_response(res: Response) -> Result<Value> {
+async fn decode_response(res: Response) -> Result<PublicValue> {
 	match res.error_for_status() {
 		Ok(res) => match res.headers().get(CONTENT_TYPE) {
 			Some(mime) => match mime.to_str() {
@@ -156,16 +153,16 @@ async fn decode_response(res: Response) -> Result<Value> {
 				}
 				Ok(v) if v.starts_with("application/octet-stream") => {
 					let bytes = res.bytes().await.map_err(Error::from)?;
-					Ok(Value::Bytes(Bytes(bytes.into())))
+					Ok(PublicValue::Bytes(PublicBytes::from(bytes.to_vec())))
 				}
 				Ok(v) if v.starts_with("text") => {
 					let txt = res.text().await.map_err(Error::from)?;
-					let val = txt.into();
+					let val = PublicValue::String(txt);
 					Ok(val)
 				}
-				_ => Ok(Value::None),
+				_ => Ok(PublicValue::None),
 			},
-			_ => Ok(Value::None),
+			_ => Ok(PublicValue::None),
 		},
 		Err(err) => match err.status() {
 			Some(s) => bail!(Error::Http(format!(
@@ -188,6 +185,11 @@ async fn request(
 	// Check if the URI is valid and allowed
 	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.to_string()))?;
 	ctx.check_allowed_net(&url).await?;
+
+	let body = match body {
+		Some(v) => Some(crate::val::convert_value_to_public_value(v)?),
+		None => None,
+	};
 
 	// Get or create a shared HTTP client for better connection reuse
 	#[cfg(not(target_family = "wasm"))]
@@ -262,7 +264,8 @@ async fn request(
 		}
 	} else {
 		// Receive the response as a value
-		decode_response(res).await
+		let val = decode_response(res).await?;
+		Ok(convert_public_value_to_internal(val))
 	}
 }
 

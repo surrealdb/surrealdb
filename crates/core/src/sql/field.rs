@@ -5,7 +5,7 @@ use crate::sql::{Expr, Idiom};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Fields {
+pub(crate) enum Fields {
 	/// Fields had the `VALUE` clause and should only return the given selector
 	Value(Box<Field>),
 	/// Normal fields where an object with the selected fields is expected
@@ -26,6 +26,13 @@ impl Fields {
 		match self {
 			Fields::Value(field) => matches!(**field, Field::All),
 			Fields::Select(fields) => fields.iter().all(|x| matches!(x, Field::All)),
+		}
+	}
+
+	pub fn is_empty(&self) -> bool {
+		match self {
+			Fields::Value(_field) => false,
+			Fields::Select(fields) => fields.is_empty(),
 		}
 	}
 }
@@ -63,7 +70,7 @@ impl Display for Fields {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Field {
+pub(crate) enum Field {
 	/// The `*` in `SELECT * FROM ...`
 	#[default]
 	All,

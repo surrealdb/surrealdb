@@ -13,7 +13,7 @@ use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct RemoveDatabaseStatement {
+pub(crate) struct RemoveDatabaseStatement {
 	pub name: Expr,
 	pub if_exists: bool,
 	pub expunge: bool,
@@ -61,12 +61,9 @@ impl RemoveDatabaseStatement {
 		};
 
 		// Remove the index stores
-		#[cfg(not(target_family = "wasm"))]
 		ctx.get_index_stores()
 			.database_removed(ctx.get_index_builder(), &txn, db.namespace_id, db.database_id)
 			.await?;
-		#[cfg(target_family = "wasm")]
-		ctx.get_index_stores().database_removed(&txn, db.namespace_id, db.database_id).await?;
 		// Remove the sequences
 		if let Some(seq) = ctx.get_sequences() {
 			seq.database_removed(&txn, db.namespace_id, db.database_id).await?;

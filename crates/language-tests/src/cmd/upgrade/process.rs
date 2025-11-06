@@ -6,9 +6,10 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use futures::{SinkExt, StreamExt};
-use revision::revisioned;
-use surrealdb_core::dbs::{self, Status};
-use surrealdb_core::val::Value;
+use surrealdb_core::rpc::DbResponse;
+use surrealdb_core::rpc::DbResult;
+use surrealdb_core::rpc::DbResultError;
+use surrealdb_types::Value;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 use tokio::process::{Child, Command};
@@ -24,28 +25,6 @@ use super::Config;
 use super::protocol::{ProxyObject, ProxyValue};
 use crate::cli::{DsVersion, UpgradeBackend};
 use crate::tests::report::TestTaskResult;
-
-#[revisioned(revision = 1)]
-#[derive(Debug)]
-pub struct Failure {
-	code: i64,
-	pub message: String,
-}
-
-#[revisioned(revision = 1)]
-#[derive(Debug)]
-pub enum Data {
-	Other(Value),
-	Query(Vec<dbs::QueryMethodResponse>),
-	Live(dbs::Notification),
-}
-
-#[revisioned(revision = 1)]
-#[derive(Debug)]
-pub struct Response {
-	id: Option<Value>,
-	pub result: Result<Data, Failure>,
-}
 
 pub struct ProcessOutput {
 	pub stdout: String,
@@ -188,7 +167,7 @@ impl SurrealProcess {
 		self.assert_running_while(async {
 			let request = tokio_tungstenite::tungstenite::handshake::client::Request::builder()
 				.uri(format!("ws://127.0.0.1:{}/rpc", port))
-				.header(SEC_WEBSOCKET_PROTOCOL, "revision")
+				.header(SEC_WEBSOCKET_PROTOCOL, surrealdb_core::api::format::FLATBUFFERS)
 				.header("Upgrade", "websocket")
 				.header(SEC_WEBSOCKET_VERSION, "13")
 				.header(SEC_WEBSOCKET_KEY, generate_key())
@@ -251,52 +230,74 @@ pub struct SurrealConnection {
 }
 
 impl SurrealConnection {
-	pub async fn request(&mut self, mut object: ProxyObject) -> anyhow::Result<Response> {
+	pub async fn request(&mut self, mut object: ProxyObject) -> Result<DbResponse, DbResultError> {
 		let id = self.id;
 		self.id += 1;
 
 		object.insert("id".to_owned(), ProxyValue::from(id));
 
-		let message =
-			revision::to_vec(&ProxyValue::from(object)).context("Failed to serialize message")?;
-		self.socket.send(Message::Binary(message)).await.context("Failed to send query message")?;
+		// Convert ProxyObject to Value
+		let value = object.to_value();
+
+		let message = surrealdb_core::rpc::format::flatbuffers::encode(&value)
+			.map_err(|e| DbResultError::SerializationError(e.to_string()))?;
+		self.socket.send(Message::Binary(message.into())).await.map_err(|e| {
+			DbResultError::InternalError(format!("Failed to send query message: {}", e))
+		})?;
 
 		loop {
 			let Some(message) = self.socket.next().await else {
-				bail!("Websocket connection closed early")
+				return Err(DbResultError::InternalError(
+					"Websocket connection closed early".to_string(),
+				));
 			};
-			let message = message.context("Surrealdb connection error")?;
+			let message = message.map_err(|e| {
+				DbResultError::InternalError(format!("Surrealdb connection error: {}", e))
+			})?;
 
 			let data = match message {
 				Message::Ping(x) => {
-					self.socket.send(Message::Pong(x)).await?;
+					self.socket.send(Message::Pong(x)).await.map_err(|e| {
+						DbResultError::InternalError(format!("Failed to send pong: {}", e))
+					})?;
 					continue;
 				}
 				Message::Text(_) => {
-					bail!(
-						"Recieved a text message from the database, expecting only binary messages"
-					)
+					return Err(DbResultError::InternalError(
+						"Received a text message from the database, expecting only binary messages"
+							.to_string(),
+					));
 				}
 				Message::Binary(x) => x,
 				Message::Pong(_) => continue,
 				// Documentation says we don't get this message.
 				Message::Frame(_) => unreachable!(),
 				Message::Close(_) => {
-					bail!("Websocket connection to database closed early")
+					return Err(DbResultError::InternalError(
+						"Websocket connection to database closed early".to_string(),
+					));
 				}
 			};
 
-			let response = revision::from_slice::<Response>(&data)
-				.context("Failed to deserialize response")?;
+			let response: DbResponse = surrealdb_core::rpc::format::flatbuffers::decode(&data)
+				.map_err(|e| {
+					DbResultError::DeserializationError(format!(
+						"Failed to deserialize response: {}",
+						e
+					))
+				})?;
 
 			if response.result.is_err() {
 				let Err(e) = response.result else {
 					unreachable!()
 				};
-				bail!("Response returned a failure: {}", e.message);
+				return Err(DbResultError::InternalError(format!(
+					"Response returned a failure: {}",
+					e.message()
+				)));
 			}
 
-			if response.id != Some(Value::from(id)) {
+			if response.id != Some(Value::Number(surrealdb_types::Number::Int(id))) {
 				continue;
 			}
 
@@ -311,29 +312,23 @@ impl SurrealConnection {
 
 		let response = match self.request(request_obj).await {
 			Ok(x) => x,
-			Err(e) => return Ok(TestTaskResult::RunningError(e)),
+			Err(e) => return Ok(TestTaskResult::RunningError(e.into())),
 		};
 
 		match response.result {
-			Ok(Data::Query(e)) => {
+			Ok(DbResult::Query(e)) => {
 				let results = e
 					.into_iter()
-					.map(|x| {
-						if let Status::Ok = x.status {
-							Ok(Ok(x.result))
-						} else {
-							let Value::String(x) = x.result else {
-								bail!("Value of result with error status was not a string");
-							};
-							Ok(Err(x.to_string()))
-						}
+					.map(|x| match x.result {
+						Ok(value) => Ok(Ok(value)),
+						Err(e) => Ok(Err(e.message())),
 					})
 					.collect::<Result<Vec<Result<Value, String>>, anyhow::Error>>()?;
 
 				Ok(TestTaskResult::Results(results))
 			}
 			Ok(_) => bail!("Got invalid response type"),
-			Err(e) => Ok(TestTaskResult::RunningError(anyhow::Error::msg(e.message))),
+			Err(e) => Ok(TestTaskResult::RunningError(anyhow::Error::msg(e.message()))),
 		}
 	}
 }

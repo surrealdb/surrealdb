@@ -26,37 +26,37 @@ value = "'NONE'"
 value = "'NULL'"
 
 [[test.results]]
-error = "Expected `object` but found a `1dec`"
+error = "Could not cast into `object` using input `1dec`"
 
 [[test.results]]
-error = "Expected `array` but found a `1dec`"
+error = "Could not cast into `array` using input `1dec`"
 
 [[test.results]]
-error = "Expected `datetime` but found a `1dec`"
+error = "Could not cast into `datetime` using input `1dec`"
 
 [[test.results]]
-error = "Expected `duration` but found a `1dec`"
+error = "Could not cast into `duration` using input `1dec`"
 
 [[test.results]]
-error = "Expected `geometry` but found a `1dec`"
+error = "Could not cast into `geometry` using input `1dec`"
 
 [[test.results]]
-error = "Expected `uuid` but found a `1dec`"
+error = "Could not cast into `uuid` using input `1dec`"
 
 [[test.results]]
-error = "Expected `record` but found a `1dec`"
+error = "Could not cast into `record` using input `1dec`"
 
 [[test.results]]
-error = "Expected `geometry` but found a `1dec`"
+error = "Could not cast into `geometry` using input `1dec`"
 
 [[test.results]]
-error = "Expected `array` but found a `1dec`"
+error = "Could not cast into `array` using input `1dec`"
 
 [[test.results]]
-error = "Expected `function` but found a `1dec`"
+error = "Could not cast into `function` using input `1dec`"
 
 [[test.results]]
-error = "Expected `range` but found a `1dec`"
+error = "Could not cast into `range` using input `1dec`"
 
 */
 <number> 1dec;

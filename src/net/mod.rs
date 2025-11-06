@@ -34,14 +34,15 @@ use axum_server::Handle;
 use axum_server::tls_rustls::RustlsConfig;
 use http::header;
 use surrealdb::headers::{AUTH_DB, AUTH_NS, DB, ID, NS};
+use surrealdb_core::CommunityComposer;
+use surrealdb_core::dbs::capabilities::ExperimentalTarget;
+use surrealdb_core::kvs::Datastore;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceBuilder;
 use tower_http::ServiceBuilderExt;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::auth::AsyncRequireAuthorizationLayer;
-#[cfg(feature = "http-compression")]
 use tower_http::compression::CompressionLayer;
-#[cfg(feature = "http-compression")]
 use tower_http::compression::predicate::{NotForContentType, Predicate, SizeAbove};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::request_id::MakeRequestUuid;
@@ -50,15 +51,49 @@ use tower_http::sensitive_headers::{
 };
 use tower_http::trace::TraceLayer;
 
-use crate::cli::CF;
+use crate::cli::Config;
 use crate::cnf;
-use crate::core::dbs::capabilities::ExperimentalTarget;
-use crate::core::kvs::Datastore;
 use crate::net::signals::graceful_shutdown;
 use crate::rpc::{RpcState, notifications};
 use crate::telemetry::metrics::HttpMetricsLayer;
 
 const LOG: &str = "surrealdb::net";
+
+/// Factory for constructing the top-level Axum Router used by the HTTP server.
+///
+/// Embedders can provide their own implementation to add or remove routes, or wrap
+/// additional middleware. The default binary uses `DefaultRouterFactory`.
+pub trait RouterFactory {
+	/// Build and return the base Router. The server will attach shared state and layers.
+	fn configure_router() -> Router<Arc<RpcState>>;
+}
+
+/// Default router implementation for the community edition.
+///
+/// Provides the standard set of HTTP routes shipped with the `surreal` binary.
+/// Consumers embedding SurrealDB can implement `RouterFactory` on their own
+/// composer to customize routes.
+impl RouterFactory for CommunityComposer {
+	fn configure_router() -> Router<Arc<RpcState>> {
+		Router::<Arc<RpcState>>::new()
+			// Redirect until we provide a UI
+			.route("/", get(|| async { Redirect::temporary(cnf::APP_ENDPOINT) }))
+			.route("/status", get(|| async {}))
+			.merge(health::router())
+			.merge(export::router())
+			.merge(import::router())
+			.merge(rpc::router())
+			.merge(version::router())
+			.merge(sync::router())
+			.merge(sql::router())
+			.merge(signin::router())
+			.merge(signup::router())
+			.merge(key::router())
+			.merge(ml::router())
+			.merge(api::router())
+			.merge(gql::router())
+	}
+}
 
 ///
 /// AppState is used to share data between routes.
@@ -68,10 +103,22 @@ pub struct AppState {
 	pub datastore: Arc<Datastore>,
 }
 
-pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<()> {
-	// Get local copy of options
-	let opt = CF.get().unwrap();
-
+/// Initialize and start the HTTP server.
+///
+/// Sets up the Axum HTTP server with middleware, routing, and TLS configuration.
+///
+/// # Parameters
+/// - `opt`: Server configuration including bind address and TLS settings
+/// - `ds`: The datastore instance to serve
+/// - `ct`: Cancellation token for graceful shutdown
+///
+/// # Generic parameters
+/// - `F`: Router factory type implementing `RouterFactory`
+pub async fn init<F: RouterFactory>(
+	opt: &Config,
+	ds: Arc<Datastore>,
+	ct: CancellationToken,
+) -> Result<()> {
 	let app_state = AppState {
 		client_ip: opt.client_ip,
 		datastore: ds.clone(),
@@ -96,7 +143,6 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<()> {
 		// Limit the number of requests handled at once
 		.concurrency_limit(*cnf::NET_MAX_CONCURRENT_REQUESTS);
 
-	#[cfg(feature = "http-compression")]
 	let service = service.layer(
 		CompressionLayer::new().compress_when(
 			// Don't compress below 512 bytes
@@ -108,23 +154,9 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<()> {
 		),
 	);
 
-	#[cfg(feature = "http-compression")]
 	let allow_header = [
 		http::header::ACCEPT,
 		http::header::ACCEPT_ENCODING,
-		http::header::AUTHORIZATION,
-		http::header::CONTENT_TYPE,
-		http::header::ORIGIN,
-		NS.clone(),
-		DB.clone(),
-		ID.clone(),
-		AUTH_NS.clone(),
-		AUTH_DB.clone(),
-	];
-
-	#[cfg(not(feature = "http-compression"))]
-	let allow_header = [
-		http::header::ACCEPT,
 		http::header::AUTHORIZATION,
 		http::header::CONTENT_TYPE,
 		http::header::ORIGIN,
@@ -168,23 +200,7 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<()> {
 				.max_age(Duration::from_secs(86400)),
 		);
 
-	let axum_app = Router::<Arc<RpcState>>::new()
-		// Redirect until we provide a UI
-		.route("/", get(|| async { Redirect::temporary(cnf::APP_ENDPOINT) }))
-		.route("/status", get(|| async {}))
-		.merge(health::router())
-		.merge(export::router())
-		.merge(import::router())
-		.merge(rpc::router())
-		.merge(version::router())
-		.merge(sync::router())
-		.merge(sql::router())
-		.merge(signin::router())
-		.merge(signup::router())
-		.merge(key::router())
-		.merge(ml::router())
-		.merge(api::router());
-	//.merge(gql::router(ds.clone()));
+	let axum_app = F::configure_router();
 
 	if ds.get_capabilities().allows_experimental(&ExperimentalTarget::GraphQL) {
 		warn!(
@@ -197,7 +213,7 @@ pub async fn init(ds: Arc<Datastore>, ct: CancellationToken) -> Result<()> {
 	// Get a new server handler
 	let handle = Handle::new();
 
-	let rpc_state = Arc::new(RpcState::new());
+	let rpc_state = Arc::new(RpcState::default());
 
 	// Setup the graceful shutdown handler
 	let shutdown_handler = graceful_shutdown(rpc_state.clone(), ct.clone(), handle.clone());

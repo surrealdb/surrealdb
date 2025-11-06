@@ -3,6 +3,7 @@ use revision::revisioned;
 mod access;
 mod analyzer;
 mod api;
+pub(crate) mod base;
 mod bucket;
 mod config;
 mod event;
@@ -10,10 +11,10 @@ mod field;
 mod function;
 mod index;
 mod ml;
+mod module;
 mod param;
 mod sequence;
 mod user;
-
 use std::fmt::{Display, Formatter};
 
 pub use access::*;
@@ -26,7 +27,8 @@ pub use field::*;
 pub use function::*;
 pub use index::*;
 pub use ml::*;
-pub use param::*;
+pub use module::*;
+pub(crate) use param::*;
 pub use sequence::*;
 pub use user::*;
 
@@ -36,7 +38,7 @@ use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub enum Permission {
+pub(crate) enum Permission {
 	None,
 	#[default]
 	Full,
@@ -48,10 +50,6 @@ pub enum Permission {
 impl Permission {
 	pub fn is_none(&self) -> bool {
 		matches!(self, Self::None)
-	}
-
-	pub fn is_full(&self) -> bool {
-		matches!(self, Self::Full)
 	}
 
 	pub fn is_specific(&self) -> bool {
@@ -86,10 +84,10 @@ impl Display for Permission {
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Permissions {
-	pub select: Permission,
-	pub create: Permission,
-	pub update: Permission,
-	pub delete: Permission,
+	pub(crate) select: Permission,
+	pub(crate) create: Permission,
+	pub(crate) update: Permission,
+	pub(crate) delete: Permission,
 }
 
 impl Permissions {
@@ -100,29 +98,6 @@ impl Permissions {
 			update: Permission::None,
 			delete: Permission::None,
 		}
-	}
-
-	pub fn full() -> Self {
-		Permissions {
-			select: Permission::Full,
-			create: Permission::Full,
-			update: Permission::Full,
-			delete: Permission::Full,
-		}
-	}
-
-	pub fn is_none(&self) -> bool {
-		self.select == Permission::None
-			&& self.create == Permission::None
-			&& self.update == Permission::None
-			&& self.delete == Permission::None
-	}
-
-	pub fn is_full(&self) -> bool {
-		self.select == Permission::Full
-			&& self.create == Permission::Full
-			&& self.update == Permission::Full
-			&& self.delete == Permission::Full
 	}
 
 	pub fn to_sql_definition(&self) -> crate::sql::Permissions {

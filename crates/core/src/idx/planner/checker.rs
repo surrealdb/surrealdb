@@ -6,8 +6,8 @@ use ahash::HashMap;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::DatabaseDefinition;
 use crate::catalog::providers::TableProvider;
+use crate::catalog::{DatabaseDefinition, Record};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
@@ -19,7 +19,6 @@ use crate::idx::trees::hnsw::docs::HnswDocs;
 use crate::idx::trees::knn::Ids64;
 use crate::kvs::Transaction;
 use crate::val::RecordId;
-use crate::val::record::Record;
 
 pub enum HnswConditionChecker<'a> {
 	Hnsw(HnswChecker),
@@ -85,7 +84,7 @@ impl<'a> HnswConditionChecker<'a> {
 }
 
 impl<'a> MTreeConditionChecker<'a> {
-	pub fn new_cond(
+	pub(in crate::idx) fn new_cond(
 		ctx: &'a Context,
 		opt: &'a Options,
 		cond: Arc<Cond>,

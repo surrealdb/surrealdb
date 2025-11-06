@@ -83,9 +83,13 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		Backend::SurrealKv => {}
 		#[cfg(not(feature = "backend-surrealkv"))]
 		Backend::SurrealKv => bail!("SurrealKV backend feature is not enabled"),
-		#[cfg(any(feature = "backend-foundation-7_1", feature = "backend-foundation-7_1"))]
+		#[cfg(feature = "backend-tikv")]
+		Backend::TikV => {}
+		#[cfg(not(feature = "backend-tikv"))]
+		Backend::TikV => bail!("TiKV backend feature is not enabled"),
+		#[cfg(feature = "backend-foundation")]
 		Backend::Foundation => {}
-		#[cfg(not(any(feature = "backend-foundation-7_1", feature = "backend-foundation-7_1")))]
+		#[cfg(not(feature = "backend-foundation"))]
 		Backend::Foundation => bail!("FoundationDB backend features is not enabled"),
 	}
 
@@ -277,7 +281,7 @@ pub async fn grade_task(
 		.expect("failed to create datastore for running matching expressions");
 
 	let mut session = surrealdb_core::dbs::Session::default();
-	ds.process_use(&mut session, Some("match".to_string()), Some("match".to_string()))
+	ds.process_use(None, &mut session, Some("match".to_string()), Some("match".to_string()))
 		.await
 		.unwrap();
 
@@ -352,7 +356,7 @@ async fn run_test_with_dbs(
 		.unwrap_or(Duration::from_secs(2));
 
 	let mut import_session = Session::owner();
-	dbs.process_use(&mut import_session, session.ns.clone(), session.db.clone()).await?;
+	dbs.process_use(None, &mut import_session, session.ns.clone(), session.db.clone()).await?;
 
 	for import in set[id].config.imports() {
 		let Some(test) = set.find_all(import) else {
@@ -400,13 +404,11 @@ async fn run_test_with_dbs(
 		references_enabled: dbs
 			.get_capabilities()
 			.allows_experimental(&ExperimentalTarget::RecordReferences),
-		bearer_access_enabled: dbs
-			.get_capabilities()
-			.allows_experimental(&ExperimentalTarget::BearerAccess),
 		define_api_enabled: dbs
 			.get_capabilities()
 			.allows_experimental(&ExperimentalTarget::DefineApi),
 		files_enabled: dbs.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
+		surrealism_enabled: dbs.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism),
 		..Default::default()
 	};
 

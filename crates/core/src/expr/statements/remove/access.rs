@@ -13,7 +13,7 @@ use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct RemoveAccessStatement {
+pub(crate) struct RemoveAccessStatement {
 	pub name: Expr,
 	pub base: Base,
 	pub if_exists: bool,

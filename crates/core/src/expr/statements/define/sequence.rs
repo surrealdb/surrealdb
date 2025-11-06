@@ -17,7 +17,7 @@ use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineSequenceStatement {
+pub(crate) struct DefineSequenceStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub batch: Expr,
@@ -73,7 +73,7 @@ impl DefineSequenceStatement {
 
 		let db = {
 			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_db(ns, db, opt.strict).await?
+			txn.get_or_add_db(Some(ctx), ns, db, opt.strict).await?
 		};
 
 		// Process the statement

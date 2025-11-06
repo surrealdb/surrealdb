@@ -1,9 +1,9 @@
 use revision::revisioned;
+use surrealdb_types::{ToSql, write_sql};
 
 use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::sql::statements::define::DefineKind;
 use crate::val::Value;
 
@@ -14,7 +14,7 @@ pub struct MlModelDefinition {
 	pub name: String,
 	pub version: String,
 	pub comment: Option<String>,
-	pub permissions: Permission,
+	pub(crate) permissions: Permission,
 }
 
 impl_kv_value_revisioned!(MlModelDefinition);
@@ -47,7 +47,7 @@ impl InfoStructure for MlModelDefinition {
 }
 
 impl ToSql for MlModelDefinition {
-	fn to_sql(&self) -> String {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }

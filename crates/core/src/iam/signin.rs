@@ -7,6 +7,7 @@ use jsonwebtoken::{EncodingKey, Header, encode};
 use md5::Digest;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
+use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::access::{
@@ -21,55 +22,107 @@ use crate::catalog::providers::{
 };
 use crate::catalog::{DatabaseDefinition, NamespaceDefinition};
 use crate::cnf::{INSECURE_FORWARD_ACCESS_ERRORS, SERVER_NAME};
-use crate::dbs::capabilities::ExperimentalTarget;
-use crate::dbs::{Session, Variables};
+use crate::dbs::Session;
 use crate::err::Error;
 use crate::expr::access_type;
 use crate::expr::statements::access;
 use crate::iam::issue::{config, expiration};
-use crate::iam::token::{Claims, HEADER};
+use crate::iam::token::{Claims, HEADER, Token};
 use crate::iam::{self, Auth, algorithm_to_jwt_algorithm};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::val::{Datetime, Object, Value};
+use crate::types::{PublicValue, PublicVariables};
+use crate::val::{Datetime, Value};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct SigninData {
-	pub token: String,
-	pub refresh: Option<String>,
-}
-
-pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Result<SigninData> {
+/// Authenticates a user and returns an authentication token.
+///
+/// This function handles user authentication for SurrealDB and returns a token
+/// that can be used for subsequent API requests. The token may include both
+/// access and refresh tokens depending on the authentication method and
+/// configuration.
+///
+/// # Parameters
+///
+/// - `kvs`: The datastore instance for database operations
+/// - `session`: The current session context
+/// - `vars`: Public variables containing authentication credentials
+///
+/// # Returns
+///
+/// Returns a `Token` that can be either:
+/// - An access token only
+/// - An access token and a refresh token
+///
+/// # Authentication Methods
+///
+/// The function supports multiple authentication methods based on the provided variables:
+/// - **Database access method**: When `NS`, `DB`, and `AC` are provided
+/// - **Database user credentials**: When `NS`, `DB`, `user`, and `pass` are provided
+/// - **Namespace user credentials**: When `NS`, `user`, and `pass` are provided
+/// - **Root user credentials**: When `user` and `pass` are provided
+///
+/// # Examples
+///
+/// ```rust
+/// use surrealdb_core::iam::signin;
+/// use surrealdb_core::kvs::Datastore;
+/// use surrealdb_core::dbs::Session;
+/// use surrealdb_core::types::PublicVariables;
+///
+/// // Database access method
+/// let vars = PublicVariables::from([
+///     ("NS".to_string(), "test_namespace".into()),
+///     ("DB".to_string(), "test_database".into()),
+///     ("AC".to_string(), "my_access_method".into()),
+///     // ... other access method parameters
+/// ]);
+///
+/// let token = signin(&kvs, &mut session, vars).await?;
+/// match token {
+///     Token::Access(access_token) => {
+///         // Use access token for API requests
+///     }
+///     Token::WithRefresh { access, refresh } => {
+///         // Use access token for API requests
+///         // Store refresh token for token renewal
+///     }
+/// }
+/// ```
+pub async fn signin(
+	kvs: &Datastore,
+	session: &mut Session,
+	vars: PublicVariables,
+) -> Result<Token> {
 	// Parse the specified variables
-	let ns = vars.get("NS").or_else(|| vars.get("ns"));
-	let db = vars.get("DB").or_else(|| vars.get("db"));
-	let ac = vars.get("AC").or_else(|| vars.get("ac"));
+	let ns = vars.get("NS").or_else(|| vars.get("ns")).cloned();
+	let db = vars.get("DB").or_else(|| vars.get("db")).cloned();
+	let ac = vars.get("AC").or_else(|| vars.get("ac")).cloned();
 	// Check if the parameters exist
 	match (ns, db, ac) {
 		// DB signin with access method
 		(Some(ns), Some(db), Some(ac)) => {
 			// Process the provided values
-			let ns = ns.to_raw_string();
-			let db = db.to_raw_string();
-			let ac = ac.to_raw_string();
+			let ns = ns.into_string()?;
+			let db = db.into_string()?;
+			let ac = ac.into_string()?;
 			// Attempt to signin using specified access method
 			super::signin::db_access(kvs, session, ns, db, ac, vars).await
 		}
 		// DB signin with user credentials
 		(Some(ns), Some(db), None) => {
 			// Get the provided user and pass
-			let user = vars.get("user");
-			let pass = vars.get("pass");
+			let user = vars.get("user").cloned();
+			let pass = vars.get("pass").cloned();
 			// Validate the user and pass
 			match (user, pass) {
 				// There is a username and password
 				(Some(user), Some(pass)) => {
 					// Process the provided values
-					let ns = ns.to_raw_string();
-					let db = db.to_raw_string();
-					let user = user.to_raw_string();
-					let pass = pass.to_raw_string();
+					let ns = ns.into_string()?;
+					let db = db.into_string()?;
+					let user = user.into_string()?;
+					let pass = pass.into_string()?;
 					// Attempt to signin to database
 					super::signin::db_user(kvs, session, ns, db, user, pass).await
 				}
@@ -79,24 +132,24 @@ pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Res
 		// NS signin with access method
 		(Some(ns), None, Some(ac)) => {
 			// Process the provided values
-			let ns = ns.to_raw_string();
-			let ac = ac.to_raw_string();
+			let ns = ns.into_string()?;
+			let ac = ac.into_string()?;
 			// Attempt to signin using specified access method
 			super::signin::ns_access(kvs, session, ns, ac, vars).await
 		}
 		// NS signin with user credentials
 		(Some(ns), None, None) => {
 			// Get the provided user and pass
-			let user = vars.get("user");
-			let pass = vars.get("pass");
+			let user = vars.get("user").cloned();
+			let pass = vars.get("pass").cloned();
 			// Validate the user and pass
 			match (user, pass) {
 				// There is a username and password
 				(Some(user), Some(pass)) => {
 					// Process the provided values
-					let ns = ns.to_raw_string();
-					let user = user.to_raw_string();
-					let pass = pass.to_raw_string();
+					let ns = ns.into_string()?;
+					let user = user.into_string()?;
+					let pass = pass.into_string()?;
 					// Attempt to signin to namespace
 					super::signin::ns_user(kvs, session, ns, user, pass).await
 				}
@@ -106,15 +159,15 @@ pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Res
 		// ROOT signin with user credentials
 		(None, None, None) => {
 			// Get the provided user and pass
-			let user = vars.get("user");
-			let pass = vars.get("pass");
+			let user = vars.get("user").cloned();
+			let pass = vars.get("pass").cloned();
 			// Validate the user and pass
 			match (user, pass) {
 				// There is a username and password
 				(Some(user), Some(pass)) => {
 					// Process the provided values
-					let user = user.to_raw_string();
-					let pass = pass.to_raw_string();
+					let user = user.into_string()?;
+					let pass = pass.into_string()?;
 					// Attempt to signin to root
 					super::signin::root_user(kvs, session, user, pass).await
 				}
@@ -125,14 +178,78 @@ pub async fn signin(kvs: &Datastore, session: &mut Session, vars: Object) -> Res
 	}
 }
 
+/// Authenticates a user using a database access method.
+///
+/// This function handles authentication for users who have been granted access
+/// through a specific access method defined on the database. It supports both
+/// traditional access tokens and refresh token flows.
+///
+/// # Parameters
+///
+/// - `kvs`: The datastore instance for database operations
+/// - `session`: The current session context
+/// - `ns`: The namespace name
+/// - `db`: The database name
+/// - `ac`: The access method name
+/// - `vars`: Public variables containing authentication parameters
+///
+/// # Returns
+///
+/// Returns a `Token` that may include both access and refresh tokens
+/// depending on the access method configuration.
+///
+/// # Access Method Configuration
+///
+/// The access method must be defined with the `DEFINE ACCESS` statement
+/// and can include refresh token support with the `WITH REFRESH` clause:
+///
+/// ```sql
+/// DEFINE ACCESS my_access ON DATABASE TYPE RECORD
+/// SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+/// SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+/// WITH REFRESH
+/// DURATION FOR SESSION 1d FOR TOKEN 15s
+/// ```
+///
+/// # Examples
+///
+/// ```rust
+/// use surrealdb_core::iam::signin::db_access;
+/// use surrealdb_core::kvs::Datastore;
+/// use surrealdb_core::dbs::Session;
+/// use surrealdb_core::types::PublicVariables;
+///
+/// let vars = PublicVariables::from([
+///     ("email".to_string(), "user@example.com".into()),
+///     ("pass".to_string(), "password123".into()),
+/// ]);
+///
+/// let token = db_access(
+///     &kvs,
+///     &mut session,
+///     "test_namespace".to_string(),
+///     "test_database".to_string(),
+///     "my_access".to_string(),
+///     vars
+/// ).await?;
+///
+/// match token {
+///     Token::Access(access_token) => {
+///         // Traditional access token
+///     }
+///     Token::WithRefresh { access, refresh } => {
+///         // Access token with refresh capability
+///     }
+/// }
+/// ```
 pub async fn db_access(
 	kvs: &Datastore,
 	session: &mut Session,
 	ns: String,
 	db: String,
 	ac: String,
-	vars: Object,
-) -> Result<SigninData> {
+	vars: PublicVariables,
+) -> Result<Token> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 
@@ -170,7 +287,7 @@ pub async fn db_access(
 								Some(&db_def),
 								av,
 								bearer,
-								key.to_raw_string(),
+								key.clone().into_string()?,
 							)
 							.await;
 						}
@@ -178,19 +295,17 @@ pub async fn db_access(
 					match &at.signin {
 						// This record access allows signin
 						Some(val) => {
-							// Setup the query params
-							let vars = Some(Variables::from(vars));
 							// Setup the system session for finding the signin record
 							let mut sess = Session::editor().with_ns(&ns).with_db(&db);
 							sess.ip.clone_from(&session.ip);
 							sess.or.clone_from(&session.or);
 							// Compute the value with the params
-							match kvs.evaluate(val, &sess, vars).await {
+							match kvs.evaluate(val, &sess, Some(vars)).await {
 								// The signin value succeeded
 								Ok(val) => {
-									match val.record() {
+									match val.into_record() {
 										// There is a record returned
-										Some(mut rid) => {
+										Ok(mut rid) => {
 											// Create the authentication key
 											let key = iam::issue::config(iss.alg, &iss.key)?;
 											// Create the authentication claim
@@ -203,7 +318,7 @@ pub async fn db_access(
 												ns: Some(ns.clone()),
 												db: Some(db.clone()),
 												ac: Some(ac.clone()),
-												id: Some(rid.to_string()),
+												id: Some(rid.to_sql()),
 												..Claims::default()
 											};
 											// AUTHENTICATE clause
@@ -212,9 +327,17 @@ pub async fn db_access(
 												// record
 												let mut sess =
 													Session::editor().with_ns(&ns).with_db(&db);
-												sess.rd = Some(rid.clone().into());
+												sess.rd = Some(
+													crate::val::convert_value_to_public_value(
+														Value::RecordId(rid.clone().into()),
+													)
+													.expect("record id conversion should succeed"),
+												);
 												sess.tk = Some(
-													claims.clone().into_claims_object().into(),
+													crate::val::convert_value_to_public_value(
+														claims.clone().into_claims_object().into(),
+													)
+													.expect("claims conversion should succeed"),
 												);
 												sess.ip.clone_from(&session.ip);
 												sess.or.clone_from(&session.or);
@@ -223,29 +346,16 @@ pub async fn db_access(
 											// Create refresh token if defined for the record access
 											// method
 											let refresh = match &at.bearer {
-												Some(_) => {
-													// TODO(gguillemas): Remove this once bearer
-													// access is no longer experimental
-													if !kvs.get_capabilities().allows_experimental(
-														&ExperimentalTarget::BearerAccess,
-													) {
-														debug!(
-															"Will not create refresh token with disabled bearer access feature"
-														);
-														None
-													} else {
-														Some(
-															create_refresh_token_record(
-																kvs,
-																av.name.clone(),
-																&ns,
-																&db,
-																rid.clone(),
-															)
-															.await?,
-														)
-													}
-												}
+												Some(_) => Some(
+													create_refresh_token_record(
+														kvs,
+														av.name.clone(),
+														&ns,
+														&db,
+														rid.clone().into(),
+													)
+													.await?,
+												),
 												None => None,
 											};
 											// Log the authenticated access method info
@@ -260,24 +370,37 @@ pub async fn db_access(
 												&key,
 											);
 											// Set the authentication on the session
-											session.tk = Some(claims.into_claims_object().into());
+											session.tk = Some(
+												crate::val::convert_value_to_public_value(
+													claims.into_claims_object().into(),
+												)
+												.expect("claims conversion should succeed"),
+											);
 											session.ns = Some(ns.clone());
 											session.db = Some(db.clone());
 											session.ac = Some(ac.clone());
-											session.rd = Some(Value::from(rid.clone()));
+											session.rd = Some(
+												crate::val::convert_value_to_public_value(
+													Value::RecordId(rid.clone().into()),
+												)
+												.expect("record id conversion should succeed"),
+											);
 											session.exp =
 												iam::issue::expiration(av.session_duration)?;
 											session.au = Arc::new(Auth::new(Actor::new(
-												rid.to_string(),
+												rid.to_sql(),
 												Default::default(),
-												Level::Record(ns, db, rid.to_string()),
+												Level::Record(ns, db, rid.to_sql()),
 											)));
 											// Check the authentication token
 											match enc {
 												// The auth token was created successfully
-												Ok(token) => Ok(SigninData {
-													token,
-													refresh,
+												Ok(token) => Ok(match refresh {
+													Some(refresh) => Token::WithRefresh {
+														access: token,
+														refresh,
+													},
+													None => Token::Access(token),
 												}),
 												_ => Err(anyhow::Error::new(
 													Error::TokenMakingFailed,
@@ -294,7 +417,7 @@ pub async fn db_access(
 									// If the SIGNIN clause failed due to an unexpected error, be
 									// more specific This allows clients to handle these
 									// errors, which may be retryable
-									Some(Error::Tx(_) | Error::TxFailure | Error::TxRetryable) => {
+									Some(Error::Tx(_) | Error::TxRetryable(_)) => {
 										debug!(
 											"Unexpected error found while executing a SIGNIN clause: {e}"
 										);
@@ -321,7 +444,7 @@ pub async fn db_access(
 				catalog::AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
-						Some(key) => key.to_raw_string(),
+						Some(key) => key.clone().into_string()?,
 						None => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
 					};
 
@@ -353,7 +476,7 @@ pub async fn db_user(
 	db: String,
 	user: String,
 	pass: String,
-) -> Result<SigninData> {
+) -> Result<Token> {
 	match verify_db_creds(kvs, &ns, &db, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -378,7 +501,10 @@ pub async fn db_user(
 			let au = auth_from_level_user(Level::Database(ns.clone(), db.clone()), &u)?;
 
 			// Set the authentication on the session
-			session.tk = Some(val.into_claims_object().into());
+			session.tk = Some(
+				crate::val::convert_value_to_public_value(val.into_claims_object().into())
+					.expect("claims conversion should succeed"),
+			);
 			session.ns = Some(ns.clone());
 			session.db = Some(db.clone());
 			session.exp = expiration(u.session_duration)?;
@@ -386,10 +512,7 @@ pub async fn db_user(
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(SigninData {
-					token: tk,
-					refresh: None,
-				}),
+				Ok(tk) => Ok(Token::Access(tk)),
 				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 			}
 		}
@@ -408,8 +531,8 @@ pub async fn ns_access(
 	session: &mut Session,
 	ns: String,
 	ac: String,
-	vars: Object,
-) -> Result<SigninData> {
+	vars: PublicVariables,
+) -> Result<Token> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	let ns_def = tx.expect_ns_by_name(&ns).await?;
@@ -425,7 +548,7 @@ pub async fn ns_access(
 				catalog::AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
-						Some(key) => key.to_raw_string(),
+						Some(key) => key.clone().into_string()?,
 						None => bail!(Error::AccessBearerMissingKey),
 					};
 
@@ -445,7 +568,7 @@ pub async fn ns_user(
 	ns: String,
 	user: String,
 	pass: String,
-) -> Result<SigninData> {
+) -> Result<Token> {
 	match verify_ns_creds(kvs, &ns, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -470,17 +593,17 @@ pub async fn ns_user(
 			let au = auth_from_level_user(Level::Namespace(ns.clone()), &u)?;
 
 			// Set the authentication on the session
-			session.tk = Some(val.into_claims_object().into());
+			session.tk = Some(
+				crate::val::convert_value_to_public_value(val.into_claims_object().into())
+					.expect("claims conversion should succeed"),
+			);
 			session.ns = Some(ns.clone());
 			session.exp = expiration(u.session_duration)?;
 			session.au = Arc::new(au);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(SigninData {
-					token: tk,
-					refresh: None,
-				}),
+				Ok(tk) => Ok(Token::Access(tk)),
 				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 			}
 		}
@@ -499,7 +622,7 @@ pub async fn root_user(
 	session: &mut Session,
 	user: String,
 	pass: String,
-) -> Result<SigninData> {
+) -> Result<Token> {
 	match verify_root_creds(kvs, &user, &pass).await {
 		Ok(u) => {
 			// Create the authentication key
@@ -522,16 +645,16 @@ pub async fn root_user(
 			let au = auth_from_level_user(Level::Root, &u)?;
 
 			// Set the authentication on the session
-			session.tk = Some(val.into_claims_object().into());
+			session.tk = Some(
+				crate::val::convert_value_to_public_value(val.into_claims_object().into())
+					.expect("claims conversion should succeed"),
+			);
 			session.exp = expiration(u.session_duration)?;
 			session.au = Arc::new(au);
 			// Check the authentication token
 			match enc {
 				// The auth token was created successfully
-				Ok(tk) => Ok(SigninData {
-					token: tk,
-					refresh: None,
-				}),
+				Ok(tk) => Ok(Token::Access(tk)),
 				_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 			}
 		}
@@ -547,8 +670,8 @@ pub async fn root_access(
 	kvs: &Datastore,
 	session: &mut Session,
 	ac: String,
-	vars: Object,
-) -> Result<SigninData> {
+	vars: PublicVariables,
+) -> Result<Token> {
 	// Create a new readonly transaction
 	let tx = kvs.transaction(Read, Optimistic).await?;
 	// Fetch the specified access method from storage
@@ -564,8 +687,8 @@ pub async fn root_access(
 				catalog::AccessType::Bearer(at) => {
 					// Extract key identifier and key from the provided variables.
 					let key = match vars.get("key") {
-						Some(key) => key.to_raw_string(),
-						None => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
+						Some(PublicValue::String(key)) => key.clone(),
+						_ => return Err(anyhow::Error::new(Error::AccessBearerMissingKey)),
 					};
 
 					signin_bearer(kvs, session, None, None, av, &at, key).await
@@ -578,6 +701,43 @@ pub async fn root_access(
 	}
 }
 
+/// Authenticates a user using bearer token authentication (refresh token flow).
+///
+/// This function handles authentication for refresh tokens, which are long-lived
+/// bearer tokens that can be used to obtain new access tokens without re-authentication.
+/// This is the core function that validates refresh tokens and issues new token pairs.
+///
+/// # Parameters
+///
+/// - `kvs`: The datastore instance for database operations
+/// - `session`: The current session context to be updated with authentication state
+/// - `ns`: Optional namespace definition for scoped authentication
+/// - `db`: Optional database definition for scoped authentication
+/// - `av`: The access method definition
+/// - `at`: The bearer access configuration
+/// - `key`: The bearer token (refresh token) to validate
+///
+/// # Returns
+///
+/// Returns a new `Token` containing both access and refresh tokens.
+///
+/// # Security
+///
+/// This function implements several security measures:
+/// - Validates the bearer token format and extracts the grant identifier
+/// - Checks if the grant exists and hasn't been revoked or expired
+/// - Uses constant-time comparison to prevent timing attacks
+/// - Revokes the old refresh token after successful authentication (single-use model)
+/// - Issues a new refresh token for the next refresh cycle
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The bearer access method doesn't support issuing tokens
+/// - The grant identifier is invalid
+/// - The grant doesn't exist, is revoked, or is expired
+/// - The bearer token doesn't match the stored grant
+/// - User roles cannot be retrieved (for system user grants)
 pub async fn signin_bearer(
 	kvs: &Datastore,
 	session: &mut Session,
@@ -586,13 +746,7 @@ pub async fn signin_bearer(
 	av: Arc<catalog::AccessDefinition>,
 	at: &catalog::BearerAccess,
 	key: String,
-) -> Result<SigninData> {
-	// TODO(gguillemas): Remove this once bearer access is no longer experimental.
-	if !kvs.get_capabilities().allows_experimental(&ExperimentalTarget::BearerAccess) {
-		// Return opaque error to avoid leaking the existence of the feature.
-		debug!("Error attempting to authenticate with disabled bearer access feature");
-		bail!(Error::InvalidAuth);
-	}
+) -> Result<Token> {
 	// Check if the bearer access method supports issuing tokens.
 	let iss = match &at.jwt.issue {
 		Some(iss) => iss.clone(),
@@ -698,7 +852,10 @@ pub async fn signin_bearer(
 			(None, None) => Session::editor(),
 			(None, Some(_)) => bail!(Error::NsEmpty),
 		};
-		sess.tk = Some(claims.clone().into_claims_object().into());
+		sess.tk = Some(
+			crate::val::convert_value_to_public_value(claims.clone().into_claims_object().into())
+				.expect("claims conversion should succeed"),
+		);
 		sess.ip.clone_from(&session.ip);
 		sess.or.clone_from(&session.or);
 		authenticate_generic(kvs, &sess, au).await?;
@@ -750,7 +907,17 @@ pub async fn signin_bearer(
 	// Create the authentication token.
 	let enc = encode(&Header::new(algorithm_to_jwt_algorithm(iss.alg)), &claims, &key);
 	// Set the authentication on the session.
-	session.tk = Some(claims.into_claims_object().into());
+	//
+	// IMPORTANT: These assignments overwrite the session's working context (ns, db, ac).
+	// This is intentional behavior, especially during token refresh operations.
+	// When refreshing, the session is restored to the original authentication scope
+	// from the bearer grant (which comes from the expired access token's claims),
+	// not the current session's working context that may have been modified by USE commands.
+	// This maintains proper authentication boundaries and prevents scope confusion.
+	session.tk = Some(
+		crate::val::convert_value_to_public_value(claims.into_claims_object().into())
+			.expect("claims conversion should succeed"),
+	);
 	session.ns.clone_from(&ns.map(|ns| ns.name.clone()));
 	session.db.clone_from(&db.map(|db| db.name.clone()));
 	session.ac = Some(av.name.to_string());
@@ -785,19 +952,63 @@ pub async fn signin_bearer(
 					bail!(Error::InvalidAuth);
 				},
 			)));
-			session.rd = Some(Value::from(rid.clone()));
+			session.rd = Some(
+				crate::val::convert_value_to_public_value(Value::from(rid.clone()))
+					.expect("value conversion should succeed"),
+			);
 		}
 	};
 	// Return the authentication token.
 	match enc {
-		Ok(token) => Ok(SigninData {
-			token,
-			refresh,
+		Ok(token) => Ok(match refresh {
+			Some(refresh) => Token::WithRefresh {
+				access: token,
+				refresh,
+			},
+			None => Token::Access(token),
 		}),
 		_ => Err(anyhow::Error::new(Error::TokenMakingFailed)),
 	}
 }
 
+/// Validates a bearer token and extracts the grant identifier.
+///
+/// This function parses and validates the structure of a bearer token (refresh token)
+/// and returns the grant identifier that can be used to look up the grant record
+/// in the database.
+///
+/// # Bearer Token Format
+///
+/// Bearer tokens follow this format: `{prefix}-{type}-{identifier}-{key}`
+///
+/// - `prefix`: Always "sdb" for SurrealDB tokens
+/// - `type`: The bearer access type (e.g., "refresh")
+/// - `identifier`: A unique identifier for the grant (used as database key)
+/// - `key`: The actual secret key value
+///
+/// # Parameters
+///
+/// - `key`: The bearer token string to validate
+///
+/// # Returns
+///
+/// Returns the grant identifier on success, which can be used to fetch
+/// the grant record from the database.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - The token doesn't have exactly 4 parts separated by "-"
+/// - The bearer access type is invalid
+/// - The identifier length doesn't match the expected length
+/// - The key length doesn't match the expected length
+///
+/// # Examples
+///
+/// ```ignore
+/// let grant_id = validate_grant_bearer("sdb-refresh-abc123def456-xyz789uvw012")?;
+/// // grant_id == "abc123def456"
+/// ```
 pub fn validate_grant_bearer(key: &str) -> Result<String> {
 	let parts: Vec<&str> = key.split("-").collect();
 	ensure!(parts.len() == 4, Error::AccessGrantBearerInvalid);
@@ -815,7 +1026,7 @@ pub fn validate_grant_bearer(key: &str) -> Result<String> {
 	Ok(kid.to_string())
 }
 
-pub fn verify_grant_bearer(
+pub(crate) fn verify_grant_bearer(
 	gr: &Arc<catalog::AccessGrant>,
 	key: String,
 ) -> Result<&catalog::GrantBearer> {
@@ -864,15 +1075,12 @@ pub fn verify_grant_bearer(
 
 #[cfg(test)]
 mod tests {
-	use std::collections::HashMap;
-
 	use chrono::Duration;
 	use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 	use regex::Regex;
 
 	use super::*;
 	use crate::catalog::{DatabaseId, NamespaceId};
-	use crate::dbs::Capabilities;
 	use crate::iam::Role;
 	use crate::sql::statements::define::DefineKind;
 	use crate::sql::statements::define::user::PassType;
@@ -924,16 +1132,16 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "pass".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -996,16 +1204,16 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "incorrect".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "incorrect");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -1045,31 +1253,32 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "pass".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
 			match res {
 				Ok(data) => {
-					assert!(data.refresh.is_none(), "Refresh token was unexpectedly returned")
+					assert!(
+						!matches!(data, Token::WithRefresh { .. }),
+						"Refresh token was unexpectedly returned"
+					)
 				}
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			}
 		}
 		// Test with refresh
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
@@ -1098,24 +1307,27 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "pass".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
 			let refresh = match res {
-				Ok(data) => match data.refresh {
-					Some(refresh) => refresh,
-					None => panic!("Refresh token was not returned"),
+				Ok(data) => match data {
+					Token::WithRefresh {
+						refresh,
+						..
+					} => refresh,
+					Token::Access(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
@@ -1140,25 +1352,28 @@ mod tests {
 				"Session expiration is expected to follow the defined duration"
 			);
 			// Signin with the refresh token
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("refresh", refresh.clone().into());
+			let mut vars = PublicVariables::new();
+			vars.insert("refresh", refresh.clone());
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 			// Authentication should be identical as with user credentials
 			match res {
-				Ok(data) => match data.refresh {
-					Some(new_refresh) => assert!(
+				Ok(data) => match data {
+					Token::WithRefresh {
+						refresh: new_refresh,
+						..
+					} => assert!(
 						new_refresh != refresh,
 						"New refresh token is identical to used one"
 					),
-					None => panic!("Refresh token was not returned"),
+					Token::Access(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
@@ -1183,15 +1398,15 @@ mod tests {
 				"Session expiration is expected to follow the defined duration"
 			);
 			// Attempt to sign in with the original refresh token
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("refresh", refresh.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("refresh", refresh);
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -1203,9 +1418,7 @@ mod tests {
 		}
 		// Test with expired refresh
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
@@ -1234,37 +1447,40 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "pass".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 			let refresh = match res {
-				Ok(data) => match data.refresh {
-					Some(refresh) => refresh,
-					None => panic!("Refresh token was not returned"),
+				Ok(data) => match data {
+					Token::WithRefresh {
+						refresh,
+						..
+					} => refresh,
+					Token::Access(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
 			// Wait for the refresh token to expire
 			std::thread::sleep(Duration::seconds(2).to_std().unwrap());
 			// Signin with the refresh token
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("refresh", refresh.clone().into());
+			let mut vars = PublicVariables::new();
+			vars.insert("refresh", refresh.clone());
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 			// Should fail due to the refresh token being expired
@@ -1276,9 +1492,7 @@ mod tests {
 		}
 		// Test that only the hash of the refresh token is stored
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			ds.execute(
 				r#"
@@ -1307,24 +1521,27 @@ mod tests {
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "pass".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
 			let refresh = match res {
-				Ok(data) => match data.refresh {
-					Some(refresh) => refresh,
-					None => panic!("Refresh token was not returned"),
+				Ok(data) => match data {
+					Token::WithRefresh {
+						refresh,
+						..
+					} => refresh,
+					Token::Access(_) => panic!("Refresh token was not returned"),
 				},
 				Err(e) => panic!("Failed to signin with credentials: {e}"),
 			};
@@ -1434,16 +1651,16 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "pass".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 			assert!(res.is_ok(), "Failed to signin with credentials: {:?}", res);
@@ -1472,11 +1689,18 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Decode token and check that it has been issued as intended
 			if let Ok(sd) = res {
+				let token = match &sd {
+					Token::Access(token) => token,
+					Token::WithRefresh {
+						access: token,
+						..
+					} => token,
+				};
 				// Check that token can be verified with the defined algorithm
 				let val = Validation::new(Algorithm::RS256);
 				// Check that token can be verified with the defined public key
 				let token_data = decode::<Claims>(
-					&sd.token,
+					token,
 					&DecodingKey::from_rsa_pem(public_key.as_ref()).unwrap(),
 					&val,
 				)
@@ -1681,9 +1905,16 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 					// Check issued token
 					if let Ok(sd) = res {
+						let token = match &sd {
+							Token::Access(token) => token,
+							Token::WithRefresh {
+								access: token,
+								..
+							} => token,
+						};
 						// Decode token without validation
 						let token_data =
-							decode::<Claims>(&sd.token, &DecodingKey::from_secret(&[]), &{
+							decode::<Claims>(token, &DecodingKey::from_secret(&[]), &{
 								let mut validation =
 									Validation::new(jsonwebtoken::Algorithm::HS256);
 								validation.insecure_disable_signature_validation();
@@ -1735,11 +1966,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNIN (
-						SELECT * FROM type::thing('user', $id)
+						SELECT * FROM type::record('user', $id)
 					)
 					AUTHENTICATE (
 						-- Simple example increasing the record identifier by one
-					    SELECT * FROM type::thing('user', record::id($auth) + 1)
+					    SELECT * FROM type::record('user', record::id($auth) + 1)
 					)
 					DURATION FOR SESSION 2h
 				;
@@ -1758,15 +1989,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("id", 1.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("id", 1);
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -1852,16 +2083,16 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("email", "info@example.com".into());
-			vars.insert("pass", "company-password".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("email", "info@example.com");
+			vars.insert("pass", "company-password");
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"owner".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -1897,7 +2128,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNIN (
-						SELECT * FROM type::thing('user', $id)
+						SELECT * FROM type::record('user', $id)
 					)
 					AUTHENTICATE {
 					    -- Not just signin, this clause runs across signin, signup and authenticate, which makes it a nice place to centralize logic
@@ -1913,11 +2144,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 				CREATE user:1 SET enabled = false;
 				"#,
-				&sess,
-				None,
-			)
-			.await
-			.unwrap();
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
 
 			// Signin with the user
 			let mut sess = Session {
@@ -1925,15 +2156,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("id", 1.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("id", 1);
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -1952,7 +2183,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNIN (
-					   SELECT * FROM type::thing('user', $id)
+					   SELECT * FROM type::record('user', $id)
 					)
 					AUTHENTICATE {}
 					DURATION FOR SESSION 2h
@@ -1972,15 +2203,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("id", 1.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("id", 1);
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"user".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -2041,9 +2272,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("user", "user".into());
-			vars.insert("pass", "pass".into());
+			let mut vars = PublicVariables::new();
+			vars.insert("user", "user");
+			vars.insert("pass", "pass");
 
 			let (res1, res2) = tokio::join!(
 				db_access(
@@ -2052,7 +2283,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"test".to_string(),
 					"test".to_string(),
 					"user".to_string(),
-					vars.clone().into(),
+					vars.clone(),
 				),
 				db_access(
 					&ds,
@@ -2060,7 +2291,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"test".to_string(),
 					"test".to_string(),
 					"user".to_string(),
-					vars.into(),
+					vars,
 				)
 			);
 
@@ -2092,7 +2323,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
 				SIGNIN (
-					SELECT * FROM type::thing('user', $id)
+					SELECT * FROM type::record('user', $id)
 				)
 				AUTHENTICATE {
 					-- Concurrently write to the same document
@@ -2124,8 +2355,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("id", 1.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("id", 1);
 
 			let (res1, res2) = tokio::join!(
 				db_access(
@@ -2134,7 +2365,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"test".to_string(),
 					"test".to_string(),
 					"user".to_string(),
-					vars.clone().into(),
+					vars.clone(),
 				),
 				db_access(
 					&ds,
@@ -2142,7 +2373,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					"test".to_string(),
 					"test".to_string(),
 					"user".to_string(),
-					vars.into(),
+					vars,
 				)
 			);
 
@@ -2196,10 +2427,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with correct bearer key
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2225,15 +2453,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				} else {
 					panic!("Unable to retrieve bearer key grant");
 				};
-				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
-					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
-					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_raw_string();
+				let grant = result.get("grant").clone().into_object().unwrap();
+				let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 				// Sign in with the bearer key
 				let mut sess = Session {
@@ -2241,8 +2462,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
-				vars.insert("key", key.into());
+				let mut vars = PublicVariables::new();
+				vars.insert("key", key);
 				let res = match level.level {
 					"DB" => {
 						db_access(
@@ -2251,7 +2472,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -2261,11 +2482,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -2310,10 +2531,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with correct bearer key and AUTHENTICATE clause succeeding
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2342,15 +2560,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				} else {
 					panic!("Unable to retrieve bearer key grant");
 				};
-				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
-					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
-					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_raw_string();
+				let grant = result.get("grant").clone().into_object().unwrap();
+				let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 				// Sign in with the bearer key
 				let mut sess = Session {
@@ -2358,8 +2569,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
-				vars.insert("key", key.into());
+				let mut vars = PublicVariables::new();
+				vars.insert("key", key);
 				let res = match level.level {
 					"DB" => {
 						db_access(
@@ -2368,7 +2579,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -2378,11 +2589,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -2427,10 +2638,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with correct bearer key and AUTHENTICATE clause failing
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2459,15 +2667,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				} else {
 					panic!("Unable to retrieve bearer key grant");
 				};
-				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
-					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
-					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_raw_string();
+				let grant = result.get("grant").clone().into_object().unwrap();
+				let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 				// Sign in with the bearer key
 				let mut sess = Session {
@@ -2475,8 +2676,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
-				vars.insert("key", key.into());
+				let mut vars = PublicVariables::new();
+				vars.insert("key", key);
 				let res = match level.level {
 					"DB" => {
 						db_access(
@@ -2485,7 +2686,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -2495,11 +2696,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -2512,10 +2713,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with expired grant
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2541,15 +2739,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				} else {
 					panic!("Unable to retrieve bearer key grant");
 				};
-				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
-					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
-					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_raw_string();
+				let grant = result.get("grant").clone().into_object().unwrap();
+				let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 				// Wait for the grant to expire
 				std::thread::sleep(Duration::seconds(2).to_std().unwrap());
@@ -2560,8 +2751,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
-				vars.insert("key", key.into());
+				let mut vars = PublicVariables::new();
+				vars.insert("key", key);
 				let res = match level.level {
 					"DB" => {
 						db_access(
@@ -2570,7 +2761,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -2580,11 +2771,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -2597,10 +2788,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with revoked grant
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2626,15 +2814,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				} else {
 					panic!("Unable to retrieve bearer key grant");
 				};
-				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
-					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
-					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_raw_string();
+				let grant = result.get("grant").clone().into_object().unwrap();
+				let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 				// Get grant identifier from key
 				let kid = key.split("-").collect::<Vec<&str>>()[2];
@@ -2654,8 +2835,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
-				vars.insert("key", key.into());
+				let mut vars = PublicVariables::new();
+				vars.insert("key", key);
 				let res = match level.level {
 					"DB" => {
 						db_access(
@@ -2664,7 +2845,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -2674,11 +2855,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -2691,10 +2872,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with removed access method
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2720,15 +2898,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				} else {
 					panic!("Unable to retrieve bearer key grant");
 				};
-				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
-					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
-					.unwrap();
-				let key = grant.get("key").unwrap().clone().as_raw_string();
+				let grant = result.get("grant").clone().into_object().unwrap();
+				let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 				// Remove bearer access method
 				ds.execute(format!("REMOVE ACCESS api ON {}", level.level).as_str(), &sess, None)
@@ -2741,8 +2912,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
-				vars.insert("key", key.into());
+				let mut vars = PublicVariables::new();
+				vars.insert("key", key);
 				let res = match level.level {
 					"DB" => {
 						db_access(
@@ -2751,7 +2922,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -2761,11 +2932,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -2778,10 +2949,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with missing key
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2807,15 +2975,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				} else {
 					panic!("Unable to retrieve bearer key grant");
 				};
-				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
-					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
-					.unwrap();
-				let _key = grant.get("key").unwrap().clone().as_raw_string();
+				let grant = result.get("grant").clone().into_object().unwrap();
+				let _key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 				// Sign in with the bearer key
 				let mut sess = Session {
@@ -2825,8 +2986,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				};
 
 				// The key parameter is not inserted:
-				let vars: HashMap<&str, Value> = HashMap::new();
-				// vars.insert("key", key.into());
+				let vars = PublicVariables::new();
 
 				let res = match level.level {
 					"DB" => {
@@ -2836,7 +2996,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -2846,11 +3006,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -2863,10 +3023,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with incorrect bearer key prefix part
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2892,15 +3049,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				} else {
 					panic!("Unable to retrieve bearer key grant");
 				};
-				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
-					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
-					.unwrap();
-				let valid_key = grant.get("key").unwrap().clone().as_raw_string();
+				let grant = result.get("grant").clone().into_object().unwrap();
+				let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 				// Replace a character from the key prefix
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -2913,8 +3063,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
-				vars.insert("key", key.into());
+				let mut vars = PublicVariables::new();
+				vars.insert("key", key);
 				let res = match level.level {
 					"DB" => {
 						db_access(
@@ -2923,7 +3073,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -2933,11 +3083,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -2950,10 +3100,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with incorrect bearer key length
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -2979,15 +3126,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				} else {
 					panic!("Unable to retrieve bearer key grant");
 				};
-				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
-					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
-					.unwrap();
-				let valid_key = grant.get("key").unwrap().clone().as_raw_string();
+				let grant = result.get("grant").clone().into_object().unwrap();
+				let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 				// Remove a character from the bearer key
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3000,8 +3140,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
-				vars.insert("key", key.into());
+				let mut vars = PublicVariables::new();
+				vars.insert("key", key);
 				let res = match level.level {
 					"DB" => {
 						db_access(
@@ -3010,7 +3150,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -3020,11 +3160,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -3037,10 +3177,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with incorrect bearer key identifier part
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -3066,15 +3203,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				} else {
 					panic!("Unable to retrieve bearer key grant");
 				};
-				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
-					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
-					.unwrap();
-				let valid_key = grant.get("key").unwrap().clone().as_raw_string();
+				let grant = result.get("grant").clone().into_object().unwrap();
+				let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 				// Replace a character from the key identifier
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3087,8 +3217,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
-				vars.insert("key", key.into());
+				let mut vars = PublicVariables::new();
+				vars.insert("key", key);
 				let res = match level.level {
 					"DB" => {
 						db_access(
@@ -3097,7 +3227,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -3107,11 +3237,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -3124,10 +3254,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test with incorrect bearer key value
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -3153,15 +3280,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				} else {
 					panic!("Unable to retrieve bearer key grant");
 				};
-				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
-					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
-					.unwrap();
-				let valid_key = grant.get("key").unwrap().clone().as_raw_string();
+				let grant = result.get("grant").clone().into_object().unwrap();
+				let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 				// Replace a character from the key value
 				let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3174,8 +3294,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 					db: level.db.map(String::from),
 					..Default::default()
 				};
-				let mut vars: HashMap<&str, Value> = HashMap::new();
-				vars.insert("key", key.into());
+				let mut vars = PublicVariables::new();
+				vars.insert("key", key);
 				let res = match level.level {
 					"DB" => {
 						db_access(
@@ -3184,7 +3304,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							level.ns.unwrap().to_string(),
 							level.db.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
@@ -3194,11 +3314,11 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 							&mut sess,
 							level.ns.unwrap().to_string(),
 							"api".to_string(),
-							vars.into(),
+							vars,
 						)
 						.await
 					}
-					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars.into()).await,
+					"ROOT" => root_access(&ds, &mut sess, "api".to_string(), vars).await,
 					_ => panic!("Unsupported level"),
 				};
 
@@ -3211,10 +3331,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 			// Test that only the key hash is stored
 			{
-				let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = Datastore::new("memory").await.unwrap();
 				let sess = Session::owner().with_ns("test").with_db("test");
 				let res = ds
 					.execute(
@@ -3240,16 +3357,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				} else {
 					panic!("Unable to retrieve bearer key grant");
 				};
-				let grant = result
-					.coerce_to::<Object>()
-					.unwrap()
-					.get("grant")
-					.unwrap()
-					.clone()
-					.coerce_to::<Object>()
-					.unwrap();
-				let id = grant.get("id").unwrap().clone().as_raw_string();
-				let key = grant.get("key").unwrap().clone().as_raw_string();
+				let grant = result.get("grant").clone().into_object().unwrap();
+				let id = grant.get("id").unwrap().clone().into_string().unwrap();
+				let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 				// Test that returned key is in plain text
 				assert!(
@@ -3300,9 +3410,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 	async fn test_signin_bearer_for_record() {
 		// Test with correct bearer key and existing record
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3325,15 +3433,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			} else {
 				panic!("Unable to retrieve bearer key grant");
 			};
-			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_raw_string();
+			let grant = result.get("grant").clone().into_object().unwrap();
+			let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3341,15 +3442,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("key", key);
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 			assert!(res.is_ok(), "Failed to sign in with bearer key: {:?}", res);
@@ -3376,9 +3477,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 		// Test with correct bearer key and non-existing record
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3400,15 +3499,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			} else {
 				panic!("Unable to retrieve bearer key grant");
 			};
-			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_raw_string();
+			let grant = result.get("grant").clone().into_object().unwrap();
+			let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3416,15 +3508,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("key", key);
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -3452,9 +3544,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 		}
 		// Test with correct bearer key and AUTHENTICATE clause succeeding
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3479,15 +3569,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			} else {
 				panic!("Unable to retrieve bearer key grant");
 			};
-			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_raw_string();
+			let grant = result.get("grant").clone().into_object().unwrap();
+			let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3495,15 +3578,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("key", key);
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -3532,9 +3615,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with correct bearer key and AUTHENTICATE clause failing
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3559,15 +3640,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			} else {
 				panic!("Unable to retrieve bearer key grant");
 			};
-			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_raw_string();
+			let grant = result.get("grant").clone().into_object().unwrap();
+			let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3575,15 +3649,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("key", key);
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -3596,9 +3670,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with expired grant
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3620,15 +3692,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			} else {
 				panic!("Unable to retrieve bearer key grant");
 			};
-			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_raw_string();
+			let grant = result.get("grant").clone().into_object().unwrap();
+			let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Wait for the grant to expire
 			std::thread::sleep(Duration::seconds(2).to_std().unwrap());
@@ -3639,15 +3704,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("key", key);
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -3660,9 +3725,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with revoked grant
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3684,15 +3747,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			} else {
 				panic!("Unable to retrieve bearer key grant");
 			};
-			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_raw_string();
+			let grant = result.get("grant").clone().into_object().unwrap();
+			let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Get grant identifier from key
 			let kid = key.split("-").collect::<Vec<&str>>()[2];
@@ -3708,15 +3764,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("key", key);
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -3729,9 +3785,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with removed access method
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3753,15 +3807,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			} else {
 				panic!("Unable to retrieve bearer key grant");
 			};
-			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
-				.unwrap();
-			let key = grant.get("key").unwrap().clone().as_raw_string();
+			let grant = result.get("grant").clone().into_object().unwrap();
+			let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Remove bearer access method
 			ds.execute("REMOVE ACCESS api ON DATABASE", &sess, None).await.unwrap();
@@ -3772,15 +3819,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("key", key);
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -3793,9 +3840,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with missing key
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3817,15 +3862,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			} else {
 				panic!("Unable to retrieve bearer key grant");
 			};
-			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
-				.unwrap();
-			let _key = grant.get("key").unwrap().clone().as_raw_string();
+			let grant = result.get("grant").clone().into_object().unwrap();
+			let _key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Sign in with the bearer key
 			let mut sess = Session {
@@ -3834,7 +3872,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				..Default::default()
 			};
 			// The key parameter is not inserted:
-			let vars: HashMap<&str, Value> = HashMap::new();
+			let vars = PublicVariables::new();
 			// vars.insert("key", key.into());
 			let res = db_access(
 				&ds,
@@ -3842,7 +3880,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -3855,9 +3893,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with incorrect bearer key prefix part
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3879,15 +3915,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			} else {
 				panic!("Unable to retrieve bearer key grant");
 			};
-			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
-				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_raw_string();
+			let grant = result.get("grant").clone().into_object().unwrap();
+			let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Replace a character from the key prefix
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3900,15 +3929,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("key", key);
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -3921,9 +3950,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with incorrect bearer key length
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -3945,15 +3972,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			} else {
 				panic!("Unable to retrieve bearer key grant");
 			};
-			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
-				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_raw_string();
+			let grant = result.get("grant").clone().into_object().unwrap();
+			let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Remove a character from the bearer key
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -3966,15 +3986,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("key", key);
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -3987,9 +4007,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with incorrect bearer key identifier part
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -4011,15 +4029,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			} else {
 				panic!("Unable to retrieve bearer key grant");
 			};
-			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
-				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_raw_string();
+			let grant = result.get("grant").clone().into_object().unwrap();
+			let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Replace a character from the key identifier
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -4032,15 +4043,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("key", key);
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -4053,9 +4064,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test with incorrect bearer key value
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -4077,15 +4086,8 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			} else {
 				panic!("Unable to retrieve bearer key grant");
 			};
-			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
-				.unwrap();
-			let valid_key = grant.get("key").unwrap().clone().as_raw_string();
+			let grant = result.get("grant").clone().into_object().unwrap();
+			let valid_key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Replace a character from the key value
 			let mut invalid_key: Vec<char> = valid_key.chars().collect();
@@ -4098,15 +4100,15 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 				db: Some("test".to_string()),
 				..Default::default()
 			};
-			let mut vars: HashMap<&str, Value> = HashMap::new();
-			vars.insert("key", key.into());
+			let mut vars = PublicVariables::new();
+			vars.insert("key", key);
 			let res = db_access(
 				&ds,
 				&mut sess,
 				"test".to_string(),
 				"test".to_string(),
 				"api".to_string(),
-				vars.into(),
+				vars,
 			)
 			.await;
 
@@ -4119,9 +4121,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 
 		// Test that only the key hash is stored
 		{
-			let ds = Datastore::new("memory").await.unwrap().with_capabilities(
-				Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-			);
+			let ds = Datastore::new("memory").await.unwrap();
 			let sess = Session::owner().with_ns("test").with_db("test");
 			let res = ds
 				.execute(
@@ -4143,16 +4143,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 			} else {
 				panic!("Unable to retrieve bearer key grant");
 			};
-			let grant = result
-				.coerce_to::<Object>()
-				.unwrap()
-				.get("grant")
-				.unwrap()
-				.clone()
-				.coerce_to::<Object>()
-				.unwrap();
-			let id = grant.get("id").unwrap().clone().as_raw_string();
-			let key = grant.get("key").unwrap().clone().as_raw_string();
+			let grant = result.get("grant").clone().into_object().unwrap();
+			let id = grant.get("id").unwrap().clone().into_string().unwrap();
+			let key = grant.get("key").unwrap().clone().into_string().unwrap();
 
 			// Test that returned key is in plain text
 			let ok = Regex::new(r"surreal-bearer-[a-zA-Z0-9]{12}-[a-zA-Z0-9]{24}").unwrap();
@@ -4181,8 +4174,7 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 	async fn test_signin_nonexistent_role() {
 		use crate::iam::Error as IamError;
 		use crate::sql::Base;
-		use crate::sql::statements::DefineUserStatement;
-		use crate::sql::statements::define::DefineStatement;
+		use crate::sql::statements::define::{DefineStatement, DefineUserStatement};
 		let test_levels = vec![
 			TestLevel {
 				level: "ROOT",

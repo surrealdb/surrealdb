@@ -28,6 +28,8 @@ mod multiwriter_different_keys;
 mod multiwriter_same_keys_allow;
 mod multiwriter_same_keys_conflict;
 mod raw;
+#[cfg(feature = "kv-rocksdb")]
+mod read_and_deletion_only;
 #[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 mod reverse_iterator;
 mod snapshot;
@@ -70,13 +72,17 @@ mod mem {
 	use uuid::Uuid;
 
 	use super::{ClockType, Kvs};
+	use crate::CommunityComposer;
 	use crate::kvs::Datastore;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Use a memory datastore instance
 		let path = "memory";
 		// Setup the in-memory datastore
-		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_clock(&CommunityComposer(), path, Some(clock))
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::Mem)
 	}
@@ -90,6 +96,7 @@ mod rocksdb {
 	use uuid::Uuid;
 
 	use super::{ClockType, Kvs};
+	use crate::CommunityComposer;
 	use crate::kvs::Datastore;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
@@ -97,12 +104,15 @@ mod rocksdb {
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		let path = format!("rocksdb:{path}");
 		// Setup the RocksDB datastore
-		let ds = Datastore::new_with_clock(&path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_clock(&CommunityComposer(), &path, Some(clock))
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::Rocksdb)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp,reverse_iterator);
+	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp,reverse_iterator, read_and_deletion_only);
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -111,6 +121,7 @@ mod surrealkv {
 	use uuid::Uuid;
 
 	use super::{ClockType, Kvs};
+	use crate::CommunityComposer;
 	use crate::kvs::Datastore;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
@@ -118,7 +129,10 @@ mod surrealkv {
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		let path = format!("surrealkv:{path}");
 		// Setup the SurrealKV datastore
-		let ds = Datastore::new_with_clock(&path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_clock(&CommunityComposer(), &path, Some(clock))
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::SurrealKV)
 	}
@@ -131,13 +145,17 @@ mod tikv {
 	use uuid::Uuid;
 
 	use super::{ClockType, Kvs};
+	use crate::CommunityComposer;
 	use crate::kvs::{Datastore, LockType, TransactionType};
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the cluster connection string
 		let path = "tikv:127.0.0.1:2379";
 		// Setup the TiKV datastore
-		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_clock(&CommunityComposer(), path, Some(clock))
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Clear any previous test entries
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
 		tx.delr(vec![0u8]..vec![0xffu8]).await.unwrap();
@@ -154,13 +172,17 @@ mod fdb {
 	use uuid::Uuid;
 
 	use super::{ClockType, Kvs};
+	use crate::CommunityComposer;
 	use crate::kvs::{Datastore, LockType, TransactionType};
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the cluster connection string
 		let path = "fdb:/etc/foundationdb/fdb.cluster";
 		// Setup the FoundationDB datastore
-		let ds = Datastore::new_with_clock(path, Some(clock)).await.unwrap().with_node_id(id);
+		let ds = Datastore::new_with_clock(&CommunityComposer(), path, Some(clock))
+			.await
+			.unwrap()
+			.with_node_id(id);
 		// Clear any previous test entries
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
 		tx.delp(&vec![]).await.unwrap();

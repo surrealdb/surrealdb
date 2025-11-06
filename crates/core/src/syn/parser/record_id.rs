@@ -12,21 +12,6 @@ use crate::syn::parser::mac::{expected, expected_whitespace, unexpected};
 use crate::syn::token::{Glued, TokenKind, t};
 
 impl Parser<'_> {
-	pub(crate) async fn parse_record_string(
-		&mut self,
-		stk: &mut Stk,
-		double: bool,
-	) -> ParseResult<RecordIdLit> {
-		let thing = self.parse_record_id(stk).await?;
-
-		if double {
-			expected_whitespace!(self, t!("\""));
-		} else {
-			expected_whitespace!(self, t!("'"));
-		};
-		Ok(thing)
-	}
-
 	pub(crate) async fn parse_record_id_or_range(
 		&mut self,
 		stk: &mut Stk,
@@ -95,7 +80,7 @@ impl Parser<'_> {
 					if token.kind == t!("$param") {
 						let param = self.next_token_value::<Param>()?;
 						bail!("Unexpected token `$param` expected a record-id key",
-							@token.span => "Record-id's can be create from a param with `type::thing(\"{}\",{})`", ident,param);
+							@token.span => "Record-id's can be create from a param with `type::record(\"{}\",{})`", ident,param);
 					}
 
 					// we haven't matched anything so far so we still want any type of id.
@@ -287,7 +272,7 @@ impl Parser<'_> {
 					unexpected!(self, token, "a identifier");
 				}
 				// Should be valid utf-8 as it was already parsed by the lexer
-				let text = String::from_utf8(slice.to_vec()).unwrap();
+				let text = String::from_utf8(slice.to_vec()).expect("parser validated utf8");
 				// Safety: Parser guarentees no null bytes present in string.
 				Ok(RecordIdKeyLit::String(text))
 			}
@@ -307,8 +292,7 @@ impl Parser<'_> {
 					Ok(RecordIdKeyLit::Generate(RecordIdKeyGen::Ulid))
 				} else {
 					let slice = self.lexer.span_str(token.span);
-					let text = slice.to_owned();
-					Ok(RecordIdKeyLit::String(text))
+					Ok(RecordIdKeyLit::String(slice.to_owned()))
 				}
 			}
 			t!("UUID") => {
@@ -318,8 +302,7 @@ impl Parser<'_> {
 					Ok(RecordIdKeyLit::Generate(RecordIdKeyGen::Uuid))
 				} else {
 					let slice = self.lexer.span_str(token.span);
-					let text = slice.to_owned();
-					Ok(RecordIdKeyLit::String(text))
+					Ok(RecordIdKeyLit::String(slice.to_owned()))
 				}
 			}
 			t!("RAND") => {
@@ -329,9 +312,7 @@ impl Parser<'_> {
 					Ok(RecordIdKeyLit::Generate(RecordIdKeyGen::Rand))
 				} else {
 					let slice = self.lexer.span_str(token.span);
-					// Safety: Parser guarentees no null bytes present in string.
-					let text = slice.to_owned();
-					Ok(RecordIdKeyLit::String(text))
+					Ok(RecordIdKeyLit::String(slice.to_owned()))
 				}
 			}
 			_ => {
@@ -355,16 +336,16 @@ mod tests {
 	use crate::syn::parser::ParserSettings;
 	use crate::{sql, syn};
 
-	fn thing(i: &str) -> ParseResult<RecordIdLit> {
+	fn record(i: &str) -> ParseResult<RecordIdLit> {
 		let mut parser = Parser::new(i.as_bytes());
 		let mut stack = Stack::new();
 		stack.enter(|ctx| async move { parser.parse_record_id(ctx).await }).finish()
 	}
 
 	#[test]
-	fn thing_normal() {
+	fn record_normal() {
 		let sql = "test:id";
-		let res = thing(sql);
+		let res = record(sql);
 		let out = res.unwrap();
 		assert_eq!("test:id", format!("{}", out));
 		assert_eq!(
@@ -377,9 +358,9 @@ mod tests {
 	}
 
 	#[test]
-	fn thing_integer() {
+	fn record_integer() {
 		let sql = "test:001";
-		let res = thing(sql);
+		let res = record(sql);
 		let out = res.unwrap();
 		assert_eq!("test:1", format!("{}", out));
 		assert_eq!(
@@ -392,9 +373,9 @@ mod tests {
 	}
 
 	#[test]
-	fn thing_integer_min() {
+	fn record_integer_min() {
 		let sql = format!("test:{}", i64::MIN);
-		let res = thing(&sql);
+		let res = record(&sql);
 		let out = res.unwrap();
 		assert_eq!(
 			out,
@@ -406,9 +387,9 @@ mod tests {
 	}
 
 	#[test]
-	fn thing_integer_max() {
+	fn record_integer_max() {
 		let sql = format!("test:{}", i64::MAX);
-		let res = thing(&sql);
+		let res = record(&sql);
 		let out = res.unwrap();
 		assert_eq!(
 			out,
@@ -420,10 +401,10 @@ mod tests {
 	}
 
 	#[test]
-	fn thing_integer_more_then_max() {
+	fn record_integer_more_then_max() {
 		let max_str = format!("{}", (i64::MAX as u64) + 1);
 		let sql = format!("test:{}", max_str);
-		let res = thing(&sql);
+		let res = record(&sql);
 		let out = res.unwrap();
 		assert_eq!(
 			out,
@@ -435,10 +416,10 @@ mod tests {
 	}
 
 	#[test]
-	fn thing_integer_more_then_min() {
+	fn record_integer_more_then_min() {
 		let min_str = format!("-{}", (i64::MAX as u64) + 2);
 		let sql = format!("test:{}", min_str);
-		let res = thing(&sql);
+		let res = record(&sql);
 		let out = res.unwrap();
 		assert_eq!(
 			out,
@@ -450,7 +431,7 @@ mod tests {
 	}
 
 	#[test]
-	fn thing_string() {
+	fn record_string() {
 		let sql = "r'test:001'";
 		let res = syn::expr(sql).unwrap();
 		let sql::Expr::Literal(sql::Literal::RecordId(out)) = res else {
@@ -481,9 +462,9 @@ mod tests {
 	}
 
 	#[test]
-	fn thing_quoted_backtick() {
+	fn record_quoted_backtick() {
 		let sql = "`test`:`id`";
-		let res = thing(sql);
+		let res = record(sql);
 		let out = res.unwrap();
 		assert_eq!("test:id", format!("{}", out));
 		assert_eq!(
@@ -496,9 +477,9 @@ mod tests {
 	}
 
 	#[test]
-	fn thing_quoted_brackets() {
+	fn record_quoted_brackets() {
 		let sql = "⟨test⟩:⟨id⟩";
-		let res = thing(sql);
+		let res = record(sql);
 		let out = res.unwrap();
 		assert_eq!("test:id", format!("{}", out));
 		assert_eq!(
@@ -511,9 +492,9 @@ mod tests {
 	}
 
 	#[test]
-	fn thing_object() {
+	fn record_object() {
 		let sql = "test:{ location: 'GBR', year: 2022 }";
-		let res = thing(sql);
+		let res = record(sql);
 		let out = res.unwrap();
 		assert_eq!("test:{ location: 'GBR', year: 2022 }", format!("{}", out));
 		assert_eq!(
@@ -535,9 +516,9 @@ mod tests {
 	}
 
 	#[test]
-	fn thing_array() {
+	fn record_array() {
 		let sql = "test:['GBR', 2022]";
-		let res = thing(sql);
+		let res = record(sql);
 		let out = res.unwrap();
 		assert_eq!("test:['GBR', 2022]", format!("{}", out));
 		assert_eq!(

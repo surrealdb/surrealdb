@@ -7,6 +7,9 @@ use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
 use futures::{SinkExt, StreamExt};
+use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::capabilities::RouteTarget;
+use surrealdb_types::{Array, SurrealValue, Value, Variables};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
@@ -14,12 +17,8 @@ use super::error::ResponseError;
 use super::headers::Accept;
 use super::output::Output;
 use crate::cnf::HTTP_MAX_SQL_BODY_SIZE;
-use crate::core::dbs::capabilities::RouteTarget;
-use crate::core::dbs::{Session, Variables};
-use crate::core::val::Value;
 use crate::net::error::Error as NetError;
 use crate::net::input::bytes_to_utf8;
-use crate::net::params::Params;
 
 pub(super) fn router<S>() -> Router<S>
 where
@@ -35,7 +34,7 @@ async fn post_handler(
 	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
 	output: Option<TypedHeader<Accept>>,
-	params: Query<Params>,
+	Query(vars): Query<Variables>,
 	sql: Bytes,
 ) -> Result<Output, ResponseError> {
 	// Get a database reference
@@ -52,24 +51,31 @@ async fn post_handler(
 	// Convert the received sql query
 	let sql = bytes_to_utf8(&sql).context("Non UTF-8 request body").map_err(ResponseError)?;
 	// Execute the received sql query
-	match db.execute(sql, &session, Some(Variables::from(params.0.parse()))).await {
+	match db.execute(sql, &session, Some(vars)).await {
 		Ok(res) => match output.as_deref() {
 			// Simple serialization
 			Some(Accept::ApplicationJson) => {
-				let v = res.into_iter().map(|x| x.into_value()).collect::<Value>();
+				let v = Value::Array(Array::from(
+					res.into_iter().map(|x| x.into_value()).collect::<Vec<Value>>(),
+				));
 				Ok(Output::json_value(&v))
 			}
 			Some(Accept::ApplicationCbor) => {
-				let v = res.into_iter().map(|x| x.into_value()).collect::<Value>();
-				Ok(Output::cbor(&v))
+				let v = Value::Array(Array::from(
+					res.into_iter().map(|x| x.into_value()).collect::<Vec<Value>>(),
+				));
+				Ok(Output::cbor(v))
 			}
 			// Internal serialization
-			Some(Accept::Surrealdb) => Ok(Output::bincode(&res)),
+			Some(Accept::ApplicationFlatbuffers) => {
+				let v = res.into_value();
+				Ok(Output::flatbuffers(&v))
+			}
 			// An incorrect content-type was requested
 			_ => Err(NetError::InvalidType.into()),
 		},
 		// There was an error when executing the query
-		Err(err) => Err(ResponseError(err)),
+		Err(err) => Err(ResponseError(err.into())),
 	}
 }
 
@@ -93,18 +99,19 @@ async fn handle_socket(state: AppState, ws: WebSocket, session: Session) {
 				// Execute the received sql query
 				let _ = match db.execute(sql, &session, None).await {
 					// Convert the response to JSON
-					Ok(v) => match crate::core::rpc::format::json::encode_str(Value::from(
-						v.into_iter().map(|x| x.into_value()).collect::<Vec<_>>(),
+					Ok(v) => match surrealdb_core::rpc::format::json::encode_str(Value::Array(
+						Array::from(v.into_iter().map(|x| x.into_value()).collect::<Vec<_>>()),
 					)) {
 						// Send the JSON response to the client
-						Ok(v) => tx.send(Message::Text(v)).await,
+						Ok(v) => tx.send(Message::Text(v.into())).await,
 						// There was an error converting to JSON
 						Err(e) => {
-							tx.send(Message::Text(format!("Failed to parse JSON: {e}",))).await
+							tx.send(Message::Text(format!("Failed to parse JSON: {e}",).into()))
+								.await
 						}
 					},
 					// There was an error when executing the query
-					Err(e) => tx.send(Message::Text(e.to_string())).await,
+					Err(e) => tx.send(Message::Text(e.to_string().into())).await,
 				};
 			}
 		}

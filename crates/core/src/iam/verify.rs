@@ -5,6 +5,7 @@ use anyhow::{Result, bail};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use chrono::Utc;
 use jsonwebtoken::{DecodingKey, Validation, decode};
+use surrealdb_types::ToSql;
 
 use crate::catalog::providers::{
 	AuthorisationProvider, DatabaseProvider, NamespaceProvider, UserProvider,
@@ -20,7 +21,6 @@ use crate::iam::{self, Actor, Auth, Level, Role};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::val::Value;
 use crate::{catalog, syn};
 
 /// Returns the decoding key as wel as the method by which to verify the key against
@@ -76,9 +76,9 @@ fn decode_key(alg: catalog::Algorithm, key: &[u8]) -> Result<(DecodingKey, Valid
 	Ok((dec, val))
 }
 
-static KEY: LazyLock<DecodingKey> = LazyLock::new(|| DecodingKey::from_secret(&[]));
+pub(crate) static KEY: LazyLock<DecodingKey> = LazyLock::new(|| DecodingKey::from_secret(&[]));
 
-static DUD: LazyLock<Validation> = LazyLock::new(|| {
+pub(crate) static DUD: LazyLock<Validation> = LazyLock::new(|| {
 	let mut validation = Validation::new(jsonwebtoken::Algorithm::HS256);
 	validation.insecure_disable_signature_validation();
 	validation.validate_nbf = false;
@@ -158,7 +158,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	// Decode the token without verifying
 	let token_data = decode::<Claims>(token, &KEY, &DUD)?;
 	// Convert the token to a SurrealQL object value
-	let value = Value::from(token_data.claims.clone().into_claims_object());
+	let value = crate::val::Value::from(token_data.claims.clone().into_claims_object());
 	// Check if the auth token can be used
 	if let Some(nbf) = token_data.claims.nbf {
 		if nbf > Utc::now().timestamp() {
@@ -221,7 +221,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
-							Err(anyhow::Error::new(Error::MissingTokenHeader("kid".to_string())))
+							Err(anyhow::Error::new(Error::InvalidArguments {
+								name: "token".to_string(),
+								message: "Missing token header 'kid'".to_string(),
+							}))
 						}
 					}
 					#[cfg(not(feature = "jwks"))]
@@ -235,8 +238,18 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for finding the signin record
 				let mut sess = Session::editor().with_ns(ns).with_db(db);
-				sess.rd = Some(rid.clone().into());
-				sess.tk = Some(token_data.claims.clone().into_claims_object().into());
+				sess.rd = Some(
+					crate::val::convert_value_to_public_value(crate::val::Value::RecordId(
+						rid.clone().into(),
+					))
+					.expect("record id conversion should succeed"),
+				);
+				sess.tk = Some(
+					crate::val::convert_value_to_public_value(
+						token_data.claims.clone().into_claims_object().into(),
+					)
+					.expect("claims conversion should succeed"),
+				);
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
 				rid = authenticate_record(kvs, &sess, au).await?;
@@ -244,16 +257,24 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated with record access method `{}`", ac);
 			// Set the session
-			session.tk = Some(value);
+			session.tk = Some(
+				crate::val::convert_value_to_public_value(value)
+					.expect("value conversion should succeed"),
+			);
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.ac = Some(ac.to_owned());
-			session.rd = Some(Value::from(rid.clone()));
+			session.rd = Some(
+				crate::val::convert_value_to_public_value(crate::val::Value::RecordId(
+					rid.clone().into(),
+				))
+				.expect("record id conversion should succeed"),
+			);
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
-				rid.to_string(),
+				rid.to_sql(),
 				Default::default(),
-				Level::Record(ns.to_string(), db.to_string(), rid.to_string()),
+				Level::Record(ns.to_string(), db.to_string(), rid.to_sql()),
 			)));
 			Ok(())
 		}
@@ -310,9 +331,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 							if let Some(kid) = token_data.header.kid {
 								jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 							} else {
-								Err(anyhow::Error::new(Error::MissingTokenHeader(
-									"kid".to_string(),
-								)))
+								Err(anyhow::Error::new(Error::InvalidArguments {
+									name: "token".to_string(),
+									message: "Missing token header 'kid'".to_string(),
+								}))
 							}
 						}
 						#[cfg(not(feature = "jwks"))]
@@ -324,7 +346,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					if let Some(au) = &de.authenticate {
 						// Setup the system session for executing the clause
 						let mut sess = Session::editor().with_ns(ns).with_db(db);
-						sess.tk = Some(token_data.claims.clone().into_claims_object().into());
+						sess.tk = Some(
+							crate::val::convert_value_to_public_value(
+								token_data.claims.clone().into_claims_object().into(),
+							)
+							.expect("claims conversion should succeed"),
+						);
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
 						authenticate_generic(kvs, &sess, au).await?;
@@ -346,7 +373,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					// Log the success
 					debug!("Authenticated to database `{}` with access method `{}`", db, ac);
 					// Set the session
-					session.tk = Some(value);
+					session.tk = Some(
+						crate::val::convert_value_to_public_value(value)
+							.expect("value conversion should succeed"),
+					);
 					session.ns = Some(ns.to_owned());
 					session.db = Some(db.to_owned());
 					session.ac = Some(ac.to_owned());
@@ -373,9 +403,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 								if let Some(kid) = token_data.header.kid {
 									jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 								} else {
-									Err(anyhow::Error::new(Error::MissingTokenHeader(
-										"kid".to_string(),
-									)))
+									Err(anyhow::Error::new(Error::InvalidArguments {
+										name: "token".to_string(),
+										message: "Missing token header 'kid'".to_string(),
+									}))
 								}
 							}
 							#[cfg(not(feature = "jwks"))]
@@ -387,23 +418,36 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						// AUTHENTICATE clause
 						// Setup the system session for finding the signin record
 						let mut sess = Session::editor().with_ns(ns).with_db(db);
-						sess.tk = Some(token_data.claims.clone().into_claims_object().into());
+						sess.tk = Some(
+							crate::val::convert_value_to_public_value(
+								token_data.claims.clone().into_claims_object().into(),
+							)
+							.expect("claims conversion should succeed"),
+						);
 						sess.ip.clone_from(&session.ip);
 						sess.or.clone_from(&session.or);
 						let rid = authenticate_record(kvs, &sess, au).await?;
 						// Log the success
 						debug!("Authenticated with record access method `{}`", ac);
 						// Set the session
-						session.tk = Some(value);
+						session.tk = Some(
+							crate::val::convert_value_to_public_value(value)
+								.expect("value conversion should succeed"),
+						);
 						session.ns = Some(ns.to_owned());
 						session.db = Some(db.to_owned());
 						session.ac = Some(ac.to_owned());
-						session.rd = Some(Value::from(rid.clone()));
+						session.rd = Some(
+							crate::val::convert_value_to_public_value(crate::val::Value::RecordId(
+								rid.clone().into(),
+							))
+							.expect("record id conversion should succeed"),
+						);
 						session.exp = expiration(de.session_duration)?;
 						session.au = Arc::new(Auth::new(Actor::new(
-							rid.to_string(),
+							rid.to_sql(),
 							Default::default(),
-							Level::Record(ns.to_string(), db.to_string(), rid.to_string()),
+							Level::Record(ns.to_string(), db.to_string(), rid.to_sql()),
 						)));
 					}
 					_ => bail!(Error::AccessMethodMismatch),
@@ -452,7 +496,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to database `{}` with user `{}` using token", db, id);
 			// Set the session
-			session.tk = Some(value);
+			session.tk = Some(
+				crate::val::convert_value_to_public_value(value)
+					.expect("value conversion should succeed"),
+			);
 			session.ns = Some(ns.to_owned());
 			session.db = Some(db.to_owned());
 			session.exp = expiration(de.session_duration)?;
@@ -512,7 +559,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
-							bail!(Error::MissingTokenHeader("kid".to_string()))
+							bail!(Error::InvalidArguments {
+								name: "token".to_string(),
+								message: "Missing token header 'kid'".to_string()
+							})
 						}
 					}
 					#[cfg(not(feature = "jwks"))]
@@ -526,7 +576,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for executing the clause
 				let mut sess = Session::editor().with_ns(ns);
-				sess.tk = Some(token_data.claims.clone().into_claims_object().into());
+				sess.tk = Some(
+					crate::val::convert_value_to_public_value(
+						token_data.claims.clone().into_claims_object().into(),
+					)
+					.expect("claims conversion should succeed"),
+				);
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
 				authenticate_generic(kvs, &sess, au).await?;
@@ -548,7 +603,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to namespace `{}` with access method `{}`", ns, ac);
 			// Set the session
-			session.tk = Some(value);
+			session.tk = Some(
+				crate::val::convert_value_to_public_value(value)
+					.expect("value conversion should succeed"),
+			);
 			session.ns = Some(ns.to_owned());
 			session.ac = Some(ac.to_owned());
 			session.exp = expiration(de.session_duration)?;
@@ -596,7 +654,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to namespace `{}` with user `{}` using token", ns, id);
 			// Set the session
-			session.tk = Some(value);
+			session.tk = Some(
+				crate::val::convert_value_to_public_value(value)
+					.expect("value conversion should succeed"),
+			);
 			session.ns = Some(ns.to_owned());
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
@@ -644,7 +705,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						if let Some(kid) = token_data.header.kid {
 							jwks::config(kvs, &kid, &jwks.url, token_data.header.alg).await
 						} else {
-							bail!(Error::MissingTokenHeader("kid".to_string()))
+							bail!(Error::InvalidArguments {
+								name: "token".to_string(),
+								message: "Missing token header 'kid'".to_string()
+							})
 						}
 					}
 					#[cfg(not(feature = "jwks"))]
@@ -658,7 +722,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			if let Some(au) = &de.authenticate {
 				// Setup the system session for executing the clause
 				let mut sess = Session::editor();
-				sess.tk = Some(token_data.claims.clone().into_claims_object().into());
+				sess.tk = Some(
+					crate::val::convert_value_to_public_value(
+						token_data.claims.clone().into_claims_object().into(),
+					)
+					.expect("claims conversion should succeed"),
+				);
 				sess.ip.clone_from(&session.ip);
 				sess.or.clone_from(&session.or);
 				authenticate_generic(kvs, &sess, au).await?;
@@ -680,7 +749,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to root with access method `{}`", ac);
 			// Set the session
-			session.tk = Some(value);
+			session.tk = Some(
+				crate::val::convert_value_to_public_value(value)
+					.expect("value conversion should succeed"),
+			);
 			session.ac = Some(ac.to_owned());
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Root)));
@@ -709,7 +781,10 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			// Log the success
 			debug!("Authenticated to root level with user `{}` using token", id);
 			// Set the session
-			session.tk = Some(value);
+			session.tk = Some(
+				crate::val::convert_value_to_public_value(value)
+					.expect("value conversion should succeed"),
+			);
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
 				id.to_string(),
@@ -828,7 +903,8 @@ pub async fn verify_db_creds(
 
 fn verify_pass(pass: &str, hash: &str) -> Result<()> {
 	// Compute the hash and verify the password
-	let hash = PasswordHash::new(hash).unwrap();
+	let hash =
+		PasswordHash::new(hash).map_err(|e| anyhow::anyhow!("Invalid password hash: {}", e))?;
 	// Attempt to verify the password using Argon2
 	match Argon2::default().verify_password(pass.as_ref(), &hash) {
 		Ok(_) => Ok(()),
@@ -855,10 +931,12 @@ fn verify_token(token: &str, key: &DecodingKey, validation: &Validation) -> Resu
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
 	use argon2::password_hash::{PasswordHasher, SaltString};
 	use chrono::Duration;
 	use jsonwebtoken::{EncodingKey, encode};
+	use rstest::rstest;
 
 	use super::*;
 	use crate::iam::token::{Audience, HEADER};
@@ -874,42 +952,17 @@ mod tests {
 
 	const AVAILABLE_ROLES: [Role; 3] = [Role::Viewer, Role::Editor, Role::Owner];
 
+	#[rstest]
+	#[case::without_roles_or_expiration("pass", vec![Role::Viewer], None, true)]
+	#[case::with_roles_and_expiration("pass", vec![Role::Editor, Role::Owner], Some(Duration::days(1)), true)]
+	#[case::with_invalid_password("invalid", vec![], None, false)]
 	#[tokio::test]
-	async fn test_basic() {
-		#[derive(Debug)]
-		struct TestCase {
-			title: &'static str,
-			password: &'static str,
-			roles: Vec<Role>,
-			expiration: Option<Duration>,
-			expect_ok: bool,
-		}
-
-		let test_cases = vec![
-			TestCase {
-				title: "without roles or expiration",
-				password: "pass",
-				roles: vec![Role::Viewer],
-				expiration: None,
-				expect_ok: true,
-			},
-			TestCase {
-				title: "with roles and expiration",
-				password: "pass",
-				roles: vec![Role::Editor, Role::Owner],
-				expiration: Some(Duration::days(1)),
-				expect_ok: true,
-			},
-			TestCase {
-				title: "with invalid password",
-				password: "invalid",
-				roles: vec![],
-				expiration: None,
-				expect_ok: false,
-			},
-		];
-
-		let test_levels = vec![
+	async fn test_basic(
+		#[case] password: &'static str,
+		#[case] roles: Vec<Role>,
+		#[case] expiration: Option<Duration>,
+		#[case] expect_ok: bool,
+		#[values(
 			TestLevel {
 				level: "ROOT",
 				ns: None,
@@ -925,97 +978,89 @@ mod tests {
 				ns: Some("test"),
 				db: Some("test"),
 			},
-		];
+		)]
+		level: TestLevel,
+	) {
+		let ds = Datastore::new("memory").await.unwrap();
+		let sess = Session::owner().with_ns("test").with_db("test");
 
-		for level in &test_levels {
-			for case in &test_cases {
-				println!("Test case: {} level {}", level.level, case.title);
-				let ds = Datastore::new("memory").await.unwrap();
-				let sess = Session::owner().with_ns("test").with_db("test");
+		let roles_clause = if roles.is_empty() {
+			String::new()
+		} else {
+			let roles: Vec<&str> = roles
+				.iter()
+				.map(|r| match r {
+					Role::Viewer => "VIEWER",
+					Role::Editor => "EDITOR",
+					Role::Owner => "OWNER",
+				})
+				.collect();
+			format!("ROLES {}", roles.join(", "))
+		};
 
-				let roles_clause = if case.roles.is_empty() {
-					String::new()
-				} else {
-					let roles: Vec<&str> = case
-						.roles
-						.iter()
-						.map(|r| match r {
-							Role::Viewer => "VIEWER",
-							Role::Editor => "EDITOR",
-							Role::Owner => "OWNER",
-						})
-						.collect();
-					format!("ROLES {}", roles.join(", "))
-				};
+		let duration_clause = if let Some(duration) = expiration {
+			format!("DURATION FOR SESSION {}s", duration.num_seconds())
+		} else {
+			String::new()
+		};
 
-				let duration_clause = if let Some(duration) = case.expiration {
-					format!("DURATION FOR SESSION {}s", duration.num_seconds())
-				} else {
-					String::new()
-				};
+		let define_user_query = format!(
+			"DEFINE USER user ON {} PASSWORD 'pass' {} {}",
+			level.level, roles_clause, duration_clause,
+		);
 
-				let define_user_query = format!(
-					"DEFINE USER user ON {} PASSWORD 'pass' {} {}",
-					level.level, roles_clause, duration_clause,
-				);
+		ds.execute(&define_user_query, &sess, None).await.unwrap();
 
-				ds.execute(&define_user_query, &sess, None).await.unwrap();
+		let mut sess = Session {
+			ns: level.ns.map(String::from),
+			db: level.db.map(String::from),
+			..Default::default()
+		};
 
-				let mut sess = Session {
-					ns: level.ns.map(String::from),
-					db: level.db.map(String::from),
-					..Default::default()
-				};
+		let res = basic(&ds, &mut sess, "user", password, level.ns, level.db).await;
 
-				let res = basic(&ds, &mut sess, "user", case.password, level.ns, level.db).await;
+		if expect_ok {
+			assert!(res.is_ok(), "Failed to signin: {:?}", res);
+			assert_eq!(sess.au.id(), "user");
 
-				if case.expect_ok {
-					assert!(res.is_ok(), "Failed to signin: {:?}", res);
-					assert_eq!(sess.au.id(), "user");
-
-					// Check auth level
-					assert_eq!(sess.au.level().ns(), level.ns);
-					assert_eq!(sess.au.level().db(), level.db);
-					match level.level {
-						"ROOT" => assert!(sess.au.is_root()),
-						"NS" => assert!(sess.au.is_ns()),
-						"DB" => assert!(sess.au.is_db()),
-						_ => panic!("Unsupported level"),
-					}
-
-					// Check roles
-					for role in AVAILABLE_ROLES {
-						let has_role = sess.au.has_role(role);
-						let should_have_role = case.roles.contains(&role);
-						assert_eq!(has_role, should_have_role, "Role {:?} check failed", role);
-					}
-
-					// Check expiration
-					if let Some(exp_duration) = case.expiration {
-						let exp = sess.exp.unwrap();
-						let min_exp =
-							(Utc::now() + exp_duration - Duration::seconds(10)).timestamp();
-						let max_exp =
-							(Utc::now() + exp_duration + Duration::seconds(10)).timestamp();
-						assert!(
-							exp > min_exp && exp < max_exp,
-							"Session expiration is expected to match the defined duration"
-						);
-					} else {
-						assert_eq!(sess.exp, None, "Expiration is expected to be None");
-					}
-				} else {
-					assert!(res.is_err(), "Unexpected successful signin: {:?}", res);
-				}
+			// Check auth level
+			assert_eq!(sess.au.level().ns(), level.ns);
+			assert_eq!(sess.au.level().db(), level.db);
+			match level.level {
+				"ROOT" => assert!(sess.au.is_root()),
+				"NS" => assert!(sess.au.is_ns()),
+				"DB" => assert!(sess.au.is_db()),
+				_ => panic!("Unsupported level"),
 			}
+
+			// Check roles
+			for role in AVAILABLE_ROLES {
+				let has_role = sess.au.has_role(role);
+				let should_have_role = roles.contains(&role);
+				assert_eq!(has_role, should_have_role, "Role {role:?} check failed");
+			}
+
+			// Check expiration
+			if let Some(exp_duration) = expiration {
+				let exp = sess.exp.unwrap();
+				let min_exp = (Utc::now() + exp_duration - Duration::seconds(10)).timestamp();
+				let max_exp = (Utc::now() + exp_duration + Duration::seconds(10)).timestamp();
+				assert!(
+					exp > min_exp && exp < max_exp,
+					"Session expiration is expected to match the defined duration"
+				);
+			} else {
+				assert_eq!(sess.exp, None, "Expiration is expected to be None");
+			}
+		} else {
+			assert!(res.is_err(), "Unexpected successful signin");
 		}
 	}
 
 	#[tokio::test]
 	async fn test_basic_nonexistent_role() {
 		use crate::iam::Error as IamError;
-		use crate::sql::statements::DefineUserStatement;
-		use crate::sql::statements::define::DefineStatement;
+		use crate::sql::statements::define::{DefineStatement, DefineUserStatement};
 		use crate::sql::{Base, Expr, TopLevelExpr};
 		let test_levels = vec![
 			TestLevel {
@@ -1087,50 +1132,19 @@ mod tests {
 		}
 	}
 
+	#[rstest]
+	#[case::with_no_roles(None, "secret", vec![Role::Viewer], false)]
+	#[case::with_roles(Some(vec!["editor", "owner"]), "secret", vec![Role::Editor, Role::Owner], false)]
+	#[case::with_nonexistent_roles(Some(vec!["viewer", "nonexistent"]), "secret", vec![], true)]
+	#[case::with_invalid_token_signature(None, "invalid", vec![], true)]
 	#[tokio::test]
-	async fn test_token() {
-		#[derive(Debug)]
-		struct TestCase {
-			title: &'static str,
-			roles: Option<Vec<&'static str>>,
-			key: &'static str,
-			expect_roles: Vec<Role>,
-			expect_error: bool,
-		}
-
-		let test_cases = vec![
-			TestCase {
-				title: "with no roles",
-				roles: None,
-				key: "secret",
-				expect_roles: vec![Role::Viewer],
-				expect_error: false,
-			},
-			TestCase {
-				title: "with roles",
-				roles: Some(vec!["editor", "owner"]),
-				key: "secret",
-				expect_roles: vec![Role::Editor, Role::Owner],
-				expect_error: false,
-			},
-			TestCase {
-				title: "with nonexistent roles",
-				roles: Some(vec!["viewer", "nonexistent"]),
-				key: "secret",
-				expect_roles: vec![],
-				expect_error: true,
-			},
-			TestCase {
-				title: "with invalid token signature",
-				roles: None,
-				key: "invalid",
-				expect_roles: vec![],
-				expect_error: true,
-			},
-		];
-
-		let test_levels = vec![
-			TestLevel {
+	async fn test_token(
+		#[case] roles: Option<Vec<&'static str>>,
+		#[case] key: &'static str,
+		#[case] expect_roles: Vec<Role>,
+		#[case] expect_error: bool,
+		#[values(
+			 TestLevel {
 				level: "ROOT",
 				ns: None,
 				db: None,
@@ -1144,9 +1158,10 @@ mod tests {
 				level: "DB",
 				ns: Some("test"),
 				db: Some("test"),
-			},
-		];
-
+			}
+		)]
+		level: TestLevel,
+	) {
 		let claims = Claims {
 			iss: Some("surrealdb-test".to_string()),
 			iat: Some(Utc::now().timestamp()),
@@ -1159,155 +1174,79 @@ mod tests {
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::owner().with_ns("test").with_db("test");
 
-		for level in &test_levels {
-			// Define the access token for that level
-			ds.execute(
-				format!(
-					r#"
-					DEFINE ACCESS token ON {} TYPE JWT
-						ALGORITHM HS512 KEY 'secret' DURATION FOR SESSION 30d
-					;
-				"#,
-					level.level
-				)
-				.as_str(),
-				&sess,
-				None,
+		// Define the access token for that level
+		ds.execute(
+			format!(
+				r#"
+				DEFINE ACCESS token ON {} TYPE JWT
+					ALGORITHM HS512 KEY 'secret' DURATION FOR SESSION 30d
+				;
+			"#,
+				level.level
 			)
-			.await
-			.unwrap();
+			.as_str(),
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
 
-			for case in &test_cases {
-				println!("Test case: {} level {}", level.level, case.title);
+		// Prepare the claims object
+		let mut claims = claims.clone();
+		claims.ns = level.ns.map(|s| s.to_string());
+		claims.db = level.db.map(|s| s.to_string());
+		claims.roles = roles.clone().map(|roles| roles.into_iter().map(String::from).collect());
 
-				// Prepare the claims object
-				let mut claims = claims.clone();
-				claims.ns = level.ns.map(|s| s.to_string());
-				claims.db = level.db.map(|s| s.to_string());
-				claims.roles =
-					case.roles.clone().map(|roles| roles.into_iter().map(String::from).collect());
+		// Create the token
+		let key = EncodingKey::from_secret(key.as_ref());
+		let enc = encode(&HEADER, &claims, &key).unwrap();
 
-				// Create the token
-				let key = EncodingKey::from_secret(case.key.as_ref());
-				let enc = encode(&HEADER, &claims, &key).unwrap();
+		// Authenticate with the token
+		let mut sess = Session::default();
+		let res = token(&ds, &mut sess, &enc).await;
 
-				// Authenticate with the token
-				let mut sess = Session::default();
-				let res = token(&ds, &mut sess, &enc).await;
+		if expect_error {
+			assert!(res.is_err(), "Unexpected success");
+		} else {
+			assert!(res.is_ok(), "Failed to sign in with token");
+			assert_eq!(sess.ns, level.ns.map(|s| s.to_string()));
+			assert_eq!(sess.db, level.db.map(|s| s.to_string()));
+			assert_eq!(sess.au.id(), "token");
 
-				if case.expect_error {
-					assert!(res.is_err(), "Unexpected success for case: {:?}", case);
-				} else {
-					assert!(res.is_ok(), "Failed to sign in with token for case: {:?}", case);
-					assert_eq!(sess.ns, level.ns.map(|s| s.to_string()));
-					assert_eq!(sess.db, level.db.map(|s| s.to_string()));
-					assert_eq!(sess.au.id(), "token");
-
-					// Check roles
-					for role in AVAILABLE_ROLES {
-						let has_role = sess.au.has_role(role);
-						let should_have_role = case.expect_roles.contains(&role);
-						assert_eq!(has_role, should_have_role, "Role {:?} check failed", role);
-					}
-
-					// Ensure that the expiration is set correctly
-					let exp = sess.exp.unwrap();
-					let min_exp =
-						(Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
-					let max_exp =
-						(Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
-					assert!(
-						exp > min_exp && exp < max_exp,
-						"Session expiration is expected to match the defined duration in case: {:?}",
-						case
-					);
-				}
+			// Check roles
+			for role in AVAILABLE_ROLES {
+				let has_role = sess.au.has_role(role);
+				let should_have_role = expect_roles.contains(&role);
+				assert_eq!(has_role, should_have_role, "Role {:?} check failed", role);
 			}
+
+			// Ensure that the expiration is set correctly
+			let exp = sess.exp.unwrap();
+			let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
+			let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+			assert!(
+				exp > min_exp && exp < max_exp,
+				"Session expiration is expected to match the defined duration"
+			);
 		}
 	}
 
+	#[rstest]
+	#[case::with_no_roles(vec!["user:test"], None, "secret", false)]
+	#[case::with_roles(vec!["user:test"], Some(vec!["editor", "owner"]), "secret", false)]
+	#[case::with_invalid_token_signature(vec!["user:test"], None, "invalid", true)]
+	#[case::with_generic_id(vec!["user:2k9qnabxuxh8k4d5gfto"], None, "secret", false)]
+	#[case::with_numeric_ids(vec!["user:1", "user:2", "user:100", "user:10000000"], None, "secret", false)]
+	#[case::with_alphanumeric_ids(vec!["user:username", "user:username1", "user:username10", "user:username100"], None, "secret", false)]
+	#[case::with_ids_including_special_characters(vec!["user:⟨user.name⟩", "user:⟨user.name1⟩", "user:⟨user.name10⟩", "user:⟨user.name100⟩"], None, "secret", false)]
+	#[case::with_uuid_ids(vec!["user:⟨83149446-95f5-4c0d-9f42-136e7b272456⟩"], None, "secret", false)]
 	#[tokio::test]
-	async fn test_token_record() {
-		#[derive(Debug)]
-		struct TestCase {
-			title: &'static str,
-			ids: Vec<&'static str>,
-			roles: Option<Vec<&'static str>>,
-			key: &'static str,
-			expect_error: bool,
-		}
-
-		let test_cases = vec![
-			TestCase {
-				title: "with no roles",
-				ids: vec!["user:test"],
-				roles: None,
-				key: "secret",
-				expect_error: false,
-			},
-			TestCase {
-				title: "with roles",
-				ids: vec!["user:test"],
-				roles: Some(vec!["editor", "owner"]),
-				key: "secret",
-				expect_error: false,
-			},
-			TestCase {
-				title: "with invalid token signature",
-				ids: vec!["user:test"],
-				roles: None,
-				key: "invalid",
-				expect_error: true,
-			},
-			TestCase {
-				title: "with invalid id",
-				ids: vec!["invalid"],
-				roles: None,
-				key: "invalid",
-				expect_error: true,
-			},
-			TestCase {
-				title: "with generic id",
-				ids: vec!["user:2k9qnabxuxh8k4d5gfto"],
-				roles: None,
-				key: "secret",
-				expect_error: false,
-			},
-			TestCase {
-				title: "with numeric ids",
-				ids: vec!["user:1", "user:2", "user:100", "user:10000000"],
-				roles: None,
-				key: "secret",
-				expect_error: false,
-			},
-			TestCase {
-				title: "with alphanumeric ids",
-				ids: vec!["user:username", "user:username1", "user:username10", "user:username100"],
-				roles: None,
-				key: "secret",
-				expect_error: false,
-			},
-			TestCase {
-				title: "with ids including special characters",
-				ids: vec![
-					"user:⟨user.name⟩",
-					"user:⟨user.name1⟩",
-					"user:⟨user.name10⟩",
-					"user:⟨user.name100⟩",
-				],
-				roles: None,
-				key: "secret",
-				expect_error: false,
-			},
-			TestCase {
-				title: "with UUID ids",
-				ids: vec!["user:⟨83149446-95f5-4c0d-9f42-136e7b272456⟩"],
-				roles: None,
-				key: "secret",
-				expect_error: false,
-			},
-		];
-
+	async fn test_token_record(
+		#[case] ids: Vec<&'static str>,
+		#[case] roles: Option<Vec<&'static str>>,
+		#[case] key: &'static str,
+		#[case] expect_error: bool,
+	) {
 		let secret = "secret";
 		let claims = Claims {
 			iss: Some("surrealdb-test".to_string()),
@@ -1339,54 +1278,45 @@ mod tests {
 		.await
 		.unwrap();
 
-		for case in &test_cases {
-			println!("Test case: {}", case.title);
+		for id in &ids {
+			// Prepare the claims object
+			let mut claims = claims.clone();
+			claims.id = Some(syn::record_id(id).unwrap().to_sql());
+			claims.roles = roles.clone().map(|roles| roles.into_iter().map(String::from).collect());
 
-			for id in &case.ids {
-				// Prepare the claims object
-				let mut claims = claims.clone();
-				claims.id = Some((*id).to_string());
-				claims.roles =
-					case.roles.clone().map(|roles| roles.into_iter().map(String::from).collect());
+			// Create the token
+			let key = EncodingKey::from_secret(key.as_ref());
+			let enc = encode(&HEADER, &claims, &key).unwrap();
 
-				// Create the token
-				let key = EncodingKey::from_secret(case.key.as_ref());
-				let enc = encode(&HEADER, &claims, &key).unwrap();
+			// Authenticate with the token
+			let mut sess = Session::default();
+			let res = token(&ds, &mut sess, &enc).await;
 
-				// Authenticate with the token
-				let mut sess = Session::default();
-				let res = token(&ds, &mut sess, &enc).await;
+			if expect_error {
+				assert!(res.is_err(), "Unexpected success");
+			} else {
+				assert!(res.is_ok(), "Failed to sign in with token");
+				assert_eq!(sess.ns, Some("test".to_string()));
+				assert_eq!(sess.db, Some("test".to_string()));
+				assert_eq!(sess.au.id(), *id);
 
-				if case.expect_error {
-					assert!(res.is_err(), "Unexpected success for case: {:?}", case);
-				} else {
-					assert!(res.is_ok(), "Failed to sign in with token for case: {:?}", case);
-					assert_eq!(sess.ns, Some("test".to_string()));
-					assert_eq!(sess.db, Some("test".to_string()));
-					assert_eq!(sess.au.id(), *id);
-
-					// Ensure record users do not have roles
-					for role in AVAILABLE_ROLES {
-						assert!(
-							!sess.au.has_role(role),
-							"Auth user expected to not have role {:?} in case: {:?}",
-							role,
-							case
-						);
-					}
-
-					// Ensure that the expiration is set correctly
-					let exp = sess.exp.unwrap();
-					let min_exp =
-						(Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
-					let max_exp =
-						(Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+				// Ensure record users do not have roles
+				for role in AVAILABLE_ROLES {
 					assert!(
-						exp > min_exp && exp < max_exp,
-						"Session expiration is expected to match the defined duration in case: {:?}",
-						case
+						!sess.au.has_role(role),
+						"Auth user expected to not have role {:?} in case",
+						role
 					);
 				}
+
+				// Ensure that the expiration is set correctly
+				let exp = sess.exp.unwrap();
+				let min_exp = (Utc::now() + Duration::days(30) - Duration::seconds(10)).timestamp();
+				let max_exp = (Utc::now() + Duration::days(30) + Duration::seconds(10)).timestamp();
+				assert!(
+					exp > min_exp && exp < max_exp,
+					"Session expiration is expected to match the defined duration in case"
+				);
 			}
 		}
 	}
@@ -1484,27 +1414,40 @@ mod tests {
 				"Session expiration is expected to match the defined duration"
 			);
 			let tk = match sess.tk {
-				Some(Value::Object(tk)) => tk,
+				Some(crate::types::PublicValue::Object(tk)) => tk,
 				_ => panic!("Session token is not an object"),
 			};
 			let string_claim = tk.get("string_claim").unwrap();
-			assert_eq!(*string_claim, Value::String("test".into()));
+			assert_eq!(*string_claim, crate::types::PublicValue::String("test".into()));
 			let bool_claim = tk.get("bool_claim").unwrap();
-			assert_eq!(*bool_claim, Value::Bool(true));
+			assert_eq!(*bool_claim, crate::types::PublicValue::Bool(true));
 			let int_claim = tk.get("int_claim").unwrap();
-			assert_eq!(*int_claim, Value::Number(123456.into()));
+			assert_eq!(*int_claim, crate::types::PublicValue::Number(123456.into()));
 			let float_claim = tk.get("float_claim").unwrap();
-			assert_eq!(*float_claim, Value::Number(123.456.into()));
+			assert_eq!(*float_claim, crate::types::PublicValue::Number(123.456.into()));
 			let array_claim = tk.get("array_claim").unwrap();
-			assert_eq!(*array_claim, Value::Array(vec!["test_1", "test_2"].into()));
+			assert_eq!(
+				*array_claim,
+				crate::types::PublicValue::Array(vec!["test_1", "test_2"].into())
+			);
 			let object_claim = tk.get("object_claim").unwrap();
-			let mut test_object: HashMap<String, Value> = HashMap::new();
-			test_object.insert("test_1".to_string(), Value::String("value_1".into()));
+			let mut test_object: HashMap<String, crate::types::PublicValue> = HashMap::new();
+			test_object
+				.insert("test_1".to_string(), crate::types::PublicValue::String("value_1".into()));
 			let mut test_object_child = HashMap::new();
-			test_object_child.insert("test_2_1".to_string(), Value::String("value_2_1".into()));
-			test_object_child.insert("test_2_2".to_string(), Value::String("value_2_2".into()));
-			test_object.insert("test_2".to_string(), Value::Object(test_object_child.into()));
-			assert_eq!(*object_claim, Value::Object(test_object.into()));
+			test_object_child.insert(
+				"test_2_1".to_string(),
+				crate::types::PublicValue::String("value_2_1".into()),
+			);
+			test_object_child.insert(
+				"test_2_2".to_string(),
+				crate::types::PublicValue::String("value_2_2".into()),
+			);
+			test_object.insert(
+				"test_2".to_string(),
+				crate::types::PublicValue::Object(test_object_child.into()),
+			);
+			assert_eq!(*object_claim, crate::types::PublicValue::Object(test_object.into()));
 		}
 	}
 
@@ -1747,8 +1690,7 @@ mod tests {
 
 		let ds = Datastore::new("memory").await.unwrap();
 		let sess = Session::owner().with_ns("test").with_db("test");
-		ds.execute(
-			format!("DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{secret}' DURATION FOR SESSION 30d, FOR TOKEN 30d")
+		ds.execute(format!("DEFINE ACCESS token ON DATABASE TYPE JWT ALGORITHM HS512 KEY '{secret}' DURATION FOR SESSION 30d, FOR TOKEN 30d")
 				.as_str(),
 			&sess,
 			None,
@@ -1985,7 +1927,7 @@ mod tests {
  				        WITH JWT ALGORITHM HS512 KEY '{secret}'
     					AUTHENTICATE (
 							-- Simple example increasing the record identifier by one
-							SELECT * FROM type::thing('user', record::id($auth) + 1)
+							SELECT * FROM type::record('user', record::id($auth) + 1)
     					)
     					DURATION FOR SESSION 2h
     				;
@@ -2045,7 +1987,7 @@ mod tests {
 					r#"
 				DEFINE ACCESS user ON DATABASE TYPE RECORD
 					SIGNIN (
-						SELECT * FROM type::thing('user', $id)
+						SELECT * FROM type::record('user', $id)
 					)
 					WITH JWT ALGORITHM HS512 KEY '{secret}'
 					AUTHENTICATE (
@@ -2150,11 +2092,11 @@ mod tests {
 
     				CREATE user:1 SET enabled = false;
 				"#).as_str(),
-				&sess,
-				None,
-			)
-			.await
-			.unwrap();
+			&sess,
+			None,
+		)
+		.await
+		.unwrap();
 
 			// Prepare the claims object
 			let mut claims = claims.clone();

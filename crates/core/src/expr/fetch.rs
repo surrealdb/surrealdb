@@ -18,7 +18,7 @@ use crate::val::Value;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Fetchs(pub Vec<Fetch>);
+pub(crate) struct Fetchs(pub Vec<Fetch>);
 
 impl Deref for Fetchs {
 	type Target = Vec<Fetch>;
@@ -50,7 +50,7 @@ impl InfoStructure for Fetchs {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Fetch(pub Expr);
+pub(crate) struct Fetch(pub(crate) Expr);
 
 impl Fetch {
 	pub(crate) async fn compute(

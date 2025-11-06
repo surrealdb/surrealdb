@@ -139,7 +139,8 @@ impl<'a> IndexOperation<'a> {
 					let key = self.get_unique_index_key(&n)?;
 					if txn.putc(&key, self.rid, None).await.is_err() {
 						let key = self.get_unique_index_key(&n)?;
-						let rid: RecordId = txn.get(&key, None).await?.unwrap();
+						let rid: RecordId =
+							txn.get(&key, None).await?.expect("record should exist");
 						return self.err_index_exists(rid, n);
 					}
 				}
@@ -240,7 +241,7 @@ impl<'a> IndexOperation<'a> {
 	/// the number of indexed fields.
 	fn err_index_exists(&self, rid: RecordId, mut n: Array) -> Result<()> {
 		bail!(Error::IndexExists {
-			thing: rid,
+			record: rid,
 			index: self.ix.name.to_string(),
 			value: match n.0.len() {
 				1 => n.0.remove(0).to_string(),
@@ -257,14 +258,9 @@ impl<'a> IndexOperation<'a> {
 	) -> Result<()> {
 		let mut rc = false;
 		// Build a FullText instance
-		let fti = FullTextIndex::new(
-			self.opt.id()?,
-			self.ctx.get_index_stores(),
-			&self.ctx.tx(),
-			self.ikb.clone(),
-			p,
-		)
-		.await?;
+		let fti =
+			FullTextIndex::new(self.ctx.get_index_stores(), &self.ctx.tx(), self.ikb.clone(), p)
+				.await?;
 		// Delete the old index data
 		let doc_id = if let Some(o) = self.o.take() {
 			fti.remove_content(stk, self.ctx, self.opt, self.rid, o, &mut rc).await?
@@ -294,7 +290,7 @@ impl<'a> IndexOperation<'a> {
 	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<()> {
 		let txn = self.ctx.tx();
 		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id);
-		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write, self.opt.id()?).await?;
+		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write).await?;
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			mt.remove_document(stk, &txn, self.rid, &o).await?;

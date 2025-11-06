@@ -5,10 +5,18 @@ use std::time::Duration;
 use arc_swap::ArcSwap;
 use axum::extract::ws::close_code::AGAIN;
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
+use bytes::Bytes;
+use dashmap::DashMap;
 use futures::stream::FuturesUnordered;
 use futures::{Sink, SinkExt, StreamExt};
 use opentelemetry::Context as TelemetryContext;
 use opentelemetry::trace::FutureExt;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
+use surrealdb_core::mem::ALLOC;
+use surrealdb_core::rpc::format::Format;
+use surrealdb_core::rpc::{DbResponse, DbResult, DbResultError, Method, RpcProtocol};
+use surrealdb_types::{Array, Value};
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinSet;
@@ -21,17 +29,8 @@ use crate::cnf::{
 	PKG_NAME, PKG_VERSION, WEBSOCKET_PING_FREQUENCY, WEBSOCKET_RESPONSE_BUFFER_SIZE,
 	WEBSOCKET_RESPONSE_CHANNEL_SIZE, WEBSOCKET_RESPONSE_FLUSH_PERIOD,
 };
-use crate::core::dbs::Session;
-//use surrealdb::gql::{Pessimistic, SchemaCache};
-use crate::core::kvs::Datastore;
-use crate::core::mem::ALLOC;
-use crate::core::rpc::format::Format;
-use crate::core::rpc::{Data, Method, RpcContext, RpcProtocolV1, RpcProtocolV2};
-use crate::core::val::{self, Array, Value};
 use crate::rpc::CONN_CLOSED_ERR;
-use crate::rpc::failure::Failure;
 use crate::rpc::format::WsFormat;
-use crate::rpc::response::{IntoRpcResponse, failure};
 use crate::telemetry;
 use crate::telemetry::metrics::ws::RequestContext;
 use crate::telemetry::traces::rpc::span_for_request;
@@ -55,14 +54,15 @@ pub struct Websocket {
 	pub(crate) lock: Arc<Semaphore>,
 	/// The persistent session for this WebSocket connection
 	pub(crate) session: ArcSwap<Session>,
+	pub(crate) sessions: DashMap<Uuid, Arc<Session>>,
+	/// The active transactions for this WebSocket connection
+	pub(crate) transactions: DashMap<Uuid, Arc<Transaction>>,
 	/// A cancellation token called when shutting down the server
 	pub(crate) shutdown: CancellationToken,
 	/// A cancellation token for cancelling all spawned tasks
 	pub(crate) canceller: CancellationToken,
 	/// The channels used to send and receive WebSocket messages
 	pub(crate) channel: Sender<Message>,
-	// The GraphQL schema cache stored in advance
-	//pub(crate) gql_schema: SchemaCache<Pessimistic>,
 }
 
 impl Websocket {
@@ -88,8 +88,9 @@ impl Websocket {
 			shutdown: CancellationToken::new(),
 			canceller: CancellationToken::new(),
 			session: ArcSwap::from(Arc::new(session)),
+			sessions: DashMap::new(),
+			transactions: DashMap::new(),
 			channel: sender.clone(),
-			//gql_schema: SchemaCache::new(datastore.clone()),
 			datastore,
 		});
 		// Add this WebSocket to the list
@@ -132,7 +133,7 @@ impl Websocket {
 		// Log the WebSocket disconnection
 		trace!("WebSocket {id} disconnected");
 		// Cleanup the live queries for this WebSocket
-		rpc.cleanup_lqs().await;
+		rpc.cleanup_all_lqs().await;
 		// Remove this WebSocket from the list
 		state.web_sockets.write().await.remove(&id);
 		// Stop telemetry metrics for this connection
@@ -157,7 +158,7 @@ impl Websocket {
 				// Send a regular ping message
 				_ = interval.tick() => {
 					// Create a new ping message
-					let msg = Message::Ping(vec![]);
+					let msg = Message::Ping(Bytes::from_static(b""));
 					// Close the connection if the message fails
 					if let Err(err) = internal_sender.send(msg).await {
 						// Output any errors if not a close error
@@ -349,7 +350,7 @@ impl Websocket {
 					span.record("otel.name", format!("surrealdb.rpc/{}", req.method));
 					span.record(
 						"rpc.request_id",
-						req.id.clone().map(val::Value::as_raw_string).unwrap_or_default(),
+						req.id.clone().map(|id| format!("{id:?}")).unwrap_or_default(),
 					);
 					let otel_cx = Arc::new(TelemetryContext::current_with_value(
 						req_cx.with_method(req.method.to_str()).with_size(len),
@@ -365,25 +366,48 @@ impl Websocket {
 							// Don't start processing if we are gracefully shutting down
 							if shutdown.is_cancelled() {
 								// Process the response
-								failure(req.id, Failure::custom(SERVER_SHUTTING_DOWN))
-									.send(otel_cx.clone(), rpc.format, chn)
+								crate::rpc::response::send(
+									DbResponse::failure(req.id, DbResultError::InternalError(SERVER_SHUTTING_DOWN.to_string())),
+									otel_cx.clone(),
+									rpc.format,
+									chn
+								)
 									.with_context(otel_cx.as_ref().clone())
 									.await;
 							}
 							// Check to see whether we have available memory
 							else if ALLOC.is_beyond_threshold() {
 								// Process the response
-								failure(req.id, Failure::custom(SERVER_OVERLOADED))
-									.send(otel_cx.clone(), rpc.format, chn)
+								crate::rpc::response::send(
+									DbResponse::failure(req.id, DbResultError::InternalError(SERVER_OVERLOADED.to_string())),
+									otel_cx.clone(),
+									rpc.format,
+									chn
+								)
 									.with_context(otel_cx.as_ref().clone())
 									.await;
 							}
 							// Otherwise process the request message
 							else {
 								// Process the message
-								Self::process_message(rpc.clone(), req.version, req.txn, req.method, req.params).await
-									.into_response(req.id)
-									.send(otel_cx.clone(), rpc.format, chn)
+								let result = Self::process_message(
+									rpc.clone(),
+									req.session_id.map(Into::into),
+									req.txn.map(Into::into),
+									req.method,
+									req.params,
+								)
+									.await;
+
+								crate::rpc::response::send(
+									match result {
+										Ok(result) => DbResponse::success(req.id, result),
+										Err(err) => DbResponse::failure(req.id, err),
+									},
+									otel_cx.clone(),
+									rpc.format,
+									chn
+								)
 									.with_context(otel_cx.as_ref().clone())
 									.await;
 							}
@@ -392,10 +416,14 @@ impl Websocket {
 				}
 				Err(err) => {
 					// Process the response
-					failure(None, err)
-						.send(otel_cx.clone(), rpc.format, chn)
+					crate::rpc::response::send(
+						DbResponse::failure(None, err),
+						otel_cx.clone(),
+						rpc.format,
+						chn
+					)
 						.with_context(otel_cx.as_ref().clone())
-						.await
+						.await;
 				}
 			}
 		}
@@ -406,18 +434,20 @@ impl Websocket {
 	/// Process a WebSocket message and generate a response
 	async fn process_message(
 		rpc: Arc<Websocket>,
-		version: Option<u8>,
+		session_id: Option<Uuid>,
 		txn: Option<Uuid>,
 		method: Method,
 		params: Array,
-	) -> Result<Data, Failure> {
+	) -> Result<DbResult, DbResultError> {
 		debug!("Process RPC request");
 		// Check that the method is a valid method
 		if !method.is_valid() {
-			return Err(Failure::METHOD_NOT_FOUND);
+			return Err(DbResultError::MethodNotFound("Method not found".to_string()));
 		}
 		// Execute the specified method
-		RpcContext::execute(rpc.as_ref(), version, txn, method, params).await.map_err(Into::into)
+		RpcProtocol::execute(rpc.as_ref(), txn, session_id, method, params)
+			.await
+			.map_err(Into::into)
 	}
 
 	/// Reject a WebSocket message due to server overloading
@@ -438,30 +468,94 @@ impl Websocket {
 	}
 }
 
-impl RpcProtocolV1 for Websocket {}
-impl RpcProtocolV2 for Websocket {}
-
-impl RpcContext for Websocket {
+impl RpcProtocol for Websocket {
 	/// The datastore for this RPC interface
 	fn kvs(&self) -> &Datastore {
 		&self.datastore
 	}
+
 	/// Retrieves the modification lock for this RPC context
 	fn lock(&self) -> Arc<Semaphore> {
 		self.lock.clone()
 	}
-	/// The current session for this RPC context
-	fn session(&self) -> Arc<Session> {
-		self.session.load_full()
-	}
-	/// Mutable access to the current session for this RPC context
-	fn set_session(&self, session: Arc<Session>) {
-		self.session.store(session);
-	}
+
 	/// The version information for this RPC context
-	fn version_data(&self) -> Data {
-		let value = Value::from(format!("{PKG_NAME}-{}", *PKG_VERSION));
-		Data::Other(value)
+	fn version_data(&self) -> DbResult {
+		let value = Value::String(format!("{PKG_NAME}-{}", *PKG_VERSION));
+		DbResult::Other(value)
+	}
+
+	// ------------------------------
+	// Sessions
+	// ------------------------------
+
+	/// The current session for this RPC context
+	fn get_session(&self, id: Option<&Uuid>) -> Arc<Session> {
+		if let Some(id) = id {
+			if let Some(session) = self.sessions.get(id) {
+				session.clone()
+			} else {
+				let session = Arc::new(Session::default());
+				self.sessions.insert(*id, session.clone());
+				session
+			}
+		} else {
+			self.session.load_full()
+		}
+	}
+
+	/// Mutable access to the current session for this RPC context
+	fn set_session(&self, id: Option<Uuid>, session: Arc<Session>) {
+		if let Some(id) = id {
+			self.sessions.insert(id, session);
+		} else {
+			self.session.store(session);
+		}
+	}
+
+	/// Mutable access to the current session for this RPC context
+	fn del_session(&self, id: &Uuid) {
+		self.sessions.remove(id);
+	}
+
+	/// Lists all sessions
+	fn list_sessions(&self) -> Vec<Uuid> {
+		self.sessions.iter().map(|x| *x.key()).collect()
+	}
+
+	// ------------------------------
+	// Transactions
+	// ------------------------------
+
+	/// Retrieves a transaction by ID
+	async fn get_tx(
+		&self,
+		id: Uuid,
+	) -> Result<Arc<surrealdb_core::kvs::Transaction>, surrealdb_core::rpc::RpcError> {
+		debug!("WebSocket get_tx called for transaction {id}");
+		self.transactions
+			.get(&id)
+			.map(|tx| {
+				debug!("Transaction {id} found in WebSocket transactions map");
+				tx.clone()
+			})
+			.ok_or_else(|| {
+				warn!(
+					"Transaction {id} not found in WebSocket transactions map (have {} transactions)",
+					self.transactions.len()
+				);
+				surrealdb_core::rpc::RpcError::InvalidParams("Transaction not found".to_string())
+			})
+	}
+
+	/// Stores a transaction
+	async fn set_tx(
+		&self,
+		id: Uuid,
+		tx: Arc<surrealdb_core::kvs::Transaction>,
+	) -> Result<(), surrealdb_core::rpc::RpcError> {
+		self.transactions.insert(id, tx);
+		Ok(())
 	}
 
 	// ------------------------------
@@ -472,24 +566,46 @@ impl RpcContext for Websocket {
 	const LQ_SUPPORT: bool = true;
 
 	/// Handles the execution of a LIVE statement
-	async fn handle_live(&self, lqid: &Uuid) {
-		self.state.live_queries.write().await.insert(*lqid, self.id);
+	async fn handle_live(&self, lqid: &Uuid, session_id: Option<Uuid>) {
+		self.state.live_queries.write().await.insert(*lqid, (self.id, session_id));
 		trace!("Registered live query {lqid} on websocket {}", self.id);
 	}
 
 	/// Handles the execution of a KILL statement
 	async fn handle_kill(&self, lqid: &Uuid) {
-		if let Some(id) = self.state.live_queries.write().await.remove(lqid) {
-			trace!("Unregistered live query {lqid} on websocket {id}");
+		if let Some((id, session_id)) = self.state.live_queries.write().await.remove(lqid) {
+			if let Some(session_id) = session_id {
+				trace!("Unregistered live query {lqid} on websocket {id} for session {session_id}");
+			} else {
+				trace!("Unregistered live query {lqid} on websocket {id} for default session");
+			}
 		}
 	}
 
 	/// Handles the cleanup of live queries
-	async fn cleanup_lqs(&self) {
+	async fn cleanup_lqs(&self, session_id: Option<&Uuid>) {
 		let mut gc = Vec::new();
 		// Find all live queries for to this connection
 		self.state.live_queries.write().await.retain(|key, value| {
-			if value == &self.id {
+			if value.0 == self.id && value.1.as_ref() == session_id {
+				trace!("Removing live query: {key}");
+				gc.push(*key);
+				return false;
+			}
+			true
+		});
+		// Garbage collect the live queries on this connection
+		if let Err(err) = self.kvs().delete_queries(gc).await {
+			error!("Error handling RPC connection: {err}");
+		}
+	}
+
+	/// Handles the cleanup of live queries
+	async fn cleanup_all_lqs(&self) {
+		let mut gc = Vec::new();
+		// Find all live queries for to this connection
+		self.state.live_queries.write().await.retain(|key, value| {
+			if value.0 == self.id {
 				trace!("Removing live query: {key}");
 				gc.push(*key);
 				return false;
@@ -503,13 +619,85 @@ impl RpcContext for Websocket {
 	}
 
 	// ------------------------------
-	// GraphQL
+	// Methods for transactions
 	// ------------------------------
 
-	// GraphQL queries are enabled on WebSockets
-	//const GQL_SUPPORT: bool = true;
+	/// Begin a new transaction
+	async fn begin(
+		&self,
+		_txn: Option<Uuid>,
+		_session_id: Option<Uuid>,
+	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
+		// Create a new transaction
+		let tx = self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await?;
+		// Generate a unique transaction ID
+		let id = Uuid::now_v7();
+		debug!("WebSocket begin: created transaction {id}");
+		// Store the transaction in the map
+		self.transactions.insert(id, Arc::new(tx));
+		debug!(
+			"WebSocket begin: stored transaction {id}, map now has {} transactions",
+			self.transactions.len()
+		);
+		// Return the transaction ID to the client
+		Ok(DbResult::Other(Value::Uuid(surrealdb::types::Uuid(id))))
+	}
 
-	//fn graphql_schema_cache(&self) -> &SchemaCache {
-	//&self.gql_schema
-	//}
+	/// Commit a transaction
+	async fn commit(
+		&self,
+		_txn: Option<Uuid>,
+		_session_id: Option<Uuid>,
+		params: Array,
+	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
+		// Extract the transaction ID from params
+		let mut params_vec = params.into_vec();
+		let Some(Value::Uuid(surrealdb::types::Uuid(txn_id))) = params_vec.pop() else {
+			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
+				"Expected transaction UUID".to_string(),
+			));
+		};
+
+		// Retrieve and remove the transaction from the map
+		let Some((_, tx)) = self.transactions.remove(&txn_id) else {
+			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
+				"Transaction not found".to_string(),
+			));
+		};
+
+		// Commit the transaction
+		tx.commit().await?;
+
+		// Return success
+		Ok(DbResult::Other(Value::None))
+	}
+
+	/// Cancel a transaction
+	async fn cancel(
+		&self,
+		_txn: Option<Uuid>,
+		_session_id: Option<Uuid>,
+		params: Array,
+	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
+		// Extract the transaction ID from params
+		let mut params_vec = params.into_vec();
+		let Some(Value::Uuid(surrealdb::types::Uuid(txn_id))) = params_vec.pop() else {
+			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
+				"Expected transaction UUID".to_string(),
+			));
+		};
+
+		// Retrieve and remove the transaction from the map
+		let Some((_, tx)) = self.transactions.remove(&txn_id) else {
+			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
+				"Transaction not found".to_string(),
+			));
+		};
+
+		// Cancel the transaction
+		tx.cancel().await?;
+
+		// Return success
+		Ok(DbResult::Other(Value::None))
+	}
 }

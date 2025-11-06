@@ -11,10 +11,9 @@ use crate::expr::{Algorithm, Expr, Literal};
 /// The type of access methods available
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub enum AccessType {
+pub(crate) enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
-	// TODO(gguillemas): Document once bearer access is no longer experimental.
 	Bearer(BearerAccess),
 }
 
@@ -83,7 +82,7 @@ impl AccessType {
 }
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub struct JwtAccess {
+pub(crate) struct JwtAccess {
 	// Verify is required
 	pub verify: JwtAccessVerify,
 	// Issue is optional
@@ -127,36 +126,10 @@ impl Display for JwtAccess {
 	}
 }
 
-impl JwtAccess {
-	/// Redacts certain parts of the definition for security on export.
-	pub(crate) fn redacted(&self) -> JwtAccess {
-		let mut jwt = self.clone();
-		jwt.verify = match jwt.verify {
-			JwtAccessVerify::Key(mut key) => {
-				// If algorithm is symmetric, the verification key is a secret
-				if key.alg.is_symmetric() {
-					key.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
-				}
-				JwtAccessVerify::Key(key)
-			}
-			// No secrets in JWK
-			JwtAccessVerify::Jwks(jwks) => JwtAccessVerify::Jwks(jwks),
-		};
-		jwt.issue = match jwt.issue {
-			Some(mut issue) => {
-				issue.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
-				Some(issue)
-			}
-			None => None,
-		};
-		jwt
-	}
-}
-
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub struct JwtAccessIssue {
-	pub alg: Algorithm,
-	pub key: Expr,
+pub(crate) struct JwtAccessIssue {
+	pub(crate) alg: Algorithm,
+	pub(crate) key: Expr,
 }
 
 impl Default for JwtAccessIssue {
@@ -171,7 +144,7 @@ impl Default for JwtAccessIssue {
 }
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub enum JwtAccessVerify {
+pub(crate) enum JwtAccessVerify {
 	Key(JwtAccessVerifyKey),
 	Jwks(JwtAccessVerifyJwks),
 }
@@ -184,9 +157,9 @@ impl Default for JwtAccessVerify {
 	}
 }
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub struct JwtAccessVerifyKey {
-	pub alg: Algorithm,
-	pub key: Expr,
+pub(crate) struct JwtAccessVerifyKey {
+	pub(crate) alg: Algorithm,
+	pub(crate) key: Expr,
 }
 
 impl Default for JwtAccessVerifyKey {
@@ -201,12 +174,12 @@ impl Default for JwtAccessVerifyKey {
 }
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub struct JwtAccessVerifyJwks {
-	pub url: Expr,
+pub(crate) struct JwtAccessVerifyJwks {
+	pub(crate) url: Expr,
 }
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub struct RecordAccess {
+pub(crate) struct RecordAccess {
 	pub signup: Option<Expr>,
 	pub signin: Option<Expr>,
 	pub jwt: JwtAccess,
@@ -227,7 +200,7 @@ impl Default for RecordAccess {
 }
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub struct BearerAccess {
+pub(crate) struct BearerAccess {
 	pub kind: BearerAccessType,
 	pub subject: BearerAccessSubject,
 	pub jwt: JwtAccess,
@@ -246,12 +219,13 @@ impl Default for BearerAccess {
 }
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq)]
-pub enum BearerAccessType {
+pub(crate) enum BearerAccessType {
 	Bearer,
 	Refresh,
 }
 
 impl BearerAccessType {
+	#[cfg(test)]
 	pub fn prefix(&self) -> &'static str {
 		match self {
 			Self::Bearer => "surreal-bearer",

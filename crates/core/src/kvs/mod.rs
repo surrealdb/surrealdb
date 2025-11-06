@@ -18,7 +18,7 @@
 
 pub mod export;
 
-mod api;
+pub mod api;
 mod batch;
 mod cf;
 mod clock;
@@ -26,7 +26,6 @@ mod ds;
 mod key;
 mod node;
 mod scanner;
-mod stash;
 mod threadpool;
 mod tr;
 mod tx;
@@ -40,19 +39,19 @@ mod surrealkv;
 mod tikv;
 
 pub(crate) mod cache;
-
-#[cfg(not(target_family = "wasm"))]
 pub(crate) mod index;
-pub(crate) mod savepoint;
+pub mod savepoint;
 pub(crate) mod sequences;
+pub(crate) mod slowlog;
 pub(crate) mod tasklease;
 #[cfg(test)]
 mod tests;
 mod util;
 
-pub use ds::Datastore;
-#[cfg(not(target_family = "wasm"))]
-pub(crate) use index::{ConsumeResult, IndexBuilder};
+pub use api::Transaction as KVTransaction;
+pub use clock::SizedClock;
+pub use ds::requirements::{TransactionBuilderFactoryRequirements, TransactionBuilderRequirements};
+pub use ds::{Datastore, DatastoreFlavor, TransactionBuilder, TransactionBuilderFactory};
 pub(crate) use key::{KVKey, KVValue, impl_kv_key_storekey, impl_kv_value_revisioned};
 pub use tr::{Check, LockType, TransactionType, Transactor};
 pub use tx::Transaction;

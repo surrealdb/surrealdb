@@ -11,19 +11,20 @@ use crate::expr::{Base, Expr};
 use crate::kvs::Datastore;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
-use crate::val::{RecordId, Value};
+use crate::types::{PublicRecordId, PublicValue};
+use crate::val::RecordId;
 
 // Execute the AUTHENTICATE clause for a record access method
-pub async fn authenticate_record(
+pub(crate) async fn authenticate_record(
 	kvs: &Datastore,
 	session: &Session,
 	authenticate: &Expr,
-) -> Result<RecordId> {
+) -> Result<PublicRecordId> {
 	match kvs.evaluate(authenticate, session, None).await {
-		Ok(val) => match val.record() {
+		Ok(val) => match val.into_record() {
 			// If the AUTHENTICATE clause returns a record, authentication continues with that
 			// record
-			Some(id) => Ok(id),
+			Ok(id) => Ok(id),
 			// If the AUTHENTICATE clause returns anything else, authentication fails generically
 			_ => {
 				debug!("Authentication attempt as record user rejected by AUTHENTICATE clause");
@@ -37,7 +38,7 @@ pub async fn authenticate_record(
 				Some(Error::Thrown(_)) => Err(e),
 				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
 				// This allows clients to handle these errors, which may be retryable
-				Some(Error::Tx(_) | Error::TxFailure | Error::TxRetryable) => {
+				Some(Error::Tx(_) | Error::TxRetryable(_)) => {
 					debug!("Unexpected error found while executing AUTHENTICATE clause: {e}");
 					Err(anyhow::Error::new(Error::UnexpectedAuth))
 				}
@@ -58,7 +59,7 @@ pub async fn authenticate_record(
 }
 
 // Execute the AUTHENTICATE clause for any other access method
-pub async fn authenticate_generic(
+pub(crate) async fn authenticate_generic(
 	kvs: &Datastore,
 	session: &Session,
 	authenticate: &Expr,
@@ -67,7 +68,7 @@ pub async fn authenticate_generic(
 		Ok(val) => {
 			match val {
 				// If the AUTHENTICATE clause returns nothing, authentication continues
-				Value::None => Ok(()),
+				PublicValue::None => Ok(()),
 				// If the AUTHENTICATE clause returns anything else, authentication fails
 				// generically
 				_ => {
@@ -83,7 +84,7 @@ pub async fn authenticate_generic(
 				Some(Error::Thrown(_)) => Err(e),
 				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
 				// This allows clients to handle these errors, which may be retryable
-				Some(Error::Tx(_) | Error::TxFailure | Error::TxRetryable) => {
+				Some(Error::Tx(_) | Error::TxRetryable(_)) => {
 					debug!("Unexpected error found while executing an AUTHENTICATE clause: {e}");
 					Err(anyhow::Error::new(Error::UnexpectedAuth))
 				}
@@ -104,7 +105,7 @@ pub async fn authenticate_generic(
 }
 
 // Create a bearer key to act as refresh token for a record user
-pub async fn create_refresh_token_record(
+pub(crate) async fn create_refresh_token_record(
 	kvs: &Datastore,
 	ac: String,
 	ns: &str,

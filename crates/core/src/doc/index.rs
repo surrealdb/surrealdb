@@ -24,8 +24,7 @@ use crate::dbs::{Force, Options, Statement};
 use crate::doc::{CursorDoc, Document};
 use crate::expr::FlowResultExt as _;
 use crate::idx::index::IndexOperation;
-#[cfg(not(target_family = "wasm"))]
-use crate::kvs::ConsumeResult;
+use crate::kvs::index::ConsumeResult;
 use crate::val::{RecordId, Value};
 
 impl Document {
@@ -36,17 +35,8 @@ impl Document {
 		opt: &Options,
 		_stm: &Statement<'_>,
 	) -> Result<()> {
-		// Was this force targeted at a specific index?
-		let targeted_force = matches!(opt.force, Force::Index(_));
 		// Collect indexes or skip
 		let ixs = match &opt.force {
-			Force::Index(ix)
-				if ix.first().is_some_and(|ix| {
-					self.id.as_ref().is_some_and(|id| ix.table_name.as_str() == id.table)
-				}) =>
-			{
-				ix.clone()
-			}
 			Force::All => self.ix(ctx, opt).await?,
 			_ if self.changed() => self.ix(ctx, opt).await?,
 			_ => return Ok(()),
@@ -69,7 +59,7 @@ impl Document {
 			let n = Self::build_opt_values(stk, ctx, opt, ix, &self.current).await?;
 
 			// Update the index entries
-			if targeted_force || o != n {
+			if o != n {
 				Self::one_index(&db, stk, ctx, opt, ix, o, n, &rid).await?;
 			}
 		}
@@ -88,7 +78,6 @@ impl Document {
 		n: Option<Vec<Value>>,
 		rid: &RecordId,
 	) -> Result<()> {
-		#[cfg(not(target_family = "wasm"))]
 		let (o, n) = if let Some(ib) = ctx.get_index_builder() {
 			match ib.consume(db, ctx, ix, o, n, rid).await? {
 				// The index builder consumed the value, which means it is currently building the

@@ -6,14 +6,15 @@ use std::future::Future;
 use std::sync::Arc;
 use std::thread::Builder;
 
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use regex::Regex;
 use surrealdb_core::dbs::capabilities::Capabilities;
-use surrealdb_core::dbs::{Response, Session};
+use surrealdb_core::dbs::{QueryResult, Session};
 use surrealdb_core::iam::{Auth, Level, Role};
 use surrealdb_core::kvs::Datastore;
+use surrealdb_core::rpc::DbResultError;
 use surrealdb_core::syn;
-use surrealdb_core::val::{Number, Value};
+use surrealdb_types::{Number, ToSql, Value};
 
 pub async fn new_ds() -> Result<Datastore> {
 	Ok(Datastore::new("memory").await?.with_capabilities(Capabilities::all()).with_notifications())
@@ -84,7 +85,7 @@ pub async fn iam_run_case(
 		let expected = syn::value(check_expected_result)?;
 		ensure!(
 			tmp == expected,
-			"Check statement failed for test {test_index} ({test}): expected value \n'{expected:#}' \ndoesn't match \n'{tmp:#}'",
+			"Check statement failed for test {test_index} ({test}): expected value \n'{expected:#?}' \ndoesn't match \n'{tmp:#?}'",
 		)
 	}
 
@@ -257,7 +258,7 @@ pub fn with_enough_stack(fut: impl Future<Output = Result<()>> + Send + 'static)
 
 #[track_caller]
 #[allow(dead_code)]
-fn skip_ok_pos(res: &mut Vec<Response>, pos: usize) -> Result<()> {
+fn skip_ok_pos(res: &mut Vec<QueryResult>, pos: usize) -> Result<()> {
 	assert!(!res.is_empty(), "At position {pos} - No more result!");
 	let r = res.remove(0).result;
 	let _ = r.is_err_and(|e| {
@@ -271,7 +272,7 @@ fn skip_ok_pos(res: &mut Vec<Response>, pos: usize) -> Result<()> {
 /// an error occurs.
 #[track_caller]
 #[allow(dead_code)]
-pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<()> {
+pub fn skip_ok(res: &mut Vec<QueryResult>, skip: usize) -> Result<()> {
 	for i in 0..skip {
 		skip_ok_pos(res, i)?;
 	}
@@ -289,7 +290,7 @@ pub fn skip_ok(res: &mut Vec<Response>, skip: usize) -> Result<()> {
 pub struct Test {
 	pub ds: Datastore,
 	pub session: Session,
-	pub responses: Vec<Response>,
+	pub responses: Vec<QueryResult>,
 	pos: usize,
 }
 
@@ -353,7 +354,7 @@ impl Test {
 	#[track_caller]
 	#[allow(dead_code)]
 	#[allow(clippy::should_implement_trait)]
-	pub fn next(&mut self) -> Result<Response> {
+	pub fn next(&mut self) -> Result<QueryResult> {
 		assert!(!self.responses.is_empty(), "No response left - last position: {}", self.pos);
 		self.pos += 1;
 		Ok(self.responses.remove(0))
@@ -365,7 +366,7 @@ impl Test {
 	/// the last position in the responses list before it was emptied.
 	#[track_caller]
 	pub fn next_value(&mut self) -> Result<Value> {
-		self.next()?.result
+		self.next()?.result.context("Failed to get next value")
 	}
 
 	/// Skips a specified number of elements from the beginning of the
@@ -390,13 +391,13 @@ impl Test {
 		// Then check they are indeed the same values
 		//
 		// If it is a constant we need to transform it as a number
-		if val.as_number().map(|x| x.is_nan()).unwrap_or(false) {
+		if val.clone().into_number().map(|x| x.is_nan()).unwrap_or(false) {
 			assert!(
-				tmp.as_number().map(|x| x.is_nan()).unwrap_or(false),
-				"Expected NaN but got {info}: {tmp}"
+				tmp.clone().into_number().map(|x| x.is_nan()).unwrap_or(false),
+				"Expected NaN but got {info}: {tmp:?}"
 			);
 		} else {
-			assert_eq!(tmp, val, "{info} {tmp:#}");
+			assert_eq!(tmp, val, "{info} {tmp:#?}");
 		}
 		//
 		Ok(self)
@@ -405,7 +406,7 @@ impl Test {
 	#[track_caller]
 	#[allow(dead_code)]
 	pub fn expect_regex(&mut self, regex: &str) -> Result<&mut Self> {
-		let tmp = self.next_value()?.to_string();
+		let tmp = self.next_value()?.to_sql();
 		let regex = Regex::new(regex)?;
 		assert!(regex.is_match(&tmp), "Output '{tmp}' doesn't match regex '{regex}'",);
 		Ok(self)
@@ -439,7 +440,7 @@ impl Test {
 	#[allow(dead_code)]
 	pub fn expect_val_info<I: Display>(&mut self, val: &str, info: I) -> Result<&mut Self> {
 		self.expect_value_info(
-			syn::value(val).unwrap_or_else(|_| panic!("INVALID VALUE {info}:\n{val}")),
+			syn::value(val).unwrap_or_else(|e| panic!("INVALID VALUE {e}\n\n{info}:\n{val}")),
 			info,
 		)
 	}
@@ -460,17 +461,17 @@ impl Test {
 	/// error or if the error message does not pass the check.
 	#[track_caller]
 	#[allow(dead_code)]
-	pub fn expect_error_func<F: Fn(&anyhow::Error) -> bool>(
+	pub fn expect_error_func<F: Fn(&DbResultError) -> bool>(
 		&mut self,
 		check: F,
 	) -> Result<&mut Self> {
 		let tmp = self.next()?.result;
 		match &tmp {
 			Ok(val) => {
-				panic!("At position {} - Expect error, but got OK: {val}", self.pos);
+				panic!("At position {} - Expect error, but got OK: {val:?}", self.pos);
 			}
 			Err(e) => {
-				assert!(check(e), "At position {} - Err didn't match: {e}", self.pos)
+				assert!(check(e), "At position {} - Err didn't match: {e:?}", self.pos)
 			}
 		}
 		Ok(self)
@@ -512,10 +513,10 @@ impl Test {
 			let diff = (n - val).abs();
 			assert!(
 				diff <= precision,
-				"{tmp} does not match expected: {val} - diff: {diff} - precision: {precision}"
+				"{tmp:?} does not match expected: {val} - diff: {diff} - precision: {precision}"
 			);
 		} else {
-			panic!("At position {}: Value {tmp} is not a number", self.pos);
+			panic!("At position {}: Value {tmp:?} is not a number", self.pos);
 		}
 		Ok(self)
 	}
@@ -545,15 +546,4 @@ impl Test {
 		let val = Value::Bytes(val.into());
 		self.expect_value_info(val, info)
 	}
-}
-
-/// Creates a new b-tree map of key-value pairs
-#[macro_export]
-macro_rules! map {
-    ($($k:expr_2021 $(, if let $grant:pat = $check:expr_2021)? $(, if $guard:expr_2021)? => $v:expr_2021),* $(,)? $( => $x:expr_2021 )?) => {{
-        let mut m = ::std::collections::BTreeMap::new();
-    	$(m.extend($x.iter().map(|(k, v)| (k.clone(), v.clone())));)?
-		$( $(if let $grant = $check)? $(if $guard)? { m.insert($k, $v); };)+
-        m
-    }};
 }

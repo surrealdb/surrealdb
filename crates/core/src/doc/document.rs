@@ -7,15 +7,15 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 
 use crate::catalog::providers::{CatalogProvider, TableProvider};
-use crate::catalog::{self, DatabaseDefinition, Permission, TableDefinition};
+use crate::catalog::{self, Data, DatabaseDefinition, Permission, Record, TableDefinition};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Workable};
+use crate::doc::alter::ComputedData;
 use crate::expr::{Base, FlowResultExt as _};
 use crate::iam::{Action, ResourceKind};
 use crate::idx::planner::RecordStrategy;
 use crate::idx::planner::iterators::IteratorRecord;
 use crate::kvs::cache;
-use crate::val::record::{Data, Record};
 use crate::val::{RecordId, Value};
 
 pub(crate) struct Document {
@@ -31,6 +31,7 @@ pub(crate) struct Document {
 	pub(super) initial_reduced: CursorDoc,
 	pub(super) current_reduced: CursorDoc,
 	pub(super) record_strategy: RecordStrategy,
+	pub(super) input_data: Option<ComputedData>,
 }
 
 #[derive(Clone, Debug)]
@@ -207,6 +208,7 @@ impl Document {
 			current_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 			initial_reduced: CursorDoc::new(id.clone(), ir.clone(), val.clone()),
 			record_strategy: rs,
+			input_data: None,
 		}
 	}
 
@@ -437,7 +439,7 @@ impl Document {
 				match cache.get(&key) {
 					Some(val) => val,
 					None => {
-						let val = txn.get_or_add_db(ns, db, opt.strict).await?;
+						let val = txn.get_or_add_db(Some(ctx), ns, db, opt.strict).await?;
 						let val = cache::ds::Entry::Any(val.clone());
 						cache.insert(key, val.clone());
 						val
@@ -446,7 +448,7 @@ impl Document {
 				.try_into_type()
 			}
 			// No cache is present on the context
-			_ => txn.get_or_add_db(ns, db, opt.strict).await,
+			_ => txn.get_or_add_db(Some(ctx), ns, db, opt.strict).await,
 		}
 	}
 
@@ -475,7 +477,8 @@ impl Document {
 								opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 								// We can create the table automatically
 								let (ns, db) = opt.ns_db()?;
-								txn.ensure_ns_db_tb(ns, db, &id.table, opt.strict).await?
+								txn.ensure_ns_db_tb(Some(ctx), ns, db, &id.table, opt.strict)
+									.await?
 							}
 						};
 						let val = cache::ds::Entry::Any(val.clone());
@@ -494,7 +497,7 @@ impl Document {
 						opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 						// We can create the table automatically
 						let (ns, db) = opt.ns_db()?;
-						txn.ensure_ns_db_tb(ns, db, &id.table, opt.strict).await
+						txn.ensure_ns_db_tb(Some(ctx), ns, db, &id.table, opt.strict).await
 					}
 				}
 			}

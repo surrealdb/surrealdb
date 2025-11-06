@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use revision::revisioned;
+use surrealdb_types::{Value, Number, Object, Array};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash)]
@@ -66,5 +67,31 @@ impl From<ProxyObject> for ProxyValue {
 impl From<i64> for ProxyValue {
 	fn from(value: i64) -> Self {
 		ProxyValue::Number(ProxyNumber::Int(value))
+	}
+}
+
+impl ProxyValue {
+	/// Convert this ProxyValue to a surrealdb_types::Value
+	pub fn to_value(self) -> Value {
+		match self {
+			ProxyValue::Number(ProxyNumber::Int(i)) => Value::Number(Number::Int(i)),
+			ProxyValue::Strand(s) => Value::String(s.into()),
+			ProxyValue::Array(arr) => {
+				let values: Vec<Value> = arr.0.into_iter().map(|v| v.to_value()).collect();
+				Value::Array(Array::from(values))
+			}
+			ProxyValue::Object(obj) => obj.to_value(),
+		}
+	}
+}
+
+impl ProxyObject {
+	/// Convert this ProxyObject to a surrealdb_types::Value
+	pub fn to_value(self) -> Value {
+		let mut object = Object::default();
+		for (k, v) in self.0 {
+			object.insert(k, v.to_value());
+		}
+		Value::Object(object)
 	}
 }

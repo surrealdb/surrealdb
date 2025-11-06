@@ -10,7 +10,7 @@ use crate::expr::{Block, ControlFlow, Expr, FlowResult, Param, Value};
 use crate::val::range::IntegerRangeIter;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ForeachStatement {
+pub(crate) struct ForeachStatement {
 	pub param: Param,
 	pub range: Expr,
 	pub block: Block,
@@ -81,7 +81,17 @@ impl ForeachStatement {
 				// Compute each block entry
 				let res = match v {
 					Expr::Let(x) => x.compute(stk, &mut ctx, opt, doc).await,
-					v => stk.run(|stk| v.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await,
+					v => {
+						stk.run(|stk| {
+							v.compute(
+								stk,
+								ctx.as_ref().expect("context should be initialized"),
+								opt,
+								doc,
+							)
+						})
+						.await
+					}
 				};
 				// Catch any special errors
 				match res {
@@ -98,7 +108,6 @@ impl ForeachStatement {
 		Ok(Value::None)
 	}
 }
-
 impl Display for ForeachStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "FOR {} IN {} {}", self.param, self.range, self.block)

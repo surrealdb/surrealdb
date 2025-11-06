@@ -49,6 +49,7 @@
 //! crate::key::database::az             /*{ns}*{db}!az{az_name}
 //! crate::key::database::bu             /*{ns}*{db}!bu{bu_name}
 //! crate::key::database::fc             /*{ns}*{db}!fn{fc_name}
+//! crate::key::database::md             /*{ns}*{db}!md{md_name} -> ModuleDefinition
 //! crate::key::database::ml             /*{ns}*{db}!ml{ml_name}{vn}
 //! crate::key::database::pa             /*{ns}*{db}!pa{pa_name}
 //! crate::key::database::sq             /*{ns}*{db}!sq{sq_name}

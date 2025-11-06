@@ -5,7 +5,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use radix_trie::Trie;
 
-use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId};
+use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId, Record};
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::expr::BinaryOperator;
@@ -17,7 +17,6 @@ use crate::key::index::Index;
 use crate::key::index::iu::IndexCountKey;
 use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::{KVKey, Key, Transaction, Val};
-use crate::val::record::Record;
 use crate::val::{Array, RecordId, Value};
 
 pub(crate) type IteratorRef = usize;
@@ -218,7 +217,8 @@ impl IndexItemRecord {
 	fn new_key(t: RecordId, ir: IteratorRecord) -> Self {
 		Self::Key(Arc::new(t), ir)
 	}
-	fn thing(&self) -> &RecordId {
+
+	fn record_id(&self) -> &RecordId {
 		match self {
 			Self::Key(t, _) => t,
 			Self::KeyValue(t, _, _) => t,
@@ -1023,9 +1023,9 @@ impl JoinThingIterator {
 				if ctx.is_done(count % 100 == 0).await? {
 					break;
 				}
-				let thing = r.thing();
-				let value: Value = Value::from(thing.clone());
-				let k: Key = revision::to_vec(thing)?;
+				let record = r.record_id();
+				let value: Value = Value::from(record.clone());
+				let k: Key = revision::to_vec(record)?;
 				if self.distinct.insert(k, true).is_none() {
 					self.current_local = Some(new_iter(self.ns, self.db, &self.ix, value)?);
 					return Ok(true);

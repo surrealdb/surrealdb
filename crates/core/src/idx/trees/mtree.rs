@@ -7,11 +7,10 @@ use std::sync::Arc;
 use ahash::{HashMap, HashMapExt, HashSet};
 use anyhow::Result;
 use reblessive::tree::Stk;
-use revision::{Revisioned, revisioned};
+use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use uuid::Uuid;
 
 use crate::catalog::{DatabaseDefinition, Distance, MTreeParams, VectorType};
 use crate::ctx::Context;
@@ -26,7 +25,7 @@ use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val};
 use crate::val::{Number, RecordId, Value};
 
-pub struct MTreeIndex {
+pub(crate) struct MTreeIndex {
 	ikb: IndexKeyBase,
 	dim: usize,
 	vector_type: VectorType,
@@ -48,9 +47,8 @@ impl MTreeIndex {
 		ikb: IndexKeyBase,
 		p: &MTreeParams,
 		tt: TransactionType,
-		nid: Uuid,
 	) -> Result<Self> {
-		let doc_ids = SeqDocIds::new(nid, ikb.clone());
+		let doc_ids = SeqDocIds::new(ikb.clone());
 		let state_key = ikb.new_vm_root_key();
 		let state: MState = if let Some(val) = txn.get(&state_key, None).await? {
 			val
@@ -1439,13 +1437,13 @@ impl KVValue for MState {
 	#[inline]
 	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
 		let mut val = Vec::new();
-		self.serialize_revisioned(&mut val)?;
+		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
 		Ok(val)
 	}
 
 	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
-		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
+		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
 
@@ -1477,8 +1475,8 @@ mod tests {
 
 	async fn get_db(ds: &Datastore) -> Arc<DatabaseDefinition> {
 		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
-		let def = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
-		tx.cancel().await.unwrap();
+		let def = tx.ensure_ns_db(None, "myns", "mydb", false).await.unwrap();
+		tx.commit().await.unwrap();
 		def
 	}
 

@@ -31,6 +31,7 @@ async fn define_global_param() -> Result<()> {
 			configs: {},
 			functions: {},
 			models: {},
+			modules: {},
 			params: { test: 'DEFINE PARAM $test VALUE 12345 PERMISSIONS FULL' },
 			sequences: {},
 			tables: {},

@@ -4,14 +4,15 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use crate::ctx::Context;
-use crate::dbs::{Action, Notification, Options};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Expr, FlowResultExt as _};
+use crate::types::{PublicAction, PublicNotification, PublicValue};
 use crate::val::{Uuid, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct KillStatement {
+pub(crate) struct KillStatement {
 	// Uuid of Live Query
 	// or Param resolving to Uuid of Live Query
 	pub id: Expr,
@@ -76,12 +77,12 @@ impl KillStatement {
 		}
 		if let Some(sender) = opt.broker.as_ref() {
 			sender
-				.send(Notification {
-					id: lid.into(),
-					action: Action::Killed,
-					record: Value::None,
-					result: Value::None,
-				})
+				.send(PublicNotification::new(
+					lid.into(),
+					PublicAction::Killed,
+					PublicValue::None,
+					PublicValue::None,
+				))
 				.await;
 		}
 		// Return the query id

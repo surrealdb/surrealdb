@@ -1,16 +1,19 @@
+#![allow(clippy::unwrap_used)]
 #![cfg(feature = "kv-surrealkv")]
 
-use serde::{Deserialize, Serialize};
+use surrealdb::opt::Config;
 use surrealdb_core::cnf::EXPORT_BATCH_SIZE;
+use surrealdb_types::SurrealValue;
 use tokio::fs::remove_file;
 use ulid::Ulid;
 
-use super::{CreateDb, NS, RecordName};
+use super::{CreateDb, RecordName};
 
 pub async fn export_import_versions_with_inserts_updates_deletes(new_db: impl CreateDb) {
-	let (_, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (_, db) = new_db.create_db(config).await;
 	let db_name = Ulid::new().to_string();
-	db.use_ns(NS).use_db(&db_name).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(&db_name).await.unwrap();
 
 	let num_records = (*EXPORT_BATCH_SIZE * 2) as usize;
 	let num_deleted_records = num_records / 2;
@@ -118,7 +121,7 @@ pub async fn export_import_versions_with_inserts_updates_deletes(new_db: impl Cr
 	remove_file(export_file).await.unwrap();
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, SurrealValue)]
 struct User {
 	name: String,
 	age: i32,
@@ -127,9 +130,10 @@ struct User {
 }
 
 pub async fn export_import_different_data_types(new_db: impl CreateDb) {
-	let (_, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (_, db) = new_db.create_db(config).await;
 	let db_name = Ulid::new().to_string();
-	db.use_ns(NS).use_db(&db_name).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(&db_name).await.unwrap();
 
 	// Insert a user with different data types
 	let _ = db
@@ -167,9 +171,10 @@ pub async fn export_import_different_data_types(new_db: impl CreateDb) {
 }
 
 pub async fn export_import_multiple_tables(new_db: impl CreateDb) {
-	let (_, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (_, db) = new_db.create_db(config).await;
 	let db_name = Ulid::new().to_string();
-	db.use_ns(NS).use_db(&db_name).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(&db_name).await.unwrap();
 
 	// Insert records into multiple tables
 	let _ = db
@@ -225,9 +230,10 @@ pub async fn export_import_multiple_tables(new_db: impl CreateDb) {
 }
 
 pub async fn export_import_versioned_records(new_db: impl CreateDb) {
-	let (_, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (_, db) = new_db.create_db(config).await;
 	let db_name = Ulid::new().to_string();
-	db.use_ns(NS).use_db(&db_name).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(&db_name).await.unwrap();
 
 	let num_versions = (*EXPORT_BATCH_SIZE * 2) as usize;
 
@@ -281,9 +287,10 @@ pub async fn export_import_versioned_records(new_db: impl CreateDb) {
 }
 
 pub async fn export_import_versioned_range_queries(new_db: impl CreateDb) {
-	let (_, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (_, db) = new_db.create_db(config).await;
 	let db_name = Ulid::new().to_string();
-	db.use_ns(NS).use_db(&db_name).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(&db_name).await.unwrap();
 
 	let num_records = 100;
 
@@ -361,9 +368,10 @@ pub async fn export_import_versioned_range_queries(new_db: impl CreateDb) {
 }
 
 pub async fn export_import_retrieve_specific_versions(new_db: impl CreateDb) {
-	let (_, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (_, db) = new_db.create_db(config).await;
 	let db_name = Ulid::new().to_string();
-	db.use_ns(NS).use_db(&db_name).await.unwrap();
+	db.use_ns(Ulid::new().to_string()).use_db(&db_name).await.unwrap();
 
 	// Insert a user with different versions
 	let versions = [

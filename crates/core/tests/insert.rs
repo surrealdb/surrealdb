@@ -1,11 +1,13 @@
+#![allow(clippy::unwrap_used)]
+
 use surrealdb_core::iam::Level;
 use surrealdb_core::syn;
-use surrealdb_core::val::{Array, Value};
+use surrealdb_types::{Array, Value};
+
 mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::expr::Part;
 use surrealdb_core::iam::Role;
 
 use crate::helpers::Test;
@@ -250,34 +252,16 @@ async fn insert_statement_duplicate_key_update() -> Result<()> {
 	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(
-		tmp.first().pick(&[Part::Field("name".to_owned())]),
-		Value::from("SurrealDB".to_owned())
-	);
-	assert_eq!(
-		tmp.first().pick(&[Part::Field("founded".to_owned())]),
-		Value::from("2021-09-10".to_owned())
-	);
+	assert_eq!(tmp.first().unwrap().get("name"), Value::from_t("SurrealDB".to_owned()));
+	assert_eq!(tmp.first().unwrap().get("founded"), Value::from_t("2021-09-10".to_owned()));
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(
-		tmp.first().pick(&[Part::Field("name".to_owned())]),
-		Value::from("SurrealDB".to_owned())
-	);
-	assert_eq!(
-		tmp.first().pick(&[Part::Field("founded".to_owned())]),
-		Value::from("2021-09-11".to_owned())
-	);
+	assert_eq!(tmp.first().unwrap().get("name"), Value::from_t("SurrealDB".to_owned()));
+	assert_eq!(tmp.first().unwrap().get("founded"), Value::from_t("2021-09-11".to_owned()));
 	//
 	let tmp = res.remove(0).result?;
-	assert_eq!(
-		tmp.first().pick(&[Part::Field("name".to_owned())]),
-		Value::from("SurrealDB".to_owned())
-	);
-	assert_eq!(
-		tmp.first().pick(&[Part::Field("founded".to_owned())]),
-		Value::from("2021-09-12".to_owned())
-	);
+	assert_eq!(tmp.first().unwrap().get("name"), Value::from_t("SurrealDB".to_owned()));
+	assert_eq!(tmp.first().unwrap().get("founded"), Value::from_t("2021-09-12".to_owned()));
 	//
 	Ok(())
 }
@@ -423,9 +407,9 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let res = resp.remove(0).output();
 
 			if should_succeed {
-				assert!(res.is_ok() && res.unwrap() != Array::new().into(), "{}", msg);
+				assert!(res.is_ok() && res.unwrap() != Value::Array(Array::new()), "{}", msg);
 			} else if res.is_ok() {
-				assert!(res.unwrap() == Array::new().into(), "{}", msg);
+				assert!(res.unwrap() == Value::Array(Array::new()), "{}", msg);
 			} else {
 				// Not allowed to create a table
 				let err = res.unwrap_err().to_string();
@@ -448,7 +432,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Array::new().into(),
+				res.is_ok() && res.unwrap() != Value::Array(Array::new()),
 				"unexpected error creating person record"
 			);
 
@@ -458,7 +442,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Array::new().into(),
+				res.is_ok() && res.unwrap() != Value::Array(Array::new()),
 				"unexpected error creating person record"
 			);
 
@@ -468,7 +452,7 @@ async fn common_permissions_checks(auth_enabled: bool) {
 				.unwrap();
 			let res = resp.remove(0).output();
 			assert!(
-				res.is_ok() && res.unwrap() != Array::new().into(),
+				res.is_ok() && res.unwrap() != Value::Array(Array::new()),
 				"unexpected error creating person record"
 			);
 
@@ -477,9 +461,9 @@ async fn common_permissions_checks(auth_enabled: bool) {
 			let res = resp.remove(0).output();
 
 			if should_succeed {
-				assert!(res.is_ok() && res.unwrap() != Array::new().into(), "{}", msg);
+				assert!(res.is_ok() && res.unwrap() != Value::Array(Array::new()), "{}", msg);
 			} else if res.is_ok() {
-				assert!(res.unwrap() == Array::new().into(), "{}", msg);
+				assert!(res.unwrap() == Value::Array(Array::new()), "{}", msg);
 			} else {
 				// Not allowed to create a table
 				let err = res.unwrap_err().to_string();
@@ -555,7 +539,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() == Array::new().into(),
+			res.unwrap() == Value::Array(Array::new()),
 			"{}",
 			"anonymous user should not be able to insert a new record if the table exists but has no permissions"
 		);
@@ -587,7 +571,7 @@ async fn check_permissions_auth_enabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Array::new().into(),
+			res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"anonymous user should be able to insert a new record if the table exists and grants full permissions"
 		);
@@ -621,7 +605,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Array::new().into(),
+			res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"anonymous user should be able to create the table"
 		);
@@ -653,7 +637,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Array::new().into(),
+			res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"anonymous user should not be able to insert a new record if the table exists but has no permissions"
 		);
@@ -685,7 +669,7 @@ async fn check_permissions_auth_disabled() {
 		let res = resp.remove(0).output();
 
 		assert!(
-			res.unwrap() != Array::new().into(),
+			res.unwrap() != Value::Array(Array::new()),
 			"{}",
 			"anonymous user should be able to insert a new record if the table exists and grants full permissions"
 		);
@@ -837,12 +821,12 @@ async fn insert_relation_ignore_unique_index_fix_test() -> Result<()> {
 	t.skip_ok(2)?;
 
 	let first_result = t.next()?.result?;
-	assert_eq!(first_result.as_array().unwrap().len(), 1);
+	assert_eq!(first_result.into_array().unwrap().len(), 1);
 
 	t.expect_val("[]")?;
 
 	let select_result = t.next()?.result?;
-	let records = select_result.as_array().unwrap();
+	let records = select_result.into_array().unwrap();
 
 	assert_eq!(
 		records.len(),

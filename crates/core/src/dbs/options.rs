@@ -8,17 +8,17 @@ use uuid::Uuid;
 use crate::catalog;
 use crate::catalog::SubscriptionDefinition;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
-use crate::dbs::Notification;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::iam::{Action, Auth, ResourceKind};
+use crate::types::PublicNotification;
 
 /// An Options is passed around when processing a set of query
 /// statements.
 ///
 /// An Options contains specific information for how
 /// to process each particular statement, including the record
-/// version to retrieve, whether futures should be processed, and
+/// version to retrieve, whether computed values should be processed, and
 /// whether field/event/table queries should be processed (useful
 /// when importing data, where these queries might fail).
 #[derive(Clone, Debug)]
@@ -56,7 +56,6 @@ pub enum Force {
 	All,
 	None,
 	Table(Arc<[catalog::TableDefinition]>),
-	Index(Arc<[catalog::IndexDefinition]>),
 }
 
 /// Trait for a pluggable message broker used to forward live query events across nodes.
@@ -66,7 +65,10 @@ pub trait MessageBroker: Send + Sync + Debug {
 
 	/// Forward a live query event for the given subscription to its owning node.
 	/// The concrete implementation decides how to encode and route this request.
-	fn send(&self, notification: Notification) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
+	fn send(
+		&self,
+		notification: PublicNotification,
+	) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
 }
 
 impl Default for Options {
@@ -273,7 +275,7 @@ impl Options {
 	}
 
 	// Get currently selected base
-	pub fn selected_base(&self) -> Result<Base, Error> {
+	pub(crate) fn selected_base(&self) -> Result<Base, Error> {
 		match (self.ns.as_ref(), self.db.as_ref()) {
 			(None, None) => Ok(Base::Root),
 			(Some(_), None) => Ok(Base::Ns),
@@ -282,11 +284,11 @@ impl Options {
 		}
 	}
 
-	/// Create a new Options object for a function/subquery/future/etc.
+	/// Create a new Options object for a function/subquery/computed/etc.
 	///
 	/// The parameter is the approximate cost of the operation (more concretely, the size of the
 	/// stack frame it uses relative to a simple function call). When in doubt, use a value of 1.
-	pub fn dive(&self, cost: u8) -> Result<Self, Error> {
+	pub(crate) fn dive(&self, cost: u8) -> Result<Self, Error> {
 		if self.dive < cost as u32 {
 			return Err(Error::ComputationDepthExceeded);
 		}
@@ -376,10 +378,7 @@ impl Options {
 			return Ok(());
 		}
 
-		self.auth.is_allowed(action, &res).map_err(|x| match x.downcast() {
-			Ok(x) => anyhow::Error::new(Error::IamError(x)),
-			Err(e) => e,
-		})
+		self.auth.is_allowed(action, &res)
 	}
 
 	/// Checks the current server configuration, and

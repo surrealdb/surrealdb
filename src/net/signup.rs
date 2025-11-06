@@ -4,7 +4,11 @@ use axum::routing::options;
 use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use bytes::Bytes;
-use serde::Serialize;
+use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::capabilities::RouteTarget;
+use surrealdb_core::iam::Token;
+use surrealdb_core::syn;
+use surrealdb_types::{SurrealValue, Value};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
@@ -12,26 +16,20 @@ use super::error::ResponseError;
 use super::headers::Accept;
 use super::output::Output;
 use crate::cnf::HTTP_MAX_SIGNIN_BODY_SIZE;
-use crate::core::dbs::Session;
-use crate::core::dbs::capabilities::RouteTarget;
-use crate::core::syn;
-use crate::core::val::Value;
 use crate::net::error::Error as NetError;
 use crate::net::input::bytes_to_utf8;
 
-#[derive(Serialize)]
+#[derive(SurrealValue)]
 struct Success {
 	code: u16,
 	details: String,
-	token: Option<String>,
-	refresh: Option<String>,
+	token: Token,
 }
 
 impl Success {
-	fn new(token: Option<String>, refresh: Option<String>) -> Success {
+	fn new(token: Token) -> Success {
 		Success {
 			token,
-			refresh,
 			code: 200,
 			details: String::from("Authentication succeeded"),
 		}
@@ -67,28 +65,42 @@ async fn handler(
 	match syn::json(data) {
 		// The provided value was an object
 		Ok(Value::Object(vars)) => {
-			match crate::core::iam::signup::signup(kvs, &mut session, vars).await {
+			match surrealdb_core::iam::signup::signup(kvs, &mut session, vars.into()).await {
 				// Authentication was successful
-				Ok(v) => match accept.as_deref() {
-					// Simple serialization
-					Some(Accept::ApplicationJson) => {
-						Ok(Output::json_other(&Success::new(v.token, v.refresh)))
+				Ok(token) => {
+					match accept.as_deref() {
+						// Simple serialization
+						Some(Accept::ApplicationJson) => {
+							let success = Success::new(token).into_value().into_json_value();
+							Ok(Output::json_other(&success))
+						}
+						Some(Accept::ApplicationCbor) => {
+							let success = Success::new(token).into_value();
+							Ok(Output::cbor(success))
+						}
+						// Text serialization
+						// NOTE: Only the token is returned in a plain text response.
+						Some(Accept::TextPlain) => {
+							let token = match token {
+								Token::Access(token) => token,
+								Token::WithRefresh {
+									access: token,
+									..
+								} => token,
+							};
+							Ok(Output::Text(token))
+						}
+						// Internal serialization
+						Some(Accept::ApplicationFlatbuffers) => {
+							let success = Success::new(token).into_value();
+							Ok(Output::flatbuffers(&success))
+						}
+						// Return nothing
+						None => Ok(Output::None),
+						// An incorrect content-type was requested
+						_ => Err(NetError::InvalidType.into()),
 					}
-					Some(Accept::ApplicationCbor) => {
-						Ok(Output::cbor(&Success::new(v.token, v.refresh)))
-					}
-					// Text serialization
-					// NOTE: Only the token is returned in a plain text response.
-					Some(Accept::TextPlain) => Ok(Output::Text(v.token.unwrap_or_default())),
-					// Internal serialization
-					Some(Accept::Surrealdb) => {
-						Ok(Output::bincode(&Success::new(v.token, v.refresh)))
-					}
-					// Return nothing
-					None => Ok(Output::None),
-					// An incorrect content-type was requested
-					_ => Err(NetError::InvalidType.into()),
-				},
+				}
 				// There was an error with authentication
 				Err(err) => Err(ResponseError(err)),
 			}

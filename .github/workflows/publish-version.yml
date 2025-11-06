@@ -28,7 +28,7 @@ on:
       rust-version:
         required: false
         type: string
-        default: "1.87.0"
+        default: "1.87"
         description: "The Rust version to use for building binaries"
       onnx-version:
         required: false
@@ -109,29 +109,34 @@ jobs:
     needs: [ prepare-vars ]
     runs-on: [ runner-amd64-2xlarge ]
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
-        with:
-          toolchain: ${{ inputs.rust-version }}
-
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ inputs.git-ref }}
 
-      - name: Setup cache
-        uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
-          save-if: ${{ inputs.git-ref == 'main' }}
+          toolchain: ${{ inputs.rust-version }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@76081f88faadd9c23688b78b70c734925ea84cca # (Actions must be pinned by commit hash) cargo-llvm-cov
-
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
+        with:
+          tools: cargo-llvm-cov,cargo-make
 
       - name: Test workspace + coverage
         run: cargo make ci-workspace-coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@5a1091511ad55cbe89839c7260b706298ca349f7 # (Actions must be pinned by commit hash) v5.5.1
+        with:
+          files: lcov.info
+          fail_ci_if_error: true
+          flags: workspace-tests
+          name: released-coverage
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Debug info
         if: always()
@@ -141,13 +146,6 @@ jobs:
           df -h
           ps auxf
           cat /tmp/surrealdb.log || true
-
-      - name: Upload coverage report
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # (Actions must be pinned by commit hash) v4.6.2
-        with:
-          name: code-coverage-report
-          path: target/llvm-cov/html/
-          retention-days: 5
 
   format:
     name: Check format
@@ -165,14 +163,15 @@ jobs:
           set -x
           echo "toolchain=$(cat rust-toolchain.nightly)" >> $GITHUB_OUTPUT
 
-      - name: Install nightly toolchain
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ steps.info.outputs.toolchain }}
           components: rustfmt
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Check format
         run: cargo make ci-format
@@ -187,13 +186,14 @@ jobs:
         with:
           ref: ${{ inputs.git-ref }}
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ inputs.rust-version }}
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Check workspace
         run: cargo make ci-check
@@ -208,14 +208,15 @@ jobs:
         with:
           ref: ${{ inputs.git-ref }}
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ inputs.rust-version }}
           targets: wasm32-unknown-unknown
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Check wasm
         run: cargo make ci-check-wasm
@@ -230,17 +231,18 @@ jobs:
         with:
           ref: ${{ inputs.git-ref }}
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           toolchain: ${{ inputs.rust-version }}
           components: clippy
+          save-cache: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install cargo-make
-        run: cargo install --debug --locked cargo-make
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
       - name: Check clippy
-        run: cargo make ci-clippy
+        run: cargo +${{ inputs.rust-version }} make ci-clippy
 
   build:
     name: Release binaries
@@ -264,6 +266,7 @@ jobs:
       git-ref: ${{ inputs.git-ref }}
       publish: ${{ inputs.publish }}
       nightly-release: ${{ inputs.nightly-release }}
+    secrets: inherit
 
   publish:
     name: Publish binaries

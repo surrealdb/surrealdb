@@ -7,7 +7,7 @@ use crate::sql::{
 };
 use crate::syn;
 use crate::syn::parser::{Parser, ParserSettings};
-use crate::val::Geometry;
+use crate::types::PublicGeometry;
 
 #[test]
 fn parse_index_expression() {
@@ -35,7 +35,7 @@ fn parse_coordinate() {
 		parser.parse_expr_field(stk).await
 	})
 	.unwrap();
-	let Expr::Literal(Literal::Geometry(Geometry::Point(x))) = coord else {
+	let Expr::Literal(Literal::Geometry(PublicGeometry::Point(x))) = coord else {
 		panic!("not the right value");
 	};
 	assert_eq!(x.x(), 1.88);
@@ -102,9 +102,9 @@ fn parse_large_depth_object() {
 #[test]
 fn parse_large_depth_record_id() {
 	let mut text = String::new();
-	let start = r#" r"a:[ "#;
+	let start = r#" a:[ "#;
 	let middle = r#" b:{c: 1} "#;
-	let end = r#" ]" "#;
+	let end = r#" ] "#;
 
 	for _ in 0..1000 {
 		text.push_str(start);
@@ -140,10 +140,11 @@ fn parse_large_depth_record_id() {
 
 #[test]
 fn parse_recursive_record_string() {
-	let res = syn::parse_with(r#" r"a:[r"b:{c: r"d:1"}"]" "#.as_bytes(), async |parser, stk| {
-		parser.parse_expr_field(stk).await
-	})
-	.unwrap();
+	let res =
+		syn::parse_with(r#" r"a:[r\"b:{c: r\\\"d:1\\\"}\"]" "#.as_bytes(), async |parser, stk| {
+			parser.parse_expr_field(stk).await
+		})
+		.unwrap();
 	assert_eq!(
 		res,
 		Expr::Literal(Literal::RecordId(RecordIdLit {

@@ -1,3 +1,4 @@
+use core::f64;
 use std::borrow::Cow;
 use std::num::{ParseFloatError, ParseIntError};
 use std::str::FromStr;
@@ -118,12 +119,16 @@ pub fn numeric(lexer: &mut Lexer, start: Token) -> Result<Numeric, SyntaxError> 
 }
 
 pub fn number_kind(lexer: &mut Lexer, start: Token) -> Result<NumberKind, SyntaxError> {
-	let offset = start.span.offset as usize;
+	let offset = start.span.offset;
 	match start.kind {
 		t!("-") | t!("+") => {
+			if eat_infinity(lexer, offset)? {
+				return Ok(NumberKind::Float);
+			}
 			eat_digits1(lexer, offset)?;
 		}
 		TokenKind::Digits => {}
+		TokenKind::Infinity => return Ok(NumberKind::Float),
 		x => bail!("Unexpected start token for integer: {x}",@start.span),
 	}
 
@@ -157,7 +162,7 @@ pub fn number_kind(lexer: &mut Lexer, start: Token) -> Result<NumberKind, Syntax
 	}
 
 	if has_ident_after(lexer) {
-		let char = lexer.reader.next().unwrap();
+		let char = lexer.reader.next().expect("lexer validated input");
 		let char = lexer.reader.convert_to_char(char)?;
 		bail!("Invalid token, found unexpected character `{char}` after number token", @lexer.current_span())
 	}
@@ -169,10 +174,24 @@ pub fn number(lexer: &mut Lexer, start: Token) -> Result<Numeric, SyntaxError> {
 	let span = lexer.current_span();
 	let number_str = prepare_number_str(lexer.span_str(span));
 	match kind {
-		NumberKind::Integer => number_str
-			.parse()
-			.map(Numeric::Integer)
-			.map_err(|e| syntax_error!("Failed to parse number: {e}", @lexer.current_span())),
+		NumberKind::Integer => {
+			// Number strings cannot be empty so checking the first byte is always valid.
+			if number_str.as_bytes()[0] == b'-' && number_str.as_bytes()[1] == b'I' {
+				// No need to check the whole string, if it starts with '-I' it  has to be negative
+				// infinity
+				Ok(Numeric::Float(f64::NEG_INFINITY))
+			} else if number_str.as_bytes()[0] == b'+' && number_str.as_bytes()[1] == b'I'
+				|| number_str.as_bytes()[0] == b'I'
+			{
+				// No need to check the whole string, if it starts with '+I' or 'I' it  has to be
+				// infinity
+				Ok(Numeric::Float(f64::INFINITY))
+			} else {
+				number_str.parse().map(Numeric::Integer).map_err(
+					|e| syntax_error!("Failed to parse number: {e}", @lexer.current_span()),
+				)
+			}
+		}
 		NumberKind::Float => {
 			let number_str = number_str.trim_end_matches('f');
 			number_str
@@ -202,7 +221,7 @@ pub fn integer<I>(lexer: &mut Lexer, start: Token) -> Result<I, SyntaxError>
 where
 	I: FromStr<Err = ParseIntError>,
 {
-	let offset = start.span.offset as usize;
+	let offset = start.span.offset;
 	match start.kind {
 		t!("-") | t!("+") => {
 			eat_digits1(lexer, offset)?;
@@ -212,7 +231,7 @@ where
 	};
 
 	if has_ident_after(lexer) {
-		let char = lexer.reader.next().unwrap();
+		let char = lexer.reader.next().expect("lexer validated input");
 		let char = lexer.reader.convert_to_char(char)?;
 		bail!("Invalid token, found unexpected character `{char} after integer token", @lexer.current_span())
 	}
@@ -223,7 +242,7 @@ where
 		let is_mantissa = lexer.reader.peek1().map(|x| x.is_ascii_digit()).unwrap_or(false);
 		if is_mantissa {
 			let span = Span {
-				offset: last_offset as u32,
+				offset: last_offset,
 				len: 1,
 			};
 			bail!("Unexpected character `.` starting float, only integers are allowed here", @span)
@@ -231,7 +250,7 @@ where
 	}
 
 	if peek == Some(b'e') || peek == Some(b'E') {
-		bail!("Unexpected character `{}` only integers are allowed here",peek.unwrap() as char, @lexer.current_span())
+		bail!("Unexpected character `{}` only integers are allowed here",peek.expect("validated input") as char, @lexer.current_span())
 	}
 
 	let span = lexer.current_span();
@@ -245,7 +264,7 @@ pub fn float<I>(lexer: &mut Lexer, start: Token) -> Result<I, SyntaxError>
 where
 	I: FromStr<Err = ParseFloatError>,
 {
-	let offset = start.span.offset as usize;
+	let offset = start.span.offset;
 	match start.kind {
 		t!("-") | t!("+") => {
 			eat_digits1(lexer, offset)?;
@@ -273,7 +292,7 @@ where
 	lexer.eat(b'f');
 
 	if has_ident_after(lexer) {
-		let char = lexer.reader.next().unwrap();
+		let char = lexer.reader.next().expect("lexer validated input");
 		let char = lexer.reader.convert_to_char(char)?;
 		bail!("Invalid token, found invalid character `{char}` after number token", @lexer.current_span())
 	}
@@ -395,7 +414,7 @@ fn lex_duration_suffix(lexer: &mut Lexer) -> Result<DurationSuffix, SyntaxError>
 	};
 
 	if has_ident_after(lexer) {
-		let char = lexer.reader.next().unwrap();
+		let char = lexer.reader.next().expect("lexer validated input");
 		let char = lexer.reader.convert_to_char(char)?;
 		bail!("Invalid token, found invalid character `{char}` after duration suffix", @lexer.current_span())
 	}
@@ -410,7 +429,7 @@ fn has_ident_after(lexer: &mut Lexer) -> bool {
 	}
 }
 
-fn eat_digits1(lexer: &mut Lexer, start: usize) -> Result<(), SyntaxError> {
+fn eat_digits1(lexer: &mut Lexer, start: u32) -> Result<(), SyntaxError> {
 	match lexer.reader.peek() {
 		Some(x) if x.is_ascii_digit() => {}
 		Some(x) => {
@@ -428,4 +447,23 @@ fn eat_digits1(lexer: &mut Lexer, start: usize) -> Result<(), SyntaxError> {
 
 fn eat_digits(lexer: &mut Lexer) {
 	while lexer.eat_when(|x| x.is_ascii_digit() || x == b'_') {}
+}
+
+fn eat_infinity(lexer: &mut Lexer, start: u32) -> Result<bool, SyntaxError> {
+	if !lexer.reader.eat(b'I') {
+		return Ok(false);
+	}
+
+	for b in b"nfinity" {
+		match lexer.reader.next() {
+			Some(x) if x == *b => {}
+			Some(x) => {
+				bail!("Invalid number token, expected `{}` found: {x}",*b as char, @lexer.span_since(start))
+			}
+			None => {
+				bail!("Unexpected end of file, expected a number token digit", @lexer.span_since(start));
+			}
+		}
+	}
+	Ok(true)
 }

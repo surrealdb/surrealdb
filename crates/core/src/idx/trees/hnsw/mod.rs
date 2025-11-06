@@ -9,7 +9,7 @@ use anyhow::Result;
 use rand::prelude::SmallRng;
 use rand::{Rng, SeedableRng};
 use reblessive::tree::Stk;
-use revision::{Revisioned, revisioned};
+use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
 
 use crate::catalog::{DatabaseDefinition, HnswParams};
@@ -54,13 +54,13 @@ impl KVValue for HnswState {
 	#[inline]
 	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
 		let mut val = Vec::new();
-		self.serialize_revisioned(&mut val)?;
+		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
 		Ok(val)
 	}
 
 	#[inline]
 	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
-		Ok(Self::deserialize_revisioned(&mut val.as_slice())?)
+		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
 
@@ -756,7 +756,7 @@ mod tests {
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
 
-			let db = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
+			let db = tx.ensure_ns_db(None, "myns", "mydb", false).await.unwrap();
 
 			stack
 				.enter(|stk| async {
@@ -856,7 +856,7 @@ mod tests {
 
 		let ds = Arc::new(Datastore::new("memory").await?);
 		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
-		let db = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
+		let db = tx.ensure_ns_db(None, "myns", "mydb", false).await.unwrap();
 		tx.commit().await.unwrap();
 
 		let collection: Arc<TestCollection> =

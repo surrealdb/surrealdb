@@ -1,10 +1,10 @@
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use surrealdb_types::{ToSql, write_sql};
 
 use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::sql::statements::define::{DefineBucketStatement, DefineKind};
 use crate::val::Value;
 
@@ -16,12 +16,12 @@ pub struct BucketId(pub u32);
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct BucketDefinition {
-	pub id: Option<BucketId>,
-	pub name: String,
-	pub backend: Option<String>,
-	pub permissions: Permission,
-	pub readonly: bool,
-	pub comment: Option<String>,
+	pub(crate) id: Option<BucketId>,
+	pub(crate) name: String,
+	pub(crate) backend: Option<String>,
+	pub(crate) permissions: Permission,
+	pub(crate) readonly: bool,
+	pub(crate) comment: Option<String>,
 }
 impl_kv_value_revisioned!(BucketDefinition);
 
@@ -57,7 +57,7 @@ impl InfoStructure for BucketDefinition {
 }
 
 impl ToSql for BucketDefinition {
-	fn to_sql(&self) -> String {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }

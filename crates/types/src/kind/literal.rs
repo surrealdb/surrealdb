@@ -5,9 +5,9 @@ use std::hash;
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
-use crate::utils::display::join_displayable;
+use crate::utils::display::format_seperated;
 use crate::utils::escape::QuoteStr;
-use crate::{Duration, Kind};
+use crate::{Duration, Kind, Value};
 
 /// Represents literal values in SurrealDB's type system
 ///
@@ -32,6 +32,78 @@ pub enum KindLiteral {
 	Object(BTreeMap<String, Kind>),
 	/// A boolean literal
 	Bool(bool),
+}
+
+impl KindLiteral {
+	/// Check if a value matches this literal
+	pub fn matches(&self, value: &Value) -> bool {
+		match self {
+			KindLiteral::String(s) => {
+				if let Value::String(v) = value {
+					s == v
+				} else {
+					false
+				}
+			}
+			KindLiteral::Integer(i) => {
+				if let Value::Number(crate::Number::Int(v)) = value {
+					i == v
+				} else {
+					false
+				}
+			}
+			KindLiteral::Float(f) => {
+				if let Value::Number(crate::Number::Float(v)) = value {
+					f.to_bits() == v.to_bits()
+				} else {
+					false
+				}
+			}
+			KindLiteral::Decimal(d) => {
+				if let Value::Number(crate::Number::Decimal(v)) = value {
+					d == v
+				} else {
+					false
+				}
+			}
+			KindLiteral::Duration(d) => {
+				if let Value::Duration(v) = value {
+					d == v
+				} else {
+					false
+				}
+			}
+			KindLiteral::Array(kinds) => {
+				if let Value::Array(arr) = value {
+					if kinds.len() != arr.len() {
+						return false;
+					}
+					kinds.iter().zip(arr.iter()).all(|(kind, val)| val.is_kind(kind))
+				} else {
+					false
+				}
+			}
+			KindLiteral::Object(kinds) => {
+				if let Value::Object(obj) = value {
+					if kinds.len() != obj.len() {
+						return false;
+					}
+					kinds.iter().all(|(key, kind)| {
+						obj.get(key).map(|val| val.is_kind(kind)).unwrap_or(false)
+					})
+				} else {
+					false
+				}
+			}
+			KindLiteral::Bool(b) => {
+				if let Value::Bool(v) = value {
+					b == v
+				} else {
+					false
+				}
+			}
+		}
+	}
 }
 
 impl Eq for KindLiteral {}
@@ -130,7 +202,7 @@ impl Display for KindLiteral {
 			}
 			KindLiteral::Decimal(v) => write!(f, "{v}dec"),
 			KindLiteral::Duration(duration) => duration.fmt_internal(f),
-			KindLiteral::Array(kinds) => write!(f, "[{}]", join_displayable(kinds, ", ")),
+			KindLiteral::Array(kinds) => write!(f, "[{}]", format_seperated(kinds, ", ")),
 			KindLiteral::Object(btree_map) => write!(
 				f,
 				"{{{}}}",

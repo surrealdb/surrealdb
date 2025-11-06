@@ -3,9 +3,9 @@ use std::ops::Bound;
 use std::sync::LazyLock;
 
 use rust_decimal::Decimal;
-use surrealdb_core::val::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
-	RecordIdKey, RecordIdKeyRange, Regex, Table, Uuid, Value,
+use surrealdb_types::{
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
+	RecordIdKey, RecordIdKeyRange, Regex, Set, Uuid, Value,
 };
 
 #[derive(Debug, Clone)]
@@ -232,11 +232,39 @@ impl RoughlyEq for Number {
 }
 
 impl_roughly_eq_delegate!(
-	i64, bool, String, Closure, Geometry, Bytes, Range, Regex, Duration, File, Table
+	i64, bool, String, Geometry, Bytes, Range, Regex, Duration, File
 );
 
-impl_roughly_eq_struct!(Array, 0);
-impl_roughly_eq_struct!(Object, 0);
+impl RoughlyEq for Array {
+	fn roughly_equal(&self, other: &Self, config: &RoughlyEqConfig) -> bool {
+		if self.len() != other.len() {
+			return false;
+		}
+		self.iter().zip(other.iter()).all(|(a, b)| a.roughly_equal(b, config))
+	}
+}
+
+impl RoughlyEq for Object {
+
+	fn roughly_equal(&self, other: &Self, config: &RoughlyEqConfig) -> bool {
+		if self.len() != other.len() {
+			return false;
+		}
+		self.iter().zip(other.iter()).all(|((ak, av), (bk, bv))| {
+			String::roughly_equal(ak, bk, config) && Value::roughly_equal(av, bv, config)
+		})
+	}
+}
+
+impl RoughlyEq for Set {
+	fn roughly_equal(&self, other: &Self, config: &RoughlyEqConfig) -> bool {
+		if self.len() != other.len() {
+			return false;
+		}
+		self.iter().zip(other.iter()).all(|(a, b)| a.roughly_equal(b, config))
+	}
+}
+
 impl_roughly_eq_struct!(RecordId, table, key);
 impl_roughly_eq_struct!(RecordIdKeyRange, start, end);
 
@@ -251,14 +279,13 @@ impl_roughly_eq_enum!(
 		Datetime(d),
 		Uuid(u),
 		Array(a),
+		Set(s),
 		Object(o),
 		Geometry(g),
 		Bytes(b),
 		RecordId(t),
-		Table(t),
 		Regex(r),
 		Range(r),
-		Closure(c),
 		File(f),
 	}
 );
