@@ -28,7 +28,7 @@ on:
       rust-version:
         required: false
         type: string
-        default: "1.87.0"
+        default: "1.87"
         description: "The Rust version to use for building binaries"
       onnx-version:
         required: false
@@ -242,7 +242,7 @@ jobs:
         uses: ./.github/actions/install-tools
 
       - name: Check clippy
-        run: cargo make ci-clippy
+        run: cargo +${{ inputs.rust-version }} make ci-clippy
 
   build:
     name: Release binaries
