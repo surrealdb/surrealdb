@@ -1019,6 +1019,8 @@ impl Parser<'_> {
 			concurrently: false,
 		};
 
+		let mut field_span = None;
+
 		loop {
 			match self.peek_kind() {
 				// COLUMNS and FIELDS are the same tokenkind
@@ -1028,6 +1030,7 @@ impl Parser<'_> {
 					while self.eat(t!(",")) {
 						res.cols.push(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 					}
+					field_span = Some(self.last_span);
 				}
 				t!("UNIQUE") => {
 					self.pop_peek();
@@ -1043,7 +1046,6 @@ impl Parser<'_> {
 					let mut analyzer: Option<String> = None;
 					let mut scoring = None;
 					let mut hl = false;
-
 					loop {
 						match self.peek_kind() {
 							t!("ANALYZER") => {
@@ -1194,8 +1196,27 @@ impl Parser<'_> {
 				_ => break,
 			}
 		}
-		if matches!(res.index, Index::Count(_)) && !res.cols.is_empty() {
-			bail!("Cannot create a count index with fields");
+		match (field_span, &res.index) {
+			(Some(field_span), Index::Count(_)) => {
+				if !res.cols.is_empty() {
+					bail!("Cannot create a count index with fields", @field_span);
+				}
+			}
+			(field_span, Index::FullText(_) | Index::Hnsw(_) | Index::MTree(_)) => {
+				if res.cols.len() != 1 {
+					if let Some(field_span) = field_span {
+						bail!("Expected one column, found {}", res.cols.len(), @field_span);
+					} else {
+						bail!("Expected one column, found none", @self.recent_span());
+					}
+				}
+			}
+			(None, Index::Uniq | Index::Idx) => {
+				if res.cols.is_empty() {
+					bail!("Expected at least one column - Use FIELDS to define columns", @self.recent_span());
+				}
+			}
+			(_, _) => {}
 		}
 		Ok(res)
 	}
