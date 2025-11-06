@@ -37,6 +37,9 @@ audit-as-crates-io = true
 [policy.surrealdb-types-derive]
 audit-as-crates-io = true
 
+[policy.surrealism]
+audit-as-crates-io = true
+
 [policy.surrealism-cli]
 audit-as-crates-io = true
 
