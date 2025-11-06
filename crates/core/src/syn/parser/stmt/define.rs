@@ -1207,7 +1207,7 @@ impl Parser<'_> {
 					if let Some(field_span) = field_span {
 						bail!("Expected one column, found {}", res.cols.len(), @field_span);
 					} else {
-						bail!("Expected one column, found none", @self.recent_span() => "Full text, Hnsw, or MTree indecies require a single column.").;
+						bail!("Expected one column, found none", @self.recent_span());
 					}
 				}
 			}

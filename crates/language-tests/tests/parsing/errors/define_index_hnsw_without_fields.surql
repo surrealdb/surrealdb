@@ -4,6 +4,10 @@
 [test.results]
 parsing-error = """
 Expected one column, found none
+  --> [14:52]
+   |
+14 | ... EUCLIDEAN;
+   |              ^
 """
 
 */
