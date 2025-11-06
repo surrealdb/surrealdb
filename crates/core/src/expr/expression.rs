@@ -913,6 +913,7 @@ impl DeserializeRevisioned for Expr {
 				references_enabled: true,
 				define_api_enabled: true,
 				files_enabled: true,
+				surrealism_enabled: true,
 				..Default::default()
 			},
 			async |p, stk| p.parse_expr(stk).await,

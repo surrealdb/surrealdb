@@ -4,8 +4,14 @@ use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 #[cfg(all(target_family = "wasm", feature = "http"))]
 use std::net::ToSocketAddrs;
+#[cfg(feature = "surrealism")]
+use std::str::FromStr;
 
+#[cfg(feature = "surrealism")]
+use anyhow::bail;
 use ipnet::IpNet;
+#[cfg(feature = "surrealism")]
+use surrealism_runtime::capabilities::SurrealismCapabilities;
 #[cfg(all(not(target_family = "wasm"), feature = "http"))]
 use tokio::net::lookup_host;
 use url::Url;
@@ -118,6 +124,7 @@ pub enum ExperimentalTarget {
 	GraphQL,
 	DefineApi,
 	Files,
+	Surrealism,
 }
 
 impl fmt::Display for ExperimentalTarget {
@@ -127,6 +134,7 @@ impl fmt::Display for ExperimentalTarget {
 			Self::GraphQL => write!(f, "graphql"),
 			Self::DefineApi => write!(f, "define_api"),
 			Self::Files => write!(f, "files"),
+			Self::Surrealism => write!(f, "surrealism"),
 		}
 	}
 }
@@ -144,6 +152,7 @@ impl Target<str> for ExperimentalTarget {
 			Self::GraphQL => elem.eq_ignore_ascii_case("graphql"),
 			Self::DefineApi => elem.eq_ignore_ascii_case("define_api"),
 			Self::Files => elem.eq_ignore_ascii_case("files"),
+			Self::Surrealism => elem.eq_ignore_ascii_case("surrealism"),
 		}
 	}
 }
@@ -173,6 +182,7 @@ impl std::str::FromStr for ExperimentalTarget {
 			"graphql" => Ok(ExperimentalTarget::GraphQL),
 			"define_api" => Ok(ExperimentalTarget::DefineApi),
 			"files" => Ok(ExperimentalTarget::Files),
+			"surrealism" => Ok(ExperimentalTarget::Surrealism),
 			_ => Err(ParseExperimentalTargetError::InvalidName),
 		}
 	}
@@ -841,6 +851,41 @@ impl Capabilities {
 
 	pub fn allows_http_route(&self, target: &RouteTarget) -> bool {
 		self.allow_http.matches(target) && !self.deny_http.matches(target)
+	}
+
+	/// Checks wether capabilities required by a Surrealism package are allowed.
+	/// The `allow_arbitrary_queries` capability is not checked as that is to be used by the
+	/// runtime.
+	#[cfg(feature = "surrealism")]
+	pub fn validate_surrealism_capabilities(
+		&self,
+		capabilities: SurrealismCapabilities,
+	) -> anyhow::Result<()> {
+		if capabilities.allow_scripting && !self.allows_scripting() {
+			bail!("Surrealism package requires scripting, but it is not allowed");
+		}
+
+		if !capabilities.allow_functions.is_empty() {
+			for fnc in capabilities.allow_functions.iter() {
+				if !self.allows_function_name(fnc) {
+					bail!("Surrealism package requires function '{}', but it is not allowed", fnc);
+				}
+			}
+		}
+
+		if !capabilities.allow_net.is_empty() {
+			for net in capabilities.allow_net.iter() {
+				let target = NetTarget::from_str(net)?;
+				if !self.allows_network_target(&target) {
+					bail!(
+						"Surrealism package requires network target '{}', but it is not allowed",
+						net
+					);
+				}
+			}
+		}
+
+		Ok(())
 	}
 }
 

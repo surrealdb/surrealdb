@@ -813,6 +813,28 @@ impl DatabaseProvider for Transaction {
 		}
 	}
 
+	/// Retrieve all module definitions for a specific database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	async fn all_db_modules(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<Arc<[catalog::ModuleDefinition]>> {
+		let qey = cache::tx::Lookup::Mds(ns, db);
+		match self.cache.get(&qey) {
+			Some(val) => val.try_into_mds(),
+			None => {
+				let beg = crate::key::database::md::prefix(ns, db)?;
+				let end = crate::key::database::md::suffix(ns, db)?;
+				let val = self.getr(beg..end, None).await?;
+				let val = util::deserialize_cache(val.iter().map(|x| x.1.as_slice()))?;
+				let entry = cache::tx::Entry::Mds(val.clone());
+				self.cache.insert(qey, entry);
+				Ok(val)
+			}
+		}
+	}
+
 	/// Retrieve all param definitions for a specific database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	async fn all_db_params(
@@ -984,6 +1006,42 @@ impl DatabaseProvider for Transaction {
 	) -> Result<()> {
 		let key = crate::key::database::fc::new(ns, db, &fc.name);
 		self.set(&key, fc, None).await?;
+		Ok(())
+	}
+
+	/// Retrieve a specific module definition from a database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	async fn get_db_module(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		md: &str,
+	) -> Result<Arc<catalog::ModuleDefinition>> {
+		let qey = cache::tx::Lookup::Md(ns, db, md);
+		match self.cache.get(&qey) {
+			Some(val) => val.try_into_type(),
+			None => {
+				let key = crate::key::database::md::new(ns, db, md);
+				let val = self.get(&key, None).await?.ok_or_else(|| Error::MdNotFound {
+					name: md.to_owned(),
+				})?;
+				let val = Arc::new(val);
+				let entr = cache::tx::Entry::Any(val.clone());
+				self.cache.insert(qey, entr);
+				Ok(val)
+			}
+		}
+	}
+
+	async fn put_db_module(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		md: &catalog::ModuleDefinition,
+	) -> Result<()> {
+		let name = md.get_storage_name()?;
+		let key = crate::key::database::md::new(ns, db, &name);
+		self.set(&key, md, None).await?;
 		Ok(())
 	}
 
