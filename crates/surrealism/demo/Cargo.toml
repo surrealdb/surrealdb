@@ -1,12 +1,15 @@
 [package]
 name = "demo"
 version = "0.1.0"
-edition = "2021"
-authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
-description = "Demo for Surrealism."
-license-file = "LICENSE"
-repository = "https://github.com/surrealdb/surrealdb"
-homepage = "https://github.com/surrealdb/surrealdb"
+description = "Demo for Surrealism"
+publish = false
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license-file.workspace = true
 
 [lib]
 crate-type = ["cdylib"]

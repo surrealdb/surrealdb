@@ -1,7 +1,29 @@
 /**
 [test]
-wip = true
-reason = "Test set::slice function for extracting subsets by position"
+
+[[test.results]]
+value = "{2, 3}"
+
+[[test.results]]
+value = "{1, 2}"
+
+[[test.results]]
+value = "{3, 4, 5}"
+
+[[test.results]]
+value = "{1, 2, 3, 4, 5}"
+
+[[test.results]]
+value = "{4, 5}"
+
+[[test.results]]
+value = "{1, 2, 3}"
+
+[[test.results]]
+value = "{,}"
+
+[[test.results]]
+value = "{2, 3, 4}"
 
 */
 

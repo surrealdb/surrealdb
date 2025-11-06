@@ -1,7 +1,24 @@
 /**
 [test]
-wip = true
-reason = "Set literals are not yet supported"
+
+[[test.results]]
+value = "{,}"
+
+[[test.results]]
+value = "[{1, 2, 3}, {1, 2, 3}]"
+
+[[test.results]]
+value = "[{1, 2, 3}, {1, 2, 3}]"
+
+[[test.results]]
+value = "[{1, 2, 3}, {1, 2, 3}]"
+
+[[test.results]]
+value = "[{'bar', 'foo'}, {'bar', 'foo'}]"
+
+[[test.results]]
+error = "Could not cast into `set` using input `3`"
+
 */
 
 -- Empty set

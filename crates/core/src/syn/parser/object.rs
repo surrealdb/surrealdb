@@ -19,18 +19,44 @@ impl Parser<'_> {
 	) -> ParseResult<Expr> {
 		if self.eat(t!("}")) {
 			// empty object, just return
-			enter_object_recursion!(_this = self => {
-				return Ok(Expr::Literal(Literal::Object(Vec::new())))
-			})
+			return Ok(Expr::Literal(Literal::Object(Vec::new())));
+		}
+
+		if self.eat(t!(",")) {
+			self.expect_closing_delimiter(t!("}"), start)?;
+			return Ok(Expr::Literal(Literal::Set(Vec::new())));
 		}
 
 		// Now check first if it can be an object.
-		if self.glue_and_peek1()?.kind == t!(":") {
-			return self.parse_object(stk, start).await.map(Literal::Object).map(Expr::Literal);
-		}
+		match self.glue_and_peek1()?.kind {
+			t!(":") => {
+				return self.parse_object(stk, start).await.map(Literal::Object).map(Expr::Literal);
+			}
+			_ => {
+				// It's either a set or a block.
+				let first_expr = stk.run(|stk| self.parse_block_expr(stk)).await?;
 
-		// not an object so instead parse as a block.
-		self.parse_block(stk, start).await.map(Box::new).map(Expr::Block)
+				let next = self.peek();
+				match next.kind {
+					t!(",") => {
+						self.pop_peek();
+						let mut exprs = self.parse_set(stk, start).await?;
+						exprs.insert(0, first_expr);
+						Ok(Expr::Literal(Literal::Set(exprs)))
+					}
+					t!("}") => {
+						self.pop_peek();
+						Ok(Expr::Block(Box::new(Block(vec![first_expr]))))
+					}
+					_ => {
+						self.pop_peek();
+						let block =
+							self.parse_block_remaining(stk, start, vec![first_expr]).await?;
+						Ok(Expr::Block(Box::new(block)))
+					}
+				}
+			}
+		}
 	}
 
 	/// Parses an object.
@@ -74,13 +100,52 @@ impl Parser<'_> {
 		}
 	}
 
-	/// Parses a block of statements
+	pub(crate) async fn parse_set(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Vec<Expr>> {
+		enter_object_recursion!(this = self => {
+		   return this.parse_set_inner(stk, start).await;
+		})
+	}
+
+	async fn parse_set_inner(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Vec<Expr>> {
+		let mut res = Vec::new();
+		loop {
+			if self.eat(t!("}")) {
+				return Ok(res);
+			}
+
+			let value = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+			res.push(value);
+
+			if !self.eat(t!(",")) {
+				self.expect_closing_delimiter(t!("}"), start)?;
+				return Ok(res);
+			}
+		}
+	}
+
+	/// Parses a block of statements.
 	///
 	/// # Parser State
 	/// Expects the starting `{` to have already been eaten and its span to be
 	/// handed to this functions as the `start` parameter.
 	pub async fn parse_block(&mut self, stk: &mut Stk, start: Span) -> ParseResult<Block> {
-		let mut statements = Vec::new();
+		self.parse_block_remaining(stk, start, Vec::new()).await
+	}
+
+	/// Parses the remaining statements in a block.
+	///
+	/// # Parser State
+	/// Expects the starting `{` to have already been eaten and its span to be
+	/// handed to this functions as the `start` parameter.
+	///
+	/// Any statements which have already been parsed can be passed in as the `existing_stmts`
+	/// parameter.
+	async fn parse_block_remaining(
+		&mut self,
+		stk: &mut Stk,
+		start: Span,
+		mut existing_stmts: Vec<Expr>,
+	) -> ParseResult<Block> {
 		loop {
 			// Eat empty statements.
 			while self.eat(t!(";")) {}
@@ -89,20 +154,23 @@ impl Parser<'_> {
 				break;
 			}
 
-			let before = self.recent_span();
-			let stmt = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
-			let span = before.covers(self.last_span());
-
-			Self::reject_letless_let(&stmt, span)?;
-
-			statements.push(stmt);
+			let stmt = self.parse_block_expr(stk).await?;
+			existing_stmts.push(stmt);
 
 			if !self.eat(t!(";")) {
 				self.expect_closing_delimiter(t!("}"), start)?;
 				break;
 			}
 		}
-		Ok(Block(statements))
+		Ok(Block(existing_stmts))
+	}
+
+	async fn parse_block_expr(&mut self, stk: &mut Stk) -> ParseResult<Expr> {
+		let before = self.recent_span();
+		let stmt = stk.run(|ctx| self.parse_expr_inherit(ctx)).await?;
+		let span = before.covers(self.last_span());
+		Self::reject_letless_let(&stmt, span)?;
+		Ok(stmt)
 	}
 
 	/// Parse a single entry in the object, i.e. `field: value + 1` in the

@@ -3,8 +3,8 @@ use quote::{format_ident, quote};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
 use syn::{
-	parse_macro_input, Expr, ExprLit, FnArg, GenericArgument, ItemFn, Lit, Meta, MetaNameValue,
-	PatType, PathArguments, ReturnType, Type, TypePath,
+	Expr, ExprLit, FnArg, GenericArgument, ItemFn, Lit, Meta, MetaNameValue, PatType,
+	PathArguments, ReturnType, Type, TypePath, parse_macro_input,
 };
 
 #[proc_macro_attribute]
@@ -18,30 +18,35 @@ pub fn surrealism(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 	for meta in args.iter() {
 		match meta {
-            Meta::NameValue(MetaNameValue { path, value, .. }) if path.is_ident("name") => {
-                if let Expr::Lit(ExprLit {
-                    lit: Lit::Str(s), ..
-                }) = value
-                {
-                    let val = s.value();
-                    if !val.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-                        panic!(
-                            "#[surrealism(name = \"...\")] must use only ASCII letters, digits, and underscores"
-                        );
-                    }
-                    export_name_override = Some(val);
-                }
-            }
-            Meta::Path(path) if path.is_ident("default") => {
-                is_default = true;
-            }
-            Meta::Path(path) if path.is_ident("init") => {
-                is_init = true;
-            }
-            _ => panic!(
-                "Unsupported attribute: expected #[surrealism], #[surrealism(default)], #[surrealism(init)], or #[surrealism(name = \"...\")]"
-            ),
-        }
+			Meta::NameValue(MetaNameValue {
+				path,
+				value,
+				..
+			}) if path.is_ident("name") => {
+				if let Expr::Lit(ExprLit {
+					lit: Lit::Str(s),
+					..
+				}) = value
+				{
+					let val = s.value();
+					if !val.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+						panic!(
+							"#[surrealism(name = \"...\")] must use only ASCII letters, digits, and underscores"
+						);
+					}
+					export_name_override = Some(val);
+				}
+			}
+			Meta::Path(path) if path.is_ident("default") => {
+				is_default = true;
+			}
+			Meta::Path(path) if path.is_ident("init") => {
+				is_init = true;
+			}
+			_ => panic!(
+				"Unsupported attribute: expected #[surrealism], #[surrealism(default)], #[surrealism(init)], or #[surrealism(name = \"...\")]"
+			),
+		}
 	}
 
 	let fn_name = &input_fn.sig.ident;

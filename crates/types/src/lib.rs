@@ -69,6 +69,25 @@ macro_rules! object {
     };
 }
 
+/// Macro for creating a SurrealDB set.
+///
+/// This macro creates a SurrealDB set, which is a collection of values.
+/// All values must implement the `SurrealValue` trait.
+///
+/// # Example
+///
+/// ```rust
+/// use surrealdb_types::set;
+///
+/// let set = set! {1, 2, 3};
+/// ```
+#[macro_export]
+macro_rules! set {
+	($($value:expr),* $(,)?) => {
+		$crate::Set::from(vec![$($value),*])
+	};
+}
+
 /// Macro for creating a SurrealDB variables struct.
 ///
 /// This macro creates a SurrealDB variables struct, which is a collection of key-value pairs.
