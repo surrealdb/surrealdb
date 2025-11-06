@@ -10,6 +10,7 @@ use uuid::Uuid;
 use crate::err::Error;
 use crate::key::root::tl::Tl;
 use crate::kvs::ds::TransactionFactory;
+use crate::kvs::sequences::Sequences;
 use crate::kvs::{LockType, Transaction, TransactionType, impl_kv_value_revisioned};
 
 #[derive(Debug)]
@@ -90,6 +91,7 @@ enum LeaseStatus {
 /// - Automatic lease renewal when more than half the duration has elapsed
 /// - Lease ownership verification
 pub struct LeaseHandler {
+	sequences: Sequences,
 	/// UUID of the current node trying to acquire or check leases
 	node: Uuid,
 	/// Transaction factory for database operations
@@ -117,12 +119,14 @@ impl LeaseHandler {
 	/// * `Err` - If the lease_duration cannot be converted to chrono::Duration (e.g., if it's too
 	///   large)
 	pub(super) fn new(
+		sequences: Sequences,
 		node: Uuid,
 		tf: TransactionFactory,
 		task_type: TaskLeaseType,
 		lease_duration: std::time::Duration,
 	) -> Result<Self> {
 		Ok(Self {
+			sequences,
 			node,
 			tf,
 			task_type,
@@ -274,7 +278,10 @@ impl LeaseHandler {
 	/// * `Ok(None)` - If no lease exists for this task type
 	/// * `Err` - If database operations fail
 	async fn read_lease(&self, current: DateTime<Utc>) -> Result<Option<(TaskLease, LeaseStatus)>> {
-		let tx = self.tf.transaction(TransactionType::Read, LockType::Optimistic).await?;
+		let tx = self
+			.tf
+			.transaction(TransactionType::Read, LockType::Optimistic, self.sequences.clone())
+			.await?;
 		self.get_lease(&tx, current).await
 	}
 
@@ -334,7 +341,10 @@ impl LeaseHandler {
 	/// * `Ok(false)` - If another node owns a valid lease or acquired it during our attempt
 	/// * `Err` - Only if database operations fail (network errors, transaction failures, etc.)
 	async fn acquire_new_lease(&self, current: DateTime<Utc>) -> Result<bool> {
-		let tx = self.tf.transaction(TransactionType::Write, LockType::Optimistic).await?;
+		let tx = self
+			.tf
+			.transaction(TransactionType::Write, LockType::Optimistic, self.sequences.clone())
+			.await?;
 
 		// Optimization: If a valid (non-expired) lease already exists and we don't own it,
 		// return early without attempting to write. This avoids unnecessary transaction overhead.
@@ -403,6 +413,7 @@ mod tests {
 	use crate::dbs::node::Timestamp;
 	use crate::kvs::clock::{FakeClock, SizedClock};
 	use crate::kvs::ds::{DatastoreFlavor, TransactionFactory};
+	use crate::kvs::sequences::Sequences;
 	#[cfg(feature = "kv-mem")]
 	use crate::kvs::tasklease::LeaseStatus;
 	use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
@@ -442,12 +453,14 @@ mod tests {
 	/// * How many times the node failed to acquire the lease (owned by another node)
 	/// * How many errors occurred during lease acquisition attempts
 	async fn node_task_lease(
+		sequences: Sequences,
 		id: Uuid,
 		tf: TransactionFactory,
 		test_duration: Duration,
 		lease_duration: Duration,
 	) -> NodeResult {
-		let lh = LeaseHandler::new(id, tf, TaskLeaseType::IndexCompaction, lease_duration).unwrap();
+		let lh = LeaseHandler::new(sequences, id, tf, TaskLeaseType::IndexCompaction, lease_duration)
+				.unwrap();
 		let mut result = NodeResult::default();
 		let start_time = Instant::now();
 		while start_time.elapsed() < test_duration {
@@ -485,13 +498,22 @@ mod tests {
 		let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 		// Create a transaction factory with the specified datastore flavor
 		let tf = TransactionFactory::new(clock, Box::new(flavor));
+		// Create a sequence generator for the transaction factory
+		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 		// Set test to run for 3 seconds
 		let test_duration = Duration::from_secs(3);
 		// Set each lease to be valid for 1 second
 		let lease_duration = Duration::from_secs(1);
 		// Create a closure that generates a node task with a specific UUID
-		let new_node =
-			|n| node_task_lease(Uuid::from_u128(n), tf.clone(), test_duration, lease_duration);
+		let new_node = |n| {
+			node_task_lease(
+				sequences.clone(),
+				Uuid::from_u128(n),
+				tf.clone(),
+				test_duration,
+				lease_duration,
+			)
+		};
 
 		// Spawn three concurrent nodes with different UUIDs
 		let node1 = tokio::spawn(new_node(0));
@@ -570,6 +592,7 @@ mod tests {
 		// Create an in-memory datastore
 		let flavor = crate::kvs::mem::Datastore::new().await.map(DatastoreFlavor::Mem).unwrap();
 		let tf = TransactionFactory::new(clock, Box::new(flavor));
+		let sequences = Sequences::new(tf.clone(), Uuid::new_v4());
 
 		let node_id = Uuid::new_v4();
 
@@ -577,8 +600,14 @@ mod tests {
 		let lease_duration = Duration::from_secs(5);
 
 		// Create a lease handler
-		let lh =
-			LeaseHandler::new(node_id, tf, TaskLeaseType::IndexCompaction, lease_duration).unwrap();
+		let lh = LeaseHandler::new(
+			sequences,
+			node_id,
+			tf,
+			TaskLeaseType::IndexCompaction,
+			lease_duration,
+		)
+		.unwrap();
 
 		// PART 1: Initial lease acquisition
 		// Initially acquire the lease

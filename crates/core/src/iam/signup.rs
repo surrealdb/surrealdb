@@ -220,7 +220,7 @@ pub async fn db_access(
 			Some(Error::Thrown(_)) => Err(e),
 			// If the SIGNUP clause failed due to an unexpected error, be more specific
 			// This allows clients to handle these errors, which may be retryable
-			Some(Error::Tx(_) | Error::TxRetryable) => {
+			Some(Error::Tx(_) | Error::TxRetryable(_)) => {
 				debug!("Unexpected error found while executing a SIGNUP clause: {e}");
 				Err(anyhow::Error::new(Error::UnexpectedAuth))
 			}

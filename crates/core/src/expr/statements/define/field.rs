@@ -176,7 +176,7 @@ impl DefineFieldStatement {
 
 		let tb = {
 			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_tb(ns, db, &definition.what, opt.strict).await?
+			txn.get_or_add_tb(Some(ctx), ns, db, &definition.what, opt.strict).await?
 		};
 
 		// Process the statement

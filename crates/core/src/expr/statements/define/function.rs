@@ -70,7 +70,7 @@ impl DefineFunctionStatement {
 		// Process the statement
 		{
 			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_db(ns, db, opt.strict).await?
+			txn.get_or_add_db(Some(ctx), ns, db, opt.strict).await?
 		};
 
 		txn.put_db_function(

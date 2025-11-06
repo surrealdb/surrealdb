@@ -11,7 +11,6 @@ use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use roaring::RoaringTreemap;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
-use uuid::Uuid;
 
 use crate::catalog::{DatabaseDefinition, Distance, MTreeParams, VectorType};
 use crate::ctx::Context;
@@ -48,9 +47,8 @@ impl MTreeIndex {
 		ikb: IndexKeyBase,
 		p: &MTreeParams,
 		tt: TransactionType,
-		nid: Uuid,
 	) -> Result<Self> {
-		let doc_ids = SeqDocIds::new(nid, ikb.clone());
+		let doc_ids = SeqDocIds::new(ikb.clone());
 		let state_key = ikb.new_vm_root_key();
 		let state: MState = if let Some(val) = txn.get(&state_key, None).await? {
 			val
@@ -1477,8 +1475,8 @@ mod tests {
 
 	async fn get_db(ds: &Datastore) -> Arc<DatabaseDefinition> {
 		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
-		let def = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
-		tx.cancel().await.unwrap();
+		let def = tx.ensure_ns_db(None, "myns", "mydb", false).await.unwrap();
+		tx.commit().await.unwrap();
 		def
 	}
 

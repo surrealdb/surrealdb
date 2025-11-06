@@ -129,9 +129,9 @@ pub trait RpcProtocolV1: RpcContext {
 			PublicValue::None => (),
 			PublicValue::Null => session.ns = None,
 			PublicValue::String(ns) => {
-				let tx =
-					self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await?;
-				tx.get_or_add_ns(&ns, self.kvs().is_strict_mode()).await?;
+				let kvs = self.kvs();
+				let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
+				tx.get_or_add_ns(None, &ns, self.kvs().is_strict_mode()).await?;
 				tx.commit().await?;
 
 				session.ns = Some(ns)
@@ -150,7 +150,7 @@ pub trait RpcProtocolV1: RpcContext {
 				let ns = session.ns.clone().unwrap();
 				let tx =
 					self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await?;
-				tx.ensure_ns_db(&ns, &db, self.kvs().is_strict_mode()).await?;
+				tx.ensure_ns_db(None, &ns, &db, self.kvs().is_strict_mode()).await?;
 				tx.commit().await?;
 				session.db = Some(db)
 			}

@@ -756,7 +756,7 @@ mod tests {
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
 
-			let db = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
+			let db = tx.ensure_ns_db(None, "myns", "mydb", false).await.unwrap();
 
 			stack
 				.enter(|stk| async {
@@ -856,7 +856,7 @@ mod tests {
 
 		let ds = Arc::new(Datastore::new("memory").await?);
 		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
-		let db = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
+		let db = tx.ensure_ns_db(None, "myns", "mydb", false).await.unwrap();
 		tx.commit().await.unwrap();
 
 		let collection: Arc<TestCollection> =

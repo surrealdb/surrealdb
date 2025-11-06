@@ -555,7 +555,8 @@ async fn router(
 			namespace,
 			database,
 		} => {
-			let result = kvs.process_use(&mut *session.write().await, namespace, database).await?;
+			let result =
+				kvs.process_use(None, &mut *session.write().await, namespace, database).await?;
 			Ok(vec![result])
 		}
 		Command::Signup {

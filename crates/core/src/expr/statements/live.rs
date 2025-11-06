@@ -86,7 +86,7 @@ impl LiveStatement {
 				// Ensure that the table definition exists
 				{
 					let (ns, db) = opt.ns_db()?;
-					txn.ensure_ns_db_tb(ns, db, &tb, opt.strict).await?;
+					txn.ensure_ns_db_tb(Some(ctx), ns, db, &tb, opt.strict).await?;
 				}
 				// Insert the node live query
 				let key = crate::key::node::lq::new(nid, live_query_id);
@@ -161,7 +161,7 @@ mod tests {
 		let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
 
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let db = tx.ensure_ns_db(ns, db, false).await.unwrap();
+		let db = tx.ensure_ns_db(None, ns, db, false).await.unwrap();
 		tx.commit().await.unwrap();
 
 		// Create a new transaction and verify that there are no tables defined.
@@ -239,7 +239,7 @@ mod tests {
 		let ses = Session::owner().with_ns(ns).with_db(db).with_rt(true);
 
 		let tx = dbs.transaction(Write, Optimistic).await.unwrap();
-		let db = tx.ensure_ns_db(ns, db, false).await.unwrap();
+		let db = tx.ensure_ns_db(None, ns, db, false).await.unwrap();
 		tx.commit().await.unwrap();
 
 		// Create a new transaction and verify that there are no tables defined.

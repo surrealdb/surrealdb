@@ -316,7 +316,7 @@ pub async fn db_access(
 									// If the SIGNIN clause failed due to an unexpected error, be
 									// more specific This allows clients to handle these
 									// errors, which may be retryable
-									Some(Error::Tx(_) | Error::TxRetryable) => {
+									Some(Error::Tx(_) | Error::TxRetryable(_)) => {
 										debug!(
 											"Unexpected error found while executing a SIGNIN clause: {e}"
 										);

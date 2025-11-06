@@ -376,14 +376,14 @@ pub async fn create_grant(
 					txn.put(&key, &gr_store, None).await
 				}
 				Base::Ns => {
-					let ns = txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+					let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?, opt.strict).await?;
 					let key =
 						crate::key::namespace::access::gr::new(ns.namespace_id, &gr.ac, &gr.id);
 					txn.put(&key, &gr_store, None).await
 				}
 				Base::Db => {
 					let (ns, db) = opt.ns_db()?;
-					let db = txn.get_or_add_db(ns, db, opt.strict).await?;
+					let db = txn.get_or_add_db(Some(ctx), ns, db, opt.strict).await?;
 
 					let key = crate::key::database::access::gr::new(
 						db.namespace_id,
@@ -660,13 +660,13 @@ pub async fn revoke_grant(
 					txn.set(&key, &revoke, None).await?;
 				}
 				Base::Ns => {
-					let ns = txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+					let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?, opt.strict).await?;
 					let key = crate::key::namespace::access::gr::new(ns.namespace_id, &stmt.ac, gr);
 					txn.set(&key, &revoke, None).await?;
 				}
 				Base::Db => {
 					let (ns, db) = opt.ns_db()?;
-					let db = txn.get_or_add_db(ns, db, opt.strict).await?;
+					let db = txn.get_or_add_db(Some(ctx), ns, db, opt.strict).await?;
 
 					let key = crate::key::database::access::gr::new(
 						db.namespace_id,
@@ -750,7 +750,7 @@ pub async fn revoke_grant(
 						txn.set(&key, &gr, None).await?;
 					}
 					Base::Ns => {
-						let ns = txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+						let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?, opt.strict).await?;
 						let key = crate::key::namespace::access::gr::new(
 							ns.namespace_id,
 							&stmt.ac,
@@ -760,7 +760,7 @@ pub async fn revoke_grant(
 					}
 					Base::Db => {
 						let (ns, db) = opt.ns_db()?;
-						let db = txn.get_or_add_db(ns, db, opt.strict).await?;
+						let db = txn.get_or_add_db(Some(ctx), ns, db, opt.strict).await?;
 
 						let key = crate::key::database::access::gr::new(
 							db.namespace_id,

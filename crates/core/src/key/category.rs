@@ -21,8 +21,10 @@ pub enum Category {
 	AccessGrant,
 	/// crate::key::root::nd                 /!nd{nd}
 	Node,
+	/// crate::key::root::nb                 /!nb
+	NamespaceIdentifierBatch,
 	/// crate::key::root::ni                 /!ni
-	NamespaceIdentifier,
+	NamespaceIdentifierState,
 	/// crate::key::root::ns                 /!ns{ns}
 	Namespace,
 	/// crate::key::root::us                 /!us{us}
@@ -41,10 +43,18 @@ pub enum Category {
 	///
 	/// ------------------------------
 	///
-	/// crate::key::namespace::di            /+{ni}!di
-	DatabaseIdentifier,
-	/// crate::key::database::ti             /+{ni}*{di}!ti
-	DatabaseTableIdentifier,
+	/// crate::key::namespace::dh            /+{ns}!dh
+	DatabaseIdentifierBatch,
+	/// crate::key::namespace::di            /+{ns}!di
+	DatabaseIdentifierState,
+	/// crate::key::database::th             /*{ns}*{db}!th
+	DatabaseTableIdentifierBatch,
+	/// crate::key::database::ti             /*{ns}*{db}!ti
+	DatabaseTableIdentifierState,
+	/// crate::key::table::ih                /*{ns}*{db}*{tb}!ih
+	TableIndexIdentifierBatch,
+	/// crate::key::table::is                /*{ns}*{db}*{tb}!is
+	TableIndexIdentifierState,
 	///
 	/// ------------------------------
 	///
@@ -204,14 +214,16 @@ impl Display for Category {
 			Self::AccessRoot => "AccessRoot",
 			Self::AccessGrant => "AccessGrant",
 			Self::Node => "Node",
-			Self::NamespaceIdentifier => "NamespaceIdentifier",
+			Self::NamespaceIdentifierBatch => "NamespaceIdentifierBatch",
+			Self::NamespaceIdentifierState => "NamespaceIdentifierState",
 			Self::Namespace => "Namespace",
 			Self::User => "User",
 			Self::NodeRoot => "NodeRoot",
 			Self::NodeLiveQuery => "NodeLiveQuery",
 			Self::NamespaceRoot => "NamespaceRoot",
 			Self::DatabaseAlias => "DatabaseAlias",
-			Self::DatabaseIdentifier => "DatabaseIdentifier",
+			Self::DatabaseIdentifierBatch => "DatabaseIdentifierBatch",
+			Self::DatabaseIdentifierState => "DatabaseIdentifierState",
 			Self::NamespaceAccess => "NamespaceAccess",
 			Self::NamespaceAccessRoot => "NamespaceAccessRoot",
 			Self::NamespaceAccessGrant => "NamespaceAccessGrant",
@@ -227,7 +239,8 @@ impl Display for Category {
 			Self::DatabaseModel => "DatabaseModel",
 			Self::DatabaseParameter => "DatabaseParameter",
 			Self::DatabaseTable => "DatabaseTable",
-			Self::DatabaseTableIdentifier => "DatabaseTableIdentifier",
+			Self::DatabaseTableIdentifierBatch => "DatabaseTableIdentifierBatch",
+			Self::DatabaseTableIdentifierState => "DatabaseTableIdentifierState",
 			Self::DatabaseTimestamp => "DatabaseTimestamp",
 			Self::DatabaseUser => "DatabaseUser",
 			Self::DatabaseVersionstamp => "DatabaseVersionstamp",
@@ -273,6 +286,8 @@ impl Display for Category {
 			Self::IndexTermDocuments => "IndexTermDocuments",
 			Self::IndexCompaction => "IndexCompaction",
 			Self::IndexCountState => "IndexCountState",
+			Self::TableIndexIdentifierBatch => "TableIndexIdentifierBatch",
+			Self::TableIndexIdentifierState => "TableIndexIdentifierState",
 		};
 		write!(f, "{}", name)
 	}
