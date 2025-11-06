@@ -1165,7 +1165,7 @@ impl Parser<'_> {
 					bail!("Cannot create a count index with fields", @field_span);
 				}
 			}
-			(field_span, Index::FullText(_) | Index::Hnsw(_) | Index::MTree(_)) => {
+			(field_span, Index::FullText(_) | Index::Hnsw(_)) => {
 				if res.cols.len() != 1 {
 					if let Some(field_span) = field_span {
 						bail!("Expected one column, found {}", res.cols.len(), @field_span);

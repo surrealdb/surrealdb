@@ -50,15 +50,7 @@ affinitypool = "0.3.1"
 dmp = "0.2.3"
 indxdb = "0.6.0"
 lexicmp = "0.2.0"
-#revision = { version = "0.13.0", features = [
-#    "chrono",
-#    "geo",
-#    "roaring",
-#    "regex",
-#    "rust_decimal",
-#    "uuid",
-#] }
-revision = { version = "0.13.0", git = "https://github.com/surrealdb/revision", branch = "emmanuel/specialised_vec_i16_i32_i64", features = [
+revision = { version = "0.14.0", features = [
     "chrono",
     "geo",
     "roaring",
@@ -154,7 +146,7 @@ regex = "1.10.6"
 regex-syntax = "0.8.4"
 reqwest = { version = "0.12.7", default-features = false }
 ring = "0.17.13"
-roaring = "0.10.6"
+roaring = "0.11.2"
 rustls = { version = "0.23.12", default-features = false }
 rust_decimal = { version = "1.37.2" }
 rust-s3 = "0.35.1"

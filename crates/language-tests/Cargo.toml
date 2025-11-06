@@ -46,6 +46,6 @@ similar = "2.6.0"
 
 # Used for for communicating with the surrealdb server during upgrade tests.
 tokio-tungstenite = { version = "0.28.0", optional = true }
-revision = { version = "0.13.0", optional = true }
+revision = { version = "0.14.0", optional = true }
 cfg-if = "1.0.0"
 serde_json = "1.0.145"
