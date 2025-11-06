@@ -127,10 +127,10 @@ impl<'a> MigratorPass<'a> {
 		}
 	}
 
-	fn with_path<T, F, R>(&mut self, segment: T, f: F) -> R
+	fn with_path<T, F, R>(&mut self, segment: T, f: F) -> Result<R, fmt::Error>
 	where
 		T: Display,
-		F: FnOnce(&mut Self) -> R,
+		F: FnOnce(&mut Self) -> Result<R, fmt::Error>,
 	{
 		let len = self.path.len();
 		write!(self.path, "{}", segment).unwrap();
@@ -139,10 +139,10 @@ impl<'a> MigratorPass<'a> {
 		r
 	}
 
-	fn with_state<Fs, Fc, R>(&mut self, fs: Fs, fc: Fc) -> R
+	fn with_state<Fs, Fc, R>(&mut self, fs: Fs, fc: Fc) -> Result<R, fmt::Error>
 	where
 		Fs: FnOnce(PassState) -> PassState,
-		Fc: FnOnce(&mut Self) -> R,
+		Fc: FnOnce(&mut Self) -> Result<R, fmt::Error>,
 	{
 		let old_state = self.state;
 		self.state = fs(old_state);
