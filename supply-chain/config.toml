@@ -37,6 +37,18 @@ audit-as-crates-io = true
 [policy.surrealdb-types-derive]
 audit-as-crates-io = true
 
+[policy.surrealism-cli]
+audit-as-crates-io = true
+
+[policy.surrealism-macros]
+audit-as-crates-io = true
+
+[policy.surrealism-runtime]
+audit-as-crates-io = true
+
+[policy.surrealism-types]
+audit-as-crates-io = true
+
 [[exemptions.Inflector]]
 version = "0.11.4"
 criteria = "safe-to-deploy"
@@ -213,14 +225,6 @@ criteria = "safe-to-deploy"
 version = "0.9.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.candle-nn]]
-version = "0.9.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.candle-transformers]]
-version = "0.9.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.cast]]
 version = "0.3.0"
 criteria = "safe-to-deploy"
@@ -243,10 +247,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.clipboard-win]]
 version = "5.4.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.compact_str]]
-version = "0.9.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.concurrent-queue]]
@@ -309,10 +309,6 @@ criteria = "safe-to-deploy"
 version = "0.20.9"
 criteria = "safe-to-deploy"
 
-[[exemptions.dary_heap]]
-version = "0.3.8"
-criteria = "safe-to-deploy"
-
 [[exemptions.dashmap]]
 version = "6.1.0"
 criteria = "safe-to-deploy"
@@ -333,28 +329,8 @@ criteria = "safe-to-run"
 version = "1.4.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.derive_builder]]
-version = "0.20.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.derive_builder_core]]
-version = "0.20.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.derive_builder_macro]]
-version = "0.20.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.deunicode]]
 version = "1.6.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.dirs]]
-version = "6.0.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.dirs-sys]]
-version = "0.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.dtoa-short]]
@@ -377,10 +353,6 @@ criteria = "safe-to-deploy"
 version = "0.4.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.encode_unicode]]
-version = "1.0.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.endian-type]]
 version = "0.1.2"
 criteria = "safe-to-deploy"
@@ -401,10 +373,6 @@ criteria = "safe-to-deploy"
 version = "3.3.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.esaxx-rs]]
-version = "0.1.10"
-criteria = "safe-to-deploy"
-
 [[exemptions.event-listener]]
 version = "5.4.0"
 criteria = "safe-to-deploy"
@@ -419,14 +387,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.fail]]
 version = "0.4.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.fancy-regex]]
-version = "0.13.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.fancy-regex]]
-version = "0.14.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.fastnum]]
@@ -609,10 +569,6 @@ criteria = "safe-to-deploy"
 version = "0.5.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.hf-hub]]
-version = "0.4.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.html5ever]]
 version = "0.35.0"
 criteria = "safe-to-deploy"
@@ -699,14 +655,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.mac]]
 version = "0.1.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.macro_rules_attribute]]
-version = "0.2.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.macro_rules_attribute-proc_macro]]
-version = "0.2.2"
 criteria = "safe-to-deploy"
 
 [[exemptions.markup5ever]]
@@ -1017,10 +965,6 @@ criteria = "safe-to-deploy"
 version = "0.5.10"
 criteria = "safe-to-deploy"
 
-[[exemptions.redox_users]]
-version = "0.5.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.rend]]
 version = "0.4.2"
 criteria = "safe-to-deploy"
@@ -1161,10 +1105,6 @@ criteria = "safe-to-deploy"
 version = "0.2.7"
 criteria = "safe-to-deploy"
 
-[[exemptions.serde_plain]]
-version = "1.0.2"
-criteria = "safe-to-deploy"
-
 [[exemptions.serde_urlencoded]]
 version = "0.7.1"
 criteria = "safe-to-deploy"
@@ -1205,10 +1145,6 @@ criteria = "safe-to-deploy"
 version = "0.9.8"
 criteria = "safe-to-deploy"
 
-[[exemptions.spm_precompiled]]
-version = "0.1.4"
-criteria = "safe-to-deploy"
-
 [[exemptions.static_assertions_next]]
 version = "1.1.2"
 criteria = "safe-to-deploy"
@@ -1231,6 +1167,22 @@ criteria = "safe-to-deploy"
 
 [[exemptions.surrealdb-rocksdb]]
 version = "0.24.0-surreal.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.surrealism-cli]]
+version = "0.1.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.surrealism-macros]]
+version = "0.1.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.surrealism-runtime]]
+version = "0.1.1"
+criteria = "safe-to-deploy"
+
+[[exemptions.surrealism-types]]
+version = "0.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.symbolic-common]]
@@ -1305,10 +1257,6 @@ criteria = "safe-to-deploy"
 version = "1.2.1"
 criteria = "safe-to-deploy"
 
-[[exemptions.tokenizers]]
-version = "0.21.4"
-criteria = "safe-to-deploy"
-
 [[exemptions.tokio-rustls]]
 version = "0.24.1"
 criteria = "safe-to-deploy"
@@ -1379,14 +1327,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.ulid]]
 version = "1.2.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.unicode-normalization-alignments]]
-version = "0.1.12"
-criteria = "safe-to-deploy"
-
-[[exemptions.unicode_categories]]
-version = "0.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.untrusted]]
