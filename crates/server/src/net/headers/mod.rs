@@ -1,8 +1,8 @@
 use axum_extra::TypedHeader;
 use axum_extra::headers::Header;
 use axum_extra::typed_header::{TypedHeaderRejection, TypedHeaderRejectionReason};
-use http::HeaderValue;
-use http::header::SERVER;
+use http::header::{InvalidHeaderValue, SERVER};
+use http::{HeaderName, HeaderValue};
 use surrealdb::headers::VERSION;
 use surrealdb_core::cnf::SERVER_NAME;
 use tower_http::set_header::SetResponseHeaderLayer;
@@ -26,25 +26,29 @@ pub use db::SurrealDatabase;
 pub use id::SurrealId;
 pub use ns::SurrealNamespace;
 
-pub fn add_version_header(enabled: bool) -> SetResponseHeaderLayer<Option<HeaderValue>> {
+pub fn add_header(
+	enabled: bool,
+	header: String,
+	default: &HeaderName,
+) -> Result<SetResponseHeaderLayer<Option<HeaderValue>>, InvalidHeaderValue> {
 	let header_value = if enabled {
-		let val = format!("{PKG_NAME}-{}", *PKG_VERSION);
-		Some(HeaderValue::try_from(val).unwrap())
+		Some(HeaderValue::try_from(header)?)
 	} else {
 		None
 	};
-
-	SetResponseHeaderLayer::if_not_present(VERSION.clone(), header_value)
+	Ok(SetResponseHeaderLayer::if_not_present(default.clone(), header_value))
 }
 
-pub fn add_server_header(enabled: bool) -> SetResponseHeaderLayer<Option<HeaderValue>> {
-	let header_value = if enabled {
-		Some(HeaderValue::try_from(SERVER_NAME).unwrap())
-	} else {
-		None
-	};
+pub fn add_version_header(
+	enabled: bool,
+) -> Result<SetResponseHeaderLayer<Option<HeaderValue>>, InvalidHeaderValue> {
+	add_header(enabled, format!("{}/{}", PKG_NAME, *PKG_VERSION), &VERSION)
+}
 
-	SetResponseHeaderLayer::if_not_present(SERVER, header_value)
+pub fn add_server_header(
+	enabled: bool,
+) -> Result<SetResponseHeaderLayer<Option<HeaderValue>>, InvalidHeaderValue> {
+	add_header(enabled, SERVER_NAME.to_owned(), &SERVER)
 }
 
 // Parse a TypedHeader, returning None if the header is missing and an error if

@@ -5,7 +5,7 @@ use surrealdb::headers::DB;
 
 /// Typed header implementation for the database header.
 /// It's used to specify the database to use for database operations.
-pub struct SurrealDatabase(String);
+pub struct SurrealDatabase(HeaderValue, String);
 
 impl Header for SurrealDatabase {
 	fn name() -> &'static HeaderName {
@@ -16,10 +16,10 @@ impl Header for SurrealDatabase {
 	where
 		I: Iterator<Item = &'i HeaderValue>,
 	{
-		let value = values.next().ok_or_else(headers::Error::invalid)?;
-		let value = value.to_str().map_err(|_| headers::Error::invalid())?.to_string();
+		let value = values.next().ok_or_else(headers::Error::invalid)?.clone();
+		let string = value.to_str().map_err(|_| headers::Error::invalid())?.to_string();
 
-		Ok(SurrealDatabase(value))
+		Ok(SurrealDatabase(value, string))
 	}
 
 	fn encode<E>(&self, values: &mut E)
@@ -34,7 +34,7 @@ impl std::ops::Deref for SurrealDatabase {
 	type Target = String;
 
 	fn deref(&self) -> &Self::Target {
-		&self.0
+		&self.1
 	}
 }
 
@@ -44,9 +44,8 @@ impl From<SurrealDatabase> for HeaderValue {
 	}
 }
 
-#[expect(clippy::fallible_impl_from)]
 impl From<&SurrealDatabase> for HeaderValue {
 	fn from(value: &SurrealDatabase) -> Self {
-		HeaderValue::from_str(value.0.as_str()).unwrap()
+		value.0.clone()
 	}
 }

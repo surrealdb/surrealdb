@@ -12,6 +12,17 @@ pub enum ContentType {
 	ApplicationSurrealDBFlatbuffers,
 }
 
+pub(super) static HEADER_VALUE_TEXT_PLAIN: HeaderValue =
+	HeaderValue::from_static(surrealdb_core::api::format::PLAIN);
+pub(super) static HEADER_VALUE_APPLICATION_JSON: HeaderValue =
+	HeaderValue::from_static(surrealdb_core::api::format::JSON);
+pub(super) static HEADER_VALUE_APPLICATION_CBOR: HeaderValue =
+	HeaderValue::from_static(surrealdb_core::api::format::CBOR);
+pub(super) static HEADER_VALUE_APPLICATION_OCTET_STREAM: HeaderValue =
+	HeaderValue::from_static(surrealdb_core::api::format::OCTET_STREAM);
+pub(super) static HEADER_VALUE_APPLICATION_SURREAL_DB_FLATBUFFERS: HeaderValue =
+	HeaderValue::from_static(surrealdb_core::api::format::FLATBUFFERS);
+
 impl std::fmt::Display for ContentType {
 	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
 		match self {
@@ -67,9 +78,16 @@ impl From<ContentType> for HeaderValue {
 	}
 }
 
-#[expect(clippy::fallible_impl_from)]
 impl From<&ContentType> for HeaderValue {
 	fn from(value: &ContentType) -> Self {
-		HeaderValue::from_str(value.to_string().as_str()).unwrap()
+		match value {
+			ContentType::TextPlain => HEADER_VALUE_TEXT_PLAIN.clone(),
+			ContentType::ApplicationJson => HEADER_VALUE_APPLICATION_JSON.clone(),
+			ContentType::ApplicationCbor => HEADER_VALUE_APPLICATION_CBOR.clone(),
+			ContentType::ApplicationOctetStream => HEADER_VALUE_APPLICATION_OCTET_STREAM.clone(),
+			ContentType::ApplicationSurrealDBFlatbuffers => {
+				HEADER_VALUE_APPLICATION_SURREAL_DB_FLATBUFFERS.clone()
+			}
+		}
 	}
 }

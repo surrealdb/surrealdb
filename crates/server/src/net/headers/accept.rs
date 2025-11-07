@@ -1,3 +1,8 @@
+use crate::net::headers::content_type::{
+	HEADER_VALUE_APPLICATION_CBOR, HEADER_VALUE_APPLICATION_JSON,
+	HEADER_VALUE_APPLICATION_OCTET_STREAM, HEADER_VALUE_APPLICATION_SURREAL_DB_FLATBUFFERS,
+	HEADER_VALUE_TEXT_PLAIN,
+};
 use axum_extra::headers;
 use axum_extra::headers::Header;
 use http::{HeaderName, HeaderValue};
@@ -63,9 +68,16 @@ impl From<Accept> for HeaderValue {
 	}
 }
 
-#[expect(clippy::fallible_impl_from)]
 impl From<&Accept> for HeaderValue {
 	fn from(value: &Accept) -> Self {
-		HeaderValue::from_str(value.to_string().as_str()).unwrap()
+		match value {
+			Accept::TextPlain => HEADER_VALUE_TEXT_PLAIN.clone(),
+			Accept::ApplicationJson => HEADER_VALUE_APPLICATION_JSON.clone(),
+			Accept::ApplicationCbor => HEADER_VALUE_APPLICATION_CBOR.clone(),
+			Accept::ApplicationOctetStream => HEADER_VALUE_APPLICATION_OCTET_STREAM.clone(),
+			Accept::ApplicationFlatbuffers => {
+				HEADER_VALUE_APPLICATION_SURREAL_DB_FLATBUFFERS.clone()
+			}
+		}
 	}
 }

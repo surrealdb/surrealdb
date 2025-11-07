@@ -276,22 +276,27 @@ impl DbsCapabilities {
 		// If there was a global deny, we allow if there is a general allow or some
 		// specific allows for functions
 		if self.deny_all {
-			match &self.allow_funcs {
-				Some(Targets::Some(_)) => return self.allow_funcs.clone().unwrap(), /* We already checked for Some */
-				Some(Targets::All) => return Targets::All,
-				Some(_) => return Targets::None,
-				None => return Targets::None,
+			if let Some(targets) = &self.allow_funcs {
+				match targets {
+					Targets::None => {}
+					Targets::Some(_) => {
+						return targets.clone();
+					}
+					Targets::All => {
+						return Targets::All;
+					}
+				}
 			}
+			return Targets::None;
 		}
 
 		// If there was a general deny for functions, we allow if there are specific
 		// allows for functions
 		if let Some(Targets::All) = self.deny_funcs {
-			match &self.allow_funcs {
-				Some(Targets::Some(_)) => return self.allow_funcs.clone().unwrap(), /* We already checked for Some */
-				Some(_) => return Targets::None,
-				None => return Targets::None,
+			if let Some(targets) = &self.allow_funcs {
+				return targets.clone();
 			}
+			return Targets::None;
 		}
 
 		// If there are no high level denies but there is a global allow, we allow
@@ -309,26 +314,29 @@ impl DbsCapabilities {
 		// If there was a global deny, we allow if there is a general allow or some
 		// specific allows for networks
 		if self.deny_all {
-			match &self.allow_net {
-				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap(), /* We already */
-				// checked for
-				// Some
-				Some(Targets::All) => return Targets::All,
-				Some(_) => return Targets::None,
-				None => return Targets::None,
+			if let Some(targets) = &self.allow_net {
+				match targets {
+					Targets::None => {}
+					Targets::Some(_) => {
+						return targets.clone();
+					}
+					Targets::All => {
+						return Targets::All;
+					}
+				}
 			}
+			return Targets::None;
 		}
 
 		// If there was a general deny for networks, we allow if there are specific
 		// allows for networks
 		if let Some(Targets::All) = self.deny_net {
-			match &self.allow_net {
-				Some(Targets::Some(_)) => return self.allow_net.clone().unwrap(), /* We already */
-				// checked for
-				// Some
-				Some(_) => return Targets::None,
-				None => return Targets::None,
+			if let Some(targets) = &self.allow_net {
+				if let Targets::Some(_) = targets {
+					return targets.clone();
+				}
 			}
+			return Targets::None;
 		}
 
 		// If there are no high level denies but there is a global allow, we allow
@@ -346,26 +354,29 @@ impl DbsCapabilities {
 		// If there was a global deny, we allow if there is a general allow or some
 		// specific allows for RPC
 		if self.deny_all {
-			match &self.allow_rpc {
-				Some(Targets::Some(_)) => return self.allow_rpc.clone().unwrap(), /* We already */
-				// checked for
-				// Some
-				Some(Targets::All) => return Targets::All,
-				Some(_) => return Targets::None,
-				None => return Targets::None,
+			if let Some(targets) = &self.allow_rpc {
+				match targets {
+					Targets::None => {}
+					Targets::Some(_) => {
+						return targets.clone();
+					}
+					Targets::All => {
+						return Targets::All;
+					}
+				}
 			}
+			return Targets::None;
 		}
 
 		// If there was a general deny for RPC, we allow if there are specific allows
 		// for RPC methods
 		if let Some(Targets::All) = self.deny_rpc {
-			match &self.allow_rpc {
-				Some(Targets::Some(_)) => return self.allow_rpc.clone().unwrap(), /* We already */
-				// checked for
-				// Some
-				Some(_) => return Targets::None,
-				None => return Targets::None,
+			if let Some(targets) = self.allow_rpc.as_ref() {
+				if let Targets::Some(_) = targets {
+					return targets.clone();
+				}
 			}
+			return Targets::None;
 		}
 
 		// If there are no high level denies but there is a global allow, we allow RPC
@@ -382,26 +393,27 @@ impl DbsCapabilities {
 		// If there was a global deny, we allow if there is a general allow or some
 		// specific allows for HTTP
 		if self.deny_all {
-			match &self.allow_http {
-				Some(Targets::Some(_)) => return self.allow_http.clone().unwrap(), /* We already */
-				// checked for
-				// Some
-				Some(Targets::All) => return Targets::All,
-				Some(_) => return Targets::None,
-				None => return Targets::None,
+			if let Some(targets) = self.allow_http.as_ref() {
+				match targets {
+					Targets::None => {}
+					Targets::Some(_) => {
+						return targets.clone();
+					}
+					Targets::All => {
+						return Targets::All;
+					}
+				}
 			}
+			return Targets::None;
 		}
 
 		// If there was a general deny for HTTP, we allow if there are specific allows
 		// for HTTP routes
 		if let Some(Targets::All) = self.deny_http {
-			match &self.allow_http {
-				Some(Targets::Some(_)) => return self.allow_http.clone().unwrap(), /* We already */
-				// checked for
-				// Some
-				Some(_) => return Targets::None,
-				None => return Targets::None,
+			if let Some(targets) = self.allow_http.as_ref() {
+				return targets.clone();
 			}
+			return Targets::None;
 		}
 
 		// If there are no high level denies but there is a global allow, we allow HTTP
@@ -462,24 +474,24 @@ impl DbsCapabilities {
 		// Allowed functions already consider a global deny and a general deny for
 		// functions On top of what is explicitly allowed, we deny what is
 		// specifically denied
-		match &self.deny_funcs {
-			Some(Targets::Some(_)) => self.deny_funcs.clone().unwrap(), /* We already checked */
-			// for Some
-			Some(_) => Targets::None,
-			None => Targets::None,
+		if let Some(targets) = &self.deny_funcs {
+			if let Targets::Some(_) = targets {
+				return targets.clone();
+			}
 		}
+		Targets::None
 	}
 
 	fn get_deny_net(&self) -> Targets<NetTarget> {
 		// Allowed networks already consider a global deny and a general deny for
 		// networks On top of what is explicitly allowed, we deny what is specifically
 		// denied
-		match &self.deny_net {
-			Some(Targets::Some(_)) => self.deny_net.clone().unwrap(), /* We already checked for */
-			// Some
-			Some(_) => Targets::None,
-			None => Targets::None,
+		if let Some(targets) = &self.deny_net {
+			if let Targets::Some(_) = targets {
+				return targets.clone();
+			}
 		}
+		Targets::None
 	}
 
 	fn get_deny_all(&self) -> bool {
@@ -489,24 +501,24 @@ impl DbsCapabilities {
 	fn get_deny_rpc(&self) -> Targets<MethodTarget> {
 		// Allowed RPC methods already consider a global deny and a general deny for RPC
 		// On top of what is explicitly allowed, we deny what is specifically denied
-		match &self.deny_rpc {
-			Some(Targets::Some(_)) => self.deny_rpc.clone().unwrap(), /* We already checked for */
-			// Some
-			Some(_) => Targets::None,
-			None => Targets::None,
+		if let Some(targets) = &self.deny_rpc {
+			if let Targets::Some(_) = targets {
+				return targets.clone();
+			}
 		}
+		Targets::None
 	}
 
 	fn get_deny_http(&self) -> Targets<RouteTarget> {
 		// Allowed HTTP routes already consider a global deny and a general deny for
 		// HTTP On top of what is explicitly allowed, we deny what is specifically
 		// denied
-		match &self.deny_http {
-			Some(Targets::Some(_)) => self.deny_http.clone().unwrap(), /* We already checked for */
-			// Some
-			Some(_) => Targets::None,
-			None => Targets::None,
+		if let Some(targets) = self.deny_http.as_ref() {
+			if let Targets::Some(_) = targets {
+				return targets.clone();
+			}
 		}
+		Targets::None
 	}
 
 	fn get_deny_experimental(&self) -> Targets<ExperimentalTarget> {

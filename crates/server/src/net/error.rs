@@ -132,7 +132,7 @@ impl IntoResponse for ResponseError {
 		if let Some(e) = self.0.downcast_ref::<ApiError>() {
 			return ErrorMessage {
 				code: e.status_code(),
-				details: Some("An error occured while processing this API request".to_string()),
+				details: Some("An error occurred while processing this API request".to_string()),
 				description: Some(e.to_string()),
 				information: None,
 			}
@@ -141,7 +141,22 @@ impl IntoResponse for ResponseError {
 
 		// Check for our local Error type
 		if self.0.is::<Error>() {
-			return self.0.downcast::<Error>().unwrap().into_response();
+			match self.0.downcast::<Error>() {
+				Ok(e) => {
+					return e.into_response();
+				}
+				Err(e) => {
+					return ErrorMessage {
+						code: StatusCode::INTERNAL_SERVER_ERROR,
+						details: Some(
+							"An error occurred while processing this API request".to_string(),
+						),
+						description: Some(e.to_string()),
+						information: None,
+					}
+					.into_response();
+				}
+			}
 		}
 
 		// Handle errors based on their string representation

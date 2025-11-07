@@ -169,9 +169,9 @@ impl HttpFormat for Format {
 			Format::Unsupported => return Err(RpcError::InvalidRequest),
 		};
 
-		Ok(AxumResponse::builder()
+		AxumResponse::builder()
 			.header(CONTENT_TYPE, ContentType::from(self))
 			.body(val.into())
-			.unwrap())
+			.map_err(|_| RpcError::ParseError)
 	}
 }

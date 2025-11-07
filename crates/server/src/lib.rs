@@ -53,7 +53,7 @@ pub fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(composer
 }
 
 /// Rust's default thread stack size of 2MiB doesn't allow sufficient recursion depth.
-fn with_enough_stack<T>(fut: impl Future<Output = T> + Send) -> T {
+fn with_enough_stack(fut: impl Future<Output = ExitCode> + Send) -> ExitCode {
 	// Start a Tokio runtime with custom configuration
 	let mut b = tokio::runtime::Builder::new_multi_thread();
 	b.enable_all()
@@ -62,7 +62,13 @@ fn with_enough_stack<T>(fut: impl Future<Output = T> + Send) -> T {
 		.thread_stack_size(*cnf::RUNTIME_STACK_SIZE)
 		.thread_name("surrealdb-worker");
 	#[cfg(feature = "allocation-tracking")]
-	b.on_thread_stop(|| crate::core::mem::ALLOC.stop_tracking());
+	b.on_thread_stop(|| core::mem::ALLOC.stop_tracking());
 	// Build the runtime
-	b.build().unwrap().block_on(fut)
+	match b.build() {
+		Ok(b) => b.block_on(fut),
+		Err(e) => {
+			error!("Failed to build runtime: {}", e);
+			ExitCode::FAILURE
+		}
+	}
 }

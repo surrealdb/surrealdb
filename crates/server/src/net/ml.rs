@@ -132,7 +132,7 @@ mod implementation {
 			}
 		});
 		// Return the streamed body
-		Ok(Response::builder().status(StatusCode::OK).body(body).unwrap())
+		Ok(Response::builder().status(StatusCode::OK).body(body)?)
 	}
 }
 

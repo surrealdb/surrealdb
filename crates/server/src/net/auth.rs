@@ -60,7 +60,11 @@ impl AsyncAuthorizeRequest<Body> for SurrealAuth {
 					let unauthorized_response = Response::builder()
 						.status(StatusCode::UNAUTHORIZED)
 						.body(Body::new(err.to_string()))
-						.unwrap();
+						.unwrap_or_else(|_| {
+							let mut resp = Response::new(Body::empty());
+							*resp.status_mut() = StatusCode::UNAUTHORIZED;
+							resp
+						});
 					Err(unauthorized_response)
 				}
 			}

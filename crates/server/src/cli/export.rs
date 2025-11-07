@@ -111,8 +111,9 @@ pub async fn init(
 		client
 	} else if token.is_some() && !is_local {
 		let client = connect(endpoint).await?;
-		client.authenticate(token.unwrap()).await?;
-
+		if let Some(t) = token {
+			client.authenticate(t).await?;
+		}
 		client
 	} else {
 		debug!("Connecting to the database engine without authentication");

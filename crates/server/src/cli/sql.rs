@@ -5,6 +5,7 @@ use rustyline::error::ReadlineError;
 use rustyline::validate::{ValidationContext, ValidationResult, Validator};
 use rustyline::{Completer, Editor, Helper, Highlighter, Hinter};
 use serde::Serialize;
+use serde_json::Value as JsonValue;
 use serde_json::ser::PrettyFormatter;
 use surrealdb::engine::any::{self, connect};
 use surrealdb::method::WithStats;
@@ -98,8 +99,9 @@ pub async fn init(
 		client
 	} else if token.is_some() && !is_local {
 		let client = connect(endpoint).await?;
-		client.authenticate(token.unwrap()).await?;
-
+		if let Some(token) = token {
+			client.authenticate(token).await?;
+		}
 		client
 	} else {
 		debug!("Connecting to the database engine without authentication");
@@ -107,7 +109,7 @@ pub async fn init(
 	};
 
 	// Create a new terminal REPL
-	let mut rl = Editor::new().unwrap();
+	let mut rl = Editor::new()?;
 	// Set custom input validation
 	rl.set_helper(Some(InputValidator {
 		multi,
@@ -208,7 +210,7 @@ pub async fn init(
 				}
 
 				// Extract the namespace and database from the current prompt
-				let (prompt_ns, prompt_db) = split_prompt(&prompt);
+				let (prompt_ns, prompt_db) = split_prompt(&prompt)?;
 				// The namespace should be set before the database can be set
 				if namespace.is_none() && prompt_ns.is_empty() && database.is_some() {
 					eprintln!("Specify a namespace to use\n");
@@ -261,6 +263,21 @@ pub async fn init(
 	let _ = rl.save_history("history.txt");
 	// All ok
 	Ok(())
+}
+
+fn pretty_print_json(value: JsonValue) -> String {
+	let pretty_print = |value: &JsonValue| -> Result<String> {
+		let mut buf = Vec::new();
+		let mut serializer =
+			serde_json::Serializer::with_formatter(&mut buf, PrettyFormatter::with_indent(b"\t"));
+		value.serialize(&mut serializer)?;
+		Ok(String::from_utf8(buf)?)
+	};
+	match pretty_print(&value) {
+		Ok(v) => v,
+		// Fall back to the default print if the JSON value is not valid UTF-8 or if the serializer fails
+		Err(_) => value.to_string(),
+	}
 }
 
 fn process(
@@ -329,13 +346,7 @@ fn process(
 				}
 				// Yes prettify the JSON response
 				(true, true) => {
-					let mut buf = Vec::new();
-					let mut serializer = serde_json::Serializer::with_formatter(
-						&mut buf,
-						PrettyFormatter::with_indent(b"\t"),
-					);
-					data.into_json_value().serialize(&mut serializer).unwrap();
-					let output = String::from_utf8(buf).unwrap();
+					let output = pretty_print_json(data.into_json_value());
 					format!(
 						"-- Notification (action: {action:?}, live query ID: {query_id})\n{output:#}"
 					)
@@ -366,21 +377,14 @@ fn process(
 		// Don't pretty print the JSON response
 		(true, false) => {
 			let value = Value::from_vec(vec.into_iter().map(|(_, x)| x).collect::<Vec<_>>());
-			serde_json::to_string(&value.into_json_value()).unwrap()
+			serde_json::to_string(&value.into_json_value())?
 		}
 		// Yes prettify the JSON response
 		(true, true) => vec
 			.into_iter()
 			.enumerate()
 			.map(|(index, (stats, value))| {
-				let mut buf = Vec::new();
-				let mut serializer = serde_json::Serializer::with_formatter(
-					&mut buf,
-					PrettyFormatter::with_indent(b"\t"),
-				);
-				let x = value.into_json_value();
-				x.serialize(&mut serializer).unwrap();
-				let output = String::from_utf8(buf).unwrap();
+				let output = pretty_print_json(value.into_json_value());
 				let query_num = index + 1;
 				let execution_time = stats.execution_time.unwrap_or_default();
 				format!("-- Query {query_num} (execution time: {execution_time:?}\n{output:#}",)
@@ -440,7 +444,11 @@ fn filter_line_continuations(line: &str) -> String {
 	line.replace("\\\n", "").replace("\\\r\n", "")
 }
 
-fn split_prompt(prompt: &str) -> (&str, &str) {
-	let selection = prompt.split_once('>').unwrap().0;
-	selection.split_once('/').unwrap_or((selection, ""))
+fn split_prompt(prompt: &str) -> Result<(&str, &str)> {
+	if let Some(sp) = prompt.split_once('>') {
+		let selection = sp.0;
+		Ok(selection.split_once('/').unwrap_or((selection, "")))
+	} else {
+		Err(anyhow!("Invalid prompt format"))
+	}
 }

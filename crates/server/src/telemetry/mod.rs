@@ -323,24 +323,24 @@ pub fn filter_from_value(v: &str) -> std::result::Result<EnvFilter, ParseError> 
 		// Otherwise, let's show debugs and above
 		"debug" => Ok(EnvFilter::default()
 			.add_directive(Level::WARN.into())
-			.add_directive("surreal=debug".parse().unwrap())
-			.add_directive("surrealdb=debug".parse().unwrap())
-			.add_directive("surrealdb::core::kvs::tx=debug".parse().unwrap())
-			.add_directive("surrealdb::core::kvs::tr=debug".parse().unwrap())),
+			.add_directive("surreal=debug".parse()?)
+			.add_directive("surrealdb=debug".parse()?)
+			.add_directive("surrealdb::core::kvs::tx=debug".parse()?)
+			.add_directive("surrealdb::core::kvs::tr=debug".parse()?)),
 		// Specify the log level for each code area
 		"trace" => Ok(EnvFilter::default()
 			.add_directive(Level::WARN.into())
-			.add_directive("surreal=trace".parse().unwrap())
-			.add_directive("surrealdb=trace".parse().unwrap())
-			.add_directive("surrealdb::core::kvs::tx=debug".parse().unwrap())
-			.add_directive("surrealdb::core::kvs::tr=debug".parse().unwrap())),
+			.add_directive("surreal=trace".parse()?)
+			.add_directive("surrealdb=trace".parse()?)
+			.add_directive("surrealdb::core::kvs::tx=debug".parse()?)
+			.add_directive("surrealdb::core::kvs::tr=debug".parse()?)),
 		// Check if we should show all surreal logs
 		"full" => Ok(EnvFilter::default()
 			.add_directive(Level::DEBUG.into())
-			.add_directive("surreal=trace".parse().unwrap())
-			.add_directive("surrealdb=trace".parse().unwrap())
-			.add_directive("surrealdb::core::kvs::tx=trace".parse().unwrap())
-			.add_directive("surrealdb::core::kvs::tr=trace".parse().unwrap())),
+			.add_directive("surreal=trace".parse()?)
+			.add_directive("surrealdb=trace".parse()?)
+			.add_directive("surrealdb::core::kvs::tx=trace".parse()?)
+			.add_directive("surrealdb::core::kvs::tr=trace".parse()?)),
 		// Check if we should show all module logs
 		"all" => Ok(EnvFilter::default().add_directive(Level::TRACE.into())),
 		// Let's try to parse the custom log level

@@ -13,13 +13,19 @@ pub async fn test_version_upgrade() {
 	client
 		.fetch_mock
 		.insert("latest".to_string(), || -> Result<String> { Ok("1.0.0".to_string()) });
-	check_upgrade(&client, "1.0.0")
-		.await
-		.expect("Expected the versions to be the same and not require an upgrade");
-	check_upgrade(&client, "0.9.0")
-		.await
-		.expect_err("Expected the versions to be different and require an upgrade");
-	check_upgrade(&client, "1.1.0")
-		.await
-		.expect("Expected the versions to be illogical, and not require and upgrade");
+	assert_eq!(
+		check_upgrade(&client, "1.0.0").await.unwrap(),
+		None,
+		"Expected the versions to be the same and not require an upgrade"
+	);
+	assert_eq!(
+		check_upgrade(&client, "0.9.0").await.unwrap(),
+		Some(semver::Version::parse("1.0.0").unwrap()),
+		"Expected the versions to be different and require an upgrade"
+	);
+	assert_eq!(
+		check_upgrade(&client, "1.1.0").await.unwrap(),
+		None,
+		"Expected the versions to be illogical, and not require and upgrade"
+	);
 }

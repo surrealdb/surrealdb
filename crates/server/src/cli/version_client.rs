@@ -29,7 +29,7 @@ pub(crate) fn new(timeout: Option<Duration>) -> Result<ReqwestVersionClient> {
 
 impl VersionClient for ReqwestVersionClient {
 	async fn fetch(&self, version: &str) -> Result<Cow<'static, str>> {
-		let request = self.client.get(format!("{ROOT}/{version}.txt")).build().unwrap();
+		let request = self.client.get(format!("{ROOT}/{version}.txt")).build()?;
 		let response = self.client.execute(request).await?;
 		if !response.status().is_success() {
 			bail!("received status {} when fetchin version", response.status())

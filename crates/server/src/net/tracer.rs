@@ -112,7 +112,7 @@ impl<B> OnResponse<B> for HttpTraceLayerHooks {
 		span.record("http.response.status_code", response.status().as_u16());
 		// Record the response body size if specified
 		if let Some(size) = response.headers().get(header::CONTENT_LENGTH) {
-			span.record("http.response.body.size", size.to_str().unwrap());
+			span.record("http.response.body.size", size.to_str().unwrap_or(""));
 		}
 		// Server errors are handled by the on_failure hook
 		if !response.status().is_server_error() {

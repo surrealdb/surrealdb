@@ -5,7 +5,7 @@ use surrealdb::headers::ID;
 
 /// Typed header implementation for the id header.
 /// It's used to specify the session id.
-pub struct SurrealId(String);
+pub struct SurrealId(HeaderValue, String);
 
 impl Header for SurrealId {
 	fn name() -> &'static HeaderName {
@@ -16,10 +16,10 @@ impl Header for SurrealId {
 	where
 		I: Iterator<Item = &'i HeaderValue>,
 	{
-		let value = values.next().ok_or_else(headers::Error::invalid)?;
-		let value = value.to_str().map_err(|_| headers::Error::invalid())?.to_string();
+		let value = values.next().ok_or_else(headers::Error::invalid)?.clone();
+		let string = value.to_str().map_err(|_| headers::Error::invalid())?.to_string();
 
-		Ok(SurrealId(value))
+		Ok(SurrealId(value, string))
 	}
 
 	fn encode<E>(&self, values: &mut E)
@@ -34,7 +34,7 @@ impl std::ops::Deref for SurrealId {
 	type Target = String;
 
 	fn deref(&self) -> &Self::Target {
-		&self.0
+		&self.1
 	}
 }
 
@@ -44,9 +44,8 @@ impl From<SurrealId> for HeaderValue {
 	}
 }
 
-#[expect(clippy::fallible_impl_from)]
 impl From<&SurrealId> for HeaderValue {
 	fn from(value: &SurrealId) -> Self {
-		HeaderValue::from_str(value.0.as_str()).unwrap()
+		value.0.clone()
 	}
 }

@@ -98,5 +98,5 @@ async fn handle_inner(
 		}
 	});
 	// Return the chunked body
-	Ok(Response::builder().status(StatusCode::OK).body(body).unwrap())
+	Ok(Response::builder().status(StatusCode::OK).body(body)?)
 }

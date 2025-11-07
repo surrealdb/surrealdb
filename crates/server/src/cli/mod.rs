@@ -44,6 +44,8 @@ use crate::cnf::{LOGO, PKG_VERSION};
 use crate::env::RELEASE;
 use crate::net::RouterFactory;
 
+use anyhow::Result;
+
 const INFO: &str = "
 To get started using SurrealDB, and for guides on connecting to and building applications
 on top of SurrealDB, check out the SurrealDB documentation (https://surrealdb.com/docs).
@@ -234,14 +236,19 @@ pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
 	let args = Cli::parse();
 	// After parsing arguments, we check the version online
 	if args.online_version_check {
-		let client = version_client::new(Some(Duration::from_millis(500))).unwrap();
-		if let Err(opt_version) = check_upgrade(&client, PKG_VERSION.deref()).await {
-			match opt_version {
-				None => warn!("A new version of SurrealDB may be available."),
-				Some(v) => warn!("A new version of SurrealDB is available: {v}"),
-			};
-			// TODO ansi_term crate?
-			warn!("You can upgrade using the 'surreal upgrade' command");
+		match version_client::new(Some(Duration::from_millis(500))) {
+			Ok(client) => match check_upgrade(&client, PKG_VERSION.deref()).await {
+				Ok(Some(v)) => warn!("A new version of SurrealDB is available: {v}"),
+				Ok(None) => {}
+				Err(e) => {
+					error!("{}", e);
+					warn!("A new version of SurrealDB may be available.");
+				}
+			},
+			Err(e) => {
+				error!("{}", e);
+				warn!("A new version of SurrealDB may be available.");
+			}
 		}
 	}
 	// Check if we are running the server
@@ -324,17 +331,14 @@ pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
 /// Check if there is a newer version
 /// Ok = No upgrade needed
 /// Err = Upgrade needed, returns the new version if it is available
-async fn check_upgrade<C: VersionClient>(
-	client: &C,
-	pkg_version: &str,
-) -> Result<(), Option<Version>> {
+async fn check_upgrade<C: VersionClient>(client: &C, pkg_version: &str) -> Result<Option<Version>> {
 	match client.fetch("latest").await {
 		Ok(version) => {
 			// Request was successful, compare against current
-			let old_version = upgrade::parse_version(pkg_version).unwrap();
-			let new_version = upgrade::parse_version(&version).unwrap();
+			let old_version = upgrade::parse_version(pkg_version)?;
+			let new_version = upgrade::parse_version(&version)?;
 			if old_version < new_version {
-				return Err(Some(new_version));
+				return Ok(Some(new_version));
 			}
 		}
 		_ => {
@@ -343,5 +347,5 @@ async fn check_upgrade<C: VersionClient>(
 			// todo It would return Err(None) if the version is too old
 		}
 	}
-	Ok(())
+	Ok(None)
 }

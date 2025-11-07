@@ -49,8 +49,7 @@ pub fn init() -> Result<Option<SdkMeterProvider>, MetricsError> {
 				.build_metrics_exporter(
 					Box::new(DefaultTemporalitySelector::new()),
 					Box::new(DefaultAggregationSelector::new()),
-				)
-				.unwrap();
+				)?;
 			// Create the reader to run with Tokio
 			let reader = PeriodicReader::builder(exporter, runtime::Tokio).build();
 			// Add a view for metering durations

@@ -207,8 +207,11 @@ pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
 		.with_changefeed_gc_interval(changefeed_gc_interval)
 		.with_index_compaction_interval(index_compaction_interval);
 	// Configure the config
+	let Some(bind) = listen_addresses.first().copied() else {
+		return Err(anyhow::anyhow!("No listen address provided"));
+	};
 	let config = Config {
-		bind: listen_addresses.first().copied().unwrap(),
+		bind,
 		client_ip,
 		path,
 		user,

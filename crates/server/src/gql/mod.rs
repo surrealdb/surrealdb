@@ -14,6 +14,7 @@ use axum::response::IntoResponse;
 use bytes::Bytes;
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
+use http::StatusCode;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_core::gql::cache::GraphQLSchemaCache;
@@ -116,10 +117,17 @@ where
 					create_multipart_mixed_stream(stream, Duration::from_secs(30))
 						.map(Ok::<_, std::io::Error>),
 				);
-				Ok(HttpResponse::builder()
+				match HttpResponse::builder()
 					.header("content-type", "multipart/mixed; boundary=graphql")
 					.body(body)
-					.unwrap())
+				{
+					Ok(r) => Ok(r),
+					Err(err) => {
+						let mut resp = HttpResponse::new(Body::new(err.to_string()));
+						*resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+						Ok(resp)
+					}
+				}
 			} else {
 				let gql_req =
 					match GraphQLBatchRequest::<GraphQLRejection>::from_request(req, &()).await {
