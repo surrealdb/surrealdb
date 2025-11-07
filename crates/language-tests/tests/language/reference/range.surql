@@ -43,9 +43,9 @@ INSERT INTO message [
     { id: 5, chat: chat:bla, message: "Fifth message" },
 ] RETURN NONE;
 
-chat:bla<~(message:..=3 VIA chat).message;
-chat:bla<~(message:1..=3 VIA chat).message;
-chat:bla<~(message:1>..=3 VIA chat).message;
-chat:bla<~(message:1>..3 VIA chat).message;
-chat:bla<~(message:1>.. VIA chat).message;
-chat:bla<~(message VIA chat).message;
+chat:bla<~(message:..=3 FIELD chat).message;
+chat:bla<~(message:1..=3 FIELD chat).message;
+chat:bla<~(message:1>..=3 FIELD chat).message;
+chat:bla<~(message:1>..3 FIELD chat).message;
+chat:bla<~(message:1>.. FIELD chat).message;
+chat:bla<~(message FIELD chat).message;

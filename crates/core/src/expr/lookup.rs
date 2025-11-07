@@ -373,7 +373,7 @@ impl Display for LookupSubject {
 			} => {
 				EscapeIdent(table).fmt(f)?;
 				if let Some(referencing_field) = referencing_field {
-					write!(f, " VIA {referencing_field}")?;
+					write!(f, " FIELD {}", EscapeIdent(referencing_field))?;
 				}
 				Ok(())
 			}
@@ -384,7 +384,7 @@ impl Display for LookupSubject {
 			} => {
 				write!(f, "{}:{range}", EscapeIdent(table))?;
 				if let Some(referencing_field) = referencing_field {
-					write!(f, " VIA {referencing_field}")?;
+					write!(f, " FIELD {}", EscapeIdent(referencing_field))?;
 				}
 				Ok(())
 			}

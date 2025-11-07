@@ -188,7 +188,7 @@ impl Display for LookupSubject {
 			} => {
 				Display::fmt(&EscapeIdent(table), f)?;
 				if let Some(referencing_field) = referencing_field {
-					write!(f, " VIA {}", EscapeIdent(referencing_field))?;
+					write!(f, " FIELD {}", EscapeIdent(referencing_field))?;
 				}
 				Ok(())
 			}
@@ -199,7 +199,7 @@ impl Display for LookupSubject {
 			} => {
 				write!(f, "{}:{range}", EscapeIdent(table))?;
 				if let Some(referencing_field) = referencing_field {
-					write!(f, " VIA {}", EscapeIdent(referencing_field))?;
+					write!(f, " FIELD {}", EscapeIdent(referencing_field))?;
 				}
 				Ok(())
 			}

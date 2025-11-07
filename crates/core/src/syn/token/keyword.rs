@@ -214,7 +214,6 @@ keyword! {
 	Value => "VALUE",
 	Values => "VALUES",
 	Version => "VERSION",
-	Via => "VIA",
 	Vs => "VS",
 	When => "WHEN",
 	Where => "WHERE",

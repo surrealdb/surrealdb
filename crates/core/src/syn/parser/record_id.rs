@@ -163,7 +163,7 @@ impl Parser<'_> {
 		&mut self,
 		supports_referencing_field: bool,
 	) -> ParseResult<Option<String>> {
-		if supports_referencing_field && self.eat(t!("VIA")) {
+		if supports_referencing_field && self.eat(t!("FIELD")) {
 			Ok(Some(self.parse_ident()?))
 		} else {
 			Ok(None)

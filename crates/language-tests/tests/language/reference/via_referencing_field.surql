@@ -44,10 +44,10 @@ CREATE person:john SET born_in = city:london, lives_in = city:newyork;
 CREATE person:mary SET born_in = city:london, lives_in = city:london;
 
 city:london<~person;
-city:london<~(person VIA born_in);
-city:london<~(person VIA lives_in);
+city:london<~(person FIELD born_in);
+city:london<~(person FIELD lives_in);
 
 city:newyork<~person;
-city:newyork<~(person VIA born_in);
-city:newyork<~(person VIA lives_in);
+city:newyork<~(person FIELD born_in);
+city:newyork<~(person FIELD lives_in);
 

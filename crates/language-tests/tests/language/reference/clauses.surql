@@ -102,34 +102,34 @@ CREATE message:3 SET
 RETURN NONE;
 
 -- 8
-chat:general<~(message VIA chat);
+chat:general<~(message FIELD chat);
 
 -- 9
-chat:general<~(SELECT id FROM message VIA chat);
+chat:general<~(SELECT id FROM message FIELD chat);
 
 -- 10
-chat:general<~(message VIA chat WHERE author = user:alice);
+chat:general<~(message FIELD chat WHERE author = user:alice);
 
 -- 11
-chat:general<~(SELECT text FROM message VIA chat ORDER BY text DESC);
+chat:general<~(SELECT text FROM message FIELD chat ORDER BY text DESC);
 
 -- 12
-chat:general<~(SELECT id FROM message VIA chat ORDER BY id LIMIT 2);
+chat:general<~(SELECT id FROM message FIELD chat ORDER BY id LIMIT 2);
 
 -- 13
-chat:general<~(SELECT id FROM message VIA chat ORDER BY id START 1);
+chat:general<~(SELECT id FROM message FIELD chat ORDER BY id START 1);
 
 -- 14
-chat:general<~(SELECT id FROM message VIA chat ORDER BY id START 1 LIMIT 1);
+chat:general<~(SELECT id FROM message FIELD chat ORDER BY id START 1 LIMIT 1);
 
 -- 15
-chat:general<~(SELECT id, tags FROM message VIA chat SPLIT tags);
+chat:general<~(SELECT id, tags FROM message FIELD chat SPLIT tags);
 
 -- 16
-chat:general<~(SELECT author, count() AS count FROM message VIA chat GROUP BY author ORDER BY author);
+chat:general<~(SELECT author, count() AS count FROM message FIELD chat GROUP BY author ORDER BY author);
 
 -- 17
-chat:general<~(SELECT id, priority FROM message VIA chat WHERE priority IN [1, 3] ORDER BY priority DESC LIMIT 2);
+chat:general<~(SELECT id, priority FROM message FIELD chat WHERE priority IN [1, 3] ORDER BY priority DESC LIMIT 2);
 
 -- TODO alias on lookups seem to be useless...
--- user:alice<~(message VIA author AS chat_messages);
+-- user:alice<~(message FIELD author AS chat_messages);
