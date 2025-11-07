@@ -116,11 +116,14 @@ where
 
 		// Execute the LIVE SELECT query directly to get the UUID
 		let results = router
-			.execute_query(Command::Query {
-				query: Cow::Owned(query),
-				txn: None,
-				variables,
-			})
+			.execute_query(
+				Command::Query {
+					query: Cow::Owned(query),
+					txn: None,
+					variables,
+				},
+				client.session_id,
+			)
 			.await?;
 
 		// Get the first result which should be the UUID
@@ -147,7 +150,7 @@ where
 			}
 		};
 
-		let rx = register(router, id).await?;
+		let rx = register(router, id, client.session_id).await?;
 		Ok(Stream::new(client.inner.clone().into(), id, Some(rx)))
 	})
 }
@@ -155,13 +158,17 @@ where
 pub(crate) async fn register(
 	router: &Router,
 	id: Uuid,
+	session_id: Uuid,
 ) -> Result<Receiver<Result<CoreNotification>>> {
 	let (tx, rx) = async_channel::unbounded();
 	router
-		.execute_unit(Command::SubscribeLive {
-			uuid: id,
-			notification_sender: tx,
-		})
+		.execute_unit(
+			Command::SubscribeLive {
+				uuid: id,
+				notification_sender: tx,
+			},
+			session_id,
+		)
 		.await?;
 	Ok(rx)
 }
@@ -322,9 +329,12 @@ where
 	spawn(async move {
 		if let Ok(router) = client.inner.router.extract() {
 			router
-				.execute_unit(Command::Kill {
-					uuid,
-				})
+				.execute_unit(
+					Command::Kill {
+						uuid,
+					},
+					client.session_id,
+				)
 				.await
 				.ok();
 		}

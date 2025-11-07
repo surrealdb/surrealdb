@@ -5,6 +5,7 @@ use async_channel::{Receiver, Sender};
 use surrealdb_core::dbs::QueryResult;
 use surrealdb_core::rpc::DbResultError;
 use surrealdb_types::{SurrealValue, Value};
+use uuid::Uuid;
 
 use crate::err::Error;
 use crate::method::BoxFuture;
@@ -21,6 +22,7 @@ use super::opt::Config;
 pub struct RequestData {
 	pub(crate) id: i64,
 	pub(crate) command: Command,
+	pub(crate) session_id: Option<Uuid>,
 }
 
 #[derive(Debug)]
@@ -51,6 +53,7 @@ impl Router {
 	pub(crate) fn send_command(
 		&self,
 		command: Command,
+		session_id: Option<Uuid>,
 	) -> BoxFuture<'_, Result<Receiver<std::result::Result<Vec<QueryResult>, DbResultError>>>> {
 		Box::pin(async move {
 			let id = self.next_id();
@@ -59,6 +62,7 @@ impl Router {
 				request: RequestData {
 					id,
 					command,
+					session_id,
 				},
 				response: sender,
 			};
@@ -105,12 +109,12 @@ impl Router {
 	}
 
 	/// Execute all methods except `query`
-	pub(crate) fn execute<R>(&self, command: Command) -> BoxFuture<'_, Result<R>>
+	pub(crate) fn execute<R>(&self, command: Command, session_id: Uuid) -> BoxFuture<'_, Result<R>>
 	where
 		R: SurrealValue,
 	{
 		Box::pin(async move {
-			let rx = self.send_command(command).await?;
+			let rx = self.send_command(command, Some(session_id)).await?;
 			let value = self.recv_value(rx).await?;
 			// Handle single-element arrays that might be returned from operations like
 			// signup/signin
@@ -125,12 +129,16 @@ impl Router {
 	}
 
 	/// Execute methods that return an optional single response
-	pub(crate) fn execute_opt<R>(&self, command: Command) -> BoxFuture<'_, Result<Option<R>>>
+	pub(crate) fn execute_opt<R>(
+		&self,
+		command: Command,
+		session_id: Uuid,
+	) -> BoxFuture<'_, Result<Option<R>>>
 	where
 		R: SurrealValue,
 	{
 		Box::pin(async move {
-			let rx = self.send_command(command).await?;
+			let rx = self.send_command(command, Some(session_id)).await?;
 			match self.recv_value(rx).await? {
 				Value::None | Value::Null => Ok(None),
 				Value::Array(array) => match array.len() {
@@ -150,12 +158,16 @@ impl Router {
 	}
 
 	/// Execute methods that return multiple responses
-	pub(crate) fn execute_vec<R>(&self, command: Command) -> BoxFuture<'_, Result<Vec<R>>>
+	pub(crate) fn execute_vec<R>(
+		&self,
+		command: Command,
+		session_id: Uuid,
+	) -> BoxFuture<'_, Result<Vec<R>>>
 	where
 		R: SurrealValue,
 	{
 		Box::pin(async move {
-			let rx = self.send_command(command).await?;
+			let rx = self.send_command(command, Some(session_id)).await?;
 			match self.recv_value(rx).await? {
 				Value::None | Value::Null => Ok(Vec::new()),
 				Value::Array(array) => array
@@ -168,9 +180,13 @@ impl Router {
 	}
 
 	/// Execute methods that return nothing
-	pub(crate) fn execute_unit(&self, command: Command) -> BoxFuture<'_, Result<()>> {
+	pub(crate) fn execute_unit(
+		&self,
+		command: Command,
+		session_id: Uuid,
+	) -> BoxFuture<'_, Result<()>> {
 		Box::pin(async move {
-			let rx = self.send_command(command).await?;
+			let rx = self.send_command(command, Some(session_id)).await?;
 			match self.recv_value(rx).await? {
 				Value::None | Value::Null => Ok(()),
 				Value::Array(array) if array.is_empty() => Ok(()),
@@ -183,9 +199,13 @@ impl Router {
 	}
 
 	/// Execute methods that return a raw value
-	pub(crate) fn execute_value(&self, command: Command) -> BoxFuture<'_, Result<Value>> {
+	pub(crate) fn execute_value(
+		&self,
+		command: Command,
+		session_id: Uuid,
+	) -> BoxFuture<'_, Result<Value>> {
 		Box::pin(async move {
-			let rx = self.send_command(command).await?;
+			let rx = self.send_command(command, Some(session_id)).await?;
 			self.recv_value(rx).await
 		})
 	}
@@ -194,9 +214,10 @@ impl Router {
 	pub(crate) fn execute_query(
 		&self,
 		command: Command,
+		session_id: Uuid,
 	) -> BoxFuture<'_, Result<Vec<QueryResult>>> {
 		Box::pin(async move {
-			let rx = self.send_command(command).await?;
+			let rx = self.send_command(command, Some(session_id)).await?;
 			self.recv_results(rx).await
 		})
 	}
@@ -213,7 +234,12 @@ pub(crate) struct MlExportConfig {
 /// Connection trait implemented by supported protocols
 pub trait Sealed: Sized + Send + Sync + 'static {
 	/// Connect to the server
-	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>>
+	#[allow(private_interfaces)]
+	fn connect(
+		address: Endpoint,
+		capacity: usize,
+		session_clone: Option<crate::SessionClone>,
+	) -> BoxFuture<'static, Result<Surreal<Self>>>
 	where
 		Self: crate::Connection;
 }

@@ -39,10 +39,13 @@ where
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
 			router
-				.execute_unit(Command::Use {
-					namespace: self.ns,
-					database: Some(self.db),
-				})
+				.execute_unit(
+					Command::Use {
+						namespace: self.ns,
+						database: Some(self.db),
+					},
+					self.client.session_id,
+				)
 				.await?;
 			self.client.inner.waiter.0.send(Some(WaitFor::Database)).ok();
 			Ok(())

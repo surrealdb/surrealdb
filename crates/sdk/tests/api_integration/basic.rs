@@ -1787,7 +1787,7 @@ pub async fn client_side_transactions(new_db: impl CreateDb) {
 		.await
 		.unwrap();
 	assert!(user.is_some());
-	txn.commit().await.unwrap();
+	let db = txn.commit().await.unwrap();
 
 	// Verify the user was created by querying through the main db connection
 	let users: Vec<User> = db.select("user").await.unwrap();
@@ -1806,7 +1806,7 @@ pub async fn client_side_transactions(new_db: impl CreateDb) {
 		.await
 		.unwrap();
 	// Cancel the transaction - the user should not be persisted
-	txn.cancel().await.unwrap();
+	let db = txn.cancel().await.unwrap();
 
 	// Verify Jane was not created
 	let users: Vec<User> = db.select("user").await.unwrap();
@@ -1831,7 +1831,7 @@ pub async fn client_side_transactions(new_db: impl CreateDb) {
 		})
 		.await
 		.unwrap();
-	txn.commit().await.unwrap();
+	let db = txn.commit().await.unwrap();
 
 	// Verify all users were created
 	let users: Vec<User> = db.select("user").await.unwrap();

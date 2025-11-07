@@ -495,7 +495,19 @@ impl RpcProtocol for Websocket {
 			if let Some(session) = self.sessions.get(id) {
 				session.clone()
 			} else {
-				let session = Arc::new(Session::default());
+				// Create a new session, inheriting authentication from the default session
+				// We only inherit from the default session to avoid picking up random ns/db state
+				let default = self.session.load_full();
+				let session = if default.au.is_record() || default.au.is_root() {
+					let mut new_session = default.as_ref().clone();
+					// Reset namespace and database (new session must explicitly set these)
+					new_session.ns = None;
+					new_session.db = None;
+					Arc::new(new_session)
+				} else {
+					Arc::new(Session::default())
+				};
+
 				self.sessions.insert(*id, session.clone());
 				session
 			}

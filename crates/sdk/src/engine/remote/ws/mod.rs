@@ -61,13 +61,22 @@ struct PendingRequest {
 	// The channel to send the result of the request into.
 	response_channel:
 		Sender<std::result::Result<Vec<QueryResult>, surrealdb_core::rpc::DbResultError>>,
+	// The session ID associated with this request.
+	session_id: Option<uuid::Uuid>,
+}
+
+/// Per-session state for WebSocket connections
+#[derive(Clone, Default)]
+struct WsSessionState {
+	/// Vars currently set by the set method for this session
+	vars: IndexMap<String, Value>,
+	/// Messages which ought to be replayed on a reconnect for this session
+	replay: IndexMap<ReplayMethod, Command>,
 }
 
 struct RouterState<Sink, Stream> {
-	/// Vars currently set by the set method,
-	vars: IndexMap<String, Value>,
-	/// Messages which aught to be replayed on a reconnect.
-	replay: IndexMap<ReplayMethod, Command>,
+	/// Per-session state (vars and replay commands)
+	sessions: HashMap<Option<uuid::Uuid>, WsSessionState>,
 	/// Pending live queries
 	live_queries: HashMap<Uuid, Sender<Result<Notification>>>,
 	/// Send requests which are still awaiting an awnser.
@@ -83,8 +92,7 @@ struct RouterState<Sink, Stream> {
 impl<Sink, Stream> RouterState<Sink, Stream> {
 	pub fn new(sink: Sink, stream: Stream) -> Self {
 		RouterState {
-			vars: IndexMap::new(),
-			replay: IndexMap::new(),
+			sessions: HashMap::new(),
 			live_queries: HashMap::new(),
 			pending_requests: HashMap::new(),
 			last_activity: Instant::now(),

@@ -53,7 +53,7 @@ macro_rules! into_future {
 			} = self;
 			Box::pin(async move {
 				let router = client.inner.router.extract()?;
-				router.$method(command?).await
+				router.$method(command?, client.session_id).await
 			})
 		}
 	};

@@ -38,9 +38,12 @@ where
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
 			router
-				.execute_unit(Command::Unset {
-					key: self.key,
-				})
+				.execute_unit(
+					Command::Unset {
+						key: self.key,
+					},
+					self.client.session_id,
+				)
 				.await
 		})
 	}
