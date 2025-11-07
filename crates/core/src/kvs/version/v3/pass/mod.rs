@@ -1141,26 +1141,28 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_define_event(&mut self, d: &DefineEventStatement) -> Result<(), Self::Error> {
-		self.w.write_str("DEFINE FIELD")?;
-		if d.if_not_exists {
-			self.w.write_str(" IF NOT EXISTS")?;
-		}
-		if d.overwrite {
-			self.w.write_str(" OVERWRITE")?;
-		}
-		write!(self.w, " {} ON {} WHEN ", d.name, d.what)?;
-		self.visit_value(&d.when)?;
-		self.w.write_str(" THEN ")?;
-		for (idx, v) in d.then.0.iter().enumerate() {
-			if idx != 0 {
-				self.w.write_str(", ")?;
+		self.with_path(format_args!("/event/{}", &d.name.0), |this| {
+			this.w.write_str("DEFINE EVENT")?;
+			if d.if_not_exists {
+				this.w.write_str(" IF NOT EXISTS")?;
 			}
-			self.visit_value(v)?;
-		}
-		if let Some(ref v) = d.comment {
-			write!(self.w, " COMMENT {v}")?
-		}
-		Ok(())
+			if d.overwrite {
+				this.w.write_str(" OVERWRITE")?;
+			}
+			write!(this.w, " {} ON {} WHEN ", d.name, d.what)?;
+			this.visit_value(&d.when)?;
+			this.w.write_str(" THEN ")?;
+			for (idx, v) in d.then.0.iter().enumerate() {
+				if idx != 0 {
+					this.w.write_str(", ")?;
+				}
+				this.visit_value(v)?;
+			}
+			if let Some(ref v) = d.comment {
+				write!(this.w, " COMMENT {v}")?
+			}
+			Ok(())
+		})
 	}
 
 	fn visit_define_table(&mut self, d: &DefineTableStatement) -> Result<(), Self::Error> {
@@ -1283,14 +1285,14 @@ impl Visitor for MigratorPass<'_> {
 	}
 
 	fn visit_define_param(&mut self, d: &DefineParamStatement) -> Result<(), Self::Error> {
-		self.w.write_str("DEFINE PARAM ")?;
+		self.w.write_str("DEFINE PARAM")?;
 		if d.if_not_exists {
-			self.w.write_str(" IF NOT EXISTS ")?;
+			self.w.write_str(" IF NOT EXISTS")?;
 		}
 		if d.overwrite {
-			self.w.write_str(" OVERWRITE ")?;
+			self.w.write_str(" OVERWRITE")?;
 		}
-		write!(self.w, "${} VALUE ", d.name)?;
+		write!(self.w, " ${} VALUE", d.name)?;
 		self.visit_value(&d.value)?;
 
 		if let Some(ref v) = d.comment {
@@ -1306,12 +1308,12 @@ impl Visitor for MigratorPass<'_> {
 
 	fn visit_define_function(&mut self, d: &DefineFunctionStatement) -> Result<(), Self::Error> {
 		self.with_path(format_args!("/fn/{}", d.name.0), |this| {
-			this.w.write_str("DEFINE PARAM ")?;
+			this.w.write_str("DEFINE FUNCTION")?;
 			if d.if_not_exists {
-				this.w.write_str(" IF NOT EXISTS ")?;
+				this.w.write_str(" IF NOT EXISTS")?;
 			}
 			if d.overwrite {
-				this.w.write_str(" OVERWRITE ")?;
+				this.w.write_str(" OVERWRITE")?;
 			}
 			write!(this.w, " fn::{}(", d.name.0)?;
 			for (i, (name, kind)) in d.args.iter().enumerate() {

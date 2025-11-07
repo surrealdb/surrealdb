@@ -61,6 +61,7 @@ impl MigrationIssue {
 		obj.insert("error".to_string(), self.error.clone().into());
 		obj.insert("kind".to_string(), self.kind.as_str().into());
 		obj.insert("origin".to_string(), self.origin.clone().into());
+		obj.insert("details".to_string(), self.details.clone().into());
 
 		if let Some(x) = &self.error_location {
 			obj.insert("location".to_string(), x.to_object().into());

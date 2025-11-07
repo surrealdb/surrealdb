@@ -33,7 +33,10 @@ use crate::sql::{
 };
 use std::ops::Bound;
 
-use super::{access_type::BearerAccess, AccessType, JwtAccess, RecordAccess};
+use super::{
+	access_type::BearerAccess, statements::define::ApiDefinition, AccessType, JwtAccess,
+	RecordAccess,
+};
 
 macro_rules! implement_visitor{
 	($(fn $name:ident($this:ident, $value:ident: &$ty:ty) {
@@ -1516,6 +1519,20 @@ implement_visitor! {
 			},
 
 		}
+		Ok(())
+	}
+
+	fn visit_api_definition(this, def: &ApiDefinition){
+		for a in def.actions.iter(){
+			this.visit_api_action(a)?;
+		}
+		if let Some(v) = &def.fallback{
+			this.visit_value(v)?;
+		}
+		if let Some(c) = &def.config{
+			this.visit_api_config(c)?;
+		}
+
 		Ok(())
 	}
 }
