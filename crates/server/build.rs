@@ -4,11 +4,11 @@ fn main() {
 		println!("cargo::rustc-check-cfg=cfg(wasm)");
 	}
 	if cfg!(any(
-		feature = "kv-mem",
-		feature = "kv-fdb",
-		feature = "kv-tikv",
-		feature = "kv-rocksdb",
-		feature = "kv-surrealkv",
+		feature = "storage-mem",
+		feature = "storage-fdb",
+		feature = "storage-tikv",
+		feature = "storage-rocksdb",
+		feature = "storage-surrealkv",
 	)) {
 		println!("cargo:rustc-cfg=storage");
 		println!("cargo::rustc-check-cfg=cfg(storage)");
