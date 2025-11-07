@@ -219,9 +219,50 @@ keywords.workspace = true
 categories.workspace = true
 license-file.workspace = true
 
+[features]
+ml = ["surrealdb/ml"]
+storage-surrealkv = ["surrealdb/kv-surrealkv"]
+
 [dependencies]
+# workspace internal dependencies
+surrealdb = { workspace = true, features = [
+    "protocol-http",
+    "protocol-ws",
+    "rustls",
+] }
 surrealdb-core.workspace = true
 surrealdb-server.workspace = true
+surrealdb-types.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+nix = { version = "0.27.1", features = ["signal", "user"] }
+
+[dev-dependencies]
+assert_fs = "1.0.13"
+chrono.workspace = true
+ciborium.workspace = true
+futures.workspace = true
+futures-util.workspace = true
+http.workspace = true
+jsonwebtoken.workspace = true
+rand.workspace = true
+rcgen = "0.13.2"
+reqwest = { workspace = true, default-features = false, features = [
+    "blocking",
+    "gzip",
+    "http2",
+] }
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+surrealdb-types.workspace = true
+test-log = { workspace = true, features = ["trace"] }
+thiserror.workspace = true
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "signal", "tracing"] }
+tokio-stream.workspace = true
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+ulid.workspace = true
 
 [build-dependencies]
 semver.workspace = true
