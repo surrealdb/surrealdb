@@ -1,4 +1,3 @@
-
 # cargo-vet audits file
 
 [[audits.async-executor]]
@@ -1245,6 +1244,12 @@ start = "2024-08-07"
 end = "2025-08-07"
 
 [[trusted.surrealdb-core]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2024-01-30"
+end = "2026-02-13"
+
+[[trusted.surrealdb-server]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2024-01-30"

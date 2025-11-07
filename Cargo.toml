@@ -38,7 +38,7 @@ categories = ["database-implementations", "data-structures", "embedded"]
 surrealdb = { version = "=3.0.0-alpha.13", path = "crates/sdk" }
 surrealdb-core = { version = "=3.0.0-alpha.13", path = "crates/core", default-features = false }
 surrealdb-macros = { version = "=3.0.0-alpha.13", path = "crates/macros" }
-surrealdb-server = { version = "=3.0.0-alpha.13", path = "crates/server" }
+surrealdb-server = { version = "=3.0.0-alpha.13", path = "crates/server", default-features = false }
 surrealdb-types = { version = "=3.0.0-alpha.13", path = "crates/types" }
 surrealdb-types-derive = { version = "=3.0.0-alpha.13", path = "crates/types-derive" }
 surrealism = { version = "=0.1.1", path = "crates/surrealism/surrealism" }

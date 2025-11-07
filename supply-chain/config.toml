@@ -1,4 +1,3 @@
-
 # cargo-vet config file
 
 [cargo-vet]
@@ -29,6 +28,9 @@ url = "https://raw.githubusercontent.com/zcash/rust-ecosystem/main/supply-chain/
 audit-as-crates-io = true
 
 [policy.surrealdb-core]
+audit-as-crates-io = true
+
+[policy.surrealdb-server]
 audit-as-crates-io = true
 
 [policy.surrealdb-types]
