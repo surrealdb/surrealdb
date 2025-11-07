@@ -1,11 +1,12 @@
+use axum_extra::headers;
+use axum_extra::headers::Header;
+use http::{HeaderName, HeaderValue};
+
 use crate::net::headers::content_type::{
 	HEADER_VALUE_APPLICATION_CBOR, HEADER_VALUE_APPLICATION_JSON,
 	HEADER_VALUE_APPLICATION_OCTET_STREAM, HEADER_VALUE_APPLICATION_SURREAL_DB_FLATBUFFERS,
 	HEADER_VALUE_TEXT_PLAIN,
 };
-use axum_extra::headers;
-use axum_extra::headers::Header;
-use http::{HeaderName, HeaderValue};
 
 /// Typed header implementation for the `Accept` header.
 #[derive(Debug)]

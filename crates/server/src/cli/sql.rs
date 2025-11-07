@@ -275,7 +275,8 @@ fn pretty_print_json(value: JsonValue) -> String {
 	};
 	match pretty_print(&value) {
 		Ok(v) => v,
-		// Fall back to the default print if the JSON value is not valid UTF-8 or if the serializer fails
+		// Fall back to the default print if the JSON value is not valid UTF-8 or if the serializer
+		// fails
 		Err(_) => value.to_string(),
 	}
 }

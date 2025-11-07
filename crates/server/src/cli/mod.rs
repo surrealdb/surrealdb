@@ -21,6 +21,7 @@ use std::ops::Deref;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
 pub use config::{Config, ConfigCheck, ConfigCheckRequirements};
 use export::ExportCommandArguments;
@@ -43,8 +44,6 @@ use crate::cnf::DEBUG_BUILD_WARNING;
 use crate::cnf::{LOGO, PKG_VERSION};
 use crate::env::RELEASE;
 use crate::net::RouterFactory;
-
-use anyhow::Result;
 
 const INFO: &str = "
 To get started using SurrealDB, and for guides on connecting to and building applications
