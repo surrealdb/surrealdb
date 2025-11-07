@@ -9,13 +9,13 @@ use uuid::Uuid;
 
 use crate::catalog;
 use crate::catalog::{
-	DatabaseDefinition, DatabaseId, IndexId, NamespaceDefinition, NamespaceId, TableDefinition,
-	UserDefinition,
+	DatabaseDefinition, DatabaseId, IndexId, NamespaceDefinition, NamespaceId, Record,
+	TableDefinition, TableId, UserDefinition,
 };
+use crate::ctx::MutableContext;
 use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::val::RecordIdKey;
-use crate::val::record::Record;
 
 /// SurrealDB Node provider.
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
@@ -40,8 +40,13 @@ pub(crate) trait NamespaceProvider {
 
 	/// Get or add a namespace with a default configuration, only if we are in
 	/// dynamic mode.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
-	async fn get_or_add_ns(&self, ns: &str, strict: bool) -> Result<Arc<NamespaceDefinition>> {
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self, ctx))]
+	async fn get_or_add_ns(
+		&self,
+		ctx: Option<&MutableContext>,
+		ns: &str,
+		strict: bool,
+	) -> Result<Arc<NamespaceDefinition>> {
 		match self.get_ns_by_name(ns).await? {
 			Some(val) => Ok(val),
 			// The entry is not in the database
@@ -52,20 +57,18 @@ pub(crate) trait NamespaceProvider {
 					}
 					.into());
 				}
-
 				let ns = NamespaceDefinition {
-					namespace_id: self.get_next_ns_id().await?,
+					namespace_id: self.get_next_ns_id(ctx).await?,
 					name: ns.to_owned(),
 					comment: None,
 				};
-
-				return self.put_ns(ns).await;
+				self.put_ns(ns).await
 			}
 		}
 	}
 
 	/// Get the next namespace id.
-	async fn get_next_ns_id(&self) -> Result<NamespaceId>;
+	async fn get_next_ns_id(&self, ctx: Option<&MutableContext>) -> Result<NamespaceId>;
 
 	/// Put a namespace definition into the datastore.
 	async fn put_ns(&self, ns: NamespaceDefinition) -> Result<Arc<NamespaceDefinition>>;
@@ -95,11 +98,19 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 	/// dynamic mode.
 	async fn get_or_add_db_upwards(
 		&self,
+		ctx: Option<&MutableContext>,
 		ns: &str,
 		db: &str,
 		strict: bool,
 		upwards: bool,
 	) -> Result<Arc<DatabaseDefinition>>;
+
+	/// Get the next database id.
+	async fn get_next_db_id(
+		&self,
+		ctx: Option<&MutableContext>,
+		ns: NamespaceId,
+	) -> Result<DatabaseId>;
 
 	/// Put a database definition into a namespace.
 	async fn put_db(&self, ns: &str, db: DatabaseDefinition) -> Result<Arc<DatabaseDefinition>>;
@@ -144,6 +155,13 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<Arc<[catalog::FunctionDefinition]>>;
+
+	/// Retrieve all module definitions for a specific database.
+	async fn all_db_modules(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<Arc<[catalog::ModuleDefinition]>>;
 
 	/// Retrieve all param definitions for a specific database.
 	async fn all_db_params(
@@ -204,6 +222,22 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		fc: &catalog::FunctionDefinition,
+	) -> Result<()>;
+
+	/// Retrieve a specific module definition from a database.
+	async fn get_db_module(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		md: &str,
+	) -> Result<Arc<catalog::ModuleDefinition>>;
+
+	/// Put a module definition into a database.
+	async fn put_db_module(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		md: &catalog::ModuleDefinition,
 	) -> Result<()>;
 
 	/// Retrieve a specific function definition from a database.
@@ -294,12 +328,21 @@ pub(crate) trait TableProvider {
 	/// dynamic mode.
 	async fn get_or_add_tb_upwards(
 		&self,
+		ctx: Option<&MutableContext>,
 		ns: &str,
 		db: &str,
 		tb: &str,
 		strict: bool,
 		upwards: bool,
 	) -> Result<Arc<TableDefinition>>;
+
+	/// Get the next namespace id.
+	async fn get_next_tb_id(
+		&self,
+		ctx: Option<&MutableContext>,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<TableId>;
 
 	/// Put a table definition into a database.
 	async fn put_tb(
@@ -769,43 +812,47 @@ pub(crate) trait CatalogProvider:
 	/// dynamic mode.
 	async fn get_or_add_db(
 		&self,
+		ctx: Option<&MutableContext>,
 		ns: &str,
 		db: &str,
 		strict: bool,
 	) -> Result<Arc<DatabaseDefinition>> {
-		self.get_or_add_db_upwards(ns, db, strict, false).await
+		self.get_or_add_db_upwards(ctx, ns, db, strict, false).await
 	}
 
 	/// Ensures that the given namespace and database exist. If they do not, they will be created.
 	async fn ensure_ns_db(
 		&self,
+		ctx: Option<&MutableContext>,
 		ns: &str,
 		db: &str,
 		strict: bool,
 	) -> Result<Arc<DatabaseDefinition>> {
-		self.get_or_add_db_upwards(ns, db, strict, true).await
+		self.get_or_add_db_upwards(ctx, ns, db, strict, true).await
 	}
 
 	/// Get or add a table with a default configuration, only if we are in
 	/// dynamic mode.
 	async fn get_or_add_tb(
 		&self,
+		ctx: Option<&MutableContext>,
 		ns: &str,
 		db: &str,
 		tb: &str,
 		strict: bool,
 	) -> Result<Arc<TableDefinition>> {
-		self.get_or_add_tb_upwards(ns, db, tb, strict, false).await
+		self.get_or_add_tb_upwards(ctx, ns, db, tb, strict, false).await
 	}
 
 	/// Ensures that a table, database, and namespace are all fully defined.
 	async fn ensure_ns_db_tb(
 		&self,
+		ctx: Option<&MutableContext>,
 		ns: &str,
 		db: &str,
 		tb: &str,
 		strict: bool,
 	) -> Result<Arc<TableDefinition>> {
-		self.get_or_add_tb_upwards(ns, db, tb, strict, true).await
+		self.get_or_add_tb_upwards(ctx, ns, db, tb, strict, true).await
 	}
 }

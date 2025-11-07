@@ -1,15 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::dbs::Session;
-use crate::expr::Kind;
-use crate::expr::kind::KindLiteral;
-use crate::expr::statements::define::config::graphql::{FunctionsConfig, TablesConfig};
-use crate::expr::{self, Expr};
-use crate::gql::functions::process_fns;
-use crate::gql::tables::process_tbs;
-use crate::kvs::Datastore;
-use crate::val::{Geometry, Number as SurNumber, Value as SurValue};
 use async_graphql::dynamic::{
 	Enum, Interface, InterfaceField, Object, Scalar, Schema, Type, TypeRef, Union,
 };
@@ -21,13 +12,24 @@ use serde_json::Number;
 use super::error::{GqlError, resolver_error};
 #[cfg(debug_assertions)]
 use super::ext::ValidatorExt;
+use crate::catalog::providers::{DatabaseProvider, TableProvider};
+use crate::catalog::{GraphQLConfig, GraphQLFunctionsConfig, GraphQLTablesConfig};
+use crate::dbs::Session;
+use crate::expr::kind::KindLiteral;
+use crate::expr::{Expr, Kind, Literal};
 use crate::gql::error::{internal_error, schema_error, type_error};
-use crate::gql::ext::NamedContainer;
-use crate::kvs::{LockType, TransactionType};
+use crate::gql::functions::process_fns;
+use crate::gql::tables::process_tbs;
+use crate::kvs::{Datastore, LockType, TransactionType};
+use crate::val::{
+	Array as SurArray, Number as SurNumber, Object as SurObject, RecordId as SurRecordId,
+	RecordIdKey as SurRecordIdKey, Set as SurSet, Table, Value as SurValue,
+};
 
 pub async fn generate_schema(
 	datastore: &Arc<Datastore>,
 	session: &Session,
+	gql_config: GraphQLConfig,
 ) -> Result<Schema, GqlError> {
 	let kvs = datastore;
 	let tx = kvs.transaction(TransactionType::Read, LockType::Optimistic).await?;
@@ -36,65 +38,60 @@ pub async fn generate_schema(
 
 	let db_def = match tx.get_db_by_name(ns, db).await? {
 		Some(db) => db,
-		None => return Err(GqlError::DbError(anyhow::anyhow!("Database not found: {ns} {db}"))),
+		None => return Err(GqlError::NotConfigured),
 	};
 
-	let cg = tx
-		.expect_db_config(db_def.namespace_id, db_def.database_id, "graphql")
-		.await
-		.map_err(|e| {
-			if matches!(e.downcast_ref(), Some(crate::err::Error::CgNotFound { .. })) {
-				GqlError::NotConfigured
-			} else {
-				GqlError::DbError(e)
+	// Get all tables
+	let tbs = match gql_config.tables {
+		GraphQLTablesConfig::None => None,
+		_ => {
+			let tbs = tx.all_tb(db_def.namespace_id, db_def.database_id, None).await?;
+
+			match gql_config.tables {
+				GraphQLTablesConfig::None => None,
+				GraphQLTablesConfig::Auto => Some(tbs),
+				GraphQLTablesConfig::Include(inc) => {
+					Some(tbs.iter().filter(|t| inc.contains(&t.name)).cloned().collect())
+				}
+				GraphQLTablesConfig::Exclude(exc) => {
+					Some(tbs.iter().filter(|t| !exc.contains(&t.name)).cloned().collect())
+				}
 			}
-		})?;
-	let config = cg.inner.clone().try_into_graphql()?;
-
-	let tbs = tx.all_tb(db_def.namespace_id, db_def.database_id, None).await?;
-
-	let tbs = match config.tables {
-		TablesConfig::None => None,
-		TablesConfig::Auto => Some(tbs),
-		TablesConfig::Include(inc) => {
-			Some(tbs.iter().filter(|t| inc.contains_name(&t.name)).cloned().collect())
-		}
-		TablesConfig::Exclude(exc) => {
-			Some(tbs.iter().filter(|t| !exc.contains_name(&t.name)).cloned().collect())
 		}
 	};
 
-	let fns = tx.all_db_functions(db_def.namespace_id, db_def.database_id).await?;
-
-	let fns = match config.functions {
-		FunctionsConfig::None => None,
-		FunctionsConfig::Auto => Some(fns),
-		FunctionsConfig::Include(inc) => {
-			Some(fns.iter().filter(|f| inc.contains(&f.name)).cloned().collect())
-		}
-		FunctionsConfig::Exclude(exc) => {
-			Some(fns.iter().filter(|f| !exc.contains(&f.name)).cloned().collect())
+	// Get all functions
+	let fns = match gql_config.functions {
+		GraphQLFunctionsConfig::None => None,
+		_ => {
+			let fns = tx.all_db_functions(db_def.namespace_id, db_def.database_id).await?;
+			match gql_config.functions {
+				GraphQLFunctionsConfig::None => None,
+				GraphQLFunctionsConfig::Auto => Some(fns),
+				GraphQLFunctionsConfig::Include(inc) => {
+					Some(fns.iter().filter(|f| inc.contains(&f.name)).cloned().collect())
+				}
+				GraphQLFunctionsConfig::Exclude(exc) => {
+					Some(fns.iter().filter(|f| !exc.contains(&f.name)).cloned().collect())
+				}
+			}
 		}
 	};
-
-	match (&tbs, &fns) {
-		(None, None) => return Err(GqlError::NotConfigured),
-		(None, Some(fs)) if fs.is_empty() => {
-			return Err(schema_error("no functions found in database"));
-		}
-		(Some(ts), None) if ts.is_empty() => {
-			return Err(schema_error("no tables found in database"));
-		}
-		(Some(ts), Some(fs)) if ts.is_empty() && fs.is_empty() => {
-			return Err(schema_error("no items found in database"));
-		}
-		_ => {}
-	}
 
 	let mut query = Object::new("Query");
 	let mut types: Vec<Type> = Vec::new();
 
 	trace!(ns, db, ?tbs, ?fns, "generating schema");
+
+	let has_tables = tbs.as_ref().is_some_and(|t| !t.is_empty());
+	let has_fns = fns.as_ref().is_some_and(|f| !f.is_empty());
+
+	// Check if there's anything to expose via GraphQL
+	if !has_tables && !has_fns {
+		return Err(schema_error(
+			"no items found in database: GraphQL requires at least one table or function",
+		));
+	}
 
 	match tbs {
 		Some(tbs) if !tbs.is_empty() => {
@@ -184,7 +181,6 @@ pub async fn generate_schema(
 		Interface::new("record").field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)));
 	schema = schema.register(id_interface);
 
-	// TODO: when used get: `Result::unwrap()` on an `Err` value: SchemaError("Field \"like.in\" is not sub-type of \"relation.in\"")
 	let relation_interface = Interface::new("relation")
 		.field(InterfaceField::new("id", TypeRef::named_nn(TypeRef::ID)))
 		.field(InterfaceField::new("in", TypeRef::named_nn("record")))
@@ -197,8 +193,7 @@ pub async fn generate_schema(
 		.map_err(|e| schema_error(format!("there was an error generating schema: {e:?}")))
 }
 
-#[allow(clippy::result_large_err)]
-pub fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> {
+pub(crate) fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> {
 	let out = match v {
 		SurValue::None => GqlValue::Null,
 		SurValue::Null => GqlValue::Null,
@@ -211,16 +206,23 @@ pub fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> {
 			),
 			num @ SurNumber::Decimal(_) => GqlValue::String(num.to_string()),
 		},
-		SurValue::String(s) => GqlValue::String(s.0),
+		SurValue::String(s) => GqlValue::String(s),
 		d @ SurValue::Duration(_) => GqlValue::String(d.to_string()),
 		SurValue::Datetime(d) => GqlValue::String(d.to_rfc3339()),
 		SurValue::Uuid(uuid) => GqlValue::String(uuid.to_string()),
-		SurValue::Array(a) => {
-			GqlValue::List(a.into_iter().map(|v| sql_value_to_gql_value(v).unwrap()).collect())
-		}
+		SurValue::Array(a) => GqlValue::List(
+			a.into_iter()
+				.map(|v| sql_value_to_gql_value(v).expect("value conversion should succeed"))
+				.collect(),
+		),
 		SurValue::Object(o) => GqlValue::Object(
 			o.0.into_iter()
-				.map(|(k, v)| (Name::new(k), sql_value_to_gql_value(v).unwrap()))
+				.map(|(k, v)| {
+					(
+						Name::new(k),
+						sql_value_to_gql_value(v).expect("value conversion should succeed"),
+					)
+				})
 				.collect(),
 		),
 		SurValue::Geometry(_) => return Err(resolver_error("unimplemented: Geometry types")),
@@ -231,7 +233,6 @@ pub fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> {
 	Ok(out)
 }
 
-#[allow(clippy::result_large_err)]
 pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlError> {
 	let optional = kind.can_be_none();
 	let out_ty = match kind {
@@ -250,16 +251,16 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		Kind::Regex => return Err(schema_error("Kind::Regex is not yet supported")),
 		Kind::String => TypeRef::named(TypeRef::STRING),
 		Kind::Uuid => TypeRef::named("uuid"),
-		Kind::Record(mut r) => match r.len() {
+		Kind::Table(ref _t) => TypeRef::named(kind.to_string()),
+		Kind::Record(mut tables) => match tables.len() {
 			0 => TypeRef::named("record"),
-			1 => TypeRef::named(r.pop().unwrap().0),
+			1 => TypeRef::named(tables.pop().expect("single table in record kind")),
 			_ => {
-				let names: Vec<String> = r.into_iter().map(|t| t.0).collect();
-				let ty_name = names.join("_or_");
+				let ty_name = tables.join("_or_");
 
 				let mut tmp_union = Union::new(ty_name.clone())
-					.description(format!("A record which is one of: {}", names.join(", ")));
-				for n in names {
+					.description(format!("A record which is one of: {}", tables.join(", ")));
+				for n in tables {
 					tmp_union = tmp_union.possible_type(n);
 				}
 
@@ -281,7 +282,7 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 								"just checked that this is a Kind::Literal(Literal::String(_))"
 							);
 						};
-						out.0
+						out
 					})
 					.collect();
 
@@ -390,17 +391,104 @@ macro_rules! any_try_kinds {
 	};
 }
 
-#[allow(clippy::result_large_err)]
-pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError> {
+/// Convert a static RecordIdKeyLit to RecordIdKey
+/// Only works for static literals (no expressions)
+fn convert_static_record_id_key(
+	key: crate::expr::RecordIdKeyLit,
+) -> Result<SurRecordIdKey, GqlError> {
+	use crate::expr::RecordIdKeyLit;
+	match key {
+		RecordIdKeyLit::Number(n) => Ok(SurRecordIdKey::Number(n)),
+		RecordIdKeyLit::String(s) => Ok(SurRecordIdKey::String(s)),
+		RecordIdKeyLit::Uuid(u) => Ok(SurRecordIdKey::Uuid(u)),
+		RecordIdKeyLit::Array(exprs) => {
+			let vals: Result<Vec<SurValue>, GqlError> =
+				exprs.into_iter().map(convert_static_expr).collect();
+			Ok(SurRecordIdKey::Array(SurArray(vals?)))
+		}
+		RecordIdKeyLit::Object(entries) => {
+			let mut map = BTreeMap::new();
+			for entry in entries {
+				map.insert(entry.key, convert_static_expr(entry.value)?);
+			}
+			Ok(SurRecordIdKey::Object(SurObject(map)))
+		}
+		RecordIdKeyLit::Generate(_) => Err(resolver_error(
+			"Generated RecordId keys (rand(), ulid(), uuid()) are not supported in GraphQL inputs",
+		)),
+		RecordIdKeyLit::Range(_) => {
+			Err(resolver_error("RecordId key ranges are not supported in GraphQL"))
+		}
+	}
+}
+
+/// Convert a static Expr to Value
+/// Only works for static literals (no parameters, idioms, function calls, etc.)
+fn convert_static_expr(expr: Expr) -> Result<SurValue, GqlError> {
+	match expr {
+		Expr::Literal(lit) => convert_static_literal(lit),
+		Expr::Table(t) => Ok(SurValue::Table(Table::new(t))),
+		_ => Err(resolver_error("Only literal values are supported in GraphQL inputs")),
+	}
+}
+
+/// Convert a static Literal to Value
+/// Only works for static literals (no expressions that need evaluation)
+fn convert_static_literal(lit: Literal) -> Result<SurValue, GqlError> {
+	match lit {
+		Literal::None => Ok(SurValue::None),
+		Literal::Null => Ok(SurValue::Null),
+		Literal::Bool(b) => Ok(SurValue::Bool(b)),
+		Literal::Float(f) => Ok(SurValue::Number(SurNumber::Float(f))),
+		Literal::Integer(i) => Ok(SurValue::Number(SurNumber::Int(i))),
+		Literal::Decimal(d) => Ok(SurValue::Number(SurNumber::Decimal(d))),
+		Literal::String(s) => Ok(SurValue::String(s)),
+		Literal::Bytes(b) => Ok(SurValue::Bytes(b)),
+		Literal::Regex(r) => Ok(SurValue::Regex(r)),
+		Literal::RecordId(record_id_lit) => {
+			let key = convert_static_record_id_key(record_id_lit.key)?;
+			Ok(SurValue::RecordId(SurRecordId {
+				table: record_id_lit.table,
+				key,
+			}))
+		}
+		Literal::Array(exprs) => {
+			let vals: Result<Vec<SurValue>, GqlError> =
+				exprs.into_iter().map(convert_static_expr).collect();
+			Ok(SurValue::Array(SurArray(vals?)))
+		}
+		Literal::Set(exprs) => {
+			let vals: Result<Vec<SurValue>, GqlError> =
+				exprs.into_iter().map(convert_static_expr).collect();
+			Ok(SurValue::Set(SurSet::from(vals?)))
+		}
+		Literal::Object(entries) => {
+			let mut map = BTreeMap::new();
+			for entry in entries {
+				map.insert(entry.key, convert_static_expr(entry.value)?);
+			}
+			Ok(SurValue::Object(SurObject(map)))
+		}
+		Literal::Duration(d) => Ok(SurValue::Duration(d)),
+		Literal::Datetime(dt) => Ok(SurValue::Datetime(dt)),
+		Literal::Uuid(u) => Ok(SurValue::Uuid(u)),
+		Literal::Geometry(g) => Ok(SurValue::Geometry(g)),
+		Literal::File(f) => Ok(SurValue::File(f)),
+		Literal::UnboundedRange => {
+			Err(resolver_error("Unbounded ranges are not supported in GraphQL"))
+		}
+	}
+}
+
+pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError> {
 	use crate::syn;
 	match kind {
 		Kind::Any => match val {
 			GqlValue::String(s) => {
 				use Kind::*;
 				any_try_kinds!(val, Datetime, Duration, Uuid);
-				syn::expr_legacy_strand(s.as_str())
-					.map(Into::into)
-					.map_err(|_| type_error(kind, val))
+				let expr = syn::expr_legacy_strand(s.as_str())?;
+				convert_static_expr(expr.into())
 			}
 			GqlValue::Null => Ok(SurValue::Null),
 			obj @ GqlValue::Object(_) => gql_to_sql_kind(obj, Kind::Object),
@@ -436,27 +524,25 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 		Kind::Decimal => match val {
 			GqlValue::Number(n) => {
 				if let Some(int) = n.as_i64() {
-					Ok(Expr::Literal(expr::Literal::Decimal(int.into())))
+					Ok(SurValue::Number(SurNumber::Decimal(int.into())))
 				} else if let Some(d) = n.as_f64().and_then(Decimal::from_f64) {
-					Ok(Expr::Literal(expr::Literal::Decimal(d)))
+					Ok(SurValue::Number(SurNumber::Decimal(d)))
 				} else if let Some(uint) = n.as_u64() {
-					Ok(Expr::Literal(expr::Literal::Decimal(uint.into())))
+					Ok(SurValue::Number(SurNumber::Decimal(uint.into())))
 				} else {
 					Err(type_error(kind, val))
 				}
 			}
-			//TODO: Verify correctness of code here.
-			GqlValue::String(s) => match syn::expr(s).map(Into::into) {
-				Ok(SurValue::Number(n)) => match n {
-					SurNumber::Int(i) => Ok(SurValue::from(i.into())),
-					SurNumber::Float(f) => match Decimal::from_f64(f) {
-						Some(d) => Ok(SurValue::Number(SurNumber::Decimal(d))),
-						None => Err(type_error(kind, val)),
-					},
-					SurNumber::Decimal(d) => Ok(SurValue::Number(SurNumber::Decimal(d))),
-				},
-				_ => Err(type_error(kind, val)),
-			},
+			GqlValue::String(s) => {
+				let decimal_expr: Expr = syn::expr(s)?.into();
+
+				match decimal_expr {
+					Expr::Literal(Literal::Decimal(d)) => {
+						Ok(SurValue::Number(SurNumber::Decimal(d)))
+					}
+					_ => Err(type_error(kind, val)),
+				}
+			}
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::Duration => match val {
@@ -478,17 +564,14 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 					unreachable!("serde_json::Number must be either i64, u64 or f64")
 				}
 			}
-			GqlValue::String(s) => match syn::expr(s).map(Into::into) {
-				Ok(SurValue::Number(n)) => match n {
-					SurNumber::Int(int) => Ok(SurValue::Number(SurNumber::Float(int as f64))),
-					SurNumber::Float(float) => Ok(SurValue::Number(SurNumber::Float(float))),
-					SurNumber::Decimal(d) => match d.try_into() {
-						Ok(f) => Ok(SurValue::Number(SurNumber::Float(f))),
-						_ => Err(type_error(kind, val)),
-					},
-				},
-				_ => Err(type_error(kind, val)),
-			},
+			GqlValue::String(s) => {
+				let float_expr: Expr = syn::expr(s)?.into();
+
+				match float_expr {
+					Expr::Literal(Literal::Float(f)) => Ok(SurValue::Number(SurNumber::Float(f))),
+					_ => Err(type_error(kind, val)),
+				}
+			}
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::Int => match val {
@@ -499,23 +582,14 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 					Err(type_error(kind, val))
 				}
 			}
-			GqlValue::String(s) => match syn::expr(s).map(Into::into) {
-				Ok(SurValue::Number(n)) => match n {
-					SurNumber::Int(int) => Ok(SurValue::Number(SurNumber::Int(int))),
-					SurNumber::Float(float) => {
-						if float.fract() == 0.0 {
-							Ok(SurValue::Number(SurNumber::Int(float as i64)))
-						} else {
-							Err(type_error(kind, val))
-						}
-					}
-					SurNumber::Decimal(d) => match d.try_into() {
-						Ok(i) => Ok(SurValue::Number(SurNumber::Int(i))),
-						_ => Err(type_error(kind, val)),
-					},
-				},
-				_ => Err(type_error(kind, val)),
-			},
+			GqlValue::String(s) => {
+				let int_expr: Expr = syn::expr(s)?.into();
+
+				match int_expr {
+					Expr::Literal(Literal::Integer(i)) => Ok(SurValue::Number(SurNumber::Int(i))),
+					_ => Err(type_error(kind, val)),
+				}
+			}
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::Number => match val {
@@ -530,10 +604,18 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 					unreachable!("serde_json::Number must be either i64, u64 or f64")
 				}
 			}
-			GqlValue::String(s) => match syn::expr(s).map(Into::into) {
-				Ok(SurValue::Number(n)) => Ok(SurValue::Number(n)),
-				_ => Err(type_error(kind, val)),
-			},
+			GqlValue::String(s) => {
+				let number_expr: Expr = syn::expr(s)?.into();
+
+				match number_expr {
+					Expr::Literal(Literal::Integer(i)) => Ok(SurValue::Number(SurNumber::Int(i))),
+					Expr::Literal(Literal::Float(f)) => Ok(SurValue::Number(SurNumber::Float(f))),
+					Expr::Literal(Literal::Decimal(d)) => {
+						Ok(SurValue::Number(SurNumber::Decimal(d)))
+					}
+					_ => Err(type_error(kind, val)),
+				}
+			}
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::Object => match val {
@@ -544,14 +626,25 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 					.collect();
 				Ok(SurValue::Object(out?.into()))
 			}
-			GqlValue::String(s) => match syn::expr_legacy_strand(s.as_str()).map(Into::into) {
-				Ok(obj @ SurValue::Object(_)) => Ok(obj),
-				_ => Err(type_error(kind, val)),
-			},
+			GqlValue::String(s) => {
+				let expr = syn::expr_legacy_strand(s.as_str())?;
+				let expr: Expr = expr.into();
+
+				match expr {
+					Expr::Literal(Literal::Object(o)) => {
+						let mut map = BTreeMap::new();
+						for entry in o {
+							map.insert(entry.key, convert_static_expr(entry.value)?);
+						}
+						Ok(SurValue::Object(SurObject(map)))
+					}
+					_ => Err(type_error(kind, val)),
+				}
+			}
 			_ => Err(type_error(kind, val)),
 		},
 		Kind::String => match val {
-			GqlValue::String(s) => Ok(SurValue::String(s.to_owned().into())),
+			GqlValue::String(s) => Ok(SurValue::String(s.to_owned())),
 			GqlValue::Enum(s) => Ok(SurValue::String(s.as_str().into())),
 			_ => Err(type_error(kind, val)),
 		},
@@ -562,14 +655,32 @@ pub fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, GqlError>
 			},
 			_ => Err(type_error(kind, val)),
 		},
-		Kind::Record(ref ts) => match val {
-			GqlValue::String(s) => match syn::thing(s) {
-				Ok(t) => match ts.contains(&t.tb.as_str().into()) {
-					true => Ok(SurValue::RecordId(t.into())),
-					false => Err(type_error(kind, val)),
-				},
-				Err(_) => Err(type_error(kind, val)),
+		Kind::Table(ref ts) => match val {
+			GqlValue::String(s) => match ts.contains(&s.as_str().into()) {
+				true => Ok(SurValue::Table(Table::new(s.clone()))),
+				false => Err(type_error(kind, val)),
 			},
+			_ => Err(type_error(kind, val)),
+		},
+		Kind::Record(ref ts) => match val {
+			GqlValue::String(s) => {
+				let record_id_expr = syn::expr(s)?;
+				let record_id_expr: Expr = record_id_expr.into();
+
+				match record_id_expr {
+					Expr::Literal(Literal::RecordId(t)) => match ts.contains(&t.table) {
+						true => {
+							let key = convert_static_record_id_key(t.key)?;
+							Ok(SurValue::RecordId(SurRecordId {
+								table: t.table,
+								key,
+							}))
+						}
+						false => Err(type_error(kind, val)),
+					},
+					_ => Err(type_error(kind, val)),
+				}
+			}
 			_ => Err(type_error(kind, val)),
 		},
 		// TODO: add geometry

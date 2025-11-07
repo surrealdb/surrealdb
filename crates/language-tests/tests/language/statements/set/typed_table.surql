@@ -5,7 +5,7 @@
 value = "NONE"
 
 [[test.results]]
-value = "'users'"
+match = "$result == type::table('users')"
 
 [[test.results]]
 error = "Tried to set `$table_bad`, but couldn't coerce value: Expected `table<users>` but found `'posts'`"
@@ -14,7 +14,7 @@ error = "Tried to set `$table_bad`, but couldn't coerce value: Expected `table<u
 value = "NONE"
 
 [[test.results]]
-value = "'posts'"
+match = "$result == type::table('posts')"
 
 */
 

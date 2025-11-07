@@ -30,6 +30,7 @@ use crate::vs::VersionStampError;
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
 #[allow(clippy::enum_variant_names)]
+#[allow(dead_code, reason = "Some variants are only used by specific KV stores")]
 pub(crate) enum Error {
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
@@ -55,11 +56,12 @@ pub(crate) enum Error {
 	#[error("Couldn't write to a read only transaction")]
 	TxReadonly,
 
-	/// The datastore is read-only due to disk saturation
+	#[cfg(feature = "kv-rocksdb")]
+	/// The datastore is read-and-deletion-only due to disk saturation
 	#[error(
-		"The datastore is read-only due to disk saturation. Please free up disk space and restart the instance to enable write operations"
+		"The datastore is in read-and-deletion-only mode due to disk space limitations. Only read and delete operations are allowed. Deleting data will free up space and automatically restore normal operations when usage drops below the threshold"
 	)]
-	DbReadOnly,
+	DbReadAndDeleteOnly,
 
 	/// The conditional value in the request was not equal
 	#[error("Value being checked was not correct")]
@@ -71,9 +73,9 @@ pub(crate) enum Error {
 
 	/// There was a transaction error that can be retried
 	#[error(
-		"Failed to commit transaction due to a read or write conflict. This transaction can be retried"
+		"Failed to commit transaction due to a read or write conflict ({0}). This transaction can be retried"
 	)]
-	TxRetryable,
+	TxRetryable(String),
 
 	/// No namespace has been selected
 	#[error("Specify a namespace to use")]
@@ -171,11 +173,16 @@ pub(crate) enum Error {
 
 	/// The wrong quantity or magnitude of arguments was given for the specified
 	/// function
-	#[error("Incorrect arguments for aggregate function {name}() on table '{table}'. {message}")]
+	#[error("Invalid aggregation: {message}")]
 	InvalidAggregation {
-		name: String,
-		table: String,
 		message: String,
+	},
+
+	#[error(
+		"Incorrect selector for aggregate selection, expression `{expr}` within in selector cannot be aggregated in a group."
+	)]
+	InvalidAggregationSelector {
+		expr: String,
 	},
 
 	/// The URL is invalid
@@ -267,6 +274,12 @@ pub(crate) enum Error {
 	/// The requested function does not exist
 	#[error("The function 'fn::{name}' does not exist")]
 	FcNotFound {
+		name: String,
+	},
+
+	/// The requested function does not exist
+	#[error("The module '{name}' does not exist")]
+	MdNotFound {
 		name: String,
 	},
 
@@ -368,8 +381,8 @@ pub(crate) enum Error {
 	RealtimeDisabled,
 
 	/// Reached excessive computation depth due to functions, subqueries, or
-	/// futures
-	#[error("Reached excessive computation depth due to functions, subqueries, or futures")]
+	/// computed values
+	#[error("Reached excessive computation depth due to functions, subqueries, or computed values")]
 	ComputationDepthExceeded,
 
 	/// Tried to execute a statement that can't be used here
@@ -498,7 +511,7 @@ pub(crate) enum Error {
 	},
 
 	/// The specified table is not configured for the type of record being added
-	#[error("Found record: `{record}` which is {}a relation, but expected a {target_type}", if *relation { "not " } else { "" })]
+	#[error("Found record: `{record}` which is {}a relation, but expected a {target_type}", if *relation { "" } else { "not " })]
 	TableCheck {
 		record: String,
 		relation: bool,
@@ -802,6 +815,12 @@ pub(crate) enum Error {
 	/// The requested function already exists
 	#[error("The function 'fn::{name}' already exists")]
 	FcAlreadyExists {
+		name: String,
+	},
+
+	/// The requested module already exists
+	#[error("The module '{name}' already exists")]
+	MdAlreadyExists {
 		name: String,
 	},
 
@@ -1164,6 +1183,7 @@ pub(crate) enum Error {
 }
 
 impl Error {
+	#[cold]
 	#[track_caller]
 	pub fn unreachable<T: fmt::Display>(message: T) -> Error {
 		let location = std::panic::Location::caller();
@@ -1234,10 +1254,11 @@ impl From<ToStrError> for Error {
 #[cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
 impl From<surrealkv::Error> for Error {
 	fn from(e: surrealkv::Error) -> Error {
+		let s = e.to_string();
 		match e {
-			surrealkv::Error::TransactionReadConflict => Error::TxRetryable,
-			surrealkv::Error::TransactionWriteConflict => Error::TxRetryable,
-			_ => Error::Tx(e.to_string()),
+			surrealkv::Error::TransactionReadConflict => Error::TxRetryable(s),
+			surrealkv::Error::TransactionWriteConflict => Error::TxRetryable(s),
+			_ => Error::Tx(s),
 		}
 	}
 }
@@ -1245,10 +1266,11 @@ impl From<surrealkv::Error> for Error {
 #[cfg(feature = "kv-rocksdb")]
 impl From<rocksdb::Error> for Error {
 	fn from(e: rocksdb::Error) -> Error {
+		let s = e.to_string();
 		match e.kind() {
-			rocksdb::ErrorKind::Busy => Error::TxRetryable,
-			rocksdb::ErrorKind::TryAgain => Error::TxRetryable,
-			_ => Error::Tx(e.to_string()),
+			rocksdb::ErrorKind::Busy => Error::TxRetryable(s),
+			rocksdb::ErrorKind::TryAgain => Error::TxRetryable(s),
+			_ => Error::Tx(s),
 		}
 	}
 }
@@ -1267,16 +1289,17 @@ impl From<indxdb::err::Error> for Error {
 #[cfg(feature = "kv-tikv")]
 impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
+		let s = e.to_string();
 		match e {
 			tikv::Error::DuplicateKeyInsertion => Error::TxKeyAlreadyExists,
-			tikv::Error::KeyError(ke) if ke.conflict.is_some() => Error::TxRetryable,
+			tikv::Error::KeyError(ke) if ke.conflict.is_some() => Error::TxRetryable(s),
 			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => {
 				Error::Tx("Transaction key too large".to_string())
 			}
 			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => {
 				Error::Tx("Transaction too large".to_string())
 			}
-			_ => Error::Tx(e.to_string()),
+			_ => Error::Tx(s),
 		}
 	}
 }
@@ -1284,26 +1307,28 @@ impl From<tikv::Error> for Error {
 #[cfg(feature = "kv-fdb")]
 impl From<foundationdb::FdbError> for Error {
 	fn from(e: foundationdb::FdbError) -> Error {
+		let s = e.to_string();
 		if e.is_retryable() {
-			return Error::TxRetryable;
+			return Error::TxRetryable(s);
 		}
 		if e.is_retryable_not_committed() {
-			return Error::TxRetryable;
+			return Error::TxRetryable(s);
 		}
-		Error::Ds(e.to_string())
+		Error::Ds(s)
 	}
 }
 
 #[cfg(feature = "kv-fdb")]
 impl From<foundationdb::TransactionCommitError> for Error {
 	fn from(e: foundationdb::TransactionCommitError) -> Error {
+		let s = e.to_string();
 		if e.is_retryable() {
-			return Error::TxRetryable;
+			return Error::TxRetryable(s);
 		}
 		if e.is_retryable_not_committed() {
-			return Error::TxRetryable;
+			return Error::TxRetryable(s);
 		}
-		Error::Tx(e.to_string())
+		Error::Tx(s)
 	}
 }
 

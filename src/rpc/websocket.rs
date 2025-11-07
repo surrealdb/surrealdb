@@ -11,13 +11,12 @@ use futures::stream::FuturesUnordered;
 use futures::{Sink, SinkExt, StreamExt};
 use opentelemetry::Context as TelemetryContext;
 use opentelemetry::trace::FutureExt;
-use surrealdb::types::{Array, Value};
 use surrealdb_core::dbs::Session;
-//use surrealdb::gql::{Pessimistic, SchemaCache};
-use surrealdb_core::kvs::Datastore;
+use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
 use surrealdb_core::mem::ALLOC;
 use surrealdb_core::rpc::format::Format;
-use surrealdb_core::rpc::{DbResponse, DbResult, DbResultError, Method, RpcContext, RpcProtocolV1};
+use surrealdb_core::rpc::{DbResponse, DbResult, DbResultError, Method, RpcProtocol};
+use surrealdb_types::{Array, Value};
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinSet;
@@ -56,14 +55,14 @@ pub struct Websocket {
 	/// The persistent session for this WebSocket connection
 	pub(crate) session: ArcSwap<Session>,
 	pub(crate) sessions: DashMap<Uuid, Arc<Session>>,
+	/// The active transactions for this WebSocket connection
+	pub(crate) transactions: DashMap<Uuid, Arc<Transaction>>,
 	/// A cancellation token called when shutting down the server
 	pub(crate) shutdown: CancellationToken,
 	/// A cancellation token for cancelling all spawned tasks
 	pub(crate) canceller: CancellationToken,
 	/// The channels used to send and receive WebSocket messages
 	pub(crate) channel: Sender<Message>,
-	// The GraphQL schema cache stored in advance
-	//pub(crate) gql_schema: SchemaCache<Pessimistic>,
 }
 
 impl Websocket {
@@ -90,8 +89,8 @@ impl Websocket {
 			canceller: CancellationToken::new(),
 			session: ArcSwap::from(Arc::new(session)),
 			sessions: DashMap::new(),
+			transactions: DashMap::new(),
 			channel: sender.clone(),
-			//gql_schema: SchemaCache::new(datastore.clone()),
 			datastore,
 		});
 		// Add this WebSocket to the list
@@ -393,7 +392,6 @@ impl Websocket {
 								// Process the message
 								let result = Self::process_message(
 									rpc.clone(),
-									req.version,
 									req.session_id.map(Into::into),
 									req.txn.map(Into::into),
 									req.method,
@@ -436,7 +434,6 @@ impl Websocket {
 	/// Process a WebSocket message and generate a response
 	async fn process_message(
 		rpc: Arc<Websocket>,
-		version: Option<u8>,
 		session_id: Option<Uuid>,
 		txn: Option<Uuid>,
 		method: Method,
@@ -448,7 +445,7 @@ impl Websocket {
 			return Err(DbResultError::MethodNotFound("Method not found".to_string()));
 		}
 		// Execute the specified method
-		RpcContext::execute(rpc.as_ref(), version, txn, session_id, method, params)
+		RpcProtocol::execute(rpc.as_ref(), txn, session_id, method, params)
 			.await
 			.map_err(Into::into)
 	}
@@ -471,17 +468,27 @@ impl Websocket {
 	}
 }
 
-impl RpcProtocolV1 for Websocket {}
-
-impl RpcContext for Websocket {
+impl RpcProtocol for Websocket {
 	/// The datastore for this RPC interface
 	fn kvs(&self) -> &Datastore {
 		&self.datastore
 	}
+
 	/// Retrieves the modification lock for this RPC context
 	fn lock(&self) -> Arc<Semaphore> {
 		self.lock.clone()
 	}
+
+	/// The version information for this RPC context
+	fn version_data(&self) -> DbResult {
+		let value = Value::String(format!("{PKG_NAME}-{}", *PKG_VERSION));
+		DbResult::Other(value)
+	}
+
+	// ------------------------------
+	// Sessions
+	// ------------------------------
+
 	/// The current session for this RPC context
 	fn get_session(&self, id: Option<&Uuid>) -> Arc<Session> {
 		if let Some(id) = id {
@@ -496,6 +503,7 @@ impl RpcContext for Websocket {
 			self.session.load_full()
 		}
 	}
+
 	/// Mutable access to the current session for this RPC context
 	fn set_session(&self, id: Option<Uuid>, session: Arc<Session>) {
 		if let Some(id) = id {
@@ -504,18 +512,50 @@ impl RpcContext for Websocket {
 			self.session.store(session);
 		}
 	}
+
 	/// Mutable access to the current session for this RPC context
 	fn del_session(&self, id: &Uuid) {
 		self.sessions.remove(id);
 	}
+
 	/// Lists all sessions
 	fn list_sessions(&self) -> Vec<Uuid> {
 		self.sessions.iter().map(|x| *x.key()).collect()
 	}
-	/// The version information for this RPC context
-	fn version_data(&self) -> DbResult {
-		let value = Value::String(format!("{PKG_NAME}-{}", *PKG_VERSION));
-		DbResult::Other(value)
+
+	// ------------------------------
+	// Transactions
+	// ------------------------------
+
+	/// Retrieves a transaction by ID
+	async fn get_tx(
+		&self,
+		id: Uuid,
+	) -> Result<Arc<surrealdb_core::kvs::Transaction>, surrealdb_core::rpc::RpcError> {
+		debug!("WebSocket get_tx called for transaction {id}");
+		self.transactions
+			.get(&id)
+			.map(|tx| {
+				debug!("Transaction {id} found in WebSocket transactions map");
+				tx.clone()
+			})
+			.ok_or_else(|| {
+				warn!(
+					"Transaction {id} not found in WebSocket transactions map (have {} transactions)",
+					self.transactions.len()
+				);
+				surrealdb_core::rpc::RpcError::InvalidParams("Transaction not found".to_string())
+			})
+	}
+
+	/// Stores a transaction
+	async fn set_tx(
+		&self,
+		id: Uuid,
+		tx: Arc<surrealdb_core::kvs::Transaction>,
+	) -> Result<(), surrealdb_core::rpc::RpcError> {
+		self.transactions.insert(id, tx);
+		Ok(())
 	}
 
 	// ------------------------------
@@ -579,13 +619,85 @@ impl RpcContext for Websocket {
 	}
 
 	// ------------------------------
-	// GraphQL
+	// Methods for transactions
 	// ------------------------------
 
-	// GraphQL queries are enabled on WebSockets
-	//const GQL_SUPPORT: bool = true;
+	/// Begin a new transaction
+	async fn begin(
+		&self,
+		_txn: Option<Uuid>,
+		_session_id: Option<Uuid>,
+	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
+		// Create a new transaction
+		let tx = self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await?;
+		// Generate a unique transaction ID
+		let id = Uuid::now_v7();
+		debug!("WebSocket begin: created transaction {id}");
+		// Store the transaction in the map
+		self.transactions.insert(id, Arc::new(tx));
+		debug!(
+			"WebSocket begin: stored transaction {id}, map now has {} transactions",
+			self.transactions.len()
+		);
+		// Return the transaction ID to the client
+		Ok(DbResult::Other(Value::Uuid(surrealdb::types::Uuid(id))))
+	}
 
-	//fn graphql_schema_cache(&self) -> &SchemaCache {
-	//&self.gql_schema
-	//}
+	/// Commit a transaction
+	async fn commit(
+		&self,
+		_txn: Option<Uuid>,
+		_session_id: Option<Uuid>,
+		params: Array,
+	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
+		// Extract the transaction ID from params
+		let mut params_vec = params.into_vec();
+		let Some(Value::Uuid(surrealdb::types::Uuid(txn_id))) = params_vec.pop() else {
+			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
+				"Expected transaction UUID".to_string(),
+			));
+		};
+
+		// Retrieve and remove the transaction from the map
+		let Some((_, tx)) = self.transactions.remove(&txn_id) else {
+			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
+				"Transaction not found".to_string(),
+			));
+		};
+
+		// Commit the transaction
+		tx.commit().await?;
+
+		// Return success
+		Ok(DbResult::Other(Value::None))
+	}
+
+	/// Cancel a transaction
+	async fn cancel(
+		&self,
+		_txn: Option<Uuid>,
+		_session_id: Option<Uuid>,
+		params: Array,
+	) -> Result<DbResult, surrealdb_core::rpc::RpcError> {
+		// Extract the transaction ID from params
+		let mut params_vec = params.into_vec();
+		let Some(Value::Uuid(surrealdb::types::Uuid(txn_id))) = params_vec.pop() else {
+			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
+				"Expected transaction UUID".to_string(),
+			));
+		};
+
+		// Retrieve and remove the transaction from the map
+		let Some((_, tx)) = self.transactions.remove(&txn_id) else {
+			return Err(surrealdb_core::rpc::RpcError::InvalidParams(
+				"Transaction not found".to_string(),
+			));
+		};
+
+		// Cancel the transaction
+		tx.cancel().await?;
+
+		// Return success
+		Ok(DbResult::Other(Value::None))
+	}
 }

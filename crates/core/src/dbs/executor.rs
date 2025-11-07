@@ -20,12 +20,12 @@ use crate::dbs::response::QueryResult;
 use crate::dbs::{Force, Options, QueryType};
 use crate::doc::DefaultBroker;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
 use crate::expr::statements::OptionStatement;
 use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
+use crate::kvs::slowlog::SlowLogVisit;
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::rpc::DbResultError;
 use crate::sql::{self, Ast};
@@ -90,7 +90,7 @@ impl Executor {
 	///
 	/// Generic over `S` to accept both concrete statements and wrappers that
 	/// implement `Display` and `VisitExpression`.
-	fn check_slow_log<S: VisitExpression + ToSql>(&self, start: &Instant, stm: &S) {
+	fn check_slow_log<S: SlowLogVisit + ToSql>(&self, start: &Instant, stm: &S) {
 		if let Some(slow_log) = self.ctx.slow_log() {
 			slow_log.check_log(&self.ctx, start, stm);
 		}
@@ -105,17 +105,23 @@ impl Executor {
 		start: &Instant,
 		plan: TopLevelExpr,
 	) -> FlowResult<Value> {
-		let res = match plan {
-			TopLevelExpr::Use(stmt) => {
-				// Avoid moving in and out of the context via Arc::get_mut
-				let ctx = Arc::get_mut(&mut self.ctx)
+		/// Helper method to get mutable access to the context
+		macro_rules! ctx_mut {
+			() => {
+				Arc::get_mut(&mut self.ctx)
 					.ok_or_else(|| {
 						Error::unreachable("Tried to unfreeze a Context with multiple references")
 					})
-					.map_err(anyhow::Error::new)?;
+					.map_err(anyhow::Error::new)?
+			};
+		}
+		let res = match plan {
+			TopLevelExpr::Use(stmt) => {
+				// Avoid moving in and out of the context via Arc::get_mut
+				let ctx = ctx_mut!();
 
 				if let Some(ns) = stmt.ns {
-					txn.get_or_add_ns(&ns, self.opt.strict).await?;
+					txn.get_or_add_ns(Some(ctx), &ns, self.opt.strict).await?;
 
 					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
 					self.opt.set_ns(Some(ns.as_str().into()));
@@ -129,7 +135,7 @@ impl Executor {
 						)));
 					};
 
-					txn.ensure_ns_db(ns, &db, self.opt.strict).await?;
+					txn.ensure_ns_db(Some(ctx), ns, &db, self.opt.strict).await?;
 
 					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
 					self.opt.set_db(Some(db.as_str().into()));
@@ -146,12 +152,7 @@ impl Executor {
 
 			TopLevelExpr::Expr(Expr::Let(stm)) => {
 				// Avoid moving in and out of the context via Arc::get_mut
-				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| {
-						Error::unreachable("Tried to unfreeze a Context with multiple references")
-					})
-					.map_err(anyhow::Error::new)?
-					.set_transaction(txn);
+				ctx_mut!().set_transaction(txn);
 
 				// Run the statement
 				let res = self
@@ -178,12 +179,7 @@ impl Executor {
 					})));
 				}
 				// Set the parameter
-				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| {
-						Error::unreachable("Tried to unfreeze a Context with multiple references")
-					})
-					.map_err(anyhow::Error::new)?
-					.add_value(stm.name.clone(), result.into());
+				ctx_mut!().add_value(stm.name.clone(), result.into());
 
 				// Check if we dump the slow log
 				self.check_slow_log(start, stm.as_ref());
@@ -221,14 +217,7 @@ impl Executor {
 					.map_err(ControlFlow::Err)
 			}
 			TopLevelExpr::Live(s) => {
-				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| {
-						err::Error::unreachable(
-							"Tried to unfreeze a Context with multiple references",
-						)
-					})
-					.map_err(anyhow::Error::new)?
-					.set_transaction(txn);
+				ctx_mut!().set_transaction(txn);
 				self.stack
 					.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None))
 					.finish()
@@ -236,36 +225,17 @@ impl Executor {
 					.map_err(ControlFlow::Err)
 			}
 			TopLevelExpr::Show(s) => {
-				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| {
-						err::Error::unreachable(
-							"Tried to unfreeze a Context with multiple references",
-						)
-					})
-					.map_err(anyhow::Error::new)?
-					.set_transaction(txn);
+				ctx_mut!().set_transaction(txn);
 				s.compute(&self.ctx, &self.opt, None).await.map_err(ControlFlow::Err)
 			}
 			TopLevelExpr::Access(s) => {
-				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| {
-						err::Error::unreachable(
-							"Tried to unfreeze a Context with multiple references",
-						)
-					})
-					.map_err(anyhow::Error::new)?
-					.set_transaction(txn);
+				ctx_mut!().set_transaction(txn);
 				self.stack.enter(|stk| s.compute(stk, &self.ctx, &self.opt, None)).finish().await
 			}
 			// Process all other normal statements
 			TopLevelExpr::Expr(e) => {
 				// The transaction began successfully
-				Arc::get_mut(&mut self.ctx)
-					.ok_or_else(|| {
-						Error::unreachable("Tried to unfreeze a Context with multiple references")
-					})
-					.map_err(anyhow::Error::new)?
-					.set_transaction(txn);
+				ctx_mut!().set_transaction(txn);
 				// Process the statement
 				let res = self
 					.stack
@@ -529,6 +499,13 @@ impl Executor {
 
 					self.opt.broker = None;
 
+					// CANCEL returns NONE
+					self.results.push(QueryResult {
+						time: before.elapsed(),
+						result: Ok(convert_value_to_public_value(Value::None)?),
+						query_type: QueryType::Other,
+					});
+
 					return Ok(());
 				}
 				TopLevelExpr::Commit => {
@@ -558,6 +535,13 @@ impl Executor {
 							}
 						}
 
+						// COMMIT returns NONE
+						self.results.push(QueryResult {
+							time: before.elapsed(),
+							result: Ok(convert_value_to_public_value(Value::None)?),
+							query_type: QueryType::Other,
+						});
+
 						return Ok(());
 					};
 
@@ -574,15 +558,17 @@ impl Executor {
 				}
 				TopLevelExpr::Option(stmt) => match self.execute_option_statement(stmt) {
 					Ok(_) => {
-						// skip adding the value as executing an option statement doesn't produce
-						// results
+						// OPTION returns NONE
+						self.results.push(QueryResult {
+							time: before.elapsed(),
+							result: Ok(convert_value_to_public_value(Value::None)?),
+							query_type: QueryType::Other,
+						});
 						continue;
 					}
 					Err(e) => Err(DbResultError::InternalError(e.to_string())),
 				},
 				stmt => {
-					skip_remaining = matches!(stmt, TopLevelExpr::Expr(Expr::Return(_)));
-
 					// reintroduce planner later.
 					let plan = stmt;
 
@@ -639,12 +625,6 @@ impl Executor {
 							}
 						};
 
-					if skip_remaining {
-						// If we skip the next values due to return then we need to clear the other
-						// results.
-						self.results.truncate(start_results)
-					}
-
 					match r {
 						Ok(value) => Ok(convert_value_to_public_value(value)?),
 						Err(err) => Err(DbResultError::InternalError(err.to_string())),
@@ -693,6 +673,48 @@ impl Executor {
 	) -> Result<Vec<QueryResult>> {
 		let stream = futures::stream::iter(qry.expressions.into_iter().map(Ok));
 		Self::execute_expr_stream(kvs, ctx, opt, false, stream).await
+	}
+
+	/// Execute a logical plan with an existing transaction
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	pub async fn execute_plan_with_transaction(
+		ctx: Context,
+		opt: Options,
+		qry: LogicalPlan,
+	) -> Result<Vec<QueryResult>> {
+		// The transaction is already set in the context
+		// Execute each expression with the transaction
+		let tx = ctx.tx();
+		let mut executor = Executor::new(ctx, opt);
+		let mut results = Vec::new();
+
+		for expr in qry.expressions {
+			let start = Instant::now();
+			let result = executor.execute_plan_in_transaction(tx.clone(), &start, expr).await;
+
+			let time = start.elapsed();
+			let query_result = match result {
+				Ok(value) | Err(ControlFlow::Return(value)) => QueryResult {
+					time,
+					result: crate::val::convert_value_to_public_value(value)
+						.map_err(|e| crate::rpc::DbResultError::InternalError(e.to_string())),
+					query_type: QueryType::Other,
+				},
+				Err(ControlFlow::Err(e)) => QueryResult {
+					time,
+					result: Err(DbResultError::InternalError(e.to_string())),
+					query_type: QueryType::Other,
+				},
+				Err(ControlFlow::Continue) | Err(ControlFlow::Break) => QueryResult {
+					time,
+					result: Err(DbResultError::InternalError("Invalid control flow".to_string())),
+					query_type: QueryType::Other,
+				},
+			};
+			results.push(query_result);
+		}
+
+		Ok(results)
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
@@ -745,9 +767,23 @@ impl Executor {
 			};
 
 			match stmt {
-				TopLevelExpr::Option(stmt) => this.execute_option_statement(stmt)?,
-				// handle option here because it doesn't produce a result.
+				TopLevelExpr::Option(stmt) => {
+					this.execute_option_statement(stmt)?;
+					// OPTION returns NONE
+					this.results.push(QueryResult {
+						time: Duration::ZERO,
+						result: Ok(convert_value_to_public_value(Value::None)?),
+						query_type: QueryType::Other,
+					});
+				}
 				TopLevelExpr::Begin => {
+					// BEGIN returns NONE
+					this.results.push(QueryResult {
+						time: Duration::ZERO,
+						result: Ok(convert_value_to_public_value(Value::None)?),
+						query_type: QueryType::Other,
+					});
+
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
 						this.results.push(QueryResult {
 							time: Duration::ZERO,

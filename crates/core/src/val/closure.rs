@@ -10,7 +10,6 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Variables};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::{Expr, FlowResultExt, Kind, Param};
 use crate::val::Value;
 
@@ -19,7 +18,7 @@ pub(crate) struct Closure {
 	pub args: Vec<(Param, Kind)>,
 	pub returns: Option<Kind>,
 	pub body: Expr,
-	pub vars: Variables,
+	pub captures: Variables,
 }
 
 impl PartialOrd for Closure {
@@ -34,12 +33,6 @@ impl Ord for Closure {
 }
 
 impl Closure {
-	pub(crate) async fn compute(&self, ctx: &Context) -> Result<Value> {
-		let mut closure = self.clone();
-		closure.vars.extend(Variables::from_expr(&self.body, ctx));
-		Ok(Value::Closure(Box::new(closure)))
-	}
-
 	pub(crate) async fn invoke(
 		&self,
 		stk: &mut Stk,
@@ -49,7 +42,7 @@ impl Closure {
 		args: Vec<Value>,
 	) -> Result<Value> {
 		let mut ctx = MutableContext::new_isolated(ctx);
-		ctx.attach_variables(self.vars.clone())?;
+		ctx.attach_variables(self.captures.clone())?;
 
 		// check for missing arguments.
 		if self.args.len() > args.len() {
@@ -85,15 +78,6 @@ impl Closure {
 		} else {
 			Ok(result)
 		}
-	}
-}
-
-impl VisitExpression for Closure {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.body.visit(visitor)
 	}
 }
 

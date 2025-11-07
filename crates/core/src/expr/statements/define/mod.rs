@@ -9,6 +9,7 @@ mod field;
 mod function;
 mod index;
 mod model;
+mod module;
 mod namespace;
 mod param;
 mod sequence;
@@ -30,6 +31,7 @@ pub(crate) use function::DefineFunctionStatement;
 pub(crate) use index::DefineIndexStatement;
 pub(in crate::expr::statements) use index::run_indexing;
 pub(crate) use model::DefineModelStatement;
+pub(crate) use module::DefineModuleStatement;
 pub(crate) use namespace::DefineNamespaceStatement;
 pub(crate) use param::DefineParamStatement;
 use reblessive::tree::Stk;
@@ -40,8 +42,6 @@ pub(crate) use user::DefineUserStatement;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::Expr;
-use crate::expr::expression::VisitExpression;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
@@ -70,6 +70,7 @@ pub(crate) enum DefineStatement {
 	Api(DefineApiStatement),
 	Bucket(DefineBucketStatement),
 	Sequence(DefineSequenceStatement),
+	Module(DefineModuleStatement),
 }
 
 impl DefineStatement {
@@ -98,32 +99,7 @@ impl DefineStatement {
 			Self::Api(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Bucket(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
-		}
-	}
-}
-
-impl VisitExpression for DefineStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		match self {
-			DefineStatement::Namespace(namespace) => namespace.visit(visitor),
-			DefineStatement::Database(database) => database.visit(visitor),
-			DefineStatement::Function(function) => function.visit(visitor),
-			DefineStatement::Analyzer(analyzer) => analyzer.visit(visitor),
-			DefineStatement::Param(param) => param.visit(visitor),
-			DefineStatement::Table(table) => table.visit(visitor),
-			DefineStatement::Event(event) => event.visit(visitor),
-			DefineStatement::Field(field) => field.visit(visitor),
-			DefineStatement::Index(index) => index.visit(visitor),
-			DefineStatement::User(user) => user.visit(visitor),
-			DefineStatement::Model(model) => model.visit(visitor),
-			DefineStatement::Access(access) => access.visit(visitor),
-			DefineStatement::Config(_) => {}
-			DefineStatement::Api(api) => api.visit(visitor),
-			DefineStatement::Bucket(bucket) => bucket.visit(visitor),
-			DefineStatement::Sequence(sequence) => sequence.visit(visitor),
+			Self::Module(v) => v.compute(stk, ctx, opt, doc).await,
 		}
 	}
 }
@@ -147,6 +123,7 @@ impl Display for DefineStatement {
 			Self::Api(v) => Display::fmt(v, f),
 			Self::Bucket(v) => Display::fmt(v, f),
 			Self::Sequence(v) => Display::fmt(v, f),
+			Self::Module(v) => Display::fmt(v, f),
 		}
 	}
 }

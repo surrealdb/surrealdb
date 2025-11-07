@@ -112,7 +112,10 @@ pub mod argon2 {
 	pub fn r#gen((pass,): (String,)) -> Result<Value> {
 		let algo = Argon2::default();
 		let salt = SaltString::generate(&mut OsRng);
-		let hash = algo.hash_password(pass.as_ref(), &salt).unwrap().to_string();
+		let hash = algo
+			.hash_password(pass.as_ref(), &salt)
+			.map_err(|e| anyhow::anyhow!("Failed to hash password: {}", e))?
+			.to_string();
 		Ok(hash.into())
 	}
 }
@@ -145,7 +148,8 @@ pub mod bcrypt {
 	}
 
 	pub fn r#gen((pass,): (String,)) -> Result<Value> {
-		let hash = bcrypt::hash(pass, bcrypt::DEFAULT_COST).unwrap();
+		let hash = bcrypt::hash(pass, bcrypt::DEFAULT_COST)
+			.map_err(|e| anyhow::anyhow!("Failed to hash password: {}", e))?;
 		Ok(hash.into())
 	}
 }
@@ -179,7 +183,10 @@ pub mod pbkdf2 {
 
 	pub fn r#gen((pass,): (String,)) -> Result<Value> {
 		let salt = SaltString::generate(&mut OsRng);
-		let hash = Pbkdf2.hash_password(pass.as_ref(), &salt).unwrap().to_string();
+		let hash = Pbkdf2
+			.hash_password(pass.as_ref(), &salt)
+			.map_err(|e| anyhow::anyhow!("Failed to hash password: {}", e))?
+			.to_string();
 		Ok(hash.into())
 	}
 }
@@ -213,7 +220,10 @@ pub mod scrypt {
 
 	pub fn r#gen((pass,): (String,)) -> Result<Value> {
 		let salt = SaltString::generate(&mut OsRng);
-		let hash = Scrypt.hash_password(pass.as_ref(), &salt).unwrap().to_string();
+		let hash = Scrypt
+			.hash_password(pass.as_ref(), &salt)
+			.map_err(|e| anyhow::anyhow!("Failed to hash password: {}", e))?
+			.to_string();
 		Ok(hash.into())
 	}
 }

@@ -22,6 +22,8 @@ pub mod range;
 pub mod record_id;
 /// Regular expression value types for SurrealDB
 pub mod regex;
+/// Set value types for SurrealDB
+pub mod set;
 /// Table value types for SurrealDB
 pub mod table;
 /// UUID value types for SurrealDB
@@ -44,6 +46,7 @@ pub use self::object::Object;
 pub use self::range::Range;
 pub use self::record_id::{RecordId, RecordIdKey, RecordIdKeyRange};
 pub use self::regex::Regex;
+pub use self::set::Set;
 pub use self::table::Table;
 pub use self::uuid::Uuid;
 use crate::sql::ToSql;
@@ -86,20 +89,16 @@ pub enum Value {
 	Number(Number),
 	/// A string value
 	String(String),
+	/// Binary data
+	Bytes(Bytes),
 	/// A duration value representing a time span
 	Duration(Duration),
 	/// A datetime value representing a point in time
 	Datetime(Datetime),
 	/// A UUID value
 	Uuid(Uuid),
-	/// An array of values
-	Array(Array),
-	/// An object containing key-value pairs
-	Object(Object),
 	/// A geometric value (point, line, polygon, etc.)
 	Geometry(Geometry),
-	/// Binary data
-	Bytes(Bytes),
 	/// A table value
 	Table(Table),
 	/// A record identifier
@@ -110,6 +109,12 @@ pub enum Value {
 	Range(Box<Range>),
 	/// A regular expression
 	Regex(Regex),
+	/// An array of values
+	Array(Array),
+	/// An object containing key-value pairs
+	Object(Object),
+	/// A set of values
+	Set(Set),
 }
 
 impl Eq for Value {}
@@ -133,6 +138,7 @@ impl Ord for Value {
 			(Value::Datetime(a), Value::Datetime(b)) => a.cmp(b),
 			(Value::Uuid(a), Value::Uuid(b)) => a.cmp(b),
 			(Value::Array(a), Value::Array(b)) => a.cmp(b),
+			(Value::Set(a), Value::Set(b)) => a.cmp(b),
 			(Value::Object(a), Value::Object(b)) => a.cmp(b),
 			(Value::Geometry(a), Value::Geometry(b)) => a.partial_cmp(b).unwrap_or(Ordering::Equal),
 			(Value::Bytes(a), Value::Bytes(b)) => a.cmp(b),
@@ -159,6 +165,7 @@ impl Ord for Value {
 				| Value::Datetime(_)
 				| Value::Uuid(_)
 				| Value::Array(_)
+				| Value::Set(_)
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
@@ -175,6 +182,7 @@ impl Ord for Value {
 				| Value::Datetime(_)
 				| Value::Uuid(_)
 				| Value::Array(_)
+				| Value::Set(_)
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
@@ -193,6 +201,7 @@ impl Ord for Value {
 				| Value::Datetime(_)
 				| Value::Uuid(_)
 				| Value::Array(_)
+				| Value::Set(_)
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
@@ -208,6 +217,7 @@ impl Ord for Value {
 				| Value::Datetime(_)
 				| Value::Uuid(_)
 				| Value::Array(_)
+				| Value::Set(_)
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
@@ -225,6 +235,7 @@ impl Ord for Value {
 				| Value::Datetime(_)
 				| Value::Uuid(_)
 				| Value::Array(_)
+				| Value::Set(_)
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
@@ -239,6 +250,7 @@ impl Ord for Value {
 				| Value::Datetime(_)
 				| Value::Uuid(_)
 				| Value::Array(_)
+				| Value::Set(_)
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
@@ -255,6 +267,7 @@ impl Ord for Value {
 				Value::Datetime(_)
 				| Value::Uuid(_)
 				| Value::Array(_)
+				| Value::Set(_)
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
@@ -268,6 +281,7 @@ impl Ord for Value {
 				Value::Datetime(_)
 				| Value::Uuid(_)
 				| Value::Array(_)
+				| Value::Set(_)
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
@@ -283,6 +297,7 @@ impl Ord for Value {
 				Value::Datetime(_),
 				Value::Uuid(_)
 				| Value::Array(_)
+				| Value::Set(_)
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
@@ -295,6 +310,7 @@ impl Ord for Value {
 			(
 				Value::Uuid(_)
 				| Value::Array(_)
+				| Value::Set(_)
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
@@ -309,6 +325,7 @@ impl Ord for Value {
 			(
 				Value::Uuid(_),
 				Value::Array(_)
+				| Value::Set(_)
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
@@ -320,6 +337,7 @@ impl Ord for Value {
 			) => Ordering::Less,
 			(
 				Value::Array(_)
+				| Value::Set(_)
 				| Value::Object(_)
 				| Value::Geometry(_)
 				| Value::Bytes(_)
@@ -340,6 +358,31 @@ impl Ord for Value {
 				| Value::RecordId(_)
 				| Value::File(_)
 				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Set(_),
+			) => Ordering::Less,
+			(
+				Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
+				| Value::Regex(_)
+				| Value::Set(_),
+				Value::Array(_),
+			) => Ordering::Greater,
+
+			(
+				Value::Set(_),
+				Value::Object(_)
+				| Value::Geometry(_)
+				| Value::Bytes(_)
+				| Value::Table(_)
+				| Value::RecordId(_)
+				| Value::File(_)
+				| Value::Range(_)
 				| Value::Regex(_),
 			) => Ordering::Less,
 			(
@@ -351,7 +394,7 @@ impl Ord for Value {
 				| Value::File(_)
 				| Value::Range(_)
 				| Value::Regex(_),
-				Value::Array(_),
+				Value::Set(_),
 			) => Ordering::Greater,
 
 			(
@@ -450,6 +493,7 @@ impl Value {
 			Value::Datetime(_) => Kind::Datetime,
 			Value::Uuid(_) => Kind::Uuid,
 			Value::Array(_) => Kind::Array(Box::new(Kind::Any), None),
+			Value::Set(_) => Kind::Set(Box::new(Kind::Any), None),
 			Value::Object(_) => Kind::Object,
 			Value::Geometry(_) => Kind::Geometry(Vec::new()),
 			Value::Bytes(_) => Kind::Bytes,
@@ -485,6 +529,7 @@ impl Value {
 			Value::Bytes(b) => b.is_empty(),
 			Value::Object(obj) => obj.is_empty(),
 			Value::Array(arr) => arr.is_empty(),
+			Value::Set(set) => set.is_empty(),
 			_ => false,
 		}
 	}
@@ -562,9 +607,17 @@ impl Value {
 				self.is_geometry_and(|g| kinds.is_empty() || kinds.contains(&g.kind()))
 			}
 			Kind::Either(kinds) => kinds.iter().any(|k| self.is_kind(k)),
-			Kind::Set(_kind, _max) => {
-				// Sets are not yet implemented as a value type
-				false
+			Kind::Set(kind, max) => {
+				self.is_set_and(|set| {
+					// Check max length if specified
+					if let Some(max_len) = max {
+						if set.len() > *max_len as usize {
+							return false;
+						}
+					}
+					// Check all elements match the kind
+					set.iter().all(|v| v.is_kind(kind))
+				})
 			}
 			Kind::Array(kind, max) => {
 				self.is_array_and(|arr| {
@@ -683,7 +736,6 @@ impl ToSql for Value {
 			Value::Null => f.push_str("NULL"),
 			Value::Bool(v) => v.fmt_sql(f),
 			Value::Number(v) => v.fmt_sql(f),
-			// Value::String(v) => f.push_str(&QuoteStr(v).to_string()),
 			Value::String(v) => write_sql!(f, "{}", QuoteStr(v.as_str())),
 			Value::Duration(v) => v.fmt_sql(f),
 			Value::Datetime(v) => v.fmt_sql(f),
@@ -697,6 +749,7 @@ impl ToSql for Value {
 			Value::File(v) => v.fmt_sql(f),
 			Value::Range(v) => v.fmt_sql(f),
 			Value::Regex(v) => v.fmt_sql(f),
+			Value::Set(v) => v.fmt_sql(f),
 		}
 	}
 }

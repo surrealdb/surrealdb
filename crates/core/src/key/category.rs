@@ -21,8 +21,10 @@ pub enum Category {
 	AccessGrant,
 	/// crate::key::root::nd                 /!nd{nd}
 	Node,
+	/// crate::key::root::nb                 /!nb
+	NamespaceIdentifierBatch,
 	/// crate::key::root::ni                 /!ni
-	NamespaceIdentifier,
+	NamespaceIdentifierState,
 	/// crate::key::root::ns                 /!ns{ns}
 	Namespace,
 	/// crate::key::root::us                 /!us{us}
@@ -41,10 +43,18 @@ pub enum Category {
 	///
 	/// ------------------------------
 	///
-	/// crate::key::namespace::di            /+{ni}!di
-	DatabaseIdentifier,
-	/// crate::key::database::ti             /+{ni}*{di}!ti
-	DatabaseTableIdentifier,
+	/// crate::key::namespace::dh            /+{ns}!dh
+	DatabaseIdentifierBatch,
+	/// crate::key::namespace::di            /+{ns}!di
+	DatabaseIdentifierState,
+	/// crate::key::database::th             /*{ns}*{db}!th
+	DatabaseTableIdentifierBatch,
+	/// crate::key::database::ti             /*{ns}*{db}!ti
+	DatabaseTableIdentifierState,
+	/// crate::key::table::ih                /*{ns}*{db}*{tb}!ih
+	TableIndexIdentifierBatch,
+	/// crate::key::table::is                /*{ns}*{db}*{tb}!is
+	TableIndexIdentifierState,
 	///
 	/// ------------------------------
 	///
@@ -125,16 +135,10 @@ pub enum Category {
 	IndexDocKeys,
 	/// crate::key::index::bk                /*{ns}*{db}*{tb}+{ix}!bk{id}
 	IndexTermList,
-	/// crate::key::index::bl                /*{ns}*{db}*{tb}+{ix}!bl{id}
-	IndexBTreeNodeDocLengths,
 	/// crate::key::index::bo                /*{ns}*{db}*{tb}+{ix}!bo{id}
 	IndexOffset,
-	/// crate::key::index::bp                /*{ns}*{db}*{tb}+{ix}!bp{id}
-	IndexBTreeNodePostings,
 	/// crate::key::index::bs                /*{ns}*{db}*{tb}+{ix}!bs
 	IndexFullTextState,
-	/// crate::key::index::bt                /*{ns}*{db}*{tb}+{ix}!bt{id}
-	IndexBTreeNodeTerms,
 	/// crate::key::index::bu                /*{ns}*{db}*{tb}+{ix}!bu{id}
 	IndexTerms,
 	/// crate::key::index::dc                /*{ns}*{db}*{tb}+{ix}!dc{id}
@@ -204,14 +208,16 @@ impl Display for Category {
 			Self::AccessRoot => "AccessRoot",
 			Self::AccessGrant => "AccessGrant",
 			Self::Node => "Node",
-			Self::NamespaceIdentifier => "NamespaceIdentifier",
+			Self::NamespaceIdentifierBatch => "NamespaceIdentifierBatch",
+			Self::NamespaceIdentifierState => "NamespaceIdentifierState",
 			Self::Namespace => "Namespace",
 			Self::User => "User",
 			Self::NodeRoot => "NodeRoot",
 			Self::NodeLiveQuery => "NodeLiveQuery",
 			Self::NamespaceRoot => "NamespaceRoot",
 			Self::DatabaseAlias => "DatabaseAlias",
-			Self::DatabaseIdentifier => "DatabaseIdentifier",
+			Self::DatabaseIdentifierBatch => "DatabaseIdentifierBatch",
+			Self::DatabaseIdentifierState => "DatabaseIdentifierState",
 			Self::NamespaceAccess => "NamespaceAccess",
 			Self::NamespaceAccessRoot => "NamespaceAccessRoot",
 			Self::NamespaceAccessGrant => "NamespaceAccessGrant",
@@ -227,7 +233,8 @@ impl Display for Category {
 			Self::DatabaseModel => "DatabaseModel",
 			Self::DatabaseParameter => "DatabaseParameter",
 			Self::DatabaseTable => "DatabaseTable",
-			Self::DatabaseTableIdentifier => "DatabaseTableIdentifier",
+			Self::DatabaseTableIdentifierBatch => "DatabaseTableIdentifierBatch",
+			Self::DatabaseTableIdentifierState => "DatabaseTableIdentifierState",
 			Self::DatabaseTimestamp => "DatabaseTimestamp",
 			Self::DatabaseUser => "DatabaseUser",
 			Self::DatabaseVersionstamp => "DatabaseVersionstamp",
@@ -247,11 +254,8 @@ impl Display for Category {
 			Self::IndexDocLength => "IndexDocLength",
 			Self::IndexTermDocument => "IndexTermDocument",
 			Self::IndexTermList => "IndexTermList",
-			Self::IndexBTreeNodeDocLengths => "IndexBTreeNodeDocLengths",
 			Self::IndexOffset => "IndexOffset",
-			Self::IndexBTreeNodePostings => "IndexBTreeNodePostings",
 			Self::IndexFullTextState => "IndexFullTextState",
-			Self::IndexBTreeNodeTerms => "IndexBTreeNodeTerms",
 			Self::IndexTerms => "IndexTerms",
 			Self::IndexHnswElements => "IndexHnswElements",
 			Self::IndexHnswDocIds => "IndexHnswDocIds",
@@ -273,6 +277,8 @@ impl Display for Category {
 			Self::IndexTermDocuments => "IndexTermDocuments",
 			Self::IndexCompaction => "IndexCompaction",
 			Self::IndexCountState => "IndexCountState",
+			Self::TableIndexIdentifierBatch => "TableIndexIdentifierBatch",
+			Self::TableIndexIdentifierState => "TableIndexIdentifierState",
 		};
 		write!(f, "{}", name)
 	}

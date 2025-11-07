@@ -21,12 +21,13 @@ impl From<crate::expr::Block> for Block {
 impl Display for Block {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
-		match (self.0.len(), self.0.first()) {
-			(0, _) => f.write_str("{}"),
-			(1, Some(v)) => {
+		match self.0.len() {
+			0 => f.write_str("{;}"),
+			1 => {
+				let v = &self.0[0];
 				write!(f, "{{ {v} }}")
 			}
-			(l, _) => {
+			l => {
 				f.write_char('{')?;
 				if l > 1 {
 					f.write_char('\n')?;

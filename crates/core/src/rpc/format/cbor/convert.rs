@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::iter::once;
 use std::ops::Bound;
 
@@ -12,7 +12,7 @@ use crate::syn;
 use crate::types::{
 	PublicArray, PublicDatetime, PublicDuration, PublicFile, PublicGeometry, PublicNumber,
 	PublicObject, PublicRange, PublicRecordId, PublicRecordIdKey, PublicRecordIdKeyRange,
-	PublicUuid, PublicValue,
+	PublicSet, PublicTable, PublicUuid, PublicValue,
 };
 use crate::val::DecimalExt;
 
@@ -41,6 +41,7 @@ const TAG_BOUND_EXCLUDED: u64 = 51;
 
 // Custom tags (55->60 is unassigned)
 const TAG_FILE: u64 = 55;
+const TAG_SET: u64 = 56;
 
 // Custom Geometries (88->95 is unassigned)
 const TAG_GEOMETRY_POINT: u64 = 88;
@@ -185,7 +186,7 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 				},
 				// A literal table
 				TAG_TABLE => match *v {
-					CborValue::Text(v) => Ok(PublicValue::String(v)),
+					CborValue::Text(v) => Ok(PublicValue::Table(PublicTable::new(v))),
 					_ => Err(anyhow!("Expected a CBOR text data type")),
 				},
 				// A range
@@ -349,6 +350,12 @@ pub fn to_value(val: CborValue) -> Result<PublicValue> {
 						Err(anyhow!("Expected a CBOR array with two String bucket and key values"))
 					}
 				},
+				TAG_SET => match *v {
+					CborValue::Array(v) => Ok(PublicValue::Set(PublicSet::from(
+						v.into_iter().map(to_value).collect::<Result<BTreeSet<PublicValue>>>()?,
+					))),
+					_ => Err(anyhow!("Expected a CBOR array with Set values")),
+				},
 				// An unknown tag
 				_ => Err(anyhow!("Encountered an unknown CBOR tag")),
 			}
@@ -403,6 +410,9 @@ pub fn from_value(val: PublicValue) -> Result<CborValue> {
 		PublicValue::Array(v) => from_array(v),
 		PublicValue::Object(v) => from_object(v),
 		PublicValue::Bytes(v) => Ok(CborValue::Bytes(v.into())),
+		PublicValue::Table(v) => {
+			Ok(CborValue::Tag(TAG_TABLE, Box::new(CborValue::Text(v.into_string()))))
+		}
 		PublicValue::RecordId(PublicRecordId {
 			table,
 			key,
@@ -431,8 +441,16 @@ pub fn from_value(val: PublicValue) -> Result<CborValue> {
 				CborValue::Text(file.key().to_string()),
 			])),
 		)),
-		// We shouldn't reach here
-		_ => Err(anyhow!("Found unsupported SurrealQL value being encoded into a CBOR value")),
+		PublicValue::Set(v) => Ok(CborValue::Tag(
+			TAG_SET,
+			Box::new(CborValue::Array(
+				v.into_iter().map(from_value).collect::<Result<Vec<CborValue>>>()?,
+			)),
+		)),
+		PublicValue::Regex(_) => {
+			// Uncborrable value type
+			Err(anyhow!("Unsupported value type: Regex"))
+		}
 	}
 }
 

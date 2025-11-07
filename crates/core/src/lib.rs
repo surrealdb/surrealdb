@@ -34,8 +34,9 @@ mod cf;
 mod doc;
 mod exe;
 mod fnc;
-mod idg;
 mod key;
+#[cfg(feature = "surrealism")]
+mod surrealism;
 mod sys;
 
 pub mod api;
@@ -46,8 +47,8 @@ pub mod dbs;
 pub mod env;
 pub mod err;
 pub mod expr;
-//pub mod gql;
 mod fmt;
+pub mod gql;
 pub mod iam;
 pub mod idx;
 pub mod kvs;
@@ -71,8 +72,8 @@ pub(crate) mod types {
 		KindLiteral as PublicKindLiteral, Notification as PublicNotification,
 		Number as PublicNumber, Object as PublicObject, Range as PublicRange,
 		RecordId as PublicRecordId, RecordIdKey as PublicRecordIdKey,
-		RecordIdKeyRange as PublicRecordIdKeyRange, Regex as PublicRegex, SurrealValue,
-		Table as PublicTable, Uuid as PublicUuid, Value as PublicValue,
+		RecordIdKeyRange as PublicRecordIdKeyRange, Regex as PublicRegex, Set as PublicSet,
+		SurrealValue, Table as PublicTable, Uuid as PublicUuid, Value as PublicValue,
 		Variables as PublicVariables,
 	};
 }

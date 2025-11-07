@@ -63,7 +63,8 @@ pub async fn run(
 	let time_limit = Duration::from_millis(*crate::cnf::SCRIPTING_MAX_TIME_LIMIT as u64);
 
 	// Create a JavaScript context
-	let run = js::AsyncRuntime::new().unwrap();
+	let run = js::AsyncRuntime::new()
+		.map_err(|e| anyhow::anyhow!("Failed to create JavaScript runtime: {}", e))?;
 	// Explicitly set max stack size to 256 KiB
 	run.set_max_stack_size(*SCRIPTING_MAX_STACK_SIZE).await;
 	// Explicitly set max memory size to 2 MB
@@ -73,7 +74,9 @@ pub async fn run(
 	let handler = Box::new(move || cancellation.is_done() || instant_start.elapsed() > time_limit);
 	run.set_interrupt_handler(Some(handler)).await;
 	// Create an execution context
-	let ctx = js::AsyncContext::full(&run).await.unwrap();
+	let ctx = js::AsyncContext::full(&run)
+		.await
+		.map_err(|e| anyhow::anyhow!("Failed to create JavaScript context: {}", e))?;
 	// Set the module resolver and loader
 	run.set_loader(resolver(), loader()).await;
 	// Create the main function structure

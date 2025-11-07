@@ -4,7 +4,7 @@ use helpers::new_ds;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::rpc::DbResultError;
 use surrealdb_core::syn;
-use surrealdb_types::{Array, Number, Value};
+use surrealdb_types::{Array, Number, Table, Value};
 
 use crate::helpers::Test;
 
@@ -3066,11 +3066,11 @@ async fn function_type_table() -> Result<()> {
 	let mut test = Test::new(sql).await?;
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::String("person".to_string());
+	let val = Value::Table(Table::new("person".to_string()));
 	assert_eq!(tmp, val);
 	//
 	let tmp = test.next()?.result?;
-	let val = Value::String("animal".to_string());
+	let val = Value::Table(Table::new("animal".to_string()));
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -3924,7 +3924,7 @@ async fn function_custom_typed_returns() -> Result<()> {
 		RETURN fn::two();
 		RETURN fn::two_bad_type();
 	"#;
-	let error = "Couldn't coerce return value from function `two_bad_type`: Expected `string` but found `2`";
+	let error = "Couldn't coerce return value from function `fn::two_bad_type`: Expected `string` but found `2`";
 	Test::new(sql)
 		.await?
 		.expect_val("None")?

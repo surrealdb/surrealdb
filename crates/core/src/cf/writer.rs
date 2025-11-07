@@ -187,7 +187,7 @@ mod tests {
 		//
 
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let tb = tx.ensure_ns_db_tb(NS, DB, TB, false).await.unwrap();
+		let tb = tx.ensure_ns_db_tb(None, NS, DB, TB, false).await.unwrap();
 		tx.commit().await.unwrap();
 
 		let mut tx1 = ds.transaction(Write, Optimistic).await.unwrap().inner();
@@ -401,7 +401,7 @@ mod tests {
 		let ds = init(false).await;
 
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
-		let tb = tx.ensure_ns_db_tb(NS, DB, TB, false).await.unwrap();
+		let tb = tx.ensure_ns_db_tb(None, NS, DB, TB, false).await.unwrap();
 		tx.commit().await.unwrap();
 
 		ds.changefeed_process_at(None, 5).await.unwrap();

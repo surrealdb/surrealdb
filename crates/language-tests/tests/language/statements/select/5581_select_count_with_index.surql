@@ -11,7 +11,7 @@ value = "NONE"
 value = "[]"
 
 [[test.results]]
-value = "[{ detail: { plan: { index: 'idx_indexedField', operator: '=', value: 'cake' }, table: 'test' }, operation: 'Iterate Index Count' }, { detail: { idioms: { count: ['count'] }, type: 'Group' }, operation: 'Collector' }]"
+value = '''[{ detail: { plan: { index: 'idx_indexedField', operator: '=', value: 'cake' }, table: 'test' }, operation: 'Iterate Index Count' }, { detail: { "Aggregate expressions": {  }, Aggregations: { _a0: 'Count' }, "Group expressions": {  }, "Select expression": { count: '_a0' }, type: 'Group' }, operation: 'Collector' }]'''
 
 [[test.results]]
 value = "[{ count: 10 }]"
@@ -20,7 +20,7 @@ value = "[{ count: 10 }]"
 value = "[{ count: 10 }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { index: 'idx_indexedField', operator: '=', value: 'cake' }, table: 'test' }, operation: 'Iterate Index' }, { detail: { idioms: { count: ['count'] }, type: 'Group' }, operation: 'Collector' }]"
+value = '''[{ detail: { plan: { index: 'idx_indexedField', operator: '=', value: 'cake' }, table: 'test' }, operation: 'Iterate Index' }, { detail: { "Aggregate expressions": {  }, Aggregations: { _a0: 'Count' }, "Group expressions": {  }, "Select expression": { count: '_a0' }, type: 'Group' }, operation: 'Collector' }]'''
 
 [[test.results]]
 value = "[]"

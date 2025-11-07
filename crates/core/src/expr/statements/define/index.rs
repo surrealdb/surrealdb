@@ -1,4 +1,5 @@
 use std::fmt::{self, Display};
+use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
@@ -7,12 +8,11 @@ use uuid::Uuid;
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, TableProvider};
-use crate::catalog::{Index, IndexDefinition, TableDefinition};
+use crate::catalog::{Index, IndexDefinition, TableDefinition, TableId};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::{expr_to_ident, exprs_to_fields};
 use crate::expr::{Base, Expr, Literal, Part};
 use crate::fmt::Fmt;
@@ -28,18 +28,6 @@ pub(crate) struct DefineIndexStatement {
 	pub index: Index,
 	pub comment: Option<Expr>,
 	pub concurrently: bool,
-}
-
-impl VisitExpression for DefineIndexStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.what.visit(visitor);
-		self.cols.iter().for_each(|expr| expr.visit(visitor));
-		self.comment.iter().for_each(|expr| expr.visit(visitor));
-	}
 }
 
 impl Default for DefineIndexStatement {
@@ -74,8 +62,9 @@ impl DefineIndexStatement {
 		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "index name").await?;
 		let what = expr_to_ident(stk, ctx, opt, doc, &self.what, "index table").await?;
 
+		// Ensure the table exists
 		let (ns, db) = opt.ns_db()?;
-		let tb = txn.ensure_ns_db_tb(ns, db, &what, opt.strict).await?;
+		let tb = txn.ensure_ns_db_tb(Some(ctx), ns, db, &what, opt.strict).await?;
 
 		// Check if the definition exists
 		let index_id = if let Some(ix) =
@@ -94,18 +83,13 @@ impl DefineIndexStatement {
 			}
 			// Clear the index store cache
 			ctx.get_index_stores()
-				.index_removed(
-					ctx.get_index_builder(),
-					&txn,
-					tb.namespace_id,
-					tb.database_id,
-					&tb.name,
-					&name,
-				)
+				.index_removed(ctx.get_index_builder(), tb.namespace_id, tb.database_id, &tb, &ix)
 				.await?;
 			ix.index_id
 		} else {
-			txn.lock().await.get_next_ix_id(tb.namespace_id, tb.database_id).await?
+			ctx.try_get_sequences()?
+				.next_index_id(Some(ctx), tb.namespace_id, tb.database_id, tb.name.clone())
+				.await?
 		};
 
 		// Compute columns
@@ -163,7 +147,7 @@ impl DefineIndexStatement {
 		// Clear the cache
 		txn.clear_cache();
 		// Process the index
-		run_indexing(ctx, opt, &index_def, !self.concurrently).await?;
+		run_indexing(ctx, opt, tb.table_id, index_def.into(), !self.concurrently).await?;
 
 		// Ok all good
 		Ok(Value::None)
@@ -198,14 +182,14 @@ impl Display for DefineIndexStatement {
 pub(in crate::expr::statements) async fn run_indexing(
 	ctx: &Context,
 	opt: &Options,
-	index: &IndexDefinition,
+	tb: TableId,
+	ix: Arc<IndexDefinition>,
 	blocking: bool,
 ) -> Result<()> {
-	let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 	let rcv = ctx
 		.get_index_builder()
 		.ok_or_else(|| Error::unreachable("No Index Builder"))?
-		.build(ctx, opt.clone(), ns, db, index.clone().into(), blocking)
+		.build(ctx, opt.clone(), tb, ix, blocking)
 		.await?;
 	if let Some(rcv) = rcv {
 		rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?

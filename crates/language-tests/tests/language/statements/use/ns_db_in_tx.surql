@@ -8,7 +8,13 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "{ accesses: {  }, databases: {  }, users: {  } }"
+
+[[test.results]]
+value = "NONE"
 
 [[test.results]]
 value = "{ accesses: {  }, databases: {  }, users: {  } }"

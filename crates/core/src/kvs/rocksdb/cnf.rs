@@ -219,3 +219,10 @@ pub(super) static ROCKSDB_DELETION_FACTORY_DELETE_COUNT: LazyLock<usize> =
 /// The ratio of deletions to track in the window (default: 0.5)
 pub(super) static ROCKSDB_DELETION_FACTORY_RATIO: LazyLock<f64> =
 	lazy_env_parse!("SURREAL_ROCKSDB_DELETION_FACTORY_RATIO", f64, 0.5);
+
+/// The maximum allowed space usage for SST files in bytes (default: 0, meaning unlimited).
+/// When this limit is reached, the datastore enters read-and-deletion-only mode, where only read
+/// and delete operations are allowed. This allows gradual space recovery through data deletion.
+/// Set to 0 to disable space monitoring.
+pub(super) static ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE: LazyLock<u64> =
+	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE", u64, 0);

@@ -272,9 +272,8 @@ impl FileReader {
 	fn read_usize<R: Read>(reader: &mut R) -> Result<usize, io::Error> {
 		let mut buf = vec![0u8; FileCollector::USIZE_SIZE];
 		reader.read_exact(&mut buf)?;
-		// Safe to call unwrap because we know the slice length matches the expected
-		// length
-		let u = usize::from_be_bytes(buf.try_into().unwrap());
+		// Safe because we know the slice length matches the expected length
+		let u = usize::from_be_bytes(buf.try_into().expect("buffer size matches usize"));
 		Ok(u)
 	}
 

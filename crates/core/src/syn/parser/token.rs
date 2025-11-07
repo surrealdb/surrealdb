@@ -100,6 +100,7 @@ impl Parser<'_> {
 				| TokenKind::NaN
 				| t!("true") | t!("false")
 				| t!("fn") | t!("ml")
+				| t!("mod") | t!("silo")
 				| t!("(") | t!("{")
 				| t!("[") | t!("/")
 				| t!("|") | t!("||")

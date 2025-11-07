@@ -12,7 +12,7 @@ value = "[{ id: likes:gcnv21jr14dsvx8k2ghr, in: person:raphael, out: person:tobi
 skip-record-id-key = true
 
 [[test.results]]
-error = "Found record: `likes:1` which is a relation, but expected a RELATION"
+error = "Found record: `likes:1` which is not a relation, but expected a RELATION"
 
 */
 

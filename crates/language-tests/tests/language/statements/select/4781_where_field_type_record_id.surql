@@ -16,7 +16,7 @@ value = "[UserTag:⟨tag-1⟩, UserTag:⟨tag-2⟩]"
 
 */
 
-BEGIN;
+{
     DEFINE TABLE UserTag SCHEMAFULL PERMISSIONS FULL;
     DEFINE FIELD name ON TABLE UserTag TYPE option<string>;
     DEFINE FIELD color ON TABLE UserTag COMPUTED group.color;
@@ -41,9 +41,8 @@ BEGIN;
       { id: "utg-2", color: Color:blue }
     ];
 
-RETURN "OK";
-COMMIT;
-
+    RETURN "OK";
+};
 
 SELECT VALUE color FROM UserTag;
 SELECT VALUE id FROM UserTag WHERE color;

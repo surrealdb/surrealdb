@@ -10,7 +10,7 @@ use super::Transaction;
 use crate::catalog::providers::{
 	AuthorisationProvider, DatabaseProvider, TableProvider, UserProvider,
 };
-use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
+use crate::catalog::{DatabaseId, NamespaceId, Record, TableDefinition};
 use crate::cnf::EXPORT_BATCH_SIZE;
 use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
@@ -18,9 +18,10 @@ use crate::expr::statements::define::{DefineAccessStatement, DefineUserStatement
 use crate::expr::{Base, DefineAnalyzerStatement};
 use crate::key::record;
 use crate::kvs::KVValue;
-use crate::val::record::Record;
+use crate::sql::statements::OptionStatement;
 
 #[derive(Clone, Debug, SurrealValue)]
+#[surreal(default)]
 pub struct Config {
 	pub users: bool,
 	pub accesses: bool,
@@ -157,7 +158,7 @@ impl Transaction {
 		db: DatabaseId,
 	) -> Result<()> {
 		// Output OPTIONS
-		self.export_section("OPTION", ["OPTION IMPORT"].iter(), chn).await?;
+		self.export_section("OPTION", [OptionStatement::import()].into_iter(), chn).await?;
 
 		// Output USERS
 		if cfg.users {
@@ -409,7 +410,8 @@ impl Transaction {
 					} else {
 						// If the record is not a tombstone and a version exists, format it as an
 						// INSERT VERSION command.
-						let ts = Utc.timestamp_nanos(version.unwrap() as i64);
+						let ts =
+							Utc.timestamp_nanos(version.expect("version should be set") as i64);
 						format!("INSERT {} VERSION d'{:?}';", record.data.as_ref(), ts)
 					}
 				} else {

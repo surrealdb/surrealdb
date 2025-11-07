@@ -204,6 +204,14 @@ impl Parser<'_> {
 				self.pop_peek();
 				self.parse_custom_function(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?
 			}
+			t!("mod") => {
+				self.pop_peek();
+				self.parse_module_function(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?
+			}
+			t!("silo") => {
+				self.pop_peek();
+				self.parse_silo_function(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?
+			}
 			t!("ml") => {
 				self.pop_peek();
 				self.parse_model(stk).await.map(|x| Expr::FunctionCall(Box::new(x)))?

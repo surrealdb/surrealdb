@@ -9,12 +9,12 @@ use axum_extra::TypedHeader;
 use axum_extra::extract::Query;
 use bytes::Bytes;
 use serde::Deserialize;
-use surrealdb::types::{Array, SurrealValue, Value, Variables, vars};
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_core::iam::check::check_ns_db;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn;
+use surrealdb_types::{Array, SurrealValue, Value, Variables, vars};
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
@@ -96,7 +96,7 @@ async fn execute_and_return(
 				let v = Value::Array(Array::from(
 					res.into_iter().map(|x| x.into_value()).collect::<Vec<Value>>(),
 				));
-				Ok(Output::cbor(&v))
+				Ok(Output::cbor(v))
 			}
 			// Internal serialization
 			Some(Accept::ApplicationFlatbuffers) => {

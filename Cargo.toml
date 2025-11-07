@@ -1,12 +1,24 @@
 [workspace]
-members = [".", "crates/core", "crates/sdk", "crates/types", "crates/types-derive"]
+members = [
+    ".",
+    "crates/core",
+    "crates/sdk",
+    "crates/types",
+    "crates/types-derive",
+    "crates/surrealism/surrealism",
+    "crates/surrealism/surrealism-cli",
+    "crates/surrealism/surrealism-macros",
+    "crates/surrealism/surrealism-runtime",
+    "crates/surrealism/surrealism-types",
+    "crates/surrealism/demo"
+]
 
 [workspace.package]
 authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
 edition = "2024"
 license-file = "LICENSE"
 publish = false
-version = "3.0.0-alpha.11"
+version = "3.0.0-alpha.13"
 rust-version = "1.87.0"
 description = "A scalable, distributed, collaborative, document-graph database, for the realtime web"
 repository = "https://github.com/surrealdb/surrealdb"
@@ -22,18 +34,23 @@ categories = ["database-implementations", "data-structures", "embedded"]
 
 [workspace.dependencies]
 # workspace internal dependencies
-surrealdb = { version = "=3.0.0-alpha.11", path = "crates/sdk" }
-surrealdb-core = { version = "=3.0.0-alpha.11", path = "crates/core", default-features = false }
-surrealdb-macros = { version = "=3.0.0-alpha.11", path = "crates/macros" }
-surrealdb-types = { version = "=3.0.0-alpha.11", path = "crates/types" }
-surrealdb-types-derive = { version = "=3.0.0-alpha.11", path = "crates/types-derive" }
+surrealdb = { version = "=3.0.0-alpha.13", path = "crates/sdk" }
+surrealdb-core = { version = "=3.0.0-alpha.13", path = "crates/core", default-features = false }
+surrealdb-macros = { version = "=3.0.0-alpha.13", path = "crates/macros" }
+surrealdb-types = { version = "=3.0.0-alpha.13", path = "crates/types" }
+surrealdb-types-derive = { version = "=3.0.0-alpha.13", path = "crates/types-derive" }
+surrealism = { version = "=0.1.1", path = "crates/surrealism/surrealism" }
+surrealism-cli = { version = "=0.1.1", path = "crates/surrealism/surrealism-cli" }
+surrealism-macros = { version = "=0.1.1", path = "crates/surrealism/surrealism-macros", default-features = false }
+surrealism-runtime = { version = "=0.1.1", path = "crates/surrealism/surrealism-runtime" }
+surrealism-types = { version = "=0.1.1", path = "crates/surrealism/surrealism-types", default-features = false }
 
 # External surreal crates
 affinitypool = "0.3.1"
 dmp = "0.2.3"
 indxdb = "0.6.0"
 lexicmp = "0.2.0"
-revision = { version = "0.13.0", features = [
+revision = { version = "0.14.0", features = [
     "chrono",
     "geo",
     "roaring",
@@ -41,7 +58,7 @@ revision = { version = "0.13.0", features = [
     "rust_decimal",
     "uuid",
 ] }
-storekey = { version = "0.8.0", features = ["uuid"] }
+storekey = { version = "0.9.0", features = ["uuid"] }
 surrealkv = { version = "0.9.1" }
 surrealml = { version = "0.1.9", package = "surrealml-core", features = [
     "dynamic",
@@ -52,7 +69,7 @@ vart = "0.9.3"
 js = { version = "0.9.0", package = "rquickjs" }
 reblessive = "0.4.3"
 ## Maintained by @rushmorem
-ipnet = "2.9.0"
+ipnet = "2.11.0"
 serde-content = "0.1.0"
 
 # External Kv stores
@@ -60,7 +77,8 @@ foundationdb = { version = "0.9.2", default-features = false, features = [
     "embedded-fdb-include",
     "fdb-7_3",
 ] }
-rocksdb = { version = "0.24.0", features = ["lz4", "snappy"] }
+rocksdb = { version = "0.24.0-surreal.1", package = "surrealdb-rocksdb", features = ["lz4", "snappy"] }
+
 # Managed by surreal but mostly external code
 tikv = { version = "0.3.0-surreal.3", default-features = false, package = "surrealdb-tikv-client" }
 
@@ -74,8 +92,8 @@ argon2 = "0.5.2"
 arrayvec = "0.7.6"
 async-channel = "2.3.1"
 async-executor = "1.13.1"
-async-graphql = { version = "7.0.9", default-features = false }
-async-graphql-axum = "=7.0.13"
+async-graphql = { version = "7.0.17", default-features = false, features = ["custom-error-conversion"] }
+async-graphql-axum = "7.0.17"
 async-trait = "0.1.88"
 base64 = "0.21.5"
 bcrypt = "0.15.0"
@@ -128,9 +146,9 @@ regex = "1.10.6"
 regex-syntax = "0.8.4"
 reqwest = { version = "0.12.7", default-features = false }
 ring = "0.17.13"
-roaring = "0.10.6"
+roaring = "0.11.2"
 rustls = { version = "0.23.12", default-features = false }
-rust_decimal = { version = "1.37.2" }
+rust_decimal = { version = "1.39.0" }
 rust-s3 = "0.35.1"
 # TODO: Look at dependency, 5 years old seems unmaintained.
 rust-stemmers = "1.2.0"
@@ -143,7 +161,7 @@ sha2 = "0.10.8"
 snap = "1.1.0"
 strsim = "0.11.1"
 subtle = "2.6"
-surrealdb-protocol = { version = "0.5.1", default-features = false }
+surrealdb-protocol = { version = "0.6.0", default-features = false }
 sysinfo = "0.33.0"
 tempfile = "3.10.1"
 thiserror = "1.0.63"
@@ -174,6 +192,17 @@ time = "0.3.36"
 tracing-subscriber = "0.3.18"
 wiremock = "0.6.0"
 
+# Surrealism specific dependencies
+clap = { version = "4.5.40", features = ["derive"] }
+toml = "0.8.10"
+tar = "0.4.40"
+zstd = "0.13.0"
+wasmtime = { version = "34.0.1", default-features = false, features = ["cranelift", "winch"] }
+wasmtime-wasi = "34.0.1"
+walrus = "0.20.3"
+wasm-opt = "0.116.0"
+candle-core = "0.9.1"
+
 [package]
 name = "surreal"
 publish = false
@@ -200,12 +229,14 @@ default = [
     "storage-rocksdb",
     "scripting",
     "http",
+    "surrealism",
 ]
 http = ["surrealdb/http"]
 jwks = ["surrealdb/jwks"]
 ml = ["surrealdb/ml"]
 performance-profiler = ["dep:pprof"]
 scripting = ["surrealdb/scripting"]
+surrealism = ["surrealdb-core/surrealism"]
 storage-mem = ["surrealdb/kv-mem"]
 storage-indxdb = ["surrealdb/kv-indxdb"]
 storage-rocksdb = ["surrealdb/kv-rocksdb"]
@@ -402,6 +433,11 @@ allow_attributes = "allow"
 # https://rust-lang.github.io/rust-clippy/master/#assigning_clones
 assigning_clones = "warn"
 
+# This lint allows boolean comparisons in assert-like macros.
+# It is fine to use `assert_eq!(val, true)` in tests and is often more readable than `assert!(val)`.
+# https://rust-lang.github.io/rust-clippy/master/#bool_assert_comparison
+bool_assert_comparison = "allow"
+
 # Checks for the usage of `as _` conversion using inferred type.
 # https://rust-lang.github.io/rust-clippy/master/#cloned_instead_of_copied
 cloned_instead_of_copied = "warn"
@@ -451,6 +487,10 @@ lossy_float_literal = "warn"
 # SurrealDB relies on async functions in the AST parser and executor to avoid stack overflows.
 # Warning or denying this lint can cause unexpected errors.
 unused_async = "allow"
+
+# Checks for `.unwrap()` or `.unwrap_err()` calls on Results and `.unwrap()` call on `Option`s.
+# https://rust-lang.github.io/rust-clippy/master/index.html#unwrap_used
+unwrap_used = "warn"
 
 # Profiles
 [profile.release]

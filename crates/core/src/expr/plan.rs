@@ -22,13 +22,6 @@ impl Display for LogicalPlan {
 	}
 }
 
-impl LogicalPlan {
-	// Check if we require a writeable transaction
-	//pub(crate) fn read_only(&self) -> bool {
-	//self.expressions.iter().all(|x| x.read_only())
-	//}
-}
-
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub(crate) enum TopLevelExpr {
 	Begin,

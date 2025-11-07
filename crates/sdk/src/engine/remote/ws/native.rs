@@ -7,8 +7,9 @@ use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use serde::Deserialize;
 use surrealdb_core::dbs::QueryResultBuilder;
+use surrealdb_core::iam::token::Token;
 use surrealdb_core::rpc::{DbResponse, DbResult};
-use surrealdb_types::SurrealValue;
+use surrealdb_types::{Array, SurrealValue};
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tokio::time;
@@ -23,6 +24,7 @@ use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use trice::Instant;
 
 use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
+use crate::conn::cmd::RouterRequest;
 use crate::conn::{self, Command, RequestData, Route, Router};
 use crate::engine::IntervalStream;
 use crate::engine::remote::ws::{Client, PING_INTERVAL};
@@ -157,9 +159,9 @@ async fn router_handle_route(
 		return HandleResult::Ok;
 	};
 
-	// Merge stored vars with query vars for RawQuery
+	// Merge stored vars with query vars for Query
 	let command = match command {
-		Command::RawQuery {
+		Command::Query {
 			txn,
 			query,
 			variables,
@@ -167,7 +169,7 @@ async fn router_handle_route(
 			let mut merged_vars =
 				state.vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Variables>();
 			merged_vars.extend(variables);
-			Command::RawQuery {
+			Command::Query {
 				txn,
 				query,
 				variables: merged_vars,
@@ -230,8 +232,11 @@ async fn router_handle_route(
 			state.replay.insert(ReplayMethod::Invalidate, command.clone());
 		}
 		Command::Authenticate {
-			token: _,
+			ref token,
 		} => {
+			effect = RequestEffect::Authenticate {
+				token: Some(token.clone()),
+			};
 			state.replay.insert(ReplayMethod::Authenticate, command.clone());
 		}
 		_ => {}
@@ -242,12 +247,12 @@ async fn router_handle_route(
 			let _ = response.send(Err(Error::BackupsNotSupported.into())).await;
 			return HandleResult::Ok;
 		};
-		trace!("Request {:?}", request);
 
 		let request_value = request.into_value();
 
-		// Unwrap because a router request cannot fail to serialize.
-		let payload = surrealdb_core::rpc::format::flatbuffers::encode(&request_value).unwrap();
+		// Router request should not fail to serialize
+		let payload = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
+			.expect("router request should serialize");
 
 		Message::Binary(payload.into())
 	};
@@ -284,7 +289,6 @@ async fn router_handle_route(
 async fn router_handle_response(message: Message, state: &mut RouterState) -> HandleResult {
 	match db_response_from_message(&message) {
 		Ok(response) => {
-			trace!("{response:?}");
 			let Some(response) = response else {
 				return HandleResult::Ok;
 			};
@@ -295,7 +299,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 					// Try to extract i64 from Value
 					if let Value::Number(surrealdb_types::Number::Int(id_num)) = id {
 						match state.pending_requests.remove(&id_num) {
-							Some(pending) => {
+							Some(mut pending) => {
 								// We can only route responses with IDs
 								match response.result {
 									Ok(DbResult::Query(results)) => {
@@ -313,6 +317,10 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 											} => {
 												state.vars.shift_remove(&key);
 											}
+											RequestEffect::Authenticate {
+												..
+											} => { /* Authenticate responses are handled in the `DBResult::Other` variant */
+											}
 										}
 										if let Err(err) =
 											pending.response_channel.send(Ok(results)).await
@@ -325,7 +333,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 									Ok(DbResult::Live(_notification)) => {
 										tracing::error!("Unexpected live query result in response");
 									}
-									Ok(DbResult::Other(value)) => {
+									Ok(DbResult::Other(mut value)) => {
 										// Apply effect only on success
 										match pending.effect {
 											RequestEffect::None => {}
@@ -340,6 +348,13 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 											} => {
 												state.vars.shift_remove(&key);
 											}
+											RequestEffect::Authenticate {
+												token,
+											} => {
+												if let Some(token) = token {
+													value = token.into_value();
+												}
+											}
 										}
 										let result = QueryResultBuilder::started_now()
 											.finish_with_result(Ok(value));
@@ -352,8 +367,78 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 										}
 									}
 									Err(error) => {
-										// Don't apply effect on error
-										let _res = pending.response_channel.send(Err(error)).await;
+										// Automatic refresh token handling:
+										// If a request fails with "token has expired" and we have a
+										// refresh token, automatically attempt to refresh
+										// the authentication and retry the request.
+										if let RequestEffect::Authenticate {
+											token: Some(token),
+										} = pending.effect
+										{
+											// Check if this is a token with refresh capability
+											if let Token::WithRefresh {
+												..
+											} = &token
+											{
+												// If the error is due to token expiration, attempt
+												// automatic refresh
+												if error.to_string().contains("token has expired") {
+													// Construct a new authentication request with
+													// the token (which includes the
+													// refresh token for automatic renewal)
+													let request = RouterRequest {
+														id: Some(id_num),
+														method: "authenticate",
+														params: Some(Value::Array(Array::from(
+															vec![token.into_value()],
+														))),
+														txn: None,
+													};
+													let request_value = request.into_value();
+													let value =
+											surrealdb_core::rpc::format::flatbuffers::encode(
+												&request_value,
+											)
+											.expect("router request should serialize");
+													let message = Message::Binary(value.into());
+													// Send the refresh request
+													match state.sink.send(message).await {
+														Err(send_error) => {
+															trace!(
+																"failed to send refresh query to the server; {send_error:?}"
+															);
+															// If we can't send the refresh request,
+															// return the original error
+															pending
+																.response_channel
+																.send(Err(error))
+																.await
+																.ok();
+														}
+														Ok(..) => {
+															// Successfully queued the refresh
+															// request.
+															// Clear the token from the effect to
+															// prevent infinite retry loops,
+															// and keep the request pending for
+															// retry after refresh succeeds.
+															pending.effect =
+																RequestEffect::Authenticate {
+																	token: None,
+																};
+															state
+																.pending_requests
+																.insert(id_num, pending);
+														}
+													}
+													return HandleResult::Ok;
+												}
+											}
+										}
+
+										// For all other errors, or if automatic refresh isn't
+										// applicable, return the error to the caller
+										pending.response_channel.send(Err(error)).await.ok();
 									}
 								}
 							}
@@ -380,14 +465,14 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 										uuid: live_query_id,
 									}
 									.into_router_request(None)
-									.unwrap();
+									.expect("KILL command should convert to router request");
 
 									let request_value = request.into_value();
 
 									let value = surrealdb_core::rpc::format::flatbuffers::encode(
 										&request_value,
 									)
-									.unwrap();
+									.expect("router request should serialize");
 									Message::Binary(value.into())
 								};
 								if let Err(error) = state.sink.send(kill).await {
@@ -485,8 +570,8 @@ async fn router_reconnect(
 
 					let request_value = request.into_value();
 
-					let message =
-						surrealdb_core::rpc::format::flatbuffers::encode(&request_value).unwrap();
+					let message = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
+						.expect("router request should serialize");
 
 					if let Err(error) = state.sink.send(Message::Binary(message.into())).await {
 						trace!("{error}");
@@ -500,11 +585,11 @@ async fn router_reconnect(
 						value: value.clone(),
 					}
 					.into_router_request(None)
-					.unwrap();
+					.expect("SET command should convert to router request");
 					trace!("Request {:?}", request);
 					let request_value = request.into_value();
-					let payload =
-						surrealdb_core::rpc::format::flatbuffers::encode(&request_value).unwrap();
+					let payload = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
+						.expect("router request should serialize");
 
 					if let Err(error) = state.sink.send(Message::Binary(payload.into())).await {
 						trace!("{error}");
@@ -532,9 +617,12 @@ pub(crate) async fn run_router(
 	route_rx: Receiver<Route>,
 ) {
 	let ping = {
-		let request = Command::Health.into_router_request(None).unwrap();
+		let request = Command::Health
+			.into_router_request(None)
+			.expect("HEALTH command should convert to router request");
 		let request_value = request.into_value();
-		let value = surrealdb_core::rpc::format::flatbuffers::encode(&request_value).unwrap();
+		let value = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
+			.expect("router request should serialize");
 		Message::Binary(value.into())
 	};
 

@@ -18,7 +18,6 @@ use crate::expr::access_type::{
 	BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccessIssue, JwtAccessVerify,
 	JwtAccessVerifyJwks, JwtAccessVerifyKey,
 };
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{AccessType, Algorithm, Base, Expr, Idiom, JwtAccess, Literal, RecordAccess};
 use crate::iam::{Action, ResourceKind};
@@ -33,17 +32,6 @@ pub(crate) struct DefineAccessStatement {
 	pub authenticate: Option<Expr>,
 	pub duration: AccessDuration,
 	pub comment: Option<Expr>,
-}
-
-impl VisitExpression for DefineAccessStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.authenticate.iter().for_each(|expr| expr.visit(visitor));
-		self.comment.iter().for_each(|expr| expr.visit(visitor));
-	}
 }
 
 impl Default for DefineAccessStatement {
@@ -317,7 +305,7 @@ impl DefineAccessStatement {
 				}
 				// Process the statement
 				let key = crate::key::namespace::ac::new(ns, &definition.name);
-				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+				txn.get_or_add_ns(Some(ctx), opt.ns()?, opt.strict).await?;
 				txn.set(&key, &definition, None).await?;
 				// Clear the cache
 				txn.clear_cache();

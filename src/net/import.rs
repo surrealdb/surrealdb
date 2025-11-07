@@ -4,11 +4,11 @@ use axum::routing::post;
 use axum::{Extension, Router};
 use axum_extra::TypedHeader;
 use futures::TryStreamExt;
-use surrealdb::types::SurrealValue;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::dbs::capabilities::RouteTarget;
 use surrealdb_core::iam::Action::Edit;
 use surrealdb_core::iam::ResourceKind::Any;
+use surrealdb_types::SurrealValue;
 use tower_http::limit::RequestBodyLimitLayer;
 
 use super::AppState;
@@ -63,7 +63,7 @@ async fn handler(
 					// TODO(3.0): This code here is using the wrong serialization method which might
 					// result in some values of the code being serialized wrong.
 					let res = res.into_value();
-					Ok(Output::cbor(&res))
+					Ok(Output::cbor(res))
 				}
 				// Return nothing
 				Some(Accept::ApplicationOctetStream) => Ok(Output::None),

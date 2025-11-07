@@ -1,39 +1,60 @@
 use std::fmt;
 use std::fmt::Debug;
 
+use anyhow::{Result, bail};
+
 use crate::catalog::ViewDefinition;
-use crate::expr::expression::VisitExpression;
+use crate::catalog::aggregation::{AggregateFields, AggregationAnalysis};
+use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Cond, Expr, Fields, Groups, Value};
+use crate::expr::{Cond, Fields, Groups, Value};
 use crate::fmt::{EscapeIdent, Fmt};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct View {
+	pub(crate) materialize: bool,
 	pub(crate) expr: Fields,
 	pub(crate) what: Vec<String>,
 	pub(crate) cond: Option<Cond>,
 	pub(crate) group: Option<Groups>,
 }
 
-impl VisitExpression for View {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.expr.visit(visitor);
-		self.cond.iter().for_each(|cond| cond.0.visit(visitor));
-		self.group.iter().for_each(|groups| groups.visit(visitor));
-	}
-}
-
 impl View {
-	pub(crate) fn to_definition(&self) -> ViewDefinition {
-		ViewDefinition {
-			fields: self.expr.clone(),
-			what: self.what.clone(),
-			cond: self.cond.clone().map(|c| c.0),
-			groups: self.group.clone(),
+	pub(crate) fn to_definition(&self) -> Result<ViewDefinition> {
+		if !self.materialize {
+			return Ok(ViewDefinition::Select {
+				fields: self.expr.clone(),
+				tables: self.what.clone(),
+				condition: self.cond.clone().map(|x| x.0),
+				groups: self.group.clone(),
+			});
 		}
+
+		let Some(group) = self.group.as_ref() else {
+			// No group, nothing to aggregate.
+			return Ok(ViewDefinition::Materialized {
+				fields: self.expr.clone(),
+				tables: self.what.clone(),
+				condition: self.cond.clone().map(|x| x.0),
+			});
+		};
+
+		let analysis = AggregationAnalysis::analyze_fields_groups(&self.expr, group, true)?;
+		if let AggregateFields::Value(_) = analysis.fields {
+			bail!(Error::InvalidAggregation {
+				message: "the selector `VALUE` clause is not supported on DEFINE TABLE .. AS SELECT .. GROUP .. aggregates"
+					.to_string()
+			})
+		}
+
+		Ok(ViewDefinition::Aggregated {
+			groups: group.clone(),
+			fields: self.expr.clone(),
+
+			analysis,
+			tables: self.what.clone(),
+			condition: self.cond.clone().map(|x| x.0),
+		})
 	}
 }
 

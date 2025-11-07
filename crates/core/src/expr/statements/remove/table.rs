@@ -4,13 +4,12 @@ use anyhow::Result;
 use reblessive::tree::Stk;
 use uuid::Uuid;
 
-use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
+use crate::catalog::{TableDefinition, ViewDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
@@ -23,14 +22,6 @@ pub(crate) struct RemoveTableStatement {
 	pub expunge: bool,
 }
 
-impl VisitExpression for RemoveTableStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-	}
-}
 impl Default for RemoveTableStatement {
 	fn default() -> Self {
 		Self {
@@ -59,8 +50,6 @@ impl RemoveTableStatement {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
-		// Remove the index stores
-		ctx.get_index_stores().table_removed(ctx.get_index_builder(), &txn, ns, db, &name).await?;
 		// Get the defined table
 		let Some(tb) = txn.get_tb(ns, db, &name).await? else {
 			if self.if_exists {
@@ -72,6 +61,8 @@ impl RemoveTableStatement {
 			}
 			.into());
 		};
+		// Remove the index stores
+		ctx.get_index_stores().table_removed(ctx.get_index_builder(), &txn, ns, db, &tb).await?;
 
 		// Get the foreign tables
 		let fts = txn.all_tb_views(ns, db, &name).await?;
@@ -108,8 +99,21 @@ impl RemoveTableStatement {
 		}
 		// Check if this is a foreign table
 		if let Some(view) = &tb.view {
+			let (ViewDefinition::Materialized {
+				tables,
+				..
+			}
+			| ViewDefinition::Aggregated {
+				tables,
+				..
+			}
+			| ViewDefinition::Select {
+				tables,
+				..
+			}) = &view;
+
 			// Process each foreign table
-			for ft in view.what.iter() {
+			for ft in tables.iter() {
 				// Save the view config
 				let key = crate::key::table::ft::new(ns, db, ft, &name);
 				txn.del(&key).await?;

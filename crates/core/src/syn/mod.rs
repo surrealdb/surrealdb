@@ -8,7 +8,7 @@ use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
 use crate::sql::kind::KindLiteral;
-use crate::sql::{Ast, Block, Expr, Fetchs, Fields, Idiom, Kind, Output, RecordIdLit};
+use crate::sql::{Ast, Block, Expr, Fetchs, Fields, Function, Idiom, Kind, Output, RecordIdLit};
 use crate::types::{PublicDatetime, PublicDuration, PublicRecordId, PublicValue};
 
 pub mod error;
@@ -40,7 +40,7 @@ pub fn could_be_reserved_keyword(s: &str) -> bool {
 
 pub fn parse_with<F, R>(input: &[u8], f: F) -> Result<R>
 where
-	F: AsyncFnOnce(&mut Parser, &mut Stk) -> ParseResult<R>,
+	F: AsyncFnOnce(&mut Parser<'_>, &mut Stk) -> ParseResult<R>,
 {
 	parse_with_settings(input, settings_from_capabilities(&Capabilities::all()), f)
 }
@@ -67,9 +67,9 @@ pub fn settings_from_capabilities(cap: &Capabilities) -> ParserSettings {
 		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
 		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
 		references_enabled: cap.allows_experimental(&ExperimentalTarget::RecordReferences),
-		bearer_access_enabled: cap.allows_experimental(&ExperimentalTarget::BearerAccess),
 		define_api_enabled: cap.allows_experimental(&ExperimentalTarget::DefineApi),
 		files_enabled: cap.allows_experimental(&ExperimentalTarget::Files),
+		surrealism_enabled: cap.allows_experimental(&ExperimentalTarget::Surrealism),
 		..Default::default()
 	}
 }
@@ -133,6 +133,25 @@ pub fn expr_with_capabilities(input: &str, capabilities: &Capabilities) -> Resul
 		input.as_bytes(),
 		settings_from_capabilities(capabilities),
 		async |parser, stk| parser.parse_expr_field(stk).await,
+	)
+}
+
+/// Parses a SurrealQL [`Value`].
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn function(input: &str) -> Result<Function> {
+	let capabilities = Capabilities::all();
+	function_with_capabilities(input, &capabilities)
+}
+
+/// Parses a SurrealQL [`Value`].
+#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+pub fn function_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Function> {
+	trace!(target: TARGET, "Parsing SurrealQL function name");
+
+	parse_with_settings(
+		input.as_bytes(),
+		settings_from_capabilities(capabilities),
+		async |parser, _stk| parser.parse_function_name().await,
 	)
 }
 
@@ -227,9 +246,9 @@ pub fn block(input: &str) -> Result<Block> {
 			legacy_strands: true,
 			flexible_record_id: true,
 			references_enabled: true,
-			bearer_access_enabled: true,
 			define_api_enabled: true,
 			files_enabled: true,
+			surrealism_enabled: true,
 			..Default::default()
 		},
 		async |parser, stk| {

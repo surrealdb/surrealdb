@@ -1,5 +1,7 @@
+#![allow(clippy::unwrap_used)]
 #![cfg(feature = "kv-surrealkv")]
 
+use surrealdb::opt::Config;
 use surrealdb::types::Value;
 use surrealdb_types::object;
 use ulid::Ulid;
@@ -7,7 +9,8 @@ use ulid::Ulid;
 use super::CreateDb;
 
 pub async fn select_with_version(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
@@ -62,7 +65,8 @@ pub async fn select_with_version(new_db: impl CreateDb) {
 }
 
 pub async fn create_with_version(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
@@ -107,7 +111,8 @@ pub async fn create_with_version(new_db: impl CreateDb) {
 }
 
 pub async fn insert_with_version(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
@@ -152,7 +157,8 @@ pub async fn insert_with_version(new_db: impl CreateDb) {
 }
 
 pub async fn info_for_db_with_versioned_tables(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
@@ -184,7 +190,8 @@ pub async fn info_for_db_with_versioned_tables(new_db: impl CreateDb) {
 }
 
 pub async fn info_for_table_with_versioned_fields(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 

@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use criterion::Bencher;
 use criterion::measurement::WallTime;
 use surrealdb::Surreal;

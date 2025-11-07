@@ -10,7 +10,6 @@ use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::expression::VisitExpression;
 use crate::expr::part::{Next, NextMethod};
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::statements::info::InfoStructure;
@@ -52,19 +51,6 @@ impl InfoStructure for Idioms {
 /// An idiom defines a way to reference a field, reference, or other part of the document graph.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct Idiom(pub(crate) Vec<Part>);
-
-impl Deref for Idiom {
-	type Target = [Part];
-	fn deref(&self) -> &Self::Target {
-		self.0.as_slice()
-	}
-}
-
-impl From<Vec<Part>> for Idiom {
-	fn from(v: Vec<Part>) -> Self {
-		Self(v)
-	}
-}
 
 impl Idiom {
 	/// Returns an idiom for a field of the given name.
@@ -119,7 +105,9 @@ impl Idiom {
 
 		let mut iter = self.0.iter();
 		match iter.next() {
-			Some(Part::Field(v)) => write!(&mut s, "{}", EscapeKwFreeIdent(v)).unwrap(),
+			Some(Part::Field(v)) => {
+				write!(&mut s, "{}", EscapeKwFreeIdent(v)).expect("writing to string")
+			}
 			Some(x) => s.push_str(&x.to_raw_string()),
 			None => {}
 		};
@@ -176,12 +164,16 @@ impl Idiom {
 	}
 }
 
-impl VisitExpression for Idiom {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.0.iter().for_each(|p| p.visit(visitor))
+impl Deref for Idiom {
+	type Target = [Part];
+	fn deref(&self) -> &Self::Target {
+		self.0.as_slice()
+	}
+}
+
+impl From<Vec<Part>> for Idiom {
+	fn from(v: Vec<Part>) -> Self {
+		Self(v)
 	}
 }
 

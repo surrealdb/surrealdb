@@ -39,7 +39,6 @@ mod database_upgrade {
 		import_data_on_docker(&client, "DEMO_DATA", DEAL_STORE_DATASET).await;
 		create_data_on_docker(&client, "IDX", &DATA_IDX).await;
 		create_data_on_docker(&client, "FTS", &DATA_FTS).await;
-		create_data_on_docker(&client, "MTREE", &DATA_MTREE).await;
 
 		// Check the data set
 		check_data_on_docker(&client, "IDX", &CHECK_IDX).await;
@@ -68,7 +67,6 @@ mod database_upgrade {
 		check_migrated_data(&db, "IDX", &CHECK_IDX).await;
 		check_migrated_data(&db, "DB", &CHECK_DB).await;
 		check_migrated_data(&db, "FTS", &CHECK_FTS).await;
-		check_migrated_data(&db, "MTREE", &CHECK_MTREE_DB).await;
 		check_migrated_data(&db, "KNN_BRUTEFORCE", &CHECK_KNN_BRUTEFORCE).await;
 
 		// Collect INFO FOR NS/DB on the migrated database
@@ -197,19 +195,6 @@ mod database_upgrade {
 	const CHECK_FTS: [Check; 1] = [(
 		"SELECT search::highlight('<em>','</em>', 1) AS name FROM account WHERE name @1@ 'Tobie'",
 		Some("[{ name: '<em>Tobie</em>' }]"),
-	)];
-
-	// Set of DATA for VectorSearch and  Knn Operator checking
-	const DATA_MTREE: [&str; 4] = [
-		"CREATE pts:1 SET point = [1,2,3,4]",
-		"CREATE pts:2 SET point = [4,5,6,7]",
-		"CREATE pts:3 SET point = [8,9,10,11]",
-		"DEFINE INDEX mt_pts ON pts FIELDS point MTREE DIMENSION 4",
-	];
-
-	const CHECK_MTREE_DB: [Check; 1] = [(
-		"SELECT id, vector::distance::euclidean(point, [2,3,4,5]) AS dist FROM pts WHERE point <|2|> [2,3,4,5]",
-		Some("[{ dist: 2f, id: pts:1 }, { dist: 4f, id: pts:2 }]"),
 	)];
 
 	const CHECK_KNN_BRUTEFORCE: [Check; 1] = [(
@@ -378,7 +363,6 @@ mod database_upgrade {
 		check_info_key(prev, next, "analyzers");
 		check_info_key(prev, next, "users");
 		check_info_key(prev, next, "indexes");
-		check_info_key(prev, next, "tables");
 	}
 
 	async fn check_migrated_data(db: &Surreal<Any>, info: &str, queries: &[Check]) {

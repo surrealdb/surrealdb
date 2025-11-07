@@ -20,16 +20,12 @@ where
 {
 	/// Creates a commit future
 	pub fn commit(self) -> Commit<C> {
-		Commit {
-			client: self.client,
-		}
+		Commit::from_transaction(self)
 	}
 
 	/// Creates a cancel future
 	pub fn cancel(self) -> Cancel<C> {
-		Cancel {
-			client: self.client,
-		}
+		Cancel::from_transaction(self)
 	}
 
 	/// See [Surreal::query]

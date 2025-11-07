@@ -7,7 +7,7 @@ use std::sync::{Arc, OnceLock};
 
 use surrealdb_types::{self, SurrealValue, Value, Variables};
 
-use crate::opt::auth::{Credentials, Jwt};
+use crate::opt::auth::{Credentials, Token};
 use crate::opt::{IntoEndpoint, IntoExportDestination, WaitFor, auth};
 use crate::{Connect, Connection, OnceLockExt, Surreal};
 
@@ -60,7 +60,7 @@ pub use insert::Insert;
 pub use invalidate::Invalidate;
 pub use merge::Merge;
 pub use patch::Patch;
-pub use query::{Query, QueryStream};
+pub use query::{IntoVariables, Query, QueryStream};
 pub use run::{IntoFn, Run};
 pub use select::Select;
 pub use set::Set;
@@ -232,7 +232,7 @@ where
 		}
 	}
 
-	pub fn transaction(&self) -> Begin<C> {
+	pub fn begin(&self) -> Begin<C> {
 		Begin {
 			client: self.clone(),
 		}
@@ -407,11 +407,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signup<R>(&'_ self, credentials: impl Credentials<auth::Signup, R>) -> Signup<'_, C, R> {
+	pub fn signup(&'_ self, credentials: impl Credentials<auth::Signup>) -> Signup<'_, C> {
 		Signup {
 			client: Cow::Borrowed(self),
 			credentials: credentials.into_value(),
-			response_type: PhantomData,
 		}
 	}
 
@@ -524,11 +523,10 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn signin<R>(&'_ self, credentials: impl Credentials<auth::Signin, R>) -> Signin<'_, C, R> {
+	pub fn signin(&'_ self, credentials: impl Credentials<auth::Signin>) -> Signin<'_, C> {
 		Signin {
 			client: Cow::Borrowed(self),
 			credentials: credentials.into_value(),
-			response_type: PhantomData,
 		}
 	}
 
@@ -547,6 +545,8 @@ where
 	pub fn invalidate(&'_ self) -> Invalidate<'_, C> {
 		Invalidate {
 			client: Cow::Borrowed(self),
+			token: Value::None,
+			typ: PhantomData,
 		}
 	}
 
@@ -563,10 +563,11 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn authenticate(&'_ self, token: impl Into<Jwt>) -> Authenticate<'_, C> {
+	pub fn authenticate(&'_ self, token: impl Into<Token>) -> Authenticate<'_, C> {
 		Authenticate {
 			client: Cow::Borrowed(self),
 			token: token.into(),
+			token_type: PhantomData,
 		}
 	}
 

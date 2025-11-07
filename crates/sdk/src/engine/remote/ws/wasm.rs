@@ -8,8 +8,9 @@ use futures::stream::{SplitSink, SplitStream};
 use futures::{FutureExt, SinkExt, StreamExt};
 use pharos::{Channel, Events, Observable, ObserveConfig};
 use surrealdb_core::dbs::QueryResultBuilder;
+use surrealdb_core::iam::Token;
 use surrealdb_core::rpc::{DbResponse, DbResult};
-use surrealdb_types::{SurrealValue, Value, Variables, object};
+use surrealdb_types::{Array, SurrealValue, Value, Variables, object};
 use tokio::sync::watch;
 use trice::Instant;
 use wasm_bindgen_futures::spawn_local;
@@ -18,6 +19,7 @@ use wasmtimer::tokio::MissedTickBehavior;
 use ws_stream_wasm::{WsEvent, WsMessage as Message, WsMeta, WsStream};
 
 use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
+use crate::conn::cmd::RouterRequest;
 use crate::conn::{self, Command, RequestData, Route, Router};
 use crate::engine::IntervalStream;
 use crate::engine::remote::ws::{Client, PING_INTERVAL};
@@ -89,9 +91,9 @@ async fn router_handle_request(
 		return HandleResult::Ok;
 	};
 
-	// Merge stored vars with query vars for RawQuery
+	// Merge stored vars with query vars for Query
 	let command = match command {
-		Command::RawQuery {
+		Command::Query {
 			txn,
 			query,
 			variables,
@@ -99,7 +101,7 @@ async fn router_handle_request(
 			let mut merged_vars =
 				state.vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Variables>();
 			merged_vars.extend(variables);
-			Command::RawQuery {
+			Command::Query {
 				txn,
 				query,
 				variables: merged_vars,
@@ -164,8 +166,11 @@ async fn router_handle_request(
 			state.replay.insert(ReplayMethod::Invalidate, command.clone());
 		}
 		Command::Authenticate {
-			..
+			ref token,
 		} => {
+			effect = RequestEffect::Authenticate {
+				token: Some(token.clone()),
+			};
 			state.replay.insert(ReplayMethod::Authenticate, command.clone());
 		}
 		_ => {}
@@ -216,7 +221,7 @@ async fn router_handle_response(
 					Some(id) => {
 						if let Ok(id) = id.into_int() {
 							// We can only route responses with IDs
-							if let Some(pending) = state.pending_requests.remove(&id) {
+							if let Some(mut pending) = state.pending_requests.remove(&id) {
 								match response.result {
 									Ok(DbResult::Query(results)) => {
 										// Apply effect only on success
@@ -233,6 +238,7 @@ async fn router_handle_response(
 											} => {
 												state.vars.shift_remove(&key);
 											}
+											_ => {}
 										}
 										let _res = pending.response_channel.send(Ok(results)).await;
 									}
@@ -255,6 +261,9 @@ async fn router_handle_response(
 											} => {
 												state.vars.shift_remove(&key);
 											}
+											RequestEffect::Authenticate {
+												..
+											} => {}
 										}
 										// Other results should be converted to a single result vec
 										let _res = pending
@@ -263,9 +272,79 @@ async fn router_handle_response(
 											.await;
 									}
 									Err(error) => {
-										// Don't apply effect on error
-										let _res =
-											pending.response_channel.send(Err(error.into())).await;
+										// Automatic refresh token handling:
+										// If a request fails with "token has expired" and we have a
+										// refresh token, automatically attempt to refresh
+										// the authentication and retry the request.
+										if let RequestEffect::Authenticate {
+											token: Some(token),
+										} = pending.effect
+										{
+											// Check if this is a token with refresh capability
+											if let Token::WithRefresh {
+												..
+											} = &token
+											{
+												// If the error is due to token expiration, attempt
+												// automatic refresh
+												if error.to_string().contains("token has expired") {
+													// Construct a new authentication request with
+													// the token (which includes the
+													// refresh token for automatic renewal)
+													let request = RouterRequest {
+														id: Some(id),
+														method: "authenticate",
+														params: Some(Value::Array(Array::from(
+															vec![token.into_value()],
+														))),
+														txn: None,
+													};
+													let request_value = request.into_value();
+													let value =
+											surrealdb_core::rpc::format::flatbuffers::encode(
+												&request_value,
+											)
+											.expect("router request should serialize");
+													let message = Message::Binary(value.into());
+													// Send the refresh request
+													match state.sink.send(message).await {
+														Err(send_error) => {
+															trace!(
+																"failed to send refresh query to the server; {send_error:?}"
+															);
+															// If we can't send the refresh request,
+															// return the original error
+															pending
+																.response_channel
+																.send(Err(error))
+																.await
+																.ok();
+														}
+														Ok(..) => {
+															// Successfully queued the refresh
+															// request.
+															// Clear the token from the effect to
+															// prevent infinite retry loops,
+															// and keep the request pending for
+															// retry after refresh succeeds.
+															pending.effect =
+																RequestEffect::Authenticate {
+																	token: None,
+																};
+															state
+																.pending_requests
+																.insert(id, pending);
+														}
+													}
+
+													return HandleResult::Ok;
+												}
+											}
+										}
+
+										// For all other errors, or if automatic refresh isn't
+										// applicable, return the error to the caller
+										pending.response_channel.send(Err(error)).await.ok();
 									}
 								}
 							} else {

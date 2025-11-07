@@ -13,7 +13,7 @@ use crate::expr::{Expr, Literal, Part, Value};
 use crate::fmt::{EscapeIdent, EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
-	Regex, Uuid,
+	Regex, Set, Uuid,
 };
 
 #[revisioned(revision = 1)]
@@ -336,6 +336,12 @@ impl<T: HasKind> HasKind for Vec<T> {
 impl HasKind for Array {
 	fn kind() -> Kind {
 		Kind::Array(Box::new(Kind::Any), None)
+	}
+}
+
+impl HasKind for Set {
+	fn kind() -> Kind {
+		Kind::Set(Box::new(Kind::Any), None)
 	}
 }
 

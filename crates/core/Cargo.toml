@@ -45,6 +45,7 @@ scripting = ["dep:js"]
 http = ["dep:reqwest"]
 ml = ["dep:surrealml"]
 jwks = ["dep:reqwest"]
+surrealism = ["dep:surrealism-runtime"]
 allocator = ["dep:jemallocator"]
 arbitrary = [
     "dep:arbitrary",
@@ -193,10 +194,12 @@ wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
 ws_stream_wasm.workspace = true
 
 # NON-WASM DEPENDENCY CONFIGURATION
+# Note: surrealism-runtime is only available on non-WASM targets
+# The surrealism feature will be enabled by default for non-WASM in the parent workspace
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 rust-s3 = { workspace = true, optional = true }
 surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers", "rpc"] }
-surrealdb-types = { workspace = true, features = ["js"] }
+surrealdb-types = { workspace = true }
 tokio = { workspace = true, default-features = false, features = [
     "macros",
     "io-util",
@@ -208,6 +211,7 @@ tokio = { workspace = true, default-features = false, features = [
 ] }
 tokio-tungstenite = { workspace = true, optional = true }
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
+surrealism-runtime = { workspace = true, optional = true }
 
 # OS-SPECIFIC ALLOCATOR DEPENDENCIES
 [target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "ios", target_os = "android", target_os = "freebsd", target_os = "netbsd", target_os = "openbsd"))'.dependencies]

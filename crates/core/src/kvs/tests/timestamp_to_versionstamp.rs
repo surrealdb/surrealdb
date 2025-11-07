@@ -30,10 +30,16 @@ pub async fn timestamp_to_versionstamp(new_ds: impl CreateDs) {
 	let node_id = Uuid::parse_str("A905CA25-56ED-49FB-B759-696AEA87C342").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
-	// Give the current versionstamp a timestamp of 0
-	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	let db = tx.ensure_ns_db("myns", "mydb", false).await.unwrap();
 
+	let db = {
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		// The ns and db should already exist, but we need to get the versionstamp for the db
+		let db = tx.ensure_ns_db(None, "myns", "mydb", false).await.unwrap();
+		tx.commit().await.unwrap();
+		db
+	};
+
+	// Give the current versionstamp a timestamp of 0
 	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
 	tr.set_timestamp_for_versionstamp(0, db.namespace_id, db.database_id).await.unwrap();
 	tr.commit().await.unwrap();
@@ -82,38 +88,51 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 	// Declare ns/db
 	ds.execute("USE NS myns; USE DB mydb; CREATE record", &Session::owner(), None).await.unwrap();
 
-	let tx = ds.transaction(Write, Optimistic).await.unwrap();
-	let db = tx.get_or_add_db("myns", "mydb", false).await.unwrap();
+	let db = {
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
+		// The ns and db should already exist, but we need to get the versionstamp for the db
+		let db = tx.get_or_add_db(None, "myns", "mydb", false).await.unwrap();
+		tx.commit().await.unwrap();
+		db
+	};
 
 	// Give the current versionstamp a timestamp of 0
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx.set_timestamp_for_versionstamp(0, db.namespace_id, db.database_id).await.unwrap();
-	tx.commit().await.unwrap();
+	{
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		tx.set_timestamp_for_versionstamp(0, db.namespace_id, db.database_id).await.unwrap();
+		tx.commit().await.unwrap();
+	}
 
 	// Get the versionstamp for timestamp 0
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	let vs1 = tx
-		.get_versionstamp_from_timestamp(0, db.namespace_id, db.database_id)
-		.await
-		.unwrap()
-		.unwrap();
-	tx.commit().await.unwrap();
+	let vs1 = {
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let vs1 = tx
+			.get_versionstamp_from_timestamp(0, db.namespace_id, db.database_id)
+			.await
+			.unwrap()
+			.unwrap();
+		tx.commit().await.unwrap();
+		vs1
+	};
 
 	// Give the current versionstamp a timestamp of 1
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	tx.set_timestamp_for_versionstamp(1, db.namespace_id, db.database_id).await.unwrap();
-	tx.commit().await.unwrap();
+	{
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		tx.set_timestamp_for_versionstamp(1, db.namespace_id, db.database_id).await.unwrap();
+		tx.commit().await.unwrap();
+	}
 
 	// Get the versionstamp for timestamp 1
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	let vs2 = tx
-		.get_versionstamp_from_timestamp(1, db.namespace_id, db.database_id)
-		.await
-		.unwrap()
-		.unwrap();
-	tx.commit().await.unwrap();
-
-	assert!(vs1 < vs2);
+	{
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let vs2 = tx
+			.get_versionstamp_from_timestamp(1, db.namespace_id, db.database_id)
+			.await
+			.unwrap()
+			.unwrap();
+		tx.commit().await.unwrap();
+		assert!(vs1 < vs2);
+	}
 
 	// Scan range
 	let start =
@@ -121,39 +140,43 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 	let end = crate::key::database::ts::new(db.namespace_id, db.database_id, u64::MAX)
 		.encode_key()
 		.unwrap();
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	let scanned = tx.scan(start.clone()..end.clone(), u32::MAX, None).await.unwrap();
-	tx.commit().await.unwrap();
-	assert_eq!(scanned.len(), 2);
-	assert_eq!(
-		scanned[0].0,
-		crate::key::database::ts::new(db.namespace_id, db.database_id, 0).encode_key().unwrap()
-	);
-	assert_eq!(
-		scanned[1].0,
-		crate::key::database::ts::new(db.namespace_id, db.database_id, 1).encode_key().unwrap()
-	);
+	{
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let scanned = tx.scan(start.clone()..end.clone(), u32::MAX, None).await.unwrap();
+		tx.commit().await.unwrap();
+		assert_eq!(scanned.len(), 2);
+		assert_eq!(
+			scanned[0].0,
+			crate::key::database::ts::new(db.namespace_id, db.database_id, 0).encode_key().unwrap()
+		);
+		assert_eq!(
+			scanned[1].0,
+			crate::key::database::ts::new(db.namespace_id, db.database_id, 1).encode_key().unwrap()
+		);
+	}
 
 	// Repeating tick
 	ds.changefeed_process_at(None, 1).await.unwrap();
 
 	// Validate
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
-	let scanned = tx.scan(start..end, u32::MAX, None).await.unwrap();
-	tx.commit().await.unwrap();
-	assert_eq!(scanned.len(), 3);
-	assert_eq!(
-		scanned[0].0,
-		crate::key::database::ts::new(db.namespace_id, db.database_id, 0).encode_key().unwrap()
-	);
-	assert_eq!(
-		scanned[1].0,
-		crate::key::database::ts::new(db.namespace_id, db.database_id, 1).encode_key().unwrap()
-	);
-	assert_eq!(
-		scanned[2].0,
-		crate::key::database::ts::new(db.namespace_id, db.database_id, 2).encode_key().unwrap()
-	);
+	{
+		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let scanned = tx.scan(start..end, u32::MAX, None).await.unwrap();
+		tx.commit().await.unwrap();
+		assert_eq!(scanned.len(), 3);
+		assert_eq!(
+			scanned[0].0,
+			crate::key::database::ts::new(db.namespace_id, db.database_id, 0).encode_key().unwrap()
+		);
+		assert_eq!(
+			scanned[1].0,
+			crate::key::database::ts::new(db.namespace_id, db.database_id, 1).encode_key().unwrap()
+		);
+		assert_eq!(
+			scanned[2].0,
+			crate::key::database::ts::new(db.namespace_id, db.database_id, 2).encode_key().unwrap()
+		);
+	}
 }
 
 macro_rules! define_tests {

@@ -78,7 +78,9 @@ impl Display for Data {
 			Self::ValuesExpression(v) => write!(
 				f,
 				"({}) VALUES {}",
-				Fmt::comma_separated(v.first().unwrap().iter().map(|(v, _)| v)),
+				Fmt::comma_separated(
+					v.first().expect("values expression is non-empty").iter().map(|(v, _)| v)
+				),
 				Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| write!(
 					f,
 					"({})",

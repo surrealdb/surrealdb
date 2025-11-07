@@ -440,7 +440,7 @@ impl Test {
 	#[allow(dead_code)]
 	pub fn expect_val_info<I: Display>(&mut self, val: &str, info: I) -> Result<&mut Self> {
 		self.expect_value_info(
-			syn::value(val).unwrap_or_else(|_| panic!("INVALID VALUE {info}:\n{val}")),
+			syn::value(val).unwrap_or_else(|e| panic!("INVALID VALUE {e}\n\n{info}:\n{val}")),
 			info,
 		)
 	}

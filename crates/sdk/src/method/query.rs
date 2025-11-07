@@ -53,7 +53,9 @@ impl<T: SurrealValue> IntoVariables for T {
 			Value::Array(arr) => {
 				let mut vars = Variables::new();
 				for v in arr.chunks(2) {
-					let key = v[0].clone().into_string().unwrap();
+					let key = v[0].clone().into_string().map_err(|_| {
+						Error::InvalidParams("Variable key must be a string".to_string())
+					})?;
 					let value = v[1].clone();
 					vars.insert(key, value);
 				}
@@ -102,7 +104,7 @@ where
 			let router = client.inner.router.extract()?;
 
 			let results = router
-				.execute_query(Command::RawQuery {
+				.execute_query(Command::Query {
 					query: Cow::Owned(query.into_owned()),
 					txn,
 					variables: variables?,

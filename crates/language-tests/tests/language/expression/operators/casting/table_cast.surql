@@ -3,34 +3,34 @@
 reason = "Test casting strings to table type"
 
 [[test.results]]
-value = "'users'"
+match = "$result == type::table('users')"
 
 [[test.results]]
-value = "'users'"
+match = "$result == type::table('users')"
 
 [[test.results]]
-value = "'users'"
+match = "$result == type::table('users')"
 
 [[test.results]]
-value = "'posts'"
+match = "$result == type::table('posts')"
 
 [[test.results]]
-error = "Expected `table<users|posts>` but found a `'comments'`"
+error = "Could not cast into `table<users|posts>` using input `'comments'`"
 
 [[test.results]]
-value = "''"
+match = "$result == type::table('')"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "'users'"
+match = "$result == type::table('users')"
 
 [[test.results]]
-value = "'user_accounts'"
+match = "$result == type::table('user_accounts')"
 
 [[test.results]]
-value = "'user_accounts'"
+match = "$result == type::table('user_accounts')"
 
 [env]
 namespace = "test"

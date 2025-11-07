@@ -197,18 +197,17 @@ pub async fn create_grant(
 			let ns = ctx.expect_ns_id(opt).await?;
 			txn.get_ns_access(ns, &access).await?.ok_or_else(|| Error::AccessNsNotFound {
 				ac: access.to_string(),
-				// The namespace is expected above so this unwrap should not be able to trigger
-				ns: opt.ns.as_deref().unwrap().to_owned(),
+				// The namespace is expected above
+				ns: opt.ns.as_deref().expect("namespace validated by expect_ns_id").to_owned(),
 			})?
 		}
 		Base::Db => {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 			txn.get_db_access(ns, db, &access).await?.ok_or_else(|| Error::AccessDbNotFound {
 				ac: access.to_string(),
-				// The namespace and database is expected above so these unwraps should not be able
-				// to trigger
-				ns: opt.ns.as_deref().unwrap().to_owned(),
-				db: opt.db.as_deref().unwrap().to_owned(),
+				// The namespace and database is expected above
+				ns: opt.ns.as_deref().expect("namespace validated by expect_ns_db_ids").to_owned(),
+				db: opt.db.as_deref().expect("database validated by expect_ns_db_ids").to_owned(),
 			})?
 		}
 	};
@@ -315,9 +314,11 @@ pub async fn create_grant(
 							txn.get_ns_user(ns_id, user).await?.ok_or_else(|| {
 								Error::UserNsNotFound {
 									name: user.to_string(),
-									// We just retrieved the ns_id above so we should have a
-									// namespace.
-									ns: opt.ns().unwrap().to_owned(),
+									// We just retrieved the ns_id above
+									ns: opt
+										.ns()
+										.expect("namespace validated by get_ns_id")
+										.to_owned(),
 								}
 							})?
 						}
@@ -326,10 +327,15 @@ pub async fn create_grant(
 							txn.get_db_user(ns_id, db_id, user).await?.ok_or_else(|| {
 								Error::UserDbNotFound {
 									name: user.to_string(),
-									// We just retrieved the ns_id and db_id above so we should have
-									// a namespace and database.
-									ns: opt.ns().unwrap().to_owned(),
-									db: opt.db().unwrap().to_owned(),
+									// We just retrieved the ns_id and db_id above
+									ns: opt
+										.ns()
+										.expect("namespace validated by expect_ns_db_ids")
+										.to_owned(),
+									db: opt
+										.db()
+										.expect("database validated by expect_ns_db_ids")
+										.to_owned(),
 								}
 							})?
 						}
@@ -376,14 +382,14 @@ pub async fn create_grant(
 					txn.put(&key, &gr_store, None).await
 				}
 				Base::Ns => {
-					let ns = txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+					let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?, opt.strict).await?;
 					let key =
 						crate::key::namespace::access::gr::new(ns.namespace_id, &gr.ac, &gr.id);
 					txn.put(&key, &gr_store, None).await
 				}
 				Base::Db => {
 					let (ns, db) = opt.ns_db()?;
-					let db = txn.get_or_add_db(ns, db, opt.strict).await?;
+					let db = txn.get_or_add_db(Some(ctx), ns, db, opt.strict).await?;
 
 					let key = crate::key::database::access::gr::new(
 						db.namespace_id,
@@ -467,21 +473,28 @@ async fn compute_show(
 			if txn.get_ns_access(ns, &stmt.ac).await?.is_none() {
 				bail!(Error::AccessNsNotFound {
 					ac: stmt.ac.to_string(),
-					// We expected a namespace above so this unwrap shouldn't be able to trigger.
-					ns: opt.ns.as_deref().unwrap().to_owned(),
+					// We expected a namespace above
+					ns: opt.ns.as_deref().expect("namespace validated by expect_ns_id").to_owned(),
 				});
 			}
 		}
 		Base::Db => {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-			// We expected a namespace above so this unwrap shouldn't be able to trigger.
+			// We expected a namespace above
 			if txn.get_db_access(ns, db, &stmt.ac).await?.is_none() {
 				bail!(Error::AccessDbNotFound {
 					ac: stmt.ac.to_string(),
-					// We expected a namespace and database above so these unwrap shouldn't be able
-					// to trigger.
-					ns: opt.ns.as_deref().unwrap().to_owned(),
-					db: opt.db.as_deref().unwrap().to_owned(),
+					// We expected a namespace and database above
+					ns: opt
+						.ns
+						.as_deref()
+						.expect("namespace validated by expect_ns_db_ids")
+						.to_owned(),
+					db: opt
+						.db
+						.as_deref()
+						.expect("database validated by expect_ns_db_ids")
+						.to_owned(),
 				});
 			}
 		}
@@ -660,13 +673,13 @@ pub async fn revoke_grant(
 					txn.set(&key, &revoke, None).await?;
 				}
 				Base::Ns => {
-					let ns = txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+					let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?, opt.strict).await?;
 					let key = crate::key::namespace::access::gr::new(ns.namespace_id, &stmt.ac, gr);
 					txn.set(&key, &revoke, None).await?;
 				}
 				Base::Db => {
 					let (ns, db) = opt.ns_db()?;
-					let db = txn.get_or_add_db(ns, db, opt.strict).await?;
+					let db = txn.get_or_add_db(Some(ctx), ns, db, opt.strict).await?;
 
 					let key = crate::key::database::access::gr::new(
 						db.namespace_id,
@@ -750,7 +763,7 @@ pub async fn revoke_grant(
 						txn.set(&key, &gr, None).await?;
 					}
 					Base::Ns => {
-						let ns = txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+						let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?, opt.strict).await?;
 						let key = crate::key::namespace::access::gr::new(
 							ns.namespace_id,
 							&stmt.ac,
@@ -760,7 +773,7 @@ pub async fn revoke_grant(
 					}
 					Base::Db => {
 						let (ns, db) = opt.ns_db()?;
-						let db = txn.get_or_add_db(ns, db, opt.strict).await?;
+						let db = txn.get_or_add_db(Some(ctx), ns, db, opt.strict).await?;
 
 						let key = crate::key::database::access::gr::new(
 							db.namespace_id,
