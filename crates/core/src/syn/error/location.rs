@@ -38,7 +38,8 @@ impl Location {
 			column: column + 1,
 		}
 	}
-	pub fn range_of_span(source: &str, span: Span) -> Range<Self> {
+
+	pub fn from_span(source: &str, span: Span) -> Range<Self> {
 		if source.len() <= span.offset as usize {
 			return Self::range_of_source_end(source);
 		}

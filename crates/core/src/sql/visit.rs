@@ -33,6 +33,11 @@ use crate::sql::{
 };
 use std::ops::Bound;
 
+use super::{
+	access_type::BearerAccess, statements::define::ApiDefinition, AccessType, JwtAccess,
+	RecordAccess,
+};
+
 macro_rules! implement_visitor{
 	($(fn $name:ident($this:ident, $value:ident: &$ty:ty) {
 	    $($t:tt)*
@@ -630,9 +635,42 @@ implement_visitor! {
 
 
 	fn visit_define_access(this, d: &DefineAccessStatement) {
+		this.visit_access_type(&d.kind)?;
+
 		if let Some(v) = d.authenticate.as_ref(){
 			this.visit_value(v)?;
 		}
+		Ok(())
+	}
+
+	fn visit_access_type(this, a: &AccessType) {
+		match a {
+			AccessType::Record(ac) => this.visit_record_access(ac),
+			AccessType::Jwt(ac) => this.visit_jwt_access(ac),
+			AccessType::Bearer(ac) => this.visit_bearer_access(ac),
+		}
+	}
+
+	fn visit_record_access(this, a: &RecordAccess){
+		if let Some(s) = &a.signup{
+			this.visit_value(s)?;
+		}
+		if let Some(s) = &a.signin{
+			this.visit_value(s)?;
+		}
+		this.visit_jwt_access(&a.jwt)?;
+		if let Some(ac) = &a.bearer{
+			this.visit_bearer_access(ac)?;
+		}
+		Ok(())
+	}
+
+	fn visit_jwt_access(this, a: &JwtAccess){
+		Ok(())
+	}
+
+	fn visit_bearer_access(this, a: &BearerAccess){
+		this.visit_jwt_access(&a.jwt)?;
 		Ok(())
 	}
 
@@ -1481,6 +1519,20 @@ implement_visitor! {
 			},
 
 		}
+		Ok(())
+	}
+
+	fn visit_api_definition(this, def: &ApiDefinition){
+		for a in def.actions.iter(){
+			this.visit_api_action(a)?;
+		}
+		if let Some(v) = &def.fallback{
+			this.visit_value(v)?;
+		}
+		if let Some(c) = &def.config{
+			this.visit_api_config(c)?;
+		}
+
 		Ok(())
 	}
 }

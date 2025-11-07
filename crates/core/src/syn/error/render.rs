@@ -2,6 +2,8 @@
 
 use std::{cmp::Ordering, fmt, ops::Range};
 
+use crate::sql::Object;
+
 use super::{Location, MessageKind};
 
 #[derive(Clone, Debug)]
@@ -58,6 +60,17 @@ pub enum Truncation {
 	End,
 	/// Both sided of the snippet where truncated.
 	Both,
+}
+
+impl Truncation {
+	pub fn as_str(&self) -> &str {
+		match self {
+			Truncation::None => "none",
+			Truncation::Start => "start",
+			Truncation::End => "end",
+			Truncation::Both => "both",
+		}
+	}
 }
 
 /// A piece of the source code with a location and an optional explanation.
@@ -180,6 +193,23 @@ impl Snippet {
 
 		(line, truncation, offset)
 	}
+
+	pub fn to_object(&self) -> Object {
+		let mut obj = Object::default();
+		obj.insert("source".to_owned(), self.source.clone().into());
+		obj.insert("truncation".to_owned(), self.truncation.as_str().into());
+		obj.insert("line".to_owned(), self.location.line.into());
+		obj.insert("column".to_owned(), self.location.column.into());
+		obj.insert("length".to_owned(), self.length.into());
+
+		if let Some(x) = &self.label {
+			obj.insert("label".to_owned(), x.clone().into());
+		}
+
+		obj.insert("kind".to_owned(), self.kind.as_str().into());
+
+		obj
+	}
 }
 
 impl fmt::Display for Snippet {
@@ -248,7 +278,7 @@ mod test {
 		let source = "\n\n\n\t      $     \t";
 		let offset = source.char_indices().find(|(_, c)| *c == '$').unwrap().0;
 
-		let location = Location::range_of_span(
+		let location = Location::from_span(
 			source,
 			Span {
 				offset: offset as u32,
@@ -268,7 +298,7 @@ mod test {
 		let source = "     aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa $     \t";
 		let offset = source.char_indices().find(|(_, c)| *c == '$').unwrap().0;
 
-		let location = Location::range_of_span(
+		let location = Location::from_span(
 			source,
 			Span {
 				offset: offset as u32,
@@ -288,7 +318,7 @@ mod test {
 		let source = "\n\n  a $ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa    \t";
 		let offset = source.char_indices().find(|(_, c)| *c == '$').unwrap().0;
 
-		let location = Location::range_of_span(
+		let location = Location::from_span(
 			source,
 			Span {
 				offset: offset as u32,
@@ -311,7 +341,7 @@ mod test {
 		let source = "\n\n\n\n  aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa $ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa   \t";
 		let offset = source.char_indices().find(|(_, c)| *c == '$').unwrap().0;
 
-		let location = Location::range_of_span(
+		let location = Location::from_span(
 			source,
 			Span {
 				offset: offset as u32,
