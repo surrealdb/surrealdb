@@ -27,12 +27,26 @@ type WebSockets = RwLock<HashMap<Uuid, WebSocket>>;
 /// Mapping of LIVE Query ID to WebSocket ID + Session ID
 type LiveQueries = RwLock<HashMap<Uuid, (Uuid, Option<Uuid>)>>;
 
-#[derive(Default)]
 pub struct RpcState {
 	/// Stores the currently connected WebSockets
 	pub web_sockets: WebSockets,
 	/// Stores the currently initiated LIVE queries
 	pub live_queries: LiveQueries,
+	/// HTTP RPC handler with persistent sessions
+	pub http: Arc<crate::rpc::http::Http>,
+}
+
+impl RpcState {
+	pub fn new(
+		datastore: Arc<surrealdb_core::kvs::Datastore>,
+		session: surrealdb_core::dbs::Session,
+	) -> Self {
+		Self {
+			web_sockets: RwLock::new(HashMap::new()),
+			live_queries: RwLock::new(HashMap::new()),
+			http: Arc::new(crate::rpc::http::Http::new(datastore, session)),
+		}
+	}
 }
 
 /// Performs notification delivery to the WebSockets

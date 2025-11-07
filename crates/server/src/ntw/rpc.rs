@@ -29,7 +29,6 @@ use crate::cnf::HTTP_MAX_RPC_BODY_SIZE;
 use crate::ntw::error::Error as NetError;
 use crate::rpc::RpcState;
 use crate::rpc::format::HttpFormat;
-use crate::rpc::http::Http;
 use crate::rpc::websocket::Websocket;
 
 pub(super) fn router() -> Router<Arc<RpcState>> {
@@ -150,6 +149,7 @@ async fn handle_socket(
 async fn post_handler(
 	Extension(state): Extension<AppState>,
 	Extension(session): Extension<Session>,
+	State(rpc_state): State<Arc<RpcState>>,
 	accept: Option<TypedHeader<Accept>>,
 	TypedHeader(content_type): TypedHeader<ContentType>,
 	body: Bytes,
@@ -175,8 +175,11 @@ async fn post_handler(
 	{
 		return Err(NetError::InvalidType.into());
 	}
-	// Create a new HTTP instance
-	let rpc = Http::new(Arc::clone(&state.datastore), session);
+	// Use the shared HTTP instance with persistent sessions
+	let rpc = &*rpc_state.http;
+	// Update the default session (None key) with the session from middleware
+	// This is used for requests that don't specify a session_id
+	rpc.set_session(None, Arc::new(session));
 	// Check to see available memory
 	if ALLOC.is_beyond_threshold() {
 		return Err(NetError::ServerOverloaded.into());
@@ -186,7 +189,7 @@ async fn post_handler(
 		Ok(req) => {
 			// Execute the specified method
 			let res = RpcProtocol::execute(
-				&rpc,
+				rpc,
 				req.txn.map(Into::into),
 				req.session_id.map(Into::into),
 				req.method,

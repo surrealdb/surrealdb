@@ -52,10 +52,13 @@ where
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
 			router
-				.execute_unit(Command::Use {
-					namespace: Some(self.ns),
-					database: None,
-				})
+				.execute_unit(
+					Command::Use {
+						namespace: Some(self.ns),
+						database: None,
+					},
+					self.client.session_id,
+				)
 				.await
 		})
 	}

@@ -96,6 +96,7 @@ addr.workspace = true
 ahash.workspace = true
 ammonia.workspace = true
 anyhow.workspace = true
+arc-swap.workspace = true
 argon2.workspace = true
 async-channel.workspace = true
 async-executor.workspace = true

@@ -92,7 +92,7 @@ pub(crate) fn default_headers() -> HeaderMap {
 	headers
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Auth {
 	Basic {
 		user: String,
@@ -303,11 +303,12 @@ async fn refresh_token(
 	client: &reqwest::Client,
 	headers: &HeaderMap,
 	auth: &Option<Auth>,
+	session_id: Option<uuid::Uuid>,
 ) -> Result<(Value, Vec<QueryResult>)> {
 	let req = Command::Refresh {
 		token,
 	}
-	.into_router_request(None)
+	.into_router_request(None, session_id)
 	.expect("refresh should be a valid router request");
 	let results = send_request(req, base_url, client, headers, auth).await?;
 	let value = match results.first() {
@@ -328,6 +329,7 @@ async fn router(
 	vars: &mut IndexMap<String, Value>,
 	auth: &mut Option<Auth>,
 ) -> Result<Vec<QueryResult>> {
+	let session_id = req.session_id;
 	match req.command {
 		Command::Use {
 			namespace,
@@ -337,7 +339,7 @@ async fn router(
 				namespace: namespace.clone(),
 				database: database.clone(),
 			}
-			.into_router_request(None)
+			.into_router_request(None, session_id)
 			.expect("USE command should convert to router request");
 			// process request to check permissions
 			let out = send_request(req, base_url, client, headers, auth).await?;
@@ -360,7 +362,7 @@ async fn router(
 			let req = Command::Signin {
 				credentials: credentials.clone(),
 			}
-			.into_router_request(None)
+			.into_router_request(None, session_id)
 			.expect("signin should be a valid router request");
 
 			let results = send_request(req, base_url, client, headers, auth).await?;
@@ -401,7 +403,7 @@ async fn router(
 			let req = Command::Authenticate {
 				token: token.clone(),
 			}
-			.into_router_request(None)
+			.into_router_request(None, session_id)
 			.expect("authenticate should be a valid router request");
 			let mut results = send_request(req, base_url, client, headers, auth).await?;
 			if let Some(result) = results.first_mut() {
@@ -425,8 +427,10 @@ async fn router(
 							// If the error is due to token expiration, attempt automatic refresh
 							if error.to_string().contains("token has expired") {
 								// Call the refresh_token helper to get new tokens
-								let (value, refresh_results) =
-									refresh_token(token, base_url, client, headers, auth).await?;
+								let (value, refresh_results) = refresh_token(
+									token, base_url, client, headers, auth, session_id,
+								)
+								.await?;
 								// Update the stored authentication with the new access token
 								*auth = Some(Auth::Bearer {
 									token: Token::from_value(value)?.access,
@@ -443,15 +447,22 @@ async fn router(
 		Command::Refresh {
 			token,
 		} => {
-			let (value, results) = refresh_token(token, base_url, client, headers, auth).await?;
+			let (value, results) =
+				refresh_token(token, base_url, client, headers, auth, session_id).await?;
 			*auth = Some(Auth::Bearer {
 				token: Token::from_value(value)?.access,
 			});
 			Ok(results)
 		}
 		Command::Invalidate => {
+			// Send invalidate to server to clear stored session
+			let req = Command::Invalidate
+				.into_router_request(None, session_id)
+				.expect("invalidate should be a valid router request");
+			let results = send_request(req, base_url, client, headers, auth).await?;
+			// Then clear local auth so future requests don't include auth headers
 			*auth = None;
-			Ok(vec![QueryResultBuilder::instant_none()])
+			Ok(results)
 		}
 		Command::Set {
 			key,
@@ -597,14 +608,16 @@ async fn router(
 				query,
 				variables: merged_vars,
 			};
-			let req =
-				cmd.into_router_request(None).expect("command should convert to router request");
+			let req = cmd
+				.into_router_request(None, session_id)
+				.expect("command should convert to router request");
 			let res = send_request(req, base_url, client, headers, auth).await?;
 			Ok(res)
 		}
 		cmd => {
-			let req =
-				cmd.into_router_request(None).expect("command should convert to router request");
+			let req = cmd
+				.into_router_request(None, session_id)
+				.expect("command should convert to router request");
 			let res = send_request(req, base_url, client, headers, auth).await?;
 			Ok(res)
 		}

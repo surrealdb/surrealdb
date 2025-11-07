@@ -289,6 +289,13 @@ impl From<RpcError> for DbResultError {
 			RpcError::Thrown(message) => DbResultError::Thrown(message),
 			RpcError::Serialize(message) => DbResultError::SerializationError(message),
 			RpcError::Deserialize(message) => DbResultError::DeserializationError(message),
+			RpcError::SessionNotFound(id) => DbResultError::InternalError(match id {
+				Some(id) => format!("Session not found: {id:?}"),
+				None => "Default session not found".to_string(),
+			}),
+			RpcError::SessionExists(id) => {
+				DbResultError::InternalError(format!("Session already exists: {id}"))
+			}
 		}
 	}
 }

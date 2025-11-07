@@ -108,6 +108,7 @@ rustls = { workspace = true, default-features = false, features = [
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { workspace = true, features = ["wasm_js"] }
+js-sys = "0.3"
 pharos.workspace = true
 rustls-pki-types = { version = "1.7.0", features = ["web"] }
 ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
@@ -116,8 +117,10 @@ tokio = { workspace = true, default-features = false, features = [
     "sync",
 ] }
 uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
+wasm-bindgen = "0.2"
 wasm-bindgen-futures.workspace = true
 wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
+web-sys = { version = "0.3", features = ["Window", "Request", "RequestInit", "Response"] }
 ws_stream_wasm.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]

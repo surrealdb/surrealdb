@@ -250,7 +250,7 @@ impl SurrealValue for Token {
 /// should take care to ensure that only authorized users have access to the
 /// JWT. For example, it can be stored in a secure cookie or encrypted in conjunction with other
 /// encryption mechanisms.
-#[derive(Debug, Serialize, Deserialize, SurrealValue)]
+#[derive(Debug, Clone, Serialize, Deserialize, SurrealValue)]
 pub struct AccessToken(pub(crate) SecureToken);
 
 impl AccessToken {

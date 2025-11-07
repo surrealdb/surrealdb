@@ -63,11 +63,14 @@ macro_rules! into_future {
 				let what = what.for_sql_query(&mut variables)?;
 
 				router
-					.$method(Command::Query {
-						txn,
-						query: Cow::Owned(format!("DELETE FROM {what} RETURN BEFORE")),
-						variables,
-					})
+					.$method(
+						Command::Query {
+							txn,
+							query: Cow::Owned(format!("DELETE FROM {what} RETURN BEFORE")),
+							variables,
+						},
+						client.session_id,
+					)
 					.await
 			})
 		}

@@ -35,9 +35,12 @@ where
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
 			let _: surrealdb_types::Value = router
-				.execute(Command::Commit {
-					txn: self.txn,
-				})
+				.execute(
+					Command::Commit {
+						txn: self.txn,
+					},
+					self.client.session_id,
+				)
 				.await?;
 			Ok(self.client)
 		})

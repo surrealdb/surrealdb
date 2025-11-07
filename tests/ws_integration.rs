@@ -2437,6 +2437,9 @@ pub async fn multi_session_isolation(cfg_server: Option<Format>, cfg_format: For
 	let session1 = "11111111-1111-1111-1111-111111111111";
 	let session2 = "22222222-2222-2222-2222-222222222222";
 
+	socket.send_request("clone_session", json!([null, session1])).await.unwrap();
+	socket.send_request("clone_session", json!([null, session2])).await.unwrap();
+
 	// Test 1: Variable isolation between named sessions
 	// Setup session1 with auth and namespace/database
 	socket
@@ -2527,6 +2530,9 @@ pub async fn multi_session_authentication(cfg_server: Option<Format>, cfg_format
 	let session1 = "11111111-1111-1111-1111-111111111111";
 	let session2 = "22222222-2222-2222-2222-222222222222";
 
+	socket.send_request("clone_session", json!([null, session1])).await.unwrap();
+	socket.send_request("clone_session", json!([null, session2])).await.unwrap();
+
 	// Authenticate session 1 as root user
 	let res = socket
 		.send_request_with_session(
@@ -2584,6 +2590,19 @@ pub async fn multi_session_management(cfg_server: Option<Format>, cfg_format: Fo
 	assert_eq!(res["result"].as_array().unwrap().len(), 0, "Expected no sessions initially");
 
 	// Test 2: Create sessions with proper authentication and namespace/database setup
+	socket.send_request("clone_session", json!([null, session1])).await.unwrap();
+	socket.send_request("clone_session", json!([null, session2])).await.unwrap();
+	socket.send_request("clone_session", json!([null, session3])).await.unwrap();
+	let res = socket.send_request("sessions", json!([])).await.unwrap();
+	let sessions = res["result"].as_array().unwrap();
+	assert_eq!(sessions.len(), 3, "Expected 3 sessions");
+
+	let session_ids: Vec<String> =
+		sessions.iter().filter_map(|v| v.as_str()).map(|s| s.to_string()).collect();
+	assert!(session_ids.contains(&session1.to_string()), "Session 1 not found");
+	assert!(session_ids.contains(&session2.to_string()), "Session 2 not found");
+	assert!(session_ids.contains(&session3.to_string()), "Session 3 not found");
+
 	socket
 		.send_request_with_session("signin", json!([{"user": USER, "pass": PASS}]), session1)
 		.await
@@ -2604,16 +2623,6 @@ pub async fn multi_session_management(cfg_server: Option<Format>, cfg_format: Fo
 		.unwrap();
 	socket.send_request_with_session("use", json!([NS, DB]), session3).await.unwrap();
 	socket.send_request_with_session("set", json!(["var3", "value3"]), session3).await.unwrap();
-
-	let res = socket.send_request("sessions", json!([])).await.unwrap();
-	let sessions = res["result"].as_array().unwrap();
-	assert_eq!(sessions.len(), 3, "Expected 3 sessions");
-
-	let session_ids: Vec<String> =
-		sessions.iter().filter_map(|v| v.as_str()).map(|s| s.to_string()).collect();
-	assert!(session_ids.contains(&session1.to_string()), "Session 1 not found");
-	assert!(session_ids.contains(&session2.to_string()), "Session 2 not found");
-	assert!(session_ids.contains(&session3.to_string()), "Session 3 not found");
 
 	// Test 3: Verify session variables work
 	let res =

@@ -6,25 +6,28 @@ use std::task::Poll;
 use async_channel::{Receiver, Sender};
 use futures::StreamExt;
 use futures::stream::poll_fn;
-use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::Level;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::options::EngineOptions;
-use surrealdb_types::Variables;
 use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
 
 use crate::conn::{self, Route, Router};
-use crate::engine::local::Db;
+use crate::engine::local::{Db, LiveQueryState, LocalSessionState};
 use crate::engine::tasks;
 use crate::method::BoxFuture;
 use crate::opt::auth::Root;
 use crate::opt::{Endpoint, EndpointKind, WaitFor};
-use crate::{ExtraFeatures, Result, Surreal};
+use crate::{ExtraFeatures, Result, SessionClone, SessionId, Surreal};
 
 impl crate::Connection for Db {}
 impl conn::Sealed for Db {
-	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
+	#[allow(private_interfaces)]
+	fn connect(
+		address: Endpoint,
+		capacity: usize,
+		session_clone: Option<crate::SessionClone>,
+	) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
 				0 => async_channel::unbounded(),
@@ -33,8 +36,9 @@ impl conn::Sealed for Db {
 
 			let (conn_tx, conn_rx) = async_channel::bounded(1);
 			let config = address.config.clone();
+			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 
-			tokio::spawn(run_router(address, conn_tx, route_rx));
+			tokio::spawn(run_router(address, conn_tx, route_rx, session_clone.receiver.clone()));
 
 			conn_rx.recv().await??;
 
@@ -50,7 +54,7 @@ impl conn::Sealed for Db {
 				last_id: AtomicI64::new(0),
 			};
 
-			Ok((router, waiter).into())
+			Ok((router, waiter, session_clone).into())
 		})
 	}
 }
@@ -59,6 +63,7 @@ pub(crate) async fn run_router(
 	address: Endpoint,
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Route>,
+	session_rx: Receiver<SessionId>,
 ) {
 	let configured_root = match address.config.auth {
 		Level::Root => Some(Root {
@@ -113,16 +118,13 @@ pub(crate) async fn run_router(
 	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
 	let kvs = Arc::new(kvs);
-	let vars = Arc::new(RwLock::new(Variables::default()));
 	let live_queries = Arc::new(RwLock::new(super::LiveQueryMap::new()));
-	let session = Arc::new(RwLock::new(Session::default().with_rt(true)));
+	let sessions = Arc::new(RwLock::new(HashMap::new()));
 
 	let router_state = super::RouterState {
 		kvs: kvs.clone(),
-		vars: vars.clone(),
 		live_queries: live_queries.clone(),
-		session: session.clone(),
-		transactions: Arc::new(RwLock::new(HashMap::new())),
+		sessions: sessions.clone(),
 	};
 
 	let canceller = CancellationToken::new();
@@ -154,6 +156,22 @@ pub(crate) async fn run_router(
 		let router_state = router_state.clone();
 
 		tokio::select! {
+			biased;
+
+			session = session_rx.recv() => {
+				let Ok(session_id) = session else {
+					break
+				};
+				match session_id {
+					SessionId::Initial(session_id) => {
+						router_state.sessions.write().await.insert(session_id, LocalSessionState::default());
+					}
+					SessionId::Clone { old, new } => {
+						let state = router_state.sessions.read().await.get(&old).cloned().unwrap_or_default();
+						router_state.sessions.write().await.insert(new, state);
+					}
+				}
+			}
 			route = route_rx.recv() => {
 				let Ok(route) = route else {
 					break
@@ -179,17 +197,17 @@ pub(crate) async fn run_router(
 				};
 
 				let kvs_clone = kvs.clone();
-				let vars_clone = vars.clone();
-				let session_clone = session.clone();
+				let sessions_clone = sessions.clone();
 				let live_queries_clone = live_queries.clone();
 				tokio::spawn(async move {
 					let id = notification.id.0;
-					if let Some(sender) = live_queries_clone.read().await.get(&id)
-
+					if let Some(LiveQueryState { session_id, sender }) = live_queries_clone.read().await.get(&id)
 						&& sender.send(Ok(notification)).await.is_err() {
 							live_queries_clone.write().await.remove(&id);
+							let sessions_lock = sessions_clone.read().await;
+							let state = sessions_lock.get(session_id).cloned().unwrap_or_default();
 							if let Err(error) =
-								super::kill_live_query(&kvs_clone, id, &*session_clone.read().await, vars_clone.read().await.clone()).await
+								super::kill_live_query(&kvs_clone, id, &state.session, state.vars).await
 							{
 								warn!("Failed to kill live query '{id}'; {error}");
 							}

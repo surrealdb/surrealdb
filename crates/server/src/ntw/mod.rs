@@ -213,7 +213,8 @@ pub async fn init<F: RouterFactory>(
 	// Get a new server handler
 	let handle = Handle::new();
 
-	let rpc_state = Arc::new(RpcState::default());
+	// Create RpcState with persistent HTTP handler
+	let rpc_state = Arc::new(RpcState::new(ds.clone(), surrealdb_core::dbs::Session::default()));
 
 	// Setup the graceful shutdown handler
 	let shutdown_handler = graceful_shutdown(rpc_state.clone(), ct.clone(), handle.clone());

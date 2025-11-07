@@ -57,11 +57,14 @@ where
 			};
 
 			router
-				.execute(Command::Run {
-					name,
-					version,
-					args,
-				})
+				.execute(
+					Command::Run {
+						name,
+						version,
+						args,
+					},
+					client.session_id,
+				)
 				.await
 		})
 	}
