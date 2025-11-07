@@ -1,0 +1,188 @@
+[package]
+name = "surrealdb-server"
+readme = "README.md"
+authors.workspace = true
+edition.workspace = true
+license-file.workspace = true
+publish.workspace = true
+version.workspace = true
+rust-version.workspace = true
+description.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+# Public features
+allocation-tracking = ["surrealdb/allocation-tracking"]
+allocator = ["surrealdb/allocator"]
+default = [
+    "allocator",
+    "allocation-tracking",
+    "storage-mem",
+    "storage-surrealkv",
+    "storage-rocksdb",
+    "scripting",
+    "http",
+    "surrealism",
+]
+http = ["surrealdb/http"]
+jwks = ["surrealdb/jwks"]
+ml = ["surrealdb/ml"]
+performance-profiler = ["dep:pprof"]
+scripting = ["surrealdb/scripting"]
+surrealism = ["surrealdb-core/surrealism"]
+storage-mem = ["surrealdb/kv-mem"]
+storage-indxdb = ["surrealdb/kv-indxdb"]
+storage-rocksdb = ["surrealdb/kv-rocksdb"]
+storage-surrealkv = ["surrealdb/kv-surrealkv"]
+storage-tikv = ["surrealdb/kv-tikv"]
+storage-fdb = ["surrealdb/kv-fdb"]
+# Commercial features
+enterprise = ["surrealdb-core/enterprise"]
+
+[dependencies]
+# workspace internal dependencies
+surrealdb = { workspace = true, features = [
+    "protocol-http",
+    "protocol-ws",
+    "rustls",
+] }
+surrealdb-core.workspace = true
+surrealdb-types.workspace = true
+
+# External surreal crates
+revision = { workspace = true, features = [
+    "chrono",
+    "geo",
+    "roaring",
+    "regex",
+    "rust_decimal",
+    "uuid",
+] }
+
+# Crates only used by the root surrealdb crate
+anyhow.workspace = true
+arc-swap = "1.7.1"
+async-trait.workspace = true
+axum = { version = "0.8.5", features = ["tracing", "ws"] }
+axum-extra = { version = "0.10.2", features = [
+    "query",
+    "typed-routing",
+    "typed-header",
+] }
+axum-server = { version = "0.7.2", features = ["tls-rustls-no-provider"] }
+bincode.workspace = true
+console-subscriber = "0.4.1"
+clap = { version = "4.4.11", features = [
+    "env",
+    "derive",
+    "wrap_help",
+    "unicode",
+] }
+dashmap.workspace = true
+glob = "0.3.1"
+http-body = "1.0.0"
+http-body-util = "0.1.1"
+hyper = "1.4.1"
+opentelemetry = { version = "0.24" }
+opentelemetry-otlp = { version = "0.17.0", features = ["metrics"] }
+opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
+rustyline = { version = "17.0.1", features = ["derive"] }
+tower = { version = "0.4.13", features = ["limit", "load-shed"] }
+tower-http = { version = "0.5.2", features = [
+    "trace",
+    "sensitive-headers",
+    "auth",
+    "request-id",
+    "util",
+    "catch-panic",
+    "cors",
+    "set-header",
+    "limit",
+    "add-extension",
+    "compression-full",
+] }
+tower-service = "0.3.3"
+tracing-appender = "0.2.3"
+tracing-opentelemetry = "0.25.0"
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
+urlencoding = "2.1.3"
+
+# Other crates
+argon2.workspace = true
+async-graphql = { workspace = true, default-features = false }
+async-graphql-axum.workspace = true
+base64.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+ciborium.workspace = true
+futures.workspace = true
+futures-util.workspace = true
+geo = { workspace = true, default-features = false }
+geo-types.workspace = true
+http.workspace = true
+num_cpus.workspace = true
+pin-project-lite.workspace = true
+rand.workspace = true
+reqwest = { workspace = true, default-features = false, features = [
+    "blocking",
+    "gzip",
+    "http2",
+] }
+rust_decimal.workspace = true
+semver.workspace = true
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["macros", "signal", "tracing"] }
+tokio-stream.workspace = true
+tokio-tungstenite.workspace = true
+tokio-util = { workspace = true, features = ["io"] }
+tracing.workspace = true
+uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
+
+# Optional crates
+pprof = { workspace = true, features = [
+    "flamegraph",
+    "prost-codec",
+], optional = true }
+
+[target.'cfg(windows)'.dependencies]
+nu-ansi-term = "0.46.0"
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.27.1", features = ["user"] }
+
+[target.'cfg(unix)'.dev-dependencies]
+nix = { version = "0.27.1", features = ["signal", "user"] }
+
+[dev-dependencies]
+# Crates only used by the root surrealdb crate
+assert_fs = "1.0.13"
+opentelemetry-proto = { version = "0.7.0", features = [
+    "gen-tonic",
+    "metrics",
+    "logs",
+] }
+rcgen = "0.13.2"
+tonic = "0.12.3"
+
+# Other crates
+chrono.workspace = true
+env_logger.workspace = true
+jsonwebtoken.workspace = true
+serial_test.workspace = true
+test-log = { workspace = true, features = ["trace"] }
+ulid.workspace = true
+wiremock.workspace = true
+rstest.workspace = true
+surrealdb-types.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+name = "surrealdb_server"
