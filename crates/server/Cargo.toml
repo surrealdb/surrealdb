@@ -15,8 +15,8 @@ categories.workspace = true
 
 [features]
 # Public features
-allocation-tracking = ["surrealdb/allocation-tracking"]
-allocator = ["surrealdb/allocator"]
+allocation-tracking = ["surrealdb-core/allocation-tracking"]
+allocator = ["surrealdb-core/allocator"]
 default = [
     "allocator",
     "allocation-tracking",
@@ -27,11 +27,11 @@ default = [
     "http",
     "surrealism",
 ]
-http = ["surrealdb/http"]
-jwks = ["surrealdb/jwks"]
+http = ["surrealdb-core/http"]
+jwks = ["surrealdb-core/jwks"]
 ml = ["surrealdb/ml"]
 performance-profiler = ["dep:pprof"]
-scripting = ["surrealdb/scripting"]
+scripting = ["surrealdb-core/scripting"]
 surrealism = ["surrealdb-core/surrealism"]
 storage-mem = ["surrealdb/kv-mem"]
 storage-indxdb = ["surrealdb/kv-indxdb"]

@@ -1242,6 +1242,13 @@ user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
+[[publisher.surrealdb-server]]
+version = "3.0.0-alpha.13"
+when = "2025-11-05"
+user-id = 145457
+user-login = "tobiemh"
+user-name = "Tobie Morgan Hitchcock"
+
 [[publisher.surrealdb-protocol]]
 version = "0.6.0"
 when = "2025-10-28"

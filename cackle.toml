@@ -1006,7 +1006,7 @@ allow_apis = ["net"]
 allow_unsafe = true
 allow_apis = ["fs"]
 
-[pkg.surrealdb]
+[pkg.surrealdb-server]
 allow_unsafe = true
 allow_apis = ["fs"]
 build.allow_build_instructions = ["cargo::rustc-check-cfg=*"]
