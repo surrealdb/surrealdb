@@ -221,6 +221,7 @@ license-file.workspace = true
 
 [features]
 ml = ["surrealdb/ml"]
+storage-mem = ["surrealdb/kv-mem"]
 storage-surrealkv = ["surrealdb/kv-surrealkv"]
 
 [dependencies]
