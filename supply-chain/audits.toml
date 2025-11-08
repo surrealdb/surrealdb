@@ -1,3 +1,4 @@
+
 # cargo-vet audits file
 
 [[audits.async-executor]]
@@ -1249,13 +1250,6 @@ user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2024-01-30"
 end = "2026-02-13"
 
-[[trusted.surrealdb-server]]
-criteria = "safe-to-deploy"
-user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
-start = "2024-01-30"
-end = "2026-02-13"
-
-
 [[trusted.surrealdb-derive]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
@@ -1273,6 +1267,12 @@ criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2025-07-04"
 end = "2026-07-18"
+
+[[trusted.surrealdb-server]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2024-01-30"
+end = "2026-02-13"
 
 [[trusted.surrealdb-tikv-client]]
 criteria = "safe-to-deploy"
