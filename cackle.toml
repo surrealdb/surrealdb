@@ -29,7 +29,6 @@ include = [
     "hashbrown",
     "mio::net",
     "surrealdb",
-    "surrealdb_server::net",
     "surrealdb_core",
     "surrealkv",
     "tokio::net",
