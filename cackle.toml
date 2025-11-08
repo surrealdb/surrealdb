@@ -29,14 +29,14 @@ include = [
     "hashbrown",
     "mio::net",
     "surrealdb",
-    "surrealdb_server",
+    "surrealdb_server::net",
     "surrealdb_core",
     "surrealkv",
     "tokio::net",
     "tracing",
     "tracing_core",
 ]
-exclude = ["hashbrown::map", "surrealdb_server::net", "clap_builder"]
+exclude = ["hashbrown::map"]
 
 [api.process]
 include = [
