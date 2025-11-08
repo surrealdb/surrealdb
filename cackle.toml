@@ -1022,6 +1022,9 @@ build.allow_build_instructions = [
 [pkg.surrealdb-protocol]
 allow_unsafe = true
 
+[pkg.surrealdb]
+allow_apis = ["fs"]
+
 [pkg.assert_fs]
 from.test.allow_apis = ["fs"]
 
