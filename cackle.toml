@@ -36,7 +36,7 @@ include = [
     "tracing",
     "tracing_core",
 ]
-exclude = ["hashbrown::map", "surrealdb_server::net"]
+exclude = ["hashbrown::map", "surrealdb_server::net", "clap_builder"]
 
 [api.process]
 include = [
