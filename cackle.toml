@@ -28,7 +28,7 @@ include = [
     "futures_util",
     "hashbrown",
     "mio::net",
-    "surreal::net",
+    "surreal_server::net",
     "surrealdb",
     "surrealdb_core",
     "surrealkv",
@@ -36,7 +36,7 @@ include = [
     "tracing",
     "tracing_core",
 ]
-exclude = ["hashbrown::map", "surrealdb_server"]
+exclude = ["hashbrown::map"]
 
 [api.process]
 include = [
