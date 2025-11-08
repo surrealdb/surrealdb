@@ -234,6 +234,7 @@ default = [
 allocator = ["surrealdb-server/allocator"]
 allocation-tracking = ["surrealdb-server/allocation-tracking"]
 http = ["surrealdb-server/http"]
+jwks = ["surrealdb-server/jwks"]
 ml = ["surrealdb-server/ml"]
 scripting = ["surrealdb-server/scripting"]
 surrealism = ["surrealdb-server/surrealism"]
