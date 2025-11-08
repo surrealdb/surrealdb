@@ -220,10 +220,26 @@ categories.workspace = true
 license-file.workspace = true
 
 [features]
+default = [
+    "allocator",
+    "allocation-tracking",
+    "storage-mem",
+    "storage-surrealkv",
+    "storage-rocksdb",
+    "scripting",
+    "http",
+    "surrealism",
+]
 
+allocator = ["surrealdb-server/allocator"]
+allocation-tracking = ["surrealdb-server/allocation-tracking"]
+http = ["surrealdb-server/http"]
 ml = ["surrealdb-server/ml"]
+scripting = ["surrealdb-server/scripting"]
+surrealism = ["surrealdb-server/surrealism"]
 storage-mem = ["surrealdb-server/storage-mem"]
 storage-surrealkv = ["surrealdb-server/storage-surrealkv"]
+storage-rocksdb = ["surrealdb-server/storage-rocksdb"]
 
 [dependencies]
 # workspace internal dependencies
