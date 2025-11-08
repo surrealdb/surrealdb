@@ -294,7 +294,9 @@ impl DbsCapabilities {
 		// allows for functions
 		if let Some(Targets::All) = self.deny_funcs {
 			if let Some(targets) = &self.allow_funcs {
-				return targets.clone();
+				if let Targets::Some(_) = targets {
+					return targets.clone();
+				}
 			}
 			return Targets::None;
 		}
@@ -411,7 +413,9 @@ impl DbsCapabilities {
 		// for HTTP routes
 		if let Some(Targets::All) = self.deny_http {
 			if let Some(targets) = self.allow_http.as_ref() {
-				return targets.clone();
+				if let Targets::Some(_) = targets {
+					return targets.clone();
+				}
 			}
 			return Targets::None;
 		}
@@ -1100,5 +1104,98 @@ mod tests {
 		};
 		assert_eq!(caps.get_allow_experimental(), Targets::All);
 		assert_eq!(caps.get_allow_arbitrary_query(), Targets::All);
+	}
+
+	#[test]
+	fn test_dbs_capabilities_deny_all_vs_allow_all() {
+		// Test case 1: When deny_funcs = Targets::All and allow_funcs = Targets::All,
+		// the deny should take precedence and return Targets::None
+		let caps = DbsCapabilities {
+			allow_all: false,
+			#[cfg(feature = "scripting")]
+			allow_scripting: false,
+			allow_guests: false,
+			allow_funcs: Some(Targets::All),
+			allow_experimental: None,
+			allow_arbitrary_query: None,
+			allow_net: None,
+			allow_rpc: None,
+			allow_http: None,
+			deny_all: false,
+			#[cfg(feature = "scripting")]
+			deny_scripting: false,
+			deny_guests: false,
+			deny_funcs: Some(Targets::All),
+			deny_experimental: None,
+			deny_arbitrary_query: None,
+			deny_net: None,
+			deny_rpc: None,
+			deny_http: None,
+		};
+		assert_eq!(
+			caps.get_allow_funcs(),
+			Targets::None,
+			"When deny_funcs=All and allow_funcs=All, should deny (return None)"
+		);
+
+		// Test case 2: When deny_http = Targets::All and allow_http = Targets::All,
+		// the deny should take precedence and return Targets::None
+		let caps = DbsCapabilities {
+			allow_all: false,
+			#[cfg(feature = "scripting")]
+			allow_scripting: false,
+			allow_guests: false,
+			allow_funcs: None,
+			allow_experimental: None,
+			allow_arbitrary_query: None,
+			allow_net: None,
+			allow_rpc: None,
+			allow_http: Some(Targets::All),
+			deny_all: false,
+			#[cfg(feature = "scripting")]
+			deny_scripting: false,
+			deny_guests: false,
+			deny_funcs: None,
+			deny_experimental: None,
+			deny_arbitrary_query: None,
+			deny_net: None,
+			deny_rpc: None,
+			deny_http: Some(Targets::All),
+		};
+		assert_eq!(
+			caps.get_allow_http(),
+			Targets::None,
+			"When deny_http=All and allow_http=All, should deny (return None)"
+		);
+
+		// Test case 3: When deny_funcs = Targets::All and allow_funcs = Targets::None,
+		// should return Targets::None
+		let caps = DbsCapabilities {
+			allow_all: false,
+			#[cfg(feature = "scripting")]
+			allow_scripting: false,
+			allow_guests: false,
+			allow_funcs: Some(Targets::None),
+			allow_experimental: None,
+			allow_arbitrary_query: None,
+			allow_net: None,
+			allow_rpc: None,
+			allow_http: None,
+			deny_all: false,
+			#[cfg(feature = "scripting")]
+			deny_scripting: false,
+			deny_guests: false,
+			deny_funcs: Some(Targets::All),
+			deny_experimental: None,
+			deny_arbitrary_query: None,
+			deny_net: None,
+			deny_rpc: None,
+			deny_http: None,
+		};
+		assert_eq!(
+			caps.get_allow_funcs(),
+			Targets::None,
+			"When deny_funcs=All and allow_funcs=None, should deny (return None)"
+		);
 	}
 }
