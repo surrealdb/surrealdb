@@ -1,3 +1,5 @@
+//! Tests for CLI version upgrade checking functionality.
+
 use std::collections::BTreeMap;
 
 use anyhow::Result;
@@ -5,6 +7,12 @@ use anyhow::Result;
 use crate::cli::check_upgrade;
 use crate::cli::version_client::MapVersionClient;
 
+/// Tests the version upgrade checking logic with different version scenarios.
+///
+/// This test verifies three cases:
+/// - Same version: should return None (no upgrade needed)
+/// - Older version: should return Some(new_version) (upgrade available)
+/// - Newer version: should return None (local version is ahead, no upgrade needed)
 #[test_log::test(tokio::test)]
 pub async fn test_version_upgrade() {
 	let mut client = MapVersionClient {
@@ -26,6 +34,6 @@ pub async fn test_version_upgrade() {
 	assert_eq!(
 		check_upgrade(&client, "1.1.0").await.unwrap(),
 		None,
-		"Expected the versions to be illogical, and not require and upgrade"
+		"Expected the local version to be newer, so no upgrade is required"
 	);
 }

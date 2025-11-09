@@ -327,9 +327,12 @@ pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
 	}
 }
 
-/// Check if there is a newer version
-/// Ok = No upgrade needed
-/// Err = Upgrade needed, returns the new version if it is available
+/// Check if there is a newer version available.
+///
+/// # Returns
+/// - `Ok(Some(version))` - A newer version is available
+/// - `Ok(None)` - No upgrade needed (current version is up-to-date or newer)
+/// - `Err(e)` - An error occurred during version checking or parsing
 async fn check_upgrade<C: VersionClient>(client: &C, pkg_version: &str) -> Result<Option<Version>> {
 	match client.fetch("latest").await {
 		Ok(version) => {

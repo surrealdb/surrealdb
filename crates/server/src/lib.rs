@@ -65,7 +65,9 @@ fn with_enough_stack(fut: impl Future<Output = ExitCode> + Send) -> ExitCode {
 		.thread_name("surrealdb-worker");
 	#[cfg(feature = "allocation-tracking")]
 	b.on_thread_stop(|| core::mem::ALLOC.stop_tracking());
-	// Build the runtime
+	// Build the runtime and execute the future.
+	// If runtime creation fails (e.g., insufficient system resources), log the error
+	// and return FAILURE to indicate the application cannot start.
 	match b.build() {
 		Ok(b) => b.block_on(fut),
 		Err(e) => {
