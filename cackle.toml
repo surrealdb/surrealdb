@@ -30,6 +30,7 @@ include = [
     "mio::net",
     "surrealdb",
     "surrealdb_core",
+    "surrealdb_server",
     "surrealkv",
     "tokio::net",
     "tracing",

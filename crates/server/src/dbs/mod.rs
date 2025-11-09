@@ -4,8 +4,10 @@ use std::time::Duration;
 
 use anyhow::Result;
 use clap::Args;
+use rand::Rng;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
 use surrealdb_core::kvs::{Datastore, TransactionBuilderFactory};
+use tokio::time::{Instant, sleep, timeout};
 
 use crate::cli::Config;
 use crate::core::dbs::Session;
@@ -576,6 +578,74 @@ impl From<DbsCapabilities> for Capabilities {
 	}
 }
 
+/// Retry an async operation until it succeeds or a timeout is reached
+///
+/// # Parameters
+/// - `operation_name`: Name of the operation for logging purposes
+/// - `f`: The async function to retry
+///
+/// # Returns
+/// The result of the operation if successful within the timeout
+async fn retry_with_timeout<F, Fut, T, E>(operation_name: &str, f: F) -> Result<T, anyhow::Error>
+where
+	F: Fn() -> Fut,
+	Fut: std::future::Future<Output = Result<T, E>>,
+	E: std::fmt::Display + std::fmt::Debug,
+{
+	let timeout_duration = Duration::from_secs(60);
+	let start = Instant::now();
+	let mut attempt = 0;
+
+	loop {
+		attempt += 1;
+
+		match timeout(timeout_duration.saturating_sub(start.elapsed()), f()).await {
+			Ok(Ok(result)) => {
+				if attempt > 1 {
+					info!(target: TARGET, operation = operation_name, attempts = attempt, "Operation succeeded after retry");
+				}
+				return Ok(result);
+			}
+			Ok(Err(e)) => {
+				let elapsed = start.elapsed();
+				if elapsed >= timeout_duration {
+					return Err(anyhow::anyhow!(
+						"Operation '{}' failed after {} attempts over {:?}: {}",
+						operation_name,
+						attempt,
+						elapsed,
+						e
+					));
+				}
+
+				warn!(
+					target: TARGET,
+					operation = operation_name,
+					attempt = attempt,
+					error = %e,
+					"Operation failed, retrying..."
+				);
+
+				// Exponential backoff with jitter: 100ms, 200ms, 400ms, 800ms, 1600ms, capped at 5s
+				// Jitter adds randomness (0.5 to 1.5x) to prevent thundering herd
+				let base_backoff = Duration::from_millis(100 * 2u64.pow((attempt - 1).min(5)));
+				let base_backoff = base_backoff.min(Duration::from_secs(5));
+				let jitter = rand::thread_rng().gen_range(0.5..=1.5);
+				let backoff = base_backoff.mul_f64(jitter);
+				sleep(backoff).await;
+			}
+			Err(_) => {
+				return Err(anyhow::anyhow!(
+					"Operation '{}' timed out after {} attempts over {:?}",
+					operation_name,
+					attempt,
+					start.elapsed()
+				));
+			}
+		}
+	}
+}
+
 #[instrument(level = "trace", target = "surreal::dbs", skip_all)]
 /// Initialise the database server
 ///
@@ -650,7 +720,7 @@ pub async fn init<F: TransactionBuilderFactory>(
 		.with_capabilities(capabilities)
 		.with_slow_log(slow_log_threshold, slow_log_param_allow, slow_log_param_deny);
 	// Ensure the storage version is up to date to prevent corruption
-	dbs.check_version().await?;
+	retry_with_timeout("check_version", || async { dbs.check_version().await }).await?;
 	// Import file at start, if provided
 	if let Some(file) = import_file {
 		// Log the startup import path
@@ -658,14 +728,18 @@ pub async fn init<F: TransactionBuilderFactory>(
 		// Read the full file contents
 		let sql = fs::read_to_string(file)?;
 		// Execute the SurrealQL file
-		dbs.startup(&sql, &Session::owner()).await?;
+		retry_with_timeout("startup", || async { dbs.startup(&sql, &Session::owner()).await })
+			.await?;
 	}
 	// Setup initial server auth credentials
 	if let (Some(user), Some(pass)) = (opt.user.as_ref(), opt.pass.as_ref()) {
 		// Log the initialisation of credentials
 		info!(target: TARGET, user = %user, "Initialising credentials");
 		// Initialise the credentials
-		dbs.initialise_credentials(user, pass).await?;
+		retry_with_timeout("initialise_credentials", || async {
+			dbs.initialise_credentials(user, pass).await
+		})
+		.await?;
 	}
 	// Bootstrap the datastore
 	dbs.bootstrap().await?;
