@@ -622,7 +622,7 @@ where
 					));
 				}
 
-				warn!(
+				debug!(
 					target: TARGET,
 					operation = operation_name,
 					attempt = attempt,

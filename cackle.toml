@@ -1051,6 +1051,7 @@ allow_apis = ["fs", "net"]
 
 [pkg.clap_builder]
 allow_apis = ["fs"]
+from.allow = ["surrealdb_server"]
 
 [pkg.axum]
 allow_apis = ["net"]
