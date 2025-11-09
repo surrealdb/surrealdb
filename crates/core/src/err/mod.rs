@@ -1233,9 +1233,13 @@ impl From<surrealmx::Error> for Error {
 	fn from(e: surrealmx::Error) -> Error {
 		let s = e.to_string();
 		match e {
+			surrealmx::Error::TxNotWritable => Error::TxReadonly,
+			surrealmx::Error::ValNotExpectedValue => Error::TxConditionNotMet,
+			surrealmx::Error::TxClosed => Error::TxFinished,
+			surrealmx::Error::KeyAlreadyExists => Error::TxKeyAlreadyExists,
 			surrealmx::Error::KeyReadConflict => Error::TxRetryable(s),
 			surrealmx::Error::KeyWriteConflict => Error::TxRetryable(s),
-			_ => Error::Tx(e.to_string()),
+			_ => Error::Tx(s),
 		}
 	}
 }
@@ -1246,6 +1250,8 @@ impl From<surrealkv::Error> for Error {
 		let s = e.to_string();
 		match e {
 			surrealkv::Error::TransactionWriteConflict => Error::TxRetryable(s),
+			surrealkv::Error::TransactionReadOnly => Error::TxReadonly,
+			surrealkv::Error::TransactionClosed => Error::TxFinished,
 			_ => Error::Tx(s),
 		}
 	}
