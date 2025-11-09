@@ -746,7 +746,9 @@ pub async fn init<F: TransactionBuilderFactory>(
 		.await?;
 	}
 	// Bootstrap the datastore
-	dbs.bootstrap().await?;
+	retry_with_timeout("Insert node", || async { dbs.insert_node(dbs.id()).await }).await?;
+	retry_with_timeout("Expire nodes", || async { dbs.expire_nodes().await }).await?;
+	retry_with_timeout("Remove nodes", || async { dbs.remove_nodes().await }).await?;
 	// All ok
 	Ok(dbs)
 }
