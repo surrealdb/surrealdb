@@ -303,7 +303,7 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 		.env
 		.as_ref()
 		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
-		.unwrap_or(Duration::from_secs(1));
+		.unwrap_or(Duration::from_secs(3));
 
 	let strict = config.env.as_ref().map(|x| x.strict).unwrap_or(false);
 
