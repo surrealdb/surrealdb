@@ -36,9 +36,9 @@ mod implementation {
 	use surrealdb_core::iam::{Action, ResourceKind};
 	use surrealdb_core::ml::storage::surml_file::SurMlFile;
 
-	use crate::net::AppState;
-	use crate::net::error::{Error as NetError, ResponseError};
-	use crate::net::output::Output;
+	use crate::ntw::AppState;
+	use crate::ntw::error::{Error as NetError, ResponseError};
+	use crate::ntw::output::Output;
 
 	/// This endpoint allows the user to import a model into the database.
 	pub async fn import(
@@ -144,8 +144,8 @@ mod implementation {
 	use surrealdb_core::dbs::Session;
 	use surrealdb_core::dbs::capabilities::RouteTarget;
 
-	use crate::net::AppState;
-	use crate::net::error::{Error as NetError, ResponseError};
+	use crate::ntw::AppState;
+	use crate::ntw::error::{Error as NetError, ResponseError};
 
 	/// This endpoint allows the user to import a model into the database.
 	pub async fn import(

@@ -17,7 +17,9 @@ mod cnf;
 mod dbs;
 mod env;
 mod gql;
-pub mod net;
+/// Make `ntw` public so embedders can access RouterFactory and related networking definitions
+/// when running SurrealDB as a library.
+pub mod ntw;
 /// Make `rpc` public so embedders can access RpcState and related router definitions
 /// when running SurrealDB as a library.
 pub mod rpc;
@@ -34,7 +36,7 @@ use surrealdb_core::kvs::TransactionBuilderFactory;
 
 // Re-export the core crate in the same path used across internal modules
 // so that `crate::core::...` keeps working when used as a library target.
-use crate::net::RouterFactory;
+use crate::ntw::RouterFactory;
 
 /// Initialize SurrealDB CLI/server with the same behavior as the `surreal` binary.
 /// This spins up a Tokio runtime with a larger stack size and then runs the CLI

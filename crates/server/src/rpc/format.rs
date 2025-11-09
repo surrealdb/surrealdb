@@ -7,7 +7,7 @@ use surrealdb_core::rpc::request::Request;
 use surrealdb_core::rpc::{DbResponse, DbResultError, RpcError};
 use surrealdb_types::{SurrealValue, Value};
 
-use crate::net::headers::{Accept, ContentType};
+use crate::ntw::headers::{Accept, ContentType};
 
 impl From<&Accept> for Format {
 	fn from(value: &Accept) -> Self {

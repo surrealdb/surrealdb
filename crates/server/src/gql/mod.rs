@@ -21,7 +21,7 @@ use surrealdb_core::gql::cache::GraphQLSchemaCache;
 use surrealdb_core::gql::error::resolver_error;
 use tower_service::Service;
 
-use crate::net::error::Error as NetError;
+use crate::ntw::error::Error as NetError;
 
 /// A GraphQL service.
 #[derive(Clone)]
@@ -59,7 +59,7 @@ where
 		Box::pin(async move {
 			let state = req
 				.extensions()
-				.get::<crate::net::AppState>()
+				.get::<crate::ntw::AppState>()
 				.expect("state extractor should always succeed");
 
 			let datastore = &state.datastore;

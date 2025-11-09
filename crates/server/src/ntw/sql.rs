@@ -17,8 +17,8 @@ use super::error::ResponseError;
 use super::headers::Accept;
 use super::output::Output;
 use crate::cnf::HTTP_MAX_SQL_BODY_SIZE;
-use crate::net::error::Error as NetError;
-use crate::net::input::bytes_to_utf8;
+use crate::ntw::error::Error as NetError;
+use crate::ntw::input::bytes_to_utf8;
 
 pub(super) fn router<S>() -> Router<S>
 where

@@ -43,7 +43,7 @@ use crate::cli::version_client::VersionClient;
 use crate::cnf::DEBUG_BUILD_WARNING;
 use crate::cnf::{LOGO, PKG_VERSION};
 use crate::env::RELEASE;
-use crate::net::RouterFactory;
+use crate::ntw::RouterFactory;
 
 const INFO: &str = "
 To get started using SurrealDB, and for guides on connecting to and building applications

@@ -153,7 +153,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		_limit: u32,
 		_version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
-		Err(anyhow::Error::new(Error::UnsupportedVersionedQueries))
+		Err(anyhow::Error::new(Error::Unimplemented("Transaction::scan".to_owned())))
 	}
 
 	/// Retrieve a specific range of keys from the datastore in reverse order.

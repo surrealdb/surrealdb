@@ -20,7 +20,7 @@ use surrealdb_types::SurrealValue;
 use super::AppState;
 use super::error::ResponseError;
 use super::headers::ContentType;
-use crate::net::error::Error as NetError;
+use crate::ntw::error::Error as NetError;
 
 pub(super) fn router<S>() -> Router<S>
 where

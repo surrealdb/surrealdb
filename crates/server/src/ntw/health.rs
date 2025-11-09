@@ -3,7 +3,7 @@ use axum::{Extension, Router};
 use surrealdb_core::dbs::capabilities::RouteTarget;
 
 use super::AppState;
-use crate::net::error::Error as NetError;
+use crate::ntw::error::Error as NetError;
 
 pub(super) fn router<S>() -> Router<S>
 where

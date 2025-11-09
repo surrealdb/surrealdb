@@ -8,7 +8,7 @@ use surrealdb_core::cnf::SERVER_NAME;
 use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::cnf::{PKG_NAME, PKG_VERSION};
-use crate::net::error::Error;
+use crate::ntw::error::Error;
 
 mod accept;
 mod auth_db;

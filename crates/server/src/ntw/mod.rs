@@ -53,7 +53,7 @@ use tower_http::trace::TraceLayer;
 
 use crate::cli::Config;
 use crate::cnf;
-use crate::net::signals::graceful_shutdown;
+use crate::ntw::signals::graceful_shutdown;
 use crate::rpc::{RpcState, notifications};
 use crate::telemetry::metrics::HttpMetricsLayer;
 

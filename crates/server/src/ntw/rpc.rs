@@ -26,7 +26,7 @@ use super::error::ResponseError;
 use super::headers::{Accept, ContentType, SurrealId};
 use crate::cnf;
 use crate::cnf::HTTP_MAX_RPC_BODY_SIZE;
-use crate::net::error::Error as NetError;
+use crate::ntw::error::Error as NetError;
 use crate::rpc::RpcState;
 use crate::rpc::format::HttpFormat;
 use crate::rpc::http::Http;

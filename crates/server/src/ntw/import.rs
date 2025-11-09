@@ -15,8 +15,8 @@ use super::AppState;
 use super::error::ResponseError;
 use super::headers::Accept;
 use crate::cnf::HTTP_MAX_IMPORT_BODY_SIZE;
-use crate::net::error::Error as NetError;
-use crate::net::output::Output;
+use crate::ntw::error::Error as NetError;
+use crate::ntw::output::Output;
 
 pub(super) fn router<S>() -> Router<S>
 where

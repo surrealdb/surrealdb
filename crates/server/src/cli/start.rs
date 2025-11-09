@@ -16,9 +16,9 @@ use super::config::Config;
 use crate::cli::ConfigCheck;
 use crate::cnf::LOGO;
 use crate::dbs::StartCommandDbsOptions;
-use crate::net::RouterFactory;
-use crate::net::client_ip::ClientIp;
-use crate::{dbs, env, net};
+use crate::ntw::RouterFactory;
+use crate::ntw::client_ip::ClientIp;
+use crate::{dbs, env, ntw};
 
 #[derive(Args, Debug)]
 pub struct StartCommandArguments {
@@ -239,7 +239,7 @@ pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
 	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &config.engine);
 	// Start the web server
 	// Build and run the HTTP server using the provided RouterFactory implementation
-	net::init::<C>(&config, datastore.clone(), canceller.clone()).await?;
+	ntw::init::<C>(&config, datastore.clone(), canceller.clone()).await?;
 	// Shutdown and stop closed tasks
 	canceller.cancel();
 	// Wait for background tasks to finish

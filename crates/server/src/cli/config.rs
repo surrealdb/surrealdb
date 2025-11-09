@@ -5,7 +5,7 @@ use anyhow::Result;
 use surrealdb_core::CommunityComposer;
 use surrealdb_core::options::EngineOptions;
 
-use crate::net::client_ip::ClientIp;
+use crate::ntw::client_ip::ClientIp;
 
 /// Trait for validating configuration before system initialization.
 ///

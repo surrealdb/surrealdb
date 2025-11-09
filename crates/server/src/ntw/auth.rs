@@ -19,7 +19,7 @@ use super::headers::{
 	SurrealAuthDatabase, SurrealAuthNamespace, SurrealDatabase, SurrealId, SurrealNamespace,
 	parse_typed_header,
 };
-use crate::net::error::Error as NetError;
+use crate::ntw::error::Error as NetError;
 
 ///
 /// SurrealAuth is a tower layer that implements the AsyncAuthorizeRequest
