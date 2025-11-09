@@ -45,7 +45,7 @@ pub struct StartCommandArguments {
 	#[arg(default_value = "3s")]
 	node_membership_refresh_interval: Duration,
 	#[arg(
-		help = "The interval at which process and archive inactive nodes",
+		help = "The interval at which to process and archive inactive nodes",
 		help_heading = "Database"
 	)]
 	#[arg(env = "SURREAL_NODE_MEMBERSHIP_CHECK_INTERVAL", long = "node-membership-check-interval", value_parser = super::validator::duration)]

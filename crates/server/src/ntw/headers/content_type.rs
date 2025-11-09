@@ -2,24 +2,38 @@ use axum_extra::headers;
 use axum_extra::headers::Header;
 use http::{HeaderName, HeaderValue};
 
-/// Typed header implementation for the `ContentType` header.
+/// Typed header implementation for the `Content-Type` HTTP header.
+///
+/// This enum represents the content types supported by SurrealDB's HTTP API
+/// for request and response serialization. It implements the axum `Header` trait
+/// for automatic parsing and encoding in HTTP handlers.
 #[derive(Debug)]
 pub enum ContentType {
+	/// Plain text format (`text/plain`)
 	TextPlain,
+	/// JSON format (`application/json`)
 	ApplicationJson,
+	/// CBOR (Concise Binary Object Representation) format (`application/cbor`)
 	ApplicationCbor,
+	/// Generic binary format (`application/octet-stream`)
 	ApplicationOctetStream,
+	/// SurrealDB Flatbuffers format (`application/surrealdb+flatbuffers`)
 	ApplicationSurrealDBFlatbuffers,
 }
 
+/// Pre-allocated static header value for `text/plain` content type
 pub(super) static HEADER_VALUE_TEXT_PLAIN: HeaderValue =
 	HeaderValue::from_static(surrealdb_core::api::format::PLAIN);
+/// Pre-allocated static header value for `application/json` content type
 pub(super) static HEADER_VALUE_APPLICATION_JSON: HeaderValue =
 	HeaderValue::from_static(surrealdb_core::api::format::JSON);
+/// Pre-allocated static header value for `application/cbor` content type
 pub(super) static HEADER_VALUE_APPLICATION_CBOR: HeaderValue =
 	HeaderValue::from_static(surrealdb_core::api::format::CBOR);
+/// Pre-allocated static header value for `application/octet-stream` content type
 pub(super) static HEADER_VALUE_APPLICATION_OCTET_STREAM: HeaderValue =
 	HeaderValue::from_static(surrealdb_core::api::format::OCTET_STREAM);
+/// Pre-allocated static header value for `application/surrealdb+flatbuffers` content type
 pub(super) static HEADER_VALUE_APPLICATION_SURREAL_DB_FLATBUFFERS: HeaderValue =
 	HeaderValue::from_static(surrealdb_core::api::format::FLATBUFFERS);
 

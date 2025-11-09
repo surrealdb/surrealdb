@@ -2,7 +2,7 @@
 //! Exposes the same init() used by the `surreal` binary so external apps can
 //! start SurrealDB within their own `main()`.
 
-// Temporary allow deprecated until the 3.0
+// Temporarily allow deprecated items until version 3.0 for backward compatibility
 #![allow(deprecated)]
 #![deny(clippy::mem_forget)]
 
@@ -54,7 +54,9 @@ pub fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(composer
 	with_enough_stack(cli::init::<C>(composer))
 }
 
-/// Rust's default thread stack size of 2MiB doesn't allow sufficient recursion depth.
+/// Rust's default thread stack size of 2MiB doesn't allow sufficient recursion depth
+/// for SurrealDB's query parser and execution engine. This function creates a Tokio
+/// runtime with a larger stack size configured via `cnf::RUNTIME_STACK_SIZE`.
 fn with_enough_stack(fut: impl Future<Output = ExitCode> + Send) -> ExitCode {
 	// Start a Tokio runtime with custom configuration
 	let mut b = tokio::runtime::Builder::new_multi_thread();
