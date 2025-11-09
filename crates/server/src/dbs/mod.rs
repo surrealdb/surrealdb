@@ -578,7 +578,9 @@ impl From<DbsCapabilities> for Capabilities {
 	}
 }
 
-/// Retry an async operation until it succeeds or a timeout is reached
+/// Retry an async operation until it succeeds or a timeout is reached.
+/// This is required for operations that rely on remote or distributed KV store
+/// that may not be immediately available.
 ///
 /// # Parameters
 /// - `operation_name`: Name of the operation for logging purposes
@@ -589,7 +591,7 @@ impl From<DbsCapabilities> for Capabilities {
 async fn retry_with_timeout<F, Fut, T, E>(operation_name: &str, f: F) -> Result<T, anyhow::Error>
 where
 	F: Fn() -> Fut,
-	Fut: std::future::Future<Output = Result<T, E>>,
+	Fut: Future<Output = Result<T, E>>,
 	E: std::fmt::Display + std::fmt::Debug,
 {
 	let timeout_duration = Duration::from_secs(60);
@@ -603,6 +605,8 @@ where
 			Ok(Ok(result)) => {
 				if attempt > 1 {
 					info!(target: TARGET, operation = operation_name, attempts = attempt, "Operation succeeded after retry");
+				} else {
+					info!(target: TARGET, operation = operation_name, attempts = attempt, "Operation succeeded");
 				}
 				return Ok(result);
 			}
