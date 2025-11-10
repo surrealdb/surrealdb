@@ -31,6 +31,9 @@ audit-as-crates-io = true
 [policy.surrealdb-core]
 audit-as-crates-io = true
 
+[policy.surrealdb-server]
+audit-as-crates-io = false
+
 [policy.surrealdb-types]
 audit-as-crates-io = true
 
@@ -886,10 +889,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.prost-derive]]
 version = "0.11.9"
-criteria = "safe-to-deploy"
-
-[[exemptions.prost-derive]]
-version = "0.13.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.prost-types]]

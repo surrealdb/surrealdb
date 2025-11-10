@@ -343,6 +343,7 @@ impl Value {
 	pub fn all_equal(&self, other: &Value) -> bool {
 		match self {
 			Value::Array(v) => v.iter().all(|v| v.equal(other)),
+			Value::Set(v) => v.iter().all(|v| v.equal(other)),
 			_ => self.equal(other),
 		}
 	}
@@ -351,6 +352,7 @@ impl Value {
 	pub fn any_equal(&self, other: &Value) -> bool {
 		match self {
 			Value::Array(v) => v.iter().any(|v| v.equal(other)),
+			Value::Set(v) => v.iter().any(|v| v.equal(other)),
 			_ => self.equal(other),
 		}
 	}
@@ -393,7 +395,7 @@ impl Value {
 		}
 	}
 
-	/// Check if all Values in an Array contain another Value
+	/// Check if all Values in an Array, Set or String contain another Value
 	pub fn contains_all(&self, other: &Value) -> bool {
 		match other {
 			Value::Array(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
@@ -408,8 +410,27 @@ impl Value {
 					this.contains(&**other_string)
 				})
 			}
+			Value::Set(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
+				// confirmed as strand so all return false is unreachable
+				let Value::String(this) = self else {
+					return false;
+				};
+				v.iter().all(|s| {
+					let Value::String(other_string) = s else {
+						return false;
+					};
+					this.contains(&**other_string)
+				})
+			}
 			Value::Array(v) => v.iter().all(|v| match self {
 				Value::Array(w) => w.iter().any(|w| v.equal(w)),
+				Value::Set(w) => w.iter().any(|w| v.equal(w)),
+				Value::Geometry(_) => self.contains(v),
+				_ => false,
+			}),
+			Value::Set(v) => v.iter().all(|v| match self {
+				Value::Array(w) => w.iter().any(|w| v.equal(w)),
+				Value::Set(w) => w.iter().any(|w| v.equal(w)),
 				Value::Geometry(_) => self.contains(v),
 				_ => false,
 			}),
@@ -421,7 +442,7 @@ impl Value {
 		}
 	}
 
-	/// Check if any Values in an Array contain another Value
+	/// Check if any Values in an Array, Set or String contain another Value
 	pub fn contains_any(&self, other: &Value) -> bool {
 		match other {
 			Value::Array(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
@@ -436,8 +457,27 @@ impl Value {
 					this.contains(&**other_string)
 				})
 			}
+			Value::Set(v) if v.iter().all(|v| v.is_strand()) && self.is_strand() => {
+				// confirmed as strand so all return false is unreachable
+				let Value::String(this) = self else {
+					return false;
+				};
+				v.iter().any(|s| {
+					let Value::String(other_string) = s else {
+						return false;
+					};
+					this.contains(&**other_string)
+				})
+			}
 			Value::Array(v) => v.iter().any(|v| match self {
 				Value::Array(w) => w.iter().any(|w| v.equal(w)),
+				Value::Set(w) => w.iter().any(|w| v.equal(w)),
+				Value::Geometry(_) => self.contains(v),
+				_ => false,
+			}),
+			Value::Set(v) => v.iter().any(|v| match self {
+				Value::Array(w) => w.iter().any(|w| v.equal(w)),
+				Value::Set(w) => w.iter().any(|w| v.equal(w)),
 				Value::Geometry(_) => self.contains(v),
 				_ => false,
 			}),
@@ -449,7 +489,7 @@ impl Value {
 		}
 	}
 
-	/// Check if this Value intersects another Value
+	/// Check if this Geometry intersects another Value
 	pub fn intersects(&self, other: &Value) -> bool {
 		match self {
 			Value::Geometry(v) => match other {
