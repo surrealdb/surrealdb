@@ -17,7 +17,7 @@ use crate::catalog::DatabaseDefinition;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
-use crate::expr::order::Ordering;
+use crate::expr::order::{OrderDirection, Ordering};
 use crate::expr::with::With;
 use crate::expr::{Cond, Fields, Groups};
 use crate::idx::planner::executor::{InnerQueryExecutor, IteratorEntry, QueryExecutor};
@@ -211,13 +211,12 @@ impl<'a> StatementContext<'a> {
 	/// On backends that support reverse scans (e.g., RocksDB/TiKV), we reverse
 	/// the direction when the first ORDER BY is `id DESC`. Otherwise, we
 	/// default to forward.
-	#[allow(unused_variables)]
 	pub(crate) fn check_scan_direction(&self, has_reverse_scan: bool) -> ScanDirection {
 		#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 		if has_reverse_scan {
 			if let Some(Ordering::Order(o)) = self.order {
 				if let Some(o) = o.first() {
-					if !o.direction && o.value.is_id() {
+					if matches!(o.direction, OrderDirection::Descending) && o.value.is_id() {
 						return ScanDirection::Backward;
 					}
 				}

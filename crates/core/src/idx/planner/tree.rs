@@ -152,7 +152,7 @@ impl<'a> TreeBuilder<'a> {
 							index_reference.clone(),
 							Some(id),
 							IdiomPosition::None,
-							IndexOperator::Order(o.direction.clone()),
+							IndexOperator::Order(o.direction),
 						));
 						break;
 					}
