@@ -20,6 +20,9 @@ const TARGET: &str = "surreal::dbs";
 
 #[derive(Args, Debug)]
 pub struct StartCommandDbsOptions {
+	#[arg(help = "Whether strict mode is enabled on this database instance")]
+	#[arg(env = "SURREAL_STRICT", short = 's', long = "strict", hide = true)]
+	strict_mode: Option<bool>,
 	#[arg(help = "The maximum duration that a set of statements can run for")]
 	#[arg(env = "SURREAL_QUERY_TIMEOUT", long)]
 	#[arg(value_parser = super::cli::validator::duration)]
@@ -661,6 +664,7 @@ pub async fn init<F: TransactionBuilderFactory>(
 	factory: &F,
 	opt: &Config,
 	StartCommandDbsOptions {
+		strict_mode,
 		query_timeout,
 		transaction_timeout,
 		unauthenticated,
@@ -672,6 +676,12 @@ pub async fn init<F: TransactionBuilderFactory>(
 		slow_log_param_deny,
 	}: StartCommandDbsOptions,
 ) -> Result<Datastore> {
+	// Warn about the strict mode flag being unused.
+	if let Some(true) = strict_mode {
+		warn!(
+			"Strict mode is no longer defined on the server level. Use `DEFINE DATABASE <db> STRICT` instead. Ignoring strict mode flag."
+		);
+	}
 	// Log specified query timeout
 	if let Some(v) = query_timeout {
 		debug!("Maximum query processing timeout is {v:?}");
