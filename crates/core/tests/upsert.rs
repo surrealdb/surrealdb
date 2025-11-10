@@ -1014,7 +1014,7 @@ async fn upsert_none_removes_field() -> Result<()> {
 		};
 
 		DEFINE TABLE flex SCHEMAFULL;
-		DEFINE FIELD obj ON flex TYPE object;
+		DEFINE FIELD obj ON flex TYPE object FLEXIBLE;
 		UPSERT flex:1 CONTENT {
 			obj: {
 				a: 1
