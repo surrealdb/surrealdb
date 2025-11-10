@@ -835,6 +835,125 @@ pub async fn live_rpc(cfg_server: Option<Format>, cfg_format: Format) {
 	server.finish().unwrap();
 }
 
+pub async fn live_query_diff(cfg_server: Option<Format>, cfg_format: Format) {
+	// Setup database server
+	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
+	// Connect to WebSocket
+	let mut socket = Socket::connect(&addr, cfg_server, cfg_format).await.unwrap();
+	// Authenticate the connection
+	socket.send_message_signin(USER, PASS, None, None, None).await.unwrap();
+	// Specify a namespace and database
+	socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
+	// Send LIVE DIFF command
+	let res = socket.send_request("query", json!(["LIVE SELECT DIFF FROM tester"])).await.unwrap();
+	assert!(res.is_object(), "result: {res:?}");
+	assert!(res["result"].is_array(), "result: {res:?}");
+	let res = res["result"].as_array().unwrap();
+	assert_eq!(res.len(), 1, "result: {res:?}");
+	assert!(res[0]["result"].is_string(), "result: {res:?}");
+	let live_id = res[0]["result"].as_str().unwrap();
+
+	// Create a new test record
+	let res = socket
+		.send_request("query", json!(["CREATE tester:id SET name = 'foo', value = 42"]))
+		.await
+		.unwrap();
+	assert!(res.is_object(), "result: {res:?}");
+	assert!(res["result"].is_array(), "result: {res:?}");
+
+	// Wait for the CREATE notification
+	let msgs = socket.receive_all_other_messages(1, Duration::from_secs(1)).await.unwrap();
+	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
+	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, live_id));
+	assert!(res.is_some(), "Expected to find a notification for LQ id {live_id}: {msgs:?}");
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {res:?}");
+	let res = res["result"].as_object().unwrap();
+	assert_eq!(res["action"], "CREATE", "result: {res:?}");
+	// For CREATE with DIFF, the result should be an array of operations
+	assert!(res["result"].is_array(), "Expected diff operations array, got: {res:?}");
+	let operations = res["result"].clone();
+	// Check that we have proper JSON patch operations
+	assert_eq!(
+		operations,
+		json!([
+			{
+				"op": "replace",
+				"path": "",
+				"value": {
+					"id": "tester:id",
+					"name": "foo",
+					"value": 42
+				}
+			}
+		])
+	);
+
+	// Update the record
+	let res = socket
+		.send_request("query", json!(["UPDATE tester:id SET name = 'bar', value = 100"]))
+		.await
+		.unwrap();
+	assert!(res.is_object(), "result: {res:?}");
+
+	// Wait for the UPDATE notification
+	let msgs = socket.receive_all_other_messages(1, Duration::from_secs(1)).await.unwrap();
+	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
+	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, live_id));
+	assert!(res.is_some(), "Expected to find a notification for LQ id {live_id}: {msgs:?}");
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {res:?}");
+	let res = res["result"].as_object().unwrap();
+	assert_eq!(res["action"], "UPDATE", "result: {res:?}");
+	// For UPDATE with DIFF, the result should be an array of operations
+	assert!(res["result"].is_array(), "Expected diff operations array, got: {res:?}");
+	let operations = res["result"].clone();
+	assert_eq!(
+		operations,
+		json!([
+			{
+				"op": "change",
+				"path": "/name",
+				"value": "@@ -1,3 +1,3 @@\n-foo\n+bar\n",
+			},
+			{
+				"op": "replace",
+				"path": "/value",
+				"value": 100
+			}
+		])
+	);
+
+	// Delete the record
+	let res = socket.send_request("query", json!(["DELETE tester:id"])).await.unwrap();
+	assert!(res.is_object(), "result: {res:?}");
+
+	// Wait for the DELETE notification
+	let msgs = socket.receive_all_other_messages(1, Duration::from_secs(1)).await.unwrap();
+	assert!(msgs.iter().all(|v| v["error"].is_null()), "Unexpected error received: {msgs:?}");
+	let res = msgs.iter().find(|v| common::is_notification_from_lq(v, live_id));
+	assert!(res.is_some(), "Expected to find a notification for LQ id {live_id}: {msgs:?}");
+	let res = res.unwrap();
+	assert!(res.is_object(), "result: {res:?}");
+	let res = res["result"].as_object().unwrap();
+	assert_eq!(res["action"], "DELETE", "result: {res:?}");
+	// For DELETE with DIFF, the result should be an array of operations
+	let operations = res["result"].clone();
+	assert_eq!(
+		operations,
+		json!([
+			{
+				"op": "replace",
+				"path": "",
+				"value": null
+			}
+		])
+	);
+
+	// Test passed
+	server.finish().unwrap();
+}
+
 pub async fn kill(cfg_server: Option<Format>, cfg_format: Format) {
 	// Setup database server
 	let (addr, mut server) = common::start_server_with_defaults().await.unwrap();
@@ -2573,6 +2692,8 @@ define_include_tests! {
 	live_query,
 	#[test_log::test(tokio::test)]
 	live_rpc,
+	#[test_log::test(tokio::test)]
+	live_query_diff,
 	#[test_log::test(tokio::test)]
 	kill,
 	#[test_log::test(tokio::test)]

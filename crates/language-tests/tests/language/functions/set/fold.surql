@@ -1,7 +1,20 @@
 /**
 [test]
-wip = true
-reason = "Test set::fold function for folding/reducing with accumulator"
+
+[[test.results]]
+value = "15"
+
+[[test.results]]
+value = "120"
+
+[[test.results]]
+value = "10"
+
+[[test.results]]
+value = "'applebananakirwi'"
+
+[[test.results]]
+value = "[1, 2, 3, 4, 5]"
 
 */
 

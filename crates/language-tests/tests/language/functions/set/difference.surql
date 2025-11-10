@@ -1,7 +1,24 @@
 /**
 [test]
-wip = true
-reason = "Set literals are not yet supported"
+
+[[test.results]]
+value = "{,}"
+
+[[test.results]]
+error = "Incorrect arguments for function set::difference(). Argument 1 was the wrong type. Expected `set` but found `3`"
+
+[[test.results]]
+value = "{1, 4}"
+
+[[test.results]]
+value = "{1, 2, 3, 4, 5}"
+
+[[test.results]]
+value = "{1, 2, 3}"
+
+[[test.results]]
+value = "{,}"
+
 */
 
 RETURN set::difference({,}, {,});

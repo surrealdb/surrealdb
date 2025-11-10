@@ -93,4 +93,33 @@ impl RpcProtocol for Http {
 	async fn unset(&self, _session_id: Option<Uuid>, _params: Array) -> Result<DbResult, RpcError> {
 		Err(RpcError::MethodNotFound)
 	}
+
+	/// Transactions are not supported on HTTP RPC context
+	async fn begin(
+		&self,
+		_txn: Option<Uuid>,
+		_session_id: Option<Uuid>,
+	) -> Result<DbResult, RpcError> {
+		Err(RpcError::MethodNotFound)
+	}
+
+	/// Transactions are not supported on HTTP RPC context
+	async fn commit(
+		&self,
+		_txn: Option<Uuid>,
+		_session_id: Option<Uuid>,
+		_params: Array,
+	) -> Result<DbResult, RpcError> {
+		Err(RpcError::MethodNotFound)
+	}
+
+	/// Transactions are not supported on HTTP RPC context
+	async fn cancel(
+		&self,
+		_txn: Option<Uuid>,
+		_session_id: Option<Uuid>,
+		_params: Array,
+	) -> Result<DbResult, RpcError> {
+		Err(RpcError::MethodNotFound)
+	}
 }

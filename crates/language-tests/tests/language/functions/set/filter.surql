@@ -1,7 +1,21 @@
 /**
 [test]
-wip = true
-reason = "Test set::filter function for filtering set elements"
+
+[[test.results]]
+value = "{2, 4}"
+
+[[test.results]]
+value = "{4, 5}"
+
+[[test.results]]
+value = "{2,}"
+
+[[test.results]]
+value = "{,}"
+
+[[test.results]]
+value = "{'banana',}"
+
 */
 
 -- Filter even numbers

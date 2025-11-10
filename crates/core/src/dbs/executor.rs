@@ -499,6 +499,13 @@ impl Executor {
 
 					self.opt.broker = None;
 
+					// CANCEL returns NONE
+					self.results.push(QueryResult {
+						time: before.elapsed(),
+						result: Ok(convert_value_to_public_value(Value::None)?),
+						query_type: QueryType::Other,
+					});
+
 					return Ok(());
 				}
 				TopLevelExpr::Commit => {
@@ -528,6 +535,13 @@ impl Executor {
 							}
 						}
 
+						// COMMIT returns NONE
+						self.results.push(QueryResult {
+							time: before.elapsed(),
+							result: Ok(convert_value_to_public_value(Value::None)?),
+							query_type: QueryType::Other,
+						});
+
 						return Ok(());
 					};
 
@@ -544,15 +558,17 @@ impl Executor {
 				}
 				TopLevelExpr::Option(stmt) => match self.execute_option_statement(stmt) {
 					Ok(_) => {
-						// skip adding the value as executing an option statement doesn't produce
-						// results
+						// OPTION returns NONE
+						self.results.push(QueryResult {
+							time: before.elapsed(),
+							result: Ok(convert_value_to_public_value(Value::None)?),
+							query_type: QueryType::Other,
+						});
 						continue;
 					}
 					Err(e) => Err(DbResultError::InternalError(e.to_string())),
 				},
 				stmt => {
-					skip_remaining = matches!(stmt, TopLevelExpr::Expr(Expr::Return(_)));
-
 					// reintroduce planner later.
 					let plan = stmt;
 
@@ -609,12 +625,6 @@ impl Executor {
 							}
 						};
 
-					if skip_remaining {
-						// If we skip the next values due to return then we need to clear the other
-						// results.
-						self.results.truncate(start_results)
-					}
-
 					match r {
 						Ok(value) => Ok(convert_value_to_public_value(value)?),
 						Err(err) => Err(DbResultError::InternalError(err.to_string())),
@@ -663,6 +673,48 @@ impl Executor {
 	) -> Result<Vec<QueryResult>> {
 		let stream = futures::stream::iter(qry.expressions.into_iter().map(Ok));
 		Self::execute_expr_stream(kvs, ctx, opt, false, stream).await
+	}
+
+	/// Execute a logical plan with an existing transaction
+	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
+	pub async fn execute_plan_with_transaction(
+		ctx: Context,
+		opt: Options,
+		qry: LogicalPlan,
+	) -> Result<Vec<QueryResult>> {
+		// The transaction is already set in the context
+		// Execute each expression with the transaction
+		let tx = ctx.tx();
+		let mut executor = Executor::new(ctx, opt);
+		let mut results = Vec::new();
+
+		for expr in qry.expressions {
+			let start = Instant::now();
+			let result = executor.execute_plan_in_transaction(tx.clone(), &start, expr).await;
+
+			let time = start.elapsed();
+			let query_result = match result {
+				Ok(value) | Err(ControlFlow::Return(value)) => QueryResult {
+					time,
+					result: crate::val::convert_value_to_public_value(value)
+						.map_err(|e| crate::rpc::DbResultError::InternalError(e.to_string())),
+					query_type: QueryType::Other,
+				},
+				Err(ControlFlow::Err(e)) => QueryResult {
+					time,
+					result: Err(DbResultError::InternalError(e.to_string())),
+					query_type: QueryType::Other,
+				},
+				Err(ControlFlow::Continue) | Err(ControlFlow::Break) => QueryResult {
+					time,
+					result: Err(DbResultError::InternalError("Invalid control flow".to_string())),
+					query_type: QueryType::Other,
+				},
+			};
+			results.push(query_result);
+		}
+
+		Ok(results)
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
@@ -715,9 +767,23 @@ impl Executor {
 			};
 
 			match stmt {
-				TopLevelExpr::Option(stmt) => this.execute_option_statement(stmt)?,
-				// handle option here because it doesn't produce a result.
+				TopLevelExpr::Option(stmt) => {
+					this.execute_option_statement(stmt)?;
+					// OPTION returns NONE
+					this.results.push(QueryResult {
+						time: Duration::ZERO,
+						result: Ok(convert_value_to_public_value(Value::None)?),
+						query_type: QueryType::Other,
+					});
+				}
 				TopLevelExpr::Begin => {
+					// BEGIN returns NONE
+					this.results.push(QueryResult {
+						time: Duration::ZERO,
+						result: Ok(convert_value_to_public_value(Value::None)?),
+						query_type: QueryType::Other,
+					});
+
 					if let Err(e) = this.execute_begin_statement(kvs, stream.as_mut()).await {
 						this.results.push(QueryResult {
 							time: Duration::ZERO,

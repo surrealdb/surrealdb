@@ -105,8 +105,6 @@ pub(crate) enum Index {
 	Idx,
 	/// Unique index
 	Uniq,
-	/// M-Tree index for distance based metrics
-	MTree(MTreeParams),
 	/// HNSW index for distance-based metrics
 	Hnsw(HnswParams),
 	/// Index with Full-Text search capabilities
@@ -120,7 +118,6 @@ impl Index {
 		match self {
 			Self::Idx => crate::sql::index::Index::Idx,
 			Self::Uniq => crate::sql::index::Index::Uniq,
-			Self::MTree(params) => crate::sql::index::Index::MTree(params.clone().into()),
 			Self::Hnsw(params) => crate::sql::index::Index::Hnsw(params.clone().into()),
 			Self::FullText(params) => crate::sql::index::Index::FullText(params.clone().into()),
 			Self::Count(cond) => crate::sql::index::Index::Count(cond.clone().map(Into::into)),
@@ -212,22 +209,6 @@ impl Default for Scoring {
 			b: 0.75,
 		}
 	}
-}
-
-/// M-Tree index parameters.
-#[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct MTreeParams {
-	/// The dimension of the index.
-	pub dimension: u16,
-	/// The distance metric to use.
-	pub distance: Distance,
-	/// The vector type to use.
-	pub vector_type: VectorType,
-	/// The capacity of the index.
-	pub capacity: u16,
-	/// The cache of the M-Tree.
-	pub mtree_cache: u32,
 }
 
 /// Distance metric for calculating distances between vectors.

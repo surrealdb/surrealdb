@@ -187,7 +187,7 @@ Defaults to `"*"`
 #### `[test.results]`
 
 The test results table specifies the expected out of the test. The command line
-tool will warn about every test that does not includes a this table in its
+tool will warn about every test that does not include this table in its
 configuration. This table can either be a straight table or an array of tables.
 
 Examples:
@@ -200,6 +200,28 @@ parsing-error = "foo"
 This tests if the test returns a parsing error with the text `foo`. A test is
 parsed once and can only return a single parsing error. So when testing for a
 parsing error only a single result is allowed to be specified.
+
+```surql
+/**
+[test]
+
+[test.results]
+parsing-error = """
+Invalid function/constant path, did you maybe mean `type::record`
+  --> [16:1]
+   |
+16 | type::thing("person", "one");
+   | ^^^^^^^^^^^
+"""
+
+*/
+
+type::thing("person", "one");
+
+// Can't add this extra assertion inside the same file
+// Must be a separate file with its own [test.results]
+// string::slayce();
+```
 
 Note that the following are also allowed:
 

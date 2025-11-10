@@ -26,14 +26,14 @@ use crate::expr::statements::{
 	AccessStatement, AlterStatement, CreateStatement, DefineAccessStatement,
 	DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement, DefineEventStatement,
 	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
-	DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement,
-	DefineUserStatement, DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement,
-	InsertStatement, KillStatement, LiveStatement, OptionStatement, OutputStatement,
+	DefineModuleStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
+	DefineTableStatement, DefineUserStatement, DeleteStatement, ForeachStatement, IfelseStatement,
+	InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement, OutputStatement,
 	RelateStatement, RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement,
 	RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
-	RemoveModelStatement, RemoveNamespaceStatement, RemoveParamStatement, RemoveStatement,
-	RemoveTableStatement, RemoveUserStatement, SelectStatement, SetStatement, ShowStatement,
-	SleepStatement, UpdateStatement, UpsertStatement, UseStatement,
+	RemoveModelStatement, RemoveModuleStatement, RemoveNamespaceStatement, RemoveParamStatement,
+	RemoveStatement, RemoveTableStatement, RemoveUserStatement, SelectStatement, SetStatement,
+	ShowStatement, SleepStatement, UpdateStatement, UpsertStatement, UseStatement,
 };
 use crate::expr::{
 	AccessType, Block, ClosureExpr, Data, Expr, Field, Fields, Function, FunctionCall, Idiom,
@@ -527,6 +527,9 @@ implement_visitor! {
 			RemoveStatement::Sequence(r) => {
 				this.visit_remove_sequence(r)?;
 			},
+			RemoveStatement::Module(r) => {
+				this.visit_remove_module(r)?;
+			},
 		}
 		Ok(())
 	}
@@ -542,6 +545,10 @@ implement_visitor! {
 	}
 
 	fn visit_remove_function(this, r: &RemoveFunctionStatement){
+		Ok(())
+	}
+
+	fn visit_remove_module(this, r: &RemoveModuleStatement){
 		Ok(())
 	}
 
@@ -761,6 +768,9 @@ implement_visitor! {
 			DefineStatement::Sequence(d) => {
 				this.visit_define_sequence(d)?;
 			},
+			DefineStatement::Module(d) => {
+				this.visit_define_module(d)?;
+			},
 		}
 		Ok(())
 	}
@@ -910,8 +920,15 @@ implement_visitor! {
 		Ok(())
 	}
 
-
 	fn visit_define_model(this, d: &DefineModelStatement) {
+		this.visit_permission(&d.permissions)?;
+		if let Some(expr) = d.comment.as_ref(){
+			this.visit_expr(expr)?;
+		}
+		Ok(())
+	}
+
+	fn visit_define_module(this, d: &DefineModuleStatement) {
 		this.visit_permission(&d.permissions)?;
 		if let Some(expr) = d.comment.as_ref(){
 			this.visit_expr(expr)?;
@@ -1939,6 +1956,9 @@ implement_visitor_mut! {
 			RemoveStatement::Sequence(r) => {
 				this.visit_mut_remove_sequence(r)?;
 			},
+			RemoveStatement::Module(r) => {
+				this.visit_mut_remove_module(r)?;
+			},
 		}
 		Ok(())
 	}
@@ -1954,6 +1974,10 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_remove_function(this, r: &mut RemoveFunctionStatement){
+		Ok(())
+	}
+
+	fn visit_mut_remove_module(this, r: &mut RemoveModuleStatement){
 		Ok(())
 	}
 
@@ -2173,6 +2197,9 @@ implement_visitor_mut! {
 			DefineStatement::Sequence(d) => {
 				this.visit_mut_define_sequence(d)?;
 			},
+			DefineStatement::Module(d) => {
+				this.visit_mut_define_module(d)?;
+			},
 		}
 		Ok(())
 	}
@@ -2318,8 +2345,15 @@ implement_visitor_mut! {
 		Ok(())
 	}
 
-
 	fn visit_mut_define_model(this, d: &mut DefineModelStatement) {
+		this.visit_mut_permission(&mut d.permissions)?;
+		if let Some(expr) = d.comment.as_mut(){
+			this.visit_mut_expr(expr)?;
+		}
+		Ok(())
+	}
+
+	fn visit_mut_define_module(this, d: &mut DefineModuleStatement) {
 		this.visit_mut_permission(&mut d.permissions)?;
 		if let Some(expr) = d.comment.as_mut(){
 			this.visit_mut_expr(expr)?;

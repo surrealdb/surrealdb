@@ -405,6 +405,7 @@ async fn run_test_with_dbs(
 			.get_capabilities()
 			.allows_experimental(&ExperimentalTarget::DefineApi),
 		files_enabled: dbs.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
+		surrealism_enabled: dbs.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism),
 		..Default::default()
 	};
 

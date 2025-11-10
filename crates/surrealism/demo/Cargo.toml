@@ -1,0 +1,25 @@
+[package]
+name = "demo"
+version = "0.1.0"
+description = "Demo for Surrealism"
+publish = false
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license-file.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+surrealdb-types.workspace = true
+surrealism.workspace = true
+
+[lints]
+workspace = true

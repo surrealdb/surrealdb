@@ -9,6 +9,7 @@ mod field;
 mod function;
 mod index;
 mod model;
+mod module;
 mod namespace;
 mod param;
 mod sequence;
@@ -30,6 +31,7 @@ pub(crate) use function::DefineFunctionStatement;
 pub(crate) use index::DefineIndexStatement;
 pub(in crate::expr::statements) use index::run_indexing;
 pub(crate) use model::DefineModelStatement;
+pub(crate) use module::DefineModuleStatement;
 pub(crate) use namespace::DefineNamespaceStatement;
 pub(crate) use param::DefineParamStatement;
 use reblessive::tree::Stk;
@@ -68,6 +70,7 @@ pub(crate) enum DefineStatement {
 	Api(DefineApiStatement),
 	Bucket(DefineBucketStatement),
 	Sequence(DefineSequenceStatement),
+	Module(DefineModuleStatement),
 }
 
 impl DefineStatement {
@@ -96,6 +99,7 @@ impl DefineStatement {
 			Self::Api(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Bucket(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Module(v) => v.compute(stk, ctx, opt, doc).await,
 		}
 	}
 }
@@ -119,6 +123,7 @@ impl Display for DefineStatement {
 			Self::Api(v) => Display::fmt(v, f),
 			Self::Bucket(v) => Display::fmt(v, f),
 			Self::Sequence(v) => Display::fmt(v, f),
+			Self::Module(v) => Display::fmt(v, f),
 		}
 	}
 }

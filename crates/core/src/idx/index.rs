@@ -1,5 +1,5 @@
 //! This module applies index mutations for a single document across different
-//! index types (UNIQUE, regular, search, fulltext, MTree, Hnsw). Index keys are
+//! index types (UNIQUE, regular, search, fulltext, Hnsw). Index keys are
 //! constructed via key::index and field values are encoded using
 //! key::value::Array.
 //!
@@ -17,7 +17,7 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use crate::catalog::{
-	DatabaseId, FullTextParams, HnswParams, Index, IndexDefinition, MTreeParams, NamespaceId,
+	DatabaseId, FullTextParams, HnswParams, Index, IndexDefinition, NamespaceId, TableId,
 };
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -26,11 +26,10 @@ use crate::expr::{Cond, Part};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::planner::iterators::IndexCountThingIterator;
-use crate::idx::trees::mtree::MTreeIndex;
 use crate::key;
 use crate::key::index::iu::IndexCountKey;
 use crate::key::root::ic::IndexCompactionKey;
-use crate::kvs::{Transaction, TransactionType};
+use crate::kvs::Transaction;
 use crate::val::{Array, RecordId, Value};
 
 pub(crate) struct IndexOperation<'a> {
@@ -38,6 +37,7 @@ pub(crate) struct IndexOperation<'a> {
 	opt: &'a Options,
 	ns: NamespaceId,
 	db: DatabaseId,
+	tb: TableId,
 	ix: &'a IndexDefinition,
 	ikb: IndexKeyBase,
 	/// The old values (if existing)
@@ -54,6 +54,7 @@ impl<'a> IndexOperation<'a> {
 		opt: &'a Options,
 		ns: NamespaceId,
 		db: DatabaseId,
+		tb: TableId,
 		ix: &'a IndexDefinition,
 		o: Option<Vec<Value>>,
 		n: Option<Vec<Value>>,
@@ -64,6 +65,7 @@ impl<'a> IndexOperation<'a> {
 			opt,
 			ns,
 			db,
+			tb,
 			ix,
 			ikb: IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id),
 			o,
@@ -82,7 +84,6 @@ impl<'a> IndexOperation<'a> {
 			Index::Uniq => self.index_unique().await,
 			Index::Idx => self.index_non_unique().await,
 			Index::FullText(p) => self.index_fulltext(stk, p, require_compaction).await,
-			Index::MTree(p) => self.index_mtree(stk, p).await,
 			Index::Hnsw(p) => self.index_hnsw(p).await,
 			Index::Count(c) => self.index_count(stk, c.as_ref(), require_compaction).await,
 		}
@@ -287,27 +288,12 @@ impl<'a> IndexOperation<'a> {
 		FullTextIndex::trigger_compaction(&self.ikb, &self.ctx.tx(), self.opt.id()?).await
 	}
 
-	async fn index_mtree(&mut self, stk: &mut Stk, p: &MTreeParams) -> Result<()> {
-		let txn = self.ctx.tx();
-		let ikb = IndexKeyBase::new(self.ns, self.db, &self.ix.table_name, self.ix.index_id);
-		let mut mt = MTreeIndex::new(&txn, ikb, p, TransactionType::Write).await?;
-		// Delete the old index data
-		if let Some(o) = self.o.take() {
-			mt.remove_document(stk, &txn, self.rid, &o).await?;
-		}
-		// Create the new index data
-		if let Some(n) = self.n.take() {
-			mt.index_document(stk, self.ctx, &txn, self.rid, &n).await?;
-		}
-		mt.finish(&txn).await
-	}
-
 	async fn index_hnsw(&mut self, p: &HnswParams) -> Result<()> {
 		let txn = self.ctx.tx();
 		let hnsw = self
 			.ctx
 			.get_index_stores()
-			.get_index_hnsw(self.ns, self.db, self.ctx, self.ix, p)
+			.get_index_hnsw(self.ns, self.db, self.ctx, self.tb, self.ix, p)
 			.await?;
 		let mut hnsw = hnsw.write().await;
 		// Delete the old index data

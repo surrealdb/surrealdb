@@ -1,7 +1,24 @@
 /**
 [test]
-wip = true
-reason = "Set literals are not yet supported"
+
+[[test.results]]
+value = "false"
+
+[[test.results]]
+error = "Incorrect arguments for function set::contains(). Argument 1 was the wrong type. Expected `set` but found `3`"
+
+[[test.results]]
+value = "true"
+
+[[test.results]]
+value = "false"
+
+[[test.results]]
+value = "true"
+
+[[test.results]]
+value = "false"
+
 */
 
 RETURN set::contains({,}, 3);

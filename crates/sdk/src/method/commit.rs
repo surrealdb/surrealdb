@@ -1,13 +1,27 @@
 use std::future::IntoFuture;
 
-use crate::method::BoxFuture;
-use crate::{Connection, Result, Surreal};
+use crate::conn::Command;
+use crate::method::{BoxFuture, Transaction};
+use crate::{Connection, OnceLockExt, Result, Surreal};
 
 /// A transaction commit future
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
 pub struct Commit<C: Connection> {
 	pub(crate) client: Surreal<C>,
+	pub(crate) txn: uuid::Uuid,
+}
+
+impl<C> Commit<C>
+where
+	C: Connection,
+{
+	pub(crate) fn from_transaction(transaction: Transaction<C>) -> Self {
+		Self {
+			client: transaction.client,
+			txn: transaction.id,
+		}
+	}
 }
 
 impl<C> IntoFuture for Commit<C>
@@ -19,7 +33,12 @@ where
 
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
-			self.client.query("COMMIT").await?;
+			let router = self.client.inner.router.extract()?;
+			let _: surrealdb_types::Value = router
+				.execute(Command::Commit {
+					txn: self.txn,
+				})
+				.await?;
 			Ok(self.client)
 		})
 	}

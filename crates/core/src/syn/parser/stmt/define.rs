@@ -5,7 +5,7 @@ use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
 use crate::sql::filter::Filter;
-use crate::sql::index::{Distance, HnswParams, MTreeParams, VectorType};
+use crate::sql::index::{Distance, HnswParams, VectorType};
 use crate::sql::statements::define::config::api::{ApiConfig, Middleware};
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::config::{ConfigInner, graphql};
@@ -19,14 +19,18 @@ use crate::sql::statements::define::{
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	AccessType, Expr, Index, Kind, Literal, Param, Permission, Permissions, Scoring, TableType,
-	access_type, table_type,
+	AccessType, DefineModuleStatement, Expr, Index, Kind, Literal, Param, Permission, Permissions,
+	Scoring, TableType, access_type, table_type,
 };
+#[cfg(feature = "surrealism")]
+use crate::sql::{ModuleExecutable, SiloExecutable, SurrealismExecutable};
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Token, TokenKind, t};
 use crate::types::PublicDuration;
+#[cfg(feature = "surrealism")]
+use crate::types::PublicFile;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_define_stmt(
@@ -58,6 +62,7 @@ impl Parser<'_> {
 			t!("CONFIG") => self.parse_define_config(stk).await.map(DefineStatement::Config),
 			t!("BUCKET") => self.parse_define_bucket(stk, next).await.map(DefineStatement::Bucket),
 			t!("SEQUENCE") => self.parse_define_sequence(stk).await.map(DefineStatement::Sequence),
+			t!("MODULE") => self.parse_define_module(stk).await.map(DefineStatement::Module),
 			_ => unexpected!(self, next, "a define statement keyword"),
 		}
 	}
@@ -197,6 +202,107 @@ impl Parser<'_> {
 		}
 
 		Ok(res)
+	}
+
+	#[cfg(not(feature = "surrealism"))]
+	pub(crate) async fn parse_define_module(
+		&mut self,
+		_stk: &mut Stk,
+	) -> ParseResult<DefineModuleStatement> {
+		bail!(
+			"Surrealism modules are not supported in WASM environments",
+			@self.last_span() => "Use of `DEFINE MODULE` is not supported in WASM environments"
+		)
+	}
+
+	#[cfg(feature = "surrealism")]
+	pub(crate) async fn parse_define_module(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineModuleStatement> {
+		if !self.settings.surrealism_enabled {
+			bail!(
+				"Experimental capability `surrealism` is not enabled",
+				@self.last_span() => "Use of `DEFINE MODULE` is still experimental"
+			)
+		}
+
+		let kind = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			DefineKind::IfNotExists
+		} else if self.eat(t!("OVERWRITE")) {
+			DefineKind::Overwrite
+		} else {
+			DefineKind::Default
+		};
+
+		let name = if self.eat(t!("mod")) {
+			expected!(self, t!("::"));
+			let name = self.parse_ident()?;
+			expected!(self, t!("AS"));
+			Some(name)
+		} else {
+			None
+		};
+
+		let peek = self.peek();
+		let executable = match peek.kind {
+			t!("silo") => {
+				self.pop_peek();
+				expected!(self, t!("::"));
+				let organisation = self.parse_ident()?;
+				expected!(self, t!("::"));
+				let package = self.parse_ident()?;
+				expected!(self, t!("<"));
+				let major = self.next_token_value::<u32>()?;
+				expected!(self, t!("."));
+				let minor = self.next_token_value::<u32>()?;
+				expected!(self, t!("."));
+				let patch = self.next_token_value::<u32>()?;
+				expected!(self, t!(">"));
+
+				ModuleExecutable::Silo(SiloExecutable {
+					organisation,
+					package,
+					major,
+					minor,
+					patch,
+				})
+			}
+			t!("f\"") | t!("f'") => {
+				let file = self.next_token_value::<PublicFile>()?;
+				ModuleExecutable::Surrealism(SurrealismExecutable(file.into()))
+			}
+			_ => {
+				unexpected!(self, peek, "a module executable");
+			}
+		};
+
+		let mut definition = DefineModuleStatement {
+			kind,
+			name,
+			executable,
+			comment: None,
+			permissions: Permission::default(),
+		};
+
+		loop {
+			match self.peek_kind() {
+				t!("COMMENT") => {
+					self.pop_peek();
+					definition.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
+				}
+				t!("PERMISSIONS") => {
+					self.pop_peek();
+					definition.permissions =
+						stk.run(|ctx| self.parse_permission_value(ctx)).await?;
+				}
+				_ => break,
+			}
+		}
+
+		Ok(definition)
 	}
 
 	pub(crate) async fn parse_define_user(
@@ -941,6 +1047,8 @@ impl Parser<'_> {
 			concurrently: false,
 		};
 
+		let mut field_span = None;
+
 		loop {
 			match self.peek_kind() {
 				// COLUMNS and FIELDS are the same tokenkind
@@ -950,6 +1058,7 @@ impl Parser<'_> {
 					while self.eat(t!(",")) {
 						res.cols.push(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 					}
+					field_span = Some(self.last_span);
 				}
 				t!("UNIQUE") => {
 					self.pop_peek();
@@ -965,7 +1074,6 @@ impl Parser<'_> {
 					let mut analyzer: Option<String> = None;
 					let mut scoring = None;
 					let mut hl = false;
-
 					loop {
 						match self.peek_kind() {
 							t!("ANALYZER") => {
@@ -1000,43 +1108,6 @@ impl Parser<'_> {
 						sc: scoring.unwrap_or_else(Default::default),
 						hl,
 					});
-				}
-				t!("MTREE") => {
-					self.pop_peek();
-					expected!(self, t!("DIMENSION"));
-					let dimension = self.next_token_value()?;
-					let mut distance = Distance::Euclidean;
-					let mut vector_type = VectorType::F64;
-					let mut capacity = 40;
-					let mut mtree_cache = 100;
-					loop {
-						match self.peek_kind() {
-							t!("DISTANCE") => {
-								self.pop_peek();
-								distance = self.parse_distance()?
-							}
-							t!("TYPE") => {
-								self.pop_peek();
-								vector_type = self.parse_vector_type()?
-							}
-							t!("CAPACITY") => {
-								self.pop_peek();
-								capacity = self.next_token_value()?
-							}
-							t!("MTREE_CACHE") => {
-								self.pop_peek();
-								mtree_cache = self.next_token_value()?
-							}
-							_ => break,
-						}
-					}
-					res.index = Index::MTree(MTreeParams {
-						dimension,
-						distance,
-						vector_type,
-						capacity,
-						mtree_cache,
-					})
 				}
 				t!("HNSW") => {
 					self.pop_peek();
@@ -1116,8 +1187,27 @@ impl Parser<'_> {
 				_ => break,
 			}
 		}
-		if matches!(res.index, Index::Count(_)) && !res.cols.is_empty() {
-			bail!("Cannot create a count index with fields");
+		match (field_span, &res.index) {
+			(Some(field_span), Index::Count(_)) => {
+				if !res.cols.is_empty() {
+					bail!("Cannot create a count index with fields", @field_span);
+				}
+			}
+			(field_span, Index::FullText(_) | Index::Hnsw(_)) => {
+				if res.cols.len() != 1 {
+					if let Some(field_span) = field_span {
+						bail!("Expected one column, found {}", res.cols.len(), @field_span);
+					} else {
+						bail!("Expected one column, found none", @self.recent_span());
+					}
+				}
+			}
+			(None, Index::Uniq | Index::Idx) => {
+				if res.cols.is_empty() {
+					bail!("Expected at least one column - Use FIELDS to define columns", @self.recent_span());
+				}
+			}
+			(_, _) => {}
 		}
 		Ok(res)
 	}

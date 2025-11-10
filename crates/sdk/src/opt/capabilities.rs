@@ -15,6 +15,7 @@ pub enum ExperimentalFeature {
 	RecordReferences,
 	GraphQl,
 	DefineApi,
+	Surrealism,
 }
 
 /// Not public API
@@ -25,6 +26,7 @@ impl From<&ExperimentalFeature> for ExperimentalTarget {
 			ExperimentalFeature::RecordReferences => ExperimentalTarget::RecordReferences,
 			ExperimentalFeature::GraphQl => ExperimentalTarget::GraphQL,
 			ExperimentalFeature::DefineApi => ExperimentalTarget::DefineApi,
+			ExperimentalFeature::Surrealism => ExperimentalTarget::Surrealism,
 		}
 	}
 }

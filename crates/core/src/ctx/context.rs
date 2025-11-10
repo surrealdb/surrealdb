@@ -9,10 +9,16 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 use async_channel::Sender;
+#[cfg(feature = "surrealism")]
+use surrealism_runtime::controller::Runtime;
+#[cfg(feature = "surrealism")]
+use surrealism_runtime::package::SurrealismPackage;
 use trice::Instant;
 #[cfg(feature = "http")]
 use url::Url;
 
+#[cfg(feature = "surrealism")]
+use crate::buc::store::ObjectKey;
 use crate::buc::store::ObjectStore;
 use crate::buc::{self, BucketConnectionKey, BucketConnections};
 use crate::catalog::providers::{
@@ -22,6 +28,8 @@ use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
+#[cfg(feature = "surrealism")]
+use crate::dbs::capabilities::ExperimentalTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::{Capabilities, Options, Session, Variables};
@@ -36,6 +44,8 @@ use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::mem::ALLOC;
 use crate::sql::expression::convert_public_value_to_internal;
+#[cfg(feature = "surrealism")]
+use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup, SurrealismCacheValue};
 use crate::types::{PublicNotification, PublicVariables};
 use crate::val::Value;
 
@@ -81,6 +91,9 @@ pub struct MutableContext {
 	isolated: bool,
 	// A map of bucket connections
 	buckets: Option<Arc<BucketConnections>>,
+	// The surrealism cache
+	#[cfg(feature = "surrealism")]
+	surrealism_cache: Option<Arc<SurrealismCache>>,
 }
 
 impl Default for MutableContext {
@@ -131,6 +144,8 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			buckets: None,
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: None,
 		}
 	}
 
@@ -156,6 +171,8 @@ impl MutableContext {
 			isolated: false,
 			parent: Some(parent.clone()),
 			buckets: parent.buckets.clone(),
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: parent.surrealism_cache.clone(),
 		}
 	}
 
@@ -183,6 +200,8 @@ impl MutableContext {
 			isolated: true,
 			parent: Some(parent.clone()),
 			buckets: parent.buckets.clone(),
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: parent.surrealism_cache.clone(),
 		}
 	}
 
@@ -210,6 +229,8 @@ impl MutableContext {
 			isolated: false,
 			parent: None,
 			buckets: from.buckets.clone(),
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: from.surrealism_cache.clone(),
 		}
 	}
 
@@ -225,6 +246,7 @@ impl MutableContext {
 		cache: Arc<DatastoreCache>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: Arc<BucketConnections>,
+		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
 	) -> Result<MutableContext> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -246,6 +268,8 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			buckets: Some(buckets),
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: Some(surrealism_cache),
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -740,6 +764,53 @@ impl MutableContext {
 			}
 		} else {
 			bail!(Error::BucketUnavailable(bu.into()))
+		}
+	}
+
+	#[cfg(feature = "surrealism")]
+	pub(crate) fn get_surrealism_cache(&self) -> Option<Arc<SurrealismCache>> {
+		self.surrealism_cache.as_ref().map(|sc| sc.clone())
+	}
+
+	#[cfg(feature = "surrealism")]
+	pub(crate) async fn get_surrealism_runtime(
+		&self,
+		lookup: SurrealismCacheLookup<'_>,
+	) -> Result<Arc<Runtime>> {
+		if !self.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
+			bail!(
+				"Failed to get surrealism runtime: Experimental capability `surrealism` is not enabled"
+			);
+		}
+
+		let Some(cache) = self.get_surrealism_cache() else {
+			bail!("Surrealism cache is not available");
+		};
+
+		if let Some(value) = cache.get(&lookup) {
+			Ok(value.runtime.clone())
+		} else {
+			let SurrealismCacheLookup::File(ns, db, bucket, key) = lookup else {
+				bail!("silo lookups are not supported yet");
+			};
+			let bucket = self.get_bucket_store(*ns, *db, bucket).await?;
+			let key = ObjectKey::new(key);
+			let surli =
+				bucket.get(&key).await.map_err(|e| anyhow::anyhow!("failed to get file: {}", e))?;
+
+			let Some(surli) = surli else {
+				bail!("file not found");
+			};
+
+			let package = SurrealismPackage::from_reader(std::io::Cursor::new(surli))?;
+			let runtime = Arc::new(Runtime::new(package)?);
+			cache.insert(
+				lookup.into(),
+				SurrealismCacheValue {
+					runtime: runtime.clone(),
+				},
+			);
+			Ok(runtime)
 		}
 	}
 }

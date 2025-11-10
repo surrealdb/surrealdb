@@ -71,13 +71,14 @@ use crate::vs::VersionStamp;
 		expr: Expr::Literal(Literal::String("expr".to_string())),
 		alias: Some(Idiom::from_str("field[0]").unwrap()),
 	}]),
+	diff: false,
 	what: Expr::Literal(Literal::String("what".to_string())),
 	cond: Some(Expr::Literal(Literal::String("cond".to_string()))),
 	fetch: Some(Fetchs(vec![Fetch(Expr::Literal(Literal::String("fetch".to_string())))])),
 	auth: Some(Auth::default()),
 	session: Some(Value::default()),
 	vars: BTreeMap::new(),
-}, 98)]
+}, 99)]
 #[case::access(AccessDefinition {
 	name: "access".to_string(),
 	access_type: AccessType::Bearer(BearerAccess {

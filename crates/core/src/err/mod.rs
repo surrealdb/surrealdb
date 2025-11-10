@@ -277,6 +277,12 @@ pub(crate) enum Error {
 		name: String,
 	},
 
+	/// The requested function does not exist
+	#[error("The module '{name}' does not exist")]
+	MdNotFound {
+		name: String,
+	},
+
 	/// The requested field does not exist
 	#[error("The field '{name}' does not exist")]
 	FdNotFound {
@@ -505,7 +511,7 @@ pub(crate) enum Error {
 	},
 
 	/// The specified table is not configured for the type of record being added
-	#[error("Found record: `{record}` which is {}a relation, but expected a {target_type}", if *relation { "not " } else { "" })]
+	#[error("Found record: `{record}` which is {}a relation, but expected a {target_type}", if *relation { "" } else { "not " })]
 	TableCheck {
 		record: String,
 		relation: bool,
@@ -809,6 +815,12 @@ pub(crate) enum Error {
 	/// The requested function already exists
 	#[error("The function 'fn::{name}' already exists")]
 	FcAlreadyExists {
+		name: String,
+	},
+
+	/// The requested module already exists
+	#[error("The module '{name}' already exists")]
+	MdAlreadyExists {
 		name: String,
 	},
 

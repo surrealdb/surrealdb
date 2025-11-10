@@ -30,6 +30,9 @@ pub enum Method {
 	Run,
 	InsertRelation,
 	Sessions,
+	Begin,
+	Commit,
+	Cancel,
 }
 
 impl Method {
@@ -83,6 +86,9 @@ impl Method {
 			"run" => Self::Run,
 			"insert_relation" => Self::InsertRelation,
 			"sessions" => Self::Sessions,
+			"begin" => Self::Begin,
+			"commit" => Self::Commit,
+			"cancel" => Self::Cancel,
 			_ => Self::Unknown,
 		}
 	}
@@ -120,6 +126,9 @@ impl Method {
 			Self::Run => "run",
 			Self::InsertRelation => "insert_relation",
 			Self::Sessions => "sessions",
+			Self::Begin => "begin",
+			Self::Commit => "commit",
+			Self::Cancel => "cancel",
 		}
 	}
 }

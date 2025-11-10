@@ -115,8 +115,16 @@ pub(crate) async fn run_router(
 
 	let kvs = Arc::new(kvs);
 	let vars = Arc::new(RwLock::new(Variables::default()));
-	let live_queries = Arc::new(RwLock::new(HashMap::new()));
+	let live_queries = Arc::new(RwLock::new(super::LiveQueryMap::new()));
 	let session = Arc::new(RwLock::new(Session::default().with_rt(true)));
+
+	let router_state = super::RouterState {
+		kvs: kvs.clone(),
+		vars: vars.clone(),
+		live_queries: live_queries.clone(),
+		session: session.clone(),
+		transactions: Arc::new(RwLock::new(HashMap::new())),
+	};
 
 	let canceller = CancellationToken::new();
 
@@ -144,17 +152,15 @@ pub(crate) async fn run_router(
 	});
 
 	loop {
-		let kvs = kvs.clone();
-		let session = session.clone();
-		let vars = vars.clone();
-		let live_queries = live_queries.clone();
+		let router_state = router_state.clone();
+
 		tokio::select! {
 			route = route_rx.recv() => {
 				let Ok(route) = route else {
 					break
 				};
 				tokio::spawn(async move {
-					match super::router(route.request, &kvs, &session, &vars, &live_queries)
+					match super::router(route.request, router_state)
 						.await
 					{
 						Ok(value) => {
@@ -173,14 +179,18 @@ pub(crate) async fn run_router(
 					continue
 				};
 
+				let kvs_clone = kvs.clone();
+				let vars_clone = vars.clone();
+				let session_clone = session.clone();
+				let live_queries_clone = live_queries.clone();
 				tokio::spawn(async move {
 					let id = notification.id.0;
-					if let Some(sender) = live_queries.read().await.get(&id) {
+					if let Some(sender) = live_queries_clone.read().await.get(&id) {
 
 						if sender.send(Ok(notification)).await.is_err() {
-							live_queries.write().await.remove(&id);
+							live_queries_clone.write().await.remove(&id);
 							if let Err(error) =
-								super::kill_live_query(&kvs, id, &*session.read().await, vars.read().await.clone()).await
+								super::kill_live_query(&kvs_clone, id, &*session_clone.read().await, vars_clone.read().await.clone()).await
 							{
 								warn!("Failed to kill live query '{id}'; {error}");
 							}

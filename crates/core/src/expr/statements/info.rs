@@ -164,6 +164,7 @@ impl InfoStatement {
 						"analyzers".to_string() => process(txn.all_db_analyzers(ns, db).await?),
 						"buckets".to_string() => process(txn.all_db_buckets(ns, db).await?),
 						"functions".to_string() => process(txn.all_db_functions(ns, db).await?),
+						"modules".to_string() => process(txn.all_db_modules(ns, db).await?),
 						"models".to_string() => process(txn.all_db_models(ns, db).await?),
 						"params".to_string() => process(txn.all_db_params(ns, db).await?),
 						"tables".to_string() => process(txn.all_tb(ns, db, version).await?),
@@ -206,6 +207,13 @@ impl InfoStatement {
 							let mut out = Object::default();
 							for v in txn.all_db_functions(ns, db).await?.iter() {
 								out.insert(v.name.clone(), v.to_sql().into());
+							}
+							out.into()
+						},
+						"modules".to_string() => {
+							let mut out = Object::default();
+							for v in txn.all_db_modules(ns, db).await?.iter() {
+								out.insert(v.get_storage_name()?, v.to_sql().into());
 							}
 							out.into()
 						},
@@ -388,8 +396,8 @@ impl InfoStatement {
 				if let Some(ib) = ctx.get_index_builder() {
 					// Obtain the index
 					let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-					let res = txn.expect_tb_index(ns, db, &table, &index).await?;
-					let status = ib.get_status(ns, db, &res).await;
+					let ix = txn.expect_tb_index(ns, db, &table, &index).await?;
+					let status = ib.get_status(ns, db, &ix).await;
 					let mut out = Object::default();
 					out.insert("building".to_string(), status.into());
 					return Ok(out.into());

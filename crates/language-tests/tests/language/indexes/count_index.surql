@@ -40,13 +40,13 @@ DEFINE INDEX idx ON t COUNT;
 INFO FOR TB t;
 INFO FOR INDEX idx ON t;
 //INFO FOR INDEX idxw ON t;
-BEGIN;
+{
     CREATE t:1 SET b = true;
     CREATE t:2 SET b = true;
     CREATE t:3 SET b = false;
     CREATE t:4 SET b = false;
     RETURN 'OK';
-COMMIT;
+};
 
 SELECT count() FROM t GROUP ALL EXPLAIN;
 // SELECT count() FROM t WHERE b = true GROUP ALL EXPLAIN;

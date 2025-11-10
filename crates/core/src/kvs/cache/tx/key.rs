@@ -38,6 +38,8 @@ pub(crate) enum Key {
 	Bus(NamespaceId, DatabaseId),
 	/// A cache key for functions (on a database)
 	Fcs(NamespaceId, DatabaseId),
+	/// A cache key for modules (on a database)
+	Mds(NamespaceId, DatabaseId),
 	/// A cache key for models (on a database)
 	Mls(NamespaceId, DatabaseId),
 	/// A cache key for configs (on a database)
@@ -90,6 +92,8 @@ pub(crate) enum Key {
 	Bu(NamespaceId, DatabaseId, String),
 	/// A cache key for a function (on a database)
 	Fc(NamespaceId, DatabaseId, String),
+	/// A cache key for a module (on a database)
+	Md(NamespaceId, DatabaseId, String),
 	/// A cache key for a model (on a database)
 	Ml(NamespaceId, DatabaseId, String, String),
 	/// A cache key for a config (on a database)
@@ -133,6 +137,7 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Azs(a, b) => Key::Azs(a, b),
 			Lookup::Bus(a, b) => Key::Bus(a, b),
 			Lookup::Fcs(a, b) => Key::Fcs(a, b),
+			Lookup::Mds(a, b) => Key::Mds(a, b),
 			Lookup::Mls(a, b) => Key::Mls(a, b),
 			Lookup::Cgs(a, b) => Key::Cgs(a, b),
 			Lookup::Pas(a, b) => Key::Pas(a, b),
@@ -160,6 +165,7 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Az(a, b, c) => Key::Az(a, b, c.to_string()),
 			Lookup::Bu(a, b, c) => Key::Bu(a, b, c.to_string()),
 			Lookup::Fc(a, b, c) => Key::Fc(a, b, c.to_string()),
+			Lookup::Md(a, b, c) => Key::Md(a, b, c.to_string()),
 			Lookup::Ml(a, b, c, d) => Key::Ml(a, b, c.to_string(), d.to_string()),
 			Lookup::Cg(a, b, c) => Key::Cg(a, b, c.to_string()),
 			Lookup::Pa(a, b, c) => Key::Pa(a, b, c.to_string()),

@@ -254,6 +254,13 @@ args = [
     "--features",
     "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
     "--workspace",
+    # Exclude surrealism packages due to wasmtime complexity and stdin loops
+    "--exclude", "surrealism-cli",
+    "--exclude", "surrealism-runtime",
+    "--exclude", "surrealism",
+    "--exclude", "surrealism-macros",
+    "--exclude", "surrealism-types",
+    "--exclude", "demo",
     "--no-fail-fast",
     "--",
     "--skip",
