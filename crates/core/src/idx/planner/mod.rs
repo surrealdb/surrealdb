@@ -312,13 +312,13 @@ impl QueryPlanner {
 			has_reverse_scan: ctx.ctx.tx().has_reverse_scan(),
 		};
 		match PlanBuilder::build(ctx, p).await? {
-			Plan::SingleIndex(exp, io, rs) => {
+			Plan::SingleIndex(exp, io, rs, pre_ordered) => {
 				if io.require_distinct() {
 					self.requires_distinct = true;
 				}
 				let is_order = io.is_order();
 				let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
-				self.add(t.clone(), Some(ir), exe, it, rs);
+				self.add(t.clone(), Some(ir), exe, it, rs, pre_ordered);
 				if is_order {
 					self.ordering_indexes.push(ir);
 				}
@@ -327,29 +327,30 @@ impl QueryPlanner {
 				for (exp, io) in non_range_indexes {
 					let ie = IteratorEntry::Single(Some(exp), io);
 					let ir = exe.add_iterator(ie);
-					it.ingest(Iterable::Index(t.clone(), ir, rs));
+					it.ingest(Iterable::Index(t.clone(), ir, rs, false));
 				}
 				for (ixr, rq) in ranges_indexes {
 					let ie =
 						IteratorEntry::Range(rq.exps, ixr, rq.from, rq.to, ScanDirection::Forward);
 					let ir = exe.add_iterator(ie);
-					it.ingest(Iterable::Index(t.clone(), ir, rs));
+					it.ingest(Iterable::Index(t.clone(), ir, rs, false));
 				}
 				self.requires_distinct = true;
-				self.add(t.clone(), None, exe, it, rs);
+				self.add(t.clone(), None, exe, it, rs, false);
 			}
 			Plan::SingleIndexRange(ixn, rq, keys_only, sc, is_order) => {
 				let ir = exe.add_iterator(IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to, sc));
 				if is_order {
 					self.ordering_indexes.push(ir);
 				}
-				self.add(t.clone(), Some(ir), exe, it, keys_only);
+				self.add(t.clone(), Some(ir), exe, it, keys_only, false);
 			}
 			Plan::TableIterator(reason, rs, sc) => {
 				if let Some(reason) = reason {
 					self.fallbacks.push(reason);
 				}
-				self.add(t.clone(), None, exe, it, rs);
+				// TODO EK: It is pre-ordered if the storage engine provide the record ordered by ID
+				self.add(t.clone(), None, exe, it, rs, false);
 				it.ingest(Iterable::Table(t.clone(), rs, sc));
 				is_table_iterator = true;
 			}
@@ -369,10 +370,11 @@ impl QueryPlanner {
 		exe: InnerQueryExecutor,
 		it: &mut Iterator,
 		rs: RecordStrategy,
+		pre_ordered: bool,
 	) {
 		self.executors.insert(tb.clone(), exe.into());
 		if let Some(irf) = irf {
-			it.ingest(Iterable::Index(tb, irf, rs));
+			it.ingest(Iterable::Index(tb, irf, rs, pre_ordered));
 		}
 	}
 	pub(crate) fn has_executors(&self) -> bool {

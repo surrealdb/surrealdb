@@ -14,6 +14,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::operator::{BooleanOperator, MatchesOperator};
+use crate::expr::order::OrderDirection;
 use crate::expr::{Cond, Expr, FlowResultExt as _, Idiom};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::MatchRef;
@@ -451,8 +452,8 @@ impl QueryExecutor {
 					Box::new(IndexJoinThingIterator::new(ir, ns, db, ix.clone(), iterators)?);
 				Some(ThingIterator::IndexJoin(index_join))
 			}
-			IndexOperator::Order(reverse) => {
-				if *reverse {
+			IndexOperator::Order(direction) => {
+				if matches!(direction, OrderDirection::Descending) {
 					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 					{
 						Some(ThingIterator::IndexRangeReverse(
@@ -586,8 +587,8 @@ impl QueryExecutor {
 				)?);
 				Some(ThingIterator::UniqueJoin(unique_join))
 			}
-			IndexOperator::Order(reverse) => {
-				if *reverse {
+			IndexOperator::Order(direction) => {
+				if matches!(direction, OrderDirection::Descending) {
 					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 					{
 						Some(ThingIterator::UniqueRangeReverse(

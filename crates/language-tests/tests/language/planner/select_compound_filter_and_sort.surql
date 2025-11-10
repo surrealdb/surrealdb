@@ -8,7 +8,7 @@ value = "'OK'"
 value = "[{ f: true, id: t:4, s: 1 }, { f: true, id: t:2, s: 3 }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { index: 'idx', operator: '=', value: [true] }, table: 't' }, operation: 'Iterate Index' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = "[{ detail: { plan: { index: 'idx', operator: '=', value: true }, table: 't' }, operation: 'Iterate Index Ordered' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 */
 {
@@ -20,5 +20,5 @@ value = "[{ detail: { plan: { index: 'idx', operator: '=', value: [true] }, tabl
     RETURN "OK";
 };
 
-SELECT * FROM t WHERE f ORDER BY s;
-SELECT * FROM t WHERE f ORDER BY s EXPLAIN;
+SELECT * FROM t WHERE f = true ORDER BY s;
+SELECT * FROM t WHERE f = true ORDER BY s EXPLAIN;

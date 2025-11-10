@@ -81,7 +81,8 @@ pub(crate) enum Iterable {
 	/// table, which then fetches the corresponding records
 	/// which are matched within the index.
 	/// When the 3rd argument is true, we iterate over keys only.
-	Index(String, IteratorRef, RecordStrategy),
+	/// 4rd argument is true when it is pre-ordered by the index itself
+	Index(String, IteratorRef, RecordStrategy, bool),
 }
 
 #[derive(Debug)]
@@ -666,7 +667,7 @@ impl Iterator {
 		// START must apply to the filtered set. Therefore, disallow with WHERE
 		// unless the iterator itself applies the condition (index executor).
 		if let Some(cond) = stm.cond() {
-			if let Some(Iterable::Index(t, irf, _)) = self.entries.first() {
+			if let Some(Iterable::Index(t, irf, _, _)) = self.entries.first() {
 				if let Some(qp) = ctx.get_query_planner() {
 					if let Some(exe) = qp.get_query_executor(t) {
 						if exe.is_iterator_expression(*irf, &cond.0) {
@@ -690,7 +691,7 @@ impl Iterator {
 			return true;
 		}
 		// With ORDER BY, only safe if iterator is a sorted index matching ORDER
-		if let Some(Iterable::Index(_, irf, _)) = self.entries.first() {
+		if let Some(Iterable::Index(_, irf, _, _)) = self.entries.first() {
 			if let Some(qp) = ctx.get_query_planner() {
 				if qp.is_order(irf) {
 					return true;
@@ -727,9 +728,9 @@ impl Iterator {
 		}
 		// With ORDER BY, only safe if the only iterator is backed by a sorted index
 		if self.entries.len() == 1 {
-			if let Some(Iterable::Index(_, irf, _)) = self.entries.first() {
+			if let Some(Iterable::Index(_, irf, _, order)) = self.entries.first() {
 				if let Some(qp) = ctx.get_query_planner() {
-					if qp.is_order(irf) {
+					if *order || qp.is_order(irf) {
 						return true;
 					}
 				}

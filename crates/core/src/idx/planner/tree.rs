@@ -9,7 +9,7 @@ use reblessive::tree::Stk;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{self, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId};
 use crate::expr::operator::NearestNeighbor;
-use crate::expr::order::{OrderList, Ordering};
+use crate::expr::order::{OrderDirection, OrderList, Ordering};
 use crate::expr::visit::MutVisitor;
 use crate::expr::{
 	BinaryOperator, Cond, Expr, FlowResultExt as _, Idiom, Kind, Literal, Order, Part, With,
@@ -152,7 +152,7 @@ impl<'a> TreeBuilder<'a> {
 							index_reference.clone(),
 							Some(id),
 							IdiomPosition::None,
-							IndexOperator::Order(!o.direction),
+							IndexOperator::Order(o.direction.clone()),
 						));
 						break;
 					}
@@ -745,6 +745,23 @@ impl IndexReference {
 			indexes,
 			idx,
 		}
+	}
+
+	pub(crate) fn match_order(&self, order_list: &OrderList, mut from_col: usize) -> bool {
+		for o in &order_list.0 {
+			// TODO EK: Should work for descending too if reverse iteration is possible
+			if matches!(o.direction, OrderDirection::Descending) {
+				return false;
+			}
+			let Some(index_col) = self.cols.get(from_col) else {
+				return false;
+			};
+			if !o.value.eq(index_col) {
+				return false;
+			}
+			from_col += 1;
+		}
+		true
 	}
 }
 
