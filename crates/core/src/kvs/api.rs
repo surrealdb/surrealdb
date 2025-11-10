@@ -249,10 +249,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.writeable() {
-			panic!("Cannot delete a range of prefixed keys from a read-only transaction");
-		}
-		// ensure!(self.writeable(), Error::TxReadonly);
+		ensure!(self.writeable(), Error::TxReadonly);
 		// Continue with function logic
 		let range = util::to_prefix_range(key)?;
 		self.delr(range).await
@@ -267,10 +264,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.writeable() {
-			panic!("Cannot delete a range of keys from a read-only transaction");
-		}
-		// ensure!(self.writeable(), Error::TxReadonly);
+		ensure!(self.writeable(), Error::TxReadonly);
 		// Continue with function logic
 		let mut next = Some(rng);
 		while let Some(rng) = next {
@@ -292,10 +286,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.writeable() {
-			panic!("Cannot clear a range of prefixed keys from a read-only transaction");
-		}
-		// ensure!(self.writeable(), Error::TxReadonly);
+		ensure!(self.writeable(), Error::TxReadonly);
 
 		let range = util::to_prefix_range(key)?;
 		self.clrr(range).await
@@ -310,10 +301,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
-		if !self.writeable() {
-			panic!("Cannot clear a range of keys from a read-only transaction");
-		}
-		// ensure!(self.writeable(), Error::TxReadonly);
+		ensure!(self.writeable(), Error::TxReadonly);
 		// Continue with function logic
 		let mut next = Some(rng);
 		while let Some(rng) = next {
