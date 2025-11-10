@@ -9,6 +9,7 @@ on:
       - Cargo.lock
       - Cargo.toml
       - crates/core/Cargo.toml
+      - crates/server/Cargo.toml
       - crates/sdk/Cargo.toml
       - build.rs
       - crates/sdk/build.rs
@@ -24,6 +25,7 @@ on:
       - Cargo.lock
       - Cargo.toml
       - crates/core/Cargo.toml
+      - crates/server/Cargo.toml
       - crates/sdk/Cargo.toml
       - build.rs
       - crates/sdk/build.rs

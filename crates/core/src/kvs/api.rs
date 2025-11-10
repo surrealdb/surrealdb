@@ -152,9 +152,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		_rng: Range<Key>,
 		_limit: u32,
 		_version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>> {
-		Err(anyhow::Error::new(Error::UnsupportedVersionedQueries))
-	}
+	) -> Result<Vec<(Key, Val)>>;
 
 	/// Retrieve a specific range of keys from the datastore in reverse order.
 	///
