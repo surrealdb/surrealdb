@@ -295,6 +295,7 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("FEATURE") => TokenKind::Keyword(Keyword::Feature),
 	UniCase::ascii("FILE") => TokenKind::Keyword(Keyword::File),
 	UniCase::ascii("FLOAT") => TokenKind::Keyword(Keyword::Float),
+	UniCase::ascii("GEOMETRY") => TokenKind::Keyword(Keyword::Geometry),
 	UniCase::ascii("fn") => TokenKind::Keyword(Keyword::Fn),
 	UniCase::ascii("silo") => TokenKind::Keyword(Keyword::Silo),
 	UniCase::ascii("mod") => TokenKind::Keyword(Keyword::Mod),

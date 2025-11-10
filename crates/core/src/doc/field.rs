@@ -40,7 +40,6 @@ fn clean_none(v: &mut Value) -> bool {
 impl Document {
 	/// Ensures that any remaining fields on a
 	/// SCHEMAFULL table are cleaned up and removed.
-	/// Also validates object<schemafull> fields even in schemaless tables.
 	pub(super) async fn cleanup_table_fields(
 		&mut self,
 		ctx: &Context,

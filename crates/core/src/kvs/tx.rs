@@ -1168,6 +1168,13 @@ impl TableProvider for Transaction {
 					}
 				};
 
+				if db_def.strict {
+					return Err(Error::TbNotFound {
+						name: tb.to_owned(),
+					}
+					.into());
+				}
+
 				let table_key =
 					crate::key::database::tb::new(db_def.namespace_id, db_def.database_id, tb);
 				if let Some(tb_def) = self.get(&table_key, None).await? {
@@ -1176,13 +1183,6 @@ impl TableProvider for Transaction {
 						cache::tx::Entry::Any(Arc::clone(&cached_tb) as Arc<dyn Any + Send + Sync>);
 					self.cache.insert(qey, cached_entry);
 					return Ok(cached_tb);
-				}
-
-				if db_def.strict {
-					return Err(Error::TbNotFound {
-						name: tb.to_owned(),
-					}
-					.into());
 				}
 
 				let tb_def = TableDefinition::new(
@@ -1230,7 +1230,18 @@ impl TableProvider for Transaction {
 		tb: &TableDefinition,
 	) -> Result<Arc<TableDefinition>> {
 		let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
-		self.set(&key, tb, None).await?;
+		match self.set(&key, tb, None).await {
+			Ok(_) => {}
+			Err(e) => {
+				if matches!(e.downcast_ref(), Some(Error::TxReadonly)) {
+					return Err(Error::TbNotFound {
+						name: tb.name.clone(),
+					}
+					.into());
+				}
+				return Err(e);
+			}
+		}
 
 		// Populate cache
 		let cached_tb = Arc::new(tb.clone());

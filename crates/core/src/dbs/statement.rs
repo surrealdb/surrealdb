@@ -153,6 +153,18 @@ impl Statement<'_> {
 	/// UPSERT |some:1000|;
 	/// UPSERT |some:1..1000|;
 	/// UPSERT { id: some:thing };
+	///
+	/// Importantly, when a WHERE clause condition is
+	/// specified on an UPSERT clause, then we do
+	/// first retrieve the document from storage, and
+	/// this function will return false in the
+	/// following instances:
+	///
+	/// UPSERT some WHERE test = true;
+	/// UPSERT some:thing WHERE test = true;
+	/// UPSERT |some:1000| WHERE test = true;
+	/// UPSERT |some:1..1000| WHERE test = true;
+	/// UPSERT { id: some:thing } WHERE test = true;
 	pub(crate) fn is_deferable(&self) -> bool {
 		match self {
 			Statement::Upsert(v) if v.cond.is_none() => true,

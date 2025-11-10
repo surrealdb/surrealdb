@@ -133,6 +133,10 @@ impl Parser<'_> {
 							self.pop_peek();
 							res.kind = AlterKind::Drop;
 						}
+						t!("FLEXIBLE") => {
+							self.pop_peek();
+							res.flexible = AlterKind::Drop;
+						}
 						t!("READONLY") => {
 							self.pop_peek();
 							res.readonly = AlterKind::Drop;
@@ -176,6 +180,10 @@ impl Parser<'_> {
 				t!("TYPE") => {
 					self.pop_peek();
 					res.kind = AlterKind::Set(stk.run(|stk| self.parse_inner_kind(stk)).await?);
+				}
+				t!("FLEXIBLE") => {
+					self.pop_peek();
+					res.flexible = AlterKind::Set(());
 				}
 				t!("READONLY") => {
 					self.pop_peek();

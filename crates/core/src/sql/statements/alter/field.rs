@@ -52,6 +52,7 @@ pub struct AlterFieldStatement {
 	pub what: String,
 	pub if_exists: bool,
 	pub kind: AlterKind<Kind>,
+	pub flexible: AlterKind<()>,
 	pub readonly: AlterKind<()>,
 	pub value: AlterKind<Expr>,
 	pub assert: AlterKind<Expr>,
@@ -71,6 +72,11 @@ impl Display for AlterFieldStatement {
 		match self.kind {
 			AlterKind::Set(ref x) => write!(f, " TYPE {x}")?,
 			AlterKind::Drop => write!(f, " DROP TYPE")?,
+			AlterKind::None => {}
+		}
+		match self.flexible {
+			AlterKind::Set(_) => write!(f, " FLEXIBLE")?,
+			AlterKind::Drop => write!(f, " DROP FLEXIBLE")?,
 			AlterKind::None => {}
 		}
 		match self.readonly {
@@ -121,6 +127,7 @@ impl From<AlterFieldStatement> for crate::expr::statements::alter::AlterFieldSta
 			what: v.what,
 			if_exists: v.if_exists,
 			kind: v.kind.into(),
+			flexible: v.flexible.into(),
 			readonly: v.readonly.into(),
 			value: v.value.into(),
 			assert: v.assert.into(),
@@ -139,6 +146,7 @@ impl From<crate::expr::statements::alter::AlterFieldStatement> for AlterFieldSta
 			what: v.what,
 			if_exists: v.if_exists,
 			kind: v.kind.into(),
+			flexible: v.flexible.into(),
 			readonly: v.readonly.into(),
 			value: v.value.into(),
 			assert: v.assert.into(),

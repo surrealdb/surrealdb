@@ -234,10 +234,11 @@ impl Controller {
 
 		// Then check each one to see if it's actually a function
 		for name in function_names {
-			if let Some(export) = self.instance.get_export(&mut self.store, &name) && let ExternType::Func(_) = export.ty(&self.store) {
+			if let Some(export) = self.instance.get_export(&mut self.store, &name)
+				&& let ExternType::Func(_) = export.ty(&self.store)
+			{
 				// strip the prefix
-				let function_name =
-					name.strip_prefix("__sr_fnc__").unwrap_or(&name).to_string();
+				let function_name = name.strip_prefix("__sr_fnc__").unwrap_or(&name).to_string();
 				functions.push(function_name);
 			}
 		}

@@ -390,12 +390,6 @@ pub(crate) trait TableProvider {
 		tb: &str,
 	) -> Result<Option<Arc<TableDefinition>>>;
 
-	/// Check if a table exists.
-	async fn check_tb(&self, ns: NamespaceId, db: DatabaseId, tb: &str) -> Result<()> {
-		self.expect_tb(ns, db, tb).await?;
-		Ok(())
-	}
-
 	/// Retrieve a specific table definition returning an error if it does not exist.
 	async fn expect_tb(
 		&self,
