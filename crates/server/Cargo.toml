@@ -1,5 +1,6 @@
 [package]
 name = "surrealdb-server"
+publish = true
 readme = "README.md"
 authors.workspace = true
 edition.workspace = true
