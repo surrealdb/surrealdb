@@ -20,25 +20,22 @@ value = "NONE"
 value = "[]"
 
 [[test.results]]
-value = "[{ a: 1, id: test:crc7qde29bwmdde48eyo }]"
-skip-record-id-key = true
+value = "[{ a: 1, id: test:1 }]"
 
 [[test.results]]
-value = "[{ a: 2, id: test:g2ojc7en7dunuc3i2ywk }]"
-skip-record-id-key = true
+value = "[{ a: 2, id: test:2 }]"
 
 [[test.results]]
-value = "[{ a: 1, id: test:crc7qde29bwmdde48eyo }, { a: 2, id: test:g2ojc7en7dunuc3i2ywk }]"
-skip-record-id-key = true
+value = "[{ a: 1, id: test:1 }, { a: 2, id: test:2 }]"
 
 [[test.results]]
 value = "[{ count: 2, id: view:[] }]"
 
 [[test.results]]
-value = "NONE"
+error = "Invalid query: Cannot delete table `test` on which a view is defined, table(s) `view` are defined as a view on this table."
 
 [[test.results]]
-error = "The table 'test' does not exist"
+value = "[{ a: 1, id: test:1 }, { a: 2, id: test:2 }]"
 
 [[test.results]]
 # TODO: Shouldn't this be 0?
@@ -55,8 +52,8 @@ DEFINE TABLE view AS SELECT count() FROM test GROUP ALL;
 
 SELECT * FROM view;
 
-create test SET a = 1;
-create test SET a = 2;
+create test:1 SET a = 1;
+create test:2 SET a = 2;
 
 SELECT * FROM test ORDER BY a ASC;
 SELECT * FROM view;

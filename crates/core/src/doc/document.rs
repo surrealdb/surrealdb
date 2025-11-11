@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::ops::{Deref, DerefMut};
@@ -40,6 +41,25 @@ pub(crate) struct CursorDoc {
 	pub(crate) ir: Option<Arc<IteratorRecord>>,
 	pub(crate) doc: CursorRecord,
 	pub(crate) fields_computed: bool,
+}
+
+impl CursorDoc {
+	/// Updates the `"parent"` doc field for statements with a meaning full
+	/// document.
+	pub async fn update_parent<F, R>(ctx: &Context, doc: Option<&CursorDoc>, f: F) -> R
+	where
+		F: AsyncFnOnce(Cow<Context>) -> R,
+	{
+		let ctx = if let Some(doc) = doc {
+			let mut new_ctx = MutableContext::new(ctx);
+			new_ctx.add_value("parent", doc.doc.as_ref().clone().into());
+			Cow::Owned(new_ctx.freeze())
+		} else {
+			Cow::Borrowed(ctx)
+		};
+
+		f(ctx).await
+	}
 }
 
 /// Wrapper around a Record for cursor operations

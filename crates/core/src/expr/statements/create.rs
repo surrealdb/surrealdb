@@ -90,22 +90,25 @@ impl CreateStatement {
 		// Ensure the database exists.
 		ctx.get_db(opt).await?;
 
-		// Process the statement
-		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
-		// Catch statement timeout
-		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
-		// Output the results
-		match res {
-			// This is a single record result
-			Value::Array(mut a) if self.only => match a.len() {
-				// There was exactly one result
-				1 => Ok(a.remove(0)),
-				// There were no results
-				_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
-			},
-			// This is standard query result
-			v => Ok(v),
-		}
+		CursorDoc::update_parent(&ctx, doc, async |ctx| {
+			// Process the statement
+			let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
+			// Catch statement timeout
+			ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
+			// Output the results
+			match res {
+				// This is a single record result
+				Value::Array(mut a) if self.only => match a.len() {
+					// There was exactly one result
+					1 => Ok(a.remove(0)),
+					// There were no results
+					_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
+				},
+				// This is standard query result
+				v => Ok(v),
+			}
+		})
+		.await
 	}
 }
 
