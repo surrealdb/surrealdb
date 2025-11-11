@@ -16,12 +16,12 @@ value = "[{ g: 2, id: a:4, v: 4 }]"
 [[test.results]]
 error = """
 Invalid query: Found a `$this` parameter refering to the document of a group by select statement
-Select statments with a group by currently have no defined document to refer to"""
+Select statements with a group by currently have no defined document to refer to"""
 
 [[test.results]]
 error = """
 Invalid query: Found a `$this` parameter refering to the document of a group by select statement
-Select statments with a group by currently have no defined document to refer to"""
+Select statements with a group by currently have no defined document to refer to"""
 
 */
 
