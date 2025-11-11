@@ -320,14 +320,13 @@ impl Lexer<'_> {
 				Some(b'_') => return self.lex_param(),
 				Some(b'`') => {
 					self.reader.next();
-					return self.lex_surrounded_param(true);
+					return self.lex_surrounded_param();
 				}
 				Some(x) if x.is_ascii_alphabetic() => return self.lex_param(),
 				Some(x) if !x.is_ascii() => {
 					let backup = self.reader.offset();
 					self.reader.next();
 					match self.reader.complete_char(x) {
-						Ok('`') => return self.lex_surrounded_param(false),
 						Err(e) => return self.invalid_token(e.into()),
 						_ => {
 							self.reader.backup(backup);
@@ -341,7 +340,7 @@ impl Lexer<'_> {
 				self.eat_single_line_comment();
 				TokenKind::WhiteSpace
 			}
-			b'`' => return self.lex_surrounded_ident(true),
+			b'`' => return self.lex_surrounded_ident(),
 			b'"' => {
 				if let Err(e) = self.eat_string_like(true) {
 					return self.invalid_token(e);

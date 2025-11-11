@@ -61,8 +61,8 @@ impl Lexer<'_> {
 		}
 	}
 
-	pub(super) fn lex_surrounded_param(&mut self, is_backtick: bool) -> Token {
-		match self.lex_surrounded_ident_err(is_backtick) {
+	pub(super) fn lex_surrounded_param(&mut self) -> Token {
+		match self.lex_surrounded_ident_err() {
 			Ok(_) => self.finish_token(TokenKind::Parameter),
 			Err(e) => self.invalid_token(e),
 		}
@@ -111,31 +111,24 @@ impl Lexer<'_> {
 	}
 
 	/// Lex an ident which is surround by delimiters.
-	pub(super) fn lex_surrounded_ident(&mut self, is_backtick: bool) -> Token {
-		match self.lex_surrounded_ident_err(is_backtick) {
+	pub(super) fn lex_surrounded_ident(&mut self) -> Token {
+		match self.lex_surrounded_ident_err() {
 			Ok(_) => self.finish_token(TokenKind::Identifier),
 			Err(e) => self.invalid_token(e),
 		}
 	}
 
-	/// Lex an ident surrounded either by ```` or `\`\``
-	pub(super) fn lex_surrounded_ident_err(
-		&mut self,
-		is_backtick: bool,
-	) -> Result<(), SyntaxError> {
+	/// Lex an ident surrounded by ````.
+	pub(super) fn lex_surrounded_ident_err(&mut self) -> Result<(), SyntaxError> {
 		let start_span = self.current_span();
 		loop {
 			let Some(x) = self.reader.next() else {
-				let end_char = if is_backtick {
-					'`'
-				} else {
-					'`'
-				};
+				let end_char = '`';
 				let error = syntax_error!("Unexpected end of file, expected identifier to end with `{end_char}`", @self.current_span());
 				return Err(error);
 			};
 			match x {
-				b'`' if is_backtick => {
+				b'`' => {
 					return Ok(());
 				}
 				b'\\' => {
