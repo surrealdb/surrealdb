@@ -13,7 +13,7 @@ impl Lexer<'_> {
 			Err(e) => return self.invalid_token(e.into()),
 		};
 		let kind = match c {
-			'⟨' => return self.lex_surrounded_ident(false),
+			'`' => return self.lex_surrounded_ident(false),
 			'…' => t!("..."),
 			'∋' => t!("∋"),
 			'∌' => t!("∌"),

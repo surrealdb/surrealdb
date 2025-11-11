@@ -500,7 +500,7 @@ mod tests {
 
 	#[test]
 	fn record_quoted_brackets() {
-		let sql = "⟨test⟩:⟨id⟩";
+		let sql = "`test`:`id`";
 		let res = record(sql);
 		let out = res.unwrap();
 		assert_eq!("test:id", format!("{}", out));

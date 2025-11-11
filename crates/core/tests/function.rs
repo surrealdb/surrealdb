@@ -3128,7 +3128,7 @@ async fn function_type_thing() -> Result<()> {
 	let val = syn::value(
 		"[
 			{
-				id: city:⟨8e60244d-95f6-4f95-9e30-09a98977efb0⟩,
+				id: city:`8e60244d-95f6-4f95-9e30-09a98977efb0`,
 			}
 		]",
 	)

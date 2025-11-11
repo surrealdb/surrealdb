@@ -9,5 +9,5 @@ value = '''{ "a`b": 'DEFINE TABLE `a\\`b` TYPE ANY SCHEMALESS PERMISSIONS NONE' 
 
 */
 
-DEFINE TABLE ⟨a`b⟩;
+DEFINE TABLE `a\`b`;
 (INFO FOR DB).tables

@@ -327,7 +327,7 @@ impl Lexer<'_> {
 					let backup = self.reader.offset();
 					self.reader.next();
 					match self.reader.complete_char(x) {
-						Ok('⟨') => return self.lex_surrounded_param(false),
+						Ok('`') => return self.lex_surrounded_param(false),
 						Err(e) => return self.invalid_token(e.into()),
 						_ => {
 							self.reader.backup(backup);
