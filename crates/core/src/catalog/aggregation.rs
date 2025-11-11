@@ -621,7 +621,7 @@ impl MutVisitor for AggregateExprCollector<'_> {
 				if p.as_str() == "this" {
 					bail!(Error::Query{
 						message: "Found a `$this` parameter refering to the document of a group by select statement\n\
-							Select statments with a group by currently have no defined document to refer to".to_string()
+							Select statements with a group by currently have no defined document to refer to".to_string()
 					});
 				}
 				Ok(())
@@ -873,7 +873,7 @@ impl MutVisitor for ParentRewritor {
 			if p.as_str() == "parent" {
 				return Err(Error::Query{
 					message: "Found a `$parent` parameter refering to the document of a GROUP select statement\n\
-						Select statments with a GROUP BY or GROUP ALL currently have no defined document to refer to".to_string()
+						Select statements with a GROUP BY or GROUP ALL currently have no defined document to refer to".to_string()
 				});
 			}
 		}
