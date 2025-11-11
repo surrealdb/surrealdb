@@ -241,6 +241,9 @@ surrealism = ["surrealdb-server/surrealism"]
 storage-mem = ["surrealdb-server/storage-mem"]
 storage-surrealkv = ["surrealdb-server/storage-surrealkv"]
 storage-rocksdb = ["surrealdb-server/storage-rocksdb"]
+storage-tikv = ["surrealdb-server/storage-tikv"]
+storage-fdb = ["surrealdb-server/storage-fdb"]
+storage-indxdb = ["surrealdb-server/storage-indxdb"]
 
 [dependencies]
 # workspace internal dependencies
