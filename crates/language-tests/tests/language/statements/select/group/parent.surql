@@ -32,5 +32,5 @@ create a:4 set v = 4, g = 2;
 
 SELECT (SELECT $parent FROM 1) as parent,g,math::mean(v) FROM a GROUP BY g;
 
-SELECT (SELECT (($parent)) FROM 1) as parent,g,math::mean(v) FROM a GROUP BY g;
+SELECT (SELECT { $parent } FROM 1) as parent,g,math::mean(v) FROM a GROUP BY g;
 

@@ -877,7 +877,7 @@ impl MutVisitor for ParentRewritor {
 				});
 			}
 		}
-		Ok(())
+		e.visit_mut(self)
 	}
 
 	fn visit_mut_create(&mut self, s: &mut CreateStatement) -> Result<(), Self::Error> {

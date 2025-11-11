@@ -23,6 +23,11 @@ error = """
 Invalid query: Found a `$this` parameter refering to the document of a group by select statement
 Select statements with a group by currently have no defined document to refer to"""
 
+[[test.results]]
+error = """
+Invalid query: Found a `$this` parameter refering to the document of a group by select statement
+Select statements with a group by currently have no defined document to refer to"""
+
 */
 
 create a:1 set v = 1, g = 1;
@@ -31,5 +36,6 @@ create a:3 set v = 3, g = 2;
 create a:4 set v = 4, g = 2;
 
 SELECT $this,g,math::mean(v) FROM a GROUP BY g;
+SELECT { $this },g,math::mean(v) FROM a GROUP BY g;
 SELECT g,math::mean($this.v) FROM a GROUP BY g;
 
