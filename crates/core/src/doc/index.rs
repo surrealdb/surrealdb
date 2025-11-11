@@ -20,7 +20,7 @@ use reblessive::tree::Stk;
 
 use crate::catalog::{DatabaseDefinition, IndexDefinition, TableDefinition};
 use crate::ctx::Context;
-use crate::dbs::{Force, Options, Statement};
+use crate::dbs::{Force, Options};
 use crate::doc::{CursorDoc, Document};
 use crate::expr::FlowResultExt as _;
 use crate::idx::index::IndexOperation;
@@ -33,7 +33,6 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_stm: &Statement<'_>,
 	) -> Result<()> {
 		// Collect indexes or skip
 		let ixs = match &opt.force {

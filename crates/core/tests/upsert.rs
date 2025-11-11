@@ -380,7 +380,7 @@ async fn upsert_new_and_update_records_with_content_and_merge_with_readonly_fiel
 		DEFINE TABLE person SCHEMALESS;
 		DEFINE FIELD created ON person TYPE datetime READONLY DEFAULT d'2024-01-01';
 		DEFINE FIELD age ON person TYPE number;
-		DEFINE FIELD data ON person FLEXIBLE TYPE object;
+		DEFINE FIELD data ON person TYPE object;
 		-- This record will be created successfully
 		UPSERT person:test CONTENT { age: 1, data: { some: true, other: false } };
 		-- This record will be updated successfully, with the readonly field untouched
@@ -1014,7 +1014,7 @@ async fn upsert_none_removes_field() -> Result<()> {
 		};
 
 		DEFINE TABLE flex SCHEMAFULL;
-		DEFINE FIELD obj ON flex FLEXIBLE TYPE object;
+		DEFINE FIELD obj ON flex TYPE object FLEXIBLE;
 		UPSERT flex:1 CONTENT {
 			obj: {
 				a: 1

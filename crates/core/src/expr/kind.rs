@@ -12,8 +12,8 @@ use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
 use crate::fmt::{EscapeIdent, EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::val::{
-	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
-	Regex, Set, Uuid,
+	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Range, RecordId, Regex, Set,
+	Uuid,
 };
 
 #[revisioned(revision = 1)]
@@ -408,8 +408,13 @@ impl_basic_has_kind! {
 	Datetime => Datetime,
 	Duration => Duration,
 	Uuid => Uuid,
-	Object => Object,
 	Range => Range,
+}
+
+impl HasKind for crate::val::Object {
+	fn kind() -> Kind {
+		Kind::Object
+	}
 }
 
 macro_rules! impl_geometry_has_kind{

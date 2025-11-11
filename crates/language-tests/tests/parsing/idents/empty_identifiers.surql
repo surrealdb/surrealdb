@@ -26,16 +26,16 @@ value = '''{ accesses: {  }, analyzers: {  }, apis: {  }, buckets: {  }, configs
 value = '''{ events: {  }, fields: { "``.``": 'DEFINE FIELD ``.`` ON `` TYPE number PERMISSIONS FULL' }, indexes: {  }, lives: {  }, tables: {  } }'''
 
 [[test.results]]
-value = "[{ id: ``:1 }]"
+value = "[{ ``: { ``: 1 }, id: ``:1 }]"
 
 [[test.results]]
-value = "[{ id: ``:2 }]"
+value = "[{ ``: { ``: 2 }, id: ``:2 }]"
 
 [[test.results]]
-value = "[{ id: ``:⟨⟩ }]"
+value = "[{ ``: { ``: 3 }, id: ``:⟨⟩ }]"
 
 [[test.results]]
-value = "[{ id: ``:1 }, { id: ``:2 }, { id: ``:⟨⟩ }]"
+value = "[{ ``: { ``: 1 }, id: ``:1 }, { ``: { ``: 2 }, id: ``:2 }, { ``: { ``: 3 }, id: ``:⟨⟩ }]"
 
 */
 

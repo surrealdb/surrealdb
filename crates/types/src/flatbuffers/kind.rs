@@ -87,7 +87,9 @@ impl ToFlatbuffers for Kind {
 						.as_union_value(),
 				),
 			},
-			Self::Object => proto_fb::KindArgs {
+			Self::Object {
+				..
+			} => proto_fb::KindArgs {
 				kind_type: proto_fb::KindType::Object,
 				kind: Some(
 					proto_fb::ObjectKind::create(builder, &proto_fb::ObjectKindArgs {})

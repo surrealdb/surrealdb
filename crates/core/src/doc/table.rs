@@ -121,7 +121,7 @@ impl Document {
 				};
 
 				if set {
-					let data = fields.compute(stk, ctx, opt, Some(&self.current), false).await?;
+					let data = fields.compute(stk, ctx, opt, Some(&self.current)).await?;
 					let record = Arc::new(Record::new(data.into()));
 
 					ctx.tx().set_record(ns, db, table_name, id, record, None).await?;
@@ -1117,6 +1117,7 @@ impl Document {
 			id: Some(id),
 		};
 
+		stk.run(|stk| document.store_index_data(stk, ctx, opt)).await?;
 		stk.run(|stk| document.process_views(stk, ctx, opt, action)).await?;
 		stk.run(|stk| document.process_events(stk, ctx, opt, action, None)).await?;
 

@@ -64,7 +64,7 @@ static SOURCE: &str = r#"
 	DEFINE PARAM $a VALUE { a: 1, "b": 3 } PERMISSIONS WHERE null;
 	DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo;
 	DEFINE EVENT event ON TABLE table WHEN null THEN null,none;
-	DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true;
+	DEFINE FIELD foo.*[*]... ON TABLE bar TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true;
 	DEFINE INDEX index ON TABLE table FIELDS a FULLTEXT ANALYZER ana BM25 (0.1,0.2) HIGHLIGHTS;
 	DEFINE INDEX index ON TABLE table FIELDS a UNIQUE;
 	DEFINE ANALYZER ana FILTERS ASCII, EDGENGRAM(1,2), NGRAM(3,4), LOWERCASE, SNOWBALL(NLD), UPPERCASE TOKENIZERS BLANK, CAMEL, CLASS, PUNCT FUNCTION fn::foo::bar;
@@ -176,6 +176,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				kind: DefineKind::Default,
 				id: None,
 				name: Expr::Idiom(Idiom::field("a".to_string())),
+				strict: false,
 				comment: Some(Expr::Literal(Literal::String("test".to_string()))),
 				changefeed: Some(ChangeFeed {
 					expiry: PublicDuration::from_secs(60 * 10),
@@ -188,6 +189,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				kind: DefineKind::Default,
 				id: None,
 				name: Expr::Idiom(Idiom::field("a".to_string())),
+				strict: false,
 				comment: None,
 				changefeed: None,
 			},
@@ -306,12 +308,12 @@ fn statements() -> Vec<TopLevelExpr> {
 				Part::Flatten,
 			])),
 			what: Expr::Idiom(Idiom::field("bar".to_string())),
-			flex: true,
 			field_kind: Some(Kind::Either(vec![
 				Kind::None,
 				Kind::Number,
 				Kind::Array(Box::new(Kind::Record(vec!["foo".to_owned()])), Some(10)),
 			])),
+			flexible: false,
 			readonly: false,
 			value: Some(Expr::Literal(Literal::Null)),
 			assert: Some(Expr::Literal(Literal::Bool(true))),
@@ -624,7 +626,10 @@ fn statements() -> Vec<TopLevelExpr> {
 				Part::Field("a".to_owned()),
 				Part::Graph(Lookup {
 					kind: LookupKind::Graph(Dir::Out),
-					what: vec![LookupSubject::Table("b".to_owned())],
+					what: vec![LookupSubject::Table {
+						table: "b".to_owned(),
+						referencing_field: None,
+					}],
 					..Default::default()
 				}),
 			]))],
@@ -636,7 +641,10 @@ fn statements() -> Vec<TopLevelExpr> {
 					Part::Field("a".to_owned()),
 					Part::Graph(Lookup {
 						kind: LookupKind::Graph(Dir::Out),
-						what: vec![LookupSubject::Table("b".to_owned())],
+						what: vec![LookupSubject::Table {
+							table: "b".to_owned(),
+							referencing_field: None,
+						}],
 						..Default::default()
 					}),
 				]),
@@ -653,7 +661,10 @@ fn statements() -> Vec<TopLevelExpr> {
 				Part::Field("a".to_owned()),
 				Part::Graph(Lookup {
 					kind: LookupKind::Graph(Dir::Out),
-					what: vec![LookupSubject::Table("b".to_owned())],
+					what: vec![LookupSubject::Table {
+						table: "b".to_owned(),
+						referencing_field: None,
+					}],
 					..Default::default()
 				}),
 			]))],
@@ -665,7 +676,10 @@ fn statements() -> Vec<TopLevelExpr> {
 					Part::Field("a".to_owned()),
 					Part::Graph(Lookup {
 						kind: LookupKind::Graph(Dir::Out),
-						what: vec![LookupSubject::Table("b".to_owned())],
+						what: vec![LookupSubject::Table {
+							table: "b".to_owned(),
+							referencing_field: None,
+						}],
 						..Default::default()
 					}),
 				]),

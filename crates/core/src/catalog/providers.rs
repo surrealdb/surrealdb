@@ -45,18 +45,11 @@ pub(crate) trait NamespaceProvider {
 		&self,
 		ctx: Option<&MutableContext>,
 		ns: &str,
-		strict: bool,
 	) -> Result<Arc<NamespaceDefinition>> {
 		match self.get_ns_by_name(ns).await? {
 			Some(val) => Ok(val),
 			// The entry is not in the database
 			None => {
-				if strict {
-					return Err(Error::NsNotFound {
-						name: ns.to_owned(),
-					}
-					.into());
-				}
 				let ns = NamespaceDefinition {
 					namespace_id: self.get_next_ns_id(ctx).await?,
 					name: ns.to_owned(),
@@ -101,7 +94,6 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		ctx: Option<&MutableContext>,
 		ns: &str,
 		db: &str,
-		strict: bool,
 		upwards: bool,
 	) -> Result<Arc<DatabaseDefinition>>;
 
@@ -332,7 +324,6 @@ pub(crate) trait TableProvider {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		strict: bool,
 		upwards: bool,
 	) -> Result<Arc<TableDefinition>>;
 
@@ -398,21 +389,6 @@ pub(crate) trait TableProvider {
 		db: DatabaseId,
 		tb: &str,
 	) -> Result<Option<Arc<TableDefinition>>>;
-
-	/// Check if a table exists.
-	async fn check_tb(
-		&self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &str,
-		strict: bool,
-	) -> Result<()> {
-		if !strict {
-			return Ok(());
-		}
-		self.expect_tb(ns, db, tb).await?;
-		Ok(())
-	}
 
 	/// Retrieve a specific table definition returning an error if it does not exist.
 	async fn expect_tb(
@@ -815,9 +791,8 @@ pub(crate) trait CatalogProvider:
 		ctx: Option<&MutableContext>,
 		ns: &str,
 		db: &str,
-		strict: bool,
 	) -> Result<Arc<DatabaseDefinition>> {
-		self.get_or_add_db_upwards(ctx, ns, db, strict, false).await
+		self.get_or_add_db_upwards(ctx, ns, db, false).await
 	}
 
 	/// Ensures that the given namespace and database exist. If they do not, they will be created.
@@ -826,9 +801,8 @@ pub(crate) trait CatalogProvider:
 		ctx: Option<&MutableContext>,
 		ns: &str,
 		db: &str,
-		strict: bool,
 	) -> Result<Arc<DatabaseDefinition>> {
-		self.get_or_add_db_upwards(ctx, ns, db, strict, true).await
+		self.get_or_add_db_upwards(ctx, ns, db, true).await
 	}
 
 	/// Get or add a table with a default configuration, only if we are in
@@ -839,9 +813,8 @@ pub(crate) trait CatalogProvider:
 		ns: &str,
 		db: &str,
 		tb: &str,
-		strict: bool,
 	) -> Result<Arc<TableDefinition>> {
-		self.get_or_add_tb_upwards(ctx, ns, db, tb, strict, false).await
+		self.get_or_add_tb_upwards(ctx, ns, db, tb, false).await
 	}
 
 	/// Ensures that a table, database, and namespace are all fully defined.
@@ -851,8 +824,7 @@ pub(crate) trait CatalogProvider:
 		ns: &str,
 		db: &str,
 		tb: &str,
-		strict: bool,
 	) -> Result<Arc<TableDefinition>> {
-		self.get_or_add_tb_upwards(ctx, ns, db, tb, strict, true).await
+		self.get_or_add_tb_upwards(ctx, ns, db, tb, true).await
 	}
 }

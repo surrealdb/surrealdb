@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::ops::{Deref, DerefMut};
@@ -40,6 +41,25 @@ pub(crate) struct CursorDoc {
 	pub(crate) ir: Option<Arc<IteratorRecord>>,
 	pub(crate) doc: CursorRecord,
 	pub(crate) fields_computed: bool,
+}
+
+impl CursorDoc {
+	/// Updates the `"parent"` doc field for statements with a meaning full
+	/// document.
+	pub async fn update_parent<F, R>(ctx: &Context, doc: Option<&CursorDoc>, f: F) -> R
+	where
+		F: AsyncFnOnce(Cow<Context>) -> R,
+	{
+		let ctx = if let Some(doc) = doc {
+			let mut new_ctx = MutableContext::new(ctx);
+			new_ctx.add_value("parent", doc.doc.as_ref().clone().into());
+			Cow::Owned(new_ctx.freeze())
+		} else {
+			Cow::Borrowed(ctx)
+		};
+
+		f(ctx).await
+	}
 }
 
 /// Wrapper around a Record for cursor operations
@@ -439,7 +459,7 @@ impl Document {
 				match cache.get(&key) {
 					Some(val) => val,
 					None => {
-						let val = txn.get_or_add_db(Some(ctx), ns, db, opt.strict).await?;
+						let val = txn.get_or_add_db(Some(ctx), ns, db).await?;
 						let val = cache::ds::Entry::Any(val.clone());
 						cache.insert(key, val.clone());
 						val
@@ -448,7 +468,7 @@ impl Document {
 				.try_into_type()
 			}
 			// No cache is present on the context
-			_ => txn.get_or_add_db(Some(ctx), ns, db, opt.strict).await,
+			_ => txn.get_or_add_db(Some(ctx), ns, db).await,
 		}
 	}
 
@@ -477,8 +497,7 @@ impl Document {
 								opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 								// We can create the table automatically
 								let (ns, db) = opt.ns_db()?;
-								txn.ensure_ns_db_tb(Some(ctx), ns, db, &id.table, opt.strict)
-									.await?
+								txn.ensure_ns_db_tb(Some(ctx), ns, db, &id.table).await?
 							}
 						};
 						let val = cache::ds::Entry::Any(val.clone());
@@ -497,7 +516,7 @@ impl Document {
 						opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 						// We can create the table automatically
 						let (ns, db) = opt.ns_db()?;
-						txn.ensure_ns_db_tb(Some(ctx), ns, db, &id.table, opt.strict).await
+						txn.ensure_ns_db_tb(Some(ctx), ns, db, &id.table).await
 					}
 				}
 			}

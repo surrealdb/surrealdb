@@ -16,7 +16,7 @@ use crate::err::Error;
 use crate::expr::order::OrderList;
 use crate::val::Value;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(super) struct MemoryCollector(Vec<Value>);
 
 impl MemoryCollector {

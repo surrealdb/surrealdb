@@ -640,7 +640,6 @@ impl DatabaseProvider for Transaction {
 		ctx: Option<&MutableContext>,
 		ns: &str,
 		db: &str,
-		strict: bool,
 		upwards: bool,
 	) -> Result<Arc<DatabaseDefinition>> {
 		let qey = cache::tx::Lookup::DbByName(ns, db);
@@ -657,45 +656,30 @@ impl DatabaseProvider for Transaction {
 					return Ok(db_def);
 				}
 
-				// Database does not exist
-				if !strict {
-					let ns_def = if upwards {
-						self.get_or_add_ns(ctx, ns, strict).await?
-					} else {
-						match self.get_ns_by_name(ns).await? {
-							Some(ns_def) => ns_def,
-							None => {
-								return Err(Error::NsNotFound {
-									name: ns.to_owned(),
-								}
-								.into());
+				let ns_def = if upwards {
+					self.get_or_add_ns(ctx, ns).await?
+				} else {
+					match self.get_ns_by_name(ns).await? {
+						Some(ns_def) => ns_def,
+						None => {
+							return Err(Error::NsNotFound {
+								name: ns.to_owned(),
 							}
+							.into());
 						}
-					};
-
-					let db_def = DatabaseDefinition {
-						namespace_id: ns_def.namespace_id,
-						database_id: self.get_next_db_id(ctx, ns_def.namespace_id).await?,
-						name: db.to_string(),
-						comment: None,
-						changefeed: None,
-					};
-
-					return self.put_db(&ns_def.name, db_def).await;
-				}
-
-				// Ensure the namespace exists
-				if self.get_ns_by_name(ns).await?.is_none() {
-					return Err(Error::NsNotFound {
-						name: ns.to_owned(),
 					}
-					.into());
-				}
+				};
 
-				Err(Error::DbNotFound {
-					name: db.to_owned(),
-				}
-				.into())
+				let db_def = DatabaseDefinition {
+					namespace_id: ns_def.namespace_id,
+					database_id: self.get_next_db_id(ctx, ns_def.namespace_id).await?,
+					name: db.to_string(),
+					comment: None,
+					changefeed: None,
+					strict: false,
+				};
+
+				return self.put_db(&ns_def.name, db_def).await;
 			}
 		}
 	}
@@ -1156,7 +1140,6 @@ impl TableProvider for Transaction {
 		ns: &str,
 		db: &str,
 		tb: &str,
-		strict: bool,
 		upwards: bool,
 	) -> Result<Arc<TableDefinition>> {
 		let qey = cache::tx::Lookup::TbByName(ns, db, tb);
@@ -1166,7 +1149,7 @@ impl TableProvider for Transaction {
 			// The entry is not in the cache
 			None => {
 				let db_def = if upwards {
-					self.get_or_add_db_upwards(ctx, ns, db, strict, upwards).await?
+					self.get_or_add_db_upwards(ctx, ns, db, upwards).await?
 				} else {
 					if self.get_ns_by_name(ns).await?.is_none() {
 						return Err(Error::NsNotFound {
@@ -1195,7 +1178,7 @@ impl TableProvider for Transaction {
 					return Ok(cached_tb);
 				}
 
-				if strict {
+				if db_def.strict {
 					return Err(Error::TbNotFound {
 						name: tb.to_owned(),
 					}
@@ -1247,7 +1230,18 @@ impl TableProvider for Transaction {
 		tb: &TableDefinition,
 	) -> Result<Arc<TableDefinition>> {
 		let key = crate::key::database::tb::new(tb.namespace_id, tb.database_id, &tb.name);
-		self.set(&key, tb, None).await?;
+		match self.set(&key, tb, None).await {
+			Ok(_) => {}
+			Err(e) => {
+				if matches!(e.downcast_ref(), Some(Error::TxReadonly)) {
+					return Err(Error::TbNotFound {
+						name: tb.name.clone(),
+					}
+					.into());
+				}
+				return Err(e);
+			}
+		}
 
 		// Populate cache
 		let cached_tb = Arc::new(tb.clone());
