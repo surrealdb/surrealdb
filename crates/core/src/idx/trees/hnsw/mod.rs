@@ -1,3 +1,4 @@
+pub(crate) mod cache;
 pub(crate) mod docs;
 mod elements;
 mod flavor;
@@ -12,10 +13,11 @@ use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
 
-use crate::catalog::{DatabaseDefinition, HnswParams};
+use crate::catalog::{DatabaseDefinition, HnswParams, TableId};
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::trees::dynamicset::DynamicSet;
+use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
 use crate::idx::trees::hnsw::elements::HnswElements;
 use crate::idx::trees::hnsw::heuristic::Heuristic;
@@ -52,14 +54,14 @@ pub(crate) struct HnswState {
 
 impl KVValue for HnswState {
 	#[inline]
-	fn kv_encode_value(&self) -> anyhow::Result<Vec<u8>> {
+	fn kv_encode_value(&self) -> Result<Vec<u8>> {
 		let mut val = Vec::new();
 		SerializeRevisioned::serialize_revisioned(self, &mut val)?;
 		Ok(val)
 	}
 
 	#[inline]
-	fn kv_decode_value(val: Vec<u8>) -> anyhow::Result<Self> {
+	fn kv_decode_value(val: Vec<u8>) -> Result<Self> {
 		Ok(DeserializeRevisioned::deserialize_revisioned(&mut val.as_slice())?)
 	}
 }
@@ -88,7 +90,12 @@ where
 	L0: DynamicSet,
 	L: DynamicSet,
 {
-	fn new(ikb: IndexKeyBase, p: &HnswParams) -> Result<Self> {
+	fn new(
+		table_id: TableId,
+		ikb: IndexKeyBase,
+		p: &HnswParams,
+		vector_cache: VectorCache,
+	) -> Result<Self> {
 		let m0 = p.m0 as usize;
 		Ok(Self {
 			state: Default::default(),
@@ -97,7 +104,7 @@ where
 			ml: p.ml.to_float(),
 			layer0: HnswLayer::new(ikb.clone(), 0, m0),
 			layers: Vec::default(),
-			elements: HnswElements::new(ikb.clone(), p.distance.clone()),
+			elements: HnswElements::new(table_id, ikb.clone(), p.distance.clone(), vector_cache),
 			rng: SmallRng::from_entropy(),
 			heuristic: p.into(),
 			ikb,
@@ -416,20 +423,20 @@ where
 		self.elements.get_vector(tx, e_id).await
 	}
 	#[cfg(test)]
-	fn check_hnsw_properties(&self, expected_count: usize) {
-		check_hnsw_props(self, expected_count);
+	async fn check_hnsw_properties(&self, expected_count: usize) {
+		check_hnsw_props(self, expected_count).await;
 	}
 }
 
 #[cfg(test)]
-fn check_hnsw_props<L0, L>(h: &Hnsw<L0, L>, expected_count: usize)
+async fn check_hnsw_props<L0, L>(h: &Hnsw<L0, L>, expected_count: usize)
 where
 	L0: DynamicSet,
 	L: DynamicSet,
 {
-	assert_eq!(h.elements.len(), expected_count);
+	assert_eq!(h.elements.len().await, expected_count);
 	for layer in h.layers.iter() {
-		layer.check_props(&h.elements);
+		layer.check_props(&h.elements).await;
 	}
 }
 
@@ -448,7 +455,8 @@ mod tests {
 
 	use crate::catalog::providers::CatalogProvider;
 	use crate::catalog::{
-		DatabaseDefinition, DatabaseId, Distance, HnswParams, IndexId, NamespaceId, VectorType,
+		DatabaseDefinition, DatabaseId, Distance, HnswParams, IndexId, NamespaceId,
+		TableDefinition, TableId, VectorType,
 	};
 	use crate::ctx::{Context, MutableContext};
 	use crate::idx::IndexKeyBase;
@@ -474,7 +482,7 @@ mod tests {
 			let obj: SharedVector = obj.clone();
 			let e_id = h.insert(tx, obj.clone_vector()).await.unwrap();
 			map.insert(e_id, obj);
-			h.check_hnsw_properties(map.len());
+			h.check_hnsw_properties(map.len()).await;
 		}
 		map
 	}
@@ -530,15 +538,23 @@ mod tests {
 		for e_id in element_ids {
 			assert!(h.remove(tx, e_id).await.unwrap());
 			map.remove(&e_id);
-			h.check_hnsw_properties(map.len());
+			h.check_hnsw_properties(map.len()).await;
 		}
 	}
 
 	async fn test_hnsw_collection(p: &HnswParams, collection: &TestCollection) {
 		let ds = Datastore::new("memory").await.unwrap();
-		let mut h =
-			HnswFlavor::new(IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)), p)
-				.unwrap();
+		let ns = NamespaceId(1);
+		let db = DatabaseId(2);
+		let tb = TableId(3);
+		let tb = TableDefinition::new(ns, db, tb, "tb".to_string());
+		let mut h = HnswFlavor::new(
+			tb.table_id,
+			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), &tb.name, IndexId(4)),
+			p,
+			ds.index_store().vector_cache().clone(),
+		)
+		.unwrap();
 		let map = {
 			let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
 			let map = insert_collection_hnsw(&tx, &mut h, collection).await;
@@ -645,7 +661,7 @@ mod tests {
 					e.insert(HashSet::from_iter([*doc_id]));
 				}
 			}
-			h.check_hnsw_properties(map.len());
+			h.check_hnsw_properties(map.len()).await;
 		}
 		Ok(map)
 	}
@@ -707,7 +723,7 @@ mod tests {
 				}
 			}
 			// Check properties
-			h.check_hnsw_properties(map.len());
+			h.check_hnsw_properties(map.len()).await;
 		}
 		Ok(())
 	}
@@ -735,11 +751,16 @@ mod tests {
 		// Create index
 		let (mut h, map) = {
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
+			let ns = NamespaceId(1);
+			let db = DatabaseId(2);
+			let tb = TableId(3);
+			let ix = IndexId(4);
 			let tx = ctx.tx();
 			let mut h = HnswIndex::new(
+				ctx.get_index_stores().vector_cache().clone(),
 				&tx,
-				IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
-				"test".to_string(),
+				IndexKeyBase::new(ns, db, "tb", ix),
+				tb,
 				&p,
 			)
 			.await
@@ -756,7 +777,7 @@ mod tests {
 			let ctx = new_ctx(&ds, TransactionType::Write).await;
 			let tx = ctx.tx();
 
-			let db = tx.ensure_ns_db(None, "myns", "mydb", false).await.unwrap();
+			let db = tx.ensure_ns_db(None, "myns", "mydb").await.unwrap();
 
 			stack
 				.enter(|stk| async {
@@ -827,10 +848,11 @@ mod tests {
 			(9, new_i16_vec(-4, -2)),
 			(10, new_i16_vec(0, 3)),
 		]);
-		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3));
+		let ikb = IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(4));
 		let p = new_params(2, VectorType::I16, Distance::Euclidean, 3, 500, true, true);
-		let mut h = HnswFlavor::new(ikb, &p).unwrap();
 		let ds = Arc::new(Datastore::new("memory").await.unwrap());
+		let mut h =
+			HnswFlavor::new(TableId(3), ikb, &p, ds.index_store().vector_cache().clone()).unwrap();
 		{
 			let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
 			insert_collection_hnsw(&tx, &mut h, &collection).await;
@@ -856,7 +878,7 @@ mod tests {
 
 		let ds = Arc::new(Datastore::new("memory").await?);
 		let tx = ds.transaction(TransactionType::Write, Optimistic).await.unwrap();
-		let db = tx.ensure_ns_db(None, "myns", "mydb", false).await.unwrap();
+		let db = tx.ensure_ns_db(None, "myns", "mydb").await.unwrap();
 		tx.commit().await.unwrap();
 
 		let collection: Arc<TestCollection> =
@@ -868,10 +890,13 @@ mod tests {
 
 		let ctx = new_ctx(&ds, TransactionType::Write).await;
 		let tx = ctx.tx();
+		let tb = TableId(3);
+		let ix = IndexId(4);
 		let mut h = HnswIndex::new(
+			ctx.get_index_stores().vector_cache().clone(),
 			&tx,
-			IndexKeyBase::new(NamespaceId(1), DatabaseId(2), "tb", IndexId(3)),
-			"Index".to_string(),
+			IndexKeyBase::new(db.namespace_id, db.database_id, "tb", ix),
+			tb,
 			&p,
 		)
 		.await?;
@@ -990,10 +1015,7 @@ mod tests {
 					b.add(d, Ids64::One(*doc_id));
 				}
 			}
-			b.build(
-				#[cfg(debug_assertions)]
-				HashMap::default(),
-			)
+			b.build()
 		}
 	}
 

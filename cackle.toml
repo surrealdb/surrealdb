@@ -24,13 +24,14 @@ exclude = ["std::path::Path", "std::path::PathBuf"]
 
 [api.net]
 include = [
+    "clap_builder",
     "connect",
     "futures_util",
     "hashbrown",
     "mio::net",
-    "surreal::net",
     "surrealdb",
     "surrealdb_core",
+    "surrealdb_server",
     "surrealkv",
     "tokio::net",
     "tracing",
@@ -1006,9 +1007,9 @@ allow_apis = ["net"]
 allow_unsafe = true
 allow_apis = ["fs"]
 
-[pkg.surrealdb]
+[pkg.surrealdb-server]
 allow_unsafe = true
-allow_apis = ["fs"]
+allow_apis = ["fs", "process", "net"]
 build.allow_build_instructions = ["cargo::rustc-check-cfg=*"]
 
 [pkg.surrealdb-core]
@@ -1021,6 +1022,9 @@ build.allow_build_instructions = [
 
 [pkg.surrealdb-protocol]
 allow_unsafe = true
+
+[pkg.surrealdb]
+allow_apis = ["fs"]
 
 [pkg.assert_fs]
 from.test.allow_apis = ["fs"]
@@ -1713,3 +1717,18 @@ allow_apis = ["fs"]
 [pkg.witx]
 allow_unsafe = true
 allow_apis = ["fs"]
+
+[pkg.i_float]
+allow_unsafe = true
+
+[pkg.i_key_sort]
+allow_unsafe = true
+
+[pkg.i_overlay]
+allow_unsafe = true
+
+[pkg.i_shape]
+allow_unsafe = true
+
+[pkg.i_tree]
+allow_unsafe = true

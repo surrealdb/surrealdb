@@ -5,6 +5,7 @@ use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 
 use crate::catalog::Record;
+use crate::catalog::providers::TableProvider;
 use crate::ctx::{Canceller, Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
@@ -183,9 +184,7 @@ impl Iterator {
 		// Match the values
 		match val {
 			Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
-			Expr::Table(v) => {
-				self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.clone()).await?
-			}
+			Expr::Table(v) => self.prepare_table(ctx, opt, stk, planner, stm_ctx, v).await?,
 			Expr::Idiom(x) => {
 				// TODO: This needs to be structured better.
 				// match against what previously would be an edge.
@@ -220,7 +219,7 @@ impl Iterator {
 					};
 					let mut what = Vec::new();
 					for s in lookup.what.iter() {
-						what.push(s.compute(stk, ctx, opt, doc, &lookup.kind).await?);
+						what.push(s.compute(stk, ctx, opt, doc).await?);
 					}
 					// idiom matches the Edges pattern.
 					self.prepare_lookup(stm_ctx.stm, from, lookup.kind.clone(), what)?;
@@ -243,24 +242,39 @@ impl Iterator {
 		stk: &mut Stk,
 		planner: &mut QueryPlanner,
 		stm_ctx: &StatementContext<'_>,
-		table: String,
+		table: &str,
 	) -> Result<()> {
 		// We add the iterable only if we have a permission
-		let p = planner.check_table_permission(stm_ctx, &table).await?;
+		let p = planner.check_table_permission(stm_ctx, table).await?;
 		if matches!(p, GrantedPermission::None) {
 			return Ok(());
 		}
 		// Add the record to the iterator
 		if stm_ctx.stm.is_deferable() {
 			ctx.get_db(opt).await?;
-			self.ingest(Iterable::Yield(table))
+			self.ingest(Iterable::Yield(table.to_string()));
 		} else {
 			if stm_ctx.stm.is_guaranteed() {
-				self.guaranteed = Some(Iterable::Yield(table.clone()));
+				self.guaranteed = Some(Iterable::Yield(table.to_string()));
 			}
+
 			let db = ctx.get_db(opt).await?;
 
-			planner.add_iterables(&db, stk, stm_ctx, table, p, self).await?;
+			// For read-only statements (like SELECT, UPDATE, DELETE), check if the table exists
+			// If it doesn't exist in strict mode, throw an error rather than returning empty
+			// results In non-strict mode, the table will be created if needed, or queries return
+			// empty results UPSERT statements are allowed to create tables even in non-deferable
+			// mode
+			if stm_ctx.stm.requires_table_existence()
+				&& ctx.tx().get_tb(db.namespace_id, db.database_id, table).await?.is_none()
+				&& db.strict
+			{
+				bail!(Error::TbNotFound {
+					name: table.to_string(),
+				});
+			}
+
+			planner.add_iterables(&db, stk, stm_ctx, table.to_string(), p, self).await?;
 		}
 		// All ingested ok
 		Ok(())
@@ -391,23 +405,13 @@ impl Iterator {
 	) -> Result<()> {
 		let v = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await.catch_return()?;
 		match v {
-			Value::Table(v) => {
-				self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.as_str().to_owned()).await?
-			}
+			Value::Table(v) => self.prepare_table(ctx, opt, stk, planner, stm_ctx, &v).await?,
 			Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
 			Value::Array(a) => {
 				for v in a.into_iter() {
 					match v {
 						Value::Table(v) => {
-							self.prepare_table(
-								ctx,
-								opt,
-								stk,
-								planner,
-								stm_ctx,
-								v.as_str().to_owned(),
-							)
-							.await?
+							self.prepare_table(ctx, opt, stk, planner, stm_ctx, &v).await?
 						}
 						Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
 						v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
@@ -446,9 +450,7 @@ impl Iterator {
 		for v in v {
 			match v {
 				Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
-				Expr::Table(v) => {
-					self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.clone()).await?
-				}
+				Expr::Table(v) => self.prepare_table(ctx, opt, stk, planner, stm_ctx, v).await?,
 				Expr::Idiom(x) => {
 					// match against what previously would be an edge.
 					if x.len() != 2 {
@@ -488,7 +490,7 @@ impl Iterator {
 						};
 						let mut what = Vec::new();
 						for s in lookup.what.iter() {
-							what.push(s.compute(stk, ctx, opt, doc, &lookup.kind).await?);
+							what.push(s.compute(stk, ctx, opt, doc).await?);
 						}
 						// idiom matches the Edges pattern.
 						return self.prepare_lookup(stm_ctx.stm, from, lookup.kind.clone(), what);

@@ -15,7 +15,9 @@ use tokio::sync::RwLock;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
-use crate::catalog::{DatabaseDefinition, DatabaseId, IndexDefinition, NamespaceId, Record};
+use crate::catalog::{
+	DatabaseDefinition, DatabaseId, IndexDefinition, IndexId, NamespaceId, Record, TableId,
+};
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
@@ -131,16 +133,16 @@ struct IndexKey {
 	ns: NamespaceId,
 	db: DatabaseId,
 	tb: String,
-	ix: String,
+	ix: IndexId,
 }
 
 impl IndexKey {
-	fn new(ns: NamespaceId, db: DatabaseId, tb: &str, ix: &str) -> Self {
+	fn new(ns: NamespaceId, db: DatabaseId, tb: &str, ix: IndexId) -> Self {
 		Self {
 			ns,
 			db,
 			tb: tb.to_owned(),
-			ix: ix.to_owned(),
+			ix,
 		}
 	}
 }
@@ -159,16 +161,18 @@ impl IndexBuilder {
 		}
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	fn start_building(
 		&self,
 		ctx: &Context,
 		opt: Options,
 		ns: NamespaceId,
 		db: DatabaseId,
+		tb: TableId,
 		ix: Arc<IndexDefinition>,
 		sdr: Option<Sender<Result<()>>>,
 	) -> Result<IndexBuilding> {
-		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ns, db, ix)?);
+		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ns, db, tb, ix)?);
 		let b = building.clone();
 		spawn(async move {
 			let guard = BuildingFinishGuard(b.clone());
@@ -190,12 +194,12 @@ impl IndexBuilder {
 		&self,
 		ctx: &Context,
 		opt: Options,
-		ns: NamespaceId,
-		db: DatabaseId,
+		tb: TableId,
 		ix: Arc<IndexDefinition>,
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<()>>>> {
-		let key = IndexKey::new(ns, db, &ix.table_name, &ix.name);
+		let (ns, db) = ctx.expect_ns_db_ids(&opt).await?;
+		let key = IndexKey::new(ns, db, &ix.table_name, ix.index_id);
 		let (rcv, sdr) = if blocking {
 			let (s, r) = channel();
 			(Some(r), Some(s))
@@ -208,15 +212,15 @@ impl IndexBuilder {
 				ensure!(
 					e.get().is_finished(),
 					Error::IndexAlreadyBuilding {
-						name: e.key().ix.clone(),
+						name: ix.name.clone(),
 					}
 				);
-				let ib = self.start_building(ctx, opt, ns, db, ix, sdr)?;
+				let ib = self.start_building(ctx, opt, ns, db, tb, ix, sdr)?;
 				e.insert(ib);
 			}
 			Entry::Vacant(e) => {
 				// No index is currently building, we can start building it
-				let ib = self.start_building(ctx, opt, ns, db, ix, sdr)?;
+				let ib = self.start_building(ctx, opt, ns, db, tb, ix, sdr)?;
 				e.insert(ib);
 			}
 		};
@@ -232,7 +236,7 @@ impl IndexBuilder {
 		new_values: Option<Vec<Value>>,
 		rid: &RecordId,
 	) -> Result<ConsumeResult> {
-		let key = IndexKey::new(db.namespace_id, db.database_id, &ix.table_name, &ix.name);
+		let key = IndexKey::new(db.namespace_id, db.database_id, &ix.table_name, ix.index_id);
 		if let Some(b) = self.indexes.read().await.get(&key) {
 			return b.maybe_consume(ctx, old_values, new_values, rid).await;
 		}
@@ -245,7 +249,7 @@ impl IndexBuilder {
 		db: DatabaseId,
 		ix: &IndexDefinition,
 	) -> BuildingStatus {
-		let key = IndexKey::new(ns, db, &ix.table_name, &ix.name);
+		let key = IndexKey::new(ns, db, &ix.table_name, ix.index_id);
 		if let Some(b) = self.indexes.read().await.get(&key) {
 			b.status.read().await.clone()
 		} else {
@@ -258,7 +262,7 @@ impl IndexBuilder {
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &str,
-		ix: &str,
+		ix: IndexId,
 	) -> Result<()> {
 		let key = IndexKey::new(ns, db, tb, ix);
 		if let Some(b) = self.indexes.write().await.remove(&key) {
@@ -328,6 +332,7 @@ struct Building {
 	opt: Options,
 	ns: NamespaceId,
 	db: DatabaseId,
+	tb: TableId,
 	ikb: IndexKeyBase,
 	tf: TransactionFactory,
 	ix: Arc<IndexDefinition>,
@@ -344,6 +349,7 @@ impl Building {
 		opt: Options,
 		ns: NamespaceId,
 		db: DatabaseId,
+		tb: TableId,
 		ix: Arc<IndexDefinition>,
 	) -> Result<Self> {
 		let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
@@ -352,6 +358,7 @@ impl Building {
 			opt,
 			ns,
 			db,
+			tb,
 			ikb,
 			tf,
 			ix,
@@ -586,6 +593,7 @@ impl Building {
 				&self.opt,
 				self.ns,
 				self.db,
+				self.tb,
 				&self.ix,
 				None,
 				opt_values.clone(),
@@ -635,6 +643,7 @@ impl Building {
 					&self.opt,
 					self.ns,
 					self.db,
+					self.tb,
 					&self.ix,
 					a.old_values,
 					a.new_values,

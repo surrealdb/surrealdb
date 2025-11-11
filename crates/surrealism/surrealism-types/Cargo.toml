@@ -1,6 +1,6 @@
 [package]
 name = "surrealism-types"
-version = "0.1.0"
+version = "0.1.1"
 description = "Types for Surrealism"
 edition.workspace = true
 rust-version.workspace = true
@@ -26,7 +26,7 @@ surrealdb-types.workspace = true
 chrono.workspace = true
 bytes = "1.10.1"
 flatbuffers = "25.2.10"
-rust_decimal = "1.37.2"
+rust_decimal = "1.39.0"
 
 [lints]
 workspace = true

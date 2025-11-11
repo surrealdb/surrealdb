@@ -95,8 +95,6 @@ pub struct Datastore {
 	transaction_factory: TransactionFactory,
 	/// The unique id of this datastore, used in notifications.
 	id: Uuid,
-	/// Whether this datastore runs in strict mode by default.
-	strict: bool,
 	/// Whether authentication is enabled on this datastore.
 	auth_enabled: bool,
 	/// The maximum duration timeout for running multiple statements in a query.
@@ -642,7 +640,6 @@ impl Datastore {
 		Ok(Self {
 			id,
 			transaction_factory: tf.clone(),
-			strict: false,
 			auth_enabled: false,
 			query_timeout: None,
 			slow_log: None,
@@ -668,7 +665,6 @@ impl Datastore {
 	pub fn restart(self) -> Self {
 		Self {
 			id: self.id,
-			strict: self.strict,
 			auth_enabled: self.auth_enabled,
 			query_timeout: self.query_timeout,
 			slow_log: self.slow_log.clone(),
@@ -690,20 +686,10 @@ impl Datastore {
 		}
 	}
 
-	/// Specify whether this Datastore should run in strict mode
+	/// Set the node id for this datastore.
 	pub fn with_node_id(mut self, id: Uuid) -> Self {
 		self.id = id;
 		self
-	}
-
-	/// Specify whether this Datastore should run in strict mode
-	pub fn with_strict_mode(mut self, strict: bool) -> Self {
-		self.strict = strict;
-		self
-	}
-
-	pub fn is_strict_mode(&self) -> bool {
-		self.strict
 	}
 
 	/// Specify whether this datastore should enable live query notifications
@@ -812,7 +798,8 @@ impl Datastore {
 	}
 
 	// Used for testing live queries
-	pub fn get_cache(&self) -> Arc<DatastoreCache> {
+	#[cfg(test)]
+	pub(crate) fn get_cache(&self) -> Arc<DatastoreCache> {
 		self.cache.clone()
 	}
 
@@ -1336,9 +1323,6 @@ impl Datastore {
 		// Process all statements
 
 		let parser_settings = ParserSettings {
-			references_enabled: ctx
-				.get_capabilities()
-				.allows_experimental(&ExperimentalTarget::RecordReferences),
 			define_api_enabled: ctx
 				.get_capabilities()
 				.allows_experimental(&ExperimentalTarget::DefineApi),
@@ -1939,7 +1923,6 @@ impl Datastore {
 			.with_db(sess.db())
 			.with_live(sess.live())
 			.with_auth(sess.au.clone())
-			.with_strict(self.strict)
 			.with_auth_enabled(self.auth_enabled)
 	}
 
@@ -1998,7 +1981,7 @@ impl Datastore {
 		match (namespace, database) {
 			(Some(ns), Some(db)) => {
 				let tx = new_tx().await?;
-				tx.ensure_ns_db(ctx, &ns, &db, self.strict)
+				tx.ensure_ns_db(ctx, &ns, &db)
 					.await
 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
 				commit_tx(tx).await?;
@@ -2007,7 +1990,7 @@ impl Datastore {
 			}
 			(Some(ns), None) => {
 				let tx = new_tx().await?;
-				tx.get_or_add_ns(ctx, &ns, self.strict)
+				tx.get_or_add_ns(ctx, &ns)
 					.await
 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
 				commit_tx(tx).await?;
@@ -2020,7 +2003,7 @@ impl Datastore {
 					));
 				};
 				let tx = new_tx().await?;
-				tx.ensure_ns_db(ctx, &ns, &db, self.strict)
+				tx.ensure_ns_db(ctx, &ns, &db)
 					.await
 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
 				commit_tx(tx).await?;
@@ -2088,7 +2071,7 @@ impl Datastore {
 	{
 		let tx = Arc::new(self.transaction(TransactionType::Write, LockType::Optimistic).await?);
 
-		let db = tx.ensure_ns_db(None, ns, db, false).await?;
+		let db = tx.ensure_ns_db(None, ns, db).await?;
 
 		let apis = tx.all_db_apis(db.namespace_id, db.database_id).await?;
 		let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
@@ -2256,7 +2239,6 @@ mod test {
 			.with_ns(Some("test".into()))
 			.with_db(Some("test".into()))
 			.with_live(false)
-			.with_strict(false)
 			.with_auth_enabled(false)
 			.with_max_computation_depth(u32::MAX);
 
@@ -2293,7 +2275,7 @@ mod test {
 
 		let db = {
 			let txn = ds.transaction(TransactionType::Write, LockType::Pessimistic).await?;
-			let db = txn.ensure_ns_db(None, "test", "test", false).await?;
+			let db = txn.ensure_ns_db(None, "test", "test").await?;
 			txn.commit().await?;
 			db
 		};

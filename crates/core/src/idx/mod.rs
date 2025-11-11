@@ -14,7 +14,6 @@ use uuid::Uuid;
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::seqdocids::DocId;
 use crate::idx::trees::hnsw::ElementId;
-use crate::idx::trees::store::NodeId;
 use crate::idx::trees::vector::SerializedVector;
 use crate::key::index::dc::Dc;
 use crate::key::index::dl::Dl;
@@ -32,7 +31,6 @@ use crate::key::index::ip::Ip;
 use crate::key::index::is::Is;
 use crate::key::index::td::{Td, TdRoot};
 use crate::key::index::tt::Tt;
-use crate::key::index::vm::{Vm, VmRoot};
 use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::Key;
 use crate::val::RecordIdKey;
@@ -89,14 +87,6 @@ impl IndexKeyBase {
 
 	fn new_hs_key(&self) -> Hs<'_> {
 		Hs::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
-	}
-
-	fn new_vm_root_key(&self) -> VmRoot<'_> {
-		VmRoot::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
-	}
-
-	fn new_vm_key(&self, node_id: NodeId) -> Vm<'_> {
-		Vm::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, node_id)
 	}
 
 	fn new_ii_key(&self, doc_id: DocId) -> Ii<'_> {

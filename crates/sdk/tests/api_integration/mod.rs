@@ -416,14 +416,14 @@ mod mem {
 	async fn experimental_features() {
 		let surql = "
 		    USE NAMESPACE namespace DATABASE database;
-			DEFINE FIELD using ON house TYPE record<utility> REFERENCE ON DELETE CASCADE;
+			DEFINE API \"/\" FOR any THEN {};
 		";
 		// Experimental features are rejected by default
 		let db = Surreal::new::<Mem>(()).await.unwrap();
 		db.query(surql).await.unwrap_err();
 		// Experimental features can be allowed
-		let capabilities = Capabilities::new()
-			.with_experimental_feature_allowed(ExperimentalFeature::RecordReferences);
+		let capabilities =
+			Capabilities::new().with_experimental_feature_allowed(ExperimentalFeature::DefineApi);
 		let config = Config::new().capabilities(capabilities);
 		let db = Surreal::new::<Mem>(config).await.unwrap();
 		db.query(surql).await.unwrap().check().unwrap();

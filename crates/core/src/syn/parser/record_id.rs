@@ -138,13 +138,35 @@ impl Parser<'_> {
 	pub(crate) async fn parse_lookup_subject(
 		&mut self,
 		stk: &mut Stk,
+		supports_referencing_field: bool,
 	) -> ParseResult<LookupSubject> {
-		let tb = self.parse_ident()?;
+		let table = self.parse_ident()?;
 		if self.eat_whitespace(t!(":")) {
-			let rng = self.parse_id_range(stk).await?;
-			Ok(LookupSubject::Range(tb, rng))
+			let range = self.parse_id_range(stk).await?;
+			let referencing_field =
+				self.parse_referencing_field(supports_referencing_field).await?;
+
+			Ok(LookupSubject::Range {
+				table,
+				range,
+				referencing_field,
+			})
 		} else {
-			Ok(LookupSubject::Table(tb))
+			Ok(LookupSubject::Table {
+				table,
+				referencing_field: self.parse_referencing_field(supports_referencing_field).await?,
+			})
+		}
+	}
+
+	pub(crate) async fn parse_referencing_field(
+		&mut self,
+		supports_referencing_field: bool,
+	) -> ParseResult<Option<String>> {
+		if supports_referencing_field && self.eat(t!("FIELD")) {
+			Ok(Some(self.parse_ident()?))
+		} else {
+			Ok(None)
 		}
 	}
 

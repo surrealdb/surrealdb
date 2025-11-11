@@ -4,7 +4,6 @@ use crate::sql::TableType;
 use crate::sql::statements::alter::field::AlterDefault;
 use crate::sql::statements::alter::{AlterFieldStatement, AlterKind, AlterSequenceStatement};
 use crate::sql::statements::{AlterStatement, AlterTableStatement};
-use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;
@@ -129,13 +128,13 @@ impl Parser<'_> {
 					self.pop_peek();
 					let peek = self.peek();
 					match peek.kind {
-						t!("FLEXIBLE") => {
-							self.pop_peek();
-							res.flex = AlterKind::Drop;
-						}
 						t!("TYPE") => {
 							self.pop_peek();
 							res.kind = AlterKind::Drop;
+						}
+						t!("FLEXIBLE") => {
+							self.pop_peek();
+							res.flexible = AlterKind::Drop;
 						}
 						t!("READONLY") => {
 							self.pop_peek();
@@ -158,13 +157,6 @@ impl Parser<'_> {
 							res.comment = AlterKind::Drop;
 						}
 						t!("REFERENCE") => {
-							if !self.settings.references_enabled {
-								bail!(
-									"Experimental capability `record_references` is not enabled",
-									@self.last_span() => "Use of `REFERENCE` keyword is still experimental"
-								)
-							}
-
 							self.pop_peek();
 							res.reference = AlterKind::Drop;
 						}
@@ -177,17 +169,17 @@ impl Parser<'_> {
 						}
 					}
 				}
-				t!("FLEXIBLE") => {
-					self.pop_peek();
-					res.flex = AlterKind::Set(());
-				}
 				t!("TYPE") => {
 					self.pop_peek();
 					res.kind = AlterKind::Set(stk.run(|stk| self.parse_inner_kind(stk)).await?);
 				}
+				t!("FLEXIBLE") => {
+					self.pop_peek();
+					res.flexible = AlterKind::Set(());
+				}
 				t!("READONLY") => {
 					self.pop_peek();
-					res.flex = AlterKind::Set(());
+					res.readonly = AlterKind::Set(());
 				}
 				t!("VALUE") => {
 					self.pop_peek();
@@ -216,13 +208,6 @@ impl Parser<'_> {
 					res.comment = AlterKind::Set(self.parse_string_lit()?);
 				}
 				t!("REFERENCE") => {
-					if !self.settings.references_enabled {
-						bail!(
-							"Experimental capability `record_references` is not enabled",
-							@self.last_span() => "Use of `REFERENCE` keyword is still experimental"
-						)
-					}
-
 					self.pop_peek();
 					res.reference = AlterKind::Set(self.parse_reference(stk).await?);
 				}

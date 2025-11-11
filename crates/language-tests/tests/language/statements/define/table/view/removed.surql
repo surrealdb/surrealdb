@@ -11,6 +11,12 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[]"
 
 [[test.results]]
@@ -29,13 +35,16 @@ value = "[{ count: 2, id: view:[] }]"
 error = "Invalid query: Cannot delete table `test` on which a view is defined, table(s) `view` are defined as a view on this table."
 
 [[test.results]]
-value = "[{ a: 1, id: test:1 }, { a: 2, id: test:2 }]"
+error = "The table 'test' does not exist"
 
 [[test.results]]
+# TODO: Shouldn't this be 0?
 value = "[{ count: 2, id: view:[] }]"
 
 */
 
+DEFINE DATABASE strict_test STRICT;
+USE DB strict_test;
 
 DEFINE TABLE test SCHEMAFUL;
 DEFINE FIELD a ON test TYPE number;

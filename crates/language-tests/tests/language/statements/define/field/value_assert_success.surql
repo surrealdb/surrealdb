@@ -22,4 +22,4 @@ DEFINE TABLE person SCHEMAFULL;
 DEFINE FIELD age ON person TYPE number ASSERT $value > 0;
 DEFINE FIELD email ON person TYPE string ASSERT string::is_email($value);
 DEFINE FIELD name ON person TYPE option<string> VALUE $value OR 'No name';
-CREATE person:test SET email = 'info@surrealdb.com', other = 'ignore', age = 22;
+CREATE person:test SET email = 'info@surrealdb.com', age = 22;

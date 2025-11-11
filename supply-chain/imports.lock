@@ -266,13 +266,6 @@ user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
 
-[[publisher.console]]
-version = "0.15.11"
-when = "2025-03-01"
-user-id = 4556
-user-login = "djc"
-user-name = "Dirkjan Ochtman"
-
 [[publisher.core-foundation]]
 version = "0.9.3"
 when = "2022-02-07"
@@ -651,13 +644,6 @@ user-id = 539
 user-login = "cuviper"
 user-name = "Josh Stone"
 
-[[publisher.indicatif]]
-version = "0.17.11"
-when = "2025-01-28"
-user-id = 4556
-user-login = "djc"
-user-name = "Dirkjan Ochtman"
-
 [[publisher.indxdb]]
 version = "0.6.0"
 when = "2025-01-08"
@@ -797,20 +783,6 @@ when = "2023-03-20"
 user-id = 359
 user-login = "seanmonstar"
 user-name = "Sean McArthur"
-
-[[publisher.monostate]]
-version = "0.1.18"
-when = "2025-09-29"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
-
-[[publisher.monostate-impl]]
-version = "0.1.18"
-when = "2025-09-29"
-user-id = 3618
-user-login = "dtolnay"
-user-name = "David Tolnay"
 
 [[publisher.native-tls]]
 version = "0.2.14"
@@ -1039,13 +1011,6 @@ user-id = 356
 user-login = "bluss"
 user-name = "bluss"
 
-[[publisher.rayon-cond]]
-version = "0.4.0"
-when = "2025-03-12"
-user-id = 539
-user-login = "cuviper"
-user-name = "Josh Stone"
-
 [[publisher.regalloc2]]
 version = "0.12.2"
 when = "2025-05-07"
@@ -1054,15 +1019,15 @@ user-login = "cfallin"
 user-name = "Chris Fallin"
 
 [[publisher.regex]]
-version = "1.11.1"
-when = "2024-10-24"
+version = "1.12.2"
+when = "2025-10-13"
 user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
 
 [[publisher.regex-automata]]
-version = "0.4.9"
-when = "2024-11-11"
+version = "0.4.13"
+when = "2025-10-13"
 user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
@@ -1089,8 +1054,8 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.revision]]
-version = "0.13.0"
-when = "2025-09-18"
+version = "0.14.0"
+when = "2025-11-06"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -1103,8 +1068,8 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.revision-derive]]
-version = "0.13.0"
-when = "2025-09-18"
+version = "0.14.0"
+when = "2025-11-06"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -1264,15 +1229,15 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb]]
-version = "3.0.0-alpha.12"
-when = "2025-10-30"
+version = "3.0.0-alpha.13"
+when = "2025-11-05"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-core]]
-version = "3.0.0-alpha.12"
-when = "2025-10-30"
+version = "3.0.0-alpha.13"
+when = "2025-11-05"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -1292,15 +1257,15 @@ user-login = "mumoshu"
 user-name = "Yusuke Kuoka"
 
 [[publisher.surrealdb-types]]
-version = "3.0.0-alpha.12"
-when = "2025-10-30"
+version = "3.0.0-alpha.13"
+when = "2025-11-05"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-types-derive]]
-version = "3.0.0-alpha.12"
-when = "2025-10-30"
+version = "3.0.0-alpha.13"
+when = "2025-11-05"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -1332,20 +1297,6 @@ when = "2025-03-09"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
-
-[[publisher.system-configuration]]
-version = "0.6.1"
-when = "2024-08-22"
-user-id = 1459
-user-login = "faern"
-user-name = "Linus Färnstrand"
-
-[[publisher.system-configuration-sys]]
-version = "0.6.0"
-when = "2024-01-31"
-user-id = 1459
-user-login = "faern"
-user-name = "Linus Färnstrand"
 
 [[publisher.system-interface]]
 version = "0.27.3"
@@ -1495,8 +1446,8 @@ user-login = "hsivonen"
 user-name = "Henri Sivonen"
 
 [[publisher.uuid]]
-version = "1.17.0"
-when = "2025-05-23"
+version = "1.18.1"
+when = "2025-09-02"
 user-id = 3204
 user-login = "KodrAus"
 user-name = "Ashley Mannix"
@@ -3144,13 +3095,6 @@ version = "1.4.0"
 notes = "Contains no unsafe"
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
-[[audits.google.audits.base64]]
-who = "Adam Langley <agl@chromium.org>"
-criteria = "safe-to-deploy"
-version = "0.13.1"
-notes = "Skimmed the uses of `std` to ensure that nothing untoward is happening. Code uses `forbid(unsafe_code)` and, indeed, there are no uses of `unsafe`"
-aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
-
 [[audits.google.audits.bitflags]]
 who = "Lukasz Anforowicz <lukasza@chromium.org>"
 criteria = "safe-to-deploy"
@@ -3599,12 +3543,6 @@ version = "0.4.2"
 notes = "Contains no unsafe"
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
-[[audits.google.audits.number_prefix]]
-who = "George Burgess IV <gbiv@google.com>"
-criteria = "safe-to-deploy"
-version = "0.4.0"
-aggregated-from = "https://chromium.googlesource.com/chromiumos/third_party/rust_crates/+/refs/heads/main/cargo-vet/audits.toml?format=TEXT"
-
 [[audits.google.audits.openssl-macros]]
 who = "George Burgess IV <gbiv@google.com>"
 criteria = "safe-to-deploy"
@@ -3811,28 +3749,6 @@ There is unsafe to convert pointers from str to RelativePath, where the latter
 is a transparent wrapper around str so the pointer will be to a valid
 type/value always.
 """
-aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
-
-[[audits.google.audits.rust_decimal]]
-who = "Lukasz Anforowicz <lukasza@chromium.org>"
-criteria = "safe-to-deploy"
-version = "1.36.0"
-notes = '''
-Grepped for `-i cipher`, `-i crypto`, `'\bfs\b'`, `'\bnet\b'`, `'\bunsafe\b'`
-and there were no hits except:
-
-* Some reasonable `fs` usage in `build.rs`, under `make/scripts`, in one test
-* A single `unsafe` usage in one test.  I think this still qualifies this crate
-  as `ub-risk-0`.  FWIW the test usage seems sound - see:
-  https://chromium-review.googlesource.com/c/chromium/src/+/6187726/2/third_party/rust/chromium_crates_io/vendor/rust_decimal-1.36.0/tests/decimal_tests.rs
-'''
-aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
-
-[[audits.google.audits.rust_decimal]]
-who = "Chris Palmer <palmer@google.com>"
-criteria = "safe-to-deploy"
-delta = "1.36.0 -> 1.37.0"
-notes = "New `unsafe` in a test."
 aggregated-from = "https://chromium.googlesource.com/chromium/src/+/main/third_party/rust/chromium_crates_io/supply-chain/audits.toml?format=TEXT"
 
 [[audits.google.audits.rustversion]]
@@ -4412,13 +4328,6 @@ criteria = "safe-to-deploy"
 delta = "0.2.20 -> 0.2.21"
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
-[[audits.mozilla.audits.android-tzdata]]
-who = "Mark Hammond <mhammond@skippinet.com.au>"
-criteria = "safe-to-deploy"
-version = "0.1.1"
-notes = "Small crate parsing a file. No unsafe code"
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
 [[audits.mozilla.audits.android_system_properties]]
 who = "Nicolas Silva <nical@fastmail.com>"
 criteria = "safe-to-deploy"
@@ -4494,50 +4403,6 @@ criteria = "safe-to-deploy"
 delta = "0.69.2 -> 0.69.4"
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
-[[audits.mozilla.audits.bit-set]]
-who = "Aria Beingessner <a.beingessner@gmail.com>"
-criteria = "safe-to-deploy"
-version = "0.5.2"
-notes = "Another crate I own via contain-rs that is ancient and maintenance mode, no known issues."
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
-[[audits.mozilla.audits.bit-set]]
-who = "Mike Hommey <mh+mozilla@glandium.org>"
-criteria = "safe-to-deploy"
-delta = "0.5.2 -> 0.5.3"
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
-[[audits.mozilla.audits.bit-set]]
-who = "Teodor Tanasoaia <ttanasoaia@mozilla.com>"
-criteria = "safe-to-deploy"
-delta = "0.5.3 -> 0.6.0"
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
-[[audits.mozilla.audits.bit-set]]
-who = "Jim Blandy <jimb@red-bean.com>"
-criteria = "safe-to-deploy"
-delta = "0.6.0 -> 0.8.0"
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
-[[audits.mozilla.audits.bit-vec]]
-who = "Aria Beingessner <a.beingessner@gmail.com>"
-criteria = "safe-to-deploy"
-version = "0.6.3"
-notes = "Another crate I own via contain-rs that is ancient and in maintenance mode but otherwise perfectly fine."
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
-[[audits.mozilla.audits.bit-vec]]
-who = "Teodor Tanasoaia <ttanasoaia@mozilla.com>"
-criteria = "safe-to-deploy"
-delta = "0.6.3 -> 0.7.0"
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
-[[audits.mozilla.audits.bit-vec]]
-who = "Jim Blandy <jimb@red-bean.com>"
-criteria = "safe-to-deploy"
-delta = "0.7.0 -> 0.8.0"
-aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
-
 [[audits.mozilla.audits.bindgen]]
 who = "Emilio Cobos Álvarez <emilio@crisal.io>"
 criteria = "safe-to-deploy"
@@ -4588,6 +4453,18 @@ who = "Alex Franchuk <afranchuk@mozilla.com>"
 criteria = "safe-to-deploy"
 delta = "0.1.1 -> 0.2.1"
 notes = "Very minor changes."
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.chrono]]
+who = "Lars Eggert <lars@eggert.org>"
+criteria = "safe-to-deploy"
+delta = "0.4.40 -> 0.4.41"
+aggregated-from = "https://raw.githubusercontent.com/mozilla/glean/main/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.chrono]]
+who = "Erich Gubler <erichdongubler@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.41 -> 0.4.42"
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.codespan-reporting]]
@@ -5148,12 +5025,6 @@ criteria = "safe-to-deploy"
 delta = "1.20.3 -> 1.21.1"
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
-[[audits.mozilla.audits.option-ext]]
-who = "Nika Layzell <nika@thelayzells.com>"
-criteria = "safe-to-deploy"
-version = "0.2.0"
-aggregated-from = "https://raw.githubusercontent.com/mozilla/cargo-vet/main/supply-chain/audits.toml"
-
 [[audits.mozilla.audits.percent-encoding]]
 who = "Valentin Gosu <valentin.gosu@gmail.com>"
 criteria = "safe-to-deploy"
@@ -5187,6 +5058,17 @@ aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-ch
 who = "Drew Willcoxon <adw@mozilla.com>"
 criteria = "safe-to-deploy"
 delta = "0.11.9 -> 0.12.1"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
+[[audits.mozilla.audits.prost-derive]]
+who = "Alex Franchuk <afranchuk@mozilla.com>"
+criteria = "safe-to-deploy"
+delta = "0.12.1 -> 0.13.5"
+notes = """
+This is mostly code cleanup and using higher-level functions from
+itertools/std. There were also a few tests added, which is an improvement over
+having none at all.
+"""
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
 [[audits.mozilla.audits.quinn-udp]]
@@ -5533,6 +5415,12 @@ version = "0.1.1"
 notes = "A microsoft crate allowing unsafe calls to windows apis."
 aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
 
+[[audits.mozilla.audits.windows-link]]
+who = "Erich Gubler <erichdongubler@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.1.1 -> 0.2.0"
+aggregated-from = "https://hg.mozilla.org/mozilla-central/raw-file/tip/supply-chain/audits.toml"
+
 [[audits.mozilla.audits.write16]]
 who = "Henri Sivonen <hsivonen@hsivonen.fi>"
 criteria = "safe-to-deploy"
@@ -5793,6 +5681,16 @@ criteria = "safe-to-deploy"
 delta = "0.1.3 -> 0.1.4"
 aggregated-from = "https://raw.githubusercontent.com/zcash/wallet/main/supply-chain/audits.toml"
 
+[[audits.zcash.audits.ipnet]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "2.10.1 -> 2.11.0"
+notes = """
+Introduces an implicit MSRV of 1.81 for no-std usage, but does not declare it as
+std usage continues to work with earlier Rust versions.
+"""
+aggregated-from = "https://raw.githubusercontent.com/zcash/zcash/master/qa/supply-chain/audits.toml"
+
 [[audits.zcash.audits.num-conv]]
 who = "Daira-Emma Hopwood <daira@jacaranda.org>"
 criteria = "safe-to-deploy"
@@ -5833,24 +5731,6 @@ criteria = "safe-to-deploy"
 delta = "0.12.3 -> 0.12.6"
 notes = "Changes to proc macro code are to fix lints after bumping MSRV."
 aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
-
-[[audits.zcash.audits.prost-derive]]
-who = "Jack Grigg <jack@electriccoin.co>"
-criteria = "safe-to-deploy"
-delta = "0.13.1 -> 0.13.4"
-aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
-
-[[audits.zcash.audits.prost-derive]]
-who = "Jack Grigg <jack@electriccoin.co>"
-criteria = "safe-to-deploy"
-delta = "0.13.4 -> 0.13.5"
-aggregated-from = "https://raw.githubusercontent.com/zcash/wallet/main/supply-chain/audits.toml"
-
-[[audits.zcash.audits.rust_decimal]]
-who = "Jack Grigg <jack@electriccoin.co>"
-criteria = "safe-to-deploy"
-delta = "1.37.0 -> 1.37.2"
-aggregated-from = "https://raw.githubusercontent.com/zcash/wallet/main/supply-chain/audits.toml"
 
 [[audits.zcash.audits.rustc_version]]
 who = "Jack Grigg <jack@electriccoin.co>"
@@ -6028,4 +5908,11 @@ aggregated-from = "https://raw.githubusercontent.com/zcash/wallet/main/supply-ch
 who = "Jack Grigg <jack@electriccoin.co>"
 criteria = "safe-to-deploy"
 delta = "0.1.1 -> 0.1.3"
+aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"
+
+[[audits.zcash.audits.windows-link]]
+who = "Jack Grigg <jack@electriccoin.co>"
+criteria = "safe-to-deploy"
+delta = "0.2.0 -> 0.2.1"
+notes = "No code changes at all."
 aggregated-from = "https://raw.githubusercontent.com/zcash/librustzcash/main/supply-chain/audits.toml"

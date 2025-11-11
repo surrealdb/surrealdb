@@ -296,7 +296,7 @@ impl MutableContext {
 	pub(crate) async fn get_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
 		let ns = opt.ns()?;
 		let tx = self.tx();
-		let ns_def = tx.get_or_add_ns(Some(self), ns, opt.strict).await?;
+		let ns_def = tx.get_or_add_ns(Some(self), ns).await?;
 		Ok(ns_def.namespace_id)
 	}
 
@@ -318,7 +318,7 @@ impl MutableContext {
 	/// created based on the `strict` option.
 	pub(crate) async fn get_ns_db_ids(&self, opt: &Options) -> Result<(NamespaceId, DatabaseId)> {
 		let (ns, db) = opt.ns_db()?;
-		let db_def = self.tx().ensure_ns_db(Some(self), ns, db, opt.strict).await?;
+		let db_def = self.tx().ensure_ns_db(Some(self), ns, db).await?;
 		Ok((db_def.namespace_id, db_def.database_id))
 	}
 
@@ -354,7 +354,7 @@ impl MutableContext {
 
 	pub(crate) async fn get_db(&self, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
 		let (ns, db) = opt.ns_db()?;
-		let db_def = self.tx().ensure_ns_db(Some(self), ns, db, opt.strict).await?;
+		let db_def = self.tx().ensure_ns_db(Some(self), ns, db).await?;
 		Ok(db_def)
 	}
 

@@ -519,7 +519,6 @@ impl<'a> TreeBuilder<'a> {
 				Index::FullText {
 					..
 				} if *col == 0 => Self::eval_matches_operator(op, n),
-				Index::MTree(_) if *col == 0 => self.eval_mtree_knn(e, op, n)?,
 				Index::Hnsw(_) if *col == 0 => self.eval_hnsw_knn(e, op, n)?,
 				_ => None,
 			};
@@ -551,27 +550,6 @@ impl<'a> TreeBuilder<'a> {
 			}
 		}
 		None
-	}
-
-	fn eval_mtree_knn(
-		&mut self,
-		exp: &Arc<Expr>,
-		op: &BinaryOperator,
-		n: &Node,
-	) -> Result<Option<IndexOperator>> {
-		let BinaryOperator::NearestNeighbor(nn) = op else {
-			return Ok(None);
-		};
-		let NearestNeighbor::KTree(k) = &**nn else {
-			return Ok(None);
-		};
-
-		if let Node::Computed(v) = n {
-			let vec: Arc<Vec<Number>> = Arc::new(v.as_ref().clone().coerce_to()?);
-			self.knn_expressions.insert(exp.clone());
-			return Ok(Some(IndexOperator::Knn(vec, *k)));
-		}
-		Ok(None)
 	}
 
 	fn eval_hnsw_knn(
