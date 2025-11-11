@@ -35,7 +35,7 @@ value = "[{ count: 2, id: view:[] }]"
 error = "Invalid query: Cannot delete table `test` on which a view is defined, table(s) `view` are defined as a view on this table."
 
 [[test.results]]
-error = "The table 'test' does not exist"
+value = "[{ a: 1, id: test:1 }, { a: 2, id: test:2 }]"
 
 [[test.results]]
 # TODO: Shouldn't this be 0?
