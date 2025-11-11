@@ -305,15 +305,12 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
 		.unwrap_or(Duration::from_secs(1));
 
-	let strict = config.env.as_ref().map(|x| x.strict).unwrap_or(false);
-
 	let res = context
 		.ds
 		.with(
 			move |ds| {
 				ds.with_capabilities(capabilities)
 					.with_query_timeout(Some(timeout_duration))
-					.with_strict_mode(strict)
 			},
 			async |ds| run_test_with_dbs(context.id, &context.testset, ds).await,
 		)

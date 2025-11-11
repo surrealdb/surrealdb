@@ -125,6 +125,10 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.changefeed = Some(self.parse_changefeed()?);
 				}
+				t!("STRICT") => {
+					self.pop_peek();
+					res.strict = true;
+				}
 				_ => break,
 			}
 		}
@@ -933,11 +937,35 @@ impl Parser<'_> {
 				// FLEX, FLEXI and FLEXIBLE are all the same token type.
 				t!("FLEXIBLE") => {
 					self.pop_peek();
-					res.flex = true;
+					bail!("FLEXIBLE must be specified after TYPE", @self.last_span);
 				}
 				t!("TYPE") => {
 					self.pop_peek();
 					res.field_kind = Some(stk.run(|ctx| self.parse_inner_kind(ctx)).await?);
+
+					// Check if FLEXIBLE follows TYPE
+					if self.eat(t!("FLEXIBLE")) {
+						// Validate that the field_kind contains an object
+						fn kind_contains_object(kind: &Kind) -> bool {
+							match kind {
+								Kind::Object => true,
+								Kind::Either(kinds) => kinds.iter().any(kind_contains_object),
+								Kind::Array(inner, _) | Kind::Set(inner, _) => {
+									kind_contains_object(inner)
+								}
+								_ => false,
+							}
+						}
+
+						let is_valid_for_flexible =
+							res.field_kind.as_ref().is_some_and(kind_contains_object);
+
+						if !is_valid_for_flexible {
+							bail!("FLEXIBLE can only be used with types containing object", @self.last_span);
+						}
+
+						res.flexible = true;
+					}
 				}
 				t!("READONLY") => {
 					self.pop_peek();

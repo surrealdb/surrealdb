@@ -59,7 +59,7 @@ impl DefineParamStatement {
 
 		let db = {
 			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_db(Some(ctx), ns, db, opt.strict).await?
+			txn.get_or_add_db(Some(ctx), ns, db).await?
 		};
 
 		// Process the statement

@@ -198,6 +198,7 @@ fn parse_define_database() {
 			kind: DefineKind::Default,
 			id: None,
 			name: Expr::Idiom(Idiom::field("a".to_string())),
+			strict: false,
 			comment: Some(Expr::Literal(Literal::String("test".to_string()))),
 			changefeed: Some(ChangeFeed {
 				expiry: PublicDuration::from_secs(60 * 10),
@@ -216,6 +217,7 @@ fn parse_define_database() {
 			kind: DefineKind::Default,
 			id: None,
 			name: Expr::Idiom(Idiom::field("a".to_string())),
+			strict: false,
 			comment: None,
 			changefeed: None,
 		})))
@@ -1714,7 +1716,7 @@ fn parse_define_event() {
 fn parse_define_field() {
 	// General
 	{
-		let res = syn::parse_with(r#"DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
+		let res = syn::parse_with(r#"DEFINE FIELD foo.*[*]... ON TABLE bar TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true"#.as_bytes(),async |parser,stk| parser. parse_expr_inherit(stk).await).unwrap();
 
 		assert_eq!(
 			res,
@@ -1727,12 +1729,12 @@ fn parse_define_field() {
 					Part::Flatten,
 				])),
 				what: Expr::Idiom(Idiom::field("bar".to_string())),
-				flex: true,
 				field_kind: Some(Kind::Either(vec![
 					Kind::None,
 					Kind::Number,
 					Kind::Array(Box::new(Kind::Record(vec!["foo".to_string()])), Some(10))
 				])),
+				flexible: false,
 				readonly: false,
 				value: Some(Expr::Literal(Literal::Null)),
 				assert: Some(Expr::Literal(Literal::Bool(true))),

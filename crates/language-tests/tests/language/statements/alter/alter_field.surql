@@ -12,7 +12,7 @@ value = "{ events: {  }, fields: { a: 'DEFINE FIELD a ON a PERMISSIONS FULL' }, 
 value = "NONE"
 
 [[test.results]]
-value = '''{ events: {  }, fields: { a: "DEFINE FIELD a ON a FLEXIBLE TYPE record<test> DEFAULT ALWAYS test:123 VALUE test:123 ASSERT true REFERENCE ON DELETE IGNORE COMMENT 'test' PERMISSIONS FOR select, create, update NONE" }, indexes: {  }, lives: {  }, tables: {  } }'''
+value = '''{ events: {  }, fields: { a: "DEFINE FIELD a ON a TYPE record<test> DEFAULT ALWAYS test:123 READONLY VALUE test:123 ASSERT true REFERENCE ON DELETE IGNORE COMMENT 'test' PERMISSIONS FOR select, create, update NONE" }, indexes: {  }, lives: {  }, tables: {  } }'''
 
 [[test.results]]
 value = "NONE"
@@ -26,7 +26,6 @@ DEFINE FIELD a ON a;
 INFO FOR TB a;
 
 ALTER FIELD a ON a
-	FLEXIBLE
 	TYPE record<test>
 	READONLY
 	VALUE test:123
@@ -38,7 +37,6 @@ ALTER FIELD a ON a
 INFO FOR TB a;
 
 ALTER FIELD a ON a
-    DROP FLEXIBLE
     DROP TYPE
     DROP READONLY
     DROP VALUE

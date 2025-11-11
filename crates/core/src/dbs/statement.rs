@@ -49,6 +49,35 @@ pub(crate) enum Statement<'a> {
 	Access(&'a AccessStatement),
 }
 
+impl<'a> Statement<'a> {
+	/// Returns whether the statement requires the table to exist in the database
+	/// before executing or if it may be able to create it if it doesn't exist.
+	///
+	/// SELECT statements, for example, require the table to exist in the database
+	/// before executing, regardless of whether the db is strict or not.
+	///
+	/// UPSERT statements, on the other hand, may be allowed to create the table if it doesn't exist
+	/// depending on the db's strictness.
+	pub(crate) fn requires_table_existence(&self) -> bool {
+		match self {
+			Statement::Live(_)
+			| Statement::Show(_)
+			| Statement::Select {
+				..
+			}
+			| Statement::Update {
+				..
+			}
+			| Statement::Access(_)
+			| Statement::Delete(_) => true,
+			Statement::Create(_)
+			| Statement::Upsert(_)
+			| Statement::Relate(_)
+			| Statement::Insert(_) => false,
+		}
+	}
+}
+
 impl<'a> From<&'a LiveStatement> for Statement<'a> {
 	fn from(v: &'a LiveStatement) -> Self {
 		Statement::Live(v)

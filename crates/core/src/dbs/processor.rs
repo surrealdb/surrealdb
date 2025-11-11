@@ -667,16 +667,17 @@ pub(super) trait Collector {
 		v: &str,
 		sc: ScanDirection,
 	) -> Result<()> {
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		let db = ctx.get_db(opt).await?;
 
 		// Get the transaction
 		let txn = ctx.tx();
-		// Check that the table exists
-		txn.check_tb(ns, db, v, opt.strict).await?;
+		if db.strict {
+			txn.expect_tb(db.namespace_id, db.database_id, v).await?;
+		}
 
 		// Prepare the start and end keys
-		let beg = record::prefix(ns, db, v)?;
-		let end = record::suffix(ns, db, v)?;
+		let beg = record::prefix(db.namespace_id, db.database_id, v)?;
+		let end = record::suffix(db.namespace_id, db.database_id, v)?;
 		// Optionally skip keys
 		let rng = if let Some(r) = self.start_skip(ctx, &txn, beg..end, sc).await? {
 			r
@@ -709,16 +710,18 @@ pub(super) trait Collector {
 		v: &str,
 		sc: ScanDirection,
 	) -> Result<()> {
-		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		let db = ctx.get_db(opt).await?;
 
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_tb(ns, db, v, opt.strict).await?;
+		if db.strict {
+			txn.expect_tb(db.namespace_id, db.database_id, v).await?;
+		}
 
 		// Prepare the start and end keys
-		let beg = record::prefix(ns, db, v)?;
-		let end = record::suffix(ns, db, v)?;
+		let beg = record::prefix(db.namespace_id, db.database_id, v)?;
+		let end = record::suffix(db.namespace_id, db.database_id, v)?;
 		// Optionally skip keys
 		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
 			// Returns the next range of keys
@@ -747,15 +750,17 @@ pub(super) trait Collector {
 	}
 
 	async fn collect_table_count(&mut self, ctx: &Context, opt: &Options, v: &str) -> Result<()> {
-		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		let db = ctx.get_db(opt).await?;
 
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_tb(ns, db, v, opt.strict).await?;
+		if db.strict {
+			txn.expect_tb(db.namespace_id, db.database_id, v).await?;
+		}
 
-		let beg = record::prefix(ns, db, v)?;
-		let end = record::suffix(ns, db, v)?;
+		let beg = record::prefix(db.namespace_id, db.database_id, v)?;
+		let end = record::suffix(db.namespace_id, db.database_id, v)?;
 		// Create a new iterable range
 		let count = txn.count(beg..end).await?;
 		// Collect the count
