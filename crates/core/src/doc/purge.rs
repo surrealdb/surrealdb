@@ -61,45 +61,52 @@ impl Document {
 		// Get the namespace / database
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		if self.initial.doc.is_edge() {
-			let (Value::RecordId(ref l), Value::RecordId(ref r)) = 
-				(self.initial.doc.as_ref().pick(&*IN), self.initial.doc.as_ref().pick(&*OUT));
-				// Lock the transaction
-				let mut txn = txn.lock().await;
-				// Get temporary edge references
-				let (ref o, ref i) = (Dir::Out, Dir::In);
-				// Purge the left pointer edge
-				let key = crate::key::graph::new(ns, db, &l.table, &l.key, o, rid);
-				txn.del(&key).await?;
-				// Purge the left inner edge
-				let key = crate::key::graph::new(ns, db, &rid.table, &rid.key, i, l);
-				txn.del(&key).await?;
-				// Purge the right inner edge
-				let key = crate::key::graph::new(ns, db, &rid.table, &rid.key, o, r);
-				txn.del(&key).await?;
-				// Purge the right pointer edge
-				let key = crate::key::graph::new(ns, db, &r.table, &r.key, i, rid);
-				txn.del(&key).await?;
-				// Release the transaction
-				drop(txn);
-			}
-			_ => {
-				let what = vec![
-					Part::Start(Expr::Literal(Literal::RecordId(rid.clone().into_literal()))),
-					Part::Lookup(Lookup {
-						kind: LookupKind::Graph(Dir::Both),
-						..Default::default()
-					}),
-				];
-
-				// Setup the delete statement
-				let stm = DeleteStatement {
-					what: vec![Expr::Idiom(Idiom(what))],
-					..DeleteStatement::default()
-				};
-				// Execute the delete statement
-				stm.compute(stk, ctx, opt, None).await?;
-			}
+			// Get the in record id
+			let l = self.initial.doc.as_ref().pick(&*IN);
+			let Value::RecordId(ref l) = l else {
+				fail!("Expected a record id for the `in` field, found {l}");
+			};
+			// Get the out record id
+			let r = self.initial.doc.as_ref().pick(&*OUT);
+			let Value::RecordId(ref r) = r else {
+				fail!("Expected a record id for the `out` field, found {r}");
+			};
+			// Lock the transaction
+			let mut txn = txn.lock().await;
+			// Get temporary edge references
+			let (ref o, ref i) = (Dir::Out, Dir::In);
+			// Purge the left pointer edge
+			let key = crate::key::graph::new(ns, db, &l.table, &l.key, o, rid);
+			txn.del(&key).await?;
+			// Purge the left inner edge
+			let key = crate::key::graph::new(ns, db, &rid.table, &rid.key, i, l);
+			txn.del(&key).await?;
+			// Purge the right inner edge
+			let key = crate::key::graph::new(ns, db, &rid.table, &rid.key, o, r);
+			txn.del(&key).await?;
+			// Purge the right pointer edge
+			let key = crate::key::graph::new(ns, db, &r.table, &r.key, i, rid);
+			txn.del(&key).await?;
+			// Release the transaction
+			drop(txn);
 		}
+
+		// Cleanup edges via which the current record relates to other records
+		let what = vec![
+			Part::Start(Expr::Literal(Literal::RecordId(rid.clone().into_literal()))),
+			Part::Lookup(Lookup {
+				kind: LookupKind::Graph(Dir::Both),
+				..Default::default()
+			}),
+		];
+
+		// Setup the delete statement
+		let stm = DeleteStatement {
+			what: vec![Expr::Idiom(Idiom(what))],
+			..DeleteStatement::default()
+		};
+		// Execute the delete statement
+		stm.compute(stk, ctx, opt, None).await?;
 		// Carry on
 		Ok(())
 	}

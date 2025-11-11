@@ -1105,12 +1105,12 @@ pub(crate) enum Error {
 	/// The `REFERENCE` keyword can only be used in combination with a type
 	/// referencing a record
 	#[error(
-		"Cannot use the `REFERENCE` keyword with `TYPE {0}`. Specify a `record` type, or a type containing only records, instead."
+		"Cannot use the `REFERENCE` keyword with `TYPE {0}`. Specify only a `record` type, or a type containing only records, instead."
 	)]
 	ReferenceTypeConflict(String),
 
 	#[error(
-		"Cannot use the `REFERENCE` keyword on nested field `{0}`. Specify a referincing field at the root level instead."
+		"Cannot use the `REFERENCE` keyword on nested field `{0}`. Specify a referencing field at the root level instead."
 	)]
 	ReferenceNestedField(String),
 

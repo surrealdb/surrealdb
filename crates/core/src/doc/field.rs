@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
@@ -668,30 +669,28 @@ impl FieldEditContext<'_> {
 			// Create a vector to store the actions
 			let mut actions = vec![];
 
-			fn collect_rids(v: &Value) -> Vec<&RecordId> {
+			fn collect_rids(v: &Value) -> HashSet<&RecordId> {
 				match v {
 					Value::Array(arr) => {
-						arr.iter().filter_map(|v| v.as_record()).collect::<Vec<_>>()
+						arr.iter().filter_map(|v| v.as_record()).collect::<HashSet<_>>()
 					}
-					Value::Set(set) => set.iter().filter_map(|v| v.as_record()).collect::<Vec<_>>(),
-					Value::RecordId(rid) => vec![rid],
-					_ => vec![],
+					Value::Set(set) => {
+						set.iter().filter_map(|v| v.as_record()).collect::<HashSet<_>>()
+					}
+					Value::RecordId(rid) => HashSet::from([rid]),
+					_ => HashSet::new(),
 				}
 			}
 
 			let old = collect_rids(old);
 			let new = collect_rids(val);
 
-			for rid in old.iter() {
-				if !new.contains(rid) {
-					actions.push(RefAction::Delete(rid));
-				}
+			for rid in old.difference(&new) {
+				actions.push(RefAction::Delete(rid));
 			}
 
-			for rid in new.iter() {
-				if !old.contains(rid) {
-					actions.push(RefAction::Set(rid));
-				}
+			for rid in new.difference(&old) {
+				actions.push(RefAction::Set(rid));
 			}
 
 			// Process the actions
