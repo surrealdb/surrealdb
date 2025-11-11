@@ -60,12 +60,9 @@ impl Document {
 		let txn = ctx.tx();
 		// Get the namespace / database
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-		match (
-			self.initial.doc.is_edge(),
-			self.initial.doc.as_ref().pick(&*IN),
-			self.initial.doc.as_ref().pick(&*OUT),
-		) {
-			(true, Value::RecordId(ref l), Value::RecordId(ref r)) => {
+		if self.initial.doc.is_edge() {
+			let (Value::RecordId(ref l), Value::RecordId(ref r)) = 
+				(self.initial.doc.as_ref().pick(&*IN), self.initial.doc.as_ref().pick(&*OUT));
 				// Lock the transaction
 				let mut txn = txn.lock().await;
 				// Get temporary edge references
