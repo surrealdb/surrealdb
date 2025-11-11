@@ -5,7 +5,7 @@ use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
 use crate::sql::filter::Filter;
-use crate::sql::index::{Distance, HnswParams, MTreeParams, VectorType};
+use crate::sql::index::{Distance, HnswParams, VectorType};
 use crate::sql::statements::define::config::api::{ApiConfig, Middleware};
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::config::{ConfigInner, graphql};
@@ -1012,6 +1012,8 @@ impl Parser<'_> {
 			concurrently: false,
 		};
 
+		let mut field_span = None;
+
 		loop {
 			match self.peek_kind() {
 				// COLUMNS and FIELDS are the same tokenkind
@@ -1021,6 +1023,7 @@ impl Parser<'_> {
 					while self.eat(t!(",")) {
 						res.cols.push(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 					}
+					field_span = Some(self.last_span);
 				}
 				t!("UNIQUE") => {
 					self.pop_peek();
@@ -1036,7 +1039,6 @@ impl Parser<'_> {
 					let mut analyzer: Option<String> = None;
 					let mut scoring = None;
 					let mut hl = false;
-
 					loop {
 						match self.peek_kind() {
 							t!("ANALYZER") => {
@@ -1071,43 +1073,6 @@ impl Parser<'_> {
 						sc: scoring.unwrap_or_else(Default::default),
 						hl,
 					});
-				}
-				t!("MTREE") => {
-					self.pop_peek();
-					expected!(self, t!("DIMENSION"));
-					let dimension = self.next_token_value()?;
-					let mut distance = Distance::Euclidean;
-					let mut vector_type = VectorType::F64;
-					let mut capacity = 40;
-					let mut mtree_cache = 100;
-					loop {
-						match self.peek_kind() {
-							t!("DISTANCE") => {
-								self.pop_peek();
-								distance = self.parse_distance()?
-							}
-							t!("TYPE") => {
-								self.pop_peek();
-								vector_type = self.parse_vector_type()?
-							}
-							t!("CAPACITY") => {
-								self.pop_peek();
-								capacity = self.next_token_value()?
-							}
-							t!("MTREE_CACHE") => {
-								self.pop_peek();
-								mtree_cache = self.next_token_value()?
-							}
-							_ => break,
-						}
-					}
-					res.index = Index::MTree(MTreeParams {
-						dimension,
-						distance,
-						vector_type,
-						capacity,
-						mtree_cache,
-					})
 				}
 				t!("HNSW") => {
 					self.pop_peek();
@@ -1187,8 +1152,27 @@ impl Parser<'_> {
 				_ => break,
 			}
 		}
-		if matches!(res.index, Index::Count(_)) && !res.cols.is_empty() {
-			bail!("Cannot create a count index with fields");
+		match (field_span, &res.index) {
+			(Some(field_span), Index::Count(_)) => {
+				if !res.cols.is_empty() {
+					bail!("Cannot create a count index with fields", @field_span);
+				}
+			}
+			(field_span, Index::FullText(_) | Index::Hnsw(_)) => {
+				if res.cols.len() != 1 {
+					if let Some(field_span) = field_span {
+						bail!("Expected one column, found {}", res.cols.len(), @field_span);
+					} else {
+						bail!("Expected one column, found none", @self.recent_span());
+					}
+				}
+			}
+			(None, Index::Uniq | Index::Idx) => {
+				if res.cols.is_empty() {
+					bail!("Expected at least one column - Use FIELDS to define columns", @self.recent_span());
+				}
+			}
+			(_, _) => {}
 		}
 		Ok(res)
 	}

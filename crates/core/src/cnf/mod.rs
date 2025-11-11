@@ -175,3 +175,7 @@ pub static ACCESSIBLE_OUTPUT: LazyLock<bool> =
 /// Specify the USER-AGENT string used by HTTP requests
 pub static SURREALDB_USER_AGENT: LazyLock<String> =
 	LazyLock::new(|| std::env::var("SURREAL_USER_AGENT").unwrap_or("SurrealDB".to_string()));
+
+/// The maximum size of the HNSW vector cache (default: 256 MiB)
+pub static HNSW_CACHE_SIZE: LazyLock<u64> =
+	lazy_env_parse!("SURREAL_HNSW_CACHE_SIZE", u64, 256 * 1024 * 1024);

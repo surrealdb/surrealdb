@@ -1,12 +1,14 @@
 [package]
 name = "surrealism-macros"
-version = "0.1.0"
-edition = "2021"
-authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
-description = "Macros for Surrealism."
-license-file = "LICENSE"
-repository = "https://github.com/surrealdb/surrealdb"
-homepage = "https://github.com/surrealdb/surrealdb"
+version = "0.1.1"
+description = "Macros for Surrealism"
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license-file.workspace = true
 
 [dependencies]
 quote = "1.0"

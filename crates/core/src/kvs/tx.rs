@@ -24,7 +24,6 @@ use crate::ctx::MutableContext;
 use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::idx::planner::ScanDirection;
-use crate::idx::trees::store::cache::IndexTreeCaches;
 use crate::key::database::sq::Sq;
 use crate::kvs::cache::tx::TransactionCache;
 use crate::kvs::key::KVKey;
@@ -40,8 +39,6 @@ pub struct Transaction {
 	tx: Mutex<Transactor>,
 	/// The query cache for this store
 	cache: TransactionCache,
-	/// Cache the index updates
-	index_caches: IndexTreeCaches,
 	/// Does this support reverse scan?
 	has_reverse_scan: bool,
 	/// The sequences for this store
@@ -56,7 +53,6 @@ impl Transaction {
 			has_reverse_scan: tx.inner.supports_reverse_scan(),
 			tx: Mutex::new(tx),
 			cache: TransactionCache::new(),
-			index_caches: IndexTreeCaches::default(),
 			sequences,
 		}
 	}
@@ -480,10 +476,6 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
 	pub fn clear_cache(&self) {
 		self.cache.clear()
-	}
-
-	pub(crate) fn index_caches(&self) -> &IndexTreeCaches {
-		&self.index_caches
 	}
 }
 

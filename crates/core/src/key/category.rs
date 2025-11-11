@@ -135,16 +135,10 @@ pub enum Category {
 	IndexDocKeys,
 	/// crate::key::index::bk                /*{ns}*{db}*{tb}+{ix}!bk{id}
 	IndexTermList,
-	/// crate::key::index::bl                /*{ns}*{db}*{tb}+{ix}!bl{id}
-	IndexBTreeNodeDocLengths,
 	/// crate::key::index::bo                /*{ns}*{db}*{tb}+{ix}!bo{id}
 	IndexOffset,
-	/// crate::key::index::bp                /*{ns}*{db}*{tb}+{ix}!bp{id}
-	IndexBTreeNodePostings,
 	/// crate::key::index::bs                /*{ns}*{db}*{tb}+{ix}!bs
 	IndexFullTextState,
-	/// crate::key::index::bt                /*{ns}*{db}*{tb}+{ix}!bt{id}
-	IndexBTreeNodeTerms,
 	/// crate::key::index::bu                /*{ns}*{db}*{tb}+{ix}!bu{id}
 	IndexTerms,
 	/// crate::key::index::dc                /*{ns}*{db}*{tb}+{ix}!dc{id}
@@ -260,11 +254,8 @@ impl Display for Category {
 			Self::IndexDocLength => "IndexDocLength",
 			Self::IndexTermDocument => "IndexTermDocument",
 			Self::IndexTermList => "IndexTermList",
-			Self::IndexBTreeNodeDocLengths => "IndexBTreeNodeDocLengths",
 			Self::IndexOffset => "IndexOffset",
-			Self::IndexBTreeNodePostings => "IndexBTreeNodePostings",
 			Self::IndexFullTextState => "IndexFullTextState",
-			Self::IndexBTreeNodeTerms => "IndexBTreeNodeTerms",
 			Self::IndexTerms => "IndexTerms",
 			Self::IndexHnswElements => "IndexHnswElements",
 			Self::IndexHnswDocIds => "IndexHnswDocIds",

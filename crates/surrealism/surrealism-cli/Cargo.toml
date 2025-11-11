@@ -1,12 +1,14 @@
 [package]
 name = "surrealism-cli"
-version = "0.1.0"
-edition = "2021"
-authors = ["Tobie Morgan Hitchcock <tobie@surrealdb.com>"]
-description = "CLI for Surrealism."
-license-file = "LICENSE"
-repository = "https://github.com/surrealdb/surrealdb"
-homepage = "https://github.com/surrealdb/surrealdb"
+version = "0.1.1"
+description = "CLI for Surrealism"
+edition.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license-file.workspace = true
 
 [[bin]]
 name = "surrealism"

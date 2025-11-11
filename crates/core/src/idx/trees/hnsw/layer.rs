@@ -411,8 +411,9 @@ impl<S> HnswLayer<S>
 where
 	S: DynamicSet,
 {
-	pub(in crate::idx::trees::hnsw) fn check_props(&self, elements: &HnswElements) {
-		assert!(self.graph.len() <= elements.len(), "{} - {}", self.graph.len(), elements.len());
+	pub(in crate::idx::trees::hnsw) async fn check_props(&self, elements: &HnswElements) {
+		let elements_len = elements.len().await;
+		assert!(self.graph.len() <= elements_len, "{} - {}", self.graph.len(), elements_len);
 		for (e_id, f_ids) in self.graph.nodes() {
 			assert!(
 				f_ids.len() <= self.m_max,
@@ -422,7 +423,7 @@ where
 			);
 			assert!(!f_ids.contains(e_id), "!f_ids.contains(e_id) - el: {e_id} - f_ids: {f_ids:?}");
 			assert!(
-				elements.contains(e_id),
+				elements.contains(*e_id).await,
 				"h.elements.contains_key(e_id) - el: {e_id} - f_ids: {f_ids:?}"
 			);
 		}

@@ -812,7 +812,8 @@ impl Datastore {
 	}
 
 	// Used for testing live queries
-	pub fn get_cache(&self) -> Arc<DatastoreCache> {
+	#[cfg(test)]
+	pub(crate) fn get_cache(&self) -> Arc<DatastoreCache> {
 		self.cache.clone()
 	}
 
