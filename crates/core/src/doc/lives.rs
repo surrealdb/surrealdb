@@ -368,11 +368,7 @@ impl Document {
 		live_subscription: &SubscriptionDefinition,
 		doc: &CursorDoc,
 	) -> Result<Value, IgnoreError> {
-		live_subscription
-			.fields
-			.compute(stk, ctx, opt, Some(doc), false)
-			.await
-			.map_err(IgnoreError::from)
+		live_subscription.fields.compute(stk, ctx, opt, Some(doc)).await.map_err(IgnoreError::from)
 	}
 }
 
