@@ -20,9 +20,6 @@ value = "[{ id: comic_book:one, owners: [person:mat, person:nynaeve], title: 'Lo
 [[test.results]]
 value = "[{ id: comic_book:one, owners: [{ id: person:mat, name: 'Mat' }, { id: person:nynaeve, name: 'Nynaeve' }], title: 'Loki, God of Stories' }]"
 
-[env.capabilities]
-allow-experimental = ["record_references"]
-
 */
 
 DEFINE FIELD comics ON person TYPE option<array<record<comic_book>>> REFERENCE;

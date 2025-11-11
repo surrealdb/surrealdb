@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
@@ -5,14 +6,13 @@ use reblessive::tree::Stk;
 
 use crate::catalog::{self, FieldDefinition};
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err::Error;
+use crate::expr::FlowResultExt as _;
 use crate::expr::data::Data;
 use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
 use crate::expr::kind::Kind;
-use crate::expr::{FlowResultExt as _, Part};
 use crate::iam::Action;
 use crate::val::value::CoerceError;
 use crate::val::value::every::ArrayBehaviour;
@@ -377,8 +377,8 @@ struct FieldEditContext<'a> {
 }
 
 enum RefAction<'a> {
-	Set(&'a RecordId, String),
-	Delete(&'a RecordId, String),
+	Set(&'a RecordId),
+	Delete(&'a RecordId),
 }
 
 impl FieldEditContext<'_> {
@@ -657,91 +657,47 @@ impl FieldEditContext<'_> {
 	}
 	/// Process any REFERENCE clause for the field definition
 	async fn process_reference_clause(&mut self, val: &Value) -> Result<()> {
-		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-			return Ok(());
-		}
-
 		// Is there a `REFERENCE` clause?
 		if self.def.reference.is_some() {
-			let doc = Some(&self.doc.current);
-			let old = self.old.as_ref();
-
-			// The current value might be contained inside an array of references
-			// Try to find other references with a similar path to the current one
-			let mut check_others = async || -> Result<Vec<Value>> {
-				let others = self
-					.doc
-					.current
-					.doc
-					.as_ref()
-					.get(self.stk, self.ctx, self.opt, doc, &self.def.name)
-					.await
-					.catch_return()?;
-
-				if let Value::Array(arr) = others {
-					Ok(arr.0)
-				} else {
-					Ok(vec![])
-				}
-			};
-
 			// Check if the value has actually changed
+			let old = self.old.as_ref();
 			if old == val {
 				// Nothing changed
 				return Ok(());
 			}
 
+			// Create a vector to store the actions
 			let mut actions = vec![];
 
-			// A value might be contained inside an array of references
-			// If so, we skip it. Otherwise, we delete the reference.
-			if let Value::RecordId(rid) = old {
-				let others = check_others().await?;
-				if !others.iter().any(|v| v == old) {
-					actions.push(RefAction::Delete(rid, self.def.name.to_string()));
+			fn collect_rids(v: &Value) -> HashSet<&RecordId> {
+				match v {
+					Value::Array(arr) => {
+						arr.iter().filter_map(|v| v.as_record()).collect::<HashSet<_>>()
+					}
+					Value::Set(set) => {
+						set.iter().filter_map(|v| v.as_record()).collect::<HashSet<_>>()
+					}
+					Value::RecordId(rid) => HashSet::from([rid]),
+					_ => HashSet::new(),
 				}
 			}
 
-			// New references, wether on their own or inside an array
-			// are always processed through here. Always add the new reference
-			// if the key already exists it will just overwrite which is fine.
-			if let Value::RecordId(rid) = val {
-				actions.push(RefAction::Set(rid, self.def.name.to_string()));
+			let old = collect_rids(old);
+			let new = collect_rids(val);
+
+			for rid in old.difference(&new) {
+				actions.push(RefAction::Delete(rid));
 			}
 
-			// Values removed from an array are not always processed via the above
-			// Try to delete the references here where needed
-			if let Value::Array(oldarr) = old {
-				// For array based references, we always store the foreign field as the nested field
-				let ff = self.def.name.clone().push(Part::All).to_string();
-				// If the new value is still an array, we only filter out the record ids that
-				// are not present in the new array
-				if let Value::Array(newarr) = val {
-					for old_rid in oldarr.iter() {
-						if newarr.contains(old_rid) {
-							continue;
-						}
-
-						if let Value::RecordId(rid) = old_rid {
-							actions.push(RefAction::Delete(rid, ff.clone()));
-						}
-					}
-
-					// If the new value is not an array, then all record ids in the old array are
-					// removed
-				} else {
-					for old_rid in oldarr.iter() {
-						if let Value::RecordId(rid) = old_rid {
-							actions.push(RefAction::Delete(rid, ff.clone()));
-						}
-					}
-				}
+			for rid in new.difference(&old) {
+				actions.push(RefAction::Set(rid));
 			}
 
 			// Process the actions
+			let ff = self.def.name.to_string();
 			for action in actions.into_iter() {
 				match action {
-					RefAction::Set(rid, ff) => {
+					RefAction::Set(rid) => {
 						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
 						let key = crate::key::r#ref::new(
 							ns,
@@ -749,13 +705,13 @@ impl FieldEditContext<'_> {
 							&rid.table,
 							&rid.key,
 							&self.rid.table,
-							&self.rid.key,
 							&ff,
+							&self.rid.key,
 						);
 
 						self.ctx.tx().set(&key, &(), None).await?;
 					}
-					RefAction::Delete(rid, ff) => {
+					RefAction::Delete(rid) => {
 						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
 						let key = crate::key::r#ref::new(
 							ns,
@@ -763,8 +719,8 @@ impl FieldEditContext<'_> {
 							&rid.table,
 							&rid.key,
 							&self.rid.table,
-							&self.rid.key,
 							&ff,
+							&self.rid.key,
 						);
 
 						self.ctx.tx().del(&key).await?;

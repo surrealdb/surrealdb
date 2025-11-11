@@ -37,9 +37,6 @@ value = "true"
 [[test.results]]
 value = "true"
 
-[env.capabilities]
-allow-experimental = ["record_references"]
-
 */
 
 DEFINE FIELD likes ON person TYPE array<record<cat|wolf>> REFERENCE;

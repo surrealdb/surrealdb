@@ -970,13 +970,6 @@ impl Parser<'_> {
 					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("REFERENCE") => {
-					if !self.settings.references_enabled {
-						bail!(
-							"Experimental capability `record_references` is not enabled",
-							@self.last_span() => "Use of `REFERENCE` keyword is still experimental"
-						)
-					}
-
 					self.pop_peek();
 					res.reference = Some(self.parse_reference(stk).await?);
 				}

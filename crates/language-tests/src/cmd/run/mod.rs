@@ -401,9 +401,6 @@ async fn run_test_with_dbs(
 
 	let source = &set[id].source;
 	let settings = syn::parser::ParserSettings {
-		references_enabled: dbs
-			.get_capabilities()
-			.allows_experimental(&ExperimentalTarget::RecordReferences),
 		define_api_enabled: dbs
 			.get_capabilities()
 			.allows_experimental(&ExperimentalTarget::DefineApi),

@@ -964,7 +964,6 @@ impl DeserializeRevisioned for Expr {
 		let expr = crate::syn::parse_with_settings(
 			query.as_bytes(),
 			crate::syn::parser::ParserSettings {
-				references_enabled: true,
 				define_api_enabled: true,
 				files_enabled: true,
 				surrealism_enabled: true,
