@@ -18,7 +18,6 @@ value = "[{ after: { mean: 2f }, before: { mean: 1.5f }, even: 'UPDATE', id: tes
 {
 	DEFINE TABLE target;
 	DEFINE TABLE view AS SELECT math::mean(field) as mean FROM target GROUP ALL;
-	DEFINE TABLE test;
 
 	CREATE target:1 SET field = 1;
 	CREATE target:2 SET field = 2;

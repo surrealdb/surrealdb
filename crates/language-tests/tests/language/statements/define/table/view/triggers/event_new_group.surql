@@ -18,7 +18,6 @@ value = "[{ after: { mean: 3f }, even: 'CREATE', id: test:triggered_on_view }]"
 {
 	DEFINE TABLE target;
 	DEFINE TABLE view AS SELECT math::mean(field) as mean FROM target GROUP ALL;
-	DEFINE TABLE test;
 
 	DEFINE EVENT event ON view THEN {
 		CREATE test:triggered_on_view SET

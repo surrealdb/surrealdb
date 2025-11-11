@@ -11,6 +11,12 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 value = "[]"
 
 [[test.results]]
@@ -40,6 +46,8 @@ value = "[{ count: 2, id: view:[] }]"
 
 */
 
+DEFINE DATABASE strict_test STRICT;
+USE DB strict_test;
 
 DEFINE TABLE test SCHEMAFUL;
 DEFINE FIELD a ON test TYPE number;

@@ -261,10 +261,13 @@ impl Iterator {
 			let db = ctx.get_db(opt).await?;
 
 			// For read-only statements (like SELECT, UPDATE, DELETE), check if the table exists
-			// If it doesn't exist, throw an error rather than returning empty results
-			// UPSERT statements are allowed to create tables even in non-deferable mode
-			if !matches!(stm_ctx.stm, Statement::Upsert(_))
+			// If it doesn't exist in strict mode, throw an error rather than returning empty
+			// results In non-strict mode, the table will be created if needed, or queries return
+			// empty results UPSERT statements are allowed to create tables even in non-deferable
+			// mode
+			if stm_ctx.stm.requires_table_existence()
 				&& ctx.tx().get_tb(db.namespace_id, db.database_id, table).await?.is_none()
+				&& db.strict
 			{
 				bail!(Error::TbNotFound {
 					name: table.to_string(),

@@ -8,15 +8,18 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: person:test, settings: { nested: { object: { thing: 'test' } } } }]"
+error = "Found field 'settings.nested', but no such field exists for table 'person'"
 
 [[test.results]]
-value = "[{ id: person:test, settings: { nested: { object: { thing: 'test' } } } }]"
+value = "[{ id: person:test, settings: {} }]"
+
+[[test.results]]
+value = "[{ id: person:test, settings: {} }]"
 
 */
 
 DEFINE TABLE person SCHEMAFULL;
-DEFINE FIELD settings ON person TYPE object FLEXIBLE;
+DEFINE FIELD settings ON person TYPE object;
 UPSERT person:test CONTENT {
 	settings: {
 		nested: {
@@ -25,5 +28,8 @@ UPSERT person:test CONTENT {
 			}
 		}
 	}
+};
+UPSERT person:test CONTENT {
+	settings: {}
 };
 SELECT * FROM person;

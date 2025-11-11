@@ -2572,7 +2572,7 @@ DEFINE FIELD person
     TYPE record<person>;
 DEFINE FIELD stored_cards
     ON TABLE payment_details
-    TYPE array<object>;
+    TYPE array<object> FLEXIBLE;
 DEFINE FIELD time
     ON TABLE payment_details
     TYPE object;
@@ -2808,7 +2808,7 @@ DEFINE FIELD size
     TYPE string;
 DEFINE FIELD shipping_address
     ON TABLE order
-    TYPE object;
+    TYPE object FLEXIBLE;
 DEFINE FIELD payment_method
     ON TABLE order
     TYPE string;
@@ -2876,7 +2876,7 @@ DEFINE FIELD name
     TYPE string;
 DEFINE FIELD addresses
     ON TABLE seller
-    TYPE object;
+    TYPE object FLEXIBLE;
 DEFINE FIELD website
     ON TABLE seller
     TYPE object;

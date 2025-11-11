@@ -18,7 +18,6 @@ value = "[{ before: { mean: 3f }, even: 'DELETE', id: test:triggered_on_view }]"
 {
 	DEFINE TABLE target;
 	DEFINE TABLE view AS SELECT math::mean(field) as mean FROM target GROUP ALL;
-	DEFINE TABLE test;
 
 	CREATE target:1 SET field = 3;
 

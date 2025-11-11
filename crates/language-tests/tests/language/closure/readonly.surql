@@ -2,6 +2,12 @@
 [test]
 
 [[test.results]]
+value = "NONE"
+
+[[test.results]]
+value = "NONE"
+
+[[test.results]]
 error = "The table 'foo' does not exist"
 
 [[test.results]]
@@ -17,6 +23,9 @@ value = "NONE"
 value = "[]"
 
 */
+DEFINE DATABASE strict_test STRICT;
+USE DB strict_test;
+
 (||{
 	CREATE foo;
 })();
