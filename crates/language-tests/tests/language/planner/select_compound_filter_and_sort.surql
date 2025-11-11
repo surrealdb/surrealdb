@@ -8,7 +8,7 @@ value = "'OK'"
 value = "[{ f: true, id: t:4, s: 1 }, { f: true, id: t:2, s: 3 }]"
 
 [[test.results]]
-value = "[{ detail: { plan: { index: 'idx', operator: '=', value: true }, table: 't' }, operation: 'Iterate Index Ordered' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = "[{ detail: { plan: { index: 'idx', operator: '=', value: true }, table: 't' }, operation: 'Iterate Index Ordered' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }]"
 
 */
 {

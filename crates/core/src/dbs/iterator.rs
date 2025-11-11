@@ -81,8 +81,8 @@ pub(crate) enum Iterable {
 	/// table, which then fetches the corresponding records
 	/// which are matched within the index.
 	/// When the 3rd argument is true, we iterate over keys only.
-	/// 4rd argument is true when it is pre-ordered by the index itself
-	Index(String, IteratorRef, RecordStrategy, bool),
+	/// 4rd argument is some when it is pre-ordered by the index itself
+	Index(String, IteratorRef, RecordStrategy, ScanDirection),
 }
 
 #[derive(Debug)]
@@ -728,9 +728,9 @@ impl Iterator {
 		}
 		// With ORDER BY, only safe if the only iterator is backed by a sorted index
 		if self.entries.len() == 1 {
-			if let Some(Iterable::Index(_, irf, _, order)) = self.entries.first() {
+			if let Some(Iterable::Index(_, irf, _, _)) = self.entries.first() {
 				if let Some(qp) = ctx.get_query_planner() {
-					if *order || qp.is_order(irf) {
+					if qp.is_order(irf) {
 						return true;
 					}
 				}
