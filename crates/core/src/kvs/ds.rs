@@ -73,6 +73,8 @@ use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
 use crate::kvs::{LockType, TransactionType};
 use crate::rpc::DbResultError;
 use crate::sql::Ast;
+#[cfg(feature = "surrealism")]
+use crate::surrealism::cache::SurrealismCache;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::types::{PublicNotification, PublicValue, PublicVariables};
 use crate::val::{Value, convert_value_to_public_value};
@@ -124,6 +126,9 @@ pub struct Datastore {
 	buckets: Arc<BucketConnections>,
 	// The sequences
 	sequences: Sequences,
+	// The surrealism cache
+	#[cfg(feature = "surrealism")]
+	surrealism_cache: Arc<SurrealismCache>,
 }
 
 #[derive(Clone)]
@@ -293,7 +298,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 			path.to_string()
 		};
 		// Initiate the desired datastore
-		let (datastore_flavour, clock) = match (flavour, path) {
+		match (flavour, path) {
 			// Initiate an in-memory datastore
 			(flavour @ "memory", _) => {
 				#[cfg(feature = "kv-mem")]
@@ -302,7 +307,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started kvs store in {flavour}");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-mem"))]
 				bail!(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -324,7 +329,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 						.map(DatastoreFlavor::RocksDB)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
 				bail!(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -342,7 +347,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 						.map(DatastoreFlavor::RocksDB)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
 				bail!(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -359,7 +364,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 						.map(DatastoreFlavor::SurrealKV)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store with versions enabled");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
 				bail!(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -377,7 +382,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 						.map(DatastoreFlavor::SurrealKV)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store with versions not enabled");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
 				bail!(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -390,7 +395,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 						super::indxdb::Datastore::new(&path).await.map(DatastoreFlavor::IndxDB)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
 				bail!(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -402,7 +407,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 					let v = super::tikv::Datastore::new(&path).await.map(DatastoreFlavor::TiKV)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
 				bail!(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -416,7 +421,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 						.map(DatastoreFlavor::FoundationDB)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
 					info!(target: TARGET, "Started {flavour} kvs store");
-					(v, c)
+					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-fdb"))]
 				bail!(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
@@ -426,8 +431,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 				info!(target: TARGET, "Unable to load the specified datastore {flavour}{}", path);
 				bail!(Error::Ds("Unable to load the specified datastore".into()))
 			}
-		};
-		Ok((Box::<DatastoreFlavor>::new(datastore_flavour), clock))
+		}
 	}
 
 	fn path_valid(v: &str) -> Result<String> {
@@ -654,6 +658,8 @@ impl Datastore {
 			cache: Arc::new(DatastoreCache::new()),
 			buckets: Arc::new(DashMap::new()),
 			sequences: Sequences::new(tf, id),
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: Arc::new(SurrealismCache::new()),
 		})
 	}
 
@@ -679,6 +685,8 @@ impl Datastore {
 			buckets: Arc::new(DashMap::new()),
 			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: Arc::new(SurrealismCache::new()),
 		}
 	}
 
@@ -804,7 +812,8 @@ impl Datastore {
 	}
 
 	// Used for testing live queries
-	pub fn get_cache(&self) -> Arc<DatastoreCache> {
+	#[cfg(test)]
+	pub(crate) fn get_cache(&self) -> Arc<DatastoreCache> {
 		self.cache.clone()
 	}
 
@@ -1221,6 +1230,76 @@ impl Datastore {
 		self.process(ast, sess, vars).await
 	}
 
+	/// Execute a query with an existing transaction
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn execute_with_transaction(
+		&self,
+		txt: &str,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		tx: Arc<Transaction>,
+	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+		// Parse the SQL query text
+		let ast = syn::parse_with_capabilities(txt, &self.capabilities)
+			.map_err(|e| DbResultError::ParseError(e.to_string()))?;
+		// Process the AST with the transaction
+		self.process_with_transaction(ast, sess, vars, tx).await
+	}
+
+	/// Process an AST with an existing transaction
+	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
+	pub async fn process_with_transaction(
+		&self,
+		ast: Ast,
+		sess: &Session,
+		vars: Option<PublicVariables>,
+		tx: Arc<Transaction>,
+	) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+		// Check if the session has expired
+		if sess.expired() {
+			return Err(DbResultError::InvalidAuth("The session has expired".to_string()));
+		}
+
+		// Check if anonymous actors can execute queries when auth is enabled
+		if let Err(e) = self.check_anon(sess) {
+			return Err(DbResultError::InvalidAuth(format!("Anonymous access not allowed: {}", e)));
+		}
+
+		// Create a new query options
+		let opt = self.setup_options(sess);
+
+		// Create a default context
+		let mut ctx = self.setup_ctx().map_err(|e| match e.downcast_ref::<Error>() {
+			Some(Error::ExpiredSession) => {
+				DbResultError::InvalidAuth("The session has expired".to_string())
+			}
+			_ => DbResultError::InternalError(e.to_string()),
+		})?;
+
+		// Store the query variables
+		if let Some(vars) = vars {
+			ctx.attach_variables(vars.into()).map_err(|e| match e {
+				Error::InvalidParam {
+					..
+				} => DbResultError::InvalidParams("Invalid query variables".to_string()),
+				_ => DbResultError::InternalError(e.to_string()),
+			})?;
+		}
+
+		// Set the transaction in the context
+		ctx.set_transaction(tx);
+
+		// Process all statements with the transaction
+		Executor::execute_plan_with_transaction(ctx.freeze(), opt, ast.into()).await.map_err(|e| {
+			match e.downcast_ref::<Error>() {
+				Some(Error::ExpiredSession) => {
+					DbResultError::InvalidAuth("The session has expired".to_string())
+				}
+				_ => DbResultError::InternalError(e.to_string()),
+			}
+		})
+	}
+
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn execute_import<S>(
 		&self,
@@ -1261,13 +1340,13 @@ impl Datastore {
 			references_enabled: ctx
 				.get_capabilities()
 				.allows_experimental(&ExperimentalTarget::RecordReferences),
-			bearer_access_enabled: ctx
-				.get_capabilities()
-				.allows_experimental(&ExperimentalTarget::BearerAccess),
 			define_api_enabled: ctx
 				.get_capabilities()
 				.allows_experimental(&ExperimentalTarget::DefineApi),
 			files_enabled: ctx.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
+			surrealism_enabled: ctx
+				.get_capabilities()
+				.allows_experimental(&ExperimentalTarget::Surrealism),
 			..Default::default()
 		};
 		let mut statements_stream = StatementStream::new_with_settings(parser_settings);
@@ -1877,6 +1956,8 @@ impl Datastore {
 			#[cfg(storage)]
 			self.temporary_directory.clone(),
 			self.buckets.clone(),
+			#[cfg(feature = "surrealism")]
+			self.surrealism_cache.clone(),
 		)?;
 		// Setup the notification channel
 		if let Some(channel) = &self.notification_channel {

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 
+use crate::catalog::Record;
 use crate::ctx::{Canceller, Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
@@ -19,7 +20,6 @@ use crate::idx::planner::{
 	GrantedPermission, IterationStage, QueryPlanner, RecordStrategy, ScanDirection,
 	StatementContext,
 };
-use crate::val::record::Record;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, Value};
 
 const TARGET: &str = "surrealdb::core::dbs";
@@ -183,9 +183,7 @@ impl Iterator {
 		// Match the values
 		match val {
 			Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
-			Expr::Table(v) => {
-				self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.clone()).await?
-			}
+			Expr::Table(v) => self.prepare_table(ctx, opt, stk, planner, stm_ctx, v).await?,
 			Expr::Idiom(x) => {
 				// TODO: This needs to be structured better.
 				// match against what previously would be an edge.
@@ -243,24 +241,24 @@ impl Iterator {
 		stk: &mut Stk,
 		planner: &mut QueryPlanner,
 		stm_ctx: &StatementContext<'_>,
-		table: String,
+		table: &str,
 	) -> Result<()> {
 		// We add the iterable only if we have a permission
-		let p = planner.check_table_permission(stm_ctx, &table).await?;
+		let p = planner.check_table_permission(stm_ctx, table).await?;
 		if matches!(p, GrantedPermission::None) {
 			return Ok(());
 		}
 		// Add the record to the iterator
 		if stm_ctx.stm.is_deferable() {
 			ctx.get_db(opt).await?;
-			self.ingest(Iterable::Yield(table))
+			self.ingest(Iterable::Yield(table.to_string()));
 		} else {
 			if stm_ctx.stm.is_guaranteed() {
-				self.guaranteed = Some(Iterable::Yield(table.clone()));
+				self.guaranteed = Some(Iterable::Yield(table.to_string()));
 			}
 			let db = ctx.get_db(opt).await?;
 
-			planner.add_iterables(&db, stk, stm_ctx, table, p, self).await?;
+			planner.add_iterables(&db, stk, stm_ctx, table.to_string(), p, self).await?;
 		}
 		// All ingested ok
 		Ok(())
@@ -391,23 +389,13 @@ impl Iterator {
 	) -> Result<()> {
 		let v = stk.run(|stk| expr.compute(stk, ctx, opt, doc)).await.catch_return()?;
 		match v {
-			Value::Table(v) => {
-				self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.as_str().to_owned()).await?
-			}
+			Value::Table(v) => self.prepare_table(ctx, opt, stk, planner, stm_ctx, &v).await?,
 			Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
 			Value::Array(a) => {
 				for v in a.into_iter() {
 					match v {
 						Value::Table(v) => {
-							self.prepare_table(
-								ctx,
-								opt,
-								stk,
-								planner,
-								stm_ctx,
-								v.as_str().to_owned(),
-							)
-							.await?
+							self.prepare_table(ctx, opt, stk, planner, stm_ctx, &v).await?
 						}
 						Value::RecordId(v) => self.prepare_thing(planner, stm_ctx, v).await?,
 						v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
@@ -446,9 +434,7 @@ impl Iterator {
 		for v in v {
 			match v {
 				Expr::Mock(v) => self.prepare_mock(stm_ctx, v).await?,
-				Expr::Table(v) => {
-					self.prepare_table(ctx, opt, stk, planner, stm_ctx, v.clone()).await?
-				}
+				Expr::Table(v) => self.prepare_table(ctx, opt, stk, planner, stm_ctx, v).await?,
 				Expr::Idiom(x) => {
 					// match against what previously would be an edge.
 					if x.len() != 2 {
@@ -584,7 +570,7 @@ impl Iterator {
 			// Process any SPLIT AT clause
 			self.output_split(stk, ctx, opt, stm, rs).await?;
 			// Process any GROUP BY clause
-			self.output_group(stk, ctx, opt, stm).await?;
+			self.output_group(stk, ctx, opt).await?;
 			// Process any ORDER BY clause
 			if let Some(orders) = stm.order() {
 				#[cfg(not(target_family = "wasm"))]
@@ -832,7 +818,7 @@ impl Iterator {
 								// Set the value at the path
 								obj.set(stk, ctx, opt, split, val).await?;
 								// Add the object to the results
-								self.results.push(stk, ctx, opt, stm, rs, obj).await?;
+								self.results.push(stk, ctx, opt, rs, obj).await?;
 							}
 						}
 						_ => {
@@ -841,7 +827,7 @@ impl Iterator {
 							// Set the value at the path
 							obj.set(stk, ctx, opt, split, val).await?;
 							// Add the object to the results
-							self.results.push(stk, ctx, opt, stm, rs, obj).await?;
+							self.results.push(stk, ctx, opt, rs, obj).await?;
 						}
 					}
 				}
@@ -850,16 +836,10 @@ impl Iterator {
 		Ok(())
 	}
 
-	async fn output_group(
-		&mut self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		stm: &Statement<'_>,
-	) -> Result<()> {
+	async fn output_group(&mut self, stk: &mut Stk, ctx: &Context, opt: &Options) -> Result<()> {
 		// Process any GROUP clause
 		if let Results::Groups(g) = &mut self.results {
-			self.results = Results::Memory(g.output(stk, ctx, opt, stm).await?);
+			self.results = Results::Memory(g.output(stk, ctx, opt).await?);
 		}
 		// Everything ok
 		Ok(())
@@ -937,7 +917,7 @@ impl Iterator {
 		// Extract the value
 		let res = Self::extract_value(stk, ctx, opt, stm, pro).await;
 		// Process the result
-		self.result(stk, ctx, opt, stm, rs, res).await;
+		self.result(stk, ctx, opt, rs, res).await;
 		// Everything ok
 		Ok(())
 	}
@@ -969,7 +949,6 @@ impl Iterator {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		stm: &Statement<'_>,
 		rs: RecordStrategy,
 		res: Result<Value, IgnoreError>,
 	) {
@@ -986,7 +965,7 @@ impl Iterator {
 				return;
 			}
 			Ok(v) => {
-				if let Err(e) = self.results.push(stk, ctx, opt, stm, rs, v).await {
+				if let Err(e) = self.results.push(stk, ctx, opt, rs, v).await {
 					self.error = Some(e);
 					self.run.cancel();
 					return;

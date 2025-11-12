@@ -165,16 +165,16 @@ use futures::StreamExt;
 use futures::stream::poll_fn;
 use surrealdb_core::dbs::{QueryResult, QueryResultBuilder, Session};
 use surrealdb_core::iam;
-use surrealdb_core::kvs::Datastore;
 #[cfg(not(target_family = "wasm"))]
 use surrealdb_core::kvs::export::Config as DbExportConfig;
+use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
 use surrealdb_core::rpc::DbResultError;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use surrealdb_core::{
 	iam::{Action, ResourceKind, check::check_ns_db},
 	ml::storage::surml_file::SurMlFile,
 };
-use surrealdb_types::{Notification, ToSql, Value, Variables};
+use surrealdb_types::{Notification, SurrealValue, ToSql, Value, Variables};
 use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
@@ -189,14 +189,24 @@ use uuid::Uuid;
 use crate::conn::MlExportConfig;
 use crate::conn::{Command, RequestData};
 use crate::opt::IntoEndpoint;
+use crate::opt::auth::{AccessToken, RefreshToken, SecureToken, Token};
 use crate::{Connect, Result, Surreal};
+
+type LiveQueryMap = HashMap<Uuid, Sender<Result<Notification>>>;
+
+#[derive(Clone)]
+pub(crate) struct RouterState {
+	pub(crate) kvs: Arc<Datastore>,
+	pub(crate) vars: Arc<RwLock<Variables>>,
+	pub(crate) live_queries: Arc<RwLock<LiveQueryMap>>,
+	pub(crate) session: Arc<RwLock<Session>>,
+	pub(crate) transactions: Arc<RwLock<HashMap<Uuid, Arc<Transaction>>>>,
+}
 
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod native;
 #[cfg(target_family = "wasm")]
 pub(crate) mod wasm;
-
-type LiveQueryMap = HashMap<Uuid, Sender<Result<Notification>>>;
 
 /// In-memory database
 ///
@@ -545,10 +555,13 @@ async fn router(
 		command,
 		..
 	}: RequestData,
-	kvs: &Arc<Datastore>,
-	session: &Arc<RwLock<Session>>,
-	vars: &Arc<RwLock<Variables>>,
-	live_queries: &Arc<RwLock<LiveQueryMap>>,
+	RouterState {
+		kvs,
+		session,
+		vars,
+		live_queries,
+		transactions,
+	}: RouterState,
 ) -> std::result::Result<Vec<QueryResult>, crate::Error> {
 	match command {
 		Command::Use {
@@ -564,11 +577,23 @@ async fn router(
 		} => {
 			let query_result = QueryResultBuilder::started_now();
 			let signup_data =
-				iam::signup::signup(kvs, &mut *session.write().await, credentials.into())
+				iam::signup::signup(&kvs, &mut *session.write().await, credentials.into())
 					.await
 					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
-			let token = signup_data.token.map(Value::String).unwrap_or(Value::None);
-			let result = query_result.finish_with_result(Ok(token));
+			let token = match signup_data {
+				iam::Token::Access(token) => Token {
+					access: AccessToken(SecureToken(token)),
+					refresh: None,
+				},
+				iam::Token::WithRefresh {
+					access: token,
+					refresh,
+				} => Token {
+					access: AccessToken(SecureToken(token)),
+					refresh: Some(RefreshToken(SecureToken(refresh))),
+				},
+			};
+			let result = query_result.finish_with_result(Ok(token.into_value()));
 
 			Ok(vec![result])
 		}
@@ -577,20 +602,69 @@ async fn router(
 		} => {
 			let query_result = QueryResultBuilder::started_now();
 			let signin_data =
-				iam::signin::signin(kvs, &mut *session.write().await, credentials.into())
+				iam::signin::signin(&kvs, &mut *session.write().await, credentials.into())
 					.await
 					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
-
-			let result = query_result.finish_with_result(Ok(Value::String(signin_data.token)));
-
+			let token = match signin_data {
+				iam::Token::Access(token) => Token {
+					access: AccessToken(SecureToken(token)),
+					refresh: None,
+				},
+				iam::Token::WithRefresh {
+					access,
+					refresh,
+				} => Token {
+					access: AccessToken(SecureToken(access)),
+					refresh: Some(RefreshToken(SecureToken(refresh))),
+				},
+			};
+			let result = query_result.finish_with_result(Ok(token.into_value()));
 			Ok(vec![result])
 		}
 		Command::Authenticate {
 			token,
 		} => {
 			let query_result = QueryResultBuilder::started_now();
-			let result = match iam::verify::token(kvs, &mut *session.write().await, &token).await {
-				Ok(_) => query_result.finish_with_result(Ok(Value::None)),
+			// Extract the access token and check if this token supports refresh
+			let (access, with_refresh) = match &token {
+				iam::Token::Access(access) => (access, false),
+				iam::Token::WithRefresh {
+					access,
+					..
+				} => (access, true),
+			};
+			// Attempt to authenticate with the access token
+			let result = match iam::verify::token(&kvs, &mut *session.write().await, access).await {
+				// Authentication successful - return the original token
+				Ok(_) => query_result.finish_with_result(Ok(token.into_value())),
+				Err(error) => {
+					// Automatic refresh token handling:
+					// If the access token is expired and we have a refresh token,
+					// automatically attempt to refresh and return new tokens.
+					if with_refresh && error.to_string().contains("token has expired") {
+						let result = match token.refresh(&kvs, &mut *session.write().await).await {
+							Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
+							Err(error) => query_result.finish_with_result(Err(
+								DbResultError::InternalError(error.to_string()),
+							)),
+						};
+						return Ok(vec![result]);
+					}
+					// If authentication failed and automatic refresh isn't applicable,
+					// return the authentication error
+					query_result
+						.finish_with_result(Err(DbResultError::InternalError(error.to_string())))
+				}
+			};
+			Ok(vec![result])
+		}
+		Command::Refresh {
+			token,
+		} => {
+			// Refresh command: Exchange a refresh token for new access and refresh tokens
+			let query_result = QueryResultBuilder::started_now();
+			let result = match token.refresh(&kvs, &mut *session.write().await).await {
+				Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
 				Err(error) => query_result
 					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
 			};
@@ -605,14 +679,81 @@ async fn router(
 			};
 			Ok(vec![result])
 		}
-		Command::RawQuery {
-			txn: _,
+		Command::Begin => {
+			let query_result = QueryResultBuilder::started_now();
+			let result = match kvs.transaction(TransactionType::Write, LockType::Optimistic).await {
+				Ok(txn) => {
+					let id = Uuid::now_v7();
+					transactions.write().await.insert(id, std::sync::Arc::new(txn));
+					query_result.finish_with_result(Ok(Value::Uuid(id.into())))
+				}
+				Err(error) => query_result
+					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
+			};
+			Ok(vec![result])
+		}
+		Command::Revoke {
+			token,
+		} => {
+			// Revoke command: Explicitly invalidate a refresh token to prevent future use
+			let query_result = QueryResultBuilder::started_now();
+			let result = match token.revoke_refresh_token(&kvs).await {
+				Ok(_) => query_result.finish_with_result(Ok(Value::None)),
+				Err(error) => query_result
+					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
+			};
+			Ok(vec![result])
+		}
+		Command::Rollback {
+			txn,
+		} => {
+			let tx = transactions.write().await.remove(&txn);
+			if let Some(tx) = tx {
+				tx.cancel().await?;
+			}
+			Ok(vec![QueryResultBuilder::instant_none()])
+		}
+		Command::Commit {
+			txn,
+		} => {
+			let tx = transactions.write().await.remove(&txn);
+			if let Some(tx) = tx {
+				tx.commit().await?;
+			}
+			Ok(vec![QueryResultBuilder::instant_none()])
+		}
+		Command::Query {
+			txn,
 			query,
 			variables,
 		} => {
 			let mut vars = vars.read().await.clone();
 			vars.extend(variables);
-			let response = kvs.execute(query.as_ref(), &*session.read().await, Some(vars)).await?;
+
+			// If a transaction UUID is provided, we need to retrieve it and use it
+			let response = if let Some(txn_id) = txn {
+				// Retrieve the transaction from storage
+				let tx_option = transactions.read().await.get(&txn_id).cloned();
+				if let Some(tx) = tx_option {
+					// Execute with the existing transaction
+					kvs.execute_with_transaction(
+						query.as_ref(),
+						&*session.read().await,
+						Some(vars),
+						tx,
+					)
+					.await?
+				} else {
+					// Transaction not found - return error
+					return Ok(vec![QueryResultBuilder::started_now().finish_with_result(Err(
+						DbResultError::InternalError("Transaction not found".to_string()),
+					))]);
+				}
+			} else {
+				// No transaction - use normal execution
+				kvs.execute(query.as_ref(), &*session.read().await, Some(vars)).await?
+			};
+
 			Ok(response)
 		}
 
@@ -650,7 +791,7 @@ async fn router(
 
 			// Write to channel.
 			let session = session.read().await.clone();
-			let export = export_file(kvs, &session, tx, config);
+			let export = export_file(&kvs, &session, tx, config);
 
 			// Read from channel and write to pipe.
 			let bridge = async move {
@@ -698,7 +839,7 @@ async fn router(
 
 			// Write to channel.
 			let session = session.read().await;
-			let export = export_ml(kvs, &session, tx, config);
+			let export = export_ml(&kvs, &session, tx, config);
 
 			// Read from channel and write to pipe.
 			let bridge = async move {
@@ -945,7 +1086,7 @@ async fn router(
 		} => {
 			live_queries.write().await.remove(&uuid);
 			let results =
-				kill_live_query(kvs, uuid, &*session.read().await, vars.read().await.clone())
+				kill_live_query(&kvs, uuid, &*session.read().await, vars.read().await.clone())
 					.await?;
 			Ok(results)
 		}

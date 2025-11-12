@@ -9,21 +9,24 @@ use crate::sql::access_type::{
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::data::Assignment;
 use crate::sql::filter::Filter;
-use crate::sql::index::{Distance, FullTextParams, MTreeParams, VectorType};
+use crate::sql::index::FullTextParams;
 use crate::sql::language::Language;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::lookup::{LookupKind, LookupSubject};
 use crate::sql::order::{OrderList, Ordering};
-use crate::sql::statements::define::{DefineDefault, DefineKind};
+use crate::sql::statements::define::{
+	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineDefault,
+	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
+	DefineKind, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
+	DefineTableStatement,
+};
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
-	CreateStatement, DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement,
-	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement,
-	DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement, InsertStatement,
-	KillStatement, OutputStatement, RelateStatement, RemoveFieldStatement, RemoveFunctionStatement,
-	RemoveStatement, SelectStatement, SetStatement, UpdateStatement, UpsertStatement,
+	CreateStatement, DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement,
+	InsertStatement, KillStatement, OutputStatement, RelateStatement, RemoveFieldStatement,
+	RemoveFunctionStatement, RemoveStatement, SelectStatement, SetStatement, UpdateStatement,
+	UpsertStatement,
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
@@ -33,7 +36,7 @@ use crate::sql::{
 	RecordIdLit, Scoring, Script, Split, Splits, Start, TableType, Timeout, TopLevelExpr, With,
 };
 use crate::syn::parser::StatementStream;
-use crate::types::{PublicDatetime, PublicDuration, PublicNumber, PublicUuid};
+use crate::types::{PublicDatetime, PublicDuration, PublicUuid};
 use crate::val::range::TypedRange;
 
 fn ident_field(name: &str) -> Expr {
@@ -62,9 +65,8 @@ static SOURCE: &str = r#"
 	DEFINE TABLE name DROP SCHEMAFUL CHANGEFEED 1s PERMISSIONS FOR SELECT WHERE a = 1 AS SELECT foo FROM bar GROUP BY foo;
 	DEFINE EVENT event ON TABLE table WHEN null THEN null,none;
 	DEFINE FIELD foo.*[*]... ON TABLE bar FLEX TYPE option<number | array<record<foo>,10>> VALUE null ASSERT true DEFAULT false PERMISSIONS FOR UPDATE NONE, FOR CREATE WHERE true;
-	DEFINE INDEX index ON TABLE table FIELDS a,b[*] FULLTEXT ANALYZER ana BM25 (0.1,0.2) HIGHLIGHTS;
+	DEFINE INDEX index ON TABLE table FIELDS a FULLTEXT ANALYZER ana BM25 (0.1,0.2) HIGHLIGHTS;
 	DEFINE INDEX index ON TABLE table FIELDS a UNIQUE;
-	DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 MTREE_CACHE 9;
 	DEFINE ANALYZER ana FILTERS ASCII, EDGENGRAM(1,2), NGRAM(3,4), LOWERCASE, SNOWBALL(NLD), UPPERCASE TOKENIZERS BLANK, CAMEL, CLASS, PUNCT FUNCTION fn::foo::bar;
 	DELETE FROM ONLY |foo:32..64| WITH INDEX index,index_2 Where 2 RETURN AFTER TIMEOUT 1s PARALLEL EXPLAIN FULL;
 	DELETE FROM ONLY a:b->?[$][?true] WITH INDEX index,index_2 WHERE null RETURN NULL TIMEOUT 1h PARALLEL EXPLAIN FULL;
@@ -328,10 +330,7 @@ fn statements() -> Vec<TopLevelExpr> {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field("index".to_string())),
 			what: Expr::Idiom(Idiom::field("table".to_string())),
-			cols: vec![
-				Expr::Idiom(Idiom(vec![Part::Field("a".to_string())])),
-				Expr::Idiom(Idiom(vec![Part::Field("b".to_string()), Part::All])),
-			],
+			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())]))],
 			index: Index::FullText(FullTextParams {
 				az: "ana".to_owned(),
 				hl: true,
@@ -349,21 +348,6 @@ fn statements() -> Vec<TopLevelExpr> {
 			what: Expr::Idiom(Idiom::field("table".to_string())),
 			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())]))],
 			index: Index::Uniq,
-			comment: None,
-			concurrently: false,
-		})))),
-		TopLevelExpr::Expr(Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
-			kind: DefineKind::Default,
-			name: Expr::Idiom(Idiom::field("index".to_string())),
-			what: Expr::Idiom(Idiom::field("table".to_string())),
-			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())]))],
-			index: Index::MTree(MTreeParams {
-				dimension: 4,
-				distance: Distance::Minkowski(PublicNumber::Int(5)),
-				capacity: 6,
-				mtree_cache: 9,
-				vector_type: VectorType::F64,
-			}),
 			comment: None,
 			concurrently: false,
 		})))),

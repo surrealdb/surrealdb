@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::fmt;
 
 use anyhow::{Result, bail};
@@ -8,9 +7,10 @@ use uuid::Uuid;
 use crate::catalog::providers::CatalogProvider;
 use crate::catalog::{NodeLiveQuery, SubscriptionDefinition};
 use crate::ctx::Context;
-use crate::dbs::{Options, Variables};
+use crate::dbs::{Options, ParameterCapturePass, Variables};
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::visit::Visit;
 use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _};
 use crate::val::Value;
 
@@ -19,6 +19,7 @@ pub(crate) struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,
 	pub fields: Fields,
+	pub diff: bool,
 	pub what: Expr,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
@@ -40,14 +41,20 @@ impl LiveStatement {
 		// Get the Node ID
 		let nid = opt.id()?;
 
-		let mut vars = BTreeMap::new();
-		vars.extend(Variables::from_expr(&self.fields, ctx));
-		vars.extend(Variables::from_expr(&self.what, ctx));
+		let mut vars = Variables::new();
+		let mut pass = ParameterCapturePass {
+			context: ctx,
+			captures: &mut vars,
+		};
+		let _ = self.fields.visit(&mut pass);
+		let _ = self.what.visit(&mut pass);
 		if let Some(cond) = &self.cond {
-			vars.extend(Variables::from_expr(cond, ctx));
+			let _ = cond.0.visit(&mut pass);
 		}
 		if let Some(fetch) = &self.fetch {
-			vars.extend(Variables::from_expr(fetch, ctx));
+			for i in fetch.0.iter() {
+				let _ = i.0.visit(&mut pass);
+			}
 		}
 
 		// Check that auth has been set
@@ -55,6 +62,7 @@ impl LiveStatement {
 			id: self.id,
 			node: self.node,
 			fields: self.fields.clone(),
+			diff: self.diff,
 			what: self.what.clone(),
 			cond: self.cond.clone().map(|c| c.0),
 			fetch: self.fetch.clone(),
@@ -66,7 +74,7 @@ impl LiveStatement {
 			// for when we store the LIVE Statement
 			session: ctx.value("session").cloned(),
 			// Add the variables to the subscription definition
-			vars,
+			vars: vars.0,
 		};
 		// Get the id
 		let live_query_id = subscription_definition.id;
@@ -134,6 +142,7 @@ impl fmt::Display for LiveStatement {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
 	use anyhow::Result;
 

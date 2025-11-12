@@ -6,7 +6,6 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::{Block, ControlFlow, Expr, FlowResult, Param, Value};
 use crate::val::range::IntegerRangeIter;
 
@@ -82,7 +81,17 @@ impl ForeachStatement {
 				// Compute each block entry
 				let res = match v {
 					Expr::Let(x) => x.compute(stk, &mut ctx, opt, doc).await,
-					v => stk.run(|stk| v.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await,
+					v => {
+						stk.run(|stk| {
+							v.compute(
+								stk,
+								ctx.as_ref().expect("context should be initialized"),
+								opt,
+								doc,
+							)
+						})
+						.await
+					}
 				};
 				// Catch any special errors
 				match res {
@@ -97,15 +106,6 @@ impl ForeachStatement {
 		}
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-impl VisitExpression for ForeachStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.range.visit(visitor);
-		self.block.visit(visitor);
 	}
 }
 impl Display for ForeachStatement {

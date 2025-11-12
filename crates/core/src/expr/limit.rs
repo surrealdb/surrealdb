@@ -9,7 +9,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Expr;
-use crate::expr::expression::VisitExpression;
 use crate::val::{Number, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -41,15 +40,6 @@ impl Limit {
 			// A different error occurred
 			Err(e) => Err(e),
 		}
-	}
-}
-
-impl VisitExpression for Limit {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.0.visit(visitor);
 	}
 }
 

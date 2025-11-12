@@ -9,7 +9,7 @@ use crate::sql::access_type::{
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::data::Assignment;
 use crate::sql::filter::Filter;
-use crate::sql::index::{Distance, FullTextParams, HnswParams, MTreeParams, VectorType};
+use crate::sql::index::{Distance, FullTextParams, HnswParams, VectorType};
 use crate::sql::language::Language;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::lookup::{LookupKind, LookupSubject};
@@ -18,20 +18,22 @@ use crate::sql::statements::access::{
 	self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke, AccessStatementShow,
 };
 use crate::sql::statements::define::user::PassType;
-use crate::sql::statements::define::{DefineDefault, DefineKind};
+use crate::sql::statements::define::{
+	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineDefault,
+	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
+	DefineKind, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
+	DefineTableStatement,
+};
 use crate::sql::statements::remove::RemoveAnalyzerStatement;
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
 use crate::sql::statements::{
-	AccessStatement, CreateStatement, DefineAccessStatement, DefineAnalyzerStatement,
-	DefineDatabaseStatement, DefineEventStatement, DefineFieldStatement, DefineFunctionStatement,
-	DefineIndexStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-	DefineTableStatement, DeleteStatement, ForeachStatement, IfelseStatement, InfoStatement,
-	InsertStatement, KillStatement, OptionStatement, OutputStatement, RelateStatement,
-	RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement,
-	RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement, RemoveParamStatement,
-	RemoveStatement, RemoveTableStatement, RemoveUserStatement, SelectStatement, UpdateStatement,
-	UpsertStatement, UseStatement,
+	AccessStatement, CreateStatement, DeleteStatement, ForeachStatement, IfelseStatement,
+	InfoStatement, InsertStatement, KillStatement, OptionStatement, OutputStatement,
+	RelateStatement, RemoveAccessStatement, RemoveDatabaseStatement, RemoveEventStatement,
+	RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement, RemoveNamespaceStatement,
+	RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
+	SelectStatement, UpdateStatement, UpsertStatement, UseStatement,
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
@@ -42,7 +44,7 @@ use crate::sql::{
 };
 use crate::syn;
 use crate::syn::parser::ParserSettings;
-use crate::types::{PublicDatetime, PublicDuration, PublicNumber, PublicUuid};
+use crate::types::{PublicDatetime, PublicDuration, PublicUuid};
 use crate::val::range::TypedRange;
 
 fn ident_field(name: &str) -> Expr {
@@ -955,10 +957,7 @@ fn parse_define_access_record() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH REFRESH DURATION FOR GRANT 10d"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap();
@@ -1169,10 +1168,7 @@ fn parse_define_access_record() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH REFRESH WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p,s| p.parse_expr_inherit(s).await,
 		)
 			.unwrap();
@@ -1229,10 +1225,7 @@ fn parse_define_access_record() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE RECORD WITH JWT ALGORITHM PS512 KEY "foo" WITH ISSUER KEY "bar" WITH REFRESH DURATION FOR GRANT 10d, FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p,s| p.parse_expr_inherit(s).await,
 		).unwrap();
 		assert_eq!(
@@ -1355,10 +1348,7 @@ fn parse_define_access_bearer() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR USER COMMENT "foo""#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap();
@@ -1401,10 +1391,7 @@ fn parse_define_access_bearer() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON NS TYPE BEARER FOR USER COMMENT "foo""#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap();
@@ -1447,10 +1434,7 @@ fn parse_define_access_bearer() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON ROOT TYPE BEARER FOR USER COMMENT "foo""#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap();
@@ -1493,10 +1477,7 @@ fn parse_define_access_bearer() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR RECORD COMMENT "foo""#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap();
@@ -1538,10 +1519,7 @@ fn parse_define_access_bearer() {
 	{
 		syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON NS TYPE BEARER FOR RECORD COMMENT "foo""#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap_err();
@@ -1550,10 +1528,7 @@ fn parse_define_access_bearer() {
 	{
 		syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON ROOT TYPE BEARER FOR RECORD COMMENT "foo""#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p, s| p.parse_expr_inherit(s).await,
 		)
 		.unwrap_err();
@@ -1562,10 +1537,7 @@ fn parse_define_access_bearer() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR USER WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR GRANT 90d, FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p,s| p.parse_expr_inherit(s).await,
 		).unwrap();
 		assert_eq!(
@@ -1606,10 +1578,7 @@ fn parse_define_access_bearer() {
 	{
 		let res = syn::parse_with_settings(
 			r#"DEFINE ACCESS a ON DB TYPE BEARER FOR RECORD WITH JWT ALGORITHM HS384 KEY "foo" DURATION FOR GRANT 90d, FOR TOKEN 10s, FOR SESSION 15m"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |p,s| p.parse_expr_inherit(s).await,
 		).unwrap();
 		assert_eq!(
@@ -1783,44 +1752,18 @@ fn parse_define_field() {
 
 	// Invalid DELETE permission
 	{
-		// TODO(gguillemas): Providing the DELETE permission should return a parse error
-		// in 3.0.0. Currently, the DELETE permission is just ignored to maintain
-		// backward compatibility.
-		let res = syn::parse_with(
+		syn::parse_with(
 			r#"DEFINE FIELD foo ON TABLE bar PERMISSIONS FOR DELETE NONE"#.as_bytes(),
 			async |parser, stk| parser.parse_expr_inherit(stk).await,
 		)
-		.unwrap();
-		assert_eq!(
-			res,
-			Expr::Define(Box::new(DefineStatement::Field(DefineFieldStatement {
-				kind: DefineKind::Default,
-				name: Expr::Idiom(Idiom(vec![Part::Field("foo".to_string())])),
-				what: Expr::Idiom(Idiom::field("bar".to_string())),
-				flex: false,
-				field_kind: None,
-				readonly: false,
-				value: None,
-				assert: None,
-				default: DefineDefault::None,
-				permissions: Permissions {
-					delete: Permission::Full,
-					update: Permission::Full,
-					create: Permission::Full,
-					select: Permission::Full,
-				},
-				comment: None,
-				reference: None,
-				computed: None,
-			})))
-		)
+		.unwrap_err();
 	}
 }
 
 #[test]
 fn parse_define_index() {
 	let res = syn::parse_with(
-		"DEFINE INDEX index ON TABLE table FIELDS a,b[*] FULLTEXT ANALYZER ana BM25 (0.1,0.2) HIGHLIGHTS"
+		"DEFINE INDEX index ON TABLE table FIELDS a FULLTEXT ANALYZER ana BM25 (0.1,0.2) HIGHLIGHTS"
 		.as_bytes(),
 		async |parser, stk| parser.parse_expr_inherit(stk).await,
 	)
@@ -1831,10 +1774,7 @@ fn parse_define_index() {
 			kind: DefineKind::Default,
 			name: Expr::Idiom(Idiom::field("index".to_string())),
 			what: Expr::Idiom(Idiom::field("table".to_string())),
-			cols: vec![
-				Expr::Idiom(Idiom(vec![Part::Field("a".to_string())])),
-				Expr::Idiom(Idiom(vec![Part::Field("b".to_string()), Part::All]))
-			],
+			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())])),],
 			index: Index::FullText(FullTextParams {
 				az: "ana".to_owned(),
 				hl: true,
@@ -1864,28 +1804,6 @@ fn parse_define_index() {
 			index: Index::Uniq,
 			comment: None,
 			concurrently: false
-		})))
-	);
-
-	let res =
-		syn::parse_with( r#"DEFINE INDEX index ON TABLE table FIELDS a MTREE DIMENSION 4 DISTANCE MINKOWSKI 5 CAPACITY 6 TYPE I16 MTREE_CACHE 9"#.as_bytes(),async |parser,stk| parser.parse_expr_inherit(stk).await).unwrap();
-
-	assert_eq!(
-		res,
-		Expr::Define(Box::new(DefineStatement::Index(DefineIndexStatement {
-			kind: DefineKind::Default,
-			name: Expr::Idiom(Idiom::field("index".to_string())),
-			what: Expr::Idiom(Idiom::field("table".to_string())),
-			cols: vec![Expr::Idiom(Idiom(vec![Part::Field("a".to_string())]))],
-			index: Index::MTree(MTreeParams {
-				dimension: 4,
-				distance: Distance::Minkowski(PublicNumber::Int(5)),
-				capacity: 6,
-				mtree_cache: 9,
-				vector_type: VectorType::I16,
-			}),
-			comment: None,
-			concurrently: false,
 		})))
 	);
 
@@ -2530,7 +2448,8 @@ fn parse_live() {
 	let TopLevelExpr::Live(stmt) = res else {
 		panic!()
 	};
-	assert_eq!(stmt.fields, Fields::Select(vec![Field::All]));
+	assert_eq!(stmt.fields, Fields::Select(vec![]));
+	assert_eq!(stmt.diff, true);
 	assert_eq!(stmt.what, Expr::Param(Param::new("foo".to_owned())));
 
 	let res = syn::parse_with(
@@ -2875,10 +2794,7 @@ fn parse_access_grant() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON NAMESPACE GRANT FOR USER b"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2895,10 +2811,7 @@ fn parse_access_grant() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON NAMESPACE GRANT FOR RECORD b:c"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2922,10 +2835,7 @@ fn parse_access_show() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE SHOW ALL"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2943,10 +2853,7 @@ fn parse_access_show() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE SHOW GRANT b"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2964,10 +2871,7 @@ fn parse_access_show() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE SHOW WHERE true"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -2989,10 +2893,7 @@ fn parse_access_revoke() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE REVOKE ALL"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3010,10 +2911,7 @@ fn parse_access_revoke() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE REVOKE GRANT b"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3031,10 +2929,7 @@ fn parse_access_revoke() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE REVOKE WHERE true"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3056,10 +2951,7 @@ fn parse_access_purge() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE EXPIRED, REVOKED"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3078,10 +2970,7 @@ fn parse_access_purge() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE EXPIRED"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3100,10 +2989,7 @@ fn parse_access_purge() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE REVOKED"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3122,10 +3008,7 @@ fn parse_access_purge() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE EXPIRED FOR 90d"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3144,10 +3027,7 @@ fn parse_access_purge() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE REVOKED FOR 90d"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();
@@ -3166,10 +3046,7 @@ fn parse_access_purge() {
 	{
 		let res = syn::parse_with_settings(
 			r#"ACCESS a ON DATABASE PURGE REVOKED, EXPIRED FOR 90d"#.as_bytes(),
-			ParserSettings {
-				bearer_access_enabled: true,
-				..Default::default()
-			},
+			ParserSettings::default(),
 			async |parser, stk| parser.parse_top_level_expr(stk).await,
 		)
 		.unwrap();

@@ -10,7 +10,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Timeout, Value};
 use crate::iam::{Action, ResourceKind};
@@ -24,17 +23,6 @@ pub(crate) struct DefineSequenceStatement {
 	pub batch: Expr,
 	pub start: Expr,
 	pub timeout: Option<Timeout>,
-}
-
-impl VisitExpression for DefineSequenceStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.batch.visit(visitor);
-		self.start.visit(visitor);
-	}
 }
 
 impl Default for DefineSequenceStatement {

@@ -16,7 +16,6 @@ use crate::val::Value;
 pub enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
-	// TODO(gguillemas): Document once bearer access is no longer experimental.
 	Bearer(BearerAccess),
 }
 

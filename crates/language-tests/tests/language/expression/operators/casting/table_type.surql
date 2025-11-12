@@ -8,7 +8,7 @@ match = "$result == type::table('users')"
 match = "$result == type::table('posts')"
 
 [[test.results]]
-error = "Expected `table<users>` but found a `'posts'`"
+error = "Could not cast into `table<users>` using input `'posts'`"
 
 [[test.results]]
 match = "$result == type::table('users')"

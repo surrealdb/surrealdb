@@ -11,7 +11,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr};
 use crate::fmt::Fmt;
@@ -26,19 +25,6 @@ pub(crate) struct DefineEventStatement {
 	pub when: Expr,
 	pub then: Vec<Expr>,
 	pub comment: Option<Expr>,
-}
-
-impl VisitExpression for DefineEventStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.target_table.visit(visitor);
-		self.when.visit(visitor);
-		self.then.iter().for_each(|comment| comment.visit(visitor));
-		self.comment.iter().for_each(|comment| comment.visit(visitor));
-	}
 }
 
 impl DefineEventStatement {

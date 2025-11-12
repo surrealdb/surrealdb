@@ -21,6 +21,9 @@ value = "'uuid'"
 value = "'array'"
 
 [[test.results]]
+value = "'set'"
+
+[[test.results]]
 value = "'object'"
 
 [[test.results]]
@@ -110,6 +113,12 @@ value = "'table'"
 {
     CREATE test_values:array SET value = [1, 2, 3];
     RETURN (SELECT VALUE type::of(value) FROM test_values:array)[0];
+};
+
+-- Test set storage
+{
+    CREATE test_values:set SET value = type::set([1, 2, 3]);
+    RETURN (SELECT VALUE type::of(value) FROM test_values:set)[0];
 };
 
 -- Test object storage

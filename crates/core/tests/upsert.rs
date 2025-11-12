@@ -1,6 +1,9 @@
+#![allow(clippy::unwrap_used)]
+
 use surrealdb_core::iam::Level;
 use surrealdb_core::syn;
 use surrealdb_types::{Array, ToSql, Value};
+
 mod helpers;
 use anyhow::Result;
 use helpers::new_ds;

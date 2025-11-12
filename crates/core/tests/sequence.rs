@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 mod helpers;
 
 use std::collections::BTreeSet;
@@ -32,11 +34,8 @@ async fn concurrent_sequence_next_val() -> Result<()> {
 
 	// Create the sequence
 	let res = &mut ds
-		.execute(
-			"DEFINE SEQUENCE sq1 START -250; DEFINE SEQUENCE sq2 BATCH 50; DEFINE SEQUENCE sq3 BATCH 10 START 1000;",
-			&ses,
-			None,
-		)
+		.execute("DEFINE SEQUENCE sq1 START -250; DEFINE SEQUENCE sq2 BATCH 50; DEFINE SEQUENCE sq3 BATCH 10 START 1000;",
+			&ses, None)
 		.await?;
 	skip_ok(res, 3)?;
 

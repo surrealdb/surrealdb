@@ -342,7 +342,7 @@ impl QueryPlanner {
 					self.fallbacks.push(reason);
 				}
 				self.add(t.clone(), None, exe, it, rs);
-				it.ingest(Iterable::Table(t, rs, sc));
+				it.ingest(Iterable::Table(t.clone(), rs, sc));
 				is_table_iterator = true;
 			}
 		}

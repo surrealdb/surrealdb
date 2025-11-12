@@ -242,7 +242,8 @@ impl MiddlewareDefinition {
 				.clone()
 				.into_iter()
 				.map(|v| {
-					let public_val: crate::types::PublicValue = v.try_into().unwrap();
+					let public_val: crate::types::PublicValue =
+						v.try_into().expect("value conversion should succeed");
 					crate::sql::Expr::from_public_value(public_val)
 				})
 				.collect(),

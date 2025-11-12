@@ -8,7 +8,6 @@ use super::FlowResult;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::expression::VisitExpression;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Value};
 use crate::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
@@ -70,7 +69,18 @@ impl Block {
 		for v in self.iter() {
 			match v {
 				Expr::Let(x) => res = x.compute(stk, &mut ctx, opt, doc).await?,
-				v => res = stk.run(|stk| v.compute(stk, ctx.as_ref().unwrap(), opt, doc)).await?,
+				v => {
+					res = stk
+						.run(|stk| {
+							v.compute(
+								stk,
+								ctx.as_ref().expect("context should be initialized"),
+								opt,
+								doc,
+							)
+						})
+						.await?
+				}
 			}
 		}
 		// Return nothing
@@ -78,20 +88,11 @@ impl Block {
 	}
 }
 
-impl VisitExpression for Block {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.0.iter().for_each(|x| x.visit(visitor));
-	}
-}
-
 impl Display for Block {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
 		match (self.len(), self.first()) {
-			(0, _) => f.write_str("{}"),
+			(0, _) => f.write_str("{;}"),
 			(1, Some(v)) => {
 				write!(f, "{{ {v} }}")
 			}

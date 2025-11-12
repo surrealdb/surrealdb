@@ -10,7 +10,6 @@ use crate::catalog::{BucketDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt, Literal};
 use crate::iam::{Action, ResourceKind};
@@ -24,17 +23,6 @@ pub(crate) struct DefineBucketStatement {
 	pub permissions: Permission,
 	pub readonly: bool,
 	pub comment: Option<Expr>,
-}
-
-impl VisitExpression for DefineBucketStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.backend.iter().for_each(|action| action.visit(visitor));
-		self.comment.iter().for_each(|expr| expr.visit(visitor));
-	}
 }
 
 impl Default for DefineBucketStatement {

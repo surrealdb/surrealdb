@@ -107,7 +107,7 @@ impl Model {
 		}
 
 		// Take the first and only specified argument
-		let argument = args.pop().unwrap();
+		let argument = args.pop().expect("single argument validated above");
 		match argument {
 			// Perform bufferered compute
 			Value::Object(v) => {
@@ -136,7 +136,7 @@ impl Model {
 					})
 				})
 				.await
-				.unwrap()
+				.map_err(|e| anyhow::anyhow!("ML task failed: {}", e))?
 				.map_err(ControlFlow::from)?;
 				// Convert the output to a value
 				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
@@ -168,7 +168,7 @@ impl Model {
 					})
 				})
 				.await
-				.unwrap()
+				.map_err(|e| anyhow::anyhow!("ML task failed: {}", e))?
 				.map_err(ControlFlow::from)?;
 				// Convert the output to a value
 				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())
@@ -202,7 +202,7 @@ impl Model {
 					})
 				})
 				.await
-				.unwrap()
+				.map_err(|e| anyhow::anyhow!("ML task failed: {}", e))?
 				.map_err(ControlFlow::from)?;
 				// Convert the output to a value
 				Ok(outcome.into_iter().map(|x| Value::Number(Number::Float(x as f64))).collect())

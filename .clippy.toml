@@ -6,3 +6,5 @@ disallowed-methods = [
   { path = "rust_decimal::Decimal::from_str", reason = "Must use a normalized method to ensure decimal values are represented consistently.", allow-invalid = true },
   { path = "rust_decimal::Decimal::parse", reason = "Must use a normalized method to ensure decimal values are represented consistently.", allow-invalid = true },
 ]
+
+allow-unwrap-in-tests = true

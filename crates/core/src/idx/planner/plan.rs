@@ -411,7 +411,6 @@ pub(super) enum IndexOperator {
 	RangePart(BinaryOperator, Arc<Value>),
 	Range(Vec<Value>, Vec<(BinaryOperator, Arc<Value>)>),
 	Matches(String, MatchesOperator),
-	Knn(Arc<Vec<Number>>, u32),
 	Ann(Arc<Vec<Number>>, u32, u32),
 	/// false = ascending, true = descending
 	Order(bool),
@@ -508,13 +507,6 @@ impl IndexOption {
 					})
 					.collect();
 				e.insert("ranges", Value::from(a));
-			}
-			IndexOperator::Knn(a, k) => {
-				let expr = NearestNeighbor::KTree(*k).to_string();
-				let op = Value::from(expr);
-				let val = Value::Array(Array::from(a.as_ref().clone()));
-				e.insert("operator", op);
-				e.insert("value", val);
 			}
 			IndexOperator::Ann(a, k, ef) => {
 				let expr = NearestNeighbor::Approximate(*k, *ef).to_string();

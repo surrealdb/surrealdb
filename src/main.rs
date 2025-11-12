@@ -6,8 +6,9 @@
 use std::process::ExitCode;
 
 use surrealdb_core::CommunityComposer;
+use surrealdb_server::init;
 
 fn main() -> ExitCode {
 	// Use the default storage flavor and default HTTP router shipped with the binary
-	surreal::init(CommunityComposer())
+	init(CommunityComposer())
 }

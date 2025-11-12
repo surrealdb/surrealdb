@@ -18,7 +18,7 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::{DatabaseDefinition, IndexDefinition};
+use crate::catalog::{DatabaseDefinition, IndexDefinition, TableDefinition};
 use crate::ctx::Context;
 use crate::dbs::{Force, Options, Statement};
 use crate::doc::{CursorDoc, Document};
@@ -42,7 +42,8 @@ impl Document {
 			_ => return Ok(()),
 		};
 		// Check if the table is a view
-		if self.tb(ctx, opt).await?.drop {
+		let tb = self.tb(ctx, opt).await?;
+		if tb.drop {
 			return Ok(());
 		}
 
@@ -60,7 +61,7 @@ impl Document {
 
 			// Update the index entries
 			if o != n {
-				Self::one_index(&db, stk, ctx, opt, ix, o, n, &rid).await?;
+				Self::one_index(&db, &tb, stk, ctx, opt, ix, o, n, &rid).await?;
 			}
 		}
 		// Carry on
@@ -70,6 +71,7 @@ impl Document {
 	#[allow(clippy::too_many_arguments)]
 	async fn one_index(
 		db: &DatabaseDefinition,
+		tb: &TableDefinition,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
@@ -92,7 +94,17 @@ impl Document {
 		};
 
 		// Store all the variables and parameters required by the index operation
-		let mut ic = IndexOperation::new(ctx, opt, db.namespace_id, db.database_id, ix, o, n, rid);
+		let mut ic = IndexOperation::new(
+			ctx,
+			opt,
+			db.namespace_id,
+			db.database_id,
+			tb.table_id,
+			ix,
+			o,
+			n,
+			rid,
+		);
 		// Keep track of compaction requests, we need to trigger them after the index operation
 		let mut require_compaction = false;
 		// Execute the index operation

@@ -1,8 +1,3 @@
-#![cfg_attr(
-	not(any(feature = "kv-fdb", feature = "kv-tikv")),
-	expect(dead_code, reason = "This is only used in FoundationDB and TiKV")
-)]
-
 use std::collections::{HashMap, VecDeque};
 
 use anyhow::Result;

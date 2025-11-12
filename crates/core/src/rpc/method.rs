@@ -8,7 +8,9 @@ pub enum Method {
 	Signup,
 	Signin,
 	Authenticate,
+	Refresh,
 	Invalidate,
+	Revoke,
 	Reset,
 	Kill,
 	Live,
@@ -28,6 +30,9 @@ pub enum Method {
 	Run,
 	InsertRelation,
 	Sessions,
+	Begin,
+	Commit,
+	Cancel,
 }
 
 impl Method {
@@ -59,7 +64,9 @@ impl Method {
 			"signup" => Self::Signup,
 			"signin" => Self::Signin,
 			"authenticate" => Self::Authenticate,
+			"refresh" => Self::Refresh,
 			"invalidate" => Self::Invalidate,
+			"revoke" => Self::Revoke,
 			"reset" => Self::Reset,
 			"kill" => Self::Kill,
 			"live" => Self::Live,
@@ -79,6 +86,9 @@ impl Method {
 			"run" => Self::Run,
 			"insert_relation" => Self::InsertRelation,
 			"sessions" => Self::Sessions,
+			"begin" => Self::Begin,
+			"commit" => Self::Commit,
+			"cancel" => Self::Cancel,
 			_ => Self::Unknown,
 		}
 	}
@@ -94,7 +104,9 @@ impl Method {
 			Self::Signup => "signup",
 			Self::Signin => "signin",
 			Self::Authenticate => "authenticate",
+			Self::Refresh => "refresh",
 			Self::Invalidate => "invalidate",
+			Self::Revoke => "revoke",
 			Self::Reset => "reset",
 			Self::Kill => "kill",
 			Self::Live => "live",
@@ -114,6 +126,9 @@ impl Method {
 			Self::Run => "run",
 			Self::InsertRelation => "insert_relation",
 			Self::Sessions => "sessions",
+			Self::Begin => "begin",
+			Self::Commit => "commit",
+			Self::Cancel => "cancel",
 		}
 	}
 }

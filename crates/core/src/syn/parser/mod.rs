@@ -147,12 +147,12 @@ pub struct ParserSettings {
 	pub query_recursion_limit: usize,
 	/// Whether record references are enabled.
 	pub references_enabled: bool,
-	/// Whether bearer access is enabled
-	pub bearer_access_enabled: bool,
-	/// Whether bearer access is enabled
+	/// Whether define api is enabled
 	pub define_api_enabled: bool,
 	/// Whether the files feature is enabled
 	pub files_enabled: bool,
+	/// Whether the surrealism feature is enabled
+	pub surrealism_enabled: bool,
 }
 
 impl Default for ParserSettings {
@@ -163,9 +163,9 @@ impl Default for ParserSettings {
 			object_recursion_limit: 100,
 			query_recursion_limit: 20,
 			references_enabled: false,
-			bearer_access_enabled: false,
 			define_api_enabled: false,
 			files_enabled: false,
+			surrealism_enabled: false,
 		}
 	}
 }
@@ -174,9 +174,9 @@ impl ParserSettings {
 	pub fn default_with_experimental(enabled: bool) -> Self {
 		ParserSettings {
 			references_enabled: enabled,
-			bearer_access_enabled: enabled,
 			define_api_enabled: enabled,
 			files_enabled: enabled,
+			surrealism_enabled: enabled,
 			..Self::default()
 		}
 	}
@@ -256,7 +256,7 @@ impl<'a> Parser<'a> {
 	///
 	/// Should only be called after peeking a value.
 	pub fn pop_peek(&mut self) -> Token {
-		let res = self.token_buffer.pop().unwrap();
+		let res = self.token_buffer.pop().expect("token buffer is non-empty");
 		self.last_span = res.span;
 		res
 	}
@@ -313,7 +313,7 @@ impl<'a> Parser<'a> {
 			};
 			self.token_buffer.push(r);
 		}
-		self.token_buffer.at(at).unwrap()
+		self.token_buffer.at(at).expect("token exists at index")
 	}
 
 	pub fn peek1(&mut self) -> Token {
@@ -331,7 +331,7 @@ impl<'a> Parser<'a> {
 			let r = self.lexer.next_token();
 			self.token_buffer.push(r);
 		}
-		self.token_buffer.at(at).unwrap()
+		self.token_buffer.at(at).expect("token exists at index")
 	}
 
 	pub fn peek_whitespace1(&mut self) -> Token {
@@ -465,8 +465,12 @@ impl StatementStream {
 		// The parser should have ensured that bytes is a valid utf-8 string.
 		// TODO: Maybe change this to unsafe cast once we have more convidence in the
 		// parsers correctness.
-		let (line_num, remaining) =
-			std::str::from_utf8(bytes).unwrap().lines().enumerate().last().unwrap_or((0, ""));
+		let (line_num, remaining) = std::str::from_utf8(bytes)
+			.expect("parser validated utf8")
+			.lines()
+			.enumerate()
+			.last()
+			.unwrap_or((0, ""));
 
 		self.line_offset += line_num;
 		if line_num > 0 {

@@ -25,7 +25,7 @@ async fn strict_typing_inline() -> Result<()> {
 	assert_eq!(res.len(), 9);
 	//
 	let tmp = res.remove(0).result;
-	assert_eq!(tmp.unwrap_err().to_string(), "Expected `int` but found a `NONE`");
+	assert_eq!(tmp.unwrap_err().to_string(), "Could not cast into `int` using input `NONE`");
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
@@ -40,7 +40,7 @@ async fn strict_typing_inline() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result;
-	assert_eq!(tmp.unwrap_err().to_string(), "Expected `bool | int` but found a `NONE`");
+	assert_eq!(tmp.unwrap_err().to_string(), "Could not cast into `bool | int` using input `NONE`");
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(

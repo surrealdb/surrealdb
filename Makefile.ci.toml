@@ -254,6 +254,13 @@ args = [
     "--features",
     "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
     "--workspace",
+    # Exclude surrealism packages due to wasmtime complexity and stdin loops
+    "--exclude", "surrealism-cli",
+    "--exclude", "surrealism-runtime",
+    "--exclude", "surrealism",
+    "--exclude", "surrealism-macros",
+    "--exclude", "surrealism-types",
+    "--exclude", "demo",
     "--no-fail-fast",
     "--",
     "--skip",
@@ -428,7 +435,7 @@ run_task = { name = [
 
 [tasks.ci-rocksdb-kvs]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb" }
+env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb", SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE = 10485760, SURREAL_ROCKSDB_WRITE_BUFFER_SIZE = 10240, SURREAL_ROCKSDB_WAL_SIZE_LIMIT = 1 }
 run_task = { name = [
     "test-kvs",
 ], fork = true, parallel = true }

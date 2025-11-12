@@ -1,8 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
-use crate::expr::Expr;
-use crate::expr::expression::VisitExpression;
 use crate::expr::idiom::Idiom;
 use crate::fmt::Fmt;
 
@@ -21,15 +19,6 @@ impl IntoIterator for Splits {
 	type IntoIter = std::vec::IntoIter<Self::Item>;
 	fn into_iter(self) -> Self::IntoIter {
 		self.0.into_iter()
-	}
-}
-
-impl VisitExpression for Splits {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.0.iter().for_each(|split| split.visit(visitor));
 	}
 }
 

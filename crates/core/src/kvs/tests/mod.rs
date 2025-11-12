@@ -28,6 +28,8 @@ mod multiwriter_different_keys;
 mod multiwriter_same_keys_allow;
 mod multiwriter_same_keys_conflict;
 mod raw;
+#[cfg(feature = "kv-rocksdb")]
+mod read_and_deletion_only;
 mod reverse_iterator;
 mod snapshot;
 mod timestamp_to_versionstamp;
@@ -125,6 +127,7 @@ mod rocksdb {
 		multiwriter_same_keys_conflict,
 		timestamp_to_versionstamp,
 		reverse_iterator,
+		read_and_deletion_only,
 	);
 }
 

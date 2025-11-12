@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use std::collections::HashSet;
 use std::hint::black_box;
 

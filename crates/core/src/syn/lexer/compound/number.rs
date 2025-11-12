@@ -162,7 +162,7 @@ pub fn number_kind(lexer: &mut Lexer, start: Token) -> Result<NumberKind, Syntax
 	}
 
 	if has_ident_after(lexer) {
-		let char = lexer.reader.next().unwrap();
+		let char = lexer.reader.next().expect("lexer validated input");
 		let char = lexer.reader.convert_to_char(char)?;
 		bail!("Invalid token, found unexpected character `{char}` after number token", @lexer.current_span())
 	}
@@ -231,7 +231,7 @@ where
 	};
 
 	if has_ident_after(lexer) {
-		let char = lexer.reader.next().unwrap();
+		let char = lexer.reader.next().expect("lexer validated input");
 		let char = lexer.reader.convert_to_char(char)?;
 		bail!("Invalid token, found unexpected character `{char} after integer token", @lexer.current_span())
 	}
@@ -250,7 +250,7 @@ where
 	}
 
 	if peek == Some(b'e') || peek == Some(b'E') {
-		bail!("Unexpected character `{}` only integers are allowed here",peek.unwrap() as char, @lexer.current_span())
+		bail!("Unexpected character `{}` only integers are allowed here",peek.expect("validated input") as char, @lexer.current_span())
 	}
 
 	let span = lexer.current_span();
@@ -292,7 +292,7 @@ where
 	lexer.eat(b'f');
 
 	if has_ident_after(lexer) {
-		let char = lexer.reader.next().unwrap();
+		let char = lexer.reader.next().expect("lexer validated input");
 		let char = lexer.reader.convert_to_char(char)?;
 		bail!("Invalid token, found invalid character `{char}` after number token", @lexer.current_span())
 	}
@@ -414,7 +414,7 @@ fn lex_duration_suffix(lexer: &mut Lexer) -> Result<DurationSuffix, SyntaxError>
 	};
 
 	if has_ident_after(lexer) {
-		let char = lexer.reader.next().unwrap();
+		let char = lexer.reader.next().expect("lexer validated input");
 		let char = lexer.reader.convert_to_char(char)?;
 		bail!("Invalid token, found invalid character `{char}` after duration suffix", @lexer.current_span())
 	}

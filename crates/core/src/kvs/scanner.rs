@@ -87,7 +87,7 @@ impl<'a, I> Scanner<'a, I> {
 			self.future = Some(scan(range, batch));
 		}
 		// Try to resolve the future
-		match self.future.as_mut().unwrap().poll_unpin(cx) {
+		match self.future.as_mut().expect("future should be set").poll_unpin(cx) {
 			// The future has now completed fully
 			Poll::Ready(result) => {
 				// Drop the completed asynchronous future
@@ -131,7 +131,8 @@ impl<'a, I> Scanner<'a, I> {
 							// Store the fetched range results
 							self.results.extend(v);
 							// Remove the first result to return
-							let item = self.results.pop_front().unwrap();
+							let item =
+								self.results.pop_front().expect("results should be non-empty");
 							// Return the first result
 							Poll::Ready(Some(Ok(item)))
 						}

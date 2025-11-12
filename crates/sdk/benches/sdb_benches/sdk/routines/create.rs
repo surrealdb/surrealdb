@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
 use surrealdb_types::RecordIdKey;

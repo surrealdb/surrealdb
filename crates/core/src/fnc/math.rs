@@ -1,10 +1,11 @@
+use core::f64;
+
 use anyhow::{Result, bail, ensure};
 
 use crate::err::Error;
+use crate::fnc::util;
 use crate::fnc::util::math::bottom::Bottom;
-use crate::fnc::util::math::deviation::Deviation;
 use crate::fnc::util::math::interquartile::Interquartile;
-use crate::fnc::util::math::mean::Mean;
 use crate::fnc::util::math::median::Median;
 use crate::fnc::util::math::midhinge::Midhinge;
 use crate::fnc::util::math::mode::Mode;
@@ -13,7 +14,6 @@ use crate::fnc::util::math::percentile::Percentile;
 use crate::fnc::util::math::spread::Spread;
 use crate::fnc::util::math::top::Top;
 use crate::fnc::util::math::trimean::Trimean;
-use crate::fnc::util::math::variance::Variance;
 use crate::val::number::Sort;
 use crate::val::{Number, TryPow, Value};
 
@@ -128,7 +128,7 @@ pub fn max((array,): (Vec<Number>,)) -> Result<Value> {
 }
 
 pub fn mean((array,): (Vec<Number>,)) -> Result<Value> {
-	Ok(array.mean().into())
+	util::math::mean(&array).map(Value::Number)
 }
 
 pub fn median((mut array,): (Vec<Number>,)) -> Result<Value> {
@@ -199,7 +199,7 @@ pub fn sqrt((arg,): (Number,)) -> Result<Value> {
 }
 
 pub fn stddev((array,): (Vec<Number>,)) -> Result<Value> {
-	Ok(array.deviation(true).into())
+	util::math::deviation(&array).map(Value::Number)
 }
 
 pub fn sum((array,): (Vec<Number>,)) -> Result<Value> {
@@ -225,5 +225,5 @@ pub fn trimean((mut array,): (Vec<Number>,)) -> Result<Value> {
 }
 
 pub fn variance((array,): (Vec<Number>,)) -> Result<Value> {
-	Ok(array.variance(true).into())
+	util::math::variance(&array).map(Value::Number)
 }

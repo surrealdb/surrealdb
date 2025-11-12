@@ -9,14 +9,13 @@ use uuid::Uuid;
 
 use crate::catalog;
 use crate::catalog::{
-	DatabaseDefinition, DatabaseId, IndexId, NamespaceDefinition, NamespaceId, TableDefinition,
-	TableId, UserDefinition,
+	DatabaseDefinition, DatabaseId, IndexId, NamespaceDefinition, NamespaceId, Record,
+	TableDefinition, TableId, UserDefinition,
 };
 use crate::ctx::MutableContext;
 use crate::dbs::node::Node;
 use crate::err::Error;
 use crate::val::RecordIdKey;
-use crate::val::record::Record;
 
 /// SurrealDB Node provider.
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
@@ -157,6 +156,13 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		db: DatabaseId,
 	) -> Result<Arc<[catalog::FunctionDefinition]>>;
 
+	/// Retrieve all module definitions for a specific database.
+	async fn all_db_modules(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+	) -> Result<Arc<[catalog::ModuleDefinition]>>;
+
 	/// Retrieve all param definitions for a specific database.
 	async fn all_db_params(
 		&self,
@@ -216,6 +222,22 @@ pub(crate) trait DatabaseProvider: NamespaceProvider {
 		ns: NamespaceId,
 		db: DatabaseId,
 		fc: &catalog::FunctionDefinition,
+	) -> Result<()>;
+
+	/// Retrieve a specific module definition from a database.
+	async fn get_db_module(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		md: &str,
+	) -> Result<Arc<catalog::ModuleDefinition>>;
+
+	/// Put a module definition into a database.
+	async fn put_db_module(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		md: &catalog::ModuleDefinition,
 	) -> Result<()>;
 
 	/// Retrieve a specific function definition from a database.

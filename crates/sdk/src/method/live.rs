@@ -116,7 +116,7 @@ where
 
 		// Execute the LIVE SELECT query directly to get the UUID
 		let results = router
-			.execute_query(Command::RawQuery {
+			.execute_query(Command::Query {
 				query: Cow::Owned(query),
 				txn: None,
 				variables,

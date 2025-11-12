@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::path::PathBuf;
 
 use async_channel::Sender;
+use surrealdb_core::iam::token::Token;
 use surrealdb_core::kvs::export::Config as DbExportConfig;
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 use surrealdb_types::SurrealValue;
@@ -25,10 +26,23 @@ pub(crate) enum Command {
 		credentials: Object,
 	},
 	Authenticate {
-		token: String,
+		token: Token,
+	},
+	Refresh {
+		token: Token,
 	},
 	Invalidate,
-	RawQuery {
+	Begin,
+	Rollback {
+		txn: Uuid,
+	},
+	Commit {
+		txn: Uuid,
+	},
+	Revoke {
+		token: Token,
+	},
+	Query {
 		txn: Option<Uuid>,
 		query: Cow<'static, str>,
 		variables: Variables,
@@ -94,7 +108,7 @@ impl Command {
 					id,
 					method: "use",
 					params: Some(Value::Array(Array::from(vec![namespace, database]))),
-					transaction: None,
+					txn: None,
 				}
 			}
 			Command::Signup {
@@ -103,7 +117,7 @@ impl Command {
 				id,
 				method: "signup",
 				params: Some(Value::Array(Array::from(vec![Value::from_t(credentials)]))),
-				transaction: None,
+				txn: None,
 			},
 			Command::Signin {
 				credentials,
@@ -111,23 +125,72 @@ impl Command {
 				id,
 				method: "signin",
 				params: Some(Value::Array(Array::from(vec![Value::from_t(credentials)]))),
-				transaction: None,
+				txn: None,
 			},
 			Command::Authenticate {
 				token,
 			} => RouterRequest {
 				id,
 				method: "authenticate",
+				// Extract only the access token for authentication.
+				// If the token has a refresh component, we ignore it here
+				// as authentication only needs the access token.
+				params: Some(Value::Array(Array::from(vec![match token {
+					Token::Access(access) => access.into_value(),
+					Token::WithRefresh {
+						access,
+						..
+					} => access.into_value(),
+				}]))),
+				txn: None,
+			},
+			Command::Refresh {
+				token,
+			} => RouterRequest {
+				id,
+				method: "refresh",
+				// Send the entire token structure (both access and refresh tokens)
+				// to the server for the refresh operation.
 				params: Some(Value::Array(Array::from(vec![Value::from_t(token)]))),
-				transaction: None,
+				txn: None,
 			},
 			Command::Invalidate => RouterRequest {
 				id,
 				method: "invalidate",
 				params: None,
-				transaction: None,
+				txn: None,
 			},
-			Command::RawQuery {
+			Command::Begin => RouterRequest {
+				id,
+				method: "begin",
+				params: None,
+				txn: None,
+			},
+			Command::Commit {
+				txn,
+			} => RouterRequest {
+				id,
+				method: "commit",
+				params: Some(Value::Array(Array::from(vec![Value::Uuid(Uuid(txn))]))),
+				txn: None,
+			},
+			Command::Rollback {
+				txn,
+			} => RouterRequest {
+				id,
+				method: "cancel",
+				params: Some(Value::Array(Array::from(vec![Value::Uuid(Uuid(txn))]))),
+				txn: None,
+			},
+			Command::Revoke {
+				token,
+			} => RouterRequest {
+				id,
+				method: "revoke",
+				params: Some(Value::Array(Array::from(vec![token.into_value()]))),
+				txn: None,
+			},
+			Command::Query {
 				txn,
 				query,
 				variables,
@@ -138,7 +201,7 @@ impl Command {
 					id,
 					method: "query",
 					params: Some(Value::Array(Array::from(params))),
-					transaction: txn,
+					txn,
 				}
 			}
 			Command::ExportFile {
@@ -163,13 +226,13 @@ impl Command {
 				id,
 				method: "ping",
 				params: None,
-				transaction: None,
+				txn: None,
 			},
 			Command::Version => RouterRequest {
 				id,
 				method: "version",
 				params: None,
-				transaction: None,
+				txn: None,
 			},
 			Command::Set {
 				key,
@@ -178,7 +241,7 @@ impl Command {
 				id,
 				method: "let",
 				params: Some(Value::from_t(vec![Value::from_t(key), value])),
-				transaction: None,
+				txn: None,
 			},
 			Command::Unset {
 				key,
@@ -186,7 +249,7 @@ impl Command {
 				id,
 				method: "unset",
 				params: Some(Value::from_t(vec![Value::from_t(key)])),
-				transaction: None,
+				txn: None,
 			},
 			Command::SubscribeLive {
 				..
@@ -197,7 +260,7 @@ impl Command {
 				id,
 				method: "kill",
 				params: Some(Value::from_t(vec![Value::Uuid(Uuid(uuid))])),
-				transaction: None,
+				txn: None,
 			},
 			Command::Run {
 				name,
@@ -213,7 +276,7 @@ impl Command {
 						version,
 						Value::Array(args),
 					]))),
-					transaction: None,
+					txn: None,
 				}
 			}
 		};
@@ -228,11 +291,10 @@ impl Command {
 #[derive(Clone, Debug, SurrealValue)]
 #[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
 pub(crate) struct RouterRequest {
-	id: Option<i64>,
-	method: &'static str,
-	params: Option<Value>,
-	#[allow(dead_code)]
-	transaction: Option<Uuid>,
+	pub(crate) id: Option<i64>,
+	pub(crate) method: &'static str,
+	pub(crate) params: Option<Value>,
+	pub(crate) txn: Option<Uuid>,
 }
 
 #[cfg(test)]
@@ -278,7 +340,7 @@ mod test {
 				Value::Number(Number::Int(1234i64)),
 				Value::String("request".to_string()),
 			]))),
-			transaction: Some(Uuid::new_v4()),
+			txn: Some(Uuid::new_v4()),
 		};
 
 		assert_converts(

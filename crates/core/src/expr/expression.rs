@@ -11,6 +11,7 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::closure::ClosureExpr;
 use crate::expr::operator::BindingPower;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::statements::{
@@ -26,7 +27,7 @@ use crate::expr::{
 use crate::fmt::{EscapeIdent, Pretty};
 use crate::fnc;
 use crate::types::PublicValue;
-use crate::val::{Array, Closure, Range, Table, Value};
+use crate::val::{Array, Range, Table, Value};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum Expr {
@@ -55,7 +56,7 @@ pub(crate) enum Expr {
 	// TODO: Factor out the call from the function expression.
 	FunctionCall(Box<FunctionCall>),
 
-	Closure(Box<Closure>),
+	Closure(Box<ClosureExpr>),
 
 	Break,
 	Continue,
@@ -154,6 +155,13 @@ impl Expr {
 			surrealdb_types::Value::Array(a) => Expr::Literal(Literal::Array(
 				a.inner().iter().cloned().map(Expr::from_public_value).collect(),
 			)),
+			surrealdb_types::Value::Set(s) => {
+				// Convert set to array for literal representation since there's no set literal
+				// syntax
+				Expr::Literal(Literal::Array(
+					s.iter().cloned().map(Expr::from_public_value).collect(),
+				))
+			}
 			surrealdb_types::Value::Object(o) => Expr::Literal(Literal::Object(
 				o.inner()
 					.iter()
@@ -813,122 +821,6 @@ impl Expr {
 	}
 }
 
-/// A lightweight visitor for traversing an expression tree.
-///
-/// Implementors call the provided `visitor` function on `self` and any nested
-/// expressions. The traversal order is pre-order: the current node is visited
-/// before its children. This is intentionally minimal to keep traversal cheap.
-///
-/// This trait enables features that need to inspect a statement without
-/// executing it, such as slow-query logging, which walks the AST to find
-/// `$param` usages.
-pub(crate) trait VisitExpression {
-	/// Visit this expression and its nested expressions, invoking `visitor`
-	/// for each encountered node.
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr);
-}
-
-impl VisitExpression for Expr {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		visitor(self);
-		match self {
-			Expr::Literal(x) => {
-				x.visit(visitor);
-			}
-			Expr::Param(_) => {}
-			Expr::Idiom(x) => {
-				x.visit(visitor);
-			}
-			Expr::Table(_) => {}
-			Expr::Mock(_) => {}
-			Expr::Block(block) => {
-				block.visit(visitor);
-			}
-			Expr::Constant(_) => {}
-			Expr::Prefix {
-				expr,
-				..
-			} => {
-				expr.visit(visitor);
-			}
-			Expr::Postfix {
-				expr,
-				..
-			} => expr.visit(visitor),
-			Expr::Binary {
-				left,
-				right,
-				..
-			} => {
-				left.visit(visitor);
-				right.visit(visitor);
-			}
-			Expr::FunctionCall(function) => function.visit(visitor),
-			Expr::Closure(closure) => {
-				closure.visit(visitor);
-			}
-			Expr::Break => {}
-			Expr::Continue => {}
-			Expr::Return(output) => {
-				output.visit(visitor);
-			}
-			Expr::Throw(expr) => expr.visit(visitor),
-			Expr::IfElse(x) => {
-				x.exprs.iter().for_each(|(a, b)| {
-					a.visit(visitor);
-					b.visit(visitor);
-				});
-
-				if let Some(x) = &x.close {
-					x.visit(visitor);
-				}
-			}
-			Expr::Select(select) => {
-				select.visit(visitor);
-			}
-			Expr::Create(create) => {
-				create.visit(visitor);
-			}
-			Expr::Update(update) => {
-				update.visit(visitor);
-			}
-			Expr::Upsert(upsert) => {
-				upsert.visit(visitor);
-			}
-			Expr::Delete(delete) => {
-				delete.visit(visitor);
-			}
-			Expr::Relate(relate) => relate.visit(visitor),
-			Expr::Insert(insert) => {
-				insert.visit(visitor);
-			}
-			Expr::Define(define) => {
-				define.visit(visitor);
-			}
-			Expr::Remove(remove) => {
-				remove.visit(visitor);
-			}
-			Expr::Rebuild(_) => {}
-			Expr::Alter(alter) => {
-				alter.visit(visitor);
-			}
-			Expr::Info(info) => {
-				info.visit(visitor);
-			}
-			Expr::Foreach(foreach) => foreach.visit(visitor),
-			Expr::Let(set) => {
-				set.visit(visitor);
-			}
-			Expr::Sleep(_) => {}
-		}
-	}
-}
-
 impl fmt::Display for Expr {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		use std::fmt::Write;
@@ -1073,9 +965,9 @@ impl DeserializeRevisioned for Expr {
 			query.as_bytes(),
 			crate::syn::parser::ParserSettings {
 				references_enabled: true,
-				bearer_access_enabled: true,
 				define_api_enabled: true,
 				files_enabled: true,
+				surrealism_enabled: true,
 				..Default::default()
 			},
 			async |p, stk| p.parse_expr(stk).await,
