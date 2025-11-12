@@ -10,7 +10,7 @@ use crate::expr::{Expr, Literal};
 use crate::val::Duration;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Timeout(pub Expr);
+pub(crate) struct Timeout(pub(crate) Expr);
 
 impl Default for Timeout {
 	fn default() -> Self {

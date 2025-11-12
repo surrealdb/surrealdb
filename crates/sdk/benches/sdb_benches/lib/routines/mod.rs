@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use std::sync::Arc;
 
 use criterion::Bencher;
@@ -9,6 +11,10 @@ mod create;
 pub(super) use create::*;
 mod read;
 pub(super) use read::*;
+
+fn rand_id() -> String {
+	nanoid::nanoid!(20, &surrealdb_core::cnf::ID_CHARS)
+}
 
 /// Routine trait for the benchmark routines.
 ///

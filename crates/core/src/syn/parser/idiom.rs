@@ -113,15 +113,9 @@ impl Parser<'_> {
 					if peek.kind == t!("~") {
 						self.pop_peek();
 						self.pop_peek();
-						if !self.settings.references_enabled {
-							bail!(
-								"Experimental capability `record_references` is not enabled",
-								@self.last_span() => "Use of `<~` reference lookup is still experimental"
-							)
-						}
-
 						let lookup =
 							stk.run(|stk| self.parse_lookup(stk, LookupKind::Reference)).await?;
+
 						res.push(Part::Graph(lookup))
 					} else if peek.kind == t!("-") {
 						self.pop_peek();
@@ -194,13 +188,6 @@ impl Parser<'_> {
 					if peek.kind == t!("~") {
 						self.pop_peek();
 						self.pop_peek();
-						if !self.settings.references_enabled {
-							bail!(
-								"Experimental capability `record_references` is not enabled",
-								@self.last_span() => "Use of `<~` reference lookup is still experimental"
-							)
-						}
-
 						let lookup = self.parse_lookup(stk, LookupKind::Reference).await?;
 						res.push(Part::Graph(lookup))
 					} else if peek.kind == t!("-") {
@@ -229,7 +216,7 @@ impl Parser<'_> {
 
 	/// Parse a idiom which can only start with a graph or an identifier.
 	/// Other expressions are not allowed as start of this idiom
-	pub async fn parse_plain_idiom(&mut self, stk: &mut Stk) -> ParseResult<Idiom> {
+	pub(crate) async fn parse_plain_idiom(&mut self, stk: &mut Stk) -> ParseResult<Idiom> {
 		let start = match self.peek_kind() {
 			t!("->") => {
 				self.pop_peek();
@@ -240,13 +227,6 @@ impl Parser<'_> {
 			t!("<") => {
 				let t = self.pop_peek();
 				let lookup = if self.eat_whitespace(t!("~")) {
-					if !self.settings.references_enabled {
-						bail!(
-							"Experimental capability `record_references` is not enabled",
-							@self.last_span() => "Use of `<~` reference lookup is still experimental"
-						)
-					}
-
 					stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Reference)).await?
 				} else if self.eat_whitespace(t!("-")) {
 					stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::In))).await?
@@ -660,14 +640,14 @@ impl Parser<'_> {
 	pub(super) async fn parse_lookup(
 		&mut self,
 		stk: &mut Stk,
-		kind: LookupKind,
+		lookup_kind: LookupKind,
 	) -> ParseResult<Lookup> {
 		let token = self.peek();
 		match token.kind {
 			t!("?") => {
 				self.pop_peek();
 				Ok(Lookup {
-					kind,
+					kind: lookup_kind,
 					..Default::default()
 				})
 			}
@@ -690,10 +670,10 @@ impl Parser<'_> {
 						Vec::new()
 					}
 					x if Self::kind_is_identifier(x) => {
-						let subject = self.parse_lookup_subject(stk).await?;
+						let subject = self.parse_lookup_subject(stk, true).await?;
 						let mut subjects = vec![subject];
 						while self.eat(t!(",")) {
-							subjects.push(self.parse_lookup_subject(stk).await?);
+							subjects.push(self.parse_lookup_subject(stk, true).await?);
 						}
 						subjects
 					}
@@ -729,7 +709,7 @@ impl Parser<'_> {
 				self.expect_closing_delimiter(t!(")"), span)?;
 
 				Ok(Lookup {
-					kind,
+					kind: lookup_kind,
 					what,
 					cond,
 					alias,
@@ -744,9 +724,9 @@ impl Parser<'_> {
 			x if Self::kind_is_identifier(x) => {
 				// The following function should always succeed here,
 				// returning an error here would be a bug, so unwrap.
-				let subject = self.parse_lookup_subject(stk).await?;
+				let subject = self.parse_lookup_subject(stk, false).await?;
 				Ok(Lookup {
-					kind,
+					kind: lookup_kind,
 					what: vec![subject],
 					..Default::default()
 				})
@@ -1013,12 +993,18 @@ mod tests {
 				f("friend"),
 				Part::Graph(Lookup {
 					kind: LookupKind::Graph(Dir::Out),
-					what: vec![LookupSubject::Table("like".to_owned())],
+					what: vec![LookupSubject::Table {
+						table: "like".to_owned(),
+						referencing_field: None
+					}],
 					..Default::default()
 				}),
 				Part::Graph(Lookup {
 					kind: LookupKind::Graph(Dir::Out),
-					what: vec![LookupSubject::Table("person".to_owned())],
+					what: vec![LookupSubject::Table {
+						table: "person".to_owned(),
+						referencing_field: None
+					}],
 					..Default::default()
 				}),
 			]))

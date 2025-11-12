@@ -3,7 +3,7 @@ use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
-use surrealdb_core::val::{Array, Value};
+use surrealdb_types::{Array, Value};
 
 #[tokio::test]
 async fn subquery_select() -> Result<()> {
@@ -157,7 +157,7 @@ async fn subquery_ifelse_set() -> Result<()> {
 	assert_eq!(tmp, Value::None);
 	// RETURN $record;
 	let tmp = res.remove(0).result?;
-	let val = Array::new().into();
+	let val = Value::Array(Array::new());
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
@@ -291,7 +291,7 @@ async fn subquery_ifelse_array() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Array::new().into();
+	let val = Value::Array(Array::new());
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;

@@ -27,7 +27,8 @@ impl Document {
 		if !self.is_iteration_initial() {
 			return self.insert_update(stk, ctx, opt, &Statement::Insert(stm)).await;
 		}
-
+		// Try to generate a record id if none is present
+		self.generate_record_id()?;
 		// is this retryable?
 		// it is retryable when some data is present on the insert statement to update.
 		let retryable = stm.update.is_some();
@@ -66,7 +67,7 @@ impl Document {
 						return Err(IgnoreError::Error(e));
 					}
 					let Ok(Error::IndexExists {
-						thing,
+						record: thing,
 						..
 					}) = e.downcast()
 					else {
@@ -94,7 +95,7 @@ impl Document {
 						return Err(IgnoreError::Error(e));
 					}
 					let Ok(Error::RecordExists {
-						thing,
+						record: thing,
 						..
 					}) = e.downcast()
 					else {
@@ -140,7 +141,7 @@ impl Document {
 		self.modify_for_update_retry(retry, val);
 
 		// we restarted, so we might need to generate a record id again?
-		self.generate_record_id(stk, ctx, opt, &Statement::Insert(stm)).await?;
+		self.generate_record_id()?;
 
 		self.insert_update(stk, ctx, opt, &Statement::Insert(stm)).await
 	}
@@ -163,7 +164,7 @@ impl Document {
 		self.process_table_fields(stk, ctx, opt, stm).await?;
 		self.cleanup_table_fields(ctx, opt, stm).await?;
 		self.check_permissions_table(stk, ctx, opt, stm).await?;
-		self.store_index_data(stk, ctx, opt, stm).await?;
+		self.store_index_data(stk, ctx, opt).await?;
 		self.store_record_data(ctx, opt, stm).await?;
 		self.process_table_views(stk, ctx, opt, stm).await?;
 		self.process_table_lives(stk, ctx, opt, stm).await?;
@@ -189,7 +190,7 @@ impl Document {
 		self.process_table_fields(stk, ctx, opt, stm).await?;
 		self.cleanup_table_fields(ctx, opt, stm).await?;
 		self.check_permissions_table(stk, ctx, opt, stm).await?;
-		self.store_index_data(stk, ctx, opt, stm).await?;
+		self.store_index_data(stk, ctx, opt).await?;
 		self.store_record_data(ctx, opt, stm).await?;
 		self.process_table_views(stk, ctx, opt, stm).await?;
 		self.process_table_lives(stk, ctx, opt, stm).await?;

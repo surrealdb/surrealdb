@@ -8,17 +8,17 @@ use uuid::Uuid;
 use crate::catalog;
 use crate::catalog::SubscriptionDefinition;
 use crate::cnf::MAX_COMPUTATION_DEPTH;
-use crate::dbs::Notification;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::iam::{Action, Auth, ResourceKind};
+use crate::types::PublicNotification;
 
 /// An Options is passed around when processing a set of query
 /// statements.
 ///
 /// An Options contains specific information for how
 /// to process each particular statement, including the record
-/// version to retrieve, whether futures should be processed, and
+/// version to retrieve, whether computed values should be processed, and
 /// whether field/event/table queries should be processed (useful
 /// when importing data, where these queries might fail).
 #[derive(Clone, Debug)]
@@ -41,8 +41,6 @@ pub struct Options {
 	pub(crate) force: Force,
 	/// Should we run permissions checks?
 	pub(crate) perms: bool,
-	/// Should we error if tables don't exist?
-	pub(crate) strict: bool,
 	/// Should we process field queries?
 	pub(crate) import: bool,
 	/// The data version as nanosecond timestamp
@@ -56,7 +54,6 @@ pub enum Force {
 	All,
 	None,
 	Table(Arc<[catalog::TableDefinition]>),
-	Index(Arc<[catalog::IndexDefinition]>),
 }
 
 /// Trait for a pluggable message broker used to forward live query events across nodes.
@@ -66,7 +63,10 @@ pub trait MessageBroker: Send + Sync + Debug {
 
 	/// Forward a live query event for the given subscription to its owning node.
 	/// The concrete implementation decides how to encode and route this request.
-	fn send(&self, notification: Notification) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
+	fn send(
+		&self,
+		notification: PublicNotification,
+	) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
 }
 
 impl Default for Options {
@@ -86,7 +86,6 @@ impl Options {
 			live: false,
 			perms: true,
 			force: Force::None,
-			strict: false,
 			import: false,
 			auth_enabled: true,
 			broker: None,
@@ -165,12 +164,6 @@ impl Options {
 		self
 	}
 
-	/// Sepecify if we should error when a table does not exist
-	pub fn with_strict(mut self, strict: bool) -> Self {
-		self.strict = strict;
-		self
-	}
-
 	/// Specify if we are currently importing data
 	pub fn with_import(mut self, import: bool) -> Self {
 		self.set_import(import);
@@ -235,19 +228,6 @@ impl Options {
 	}
 
 	/// Create a new Options object for a subquery
-	pub fn new_with_strict(&self, strict: bool) -> Self {
-		Self {
-			broker: self.broker.clone(),
-			auth: self.auth.clone(),
-			ns: self.ns.clone(),
-			db: self.db.clone(),
-			force: self.force.clone(),
-			strict,
-			..*self
-		}
-	}
-
-	/// Create a new Options object for a subquery
 	pub fn new_with_import(&self, import: bool) -> Self {
 		Self {
 			broker: self.broker.clone(),
@@ -273,7 +253,7 @@ impl Options {
 	}
 
 	// Get currently selected base
-	pub fn selected_base(&self) -> Result<Base, Error> {
+	pub(crate) fn selected_base(&self) -> Result<Base, Error> {
 		match (self.ns.as_ref(), self.db.as_ref()) {
 			(None, None) => Ok(Base::Root),
 			(Some(_), None) => Ok(Base::Ns),
@@ -282,11 +262,11 @@ impl Options {
 		}
 	}
 
-	/// Create a new Options object for a function/subquery/future/etc.
+	/// Create a new Options object for a function/subquery/computed/etc.
 	///
 	/// The parameter is the approximate cost of the operation (more concretely, the size of the
 	/// stack frame it uses relative to a simple function call). When in doubt, use a value of 1.
-	pub fn dive(&self, cost: u8) -> Result<Self, Error> {
+	pub(crate) fn dive(&self, cost: u8) -> Result<Self, Error> {
 		if self.dive < cost as u32 {
 			return Err(Error::ComputationDepthExceeded);
 		}
@@ -376,10 +356,7 @@ impl Options {
 			return Ok(());
 		}
 
-		self.auth.is_allowed(action, &res).map_err(|x| match x.downcast() {
-			Ok(x) => anyhow::Error::new(Error::IamError(x)),
-			Err(e) => e,
-		})
+		self.auth.is_allowed(action, &res)
 	}
 
 	/// Checks the current server configuration, and

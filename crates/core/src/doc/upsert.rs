@@ -40,15 +40,15 @@ impl Document {
 				// record using the ON DUPLICATE KEY UPDATE
 				// clause with the ID received in the error
 				Ok(Error::IndexExists {
-					thing,
+					record,
 					..
-				}) if !self.is_specific_record_id() => thing,
+				}) if !self.is_specific_record_id() => record,
 				// We attempted to INSERT a document with an ID,
 				// and this ID already exists in the database,
 				// so we need to UPDATE the record instead.
 				Ok(Error::RecordExists {
-					thing,
-				}) => thing,
+					record,
+				}) => record,
 
 				// If an error was received, but this statement
 				// is potentially retryable because it might
@@ -95,7 +95,7 @@ impl Document {
 
 		// Skip generate_record_id in retry mode since the ID is already set correctly
 		if !self.retry {
-			self.generate_record_id(stk, ctx, opt, stm).await?;
+			self.generate_record_id()?;
 		}
 
 		self.upsert_update(stk, ctx, opt, stm).await
@@ -110,15 +110,16 @@ impl Document {
 		stm: &Statement<'_>,
 	) -> Result<Value, IgnoreError> {
 		self.check_permissions_quick(stk, ctx, opt, stm).await?;
+		self.process_record_data(stk, ctx, opt, stm).await?;
+		self.generate_record_id()?;
 		self.check_table_type(ctx, opt, stm).await?;
 		self.check_data_fields(stk, ctx, opt, stm).await?;
-		self.process_record_data(stk, ctx, opt, stm).await?;
 		self.default_record_data(ctx, opt, stm).await?;
 		self.process_table_fields(stk, ctx, opt, stm).await?;
 		self.cleanup_table_fields(ctx, opt, stm).await?;
 		self.check_permissions_table(stk, ctx, opt, stm).await?;
 		self.store_record_data(ctx, opt, stm).await?;
-		self.store_index_data(stk, ctx, opt, stm).await?;
+		self.store_index_data(stk, ctx, opt).await?;
 		self.process_table_views(stk, ctx, opt, stm).await?;
 		self.process_table_lives(stk, ctx, opt, stm).await?;
 		self.process_table_events(stk, ctx, opt, stm).await?;
@@ -145,7 +146,7 @@ impl Document {
 		self.cleanup_table_fields(ctx, opt, stm).await?;
 		self.check_permissions_table(stk, ctx, opt, stm).await?;
 		self.store_record_data(ctx, opt, stm).await?;
-		self.store_index_data(stk, ctx, opt, stm).await?;
+		self.store_index_data(stk, ctx, opt).await?;
 		self.process_table_views(stk, ctx, opt, stm).await?;
 		self.process_table_lives(stk, ctx, opt, stm).await?;
 		self.process_table_events(stk, ctx, opt, stm).await?;

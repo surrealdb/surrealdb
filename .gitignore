@@ -30,6 +30,7 @@ Temporary Items
 *.skv
 *.sw?
 *.skv
+*.profraw
 lcov.info
 
 # -----------------------------------
@@ -58,4 +59,7 @@ lcov.info
 surreal
 history.txt
 /doc/tla/states/
+
+crates/surrealism/test/demo.surli
+crates/surrealism/test/surrealism
 

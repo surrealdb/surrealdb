@@ -10,7 +10,6 @@ use super::paths::ID;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::expression::VisitExpression;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, FlowResultExt as _, Function, Idiom, Part};
 use crate::fmt::Fmt;
@@ -21,7 +20,7 @@ use crate::val::{Array, Value};
 /// The `foo,bar,*` part of statements like `SELECT foo,bar.* FROM faz`.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Fields {
+pub(crate) enum Fields {
 	/// Fields had the `VALUE` clause and should only return the given selector
 	///
 	/// This variant should not contain Field::All
@@ -56,16 +55,6 @@ impl Fields {
 		}
 	}
 
-	pub(crate) fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		match self {
-			Fields::Value(field) => field.visit(visitor),
-			Fields::Select(fields) => fields.iter().for_each(|f| f.visit(visitor)),
-		}
-	}
-
 	/// Create a new `*` field projection
 	pub fn all() -> Self {
 		Fields::Select(vec![Field::All])
@@ -95,7 +84,7 @@ impl Fields {
 	}
 
 	/// Returns an iterator which returns all fields which are not `Field::All`.
-	pub fn iter_non_all_fields(&self) -> impl Iterator<Item = &'_ Field> {
+	pub(crate) fn iter_non_all_fields(&self) -> impl Iterator<Item = &'_ Field> {
 		self.iter_fields().filter(|x| !matches!(x, Field::All))
 	}
 
@@ -139,13 +128,12 @@ impl Fields {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-		group: bool,
 	) -> Result<Value> {
 		if let Some(doc) = doc {
-			self.compute_value(stk, ctx, opt, doc, group).await
+			self.compute_value(stk, ctx, opt, doc).await
 		} else {
 			let doc = Value::None.into();
-			self.compute_value(stk, ctx, opt, &doc, group).await
+			self.compute_value(stk, ctx, opt, &doc).await
 		}
 	}
 
@@ -155,7 +143,6 @@ impl Fields {
 		ctx: &Context,
 		opt: &Options,
 		doc: &CursorDoc,
-		group: bool,
 	) -> Result<Value> {
 		// Process the desired output
 
@@ -205,7 +192,7 @@ impl Fields {
 							}
 							// Assign each fetched yield to the output
 							for (p, x) in res {
-								match p.last().unwrap().alias() {
+								match p.last().expect("idiom is non-empty").alias() {
 									// This is an alias expression part
 									Some(a) => {
 										if let Some(i) = alias {
@@ -224,120 +211,99 @@ impl Fields {
 						// TODO: This section should not be handled here, this should be catched by
 						// an analysis pass and optimized.
 						Expr::FunctionCall(f) => {
-							if group && f.receiver.is_aggregate() {
-								let x = if f.arguments.is_empty() {
-									f.compute(stk, ctx, opt, Some(doc)).await.catch_return()?
-								} else {
-									stk.run(|stk| f.arguments[0].compute(stk, ctx, opt, Some(doc)))
-										.await
-										.catch_return()?
-								};
-								// Check if this is a single VALUE field expression
-								if self.is_single() {
-									out = x
-								} else {
-									out.set(stk, ctx, opt, name.as_ref(), x).await?
-								}
-							} else {
-								// functions 'type::fields' and 'type::field' are specially handled
-								// here as they don't just return a result but also set fields on
-								// the document, so `type::field("foo")` results in `{ foo: "value"
-								// }` instead of `{ ["type::field('foo')"]: "value" }`
-								match f.receiver {
-									Function::Normal(ref x) if x == "type::fields" => {
-										// Some manual reimplemenation of type::fields to make it
-										// more efficient.
-										let mut arguments = Vec::new();
-										for arg in f.arguments.iter() {
-											arguments.push(
-												stk.run(|stk| {
-													arg.compute(stk, ctx, opt, Some(doc))
-												})
+							// functions 'type::fields' and 'type::field' are specially handled
+							// here as they don't just return a result but also set fields on
+							// the document, so `type::field("foo")` results in `{ foo: "value"
+							// }` instead of `{ ["type::field('foo')"]: "value" }`
+							match f.receiver {
+								Function::Normal(ref x) if x == "type::fields" => {
+									// Some manual reimplemenation of type::fields to make it
+									// more efficient.
+									let mut arguments = Vec::new();
+									for arg in f.arguments.iter() {
+										arguments.push(
+											stk.run(|stk| arg.compute(stk, ctx, opt, Some(doc)))
 												.await
 												.catch_return()?,
-											);
-										}
-
-										// replicate the same error that would happen with normal
-										// function calls
-										let (args,) =
-											<(Vec<String>,)>::from_args("type::fields", arguments)?;
-
-										// manually do the implementation of type::fields
-										let mut idioms = Vec::<Idiom>::new();
-										for arg in args {
-											idioms.push(syn::idiom(&arg)?.into())
-										}
-
-										let mut idiom_results = Vec::new();
-										for idiom in idioms.iter() {
-											let res = idiom
-												.compute(stk, ctx, opt, Some(doc))
-												.await
-												.catch_return()?;
-											idiom_results.push(res);
-										}
-										// Check if this is a single VALUE field expression
-										if self.is_single() {
-											out = Value::Array(Array(idiom_results));
-										} else {
-											// TODO: Alias is ignored here, figure out the right
-											// behaviour. Maybe make an alias result in sub fields?
-											// `select type::fields(["foo","faz"]) as bar` resulting
-											// in `{ "bar": { foo: value, faz: value} }`?
-											for (idiom, idiom_res) in
-												idioms.iter().zip(idiom_results.into_iter())
-											{
-												out.set(stk, ctx, opt, &idiom.0, idiom_res).await?;
-											}
-										}
+										);
 									}
-									Function::Normal(ref x) if x == "type::field" => {
-										// Some manual reimplemenation of type::field to make it
-										// more efficient.
-										let mut arguments = Vec::new();
-										for arg in f.arguments.iter() {
-											arguments.push(
-												stk.run(|stk| {
-													arg.compute(stk, ctx, opt, Some(doc))
-												})
-												.await
-												.catch_return()?,
-											);
-										}
 
-										// replicate the same error that would happen with normal
-										// function calls
-										let (arg,) =
-											<(String,)>::from_args("type::field", arguments)?;
+									// replicate the same error that would happen with normal
+									// function calls
+									let (args,) =
+										<(Vec<String>,)>::from_args("type::fields", arguments)?;
 
-										// manually do the implementation of type::field
-										let idiom: Idiom = syn::idiom(&arg)?.into();
+									// manually do the implementation of type::fields
+									let mut idioms = Vec::<Idiom>::new();
+									for arg in args {
+										idioms.push(syn::idiom(&arg)?.into())
+									}
 
+									let mut idiom_results = Vec::new();
+									for idiom in idioms.iter() {
 										let res = idiom
 											.compute(stk, ctx, opt, Some(doc))
 											.await
 											.catch_return()?;
-
-										if let Some(alias) = alias {
-											out.set(stk, ctx, opt, alias, res).await?;
-										} else if self.is_single() {
-											out = res
-										} else {
-											out.set(stk, ctx, opt, &idiom.0, res).await?;
+										idiom_results.push(res);
+									}
+									// Check if this is a single VALUE field expression
+									if self.is_single() {
+										out = Value::Array(Array(idiom_results));
+									} else {
+										// TODO: Alias is ignored here, figure out the right
+										// behaviour. Maybe make an alias result in sub fields?
+										// `select type::fields(["foo","faz"]) as bar` resulting
+										// in `{ "bar": { foo: value, faz: value} }`?
+										for (idiom, idiom_res) in
+											idioms.iter().zip(idiom_results.into_iter())
+										{
+											out.set(stk, ctx, opt, &idiom.0, idiom_res).await?;
 										}
 									}
-									_ => {
-										let expr = stk
-											.run(|stk| expr.compute(stk, ctx, opt, Some(doc)))
-											.await
-											.catch_return()?;
+								}
+								Function::Normal(ref x) if x == "type::field" => {
+									// Some manual reimplemenation of type::field to make it
+									// more efficient.
+									let mut arguments = Vec::new();
+									for arg in f.arguments.iter() {
+										arguments.push(
+											stk.run(|stk| arg.compute(stk, ctx, opt, Some(doc)))
+												.await
+												.catch_return()?,
+										);
+									}
 
-										if self.is_single() {
-											out = expr;
-										} else {
-											out.set(stk, ctx, opt, name.as_ref(), expr).await?;
-										}
+									// replicate the same error that would happen with normal
+									// function calls
+									let (arg,) = <(String,)>::from_args("type::field", arguments)?;
+
+									// manually do the implementation of type::field
+									let idiom: Idiom = syn::idiom(&arg)?.into();
+
+									let res = idiom
+										.compute(stk, ctx, opt, Some(doc))
+										.await
+										.catch_return()?;
+
+									if let Some(alias) = alias {
+										out.set(stk, ctx, opt, alias, res).await?;
+									} else if self.is_single() {
+										out = res
+									} else {
+										out.set(stk, ctx, opt, &idiom.0, res).await?;
+									}
+								}
+								_ => {
+									let expr = stk
+										.run(|stk| expr.compute(stk, ctx, opt, Some(doc)))
+										.await
+										.catch_return()?;
+
+									if self.is_single() {
+										out = expr;
+									} else {
+										out.set(stk, ctx, opt, name.as_ref(), expr).await?;
 									}
 								}
 							}
@@ -364,7 +330,7 @@ impl Fields {
 	}
 }
 
-pub enum FieldsIter<'a> {
+pub(crate) enum FieldsIter<'a> {
 	Single(Option<&'a Field>),
 	Multiple(Iter<'a, Field>),
 }
@@ -396,7 +362,7 @@ impl ExactSizeIterator for FieldsIter<'_> {}
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub enum Field {
+pub(crate) enum Field {
 	/// The `*` in `SELECT * FROM ...`
 	#[default]
 	All,
@@ -421,20 +387,6 @@ impl Field {
 	}
 }
 
-impl VisitExpression for Field {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		if let Field::Single {
-			expr,
-			..
-		} = self
-		{
-			expr.visit(visitor);
-		}
-	}
-}
 impl Display for Field {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {

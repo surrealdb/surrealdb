@@ -12,7 +12,7 @@ use crate::syn::lexer::compound::{self, NumberKind};
 use crate::syn::parser::mac::unexpected;
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{self, Span, TokenKind, t};
-use crate::val::{Bytes, Datetime, DecimalExt as _, Duration, File, Number, Regex, Uuid};
+use crate::val::DecimalExt as _;
 
 mod number;
 
@@ -58,7 +58,7 @@ impl TokenValue for Param {
 	}
 }
 
-impl TokenValue for Duration {
+impl TokenValue for surrealdb_types::Duration {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();
 		match token.kind {
@@ -66,14 +66,14 @@ impl TokenValue for Duration {
 			TokenKind::Digits => {
 				parser.pop_peek();
 				let v = parser.lexer.lex_compound(token, compound::duration)?.value;
-				Ok(Duration(v))
+				Ok(surrealdb_types::Duration::from(v))
 			}
 			_ => unexpected!(parser, token, "a duration"),
 		}
 	}
 }
 
-impl TokenValue for Datetime {
+impl TokenValue for surrealdb_types::Datetime {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();
 		match token.kind {
@@ -105,7 +105,7 @@ impl TokenValue for Datetime {
 	}
 }
 
-impl TokenValue for Uuid {
+impl TokenValue for surrealdb_types::Uuid {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();
 		match token.kind {
@@ -136,7 +136,7 @@ impl TokenValue for Uuid {
 	}
 }
 
-impl TokenValue for File {
+impl TokenValue for surrealdb_types::File {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();
 		if !parser.settings.files_enabled {
@@ -171,7 +171,7 @@ impl TokenValue for File {
 	}
 }
 
-impl TokenValue for Bytes {
+impl TokenValue for surrealdb_types::Bytes {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();
 		match token.kind {
@@ -202,7 +202,7 @@ impl TokenValue for Bytes {
 	}
 }
 
-impl TokenValue for Regex {
+impl TokenValue for surrealdb_types::Regex {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let peek = parser.peek();
 		match peek.kind {
@@ -280,13 +280,13 @@ impl TokenValue for NumberToken {
 }
 
 // TODO: Remove once properly seperating AST from Expr.
-impl TokenValue for Number {
+impl TokenValue for surrealdb_types::Number {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.next_token_value::<NumberToken>()?;
 		match token {
-			NumberToken::Float(x) => Ok(Number::Float(x)),
-			NumberToken::Integer(x) => Ok(Number::Int(x)),
-			NumberToken::Decimal(x) => Ok(Number::Decimal(x)),
+			NumberToken::Float(x) => Ok(Self::Float(x)),
+			NumberToken::Integer(x) => Ok(Self::Int(x)),
+			NumberToken::Decimal(x) => Ok(Self::Decimal(x)),
 		}
 	}
 }

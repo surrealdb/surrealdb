@@ -62,7 +62,7 @@ if value.is::<String>() {
 }
 
 // Convert from SurrealDB value to Rust type
-let string = value.into::<String>().unwrap();
+let string = value.into_t::<String>().unwrap();
 println!("Extracted string: {}", string);
 ```
 
@@ -86,7 +86,7 @@ Type-safe representation of SurrealDB record identifiers:
 use surrealdb_types::{RecordId, RecordIdKey, Value};
 
 let record_id = RecordId {
-    table: "person".to_string(),
+    table: "person".into(),
     key: RecordIdKey::String("john".to_string()),
 };
 let record_val = Value::RecordId(record_id);

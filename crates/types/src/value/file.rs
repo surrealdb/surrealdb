@@ -1,9 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+use crate::sql::ToSql;
+use crate::write_sql;
+
 /// Represents a file reference in SurrealDB
 ///
 /// A file reference points to a file stored in a bucket with a specific key.
 /// This is used for file storage and retrieval operations.
+
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct File {
 	/// The bucket name where the file is stored
@@ -40,4 +44,25 @@ impl File {
 	pub fn key(&self) -> &str {
 		&self.key
 	}
+}
+
+impl ToSql for crate::File {
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "f\"{}:{}\"", fmt_inner(&self.bucket, true), fmt_inner(&self.key, false));
+	}
+}
+
+fn fmt_inner(v: &str, escape_slash: bool) -> String {
+	v.chars()
+		.flat_map(|c| {
+			if c.is_ascii_alphanumeric()
+				|| matches!(c, '-' | '_' | '.')
+				|| (!escape_slash && c == '/')
+			{
+				vec![c]
+			} else {
+				vec!['\\', c]
+			}
+		})
+		.collect::<String>()
 }

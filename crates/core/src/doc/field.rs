@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
@@ -5,14 +6,13 @@ use reblessive::tree::Stk;
 
 use crate::catalog::{self, FieldDefinition};
 use crate::ctx::{Context, MutableContext};
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::dbs::{Options, Statement};
 use crate::doc::Document;
 use crate::err::Error;
+use crate::expr::FlowResultExt as _;
 use crate::expr::data::Data;
 use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
 use crate::expr::kind::Kind;
-use crate::expr::{FlowResultExt as _, Part};
 use crate::iam::Action;
 use crate::val::value::CoerceError;
 use crate::val::value::every::ArrayBehaviour;
@@ -40,8 +40,6 @@ fn clean_none(v: &mut Value) -> bool {
 impl Document {
 	/// Ensures that any remaining fields on a
 	/// SCHEMAFULL table are cleaned up and removed.
-	/// If a field is defined as FLEX, then any
-	/// nested fields or array values are untouched.
 	pub(super) async fn cleanup_table_fields(
 		&mut self,
 		ctx: &Context,
@@ -50,24 +48,82 @@ impl Document {
 	) -> Result<()> {
 		// Get the table
 		let tb = self.tb(ctx, opt).await?;
+
 		// This table is schemafull
 		if tb.schemafull {
 			// Prune unspecified fields from the document that are not defined via
 			// `DefineFieldStatement`s.
 
-			// Create a vector to store the keys
+			// Create a trie to store which fields are defined and allow nested fields
 			let mut defined_field_names = IdiomTrie::new();
+			// Create a set to track explicitly defined fields
+			let mut explicitly_defined = std::collections::HashSet::new();
+			// Create a set to track which fields preserve their nested values
+			let mut preserve_nested = std::collections::HashSet::new();
+
+			// First pass: collect all explicitly defined field names
+			let mut explicit_field_names = std::collections::HashSet::new();
+			for fd in self.fd(ctx, opt).await?.iter() {
+				explicit_field_names.insert(fd.name.clone());
+			}
 
 			// Loop through all field definitions
 			for fd in self.fd(ctx, opt).await?.iter() {
-				let is_flex = fd.flexible;
 				let is_literal = fd.field_kind.as_ref().is_some_and(Kind::contains_literal);
+				let is_any = fd.field_kind.as_ref().is_some_and(Kind::is_any);
+
+				// Check if the kind contains object (including option<object>, array<object>, etc.)
+				fn kind_contains_object(kind: &Kind) -> bool {
+					match kind {
+						Kind::Object => true,
+						Kind::Either(kinds) => kinds.iter().any(kind_contains_object),
+						Kind::Array(inner, _) | Kind::Set(inner, _) => kind_contains_object(inner),
+						_ => false,
+					}
+				}
+				let contains_object = fd.field_kind.as_ref().is_some_and(kind_contains_object);
+
+				// In SCHEMAFULL tables:
+				// - TYPE any: allows nested (inherent)
+				// - TYPE containing object without FLEXIBLE: strict (does NOT allow arbitrary
+				//   nested)
+				// - TYPE containing object with FLEXIBLE: allows nested
+				// - Literal types: allow nested
+				let allows_nested = is_any || is_literal || (contains_object && fd.flexible);
+
+				// Preserve nested fields if they allow nested
+				let should_preserve = allows_nested;
+
+				// Expand the field name to actual document values (handles array wildcards)
+				// and insert each into the trie
 				for k in self.current.doc.as_ref().each(&fd.name).into_iter() {
-					defined_field_names.insert(&k, is_flex || is_literal);
+					// Insert the field - mark as allowing nested based on calculation above
+					defined_field_names.insert(&k, allows_nested);
+					// Track this as an explicitly defined field
+					explicitly_defined.insert(k.clone());
+					// Track if this field preserves nested values
+					if should_preserve {
+						preserve_nested.insert(k.clone());
+					}
+					// Also insert all ancestor paths
+					// BUT only mark them as allowing nested if they don't have their own explicit
+					// definition
+					for i in 1..k.len() {
+						let ancestor = Idiom(k[..i].to_vec());
+						if !explicit_field_names.contains(&ancestor) {
+							// This ancestor doesn't have an explicit definition, treat as
+							// schemaless object
+							defined_field_names.insert(&k[..i], true);
+							if should_preserve {
+								preserve_nested.insert(k[..i].to_vec().into());
+							}
+						}
+					}
 				}
 			}
 
 			// Loop over every field in the document
+			let mut fields_to_remove = Vec::new();
 			for current_doc_field_idiom in
 				self.current.doc.as_ref().every(None, true, ArrayBehaviour::Full).iter()
 			{
@@ -79,16 +135,60 @@ impl Document {
 				// Check if the field is defined in the schema
 				match defined_field_names.contains(current_doc_field_idiom) {
 					IdiomTrieContains::Exact(_) => {
-						// This field is defined in the schema, so we can skip it.
+						// This field exists in the trie. Check if it's explicitly defined.
+						if !explicitly_defined.contains(current_doc_field_idiom) {
+							// This is an ancestor path, not an explicit field definition.
+							// Check if we should preserve it:
+							// 1. If any ancestor preserves nested fields
+							// 2. If this field has explicitly defined descendants
+							let mut should_preserve = false;
+
+							// Check ancestors
+							for i in 1..=current_doc_field_idiom.len() {
+								let ancestor = Idiom(current_doc_field_idiom[..i].to_vec());
+								if preserve_nested.contains(&ancestor) {
+									should_preserve = true;
+									break;
+								}
+							}
+
+							// Check if this field has explicitly defined descendants
+							if !should_preserve {
+								for explicit_field in explicitly_defined.iter() {
+									if explicit_field.starts_with(current_doc_field_idiom)
+										&& explicit_field.len() > current_doc_field_idiom.len()
+									{
+										should_preserve = true;
+										break;
+									}
+								}
+							}
+
+							if !should_preserve {
+								// Ancestor field is not preserved and has no defined children -
+								// remove it
+								fields_to_remove.push(current_doc_field_idiom.clone());
+							}
+						}
+						// Otherwise, it's explicitly defined, keep it
 						continue;
 					}
 					IdiomTrieContains::Ancestor(true) => {
-						// This field is not explicitly defined in the schema, but it is a child of
-						// a flex or literal field. If the field is a child of a flex field,
-						// then any nested fields are allowed. If the field is a child of a
-						// literal field, then allow any fields as they will be caught during
-						// coercion.
-						continue;
+						// This field is not explicitly defined, but it is a child of a field
+						// that allows nested values. Check if the parent preserves nested fields.
+						// Look for any ancestor in preserve_nested set
+						let mut should_preserve = false;
+						for i in 1..=current_doc_field_idiom.len() {
+							let ancestor = Idiom(current_doc_field_idiom[..i].to_vec());
+							if preserve_nested.contains(&ancestor) {
+								should_preserve = true;
+								break;
+							}
+						}
+						if !should_preserve {
+							// Nested fields are allowed but not preserved - remove them
+							fields_to_remove.push(current_doc_field_idiom.clone());
+						}
 					}
 					IdiomTrieContains::Ancestor(false) => {
 						if let Some(part) = current_doc_field_idiom.last() {
@@ -101,35 +201,26 @@ impl Document {
 
 						// This field is not explicitly defined in the schema or it is not a child
 						// of a flex field.
-						ensure!(
-							!opt.strict,
-							// If strict, then throw an error on an undefined field
-							Error::FieldUndefined {
-								table: tb.name.clone(),
-								field: current_doc_field_idiom.to_owned(),
-							}
-						);
-
-						// Otherwise, delete the field silently and don't error
-						self.current.doc.to_mut().cut(current_doc_field_idiom);
+						bail!(Error::FieldUndefined {
+							table: tb.name.clone(),
+							field: current_doc_field_idiom.to_owned(),
+						});
 					}
 
 					IdiomTrieContains::None => {
 						// This field is not explicitly defined in the schema or it is not a child
 						// of a flex field.
-						ensure!(
-							!opt.strict,
-							// If strict, then throw an error on an undefined field
-							Error::FieldUndefined {
-								table: tb.name.clone(),
-								field: current_doc_field_idiom.to_owned(),
-							}
-						);
-
-						// Otherwise, delete the field silently and don't error
-						self.current.doc.to_mut().cut(current_doc_field_idiom);
+						bail!(Error::FieldUndefined {
+							table: tb.name.clone(),
+							field: current_doc_field_idiom.to_owned(),
+						});
 					}
 				}
+			}
+
+			// Remove fields that were marked for removal
+			for field in fields_to_remove {
+				self.current.doc.to_mut().cut(&field);
 			}
 		}
 
@@ -158,7 +249,7 @@ impl Document {
 		// Get the record id
 		let rid = self.id()?;
 		// Get the user applied input
-		let inp = self.initial.doc.as_ref().changed(self.current.doc.as_ref());
+		let inp = self.compute_input_value(stk, ctx, opt, stm).await?.unwrap_or_default();
 		// When set, any matching embedded object fields
 		// which are prefixed with the specified idiom
 		// will be skipped, as the parent object is optional
@@ -191,7 +282,7 @@ impl Document {
 						self.is_new() || val == *old,
 						Error::FieldReadonly {
 							field: fd.name.clone(),
-							thing: rid.to_string(),
+							record: rid.to_string(),
 						}
 					);
 
@@ -232,7 +323,7 @@ impl Document {
 							_ => {
 								bail!(Error::FieldReadonly {
 									field: fd.name.clone(),
-									thing: rid.to_string(),
+									record: rid.to_string(),
 								});
 							}
 						}
@@ -377,8 +468,8 @@ struct FieldEditContext<'a> {
 }
 
 enum RefAction<'a> {
-	Set(&'a RecordId, String),
-	Delete(&'a RecordId, String),
+	Set(&'a RecordId),
+	Delete(&'a RecordId),
 }
 
 impl FieldEditContext<'_> {
@@ -397,7 +488,7 @@ impl FieldEditContext<'_> {
 
 						// Check the type of the ID part
 						inner.coerce_to_kind(kind).map_err(|e| Error::FieldCoerce {
-							thing: self.rid.to_string(),
+							record: self.rid.to_string(),
 							field_name: self.def.name.to_string(),
 							error: Box::new(e),
 						})?;
@@ -407,7 +498,7 @@ impl FieldEditContext<'_> {
 				else {
 					// There was a field check error
 					bail!(Error::FieldCoerce {
-						thing: self.rid.to_string(),
+						record: self.rid.to_string(),
 						field_name: "id".to_string(),
 						error: Box::new(CoerceError::InvalidKind {
 							from: val,
@@ -420,7 +511,7 @@ impl FieldEditContext<'_> {
 			else {
 				// Check the type of the field value
 				let val = val.coerce_to_kind(kind).map_err(|e| Error::FieldCoerce {
-					thing: self.rid.to_string(),
+					record: self.rid.to_string(),
 					field_name: self.def.name.to_string(),
 					error: Box::new(e),
 				})?;
@@ -563,7 +654,7 @@ impl FieldEditContext<'_> {
 			ensure!(
 				res.is_truthy(),
 				Error::FieldValue {
-					thing: self.rid.to_string(),
+					record: self.rid.to_string(),
 					field: self.def.name.clone(),
 					check: expr.to_string(),
 					value: now.to_string(),
@@ -657,91 +748,47 @@ impl FieldEditContext<'_> {
 	}
 	/// Process any REFERENCE clause for the field definition
 	async fn process_reference_clause(&mut self, val: &Value) -> Result<()> {
-		if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-			return Ok(());
-		}
-
 		// Is there a `REFERENCE` clause?
 		if self.def.reference.is_some() {
-			let doc = Some(&self.doc.current);
-			let old = self.old.as_ref();
-
-			// The current value might be contained inside an array of references
-			// Try to find other references with a similar path to the current one
-			let mut check_others = async || -> Result<Vec<Value>> {
-				let others = self
-					.doc
-					.current
-					.doc
-					.as_ref()
-					.get(self.stk, self.ctx, self.opt, doc, &self.def.name)
-					.await
-					.catch_return()?;
-
-				if let Value::Array(arr) = others {
-					Ok(arr.0)
-				} else {
-					Ok(vec![])
-				}
-			};
-
 			// Check if the value has actually changed
+			let old = self.old.as_ref();
 			if old == val {
 				// Nothing changed
 				return Ok(());
 			}
 
+			// Create a vector to store the actions
 			let mut actions = vec![];
 
-			// A value might be contained inside an array of references
-			// If so, we skip it. Otherwise, we delete the reference.
-			if let Value::RecordId(rid) = old {
-				let others = check_others().await?;
-				if !others.iter().any(|v| v == old) {
-					actions.push(RefAction::Delete(rid, self.def.name.to_string()));
+			fn collect_rids(v: &Value) -> HashSet<&RecordId> {
+				match v {
+					Value::Array(arr) => {
+						arr.iter().filter_map(|v| v.as_record()).collect::<HashSet<_>>()
+					}
+					Value::Set(set) => {
+						set.iter().filter_map(|v| v.as_record()).collect::<HashSet<_>>()
+					}
+					Value::RecordId(rid) => HashSet::from([rid]),
+					_ => HashSet::new(),
 				}
 			}
 
-			// New references, wether on their own or inside an array
-			// are always processed through here. Always add the new reference
-			// if the key already exists it will just overwrite which is fine.
-			if let Value::RecordId(rid) = val {
-				actions.push(RefAction::Set(rid, self.def.name.to_string()));
+			let old = collect_rids(old);
+			let new = collect_rids(val);
+
+			for rid in old.difference(&new) {
+				actions.push(RefAction::Delete(rid));
 			}
 
-			// Values removed from an array are not always processed via the above
-			// Try to delete the references here where needed
-			if let Value::Array(oldarr) = old {
-				// For array based references, we always store the foreign field as the nested field
-				let ff = self.def.name.clone().push(Part::All).to_string();
-				// If the new value is still an array, we only filter out the record ids that
-				// are not present in the new array
-				if let Value::Array(newarr) = val {
-					for old_rid in oldarr.iter() {
-						if newarr.contains(old_rid) {
-							continue;
-						}
-
-						if let Value::RecordId(rid) = old_rid {
-							actions.push(RefAction::Delete(rid, ff.clone()));
-						}
-					}
-
-					// If the new value is not an array, then all record ids in the old array are
-					// removed
-				} else {
-					for old_rid in oldarr.iter() {
-						if let Value::RecordId(rid) = old_rid {
-							actions.push(RefAction::Delete(rid, ff.clone()));
-						}
-					}
-				}
+			for rid in new.difference(&old) {
+				actions.push(RefAction::Set(rid));
 			}
 
 			// Process the actions
+			let ff = self.def.name.to_string();
 			for action in actions.into_iter() {
 				match action {
-					RefAction::Set(rid, ff) => {
+					RefAction::Set(rid) => {
 						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
 						let key = crate::key::r#ref::new(
 							ns,
@@ -749,13 +796,13 @@ impl FieldEditContext<'_> {
 							&rid.table,
 							&rid.key,
 							&self.rid.table,
-							&self.rid.key,
 							&ff,
+							&self.rid.key,
 						);
 
 						self.ctx.tx().set(&key, &(), None).await?;
 					}
-					RefAction::Delete(rid, ff) => {
+					RefAction::Delete(rid) => {
 						let (ns, db) = self.ctx.expect_ns_db_ids(self.opt).await?;
 						let key = crate::key::r#ref::new(
 							ns,
@@ -763,8 +810,8 @@ impl FieldEditContext<'_> {
 							&rid.table,
 							&rid.key,
 							&self.rid.table,
-							&self.rid.key,
 							&ff,
+							&self.rid.key,
 						);
 
 						self.ctx.tx().del(&key).await?;

@@ -4,11 +4,11 @@ use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset as _, Time
 
 use crate::syn::error::{SyntaxError, bail, syntax_error};
 use crate::syn::lexer::{BytesReader, Lexer};
-use crate::val::Datetime;
+use crate::types::PublicDatetime;
 
 impl Lexer<'_> {
 	/// Lex a datetime from a string.
-	pub fn lex_datetime(str: &str) -> Result<Datetime, SyntaxError> {
+	pub fn lex_datetime(str: &str) -> Result<PublicDatetime, SyntaxError> {
 		// Taken from chrono docs, who took it from the rfc docs.
 		// We don't use the chrone parse function as ours provides better error feedback.
 		//
@@ -90,10 +90,10 @@ impl Lexer<'_> {
 					.fix()
 					.from_local_datetime(&date_time)
 					.earliest()
-					.unwrap()
+					.expect("valid datetime")
 					.with_timezone(&Utc);
 
-				return Ok(Datetime(datetime));
+				return Ok(PublicDatetime::from(datetime));
 			}
 		}
 
@@ -167,9 +167,11 @@ impl Lexer<'_> {
 				// The range checks on the digits ensure that the offset can't exceed 23:59 so
 				// below unwraps won't panic.
 				if x == b'-' {
-					FixedOffset::west_opt((hour * 3600 + minutes * 60) as i32).unwrap()
+					FixedOffset::west_opt((hour * 3600 + minutes * 60) as i32)
+						.expect("valid timezone offset")
 				} else {
-					FixedOffset::east_opt((hour * 3600 + minutes * 60) as i32).unwrap()
+					FixedOffset::east_opt((hour * 3600 + minutes * 60) as i32)
+						.expect("valid timezone offset")
 				}
 			}
 			Some(b'Z' | b'z') => Utc.fix(),
@@ -189,11 +191,11 @@ impl Lexer<'_> {
 		let datetime = timezone
 			.from_local_datetime(&date_time)
 			.earliest()
-			// this should never panic with a fixed offset.
-			.unwrap()
+			// this should never panic with a fixed offset
+			.expect("valid datetime with fixed offset")
 			.with_timezone(&Utc);
 
-		Ok(Datetime(datetime))
+		Ok(PublicDatetime::from(datetime))
 	}
 
 	fn expect_seperator(reader: &mut BytesReader, sep: u8) -> Result<(), SyntaxError> {

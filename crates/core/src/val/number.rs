@@ -49,7 +49,7 @@ pub(crate) enum NumberKind {
 #[derive(Clone, Copy, Serialize, Deserialize, Debug)]
 #[serde(rename = "$surrealdb::private::Number")]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Number {
+pub(crate) enum Number {
 	Int(i64),
 	Float(f64),
 	Decimal(Decimal),
@@ -91,6 +91,26 @@ impl From<f64> for Number {
 impl From<Decimal> for Number {
 	fn from(v: Decimal) -> Self {
 		Self::Decimal(v)
+	}
+}
+
+impl From<surrealdb_types::Number> for Number {
+	fn from(v: surrealdb_types::Number) -> Self {
+		match v {
+			surrealdb_types::Number::Int(i) => Self::Int(i),
+			surrealdb_types::Number::Float(f) => Self::Float(f),
+			surrealdb_types::Number::Decimal(d) => Self::Decimal(d),
+		}
+	}
+}
+
+impl From<Number> for surrealdb_types::Number {
+	fn from(v: Number) -> Self {
+		match v {
+			Number::Int(i) => Self::Int(i),
+			Number::Float(f) => Self::Float(f),
+			Number::Decimal(d) => Self::Decimal(d),
+		}
 	}
 }
 
@@ -207,18 +227,6 @@ impl Number {
 		matches!(self, Number::Float(_))
 	}
 
-	pub fn is_decimal(&self) -> bool {
-		matches!(self, Number::Decimal(_))
-	}
-
-	pub fn is_integer(&self) -> bool {
-		match self {
-			Number::Int(_) => true,
-			Number::Float(v) => v.fract() == 0.0,
-			Number::Decimal(v) => v.is_integer(),
-		}
-	}
-
 	pub fn is_truthy(&self) -> bool {
 		match self {
 			Number::Int(v) => v != &0,
@@ -227,43 +235,11 @@ impl Number {
 		}
 	}
 
-	pub fn is_positive(&self) -> bool {
-		match self {
-			Number::Int(v) => v > &0,
-			Number::Float(v) => v > &0.0,
-			Number::Decimal(v) => v > &Decimal::ZERO,
-		}
-	}
-
-	pub fn is_negative(&self) -> bool {
-		match self {
-			Number::Int(v) => v < &0,
-			Number::Float(v) => v < &0.0,
-			Number::Decimal(v) => v < &Decimal::ZERO,
-		}
-	}
-
 	pub fn is_zero(&self) -> bool {
 		match self {
 			Number::Int(v) => v == &0,
 			Number::Float(v) => v == &0.0,
 			Number::Decimal(v) => v == &Decimal::ZERO,
-		}
-	}
-
-	pub fn is_zero_or_positive(&self) -> bool {
-		match self {
-			Number::Int(v) => v >= &0,
-			Number::Float(v) => v >= &0.0,
-			Number::Decimal(v) => v >= &Decimal::ZERO,
-		}
-	}
-
-	pub fn is_zero_or_negative(&self) -> bool {
-		match self {
-			Number::Int(v) => v <= &0,
-			Number::Float(v) => v <= &0.0,
-			Number::Decimal(v) => v <= &Decimal::ZERO,
 		}
 	}
 
@@ -307,35 +283,35 @@ impl Number {
 	// Complex conversion of number
 	// -----------------------------------
 
-	pub fn to_usize(&self) -> usize {
+	pub fn to_usize(self) -> usize {
 		match self {
-			Number::Int(v) => *v as usize,
-			Number::Float(v) => *v as usize,
+			Number::Int(v) => v as usize,
+			Number::Float(v) => v as usize,
 			Number::Decimal(v) => v.to_usize().unwrap_or_default(),
 		}
 	}
 
-	pub fn to_int(&self) -> i64 {
+	pub fn to_int(self) -> i64 {
 		match self {
-			Number::Int(v) => *v,
-			Number::Float(v) => *v as i64,
+			Number::Int(v) => v,
+			Number::Float(v) => v as i64,
 			Number::Decimal(v) => v.to_i64().unwrap_or_default(),
 		}
 	}
 
-	pub fn to_float(&self) -> f64 {
+	pub fn to_float(self) -> f64 {
 		match self {
-			Number::Int(v) => *v as f64,
-			Number::Float(v) => *v,
-			&Number::Decimal(v) => v.try_into().unwrap_or_default(),
+			Number::Int(v) => v as f64,
+			Number::Float(v) => v,
+			Number::Decimal(v) => v.try_into().unwrap_or_default(),
 		}
 	}
 
-	pub fn to_decimal(&self) -> Decimal {
+	pub fn to_decimal(self) -> Decimal {
 		match self {
-			Number::Int(v) => Decimal::from(*v),
-			Number::Float(v) => Decimal::from_f64(*v).unwrap_or_default(),
-			Number::Decimal(v) => *v,
+			Number::Int(v) => Decimal::from(v),
+			Number::Float(v) => Decimal::from_f64(v).unwrap_or_default(),
+			Number::Decimal(v) => v,
 		}
 	}
 
@@ -632,15 +608,6 @@ impl Number {
 			Number::Decimal(v) => v.sqrt().unwrap_or_default().into(),
 		}
 	}
-
-	pub fn pow(self, power: Number) -> Number {
-		match (self, power) {
-			(Number::Int(v), Number::Int(p)) => Number::Int(v.pow(p as u32)),
-			(Number::Decimal(v), Number::Int(p)) => v.powi(p).into(),
-			// TODO: (Number::Decimal(v), Number::Decimal(p)) => todo!(),
-			(v, p) => v.as_float().powf(p.as_float()).into(),
-		}
-	}
 }
 
 impl Eq for Number {}
@@ -804,15 +771,12 @@ impl Ord for Number {
 	}
 }
 
-// Warning: Equal numbers may have different hashes, which violates
-// the invariants of certain collections!
 impl hash::Hash for Number {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
-		match self {
-			Number::Int(v) => v.hash(state),
-			Number::Float(v) => v.to_bits().hash(state),
-			Number::Decimal(v) => v.hash(state),
-		}
+		// Use decimal buffer encoding to ensure numerically-equal values
+		// across variants (Int/Float/Decimal) produce identical hashes.
+		// This maintains the Hash/Eq contract: if a == b, then hash(a) == hash(b).
+		self.as_decimal_buf().hash(state);
 	}
 }
 
@@ -1133,7 +1097,7 @@ impl Sort for Vec<Number> {
 
 impl ToFloat for Number {
 	fn to_float(&self) -> f64 {
-		self.to_float()
+		Number::to_float(*self)
 	}
 }
 
@@ -1196,27 +1160,12 @@ pub trait DecimalExt {
 	fn from_str_normalized(s: &str) -> Result<Self, rust_decimal::Error>
 	where
 		Self: Sized;
-
-	/// Converts a string to a Decimal, normalizing it in the process.
-	///
-	/// This method is a convenience wrapper around
-	/// `rust_decimal::Decimal::from_str_exact` which can parse a string into a
-	/// Decimal and normalize it. If the value has higher precision than the
-	/// Decimal type can handle an Underflow error will be returned.
-	fn from_str_exact_normalized(s: &str) -> Result<Self, rust_decimal::Error>
-	where
-		Self: Sized;
 }
 
 impl DecimalExt for Decimal {
 	fn from_str_normalized(s: &str) -> Result<Decimal, rust_decimal::Error> {
 		#[allow(clippy::disallowed_methods)]
 		Ok(Decimal::from_str(s)?.normalize())
-	}
-
-	fn from_str_exact_normalized(s: &str) -> Result<Decimal, rust_decimal::Error> {
-		#[allow(clippy::disallowed_methods)]
-		Ok(Decimal::from_str_exact(s)?.normalize())
 	}
 }
 
@@ -1253,25 +1202,6 @@ mod tests {
 	}
 
 	#[test]
-	fn test_decimal_ext_from_str_exact_normalized() {
-		let decimal = Decimal::from_str_exact_normalized("0.0").unwrap();
-		assert_eq!(decimal.to_string(), "0");
-		assert_eq!(decimal.to_i64(), Some(0));
-		assert_eq!(decimal.to_f64(), Some(0.0));
-
-		let decimal = Decimal::from_str_exact_normalized("123.456").unwrap();
-		assert_eq!(decimal.to_string(), "123.456");
-		assert_eq!(decimal.to_i64(), Some(123));
-		assert_eq!(decimal.to_f64(), Some(123.456));
-
-		let decimal =
-			Decimal::from_str_exact_normalized("13.5719384719384719385639856394139476937756394756");
-		assert!(decimal.is_err());
-		let err = decimal.unwrap_err();
-		assert_eq!(err.to_string(), "Number has a high precision that can not be represented.");
-	}
-
-	#[test]
 	fn test_try_float_div() {
 		let (sum_one, count_one) = (Number::Int(5), Number::Int(2));
 		assert_eq!(sum_one.try_float_div(count_one).unwrap(), Number::Float(2.5));
@@ -1290,12 +1220,12 @@ mod tests {
 		let b = Number::Float(-f64::INFINITY);
 		let c = Number::Float(1f64);
 		let d = Number::Decimal(
-			Decimal::from_str_exact_normalized("1.0000000000000000000000000002").unwrap(),
+			Decimal::from_str_normalized("1.0000000000000000000000000002").unwrap(),
 		);
-		let e = Number::Decimal(Decimal::from_str_exact_normalized("1.1").unwrap());
+		let e = Number::Decimal(Decimal::from_str_normalized("1.1").unwrap());
 		let f = Number::Float(1.1f64);
 		let g = Number::Float(1.5f64);
-		let h = Number::Decimal(Decimal::from_str_exact_normalized("1.5").unwrap());
+		let h = Number::Decimal(Decimal::from_str_normalized("1.5").unwrap());
 		let i = Number::Float(f64::INFINITY);
 		let j = Number::Float(f64::NAN);
 		let original = vec![a, b, c, d, e, f, g, h, i, j];

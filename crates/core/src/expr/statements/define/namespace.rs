@@ -10,28 +10,17 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineNamespaceStatement {
+pub(crate) struct DefineNamespaceStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Expr,
 	pub comment: Option<Expr>,
-}
-
-impl VisitExpression for DefineNamespaceStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.comment.iter().for_each(|comment| comment.visit(visitor))
-	}
 }
 
 impl Default for DefineNamespaceStatement {
@@ -76,7 +65,7 @@ impl DefineNamespaceStatement {
 			}
 			ns.namespace_id
 		} else {
-			txn.lock().await.get_next_ns_id().await?
+			ctx.try_get_sequences()?.next_namespace_id(Some(ctx)).await?
 		};
 
 		// Process the statement

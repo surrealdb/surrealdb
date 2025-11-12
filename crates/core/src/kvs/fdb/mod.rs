@@ -52,19 +52,7 @@ pub struct Transaction {
 
 impl Drop for Transaction {
 	fn drop(&mut self) {
-		if !self.done && self.write {
-			match self.check {
-				Check::None => {
-					trace!("A transaction was dropped without being committed or cancelled");
-				}
-				Check::Warn => {
-					warn!("A transaction was dropped without being committed or cancelled");
-				}
-				Check::Error => {
-					error!("A transaction was dropped without being committed or cancelled");
-				}
-			}
-		}
+		self.check.drop_check(self.done, self.write);
 	}
 }
 
@@ -231,7 +219,13 @@ impl super::api::Transaction for Transaction {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Check the key
-		let res = self.inner.as_ref().unwrap().get(&key, self.snapshot()).await?.is_some();
+		let res = self
+			.inner
+			.as_ref()
+			.expect("transaction should have inner")
+			.get(&key, self.snapshot())
+			.await?
+			.is_some();
 		// Return result
 		Ok(res)
 	}
@@ -244,8 +238,13 @@ impl super::api::Transaction for Transaction {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Get the key
-		let res =
-			self.inner.as_ref().unwrap().get(&key, self.snapshot()).await?.map(|v| v.to_vec());
+		let res = self
+			.inner
+			.as_ref()
+			.expect("transaction should have inner")
+			.get(&key, self.snapshot())
+			.await?
+			.map(|v| v.to_vec());
 		// Return result
 		Ok(res)
 	}
@@ -266,7 +265,7 @@ impl super::api::Transaction for Transaction {
 			None
 		};
 		// Set the key
-		self.inner.as_ref().unwrap().set(&key, &val);
+		self.inner.as_ref().expect("transaction should have inner").set(&key, &val);
 		// Confirm the save point
 		if let Some(prep) = prep {
 			self.save_points.save(prep);
@@ -292,7 +291,7 @@ impl super::api::Transaction for Transaction {
 			None
 		};
 		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
+		let inner = self.inner.as_ref().expect("transaction should have inner");
 		// Get the existing value (if any)
 		let key_exists = if let Some(SavePrepare::NewKey(_, sv)) = &prep {
 			sv.get_val().is_some()
@@ -325,7 +324,7 @@ impl super::api::Transaction for Transaction {
 			None
 		};
 		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
+		let inner = self.inner.as_ref().expect("transaction should have inner");
 		// Get the existing value (if any)
 		let current_val = if let Some(SavePrepare::NewKey(_, sv)) = &prep {
 			sv.get_val().cloned()
@@ -360,7 +359,7 @@ impl super::api::Transaction for Transaction {
 			None
 		};
 		// Remove the key
-		self.inner.as_ref().unwrap().clear(&key);
+		self.inner.as_ref().expect("transaction should have inner").clear(&key);
 		// Confirm the save point
 		if let Some(prep) = prep {
 			self.save_points.save(prep);
@@ -383,7 +382,7 @@ impl super::api::Transaction for Transaction {
 			None
 		};
 		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
+		let inner = self.inner.as_ref().expect("transaction should have inner");
 		// Get the existing value (if any)
 		let current_val = if let Some(SavePrepare::NewKey(_, sv)) = &prep {
 			sv.get_val().cloned()
@@ -414,7 +413,10 @@ impl super::api::Transaction for Transaction {
 		// TODO: Check if we need savepoint with ranges
 
 		// Delete the key range
-		self.inner.as_ref().unwrap().clear_range(&rng.start, &rng.end);
+		self.inner
+			.as_ref()
+			.expect("transaction should have inner")
+			.clear_range(&rng.start, &rng.end);
 		// Return result
 		Ok(())
 	}
@@ -432,7 +434,7 @@ impl super::api::Transaction for Transaction {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
+		let inner = self.inner.as_ref().expect("transaction should have inner");
 
 		// Create result set
 		let mut res = vec![];
@@ -466,7 +468,7 @@ impl super::api::Transaction for Transaction {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Get the transaction
-		let inner = self.inner.as_ref().unwrap();
+		let inner = self.inner.as_ref().expect("transaction should have inner");
 		// Create result set
 		let mut res = vec![];
 		// Set the key range
@@ -492,7 +494,8 @@ impl super::api::Transaction for Transaction {
 		// Check to see if transaction is closed
 		ensure!(!self.done, Error::TxFinished);
 		// Get the current read version
-		let res = self.inner.as_ref().unwrap().get_read_version().await?;
+		let res =
+			self.inner.as_ref().expect("transaction should have inner").get_read_version().await?;
 		// Convert to a version stamp
 		let res = VersionStamp::from_u64(res as u64);
 		// Return result
@@ -523,7 +526,11 @@ impl super::api::Transaction for Transaction {
 		// Append the 4 byte placeholder position in little endian
 		key.append(&mut pos.to_le_bytes().to_vec());
 		// Set the versionstamp key
-		self.inner.as_ref().unwrap().atomic_op(&key, &val, MutationType::SetVersionstampedKey);
+		self.inner.as_ref().expect("transaction should have inner").atomic_op(
+			&key,
+			&val,
+			MutationType::SetVersionstampedKey,
+		);
 		// Return result
 		Ok(())
 	}

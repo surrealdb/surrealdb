@@ -5,7 +5,7 @@ use crate::sql::Expr;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Permissions {
+pub(crate) struct Permissions {
 	pub select: Permission,
 	pub create: Permission,
 	pub update: Permission,
@@ -162,25 +162,11 @@ impl From<crate::catalog::Permissions> for Permissions {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Permission {
+pub(crate) enum Permission {
 	None,
 	#[default]
 	Full,
 	Specific(Expr),
-}
-
-impl Permission {
-	pub fn is_none(&self) -> bool {
-		matches!(self, Self::None)
-	}
-
-	pub fn is_full(&self) -> bool {
-		matches!(self, Self::Full)
-	}
-
-	pub fn is_specific(&self) -> bool {
-		matches!(self, Self::Specific(_))
-	}
 }
 
 impl Display for Permission {

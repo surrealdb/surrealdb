@@ -21,18 +21,15 @@ pub mod hi;
 pub mod hl;
 pub mod hs;
 pub mod hv;
-#[cfg(not(target_family = "wasm"))]
 pub mod ia;
 pub mod ib;
 pub mod id;
 pub mod ii;
-#[cfg(not(target_family = "wasm"))]
 pub mod ip;
 pub mod is;
 pub mod iu;
 pub mod td;
 pub mod tt;
-pub mod vm;
 
 use std::borrow::Cow;
 
@@ -260,7 +257,7 @@ impl<'a> Index<'a> {
 		fd: &Array,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
-		*beg.last_mut().unwrap() = 0x00; // set trailing sentinel to 0x00 -> inclusive lower bound within composite tuple
+		*beg.last_mut().expect("prefix buffer is non-empty") = 0x00; // set trailing sentinel to 0x00 -> inclusive lower bound within composite tuple
 		Ok(beg)
 	}
 
@@ -276,7 +273,7 @@ impl<'a> Index<'a> {
 		fd: &Array,
 	) -> Result<Vec<u8>> {
 		let mut beg = Self::prefix_ids(ns, db, tb, ix, fd)?;
-		*beg.last_mut().unwrap() = 0xff; // set trailing sentinel to 0xFF -> exclusive upper bound within composite tuple
+		*beg.last_mut().expect("prefix buffer is non-empty") = 0xff; // set trailing sentinel to 0xFF -> exclusive upper bound within composite tuple
 		Ok(beg)
 	}
 }

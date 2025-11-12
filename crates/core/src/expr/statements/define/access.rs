@@ -4,6 +4,7 @@ use anyhow::{Result, bail};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
 use reblessive::tree::Stk;
+use surrealdb_types::{ToSql, write_sql};
 
 use super::DefineKind;
 use crate::catalog::providers::{AuthorisationProvider, NamespaceProvider};
@@ -17,14 +18,13 @@ use crate::expr::access_type::{
 	BearerAccess, BearerAccessSubject, BearerAccessType, JwtAccessIssue, JwtAccessVerify,
 	JwtAccessVerifyJwks, JwtAccessVerifyKey,
 };
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{AccessType, Algorithm, Base, Expr, Idiom, JwtAccess, Literal, RecordAccess};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Value};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineAccessStatement {
+pub(crate) struct DefineAccessStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub base: Base,
@@ -32,17 +32,6 @@ pub struct DefineAccessStatement {
 	pub authenticate: Option<Expr>,
 	pub duration: AccessDuration,
 	pub comment: Option<Expr>,
-}
-
-impl VisitExpression for DefineAccessStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.authenticate.iter().for_each(|expr| expr.visit(visitor));
-		self.comment.iter().for_each(|expr| expr.visit(visitor));
-	}
 }
 
 impl Default for DefineAccessStatement {
@@ -154,25 +143,6 @@ impl DefineAccessStatement {
 		}
 	}
 
-	/// Returns a version of the statement where potential secrets are redacted
-	/// This function should be used when displaying the statement to datastore users
-	/// This function should NOT be used when displaying the statement for export purposes
-	pub fn redacted(&self) -> DefineAccessStatement {
-		let mut das = self.clone();
-		das.access_type = match das.access_type {
-			AccessType::Jwt(ac) => AccessType::Jwt(ac.redacted()),
-			AccessType::Record(mut ac) => {
-				ac.jwt = ac.jwt.redacted();
-				AccessType::Record(ac)
-			}
-			AccessType::Bearer(mut ac) => {
-				ac.jwt = ac.jwt.redacted();
-				AccessType::Bearer(ac)
-			}
-		};
-		das
-	}
-
 	async fn to_definition(
 		&self,
 		stk: &mut Stk,
@@ -248,6 +218,7 @@ impl DefineAccessStatement {
 
 		Ok(AccessDefinition {
 			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "access name").await?,
+			base: self.base.into(),
 			grant_duration: map_opt!(x as &self.duration.grant => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
 			token_duration: map_opt!(x as &self.duration.token => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
 			session_duration: map_opt!(x as &self.duration.session => compute_to!(stk, ctx, opt, doc, x => val::Duration).0),
@@ -334,7 +305,7 @@ impl DefineAccessStatement {
 				}
 				// Process the statement
 				let key = crate::key::namespace::ac::new(ns, &definition.name);
-				txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+				txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
 				txn.set(&key, &definition, None).await?;
 				// Clear the cache
 				txn.clear_cache();
@@ -453,5 +424,11 @@ impl Display for DefineAccessStatement {
 			write!(f, " COMMENT {}", comment)?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for DefineAccessStatement {
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self)
 	}
 }

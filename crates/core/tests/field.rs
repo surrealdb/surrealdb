@@ -3,7 +3,7 @@ use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
-use surrealdb_core::val::{Array, RecordId};
+use surrealdb_types::{Array, RecordId, Value};
 
 use crate::helpers::Test;
 
@@ -120,7 +120,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 		DEFINE TABLE business SCHEMAFULL;
 		DEFINE FIELD owner ON TABLE business TYPE record<user>;
 		DEFINE TABLE contact TYPE RELATION SCHEMAFULL PERMISSIONS FOR select, create WHERE in.owner.id = $auth.id;
-		INSERT INTO user (id, name) VALUES (user:one, 'John'), (user:two, 'Lucy');
+		INSERT INTO user (id) VALUES (user:one), (user:two);
 		INSERT INTO business (id, owner) VALUES (business:one, user:one), (business:two, user:two);
 	";
 	let dbs = new_ds().await?.with_auth_enabled(true);
@@ -178,7 +178,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 		"test",
 		"test",
 		"test",
-		RecordId::new("user".to_owned(), "one".to_owned()).into(),
+		Value::RecordId(RecordId::new("user", "one".to_string())),
 	);
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	assert_eq!(res.len(), 2);
@@ -197,7 +197,7 @@ async fn field_definition_edge_permissions() -> Result<()> {
 	assert_eq!(tmp, val);
 	//
 	let tmp = res.remove(0).result?;
-	let val = Array::new().into();
+	let val = Value::Array(Array::new());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -266,7 +266,7 @@ async fn field_definition_flexible_array_any() -> Result<()> {
 	let sql = "
 		DEFINE TABLE user SCHEMAFULL;
 		DEFINE FIELD custom ON user TYPE option<array>;
-		DEFINE FIELD OVERWRITE custom.* ON user FLEXIBLE TYPE any;
+		DEFINE FIELD OVERWRITE custom.* ON user TYPE any;
 		CREATE user:one CONTENT { custom: ['sometext'] };
 		CREATE user:two CONTENT { custom: [ ['sometext'] ] };
 		CREATE user:three CONTENT { custom: [ { key: 'sometext' } ] };

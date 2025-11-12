@@ -30,7 +30,7 @@ pub async fn read(
 	let beg = match start {
 		ShowSince::Versionstamp(x) => change::prefix_ts(ns, db, VersionStamp::from_u64(x)),
 		ShowSince::Timestamp(x) => {
-			let ts = x.0.timestamp() as u64;
+			let ts = x.timestamp() as u64;
 			let vs = tx.lock().await.get_versionstamp_from_timestamp(ts, ns, db).await?;
 			match vs {
 				Some(vs) => change::prefix_ts(ns, db, vs),
@@ -87,7 +87,7 @@ pub async fn read(
 	// Collect all mutations together
 	if !buf.is_empty() {
 		let db_mut = DatabaseMutation(buf);
-		res.push(ChangeSet(vs.unwrap(), db_mut));
+		res.push(ChangeSet(vs.expect("versionstamp should be set when mutations exist"), db_mut));
 	}
 	// Return the results
 	Ok(res)

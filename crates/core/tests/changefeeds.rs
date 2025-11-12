@@ -6,8 +6,8 @@ use surrealdb_core::kvs::Datastore;
 use surrealdb_core::kvs::LockType::Optimistic;
 use surrealdb_core::kvs::TransactionType::Write;
 use surrealdb_core::syn;
-use surrealdb_core::val::{Array, Value};
 use surrealdb_core::vs::VersionStamp;
+use surrealdb_types::{Array, ToSql, Value};
 
 mod helpers;
 
@@ -106,30 +106,30 @@ async fn database_change_feeds() -> Result<()> {
 		)
 		.unwrap();
 		Some(&tmp)
-			.filter(|x| *x == &val)
+			.filter(|x| *x == val)
 			.map(|_v| ())
-			.ok_or_else(|| anyhow!("Expected UPDATE value:\nleft: {}\nright: {}", tmp, val))?;
+			.ok_or_else(|| anyhow!("Expected UPDATE value:\nleft: {tmp:?}\nright: {val:?}"))?;
 		// DELETE
 		let tmp = res.remove(0).result?;
-		let val = Array::new().into();
+		let val = Value::Array(Array::new());
 		Some(&tmp)
 			.filter(|x| **x == val)
 			.map(|_v| ())
-			.ok_or_else(|| anyhow!("Expected DELETE value:\nleft: {}\nright: {}", tmp, val))?;
+			.ok_or_else(|| anyhow!("Expected DELETE value:\nleft: {tmp:?}\nright: {val:?}"))?;
 		// SHOW CHANGES
 		let tmp = res.remove(0).result?;
 		cf_val_arr
 			.iter()
-			.find(|x| *x == &tmp)
+			.find(|x| *x == tmp)
 			// We actually dont want to capture if its found
 			.map(|_v| ())
 			.ok_or_else(|| {
 				anyhow!(
-					"Expected SHOW CHANGES value not found:\n{}\nin:\n{}",
+					"Expected SHOW CHANGES value not found:\n{:?}\nin:\n{:?}",
 					tmp,
 					cf_val_arr
 						.iter()
-						.map(|vs| vs.to_string())
+						.map(|vs| vs.clone().into_string().unwrap())
 						.reduce(|left, right| format!("{}\n{}", left, right))
 						.unwrap()
 				)
@@ -172,7 +172,7 @@ async fn database_change_feeds() -> Result<()> {
 	dbs.changefeed_process_at(None, current_time).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
-	let val: Value = Array::new().into();
+	let val: Value = Value::Array(Array::new());
 	assert_eq!(val, tmp);
 	//
 	Ok(())
@@ -269,7 +269,7 @@ async fn table_change_feeds() -> Result<()> {
 	assert_eq!(tmp, val);
 	// DELETE
 	let tmp = res.remove(0).result?;
-	let val = Array::new().into();
+	let val = Value::Array(Array::new());
 	assert_eq!(tmp, val);
 	// CREATE
 	let _tmp = res.remove(0).result?;
@@ -306,7 +306,7 @@ async fn table_change_feeds() -> Result<()> {
 				syn::value(
 					format!(
 						r#"[
-						{{ versionstamp: {vs1}, changes: [ {{ define_table: {{ name: 'person', changefeed: {{ expiry: '1h', original: false }}, drop: false, kind: {{ kind: 'ANY' }}, permissions: {{ create: false, delete: false, select: false, update: false }}, schemafull: false }} }} ] }},
+						{{ versionstamp: {vs1}, changes: [ {{ define_table: {{ name: 'person', changefeed: {{ expiry: 1h, original: false }}, drop: false, kind: {{ kind: 'ANY' }}, permissions: {{ create: false, delete: false, select: false, update: false }}, schemafull: false }} }} ] }},
 						{{ versionstamp: {vs2}, changes: [ {{ update: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
 						{{ versionstamp: {vs3}, changes: [ {{ update: {{ id: person:test, name: 'Name: Jaime' }} }} ] }},
 						{{ versionstamp: {vs4}, changes: [ {{ update: {{ id: person:test, name: 'Name: Tobie' }} }} ] }},
@@ -320,13 +320,9 @@ async fn table_change_feeds() -> Result<()> {
 			.collect();
 	assert!(
 		allowed_values.contains(&tmp),
-		"tmp:\n{}\nchecked:\n{}",
+		"tmp:\n{:?}\nchecked:\n{:?}",
 		tmp,
-		allowed_values
-			.iter()
-			.map(|v| v.to_string())
-			.reduce(|a, b| format!("{}\n{}", a, b))
-			.unwrap()
+		allowed_values.iter().map(|v| v.to_sql()).reduce(|a, b| format!("{a}\n{b}")).unwrap()
 	);
 	// Retain for 1h
 	let sql = "
@@ -337,19 +333,15 @@ async fn table_change_feeds() -> Result<()> {
 	let tmp = res.remove(0).result?;
 	assert!(
 		allowed_values.contains(&tmp),
-		"tmp:\n{}\nchecked:\n{}",
+		"tmp:\n{:?}\nchecked:\n{:?}",
 		tmp,
-		allowed_values
-			.iter()
-			.map(|v| v.to_string())
-			.reduce(|a, b| format!("{}\n{}", a, b))
-			.unwrap()
+		allowed_values.iter().map(|v| v.to_sql()).reduce(|a, b| format!("{a}\n{b}")).unwrap()
 	);
 	// GC after 1hs
 	dbs.changefeed_process_at(None, end_ts + 3600).await?;
 	let res = &mut dbs.execute(sql, &ses, None).await?;
 	let tmp = res.remove(0).result?;
-	let val = Array::new().into();
+	let val = Value::Array(Array::new());
 	assert_eq!(tmp, val);
 	//
 	Ok(())
@@ -423,7 +415,7 @@ async fn changefeed_with_ts() -> Result<()> {
 			define_table: {
 				name: 'user',
 				changefeed: {
-					expiry: '1h',
+					expiry: 1h,
 					original: false,
 				},
 				drop: false,

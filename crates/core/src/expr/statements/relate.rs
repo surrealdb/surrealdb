@@ -7,13 +7,12 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
 use crate::idx::planner::RecordStrategy;
-use crate::val::RecordId;
+use crate::val::{RecordId, RecordIdKey, Table};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct RelateStatement {
+pub(crate) struct RelateStatement {
 	pub only: bool,
 	/// The expression resulting in the table through which we create a relation
 	pub through: Expr,
@@ -137,75 +136,38 @@ impl RelateStatement {
 		//
 		for f in from.iter() {
 			for t in to.iter() {
-				match stk
+				let through = stk
 					.run(|stk| self.through.compute(stk, &ctx, opt, doc))
 					.await
-					.catch_return()?
-				{
-					// The relation has a specific record id
-					Value::RecordId(id) => {
-						i.ingest(Iterable::Relatable(f.clone(), id.clone(), t.clone(), None))
-					}
-					// The relation does not have a specific record id
-					Value::Table(tb) => match self.data {
-						// There is a data clause so check for a record id
-						Some(ref data) => {
-							let id = match data.rid(stk, &ctx, opt).await? {
-								Value::None => RecordId::random_for_table(tb.into_string()),
-								id => id.generate(tb.as_str().to_owned(), false)?,
-							};
-							i.ingest(Iterable::Relatable(f.clone(), id, t.clone(), None))
-						}
-						// There is no data clause so create a record id
-						None => i.ingest(Iterable::Relatable(
-							f.clone(),
-							RecordId::random_for_table(tb.into_string()),
-							t.clone(),
-							None,
-						)),
-					},
-					// The relation can not be any other type
-					v => {
-						bail!(Error::RelateStatementOut {
-							value: v.to_string(),
-						})
-					}
-				};
+					.catch_return()?;
+
+				let through = RelateThrough::try_from(through)?;
+				i.ingest(Iterable::Relatable(f.clone(), through, t.clone(), None));
 			}
 		}
 
 		// Assign the statement
 		let stm = Statement::from(self);
 
-		// Process the statement
-		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
-		// Catch statement timeout
-		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
-		// Output the results
-		match res {
-			// This is a single record result
-			Value::Array(mut a) if self.only => match a.len() {
-				// There was exactly one result
-				1 => Ok(a.0.pop().unwrap()),
-				// There were no results
-				_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
-			},
-			// This is standard query result
-			v => Ok(v),
-		}
-	}
-}
-
-impl VisitExpression for RelateStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.through.visit(visitor);
-		self.from.visit(visitor);
-		self.to.visit(visitor);
-		self.output.iter().for_each(|output| output.visit(visitor));
-		self.data.iter().for_each(|data| data.visit(visitor));
+		CursorDoc::update_parent(&ctx, doc, async |ctx| {
+			// Process the statement
+			let res = i.output(stk, ctx.as_ref(), opt, &stm, RecordStrategy::KeysAndValues).await?;
+			// Catch statement timeout
+			ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
+			// Output the results
+			match res {
+				// This is a single record result
+				Value::Array(mut a) if self.only => match a.len() {
+					// There was exactly one result
+					1 => Ok(a.0.pop().expect("array has exactly one element")),
+					// There were no results
+					_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
+				},
+				// This is standard query result
+				v => Ok(v),
+			}
+		})
+		.await
 	}
 }
 
@@ -232,5 +194,43 @@ impl fmt::Display for RelateStatement {
 			f.write_str(" PARALLEL")?
 		}
 		Ok(())
+	}
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub(crate) enum RelateThrough {
+	RecordId(RecordId),
+	Table(String),
+}
+
+impl From<(String, Option<RecordIdKey>)> for RelateThrough {
+	fn from((table, id): (String, Option<RecordIdKey>)) -> Self {
+		if let Some(id) = id {
+			RelateThrough::RecordId(RecordId::new(table, id))
+		} else {
+			RelateThrough::Table(table)
+		}
+	}
+}
+
+impl TryFrom<Value> for RelateThrough {
+	type Error = anyhow::Error;
+	fn try_from(value: Value) -> Result<Self> {
+		match value {
+			Value::RecordId(id) => Ok(RelateThrough::RecordId(id)),
+			Value::Table(table) => Ok(RelateThrough::Table(table.into_string())),
+			_ => bail!(Error::RelateStatementOut {
+				value: value.to_string()
+			}),
+		}
+	}
+}
+
+impl From<RelateThrough> for Value {
+	fn from(v: RelateThrough) -> Self {
+		match v {
+			RelateThrough::RecordId(id) => Value::RecordId(id),
+			RelateThrough::Table(table) => Value::Table(Table::new(table)),
+		}
 	}
 }

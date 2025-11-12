@@ -1,17 +1,18 @@
+#![allow(clippy::unwrap_used)]
+
 use std::sync::LazyLock;
 use std::time::Duration;
 
 use criterion::{Criterion, Throughput};
-use serde::{Deserialize, Serialize};
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
-use surrealdb_core::val::RecordIdKey;
+use surrealdb_types::{RecordIdKey, SurrealValue};
 
 mod routines;
 
 static DB: LazyLock<Surreal<Any>> = LazyLock::new(Surreal::init);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, SurrealValue)]
 struct Record {
 	field: RecordIdKey,
 }

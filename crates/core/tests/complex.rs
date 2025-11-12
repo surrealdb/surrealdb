@@ -4,9 +4,9 @@ mod helpers;
 use anyhow::Result;
 use helpers::{new_ds, with_enough_stack};
 use surrealdb_core::dbs::Session;
-use surrealdb_core::err::Error;
+use surrealdb_core::rpc::DbResultError;
 use surrealdb_core::syn;
-use surrealdb_core::val::Value;
+use surrealdb_types::Value;
 
 /* Removed because of <future> removal, not yet relevant for the initial COMPUTED implementation.
  * Once we start to analyze query dependencies up front we can error on cyclic dependencies again.
@@ -131,7 +131,7 @@ fn ok_future_graph_subquery_recursion_depth() -> Result<()> {
 fn ok_graph_traversal_depth() -> Result<()> {
 	// Build the SQL traversal query
 	fn graph_traversal(n: usize) -> String {
-		let mut ret = String::from("DELETE node;\n");
+		let mut ret = String::from("DEFINE DB test; REMOVE TABLE IF EXISTS node;\n");
 		ret.push_str("CREATE node:0;\n");
 		for i in 1..=n {
 			let prev = i - 1;
@@ -150,7 +150,7 @@ fn ok_graph_traversal_depth() -> Result<()> {
 		// Ensure a good stack size for tests
 		with_enough_stack(async move {
 			// Run the graph traversal queries
-			let mut res = run_queries(&graph_traversal(n)).await?;
+			let mut res = run_queries(&graph_traversal(n)).await;
 			// Remove the last result
 			let tmp = res.next_back().unwrap();
 			// Check all other queries
@@ -171,12 +171,8 @@ fn ok_graph_traversal_depth() -> Result<()> {
 					assert_eq!(res, val);
 				}
 				Err(res) => {
-					assert!(
-						matches!(res.downcast_ref(), Some(Error::ComputationDepthExceeded)),
-						"found {:?}",
-						res
-					);
 					assert!(n > 10, "Max traversals: {}", n - 1);
+					panic!("This should not happen: {res:?}");
 				}
 			}
 
@@ -193,12 +189,12 @@ fn ok_cast_chain_depth() -> Result<()> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
 		// Run a casting query which succeeds
-		let mut res = run_queries(&cast_chain(10)).await?;
+		let mut res = run_queries(&cast_chain(10)).await;
 		//
 		assert_eq!(res.len(), 1);
 		//
 		let tmp = res.next().unwrap()?;
-		let val = Value::from(vec![Value::from(5)]);
+		let val = Value::from_vec(vec![Value::from_int(5)]);
 		assert_eq!(tmp, val);
 		//
 		Ok(())
@@ -210,26 +206,18 @@ fn excessive_cast_chain_depth() -> Result<()> {
 	// Ensure a good stack size for tests
 	with_enough_stack(async {
 		// Run a casting query which will fail (either while parsing or executing)
-		match run_queries(&cast_chain(125)).await {
-			Ok(mut res) => {
-				assert_eq!(res.len(), 1);
-				//
-				let tmp = res.next().unwrap();
-				let err = tmp.unwrap_err();
-				assert!(
-					matches!(err.downcast_ref(), Some(Error::ComputationDepthExceeded)),
-					"found {:?}",
-					err
-				);
-			}
-			Err(e) => {
-				assert!(
-					matches!(e.downcast_ref(), Some(Error::ComputationDepthExceeded)),
-					"found {:?}",
-					e
-				);
-			}
-		}
+		let mut res = run_queries(&cast_chain(125)).await;
+		assert_eq!(res.len(), 1);
+		//
+		let tmp = res.next().unwrap();
+		let err = tmp.unwrap_err();
+		assert_eq!(
+			err,
+			DbResultError::InternalError(
+				"Reached excessive computation depth due to functions, subqueries, or computed values"
+					.to_string()
+			)
+		);
 		//
 		Ok(())
 	})
@@ -237,10 +225,16 @@ fn excessive_cast_chain_depth() -> Result<()> {
 
 async fn run_queries(
 	sql: &str,
-) -> Result<impl ExactSizeIterator<Item = Result<Value>> + DoubleEndedIterator + 'static> {
-	let dbs = new_ds().await?;
+) -> impl ExactSizeIterator<Item = std::result::Result<Value, DbResultError>>
++ DoubleEndedIterator
++ 'static {
+	let dbs = new_ds().await.expect("Failed to create new datastore");
 	let ses = Session::owner().with_ns("test").with_db("test");
-	dbs.execute(sql, &ses, None).await.map(|v| v.into_iter().map(|res| res.result))
+	dbs.execute(sql, &ses, None)
+		.await
+		.expect("Failed to execute query")
+		.into_iter()
+		.map(|res| res.result)
 }
 
 fn cast_chain(n: usize) -> String {

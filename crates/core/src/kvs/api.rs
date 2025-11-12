@@ -16,7 +16,7 @@ use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare, SavedValue};
 use crate::kvs::{KVKey, KVValue, Key, Val, Version};
 use crate::vs::VersionStamp;
 
-mod requirements {
+pub mod requirements {
 	//! This module defines the trait requirements for a transaction.
 	//!
 	//! The reason this exists is to allow for swapping out the `Send`
@@ -152,9 +152,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		_rng: Range<Key>,
 		_limit: u32,
 		_version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>> {
-		Err(anyhow::Error::new(Error::UnsupportedVersionedQueries))
-	}
+	) -> Result<Vec<(Key, Val)>>;
 
 	/// Retrieve a specific range of keys from the datastore in reverse order.
 	///

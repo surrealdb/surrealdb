@@ -1,10 +1,10 @@
 use std::time::Duration;
 
 use revision::revisioned;
+use surrealdb_types::{ToSql, write_sql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::sql::statements::define::{DefineKind, DefineSequenceStatement};
 use crate::val::Value;
 
@@ -45,7 +45,7 @@ impl InfoStructure for SequenceDefinition {
 }
 
 impl ToSql for &SequenceDefinition {
-	fn to_sql(&self) -> String {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }

@@ -1,73 +1,67 @@
 use std::collections::BTreeMap;
+use std::convert::Infallible;
 
 use serde::{Deserialize, Serialize};
 
+use crate::cnf::PROTECTED_PARAM_NAMES;
+use crate::ctx::Context;
+use crate::expr::Param;
+use crate::expr::visit::{Visit, Visitor};
+use crate::sql::expression::convert_public_value_to_internal;
+use crate::types::PublicVariables;
 use crate::val::{Object, Value};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+/// A visitor pass which will capture the value of parameters in the visited expression from the
+/// context.
+pub(crate) struct ParameterCapturePass<'a, 'b> {
+	pub context: &'a Context,
+	pub captures: &'b mut Variables,
+}
+
+impl ParameterCapturePass<'_, '_> {
+	pub fn capture<V: for<'a, 'b> Visit<ParameterCapturePass<'a, 'b>>>(
+		context: &Context,
+		v: &V,
+	) -> Variables {
+		let mut captures = Variables::new();
+
+		let _ = v.visit(&mut ParameterCapturePass {
+			context,
+			captures: &mut captures,
+		});
+
+		captures
+	}
+}
+
+impl Visitor for ParameterCapturePass<'_, '_> {
+	type Error = Infallible;
+
+	fn visit_param(&mut self, param: &Param) -> Result<(), Self::Error> {
+		if !PROTECTED_PARAM_NAMES.contains(&param.as_str()) {
+			if let Some(v) = self.context.value(param.as_str()) {
+				self.captures.0.entry(param.clone().into_string()).or_insert_with(|| v.clone());
+			}
+		}
+		Ok(())
+	}
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize, Hash)]
 #[repr(transparent)]
-pub struct Variables(pub BTreeMap<String, Value>);
+pub(crate) struct Variables(pub(crate) BTreeMap<String, Value>);
 
 impl Variables {
 	/// Create a new empty variables map.
-	#[inline]
+	#[allow(dead_code)]
 	pub fn new() -> Self {
 		Self(BTreeMap::new())
 	}
 
 	/// Insert a new variable into the map.
-	#[inline]
+	#[allow(dead_code)]
 	pub fn insert(&mut self, key: String, value: Value) {
 		self.0.insert(key, value);
-	}
-
-	/// Remove a variable from the map.
-	#[inline]
-	pub fn remove(&mut self, key: &str) {
-		self.0.remove(key);
-	}
-
-	#[inline]
-	pub fn append(&mut self, other: &mut Variables) {
-		self.0.append(&mut other.0);
-	}
-
-	/// Extend the variables map with another variables map.
-	#[inline]
-	pub fn extend(&mut self, other: Variables) {
-		self.0.extend(other.0);
-	}
-
-	/// Check if the variables map is empty.
-	#[inline]
-	pub fn is_empty(&self) -> bool {
-		self.0.is_empty()
-	}
-
-	/// Get the number of variables in the map.
-	#[inline]
-	pub fn len(&self) -> usize {
-		self.0.len()
-	}
-
-	/// Get an iterator over the variables in the map.
-	#[inline]
-	pub fn iter(&'_ self) -> std::collections::btree_map::Iter<'_, String, Value> {
-		self.0.iter()
-	}
-
-	/// Merge another variables map into the current one.
-	#[inline]
-	pub fn merge(&mut self, other: impl Into<Variables>) {
-		self.0.extend(other.into().0);
-	}
-
-	/// Merge another variables map into a new variables map.
-	#[inline]
-	pub fn merged(&self, other: impl Into<Variables>) -> Variables {
-		let mut vars = self.clone();
-		vars.merge(other.into());
-		vars
 	}
 }
 
@@ -99,29 +93,13 @@ impl From<BTreeMap<String, Value>> for Variables {
 	}
 }
 
-/*
-impl TryFrom<proto::Variables> for Variables {
-	type Error = anyhow::Error;
-
-	fn try_from(value: proto::Variables) -> Result<Self, Self::Error> {
-		let mut vars = Self::new();
-		for (k, v) in value.variables.into_iter() {
-			vars.insert(k, v.try_into()?);
+impl From<PublicVariables> for Variables {
+	fn from(vars: PublicVariables) -> Self {
+		let mut map = BTreeMap::new();
+		for (key, val) in vars {
+			let internal_val = convert_public_value_to_internal(val);
+			map.insert(key, internal_val);
 		}
-		Ok(vars)
+		Self(map)
 	}
 }
-
-impl TryFrom<Variables> for proto::Variables {
-	type Error = anyhow::Error;
-
-	fn try_from(value: Variables) -> Result<Self, Self::Error> {
-		let mut vars = Self {
-			variables: BTreeMap::new(),
-		};
-		for (k, v) in value.0.into_iter() {
-			vars.variables.insert(k, v.try_into()?);
-		}
-		Ok(vars)
-	}
-}*/

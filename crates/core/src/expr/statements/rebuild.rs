@@ -16,7 +16,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum RebuildStatement {
+pub(crate) enum RebuildStatement {
 	Index(RebuildIndexStatement),
 }
 
@@ -24,13 +24,13 @@ impl RebuildStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
-		stk: &mut Stk,
+		_stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		doc: Option<&CursorDoc>,
+		_doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		match self {
-			Self::Index(s) => s.compute(stk, ctx, opt, doc).await,
+			Self::Index(s) => s.compute(ctx, opt).await,
 		}
 	}
 }
@@ -44,7 +44,7 @@ impl Display for RebuildStatement {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct RebuildIndexStatement {
+pub(crate) struct RebuildIndexStatement {
 	pub name: String,
 	pub what: String,
 	pub if_exists: bool,
@@ -53,13 +53,7 @@ pub struct RebuildIndexStatement {
 
 impl RebuildIndexStatement {
 	/// Process this type returning a computed simple Value
-	pub(crate) async fn compute(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		doc: Option<&CursorDoc>,
-	) -> Result<Value> {
+	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the index definition
@@ -78,10 +72,10 @@ impl RebuildIndexStatement {
 				}
 			}
 		};
-		let ix = ix.as_ref().clone();
+		let tb = ctx.tx().expect_tb(ns, db, &self.what).await?;
 
 		// Rebuild the index
-		run_indexing(stk, ctx, opt, doc, &ix, !self.concurrently).await?;
+		run_indexing(ctx, opt, tb.table_id, ix, !self.concurrently).await?;
 		// Ok all good
 		Ok(Value::None)
 	}

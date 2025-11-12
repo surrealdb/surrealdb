@@ -8,7 +8,9 @@ use helpers::new_ds;
 use rust_decimal::Decimal;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
-use surrealdb_core::val::{Geometry, Number, Value};
+use surrealdb_types::{Geometry, Number, Value};
+
+use crate::helpers::skip_ok;
 
 #[tokio::test]
 async fn script_function_error() -> Result<()> {
@@ -65,24 +67,30 @@ async fn script_function_simple() -> Result<()> {
 #[tokio::test]
 async fn script_function_context() -> Result<()> {
 	let sql = "
-		CREATE film:test SET
-			ratings = [
-				{ rating: 6.3 },
-				{ rating: 8.7 },
-			],
-			display = function() {
+		DEFINE TABLE film SCHEMAFULL;
+		DEFINE FIELD ratings ON film TYPE array<{ rating: number }>;
+		DEFINE FIELD display ON film COMPUTED {
+			function() {
 				return this.ratings.filter(r => {
 					return r.rating >= 7;
 				}).map(r => {
 					return { ...r, rating: Math.round(r.rating * 10) };
 				});
 			}
-		;
+		};
+
+		CREATE film:test SET
+			ratings = [
+				{ rating: 6.3 },
+				{ rating: 8.7 },
+			];
 	";
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 1);
+	assert_eq!(res.len(), 4);
+	//
+	skip_ok(res, 3)?;
 	//
 	let tmp = res.remove(0).result?;
 	let val = syn::value(

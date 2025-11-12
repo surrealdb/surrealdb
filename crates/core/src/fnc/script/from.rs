@@ -8,7 +8,7 @@ use crate::val::{Array, Bytes, Datetime, Geometry, Object, RecordIdKey, Value};
 
 fn check_nul(s: &str) -> Result<(), Error> {
 	if s.contains('\0') {
-		Err(Error::InvalidString(std::ffi::CString::new(s).unwrap_err()))
+		Err(Error::InvalidString(std::ffi::CString::new(s).expect_err("string contains nul")))
 	} else {
 		Ok(())
 	}
@@ -19,12 +19,14 @@ impl<'js> FromJs<'js> for Value {
 		match val.type_of() {
 			js::Type::Undefined => Ok(Value::None),
 			js::Type::Null => Ok(Value::Null),
-			js::Type::Bool => Ok(Value::from(val.as_bool().unwrap())),
-			js::Type::Int => Ok(Value::from(val.as_int().unwrap() as f64)),
-			js::Type::Float => Ok(Value::from(val.as_float().unwrap())),
-			js::Type::String => Ok(Value::from(val.as_string().unwrap().to_string()?)),
+			js::Type::Bool => Ok(Value::from(val.as_bool().expect("type checked as bool"))),
+			js::Type::Int => Ok(Value::from(val.as_int().expect("type checked as int") as f64)),
+			js::Type::Float => Ok(Value::from(val.as_float().expect("type checked as float"))),
+			js::Type::String => {
+				Ok(Value::from(val.into_string().expect("type checked as string").to_string()?))
+			}
 			js::Type::Array => {
-				let v = val.as_array().unwrap();
+				let v = val.as_array().expect("type checked as array");
 				let mut x = Array::with_capacity(v.len());
 				for i in v.iter() {
 					let v = i?;
@@ -45,7 +47,7 @@ impl<'js> FromJs<'js> for Value {
 			}
 			js::Type::Object | js::Type::Exception => {
 				// Extract the value as an object
-				let v = val.into_object().unwrap();
+				let v = val.into_object().expect("type checked as object");
 				// Check to see if this object is an error
 				if v.is_error() {
 					let e: String = v.get(js::atom::PredefinedAtom::Message)?;
@@ -105,7 +107,10 @@ impl<'js> FromJs<'js> for Value {
 				if (v).is_instance_of(&date) {
 					let f: js::Function = v.get("getTime")?;
 					let m: i64 = f.call((This(v),))?;
-					let d = Utc.timestamp_millis_opt(m).unwrap();
+					let d = Utc
+						.timestamp_millis_opt(m)
+						.single()
+						.ok_or_else(|| Error::new_from_js("Date", "invalid timestamp"))?;
 					return Ok(Datetime::from(d).into());
 				}
 

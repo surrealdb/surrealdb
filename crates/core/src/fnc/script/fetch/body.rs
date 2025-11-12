@@ -134,10 +134,10 @@ impl<'js> FromJs<'js> for Body {
 	fn from_js(ctx: &Ctx<'js>, value: Value<'js>) -> Result<Self> {
 		let object = match value.type_of() {
 			Type::String => {
-				let string = value.as_string().unwrap().to_string()?;
+				let string = value.into_string().expect("type checked as string").to_string()?;
 				return Ok(Body::buffer(BodyKind::String, string));
 			}
-			Type::Object => value.as_object().unwrap(),
+			Type::Object => value.as_object().expect("type checked as object"),
 			x => {
 				return Err(Error::FromJs {
 					from: x.as_str(),

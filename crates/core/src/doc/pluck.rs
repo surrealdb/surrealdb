@@ -87,7 +87,7 @@ impl Document {
 					ctx.add_value("before", initial.doc.as_arc());
 					let ctx = ctx.freeze();
 					// Output the specified fields
-					v.compute(stk, &ctx, opt, Some(current), false).await.map_err(IgnoreError::from)
+					v.compute(stk, &ctx, opt, Some(current)).await.map_err(IgnoreError::from)
 				}
 			},
 			None => match stm {
@@ -106,11 +106,17 @@ impl Document {
 						self.computed_fields(stk, ctx, opt, DocKind::Current).await?;
 						&self.current
 					};
-					// Process the SELECT statement fields
-					stmt.expr
-						.compute(stk, ctx, opt, Some(current), stmt.group.is_some())
-						.await
-						.map_err(IgnoreError::from)
+
+					if stmt.group.is_some() {
+						// Field computation with groups is defered to collection.
+						Ok(current.doc.data.as_ref().clone())
+					} else {
+						// Process the SELECT statement fields
+						stmt.expr
+							.compute(stk, ctx, opt, Some(current))
+							.await
+							.map_err(IgnoreError::from)
+					}
 				}
 				Statement::Create(_)
 				| Statement::Upsert(_)

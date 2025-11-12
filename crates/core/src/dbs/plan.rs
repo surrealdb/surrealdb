@@ -5,7 +5,7 @@ use crate::dbs::result::Results;
 use crate::dbs::{Iterable, Statement};
 use crate::expr::lookup::LookupKind;
 use crate::idx::planner::RecordStrategy;
-use crate::val::{Object, Value};
+use crate::val::{Object, RecordId, Value};
 
 pub(super) struct Plan {
 	pub(super) do_iterate: bool,
@@ -160,15 +160,22 @@ impl ExplainItem {
 					("direction", sc.to_string().into()),
 				],
 			},
-			Iterable::Mergeable(t, v) => Self {
+			Iterable::Mergeable(tb, None, v) => Self {
 				name: "Iterate Mergeable".into(),
-				details: vec![("thing", Value::RecordId(t.to_owned())), ("value", v.to_owned())],
+				details: vec![("table", Value::String(tb.to_owned())), ("value", v.to_owned())],
+			},
+			Iterable::Mergeable(tb, Some(id), v) => Self {
+				name: "Iterate Mergeable".into(),
+				details: vec![
+					("thing", Value::RecordId(RecordId::new(tb.to_owned(), id.to_owned()))),
+					("value", v.to_owned()),
+				],
 			},
 			Iterable::Relatable(t1, t2, t3, None) => Self {
 				name: "Iterate Relatable".into(),
 				details: vec![
 					("thing-1", Value::RecordId(t1.to_owned())),
-					("thing-2", Value::RecordId(t2.to_owned())),
+					("thing-2", t2.clone().into()),
 					("thing-3", Value::RecordId(t3.to_owned())),
 				],
 			},
@@ -176,7 +183,7 @@ impl ExplainItem {
 				name: "Iterate Relatable".into(),
 				details: vec![
 					("thing-1", Value::RecordId(t1.to_owned())),
-					("thing-2", Value::RecordId(t2.to_owned())),
+					("thing-2", t2.clone().into()),
 					("thing-3", Value::RecordId(t3.to_owned())),
 					("value", v.to_owned()),
 				],

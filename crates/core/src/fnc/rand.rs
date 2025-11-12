@@ -26,7 +26,7 @@ pub fn r#enum(Any(mut args): Any) -> Result<Value> {
 			Value::Array(v) => v.into_iter().choose(&mut rand::thread_rng()).unwrap_or(Value::None),
 			v => v,
 		},
-		_ => args.into_iter().choose(&mut rand::thread_rng()).unwrap(),
+		_ => args.into_iter().choose(&mut rand::thread_rng()).expect("non-empty args"),
 	})
 }
 
@@ -82,17 +82,17 @@ pub fn float((NoneOrRange(range),): (NoneOrRange<f64>,)) -> Result<Value> {
 	Ok(Value::from(v))
 }
 
-pub fn guid((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) -> Result<Value> {
+pub fn id((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) -> Result<Value> {
 	// Set a reasonable maximum length
 	const LIMIT: i64 = 64;
 
-	// rand::guid(NULL,10) is not allowed by the calling infrastructure.
+	// rand::id(NULL,10) is not allowed by the calling infrastructure.
 	let lower = arg1.unwrap_or(20);
 	let len = if let Some(upper) = arg2 {
 		ensure!(
 			lower <= upper,
 			Error::InvalidArguments {
-				name: String::from("rand::guid"),
+				name: String::from("rand::id"),
 				message: "Lowerbound of number of characters must be less then the upperbound."
 					.to_string(),
 			}
@@ -100,7 +100,7 @@ pub fn guid((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) ->
 		ensure!(
 			upper <= LIMIT,
 			Error::InvalidArguments {
-				name: String::from("rand::guid"),
+				name: String::from("rand::id"),
 				message: format!(
 					"To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."
 				),
@@ -112,7 +112,7 @@ pub fn guid((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) ->
 		ensure!(
 			lower <= LIMIT,
 			Error::InvalidArguments {
-				name: String::from("rand::guid"),
+				name: String::from("rand::id"),
 				message: format!(
 					"To generate a string of X characters in length, the argument must be a positive number and no higher than {LIMIT}."
 				),
@@ -121,7 +121,7 @@ pub fn guid((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) ->
 		lower as usize
 	};
 
-	// Generate the random guid
+	// Generate the random id
 	Ok(nanoid!(len, &ID_CHARS).into())
 }
 
@@ -141,7 +141,7 @@ pub fn int((NoneOrRange(range),): (NoneOrRange<i64>,)) -> Result<Value> {
 pub fn string((Optional(arg1), Optional(arg2)): (Optional<i64>, Optional<i64>)) -> Result<Value> {
 	// Set a reasonable maximum length
 	const LIMIT: i64 = 65536;
-	// rand::guid(NULL,10) is not allowed by the calling infrastructure.
+	// rand::id(NULL,10) is not allowed by the calling infrastructure.
 	let lower = arg1.unwrap_or(32);
 	let len = if let Some(upper) = arg2 {
 		ensure!(

@@ -5,7 +5,7 @@ use crate::sql::{Cond, Data, Explain, Expr, Output, Timeout, With};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct UpsertStatement {
+pub(crate) struct UpsertStatement {
 	pub only: bool,
 	pub what: Vec<Expr>,
 	pub with: Option<With>,

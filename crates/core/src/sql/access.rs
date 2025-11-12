@@ -1,8 +1,5 @@
-use std::fmt::{self, Display, Formatter};
-
-use crate::fmt::EscapeIdent;
 use crate::sql::{Expr, Literal};
-use crate::val::Duration;
+use crate::types::PublicDuration;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -25,11 +22,11 @@ impl Default for AccessDuration {
 		Self {
 			// By default, access grants expire in 30 days.
 			grant: Some(Expr::Literal(Literal::Duration(
-				Duration::from_days(30).expect("30 days should fit in a duration"),
+				PublicDuration::from_days(30).expect("30 days should fit in a duration"),
 			))),
 			// By default, tokens expire after one hour
 			token: Some(Expr::Literal(Literal::Duration(
-				Duration::from_hours(1).expect("1 hour should fit in a duration"),
+				PublicDuration::from_hours(1).expect("1 hour should fit in a duration"),
 			))),
 			// By default, sessions do not expire
 			session: None,
@@ -54,19 +51,5 @@ impl From<crate::expr::access::AccessDuration> for AccessDuration {
 			token: v.token.map(Into::into),
 			session: v.session.map(Into::into),
 		}
-	}
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Accesses(pub Vec<Access>);
-
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Access(pub String);
-
-impl Display for Access {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		EscapeIdent(&self.0).fmt(f)
 	}
 }

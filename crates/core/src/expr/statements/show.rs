@@ -9,7 +9,6 @@ use crate::expr::{Base, Value};
 use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Datetime;
-use crate::vs::VersionStamp;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ShowSince {
@@ -17,23 +16,10 @@ pub enum ShowSince {
 	Versionstamp(u64),
 }
 
-impl ShowSince {
-	pub fn versionstamp(vs: &VersionStamp) -> ShowSince {
-		ShowSince::Versionstamp(vs.into_u64_lossy())
-	}
-
-	pub fn as_versionstamp(&self) -> Option<VersionStamp> {
-		match self {
-			ShowSince::Timestamp(_) => None,
-			ShowSince::Versionstamp(v) => Some(VersionStamp::from_u64(*v)),
-		}
-	}
-}
-
 /// A SHOW CHANGES statement for displaying changes made to a table or database.
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ShowStatement {
+pub(crate) struct ShowStatement {
 	pub table: Option<String>,
 	pub since: ShowSince,
 	pub limit: Option<u32>,

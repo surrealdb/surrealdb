@@ -7,28 +7,27 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout};
 use crate::fmt::Fmt;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::{Datetime, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct CreateStatement {
+pub(crate) struct CreateStatement {
 	// A keyword modifier indicating if we are expecting a single result or several
 	pub only: bool,
 	// Where we are creating (i.e. table, or record ID)
-	pub what: Vec<Expr>,
+	pub(crate) what: Vec<Expr>,
 	// The data associated with the record being created
-	pub data: Option<Data>,
+	pub(crate) data: Option<Data>,
 	//  What the result of the statement should resemble (i.e. Diff or no result etc).
-	pub output: Option<Output>,
+	pub(crate) output: Option<Output>,
 	// The timeout for the statement
 	pub timeout: Option<Timeout>,
 	// If the statement should be run in parallel
 	pub parallel: bool,
 	// Version as nanosecond timestamp passed down to Datastore
-	pub version: Option<Expr>,
+	pub(crate) version: Option<Expr>,
 }
 
 impl CreateStatement {
@@ -91,34 +90,25 @@ impl CreateStatement {
 		// Ensure the database exists.
 		ctx.get_db(opt).await?;
 
-		// Process the statement
-		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
-		// Catch statement timeout
-		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
-		// Output the results
-		match res {
-			// This is a single record result
-			Value::Array(mut a) if self.only => match a.len() {
-				// There was exactly one result
-				1 => Ok(a.remove(0)),
-				// There were no results
-				_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
-			},
-			// This is standard query result
-			v => Ok(v),
-		}
-	}
-}
-
-impl VisitExpression for CreateStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.what.iter().for_each(|expr| expr.visit(visitor));
-		self.data.iter().for_each(|data| data.visit(visitor));
-		self.output.iter().for_each(|output| output.visit(visitor));
-		self.version.iter().for_each(|expr| expr.visit(visitor));
+		CursorDoc::update_parent(&ctx, doc, async |ctx| {
+			// Process the statement
+			let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
+			// Catch statement timeout
+			ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
+			// Output the results
+			match res {
+				// This is a single record result
+				Value::Array(mut a) if self.only => match a.len() {
+					// There was exactly one result
+					1 => Ok(a.remove(0)),
+					// There were no results
+					_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
+				},
+				// This is standard query result
+				v => Ok(v),
+			}
+		})
+		.await
 	}
 }
 

@@ -1,12 +1,12 @@
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
+use crate::catalog::Record;
 use crate::ctx::Context;
 use crate::dbs::{Operable, Options, Processed, Statement, Workable};
 use crate::doc::Document;
 use crate::err::Error;
 use crate::val::Value;
-use crate::val::record::Record;
 
 impl Document {
 	pub(crate) async fn process(
@@ -32,8 +32,6 @@ impl Document {
 		};
 		// Setup a new document
 		let mut doc = Document::new(pro.rid, pro.ir, pro.generate, ins.0, ins.1, false, pro.rs);
-		// Generate a new document id if necessary
-		doc.generate_record_id(stk, ctx, opt, stm).await?;
 		// Process the statement
 		let res = match stm {
 			Statement::Select {

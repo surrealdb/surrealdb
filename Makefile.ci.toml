@@ -21,6 +21,10 @@ BENCH_FEATURES = { value = "protocol-ws,kv-mem,kv-rocksdb,kv-surrealkv", conditi
 SURREAL_SCRIPTING_MAX_TIME_LIMIT = { value = "500", condition = { env_not_set = [
     "SURREAL_SCRIPTING_MAX_TIME_LIMIT",
 ] } }
+# Configure LLVM profiling output to go to target directory instead of repo root
+LLVM_PROFILE_FILE = { value = "target/llvm-cov-target/%p-%m.profraw", condition = { env_not_set = [
+    "LLVM_PROFILE_FILE",
+] } }
 
 [tasks.ci-format]
 category = "CI - CHECK"
@@ -38,6 +42,7 @@ args = [
     "--all-targets",
     "--features",
     "${ALL_FEATURES}",
+    "${@}",
 ]
 
 [tasks.ci-check-release]
@@ -228,29 +233,17 @@ args = [
     "--locked",
     "--no-default-features",
     "--features",
-    "storage-mem,scripting,http,jwks",
+    "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
     "--workspace",
-    "--no-fail-fast",
     "--",
     "--skip",
-    "api_integration",
-    "--skip",
     "cli_integration",
-    "--skip",
-    "http_integration",
-    "--skip",
-    "ws_integration",
-    "--skip",
-    "ml_integration",
-    "--skip",
-    "graphql_integration",
-    "--skip",
-    "database_upgrade",
 ]
 
 [tasks.ci-workspace-coverage]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
+env = { LLVM_PROFILE_FILE = "target/llvm-cov-target/%p-%m.profraw" }
 args = [
     "llvm-cov",
     "--lcov",
@@ -261,6 +254,14 @@ args = [
     "--features",
     "allocator,allocation-tracking,storage-mem,scripting,http,jwks",
     "--workspace",
+    # Exclude surrealism packages due to wasmtime complexity and stdin loops
+    "--exclude", "surrealism-cli",
+    "--exclude", "surrealism-runtime",
+    "--exclude", "surrealism",
+    "--exclude", "surrealism-macros",
+    "--exclude", "surrealism-types",
+    "--exclude", "demo",
+    "--no-fail-fast",
     "--",
     "--skip",
     "api_integration",
@@ -281,6 +282,7 @@ args = [
 [tasks.test-workspace-coverage-complete]
 category = "CI - INTEGRATION TESTS"
 command = "cargo"
+env = { LLVM_PROFILE_FILE = "target/llvm-cov-target/%p-%m.profraw" }
 args = [
     "llvm-cov",
     "--html",
@@ -433,7 +435,7 @@ run_task = { name = [
 
 [tasks.ci-rocksdb-kvs]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb" }
+env = { _TEST_API_ENGINE = "file", _TEST_FEATURES = "kv-rocksdb", SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE = 10485760, SURREAL_ROCKSDB_WRITE_BUFFER_SIZE = 10240, SURREAL_ROCKSDB_WAL_SIZE_LIMIT = 1 }
 run_task = { name = [
     "test-kvs",
 ], fork = true, parallel = true }
@@ -460,6 +462,75 @@ env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb" }
 run_task = { name = [
     "test-kvs",
 ], fork = true, parallel = false }
+
+#
+# Language tests
+#
+[tasks.test-lang]
+category = "CI - LANGUAGE TESTS"
+description = "Run SurrealQL language tests with specified engine"
+script = """
+    #!/bin/bash -ex
+    cd crates/language-tests
+    if [ "${_TEST_LANG_FEATURES}" != "" ]; then
+        cargo build --features ${_TEST_LANG_FEATURES}
+    else
+        cargo build
+    fi
+    if [ "${_TEST_API_ENGINE}" = "tikv" ] || [ "${_TEST_API_ENGINE}" = "foundation" ]; then
+        ./target/debug/surrealql-test --color always run --no-wip -j 1 --backend ${_TEST_API_ENGINE}
+    else
+        ./target/debug/surrealql-test --color always run --no-wip -j 3 --backend ${_TEST_API_ENGINE}
+    fi
+"""
+
+[tasks.ci-lang-test-mem]
+category = "CI - LANGUAGE TESTS"
+env = { _TEST_API_ENGINE = "memory", _TEST_LANG_FEATURES = "" }
+run_task = { name = [
+    "test-lang",
+], fork = true, parallel = true }
+
+[tasks.ci-lang-test-rocksdb]
+category = "CI - LANGUAGE TESTS"
+env = { _TEST_API_ENGINE = "rocksdb", _TEST_LANG_FEATURES = "backend-rocksdb" }
+run_task = { name = [
+    "test-lang",
+], fork = true, parallel = true }
+
+[tasks.ci-lang-test-surrealkv]
+category = "CI - LANGUAGE TESTS"
+env = { _TEST_API_ENGINE = "surrealkv", _TEST_LANG_FEATURES = "backend-surrealkv" }
+run_task = { name = [
+    "test-lang",
+], fork = true, parallel = false }
+
+[tasks.ci-lang-test-tikv]
+category = "CI - LANGUAGE TESTS"
+env = { _TEST_API_ENGINE = "tikv", _TEST_LANG_FEATURES = "backend-tikv" }
+run_task = { name = [
+    "start-tikv",
+    "test-lang",
+    "stop-tikv",
+], fork = true, parallel = false }
+
+[tasks.ci-lang-test-fdb]
+category = "CI - LANGUAGE TESTS"
+env = { _TEST_API_ENGINE = "foundation", _TEST_LANG_FEATURES = "backend-foundation" }
+run_task = { name = [
+    "test-lang",
+], fork = true, parallel = false }
+
+[tasks.ci-lang-test-all]
+category = "CI - LANGUAGE TESTS"
+description = "Run all language tests"
+dependencies = [
+    "ci-lang-test-mem",
+    "ci-lang-test-rocksdb",
+    "ci-lang-test-surrealkv",
+    "ci-lang-test-tikv",
+    "ci-lang-test-fdb",
+]
 
 #
 # Services
@@ -658,3 +729,82 @@ run_task = { name = ["bench-target"] }
 category = "CI - BENCHMARK - SurrealDB Target"
 env = { BENCH_DATASTORE_TARGET = "sdk-ws" }
 run_task = { name = ["bench-target"] }
+
+#
+# Comprehensive CI check - runs all required checks for PR merge
+#
+
+[tasks.ci-sdk-tests]
+category = "CI - INTEGRATION TESTS"
+dependencies = [
+    "ci-api-integration-mem",
+    "ci-api-integration-any",
+    "ci-api-integration-http",
+    "ci-api-integration-ws",
+]
+
+
+
+[tasks.ci-sdk-build]
+category = "CI - INTEGRATION TESTS"
+description = "Build SDK test projects"
+script = """
+    #!/bin/bash -e
+    echo "Building SDK local tests..."
+    cd tests/sdk/local
+    cargo build
+
+    echo "Building SDK remote tests..."
+    cd ../remote
+    cargo build
+"""
+
+[tasks.ci-all-required]
+category = "CI - ALL REQUIRED CHECKS"
+description = "Run all required CI checks that must pass for PR merge (excludes tikv/fdb which require external services)"
+dependencies = [
+    # Code quality checks
+    "ci-format",
+    "ci-clippy",
+    "ci-clippy-release",
+    "ci-check",
+    "ci-check-release",
+    "ci-check-wasm",
+    "ci-docs",
+    # Integration tests
+    "ci-cli-integration",
+    "ci-http-integration",
+    "ci-ws-integration",
+    "ci-ml-integration",
+    # Workspace tests (use ci-test-workspace instead of ci-workspace-coverage to skip coverage overhead)
+    "ci-test-workspace",
+    # KVS tests (local engines only - tikv/fdb require external services)
+    "ci-mem-kvs",
+    "ci-rocksdb-kvs",
+    "ci-surrealkv-kvs",
+    # SDK build tests
+    "ci-sdk-build",
+    # SDK tests (local engines only - tikv/fdb require external services)
+    "ci-api-integration-mem",
+    "ci-api-integration-rocksdb",
+    "ci-api-integration-surrealkv",
+    "ci-api-integration-http",
+    "ci-api-integration-ws",
+    "ci-api-integration-any",
+]
+
+[tasks.ci-all-required-with-lang]
+category = "CI - ALL REQUIRED CHECKS"
+description = "Run all required CI checks including SurrealQL language tests"
+script = """
+    #!/bin/bash -e
+
+    # Run all standard required checks
+    cargo make ci-all-required
+
+    # Run SurrealQL language tests
+    echo "Running SurrealQL language tests..."
+    cd crates/language-tests
+    cargo build
+    ./target/debug/surrealql-test --color always run --no-wip -j 3
+"""

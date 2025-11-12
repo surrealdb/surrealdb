@@ -5,31 +5,32 @@ use crate::sql::access::AccessDuration;
 use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
 use crate::sql::filter::Filter;
-use crate::sql::index::{Distance, HnswParams, MTreeParams, VectorType};
+use crate::sql::index::{Distance, HnswParams, VectorType};
 use crate::sql::statements::define::config::api::{ApiConfig, Middleware};
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::config::{ConfigInner, graphql};
 use crate::sql::statements::define::user::PassType;
 use crate::sql::statements::define::{
-	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault, DefineKind,
-	DefineSequenceStatement,
-};
-use crate::sql::statements::{
-	DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement,
+	ApiAction, DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement,
+	DefineBucketStatement, DefineConfigStatement, DefineDatabaseStatement, DefineDefault,
 	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineNamespaceStatement, DefineParamStatement, DefineStatement, DefineTableStatement,
-	DefineUserStatement,
+	DefineKind, DefineNamespaceStatement, DefineParamStatement, DefineSequenceStatement,
+	DefineStatement, DefineTableStatement, DefineUserStatement,
 };
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{
-	AccessType, Expr, Index, Kind, Literal, Param, Permission, Permissions, Scoring, TableType,
-	access_type, table_type,
+	AccessType, DefineModuleStatement, Expr, Index, Kind, Literal, Param, Permission, Permissions,
+	Scoring, TableType, access_type, table_type,
 };
+#[cfg(feature = "surrealism")]
+use crate::sql::{ModuleExecutable, SiloExecutable, SurrealismExecutable};
 use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{Token, TokenKind, t};
-use crate::val::Duration;
+use crate::types::PublicDuration;
+#[cfg(feature = "surrealism")]
+use crate::types::PublicFile;
 
 impl Parser<'_> {
 	pub(crate) async fn parse_define_stmt(
@@ -61,6 +62,7 @@ impl Parser<'_> {
 			t!("CONFIG") => self.parse_define_config(stk).await.map(DefineStatement::Config),
 			t!("BUCKET") => self.parse_define_bucket(stk, next).await.map(DefineStatement::Bucket),
 			t!("SEQUENCE") => self.parse_define_sequence(stk).await.map(DefineStatement::Sequence),
+			t!("MODULE") => self.parse_define_module(stk).await.map(DefineStatement::Module),
 			_ => unexpected!(self, next, "a define statement keyword"),
 		}
 	}
@@ -94,7 +96,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_database(
+	pub(crate) async fn parse_define_database(
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineDatabaseStatement> {
@@ -123,6 +125,10 @@ impl Parser<'_> {
 					self.pop_peek();
 					res.changefeed = Some(self.parse_changefeed()?);
 				}
+				t!("STRICT") => {
+					self.pop_peek();
+					res.strict = true;
+				}
 				_ => break,
 			}
 		}
@@ -130,7 +136,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_function(
+	pub(crate) async fn parse_define_function(
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineFunctionStatement> {
@@ -198,7 +204,111 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_user(&mut self, stk: &mut Stk) -> ParseResult<DefineUserStatement> {
+	#[cfg(not(feature = "surrealism"))]
+	pub(crate) async fn parse_define_module(
+		&mut self,
+		_stk: &mut Stk,
+	) -> ParseResult<DefineModuleStatement> {
+		bail!(
+			"Surrealism modules are not supported in WASM environments",
+			@self.last_span() => "Use of `DEFINE MODULE` is not supported in WASM environments"
+		)
+	}
+
+	#[cfg(feature = "surrealism")]
+	pub(crate) async fn parse_define_module(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineModuleStatement> {
+		if !self.settings.surrealism_enabled {
+			bail!(
+				"Experimental capability `surrealism` is not enabled",
+				@self.last_span() => "Use of `DEFINE MODULE` is still experimental"
+			)
+		}
+
+		let kind = if self.eat(t!("IF")) {
+			expected!(self, t!("NOT"));
+			expected!(self, t!("EXISTS"));
+			DefineKind::IfNotExists
+		} else if self.eat(t!("OVERWRITE")) {
+			DefineKind::Overwrite
+		} else {
+			DefineKind::Default
+		};
+
+		let name = if self.eat(t!("mod")) {
+			expected!(self, t!("::"));
+			let name = self.parse_ident()?;
+			expected!(self, t!("AS"));
+			Some(name)
+		} else {
+			None
+		};
+
+		let peek = self.peek();
+		let executable = match peek.kind {
+			t!("silo") => {
+				self.pop_peek();
+				expected!(self, t!("::"));
+				let organisation = self.parse_ident()?;
+				expected!(self, t!("::"));
+				let package = self.parse_ident()?;
+				expected!(self, t!("<"));
+				let major = self.next_token_value::<u32>()?;
+				expected!(self, t!("."));
+				let minor = self.next_token_value::<u32>()?;
+				expected!(self, t!("."));
+				let patch = self.next_token_value::<u32>()?;
+				expected!(self, t!(">"));
+
+				ModuleExecutable::Silo(SiloExecutable {
+					organisation,
+					package,
+					major,
+					minor,
+					patch,
+				})
+			}
+			t!("f\"") | t!("f'") => {
+				let file = self.next_token_value::<PublicFile>()?;
+				ModuleExecutable::Surrealism(SurrealismExecutable(file.into()))
+			}
+			_ => {
+				unexpected!(self, peek, "a module executable");
+			}
+		};
+
+		let mut definition = DefineModuleStatement {
+			kind,
+			name,
+			executable,
+			comment: None,
+			permissions: Permission::default(),
+		};
+
+		loop {
+			match self.peek_kind() {
+				t!("COMMENT") => {
+					self.pop_peek();
+					definition.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
+				}
+				t!("PERMISSIONS") => {
+					self.pop_peek();
+					definition.permissions =
+						stk.run(|ctx| self.parse_permission_value(ctx)).await?;
+				}
+				_ => break,
+			}
+		}
+
+		Ok(definition)
+	}
+
+	pub(crate) async fn parse_define_user(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineUserStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -221,7 +331,7 @@ impl Parser<'_> {
 			                                   * the viewer role
 			                                   * by default */
 			// TODO: Move out of the parser
-			token_duration: Some(Expr::Literal(Literal::Duration(Duration::from_secs(3600)))), /* defaults to 1 hour. */
+			token_duration: Some(Expr::Literal(Literal::Duration(PublicDuration::from_secs(3600)))), /* defaults to 1 hour. */
 			..DefineUserStatement::default()
 		};
 
@@ -319,7 +429,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_access(
+	pub(crate) async fn parse_define_access(
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineAccessStatement> {
@@ -398,16 +508,6 @@ impl Parser<'_> {
 										}
 									}
 									t!("REFRESH") => {
-										// TODO(gguillemas): Remove this once bearer access is no
-										// longer experimental.
-										if !self.settings.bearer_access_enabled {
-											unexpected!(
-												self,
-												peek,
-												"the experimental bearer access feature to be enabled"
-											);
-										}
-
 										self.pop_peek();
 										ac.bearer = Some(access_type::BearerAccess {
 											kind: access_type::BearerAccessType::Refresh,
@@ -417,11 +517,7 @@ impl Parser<'_> {
 										});
 									}
 									_ => {
-										if self.settings.bearer_access_enabled {
-											unexpected!(self, token, "JWT or REFRESH")
-										} else {
-											unexpected!(self, token, "JWT")
-										}
+										unexpected!(self, token, "JWT or REFRESH")
 									}
 								}
 								self.eat(t!(","));
@@ -429,16 +525,6 @@ impl Parser<'_> {
 							res.access_type = AccessType::Record(ac);
 						}
 						t!("BEARER") => {
-							// TODO(gguillemas): Remove this once bearer access is no longer
-							// experimental.
-							if !self.settings.bearer_access_enabled {
-								unexpected!(
-									self,
-									peek,
-									"the experimental bearer access feature to be enabled"
-								);
-							}
-
 							self.pop_peek();
 							let mut ac = access_type::BearerAccess {
 								..Default::default()
@@ -537,7 +623,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_param(&mut self, stk: &mut Stk) -> ParseResult<DefineParamStatement> {
+	pub(crate) async fn parse_define_param(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineParamStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -577,7 +666,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_table(&mut self, stk: &mut Stk) -> ParseResult<DefineTableStatement> {
+	pub(crate) async fn parse_define_table(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineTableStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -668,7 +760,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_api(&mut self, stk: &mut Stk) -> ParseResult<DefineApiStatement> {
+	pub(crate) async fn parse_define_api(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineApiStatement> {
 		if !self.settings.define_api_enabled {
 			bail!("Cannot define an API, as the experimental define api capability is not enabled", @self.last_span);
 		}
@@ -761,7 +856,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_event(&mut self, stk: &mut Stk) -> ParseResult<DefineEventStatement> {
+	pub(crate) async fn parse_define_event(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineEventStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -809,7 +907,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_field(&mut self, stk: &mut Stk) -> ParseResult<DefineFieldStatement> {
+	pub(crate) async fn parse_define_field(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineFieldStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -836,11 +937,35 @@ impl Parser<'_> {
 				// FLEX, FLEXI and FLEXIBLE are all the same token type.
 				t!("FLEXIBLE") => {
 					self.pop_peek();
-					res.flex = true;
+					bail!("FLEXIBLE must be specified after TYPE", @self.last_span);
 				}
 				t!("TYPE") => {
 					self.pop_peek();
 					res.field_kind = Some(stk.run(|ctx| self.parse_inner_kind(ctx)).await?);
+
+					// Check if FLEXIBLE follows TYPE
+					if self.eat(t!("FLEXIBLE")) {
+						// Validate that the field_kind contains an object
+						fn kind_contains_object(kind: &Kind) -> bool {
+							match kind {
+								Kind::Object => true,
+								Kind::Either(kinds) => kinds.iter().any(kind_contains_object),
+								Kind::Array(inner, _) | Kind::Set(inner, _) => {
+									kind_contains_object(inner)
+								}
+								_ => false,
+							}
+						}
+
+						let is_valid_for_flexible =
+							res.field_kind.as_ref().is_some_and(kind_contains_object);
+
+						if !is_valid_for_flexible {
+							bail!("FLEXIBLE can only be used with types containing object", @self.last_span);
+						}
+
+						res.flexible = true;
+					}
 				}
 				t!("READONLY") => {
 					self.pop_peek();
@@ -873,13 +998,6 @@ impl Parser<'_> {
 					res.comment = Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 				}
 				t!("REFERENCE") => {
-					if !self.settings.references_enabled {
-						bail!(
-							"Experimental capability `record_references` is not enabled",
-							@self.last_span() => "Use of `REFERENCE` keyword is still experimental"
-						)
-					}
-
 					self.pop_peek();
 					res.reference = Some(self.parse_reference(stk).await?);
 				}
@@ -894,7 +1012,10 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_index(&mut self, stk: &mut Stk) -> ParseResult<DefineIndexStatement> {
+	pub(crate) async fn parse_define_index(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefineIndexStatement> {
 		let kind = if self.eat(t!("IF")) {
 			expected!(self, t!("NOT"));
 			expected!(self, t!("EXISTS"));
@@ -919,6 +1040,8 @@ impl Parser<'_> {
 			concurrently: false,
 		};
 
+		let mut field_span = None;
+
 		loop {
 			match self.peek_kind() {
 				// COLUMNS and FIELDS are the same tokenkind
@@ -928,6 +1051,7 @@ impl Parser<'_> {
 					while self.eat(t!(",")) {
 						res.cols.push(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
 					}
+					field_span = Some(self.last_span);
 				}
 				t!("UNIQUE") => {
 					self.pop_peek();
@@ -943,7 +1067,6 @@ impl Parser<'_> {
 					let mut analyzer: Option<String> = None;
 					let mut scoring = None;
 					let mut hl = false;
-
 					loop {
 						match self.peek_kind() {
 							t!("ANALYZER") => {
@@ -978,43 +1101,6 @@ impl Parser<'_> {
 						sc: scoring.unwrap_or_else(Default::default),
 						hl,
 					});
-				}
-				t!("MTREE") => {
-					self.pop_peek();
-					expected!(self, t!("DIMENSION"));
-					let dimension = self.next_token_value()?;
-					let mut distance = Distance::Euclidean;
-					let mut vector_type = VectorType::F64;
-					let mut capacity = 40;
-					let mut mtree_cache = 100;
-					loop {
-						match self.peek_kind() {
-							t!("DISTANCE") => {
-								self.pop_peek();
-								distance = self.parse_distance()?
-							}
-							t!("TYPE") => {
-								self.pop_peek();
-								vector_type = self.parse_vector_type()?
-							}
-							t!("CAPACITY") => {
-								self.pop_peek();
-								capacity = self.next_token_value()?
-							}
-							t!("MTREE_CACHE") => {
-								self.pop_peek();
-								mtree_cache = self.next_token_value()?
-							}
-							_ => break,
-						}
-					}
-					res.index = Index::MTree(MTreeParams {
-						dimension,
-						distance,
-						vector_type,
-						capacity,
-						mtree_cache,
-					})
 				}
 				t!("HNSW") => {
 					self.pop_peek();
@@ -1094,13 +1180,32 @@ impl Parser<'_> {
 				_ => break,
 			}
 		}
-		if matches!(res.index, Index::Count(_)) && !res.cols.is_empty() {
-			bail!("Cannot create a count index with fields");
+		match (field_span, &res.index) {
+			(Some(field_span), Index::Count(_)) => {
+				if !res.cols.is_empty() {
+					bail!("Cannot create a count index with fields", @field_span);
+				}
+			}
+			(field_span, Index::FullText(_) | Index::Hnsw(_)) => {
+				if res.cols.len() != 1 {
+					if let Some(field_span) = field_span {
+						bail!("Expected one column, found {}", res.cols.len(), @field_span);
+					} else {
+						bail!("Expected one column, found none", @self.recent_span());
+					}
+				}
+			}
+			(None, Index::Uniq | Index::Idx) => {
+				if res.cols.is_empty() {
+					bail!("Expected at least one column - Use FIELDS to define columns", @self.recent_span());
+				}
+			}
+			(_, _) => {}
 		}
 		Ok(res)
 	}
 
-	pub async fn parse_define_analyzer(
+	pub(crate) async fn parse_define_analyzer(
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineAnalyzerStatement> {
@@ -1220,7 +1325,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_bucket(
+	pub(crate) async fn parse_define_bucket(
 		&mut self,
 		stk: &mut Stk,
 		token: Token,
@@ -1274,7 +1379,7 @@ impl Parser<'_> {
 		Ok(res)
 	}
 
-	pub async fn parse_define_sequence(
+	pub(crate) async fn parse_define_sequence(
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineSequenceStatement> {
@@ -1308,7 +1413,7 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_define_config(
+	pub(crate) async fn parse_define_config(
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<DefineConfigStatement> {
@@ -1335,7 +1440,7 @@ impl Parser<'_> {
 		})
 	}
 
-	pub async fn parse_api_config(&mut self, stk: &mut Stk) -> ParseResult<ApiConfig> {
+	pub(crate) async fn parse_api_config(&mut self, stk: &mut Stk) -> ParseResult<ApiConfig> {
 		let mut config = ApiConfig::default();
 		loop {
 			match self.peek_kind() {
@@ -1513,7 +1618,7 @@ impl Parser<'_> {
 		Ok(Kind::Record(names))
 	}
 
-	pub async fn parse_jwt(&mut self, stk: &mut Stk) -> ParseResult<access_type::JwtAccess> {
+	async fn parse_jwt(&mut self, stk: &mut Stk) -> ParseResult<access_type::JwtAccess> {
 		let mut res = access_type::JwtAccess {
 			// By default, a JWT access method is only used to verify.
 			issue: None,

@@ -7,14 +7,14 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::paths::{IN, OUT};
+use crate::expr::statements::relate::RelateThrough;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
 use crate::idx::planner::RecordStrategy;
-use crate::val::{Datetime, RecordId, Table};
+use crate::val::{Datetime, RecordIdKey, Table};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct InsertStatement {
+pub(crate) struct InsertStatement {
 	pub into: Option<Expr>,
 	pub data: Data,
 	/// Does the statement have the ignore clause.
@@ -91,9 +91,9 @@ impl InsertStatement {
 						o.set(stk, &ctx, opt, k, v).await?;
 					}
 					// Specify the new table record id
-					let id = gen_id(&o, &into)?;
+					let (tb, id) = extract_tb_id(&o, &into)?;
 					// Pass the value to the iterator
-					i.ingest(iterable(id, o, self.relation)?)
+					i.ingest(iterable(tb, id, o, self.relation)?)
 				}
 			}
 			// Check if this is a modern statement
@@ -103,16 +103,16 @@ impl InsertStatement {
 					Value::Array(v) => {
 						for v in v {
 							// Specify the new table record id
-							let id = gen_id(&v, &into)?;
+							let (tb, id) = extract_tb_id(&v, &into)?;
 							// Pass the value to the iterator
-							i.ingest(iterable(id, v, self.relation)?)
+							i.ingest(iterable(tb, id, v, self.relation)?)
 						}
 					}
 					Value::Object(_) => {
 						// Specify the new table record id
-						let id = gen_id(&v, &into)?;
+						let (tb, id) = extract_tb_id(&v, &into)?;
 						// Pass the value to the iterator
-						i.ingest(iterable(id, v, self.relation)?)
+						i.ingest(iterable(tb, id, v, self.relation)?)
 					}
 					v => {
 						bail!(Error::InsertStatement {
@@ -129,25 +129,15 @@ impl InsertStatement {
 		// Ensure the database exists.
 		ctx.get_db(opt).await?;
 
-		// Process the statement
-		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
-		// Catch statement timeout
-		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
-		// Output the results
-		Ok(res)
-	}
-}
-
-impl VisitExpression for InsertStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.into.iter().for_each(|expr| expr.visit(visitor));
-		self.data.visit(visitor);
-		self.update.iter().for_each(|data| data.visit(visitor));
-		self.output.iter().for_each(|output| output.visit(visitor));
-		self.version.iter().for_each(|expr| expr.visit(visitor));
+		CursorDoc::update_parent(&ctx, doc, async |ctx| {
+			// Process the statement
+			let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
+			// Catch statement timeout
+			ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
+			// Output the results
+			Ok(res)
+		})
+		.await
 	}
 }
 
@@ -183,7 +173,7 @@ impl fmt::Display for InsertStatement {
 	}
 }
 
-fn iterable(id: RecordId, v: Value, relation: bool) -> Result<Iterable> {
+fn iterable(tb: String, id: Option<RecordIdKey>, v: Value, relation: bool) -> Result<Iterable> {
 	if relation {
 		let f = match v.pick(&*IN) {
 			Value::RecordId(v) => v,
@@ -201,20 +191,48 @@ fn iterable(id: RecordId, v: Value, relation: bool) -> Result<Iterable> {
 				})
 			}
 		};
-		Ok(Iterable::Relatable(f, id, w, Some(v)))
+		// TODO(micha): Support table relations too?
+		Ok(Iterable::Relatable(f, RelateThrough::from((tb, id)), w, Some(v)))
 	} else {
-		Ok(Iterable::Mergeable(id, v))
+		Ok(Iterable::Mergeable(tb, id, v))
 	}
 }
 
-fn gen_id(v: &Value, into: &Option<Table>) -> Result<RecordId> {
-	match into {
-		Some(into) => v.rid().generate(into.clone().into_string(), true),
-		None => match v.rid() {
-			Value::RecordId(v) => Ok(v),
-			v => Err(anyhow::Error::new(Error::InsertStatementId {
+fn extract_tb_id(v: &Value, into: &Option<Table>) -> Result<(String, Option<RecordIdKey>)> {
+	if let Some(tb) = into {
+		let id = match v.rid() {
+			// There is a floating point number for the id field
+			Value::Number(id) if id.is_float() => Some(RecordIdKey::Number(id.as_int())),
+			// There is an integer number for the id field
+			Value::Number(id) if id.is_int() => Some(RecordIdKey::Number(id.as_int())),
+			// There is a string for the id field
+			Value::String(id) if !id.is_empty() => Some(id.into()),
+			// There is an object for the id field
+			Value::Object(id) => Some(id.into()),
+			// There is an array for the id field
+			Value::Array(id) => Some(id.into()),
+			// There is a UUID for the id field
+			Value::Uuid(id) => Some(id.into()),
+			// There is a record id defined
+			Value::RecordId(id) => Some(id.key),
+			// There is no record id field
+			Value::None => None,
+			// Any other value cannot be converted to a record id key
+			v => {
+				bail!(Error::InsertStatementId {
+					value: v.to_string(),
+				});
+			}
+		};
+		Ok((tb.clone().into_string(), id))
+	} else {
+		let v = v.rid();
+		if let Value::RecordId(rid) = v {
+			Ok((rid.table, Some(rid.key)))
+		} else {
+			bail!(Error::InsertStatementId {
 				value: v.to_string(),
-			})),
-		},
+			});
+		}
 	}
 }

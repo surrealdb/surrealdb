@@ -44,19 +44,7 @@ pub struct Transaction {
 
 impl Drop for Transaction {
 	fn drop(&mut self) {
-		if !self.done && self.write {
-			match self.check {
-				Check::None => {
-					trace!("A transaction was dropped without being committed or cancelled");
-				}
-				Check::Warn => {
-					warn!("A transaction was dropped without being committed or cancelled");
-				}
-				Check::Error => {
-					error!("A transaction was dropped without being committed or cancelled");
-				}
-			}
-		}
+		self.check.drop_check(self.done, self.write);
 	}
 }
 
@@ -472,7 +460,10 @@ impl super::api::Transaction for Transaction {
 		// Calculate the previous version value
 		if let Some(prev) = self.get(key_encoded.clone(), None).await? {
 			let prev = VersionStamp::from_slice(prev.as_slice())?.try_into_u64()?;
-			ensure!(prev < ver, Error::TxFailure);
+			ensure!(
+				prev < ver,
+				Error::Tx(format!("Previous version {prev} is greater than current version {ver}"))
+			);
 		};
 		// Convert the timestamp to a versionstamp
 		let ver = VersionStamp::from_u64(ver);

@@ -8,7 +8,7 @@ use crate::sql::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, S
 /// Since they both work very similarly, they also both support the same operations
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Lookup {
+pub(crate) struct Lookup {
 	pub kind: LookupKind,
 	pub expr: Option<Fields>,
 	pub what: Vec<LookupSubject>,
@@ -24,6 +24,10 @@ pub struct Lookup {
 impl Display for Lookup {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		if self.what.len() <= 1
+			// When the singular lookup subject has a referencing field, it needs to be wrapped in parentheses
+			// Otherwise <~table.field will be parsed as [Lookup(<~table), Field(.field)]
+			// Whereas <~(table.field) will be parsed as [Lookup(<~table.field)]
+			&& self.what.iter().all(|v| v.referencing_field().is_none())
 			&& self.cond.is_none()
 			&& self.alias.is_none()
 			&& self.expr.is_none()
@@ -112,16 +116,6 @@ pub enum LookupKind {
 	Reference,
 }
 
-impl LookupKind {
-	pub fn is_graph(&self) -> bool {
-		matches!(self, LookupKind::Graph(_))
-	}
-
-	pub fn is_reference(&self) -> bool {
-		matches!(self, LookupKind::Reference)
-	}
-}
-
 impl Default for LookupKind {
 	fn default() -> Self {
 		Self::Graph(Dir::Both)
@@ -159,15 +153,56 @@ impl From<crate::expr::lookup::LookupKind> for LookupKind {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum LookupSubject {
-	Table(String),
-	Range(String, RecordIdKeyRangeLit),
+	Table {
+		table: String,
+		referencing_field: Option<String>,
+	},
+	Range {
+		table: String,
+		range: RecordIdKeyRangeLit,
+		referencing_field: Option<String>,
+	},
+}
+
+impl LookupSubject {
+	pub fn referencing_field(&self) -> Option<&String> {
+		match self {
+			LookupSubject::Table {
+				referencing_field,
+				..
+			} => referencing_field.as_ref(),
+			LookupSubject::Range {
+				referencing_field,
+				..
+			} => referencing_field.as_ref(),
+		}
+	}
 }
 
 impl Display for LookupSubject {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Self::Table(tb) => Display::fmt(&EscapeIdent(tb), f),
-			Self::Range(tb, rng) => write!(f, "{}:{rng}", EscapeIdent(tb)),
+			Self::Table {
+				table,
+				referencing_field,
+			} => {
+				Display::fmt(&EscapeIdent(table), f)?;
+				if let Some(referencing_field) = referencing_field {
+					write!(f, " FIELD {}", EscapeIdent(referencing_field))?;
+				}
+				Ok(())
+			}
+			Self::Range {
+				table,
+				range,
+				referencing_field,
+			} => {
+				write!(f, "{}:{range}", EscapeIdent(table))?;
+				if let Some(referencing_field) = referencing_field {
+					write!(f, " FIELD {}", EscapeIdent(referencing_field))?;
+				}
+				Ok(())
+			}
 		}
 	}
 }
@@ -175,10 +210,21 @@ impl Display for LookupSubject {
 impl From<LookupSubject> for crate::expr::lookup::LookupSubject {
 	fn from(v: LookupSubject) -> Self {
 		match v {
-			LookupSubject::Table(tb) => Self::Table(tb),
-			LookupSubject::Range(table, range) => Self::Range {
+			LookupSubject::Table {
+				table,
+				referencing_field,
+			} => Self::Table {
+				table: table.clone(),
+				referencing_field,
+			},
+			LookupSubject::Range {
+				table,
+				range,
+				referencing_field,
+			} => Self::Range {
 				table,
 				range: range.into(),
+				referencing_field,
 			},
 		}
 	}
@@ -187,11 +233,22 @@ impl From<LookupSubject> for crate::expr::lookup::LookupSubject {
 impl From<crate::expr::lookup::LookupSubject> for LookupSubject {
 	fn from(v: crate::expr::lookup::LookupSubject) -> Self {
 		match v {
-			crate::expr::lookup::LookupSubject::Table(tb) => Self::Table(tb),
+			crate::expr::lookup::LookupSubject::Table {
+				table,
+				referencing_field,
+			} => Self::Table {
+				table: table.clone(),
+				referencing_field,
+			},
 			crate::expr::lookup::LookupSubject::Range {
 				table,
 				range,
-			} => Self::Range(table, range.into()),
+				referencing_field,
+			} => Self::Range {
+				table,
+				range: range.into(),
+				referencing_field,
+			},
 		}
 	}
 }

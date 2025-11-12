@@ -115,7 +115,7 @@ jobs:
         uses: ./.github/actions/install-tools
 
       - name: Run clippy
-        run: cargo make ci-clippy
+        run: cargo +${{ env.RUST_VERSION }} make ci-clippy
 
   clippy-release:
     name: Check clippy (release)
@@ -135,7 +135,7 @@ jobs:
         uses: ./.github/actions/install-tools
 
       - name: Run clippy release
-        run: cargo make ci-clippy-release
+        run: cargo +${{ env.RUST_VERSION }} make ci-clippy-release
 
   check:
     name: Check workspace
@@ -350,8 +350,8 @@ jobs:
       - name: Install tools
         uses: ./.github/actions/install-tools
 
-      #- name: Run GraphQL integration tests
-        #run: cargo make ci-graphql-integration
+      - name: Run GraphQL integration tests
+        run: cargo make ci-graphql-integration
 
   # ----------------------------------------
   # Workspace tests
@@ -396,7 +396,7 @@ jobs:
     name: KVS - ${{ matrix.engine }} engine
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         engine: [mem, rocksdb, surrealkv, tikv, fdb]
     steps:
@@ -453,7 +453,7 @@ jobs:
     name: Rust SDK - ${{ matrix.engine }} engine
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         engine: [any, ws, http, mem, rocksdb, surrealkv, tikv, fdb]
     steps:
@@ -506,8 +506,12 @@ jobs:
   # ----------------------------------------
 
   lang-tests:
-    name: SurrealQL language tests
+    name: SurrealQL tests - ${{ matrix.engine }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        engine: [mem, surrealkv] # TODO(tobiemh): add 'rocksdb' and 'tikv' in KVS PR
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -518,16 +522,19 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: crates/language-tests
+          cache-key: lang-${{ matrix.engine }}
 
-      - name: Build SurrealQL test tool
-        run: |
-          cd crates/language-tests
-          cargo build
+      - name: Install tools
+        uses: ./.github/actions/install-tools
 
-      - name: Run SurrealQL test suite
-        run: |
-          cd crates/language-tests
-          ./target/debug/surrealql-test --color always run --no-wip -j 3
+      - name: Setup databases
+        uses: ./.github/actions/setup-databases
+        with:
+          tikv: ${{ matrix.engine == 'tikv' }}
+          foundationdb: ${{ matrix.engine == 'fdb' }}
+
+      - name: Run language tests
+        run: cargo make ci-lang-test-${{ matrix.engine }}
 
   upgrade-tests:
     name: SurrealQL upgrade tests
@@ -596,8 +603,8 @@ jobs:
 
       - name: Run JavaScript tests (HTTP)
         id: test-http
-        run: bun test
         continue-on-error: true
+        run: bun test
         env:
           SURREAL_PROTOCOL: http
           SURREAL_VERSION_CHECK: "false"
@@ -605,17 +612,17 @@ jobs:
 
       - name: Run JavaScript tests (WebSocket)
         id: test-ws
-        run: bun test
         continue-on-error: true
+        run: bun test
         env:
           SURREAL_PROTOCOL: ws
           SURREAL_VERSION_CHECK: "false"
           SURREAL_EXECUTABLE_PATH: ${{ github.workspace }}/artifacts/surreal
 
-      - name: Check for test failures
+      - name: ${{ (steps.test-http.outcome != 'success' || steps.test-ws.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
         id: check-failures
         run: |
-          if [ "${{ steps.test-http.outcome }}" = "failure" ] || [ "${{ steps.test-ws.outcome }}" = "failure" ]; then
+          if [ "${{ steps.test-http.outcome }}" != "success" ] || [ "${{ steps.test-ws.outcome }}" != "success" ]; then
             echo "failed=true" >> $GITHUB_OUTPUT
           else
             echo "failed=false" >> $GITHUB_OUTPUT
@@ -648,7 +655,7 @@ jobs:
         run: chmod +x ${{ github.workspace }}/artifacts/surreal
 
       - name: Setup Golang
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: ${{ matrix.version }}
           check-latest: true
@@ -658,6 +665,7 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
+        timeout-minutes: 1
         run: |
           # Wait for SurrealDB to be ready
           for i in {1..30}; do
@@ -677,22 +685,24 @@ jobs:
 
       - name: Run Golang tests (HTTP)
         id: test-http
-        run: go test -v -cover ./...
+        timeout-minutes: 5
         continue-on-error: true
+        run: go test -v -cover ./...
         env:
           SURREALDB_URL: http://localhost:8000/rpc
 
       - name: Run Golang tests (WebSocket)
         id: test-ws
-        run: go test -v -cover ./...
+        timeout-minutes: 5
         continue-on-error: true
+        run: go test -v -cover ./...
         env:
           SURREALDB_URL: ws://localhost:8000/rpc
 
-      - name: Check for test failures
+      - name: ${{ (steps.test-http.outcome != 'success' || steps.test-ws.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
         id: check-failures
         run: |
-          if [ "${{ steps.test-http.outcome }}" = "failure" ] || [ "${{ steps.test-ws.outcome }}" = "failure" ]; then
+          if [ "${{ steps.test-http.outcome }}" != "success" ] || [ "${{ steps.test-ws.outcome }}" != "success" ]; then
             echo "failed=true" >> $GITHUB_OUTPUT
           else
             echo "failed=false" >> $GITHUB_OUTPUT
@@ -725,7 +735,7 @@ jobs:
         run: chmod +x ${{ github.workspace }}/artifacts/surreal
 
       - name: Setup Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.version }}
 
@@ -739,6 +749,7 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
+        timeout-minutes: 1
         run: |
           # Wait for SurrealDB to be ready
           for i in {1..30}; do
@@ -761,8 +772,9 @@ jobs:
 
       - name: Run Python tests (HTTP)
         id: test-http
-        run: uv run pytest
+        timeout-minutes: 5
         continue-on-error: true
+        run: uv run pytest
         env:
           PYTHONPATH: ./src
           SURREALDB_URL: http://localhost:8000
@@ -771,18 +783,19 @@ jobs:
 
       - name: Run Python tests (WebSocket)
         id: test-ws
-        run: uv run pytest
+        timeout-minutes: 5
         continue-on-error: true
+        run: uv run pytest
         env:
           PYTHONPATH: ./src
           SURREALDB_URL: ws://localhost:8000
           SURREALDB_VERSION: ${{ matrix.version }}
           PYTHONWARNINGS: ignore::ResourceWarning,ignore::UserWarning
 
-      - name: Check for test failures
+      - name: ${{ (steps.test-http.outcome != 'success' || steps.test-ws.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
         id: check-failures
         run: |
-          if [ "${{ steps.test-http.outcome }}" = "failure" ] || [ "${{ steps.test-ws.outcome }}" = "failure" ]; then
+          if [ "${{ steps.test-http.outcome }}" != "success" ] || [ "${{ steps.test-ws.outcome }}" != "success" ]; then
             echo "failed=true" >> $GITHUB_OUTPUT
           else
             echo "failed=false" >> $GITHUB_OUTPUT
@@ -828,6 +841,7 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
+        timeout-minutes: 1
         run: |
           # Wait for SurrealDB to be ready
           for i in {1..30}; do
@@ -847,13 +861,14 @@ jobs:
 
       - name: Run PHP tests
         id: test-php
-        run: composer test-coverage-v2
+        timeout-minutes: 5
         continue-on-error: true
+        run: composer test-coverage-v2
 
-      - name: Check for test failures
+      - name: ${{ (steps.test-php.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
         id: check-failures
         run: |
-          if [ "${{ steps.test-php.outcome }}" = "failure" ]; then
+          if [ "${{ steps.test-php.outcome }}" != "success" ]; then
             echo "failed=true" >> $GITHUB_OUTPUT
           else
             echo "failed=false" >> $GITHUB_OUTPUT
@@ -903,6 +918,7 @@ jobs:
         run: ${{ github.workspace }}/artifacts/surreal start --allow-all -u root -p root &
 
       - name: Wait for startup
+        timeout-minutes: 1
         run: |
           # Wait for SurrealDB to be ready
           for i in {1..30}; do
@@ -922,26 +938,28 @@ jobs:
 
       - name: Run .NET tests
         id: test-main
+        timeout-minutes: 5
+        continue-on-error: true
         run: >
           dotnet test
           ./SurrealDb.Net.Tests/SurrealDb.Net.Tests.csproj
           --no-restore
           --no-build
-        continue-on-error: true
 
       - name: Run .NET tests (Live Query)
-        id: test-live-query
+        id: test-live
+        timeout-minutes: 5
+        continue-on-error: true
         run: >
           dotnet test
           ./SurrealDb.Net.LiveQuery.Tests/SurrealDb.Net.LiveQuery.Tests.csproj
           --no-restore
           --no-build
-        continue-on-error: true
 
-      - name: Check for test failures
+      - name: ${{ (steps.test-main.outcome != 'success' || steps.test-live.outcome != 'success') && '❌ SDK tests failed' || '✅ SDK tests succeeded' }}
         id: check-failures
         run: |
-          if [ "${{ steps.test-main.outcome }}" = "failure" ] || [ "${{ steps.test-live-query.outcome }}" = "failure" ]; then
+          if [ "${{ steps.test-main.outcome }}" != "success" ] || [ "${{ steps.test-live.outcome }}" != "success" ]; then
             echo "failed=true" >> $GITHUB_OUTPUT
           else
             echo "failed=false" >> $GITHUB_OUTPUT
@@ -952,8 +970,9 @@ jobs:
   # ----------------------------------------
 
   sdk-output:
-    name: ${{ (needs.sdk-javascript.outputs.tests-failed == 'true' || needs.sdk-golang.outputs.tests-failed == 'true' || needs.sdk-python.outputs.tests-failed == 'true' || needs.sdk-php.outputs.tests-failed == 'true' || needs.sdk-dotnet.outputs.tests-failed == 'true') && '⚠️ SDK tests failed' || '✅ SDK tests passed' }}
+    name: ${{ (needs.sdk-javascript.outputs.tests-failed == 'true' || needs.sdk-golang.outputs.tests-failed == 'true' || needs.sdk-python.outputs.tests-failed == 'true' || needs.sdk-php.outputs.tests-failed == 'true' || needs.sdk-dotnet.outputs.tests-failed == 'true') && '❌ SDK tests failed' || '✅ SDK tests passed' }}
     runs-on: ubuntu-latest
+    if: always()
     needs:
       - sdk-javascript
       - sdk-golang
@@ -972,7 +991,7 @@ jobs:
       - name: Output SDK test summary
         run: |
           if [[ "${{ needs.sdk-javascript.outputs.tests-failed == 'true' || needs.sdk-golang.outputs.tests-failed == 'true' || needs.sdk-python.outputs.tests-failed == 'true' || needs.sdk-php.outputs.tests-failed == 'true' || needs.sdk-dotnet.outputs.tests-failed == 'true' }}" == "true" ]]; then
-            echo "⚠️ Some SDK tests failed"
+            echo "❌ Some SDK tests failed"
           else
             echo "✅ All SDK tests passed successfully"
           fi
@@ -984,6 +1003,7 @@ jobs:
   required-checks:
     name: Required checks
     runs-on: ubuntu-latest
+    if: always()
     needs:
       # Server build
       - build
@@ -1016,5 +1036,48 @@ jobs:
       - lang-tests
       - upgrade-tests
     steps:
-      - name: All required checks passed
-        run: echo "All required CI checks have passed successfully!"
+      - name: Check for failures
+        run: |
+          echo "Checking results of all required jobs..."
+
+          # List of all job results
+          results=(
+            "${{ needs.build.result }}"
+            "${{ needs.format.result }}"
+            "${{ needs.clippy.result }}"
+            "${{ needs.clippy-release.result }}"
+            "${{ needs.check.result }}"
+            "${{ needs.check-release.result }}"
+            "${{ needs.check-msrv.result }}"
+            "${{ needs.check-wasm.result }}"
+            "${{ needs.check-revision.result }}"
+            "${{ needs.check-docs.result }}"
+            "${{ needs.cli-integration.result }}"
+            "${{ needs.http-integration.result }}"
+            "${{ needs.ws-integration.result }}"
+            "${{ needs.ml-integration.result }}"
+            "${{ needs.graphql-integration.result }}"
+            "${{ needs.test.result }}"
+            "${{ needs.sdk-build.result }}"
+            "${{ needs.sdk-engines.result }}"
+            "${{ needs.kvs-engines.result }}"
+            "${{ needs.db-upgrade.result }}"
+            "${{ needs.lang-tests.result }}"
+            "${{ needs.upgrade-tests.result }}"
+          )
+
+          # Check if any job failed
+          failed=false
+          for result in "${results[@]}"; do
+            if [[ "$result" != "success" ]]; then
+              echo "❌ A required job had result: $result"
+              failed=true
+            fi
+          done
+
+          if [[ "$failed" == "true" ]]; then
+            echo "❌ One or more required checks failed"
+            exit 1
+          else
+            echo "✅ All required CI checks have passed successfully!"
+          fi

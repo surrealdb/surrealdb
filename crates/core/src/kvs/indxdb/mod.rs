@@ -28,19 +28,7 @@ pub struct Transaction {
 
 impl Drop for Transaction {
 	fn drop(&mut self) {
-		if !self.done && self.write {
-			match self.check {
-				Check::None => {
-					trace!("A transaction was dropped without being committed or cancelled");
-				}
-				Check::Warn => {
-					warn!("A transaction was dropped without being committed or cancelled");
-				}
-				Check::Error => {
-					error!("A transaction was dropped without being committed or cancelled");
-				}
-			}
-		}
+		self.check.drop_check(self.done, self.write);
 	}
 }
 

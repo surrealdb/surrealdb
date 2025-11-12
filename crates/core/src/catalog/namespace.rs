@@ -1,13 +1,14 @@
 use std::fmt::{Display, Formatter};
 
-use revision::{Revisioned, revisioned};
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{ToSql, write_sql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::sql::statements::DefineNamespaceStatement;
-use crate::sql::{Expr, Literal, ToSql};
+use crate::sql::{Expr, Literal};
 use crate::val::Value;
 
 #[derive(
@@ -34,18 +35,22 @@ impl Revisioned for NamespaceId {
 	fn revision() -> u16 {
 		1
 	}
+}
 
+impl SerializeRevisioned for NamespaceId {
 	#[inline]
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		self.0.serialize_revisioned(writer)
+		SerializeRevisioned::serialize_revisioned(&self.0, writer)
 	}
+}
 
+impl DeserializeRevisioned for NamespaceId {
 	#[inline]
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		Revisioned::deserialize_revisioned(reader).map(NamespaceId)
+		DeserializeRevisioned::deserialize_revisioned(reader).map(NamespaceId)
 	}
 }
 
@@ -81,8 +86,8 @@ impl NamespaceDefinition {
 }
 
 impl ToSql for NamespaceDefinition {
-	fn to_sql(&self) -> String {
-		self.to_sql_definition().to_string()
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self.to_sql_definition())
 	}
 }
 

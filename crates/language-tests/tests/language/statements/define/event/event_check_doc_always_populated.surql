@@ -40,7 +40,7 @@ value = """[
 
 DEFINE EVENT test ON test WHEN true THEN {
     LET $doc = $this;
-    CREATE type::thing('log', $event) SET this = $doc, value = $value, before = $before, after = $after;
+    CREATE type::record('log', $event) SET this = $doc, value = $value, before = $before, after = $after;
 };
 CREATE test:1 SET num = 1;
 UPSERT test:1 set num = 2;

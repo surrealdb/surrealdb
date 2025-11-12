@@ -15,10 +15,6 @@ impl Param {
 		Self(str)
 	}
 
-	pub fn as_str(&self) -> &str {
-		&self.0
-	}
-
 	// Convert into a string.
 	pub fn into_string(self) -> String {
 		self.0
@@ -33,14 +29,12 @@ impl fmt::Display for Param {
 
 impl From<Param> for crate::expr::Param {
 	fn from(v: Param) -> Self {
-		// Safety: Null byte guarenteed is upheld by param.
 		Self::new(v.0)
 	}
 }
 
 impl From<crate::expr::Param> for Param {
 	fn from(v: crate::expr::Param) -> Self {
-		// Safety: Null byte guarenteed is upheld by param.
 		Self::new(v.into_string())
 	}
 }

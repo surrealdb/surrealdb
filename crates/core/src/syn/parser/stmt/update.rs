@@ -5,7 +5,10 @@ use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::t;
 
 impl Parser<'_> {
-	pub async fn parse_update_stmt(&mut self, stk: &mut Stk) -> ParseResult<UpdateStatement> {
+	pub(crate) async fn parse_update_stmt(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<UpdateStatement> {
 		let only = self.eat(t!("ONLY"));
 		let what = self.parse_what_list(stk).await?;
 		let with = self.try_parse_with()?;

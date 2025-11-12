@@ -11,7 +11,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr};
 use crate::fmt::Fmt;
@@ -19,26 +18,13 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineEventStatement {
+pub(crate) struct DefineEventStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub target_table: Expr,
 	pub when: Expr,
 	pub then: Vec<Expr>,
 	pub comment: Option<Expr>,
-}
-
-impl VisitExpression for DefineEventStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.target_table.visit(visitor);
-		self.when.visit(visitor);
-		self.then.iter().for_each(|comment| comment.visit(visitor));
-		self.comment.iter().for_each(|comment| comment.visit(visitor));
-	}
 }
 
 impl DefineEventStatement {
@@ -80,7 +66,7 @@ impl DefineEventStatement {
 		// Ensure the table exists
 		let tb = {
 			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_tb(ns, db, &target_table, opt.strict).await?
+			txn.get_or_add_tb(Some(ctx), ns, db, &target_table).await?
 		};
 
 		// Process the statement

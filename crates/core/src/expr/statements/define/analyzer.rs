@@ -2,6 +2,7 @@ use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::{ToSql, write_sql};
 
 use super::DefineKind;
 use crate::catalog;
@@ -10,7 +11,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::filter::Filter;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::tokenizer::Tokenizer;
@@ -18,23 +18,13 @@ use crate::expr::{Base, Expr, Idiom, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineAnalyzerStatement {
+pub(crate) struct DefineAnalyzerStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub function: Option<String>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
 	pub comment: Option<Expr>,
-}
-
-impl VisitExpression for DefineAnalyzerStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.comment.iter().for_each(|comment| comment.visit(visitor));
-	}
 }
 
 impl Default for DefineAnalyzerStatement {
@@ -141,5 +131,11 @@ impl Display for DefineAnalyzerStatement {
 			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for DefineAnalyzerStatement {
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self)
 	}
 }

@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use std::collections::BTreeMap;
 use std::time::Duration;
 
@@ -5,7 +7,7 @@ use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_mai
 use surrealdb_core::dbs::capabilities::{FuncTarget, Targets};
 use surrealdb_core::dbs::{Capabilities, Session};
 use surrealdb_core::kvs::Datastore;
-use surrealdb_core::val::{Array, Number, Object, Value};
+use surrealdb_types::{Array, Number, Object, Value};
 use tokio::runtime::Runtime;
 
 fn bench_with_or_without_index(c: &mut Criterion) {
@@ -74,7 +76,7 @@ async fn run(i: &Input, q: &str, expected: usize) {
 		let expected = Value::Array(Array::from(vec![Value::Object(Object::from(
 			BTreeMap::from([("count", Value::Number(Number::Int(expected as i64)))]),
 		))]));
-		assert_eq!(format!("{val:#}"), format!("{expected:#}"));
+		assert_eq!(val, expected);
 	}
 	black_box(r);
 }

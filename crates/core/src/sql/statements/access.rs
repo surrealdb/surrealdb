@@ -3,7 +3,7 @@ use std::fmt::{Display, Formatter};
 
 use crate::fmt::EscapeIdent;
 use crate::sql::{Base, Cond, RecordIdLit};
-use crate::val::{Datetime, Duration, Uuid};
+use crate::types::PublicDuration;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -134,7 +134,7 @@ pub struct AccessStatementPurge {
 	// TODO: Merge these booleans into a enum as having them both be false is invalid state.
 	pub expired: bool,
 	pub revoked: bool,
-	pub grace: Duration,
+	pub grace: PublicDuration,
 }
 
 impl From<AccessStatementPurge> for crate::expr::statements::access::AccessStatementPurge {
@@ -144,7 +144,7 @@ impl From<AccessStatementPurge> for crate::expr::statements::access::AccessState
 			base: v.base.map(Into::into),
 			expired: v.expired,
 			revoked: v.revoked,
-			grace: v.grace,
+			grace: v.grace.into(),
 		}
 	}
 }
@@ -156,21 +156,9 @@ impl From<crate::expr::statements::access::AccessStatementPurge> for AccessState
 			base: v.base.map(Into::into),
 			expired: v.expired,
 			revoked: v.revoked,
-			grace: v.grace,
+			grace: v.grace.into(),
 		}
 	}
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct AccessGrant {
-	pub id: String,                   // Unique grant identifier.
-	pub ac: String,                   // Access method used to create the grant.
-	pub creation: Datetime,           // Grant creation time.
-	pub expiration: Option<Datetime>, // Grant expiration time, if any.
-	pub revocation: Option<Datetime>, // Grant revocation time, if any.
-	pub subject: Subject,             // Subject of the grant.
-	pub grant: Grant,                 // Grant data.
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -196,50 +184,6 @@ impl From<crate::expr::statements::access::Subject> for Subject {
 			crate::expr::statements::access::Subject::User(name) => Self::User(name),
 		}
 	}
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum Grant {
-	Jwt(GrantJwt),
-	Record(GrantRecord),
-	Bearer(GrantBearer),
-}
-
-impl Grant {
-	// Returns the type of the grant as a string.
-	pub fn variant(&self) -> &str {
-		match self {
-			Grant::Jwt(_) => "jwt",
-			Grant::Record(_) => "record",
-			Grant::Bearer(_) => "bearer",
-		}
-	}
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct GrantJwt {
-	pub jti: Uuid,             // JWT ID
-	pub token: Option<String>, // JWT. Will not be stored after being returned.
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct GrantRecord {
-	pub rid: Uuid,             // Record ID
-	pub jti: Uuid,             // JWT ID
-	pub token: Option<String>, // JWT. Will not be stored after being returned.
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct GrantBearer {
-	pub id: String, // Key ID
-	// Key. Will not be stored and be returned as redacted.
-	// Immediately after generation, it will contain the plaintext key.
-	// Will be hashed before storage so that the plaintext key is not stored.
-	pub key: String,
 }
 
 impl Display for AccessStatement {

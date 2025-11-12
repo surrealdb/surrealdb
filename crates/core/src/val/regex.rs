@@ -23,7 +23,7 @@ pub struct Regex(pub regex::Regex);
 impl Regex {
 	// Deref would expose `regex::Regex::as_str` which wouldn't have the '/'
 	// delimiters.
-	pub fn regex(&self) -> &regex::Regex {
+	pub fn inner(&self) -> &regex::Regex {
 		&self.0
 	}
 }
@@ -95,6 +95,18 @@ impl Display for Regex {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		let t = self.0.to_string().replace('/', "\\/");
 		write!(f, "/{}/", &t)
+	}
+}
+
+impl From<surrealdb_types::Regex> for Regex {
+	fn from(v: surrealdb_types::Regex) -> Self {
+		Self(v.0)
+	}
+}
+
+impl From<Regex> for surrealdb_types::Regex {
+	fn from(x: Regex) -> Self {
+		surrealdb_types::Regex(x.0)
 	}
 }
 

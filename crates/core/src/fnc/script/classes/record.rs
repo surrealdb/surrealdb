@@ -5,7 +5,7 @@ use crate::val::{RecordId, Value};
 
 #[derive(Clone, Trace, JsLifetime)]
 #[js::class]
-pub struct Record {
+pub(crate) struct Record {
 	#[qjs(skip_trace)]
 	pub(crate) value: RecordId,
 }
@@ -22,7 +22,7 @@ impl Record {
 					Value::Object(v) => v.into(),
 					Value::Number(v) => v.to_int().into(),
 					Value::Uuid(v) => v.into(),
-					v => v.as_raw_string().into(),
+					v => v.into_raw_string().into(),
 				},
 			},
 		}

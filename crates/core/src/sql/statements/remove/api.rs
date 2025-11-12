@@ -4,7 +4,7 @@ use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct RemoveApiStatement {
+pub(crate) struct RemoveApiStatement {
 	pub name: Expr,
 	pub if_exists: bool,
 }

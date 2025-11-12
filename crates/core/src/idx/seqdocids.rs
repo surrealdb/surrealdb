@@ -1,12 +1,8 @@
-use std::sync::Arc;
-
 use anyhow::Result;
-use uuid::Uuid;
 
 use crate::ctx::Context;
 use crate::idx::IndexKeyBase;
 use crate::kvs::Transaction;
-use crate::kvs::sequences::SequenceDomain;
 use crate::val::RecordIdKey;
 
 pub type DocId = u64;
@@ -46,25 +42,18 @@ impl Resolved {
 /// - Allocates IDs in batches for better performance
 pub(crate) struct SeqDocIds {
 	ikb: IndexKeyBase,
-	nid: Uuid,
-	domain: Arc<SequenceDomain>,
 	batch: u32,
 }
 
 impl SeqDocIds {
 	/// Creates a new SeqDocIds instance
 	///
-	/// Initializes a new document ID manager with the specified node ID and
-	/// index key base. Sets up the sequence domain for generating unique
-	/// document IDs.
+	/// Initializes a new document ID manager for the specified index.
 	///
 	/// # Arguments
-	/// * `nid` - The node ID used for distributed sequence generation
 	/// * `ikb` - The index key base containing namespace, database, table, and index information
-	pub(in crate::idx) fn new(nid: Uuid, ikb: IndexKeyBase) -> Self {
+	pub(in crate::idx) fn new(ikb: IndexKeyBase) -> Self {
 		Self {
-			nid,
-			domain: Arc::new(SequenceDomain::new_ft_doc_ids(ikb.clone())),
 			batch: 1000, // TODO ekeller: Make that configurable?
 			ikb,
 		}
@@ -117,7 +106,7 @@ impl SeqDocIds {
 		// If not, let's get one from the sequence
 		let new_doc_id = ctx
 			.try_get_sequences()?
-			.next_val_fts_idx(ctx, self.nid, self.domain.clone(), self.batch)
+			.next_fts_doc_id(Some(ctx), self.ikb.clone(), self.batch)
 			.await? as DocId;
 		{
 			tx.set(&id_key, &new_doc_id, None).await?;
@@ -174,8 +163,6 @@ impl SeqDocIds {
 
 #[cfg(test)]
 mod tests {
-	use uuid::Uuid;
-
 	use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 	use crate::ctx::Context;
 	use crate::idx::IndexKeyBase;
@@ -195,7 +182,7 @@ mod tests {
 		let tx = ds.transaction(tt, Optimistic).await.unwrap();
 		let ikb = IndexKeyBase::new(TEST_NS_ID, TEST_DB_ID, TEST_TB, TEST_IX_ID);
 		ctx.set_transaction(tx.into());
-		let d = SeqDocIds::new(Uuid::nil(), ikb);
+		let d = SeqDocIds::new(ikb);
 		(ctx.freeze(), d)
 	}
 

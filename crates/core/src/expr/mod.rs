@@ -52,71 +52,65 @@ pub(crate) mod view;
 pub(crate) mod with;
 
 pub(crate) mod decimal;
+pub(crate) mod module;
 
-pub mod statements;
+mod closure;
+pub(crate) mod statements;
+pub mod visit;
 
-pub use self::access_type::{AccessType, JwtAccess, RecordAccess};
-pub use self::algorithm::Algorithm;
-pub use self::base::Base;
-pub use self::block::Block;
-pub use self::bytesize::Bytesize;
-pub use self::changefeed::ChangeFeed;
-pub use self::cond::Cond;
-pub use self::constant::Constant;
-pub use self::data::Data;
-pub use self::dir::Dir;
-//pub use self::edges::Edges;
-pub use self::explain::Explain;
-pub use self::expression::Expr;
-pub use self::fetch::{Fetch, Fetchs};
-pub use self::field::{Field, Fields};
-pub use self::filter::Filter;
-pub use self::function::{Function, FunctionCall};
-pub use self::group::{Group, Groups};
-pub use self::idiom::{Idiom, Idioms};
-pub use self::kind::{GeometryKind, Kind, KindLiteral};
-pub use self::limit::Limit;
-pub use self::literal::Literal;
-pub use self::lookup::Lookup;
-pub use self::mock::Mock;
-pub use self::model::{get_model_path, Model};
-pub use self::operation::Operation;
-pub use self::operator::{AssignOperator, BinaryOperator, PostfixOperator, PrefixOperator};
-pub use self::order::{Order, OrderList, Ordering};
-pub use self::output::Output;
-pub use self::param::Param;
-pub use self::part::Part;
-pub use self::plan::{LogicalPlan, TopLevelExpr};
-pub use self::record_id::{RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit};
-pub use self::script::Script;
-pub use self::split::{Split, Splits};
-pub use self::start::Start;
-pub use self::statements::{
-	AccessGrant, AccessStatement, AlterStatement, AlterTableStatement, CreateStatement,
-	DefineAccessStatement, DefineAnalyzerStatement, DefineApiStatement, DefineDatabaseStatement,
-	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
-	DefineModelStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
-	DefineTableStatement, DefineUserStatement, DeleteStatement, ForeachStatement, IfelseStatement,
-	InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement, OutputStatement,
-	RebuildStatement, RelateStatement, RemoveAccessStatement, RemoveAnalyzerStatement,
-	RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement,
-	RemoveIndexStatement, RemoveModelStatement, RemoveNamespaceStatement, RemoveParamStatement,
-	RemoveStatement, RemoveTableStatement, RemoveUserStatement, SelectStatement, SetStatement,
-	ShowStatement, SleepStatement, UpdateStatement, UpsertStatement, UseStatement,
+pub(crate) use self::access_type::{AccessType, JwtAccess, RecordAccess};
+pub(crate) use self::algorithm::Algorithm;
+pub(crate) use self::base::Base;
+pub(crate) use self::block::Block;
+pub(crate) use self::bytesize::Bytesize;
+pub(crate) use self::changefeed::ChangeFeed;
+pub(crate) use self::closure::ClosureExpr;
+pub(crate) use self::cond::Cond;
+pub(crate) use self::constant::Constant;
+pub(crate) use self::data::Data;
+pub(crate) use self::dir::Dir;
+pub(crate) use self::explain::Explain;
+pub(crate) use self::expression::Expr;
+pub(crate) use self::fetch::{Fetch, Fetchs};
+pub(crate) use self::field::{Field, Fields};
+pub(crate) use self::filter::Filter;
+pub(crate) use self::function::{Function, FunctionCall};
+pub(crate) use self::group::{Group, Groups};
+pub(crate) use self::idiom::{Idiom, Idioms};
+pub(crate) use self::kind::{Kind, KindLiteral};
+pub(crate) use self::limit::Limit;
+pub(crate) use self::literal::{Literal, ObjectEntry};
+pub(crate) use self::lookup::Lookup;
+pub(crate) use self::mock::Mock;
+pub(crate) use self::model::Model;
+pub(crate) use self::module::{ModuleExecutable, SiloExecutable, SurrealismExecutable};
+pub(crate) use self::operation::Operation;
+pub(crate) use self::operator::{AssignOperator, BinaryOperator, PostfixOperator, PrefixOperator};
+pub(crate) use self::order::{Order, OrderList, Ordering};
+pub(crate) use self::output::Output;
+pub(crate) use self::param::Param;
+pub(crate) use self::part::Part;
+pub(crate) use self::plan::{LogicalPlan, TopLevelExpr};
+pub(crate) use self::record_id::{
+	RecordIdKeyGen, RecordIdKeyLit, RecordIdKeyRangeLit, RecordIdLit,
 };
-pub use self::timeout::Timeout;
-pub use self::tokenizer::Tokenizer;
-pub use self::view::View;
-pub use self::with::With;
+pub(crate) use self::script::Script;
+pub(crate) use self::split::{Split, Splits};
+pub(crate) use self::start::Start;
+pub(crate) use self::statements::{DefineAnalyzerStatement, SelectStatement, SleepStatement};
+pub(crate) use self::timeout::Timeout;
+pub(crate) use self::tokenizer::Tokenizer;
+pub(crate) use self::view::View;
+pub(crate) use self::with::With;
 
 /// Result of functions which can impact the controlflow of query execution.
-pub type FlowResult<T> = Result<T, ControlFlow>;
+pub(crate) type FlowResult<T> = Result<T, ControlFlow>;
 
 /// An enum carrying control flow information.
 ///
 /// Returned by compute functions which can impact control flow.
 #[derive(Debug)]
-pub enum ControlFlow {
+pub(crate) enum ControlFlow {
 	Break,
 	Continue,
 	Return(Value),
@@ -130,7 +124,7 @@ impl From<anyhow::Error> for ControlFlow {
 }
 
 /// Helper trait to catch controlflow return unwinding.
-pub trait FlowResultExt {
+pub(crate) trait FlowResultExt {
 	/// Function which catches `ControlFlow::Return(x)` and turns it into
 	/// `Ok(x)`.
 	///

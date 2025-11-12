@@ -17,10 +17,9 @@ pub(crate) fn random_key() -> String {
 /// The type of access methods available
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum AccessType {
+pub(crate) enum AccessType {
 	Record(RecordAccess),
 	Jwt(JwtAccess),
-	// TODO(gguillemas): Document once bearer access is no longer experimental.
 	Bearer(BearerAccess),
 }
 
@@ -110,7 +109,7 @@ impl AccessType {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct JwtAccess {
+pub(crate) struct JwtAccess {
 	// Verify is required
 	pub verify: JwtAccessVerify,
 	// Issue is optional
@@ -175,7 +174,7 @@ impl From<crate::expr::JwtAccess> for JwtAccess {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct JwtAccessIssue {
+pub(crate) struct JwtAccessIssue {
 	pub alg: Algorithm,
 	pub key: Expr,
 }
@@ -212,7 +211,7 @@ impl From<crate::expr::access_type::JwtAccessIssue> for JwtAccessIssue {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum JwtAccessVerify {
+pub(crate) enum JwtAccessVerify {
 	Key(JwtAccessVerifyKey),
 	Jwks(JwtAccessVerifyJwks),
 }
@@ -237,7 +236,7 @@ impl From<crate::expr::access_type::JwtAccessVerify> for JwtAccessVerify {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct JwtAccessVerifyKey {
+pub(crate) struct JwtAccessVerifyKey {
 	pub alg: Algorithm,
 	pub key: Expr,
 }
@@ -262,7 +261,7 @@ impl From<crate::expr::access_type::JwtAccessVerifyKey> for JwtAccessVerifyKey {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct JwtAccessVerifyJwks {
+pub(crate) struct JwtAccessVerifyJwks {
 	pub url: Expr,
 }
 
@@ -284,7 +283,7 @@ impl From<crate::expr::access_type::JwtAccessVerifyJwks> for JwtAccessVerifyJwks
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct RecordAccess {
+pub(crate) struct RecordAccess {
 	pub signup: Option<Expr>,
 	pub signin: Option<Expr>,
 	pub jwt: JwtAccess,
@@ -315,7 +314,7 @@ impl From<crate::expr::RecordAccess> for RecordAccess {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct BearerAccess {
+pub(crate) struct BearerAccess {
 	pub kind: BearerAccessType,
 	pub subject: BearerAccessSubject,
 	pub jwt: JwtAccess,
@@ -353,18 +352,9 @@ impl From<crate::expr::access_type::BearerAccess> for BearerAccess {
 
 #[derive(Debug, Hash, Clone, Eq, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum BearerAccessType {
+pub(crate) enum BearerAccessType {
 	Bearer,
 	Refresh,
-}
-
-impl BearerAccessType {
-	pub fn prefix(&self) -> &'static str {
-		match self {
-			Self::Bearer => "surreal-bearer",
-			Self::Refresh => "surreal-refresh",
-		}
-	}
 }
 
 impl FromStr for BearerAccessType {

@@ -47,16 +47,26 @@ impl<'a> Prefix<'a> {
 		}
 	}
 
+	pub(crate) fn new_range(
+		ns: NamespaceId,
+		db: DatabaseId,
+		g: u8,
+		h: u8,
+		sq: &'a str,
+	) -> Result<Range<Vec<u8>>> {
+		let mut beg = Self::new(ns, db, sq, g, h).encode_key()?;
+		let mut end = Self::new(ns, db, sq, g, h).encode_key()?;
+		beg.extend_from_slice(&[0x00; 9]);
+		end.extend_from_slice(&[0xFF; 9]);
+		Ok(beg..end)
+	}
+
 	pub(crate) fn new_ba_range(
 		ns: NamespaceId,
 		db: DatabaseId,
 		sq: &'a str,
 	) -> Result<Range<Vec<u8>>> {
-		let mut beg = Self::new(ns, db, sq, b'b', b'a').encode_key()?;
-		let mut end = Self::new(ns, db, sq, b'b', b'a').encode_key()?;
-		beg.extend_from_slice(&[0x00; 9]);
-		end.extend_from_slice(&[0xFF; 9]);
-		Ok(beg..end)
+		Self::new_range(ns, db, b'b', b'a', sq)
 	}
 
 	pub(crate) fn new_st_range(
@@ -64,11 +74,7 @@ impl<'a> Prefix<'a> {
 		db: DatabaseId,
 		sq: &'a str,
 	) -> Result<Range<Vec<u8>>> {
-		let mut beg = Self::new(ns, db, sq, b's', b't').encode_key()?;
-		let mut end = Self::new(ns, db, sq, b's', b't').encode_key()?;
-		beg.extend_from_slice(&[0x00; 9]);
-		end.extend_from_slice(&[0xFF; 9]);
-		Ok(beg..end)
+		Self::new_range(ns, db, b's', b't', sq)
 	}
 }
 

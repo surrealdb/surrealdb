@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used)]
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 

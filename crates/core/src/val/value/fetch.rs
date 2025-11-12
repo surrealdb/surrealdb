@@ -239,7 +239,7 @@ impl Value {
 				Ok(())
 			}
 			Value::RecordId(v) => {
-				// Clone the thing
+				// Clone the record
 				let val = v.clone();
 				// Fetch the remote embedded record
 				let stm = SelectStatement {

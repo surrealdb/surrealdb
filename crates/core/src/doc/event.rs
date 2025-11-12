@@ -1,9 +1,11 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use reblessive::tree::Stk;
 
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Options, Statement};
-use crate::doc::Document;
+use crate::doc::{Action, Document};
 use crate::expr::FlowResultExt as _;
 use crate::val::Value;
 
@@ -30,20 +32,55 @@ impl Document {
 		}
 		// Don't run permissions
 		let opt = &opt.new_with_perms(false);
+
+		if self.ev(ctx, opt).await?.is_empty() {
+			return Ok(());
+		}
+
+		let input = self.compute_input_value(stk, ctx, opt, stm).await?;
+
+		let action = if stm.is_delete() {
+			Action::Delete
+		} else if self.is_new() {
+			Action::Create
+		} else {
+			Action::Update
+		};
+
+		self.process_events(stk, ctx, opt, action, input).await
+	}
+
+	pub(super) async fn process_events(
+		&mut self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		action: Action,
+		input: Option<Arc<Value>>,
+	) -> Result<()> {
+		// Check import
+		if opt.import {
+			return Ok(());
+		}
+		// Check if changed
+		if !self.changed() {
+			return Ok(());
+		}
+		// Don't run permissions
+		let opt = &opt.new_with_perms(false);
+
 		// Loop through all event statements
 		for ev in self.ev(ctx, opt).await?.iter() {
-			// Get the event action
-			let evt = if stm.is_delete() {
-				Value::from("DELETE")
-			} else if self.is_new() {
-				Value::from("CREATE")
-			} else {
-				Value::from("UPDATE")
+			let evt = match action {
+				Action::Create => Value::from("CREATE"),
+				Action::Update => Value::from("UPDATE"),
+				Action::Delete => Value::from("DELETE"),
 			};
+			// Get the event action
 			let after = self.current.doc.as_arc();
 			let before = self.initial.doc.as_arc();
 			// Depending on type of event, how do we populate the document
-			let doc = if stm.is_delete() {
+			let doc = if action == Action::Delete {
 				&mut self.initial
 			} else {
 				&mut self.current
@@ -54,6 +91,7 @@ impl Document {
 			ctx.add_value("value", doc.doc.as_arc());
 			ctx.add_value("after", after);
 			ctx.add_value("before", before);
+			ctx.add_value("input", input.clone().unwrap_or_default());
 			// Freeze the context
 			let ctx = ctx.freeze();
 			// Process conditional clause

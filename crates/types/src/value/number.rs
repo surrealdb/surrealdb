@@ -1,16 +1,19 @@
 use std::cmp::Ordering;
+use std::fmt::{self, Display};
 use std::hash;
 
 use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
-use crate::Kind;
+use crate::sql::ToSql;
+use crate::{Kind, write_sql};
 
 /// Represents a numeric value in SurrealDB
 ///
 /// Numbers in SurrealDB can be integers, floating-point numbers, or decimal numbers.
 /// This enum provides type-safe representation for all numeric types.
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum Number {
 	/// A 64-bit signed integer
@@ -19,6 +22,62 @@ pub enum Number {
 	Float(f64),
 	/// A decimal number with arbitrary precision
 	Decimal(Decimal),
+}
+
+impl Number {
+	/// A NaN number
+	pub const NAN: Self = Self::Float(f64::NAN);
+
+	/// Checks if this number is NaN.
+	pub fn is_nan(&self) -> bool {
+		matches!(self, Number::Float(v) if v.is_nan())
+	}
+
+	/// Converts this number into an i64.
+	///
+	/// Returns 0 if the number cannot be converted.
+	pub fn to_int(&self) -> Option<i64> {
+		match self {
+			Number::Int(v) => Some(*v),
+			Number::Float(v) => Some(*v as i64),
+			Number::Decimal(v) => v.to_i64(),
+		}
+	}
+
+	/// Converts this number into an f64.
+	///
+	/// Returns 0.0 if the number cannot be converted.
+	pub fn to_f64(&self) -> Option<f64> {
+		match self {
+			Number::Int(v) => Some(*v as f64),
+			Number::Float(v) => Some(*v),
+			Number::Decimal(v) => v.to_f64(),
+		}
+	}
+}
+
+impl Display for Number {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		match self {
+			Number::Int(v) => Display::fmt(v, f),
+			Number::Float(v) => {
+				if v.is_finite() {
+					// Add suffix to distinguish between int and float
+					write!(f, "{v}f")
+				} else {
+					// Don't add suffix for NaN, inf, -inf
+					Display::fmt(v, f)
+				}
+			}
+			Number::Decimal(v) => write!(f, "{v}dec"),
+		}
+	}
+}
+
+impl ToSql for Number {
+	fn fmt_sql(&self, f: &mut String) {
+		write_sql!(f, "{}", self)
+	}
 }
 
 macro_rules! impl_number {

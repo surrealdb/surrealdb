@@ -10,7 +10,7 @@ use crate::expr::{Base, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct RemoveModelStatement {
+pub(crate) struct RemoveModelStatement {
 	pub name: String,
 	pub version: String,
 	pub if_exists: bool,

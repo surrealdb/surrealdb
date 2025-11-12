@@ -11,7 +11,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Base, Expr, Literal};
@@ -19,22 +18,13 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct DefineDatabaseStatement {
+pub(crate) struct DefineDatabaseStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Expr,
+	pub strict: bool,
 	pub comment: Option<Expr>,
 	pub changefeed: Option<ChangeFeed>,
-}
-
-impl VisitExpression for DefineDatabaseStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.comment.iter().for_each(|comment| comment.visit(visitor));
-	}
 }
 
 impl Default for DefineDatabaseStatement {
@@ -45,6 +35,7 @@ impl Default for DefineDatabaseStatement {
 			name: Expr::Literal(Literal::None),
 			comment: None,
 			changefeed: None,
+			strict: false,
 		}
 	}
 }
@@ -66,7 +57,7 @@ impl DefineDatabaseStatement {
 
 		// Fetch the transaction
 		let txn = ctx.tx();
-		let nsv = txn.get_or_add_ns(ns, opt.strict).await?;
+		let nsv = txn.get_or_add_ns(Some(ctx), ns).await?;
 
 		// Process the name
 		let name = expr_to_ident(stk, ctx, opt, doc, &self.name, "database name").await?;
@@ -89,7 +80,7 @@ impl DefineDatabaseStatement {
 
 			db.database_id
 		} else {
-			txn.lock().await.get_next_db_id(nsv.namespace_id).await?
+			ctx.try_get_sequences()?.next_database_id(Some(ctx), nsv.namespace_id).await?
 		};
 
 		// Set the database definition, keyed by namespace name and database name.
@@ -99,6 +90,7 @@ impl DefineDatabaseStatement {
 			name: name.clone(),
 			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
 			changefeed: self.changefeed,
+			strict: self.strict,
 		};
 		txn.put_db(&nsv.name, db_def).await?;
 
@@ -123,6 +115,9 @@ impl Display for DefineDatabaseStatement {
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {}", self.name)?;
+		if self.strict {
+			write!(f, " STRICT")?;
+		}
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {}", v)?
 		}

@@ -2,15 +2,16 @@ mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::err::Error;
+use surrealdb_core::rpc::DbResultError;
 use surrealdb_core::syn;
-use surrealdb_core::val::Value;
+use surrealdb_types::Value;
 
 use crate::helpers::Test;
 
 #[tokio::test]
 async fn relate_with_parameters() -> Result<()> {
 	let sql = "
+		USE NS test DB test;
 		LET $tobie = person:tobie;
 		LET $jaime = person:jaime;
 		RELATE $tobie->knows->$jaime SET id = knows:test, brother = true;
@@ -18,7 +19,11 @@ async fn relate_with_parameters() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 3);
+	assert_eq!(res.len(), 4);
+
+	// USE NS test DB test;
+	let tmp = res.remove(0).result;
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::None;
@@ -48,6 +53,7 @@ async fn relate_with_parameters() -> Result<()> {
 #[tokio::test]
 async fn relate_and_overwrite() -> Result<()> {
 	let sql = "
+		USE NS test DB test;
 		LET $tobie = person:tobie;
 		LET $jaime = person:jaime;
 		RELATE $tobie->knows->$jaime CONTENT { id: knows:test, brother: true };
@@ -57,7 +63,11 @@ async fn relate_and_overwrite() -> Result<()> {
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
 	let res = &mut dbs.execute(sql, &ses, None).await?;
-	assert_eq!(res.len(), 5);
+	assert_eq!(res.len(), 6);
+
+	// USE NS test DB test;
+	let tmp = res.remove(0).result;
+	tmp.unwrap();
 	//
 	let tmp = res.remove(0).result?;
 	let val = Value::None;
@@ -121,9 +131,9 @@ async fn relate_with_param_or_subquery() -> Result<()> {
         LET $relation = type::table("knows");
 		RELATE $tobie->$relation->$jaime;
 		RELATE $tobie->(type::table("knows"))->$jaime;
-        LET $relation = type::thing("knows:foo");
+        LET $relation = type::record("knows:foo");
 		RELATE $tobie->$relation->$jaime;
-		RELATE $tobie->(type::thing("knows:bar"))->$jaime;
+		RELATE $tobie->(type::record("knows:bar"))->$jaime;
 	"#;
 	let dbs = new_ds().await?;
 	let ses = Session::owner().with_ns("test").with_db("test");
@@ -159,11 +169,11 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 		let id = o.get("id").unwrap();
 
 		let Value::RecordId(t) = id else {
-			panic!("should be thing {id:?}")
+			panic!("should be record {id:?}")
 		};
-		assert_eq!(t.table, "knows");
+		assert_eq!(t.table.as_str(), "knows");
 	}
-	// LET $relation = type::thing("knows:foo");
+	// LET $relation = type::record("knows:foo");
 	let tmp = res.remove(0).result?;
 	let val = Value::None;
 	assert_eq!(tmp, val);
@@ -180,7 +190,7 @@ async fn relate_with_param_or_subquery() -> Result<()> {
 	)
 	.unwrap();
 	assert_eq!(tmp, val);
-	// LET $relation = type::thing("knows:bar");
+	// LET $relation = type::record("knows:bar");
 	let tmp = res.remove(0).result?;
 	let val = syn::value(
 		"[
@@ -267,10 +277,10 @@ async fn schemafull_relate() -> Result<()> {
 	)?;
 
 	// reason is bool not string
-	t.expect_error_func(|e| matches!(e.downcast_ref(), Some(Error::FieldCoerce { .. })))?;
+	t.expect_error_func(|e| *e == DbResultError::InternalError("Couldn't coerce value for field `reason` of `likes:2`: Expected `string` but found `true`".to_string()))?;
 
 	// dog:1 is not a person
-	t.expect_error_func(|e| matches!(e.downcast_ref(), Some(Error::FieldCoerce { .. })))?;
+	t.expect_error_func(|e| *e == DbResultError::InternalError("Couldn't coerce value for field `in` of `likes:3`: Expected `record<person>` but found `dog:1`".to_string()))?;
 
 	Ok(())
 }
@@ -289,7 +299,9 @@ async fn relate_enforced() -> Result<()> {
 	//
 	t.skip_ok(1)?;
 	//
-	t.expect_error_func(|e| matches!(e.downcast_ref(), Some(Error::IdNotFound { .. })))?;
+	t.expect_error_func(|e| {
+		*e == DbResultError::InternalError("The record 'a:1' does not exist".to_string())
+	})?;
 	//
 	t.expect_val("[{ id: a:1 }, { id: a:2 }]")?;
 	//
@@ -304,6 +316,7 @@ async fn relate_enforced() -> Result<()> {
 	configs: {},
 	functions: {},
 	models: {},
+	modules: {},
 	params: {},
 	sequences: {},
 	tables: {

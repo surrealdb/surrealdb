@@ -2,12 +2,12 @@ use std::collections::{BTreeMap, HashMap};
 use std::fmt::{self, Display, Formatter};
 
 use revision::revisioned;
+use surrealdb_types::ToSql;
 
 use crate::catalog::TableDefinition;
 use crate::expr::Operation;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::ToSql;
 use crate::val::{Array, Number, Object, RecordId, Value};
 use crate::vs::VersionStamp;
 
@@ -155,7 +155,9 @@ impl Display for TableMutation {
 			TableMutation::SetWithDiff(id, _previous, v) => write!(f, "SET {} {:?}", id, v),
 			TableMutation::Del(id) => write!(f, "DEL {}", id),
 			TableMutation::DelWithOriginal(id, _) => write!(f, "DEL {}", id),
-			TableMutation::Def(t) => write!(f, "{}", t.to_sql()),
+			TableMutation::Def(t) => {
+				write!(f, "{}", t.to_sql())
+			}
 		}
 	}
 }
@@ -197,6 +199,7 @@ mod tests {
 
 	use super::*;
 	use crate::catalog::{DatabaseId, NamespaceId, TableId};
+	use crate::val::convert_value_to_public_value;
 
 	#[test]
 	fn serialization() {
@@ -225,7 +228,7 @@ mod tests {
 				],
 			)]),
 		);
-		let v = cs.into_value().into_json_value().unwrap();
+		let v = convert_value_to_public_value(cs.into_value()).unwrap().into_json_value();
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,
@@ -284,7 +287,7 @@ mod tests {
 				],
 			)]),
 		);
-		let v = cs.into_value().into_json_value().unwrap();
+		let v = convert_value_to_public_value(cs.into_value()).unwrap().into_json_value();
 		let s = serde_json::to_string(&v).unwrap();
 		assert_eq!(
 			s,

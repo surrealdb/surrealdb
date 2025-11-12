@@ -13,7 +13,7 @@ use crate::syn::error::bail;
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
 use crate::syn::token::{DistanceKind, Span, TokenKind, VectorTypeKind, t};
-use crate::val::Duration;
+use crate::types::PublicDuration;
 
 pub(crate) enum MissingKind {
 	Split,
@@ -24,7 +24,7 @@ pub(crate) enum MissingKind {
 impl Parser<'_> {
 	/// Parses a data production if the next token is a data keyword.
 	/// Otherwise returns None
-	pub async fn try_parse_data(&mut self, stk: &mut Stk) -> ParseResult<Option<Data>> {
+	pub(crate) async fn try_parse_data(&mut self, stk: &mut Stk) -> ParseResult<Option<Data>> {
 		let res = match self.peek().kind {
 			t!("SET") => {
 				self.pop_peek();
@@ -65,7 +65,7 @@ impl Parser<'_> {
 	}
 
 	/// Parses a statement output if the next token is `return`.
-	pub async fn try_parse_output(&mut self, stk: &mut Stk) -> ParseResult<Option<Output>> {
+	pub(crate) async fn try_parse_output(&mut self, stk: &mut Stk) -> ParseResult<Option<Output>> {
 		if !self.eat(t!("RETURN")) {
 			return Ok(None);
 		}
@@ -74,7 +74,7 @@ impl Parser<'_> {
 
 	/// Needed because some part of the RPC needs to call into the parser for
 	/// this specific part.
-	pub async fn parse_output(&mut self, stk: &mut Stk) -> ParseResult<Output> {
+	pub(crate) async fn parse_output(&mut self, stk: &mut Stk) -> ParseResult<Output> {
 		let res = match self.peek_kind() {
 			t!("NONE") => {
 				self.pop_peek();
@@ -102,7 +102,10 @@ impl Parser<'_> {
 	}
 
 	/// Parses a statement timeout if the next token is `TIMEOUT`.
-	pub async fn try_parse_timeout(&mut self, stk: &mut Stk) -> ParseResult<Option<Timeout>> {
+	pub(crate) async fn try_parse_timeout(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<Option<Timeout>> {
 		if !self.eat(t!("TIMEOUT")) {
 			return Ok(None);
 		}
@@ -110,14 +113,14 @@ impl Parser<'_> {
 		Ok(Some(Timeout(duration)))
 	}
 
-	pub async fn try_parse_fetch(&mut self, stk: &mut Stk) -> ParseResult<Option<Fetchs>> {
+	pub(crate) async fn try_parse_fetch(&mut self, stk: &mut Stk) -> ParseResult<Option<Fetchs>> {
 		if !self.eat(t!("FETCH")) {
 			return Ok(None);
 		}
 		Ok(Some(self.parse_fetchs(stk).await?))
 	}
 
-	pub async fn parse_fetchs(&mut self, stk: &mut Stk) -> ParseResult<Fetchs> {
+	pub(crate) async fn parse_fetchs(&mut self, stk: &mut Stk) -> ParseResult<Fetchs> {
 		let mut fetchs = self.try_parse_param_or_idiom_or_fields(stk).await?;
 		while self.eat(t!(",")) {
 			fetchs.append(&mut self.try_parse_param_or_idiom_or_fields(stk).await?);
@@ -125,7 +128,7 @@ impl Parser<'_> {
 		Ok(Fetchs(fetchs))
 	}
 
-	pub async fn try_parse_param_or_idiom_or_fields(
+	pub(crate) async fn try_parse_param_or_idiom_or_fields(
 		&mut self,
 		stk: &mut Stk,
 	) -> ParseResult<Vec<Fetch>> {
@@ -160,7 +163,7 @@ impl Parser<'_> {
 		}
 	}
 
-	pub async fn try_parse_condition(&mut self, stk: &mut Stk) -> ParseResult<Option<Cond>> {
+	pub(crate) async fn try_parse_condition(&mut self, stk: &mut Stk) -> ParseResult<Option<Cond>> {
 		if !self.eat(t!("WHERE")) {
 			return Ok(None);
 		}
@@ -270,7 +273,7 @@ impl Parser<'_> {
 		Ok(())
 	}
 
-	pub async fn try_parse_group(
+	pub(crate) async fn try_parse_group(
 		&mut self,
 		stk: &mut Stk,
 		fields: &Fields,
@@ -313,7 +316,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the parser to have just eaten the `PERMISSIONS` keyword.
-	pub async fn parse_permission(
+	pub(crate) async fn parse_permission(
 		&mut self,
 		stk: &mut Stk,
 		field: bool,
@@ -348,7 +351,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the parser to just have eaten the `FOR` keyword.
-	pub async fn parse_specific_permission(
+	pub(crate) async fn parse_specific_permission(
 		&mut self,
 		stk: &mut Stk,
 		permissions: &mut Permissions,
@@ -372,11 +375,8 @@ impl Parser<'_> {
 					update = true;
 				}
 				t!("DELETE") => {
-					// TODO(gguillemas): Return a parse error instead of logging a warning in 3.0.0.
 					if field {
-						warn!(
-							"The DELETE permission has no effect on fields and is deprecated, but was found in a DEFINE FIELD statement."
-						);
+						bail!("Can't define permission DELETE for fields")
 					} else {
 						delete = true;
 					}
@@ -412,7 +412,10 @@ impl Parser<'_> {
 	///
 	/// Expects the parser to just have eaten either `SELECT`, `CREATE`,
 	/// `UPDATE` or `DELETE`.
-	pub async fn parse_permission_value(&mut self, stk: &mut Stk) -> ParseResult<Permission> {
+	pub(crate) async fn parse_permission_value(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<Permission> {
 		let next = self.next();
 		match next.kind {
 			t!("NONE") => Ok(Permission::None),
@@ -450,7 +453,7 @@ impl Parser<'_> {
 	/// # Parser State
 	/// Expects the parser to have already eating the `CHANGEFEED` keyword
 	pub fn parse_changefeed(&mut self) -> ParseResult<ChangeFeed> {
-		let expiry = self.next_token_value::<Duration>()?.0;
+		let expiry = self.next_token_value::<PublicDuration>()?;
 		let store_diff = if self.eat(t!("INCLUDE")) {
 			expected!(self, t!("ORIGINAL"));
 			true
@@ -468,7 +471,7 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects the parser to have already eating the `REFERENCE` keyword
-	pub async fn parse_reference(&mut self, stk: &mut Stk) -> ParseResult<Reference> {
+	pub(crate) async fn parse_reference(&mut self, stk: &mut Stk) -> ParseResult<Reference> {
 		let on_delete = if self.eat(t!("ON")) {
 			expected!(self, t!("DELETE"));
 			let next = self.next();
@@ -498,7 +501,7 @@ impl Parser<'_> {
 	/// # Parse State
 	/// Expects the parser to have already eaten the possible `(` if the view
 	/// was wrapped in parens. Expects the next keyword to be `SELECT`.
-	pub async fn parse_view(&mut self, stk: &mut Stk) -> ParseResult<View> {
+	pub(crate) async fn parse_view(&mut self, stk: &mut Stk) -> ParseResult<View> {
 		expected!(self, t!("SELECT"));
 		let before_fields = self.peek().span;
 		let fields = self.parse_fields(stk).await?;
@@ -520,7 +523,7 @@ impl Parser<'_> {
 		})
 	}
 
-	pub fn parse_distance(&mut self) -> ParseResult<Distance> {
+	pub(crate) fn parse_distance(&mut self) -> ParseResult<Distance> {
 		let next = self.next();
 		match next.kind {
 			TokenKind::Distance(k) => {
@@ -533,7 +536,7 @@ impl Parser<'_> {
 					DistanceKind::Jaccard => Distance::Jaccard,
 
 					DistanceKind::Minkowski => {
-						let distance = self.next_token_value()?;
+						let distance: surrealdb_types::Number = self.next_token_value()?;
 						Distance::Minkowski(distance)
 					}
 					DistanceKind::Pearson => Distance::Pearson,

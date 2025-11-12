@@ -5,13 +5,12 @@ use reblessive::tree::Stk;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::expression::VisitExpression;
 use crate::expr::fetch::Fetchs;
 use crate::expr::{ControlFlow, Expr, FlowResult};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct OutputStatement {
+pub(crate) struct OutputStatement {
 	pub what: Expr,
 	pub fetch: Option<Fetchs>,
 }
@@ -44,18 +43,6 @@ impl OutputStatement {
 		}
 		//
 		Err(ControlFlow::Return(value))
-	}
-}
-
-impl VisitExpression for OutputStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.what.visit(visitor);
-		if let Some(fetchs) = &self.fetch {
-			fetchs.visit(visitor);
-		}
 	}
 }
 

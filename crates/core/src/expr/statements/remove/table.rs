@@ -1,35 +1,27 @@
 use std::fmt::{self, Display, Formatter};
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use uuid::Uuid;
 
-use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
+use crate::catalog::{TableDefinition, ViewDefinition};
 use crate::ctx::Context;
-use crate::dbs::{self, Notification, Options};
+use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
+use crate::types::{PublicAction, PublicNotification, PublicValue};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct RemoveTableStatement {
+pub(crate) struct RemoveTableStatement {
 	pub name: Expr,
 	pub if_exists: bool,
 	pub expunge: bool,
 }
 
-impl VisitExpression for RemoveTableStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-	}
-}
 impl Default for RemoveTableStatement {
 	fn default() -> Self {
 		Self {
@@ -58,11 +50,6 @@ impl RemoveTableStatement {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
-		// Remove the index stores
-		#[cfg(not(target_family = "wasm"))]
-		ctx.get_index_stores().table_removed(ctx.get_index_builder(), &txn, ns, db, &name).await?;
-		#[cfg(target_family = "wasm")]
-		ctx.get_index_stores().table_removed(&txn, ns, db, &name).await?;
 		// Get the defined table
 		let Some(tb) = txn.get_tb(ns, db, &name).await? else {
 			if self.if_exists {
@@ -74,9 +61,30 @@ impl RemoveTableStatement {
 			}
 			.into());
 		};
+		// Remove the index stores
+		ctx.get_index_stores().table_removed(ctx.get_index_builder(), &txn, ns, db, &tb).await?;
 
 		// Get the foreign tables
 		let fts = txn.all_tb_views(ns, db, &name).await?;
+
+		if !fts.is_empty() {
+			let mut message =
+				format!("Cannot delete table `{name}` on which a view is defined, table(s) `")
+					.to_string();
+			for (idx, f) in fts.iter().enumerate() {
+				if idx != 0 {
+					message.push_str("`, `")
+				}
+				message.push_str(&f.name);
+			}
+
+			message.push_str("` are defined as a view on this table.");
+
+			bail!(Error::Query {
+				message
+			});
+		}
+
 		// Get the live queries
 		let lvs = txn.all_tb_lives(ns, db, &name).await?;
 
@@ -94,24 +102,23 @@ impl RemoveTableStatement {
 		} else {
 			txn.delp(&key).await?
 		};
-		// Process each attached foreign table
-		for ft in fts.iter() {
-			// Refresh the table cache
-			let foreign_tb = txn.expect_tb(ns, db, &ft.name).await?;
-			txn.put_tb(
-				ns_name,
-				db_name,
-				&TableDefinition {
-					cache_tables_ts: Uuid::now_v7(),
-					..foreign_tb.as_ref().clone()
-				},
-			)
-			.await?;
-		}
 		// Check if this is a foreign table
 		if let Some(view) = &tb.view {
+			let (ViewDefinition::Materialized {
+				tables,
+				..
+			}
+			| ViewDefinition::Aggregated {
+				tables,
+				..
+			}
+			| ViewDefinition::Select {
+				tables,
+				..
+			}) = &view;
+
 			// Process each foreign table
-			for ft in view.what.iter() {
+			for ft in tables.iter() {
 				// Save the view config
 				let key = crate::key::table::ft::new(ns, db, ft, &name);
 				txn.del(&key).await?;
@@ -131,12 +138,12 @@ impl RemoveTableStatement {
 		if let Some(sender) = opt.broker.as_ref() {
 			for lv in lvs.iter() {
 				sender
-					.send(Notification {
-						id: lv.id.into(),
-						action: dbs::Action::Killed,
-						record: Value::None,
-						result: Value::None,
-					})
+					.send(PublicNotification::new(
+						lv.id.into(),
+						PublicAction::Killed,
+						PublicValue::None,
+						PublicValue::None,
+					))
 					.await;
 			}
 		}

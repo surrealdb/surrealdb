@@ -64,7 +64,7 @@ impl Document {
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
 							Err(anyhow::Error::new(Error::RecordExists {
-								thing: rid.as_ref().to_owned(),
+								record: rid.as_ref().to_owned(),
 							}))
 						} else {
 							Err(e)
@@ -97,7 +97,7 @@ impl Document {
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
 							Err(anyhow::Error::new(Error::RecordExists {
-								thing: rid.as_ref().to_owned(),
+								record: rid.as_ref().to_owned(),
 							}))
 						} else {
 							Err(e)
@@ -130,7 +130,7 @@ impl Document {
 					Err(e) => {
 						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
 							Err(anyhow::Error::new(Error::RecordExists {
-								thing: rid.as_ref().to_owned(),
+								record: rid.as_ref().to_owned(),
 							}))
 						} else {
 							Err(e)

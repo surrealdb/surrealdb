@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used)]
 #![cfg(any(
 	feature = "protocol-ws",
 	feature = "kv-mem",
@@ -13,14 +14,11 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::Result;
 use futures::{Stream, StreamExt};
-use serde::{Deserialize, Serialize};
-use serde_json::json;
 use surrealdb::method::QueryStream;
-use surrealdb::opt::Resource;
-use surrealdb::{Action, Notification, RecordId, Value};
-use surrealdb_core::val;
+use surrealdb::opt::{Config, Resource};
+use surrealdb::types::{Action, RecordId, SurrealValue, Value, object};
+use surrealdb::{Notification, Result};
 use tokio::sync::RwLock;
 use tracing::info;
 use ulid::Ulid;
@@ -32,7 +30,8 @@ const LQ_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_NOTIFICATIONS: usize = 100;
 
 pub async fn live_select_table(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 
@@ -54,8 +53,13 @@ pub async fn live_select_table(new_db: impl CreateDb) {
 		assert_eq!(notification.action, Action::Create);
 
 		// Update the record
-		let _: Option<ApiRecordId> =
-			db.update(&notification.data.id).content(json!({"foo": "bar"})).await.unwrap();
+		let _: Option<ApiRecordId> = db
+			.update(&notification.data.id)
+			.content(UpdateContent {
+				field: "bar".to_string(),
+			})
+			.await
+			.unwrap();
 		// Pull the notification
 		let notification: Notification<ApiRecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
@@ -83,7 +87,7 @@ pub async fn live_select_table(new_db: impl CreateDb) {
 		let notification =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should be an object
-		assert!(notification.data.into_inner().is_object());
+		assert!(notification.data.is_object());
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create);
 	}
@@ -92,7 +96,8 @@ pub async fn live_select_table(new_db: impl CreateDb) {
 }
 
 pub async fn live_select_record_id(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 
@@ -100,7 +105,7 @@ pub async fn live_select_record_id(new_db: impl CreateDb) {
 		let table = format!("table_{}", Ulid::new());
 		db.query(format!("DEFINE TABLE {table}")).await.unwrap();
 
-		let record_id = RecordId::from((table, "john".to_owned()));
+		let record_id = RecordId::new(table, "john");
 
 		// Start listening
 		let mut users = db.select(&record_id).live().await.unwrap();
@@ -116,8 +121,13 @@ pub async fn live_select_record_id(new_db: impl CreateDb) {
 		assert_eq!(notification.action, Action::Create);
 
 		// Update the record
-		let _: Option<ApiRecordId> =
-			db.update(&notification.data.id).content(json!({"foo": "bar"})).await.unwrap();
+		let _: Option<ApiRecordId> = db
+			.update(&notification.data.id)
+			.content(UpdateContent {
+				field: "bar".to_string(),
+			})
+			.await
+			.unwrap();
 		// Pull the notification
 		let notification: Notification<ApiRecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
@@ -137,7 +147,7 @@ pub async fn live_select_record_id(new_db: impl CreateDb) {
 		let table = format!("table_{}", Ulid::new());
 		db.query(format!("DEFINE TABLE {table}")).await.unwrap();
 
-		let record_id = RecordId::from((table, "john".to_owned()));
+		let record_id = RecordId::new(table, "john");
 
 		// Start listening
 		let mut users = db.select(Resource::from(&record_id)).live().await.unwrap();
@@ -148,7 +158,7 @@ pub async fn live_select_record_id(new_db: impl CreateDb) {
 		let notification: Notification<Value> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should be an object
-		assert!(notification.data.into_inner().is_object());
+		assert!(notification.data.is_object());
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create);
 	}
@@ -157,7 +167,8 @@ pub async fn live_select_record_id(new_db: impl CreateDb) {
 }
 
 pub async fn live_select_record_ranges(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 
@@ -179,8 +190,13 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 		assert_eq!(notification.action, Action::Create);
 
 		// Update the record
-		let _: Option<ApiRecordId> =
-			db.update(&notification.data.id).content(json!({"foo": "bar"})).await.unwrap();
+		let _: Option<ApiRecordId> = db
+			.update(&notification.data.id)
+			.content(UpdateContent {
+				field: "bar".to_string(),
+			})
+			.await
+			.unwrap();
 		// Pull the notification
 		let notification: Notification<ApiRecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
@@ -207,26 +223,30 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 			db.select(Resource::from(&table)).range("jane".."john").live().await.unwrap();
 
 		// Create a record
-		let created_value =
-			match db.create(Resource::from((table, "job"))).await.unwrap().into_inner() {
-				val::Value::Object(created_value) => created_value,
-				_ => panic!("Expected an object"),
-			};
+		let created_value = db
+			.create(Resource::from((table, "job")))
+			.await
+			.unwrap()
+			.into_array()
+			.unwrap()
+			.remove(0)
+			.into_object()
+			.unwrap();
 
 		// Pull the notification
 		let notification: Notification<Value> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should be an object
-		assert!(notification.data.into_inner().is_object());
+		assert!(notification.data.is_object());
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create);
 
 		// Delete the record
 		let thing = match created_value.get("id").unwrap() {
-			val::Value::RecordId(thing) => thing,
+			Value::RecordId(thing) => thing,
 			_ => panic!("Expected a thing"),
 		};
-		db.query("DELETE $item").bind(("item", RecordId::from_inner(thing.clone()))).await.unwrap();
+		db.query("DELETE $item").bind(("item", thing.clone())).await.unwrap();
 
 		// Pull the notification
 		let notification: Notification<Value> =
@@ -234,8 +254,8 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 
 		// It should be deleted
 		assert_eq!(notification.action, Action::Delete);
-		let notification = match notification.data.into_inner() {
-			val::Value::Object(notification) => notification,
+		let notification = match notification.data {
+			Value::Object(notification) => notification,
 			_ => panic!("Expected an object"),
 		};
 		assert_eq!(notification, created_value);
@@ -245,7 +265,8 @@ pub async fn live_select_record_ranges(new_db: impl CreateDb) {
 }
 
 pub async fn live_select_query(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	{
@@ -279,8 +300,13 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 
 		// Update the record
 		info!("Updating record");
-		let _: Option<ApiRecordId> =
-			db.update(&notifications[0].data.id).content(json!({"foo": "bar"})).await.unwrap();
+		let _: Option<ApiRecordId> = db
+			.update(&notifications[0].data.id)
+			.content(UpdateContent {
+				field: "bar".to_string(),
+			})
+			.await
+			.unwrap();
 		let notifications = receive_all_pending_notifications(users.clone(), LQ_TIMEOUT).await;
 
 		// It should be updated
@@ -324,7 +350,7 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 
 		// The returned record should be an object
-		assert!(notification.data.into_inner().is_object());
+		assert!(notification.data.is_object());
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create);
 	}
@@ -352,8 +378,13 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 		assert_eq!(notification.action, Action::Create, "{:?}", notification);
 
 		// Update the record
-		let _: Option<ApiRecordId> =
-			db.update(&notification.data.id).content(json!({"foo": "bar"})).await.unwrap();
+		let _: Option<ApiRecordId> = db
+			.update(&notification.data.id)
+			.content(UpdateContent {
+				field: "bar".to_string(),
+			})
+			.await
+			.unwrap();
 		// Pull the notification
 		let notification: Notification<ApiRecordId> =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
@@ -389,7 +420,7 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 		let notification =
 			tokio::time::timeout(LQ_TIMEOUT, users.next()).await.unwrap().unwrap().unwrap();
 		// The returned record should be an object
-		assert!(notification.data.into_inner().is_object());
+		assert!(notification.data.is_object());
 		// It should be newly created
 		assert_eq!(notification.action, Action::Create);
 	}
@@ -398,53 +429,60 @@ pub async fn live_select_query(new_db: impl CreateDb) {
 }
 
 pub async fn live_query_delete_notifications(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 
 	let mut stream =
-		db.query("LIVE SELECT foo FROM bar").await.unwrap().stream::<Value>(0).unwrap();
+		db.query("LIVE SELECT field FROM bar").await.unwrap().stream::<Value>(0).unwrap();
 
-	db.query("CREATE bar CONTENT { foo: 'baz' }").await.unwrap().check().unwrap();
+	db.query("CREATE bar CONTENT { field: 'baz' }").await.unwrap().check().unwrap();
 	let notification =
 		tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap().unwrap();
-	assert_eq!(notification.data, "{ foo: 'baz' }".parse().unwrap());
+	assert_eq!(notification.data, Value::Object(object! { field: "baz" }));
 	assert_eq!(notification.action, Action::Create);
 
 	db.query("UPDATE bar MERGE { data: 123 }").await.unwrap().check().unwrap();
 	let notification =
 		tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap().unwrap();
-	assert_eq!(notification.data, "{ foo: 'baz' }".parse().unwrap());
+	assert_eq!(notification.data, Value::Object(object! { field: "baz" }));
 	assert_eq!(notification.action, Action::Update);
 
 	db.query("DELETE bar").await.unwrap().check().unwrap();
 	let notification =
 		tokio::time::timeout(LQ_TIMEOUT, stream.next()).await.unwrap().unwrap().unwrap();
-	assert_eq!(notification.data, "{ foo: 'baz' }".parse().unwrap());
+	assert_eq!(notification.data, Value::Object(object! { field: "baz" }));
 	assert_eq!(notification.action, Action::Delete);
 
 	drop(permit);
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, SurrealValue, PartialEq, PartialOrd)]
 struct ApiRecordIdWithFetchedLink {
 	id: RecordId,
 	link: Option<ApiRecordId>,
 }
 
-#[derive(Debug, Clone, Deserialize, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, SurrealValue, PartialEq, PartialOrd)]
 struct ApiRecordIdWithUnfetchedLink {
 	id: RecordId,
 	link: RecordId,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, SurrealValue, PartialEq, PartialOrd)]
 struct LinkContent {
 	link: RecordId,
 }
 
+#[derive(Debug, Clone, SurrealValue)]
+struct UpdateContent {
+	field: String,
+}
+
 pub async fn live_select_with_fetch(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 

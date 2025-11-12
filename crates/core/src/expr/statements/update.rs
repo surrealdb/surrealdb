@@ -7,14 +7,13 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::{Cond, Data, Explain, Expr, Output, Timeout, With};
 use crate::fmt::Fmt;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Default, Hash)]
-pub struct UpdateStatement {
+pub(crate) struct UpdateStatement {
 	pub only: bool,
 	pub what: Vec<Expr>,
 	pub with: Option<With>,
@@ -70,34 +69,25 @@ impl UpdateStatement {
 		// Attach the query planner to the context
 		let ctx = stm.setup_query_planner(planner, ctx);
 
-		// Process the statement
-		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
-		// Catch statement timeout
-		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
-		// Output the results
-		match res {
-			// This is a single record result
-			Value::Array(mut a) if self.only => match a.len() {
-				// There was exactly one result
-				1 => Ok(a.remove(0)),
-				// There were no results
-				_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
-			},
-			// This is standard query result
-			v => Ok(v),
-		}
-	}
-}
-
-impl VisitExpression for UpdateStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.what.iter().for_each(|e| e.visit(visitor));
-		self.data.iter().for_each(|d| d.visit(visitor));
-		self.cond.iter().for_each(|c| c.0.visit(visitor));
-		self.output.iter().for_each(|m| m.visit(visitor));
+		CursorDoc::update_parent(&ctx, doc, async |ctx| {
+			// Process the statement
+			let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
+			// Catch statement timeout
+			ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
+			// Output the results
+			match res {
+				// This is a single record result
+				Value::Array(mut a) if self.only => match a.len() {
+					// There was exactly one result
+					1 => Ok(a.remove(0)),
+					// There were no results
+					_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
+				},
+				// This is standard query result
+				v => Ok(v),
+			}
+		})
+		.await
 	}
 }
 

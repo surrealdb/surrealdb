@@ -87,7 +87,10 @@ mod cli_integration {
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
 			let output = common::run(&args).input("CREATE any:any;\n").output().unwrap();
-			assert!(output.contains("Development builds are not intended for production use"));
+			assert!(
+				output.contains("Development builds are not intended for production use"),
+				"{output}"
+			);
 		}
 
 		info!("* Create a record");
@@ -96,7 +99,10 @@ mod cli_integration {
 				"sql --conn http://{addr} {creds} --ns {ns} --db {db} --multi --hide-welcome"
 			);
 			let output = common::run(&args).input("CREATE thing:one;\n").output().unwrap();
-			assert!(output.contains("[[{ id: thing:one }]]\n\n"), "failed to send sql: {args}");
+			assert!(
+				output.contains("[[{ id: thing:one }]]\n\n"),
+				"failed to send sql: {args} - output: {output}"
+			);
 		}
 
 		info!("* Export to stdout");
@@ -107,8 +113,11 @@ mod cli_integration {
 			let output = common::run(&args)
 				.output()
 				.unwrap_or_else(|_| panic!("failed to run stdout export: {args}"));
-			assert!(output.contains("DEFINE TABLE thing TYPE ANY SCHEMALESS PERMISSIONS NONE;"));
-			assert!(output.contains("INSERT [ { id: thing:one } ];"));
+			assert!(
+				output.contains("DEFINE TABLE thing TYPE ANY SCHEMALESS PERMISSIONS NONE;"),
+				"{output}"
+			);
+			assert!(output.contains("INSERT [ { id: thing:one } ];"), "{output}");
 		}
 
 		info!("* Export to file");
@@ -141,7 +150,7 @@ mod cli_integration {
 			let (line1, rest) = output.split_once('\n').expect("response to have multiple lines");
 			assert!(line1.starts_with("-- Query 1"), "Expected on {line1}, and rest was {rest}");
 			assert!(line1.contains("execution time"));
-			assert_eq!(rest, "[\n\t{\n\t\tid: thing:one\n\t}\n]\n\n", "failed to send sql: {args}");
+			assert_eq!(rest, "[{ id: thing:one }]\n\n", "failed to send sql: {args}");
 		}
 
 		info!("* Advanced uncomputed variable to be computed before saving");
@@ -1048,7 +1057,7 @@ mod cli_integration {
 			let output = remove_debug_info(output);
 			assert_eq!(
 				output,
-				"[[{ id: thing:one }]]\n\n".to_owned(),
+				"[NONE, [{ id: thing:one }], NONE]\n\n".to_owned(),
 				"failed to send sql: {args}"
 			);
 		}
@@ -1065,15 +1074,15 @@ mod cli_integration {
 			let output = remove_debug_info(output).replace('\n', "");
 			let allowed = [
 				// Delete these
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 2 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 4 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 2 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 1 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 3 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 2 }, { changes: [{ update: { id: thing:one } }], versionstamp: 4 }]]",
 				// Keep these
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
-				"[[{ changes: [{ define_table: { changefeed: { expiry: '1s', original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 262144 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 131072 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 65536 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 196608 }]]",
+				"[[{ changes: [{ define_table: { changefeed: { expiry: 1s, original: false }, drop: false, kind: { kind: 'ANY' }, name: 'thing', permissions: { create: false, delete: false, select: false, update: false }, schemafull: false } }], versionstamp: 131072 }, { changes: [{ update: { id: thing:one } }], versionstamp: 262144 }]]",
 			];
 			allowed
 				.into_iter()

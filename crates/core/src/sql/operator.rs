@@ -112,7 +112,7 @@ impl fmt::Display for PostfixOperator {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum BinaryOperator {
+pub(crate) enum BinaryOperator {
 	/// `-`
 	Subtract,
 	/// `+`
@@ -368,7 +368,7 @@ impl From<crate::expr::BinaryOperator> for BinaryOperator {
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum NearestNeighbor {
+pub(crate) enum NearestNeighbor {
 	/// `<|k, dist|>`
 	K(u32, Distance),
 	/// `<|k|>`

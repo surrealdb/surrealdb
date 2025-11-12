@@ -21,7 +21,7 @@ CREATE test:values SET data = [
 	{a: 1},
 	(1,2),
 	encoding::base64::decode("MjMyMw"),
-	type::thing('a','b'),
+	type::record('a','b'),
 	/a/,
 	0..10,
 ];

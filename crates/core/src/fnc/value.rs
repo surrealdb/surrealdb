@@ -12,7 +12,7 @@ pub async fn chain(
 	(value, worker): (Value, Box<Closure>),
 ) -> Result<Value> {
 	if let Some(opt) = opt {
-		worker.compute(stk, ctx, opt, doc, vec![value]).await
+		worker.invoke(stk, ctx, opt, doc, vec![value]).await
 	} else {
 		Ok(Value::None)
 	}

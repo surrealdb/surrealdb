@@ -7,14 +7,13 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::{Cond, Data, Explain, Expr, Output, Timeout, With};
 use crate::fmt::Fmt;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Default, Hash)]
-pub struct UpsertStatement {
+pub(crate) struct UpsertStatement {
 	pub only: bool,
 	pub what: Vec<Expr>,
 	pub with: Option<With>,
@@ -67,40 +66,31 @@ impl UpsertStatement {
 				}
 			})?;
 		}
-		// Attach the query planner to the context
-		let ctx = stm.setup_query_planner(planner, ctx);
+		CursorDoc::update_parent(&ctx, doc, async |ctx| {
+			// Attach the query planner to the context
+			let ctx = stm.setup_query_planner(planner, ctx);
 
-		// Ensure the database exists.
-		ctx.get_db(opt).await?;
+			// Ensure the database exists.
+			ctx.get_db(opt).await?;
 
-		// Process the statement
-		let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
-		// Catch statement timeout
-		ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
-		// Output the results
-		match res {
-			// This is a single record result
-			Value::Array(mut a) if self.only => match a.len() {
-				// There was exactly one result
-				1 => Ok(a.remove(0)),
-				// There were no results
-				_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
-			},
-			// This is standard query result
-			v => Ok(v),
-		}
-	}
-}
-
-impl VisitExpression for UpsertStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.what.iter().for_each(|expr| expr.visit(visitor));
-		self.data.iter().for_each(|data| data.visit(visitor));
-		self.cond.iter().for_each(|cond| cond.0.visit(visitor));
-		self.output.iter().for_each(|output| output.visit(visitor));
+			// Process the statement
+			let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
+			// Catch statement timeout
+			ensure!(!ctx.is_timedout().await?, Error::QueryTimedout);
+			// Output the results
+			match res {
+				// This is a single record result
+				Value::Array(mut a) if self.only => match a.len() {
+					// There was exactly one result
+					1 => Ok(a.remove(0)),
+					// There were no results
+					_ => Err(anyhow::Error::new(Error::SingleOnlyOutput)),
+				},
+				// This is standard query result
+				v => Ok(v),
+			}
+		})
+		.await
 	}
 }
 

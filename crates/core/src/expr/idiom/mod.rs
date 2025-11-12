@@ -5,22 +5,21 @@ use std::str::FromStr;
 
 use reblessive::Stack;
 use reblessive::tree::Stk;
-use revision::Revisioned;
+use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::expression::VisitExpression;
 use crate::expr::part::{Next, NextMethod};
 use crate::expr::paths::{ID, IN, OUT};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, FlowResult, Part, Value};
-use crate::fmt::{EscapeIdent, Fmt};
+use crate::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt};
 
 pub mod recursion;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct Idioms(pub Vec<Idiom>);
+pub(crate) struct Idioms(pub(crate) Vec<Idiom>);
 
 impl Deref for Idioms {
 	type Target = Vec<Idiom>;
@@ -51,20 +50,7 @@ impl InfoStructure for Idioms {
 
 /// An idiom defines a way to reference a field, reference, or other part of the document graph.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct Idiom(pub Vec<Part>);
-
-impl Deref for Idiom {
-	type Target = [Part];
-	fn deref(&self) -> &Self::Target {
-		self.0.as_slice()
-	}
-}
-
-impl From<Vec<Part>> for Idiom {
-	fn from(v: Vec<Part>) -> Self {
-		Self(v)
-	}
-}
+pub(crate) struct Idiom(pub(crate) Vec<Part>);
 
 impl Idiom {
 	/// Returns an idiom for a field of the given name.
@@ -113,11 +99,15 @@ impl Idiom {
 
 	/// Returns a raw string representation of this idiom without any escaping.
 	pub(crate) fn to_raw_string(&self) -> String {
+		use std::fmt::Write;
+
 		let mut s = String::new();
 
 		let mut iter = self.0.iter();
 		match iter.next() {
-			Some(Part::Field(v)) => s.push_str(&v.clone()),
+			Some(Part::Field(v)) => {
+				write!(&mut s, "{}", EscapeKwFreeIdent(v)).expect("writing to string")
+			}
 			Some(x) => s.push_str(&x.to_raw_string()),
 			None => {}
 		};
@@ -174,12 +164,16 @@ impl Idiom {
 	}
 }
 
-impl VisitExpression for Idiom {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.0.iter().for_each(|p| p.visit(visitor))
+impl Deref for Idiom {
+	type Target = [Part];
+	fn deref(&self) -> &Self::Target {
+		self.0.as_slice()
+	}
+}
+
+impl From<Vec<Part>> for Idiom {
+	fn from(v: Vec<Part>) -> Self {
+		Self(v)
 	}
 }
 
@@ -231,17 +225,20 @@ impl Revisioned for Idiom {
 	fn revision() -> u16 {
 		1
 	}
+}
 
+impl SerializeRevisioned for Idiom {
 	fn serialize_revisioned<W: std::io::Write>(
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		self.to_raw_string().serialize_revisioned(writer)?;
-		Ok(())
+		SerializeRevisioned::serialize_revisioned(&self.to_raw_string(), writer)
 	}
+}
 
+impl DeserializeRevisioned for Idiom {
 	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		let s: String = Revisioned::deserialize_revisioned(reader)?;
+		let s: String = DeserializeRevisioned::deserialize_revisioned(reader)?;
 		let idiom =
 			Idiom::from_str(&s).map_err(|err| revision::Error::Conversion(format!("{err:?}")))?;
 		Ok(idiom)

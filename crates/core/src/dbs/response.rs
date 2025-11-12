@@ -1,22 +1,22 @@
 use std::fmt;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use revision::{Revisioned, revisioned};
-use serde::ser::SerializeStruct;
+use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use surrealdb_types::{Kind, SurrealValue, Value, kind, object};
 
 use crate::expr::TopLevelExpr;
-use crate::val::{Object, Value};
-
-pub(crate) const TOKEN: &str = "$surrealdb::private::sql::Response";
+use crate::rpc::DbResultError;
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize, SurrealValue)]
+#[surreal(untagged, lowercase)]
 #[serde(rename_all = "lowercase")]
 pub enum QueryType {
 	// Any kind of query
 	#[default]
+	#[surreal(value = none)]
 	Other,
 	// Indicates that the response live query id must be tracked
 	Live,
@@ -36,7 +36,7 @@ impl fmt::Display for QueryType {
 
 impl QueryType {
 	/// Returns the query type for the given toplevel expression.
-	pub fn for_toplevel_expr(expr: &TopLevelExpr) -> Self {
+	pub(crate) fn for_toplevel_expr(expr: &TopLevelExpr) -> Self {
 		match expr {
 			TopLevelExpr::Live(_) => QueryType::Live,
 			TopLevelExpr::Kill(_) => QueryType::Kill,
@@ -46,125 +46,191 @@ impl QueryType {
 }
 
 /// The return value when running a query set on the database.
-#[derive(Debug)]
-pub struct Response {
+#[derive(Debug, Clone)]
+pub struct QueryResult {
 	pub time: Duration,
-	pub result: Result<Value>,
+	pub result: Result<Value, DbResultError>,
 	// Record the query type in case processing the response is necessary (such as tracking live
 	// queries).
 	pub query_type: QueryType,
 }
 
-impl Response {
+impl QueryResult {
 	/// Retrieve the response as a normal result
 	pub fn output(self) -> Result<Value> {
-		self.result
+		self.result.map_err(|err| anyhow::anyhow!(err.to_string()))
+	}
+}
+
+impl SurrealValue for QueryResult {
+	fn kind_of() -> Kind {
+		kind!(
+			{
+				status: "OK",
+				time: string,
+				result: any,
+				query_type: (QueryType::kind_of()),
+			} | {
+				status: "ERR",
+				time: string,
+				result: string,
+				query_type: (QueryType::kind_of()),
+			}
+		)
 	}
 
-	/// Convert's the response into a value as it is send across the net.
-	pub fn into_value(self) -> Value {
-		let mut res = Object::new();
-		res.insert("time".to_owned(), format!("{:?}", self.time).into());
+	fn is_value(value: &Value) -> bool {
+		value.is_object_and(|map| {
+			map.get("status").is_some_and(Status::is_value)
+				&& map.get("time").is_some_and(Value::is_string)
+				&& map.get("result").is_some()
+				&& map.get("type").is_some_and(QueryType::is_value)
+		})
+	}
 
-		if !matches!(self.query_type, QueryType::Other) {
-			res.insert("type".to_owned(), self.query_type.to_string().into());
+	fn into_value(self) -> Value {
+		Value::Object(object! {
+			status: Status::from(&self.result).into_value(),
+			time: format!("{:?}", self.time).into_value(),
+			result: match self.result {
+				Ok(v) => v.into_value(),
+				Err(e) => Value::from_string(e.to_string()),
+			},
+			type: self.query_type.into_value(),
+		})
+	}
+
+	fn from_value(value: Value) -> anyhow::Result<Self> {
+		// Assert required fields
+		let Value::Object(mut map) = value else {
+			anyhow::bail!("Expected object for QueryResult");
+		};
+		let Some(status) = map.remove("status") else {
+			anyhow::bail!("Expected status for QueryResult");
+		};
+		let Some(time) = map.remove("time") else {
+			anyhow::bail!("Expected time for QueryResult");
+		};
+		let Some(result) = map.remove("result") else {
+			anyhow::bail!("Expected result for QueryResult");
+		};
+
+		// Grab status, query type and time
+		let status = Status::from_value(status)?;
+		let query_type =
+			map.remove("type").map(QueryType::from_value).transpose()?.unwrap_or_default();
+
+		let time = humantime::parse_duration(&time.into_string()?)?;
+
+		// Grab result based on status
+
+		let result = match status {
+			Status::Ok => Ok(Value::from_value(result)?),
+			Status::Err => Err(DbResultError::from_value(result)?),
+		};
+
+		Ok(QueryResult {
+			time,
+			result,
+			query_type,
+		})
+	}
+}
+
+pub struct QueryResultBuilder {
+	start_time: Instant,
+	result: Result<Value, DbResultError>,
+	query_type: QueryType,
+}
+
+impl QueryResultBuilder {
+	pub fn started_now() -> Self {
+		Self {
+			start_time: Instant::now(),
+			result: Ok(Value::None),
+			query_type: QueryType::Other,
 		}
+	}
 
-		match self.result {
-			Ok(v) => {
-				res.insert("status".to_owned(), "OK".to_owned().into());
-				res.insert("result".to_owned(), v);
-			}
-			Err(e) => {
-				res.insert("status".to_owned(), "ERR".to_owned().into());
-				res.insert("result".to_owned(), e.to_string().into());
-			}
+	pub fn instant_none() -> QueryResult {
+		QueryResult {
+			time: Duration::ZERO,
+			result: Ok(Value::None),
+			query_type: QueryType::Other,
 		}
+	}
 
-		res.into()
+	pub fn with_result(mut self, result: Result<Value, DbResultError>) -> Self {
+		self.result = result;
+		self
+	}
+
+	pub fn with_query_type(mut self, query_type: QueryType) -> Self {
+		self.query_type = query_type;
+		self
+	}
+
+	pub fn finish(self) -> QueryResult {
+		QueryResult {
+			time: self.start_time.elapsed(),
+			result: self.result,
+			query_type: self.query_type,
+		}
+	}
+
+	pub fn finish_with_result(self, result: Result<Value, DbResultError>) -> QueryResult {
+		QueryResult {
+			time: self.start_time.elapsed(),
+			result,
+			query_type: self.query_type,
+		}
 	}
 }
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, SurrealValue)]
 #[serde(rename_all = "UPPERCASE")]
+#[surreal(untagged, uppercase)]
 pub enum Status {
 	Ok,
 	Err,
 }
 
-impl Serialize for Response {
+impl Status {
+	pub fn is_ok(&self) -> bool {
+		matches!(self, Status::Ok)
+	}
+
+	pub fn is_err(&self) -> bool {
+		matches!(self, Status::Err)
+	}
+}
+
+impl<'a, T, E> From<&'a Result<T, E>> for Status {
+	fn from(result: &'a Result<T, E>) -> Self {
+		match result {
+			Ok(_) => Status::Ok,
+			Err(_) => Status::Err,
+		}
+	}
+}
+
+impl Serialize for QueryResult {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
 	where
 		S: serde::Serializer,
 	{
-		let includes_type = !matches!(self.query_type, QueryType::Other);
-		let mut val = serializer.serialize_struct(
-			TOKEN,
-			if includes_type {
-				3
-			} else {
-				4
-			},
-		)?;
-
-		val.serialize_field("time", &format!("{:?}", self.time))?;
-		if includes_type {
-			val.serialize_field("type", &self.query_type)?;
-		}
-
-		match &self.result {
-			Ok(v) => {
-				val.serialize_field("status", &Status::Ok)?;
-				val.serialize_field("result", v)?;
-			}
-			Err(e) => {
-				val.serialize_field("status", &Status::Err)?;
-				val.serialize_field("result", &Value::from(e.to_string()))?;
-			}
-		}
-		val.end()
+		self.clone().into_value().serialize(serializer)
 	}
 }
 
-#[revisioned(revision = 1)]
-#[derive(Debug, Serialize, Deserialize)]
-pub struct QueryMethodResponse {
-	pub time: String,
-	pub status: Status,
-	pub result: Value,
-}
-
-impl From<&Response> for QueryMethodResponse {
-	fn from(res: &Response) -> Self {
-		let time = format!("{:?}", res.time);
-		let (status, result) = match &res.result {
-			Ok(value) => (Status::Ok, value.clone()),
-			Err(error) => (Status::Err, Value::from(error.to_string())),
-		};
-		Self {
-			status,
-			result,
-			time,
-		}
-	}
-}
-
-impl Revisioned for Response {
-	#[inline]
-	fn serialize_revisioned<W: std::io::Write>(
-		&self,
-		writer: &mut W,
-	) -> Result<(), revision::Error> {
-		QueryMethodResponse::from(self).serialize_revisioned(writer)
-	}
-
-	#[inline]
-	fn deserialize_revisioned<R: std::io::Read>(_reader: &mut R) -> Result<Self, revision::Error> {
-		unreachable!("deserialising `Response` directly is not supported")
-	}
-
-	fn revision() -> u16 {
-		1
+impl<'de> Deserialize<'de> for QueryResult {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: serde::Deserializer<'de>,
+	{
+		// Deserialize as a Value first, then convert
+		let value = Value::deserialize(deserializer)?;
+		QueryResult::from_value(value).map_err(serde::de::Error::custom)
 	}
 }

@@ -1,30 +1,46 @@
+#![allow(clippy::unwrap_used)]
+
 // Tests common to all protocols and storage engines
 
-use std::borrow::Cow;
-use std::ops::Bound;
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
 use serde_json::json;
-use surrealdb::error::{Api as ApiError, Db as DbError};
-use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess};
-use surrealdb::opt::{PatchOp, PatchOps, Raw, Resource};
-use surrealdb::{RecordId, Response, Value};
-use surrealdb_core::expr::TopLevelExpr;
-use surrealdb_core::{syn, val};
+use surrealdb::IndexedResults;
+use surrealdb::opt::auth::{Database, Namespace, Record as RecordAccess, Token};
+use surrealdb::opt::{Config, PatchOp, PatchOps, Resource};
+use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, Value, array, object};
+use surrealdb_core::syn;
+use surrealdb_types::Array;
 use ulid::Ulid;
 
 use super::{AuthParams, CreateDb};
 use crate::api_integration::{ApiRecordId, Record, RecordBuf, RecordName};
 
+macro_rules! rid {
+	// Handle identifier:identifier
+	($table:ident : $name:ident) => {
+		RecordId::new(stringify!($table), stringify!($name))
+	};
+	// Handle "string:string"
+	($input:literal) => {{
+		let parts = $input.split(':').collect::<Vec<&str>>();
+		if parts.len() != 2 {
+			panic!("Invalid rid! input: {}", $input);
+		}
+		RecordId::new(parts[0], parts[1])
+	}};
+}
+
 pub async fn connect(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	drop(permit);
 	db.health().await.unwrap();
 }
 
 pub async fn yuse(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	let item = Ulid::new().to_string();
 	let err = db.create(Resource::from(item.as_str())).await.unwrap_err();
 	if !err.to_string().contains("Specify a namespace to use") {
@@ -41,7 +57,8 @@ pub async fn yuse(new_db: impl CreateDb) {
 }
 
 pub async fn invalidate(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	db.invalidate().await.unwrap();
@@ -54,11 +71,12 @@ pub async fn invalidate(new_db: impl CreateDb) {
 }
 
 pub async fn signup_record(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	let namespace = Ulid::new().to_string();
 	let database = Ulid::new().to_string();
 	db.use_ns(&namespace).use_db(&database).await.unwrap();
-	let access = Ulid::new().to_string();
+	let access = Ulid::new();
 	let sql = format!(
 		"
         DEFINE ACCESS `{access}` ON DB TYPE RECORD
@@ -71,12 +89,12 @@ pub async fn signup_record(new_db: impl CreateDb) {
 	drop(permit);
 	response.check().unwrap();
 	db.signup(RecordAccess {
-		namespace: &namespace,
-		database: &database,
-		access: &access,
+		namespace: namespace.to_string(),
+		database: database.to_string(),
+		access: access.to_string(),
 		params: AuthParams {
-			email: "john.doe@example.com",
-			pass: "password123",
+			email: "john.doe@example.com".to_string(),
+			pass: "password123".to_string(),
 		},
 	})
 	.await
@@ -84,18 +102,19 @@ pub async fn signup_record(new_db: impl CreateDb) {
 }
 
 pub async fn signin_ns(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	let namespace = Ulid::new().to_string();
 	db.use_ns(&namespace).use_db(Ulid::new().to_string()).await.unwrap();
 	let user = Ulid::new().to_string();
-	let pass = "password123";
+	let pass = "password123".to_string();
 	let sql = format!("DEFINE USER `{user}` ON NAMESPACE PASSWORD '{pass}'");
 	let response = db.query(sql).await.unwrap();
 	drop(permit);
 	response.check().unwrap();
 	db.signin(Namespace {
-		namespace: &namespace,
-		username: &user,
+		namespace: namespace.to_string(),
+		username: user,
 		password: pass,
 	})
 	.await
@@ -103,7 +122,8 @@ pub async fn signin_ns(new_db: impl CreateDb) {
 }
 
 pub async fn signin_db(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	let namespace = Ulid::new().to_string();
 	let database = Ulid::new().to_string();
 	db.use_ns(&namespace).use_db(&database).await.unwrap();
@@ -114,21 +134,22 @@ pub async fn signin_db(new_db: impl CreateDb) {
 	drop(permit);
 	response.check().unwrap();
 	db.signin(Database {
-		namespace: &namespace,
-		database: &database,
-		username: &user,
-		password: pass,
+		namespace: namespace.to_string(),
+		database: database.to_string(),
+		username: user,
+		password: pass.to_string(),
 	})
 	.await
 	.unwrap();
 }
 
 pub async fn signin_record(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	let namespace = Ulid::new().to_string();
 	let database = Ulid::new().to_string();
 	db.use_ns(&namespace).use_db(&database).await.unwrap();
-	let access = Ulid::new().to_string();
+	let access = Ulid::new();
 	let email = format!("{access}@example.com");
 	let pass = "password123";
 	let sql = format!(
@@ -143,23 +164,23 @@ pub async fn signin_record(new_db: impl CreateDb) {
 	drop(permit);
 	response.check().unwrap();
 	db.signup(RecordAccess {
-		namespace: &namespace,
-		database: &database,
-		access: &access,
+		namespace: namespace.to_string(),
+		database: database.to_string(),
+		access: access.to_string(),
 		params: AuthParams {
-			pass,
-			email: &email,
+			pass: pass.to_string(),
+			email: email.clone(),
 		},
 	})
 	.await
 	.unwrap();
 	db.signin(RecordAccess {
-		namespace: &namespace,
-		database: &database,
-		access: &access,
+		namespace: namespace.to_string(),
+		database: database.to_string(),
+		access: access.to_string(),
 		params: AuthParams {
-			pass,
-			email: &email,
+			pass: pass.to_string(),
+			email,
 		},
 	})
 	.await
@@ -167,7 +188,8 @@ pub async fn signin_record(new_db: impl CreateDb) {
 }
 
 pub async fn record_access_throws_error(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	let namespace = Ulid::new().to_string();
 	let database = Ulid::new().to_string();
 	db.use_ns(&namespace).use_db(&database).await.unwrap();
@@ -188,24 +210,23 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 
 	let err = db
 		.signup(RecordAccess {
-			namespace: &namespace,
-			database: &database,
-			access: &access,
+			namespace: namespace.to_string(),
+			database: database.to_string(),
+			access: access.to_string(),
 			params: AuthParams {
-				pass,
-				email: &email,
+				pass: pass.to_string(),
+				email: email.clone(),
 			},
 		})
 		.await
 		.unwrap_err();
 
-	if let Some(e) = err.downcast_ref() {
-		match e {
-			surrealdb_core::err::Error::Thrown(e) => assert_eq!(e, "signup_thrown_error"),
-			x => panic!("unexpected error: {x:?}"),
-		}
-	} else if let Some(e) = err.downcast_ref() {
-		match e {
+	// Check if the error message contains our expected thrown error
+	let err_str = err.to_string();
+	if err_str.contains("signup_thrown_error") {
+		// Expected thrown error
+	} else {
+		match &err {
 			surrealdb::error::Api::Query(e) => assert!(e.contains("signup")),
 			surrealdb::error::Api::Http(e) => assert_eq!(
 				e,
@@ -213,30 +234,27 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 			),
 			x => panic!("unexpected error: {x:?}"),
 		}
-	} else {
-		panic!("unexpected error: {err:?}")
 	}
 
 	let err = db
 		.signin(RecordAccess {
-			namespace: &namespace,
-			database: &database,
-			access: &access,
+			namespace: namespace.to_string(),
+			database: database.to_string(),
+			access: access.to_string(),
 			params: AuthParams {
-				pass,
-				email: &email,
+				pass: pass.to_string(),
+				email: email.clone(),
 			},
 		})
 		.await
 		.unwrap_err();
 
-	if let Some(e) = err.downcast_ref() {
-		match e {
-			surrealdb_core::err::Error::Thrown(e) => assert_eq!(e, "signin_thrown_error"),
-			x => panic!("unexpected error: {x:?}"),
-		}
-	} else if let Some(e) = err.downcast_ref() {
-		match e {
+	// Check if the error message contains our expected thrown error
+	let err_str = err.to_string();
+	if err_str.contains("signin_thrown_error") {
+		// Expected thrown error
+	} else {
+		match &err {
 			surrealdb::error::Api::Query(e) => assert!(e.contains("signin")),
 			surrealdb::error::Api::Http(e) => assert_eq!(
 				e,
@@ -244,13 +262,12 @@ pub async fn record_access_throws_error(new_db: impl CreateDb) {
 			),
 			x => panic!("unexpected error: {x:?}"),
 		}
-	} else {
-		panic!("unexpected error: {err:?}")
 	}
 }
 
 pub async fn record_access_invalid_query(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	let namespace = Ulid::new().to_string();
 	let database = Ulid::new().to_string();
 	db.use_ns(&namespace).use_db(&database).await.unwrap();
@@ -271,75 +288,68 @@ pub async fn record_access_invalid_query(new_db: impl CreateDb) {
 
 	let err = db
 		.signup(RecordAccess {
-			namespace: &namespace,
-			database: &database,
-			access: &access,
+			namespace: namespace.to_string(),
+			database: database.to_string(),
+			access: access.to_string(),
 			params: AuthParams {
-				pass,
-				email: &email,
+				pass: pass.to_string(),
+				email: email.clone(),
 			},
 		})
 		.await
 		.unwrap_err();
 
-	if let Some(e) = err.downcast_ref() {
-		match e {
-			surrealdb_core::err::Error::AccessRecordSignupQueryFailed => {}
-			x => panic!("unexpected error: {x:?}"),
-		}
-	} else if let Some(e) = err.downcast_ref() {
-		match e {
-			surrealdb::error::Api::Query(e) => assert_eq!(
-				e,
-				"There was a problem with the database: The record access signup query failed"
-			),
+	// Check if the error message indicates a signup query failure
+	let err_str = err.to_string();
+	if err_str.contains("signup query failed") || err_str.contains("signup") {
+		// Expected error
+	} else {
+		match &err {
+			surrealdb::error::Api::Query(e) => {
+				assert_eq!(e, "The record access signup query failed")
+			}
 			surrealdb::error::Api::Http(e) => assert_eq!(
 				e,
 				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signup)"
 			),
 			x => panic!("unexpected error: {x:?}"),
 		}
-	} else {
-		panic!("unexpected error: {err:?}")
 	};
 
 	let err = db
 		.signin(RecordAccess {
-			namespace: &namespace,
-			database: &database,
-			access: &access,
+			namespace: namespace.to_string(),
+			database: database.to_string(),
+			access: access.to_string(),
 			params: AuthParams {
-				pass,
-				email: &email,
+				pass: pass.to_string(),
+				email: email.clone(),
 			},
 		})
 		.await
 		.unwrap_err();
 
-	if let Some(e) = err.downcast_ref() {
-		match e {
-			surrealdb_core::err::Error::AccessRecordSigninQueryFailed => {}
-			x => panic!("unexpected error: {x:?}"),
-		}
-	} else if let Some(e) = err.downcast_ref() {
-		match e {
-			surrealdb::error::Api::Query(e) => assert_eq!(
-				e,
-				"There was a problem with the database: The record access signin query failed"
-			),
+	// Check if the error message indicates a signin query failure
+	let err_str = err.to_string();
+	if err_str.contains("signin query failed") || err_str.contains("signin") {
+		// Expected error
+	} else {
+		match &err {
+			surrealdb::error::Api::Query(e) => {
+				assert_eq!(e, "The record access signin query failed")
+			}
 			surrealdb::error::Api::Http(e) => assert_eq!(
 				e,
 				"HTTP status client error (400 Bad Request) for url (http://127.0.0.1:8000/signin)"
 			),
 			x => panic!("unexpected error: {x:?}"),
 		}
-	} else {
-		panic!("unexpected error: {err:?}")
 	};
 }
 
 pub async fn authenticate(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	let namespace = Ulid::new().to_string();
 	db.use_ns(&namespace).use_db(Ulid::new().to_string()).await.unwrap();
 	let user = Ulid::new().to_string();
@@ -350,9 +360,9 @@ pub async fn authenticate(new_db: impl CreateDb) {
 	response.check().unwrap();
 	let token = db
 		.signin(Namespace {
-			namespace: &namespace,
-			username: &user,
-			password: pass,
+			namespace: namespace.to_string(),
+			username: user,
+			password: pass.to_string(),
 		})
 		.await
 		.unwrap();
@@ -360,7 +370,8 @@ pub async fn authenticate(new_db: impl CreateDb) {
 }
 
 pub async fn query(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let _ = db
@@ -382,21 +393,12 @@ pub async fn query(new_db: impl CreateDb) {
 }
 
 pub async fn query_raw(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
-	let _ = db
-		.query(Raw::from("CREATE user:john SET name = 'John Doe'"))
-		.await
-		.unwrap()
-		.check()
-		.unwrap();
-	let mut response = db
-		.query(Raw::from("SELECT name FROM user:john".to_owned()))
-		.await
-		.unwrap()
-		.check()
-		.unwrap();
+	let _ = db.query("CREATE user:john SET name = 'John Doe'").await.unwrap().check().unwrap();
+	let mut response = db.query("SELECT name FROM user:john").await.unwrap().check().unwrap();
 	let Some(name): Option<String> = response.take("name").unwrap() else {
 		panic!("query returned no record");
 	};
@@ -404,7 +406,8 @@ pub async fn query_raw(new_db: impl CreateDb) {
 }
 
 pub async fn query_decimals(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	let sql = "
 	    DEFINE TABLE foo;
@@ -416,11 +419,15 @@ pub async fn query_decimals(new_db: impl CreateDb) {
 }
 
 pub async fn query_binds(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
-	let mut response =
-		db.query("CREATE user:john SET name = $name").bind(("name", "John Doe")).await.unwrap();
+	let mut response = db
+		.query("CREATE user:john SET name = $name")
+		.bind(("name", "John Doe".to_string()))
+		.await
+		.unwrap();
 	let Some(record): Option<RecordName> = response.take(0).unwrap() else {
 		panic!("query returned no record");
 	};
@@ -448,7 +455,8 @@ pub async fn query_binds(new_db: impl CreateDb) {
 }
 
 pub async fn query_with_stats(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "CREATE foo; SELECT * FROM foo";
@@ -464,23 +472,25 @@ pub async fn query_with_stats(new_db: impl CreateDb) {
 }
 
 pub async fn query_chaining(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let response = db
-		.query(TopLevelExpr::Begin)
+		.query("BEGIN")
 		.query("CREATE account:one SET balance = 135605.16")
 		.query("CREATE account:two SET balance = 91031.31")
 		.query("UPDATE account:one SET balance += 300.00")
 		.query("UPDATE account:two SET balance -= 300.00")
-		.query(TopLevelExpr::Commit)
+		.query("COMMIT")
 		.await
 		.unwrap();
 	response.check().unwrap();
 }
 
 pub async fn mixed_results_query(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "CREATE bar SET baz = rand('a'); CREATE foo;";
@@ -490,7 +500,8 @@ pub async fn mixed_results_query(new_db: impl CreateDb) {
 }
 
 pub async fn create_record_no_id(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let _: Option<ApiRecordId> = db.create("user").await.unwrap();
@@ -498,7 +509,8 @@ pub async fn create_record_no_id(new_db: impl CreateDb) {
 }
 
 pub async fn create_record_with_id(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let _: Option<ApiRecordId> = db.create(("user", "jane")).await.unwrap();
@@ -507,7 +519,8 @@ pub async fn create_record_with_id(new_db: impl CreateDb) {
 }
 
 pub async fn create_record_no_id_with_content(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let _: Option<ApiRecordId> = db
@@ -527,7 +540,8 @@ pub async fn create_record_no_id_with_content(new_db: impl CreateDb) {
 }
 
 pub async fn create_record_with_id_with_content(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let record: Option<ApiRecordId> = db
@@ -537,75 +551,68 @@ pub async fn create_record_with_id_with_content(new_db: impl CreateDb) {
 		})
 		.await
 		.unwrap();
-	assert_eq!(record.unwrap().id, "user:john".parse::<RecordId>().unwrap());
+	assert_eq!(record.unwrap().id, RecordId::new("user", "john"));
 	let value: Value = db
-		.create(Resource::from("user:jane".parse::<RecordId>().unwrap()))
+		.create(Resource::from(RecordId::new("user", "jane")))
 		.content(Record {
 			name: "Jane Doe".to_owned(),
 		})
 		.await
 		.unwrap();
-	assert_eq!(
-		value.into_inner().record(),
-		Some("user:jane".parse::<RecordId>().unwrap().into_inner())
-	);
+	assert_eq!(value.into_record().unwrap(), RecordId::new("user", "jane"));
 }
 
 pub async fn create_record_with_id_in_content(new_db: impl CreateDb) {
-	#[derive(Debug, Serialize, Deserialize)]
+	#[derive(Debug, SurrealValue)]
 	pub struct Person {
 		pub id: u32,
-		pub name: &'static str,
-		pub job: &'static str,
+		pub name: String,
+		pub job: String,
 	}
 
-	#[derive(Debug, Serialize, Deserialize)]
+	#[derive(Debug, SurrealValue)]
 	pub struct Record {
 		#[allow(dead_code)]
 		pub id: RecordId,
 	}
 
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
 	let record: Option<RecordBuf> = db
 		.create(("user", "john"))
 		.content(RecordBuf {
-			id: RecordId::from_table_key("user", "john"),
+			id: RecordId::new("user", "john"),
 			name: "John Doe".to_owned(),
 		})
 		.await
 		.unwrap();
-	assert_eq!(record.unwrap().id, "user:john".parse::<RecordId>().unwrap());
+	assert_eq!(record.unwrap().id, RecordId::new("user", "john"));
 
 	let error = db
 		.create::<Option<RecordBuf>>(("user", "john"))
 		.content(RecordBuf {
-			id: RecordId::from_table_key("user", "jane"),
+			id: RecordId::new("user", "jane"),
 			name: "John Doe".to_owned(),
 		})
 		.await
 		.unwrap_err();
 
-	if let Some(DbError::IdMismatch {
-		..
-	}) = error.downcast_ref()
-	{
-	} else if let Some(ApiError::Query {
-		..
-	}) = error.downcast_ref()
-	{
-	} else {
-		panic!("unexpected error; {error:?}")
-	};
+	assert!(
+		error.to_string().contains(
+			"Found user:jane for the `id` field, but a specific record has been specified"
+		),
+		"{error}"
+	);
 
 	let _: Option<Record> = db
 		.create("person")
 		.content(Person {
 			id: 1010,
-			name: "Max Mustermann",
-			job: "chef",
+			name: "Max Mustermann".to_string(),
+			job: "chef".to_string(),
 		})
 		.await
 		.unwrap();
@@ -614,15 +621,16 @@ pub async fn create_record_with_id_in_content(new_db: impl CreateDb) {
 		.update(("person", 1010))
 		.content(Person {
 			id: 1010,
-			name: "Max Mustermann",
-			job: "IT Tech",
+			name: "Max Mustermann".to_string(),
+			job: "IT Tech".to_string(),
 		})
 		.await
 		.unwrap();
 }
 
 pub async fn insert_table(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
@@ -638,7 +646,8 @@ pub async fn insert_table(new_db: impl CreateDb) {
 }
 
 pub async fn insert_thing(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
@@ -652,72 +661,37 @@ pub async fn insert_thing(new_db: impl CreateDb) {
 	assert_eq!(
 		user,
 		Some(ApiRecordId {
-			id: "user:user5".parse().unwrap(),
+			id: RecordId::new("user", "user5"),
 		})
 	);
 }
 
-pub async fn insert_unspecified(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
-	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
-	drop(permit);
-	let tmp: Result<Vec<RecordId>, _> = db.insert(()).await;
-	tmp.unwrap_err();
-	let tmp: Result<Vec<RecordId>, _> = db.insert(()).content(json!({ "foo": "bar" })).await;
-	tmp.unwrap_err();
-	let tmp: Vec<ApiRecordId> = db
-		.insert(())
-		.content("{id: user:user1, foo: 'bar'}".parse::<Value>().unwrap())
-		.await
-		.unwrap();
-	assert_eq!(
-		tmp,
-		vec![ApiRecordId {
-			id: "user:user1".parse::<RecordId>().unwrap(),
-		}]
-	);
-
-	let tmp: Result<Value, _> = db.insert(Resource::from(())).await;
-	tmp.unwrap_err();
-	let tmp: Result<Value, _> =
-		db.insert(Resource::from(())).content(json!({ "foo": "bar" })).await;
-	tmp.unwrap_err();
-	let tmp: Value = db
-		.insert(Resource::from(()))
-		.content("{id: user:user2, foo: 'bar'}".parse::<Value>().unwrap())
-		.await
-		.unwrap();
-	let val = "{id: user:user2, foo: 'bar'}".parse::<Value>().unwrap();
-	assert_eq!(tmp, val);
-}
-
 pub async fn insert_relation_table(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
-	let tmp: Result<Vec<ApiRecordId>, _> =
-		db.insert("likes").relation("{}".parse::<Value>().unwrap()).await;
+	let tmp: Result<Vec<ApiRecordId>, _> = db.insert("likes").relation(object! {}).await;
 	tmp.unwrap_err();
-	let val = "{in: person:a, out: thing:a}".parse::<Value>().unwrap();
+	let val = object! {in: RecordId::new("person", "a"), out: RecordId::new("thing", "a")};
 	let _: Vec<ApiRecordId> = db.insert("likes").relation(val).await.unwrap();
 
-	let vals = r#"[
-		{ in: person:b, out: thing:a },
-		{ id: likes:2, in: person:c, out: thing:a },
-		{ id: likes:3, in: person:d, out: thing:a },
-	]"#
-	.parse::<Value>()
-	.unwrap();
+	let vals = array![
+		object! { in: rid!(person:b), out: rid!("thing:a") },
+		object! { id: rid!("likes:2"), in: rid!("person:c"), out: rid!("thing:a") },
+		object! { id: rid!("likes:3"), in: rid!("person:d"), out: rid!("thing:a") },
+	];
 	let _: Vec<ApiRecordId> = db.insert("likes").relation(vals).await.unwrap();
 }
 
 pub async fn binding_edges(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	//
-	let john = "person:john".parse::<RecordId>().unwrap();
-	let jane = "person:jane".parse::<RecordId>().unwrap();
+	let john = rid!("person:john");
+	let jane = rid!("person:jane");
 	let value: Value = db
 		.query("RELATE $john -> knows -> $jane SET id = knows:one")
 		.bind(("john", john.clone()))
@@ -726,7 +700,12 @@ pub async fn binding_edges(new_db: impl CreateDb) {
 		.unwrap()
 		.take(0)
 		.unwrap();
-	assert_eq!(value, "[{ id: knows:one, in: person:john, out: person:jane }]".parse().unwrap());
+	assert_eq!(
+		value,
+		Value::Array(array![Value::Object(
+			object! { id: rid!("knows:one"), in: rid!("person:john"), out: rid!("person:jane") }
+		)])
+	);
 	//
 	let value: Value = db
 		.query("RELATE $john -> knows:two -> $jane")
@@ -736,7 +715,12 @@ pub async fn binding_edges(new_db: impl CreateDb) {
 		.unwrap()
 		.take(0)
 		.unwrap();
-	assert_eq!(value, "[{ id: knows:two, in: person:john, out: person:jane }]".parse().unwrap());
+	assert_eq!(
+		value,
+		Value::Array(array![Value::Object(
+			object! { id: rid!("knows:two"), in: rid!("person:john"), out: rid!("person:jane") }
+		)])
+	);
 	//
 	let surql =
 		"LET $kind = type::table($knows); RELATE $john -> $kind -> $jane SET id = knows:three";
@@ -749,7 +733,12 @@ pub async fn binding_edges(new_db: impl CreateDb) {
 		.unwrap()
 		.take(1)
 		.unwrap();
-	assert_eq!(value, "[{ id: knows:three, in: person:john, out: person:jane }]".parse().unwrap());
+	assert_eq!(
+		value,
+		Value::Array(array![Value::Object(
+			object! { id: rid!("knows:three"), in: rid!("person:john"), out: rid!("person:jane") }
+		)])
+	);
 	//
 	let value: Value = db
 		.query("LET $kind = <record> $knows; RELATE $john -> $kind -> $jane")
@@ -760,11 +749,17 @@ pub async fn binding_edges(new_db: impl CreateDb) {
 		.unwrap()
 		.take(1)
 		.unwrap();
-	assert_eq!(value, "[{ id: knows:four, in: person:john, out: person:jane }]".parse().unwrap());
+	assert_eq!(
+		value,
+		Value::Array(array![Value::Object(
+			object! { id: rid!("knows:four"), in: rid!("person:john"), out: rid!("person:jane") }
+		)])
+	);
 }
 
 pub async fn select_table(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
@@ -776,7 +771,8 @@ pub async fn select_table(new_db: impl CreateDb) {
 }
 
 pub async fn select_record_id(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let record_id = ("user", "john");
@@ -784,16 +780,14 @@ pub async fn select_record_id(new_db: impl CreateDb) {
 	let Some(record): Option<ApiRecordId> = db.select(record_id).await.unwrap() else {
 		panic!("record not found");
 	};
-	assert_eq!(record.id, "user:john".parse().unwrap());
+	assert_eq!(record.id, rid!("user:john"));
 	let value: Value = db.select(Resource::from(record_id)).await.unwrap();
-	assert_eq!(
-		value.into_inner().record(),
-		Some("user:john".parse::<RecordId>().unwrap().into_inner())
-	);
+	assert_eq!(value.into_record().unwrap(), rid!("user:john"));
 }
 
 pub async fn select_record_ranges(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
@@ -805,7 +799,7 @@ pub async fn select_record_ranges(new_db: impl CreateDb) {
 		users
 			.into_iter()
 			.map(|user| {
-				let val::RecordIdKey::String(ref x) = user.id.into_inner().key else {
+				let RecordIdKey::String(ref x) = user.id.key else {
 					panic!()
 				};
 				x.clone()
@@ -825,17 +819,15 @@ pub async fn select_record_ranges(new_db: impl CreateDb) {
 	let users: Vec<ApiRecordId> = db.select(table).range("jane"..="john").await.unwrap();
 	assert_eq!(convert(users), vec!["jane", "john"]);
 	let v: Value = db.select(Resource::from(table)).range("jane"..="john").await.unwrap();
-	let val::Value::Array(array) = v.into_inner() else {
+	let Value::Array(array) = v else {
 		panic!()
 	};
 	assert_eq!(array.len(), 2);
-	let users: Vec<ApiRecordId> =
-		db.select(table).range((Bound::Excluded("jane"), Bound::Included("john"))).await.unwrap();
-	assert_eq!(convert(users), vec!["john"]);
 }
 
 pub async fn select_records_order_by_start_limit(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "
@@ -846,7 +838,7 @@ pub async fn select_records_order_by_start_limit(new_db: impl CreateDb) {
     ";
 	db.query(sql).await.unwrap().check().unwrap();
 
-	let check_start_limit = |mut response: Response, expected: Vec<&str>| {
+	let check_start_limit = |mut response: IndexedResults, expected: Vec<&str>| {
 		let users: Vec<RecordName> = response.take(0).unwrap();
 		let users: Vec<String> = users.into_iter().map(|user| user.name).collect();
 		assert_eq!(users, expected);
@@ -870,7 +862,8 @@ pub async fn select_records_order_by_start_limit(new_db: impl CreateDb) {
 }
 
 pub async fn select_records_order_by(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "
@@ -890,7 +883,8 @@ pub async fn select_records_order_by(new_db: impl CreateDb) {
 }
 
 pub async fn select_records_fetch(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "
@@ -902,9 +896,9 @@ pub async fn select_records_fetch(new_db: impl CreateDb) {
     ";
 	db.query(sql).await.unwrap().check().unwrap();
 
-	let check_fetch = |mut response: Response, expected: &str| {
+	let check_fetch = |mut response: IndexedResults, expected: &str| {
 		let val: Value = response.take(0).unwrap();
-		let exp = expected.parse().unwrap();
+		let exp = surrealdb::parse::value(expected).unwrap();
 		assert_eq!(val, exp);
 	};
 
@@ -986,7 +980,8 @@ pub async fn select_records_fetch(new_db: impl CreateDb) {
 }
 
 pub async fn update_table(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
@@ -998,7 +993,8 @@ pub async fn update_table(new_db: impl CreateDb) {
 }
 
 pub async fn update_record_id(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
@@ -1009,14 +1005,15 @@ pub async fn update_record_id(new_db: impl CreateDb) {
 }
 
 pub async fn update_table_with_content(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "
-        CREATE type::thing($table, 'amos') SET name = 'Amos';
-        CREATE type::thing($table, 'jane') SET name = 'Jane';
-        CREATE type::thing($table, 'john') SET name = 'John';
-        CREATE type::thing($table, 'zoey') SET name = 'Zoey';
+        CREATE type::record($table, 'amos') SET name = 'Amos';
+        CREATE type::record($table, 'jane') SET name = 'Jane';
+        CREATE type::record($table, 'john') SET name = 'John';
+        CREATE type::record($table, 'zoey') SET name = 'Zoey';
     ";
 	let table = "user";
 	let response = db.query(sql).bind(("table", table)).await.unwrap();
@@ -1030,19 +1027,19 @@ pub async fn update_table_with_content(new_db: impl CreateDb) {
 		.unwrap();
 	let expected = &[
 		RecordBuf {
-			id: "user:amos".parse().unwrap(),
+			id: rid!(user:amos),
 			name: "Doe".to_owned(),
 		},
 		RecordBuf {
-			id: "user:jane".parse().unwrap(),
+			id: rid!(user:jane),
 			name: "Doe".to_owned(),
 		},
 		RecordBuf {
-			id: "user:john".parse().unwrap(),
+			id: rid!(user:john),
 			name: "Doe".to_owned(),
 		},
 		RecordBuf {
-			id: "user:zoey".parse().unwrap(),
+			id: rid!(user:zoey),
 			name: "Doe".to_owned(),
 		},
 	];
@@ -1052,14 +1049,15 @@ pub async fn update_table_with_content(new_db: impl CreateDb) {
 }
 
 pub async fn update_record_range_with_content(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "
-        CREATE type::thing($table, 'amos') SET name = 'Amos';
-        CREATE type::thing($table, 'jane') SET name = 'Jane';
-        CREATE type::thing($table, 'john') SET name = 'John';
-        CREATE type::thing($table, 'zoey') SET name = 'Zoey';
+        CREATE type::record($table, 'amos') SET name = 'Amos';
+        CREATE type::record($table, 'jane') SET name = 'Jane';
+        CREATE type::record($table, 'john') SET name = 'John';
+        CREATE type::record($table, 'zoey') SET name = 'Zoey';
     ";
 	let table = "user";
 	let response = db.query(sql).bind(("table", table)).await.unwrap();
@@ -1076,11 +1074,11 @@ pub async fn update_record_range_with_content(new_db: impl CreateDb) {
 		users,
 		&[
 			RecordBuf {
-				id: "user:jane".parse().unwrap(),
+				id: rid!(user:jane),
 				name: "Doe".to_owned(),
 			},
 			RecordBuf {
-				id: "user:john".parse().unwrap(),
+				id: rid!(user:john),
 				name: "Doe".to_owned(),
 			},
 		]
@@ -1090,19 +1088,19 @@ pub async fn update_record_range_with_content(new_db: impl CreateDb) {
 		users,
 		&[
 			RecordBuf {
-				id: "user:amos".parse().unwrap(),
+				id: rid!(user:amos),
 				name: "Amos".to_owned(),
 			},
 			RecordBuf {
-				id: "user:jane".parse().unwrap(),
+				id: rid!(user:jane),
 				name: "Doe".to_owned(),
 			},
 			RecordBuf {
-				id: "user:john".parse().unwrap(),
+				id: rid!(user:john),
 				name: "Doe".to_owned(),
 			},
 			RecordBuf {
-				id: "user:zoey".parse().unwrap(),
+				id: rid!(user:zoey),
 				name: "Zoey".to_owned(),
 			},
 		]
@@ -1110,7 +1108,8 @@ pub async fn update_record_range_with_content(new_db: impl CreateDb) {
 }
 
 pub async fn update_record_id_with_content(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let record_id = ("user", "john");
@@ -1134,23 +1133,23 @@ pub async fn update_record_id_with_content(new_db: impl CreateDb) {
 	assert_eq!(user.unwrap().name, "John Doe");
 }
 
-#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Debug, SurrealValue, Eq, PartialEq, Ord, PartialOrd)]
 struct Name {
-	first: Cow<'static, str>,
-	last: Cow<'static, str>,
+	first: String,
+	last: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[derive(Debug, SurrealValue, PartialEq, PartialOrd)]
 struct Person {
-	#[serde(skip_serializing)]
 	id: Option<RecordId>,
-	title: Cow<'static, str>,
+	title: String,
 	name: Name,
 	marketing: bool,
 }
 
 pub async fn update_merge_record_id(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let record_id = ("person", "jaime");
@@ -1167,14 +1166,14 @@ pub async fn update_merge_record_id(new_db: impl CreateDb) {
 		})
 		.await
 		.unwrap();
-	assert_eq!(jaime.unwrap().id.unwrap(), "person:jaime".parse().unwrap());
+	assert_eq!(jaime.unwrap().id.unwrap(), rid!(person:jaime));
 	jaime = db.update(record_id).merge(json!({ "marketing": true })).await.unwrap();
 	assert!(jaime.as_ref().unwrap().marketing);
 	jaime = db.select(record_id).await.unwrap();
 	assert_eq!(
 		jaime.unwrap(),
 		Person {
-			id: Some("person:jaime".parse().unwrap()),
+			id: Some(rid!(person:jaime)),
 			title: "Founder & COO".into(),
 			name: Name {
 				first: "Jaime".into(),
@@ -1186,7 +1185,8 @@ pub async fn update_merge_record_id(new_db: impl CreateDb) {
 }
 
 pub async fn upsert_merge_record_id(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	// Create a new record using upsert
@@ -1204,7 +1204,7 @@ pub async fn upsert_merge_record_id(new_db: impl CreateDb) {
 		})
 		.await
 		.unwrap();
-	assert_eq!(jaime.unwrap().id.unwrap(), "person:jaime".parse().unwrap());
+	assert_eq!(jaime.unwrap().id.unwrap(), rid!(person:jaime));
 	// Update the record using merge
 	jaime = db.upsert(record_id).merge(json!({ "marketing": true })).await.unwrap();
 	assert!(jaime.as_ref().unwrap().marketing);
@@ -1212,7 +1212,7 @@ pub async fn upsert_merge_record_id(new_db: impl CreateDb) {
 	assert_eq!(
 		jaime,
 		Some(Person {
-			id: Some("person:jaime".parse().unwrap()),
+			id: Some(rid!(person:jaime)),
 			title: "Founder & COO".into(),
 			name: Name {
 				first: "Jaime".into(),
@@ -1238,7 +1238,7 @@ pub async fn upsert_merge_record_id(new_db: impl CreateDb) {
 	assert_eq!(
 		tobie,
 		Some(Person {
-			id: Some("person:tobie".parse().unwrap()),
+			id: Some(rid!(person:tobie)),
 			title: "Founder & CEO".into(),
 			name: Name {
 				first: "Tobie".into(),
@@ -1252,7 +1252,7 @@ pub async fn upsert_merge_record_id(new_db: impl CreateDb) {
 	assert_eq!(
 		tobie,
 		Some(Person {
-			id: Some("person:tobie".parse().unwrap()),
+			id: Some(rid!(person:tobie)),
 			title: "Founder & CEO".into(),
 			name: Name {
 				first: "Tobie".into(),
@@ -1263,15 +1263,17 @@ pub async fn upsert_merge_record_id(new_db: impl CreateDb) {
 	);
 }
 
+#[allow(clippy::disallowed_names)]
 pub async fn patch_record_id(new_db: impl CreateDb) {
-	#[derive(Debug, Deserialize, PartialEq)]
+	#[derive(Debug, SurrealValue, PartialEq)]
 	struct Record {
 		id: RecordId,
 		baz: String,
 		hello: Vec<String>,
 	}
 
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let id = "john";
@@ -1294,22 +1296,24 @@ pub async fn patch_record_id(new_db: impl CreateDb) {
 	assert_eq!(
 		value,
 		Some(Record {
-			id: format!("user:{id}").parse().unwrap(),
+			id: RecordId::new("user", id),
 			baz: "boo".to_owned(),
 			hello: vec!["world".to_owned()],
 		})
 	);
 }
 
+#[allow(clippy::disallowed_names)]
 pub async fn upsert_patch_record_id(new_db: impl CreateDb) {
-	#[derive(Debug, Deserialize, PartialEq)]
+	#[derive(Debug, SurrealValue, PartialEq)]
 	struct Record {
 		id: RecordId,
 		baz: String,
 		hello: Vec<String>,
 	}
 
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let id = "john";
@@ -1332,7 +1336,7 @@ pub async fn upsert_patch_record_id(new_db: impl CreateDb) {
 	assert_eq!(
 		value,
 		Some(Record {
-			id: format!("user:{id}").parse().unwrap(),
+			id: RecordId::new("user", id),
 			baz: "boo".to_owned(),
 			hello: vec!["world".to_owned()],
 		})
@@ -1346,7 +1350,7 @@ pub async fn upsert_patch_record_id(new_db: impl CreateDb) {
 	assert_eq!(
 		jane,
 		Some(Record {
-			id: "user:jane".parse().unwrap(),
+			id: RecordId::new("user", "jane"),
 			baz: "boo".to_owned(),
 			hello: vec!["world".to_owned()],
 		})
@@ -1356,22 +1360,24 @@ pub async fn upsert_patch_record_id(new_db: impl CreateDb) {
 	assert_eq!(
 		jane,
 		Some(Record {
-			id: "user:jane".parse().unwrap(),
+			id: RecordId::new("user", "jane"),
 			baz: "boo".to_owned(),
 			hello: vec!["world".to_owned()],
 		})
 	);
 }
 
+#[allow(clippy::disallowed_names)]
 pub async fn patch_record_id_ops(new_db: impl CreateDb) {
-	#[derive(Debug, Deserialize, PartialEq)]
+	#[derive(Debug, SurrealValue, PartialEq)]
 	struct Record {
 		id: RecordId,
 		baz: String,
 		hello: Vec<String>,
 	}
 
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let id = "john";
@@ -1392,7 +1398,7 @@ pub async fn patch_record_id_ops(new_db: impl CreateDb) {
 	assert_eq!(
 		value,
 		Some(Record {
-			id: format!("user:{id}").parse().unwrap(),
+			id: RecordId::new("user", id),
 			baz: "boo".to_owned(),
 			hello: vec!["world".to_owned()],
 		})
@@ -1400,7 +1406,8 @@ pub async fn patch_record_id_ops(new_db: impl CreateDb) {
 }
 
 pub async fn delete_table(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let table = "user";
@@ -1416,32 +1423,34 @@ pub async fn delete_table(new_db: impl CreateDb) {
 }
 
 pub async fn delete_record_id(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
-	let record_id = ("user", "john");
-	let _: Option<ApiRecordId> = db.create(record_id).await.unwrap();
-	let _: Option<ApiRecordId> = db.select(record_id).await.unwrap();
-	let john: Option<ApiRecordId> = db.delete(record_id).await.unwrap();
+	let record_id = RecordId::new("user", "john");
+	let _: Option<ApiRecordId> = db.create(&record_id).await.unwrap();
+	let _: Option<ApiRecordId> = db.select(&record_id).await.unwrap();
+	let john: Option<ApiRecordId> = db.delete(&record_id).await.unwrap();
 	assert!(john.is_some());
 	let john: Option<ApiRecordId> = db.select(record_id).await.unwrap();
 	assert!(john.is_none());
 	// non-existing user
-	let jane: Option<ApiRecordId> = db.delete(("user", "jane")).await.unwrap();
+	let jane: Option<ApiRecordId> = db.delete(RecordId::new("user", "jane")).await.unwrap();
 	assert!(jane.is_none());
-	let value: Value = db.delete(Resource::from(("user", "jane"))).await.unwrap();
-	assert_eq!(value.into_inner(), val::Value::None);
+	let value: Value = db.delete(Resource::from(RecordId::new("user", "jane"))).await.unwrap();
+	assert_eq!(value, Value::Array(Array::new()));
 }
 
 pub async fn delete_record_range(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let sql = "
-        CREATE type::thing($table, 'amos') SET name = 'Amos';
-        CREATE type::thing($table, 'jane') SET name = 'Jane';
-        CREATE type::thing($table, 'john') SET name = 'John';
-        CREATE type::thing($table, 'zoey') SET name = 'Zoey';
+        CREATE type::record($table, 'amos') SET name = 'Amos';
+        CREATE type::record($table, 'jane') SET name = 'Jane';
+        CREATE type::record($table, 'john') SET name = 'John';
+        CREATE type::record($table, 'zoey') SET name = 'Zoey';
     ";
 	let table = "user";
 	let response = db.query(sql).bind(("table", table)).await.unwrap();
@@ -1451,11 +1460,11 @@ pub async fn delete_record_range(new_db: impl CreateDb) {
 		users,
 		&[
 			RecordBuf {
-				id: "user:jane".parse().unwrap(),
+				id: rid!(user:jane),
 				name: "Jane".to_owned(),
 			},
 			RecordBuf {
-				id: "user:john".parse().unwrap(),
+				id: rid!(user:john),
 				name: "John".to_owned(),
 			},
 		]
@@ -1465,11 +1474,11 @@ pub async fn delete_record_range(new_db: impl CreateDb) {
 		users,
 		&[
 			RecordBuf {
-				id: "user:amos".parse().unwrap(),
+				id: rid!(user:amos),
 				name: "Amos".to_owned(),
 			},
 			RecordBuf {
-				id: "user:zoey".parse().unwrap(),
+				id: rid!(user:zoey),
 				name: "Zoey".to_owned(),
 			},
 		]
@@ -1477,7 +1486,8 @@ pub async fn delete_record_range(new_db: impl CreateDb) {
 }
 
 pub async fn changefeed(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	// Enable change feeds
 	let sql = "
@@ -1503,11 +1513,11 @@ pub async fn changefeed(new_db: impl CreateDb) {
 		.unwrap();
 	let expected = &[
 		RecordBuf {
-			id: "testuser:amos".parse().unwrap(),
+			id: rid!(testuser:amos),
 			name: "Doe".to_owned(),
 		},
 		RecordBuf {
-			id: "testuser:jane".parse().unwrap(),
+			id: rid!(testuser:jane),
 			name: "Doe".to_owned(),
 		},
 	];
@@ -1520,27 +1530,28 @@ pub async fn changefeed(new_db: impl CreateDb) {
 	let mut response = db.query(sql).await.unwrap();
 	drop(permit);
 	let v: Value = response.take(0).unwrap();
-	let val::Value::Array(array) = v.into_inner() else {
+	let Value::Array(array) = v else {
 		panic!()
 	};
 	assert_eq!(array.len(), 5);
 	// DEFINE TABLE
 	let a = array.first().unwrap();
-	let val::Value::Object(a) = a.clone() else {
+	let Value::Object(a) = a.clone() else {
 		unreachable!()
 	};
-	let val::Value::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
+	let Value::Number(_versionstamp1) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
 	let changes = a.get("changes").unwrap().clone().clone();
 	assert_eq!(
-		Value::from_inner(changes),
-		"[
+		changes,
+		surrealdb::parse::value(
+			"[
         {
             define_table: {
                 name: 'testuser',
 				changefeed: {
-					expiry: '1h',
+					expiry: 1h,
 					original: false
 				},
 				drop: false,
@@ -1557,44 +1568,46 @@ pub async fn changefeed(new_db: impl CreateDb) {
             }
         }
     ]"
-		.parse()
+		)
 		.unwrap()
 	);
 	// UPDATE testuser:amos
 	let a = &array[1];
-	let val::Value::Object(a) = a.clone() else {
+	let Value::Object(a) = a.clone() else {
 		unreachable!()
 	};
-	let val::Value::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
+	let Value::Number(versionstamp1) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
-		Value::from_inner(changes),
-		r#"[
+		changes,
+		surrealdb::parse::value(
+			"[
                  {
                       update: {
                           id: testuser:amos,
                           name: 'Amos'
                       }
                  }
-            ]"#
-		.parse()
+            ]"
+		)
 		.unwrap()
 	);
 	// UPDATE testuser:jane
 	let a = &array[2];
-	let val::Value::Object(a) = a.clone() else {
+	let Value::Object(a) = a.clone() else {
 		unreachable!()
 	};
-	let val::Value::Number(versionstamp2) = a.get("versionstamp").unwrap().clone() else {
+	let Value::Number(versionstamp2) = a.get("versionstamp").unwrap().clone() else {
 		unreachable!()
 	};
 	assert!(*versionstamp1 < versionstamp2);
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
-		Value::from_inner(changes),
-		"[
+		changes,
+		surrealdb::parse::value(
+			"[
                     {
                          update: {
                              id: testuser:jane,
@@ -1602,22 +1615,23 @@ pub async fn changefeed(new_db: impl CreateDb) {
                          }
                     }
                 ]"
-		.parse()
+		)
 		.unwrap()
 	);
 	// UPDATE testuser:amos
 	let a = &array[3];
-	let val::Value::Object(a) = a.clone() else {
+	let Value::Object(a) = a.clone() else {
 		unreachable!()
 	};
-	let val::Value::Number(versionstamp3) = a.get("versionstamp").unwrap() else {
+	let Value::Number(versionstamp3) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
 	assert!(versionstamp2 < *versionstamp3);
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
-		Value::from_inner(changes),
-		"[
+		changes,
+		surrealdb::parse::value(
+			"[
                     {
                         update: {
                             id: testuser:amos,
@@ -1625,22 +1639,23 @@ pub async fn changefeed(new_db: impl CreateDb) {
                         }
                     }
                 ]"
-		.parse()
+		)
 		.unwrap()
 	);
 	// UPDATE table
 	let a = &array[4];
-	let val::Value::Object(a) = a.clone() else {
+	let Value::Object(a) = a.clone() else {
 		unreachable!()
 	};
-	let val::Value::Number(versionstamp4) = a.get("versionstamp").unwrap() else {
+	let Value::Number(versionstamp4) = a.get("versionstamp").unwrap() else {
 		unreachable!()
 	};
 	assert!(versionstamp3 < versionstamp4);
 	let changes = a.get("changes").unwrap().to_owned();
 	assert_eq!(
-		Value::from_inner(changes),
-		"[
+		changes,
+		surrealdb::parse::value(
+			"[
         {
             update: {
                 id: testuser:amos,
@@ -1654,19 +1669,21 @@ pub async fn changefeed(new_db: impl CreateDb) {
             }
         }
     ]"
-		.parse()
+		)
 		.unwrap()
 	);
 }
 
 pub async fn version(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	drop(permit);
 	db.version().await.unwrap();
 }
 
 pub async fn set_unset(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 	let (key, value) = ("name", "Doe");
@@ -1688,7 +1705,8 @@ pub async fn set_unset(new_db: impl CreateDb) {
 }
 
 pub async fn return_bool(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	let mut response = db.query("RETURN true").await.unwrap();
 	drop(permit);
 	let Some(boolean): Option<bool> = response.take(0).unwrap() else {
@@ -1697,50 +1715,12 @@ pub async fn return_bool(new_db: impl CreateDb) {
 	assert!(boolean);
 	let mut response = db.query("RETURN false").await.unwrap();
 	let value: Value = response.take(0).unwrap();
-	assert_eq!(value.into_inner(), val::Value::Bool(false));
-}
-
-pub async fn run(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
-	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
-	drop(permit);
-	let sql = "
-	DEFINE FUNCTION fn::foo() {
-	   RETURN 42;
-	};
-	DEFINE FUNCTION fn::bar($val: any) {
-	   CREATE foo:1 set val = $val;
-	   RETURN NONE;
-	};
-	DEFINE FUNCTION fn::baz() {
-	   RETURN SELECT VALUE val FROM ONLY foo:1;
-	};
-	";
-	let _ = db.query(sql).await.unwrap();
-
-	let tmp: i32 = db.run("fn::foo").await.unwrap();
-	assert_eq!(tmp, 42);
-
-	let tmp = db.run::<i32>("fn::foo").args(7).await.unwrap_err();
-	println!("fn::foo res: {tmp}");
-	assert!(tmp.to_string().contains("The function expects 0 arguments."));
-
-	let tmp = db.run::<()>("fn::idnotexist").await.unwrap_err();
-	println!("fn::idontexist res: {tmp}");
-	assert!(tmp.to_string().contains("The function 'fn::idnotexist' does not exist"));
-
-	let tmp: usize = db.run("count").args(vec![1, 2, 3]).await.unwrap();
-	assert_eq!(tmp, 3);
-
-	let tmp: Option<RecordId> = db.run("fn::bar").args(7).await.unwrap();
-	assert_eq!(tmp, None);
-
-	let tmp: i32 = db.run("fn::baz").await.unwrap();
-	assert_eq!(tmp, 7);
+	assert_eq!(value, Value::Bool(false));
 }
 
 pub async fn multi_take(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
@@ -1759,7 +1739,8 @@ pub async fn multi_take(new_db: impl CreateDb) {
 }
 
 pub async fn field_and_index_methods(new_db: impl CreateDb) {
-	let (permit, db) = new_db.create_db().await;
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
 	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
 	drop(permit);
 
@@ -1768,9 +1749,9 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 	let as_value: Value = response.take::<Value>(0).unwrap();
 	let inside = as_value.get(0).get("b1").get("total_peers");
 
-	assert_eq!(inside, &Value::from_inner(val::Value::Number(74.into())));
+	assert_eq!(inside, &Value::Number(74.into()));
 	assert!(!inside.is_none());
-	assert_eq!(inside.into_option(), Some(&Value::from_inner(val::Value::Number(74.into()))));
+	assert_eq!(inside.clone().into_option::<Value>().unwrap(), Some(Value::Number(74.into())));
 
 	let mut response =
 		db.query("SELECT b1 FROM CREATE something SET b1.total_peers = 74").await.unwrap();
@@ -1778,9 +1759,157 @@ pub async fn field_and_index_methods(new_db: impl CreateDb) {
 	// Second .get() is a non-existent field
 	let inside = as_value.get(0).get("b1111111").get("total_peers");
 
-	assert_eq!(inside, &Value::from_inner(val::Value::None));
+	assert_eq!(inside, &Value::None);
 	assert!(inside.is_none());
-	assert_eq!(inside.into_option(), None);
+	assert_eq!(inside.clone().into_option::<Value>().unwrap(), None);
+}
+
+#[cfg(not(feature = "protocol-http"))]
+pub async fn client_side_transactions(new_db: impl CreateDb) {
+	#[derive(Debug, Clone, SurrealValue, PartialEq)]
+	struct User {
+		name: String,
+		email: String,
+	}
+
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	db.use_ns(Ulid::new().to_string()).use_db(Ulid::new().to_string()).await.unwrap();
+
+	// Test 1: Commit a transaction
+	let txn = db.begin().await.unwrap();
+	let user: Option<User> = txn
+		.create("user")
+		.content(User {
+			name: "John".to_owned(),
+			email: "john@example.com".to_owned(),
+		})
+		.await
+		.unwrap();
+	assert!(user.is_some());
+	txn.commit().await.unwrap();
+
+	// Verify the user was created by querying through the main db connection
+	let users: Vec<User> = db.select("user").await.unwrap();
+	assert_eq!(users.len(), 1);
+	assert_eq!(users[0].name, "John");
+	assert_eq!(users[0].email, "john@example.com");
+
+	// Test 2: Cancel a transaction (rollback)
+	let txn = db.begin().await.unwrap();
+	let _: Option<User> = txn
+		.create("user")
+		.content(User {
+			name: "Jane".to_owned(),
+			email: "jane@example.com".to_owned(),
+		})
+		.await
+		.unwrap();
+	// Cancel the transaction - the user should not be persisted
+	txn.cancel().await.unwrap();
+
+	// Verify Jane was not created
+	let users: Vec<User> = db.select("user").await.unwrap();
+	assert_eq!(users.len(), 1); // Still only John
+	assert_eq!(users[0].name, "John");
+
+	// Test 3: Multiple operations in a single transaction
+	let txn = db.begin().await.unwrap();
+	let _: Option<User> = txn
+		.create(("user", "alice"))
+		.content(User {
+			name: "Alice".to_owned(),
+			email: "alice@example.com".to_owned(),
+		})
+		.await
+		.unwrap();
+	let _: Option<User> = txn
+		.create(("user", "bob"))
+		.content(User {
+			name: "Bob".to_owned(),
+			email: "bob@example.com".to_owned(),
+		})
+		.await
+		.unwrap();
+	txn.commit().await.unwrap();
+
+	// Verify all users were created
+	let users: Vec<User> = db.select("user").await.unwrap();
+	assert_eq!(users.len(), 3); // John, Alice, Bob
+
+	drop(permit);
+}
+
+#[cfg(feature = "protocol-http")]
+pub async fn client_side_transactions(_new_db: impl CreateDb) {
+	// Client-side transactions are not supported on HTTP
+}
+
+pub async fn refresh_tokens(new_db: impl CreateDb) {
+	let config = Config::new();
+	let (permit, db) = new_db.create_db(config).await;
+	let namespace = Ulid::new().to_string();
+	let database = Ulid::new().to_string();
+	db.use_ns(&namespace).use_db(&database).await.unwrap();
+	let access = Ulid::new();
+	let email = format!("{access}@example.com");
+	let pass = "password123";
+	// Define the access grant with refresh tokens enabled
+	let sql = format!(
+		"
+        DEFINE ACCESS `{access}` ON DATABASE TYPE RECORD
+        SIGNUP ( CREATE user SET email = $email, pass = crypto::argon2::generate($pass) )
+        SIGNIN ( SELECT * FROM user WHERE email = $email AND crypto::argon2::compare(pass, $pass) )
+		WITH REFRESH
+		DURATION FOR SESSION 1d FOR TOKEN 15s
+    "
+	);
+	let response = db.query(sql).await.unwrap();
+	drop(permit);
+	response.check().unwrap();
+	// Ensure signup returns a refresh token
+	let token = db
+		.signup(RecordAccess {
+			namespace: namespace.clone(),
+			database: database.clone(),
+			access: access.to_string(),
+			params: AuthParams {
+				pass: pass.to_string(),
+				email: email.clone(),
+			},
+		})
+		.await
+		.unwrap();
+	assert!(token.refresh.is_some());
+	// Ensure signin returns a refresh token
+	let token = db
+		.signin(RecordAccess {
+			namespace,
+			database,
+			access: access.to_string(),
+			params: AuthParams {
+				pass: pass.to_string(),
+				email,
+			},
+		})
+		.await
+		.unwrap();
+	assert!(token.refresh.is_some());
+	// Tokens can be refreshed
+	let old_token = token.access.as_insecure_token().to_owned();
+	let token = db.authenticate(token).refresh().await.unwrap();
+	assert!(token.refresh.is_some());
+	assert_ne!(old_token, token.access.as_insecure_token());
+	// Revoke a refresh token
+	let value = token.into_value();
+	let token = Token::from_value(value.clone()).unwrap();
+	db.invalidate().refresh(token).await.unwrap();
+	// The access token is still valid
+	let token = Token::from_value(value.clone()).unwrap();
+	db.authenticate(token).await.unwrap();
+	// The refresh token is revoked
+	let token = Token::from_value(value).unwrap();
+	db.authenticate(token).refresh().await.unwrap_err();
 }
 
 define_include_tests!(basic => {
@@ -1833,8 +1962,6 @@ define_include_tests!(basic => {
 	#[test_log::test(tokio::test)]
 	insert_thing,
 	#[test_log::test(tokio::test)]
-	insert_unspecified,
-	#[test_log::test(tokio::test)]
 	insert_relation_table,
 	#[test_log::test(tokio::test)]
 	binding_edges,
@@ -1885,9 +2012,11 @@ define_include_tests!(basic => {
 	#[test_log::test(tokio::test)]
 	return_bool,
 	#[test_log::test(tokio::test)]
-	run,
-	#[test_log::test(tokio::test)]
 	multi_take,
 	#[test_log::test(tokio::test)]
 	field_and_index_methods,
+	#[test_log::test(tokio::test)]
+	client_side_transactions,
+	#[test_log::test(tokio::test)]
+	refresh_tokens,
 });

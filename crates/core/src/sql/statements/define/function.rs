@@ -6,7 +6,7 @@ use crate::sql::{Block, Expr, Kind, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct DefineFunctionStatement {
+pub(crate) struct DefineFunctionStatement {
 	pub kind: DefineKind,
 	pub name: String,
 	pub args: Vec<(String, Kind)>,

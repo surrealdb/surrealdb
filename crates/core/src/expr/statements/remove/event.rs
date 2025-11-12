@@ -10,27 +10,17 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct RemoveEventStatement {
+pub(crate) struct RemoveEventStatement {
 	pub name: Expr,
 	pub table_name: Expr,
 	pub if_exists: bool,
 }
 
-impl VisitExpression for RemoveEventStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.table_name.visit(visitor);
-	}
-}
 impl Default for RemoveEventStatement {
 	fn default() -> Self {
 		Self {

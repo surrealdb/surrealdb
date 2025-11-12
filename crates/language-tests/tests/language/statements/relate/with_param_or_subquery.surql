@@ -33,6 +33,6 @@ LET $jaime = person:jaime;
 LET $relation = type::table("knows");
 RELATE $tobie->$relation->$jaime CONTENT { id: "foo" };
 RELATE $tobie->(type::table("knows"))->$jaime CONTENT { id: "bar" };
-LET $relation = type::thing("knows:foo");
+LET $relation = type::record("knows:foo");
 RELATE $tobie->$relation->$jaime;
-RELATE $tobie->(type::thing("knows:bar"))->$jaime;
+RELATE $tobie->(type::record("knows:bar"))->$jaime;

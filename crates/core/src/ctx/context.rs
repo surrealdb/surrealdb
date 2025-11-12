@@ -9,10 +9,16 @@ use std::time::Duration;
 
 use anyhow::{Result, bail};
 use async_channel::Sender;
+#[cfg(feature = "surrealism")]
+use surrealism_runtime::controller::Runtime;
+#[cfg(feature = "surrealism")]
+use surrealism_runtime::package::SurrealismPackage;
 use trice::Instant;
 #[cfg(feature = "http")]
 use url::Url;
 
+#[cfg(feature = "surrealism")]
+use crate::buc::store::ObjectKey;
 use crate::buc::store::ObjectStore;
 use crate::buc::{self, BucketConnectionKey, BucketConnections};
 use crate::catalog::providers::{
@@ -22,20 +28,25 @@ use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
 use crate::ctx::reason::Reason;
+#[cfg(feature = "surrealism")]
+use crate::dbs::capabilities::ExperimentalTarget;
 #[cfg(feature = "http")]
 use crate::dbs::capabilities::NetTarget;
-use crate::dbs::{Capabilities, Notification, Options, Session, Variables};
+use crate::dbs::{Capabilities, Options, Session, Variables};
 use crate::err::Error;
 use crate::idx::planner::executor::QueryExecutor;
 use crate::idx::planner::{IterationStage, QueryPlanner};
 use crate::idx::trees::store::IndexStores;
-#[cfg(not(target_family = "wasm"))]
-use crate::kvs::IndexBuilder;
 use crate::kvs::Transaction;
 use crate::kvs::cache::ds::DatastoreCache;
+use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::mem::ALLOC;
+use crate::sql::expression::convert_public_value_to_internal;
+#[cfg(feature = "surrealism")]
+use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup, SurrealismCacheValue};
+use crate::types::{PublicNotification, PublicVariables};
 use crate::val::Value;
 
 pub type Context = Arc<MutableContext>;
@@ -54,7 +65,7 @@ pub struct MutableContext {
 	// A collection of read only values stored in this context.
 	values: HashMap<Cow<'static, str>, Arc<Value>>,
 	// Stores the notification channel if available
-	notifications: Option<Sender<Notification>>,
+	notifications: Option<Sender<PublicNotification>>,
 	// An optional query planner
 	query_planner: Option<Arc<QueryPlanner>>,
 	// An optional query executor
@@ -66,7 +77,6 @@ pub struct MutableContext {
 	// The index store
 	index_stores: IndexStores,
 	// The index concurrent builders
-	#[cfg(not(target_family = "wasm"))]
 	index_builder: Option<IndexBuilder>,
 	// The sequences
 	sequences: Option<Sequences>,
@@ -81,6 +91,9 @@ pub struct MutableContext {
 	isolated: bool,
 	// A map of bucket connections
 	buckets: Option<Arc<BucketConnections>>,
+	// The surrealism cache
+	#[cfg(feature = "surrealism")]
+	surrealism_cache: Option<Arc<SurrealismCache>>,
 }
 
 impl Default for MutableContext {
@@ -124,7 +137,6 @@ impl MutableContext {
 			capabilities: Arc::new(Capabilities::default()),
 			index_stores: IndexStores::default(),
 			cache: None,
-			#[cfg(not(target_family = "wasm"))]
 			index_builder: None,
 			sequences: None,
 			#[cfg(storage)]
@@ -132,6 +144,8 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			buckets: None,
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: None,
 		}
 	}
 
@@ -149,7 +163,6 @@ impl MutableContext {
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
 			cache: parent.cache.clone(),
-			#[cfg(not(target_family = "wasm"))]
 			index_builder: parent.index_builder.clone(),
 			sequences: parent.sequences.clone(),
 			#[cfg(storage)]
@@ -158,6 +171,8 @@ impl MutableContext {
 			isolated: false,
 			parent: Some(parent.clone()),
 			buckets: parent.buckets.clone(),
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: parent.surrealism_cache.clone(),
 		}
 	}
 
@@ -177,7 +192,6 @@ impl MutableContext {
 			capabilities: parent.capabilities.clone(),
 			index_stores: parent.index_stores.clone(),
 			cache: parent.cache.clone(),
-			#[cfg(not(target_family = "wasm"))]
 			index_builder: parent.index_builder.clone(),
 			sequences: parent.sequences.clone(),
 			#[cfg(storage)]
@@ -186,13 +200,14 @@ impl MutableContext {
 			isolated: true,
 			parent: Some(parent.clone()),
 			buckets: parent.buckets.clone(),
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: parent.surrealism_cache.clone(),
 		}
 	}
 
 	/// Create a new context from a frozen parent context.
 	/// This context is not linked to the parent context,
 	/// and won't be cancelled if the parent is cancelled.
-	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn new_concurrent(from: &Context) -> Self {
 		Self {
 			values: HashMap::default(),
@@ -214,6 +229,8 @@ impl MutableContext {
 			isolated: false,
 			parent: None,
 			buckets: from.buckets.clone(),
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: from.surrealism_cache.clone(),
 		}
 	}
 
@@ -224,11 +241,12 @@ impl MutableContext {
 		slow_log: Option<SlowLog>,
 		capabilities: Arc<Capabilities>,
 		index_stores: IndexStores,
-		#[cfg(not(target_family = "wasm"))] index_builder: IndexBuilder,
+		index_builder: IndexBuilder,
 		sequences: Sequences,
 		cache: Arc<DatastoreCache>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
 		buckets: Arc<BucketConnections>,
+		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
 	) -> Result<MutableContext> {
 		let mut ctx = Self {
 			values: HashMap::default(),
@@ -243,7 +261,6 @@ impl MutableContext {
 			capabilities,
 			index_stores,
 			cache: Some(cache),
-			#[cfg(not(target_family = "wasm"))]
 			index_builder: Some(index_builder),
 			sequences: Some(sequences),
 			#[cfg(storage)]
@@ -251,6 +268,8 @@ impl MutableContext {
 			transaction: None,
 			isolated: false,
 			buckets: Some(buckets),
+			#[cfg(feature = "surrealism")]
+			surrealism_cache: Some(surrealism_cache),
 		};
 		if let Some(timeout) = time_out {
 			ctx.add_timeout(timeout)?;
@@ -276,7 +295,8 @@ impl MutableContext {
 	/// the `strict` option.
 	pub(crate) async fn get_ns_id(&self, opt: &Options) -> Result<NamespaceId> {
 		let ns = opt.ns()?;
-		let ns_def = self.tx().get_or_add_ns(ns, opt.strict).await?;
+		let tx = self.tx();
+		let ns_def = tx.get_or_add_ns(Some(self), ns).await?;
 		Ok(ns_def.namespace_id)
 	}
 
@@ -298,8 +318,22 @@ impl MutableContext {
 	/// created based on the `strict` option.
 	pub(crate) async fn get_ns_db_ids(&self, opt: &Options) -> Result<(NamespaceId, DatabaseId)> {
 		let (ns, db) = opt.ns_db()?;
-		let db_def = self.tx().ensure_ns_db(ns, db, opt.strict).await?;
+		let db_def = self.tx().ensure_ns_db(Some(self), ns, db).await?;
 		Ok((db_def.namespace_id, db_def.database_id))
+	}
+
+	/// Get the namespace and database ids for the current context.
+	/// If the namespace or database does not exist, it will be try to be
+	/// created based on the `strict` option.
+	pub(crate) async fn try_ns_db_ids(
+		&self,
+		opt: &Options,
+	) -> Result<Option<(NamespaceId, DatabaseId)>> {
+		let (ns, db) = opt.ns_db()?;
+		let Some(db_def) = self.tx().get_db_by_name(ns, db).await? else {
+			return Ok(None);
+		};
+		Ok(Some((db_def.namespace_id, db_def.database_id)))
 	}
 
 	/// Get the namespace and database ids for the current context.
@@ -320,7 +354,7 @@ impl MutableContext {
 
 	pub(crate) async fn get_db(&self, opt: &Options) -> Result<Arc<DatabaseDefinition>> {
 		let (ns, db) = opt.ns_db()?;
-		let db_def = self.tx().ensure_ns_db(ns, db, opt.strict).await?;
+		let db_def = self.tx().ensure_ns_db(Some(self), ns, db).await?;
 		Ok(db_def)
 	}
 
@@ -375,7 +409,7 @@ impl MutableContext {
 
 	/// Add the LIVE query notification channel to the context, so that we
 	/// can send notifications to any subscribers.
-	pub(crate) fn add_notifications(&mut self, chn: Option<&Sender<Notification>>) {
+	pub(crate) fn add_notifications(&mut self, chn: Option<&Sender<PublicNotification>>) {
 		self.notifications = chn.cloned()
 	}
 
@@ -418,7 +452,7 @@ impl MutableContext {
 		self.slow_log.as_ref()
 	}
 
-	pub(crate) fn notifications(&self) -> Option<Sender<Notification>> {
+	pub(crate) fn notifications(&self) -> Option<Sender<PublicNotification>> {
 		self.notifications.clone()
 	}
 
@@ -446,7 +480,6 @@ impl MutableContext {
 	}
 
 	/// Get the index_builder for this context/ds
-	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn get_index_builder(&self) -> Option<&IndexBuilder> {
 		self.index_builder.as_ref()
 	}
@@ -555,7 +588,7 @@ impl MutableContext {
 	pub(crate) fn attach_session(&mut self, session: &Session) -> Result<(), Error> {
 		self.add_values(session.values());
 		if !session.variables.is_empty() {
-			self.attach_variables(session.variables.clone())?;
+			self.attach_variables(session.variables.clone().into())?;
 		}
 		Ok(())
 	}
@@ -569,6 +602,20 @@ impl MutableContext {
 				});
 			}
 			self.add_value(key, val.into());
+		}
+		Ok(())
+	}
+
+	pub(crate) fn attach_public_variables(&mut self, vars: PublicVariables) -> Result<(), Error> {
+		for (key, val) in vars {
+			if PROTECTED_PARAM_NAMES.contains(&key.as_str()) {
+				return Err(Error::InvalidParam {
+					name: key.clone(),
+				});
+			}
+
+			let internal_val = convert_public_value_to_internal(val);
+			self.add_value(key, Arc::new(internal_val));
 		}
 		Ok(())
 	}
@@ -717,6 +764,53 @@ impl MutableContext {
 			}
 		} else {
 			bail!(Error::BucketUnavailable(bu.into()))
+		}
+	}
+
+	#[cfg(feature = "surrealism")]
+	pub(crate) fn get_surrealism_cache(&self) -> Option<Arc<SurrealismCache>> {
+		self.surrealism_cache.as_ref().map(|sc| sc.clone())
+	}
+
+	#[cfg(feature = "surrealism")]
+	pub(crate) async fn get_surrealism_runtime(
+		&self,
+		lookup: SurrealismCacheLookup<'_>,
+	) -> Result<Arc<Runtime>> {
+		if !self.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism) {
+			bail!(
+				"Failed to get surrealism runtime: Experimental capability `surrealism` is not enabled"
+			);
+		}
+
+		let Some(cache) = self.get_surrealism_cache() else {
+			bail!("Surrealism cache is not available");
+		};
+
+		if let Some(value) = cache.get(&lookup) {
+			Ok(value.runtime.clone())
+		} else {
+			let SurrealismCacheLookup::File(ns, db, bucket, key) = lookup else {
+				bail!("silo lookups are not supported yet");
+			};
+			let bucket = self.get_bucket_store(*ns, *db, bucket).await?;
+			let key = ObjectKey::new(key);
+			let surli =
+				bucket.get(&key).await.map_err(|e| anyhow::anyhow!("failed to get file: {}", e))?;
+
+			let Some(surli) = surli else {
+				bail!("file not found");
+			};
+
+			let package = SurrealismPackage::from_reader(std::io::Cursor::new(surli))?;
+			let runtime = Arc::new(Runtime::new(package)?);
+			cache.insert(
+				lookup.into(),
+				SurrealismCacheValue {
+					runtime: runtime.clone(),
+				},
+			);
+			Ok(runtime)
 		}
 	}
 }

@@ -211,12 +211,15 @@ impl<'a> StatementContext<'a> {
 	/// On backends that support reverse scans (e.g., RocksDB/TiKV), we reverse
 	/// the direction when the first ORDER BY is `id DESC`. Otherwise, we
 	/// default to forward.
-	pub(crate) fn check_scan_direction(&self) -> ScanDirection {
+	#[allow(unused_variables)]
+	pub(crate) fn check_scan_direction(&self, has_reverse_scan: bool) -> ScanDirection {
 		#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-		if let Some(Ordering::Order(o)) = self.order {
-			if let Some(o) = o.first() {
-				if !o.direction && o.value.is_id() {
-					return ScanDirection::Backward;
+		if has_reverse_scan {
+			if let Some(Ordering::Order(o)) = self.order {
+				if let Some(o) = o.first() {
+					if !o.direction && o.value.is_id() {
+						return ScanDirection::Backward;
+					}
 				}
 			}
 		}
@@ -306,7 +309,7 @@ impl QueryPlanner {
 			all_and: tree.all_and,
 			all_expressions_with_index: tree.all_expressions_with_index,
 			all_and_groups: tree.all_and_groups,
-			reverse_scan: ctx.ctx.tx().reverse_scan(),
+			has_reverse_scan: ctx.ctx.tx().has_reverse_scan(),
 		};
 		match PlanBuilder::build(ctx, p).await? {
 			Plan::SingleIndex(exp, io, rs) => {
@@ -347,7 +350,7 @@ impl QueryPlanner {
 					self.fallbacks.push(reason);
 				}
 				self.add(t.clone(), None, exe, it, rs);
-				it.ingest(Iterable::Table(t, rs, sc));
+				it.ingest(Iterable::Table(t.clone(), rs, sc));
 				is_table_iterator = true;
 			}
 		}

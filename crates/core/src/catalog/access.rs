@@ -8,7 +8,7 @@ use crate::val::{Datetime, RecordId};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Subject {
+pub(crate) enum Subject {
 	Record(RecordId),
 	User(String),
 }
@@ -83,7 +83,7 @@ impl GrantBearer {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct AccessGrant {
+pub(crate) struct AccessGrant {
 	pub id: String,                   // Unique grant identifier.
 	pub ac: String,                   // Access method used to create the grant.
 	pub creation: Datetime,           // Grant creation time.
@@ -98,7 +98,7 @@ impl AccessGrant {
 	/// Returns a version of the statement where potential secrets are redacted.
 	/// This function should be used when displaying the statement to datastore users.
 	/// This function should NOT be used when displaying the statement for export purposes.
-	pub fn redacted(mut self) -> AccessGrant {
+	pub(crate) fn redacted(mut self) -> AccessGrant {
 		self.grant = match self.grant {
 			Grant::Jwt(mut gr) => {
 				// Token should not even be stored. We clear it just as a precaution.

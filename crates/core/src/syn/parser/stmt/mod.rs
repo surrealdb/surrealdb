@@ -17,7 +17,7 @@ use crate::sql::{AssignOperator, Expr, Fields, Literal, Param, TopLevelExpr};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::unexpected;
 use crate::syn::token::{TokenKind, t};
-use crate::val::Duration;
+use crate::types::PublicDuration;
 
 mod alter;
 mod create;
@@ -244,7 +244,7 @@ impl Parser<'_> {
 				let grace = if self.eat(t!("FOR")) {
 					self.next_token_value()?
 				} else {
-					Duration::default()
+					PublicDuration::default()
 				};
 				Ok(AccessStatement::Purge(AccessStatementPurge {
 					ac,
@@ -410,12 +410,12 @@ impl Parser<'_> {
 	pub(super) async fn parse_live_stmt(&mut self, stk: &mut Stk) -> ParseResult<LiveStatement> {
 		expected!(self, t!("SELECT"));
 
-		let expr = match self.peek_kind() {
+		let (diff, fields) = match self.peek_kind() {
 			t!("DIFF") => {
 				self.pop_peek();
-				Fields::all()
+				(true, Fields::none())
 			}
-			_ => self.parse_fields(stk).await?,
+			_ => (false, self.parse_fields(stk).await?),
 		};
 		expected!(self, t!("FROM"));
 		let what = match self.peek().kind {
@@ -426,7 +426,8 @@ impl Parser<'_> {
 		let fetch = self.try_parse_fetch(stk).await?;
 
 		Ok(LiveStatement {
-			fields: expr,
+			fields,
+			diff,
 			what,
 			cond,
 			fetch,

@@ -4,7 +4,7 @@ use crate::api::context::InvocationContext;
 use crate::err::Error;
 use crate::fnc::args::Optional;
 
-pub fn max_body(context: &mut InvocationContext, (max_size,): (String,)) -> Result<()> {
+pub(crate) fn max_body(context: &mut InvocationContext, (max_size,): (String,)) -> Result<()> {
 	let bytesize = max_size.parse().map_err(|_| Error::InvalidArguments {
 		name: "max_body".to_string(),
 		message: "Argument 1 was the wrong type, expected bytes size string".to_string(),
@@ -13,7 +13,7 @@ pub fn max_body(context: &mut InvocationContext, (max_size,): (String,)) -> Resu
 	Ok(())
 }
 
-pub fn raw_body(
+pub(crate) fn raw_body(
 	context: &mut InvocationContext,
 	(Optional(raw),): (Optional<bool>,),
 ) -> Result<()> {

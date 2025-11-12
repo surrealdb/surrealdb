@@ -5,6 +5,7 @@ use std::sync::Arc;
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{
 	DatabaseDefinition, DatabaseId, Distance, Index, IndexDefinition, NamespaceId,
 };
@@ -18,7 +19,7 @@ use crate::idx::IndexKeyBase;
 use crate::idx::ft::MatchRef;
 use crate::idx::ft::fulltext::{FullTextIndex, QueryTerms, Scorer};
 use crate::idx::ft::highlighter::HighlightParams;
-use crate::idx::planner::checker::{HnswConditionChecker, MTreeConditionChecker};
+use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::planner::iterators::{
 	IndexCountThingIterator, IndexEqualThingIterator, IndexJoinThingIterator,
 	IndexRangeThingIterator, IndexUnionThingIterator, IteratorRecord, IteratorRef, KnnIterator,
@@ -34,9 +35,7 @@ use crate::idx::planner::plan::IndexOperator::Matches;
 use crate::idx::planner::plan::{IndexOperator, IndexOption, RangeValue};
 use crate::idx::planner::tree::{IdiomPosition, IndexReference};
 use crate::idx::planner::{IterationStage, ScanDirection};
-use crate::idx::trees::mtree::MTreeIndex;
 use crate::idx::trees::store::hnsw::SharedHnswIndex;
-use crate::kvs::TransactionType;
 use crate::val::{Array, Number, Object, RecordId, Value};
 
 pub(super) type KnnBruteForceEntry = (KnnPriorityList, Idiom, Arc<Vec<Number>>, Distance);
@@ -71,7 +70,6 @@ pub(crate) struct QueryExecutor(Arc<InnerQueryExecutor>);
 /// that will be used at execution time.
 enum PerIndexReferenceIndex {
 	FullText(FullTextIndex),
-	MTree(MTreeIndex),
 	Hnsw(SharedHnswIndex),
 }
 
@@ -79,7 +77,6 @@ enum PerIndexReferenceIndex {
 /// the prepared execution structure (per index type) used to iterate results.
 enum PerExpressionEntry {
 	FullText(FullTextEntry),
-	MTree(MtEntry),
 	Hnsw(HnswEntry),
 	KnnBruteForce(KnnBruteForceEntry),
 }
@@ -150,36 +147,31 @@ impl InnerQueryExecutor {
 			let index_reference = io.index_reference();
 			match &index_reference.index {
 				Index::FullText(p) => {
-					let fulltext_entry: Option<FullTextEntry> =
-						match ir_map.entry(index_reference.clone()) {
-							Entry::Occupied(e) => {
-								if let PerIndexReferenceIndex::FullText(fti) = e.get() {
-									FullTextEntry::new(stk, ctx, opt, fti, io).await?
-								} else {
-									None
-								}
+					let fulltext_entry: Option<FullTextEntry> = match ir_map
+						.entry(index_reference.clone())
+					{
+						Entry::Occupied(e) => {
+							if let PerIndexReferenceIndex::FullText(fti) = e.get() {
+								FullTextEntry::new(stk, ctx, opt, fti, io).await?
+							} else {
+								None
 							}
-							Entry::Vacant(e) => {
-								let ix: &IndexDefinition = e.key();
-								let ikb = IndexKeyBase::new(
-									db.namespace_id,
-									db.database_id,
-									&ix.table_name,
-									ix.index_id,
-								);
-								let ft = FullTextIndex::new(
-									opt.id()?,
-									ctx.get_index_stores(),
-									&ctx.tx(),
-									ikb,
-									p,
-								)
+						}
+						Entry::Vacant(e) => {
+							let ix: &IndexDefinition = e.key();
+							let ikb = IndexKeyBase::new(
+								db.namespace_id,
+								db.database_id,
+								&ix.table_name,
+								ix.index_id,
+							);
+							let ft = FullTextIndex::new(ctx.get_index_stores(), &ctx.tx(), ikb, p)
 								.await?;
-								let fte = FullTextEntry::new(stk, ctx, opt, &ft, io).await?;
-								e.insert(PerIndexReferenceIndex::FullText(ft));
-								fte
-							}
-						};
+							let fte = FullTextEntry::new(stk, ctx, opt, &ft, io).await?;
+							e.insert(PerIndexReferenceIndex::FullText(ft));
+							fte
+						}
+					};
 					if let Some(e) = fulltext_entry {
 						if let Matches(
 							_,
@@ -198,61 +190,6 @@ impl InnerQueryExecutor {
 							);
 						}
 						exp_entries.insert(exp, PerExpressionEntry::FullText(e));
-					}
-				}
-				Index::MTree(p) => {
-					if let IndexOperator::Knn(a, k) = io.op() {
-						let mte = match ir_map.entry(index_reference.clone()) {
-							Entry::Occupied(e) => {
-								if let PerIndexReferenceIndex::MTree(mti) = e.get() {
-									Some(
-										MtEntry::new(
-											db,
-											stk,
-											ctx,
-											opt,
-											mti,
-											a,
-											*k,
-											knn_condition.clone(),
-										)
-										.await?,
-									)
-								} else {
-									None
-								}
-							}
-							Entry::Vacant(e) => {
-								let ix: &IndexDefinition = e.key();
-								let ikb = IndexKeyBase::new(
-									db.namespace_id,
-									db.database_id,
-									&ix.table_name,
-									ix.index_id,
-								);
-								let tx = ctx.tx();
-								let mti =
-									MTreeIndex::new(&tx, ikb, p, TransactionType::Read, opt.id()?)
-										.await?;
-								drop(tx);
-								let entry = MtEntry::new(
-									db,
-									stk,
-									ctx,
-									opt,
-									&mti,
-									a,
-									*k,
-									knn_condition.clone(),
-								)
-								.await?;
-								e.insert(PerIndexReferenceIndex::MTree(mti));
-								Some(entry)
-							}
-						};
-						if let Some(mte) = mte {
-							exp_entries.insert(exp, PerExpressionEntry::MTree(mte));
-						}
 					}
 				}
 				Index::Hnsw(p) => {
@@ -279,12 +216,21 @@ impl InnerQueryExecutor {
 								}
 							}
 							Entry::Vacant(e) => {
+								let tb = ctx
+									.tx()
+									.expect_tb(
+										db.namespace_id,
+										db.database_id,
+										&index_reference.table_name,
+									)
+									.await?;
 								let hi = ctx
 									.get_index_stores()
 									.get_index_hnsw(
 										db.namespace_id,
 										db.database_id,
 										ctx,
+										tb.table_id,
 										index_reference,
 										p,
 									)
@@ -454,7 +400,6 @@ impl QueryExecutor {
 			Index::FullText {
 				..
 			} => self.new_fulltext_index_iterator(irf, io.clone()).await,
-			Index::MTree(_) => Ok(self.new_mtree_index_knn_iterator(irf)),
 			Index::Hnsw(_) => Ok(self.new_hnsw_index_ann_iterator(irf)),
 		}
 	}
@@ -724,16 +669,6 @@ impl QueryExecutor {
 		Ok(None)
 	}
 
-	fn new_mtree_index_knn_iterator(&self, ir: IteratorRef) -> Option<ThingIterator> {
-		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
-			if let Some(PerExpressionEntry::MTree(mte)) = self.0.exp_entries.get(exp) {
-				let it = KnnIterator::new(ir, mte.res.clone());
-				return Some(ThingIterator::Knn(it));
-			}
-		}
-		None
-	}
-
 	fn new_hnsw_index_ann_iterator(&self, ir: IteratorRef) -> Option<ThingIterator> {
 		if let Some(IteratorEntry::Single(Some(exp), ..)) = self.0.it_entries.get(ir) {
 			if let Some(PerExpressionEntry::Hnsw(he)) = self.0.exp_entries.get(exp) {
@@ -953,35 +888,6 @@ impl FullTextEntry {
 		} else {
 			Ok(None)
 		}
-	}
-}
-
-#[derive(Clone)]
-pub(super) struct MtEntry {
-	res: VecDeque<KnnIteratorResult>,
-}
-
-impl MtEntry {
-	#[expect(clippy::too_many_arguments)]
-	async fn new(
-		db: &DatabaseDefinition,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		mt: &MTreeIndex,
-		o: &[Number],
-		k: u32,
-		cond: Option<Arc<Cond>>,
-	) -> Result<Self> {
-		let cond_checker = if let Some(cond) = cond {
-			MTreeConditionChecker::new_cond(ctx, opt, cond, mt.get_ikb().clone())
-		} else {
-			MTreeConditionChecker::new(ctx, mt.get_ikb().clone())
-		};
-		let res = mt.knn_search(db, stk, ctx, o, k as usize, cond_checker).await?;
-		Ok(Self {
-			res,
-		})
 	}
 }
 

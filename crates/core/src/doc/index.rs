@@ -18,14 +18,13 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::{DatabaseDefinition, IndexDefinition};
+use crate::catalog::{DatabaseDefinition, IndexDefinition, TableDefinition};
 use crate::ctx::Context;
-use crate::dbs::{Force, Options, Statement};
+use crate::dbs::{Force, Options};
 use crate::doc::{CursorDoc, Document};
 use crate::expr::FlowResultExt as _;
 use crate::idx::index::IndexOperation;
-#[cfg(not(target_family = "wasm"))]
-use crate::kvs::ConsumeResult;
+use crate::kvs::index::ConsumeResult;
 use crate::val::{RecordId, Value};
 
 impl Document {
@@ -34,25 +33,16 @@ impl Document {
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
-		_stm: &Statement<'_>,
 	) -> Result<()> {
-		// Was this force targeted at a specific index?
-		let targeted_force = matches!(opt.force, Force::Index(_));
 		// Collect indexes or skip
 		let ixs = match &opt.force {
-			Force::Index(ix)
-				if ix.first().is_some_and(|ix| {
-					self.id.as_ref().is_some_and(|id| ix.table_name.as_str() == id.table)
-				}) =>
-			{
-				ix.clone()
-			}
 			Force::All => self.ix(ctx, opt).await?,
 			_ if self.changed() => self.ix(ctx, opt).await?,
 			_ => return Ok(()),
 		};
 		// Check if the table is a view
-		if self.tb(ctx, opt).await?.drop {
+		let tb = self.tb(ctx, opt).await?;
+		if tb.drop {
 			return Ok(());
 		}
 
@@ -69,8 +59,8 @@ impl Document {
 			let n = Self::build_opt_values(stk, ctx, opt, ix, &self.current).await?;
 
 			// Update the index entries
-			if targeted_force || o != n {
-				Self::one_index(&db, stk, ctx, opt, ix, o, n, &rid).await?;
+			if o != n {
+				Self::one_index(&db, &tb, stk, ctx, opt, ix, o, n, &rid).await?;
 			}
 		}
 		// Carry on
@@ -80,6 +70,7 @@ impl Document {
 	#[allow(clippy::too_many_arguments)]
 	async fn one_index(
 		db: &DatabaseDefinition,
+		tb: &TableDefinition,
 		stk: &mut Stk,
 		ctx: &Context,
 		opt: &Options,
@@ -88,7 +79,6 @@ impl Document {
 		n: Option<Vec<Value>>,
 		rid: &RecordId,
 	) -> Result<()> {
-		#[cfg(not(target_family = "wasm"))]
 		let (o, n) = if let Some(ib) = ctx.get_index_builder() {
 			match ib.consume(db, ctx, ix, o, n, rid).await? {
 				// The index builder consumed the value, which means it is currently building the
@@ -103,7 +93,17 @@ impl Document {
 		};
 
 		// Store all the variables and parameters required by the index operation
-		let mut ic = IndexOperation::new(ctx, opt, db.namespace_id, db.database_id, ix, o, n, rid);
+		let mut ic = IndexOperation::new(
+			ctx,
+			opt,
+			db.namespace_id,
+			db.database_id,
+			tb.table_id,
+			ix,
+			o,
+			n,
+			rid,
+		);
 		// Keep track of compaction requests, we need to trigger them after the index operation
 		let mut require_compaction = false;
 		// Execute the index operation

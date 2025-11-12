@@ -3,10 +3,9 @@ use std::time::Duration;
 
 use anyhow::Result;
 use helpers::{new_ds, skip_ok};
-use surrealdb_core::dbs::{Action, Session, Variables};
-use surrealdb_core::expr::Kind;
+use surrealdb_core::dbs::Session;
 use surrealdb_core::syn;
-use surrealdb_core::val::RecordId;
+use surrealdb_types::{Action, Kind, RecordId, Value, vars};
 
 #[tokio::test]
 async fn live_permissions() -> Result<()> {
@@ -41,7 +40,7 @@ async fn live_permissions() -> Result<()> {
 		"test",
 		"test",
 		"test",
-		RecordId::new("user".to_owned(), "test".to_owned()).into(),
+		Value::RecordId(RecordId::new("user".to_owned(), "test".to_owned())),
 	)
 	.with_rt(true);
 	let sql = "
@@ -90,7 +89,7 @@ async fn live_document_reduction() -> Result<()> {
 		"test",
 		"test",
 		"test",
-		RecordId::new("user".to_owned(), "test".to_owned()).into(),
+		Value::RecordId(RecordId::new("user".to_owned(), "test".to_owned())),
 	)
 	.with_rt(true);
 
@@ -111,7 +110,7 @@ async fn live_document_reduction() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses_record, None).await?;
 	assert_eq!(res.len(), 1);
 	let lqid = res.remove(0).result?;
-	assert_eq!(lqid.kind(), Some(Kind::Uuid));
+	assert_eq!(lqid.kind(), Kind::Uuid);
 
 	////////////////////////////////////////////////////////////
 
@@ -207,9 +206,7 @@ async fn live_document_reduction() -> Result<()> {
 
 	// Kill the live query
 	let sql = "KILL $uuid";
-	let res = &mut dbs
-		.execute(sql, &ses_owner, Some(Variables(map!("uuid".to_string() => lqid))))
-		.await?;
+	let res = &mut dbs.execute(sql, &ses_owner, Some(vars! { uuid: lqid })).await?;
 	assert_eq!(res.len(), 1);
 	skip_ok(res, 1)?;
 
@@ -222,7 +219,7 @@ async fn live_document_reduction() -> Result<()> {
 	let res = &mut dbs.execute(sql, &ses_record, None).await?;
 	assert_eq!(res.len(), 1);
 	let lqid = res.remove(0).result?;
-	assert_eq!(lqid.kind(), Some(Kind::Uuid));
+	assert_eq!(lqid.kind(), Kind::Uuid);
 
 	////////////////////////////////////////////////////////////
 
@@ -252,5 +249,58 @@ async fn live_document_reduction() -> Result<()> {
 	////////////////////////////////////////////////////////////
 
 	// Test passed!
+	Ok(())
+}
+
+#[tokio::test]
+async fn test_live_with_variables() -> Result<()> {
+	let dbs = new_ds().await?.with_auth_enabled(true).with_notifications();
+	let Some(channel) = dbs.notifications() else {
+		unreachable!("No notification channel");
+	};
+
+	// Setup
+	let ses = Session::owner().with_ns("test").with_db("test").with_rt(true);
+	let sql = "
+		DEFINE TABLE test;
+		DEFINE FIELD num ON test TYPE number;
+	";
+
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 2);
+	skip_ok(res, 2)?;
+
+	// Start live query
+	let sql = "LIVE SELECT * FROM test WHERE num = $num;";
+	let res = &mut dbs.execute(sql, &ses, Some(vars!("num": 123))).await?;
+	assert_eq!(res.len(), 1);
+	let lqid = res.remove(0).result?;
+	assert_eq!(lqid.kind(), Kind::Uuid);
+
+	// Triggers notification
+	let sql = "CREATE test:1 SET num = 123;";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	skip_ok(res, 1)?;
+
+	// Does not trigger notification
+	let sql = "UPDATE test:1 SET num = 456;";
+	let res = &mut dbs.execute(sql, &ses, None).await?;
+	assert_eq!(res.len(), 1);
+	skip_ok(res, 1)?;
+
+	// Kill live query
+	let sql = "KILL $uuid";
+	let res = &mut dbs.execute(sql, &ses, Some(vars!("uuid": lqid))).await?;
+	assert_eq!(res.len(), 1);
+	skip_ok(res, 1)?;
+
+	// Receive notification
+	let tmp = channel.recv().await?;
+	assert_eq!(tmp.action, Action::Create);
+	assert_eq!(tmp.result, syn::value("{ id: test:1, num: 123 }")?);
+	let tmp = channel.recv().await?;
+	assert_eq!(tmp.action, Action::Killed);
+
 	Ok(())
 }

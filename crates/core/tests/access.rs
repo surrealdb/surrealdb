@@ -3,15 +3,13 @@
 mod helpers;
 use helpers::new_ds;
 use regex::Regex;
-use surrealdb_core::dbs::capabilities::ExperimentalTarget;
-use surrealdb_core::dbs::{Capabilities, Session};
+use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::{Level, Role};
-use surrealdb_core::sql::Base;
-use surrealdb_core::val::Array;
+use surrealdb_types::{Array, ToSql, Value};
 use tokio::time::Duration;
 
 struct TestLevel {
-	base: Base,
+	base: String,
 	ns: Option<&'static str>,
 	db: Option<&'static str>,
 }
@@ -20,17 +18,17 @@ struct TestLevel {
 async fn access_bearer_grant() {
 	let test_levels = vec![
 		TestLevel {
-			base: Base::Root,
+			base: "ROOT".to_string(),
 			ns: None,
 			db: None,
 		},
 		TestLevel {
-			base: Base::Ns,
+			base: "NAMESPACE".to_string(),
 			ns: Some("test"),
 			db: None,
 		},
 		TestLevel {
-			base: Base::Db,
+			base: "DATABASE".to_string(),
 			ns: Some("test"),
 			db: Some("test"),
 		},
@@ -54,13 +52,12 @@ async fn access_bearer_grant() {
 			ACCESS srv GRANT FOR RECORD user:tobie;
 		"
 		);
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
-		let ses = match level.base {
-			Base::Root => Session::owner(),
-			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
-			Base::Db => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
+		let dbs = new_ds().await.unwrap();
+		let ses = match level.base.as_str() {
+			"ROOT" => Session::owner(),
+			"NAMESPACE" => Session::owner().with_ns(level.ns.unwrap()),
+			"DATABASE" => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
+			_ => panic!("Unsupported level"),
 		};
 		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 		assert_eq!(res.len(), 8);
@@ -68,20 +65,18 @@ async fn access_bearer_grant() {
 		res.remove(0).result.unwrap();
 		res.remove(0).result.unwrap();
 		//
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok =
-			Regex::new(r"\{ ac: 'srv', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
-					.unwrap();
+			Regex::new(r"\{ ac: 'srv', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}") 					.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		//
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok =
-			Regex::new(r"\{ ac: 'srv', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
-					.unwrap();
+			Regex::new(r"\{ ac: 'srv', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}") 					.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		//
 		let tmp = res.remove(0).result.unwrap_err();
-		let expected = if matches!(level.base, Base::Root) {
+		let expected = if level.base == "ROOT" {
 			"The root user 'jaime' does not exist".to_string()
 		} else {
 			format!(
@@ -92,7 +87,7 @@ async fn access_bearer_grant() {
 		assert_eq!(tmp.to_string(), expected);
 		//
 		let tmp = res.remove(0).result.unwrap_err();
-		let expected = if matches!(level.base, Base::Root) {
+		let expected = if level.base == "ROOT" {
 			"The root user 'jaime' does not exist".to_string()
 		} else {
 			format!(
@@ -103,20 +98,20 @@ async fn access_bearer_grant() {
 		assert_eq!(tmp.to_string(), expected);
 		//
 		let tmp = res.remove(0).result.unwrap_err();
-		if let Base::Db = level.base {
+		if level.base == "DATABASE" {
 			assert_eq!(tmp.to_string(), "This access grant has an invalid subject");
 		} else {
 			assert_eq!(tmp.to_string(), "Specify a database to use");
 		}
 		//
 		let tmp = res.remove(0).result.unwrap_err();
-		if let Base::Db = level.base {
+		if level.base == "DATABASE" {
 			assert_eq!(tmp.to_string(), "This access grant has an invalid subject");
 		} else {
 			assert_eq!(tmp.to_string(), "Specify a database to use");
 		}
 		//
-		if let Base::Db = level.base {
+		if level.base == "DATABASE" {
 			let sql = format!(
 				"
 				-- Initial setup on database
@@ -138,28 +133,24 @@ async fn access_bearer_grant() {
 			res.remove(0).result.unwrap();
 			res.remove(0).result.unwrap();
 			//
-			let tmp = res.remove(0).result.unwrap().to_string();
+			let tmp = res.remove(0).result.unwrap().to_sql();
 			let ok =
-				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:tobie \}, type: 'bearer' \}")
-						.unwrap();
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:tobie \}, type: 'bearer' \}") 						.unwrap();
 			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 			//
-			let tmp = res.remove(0).result.unwrap().to_string();
+			let tmp = res.remove(0).result.unwrap().to_sql();
 			let ok =
-				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:tobie \}, type: 'bearer' \}")
-						.unwrap();
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:tobie \}, type: 'bearer' \}") 						.unwrap();
 			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 			//
-			let tmp = res.remove(0).result.unwrap().to_string();
+			let tmp = res.remove(0).result.unwrap().to_sql();
 			let ok =
-				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:jaime \}, type: 'bearer' \}")
-						.unwrap();
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:jaime \}, type: 'bearer' \}") 						.unwrap();
 			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 			//
-			let tmp = res.remove(0).result.unwrap().to_string();
+			let tmp = res.remove(0).result.unwrap().to_sql();
 			let ok =
-				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:jaime \}, type: 'bearer' \}")
-						.unwrap();
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:jaime \}, type: 'bearer' \}") 						.unwrap();
 			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 			//
 			let tmp = res.remove(0).result.unwrap_err();
@@ -175,24 +166,24 @@ async fn access_bearer_grant() {
 async fn access_bearer_revoke() {
 	let test_levels = vec![
 		TestLevel {
-			base: Base::Root,
+			base: "ROOT".to_string(),
 			ns: None,
 			db: None,
 		},
 		TestLevel {
-			base: Base::Ns,
+			base: "NAMESPACE".to_string(),
 			ns: Some("test"),
 			db: None,
 		},
 		TestLevel {
-			base: Base::Db,
+			base: "DATABASE".to_string(),
 			ns: Some("test"),
 			db: Some("test"),
 		},
 	];
 
 	for level in &test_levels {
-		let base = level.base.to_string();
+		let base = level.base.clone();
 		println!("Test level: {}", base);
 		let sql = format!(
 			r"
@@ -206,13 +197,12 @@ async fn access_bearer_revoke() {
 			ACCESS srv ON {base} GRANT FOR USER jaime;
 		"
 		);
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
-		let ses = match level.base {
-			Base::Root => Session::owner(),
-			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
-			Base::Db => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
+		let dbs = new_ds().await.unwrap();
+		let ses = match level.base.as_str() {
+			"ROOT" => Session::owner(),
+			"NAMESPACE" => Session::owner().with_ns(level.ns.unwrap()),
+			"DATABASE" => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
+			_ => panic!("Unsupported level"),
 		};
 		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 		// Consume the results of the setup statements
@@ -220,10 +210,9 @@ async fn access_bearer_revoke() {
 		res.remove(0).result.unwrap();
 		res.remove(0).result.unwrap();
 		// Retrieve the first generated bearer grant
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let re =
-			Regex::new(r"\{ ac: 'srv', creation: .*?, expiration: .*, grant: \{ id: '(.*?)', key: .*? \}, id: .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
-					.unwrap();
+			Regex::new(r"\{ ac: 'srv', creation: .*?, expiration: .*, grant: \{ id: '(.*?)', key: .*? \}, id: .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}") 					.unwrap();
 		let kid = &re.captures(&tmp).unwrap()[1];
 		// Consume the results of the other three
 		res.remove(0).result.unwrap();
@@ -232,7 +221,7 @@ async fn access_bearer_revoke() {
 		// Revoke the first bearer grant
 		let res =
 			&mut dbs.execute(&format!("ACCESS srv REVOKE GRANT {kid}"), &ses, None).await.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok = Regex::new(r"\{ ac: 'srv', .*?, revocation: d'.*?', .*? \}").unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Attempt to revoke the first bearer grant again
@@ -245,7 +234,7 @@ async fn access_bearer_revoke() {
 			.execute("ACCESS srv SHOW WHERE revocation IS NOT NONE", &ses, None)
 			.await
 			.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok = Regex::new(&format!(
 			r"\[\{{ ac: 'srv', .*?, id: '{kid}', revocation: d'.*?', .*? \}}\]"
 		))
@@ -256,7 +245,7 @@ async fn access_bearer_revoke() {
 			.execute("ACCESS srv REVOKE WHERE subject.user = 'jaime'", &ses, None)
 			.await
 			.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok = Regex::new(
 			r"\[\{ ac: 'srv', .*?, revocation: d'.*?', subject: \{ user: 'jaime' \}, type: 'bearer' \}\]",
 		)
@@ -264,20 +253,19 @@ async fn access_bearer_revoke() {
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Revoke the rest of the bearer grants
 		let res = &mut dbs.execute("ACCESS srv REVOKE ALL", &ses, None).await.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok = Regex::new(
-			r"\[\{ ac: 'srv', .*?, revocation: d'.*?', .*? \}, \{ ac: 'srv', .*?, revocation: d'.*?', .*? \}\]",
-		)
+			r"\[\{ ac: 'srv', .*?, revocation: d'.*?', .*? \}, \{ ac: 'srv', .*?, revocation: d'.*?', .*? \}\]", 		)
 		.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Ensure that all bearer grants are now revoked
 		let res =
 			&mut dbs.execute("ACCESS srv SHOW WHERE revocation IS NONE", &ses, None).await.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok = Regex::new(r"\[\]").unwrap();
 
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
-		if let Base::Db = level.base {
+		if level.base == "DATABASE" {
 			let sql = format!(
 				"
 				-- Initial setup on database
@@ -297,16 +285,14 @@ async fn access_bearer_revoke() {
 			res.remove(0).result.unwrap();
 			res.remove(0).result.unwrap();
 			//
-			let tmp = res.remove(0).result.unwrap().to_string();
+			let tmp = res.remove(0).result.unwrap().to_sql();
 			let ok =
-				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: d'.*?', subject: \{ record: user:tobie \}, type: 'bearer' \}")
-						.unwrap();
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: d'.*?', subject: \{ record: user:tobie \}, type: 'bearer' \}") 						.unwrap();
 			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 			//
-			let tmp = res.remove(0).result.unwrap().to_string();
+			let tmp = res.remove(0).result.unwrap().to_sql();
 			let ok =
-				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: d'.*?', subject: \{ record: user:jaime \}, type: 'bearer' \}")
-						.unwrap();
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: d'.*?', subject: \{ record: user:jaime \}, type: 'bearer' \}") 						.unwrap();
 			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		}
 	}
@@ -316,24 +302,24 @@ async fn access_bearer_revoke() {
 async fn access_bearer_show() {
 	let test_levels = vec![
 		TestLevel {
-			base: Base::Root,
+			base: "ROOT".to_string(),
 			ns: None,
 			db: None,
 		},
 		TestLevel {
-			base: Base::Ns,
+			base: "NAMESPACE".to_string(),
 			ns: Some("test"),
 			db: None,
 		},
 		TestLevel {
-			base: Base::Db,
+			base: "DATABASE".to_string(),
 			ns: Some("test"),
 			db: Some("test"),
 		},
 	];
 
 	for level in &test_levels {
-		let base = level.base.to_string();
+		let base = level.base.clone();
 		println!("Test level: {}", base);
 		let sql = format!(
 			r"
@@ -347,13 +333,12 @@ async fn access_bearer_show() {
 			ACCESS srv ON {base} GRANT FOR USER jaime;
 		"
 		);
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
-		let ses = match level.base {
-			Base::Root => Session::owner(),
-			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
-			Base::Db => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
+		let dbs = new_ds().await.unwrap();
+		let ses = match level.base.as_str() {
+			"ROOT" => Session::owner(),
+			"NAMESPACE" => Session::owner().with_ns(level.ns.unwrap()),
+			"DATABASE" => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
+			_ => panic!("Unsupported level"),
 		};
 		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 		// Consume the results of the setup statements
@@ -361,10 +346,9 @@ async fn access_bearer_show() {
 		res.remove(0).result.unwrap();
 		res.remove(0).result.unwrap();
 		// Retrieve the first generated bearer grant
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let re =
-			Regex::new(r"\{ ac: 'srv', creation: .*?, expiration: .*, grant: \{ id: '(.*?)', key: .*? \}, id: .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
-					.unwrap();
+			Regex::new(r"\{ ac: 'srv', creation: .*?, expiration: .*, grant: \{ id: '(.*?)', key: .*? \}, id: .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}") 					.unwrap();
 		let kid = &re.captures(&tmp).unwrap()[1];
 		// Consume the results of the other three
 		res.remove(0).result.unwrap();
@@ -373,7 +357,7 @@ async fn access_bearer_show() {
 		// Revoke the first bearer grant
 		let res =
 			&mut dbs.execute(&format!("ACCESS srv REVOKE GRANT {kid}"), &ses, None).await.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok = Regex::new(r"\{ ac: 'srv', .*?, revocation: d'.*?', .*? \}").unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Show a specific bearer grant
@@ -381,10 +365,9 @@ async fn access_bearer_show() {
 			.execute(&format!("ACCESS srv SHOW WHERE grant.id = '{kid}'"), &ses, None)
 			.await
 			.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok = Regex::new(&format!(
-			r"\[\{{ ac: 'srv', .*?, grant: \{{ id: '{kid}', key: '\[REDACTED\]' \}}, id: '{kid}', revocation: d'.*?', subject: \{{ user: 'tobie' \}}, type: 'bearer' \}}\]",
-		))
+			r"\[\{{ ac: 'srv', .*?, grant: \{{ id: '{kid}', key: '\[REDACTED\]' \}}, id: '{kid}', revocation: d'.*?', subject: \{{ user: 'tobie' \}}, type: 'bearer' \}}\]", 		))
 		.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Show all bearer grants for a specific user
@@ -392,7 +375,7 @@ async fn access_bearer_show() {
 			.execute("ACCESS srv SHOW WHERE subject.user = 'jaime'", &ses, None)
 			.await
 			.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok = Regex::new(
 			r"\[\{ ac: 'srv', .*?, revocation: NONE, subject: \{ user: 'jaime' \}, type: 'bearer' \}\]",
 		)
@@ -407,10 +390,9 @@ async fn access_bearer_show() {
 			)
 			.await
 			.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok = Regex::new(
-			r"\[\{ ac: 'srv', .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}, \{ ac: 'srv', .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}\]",
-		)
+			r"\[\{ ac: 'srv', .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}, \{ ac: 'srv', .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}\]", 		)
 		.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Show all revoked bearer grants
@@ -418,10 +400,9 @@ async fn access_bearer_show() {
 			.execute("ACCESS srv SHOW WHERE revocation IS NOT NONE", &ses, None)
 			.await
 			.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok = Regex::new(&format!(
-			r"\[\{{ ac: 'srv', .*?, grant: \{{ id: '{kid}', key: '\[REDACTED\]' \}}, id: '{kid}', revocation: d'.*?', subject: \{{ user: 'tobie' \}}, type: 'bearer' \}}\]",
-		))
+			r"\[\{{ ac: 'srv', .*?, grant: \{{ id: '{kid}', key: '\[REDACTED\]' \}}, id: '{kid}', revocation: d'.*?', subject: \{{ user: 'tobie' \}}, type: 'bearer' \}}\]", 		))
 		.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Show all active bearer grants
@@ -433,13 +414,13 @@ async fn access_bearer_show() {
 			)
 			.await
 			.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok = Regex::new(
 			r"\[\{ ac: 'srv', .*?, revocation: NONE, subject: \{ user: '(tobie|jaime)' \}, type: 'bearer' \}, \{ ac: 'srv', .*?, revocation: NONE, subject: \{ user: '(tobie|jaime)' \}, type: 'bearer' \}, \{ ac: 'srv', .*?, revocation: NONE, subject: \{ user: '(tobie|jaime)' \}, type: 'bearer' \}\]",
 		)
 		.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
-		if let Base::Db = level.base {
+		if level.base == "DATABASE" {
 			let sql = format!(
 				"
 				-- Initial setup on database
@@ -459,16 +440,14 @@ async fn access_bearer_show() {
 			res.remove(0).result.unwrap();
 			res.remove(0).result.unwrap();
 			//
-			let tmp = res.remove(0).result.unwrap().to_string();
+			let tmp = res.remove(0).result.unwrap().to_sql();
 			let ok =
-				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:tobie \}, type: 'bearer' \}")
-						.unwrap();
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:tobie \}, type: 'bearer' \}") 						.unwrap();
 			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 			//
-			let tmp = res.remove(0).result.unwrap().to_string();
+			let tmp = res.remove(0).result.unwrap().to_sql();
 			let ok =
-				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:jaime \}, type: 'bearer' \}")
-						.unwrap();
+				Regex::new(r"\{ ac: 'api', creation: .*, expiration: .*, grant: \{ .* \}, id: .*, revocation: NONE, subject: \{ record: user:jaime \}, type: 'bearer' \}") 						.unwrap();
 			assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		}
 	}
@@ -478,24 +457,24 @@ async fn access_bearer_show() {
 async fn access_bearer_purge() {
 	let test_levels = vec![
 		TestLevel {
-			base: Base::Root,
+			base: "ROOT".to_string(),
 			ns: None,
 			db: None,
 		},
 		TestLevel {
-			base: Base::Ns,
+			base: "NAMESPACE".to_string(),
 			ns: Some("test"),
 			db: None,
 		},
 		TestLevel {
-			base: Base::Db,
+			base: "DATABASE".to_string(),
 			ns: Some("test"),
 			db: Some("test"),
 		},
 	];
 
 	for level in &test_levels {
-		let base = level.base.to_string();
+		let base = level.base.clone();
 		println!("Test level: {}", base);
 		let sql = format!(
 			r"
@@ -511,13 +490,12 @@ async fn access_bearer_purge() {
 			ACCESS srv ON {base} GRANT FOR USER jaime;
 		"
 		);
-		let dbs = new_ds().await.unwrap().with_capabilities(
-			Capabilities::default().with_experimental(ExperimentalTarget::BearerAccess.into()),
-		);
-		let ses = match level.base {
-			Base::Root => Session::owner(),
-			Base::Ns => Session::owner().with_ns(level.ns.unwrap()),
-			Base::Db => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
+		let dbs = new_ds().await.unwrap();
+		let ses = match level.base.as_str() {
+			"ROOT" => Session::owner(),
+			"NAMESPACE" => Session::owner().with_ns(level.ns.unwrap()),
+			"DATABASE" => Session::owner().with_ns(level.ns.unwrap()).with_db(level.db.unwrap()),
+			_ => panic!("Unsupported level"),
 		};
 		let res = &mut dbs.execute(&sql, &ses, None).await.unwrap();
 		// Consume the results of the setup statements
@@ -525,10 +503,9 @@ async fn access_bearer_purge() {
 		res.remove(0).result.unwrap();
 		res.remove(0).result.unwrap();
 		// Retrieve the first generated bearer grant
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let re =
-			Regex::new(r"\{ ac: 'srv', creation: .*?, expiration: d'.*?', grant: \{ id: '(.*?)', key: .*? \}, id: .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}")
-					.unwrap();
+			Regex::new(r"\{ ac: 'srv', creation: .*?, expiration: d'.*?', grant: \{ id: '(.*?)', key: .*? \}, id: .*?, revocation: NONE, subject: \{ user: 'tobie' \}, type: 'bearer' \}") 					.unwrap();
 		let kid = &re.captures(&tmp).unwrap()[1];
 		// Consume the results of the other three
 		res.remove(0).result.unwrap();
@@ -539,7 +516,7 @@ async fn access_bearer_purge() {
 		// Revoke the first bearer grant
 		let res =
 			&mut dbs.execute(&format!("ACCESS srv REVOKE GRANT {kid}"), &ses, None).await.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok =
 			Regex::new(&format!(r"\{{ ac: 'srv', .*?, id: '{kid}', revocation: d'.*?', .*? \}}"))
 				.unwrap();
@@ -547,7 +524,7 @@ async fn access_bearer_purge() {
 		// Show revoked bearer grant
 		let res =
 			&mut dbs.execute(&format!("ACCESS srv SHOW GRANT {kid}"), &ses, None).await.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok =
 			Regex::new(&format!(r"\{{ ac: 'srv', .*?, id: '{kid}', revocation: d'.*?', .*? \}}"))
 				.unwrap();
@@ -556,7 +533,7 @@ async fn access_bearer_purge() {
 		std::thread::sleep(Duration::from_secs(1));
 		// Purge revoked bearer grants
 		let res = &mut dbs.execute("ACCESS srv PURGE REVOKED", &ses, None).await.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok = Regex::new(&format!(
 			r"\[\{{ ac: 'srv', .*?, id: '{kid}', revocation: d'.*?', .*? \}}\]"
 		))
@@ -564,39 +541,36 @@ async fn access_bearer_purge() {
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Ensure that only that bearer grant is purged
 		let res = &mut dbs.execute("ACCESS srv SHOW ALL", &ses, None).await.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
-		let ok = Regex::new(r"\[\{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}\]")
-		.unwrap();
+		let tmp = res.remove(0).result.unwrap().to_sql();
+		let ok = Regex::new(r"\[\{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}\]") 		.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Purge expired grants, of which there are none
 		let res = &mut dbs.execute("ACCESS srv PURGE EXPIRED", &ses, None).await.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok = Regex::new(r"\[\]").unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Wait for all grants to expire
 		std::thread::sleep(Duration::from_secs(2));
 		// Purge grants expired for 2 seconds
 		let res = &mut dbs.execute("ACCESS srv PURGE EXPIRED FOR 2s", &ses, None).await.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok = Regex::new(r"\[\]").unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Ensure that no grants have been purged
 		let res = &mut dbs.execute("ACCESS srv SHOW ALL", &ses, None).await.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
-		let ok = Regex::new(r"\[\{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}\]")
-		.unwrap();
+		let tmp = res.remove(0).result.unwrap().to_sql();
+		let ok = Regex::new(r"\[\{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}\]") 		.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Wait for grants to be expired for 2 seconds
 		std::thread::sleep(Duration::from_secs(2));
 		// Purge grants expired for 2 seconds
 		let res = &mut dbs.execute("ACCESS srv PURGE EXPIRED FOR 2s", &ses, None).await.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
-		let ok = Regex::new(r"\[\{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}\]")
-		.unwrap();
+		let tmp = res.remove(0).result.unwrap().to_sql();
+		let ok = Regex::new(r"\[\{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}, \{ ac: 'srv', .*? \}\]") 		.unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 		// Ensure that all grants have been purged
 		let res = &mut dbs.execute("ACCESS srv SHOW ALL", &ses, None).await.unwrap();
-		let tmp = res.remove(0).result.unwrap().to_string();
+		let tmp = res.remove(0).result.unwrap().to_sql();
 		let ok = Regex::new(r"\[\]").unwrap();
 		assert!(ok.is_match(&tmp), "Output '{}' doesn't match regex '{}'", tmp, ok);
 	}
@@ -608,12 +582,12 @@ async fn access_bearer_purge() {
 
 #[tokio::test]
 async fn permissions_access_grant() {
-	let test_levels = vec![Base::Root, Base::Ns, Base::Db];
+	let test_levels = vec!["ROOT", "NAMESPACE", "DATABASE"];
 	let level_ns = Level::Namespace("NS".to_owned());
 	let level_db = Level::Database("NS".to_owned(), "DB".to_owned());
 
 	for level in &test_levels {
-		let base = level.to_string();
+		let base = (*level).to_string();
 		println!("Test level: {}", base);
 
 		let tests = vec![
@@ -637,25 +611,26 @@ async fn permissions_access_grant() {
 				"viewer at root level should not be able to issue a grant",
 			),
 			// Namespace level
-			match level {
-				Base::Db => (
+			match *level {
+				"DATABASE" => (
 					(level_ns.clone(), Role::Owner),
 					("NS", "DB"),
 					true,
 					"owner at namespace level should be able to issue a grant on its namespace",
 				),
-				Base::Ns => (
+				"NAMESPACE" => (
 					(level_ns.clone(), Role::Owner),
 					("NS", "DB"),
 					true,
 					"owner at namespace level should be able to issue a grant on its namespace",
 				),
-				Base::Root => (
+				"ROOT" => (
 					(level_ns.clone(), Role::Owner),
 					("NS", "DB"),
 					false,
 					"owner at namespace level should not be able to issue a grant on its namespace",
 				),
+				_ => panic!("Unsupported level"),
 			},
 			(
 				(level_ns.clone(), Role::Owner),
@@ -688,25 +663,26 @@ async fn permissions_access_grant() {
 				"viewer at namespace level should not be able to issue a grant on another namespace",
 			),
 			// Database level
-			match level {
-				Base::Db => (
+			match *level {
+				"DATABASE" => (
 					(level_db.clone(), Role::Owner),
 					("NS", "DB"),
 					true,
 					"owner at database level should be able to issue a grant on its database",
 				),
-				Base::Ns => (
+				"NAMESPACE" => (
 					(level_db.clone(), Role::Owner),
 					("NS", "DB"),
 					false,
 					"owner at database level should not be able to issue a grant on its database",
 				),
-				Base::Root => (
+				"ROOT" => (
 					(level_db.clone(), Role::Owner),
 					("NS", "DB"),
 					false,
 					"owner at database level should not be able to issue a grant on its database",
 				),
+				_ => panic!("Unsupported level"),
 			},
 			(
 				(level_db.clone(), Role::Owner),
@@ -718,8 +694,8 @@ async fn permissions_access_grant() {
 				(level_db.clone(), Role::Owner),
 				("OTHER_NS", "DB"),
 				false,
-				"owner at database level should not be able to issue a grant on another namespace even if the database name matches",
-			),
+				"owner at database level should not be able to issue a grant on another namespace even if the
+database name matches", 			),
 			(
 				(level_db.clone(), Role::Editor),
 				("NS", "DB"),
@@ -736,8 +712,8 @@ async fn permissions_access_grant() {
 				(level_db.clone(), Role::Editor),
 				("OTHER_NS", "DB"),
 				false,
-				"editor at database level should not be able to issue a grant on another namespace even if the database name matches",
-			),
+				"editor at database level should not be able to issue a grant on another namespace even if
+the database name matches", 			),
 			(
 				(level_db.clone(), Role::Viewer),
 				("NS", "DB"),
@@ -754,37 +730,33 @@ async fn permissions_access_grant() {
 				(level_db.clone(), Role::Viewer),
 				("OTHER_NS", "DB"),
 				false,
-				"viewer at database level should not be able to issue a grant on another namespace even if the database name matches",
-			),
+				"viewer at database level should not be able to issue a grant on another namespace even if
+the database name matches", 			),
 		];
 		let statement = format!("ACCESS api ON {base} GRANT FOR USER tobie");
 
 		let test_level = level;
 		for ((level, role), (ns, db), should_succeed, msg) in tests.into_iter() {
 			let sess = Session::for_level(level, role).with_ns(ns).with_db(db);
-			let sess_setup = match test_level {
-				Base::Root => {
-					Session::for_level(Level::Root, Role::Owner).with_ns("NS").with_db("DB")
-				}
-				Base::Ns => Session::for_level(Level::Namespace("NS".to_owned()), Role::Owner)
+			let sess_setup = match *test_level {
+				"ROOT" => Session::for_level(Level::Root, Role::Owner).with_ns("NS").with_db("DB"),
+				"NAMESPACE" => Session::for_level(Level::Namespace("NS".to_owned()), Role::Owner)
 					.with_ns("NS")
 					.with_db("DB"),
-				Base::Db => Session::for_level(
+				"DATABASE" => Session::for_level(
 					Level::Database("NS".to_owned(), "DB".to_owned()),
 					Role::Owner,
 				)
 				.with_ns("NS")
 				.with_db("DB"),
+				_ => panic!("Unsupported level"),
 			};
 			let statement_setup = format!(
 				"DEFINE ACCESS api ON {base} TYPE BEARER FOR USER; DEFINE USER tobie ON {base} ROLES OWNER"
 			);
 
 			{
-				let ds = new_ds().await.unwrap().with_auth_enabled(true).with_capabilities(
-					Capabilities::default()
-						.with_experimental(ExperimentalTarget::BearerAccess.into()),
-				);
+				let ds = new_ds().await.unwrap().with_auth_enabled(true);
 
 				let mut resp = ds.execute(&statement_setup, &sess_setup, None).await.unwrap();
 				let res = resp.remove(0).output();
@@ -797,7 +769,7 @@ async fn permissions_access_grant() {
 
 				if should_succeed {
 					assert!(res.is_ok(), "{}: {:?}", msg, res);
-					assert_ne!(res.unwrap(), Array::new().into(), "{}", msg);
+					assert_ne!(res.unwrap(), Value::Array(Array::new()), "{}", msg);
 				} else {
 					let err = res.unwrap_err().to_string();
 					assert!(

@@ -57,7 +57,7 @@ pub async fn all(
 		Some(Value::Closure(closure)) => {
 			if let Some(opt) = opt {
 				for arg in array.into_iter() {
-					if closure.compute(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
+					if closure.invoke(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						continue;
 					} else {
 						return Ok(Value::Bool(false));
@@ -82,7 +82,7 @@ pub async fn any(
 			if let Some(opt) = opt {
 				for arg in array.into_iter() {
 					// TODO: Don't clone the closure every time the function is called.
-					if closure.compute(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
+					if closure.invoke(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						return Ok(Value::Bool(true));
 					} else {
 						continue;
@@ -217,30 +217,24 @@ pub fn fill(
 
 	let range = if let Some(end) = end {
 		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::range"),
+			name: String::from("array::fill"),
 			message: format!("Argument 1 was the wrong type. {e}"),
 		})?;
 
-		TypedRange {
-			start: Bound::Included(start),
-			end: Bound::Excluded(end),
-		}
+		TypedRange::from_range(start..end)
 	} else if range_start.is_range() {
-		// Condition checked above, unwrap cannot trigger.
-		let range = range_start.into_range().unwrap();
+		// Condition checked above, cannot fail
+		let range = range_start.into_range().expect("is_range() check passed");
 		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::range"),
+			name: String::from("array::fill"),
 			message: format!("Argument 1 was the wrong type. {e}"),
 		})?
 	} else {
 		let start = range_start.coerce_to::<i64>().map_err(|e| Error::InvalidArguments {
-			name: String::from("array::range"),
+			name: String::from("array::fill"),
 			message: format!("Argument 1 was the wrong type. {e}"),
 		})?;
-		TypedRange {
-			start: Bound::Included(start),
-			end: Bound::Unbounded,
-		}
+		TypedRange::from_range(start..)
 	};
 
 	let array_len = array.len() as i64;
@@ -310,7 +304,7 @@ pub async fn filter(
 			if let Some(opt) = opt {
 				let mut res = Vec::with_capacity(array.len());
 				for arg in array.into_iter() {
-					if closure.compute(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
+					if closure.invoke(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
 						res.push(arg)
 					}
 				}
@@ -332,7 +326,7 @@ pub async fn filter_index(
 			if let Some(opt) = opt {
 				let mut res = Vec::with_capacity(array.len());
 				for (i, arg) in array.into_iter().enumerate() {
-					if closure.compute(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
+					if closure.invoke(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						res.push(Value::from(i as i64));
 					}
 				}
@@ -364,7 +358,7 @@ pub async fn find(
 		Value::Closure(closure) => {
 			if let Some(opt) = opt {
 				for arg in array.into_iter() {
-					if closure.compute(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
+					if closure.invoke(stk, ctx, opt, doc, vec![arg.clone()]).await?.is_truthy() {
 						return Ok(arg);
 					}
 				}
@@ -386,7 +380,7 @@ pub async fn find_index(
 			if let Some(opt) = opt {
 				for (i, arg) in array.into_iter().enumerate() {
 					// TODO: Don't clone the closure every time the function is called.
-					if closure.compute(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
+					if closure.invoke(stk, ctx, opt, doc, vec![arg]).await?.is_truthy() {
 						return Ok(i.into());
 					}
 				}
@@ -428,7 +422,7 @@ pub async fn fold(
 	if let Some(opt) = opt {
 		let mut accum = init;
 		for (i, val) in array.into_iter().enumerate() {
-			accum = mapper.compute(stk, ctx, opt, doc, vec![accum, val, i.into()]).await?
+			accum = mapper.invoke(stk, ctx, opt, doc, vec![accum, val, i.into()]).await?
 		}
 		Ok(accum)
 	} else {
@@ -472,7 +466,7 @@ pub fn is_empty((array,): (Array,)) -> Result<Value> {
 }
 
 pub fn join((arr, sep): (Array, String)) -> Result<Value> {
-	Ok(arr.into_iter().map(Value::as_raw_string).collect::<Vec<_>>().join(&sep).into())
+	Ok(arr.into_iter().map(Value::into_raw_string).collect::<Vec<_>>().join(&sep).into())
 }
 
 pub fn last((array,): (Array,)) -> Result<Value> {
@@ -587,7 +581,7 @@ pub async fn map(
 		let mut res = Vec::with_capacity(array.len());
 		for (i, arg) in array.into_iter().enumerate() {
 			// TODO: Don't clone the closure every time the function is called.
-			res.push(mapper.compute(stk, ctx, opt, doc, vec![arg, i.into()]).await?);
+			res.push(mapper.invoke(stk, ctx, opt, doc, vec![arg, i.into()]).await?);
 		}
 		Ok(res.into())
 	} else {
@@ -633,8 +627,8 @@ pub fn range((start_range, Optional(end)): (Value, Optional<i64>)) -> Result<Val
 			end: Bound::Excluded(end),
 		}
 	} else if start_range.is_range() {
-		// Condition checked above, unwrap cannot trigger.
-		let range = start_range.into_range().unwrap();
+		// Condition checked above, cannot fail
+		let range = start_range.into_range().expect("is_range() check passed");
 		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
 			name: String::from("array::range"),
 			message: format!("Argument 1 was the wrong type. {e}"),
@@ -652,6 +646,24 @@ pub fn range((start_range, Optional(end)): (Value, Optional<i64>)) -> Result<Val
 
 	limit("array::range", mem::size_of::<Value>().saturating_mul(range.len()))?;
 
+	Ok(range.iter().map(Value::from).collect())
+}
+
+pub fn sequence((offset_len, Optional(len)): (i64, Optional<i64>)) -> Result<Value> {
+	let (offset, len) = if let Some(len) = len {
+		(offset_len, len)
+	} else {
+		(0, offset_len)
+	};
+
+	if len <= 0 {
+		return Ok(Value::Array(Array(Vec::new())));
+	}
+
+	let end = offset.saturating_add(len - 1);
+	let range = TypedRange::from_range(offset..=end);
+
+	limit("array::sequence", mem::size_of::<Value>().saturating_mul(range.len()))?;
 	Ok(range.iter().map(Value::from).collect())
 }
 
@@ -675,8 +687,7 @@ pub async fn reduce(
 					return Ok(Value::None);
 				};
 				for (idx, val) in iter.enumerate() {
-					accum =
-						mapper.compute(stk, ctx, opt, doc, vec![accum, val, idx.into()]).await?;
+					accum = mapper.invoke(stk, ctx, opt, doc, vec![accum, val, idx.into()]).await?;
 				}
 				Ok(accum)
 			}
@@ -745,8 +756,8 @@ pub fn slice(
 			end: Bound::Excluded(end),
 		}
 	} else if range_start.is_range() {
-		// Condition checked above, unwrap cannot trigger.
-		let range = range_start.into_range().unwrap();
+		// Condition checked above, cannot fail
+		let range = range_start.into_range().expect("is_range() check passed");
 		range.coerce_to_typed::<i64>().map_err(|e| Error::InvalidArguments {
 			name: String::from("array::range"),
 			message: format!("Argument 1 was the wrong type. {e}"),
@@ -783,7 +794,7 @@ pub fn slice(
 	};
 
 	if start >= array.len() {
-		return Ok(Array::new().into());
+		return Ok(Value::Array(Array::new()));
 	}
 
 	let end = match range.end {
@@ -798,12 +809,12 @@ pub fn slice(
 			if x < 0 {
 				let end = array_len.saturating_add(x).saturating_sub(1);
 				if end < start as i64 {
-					return Ok(Array::new().into());
+					return Ok(Value::Array(Array::new()));
 				}
 				end as usize
 			} else {
 				if x <= start as i64 {
-					return Ok(Array::new().into());
+					return Ok(Value::Array(Array::new()));
 				}
 				x.saturating_sub(1) as usize
 			}
@@ -812,7 +823,7 @@ pub fn slice(
 	};
 
 	if end < start {
-		return Ok(Array::new().into());
+		return Ok(Value::Array(Array::new()));
 	}
 
 	let mut i = 0;

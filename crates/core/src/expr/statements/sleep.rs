@@ -10,7 +10,7 @@ use crate::iam::{Action, ResourceKind};
 use crate::val::{Duration, Value};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct SleepStatement {
+pub(crate) struct SleepStatement {
 	pub(crate) duration: Duration,
 }
 
@@ -46,6 +46,7 @@ impl fmt::Display for SleepStatement {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod tests {
 	use std::time::{self, SystemTime};
 

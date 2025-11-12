@@ -43,6 +43,10 @@ impl Table {
 	pub fn as_str(&self) -> &str {
 		&self.0
 	}
+
+	pub fn is_table_type(&self, tables: &[String]) -> bool {
+		tables.is_empty() || tables.contains(&self.0)
+	}
 }
 
 impl Deref for Table {
@@ -55,5 +59,17 @@ impl Deref for Table {
 impl fmt::Display for Table {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		EscapeIdent(&self.0).fmt(f)
+	}
+}
+
+impl From<surrealdb_types::Table> for Table {
+	fn from(value: surrealdb_types::Table) -> Self {
+		Table(value.into_string())
+	}
+}
+
+impl From<Table> for surrealdb_types::Table {
+	fn from(value: Table) -> Self {
+		surrealdb_types::Table::new(value.0)
 	}
 }

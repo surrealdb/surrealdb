@@ -1,7 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
-use hex;
 use revision::revisioned;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
@@ -43,6 +42,18 @@ impl From<Bytes> for bytes::Bytes {
 impl From<bytes::Bytes> for Bytes {
 	fn from(bytes: bytes::Bytes) -> Self {
 		Bytes(bytes.into())
+	}
+}
+
+impl From<surrealdb_types::Bytes> for Bytes {
+	fn from(v: surrealdb_types::Bytes) -> Self {
+		Bytes(v.into())
+	}
+}
+
+impl From<Bytes> for surrealdb_types::Bytes {
+	fn from(v: Bytes) -> Self {
+		surrealdb_types::Bytes::new(v.0)
 	}
 }
 

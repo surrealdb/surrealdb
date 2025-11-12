@@ -3,7 +3,7 @@ use std::io::{self, IsTerminal as _};
 use std::time::{Duration, Instant};
 
 use similar::{Algorithm, TextDiff};
-use surrealdb_core::val::Value as SurValue;
+use surrealdb_types::{Value as SurValue, ToSql};
 
 use super::{
 	MatchValueType, MatcherMismatch, Mismatch, MismatchKind, ResultTypeMismatchReport, TestError,
@@ -313,11 +313,11 @@ impl TestReport {
 							writeln!(f, "> Got a different value then was expected")?;
 							f.indent(|f| {
 								writeln!(f, "= Expected:")?;
-								f.indent(|f| writeln!(f, "- Value: {expected}"))?;
+								f.indent(|f| writeln!(f, "- Value: {}", expected.to_sql()))?;
 								writeln!(f, "= Got:")?;
-								f.indent(|f| writeln!(f, "- Value: {got}"))?;
+								f.indent(|f| writeln!(f, "- Value: {}", got.to_sql()))?;
 								writeln!(f, "= Diff:")?;
-								f.indent(|f| Self::display_diff(got, expected, use_color, f))
+								f.indent(|f| Self::display_diff(&got.to_sql(), &expected.to_sql(), use_color, f))
 							})
 						}
 						ValueMismatchKind::ExpectedError {
@@ -333,7 +333,7 @@ impl TestReport {
 									f.indent(|f| writeln!(f, "- Any error"))?;
 								}
 								writeln!(f, "= Got:")?;
-								f.indent(|f| writeln!(f, "- Value: {got}"))
+								f.indent(|f| writeln!(f, "- Value: {}", got.to_sql()))
 							})
 						}
 						ValueMismatchKind::ExpectedValue {
@@ -344,7 +344,7 @@ impl TestReport {
 							f.indent(|f| {
 								writeln!(f, "= Expected:")?;
 								if let Some(expected) = expected {
-									f.indent(|f| writeln!(f, "- Value: {expected}"))?;
+									f.indent(|f| writeln!(f, "- Value: {}", expected.to_sql()))?;
 								} else {
 									f.indent(|f| writeln!(f, "- Any value"))?;
 								}
@@ -382,7 +382,7 @@ impl TestReport {
 						writeln!(f, "> Matcher expected a value but got an error")?;
 						f.indent(|f| {
 							writeln!(f, "= Got:")?;
-							f.indent(|f| writeln!(f, "- Value: {got}"))
+							f.indent(|f| writeln!(f, "- Value: {}", got.to_sql()))
 						})?
 					}
 					MatcherMismatch::UnexpectedError {
@@ -400,7 +400,7 @@ impl TestReport {
 						writeln!(f, "> Matching expression did not return a boolean.")?;
 						f.indent(|f| {
 							writeln!(f, "= Matching expression returned value:")?;
-							f.indent(|f| writeln!(f, "- Value: {got}"))
+							f.indent(|f| writeln!(f, "- Value: {}", got.to_sql()))
 						})?
 					}
 				},
@@ -418,7 +418,7 @@ impl TestReport {
 	fn display_value(v: &Result<SurValue, String>, f: &mut Fmt) -> fmt::Result {
 		match v {
 			Ok(x) => {
-				writeln!(f, "- Value: {x}")
+				writeln!(f, "- Value: {}", x.to_sql())
 			}
 			Err(e) => {
 				writeln!(f, "- Error: {e}")
@@ -440,18 +440,18 @@ impl TestReport {
 				None => writeln!(f, "- Any Error"),
 			},
 			TestValueExpectation::Value(v) => match v {
-				Some(v) => writeln!(f, "- Value: {}", v.expected),
+				Some(v) => writeln!(f, "- Value: {}", v.expected.to_sql()),
 				None => writeln!(f, "- Any value"),
 			},
 			TestValueExpectation::Matcher(m) => match m.matcher_value_type {
 				MatchValueType::Both => {
-					writeln!(f, "- A result to match matching expression: {}", m.value)
+					writeln!(f, "- A result to match matching expression: {}", m.value_str)
 				}
 				MatchValueType::Error => {
-					writeln!(f, "- A error to match matching expression: {}", m.value)
+					writeln!(f, "- A error to match matching expression: {}", m.value_str)
 				}
 				MatchValueType::Value => {
-					writeln!(f, "- A value to match matching expression: {}", m.value)
+					writeln!(f, "- A value to match matching expression: {}", m.value_str)
 				}
 			},
 		}

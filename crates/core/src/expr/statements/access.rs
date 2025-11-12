@@ -2,10 +2,8 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 
 use anyhow::{Result, bail, ensure};
-use md5::Digest;
 use rand::Rng;
 use reblessive::tree::Stk;
-use sha2::Sha256;
 
 use crate::catalog::providers::{
 	AuthorisationProvider, CatalogProvider, NamespaceProvider, UserProvider,
@@ -17,7 +15,7 @@ use crate::err::Error;
 use crate::expr::{Base, Cond, ControlFlow, FlowResult, FlowResultExt as _, RecordIdLit};
 use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
-use crate::val::{Array, Datetime, Duration, Object, Uuid, Value};
+use crate::val::{Array, Datetime, Duration, Object, Value};
 use crate::{catalog, val};
 
 // Keys and their identifiers are generated randomly from a 62-character pool.
@@ -33,7 +31,7 @@ pub static GRANT_BEARER_ID_LENGTH: usize = 12;
 pub static GRANT_BEARER_KEY_LENGTH: usize = 24;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum AccessStatement {
+pub(crate) enum AccessStatement {
 	Grant(AccessStatementGrant),   // Create access grant.
 	Show(AccessStatementShow),     // Show access grants.
 	Revoke(AccessStatementRevoke), // Revoke access grant.
@@ -41,14 +39,14 @@ pub enum AccessStatement {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct AccessStatementGrant {
+pub(crate) struct AccessStatementGrant {
 	pub ac: String,
 	pub base: Option<Base>,
 	pub subject: Subject,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct AccessStatementShow {
+pub(crate) struct AccessStatementShow {
 	pub ac: String,
 	pub base: Option<Base>,
 	pub gr: Option<String>,
@@ -56,7 +54,7 @@ pub struct AccessStatementShow {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct AccessStatementRevoke {
+pub(crate) struct AccessStatementRevoke {
 	pub ac: String,
 	pub base: Option<Base>,
 	pub gr: Option<String>,
@@ -64,7 +62,7 @@ pub struct AccessStatementRevoke {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct AccessStatementPurge {
+pub(crate) struct AccessStatementPurge {
 	pub ac: String,
 	pub base: Option<Base>,
 	pub expired: bool,
@@ -73,37 +71,7 @@ pub struct AccessStatementPurge {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct AccessGrant {
-	pub id: String,                   // Unique grant identifier.
-	pub ac: String,                   // Access method used to create the grant.
-	pub expiration: Option<Datetime>, // Grant expiration time, if any.
-	pub revocation: Option<Datetime>, // Grant revocation time, if any.
-	pub subject: Subject,             // Subject of the grant.
-	pub grant: Grant,                 // Grant data.
-}
-
-impl AccessGrant {
-	// Returns if the access grant is expired.
-	pub fn is_expired(&self) -> bool {
-		match &self.expiration {
-			Some(exp) => exp < &Datetime::now(),
-			None => false,
-		}
-	}
-
-	// Returns if the access grant is revoked.
-	pub fn is_revoked(&self) -> bool {
-		self.revocation.is_some()
-	}
-
-	// Returns if the access grant is active.
-	pub fn is_active(&self) -> bool {
-		!(self.is_expired() || self.is_revoked())
-	}
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Subject {
+pub(crate) enum Subject {
 	Record(RecordIdLit),
 	User(String),
 }
@@ -121,81 +89,6 @@ impl Subject {
 				Ok(catalog::Subject::Record(record_id_lit.compute(stk, ctx, opt, doc).await?))
 			}
 			Subject::User(ident) => Ok(catalog::Subject::User(ident.clone())),
-		}
-	}
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum Grant {
-	Jwt(GrantJwt),
-	Record(GrantRecord),
-	Bearer(GrantBearer),
-}
-
-impl Grant {
-	// Returns the type of the grant as a string.
-	pub fn variant(&self) -> &str {
-		match self {
-			Grant::Jwt(_) => "jwt",
-			Grant::Record(_) => "record",
-			Grant::Bearer(_) => "bearer",
-		}
-	}
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct GrantJwt {
-	pub jti: Uuid,             // JWT ID
-	pub token: Option<String>, // JWT. Will not be stored after being returned.
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct GrantRecord {
-	pub rid: Uuid,             // Record ID
-	pub jti: Uuid,             // JWT ID
-	pub token: Option<String>, // JWT. Will not be stored after being returned.
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct GrantBearer {
-	pub id: String, // Key ID
-	// Key. Will not be stored and be returned as redacted.
-	// Immediately after generation, it will contain the plaintext key.
-	// Will be hashed before storage so that the plaintext key is not stored.
-	pub key: String,
-}
-
-impl GrantBearer {
-	pub fn new(prefix: &str) -> Self {
-		let id = format!(
-			"{}{}",
-			// The pool for the first character of the key identifier excludes digits.
-			random_string(1, &GRANT_BEARER_CHARACTER_POOL[10..]),
-			random_string(GRANT_BEARER_ID_LENGTH - 1, GRANT_BEARER_CHARACTER_POOL)
-		);
-		// Safety: id cannot contain a null byte guarenteed above.
-		let secret = random_string(GRANT_BEARER_KEY_LENGTH, GRANT_BEARER_CHARACTER_POOL);
-		// Safety: id cannot contain a null byte guarenteed above.
-		let key = format!("{prefix}-{id}-{secret}");
-		Self {
-			id,
-			key,
-		}
-	}
-
-	pub fn hashed(self) -> Self {
-		// The hash of the bearer key is stored to mitigate the impact of a read-only compromise.
-		// We use SHA-256 as the key needs to be verified performantly for every operation.
-		// Unlike with passwords, brute force and rainbow tables are infeasable due to the key
-		// length. When hashing the bearer keys, the prefix and key identifier are kept as salt.
-		let mut hasher = Sha256::new();
-		hasher.update(self.key.as_str());
-		let hash = hasher.finalize();
-		let hash_hex = format!("{hash:x}");
-
-		Self {
-			key: hash_hex,
-			..self
 		}
 	}
 }
@@ -287,7 +180,7 @@ pub async fn create_grant(
 	opt: &Options,
 ) -> Result<catalog::AccessGrant> {
 	let base = match &base {
-		Some(base) => base.clone(),
+		Some(base) => *base,
 		None => opt.selected_base()?,
 	};
 	// Allowed to run?
@@ -304,18 +197,17 @@ pub async fn create_grant(
 			let ns = ctx.expect_ns_id(opt).await?;
 			txn.get_ns_access(ns, &access).await?.ok_or_else(|| Error::AccessNsNotFound {
 				ac: access.to_string(),
-				// The namespace is expected above so this unwrap should not be able to trigger
-				ns: opt.ns.as_deref().unwrap().to_owned(),
+				// The namespace is expected above
+				ns: opt.ns.as_deref().expect("namespace validated by expect_ns_id").to_owned(),
 			})?
 		}
 		Base::Db => {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 			txn.get_db_access(ns, db, &access).await?.ok_or_else(|| Error::AccessDbNotFound {
 				ac: access.to_string(),
-				// The namespace and database is expected above so these unwraps should not be able
-				// to trigger
-				ns: opt.ns.as_deref().unwrap().to_owned(),
-				db: opt.db.as_deref().unwrap().to_owned(),
+				// The namespace and database is expected above
+				ns: opt.ns.as_deref().expect("namespace validated by expect_ns_db_ids").to_owned(),
+				db: opt.db.as_deref().expect("database validated by expect_ns_db_ids").to_owned(),
 			})?
 		}
 	};
@@ -422,9 +314,11 @@ pub async fn create_grant(
 							txn.get_ns_user(ns_id, user).await?.ok_or_else(|| {
 								Error::UserNsNotFound {
 									name: user.to_string(),
-									// We just retrieved the ns_id above so we should have a
-									// namespace.
-									ns: opt.ns().unwrap().to_owned(),
+									// We just retrieved the ns_id above
+									ns: opt
+										.ns()
+										.expect("namespace validated by get_ns_id")
+										.to_owned(),
 								}
 							})?
 						}
@@ -433,10 +327,15 @@ pub async fn create_grant(
 							txn.get_db_user(ns_id, db_id, user).await?.ok_or_else(|| {
 								Error::UserDbNotFound {
 									name: user.to_string(),
-									// We just retrieved the ns_id and db_id above so we should have
-									// a namespace and database.
-									ns: opt.ns().unwrap().to_owned(),
-									db: opt.db().unwrap().to_owned(),
+									// We just retrieved the ns_id and db_id above
+									ns: opt
+										.ns()
+										.expect("namespace validated by expect_ns_db_ids")
+										.to_owned(),
+									db: opt
+										.db()
+										.expect("database validated by expect_ns_db_ids")
+										.to_owned(),
 								}
 							})?
 						}
@@ -483,14 +382,14 @@ pub async fn create_grant(
 					txn.put(&key, &gr_store, None).await
 				}
 				Base::Ns => {
-					let ns = txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+					let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
 					let key =
 						crate::key::namespace::access::gr::new(ns.namespace_id, &gr.ac, &gr.id);
 					txn.put(&key, &gr_store, None).await
 				}
 				Base::Db => {
 					let (ns, db) = opt.ns_db()?;
-					let db = txn.get_or_add_db(ns, db, opt.strict).await?;
+					let db = txn.get_or_add_db(Some(ctx), ns, db).await?;
 
 					let key = crate::key::database::access::gr::new(
 						db.namespace_id,
@@ -542,7 +441,7 @@ async fn compute_grant(
 ) -> FlowResult<Value> {
 	let subject = stmt.subject.compute(stk, ctx, opt, doc).await?;
 
-	let grant = create_grant(stmt.ac.clone(), stmt.base.clone(), subject, ctx, opt).await?;
+	let grant = create_grant(stmt.ac.clone(), stmt.base, subject, ctx, opt).await?;
 
 	Ok(Value::Object(access_object_from_grant(&grant)))
 }
@@ -555,7 +454,7 @@ async fn compute_show(
 	_doc: Option<&CursorDoc>,
 ) -> Result<Value> {
 	let base = match &stmt.base {
-		Some(base) => base.clone(),
+		Some(base) => *base,
 		None => opt.selected_base()?,
 	};
 	// Allowed to run?
@@ -574,21 +473,28 @@ async fn compute_show(
 			if txn.get_ns_access(ns, &stmt.ac).await?.is_none() {
 				bail!(Error::AccessNsNotFound {
 					ac: stmt.ac.to_string(),
-					// We expected a namespace above so this unwrap shouldn't be able to trigger.
-					ns: opt.ns.as_deref().unwrap().to_owned(),
+					// We expected a namespace above
+					ns: opt.ns.as_deref().expect("namespace validated by expect_ns_id").to_owned(),
 				});
 			}
 		}
 		Base::Db => {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
-			// We expected a namespace above so this unwrap shouldn't be able to trigger.
+			// We expected a namespace above
 			if txn.get_db_access(ns, db, &stmt.ac).await?.is_none() {
 				bail!(Error::AccessDbNotFound {
 					ac: stmt.ac.to_string(),
-					// We expected a namespace and database above so these unwrap shouldn't be able
-					// to trigger.
-					ns: opt.ns.as_deref().unwrap().to_owned(),
-					db: opt.db.as_deref().unwrap().to_owned(),
+					// We expected a namespace and database above
+					ns: opt
+						.ns
+						.as_deref()
+						.expect("namespace validated by expect_ns_db_ids")
+						.to_owned(),
+					db: opt
+						.db
+						.as_deref()
+						.expect("database validated by expect_ns_db_ids")
+						.to_owned(),
 				});
 			}
 		}
@@ -693,7 +599,7 @@ pub async fn revoke_grant(
 	opt: &Options,
 ) -> Result<Value> {
 	let base = match &stmt.base {
-		Some(base) => base.clone(),
+		Some(base) => *base,
 		None => opt.selected_base()?,
 	};
 	// Allowed to run?
@@ -767,13 +673,13 @@ pub async fn revoke_grant(
 					txn.set(&key, &revoke, None).await?;
 				}
 				Base::Ns => {
-					let ns = txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+					let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
 					let key = crate::key::namespace::access::gr::new(ns.namespace_id, &stmt.ac, gr);
 					txn.set(&key, &revoke, None).await?;
 				}
 				Base::Db => {
 					let (ns, db) = opt.ns_db()?;
-					let db = txn.get_or_add_db(ns, db, opt.strict).await?;
+					let db = txn.get_or_add_db(Some(ctx), ns, db).await?;
 
 					let key = crate::key::database::access::gr::new(
 						db.namespace_id,
@@ -857,7 +763,7 @@ pub async fn revoke_grant(
 						txn.set(&key, &gr, None).await?;
 					}
 					Base::Ns => {
-						let ns = txn.get_or_add_ns(opt.ns()?, opt.strict).await?;
+						let ns = txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
 						let key = crate::key::namespace::access::gr::new(
 							ns.namespace_id,
 							&stmt.ac,
@@ -867,7 +773,7 @@ pub async fn revoke_grant(
 					}
 					Base::Db => {
 						let (ns, db) = opt.ns_db()?;
-						let db = txn.get_or_add_db(ns, db, opt.strict).await?;
+						let db = txn.get_or_add_db(Some(ctx), ns, db).await?;
 
 						let key = crate::key::database::access::gr::new(
 							db.namespace_id,
@@ -916,7 +822,7 @@ async fn compute_purge(
 	_doc: Option<&CursorDoc>,
 ) -> Result<Value> {
 	let base = match &stmt.base {
-		Some(base) => base.clone(),
+		Some(base) => *base,
 		None => opt.selected_base()?,
 	};
 	// Allowed to run?
@@ -938,7 +844,7 @@ async fn compute_purge(
 		}
 	};
 	// Get all grants to purge.
-	let mut purged = Array::default();
+	let mut purged = Array::new();
 	let grs = match base {
 		Base::Root => txn.all_root_access_grants(&stmt.ac).await?,
 		Base::Ns => {

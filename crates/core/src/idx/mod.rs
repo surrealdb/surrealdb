@@ -14,7 +14,6 @@ use uuid::Uuid;
 use crate::catalog::{DatabaseId, IndexId, NamespaceId};
 use crate::idx::seqdocids::DocId;
 use crate::idx::trees::hnsw::ElementId;
-use crate::idx::trees::store::NodeId;
 use crate::idx::trees::vector::SerializedVector;
 use crate::key::index::dc::Dc;
 use crate::key::index::dl::Dl;
@@ -24,17 +23,14 @@ use crate::key::index::hi::Hi;
 use crate::key::index::hl::Hl;
 use crate::key::index::hs::Hs;
 use crate::key::index::hv::Hv;
-#[cfg(not(target_family = "wasm"))]
 use crate::key::index::ia::Ia;
 use crate::key::index::ib::Ib;
 use crate::key::index::id::Id as IdKey;
 use crate::key::index::ii::Ii;
-#[cfg(not(target_family = "wasm"))]
 use crate::key::index::ip::Ip;
 use crate::key::index::is::Is;
 use crate::key::index::td::{Td, TdRoot};
 use crate::key::index::tt::Tt;
-use crate::key::index::vm::{Vm, VmRoot};
 use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::Key;
 use crate::val::RecordIdKey;
@@ -93,14 +89,6 @@ impl IndexKeyBase {
 		Hs::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
 	}
 
-	fn new_vm_root_key(&self) -> VmRoot<'_> {
-		VmRoot::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix)
-	}
-
-	fn new_vm_key(&self, node_id: NodeId) -> Vm<'_> {
-		Vm::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, node_id)
-	}
-
 	fn new_ii_key(&self, doc_id: DocId) -> Ii<'_> {
 		Ii::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, doc_id)
 	}
@@ -109,12 +97,10 @@ impl IndexKeyBase {
 		IdKey::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, id)
 	}
 
-	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn new_ia_key(&self, i: u32) -> Ia<'_> {
 		Ia::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, i)
 	}
 
-	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn new_ip_key(&self, id: RecordIdKey) -> Ip<'_> {
 		Ip::new(self.0.ns, self.0.db, &self.0.tb, self.0.ix, id)
 	}
@@ -189,7 +175,6 @@ impl IndexKeyBase {
 		&self.0.tb
 	}
 
-	#[cfg(not(target_family = "wasm"))]
 	pub(crate) fn index(&self) -> IndexId {
 		self.0.ix
 	}

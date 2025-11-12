@@ -179,7 +179,8 @@ mod tests {
 	use crate::idx::ft::analyzer::filter::FilteringStage;
 	use crate::idx::ft::analyzer::tokenizer::{Token, Tokens};
 	use crate::kvs::{Datastore, LockType, TransactionType};
-	use crate::sql::{DefineStatement, Expr};
+	use crate::sql::Expr;
+	use crate::sql::statements::DefineStatement;
 	use crate::syn;
 
 	async fn get_analyzer_tokens(def: &str, input: &str) -> Tokens {

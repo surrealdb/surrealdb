@@ -7,17 +7,15 @@ use anyhow::Result;
 #[allow(unused_imports, reason = "Not used when none of the storage backends are enabled.")]
 use super::api::Transaction;
 use super::{Key, Val, Version};
-use crate::catalog::{DatabaseId, IndexId, NamespaceId, TableDefinition, TableId};
+use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cf;
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::doc::CursorRecord;
-use crate::idg::u32::U32;
 use crate::key::database::vs::VsKey;
 use crate::key::debug::Sprintable;
 use crate::kvs::KVValue;
 use crate::kvs::batch::Batch;
 use crate::kvs::key::KVKey;
-use crate::kvs::stash::Stash;
 use crate::val::RecordId;
 use crate::vs::VersionStamp;
 
@@ -30,6 +28,27 @@ pub enum Check {
 	None,
 	Warn,
 	Error,
+}
+
+impl Check {
+	const MSG: &'static str = "A transaction was dropped without being committed or cancelled";
+
+	pub fn drop_check(&self, done: bool, write: bool) {
+		if done || !write {
+			return;
+		}
+		match self {
+			Check::None => {
+				trace!("{}", Self::MSG);
+			}
+			Check::Warn => {
+				warn!("{}", Self::MSG);
+			}
+			Check::Error => {
+				error!("{}", Self::MSG);
+			}
+		}
+	}
 }
 
 /// Specifies whether the transaction is read-only or writeable.
@@ -58,7 +77,6 @@ impl From<bool> for LockType {
 /// A set of undoable updates and requests against a dataset.
 pub struct Transactor {
 	pub(super) inner: Box<dyn Transaction>,
-	pub(super) stash: Stash,
 	pub(super) cf: cf::Writer,
 }
 
@@ -584,70 +602,6 @@ impl Transactor {
 		dt: &TableDefinition,
 	) {
 		self.cf.define_table(ns, db, tb, dt)
-	}
-
-	pub(crate) async fn get_idg(&mut self, key: &Key) -> Result<U32> {
-		Ok(if let Some(v) = self.stash.get(key) {
-			v
-		} else {
-			let val = self.get(key, None).await?;
-			if let Some(val) = val {
-				U32::new(key.clone(), Some(val)).await?
-			} else {
-				U32::new(key.clone(), None).await?
-			}
-		})
-	}
-
-	/// Gets the next namespace id
-	pub(crate) async fn get_next_ns_id(&mut self) -> Result<NamespaceId> {
-		let key = crate::key::root::ni::NamespaceIdGeneratorKey::default().encode_key()?;
-		let mut seq = self.get_idg(&key).await?;
-		let nid = seq.get_next_id();
-		self.stash.set(key, seq.clone());
-		let (k, v) = seq.finish().unwrap();
-		self.replace(&k, &v).await?;
-		Ok(NamespaceId(nid))
-	}
-
-	/// Gets the next database id for the given namespace
-	pub(crate) async fn get_next_db_id(&mut self, ns: NamespaceId) -> Result<DatabaseId> {
-		let key = crate::key::namespace::di::new(ns).encode_key()?;
-		let mut seq = self.get_idg(&key).await?;
-		let nid = seq.get_next_id();
-		self.stash.set(key, seq.clone());
-		let (k, v) = seq.finish().unwrap();
-		self.replace(&k, &v).await?;
-		Ok(DatabaseId(nid))
-	}
-
-	/// Gets the next table id for the given namespace and database
-	pub(crate) async fn get_next_tb_id(
-		&mut self,
-		ns: NamespaceId,
-		db: DatabaseId,
-	) -> Result<TableId> {
-		let key = crate::key::database::ti::new(ns, db).encode_key()?;
-		let mut seq = self.get_idg(&key).await?;
-		let nid = seq.get_next_id();
-		self.stash.set(key, seq.clone());
-		let (k, v) = seq.finish().unwrap();
-		self.replace(&k, &v).await?;
-		Ok(TableId(nid))
-	}
-
-	pub(crate) async fn get_next_ix_id(
-		&mut self,
-		ns: NamespaceId,
-		db: DatabaseId,
-	) -> Result<IndexId> {
-		let key = crate::key::database::ix::new(ns, db).encode_key()?;
-		let mut seq = self.get_idg(&key).await?;
-		let nid = seq.get_next_id();
-		self.stash.set(key, seq.clone());
-		let (k, v) = seq.finish().unwrap();
-		self.replace(&k, &v).await?;
-		Ok(IndexId(nid))
 	}
 
 	// complete_changes will complete the changefeed recording for the given

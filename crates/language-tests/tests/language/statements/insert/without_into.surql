@@ -11,7 +11,7 @@ value = "[{ id: test:2 }]"
 value = "[{ id: test:3 }]"
 
 [[test.results]]
-error = "Can not execute INSERT statement where property 'id' is: NONE"
+error = "Cannot execute INSERT statement where property 'id' is: NONE"
 
 */
 INSERT [

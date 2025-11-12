@@ -2,7 +2,6 @@ mod helpers;
 use anyhow::Result;
 use helpers::new_ds;
 use surrealdb_core::dbs::Session;
-use surrealdb_core::err::Error;
 
 #[tokio::test]
 #[ignore]
@@ -38,10 +37,10 @@ async fn concurrency() -> Result<()> {
 
 		match res {
 			Err(err) => {
-				if matches!(err.downcast_ref(), Some(Error::QueryTimedout)) {
+				if err.to_string().contains("timeout") || err.to_string().contains("Timeout") {
 					Ok(false)
 				} else {
-					Err(err)
+					Err(err.into())
 				}
 			}
 			Ok(res) => {

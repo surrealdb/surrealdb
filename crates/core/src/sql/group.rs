@@ -31,7 +31,7 @@ impl From<crate::expr::Groups> for Groups {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Group(pub Idiom);
+pub(crate) struct Group(pub(crate) Idiom);
 
 impl Display for Group {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {

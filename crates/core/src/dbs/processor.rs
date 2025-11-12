@@ -8,7 +8,7 @@ use futures::StreamExt;
 use reblessive::tree::Stk;
 
 use crate::catalog::providers::TableProvider;
-use crate::catalog::{DatabaseId, NamespaceId};
+use crate::catalog::{DatabaseId, NamespaceId, Record};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
@@ -16,13 +16,12 @@ use crate::dbs::{Iterable, Iterator, Operable, Options, Processed, Statement};
 use crate::err::Error;
 use crate::expr::dir::Dir;
 use crate::expr::lookup::{ComputedLookupSubject, LookupKind};
+use crate::expr::statements::relate::RelateThrough;
 use crate::idx::planner::iterators::{IndexItemRecord, IteratorRef, ThingIterator};
 use crate::idx::planner::{IterationStage, RecordStrategy, ScanDirection};
 use crate::key::{graph, record, r#ref};
 use crate::kvs::{KVKey, KVValue, Key, Transaction, Val};
-use crate::syn;
-use crate::val::record::Record;
-use crate::val::{RecordId, RecordIdKeyRange, Value};
+use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange, Value};
 
 impl Iterable {
 	pub(super) async fn iterate(
@@ -80,7 +79,7 @@ pub(super) enum Collected {
 	TableKey(Key),
 	Relatable {
 		f: RecordId,
-		v: RecordId,
+		v: RelateThrough,
 		w: RecordId,
 		o: Option<Value>,
 	},
@@ -88,7 +87,7 @@ pub(super) enum Collected {
 	Yield(String),
 	Value(Value),
 	Defer(RecordId),
-	Mergeable(RecordId, Value),
+	Mergeable(String, Option<RecordIdKey>, Value),
 	KeyVal(Key, Val),
 	Count(usize),
 	IndexItem(IndexItemRecord),
@@ -145,7 +144,7 @@ impl Collected {
 			// Deferred record processing - handles lazy evaluation scenarios
 			Self::Defer(key) => Self::process_defer(key).await,
 			// Records with merge operations - applies data merging logic
-			Self::Mergeable(v, o) => Self::process_mergeable(v, o).await,
+			Self::Mergeable(tb, id, o) => Self::process_mergeable(tb, id, o).await,
 			// Raw key-value pairs from storage layer
 			Self::KeyVal(key, val) => Ok(Self::process_key_val(key, val)?),
 			// Count aggregation results - no record processing needed
@@ -242,27 +241,48 @@ impl Collected {
 		opt: &Options,
 		txn: &Transaction,
 		f: RecordId,
-		v: RecordId,
+		v: RelateThrough,
 		w: RecordId,
 		o: Option<Value>,
 		rid_only: bool,
 	) -> Result<Processed> {
-		// if it is skippable we only need the record id
-		let val = if rid_only {
-			Operable::Value(Record::new(Value::Null.into()).into_read_only())
-		} else {
-			let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-			let val = txn.get_record(ns, db, &v.table, &v.key, None).await?;
-			Operable::Relate(f, val, w, o.map(|v| v.into()))
+		let pro = match (rid_only, v) {
+			(true, RelateThrough::Table(v)) => Processed {
+				rs: RecordStrategy::KeysOnly,
+				generate: Some(v),
+				rid: None,
+				ir: None,
+				val: Operable::Value(Default::default()),
+			},
+			(false, RelateThrough::Table(v)) => Processed {
+				rs: RecordStrategy::KeysAndValues,
+				generate: Some(v),
+				rid: None,
+				ir: None,
+				val: Operable::Relate(f, Default::default(), w, None),
+			},
+			(true, RelateThrough::RecordId(v)) => Processed {
+				rs: RecordStrategy::KeysOnly,
+				generate: None,
+				rid: Some(v.into()),
+				ir: None,
+				val: Operable::Value(Default::default()),
+			},
+			(false, RelateThrough::RecordId(v)) => {
+				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+				let val = txn.get_record(ns, db, &v.table, &v.key, None).await?;
+				let val = Operable::Relate(f, val, w, o.map(|v| v.into()));
+
+				Processed {
+					rs: RecordStrategy::KeysAndValues,
+					generate: None,
+					rid: Some(v.into()),
+					ir: None,
+					val,
+				}
+			}
 		};
-		// Process the document record
-		let pro = Processed {
-			rs: RecordStrategy::KeysAndValues,
-			generate: None,
-			rid: Some(v.into()),
-			ir: None,
-			val,
-		};
+
 		Ok(pro)
 	}
 
@@ -309,11 +329,6 @@ impl Collected {
 	fn process_value(v: Value) -> Processed {
 		// Try to extract the id field if present and parse as Thing
 		let rid = match &v {
-			Value::Object(obj) => match obj.get("id") {
-				Some(Value::String(strand)) => syn::record_id(strand.as_str()).ok().map(Arc::new),
-				Some(Value::RecordId(thing)) => Some(Arc::new(thing.clone())),
-				_ => None,
-			},
 			Value::RecordId(thing) => Some(Arc::new(thing.clone())),
 			_ => None,
 		};
@@ -338,14 +353,24 @@ impl Collected {
 		Ok(pro)
 	}
 
-	async fn process_mergeable(v: RecordId, o: Value) -> Result<Processed> {
+	async fn process_mergeable(tb: String, id: Option<RecordIdKey>, o: Value) -> Result<Processed> {
 		// Process the document record
-		let pro = Processed {
-			rs: RecordStrategy::KeysAndValues,
-			generate: None,
-			rid: Some(v.into()),
-			ir: None,
-			val: Operable::Insert(Default::default(), o.into()),
+		let pro = if let Some(id) = id {
+			Processed {
+				rs: RecordStrategy::KeysAndValues,
+				generate: None,
+				rid: Some(RecordId::new(tb, id).into()),
+				ir: None,
+				val: Operable::Insert(Default::default(), o.into()),
+			}
+		} else {
+			Processed {
+				rs: RecordStrategy::KeysOnly,
+				generate: Some(tb),
+				rid: None,
+				ir: None,
+				val: Operable::Insert(Default::default(), o.into()),
+			}
 		};
 		// Everything ok
 		Ok(pro)
@@ -567,7 +592,9 @@ pub(super) trait Collector {
 					}
 					self.collect_index_items(ctx, opt, irf, rs).await?
 				}
-				Iterable::Mergeable(v, o) => self.collect(Collected::Mergeable(v, o)).await?,
+				Iterable::Mergeable(tb, id, o) => {
+					self.collect(Collected::Mergeable(tb, id, o)).await?
+				}
 				Iterable::Relatable(f, v, w, o) => {
 					self.collect(Collected::Relatable {
 						f,
@@ -640,16 +667,17 @@ pub(super) trait Collector {
 		v: &str,
 		sc: ScanDirection,
 	) -> Result<()> {
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+		let db = ctx.get_db(opt).await?;
 
 		// Get the transaction
 		let txn = ctx.tx();
-		// Check that the table exists
-		txn.check_tb(ns, db, v, opt.strict).await?;
+		if db.strict {
+			txn.expect_tb(db.namespace_id, db.database_id, v).await?;
+		}
 
 		// Prepare the start and end keys
-		let beg = record::prefix(ns, db, v)?;
-		let end = record::suffix(ns, db, v)?;
+		let beg = record::prefix(db.namespace_id, db.database_id, v)?;
+		let end = record::suffix(db.namespace_id, db.database_id, v)?;
 		// Optionally skip keys
 		let rng = if let Some(r) = self.start_skip(ctx, &txn, beg..end, sc).await? {
 			r
@@ -682,16 +710,18 @@ pub(super) trait Collector {
 		v: &str,
 		sc: ScanDirection,
 	) -> Result<()> {
-		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		let db = ctx.get_db(opt).await?;
 
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_tb(ns, db, v, opt.strict).await?;
+		if db.strict {
+			txn.expect_tb(db.namespace_id, db.database_id, v).await?;
+		}
 
 		// Prepare the start and end keys
-		let beg = record::prefix(ns, db, v)?;
-		let end = record::suffix(ns, db, v)?;
+		let beg = record::prefix(db.namespace_id, db.database_id, v)?;
+		let end = record::suffix(db.namespace_id, db.database_id, v)?;
 		// Optionally skip keys
 		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
 			// Returns the next range of keys
@@ -720,15 +750,17 @@ pub(super) trait Collector {
 	}
 
 	async fn collect_table_count(&mut self, ctx: &Context, opt: &Options, v: &str) -> Result<()> {
-		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		let db = ctx.get_db(opt).await?;
 
 		// Get the transaction
 		let txn = ctx.tx();
 		// Check that the table exists
-		txn.check_tb(ns, db, v, opt.strict).await?;
+		if db.strict {
+			txn.expect_tb(db.namespace_id, db.database_id, v).await?;
+		}
 
-		let beg = record::prefix(ns, db, v)?;
-		let end = record::suffix(ns, db, v)?;
+		let beg = record::prefix(db.namespace_id, db.database_id, v)?;
+		let end = record::suffix(db.namespace_id, db.database_id, v)?;
 		// Create a new iterable range
 		let count = txn.count(beg..end).await?;
 		// Collect the count
@@ -965,12 +997,12 @@ pub(super) trait Collector {
 				// Everything ok
 				return Ok(());
 			} else {
-				bail!(Error::QueryNotExecutedDetail {
+				bail!(Error::QueryNotExecuted {
 					message: "No iterator has been found.".to_string(),
 				});
 			}
 		}
-		bail!(Error::QueryNotExecutedDetail {
+		bail!(Error::QueryNotExecuted {
 			message: "No QueryExecutor has been found.".to_string(),
 		})
 	}

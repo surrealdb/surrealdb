@@ -51,8 +51,10 @@ mod http_integration {
 			let res =
 				client.post(url).basic_auth(USER, Some(PASS)).body("CREATE foo").send().await?;
 			assert_eq!(res.status(), 200);
-			let body = res.text().await?;
-			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {body}");
+			let body: serde_json::Value = res.json().await?;
+			assert_eq!(body[0]["status"], "OK");
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1);
+			assert!(body[0]["result"][0]["id"].to_string().starts_with("\"foo:"));
 		}
 
 		// Prepare users with identical credentials on ROOT, NAMESPACE and DATABASE
@@ -264,8 +266,10 @@ mod http_integration {
 		{
 			let res = client.post(url).bearer_auth(&token).body("CREATE foo").send().await?;
 			assert_eq!(res.status(), 200, "body: {}", res.text().await?);
-			let body = res.text().await?;
-			assert!(body.contains(r#"[{"result":[{"id":"foo:"#), "body: {body}");
+			let body: serde_json::Value = res.json().await?;
+			assert_eq!(body[0]["status"], "OK", "body: {body}");
+			assert_eq!(body[0]["result"].as_array().unwrap().len(), 1, "body: {body}");
+			assert!(body[0]["result"][0]["id"].to_string().starts_with("\"foo:"), "body: {body}");
 
 			// Check the selected namespace and database
 			let res = client
@@ -910,7 +914,7 @@ mod http_integration {
 			let res = client
 				.post(url)
 				.basic_auth(USER, Some(PASS))
-				.header(header::ACCEPT, "application/surrealdb")
+				.header(header::ACCEPT, surrealdb_core::api::format::FLATBUFFERS)
 				.body("CREATE foo")
 				.send()
 				.await?;
@@ -1735,8 +1739,8 @@ mod http_integration {
 		let mut headers = reqwest::header::HeaderMap::new();
 		headers.insert("surreal-ns", ns.parse()?);
 		headers.insert("surreal-db", db.parse()?);
-		headers.insert(header::ACCEPT, "application/surrealdb".parse()?);
-		headers.insert(header::CONTENT_TYPE, "application/surrealdb".parse()?);
+		headers.insert(header::ACCEPT, surrealdb_core::api::format::FLATBUFFERS.parse()?);
+		headers.insert(header::CONTENT_TYPE, surrealdb_core::api::format::FLATBUFFERS.parse()?);
 		let client = reqwest::Client::builder()
 			.connect_timeout(Duration::from_millis(10))
 			.default_headers(headers)
@@ -1986,7 +1990,7 @@ mod http_integration {
 		{
 			// Start server disallowing routes for queries, exporting and importing
 			let (addr, _server) = common::start_server(StartServerArguments {
-				args: "--deny-experimental * --allow-experimental record_references".to_string(),
+				args: "--deny-experimental * --allow-experimental define_api".to_string(),
 				// Auth disabled to ensure unauthorized errors are due to capabilities
 				auth: false,
 				..Default::default()
@@ -2012,18 +2016,20 @@ mod http_integration {
 			let res = client
 				.post(format!("{base_url}/sql"))
 				.basic_auth(USER, Some(PASS))
-				.body("DEFINE FIELD a ON deny_all_allow_references TYPE record REFERENCE")
+				.body("DEFINE API \"/\" FOR any THEN {}")
 				.send()
 				.await
 				.unwrap();
-			let res = res.text().await.unwrap();
-			assert!(res.contains("[{\"result\":null,\"status\":\"OK\""), "body: {}", res);
+			let res: serde_json::Value = res.json().await.unwrap();
+
+			assert_eq!(res[0]["status"], "OK", "body: {res}");
+			assert_eq!(res[0]["result"], serde_json::Value::Null, "body: {res}");
 		}
 		// Deny 1
 		{
 			// Start server disallowing routes for queries, exporting and importing
 			let (addr, _server) = common::start_server(StartServerArguments {
-				args: "--deny-experimental record_references --allow-experimental *".to_string(),
+				args: "--deny-experimental define_api --allow-experimental *".to_string(),
 				// Auth disabled to ensure unauthorized errors are due to capabilities
 				auth: false,
 				..Default::default()
@@ -2049,13 +2055,13 @@ mod http_integration {
 			let res = client
 				.post(format!("{base_url}/sql"))
 				.basic_auth(USER, Some(PASS))
-				.body("DEFINE FIELD a ON deny_all_allow_references TYPE record REFERENCE")
+				.body("DEFINE API \"/\" FOR any THEN {}")
 				.send()
 				.await
 				.unwrap();
 			let res = res.text().await.unwrap();
 			assert!(
-				res.contains("Experimental capability `record_references` is not enabled"),
+				res.contains("the experimental define api capability is not enabled"),
 				"body: {}",
 				res
 			);
@@ -2098,8 +2104,9 @@ mod http_integration {
 				.send()
 				.await
 				.unwrap();
-			let res = res.text().await.unwrap();
-			assert!(res.contains("[{\"result\":123,\"status\":\"OK\""), "body: {}", res);
+			let res: serde_json::Value = res.json().await.unwrap();
+			assert_eq!(res[0]["status"], "OK");
+			assert_eq!(res[0]["result"], 123);
 		}
 		// Allow record
 		{

@@ -10,27 +10,17 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct RemoveIndexStatement {
+pub(crate) struct RemoveIndexStatement {
 	pub name: Expr,
 	pub what: Expr,
 	pub if_exists: bool,
 }
 
-impl VisitExpression for RemoveIndexStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-		self.what.visit(visitor);
-	}
-}
 impl Default for RemoveIndexStatement {
 	fn default() -> Self {
 		Self {
@@ -61,22 +51,21 @@ impl RemoveIndexStatement {
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Get the transaction
 		let txn = ctx.tx();
-		// Clear the index store cache
-		#[cfg(not(target_family = "wasm"))]
-		let err = ctx
-			.get_index_stores()
-			.index_removed(ctx.get_index_builder(), &txn, ns, db, &what, &name)
-			.await;
-		#[cfg(target_family = "wasm")]
-		let err = ctx.get_index_stores().index_removed(&txn, ns, db, &what, &name).await;
-
-		if let Err(e) = err {
-			if self.if_exists && matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
-				return Ok(Value::None);
+		// Get the index definition
+		let res = txn.expect_tb_index(ns, db, &what, &name).await;
+		let ix = match res {
+			Err(e) => {
+				if self.if_exists && matches!(e.downcast_ref(), Some(Error::IxNotFound { .. })) {
+					return Ok(Value::None);
+				}
+				return Err(e);
 			}
-			return Err(e);
-		}
-
+			Ok(ix) => ix,
+		};
+		// Get the table definition
+		let tb = txn.expect_tb(ns, db, &what).await?;
+		// Clear the index store cache
+		ctx.get_index_stores().index_removed(ctx.get_index_builder(), ns, db, &tb, &ix).await?;
 		// Delete the index data.
 		txn.del_tb_index(ns, db, &what, &name).await?;
 

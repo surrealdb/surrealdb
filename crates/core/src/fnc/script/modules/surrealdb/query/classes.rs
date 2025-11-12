@@ -9,7 +9,7 @@ use crate::val::Value as SurValue;
 
 #[js::class]
 #[derive(Trace, Clone, JsLifetime)]
-pub struct Query {
+pub(crate) struct Query {
 	#[qjs(skip_trace)]
 	pub(crate) query: Expr,
 	#[qjs(skip_trace)]
@@ -17,7 +17,7 @@ pub struct Query {
 }
 
 #[derive(Default, Clone)]
-pub struct QueryVariables(pub Variables);
+pub(crate) struct QueryVariables(pub(crate) Variables);
 
 impl QueryVariables {
 	pub fn new() -> Self {

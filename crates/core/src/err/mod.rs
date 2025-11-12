@@ -18,7 +18,6 @@ use thiserror::Error;
 
 use crate::api::err::ApiError;
 use crate::buc::BucketOperation;
-use crate::catalog::Distance;
 use crate::expr::operation::PatchError;
 use crate::expr::{Expr, Idiom};
 use crate::iam::Error as IamError;
@@ -30,16 +29,12 @@ use crate::vs::VersionStampError;
 
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
-// kept, non_exhaustive because it is still public in the sdk.
-#[non_exhaustive]
-pub enum Error {
+#[allow(clippy::enum_variant_names)]
+#[allow(dead_code, reason = "Some variants are only used by specific KV stores")]
+pub(crate) enum Error {
 	/// The database encountered unreachable logic
 	#[error("The database encountered unreachable logic: {0}")]
 	Unreachable(String),
-
-	/// Statement has been deprecated
-	#[error("{0}")]
-	Deprecated(String),
 
 	/// A custom error has been thrown
 	#[error("An error occurred: {0}")]
@@ -53,10 +48,6 @@ pub enum Error {
 	#[error("There was a problem with a datastore transaction: {0}")]
 	Tx(String),
 
-	/// There was an error when starting a new datastore transaction
-	#[error("There was an error when starting a new datastore transaction")]
-	TxFailure,
-
 	/// The transaction was already cancelled or committed
 	#[error("Couldn't update a finished transaction")]
 	TxFinished,
@@ -64,6 +55,13 @@ pub enum Error {
 	/// The current transaction was created as read-only
 	#[error("Couldn't write to a read only transaction")]
 	TxReadonly,
+
+	#[cfg(feature = "kv-rocksdb")]
+	/// The datastore is read-and-deletion-only due to disk saturation
+	#[error(
+		"The datastore is in read-and-deletion-only mode due to disk space limitations. Only read and delete operations are allowed. Deleting data will free up space and automatically restore normal operations when usage drops below the threshold"
+	)]
+	DbReadAndDeleteOnly,
 
 	/// The conditional value in the request was not equal
 	#[error("Value being checked was not correct")]
@@ -73,23 +71,11 @@ pub enum Error {
 	#[error("The key being inserted already exists")]
 	TxKeyAlreadyExists,
 
-	/// The key exceeds a limit set by the KV store
-	#[error("Record id or key is too large")]
-	TxKeyTooLarge,
-
-	/// The value exceeds a limit set by the KV store
-	#[error("Record or value is too large")]
-	TxValueTooLarge,
-
 	/// There was a transaction error that can be retried
 	#[error(
-		"Failed to commit transaction due to a read or write conflict. This transaction can be retried"
+		"Failed to commit transaction due to a read or write conflict ({0}). This transaction can be retried"
 	)]
-	TxRetryable,
-
-	/// The transaction writes too much data for the KV store
-	#[error("Transaction is too large")]
-	TxTooLarge,
+	TxRetryable(String),
 
 	/// No namespace has been selected
 	#[error("Specify a namespace to use")]
@@ -99,26 +85,18 @@ pub enum Error {
 	#[error("Specify a database to use")]
 	DbEmpty,
 
-	/// No SQL query has been specified
-	#[error("Specify some SQL code to execute")]
-	QueryEmpty,
-
-	/// There was an error with the SQL query
-	#[error("The SQL query was not parsed fully")]
-	QueryRemaining,
-
 	/// There was an error with the SQL query
 	#[error("Parse error: {0}")]
 	InvalidQuery(RenderedParserError),
 
 	/// There was an error with the SQL query
-	#[error("Can not use {value} in a CONTENT clause")]
+	#[error("Cannot use {value} in a CONTENT clause")]
 	InvalidContent {
 		value: Value,
 	},
 
 	/// There was an error with the SQL query
-	#[error("Can not use {value} in a MERGE clause")]
+	#[error("Cannot use {value} in a MERGE clause")]
 	InvalidMerge {
 		value: Value,
 	},
@@ -126,6 +104,11 @@ pub enum Error {
 	/// There was an error with the provided JSON Patch
 	#[error("The JSON Patch contains invalid operations. {0}")]
 	InvalidPatch(PatchError),
+
+	#[error("Invalid query: {message}")]
+	Query {
+		message: String,
+	},
 
 	/// Given test operation failed for JSON Patch
 	#[error(
@@ -138,6 +121,7 @@ pub enum Error {
 
 	/// Remote HTTP request functions are not enabled
 	#[error("Remote HTTP request functions are not enabled")]
+	#[allow(dead_code)]
 	HttpDisabled,
 
 	/// it is not possible to set a variable with the specified name
@@ -146,42 +130,10 @@ pub enum Error {
 		name: String,
 	},
 
-	#[error(
-		"Found '{field}' in SELECT clause on line {line}, but field is not an aggregate function, and is not present in GROUP BY expression"
-	)]
-	InvalidField {
-		line: usize,
-		field: String,
-	},
-
 	/// The FETCH clause accepts idioms, strings and fields.
 	#[error("Found {value} on FETCH CLAUSE, but FETCH expects an idiom, a string or fields")]
 	InvalidFetch {
 		value: Expr,
-	},
-
-	#[error(
-		"Found '{field}' in SPLIT ON clause on line {line}, but field is not present in SELECT expression"
-	)]
-	InvalidSplit {
-		line: usize,
-		field: String,
-	},
-
-	#[error(
-		"Found '{field}' in ORDER BY clause on line {line}, but field is not present in SELECT expression"
-	)]
-	InvalidOrder {
-		line: usize,
-		field: String,
-	},
-
-	#[error(
-		"Found '{field}' in GROUP BY clause on line {line}, but field is not present in SELECT expression"
-	)]
-	InvalidGroup {
-		line: usize,
-		field: String,
 	},
 
 	/// The LIMIT clause must evaluate to a positive integer
@@ -204,6 +156,7 @@ pub enum Error {
 
 	/// There was an error with the provided machine learning model
 	#[error("Problem with machine learning computation. {message}")]
+	#[allow(dead_code)]
 	InvalidModel {
 		message: String,
 	},
@@ -225,26 +178,21 @@ pub enum Error {
 
 	/// The wrong quantity or magnitude of arguments was given for the specified
 	/// function
-	#[error("Incorrect arguments for aggregate function {name}() on table '{table}'. {message}")]
+	#[error("Invalid aggregation: {message}")]
 	InvalidAggregation {
-		name: String,
-		table: String,
 		message: String,
 	},
 
-	/// The wrong quantity or magnitude of arguments was given for the specified
-	/// function
 	#[error(
-		"There was a problem running the {name} function. Expected this function to return a value of type {check}, but found {value}"
+		"Incorrect selector for aggregate selection, expression `{expr}` within in selector cannot be aggregated in a group."
 	)]
-	FunctionCheck {
-		name: String,
-		value: String,
-		check: String,
+	InvalidAggregationSelector {
+		expr: String,
 	},
 
 	/// The URL is invalid
 	#[error("The URL `{0}` is invalid")]
+	#[cfg_attr(not(feature = "http"), expect(dead_code))]
 	InvalidUrl(String),
 
 	/// The size of the vector is incorrect
@@ -262,13 +210,6 @@ pub enum Error {
 		left: SharedVector,
 		right: SharedVector,
 		dist: f64,
-	},
-
-	/// The size of the vector is incorrect
-	#[error("The vector element ({current}) is not a number.")]
-	InvalidVectorType {
-		current: String,
-		expected: &'static str,
 	},
 
 	/// The size of the vector is incorrect
@@ -299,14 +240,9 @@ pub enum Error {
 	#[error("The query was not executed due to the memory threshold being reached")]
 	QueryBeyondMemoryThreshold,
 
-	/// The query did not execute, because the transaction has failed
-	#[error("The query was not executed due to a failed transaction")]
-	QueryNotExecuted,
-
-	/// The query did not execute, because the transaction has failed (with a
-	/// message)
+	/// The query did not execute, because the transaction has failed.
 	#[error("The query was not executed due to a failed transaction. {message}")]
-	QueryNotExecutedDetail {
+	QueryNotExecuted {
 		message: String,
 	},
 
@@ -328,21 +264,9 @@ pub enum Error {
 		name: String,
 	},
 
-	/// The requested namespace login does not exist
-	#[error("The namespace login '{name}' does not exist")]
-	NlNotFound {
-		name: String,
-	},
-
 	/// The requested database does not exist
 	#[error("The database '{name}' does not exist")]
 	DbNotFound {
-		name: String,
-	},
-
-	/// The requested database login does not exist
-	#[error("The database login '{name}' does not exist")]
-	DlNotFound {
 		name: String,
 	},
 
@@ -355,6 +279,12 @@ pub enum Error {
 	/// The requested function does not exist
 	#[error("The function 'fn::{name}' does not exist")]
 	FcNotFound {
+		name: String,
+	},
+
+	/// The requested function does not exist
+	#[error("The module '{name}' does not exist")]
+	MdNotFound {
 		name: String,
 	},
 
@@ -400,18 +330,6 @@ pub enum Error {
 		name: String,
 	},
 
-	/// The requested live query does not exist
-	#[error("The live query '{name}' does not exist")]
-	LvNotFound {
-		name: String,
-	},
-
-	/// The requested cluster live query does not exist
-	#[error("The cluster live query '{name}' does not exist")]
-	LqNotFound {
-		name: String,
-	},
-
 	/// The requested api does not exist
 	#[error("The api '/{value}' does not exist")]
 	ApNotFound {
@@ -442,9 +360,6 @@ pub enum Error {
 		rid: String,
 	},
 
-	#[error("Unsupported distance: {0}")]
-	UnsupportedDistance(Distance),
-
 	/// The requested root user does not exist
 	#[error("The root user '{name}' does not exist")]
 	UserRootNotFound {
@@ -471,113 +386,101 @@ pub enum Error {
 	RealtimeDisabled,
 
 	/// Reached excessive computation depth due to functions, subqueries, or
-	/// futures
-	#[error("Reached excessive computation depth due to functions, subqueries, or futures")]
+	/// computed values
+	#[error("Reached excessive computation depth due to functions, subqueries, or computed values")]
 	ComputationDepthExceeded,
 
 	/// Tried to execute a statement that can't be used here
 	#[error("Invalid statement: {0}")]
 	InvalidStatement(String),
 
-	/// Can not execute statement using the specified value
-	#[error("Can not execute statement using value: {value}")]
+	/// Cannot execute statement using the specified value
+	#[error("Cannot execute statement using value: {value}")]
 	InvalidStatementTarget {
 		value: String,
 	},
 
-	/// Can not execute CREATE statement using the specified value
-	#[error("Can not execute CREATE statement using value: {value}")]
+	/// Cannot execute CREATE statement using the specified value
+	#[error("Cannot execute CREATE statement using value: {value}")]
 	CreateStatement {
 		value: String,
 	},
 
-	/// Can not execute UPSERT statement using the specified value
-	#[error("Can not execute UPSERT statement using value: {value}")]
+	/// Cannot execute UPSERT statement using the specified value
+	#[error("Cannot execute UPSERT statement using value: {value}")]
 	UpsertStatement {
 		value: String,
 	},
 
-	/// Can not execute UPDATE statement using the specified value
-	#[error("Can not execute UPDATE statement using value: {value}")]
+	/// Cannot execute UPDATE statement using the specified value
+	#[error("Cannot execute UPDATE statement using value: {value}")]
 	UpdateStatement {
 		value: String,
 	},
 
-	/// Can not execute RELATE statement using the specified value
-	#[error("Can not execute RELATE statement using value: {value}")]
-	RelateStatement {
-		value: String,
-	},
-
-	/// Can not execute RELATE statement using the specified value
-	#[error("Can not execute RELATE statement where property 'in' is: {value}")]
+	/// Cannot execute RELATE statement using the specified value
+	#[error("Cannot execute RELATE statement where property 'in' is: {value}")]
 	RelateStatementIn {
 		value: String,
 	},
 
-	/// Can not execute RELATE statement using the specified value
-	#[error("Can not execute RELATE statement where property 'id' is: {value}")]
+	/// Cannot execute RELATE statement using the specified value
+	#[error("Cannot execute RELATE statement where property 'id' is: {value}")]
 	RelateStatementId {
 		value: String,
 	},
 
-	/// Can not execute RELATE statement using the specified value
-	#[error("Can not execute RELATE statement where property 'out' is: {value}")]
+	/// Cannot execute RELATE statement using the specified value
+	#[error("Cannot execute RELATE statement where property 'out' is: {value}")]
 	RelateStatementOut {
 		value: String,
 	},
 
-	/// Can not execute DELETE statement using the specified value
-	#[error("Can not execute DELETE statement using value: {value}")]
+	/// Cannot execute DELETE statement using the specified value
+	#[error("Cannot execute DELETE statement using value: {value}")]
 	DeleteStatement {
 		value: String,
 	},
 
-	/// Can not execute INSERT statement using the specified value
-	#[error("Can not execute INSERT statement using value: {value}")]
+	/// Cannot execute INSERT statement using the specified value
+	#[error("Cannot execute INSERT statement using value: {value}")]
 	InsertStatement {
 		value: String,
 	},
 
-	/// Can not execute INSERT statement using the specified value
-	#[error("Can not execute INSERT statement where property 'in' is: {value}")]
+	/// Cannot execute INSERT statement using the specified value
+	#[error("Cannot execute INSERT statement where property 'in' is: {value}")]
 	InsertStatementIn {
 		value: String,
 	},
 
-	/// Can not execute INSERT statement using the specified value
-	#[error("Can not execute INSERT statement where property 'id' is: {value}")]
+	/// Cannot execute INSERT statement using the specified value
+	#[error("Cannot execute INSERT statement where property 'id' is: {value}")]
 	InsertStatementId {
 		value: String,
 	},
 
-	/// Can not execute INSERT statement using the specified value
-	#[error("Can not execute INSERT statement where property 'out' is: {value}")]
+	/// Cannot execute INSERT statement using the specified value
+	#[error("Cannot execute INSERT statement where property 'out' is: {value}")]
 	InsertStatementOut {
 		value: String,
 	},
 
-	/// Can not execute LIVE statement using the specified value
-	#[error("Can not execute LIVE statement using value: {value}")]
+	/// Cannot execute LIVE statement using the specified value
+	#[error("Cannot execute LIVE statement using value: {value}")]
 	LiveStatement {
 		value: String,
 	},
 
-	/// Can not execute KILL statement using the specified id
-	#[error("Can not execute KILL statement using id: {value}")]
+	/// Cannot execute KILL statement using the specified id
+	#[error("Cannot execute KILL statement using id: {value}")]
 	KillStatement {
 		value: String,
 	},
 
-	/// Can not execute CREATE statement using the specified value
+	/// Cannot execute CREATE statement using the specified value
 	#[error("Expected a single result output when using the ONLY keyword")]
 	SingleOnlyOutput,
-
-	/// The permissions do not allow this query to be run on this table
-	#[error("You don't have permission to run this query on the `{table}` table")]
-	TablePermissions {
-		table: String,
-	},
 
 	/// The permissions do not allow this query to be run on this table
 	#[error("You don't have permission to view the ${name} parameter")]
@@ -598,41 +501,34 @@ pub enum Error {
 		op: BucketOperation,
 	},
 
-	/// The specified table can not be written as it is setup as a foreign table
-	/// view
-	#[error("Unable to write to the `{table}` table while setup as a view")]
-	TableIsView {
-		table: String,
-	},
-
 	/// A database entry for the specified record already exists
-	#[error("Database record `{thing}` already exists")]
+	#[error("Database record `{record}` already exists")]
 	RecordExists {
-		thing: RecordId,
+		record: RecordId,
 	},
 
 	/// A database index entry for the specified record already exists
-	#[error("Database index `{index}` already contains {value}, with record `{thing}`")]
+	#[error("Database index `{index}` already contains {value}, with record `{record}`")]
 	IndexExists {
-		thing: RecordId,
+		record: RecordId,
 		index: String,
 		value: String,
 	},
 
 	/// The specified table is not configured for the type of record being added
-	#[error("Found record: `{thing}` which is {}a relation, but expected a {target_type}", if *relation { "not " } else { "" })]
+	#[error("Found record: `{record}` which is {}a relation, but expected a {target_type}", if *relation { "" } else { "not " })]
 	TableCheck {
-		thing: String,
+		record: String,
 		relation: bool,
 		target_type: String,
 	},
 
 	/// The specified field did not conform to the field ASSERT clause
 	#[error(
-		"Found {value} for field `{field}`, with record `{thing}`, but field must conform to: {check}"
+		"Found {value} for field `{field}`, with record `{record}`, but field must conform to: {check}"
 	)]
 	FieldValue {
-		thing: String,
+		record: String,
 		value: String,
 		field: Idiom,
 		check: String,
@@ -653,27 +549,19 @@ pub enum Error {
 	},
 
 	/// The specified value did not conform to the LET type check
-	#[error("Couldn't coerce argument `{argument_idx}` for function `{func_name}`: {error}")]
-	ArgumentCoerce {
-		func_name: String,
-		argument_idx: usize,
-		error: Box<CoerceError>,
-	},
-
-	/// The specified value did not conform to the LET type check
-	#[error("Couldn't coerce value for field `{field_name}` of `{thing}`: {error}")]
+	#[error("Couldn't coerce value for field `{field_name}` of `{record}`: {error}")]
 	FieldCoerce {
-		thing: String,
+		record: String,
 		field_name: String,
 		error: Box<CoerceError>,
 	},
 
 	/// The specified field did not conform to the field ASSERT clause
 	#[error(
-		"Found changed value for field `{field}`, with record `{thing}`, but field is readonly"
+		"Found changed value for field `{field}`, with record `{record}`, but field is readonly"
 	)]
 	FieldReadonly {
-		thing: String,
+		record: String,
 		field: Idiom,
 	},
 
@@ -696,33 +584,9 @@ pub enum Error {
 		value: String,
 	},
 
-	/// Found a record id for the record but this is not a valid id
-	#[error("Found {value} for the incoming relation, but this is not a valid Record ID")]
-	InInvalid {
-		value: String,
-	},
-
-	/// Found a record id for the record but we are creating a specific record
-	#[error("Found {value} for the `in` field, but the value does not match the `in` record id")]
-	InMismatch {
-		value: String,
-	},
-
 	/// Found a record id for the record but we are creating a specific record
 	#[error("Found {value} for the `in` field, which does not match the existing field value")]
 	InOverride {
-		value: String,
-	},
-
-	/// Found a record id for the record but this is not a valid id
-	#[error("Found {value} for the outgoing relation, but this is not a valid Record ID")]
-	OutInvalid {
-		value: String,
-	},
-
-	/// Found a record id for the record but we are creating a specific record
-	#[error("Found {value} for the `out` field, but the value does not match the `out` record id")]
-	OutMismatch {
 		value: String,
 	},
 
@@ -739,13 +603,6 @@ pub enum Error {
 	/// Unable to convert a value to another value
 	#[error("{0}")]
 	Cast(#[from] CastError),
-
-	/// Unable to coerce to a value to another value
-	#[error("Expected a {kind} but the array had {size} items")]
-	LengthInvalid {
-		kind: String,
-		size: usize,
-	},
 
 	/// Cannot perform addition
 	#[error("Cannot perform addition with '{0}' and '{1}'")]
@@ -781,6 +638,7 @@ pub enum Error {
 
 	/// There was an error processing a remote HTTP request
 	#[error("There was an error processing a remote HTTP request: {0}")]
+	#[cfg_attr(not(feature = "http"), expect(dead_code))]
 	Http(String),
 
 	/// There was an error processing a value in parallel
@@ -838,10 +696,6 @@ pub enum Error {
 	#[error("Object Store error: {0}")]
 	ObsError(#[from] ObjectStoreError),
 
-	/// There was an error with model computation
-	#[error("There was an error with model computation: {0}")]
-	ModelComputation(String),
-
 	/// Duplicated match references are not allowed
 	#[error("Duplicated Match reference: {mr}")]
 	DuplicatedMatchRef {
@@ -852,11 +706,6 @@ pub enum Error {
 	/// internals
 	#[error("Timestamp arithmetic error: {0}")]
 	TimestampOverflow(String),
-
-	/// Represents a failure in timestamp arithmetic related to database
-	/// internals
-	#[error("Invalid timestamp '{0}', datetime lies outside of valid timestamp range")]
-	InvalidTimestamp(String),
 
 	/// Internal server error
 	/// This should be used extremely sporadically, since we lose the type of
@@ -871,10 +720,6 @@ pub enum Error {
 
 	#[error("Versionstamp in key is corrupted: {0}")]
 	CorruptedVersionstampInKey(#[from] VersionStampError),
-
-	/// Invalid level
-	#[error("Invalid level '{0}'")]
-	InvalidLevel(String),
 
 	/// Represents an underlying IAM error
 	#[error("IAM error: {0}")]
@@ -892,6 +737,7 @@ pub enum Error {
 
 	/// Network target is not allowed
 	#[error("Access to network target '{0}' is not allowed")]
+	#[cfg_attr(not(feature = "http"), expect(dead_code))]
 	NetTargetNotAllowed(String),
 
 	//
@@ -901,12 +747,6 @@ pub enum Error {
 
 	#[error("No record was returned")]
 	NoRecordFound,
-
-	#[error("The signup query failed")]
-	SignupQueryFailed,
-
-	#[error("The signin query failed")]
-	SigninQueryFailed,
 
 	#[error("Username or Password was not provided")]
 	MissingUserOrPass,
@@ -934,22 +774,6 @@ pub enum Error {
 	/// There was an error with signing up
 	#[error("There was a problem with signing up")]
 	InvalidSignup,
-
-	/// Auth was expected to be set but was unknown
-	#[error("Auth was expected to be set but was unknown")]
-	UnknownAuth,
-
-	/// Auth requires a token header which is missing
-	#[error("Auth token is missing the '{0}' header")]
-	MissingTokenHeader(String),
-
-	/// Auth requires a token claim which is missing
-	#[error("Auth token is missing the '{0}' claim")]
-	MissingTokenClaim(String),
-
-	/// The db is running without an available storage engine
-	#[error("The db is running without an available storage engine")]
-	MissingStorageEngine,
 
 	// The cluster node already exists
 	#[error("The node '{id}' already exists")]
@@ -999,6 +823,12 @@ pub enum Error {
 		name: String,
 	},
 
+	/// The requested module already exists
+	#[error("The module '{name}' already exists")]
+	MdAlreadyExists {
+		name: String,
+	},
+
 	/// The requested index already exists
 	#[error("The index '{name}' already exists")]
 	IxAlreadyExists {
@@ -1043,12 +873,14 @@ pub enum Error {
 
 	/// The requested namespace token already exists
 	#[error("The namespace token '{name}' already exists")]
+	#[allow(dead_code)]
 	NtAlreadyExists {
 		name: String,
 	},
 
 	/// The requested database token already exists
 	#[error("The database token '{name}' already exists")]
+	#[allow(dead_code)]
 	DtAlreadyExists {
 		name: String,
 	},
@@ -1091,10 +923,6 @@ pub enum Error {
 	/// The session has expired
 	#[error("The session has expired")]
 	ExpiredSession,
-
-	/// A node task has failed
-	#[error("A node task has failed: {0}")]
-	NodeAgent(&'static str),
 
 	/// The supplied type could not be serialiazed into `expr::Value`
 	#[error("Serialization error: {0}")]
@@ -1226,19 +1054,6 @@ pub enum Error {
 	#[error("The underlying datastore does not support reversed scans")]
 	UnsupportedReversedScans,
 
-	/// Found an unexpected value in a range
-	#[error("Expected a range value of '{expected}', but found '{found}'")]
-	InvalidRangeValue {
-		expected: String,
-		found: String,
-	},
-
-	/// Found an unexpected value in a range
-	#[error("The range cannot exceed a size of {max} for this operation")]
-	RangeTooBig {
-		max: usize,
-	},
-
 	/// There was an invalid storage version stored in the database
 	#[error("There was an invalid storage version stored in the database")]
 	InvalidStorageVersion,
@@ -1248,9 +1063,6 @@ pub enum Error {
 		"The data stored on disk is out-of-date with this version. Please follow the upgrade guides in the documentation"
 	)]
 	OutdatedStorageVersion,
-
-	#[error("Found a non-computed value where they are not allowed")]
-	NonComputed,
 
 	#[error("Size of query script exceeded maximum supported size of 4,294,967,295 bytes.")]
 	QueryTooLarge,
@@ -1264,17 +1076,9 @@ pub enum Error {
 	#[error("Failed to compute: \"{0}\", as the operation results in a negative value.")]
 	ArithmeticNegativeOverflow(String),
 
-	#[error("Failed to allocate space for \"{0}\"")]
-	InsufficientReserve(String),
-
-	#[error("Received error while streaming query: {0}.")]
-	QueryStream(String),
-
 	#[error("Error while ordering a result: {0}.")]
+	#[cfg_attr(target_family = "wasm", expect(dead_code))]
 	OrderingError(String),
-
-	#[error("Encountered an issue while processed export config: found {0}, but expected {1}.")]
-	InvalidExportConfig(Value, String),
 
 	/// Found an unexpected value in a range
 	#[error("Found {found} for bound but expected {expected}.")]
@@ -1289,29 +1093,14 @@ pub enum Error {
 		limit: u32,
 	},
 
-	/// Found an unexpected value in a range
-	#[error("Tried to use a `@` repeat recurse symbol, while not recursing.")]
-	RepeatRecurseNotRecursing,
-
-	/// Found an unexpected value in a range
-	#[error("Tried to use a `{symbol}` recursion symbol, while already recursing.")]
-	IdiomRecursionAlreadyRecursing {
-		symbol: String,
-	},
-
 	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not
 	/// supported
 	#[error("Tried to use a `@` repeat recurse symbol in a position where it is not supported")]
 	UnsupportedRepeatRecurse,
 
-	#[error("Error while computing version: expected a datetime, but found {found}")]
-	InvalidVersion {
-		found: Value,
-	},
-
 	/// Tried to use an idiom RepeatRecurse symbol in a position where it is not
 	/// supported
-	#[error("Can not construct a recursion plan when an instruction is provided")]
+	#[error("Cannot construct a recursion plan when an instruction is provided")]
 	RecursionInstructionPlanConflict,
 
 	/// The record cannot be deleted as it's still referenced elsewhere
@@ -1321,32 +1110,18 @@ pub enum Error {
 	/// The `REFERENCE` keyword can only be used in combination with a type
 	/// referencing a record
 	#[error(
-		"Cannot use the `REFERENCE` keyword with `TYPE {0}`. Specify a `record` type, or a type containing only records, instead."
+		"Cannot use the `REFERENCE` keyword with `TYPE {0}`. Specify only a `record` type, or a type containing only records, instead."
 	)]
 	ReferenceTypeConflict(String),
 
-	/// The `references` type cannot be used with other clauses altering or
-	/// working with the value
-	#[error("Cannot use the `{0}` keyword with `TYPE {0}`.")]
-	RefsTypeConflict(String, String),
-
-	/// The `references` type cannot be used with other clauses altering or
-	/// working with the value
 	#[error(
-		"When specifying a `TYPE` clause with `references`, all variants must be of type `references`."
+		"Cannot use the `REFERENCE` keyword on nested field `{0}`. Specify a referencing field at the root level instead."
 	)]
-	RefsMismatchingVariants,
+	ReferenceNestedField(String),
 
 	/// Something went wrong while updating references
 	#[error("An error occured while updating references for `{0}`: {1}")]
 	RefsUpdateFailure(String, String),
-
-	/// Cannot process `Value::Refs` as there is no Record ID in the context for
-	/// the operation
-	#[error(
-		"Cannot obtain a list of references as there is no Record ID in the context for the operation"
-	)]
-	InvalidRefsContext,
 
 	#[error(
 		"Cannot set field `{name}` with type `{kind}` as it mismatched with field `{existing_name}` with type `{existing_kind}`"
@@ -1376,13 +1151,11 @@ pub enum Error {
 	#[error("Bucket `{0}` is unavailable")]
 	BucketUnavailable(String),
 
-	#[error("File key `{0}` cannot be parsed into a path")]
-	InvalidBucketKey(String),
-
 	#[error("Bucket is unavailable")]
 	GlobalBucketEnforced,
 
 	#[error("Bucket url could not be processed: {0}")]
+	#[cfg_attr(target_family = "wasm", expect(dead_code))]
 	InvalidBucketUrl(String),
 
 	#[error("Bucket backend is not supported")]
@@ -1393,9 +1166,6 @@ pub enum Error {
 
 	#[error("Operation for bucket `{0}` failed: {1}")]
 	ObjectStoreFailure(String, String),
-
-	#[error("Failed to connect to bucket: {0}")]
-	BucketConnectionFailed(String),
 
 	/// The `COMPUTED` clause cannot be used with other clauses altering or
 	/// working with the value
@@ -1423,6 +1193,7 @@ pub enum Error {
 }
 
 impl Error {
+	#[cold]
 	#[track_caller]
 	pub fn unreachable<T: fmt::Display>(message: T) -> Error {
 		let location = std::panic::Location::caller();
@@ -1493,10 +1264,11 @@ impl From<ToStrError> for Error {
 #[cfg(any(feature = "kv-mem", feature = "kv-surrealkv"))]
 impl From<surrealkv::Error> for Error {
 	fn from(e: surrealkv::Error) -> Error {
+		let s = e.to_string();
 		match e {
-			surrealkv::Error::TransactionReadConflict => Error::TxRetryable,
-			surrealkv::Error::TransactionWriteConflict => Error::TxRetryable,
-			_ => Error::Tx(e.to_string()),
+			surrealkv::Error::TransactionReadConflict => Error::TxRetryable(s),
+			surrealkv::Error::TransactionWriteConflict => Error::TxRetryable(s),
+			_ => Error::Tx(s),
 		}
 	}
 }
@@ -1504,10 +1276,11 @@ impl From<surrealkv::Error> for Error {
 #[cfg(feature = "kv-rocksdb")]
 impl From<rocksdb::Error> for Error {
 	fn from(e: rocksdb::Error) -> Error {
+		let s = e.to_string();
 		match e.kind() {
-			rocksdb::ErrorKind::Busy => Error::TxRetryable,
-			rocksdb::ErrorKind::TryAgain => Error::TxRetryable,
-			_ => Error::Tx(e.to_string()),
+			rocksdb::ErrorKind::Busy => Error::TxRetryable(s),
+			rocksdb::ErrorKind::TryAgain => Error::TxRetryable(s),
+			_ => Error::Tx(s),
 		}
 	}
 }
@@ -1526,12 +1299,17 @@ impl From<indxdb::err::Error> for Error {
 #[cfg(feature = "kv-tikv")]
 impl From<tikv::Error> for Error {
 	fn from(e: tikv::Error) -> Error {
+		let s = e.to_string();
 		match e {
 			tikv::Error::DuplicateKeyInsertion => Error::TxKeyAlreadyExists,
-			tikv::Error::KeyError(ke) if ke.conflict.is_some() => Error::TxRetryable,
-			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => Error::TxKeyTooLarge,
-			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => Error::TxTooLarge,
-			_ => Error::Tx(e.to_string()),
+			tikv::Error::KeyError(ke) if ke.conflict.is_some() => Error::TxRetryable(s),
+			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => {
+				Error::Tx("Transaction key too large".to_string())
+			}
+			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => {
+				Error::Tx("Transaction too large".to_string())
+			}
+			_ => Error::Tx(s),
 		}
 	}
 }
@@ -1539,26 +1317,28 @@ impl From<tikv::Error> for Error {
 #[cfg(feature = "kv-fdb")]
 impl From<foundationdb::FdbError> for Error {
 	fn from(e: foundationdb::FdbError) -> Error {
+		let s = e.to_string();
 		if e.is_retryable() {
-			return Error::TxRetryable;
+			return Error::TxRetryable(s);
 		}
 		if e.is_retryable_not_committed() {
-			return Error::TxRetryable;
+			return Error::TxRetryable(s);
 		}
-		Error::Ds(e.to_string())
+		Error::Ds(s)
 	}
 }
 
 #[cfg(feature = "kv-fdb")]
 impl From<foundationdb::TransactionCommitError> for Error {
 	fn from(e: foundationdb::TransactionCommitError) -> Error {
+		let s = e.to_string();
 		if e.is_retryable() {
-			return Error::TxRetryable;
+			return Error::TxRetryable(s);
 		}
 		if e.is_retryable_not_committed() {
-			return Error::TxRetryable;
+			return Error::TxRetryable(s);
 		}
-		Error::Tx(e.to_string())
+		Error::Tx(s)
 	}
 }
 

@@ -26,6 +26,24 @@ overwrite`, which will overwrite the specified results of test if they do not
 match the actual results of the test. This flag should be used sparingly and
 only after inspecting if the new results are actually valid.
 
+The `--backend` flag allows you to specify which storage engine to use for running
+the tests. By default, tests run using the in-memory storage engine (`mem` or `memory`).
+Other supported backends include:
+- `memory` or `mem` (default): In-memory storage engine, fastest for testing
+- `rocksdb`: RocksDB embedded storage engine (requires `backend-rocksdb` feature)
+- `surrealkv` or `file`: SurrealKV file-based storage engine (requires `backend-surrealkv` feature)
+- `tikv`: TiKV distributed storage engine (requires `backend-tikv` feature and a running TiKV cluster)
+- `foundation`: FoundationDB storage engine (requires `backend-foundation` feature)
+
+Note that some backends require the corresponding Cargo feature to be enabled when building:
+```bash
+# Example: Running tests with RocksDB backend
+cargo run --features backend-rocksdb run --backend rocksdb
+
+# Example: Running tests with TiKV backend (requires running TiKV cluster at 127.0.0.1:2379)
+cargo run --features backend-tikv run --backend tikv
+```
+
 ## SurrealQL Language Test Format
 
 Language test are plain surrealql files that are parse-able by the normal
@@ -169,28 +187,50 @@ Defaults to `"*"`
 #### `[test.results]`
 
 The test results table specifies the expected out of the test. The command line
-tool will warn about every test that does not includes a this table in its
+tool will warn about every test that does not include this table in its
 configuration. This table can either be a straight table or an array of tables.
 
 Examples:
 
 ```toml
 [test.results]
-parse-error = "foo"
+parsing-error = "foo"
 ```
 
 This tests if the test returns a parsing error with the text `foo`. A test is
 parsed once and can only return a single parsing error. So when testing for a
 parsing error only a single result is allowed to be specified.
 
+```surql
+/**
+[test]
+
+[test.results]
+parsing-error = """
+Invalid function/constant path, did you maybe mean `type::record`
+  --> [16:1]
+   |
+16 | type::thing("person", "one");
+   | ^^^^^^^^^^^
+"""
+
+*/
+
+type::thing("person", "one");
+
+// Can't add this extra assertion inside the same file
+// Must be a separate file with its own [test.results]
+// string::slayce();
+```
+
 Note that the following are also allowed:
 
 ```toml
 [test.results]
-parse-error = true
+parsing-error = true
 
 [test.results]
-parse-error = false
+parsing-error = false
 ```
 
 Specifying a boolean will check for the presence or absence of a parsing error

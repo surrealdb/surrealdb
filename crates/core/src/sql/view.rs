@@ -5,7 +5,7 @@ use crate::sql::{Cond, Fields, Groups};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct View {
+pub(crate) struct View {
 	pub expr: Fields,
 	pub what: Vec<String>,
 	pub cond: Option<Cond>,
@@ -33,6 +33,7 @@ impl fmt::Display for View {
 impl From<View> for crate::expr::View {
 	fn from(v: View) -> Self {
 		crate::expr::View {
+			materialize: true,
 			expr: v.expr.into(),
 			what: v.what.clone(),
 			cond: v.cond.map(Into::into),

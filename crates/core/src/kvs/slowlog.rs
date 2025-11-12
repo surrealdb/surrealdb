@@ -15,16 +15,16 @@
 //!   whitespace is collapsed so the entire log fits on one line.
 //!
 //! Note: Values considered "nullish" are not logged.
-use std::fmt::Display;
+use std::fmt::Write;
 use std::sync::Arc;
 use std::time::Duration;
 
+use surrealdb_types::ToSql;
 use trice::Instant;
 
+use crate::catalog::{Permission, Permissions};
 use crate::ctx::Context;
-use crate::expr::Expr;
-use crate::expr::expression::VisitExpression;
-use crate::sql::ToSql;
+use crate::expr::visit::{Visit, Visitor};
 
 #[derive(Clone)]
 /// Configuration and logic for slow query logging.
@@ -44,6 +44,44 @@ struct Inner {
 	param_allow: Vec<String>,
 	param_deny: Vec<String>,
 }
+
+pub(crate) struct ParamVisitor<'a> {
+	params: String,
+	slow_log: &'a SlowLog,
+	ctx: &'a Context,
+}
+
+impl Visitor for ParamVisitor<'_> {
+	type Error = ();
+
+	fn visit_param(&mut self, param: &crate::expr::Param) -> Result<(), Self::Error> {
+		if !self.slow_log.is_param_allowed(param) {
+			return Ok(());
+		}
+		if let Some(value) = self.ctx.value(param) {
+			if !value.is_none() && !value.is_null() {
+				let value = value.to_string().split_whitespace().collect::<Vec<_>>().join(" ");
+				if !self.params.is_empty() {
+					self.params.push_str(", ");
+				}
+				write!(&mut self.params, "{}={}", param, value)
+					.expect("Writing into a string cannot fail");
+			}
+		}
+		Ok(())
+	}
+
+	// Empty implementations so that the visitor won't recurse into permissions.
+	fn visit_permissions(&mut self, _: &Permissions) -> Result<(), Self::Error> {
+		Ok(())
+	}
+	fn visit_permission(&mut self, _: &Permission) -> Result<(), Self::Error> {
+		Ok(())
+	}
+}
+
+pub(crate) trait SlowLogVisit: for<'a> Visit<ParamVisitor<'a>> {}
+impl<V: for<'a> Visit<ParamVisitor<'a>>> SlowLogVisit for V {}
 
 impl SlowLog {
 	/// Create a new slow log configuration.
@@ -93,7 +131,7 @@ impl SlowLog {
 	///   values from the `Context`.
 	/// - Renders the SQL and parameter values, collapsing whitespace so the output is a single line
 	///   suitable for log processing.
-	pub(crate) fn check_log<S: VisitExpression + Display>(
+	pub(crate) fn check_log<S: SlowLogVisit + ToSql>(
 		&self,
 		ctx: &Context,
 		start: &Instant,
@@ -103,26 +141,25 @@ impl SlowLog {
 		if elapsed < self.0.duration {
 			return;
 		}
+
 		// Extract params
-		let mut params = vec![];
-		stm.visit(&mut |e| {
-			if let Expr::Param(p) = e {
-				let name = p.as_str();
-				if !self.is_param_allowed(name) {
-					return;
-				}
-				if let Some(value) = ctx.value(name) {
-					if !value.is_nullish() {
-						let value = value.to_sql().split_whitespace().collect::<Vec<_>>().join(" ");
-						params.push(format!("${}={}", name, value));
-					}
-				}
-			}
-		});
+		let params = self.extract_params(ctx, stm);
 		// Ensure the query is logged on a single line by collapsing whitespace
 		let stm = stm.to_sql().split_whitespace().collect::<Vec<_>>().join(" ");
-		let params = params.join(", ");
 		warn!("Slow query detected - time: {elapsed:#?} - query: {stm} - params: [ {params} ]");
+	}
+
+	fn extract_params<S: SlowLogVisit + ToSql>(&self, ctx: &Context, stm: &S) -> String {
+		let mut visitor = ParamVisitor {
+			params: String::new(),
+			slow_log: self,
+			ctx,
+		};
+
+		// no errors can happen
+		let _ = stm.visit(&mut visitor);
+
+		visitor.params
 	}
 }
 

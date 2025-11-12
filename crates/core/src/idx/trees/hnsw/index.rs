@@ -1,14 +1,13 @@
 use std::collections::VecDeque;
 
-#[cfg(debug_assertions)]
-use ahash::HashMap;
 use anyhow::Result;
 use reblessive::tree::Stk;
 
-use crate::catalog::{DatabaseDefinition, HnswParams, VectorType};
+use crate::catalog::{DatabaseDefinition, HnswParams, TableId, VectorType};
 use crate::idx::IndexKeyBase;
 use crate::idx::planner::checker::HnswConditionChecker;
 use crate::idx::planner::iterators::KnnIteratorResult;
+use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::hnsw::docs::{HnswDocs, VecDocs};
 use crate::idx::trees::hnsw::elements::HnswElements;
 use crate::idx::trees::hnsw::flavor::HnswFlavor;
@@ -18,7 +17,7 @@ use crate::idx::trees::vector::{SharedVector, Vector};
 use crate::kvs::Transaction;
 use crate::val::{Number, RecordIdKey, Value};
 
-pub struct HnswIndex {
+pub(crate) struct HnswIndex {
 	dim: usize,
 	vector_type: VectorType,
 	hnsw: HnswFlavor,
@@ -73,17 +72,18 @@ impl<'a> HnswCheckedSearchContext<'a> {
 }
 
 impl HnswIndex {
-	pub async fn new(
+	pub(crate) async fn new(
+		vector_cache: VectorCache,
 		tx: &Transaction,
 		ikb: IndexKeyBase,
-		tb: String,
+		tb: TableId,
 		p: &HnswParams,
 	) -> Result<Self> {
 		Ok(Self {
 			dim: p.dimension as usize,
 			vector_type: p.vector_type,
-			hnsw: HnswFlavor::new(ikb.clone(), p)?,
-			docs: HnswDocs::new(tx, tb, ikb.clone()).await?,
+			hnsw: HnswFlavor::new(tb, ikb.clone(), p, vector_cache)?,
+			docs: HnswDocs::new(tx, ikb.table().to_string(), ikb.clone()).await?,
 			vec_docs: VecDocs::new(ikb),
 		})
 	}
@@ -195,14 +195,11 @@ impl HnswIndex {
 				}
 			}
 		}
-		Ok(builder.build(
-			#[cfg(debug_assertions)]
-			HashMap::default(),
-		))
+		Ok(builder.build())
 	}
 
 	#[cfg(test)]
-	pub(super) fn check_hnsw_properties(&self, expected_count: usize) {
-		self.hnsw.check_hnsw_properties(expected_count)
+	pub(super) async fn check_hnsw_properties(&self, expected_count: usize) {
+		self.hnsw.check_hnsw_properties(expected_count).await
 	}
 }

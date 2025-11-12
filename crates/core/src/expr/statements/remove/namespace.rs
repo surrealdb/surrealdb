@@ -8,25 +8,15 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct RemoveNamespaceStatement {
+pub(crate) struct RemoveNamespaceStatement {
 	pub name: Expr,
 	pub if_exists: bool,
 	pub expunge: bool,
-}
-
-impl VisitExpression for RemoveNamespaceStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-	}
 }
 
 impl Default for RemoveNamespaceStatement {
@@ -69,12 +59,9 @@ impl RemoveNamespaceStatement {
 		};
 
 		// Remove the index stores
-		#[cfg(not(target_family = "wasm"))]
 		ctx.get_index_stores()
 			.namespace_removed(ctx.get_index_builder(), &txn, ns.namespace_id)
 			.await?;
-		#[cfg(target_family = "wasm")]
-		ctx.get_index_stores().namespace_removed(&txn, ns.namespace_id).await?;
 		// Remove the sequences
 		if let Some(seq) = ctx.get_sequences() {
 			seq.namespace_removed(&txn, ns.namespace_id).await?;

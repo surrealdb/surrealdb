@@ -1,6 +1,8 @@
+#![allow(clippy::unwrap_used)]
+
 use surrealdb::Surreal;
 use surrealdb::engine::any::Any;
-use surrealdb_core::val::RecordIdKey;
+use surrealdb_types::RecordIdKey;
 use tokio::runtime::Runtime;
 use tokio::task::JoinSet;
 
@@ -15,7 +17,7 @@ impl Read {
 	pub fn new(runtime: &'static Runtime) -> Self {
 		Self {
 			runtime,
-			table_name: format!("table_{}", RecordIdKey::rand()),
+			table_name: format!("table_{}", super::rand_id()),
 		}
 	}
 }

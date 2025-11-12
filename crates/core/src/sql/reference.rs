@@ -4,7 +4,7 @@ use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Reference {
+pub(crate) struct Reference {
 	pub on_delete: ReferenceDeleteStrategy,
 }
 
@@ -31,7 +31,7 @@ impl From<crate::expr::reference::Reference> for Reference {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum ReferenceDeleteStrategy {
+pub(crate) enum ReferenceDeleteStrategy {
 	Reject,
 	Ignore,
 	Cascade,

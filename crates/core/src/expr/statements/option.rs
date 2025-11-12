@@ -3,7 +3,7 @@ use std::fmt;
 use crate::fmt::EscapeIdent;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct OptionStatement {
+pub(crate) struct OptionStatement {
 	pub name: String,
 	pub what: bool,
 }

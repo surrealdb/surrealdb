@@ -10,7 +10,7 @@ use super::DefineKind;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct DefineConfigStatement {
+pub(crate) struct DefineConfigStatement {
 	pub kind: DefineKind,
 	pub inner: ConfigInner,
 }
@@ -35,7 +35,7 @@ impl From<crate::expr::statements::define::DefineConfigStatement> for DefineConf
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub enum ConfigInner {
+pub(crate) enum ConfigInner {
 	GraphQL(GraphQLConfig),
 	Api(ApiConfig),
 }

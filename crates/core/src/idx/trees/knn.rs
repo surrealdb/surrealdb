@@ -1,9 +1,7 @@
-use std::cmp::{Ordering, Reverse};
+use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, VecDeque};
 
-#[cfg(debug_assertions)]
-use ahash::HashMap;
 use ahash::{HashSet, HashSetExt};
 use revision::revisioned;
 use roaring::RoaringTreemap;
@@ -12,20 +10,6 @@ use serde::{Deserialize, Serialize};
 use crate::idx::seqdocids::DocId;
 use crate::idx::trees::dynamicset::DynamicSet;
 use crate::idx::trees::hnsw::ElementId;
-use crate::idx::trees::store::NodeId;
-
-#[derive(Debug, Clone, Copy, Ord, Eq, PartialEq, PartialOrd)]
-pub(super) struct PriorityNode(Reverse<FloatKey>, NodeId);
-
-impl PriorityNode {
-	pub(super) fn new(d: f64, id: NodeId) -> Self {
-		Self(Reverse(FloatKey::new(d)), id)
-	}
-
-	pub(super) fn id(&self) -> NodeId {
-		self.1
-	}
-}
 
 #[derive(Default, Debug, Clone)]
 pub(super) struct DoublePriorityQueue(BTreeMap<FloatKey, VecDeque<ElementId>>, usize);
@@ -86,7 +70,7 @@ impl DoublePriorityQueue {
 	pub(super) fn peek_first(&self) -> Option<(f64, ElementId)> {
 		self.0.first_key_value().map(|(k, q)| {
 			let k = k.0;
-			let v = *q.iter().next().unwrap(); // By design the contains always contains one element
+			let v = *q.iter().next().expect("contains always has one element"); // By design the contains always contains one element
 			(k, v)
 		})
 	}
@@ -143,12 +127,6 @@ impl DoublePriorityQueue {
 /// BTreeSet.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct FloatKey(f64);
-
-impl FloatKey {
-	pub(super) fn new(f: f64) -> Self {
-		FloatKey(f)
-	}
-}
 impl From<FloatKey> for f64 {
 	fn from(v: FloatKey) -> Self {
 		v.0
@@ -361,7 +339,7 @@ impl Ids64 {
 		}
 	}
 
-	pub(in crate::idx) fn iter(&self) -> Box<dyn Iterator<Item = DocId> + '_> {
+	pub(in crate::idx) fn iter(&self) -> Box<dyn Iterator<Item = DocId> + Send + '_> {
 		match &self {
 			Self::Empty => Box::new(EmptyIterator {}),
 			Self::One(d) => Box::new(OneDocIterator(Some(*d))),
@@ -576,10 +554,7 @@ impl KnnResultBuilder {
 		Ids64::Empty
 	}
 
-	pub(super) fn build(
-		self,
-		#[cfg(debug_assertions)] visited_nodes: HashMap<NodeId, usize>,
-	) -> KnnResult {
+	pub(super) fn build(self) -> KnnResult {
 		let mut sorted_docs = VecDeque::with_capacity(self.knn as usize);
 		let mut left = self.knn;
 		for (pr, docs) in self.priority_list {
@@ -602,17 +577,12 @@ impl KnnResultBuilder {
 		trace!("sorted_docs: {:?}", sorted_docs);
 		KnnResult {
 			docs: sorted_docs,
-			#[cfg(debug_assertions)]
-			visited_nodes,
 		}
 	}
 }
 
 pub struct KnnResult {
 	pub(in crate::idx::trees) docs: VecDeque<(DocId, f64)>,
-	#[cfg(debug_assertions)]
-	#[cfg_attr(all(debug_assertions, not(test)), expect(dead_code))]
-	pub(in crate::idx::trees) visited_nodes: HashMap<NodeId, usize>,
 }
 
 #[cfg(test)]
@@ -623,8 +593,6 @@ pub(super) mod tests {
 	use std::io::{BufRead, BufReader};
 	use std::time::SystemTime;
 
-	#[cfg(debug_assertions)]
-	use ahash::HashMap;
 	use ahash::HashSet;
 	use anyhow::Result;
 	use flate2::read::GzDecoder;
@@ -638,6 +606,7 @@ pub(super) mod tests {
 	use crate::idx::seqdocids::DocId;
 	use crate::idx::trees::knn::{DoublePriorityQueue, FloatKey, Ids64, KnnResultBuilder};
 	use crate::idx::trees::vector::{SharedVector, Vector};
+	use crate::sql::expression::convert_public_value_to_internal;
 	use crate::syn;
 	use crate::val::{Number, Value};
 
@@ -692,8 +661,9 @@ pub(super) mod tests {
 				}
 			}
 			let line = line_result?;
-			let Ok(Value::Array(array)) = syn::value(&line) else {
-				panic!()
+			let Value::Array(array) = convert_public_value_to_internal(syn::value(&line).unwrap())
+			else {
+				panic!("Expected a valid array value");
 			};
 			let vec = Vector::try_from_value(t, array.len(), &Value::Array(array))?.into();
 			res.push((i as DocId, vec));
@@ -828,10 +798,7 @@ pub(super) mod tests {
 		b.add(0.2, Ids64::Vec3([0, 1, 2]));
 		b.add(0.2, Ids64::One(3));
 		b.add(0.2, Ids64::Vec2([6, 8]));
-		let res = b.build(
-			#[cfg(debug_assertions)]
-			HashMap::default(),
-		);
+		let res = b.build();
 		assert_eq!(
 			res.docs,
 			VecDeque::from([(5, 0.0), (0, 0.2), (1, 0.2), (2, 0.2), (3, 0.2), (6, 0.2), (8, 0.2)])
@@ -888,8 +855,7 @@ pub(super) mod tests {
 
 	#[test]
 	fn test_priority_node() {
-		let (n1, n2, n3) =
-			((FloatKey::new(1.0), 1), (FloatKey::new(2.0), 2), (FloatKey::new(3.0), 3));
+		let (n1, n2, n3) = ((FloatKey(1.0), 1), (FloatKey(2.0), 2), (FloatKey(3.0), 3));
 		let mut q = BinaryHeap::from([n3, n1, n2]);
 
 		assert_eq!(q.pop(), Some(n3));
@@ -975,7 +941,7 @@ pub(super) mod tests {
 		const TOTAL: usize = 500;
 		let mut pns = Vec::with_capacity(TOTAL);
 		for i in 0..TOTAL {
-			pns.push((FloatKey::new(i as f64), i as u64));
+			pns.push((FloatKey(i as f64), i as u64));
 		}
 
 		// Test BTreeSet

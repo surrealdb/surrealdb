@@ -8,26 +8,17 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct RemoveDatabaseStatement {
+pub(crate) struct RemoveDatabaseStatement {
 	pub name: Expr,
 	pub if_exists: bool,
 	pub expunge: bool,
 }
 
-impl VisitExpression for RemoveDatabaseStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.name.visit(visitor);
-	}
-}
 impl Default for RemoveDatabaseStatement {
 	fn default() -> Self {
 		Self {
@@ -70,12 +61,9 @@ impl RemoveDatabaseStatement {
 		};
 
 		// Remove the index stores
-		#[cfg(not(target_family = "wasm"))]
 		ctx.get_index_stores()
 			.database_removed(ctx.get_index_builder(), &txn, db.namespace_id, db.database_id)
 			.await?;
-		#[cfg(target_family = "wasm")]
-		ctx.get_index_stores().database_removed(&txn, db.namespace_id, db.database_id).await?;
 		// Remove the sequences
 		if let Some(seq) = ctx.get_sequences() {
 			seq.database_removed(&txn, db.namespace_id, db.database_id).await?;

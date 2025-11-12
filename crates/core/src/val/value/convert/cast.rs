@@ -12,7 +12,7 @@ use crate::syn;
 use crate::val::array::Uniq;
 use crate::val::{
 	Array, Bytes, Closure, Datetime, DecimalExt, Duration, File, Geometry, Null, Number, Object,
-	Range, RecordId, Regex, SqlNone, Uuid, Value,
+	Range, RecordId, Regex, Set, SqlNone, Uuid, Value,
 };
 
 #[derive(Clone, Debug)]
@@ -47,7 +47,7 @@ impl fmt::Display for CastError {
 				from,
 				into,
 			} => {
-				write!(f, "Expected `{into}` but found a `{from}`")
+				write!(f, "Could not cast into `{into}` using input `{from}`")
 			}
 			CastError::ElementOf {
 				inner,
@@ -355,7 +355,7 @@ impl Cast for String {
 			Value::None => Ok("NONE".into()),
 			Value::String(x) => Ok(x),
 			Value::Uuid(x) => Ok(x.to_raw()),
-			Value::Datetime(x) => Ok(x.into_raw_string()),
+			Value::Datetime(x) => Ok(x.to_raw_string()),
 			Value::Number(Number::Decimal(x)) => Ok(x.to_string()),
 			x => Ok(x.to_string()),
 		}
@@ -466,8 +466,8 @@ impl Cast for Bytes {
 				let mut res = Vec::new();
 
 				for v in x.0.into_iter() {
-					// Unwrap condition checked above.
-					let x = v.clone().cast_to::<i64>().unwrap();
+					// Condition checked above
+					let x = v.clone().cast_to::<i64>().expect("value checked to be castable above");
 					// TODO: Fix truncation.
 					res.push(x as u8);
 				}
@@ -501,8 +501,8 @@ impl Cast for Array {
 						into: "array".to_string(),
 					});
 				}
-				// unwrap checked above
-				let range = range.coerce_to_typed::<i64>().unwrap();
+				// checked above
+				let range = range.coerce_to_typed::<i64>().expect("range type checked above");
 				if range.len() > *GENERATION_ALLOCATION_LIMIT {
 					return Err(CastError::RangeSizeLimit {
 						value: Box::new(Range::from(range)),
@@ -516,6 +516,26 @@ impl Cast for Array {
 			_ => Err(CastError::InvalidKind {
 				from: v,
 				into: "array".into(),
+			}),
+		}
+	}
+}
+
+impl Cast for Set {
+	fn can_cast(v: &Value) -> bool {
+		matches!(v, Value::Set(_) | Value::Array(_))
+	}
+
+	fn cast(v: Value) -> Result<Self, CastError> {
+		match v {
+			Value::Set(x) => Ok(x),
+			Value::Array(x) => {
+				// Convert array to set, automatically deduplicating
+				Ok(Set::from(x.0))
+			}
+			_ => Err(CastError::InvalidKind {
+				from: v,
+				into: "set".into(),
 			}),
 		}
 	}
@@ -569,10 +589,10 @@ impl Cast for Box<Range> {
 				}
 
 				let mut iter = x.into_iter();
-				// unwrap checked above.
-				let beg = iter.next().unwrap();
-				// unwrap checked above.
-				let end = iter.next().unwrap();
+				// checked above
+				let beg = iter.next().expect("array length checked above");
+				// checked above
+				let end = iter.next().expect("array length checked above");
 
 				Ok(Box::new(Range {
 					start: Bound::Included(beg),
@@ -615,10 +635,18 @@ impl Cast for Point<f64> {
 				}
 
 				let mut iter = x.into_iter();
-				// Both unwraps checked above.
-				let x = iter.next().unwrap().cast_to::<f64>().unwrap();
-				// Both unwraps checked above.
-				let y = iter.next().unwrap().cast_to::<f64>().unwrap();
+				// checked above
+				let x = iter
+					.next()
+					.expect("array length checked above")
+					.cast_to::<f64>()
+					.expect("value type checked above");
+				// checked above
+				let y = iter
+					.next()
+					.expect("array length checked above")
+					.cast_to::<f64>()
+					.expect("value type checked above");
 
 				Ok(Point::new(x, y))
 			}
@@ -643,7 +671,7 @@ impl Cast for RecordId {
 		match v {
 			Value::RecordId(x) => Ok(x),
 			Value::String(x) => match syn::record_id(&x) {
-				Ok(x) => Ok(x),
+				Ok(x) => Ok(x.into()),
 				Err(_) => Err(CastError::InvalidKind {
 					from: Value::String(x),
 					into: "record".to_string(),
@@ -652,6 +680,23 @@ impl Cast for RecordId {
 			from => Err(CastError::InvalidKind {
 				from,
 				into: "record".to_string(),
+			}),
+		}
+	}
+}
+
+impl Cast for crate::val::Table {
+	fn can_cast(v: &Value) -> bool {
+		matches!(v, Value::Table(_) | Value::String(_))
+	}
+
+	fn cast(v: Value) -> Result<Self, CastError> {
+		match v {
+			Value::Table(x) => Ok(x),
+			Value::String(x) => Ok(crate::val::Table::new(x)),
+			from => Err(CastError::InvalidKind {
+				from,
+				into: "table".to_string(),
 			}),
 		}
 	}
@@ -714,7 +759,7 @@ impl Value {
 			Kind::String => self.can_cast_to::<String>(),
 			Kind::Datetime => self.can_cast_to::<Datetime>(),
 			Kind::Duration => self.can_cast_to::<Duration>(),
-			Kind::Object => self.can_cast_to::<Object>(),
+			Kind::Object => self.can_cast_to::<crate::val::Object>(),
 			Kind::Bytes => self.can_cast_to::<Bytes>(),
 			Kind::Uuid => self.can_cast_to::<Uuid>(),
 			Kind::Regex => self.can_cast_to::<Regex>(),
@@ -728,6 +773,13 @@ impl Value {
 				Some(l) => self.can_cast_to_array_len(t, *l),
 				None => self.can_cast_to_array(t),
 			},
+			Kind::Table(t) => {
+				if t.is_empty() {
+					self.can_cast_to::<String>()
+				} else {
+					self.can_cast_to_table(t)
+				}
+			}
 			Kind::Record(t) => {
 				if t.is_empty() {
 					self.can_cast_to::<RecordId>()
@@ -768,9 +820,17 @@ impl Value {
 		}
 	}
 
+	fn can_cast_to_table(&self, val: &[String]) -> bool {
+		match self {
+			Value::Table(t) => t.is_table_type(val),
+			Value::String(_) => true, // Strings can be cast to tables
+			_ => false,
+		}
+	}
+
 	fn can_cast_to_record(&self, val: &[String]) -> bool {
 		match self {
-			Value::RecordId(t) => t.is_record_type(val),
+			Value::RecordId(t) => t.is_table_type(val),
 			_ => false,
 		}
 	}
@@ -806,7 +866,7 @@ impl Value {
 			Kind::String => self.cast_to::<String>().map(Value::from),
 			Kind::Datetime => self.cast_to::<Datetime>().map(Value::from),
 			Kind::Duration => self.cast_to::<Duration>().map(Value::from),
-			Kind::Object => self.cast_to::<Object>().map(Value::from),
+			Kind::Object => self.cast_to::<crate::val::Object>().map(Value::from),
 			Kind::Bytes => self.cast_to::<Bytes>().map(Value::from),
 			Kind::Uuid => self.cast_to::<Uuid>().map(Value::from),
 			Kind::Regex => self.cast_to::<Regex>().map(Value::from),
@@ -819,6 +879,10 @@ impl Value {
 			Kind::Array(t, l) => match l {
 				Some(l) => self.cast_to_array_len(t, *l).map(Value::from),
 				None => self.cast_to_array(t).map(Value::from),
+			},
+			Kind::Table(t) => match t.is_empty() {
+				true => self.cast_to::<String>().map(|s| Value::Table(crate::val::Table::new(s))),
+				false => self.cast_to_table(t).map(Value::from),
 			},
 			Kind::Record(t) => match t.is_empty() {
 				true => self.cast_to::<RecordId>().map(Value::from),
@@ -864,12 +928,55 @@ impl Value {
 		}
 	}
 
+	/// Try to convert this value to a Table of a certain type
+	fn cast_to_table(self, val: &[String]) -> Result<crate::val::Table, CastError> {
+		match self {
+			Value::Table(v) if v.is_table_type(val) => Ok(v),
+			Value::String(v) => {
+				// Check if the string is a valid table name and matches the allowed types
+				let table = crate::val::Table::new(v.clone());
+				if table.is_table_type(val) {
+					Ok(table)
+				} else {
+					let mut kind = "table<".to_string();
+					for (idx, t) in val.iter().enumerate() {
+						if idx != 0 {
+							kind.push('|');
+						}
+						kind.push_str(t.as_str())
+					}
+					kind.push('>');
+
+					Err(CastError::InvalidKind {
+						from: Value::String(v),
+						into: kind,
+					})
+				}
+			}
+			x => {
+				let mut kind = "table<".to_string();
+				for (idx, t) in val.iter().enumerate() {
+					if idx != 0 {
+						kind.push('|');
+					}
+					kind.push_str(t.as_str())
+				}
+				kind.push('>');
+
+				Err(CastError::InvalidKind {
+					from: x,
+					into: kind,
+				})
+			}
+		}
+	}
+
 	/// Try to convert this value to a Record of a certain type
 	fn cast_to_record(self, val: &[String]) -> Result<RecordId, CastError> {
 		match self {
-			Value::RecordId(v) if v.is_record_type(val) => Ok(v),
+			Value::RecordId(v) if v.is_table_type(val) => Ok(v),
 			Value::String(v) => match syn::record_id(v.as_str()) {
-				Ok(x) if x.is_record_type(val) => Ok(x),
+				Ok(x) if x.is_table_type(val) => Ok(x.into()),
 				_ => {
 					let mut kind = "record<".to_string();
 					for (idx, t) in val.iter().enumerate() {
@@ -1003,5 +1110,87 @@ impl Value {
 			from: v.into(),
 			into: kind,
 		})
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_cast_to_table_generic() {
+		// Test casting string to generic table type
+		let value = Value::String("users".to_string());
+		let kind = Kind::Table(vec![]);
+		let result = value.cast_to_kind(&kind);
+		assert!(result.is_ok());
+		if let Ok(Value::Table(table)) = result {
+			assert_eq!(table.as_str(), "users");
+		} else {
+			panic!("Expected Value::Table");
+		}
+	}
+
+	#[test]
+	fn test_cast_to_table_specific() {
+		// Test casting string to specific table type (matching)
+		let value = Value::String("users".to_string());
+		let kind = Kind::Table(vec!["users".to_string()]);
+		let result = value.cast_to_kind(&kind);
+		assert!(result.is_ok());
+		if let Ok(Value::Table(table)) = result {
+			assert_eq!(table.as_str(), "users");
+		}
+
+		// Test casting string to specific table type (not matching)
+		let value = Value::String("posts".to_string());
+		let kind = Kind::Table(vec!["users".to_string()]);
+		let result = value.cast_to_kind(&kind);
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn test_cast_to_table_union() {
+		// Test casting string to union of table types
+		let value = Value::String("posts".to_string());
+		let kind = Kind::Table(vec!["users".to_string(), "posts".to_string()]);
+		let result = value.cast_to_kind(&kind);
+		assert!(result.is_ok());
+		if let Ok(Value::Table(table)) = result {
+			assert_eq!(table.as_str(), "posts");
+		}
+
+		// Test casting string that doesn't match any in the union
+		let value = Value::String("comments".to_string());
+		let kind = Kind::Table(vec!["users".to_string(), "posts".to_string()]);
+		let result = value.cast_to_kind(&kind);
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn test_cast_table_to_table() {
+		// Test casting table value to table type
+		let value = Value::Table(crate::val::Table::new("users".to_string()));
+		let kind = Kind::Table(vec!["users".to_string()]);
+		let result = value.cast_to_kind(&kind);
+		assert!(result.is_ok());
+	}
+
+	#[test]
+	fn test_can_cast_to_table() {
+		// Test can_cast_to_kind for tables - String can always cast to generic table
+		let value = Value::String("users".to_string());
+		let kind = Kind::Table(vec![]);
+		assert!(value.can_cast_to_kind(&kind));
+
+		// Table value can cast to table type
+		let value = Value::Table(crate::val::Table::new("users".to_string()));
+		let kind = Kind::Table(vec!["users".to_string()]);
+		assert!(value.can_cast_to_kind(&kind));
+
+		// Table value cannot cast to wrong table type
+		let value = Value::Table(crate::val::Table::new("posts".to_string()));
+		let kind = Kind::Table(vec!["users".to_string()]);
+		assert!(!value.can_cast_to_kind(&kind));
 	}
 }

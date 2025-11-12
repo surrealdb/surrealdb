@@ -5,7 +5,7 @@ use crate::api::context::InvocationContext;
 use crate::fnc::args::Optional;
 use crate::val::{Object, Value};
 
-pub fn raw_body(
+pub(crate) fn raw_body(
 	context: &mut InvocationContext,
 	(Optional(raw),): (Optional<bool>,),
 ) -> Result<()> {
@@ -13,7 +13,10 @@ pub fn raw_body(
 	Ok(())
 }
 
-pub fn header(context: &mut InvocationContext, (name, value): (String, Value)) -> Result<()> {
+pub(crate) fn header(
+	context: &mut InvocationContext,
+	(name, value): (String, Value),
+) -> Result<()> {
 	let name: HeaderName = name.parse()?;
 	if let Value::None = value {
 		if let Some(v) = context.response_headers.as_mut() {
@@ -34,7 +37,7 @@ pub fn header(context: &mut InvocationContext, (name, value): (String, Value)) -
 	Ok(())
 }
 
-pub fn headers(context: &mut InvocationContext, (headers,): (Object,)) -> Result<()> {
+pub(crate) fn headers(context: &mut InvocationContext, (headers,): (Object,)) -> Result<()> {
 	let mut unset: Vec<String> = Vec::new();
 	let mut headermap = HeaderMap::new();
 

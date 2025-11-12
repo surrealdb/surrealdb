@@ -7,8 +7,8 @@ use crate::expr::statements::{
 use crate::fmt::Fmt;
 
 #[derive(Clone, Debug)]
-pub struct LogicalPlan {
-	pub expressions: Vec<TopLevelExpr>,
+pub(crate) struct LogicalPlan {
+	pub(crate) expressions: Vec<TopLevelExpr>,
 }
 
 impl Display for LogicalPlan {
@@ -22,15 +22,8 @@ impl Display for LogicalPlan {
 	}
 }
 
-impl LogicalPlan {
-	// Check if we require a writeable transaction
-	//pub(crate) fn read_only(&self) -> bool {
-	//self.expressions.iter().all(|x| x.read_only())
-	//}
-}
-
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
-pub enum TopLevelExpr {
+pub(crate) enum TopLevelExpr {
 	Begin,
 	Cancel,
 	Commit,

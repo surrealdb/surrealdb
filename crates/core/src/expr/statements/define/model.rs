@@ -10,29 +10,19 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::expression::VisitExpression;
 use crate::expr::{Base, Expr};
 use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct DefineModelStatement {
+pub(crate) struct DefineModelStatement {
 	pub kind: DefineKind,
 	pub hash: String,
 	pub name: String,
 	pub version: String,
 	pub comment: Option<Expr>,
 	pub permissions: Permission,
-}
-
-impl VisitExpression for DefineModelStatement {
-	fn visit<F>(&self, visitor: &mut F)
-	where
-		F: FnMut(&Expr),
-	{
-		self.comment.iter().for_each(|expr| expr.visit(visitor));
-	}
 }
 
 impl DefineModelStatement {
