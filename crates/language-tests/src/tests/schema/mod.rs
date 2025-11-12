@@ -83,9 +83,6 @@ pub struct TestEnv {
 	#[serde(default)]
 	pub clean: bool,
 
-	#[serde(default)]
-	pub strict: bool,
-
 	pub namespace: Option<BoolOr<String>>,
 	pub database: Option<BoolOr<String>>,
 
@@ -432,7 +429,6 @@ impl<'de> Deserialize<'de> for SurrealConfigValue {
 			query_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			references_enabled: true,
 			define_api_enabled: true,
 			files_enabled: true,
 			surrealism_enabled: true,
@@ -496,7 +492,6 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			query_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			references_enabled: true,
 			define_api_enabled: true,
 			files_enabled: true,
 			surrealism_enabled: true,
@@ -540,7 +535,6 @@ impl<'de> Deserialize<'de> for SurrealObject {
 			query_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			references_enabled: true,
 			define_api_enabled: true,
 			files_enabled: true,
 			surrealism_enabled: true,

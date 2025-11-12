@@ -1,6 +1,6 @@
 /**
 [test]
-description = "This test proves that $parent is fixed at the time when the query is executed, and does not change throughout the various assignments"
+reason = "This test proves that $parent is fixed at the time when the query is executed, and does not change throughout the various assignments"
 
 [[test.results]]
 value = "[{ a: parent:a, b: parent:b, c: parent:c, id: test:1 }]"

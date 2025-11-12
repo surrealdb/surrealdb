@@ -305,7 +305,7 @@ impl DefineAccessStatement {
 				}
 				// Process the statement
 				let key = crate::key::namespace::ac::new(ns, &definition.name);
-				txn.get_or_add_ns(Some(ctx), opt.ns()?, opt.strict).await?;
+				txn.get_or_add_ns(Some(ctx), opt.ns()?).await?;
 				txn.set(&key, &definition, None).await?;
 				// Clear the cache
 				txn.clear_cache();

@@ -13,7 +13,6 @@ use crate::catalog::{
 };
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
@@ -37,10 +36,8 @@ pub(crate) struct DefineFieldStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub what: Expr,
-	/// Whether the field is marked as flexible.
-	/// Flexible allows the field to be schemaless even if the table is marked as schemafull.
-	pub flex: bool,
 	pub field_kind: Option<Kind>,
+	pub flexible: bool,
 	pub readonly: bool,
 	pub value: Option<Expr>,
 	pub assert: Option<Expr>,
@@ -57,8 +54,8 @@ impl Default for DefineFieldStatement {
 			kind: DefineKind::Default,
 			name: Expr::Literal(Literal::None),
 			what: Expr::Literal(Literal::None),
-			flex: false,
 			field_kind: None,
+			flexible: false,
 			readonly: false,
 			value: None,
 			assert: None,
@@ -90,8 +87,8 @@ impl DefineFieldStatement {
 		Ok(catalog::FieldDefinition {
 			name: expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?,
 			what: expr_to_ident(stk, ctx, opt, doc, &self.what, "table name").await?,
-			flexible: self.flex,
 			field_kind: self.field_kind.clone(),
+			flexible: self.flexible,
 			readonly: self.readonly,
 			value: self.value.clone(),
 			assert: self.assert.clone(),
@@ -130,13 +127,16 @@ impl DefineFieldStatement {
 		self.validate_computed_options(ns, db, ctx.tx(), &definition).await?;
 
 		// Validate reference options
-		self.validate_reference_options(ctx)?;
+		self.validate_reference_options(&definition)?;
 
 		// Disallow mismatched types
 		self.disallow_mismatched_types(ctx, ns, db, &definition).await?;
 
 		// Validate id field restrictions
 		self.validate_id_restrictions(&definition)?;
+
+		// Validate FLEXIBLE restrictions
+		self.validate_flexible_restrictions(ctx, ns, db, &definition).await?;
 
 		// Fetch the transaction
 		let txn = ctx.tx();
@@ -161,7 +161,7 @@ impl DefineFieldStatement {
 
 		let tb = {
 			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_tb(Some(ctx), ns, db, &definition.what, opt.strict).await?
+			txn.get_or_add_tb(Some(ctx), ns, db, &definition.what).await?
 		};
 
 		// Process the statement
@@ -289,16 +289,13 @@ impl DefineFieldStatement {
 				{
 					FieldDefinition {
 						field_kind: Some(cur_kind),
-						//reference: self.reference.clone(),
 						..existing.clone()
 					}
 				} else {
 					FieldDefinition {
 						name: name.clone(),
 						what: definition.what.to_string(),
-						flexible: definition.flexible,
 						field_kind: Some(cur_kind),
-						reference: definition.reference.clone(),
 						..Default::default()
 					}
 				};
@@ -342,7 +339,6 @@ impl DefineFieldStatement {
 				matches!(self.default, DefineDefault::None),
 				Error::ComputedKeywordConflict("DEFAULT".into())
 			);
-			ensure!(!self.flex, Error::ComputedKeywordConflict("FLEXIBLE".into()));
 			ensure!(!self.readonly, Error::ComputedKeywordConflict("READONLY".into()));
 
 			// Ensure no nested fields exist
@@ -372,13 +368,17 @@ impl DefineFieldStatement {
 		Ok(())
 	}
 
-	pub(crate) fn validate_reference_options(&self, ctx: &Context) -> Result<()> {
-		if !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-			return Ok(());
-		}
-
+	pub(crate) fn validate_reference_options(
+		&self,
+		definition: &catalog::FieldDefinition,
+	) -> Result<()> {
 		// If a reference is defined, the field must be a record
 		if self.reference.is_some() {
+			ensure!(
+				definition.name.len() == 1,
+				Error::ReferenceNestedField(definition.name.to_string())
+			);
+
 			fn valid(kind: &Kind, outer: bool) -> bool {
 				match kind {
 					Kind::None | Kind::Record(_) => true,
@@ -476,6 +476,32 @@ impl DefineFieldStatement {
 
 		Ok(())
 	}
+
+	pub(crate) async fn validate_flexible_restrictions(
+		&self,
+		ctx: &Context,
+		ns: NamespaceId,
+		db: DatabaseId,
+		definition: &catalog::FieldDefinition,
+	) -> Result<()> {
+		if self.flexible {
+			// Get the table definition
+			let txn = ctx.tx();
+			let Some(tb) = txn.get_tb(ns, db, &definition.what).await? else {
+				bail!(Error::TbNotFound {
+					name: definition.what.to_string(),
+				});
+			};
+
+			// FLEXIBLE can only be used in SCHEMAFULL tables
+			ensure!(
+				tb.schemafull,
+				Error::Thrown("FLEXIBLE can only be used in SCHEMAFULL tables".into())
+			);
+		}
+
+		Ok(())
+	}
 }
 
 impl Display for DefineFieldStatement {
@@ -487,11 +513,11 @@ impl Display for DefineFieldStatement {
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {} ON {}", self.name, self.what)?;
-		if self.flex {
-			write!(f, " FLEXIBLE")?
-		}
 		if let Some(ref v) = self.field_kind {
-			write!(f, " TYPE {v}")?
+			write!(f, " TYPE {v}")?;
+			if self.flexible {
+				write!(f, " FLEXIBLE")?;
+			}
 		}
 		match self.default {
 			DefineDefault::None => {}

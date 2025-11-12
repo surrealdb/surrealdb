@@ -206,7 +206,7 @@ pub trait RpcProtocol {
 			PublicValue::String(ns) => {
 				let kvs = self.kvs();
 				let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-				tx.get_or_add_ns(None, &ns, self.kvs().is_strict_mode()).await?;
+				tx.get_or_add_ns(None, &ns).await?;
 				tx.commit().await?;
 
 				session.ns = Some(ns)
@@ -225,7 +225,7 @@ pub trait RpcProtocol {
 				let ns = session.ns.clone().expect("namespace should be set");
 				let tx =
 					self.kvs().transaction(TransactionType::Write, LockType::Optimistic).await?;
-				tx.ensure_ns_db(None, &ns, &db, self.kvs().is_strict_mode()).await?;
+				tx.ensure_ns_db(None, &ns, &db).await?;
 				tx.commit().await?;
 				session.db = Some(db)
 			}

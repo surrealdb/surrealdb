@@ -771,15 +771,12 @@ impl Ord for Number {
 	}
 }
 
-// Warning: Equal numbers may have different hashes, which violates
-// the invariants of certain collections!
 impl hash::Hash for Number {
 	fn hash<H: hash::Hasher>(&self, state: &mut H) {
-		match self {
-			Number::Int(v) => v.hash(state),
-			Number::Float(v) => v.to_bits().hash(state),
-			Number::Decimal(v) => v.hash(state),
-		}
+		// Use decimal buffer encoding to ensure numerically-equal values
+		// across variants (Int/Float/Decimal) produce identical hashes.
+		// This maintains the Hash/Eq contract: if a == b, then hash(a) == hash(b).
+		self.as_decimal_buf().hash(state);
 	}
 }
 

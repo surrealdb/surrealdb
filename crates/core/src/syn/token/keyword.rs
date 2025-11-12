@@ -186,6 +186,7 @@ keyword! {
 	Snowball => "SNOWBALL",
 	Split => "SPLIT",
 	Start => "START",
+	Strict => "STRICT",
 	Structure => "STRUCTURE",
 	Table => "TABLE",
 	Tables => "TABLES",

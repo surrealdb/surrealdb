@@ -1540,8 +1540,8 @@ implement_visitor! {
 
 	fn visit_lookup_subject(this, subject: &LookupSubject){
 		match subject{
-			LookupSubject::Table(_) => {},
-			LookupSubject::Range{range,..} => {
+			LookupSubject::Table { .. } => {},
+			LookupSubject::Range { range, .. } => {
 				this.visit_record_id_key_range(range)?;
 			},
 
@@ -2976,11 +2976,10 @@ implement_visitor_mut! {
 
 	fn visit_mut_lookup_subject(this, subject: &mut LookupSubject){
 		match subject{
-			LookupSubject::Table(_) => {},
-			LookupSubject::Range{range,..} => {
+			LookupSubject::Table { .. } => {},
+			LookupSubject::Range { range, .. } => {
 				this.visit_mut_record_id_key_range(range)?;
 			},
-
 		}
 		Ok(())
 	}

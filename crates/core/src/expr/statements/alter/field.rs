@@ -32,8 +32,8 @@ pub(crate) struct AlterFieldStatement {
 	pub name: Idiom,
 	pub what: String,
 	pub if_exists: bool,
-	pub flex: AlterKind<()>,
 	pub kind: AlterKind<Kind>,
+	pub flexible: AlterKind<()>,
 	pub readonly: AlterKind<()>,
 	pub value: AlterKind<Expr>,
 	pub assert: AlterKind<Expr>,
@@ -74,15 +74,14 @@ impl AlterFieldStatement {
 			}
 		};
 
-		match self.flex {
-			AlterKind::Set(_) => df.flexible = true,
-			AlterKind::Drop => df.flexible = false,
-			AlterKind::None => {}
-		}
-
 		match self.kind {
 			AlterKind::Set(ref k) => df.field_kind = Some(k.clone()),
 			AlterKind::Drop => df.field_kind = None,
+			AlterKind::None => {}
+		}
+		match self.flexible {
+			AlterKind::Set(_) => df.flexible = true,
+			AlterKind::Drop => df.flexible = false,
 			AlterKind::None => {}
 		}
 
@@ -178,15 +177,15 @@ impl Display for AlterFieldStatement {
 		}
 		write!(f, " {} ON {}", self.name, EscapeIdent(&self.what))?;
 
-		match self.flex {
-			AlterKind::Set(_) => write!(f, " FLEXIBLE")?,
-			AlterKind::Drop => write!(f, " DROP FLEXIBLE")?,
-			AlterKind::None => {}
-		}
-
 		match self.kind {
 			AlterKind::Set(ref x) => write!(f, " TYPE {x}")?,
 			AlterKind::Drop => write!(f, " DROP TYPE")?,
+			AlterKind::None => {}
+		}
+
+		match self.flexible {
+			AlterKind::Set(_) => write!(f, " FLEXIBLE")?,
+			AlterKind::Drop => write!(f, " DROP FLEXIBLE")?,
 			AlterKind::None => {}
 		}
 

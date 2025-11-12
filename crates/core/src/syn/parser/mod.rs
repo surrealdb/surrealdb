@@ -145,8 +145,6 @@ pub struct ParserSettings {
 	/// itself. Examples are subquery and blocks like block statements and if
 	/// statements and such.
 	pub query_recursion_limit: usize,
-	/// Whether record references are enabled.
-	pub references_enabled: bool,
 	/// Whether define api is enabled
 	pub define_api_enabled: bool,
 	/// Whether the files feature is enabled
@@ -162,7 +160,6 @@ impl Default for ParserSettings {
 			flexible_record_id: true,
 			object_recursion_limit: 100,
 			query_recursion_limit: 20,
-			references_enabled: false,
 			define_api_enabled: false,
 			files_enabled: false,
 			surrealism_enabled: false,
@@ -173,7 +170,6 @@ impl Default for ParserSettings {
 impl ParserSettings {
 	pub fn default_with_experimental(enabled: bool) -> Self {
 		ParserSettings {
-			references_enabled: enabled,
 			define_api_enabled: enabled,
 			files_enabled: enabled,
 			surrealism_enabled: enabled,

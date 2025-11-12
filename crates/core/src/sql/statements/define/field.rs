@@ -48,11 +48,8 @@ pub(crate) struct DefineFieldStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
 	pub what: Expr,
-	/// Whether the field is marked as flexible.
-	/// Flexible allows the field to be schemaless even if the table is marked
-	/// as schemafull.
-	pub flex: bool,
 	pub field_kind: Option<Kind>,
+	pub flexible: bool,
 	pub readonly: bool,
 	pub value: Option<Expr>,
 	pub assert: Option<Expr>,
@@ -69,8 +66,8 @@ impl Default for DefineFieldStatement {
 			kind: DefineKind::Default,
 			name: Expr::Literal(Literal::None),
 			what: Expr::Literal(Literal::None),
-			flex: false,
 			field_kind: None,
+			flexible: false,
 			readonly: false,
 			value: None,
 			assert: None,
@@ -92,11 +89,11 @@ impl Display for DefineFieldStatement {
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {} ON {}", self.name, self.what)?;
-		if self.flex {
-			write!(f, " FLEXIBLE")?
-		}
 		if let Some(ref v) = self.field_kind {
-			write!(f, " TYPE {v}")?
+			write!(f, " TYPE {v}")?;
+			if self.flexible {
+				write!(f, " FLEXIBLE")?;
+			}
 		}
 
 		match self.default {
@@ -148,9 +145,9 @@ impl From<DefineFieldStatement> for crate::expr::statements::DefineFieldStatemen
 			kind: v.kind.into(),
 			name: v.name.into(),
 			what: v.what.into(),
-			flex: v.flex,
 			readonly: v.readonly,
 			field_kind: v.field_kind.map(Into::into),
+			flexible: v.flexible,
 			value: v.value.map(Into::into),
 			assert: v.assert.map(Into::into),
 			computed: v.computed.map(Into::into),
@@ -169,9 +166,9 @@ impl From<crate::expr::statements::DefineFieldStatement> for DefineFieldStatemen
 			kind: v.kind.into(),
 			name: v.name.into(),
 			what: v.what.into(),
-			flex: v.flex,
 			readonly: v.readonly,
 			field_kind: v.field_kind.map(Into::into),
+			flexible: v.flexible,
 			value: v.value.map(Into::into),
 			assert: v.assert.map(Into::into),
 			computed: v.computed.map(Into::into),
