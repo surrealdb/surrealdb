@@ -115,10 +115,6 @@ criteria = "safe-to-deploy"
 version = "0.3.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.async-recursion]]
-version = "1.1.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.async-task]]
 version = "4.7.0"
 criteria = "safe-to-deploy"
@@ -163,20 +159,12 @@ criteria = "safe-to-deploy"
 version = "0.7.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.base64ct]]
-version = "1.7.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.bcrypt]]
 version = "0.15.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.bincode]]
 version = "1.3.3"
-criteria = "safe-to-deploy"
-
-[[exemptions.bindgen]]
-version = "0.70.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.bitvec]]
@@ -197,10 +185,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.bnum]]
 version = "0.12.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.borsh]]
-version = "1.5.6"
 criteria = "safe-to-deploy"
 
 [[exemptions.borsh-derive]]
@@ -331,10 +315,6 @@ criteria = "safe-to-run"
 version = "0.1.4"
 criteria = "safe-to-run"
 
-[[exemptions.derive_arbitrary]]
-version = "1.4.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.deunicode]]
 version = "1.6.1"
 criteria = "safe-to-deploy"
@@ -401,10 +381,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.findshlibs]]
 version = "0.10.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.flate2]]
-version = "1.1.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.float_next_after]]
@@ -553,10 +529,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.hermit-abi]]
 version = "0.3.9"
-criteria = "safe-to-deploy"
-
-[[exemptions.hermit-abi]]
-version = "0.5.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.html5ever]]
@@ -931,10 +903,6 @@ criteria = "safe-to-deploy"
 version = "0.7.3"
 criteria = "safe-to-deploy"
 
-[[exemptions.rand]]
-version = "0.9.0"
-criteria = "safe-to-deploy"
-
 [[exemptions.rand_chacha]]
 version = "0.2.2"
 criteria = "safe-to-deploy"
@@ -1239,14 +1207,6 @@ criteria = "safe-to-deploy"
 version = "0.4.2"
 criteria = "safe-to-deploy"
 
-[[exemptions.test-log]]
-version = "0.2.17"
-criteria = "safe-to-run"
-
-[[exemptions.test-log-macros]]
-version = "0.2.17"
-criteria = "safe-to-run"
-
 [[exemptions.tikv-jemalloc-sys]]
 version = "0.6.0+5.3.0-1-ge13ca993e8ccb9ba9847cc330696e02839f328f7"
 criteria = "safe-to-deploy"
@@ -1321,10 +1281,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.trait-variant]]
 version = "0.1.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.try_map]]
-version = "0.3.1"
 criteria = "safe-to-deploy"
 
 [[exemptions.tungstenite]]
@@ -1441,14 +1397,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.wyz]]
 version = "0.5.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.xattr]]
-version = "1.5.0"
-criteria = "safe-to-deploy"
-
-[[exemptions.xml-rs]]
-version = "0.8.25"
 criteria = "safe-to-deploy"
 
 [[exemptions.yasna]]
