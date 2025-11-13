@@ -1395,6 +1395,7 @@ allow_apis = ["fs", "process"]
 
 [pkg.ort-sys]
 allow_apis = ["fs"]
+allow_unsafe = true
 
 [pkg.prometheus]
 allow_unsafe = true
