@@ -39,8 +39,6 @@ unknown-registry = "deny"
 # List of URLs for allowed crate registries. Defaults to the crates.io index
 # if not specified. If it is specified but empty, no registries are allowed.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-# List of URLs for allowed Git repositories
-allow-git = ["https://github.com/surrealdb/rust-rocksdb.git?branch=10_6_2_sst_file_manager"]
 
 # --------------------------------------------------
 # ADVISORIES
@@ -126,8 +124,6 @@ allow = ["BUSL-1.1"]
 name = "surrealism-types"
 allow = ["BUSL-1.1"]
 
-# Specify overrides for crates where licenses are hard to guess.
-
 [[licenses.clarify]]
 name = "surreal"
 expression = "BUSL-1.1"
@@ -172,6 +168,8 @@ license-files = []
 name = "surrealism-types"
 expression = "BUSL-1.1"
 license-files = []
+
+# Specify overrides for crates where licenses are hard to guess.
 
 [[licenses.clarify]]
 name = "ring"
