@@ -66,13 +66,13 @@ revision = { workspace = true, features = [
 anyhow.workspace = true
 arc-swap = "1.7.1"
 async-trait.workspace = true
-axum = { workspace = true, features = ["tracing", "ws"] }
-axum-extra = { workspace = true, features = [
+axum = { version = "0.8.5", features = ["tracing", "ws"] }
+axum-extra = { version = "0.10.2", features = [
     "query",
     "typed-routing",
     "typed-header",
 ] }
-axum-server = { workspace = true, features = ["tls-rustls-no-provider"] }
+axum-server = { version = "0.7.2", features = ["tls-rustls-no-provider"] }
 bincode.workspace = true
 console-subscriber = "0.4.1"
 clap = { version = "4.4.11", features = [
@@ -83,7 +83,8 @@ clap = { version = "4.4.11", features = [
 ] }
 dashmap.workspace = true
 glob = "0.3.1"
-http-body.workspace = true
+http-body = "1.0.0"
+http-body-util = "0.1.1"
 hyper.workspace = true
 opentelemetry = { version = "0.24" }
 opentelemetry-otlp = { version = "0.17.0", features = ["metrics"] }
