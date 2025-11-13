@@ -2,9 +2,9 @@
 //!
 //! SurrealDB supports various ways of storing and accessing your data. For
 //! storing data we support a number of key value stores. These are SurrealKV,
-//! RocksDB, TiKV, FoundationDB and an in-memory store. We call these
+//! RocksDB, TiKV and an in-memory store. We call these
 //! local engines. SurrealKV and RocksDB are file-based, single node key value
-//! stores. TiKV and FoundationDB are are distributed stores that can scale
+//! stores. TiKV is a distributed store that can scale
 //! horizontally across multiple nodes. The in-memory store does not persist
 //! your data, it only stores it in memory. All these can be embedded in your
 //! application, so you don't need to spin up a SurrealDB server first in order
@@ -315,9 +315,6 @@ impl Surreal<Any> {
 ///
 /// // Instantiate a TiKV-backed instance
 /// let db = connect("tikv://localhost:2379").await?;
-///
-/// // Instantiate a FoundationDB-backed instance
-/// let db = connect("fdb://path/to/fdb.cluster").await?;
 /// # Ok(())
 /// # }
 /// ```

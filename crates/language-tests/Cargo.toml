@@ -12,7 +12,6 @@ default = []
 backend-surrealkv = ["surrealdb-core/kv-surrealkv"]
 backend-rocksdb = ["surrealdb-core/kv-rocksdb"]
 backend-tikv = ["surrealdb-core/kv-tikv"]
-backend-foundation = ["surrealdb-core/kv-fdb"]
 upgrade = ["backend-surrealkv", "tokio-tungstenite", "revision"] # Upgrade test suite.
 
 [dependencies]

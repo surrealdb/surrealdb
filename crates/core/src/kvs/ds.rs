@@ -185,7 +185,7 @@ impl TransactionFactory {
 /// Abstraction over storage backends for creating and managing transactions.
 ///
 /// This trait allows decoupling `Datastore` from concrete KV engines (memory,
-/// RocksDB, TiKV, FoundationDB, SurrealKV, etc.). Implementors translate the
+/// RocksDB, TiKV, SurrealKV, SurrealDS, etc.). Implementors translate the
 /// generic transaction parameters into a backend-specific transaction and
 /// report whether the transaction is considered "local" (used internally to
 /// enable some optimizations).
@@ -259,8 +259,6 @@ pub enum DatastoreFlavor {
 	IndxDB(super::indxdb::Datastore),
 	#[cfg(feature = "kv-tikv")]
 	TiKV(super::tikv::Datastore),
-	#[cfg(feature = "kv-fdb")]
-	FoundationDB(super::fdb::Datastore),
 	#[cfg(feature = "kv-surrealkv")]
 	SurrealKV(super::surrealkv::Datastore),
 }
@@ -410,20 +408,6 @@ impl TransactionBuilderFactory for CommunityComposer {
 				#[cfg(not(feature = "kv-tikv"))]
 				bail!(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
-			// Initiate a FoundationDB datastore
-			(flavour @ "fdb", path) => {
-				#[cfg(feature = "kv-fdb")]
-				{
-					let v = super::fdb::Datastore::new(&path)
-						.await
-						.map(DatastoreFlavor::FoundationDB)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
-				}
-				#[cfg(not(feature = "kv-fdb"))]
-				bail!(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
 			// The datastore path is not valid
 			(flavour, path) => {
 				info!(target: TARGET, "Unable to load the specified datastore {flavour}{}", path);
@@ -440,7 +424,6 @@ impl TransactionBuilderFactory for CommunityComposer {
 			v if v.starts_with("surrealkv:") => Ok(v.to_string()),
 			v if v.starts_with("surrealkv+versioned:") => Ok(v.to_string()),
 			v if v.starts_with("tikv:") => Ok(v.to_string()),
-			v if v.starts_with("fdb:") => Ok(v.to_string()),
 			_ => bail!("Provide a valid database path parameter"),
 		}
 	}
@@ -485,11 +468,6 @@ impl TransactionBuilder for DatastoreFlavor {
 				let tx = v.transaction(write, lock).await?;
 				(tx, false)
 			}
-			#[cfg(feature = "kv-fdb")]
-			Self::FoundationDB(v) => {
-				let tx = v.transaction(write, lock).await?;
-				(tx, false)
-			}
 			#[cfg(feature = "kv-surrealkv")]
 			Self::SurrealKV(v) => {
 				let tx = v.transaction(write, lock).await?;
@@ -510,8 +488,6 @@ impl TransactionBuilder for DatastoreFlavor {
 			Self::IndxDB(v) => v.shutdown().await,
 			#[cfg(feature = "kv-tikv")]
 			Self::TiKV(v) => v.shutdown().await,
-			#[cfg(feature = "kv-fdb")]
-			Self::FoundationDB(v) => v.shutdown().await,
 			#[cfg(feature = "kv-surrealkv")]
 			Self::SurrealKV(v) => v.shutdown().await,
 			#[allow(unreachable_patterns)]
@@ -532,8 +508,6 @@ impl Display for DatastoreFlavor {
 			Self::IndxDB(_) => write!(f, "indxdb"),
 			#[cfg(feature = "kv-tikv")]
 			Self::TiKV(_) => write!(f, "tikv"),
-			#[cfg(feature = "kv-fdb")]
-			Self::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
 			Self::SurrealKV(_) => write!(f, "surrealkv"),
 			#[allow(unreachable_patterns)]

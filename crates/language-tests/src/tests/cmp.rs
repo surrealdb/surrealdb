@@ -4,8 +4,8 @@ use std::sync::LazyLock;
 
 use rust_decimal::Decimal;
 use surrealdb_types::{
-	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId,
-	RecordIdKey, RecordIdKeyRange, Regex, Set, Uuid, Value,
+	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, RecordId, RecordIdKey,
+	RecordIdKeyRange, Regex, Set, Uuid, Value,
 };
 
 #[derive(Debug, Clone)]
@@ -231,9 +231,7 @@ impl RoughlyEq for Number {
 	}
 }
 
-impl_roughly_eq_delegate!(
-	i64, bool, String, Geometry, Bytes, Range, Regex, Duration, File
-);
+impl_roughly_eq_delegate!(i64, bool, String, Geometry, Bytes, Range, Regex, Duration, File);
 
 impl RoughlyEq for Array {
 	fn roughly_equal(&self, other: &Self, config: &RoughlyEqConfig) -> bool {
@@ -245,7 +243,6 @@ impl RoughlyEq for Array {
 }
 
 impl RoughlyEq for Object {
-
 	fn roughly_equal(&self, other: &Self, config: &RoughlyEqConfig) -> bool {
 		if self.len() != other.len() {
 			return false;

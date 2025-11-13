@@ -411,26 +411,6 @@ criteria = "safe-to-deploy"
 version = "1.0.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.foundationdb]]
-version = "0.9.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.foundationdb-gen]]
-version = "0.9.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.foundationdb-macros]]
-version = "0.3.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.foundationdb-sys]]
-version = "0.9.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.foundationdb-tuple]]
-version = "0.9.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.fs-err]]
 version = "3.1.0"
 criteria = "safe-to-deploy"

@@ -7,8 +7,6 @@
 //! - put
 //!
 //! These operations can be processed by the following storage engines:
-//! - `fdb`: [FoundationDB](https://github.com/apple/foundationdb/) a distributed database designed
-//!   to handle large volumes of structured data across clusters of commodity servers
 //! - `indxdb`: WASM based database to store data in the browser
 //! - `rocksdb`: [RocksDB](https://github.com/facebook/rocksdb) an embeddable persistent key-value
 //!   store for fast storage
@@ -31,7 +29,6 @@ mod tr;
 mod tx;
 pub(crate) mod version;
 
-mod fdb;
 mod indxdb;
 mod mem;
 mod rocksdb;

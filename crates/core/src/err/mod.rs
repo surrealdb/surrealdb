@@ -1314,34 +1314,6 @@ impl From<tikv::Error> for Error {
 	}
 }
 
-#[cfg(feature = "kv-fdb")]
-impl From<foundationdb::FdbError> for Error {
-	fn from(e: foundationdb::FdbError) -> Error {
-		let s = e.to_string();
-		if e.is_retryable() {
-			return Error::TxRetryable(s);
-		}
-		if e.is_retryable_not_committed() {
-			return Error::TxRetryable(s);
-		}
-		Error::Ds(s)
-	}
-}
-
-#[cfg(feature = "kv-fdb")]
-impl From<foundationdb::TransactionCommitError> for Error {
-	fn from(e: foundationdb::TransactionCommitError) -> Error {
-		let s = e.to_string();
-		if e.is_retryable() {
-			return Error::TxRetryable(s);
-		}
-		if e.is_retryable_not_committed() {
-			return Error::TxRetryable(s);
-		}
-		Error::Tx(s)
-	}
-}
-
 impl From<async_channel::RecvError> for Error {
 	fn from(e: async_channel::RecvError) -> Error {
 		Error::Channel(e.to_string())

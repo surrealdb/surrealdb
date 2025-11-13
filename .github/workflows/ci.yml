@@ -398,7 +398,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        engine: [mem, rocksdb, surrealkv, tikv, fdb]
+        engine: [mem, rocksdb, surrealkv, tikv]
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -419,7 +419,6 @@ jobs:
         uses: ./.github/actions/setup-databases
         with:
           tikv: ${{ matrix.engine == 'tikv' }}
-          foundationdb: ${{ matrix.engine == 'fdb' }}
 
       - name: Test engine
         run: cargo make ci-${{ matrix.engine }}-kvs
@@ -455,7 +454,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        engine: [any, ws, http, mem, rocksdb, surrealkv, tikv, fdb]
+        engine: [any, ws, http, mem, rocksdb, surrealkv, tikv]
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -476,7 +475,6 @@ jobs:
         uses: ./.github/actions/setup-databases
         with:
           tikv: ${{ matrix.engine == 'tikv' }}
-          foundationdb: ${{ matrix.engine == 'fdb' }}
 
       - name: Test engine
         run: cargo make ci-api-integration-${{ matrix.engine }}
@@ -531,7 +529,6 @@ jobs:
         uses: ./.github/actions/setup-databases
         with:
           tikv: ${{ matrix.engine == 'tikv' }}
-          foundationdb: ${{ matrix.engine == 'fdb' }}
 
       - name: Run language tests
         run: cargo make ci-lang-test-${{ matrix.engine }}

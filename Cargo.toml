@@ -75,10 +75,6 @@ ipnet = "2.11.0"
 serde-content = "0.1.0"
 
 # External Kv stores
-foundationdb = { version = "0.9.2", default-features = false, features = [
-    "embedded-fdb-include",
-    "fdb-7_3",
-] }
 rocksdb = { version = "0.24.0-surreal.1", package = "surrealdb-rocksdb", features = ["lz4", "snappy"] }
 
 # Managed by surreal but mostly external code
@@ -242,7 +238,6 @@ storage-mem = ["surrealdb-server/storage-mem"]
 storage-surrealkv = ["surrealdb-server/storage-surrealkv"]
 storage-rocksdb = ["surrealdb-server/storage-rocksdb"]
 storage-tikv = ["surrealdb-server/storage-tikv"]
-storage-fdb = ["surrealdb-server/storage-fdb"]
 storage-indxdb = ["surrealdb-server/storage-indxdb"]
 
 [dependencies]

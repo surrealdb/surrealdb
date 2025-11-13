@@ -3,7 +3,6 @@
 	feature = "kv-rocksdb",
 	feature = "kv-indxdb",
 	feature = "kv-tikv",
-	feature = "kv-fdb",
 	feature = "kv-surrealkv",
 ))]
 
@@ -43,8 +42,6 @@ pub(crate) enum Kvs {
 	Rocksdb,
 	#[cfg_attr(not(feature = "kv-tikv"), expect(dead_code))]
 	Tikv,
-	#[cfg_attr(not(feature = "kv-fdb"), expect(dead_code))]
-	Fdb,
 	#[cfg_attr(not(feature = "kv-surrealkv"), expect(dead_code))]
 	SurrealKV,
 }
@@ -165,31 +162,4 @@ mod tikv {
 	}
 
 	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_allow,timestamp_to_versionstamp,reverse_iterator);
-}
-
-#[cfg(feature = "kv-fdb")]
-mod fdb {
-	use uuid::Uuid;
-
-	use super::{ClockType, Kvs};
-	use crate::CommunityComposer;
-	use crate::kvs::{Datastore, LockType, TransactionType};
-
-	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
-		// Setup the cluster connection string
-		let path = "fdb:/etc/foundationdb/fdb.cluster";
-		// Setup the FoundationDB datastore
-		let ds = Datastore::new_with_clock(&CommunityComposer(), path, Some(clock))
-			.await
-			.unwrap()
-			.with_node_id(id);
-		// Clear any previous test entries
-		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
-		tx.delp(&vec![]).await.unwrap();
-		tx.commit().await.unwrap();
-		// Return the datastore
-		(ds, Kvs::Fdb)
-	}
-
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_allow,timestamp_to_versionstamp);
 }

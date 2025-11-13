@@ -148,13 +148,6 @@ jobs:
           sudo apt-get -qq -y install clang curl
           cargo install --quiet --locked critcmp cargo-make
 
-      # Install FoundationDB if needed
-      - name: Setup FoundationDB
-        uses: foundationdb-rs/foundationdb-actions-install@6f9e87d22e19b889ab4c4eeabc1939f807df1d8a # v.2.2.0 (Actions must be pinned by commit hash)
-        if: ${{ matrix.target == 'lib-fdb' || matrix.target == 'sdk-fdb' }}
-        with:
-          version: "7.1.61"
-
       # Run SurrealDB in the background if needed
       - name: Build and start SurrealDB
         if: ${{ matrix.target == 'sdk-ws' }}

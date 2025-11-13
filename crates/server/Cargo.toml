@@ -38,7 +38,6 @@ storage-indxdb = ["surrealdb/kv-indxdb", "surrealdb-core/kv-indxdb"]
 storage-rocksdb = ["surrealdb/kv-rocksdb", "surrealdb-core/kv-rocksdb"]
 storage-surrealkv = ["surrealdb/kv-surrealkv", "surrealdb-core/kv-surrealkv"]
 storage-tikv = ["surrealdb/kv-tikv", "surrealdb-core/kv-tikv"]
-storage-fdb = ["surrealdb/kv-fdb", "surrealdb-core/kv-fdb"]
 # Commercial features
 enterprise = ["surrealdb-core/enterprise"]
 
