@@ -57,7 +57,7 @@ yanked = "warn"
 # A list of security advisory identifiers to ignore.
 # TODOs:
 # - for RUSTSEC-2024-0436, track https://github.com/3Hren/msgpack-rust/issues/365
-ignore = ["RUSTSEC-2024-0436"]
+ignore = ["RUSTSEC-2024-0436", "RUSTSEC-2025-0118"]
 
 # --------------------------------------------------
 # LICENSES
@@ -79,7 +79,6 @@ allow = [
     "BSD-3-Clause",
     "Unlicense",
     "Unicode-3.0",
-    "CDDL-1.0",
 ]
 # The confidence threshold for detecting a license from license text.
 confidence-threshold = 0.95
