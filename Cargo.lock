@@ -2855,6 +2855,7 @@ version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f811f663912a69249fa620dcd2a005db7254529da2d8a0b23942e81f47084501"
 dependencies = [
+ "earcutr",
  "float_next_after",
  "geo-types",
  "geographiclib-rs",
@@ -2863,6 +2864,7 @@ dependencies = [
  "robust",
  "rstar",
  "serde",
+ "spade",
 ]
 
 [[package]]
@@ -6993,7 +6995,7 @@ dependencies = [
  "chrono",
  "flatbuffers",
  "futures",
- "geo 0.31.0",
+ "geo 0.28.0",
  "prost 0.13.5",
  "prost-types 0.13.5",
  "rust_decimal",
@@ -7054,6 +7056,8 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry-proto",
  "opentelemetry_sdk",
+ "ort",
+ "ort-sys",
  "pin-project-lite",
  "pprof",
  "rand 0.8.5",
