@@ -1393,6 +1393,9 @@ allow_apis = ["fs"]
 [pkg.ort]
 allow_apis = ["fs", "process"]
 
+[pkg.ort-sys]
+allow_apis = ["fs"]
+
 [pkg.prometheus]
 allow_unsafe = true
 
