@@ -127,6 +127,7 @@ build.allow_build_instructions = [
 
 [pkg.socks]
 allow_unsafe = true
+allow_apis = ["net"]
 
 [pkg.surrealdb-librocksdb-sys]
 allow_unsafe = true
