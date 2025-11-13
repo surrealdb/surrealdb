@@ -125,7 +125,7 @@ build.allow_build_instructions = [
     "cargo:rustc-link-search=native=*",
 ]
 
-[pgk.socks]
+[pkg.socks]
 allow_unsafe = true
 
 [pkg.surrealdb-librocksdb-sys]
