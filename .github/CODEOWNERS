@@ -21,7 +21,6 @@ Cargo.lock @surrealdb/security
 Cargo.toml @surrealdb/security
 crates/core/Cargo.toml @surrealdb/security
 crates/sdk/Cargo.toml @surrealdb/security
-cackle.toml @surrealdb/security
 supply-chain/* @surrealdb/security
 deny.toml @surrealdb/security
 .github/CODEOWNERS @surrealdb/security
