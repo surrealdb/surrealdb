@@ -2855,7 +2855,6 @@ version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f811f663912a69249fa620dcd2a005db7254529da2d8a0b23942e81f47084501"
 dependencies = [
- "earcutr",
  "float_next_after",
  "geo-types",
  "geographiclib-rs",
@@ -2864,7 +2863,6 @@ dependencies = [
  "robust",
  "rstar",
  "serde",
- "spade",
 ]
 
 [[package]]
@@ -6995,7 +6993,7 @@ dependencies = [
  "chrono",
  "flatbuffers",
  "futures",
- "geo 0.28.0",
+ "geo 0.31.0",
  "prost 0.13.5",
  "prost-types 0.13.5",
  "rust_decimal",
@@ -7046,7 +7044,6 @@ dependencies = [
  "glob",
  "http 1.3.1",
  "http-body 1.0.1",
- "http-body-util",
  "hyper 1.6.0",
  "jsonwebtoken",
  "nix 0.27.1",
@@ -7266,8 +7263,7 @@ dependencies = [
 [[package]]
 name = "surrealml-core"
 version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea0f24f36f27268c8c60b1794c25274161149fd309dd0cba209e19afa270c015"
+source = "git+https://github.com/surrealdb/surrealml.git?branch=emmanuel%2Fdependencies-check#bbea0c0344b307b68567835aef0156bb5fd43865"
 dependencies = [
  "bytes",
  "futures-core",
@@ -7276,11 +7272,12 @@ dependencies = [
  "once_cell",
  "onnx-embedding",
  "ort",
+ "ort-sys",
  "regex",
  "serde",
  "tempfile",
  "thiserror 2.0.12",
- "zip 3.0.0",
+ "zip 4.6.1",
 ]
 
 [[package]]
@@ -9529,6 +9526,18 @@ dependencies = [
  "zeroize",
  "zopfli",
  "zstd",
+]
+
+[[package]]
+name = "zip"
+version = "4.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1"
+dependencies = [
+ "arbitrary",
+ "crc32fast",
+ "indexmap 2.8.0",
+ "memchr",
 ]
 
 [[package]]
