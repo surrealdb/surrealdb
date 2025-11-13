@@ -87,10 +87,10 @@ alerts](https://docs.github.com/en/code-security/dependabot/dependabot-alerts/ab
 monitor its dependencies for security issues.
 
 SurrealDB also [implements basic supply chain security practices](https://github.com/surrealdb/surrealdb/pull/3395)
-using [`cargo-vet`](https://mozilla.github.io/cargo-vet/index.html) and [`cargo-acl` (i.e.
-Cackle)](https://github.com/cackle-rs/cackle) to mitigate the impact of attackers introducing malicious code into
-third-party dependencies. These tools are executed as part of the CI process to ensure that significant changes in
-dependencies are considered. More details about these practices can be found [here](supply-chain/README.md).
+using [`cargo-vet`](https://mozilla.github.io/cargo-vet/index.html) to mitigate the impact of attackers introducing 
+malicious code into third-party dependencies. This tool is executed as part of the CI process to ensure that 
+significant changes in dependencies are considered. More details about these practices can be found 
+[here](supply-chain/README.md).
 
 ### Fuzzing
 
