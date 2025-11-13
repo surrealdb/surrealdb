@@ -1392,6 +1392,7 @@ allow_apis = ["fs"]
 
 [pkg.ort]
 allow_apis = ["fs", "process"]
+allow_unsafe = true
 
 [pkg.ort-sys]
 allow_apis = ["fs"]
