@@ -125,6 +125,10 @@ build.allow_build_instructions = [
     "cargo:rustc-link-search=native=*",
 ]
 
+[pkg.socks]
+allow_unsafe = true
+allow_apis = ["net"]
+
 [pkg.surrealdb-librocksdb-sys]
 allow_unsafe = true
 build.sandbox.allow_network = true
@@ -1388,6 +1392,11 @@ allow_apis = ["fs"]
 
 [pkg.ort]
 allow_apis = ["fs", "process"]
+allow_unsafe = true
+
+[pkg.ort-sys]
+allow_apis = ["fs"]
+allow_unsafe = true
 
 [pkg.prometheus]
 allow_unsafe = true

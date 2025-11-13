@@ -7056,6 +7056,8 @@ dependencies = [
  "opentelemetry-otlp",
  "opentelemetry-proto",
  "opentelemetry_sdk",
+ "ort",
+ "ort-sys",
  "pin-project-lite",
  "pprof",
  "rand 0.8.5",
