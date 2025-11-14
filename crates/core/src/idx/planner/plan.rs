@@ -7,6 +7,7 @@ use anyhow::Result;
 
 use crate::catalog::Index;
 use crate::expr::operator::{MatchesOperator, NearestNeighbor};
+use crate::expr::order::{OrderDirection, Ordering};
 use crate::expr::with::With;
 use crate::expr::{BinaryOperator, Expr, Idiom};
 use crate::idx::planner::tree::{
@@ -75,7 +76,7 @@ impl PlanBuilder {
 		}
 
 		if let Some(io) = p.index_count {
-			return Ok(Plan::SingleIndex(None, io, RecordStrategy::Count));
+			return Ok(Plan::SingleIndex(None, io, RecordStrategy::Count, ScanDirection::Forward));
 		}
 
 		//Analyse the query AST to discover indexable conditions and collect
@@ -96,26 +97,29 @@ impl PlanBuilder {
 			// operations
 			let mut compound_index = None;
 			for (ixr, vals) in p.compound_indexes {
-				if let Some((cols, io)) = b.check_compound_index_all_and(&ixr, vals) {
+				if let Some((cols, io, scan_direction)) =
+					b.check_compound_index_all_and(&ixr, vals, ctx.order, p.has_reverse_scan)
+				{
 					// Prefer indexes that cover more columns (higher selectivity)
-					if let Some((c, _)) = &compound_index {
+					if let Some((c, _, _)) = &compound_index {
 						if cols <= *c {
 							continue; // Skip if this index covers fewer columns
 						}
 					}
 					// Only consider true compound indexes (multiple columns)
-					if cols > 1 {
-						compound_index = Some((cols, io));
+					if cols > 1 || scan_direction.is_some() {
+						compound_index =
+							Some((cols, io, scan_direction.unwrap_or(ScanDirection::Forward)));
 					}
 				}
 			}
 
-			if let Some((_, io)) = compound_index {
+			if let Some((_, io, scan_direction)) = compound_index {
 				// Evaluate whether we can use index-only access (no table lookups needed)
 				let record_strategy =
 					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
 				// Return optimized single compound index plan
-				return Ok(Plan::SingleIndex(None, io, record_strategy));
+				return Ok(Plan::SingleIndex(None, io, record_strategy, scan_direction));
 			}
 
 			// Select the first available range query (deterministic group order)
@@ -157,7 +161,7 @@ impl PlanBuilder {
 				let record_strategy =
 					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
 				// Return the plan
-				return Ok(Plan::SingleIndex(Some(e), i, record_strategy));
+				return Ok(Plan::SingleIndex(Some(e), i, record_strategy, ScanDirection::Forward));
 			}
 			// If there is an order option
 			if let Some(o) = p.order_limit {
@@ -167,7 +171,13 @@ impl PlanBuilder {
 				// Check compatibility with reverse-scan capability
 				if Self::check_order_scan(p.has_reverse_scan, o.op()) {
 					// Return the plan
-					return Ok(Plan::SingleIndex(None, o.clone(), record_strategy));
+					// TODO EK: Is that in fact pre-ordered?
+					return Ok(Plan::SingleIndex(
+						None,
+						o.clone(),
+						record_strategy,
+						ScanDirection::Forward,
+					));
 				}
 			}
 		}
@@ -207,12 +217,12 @@ impl PlanBuilder {
 	/// Check if the ordering is compatible with the datastore transaction
 	/// capabilities
 	fn check_order_scan(has_reverse_scan: bool, op: &IndexOperator) -> bool {
-		has_reverse_scan || matches!(op, IndexOperator::Order(false))
+		has_reverse_scan || matches!(op, IndexOperator::Order(OrderDirection::Ascending))
 	}
 
 	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 	fn check_range_scan_direction(has_reverse_scan: bool, op: &IndexOperator) -> ScanDirection {
-		if has_reverse_scan && matches!(op, IndexOperator::Order(true)) {
+		if has_reverse_scan && matches!(op, IndexOperator::Order(OrderDirection::Descending)) {
 			return ScanDirection::Backward;
 		}
 		ScanDirection::Forward
@@ -224,7 +234,9 @@ impl PlanBuilder {
 		&self,
 		index_reference: &IndexReference,
 		columns: Vec<Vec<IndexOperator>>,
-	) -> Option<(IdiomCol, IndexOption)> {
+		ordering: Option<&Ordering>,
+		has_reverse_scan: bool,
+	) -> Option<(IdiomCol, IndexOption, Option<ScanDirection>)> {
 		// Check the index can be used
 		if !self.with_indexes.allowed_index(index_reference.index_id) {
 			return None;
@@ -272,6 +284,7 @@ impl PlanBuilder {
 						IdiomPosition::None,
 						IndexOperator::Range(vec![], range_parts),
 					),
+					None,
 				));
 			}
 			return None;
@@ -290,8 +303,15 @@ impl PlanBuilder {
 						IdiomPosition::None,
 						IndexOperator::Range(equals, range_parts),
 					),
+					None,
 				));
 			}
+
+			let scan_direction = if let Some(Ordering::Order(order_list)) = ordering {
+				index_reference.match_order(order_list, continues_equals_values, has_reverse_scan)
+			} else {
+				None
+			};
 			return Some((
 				continues_equals_values,
 				IndexOption::new(
@@ -300,6 +320,7 @@ impl PlanBuilder {
 					IdiomPosition::None,
 					IndexOperator::Equality(Arc::new(Value::Array(Array(equals)))),
 				),
+				scan_direction,
 			));
 		}
 		let vals: Vec<Value> = equal_combinations
@@ -317,6 +338,7 @@ impl PlanBuilder {
 				IdiomPosition::None,
 				IndexOperator::Union(Arc::new(Value::Array(Array(vals)))),
 			),
+			None,
 		))
 	}
 
@@ -391,7 +413,8 @@ pub(super) enum Plan {
 	/// Index scan filtered on records matching a given expression
 	/// 1: The optional expression associated with the index
 	/// 2: A record strategy
-	SingleIndex(Option<Arc<Expr>>, IndexOption, RecordStrategy),
+	/// 4: The expected scan direction
+	SingleIndex(Option<Arc<Expr>>, IndexOption, RecordStrategy, ScanDirection),
 	/// Union of filtered index scans
 	/// 1: A list of expression and index options
 	/// 2: A list of index ranges
@@ -431,8 +454,7 @@ pub(super) enum IndexOperator {
 	Range(Vec<Value>, Vec<(BinaryOperator, Arc<Value>)>),
 	Matches(String, MatchesOperator),
 	Ann(Arc<Vec<Number>>, u32, u32),
-	/// false = ascending, true = descending
-	Order(bool),
+	Order(OrderDirection),
 	Count,
 }
 
@@ -484,9 +506,12 @@ impl IndexOption {
 		value.clone()
 	}
 
-	pub(crate) fn explain(&self) -> Value {
+	pub(crate) fn explain(&self, sc: Option<ScanDirection>) -> Value {
 		let mut e = HashMap::new();
 		e.insert("index", Value::from(self.index_reference().name.clone()));
+		if let Some(sc) = sc {
+			e.insert("direction", Value::from(sc.to_string()));
+		}
 		match self.op() {
 			IndexOperator::Equality(v) => {
 				e.insert("operator", Value::from(BinaryOperator::Equal.to_string()));
@@ -500,7 +525,7 @@ impl IndexOption {
 				e.insert("operator", Value::from("join"));
 				let mut joins = Vec::with_capacity(ios.len());
 				for io in ios {
-					joins.push(io.explain());
+					joins.push(io.explain(None));
 				}
 				let joins = Value::from(joins);
 				e.insert("joins", joins);
@@ -534,10 +559,10 @@ impl IndexOption {
 				e.insert("operator", op);
 				e.insert("value", val);
 			}
-			IndexOperator::Order(reverse) => {
+			IndexOperator::Order(direction) => {
 				e.insert(
 					"operator",
-					Value::from(if *reverse {
+					Value::from(if matches!(direction, OrderDirection::Descending) {
 						"ReverseOrder"
 					} else {
 						"Order"

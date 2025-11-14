@@ -39,11 +39,13 @@ impl fmt::Display for OrderList {
 impl OrderList {
 	pub(crate) fn compare(&self, a: &Value, b: &Value) -> cmp::Ordering {
 		for order in &self.0 {
-			// Reverse the ordering if DESC
-			let o = if order.direction {
-				a.compare(b, &order.value.0, order.collate, order.numeric)
-			} else {
-				b.compare(a, &order.value.0, order.collate, order.numeric)
+			let o = match order.direction {
+				OrderDirection::Ascending => {
+					a.compare(b, &order.value.0, order.collate, order.numeric)
+				}
+				OrderDirection::Descending => {
+					b.compare(a, &order.value.0, order.collate, order.numeric)
+				}
 			};
 			//
 			match o {
@@ -57,14 +59,20 @@ impl OrderList {
 	}
 }
 
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub(crate) enum OrderDirection {
+	#[default]
+	Ascending,
+	Descending,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct Order {
 	/// The value to order by
 	pub(crate) value: Idiom,
 	pub(crate) collate: bool,
 	pub(crate) numeric: bool,
-	/// true if the direction is ascending
-	pub(crate) direction: bool,
+	pub(crate) direction: OrderDirection,
 }
 
 impl fmt::Display for Order {
@@ -76,7 +84,7 @@ impl fmt::Display for Order {
 		if self.numeric {
 			write!(f, " NUMERIC")?;
 		}
-		if !self.direction {
+		if matches!(self.direction, OrderDirection::Descending) {
 			write!(f, " DESC")?;
 		}
 		Ok(())

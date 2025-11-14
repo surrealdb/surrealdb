@@ -58,7 +58,7 @@ impl Iterable {
 
 	fn iteration_stage_check(&self, ctx: &Context) -> bool {
 		match self {
-			Iterable::Table(tb, _, _) | Iterable::Index(tb, _, _) => {
+			Iterable::Table(tb, _, _) | Iterable::Index(tb, _, _, _) => {
 				if let Some(IterationStage::BuildKnn) = ctx.get_iteration_stage() {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(tb) {
@@ -578,7 +578,7 @@ pub(super) trait Collector {
 						}
 					}
 				}
-				Iterable::Index(v, irf, rs) => {
+				Iterable::Index(v, irf, rs, _) => {
 					if let Some(qp) = ctx.get_query_planner() {
 						if let Some(exe) = qp.get_query_executor(v.as_str()) {
 							// Attach the table-specific QueryExecutor to the Context to avoid
