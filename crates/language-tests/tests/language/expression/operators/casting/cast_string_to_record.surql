@@ -11,7 +11,7 @@ value = "b:1"
 value = "b:['a']"
 
 [[test.results]]
-value = "b:⟨99999999999999999999999⟩"
+value = "b:`99999999999999999999999`"
 
 [[test.results]]
 value = "b:999999999999999"
