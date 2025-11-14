@@ -3,8 +3,8 @@ use std::any::Any;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::syn::error::RenderedError;
-use surrealdb_types::Variables;
 use surrealdb_types::Value as SurValue;
+use surrealdb_types::Variables;
 
 use super::cmp::{RoughlyEq, RoughlyEqConfig};
 use crate::tests::TestSet;

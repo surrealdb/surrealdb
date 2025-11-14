@@ -3,7 +3,7 @@ use std::io::{self, IsTerminal as _};
 use std::time::{Duration, Instant};
 
 use similar::{Algorithm, TextDiff};
-use surrealdb_types::{Value as SurValue, ToSql};
+use surrealdb_types::{ToSql, Value as SurValue};
 
 use super::{
 	MatchValueType, MatcherMismatch, Mismatch, MismatchKind, ResultTypeMismatchReport, TestError,
@@ -317,7 +317,14 @@ impl TestReport {
 								writeln!(f, "= Got:")?;
 								f.indent(|f| writeln!(f, "- Value: {}", got.to_sql()))?;
 								writeln!(f, "= Diff:")?;
-								f.indent(|f| Self::display_diff(&got.to_sql(), &expected.to_sql(), use_color, f))
+								f.indent(|f| {
+									Self::display_diff(
+										&got.to_sql(),
+										&expected.to_sql(),
+										use_color,
+										f,
+									)
+								})
 							})
 						}
 						ValueMismatchKind::ExpectedError {

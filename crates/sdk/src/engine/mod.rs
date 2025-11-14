@@ -3,7 +3,6 @@
 pub mod any;
 #[cfg(any(
 	feature = "kv-mem",
-	feature = "kv-fdb",
 	feature = "kv-tikv",
 	feature = "kv-rocksdb",
 	feature = "kv-indxdb",

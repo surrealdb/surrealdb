@@ -1,4 +1,4 @@
-#![cfg(any(feature = "kv-tikv", feature = "kv-fdb"))]
+#![cfg(feature = "kv-tikv")]
 
 use std::sync::Arc;
 

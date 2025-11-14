@@ -63,7 +63,6 @@ impl SurrealProcess {
 		let endpoint = match config.backend {
 			UpgradeBackend::RocksDb => format!("rocksdb://{tmp_dir}/ds"),
 			UpgradeBackend::SurrealKv => format!("surrealkv://{tmp_dir}/ds"),
-			UpgradeBackend::Foundation => format!("fdb://{tmp_dir}/ds"),
 		};
 
 		let bind = format!("127.0.0.1:{port}");
