@@ -340,11 +340,15 @@ impl super::api::Transaction for Transaction {
 		// Retrieve the scan range
 		let res = match version {
 			Some(ts) => inner
-				.keys_at_version(beg, end, ts, Some(limit as usize))?
+				.keys_at_version(beg, end, ts)?
+				.into_iter()
+				.take(limit as usize)
 				.map(|r| r.map(Key::from).map_err(Into::into))
 				.collect::<Result<_>>()?,
 			None => inner
-				.keys(beg, end, Some(limit as usize))?
+				.keys(beg, end)?
+				.into_iter()
+				.take(limit as usize)
 				.map(|r| r.map(Key::from).map_err(Into::into))
 				.collect::<Result<_>>()?,
 		};
@@ -370,13 +374,17 @@ impl super::api::Transaction for Transaction {
 		// Retrieve the scan range
 		let res = match version {
 			Some(ts) => inner
-				.keys_at_version(beg, end, ts, Some(limit as usize))?
+				.keys_at_version(beg, end, ts)?
 				.rev()
+				.into_iter()
+				.take(limit as usize)
 				.map(|r| r.map(Key::from).map_err(Into::into))
 				.collect::<Result<_>>()?,
 			None => inner
-				.keys(beg, end, Some(limit as usize))?
+				.keys(beg, end)?
 				.rev()
+				.into_iter()
+				.take(limit as usize)
 				.map(|r| r.map(Key::from).map_err(Into::into))
 				.collect::<Result<_>>()?,
 		};
@@ -402,11 +410,15 @@ impl super::api::Transaction for Transaction {
 		// Retrieve the scan range
 		let res = match version {
 			Some(ts) => inner
-				.range_at_version(beg, end, ts, Some(limit as usize))?
+				.range_at_version(beg, end, ts)?
+				.into_iter()
+				.take(limit as usize)
 				.map(|r| r.map(|(k, v)| (k.to_vec(), v.to_vec())).map_err(Into::into))
 				.collect::<Result<_>>()?,
 			None => inner
-				.range(beg, end, Some(limit as usize))?
+				.range(beg, end)?
+				.into_iter()
+				.take(limit as usize)
 				.map(|r| r.map(|(k, v)| (k.to_vec(), v.to_vec())).map_err(Into::into))
 				.collect::<Result<_>>()?,
 		};
@@ -432,13 +444,17 @@ impl super::api::Transaction for Transaction {
 		// Retrieve the scan range
 		let res = match version {
 			Some(ts) => inner
-				.range_at_version(beg, end, ts, Some(limit as usize))?
+				.range_at_version(beg, end, ts)?
 				.rev()
+				.into_iter()
+				.take(limit as usize)
 				.map(|r| r.map(|(k, v)| (k.to_vec(), v.to_vec())).map_err(Into::into))
 				.collect::<Result<_>>()?,
 			None => inner
-				.range(beg, end, Some(limit as usize))?
+				.range(beg, end)?
 				.rev()
+				.into_iter()
+				.take(limit as usize)
 				.map(|r| r.map(|(k, v)| (k.to_vec(), v.to_vec())).map_err(Into::into))
 				.collect::<Result<_>>()?,
 		};

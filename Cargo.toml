@@ -61,8 +61,7 @@ revision = { version = "0.14.0", features = [
     "uuid",
 ] }
 storekey = { version = "0.9.0", features = ["uuid"] }
-#surrealkv = { version = "0.13.0" }
-surrealkv = { git = "https://github.com/surrealdb/surrealkv", hash = "3504c0d" }
+surrealkv = "0.15.0"
 surrealml = { version = "0.1.9", package = "surrealml-core", features = [
     "dynamic",
 ] }
