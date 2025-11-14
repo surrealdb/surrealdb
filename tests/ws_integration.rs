@@ -2205,7 +2205,7 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 		// Start server disallowing some RPC methods
 		let (addr, mut server) = common::start_server(StartServerArguments {
 			// Deny all routes except for RPC
-			args: "--deny-rpc info,query".to_string(),
+			args: "--deny-rpc info".to_string(),
 			// Auth disabled to ensure unauthorized errors are due to capabilities
 			auth: false,
 			..Default::default()
@@ -2218,10 +2218,7 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 		socket.send_message_use(Some(NS), Some(DB)).await.unwrap();
 
 		// Test operations that SHOULD NOT with the provided capabilities
-		let operations_ko = vec![
-			socket.send_request("info", json!([])),
-			socket.send_request("query", json!(["SELECT * FROM 1"])),
-		];
+		let operations_ko = vec![socket.send_request("info", json!([]))];
 		for operation in operations_ko {
 			let res = operation.await;
 			assert!(res.is_ok(), "result: {res:?}");
@@ -2238,6 +2235,7 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 			socket.send_request("version", json!([])),
 			socket.send_request("let", json!(["let_var", "let_value",])),
 			socket.send_request("set", json!(["set_var", "set_value",])),
+			socket.send_request("query", json!(["DEFINE TABLE tester"])),
 			socket.send_request("select", json!(["tester",])),
 			socket.send_request(
 				"insert",

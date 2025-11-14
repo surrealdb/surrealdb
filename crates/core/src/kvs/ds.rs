@@ -77,7 +77,7 @@ use crate::sql::Ast;
 use crate::surrealism::cache::SurrealismCache;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::types::{PublicNotification, PublicValue, PublicVariables};
-use crate::val::{Value, convert_value_to_public_value};
+use crate::val::convert_value_to_public_value;
 use crate::{CommunityComposer, cf, syn};
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
@@ -95,8 +95,6 @@ pub struct Datastore {
 	transaction_factory: TransactionFactory,
 	/// The unique id of this datastore, used in notifications.
 	id: Uuid,
-	/// Whether this datastore runs in strict mode by default.
-	strict: bool,
 	/// Whether authentication is enabled on this datastore.
 	auth_enabled: bool,
 	/// The maximum duration timeout for running multiple statements in a query.
@@ -187,7 +185,7 @@ impl TransactionFactory {
 /// Abstraction over storage backends for creating and managing transactions.
 ///
 /// This trait allows decoupling `Datastore` from concrete KV engines (memory,
-/// RocksDB, TiKV, FoundationDB, SurrealKV, etc.). Implementors translate the
+/// RocksDB, TiKV, SurrealKV, SurrealDS, etc.). Implementors translate the
 /// generic transaction parameters into a backend-specific transaction and
 /// report whether the transaction is considered "local" (used internally to
 /// enable some optimizations).
@@ -261,8 +259,6 @@ pub enum DatastoreFlavor {
 	IndxDB(super::indxdb::Datastore),
 	#[cfg(feature = "kv-tikv")]
 	TiKV(super::tikv::Datastore),
-	#[cfg(feature = "kv-fdb")]
-	FoundationDB(super::fdb::Datastore),
 	#[cfg(feature = "kv-surrealkv")]
 	SurrealKV(super::surrealkv::Datastore),
 }
@@ -412,20 +408,6 @@ impl TransactionBuilderFactory for CommunityComposer {
 				#[cfg(not(feature = "kv-tikv"))]
 				bail!(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
-			// Initiate a FoundationDB datastore
-			(flavour @ "fdb", path) => {
-				#[cfg(feature = "kv-fdb")]
-				{
-					let v = super::fdb::Datastore::new(&path)
-						.await
-						.map(DatastoreFlavor::FoundationDB)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
-				}
-				#[cfg(not(feature = "kv-fdb"))]
-				bail!(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
 			// The datastore path is not valid
 			(flavour, path) => {
 				info!(target: TARGET, "Unable to load the specified datastore {flavour}{}", path);
@@ -442,7 +424,6 @@ impl TransactionBuilderFactory for CommunityComposer {
 			v if v.starts_with("surrealkv:") => Ok(v.to_string()),
 			v if v.starts_with("surrealkv+versioned:") => Ok(v.to_string()),
 			v if v.starts_with("tikv:") => Ok(v.to_string()),
-			v if v.starts_with("fdb:") => Ok(v.to_string()),
 			_ => bail!("Provide a valid database path parameter"),
 		}
 	}
@@ -487,11 +468,6 @@ impl TransactionBuilder for DatastoreFlavor {
 				let tx = v.transaction(write, lock).await?;
 				(tx, false)
 			}
-			#[cfg(feature = "kv-fdb")]
-			Self::FoundationDB(v) => {
-				let tx = v.transaction(write, lock).await?;
-				(tx, false)
-			}
 			#[cfg(feature = "kv-surrealkv")]
 			Self::SurrealKV(v) => {
 				let tx = v.transaction(write, lock).await?;
@@ -512,8 +488,6 @@ impl TransactionBuilder for DatastoreFlavor {
 			Self::IndxDB(v) => v.shutdown().await,
 			#[cfg(feature = "kv-tikv")]
 			Self::TiKV(v) => v.shutdown().await,
-			#[cfg(feature = "kv-fdb")]
-			Self::FoundationDB(v) => v.shutdown().await,
 			#[cfg(feature = "kv-surrealkv")]
 			Self::SurrealKV(v) => v.shutdown().await,
 			#[allow(unreachable_patterns)]
@@ -534,8 +508,6 @@ impl Display for DatastoreFlavor {
 			Self::IndxDB(_) => write!(f, "indxdb"),
 			#[cfg(feature = "kv-tikv")]
 			Self::TiKV(_) => write!(f, "tikv"),
-			#[cfg(feature = "kv-fdb")]
-			Self::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
 			Self::SurrealKV(_) => write!(f, "surrealkv"),
 			#[allow(unreachable_patterns)]
@@ -642,7 +614,6 @@ impl Datastore {
 		Ok(Self {
 			id,
 			transaction_factory: tf.clone(),
-			strict: false,
 			auth_enabled: false,
 			query_timeout: None,
 			slow_log: None,
@@ -668,7 +639,6 @@ impl Datastore {
 	pub fn restart(self) -> Self {
 		Self {
 			id: self.id,
-			strict: self.strict,
 			auth_enabled: self.auth_enabled,
 			query_timeout: self.query_timeout,
 			slow_log: self.slow_log.clone(),
@@ -690,20 +660,10 @@ impl Datastore {
 		}
 	}
 
-	/// Specify whether this Datastore should run in strict mode
+	/// Set the node id for this datastore.
 	pub fn with_node_id(mut self, id: Uuid) -> Self {
 		self.id = id;
 		self
-	}
-
-	/// Specify whether this Datastore should run in strict mode
-	pub fn with_strict_mode(mut self, strict: bool) -> Self {
-		self.strict = strict;
-		self
-	}
-
-	pub fn is_strict_mode(&self) -> bool {
-		self.strict
 	}
 
 	/// Specify whether this datastore should enable live query notifications
@@ -1337,9 +1297,6 @@ impl Datastore {
 		// Process all statements
 
 		let parser_settings = ParserSettings {
-			references_enabled: ctx
-				.get_capabilities()
-				.allows_experimental(&ExperimentalTarget::RecordReferences),
 			define_api_enabled: ctx
 				.get_capabilities()
 				.allows_experimental(&ExperimentalTarget::DefineApi),
@@ -1706,81 +1663,13 @@ impl Datastore {
 		})
 	}
 
-	/// Ensure a SQL [`Value`] is fully computed
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn compute(
-		&self,
-		val: Expr,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-	) -> Result<Value> {
-		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
-		// Check if anonymous actors can compute values when auth is enabled
-		// TODO(sgirones): Check this as part of the authorisation layer
-		self.check_anon(sess).map_err(|_| {
-			Error::from(IamError::NotAllowed {
-				actor: "anonymous".to_string(),
-				action: "compute".to_string(),
-				resource: "value".to_string(),
-			})
-		})?;
-
-		// Create a new memory stack
-		let mut stack = TreeStack::new();
-		// Create a new query options
-		let opt = self.setup_options(sess);
-		// Create a default context
-		let mut ctx = MutableContext::default();
-		// Set context capabilities
-		ctx.add_capabilities(self.capabilities.clone());
-		// Set the global query timeout
-		if let Some(timeout) = self.query_timeout {
-			ctx.add_timeout(timeout)?;
-		}
-		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
-			ctx.add_notifications(Some(&channel.0));
-		}
-		// Start an execution context
-		ctx.attach_session(sess)?;
-		// Store the query variables
-		if let Some(vars) = vars {
-			ctx.attach_variables(vars.into())?;
-		}
-		let txn_type = if val.read_only() {
-			TransactionType::Read
-		} else {
-			TransactionType::Write
-		};
-		// Start a new transaction
-		let txn = self.transaction(txn_type, Optimistic).await?.enclose();
-		// Store the transaction
-		ctx.set_transaction(txn.clone());
-		// Freeze the context
-		let ctx = ctx.freeze();
-		// Compute the value
-		let res =
-			stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.catch_return();
-		// Store any data
-		if res.is_ok() && matches!(txn_type, TransactionType::Read) {
-			// If the compute was successful, then commit if writeable
-			txn.commit().await?
-		} else {
-			// Cancel if the compute was an error, or if readonly
-			txn.cancel().await?
-		};
-		// Return result
-		res
-	}
-
 	/// Evaluates a SQL [`Value`] without checking authenticating config
 	/// This is used in very specific cases, where we do not need to check
 	/// whether authentication is enabled, or guest access is disabled.
 	/// For example, this is used when processing a record access SIGNUP or
 	/// SIGNIN clause, which still needs to work without guest access.
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn evaluate(
+	pub(crate) async fn evaluate(
 		&self,
 		val: &Expr,
 		sess: &Session,
@@ -1940,7 +1829,6 @@ impl Datastore {
 			.with_db(sess.db())
 			.with_live(sess.live())
 			.with_auth(sess.au.clone())
-			.with_strict(self.strict)
 			.with_auth_enabled(self.auth_enabled)
 	}
 
@@ -1999,7 +1887,7 @@ impl Datastore {
 		match (namespace, database) {
 			(Some(ns), Some(db)) => {
 				let tx = new_tx().await?;
-				tx.ensure_ns_db(ctx, &ns, &db, self.strict)
+				tx.ensure_ns_db(ctx, &ns, &db)
 					.await
 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
 				commit_tx(tx).await?;
@@ -2008,7 +1896,7 @@ impl Datastore {
 			}
 			(Some(ns), None) => {
 				let tx = new_tx().await?;
-				tx.get_or_add_ns(ctx, &ns, self.strict)
+				tx.get_or_add_ns(ctx, &ns)
 					.await
 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
 				commit_tx(tx).await?;
@@ -2021,7 +1909,7 @@ impl Datastore {
 					));
 				};
 				let tx = new_tx().await?;
-				tx.ensure_ns_db(ctx, &ns, &db, self.strict)
+				tx.ensure_ns_db(ctx, &ns, &db)
 					.await
 					.map_err(|err| DbResultError::InternalError(err.to_string()))?;
 				commit_tx(tx).await?;
@@ -2089,7 +1977,7 @@ impl Datastore {
 	{
 		let tx = Arc::new(self.transaction(TransactionType::Write, LockType::Optimistic).await?);
 
-		let db = tx.ensure_ns_db(None, ns, db, false).await?;
+		let db = tx.ensure_ns_db(None, ns, db).await?;
 
 		let apis = tx.all_db_apis(db.namespace_id, db.database_id).await?;
 		let segments: Vec<&str> = path.split('/').filter(|x| !x.is_empty()).collect();
@@ -2257,7 +2145,6 @@ mod test {
 			.with_ns(Some("test".into()))
 			.with_db(Some("test".into()))
 			.with_live(false)
-			.with_strict(false)
 			.with_auth_enabled(false)
 			.with_max_computation_depth(u32::MAX);
 
@@ -2294,7 +2181,7 @@ mod test {
 
 		let db = {
 			let txn = ds.transaction(TransactionType::Write, LockType::Pessimistic).await?;
-			let db = txn.ensure_ns_db(None, "test", "test", false).await?;
+			let db = txn.ensure_ns_db(None, "test", "test").await?;
 			txn.commit().await?;
 			db
 		};

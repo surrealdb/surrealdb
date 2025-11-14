@@ -8,7 +8,7 @@ use crate::dbs::Capabilities;
 use crate::dbs::capabilities::ExperimentalTarget;
 use crate::err::Error;
 use crate::sql::kind::KindLiteral;
-use crate::sql::{Ast, Block, Expr, Fetchs, Fields, Function, Idiom, Kind, Output, RecordIdLit};
+use crate::sql::{Ast, Block, Expr, Function, Idiom, Kind};
 use crate::types::{PublicDatetime, PublicDuration, PublicRecordId, PublicValue};
 
 pub mod error;
@@ -66,7 +66,6 @@ pub fn settings_from_capabilities(cap: &Capabilities) -> ParserSettings {
 	ParserSettings {
 		object_recursion_limit: *MAX_OBJECT_PARSING_DEPTH as usize,
 		query_recursion_limit: *MAX_QUERY_PARSING_DEPTH as usize,
-		references_enabled: cap.allows_experimental(&ExperimentalTarget::RecordReferences),
 		define_api_enabled: cap.allows_experimental(&ExperimentalTarget::DefineApi),
 		files_enabled: cap.allows_experimental(&ExperimentalTarget::Files),
 		surrealism_enabled: cap.allows_experimental(&ExperimentalTarget::Surrealism),
@@ -118,15 +117,9 @@ pub(crate) fn expr(input: &str) -> Result<Expr> {
 	expr_with_capabilities(input, &capabilities)
 }
 
-/// Validates a SurrealQL [`Expr`]
-pub fn validate_expr(input: &str) -> Result<()> {
-	expr(input)?;
-	Ok(())
-}
-
 /// Parses a SurrealQL [`Value`].
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn expr_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Expr> {
+pub(crate) fn expr_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value");
 
 	parse_with_settings(
@@ -171,12 +164,6 @@ pub(crate) fn idiom(input: &str) -> Result<Idiom> {
 	parse_with(input.as_bytes(), async |parser, stk| parser.parse_plain_idiom(stk).await)
 }
 
-/// Validates a SurrealQL [`Idiom`]
-pub fn validate_idiom(input: &str) -> Result<()> {
-	idiom(input)?;
-	Ok(())
-}
-
 /// Parse a datetime without enclosing delimiters from a string.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn datetime(input: &str) -> Result<PublicDatetime> {
@@ -216,14 +203,6 @@ pub fn record_id(input: &str) -> Result<PublicRecordId> {
 	parse_with(input.as_bytes(), async |parser, stk| parser.parse_value_record_id(stk).await)
 }
 
-/// Parse a record id including ranges.
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn record_id_with_range(input: &str) -> Result<RecordIdLit> {
-	trace!(target: TARGET, "Parsing SurrealQL record id with range");
-
-	parse_with(input.as_bytes(), async |parser, stk| parser.parse_record_id_with_range(stk).await)
-}
-
 /// Parse a table name from a string.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
 pub fn table(input: &str) -> Result<crate::val::Table> {
@@ -245,7 +224,6 @@ pub fn block(input: &str) -> Result<Block> {
 		ParserSettings {
 			legacy_strands: true,
 			flexible_record_id: true,
-			references_enabled: true,
 			define_api_enabled: true,
 			files_enabled: true,
 			surrealism_enabled: true,
@@ -267,47 +245,9 @@ pub fn block(input: &str) -> Result<Block> {
 	)
 }
 
-/// Parses fields for a SELECT statement
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub(crate) fn fields_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Fields> {
-	trace!(target: TARGET, "Parsing select fields");
-
-	parse_with_settings(
-		input.as_bytes(),
-		settings_from_capabilities(capabilities),
-		async |parser, stk| parser.parse_fields(stk).await,
-	)
-}
-
-/// Parses fields for a SELECT statement
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub(crate) fn fetchs_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Fetchs> {
-	trace!(target: TARGET, "Parsing fetch fields");
-
-	parse_with_settings(
-		input.as_bytes(),
-		settings_from_capabilities(capabilities),
-		async |parser, stk| parser.parse_fetchs(stk).await,
-	)
-}
-
-/// Parses an output for a RETURN clause
-#[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub(crate) fn output_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Output> {
-	trace!(target: TARGET, "Parsing RETURN clause");
-
-	ensure!(input.len() <= u32::MAX as usize, Error::QueryTooLarge);
-
-	parse_with_settings(
-		input.as_bytes(),
-		settings_from_capabilities(capabilities),
-		async |parser, stk| parser.parse_output(stk).await,
-	)
-}
-
 /// Parses a SurrealQL [`Value`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
-pub fn expr_legacy_strand(input: &str) -> Result<Expr> {
+pub(crate) fn expr_legacy_strand(input: &str) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 
 	let settings = ParserSettings {

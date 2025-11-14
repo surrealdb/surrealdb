@@ -87,10 +87,6 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		Backend::TikV => {}
 		#[cfg(not(feature = "backend-tikv"))]
 		Backend::TikV => bail!("TiKV backend feature is not enabled"),
-		#[cfg(feature = "backend-foundation")]
-		Backend::Foundation => {}
-		#[cfg(not(feature = "backend-foundation"))]
-		Backend::Foundation => bail!("FoundationDB backend features is not enabled"),
 	}
 
 	let subset = filter_testset_from_arguments(testset, matches);
@@ -305,16 +301,10 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
 		.unwrap_or(Duration::from_secs(3));
 
-	let strict = config.env.as_ref().map(|x| x.strict).unwrap_or(false);
-
 	let res = context
 		.ds
 		.with(
-			move |ds| {
-				ds.with_capabilities(capabilities)
-					.with_query_timeout(Some(timeout_duration))
-					.with_strict_mode(strict)
-			},
+			move |ds| ds.with_capabilities(capabilities).with_query_timeout(Some(timeout_duration)),
 			async |ds| run_test_with_dbs(context.id, &context.testset, ds).await,
 		)
 		.await;
@@ -401,14 +391,13 @@ async fn run_test_with_dbs(
 
 	let source = &set[id].source;
 	let settings = syn::parser::ParserSettings {
-		references_enabled: dbs
-			.get_capabilities()
-			.allows_experimental(&ExperimentalTarget::RecordReferences),
 		define_api_enabled: dbs
 			.get_capabilities()
 			.allows_experimental(&ExperimentalTarget::DefineApi),
 		files_enabled: dbs.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
-		surrealism_enabled: dbs.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism),
+		surrealism_enabled: dbs
+			.get_capabilities()
+			.allows_experimental(&ExperimentalTarget::Surrealism),
 		..Default::default()
 	};
 

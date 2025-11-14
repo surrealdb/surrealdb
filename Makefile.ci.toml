@@ -403,13 +403,6 @@ run_task = { name = [
     "stop-tikv",
 ], fork = true, parallel = false }
 
-[tasks.ci-api-integration-fdb]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb" }
-run_task = { name = [
-    "test-api-integration",
-], fork = true, parallel = false }
-
 [tasks.ci-api-integration-all]
 category = "CI - INTEGRATION TESTS"
 description = "Run all integration tests"
@@ -418,7 +411,6 @@ dependencies = [
     "ci-api-integration-rocksdb",
     "ci-api-integration-surrealkv",
     "ci-api-integration-tikv",
-    "ci-api-integration-fdb",
     "ci-api-integration-http",
     "ci-api-integration-ws",
 ]
@@ -454,13 +446,6 @@ run_task = { name = [
     "start-tikv",
     "test-kvs",
     "stop-tikv",
-], fork = true, parallel = false }
-
-[tasks.ci-fdb-kvs]
-category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "fdb", _TEST_FEATURES = "kv-fdb" }
-run_task = { name = [
-    "test-kvs",
 ], fork = true, parallel = false }
 
 #
@@ -514,13 +499,6 @@ run_task = { name = [
     "stop-tikv",
 ], fork = true, parallel = false }
 
-[tasks.ci-lang-test-fdb]
-category = "CI - LANGUAGE TESTS"
-env = { _TEST_API_ENGINE = "foundation", _TEST_LANG_FEATURES = "backend-foundation" }
-run_task = { name = [
-    "test-lang",
-], fork = true, parallel = false }
-
 [tasks.ci-lang-test-all]
 category = "CI - LANGUAGE TESTS"
 description = "Run all language tests"
@@ -529,7 +507,6 @@ dependencies = [
     "ci-lang-test-rocksdb",
     "ci-lang-test-surrealkv",
     "ci-lang-test-tikv",
-    "ci-lang-test-fdb",
 ]
 
 #
@@ -629,18 +606,6 @@ script = """
 
     exit 1
 """
-
-[tasks.clear-fdb]
-category = "CI - SERVICES"
-command = "fdbcli"
-args = [
-    "-C",
-    "/etc/foundationdb/fdb.cluster",
-    "--exec",
-    "writemode on; clearrange \"\" \\xFF",
-    "--timeout",
-    "20",
-]
 
 #
 # Builds

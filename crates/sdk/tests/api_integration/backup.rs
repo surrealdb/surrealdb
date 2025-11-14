@@ -3,7 +3,6 @@
 	feature = "kv-mem",
 	feature = "kv-rocksdb",
 	feature = "kv-tikv",
-	feature = "kv-fdb",
 	feature = "kv-surrealkv",
 	feature = "protocol-http",
 ))]
@@ -104,7 +103,9 @@ pub async fn export_with_config(new_db: impl CreateDb) {
 	// Export, remove table, and import
 	let res = async {
 		db.export(&file).with_config().tables(vec!["user"]).await.unwrap();
-		db.query("REMOVE TABLE user; REMOVE TABLE group;").await.unwrap();
+		db.query("REMOVE TABLE user; REMOVE TABLE group; DEFINE TABLE user; DEFINE TABLE group;")
+			.await
+			.unwrap();
 		db.import(&file).await.unwrap();
 		Ok::<(), surrealdb::Error>(())
 	}

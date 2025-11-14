@@ -7,7 +7,6 @@ use reblessive::tree::Stk;
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::dbs::capabilities::ExperimentalTarget;
 use crate::doc::CursorDoc;
 use crate::expr::order::Ordering;
 use crate::expr::start::Start;
@@ -42,6 +41,10 @@ impl Lookup {
 impl Display for Lookup {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		if self.what.len() <= 1
+			// When the singular lookup subject has a referencing field, it needs to be wrapped in parentheses
+			// Otherwise <~table.field will be parsed as [Lookup(<~table), Field(.field)]
+			// Whereas <~(table.field) will be parsed as [Lookup(<~table.field)]
+			&& self.what.iter().all(|v| v.referencing_field().is_none())
 			&& self.cond.is_none()
 			&& self.alias.is_none()
 			&& self.expr.is_none()
@@ -112,11 +115,30 @@ impl Display for LookupKind {
 /// This enum instructs whether we scan all edges on a table or just a specific range
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum LookupSubject {
-	Table(String),
+	Table {
+		table: String,
+		referencing_field: Option<String>,
+	},
 	Range {
 		table: String,
 		range: RecordIdKeyRangeLit,
+		referencing_field: Option<String>,
 	},
+}
+
+impl LookupSubject {
+	pub(crate) fn referencing_field(&self) -> Option<&String> {
+		match self {
+			LookupSubject::Table {
+				referencing_field,
+				..
+			} => referencing_field.as_ref(),
+			LookupSubject::Range {
+				referencing_field,
+				..
+			} => referencing_field.as_ref(),
+		}
+	}
 }
 
 impl LookupSubject {
@@ -126,24 +148,23 @@ impl LookupSubject {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-		kind: &LookupKind,
 	) -> Result<ComputedLookupSubject> {
-		if matches!(kind, LookupKind::Reference)
-			&& !ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences)
-		{
-			bail!(
-				"Failed to process lookup: Experimental capability `record_references` is not enabled"
-			);
-		}
-
 		match self {
-			LookupSubject::Table(ident) => Ok(ComputedLookupSubject::Table(ident.clone())),
+			LookupSubject::Table {
+				table,
+				referencing_field,
+			} => Ok(ComputedLookupSubject::Table {
+				table: table.clone(),
+				referencing_field: referencing_field.clone(),
+			}),
 			LookupSubject::Range {
 				table,
 				range,
+				referencing_field,
 			} => Ok(ComputedLookupSubject::Range {
 				table: table.clone(),
 				range: range.compute(stk, ctx, opt, doc).await?,
+				referencing_field: referencing_field.clone(),
 			}),
 		}
 	}
@@ -152,23 +173,35 @@ impl LookupSubject {
 /// This enum instructs whether we scan all edges on a table or just a specific range
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ComputedLookupSubject {
-	Table(String),
+	Table {
+		table: String,
+		referencing_field: Option<String>,
+	},
 	Range {
 		table: String,
 		range: RecordIdKeyRange,
+		referencing_field: Option<String>,
 	},
 }
 
 impl ComputedLookupSubject {
 	pub fn into_literal(self) -> LookupSubject {
 		match self {
-			ComputedLookupSubject::Table(ident) => LookupSubject::Table(ident),
+			ComputedLookupSubject::Table {
+				table,
+				referencing_field,
+			} => LookupSubject::Table {
+				table: table.clone(),
+				referencing_field: referencing_field.clone(),
+			},
 			ComputedLookupSubject::Range {
 				table,
 				range,
+				referencing_field,
 			} => LookupSubject::Range {
 				table,
 				range: range.into_literal(),
+				referencing_field: referencing_field.clone(),
 			},
 		}
 	}
@@ -187,32 +220,53 @@ impl ComputedLookupSubject {
 			// We're looking up record references
 			LookupKind::Reference => match self {
 				// Scan the entire range
-				Self::Table(t) => Ok((
-					crate::key::r#ref::ftprefix(ns, db, tb, id, t)?,
-					crate::key::r#ref::ftsuffix(ns, db, tb, id, t)?,
+				Self::Table {
+					table,
+					referencing_field: None,
+				} => Ok((
+					crate::key::r#ref::ftprefix(ns, db, tb, id, table)?,
+					crate::key::r#ref::ftsuffix(ns, db, tb, id, table)?,
+				)),
+				// Scan the entire range with a referencing field
+				Self::Table {
+					table,
+					referencing_field: Some(field),
+				} => Ok((
+					crate::key::r#ref::ffprefix(ns, db, tb, id, table, field)?,
+					crate::key::r#ref::ffsuffix(ns, db, tb, id, table, field)?,
 				)),
 				// Scan a specific range
 				Self::Range {
 					table,
 					range,
+					referencing_field,
 				} => {
+					let Some(field) = referencing_field else {
+						bail!(
+							"Cannot scan a specific range of record references without a referencing field"
+						);
+					};
 					let beg = match &range.start {
-						Bound::Unbounded => crate::key::r#ref::ftprefix(ns, db, tb, id, table)?,
+						Bound::Unbounded => {
+							crate::key::r#ref::ffprefix(ns, db, tb, id, table, field)?
+						}
 						Bound::Included(v) => {
-							crate::key::r#ref::fkprefix(ns, db, tb, id, table, v)?
+							crate::key::r#ref::refprefix(ns, db, tb, id, table, field, v)?
 						}
 						Bound::Excluded(v) => {
-							crate::key::r#ref::fksuffix(ns, db, tb, id, table, v)?
+							crate::key::r#ref::refsuffix(ns, db, tb, id, table, field, v)?
 						}
 					};
 					// Prepare the range end key
 					let end = match &range.end {
-						Bound::Unbounded => crate::key::r#ref::ftsuffix(ns, db, tb, id, table)?,
+						Bound::Unbounded => {
+							crate::key::r#ref::ffsuffix(ns, db, tb, id, table, field)?
+						}
 						Bound::Excluded(v) => {
-							crate::key::r#ref::fkprefix(ns, db, tb, id, table, v)?
+							crate::key::r#ref::refprefix(ns, db, tb, id, table, field, v)?
 						}
 						Bound::Included(v) => {
-							crate::key::r#ref::fksuffix(ns, db, tb, id, table, v)?
+							crate::key::r#ref::refsuffix(ns, db, tb, id, table, field, v)?
 						}
 					};
 
@@ -222,14 +276,18 @@ impl ComputedLookupSubject {
 			// We're looking up graph edges
 			LookupKind::Graph(dir) => match self {
 				// Scan the entire range
-				Self::Table(t) => Ok((
-					crate::key::graph::ftprefix(ns, db, tb, id, dir, t)?,
-					crate::key::graph::ftsuffix(ns, db, tb, id, dir, t)?,
+				Self::Table {
+					table,
+					..
+				} => Ok((
+					crate::key::graph::ftprefix(ns, db, tb, id, dir, table)?,
+					crate::key::graph::ftsuffix(ns, db, tb, id, dir, table)?,
 				)),
 				// Scan a specific range
 				Self::Range {
 					table,
 					range,
+					..
 				} => {
 					let beg = match &range.start {
 						Bound::Unbounded => {
@@ -309,11 +367,27 @@ impl ComputedLookupSubject {
 impl Display for LookupSubject {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
-			Self::Table(tb) => EscapeIdent(tb).fmt(f),
+			Self::Table {
+				table,
+				referencing_field,
+			} => {
+				EscapeIdent(table).fmt(f)?;
+				if let Some(referencing_field) = referencing_field {
+					write!(f, " FIELD {}", EscapeIdent(referencing_field))?;
+				}
+				Ok(())
+			}
 			Self::Range {
 				table,
 				range,
-			} => write!(f, "{}:{range}", EscapeIdent(table)),
+				referencing_field,
+			} => {
+				write!(f, "{}:{range}", EscapeIdent(table))?;
+				if let Some(referencing_field) = referencing_field {
+					write!(f, " FIELD {}", EscapeIdent(referencing_field))?;
+				}
+				Ok(())
+			}
 		}
 	}
 }

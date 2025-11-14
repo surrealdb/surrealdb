@@ -7,7 +7,7 @@ use surrealdb_types::{RecordId, ToSql, write_sql};
 
 use super::SleepStatement;
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
@@ -329,24 +329,6 @@ impl Expr {
 		}
 	}
 
-	/// Updates the `"parent"` doc field for statements with a meaning full
-	/// document.
-	async fn update_parent_doc<F, R>(ctx: &Context, doc: Option<&CursorDoc>, f: F) -> R
-	where
-		F: AsyncFnOnce(&Context, Option<&CursorDoc>) -> R,
-	{
-		let mut ctx_store = None;
-		let ctx = if let Some(doc) = doc {
-			let mut new_ctx = MutableContext::new(ctx);
-			new_ctx.add_value("parent", doc.doc.as_ref().clone().into());
-			ctx_store.insert(new_ctx.freeze())
-		} else {
-			ctx
-		};
-
-		f(ctx, doc).await
-	}
-
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,
@@ -414,76 +396,40 @@ impl Expr {
 			}
 			Expr::IfElse(ifelse_statement) => ifelse_statement.compute(stk, ctx, &opt, doc).await,
 			Expr::Select(select_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					select_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				select_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Create(create_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					create_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				create_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Update(update_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					update_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				update_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Delete(delete_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					delete_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				delete_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Relate(relate_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					relate_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				relate_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Insert(insert_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					insert_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				insert_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Define(define_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					define_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				define_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Remove(remove_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					remove_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				remove_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Rebuild(rebuild_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					rebuild_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				rebuild_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Upsert(upsert_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					upsert_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				upsert_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Alter(alter_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					alter_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				alter_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Info(info_statement) => {
-				Self::update_parent_doc(ctx, doc, async |ctx, doc| {
-					info_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
-				})
-				.await
+				info_statement.compute(stk, ctx, &opt, doc).await.map_err(ControlFlow::Err)
 			}
 			Expr::Foreach(foreach_statement) => {
 				foreach_statement.compute(stk, ctx, &opt, doc).await
@@ -964,7 +910,6 @@ impl DeserializeRevisioned for Expr {
 		let expr = crate::syn::parse_with_settings(
 			query.as_bytes(),
 			crate::syn::parser::ParserSettings {
-				references_enabled: true,
 				define_api_enabled: true,
 				files_enabled: true,
 				surrealism_enabled: true,

@@ -85,7 +85,7 @@ View the [features](https://surrealdb.com/features), the latest [releases](https
 - [Getting started](#getting-started)
 	- [Server side code](#server-side-code)
 	- [Client side apps](#client-side-apps)
-- [Surreal Cloud](#surreal-cloud)
+- [SurrealDB Cloud](#surrealdb-cloud)
 - [Installation](#installation)
 	- [Install on macOS](#install-on-macos)
 	- [Install on Linux](#install-on-linux)
@@ -172,16 +172,16 @@ Getting started with SurrealDB is as easy as starting up the SurrealDB database 
     <a href="https://surrealdb.com/docs/integration/sdks/ember"><img width=60 title="Ember.js" src="https://raw.githubusercontent.com/surrealdb/icons/main/emberjs.svg" /></a>
 </p>
 
-<h2><img height="20" src="/img/cloud.svg?raw=true">&nbsp;&nbsp;Surreal Cloud</h2>
+<h2><img height="20" src="/img/cloud.svg?raw=true">&nbsp;&nbsp;SurrealDB Cloud</h2>
 
 <a href="https://surrealdb.com/cloud#gh-dark-mode-only" target="_blank">
-    <img width="100%" src="/img/white/cloud.png" alt="Surreal Cloud">
+    <img width="100%" src="/img/white/cloud.png" alt="SurrealDB Cloud">
 </a>
 <a href="https://surrealdb.com/cloud#gh-light-mode-only" target="_blank">
-    <img width="100%" src="/img/black/cloud.png" alt="Surreal Cloud">
+    <img width="100%" src="/img/black/cloud.png" alt="SurrealDB Cloud">
 </a>
 
-SurrealDB is available as a [hosted platform](https://surrealist.app/cloud). Forget about infrastructure operations, monitoring, backups or capacity planning. [Surreal Cloud](https://surrealdb.com/cloud) allows you to focus on building great products using the power and flexibility of SurrealDB in just a few clicks. Grow from prototype to enterprise-scale. The Surreal Cloud scalable architecture allows your database to evolve as your application grows, ensuring you are always ahead of demand. However if you want to deploy SurrealDB yourself, keep reading below.
+SurrealDB is available as a [hosted platform](https://surrealist.app/cloud). Forget about infrastructure operations, monitoring, backups or capacity planning. [SurrealDB Cloud](https://surrealdb.com/cloud) allows you to focus on building great products using the power and flexibility of SurrealDB in just a few clicks. Grow from prototype to enterprise-scale. The SurrealDB Cloud scalable architecture allows your database to evolve as your application grows, ensuring you are always ahead of demand. However if you want to deploy SurrealDB yourself, keep reading below.
 
 <h2><img height="20" src="./img/installation.svg">&nbsp;&nbsp;Installation</h2>
 

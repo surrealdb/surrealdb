@@ -46,21 +46,6 @@ impl conn::Sealed for Any {
 			let mut features = HashSet::new();
 
 			match EndpointKind::from(address.url.scheme()) {
-				EndpointKind::FoundationDb => {
-					#[cfg(feature = "kv-fdb")]
-					{
-						features.insert(ExtraFeatures::Backup);
-						features.insert(ExtraFeatures::LiveQueries);
-						tokio::spawn(engine::local::native::run_router(address, conn_tx, route_rx));
-						conn_rx.recv().await??
-					}
-
-					#[cfg(not(feature = "kv-fdb"))]
-				return Err(
-					Error::Scheme("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())
-				);
-				}
-
 				EndpointKind::Memory => {
 					#[cfg(feature = "kv-mem")]
 					{

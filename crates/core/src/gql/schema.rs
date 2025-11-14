@@ -705,9 +705,9 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 				}
 				string @ GqlValue::String(_) => {
 					either_try_kinds!(
-						ks, string, Datetime, Duration, AllNumbers, Object, Uuid, Array, Any,
-						String
+						ks, string, Datetime, Duration, AllNumbers, Uuid, Array, Any, String
 					);
+					either_try_kind!(ks, string, Kind::Object);
 					Err(type_error(kind, val))
 				}
 				bool @ GqlValue::Boolean(_) => {
@@ -727,7 +727,7 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 				}
 				// TODO: consider geometry and other types that can come from objects
 				obj @ GqlValue::Object(_) => {
-					either_try_kind!(ks, obj, Object);
+					either_try_kind!(ks, obj, Kind::Object);
 					Err(type_error(kind, val))
 				}
 			}

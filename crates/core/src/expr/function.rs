@@ -59,6 +59,7 @@ impl Function {
 			},
 		}
 	}
+
 	/// Checks if this function invocation is writable
 	pub fn read_only(&self) -> bool {
 		match self {
@@ -70,38 +71,6 @@ impl Function {
 			} => false,
 			Self::Normal(f) => f != "api::invoke",
 			Self::Model(_) => true,
-		}
-	}
-
-	/// Check if this function is a grouping function
-	pub fn is_aggregate(&self) -> bool {
-		match self {
-			Self::Normal(f) if f == "array::distinct" => true,
-			Self::Normal(f) if f == "array::first" => true,
-			Self::Normal(f) if f == "array::flatten" => true,
-			Self::Normal(f) if f == "array::group" => true,
-			Self::Normal(f) if f == "array::last" => true,
-			Self::Normal(f) if f == "count" => true,
-			Self::Normal(f) if f == "math::bottom" => true,
-			Self::Normal(f) if f == "math::interquartile" => true,
-			Self::Normal(f) if f == "math::max" => true,
-			Self::Normal(f) if f == "math::mean" => true,
-			Self::Normal(f) if f == "math::median" => true,
-			Self::Normal(f) if f == "math::midhinge" => true,
-			Self::Normal(f) if f == "math::min" => true,
-			Self::Normal(f) if f == "math::mode" => true,
-			Self::Normal(f) if f == "math::nearestrank" => true,
-			Self::Normal(f) if f == "math::percentile" => true,
-			Self::Normal(f) if f == "math::sample" => true,
-			Self::Normal(f) if f == "math::spread" => true,
-			Self::Normal(f) if f == "math::stddev" => true,
-			Self::Normal(f) if f == "math::sum" => true,
-			Self::Normal(f) if f == "math::top" => true,
-			Self::Normal(f) if f == "math::trimean" => true,
-			Self::Normal(f) if f == "math::variance" => true,
-			Self::Normal(f) if f == "time::max" => true,
-			Self::Normal(f) if f == "time::min" => true,
-			_ => false,
 		}
 	}
 

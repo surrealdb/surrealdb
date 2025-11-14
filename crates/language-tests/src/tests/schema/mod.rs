@@ -13,7 +13,7 @@ use surrealdb_core::dbs::capabilities::{
 };
 use surrealdb_core::syn::parser::ParserSettings;
 use surrealdb_core::syn::{self};
-use surrealdb_types::{Object, RecordId, Value, ToSql};
+use surrealdb_types::{Object, RecordId, ToSql, Value};
 
 /// Root test config struct.
 #[derive(Default, Clone, Debug, Deserialize, Serialize)]
@@ -82,9 +82,6 @@ pub struct TestEnv {
 	pub sequential: bool,
 	#[serde(default)]
 	pub clean: bool,
-
-	#[serde(default)]
-	pub strict: bool,
 
 	pub namespace: Option<BoolOr<String>>,
 	pub database: Option<BoolOr<String>>,
@@ -432,7 +429,6 @@ impl<'de> Deserialize<'de> for SurrealConfigValue {
 			query_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			references_enabled: true,
 			define_api_enabled: true,
 			files_enabled: true,
 			surrealism_enabled: true,
@@ -496,7 +492,6 @@ impl<'de> Deserialize<'de> for SurrealRecordId {
 			query_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			references_enabled: true,
 			define_api_enabled: true,
 			files_enabled: true,
 			surrealism_enabled: true,
@@ -540,7 +535,6 @@ impl<'de> Deserialize<'de> for SurrealObject {
 			query_recursion_limit: 100,
 			legacy_strands: false,
 			flexible_record_id: true,
-			references_enabled: true,
 			define_api_enabled: true,
 			files_enabled: true,
 			surrealism_enabled: true,

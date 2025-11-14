@@ -8,10 +8,13 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "[{ id: person:test, settings: {  } }]"
+error = "Found field 'settings.nested', but no such field exists for table 'person'"
 
 [[test.results]]
-value = "[{ id: person:test, settings: {  } }]"
+value = "[{ id: person:test, settings: {} }]"
+
+[[test.results]]
+value = "[{ id: person:test, settings: {} }]"
 
 */
 
@@ -25,5 +28,8 @@ UPSERT person:test CONTENT {
 			}
 		}
 	}
+};
+UPSERT person:test CONTENT {
+	settings: {}
 };
 SELECT * FROM person;

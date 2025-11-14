@@ -47,8 +47,14 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use crate::err::Error;
+use crate::expr::statements::define::DefineConfigStatement;
+use crate::expr::statements::{
+	CreateStatement, DefineAccessStatement, DefineApiStatement, DefineFieldStatement,
+	DefineFunctionStatement, DefineIndexStatement, InsertStatement, RelateStatement,
+	UpdateStatement, UpsertStatement,
+};
 use crate::expr::visit::{MutVisitor, VisitMut};
-use crate::expr::{Expr, Field, Fields, Function, Groups, Idiom, Part};
+use crate::expr::{Expr, Field, Fields, Function, Groups, Idiom, Part, SelectStatement};
 use crate::val::{Array, Datetime, Number, Object, TryAdd as _, TryFloatDiv, TryMul, Value};
 
 /// An expression which will be aggregated over for each group.
@@ -611,6 +617,15 @@ impl MutVisitor for AggregateExprCollector<'_> {
 				*s = Expr::Idiom(Idiom::field(aggregate_field_name(self.aggregations.len() - 1)));
 				Ok(())
 			}
+			Expr::Param(p) => {
+				if p.as_str() == "this" {
+					bail!(Error::Query{
+						message: "Found a `$this` parameter refering to the document of a group by select statement\n\
+							Select statements with a group by currently have no defined document to refer to".to_string()
+					});
+				}
+				Ok(())
+			}
 			Expr::Idiom(i) => {
 				if !self.within_aggregate_argument {
 					if let Some(group_idx) = self.groups.0.iter().position(|x| x.0 == *i) {
@@ -634,8 +649,11 @@ impl MutVisitor for AggregateExprCollector<'_> {
 								.or_insert_with(|| len);
 							self.aggregations.push(Aggregation::Accumulate(arg))
 						} else {
-							bail!(Error::InvalidAggregationSelector {
-								expr: i.to_string(),
+							bail!(Error::Query {
+								message: format!(
+									"Found idiom `{i}` within the selector of a materialized aggregate view.\n\
+											 Selection of document fields which are not used within the argument of an optimized aggregate function is currently not supported"
+								)
 							})
 						}
 					}
@@ -646,6 +664,357 @@ impl MutVisitor for AggregateExprCollector<'_> {
 			}
 			x => x.visit_mut(self),
 		}
+	}
+
+	// ---------------
+	// We need to avoid trying to find aggregates in places where there are no aggregates.
+	// Take `SELECT (SELECT foo FROM ONLY { foo: math::mean(bar)  }) FROM foo GROUP ALL`
+	// `foo` here has nothing to do as it is calculated in a different context fromn `bar`
+	// which is part of the aggregate calculation.
+	//
+	//
+	// The implementations below ensure that only the places where we are within the same
+	// context are traversed.
+	// ---------------
+
+	fn visit_mut_create(&mut self, s: &mut CreateStatement) -> Result<(), Self::Error> {
+		for e in s.what.iter_mut() {
+			self.visit_mut_expr(e)?;
+		}
+		if let Some(t) = &mut s.timeout {
+			self.visit_mut_expr(&mut t.0)?;
+		}
+		if let Some(d) = &mut s.data {
+			ParentRewritor.visit_mut_data(d)?;
+		}
+		if let Some(v) = &mut s.version {
+			self.visit_mut_expr(v)?;
+		}
+		Ok(())
+	}
+
+	fn visit_mut_select(&mut self, s: &mut SelectStatement) -> Result<(), Self::Error> {
+		for v in s.what.iter_mut() {
+			self.visit_mut_expr(v)?;
+		}
+		if let Some(l) = s.limit.as_mut() {
+			self.visit_mut_expr(&mut l.0)?;
+		}
+		if let Some(v) = s.version.as_mut() {
+			self.visit_mut_expr(v)?;
+		}
+
+		ParentRewritor.visit_mut_fields(&mut s.expr)?;
+		for o in s.omit.iter_mut() {
+			ParentRewritor.visit_mut_expr(o)?;
+		}
+		if let Some(c) = s.cond.as_mut() {
+			ParentRewritor.visit_mut_expr(&mut c.0)?;
+		}
+		if let Some(s) = s.split.as_mut() {
+			for s in s.0.iter_mut() {
+				ParentRewritor.visit_mut_idiom(&mut s.0)?;
+			}
+		}
+		if let Some(g) = s.group.as_mut() {
+			for g in g.0.iter_mut() {
+				ParentRewritor.visit_mut_idiom(&mut g.0)?;
+			}
+		}
+		if let Some(o) = s.order.as_mut() {
+			ParentRewritor.visit_mut_ordering(o)?;
+		}
+		if let Some(f) = s.fetch.as_mut() {
+			for f in f.0.iter_mut() {
+				ParentRewritor.visit_mut_expr(&mut f.0)?;
+			}
+		}
+
+		Ok(())
+	}
+
+	fn visit_mut_update(&mut self, s: &mut UpdateStatement) -> Result<(), Self::Error> {
+		for e in s.what.iter_mut() {
+			self.visit_mut_expr(e)?;
+		}
+		if let Some(e) = &mut s.data {
+			ParentRewritor.visit_mut_data(e)?;
+		}
+		if let Some(e) = &mut s.cond {
+			ParentRewritor.visit_mut_expr(&mut e.0)?;
+		}
+		if let Some(t) = &mut s.timeout {
+			self.visit_mut_expr(&mut t.0)?;
+		}
+		Ok(())
+	}
+
+	fn visit_mut_upsert(&mut self, s: &mut UpsertStatement) -> Result<(), Self::Error> {
+		for e in s.what.iter_mut() {
+			self.visit_mut_expr(e)?;
+		}
+		if let Some(d) = &mut s.data {
+			ParentRewritor.visit_mut_data(d)?;
+		}
+		if let Some(e) = &mut s.cond {
+			ParentRewritor.visit_mut_expr(&mut e.0)?;
+		}
+		if let Some(t) = &mut s.timeout {
+			self.visit_mut_expr(&mut t.0)?;
+		}
+		Ok(())
+	}
+
+	fn visit_mut_relate(&mut self, s: &mut RelateStatement) -> Result<(), Self::Error> {
+		self.visit_mut_expr(&mut s.through)?;
+		self.visit_mut_expr(&mut s.from)?;
+		self.visit_mut_expr(&mut s.to)?;
+		if let Some(o) = s.timeout.as_mut() {
+			self.visit_mut_expr(&mut o.0)?;
+		}
+
+		if let Some(d) = s.data.as_mut() {
+			ParentRewritor.visit_mut_data(d)?;
+		}
+		if let Some(o) = s.output.as_mut() {
+			ParentRewritor.visit_mut_output(o)?;
+		}
+		Ok(())
+	}
+
+	fn visit_mut_insert(&mut self, i: &mut InsertStatement) -> Result<(), Self::Error> {
+		if let Some(v) = i.into.as_mut() {
+			self.visit_mut_expr(v)?;
+		}
+		if let Some(o) = i.timeout.as_mut() {
+			self.visit_mut_expr(&mut o.0)?;
+		}
+		if let Some(o) = i.version.as_mut() {
+			self.visit_mut_expr(o)?;
+		}
+
+		ParentRewritor.visit_mut_data(&mut i.data)?;
+		if let Some(update) = i.update.as_mut() {
+			ParentRewritor.visit_mut_data(update)?;
+		}
+		if let Some(o) = i.output.as_mut() {
+			ParentRewritor.visit_mut_output(o)?;
+		}
+		Ok(())
+	}
+
+	fn visit_mut_define_api(
+		&mut self,
+		d: &mut DefineApiStatement,
+	) -> std::result::Result<(), Self::Error> {
+		self.visit_mut_expr(&mut d.path)?;
+		if let Some(c) = &mut d.comment {
+			self.visit_mut_expr(c)?
+		}
+		Ok(())
+	}
+
+	fn visit_mut_define_function(
+		&mut self,
+		d: &mut DefineFunctionStatement,
+	) -> std::result::Result<(), Self::Error> {
+		if let Some(c) = &mut d.comment {
+			self.visit_mut_expr(c)?
+		}
+		Ok(())
+	}
+
+	fn visit_mut_define_access(
+		&mut self,
+		d: &mut DefineAccessStatement,
+	) -> std::result::Result<(), Self::Error> {
+		self.visit_mut_expr(&mut d.name)?;
+		if let Some(c) = &mut d.comment {
+			self.visit_mut_expr(c)?
+		}
+		if let Some(e) = d.duration.grant.as_mut() {
+			self.visit_mut_expr(e)?;
+		}
+		if let Some(e) = d.duration.token.as_mut() {
+			self.visit_mut_expr(e)?;
+		}
+		if let Some(e) = d.duration.session.as_mut() {
+			self.visit_mut_expr(e)?;
+		}
+		Ok(())
+	}
+
+	fn visit_mut_define_index(&mut self, d: &mut DefineIndexStatement) -> Result<(), Self::Error> {
+		self.visit_mut_expr(&mut d.name)?;
+		if let Some(expr) = d.comment.as_mut() {
+			self.visit_mut_expr(expr)?;
+		}
+		Ok(())
+	}
+
+	fn visit_mut_define_field(&mut self, d: &mut DefineFieldStatement) -> Result<(), Self::Error> {
+		self.visit_mut_expr(&mut d.name)?;
+		self.visit_mut_expr(&mut d.what)?;
+		if let Some(expr) = d.comment.as_mut() {
+			self.visit_mut_expr(expr)?;
+		}
+		Ok(())
+	}
+}
+
+// Rewrites all `$parent` parameters that are evauluated in the current context to `None`
+struct ParentRewritor;
+
+impl MutVisitor for ParentRewritor {
+	type Error = Error;
+
+	fn visit_mut_expr(&mut self, e: &mut Expr) -> Result<(), Self::Error> {
+		if let Expr::Param(p) = e {
+			if p.as_str() == "parent" {
+				return Err(Error::Query{
+					message: "Found a `$parent` parameter refering to the document of a GROUP select statement\n\
+						Select statements with a GROUP BY or GROUP ALL currently have no defined document to refer to".to_string()
+				});
+			}
+		}
+		e.visit_mut(self)
+	}
+
+	fn visit_mut_create(&mut self, s: &mut CreateStatement) -> Result<(), Self::Error> {
+		for e in s.what.iter_mut() {
+			self.visit_mut_expr(e)?;
+		}
+		if let Some(t) = &mut s.timeout {
+			self.visit_mut_expr(&mut t.0)?;
+		}
+		if let Some(v) = &mut s.version {
+			self.visit_mut_expr(v)?;
+		}
+		Ok(())
+	}
+
+	fn visit_mut_select(&mut self, s: &mut SelectStatement) -> Result<(), Self::Error> {
+		self.visit_mut_fields(&mut s.expr)?;
+		for v in s.what.iter_mut() {
+			self.visit_mut_expr(v)?;
+		}
+		if let Some(l) = s.limit.as_mut() {
+			self.visit_mut_expr(&mut l.0)?;
+		}
+		if let Some(v) = s.version.as_mut() {
+			self.visit_mut_expr(v)?;
+		}
+		Ok(())
+	}
+
+	fn visit_mut_update(&mut self, s: &mut UpdateStatement) -> Result<(), Self::Error> {
+		for e in s.what.iter_mut() {
+			self.visit_mut_expr(e)?;
+		}
+		if let Some(t) = &mut s.timeout {
+			self.visit_mut_expr(&mut t.0)?;
+		}
+		Ok(())
+	}
+
+	fn visit_mut_upsert(&mut self, s: &mut UpsertStatement) -> Result<(), Self::Error> {
+		for e in s.what.iter_mut() {
+			self.visit_mut_expr(e)?;
+		}
+		if let Some(t) = &mut s.timeout {
+			self.visit_mut_expr(&mut t.0)?;
+		}
+		Ok(())
+	}
+
+	fn visit_mut_relate(&mut self, s: &mut RelateStatement) -> Result<(), Self::Error> {
+		self.visit_mut_expr(&mut s.through)?;
+		self.visit_mut_expr(&mut s.from)?;
+		self.visit_mut_expr(&mut s.to)?;
+		if let Some(o) = s.timeout.as_mut() {
+			self.visit_mut_expr(&mut o.0)?;
+		}
+
+		Ok(())
+	}
+
+	fn visit_mut_insert(&mut self, i: &mut InsertStatement) -> Result<(), Self::Error> {
+		if let Some(v) = i.into.as_mut() {
+			self.visit_mut_expr(v)?;
+		}
+		if let Some(o) = i.timeout.as_mut() {
+			self.visit_mut_expr(&mut o.0)?;
+		}
+		if let Some(o) = i.version.as_mut() {
+			self.visit_mut_expr(o)?;
+		}
+		Ok(())
+	}
+
+	fn visit_mut_define_api(
+		&mut self,
+		d: &mut DefineApiStatement,
+	) -> std::result::Result<(), Self::Error> {
+		self.visit_mut_expr(&mut d.path)?;
+		if let Some(c) = &mut d.comment {
+			self.visit_mut_expr(c)?
+		}
+		Ok(())
+	}
+
+	fn visit_mut_permission(&mut self, _: &mut super::Permission) -> Result<(), Self::Error> {
+		Ok(())
+	}
+
+	fn visit_mut_define_config(
+		&mut self,
+		_: &mut DefineConfigStatement,
+	) -> Result<(), Self::Error> {
+		Ok(())
+	}
+
+	fn visit_mut_define_function(
+		&mut self,
+		_: &mut DefineFunctionStatement,
+	) -> std::result::Result<(), Self::Error> {
+		Ok(())
+	}
+
+	fn visit_mut_define_access(
+		&mut self,
+		d: &mut DefineAccessStatement,
+	) -> std::result::Result<(), Self::Error> {
+		self.visit_mut_expr(&mut d.name)?;
+		if let Some(c) = &mut d.comment {
+			self.visit_mut_expr(c)?
+		}
+		if let Some(e) = d.duration.grant.as_mut() {
+			self.visit_mut_expr(e)?;
+		}
+		if let Some(e) = d.duration.token.as_mut() {
+			self.visit_mut_expr(e)?;
+		}
+		if let Some(e) = d.duration.session.as_mut() {
+			self.visit_mut_expr(e)?;
+		}
+		Ok(())
+	}
+
+	fn visit_mut_define_index(&mut self, d: &mut DefineIndexStatement) -> Result<(), Self::Error> {
+		self.visit_mut_expr(&mut d.name)?;
+		if let Some(expr) = d.comment.as_mut() {
+			self.visit_mut_expr(expr)?;
+		}
+		Ok(())
+	}
+
+	fn visit_mut_define_field(&mut self, d: &mut DefineFieldStatement) -> Result<(), Self::Error> {
+		self.visit_mut_expr(&mut d.name)?;
+		self.visit_mut_expr(&mut d.what)?;
+		if let Some(expr) = d.comment.as_mut() {
+			self.visit_mut_expr(expr)?;
+		}
+		Ok(())
 	}
 }
 

@@ -5,6 +5,7 @@ use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 
 use crate::catalog::Record;
+use crate::catalog::providers::TableProvider;
 use crate::ctx::{Canceller, Context, MutableContext};
 use crate::dbs::distinct::SyncDistinct;
 use crate::dbs::plan::{Explanation, Plan};
@@ -218,7 +219,7 @@ impl Iterator {
 					};
 					let mut what = Vec::new();
 					for s in lookup.what.iter() {
-						what.push(s.compute(stk, ctx, opt, doc, &lookup.kind).await?);
+						what.push(s.compute(stk, ctx, opt, doc).await?);
 					}
 					// idiom matches the Edges pattern.
 					self.prepare_lookup(stm_ctx.stm, from, lookup.kind.clone(), what)?;
@@ -256,7 +257,22 @@ impl Iterator {
 			if stm_ctx.stm.is_guaranteed() {
 				self.guaranteed = Some(Iterable::Yield(table.to_string()));
 			}
+
 			let db = ctx.get_db(opt).await?;
+
+			// For read-only statements (like SELECT, UPDATE, DELETE), check if the table exists
+			// If it doesn't exist in strict mode, throw an error rather than returning empty
+			// results In non-strict mode, the table will be created if needed, or queries return
+			// empty results UPSERT statements are allowed to create tables even in non-deferable
+			// mode
+			if stm_ctx.stm.requires_table_existence()
+				&& ctx.tx().get_tb(db.namespace_id, db.database_id, table).await?.is_none()
+				&& db.strict
+			{
+				bail!(Error::TbNotFound {
+					name: table.to_string(),
+				});
+			}
 
 			planner.add_iterables(&db, stk, stm_ctx, table.to_string(), p, self).await?;
 		}
@@ -474,7 +490,7 @@ impl Iterator {
 						};
 						let mut what = Vec::new();
 						for s in lookup.what.iter() {
-							what.push(s.compute(stk, ctx, opt, doc, &lookup.kind).await?);
+							what.push(s.compute(stk, ctx, opt, doc).await?);
 						}
 						// idiom matches the Edges pattern.
 						return self.prepare_lookup(stm_ctx.stm, from, lookup.kind.clone(), what);
