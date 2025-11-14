@@ -226,7 +226,7 @@ default = [
     "storage-mem",
     "storage-surrealkv",
     "storage-rocksdb",
-    #"storage-tikv",
+    "storage-tikv",
     "scripting",
     "http",
     "surrealism",
