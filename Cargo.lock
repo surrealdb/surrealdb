@@ -3685,9 +3685,9 @@ dependencies = [
 
 [[package]]
 name = "indxdb"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "762085e7c23e799e5a996b920f38d83a85cd98be0f9353c2b9aa7a1312d376d3"
+checksum = "1f1755e419a17d32b1183b774b76f2f522f3c01d54df5fee49164ad92d380131"
 dependencies = [
  "js-sys",
  "rexie",
@@ -7157,9 +7157,9 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-tikv-client"
-version = "0.3.0-surreal.3"
+version = "0.3.0-surreal.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "837540ac73615ce69a3697a55841a5891f983532024e8296c8e00c03a69b6b78"
+checksum = "6889f0c56b5b45c031cca1f054ff7400525c8cae502b161a7fe984796d33460d"
 dependencies = [
  "async-recursion",
  "async-trait",

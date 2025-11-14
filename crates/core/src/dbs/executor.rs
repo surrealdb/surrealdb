@@ -293,25 +293,23 @@ impl Executor {
 
 		match self.execute_plan_in_transaction(txn.clone(), start, plan).await {
 			Ok(value) | Err(ControlFlow::Return(value)) => {
-				let mut lock = txn.lock().await;
-
 				// non-writable transactions might return an error on commit.
 				// So cancel them instead. This is fine since a non-writable transaction
 				// has nothing to commit anyway.
 				if let TransactionType::Read = transaction_type {
-					let _ = lock.cancel().await;
+					let _ = txn.cancel().await;
 					return Ok(value);
 				}
 
-				if let Err(e) = lock.complete_changes(false).await {
-					let _ = lock.cancel().await;
+				if let Err(e) = txn.complete_changes(false).await {
+					let _ = txn.cancel().await;
 
 					bail!(Error::QueryNotExecuted {
 						message: e.to_string(),
 					});
 				}
 
-				if let Err(e) = lock.commit().await {
+				if let Err(e) = txn.commit().await {
 					bail!(Error::QueryNotExecuted {
 						message: e.to_string(),
 					});
@@ -508,14 +506,12 @@ impl Executor {
 					return Ok(());
 				}
 				TopLevelExpr::Commit => {
-					let mut lock = txn.lock().await;
-
 					// complete_changes and then commit.
 					// If either error undo results.
-					let e = if let Err(e) = lock.complete_changes(false).await {
-						let _ = lock.cancel().await;
+					let e = if let Err(e) = txn.complete_changes(false).await {
+						let _ = txn.cancel().await;
 						e
-					} else if let Err(e) = lock.commit().await {
+					} else if let Err(e) = txn.commit().await {
 						e
 					} else {
 						// Successfully commited. everything is fine.

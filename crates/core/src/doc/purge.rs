@@ -71,8 +71,6 @@ impl Document {
 			let Value::RecordId(ref r) = r else {
 				fail!("Expected a record id for the `out` field, found {r}");
 			};
-			// Lock the transaction
-			let mut txn = txn.lock().await;
 			// Get temporary edge references
 			let (ref o, ref i) = (Dir::Out, Dir::In);
 			// Purge the left pointer edge

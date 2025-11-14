@@ -57,17 +57,26 @@ impl fmt::Display for Transactor {
 	}
 }
 
-#[cfg(debug_assertions)]
-#[cfg(not(test))]
 impl Drop for Transactor {
 	fn drop(&mut self) {
 		if !self.closed() && self.writeable() {
+			// Warn when running in test mode
+			#[cfg(test)]
+			warn!("A transaction was dropped without being committed or cancelled");
+			// Panic when running in debug mode
+			#[cfg(not(test))]
+			#[cfg(debug_assertions)]
 			panic!("A transaction was dropped without being committed or cancelled");
+			// Error when running in release mode
+			#[cfg(not(test))]
+			#[cfg(not(debug_assertions))]
+			error!("A transaction was dropped without being committed or cancelled");
 		}
 	}
 }
 
 impl Transactor {
+	/// Get the underlying datastore kind.
 	fn kind(&self) -> &'static str {
 		self.inner.kind()
 	}
@@ -100,7 +109,7 @@ impl Transactor {
 	///
 	/// This reverses all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub(crate) async fn cancel(&mut self) -> Result<()> {
+	pub(crate) async fn cancel(&self) -> Result<()> {
 		self.inner.cancel().await
 	}
 
@@ -108,13 +117,13 @@ impl Transactor {
 	///
 	/// This attempts to commit all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub(crate) async fn commit(&mut self) -> Result<()> {
+	pub(crate) async fn commit(&self) -> Result<()> {
 		self.inner.commit().await
 	}
 
 	/// Check if a key exists in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn exists<K>(&mut self, key: &K, version: Option<u64>) -> Result<bool>
+	pub async fn exists<K>(&self, key: &K, version: Option<u64>) -> Result<bool>
 	where
 		K: KVKey + Debug,
 	{
@@ -125,7 +134,7 @@ impl Transactor {
 
 	/// Fetch a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn get<K>(&mut self, key: &K, version: Option<u64>) -> Result<Option<K::ValueType>>
+	pub async fn get<K>(&self, key: &K, version: Option<u64>) -> Result<Option<K::ValueType>>
 	where
 		K: KVKey + Debug,
 	{
@@ -137,7 +146,7 @@ impl Transactor {
 
 	/// Fetch many keys from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn getm<K>(&mut self, keys: Vec<K>) -> Result<Vec<Option<K::ValueType>>>
+	pub async fn getm<K>(&self, keys: Vec<K>) -> Result<Vec<Option<K::ValueType>>>
 	where
 		K: KVKey + Debug,
 	{
@@ -158,7 +167,7 @@ impl Transactor {
 	/// This function fetches all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn getr<K>(&mut self, rng: Range<K>, version: Option<u64>) -> Result<Vec<(Key, Val)>>
+	pub async fn getr<K>(&self, rng: Range<K>, version: Option<u64>) -> Result<Vec<(Key, Val)>>
 	where
 		K: KVKey + Debug,
 	{
@@ -174,7 +183,7 @@ impl Transactor {
 	/// This function fetches all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn getp<K>(&mut self, key: &K) -> Result<Vec<(Key, Val)>>
+	pub async fn getp<K>(&self, key: &K) -> Result<Vec<(Key, Val)>>
 	where
 		K: KVKey + Debug,
 	{
@@ -185,7 +194,7 @@ impl Transactor {
 
 	/// Insert or update a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn set<K>(&mut self, key: &K, val: &K::ValueType, version: Option<u64>) -> Result<()>
+	pub async fn set<K>(&self, key: &K, val: &K::ValueType, version: Option<u64>) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
@@ -196,7 +205,7 @@ impl Transactor {
 
 	/// Insert or replace a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn replace<K>(&mut self, key: &K, val: &K::ValueType) -> Result<()>
+	pub async fn replace<K>(&self, key: &K, val: &K::ValueType) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
@@ -207,7 +216,7 @@ impl Transactor {
 
 	/// Insert a key if it doesn't exist in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn put<K>(&mut self, key: &K, val: &K::ValueType, version: Option<u64>) -> Result<()>
+	pub async fn put<K>(&self, key: &K, val: &K::ValueType, version: Option<u64>) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
@@ -219,7 +228,7 @@ impl Transactor {
 	/// Update a key in the datastore if the current value matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn putc<K>(
-		&mut self,
+		&self,
 		key: &K,
 		val: &K::ValueType,
 		chk: Option<&K::ValueType>,
@@ -235,7 +244,7 @@ impl Transactor {
 
 	/// Delete a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn del<K>(&mut self, key: &K) -> Result<()>
+	pub async fn del<K>(&self, key: &K) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
@@ -247,7 +256,7 @@ impl Transactor {
 	/// Delete a key from the datastore if the current value matches a
 	/// condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn delc<K>(&mut self, key: &K, chk: Option<&K::ValueType>) -> Result<()>
+	pub async fn delc<K>(&self, key: &K, chk: Option<&K::ValueType>) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
@@ -262,7 +271,7 @@ impl Transactor {
 	/// This function deletes all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn delr<K>(&mut self, rng: Range<K>) -> Result<()>
+	pub async fn delr<K>(&self, rng: Range<K>) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
@@ -278,7 +287,7 @@ impl Transactor {
 	/// This function deletes all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn delp<K>(&mut self, key: &K) -> Result<()>
+	pub async fn delp<K>(&self, key: &K) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
@@ -289,7 +298,7 @@ impl Transactor {
 
 	/// Delete all versions of a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn clr<K>(&mut self, key: &K) -> Result<()>
+	pub async fn clr<K>(&self, key: &K) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
@@ -301,7 +310,7 @@ impl Transactor {
 	/// Delete all versions of a key from the datastore if the current value
 	/// matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn clrc<K>(&mut self, key: &K, chk: Option<&K::ValueType>) -> Result<()>
+	pub async fn clrc<K>(&self, key: &K, chk: Option<&K::ValueType>) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
@@ -316,7 +325,7 @@ impl Transactor {
 	/// This function deletes all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn clrr<K>(&mut self, rng: Range<K>) -> Result<()>
+	pub async fn clrr<K>(&self, rng: Range<K>) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
@@ -332,7 +341,7 @@ impl Transactor {
 	/// This function deletes all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn clrp<K>(&mut self, key: &K) -> Result<()>
+	pub async fn clrp<K>(&self, key: &K) -> Result<()>
 	where
 		K: KVKey + Debug,
 	{
@@ -346,12 +355,7 @@ impl Transactor {
 	/// This function fetches the full range of keys without values, in a single
 	/// request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn keys<K>(
-		&mut self,
-		rng: Range<K>,
-		limit: u32,
-		version: Option<u64>,
-	) -> Result<Vec<Key>>
+	pub async fn keys<K>(&self, rng: Range<K>, limit: u32, version: Option<u64>) -> Result<Vec<Key>>
 	where
 		K: KVKey + Debug,
 	{
@@ -371,7 +375,7 @@ impl Transactor {
 	/// request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn keysr<K>(
-		&mut self,
+		&self,
 		rng: Range<K>,
 		limit: u32,
 		version: Option<u64>,
@@ -395,7 +399,7 @@ impl Transactor {
 	/// request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn scan<K>(
-		&mut self,
+		&self,
 		rng: Range<K>,
 		limit: u32,
 		version: Option<u64>,
@@ -415,7 +419,7 @@ impl Transactor {
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn scanr<K>(
-		&mut self,
+		&self,
 		rng: Range<K>,
 		limit: u32,
 		version: Option<u64>,
@@ -438,7 +442,7 @@ impl Transactor {
 	/// This function fetches the total count, in batches, with multiple
 	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn count<K>(&mut self, rng: Range<K>) -> Result<usize>
+	pub async fn count<K>(&self, rng: Range<K>) -> Result<usize>
 	where
 		K: KVKey + Debug,
 	{
@@ -455,7 +459,7 @@ impl Transactor {
 	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn batch_keys<K>(
-		&mut self,
+		&self,
 		rng: Range<K>,
 		batch: u32,
 		version: Option<u64>,
@@ -476,7 +480,7 @@ impl Transactor {
 	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn batch_keys_vals<K>(
-		&mut self,
+		&self,
 		rng: Range<K>,
 		batch: u32,
 		version: Option<u64>,
@@ -498,7 +502,7 @@ impl Transactor {
 	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub async fn batch_keys_vals_versions<K>(
-		&mut self,
+		&self,
 		rng: Range<K>,
 		batch: u32,
 	) -> Result<Batch<(Key, Val, Version, bool)>>
@@ -518,13 +522,13 @@ impl Transactor {
 	/// entries for this transaction, which should be done immediately before
 	/// the transaction commit. That is to keep other transactions commit
 	/// delay(pessimistic) or conflict(optimistic) as less as possible.
-	pub(crate) async fn get_versionstamp(&mut self, key: VsKey) -> Result<VersionStamp> {
+	pub(crate) async fn get_versionstamp(&self, key: VsKey) -> Result<VersionStamp> {
 		self.inner.get_versionstamp(key).await
 	}
 
 	/// Insert or update a key in the datastore.
 	pub(crate) async fn set_versionstamp<K>(
-		&mut self,
+		&self,
 		ts_key: VsKey,
 		prefix: K,
 		suffix: K,
@@ -566,13 +570,24 @@ impl Transactor {
 // --------------------------------------------------
 
 impl Transactor {
+	// Records the table (re)definition in the changefeed if enabled.
+	pub(crate) fn record_table_change(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		dt: &TableDefinition,
+	) {
+		self.cf.record_table_change(ns, db, tb, dt)
+	}
+
 	// change will record the change in the changefeed if enabled.
 	// To actually persist the record changes into the underlying kvs,
 	// you must call the `complete_changes` function and then commit the
 	// transaction.
 	#[expect(clippy::too_many_arguments)]
 	pub(crate) fn record_change(
-		&mut self,
+		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &str,
@@ -581,18 +596,7 @@ impl Transactor {
 		current: CursorRecord,
 		store_difference: bool,
 	) {
-		self.cf.record_cf_change(ns, db, tb, id.clone(), previous, current, store_difference)
-	}
-
-	// Records the table (re)definition in the changefeed if enabled.
-	pub(crate) fn record_table_change(
-		&mut self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &str,
-		dt: &TableDefinition,
-	) {
-		self.cf.define_table(ns, db, tb, dt)
+		self.cf.record_change(ns, db, tb, id.clone(), previous, current, store_difference)
 	}
 
 	// complete_changes will complete the changefeed recording for the given
@@ -616,7 +620,7 @@ impl Transactor {
 	//
 	// Lastly, you should set lock=true if you want the changefeed to be correctly
 	// ordered for non-FDB backends.
-	pub(crate) async fn complete_changes(&mut self, _lock: bool) -> Result<()> {
+	pub(crate) async fn complete_changes(&self, _lock: bool) -> Result<()> {
 		let changes = self.cf.get()?;
 		for (tskey, prefix, suffix, v) in changes {
 			self.set_versionstamp(tskey, prefix, suffix, v).await?
@@ -628,7 +632,7 @@ impl Transactor {
 	// current versionstamp. This allows get_versionstamp_from_timestamp to obtain
 	// the versionstamp from the timestamp later.
 	pub(crate) async fn set_timestamp_for_versionstamp(
-		&mut self,
+		&self,
 		ts: u64,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -675,7 +679,7 @@ impl Transactor {
 	}
 
 	pub(crate) async fn get_versionstamp_from_timestamp(
-		&mut self,
+		&self,
 		ts: u64,
 		ns: NamespaceId,
 		db: DatabaseId,

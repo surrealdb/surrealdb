@@ -31,7 +31,7 @@ pub async fn read(
 		ShowSince::Versionstamp(x) => change::prefix_ts(ns, db, VersionStamp::from_u64(x)),
 		ShowSince::Timestamp(x) => {
 			let ts = x.timestamp() as u64;
-			let vs = tx.lock().await.get_versionstamp_from_timestamp(ts, ns, db).await?;
+			let vs = tx.get_versionstamp_from_timestamp(ts, ns, db).await?;
 			match vs {
 				Some(vs) => change::prefix_ts(ns, db, vs),
 				None => {

@@ -1,6 +1,5 @@
-use std::collections::HashMap;
-
 use anyhow::Result;
+use dashmap::DashMap;
 
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cf::{TableMutation, TableMutations};
@@ -19,14 +18,6 @@ use crate::val::RecordId;
 // value = serialized table mutations
 type PreparedWrite = (VsKey, Vec<u8>, Vec<u8>, crate::kvs::Val);
 
-pub struct Writer {
-	buf: Buffer,
-}
-
-pub struct Buffer {
-	pub b: HashMap<ChangeKey, TableMutations>,
-}
-
 #[derive(Hash, Eq, PartialEq, Debug)]
 pub struct ChangeKey {
 	pub ns: NamespaceId,
@@ -34,38 +25,46 @@ pub struct ChangeKey {
 	pub tb: String,
 }
 
-impl Buffer {
-	pub fn new() -> Self {
-		Self {
-			b: HashMap::new(),
-		}
-	}
-
-	pub fn push(&mut self, ns: NamespaceId, db: DatabaseId, tb: String, m: TableMutation) {
-		let tb2 = tb.clone();
-		let ms = self
-			.b
-			.entry(ChangeKey {
-				ns,
-				db,
-				tb,
-			})
-			.or_insert(TableMutations::new(tb2));
-		ms.1.push(m);
-	}
+/// Writer is a helper for writing table mutations to a transaction.
+pub struct Writer {
+	/// The buffer of table mutations to be written to the database.
+	buffer: DashMap<ChangeKey, TableMutations>,
 }
 
 // Writer is a helper for writing table mutations to a transaction.
 impl Writer {
+	/// Create a new changefeed writer
 	pub(crate) fn new() -> Self {
 		Self {
-			buf: Buffer::new(),
+			buffer: DashMap::new(),
 		}
 	}
 
+	/// Record a table definition modification
+	pub(crate) fn record_table_change(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		dt: &TableDefinition,
+	) {
+		// Get or create the entry for the change key
+		let mut entry = self
+			.buffer
+			.entry(ChangeKey {
+				ns,
+				db,
+				tb: tb.to_string(),
+			})
+			.or_insert_with(|| TableMutations::new(tb.to_string()));
+		// Push the define table mutation to the entry
+		entry.1.push(TableMutation::Def(dt.to_owned()));
+	}
+
+	/// Record a record modification or deletion
 	#[expect(clippy::too_many_arguments)]
-	pub(crate) fn record_cf_change(
-		&mut self,
+	pub(crate) fn record_change(
+		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &str,
@@ -74,52 +73,43 @@ impl Writer {
 		current: CursorRecord,
 		store_difference: bool,
 	) {
+		// Get or create the entry for the change key
+		let mut entry = self
+			.buffer
+			.entry(ChangeKey {
+				ns,
+				db,
+				tb: tb.to_string(),
+			})
+			.or_insert_with(|| TableMutations::new(tb.to_string()));
+		// Check if this is a delete operation
 		if current.as_ref().is_nullish() {
-			self.buf.push(
-				ns,
-				db,
-				tb.to_string(),
-				match store_difference {
-					true => TableMutation::DelWithOriginal(id, previous.into_owned()),
-					false => TableMutation::Del(id),
-				},
-			);
+			// Push the delete mutation to the entry
+			entry.1.push(match store_difference {
+				true => TableMutation::DelWithOriginal(id, previous.into_owned()),
+				false => TableMutation::Del(id),
+			});
 		} else {
-			self.buf.push(
-				ns,
-				db,
-				tb.to_string(),
-				match store_difference {
-					true => {
-						if previous.as_ref().is_none() {
-							TableMutation::Set(id, current.into_owned())
-						} else {
-							// We intentionally record the patches in reverse (current -> previous)
-							// because we cannot otherwise resolve operations such as "replace" and
-							// "remove".
-							let patches_to_create_previous =
-								current.as_ref().diff(previous.as_ref());
-							TableMutation::SetWithDiff(
-								id,
-								current.into_owned(),
-								patches_to_create_previous,
-							)
-						}
+			// Push the set mutation to the entry
+			entry.1.push(match store_difference {
+				true => {
+					if previous.as_ref().is_none() {
+						TableMutation::Set(id, current.into_owned())
+					} else {
+						// We intentionally record the patches in reverse (current -> previous)
+						// because we cannot otherwise resolve operations such as "replace" and
+						// "remove".
+						let patches_to_create_previous = current.as_ref().diff(previous.as_ref());
+						TableMutation::SetWithDiff(
+							id,
+							current.into_owned(),
+							patches_to_create_previous,
+						)
 					}
-					false => TableMutation::Set(id, current.into_owned()),
-				},
-			);
+				}
+				false => TableMutation::Set(id, current.into_owned()),
+			});
 		}
-	}
-
-	pub(crate) fn define_table(
-		&mut self,
-		ns: NamespaceId,
-		db: DatabaseId,
-		tb: &str,
-		dt: &TableDefinition,
-	) {
-		self.buf.push(ns, db, tb.to_string(), TableMutation::Def(dt.to_owned()))
 	}
 
 	// get returns all the mutations buffered for this transaction,
@@ -127,23 +117,23 @@ impl Writer {
 	// current timestamp + the specified suffix.
 	pub(crate) fn get(&self) -> Result<Vec<PreparedWrite>> {
 		let mut r = Vec::<PreparedWrite>::new();
-		// Get the current timestamp
-		for (
-			ChangeKey {
+		// Iterate over the buffered mutations
+		for entry in self.buffer.iter() {
+			// Deconstruct the change key
+			let ChangeKey {
 				ns,
 				db,
 				tb,
-			},
-			mutations,
-		) in self.buf.b.iter()
-		{
+			} = entry.key();
+			// Prepare the changefeedwrite
 			let ts_key: VsKey = crate::key::database::vs::new(*ns, *db);
 			let tc_key_prefix: Key = crate::key::change::versionstamped_key_prefix(*ns, *db)?;
 			let tc_key_suffix: Key = crate::key::change::versionstamped_key_suffix(tb.as_str());
-			let value = mutations.kv_encode_value()?;
-
+			let value = entry.value().kv_encode_value()?;
+			// Push the prepared write to the result
 			r.push((ts_key, tc_key_prefix, tc_key_suffix, value))
 		}
+		// Return the prepared writes
 		Ok(r)
 	}
 }
@@ -190,7 +180,7 @@ mod tests {
 		let tb = tx.ensure_ns_db_tb(None, NS, DB, TB).await.unwrap();
 		tx.commit().await.unwrap();
 
-		let mut tx1 = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let tx1 = ds.transaction(Write, Optimistic).await.unwrap();
 		let record_a = RecordId {
 			table: TB.to_owned(),
 			key: RecordIdKey::String("A".to_owned()),
@@ -209,7 +199,7 @@ mod tests {
 		tx1.complete_changes(true).await.unwrap();
 		tx1.commit().await.unwrap();
 
-		let mut tx2 = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let tx2 = ds.transaction(Write, Optimistic).await.unwrap();
 		let record_c = RecordId {
 			table: TB.to_owned(),
 			key: RecordIdKey::String("C".to_owned()),
@@ -227,7 +217,7 @@ mod tests {
 		tx2.complete_changes(true).await.unwrap();
 		tx2.commit().await.unwrap();
 
-		let mut tx3 = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let tx3 = ds.transaction(Write, Optimistic).await.unwrap();
 		let record_b = RecordId {
 			table: TB.to_owned(),
 			key: RecordIdKey::String("B".to_owned()),
@@ -412,7 +402,7 @@ mod tests {
 		)
 		.await;
 		ds.changefeed_process_at(None, 10).await.unwrap();
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let vs1 = tx
 			.get_versionstamp_from_timestamp(5, tb.namespace_id, tb.database_id)
 			.await
@@ -474,7 +464,7 @@ mod tests {
 		};
 		let value_a: Value = "a".into();
 		let previous = Value::None.into();
-		tx.lock().await.record_change(
+		tx.record_change(
 			tb.namespace_id,
 			tb.database_id,
 			&tb.name,
@@ -483,7 +473,7 @@ mod tests {
 			value_a.into(),
 			DONT_STORE_PREVIOUS,
 		);
-		tx.lock().await.complete_changes(true).await.unwrap();
+		tx.complete_changes(true).await.unwrap();
 		tx.commit().await.unwrap();
 		record_id
 	}

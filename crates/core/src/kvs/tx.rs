@@ -1,10 +1,10 @@
 use std::any::Any;
 use std::fmt::Debug;
+use std::ops::Deref;
 use std::ops::Range;
 use std::sync::Arc;
 
 use anyhow::Result;
-use futures::lock::{Mutex, MutexGuard};
 use futures::stream::Stream;
 use uuid::Uuid;
 
@@ -35,42 +35,40 @@ pub struct Transaction {
 	/// Is this is a local datastore transaction?
 	local: bool,
 	/// The underlying transactor
-	tx: Mutex<Transactor>,
+	tr: Transactor,
 	/// The query cache for this store
 	cache: TransactionCache,
 	/// The sequences for this store
 	sequences: Sequences,
 }
 
+impl Deref for Transaction {
+	type Target = Transactor;
+
+	fn deref(&self) -> &Self::Target {
+		&self.tr
+	}
+}
+
 impl Transaction {
 	/// Create a new query store
-	pub fn new(local: bool, tx: Transactor, sequences: Sequences) -> Transaction {
+	pub fn new(local: bool, tr: Transactor, sequences: Sequences) -> Transaction {
 		Transaction {
 			local,
-			tx: Mutex::new(tx),
+			tr,
 			cache: TransactionCache::new(),
 			sequences,
 		}
 	}
 
-	/// Retrieve the underlying transaction
-	pub fn inner(self) -> Transactor {
-		self.tx.into_inner()
+	/// Check if the transaction is local or remote
+	pub fn is_local(&self) -> bool {
+		self.local
 	}
 
 	/// Enclose this transaction in an [`Arc`]
 	pub fn enclose(self) -> Arc<Transaction> {
 		Arc::new(self)
-	}
-
-	/// Retrieve the underlying transaction
-	pub async fn lock(&self) -> MutexGuard<'_, Transactor> {
-		self.tx.lock().await
-	}
-
-	/// Check if the transaction is local or remote
-	pub fn local(&self) -> bool {
-		self.local
 	}
 
 	/// Check if the transaction is finished.
@@ -80,7 +78,7 @@ impl Transaction {
 	/// calls to functions on this transaction will result
 	/// in a [`Error::TxFinished`] error.
 	pub async fn closed(&self) -> bool {
-		self.lock().await.closed()
+		self.tr.closed()
 	}
 
 	/// Cancel a transaction.
@@ -88,7 +86,7 @@ impl Transaction {
 	/// This reverses all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn cancel(&self) -> Result<()> {
-		self.lock().await.cancel().await
+		self.tr.cancel().await
 	}
 
 	/// Commit a transaction.
@@ -96,7 +94,7 @@ impl Transaction {
 	/// This attempts to commit all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn commit(&self) -> Result<()> {
-		self.lock().await.commit().await
+		self.tr.commit().await
 	}
 
 	/// Check if a key exists in the datastore.
@@ -105,7 +103,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.exists(key, version).await
+		self.tr.exists(key, version).await
 	}
 
 	/// Fetch a key from the datastore.
@@ -114,7 +112,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.get(key, version).await
+		self.tr.get(key, version).await
 	}
 
 	/// Retrieve a batch set of keys from the datastore.
@@ -123,7 +121,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.getm(keys).await
+		self.tr.getm(keys).await
 	}
 
 	/// Retrieve a specific prefix of keys from the datastore.
@@ -135,7 +133,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.getp(key).await
+		self.tr.getp(key).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -147,7 +145,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.getr(rng, version).await
+		self.tr.getr(rng, version).await
 	}
 
 	/// Delete a key from the datastore.
@@ -156,7 +154,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.del(key).await
+		self.tr.del(key).await
 	}
 
 	/// Delete a key from the datastore if the current value matches a
@@ -166,7 +164,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.delc(key, chk).await
+		self.tr.delc(key, chk).await
 	}
 
 	/// Delete a range of keys from the datastore.
@@ -178,7 +176,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.delr(rng).await
+		self.tr.delr(rng).await
 	}
 
 	/// Delete a prefix of keys from the datastore.
@@ -190,7 +188,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.delp(key).await
+		self.tr.delp(key).await
 	}
 
 	/// Delete all versions of a key from the datastore.
@@ -199,7 +197,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.clr(key).await
+		self.tr.clr(key).await
 	}
 
 	/// Delete all versions of a key from the datastore if the current value
@@ -209,7 +207,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.clrc(key, chk).await
+		self.tr.clrc(key, chk).await
 	}
 
 	/// Delete all versions of a range of keys from the datastore.
@@ -221,7 +219,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.clrr(rng).await
+		self.tr.clrr(rng).await
 	}
 
 	/// Delete all versions of a prefix of keys from the datastore.
@@ -233,7 +231,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.clrp(key).await
+		self.tr.clrp(key).await
 	}
 
 	/// Insert or update a key in the datastore.
@@ -242,16 +240,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.set(key, val, version).await
-	}
-
-	/// Insert or replace a key in the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn replace<K>(&self, key: &K, val: &K::ValueType) -> Result<()>
-	where
-		K: KVKey + Debug,
-	{
-		self.lock().await.replace(key, val).await
+		self.tr.set(key, val, version).await
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -260,7 +249,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.put(key, val, version).await
+		self.tr.put(key, val, version).await
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -274,7 +263,16 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.putc(key, val, chk).await
+		self.tr.putc(key, val, chk).await
+	}
+
+	/// Insert or replace a key in the datastore.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub async fn replace<K>(&self, key: &K, val: &K::ValueType) -> Result<()>
+	where
+		K: KVKey + Debug,
+	{
+		self.tr.replace(key, val).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -286,7 +284,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.keys(rng, limit, version).await
+		self.tr.keys(rng, limit, version).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore in reverse order.
@@ -303,7 +301,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.keysr(rng, limit, version).await
+		self.tr.keysr(rng, limit, version).await
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -320,7 +318,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.scan(rng, limit, version).await
+		self.tr.scan(rng, limit, version).await
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
@@ -333,7 +331,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.scanr(rng, limit, version).await
+		self.tr.scanr(rng, limit, version).await
 	}
 
 	/// Count the total number of keys within a range in the datastore.
@@ -345,7 +343,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.count(rng).await
+		self.tr.count(rng).await
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -362,7 +360,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.batch_keys(rng, batch, version).await
+		self.tr.batch_keys(rng, batch, version).await
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -379,7 +377,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.batch_keys_vals(rng, batch, version).await
+		self.tr.batch_keys_vals(rng, batch, version).await
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -395,7 +393,7 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.lock().await.batch_keys_vals_versions(rng, batch).await
+		self.tr.batch_keys_vals_versions(rng, batch).await
 	}
 
 	/// Retrieve a stream over a specific range of keys in the datastore.

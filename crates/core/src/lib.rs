@@ -33,11 +33,16 @@ mod buc;
 mod cf;
 mod doc;
 mod exe;
+mod fmt;
 mod fnc;
 mod key;
 #[cfg(feature = "surrealism")]
 mod surrealism;
 mod sys;
+mod val;
+
+#[doc(hidden)]
+pub mod str;
 
 pub mod api;
 pub mod catalog;
@@ -47,7 +52,6 @@ pub mod dbs;
 pub mod env;
 pub mod err;
 pub mod expr;
-mod fmt;
 pub mod gql;
 pub mod iam;
 pub mod idx;
@@ -57,9 +61,7 @@ pub mod obs;
 pub mod options;
 pub mod rpc;
 pub mod sql;
-pub mod str;
 pub mod syn;
-mod val;
 pub mod vs;
 
 pub(crate) mod types {

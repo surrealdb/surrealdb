@@ -14,24 +14,24 @@ pub async fn snapshot(new_ds: impl CreateDs) {
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Insert an initial key
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.set(&"test", &"some text".as_bytes().to_vec(), None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx1 = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx1 = ds.transaction(Read, Optimistic).await.unwrap();
 	// Check that the key was inserted ok
 	let val = tx1.get(&"test", None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Create a new writeable transaction
-	let mut txw = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let txw = ds.transaction(Write, Optimistic).await.unwrap();
 	// Update the test key content
 	txw.set(&"test", &"other text".as_bytes().to_vec(), None).await.unwrap();
 	// Create a readonly transaction
-	let mut tx2 = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx2 = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx2.get(&"test", None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Create a readonly transaction
-	let mut tx3 = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx3 = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx3.get(&"test", None).await.unwrap().unwrap();
 	assert_eq!(val, b"some text");
 	// Update the test key content
@@ -46,7 +46,7 @@ pub async fn snapshot(new_ds: impl CreateDs) {
 	// Commit the writable transaction
 	txw.commit().await.unwrap();
 	// Check that the key was updated ok
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.get(&"test", None).await.unwrap().unwrap();
 	assert_eq!(val, b"extra text");
 	tx.cancel().await.unwrap();

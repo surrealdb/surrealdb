@@ -97,7 +97,7 @@ impl AlterTableStatement {
 
 		// Record definition change
 		if changefeed_replaced {
-			txn.lock().await.record_table_change(ns, db, &self.name, &dt);
+			txn.record_table_change(ns, db, &self.name, &dt);
 		}
 
 		// Set the table definition

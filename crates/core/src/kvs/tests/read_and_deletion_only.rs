@@ -45,13 +45,13 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 
 	// Phase 1: Initial writes in normal mode (before reaching space limit)
 	{
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		tx.set(&"initial_key", &"initial_value".as_bytes().to_vec(), None).await.unwrap();
 		tx.commit().await.unwrap();
 	}
 
 	// Start a transaction that will be left uncommitted until after mode transition
-	let mut ongoing_tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let ongoing_tx = ds.transaction(Write, Optimistic).await.unwrap();
 	ongoing_tx.set(&"ongoing_key", &"ongoing_value".as_bytes().to_vec(), None).await.unwrap();
 
 	// Phase 2: Write data until space limit is reached and mode transitions to
@@ -59,7 +59,7 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 	// Some transactions will succeed before the limit, then failures will occur after transition
 	let mut count_err = 0;
 	for j in 0..200 {
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		for i in 0..100 {
 			let key = format!("unlimited_key_{}_{}", i, j);
 			let value = vec![0u8; 1024]; // 1KB per value
@@ -86,7 +86,7 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 
 	// Confirm new write transactions are blocked
 	{
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let res = tx.put(&"other_key", &"other_value".as_bytes().to_vec(), None).await;
 		assert!(
 			res.unwrap_err()
@@ -108,7 +108,7 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 
 	// Confirm read operations still work
 	{
-		let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+		let tx = ds.transaction(Read, Optimistic).await.unwrap();
 		let val = tx.get(&"initial_key", None).await.unwrap();
 		assert!(matches!(val.as_deref(), Some(b"initial_value")));
 		tx.cancel().await.unwrap();
@@ -117,7 +117,7 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 	// Phase 4: Delete data to free space and trigger recovery to normal mode
 	// Delete all keys that were successfully written (this frees space below the limit)
 	for j in 0..200 {
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		for i in 0..100 {
 			let key = format!("unlimited_key_{}_{}", i, j);
 			tx.del(&key).await.unwrap();
@@ -128,7 +128,7 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 	// Phase 5: Verify recovery to normal mode
 	// Confirm writes are allowed again after space usage drops below limit
 	{
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		tx.put(&"other_key", &"other_value".as_bytes().to_vec(), None).await.unwrap();
 		tx.commit().await.unwrap();
 	}

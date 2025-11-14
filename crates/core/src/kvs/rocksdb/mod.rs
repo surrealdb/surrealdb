@@ -613,7 +613,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Fetch many keys from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.sprint()))]
-	async fn getm(&mut self, keys: Vec<Key>) -> Result<Vec<Option<Val>>> {
+	async fn getm(&self, keys: Vec<Key>) -> Result<Vec<Option<Val>>> {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Lock the inner transaction
@@ -696,7 +696,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete a key.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn del(&mut self, key: Key) -> Result<()> {
+	async fn del(&self, key: Key) -> Result<()> {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
@@ -714,7 +714,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete a key if the current value matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<()> {
+	async fn delc(&self, key: Key, chk: Option<Val>) -> Result<()> {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
@@ -736,12 +736,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Retrieve a range of keys.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys(
-		&mut self,
-		rng: Range<Key>,
-		limit: u32,
-		version: Option<u64>,
-	) -> Result<Vec<Key>> {
+	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
 		// RocksDB does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
@@ -789,12 +784,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Retrieve a range of keys, in reverse.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keysr(
-		&mut self,
-		rng: Range<Key>,
-		limit: u32,
-		version: Option<u64>,
-	) -> Result<Vec<Key>> {
+	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
 		// RocksDB does not support versioned queries.
 		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
 		// Check to see if transaction is closed
@@ -843,7 +833,7 @@ impl super::api::Transaction for Transaction {
 	/// Retrieve a range of key-value pairs.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn scan(
-		&mut self,
+		&self,
 		rng: Range<Key>,
 		limit: u32,
 		version: Option<u64>,
@@ -896,7 +886,7 @@ impl super::api::Transaction for Transaction {
 	/// Retrieve a range of key-value pairs, in reverse.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn scanr(
-		&mut self,
+		&self,
 		rng: Range<Key>,
 		limit: u32,
 		version: Option<u64>,

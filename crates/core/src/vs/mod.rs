@@ -3,7 +3,7 @@
 //! used directly by applications.
 //! This module might be migrated into the kvs or kvs::tx module in the future.
 
-pub use std::{error, fmt, mem};
+use std::fmt;
 
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
 use storekey::{BorrowDecode, Encode};
@@ -98,7 +98,7 @@ impl fmt::Debug for VersionStampError {
 		fmt::Display::fmt(self, f)
 	}
 }
-impl error::Error for VersionStampError {}
+impl std::error::Error for VersionStampError {}
 
 impl VersionStamp {
 	pub const ZERO: VersionStamp = VersionStamp([0; 10]);
@@ -198,7 +198,7 @@ impl Iterator for VersionStampIter {
 
 	fn next(&mut self) -> Option<Self::Item> {
 		let next = self.cur?.next();
-		mem::replace(&mut self.cur, next)
+		std::mem::replace(&mut self.cur, next)
 	}
 }
 

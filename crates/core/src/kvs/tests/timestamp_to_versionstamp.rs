@@ -40,11 +40,11 @@ pub async fn timestamp_to_versionstamp(new_ds: impl CreateDs) {
 	};
 
 	// Give the current versionstamp a timestamp of 0
-	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tr = ds.transaction(Write, Optimistic).await.unwrap();
 	tr.set_timestamp_for_versionstamp(0, db.namespace_id, db.database_id).await.unwrap();
 	tr.commit().await.unwrap();
 	// Get the versionstamp for timestamp 0
-	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tr = ds.transaction(Write, Optimistic).await.unwrap();
 	let vs1 = tr
 		.get_versionstamp_from_timestamp(0, db.namespace_id, db.database_id)
 		.await
@@ -52,11 +52,11 @@ pub async fn timestamp_to_versionstamp(new_ds: impl CreateDs) {
 		.unwrap();
 	tr.commit().await.unwrap();
 	// Give the current versionstamp a timestamp of 1
-	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tr = ds.transaction(Write, Optimistic).await.unwrap();
 	tr.set_timestamp_for_versionstamp(1, db.namespace_id, db.database_id).await.unwrap();
 	tr.commit().await.unwrap();
 	// Get the versionstamp for timestamp 1
-	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tr = ds.transaction(Write, Optimistic).await.unwrap();
 	let vs2 = tr
 		.get_versionstamp_from_timestamp(1, db.namespace_id, db.database_id)
 		.await
@@ -64,11 +64,11 @@ pub async fn timestamp_to_versionstamp(new_ds: impl CreateDs) {
 		.unwrap();
 	tr.commit().await.unwrap();
 	// Give the current versionstamp a timestamp of 2
-	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tr = ds.transaction(Write, Optimistic).await.unwrap();
 	tr.set_timestamp_for_versionstamp(2, db.namespace_id, db.database_id).await.unwrap();
 	tr.commit().await.unwrap();
 	// Get the versionstamp for timestamp 2
-	let mut tr = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tr = ds.transaction(Write, Optimistic).await.unwrap();
 	let vs3 = tr
 		.get_versionstamp_from_timestamp(2, db.namespace_id, db.database_id)
 		.await
@@ -98,14 +98,14 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 
 	// Give the current versionstamp a timestamp of 0
 	{
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		tx.set_timestamp_for_versionstamp(0, db.namespace_id, db.database_id).await.unwrap();
 		tx.commit().await.unwrap();
 	}
 
 	// Get the versionstamp for timestamp 0
 	let vs1 = {
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let vs1 = tx
 			.get_versionstamp_from_timestamp(0, db.namespace_id, db.database_id)
 			.await
@@ -117,14 +117,14 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 
 	// Give the current versionstamp a timestamp of 1
 	{
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		tx.set_timestamp_for_versionstamp(1, db.namespace_id, db.database_id).await.unwrap();
 		tx.commit().await.unwrap();
 	}
 
 	// Get the versionstamp for timestamp 1
 	{
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let vs2 = tx
 			.get_versionstamp_from_timestamp(1, db.namespace_id, db.database_id)
 			.await
@@ -141,7 +141,7 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 		.encode_key()
 		.unwrap();
 	{
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let scanned = tx.scan(start.clone()..end.clone(), u32::MAX, None).await.unwrap();
 		tx.commit().await.unwrap();
 		assert_eq!(scanned.len(), 2);
@@ -160,7 +160,7 @@ pub async fn writing_ts_again_results_in_following_ts(new_ds: impl CreateDs) {
 
 	// Validate
 	{
-		let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let scanned = tx.scan(start..end, u32::MAX, None).await.unwrap();
 		tx.commit().await.unwrap();
 		assert_eq!(scanned.len(), 3);

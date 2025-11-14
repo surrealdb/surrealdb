@@ -50,7 +50,7 @@ surrealism-types = { version = "=0.1.1", path = "crates/surrealism/surrealism-ty
 # External surreal crates
 affinitypool = "0.4.0"
 dmp = "0.2.3"
-indxdb = "0.9.0"
+indxdb = "0.10.0"
 lexicmp = "0.2.0"
 revision = { version = "0.14.0", features = [
     "chrono",
@@ -79,7 +79,7 @@ serde-content = "0.1.0"
 rocksdb = { version = "0.24.0-surreal.1", package = "surrealdb-rocksdb", features = ["lz4", "snappy"] }
 
 # Managed by surreal but mostly external code
-tikv = { version = "0.3.0-surreal.3", default-features = false, package = "surrealdb-tikv-client" }
+tikv = { version = "0.3.0-surreal.4", default-features = false, package = "surrealdb-tikv-client" }
 
 # Other crates
 addr = { version = "0.15.6", default-features = false, features = ["std"] }

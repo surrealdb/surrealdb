@@ -6,9 +6,9 @@ use crate::kvs::{Key, Val};
 
 type SavePoint = HashMap<Key, SavedValue>;
 
-#[derive(Debug)]
 /// Public to allow external transaction implementations (e.g. custom backends)
 /// to construct and inspect savepoints when integrating with SurrealDB.
+#[derive(Debug)]
 pub enum SaveOperation {
 	Set,
 	Put,

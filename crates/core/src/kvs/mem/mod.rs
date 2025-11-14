@@ -164,7 +164,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Insert or replace a key in the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn replace(&mut self, key: Key, val: Val) -> Result<()> {
+	async fn replace(&self, key: Key, val: Val) -> Result<()> {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
@@ -215,7 +215,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete a key from the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn del(&mut self, key: Key) -> Result<()> {
+	async fn del(&self, key: Key) -> Result<()> {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
@@ -230,7 +230,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete a key if the current value matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<()> {
+	async fn delc(&self, key: Key, chk: Option<Val>) -> Result<()> {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
@@ -249,7 +249,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Deletes all versions of a key from the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn clr(&mut self, key: Key) -> Result<()> {
+	async fn clr(&self, key: Key) -> Result<()> {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
@@ -264,7 +264,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Delete all versions of a key if the current value matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn clrc(&mut self, key: Key, chk: Option<Val>) -> Result<()> {
+	async fn clrc(&self, key: Key, chk: Option<Val>) -> Result<()> {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
@@ -283,12 +283,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Retrieve a range of keys.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys(
-		&mut self,
-		rng: Range<Key>,
-		limit: u32,
-		version: Option<u64>,
-	) -> Result<Vec<Key>> {
+	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Set the key range
@@ -307,12 +302,7 @@ impl super::api::Transaction for Transaction {
 
 	/// Retrieve a range of keys, in reverse.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keysr(
-		&mut self,
-		rng: Range<Key>,
-		limit: u32,
-		version: Option<u64>,
-	) -> Result<Vec<Key>> {
+	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
 		// Check to see if transaction is closed
 		ensure!(!self.closed(), Error::TxFinished);
 		// Set the key range
@@ -332,7 +322,7 @@ impl super::api::Transaction for Transaction {
 	/// Retrieve a range of key-value pairs.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn scan(
-		&mut self,
+		&self,
 		rng: Range<Key>,
 		limit: u32,
 		version: Option<u64>,
@@ -356,7 +346,7 @@ impl super::api::Transaction for Transaction {
 	/// Retrieve a range of key-value pairs, in reverse.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn scanr(
-		&mut self,
+		&self,
 		rng: Range<Key>,
 		limit: u32,
 		version: Option<u64>,
@@ -380,7 +370,7 @@ impl super::api::Transaction for Transaction {
 	/// Retrieve all the versions from a range of keys.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn scan_all_versions(
-		&mut self,
+		&self,
 		rng: Range<Key>,
 		limit: u32,
 	) -> Result<Vec<(Key, Val, Version, bool)>> {

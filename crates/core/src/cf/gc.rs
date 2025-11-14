@@ -70,8 +70,6 @@ pub async fn gc_ns(
 		let watermark_ts = ts - cf_expiry;
 		// Calculate the watermark versionstamp
 		let watermark_vs = tx
-			.lock()
-			.await
 			.get_versionstamp_from_timestamp(watermark_ts, db.namespace_id, db.database_id)
 			.await?;
 		// If a versionstamp exists, then garbage collect
