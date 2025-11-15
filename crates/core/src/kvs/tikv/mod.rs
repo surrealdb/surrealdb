@@ -1,6 +1,7 @@
 #![cfg(feature = "kv-tikv")]
 
 mod cnf;
+mod savepoint;
 
 use std::ops::Range;
 use std::pin::Pin;
@@ -16,9 +17,10 @@ use crate::err::Error;
 use crate::key::database::vs::VsKey;
 use crate::key::debug::Sprintable;
 use crate::kvs::key::KVKey;
-use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare};
 use crate::kvs::{Key, Val};
 use crate::vs::VersionStamp;
+use savepoint::Operation;
+use savepoint::Savepoint;
 
 const TARGET: &str = "surrealdb::core::kvs::tikv";
 
@@ -43,8 +45,10 @@ pub struct Transaction {
 struct TransactionInner {
 	/// The underlying datastore transaction
 	tx: tikv::Transaction,
-	/// The savepoints for this transaction
-	sp: SavePoints,
+	/// Stack of savepoints for nested rollback support
+	savepoints: Vec<Savepoint>,
+	/// Current undo operations since the last savepoint
+	operations: Vec<Operation>,
 }
 
 impl Datastore {
@@ -125,7 +129,8 @@ impl Datastore {
 				write,
 				inner: RwLock::new(TransactionInner {
 					tx: txn,
-					sp: Default::default(),
+					savepoints: Vec::new(),
+					operations: Vec::new(),
 				}),
 				db: self.db.clone(),
 			})),
@@ -227,15 +232,28 @@ impl super::api::Transaction for Transaction {
 		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
 		ensure!(self.writeable(), Error::TxReadonly);
-		// Prepare the savepoint if any
-		let prepared = self.prepare_save_point(&key, version, SaveOperation::Set).await?;
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
+		// Get the old value if we need to track operations
+		let old_val = if !inner.savepoints.is_empty() || !inner.operations.is_empty() {
+			inner.tx.get(key.clone()).await?
+		} else {
+			None
+		};
 		// Set the key
-		inner.tx.put(key, val).await?;
-		// Store the save point
-		if let Some(prepared) = prepared {
-			inner.sp.save(prepared);
+		inner.tx.put(key.clone(), val).await?;
+		// Record operation after successful operation
+		if !inner.savepoints.is_empty() || !inner.operations.is_empty() {
+			match old_val {
+				Some(existing_val) => {
+					// Key existed, record operation to restore old value
+					inner.operations.push(Operation::RestoreValue(key, existing_val));
+				}
+				None => {
+					// Key didn't exist, record operation to delete it
+					inner.operations.push(Operation::DeleteKey(key));
+				}
+			}
 		}
 		// Return result
 		Ok(())
@@ -250,18 +268,17 @@ impl super::api::Transaction for Transaction {
 		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
 		ensure!(self.writeable(), Error::TxReadonly);
-		// Hydrate the savepoint if any
-		let prepared = self.prepare_save_point(&key, version, SaveOperation::Put).await?;
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
-		// Set the key if empty
-		match inner.tx.key_exists(key.clone()).await? {
-			false => inner.tx.put(key, val).await?,
-			true => bail!(Error::TxKeyAlreadyExists),
-		};
-		// Store the save point
-		if let Some(prepared) = prepared {
-			inner.sp.save(prepared);
+		// Check if key exists
+		let exists = inner.tx.key_exists(key.clone()).await?;
+		ensure!(!exists, Error::TxKeyAlreadyExists);
+		// Set the key
+		inner.tx.put(key.clone(), val).await?;
+		// Record operation after successful operation
+		if !inner.savepoints.is_empty() || !inner.operations.is_empty() {
+			// Key didn't exist (we just checked), record operation to delete it
+			inner.operations.push(Operation::DeleteKey(key));
 		}
 		// Return result
 		Ok(())
@@ -274,19 +291,30 @@ impl super::api::Transaction for Transaction {
 		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
 		ensure!(self.writeable(), Error::TxReadonly);
-		// Hydrate the savepoint if any
-		let prepared = self.prepare_save_point(&key, None, SaveOperation::Put).await?;
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
-		// Set the key if valid
-		match (inner.tx.get(key.clone()).await?, chk) {
-			(Some(v), Some(w)) if v == w => inner.tx.put(key, val).await?,
-			(None, None) => inner.tx.put(key, val).await?,
+		// Get the current value
+		let current = inner.tx.get(key.clone()).await?;
+		// Check if condition is met
+		match (&current, &chk) {
+			(Some(v), Some(w)) if v == w => {}
+			(None, None) => {}
 			_ => bail!(Error::TxConditionNotMet),
 		};
-		// Confirm the save point
-		if let Some(prepared) = prepared {
-			inner.sp.save(prepared);
+		// Set the key
+		inner.tx.put(key.clone(), val).await?;
+		// Record operation after successful operation
+		if !inner.savepoints.is_empty() || !inner.operations.is_empty() {
+			match current {
+				Some(existing_val) => {
+					// Key existed, record operation to restore old value
+					inner.operations.push(Operation::RestoreValue(key, existing_val));
+				}
+				None => {
+					// Key didn't exist, record operation to delete it
+					inner.operations.push(Operation::DeleteKey(key));
+				}
+			}
 		}
 		// Return result
 		Ok(())
@@ -299,15 +327,20 @@ impl super::api::Transaction for Transaction {
 		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
 		ensure!(self.writeable(), Error::TxReadonly);
-		// Hydrate the savepoint if any
-		let prepared = self.prepare_save_point(&key, None, SaveOperation::Del).await?;
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
+		// Get the old value if we need to track operations
+		let old_val = if !inner.savepoints.is_empty() || !inner.operations.is_empty() {
+			inner.tx.get(key.clone()).await?
+		} else {
+			None
+		};
 		// Delete the key
-		inner.tx.delete(key).await?;
-		// Confirm the save point
-		if let Some(prepared) = prepared {
-			inner.sp.save(prepared);
+		inner.tx.delete(key.clone()).await?;
+		// Record operation after successful operation
+		if let Some(existing_val) = old_val {
+			// Key existed, record operation to restore it
+			inner.operations.push(Operation::RestoreDeleted(key, existing_val));
 		}
 		// Return result
 		Ok(())
@@ -320,19 +353,22 @@ impl super::api::Transaction for Transaction {
 		ensure!(!self.closed(), Error::TxFinished);
 		// Check to see if transaction is writable
 		ensure!(self.writeable(), Error::TxReadonly);
-		// Hydrate the savepoint if any
-		let prepared = self.prepare_save_point(&key, None, SaveOperation::Del).await?;
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
-		// Set the key if valie
-		match (inner.tx.get(key.clone()).await?, chk) {
-			(Some(v), Some(w)) if v == w => inner.tx.delete(key).await?,
-			(None, None) => inner.tx.delete(key).await?,
+		// Get the current value
+		let current = inner.tx.get(key.clone()).await?;
+		// Check if condition is met
+		match (&current, &chk) {
+			(Some(v), Some(w)) if v == w => {}
+			(None, None) => {}
 			_ => bail!(Error::TxConditionNotMet),
 		};
-		// Confirm the save point
-		if let Some(prepared) = prepared {
-			inner.sp.save(prepared);
+		// Delete the key
+		inner.tx.delete(key.clone()).await?;
+		// Record operation after successful operation
+		if let Some(existing_val) = current {
+			// Key existed, record operation to restore it
+			inner.operations.push(Operation::RestoreDeleted(key, existing_val));
 		}
 		// Return result
 		Ok(())
@@ -449,88 +485,70 @@ impl super::api::Transaction for Transaction {
 
 	/// Set a new save point on the transaction.
 	async fn new_save_point(&self) -> Result<()> {
+		// Check to see if transaction is closed
+		ensure!(!self.closed(), Error::TxFinished);
+		// Check to see if transaction is writable
+		ensure!(self.writeable(), Error::TxReadonly);
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
-		// Create a new savepoint
-		inner.sp.new_save_point();
-		// All ok
+		// Take the current operations
+		let operations = std::mem::take(&mut inner.operations);
+		// Create a new savepoint with those operations
+		inner.savepoints.push(Savepoint {
+			operations,
+		});
+		// Continue
 		Ok(())
 	}
 
 	/// Release the last save point.
 	async fn release_last_save_point(&self) -> Result<()> {
+		// Check to see if transaction is closed
+		ensure!(!self.closed(), Error::TxFinished);
+		// Check to see if transaction is writable
+		ensure!(self.writeable(), Error::TxReadonly);
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Release the last savepoint
-		inner.sp.pop();
-		// All ok
+		inner.savepoints.pop();
+		// Continue
 		Ok(())
 	}
 
 	/// Rollback to the last save point.
 	async fn rollback_to_save_point(&self) -> Result<()> {
+		// Check to see if transaction is closed
+		ensure!(!self.closed(), Error::TxFinished);
+		// Check to see if transaction is writable
+		ensure!(self.writeable(), Error::TxReadonly);
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
-		// Release the last savepoint
-		let sp = inner.sp.pop()?;
-		// Loop over the savepoint entries
-		for (key, val) in sp {
-			match val.last_operation {
-				SaveOperation::Set | SaveOperation::Put => {
-					if let Some(initial_value) = val.saved_val {
-						// If the last operation was a SET or PUT
-						// then we just have set back the key to its initial value
-						inner.tx.put(key, initial_value).await?;
-					} else {
-						// If the last operation on this key was not a DEL operation,
-						// then we have to delete the key
-						inner.tx.delete(key).await?;
-					}
+		// Check if there are any savepoints
+		ensure!(!inner.savepoints.is_empty(), Error::Tx("No savepoint to rollback to".to_string()));
+		// Get the most recent savepoint
+		let savepoint = inner.savepoints.pop().unwrap();
+		// Take ownership of operations to avoid borrow checker issues
+		let operations = std::mem::take(&mut inner.operations);
+		// Execute undo operations in reverse order
+		for op in operations.iter().rev() {
+			match op {
+				// Delete the key that was inserted
+				Operation::DeleteKey(key) => {
+					inner.tx.delete(key.clone()).await?;
 				}
-				SaveOperation::Del => {
-					if let Some(initial_value) = val.saved_val {
-						// If the last operation was a DEL,
-						// then we have to put back the initial value
-						inner.tx.put(key, initial_value).await?;
-					}
+				// Restore the previous value
+				Operation::RestoreValue(key, val) => {
+					inner.tx.put(key.clone(), val.clone()).await?;
+				}
+				// Restore the deleted key
+				Operation::RestoreDeleted(key, val) => {
+					inner.tx.put(key.clone(), val.clone()).await?;
 				}
 			}
 		}
-		// All ok
+		// Restore the savepoint's operations as the current ones
+		inner.operations = savepoint.operations;
+		// Continue
 		Ok(())
-	}
-}
-
-impl Transaction {
-	/// Prepare a save point for a key.
-	async fn prepare_save_point(
-		&self,
-		key: &Key,
-		version: Option<u64>,
-		op: SaveOperation,
-	) -> Result<Option<SavePrepare>> {
-		// Import traits
-		use crate::kvs::api::Transaction;
-		use crate::kvs::savepoint::SavedValue;
-		// Load the inner transaction
-		let inner = self.inner.write().await;
-		// Check if we have a savepoint
-		if inner.sp.is_some() {
-			//
-			let is_saved_key = inner.sp.is_saved_key(key);
-			//
-			let prepared = match is_saved_key {
-				None => None,
-				Some(true) => Some(SavePrepare::AlreadyPresent(key.clone(), op)),
-				Some(false) => {
-					let val = self.get(key.clone(), version).await?;
-					Some(SavePrepare::NewKey(key.clone(), SavedValue::new(val, version, op)))
-				}
-			};
-			// Return the
-			return Ok(prepared);
-		}
-		// Noting prepared
-		Ok(None)
 	}
 }

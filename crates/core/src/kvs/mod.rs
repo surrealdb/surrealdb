@@ -37,7 +37,6 @@ mod tikv;
 
 pub(crate) mod cache;
 pub(crate) mod index;
-pub mod savepoint;
 pub(crate) mod sequences;
 pub(crate) mod slowlog;
 pub(crate) mod tasklease;
