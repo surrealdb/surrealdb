@@ -34,23 +34,23 @@ impl Datastore {
 		// Configure custom options
 		let builder = TreeBuilder::new();
 		// Enable separated keys and values
-		info!(target: TARGET, "Setting maximum segment size: {}", *cnf::SURREALKV_MAX_SEGMENT_SIZE);
-		let builder = builder.with_enable_vlog(true);
+		info!(target: TARGET, "Enabling value log separation: {}", *cnf::SURREALKV_ENABLE_VLOG);
+		let builder = builder.with_enable_vlog(*cnf::SURREALKV_ENABLE_VLOG);
 		// Configure the maximum value log file size
-		info!(target: TARGET, "Setting maximum segment size: {}", *cnf::SURREALKV_MAX_SEGMENT_SIZE);
-		let builder = builder.with_vlog_max_file_size(0);
-		// Configure the value cache capacity
-		info!(target: TARGET, "Setting maximum segment size: {}", *cnf::SURREALKV_MAX_SEGMENT_SIZE);
-		let builder = builder.with_vlog_cache_capacity(0);
+		info!(target: TARGET, "Setting value log max file size: {}", *cnf::SURREALKV_VLOG_MAX_FILE_SIZE);
+		let builder = builder.with_vlog_max_file_size(*cnf::SURREALKV_VLOG_MAX_FILE_SIZE);
+		// Configure the value log cache capacity
+		info!(target: TARGET, "Setting value log cache capacity: {}", *cnf::SURREALKV_VLOG_CACHE_CAPACITY);
+		let builder = builder.with_vlog_cache_capacity(*cnf::SURREALKV_VLOG_CACHE_CAPACITY);
 		// Enable the block cache capacity
-		info!(target: TARGET, "Setting maximum segment size: {}", *cnf::SURREALKV_MAX_SEGMENT_SIZE);
-		let builder = builder.with_block_cache_capacity(0);
-		// Disable versioned queries
-		info!(target: TARGET, "Setting maximum segment size: {}", *cnf::SURREALKV_MAX_SEGMENT_SIZE);
+		info!(target: TARGET, "Setting block cache capacity: {}", *cnf::SURREALKV_BLOCK_CACHE_CAPACITY);
+		let builder = builder.with_block_cache_capacity(*cnf::SURREALKV_BLOCK_CACHE_CAPACITY);
+		// Configure versioned queries
+		info!(target: TARGET, "Versioning enabled: {} with unlimited retention period", enable_versions);
 		let builder = builder.with_versioning(enable_versions, 0);
-		// Set the block size to 64 KiB
-		info!(target: TARGET, "Setting maximum segment size: {}", *cnf::SURREALKV_MAX_SEGMENT_SIZE);
-		let builder = builder.with_block_size(64 * 1024);
+		// Set the block size
+		info!(target: TARGET, "Setting block size: {}", *cnf::SURREALKV_BLOCK_SIZE);
+		let builder = builder.with_block_size(*cnf::SURREALKV_BLOCK_SIZE);
 		// Log if writes should be synced
 		info!(target: TARGET, "Wait for disk sync acknowledgement: {}", *cnf::SYNC_DATA);
 		// Set the data storage directory
@@ -336,13 +336,11 @@ impl super::api::Transaction for Transaction {
 		let res = match version {
 			Some(ts) => inner
 				.keys_at_version(beg, end, ts)?
-				.into_iter()
 				.take(limit as usize)
 				.map(|r| r.map(Key::from).map_err(Into::into))
 				.collect::<Result<_>>()?,
 			None => inner
 				.keys(beg, end)?
-				.into_iter()
 				.take(limit as usize)
 				.map(|r| r.map(Key::from).map_err(Into::into))
 				.collect::<Result<_>>()?,
@@ -366,14 +364,12 @@ impl super::api::Transaction for Transaction {
 			Some(ts) => inner
 				.keys_at_version(beg, end, ts)?
 				.rev()
-				.into_iter()
 				.take(limit as usize)
 				.map(|r| r.map(Key::from).map_err(Into::into))
 				.collect::<Result<_>>()?,
 			None => inner
 				.keys(beg, end)?
 				.rev()
-				.into_iter()
 				.take(limit as usize)
 				.map(|r| r.map(Key::from).map_err(Into::into))
 				.collect::<Result<_>>()?,
@@ -401,13 +397,11 @@ impl super::api::Transaction for Transaction {
 		let res = match version {
 			Some(ts) => inner
 				.range_at_version(beg, end, ts)?
-				.into_iter()
 				.take(limit as usize)
 				.map(|r| r.map(|(k, v)| (k.to_vec(), v.to_vec())).map_err(Into::into))
 				.collect::<Result<_>>()?,
 			None => inner
 				.range(beg, end)?
-				.into_iter()
 				.take(limit as usize)
 				.map(|r| r.map(|(k, v)| (k.to_vec(), v.to_vec())).map_err(Into::into))
 				.collect::<Result<_>>()?,
@@ -436,14 +430,12 @@ impl super::api::Transaction for Transaction {
 			Some(ts) => inner
 				.range_at_version(beg, end, ts)?
 				.rev()
-				.into_iter()
 				.take(limit as usize)
 				.map(|r| r.map(|(k, v)| (k.to_vec(), v.to_vec())).map_err(Into::into))
 				.collect::<Result<_>>()?,
 			None => inner
 				.range(beg, end)?
 				.rev()
-				.into_iter()
 				.take(limit as usize)
 				.map(|r| r.map(|(k, v)| (k.to_vec(), v.to_vec())).map_err(Into::into))
 				.collect::<Result<_>>()?,

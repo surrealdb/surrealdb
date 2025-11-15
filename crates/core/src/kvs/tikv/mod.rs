@@ -526,7 +526,7 @@ impl super::api::Transaction for Transaction {
 		// Check if there are any savepoints
 		ensure!(!inner.savepoints.is_empty(), Error::Tx("No savepoint to rollback to".to_string()));
 		// Get the most recent savepoint
-		let savepoint = inner.savepoints.pop().unwrap();
+		let savepoint = inner.savepoints.pop().expect("No savepoint to rollback to");
 		// Take ownership of operations to avoid borrow checker issues
 		let operations = std::mem::take(&mut inner.operations);
 		// Execute undo operations in reverse order
