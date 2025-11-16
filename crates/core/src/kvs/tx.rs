@@ -76,7 +76,7 @@ impl Transaction {
 	/// If the transaction has been canceled or committed,
 	/// then this function will return [`true`], and any further
 	/// calls to functions on this transaction will result
-	/// in a [`Error::TxFinished`] error.
+	/// in a [`kvs::Error::TransactionFinished`] error.
 	pub async fn closed(&self) -> bool {
 		self.tr.closed()
 	}
@@ -1200,7 +1200,10 @@ impl TableProvider for Transaction {
 		match self.set(&key, tb, None).await {
 			Ok(_) => {}
 			Err(e) => {
-				if matches!(e.downcast_ref(), Some(Error::TxReadonly)) {
+				if matches!(
+					e.downcast_ref(),
+					Some(Error::Kvs(crate::kvs::Error::TransactionReadonly))
+				) {
 					return Err(Error::TbNotFound {
 						name: tb.name.clone(),
 					}

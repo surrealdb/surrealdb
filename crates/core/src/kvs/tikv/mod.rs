@@ -9,11 +9,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use anyhow::{Result, bail, ensure};
 use tikv::{CheckLevel, Config, TimestampExt, TransactionClient, TransactionOptions};
 use tokio::sync::RwLock;
 
-use crate::err::Error;
+use super::err::{Error, Result};
 use crate::key::database::vs::VsKey;
 use crate::key::debug::Sprintable;
 use crate::kvs::key::KVKey;
@@ -70,7 +69,7 @@ impl Datastore {
 				info!(target: TARGET, "Connecting with cluster API V1");
 				Config::default()
 			}
-			_ => bail!(Error::Ds("Invalid TiKV API version".into())),
+			_ => return Err(Error::Datastore("Invalid TiKV API version".into())),
 		};
 		// Set the default request timeout
 		let config = config.with_timeout(Duration::from_secs(*cnf::TIKV_REQUEST_TIMEOUT));
@@ -84,7 +83,7 @@ impl Datastore {
 			Ok(db) => Ok(Datastore {
 				db: Arc::pin(db),
 			}),
-			Err(e) => Err(anyhow::Error::new(Error::Ds(e.to_string()))),
+			Err(e) => Err(Error::Datastore(e.to_string())),
 		}
 	}
 
@@ -99,7 +98,7 @@ impl Datastore {
 		&self,
 		write: bool,
 		lock: bool,
-	) -> Result<Box<dyn crate::kvs::api::Transaction>> {
+	) -> Result<Box<dyn crate::kvs::api::Transactable>> {
 		// Set whether this should be an optimistic or pessimistic transaction
 		let mut opt = if lock {
 			TransactionOptions::new_pessimistic()
@@ -134,14 +133,14 @@ impl Datastore {
 				}),
 				db: self.db.clone(),
 			})),
-			Err(e) => Err(anyhow::Error::new(Error::Tx(e.to_string()))),
+			Err(e) => Err(Error::from(e)),
 		}
 	}
 }
 
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-impl super::api::Transaction for Transaction {
+impl super::api::Transactable for Transaction {
 	fn kind(&self) -> &'static str {
 		"tikv"
 	}
@@ -160,7 +159,9 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn cancel(&self) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Mark this transaction as done
 		self.done.store(true, Ordering::Release);
 		// Load the inner transaction
@@ -175,9 +176,13 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn commit(&self) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
 		// Mark this transaction as done
 		self.done.store(true, Ordering::Release);
 		// Get the inner transaction
@@ -197,9 +202,13 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn exists(&self, key: Key, version: Option<u64>) -> Result<bool> {
 		// TiKV does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Check the key
@@ -212,9 +221,13 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn get(&self, key: Key, version: Option<u64>) -> Result<Option<Val>> {
 		// TiKV does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Get the key
@@ -227,11 +240,17 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn set(&self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
 		// TiKV does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Get the old value if we need to track operations
@@ -263,16 +282,24 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn put(&self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
 		// TiKV does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Check if key exists
 		let exists = inner.tx.key_exists(key.clone()).await?;
-		ensure!(!exists, Error::TxKeyAlreadyExists);
+		if exists {
+			return Err(Error::TransactionKeyAlreadyExists);
+		}
 		// Set the key
 		inner.tx.put(key.clone(), val).await?;
 		// Record operation after successful operation
@@ -288,9 +315,13 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn putc(&self, key: Key, val: Val, chk: Option<Val>) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Get the current value
@@ -299,7 +330,7 @@ impl super::api::Transaction for Transaction {
 		match (&current, &chk) {
 			(Some(v), Some(w)) if v == w => {}
 			(None, None) => {}
-			_ => bail!(Error::TxConditionNotMet),
+			_ => return Err(Error::TrandsactionConditionNotMet),
 		};
 		// Set the key
 		inner.tx.put(key.clone(), val).await?;
@@ -324,9 +355,13 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn del(&self, key: Key) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Get the old value if we need to track operations
@@ -350,9 +385,13 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn delc(&self, key: Key, chk: Option<Val>) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Get the current value
@@ -361,7 +400,7 @@ impl super::api::Transaction for Transaction {
 		match (&current, &chk) {
 			(Some(v), Some(w)) if v == w => {}
 			(None, None) => {}
-			_ => bail!(Error::TxConditionNotMet),
+			_ => return Err(Error::TrandsactionConditionNotMet),
 		};
 		// Delete the key
 		inner.tx.delete(key.clone()).await?;
@@ -378,9 +417,13 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn delr(&self, rng: Range<Key>) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
 		// Delete the key range
 		self.db.unsafe_destroy_range(rng.start..rng.end).await?;
 		// Return result
@@ -391,9 +434,13 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
 		// TiKV does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Scan the keys
@@ -406,9 +453,13 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
 		// TiKV does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Scan the keys
@@ -426,9 +477,13 @@ impl super::api::Transaction for Transaction {
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// TiKV does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Scan the keys
@@ -446,9 +501,13 @@ impl super::api::Transaction for Transaction {
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// TiKV does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Scan the keys
@@ -462,7 +521,9 @@ impl super::api::Transaction for Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn get_versionstamp(&self, key: VsKey) -> Result<VersionStamp> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Get the transaction version
 		let ver = self.inner.write().await.tx.current_timestamp().await?.version();
 		// Get the encoded key
@@ -470,10 +531,11 @@ impl super::api::Transaction for Transaction {
 		// Calculate the previous version value
 		if let Some(prev) = self.get(enc.clone(), None).await? {
 			let prev = VersionStamp::from_slice(prev.as_slice())?.try_into_u64()?;
-			ensure!(
-				prev < ver,
-				Error::Tx(format!("Previous version {prev} is greater than current version {ver}"))
-			);
+			if prev >= ver {
+				return Err(Error::Transaction(format!(
+					"Previous version {prev} is greater than current version {ver}"
+				)));
+			}
 		};
 		// Convert the timestamp to a versionstamp
 		let ver = VersionStamp::from_u64(ver);
@@ -486,9 +548,13 @@ impl super::api::Transaction for Transaction {
 	/// Set a new save point on the transaction.
 	async fn new_save_point(&self) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Take the current operations
@@ -504,9 +570,13 @@ impl super::api::Transaction for Transaction {
 	/// Release the last save point.
 	async fn release_last_save_point(&self) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Release the last savepoint
@@ -518,13 +588,19 @@ impl super::api::Transaction for Transaction {
 	/// Rollback to the last save point.
 	async fn rollback_to_save_point(&self) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Check if there are any savepoints
-		ensure!(!inner.savepoints.is_empty(), Error::Tx("No savepoint to rollback to".to_string()));
+		if inner.savepoints.is_empty() {
+			return Err(Error::Transaction("No savepoint to rollback to".to_string()));
+		}
 		// Get the most recent savepoint
 		let savepoint = inner.savepoints.pop().expect("No savepoint to rollback to");
 		// Take ownership of operations to avoid borrow checker issues

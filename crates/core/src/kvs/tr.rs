@@ -5,7 +5,7 @@ use std::ops::Range;
 use anyhow::Result;
 
 #[allow(unused_imports, reason = "Not used when none of the storage backends are enabled.")]
-use super::api::Transaction;
+use super::api::Transactable;
 use super::{Key, Val, Version};
 use crate::catalog::{DatabaseId, NamespaceId, TableDefinition};
 use crate::cf;
@@ -46,7 +46,7 @@ impl From<bool> for LockType {
 /// A set of undoable updates and requests against a dataset.
 pub struct Transactor {
 	// The underlying transaction
-	pub(super) inner: Box<dyn super::api::Transaction>,
+	pub(super) inner: Box<dyn super::api::Transactable>,
 	// The changefeed buffer
 	pub(super) cf: cf::Writer,
 }
@@ -86,7 +86,7 @@ impl Transactor {
 	/// If the transaction has been cancelled or committed,
 	/// then this function will return [`true`], and any further
 	/// calls to functions on this transaction will result
-	/// in a [`Error::TxFinished`] error.
+	/// in a [`kvs::Error::TransactionFinished`] error.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub(crate) fn closed(&self) -> bool {
 		self.inner.closed()
@@ -98,8 +98,8 @@ impl Transactor {
 	/// transaction, then this function will return [`true`].
 	/// This fuction can be used to check whether a transaction
 	/// allows data to be modified, and if not then the function
-	/// will return an [`Error::TxReadonly`] error when attempting
-	/// to modify any data within the transaction.
+	/// will return a [`kvs::Error::TransactionReadonly`] error w
+	/// hen attempting to modify any data within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub(crate) fn writeable(&self) -> bool {
 		self.inner.writeable()
@@ -110,7 +110,7 @@ impl Transactor {
 	/// This reverses all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub(crate) async fn cancel(&self) -> Result<()> {
-		self.inner.cancel().await
+		Ok(self.inner.cancel().await?)
 	}
 
 	/// Commit a transaction.
@@ -118,7 +118,7 @@ impl Transactor {
 	/// This attempts to commit all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
 	pub(crate) async fn commit(&self) -> Result<()> {
-		self.inner.commit().await
+		Ok(self.inner.commit().await?)
 	}
 
 	/// Check if a key exists in the datastore.
@@ -129,7 +129,7 @@ impl Transactor {
 	{
 		let key = key.encode_key()?;
 		trace!(target: TARGET, key = key.sprint(), version = version, "Exists");
-		self.inner.exists(key, version).await
+		Ok(self.inner.exists(key, version).await?)
 	}
 
 	/// Fetch a key from the datastore.
@@ -152,9 +152,11 @@ impl Transactor {
 	{
 		let keys = keys.iter().map(|k| k.encode_key()).collect::<Result<Vec<_>>>()?;
 		trace!(target: TARGET, keys = keys.sprint(), "GetM");
-		let vals = self.inner.getm(keys).await?;
 
-		vals.into_iter()
+		self.inner
+			.getm(keys)
+			.await?
+			.into_iter()
 			.map(|v| match v {
 				Some(v) => K::ValueType::kv_decode_value(v).map(Some),
 				None => Ok(None),
@@ -175,7 +177,7 @@ impl Transactor {
 		let end: Key = rng.end.encode_key()?;
 		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), version = version, "GetR");
-		self.inner.getr(rng, version).await
+		Ok(self.inner.getr(rng, version).await?)
 	}
 
 	/// Retrieve a specific prefixed range of keys from the datastore.
@@ -189,7 +191,7 @@ impl Transactor {
 	{
 		let key = key.encode_key()?;
 		trace!(target: TARGET, key = key.sprint(), "GetP");
-		self.inner.getp(key).await
+		Ok(self.inner.getp(key).await?)
 	}
 
 	/// Insert or update a key in the datastore.
@@ -200,7 +202,7 @@ impl Transactor {
 	{
 		let key = key.encode_key()?;
 		trace!(target: TARGET, key = key.sprint(), version = version, "Set");
-		self.inner.set(key, val.kv_encode_value()?, version).await
+		Ok(self.inner.set(key, val.kv_encode_value()?, version).await?)
 	}
 
 	/// Insert or replace a key in the datastore.
@@ -211,7 +213,7 @@ impl Transactor {
 	{
 		let key = key.encode_key()?;
 		trace!(target: TARGET, key = key.sprint(), "Replace");
-		self.inner.replace(key, val.kv_encode_value()?).await
+		Ok(self.inner.replace(key, val.kv_encode_value()?).await?)
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -222,7 +224,7 @@ impl Transactor {
 	{
 		let key = key.encode_key()?;
 		trace!(target: TARGET, key = key.sprint(), version = version, "Put");
-		self.inner.put(key, val.kv_encode_value()?, version).await
+		Ok(self.inner.put(key, val.kv_encode_value()?, version).await?)
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -239,7 +241,7 @@ impl Transactor {
 		let key = key.encode_key()?;
 		trace!(target: TARGET, key = key.sprint(), "PutC");
 		let chk = chk.map(|v| v.kv_encode_value()).transpose()?;
-		self.inner.putc(key, val.kv_encode_value()?, chk).await
+		Ok(self.inner.putc(key, val.kv_encode_value()?, chk).await?)
 	}
 
 	/// Delete a key from the datastore.
@@ -250,7 +252,7 @@ impl Transactor {
 	{
 		let key = key.encode_key()?;
 		trace!(target: TARGET, key = key.sprint(), "Del");
-		self.inner.del(key).await
+		Ok(self.inner.del(key).await?)
 	}
 
 	/// Delete a key from the datastore if the current value matches a
@@ -263,7 +265,7 @@ impl Transactor {
 		let key = key.encode_key()?;
 		trace!(target: TARGET, key = key.sprint(), "DelC");
 		let chk = chk.map(|v| v.kv_encode_value()).transpose()?;
-		self.inner.delc(key, chk).await
+		Ok(self.inner.delc(key, chk).await?)
 	}
 
 	/// Delete a range of keys from the datastore.
@@ -279,7 +281,7 @@ impl Transactor {
 		let end: Key = rng.end.encode_key()?;
 		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), "DelR");
-		self.inner.delr(rng).await
+		Ok(self.inner.delr(rng).await?)
 	}
 
 	/// Delete a prefixed range of keys from the datastore.
@@ -293,7 +295,7 @@ impl Transactor {
 	{
 		let key = key.encode_key()?;
 		trace!(target: TARGET, key = key.sprint(), "DelP");
-		self.inner.delp(key).await
+		Ok(self.inner.delp(key).await?)
 	}
 
 	/// Delete all versions of a key from the datastore.
@@ -304,7 +306,7 @@ impl Transactor {
 	{
 		let key = key.encode_key()?;
 		trace!(target: TARGET, key = key.sprint(), "Clr");
-		self.inner.clr(key).await
+		Ok(self.inner.clr(key).await?)
 	}
 
 	/// Delete all versions of a key from the datastore if the current value
@@ -317,7 +319,7 @@ impl Transactor {
 		let key = key.encode_key()?;
 		trace!(target: TARGET, key = key.sprint(), "ClrC");
 		let chk = chk.map(|v| v.kv_encode_value()).transpose()?;
-		self.inner.clrc(key, chk).await
+		Ok(self.inner.clrc(key, chk).await?)
 	}
 
 	/// Delete all versions of a range of keys from the datastore.
@@ -333,7 +335,7 @@ impl Transactor {
 		let end: Key = rng.end.encode_key()?;
 		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), "ClrR");
-		self.inner.clrr(rng).await
+		Ok(self.inner.clrr(rng).await?)
 	}
 
 	/// Delete all versions of a prefixed range of keys from the datastore.
@@ -347,7 +349,7 @@ impl Transactor {
 	{
 		let key: Key = key.encode_key()?;
 		trace!(target: TARGET, key = key.sprint(), "ClrP");
-		self.inner.clrp(key).await
+		Ok(self.inner.clrp(key).await?)
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -366,7 +368,7 @@ impl Transactor {
 		if rng.start > rng.end {
 			return Ok(vec![]);
 		}
-		self.inner.keys(rng, limit, version).await
+		Ok(self.inner.keys(rng, limit, version).await?)
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -390,7 +392,7 @@ impl Transactor {
 		if rng.start > rng.end {
 			return Ok(vec![]);
 		}
-		self.inner.keysr(rng, limit, version).await
+		Ok(self.inner.keysr(rng, limit, version).await?)
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -414,7 +416,7 @@ impl Transactor {
 		if rng.start > rng.end {
 			return Ok(vec![]);
 		}
-		self.inner.scan(rng, limit, version).await
+		Ok(self.inner.scan(rng, limit, version).await?)
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
@@ -434,7 +436,7 @@ impl Transactor {
 		if rng.start > rng.end {
 			return Ok(vec![]);
 		}
-		self.inner.scanr(rng, limit, version).await
+		Ok(self.inner.scanr(rng, limit, version).await?)
 	}
 
 	/// Count the total number of keys within a range in the datastore.
@@ -450,7 +452,7 @@ impl Transactor {
 		let end: Key = rng.end.encode_key()?;
 		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), "Count");
-		self.inner.count(rng).await
+		Ok(self.inner.count(rng).await?)
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -471,7 +473,7 @@ impl Transactor {
 		let end: Key = rng.end.encode_key()?;
 		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), version = version, "Batch");
-		self.inner.batch_keys(rng, batch, version).await
+		Ok(self.inner.batch_keys(rng, batch, version).await?)
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -492,7 +494,7 @@ impl Transactor {
 		let end: Key = rng.end.encode_key()?;
 		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), version = version, "Batch");
-		self.inner.batch_keys_vals(rng, batch, version).await
+		Ok(self.inner.batch_keys_vals(rng, batch, version).await?)
 	}
 
 	/// Retrieve a batched scan of all versions over a specific range of keys in
@@ -513,7 +515,7 @@ impl Transactor {
 		let end: Key = rng.end.encode_key()?;
 		let rng = beg..end;
 		trace!(target: TARGET, rng = rng.sprint(), "BatchVersions");
-		self.inner.batch_keys_vals_versions(rng, batch).await
+		Ok(self.inner.batch_keys_vals_versions(rng, batch).await?)
 	}
 
 	/// Obtain a new change timestamp for a key
@@ -523,7 +525,7 @@ impl Transactor {
 	/// the transaction commit. That is to keep other transactions commit
 	/// delay(pessimistic) or conflict(optimistic) as less as possible.
 	pub(crate) async fn get_versionstamp(&self, key: VsKey) -> Result<VersionStamp> {
-		self.inner.get_versionstamp(key).await
+		Ok(self.inner.get_versionstamp(key).await?)
 	}
 
 	/// Insert or update a key in the datastore.
@@ -540,7 +542,7 @@ impl Transactor {
 		let prefix = prefix.encode_key()?;
 		let suffix = suffix.encode_key()?;
 		let value = val.kv_encode_value()?;
-		self.inner.set_versionstamp(ts_key, prefix, suffix, value).await
+		Ok(self.inner.set_versionstamp(ts_key, prefix, suffix, value).await?)
 	}
 }
 
@@ -551,17 +553,17 @@ impl Transactor {
 impl Transactor {
 	/// Set a new save point on the transaction.
 	pub(crate) async fn new_save_point(&self) -> Result<()> {
-		self.inner.new_save_point().await
+		Ok(self.inner.new_save_point().await?)
 	}
 
 	/// Release the last save point.
 	pub(crate) async fn release_last_save_point(&self) -> Result<()> {
-		self.inner.release_last_save_point().await
+		Ok(self.inner.release_last_save_point().await?)
 	}
 
 	/// Rollback to the last save point.
 	pub(crate) async fn rollback_to_save_point(&self) -> Result<()> {
-		self.inner.rollback_to_save_point().await
+		Ok(self.inner.rollback_to_save_point().await?)
 	}
 }
 

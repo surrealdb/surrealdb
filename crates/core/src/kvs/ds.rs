@@ -25,10 +25,11 @@ use uuid::Uuid;
 #[cfg(target_family = "wasm")]
 use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 
+use super::api::Transactable;
+use super::export;
 use super::tr::Transactor;
 use super::tx::Transaction;
 use super::version::MajorVersion;
-use super::{api, export};
 use crate::api::body::ApiBody;
 use crate::api::invocation::ApiInvocation;
 use crate::api::response::{ApiResponse, ResponseInstruction};
@@ -206,7 +207,7 @@ pub trait TransactionBuilder: TransactionBuilderRequirements {
 		&self,
 		write: bool,
 		lock: bool,
-	) -> Result<(Box<dyn api::Transaction>, bool)>;
+	) -> Result<(Box<dyn Transactable>, bool)>;
 
 	/// Perform any backend-specific shutdown/cleanup.
 	async fn shutdown(&self) -> Result<()>;
@@ -306,7 +307,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-mem"))]
-				bail!(Error::Ds("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `memory` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
 			// Initiate a File (RocksDB) datastore
 			(flavour @ "file", path) => {
@@ -314,7 +315,6 @@ impl TransactionBuilderFactory for CommunityComposer {
 				{
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
-
 					// Initialise the storage engine
 					warn!(
 						"file:// is deprecated, please use surrealkv:// or surrealkv+versioned:// or rocksdb://"
@@ -328,7 +328,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
-				bail!(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
 			// Initiate a RocksDB datastore
 			(flavour @ "rocksdb", path) => {
@@ -337,7 +337,6 @@ impl TransactionBuilderFactory for CommunityComposer {
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
 					// Initialise the storage engine
-
 					let v = super::rocksdb::Datastore::new(&path)
 						.await
 						.map(DatastoreFlavor::RocksDB)?;
@@ -346,7 +345,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-rocksdb"))]
-				bail!(Error::Ds("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `rocksdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
 			// Initiate a SurrealKV versioned database
 			(flavour @ "surrealkv+versioned", path) => {
@@ -363,7 +362,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
-				bail!(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
 			// Initiate a SurrealKV non-versioned database
 			(flavour @ "surrealkv", path) => {
@@ -372,7 +371,6 @@ impl TransactionBuilderFactory for CommunityComposer {
 					// Create a new blocking threadpool
 					super::threadpool::initialise();
 					// Initialise the storage engine
-
 					let v = super::surrealkv::Datastore::new(&path, false)
 						.await
 						.map(DatastoreFlavor::SurrealKV)?;
@@ -381,7 +379,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-surrealkv"))]
-				bail!(Error::Ds("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `surrealkv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
 			// Initiate an IndxDB database
 			(flavour @ "indxdb", path) => {
@@ -394,7 +392,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-indxdb"))]
-				bail!(Error::Ds("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `indxdb` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
 			// Initiate a TiKV datastore
 			(flavour @ "tikv", path) => {
@@ -406,12 +404,14 @@ impl TransactionBuilderFactory for CommunityComposer {
 					Ok((Box::<DatastoreFlavor>::new(v), c))
 				}
 				#[cfg(not(feature = "kv-tikv"))]
-				bail!(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
+				bail!(Error::Kvs(crate::kvs::Error::Datastore("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned())));
 			}
 			// The datastore path is not valid
 			(flavour, path) => {
-				info!(target: TARGET, "Unable to load the specified datastore {flavour}{}", path);
-				bail!(Error::Ds("Unable to load the specified datastore".into()))
+				info!(target: TARGET, "Unable to load the specified datastore {flavour}{path}");
+				bail!(Error::Kvs(crate::kvs::Error::Datastore(
+					"Unable to load the specified datastore".into()
+				)))
 			}
 		}
 	}
@@ -444,7 +444,7 @@ impl TransactionBuilder for DatastoreFlavor {
 		&self,
 		write: bool,
 		lock: bool,
-	) -> Result<(Box<dyn api::Transaction>, bool)> {
+	) -> Result<(Box<dyn Transactable>, bool)> {
 		//-> Pin<Box<dyn Future<Output = Result<(Box<dyn api::Transaction>, bool)>> + Send + 'a>> {
 		//Box::pin(async move {
 		Ok(match self {
@@ -478,18 +478,17 @@ impl TransactionBuilder for DatastoreFlavor {
 	}
 
 	async fn shutdown(&self) -> Result<()> {
-		//Box::pin(async move {
 		match self {
 			#[cfg(feature = "kv-mem")]
-			Self::Mem(v) => v.shutdown().await,
+			Self::Mem(v) => Ok(v.shutdown().await?),
 			#[cfg(feature = "kv-rocksdb")]
-			Self::RocksDB(v) => v.shutdown().await,
+			Self::RocksDB(v) => Ok(v.shutdown().await?),
 			#[cfg(feature = "kv-indxdb")]
-			Self::IndxDB(v) => v.shutdown().await,
+			Self::IndxDB(v) => Ok(v.shutdown().await?),
 			#[cfg(feature = "kv-tikv")]
-			Self::TiKV(v) => v.shutdown().await,
+			Self::TiKV(v) => Ok(v.shutdown().await?),
 			#[cfg(feature = "kv-surrealkv")]
-			Self::SurrealKV(v) => v.shutdown().await,
+			Self::SurrealKV(v) => Ok(v.shutdown().await?),
 			#[allow(unreachable_patterns)]
 			_ => unreachable!(),
 		}
@@ -1424,11 +1423,8 @@ impl Datastore {
 			Some(Error::IamError(iam_err)) => {
 				DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
 			}
-			Some(Error::Ds(msg)) => {
-				DbResultError::InternalError(format!("Datastore error: {}", msg))
-			}
-			Some(Error::Tx(msg)) => {
-				DbResultError::InternalError(format!("Transaction error: {}", msg))
+			Some(Error::Kvs(kvs_err)) => {
+				DbResultError::InternalError(format!("Key-value store error: {}", kvs_err))
 			}
 			Some(Error::InvalidQuery(_)) => {
 				DbResultError::ParseError("Invalid query syntax".to_string())
@@ -1514,27 +1510,9 @@ impl Datastore {
 				Some(Error::IamError(iam_err)) => {
 					DbResultError::InvalidAuth(format!("IAM error: {}", iam_err))
 				}
-				Some(Error::Ds(msg)) => {
-					DbResultError::InternalError(format!("Datastore error: {}", msg))
+				Some(Error::Kvs(kvs_err)) => {
+					DbResultError::InternalError(format!("Key-value store error: {}", kvs_err))
 				}
-				Some(Error::Tx(msg)) => {
-					DbResultError::InternalError(format!("Transaction error: {}", msg))
-				}
-				Some(Error::TxFinished) => {
-					DbResultError::InternalError("Transaction already finished".to_string())
-				}
-				Some(Error::TxReadonly) => DbResultError::InternalError(
-					"Cannot write to read-only transaction".to_string(),
-				),
-				Some(Error::TxConditionNotMet) => {
-					DbResultError::InternalError("Transaction condition not met".to_string())
-				}
-				Some(Error::TxKeyAlreadyExists) => {
-					DbResultError::InternalError("Key already exists in transaction".to_string())
-				}
-				Some(Error::TxRetryable(e)) => DbResultError::InternalError(format!(
-					"Transaction conflict: {e} - retry required"
-				)),
 				Some(Error::NsEmpty) => {
 					DbResultError::InvalidParams("No namespace specified".to_string())
 				}

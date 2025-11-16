@@ -30,7 +30,7 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 	// In ReadAndDeletionOnly mode:
 	// - Read operations are allowed
 	// - Delete operations are allowed (to free up space)
-	// - Write operations return Error::DbReadAndDeleteOnly
+	// - Write operations return kvs::Error::ReadAndDeleteOnly
 	// - The error message indicates that deleting data will free space
 	// - When space drops below the limit (after deletions and compaction), normal mode is restored
 

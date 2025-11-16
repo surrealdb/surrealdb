@@ -35,7 +35,10 @@ impl Datastore {
 		let res = run!(txn, txn.put(&key, &node, None).await);
 		match res {
 			Err(e) => {
-				if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+				if matches!(
+					e.downcast_ref(),
+					Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+				) {
 					Err(anyhow::Error::new(Error::ClAlreadyExists {
 						id: id.to_string(),
 					}))

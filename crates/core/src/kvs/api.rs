@@ -2,18 +2,27 @@
 #![warn(clippy::missing_docs_in_private_items)]
 
 use std::ops::Range;
+use std::time::SystemTime;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::Context;
 
+use super::err::{Error, Result};
 use super::util;
 use crate::cnf::{COUNT_BATCH_SIZE, NORMAL_FETCH_SIZE};
-use crate::err::Error;
+// use crate::err::Error;
 use crate::key::database::vs::VsKey;
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 use crate::kvs::{KVKey, KVValue, Key, Val, Version};
 use crate::vs::VersionStamp;
-use std::time::SystemTime;
+
+macro_rules! ensure {
+	($cond:expr, $err:expr $(,)?) => {
+		if !$cond {
+			return Err($err);
+		}
+	};
+}
 
 pub mod requirements {
 	//! This module defines the trait requirements for a transaction.
@@ -56,7 +65,7 @@ pub mod requirements {
 #[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-pub trait Transaction: requirements::TransactionRequirements {
+pub trait Transactable: requirements::TransactionRequirements {
 	/// Get the name of the transaction type.
 	fn kind(&self) -> &'static str;
 
@@ -65,7 +74,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// If the transaction has been cancelled or committed,
 	/// then this function will return [`true`], and any further
 	/// calls to functions on this transaction will result
-	/// in an [`Error::TxFinished`] error.
+	/// in a [`kvs::Error::TransactionFinished`] error.
 	fn closed(&self) -> bool;
 
 	/// Check if transaction is writeable.
@@ -74,7 +83,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// transaction, then this function will return [`true`].
 	/// This fuction can be used to check whether a transaction
 	/// allows data to be modified, and if not then the function
-	/// will return an [`Error::TxReadonly`] error.
+	/// will return a [`kvs::Error::TransactionReadonly`] error.
 	fn writeable(&self) -> bool;
 
 	/// Get the current timestamp
@@ -174,7 +183,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.sprint()))]
 	async fn getm(&self, keys: Vec<Key>) -> Result<Vec<Option<Val>>> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		ensure!(!self.closed(), Error::TransactionFinished);
 		// Continue with function logic
 		let mut out = Vec::with_capacity(keys.len());
 		for key in keys.into_iter() {
@@ -194,7 +203,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn getp(&self, key: Key) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		ensure!(!self.closed(), Error::TransactionFinished);
 		// Continue with function logic
 		let range = util::to_prefix_range(key)?;
 		self.getr(range, None).await
@@ -207,7 +216,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn getr(&self, rng: Range<Key>, version: Option<u64>) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		ensure!(!self.closed(), Error::TransactionFinished);
 		// Continue with function logic
 		let mut out = vec![];
 		let mut next = Some(rng);
@@ -228,9 +237,9 @@ pub trait Transaction: requirements::TransactionRequirements {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn delp(&self, key: Key) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		ensure!(!self.closed(), Error::TransactionFinished);
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
+		ensure!(self.writeable(), Error::TransactionReadonly);
 		// Continue with function logic
 		let range = util::to_prefix_range(key)?;
 		self.delr(range).await
@@ -243,9 +252,9 @@ pub trait Transaction: requirements::TransactionRequirements {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn delr(&self, rng: Range<Key>) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		ensure!(!self.closed(), Error::TransactionFinished);
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
+		ensure!(self.writeable(), Error::TransactionReadonly);
 		// Continue with function logic
 		let mut next = Some(rng);
 		while let Some(rng) = next {
@@ -265,9 +274,9 @@ pub trait Transaction: requirements::TransactionRequirements {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
 	async fn clrp(&self, key: Key) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		ensure!(!self.closed(), Error::TransactionFinished);
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
+		ensure!(self.writeable(), Error::TransactionReadonly);
 		// Continue with function logic
 		let range = util::to_prefix_range(key)?;
 		self.clrr(range).await
@@ -280,9 +289,9 @@ pub trait Transaction: requirements::TransactionRequirements {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn clrr(&self, rng: Range<Key>) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		ensure!(!self.closed(), Error::TransactionFinished);
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
+		ensure!(self.writeable(), Error::TransactionReadonly);
 		// Continue with function logic
 		let mut next = Some(rng);
 		while let Some(rng) = next {
@@ -302,7 +311,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn count(&self, rng: Range<Key>) -> Result<usize> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		ensure!(!self.closed(), Error::TransactionFinished);
 		// Continue with function logic
 		let mut len = 0;
 		let mut next = Some(rng);
@@ -325,7 +334,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		_rng: Range<Key>,
 		_limit: u32,
 	) -> Result<Vec<(Key, Val, Version, bool)>> {
-		Err(anyhow::Error::new(Error::UnsupportedVersionedQueries))
+		Err(Error::UnsupportedVersionedQueries)
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -340,7 +349,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		version: Option<u64>,
 	) -> Result<Batch<Key>> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		ensure!(!self.closed(), Error::TransactionFinished);
 		// Continue with function logic
 		let end = rng.end.clone();
 		// Scan for the next batch
@@ -381,7 +390,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		version: Option<u64>,
 	) -> Result<Batch<(Key, Val)>> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		ensure!(!self.closed(), Error::TransactionFinished);
 		// Continue with function logic
 		let end = rng.end.clone();
 		// Scan for the next batch
@@ -421,7 +430,7 @@ pub trait Transaction: requirements::TransactionRequirements {
 		batch: u32,
 	) -> Result<Batch<(Key, Val, Version, bool)>> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		ensure!(!self.closed(), Error::TransactionFinished);
 		// Continue with function logic
 		let end = rng.end.clone();
 		// Scan for the next batch
@@ -459,9 +468,10 @@ pub trait Transaction: requirements::TransactionRequirements {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn get_versionstamp(&self, key: VsKey) -> Result<VersionStamp> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
-
+		ensure!(!self.closed(), Error::TransactionFinished);
+		// Get the encoded key
 		let key_encoded = key.encode_key()?;
+		// Get the previous version
 		// Calculate the version number
 		let ver = match self.get(key_encoded.clone(), None).await? {
 			Some(prev) => <VsKey as KVKey>::ValueType::kv_decode_value(prev)?
@@ -485,9 +495,9 @@ pub trait Transaction: requirements::TransactionRequirements {
 		val: Val,
 	) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		ensure!(!self.closed(), Error::TransactionFinished);
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
+		ensure!(self.writeable(), Error::TransactionReadonly);
 		// Continue with function logic
 		let ts = self.get_versionstamp(ts_key).await?;
 		let mut k: Vec<u8> = prefix;

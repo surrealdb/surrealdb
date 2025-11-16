@@ -121,7 +121,10 @@ impl<'a> IndexOperation<'a> {
 				let key = self.get_unique_index_key(&o)?;
 				match txn.delc(&key, Some(self.rid)).await {
 					Err(e) => {
-						if matches!(e.downcast_ref::<Error>(), Some(Error::TxConditionNotMet)) {
+						if matches!(
+							e.downcast_ref::<Error>(),
+							Some(Error::Kvs(crate::kvs::Error::TrandsactionConditionNotMet))
+						) {
 							Ok(())
 						} else {
 							Err(e)
@@ -159,7 +162,10 @@ impl<'a> IndexOperation<'a> {
 				let key = self.get_non_unique_index_key(&o)?;
 				match txn.delc(&key, Some(self.rid)).await {
 					Err(e) => {
-						if matches!(e.downcast_ref::<Error>(), Some(Error::TxConditionNotMet)) {
+						if matches!(
+							e.downcast_ref::<Error>(),
+							Some(Error::Kvs(crate::kvs::Error::TrandsactionConditionNotMet))
+						) {
 							Ok(())
 						} else {
 							Err(e)
