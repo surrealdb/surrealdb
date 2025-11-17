@@ -85,6 +85,81 @@ fn access_method_to_vars(
 	}
 }
 
+/// Handles notification delivery for live queries
+async fn notifications(
+	ds: Arc<Datastore>,
+	service: Arc<SurrealDbGrpcService>,
+	canceller: CancellationToken,
+) {
+	// Listen to the notifications channel
+	if let Some(channel) = ds.notifications() {
+		// Loop continuously
+		loop {
+			tokio::select! {
+				// Check if this has shutdown
+				_ = canceller.cancelled() => break,
+				// Receive a notification on the channel
+				Ok(notification) = channel.recv() => {
+					// Get the id for this notification
+					let id = notification.id.as_ref();
+					// Get the sender for this live query
+					if let Some(sender) = service.live_queries.get(id) {
+						// Convert notification to SubscribeResponse
+						// Create protobuf Notification from surrealdb Notification
+						use surrealdb_protocol::proto::rpc::v1::Notification;
+						use surrealdb_protocol::proto::v1::Uuid as ProtoUuid;
+						use surrealdb_protocol::proto::v1::RecordId as ProtoRecordId;
+
+						// Convert action enum to i32
+						let action_code = match notification.action {
+							surrealdb_types::Action::Create => 0,
+							surrealdb_types::Action::Update => 1,
+							surrealdb_types::Action::Delete => 2,
+							surrealdb_types::Action::Killed => 3,
+						};
+
+						// Convert the notification record to the protobuf RecordId
+						// For now, we'll convert the entire record value to the record_id field
+						// TODO: Properly parse and set table/id fields from RecordId type
+						let proto_record_id = match &notification.record {
+							surrealdb_types::Value::RecordId(record_id) => {
+								// For now, use a simplified representation
+								// The actual implementation should properly convert the key
+								ProtoRecordId {
+									table: record_id.table.to_string(),
+									id: None, // TODO: Convert record_id.key to proper protobuf type
+								}
+							}
+							_ => {
+								// If not a record ID, use defaults
+								ProtoRecordId {
+									table: String::new(),
+									id: None,
+								}
+							}
+						};
+
+						let proto_notification = Notification {
+							live_query_id: Some(ProtoUuid {
+								value: id.to_string(),
+							}),
+							action: action_code,
+							record_id: Some(proto_record_id),
+							value: Some(surreal_value_to_proto(notification.result)),
+						};
+						let response = SubscribeResponse {
+							notification: Some(proto_notification),
+						};
+						// Send the notification to the client
+						// If send fails, the client has disconnected, so we can ignore the error
+						let _ = sender.send(response).await;
+					}
+				},
+			}
+		}
+	}
+}
+
 /// Initialize and start the gRPC server.
 ///
 /// Sets up the Tonic gRPC server with the SurrealDB service implementation.
@@ -95,7 +170,17 @@ fn access_method_to_vars(
 /// - `ct`: Cancellation token for graceful shutdown
 pub async fn init(opt: &Config, ds: Arc<Datastore>, ct: CancellationToken) -> Result<()> {
 	// Create the gRPC service implementation
-	let grpc_service = SurrealDbGrpcService::new(ds);
+	let grpc_service = Arc::new(SurrealDbGrpcService::new(ds.clone()));
+
+	// Spawn the notification delivery task
+	let notification_task = {
+		let service = grpc_service.clone();
+		let datastore = ds.clone();
+		let canceller = ct.clone();
+		tokio::spawn(async move {
+			notifications(datastore, service, canceller).await;
+		})
+	};
 
 	// Build the Tonic server
 	let mut server = Server::builder();
@@ -126,11 +211,14 @@ pub async fn init(opt: &Config, ds: Arc<Datastore>, ct: CancellationToken) -> Re
 
 	// Add the service and start the server
 	let res = server
-		.add_service(SurrealDbServiceServer::new(grpc_service))
+		.add_service(SurrealDbServiceServer::from_arc(grpc_service))
 		.serve_with_shutdown(opt.grpc_bind, async move {
 			ct.cancelled().await;
 		})
 		.await;
+
+	// Wait for notification task to complete
+	let _ = notification_task.await;
 
 	// Catch the error and try to provide some guidance
 	if let Err(e) = res {
@@ -154,6 +242,7 @@ pub struct SurrealDbGrpcService {
 	datastore: Arc<Datastore>,
 	lock: Arc<Semaphore>,
 	sessions: Arc<DashMap<Uuid, Arc<Session>>>,
+	live_queries: Arc<DashMap<Uuid, surrealdb::channel::Sender<SubscribeResponse>>>,
 }
 
 impl SurrealDbGrpcService {
@@ -162,6 +251,7 @@ impl SurrealDbGrpcService {
 			datastore,
 			lock: Arc::new(Semaphore::new(1)),
 			sessions: Arc::new(DashMap::new()),
+			live_queries: Arc::new(DashMap::new()),
 		}
 	}
 
@@ -693,9 +783,142 @@ impl SurrealDbService for SurrealDbGrpcService {
 
 	async fn subscribe(
 		&self,
-		_request: Request<SubscribeRequest>,
+		request: Request<SubscribeRequest>,
 	) -> Result<Response<Self::SubscribeStream>, Status> {
-		todo!()
+		let session_id = self.extract_session_id(&request)?;
+		let req = request.into_inner();
+
+		// Get the session
+		let session = self.get_session(&session_id);
+
+		// Check permissions
+		if !self.datastore.allows_query_by_subject(session.au.as_ref()) {
+			return Err(Status::permission_denied("Not authorized to subscribe to live queries"));
+		}
+
+		// Extract the subscribe_to field which is a oneof enum
+		let subscribe_to = req
+			.subscribe_to
+			.ok_or_else(|| Status::invalid_argument("Missing subscribe_to field"))?;
+
+		use surrealdb_protocol::proto::rpc::v1::subscribe_request::SubscribeTo;
+
+		match subscribe_to {
+			// Case 1: Subscribe to an existing live query by ID
+			// No automatic cleanup - user must issue KILL manually
+			SubscribeTo::LiveQueryId(uuid_proto) => {
+				let uuid = Uuid::parse_str(&uuid_proto.value)
+					.map_err(|_| Status::invalid_argument("Invalid live query ID format"))?;
+
+				// Create channel and register
+				let (snd, rcv) = surrealdb::channel::bounded::<SubscribeResponse>(10);
+				self.live_queries.insert(uuid, snd);
+
+				// Clone reference for cleanup (only removes from map, doesn't kill query)
+				let live_queries = self.live_queries.clone();
+
+				// Create stream without automatic KILL on close
+				let stream = futures::stream::unfold(
+					(rcv, uuid, live_queries),
+					|(rcv, uuid, live_queries)| async move {
+						match rcv.recv().await {
+							Ok(response) => Some((Ok(response), (rcv, uuid, live_queries))),
+							Err(_) => {
+								// Channel closed - only remove from map, don't kill the live query
+								live_queries.remove(&uuid);
+								None
+							}
+						}
+					},
+				);
+
+				Ok(Response::new(Box::pin(stream) as Self::SubscribeStream))
+			}
+
+			// Case 2: Execute a query to create a live query, then subscribe
+			// Automatic cleanup - kills the live query when stream closes
+			SubscribeTo::Query(query_req) => {
+				// Execute the query to create the live query
+				let vars = if let Some(proto_vars) = query_req.variables {
+					let mut merged = session.variables.clone();
+					let request_vars = proto_vars_to_surreal(proto_vars);
+					merged.extend(request_vars);
+					Some(merged)
+				} else {
+					Some(session.variables.clone())
+				};
+
+				// Execute the query (should be a LIVE query)
+				let results = self
+					.datastore
+					.execute(&query_req.query, &session, vars)
+					.await
+					.map_err(err_to_status)?;
+
+				// Extract the live query UUID from the first result
+				if results.is_empty() {
+					return Err(Status::invalid_argument("Query did not return a live query ID"));
+				}
+
+				let uuid = match &results[0].result {
+					Ok(surrealdb_types::Value::Uuid(uuid)) => uuid.0,
+					Ok(other) => {
+						return Err(Status::invalid_argument(format!(
+							"Expected UUID from LIVE query, got: {:?}",
+							other
+						)));
+					}
+					Err(e) => {
+						return Err(Status::internal(format!("Query execution failed: {}", e)));
+					}
+				};
+
+				// Create channel and register
+				let (snd, rcv) = surrealdb::channel::bounded::<SubscribeResponse>(10);
+				self.live_queries.insert(uuid, snd);
+
+				// Clone references for cleanup with automatic KILL
+				let live_queries = self.live_queries.clone();
+				let datastore = self.datastore.clone();
+				let session_for_cleanup = session.clone();
+
+				// Create a cancellation token to signal cleanup
+				let cleanup_token = tokio_util::sync::CancellationToken::new();
+				let cleanup_token_clone = cleanup_token.clone();
+
+				// Spawn a cleanup task that waits for stream to close
+				tokio::spawn(async move {
+					cleanup_token_clone.cancelled().await;
+					// Remove from live queries map
+					live_queries.remove(&uuid);
+					// Kill the live query in the datastore
+					let kill_query = "KILL $live_query_id";
+					let mut vars = surrealdb_types::Variables::default();
+					vars.insert(
+						"live_query_id".to_string(),
+						surrealdb_types::Value::Uuid(surrealdb::types::Uuid(uuid)),
+					);
+					let _ = datastore.execute(kill_query, &session_for_cleanup, Some(vars)).await;
+				});
+
+				// Create stream that signals cleanup token when done
+				let stream = futures::stream::unfold(
+					(rcv, cleanup_token),
+					|(rcv, cleanup_token)| async move {
+						match rcv.recv().await {
+							Ok(response) => Some((Ok(response), (rcv, cleanup_token))),
+							Err(_) => {
+								// Channel closed - trigger cleanup
+								cleanup_token.cancel();
+								None
+							}
+						}
+					},
+				);
+
+				Ok(Response::new(Box::pin(stream) as Self::SubscribeStream))
+			}
+		}
 	}
 }
 
