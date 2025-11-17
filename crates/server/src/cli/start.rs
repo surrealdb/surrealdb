@@ -112,6 +112,10 @@ pub struct StartCommandArguments {
 	#[arg(env = "SURREAL_BIND", short = 'b', long = "bind")]
 	#[arg(default_value = "127.0.0.1:8000")]
 	listen_addresses: Vec<SocketAddr>,
+	#[arg(help = "The hostname or IP address for the gRPC server")]
+	#[arg(env = "SURREAL_GRPC_BIND", long = "grpc-bind")]
+	#[arg(default_value = "127.0.0.1:50051")]
+	grpc_bind: SocketAddr,
 	#[arg(help = "Whether to suppress the server name and version headers")]
 	#[arg(env = "SURREAL_NO_IDENTIFICATION_HEADERS", long)]
 	#[arg(default_value_t = false)]
@@ -168,6 +172,7 @@ pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
 		password: pass,
 		client_ip,
 		listen_addresses,
+		grpc_bind,
 		dbs,
 		web,
 		node_membership_refresh_interval,
@@ -212,6 +217,7 @@ pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
 	};
 	let config = Config {
 		bind,
+		grpc_bind,
 		client_ip,
 		path,
 		user,
@@ -237,9 +243,12 @@ pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
 	let datastore = Arc::new(dbs::init::<C>(&composer, &config, dbs).await?);
 	// Start the node agent
 	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &config.engine);
-	// Start the web server
-	// Build and run the HTTP server using the provided RouterFactory implementation
-	ntw::init::<C>(&config, datastore.clone(), canceller.clone()).await?;
+	// Start both HTTP and gRPC servers concurrently
+	// Build and run the servers using the provided RouterFactory implementation
+	tokio::try_join!(
+		ntw::init::<C>(&config, datastore.clone(), canceller.clone()),
+		ntw::grpc::init(&config, datastore.clone(), canceller.clone())
+	)?;
 	// Shutdown and stop closed tasks
 	canceller.cancel();
 	// Wait for background tasks to finish

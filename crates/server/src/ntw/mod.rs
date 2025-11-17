@@ -4,6 +4,7 @@ pub mod client_ip;
 pub mod error;
 mod export;
 mod gql;
+pub mod grpc;
 pub(crate) mod headers;
 mod health;
 mod import;

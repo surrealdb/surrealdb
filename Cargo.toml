@@ -162,7 +162,8 @@ sha2 = "0.10.8"
 snap = "1.1.0"
 strsim = "0.11.1"
 subtle = "2.6"
-surrealdb-protocol = { version = "0.6.0", default-features = false }
+# surrealdb-protocol = { version = "0.6.0" }
+surrealdb-protocol = { path = "/Users/stu/dev/surrealdb/surrealdb-protocol" }
 sysinfo = "0.33.0"
 tempfile = "3.10.1"
 thiserror = "1.0.63"
@@ -170,6 +171,7 @@ tokio = { version = "1.44.2", default-features = false }
 tokio-stream = "0.1"
 tokio-tungstenite = "0.28.0"
 tokio-util = "0.7.11"
+tonic = { version = "0.12", features = ["transport", "tls"] }
 tracing = "0.1.40"
 ulid = "1.1.0"
 unicase = "2.7.0"
