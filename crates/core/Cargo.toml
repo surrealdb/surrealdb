@@ -186,6 +186,7 @@ tokio = { workspace = true, default-features = false, features = [
     "rt",
     "sync",
 ] }
+tokio-util.workspace = true
 uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
 wasm-bindgen-futures.workspace = true
 wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
