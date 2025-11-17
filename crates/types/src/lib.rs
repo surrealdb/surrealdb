@@ -5,6 +5,7 @@ mod error;
 mod flatbuffers;
 mod kind;
 mod notification;
+pub mod proto;
 mod sql;
 mod traits;
 pub(crate) mod utils;

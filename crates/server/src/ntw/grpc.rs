@@ -1,7 +1,7 @@
 use std::error::Error as StdError;
+use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::{io, mem};
 
 use anyhow::Result;
 use bytes::Bytes;
@@ -11,7 +11,7 @@ use surrealdb_core::dbs::{QueryResult, Session};
 use surrealdb_core::iam::check::check_ns_db;
 use surrealdb_core::iam::{Action, ResourceKind};
 use surrealdb_core::kvs::{Datastore, export};
-use surrealdb_core::rpc::RpcError;
+use surrealdb_core::rpc::{DbResultError, RpcError};
 use surrealdb_protocol::proto::prost_types;
 use surrealdb_protocol::proto::rpc::v1::surreal_db_service_server::{
 	SurrealDbService, SurrealDbServiceServer,
@@ -26,7 +26,6 @@ use surrealdb_protocol::proto::rpc::v1::{
 	VersionResponse,
 };
 use surrealdb_types::SurrealValue;
-use tokio::sync::Semaphore;
 use tokio_stream::Stream;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
@@ -37,35 +36,8 @@ use crate::cli::Config;
 
 const LOG: &str = "surrealdb::grpc";
 
-/// Helper function to convert protobuf Variables to surrealdb Variables
-fn proto_vars_to_surreal(
-	proto_vars: surrealdb_protocol::proto::v1::Variables,
-) -> surrealdb_types::Variables {
-	let map: std::collections::BTreeMap<String, surrealdb_types::Value> =
-		proto_vars.variables.into_iter().map(|(k, v)| (k, proto_value_to_surreal(v))).collect();
-	surrealdb_types::Variables::from(map)
-}
-
-/// Helper function to convert protobuf Value to surrealdb Value
-fn proto_value_to_surreal(
-	proto_val: surrealdb_protocol::proto::v1::Value,
-) -> surrealdb_types::Value {
-	// For now, use JSON as an intermediate format since both support serde
-	// This is a temporary solution - ideally we'd have direct conversion
-	let json = serde_json::to_value(&proto_val).unwrap_or(serde_json::Value::Null);
-	serde_json::from_value(json).unwrap_or(surrealdb_types::Value::None)
-}
-
-/// Helper function to convert surrealdb Value to protobuf Value
-fn surreal_value_to_proto(
-	surreal_val: surrealdb_types::Value,
-) -> surrealdb_protocol::proto::v1::Value {
-	// For now, use JSON as an intermediate format since both support serde
-	let json = serde_json::to_value(&surreal_val).unwrap_or(serde_json::Value::Null);
-	serde_json::from_value(json).unwrap_or_else(|_| surrealdb_protocol::proto::v1::Value {
-		value: None,
-	})
-}
+// Channel buffer size for live query subscriptions
+const LIVE_QUERY_CHANNEL_SIZE: usize = 10;
 
 /// Helper function to convert protobuf AccessMethod to surrealdb Variables
 /// This is a simplified implementation that uses serde for conversion
@@ -73,6 +45,8 @@ fn access_method_to_vars(
 	access: surrealdb_protocol::proto::rpc::v1::AccessMethod,
 ) -> surrealdb_types::Variables {
 	// Use serde to convert AccessMethod to Variables via JSON
+	// This is acceptable here since AccessMethod is a complex nested enum
+	use serde_json;
 	let json = serde_json::to_value(&access).unwrap_or(serde_json::Value::Null);
 	if let serde_json::Value::Object(map) = json {
 		let vars: std::collections::BTreeMap<String, surrealdb_types::Value> = map
@@ -105,10 +79,8 @@ async fn notifications(
 					// Get the sender for this live query
 					if let Some(sender) = service.live_queries.get(id) {
 						// Convert notification to SubscribeResponse
-						// Create protobuf Notification from surrealdb Notification
 						use surrealdb_protocol::proto::rpc::v1::Notification;
-						use surrealdb_protocol::proto::v1::Uuid as ProtoUuid;
-						use surrealdb_protocol::proto::v1::RecordId as ProtoRecordId;
+						use surrealdb_protocol::proto::v1::{Uuid as ProtoUuid, Value as ProtoValue};
 
 						// Convert action enum to i32
 						let action_code = match notification.action {
@@ -118,25 +90,12 @@ async fn notifications(
 							surrealdb_types::Action::Killed => 3,
 						};
 
-						// Convert the notification record to the protobuf RecordId
-						// For now, we'll convert the entire record value to the record_id field
-						// TODO: Properly parse and set table/id fields from RecordId type
-						let proto_record_id = match &notification.record {
-							surrealdb_types::Value::RecordId(record_id) => {
-								// For now, use a simplified representation
-								// The actual implementation should properly convert the key
-								ProtoRecordId {
-									table: record_id.table.to_string(),
-									id: None, // TODO: Convert record_id.key to proper protobuf type
-								}
-							}
-							_ => {
-								// If not a record ID, use defaults
-								ProtoRecordId {
-									table: String::new(),
-									id: None,
-								}
-							}
+						// Convert the notification record value using the From trait
+						// This properly handles RecordId and all other value types
+						let proto_value: ProtoValue = notification.record.into();
+						let proto_record_id = match proto_value.value {
+							Some(surrealdb_protocol::proto::v1::value::Value::RecordId(rid)) => Some(rid),
+							_ => None,
 						};
 
 						let proto_notification = Notification {
@@ -144,8 +103,8 @@ async fn notifications(
 								value: id.to_string(),
 							}),
 							action: action_code,
-							record_id: Some(proto_record_id),
-							value: Some(surreal_value_to_proto(notification.result)),
+							record_id: proto_record_id,
+							value: Some(notification.result.into()),
 						};
 						let response = SubscribeResponse {
 							notification: Some(proto_notification),
@@ -240,7 +199,6 @@ pub async fn init(opt: &Config, ds: Arc<Datastore>, ct: CancellationToken) -> Re
 
 pub struct SurrealDbGrpcService {
 	datastore: Arc<Datastore>,
-	lock: Arc<Semaphore>,
 	sessions: Arc<DashMap<Uuid, Arc<Session>>>,
 	live_queries: Arc<DashMap<Uuid, surrealdb::channel::Sender<SubscribeResponse>>>,
 }
@@ -249,7 +207,6 @@ impl SurrealDbGrpcService {
 	pub fn new(datastore: Arc<Datastore>) -> Self {
 		Self {
 			datastore,
-			lock: Arc::new(Semaphore::new(1)),
 			sessions: Arc::new(DashMap::new()),
 			live_queries: Arc::new(DashMap::new()),
 		}
@@ -264,20 +221,33 @@ impl SurrealDbGrpcService {
 			.ok_or_else(|| Status::invalid_argument("Invalid or missing session_id"))
 	}
 
-	/// Get a session by ID, creating a default one if not found
+	/// Get a session by ID, creating a default one if not found (read-only)
 	fn get_session(&self, id: &Uuid) -> Arc<Session> {
-		if let Some(session) = self.sessions.get(id) {
-			session.value().clone()
-		} else {
-			let session = Arc::new(Session::default());
-			self.sessions.insert(*id, session.clone());
-			session
-		}
+		self.sessions.entry(*id).or_insert_with(|| Arc::new(Session::default())).value().clone()
 	}
 
-	/// Mutable access to the current session for this RPC context
-	fn set_session(&self, id: Uuid, session: Arc<Session>) {
-		self.sessions.insert(id, session);
+	/// Update a session after mutation
+	/// This uses DashMap to atomically update the session entry
+	fn update_session(&self, id: Uuid, session: Session) {
+		self.sessions.insert(id, Arc::new(session));
+	}
+
+	/// Merge request variables with session variables
+	/// Request variables take precedence over session variables
+	fn merge_variables(
+		&self,
+		session: &Arc<Session>,
+		request_vars: Option<surrealdb_protocol::proto::v1::Variables>,
+	) -> Option<surrealdb_types::Variables> {
+		match request_vars {
+			Some(proto_vars) => {
+				let mut merged = session.variables.clone();
+				let request_vars: surrealdb_types::Variables = proto_vars.into();
+				merged.extend(request_vars);
+				Some(merged)
+			}
+			None => Some(session.variables.clone()),
+		}
 	}
 }
 
@@ -317,15 +287,11 @@ impl SurrealDbService for SurrealDbGrpcService {
 		let session_id = self.extract_session_id(&request)?;
 		let req = request.into_inner();
 
-		// Get the context lock
-		let mutex = self.lock.clone();
-		// Lock the context for update
-		let guard = mutex.acquire().await.expect("mutex should not be poisoned");
-		// Clone the current session
-		let mut session = self.get_session(&session_id).as_ref().clone();
+		// Convert protobuf variables to SurrealDB variables using From trait
+		let vars: surrealdb_types::Variables = req.variables.map(Into::into).unwrap_or_default();
 
-		// Convert protobuf variables to SurrealDB variables
-		let vars = req.variables.map(proto_vars_to_surreal).unwrap_or_default();
+		// Get current session and clone for mutation
+		let mut session = self.get_session(&session_id).as_ref().clone();
 
 		// Attempt signup, mutating the session
 		let out: std::result::Result<surrealdb_types::Value, anyhow::Error> =
@@ -333,15 +299,13 @@ impl SurrealDbService for SurrealDbGrpcService {
 				.await
 				.map(SurrealValue::into_value);
 
-		// Store the updated session
-		self.set_session(session_id, Arc::new(session));
-		// Drop the mutex guard
-		mem::drop(guard);
+		// Update the session atomically
+		self.update_session(session_id, session);
 
 		// Return the signup result
 		let value = out.map_err(err_to_status)?;
 		Ok(Response::new(SignupResponse {
-			value: Some(surreal_value_to_proto(value)),
+			value: Some(value.into()),
 		}))
 	}
 
@@ -352,15 +316,11 @@ impl SurrealDbService for SurrealDbGrpcService {
 		let session_id = self.extract_session_id(&request)?;
 		let req = request.into_inner();
 
-		// Get the context lock
-		let mutex = self.lock.clone();
-		// Lock the context for update
-		let guard = mutex.acquire().await.expect("mutex should not be poisoned");
-		// Clone the current session
-		let mut session = self.get_session(&session_id).as_ref().clone();
-
 		// Convert access_method to variables
 		let vars = req.access_method.map(access_method_to_vars).unwrap_or_default();
+
+		// Get current session and clone for mutation
+		let mut session = self.get_session(&session_id).as_ref().clone();
 
 		// Attempt signin, mutating the session
 		let out: std::result::Result<surrealdb_types::Value, anyhow::Error> =
@@ -368,15 +328,13 @@ impl SurrealDbService for SurrealDbGrpcService {
 				.await
 				.map(SurrealValue::into_value);
 
-		// Store the updated session
-		self.set_session(session_id, Arc::new(session));
-		// Drop the mutex guard
-		mem::drop(guard);
+		// Update the session atomically
+		self.update_session(session_id, session);
 
 		// Return the signin result
 		let value = out.map_err(err_to_status)?;
 		Ok(Response::new(SigninResponse {
-			value: Some(surreal_value_to_proto(value)),
+			value: Some(value.into()),
 		}))
 	}
 
@@ -390,11 +348,7 @@ impl SurrealDbService for SurrealDbGrpcService {
 		// Extract the token string
 		let token = req.token;
 
-		// Get the context lock
-		let mutex = self.lock.clone();
-		// Lock the context for update
-		let guard = mutex.acquire().await.expect("mutex should not be poisoned");
-		// Clone the current session
+		// Get current session and clone for mutation
 		let mut session = self.get_session(&session_id).as_ref().clone();
 
 		// Attempt authentication, mutating the session
@@ -403,10 +357,8 @@ impl SurrealDbService for SurrealDbGrpcService {
 				.await
 				.map(|_| ());
 
-		// Store the updated session
-		self.set_session(session_id, Arc::new(session));
-		// Drop the mutex guard
-		mem::drop(guard);
+		// Update the session atomically
+		self.update_session(session_id, session);
 
 		// Return nothing on success
 		out.map_err(err_to_status)?;
@@ -419,11 +371,7 @@ impl SurrealDbService for SurrealDbGrpcService {
 		let session_id = self.extract_session_id(&request)?;
 		let req = request.into_inner();
 
-		// Get the context lock
-		let mutex = self.lock.clone();
-		// Lock the context for update
-		let guard = mutex.acquire().await.expect("mutex should not be poisoned");
-		// Clone the current session
+		// Get current session and clone for mutation
 		let mut session = self.get_session(&session_id).as_ref().clone();
 
 		// Update the selected namespace
@@ -450,15 +398,16 @@ impl SurrealDbService for SurrealDbGrpcService {
 			session.db = None;
 		}
 
-		// Store the updated session
-		self.set_session(session_id, Arc::new(session.clone()));
-		// Drop the mutex guard
-		mem::drop(guard);
+		// Capture the response values before moving session
+		let response = UseResponse {
+			namespace: session.ns.clone().unwrap_or_default(),
+			database: session.db.clone().unwrap_or_default(),
+		};
 
-		Ok(Response::new(UseResponse {
-			namespace: session.ns.unwrap_or_default(),
-			database: session.db.unwrap_or_default(),
-		}))
+		// Update the session atomically
+		self.update_session(session_id, session);
+
+		Ok(Response::new(response))
 	}
 
 	async fn set(&self, request: Request<SetRequest>) -> Result<Response<SetResponse>, Status> {
@@ -469,25 +418,20 @@ impl SurrealDbService for SurrealDbGrpcService {
 		let name = req.name;
 		let value = req.value;
 
-		// Get the context lock
-		let mutex = self.lock.clone();
-		let guard = mutex.acquire().await.expect("mutex should not be poisoned");
-		// Clone the current session
-		let mut session = self.get_session(&session_id).as_ref().clone();
-
 		// Check for protected params
 		surrealdb_core::rpc::check_protected_param(&name).map_err(err_to_status)?;
 
-		// Set the variable in the session
+		// Get current session and clone for mutation
+		let mut session = self.get_session(&session_id).as_ref().clone();
+
+		// Set the variable in the session using From trait
 		if let Some(value) = value {
-			let val = proto_value_to_surreal(value);
+			let val: surrealdb_types::Value = value.into();
 			session.variables.insert(name, val);
 		}
 
-		// Store the updated session
-		self.set_session(session_id, Arc::new(session));
-		// Drop the mutex guard
-		mem::drop(guard);
+		// Update the session atomically
+		self.update_session(session_id, session);
 
 		Ok(Response::new(SetResponse {}))
 	}
@@ -502,19 +446,14 @@ impl SurrealDbService for SurrealDbGrpcService {
 		// Extract name
 		let name = req.name;
 
-		// Get the context lock
-		let mutex = self.lock.clone();
-		let guard = mutex.acquire().await.expect("mutex should not be poisoned");
-		// Clone the current session
+		// Get current session and clone for mutation
 		let mut session = self.get_session(&session_id).as_ref().clone();
 
 		// Remove the variable from the session
 		session.variables.remove(&name);
 
-		// Store the updated session
-		self.set_session(session_id, Arc::new(session));
-		// Drop the mutex guard
-		mem::drop(guard);
+		// Update the session atomically
+		self.update_session(session_id, session);
 
 		Ok(Response::new(UnsetResponse {}))
 	}
@@ -525,20 +464,14 @@ impl SurrealDbService for SurrealDbGrpcService {
 	) -> Result<Response<InvalidateResponse>, Status> {
 		let session_id = self.extract_session_id(&request)?;
 
-		// Get the context lock
-		let mutex = self.lock.clone();
-		// Lock the context for update
-		let guard = mutex.acquire().await.expect("mutex should not be poisoned");
-		// Clone the current session
+		// Get current session and clone for mutation
 		let mut session = self.get_session(&session_id).as_ref().clone();
 
 		// Clear the current session
 		surrealdb_core::iam::clear::clear(&mut session).map_err(err_to_status)?;
 
-		// Store the updated session
-		self.set_session(session_id, Arc::new(session));
-		// Drop the mutex guard
-		mem::drop(guard);
+		// Update the session atomically
+		self.update_session(session_id, session);
 
 		Ok(Response::new(InvalidateResponse {}))
 	}
@@ -549,21 +482,14 @@ impl SurrealDbService for SurrealDbGrpcService {
 	) -> Result<Response<ResetResponse>, Status> {
 		let session_id = self.extract_session_id(&request)?;
 
-		// Get the context lock
-		let mutex = self.lock.clone();
-		// Lock the context for update
-		let guard = mutex.acquire().await.expect("mutex should not be poisoned");
-
-		// Clone the current session
+		// Get current session and clone for mutation
 		let mut session = self.get_session(&session_id).as_ref().clone();
 
 		// Reset the current session
 		surrealdb_core::iam::reset::reset(&mut session);
 
-		// Store the updated session
-		self.set_session(session_id, Arc::new(session));
-		// Drop the mutex guard
-		mem::drop(guard);
+		// Update the session atomically
+		self.update_session(session_id, session);
 
 		Ok(Response::new(ResetResponse {}))
 	}
@@ -749,15 +675,8 @@ impl SurrealDbService for SurrealDbGrpcService {
 		// Get the session
 		let session = self.get_session(&session_id);
 
-		// Parse variables and merge with session variables
-		let vars = if let Some(proto_vars) = req.variables {
-			let mut merged = session.variables.clone();
-			let request_vars = proto_vars_to_surreal(proto_vars);
-			merged.extend(request_vars);
-			Some(merged)
-		} else {
-			Some(session.variables.clone())
-		};
+		// Merge request variables with session variables
+		let vars = self.merge_variables(&session, req.variables);
 
 		// Execute the query
 		let results =
@@ -811,7 +730,8 @@ impl SurrealDbService for SurrealDbGrpcService {
 					.map_err(|_| Status::invalid_argument("Invalid live query ID format"))?;
 
 				// Create channel and register
-				let (snd, rcv) = surrealdb::channel::bounded::<SubscribeResponse>(10);
+				let (snd, rcv) =
+					surrealdb::channel::bounded::<SubscribeResponse>(LIVE_QUERY_CHANNEL_SIZE);
 				self.live_queries.insert(uuid, snd);
 
 				// Clone reference for cleanup (only removes from map, doesn't kill query)
@@ -838,15 +758,8 @@ impl SurrealDbService for SurrealDbGrpcService {
 			// Case 2: Execute a query to create a live query, then subscribe
 			// Automatic cleanup - kills the live query when stream closes
 			SubscribeTo::Query(query_req) => {
-				// Execute the query to create the live query
-				let vars = if let Some(proto_vars) = query_req.variables {
-					let mut merged = session.variables.clone();
-					let request_vars = proto_vars_to_surreal(proto_vars);
-					merged.extend(request_vars);
-					Some(merged)
-				} else {
-					Some(session.variables.clone())
-				};
+				// Merge request variables with session variables
+				let vars = self.merge_variables(&session, query_req.variables);
 
 				// Execute the query (should be a LIVE query)
 				let results = self
@@ -874,7 +787,8 @@ impl SurrealDbService for SurrealDbGrpcService {
 				};
 
 				// Create channel and register
-				let (snd, rcv) = surrealdb::channel::bounded::<SubscribeResponse>(10);
+				let (snd, rcv) =
+					surrealdb::channel::bounded::<SubscribeResponse>(LIVE_QUERY_CHANNEL_SIZE);
 				self.live_queries.insert(uuid, snd);
 
 				// Clone references for cleanup with automatic KILL
@@ -934,15 +848,15 @@ fn query_result_to_response(
 	// Convert the result
 	match query_result.result {
 		Ok(value) => {
-			// Convert the value to a vector of protobuf values
+			// Convert the value to a vector of protobuf values using From trait
 			let values = match value {
 				surrealdb_types::Value::Array(arr) => {
 					// If it's an array, convert each element
-					arr.into_iter().map(surreal_value_to_proto).collect()
+					arr.into_iter().map(|v| v.into()).collect()
 				}
 				single_value => {
 					// Otherwise, wrap the single value in a vector
-					vec![surreal_value_to_proto(single_value)]
+					vec![single_value.into()]
 				}
 			};
 
@@ -969,10 +883,11 @@ fn query_result_to_response(
 			}
 		}
 		Err(err) => {
-			// Create an error response
+			// Convert error to DbResultError to get proper error code
+			let db_err: DbResultError = err.into();
 			let error = Some(QueryError {
-				code: -1, // Generic error code
-				message: err.to_string(),
+				code: db_err.code(),
+				message: db_err.message(),
 			});
 
 			QueryResponse {
