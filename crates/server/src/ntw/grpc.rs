@@ -6,19 +6,21 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use dashmap::DashMap;
-use surrealdb_core::dbs::Session;
+use surrealdb_core::dbs::{QueryResult, Session};
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::RpcError;
+use surrealdb_protocol::proto::prost_types;
 use surrealdb_protocol::proto::rpc::v1::surreal_db_service_server::{
 	SurrealDbService, SurrealDbServiceServer,
 };
 use surrealdb_protocol::proto::rpc::v1::{
 	AuthenticateRequest, AuthenticateResponse, ExportMlModelRequest, ExportMlModelResponse,
 	ExportSqlRequest, ExportSqlResponse, HealthRequest, HealthResponse, ImportSqlRequest,
-	ImportSqlResponse, InvalidateRequest, InvalidateResponse, QueryRequest, QueryResponse,
-	ResetRequest, ResetResponse, SetRequest, SetResponse, SigninRequest, SigninResponse,
-	SignupRequest, SignupResponse, SubscribeRequest, SubscribeResponse, UnsetRequest,
-	UnsetResponse, UseRequest, UseResponse, VersionRequest, VersionResponse,
+	ImportSqlResponse, InvalidateRequest, InvalidateResponse, QueryError, QueryRequest,
+	QueryResponse, QueryResponseKind, QueryStats, ResetRequest, ResetResponse, SetRequest,
+	SetResponse, SigninRequest, SigninResponse, SignupRequest, SignupResponse, SubscribeRequest,
+	SubscribeResponse, UnsetRequest, UnsetResponse, UseRequest, UseResponse, VersionRequest,
+	VersionResponse,
 };
 use surrealdb_types::SurrealValue;
 use tokio::sync::Semaphore;
@@ -495,9 +497,51 @@ impl SurrealDbService for SurrealDbGrpcService {
 
 	async fn query(
 		&self,
-		_request: Request<QueryRequest>,
+		request: Request<QueryRequest>,
 	) -> Result<Response<Self::QueryStream>, Status> {
-		todo!()
+		let session_id = self.extract_session_id(&request)?;
+		let req = request.into_inner();
+		
+		// Check if transaction ID is provided (not supported yet)
+		if req.txn_id.is_some() {
+			return Err(Status::unimplemented("Transaction support not yet implemented for query method"));
+		}
+		
+		// Get the session
+		let session = self.get_session(&session_id);
+		
+		// Parse variables and merge with session variables
+		let vars = if let Some(proto_vars) = req.variables {
+			let mut merged = session.variables.clone();
+			let request_vars = proto_vars_to_surreal(proto_vars);
+			merged.extend(request_vars);
+			Some(merged)
+		} else {
+			Some(session.variables.clone())
+		};
+		
+		// Execute the query
+		let results = self.datastore
+			.execute(&req.query, &session, vars)
+			.await
+			.map_err(err_to_status)?;
+		
+		// Get the total number of query results
+		let result_count = results.len() as u32;
+		
+		// Convert each QueryResult to a QueryResponse
+		let responses: Vec<QueryResponse> = results
+			.into_iter()
+			.enumerate()
+			.map(|(index, query_result)| {
+				query_result_to_response(query_result, index as u32, result_count)
+			})
+			.collect();
+		
+		// Create a stream from the responses
+		let stream = tokio_stream::iter(responses.into_iter().map(Ok));
+		
+		Ok(Response::new(Box::pin(stream) as Self::QueryStream))
 	}
 
 	async fn subscribe(
@@ -505,6 +549,72 @@ impl SurrealDbService for SurrealDbGrpcService {
 		_request: Request<SubscribeRequest>,
 	) -> Result<Response<Self::SubscribeStream>, Status> {
 		todo!()
+	}
+}
+
+/// Convert a QueryResult to a QueryResponse message
+fn query_result_to_response(
+	query_result: QueryResult,
+	query_index: u32,
+	result_count: u32,
+) -> QueryResponse {
+	// Extract the execution time
+	let duration = query_result.time;
+	
+	// Convert the result
+	match query_result.result {
+		Ok(value) => {
+			// Convert the value to a vector of protobuf values
+			let values = match value {
+				surrealdb_types::Value::Array(arr) => {
+					// If it's an array, convert each element
+					arr.into_iter().map(surreal_value_to_proto).collect()
+				}
+				single_value => {
+					// Otherwise, wrap the single value in a vector
+					vec![surreal_value_to_proto(single_value)]
+				}
+			};
+			
+			// Create query stats
+			let stats = Some(QueryStats {
+				records_returned: values.len() as i64,
+				bytes_returned: -1, // Not tracked yet
+				records_scanned: -1, // Not tracked yet
+				bytes_scanned: -1, // Not tracked yet
+				execution_duration: Some(prost_types::Duration {
+					seconds: duration.as_secs() as i64,
+					nanos: duration.subsec_nanos() as i32,
+				}),
+			});
+			
+			QueryResponse {
+				query_index,
+				batch_index: 0,
+				result_count,
+				kind: QueryResponseKind::BatchedFinal as i32,
+				stats,
+				error: None,
+				values,
+			}
+		}
+		Err(err) => {
+			// Create an error response
+			let error = Some(QueryError {
+				code: -1, // Generic error code
+				message: err.to_string(),
+			});
+			
+			QueryResponse {
+				query_index,
+				batch_index: 0,
+				result_count,
+				kind: QueryResponseKind::BatchedFinal as i32,
+				stats: None,
+				error,
+				values: vec![],
+			}
+		}
 	}
 }
 
