@@ -3685,9 +3685,9 @@ dependencies = [
 
 [[package]]
 name = "indxdb"
-version = "0.10.0"
+version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1f1755e419a17d32b1183b774b76f2f522f3c01d54df5fee49164ad92d380131"
+checksum = "bc02f06613a8063c0e54d1760fe9d1e39cb34b57654843ea1460b2627e02875a"
 dependencies = [
  "js-sys",
  "rexie",

@@ -3,15 +3,15 @@
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use indxdb::Tx;
 use tokio::sync::RwLock;
 
 use super::err::{Error, Result};
 use crate::key::debug::Sprintable;
+use crate::kvs::api::Transactable;
 use crate::kvs::{Key, Val};
 
 pub struct Datastore {
-	db: indxdb::Db,
+	db: indxdb::Database,
 }
 
 pub struct Transaction {
@@ -20,13 +20,13 @@ pub struct Transaction {
 	/// Is the transaction writeable?
 	write: bool,
 	/// The underlying datastore transaction
-	inner: RwLock<Tx>,
+	inner: RwLock<indxdb::Transaction>,
 }
 
 impl Datastore {
 	/// Open a new database
 	pub async fn new(path: &str) -> Result<Datastore> {
-		match indxdb::db::new(path).await {
+		match indxdb::Database::new(path).await {
 			Ok(db) => Ok(Datastore {
 				db,
 			}),
@@ -39,11 +39,7 @@ impl Datastore {
 		Ok(())
 	}
 	/// Start a new transaction
-	pub async fn transaction(
-		&self,
-		write: bool,
-		_: bool,
-	) -> Result<Box<dyn crate::kvs::api::Transaction>> {
+	pub async fn transaction(&self, write: bool, _: bool) -> Result<Box<dyn Transactable>> {
 		// Create a new transaction
 		match self.db.begin(write).await {
 			Ok(inner) => Ok(Box::new(Transaction {
@@ -58,7 +54,7 @@ impl Datastore {
 
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-impl super::api::Transaction for Transaction {
+impl Transactable for Transaction {
 	fn kind(&self) -> &'static str {
 		"indxdb"
 	}
@@ -123,9 +119,9 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Load the inner transaction
-		let mut inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Check the key
-		let res = inner.exi(key).await?;
+		let res = inner.exists(key).await?;
 		// Return result
 		Ok(res)
 	}
@@ -142,7 +138,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Load the inner transaction
-		let mut inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Get the key
 		let res = inner.get(key).await?;
 		// Return result
@@ -264,7 +260,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Load the inner transaction
-		let mut inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Scan the keys
 		let res = inner.keys(rng, limit).await?;
 		// Return result
@@ -283,7 +279,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Load the inner transaction
-		let mut inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Scan the keys
 		let res = inner.keysr(rng, limit).await?;
 		// Return result
@@ -307,7 +303,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Load the inner transaction
-		let mut inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Scan the keys
 		let res = inner.scan(rng, limit).await?;
 		// Return result
@@ -331,7 +327,7 @@ impl super::api::Transaction for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Load the inner transaction
-		let mut inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Scan the keys
 		let res = inner.scanr(rng, limit).await?;
 		// Return result
@@ -340,13 +336,13 @@ impl super::api::Transaction for Transaction {
 
 	/// Set a new save point on the transaction.
 	async fn new_save_point(&self) -> Result<()> {
-		self.inner.write().await.set_savepoint()?;
+		self.inner.write().await.set_savepoint().await?;
 		Ok(())
 	}
 
 	/// Rollback to the last save point.
 	async fn rollback_to_save_point(&self) -> Result<()> {
-		self.inner.write().await.rollback_to_savepoint()?;
+		self.inner.write().await.rollback_to_savepoint().await?;
 		Ok(())
 	}
 
