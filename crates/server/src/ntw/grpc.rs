@@ -1,10 +1,14 @@
 use std::error::Error as StdError;
 use std::io;
+use std::mem;
 use std::pin::Pin;
 use std::sync::Arc;
 
 use anyhow::Result;
+use dashmap::DashMap;
+use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
+use surrealdb_core::rpc::RpcError;
 use surrealdb_protocol::proto::rpc::v1::surreal_db_service_server::{
 	SurrealDbService, SurrealDbServiceServer,
 };
@@ -16,14 +20,61 @@ use surrealdb_protocol::proto::rpc::v1::{
 	SignupRequest, SignupResponse, SubscribeRequest, SubscribeResponse, UnsetRequest,
 	UnsetResponse, UseRequest, UseResponse, VersionRequest, VersionResponse,
 };
+use surrealdb_types::SurrealValue;
+use tokio::sync::Semaphore;
 use tokio_stream::Stream;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::Server;
 use tonic::{Request, Response, Status, Streaming};
+use uuid::Uuid;
 
 use crate::cli::Config;
 
 const LOG: &str = "surrealdb::grpc";
+
+/// Helper function to convert protobuf Variables to surrealdb Variables
+fn proto_vars_to_surreal(proto_vars: surrealdb_protocol::proto::v1::Variables) -> surrealdb_types::Variables {
+	let map: std::collections::BTreeMap<String, surrealdb_types::Value> = proto_vars.variables
+		.into_iter()
+		.map(|(k, v)| (k, proto_value_to_surreal(v)))
+		.collect();
+	surrealdb_types::Variables::from(map)
+}
+
+/// Helper function to convert protobuf Value to surrealdb Value
+fn proto_value_to_surreal(proto_val: surrealdb_protocol::proto::v1::Value) -> surrealdb_types::Value {
+	// For now, use JSON as an intermediate format since both support serde
+	// This is a temporary solution - ideally we'd have direct conversion
+	let json = serde_json::to_value(&proto_val).unwrap_or(serde_json::Value::Null);
+	serde_json::from_value(json).unwrap_or(surrealdb_types::Value::None)
+}
+
+/// Helper function to convert surrealdb Value to protobuf Value
+fn surreal_value_to_proto(surreal_val: surrealdb_types::Value) -> surrealdb_protocol::proto::v1::Value {
+	// For now, use JSON as an intermediate format since both support serde
+	let json = serde_json::to_value(&surreal_val).unwrap_or(serde_json::Value::Null);
+	serde_json::from_value(json).unwrap_or_else(|_| surrealdb_protocol::proto::v1::Value {
+		value: None,
+	})
+}
+
+/// Helper function to convert protobuf AccessMethod to surrealdb Variables
+/// This is a simplified implementation that uses serde for conversion
+fn access_method_to_vars(access: surrealdb_protocol::proto::rpc::v1::AccessMethod) -> surrealdb_types::Variables {
+	// Use serde to convert AccessMethod to Variables via JSON
+	let json = serde_json::to_value(&access).unwrap_or(serde_json::Value::Null);
+	if let serde_json::Value::Object(map) = json {
+		let vars: std::collections::BTreeMap<String, surrealdb_types::Value> = map
+			.into_iter()
+			.filter_map(|(k, v)| {
+				serde_json::from_value(v).ok().map(|val| (k, val))
+			})
+			.collect();
+		surrealdb_types::Variables::from(vars)
+	} else {
+		surrealdb_types::Variables::default()
+	}
+}
 
 /// Initialize and start the gRPC server.
 ///
@@ -35,9 +86,7 @@ const LOG: &str = "surrealdb::grpc";
 /// - `ct`: Cancellation token for graceful shutdown
 pub async fn init(opt: &Config, ds: Arc<Datastore>, ct: CancellationToken) -> Result<()> {
 	// Create the gRPC service implementation
-	let grpc_service = SurrealDbGrpcService {
-		datastore: ds,
-	};
+	let grpc_service = SurrealDbGrpcService::new(ds);
 
 	// Build the Tonic server
 	let mut server = Server::builder();
@@ -94,6 +143,42 @@ pub async fn init(opt: &Config, ds: Arc<Datastore>, ct: CancellationToken) -> Re
 
 pub struct SurrealDbGrpcService {
 	datastore: Arc<Datastore>,
+	lock: Arc<Semaphore>,
+    sessions: Arc<DashMap<Uuid, Arc<Session>>>,
+}
+
+impl SurrealDbGrpcService {
+	pub fn new(datastore: Arc<Datastore>) -> Self {
+		Self {
+			datastore,
+			lock: Arc::new(Semaphore::new(1)),
+			sessions: Arc::new(DashMap::new()),
+		}
+	}
+
+    fn extract_session_id<T>(&self, request: &Request<T>) -> std::result::Result<Uuid, Status> {
+        request.metadata()
+			.get("session_id")
+			.and_then(|v| v.to_str().ok())
+			.and_then(|s| Uuid::try_parse(s).ok())
+            .ok_or_else(|| Status::invalid_argument("Invalid or missing session_id"))
+    }
+
+    /// Get a session by ID, creating a default one if not found
+	fn get_session(&self, id: &Uuid) -> Arc<Session> {
+        if let Some(session) = self.sessions.get(id) {
+			session.value().clone()
+		} else {
+			let session = Arc::new(Session::default());
+			self.sessions.insert(*id, session.clone());
+			session
+		}
+    }
+
+	/// Mutable access to the current session for this RPC context
+	fn set_session(&self, id: Uuid, session: Arc<Session>) {
+        self.sessions.insert(id, session);
+    }
 }
 
 #[tonic::async_trait]
@@ -111,8 +196,7 @@ impl SurrealDbService for SurrealDbGrpcService {
 		&self,
 		_request: Request<HealthRequest>,
 	) -> Result<Response<HealthResponse>, Status> {
-        self.datastore.health_check().await.map_err(anyhow_err_to_grpc_status)?;
-
+        self.datastore.health_check().await.map_err(err_to_status)?;
         Ok(Response::new(HealthResponse {}))
 	}
 
@@ -126,52 +210,266 @@ impl SurrealDbService for SurrealDbGrpcService {
 
 	async fn signup(
 		&self,
-		_request: Request<SignupRequest>,
+		request: Request<SignupRequest>,
 	) -> Result<Response<SignupResponse>, Status> {
-		todo!()
+		let session_id = self.extract_session_id(&request)?;
+		let req = request.into_inner();
+		
+		// Get the context lock
+		let mutex = self.lock.clone();
+		// Lock the context for update
+		let guard = mutex.acquire().await.expect("mutex should not be poisoned");
+		// Clone the current session
+		let mut session = self.get_session(&session_id).as_ref().clone();
+		
+		// Convert protobuf variables to SurrealDB variables
+		let vars = req.variables
+			.map(proto_vars_to_surreal)
+			.unwrap_or_default();
+		
+		// Attempt signup, mutating the session
+		let out: std::result::Result<surrealdb_types::Value, anyhow::Error> =
+			surrealdb_core::iam::signup::signup(&self.datastore, &mut session, vars)
+				.await
+				.map(SurrealValue::into_value);
+		
+		// Store the updated session
+		self.set_session(session_id, Arc::new(session));
+		// Drop the mutex guard
+		mem::drop(guard);
+		
+		// Return the signup result
+		let value = out.map_err(err_to_status)?;
+		Ok(Response::new(SignupResponse {
+			value: Some(surreal_value_to_proto(value)),
+		}))
 	}
 
 	async fn signin(
 		&self,
-		_request: Request<SigninRequest>,
+		request: Request<SigninRequest>,
 	) -> Result<Response<SigninResponse>, Status> {
-		todo!()
+		let session_id = self.extract_session_id(&request)?;
+		let req = request.into_inner();
+		
+		// Get the context lock
+		let mutex = self.lock.clone();
+		// Lock the context for update
+		let guard = mutex.acquire().await.expect("mutex should not be poisoned");
+		// Clone the current session
+		let mut session = self.get_session(&session_id).as_ref().clone();
+		
+		// Convert access_method to variables
+		let vars = req.access_method
+			.map(access_method_to_vars)
+			.unwrap_or_default();
+		
+		// Attempt signin, mutating the session
+		let out: std::result::Result<surrealdb_types::Value, anyhow::Error> =
+			surrealdb_core::iam::signin::signin(&self.datastore, &mut session, vars)
+				.await
+				.map(SurrealValue::into_value);
+		
+		// Store the updated session
+		self.set_session(session_id, Arc::new(session));
+		// Drop the mutex guard
+		mem::drop(guard);
+		
+		// Return the signin result
+		let value = out.map_err(err_to_status)?;
+		Ok(Response::new(SigninResponse {
+			value: Some(surreal_value_to_proto(value)),
+		}))
 	}
 
 	async fn authenticate(
 		&self,
-		_request: Request<AuthenticateRequest>,
+		request: Request<AuthenticateRequest>,
 	) -> Result<Response<AuthenticateResponse>, Status> {
-		todo!()
+		let session_id = self.extract_session_id(&request)?;
+		let req = request.into_inner();
+		
+		// Extract the token string
+		let token = req.token;
+		
+		// Get the context lock
+		let mutex = self.lock.clone();
+		// Lock the context for update
+		let guard = mutex.acquire().await.expect("mutex should not be poisoned");
+		// Clone the current session
+		let mut session = self.get_session(&session_id).as_ref().clone();
+		
+		// Attempt authentication, mutating the session
+		let out: std::result::Result<(), anyhow::Error> =
+			surrealdb_core::iam::verify::token(&self.datastore, &mut session, &token)
+				.await
+				.map(|_| ());
+		
+		// Store the updated session
+		self.set_session(session_id, Arc::new(session));
+		// Drop the mutex guard
+		mem::drop(guard);
+		
+		// Return nothing on success
+		out.map_err(err_to_status)?;
+		Ok(Response::new(AuthenticateResponse {
+			value: None,
+		}))
 	}
 
-	async fn r#use(&self, _request: Request<UseRequest>) -> Result<Response<UseResponse>, Status> {
-		todo!()
+	async fn r#use(&self, request: Request<UseRequest>) -> Result<Response<UseResponse>, Status> {
+		let session_id = self.extract_session_id(&request)?;
+		let req = request.into_inner();
+		
+		// Get the context lock
+		let mutex = self.lock.clone();
+		// Lock the context for update
+		let guard = mutex.acquire().await.expect("mutex should not be poisoned");
+		// Clone the current session
+		let mut session = self.get_session(&session_id).as_ref().clone();
+		
+		// Update the selected namespace
+		let ns = req.namespace;
+		if !ns.is_empty() {
+			session.ns = Some(ns);
+		} else {
+			session.ns = None;
+		}
+		
+		// Update the selected database
+		let db = req.database;
+		if !db.is_empty() {
+			if session.ns.is_none() {
+				return Err(Status::failed_precondition("Namespace must be set before database"));
+			}
+			session.db = Some(db);
+		} else {
+			session.db = None;
+		}
+		
+		// Clear any residual database if namespace was cleared
+		if session.ns.is_none() && session.db.is_some() {
+			session.db = None;
+		}
+		
+		// Store the updated session
+		self.set_session(session_id, Arc::new(session.clone()));
+		// Drop the mutex guard
+		mem::drop(guard);
+		
+		Ok(Response::new(UseResponse {
+			namespace: session.ns.unwrap_or_default(),
+			database: session.db.unwrap_or_default(),
+		}))
 	}
 
-	async fn set(&self, _request: Request<SetRequest>) -> Result<Response<SetResponse>, Status> {
-		todo!()
+	async fn set(&self, request: Request<SetRequest>) -> Result<Response<SetResponse>, Status> {
+		let session_id = self.extract_session_id(&request)?;
+		let req = request.into_inner();
+		
+		// Extract name and value
+		let name = req.name;
+		let value = req.value;
+		
+		// Get the context lock
+		let mutex = self.lock.clone();
+		let guard = mutex.acquire().await.expect("mutex should not be poisoned");
+		// Clone the current session
+		let mut session = self.get_session(&session_id).as_ref().clone();
+		
+		// Check for protected params
+		surrealdb_core::rpc::check_protected_param(&name)
+			.map_err(err_to_status)?;
+		
+		// Set the variable in the session
+		if let Some(value) = value {
+			let val = proto_value_to_surreal(value);
+			session.variables.insert(name, val);
+		}
+		
+		// Store the updated session
+		self.set_session(session_id, Arc::new(session));
+		// Drop the mutex guard
+		mem::drop(guard);
+		
+		Ok(Response::new(SetResponse {}))
 	}
 
 	async fn unset(
 		&self,
-		_request: Request<UnsetRequest>,
+		request: Request<UnsetRequest>,
 	) -> Result<Response<UnsetResponse>, Status> {
-		todo!()
+		let session_id = self.extract_session_id(&request)?;
+		let req = request.into_inner();
+		
+		// Extract name
+		let name = req.name;
+		
+		// Get the context lock
+		let mutex = self.lock.clone();
+		let guard = mutex.acquire().await.expect("mutex should not be poisoned");
+		// Clone the current session
+		let mut session = self.get_session(&session_id).as_ref().clone();
+		
+		// Remove the variable from the session
+		session.variables.remove(&name);
+		
+		// Store the updated session
+		self.set_session(session_id, Arc::new(session));
+		// Drop the mutex guard
+		mem::drop(guard);
+		
+		Ok(Response::new(UnsetResponse {}))
 	}
 
 	async fn invalidate(
 		&self,
-		_request: Request<InvalidateRequest>,
+		request: Request<InvalidateRequest>,
 	) -> Result<Response<InvalidateResponse>, Status> {
-		todo!()
+		let session_id = self.extract_session_id(&request)?;
+		
+		// Get the context lock
+		let mutex = self.lock.clone();
+		// Lock the context for update
+		let guard = mutex.acquire().await.expect("mutex should not be poisoned");
+		// Clone the current session
+		let mut session = self.get_session(&session_id).as_ref().clone();
+		
+		// Clear the current session
+		surrealdb_core::iam::clear::clear(&mut session)
+			.map_err(err_to_status)?;
+		
+		// Store the updated session
+		self.set_session(session_id, Arc::new(session));
+		// Drop the mutex guard
+		mem::drop(guard);
+		
+		Ok(Response::new(InvalidateResponse {}))
 	}
 
 	async fn reset(
 		&self,
-		_request: Request<ResetRequest>,
+		request: Request<ResetRequest>,
 	) -> Result<Response<ResetResponse>, Status> {
-		todo!()
+		let session_id = self.extract_session_id(&request)?;
+		
+		// Get the context lock
+		let mutex = self.lock.clone();
+		// Lock the context for update
+		let guard = mutex.acquire().await.expect("mutex should not be poisoned");
+		
+		// Clone the current session
+		let mut session = self.get_session(&session_id).as_ref().clone();
+		
+		// Reset the current session
+		surrealdb_core::iam::reset::reset(&mut session);
+		
+		// Store the updated session
+		self.set_session(session_id, Arc::new(session));
+		// Drop the mutex guard
+		mem::drop(guard);
+		
+		Ok(Response::new(ResetResponse {}))
 	}
 
 	async fn import_sql(
@@ -210,6 +508,30 @@ impl SurrealDbService for SurrealDbGrpcService {
 	}
 }
 
-fn anyhow_err_to_grpc_status(err: anyhow::Error) -> Status {
-    Status::internal(err.to_string())
+/// Convert various error types to gRPC Status
+fn err_to_status(err: impl Into<anyhow::Error>) -> Status {
+	let err = err.into();
+	
+	// Try to downcast to RpcError first
+	if let Some(rpc_err) = err.downcast_ref::<RpcError>() {
+		return match rpc_err {
+			RpcError::InvalidParams(msg) => Status::invalid_argument(msg.clone()),
+			RpcError::MethodNotFound => Status::unimplemented("Method not found"),
+			RpcError::MethodNotAllowed => Status::permission_denied("Method not allowed"),
+			RpcError::ParseError => Status::invalid_argument("Parse error"),
+			RpcError::InvalidRequest => Status::invalid_argument("Invalid request"),
+			RpcError::InternalError(e) => Status::internal(e.to_string()),
+			RpcError::Thrown(msg) => Status::internal(msg.clone()),
+			RpcError::Serialize(msg) => Status::internal(format!("Serialization error: {}", msg)),
+			RpcError::Deserialize(msg) => Status::invalid_argument(format!("Deserialization error: {}", msg)),
+			RpcError::LqNotSuported => Status::unimplemented("Live queries not supported"),
+			RpcError::BadLQConfig => Status::failed_precondition("Bad live query configuration"),
+			RpcError::BadGQLConfig => Status::failed_precondition("Bad GraphQL configuration"),
+			// Catch-all for any future RpcError variants
+			_ => Status::internal(format!("RPC error: {}", rpc_err)),
+		};
+	}
+	
+	// For other errors, return internal error
+	Status::internal(err.to_string())
 }
