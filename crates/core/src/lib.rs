@@ -35,7 +35,6 @@ mod doc;
 mod exe;
 mod fmt;
 mod fnc;
-mod key;
 #[cfg(feature = "surrealism")]
 mod surrealism;
 mod sys;
@@ -55,6 +54,7 @@ pub mod expr;
 pub mod gql;
 pub mod iam;
 pub mod idx;
+pub mod key;
 pub mod kvs;
 pub mod mem;
 pub mod obs;
