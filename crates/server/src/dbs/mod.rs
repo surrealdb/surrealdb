@@ -2,12 +2,6 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::cli::Config;
-use crate::core::dbs::Session;
-use crate::core::dbs::capabilities::{
-	ArbitraryQueryTarget, Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
-	RouteTarget, Targets,
-};
 use anyhow::Result;
 use clap::Args;
 use rand::Rng;
@@ -15,6 +9,13 @@ use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
 use surrealdb_core::kvs::{Datastore, TransactionBuilderFactory};
 use tokio::time::{Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
+
+use crate::cli::Config;
+use crate::core::dbs::Session;
+use crate::core::dbs::capabilities::{
+	ArbitraryQueryTarget, Capabilities, ExperimentalTarget, FuncTarget, MethodTarget, NetTarget,
+	RouteTarget, Targets,
+};
 
 const TARGET: &str = "surreal::dbs";
 
