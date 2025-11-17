@@ -10,6 +10,7 @@ use tokio::sync::RwLock;
 
 use super::err::{Error, Result};
 use crate::key::debug::Sprintable;
+use crate::kvs::api::Transactable;
 use crate::kvs::{Key, Val, Version};
 
 const TARGET: &str = "surrealdb::core::kvs::surrealkv";
@@ -74,11 +75,7 @@ impl Datastore {
 	}
 
 	/// Start a new transaction
-	pub(crate) async fn transaction(
-		&self,
-		write: bool,
-		_: bool,
-	) -> Result<Box<dyn crate::kvs::api::Transactable>> {
+	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Box<dyn Transactable>> {
 		// Create a new transaction
 		let mut txn = match write {
 			true => self.db.begin_with_mode(Mode::ReadWrite),
@@ -100,7 +97,7 @@ impl Datastore {
 
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-impl super::api::Transactable for Transaction {
+impl Transactable for Transaction {
 	fn kind(&self) -> &'static str {
 		"surrealkv"
 	}

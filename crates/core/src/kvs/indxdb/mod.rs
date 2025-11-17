@@ -3,6 +3,8 @@
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use indxdb::Database as Db;
+use indxdb::Transaction as Tx;
 use tokio::sync::RwLock;
 
 use super::err::{Error, Result};
@@ -11,7 +13,7 @@ use crate::kvs::api::Transactable;
 use crate::kvs::{Key, Val};
 
 pub struct Datastore {
-	db: indxdb::Database,
+	db: Db,
 }
 
 pub struct Transaction {
@@ -20,7 +22,7 @@ pub struct Transaction {
 	/// Is the transaction writeable?
 	write: bool,
 	/// The underlying datastore transaction
-	inner: RwLock<indxdb::Transaction>,
+	inner: RwLock<Tx>,
 }
 
 impl Datastore {

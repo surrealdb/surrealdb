@@ -16,6 +16,7 @@ use tokio::sync::RwLock;
 use super::err::{Error, Result};
 use crate::key::database::vs::VsKey;
 use crate::key::debug::Sprintable;
+use crate::kvs::api::Transactable;
 use crate::kvs::key::KVKey;
 use crate::kvs::{Key, Val};
 use crate::vs::VersionStamp;
@@ -97,7 +98,7 @@ impl Datastore {
 		&self,
 		write: bool,
 		lock: bool,
-	) -> Result<Box<dyn crate::kvs::api::Transactable>> {
+	) -> Result<Box<dyn Transactable>> {
 		// Set whether this should be an optimistic or pessimistic transaction
 		let mut opt = if lock {
 			TransactionOptions::new_pessimistic()
@@ -139,7 +140,7 @@ impl Datastore {
 
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-impl super::api::Transactable for Transaction {
+impl Transactable for Transaction {
 	fn kind(&self) -> &'static str {
 		"tikv"
 	}

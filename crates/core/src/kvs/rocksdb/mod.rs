@@ -18,6 +18,7 @@ use tokio::sync::Mutex;
 
 use super::err::{Error, Result};
 use crate::key::debug::Sprintable;
+use crate::kvs::api::Transactable;
 use crate::kvs::{Key, Val};
 
 const TARGET: &str = "surrealdb::core::kvs::rocksdb";
@@ -393,11 +394,7 @@ impl Datastore {
 	}
 
 	/// Start a new transaction
-	pub(crate) async fn transaction(
-		&self,
-		write: bool,
-		_: bool,
-	) -> Result<Box<dyn crate::kvs::api::Transactable>> {
+	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Box<dyn Transactable>> {
 		// Set the transaction options
 		let mut to = OptimisticTransactionOptions::default();
 		to.set_snapshot(true);
@@ -524,7 +521,7 @@ impl Datastore {
 
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-impl super::api::Transactable for Transaction {
+impl Transactable for Transaction {
 	fn kind(&self) -> &'static str {
 		"rocksdb"
 	}
