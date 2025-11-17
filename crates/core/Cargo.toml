@@ -229,6 +229,7 @@ temp-dir.workspace = true
 test-log = { workspace = true, features = ["trace"] }
 time = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
+tokio-util.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock.workspace = true
 

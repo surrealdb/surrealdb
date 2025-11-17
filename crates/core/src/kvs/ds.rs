@@ -225,6 +225,11 @@ pub trait TransactionBuilder: TransactionBuilderRequirements {
 /// provide better error messages before starting the runtime.
 pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
 	/// Create a new transaction builder and the clock to use throughout the datastore.
+	///
+	/// # Parameters
+	/// - `path`: Database connection path string
+	/// - `clock`: Optional clock for timestamp generation (uses system clock if None)
+	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
 	async fn new_transaction_builder(
 		&self,
 		path: &str,
@@ -575,6 +580,7 @@ impl Datastore {
 	/// # Parameters
 	/// - `factory`: Transaction builder factory for backend selection
 	/// - `path`: Database path (e.g., "memory", "surrealkv://path", "tikv://host:port")
+	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
 	///
 	/// # Generic parameters
 	/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
@@ -595,6 +601,7 @@ impl Datastore {
 	/// - `factory`: Transaction builder factory for backend selection
 	/// - `path`: Database path (e.g., "memory", "surrealkv://path", "tikv://host:port")
 	/// - `clock`: Optional custom clock for timestamp generation (uses system clock if None)
+	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
 	///
 	/// # Generic parameters
 	/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`

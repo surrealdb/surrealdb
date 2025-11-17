@@ -658,6 +658,7 @@ where
 /// # Parameters
 /// - `factory`: Transaction builder factory for datastore backend selection
 /// - `opt`: Server configuration including database path and authentication
+/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
 ///
 /// # Generic parameters
 /// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
