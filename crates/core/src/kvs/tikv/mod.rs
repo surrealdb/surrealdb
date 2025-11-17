@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use savepoint::{Operation, Savepoint};
 use tikv::{CheckLevel, Config, TimestampExt, TransactionClient, TransactionOptions};
 use tokio::sync::RwLock;
 
@@ -18,8 +19,6 @@ use crate::key::debug::Sprintable;
 use crate::kvs::key::KVKey;
 use crate::kvs::{Key, Val};
 use crate::vs::VersionStamp;
-use savepoint::Operation;
-use savepoint::Savepoint;
 
 const TARGET: &str = "surrealdb::core::kvs::tikv";
 

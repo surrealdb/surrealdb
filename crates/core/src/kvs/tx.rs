@@ -1,7 +1,6 @@
 use std::any::Any;
 use std::fmt::Debug;
-use std::ops::Deref;
-use std::ops::Range;
+use std::ops::{Deref, Range};
 use std::sync::Arc;
 
 use anyhow::Result;
