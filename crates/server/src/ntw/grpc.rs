@@ -36,7 +36,7 @@ const LOG: &str = "surrealdb::grpc";
 pub async fn init(opt: &Config, ds: Arc<Datastore>, ct: CancellationToken) -> Result<()> {
 	// Create the gRPC service implementation
 	let grpc_service = SurrealDbGrpcService {
-		_datastore: ds,
+		datastore: ds,
 	};
 
 	// Build the Tonic server
@@ -93,7 +93,7 @@ pub async fn init(opt: &Config, ds: Arc<Datastore>, ct: CancellationToken) -> Re
 }
 
 pub struct SurrealDbGrpcService {
-	_datastore: Arc<Datastore>,
+	datastore: Arc<Datastore>,
 }
 
 #[tonic::async_trait]
@@ -111,14 +111,17 @@ impl SurrealDbService for SurrealDbGrpcService {
 		&self,
 		_request: Request<HealthRequest>,
 	) -> Result<Response<HealthResponse>, Status> {
-		todo!()
+        self.datastore.health_check().await.map_err(anyhow_err_to_grpc_status)?;
+
+        Ok(Response::new(HealthResponse {}))
 	}
 
 	async fn version(
 		&self,
 		_request: Request<VersionRequest>,
 	) -> Result<Response<VersionResponse>, Status> {
-		todo!()
+        use crate::cnf::{PKG_NAME, PKG_VERSION};
+		Ok(Response::new(VersionResponse { version: format!("{PKG_NAME}-{}", *PKG_VERSION) }))
 	}
 
 	async fn signup(
@@ -205,4 +208,8 @@ impl SurrealDbService for SurrealDbGrpcService {
 	) -> Result<Response<Self::SubscribeStream>, Status> {
 		todo!()
 	}
+}
+
+fn anyhow_err_to_grpc_status(err: anyhow::Error) -> Status {
+    Status::internal(err.to_string())
 }
