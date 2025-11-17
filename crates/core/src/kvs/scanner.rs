@@ -147,25 +147,6 @@ impl<'a, I> Scanner<'a, I> {
 	}
 }
 
-impl Stream for Scanner<'_, (Key, Val)> {
-	type Item = Result<(Key, Val)>;
-	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<(Key, Val)>>> {
-		let (store, version) = (self.store, self.version);
-		match self.dir {
-			ScanDirection::Forward => self.next_poll(
-				cx,
-				move |range, batch| Box::pin(store.scan(range, batch, version)),
-				|v| &v.0,
-			),
-			ScanDirection::Backward => self.next_poll(
-				cx,
-				move |range, batch| Box::pin(store.scanr(range, batch, version)),
-				|v| &v.0,
-			),
-		}
-	}
-}
-
 impl Stream for Scanner<'_, Key> {
 	type Item = Result<Key>;
 	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<Key>>> {
@@ -180,6 +161,25 @@ impl Stream for Scanner<'_, Key> {
 				cx,
 				move |range, batch| Box::pin(store.keysr(range, batch, version)),
 				|v| v,
+			),
+		}
+	}
+}
+
+impl Stream for Scanner<'_, (Key, Val)> {
+	type Item = Result<(Key, Val)>;
+	fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Result<(Key, Val)>>> {
+		let (store, version) = (self.store, self.version);
+		match self.dir {
+			ScanDirection::Forward => self.next_poll(
+				cx,
+				move |range, batch| Box::pin(store.scan(range, batch, version)),
+				|v| &v.0,
+			),
+			ScanDirection::Backward => self.next_poll(
+				cx,
+				move |range, batch| Box::pin(store.scanr(range, batch, version)),
+				|v| &v.0,
 			),
 		}
 	}
