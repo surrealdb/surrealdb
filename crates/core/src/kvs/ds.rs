@@ -20,6 +20,7 @@ use http::HeaderMap;
 use reblessive::TreeStack;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
 use tracing::{instrument, trace};
 use uuid::Uuid;
 #[cfg(target_family = "wasm")]
@@ -228,6 +229,7 @@ pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
 		&self,
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
+		canceller: CancellationToken,
 	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)>;
 
 	/// Validate a datastore path string.
@@ -273,6 +275,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 		&self,
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
+		_canceller: CancellationToken,
 	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)> {
 		let (flavour, path) = match path.split_once("://").or_else(|| path.split_once(':')) {
 			None if path == "memory" => ("memory", ""),
@@ -561,7 +564,7 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Self> {
-		Self::new_with_factory(&CommunityComposer(), path).await
+		Self::new_with_factory(&CommunityComposer(), path, CancellationToken::new()).await
 	}
 
 	/// Creates a new datastore instance with a custom transaction builder factory.
@@ -578,8 +581,9 @@ impl Datastore {
 	pub async fn new_with_factory<F: TransactionBuilderFactory>(
 		factory: &F,
 		path: &str,
+		canceller: CancellationToken,
 	) -> Result<Self> {
-		Self::new_with_clock::<F>(factory, path, None).await
+		Self::new_with_clock::<F>(factory, path, None, canceller).await
 	}
 
 	/// Creates a new datastore instance with a custom factory and clock.
@@ -598,9 +602,10 @@ impl Datastore {
 		factory: &F,
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
+		canceller: CancellationToken,
 	) -> Result<Datastore> {
 		// Initiate the desired datastore
-		let (builder, clock) = factory.new_transaction_builder(path, clock).await?;
+		let (builder, clock) = factory.new_transaction_builder(path, clock, canceller).await?;
 		// Set the properties on the datastore
 		Self::new_with_builder(builder, clock)
 	}
