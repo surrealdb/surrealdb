@@ -157,12 +157,12 @@ mod surrealkv {
 
 #[cfg(feature = "kv-tikv")]
 mod tikv {
+	use tokio_util::sync::CancellationToken;
 	use uuid::Uuid;
 
 	use super::{ClockType, Kvs};
 	use crate::CommunityComposer;
 	use crate::kvs::{Datastore, LockType, TransactionType};
-	use tokio_util::sync::CancellationToken;
 
 	async fn new_ds(id: Uuid, clock: ClockType) -> (Datastore, Kvs) {
 		// Setup the cluster connection string
