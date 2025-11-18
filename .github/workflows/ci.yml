@@ -29,7 +29,7 @@ permissions:
   contents: read
 
 env:
-  RUST_VERSION: "1.87"
+  RUST_VERSION: "1.89"
 
 jobs:
   # ----------------------------------------

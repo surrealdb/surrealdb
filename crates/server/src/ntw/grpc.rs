@@ -11,19 +11,19 @@ use surrealdb_core::dbs::{QueryResult, Session};
 use surrealdb_core::iam::check::check_ns_db;
 use surrealdb_core::iam::{Action, ResourceKind};
 use surrealdb_core::kvs::{Datastore, export};
-use surrealdb_core::rpc::{DbResultError, RpcError};
+use surrealdb_core::rpc::RpcError;
 use surrealdb_protocol::proto::prost_types;
 use surrealdb_protocol::proto::rpc::v1::surreal_db_service_server::{
 	SurrealDbService, SurrealDbServiceServer,
 };
 use surrealdb_protocol::proto::rpc::v1::{
-	AuthenticateRequest, AuthenticateResponse, ExportMlModelRequest, ExportMlModelResponse,
-	ExportSqlRequest, ExportSqlResponse, HealthRequest, HealthResponse, ImportSqlRequest,
-	ImportSqlResponse, InvalidateRequest, InvalidateResponse, QueryError, QueryRequest,
-	QueryResponse, QueryResponseKind, QueryStats, ResetRequest, ResetResponse, SetRequest,
-	SetResponse, SigninRequest, SigninResponse, SignupRequest, SignupResponse, SubscribeRequest,
-	SubscribeResponse, UnsetRequest, UnsetResponse, UseRequest, UseResponse, VersionRequest,
-	VersionResponse,
+	AccessMethod, AuthenticateRequest, AuthenticateResponse, ExportMlModelRequest,
+	ExportMlModelResponse, ExportSqlRequest, ExportSqlResponse, HealthRequest, HealthResponse,
+	ImportSqlRequest, ImportSqlResponse, InvalidateRequest, InvalidateResponse, QueryError,
+	QueryRequest, QueryResponse, QueryResponseKind, QueryStats, ResetRequest, ResetResponse,
+	SetRequest, SetResponse, SigninRequest, SigninResponse, SignupRequest, SignupResponse,
+	SubscribeRequest, SubscribeResponse, UnsetRequest, UnsetResponse, UseRequest, UseResponse,
+	VersionRequest, VersionResponse, access_method,
 };
 use surrealdb_types::SurrealValue;
 use tokio_stream::Stream;
@@ -37,26 +37,49 @@ use crate::cli::Config;
 const LOG: &str = "surrealdb::grpc";
 
 // Channel buffer size for live query subscriptions
-const LIVE_QUERY_CHANNEL_SIZE: usize = 10;
+const LIVE_QUERY_CHANNEL_SIZE: usize = 100;
 
 /// Helper function to convert protobuf AccessMethod to surrealdb Variables
-/// This is a simplified implementation that uses serde for conversion
-fn access_method_to_vars(
-	access: surrealdb_protocol::proto::rpc::v1::AccessMethod,
-) -> surrealdb_types::Variables {
-	// Use serde to convert AccessMethod to Variables via JSON
-	// This is acceptable here since AccessMethod is a complex nested enum
-	use serde_json;
-	let json = serde_json::to_value(&access).unwrap_or(serde_json::Value::Null);
-	if let serde_json::Value::Object(map) = json {
-		let vars: std::collections::BTreeMap<String, surrealdb_types::Value> = map
-			.into_iter()
-			.filter_map(|(k, v)| serde_json::from_value(v).ok().map(|val| (k, val)))
-			.collect();
-		surrealdb_types::Variables::from(vars)
-	} else {
-		surrealdb_types::Variables::default()
+fn access_method_to_vars(access: AccessMethod) -> surrealdb_types::Variables {
+	let Some(method) = access.method else {
+		return surrealdb_types::Variables::default();
+	};
+
+	let mut vars = surrealdb_types::Variables::default();
+
+	match method {
+		access_method::Method::Root(root) => {
+			vars.insert("user".to_string(), root.username);
+			vars.insert("pass".to_string(), root.password);
+		}
+		access_method::Method::Namespace(namespace) => {
+			vars.insert("ns".to_string(), namespace.namespace);
+			vars.insert("access".to_string(), namespace.access);
+			vars.insert("key".to_string(), namespace.key);
+		}
+		access_method::Method::Database(database) => {
+			vars.insert("ns".to_string(), database.namespace);
+			vars.insert("db".to_string(), database.database);
+			vars.insert("access".to_string(), database.access);
+			vars.insert("key".to_string(), database.key);
+			vars.insert("refresh".to_string(), database.refresh);
+		}
+		access_method::Method::NamespaceUser(namespace_user) => {
+			vars.insert("ns".to_string(), namespace_user.namespace);
+			vars.insert("user".to_string(), namespace_user.username);
+			vars.insert("pass".to_string(), namespace_user.password);
+		}
+		access_method::Method::DatabaseUser(database_user) => {
+			vars.insert("ns".to_string(), database_user.namespace);
+			vars.insert("db".to_string(), database_user.database);
+			vars.insert("user".to_string(), database_user.username);
+			vars.insert("pass".to_string(), database_user.password);
+		}
+		access_method::Method::AccessToken(access_token) => {
+			vars.insert("token".to_string(), access_token.token);
+		}
 	}
+	vars
 }
 
 /// Handles notification delivery for live queries
@@ -150,10 +173,7 @@ pub async fn init(opt: &Config, ds: Arc<Datastore>, ct: CancellationToken) -> Re
 		let cert_pem = tokio::fs::read(cert).await?;
 		let key_pem = tokio::fs::read(key).await?;
 
-		// Create TLS identity from certificate and key
 		let identity = tonic::transport::Identity::from_pem(cert_pem, key_pem);
-
-		// Configure TLS for the server
 		let tls_config = tonic::transport::ServerTlsConfig::new().identity(identity);
 
 		// Apply TLS configuration
@@ -161,10 +181,8 @@ pub async fn init(opt: &Config, ds: Arc<Datastore>, ct: CancellationToken) -> Re
 			.tls_config(tls_config)
 			.map_err(|e| anyhow::anyhow!("Failed to configure TLS: {}", e))?;
 
-		// Log the server startup
 		info!(target: LOG, "Started gRPC server on {} (TLS enabled)", &opt.grpc_bind);
 	} else {
-		// Log the server startup without TLS
 		info!(target: LOG, "Started gRPC server on {}", &opt.grpc_bind);
 	}
 
@@ -197,6 +215,9 @@ pub async fn init(opt: &Config, ds: Arc<Datastore>, ct: CancellationToken) -> Re
 	Ok(())
 }
 
+/// The gRPC service implementation.
+/// 
+/// This implements the SurrealDbService trait from the surrealdb-protocol crate.
 pub struct SurrealDbGrpcService {
 	datastore: Arc<Datastore>,
 	sessions: Arc<DashMap<Uuid, Arc<Session>>>,
@@ -212,6 +233,7 @@ impl SurrealDbGrpcService {
 		}
 	}
 
+	#[allow(clippy::result_large_err)]
 	fn extract_session_id<T>(&self, request: &Request<T>) -> std::result::Result<Uuid, Status> {
 		request
 			.metadata()
@@ -884,10 +906,9 @@ fn query_result_to_response(
 		}
 		Err(err) => {
 			// Convert error to DbResultError to get proper error code
-			let db_err: DbResultError = err.into();
 			let error = Some(QueryError {
-				code: db_err.code(),
-				message: db_err.message(),
+				code: err.code(),
+				message: err.message(),
 			});
 
 			QueryResponse {
