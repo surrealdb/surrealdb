@@ -5,7 +5,7 @@ use crate::catalog::{DatabaseId, NamespaceId};
 use crate::key::change;
 use crate::key::debug::Sprintable;
 use crate::kvs::tasklease::LeaseHandler;
-use crate::kvs::{KVKey, Transaction};
+use crate::kvs::{KVKey, Timestamp, Transaction};
 
 // gc_all_at deletes all change feed entries that become stale at the given
 // timestamp.
@@ -80,7 +80,8 @@ pub async fn gc_ns(
 }
 
 // gc_range deletes all change feed entries in the given database that are older
-// than the given watermark timestamp.
+// than the given watermark timestamp (specified in seconds since UNIX epoch).
+// The timestamp is converted to bytes for use in changefeed keys.
 #[instrument(level = "trace", target = "surrealdb::core::cfs", skip(tx))]
 pub async fn gc_range(
 	tx: &Transaction,
@@ -88,9 +89,11 @@ pub async fn gc_range(
 	db: DatabaseId,
 	watermark_ts: u64,
 ) -> Result<()> {
-	// Calculate the range
-	let beg = change::prefix_ts(ns, db, 0).encode_key()?;
-	let end = change::prefix_ts(ns, db, watermark_ts).encode_key()?;
+	// Calculate the range - convert u64 timestamps to byte arrays
+	let beg_ts = 0u64.to_ts_bytes();
+	let end_ts = watermark_ts.to_ts_bytes();
+	let beg = change::prefix_ts(ns, db, &beg_ts).encode_key()?;
+	let end = change::prefix_ts(ns, db, &end_ts).encode_key()?;
 	// Trace for debugging
 	trace!(
 		"Performing garbage collection on {ns}:{db} for watermark timestamp {watermark_ts}, between {} and {}",

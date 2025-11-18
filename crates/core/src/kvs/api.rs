@@ -2,14 +2,14 @@
 #![warn(clippy::missing_docs_in_private_items)]
 
 use std::ops::Range;
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::err::{Error, Result};
 use super::util;
 use crate::cnf::{COUNT_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
-use crate::kvs::{Key, Val, Version};
+use crate::kvs::{Key, Timestamp, Val, Version};
 
 pub mod requirements {
 	//! This module defines the trait requirements for a transaction.
@@ -74,8 +74,13 @@ pub trait Transactable: requirements::TransactionRequirements {
 	fn writeable(&self) -> bool;
 
 	/// Get the current monotonic timestamp
-	async fn timestamp(&self) -> Result<u64> {
-		Ok(SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as u64)
+	async fn timestamp(&self) -> Result<Box<dyn Timestamp>> {
+		Ok(Box::new(
+			SystemTime::now()
+				.duration_since(UNIX_EPOCH)
+				.expect("system time can not be before 1970-01-01 00:00:00 UTC")
+				.as_nanos() as u64,
+		))
 	}
 
 	/// Cancel a transaction.
@@ -348,6 +353,10 @@ pub trait Transactable: requirements::TransactionRequirements {
 		Err(Error::UnsupportedVersionedQueries)
 	}
 
+	// --------------------------------------------------
+	// Batch functions
+	// --------------------------------------------------
+
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
 	/// This function fetches keys, in batches, with multiple requests to the
@@ -475,6 +484,10 @@ pub trait Transactable: requirements::TransactionRequirements {
 			}
 		}
 	}
+
+	// --------------------------------------------------
+	// Savepoint functions
+	// --------------------------------------------------
 
 	/// Set a new save point on the transaction.
 	async fn new_save_point(&self) -> Result<()>;

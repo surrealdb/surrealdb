@@ -16,7 +16,7 @@ use tokio::sync::RwLock;
 use super::err::{Error, Result};
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
-use crate::kvs::{Key, Val};
+use crate::kvs::{Key, Timestamp, Val};
 
 const TARGET: &str = "surrealdb::core::kvs::tikv";
 
@@ -36,6 +36,19 @@ pub struct Transaction {
 	// the memory is kept alive. This pointer must
 	// be declared last, so that it is dropped last.
 	db: Pin<Arc<TransactionClient>>,
+}
+
+pub struct Timecode(tikv::Timestamp);
+
+impl Timestamp for Timecode {
+	fn to_ts_bytes(&self) -> Vec<u8> {
+		self.0.version().to_be_bytes().to_vec()
+	}
+	fn from_ts_bytes(bytes: &[u8]) -> Self {
+		Timecode(tikv::Timestamp::from_version(u64::from_be_bytes(
+			bytes.try_into().expect("timestamp should be 8 bytes"),
+		)))
+	}
 }
 
 struct TransactionInner {
@@ -153,8 +166,8 @@ impl Transactable for Transaction {
 	}
 
 	/// Get the current monotonic timestamp
-	async fn timestamp(&self) -> Result<u64> {
-		Ok(self.inner.write().await.tx.current_timestamp().await?.version())
+	async fn timestamp(&self) -> Result<Box<dyn Timestamp>> {
+		Ok(Box::new(Timecode(self.inner.write().await.tx.current_timestamp().await?)))
 	}
 
 	/// Cancel a transaction

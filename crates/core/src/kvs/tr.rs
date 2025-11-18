@@ -94,7 +94,7 @@ impl Transactor {
 	}
 
 	/// Get the current monotonic timestamp
-	pub(crate) async fn timestamp(&self) -> Result<u64> {
+	pub(crate) async fn timestamp(&self) -> Result<Box<dyn super::Timestamp>> {
 		self.inner.timestamp().await
 	}
 

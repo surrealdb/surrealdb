@@ -6,7 +6,7 @@ use crate::expr::statements::show::ShowSince;
 use crate::key::change;
 #[cfg(debug_assertions)]
 use crate::key::debug::Sprintable;
-use crate::kvs::{KVKey, KVValue, Transaction};
+use crate::kvs::{KVKey, KVValue, Timestamp, Transaction};
 use crate::vs::VersionStamp;
 
 // Reads the change feed for a specific database or a table,
@@ -26,20 +26,20 @@ pub async fn read(
 	limit: Option<u32>,
 ) -> Result<Vec<ChangeSet>> {
 	// Calculate the start of the changefeed range
-	let beg = match start {
-		ShowSince::Versionstamp(x) => change::prefix_ts(ns, db, x),
+	let ts_bytes = match start {
+		ShowSince::Versionstamp(x) => x.to_ts_bytes(),
 		ShowSince::Timestamp(x) => {
 			let ts = x.timestamp() as u64;
-			change::prefix_ts(ns, db, ts)
+			ts.to_ts_bytes()
 		}
-	}
-	.encode_key()?;
+	};
+	let beg = change::prefix_ts(ns, db, &ts_bytes).encode_key()?;
 	// Calculate the end of the changefeed range
 	let end = change::suffix(ns, db).encode_key()?;
 	// Limit the changefeed results with a default
 	let limit = limit.unwrap_or(100).min(1000);
 	// Create an empty buffer for the timestamp
-	let mut current_ts: Option<u64> = None;
+	let mut current_ts: Option<Vec<u8>> = None;
 	// Create an empty buffer for the table mutations
 	let mut buf: Vec<TableMutations> = Vec::new();
 	// Create an empty buffer for the final changesets
@@ -61,17 +61,18 @@ pub async fn read(
 		let tb_muts = TableMutations::kv_decode_value(v)?;
 		// Get the timestamp of the changefeed entry
 		match current_ts {
-			Some(x) => {
-				if dec.ts != x {
+			Some(ref x) => {
+				if dec.ts.as_ref() != x.as_slice() {
 					let db_mut = DatabaseMutation(buf);
-					// Convert timestamp to VersionStamp for compatibility with existing ChangeSet structure
-					res.push(ChangeSet(VersionStamp::from_u64(x), db_mut));
+					// Convert timestamp bytes to u64 for VersionStamp compatibility
+					let ts_u64 = <u64 as Timestamp>::from_ts_bytes(x.as_slice());
+					res.push(ChangeSet(VersionStamp::from_u64(ts_u64), db_mut));
 					buf = Vec::new();
-					current_ts = Some(dec.ts)
+					current_ts = Some(dec.ts.into_owned())
 				}
 			}
 			None => {
-				current_ts = Some(dec.ts);
+				current_ts = Some(dec.ts.into_owned());
 			}
 		}
 		buf.push(tb_muts);
@@ -79,13 +80,10 @@ pub async fn read(
 	// Collect all mutations together
 	if !buf.is_empty() {
 		let db_mut = DatabaseMutation(buf);
-		// Convert timestamp to VersionStamp for compatibility with existing ChangeSet structure
-		res.push(ChangeSet(
-			VersionStamp::from_u64(
-				current_ts.expect("timestamp should be set when mutations exist"),
-			),
-			db_mut,
-		));
+		// Convert timestamp bytes to u64 for VersionStamp compatibility
+		let ts_bytes = current_ts.expect("timestamp should be set when mutations exist");
+		let ts_u64 = <u64 as Timestamp>::from_ts_bytes(ts_bytes.as_slice());
+		res.push(ChangeSet(VersionStamp::from_u64(ts_u64), db_mut));
 	}
 	// Return the results
 	Ok(res)

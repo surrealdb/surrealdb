@@ -19,7 +19,7 @@ pub(crate) struct Cf<'a> {
 	pub db: DatabaseId,
 	_d: u8,
 	// ts is the timestamp of the change feed entry that is encoded in big-endian.
-	pub ts: u64,
+	pub ts: Cow<'a, [u8]>,
 	_c: u8,
 	pub tb: Cow<'a, str>,
 }
@@ -32,7 +32,7 @@ impl Categorise for Cf<'_> {
 }
 
 impl<'a> Cf<'a> {
-	pub fn new(ns: NamespaceId, db: DatabaseId, ts: u64, tb: &'a str) -> Self {
+	pub fn new(ns: NamespaceId, db: DatabaseId, ts: &'a [u8], tb: &'a str) -> Self {
 		Cf {
 			__: b'/',
 			_a: b'*',
@@ -40,7 +40,7 @@ impl<'a> Cf<'a> {
 			_b: b'*',
 			db,
 			_d: b'#',
-			ts,
+			ts: Cow::Borrowed(ts),
 			_c: b'*',
 			tb: Cow::Borrowed(tb),
 		}
@@ -52,7 +52,7 @@ impl<'a> Cf<'a> {
 }
 
 /// Create a complete changefeed key with timestamp
-pub fn new(ns: NamespaceId, db: DatabaseId, ts: u64, tb: &str) -> Cf<'_> {
+pub fn new<'a>(ns: NamespaceId, db: DatabaseId, ts: &'a [u8], tb: &'a str) -> Cf<'a> {
 	Cf::new(ns, db, ts, tb)
 }
 
@@ -97,18 +97,18 @@ impl DatabaseChangeFeedRange {
 impl_kv_key_storekey!(DatabaseChangeFeedRange => Vec<u8>);
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub struct DatabaseChangeFeedTsRange {
+pub struct DatabaseChangeFeedTsRange<'a> {
 	__: u8,
 	_a: u8,
 	pub ns: NamespaceId,
 	_b: u8,
 	pub db: DatabaseId,
 	_c: u8,
-	pub ts: u64,
+	pub ts: Cow<'a, [u8]>,
 }
 
-impl DatabaseChangeFeedTsRange {
-	pub fn new(ns: NamespaceId, db: DatabaseId, ts: u64) -> Self {
+impl<'a> DatabaseChangeFeedTsRange<'a> {
+	pub fn new(ns: NamespaceId, db: DatabaseId, ts: &'a [u8]) -> Self {
 		Self {
 			__: b'/',
 			_a: b'*',
@@ -116,16 +116,16 @@ impl DatabaseChangeFeedTsRange {
 			_b: b'*',
 			db,
 			_c: b'#',
-			ts,
+			ts: Cow::Borrowed(ts),
 		}
 	}
 }
 
-impl_kv_key_storekey!(DatabaseChangeFeedTsRange => TableMutations);
+impl_kv_key_storekey!(DatabaseChangeFeedTsRange<'_> => TableMutations);
 
 /// Returns the prefix for the whole database change feeds since the
 /// specified timestamp.
-pub fn prefix_ts(ns: NamespaceId, db: DatabaseId, ts: u64) -> DatabaseChangeFeedTsRange {
+pub fn prefix_ts(ns: NamespaceId, db: DatabaseId, ts: &[u8]) -> DatabaseChangeFeedTsRange<'_> {
 	DatabaseChangeFeedTsRange::new(ns, db, ts)
 }
 
@@ -144,21 +144,31 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId) -> DatabaseChangeFeedRange {
 mod tests {
 	use super::*;
 	use crate::kvs::KVKey;
+	use crate::kvs::Timestamp;
 
 	#[test]
 	fn cf_key() {
-		let val = Cf::new(NamespaceId(1), DatabaseId(2), 12345, "test");
+		let ts1 = 12345u64.to_ts_bytes();
+		let val = Cf::new(NamespaceId(1), DatabaseId(2), &ts1, "test");
 		let enc = Cf::encode_key(&val).unwrap();
+		// Verify the encoded key - note that Cow<[u8]> is encoded with length prefix
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02#\x00\x00\x00\x00\x00\x00\x30\x39*test\x00"
+			&[
+				47, 42, 0, 0, 0, 1, 42, 0, 0, 0, 2, 35, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 48, 57,
+				0, 42, 116, 101, 115, 116, 0
+			]
 		);
 
-		let val = Cf::new(NamespaceId(1), DatabaseId(2), 12346, "test");
+		let ts2 = 12346u64.to_ts_bytes();
+		let val = Cf::new(NamespaceId(1), DatabaseId(2), &ts2, "test");
 		let enc = Cf::encode_key(&val).unwrap();
 		assert_eq!(
 			enc,
-			b"/*\x00\x00\x00\x01*\x00\x00\x00\x02#\x00\x00\x00\x00\x00\x00\x30\x3a*test\x00"
+			&[
+				47, 42, 0, 0, 0, 1, 42, 0, 0, 0, 2, 35, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 48, 58,
+				0, 42, 116, 101, 115, 116, 0
+			]
 		);
 	}
 
@@ -175,8 +185,16 @@ mod tests {
 
 	#[test]
 	fn ts_prefix_key() {
-		let val = DatabaseChangeFeedTsRange::new(NamespaceId(1), DatabaseId(2), 12345);
+		let ts = 12345u64.to_ts_bytes();
+		let val = DatabaseChangeFeedTsRange::new(NamespaceId(1), DatabaseId(2), &ts);
 		let enc = DatabaseChangeFeedTsRange::encode_key(&val).unwrap();
-		assert_eq!(enc, b"/*\x00\x00\x00\x01*\x00\x00\x00\x02#\x00\x00\x00\x00\x00\x00\x30\x39");
+		// Verify the encoded key - note that Cow<[u8]> is encoded with length prefix
+		assert_eq!(
+			enc,
+			&[
+				47, 42, 0, 0, 0, 1, 42, 0, 0, 0, 2, 35, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 48, 57,
+				0
+			]
+		);
 	}
 }

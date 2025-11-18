@@ -673,14 +673,16 @@ impl Transaction {
 	pub(crate) async fn complete_changes(&self) -> Result<()> {
 		// Get the current transaction timestamp
 		let ts = self.timestamp().await?;
+		// Convert timestamp to bytes for changefeed key
+		let ts = ts.to_ts_bytes();
 		// Write all buffered changefeed entries
 		for (ns, db, tb, value) in self.cf.changes()? {
 			// Create the changefeed key with the current timestamp
-			let key = crate::key::change::new(ns, db, ts, &tb);
+			let key = crate::key::change::new(ns, db, &ts, &tb);
 			// Encode the key
-			let key_bytes = key.encode_key()?;
+			let key = key.encode_key()?;
 			// Write the changefeed entry using the raw transactor API
-			self.tr.set(key_bytes, value, None).await.map_err(Error::from)?;
+			self.tr.set(key, value, None).await.map_err(Error::from)?;
 		}
 		Ok(())
 	}
