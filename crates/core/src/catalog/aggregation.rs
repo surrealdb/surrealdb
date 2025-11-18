@@ -869,13 +869,13 @@ impl MutVisitor for ParentRewritor {
 	type Error = Error;
 
 	fn visit_mut_expr(&mut self, e: &mut Expr) -> Result<(), Self::Error> {
-		if let Expr::Param(p) = e {
-			if p.as_str() == "parent" {
-				return Err(Error::Query{
+		if let Expr::Param(p) = e
+			&& p.as_str() == "parent"
+		{
+			return Err(Error::Query{
 					message: "Found a `$parent` parameter refering to the document of a GROUP select statement\n\
 						Select statements with a GROUP BY or GROUP ALL currently have no defined document to refer to".to_string()
 				});
-			}
 		}
 		e.visit_mut(self)
 	}

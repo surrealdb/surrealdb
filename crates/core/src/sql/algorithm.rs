@@ -1,6 +1,6 @@
 use std::fmt;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Algorithm {
 	EdDSA,
@@ -9,6 +9,7 @@ pub enum Algorithm {
 	Es512,
 	Hs256,
 	Hs384,
+	#[default]
 	Hs512,
 	Ps256,
 	Ps384,
@@ -42,12 +43,6 @@ impl From<Algorithm> for jsonwebtoken::Algorithm {
 			Algorithm::Rs384 => jsonwebtoken::Algorithm::RS384,
 			Algorithm::Rs512 => jsonwebtoken::Algorithm::RS512,
 		}
-	}
-}
-
-impl Default for Algorithm {
-	fn default() -> Self {
-		Self::Hs512
 	}
 }
 

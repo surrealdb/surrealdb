@@ -610,10 +610,10 @@ impl Value {
 			Kind::Set(kind, max) => {
 				self.is_set_and(|set| {
 					// Check max length if specified
-					if let Some(max_len) = max {
-						if set.len() > *max_len as usize {
-							return false;
-						}
+					if let Some(max_len) = max
+						&& set.len() > *max_len as usize
+					{
+						return false;
 					}
 					// Check all elements match the kind
 					set.iter().all(|v| v.is_kind(kind))
@@ -622,10 +622,10 @@ impl Value {
 			Kind::Array(kind, max) => {
 				self.is_array_and(|arr| {
 					// Check max length if specified
-					if let Some(max_len) = max {
-						if arr.len() > *max_len as usize {
-							return false;
-						}
+					if let Some(max_len) = max
+						&& arr.len() > *max_len as usize
+					{
+						return false;
 					}
 					// Check all elements match the kind
 					arr.iter().all(|v| v.is_kind(kind))

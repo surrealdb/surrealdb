@@ -95,11 +95,11 @@ impl Lexer<'_> {
 	/// Expected the lexer to have already eaten the param starting `$`
 	pub(super) fn lex_param(&mut self) -> Token {
 		loop {
-			if let Some(x) = self.reader.peek() {
-				if x.is_ascii_alphanumeric() || x == b'_' {
-					self.reader.next();
-					continue;
-				}
+			if let Some(x) = self.reader.peek()
+				&& (x.is_ascii_alphanumeric() || x == b'_')
+			{
+				self.reader.next();
+				continue;
 			}
 			return self.finish_token(TokenKind::Parameter);
 		}
@@ -128,11 +128,11 @@ impl Lexer<'_> {
 	/// The scratch should contain only identifier valid chars.
 	pub(super) fn lex_ident(&mut self) -> Token {
 		loop {
-			if let Some(x) = self.reader.peek() {
-				if is_identifier_continue(x) {
-					self.reader.next();
-					continue;
-				}
+			if let Some(x) = self.reader.peek()
+				&& is_identifier_continue(x)
+			{
+				self.reader.next();
+				continue;
 			}
 
 			let str = self.span_str(self.current_span());

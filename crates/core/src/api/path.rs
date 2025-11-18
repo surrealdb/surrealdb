@@ -200,7 +200,7 @@ impl FromStr for Path {
 				let segment = Segment::Fixed(name.to_string());
 				(segment, false)
 			} else {
-				let segment = Segment::Fixed(scratch.to_string());
+				let segment = Segment::Fixed(scratch.clone());
 				(segment, false)
 			};
 

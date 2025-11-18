@@ -68,15 +68,13 @@ impl Inner {
 
 		// Do possible eviction
 		let docs_len = self.docs.len();
-		if docs_len > self.knn {
-			if let Some((_, d)) = self.priority_list.last_key_value() {
-				if docs_len - d.len() >= self.knn {
-					if let Some((_, evicted_docs)) = self.priority_list.pop_last() {
-						for id in evicted_docs {
-							self.docs.remove(&id);
-						}
-					}
-				}
+		if docs_len > self.knn
+			&& let Some((_, d)) = self.priority_list.last_key_value()
+			&& docs_len - d.len() >= self.knn
+			&& let Some((_, evicted_docs)) = self.priority_list.pop_last()
+		{
+			for id in evicted_docs {
+				self.docs.remove(&id);
 			}
 		}
 	}
@@ -136,21 +134,20 @@ impl From<std::collections::HashMap<String, KnnBruteForceResult>> for KnnBruteFo
 }
 impl KnnBruteForceResults {
 	pub(super) fn contains(&self, exp: &Expr, record: &RecordId) -> bool {
-		if let Some(result) = self.0.get(record.table.as_str()) {
-			if let Some(&pos) = result.exp.get(exp) {
-				if let Some(records) = result.res.get(pos) {
-					return records.contains_key(record);
-				}
-			}
+		if let Some(result) = self.0.get(record.table.as_str())
+			&& let Some(&pos) = result.exp.get(exp)
+			&& let Some(records) = result.res.get(pos)
+		{
+			return records.contains_key(record);
 		}
 		false
 	}
 
 	pub(crate) fn get_dist(&self, pos: usize, record: &RecordId) -> Option<Number> {
-		if let Some(result) = self.0.get(record.table.as_str()) {
-			if let Some(records) = result.res.get(pos) {
-				return records.get(record).copied();
-			}
+		if let Some(result) = self.0.get(record.table.as_str())
+			&& let Some(records) = result.res.get(pos)
+		{
+			return records.get(record).copied();
 		}
 		None
 	}

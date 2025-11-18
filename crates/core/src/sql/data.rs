@@ -3,10 +3,11 @@ use std::fmt::{self, Display, Formatter};
 use crate::fmt::Fmt;
 use crate::sql::{AssignOperator, Expr, Idiom};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[allow(clippy::enum_variant_names)]
 pub(crate) enum Data {
+	#[default]
 	EmptyExpression,
 	SetExpression(Vec<Assignment>),
 	UnsetExpression(Vec<Idiom>),
@@ -43,12 +44,6 @@ impl From<crate::expr::data::Assignment> for Assignment {
 			operator: value.operator.into(),
 			value: value.value.into(),
 		}
-	}
-}
-
-impl Default for Data {
-	fn default() -> Self {
-		Self::EmptyExpression
 	}
 }
 

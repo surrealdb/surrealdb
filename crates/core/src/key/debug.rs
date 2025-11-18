@@ -17,7 +17,7 @@ impl Sprintable for &str {
 
 impl Sprintable for String {
 	fn sprint(&self) -> String {
-		self.to_string()
+		self.clone()
 	}
 }
 

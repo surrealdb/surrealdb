@@ -5,7 +5,6 @@ readme = "README.md"
 documentation = "https://docs.rs/surrealdb-core/"
 edition.workspace = true
 version.workspace = true
-rust-version.workspace = true
 authors.workspace = true
 description.workspace = true
 repository.workspace = true
