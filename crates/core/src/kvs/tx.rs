@@ -24,11 +24,12 @@ use crate::err::Error;
 use crate::idx::planner::ScanDirection;
 use crate::key::database::sq::Sq;
 use crate::kvs::cache::tx::TransactionCache;
-use crate::kvs::key::KVKey;
 use crate::kvs::scanner::Scanner;
 use crate::kvs::sequences::Sequences;
-use crate::kvs::{Transactor, cache};
+use crate::kvs::{KVKey, KVValue, Transactor, cache};
 use crate::val::{RecordId, RecordIdKey};
+
+use crate::doc::CursorRecord;
 
 pub struct Transaction {
 	/// Is this is a local datastore transaction?
@@ -39,6 +40,8 @@ pub struct Transaction {
 	cache: TransactionCache,
 	/// The sequences for this store
 	sequences: Sequences,
+	// The changefeed buffer
+	cf: crate::cf::Writer,
 }
 
 impl Deref for Transaction {
@@ -51,12 +54,13 @@ impl Deref for Transaction {
 
 impl Transaction {
 	/// Create a new query store
-	pub fn new(local: bool, tr: Transactor, sequences: Sequences) -> Transaction {
+	pub fn new(local: bool, sequences: Sequences, tr: Transactor) -> Transaction {
 		Transaction {
 			local,
 			tr,
 			cache: TransactionCache::new(),
 			sequences,
+			cf: crate::cf::Writer::new(),
 		}
 	}
 
@@ -72,7 +76,7 @@ impl Transaction {
 
 	/// Check if the transaction is finished.
 	///
-	/// If the transaction has been canceled or committed,
+	/// If the transaction has been cancelled or committed,
 	/// then this function will return [`true`], and any further
 	/// calls to functions on this transaction will result
 	/// in a [`kvs::Error::TransactionFinished`] error.
@@ -80,12 +84,17 @@ impl Transaction {
 		self.tr.closed()
 	}
 
+	/// Get the current monotonic timestamp
+	async fn timestamp(&self) -> Result<u64> {
+		Ok(self.tr.timestamp().await.map_err(Error::from)?)
+	}
+
 	/// Cancel a transaction.
 	///
 	/// This reverses all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn cancel(&self) -> Result<()> {
-		self.tr.cancel().await
+		Ok(self.tr.cancel().await.map_err(Error::from)?)
 	}
 
 	/// Commit a transaction.
@@ -93,7 +102,7 @@ impl Transaction {
 	/// This attempts to commit all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn commit(&self) -> Result<()> {
-		self.tr.commit().await
+		Ok(self.tr.commit().await.map_err(Error::from)?)
 	}
 
 	/// Check if a key exists in the datastore.
@@ -102,7 +111,8 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.exists(key, version).await
+		let key = key.encode_key()?;
+		Ok(self.tr.exists(key, version).await.map_err(Error::from)?)
 	}
 
 	/// Fetch a key from the datastore.
@@ -111,7 +121,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.get(key, version).await
+		let key = key.encode_key()?;
+		let val = self.tr.get(key, version).await.map_err(Error::from)?;
+		val.map(K::ValueType::kv_decode_value).transpose()
 	}
 
 	/// Retrieve a batch set of keys from the datastore.
@@ -120,7 +132,17 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.getm(keys).await
+		let keys = keys.iter().map(|k| k.encode_key()).collect::<Result<Vec<_>>>()?;
+		self.tr
+			.getm(keys)
+			.await
+			.map_err(Error::from)?
+			.into_iter()
+			.map(|v| match v {
+				Some(v) => K::ValueType::kv_decode_value(v).map(Some),
+				None => Ok(None),
+			})
+			.collect()
 	}
 
 	/// Retrieve a specific prefix of keys from the datastore.
@@ -128,11 +150,18 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in
 	/// grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn getp<K>(&self, key: &K) -> Result<Vec<(Key, Val)>>
+	pub async fn getp<K>(&self, key: &K) -> Result<Vec<(Key, K::ValueType)>>
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.getp(key).await
+		let key = key.encode_key()?;
+		self.tr
+			.getp(key)
+			.await
+			.map_err(Error::from)?
+			.into_iter()
+			.map(|(k, v)| Ok((k, K::ValueType::kv_decode_value(v)?)))
+			.collect()
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -140,11 +169,23 @@ impl Transaction {
 	/// This function fetches key-value pairs from the underlying datastore in
 	/// grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn getr<K>(&self, rng: Range<K>, version: Option<u64>) -> Result<Vec<(Key, Val)>>
+	pub async fn getr<K>(
+		&self,
+		rng: Range<K>,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, K::ValueType)>>
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.getr(rng, version).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		self.tr
+			.getr(beg..end, version)
+			.await
+			.map_err(Error::from)?
+			.into_iter()
+			.map(|(k, v)| Ok((k, K::ValueType::kv_decode_value(v)?)))
+			.collect()
 	}
 
 	/// Delete a key from the datastore.
@@ -153,7 +194,8 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.del(key).await
+		let key = key.encode_key()?;
+		Ok(self.tr.del(key).await.map_err(Error::from)?)
 	}
 
 	/// Delete a key from the datastore if the current value matches a
@@ -163,7 +205,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.delc(key, chk).await
+		let key = key.encode_key()?;
+		let chk = chk.map(|v| v.kv_encode_value()).transpose()?;
+		Ok(self.tr.delc(key, chk).await.map_err(Error::from)?)
 	}
 
 	/// Delete a range of keys from the datastore.
@@ -175,7 +219,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.delr(rng).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.delr(beg..end).await.map_err(Error::from)?)
 	}
 
 	/// Delete a prefix of keys from the datastore.
@@ -187,7 +233,8 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.delp(key).await
+		let key = key.encode_key()?;
+		Ok(self.tr.delp(key).await.map_err(Error::from)?)
 	}
 
 	/// Delete all versions of a key from the datastore.
@@ -196,7 +243,8 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.clr(key).await
+		let key = key.encode_key()?;
+		Ok(self.tr.clr(key).await.map_err(Error::from)?)
 	}
 
 	/// Delete all versions of a key from the datastore if the current value
@@ -206,7 +254,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.clrc(key, chk).await
+		let key = key.encode_key()?;
+		let chk = chk.map(|v| v.kv_encode_value()).transpose()?;
+		Ok(self.tr.clrc(key, chk).await.map_err(Error::from)?)
 	}
 
 	/// Delete all versions of a range of keys from the datastore.
@@ -218,7 +268,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.clrr(rng).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.clrr(beg..end).await.map_err(Error::from)?)
 	}
 
 	/// Delete all versions of a prefix of keys from the datastore.
@@ -230,7 +282,8 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.clrp(key).await
+		let key = key.encode_key()?;
+		Ok(self.tr.clrp(key).await.map_err(Error::from)?)
 	}
 
 	/// Insert or update a key in the datastore.
@@ -239,7 +292,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.set(key, val, version).await
+		let key = key.encode_key()?;
+		let val = val.kv_encode_value()?;
+		Ok(self.tr.set(key, val, version).await.map_err(Error::from)?)
 	}
 
 	/// Insert a key if it doesn't exist in the datastore.
@@ -248,7 +303,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.put(key, val, version).await
+		let key = key.encode_key()?;
+		let val = val.kv_encode_value()?;
+		Ok(self.tr.put(key, val, version).await.map_err(Error::from)?)
 	}
 
 	/// Update a key in the datastore if the current value matches a condition.
@@ -262,7 +319,10 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.putc(key, val, chk).await
+		let key = key.encode_key()?;
+		let val = val.kv_encode_value()?;
+		let chk = chk.map(|v| v.kv_encode_value()).transpose()?;
+		Ok(self.tr.putc(key, val, chk).await.map_err(Error::from)?)
 	}
 
 	/// Insert or replace a key in the datastore.
@@ -271,7 +331,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.replace(key, val).await
+		let key = key.encode_key()?;
+		let val = val.kv_encode_value()?;
+		Ok(self.tr.replace(key, val).await.map_err(Error::from)?)
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -283,7 +345,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.keys(rng, limit, version).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.keys(beg..end, limit, version).await.map_err(Error::from)?)
 	}
 
 	/// Retrieve a specific range of keys from the datastore in reverse order.
@@ -300,7 +364,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.keysr(rng, limit, version).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.keysr(beg..end, limit, version).await.map_err(Error::from)?)
 	}
 
 	/// Retrieve a specific range of keys from the datastore.
@@ -317,7 +383,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.scan(rng, limit, version).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.scan(beg..end, limit, version).await.map_err(Error::from)?)
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
@@ -330,7 +398,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.scanr(rng, limit, version).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.scanr(beg..end, limit, version).await.map_err(Error::from)?)
 	}
 
 	/// Count the total number of keys within a range in the datastore.
@@ -342,7 +412,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.count(rng).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.count(beg..end).await.map_err(Error::from)?)
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -359,7 +431,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.batch_keys(rng, batch, version).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.batch_keys(beg..end, batch, version).await.map_err(Error::from)?)
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -376,7 +450,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.batch_keys_vals(rng, batch, version).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.batch_keys_vals(beg..end, batch, version).await.map_err(Error::from)?)
 	}
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
@@ -392,7 +468,9 @@ impl Transaction {
 	where
 		K: KVKey + Debug,
 	{
-		self.tr.batch_keys_vals_versions(rng, batch).await
+		let beg = rng.start.encode_key()?;
+		let end = rng.end.encode_key()?;
+		Ok(self.tr.batch_keys_vals_versions(beg..end, batch).await.map_err(Error::from)?)
 	}
 
 	/// Retrieve a stream over a specific range of keys in the datastore.
@@ -402,26 +480,115 @@ impl Transaction {
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub fn stream(
 		&self,
-		rng: Range<Vec<u8>>,
+		rng: Range<Key>,
 		version: Option<u64>,
 		limit: Option<usize>,
-		sc: ScanDirection,
+		dir: ScanDirection,
 	) -> impl Stream<Item = Result<(Key, Val)>> + '_ {
-		Scanner::<(Key, Val)>::new(self, *NORMAL_FETCH_SIZE, rng, version, limit, sc)
+		Scanner::<(Key, Val)>::new(self, *NORMAL_FETCH_SIZE, rng, version, limit, dir)
 	}
 
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub fn stream_keys(
 		&self,
-		rng: Range<Vec<u8>>,
+		rng: Range<Key>,
 		limit: Option<usize>,
-		sc: ScanDirection,
+		dir: ScanDirection,
 	) -> impl Stream<Item = Result<Key>> + '_ {
-		Scanner::<Key>::new(self, *NORMAL_FETCH_SIZE, rng, None, limit, sc)
+		Scanner::<Key>::new(self, *NORMAL_FETCH_SIZE, rng, None, limit, dir)
 	}
 
 	// --------------------------------------------------
-	// Cache methods
+	// Savepoint functions
+	// --------------------------------------------------
+
+	/// Set a new save point on the transaction.
+	pub async fn new_save_point(&self) -> Result<()> {
+		Ok(self.inner.new_save_point().await.map_err(Error::from)?)
+	}
+
+	/// Release the last save point.
+	pub async fn release_last_save_point(&self) -> Result<()> {
+		Ok(self.inner.release_last_save_point().await.map_err(Error::from)?)
+	}
+
+	/// Rollback to the last save point.
+	pub async fn rollback_to_save_point(&self) -> Result<()> {
+		Ok(self.inner.rollback_to_save_point().await.map_err(Error::from)?)
+	}
+
+	// --------------------------------------------------
+	// Changefeed functions
+	// --------------------------------------------------
+
+	// Records the table (re)definition in the changefeed if enabled.
+	pub(crate) fn changefeed_buffer_table_change(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		dt: &TableDefinition,
+	) {
+		self.cf.changefeed_buffer_table_change(ns, db, tb, dt)
+	}
+
+	// change will record the change in the changefeed if enabled.
+	// To actually persist the record changes into the underlying kvs,
+	// you must call the `complete_changes` function and then commit the
+	// transaction.
+	#[expect(clippy::too_many_arguments)]
+	pub(crate) fn changefeed_buffer_record_change(
+		&self,
+		ns: NamespaceId,
+		db: DatabaseId,
+		tb: &str,
+		id: &RecordId,
+		previous: CursorRecord,
+		current: CursorRecord,
+		store_difference: bool,
+	) {
+		self.cf.changefeed_buffer_record_change(
+			ns,
+			db,
+			tb,
+			id.clone(),
+			previous,
+			current,
+			store_difference,
+		)
+	}
+
+	// complete_changes will complete the changefeed recording for the given
+	// namespace and database.
+	//
+	// Under the hood, this function calls the transaction's
+	// `set_versionstamped_key` for each change. Every change must be recorded by
+	// calling this struct's `record_change` function beforehand. If there were no
+	// preceding `record_change` function calls for this transaction, this function
+	// will do nothing.
+	//
+	// This function should be called only after all the changes have been made to
+	// the transaction. Otherwise, changes are missed in the change feed.
+	//
+	// This function should be called immediately before calling the commit function
+	// to guarantee that the lock, if needed by lock=true, is held only for the
+	// duration of the commit, not the entire transaction.
+	//
+	// This function is here because it needs access to mutably borrow the
+	// transaction.
+	//
+	// Lastly, you should set lock=true if you want the changefeed to be correctly
+	// ordered for non-FDB backends.
+	pub(crate) async fn complete_changes(&self) -> Result<()> {
+		for (tskey, prefix, suffix, v) in self.cf.changes()? {
+			// self.set(prefix, suffix, v).await?
+			todo!()
+		}
+		Ok(())
+	}
+
+	// --------------------------------------------------
+	// Cache functions
 	// --------------------------------------------------
 
 	#[inline]

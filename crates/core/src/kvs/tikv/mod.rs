@@ -155,6 +155,11 @@ impl Transactable for Transaction {
 		self.write
 	}
 
+	/// Get the current monotonic timestamp
+	async fn timestamp(&self) -> Result<u64> {
+		Ok(self.inner.write().await.tx.current_timestamp().await?.version())
+	}
+
 	/// Cancel a transaction
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn cancel(&self) -> Result<()> {
@@ -515,34 +520,6 @@ impl Transactable for Transaction {
 			inner.tx.scan_reverse(rng, limit).await?.map(|kv| (Key::from(kv.0), kv.1)).collect();
 		// Return result
 		Ok(res)
-	}
-
-	/// Obtain a new change timestamp for a key
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn get_versionstamp(&self, key: VsKey) -> Result<VersionStamp> {
-		// Check to see if transaction is closed
-		if self.closed() {
-			return Err(Error::TransactionFinished);
-		}
-		// Get the transaction version
-		let ver = self.inner.write().await.tx.current_timestamp().await?.version();
-		// Get the encoded key
-		let enc = key.encode_key()?;
-		// Calculate the previous version value
-		if let Some(prev) = self.get(enc.clone(), None).await? {
-			let prev = VersionStamp::from_slice(prev.as_slice())?.try_into_u64()?;
-			if prev >= ver {
-				return Err(Error::Transaction(format!(
-					"Previous version {prev} is greater than current version {ver}"
-				)));
-			}
-		};
-		// Convert the timestamp to a versionstamp
-		let ver = VersionStamp::from_u64(ver);
-		// Store the timestamp to prevent other transactions from committing
-		self.set(enc, ver.to_vec(), None).await?;
-		// Return the uint64 representation of the timestamp as the result
-		Ok(ver)
 	}
 
 	/// Set a new save point on the transaction.

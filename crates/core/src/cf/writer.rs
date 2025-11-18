@@ -41,7 +41,7 @@ impl Writer {
 	}
 
 	/// Record a table definition modification
-	pub(crate) fn record_table_change(
+	pub(crate) fn changefeed_buffer_table_change(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -63,7 +63,7 @@ impl Writer {
 
 	/// Record a record modification or deletion
 	#[expect(clippy::too_many_arguments)]
-	pub(crate) fn record_change(
+	pub(crate) fn changefeed_buffer_record_change(
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
@@ -115,8 +115,9 @@ impl Writer {
 	// get returns all the mutations buffered for this transaction,
 	// that are to be written onto the key composed of the specified prefix + the
 	// current timestamp + the specified suffix.
-	pub(crate) fn get(&self) -> Result<Vec<PreparedWrite>> {
-		let mut r = Vec::<PreparedWrite>::new();
+	pub(crate) fn changes(&self) -> Result<Vec<PreparedWrite>> {
+		// Create a new change result set
+		let mut res = Vec::with_capacity(self.buffer.len());
 		// Iterate over the buffered mutations
 		for entry in self.buffer.iter() {
 			// Deconstruct the change key
@@ -131,10 +132,10 @@ impl Writer {
 			let tc_key_suffix: Key = crate::key::change::versionstamped_key_suffix(tb.as_str());
 			let value = entry.value().kv_encode_value()?;
 			// Push the prepared write to the result
-			r.push((ts_key, tc_key_prefix, tc_key_suffix, value))
+			res.push((ts_key, tc_key_prefix, tc_key_suffix, value))
 		}
 		// Return the prepared writes
-		Ok(r)
+		Ok(res)
 	}
 }
 
@@ -187,7 +188,7 @@ mod tests {
 		};
 		let value_a: Value = "a".into();
 		let previous = Value::None;
-		tx1.record_change(
+		tx1.changefeed_buffer_record_change(
 			tb.namespace_id,
 			tb.database_id,
 			&tb.name,
@@ -205,7 +206,7 @@ mod tests {
 			key: RecordIdKey::String("C".to_owned()),
 		};
 		let value_c: Value = "c".into();
-		tx2.record_change(
+		tx2.changefeed_buffer_record_change(
 			tb.namespace_id,
 			tb.database_id,
 			&tb.name,
@@ -223,7 +224,7 @@ mod tests {
 			key: RecordIdKey::String("B".to_owned()),
 		};
 		let value_b: Value = "b".into();
-		tx3.record_change(
+		tx3.changefeed_buffer_record_change(
 			tb.namespace_id,
 			tb.database_id,
 			&tb.name,
@@ -237,7 +238,7 @@ mod tests {
 			key: RecordIdKey::String("C".to_owned()),
 		};
 		let value_c2: Value = "c2".into();
-		tx3.record_change(
+		tx3.changefeed_buffer_record_change(
 			tb.namespace_id,
 			tb.database_id,
 			&tb.name,
@@ -464,7 +465,7 @@ mod tests {
 		};
 		let value_a: Value = "a".into();
 		let previous = Value::None.into();
-		tx.record_change(
+		tx.changefeed_buffer_record_change(
 			tb.namespace_id,
 			tb.database_id,
 			&tb.name,

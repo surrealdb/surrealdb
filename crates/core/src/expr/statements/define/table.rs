@@ -127,7 +127,7 @@ impl DefineTableStatement {
 
 		// Record definition change
 		if self.changefeed.is_some() {
-			txn.record_table_change(ns, db, &name, &tb_def);
+			txn.changefeed_buffer_table_change(ns, db, &name, &tb_def);
 		}
 
 		// Update the catalog

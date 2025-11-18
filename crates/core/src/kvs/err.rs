@@ -52,10 +52,6 @@ pub enum Error {
 	#[error("The underlying datastore does not support versioned queries")]
 	UnsupportedVersionedQueries,
 
-	/// Invalid version stamp format or conversion
-	#[error("Invalid version stamp: {0}")]
-	VersionStamp(String),
-
 	/// There was an unknown internal error
 	#[error("There was an internal error: {0}")]
 	Internal(String),
@@ -150,12 +146,5 @@ impl From<anyhow::Error> for Error {
 			Ok(e) => e,
 			Err(e) => Error::Internal(e.to_string()),
 		}
-	}
-}
-
-// Conversion from VersionStampError
-impl From<crate::vs::VersionStampError> for Error {
-	fn from(e: crate::vs::VersionStampError) -> Self {
-		Error::VersionStamp(e.to_string())
 	}
 }

@@ -79,7 +79,7 @@ use crate::surrealism::cache::SurrealismCache;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::types::{PublicNotification, PublicValue, PublicVariables};
 use crate::val::convert_value_to_public_value;
-use crate::{CommunityComposer, cf, syn};
+use crate::{CommunityComposer, syn};
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
 
@@ -172,11 +172,10 @@ impl TransactionFactory {
 		let (inner, local) = self.builder.new_transaction(write, lock).await?;
 		Ok(Transaction::new(
 			local,
+			sequences,
 			Transactor {
 				inner,
-				cf: cf::Writer::new(),
 			},
-			sequences,
 		))
 	}
 }

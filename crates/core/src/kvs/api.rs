@@ -4,17 +4,13 @@
 use std::ops::Range;
 use std::time::SystemTime;
 
-use anyhow::Context;
-
 use super::err::{Error, Result};
 use super::util;
 use crate::cnf::{COUNT_BATCH_SIZE, NORMAL_FETCH_SIZE};
 // use crate::err::Error;
-use crate::key::database::vs::VsKey;
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
-use crate::kvs::{KVKey, KVValue, Key, Val, Version};
-use crate::vs::VersionStamp;
+use crate::kvs::{Key, Val, Version};
 
 pub mod requirements {
 	//! This module defines the trait requirements for a transaction.
@@ -78,9 +74,9 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// will return a [`kvs::Error::TransactionReadonly`] error.
 	fn writeable(&self) -> bool;
 
-	/// Get the current timestamp
-	async fn get_timestamp(&self) -> Result<SystemTime> {
-		Ok(SystemTime::now())
+	/// Get the current monotonic timestamp
+	async fn timestamp(&self) -> Result<u64> {
+		Ok(SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos() as u64)
 	}
 
 	/// Cancel a transaction.
@@ -479,59 +475,6 @@ pub trait Transactable: requirements::TransactionRequirements {
 				None => Ok(Batch::<(Key, Val, Version, bool)>::new(None, res)),
 			}
 		}
-	}
-
-	/// Obtain a new change timestamp for a key
-	/// which is replaced with the current timestamp when the transaction is
-	/// committed. NOTE: This should be called when composing the change feed
-	/// entries for this transaction, which should be done immediately before
-	/// the transaction commit. That is to keep other transactions commit
-	/// delay(pessimistic) or conflict(optimistic) as less as possible.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn get_versionstamp(&self, key: VsKey) -> Result<VersionStamp> {
-		// Check to see if transaction is closed
-		if self.closed() {
-			return Err(Error::TransactionFinished);
-		}
-		// Get the encoded key
-		let key_encoded = key.encode_key()?;
-		// Get the previous version
-		// Calculate the version number
-		let ver = match self.get(key_encoded.clone(), None).await? {
-			Some(prev) => <VsKey as KVKey>::ValueType::kv_decode_value(prev)?
-				.next()
-				.context("exhausted all possible timestamps")?,
-			None => VersionStamp::from_u64(1),
-		};
-		// Store the timestamp to prevent other transactions from committing
-		self.set(key_encoded, ver.kv_encode_value()?, None).await?;
-		// Return the uint64 representation of the timestamp as the result
-		Ok(ver)
-	}
-
-	/// Insert the versionstamped key into the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn set_versionstamp(
-		&self,
-		ts_key: VsKey,
-		prefix: Key,
-		suffix: Key,
-		val: Val,
-	) -> Result<()> {
-		// Check to see if transaction is closed
-		if self.closed() {
-			return Err(Error::TransactionFinished);
-		}
-		// Check to see if transaction is writable
-		if !self.writeable() {
-			return Err(Error::TransactionReadonly);
-		}
-		// Continue with function logic
-		let ts = self.get_versionstamp(ts_key).await?;
-		let mut k: Vec<u8> = prefix;
-		k.extend_from_slice(&ts.as_bytes());
-		k.extend_from_slice(&suffix);
-		self.set(k, val, None).await
 	}
 
 	/// Set a new save point on the transaction.
