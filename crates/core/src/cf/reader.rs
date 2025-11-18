@@ -7,16 +7,15 @@ use crate::key::change;
 #[cfg(debug_assertions)]
 use crate::key::debug::Sprintable;
 use crate::kvs::{KVKey, KVValue, Timestamp, Transaction};
-use crate::vs::VersionStamp;
 
 // Reads the change feed for a specific database or a table,
-// starting from a specific timestamp.
+// starting from a specific timestamp or version number.
 //
 // The limit parameter is the maximum number of change sets to return.
 // If the limit is not specified, the default is 100.
 //
 // You can use this to read the change feed in chunks.
-// The second call would start from the last timestamp + 1 of the first call.
+// The second call would start from the last timestamp/version + 1 of the first call.
 pub async fn read(
 	tx: &Transaction,
 	ns: NamespaceId,
@@ -27,11 +26,8 @@ pub async fn read(
 ) -> Result<Vec<ChangeSet>> {
 	// Calculate the start of the changefeed range
 	let ts_bytes = match start {
-		ShowSince::Versionstamp(x) => x.to_ts_bytes(),
-		ShowSince::Timestamp(x) => {
-			let ts = x.timestamp() as u64;
-			ts.to_ts_bytes()
-		}
+		ShowSince::Versionstamp(x) => tx.timestamp_bytes_from_versionstamp(x as u128).await?,
+		ShowSince::Timestamp(x) => tx.timestamp_bytes_from_datetime(x.0).await?,
 	};
 	let beg = change::prefix_ts(ns, db, &ts_bytes).encode_key()?;
 	// Calculate the end of the changefeed range
@@ -64,9 +60,10 @@ pub async fn read(
 			Some(ref x) => {
 				if dec.ts.as_ref() != x.as_slice() {
 					let db_mut = DatabaseMutation(buf);
-					// Convert timestamp bytes to u64 for VersionStamp compatibility
-					let ts_u64 = <u64 as Timestamp>::from_ts_bytes(x.as_slice());
-					res.push(ChangeSet(VersionStamp::from_u64(ts_u64), db_mut));
+					// Convert timestamp bytes to version number
+					let version =
+						<u64 as Timestamp>::from_ts_bytes(x.as_slice())?.to_versionstamp();
+					res.push(ChangeSet(version, db_mut));
 					buf = Vec::new();
 					current_ts = Some(dec.ts.into_owned())
 				}
@@ -80,10 +77,10 @@ pub async fn read(
 	// Collect all mutations together
 	if !buf.is_empty() {
 		let db_mut = DatabaseMutation(buf);
-		// Convert timestamp bytes to u64 for VersionStamp compatibility
+		// Convert timestamp bytes to version number
 		let ts_bytes = current_ts.expect("timestamp should be set when mutations exist");
-		let ts_u64 = <u64 as Timestamp>::from_ts_bytes(ts_bytes.as_slice());
-		res.push(ChangeSet(VersionStamp::from_u64(ts_u64), db_mut));
+		let version = <u64 as Timestamp>::from_ts_bytes(ts_bytes.as_slice())?.to_versionstamp();
+		res.push(ChangeSet(version, db_mut));
 	}
 	// Return the results
 	Ok(res)

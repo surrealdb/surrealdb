@@ -9,6 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use savepoint::{Operation, Savepoint};
 use tikv::{CheckLevel, Config, TimestampExt, TransactionClient, TransactionOptions};
 use tokio::sync::RwLock;
@@ -41,13 +42,35 @@ pub struct Transaction {
 pub struct Timecode(tikv::Timestamp);
 
 impl Timestamp for Timecode {
+	/// Convert the timestamp to a version
+	fn to_versionstamp(&self) -> u128 {
+		self.0.version() as u128
+	}
+	/// Create a timestamp from a version
+	fn from_versionstamp(version: u128) -> Result<Self> {
+		Ok(Timecode(tikv::Timestamp::from_version(version as u64)))
+	}
+	/// Convert the timestamp to a datetime
+	fn to_datetime(&self) -> DateTime<Utc> {
+		DateTime::from_timestamp_nanos(self.0.physical)
+	}
+	/// Create a timestamp from a datetime
+	fn from_datetime(datetime: DateTime<Utc>) -> Result<Self> {
+		Ok(Timecode(tikv::Timestamp {
+			physical: datetime.timestamp_millis() as i64,
+			..Default::default()
+		}))
+	}
+	/// Convert the timestamp to a byte array
 	fn to_ts_bytes(&self) -> Vec<u8> {
 		self.0.version().to_be_bytes().to_vec()
 	}
-	fn from_ts_bytes(bytes: &[u8]) -> Self {
-		Timecode(tikv::Timestamp::from_version(u64::from_be_bytes(
-			bytes.try_into().expect("timestamp should be 8 bytes"),
-		)))
+	/// Create a timestamp from a byte array
+	fn from_ts_bytes(bytes: &[u8]) -> Result<Self> {
+		match bytes.try_into() {
+			Ok(v) => Ok(Timecode(tikv::Timestamp::from_version(u64::from_be_bytes(v)))),
+			Err(_) => Err(Error::TimestampInvalid("timestamp should be 8 bytes".to_string())),
+		}
 	}
 }
 
@@ -163,11 +186,6 @@ impl Transactable for Transaction {
 	/// Check if writeable
 	fn writeable(&self) -> bool {
 		self.write
-	}
-
-	/// Get the current monotonic timestamp
-	async fn timestamp(&self) -> Result<Box<dyn Timestamp>> {
-		Ok(Box::new(Timecode(self.inner.write().await.tx.current_timestamp().await?)))
 	}
 
 	/// Cancel a transaction
@@ -532,6 +550,10 @@ impl Transactable for Transaction {
 		Ok(res)
 	}
 
+	// --------------------------------------------------
+	// Savepoint functions
+	// --------------------------------------------------
+
 	/// Set a new save point on the transaction.
 	async fn new_save_point(&self) -> Result<()> {
 		// Check to see if transaction is closed
@@ -613,5 +635,24 @@ impl Transactable for Transaction {
 		inner.operations = savepoint.operations;
 		// Continue
 		Ok(())
+	}
+
+	// --------------------------------------------------
+	// Timestamp functions
+	// --------------------------------------------------
+
+	/// Get the current monotonic timestamp
+	async fn timestamp(&self) -> Result<Box<dyn Timestamp>> {
+		Ok(Box::new(Timecode(self.inner.write().await.tx.current_timestamp().await?)))
+	}
+
+	/// Convert a versionstamp to timestamp bytes for this storage engine
+	async fn timestamp_bytes_from_versionstamp(&self, version: u128) -> Result<Vec<u8>> {
+		Ok(<Timecode as Timestamp>::from_versionstamp(version)?.to_ts_bytes())
+	}
+
+	/// Convert a datetime to timestamp bytes for this storage engine
+	async fn timestamp_bytes_from_datetime(&self, datetime: DateTime<Utc>) -> Result<Vec<u8>> {
+		Ok(<Timecode as Timestamp>::from_datetime(datetime)?.to_ts_bytes())
 	}
 }

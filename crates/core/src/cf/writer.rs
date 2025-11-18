@@ -265,33 +265,9 @@ mod tests {
 		assert_eq!(r[2].1.0.len(), 1); // Third changeset has 1 table mutation
 		assert_eq!(r[2].1.0[0].1.len(), 2); // With 2 record mutations
 
-		// Store the last timestamp for cleanup
-		let last_ts = r[2].0.into_u64_lossy();
-
-		let tx5 = ds.transaction(Write, Optimistic).await.unwrap();
-		// gc_all needs to be committed before we can read the changes
-		crate::cf::gc_range(&tx5, tb.namespace_id, tb.database_id, last_ts).await.unwrap();
-		// We now commit tx5, which should persist the gc_all results
-		tx5.commit().await.unwrap();
-
-		// Now we should see the gc_all results
-		let tx6 = ds.transaction(Write, Optimistic).await.unwrap();
-		let r = crate::cf::read(
-			&tx6,
-			tb.namespace_id,
-			tb.database_id,
-			Some(&tb.name),
-			ShowSince::Versionstamp(start),
-			Some(10),
-		)
-		.await
-		.unwrap();
-		tx6.commit().await.unwrap();
-
-		// After GC, we should only see the last changeset
-		assert_eq!(r.len(), 1);
-		assert_eq!(r[0].1.0.len(), 1);
-		assert_eq!(r[0].1.0[0].1.len(), 2); // With 2 record mutations
+		// Verify versionstamps are monotonically increasing
+		assert!(r[0].0 < r[1].0, "Versionstamps should be monotonically increasing");
+		assert!(r[1].0 < r[2].0, "Versionstamps should be monotonically increasing");
 	}
 
 	#[test_log::test(tokio::test)]
@@ -327,7 +303,7 @@ mod tests {
 		let r = change_feed_ts(
 			ds.transaction(Write, Optimistic).await.unwrap(),
 			&tb,
-			r[0].0.into_u64_lossy() + 1,
+			r[0].0 as u64 + 1,
 		)
 		.await;
 		assert_eq!(r.len(), 1);

@@ -4,6 +4,7 @@ use std::ops::{Deref, Range};
 use std::sync::Arc;
 
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
 use futures::stream::Stream;
 use uuid::Uuid;
@@ -81,11 +82,6 @@ impl Transaction {
 	/// in a [`kvs::Error::TransactionFinished`] error.
 	pub async fn closed(&self) -> bool {
 		self.tr.closed()
-	}
-
-	/// Get the current monotonic timestamp
-	async fn timestamp(&self) -> Result<Box<dyn crate::kvs::Timestamp>> {
-		Ok(self.tr.timestamp().await.map_err(Error::from)?)
 	}
 
 	/// Cancel a transaction.
@@ -613,6 +609,25 @@ impl Transaction {
 	/// Rollback to the last save point.
 	pub async fn rollback_to_save_point(&self) -> Result<()> {
 		Ok(self.inner.rollback_to_save_point().await.map_err(Error::from)?)
+	}
+
+	// --------------------------------------------------
+	// Timestamp functions
+	// --------------------------------------------------
+
+	/// Get the current monotonic timestamp
+	async fn timestamp(&self) -> Result<Box<dyn crate::kvs::Timestamp>> {
+		Ok(self.tr.timestamp().await.map_err(Error::from)?)
+	}
+
+	/// Convert a versionstamp to timestamp bytes for this storage engine
+	pub async fn timestamp_bytes_from_versionstamp(&self, version: u128) -> Result<Vec<u8>> {
+		Ok(self.tr.timestamp_bytes_from_versionstamp(version).await.map_err(Error::from)?)
+	}
+
+	/// Convert a datetime to timestamp bytes for this storage engine
+	pub async fn timestamp_bytes_from_datetime(&self, datetime: DateTime<Utc>) -> Result<Vec<u8>> {
+		Ok(self.tr.timestamp_bytes_from_datetime(datetime).await.map_err(Error::from)?)
 	}
 
 	// --------------------------------------------------

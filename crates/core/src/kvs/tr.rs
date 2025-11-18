@@ -2,6 +2,7 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 
+use chrono::{DateTime, Utc};
 use futures::stream::Stream;
 
 use super::api::Transactable;
@@ -75,7 +76,7 @@ impl Transactor {
 	/// calls to functions on this transaction will result
 	/// in a [`kvs::Error::TransactionFinished`] error.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub(crate) fn closed(&self) -> bool {
+	pub fn closed(&self) -> bool {
 		self.inner.closed()
 	}
 
@@ -88,20 +89,15 @@ impl Transactor {
 	/// will return a [`kvs::Error::TransactionReadonly`] error w
 	/// hen attempting to modify any data within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub(crate) fn writeable(&self) -> bool {
+	pub fn writeable(&self) -> bool {
 		self.inner.writeable()
-	}
-
-	/// Get the current monotonic timestamp
-	pub(crate) async fn timestamp(&self) -> Result<Box<dyn super::Timestamp>> {
-		self.inner.timestamp().await
 	}
 
 	/// Cancel a transaction.
 	///
 	/// This reverses all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub(crate) async fn cancel(&self) -> Result<()> {
+	pub async fn cancel(&self) -> Result<()> {
 		self.inner.cancel().await
 	}
 
@@ -109,7 +105,7 @@ impl Transactor {
 	///
 	/// This attempts to commit all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub(crate) async fn commit(&self) -> Result<()> {
+	pub async fn commit(&self) -> Result<()> {
 		self.inner.commit().await
 	}
 
@@ -590,5 +586,24 @@ impl Transactor {
 	/// Rollback to the last save point.
 	pub async fn rollback_to_save_point(&self) -> Result<()> {
 		self.inner.rollback_to_save_point().await
+	}
+
+	// --------------------------------------------------
+	// Timestamp functions
+	// --------------------------------------------------
+
+	/// Get the current monotonic timestamp
+	pub async fn timestamp(&self) -> Result<Box<dyn super::Timestamp>> {
+		self.inner.timestamp().await
+	}
+
+	/// Convert a versionstamp to timestamp bytes for this storage engine
+	pub async fn timestamp_bytes_from_versionstamp(&self, version: u128) -> Result<Vec<u8>> {
+		self.inner.timestamp_bytes_from_versionstamp(version).await
+	}
+
+	/// Convert a datetime to timestamp bytes for this storage engine
+	pub async fn timestamp_bytes_from_datetime(&self, datetime: DateTime<Utc>) -> Result<Vec<u8>> {
+		self.inner.timestamp_bytes_from_datetime(datetime).await
 	}
 }

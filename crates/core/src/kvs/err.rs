@@ -52,6 +52,10 @@ pub enum Error {
 	#[error("The underlying datastore does not support versioned queries")]
 	UnsupportedVersionedQueries,
 
+	/// The specified timestamp is not valid for the underlying datastore
+	#[error("The specified timestamp is not valid for the underlying datastore: {0}")]
+	TimestampInvalid(String),
+
 	/// There was an unknown internal error
 	#[error("There was an internal error: {0}")]
 	Internal(String),

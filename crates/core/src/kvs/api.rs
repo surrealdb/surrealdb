@@ -2,7 +2,8 @@
 #![warn(clippy::missing_docs_in_private_items)]
 
 use std::ops::Range;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use chrono::{DateTime, Utc};
 
 use super::err::{Error, Result};
 use super::util;
@@ -72,16 +73,6 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// allows data to be modified, and if not then the function
 	/// will return a [`kvs::Error::TransactionReadonly`] error.
 	fn writeable(&self) -> bool;
-
-	/// Get the current monotonic timestamp
-	async fn timestamp(&self) -> Result<Box<dyn Timestamp>> {
-		Ok(Box::new(
-			SystemTime::now()
-				.duration_since(UNIX_EPOCH)
-				.expect("system time can not be before 1970-01-01 00:00:00 UTC")
-				.as_nanos() as u64,
-		))
-	}
 
 	/// Cancel a transaction.
 	///
@@ -497,4 +488,40 @@ pub trait Transactable: requirements::TransactionRequirements {
 
 	/// Rollback to the last save point.
 	async fn rollback_to_save_point(&self) -> Result<()>;
+
+	// --------------------------------------------------
+	// Timestamp functions
+	// --------------------------------------------------
+
+	/// Get the current monotonic timestamp
+	#[cfg(test)]
+	async fn timestamp(&self) -> Result<Box<dyn Timestamp>> {
+		static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+		Ok(Box::new(COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst)))
+	}
+
+	/// Get the current monotonic timestamp
+	#[cfg(not(test))]
+	async fn timestamp(&self) -> Result<Box<dyn Timestamp>> {
+		#[cfg(not(target_family = "wasm"))]
+		use std::time::{SystemTime, UNIX_EPOCH};
+		#[cfg(target_family = "wasm")]
+		use wasmtimer::std::{SystemTime, UNIX_EPOCH};
+		Ok(Box::new(
+			SystemTime::now()
+				.duration_since(UNIX_EPOCH)
+				.expect("system time can not be before 1970-01-01 00:00:00 UTC")
+				.as_nanos() as u64,
+		))
+	}
+
+	/// Convert a versionstamp to timestamp bytes for this storage engine
+	async fn timestamp_bytes_from_versionstamp(&self, version: u128) -> Result<Vec<u8>> {
+		Ok(<u64 as Timestamp>::from_versionstamp(version)?.to_ts_bytes())
+	}
+
+	/// Convert a datetime to timestamp bytes for this storage engine
+	async fn timestamp_bytes_from_datetime(&self, datetime: DateTime<Utc>) -> Result<Vec<u8>> {
+		Ok(<u64 as Timestamp>::from_datetime(datetime)?.to_ts_bytes())
+	}
 }

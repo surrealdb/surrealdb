@@ -62,7 +62,6 @@ pub mod options;
 pub mod rpc;
 pub mod sql;
 pub mod syn;
-pub mod vs;
 
 pub(crate) mod types {
 	//! Re-export the types from the types crate for internal use prefixed with Public.

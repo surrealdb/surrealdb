@@ -16,7 +16,6 @@ use crate::iam::Auth;
 use crate::kvs::KVValue;
 use crate::kvs::version::MajorVersion;
 use crate::val::{Datetime, Value};
-use crate::vs::VersionStamp;
 
 /// This test is used to ensure that
 #[rstest]
@@ -215,7 +214,6 @@ use crate::vs::VersionStamp;
 	timeout: Some(Duration::from_secs(123)),
 }, 15)]
 #[case::version(MajorVersion::from(1), 2)]
-#[case::versionstamp(VersionStamp::ZERO, 10)]
 #[case::user(UserDefinition {
 	name: "tobie".to_string(),
 	hash: "hash".to_string(),

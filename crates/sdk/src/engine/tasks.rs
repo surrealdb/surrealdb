@@ -153,13 +153,13 @@ fn spawn_task_changefeed_cleanup(
 	opts: &EngineOptions,
 ) -> Task {
 	// Get the delay interval from the config
-	let gc_interval = opts.changefeed_gc_interval;
+	let interval = opts.changefeed_gc_interval;
 	// Spawn a future
 	Box::pin(spawn(async move {
 		// Log the interval frequency
-		trace!("Running changefeed garbage collection every {gc_interval:?}");
+		trace!("Running changefeed garbage collection every {interval:?}");
 		// Create a new time-based interval ticket
-		let mut ticker = interval_ticker(gc_interval).await;
+		let mut ticker = interval_ticker(interval).await;
 		// Loop continuously until the task is cancelled
 		loop {
 			tokio::select! {
@@ -168,7 +168,7 @@ fn spawn_task_changefeed_cleanup(
 				_ = canceller.cancelled() => break,
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
-					if let Err(e) = dbs.changefeed_process(&gc_interval).await {
+					if let Err(e) = dbs.changefeed_process(&interval).await {
 						error!("Error running changefeed garbage collection: {e}");
 					}
 				}

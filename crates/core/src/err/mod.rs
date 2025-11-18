@@ -26,7 +26,6 @@ use crate::idx::trees::vector::SharedVector;
 use crate::kvs::Error as KvsError;
 use crate::syn::error::RenderedError as RenderedParserError;
 use crate::val::{CastError, CoerceError, RecordId, Value};
-use crate::vs::VersionStampError;
 
 /// An error originating from an embedded SurrealDB database.
 #[derive(Error, Debug)]
@@ -685,9 +684,6 @@ pub(crate) enum Error {
 	/// Unimplemented functionality
 	#[error("Unimplemented functionality: {0}")]
 	Unimplemented(String),
-
-	#[error("Versionstamp in key is corrupted: {0}")]
-	CorruptedVersionstampInKey(#[from] VersionStampError),
 
 	/// Represents an underlying IAM error
 	#[error("IAM error: {0}")]
