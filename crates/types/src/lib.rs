@@ -85,7 +85,7 @@ macro_rules! object {
 #[macro_export]
 macro_rules! set {
 	($($value:expr),* $(,)?) => {
-		$crate::Set::from(vec![$($value),*])
+		$crate::Set::from(vec![$($value.into()),*])
 	};
 }
 

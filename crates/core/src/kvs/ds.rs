@@ -1823,13 +1823,18 @@ impl Datastore {
 	}
 
 	pub fn setup_options(&self, sess: &Session) -> Options {
-		Options::default()
+		let mut opt = Options::default()
 			.with_id(self.id)
 			.with_ns(sess.ns())
 			.with_db(sess.db())
 			.with_live(sess.live())
 			.with_auth(sess.au.clone())
-			.with_auth_enabled(self.auth_enabled)
+			.with_auth_enabled(self.auth_enabled);
+		// Setup the notification broker
+		if let Some(channel) = &self.notification_channel {
+			opt = opt.new_with_broker(crate::doc::DefaultBroker::new(channel.0.clone()));
+		}
+		opt
 	}
 
 	pub fn setup_ctx(&self) -> Result<MutableContext> {
