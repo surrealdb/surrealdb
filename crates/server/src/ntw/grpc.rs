@@ -216,7 +216,7 @@ pub async fn init(opt: &Config, ds: Arc<Datastore>, ct: CancellationToken) -> Re
 }
 
 /// The gRPC service implementation.
-/// 
+///
 /// This implements the SurrealDbService trait from the surrealdb-protocol crate.
 pub struct SurrealDbGrpcService {
 	datastore: Arc<Datastore>,
@@ -745,7 +745,7 @@ impl SurrealDbService for SurrealDbGrpcService {
 		use surrealdb_protocol::proto::rpc::v1::subscribe_request::SubscribeTo;
 
 		match subscribe_to {
-			// Case 1: Subscribe to an existing live query by ID
+			// Subscribe to an existing live query by ID
 			// No automatic cleanup - user must issue KILL manually
 			SubscribeTo::LiveQueryId(uuid_proto) => {
 				let uuid = Uuid::parse_str(&uuid_proto.value)
@@ -777,7 +777,7 @@ impl SurrealDbService for SurrealDbGrpcService {
 				Ok(Response::new(Box::pin(stream) as Self::SubscribeStream))
 			}
 
-			// Case 2: Execute a query to create a live query, then subscribe
+			// Execute a query to create a live query, then subscribe
 			// Automatic cleanup - kills the live query when stream closes
 			SubscribeTo::Query(query_req) => {
 				// Merge request variables with session variables
@@ -870,7 +870,6 @@ fn query_result_to_response(
 	// Convert the result
 	match query_result.result {
 		Ok(value) => {
-			// Convert the value to a vector of protobuf values using From trait
 			let values = match value {
 				surrealdb_types::Value::Array(arr) => {
 					// If it's an array, convert each element
