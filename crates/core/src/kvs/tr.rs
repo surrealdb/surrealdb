@@ -4,11 +4,10 @@ use std::ops::Range;
 
 use futures::stream::Stream;
 
-use super::Result;
 use super::api::Transactable;
 use super::batch::Batch;
 use super::scanner::{Direction, Scanner};
-use super::{IntoBytes, Key, Val, Version};
+use super::{IntoBytes, Key, Result, Val, Version};
 
 /// Specifies whether the transaction is read-only or writeable.
 #[derive(Copy, Clone, Eq, PartialEq)]

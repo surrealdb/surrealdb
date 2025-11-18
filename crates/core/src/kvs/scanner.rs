@@ -6,9 +6,8 @@ use std::task::{Context, Poll};
 use futures::stream::Stream;
 use futures::{Future, FutureExt};
 
-use super::Result;
 use super::tr::Transactor;
-use super::{Key, Val};
+use super::{Key, Result, Val};
 use crate::cnf::MAX_BATCH_SIZE;
 
 #[cfg(not(target_family = "wasm"))]

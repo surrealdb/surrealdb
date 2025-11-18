@@ -143,8 +143,7 @@ pub fn suffix(ns: NamespaceId, db: DatabaseId) -> DatabaseChangeFeedRange {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::kvs::KVKey;
-	use crate::kvs::Timestamp;
+	use crate::kvs::{KVKey, Timestamp};
 
 	#[test]
 	fn cf_key() {
