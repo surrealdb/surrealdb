@@ -3,8 +3,7 @@
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use indxdb::Database as Db;
-use indxdb::Transaction as Tx;
+use indxdb::{Database as Db, Transaction as Tx};
 use tokio::sync::RwLock;
 
 use super::err::{Error, Result};

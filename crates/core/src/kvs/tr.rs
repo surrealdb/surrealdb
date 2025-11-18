@@ -2,10 +2,13 @@ use std::fmt;
 use std::fmt::Debug;
 use std::ops::Range;
 
+use futures::stream::Stream;
+
+use super::Result;
 use super::api::Transactable;
-use super::err::Result;
+use super::batch::Batch;
+use super::scanner::{Direction, Scanner};
 use super::{IntoBytes, Key, Val, Version};
-use crate::kvs::batch::Batch;
 
 /// Specifies whether the transaction is read-only or writeable.
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -317,6 +320,10 @@ impl Transactor {
 		self.inner.clrr(beg..end).await
 	}
 
+	// --------------------------------------------------
+	// Range functions
+	// --------------------------------------------------
+
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys without values, in a single
@@ -414,6 +421,10 @@ impl Transactor {
 		self.inner.count(beg..end).await
 	}
 
+	// --------------------------------------------------
+	// Batch functions
+	// --------------------------------------------------
+
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
 	/// This function fetches keys, in batches, with multiple requests to the
@@ -469,6 +480,98 @@ impl Transactor {
 		let beg = rng.start.into_vec();
 		let end = rng.end.into_vec();
 		self.inner.batch_keys_vals_versions(beg..end, batch).await
+	}
+
+	// --------------------------------------------------
+	// Stream functions
+	// --------------------------------------------------
+
+	/// Retrieve a stream over a specific range of keys in the datastore.
+	///
+	/// This function fetches keys in batches, with multiple requests to the
+	/// underlying datastore. The Scanner uses adaptive batch sizing, starting
+	/// at 100 items and doubling up to MAX_BATCH_SIZE. Prefetching is enabled
+	/// by default for optimal read throughput.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub fn stream_keys<K>(
+		&self,
+		rng: Range<K>,
+		version: Option<u64>,
+		limit: Option<usize>,
+		dir: Direction,
+	) -> impl Stream<Item = Result<Key>> + '_
+	where
+		K: IntoBytes + Debug,
+	{
+		let beg = rng.start.into_vec();
+		let end = rng.end.into_vec();
+		Scanner::<Key>::new(self, beg..end, version, limit, dir, true)
+	}
+
+	/// Retrieve a stream over a specific range of key-value pairs in the datastore.
+	///
+	/// This function fetches the key-value pairs in batches, with multiple
+	/// requests to the underlying datastore. The Scanner uses adaptive batch
+	/// sizing, starting at 100 items and doubling up to MAX_BATCH_SIZE.
+	/// Prefetching is enabled by default for optimal read throughput.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub fn stream_keys_vals<K>(
+		&self,
+		rng: Range<K>,
+		version: Option<u64>,
+		limit: Option<usize>,
+		dir: Direction,
+	) -> impl Stream<Item = Result<(Key, Val)>> + '_
+	where
+		K: IntoBytes + Debug,
+	{
+		let beg = rng.start.into_vec();
+		let end = rng.end.into_vec();
+		Scanner::<(Key, Val)>::new(self, beg..end, version, limit, dir, true)
+	}
+
+	/// Retrieve a stream over a specific range of keys in the datastore without
+	/// prefetching.
+	///
+	/// This variant disables prefetching, making it more suitable for scenarios
+	/// where each key will be processed with write operations (e.g., delete, update)
+	/// and prefetching would waste work on errors.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub fn stream_keys_no_prefetch<K>(
+		&self,
+		rng: Range<K>,
+		version: Option<u64>,
+		limit: Option<usize>,
+		dir: Direction,
+	) -> impl Stream<Item = Result<Key>> + '_
+	where
+		K: IntoBytes + Debug,
+	{
+		let beg = rng.start.into_vec();
+		let end = rng.end.into_vec();
+		Scanner::<Key>::new(self, beg..end, version, limit, dir, false)
+	}
+
+	/// Retrieve a stream over a specific range of keys in the datastore without
+	/// prefetching.
+	///
+	/// This variant disables prefetching, making it more suitable for scenarios
+	/// where each key will be processed with write operations (e.g., delete, update)
+	/// and prefetching would waste work on errors.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
+	pub fn stream_keys_vals_no_prefetch<K>(
+		&self,
+		rng: Range<K>,
+		version: Option<u64>,
+		limit: Option<usize>,
+		dir: Direction,
+	) -> impl Stream<Item = Result<(Key, Val)>> + '_
+	where
+		K: IntoBytes + Debug,
+	{
+		let beg = rng.start.into_vec();
+		let end = rng.end.into_vec();
+		Scanner::<(Key, Val)>::new(self, beg..end, version, limit, dir, false)
 	}
 
 	// --------------------------------------------------

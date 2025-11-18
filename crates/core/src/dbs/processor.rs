@@ -612,7 +612,7 @@ pub(super) trait Collector {
 	async fn start_skip(
 		&mut self,
 		ctx: &Context,
-		txn: &Transaction,
+		opt: &Options,
 		mut rng: Range<Key>,
 		sc: ScanDirection,
 	) -> Result<Option<Range<Key>>> {
@@ -621,7 +621,7 @@ pub(super) trait Collector {
 		//
 		// This method avoids fully materializing or processing records prior to the
 		// requested offset by streaming only keys from the underlying KV store. It
-		// updates the iterator’s internal skipped counter and returns a narrowed
+		// updates the iterator's internal skipped counter and returns a narrowed
 		// range to resume scanning from.
 		let ite = self.iterator();
 		let skippable = ite.skippable();
@@ -629,8 +629,10 @@ pub(super) trait Collector {
 			// There is nothing to skip, we return the original range.
 			return Ok(Some(rng));
 		}
+		// Get the transaction
+		let txn = ctx.tx();
 		// We only need to iterate over keys.
-		let mut stream = txn.stream_keys(rng.clone(), Some(skippable), sc);
+		let mut stream = txn.stream_keys(rng.clone(), opt.version, Some(skippable), sc);
 		let mut skipped = 0;
 		let mut last_key = vec![];
 		while let Some(res) = stream.next().await {
@@ -678,13 +680,13 @@ pub(super) trait Collector {
 		let beg = record::prefix(db.namespace_id, db.database_id, v)?;
 		let end = record::suffix(db.namespace_id, db.database_id, v)?;
 		// Optionally skip keys
-		let rng = if let Some(r) = self.start_skip(ctx, &txn, beg..end, sc).await? {
+		let rng = if let Some(r) = self.start_skip(ctx, opt, beg..end, sc).await? {
 			r
 		} else {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream(rng, opt.version, None, sc);
+		let mut stream = txn.stream_keys_vals(rng, opt.version, None, sc);
 
 		// Loop until no more entries
 		let mut count = 0;
@@ -722,7 +724,7 @@ pub(super) trait Collector {
 		let beg = record::prefix(db.namespace_id, db.database_id, v)?;
 		let end = record::suffix(db.namespace_id, db.database_id, v)?;
 		// Optionally skip keys
-		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
+		let rng = if let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? {
 			// Returns the next range of keys
 			rng
 		} else {
@@ -730,7 +732,7 @@ pub(super) trait Collector {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream_keys(rng, None, sc);
+		let mut stream = txn.stream_keys(rng, opt.version, None, sc);
 		// Loop until no more entries
 		let mut count = 0;
 		while let Some(res) = stream.next().await {
@@ -811,7 +813,7 @@ pub(super) trait Collector {
 		// Prepare
 		let (beg, end) = Self::range_prepare(ns, db, tb, r).await?;
 		// Optionally skip keys
-		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
+		let rng = if let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? {
 			// Returns the next range of keys
 			rng
 		} else {
@@ -819,7 +821,7 @@ pub(super) trait Collector {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream(rng, None, None, sc);
+		let mut stream = txn.stream_keys_vals(rng, None, None, sc);
 		// Loop until no more entries
 		let mut count = 0;
 		while let Some(res) = stream.next().await {
@@ -852,7 +854,7 @@ pub(super) trait Collector {
 		// Prepare
 		let (beg, end) = Self::range_prepare(ns, db, tb, r).await?;
 		// Optionally skip keys
-		let rng = if let Some(rng) = self.start_skip(ctx, &txn, beg..end, sc).await? {
+		let rng = if let Some(rng) = self.start_skip(ctx, opt, beg..end, sc).await? {
 			// Returns the next range of keys
 			rng
 		} else {
@@ -860,7 +862,7 @@ pub(super) trait Collector {
 			return Ok(());
 		};
 		// Create a new iterable range
-		let mut stream = txn.stream_keys(rng, None, sc);
+		let mut stream = txn.stream_keys(rng, opt.version, None, sc);
 		// Loop until no more entries
 		let mut count = 0;
 		while let Some(res) = stream.next().await {
@@ -951,7 +953,8 @@ pub(super) trait Collector {
 		// Loop over the chosen edge types
 		for (beg, end) in keys.into_iter() {
 			// Create a new iterable range
-			let mut stream = txn.stream(beg..end, None, None, ScanDirection::Forward);
+			let mut stream =
+				txn.stream_keys_vals(beg..end, opt.version, None, ScanDirection::Forward);
 			// Loop until no more entries
 			let mut count = 0;
 			while let Some(res) = stream.next().await {

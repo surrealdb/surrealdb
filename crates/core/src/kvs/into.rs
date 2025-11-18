@@ -1,5 +1,6 @@
-use bytes::Bytes;
 use std::borrow::Cow;
+
+use bytes::Bytes;
 
 /// An optimised trait for converting values to bytes only when needed
 pub trait IntoBytes {

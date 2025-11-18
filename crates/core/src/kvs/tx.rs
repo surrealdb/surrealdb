@@ -4,6 +4,7 @@ use std::ops::{Deref, Range};
 use std::sync::Arc;
 
 use anyhow::Result;
+use futures::TryStreamExt;
 use futures::stream::Stream;
 use uuid::Uuid;
 
@@ -17,19 +18,17 @@ use crate::catalog::{
 	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, IndexId,
 	NamespaceDefinition, NamespaceId, Record, TableDefinition, TableId,
 };
-use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::MutableContext;
 use crate::dbs::node::Node;
+use crate::doc::CursorRecord;
 use crate::err::Error;
 use crate::idx::planner::ScanDirection;
 use crate::key::database::sq::Sq;
 use crate::kvs::cache::tx::TransactionCache;
-use crate::kvs::scanner::Scanner;
+use crate::kvs::scanner::Direction;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::{KVKey, KVValue, Transactor, cache};
 use crate::val::{RecordId, RecordIdKey};
-
-use crate::doc::CursorRecord;
 
 pub struct Transaction {
 	/// Is this is a local datastore transaction?
@@ -85,7 +84,7 @@ impl Transaction {
 	}
 
 	/// Get the current monotonic timestamp
-	async fn timestamp(&self) -> Result<u64> {
+	async fn timestamp(&self) -> Result<Box<dyn crate::kvs::Timestamp>> {
 		Ok(self.tr.timestamp().await.map_err(Error::from)?)
 	}
 
@@ -350,6 +349,10 @@ impl Transaction {
 		Ok(self.tr.keys(beg..end, limit, version).await.map_err(Error::from)?)
 	}
 
+	// --------------------------------------------------
+	// Range functions
+	// --------------------------------------------------
+
 	/// Retrieve a specific range of keys from the datastore in reverse order.
 	///
 	/// This function fetches the full range of keys, in a single request to the
@@ -417,6 +420,10 @@ impl Transaction {
 		Ok(self.tr.count(beg..end).await.map_err(Error::from)?)
 	}
 
+	// --------------------------------------------------
+	// Batch functions
+	// --------------------------------------------------
+
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
 	/// This function fetches the keys in batches, with multiple requests to the
@@ -473,29 +480,120 @@ impl Transaction {
 		Ok(self.tr.batch_keys_vals_versions(beg..end, batch).await.map_err(Error::from)?)
 	}
 
+	// --------------------------------------------------
+	// Stream functions
+	// --------------------------------------------------
+
 	/// Retrieve a stream over a specific range of keys in the datastore.
 	///
-	/// This function fetches the key-value pairs in batches, with multiple
-	/// requests to the underlying datastore.
+	/// This function fetches keys in batches, with multiple requests to the
+	/// underlying datastore. The Scanner uses adaptive batch sizing, starting
+	/// at 100 items and doubling up to MAX_BATCH_SIZE. Prefetching is enabled
+	/// by default for optimal read throughput.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub fn stream(
+	pub fn stream_keys(
+		&self,
+		rng: Range<Key>,
+		version: Option<u64>,
+		limit: Option<usize>,
+		dir: ScanDirection,
+	) -> impl Stream<Item = Result<Key>> + '_ {
+		self.tr
+			.stream_keys(
+				rng,
+				version,
+				limit,
+				match dir {
+					ScanDirection::Forward => Direction::Forward,
+					ScanDirection::Backward => Direction::Backward,
+				},
+			)
+			.map_err(Error::from)
+			.map_err(Into::into)
+	}
+
+	/// Retrieve a stream over a specific range of key-value pairs in the datastore.
+	///
+	/// This function fetches the key-value pairs in batches, with multiple
+	/// requests to the underlying datastore. The Scanner uses adaptive batch
+	/// sizing, starting at 100 items and doubling up to MAX_BATCH_SIZE.
+	/// Prefetching is enabled by default for optimal read throughput.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub fn stream_keys_vals(
 		&self,
 		rng: Range<Key>,
 		version: Option<u64>,
 		limit: Option<usize>,
 		dir: ScanDirection,
 	) -> impl Stream<Item = Result<(Key, Val)>> + '_ {
-		Scanner::<(Key, Val)>::new(self, *NORMAL_FETCH_SIZE, rng, version, limit, dir)
+		self.tr
+			.stream_keys_vals(
+				rng,
+				version,
+				limit,
+				match dir {
+					ScanDirection::Forward => Direction::Forward,
+					ScanDirection::Backward => Direction::Backward,
+				},
+			)
+			.map_err(Error::from)
+			.map_err(Into::into)
 	}
 
+	/// Retrieve a stream over a specific range of keys in the datastore without
+	/// prefetching.
+	///
+	/// This variant disables prefetching, making it more suitable for scenarios
+	/// where each key will be processed with write operations (e.g., delete, update)
+	/// and prefetching would waste work on errors.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub fn stream_keys(
+	pub fn stream_keys_no_prefetch(
 		&self,
 		rng: Range<Key>,
+		version: Option<u64>,
 		limit: Option<usize>,
 		dir: ScanDirection,
 	) -> impl Stream<Item = Result<Key>> + '_ {
-		Scanner::<Key>::new(self, *NORMAL_FETCH_SIZE, rng, None, limit, dir)
+		self.tr
+			.stream_keys_no_prefetch(
+				rng,
+				version,
+				limit,
+				match dir {
+					ScanDirection::Forward => Direction::Forward,
+					ScanDirection::Backward => Direction::Backward,
+				},
+			)
+			.map_err(Error::from)
+			.map_err(Into::into)
+	}
+
+	/// Retrieve a stream over a specific range of key-value pairs in the datastore without
+	/// prefetching.
+	///
+	/// This variant disables prefetching, making it more suitable for scenarios
+	/// where each key will be processed with write operations (e.g., delete, update)
+	/// and prefetching would waste work on errors.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
+	pub fn stream_keys_vals_no_prefetch(
+		&self,
+		rng: Range<Key>,
+		version: Option<u64>,
+		limit: Option<usize>,
+		dir: ScanDirection,
+	) -> impl Stream<Item = Result<(Key, Val)>> + '_ {
+		self.tr
+			.stream_keys_vals_no_prefetch(
+				rng,
+				version,
+				limit,
+				match dir {
+					ScanDirection::Forward => Direction::Forward,
+					ScanDirection::Backward => Direction::Backward,
+				},
+			)
+			.map_err(Error::from)
+			.map_err(Into::into)
 	}
 
 	// --------------------------------------------------

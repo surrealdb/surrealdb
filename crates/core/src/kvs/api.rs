@@ -7,7 +7,6 @@ use std::time::SystemTime;
 use super::err::{Error, Result};
 use super::util;
 use crate::cnf::{COUNT_BATCH_SIZE, NORMAL_FETCH_SIZE};
-// use crate::err::Error;
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
 use crate::kvs::{Key, Val, Version};
@@ -117,7 +116,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// request to the underlying datastore.
 	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>>;
 
-	/// Retrieve a specific range of keys from the datastore.
+	/// Retrieve a specific range of keys from the datastore, in reverse order.
 	///
 	/// This function fetches the full range of keys without values, in a single
 	/// request to the underlying datastore.
