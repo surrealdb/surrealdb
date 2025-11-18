@@ -9,17 +9,17 @@ use reblessive::tree::Stk;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{self, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId};
 use crate::expr::operator::NearestNeighbor;
-use crate::expr::order::{OrderList, Ordering};
+use crate::expr::order::{OrderDirection, OrderList, Ordering};
 use crate::expr::visit::MutVisitor;
 use crate::expr::{
 	BinaryOperator, Cond, Expr, FlowResultExt as _, Idiom, Kind, Literal, Order, Part, With,
 };
-use crate::idx::planner::StatementContext;
 use crate::idx::planner::executor::{
 	KnnBruteForceExpression, KnnBruteForceExpressions, KnnExpressions,
 };
 use crate::idx::planner::plan::{IndexOperator, IndexOption};
 use crate::idx::planner::rewriter::KnnConditionRewriter;
+use crate::idx::planner::{ScanDirection, StatementContext};
 use crate::kvs::Transaction;
 use crate::val::{Array, Number, Value};
 
@@ -152,7 +152,7 @@ impl<'a> TreeBuilder<'a> {
 							index_reference.clone(),
 							Some(id),
 							IdiomPosition::None,
-							IndexOperator::Order(!o.direction),
+							IndexOperator::Order(o.direction),
 						));
 						break;
 					}
@@ -745,6 +745,44 @@ impl IndexReference {
 			indexes,
 			idx,
 		}
+	}
+
+	pub(crate) fn match_order(
+		&self,
+		order_list: &OrderList,
+		mut from_col: usize,
+		has_reverse_scan: bool,
+	) -> Option<ScanDirection> {
+		let mut chosen_direction = None;
+		for o in &order_list.0 {
+			let next_direction = match o.direction {
+				OrderDirection::Ascending => ScanDirection::Forward,
+				OrderDirection::Descending => {
+					if !has_reverse_scan {
+						return None;
+					}
+					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
+					return None;
+					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
+					ScanDirection::Backward
+				}
+			};
+			if let Some(previous_direction) = chosen_direction {
+				if previous_direction != next_direction {
+					return None;
+				}
+			} else {
+				chosen_direction = Some(next_direction);
+			}
+			let Some(index_col) = self.cols.get(from_col) else {
+				return None;
+			};
+			if !o.value.eq(index_col) {
+				return None;
+			}
+			from_col += 1;
+		}
+		chosen_direction
 	}
 }
 
