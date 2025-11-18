@@ -162,7 +162,7 @@ sha2 = "0.10.8"
 snap = "1.1.0"
 strsim = "0.11.1"
 subtle = "2.6"
-surrealdb-protocol = { version = "0.6.1" }
+surrealdb-protocol = { version = "0.6.1", default-features = false, features = ["proto", "flatbuffers"] }
 sysinfo = "0.33.0"
 tempfile = "3.10.1"
 thiserror = "1.0.63"

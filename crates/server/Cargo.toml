@@ -49,7 +49,7 @@ surrealdb = { workspace = true, features = [
     "rustls",
 ] }
 surrealdb-core.workspace = true
-surrealdb-protocol.workspace = true
+surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers", "rpc"] }
 surrealdb-types.workspace = true
 
 # External surreal crates
