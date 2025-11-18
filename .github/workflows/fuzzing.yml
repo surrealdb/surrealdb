@@ -20,11 +20,11 @@ jobs:
     name: Check fuzzing
     runs-on: ubuntu-latest
     steps:
-      - name: Setup environment
-        uses: ./.github/actions/setup-environment
-
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
 
       - name: Setup cache
         uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # (Actions must be pinned by commit hash) v2.7.8

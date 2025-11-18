@@ -53,13 +53,13 @@ jobs:
     name: Check dependencies for known issues
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
           components: rustfmt
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Install cargo-deny
         run: cargo install --debug --locked cargo-deny@0.18.2
@@ -77,13 +77,13 @@ jobs:
     name: Check dependencies for untrusted sources
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout sources
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
+
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
           components: rustfmt
-
-      - name: Checkout sources
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
 
       - name: Install cargo-vet
         run: cargo install --debug --locked cargo-vet
