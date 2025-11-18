@@ -958,8 +958,6 @@ impl Datastore {
 				Error::Internal(format!("Clock may have gone backwards: {:?}", e.duration()))
 			})?
 			.as_secs();
-		// Save timestamps for current versionstamps to track cleanup progress
-		self.changefeed_versionstamp(lh.as_ref(), ts).await?;
 		// Remove old changefeed data from all databases based on retention policies
 		self.changefeed_cleanup(lh.as_ref(), ts).await?;
 		// Everything completed successfully
@@ -995,8 +993,6 @@ impl Datastore {
 	pub async fn changefeed_process_at(&self, lh: Option<&LeaseHandler>, ts: u64) -> Result<()> {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running changefeed garbage collection");
-		// Save timestamps for current versionstamps using the provided timestamp
-		self.changefeed_versionstamp(lh, ts).await?;
 		// Remove old changefeed data from all databases based on retention policies
 		// using the provided timestamp as the reference point
 		self.changefeed_cleanup(lh, ts).await?;

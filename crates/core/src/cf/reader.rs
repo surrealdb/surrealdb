@@ -1,8 +1,7 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::cf::{ChangeSet, DatabaseMutation, TableMutations};
-use crate::err::Error;
 use crate::expr::statements::show::ShowSince;
 use crate::key::change;
 #[cfg(debug_assertions)]
@@ -11,13 +10,13 @@ use crate::kvs::{KVKey, KVValue, Transaction};
 use crate::vs::VersionStamp;
 
 // Reads the change feed for a specific database or a table,
-// starting from a specific versionstamp.
+// starting from a specific timestamp.
 //
 // The limit parameter is the maximum number of change sets to return.
 // If the limit is not specified, the default is 100.
 //
 // You can use this to read the change feed in chunks.
-// The second call would start from the last versionstamp + 1 of the first call.
+// The second call would start from the last timestamp + 1 of the first call.
 pub async fn read(
 	tx: &Transaction,
 	ns: NamespaceId,
@@ -28,18 +27,10 @@ pub async fn read(
 ) -> Result<Vec<ChangeSet>> {
 	// Calculate the start of the changefeed range
 	let beg = match start {
-		ShowSince::Versionstamp(x) => change::prefix_ts(ns, db, VersionStamp::from_u64(x)),
+		ShowSince::Versionstamp(x) => change::prefix_ts(ns, db, x),
 		ShowSince::Timestamp(x) => {
 			let ts = x.timestamp() as u64;
-			let vs = tx.get_versionstamp_from_timestamp(ts, ns, db).await?;
-			match vs {
-				Some(vs) => change::prefix_ts(ns, db, vs),
-				None => {
-					bail!(Error::Internal(
-						"No versionstamp found associated to this timestamp. Hint: Try a later datetime or use SINCE 0 to show all changes for a changefeed".to_string(),
-					))
-				}
-			}
+			change::prefix_ts(ns, db, ts)
 		}
 	}
 	.encode_key()?;
@@ -47,8 +38,8 @@ pub async fn read(
 	let end = change::suffix(ns, db).encode_key()?;
 	// Limit the changefeed results with a default
 	let limit = limit.unwrap_or(100).min(1000);
-	// Create an empty buffer for the versionstamp
-	let mut vs: Option<VersionStamp> = None;
+	// Create an empty buffer for the timestamp
+	let mut current_ts: Option<u64> = None;
 	// Create an empty buffer for the table mutations
 	let mut buf: Vec<TableMutations> = Vec::new();
 	// Create an empty buffer for the final changesets
@@ -69,17 +60,18 @@ pub async fn read(
 		// Decode the byte array into a vector of operations
 		let tb_muts = TableMutations::kv_decode_value(v)?;
 		// Get the timestamp of the changefeed entry
-		match vs {
+		match current_ts {
 			Some(x) => {
-				if dec.vs != x {
+				if dec.ts != x {
 					let db_mut = DatabaseMutation(buf);
-					res.push(ChangeSet(x, db_mut));
+					// Convert timestamp to VersionStamp for compatibility with existing ChangeSet structure
+					res.push(ChangeSet(VersionStamp::from_u64(x), db_mut));
 					buf = Vec::new();
-					vs = Some(dec.vs)
+					current_ts = Some(dec.ts)
 				}
 			}
 			None => {
-				vs = Some(dec.vs);
+				current_ts = Some(dec.ts);
 			}
 		}
 		buf.push(tb_muts);
@@ -87,7 +79,13 @@ pub async fn read(
 	// Collect all mutations together
 	if !buf.is_empty() {
 		let db_mut = DatabaseMutation(buf);
-		res.push(ChangeSet(vs.expect("versionstamp should be set when mutations exist"), db_mut));
+		// Convert timestamp to VersionStamp for compatibility with existing ChangeSet structure
+		res.push(ChangeSet(
+			VersionStamp::from_u64(
+				current_ts.expect("timestamp should be set when mutations exist"),
+			),
+			db_mut,
+		));
 	}
 	// Return the results
 	Ok(res)

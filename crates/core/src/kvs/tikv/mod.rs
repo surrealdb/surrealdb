@@ -14,12 +14,9 @@ use tikv::{CheckLevel, Config, TimestampExt, TransactionClient, TransactionOptio
 use tokio::sync::RwLock;
 
 use super::err::{Error, Result};
-use crate::key::database::vs::VsKey;
 use crate::key::debug::Sprintable;
 use crate::kvs::api::Transactable;
-use crate::kvs::key::KVKey;
 use crate::kvs::{Key, Val};
-use crate::vs::VersionStamp;
 
 const TARGET: &str = "surrealdb::core::kvs::tikv";
 

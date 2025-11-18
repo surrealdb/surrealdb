@@ -561,28 +561,28 @@ impl Transaction {
 	// complete_changes will complete the changefeed recording for the given
 	// namespace and database.
 	//
-	// Under the hood, this function calls the transaction's
-	// `set_versionstamped_key` for each change. Every change must be recorded by
-	// calling this struct's `record_change` function beforehand. If there were no
-	// preceding `record_change` function calls for this transaction, this function
+	// This function writes all buffered changefeed entries to the datastore
+	// with the current transaction timestamp. Every change must be recorded by
+	// calling this struct's `changefeed_buffer_record_change` function beforehand.
+	// If there were no preceding calls for this transaction, this function
 	// will do nothing.
 	//
 	// This function should be called only after all the changes have been made to
 	// the transaction. Otherwise, changes are missed in the change feed.
 	//
 	// This function should be called immediately before calling the commit function
-	// to guarantee that the lock, if needed by lock=true, is held only for the
-	// duration of the commit, not the entire transaction.
-	//
-	// This function is here because it needs access to mutably borrow the
-	// transaction.
-	//
-	// Lastly, you should set lock=true if you want the changefeed to be correctly
-	// ordered for non-FDB backends.
+	// to ensure the timestamp reflects the actual commit time.
 	pub(crate) async fn complete_changes(&self) -> Result<()> {
-		for (tskey, prefix, suffix, v) in self.cf.changes()? {
-			// self.set(prefix, suffix, v).await?
-			todo!()
+		// Get the current transaction timestamp
+		let ts = self.timestamp().await?;
+		// Write all buffered changefeed entries
+		for (ns, db, tb, value) in self.cf.changes()? {
+			// Create the changefeed key with the current timestamp
+			let key = crate::key::change::new(ns, db, ts, &tb);
+			// Encode the key
+			let key_bytes = key.encode_key()?;
+			// Write the changefeed entry using the raw transactor API
+			self.tr.set(key_bytes, value, None).await.map_err(Error::from)?;
 		}
 		Ok(())
 	}

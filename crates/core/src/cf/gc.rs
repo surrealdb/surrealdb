@@ -6,7 +6,6 @@ use crate::key::change;
 use crate::key::debug::Sprintable;
 use crate::kvs::tasklease::LeaseHandler;
 use crate::kvs::{KVKey, Transaction};
-use crate::vs::VersionStamp;
 
 // gc_all_at deletes all change feed entries that become stale at the given
 // timestamp.
@@ -66,16 +65,10 @@ pub async fn gc_ns(
 		if ts < cf_expiry {
 			continue;
 		}
-		// Calculate the watermark expiry window
+		// Calculate the watermark timestamp
 		let watermark_ts = ts - cf_expiry;
-		// Calculate the watermark versionstamp
-		let watermark_vs = tx
-			.get_versionstamp_from_timestamp(watermark_ts, db.namespace_id, db.database_id)
-			.await?;
-		// If a versionstamp exists, then garbage collect
-		if let Some(watermark_vs) = watermark_vs {
-			gc_range(tx, db.namespace_id, db.database_id, watermark_vs).await?;
-		}
+		// Garbage collect all entries older than the watermark
+		gc_range(tx, db.namespace_id, db.database_id, watermark_ts).await?;
 		// Possibly renew the lease
 		if let Some(lh) = lh {
 			lh.try_maintain_lease().await?;
@@ -86,21 +79,21 @@ pub async fn gc_ns(
 	Ok(())
 }
 
-// gc_db deletes all change feed entries in the given database that are older
-// than the given watermark.
+// gc_range deletes all change feed entries in the given database that are older
+// than the given watermark timestamp.
 #[instrument(level = "trace", target = "surrealdb::core::cfs", skip(tx))]
 pub async fn gc_range(
 	tx: &Transaction,
 	ns: NamespaceId,
 	db: DatabaseId,
-	vt: VersionStamp,
+	watermark_ts: u64,
 ) -> Result<()> {
 	// Calculate the range
-	let beg = change::prefix_ts(ns, db, VersionStamp::ZERO).encode_key()?;
-	let end = change::prefix_ts(ns, db, vt).encode_key()?;
+	let beg = change::prefix_ts(ns, db, 0).encode_key()?;
+	let end = change::prefix_ts(ns, db, watermark_ts).encode_key()?;
 	// Trace for debugging
 	trace!(
-		"Performing garbage collection on {ns}:{db} for watermark {vt:?}, between {} and {}",
+		"Performing garbage collection on {ns}:{db} for watermark timestamp {watermark_ts}, between {} and {}",
 		beg.sprint(),
 		end.sprint()
 	);

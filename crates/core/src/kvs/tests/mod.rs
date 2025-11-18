@@ -31,7 +31,6 @@ mod raw;
 mod read_and_deletion_only;
 mod reverse_iterator;
 mod snapshot;
-mod timestamp_to_versionstamp;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Kvs {
@@ -89,7 +88,6 @@ mod mem {
 		multireader,
 		multiwriter_different_keys,
 		multiwriter_same_keys_conflict,
-		timestamp_to_versionstamp,
 		reverse_iterator,
 	);
 }
@@ -122,7 +120,6 @@ mod rocksdb {
 		multireader,
 		multiwriter_different_keys,
 		multiwriter_same_keys_conflict,
-		timestamp_to_versionstamp,
 		reverse_iterator,
 		read_and_deletion_only,
 	);
@@ -156,7 +153,6 @@ mod surrealkv {
 		multireader,
 		multiwriter_different_keys,
 		multiwriter_same_keys_conflict,
-		timestamp_to_versionstamp,
 		reverse_iterator,
 	);
 }
@@ -191,7 +187,6 @@ mod tikv {
 		multireader,
 		multiwriter_different_keys,
 		multiwriter_same_keys_allow,
-		timestamp_to_versionstamp,
 		reverse_iterator,
 	);
 }

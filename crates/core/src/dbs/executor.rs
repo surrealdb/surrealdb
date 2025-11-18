@@ -301,7 +301,7 @@ impl Executor {
 					return Ok(value);
 				}
 
-				if let Err(e) = txn.complete_changes(false).await {
+				if let Err(e) = txn.complete_changes().await {
 					let _ = txn.cancel().await;
 
 					bail!(Error::QueryNotExecuted {
@@ -508,7 +508,7 @@ impl Executor {
 				TopLevelExpr::Commit => {
 					// complete_changes and then commit.
 					// If either error undo results.
-					let e = if let Err(e) = txn.complete_changes(false).await {
+					let e = if let Err(e) = txn.complete_changes().await {
 						let _ = txn.cancel().await;
 						e
 					} else if let Err(e) = txn.commit().await {
