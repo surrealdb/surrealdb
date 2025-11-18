@@ -41,8 +41,8 @@ jobs:
   #   runs-on: [runner-arm64-2xlarge]
   #   timeout-minutes: 60
   #   steps:
-  #     - name: Install stable toolchain
-  #       uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # stable (Actions must be pinned by commit hash)
+  #     - name: Setup environment
+  #       uses: ./.github/actions/setup-environment
 
   #     - name: Configure AWS credentials
   #       uses: aws-actions/configure-aws-credentials@97834a484a5ab3c40fa9e2eb40fcf8041105a573
@@ -125,8 +125,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2 (Actions must be pinned by commit hash)
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # stable (Actions must be pinned by commit hash)
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           components: rustfmt
 

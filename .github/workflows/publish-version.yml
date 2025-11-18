@@ -60,13 +60,13 @@ jobs:
       release-name: ${{ steps.outputs.outputs.release-name }}
       build-metadata: ${{ steps.outputs.outputs.build-metadata }}
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
-
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           ref: ${{ inputs.git-ref }}
+
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
 
       - name: Set outputs
         id: outputs

@@ -53,8 +53,8 @@ jobs:
     name: Check dependencies for known issues
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           components: rustfmt
 
@@ -77,8 +77,8 @@ jobs:
     name: Check dependencies for untrusted sources
     runs-on: ubuntu-latest
     steps:
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # (Actions must be pinned by commit hash) stable
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
           components: rustfmt
 
