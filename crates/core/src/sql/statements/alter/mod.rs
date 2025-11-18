@@ -1,4 +1,5 @@
 pub mod field;
+use surrealdb_types::{SqlFormat, ToSql};
 mod sequence;
 mod table;
 
@@ -57,6 +58,16 @@ impl Display for AlterStatement {
 			Self::Table(v) => Display::fmt(v, f),
 			Self::Sequence(v) => Display::fmt(v, f),
 			Self::Field(v) => Display::fmt(v, f),
+		}
+	}
+}
+
+impl ToSql for AlterStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Self::Table(v) => v.fmt_sql(f, fmt),
+			Self::Sequence(v) => v.fmt_sql(f, fmt),
+			Self::Field(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }

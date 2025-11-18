@@ -6,7 +6,7 @@ use chrono::offset::LocalResult;
 use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
+use crate::sql::{SqlFormat, ToSql};
 use crate::utils::escape::QuoteStr;
 use crate::write_sql;
 
@@ -81,7 +81,7 @@ impl Display for Datetime {
 }
 
 impl ToSql for Datetime {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		write_sql!(f, "d{}", QuoteStr(&self.to_string()))
 	}
 }

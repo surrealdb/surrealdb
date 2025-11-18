@@ -1,7 +1,7 @@
 use std::fmt;
 
 use revision::revisioned;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::Expr;
 
@@ -16,7 +16,7 @@ impl fmt::Display for Cond {
 }
 
 impl ToSql for Cond {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		write_sql!(f, "WHERE {}", self.0);
 	}
 }

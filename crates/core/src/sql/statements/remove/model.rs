@@ -1,4 +1,5 @@
 use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -17,6 +18,12 @@ impl Display for RemoveModelStatement {
 		}
 		write!(f, " ml::{}<{}>", &self.name, self.version)?;
 		Ok(())
+	}
+}
+
+impl ToSql for RemoveModelStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

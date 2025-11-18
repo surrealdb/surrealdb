@@ -1,4 +1,5 @@
 use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::types::PublicDuration;
 
@@ -10,6 +11,12 @@ pub struct SleepStatement {
 impl fmt::Display for SleepStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SLEEP {}", self.duration)
+	}
+}
+
+impl ToSql for SleepStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

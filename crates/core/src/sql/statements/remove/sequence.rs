@@ -1,4 +1,5 @@
 use std::fmt::{self, Display, Formatter};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::{Expr, Literal};
 
@@ -26,6 +27,12 @@ impl Display for RemoveSequenceStatement {
 		}
 		write!(f, " {}", self.name)?;
 		Ok(())
+	}
+}
+
+impl ToSql for RemoveSequenceStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

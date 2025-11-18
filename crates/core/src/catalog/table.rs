@@ -1,5 +1,5 @@
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisioned};
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, NamespaceId, Permissions, ViewDefinition};
@@ -121,8 +121,8 @@ impl TableDefinition {
 }
 
 impl ToSql for TableDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, fmt)
 	}
 }
 
@@ -152,7 +152,7 @@ pub enum TableType {
 }
 
 impl ToSql for TableType {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		match self {
 			TableType::Any => f.push_str("ANY"),
 			TableType::Normal => f.push_str("NORMAL"),

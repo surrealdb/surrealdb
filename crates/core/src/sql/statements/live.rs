@@ -1,6 +1,7 @@
 use std::fmt;
 
 use uuid::Uuid;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::{Cond, Expr, Fetchs, Fields};
 
@@ -31,6 +32,12 @@ impl fmt::Display for LiveStatement {
 			write!(f, " {v}")?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for LiveStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

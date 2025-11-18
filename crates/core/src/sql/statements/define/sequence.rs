@@ -1,6 +1,7 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::sql::{Expr, Literal, Timeout};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -38,6 +39,12 @@ impl Display for DefineSequenceStatement {
 			write!(f, " {v}")?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for DefineSequenceStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

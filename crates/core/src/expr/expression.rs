@@ -3,7 +3,7 @@ use std::ops::Bound;
 
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
-use surrealdb_types::{RecordId, ToSql, write_sql};
+use surrealdb_types::{RecordId, SqlFormat, ToSql, write_sql};
 
 use super::SleepStatement;
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
@@ -877,7 +877,7 @@ impl fmt::Display for Expr {
 }
 
 impl ToSql for Expr {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		write_sql!(f, "{}", self)
 	}
 }

@@ -1,6 +1,7 @@
 use std::fmt::{self, Write};
 
 use super::DefineKind;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::fmt::{is_pretty, pretty_indent};
 use crate::sql::{Expr, Permission};
 
@@ -48,6 +49,12 @@ impl fmt::Display for DefineModelStatement {
 		};
 		write!(f, "PERMISSIONS {}", self.permissions)?;
 		Ok(())
+	}
+}
+
+impl ToSql for DefineModelStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

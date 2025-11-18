@@ -1,4 +1,5 @@
 use std::fmt::{self, Display, Formatter};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use std::ops::Deref;
 use std::str;
 use std::str::FromStr;
@@ -121,5 +122,11 @@ impl Deref for Uuid {
 impl Display for Uuid {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "u{}", QuoteStr(&self.0.to_string()))
+	}
+}
+
+impl ToSql for Uuid {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }

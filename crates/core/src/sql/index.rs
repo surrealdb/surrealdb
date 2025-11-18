@@ -1,6 +1,7 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::fmt::EscapeIdent;
 use crate::sql::Cond;
 use crate::sql::scoring::Scoring;
@@ -234,6 +235,12 @@ impl Display for Index {
 				Ok(())
 			}
 		}
+	}
+}
+
+impl ToSql for Index {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

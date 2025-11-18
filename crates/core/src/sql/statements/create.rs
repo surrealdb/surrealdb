@@ -1,4 +1,5 @@
 use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::Fmt;
 use crate::sql::{Data, Expr, Output, Timeout};
@@ -45,6 +46,12 @@ impl fmt::Display for CreateStatement {
 			f.write_str(" PARALLEL")?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for CreateStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

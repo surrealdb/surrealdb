@@ -1,6 +1,7 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::fmt::EscapeIdent;
 use crate::sql::{Base, Cond, RecordIdLit};
 use crate::types::PublicDuration;
@@ -250,5 +251,11 @@ impl Display for AccessStatement {
 				Ok(())
 			}
 		}
+	}
+}
+
+impl ToSql for AccessStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }

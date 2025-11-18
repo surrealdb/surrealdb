@@ -3,7 +3,7 @@ use std::fmt::{self, Write as _};
 //use async_graphql::dynamic::Object;
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use rust_decimal::Decimal;
-use surrealdb_types::ToSql;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::sql::{Expr, RecordIdLit};
@@ -141,6 +141,107 @@ impl fmt::Display for Literal {
 			Literal::Uuid(uuid) => write!(f, "{uuid}"),
 			Literal::Geometry(geometry) => write!(f, "{geometry}"),
 			Literal::File(file) => write!(f, "{}", file.to_sql()),
+		}
+	}
+}
+
+impl ToSql for Literal {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Literal::None => f.push_str("NONE"),
+			Literal::Null => f.push_str("NULL"),
+			Literal::UnboundedRange => f.push_str(".."),
+			Literal::Bool(x) => f.push_str(if *x { "true" } else { "false" }),
+			Literal::Float(float) => {
+				if float.is_finite() {
+					write_sql!(f, "{float}f")
+				} else {
+					write_sql!(f, "{float}")
+				}
+			}
+			Literal::Integer(x) => write_sql!(f, "{x}"),
+			Literal::Decimal(d) => write_sql!(f, "{d}dec"),
+			Literal::String(strand) => write_sql!(f, "{}", QuoteStr(strand)),
+			Literal::Bytes(bytes) => write_sql!(f, "{}", bytes.to_sql()),
+			Literal::Regex(regex) => write_sql!(f, "{}", regex.to_sql()),
+			Literal::RecordId(record_id_lit) => record_id_lit.fmt_sql(f, fmt),
+			Literal::Array(exprs) => {
+				f.push('[');
+				if !exprs.is_empty() {
+					let inner_fmt = fmt.increment();
+					if fmt.is_pretty() {
+						f.push('\n');
+						inner_fmt.write_indent(f);
+					}
+					for (i, expr) in exprs.iter().enumerate() {
+						if i > 0 {
+							inner_fmt.write_separator(f);
+						}
+						expr.fmt_sql(f, inner_fmt);
+					}
+					if fmt.is_pretty() {
+						f.push('\n');
+						fmt.write_indent(f);
+					}
+				}
+				f.push(']');
+			}
+			Literal::Set(exprs) => {
+				f.push('{');
+				if !exprs.is_empty() {
+					let inner_fmt = fmt.increment();
+					if fmt.is_pretty() {
+						f.push('\n');
+						inner_fmt.write_indent(f);
+					}
+					for (i, expr) in exprs.iter().enumerate() {
+						if i > 0 {
+							inner_fmt.write_separator(f);
+						}
+						expr.fmt_sql(f, inner_fmt);
+					}
+					if fmt.is_pretty() {
+						f.push('\n');
+						fmt.write_indent(f);
+					}
+				}
+				f.push('}');
+			}
+			Literal::Object(items) => {
+				if fmt.is_pretty() {
+					f.push('{');
+				} else {
+					f.push_str("{ ");
+				}
+				if !items.is_empty() {
+					let inner_fmt = fmt.increment();
+					if fmt.is_pretty() {
+						f.push('\n');
+						inner_fmt.write_indent(f);
+					}
+					for (i, entry) in items.iter().enumerate() {
+						if i > 0 {
+							inner_fmt.write_separator(f);
+						}
+						write_sql!(f, "{}: ", EscapeKey(&entry.key));
+						entry.value.fmt_sql(f, inner_fmt);
+					}
+					if fmt.is_pretty() {
+						f.push('\n');
+						fmt.write_indent(f);
+					}
+				}
+				if fmt.is_pretty() {
+					f.push('}');
+				} else {
+					f.push_str(" }");
+				}
+			}
+			Literal::Duration(duration) => write_sql!(f, "{}", duration.to_sql()),
+			Literal::Datetime(datetime) => write_sql!(f, "d{}", QuoteStr(&datetime.to_string())),
+			Literal::Uuid(uuid) => write_sql!(f, "{}", uuid.to_sql()),
+			Literal::Geometry(geometry) => write_sql!(f, "{}", geometry.to_sql()),
+			Literal::File(file) => write_sql!(f, "{}", file.to_sql()),
 		}
 	}
 }

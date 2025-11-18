@@ -1,4 +1,5 @@
 use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
 use crate::fmt::{EscapeIdent, QuoteStr};
@@ -117,6 +118,12 @@ impl Display for AlterFieldStatement {
 			AlterKind::None => {}
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for AlterFieldStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

@@ -199,3 +199,45 @@ impl Display for Object {
 		Object::display(f, &self.0)
 	}
 }
+
+impl surrealdb_types::ToSql for Object {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		use surrealdb_types::write_sql;
+		use crate::fmt::EscapeKey;
+		
+		if self.is_empty() {
+			return f.push_str("{  }");
+		}
+
+		if fmt.is_pretty() {
+			f.push('{');
+		} else {
+			f.push_str("{ ");
+		}
+
+		if !self.is_empty() {
+			let inner_fmt = fmt.increment();
+			if fmt.is_pretty() {
+				f.push('\n');
+				inner_fmt.write_indent(f);
+			}
+			for (i, (key, value)) in self.0.iter().enumerate() {
+				if i > 0 {
+					inner_fmt.write_separator(f);
+				}
+				write_sql!(f, "{}: ", EscapeKey(key));
+				value.fmt_sql(f, inner_fmt);
+			}
+			if fmt.is_pretty() {
+				f.push('\n');
+				fmt.write_indent(f);
+			}
+		}
+
+		if fmt.is_pretty() {
+			f.push('}');
+		} else {
+			f.push_str(" }");
+		}
+	}
+}

@@ -1,4 +1,5 @@
 use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::sql::changefeed::ChangeFeed;
@@ -47,6 +48,12 @@ impl Display for DefineDatabaseStatement {
 			write!(f, " {v}")?;
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for DefineDatabaseStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

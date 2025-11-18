@@ -1,6 +1,7 @@
 use std::fmt::{self, Display, Formatter, Write as _};
 use std::ops::Bound;
 
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::fmt::{EscapeKey, EscapeRid, Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{Expr, RecordIdKeyRangeLit};
@@ -163,7 +164,74 @@ impl Display for RecordIdKeyLit {
 				RecordIdKeyGen::Ulid => Display::fmt("ulid()", f),
 				RecordIdKeyGen::Uuid => Display::fmt("uuid()", f),
 			},
-			Self::Range(v) => Display::fmt(v, f),
+		Self::Range(v) => Display::fmt(v, f),
+	}
+	}
+}
+
+impl ToSql for RecordIdKeyLit {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Self::Number(v) => write_sql!(f, "{}", v),
+			Self::String(v) => write_sql!(f, "{}", EscapeRid(v)),
+			Self::Uuid(v) => write_sql!(f, "{}", v.to_sql()),
+			Self::Array(v) => {
+				f.push('[');
+				if !v.is_empty() {
+					let inner_fmt = fmt.increment();
+					if fmt.is_pretty() {
+						f.push('\n');
+						inner_fmt.write_indent(f);
+					}
+					for (i, expr) in v.iter().enumerate() {
+						if i > 0 {
+							inner_fmt.write_separator(f);
+						}
+						expr.fmt_sql(f, inner_fmt);
+					}
+					if fmt.is_pretty() {
+						f.push('\n');
+						fmt.write_indent(f);
+					}
+				}
+				f.push(']');
+			}
+			Self::Object(v) => {
+				if fmt.is_pretty() {
+					f.push('{');
+				} else {
+					f.push_str("{ ");
+				}
+				if !v.is_empty() {
+					let inner_fmt = fmt.increment();
+					if fmt.is_pretty() {
+						f.push('\n');
+						inner_fmt.write_indent(f);
+					}
+					for (i, entry) in v.iter().enumerate() {
+						if i > 0 {
+							inner_fmt.write_separator(f);
+						}
+						write_sql!(f, "{}: ", EscapeKey(&entry.key));
+						entry.value.fmt_sql(f, inner_fmt);
+					}
+					if fmt.is_pretty() {
+						f.push('\n');
+						fmt.write_indent(f);
+					}
+				}
+				if fmt.is_pretty() {
+					f.push('}');
+				} else {
+					f.push_str(" }");
+				}
+			}
+			Self::Generate(v) => match v {
+				RecordIdKeyGen::Rand => f.push_str("rand()"),
+				RecordIdKeyGen::Ulid => f.push_str("ulid()"),
+				RecordIdKeyGen::Uuid => f.push_str("uuid()"),
+			},
+			Self::Range(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }

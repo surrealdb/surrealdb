@@ -1,6 +1,6 @@
 use std::fmt;
 
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::EscapeIdent;
 
@@ -31,7 +31,7 @@ impl fmt::Display for OptionStatement {
 }
 
 impl ToSql for OptionStatement {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		write_sql!(f, "{}", self)
 	}
 }

@@ -1,4 +1,5 @@
 use std::collections::BTreeSet;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::{Deref, DerefMut};
 
@@ -203,5 +204,11 @@ impl Display for Set {
 			}
 		}
 		f.write_char('}')
+	}
+}
+
+impl ToSql for Set {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }

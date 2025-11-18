@@ -1,4 +1,5 @@
 use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::Fmt;
 use crate::sql::{Cond, Data, Explain, Expr, Output, Timeout, With};
@@ -46,6 +47,12 @@ impl fmt::Display for UpdateStatement {
 			write!(f, " {v}")?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for UpdateStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

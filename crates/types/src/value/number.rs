@@ -6,7 +6,7 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
+use crate::sql::{SqlFormat, ToSql};
 use crate::{Kind, write_sql};
 
 /// Represents a numeric value in SurrealDB
@@ -75,7 +75,7 @@ impl Display for Number {
 }
 
 impl ToSql for Number {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		write_sql!(f, "{}", self)
 	}
 }

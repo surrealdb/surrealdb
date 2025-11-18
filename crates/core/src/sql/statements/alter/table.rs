@@ -1,4 +1,5 @@
 use std::fmt::{self, Display, Write};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::AlterKind;
 use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
@@ -84,6 +85,21 @@ impl Display for AlterTableStatement {
 			write!(f, "{permissions}")?;
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for AlterTableStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		// Use Display for the content
+		let s = format!("{}", self);
+		f.push_str(&s);
+		// In single-line mode, Display adds a trailing space before permissions
+		// which we want to keep. In pretty mode, we don't want it if there are no permissions.
+		// Actually Display always adds the space. In pretty mode with no permissions, remove it.
+		if fmt.is_pretty() && self.permissions.is_none() && s.ends_with(' ') {
+			// Remove the trailing space we just added
+			f.truncate(f.len() - 1);
+		}
 	}
 }
 

@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
 use reblessive::tree::Stk;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::catalog::providers::{AuthorisationProvider, NamespaceProvider};
@@ -428,7 +428,7 @@ impl Display for DefineAccessStatement {
 }
 
 impl ToSql for DefineAccessStatement {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		write_sql!(f, "{}", self)
 	}
 }

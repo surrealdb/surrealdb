@@ -1,4 +1,5 @@
 use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use std::ops::Deref;
 
 use revision::revisioned;
@@ -71,5 +72,11 @@ impl From<surrealdb_types::Table> for Table {
 impl From<Table> for surrealdb_types::Table {
 	fn from(value: Table) -> Self {
 		surrealdb_types::Table::new(value.0)
+	}
+}
+
+impl ToSql for Table {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }

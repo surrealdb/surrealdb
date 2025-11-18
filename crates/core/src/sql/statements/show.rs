@@ -1,5 +1,6 @@
 use std::fmt;
 
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::types::PublicDatetime;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
@@ -53,6 +54,12 @@ impl fmt::Display for ShowStatement {
 			write!(f, " LIMIT {}", v)?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for ShowStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

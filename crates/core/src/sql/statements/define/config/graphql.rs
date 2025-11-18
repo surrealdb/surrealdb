@@ -1,4 +1,5 @@
 use std::fmt::{self, Display, Write};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{Fmt, Pretty, pretty_indent};
 
@@ -97,6 +98,12 @@ impl Display for GraphQLConfig {
 	}
 }
 
+impl ToSql for GraphQLConfig {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
+	}
+}
+
 impl From<FunctionsConfig> for crate::catalog::GraphQLFunctionsConfig {
 	fn from(v: FunctionsConfig) -> Self {
 		match v {
@@ -148,10 +155,22 @@ impl Display for TablesConfig {
 	}
 }
 
+impl ToSql for TablesConfig {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
+	}
+}
+
 impl Display for TableConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}", self.name)?;
 		Ok(())
+	}
+}
+
+impl ToSql for TableConfig {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 
@@ -183,5 +202,11 @@ impl Display for FunctionsConfig {
 		}
 
 		Ok(())
+	}
+}
+
+impl ToSql for FunctionsConfig {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }

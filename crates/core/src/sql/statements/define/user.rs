@@ -1,6 +1,7 @@
 use std::fmt::{self, Display};
 
 use argon2::Argon2;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use argon2::password_hash::{PasswordHasher, SaltString};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
@@ -96,6 +97,12 @@ impl Display for DefineUserStatement {
 			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for DefineUserStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

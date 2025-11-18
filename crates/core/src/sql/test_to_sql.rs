@@ -1,7 +1,6 @@
-use std::fmt::Display;
-
 use geo::Point;
 use rstest::rstest;
+use surrealdb_types::ToSql;
 
 use crate::sql::literal::ObjectEntry;
 use crate::sql::statements::access::{AccessStatementGrant, Subject};
@@ -323,7 +322,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 #[case::top_level_use(TopLevelExpr::Use(UseStatement { ns: Some("ns".to_string()), db: Some("db".to_string()) }), "USE NS ns DB db", "USE NS ns DB db")]
 #[case::top_level_show(TopLevelExpr::Show(ShowStatement { table: Some("user".to_string()), since: ShowSince::Versionstamp(123), limit: Some(10) }), "SHOW CHANGES FOR TABLE user SINCE 123 LIMIT 10", "SHOW CHANGES FOR TABLE user SINCE 123 LIMIT 10")]
 #[case::top_level_expr(TopLevelExpr::Expr(Expr::Literal(Literal::Integer(1))), "1", "1")]
-fn test_to_sql(#[case] v: impl Display, #[case] expected: &str, #[case] expected_pretty: &str) {
-	assert_eq!(format!("{v}"), expected);
-	assert_eq!(format!("{v:#}"), expected_pretty);
+fn test_to_sql(#[case] v: impl ToSql, #[case] expected: &str, #[case] expected_pretty: &str) {
+	assert_eq!(v.to_sql(), expected);
+	assert_eq!(v.to_sql_pretty(), expected_pretty);
 }

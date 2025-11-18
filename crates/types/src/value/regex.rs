@@ -7,7 +7,7 @@ use regex::RegexBuilder;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::sql::ToSql;
+use crate::sql::{SqlFormat, ToSql};
 use crate::write_sql;
 
 pub(crate) const REGEX_TOKEN: &str = "$surrealdb::public::Regex";
@@ -84,7 +84,7 @@ impl Display for Regex {
 }
 
 impl ToSql for Regex {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		write_sql!(f, "{}", self)
 	}
 }

@@ -1,4 +1,5 @@
 mod access;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 mod analyzer;
 mod api;
 mod bucket;
@@ -75,6 +76,12 @@ impl Display for RemoveStatement {
 			Self::Sequence(v) => Display::fmt(v, f),
 			Self::Module(v) => Display::fmt(v, f),
 		}
+	}
+}
+
+impl ToSql for RemoveStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

@@ -1,4 +1,5 @@
 use std::fmt::{self, Display, Formatter};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use std::ops::Deref;
 use std::str::FromStr;
 use std::{ops, str};
@@ -111,6 +112,12 @@ impl Datetime {
 impl Display for Datetime {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		write!(f, "d{}", &QuoteStr(&self.to_raw_string()))
+	}
+}
+
+impl ToSql for Datetime {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

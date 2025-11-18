@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use std::fmt;
 use std::ops::Bound;
 
@@ -477,5 +478,11 @@ impl From<crate::types::PublicRecordId> for RecordId {
 			table: value.table.into_string(),
 			key: RecordIdKey::from(value.key),
 		}
+	}
+}
+
+impl ToSql for RecordId {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }

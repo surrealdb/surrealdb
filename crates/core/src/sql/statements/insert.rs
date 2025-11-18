@@ -1,4 +1,5 @@
 use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::{Data, Expr, Output, Timeout};
 
@@ -15,6 +16,41 @@ pub struct InsertStatement {
 	pub parallel: bool,
 	pub relation: bool,
 	pub version: Option<Expr>,
+}
+
+impl ToSql for InsertStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("INSERT");
+		if self.relation {
+			f.push_str(" RELATION");
+		}
+		if self.ignore {
+			f.push_str(" IGNORE");
+		}
+		if let Some(into) = &self.into {
+			f.push_str(" INTO ");
+			into.fmt_sql(f, fmt);
+		}
+		f.push(' ');
+		self.data.fmt_sql(f, fmt);
+		if let Some(ref v) = self.update {
+			f.push(' ');
+			v.fmt_sql(f, fmt);
+		}
+		if let Some(ref v) = self.output {
+			write_sql!(f, " {}", v);
+		}
+		if let Some(ref v) = self.version {
+			f.push_str(" VERSION ");
+			v.fmt_sql(f, fmt);
+		}
+		if let Some(ref v) = self.timeout {
+			write_sql!(f, " {}", v);
+		}
+		if self.parallel {
+			f.push_str(" PARALLEL");
+		}
+	}
 }
 
 impl fmt::Display for InsertStatement {

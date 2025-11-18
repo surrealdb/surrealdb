@@ -1,4 +1,5 @@
 use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::Fmt;
 use crate::sql::{Expr, Permission};
@@ -27,6 +28,12 @@ impl Display for ApiConfig {
 
 		write!(f, " PERMISSIONS {}", self.permissions)?;
 		Ok(())
+	}
+}
+
+impl ToSql for ApiConfig {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

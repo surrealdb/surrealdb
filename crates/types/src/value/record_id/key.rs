@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
+use crate::sql::{SqlFormat, ToSql};
 use crate::utils::escape::EscapeRid;
 // Needed because we use the SurrealValue derive macro inside the crate which exports it :)
 use crate::{self as surrealdb_types, write_sql};
@@ -147,14 +147,14 @@ impl PartialEq<Value> for RecordIdKey {
 }
 
 impl ToSql for RecordIdKey {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			RecordIdKey::Number(n) => n.fmt_sql(f),
+			RecordIdKey::Number(n) => n.fmt_sql(f, fmt),
 			RecordIdKey::String(v) => write_sql!(f, "{}", EscapeRid(v)),
-			RecordIdKey::Uuid(uuid) => uuid.fmt_sql(f),
-			RecordIdKey::Object(object) => object.fmt_sql(f),
-			RecordIdKey::Array(array) => array.fmt_sql(f),
-			RecordIdKey::Range(rid) => rid.fmt_sql(f),
+			RecordIdKey::Uuid(uuid) => uuid.fmt_sql(f, fmt),
+			RecordIdKey::Object(object) => object.fmt_sql(f, fmt),
+			RecordIdKey::Array(array) => array.fmt_sql(f, fmt),
+			RecordIdKey::Range(rid) => rid.fmt_sql(f, fmt),
 		}
 	}
 }

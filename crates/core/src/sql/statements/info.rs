@@ -1,4 +1,5 @@
 use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::{Base, Expr};
 
@@ -13,6 +14,12 @@ pub enum InfoStatement {
 	Tb(Expr, bool, Option<Expr>),
 	User(Expr, Option<Base>, bool),
 	Index(Expr, Expr, bool),
+}
+
+impl ToSql for InfoStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
+	}
 }
 
 impl fmt::Display for InfoStatement {

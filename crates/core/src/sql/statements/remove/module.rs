@@ -1,4 +1,5 @@
 use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::ModuleName;
 
@@ -18,6 +19,12 @@ impl Display for RemoveModuleStatement {
 		}
 		write!(f, " {}", self.name)?;
 		Ok(())
+	}
+}
+
+impl ToSql for RemoveModuleStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

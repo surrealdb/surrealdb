@@ -477,6 +477,124 @@ impl fmt::Display for Expr {
 	}
 }
 
+impl surrealdb_types::ToSql for Expr {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		use surrealdb_types::write_sql;
+		use crate::fmt::EscapeIdent;
+		
+		match self {
+			Expr::Literal(literal) => literal.fmt_sql(f, fmt),
+			// All other variants can delegate to Display since they don't have nested structures
+			// that need pretty printing
+			Expr::Param(param) => write_sql!(f, "{}", param),
+			Expr::Idiom(idiom) => write_sql!(f, "{}", idiom),
+			Expr::Table(ident) => write_sql!(f, "{}", EscapeIdent(ident)),
+			Expr::Mock(mock) => write_sql!(f, "{}", mock),
+			Expr::Block(block) => block.fmt_sql(f, fmt),
+			Expr::Constant(constant) => write_sql!(f, "{}", constant),
+			Expr::Prefix { op, expr } => {
+				let needs_parens = expr.needs_parentheses() || {
+					let expr_bp = BindingPower::for_expr(expr);
+					let op_bp = BindingPower::for_prefix_operator(op);
+					expr_bp < op_bp || (expr_bp == op_bp && matches!(expr_bp, BindingPower::Range))
+				};
+				write_sql!(f, "{}", op);
+				if needs_parens {
+					f.push('(');
+					expr.fmt_sql(f, fmt);
+					f.push(')');
+				} else {
+					expr.fmt_sql(f, fmt);
+				}
+			}
+			Expr::Postfix { expr, op } => {
+				let needs_parens = expr.needs_parentheses() || {
+					let expr_bp = BindingPower::for_expr(expr);
+					let op_bp = BindingPower::for_postfix_operator(op);
+					expr_bp < op_bp || (expr_bp == op_bp && matches!(expr_bp, BindingPower::Range))
+				};
+				if needs_parens {
+					f.push('(');
+					expr.fmt_sql(f, fmt);
+					f.push(')');
+				} else {
+					expr.fmt_sql(f, fmt);
+				}
+				write_sql!(f, "{}", op);
+			}
+			Expr::Binary { left, op, right } => {
+				let op_bp = BindingPower::for_binary_operator(op);
+				let left_bp = BindingPower::for_expr(left);
+				let right_bp = BindingPower::for_expr(right);
+				
+				let left_needs_parens = left.needs_parentheses()
+					|| left_bp < op_bp
+					|| (left_bp == op_bp
+						&& matches!(left_bp, BindingPower::Range | BindingPower::Relation));
+				
+				if left_needs_parens {
+					f.push('(');
+					left.fmt_sql(f, fmt);
+					f.push(')');
+				} else {
+					left.fmt_sql(f, fmt);
+				}
+				
+				if matches!(
+					op,
+					BinaryOperator::Range
+						| BinaryOperator::RangeSkip
+						| BinaryOperator::RangeInclusive
+						| BinaryOperator::RangeSkipInclusive
+				) {
+					write_sql!(f, "{}", op);
+				} else {
+					write_sql!(f, " {} ", op);
+				}
+				
+				let right_needs_parens = right.needs_parentheses()
+					|| right_bp < op_bp
+					|| (right_bp == op_bp
+						&& matches!(right_bp, BindingPower::Range | BindingPower::Relation));
+				
+				if right_needs_parens {
+					f.push('(');
+					right.fmt_sql(f, fmt);
+					f.push(')');
+				} else {
+					right.fmt_sql(f, fmt);
+				}
+			}
+			Expr::FunctionCall(function_call) => write_sql!(f, "{}", function_call),
+			Expr::Closure(closure) => write_sql!(f, "{}", closure),
+			Expr::Break => f.push_str("BREAK"),
+			Expr::Continue => f.push_str("CONTINUE"),
+			Expr::Return(x) => x.fmt_sql(f, fmt),
+			Expr::Throw(expr) => {
+				f.push_str("THROW ");
+				expr.fmt_sql(f, fmt);
+			}
+			// Statement variants - delegate to their ToSql implementations
+			Expr::If(s) => s.fmt_sql(f, fmt),
+			Expr::Select(s) => s.fmt_sql(f, fmt),
+			Expr::Create(s) => s.fmt_sql(f, fmt),
+			Expr::Update(s) => s.fmt_sql(f, fmt),
+			Expr::Delete(s) => s.fmt_sql(f, fmt),
+			Expr::Relate(s) => s.fmt_sql(f, fmt),
+			Expr::Insert(s) => s.fmt_sql(f, fmt),
+			Expr::Define(s) => s.fmt_sql(f, fmt),
+			Expr::Remove(s) => s.fmt_sql(f, fmt),
+			Expr::Rebuild(s) => s.fmt_sql(f, fmt),
+			Expr::Upsert(s) => s.fmt_sql(f, fmt),
+			Expr::Alter(s) => s.fmt_sql(f, fmt),
+			Expr::Info(s) => s.fmt_sql(f, fmt),
+			Expr::Foreach(s) => s.fmt_sql(f, fmt),
+			Expr::Let(s) => s.fmt_sql(f, fmt),
+			Expr::Sleep(s) => s.fmt_sql(f, fmt),
+		}
+	}
+}
+
 impl From<Expr> for crate::expr::Expr {
 	fn from(v: Expr) -> Self {
 		match v {

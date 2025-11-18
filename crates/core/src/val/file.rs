@@ -1,4 +1,5 @@
 use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
@@ -77,4 +78,10 @@ fn fmt_inner(v: &str, escape_slash: bool) -> String {
 			}
 		})
 		.collect::<String>()
+}
+
+impl ToSql for File {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
+	}
 }

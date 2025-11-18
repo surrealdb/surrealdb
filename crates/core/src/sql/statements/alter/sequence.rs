@@ -1,4 +1,5 @@
 use std::fmt::{self, Display, Write};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
 use crate::sql::Timeout;
@@ -28,6 +29,12 @@ impl Display for AlterSequenceStatement {
 			None
 		};
 		Ok(())
+	}
+}
+
+impl ToSql for AlterSequenceStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

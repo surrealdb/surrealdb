@@ -1,6 +1,7 @@
 use std::fmt;
 use std::ops::Bound;
 
+use surrealdb_types::{SqlFormat, ToSql};
 use super::RecordIdKeyLit;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,5 +42,29 @@ impl fmt::Display for RecordIdKeyRangeLit {
 			Bound::Included(v) => write!(f, "..={v}"),
 		}?;
 		Ok(())
+	}
+}
+
+impl ToSql for RecordIdKeyRangeLit {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match &self.start {
+			Bound::Unbounded => {}
+			Bound::Included(v) => v.fmt_sql(f, fmt),
+			Bound::Excluded(v) => {
+				v.fmt_sql(f, fmt);
+				f.push('>');
+			}
+		}
+		match &self.end {
+			Bound::Unbounded => f.push_str(".."),
+			Bound::Excluded(v) => {
+				f.push_str("..");
+				v.fmt_sql(f, fmt);
+			}
+			Bound::Included(v) => {
+				f.push_str("..=");
+				v.fmt_sql(f, fmt);
+			}
+		}
 	}
 }

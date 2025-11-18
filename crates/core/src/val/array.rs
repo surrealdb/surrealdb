@@ -6,6 +6,7 @@ use anyhow::{Result, ensure};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::expr::Expr;
@@ -221,6 +222,30 @@ impl Display for Array {
 			drop(indent);
 		}
 		f.write_char(']')
+	}
+}
+
+impl ToSql for Array {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push('[');
+		if !self.is_empty() {
+			let inner_fmt = fmt.increment();
+			if fmt.is_pretty() {
+				f.push('\n');
+				inner_fmt.write_indent(f);
+			}
+			for (i, value) in self.0.iter().enumerate() {
+				if i > 0 {
+					inner_fmt.write_separator(f);
+				}
+				value.fmt_sql(f, inner_fmt);
+			}
+			if fmt.is_pretty() {
+				f.push('\n');
+				fmt.write_indent(f);
+			}
+		}
+		f.push(']');
 	}
 }
 

@@ -1,6 +1,7 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::fmt::{is_pretty, pretty_indent};
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::{Expr, Kind, Literal, Permissions, TableType, View};
@@ -105,6 +106,69 @@ impl Display for DefineTableStatement {
 		};
 		write!(f, "{}", self.permissions)?;
 		Ok(())
+	}
+}
+
+impl ToSql for DefineTableStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("DEFINE TABLE");
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
+			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
+		}
+		write_sql!(f, " {}", self.name);
+		f.push_str(" TYPE");
+		match &self.table_type {
+			TableType::Normal => f.push_str(" NORMAL"),
+			TableType::Relation(rel) => {
+				f.push_str(" RELATION");
+				if let Some(Kind::Record(kind)) = &rel.from {
+					f.push_str(" IN ");
+					for (idx, k) in kind.iter().enumerate() {
+						if idx != 0 {
+							f.push_str(" | ");
+						}
+						write_sql!(f, "{}", k);
+					}
+				}
+				if let Some(Kind::Record(kind)) = &rel.to {
+					f.push_str(" OUT ");
+					for (idx, k) in kind.iter().enumerate() {
+						if idx != 0 {
+							f.push_str(" | ");
+						}
+						write_sql!(f, "{}", k);
+					}
+				}
+				if rel.enforced {
+					f.push_str(" ENFORCED");
+				}
+			}
+			TableType::Any => f.push_str(" ANY"),
+		}
+		if self.drop {
+			f.push_str(" DROP");
+		}
+		f.push_str(if self.full { " SCHEMAFULL" } else { " SCHEMALESS" });
+		if let Some(ref comment) = self.comment {
+			f.push_str(" COMMENT ");
+			comment.fmt_sql(f, fmt);
+		}
+		if let Some(ref v) = self.view {
+			write_sql!(f, " {}", v);
+		}
+		if let Some(ref v) = self.changefeed {
+			write_sql!(f, " {}", v);
+		}
+		if fmt.is_pretty() {
+			f.push('\n');
+			let inner_fmt = fmt.increment();
+			inner_fmt.write_indent(f);
+		} else {
+			f.push(' ');
+		}
+		write_sql!(f, "{}", self.permissions);
 	}
 }
 

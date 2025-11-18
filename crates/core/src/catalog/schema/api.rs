@@ -1,7 +1,7 @@
 use std::fmt::{self, Display};
 
 use revision::revisioned;
-use surrealdb_types::{SurrealValue, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, SurrealValue, ToSql};
 
 use crate::api::path::Path;
 use crate::catalog::Permission;
@@ -72,8 +72,8 @@ impl ApiDefinition {
 }
 
 impl ToSql for ApiDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, fmt)
 	}
 }
 

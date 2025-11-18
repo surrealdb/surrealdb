@@ -1,7 +1,7 @@
 use std::fmt;
 
 use reblessive::tree::Stk;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::{Context, MutableContext};
@@ -89,7 +89,7 @@ impl fmt::Display for SetStatement {
 }
 
 impl ToSql for SetStatement {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		write_sql!(f, "{}", self)
 	}
 }

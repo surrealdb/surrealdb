@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
+use crate::sql::{SqlFormat, ToSql};
 use crate::write_sql;
 
 /// Represents a file reference in SurrealDB
@@ -47,7 +47,7 @@ impl File {
 }
 
 impl ToSql for crate::File {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		write_sql!(f, "f\"{}:{}\"", fmt_inner(&self.bucket, true), fmt_inner(&self.key, false));
 	}
 }

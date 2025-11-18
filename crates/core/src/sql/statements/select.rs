@@ -1,4 +1,5 @@
 use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::Fmt;
 use crate::sql::order::Ordering;
@@ -78,6 +79,12 @@ impl fmt::Display for SelectStatement {
 			write!(f, " {v}")?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for SelectStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

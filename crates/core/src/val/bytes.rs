@@ -1,4 +1,5 @@
 use std::fmt::{self, Display, Formatter};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use std::ops::Deref;
 
 use revision::revisioned;
@@ -68,6 +69,12 @@ impl Deref for Bytes {
 impl Display for Bytes {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		write!(f, "b\"{}\"", hex::encode_upper(&self.0))
+	}
+}
+
+impl ToSql for Bytes {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::str;
@@ -95,6 +96,12 @@ impl Display for Regex {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		let t = self.0.to_string().replace('/', "\\/");
 		write!(f, "/{}/", &t)
+	}
+}
+
+impl ToSql for Regex {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

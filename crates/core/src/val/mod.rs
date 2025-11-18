@@ -12,7 +12,7 @@ use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::err::Error;
 use crate::expr::kind::GeometryKind;
@@ -597,8 +597,28 @@ impl fmt::Display for Value {
 }
 
 impl ToSql for Value {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Value::None => f.push_str("NONE"),
+			Value::Null => f.push_str("NULL"),
+			Value::Bool(v) => f.push_str(if *v { "true" } else { "false" }),
+			Value::Number(v) => v.fmt_sql(f, fmt),
+			Value::String(v) => write_sql!(f, "{}", QuoteStr(v)),
+			Value::Duration(v) => v.fmt_sql(f, fmt),
+			Value::Datetime(v) => v.fmt_sql(f, fmt),
+			Value::Uuid(v) => v.fmt_sql(f, fmt),
+			Value::Array(v) => v.fmt_sql(f, fmt),
+			Value::Set(v) => v.fmt_sql(f, fmt),
+			Value::Object(v) => v.fmt_sql(f, fmt),
+			Value::Geometry(v) => v.fmt_sql(f, fmt),
+			Value::Bytes(v) => v.fmt_sql(f, fmt),
+			Value::Table(v) => v.fmt_sql(f, fmt),
+			Value::RecordId(v) => v.fmt_sql(f, fmt),
+			Value::File(v) => v.fmt_sql(f, fmt),
+			Value::Regex(v) => v.fmt_sql(f, fmt),
+			Value::Range(v) => v.fmt_sql(f, fmt),
+			Value::Closure(_) => f.push_str("<Closure>"),
+		}
 	}
 }
 

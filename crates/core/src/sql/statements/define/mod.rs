@@ -17,6 +17,7 @@ mod table;
 pub mod user;
 
 use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql};
 
 pub(crate) use access::DefineAccessStatement;
 pub(crate) use analyzer::DefineAnalyzerStatement;
@@ -107,6 +108,30 @@ impl Display for DefineStatement {
 			Self::Bucket(v) => Display::fmt(v, f),
 			Self::Sequence(v) => Display::fmt(v, f),
 			Self::Module(v) => Display::fmt(v, f),
+		}
+	}
+}
+
+impl ToSql for DefineStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Self::Namespace(v) => v.fmt_sql(f, fmt),
+			Self::Database(v) => v.fmt_sql(f, fmt),
+			Self::Function(v) => v.fmt_sql(f, fmt),
+			Self::User(v) => v.fmt_sql(f, fmt),
+			Self::Param(v) => v.fmt_sql(f, fmt),
+			Self::Table(v) => v.fmt_sql(f, fmt),
+			Self::Event(v) => v.fmt_sql(f, fmt),
+			Self::Field(v) => v.fmt_sql(f, fmt),
+			Self::Index(v) => v.fmt_sql(f, fmt),
+			Self::Analyzer(v) => v.fmt_sql(f, fmt),
+			Self::Model(v) => v.fmt_sql(f, fmt),
+			Self::Access(v) => v.fmt_sql(f, fmt),
+			Self::Config(v) => v.fmt_sql(f, fmt),
+			Self::Api(v) => v.fmt_sql(f, fmt),
+			Self::Bucket(v) => v.fmt_sql(f, fmt),
+			Self::Sequence(v) => v.fmt_sql(f, fmt),
+			Self::Module(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }

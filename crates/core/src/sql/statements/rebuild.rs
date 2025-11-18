@@ -1,4 +1,5 @@
 use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use std::fmt::{Display, Formatter};
 
 use crate::fmt::EscapeIdent;
@@ -14,6 +15,12 @@ impl Display for RebuildStatement {
 		match self {
 			Self::Index(v) => Display::fmt(v, f),
 		}
+	}
+}
+
+impl ToSql for RebuildStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 
@@ -53,6 +60,12 @@ impl Display for RebuildIndexStatement {
 			write!(f, " CONCURRENTLY")?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for RebuildIndexStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

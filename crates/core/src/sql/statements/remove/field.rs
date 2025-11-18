@@ -1,4 +1,5 @@
 use std::fmt::{self, Display, Formatter};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::{Expr, Literal};
 
@@ -28,6 +29,12 @@ impl Display for RemoveFieldStatement {
 		}
 		write!(f, " {} ON {}", self.name, self.what)?;
 		Ok(())
+	}
+}
+
+impl ToSql for RemoveFieldStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

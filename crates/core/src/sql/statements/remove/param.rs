@@ -1,4 +1,5 @@
 use std::fmt::{self, Display, Formatter};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::EscapeIdent;
 
@@ -17,6 +18,12 @@ impl Display for RemoveParamStatement {
 		}
 		write!(f, " ${}", EscapeIdent(&self.name))?;
 		Ok(())
+	}
+}
+
+impl ToSql for RemoveParamStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

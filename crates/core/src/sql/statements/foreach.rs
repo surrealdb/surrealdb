@@ -1,4 +1,5 @@
 use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::{Block, Expr, Param};
 
@@ -13,6 +14,15 @@ pub struct ForeachStatement {
 impl Display for ForeachStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "FOR {} IN {} {}", self.param, self.range, self.block)
+	}
+}
+
+impl ToSql for ForeachStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, "FOR {} IN ", self.param);
+		self.range.fmt_sql(f, fmt);
+		f.push(' ');
+		self.block.fmt_sql(f, fmt);
 	}
 }
 

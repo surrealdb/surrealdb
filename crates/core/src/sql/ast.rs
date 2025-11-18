@@ -1,6 +1,6 @@
 use std::fmt::{self, Display};
 
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr;
 use crate::fmt::{Fmt, Pretty};
@@ -74,7 +74,7 @@ impl Display for Ast {
 }
 
 impl ToSql for Ast {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		write_sql!(f, "{}", self)
 	}
 }
@@ -177,9 +177,26 @@ impl fmt::Display for TopLevelExpr {
 			TopLevelExpr::Kill(s) => s.fmt(f),
 			TopLevelExpr::Live(s) => s.fmt(f),
 			TopLevelExpr::Option(s) => s.fmt(f),
-			TopLevelExpr::Use(s) => s.fmt(f),
-			TopLevelExpr::Show(s) => s.fmt(f),
-			TopLevelExpr::Expr(e) => e.fmt(f),
+		TopLevelExpr::Use(s) => s.fmt(f),
+		TopLevelExpr::Show(s) => s.fmt(f),
+		TopLevelExpr::Expr(e) => e.fmt(f),
+	}
+	}
+}
+
+impl ToSql for TopLevelExpr {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			TopLevelExpr::Begin => f.push_str("BEGIN"),
+			TopLevelExpr::Cancel => f.push_str("CANCEL"),
+			TopLevelExpr::Commit => f.push_str("COMMIT"),
+			TopLevelExpr::Access(s) => s.fmt_sql(f, fmt),
+			TopLevelExpr::Kill(s) => s.fmt_sql(f, fmt),
+			TopLevelExpr::Live(s) => s.fmt_sql(f, fmt),
+			TopLevelExpr::Option(s) => s.fmt_sql(f, fmt),
+			TopLevelExpr::Use(s) => s.fmt_sql(f, fmt),
+			TopLevelExpr::Show(s) => s.fmt_sql(f, fmt),
+			TopLevelExpr::Expr(e) => e.fmt_sql(f, fmt),
 		}
 	}
 }

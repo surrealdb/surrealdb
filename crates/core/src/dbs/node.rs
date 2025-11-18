@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use uuid::Uuid;
 
 use crate::expr::statements::info::InfoStructure;
@@ -71,7 +71,7 @@ impl Display for Node {
 }
 
 impl ToSql for Node {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		write_sql!(f, "{}", self)
 	}
 }

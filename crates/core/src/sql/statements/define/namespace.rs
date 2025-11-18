@@ -1,4 +1,5 @@
 use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::sql::{Expr, Literal};
@@ -36,6 +37,12 @@ impl Display for DefineNamespaceStatement {
 			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for DefineNamespaceStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

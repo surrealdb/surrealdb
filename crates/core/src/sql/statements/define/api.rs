@@ -1,4 +1,5 @@
 use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use super::config::api::ApiConfig;
@@ -67,6 +68,12 @@ impl Display for DefineApiStatement {
 	}
 }
 
+impl ToSql for DefineApiStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
+	}
+}
+
 impl From<DefineApiStatement> for crate::expr::statements::DefineApiStatement {
 	fn from(v: DefineApiStatement) -> Self {
 		crate::expr::statements::DefineApiStatement {
@@ -108,6 +115,12 @@ impl Display for ApiAction {
 		write!(f, "{}", self.config)?;
 		write!(f, " THEN {}", self.action)?;
 		Ok(())
+	}
+}
+
+impl ToSql for ApiAction {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

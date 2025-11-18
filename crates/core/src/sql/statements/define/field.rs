@@ -1,4 +1,5 @@
 use std::fmt::{self, Display, Write};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::fmt::{is_pretty, pretty_indent};
@@ -136,6 +137,12 @@ impl Display for DefineFieldStatement {
 		// Additionally, including the permission will cause a parsing error in 3.0.0
 		write!(f, "{:#}", self.permissions)?;
 		Ok(())
+	}
+}
+
+impl ToSql for DefineFieldStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

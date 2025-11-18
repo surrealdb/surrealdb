@@ -1,4 +1,5 @@
 use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::sql::access::AccessDuration;
@@ -70,6 +71,12 @@ impl Display for DefineAccessStatement {
 			write!(f, " COMMENT {}", v)?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for DefineAccessStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

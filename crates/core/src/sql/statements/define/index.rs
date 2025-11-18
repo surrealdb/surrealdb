@@ -1,4 +1,5 @@
 use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::fmt::Fmt;
@@ -38,6 +39,12 @@ impl Display for DefineIndexStatement {
 			write!(f, " CONCURRENTLY")?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for DefineIndexStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

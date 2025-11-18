@@ -1,4 +1,5 @@
 use std::fmt::{self, Display, Formatter};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::{Base, Expr, Literal};
 
@@ -28,6 +29,12 @@ impl Display for RemoveAccessStatement {
 		}
 		write!(f, " {} ON {}", self.name, self.base)?;
 		Ok(())
+	}
+}
+
+impl ToSql for RemoveAccessStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

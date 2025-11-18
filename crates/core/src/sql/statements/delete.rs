@@ -1,4 +1,5 @@
 use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::Fmt;
 use crate::sql::{Cond, Explain, Expr, Output, Timeout, With};
@@ -14,6 +15,12 @@ pub struct DeleteStatement {
 	pub timeout: Option<Timeout>,
 	pub parallel: bool,
 	pub explain: Option<Explain>,
+}
+
+impl ToSql for DeleteStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
+	}
 }
 
 impl fmt::Display for DeleteStatement {

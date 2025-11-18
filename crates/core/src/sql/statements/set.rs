@@ -1,4 +1,5 @@
 use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::EscapeIdent;
 use crate::sql::{Expr, Kind};
@@ -19,6 +20,12 @@ impl fmt::Display for SetStatement {
 		}
 		write!(f, " = {}", self.what)?;
 		Ok(())
+	}
+}
+
+impl ToSql for SetStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

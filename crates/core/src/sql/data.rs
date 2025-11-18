@@ -1,5 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::fmt::Fmt;
 use crate::sql::{AssignOperator, Expr, Idiom};
 
@@ -96,6 +97,84 @@ impl Display for Data {
 					arg.place, arg.operator, arg.value
 				))))
 			),
+		}
+	}
+}
+
+impl ToSql for Data {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Self::EmptyExpression => {}
+			Self::SetExpression(v) => {
+				f.push_str("SET ");
+				for (i, arg) in v.iter().enumerate() {
+					if i > 0 {
+						f.push_str(", ");
+					}
+					write_sql!(f, "{} {} ", arg.place, arg.operator);
+					arg.value.fmt_sql(f, fmt);
+				}
+			}
+			Self::UnsetExpression(v) => {
+				f.push_str("UNSET ");
+				for (i, idiom) in v.iter().enumerate() {
+					if i > 0 {
+						f.push_str(", ");
+					}
+					write_sql!(f, "{}", idiom);
+				}
+			}
+			Self::PatchExpression(v) => {
+				f.push_str("PATCH ");
+				v.fmt_sql(f, fmt);
+			}
+			Self::MergeExpression(v) => {
+				f.push_str("MERGE ");
+				v.fmt_sql(f, fmt);
+			}
+			Self::ReplaceExpression(v) => {
+				f.push_str("REPLACE ");
+				v.fmt_sql(f, fmt);
+			}
+			Self::ContentExpression(v) => {
+				f.push_str("CONTENT ");
+				v.fmt_sql(f, fmt);
+			}
+			Self::SingleExpression(v) => v.fmt_sql(f, fmt),
+			Self::ValuesExpression(v) => {
+				f.push('(');
+				if let Some(first) = v.first() {
+					for (i, (idiom, _)) in first.iter().enumerate() {
+						if i > 0 {
+							f.push_str(", ");
+						}
+						write_sql!(f, "{}", idiom);
+					}
+				}
+				f.push_str(") VALUES ");
+				for (i, row) in v.iter().enumerate() {
+					if i > 0 {
+						f.push_str(", ");
+					}
+					f.push('(');
+					for (j, (_, expr)) in row.iter().enumerate() {
+						if j > 0 {
+							f.push_str(", ");
+						}
+						expr.fmt_sql(f, fmt);
+					}
+					f.push(')');
+				}
+			}
+			Self::UpdateExpression(v) => {
+				for (i, arg) in v.iter().enumerate() {
+					if i > 0 {
+						f.push_str(", ");
+					}
+					write_sql!(f, "{} {} ", arg.place, arg.operator);
+					arg.value.fmt_sql(f, fmt);
+				}
+			}
 		}
 	}
 }

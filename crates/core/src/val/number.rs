@@ -16,6 +16,7 @@
 //!   used by keys (see DecimalLexEncoder docs).
 //! - Stream-friendly: the numeric encoding contains an in-band terminator and appends a 0x00 byte,
 //!   allowing concatenation in composite keys without ambiguity during decoding.
+
 use std::cmp::Ordering;
 use std::f64::consts::PI;
 use std::fmt::{self, Debug, Display, Formatter};
@@ -32,6 +33,7 @@ use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use super::IndexFormat;
 use crate::err::Error;
 use crate::expr::decimal::DecimalLexEncoder;
@@ -201,6 +203,12 @@ impl Display for Number {
 			}
 			Number::Decimal(v) => write!(f, "{v}dec"),
 		}
+	}
+}
+
+impl ToSql for Number {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

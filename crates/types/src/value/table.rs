@@ -3,8 +3,9 @@ use std::ops::Deref;
 
 use serde::{Deserialize, Serialize};
 
+use crate::sql::{SqlFormat, ToSql};
 use crate::utils::escape::EscapeSqonIdent;
-use crate::{ToSql, write_sql};
+use crate::write_sql;
 
 /// A value type referencing a specific table.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -42,7 +43,7 @@ impl Display for Table {
 }
 
 impl ToSql for Table {
-	fn fmt_sql(&self, f: &mut String) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		write_sql!(f, "{}", EscapeSqonIdent(&self.0))
 	}
 }

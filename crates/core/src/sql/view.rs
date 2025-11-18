@@ -1,6 +1,7 @@
 use std::fmt;
 
 use crate::fmt::{EscapeIdent, Fmt};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::sql::{Cond, Fields, Groups};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,6 +28,12 @@ impl fmt::Display for View {
 			write!(f, " {v}")?
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for View {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
 

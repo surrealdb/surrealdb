@@ -1,4 +1,5 @@
 #![allow(clippy::derived_hash_with_manual_eq)]
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -1028,5 +1029,11 @@ mod test {
 				],
 			),
 		])));
+	}
+}
+
+impl ToSql for Geometry {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
 	}
 }
