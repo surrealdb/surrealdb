@@ -28,10 +28,9 @@ use crate::iam::{Action, ResourceKind};
 use crate::kvs::slowlog::SlowLogVisit;
 use crate::kvs::{Datastore, LockType, Transaction, TransactionType};
 use crate::rpc::DbResultError;
-use crate::sql::{self, Ast};
 use crate::types::PublicNotification;
 use crate::val::{Value, convert_value_to_public_value};
-use crate::{err, expr};
+use crate::{err, expr, sql};
 
 const TARGET: &str = "surrealdb::core::dbs";
 
@@ -654,18 +653,7 @@ impl Executor {
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
-	pub async fn execute(
-		kvs: &Datastore,
-		ctx: Context,
-		opt: Options,
-		qry: Ast,
-	) -> Result<Vec<QueryResult>> {
-		let stream = futures::stream::iter(qry.expressions.into_iter().map(Ok));
-		Self::execute_stream(kvs, ctx, opt, false, stream).await
-	}
-
-	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
-	pub async fn execute_plan(
+	pub(crate) async fn execute_plan(
 		kvs: &Datastore,
 		ctx: Context,
 		opt: Options,
@@ -677,7 +665,7 @@ impl Executor {
 
 	/// Execute a logical plan with an existing transaction
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
-	pub async fn execute_plan_with_transaction(
+	pub(crate) async fn execute_plan_with_transaction(
 		ctx: Context,
 		opt: Options,
 		qry: LogicalPlan,
@@ -718,7 +706,7 @@ impl Executor {
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
-	pub async fn execute_stream<S>(
+	pub(crate) async fn execute_stream<S>(
 		kvs: &Datastore,
 		ctx: Context,
 		opt: Options,
@@ -739,7 +727,7 @@ impl Executor {
 	}
 
 	#[instrument(level = "debug", name = "executor", target = "surrealdb::core::dbs", skip_all)]
-	pub async fn execute_expr_stream<S>(
+	pub(crate) async fn execute_expr_stream<S>(
 		kvs: &Datastore,
 		ctx: Context,
 		opt: Options,

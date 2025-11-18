@@ -77,7 +77,7 @@ use crate::sql::Ast;
 use crate::surrealism::cache::SurrealismCache;
 use crate::syn::parser::{ParserSettings, StatementStream};
 use crate::types::{PublicNotification, PublicValue, PublicVariables};
-use crate::val::{Value, convert_value_to_public_value};
+use crate::val::convert_value_to_public_value;
 use crate::{CommunityComposer, cf, syn};
 
 const TARGET: &str = "surrealdb::core::kvs::ds";
@@ -185,7 +185,7 @@ impl TransactionFactory {
 /// Abstraction over storage backends for creating and managing transactions.
 ///
 /// This trait allows decoupling `Datastore` from concrete KV engines (memory,
-/// RocksDB, TiKV, FoundationDB, SurrealKV, etc.). Implementors translate the
+/// RocksDB, TiKV, SurrealKV, SurrealDS, etc.). Implementors translate the
 /// generic transaction parameters into a backend-specific transaction and
 /// report whether the transaction is considered "local" (used internally to
 /// enable some optimizations).
@@ -259,8 +259,6 @@ pub enum DatastoreFlavor {
 	IndxDB(super::indxdb::Datastore),
 	#[cfg(feature = "kv-tikv")]
 	TiKV(super::tikv::Datastore),
-	#[cfg(feature = "kv-fdb")]
-	FoundationDB(super::fdb::Datastore),
 	#[cfg(feature = "kv-surrealkv")]
 	SurrealKV(super::surrealkv::Datastore),
 }
@@ -410,20 +408,6 @@ impl TransactionBuilderFactory for CommunityComposer {
 				#[cfg(not(feature = "kv-tikv"))]
 				bail!(Error::Ds("Cannot connect to the `tikv` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
 			}
-			// Initiate a FoundationDB datastore
-			(flavour @ "fdb", path) => {
-				#[cfg(feature = "kv-fdb")]
-				{
-					let v = super::fdb::Datastore::new(&path)
-						.await
-						.map(DatastoreFlavor::FoundationDB)?;
-					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));
-					info!(target: TARGET, "Started {flavour} kvs store");
-					Ok((Box::<DatastoreFlavor>::new(v), c))
-				}
-				#[cfg(not(feature = "kv-fdb"))]
-				bail!(Error::Ds("Cannot connect to the `foundationdb` storage engine as it is not enabled in this build of SurrealDB".to_owned()));
-			}
 			// The datastore path is not valid
 			(flavour, path) => {
 				info!(target: TARGET, "Unable to load the specified datastore {flavour}{}", path);
@@ -440,7 +424,6 @@ impl TransactionBuilderFactory for CommunityComposer {
 			v if v.starts_with("surrealkv:") => Ok(v.to_string()),
 			v if v.starts_with("surrealkv+versioned:") => Ok(v.to_string()),
 			v if v.starts_with("tikv:") => Ok(v.to_string()),
-			v if v.starts_with("fdb:") => Ok(v.to_string()),
 			_ => bail!("Provide a valid database path parameter"),
 		}
 	}
@@ -485,11 +468,6 @@ impl TransactionBuilder for DatastoreFlavor {
 				let tx = v.transaction(write, lock).await?;
 				(tx, false)
 			}
-			#[cfg(feature = "kv-fdb")]
-			Self::FoundationDB(v) => {
-				let tx = v.transaction(write, lock).await?;
-				(tx, false)
-			}
 			#[cfg(feature = "kv-surrealkv")]
 			Self::SurrealKV(v) => {
 				let tx = v.transaction(write, lock).await?;
@@ -510,8 +488,6 @@ impl TransactionBuilder for DatastoreFlavor {
 			Self::IndxDB(v) => v.shutdown().await,
 			#[cfg(feature = "kv-tikv")]
 			Self::TiKV(v) => v.shutdown().await,
-			#[cfg(feature = "kv-fdb")]
-			Self::FoundationDB(v) => v.shutdown().await,
 			#[cfg(feature = "kv-surrealkv")]
 			Self::SurrealKV(v) => v.shutdown().await,
 			#[allow(unreachable_patterns)]
@@ -532,8 +508,6 @@ impl Display for DatastoreFlavor {
 			Self::IndxDB(_) => write!(f, "indxdb"),
 			#[cfg(feature = "kv-tikv")]
 			Self::TiKV(_) => write!(f, "tikv"),
-			#[cfg(feature = "kv-fdb")]
-			Self::FoundationDB(_) => write!(f, "fdb"),
 			#[cfg(feature = "kv-surrealkv")]
 			Self::SurrealKV(_) => write!(f, "surrealkv"),
 			#[allow(unreachable_patterns)]
@@ -1689,81 +1663,13 @@ impl Datastore {
 		})
 	}
 
-	/// Ensure a SQL [`Value`] is fully computed
-	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn compute(
-		&self,
-		val: Expr,
-		sess: &Session,
-		vars: Option<PublicVariables>,
-	) -> Result<Value> {
-		// Check if the session has expired
-		ensure!(!sess.expired(), Error::ExpiredSession);
-		// Check if anonymous actors can compute values when auth is enabled
-		// TODO(sgirones): Check this as part of the authorisation layer
-		self.check_anon(sess).map_err(|_| {
-			Error::from(IamError::NotAllowed {
-				actor: "anonymous".to_string(),
-				action: "compute".to_string(),
-				resource: "value".to_string(),
-			})
-		})?;
-
-		// Create a new memory stack
-		let mut stack = TreeStack::new();
-		// Create a new query options
-		let opt = self.setup_options(sess);
-		// Create a default context
-		let mut ctx = MutableContext::default();
-		// Set context capabilities
-		ctx.add_capabilities(self.capabilities.clone());
-		// Set the global query timeout
-		if let Some(timeout) = self.query_timeout {
-			ctx.add_timeout(timeout)?;
-		}
-		// Setup the notification channel
-		if let Some(channel) = &self.notification_channel {
-			ctx.add_notifications(Some(&channel.0));
-		}
-		// Start an execution context
-		ctx.attach_session(sess)?;
-		// Store the query variables
-		if let Some(vars) = vars {
-			ctx.attach_variables(vars.into())?;
-		}
-		let txn_type = if val.read_only() {
-			TransactionType::Read
-		} else {
-			TransactionType::Write
-		};
-		// Start a new transaction
-		let txn = self.transaction(txn_type, Optimistic).await?.enclose();
-		// Store the transaction
-		ctx.set_transaction(txn.clone());
-		// Freeze the context
-		let ctx = ctx.freeze();
-		// Compute the value
-		let res =
-			stack.enter(|stk| val.compute(stk, &ctx, &opt, None)).finish().await.catch_return();
-		// Store any data
-		if res.is_ok() && matches!(txn_type, TransactionType::Read) {
-			// If the compute was successful, then commit if writeable
-			txn.commit().await?
-		} else {
-			// Cancel if the compute was an error, or if readonly
-			txn.cancel().await?
-		};
-		// Return result
-		res
-	}
-
 	/// Evaluates a SQL [`Value`] without checking authenticating config
 	/// This is used in very specific cases, where we do not need to check
 	/// whether authentication is enabled, or guest access is disabled.
 	/// For example, this is used when processing a record access SIGNUP or
 	/// SIGNIN clause, which still needs to work without guest access.
 	#[instrument(level = "debug", target = "surrealdb::core::kvs::ds", skip_all)]
-	pub async fn evaluate(
+	pub(crate) async fn evaluate(
 		&self,
 		val: &Expr,
 		sess: &Session,

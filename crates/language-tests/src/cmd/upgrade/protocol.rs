@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 
 use revision::revisioned;
-use surrealdb_types::{Value, Number, Object, Array};
+use surrealdb_types::{Array, Number, Object, Value};
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, PartialEq, PartialOrd, Hash)]

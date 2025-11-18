@@ -33,7 +33,6 @@ kv-rocksdb = [
     "dep:affinitypool",
 ]
 kv-tikv = ["dep:tikv", "tokio/time", "dep:tempfile", "dep:ext-sort"]
-kv-fdb = ["dep:foundationdb", "tokio/time", "dep:tempfile", "dep:ext-sort"]
 kv-surrealkv = [
     "dep:surrealkv",
     "tokio/time",
@@ -90,7 +89,6 @@ storekey.workspace = true
 vart.workspace = true
 
 # External KV stores
-foundationdb = { workspace = true, optional = true }
 rocksdb = { workspace = true, optional = true }
 tikv = { workspace = true, optional = true }
 
