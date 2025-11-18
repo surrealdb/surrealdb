@@ -360,6 +360,30 @@ impl Transactable for Transaction {
 		Ok(())
 	}
 
+	/// Count the total number of keys within a range.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn count(&self, rng: Range<Key>) -> Result<usize> {
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Set the key range
+		let beg = rng.start;
+		let end = rng.end;
+		// Load the inner transaction
+		let inner = self.inner.read().await;
+		// Execute on the blocking threadpool
+		let res = affinitypool::spawn_local(move || -> Result<_> {
+			// Count the items in the range
+			let res = inner.count(beg, end)?;
+			// Return result
+			Ok(res)
+		})
+		.await?;
+		// Return result
+		Ok(res)
+	}
+
 	/// Retrieve a range of keys.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {

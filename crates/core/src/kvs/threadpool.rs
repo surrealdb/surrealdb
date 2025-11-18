@@ -1,4 +1,4 @@
-#![cfg(any(feature = "kv-rocksdb", feature = "kv-surrealkv"))]
+#![cfg(any(feature = "kv-mem", feature = "kv-rocksdb", feature = "kv-surrealkv"))]
 
 /// Create a new blocking threadpool
 pub(super) fn initialise() {

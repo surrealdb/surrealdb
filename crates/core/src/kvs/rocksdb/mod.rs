@@ -790,6 +790,50 @@ impl Transactable for Transaction {
 		Ok(())
 	}
 
+	/// Count the total number of keys within a range.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn count(&self, rng: Range<Key>) -> Result<usize> {
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Execute on the blocking threadpool
+		let res = affinitypool::spawn_local(move || -> Result<_> {
+			// Set the key range
+			let beg = rng.start.as_slice();
+			let end = rng.end.as_slice();
+			// Load the inner transaction
+			let inner = self.inner.blocking_lock();
+			// Get the inner transaction
+			let inner =
+				inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
+			// Set the ReadOptions with the snapshot
+			let mut ro = ReadOptions::default();
+			ro.set_snapshot(&inner.snapshot());
+			ro.set_iterate_lower_bound(beg);
+			ro.set_iterate_upper_bound(end);
+			ro.set_async_io(true);
+			ro.fill_cache(false);
+			// Create the iterator
+			let mut iter = inner.raw_iterator_opt(ro);
+			// Seek to the start key
+			iter.seek(&rng.start);
+			// Count the items
+			let mut res = 0;
+			while iter.valid() {
+				res += 1;
+				iter.next();
+			}
+			// Drop the iterator
+			drop(iter);
+			// Return result
+			Ok(res)
+		})
+		.await?;
+		// Return result
+		Ok(res)
+	}
+
 	/// Retrieve a range of keys.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
@@ -802,7 +846,7 @@ impl Transactable for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Create result set
-		let mut res = vec![];
+		let mut res = Vec::with_capacity(limit as usize);
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -826,15 +870,11 @@ impl Transactable for Transaction {
 		while res.len() < limit as usize {
 			// Check the key and value
 			if let Some(k) = iter.key() {
-				// Check the range validity
-				if k >= beg && k < end {
-					res.push(k.to_vec());
-					iter.next();
-					continue;
-				}
+				res.push(k.to_vec());
+				iter.next();
+			} else {
+				break;
 			}
-			// Exit
-			break;
 		}
 		// Drop the iterator
 		drop(iter);
@@ -854,7 +894,7 @@ impl Transactable for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Create result set
-		let mut res = vec![];
+		let mut res = Vec::with_capacity(limit as usize);
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -878,15 +918,11 @@ impl Transactable for Transaction {
 		while res.len() < limit as usize {
 			// Check the key and value
 			if let Some(k) = iter.key() {
-				// Check the range validity
-				if k >= beg && k < end {
-					res.push(k.to_vec());
-					iter.prev();
-					continue;
-				}
+				res.push(k.to_vec());
+				iter.prev();
+			} else {
+				break;
 			}
-			// Exit
-			break;
 		}
 		// Drop the iterator
 		drop(iter);
@@ -911,7 +947,7 @@ impl Transactable for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Create result set
-		let mut res = vec![];
+		let mut res = Vec::with_capacity(limit as usize);
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -935,15 +971,11 @@ impl Transactable for Transaction {
 		while res.len() < limit as usize {
 			// Check the key and value
 			if let Some((k, v)) = iter.item() {
-				// Check the range validity
-				if k >= beg && k < end {
-					res.push((k.to_vec(), v.to_vec()));
-					iter.next();
-					continue;
-				}
+				res.push((k.to_vec(), v.to_vec()));
+				iter.next();
+			} else {
+				break;
 			}
-			// Exit
-			break;
 		}
 		// Drop the iterator
 		drop(iter);
@@ -968,7 +1000,7 @@ impl Transactable for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Create result set
-		let mut res = vec![];
+		let mut res = Vec::with_capacity(limit as usize);
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -992,15 +1024,11 @@ impl Transactable for Transaction {
 		while res.len() < limit as usize {
 			// Check the key and value
 			if let Some((k, v)) = iter.item() {
-				// Check the range validity
-				if k >= beg && k < end {
-					res.push((k.to_vec(), v.to_vec()));
-					iter.prev();
-					continue;
-				}
+				res.push((k.to_vec(), v.to_vec()));
+				iter.prev();
+			} else {
+				break;
 			}
-			// Exit
-			break;
 		}
 		// Drop the iterator
 		drop(iter);
