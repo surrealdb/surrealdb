@@ -25,11 +25,6 @@ on:
         type: boolean
         default: false
         description: "Create a GitHub release"
-      rust-version:
-        required: false
-        type: string
-        default: "1.87"
-        description: "The Rust version to use for building binaries"
       onnx-version:
         required: false
         type: string
@@ -67,8 +62,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
-        with:
-          toolchain: ${{ inputs.rust-version }}
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -117,7 +110,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ inputs.rust-version }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -189,7 +181,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ inputs.rust-version }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -211,7 +202,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ inputs.rust-version }}
           targets: wasm32-unknown-unknown
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -234,7 +224,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ inputs.rust-version }}
           components: clippy
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -242,7 +231,7 @@ jobs:
         uses: ./.github/actions/install-tools
 
       - name: Check clippy
-        run: cargo +${{ inputs.rust-version }} make ci-clippy
+        run: cargo make ci-clippy
 
   build:
     name: Release binaries
@@ -252,7 +241,6 @@ jobs:
       name: ${{ needs.prepare-vars.outputs.name }}
       build-metadata: ${{ needs.prepare-vars.outputs.build-metadata }}
       release-branch: ${{ inputs.git-ref }}
-      rust-version: ${{ inputs.rust-version }}
       onnx-version: ${{ inputs.onnx-version }}
       extra-features: ${{ inputs.extra-features }}
       upload: true

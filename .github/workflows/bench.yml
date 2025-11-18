@@ -18,7 +18,6 @@ defaults:
     shell: bash
 
 env:
-  RUST_VERSION: 1.87.0
   BRANCH_NAME: "${{ github.head_ref || github.ref_name }}"
 
 #
@@ -129,7 +128,6 @@ jobs:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@4305c38b25d97ef35a8ad1f985ccf2d2242004f2 # stable (Actions must be pinned by commit hash)
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
 
       - name: Setup cache

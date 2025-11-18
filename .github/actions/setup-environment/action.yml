@@ -2,10 +2,6 @@ name: 'Setup environment'
 description: 'Install Rust toolchain, checkout sources, and setup cache'
 
 inputs:
-  toolchain:
-    description: 'Rust toolchain version'
-    required: false
-    default: '1.87'
   components:
     description: 'Additional Rust components to install (space-separated)'
     required: false
@@ -37,7 +33,6 @@ runs:
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable
       with:
-        toolchain: ${{ inputs.toolchain }}
         components: ${{ inputs.components }}
         targets: ${{ inputs.targets }}
 

@@ -15,9 +15,6 @@ defaults:
 permissions:
   contents: read
 
-env:
-  RUST_VERSION: "1.87"
-
 jobs:
   check-fuzzing:
     name: Check fuzzing
@@ -25,8 +22,6 @@ jobs:
     steps:
       - name: Install stable toolchain
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # (Actions must be pinned by commit hash) stable
-        with:
-          toolchain: ${{ env.RUST_VERSION }}
 
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # (Actions must be pinned by commit hash) v4.2.2
