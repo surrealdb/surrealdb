@@ -126,13 +126,13 @@ impl Model {
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Thrown(err.message.to_string()))
+						anyhow::Error::new(Error::Thrown(err.message.clone()))
 					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
 					compute_unit.buffered_compute(&mut args).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Internal(err.message.to_string()))
+						anyhow::Error::new(Error::Internal(err.message.clone()))
 					})
 				})
 				.await
@@ -158,13 +158,13 @@ impl Model {
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Thrown(err.message.to_string()))
+						anyhow::Error::new(Error::Thrown(err.message.clone()))
 					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
 					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Internal(err.message.to_string()))
+						anyhow::Error::new(Error::Internal(err.message.clone()))
 					})
 				})
 				.await
@@ -192,13 +192,13 @@ impl Model {
 				// Run the compute in a blocking task
 				let outcome: Vec<f32> = tokio::task::spawn_blocking(move || {
 					let mut file = SurMlFile::from_bytes(bytes).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Thrown(err.message.to_string()))
+						anyhow::Error::new(Error::Thrown(err.message.clone()))
 					})?;
 					let compute_unit = ModelComputation {
 						surml_file: &mut file,
 					};
 					compute_unit.raw_compute(tensor, None).map_err(|err: SurrealError| {
-						anyhow::Error::new(Error::Internal(err.message.to_string()))
+						anyhow::Error::new(Error::Internal(err.message.clone()))
 					})
 				})
 				.await

@@ -499,11 +499,11 @@ pub async fn linear(
 
 		if scored_docs.len() < limit {
 			scored_docs.push(RrfDoc(combined_score, id, objects));
-		} else if let Some(RrfDoc(min_score, _, _)) = scored_docs.peek() {
-			if combined_score > *min_score {
-				scored_docs.pop();
-				scored_docs.push(RrfDoc(combined_score, id, objects));
-			}
+		} else if let Some(RrfDoc(min_score, _, _)) = scored_docs.peek()
+			&& combined_score > *min_score
+		{
+			scored_docs.pop();
+			scored_docs.push(RrfDoc(combined_score, id, objects));
 		}
 		if ctx.is_done(count % 100 == 0).await? {
 			break;

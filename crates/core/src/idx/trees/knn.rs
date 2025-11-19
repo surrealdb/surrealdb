@@ -514,12 +514,11 @@ impl KnnResultBuilder {
 		}
 	}
 	pub(super) fn check_add(&self, dist: f64) -> bool {
-		if self.docs.len() >= self.knn {
-			if let Some(pr) = self.priority_list.keys().last() {
-				if dist > pr.0 {
-					return false;
-				}
-			}
+		if self.docs.len() >= self.knn
+			&& let Some(pr) = self.priority_list.keys().last()
+			&& dist > pr.0
+		{
+			return false;
 		}
 		true
 	}
@@ -541,15 +540,13 @@ impl KnnResultBuilder {
 
 		// Do possible eviction
 		let docs_len = self.docs.len();
-		if docs_len > self.knn {
-			if let Some((_, d)) = self.priority_list.last_key_value() {
-				if docs_len - d.len() >= self.knn {
-					if let Some((_, evicted_docs)) = self.priority_list.pop_last() {
-						evicted_docs.remove_to(&mut self.docs);
-						return evicted_docs;
-					}
-				}
-			}
+		if docs_len > self.knn
+			&& let Some((_, d)) = self.priority_list.last_key_value()
+			&& docs_len - d.len() >= self.knn
+			&& let Some((_, evicted_docs)) = self.priority_list.pop_last()
+		{
+			evicted_docs.remove_to(&mut self.docs);
+			return evicted_docs;
 		}
 		Ids64::Empty
 	}
@@ -655,10 +652,10 @@ pub(super) mod tests {
 		let mut res = Vec::new();
 		// Iterate over each line in the file
 		for (i, line_result) in reader.lines().enumerate() {
-			if let Some(l) = limit {
-				if l == i {
-					break;
-				}
+			if let Some(l) = limit
+				&& l == i
+			{
+				break;
 			}
 			let line = line_result?;
 			let Value::Array(array) = convert_public_value_to_internal(syn::value(&line).unwrap())

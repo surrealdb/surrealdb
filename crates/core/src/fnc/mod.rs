@@ -1614,14 +1614,12 @@ fn get_execution_context<'a>(
 	ctx: &'a Context,
 	doc: Option<&'a CursorDoc>,
 ) -> Option<(&'a QueryExecutor, &'a CursorDoc, &'a RecordId)> {
-	if let Some(doc) = doc {
-		if let Some(thg) = &doc.rid {
-			if let Some(pla) = ctx.get_query_planner() {
-				if let Some(exe) = pla.get_query_executor(&thg.table) {
-					return Some((exe, doc, thg));
-				}
-			}
-		}
+	if let Some(doc) = doc
+		&& let Some(thg) = &doc.rid
+		&& let Some(pla) = ctx.get_query_planner()
+		&& let Some(exe) = pla.get_query_executor(&thg.table)
+	{
+		return Some((exe, doc, thg));
 	}
 	None
 }
