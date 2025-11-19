@@ -43,10 +43,10 @@ impl Datastore {
 	pub async fn transaction(&self, write: bool, _: bool) -> Result<Box<dyn Transactable>> {
 		// Create a new transaction
 		match self.db.begin(write).await {
-			Ok(inner) => Ok(Box::new(Transaction {
+			Ok(txn) => Ok(Box::new(Transaction {
 				done: AtomicBool::new(false),
 				write,
-				inner,
+				inner: RwLock::new(txn),
 			})),
 			Err(e) => Err(Error::from(e)),
 		}

@@ -103,15 +103,15 @@ impl From<rocksdb::Error> for Error {
 }
 
 #[cfg(feature = "kv-indxdb")]
-impl From<indxdb::err::Error> for Error {
-	fn from(e: indxdb::err::Error) -> Error {
+impl From<indxdb::Error> for Error {
+	fn from(e: indxdb::Error) -> Error {
 		match e {
-			indxdb::err::Error::DbError => Error::Datastore(e.to_string()),
-			indxdb::err::Error::TxError => Error::Transaction(e.to_string()),
-			indxdb::err::Error::TxClosed => Error::TransactionFinished,
-			indxdb::err::Error::TxNotWritable => Error::TransactionReadonly,
-			indxdb::err::Error::KeyAlreadyExists => Error::TransactionKeyAlreadyExists,
-			indxdb::err::Error::ValNotExpectedValue => Error::TrandsactionConditionNotMet,
+			indxdb::Error::DbError => Error::Datastore(e.to_string()),
+			indxdb::Error::TxError => Error::Transaction(e.to_string()),
+			indxdb::Error::TxClosed => Error::TransactionFinished,
+			indxdb::Error::TxNotWritable => Error::TransactionReadonly,
+			indxdb::Error::KeyAlreadyExists => Error::TransactionKeyAlreadyExists,
+			indxdb::Error::ValNotExpectedValue => Error::TrandsactionConditionNotMet,
 			_ => Error::Transaction(e.to_string()),
 		}
 	}
