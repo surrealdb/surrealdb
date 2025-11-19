@@ -299,6 +299,8 @@ impl TransactionBuilderFactory for CommunityComposer {
 			(flavour @ "memory", _) => {
 				#[cfg(feature = "kv-mem")]
 				{
+					// Create a new blocking threadpool
+					super::threadpool::initialise();
 					// Initialise the storage engine
 					let v = super::mem::Datastore::new().await.map(DatastoreFlavor::Mem)?;
 					let c = clock.unwrap_or_else(|| Arc::new(SizedClock::system()));

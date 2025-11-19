@@ -237,7 +237,6 @@ pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
 	let datastore = Arc::new(dbs::init::<C>(&composer, &config, dbs).await?);
 	// Start the node agent
 	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &config.engine);
-	// Start the web server
 	// Build and run the HTTP server using the provided RouterFactory implementation
 	ntw::init::<C>(&config, datastore.clone(), canceller.clone()).await?;
 	// Shutdown and stop closed tasks
