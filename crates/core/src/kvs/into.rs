@@ -49,7 +49,7 @@ impl IntoBytes for &Vec<u8> {
 	}
 	fn into_vec(&self) -> Vec<u8> {
 		// Copy the bytes to a new vector
-		self.to_vec()
+		(*self).clone()
 	}
 	fn into_bytes(self) -> Bytes {
 		// Must copy from &Vec<u8>
@@ -155,7 +155,7 @@ impl<'a> IntoBytes for Cow<'a, [u8]> {
 	fn into_vec(&self) -> Vec<u8> {
 		match self {
 			Cow::Borrowed(s) => s.to_vec(),
-			Cow::Owned(v) => v.to_vec(),
+			Cow::Owned(v) => v.clone(),
 		}
 	}
 	fn into_bytes(self) -> Bytes {

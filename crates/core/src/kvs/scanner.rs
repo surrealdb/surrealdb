@@ -102,7 +102,7 @@ impl<'a, I> Scanner<'a, I> {
 				&& self.prefetch_future.is_none()
 				&& self.active_result_count > 0
 				&& self.results.len() <= self.active_result_count / 2
-				&& self.limit.map_or(true, |l| l > 0);
+				&& self.limit.is_none_or(|l| l > 0);
 			// Perform a prefetch if the conditions are met
 			if should_prefetch {
 				// Compute the next batch size (double it, capped at MAX_BATCH_SIZE and limit)

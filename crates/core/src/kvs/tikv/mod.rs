@@ -57,7 +57,7 @@ impl Timestamp for Timecode {
 	/// Create a timestamp from a datetime
 	fn from_datetime(datetime: DateTime<Utc>) -> Result<Self> {
 		Ok(Timecode(tikv::Timestamp {
-			physical: datetime.timestamp_millis() as i64,
+			physical: datetime.timestamp_millis(),
 			..Default::default()
 		}))
 	}
