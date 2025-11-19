@@ -20,7 +20,7 @@ impl ToSql for ApiConfig {
 				.iter()
 				.map(|m| {
 					let args_str: Vec<String> =
-						m.args.iter().map(|arg| surrealdb_types::ToSql::to_sql(arg)).collect();
+						m.args.iter().map(surrealdb_types::ToSql::to_sql).collect();
 					format!("{}({})", m.name, args_str.join(", "))
 				})
 				.collect();

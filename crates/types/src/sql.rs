@@ -102,7 +102,9 @@ pub fn fmt_sql_comma_separated<T: ToSql>(items: &[T], f: &mut String, fmt: SqlFo
 	if fmt.is_pretty() && !items.is_empty() {
 		f.push('\n');
 		// Write one level less indentation for the closing bracket
-		if let SqlFormat::Indented(level) = fmt && level > 0 {
+		if let SqlFormat::Indented(level) = fmt
+			&& level > 0
+		{
 			for _ in 0..(level - 1) {
 				f.push('\t');
 			}
@@ -137,7 +139,9 @@ pub fn fmt_sql_key_value<'a, V: ToSql + 'a>(
 	if fmt.is_pretty() && !pairs.is_empty() {
 		f.push('\n');
 		// Write one level less indentation for the closing bracket
-		if let SqlFormat::Indented(level) = fmt && level > 0 {
+		if let SqlFormat::Indented(level) = fmt
+			&& level > 0
+		{
 			for _ in 0..(level - 1) {
 				f.push('\t');
 			}

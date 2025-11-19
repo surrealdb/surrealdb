@@ -274,6 +274,7 @@ impl fmt::Display for AssignOperator {
 /// If a binding power is higher the operator is more likely to directly operate
 /// on it's neighbours.
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+#[allow(dead_code)]
 pub enum BindingPower {
 	Or,
 	And,
@@ -289,6 +290,7 @@ pub enum BindingPower {
 	Prime,
 }
 
+#[allow(dead_code)]
 impl BindingPower {
 	/// Returns the binding power of this operator.
 	///

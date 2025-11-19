@@ -1,5 +1,8 @@
+use std::fmt::{self, Display, Write};
+
 use surrealdb_types::{SqlFormat, ToSql};
 
+use crate::fmt::Pretty;
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -77,5 +80,31 @@ impl ToSql for IfelseStatement {
 				v.fmt_sql(f, fmt);
 			}
 		}
+	}
+}
+
+impl Display for IfelseStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		let mut f = Pretty::from(f);
+
+		for (i, (cond, then)) in self.exprs.iter().enumerate() {
+			if i > 0 {
+				write!(f, " ELSE ")?;
+			}
+			write!(f, "IF ")?;
+			write!(f, "{}", cond)?;
+			if self.bracketed() {
+				write!(f, " {}", then)?;
+			} else {
+				write!(f, " THEN {}", then)?;
+			}
+		}
+		if let Some(ref v) = self.close {
+			write!(f, " ELSE {}", v)?;
+		}
+		if !self.bracketed() {
+			write!(f, " END")?;
+		}
+		Ok(())
 	}
 }

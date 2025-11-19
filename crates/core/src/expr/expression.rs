@@ -3,7 +3,7 @@ use std::ops::Bound;
 
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
-use surrealdb_types::{RecordId, SqlFormat, ToSql, write_sql};
+use surrealdb_types::{RecordId, SqlFormat, ToSql};
 
 use super::SleepStatement;
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
@@ -12,7 +12,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::closure::ClosureExpr;
-use crate::expr::operator::BindingPower;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::statements::{
 	AlterStatement, CreateStatement, DefineStatement, DeleteStatement, ForeachStatement,
@@ -24,7 +23,6 @@ use crate::expr::{
 	BinaryOperator, Block, Constant, ControlFlow, FlowResult, FunctionCall, Idiom, Literal, Mock,
 	ObjectEntry, Param, PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
-use crate::fmt::{EscapeIdent, Pretty};
 use crate::fnc;
 use crate::types::PublicValue;
 use crate::val::{Array, Range, Table, Value};
@@ -723,6 +721,7 @@ impl Expr {
 	// NOTE: Changes to this function also likely require changes to
 	// crate::sql::Expr::needs_parentheses
 	/// Returns if this expression needs to be parenthesized when inside another expression.
+	#[allow(dead_code)]
 	fn needs_parentheses(&self) -> bool {
 		match self {
 			Expr::Literal(_)
@@ -769,128 +768,16 @@ impl Expr {
 
 impl fmt::Display for Expr {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use std::fmt::Write;
-		let mut f = Pretty::from(f);
-		match self {
-			Expr::Literal(literal) => write!(f, "{literal}"),
-			Expr::Param(param) => write!(f, "{param}"),
-			Expr::Idiom(idiom) => write!(f, "{idiom}"),
-			Expr::Table(ident) => write!(f, "{}", EscapeIdent(ident)),
-			Expr::Mock(mock) => write!(f, "{mock}"),
-			Expr::Block(block) => write!(f, "{block}"),
-			Expr::Constant(constant) => write!(f, "{constant}"),
-			Expr::Prefix {
-				op,
-				expr,
-			} => {
-				let expr_bp = BindingPower::for_expr(expr);
-				let op_bp = BindingPower::for_prefix_operator(op);
-				if expr.needs_parentheses()
-					|| expr_bp < op_bp
-					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
-				{
-					write!(f, "{op}({expr})")
-				} else {
-					write!(f, "{op}{expr}")
-				}
-			}
-			Expr::Postfix {
-				expr,
-				op,
-			} => {
-				let expr_bp = BindingPower::for_expr(expr);
-				let op_bp = BindingPower::for_postfix_operator(op);
-				if expr.needs_parentheses()
-					|| expr_bp < op_bp
-					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
-				{
-					write!(f, "({expr}){op}")
-				} else {
-					write!(f, "{expr}{op}")
-				}
-			}
-			Expr::Binary {
-				left,
-				op,
-				right,
-			} => {
-				let op_bp = BindingPower::for_binary_operator(op);
-				let left_bp = BindingPower::for_expr(left);
-				let right_bp = BindingPower::for_expr(right);
-
-				if left.needs_parentheses()
-					|| left_bp < op_bp
-					|| left_bp == right_bp
-						&& matches!(left_bp, BindingPower::Range | BindingPower::Relation)
-				{
-					write!(f, "({left})")?;
-				} else {
-					write!(f, "{left}")?;
-				}
-
-				if matches!(
-					op,
-					BinaryOperator::Range
-						| BinaryOperator::RangeSkip
-						| BinaryOperator::RangeInclusive
-						| BinaryOperator::RangeSkipInclusive
-				) {
-					write!(f, "{op}")?;
-				} else {
-					write!(f, " {op} ")?;
-				}
-
-				if right.needs_parentheses()
-					|| right_bp < op_bp
-					|| left_bp == right_bp
-						&& matches!(right_bp, BindingPower::Range | BindingPower::Relation)
-				{
-					write!(f, "({right})")
-				} else {
-					write!(f, "{right}")
-				}
-			}
-			Expr::FunctionCall(function_call) => write!(f, "{function_call}"),
-			Expr::Closure(closure) => write!(f, "{closure}"),
-			Expr::Break => write!(f, "BREAK"),
-			Expr::Continue => write!(f, "CONTINUE"),
-			Expr::Return(x) => {
-				use surrealdb_types::ToSql;
-				let sql_stmt: crate::sql::statements::OutputStatement = (**x).clone().into();
-				write!(f, "{}", sql_stmt.to_sql())
-			}
-			Expr::Throw(expr) => write!(f, "THROW {expr}"),
-			Expr::IfElse(s) => {
-				use surrealdb_types::ToSql;
-				let sql_stmt: crate::sql::statements::IfelseStatement = (**s).clone().into();
-				write!(f, "{}", sql_stmt.to_sql())
-			}
-			Expr::Select(_)
-			| Expr::Create(_)
-			| Expr::Update(_)
-			| Expr::Delete(_)
-			| Expr::Relate(_)
-			| Expr::Insert(_)
-			| Expr::Define(_)
-			| Expr::Remove(_)
-			| Expr::Rebuild(_)
-			| Expr::Upsert(_)
-			| Expr::Alter(_)
-			| Expr::Info(_)
-			| Expr::Foreach(_)
-			| Expr::Let(_)
-			| Expr::Sleep(_) => {
-				use surrealdb_types::ToSql;
-				let sql_expr: crate::sql::Expr = self.clone().into();
-				write!(f, "{}", sql_expr.to_sql())
-			}
-		}
+		// Convert to sql module type and use its Display implementation
+		let sql_expr: crate::sql::Expr = self.clone().into();
+		fmt::Display::fmt(&sql_expr, f)
 	}
 }
 
 impl ToSql for Expr {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let sql_expr: crate::sql::Expr = self.clone().into();
+		sql_expr.fmt_sql(f, fmt);
 	}
 }
 

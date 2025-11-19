@@ -179,6 +179,13 @@ impl Kind {
 	}
 }
 
+impl surrealdb_types::ToSql for Kind {
+	fn fmt_sql(&self, f: &mut String, _fmt: surrealdb_types::SqlFormat) {
+		use std::fmt::Write;
+		let _ = write!(f, "{}", self);
+	}
+}
+
 impl From<Kind> for crate::expr::Kind {
 	fn from(v: Kind) -> Self {
 		match v {

@@ -176,7 +176,11 @@ impl From<crate::expr::TopLevelExpr> for TopLevelExpr {
 impl fmt::Display for TopLevelExpr {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		use surrealdb_types::ToSql;
-		let fmt_mode = if f.alternate() { surrealdb_types::SqlFormat::Indented(0) } else { surrealdb_types::SqlFormat::SingleLine };
+		let fmt_mode = if f.alternate() {
+			surrealdb_types::SqlFormat::Indented(0)
+		} else {
+			surrealdb_types::SqlFormat::SingleLine
+		};
 		match self {
 			TopLevelExpr::Begin => write!(f, "BEGIN"),
 			TopLevelExpr::Cancel => write!(f, "CANCEL"),

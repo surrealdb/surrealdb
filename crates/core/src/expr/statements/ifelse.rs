@@ -1,4 +1,5 @@
 use std::fmt;
+
 use reblessive::tree::Stk;
 
 use crate::ctx::Context;
@@ -51,14 +52,9 @@ impl IfelseStatement {
 
 impl fmt::Display for IfelseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use surrealdb_types::ToSql;
-		use crate::fmt::is_pretty;
+		// Convert to sql module type and use its Display implementation
 		let sql_stmt: crate::sql::statements::IfelseStatement = self.clone().into();
-		if is_pretty() {
-			write!(f, "{}", sql_stmt.to_sql_pretty())
-		} else {
-			write!(f, "{}", sql_stmt.to_sql())
-		}
+		fmt::Display::fmt(&sql_stmt, f)
 	}
 }
 

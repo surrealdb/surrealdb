@@ -373,6 +373,12 @@ impl Iterator for IntegerRangeIter {
 	}
 }
 
+impl ToSql for Range {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "{}", self)
+	}
+}
+
 #[cfg(test)]
 mod test {
 	use super::Range;
@@ -423,11 +429,5 @@ mod test {
 		ensure_order(r(".."), r("..=1"));
 		ensure_order(r("1.."), r("2.."));
 		ensure_order(r("'a'.."), r("'b'.."));
-	}
-}
-
-impl ToSql for Range {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
 	}
 }

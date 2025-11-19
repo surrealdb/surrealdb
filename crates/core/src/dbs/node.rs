@@ -59,20 +59,14 @@ impl Node {
 	}
 }
 
-impl Display for Node {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "NODE {} SEEN {}", self.id, self.heartbeat)?;
-		match self.gc {
-			true => write!(f, " ARCHIVED")?,
-			false => write!(f, " ACTIVE")?,
-		};
-		Ok(())
-	}
-}
-
 impl ToSql for Node {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+		write_sql!(f, "NODE {} SEEN {}", self.id, self.heartbeat);
+		if self.gc {
+			write_sql!(f, " ARCHIVED");
+		} else {
+			write_sql!(f, " ACTIVE");
+		}
 	}
 }
 
