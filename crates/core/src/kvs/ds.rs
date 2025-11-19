@@ -1016,7 +1016,7 @@ impl Datastore {
 	/// This function marks the node as archived, ready for garbage collection.
 	/// Later on when garbage collection is running the live queries assigned
 	/// to this node will be removed, along with the node itself.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::node", skip(self))]
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn delete_node(&self, id: uuid::Uuid) -> Result<()> {
 		// Log when this method is run
 		trace!(target: TARGET, "Archiving node in the cluster");
@@ -1035,7 +1035,7 @@ impl Datastore {
 	/// This function marks the node as archived, ready for garbage collection.
 	/// Later on when garbage collection is running the live queries assigned
 	/// to this node will be removed, along with the node itself.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::node", skip(self))]
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn expire_nodes(&self) -> Result<()> {
 		// Log when this method is run
 		trace!(target: TARGET, "Archiving expired nodes in the cluster");
@@ -1085,7 +1085,7 @@ impl Datastore {
 	/// This function clears up all nodes which have been marked as archived.
 	/// When a matching node is found, all node queries, and table queries are
 	/// garbage collected, before the node itself is completely deleted.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::node", skip(self))]
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn remove_nodes(&self) -> Result<()> {
 		// Log when this method is run
 		trace!(target: TARGET, "Cleaning up archived nodes in the cluster");
@@ -1156,7 +1156,7 @@ impl Datastore {
 	/// in the cluster, from all namespaces, databases, and tables. It uses
 	/// a number of transactions in order to prevent failure of large or
 	/// long-running transactions on distributed storage engines.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::node", skip(self))]
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn garbage_collect(&self) -> Result<()> {
 		// Log the node deletion
 		trace!(target: TARGET, "Garbage collecting all miscellaneous data");
@@ -1247,7 +1247,7 @@ impl Datastore {
 	/// are specified by uique live query UUIDs. This is necessary when a
 	/// WebSocket disconnects, and any associated live queries need to be
 	/// cleaned up and removed.
-	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::node", skip(self))]
+	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
 	pub async fn delete_queries(&self, ids: Vec<uuid::Uuid>) -> Result<()> {
 		// Log the node deletion
 		trace!(target: TARGET, "Deleting live queries for a connection");
