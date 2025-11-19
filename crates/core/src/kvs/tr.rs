@@ -131,12 +131,12 @@ impl Transactor {
 
 	/// Fetch many keys from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tr", skip_all)]
-	pub async fn getm<K>(&self, keys: Vec<K>) -> Result<Vec<Option<Val>>>
+	pub async fn getm<K>(&self, keys: Vec<K>, version: Option<u64>) -> Result<Vec<Option<Val>>>
 	where
 		K: IntoBytes + Debug,
 	{
 		let keys = keys.into_iter().map(IntoBytes::into_vec).collect();
-		self.inner.getm(keys).await
+		self.inner.getm(keys, version).await
 	}
 
 	/// Retrieve a specific prefixed range of keys from the datastore.

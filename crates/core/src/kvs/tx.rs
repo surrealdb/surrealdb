@@ -123,13 +123,17 @@ impl Transaction {
 
 	/// Retrieve a batch set of keys from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
-	pub async fn getm<K>(&self, keys: Vec<K>) -> Result<Vec<Option<K::ValueType>>>
+	pub async fn getm<K>(
+		&self,
+		keys: Vec<K>,
+		version: Option<u64>,
+	) -> Result<Vec<Option<K::ValueType>>>
 	where
 		K: KVKey + Debug,
 	{
 		let keys = keys.iter().map(|k| k.encode_key()).collect::<Result<Vec<_>>>()?;
 		self.tr
-			.getm(keys)
+			.getm(keys, version)
 			.await
 			.map_err(Error::from)?
 			.into_iter()

@@ -164,7 +164,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// This function fetches all matching keys pairs from the underlying
 	/// datastore concurrently.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.sprint()))]
-	async fn getm(&self, keys: Vec<Key>) -> Result<Vec<Option<Val>>> {
+	async fn getm(&self, keys: Vec<Key>, version: Option<u64>) -> Result<Vec<Option<Val>>> {
 		// Check to see if transaction is closed
 		if self.closed() {
 			return Err(Error::TransactionFinished);
@@ -172,7 +172,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 		// Continue with function logic
 		let mut out = Vec::with_capacity(keys.len());
 		for key in keys.into_iter() {
-			if let Some(val) = self.get(key, None).await? {
+			if let Some(val) = self.get(key, version).await? {
 				out.push(Some(val));
 			} else {
 				out.push(None);
