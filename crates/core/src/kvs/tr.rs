@@ -135,7 +135,7 @@ impl Transactor {
 	where
 		K: IntoBytes + Debug,
 	{
-		let keys = keys.iter().map(IntoBytes::into_vec).collect();
+		let keys = keys.into_iter().map(IntoBytes::into_vec).collect();
 		self.inner.getm(keys).await
 	}
 
