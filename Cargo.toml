@@ -65,7 +65,7 @@ surrealkv = "0.15.0"
 surrealml = { version = "0.1.9", package = "surrealml-core", features = [
     "dynamic",
 ] }
-surrealmx = "0.14.1"
+surrealmx = "0.14.2"
 trice = "0.4.0"
 vart = "0.9.3"
 ## Maintained by @Delskayn
