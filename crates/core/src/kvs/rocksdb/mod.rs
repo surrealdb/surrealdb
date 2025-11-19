@@ -572,11 +572,11 @@ impl Transactable for Transaction {
 		// Check if we are in read-and-deletion-only mode
 		// This is used for long duration transactions that would have started before disk
 		// conditions changed
-		if let Some(disk_space_manager) = self.disk_space_manager.as_ref() {
-			if disk_space_manager.is_deletion_only() && self.contains_only_deletions == Some(false)
-			{
-				return Err(Error::ReadAndDeleteOnly);
-			}
+		if let Some(disk_space_manager) = self.disk_space_manager.as_ref()
+			&& disk_space_manager.is_deletion_only()
+			&& self.contains_only_deletions == Some(false)
+		{
+			return Err(Error::ReadAndDeleteOnly);
 		}
 		// Get the inner transaction
 		let inner = self
@@ -1059,20 +1059,3 @@ impl Transactable for Transaction {
 		Ok(())
 	}
 }
-
-// impl Transaction {
-// 	/// Check if an error is related to Out of Disk (OOD) conditions
-// 	fn is_ood_error(error: &anyhow::Error) -> bool {
-// 		let error_msg = error.to_string().to_lowercase();
-// 		error_msg.contains("no space left on device")
-// 			|| error_msg.contains("disk full")
-// 			|| error_msg.contains("out of space")
-// 			|| error_msg.contains("enospc")
-// 	}
-
-// 	/// Log OOD error with appropriate context
-// 	fn log_ood_error(error: &anyhow::Error, context: &str) {
-// 		error!(target: TARGET, "Out of Disk error during {}: {}", context, error);
-// 		warn!(target: TARGET, "Database may enter read-only mode until disk space is available");
-// 	}
-// }

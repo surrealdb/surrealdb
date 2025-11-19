@@ -8,6 +8,7 @@ use rand::Rng;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
 use surrealdb_core::kvs::{Datastore, TransactionBuilderFactory};
 use tokio::time::{Instant, sleep, timeout};
+use tokio_util::sync::CancellationToken;
 
 use crate::cli::Config;
 use crate::core::dbs::Session;
@@ -294,10 +295,10 @@ impl DbsCapabilities {
 		// If there was a general deny for functions, we allow if there are specific
 		// allows for functions
 		if let Some(Targets::All) = self.deny_funcs {
-			if let Some(targets) = &self.allow_funcs {
-				if let Targets::Some(_) = targets {
-					return targets.clone();
-				}
+			if let Some(targets) = &self.allow_funcs
+				&& let Targets::Some(_) = targets
+			{
+				return targets.clone();
 			}
 			return Targets::None;
 		}
@@ -334,10 +335,10 @@ impl DbsCapabilities {
 		// If there was a general deny for networks, we allow if there are specific
 		// allows for networks
 		if let Some(Targets::All) = self.deny_net {
-			if let Some(targets) = &self.allow_net {
-				if let Targets::Some(_) = targets {
-					return targets.clone();
-				}
+			if let Some(targets) = &self.allow_net
+				&& let Targets::Some(_) = targets
+			{
+				return targets.clone();
 			}
 			return Targets::None;
 		}
@@ -374,10 +375,10 @@ impl DbsCapabilities {
 		// If there was a general deny for RPC, we allow if there are specific allows
 		// for RPC methods
 		if let Some(Targets::All) = self.deny_rpc {
-			if let Some(targets) = self.allow_rpc.as_ref() {
-				if let Targets::Some(_) = targets {
-					return targets.clone();
-				}
+			if let Some(targets) = self.allow_rpc.as_ref()
+				&& let Targets::Some(_) = targets
+			{
+				return targets.clone();
 			}
 			return Targets::None;
 		}
@@ -413,10 +414,10 @@ impl DbsCapabilities {
 		// If there was a general deny for HTTP, we allow if there are specific allows
 		// for HTTP routes
 		if let Some(Targets::All) = self.deny_http {
-			if let Some(targets) = self.allow_http.as_ref() {
-				if let Targets::Some(_) = targets {
-					return targets.clone();
-				}
+			if let Some(targets) = self.allow_http.as_ref()
+				&& let Targets::Some(_) = targets
+			{
+				return targets.clone();
 			}
 			return Targets::None;
 		}
@@ -479,10 +480,10 @@ impl DbsCapabilities {
 		// Allowed functions already consider a global deny and a general deny for
 		// functions On top of what is explicitly allowed, we deny what is
 		// specifically denied
-		if let Some(targets) = &self.deny_funcs {
-			if let Targets::Some(_) = targets {
-				return targets.clone();
-			}
+		if let Some(targets) = &self.deny_funcs
+			&& let Targets::Some(_) = targets
+		{
+			return targets.clone();
 		}
 		Targets::None
 	}
@@ -491,10 +492,10 @@ impl DbsCapabilities {
 		// Allowed networks already consider a global deny and a general deny for
 		// networks On top of what is explicitly allowed, we deny what is specifically
 		// denied
-		if let Some(targets) = &self.deny_net {
-			if let Targets::Some(_) = targets {
-				return targets.clone();
-			}
+		if let Some(targets) = &self.deny_net
+			&& let Targets::Some(_) = targets
+		{
+			return targets.clone();
 		}
 		Targets::None
 	}
@@ -506,10 +507,10 @@ impl DbsCapabilities {
 	fn get_deny_rpc(&self) -> Targets<MethodTarget> {
 		// Allowed RPC methods already consider a global deny and a general deny for RPC
 		// On top of what is explicitly allowed, we deny what is specifically denied
-		if let Some(targets) = &self.deny_rpc {
-			if let Targets::Some(_) = targets {
-				return targets.clone();
-			}
+		if let Some(targets) = &self.deny_rpc
+			&& let Targets::Some(_) = targets
+		{
+			return targets.clone();
 		}
 		Targets::None
 	}
@@ -518,10 +519,10 @@ impl DbsCapabilities {
 		// Allowed HTTP routes already consider a global deny and a general deny for
 		// HTTP On top of what is explicitly allowed, we deny what is specifically
 		// denied
-		if let Some(targets) = self.deny_http.as_ref() {
-			if let Targets::Some(_) = targets {
-				return targets.clone();
-			}
+		if let Some(targets) = self.deny_http.as_ref()
+			&& let Targets::Some(_) = targets
+		{
+			return targets.clone();
 		}
 		Targets::None
 	}
@@ -657,12 +658,14 @@ where
 /// # Parameters
 /// - `factory`: Transaction builder factory for datastore backend selection
 /// - `opt`: Server configuration including database path and authentication
+/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
 ///
 /// # Generic parameters
 /// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
 pub async fn init<F: TransactionBuilderFactory>(
 	factory: &F,
 	opt: &Config,
+	canceller: CancellationToken,
 	StartCommandDbsOptions {
 		strict_mode,
 		query_timeout,
@@ -716,7 +719,7 @@ pub async fn init<F: TransactionBuilderFactory>(
 	// Log the specified server capabilities
 	debug!("Server capabilities: {capabilities}");
 	// Parse and setup the desired kv datastore
-	let dbs = Datastore::new_with_factory::<F>(factory, &opt.path)
+	let dbs = Datastore::new_with_factory::<F>(factory, &opt.path, canceller)
 		.await?
 		.with_notifications()
 		.with_query_timeout(query_timeout)

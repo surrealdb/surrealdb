@@ -832,13 +832,13 @@ pub async fn signin_bearer(
 		jti: Some(Uuid::new_v4().to_string()),
 		ns: ns.map(|ns| ns.name.clone()),
 		db: db.map(|db| db.name.clone()),
-		ac: Some(av.name.to_string()),
+		ac: Some(av.name.clone()),
 		id: match &gr.subject {
 			catalog::Subject::User(user) => Some(user.clone()),
 			catalog::Subject::Record(rid) => Some(rid.to_string()),
 		},
 		roles: match &gr.subject {
-			catalog::Subject::User(_) => Some(roles.iter().map(|v| v.to_string()).collect()),
+			catalog::Subject::User(_) => Some(roles.clone()),
 			catalog::Subject::Record(_) => Default::default(),
 		},
 		..Claims::default()
@@ -920,12 +920,12 @@ pub async fn signin_bearer(
 	);
 	session.ns.clone_from(&ns.map(|ns| ns.name.clone()));
 	session.db.clone_from(&db.map(|db| db.name.clone()));
-	session.ac = Some(av.name.to_string());
+	session.ac = Some(av.name.clone());
 	session.exp = expiration(av.session_duration)?;
 	match &gr.subject {
 		catalog::Subject::User(user) => {
 			session.au = Arc::new(Auth::new(Actor::new(
-				user.to_string(),
+				user.clone(),
 				roles
 					.iter()
 					.map(|e| Role::from_str(e))

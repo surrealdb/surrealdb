@@ -79,11 +79,10 @@ impl PlanBuilder {
 
 		//Analyse the query AST to discover indexable conditions and collect
 		//optimisation opportunities
-		if let Some(root) = &p.root {
-			if let Err(e) = b.eval_node(root) {
+		if let Some(root) = &p.root
+			&& let Err(e) = b.eval_node(root) {
 				// Fall back to table scan if analysis fails
 				return Self::table_iterator(ctx, Some(&e), p.gp).await;
-			}
 		}
 
 		//Optimisation path 1: All conditions connected by AND operators
@@ -97,10 +96,10 @@ impl PlanBuilder {
 			for (ixr, vals) in p.compound_indexes {
 				if let Some((cols, io)) = b.check_compound_index_all_and(&ixr, vals) {
 					// Prefer indexes that cover more columns (higher selectivity)
-					if let Some((c, _)) = &compound_index {
-						if cols <= *c {
-							continue; // Skip if this index covers fewer columns
-						}
+					if let Some((c, _)) = &compound_index
+						&& cols <= *c
+					{
+						continue; // Skip if this index covers fewer columns
 					}
 					// Only consider true compound indexes (multiple columns)
 					if cols > 1 {
@@ -118,8 +117,8 @@ impl PlanBuilder {
 			}
 
 			// Select the first available range query (deterministic group order)
-			if let Some((_, group)) = b.groups.into_iter().next() {
-				if let Some((index_reference, rq)) = group.take_first_range() {
+			if let Some((_, group)) = b.groups.into_iter().next()
+				&& let Some((index_reference, rq)) = group.take_first_range() {
 					// Evaluate the record strategy
 					let record_strategy =
 						ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
@@ -139,7 +138,6 @@ impl PlanBuilder {
 						sc,
 						is_order,
 					));
-				}
 			}
 
 			// Otherwise, pick a non-range single-index
@@ -332,10 +330,10 @@ impl PlanBuilder {
 				right,
 				exp,
 			} => {
-				if let Some(io) = io {
-					if self.with_indexes.allowed_index(io.index_reference.index_id) {
-						self.add_index_option(*group, exp.clone(), io.clone());
-					}
+				if let Some(io) = io
+					&& self.with_indexes.allowed_index(io.index_reference.index_id)
+				{
+					self.add_index_option(*group, exp.clone(), io.clone());
 				}
 				self.eval_node(left)?;
 				self.eval_node(right)?;
@@ -457,10 +455,10 @@ impl IndexOption {
 	}
 
 	fn reduce_array(value: &Value) -> Value {
-		if let Value::Array(a) = value {
-			if a.len() == 1 {
-				return a[0].clone();
-			}
+		if let Value::Array(a) = value
+			&& a.len() == 1
+		{
+			return a[0].clone();
 		}
 		value.clone()
 	}

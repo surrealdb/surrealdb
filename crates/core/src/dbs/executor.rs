@@ -165,7 +165,7 @@ impl Executor {
 					Some(kind) => res
 						.coerce_to_kind(kind)
 						.map_err(|e| Error::SetCoerce {
-							name: stm.name.to_string(),
+							name: stm.name.clone(),
 							error: Box::new(e),
 						})
 						.map_err(anyhow::Error::new)?,

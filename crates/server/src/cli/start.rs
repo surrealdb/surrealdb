@@ -234,7 +234,7 @@ pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();
 	// Start the datastore
-	let datastore = Arc::new(dbs::init::<C>(&composer, &config, dbs).await?);
+	let datastore = Arc::new(dbs::init::<C>(&composer, &config, canceller.clone(), dbs).await?);
 	// Start the node agent
 	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &config.engine);
 	// Build and run the HTTP server using the provided RouterFactory implementation

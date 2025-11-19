@@ -66,7 +66,7 @@ impl RebuildIndexStatement {
 					return Ok(Value::None);
 				} else {
 					return Err(Error::IxNotFound {
-						name: self.name.to_string(),
+						name: self.name.clone(),
 					}
 					.into());
 				}

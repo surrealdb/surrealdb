@@ -4,7 +4,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Serialize, Deserialize, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Dir {
 	/// `<-`
@@ -12,13 +12,8 @@ pub enum Dir {
 	/// `->`
 	Out,
 	/// `<->`
+	#[default]
 	Both,
-}
-
-impl Default for Dir {
-	fn default() -> Self {
-		Self::Both
-	}
 }
 
 impl fmt::Display for Dir {

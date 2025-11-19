@@ -90,10 +90,11 @@ impl From<crate::types::PublicGeometryKind> for GeometryKind {
 }
 
 /// The kind, or data type, of a value or field.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Kind {
 	/// The most generic type, can be anything.
+	#[default]
 	Any,
 	/// None type.
 	None,
@@ -153,12 +154,6 @@ pub enum Kind {
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
 	File(Vec<String>),
-}
-
-impl Default for Kind {
-	fn default() -> Self {
-		Self::Any
-	}
 }
 
 impl Kind {

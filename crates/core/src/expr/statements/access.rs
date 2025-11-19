@@ -196,7 +196,7 @@ pub async fn create_grant(
 		Base::Ns => {
 			let ns = ctx.expect_ns_id(opt).await?;
 			txn.get_ns_access(ns, &access).await?.ok_or_else(|| Error::AccessNsNotFound {
-				ac: access.to_string(),
+				ac: access.clone(),
 				// The namespace is expected above
 				ns: opt.ns.as_deref().expect("namespace validated by expect_ns_id").to_owned(),
 			})?
@@ -204,7 +204,7 @@ pub async fn create_grant(
 		Base::Db => {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 			txn.get_db_access(ns, db, &access).await?.ok_or_else(|| Error::AccessDbNotFound {
-				ac: access.to_string(),
+				ac: access.clone(),
 				// The namespace and database is expected above
 				ns: opt.ns.as_deref().expect("namespace validated by expect_ns_db_ids").to_owned(),
 				db: opt.db.as_deref().expect("database validated by expect_ns_db_ids").to_owned(),
@@ -316,7 +316,7 @@ pub async fn create_grant(
 							let ns_id = ctx.get_ns_id(opt).await?;
 							txn.get_ns_user(ns_id, user).await?.ok_or_else(|| {
 								Error::UserNsNotFound {
-									name: user.to_string(),
+									name: user.clone(),
 									// We just retrieved the ns_id above
 									ns: opt
 										.ns()
@@ -329,7 +329,7 @@ pub async fn create_grant(
 							let (ns_id, db_id) = ctx.expect_ns_db_ids(opt).await?;
 							txn.get_db_user(ns_id, db_id, user).await?.ok_or_else(|| {
 								Error::UserDbNotFound {
-									name: user.to_string(),
+									name: user.clone(),
 									// We just retrieved the ns_id and db_id above
 									ns: opt
 										.ns()
@@ -478,7 +478,7 @@ async fn compute_show(
 			let ns = ctx.expect_ns_id(opt).await?;
 			if txn.get_ns_access(ns, &stmt.ac).await?.is_none() {
 				bail!(Error::AccessNsNotFound {
-					ac: stmt.ac.to_string(),
+					ac: stmt.ac.clone(),
 					// We expected a namespace above
 					ns: opt.ns.as_deref().expect("namespace validated by expect_ns_id").to_owned(),
 				});
@@ -489,7 +489,7 @@ async fn compute_show(
 			// We expected a namespace above
 			if txn.get_db_access(ns, db, &stmt.ac).await?.is_none() {
 				bail!(Error::AccessDbNotFound {
-					ac: stmt.ac.to_string(),
+					ac: stmt.ac.clone(),
 					// We expected a namespace and database above
 					ns: opt
 						.ns

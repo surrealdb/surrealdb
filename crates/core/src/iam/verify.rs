@@ -160,18 +160,18 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 	// Convert the token to a SurrealQL object value
 	let value = crate::val::Value::from(token_data.claims.clone().into_claims_object());
 	// Check if the auth token can be used
-	if let Some(nbf) = token_data.claims.nbf {
-		if nbf > Utc::now().timestamp() {
-			debug!("Token verification failed due to the 'nbf' claim containing a future time");
-			bail!(Error::InvalidAuth);
-		}
+	if let Some(nbf) = token_data.claims.nbf
+		&& nbf > Utc::now().timestamp()
+	{
+		debug!("Token verification failed due to the 'nbf' claim containing a future time");
+		bail!(Error::InvalidAuth);
 	}
 	// Check if the auth token has expired
-	if let Some(exp) = token_data.claims.exp {
-		if exp < Utc::now().timestamp() {
-			debug!("Token verification failed due to the 'exp' claim containing a past time");
-			bail!(Error::ExpiredToken);
-		}
+	if let Some(exp) = token_data.claims.exp
+		&& exp < Utc::now().timestamp()
+	{
+		debug!("Token verification failed due to the 'exp' claim containing a past time");
+		bail!(Error::ExpiredToken);
 	}
 	// Check the token authentication claims
 	match &token_data.claims {
@@ -191,7 +191,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(db) => db,
 				None => {
 					return Err(Error::DbNotFound {
-						name: db.to_string(),
+						name: db.clone(),
 					}
 					.into());
 				}
@@ -202,9 +202,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			let Some(de) = tx.get_db_access(db_def.namespace_id, db_def.database_id, ac).await?
 			else {
 				return Err(Error::AccessDbNotFound {
-					ac: ac.to_string(),
-					ns: ns.to_string(),
-					db: db.to_string(),
+					ac: ac.clone(),
+					ns: ns.clone(),
+					db: db.clone(),
 				}
 				.into());
 			};
@@ -274,7 +274,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.au = Arc::new(Auth::new(Actor::new(
 				rid.to_sql(),
 				Default::default(),
-				Level::Record(ns.to_string(), db.to_string(), rid.to_sql()),
+				Level::Record(ns.clone(), db.clone(), rid.to_sql()),
 			)));
 			Ok(())
 		}
@@ -294,7 +294,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(db) => db,
 				None => {
 					return Err(Error::DbNotFound {
-						name: db.to_string(),
+						name: db.clone(),
 					}
 					.into());
 				}
@@ -307,9 +307,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 
 			let Some(de) = de else {
 				return Err(Error::AccessDbNotFound {
-					ac: ac.to_string(),
-					ns: ns.to_string(),
-					db: db.to_string(),
+					ac: ac.clone(),
+					ns: ns.clone(),
+					db: db.clone(),
 				}
 				.into());
 			};
@@ -382,9 +382,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 					session.ac = Some(ac.to_owned());
 					session.exp = expiration(de.session_duration)?;
 					session.au = Arc::new(Auth::new(Actor::new(
-						de.name.to_string(),
+						de.name.clone(),
 						roles,
-						Level::Database(ns.to_string(), db.to_string()),
+						Level::Database(ns.clone(), db.clone()),
 					)));
 				}
 				// If the access type is Record, this is record access
@@ -447,7 +447,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 						session.au = Arc::new(Auth::new(Actor::new(
 							rid.to_sql(),
 							Default::default(),
-							Level::Record(ns.to_string(), db.to_string(), rid.to_sql()),
+							Level::Record(ns.clone(), db.clone(), rid.to_sql()),
 						)));
 					}
 					_ => bail!(Error::AccessMethodMismatch),
@@ -470,7 +470,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(db) => db,
 				None => {
 					return Err(Error::DbNotFound {
-						name: db.to_string(),
+						name: db.clone(),
 					}
 					.into());
 				}
@@ -504,12 +504,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.db = Some(db.to_owned());
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
-				id.to_string(),
+				id.clone(),
 				de.roles
 					.iter()
 					.map(|e| Role::from_str(e).map_err(Error::from))
 					.collect::<Result<_, _>>()?,
-				Level::Database(ns.to_string(), db.to_string()),
+				Level::Database(ns.clone(), db.clone()),
 			)));
 			Ok(())
 		}
@@ -527,7 +527,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(ns) => ns,
 				None => {
 					return Err(Error::NsNotFound {
-						name: ns.to_string(),
+						name: ns.clone(),
 					}
 					.into());
 				}
@@ -540,8 +540,8 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 
 			let Some(de) = de else {
 				return Err(Error::AccessNsNotFound {
-					ac: ac.to_string(),
-					ns: ns.to_string(),
+					ac: ac.clone(),
+					ns: ns.clone(),
 				}
 				.into());
 			};
@@ -611,9 +611,9 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.ac = Some(ac.to_owned());
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
-				de.name.to_string(),
+				de.name.clone(),
 				roles,
-				Level::Namespace(ns.to_string()),
+				Level::Namespace(ns.clone()),
 			)));
 			Ok(())
 		}
@@ -631,7 +631,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 				Some(ns) => ns,
 				None => {
 					return Err(Error::NsNotFound {
-						name: ns.to_string(),
+						name: ns.clone(),
 					}
 					.into());
 				}
@@ -661,12 +661,12 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			session.ns = Some(ns.to_owned());
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
-				id.to_string(),
+				id.clone(),
 				de.roles
 					.iter()
 					.map(|e| Role::from_str(e).map_err(Error::from))
 					.collect::<Result<_, _>>()?,
-				Level::Namespace(ns.to_string()),
+				Level::Namespace(ns.clone()),
 			)));
 			Ok(())
 		}
@@ -687,7 +687,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 
 			let Some(de) = de else {
 				return Err(Error::AccessRootNotFound {
-					ac: ac.to_string(),
+					ac: ac.clone(),
 				}
 				.into());
 			};
@@ -755,7 +755,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			);
 			session.ac = Some(ac.to_owned());
 			session.exp = expiration(de.session_duration)?;
-			session.au = Arc::new(Auth::new(Actor::new(de.name.to_string(), roles, Level::Root)));
+			session.au = Arc::new(Auth::new(Actor::new(de.name.clone(), roles, Level::Root)));
 			Ok(())
 		}
 		// Check if this is root authentication with user credentials
@@ -787,7 +787,7 @@ pub async fn token(kvs: &Datastore, session: &mut Session, token: &str) -> Resul
 			);
 			session.exp = expiration(de.session_duration)?;
 			session.au = Arc::new(Auth::new(Actor::new(
-				id.to_string(),
+				id.clone(),
 				de.roles
 					.iter()
 					.map(|e| Role::from_str(e).map_err(Error::from))

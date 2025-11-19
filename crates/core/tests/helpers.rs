@@ -39,15 +39,11 @@ pub async fn iam_run_case(
 	let mut owner_sess = sess.clone();
 	owner_sess.au = Arc::new(Auth::for_root(Role::Owner));
 
-	if use_ns {
-		if let Some(ns) = &sess.ns {
-			ds.execute(&format!("USE NS {ns}"), &owner_sess, None).await.unwrap();
-		}
+	if use_ns && let Some(ns) = &sess.ns {
+		ds.execute(&format!("USE NS {ns}"), &owner_sess, None).await.unwrap();
 	}
-	if use_db {
-		if let Some(db) = &sess.db {
-			ds.execute(&format!("USE DB {db}"), &owner_sess, None).await.unwrap();
-		}
+	if use_db && let Some(db) = &sess.db {
+		ds.execute(&format!("USE DB {db}"), &owner_sess, None).await.unwrap();
 	}
 
 	// Prepare statement

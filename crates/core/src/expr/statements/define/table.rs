@@ -166,7 +166,7 @@ impl DefineTableStatement {
 				// Refresh the table cache
 				let Some(foreign_tb) = txn.get_tb(ns, db, ft).await? else {
 					bail!(Error::TbNotFound {
-						name: ft.to_string(),
+						name: ft.clone(),
 					});
 				};
 

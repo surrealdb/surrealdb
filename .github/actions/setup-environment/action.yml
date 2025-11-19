@@ -5,7 +5,7 @@ inputs:
   toolchain:
     description: 'Rust toolchain version'
     required: false
-    default: '1.87'
+    default: stable
   components:
     description: 'Additional Rust components to install (space-separated)'
     required: false

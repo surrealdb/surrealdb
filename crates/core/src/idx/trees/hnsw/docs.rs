@@ -207,15 +207,15 @@ impl VecDocs {
 	) -> Result<()> {
 		let ser_vec = o.into();
 		let key = self.ikb.new_hv_key(&ser_vec);
-		if let Some(mut ed) = tx.get(&key, None).await? {
-			if let Some(new_docs) = ed.docs.remove(d) {
-				if new_docs.is_empty() {
-					tx.del(&key).await?;
-					h.remove(tx, ed.e_id).await?;
-				} else {
-					ed.docs = new_docs;
-					tx.set(&key, &ed, None).await?;
-				}
+		if let Some(mut ed) = tx.get(&key, None).await?
+			&& let Some(new_docs) = ed.docs.remove(d)
+		{
+			if new_docs.is_empty() {
+				tx.del(&key).await?;
+				h.remove(tx, ed.e_id).await?;
+			} else {
+				ed.docs = new_docs;
+				tx.set(&key, &ed, None).await?;
 			}
 		};
 		Ok(())

@@ -178,7 +178,7 @@ pub async fn db_access(
 		Some(db) => db,
 		None => {
 			return Err(Error::DbNotFound {
-				name: db.to_string(),
+				name: db.clone(),
 			}
 			.into());
 		}

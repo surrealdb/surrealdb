@@ -199,7 +199,7 @@ impl InfoStatement {
 						"buckets".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_buckets(ns, db).await?.iter() {
-								out.insert(v.name.to_string(), v.to_sql().into());
+								out.insert(v.name.clone(), v.to_sql().into());
 							}
 							out.into()
 						},

@@ -1136,21 +1136,21 @@ impl UniqueEqualThingIterator {
 	}
 
 	async fn next_batch<B: IteratorBatch>(&mut self, tx: &Transaction) -> Result<B> {
-		if let Some(key) = self.key.take() {
-			if let Some(val) = tx.get(&key, None).await? {
-				let rid: RecordId = revision::from_slice(&val)?;
-				let record = IndexItemRecord::new_key(rid, self.irf.into());
-				return Ok(B::from_one(record));
-			}
+		if let Some(key) = self.key.take()
+			&& let Some(val) = tx.get(&key, None).await?
+		{
+			let rid: RecordId = revision::from_slice(&val)?;
+			let record = IndexItemRecord::new_key(rid, self.irf.into());
+			return Ok(B::from_one(record));
 		}
 		Ok(B::empty())
 	}
 
 	async fn next_count(&mut self, tx: &Transaction) -> Result<usize> {
-		if let Some(key) = self.key.take() {
-			if tx.exists(&key, None).await? {
-				return Ok(1);
-			}
+		if let Some(key) = self.key.take()
+			&& tx.exists(&key, None).await?
+		{
+			return Ok(1);
 		}
 		Ok(0)
 	}
@@ -1266,11 +1266,11 @@ impl UniqueRangeThingIterator {
 			}
 		}
 
-		if self.r.matches_end() {
-			if let Some(v) = tx.get(&self.r.end, None).await? {
-				let rid: RecordId = revision::from_slice(&v)?;
-				records.add(IndexItemRecord::new_key(rid, self.irf.into()));
-			}
+		if self.r.matches_end()
+			&& let Some(v) = tx.get(&self.r.end, None).await?
+		{
+			let rid: RecordId = revision::from_slice(&v)?;
+			records.add(IndexItemRecord::new_key(rid, self.irf.into()));
 		}
 		self.done = true;
 		Ok(records)
@@ -1564,7 +1564,7 @@ where
 			let limit = limit as usize;
 			let mut records = B::with_capacity(limit.min(self.hits_left));
 			while limit > records.len() {
-				if ctx.is_done(self.hits_left % 100 == 0).await? {
+				if ctx.is_done(self.hits_left.is_multiple_of(100)).await? {
 					break;
 				}
 				if let Some((thg, doc_id)) = hits.next(tx).await? {
@@ -1590,7 +1590,7 @@ where
 			let limit = limit as usize;
 			let mut count = 0;
 			while limit > count {
-				if ctx.is_done(self.hits_left % 100 == 0).await? {
+				if ctx.is_done(self.hits_left.is_multiple_of(100)).await? {
 					break;
 				}
 				if let Some((_, _)) = hits.next(tx).await? {

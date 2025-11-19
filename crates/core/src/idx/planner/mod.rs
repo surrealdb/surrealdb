@@ -209,12 +209,10 @@ impl<'a> StatementContext<'a> {
 	/// We reverse the direction when the first ORDER BY is `id DESC`.
 	/// Otherwise, we default to forward scan direction.
 	pub(crate) fn check_scan_direction(&self) -> ScanDirection {
-		if let Some(Ordering::Order(o)) = self.order {
-			if let Some(o) = o.first() {
-				if !o.direction && o.value.is_id() {
+		if let Some(Ordering::Order(o)) = self.order
+			&& let Some(o) = o.first()
+				&& !o.direction && o.value.is_id() {
 					return ScanDirection::Backward;
-				}
-			}
 		}
 		ScanDirection::Forward
 	}
