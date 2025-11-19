@@ -28,6 +28,14 @@ pub enum Error {
 	#[error("There was a problem with a transaction: {0}")]
 	Transaction(String),
 
+	/// The transaction is too large
+	#[error("The transaction is too large")]
+	TransactionTooLarge,
+
+	/// The key being inserted in the transaction is too large
+	#[error("The key being inserted is too large")]
+	TransactionKeyTooLarge,
+
 	/// A transaction conflict occurred and the operation should be retried
 	#[error("Transaction conflict: {0}. This transaction can be retried")]
 	TransactionConflict(String),
@@ -127,15 +135,20 @@ impl From<tikv::Error> for Error {
 		match e {
 			tikv::Error::DuplicateKeyInsertion => Error::TransactionKeyAlreadyExists,
 			tikv::Error::Grpc(_) => Error::ConnectionFailed(e.to_string()),
-			tikv::Error::KeyError(ke) if ke.conflict.is_some() => {
-				use crate::key::debug::Sprintable;
-				Error::TransactionConflict(ke.conflict.unwrap().key.sprint())
+			tikv::Error::KeyError(ref ke) => {
+				if let Some(conflict) = &ke.conflict {
+					use crate::key::debug::Sprintable;
+					Error::TransactionConflict(conflict.key.sprint())
+				} else if ke.already_exist.is_some() {
+					Error::TransactionKeyAlreadyExists
+				} else if ke.abort.contains("KeyTooLarge") {
+					Error::TransactionKeyTooLarge
+				} else {
+					Error::Transaction(e.to_string())
+				}
 			}
-			tikv::Error::KeyError(ke) if ke.abort.contains("KeyTooLarge") => {
-				Error::Transaction("Transaction key too large".to_string())
-			}
-			tikv::Error::RegionError(re) if re.raft_entry_too_large.is_some() => {
-				Error::Transaction("Transaction too large".to_string())
+			tikv::Error::RegionError(ref re) if re.raft_entry_too_large.is_some() => {
+				Error::TransactionTooLarge
 			}
 			_ => Error::Transaction(e.to_string()),
 		}
