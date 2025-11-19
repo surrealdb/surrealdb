@@ -183,7 +183,7 @@ async fn request(
 	opts: impl Into<Object>,
 ) -> Result<Value> {
 	// Check if the URI is valid and allowed
-	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.to_string()))?;
+	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.clone()))?;
 	ctx.check_allowed_net(&url).await?;
 
 	let body = match body {

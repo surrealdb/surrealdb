@@ -89,12 +89,10 @@ impl CheckerCacheEntry {
 	) -> VecDeque<KnnIteratorResult> {
 		let mut result = VecDeque::with_capacity(res.len());
 		for (doc_id, dist) in res {
-			if let Some(e) = cache.remove(&doc_id) {
-				if e.truthy {
-					if let Some((rid, value)) = e.record {
-						result.push_back((rid, dist, Some(value)))
-					}
-				}
+			if let Some(e) = cache.remove(&doc_id)
+				&& e.truthy && let Some((rid, value)) = e.record
+			{
+				result.push_back((rid, dist, Some(value)))
 			}
 		}
 		result

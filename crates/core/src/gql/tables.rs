@@ -57,7 +57,7 @@ pub async fn process_tbs(
 ) -> Result<Object, GqlError> {
 	for tb in tbs.iter() {
 		trace!("Adding table: {}", tb.name);
-		let tb_name = tb.name.to_string();
+		let tb_name = tb.name.clone();
 		let first_tb_name = tb_name.clone();
 		let second_tb_name = tb_name.clone();
 
@@ -91,110 +91,112 @@ pub async fn process_tbs(
 		let kvs1 = datastore.clone();
 
 		query = query.field(
-		Field::new(
-			tb.name.to_string(),
-			TypeRef::named_nn_list_nn(tb.name.to_string()),
-			move |ctx| {
+			Field::new(tb.name.clone(), TypeRef::named_nn_list_nn(tb.name.clone()), move |ctx| {
 				let tb_name = first_tb_name.clone();
 				let fds1 = fds1.clone();
 				let kvs1 = kvs1.clone();
 				FieldFuture::new(async move {
 					// Get session from GraphQL context (has proper user permissions)
 					let sess1 = ctx.data::<Arc<Session>>()?;
-						let args = ctx.args.as_index_map();
-						trace!("received request with args: {args:?}");
+					let args = ctx.args.as_index_map();
+					trace!("received request with args: {args:?}");
 
-						let start = args.get("start").and_then(|v| v.as_i64()).map(|s| Start(Expr::Literal(Literal::Integer(s))));
-						let limit = args.get("limit").and_then(|v| v.as_i64()).map(|l| Limit(Expr::Literal(Literal::Integer(l))));
-						let order = args.get("order");
-						let filter = args.get("filter");
+					let start = args
+						.get("start")
+						.and_then(|v| v.as_i64())
+						.map(|s| Start(Expr::Literal(Literal::Integer(s))));
+					let limit = args
+						.get("limit")
+						.and_then(|v| v.as_i64())
+						.map(|l| Limit(Expr::Literal(Literal::Integer(l))));
+					let order = args.get("order");
+					let filter = args.get("filter");
 
-						let orders = match order {
-							Some(GqlValue::Object(o)) => {
-								let mut orders = vec![];
-								let mut current = o;
-								loop {
-									let asc = current.get("asc");
-									let desc = current.get("desc");
-									match (asc, desc) {
-										(Some(_), Some(_)) => {
-											return Err("Found both ASC and DESC in order".into());
-										}
-										(Some(GqlValue::Enum(a)), None) => {
-											orders.push(order_asc(a.as_str().to_string()))
-										}
-										(None, Some(GqlValue::Enum(d))) => {
-											orders.push(order_desc(d.as_str().to_string()))
-										}
-										(_, _) => {
-											break;
-										}
+					let orders = match order {
+						Some(GqlValue::Object(o)) => {
+							let mut orders = vec![];
+							let mut current = o;
+							loop {
+								let asc = current.get("asc");
+								let desc = current.get("desc");
+								match (asc, desc) {
+									(Some(_), Some(_)) => {
+										return Err("Found both ASC and DESC in order".into());
 									}
-									if let Some(GqlValue::Object(next)) = current.get("then") {
-										current = next;
-									} else {
+									(Some(GqlValue::Enum(a)), None) => {
+										orders.push(order_asc(a.as_str().to_string()))
+									}
+									(None, Some(GqlValue::Enum(d))) => {
+										orders.push(order_desc(d.as_str().to_string()))
+									}
+									(_, _) => {
 										break;
 									}
 								}
-								Some(orders)
+								if let Some(GqlValue::Object(next)) = current.get("then") {
+									current = next;
+								} else {
+									break;
+								}
 							}
-							_ => None,
-						};
+							Some(orders)
+						}
+						_ => None,
+					};
 
-						trace!("parsed orders: {orders:?}");
+					trace!("parsed orders: {orders:?}");
 
-						let cond = match filter {
-							Some(f) => {
-								let o = match f {
-									GqlValue::Object(o) => o,
-									f => {
-										error!("Found filter {f}, which should be object and should have been rejected by async graphql.");
-										return Err("Value in cond doesn't fit schema".into());
-									}
-								};
+					let cond = match filter {
+						Some(f) => {
+							let o = match f {
+								GqlValue::Object(o) => o,
+								f => {
+									error!(
+										"Found filter {f}, which should be object and should have been rejected by async graphql."
+									);
+									return Err("Value in cond doesn't fit schema".into());
+								}
+							};
 
-								let cond = cond_from_filter(o, &fds1)?;
+							let cond = cond_from_filter(o, &fds1)?;
 
-								Some(cond)
-							}
-							None => None,
-						};
+							Some(cond)
+						}
+						None => None,
+					};
 
 					trace!("parsed filter: {cond:?}");
 
 					// SELECT * FROM ...
 					// Note: We select * (not just id) so that permissions are properly checked
-					let expr = expr::Expr::Select(
-						Box::new(SelectStatement {
-							what: vec![Expr::Table(tb_name)],
-							expr: Fields::all(),
-							order: orders.map(|x| Ordering::Order(OrderList(x))),
-							cond,
-							limit,
-							start,
-							..Default::default()
-						})
-					);
+					let expr = expr::Expr::Select(Box::new(SelectStatement {
+						what: vec![Expr::Table(tb_name)],
+						expr: Fields::all(),
+						order: orders.map(|x| Ordering::Order(OrderList(x))),
+						cond,
+						limit,
+						start,
+						..Default::default()
+					}));
 
-						// Convert to LogicalPlan and execute
-						let plan = LogicalPlan {
-							expressions: vec![TopLevelExpr::Expr(expr)],
-						};
+					// Convert to LogicalPlan and execute
+					let plan = LogicalPlan {
+						expressions: vec![TopLevelExpr::Expr(expr)],
+					};
 
-						tracing::warn!("generated logical plan: {plan:?}");
+					tracing::warn!("generated logical plan: {plan:?}");
 
-						let res = execute_plan(&kvs1, sess1, plan).await?;
+					let res = execute_plan(&kvs1, sess1, plan).await?;
 
 					tracing::warn!("result: {res:?}");
 
-					let res_vec =
-						match res {
-							Value::Array(a) => a,
-							v => {
-								error!("Found top level value, in result which should be array: {v:?}");
-								return Err("Internal Error".into());
-							}
-						};
+					let res_vec = match res {
+						Value::Array(a) => a,
+						v => {
+							error!("Found top level value, in result which should be array: {v:?}");
+							return Err("Internal Error".into());
+						}
+					};
 
 					let out: Result<Vec<FieldValue>, Value> = res_vec
 						.0
@@ -208,92 +210,96 @@ pub async fn process_tbs(
 											Ok(FieldValue::owned_any(rid.clone()))
 										}
 										_ => {
-											error!("Object missing 'id' field or id is not a RecordId: {obj:?}");
+											error!(
+												"Object missing 'id' field or id is not a RecordId: {obj:?}"
+											);
 											Err("Internal Error".into())
 										}
 									}
 								}
 								_ => {
-									error!("Found top level value, in result which should be object: {v:?}");
+									error!(
+										"Found top level value, in result which should be object: {v:?}"
+									);
 									Err("Internal Error".into())
 								}
 							}
 						})
 						.collect();
 
-						match out {
-							Ok(l) => Ok(Some(FieldValue::list(l))),
-							Err(v) => {
-								Err(internal_error(format!("expected thing, found: {v:?}")).into())
-							}
+					match out {
+						Ok(l) => Ok(Some(FieldValue::list(l))),
+						Err(v) => {
+							Err(internal_error(format!("expected thing, found: {v:?}")).into())
 						}
-					})
-				},
-			)
-        .description(if let Some(c) = &tb.comment { c.to_string() } else { format!("Generated from table `{}`\nallows querying a table with filters", tb.name) })
-        .argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
-        .argument(InputValue::new("start", TypeRef::named(TypeRef::INT)))
-        .argument(InputValue::new("order", TypeRef::named(&table_order_name)))
-        .argument(InputValue::new("filter", TypeRef::named(&table_filter_name))));
+					}
+				})
+			})
+			.description(if let Some(c) = &tb.comment {
+				c.clone()
+			} else {
+				format!("Generated from table `{}`\nallows querying a table with filters", tb.name)
+			})
+			.argument(InputValue::new("limit", TypeRef::named(TypeRef::INT)))
+			.argument(InputValue::new("start", TypeRef::named(TypeRef::INT)))
+			.argument(InputValue::new("order", TypeRef::named(&table_order_name)))
+			.argument(InputValue::new("filter", TypeRef::named(&table_filter_name))),
+		);
 
 		let kvs2 = datastore.to_owned();
 		query = query.field(
-			Field::new(
-				format!("_get_{}", tb.name),
-				TypeRef::named(tb.name.to_string()),
-				move |ctx| {
-					let tb_name = second_tb_name.clone();
-					let kvs2 = kvs2.clone();
-					FieldFuture::new({
-						async move {
-							// Get session from GraphQL context (has proper user permissions)
-							let sess2 = ctx.data::<Arc<Session>>()?;
-							let args = ctx.args.as_index_map();
-							let id = match args.get("id").and_then(GqlValueUtils::as_string) {
-								Some(i) => i,
-								None => {
-									return Err(internal_error(
-										"Schema validation failed: No id found in _get_",
-									)
-									.into());
-								}
-							};
-
-							// TODO: STU: Parse record id.
-							let record_id = RecordId::new(tb_name, id);
-
-							// Build SELECT VALUE id FROM ONLY <record_id>
-							let select_stmt = SelectStatement {
-								what: vec![Value::RecordId(record_id.clone()).into_literal()],
-								expr: Fields::Value(Box::new(expr::Field::Single {
-									expr: expr::Expr::Idiom(Idiom::field("id".to_string())),
-									alias: None,
-								})),
-								only: true,
-								..Default::default()
-							};
-
-							let plan = LogicalPlan {
-								expressions: vec![TopLevelExpr::Expr(Expr::Select(Box::new(
-									select_stmt,
-								)))],
-							};
-
-							let res = execute_plan(&kvs2, sess2, plan).await?;
-
-							match res {
-								Value::RecordId(t) => {
-									// let erased: ErasedRecord = (kvs2.clone(), sess2.clone(), t);
-									Ok(Some(FieldValue::owned_any(t)))
-								}
-								_ => Ok(None),
+			Field::new(format!("_get_{}", tb.name), TypeRef::named(tb.name.clone()), move |ctx| {
+				let tb_name = second_tb_name.clone();
+				let kvs2 = kvs2.clone();
+				FieldFuture::new({
+					async move {
+						// Get session from GraphQL context (has proper user permissions)
+						let sess2 = ctx.data::<Arc<Session>>()?;
+						let args = ctx.args.as_index_map();
+						let id = match args.get("id").and_then(GqlValueUtils::as_string) {
+							Some(i) => i,
+							None => {
+								return Err(internal_error(
+									"Schema validation failed: No id found in _get_",
+								)
+								.into());
 							}
+						};
+
+						// TODO: STU: Parse record id.
+						let record_id = RecordId::new(tb_name, id);
+
+						// Build SELECT VALUE id FROM ONLY <record_id>
+						let select_stmt = SelectStatement {
+							what: vec![Value::RecordId(record_id.clone()).into_literal()],
+							expr: Fields::Value(Box::new(expr::Field::Single {
+								expr: expr::Expr::Idiom(Idiom::field("id".to_string())),
+								alias: None,
+							})),
+							only: true,
+							..Default::default()
+						};
+
+						let plan = LogicalPlan {
+							expressions: vec![TopLevelExpr::Expr(Expr::Select(Box::new(
+								select_stmt,
+							)))],
+						};
+
+						let res = execute_plan(&kvs2, sess2, plan).await?;
+
+						match res {
+							Value::RecordId(t) => {
+								// let erased: ErasedRecord = (kvs2.clone(), sess2.clone(), t);
+								Ok(Some(FieldValue::owned_any(t)))
+							}
+							_ => Ok(None),
 						}
-					})
-				},
-			)
+					}
+				})
+			})
 			.description(if let Some(c) = &tb.comment {
-				c.to_string()
+				c.clone()
 			} else {
 				format!(
 					"Generated from table `{}`\nallows querying a single record in a table by ID",
@@ -303,11 +309,11 @@ pub async fn process_tbs(
 			.argument(InputValue::new("id", TypeRef::named_nn(TypeRef::ID))),
 		);
 
-		let mut table_ty_obj = Object::new(tb.name.to_string())
+		let mut table_ty_obj = Object::new(tb.name.clone())
 			.field(Field::new(
 				"id",
 				TypeRef::named_nn(TypeRef::ID),
-				make_table_field_resolver("id", Some(Kind::Record(vec![tb.name.to_string()]))),
+				make_table_field_resolver("id", Some(Kind::Record(vec![tb.name.clone()]))),
 			))
 			.implement("record");
 
@@ -340,7 +346,7 @@ pub async fn process_tbs(
 					make_table_field_resolver(fd_name.as_str(), fd.field_kind.clone()),
 				))
 				.description(if let Some(ref c) = fd.comment {
-					c.to_string()
+					c.clone()
 				} else {
 					"".to_string()
 				});
@@ -393,9 +399,7 @@ pub async fn process_tbs(
 					match res {
 						Value::RecordId(t) => {
 							// Generic _get returns interface type "record", needs .with_type()
-							Ok(Some(
-								FieldValue::owned_any(t.clone()).with_type(t.table.to_string()),
-							))
+							Ok(Some(FieldValue::owned_any(t.clone()).with_type(t.table.clone())))
 						}
 						_ => Ok(None),
 					}
@@ -447,7 +451,7 @@ fn make_table_field_resolver(
 						let field_val = match field_kind {
 							Some(Kind::Record(ts)) if ts.is_empty() || ts.len() > 1 => {
 								// Interface or union type, needs .with_type()
-								field_val.with_type(rid.table.to_string())
+								field_val.with_type(rid.table.clone())
 							}
 							_ => {
 								// Concrete type, no .with_type() needed

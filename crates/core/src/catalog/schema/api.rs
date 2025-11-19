@@ -40,14 +40,14 @@ impl ApiDefinition {
 		let mut specificity = 0;
 		let mut res = None;
 		for api in definitions.iter() {
-			if let Some(params) = api.path.fit(segments.as_slice()) {
-				if api.fallback.is_some() || api.actions.iter().any(|x| x.methods.contains(&method))
-				{
-					let s = api.path.specificity();
-					if s > specificity {
-						specificity = s;
-						res = Some((api, params));
-					}
+			if let Some(params) = api.path.fit(segments.as_slice())
+				&& (api.fallback.is_some()
+					|| api.actions.iter().any(|x| x.methods.contains(&method)))
+			{
+				let s = api.path.specificity();
+				if s > specificity {
+					specificity = s;
+					res = Some((api, params));
 				}
 			}
 		}

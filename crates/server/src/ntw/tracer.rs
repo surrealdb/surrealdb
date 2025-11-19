@@ -90,10 +90,10 @@ impl<B> MakeSpan<B> for HttpTraceLayerHooks {
 			}
 		}
 		// Extract and record the client ip address
-		if let Some(client_ip) = req.extensions().get::<ExtractClientIP>() {
-			if let Some(ref client_ip) = client_ip.0 {
-				span.record("client.address", client_ip);
-			}
+		if let Some(client_ip) = req.extensions().get::<ExtractClientIP>()
+			&& let Some(ref client_ip) = client_ip.0
+		{
+			span.record("client.address", client_ip);
 		}
 		// Return the span
 		span

@@ -45,7 +45,7 @@ impl DefineParamStatement {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::PaAlreadyExists {
-							name: self.name.to_string(),
+							name: self.name.clone(),
 						});
 					}
 				}

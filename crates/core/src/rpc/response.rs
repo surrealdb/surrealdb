@@ -252,7 +252,7 @@ impl SurrealValue for DbResultError {
 				let message = obj.remove("message").context("Missing message")?;
 				Ok(DbResultError::from_code(code.into_int()?, message.into_string()?))
 			}
-			PublicValue::String(s) => Ok(DbResultError::Thrown(s.to_string())),
+			PublicValue::String(s) => Ok(DbResultError::Thrown(s.clone())),
 			other => anyhow::bail!("Expected object for DbResultError, got {}", other.to_sql()),
 		}
 	}

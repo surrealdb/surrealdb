@@ -292,7 +292,7 @@ impl DefineFieldStatement {
 				} else {
 					FieldDefinition {
 						name: name.clone(),
-						what: definition.what.to_string(),
+						what: definition.what.clone(),
 						field_kind: Some(cur_kind),
 						..Default::default()
 					}
@@ -424,17 +424,18 @@ impl DefineFieldStatement {
 
 		if let Some(self_kind) = &self.field_kind {
 			for fd in fds.iter() {
-				if definition.name.starts_with(&fd.name) && definition.name != fd.name {
-					if let Some(fd_kind) = &fd.field_kind {
-						let path = definition.name[fd.name.len()..].to_vec();
-						if !fd_kind.allows_nested_kind(&path, self_kind) {
-							bail!(Error::MismatchedFieldTypes {
-								name: definition.name.to_string(),
-								kind: self_kind.to_string(),
-								existing_name: fd.name.to_string(),
-								existing_kind: fd_kind.to_string(),
-							});
-						}
+				if definition.name.starts_with(&fd.name)
+					&& definition.name != fd.name
+					&& let Some(fd_kind) = &fd.field_kind
+				{
+					let path = definition.name[fd.name.len()..].to_vec();
+					if !fd_kind.allows_nested_kind(&path, self_kind) {
+						bail!(Error::MismatchedFieldTypes {
+							name: definition.name.to_string(),
+							kind: self_kind.to_string(),
+							existing_name: fd.name.to_string(),
+							existing_kind: fd_kind.to_string(),
+						});
 					}
 				}
 			}
@@ -487,7 +488,7 @@ impl DefineFieldStatement {
 			let txn = ctx.tx();
 			let Some(tb) = txn.get_tb(ns, db, &definition.what).await? else {
 				bail!(Error::TbNotFound {
-					name: definition.what.to_string(),
+					name: definition.what.clone(),
 				});
 			};
 

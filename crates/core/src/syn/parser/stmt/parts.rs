@@ -190,10 +190,10 @@ impl Parser<'_> {
 					unreachable!()
 				};
 
-				if let Some(alias) = alias {
-					if idiom == alias {
-						found = true;
-					}
+				if let Some(alias) = alias
+					&& idiom == alias
+				{
+					found = true;
 				}
 
 				match expr {
@@ -220,11 +220,11 @@ impl Parser<'_> {
 						return Ok(());
 					};
 
-					if let Some(alias) = alias {
-						if idiom == alias {
-							found = true;
-							break;
-						}
+					if let Some(alias) = alias
+						&& idiom == alias
+					{
+						found = true;
+						break;
 					}
 
 					match expr {

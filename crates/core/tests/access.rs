@@ -35,7 +35,7 @@ async fn access_bearer_grant() {
 	];
 
 	for level in &test_levels {
-		let base = level.base.to_string();
+		let base = level.base.clone();
 		println!("Test level: {}", base);
 		let sql = format!(
 			"
@@ -81,7 +81,7 @@ async fn access_bearer_grant() {
 		} else {
 			format!(
 				"The user 'jaime' does not exist in the {} 'test'",
-				level.base.to_string().to_lowercase()
+				level.base.clone().to_lowercase()
 			)
 		};
 		assert_eq!(tmp.to_string(), expected);
@@ -92,7 +92,7 @@ async fn access_bearer_grant() {
 		} else {
 			format!(
 				"The user 'jaime' does not exist in the {} 'test'",
-				level.base.to_string().to_lowercase()
+				level.base.clone().to_lowercase()
 			)
 		};
 		assert_eq!(tmp.to_string(), expected);

@@ -28,7 +28,7 @@ impl Plan {
 				}
 				if let Some(qp) = ctx.get_query_planner() {
 					for reason in qp.fallbacks() {
-						exp.add_fallback(reason.to_string());
+						exp.add_fallback(reason.clone());
 					}
 				}
 				results.explain(&mut exp);
@@ -190,10 +190,10 @@ impl ExplainItem {
 			},
 			Iterable::Index(t, ir, rs) => {
 				let mut details = vec![("table", Value::String(t.clone()))];
-				if let Some(qp) = ctx.get_query_planner() {
-					if let Some(exe) = qp.get_query_executor(t.as_str()) {
-						details.push(("plan", exe.explain(*ir)));
-					}
+				if let Some(qp) = ctx.get_query_planner()
+					&& let Some(exe) = qp.get_query_executor(t.as_str())
+				{
+					details.push(("plan", exe.explain(*ir)));
 				}
 				Self {
 					name: match rs {

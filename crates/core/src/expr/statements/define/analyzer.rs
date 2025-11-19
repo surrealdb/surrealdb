@@ -88,7 +88,7 @@ impl DefineAnalyzerStatement {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::AzAlreadyExists {
-							name: definition.name.to_string(),
+							name: definition.name.clone(),
 						});
 					}
 				}

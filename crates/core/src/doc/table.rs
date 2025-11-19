@@ -155,16 +155,15 @@ impl Document {
 	) -> Result<()> {
 		match action {
 			Action::Create => {
-				if let Some(cond) = condition {
-					if !cond
+				if let Some(cond) = condition
+					&& !cond
 						.compute(stk, ctx, opt, Some(&self.current))
 						.await
 						.catch_return()?
 						.is_truthy()
-					{
-						// Nothing to do.
-						return Ok(());
-					}
+				{
+					// Nothing to do.
+					return Ok(());
 				}
 
 				let mut group = Vec::with_capacity(aggr.group_expressions.len());
@@ -280,16 +279,15 @@ impl Document {
 				}
 			}
 			Action::Delete => {
-				if let Some(cond) = condition {
-					if !cond
+				if let Some(cond) = condition
+					&& !cond
 						.compute(stk, ctx, opt, Some(&self.initial))
 						.await
 						.catch_return()?
 						.is_truthy()
-					{
-						// Nothing to do.
-						return Ok(());
-					}
+				{
+					// Nothing to do.
+					return Ok(());
 				}
 
 				let mut group = Vec::with_capacity(aggr.group_expressions.len());
@@ -608,7 +606,7 @@ impl Document {
 				})),
 				// FROM ONLY table
 				only: true,
-				what: vec![Expr::Table(table_name.to_string())],
+				what: vec![Expr::Table(table_name.clone())],
 				// WHERE group_expr1 = group_value1 && group_expr2 = group_value2 && ..
 				cond: condition.map(Cond),
 				// GROUP ALL
@@ -987,7 +985,7 @@ impl Document {
 				})),
 				// FROM ONLY table
 				only: true,
-				what: vec![Expr::Table(table_name.to_string())],
+				what: vec![Expr::Table(table_name.clone())],
 				// WHERE group_expr1 = group_value1 && group_expr2 = group_value2 && ..
 				cond: condition.map(Cond),
 				// GROUP ALL

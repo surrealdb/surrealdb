@@ -179,10 +179,10 @@ impl ObjectStore for MemoryStore {
 		target: &'a ObjectKey,
 	) -> Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>> {
 		Box::pin(async move {
-			if !self.store.contains_key(target) {
-				if let Some((_, data)) = self.store.remove(key) {
-					self.store.insert(target.clone(), data);
-				}
+			if !self.store.contains_key(target)
+				&& let Some((_, data)) = self.store.remove(key)
+			{
+				self.store.insert(target.clone(), data);
 			}
 
 			Ok(())

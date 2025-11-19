@@ -1070,10 +1070,10 @@ impl Datastore {
 				lh.try_maintain_lease().await?;
 				let ic = IndexCompactionKey::decode_key(&k)?;
 				// If the index has already been compacted, we can ignore the task
-				if let Some(p) = &previous {
-					if p.index_matches(&ic) {
-						continue;
-					}
+				if let Some(p) = &previous
+					&& p.index_matches(&ic)
+				{
+					continue;
 				}
 				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
 					Some(ix) => match &ix.index {

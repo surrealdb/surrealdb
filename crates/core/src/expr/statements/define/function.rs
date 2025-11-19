@@ -43,7 +43,7 @@ impl DefineFunctionStatement {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::FcAlreadyExists {
-							name: self.name.to_string(),
+							name: self.name.clone(),
 						});
 					}
 				}

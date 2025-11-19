@@ -571,11 +571,11 @@ impl super::api::Transaction for Transaction {
 		// Check if we are in read-and-deletion-only mode
 		// This is used for long duration transactions that would have started before disk
 		// conditions changed
-		if let Some(disk_space_manager) = self.disk_space_manager.as_ref() {
-			if disk_space_manager.is_deletion_only() && self.contains_only_deletions == Some(false)
-			{
-				bail!(Error::DbReadAndDeleteOnly);
-			}
+		if let Some(disk_space_manager) = self.disk_space_manager.as_ref()
+			&& disk_space_manager.is_deletion_only()
+			&& self.contains_only_deletions == Some(false)
+		{
+			bail!(Error::DbReadAndDeleteOnly);
 		}
 		// Commit this transaction
 		self.inner.take().expect("transaction should have inner").commit()?;

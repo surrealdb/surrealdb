@@ -343,10 +343,10 @@ impl Iterator for IntegerRangeIter {
 
 	fn next(&mut self) -> Option<i64> {
 		let cur = self.cur;
-		if let Some(end) = self.end {
-			if cur >= end {
-				return None;
-			}
+		if let Some(end) = self.end
+			&& cur >= end
+		{
+			return None;
 		}
 		if let Some(x) = cur.checked_add(1) {
 			self.cur = x

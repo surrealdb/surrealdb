@@ -98,7 +98,7 @@ impl FileStore {
 
 		// Check if the path is allowed
 		if !is_path_allowed(&path_buf, lowercase_paths) {
-			return Err(Error::FileAccessDenied(path_from_url.to_string()));
+			return Err(Error::FileAccessDenied(path_from_url.clone()));
 		}
 
 		// Check if the path exists
@@ -492,10 +492,10 @@ impl ObjectStore for FileStore {
 			// If it's a file, return it as a single item
 			if metadata.is_file() {
 				// If a start key is provided and our base_key is less than it, return empty
-				if let Some(ref start_key) = opts.start {
-					if base_key.to_string() < start_key.to_string() {
-						return Ok(Vec::new());
-					}
+				if let Some(ref start_key) = opts.start
+					&& base_key.to_string() < start_key.to_string()
+				{
+					return Ok(Vec::new());
 				}
 
 				let size = metadata.len();

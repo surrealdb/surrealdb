@@ -226,10 +226,10 @@ where
 					Value::Array(vec) => {
 						let mut responses = Vec::with_capacity(vec.len());
 						for value in vec.iter_mut() {
-							if let Value::Object(object) = value {
-								if let Some(value) = object.remove(key) {
-									responses.push(value);
-								}
+							if let Value::Object(object) = value
+								&& let Some(value) = object.remove(key)
+							{
+								responses.push(value);
 							}
 						}
 						responses
@@ -238,10 +238,10 @@ where
 							.collect::<Result<Vec<T>>>()
 					}
 					val => {
-						if let Value::Object(object) = val {
-							if let Some(value) = object.remove(key) {
-								return Ok(vec![T::from_value(value)?]);
-							}
+						if let Value::Object(object) = val
+							&& let Some(value) = object.remove(key)
+						{
+							return Ok(vec![T::from_value(value)?]);
 						}
 						Ok(vec![])
 					}

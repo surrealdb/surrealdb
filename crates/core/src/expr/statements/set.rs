@@ -62,7 +62,7 @@ impl SetStatement {
 			Some(kind) => result
 				.coerce_to_kind(kind)
 				.map_err(|e| Error::SetCoerce {
-					name: self.name.to_string(),
+					name: self.name.clone(),
 					error: Box::new(e),
 				})
 				.map_err(anyhow::Error::new)?,

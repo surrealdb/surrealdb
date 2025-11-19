@@ -214,14 +214,13 @@ impl<'a> StatementContext<'a> {
 	#[allow(unused_variables)]
 	pub(crate) fn check_scan_direction(&self, has_reverse_scan: bool) -> ScanDirection {
 		#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-		if has_reverse_scan {
-			if let Some(Ordering::Order(o)) = self.order {
-				if let Some(o) = o.first() {
-					if !o.direction && o.value.is_id() {
-						return ScanDirection::Backward;
-					}
-				}
-			}
+		if has_reverse_scan
+			&& let Some(Ordering::Order(o)) = self.order
+			&& let Some(o) = o.first()
+			&& !o.direction
+			&& o.value.is_id()
+		{
+			return ScanDirection::Backward;
 		}
 		ScanDirection::Forward
 	}

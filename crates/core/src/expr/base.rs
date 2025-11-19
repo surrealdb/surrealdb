@@ -1,16 +1,11 @@
 use std::fmt;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash)]
 pub enum Base {
+	#[default]
 	Root,
 	Ns,
 	Db,
-}
-
-impl Default for Base {
-	fn default() -> Self {
-		Self::Root
-	}
 }
 
 impl fmt::Display for Base {

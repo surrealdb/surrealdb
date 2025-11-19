@@ -58,7 +58,7 @@ impl DefineSequenceStatement {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::SeqAlreadyExists {
-							name: name.to_string(),
+							name: name.clone(),
 						});
 					}
 				}

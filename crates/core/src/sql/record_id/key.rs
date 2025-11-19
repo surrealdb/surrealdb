@@ -103,7 +103,7 @@ impl From<crate::expr::RecordIdKeyLit> for RecordIdKeyLit {
 	fn from(value: crate::expr::RecordIdKeyLit) -> Self {
 		match value {
 			crate::expr::RecordIdKeyLit::Number(x) => RecordIdKeyLit::Number(x),
-			crate::expr::RecordIdKeyLit::String(x) => RecordIdKeyLit::String(x.to_string()),
+			crate::expr::RecordIdKeyLit::String(x) => RecordIdKeyLit::String(x.clone()),
 			crate::expr::RecordIdKeyLit::Uuid(uuid) => {
 				RecordIdKeyLit::Uuid(surrealdb_types::Uuid(uuid.0))
 			}
