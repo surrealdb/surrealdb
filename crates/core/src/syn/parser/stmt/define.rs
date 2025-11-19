@@ -1687,14 +1687,14 @@ impl Parser<'_> {
 							TokenKind::Algorithm(alg) => {
 								// If an algorithm is already defined, a different value is not
 								// expected.
-								if let JwtAccessVerify::Key(ref ver) = res.verify {
-									if alg != ver.alg {
-										unexpected!(
-											self,
-											next,
-											"a compatible algorithm or no algorithm"
-										);
-									}
+								if let JwtAccessVerify::Key(ref ver) = res.verify
+									&& alg != ver.alg
+								{
+									unexpected!(
+										self,
+										next,
+										"a compatible algorithm or no algorithm"
+									);
 								}
 								iss.alg = alg;
 							}
@@ -1706,10 +1706,11 @@ impl Parser<'_> {
 						let key = stk.run(|stk| self.parse_expr_field(stk)).await?;
 						// If the algorithm is symmetric and a key is already defined, a different
 						// key is not expected.
-						if let JwtAccessVerify::Key(ref ver) = res.verify {
-							if ver.alg.is_symmetric() && key != ver.key {
-								unexpected!(self, peek, "a symmetric key or no key");
-							}
+						if let JwtAccessVerify::Key(ref ver) = res.verify
+							&& ver.alg.is_symmetric()
+							&& key != ver.key
+						{
+							unexpected!(self, peek, "a symmetric key or no key");
 						}
 						iss.key = key;
 					}

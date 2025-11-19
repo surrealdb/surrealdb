@@ -19,6 +19,7 @@ use crate::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt};
 pub mod recursion;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[allow(dead_code)]
 pub(crate) struct Idioms(pub(crate) Vec<Idiom>);
 
 impl Deref for Idioms {

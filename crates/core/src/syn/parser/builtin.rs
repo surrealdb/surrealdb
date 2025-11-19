@@ -518,8 +518,8 @@ fn levenshtein(a: &[u8], b: &[u8], cut_off: u8) -> u8 {
 	assert!(a.len() < LEVENSTHEIN_ARRAY_SIZE);
 	assert!(b.len() < LEVENSTHEIN_ARRAY_SIZE);
 
-	for i in 1..=a.len() {
-		distance_array[0][i] = i as u8;
+	for (i, item) in distance_array[0].iter_mut().enumerate().take(a.len() + 1).skip(1) {
+		*item = i as u8;
 	}
 
 	for i in 1..=b.len() {

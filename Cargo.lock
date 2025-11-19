@@ -2807,7 +2807,6 @@ version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f811f663912a69249fa620dcd2a005db7254529da2d8a0b23942e81f47084501"
 dependencies = [
- "earcutr",
  "float_next_after",
  "geo-types",
  "geographiclib-rs",
@@ -2816,7 +2815,6 @@ dependencies = [
  "robust",
  "rstar",
  "serde",
- "spade",
 ]
 
 [[package]]
@@ -6937,6 +6935,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-tungstenite",
+ "tokio-util",
  "tracing",
  "tracing-subscriber",
  "trice",
@@ -6969,6 +6968,8 @@ dependencies = [
 [[package]]
 name = "surrealdb-protocol"
 version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1dc67b15c0c63438f127e1feec1f08df641afde1c3b9f6e345f48782fbf1cea7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6976,7 +6977,7 @@ dependencies = [
  "chrono",
  "flatbuffers",
  "futures",
- "geo 0.28.0",
+ "geo 0.31.0",
  "prost 0.13.5",
  "prost-types 0.13.5",
  "rust_decimal",

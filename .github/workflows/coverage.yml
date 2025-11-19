@@ -17,9 +17,6 @@ on:
 permissions:
   contents: read
 
-env:
-  RUST_VERSION: "1.87"
-
 jobs:
   coverage:
     name: Generate coverage report
@@ -34,7 +31,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: false  # Don't pollute cache with coverage artifacts
 
       - name: Install tools

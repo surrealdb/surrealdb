@@ -28,9 +28,6 @@ defaults:
 permissions:
   contents: read
 
-env:
-  RUST_VERSION: "1.89"
-
 jobs:
   # ----------------------------------------
   # Server build
@@ -55,7 +52,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build binary
@@ -107,7 +103,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           components: clippy
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -115,7 +110,7 @@ jobs:
         uses: ./.github/actions/install-tools
 
       - name: Run clippy
-        run: cargo +${{ env.RUST_VERSION }} make ci-clippy
+        run: cargo make ci-clippy
 
   clippy-release:
     name: Check clippy (release)
@@ -127,7 +122,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           components: clippy
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -135,7 +129,7 @@ jobs:
         uses: ./.github/actions/install-tools
 
       - name: Run clippy release
-        run: cargo +${{ env.RUST_VERSION }} make ci-clippy-release
+        run: cargo make ci-clippy-release
 
   check:
     name: Check workspace
@@ -147,7 +141,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -166,7 +159,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -206,7 +198,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           targets: wasm32-unknown-unknown
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
@@ -226,7 +217,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install revision-lock
@@ -245,7 +235,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -268,7 +257,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -287,7 +275,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -306,7 +293,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -325,7 +311,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -344,7 +329,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -367,7 +351,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -406,7 +389,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           cache-key: kvs-${{ matrix.engine }}
 
@@ -437,7 +419,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build local
@@ -462,7 +443,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           cache-key: sdk-${{ matrix.engine }}
 
@@ -493,7 +473,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Install tools
@@ -517,7 +496,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: crates/language-tests
           cache-key: lang-${{ matrix.engine }}
@@ -543,7 +521,6 @@ jobs:
       - name: Setup environment
         uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ env.RUST_VERSION }}
           save-cache: ${{ github.ref == 'refs/heads/main' }}
           workspaces: |
             crates/language-tests
