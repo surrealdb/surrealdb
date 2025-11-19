@@ -200,7 +200,10 @@ impl Transactable for Transaction {
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Cancel this transaction
-		inner.tx.rollback().await?;
+		if self.write {
+			// Ignore rollback errors
+			let _ = inner.tx.rollback().await;
+		}
 		// Continue
 		Ok(())
 	}
