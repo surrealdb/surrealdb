@@ -2073,7 +2073,7 @@ pub async fn temporary_directory(cfg_server: Option<Format>, cfg_format: Format)
 	// These selects use the memory collector
 	let mut res =
 		socket.send_message_query("SELECT * FROM test ORDER BY id DESC EXPLAIN").await.unwrap();
-	let expected = json!([{"detail": { "direction": "forward", "table": "test" }, "operation": "Iterate Table" }, { "detail": { "type": "MemoryOrdered" }, "operation": "Collector" }]);
+	let expected = json!([{"detail": { "direction": "backward", "table": "test" }, "operation": "Iterate Table" }, { "detail": { "type": "MemoryOrdered" }, "operation": "Collector" }]);
 	assert_eq!(res.remove(0)["result"], expected);
 	// And return the correct result
 	let mut res = socket.send_message_query("SELECT * FROM test ORDER BY id DESC").await.unwrap();
