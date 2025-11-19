@@ -80,9 +80,10 @@ impl PlanBuilder {
 		//Analyse the query AST to discover indexable conditions and collect
 		//optimisation opportunities
 		if let Some(root) = &p.root
-			&& let Err(e) = b.eval_node(root) {
-				// Fall back to table scan if analysis fails
-				return Self::table_iterator(ctx, Some(&e), p.gp).await;
+			&& let Err(e) = b.eval_node(root)
+		{
+			// Fall back to table scan if analysis fails
+			return Self::table_iterator(ctx, Some(&e), p.gp).await;
 		}
 
 		//Optimisation path 1: All conditions connected by AND operators
@@ -118,26 +119,27 @@ impl PlanBuilder {
 
 			// Select the first available range query (deterministic group order)
 			if let Some((_, group)) = b.groups.into_iter().next()
-				&& let Some((index_reference, rq)) = group.take_first_range() {
-					// Evaluate the record strategy
-					let record_strategy =
-						ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
-					let (is_order, sc) = if let Some(io) = p.order_limit {
-						(
-							io.index_reference == index_reference,
-							Self::check_range_scan_direction(io.op()),
-						)
-					} else {
-						(false, ScanDirection::Forward)
-					};
-					// Return the plan
-					return Ok(Plan::SingleIndexRange(
-						index_reference,
-						rq,
-						record_strategy,
-						sc,
-						is_order,
-					));
+				&& let Some((index_reference, rq)) = group.take_first_range()
+			{
+				// Evaluate the record strategy
+				let record_strategy =
+					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
+				let (is_order, sc) = if let Some(io) = p.order_limit {
+					(
+						io.index_reference == index_reference,
+						Self::check_range_scan_direction(io.op()),
+					)
+				} else {
+					(false, ScanDirection::Forward)
+				};
+				// Return the plan
+				return Ok(Plan::SingleIndexRange(
+					index_reference,
+					rq,
+					record_strategy,
+					sc,
+					is_order,
+				));
 			}
 
 			// Otherwise, pick a non-range single-index

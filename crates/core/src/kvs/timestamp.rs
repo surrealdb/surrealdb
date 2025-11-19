@@ -88,8 +88,9 @@ impl Timestamp for u128 {
 
 #[cfg(test)]
 mod tests {
-	use super::*;
 	use chrono::TimeZone;
+
+	use super::*;
 
 	#[test]
 	fn test_u64_bytes_roundtrip() {

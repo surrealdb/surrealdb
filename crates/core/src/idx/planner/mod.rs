@@ -211,8 +211,10 @@ impl<'a> StatementContext<'a> {
 	pub(crate) fn check_scan_direction(&self) -> ScanDirection {
 		if let Some(Ordering::Order(o)) = self.order
 			&& let Some(o) = o.first()
-				&& !o.direction && o.value.is_id() {
-					return ScanDirection::Backward;
+			&& !o.direction
+			&& o.value.is_id()
+		{
+			return ScanDirection::Backward;
 		}
 		ScanDirection::Forward
 	}

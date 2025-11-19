@@ -35,8 +35,7 @@ use crate::catalog::providers::{
 	ApiProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, TableProvider,
 	UserProvider,
 };
-use crate::catalog::{ApiDefinition, ApiMethod, Index};
-use crate::catalog::{NodeLiveQuery, SubscriptionDefinition};
+use crate::catalog::{ApiDefinition, ApiMethod, Index, NodeLiveQuery, SubscriptionDefinition};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
@@ -44,8 +43,7 @@ use crate::dbs::capabilities::NetTarget;
 use crate::dbs::capabilities::{
 	ArbitraryQueryTarget, ExperimentalTarget, MethodTarget, RouteTarget,
 };
-use crate::dbs::node::Node;
-use crate::dbs::node::Timestamp;
+use crate::dbs::node::{Node, Timestamp};
 use crate::dbs::{Capabilities, Executor, Options, QueryResult, QueryResultBuilder, Session};
 use crate::err::Error;
 use crate::expr::model::get_model_path;
@@ -59,7 +57,6 @@ use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
 use crate::idx::trees::store::IndexStores;
 use crate::key::root::ic::IndexCompactionKey;
-use crate::kvs::KVValue;
 use crate::kvs::LockType::*;
 use crate::kvs::TransactionType::*;
 use crate::kvs::cache::ds::DatastoreCache;
@@ -73,7 +70,7 @@ use crate::kvs::index::IndexBuilder;
 use crate::kvs::sequences::Sequences;
 use crate::kvs::slowlog::SlowLog;
 use crate::kvs::tasklease::{LeaseHandler, TaskLeaseType};
-use crate::kvs::{LockType, TransactionType};
+use crate::kvs::{KVValue, LockType, TransactionType};
 use crate::rpc::DbResultError;
 use crate::sql::Ast;
 #[cfg(feature = "surrealism")]

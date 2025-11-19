@@ -505,6 +505,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	async fn timestamp(&self) -> Result<Box<dyn Timestamp>> {
 		#[cfg(not(target_family = "wasm"))]
 		use std::time::{SystemTime, UNIX_EPOCH};
+
 		#[cfg(target_family = "wasm")]
 		use wasmtimer::std::{SystemTime, UNIX_EPOCH};
 		Ok(Box::new(
