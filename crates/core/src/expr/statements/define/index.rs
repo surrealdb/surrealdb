@@ -1,9 +1,7 @@
-use std::fmt::{self, Display};
 use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::DefineKind;
@@ -15,7 +13,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, exprs_to_fields};
 use crate::expr::{Base, Expr, Literal, Part};
-use crate::fmt::Fmt;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -153,32 +150,6 @@ impl DefineIndexStatement {
 		Ok(Value::None)
 	}
 }
-
-impl Display for DefineIndexStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE INDEX")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {} ON {}", self.name, self.what)?;
-		if !self.cols.is_empty() {
-			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter()))?;
-		}
-		if Index::Idx != self.index {
-			write!(f, " {}", self.index.to_sql())?;
-		}
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
-		}
-		if self.concurrently {
-			write!(f, " CONCURRENTLY")?
-		}
-		Ok(())
-	}
-}
-
 pub(in crate::expr::statements) async fn run_indexing(
 	ctx: &Context,
 	opt: &Options,

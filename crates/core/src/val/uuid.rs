@@ -1,5 +1,4 @@
 use std::fmt::{self, Display, Formatter};
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use std::ops::Deref;
 use std::str;
 use std::str::FromStr;
@@ -7,6 +6,7 @@ use std::str::FromStr;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::Datetime;
 use crate::fmt::QuoteStr;

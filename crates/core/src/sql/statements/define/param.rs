@@ -1,7 +1,6 @@
-use std::fmt::{self, Display, Write};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
 use crate::sql::{Expr, Permission};
 
@@ -15,32 +14,24 @@ pub(crate) struct DefineParamStatement {
 	pub permissions: Permission,
 }
 
-impl Display for DefineParamStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE PARAM")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " ${} VALUE {}", EscapeIdent(&self.name), self.value)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
-		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		write!(f, "PERMISSIONS {}", self.permissions)?;
-		Ok(())
-	}
-}
-
 impl ToSql for DefineParamStatement {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+		write_sql!(f, "DEFINE PARAM");
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write_sql!(f, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, " IF NOT EXISTS"),
+		}
+		write_sql!(f, " ${} VALUE {}", EscapeIdent(&self.name), self.value);
+		if let Some(ref v) = self.comment {
+			write_sql!(f, " COMMENT {}", v);
+		}
+		if is_pretty() {
+			let _indent = pretty_indent();
+		} else {
+			f.push(' ');
+		}
+		write_sql!(f, "PERMISSIONS {}", self.permissions);
 	}
 }
 

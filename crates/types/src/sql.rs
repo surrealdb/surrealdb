@@ -118,11 +118,12 @@ pub fn fmt_sql_key_value<'a, V: ToSql + 'a>(
 	f: &mut String,
 	fmt: SqlFormat,
 ) {
-	use crate::utils::escape::EscapeKey;
 	use std::fmt::Write;
-	
+
+	use crate::utils::escape::EscapeKey;
+
 	let pairs: Vec<_> = pairs.into_iter().collect();
-	
+
 	if fmt.is_pretty() && !pairs.is_empty() {
 		f.push('\n');
 		fmt.write_indent(f);
@@ -131,7 +132,8 @@ pub fn fmt_sql_key_value<'a, V: ToSql + 'a>(
 		if i > 0 {
 			fmt.write_separator(f);
 		}
-		write!(f, "{}: ", EscapeKey(key.as_ref())).expect("Write cannot fail when writing to a String");
+		write!(f, "{}: ", EscapeKey(key.as_ref()))
+			.expect("Write cannot fail when writing to a String");
 		value.fmt_sql(f, fmt);
 	}
 	if fmt.is_pretty() && !pairs.is_empty() {

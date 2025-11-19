@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use reblessive::tree::Stk;
 
 use crate::ctx::{Context, MutableContext};
@@ -106,10 +104,5 @@ impl ForeachStatement {
 		}
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-impl Display for ForeachStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "FOR {} IN {} {}", self.param, self.range, self.block)
 	}
 }

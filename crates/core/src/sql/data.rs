@@ -1,6 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
 use crate::fmt::Fmt;
 use crate::sql::{AssignOperator, Expr, Idiom};
 

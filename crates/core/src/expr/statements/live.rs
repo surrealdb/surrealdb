@@ -1,5 +1,3 @@
-use std::fmt;
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use uuid::Uuid;
@@ -125,19 +123,6 @@ impl LiveStatement {
 		};
 		// Return the query id
 		Ok(crate::val::Uuid(live_query_id).into())
-	}
-}
-
-impl fmt::Display for LiveStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "LIVE SELECT {} FROM {}", self.fields, self.what)?;
-		if let Some(ref v) = self.cond {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.fetch {
-			write!(f, " {v}")?
-		}
-		Ok(())
 	}
 }
 

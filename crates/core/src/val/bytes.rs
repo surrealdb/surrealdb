@@ -1,11 +1,11 @@
 use std::fmt::{self, Display, Formatter};
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use std::ops::Deref;
 
 use revision::revisioned;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::val::IndexFormat;
 

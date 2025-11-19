@@ -1,6 +1,4 @@
 #![allow(clippy::derived_hash_with_manual_eq)]
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
-
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::iter::once;
@@ -13,6 +11,7 @@ use geo_types::{MultiLineString, MultiPoint, MultiPolygon};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::Object;
 use crate::fmt::Fmt;

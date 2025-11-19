@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
@@ -105,29 +103,6 @@ impl DefineDatabaseStatement {
 		Ok(Value::None)
 	}
 }
-
-impl Display for DefineDatabaseStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE DATABASE")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {}", self.name)?;
-		if self.strict {
-			write!(f, " STRICT")?;
-		}
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
-		}
-		if let Some(ref v) = self.changefeed {
-			write!(f, " {v}")?;
-		}
-		Ok(())
-	}
-}
-
 impl InfoStructure for DefineDatabaseStatement {
 	fn structure(self) -> Value {
 		Value::from(map! {

@@ -83,7 +83,7 @@ impl Object {
 impl ToSql for Object {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		use crate::sql::fmt_sql_key_value;
-		
+
 		if self.is_empty() {
 			return f.push_str("{  }");
 		}

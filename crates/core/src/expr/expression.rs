@@ -854,24 +854,36 @@ impl fmt::Display for Expr {
 			Expr::Closure(closure) => write!(f, "{closure}"),
 			Expr::Break => write!(f, "BREAK"),
 			Expr::Continue => write!(f, "CONTINUE"),
-			Expr::Return(x) => write!(f, "{x}"),
+			Expr::Return(x) => {
+				use surrealdb_types::ToSql;
+				let sql_stmt: crate::sql::statements::OutputStatement = (**x).clone().into();
+				write!(f, "{}", sql_stmt.to_sql())
+			}
 			Expr::Throw(expr) => write!(f, "THROW {expr}"),
-			Expr::IfElse(s) => write!(f, "{s}"),
-			Expr::Select(s) => write!(f, "{s}"),
-			Expr::Create(s) => write!(f, "{s}"),
-			Expr::Update(s) => write!(f, "{s}"),
-			Expr::Delete(s) => write!(f, "{s}"),
-			Expr::Relate(s) => write!(f, "{s}"),
-			Expr::Insert(s) => write!(f, "{s}"),
-			Expr::Define(s) => write!(f, "{s}"),
-			Expr::Remove(s) => write!(f, "{s}"),
-			Expr::Rebuild(s) => write!(f, "{s}"),
-			Expr::Upsert(s) => write!(f, "{s}"),
-			Expr::Alter(s) => write!(f, "{s}"),
-			Expr::Info(s) => write!(f, "{s}"),
-			Expr::Foreach(s) => write!(f, "{s}"),
-			Expr::Let(s) => write!(f, "{s}"),
-			Expr::Sleep(s) => write!(f, "{s}"),
+			Expr::IfElse(s) => {
+				use surrealdb_types::ToSql;
+				let sql_stmt: crate::sql::statements::IfelseStatement = (**s).clone().into();
+				write!(f, "{}", sql_stmt.to_sql())
+			}
+			Expr::Select(_)
+			| Expr::Create(_)
+			| Expr::Update(_)
+			| Expr::Delete(_)
+			| Expr::Relate(_)
+			| Expr::Insert(_)
+			| Expr::Define(_)
+			| Expr::Remove(_)
+			| Expr::Rebuild(_)
+			| Expr::Upsert(_)
+			| Expr::Alter(_)
+			| Expr::Info(_)
+			| Expr::Foreach(_)
+			| Expr::Let(_)
+			| Expr::Sleep(_) => {
+				use surrealdb_types::ToSql;
+				let sql_expr: crate::sql::Expr = self.clone().into();
+				write!(f, "{}", sql_expr.to_sql())
+			}
 		}
 	}
 }

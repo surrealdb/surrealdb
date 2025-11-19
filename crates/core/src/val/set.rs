@@ -1,11 +1,11 @@
 use std::collections::BTreeSet;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use std::fmt::{self, Display, Formatter, Write};
 use std::ops::{Deref, DerefMut};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::Expr;
 use crate::val::{IndexFormat, Value};

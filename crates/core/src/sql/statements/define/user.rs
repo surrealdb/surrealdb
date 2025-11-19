@@ -1,11 +1,9 @@
-use std::fmt::{self, Display};
-
 use argon2::Argon2;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use argon2::password_hash::{PasswordHasher, SaltString};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::fmt::{EscapeIdent, Fmt, QuoteStr};
@@ -49,60 +47,47 @@ impl Default for DefineUserStatement {
 	}
 }
 
-impl Display for DefineUserStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE USER")?;
+impl ToSql for DefineUserStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "DEFINE USER");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => write_sql!(f, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, " IF NOT EXISTS"),
 		}
 
-		write!(f, " {} ON {}", self.name, self.base)?;
+		write_sql!(f, " {} ON {}", self.name, self.base);
 
 		match self.pass_type {
-			PassType::Unset => write!(f, " PASSHASH \"\" ")?,
-			PassType::Hash(ref x) => write!(f, " PASSHASH {}", QuoteStr(x))?,
-			PassType::Password(ref x) => write!(f, " PASSWORD {}", QuoteStr(x))?,
+			PassType::Unset => write_sql!(f, " PASSHASH \"\" "),
+			PassType::Hash(ref x) => write_sql!(f, " PASSHASH {}", QuoteStr(x)),
+			PassType::Password(ref x) => write_sql!(f, " PASSWORD {}", QuoteStr(x)),
 		}
 
-		write!(
+		write_sql!(
 			f,
 			" ROLES {}",
 			Fmt::comma_separated(
 				&self.roles.iter().map(|r| EscapeIdent(r.to_uppercase())).collect::<Vec<_>>()
-			),
-		)?;
+			)
+		);
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible
 		// None values need to be printed, as they are different from the default values
-		write!(f, " DURATION")?;
-		write!(
-			f,
-			" FOR TOKEN {},",
-			match self.token_duration {
-				Some(ref dur) => format!("{}", dur),
-				None => "NONE".to_string(),
-			}
-		)?;
-		write!(
-			f,
-			" FOR SESSION {}",
-			match self.session_duration {
-				Some(ref dur) => format!("{}", dur),
-				None => "NONE".to_string(),
-			}
-		)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+		write_sql!(f, " DURATION");
+		f.push_str(" FOR TOKEN ");
+		match self.token_duration {
+			Some(ref dur) => write_sql!(f, "{}", dur),
+			None => f.push_str("NONE"),
 		}
-		Ok(())
-	}
-}
-
-impl ToSql for DefineUserStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+		f.push_str(", FOR SESSION ");
+		match self.session_duration {
+			Some(ref dur) => write_sql!(f, "{}", dur),
+			None => f.push_str("NONE"),
+		}
+		if let Some(ref v) = self.comment {
+			write_sql!(f, " COMMENT {}", v);
+		}
 	}
 }
 

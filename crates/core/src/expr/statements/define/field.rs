@@ -1,4 +1,3 @@
-use std::fmt::{self, Display, Write};
 use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
@@ -18,7 +17,6 @@ use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::reference::Reference;
 use crate::expr::{Base, Expr, Kind, KindLiteral, Literal, Part, RecordIdKeyLit};
-use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::Value;
@@ -500,59 +498,6 @@ impl DefineFieldStatement {
 			);
 		}
 
-		Ok(())
-	}
-}
-
-impl Display for DefineFieldStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE FIELD")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {} ON {}", self.name, self.what)?;
-		if let Some(ref v) = self.field_kind {
-			write!(f, " TYPE {v}")?;
-			if self.flexible {
-				write!(f, " FLEXIBLE")?;
-			}
-		}
-		match self.default {
-			DefineDefault::None => {}
-			DefineDefault::Always(ref expr) => write!(f, " DEFAULT ALWAYS {expr}")?,
-			DefineDefault::Set(ref expr) => write!(f, " DEFAULT {expr}")?,
-		}
-		if self.readonly {
-			write!(f, " READONLY")?
-		}
-		if let Some(ref v) = self.value {
-			write!(f, " VALUE {v}")?
-		}
-		if let Some(ref v) = self.assert {
-			write!(f, " ASSERT {v}")?
-		}
-		if let Some(ref v) = self.computed {
-			write!(f, " COMPUTED {v}")?
-		}
-		if let Some(ref v) = self.reference {
-			write!(f, " REFERENCE {v}")?
-		}
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?
-		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		// Alternate permissions display implementation ignores delete permission
-		// This display is used to show field permissions, where delete has no effect
-		// Displaying the permission could mislead users into thinking it has an effect
-		// Additionally, including the permission will cause a parsing error in 3.0.0
-		write!(f, "{:#}", self.permissions)?;
 		Ok(())
 	}
 }

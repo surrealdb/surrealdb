@@ -1,4 +1,3 @@
-use std::fmt;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::EscapeIdent;
@@ -12,20 +11,14 @@ pub struct SetStatement {
 	pub kind: Option<Kind>,
 }
 
-impl fmt::Display for SetStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "LET ${}", EscapeIdent(&self.name))?;
-		if let Some(ref kind) = self.kind {
-			write!(f, ": {}", kind)?;
-		}
-		write!(f, " = {}", self.what)?;
-		Ok(())
-	}
-}
-
 impl ToSql for SetStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, "LET ${}", EscapeIdent(&self.name));
+		if let Some(ref kind) = self.kind {
+			write_sql!(f, ": {}", kind);
+		}
+		f.push_str(" = ");
+		self.what.fmt_sql(f, fmt);
 	}
 }
 

@@ -1,8 +1,7 @@
-use std::fmt::{self, Display, Write};
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
+use crate::fmt::EscapeIdent;
 use crate::sql::{ChangeFeed, Kind, Permissions, TableType};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -17,88 +16,72 @@ pub struct AlterTableStatement {
 	pub kind: Option<TableType>,
 }
 
-impl Display for AlterTableStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ALTER TABLE")?;
+impl ToSql for AlterTableStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("ALTER TABLE");
 		if self.if_exists {
-			write!(f, " IF EXISTS")?
+			f.push_str(" IF EXISTS");
 		}
-		write!(f, " {}", EscapeIdent(&self.name))?;
+		write_sql!(f, " {}", EscapeIdent(&self.name));
 		if let Some(kind) = &self.kind {
-			write!(f, " TYPE")?;
+			f.push_str(" TYPE");
 			match &kind {
 				TableType::Normal => {
-					f.write_str(" NORMAL")?;
+					f.push_str(" NORMAL");
 				}
 				TableType::Relation(rel) => {
-					f.write_str(" RELATION")?;
+					f.push_str(" RELATION");
 					if let Some(Kind::Record(kind)) = &rel.from {
-						write!(f, " IN ",)?;
+						f.push_str(" IN ");
 						for (idx, k) in kind.iter().enumerate() {
 							if idx != 0 {
-								write!(f, " | ")?;
+								f.push_str(" | ");
 							}
-							write!(f, "{}", EscapeIdent(k))?;
+							write_sql!(f, "{}", EscapeIdent(k));
 						}
 					}
 					if let Some(Kind::Record(kind)) = &rel.to {
-						write!(f, " OUT ",)?;
+						f.push_str(" OUT ");
 						for (idx, k) in kind.iter().enumerate() {
 							if idx != 0 {
-								write!(f, " | ")?;
+								f.push_str(" | ");
 							}
-							write!(f, "{}", EscapeIdent(k))?;
+							write_sql!(f, "{}", EscapeIdent(k));
 						}
 					}
 				}
 				TableType::Any => {
-					f.write_str(" ANY")?;
+					f.push_str(" ANY");
 				}
 			}
 		}
 
 		match self.schemafull {
-			AlterKind::Set(_) => " SCHEMAFULL".fmt(f)?,
-			AlterKind::Drop => " SCHEMALESS".fmt(f)?,
+			AlterKind::Set(_) => f.push_str(" SCHEMAFULL"),
+			AlterKind::Drop => f.push_str(" SCHEMALESS"),
 			AlterKind::None => {}
 		}
 
 		match self.comment {
-			AlterKind::Set(ref comment) => write!(f, " COMMENT {}", comment)?,
-			AlterKind::Drop => write!(f, " DROP COMMENT")?,
+			AlterKind::Set(ref comment) => {
+				f.push_str(" COMMENT ");
+				comment.fmt_sql(f, fmt);
+			}
+			AlterKind::Drop => f.push_str(" DROP COMMENT"),
 			AlterKind::None => {}
 		}
 
 		match self.changefeed {
-			AlterKind::Set(ref changefeed) => write!(f, " CHANGEFEED {}", changefeed)?,
-			AlterKind::Drop => write!(f, " DROP CHANGEFEED")?,
+			AlterKind::Set(ref changefeed) => {
+				f.push_str(" CHANGEFEED ");
+				changefeed.fmt_sql(f, fmt);
+			}
+			AlterKind::Drop => f.push_str(" DROP CHANGEFEED"),
 			AlterKind::None => {}
 		}
 
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
 		if let Some(permissions) = &self.permissions {
-			write!(f, "{permissions}")?;
-		}
-		Ok(())
-	}
-}
-
-impl ToSql for AlterTableStatement {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		// Use Display for the content
-		let s = format!("{}", self);
-		f.push_str(&s);
-		// In single-line mode, Display adds a trailing space before permissions
-		// which we want to keep. In pretty mode, we don't want it if there are no permissions.
-		// Actually Display always adds the space. In pretty mode with no permissions, remove it.
-		if fmt.is_pretty() && self.permissions.is_none() && s.ends_with(' ') {
-			// Remove the trailing space we just added
-			f.truncate(f.len() - 1);
+			permissions.fmt_sql(f, fmt);
 		}
 	}
 }

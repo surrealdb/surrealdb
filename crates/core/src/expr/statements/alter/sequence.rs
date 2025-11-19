@@ -1,4 +1,3 @@
-use std::fmt::{self, Display, Write};
 use std::ops::Deref;
 
 use anyhow::Result;
@@ -10,7 +9,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Timeout, Value};
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 
@@ -62,25 +60,5 @@ impl AlterSequenceStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for AlterSequenceStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ALTER SEQUENCE")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " {}", EscapeIdent(&self.name))?;
-		if let Some(ref timeout) = self.timeout {
-			write!(f, " TIMEOUT {timeout}")?;
-		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		Ok(())
 	}
 }

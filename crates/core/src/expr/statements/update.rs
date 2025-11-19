@@ -1,5 +1,3 @@
-use std::fmt;
-
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 
@@ -8,7 +6,6 @@ use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Cond, Data, Explain, Expr, Output, Timeout, With};
-use crate::fmt::Fmt;
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 
@@ -88,37 +85,5 @@ impl UpdateStatement {
 			}
 		})
 		.await
-	}
-}
-
-impl fmt::Display for UpdateStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "UPDATE")?;
-		if self.only {
-			f.write_str(" ONLY")?
-		}
-		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
-		if let Some(ref v) = self.with {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.data {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.cond {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.output {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
-		}
-		if self.parallel {
-			f.write_str(" PARALLEL")?
-		}
-		if let Some(ref v) = self.explain {
-			write!(f, " {v}")?
-		}
-		Ok(())
 	}
 }

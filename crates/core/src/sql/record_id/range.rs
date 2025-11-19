@@ -2,6 +2,7 @@ use std::fmt;
 use std::ops::Bound;
 
 use surrealdb_types::{SqlFormat, ToSql};
+
 use super::RecordIdKeyLit;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

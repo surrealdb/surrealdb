@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
 use crate::catalog;
@@ -106,36 +106,16 @@ impl DefineAnalyzerStatement {
 		Ok(Value::None)
 	}
 }
-
-impl Display for DefineAnalyzerStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE ANALYZER")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " IF NOT EXISTS")?,
-			DefineKind::IfNotExists => write!(f, " OVERWRITE")?,
-		}
-		write!(f, " {}", self.name)?;
-		if let Some(ref i) = self.function {
-			write!(f, " FUNCTION fn::{i}")?
-		}
-		if let Some(v) = &self.tokenizers {
-			let tokens: Vec<String> = v.iter().map(|f| f.to_string()).collect();
-			write!(f, " TOKENIZERS {}", tokens.join(","))?;
-		}
-		if let Some(v) = &self.filters {
-			let tokens: Vec<String> = v.iter().map(|f| f.to_string()).collect();
-			write!(f, " FILTERS {}", tokens.join(","))?;
-		}
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
-		}
-		Ok(())
+impl ToSql for DefineAnalyzerStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let sql_stmt: crate::sql::statements::define::DefineAnalyzerStatement = self.clone().into();
+		sql_stmt.fmt_sql(f, fmt);
 	}
 }
 
-impl ToSql for DefineAnalyzerStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+impl Display for DefineAnalyzerStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		use surrealdb_types::ToSql;
+		write!(f, "{}", self.to_sql())
 	}
 }

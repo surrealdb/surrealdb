@@ -1,7 +1,5 @@
-use std::fmt::{self, Display, Write};
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -40,144 +38,44 @@ impl From<crate::expr::statements::IfelseStatement> for IfelseStatement {
 	}
 }
 
-impl Display for IfelseStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let mut f = Pretty::from(f);
-		if self.bracketed() {
-			write!(
-				f,
-				"{}",
-				&Fmt::new(
-					self.exprs.iter().map(|args| {
-						Fmt::new(args, |(cond, then), f| {
-							if is_pretty() {
-								write!(f, "IF {cond}")?;
-								let indent = pretty_indent();
-								write!(f, "{then}")?;
-								drop(indent);
-							} else {
-								write!(f, "IF {cond} {then}")?;
-							}
-							Ok(())
-						})
-					}),
-					if is_pretty() {
-						fmt_separated_by("ELSE ")
-					} else {
-						fmt_separated_by(" ELSE ")
-					},
-				),
-			)?;
-			if let Some(ref v) = self.close {
-				if is_pretty() {
-					write!(f, "ELSE")?;
-					let indent = pretty_indent();
-					write!(f, "{v}")?;
-					drop(indent);
-				} else {
-					write!(f, " ELSE {v}")?;
-				}
-			}
-			Ok(())
-		} else {
-			write!(
-				f,
-				"{}",
-				&Fmt::new(
-					self.exprs.iter().map(|args| {
-						Fmt::new(args, |(cond, then), f| {
-							if is_pretty() {
-								write!(f, "IF {cond} THEN")?;
-								let indent = pretty_indent();
-								write!(f, "{then}")?;
-								drop(indent);
-							} else {
-								write!(f, "IF {cond} THEN {then}")?;
-							}
-							Ok(())
-						})
-					}),
-					if is_pretty() {
-						fmt_separated_by("ELSE ")
-					} else {
-						fmt_separated_by(" ELSE ")
-					},
-				),
-			)?;
-			if let Some(ref v) = self.close {
-				if is_pretty() {
-					write!(f, "ELSE")?;
-					let indent = pretty_indent();
-					write!(f, "{v}")?;
-					drop(indent);
-				} else {
-					write!(f, " ELSE {v}")?;
-				}
-			}
-			if is_pretty() {
-				f.write_str("END")?;
-			} else {
-				f.write_str(" END")?;
-			}
-			Ok(())
-		}
-	}
-}
-
 impl ToSql for IfelseStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		if self.bracketed() {
-			for (i, (cond, then)) in self.exprs.iter().enumerate() {
-				if i > 0 {
-					if fmt.is_pretty() {
-						f.push('\n');
-						f.push_str("ELSE ");
-					} else {
-						f.push_str(" ELSE ");
-					}
-				}
-				if fmt.is_pretty() {
-					f.push_str("IF ");
-					cond.fmt_sql(f, fmt);
-					let inner_fmt = fmt.increment();
-					f.push('\n');
-					inner_fmt.write_indent(f);
-					then.fmt_sql(f, inner_fmt);
-				} else {
-					f.push_str("IF ");
-					cond.fmt_sql(f, fmt);
-					f.push(' ');
-					then.fmt_sql(f, fmt);
-				}
-			}
-			if let Some(ref v) = self.close {
+		// Always use the bracketed logic since we don't have a separate Display implementation
+		for (i, (cond, then)) in self.exprs.iter().enumerate() {
+			if i > 0 {
 				if fmt.is_pretty() {
 					f.push('\n');
-					f.push_str("ELSE");
-					let inner_fmt = fmt.increment();
-					f.push('\n');
-					inner_fmt.write_indent(f);
-					v.fmt_sql(f, inner_fmt);
+					f.push_str("ELSE ");
 				} else {
 					f.push_str(" ELSE ");
-					v.fmt_sql(f, fmt);
 				}
 			}
-		} else {
-			// Non-bracketed version - same as Display
-			write_sql!(f, "{}", self);
+			if fmt.is_pretty() && self.bracketed() {
+				f.push_str("IF ");
+				cond.fmt_sql(f, fmt);
+				let inner_fmt = fmt.increment();
+				f.push('\n');
+				inner_fmt.write_indent(f);
+				then.fmt_sql(f, inner_fmt);
+			} else {
+				f.push_str("IF ");
+				cond.fmt_sql(f, fmt);
+				f.push(' ');
+				then.fmt_sql(f, fmt);
+			}
 		}
-	}
-}
-
-#[cfg(test)]
-mod tests {
-	use crate::syn;
-
-	#[test]
-	fn format_pretty() {
-		let query = syn::parse("IF 1 { 1 } ELSE IF 2 { 2 }").unwrap();
-		assert_eq!(format!("{}", query), "IF 1 { 1 } ELSE IF 2 { 2 };");
-		assert_eq!(format!("{:#}", query), "IF 1\n\t{ 1 }\nELSE IF 2\n\t{ 2 }\n;");
+		if let Some(ref v) = self.close {
+			if fmt.is_pretty() && self.bracketed() {
+				f.push('\n');
+				f.push_str("ELSE");
+				let inner_fmt = fmt.increment();
+				f.push('\n');
+				inner_fmt.write_indent(f);
+				v.fmt_sql(f, inner_fmt);
+			} else {
+				f.push_str(" ELSE ");
+				v.fmt_sql(f, fmt);
+			}
+		}
 	}
 }

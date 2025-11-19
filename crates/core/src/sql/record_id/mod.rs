@@ -1,6 +1,7 @@
 use std::fmt;
 
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
 use crate::fmt::EscapeRid;
 
 pub mod key;

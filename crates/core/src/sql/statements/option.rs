@@ -32,7 +32,11 @@ impl fmt::Display for OptionStatement {
 
 impl ToSql for OptionStatement {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+		if self.what {
+			write_sql!(f, "OPTION {}", EscapeIdent(&self.name))
+		} else {
+			write_sql!(f, "OPTION {} = FALSE", EscapeIdent(&self.name))
+		}
 	}
 }
 

@@ -1,7 +1,5 @@
-use std::fmt;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::Fmt;
 use crate::sql::order::Ordering;
 use crate::sql::{
 	Cond, Explain, Expr, Fetchs, Fields, Groups, Limit, Splits, Start, Timeout, With,
@@ -31,60 +29,66 @@ pub struct SelectStatement {
 	pub tempfiles: bool,
 }
 
-impl fmt::Display for SelectStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "SELECT {}", self.expr)?;
+impl ToSql for SelectStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, "SELECT {}", self.expr);
 		if !self.omit.is_empty() {
-			write!(f, " OMIT {}", Fmt::comma_separated(self.omit.iter()))?
+			f.push_str(" OMIT ");
+			for (i, expr) in self.omit.iter().enumerate() {
+				if i > 0 {
+					f.push_str(", ");
+				}
+				expr.fmt_sql(f, fmt);
+			}
 		}
-		write!(f, " FROM")?;
+		f.push_str(" FROM");
 		if self.only {
-			f.write_str(" ONLY")?
+			f.push_str(" ONLY");
 		}
-		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
+		f.push(' ');
+		for (i, expr) in self.what.iter().enumerate() {
+			if i > 0 {
+				f.push_str(", ");
+			}
+			expr.fmt_sql(f, fmt);
+		}
 		if let Some(ref v) = self.with {
-			write!(f, " {v}")?
+			write_sql!(f, " {}", v);
 		}
 		if let Some(ref v) = self.cond {
-			write!(f, " {v}")?
+			write_sql!(f, " {}", v);
 		}
 		if let Some(ref v) = self.split {
-			write!(f, " {v}")?
+			write_sql!(f, " {}", v);
 		}
 		if let Some(ref v) = self.group {
-			write!(f, " {v}")?
+			write_sql!(f, " {}", v);
 		}
 		if let Some(ref v) = self.order {
-			write!(f, " {v}")?
+			write_sql!(f, " {}", v);
 		}
 		if let Some(ref v) = self.limit {
-			write!(f, " {v}")?
+			write_sql!(f, " {}", v);
 		}
 		if let Some(ref v) = self.start {
-			write!(f, " {v}")?
+			write_sql!(f, " {}", v);
 		}
 		if let Some(ref v) = self.fetch {
-			write!(f, " {v}")?
+			write_sql!(f, " {}", v);
 		}
 		if let Some(ref v) = self.version {
-			write!(f, " VERSION {v}")?
+			f.push_str(" VERSION ");
+			v.fmt_sql(f, fmt);
 		}
 		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
+			write_sql!(f, " {}", v);
 		}
 		if self.parallel {
-			f.write_str(" PARALLEL")?
+			f.push_str(" PARALLEL");
 		}
 		if let Some(ref v) = self.explain {
-			write!(f, " {v}")?
+			write_sql!(f, " {}", v);
 		}
-		Ok(())
-	}
-}
-
-impl ToSql for SelectStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
 	}
 }
 

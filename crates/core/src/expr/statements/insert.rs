@@ -1,5 +1,3 @@
-use std::fmt;
-
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 
@@ -138,38 +136,6 @@ impl InsertStatement {
 			Ok(res)
 		})
 		.await
-	}
-}
-
-impl fmt::Display for InsertStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str("INSERT")?;
-		if self.relation {
-			f.write_str(" RELATION")?
-		}
-		if self.ignore {
-			f.write_str(" IGNORE")?
-		}
-		if let Some(into) = &self.into {
-			write!(f, " INTO {}", into)?;
-		}
-		write!(f, " {}", self.data)?;
-		if let Some(ref v) = self.update {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.output {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.version {
-			write!(f, "VERSION {v}")?
-		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
-		}
-		if self.parallel {
-			f.write_str(" PARALLEL")?
-		}
-		Ok(())
 	}
 }
 

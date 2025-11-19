@@ -1,4 +1,5 @@
 use std::fmt;
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::{Data, Expr, Output, Timeout};
@@ -47,8 +48,33 @@ impl fmt::Display for RelateStatement {
 }
 
 impl ToSql for RelateStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("RELATE");
+		if self.only {
+			f.push_str(" ONLY");
+		}
+		f.push(' ');
+		self.from.fmt_sql(f, fmt);
+		f.push_str(" -> ");
+		self.through.fmt_sql(f, fmt);
+		f.push_str(" -> ");
+		self.to.fmt_sql(f, fmt);
+		if self.uniq {
+			f.push_str(" UNIQUE");
+		}
+		if let Some(ref v) = self.data {
+			f.push(' ');
+			v.fmt_sql(f, fmt);
+		}
+		if let Some(ref v) = self.output {
+			write_sql!(f, " {}", v);
+		}
+		if let Some(ref v) = self.timeout {
+			write_sql!(f, " {}", v);
+		}
+		if self.parallel {
+			f.push_str(" PARALLEL");
+		}
 	}
 }
 

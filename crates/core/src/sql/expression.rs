@@ -455,24 +455,75 @@ impl fmt::Display for Expr {
 			Expr::Closure(closure) => write!(f, "{closure}"),
 			Expr::Break => write!(f, "BREAK"),
 			Expr::Continue => write!(f, "CONTINUE"),
-			Expr::Return(x) => write!(f, "{x}"),
+			Expr::Return(x) => {
+				use surrealdb_types::ToSql;
+				write!(f, "{}", x.to_sql())
+			}
 			Expr::Throw(expr) => write!(f, "THROW {expr}"),
-			Expr::If(s) => write!(f, "{s}"),
-			Expr::Select(s) => write!(f, "{s}"),
-			Expr::Create(s) => write!(f, "{s}"),
-			Expr::Update(s) => write!(f, "{s}"),
-			Expr::Delete(s) => write!(f, "{s}"),
-			Expr::Relate(s) => write!(f, "{s}"),
-			Expr::Insert(s) => write!(f, "{s}"),
-			Expr::Define(s) => write!(f, "{s}"),
-			Expr::Remove(s) => write!(f, "{s}"),
-			Expr::Rebuild(s) => write!(f, "{s}"),
-			Expr::Upsert(s) => write!(f, "{s}"),
-			Expr::Alter(s) => write!(f, "{s}"),
-			Expr::Info(s) => write!(f, "{s}"),
-			Expr::Foreach(s) => write!(f, "{s}"),
-			Expr::Let(s) => write!(f, "{s}"),
-			Expr::Sleep(s) => write!(f, "{s}"),
+			Expr::If(s) => {
+				use surrealdb_types::ToSql;
+				write!(f, "{}", s.to_sql())
+			}
+			Expr::Select(s) => {
+				use surrealdb_types::ToSql;
+				write!(f, "{}", s.to_sql())
+			}
+			Expr::Create(s) => {
+				use surrealdb_types::ToSql;
+				write!(f, "{}", s.to_sql())
+			}
+			Expr::Update(s) => {
+				use surrealdb_types::ToSql;
+				write!(f, "{}", s.to_sql())
+			}
+			Expr::Delete(s) => {
+				use surrealdb_types::ToSql;
+				write!(f, "{}", s.to_sql())
+			}
+			Expr::Relate(s) => {
+				use surrealdb_types::ToSql;
+				write!(f, "{}", s.to_sql())
+			}
+			Expr::Insert(s) => {
+				use surrealdb_types::ToSql;
+				write!(f, "{}", s.to_sql())
+			}
+			Expr::Define(s) => {
+				use surrealdb_types::ToSql;
+				write!(f, "{}", s.to_sql())
+			}
+			Expr::Remove(s) => {
+				use surrealdb_types::ToSql;
+				write!(f, "{}", s.to_sql())
+			}
+			Expr::Rebuild(s) => {
+				use surrealdb_types::ToSql;
+				write!(f, "{}", s.to_sql())
+			}
+			Expr::Upsert(s) => {
+				use surrealdb_types::ToSql;
+				write!(f, "{}", s.to_sql())
+			}
+			Expr::Alter(s) => {
+				use surrealdb_types::ToSql;
+				write!(f, "{}", s.to_sql())
+			}
+			Expr::Info(s) => {
+				use surrealdb_types::ToSql;
+				write!(f, "{}", s.to_sql())
+			}
+			Expr::Foreach(s) => {
+				use surrealdb_types::ToSql;
+				write!(f, "{}", s.to_sql())
+			}
+			Expr::Let(s) => {
+				use surrealdb_types::ToSql;
+				write!(f, "{}", s.to_sql())
+			}
+			Expr::Sleep(s) => {
+				use surrealdb_types::ToSql;
+				write!(f, "{}", s.to_sql())
+			}
 		}
 	}
 }
@@ -480,8 +531,9 @@ impl fmt::Display for Expr {
 impl surrealdb_types::ToSql for Expr {
 	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
 		use surrealdb_types::write_sql;
+
 		use crate::fmt::EscapeIdent;
-		
+
 		match self {
 			Expr::Literal(literal) => literal.fmt_sql(f, fmt),
 			// All other variants can delegate to Display since they don't have nested structures
@@ -492,7 +544,10 @@ impl surrealdb_types::ToSql for Expr {
 			Expr::Mock(mock) => write_sql!(f, "{}", mock),
 			Expr::Block(block) => block.fmt_sql(f, fmt),
 			Expr::Constant(constant) => write_sql!(f, "{}", constant),
-			Expr::Prefix { op, expr } => {
+			Expr::Prefix {
+				op,
+				expr,
+			} => {
 				let needs_parens = expr.needs_parentheses() || {
 					let expr_bp = BindingPower::for_expr(expr);
 					let op_bp = BindingPower::for_prefix_operator(op);
@@ -507,7 +562,10 @@ impl surrealdb_types::ToSql for Expr {
 					expr.fmt_sql(f, fmt);
 				}
 			}
-			Expr::Postfix { expr, op } => {
+			Expr::Postfix {
+				expr,
+				op,
+			} => {
 				let needs_parens = expr.needs_parentheses() || {
 					let expr_bp = BindingPower::for_expr(expr);
 					let op_bp = BindingPower::for_postfix_operator(op);
@@ -522,16 +580,20 @@ impl surrealdb_types::ToSql for Expr {
 				}
 				write_sql!(f, "{}", op);
 			}
-			Expr::Binary { left, op, right } => {
+			Expr::Binary {
+				left,
+				op,
+				right,
+			} => {
 				let op_bp = BindingPower::for_binary_operator(op);
 				let left_bp = BindingPower::for_expr(left);
 				let right_bp = BindingPower::for_expr(right);
-				
+
 				let left_needs_parens = left.needs_parentheses()
 					|| left_bp < op_bp
 					|| (left_bp == op_bp
 						&& matches!(left_bp, BindingPower::Range | BindingPower::Relation));
-				
+
 				if left_needs_parens {
 					f.push('(');
 					left.fmt_sql(f, fmt);
@@ -539,7 +601,7 @@ impl surrealdb_types::ToSql for Expr {
 				} else {
 					left.fmt_sql(f, fmt);
 				}
-				
+
 				if matches!(
 					op,
 					BinaryOperator::Range
@@ -551,12 +613,12 @@ impl surrealdb_types::ToSql for Expr {
 				} else {
 					write_sql!(f, " {} ", op);
 				}
-				
+
 				let right_needs_parens = right.needs_parentheses()
 					|| right_bp < op_bp
 					|| (right_bp == op_bp
 						&& matches!(right_bp, BindingPower::Range | BindingPower::Relation));
-				
+
 				if right_needs_parens {
 					f.push('(');
 					right.fmt_sql(f, fmt);

@@ -1,11 +1,10 @@
-use std::fmt::{self, Display, Write};
+use std::fmt::{self, Display};
 
 use anyhow::Result;
 use revision::revisioned;
 
 use crate::catalog::ApiConfigDefinition;
 use crate::expr::statements::info::InfoStructure;
-use crate::fmt::{Fmt, Pretty, pretty_indent};
 use crate::iam::ConfigKind;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::Value;
@@ -47,10 +46,25 @@ impl ConfigDefinition {
 
 impl Display for ConfigDefinition {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		use surrealdb_types::ToSql;
 		match &self {
-			ConfigDefinition::GraphQL(v) => Display::fmt(v, f),
-			ConfigDefinition::Api(v) => Display::fmt(v, f),
+			ConfigDefinition::GraphQL(v) => {
+				let sql_config: crate::sql::statements::define::config::GraphQLConfig =
+					v.clone().into();
+				write!(f, "{}", sql_config.to_sql())
+			}
+			ConfigDefinition::Api(v) => {
+				write!(f, "{}", v)
+			}
 		}
+	}
+}
+
+impl Display for GraphQLConfig {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		use surrealdb_types::ToSql;
+		let sql_config: crate::sql::statements::define::config::GraphQLConfig = self.clone().into();
+		write!(f, "{}", sql_config.to_sql())
 	}
 }
 
@@ -74,16 +88,6 @@ pub struct GraphQLConfig {
 	pub functions: GraphQLFunctionsConfig,
 }
 
-impl Display for GraphQLConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "GRAPHQL")?;
-
-		write!(f, " TABLES {}", self.tables)?;
-		write!(f, " FUNCTIONS {}", self.functions)?;
-		Ok(())
-	}
-}
-
 impl InfoStructure for GraphQLConfig {
 	fn structure(self) -> Value {
 		Value::from(map!(
@@ -101,35 +105,6 @@ pub enum GraphQLTablesConfig {
 	Auto,
 	Include(Vec<String>),
 	Exclude(Vec<String>),
-}
-
-impl Display for GraphQLTablesConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			GraphQLTablesConfig::Auto => write!(f, "AUTO")?,
-			GraphQLTablesConfig::None => write!(f, "NONE")?,
-			GraphQLTablesConfig::Include(cs) => {
-				let mut f = Pretty::from(f);
-				write!(f, "INCLUDE ")?;
-				if !cs.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
-					drop(indent);
-				}
-			}
-			GraphQLTablesConfig::Exclude(cs) => {
-				let mut f = Pretty::from(f);
-				write!(f, "EXCLUDE")?;
-				if !cs.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
-					drop(indent);
-				}
-			}
-		}
-
-		Ok(())
-	}
 }
 
 impl InfoStructure for GraphQLTablesConfig {
@@ -155,37 +130,6 @@ pub enum GraphQLFunctionsConfig {
 	Auto,
 	Include(Vec<String>),
 	Exclude(Vec<String>),
-}
-
-impl Display for GraphQLFunctionsConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			GraphQLFunctionsConfig::Auto => write!(f, "AUTO")?,
-			GraphQLFunctionsConfig::None => write!(f, "NONE")?,
-			GraphQLFunctionsConfig::Include(cs) => {
-				let mut f = Pretty::from(f);
-				write!(f, "INCLUDE [")?;
-				if !cs.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
-					drop(indent);
-				}
-				f.write_char(']')?;
-			}
-			GraphQLFunctionsConfig::Exclude(cs) => {
-				let mut f = Pretty::from(f);
-				write!(f, "EXCLUDE [")?;
-				if !cs.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
-					drop(indent);
-				}
-				f.write_char(']')?;
-			}
-		}
-
-		Ok(())
-	}
 }
 
 impl InfoStructure for GraphQLFunctionsConfig {

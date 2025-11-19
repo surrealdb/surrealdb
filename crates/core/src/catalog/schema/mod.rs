@@ -81,6 +81,12 @@ impl Display for Permission {
 	}
 }
 
+impl Display for Permissions {
+	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+		write!(f, "{}", self.to_sql_definition())
+	}
+}
+
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub struct Permissions {
@@ -102,12 +108,6 @@ impl Permissions {
 
 	pub fn to_sql_definition(&self) -> crate::sql::Permissions {
 		self.clone().into()
-	}
-}
-
-impl Display for Permissions {
-	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-		write!(f, "{}", self.to_sql_definition())
 	}
 }
 

@@ -1,5 +1,3 @@
-use std::fmt::{self, Display, Write};
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
@@ -11,7 +9,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Block, Expr, Kind};
-use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -79,39 +76,5 @@ impl DefineFunctionStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl fmt::Display for DefineFunctionStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE FUNCTION")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " fn::{}(", &*self.name)?;
-		for (i, (name, kind)) in self.args.iter().enumerate() {
-			if i > 0 {
-				f.write_str(", ")?;
-			}
-			write!(f, "${}: {kind}", EscapeKwFreeIdent(name))?;
-		}
-		f.write_str(") ")?;
-		if let Some(ref v) = self.returns {
-			write!(f, "-> {v} ")?;
-		}
-		Display::fmt(&self.block, f)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
-		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		write!(f, "PERMISSIONS {}", self.permissions)?;
-		Ok(())
 	}
 }

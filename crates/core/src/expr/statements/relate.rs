@@ -1,5 +1,3 @@
-use std::fmt;
-
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
 
@@ -168,32 +166,6 @@ impl RelateStatement {
 			}
 		})
 		.await
-	}
-}
-
-impl fmt::Display for RelateStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "RELATE")?;
-		if self.only {
-			f.write_str(" ONLY")?
-		}
-		write!(f, " {} -> {} -> {}", self.from, self.through, self.to)?;
-		if self.uniq {
-			f.write_str(" UNIQUE")?
-		}
-		if let Some(ref v) = self.data {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.output {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
-		}
-		if self.parallel {
-			f.write_str(" PARALLEL")?
-		}
-		Ok(())
 	}
 }
 

@@ -203,8 +203,9 @@ impl Display for Object {
 impl surrealdb_types::ToSql for Object {
 	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
 		use surrealdb_types::write_sql;
+
 		use crate::fmt::EscapeKey;
-		
+
 		if self.is_empty() {
 			return f.push_str("{  }");
 		}

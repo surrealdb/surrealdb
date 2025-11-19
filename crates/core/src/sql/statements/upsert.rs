@@ -1,4 +1,5 @@
 use std::fmt;
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::Fmt;
@@ -51,8 +52,40 @@ impl fmt::Display for UpsertStatement {
 }
 
 impl ToSql for UpsertStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("UPSERT");
+		if self.only {
+			f.push_str(" ONLY");
+		}
+		f.push(' ');
+		for (i, expr) in self.what.iter().enumerate() {
+			if i > 0 {
+				f.push_str(", ");
+			}
+			expr.fmt_sql(f, fmt);
+		}
+		if let Some(ref v) = self.with {
+			write_sql!(f, " {}", v);
+		}
+		if let Some(ref v) = self.data {
+			f.push(' ');
+			v.fmt_sql(f, fmt);
+		}
+		if let Some(ref v) = self.cond {
+			write_sql!(f, " {}", v);
+		}
+		if let Some(ref v) = self.output {
+			write_sql!(f, " {}", v);
+		}
+		if let Some(ref v) = self.timeout {
+			write_sql!(f, " {}", v);
+		}
+		if self.parallel {
+			f.push_str(" PARALLEL");
+		}
+		if let Some(ref v) = self.explain {
+			write_sql!(f, " {}", v);
+		}
 	}
 }
 

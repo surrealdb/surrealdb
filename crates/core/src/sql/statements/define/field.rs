@@ -1,4 +1,5 @@
 use std::fmt::{self, Display, Write};
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
@@ -141,8 +142,66 @@ impl Display for DefineFieldStatement {
 }
 
 impl ToSql for DefineFieldStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		use surrealdb_types::write_sql;
+		f.push_str("DEFINE FIELD");
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
+			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
+		}
+		write_sql!(f, " {} ON {}", self.name, self.what);
+		if let Some(ref v) = self.field_kind {
+			write_sql!(f, " TYPE {}", v);
+			if self.flexible {
+				f.push_str(" FLEXIBLE");
+			}
+		}
+
+		match self.default {
+			DefineDefault::None => {}
+			DefineDefault::Always(ref expr) => {
+				f.push_str(" DEFAULT ALWAYS ");
+				expr.fmt_sql(f, fmt);
+			}
+			DefineDefault::Set(ref expr) => {
+				f.push_str(" DEFAULT ");
+				expr.fmt_sql(f, fmt);
+			}
+		}
+
+		if self.readonly {
+			f.push_str(" READONLY");
+		}
+		if let Some(ref v) = self.value {
+			f.push_str(" VALUE ");
+			v.fmt_sql(f, fmt);
+		}
+		if let Some(ref v) = self.assert {
+			f.push_str(" ASSERT ");
+			v.fmt_sql(f, fmt);
+		}
+		if let Some(ref v) = self.computed {
+			f.push_str(" COMPUTED ");
+			v.fmt_sql(f, fmt);
+		}
+		if let Some(ref v) = self.reference {
+			f.push_str(" REFERENCE ");
+			v.fmt_sql(f, fmt);
+		}
+		if let Some(ref v) = self.comment {
+			f.push_str(" COMMENT ");
+			v.fmt_sql(f, fmt);
+		}
+		if fmt.is_pretty() {
+			f.push('\n');
+			fmt.write_indent(f);
+		} else {
+			f.push(' ');
+		}
+		// Special handling for field permissions - uses alternate format to skip delete
+		// which has no effect for field permissions
+		write_sql!(f, "{:#}", self.permissions);
 	}
 }
 

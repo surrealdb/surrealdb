@@ -1,5 +1,3 @@
-use std::fmt;
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
@@ -87,11 +85,5 @@ impl KillStatement {
 		}
 		// Return the query id
 		Ok(Value::None)
-	}
-}
-
-impl fmt::Display for KillStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "KILL {}", self.id)
 	}
 }

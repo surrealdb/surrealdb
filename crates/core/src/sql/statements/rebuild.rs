@@ -1,6 +1,4 @@
-use std::fmt;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
-use std::fmt::{Display, Formatter};
 
 use crate::fmt::EscapeIdent;
 
@@ -10,17 +8,11 @@ pub enum RebuildStatement {
 	Index(RebuildIndexStatement),
 }
 
-impl Display for RebuildStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			Self::Index(v) => Display::fmt(v, f),
-		}
-	}
-}
-
 impl ToSql for RebuildStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Self::Index(v) => v.fmt_sql(f, fmt),
+		}
 	}
 }
 
@@ -49,23 +41,16 @@ pub struct RebuildIndexStatement {
 	pub concurrently: bool,
 }
 
-impl Display for RebuildIndexStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REBUILD INDEX")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what))?;
-		if self.concurrently {
-			write!(f, " CONCURRENTLY")?
-		}
-		Ok(())
-	}
-}
-
 impl ToSql for RebuildIndexStatement {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+		f.push_str("REBUILD INDEX");
+		if self.if_exists {
+			f.push_str(" IF EXISTS");
+		}
+		write_sql!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what));
+		if self.concurrently {
+			f.push_str(" CONCURRENTLY");
+		}
 	}
 }
 

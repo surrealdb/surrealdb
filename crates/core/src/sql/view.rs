@@ -1,7 +1,5 @@
-use std::fmt;
-
-use crate::fmt::{EscapeIdent, Fmt};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
 use crate::sql::{Cond, Fields, Groups};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -13,27 +11,24 @@ pub(crate) struct View {
 	pub group: Option<Groups>,
 }
 
-impl fmt::Display for View {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"AS SELECT {} FROM {}",
-			self.expr,
-			Fmt::comma_separated(self.what.iter().map(EscapeIdent))
-		)?;
+impl ToSql for View {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, "AS SELECT {}", self.expr);
+		if !self.what.is_empty() {
+			f.push_str(" FROM ");
+			for (i, expr) in self.what.iter().enumerate() {
+				if i > 0 {
+					f.push_str(", ");
+				}
+				expr.fmt_sql(f, fmt);
+			}
+		}
 		if let Some(ref v) = self.cond {
-			write!(f, " {v}")?
+			write_sql!(f, " {}", v);
 		}
 		if let Some(ref v) = self.group {
-			write!(f, " {v}")?
+			write_sql!(f, " {}", v);
 		}
-		Ok(())
-	}
-}
-
-impl ToSql for View {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
 	}
 }
 

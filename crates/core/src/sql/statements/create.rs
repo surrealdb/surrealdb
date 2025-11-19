@@ -1,7 +1,5 @@
-use std::fmt;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::Fmt;
 use crate::sql::{Data, Expr, Output, Timeout};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -23,35 +21,36 @@ pub struct CreateStatement {
 	pub version: Option<Expr>,
 }
 
-impl fmt::Display for CreateStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "CREATE")?;
+impl ToSql for CreateStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("CREATE");
 		if self.only {
-			f.write_str(" ONLY")?
+			f.push_str(" ONLY");
 		}
-		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
+		f.push(' ');
+		for (i, expr) in self.what.iter().enumerate() {
+			if i > 0 {
+				f.push_str(", ");
+			}
+			expr.fmt_sql(f, fmt);
+		}
 		if let Some(ref v) = self.data {
-			write!(f, " {v}")?
+			f.push(' ');
+			v.fmt_sql(f, fmt);
 		}
 		if let Some(ref v) = self.output {
-			write!(f, " {v}")?
+			write_sql!(f, " {}", v);
 		}
 		if let Some(ref v) = self.version {
-			write!(f, " VERSION {v}")?
+			f.push_str(" VERSION ");
+			v.fmt_sql(f, fmt);
 		}
 		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
+			write_sql!(f, " {}", v);
 		}
 		if self.parallel {
-			f.write_str(" PARALLEL")?
+			f.push_str(" PARALLEL");
 		}
-		Ok(())
-	}
-}
-
-impl ToSql for CreateStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
 	}
 }
 

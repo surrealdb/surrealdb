@@ -16,9 +16,6 @@ mod sequence;
 mod table;
 pub mod user;
 
-use std::fmt::{self, Display};
-use surrealdb_types::{SqlFormat, ToSql};
-
 pub(crate) use access::DefineAccessStatement;
 pub(crate) use analyzer::DefineAnalyzerStatement;
 pub(crate) use api::{ApiAction, DefineApiStatement};
@@ -34,6 +31,7 @@ pub(crate) use module::DefineModuleStatement;
 pub(crate) use namespace::DefineNamespaceStatement;
 pub(crate) use param::DefineParamStatement;
 pub(crate) use sequence::DefineSequenceStatement;
+use surrealdb_types::{SqlFormat, ToSql};
 pub(crate) use table::DefineTableStatement;
 pub(crate) use user::DefineUserStatement;
 
@@ -86,30 +84,6 @@ pub(crate) enum DefineStatement {
 	Bucket(DefineBucketStatement),
 	Sequence(DefineSequenceStatement),
 	Module(DefineModuleStatement),
-}
-
-impl Display for DefineStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::Namespace(v) => Display::fmt(v, f),
-			Self::Database(v) => Display::fmt(v, f),
-			Self::Function(v) => Display::fmt(v, f),
-			Self::User(v) => Display::fmt(v, f),
-			Self::Param(v) => Display::fmt(v, f),
-			Self::Table(v) => Display::fmt(v, f),
-			Self::Event(v) => Display::fmt(v, f),
-			Self::Field(v) => Display::fmt(v, f),
-			Self::Index(v) => Display::fmt(v, f),
-			Self::Analyzer(v) => Display::fmt(v, f),
-			Self::Model(v) => Display::fmt(v, f),
-			Self::Access(v) => Display::fmt(v, f),
-			Self::Config(v) => Display::fmt(v, f),
-			Self::Api(v) => Display::fmt(v, f),
-			Self::Bucket(v) => Display::fmt(v, f),
-			Self::Sequence(v) => Display::fmt(v, f),
-			Self::Module(v) => Display::fmt(v, f),
-		}
-	}
 }
 
 impl ToSql for DefineStatement {

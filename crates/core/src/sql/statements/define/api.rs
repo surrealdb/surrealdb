@@ -1,4 +1,5 @@
 use std::fmt::{self, Display};
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
@@ -31,46 +32,39 @@ impl Default for DefineApiStatement {
 	}
 }
 
-impl Display for DefineApiStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE API")?;
+impl ToSql for DefineApiStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "DEFINE API");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => write_sql!(f, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, " IF NOT EXISTS"),
 		}
-		write!(f, " {}", self.path)?;
+		write_sql!(f, " {}", self.path);
 		let indent = pretty_indent();
 
-		write!(f, " FOR any")?;
+		write_sql!(f, " FOR any");
 		{
 			let indent = pretty_indent();
 
-			write!(f, "{}", self.config)?;
+			write_sql!(f, "{}", self.config);
 
 			if let Some(fallback) = &self.fallback {
-				write!(f, " THEN {}", fallback)?;
+				write_sql!(f, " THEN {}", fallback);
 			}
 
 			drop(indent);
 		}
 
 		for action in &self.actions {
-			write!(f, " {}", action)?;
+			write_sql!(f, " {}", action);
 		}
 
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?;
+			write_sql!(f, " COMMENT {}", comment);
 		}
 
 		drop(indent);
-		Ok(())
-	}
-}
-
-impl ToSql for DefineApiStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
 	}
 }
 
@@ -108,19 +102,26 @@ pub(crate) struct ApiAction {
 	pub config: ApiConfig,
 }
 
-impl Display for ApiAction {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "FOR {}", Fmt::comma_separated(self.methods.iter()))?;
-		let _indent = pretty_indent();
-		write!(f, "{}", self.config)?;
-		write!(f, " THEN {}", self.action)?;
-		Ok(())
+impl ToSql for ApiAction {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, "FOR {}", Fmt::comma_separated(self.methods.iter()));
+		if fmt.is_pretty() {
+			f.push('\n');
+			let inner_fmt = fmt.increment();
+			inner_fmt.write_indent(f);
+		} else {
+			f.push(' ');
+		}
+		self.config.fmt_sql(f, fmt);
+		f.push_str(" THEN ");
+		self.action.fmt_sql(f, fmt);
 	}
 }
 
-impl ToSql for ApiAction {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+impl Display for ApiAction {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		use surrealdb_types::ToSql;
+		write!(f, "{}", self.to_sql())
 	}
 }
 

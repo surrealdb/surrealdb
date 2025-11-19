@@ -1,6 +1,3 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
-
 use anyhow::{Result, bail, ensure};
 use rand::Rng;
 use reblessive::tree::Stk;
@@ -13,7 +10,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Cond, ControlFlow, FlowResult, FlowResultExt as _, RecordIdLit};
-use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Array, Datetime, Duration, Object, Value};
 use crate::{catalog, val};
@@ -923,73 +919,6 @@ impl AccessStatement {
 			}
 			AccessStatement::Purge(stmt) => {
 				compute_purge(stmt, ctx, opt, doc).await.map_err(ControlFlow::Err)
-			}
-		}
-	}
-}
-
-impl Display for AccessStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			Self::Grant(stmt) => {
-				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
-				if let Some(ref v) = stmt.base {
-					write!(f, " ON {v}")?;
-				}
-				write!(f, " GRANT")?;
-				match &stmt.subject {
-					Subject::User(x) => write!(f, " FOR USER {}", EscapeIdent(x))?,
-					Subject::Record(x) => write!(f, " FOR RECORD {}", x)?,
-				}
-				Ok(())
-			}
-			Self::Show(stmt) => {
-				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
-				if let Some(ref v) = stmt.base {
-					write!(f, " ON {v}")?;
-				}
-				write!(f, " SHOW")?;
-				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {}", EscapeIdent(v))?,
-					None => match &stmt.cond {
-						Some(v) => write!(f, " {v}")?,
-						None => write!(f, " ALL")?,
-					},
-				};
-				Ok(())
-			}
-			Self::Revoke(stmt) => {
-				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
-				if let Some(ref v) = stmt.base {
-					write!(f, " ON {v}")?;
-				}
-				write!(f, " REVOKE")?;
-				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {}", EscapeIdent(v))?,
-					None => match &stmt.cond {
-						Some(v) => write!(f, " {v}")?,
-						None => write!(f, " ALL")?,
-					},
-				};
-				Ok(())
-			}
-			Self::Purge(stmt) => {
-				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
-				if let Some(ref v) = stmt.base {
-					write!(f, " ON {v}")?;
-				}
-				write!(f, " PURGE")?;
-				match (stmt.expired, stmt.revoked) {
-					(true, false) => write!(f, " EXPIRED")?,
-					(false, true) => write!(f, " REVOKED")?,
-					(true, true) => write!(f, " EXPIRED, REVOKED")?,
-					// This case should not parse.
-					(false, false) => write!(f, " NONE")?,
-				};
-				if !stmt.grace.is_zero() {
-					write!(f, " FOR {}", stmt.grace)?;
-				}
-				Ok(())
 			}
 		}
 	}

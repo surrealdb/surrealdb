@@ -1,6 +1,5 @@
-use std::fmt;
-
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
 use crate::fmt::EscapeIdent;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
@@ -8,19 +7,6 @@ use crate::fmt::EscapeIdent;
 pub struct UseStatement {
 	pub ns: Option<String>,
 	pub db: Option<String>,
-}
-
-impl fmt::Display for UseStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str("USE")?;
-		if let Some(ref ns) = self.ns {
-			write!(f, " NS {}", EscapeIdent(ns))?;
-		}
-		if let Some(ref db) = self.db {
-			write!(f, " DB {}", EscapeIdent(db))?;
-		}
-		Ok(())
-	}
 }
 
 impl ToSql for UseStatement {

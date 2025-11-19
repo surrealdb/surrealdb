@@ -7,7 +7,7 @@ use rand::Rng as _;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 use reblessive::tree::Stk;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, UserProvider};
@@ -19,7 +19,6 @@ use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::user::UserDuration;
 use crate::expr::{Base, Expr, Idiom, Literal};
-use crate::fmt::{Fmt, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Duration, Value};
 
@@ -216,54 +215,16 @@ impl DefineUserStatement {
 		}
 	}
 }
-
-impl Display for DefineUserStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE USER")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(
-			f,
-			" {} ON {} PASSHASH {} ROLES {}",
-			self.name,
-			self.base,
-			QuoteStr(&self.hash),
-			Fmt::comma_separated(
-				&self.roles.iter().map(|r| r.to_string().to_uppercase()).collect::<Vec<_>>()
-			),
-		)?;
-		// Always print relevant durations so defaults can be changed in the future
-		// If default values were not printed, exports would not be forward compatible
-		// None values need to be printed, as they are different from the default values
-		write!(f, " DURATION")?;
-		write!(
-			f,
-			" FOR TOKEN {},",
-			match self.duration.token {
-				Some(ref dur) => format!("{}", dur),
-				None => "NONE".to_string(),
-			}
-		)?;
-		write!(
-			f,
-			" FOR SESSION {}",
-			match self.duration.session {
-				Some(ref dur) => format!("{}", dur),
-				None => "NONE".to_string(),
-			}
-		)?;
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?
-		}
-		Ok(())
+impl ToSql for DefineUserStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let sql_stmt: crate::sql::statements::define::DefineUserStatement = self.clone().into();
+		sql_stmt.fmt_sql(f, fmt);
 	}
 }
 
-impl ToSql for DefineUserStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+impl Display for DefineUserStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		use surrealdb_types::ToSql;
+		write!(f, "{}", self.to_sql())
 	}
 }

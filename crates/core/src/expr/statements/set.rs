@@ -1,7 +1,7 @@
 use std::fmt;
 
 use reblessive::tree::Stk;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::{Context, MutableContext};
@@ -9,7 +9,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{ControlFlow, Expr, FlowResult, Kind, Value};
-use crate::fmt::EscapeKwFreeIdent;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct SetStatement {
@@ -77,20 +76,17 @@ impl SetStatement {
 	}
 }
 
-impl fmt::Display for SetStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "LET ${}", EscapeKwFreeIdent(&self.name))?;
-		if let Some(ref kind) = self.kind {
-			write!(f, ": {}", kind)?;
-		}
-		write!(f, " = {}", self.what)?;
-		Ok(())
+impl ToSql for SetStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let sql_stmt: crate::sql::statements::SetStatement = self.clone().into();
+		sql_stmt.fmt_sql(f, fmt);
 	}
 }
 
-impl ToSql for SetStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+impl fmt::Display for SetStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		use surrealdb_types::ToSql;
+		write!(f, "{}", self.to_sql())
 	}
 }
 

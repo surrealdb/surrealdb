@@ -138,6 +138,74 @@ impl Display for Permissions {
 	}
 }
 
+impl surrealdb_types::ToSql for Permissions {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		f.push_str("PERMISSIONS");
+		if self.is_none() {
+			f.push_str(" NONE");
+			return;
+		}
+		if self.is_full() {
+			f.push_str(" FULL");
+			return;
+		}
+		let mut lines = Vec::<(Vec<PermissionKind>, &Permission)>::new();
+		for (c, permission) in [
+			PermissionKind::Select,
+			PermissionKind::Create,
+			PermissionKind::Update,
+			PermissionKind::Delete,
+		]
+		.into_iter()
+		.zip([&self.select, &self.create, &self.update, &self.delete])
+		{
+			if let Some((existing, _)) = lines.iter_mut().find(|(_, p)| *p == permission) {
+				existing.push(c);
+			} else {
+				lines.push((vec![c], permission));
+			}
+		}
+		if fmt.is_pretty() {
+			f.push('\n');
+			let inner_fmt = fmt.increment();
+			inner_fmt.write_indent(f);
+		} else {
+			f.push(' ');
+		}
+		for (i, (kinds, permission)) in lines.into_iter().enumerate() {
+			if i > 0 {
+				if fmt.is_pretty() {
+					f.push(',');
+					f.push('\n');
+					let inner_fmt = fmt.increment();
+					inner_fmt.write_indent(f);
+				} else {
+					f.push_str(", ");
+				}
+			}
+			f.push_str("FOR ");
+			for (i, kind) in kinds.into_iter().enumerate() {
+				if i > 0 {
+					f.push_str(", ");
+				}
+				f.push_str(kind.as_str());
+			}
+			match permission {
+				Permission::Specific(v) if fmt.is_pretty() => {
+					f.push_str(" WHERE ");
+					v.fmt_sql(f, fmt);
+				}
+				Permission::None => f.push_str(" NONE"),
+				Permission::Full => f.push_str(" FULL"),
+				Permission::Specific(v) => {
+					f.push_str(" WHERE ");
+					v.fmt_sql(f, fmt);
+				}
+			}
+		}
+	}
+}
+
 impl From<Permissions> for crate::catalog::Permissions {
 	fn from(v: Permissions) -> Self {
 		Self {

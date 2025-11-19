@@ -1,4 +1,3 @@
-use std::fmt::{self, Display};
 use std::ops::Deref;
 
 use anyhow::Result;
@@ -14,7 +13,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::reference::Reference;
 use crate::expr::{Base, Expr, Idiom, Kind};
-use crate::fmt::{EscapeIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -166,69 +164,5 @@ impl AlterFieldStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for AlterFieldStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ALTER FIELD")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " {} ON {}", self.name, EscapeIdent(&self.what))?;
-
-		match self.kind {
-			AlterKind::Set(ref x) => write!(f, " TYPE {x}")?,
-			AlterKind::Drop => write!(f, " DROP TYPE")?,
-			AlterKind::None => {}
-		}
-
-		match self.flexible {
-			AlterKind::Set(_) => write!(f, " FLEXIBLE")?,
-			AlterKind::Drop => write!(f, " DROP FLEXIBLE")?,
-			AlterKind::None => {}
-		}
-
-		match self.readonly {
-			AlterKind::Set(_) => write!(f, " READONLY")?,
-			AlterKind::Drop => write!(f, " DROP READONLY")?,
-			AlterKind::None => {}
-		}
-
-		match self.value {
-			AlterKind::Set(ref v) => write!(f, " VALUE {v}")?,
-			AlterKind::Drop => write!(f, " DROP VALUE")?,
-			AlterKind::None => {}
-		}
-
-		match self.assert {
-			AlterKind::Set(ref v) => write!(f, " ASSERT {v}")?,
-			AlterKind::Drop => write!(f, " DROP ASSERT")?,
-			AlterKind::None => {}
-		}
-
-		match self.default {
-			AlterDefault::None => {}
-			AlterDefault::Drop => write!(f, " DROP DEFAULT")?,
-			AlterDefault::Always(ref expr) => write!(f, "DEFAULT ALWAYS {expr}")?,
-			AlterDefault::Set(ref expr) => write!(f, "DEFAULT {expr}")?,
-		}
-		if let Some(permissions) = &self.permissions {
-			write!(f, "{permissions}")?;
-		}
-
-		match self.comment {
-			AlterKind::Set(ref x) => write!(f, " COMMENT {}", QuoteStr(x))?,
-			AlterKind::Drop => write!(f, " DROP COMMENT")?,
-			AlterKind::None => {}
-		}
-
-		match self.reference {
-			AlterKind::Set(ref v) => write!(f, " REFERENCE {v}")?,
-			AlterKind::Drop => write!(f, " DROP REFERENCE")?,
-			AlterKind::None => {}
-		}
-
-		Ok(())
 	}
 }

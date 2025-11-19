@@ -86,6 +86,7 @@ impl Display for AccessType {
 impl AccessType {
 	/// Returns whether or not the access method can issue non-token grants
 	/// In this context, token refers exclusively to JWT
+	#[allow(dead_code)]
 	pub fn can_issue_grants(&self) -> bool {
 		match self {
 			// The JWT access method cannot issue stateful grants.
@@ -98,6 +99,7 @@ impl AccessType {
 	}
 	/// Returns whether or not the access method can issue tokens
 	/// In this context, tokens refers exclusively to JWT
+	#[allow(dead_code)]
 	pub fn can_issue_tokens(&self) -> bool {
 		match self {
 			// The JWT access method can only issue tokens if an issuer is set

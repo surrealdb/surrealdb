@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
@@ -95,16 +93,6 @@ impl AlterStatement {
 			Self::Table(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Field(v) => v.compute(stk, ctx, opt, doc).await,
-		}
-	}
-}
-
-impl Display for AlterStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::Table(v) => Display::fmt(v, f),
-			Self::Sequence(v) => Display::fmt(v, f),
-			Self::Field(v) => Display::fmt(v, f),
 		}
 	}
 }

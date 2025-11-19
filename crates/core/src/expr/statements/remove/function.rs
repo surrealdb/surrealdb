@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use anyhow::Result;
 
 use crate::catalog::providers::DatabaseProvider;
@@ -41,17 +39,5 @@ impl RemoveFunctionStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for RemoveFunctionStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		// Bypass ident display since we don't want backticks arround the ident.
-		write!(f, "REMOVE FUNCTION")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " fn::{}", &*self.name)?;
-		Ok(())
 	}
 }

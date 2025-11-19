@@ -17,6 +17,16 @@ impl Display for ChangeFeed {
 	}
 }
 
+impl surrealdb_types::ToSql for ChangeFeed {
+	fn fmt_sql(&self, f: &mut String, _fmt: surrealdb_types::SqlFormat) {
+		use surrealdb_types::write_sql;
+		write_sql!(f, "CHANGEFEED {}", self.expiry);
+		if self.store_diff {
+			f.push_str(" INCLUDE ORIGINAL");
+		}
+	}
+}
+
 impl From<ChangeFeed> for crate::expr::ChangeFeed {
 	fn from(v: ChangeFeed) -> Self {
 		crate::expr::ChangeFeed {

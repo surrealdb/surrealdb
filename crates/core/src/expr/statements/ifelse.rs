@@ -1,12 +1,10 @@
-use std::fmt::{self, Display, Write};
-
+use std::fmt;
 use reblessive::tree::Stk;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResult, Value};
-use crate::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct IfelseStatement {
@@ -24,6 +22,7 @@ impl IfelseStatement {
 			&& self.close.as_ref().map(|x| x.read_only()).unwrap_or(true)
 	}
 	/// Check if we require a writeable transaction
+	#[allow(dead_code)]
 	pub(crate) fn bracketed(&self) -> bool {
 		self.exprs.iter().all(|(_, v)| matches!(v, Expr::Block(_)))
 			&& (self.close.as_ref().is_none()
@@ -50,86 +49,15 @@ impl IfelseStatement {
 	}
 }
 
-impl Display for IfelseStatement {
+impl fmt::Display for IfelseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let mut f = Pretty::from(f);
-		if self.bracketed() {
-			write!(
-				f,
-				"{}",
-				&Fmt::new(
-					self.exprs.iter().map(|args| {
-						Fmt::new(args, |(cond, then), f| {
-							if is_pretty() {
-								write!(f, "IF {cond}")?;
-								let indent = pretty_indent();
-								write!(f, "{then}")?;
-								drop(indent);
-							} else {
-								write!(f, "IF {cond} {then}")?;
-							}
-							Ok(())
-						})
-					}),
-					if is_pretty() {
-						fmt_separated_by("ELSE ")
-					} else {
-						fmt_separated_by(" ELSE ")
-					},
-				),
-			)?;
-			if let Some(ref v) = self.close {
-				if is_pretty() {
-					write!(f, "ELSE")?;
-					let indent = pretty_indent();
-					write!(f, "{v}")?;
-					drop(indent);
-				} else {
-					write!(f, " ELSE {v}")?;
-				}
-			}
-			Ok(())
+		use surrealdb_types::ToSql;
+		use crate::fmt::is_pretty;
+		let sql_stmt: crate::sql::statements::IfelseStatement = self.clone().into();
+		if is_pretty() {
+			write!(f, "{}", sql_stmt.to_sql_pretty())
 		} else {
-			write!(
-				f,
-				"{}",
-				&Fmt::new(
-					self.exprs.iter().map(|args| {
-						Fmt::new(args, |(cond, then), f| {
-							if is_pretty() {
-								write!(f, "IF {cond} THEN")?;
-								let indent = pretty_indent();
-								write!(f, "{then}")?;
-								drop(indent);
-							} else {
-								write!(f, "IF {cond} THEN {then}")?;
-							}
-							Ok(())
-						})
-					}),
-					if is_pretty() {
-						fmt_separated_by("ELSE ")
-					} else {
-						fmt_separated_by(" ELSE ")
-					},
-				),
-			)?;
-			if let Some(ref v) = self.close {
-				if is_pretty() {
-					write!(f, "ELSE")?;
-					let indent = pretty_indent();
-					write!(f, "{v}")?;
-					drop(indent);
-				} else {
-					write!(f, " ELSE {v}")?;
-				}
-			}
-			if is_pretty() {
-				f.write_str("END")?;
-			} else {
-				f.write_str(" END")?;
-			}
-			Ok(())
+			write!(f, "{}", sql_stmt.to_sql())
 		}
 	}
 }

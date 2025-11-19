@@ -1,11 +1,11 @@
 use std::cmp::Ordering;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use std::fmt;
 use std::ops::{Bound, RangeBounds};
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::value::CoerceErrorExt;
 use crate::expr;

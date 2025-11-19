@@ -1,5 +1,3 @@
-use std::fmt::{self, Write};
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
@@ -11,7 +9,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Expr};
-use crate::fmt::{is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -72,28 +69,5 @@ impl DefineModelStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl fmt::Display for DefineModelStatement {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		write!(f, "DEFINE MODEL")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " ml::{}<{}>", self.name, self.version)?;
-		if let Some(comment) = self.comment.as_ref() {
-			write!(f, " COMMENT {}", comment)?;
-		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		write!(f, "PERMISSIONS {}", self.permissions)?;
-		Ok(())
 	}
 }

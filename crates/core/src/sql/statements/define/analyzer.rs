@@ -1,4 +1,3 @@
-use std::fmt::{self, Display};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
@@ -30,36 +29,29 @@ impl Default for DefineAnalyzerStatement {
 	}
 }
 
-impl Display for DefineAnalyzerStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE ANALYZER")?;
+impl ToSql for DefineAnalyzerStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "DEFINE ANALYZER");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " IF NOT EXISTS")?,
-			DefineKind::IfNotExists => write!(f, " OVERWRITE")?,
+			DefineKind::Overwrite => write_sql!(f, " IF NOT EXISTS"),
+			DefineKind::IfNotExists => write_sql!(f, " OVERWRITE"),
 		}
-		write!(f, " {}", self.name)?;
+		write_sql!(f, " {}", self.name);
 		if let Some(ref i) = self.function {
-			write!(f, " FUNCTION fn::{i}")?
+			write_sql!(f, " FUNCTION fn::{i}");
 		}
 		if let Some(v) = &self.tokenizers {
 			let tokens: Vec<String> = v.iter().map(|f| f.to_string()).collect();
-			write!(f, " TOKENIZERS {}", tokens.join(","))?;
+			write_sql!(f, " TOKENIZERS {}", tokens.join(","));
 		}
 		if let Some(v) = &self.filters {
 			let tokens: Vec<String> = v.iter().map(|f| f.to_string()).collect();
-			write!(f, " FILTERS {}", tokens.join(","))?;
+			write_sql!(f, " FILTERS {}", tokens.join(","));
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+			write_sql!(f, " COMMENT {}", v);
 		}
-		Ok(())
-	}
-}
-
-impl ToSql for DefineAnalyzerStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
 	}
 }
 

@@ -1,4 +1,4 @@
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display};
 
 use crate::expr::Expr;
 use crate::expr::statements::{
@@ -55,18 +55,17 @@ impl TopLevelExpr {
 }
 
 impl Display for TopLevelExpr {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			TopLevelExpr::Begin => write!(f, "BEGIN"),
-			TopLevelExpr::Cancel => write!(f, "CANCEL"),
-			TopLevelExpr::Commit => write!(f, "COMMIT"),
-			TopLevelExpr::Access(s) => s.fmt(f),
-			TopLevelExpr::Kill(s) => s.fmt(f),
-			TopLevelExpr::Live(s) => s.fmt(f),
-			TopLevelExpr::Option(s) => s.fmt(f),
-			TopLevelExpr::Use(s) => s.fmt(f),
-			TopLevelExpr::Show(s) => s.fmt(f),
-			TopLevelExpr::Expr(e) => e.fmt(f),
-		}
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		// Use the sql module's ToSql implementation for display
+		use surrealdb_types::ToSql;
+		let sql_expr: crate::sql::TopLevelExpr = self.clone().into();
+		write!(f, "{}", sql_expr.to_sql())
+	}
+}
+
+impl surrealdb_types::ToSql for TopLevelExpr {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		let sql_expr: crate::sql::TopLevelExpr = self.clone().into();
+		sql_expr.fmt_sql(f, fmt);
 	}
 }

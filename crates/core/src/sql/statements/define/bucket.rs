@@ -1,4 +1,3 @@
-use std::fmt::{self, Display};
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
@@ -28,37 +27,29 @@ impl Default for DefineBucketStatement {
 	}
 }
 
-impl Display for DefineBucketStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE BUCKET")?;
+impl ToSql for DefineBucketStatement {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		write_sql!(f, "DEFINE BUCKET");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => write_sql!(f, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, " IF NOT EXISTS"),
 		}
-		write!(f, " {}", self.name)?;
+		write_sql!(f, " {}", self.name);
 
 		if self.readonly {
-			write!(f, " READONLY")?;
+			write_sql!(f, " READONLY");
 		}
 
 		if let Some(ref backend) = self.backend {
-			write!(f, " BACKEND {}", backend)?;
+			write_sql!(f, " BACKEND {}", backend);
 		}
 
-		write!(f, " PERMISSIONS {}", self.permissions)?;
+		write_sql!(f, " PERMISSIONS {}", self.permissions);
 
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?;
+			write_sql!(f, " COMMENT {}", comment);
 		}
-
-		Ok(())
-	}
-}
-
-impl ToSql for DefineBucketStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
 	}
 }
 

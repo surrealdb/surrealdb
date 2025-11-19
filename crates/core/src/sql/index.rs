@@ -2,6 +2,7 @@ use std::fmt;
 use std::fmt::{Display, Formatter};
 
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
 use crate::fmt::EscapeIdent;
 use crate::sql::Cond;
 use crate::sql::scoring::Scoring;
@@ -240,7 +241,41 @@ impl Display for Index {
 
 impl ToSql for Index {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+		match self {
+			Self::Idx => {}
+			Self::Uniq => f.push_str("UNIQUE"),
+			Self::Count(c) => {
+				f.push_str("COUNT");
+				if let Some(v) = c {
+					write_sql!(f, " {}", v);
+				}
+			}
+			Self::FullText(p) => {
+				write_sql!(f, "FULLTEXT ANALYZER {} {}", EscapeIdent(&p.az), p.sc);
+				if p.hl {
+					f.push_str(" HIGHLIGHTS");
+				}
+			}
+			Self::Hnsw(p) => {
+				write_sql!(
+					f,
+					"HNSW DIMENSION {} DIST {} TYPE {} EFC {} M {} M0 {} LM {}",
+					p.dimension,
+					p.distance,
+					p.vector_type,
+					p.ef_construction,
+					p.m,
+					p.m0,
+					p.ml
+				);
+				if p.extend_candidates {
+					f.push_str(" EXTEND_CANDIDATES");
+				}
+				if p.keep_pruned_connections {
+					f.push_str(" KEEP_PRUNED_CONNECTIONS");
+				}
+			}
+		}
 	}
 }
 

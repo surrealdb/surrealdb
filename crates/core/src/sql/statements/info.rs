@@ -1,4 +1,3 @@
-use std::fmt;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::{Base, Expr};
@@ -18,47 +17,40 @@ pub enum InfoStatement {
 
 impl ToSql for InfoStatement {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
-	}
-}
-
-impl fmt::Display for InfoStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			Self::Root(false) => f.write_str("INFO FOR ROOT"),
-			Self::Root(true) => f.write_str("INFO FOR ROOT STRUCTURE"),
-			Self::Ns(false) => f.write_str("INFO FOR NAMESPACE"),
-			Self::Ns(true) => f.write_str("INFO FOR NAMESPACE STRUCTURE"),
+			Self::Root(false) => f.push_str("INFO FOR ROOT"),
+			Self::Root(true) => f.push_str("INFO FOR ROOT STRUCTURE"),
+			Self::Ns(false) => f.push_str("INFO FOR NAMESPACE"),
+			Self::Ns(true) => f.push_str("INFO FOR NAMESPACE STRUCTURE"),
 			Self::Db(false, v) => match v {
-				Some(v) => write!(f, "INFO FOR DATABASE VERSION {v}"),
-				None => f.write_str("INFO FOR DATABASE"),
+				Some(v) => write_sql!(f, "INFO FOR DATABASE VERSION {v}"),
+				None => f.push_str("INFO FOR DATABASE"),
 			},
 			Self::Db(true, v) => match v {
-				Some(v) => write!(f, "INFO FOR DATABASE VERSION {v} STRUCTURE"),
-				None => f.write_str("INFO FOR DATABASE STRUCTURE"),
+				Some(v) => write_sql!(f, "INFO FOR DATABASE VERSION {v} STRUCTURE"),
+				None => f.push_str("INFO FOR DATABASE STRUCTURE"),
 			},
 			Self::Tb(t, false, v) => match v {
-				Some(v) => write!(f, "INFO FOR TABLE {} VERSION {v}", t),
-				None => write!(f, "INFO FOR TABLE {}", t),
+				Some(v) => write_sql!(f, "INFO FOR TABLE {} VERSION {v}", t),
+				None => write_sql!(f, "INFO FOR TABLE {}", t),
 			},
-
 			Self::Tb(t, true, v) => match v {
-				Some(v) => write!(f, "INFO FOR TABLE {} VERSION {v} STRUCTURE", t),
-				None => write!(f, "INFO FOR TABLE {} STRUCTURE", t),
+				Some(v) => write_sql!(f, "INFO FOR TABLE {} VERSION {v} STRUCTURE", t),
+				None => write_sql!(f, "INFO FOR TABLE {} STRUCTURE", t),
 			},
 			Self::User(u, b, false) => match b {
-				Some(b) => write!(f, "INFO FOR USER {} ON {b}", u),
-				None => write!(f, "INFO FOR USER {}", u),
+				Some(b) => write_sql!(f, "INFO FOR USER {} ON {b}", u),
+				None => write_sql!(f, "INFO FOR USER {}", u),
 			},
 			Self::User(u, b, true) => match b {
-				Some(b) => write!(f, "INFO FOR USER {} ON {b} STRUCTURE", u),
-				None => write!(f, "INFO FOR USER {} STRUCTURE", u),
+				Some(b) => write_sql!(f, "INFO FOR USER {} ON {b} STRUCTURE", u),
+				None => write_sql!(f, "INFO FOR USER {} STRUCTURE", u),
 			},
 			Self::Index(i, t, false) => {
-				write!(f, "INFO FOR INDEX {} ON {}", i, t)
+				write_sql!(f, "INFO FOR INDEX {} ON {}", i, t)
 			}
 			Self::Index(i, t, true) => {
-				write!(f, "INFO FOR INDEX {} ON {} STRUCTURE", i, t)
+				write_sql!(f, "INFO FOR INDEX {} ON {} STRUCTURE", i, t)
 			}
 		}
 	}

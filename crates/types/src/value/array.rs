@@ -89,7 +89,7 @@ impl IntoIterator for Array {
 impl ToSql for Array {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		use crate::sql::fmt_sql_comma_separated;
-		
+
 		f.push('[');
 		if !self.is_empty() {
 			let inner_fmt = fmt.increment();

@@ -1,7 +1,8 @@
 use std::fmt::{self, Display, Write};
 
-use super::DefineKind;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use super::DefineKind;
 use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
 use crate::sql::{Block, Expr, Kind, Permission};
 
@@ -52,8 +53,36 @@ impl fmt::Display for DefineFunctionStatement {
 }
 
 impl ToSql for DefineFunctionStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("DEFINE FUNCTION");
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
+			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
+		}
+		write_sql!(f, " fn::{}(", self.name);
+		for (i, (name, kind)) in self.args.iter().enumerate() {
+			if i > 0 {
+				f.push_str(", ");
+			}
+			write_sql!(f, "${}: {}", EscapeIdent(name), kind);
+		}
+		f.push_str(") ");
+		if let Some(ref v) = self.returns {
+			write_sql!(f, "-> {} ", v);
+		}
+		self.block.fmt_sql(f, fmt);
+		if let Some(ref v) = self.comment {
+			f.push_str(" COMMENT ");
+			v.fmt_sql(f, fmt);
+		}
+		if fmt.is_pretty() {
+			f.push('\n');
+			fmt.write_indent(f);
+		} else {
+			f.push(' ');
+		}
+		write_sql!(f, "PERMISSIONS {}", self.permissions);
 	}
 }
 

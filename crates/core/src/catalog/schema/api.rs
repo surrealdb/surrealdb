@@ -7,7 +7,6 @@ use crate::api::path::Path;
 use crate::catalog::Permission;
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
-use crate::fmt::Fmt;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, Object, Value};
 
@@ -203,23 +202,8 @@ impl InfoStructure for ApiConfigDefinition {
 
 impl Display for ApiConfigDefinition {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "API")?;
-
-		if !self.middleware.is_empty() {
-			write!(f, " MIDDLEWARE ")?;
-			write!(
-				f,
-				"{}",
-				Fmt::pretty_comma_separated(self.middleware.iter().map(|m| format!(
-					"{}({})",
-					m.name,
-					Fmt::pretty_comma_separated(m.args.iter())
-				)))
-			)?
-		}
-
-		write!(f, " PERMISSIONS {}", self.permissions)?;
-		Ok(())
+		use surrealdb_types::ToSql;
+		write!(f, "{}", self.to_sql_config().to_sql())
 	}
 }
 

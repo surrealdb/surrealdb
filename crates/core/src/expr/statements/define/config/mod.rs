@@ -78,21 +78,6 @@ impl DefineConfigStatement {
 		Ok(Value::None)
 	}
 }
-
-impl Display for DefineConfigStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE CONFIG")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {}", self.inner)?;
-
-		Ok(())
-	}
-}
-
 impl Display for ConfigInner {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self {

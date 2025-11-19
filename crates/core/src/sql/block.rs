@@ -1,6 +1,7 @@
 use std::fmt::{self, Display, Formatter, Write};
 
 use surrealdb_types::{SqlFormat, ToSql};
+
 use crate::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::Expr;
 
@@ -84,10 +85,11 @@ impl ToSql for Block {
 			}
 			_ => {
 				f.push('{');
-				
+
 				let inner_fmt = fmt.increment();
 				if fmt.is_pretty() {
-					// Pretty mode: two line separated with semicolons - \n\n before each, \n<indent>\n after all
+					// Pretty mode: two line separated with semicolons - \n\n before each,
+					// \n<indent>\n after all
 					for expr in self.0.iter() {
 						f.push('\n');
 						f.push('\n');
@@ -96,7 +98,7 @@ impl ToSql for Block {
 						f.push(';');
 					}
 					f.push('\n');
-					fmt.write_indent(f);  // Write current level indent (one less than inner)
+					fmt.write_indent(f); // Write current level indent (one less than inner)
 					f.push('\n');
 				} else {
 					// Single line: one line separated with semicolons
@@ -110,7 +112,7 @@ impl ToSql for Block {
 					}
 					f.push('\n');
 				}
-				
+
 				f.push('}');
 			}
 		}

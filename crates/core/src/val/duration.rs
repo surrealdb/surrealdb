@@ -7,12 +7,12 @@ use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::syn;
 use crate::val::{Datetime, IndexFormat, TryAdd, TrySub, Value};
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 pub(crate) static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
 pub(crate) static SECONDS_PER_WEEK: u64 = 7 * SECONDS_PER_DAY;

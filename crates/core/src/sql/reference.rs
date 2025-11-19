@@ -14,6 +14,28 @@ impl fmt::Display for Reference {
 	}
 }
 
+impl surrealdb_types::ToSql for Reference {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		f.push_str("ON DELETE ");
+		self.on_delete.fmt_sql(f, fmt);
+	}
+}
+
+impl surrealdb_types::ToSql for ReferenceDeleteStrategy {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		match self {
+			ReferenceDeleteStrategy::Reject => f.push_str("REJECT"),
+			ReferenceDeleteStrategy::Ignore => f.push_str("IGNORE"),
+			ReferenceDeleteStrategy::Cascade => f.push_str("CASCADE"),
+			ReferenceDeleteStrategy::Unset => f.push_str("UNSET"),
+			ReferenceDeleteStrategy::Custom(v) => {
+				f.push_str("THEN ");
+				v.fmt_sql(f, fmt);
+			}
+		}
+	}
+}
+
 impl From<Reference> for crate::expr::reference::Reference {
 	fn from(v: Reference) -> Self {
 		Self {

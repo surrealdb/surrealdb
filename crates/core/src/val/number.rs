@@ -32,8 +32,8 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
-
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
 use super::IndexFormat;
 use crate::err::Error;
 use crate::expr::decimal::DecimalLexEncoder;

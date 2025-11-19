@@ -3,8 +3,6 @@ use surrealdb_types::{SqlFormat, ToSql};
 mod sequence;
 mod table;
 
-use std::fmt::{self, Display};
-
 pub use field::AlterFieldStatement;
 pub use sequence::AlterSequenceStatement;
 pub use table::AlterTableStatement;
@@ -50,16 +48,6 @@ pub enum AlterStatement {
 	Table(AlterTableStatement),
 	Sequence(AlterSequenceStatement),
 	Field(AlterFieldStatement),
-}
-
-impl Display for AlterStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::Table(v) => Display::fmt(v, f),
-			Self::Sequence(v) => Display::fmt(v, f),
-			Self::Field(v) => Display::fmt(v, f),
-		}
-	}
 }
 
 impl ToSql for AlterStatement {

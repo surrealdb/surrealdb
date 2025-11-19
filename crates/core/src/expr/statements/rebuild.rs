@@ -1,6 +1,3 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
 
@@ -11,7 +8,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::statements::define::run_indexing;
-use crate::fmt::EscapeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -31,14 +27,6 @@ impl RebuildStatement {
 	) -> Result<Value> {
 		match self {
 			Self::Index(s) => s.compute(ctx, opt).await,
-		}
-	}
-}
-
-impl Display for RebuildStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			Self::Index(v) => Display::fmt(v, f),
 		}
 	}
 }
@@ -78,19 +66,5 @@ impl RebuildIndexStatement {
 		run_indexing(ctx, opt, tb.table_id, ix, !self.concurrently).await?;
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for RebuildIndexStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REBUILD INDEX")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what))?;
-		if self.concurrently {
-			write!(f, " CONCURRENTLY")?
-		}
-		Ok(())
 	}
 }

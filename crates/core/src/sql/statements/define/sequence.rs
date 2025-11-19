@@ -1,7 +1,6 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::sql::{Expr, Literal, Timeout};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -26,25 +25,18 @@ impl Default for DefineSequenceStatement {
 	}
 }
 
-impl Display for DefineSequenceStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE SEQUENCE")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {} BATCH {} START {}", self.name, self.batch, self.start)?;
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
-		}
-		Ok(())
-	}
-}
-
 impl ToSql for DefineSequenceStatement {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+		write_sql!(f, "DEFINE SEQUENCE");
+		match self.kind {
+			DefineKind::Default => {}
+			DefineKind::Overwrite => write_sql!(f, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, " IF NOT EXISTS"),
+		}
+		write_sql!(f, " {} BATCH {} START {}", self.name, self.batch, self.start);
+		if let Some(ref v) = self.timeout {
+			write_sql!(f, " {v}");
+		}
 	}
 }
 

@@ -1,8 +1,6 @@
-use std::fmt::{self, Display, Write};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
-use crate::fmt::{is_pretty, pretty_indent};
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::{Expr, Kind, Literal, Permissions, TableType, View};
 
@@ -35,77 +33,6 @@ impl Default for DefineTableStatement {
 			comment: None,
 			table_type: TableType::default(),
 		}
-	}
-}
-
-impl Display for DefineTableStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE TABLE")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {}", self.name)?;
-		write!(f, " TYPE")?;
-		match &self.table_type {
-			TableType::Normal => {
-				f.write_str(" NORMAL")?;
-			}
-			TableType::Relation(rel) => {
-				f.write_str(" RELATION")?;
-				if let Some(Kind::Record(kind)) = &rel.from {
-					write!(f, " IN ",)?;
-					for (idx, k) in kind.iter().enumerate() {
-						if idx != 0 {
-							write!(f, " | ")?;
-						}
-						write!(f, "{}", k)?;
-					}
-				}
-
-				if let Some(Kind::Record(kind)) = &rel.to {
-					write!(f, " OUT ",)?;
-					for (idx, k) in kind.iter().enumerate() {
-						if idx != 0 {
-							write!(f, " | ")?;
-						}
-						write!(f, "{}", k)?;
-					}
-				}
-				if rel.enforced {
-					write!(f, " ENFORCED")?;
-				}
-			}
-			TableType::Any => {
-				f.write_str(" ANY")?;
-			}
-		}
-		if self.drop {
-			f.write_str(" DROP")?;
-		}
-		f.write_str(if self.full {
-			" SCHEMAFULL"
-		} else {
-			" SCHEMALESS"
-		})?;
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?
-		}
-		if let Some(ref v) = self.view {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.changefeed {
-			write!(f, " {v}")?;
-		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		write!(f, "{}", self.permissions)?;
-		Ok(())
 	}
 }
 
@@ -150,16 +77,22 @@ impl ToSql for DefineTableStatement {
 		if self.drop {
 			f.push_str(" DROP");
 		}
-		f.push_str(if self.full { " SCHEMAFULL" } else { " SCHEMALESS" });
+		f.push_str(if self.full {
+			" SCHEMAFULL"
+		} else {
+			" SCHEMALESS"
+		});
 		if let Some(ref comment) = self.comment {
 			f.push_str(" COMMENT ");
 			comment.fmt_sql(f, fmt);
 		}
 		if let Some(ref v) = self.view {
-			write_sql!(f, " {}", v);
+			f.push(' ');
+			v.fmt_sql(f, fmt);
 		}
 		if let Some(ref v) = self.changefeed {
-			write_sql!(f, " {}", v);
+			f.push(' ');
+			v.fmt_sql(f, fmt);
 		}
 		if fmt.is_pretty() {
 			f.push('\n');
@@ -168,7 +101,7 @@ impl ToSql for DefineTableStatement {
 		} else {
 			f.push(' ');
 		}
-		write_sql!(f, "{}", self.permissions);
+		self.permissions.fmt_sql(f, fmt);
 	}
 }
 

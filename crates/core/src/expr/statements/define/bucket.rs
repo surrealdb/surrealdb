@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
@@ -109,33 +107,5 @@ impl DefineBucketStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for DefineBucketStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE BUCKET")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {}", self.name)?;
-
-		if self.readonly {
-			write!(f, " READONLY")?;
-		}
-
-		if let Some(ref backend) = self.backend {
-			write!(f, " BACKEND {backend}")?;
-		}
-
-		write!(f, " PERMISSIONS {}", self.permissions)?;
-
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?;
-		}
-
-		Ok(())
 	}
 }

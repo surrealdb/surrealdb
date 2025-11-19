@@ -84,44 +84,6 @@ impl DefineApiStatement {
 		Ok(Value::None)
 	}
 }
-
-impl fmt::Display for DefineApiStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE API")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {}", self.path)?;
-		let indent = pretty_indent();
-
-		write!(f, " FOR any")?;
-		{
-			let indent = pretty_indent();
-
-			write!(f, "{}", self.config)?;
-
-			if let Some(fallback) = &self.fallback {
-				write!(f, " THEN {fallback}")?;
-			}
-
-			drop(indent);
-		}
-
-		for action in &self.actions {
-			write!(f, " {action}")?;
-		}
-
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?;
-		}
-
-		drop(indent);
-		Ok(())
-	}
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct ApiAction {
 	pub methods: Vec<ApiMethod>,

@@ -658,8 +658,8 @@ impl FieldEditContext<'_> {
 	/// Process any REFERENCE clause for the field definition
 	async fn process_reference_clause(&mut self, val: &Value) -> Result<()> {
 		// TODO: RecordReferences was removed from ExperimentalTarget enum
-		// if !self.ctx.get_capabilities().allows_experimental(&ExperimentalTarget::RecordReferences) {
-		// 	return Ok(());
+		// if !self.ctx.get_capabilities().allows_experimental(&
+		// ExperimentalTarget::RecordReferences) { 	return Ok(());
 		// }
 
 		// Is there a `REFERENCE` clause?

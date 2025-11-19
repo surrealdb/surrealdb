@@ -151,7 +151,11 @@ impl ToSql for Literal {
 			Literal::None => f.push_str("NONE"),
 			Literal::Null => f.push_str("NULL"),
 			Literal::UnboundedRange => f.push_str(".."),
-			Literal::Bool(x) => f.push_str(if *x { "true" } else { "false" }),
+			Literal::Bool(x) => f.push_str(if *x {
+				"true"
+			} else {
+				"false"
+			}),
 			Literal::Float(float) => {
 				if float.is_finite() {
 					write_sql!(f, "{float}f")

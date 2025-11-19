@@ -1,6 +1,6 @@
 use std::fmt::{self, Display};
 
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr;
 use crate::fmt::{Fmt, Pretty};
@@ -74,8 +74,14 @@ impl Display for Ast {
 }
 
 impl ToSql for Ast {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		for (i, expr) in self.expressions.iter().enumerate() {
+			if i > 0 {
+				f.push(' ');
+			}
+			expr.fmt_sql(f, fmt);
+			f.push(';');
+		}
 	}
 }
 
@@ -169,18 +175,44 @@ impl From<crate::expr::TopLevelExpr> for TopLevelExpr {
 
 impl fmt::Display for TopLevelExpr {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		use surrealdb_types::ToSql;
+		let fmt_mode = if f.alternate() { surrealdb_types::SqlFormat::Indented(0) } else { surrealdb_types::SqlFormat::SingleLine };
 		match self {
 			TopLevelExpr::Begin => write!(f, "BEGIN"),
 			TopLevelExpr::Cancel => write!(f, "CANCEL"),
 			TopLevelExpr::Commit => write!(f, "COMMIT"),
-			TopLevelExpr::Access(s) => s.fmt(f),
-			TopLevelExpr::Kill(s) => s.fmt(f),
-			TopLevelExpr::Live(s) => s.fmt(f),
-			TopLevelExpr::Option(s) => s.fmt(f),
-		TopLevelExpr::Use(s) => s.fmt(f),
-		TopLevelExpr::Show(s) => s.fmt(f),
-		TopLevelExpr::Expr(e) => e.fmt(f),
-	}
+			TopLevelExpr::Access(s) => {
+				let mut buf = String::new();
+				s.fmt_sql(&mut buf, fmt_mode);
+				write!(f, "{}", buf)
+			}
+			TopLevelExpr::Kill(s) => {
+				let mut buf = String::new();
+				s.fmt_sql(&mut buf, fmt_mode);
+				write!(f, "{}", buf)
+			}
+			TopLevelExpr::Live(s) => {
+				let mut buf = String::new();
+				s.fmt_sql(&mut buf, fmt_mode);
+				write!(f, "{}", buf)
+			}
+			TopLevelExpr::Option(s) => {
+				let mut buf = String::new();
+				s.fmt_sql(&mut buf, fmt_mode);
+				write!(f, "{}", buf)
+			}
+			TopLevelExpr::Use(s) => {
+				let mut buf = String::new();
+				s.fmt_sql(&mut buf, fmt_mode);
+				write!(f, "{}", buf)
+			}
+			TopLevelExpr::Show(s) => {
+				let mut buf = String::new();
+				s.fmt_sql(&mut buf, fmt_mode);
+				write!(f, "{}", buf)
+			}
+			TopLevelExpr::Expr(e) => e.fmt(f),
+		}
 	}
 }
 

@@ -1,8 +1,9 @@
-use std::fmt::{self, Display, Formatter, Write as _};
+use std::fmt::{self, Display, Formatter};
 use std::ops::Bound;
 
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
-use crate::fmt::{EscapeKey, EscapeRid, Fmt, Pretty, is_pretty, pretty_indent};
+
+use crate::fmt::{EscapeKey, EscapeRid};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{Expr, RecordIdKeyRangeLit};
 use crate::types::{PublicRecordIdKey, PublicUuid};
@@ -120,52 +121,8 @@ impl From<crate::expr::RecordIdKeyLit> for RecordIdKeyLit {
 
 impl Display for RecordIdKeyLit {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			Self::Number(v) => Display::fmt(v, f),
-			Self::String(v) => EscapeRid(v).fmt(f),
-			Self::Uuid(v) => Display::fmt(v, f),
-			Self::Array(v) => {
-				let mut f = Pretty::from(f);
-				f.write_char('[')?;
-				if !v.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(v.iter()))?;
-					drop(indent);
-				}
-				f.write_char(']')
-			}
-			Self::Object(v) => {
-				let mut f = Pretty::from(f);
-				if is_pretty() {
-					f.write_char('{')?;
-				} else {
-					f.write_str("{ ")?;
-				}
-				if !v.is_empty() {
-					let indent = pretty_indent();
-					write!(
-						f,
-						"{}",
-						Fmt::pretty_comma_separated(v.iter().map(|args| Fmt::new(
-							args,
-							|entry, f| write!(f, "{}: {}", EscapeKey(&entry.key), &entry.value)
-						)),)
-					)?;
-					drop(indent);
-				}
-				if is_pretty() {
-					f.write_char('}')
-				} else {
-					f.write_str(" }")
-				}
-			}
-			Self::Generate(v) => match v {
-				RecordIdKeyGen::Rand => Display::fmt("rand()", f),
-				RecordIdKeyGen::Ulid => Display::fmt("ulid()", f),
-				RecordIdKeyGen::Uuid => Display::fmt("uuid()", f),
-			},
-		Self::Range(v) => Display::fmt(v, f),
-	}
+		use surrealdb_types::ToSql;
+		write!(f, "{}", self.to_sql())
 	}
 }
 

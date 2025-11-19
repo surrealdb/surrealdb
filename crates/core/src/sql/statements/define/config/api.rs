@@ -1,7 +1,7 @@
 use std::fmt::{self, Display};
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::Fmt;
 use crate::sql::{Expr, Permission};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -11,29 +11,30 @@ pub(crate) struct ApiConfig {
 	pub permissions: Permission,
 }
 
-impl Display for ApiConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for ApiConfig {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		if !self.middleware.is_empty() {
-			write!(f, " MIDDLEWARE ")?;
-			write!(
-				f,
-				"{}",
-				Fmt::pretty_comma_separated(self.middleware.iter().map(|m| format!(
-					"{}({})",
-					m.name,
-					Fmt::pretty_comma_separated(m.args.iter())
-				)))
-			)?
+			f.push_str(" MIDDLEWARE ");
+			let middleware_strs: Vec<String> = self
+				.middleware
+				.iter()
+				.map(|m| {
+					let args_str: Vec<String> =
+						m.args.iter().map(|arg| surrealdb_types::ToSql::to_sql(arg)).collect();
+					format!("{}({})", m.name, args_str.join(", "))
+				})
+				.collect();
+			f.push_str(&middleware_strs.join(", "));
 		}
 
-		write!(f, " PERMISSIONS {}", self.permissions)?;
-		Ok(())
+		write_sql!(f, " PERMISSIONS {}", self.permissions);
 	}
 }
 
-impl ToSql for ApiConfig {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+impl Display for ApiConfig {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		use surrealdb_types::ToSql;
+		write!(f, "{}", self.to_sql())
 	}
 }
 
