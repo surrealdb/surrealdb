@@ -846,7 +846,7 @@ impl Transactable for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Create result set
-		let mut res = Vec::with_capacity(limit as usize);
+		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -894,7 +894,7 @@ impl Transactable for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Create result set
-		let mut res = Vec::with_capacity(limit as usize);
+		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -947,7 +947,7 @@ impl Transactable for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Create result set
-		let mut res = Vec::with_capacity(limit as usize);
+		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
@@ -1000,7 +1000,7 @@ impl Transactable for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Create result set
-		let mut res = Vec::with_capacity(limit as usize);
+		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
