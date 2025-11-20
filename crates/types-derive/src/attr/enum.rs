@@ -22,16 +22,16 @@ impl EnumAttributes {
 					if meta.path.is_ident("untagged") {
 						enum_attrs.untagged = true;
 					} else if meta.path.is_ident("tag") {
-						if let Ok(value) = meta.value() {
-							if let Ok(lit_str) = value.parse::<LitStr>() {
-								enum_attrs.tag = Some(lit_str.value());
-							}
+						if let Ok(value) = meta.value()
+							&& let Ok(lit_str) = value.parse::<LitStr>()
+						{
+							enum_attrs.tag = Some(lit_str.value());
 						}
 					} else if meta.path.is_ident("content") {
-						if let Ok(value) = meta.value() {
-							if let Ok(lit_str) = value.parse::<LitStr>() {
-								enum_attrs.content = Some(lit_str.value());
-							}
+						if let Ok(value) = meta.value()
+							&& let Ok(lit_str) = value.parse::<LitStr>()
+						{
+							enum_attrs.content = Some(lit_str.value());
 						}
 					} else if meta.path.is_ident("uppercase") {
 						enum_attrs.casing = Some(Casing::Uppercase);

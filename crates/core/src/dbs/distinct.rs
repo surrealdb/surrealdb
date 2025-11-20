@@ -17,10 +17,10 @@ pub(crate) struct SyncDistinct {
 
 impl SyncDistinct {
 	pub(super) fn new(ctx: &Context) -> Option<Self> {
-		if let Some(pla) = ctx.get_query_planner() {
-			if pla.requires_distinct() {
-				return Some(Self::default());
-			}
+		if let Some(pla) = ctx.get_query_planner()
+			&& pla.requires_distinct()
+		{
+			return Some(Self::default());
 		}
 		None
 	}

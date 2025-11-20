@@ -454,10 +454,10 @@ impl IndexedResults {
 				break;
 			}
 		}
-		if let Some(key) = first_error {
-			if let Some((_, Err(error))) = self.results.swap_remove(&key) {
-				return Err(error);
-			}
+		if let Some(key) = first_error
+			&& let Some((_, Err(error))) = self.results.swap_remove(&key)
+		{
+			return Err(error);
 		}
 		Ok(self)
 	}

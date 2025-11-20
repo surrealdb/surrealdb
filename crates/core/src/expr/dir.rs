@@ -4,7 +4,17 @@ use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 
 #[derive(
-	Clone, Debug, Eq, PartialEq, Serialize, PartialOrd, Deserialize, Hash, Encode, BorrowDecode,
+	Clone,
+	Debug,
+	Default,
+	Eq,
+	PartialEq,
+	Serialize,
+	PartialOrd,
+	Deserialize,
+	Hash,
+	Encode,
+	BorrowDecode,
 )]
 pub enum Dir {
 	/// `<-`
@@ -12,13 +22,8 @@ pub enum Dir {
 	/// `->`
 	Out,
 	/// `<->`
+	#[default]
 	Both,
-}
-
-impl Default for Dir {
-	fn default() -> Self {
-		Self::Both
-	}
 }
 
 impl fmt::Display for Dir {

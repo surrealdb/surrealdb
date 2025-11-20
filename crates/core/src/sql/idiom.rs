@@ -1,12 +1,14 @@
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
+use crate::expr::idiom::Idioms as ExprIdioms;
 use crate::fmt::{EscapeIdent, Fmt};
 use crate::sql::{Expr, Part};
 
 // TODO: Remove unnessacry newtype.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[allow(dead_code)]
 pub(crate) struct Idioms(pub(crate) Vec<Idiom>);
 
 impl Deref for Idioms {
@@ -30,13 +32,13 @@ impl Display for Idioms {
 	}
 }
 
-impl From<Idioms> for crate::expr::Idioms {
+impl From<Idioms> for ExprIdioms {
 	fn from(v: Idioms) -> Self {
-		crate::expr::Idioms(v.0.into_iter().map(Into::into).collect())
+		ExprIdioms(v.0.into_iter().map(Into::into).collect())
 	}
 }
-impl From<crate::expr::Idioms> for Idioms {
-	fn from(v: crate::expr::Idioms) -> Self {
+impl From<ExprIdioms> for Idioms {
+	fn from(v: ExprIdioms) -> Self {
 		Idioms(v.0.into_iter().map(Into::into).collect())
 	}
 }

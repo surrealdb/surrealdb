@@ -114,6 +114,7 @@ pub fn parse_with_capabilities(input: &str, capabilities: &Capabilities) -> Resu
 
 /// Parses a SurrealQL [`Expr`].
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[allow(dead_code)]
 pub(crate) fn expr(input: &str) -> Result<Expr> {
 	let capabilities = Capabilities::all();
 	expr_with_capabilities(input, &capabilities)
@@ -121,6 +122,7 @@ pub(crate) fn expr(input: &str) -> Result<Expr> {
 
 /// Parses a SurrealQL [`Value`].
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[allow(dead_code)]
 pub(crate) fn expr_with_capabilities(input: &str, capabilities: &Capabilities) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value");
 
@@ -249,6 +251,7 @@ pub fn block(input: &str) -> Result<Block> {
 
 /// Parses a SurrealQL [`Value`] and parses values within strings.
 #[instrument(level = "trace", target = "surrealdb::core::syn", fields(length = input.len()))]
+#[allow(dead_code)]
 pub(crate) fn expr_legacy_strand(input: &str) -> Result<Expr> {
 	trace!(target: TARGET, "Parsing SurrealQL value, with legacy strings");
 

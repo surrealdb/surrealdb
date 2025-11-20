@@ -5,20 +5,15 @@ use crate::expr::{
 	field::{Fields, Selector},
 };
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) enum Output {
+	#[default]
 	None,
 	Null,
 	Diff,
 	After,
 	Before,
 	Fields(Fields),
-}
-
-impl Default for Output {
-	fn default() -> Self {
-		Self::None
-	}
 }
 
 impl Display for Output {

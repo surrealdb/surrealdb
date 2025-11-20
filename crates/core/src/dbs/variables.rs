@@ -38,10 +38,10 @@ impl Visitor for ParameterCapturePass<'_, '_> {
 	type Error = Infallible;
 
 	fn visit_param(&mut self, param: &Param) -> Result<(), Self::Error> {
-		if !PROTECTED_PARAM_NAMES.contains(&param.as_str()) {
-			if let Some(v) = self.context.value(param.as_str()) {
-				self.captures.0.entry(param.clone().into_string()).or_insert_with(|| v.clone());
-			}
+		if !PROTECTED_PARAM_NAMES.contains(&param.as_str())
+			&& let Some(v) = self.context.value(param.as_str())
+		{
+			self.captures.0.entry(param.clone().into_string()).or_insert_with(|| v.clone());
 		}
 		Ok(())
 	}

@@ -147,7 +147,7 @@ impl AlterFieldStatement {
 		// Refresh the table cache
 		let Some(tb) = txn.get_tb(ns, db, &self.what).await? else {
 			return Err(Error::TbNotFound {
-				name: self.what.to_string(),
+				name: self.what.clone(),
 			}
 			.into());
 		};

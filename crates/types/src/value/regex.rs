@@ -144,7 +144,7 @@ impl<'de> Deserialize<'de> for Regex {
 }
 
 #[cfg(feature = "arbitrary")]
-mod arbitrary {
+mod arb {
 	use ::arbitrary::Arbitrary;
 
 	use super::*;

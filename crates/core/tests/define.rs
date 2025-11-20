@@ -138,58 +138,57 @@ async fn define_statement_index_concurrently_building_status(
 		// We monitor the status
 		let mut r = ds.execute("INFO FOR INDEX test ON user", &session, None).await?;
 		let tmp = r.remove(0).result?;
-		if let Value::Object(o) = &tmp {
-			if let Some(Value::Object(o)) = o.get("building") {
-				if let Some(Value::String(s)) = o.get("status") {
-					let new_initial = o.get("initial").cloned();
-					let new_pending = o.get("pending").cloned();
-					let new_updated = o.get("updated").cloned();
-					match s.as_str() {
-						"started" => {
-							info!("Started");
-							continue;
-						}
-						"cleaning" => {
-							info!("Cleaning");
-							continue;
-						}
-						"indexing" => {
-							{
-								if new_initial != initial_count {
-									assert!(new_initial > initial_count, "{new_initial:?}");
-									info!("New initial count: {:?}", new_initial);
-									initial_count = new_initial;
-								}
-							}
-							{
-								if new_pending != pending_count {
-									info!("New pending count: {:?}", new_pending);
-									pending_count = new_pending;
-								}
-							}
-							{
-								if new_updated != updated_count {
-									assert!(new_updated > updated_count, "{new_updated:?}");
-									info!("New updated count: {:?}", new_updated);
-									updated_count = new_updated;
-								}
-							}
-							continue;
-						}
-						"ready" => {
-							let initial = new_initial.unwrap().into_int()? as usize;
-							let pending = new_pending.unwrap().into_int()?;
-							let updated = new_updated.unwrap().into_int()? as usize;
-							assert!(initial > 0, "{initial} > 0");
-							assert!(initial <= initial_size, "{initial} <= {initial_size}");
-							assert_eq!(pending, 0);
-							assert!(updated > 0, "{updated} > 0");
-							assert!(updated <= appended_count, "{updated} <= appended_count");
-							break;
-						}
-						_ => {}
-					}
+		if let Value::Object(o) = &tmp
+			&& let Some(Value::Object(o)) = o.get("building")
+			&& let Some(Value::String(s)) = o.get("status")
+		{
+			let new_initial = o.get("initial").cloned();
+			let new_pending = o.get("pending").cloned();
+			let new_updated = o.get("updated").cloned();
+			match s.as_str() {
+				"started" => {
+					info!("Started");
+					continue;
 				}
+				"cleaning" => {
+					info!("Cleaning");
+					continue;
+				}
+				"indexing" => {
+					{
+						if new_initial != initial_count {
+							assert!(new_initial > initial_count, "{new_initial:?}");
+							info!("New initial count: {:?}", new_initial);
+							initial_count = new_initial;
+						}
+					}
+					{
+						if new_pending != pending_count {
+							info!("New pending count: {:?}", new_pending);
+							pending_count = new_pending;
+						}
+					}
+					{
+						if new_updated != updated_count {
+							assert!(new_updated > updated_count, "{new_updated:?}");
+							info!("New updated count: {:?}", new_updated);
+							updated_count = new_updated;
+						}
+					}
+					continue;
+				}
+				"ready" => {
+					let initial = new_initial.unwrap().into_int()? as usize;
+					let pending = new_pending.unwrap().into_int()?;
+					let updated = new_updated.unwrap().into_int()? as usize;
+					assert!(initial > 0, "{initial} > 0");
+					assert!(initial <= initial_size, "{initial} <= {initial_size}");
+					assert_eq!(pending, 0);
+					assert!(updated > 0, "{updated} > 0");
+					assert!(updated <= appended_count, "{updated} <= appended_count");
+					break;
+				}
+				_ => {}
 			}
 		}
 		panic!("Invalid info: {tmp:#?}");

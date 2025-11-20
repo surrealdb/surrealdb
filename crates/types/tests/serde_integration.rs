@@ -11,12 +11,6 @@ struct PersonWithSerde {
 }
 
 #[derive(SurrealValue, Serialize, Deserialize, Debug, PartialEq, Clone)]
-struct AddressWithSerde {
-	street: String,
-	city: String,
-}
-
-#[derive(SurrealValue, Serialize, Deserialize, Debug, PartialEq, Clone)]
 struct ComplexPerson {
 	#[surreal(rename = "full_name")]
 	#[serde(rename = "full_name")]

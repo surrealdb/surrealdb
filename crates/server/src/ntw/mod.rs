@@ -248,10 +248,10 @@ pub async fn init<F: RouterFactory>(
 	};
 	// Catch the error and try to provide some guidance
 	if let Err(e) = res {
-		if opt.bind.port() < 1024 {
-			if let io::ErrorKind::PermissionDenied = e.kind() {
-				error!(target: LOG, "Binding to ports below 1024 requires privileged access or special permissions.");
-			}
+		if opt.bind.port() < 1024
+			&& let io::ErrorKind::PermissionDenied = e.kind()
+		{
+			error!(target: LOG, "Binding to ports below 1024 requires privileged access or special permissions.");
 		}
 		return Err(e.into());
 	}

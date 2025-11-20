@@ -89,9 +89,10 @@ impl From<crate::types::PublicGeometryKind> for GeometryKind {
 
 /// The kind, or data type, of a value or field.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum Kind {
 	/// The most generic type, can be anything.
+	#[default]
 	Any,
 	/// None type.
 	None,
@@ -153,12 +154,6 @@ pub enum Kind {
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
 	File(Vec<String>),
-}
-
-impl Default for Kind {
-	fn default() -> Self {
-		Self::Any
-	}
 }
 
 impl Kind {
@@ -255,10 +250,10 @@ impl Kind {
 					return match path.first() {
 						Some(Part::All) => inner.allows_nested_kind(&path[1..], kind),
 						Some(Part::Value(Expr::Literal(Literal::Integer(i)))) => {
-							if let Some(len) = len {
-								if *i >= *len as i64 {
-									return false;
-								}
+							if let Some(len) = len
+								&& *i >= *len as i64
+							{
+								return false;
 							}
 
 							inner.allows_nested_kind(&path[1..], kind)
@@ -775,10 +770,10 @@ impl KindLiteral {
 			Self::Integer(_) | Self::Float(_) | Self::Decimal(_) => Kind::Number,
 			Self::Duration(_) => Kind::Duration,
 			Self::Array(a) => {
-				if let Some(inner) = a.first() {
-					if a.iter().all(|x| x == inner) {
-						return Kind::Array(Box::new(inner.to_owned()), Some(a.len() as u64));
-					}
+				if let Some(inner) = a.first()
+					&& a.iter().all(|x| x == inner)
+				{
+					return Kind::Array(Box::new(inner.to_owned()), Some(a.len() as u64));
 				}
 
 				Kind::Array(Box::new(Kind::Any), None)

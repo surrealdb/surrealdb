@@ -557,17 +557,17 @@ async fn walk_paths(
 				path.push(step.to_owned());
 				Value::from(path)
 			};
-			if let Some(expects) = expects {
-				if step == expects {
-					let steps = match val {
-						Value::Array(v) => v.0,
-						v => vec![v],
-					};
-					for step in steps {
-						finished.push(step);
-					}
-					return Ok(Value::None);
+			if let Some(expects) = expects
+				&& step == expects
+			{
+				let steps = match val {
+					Value::Array(v) => v.0,
+					v => vec![v],
+				};
+				for step in steps {
+					finished.push(step);
 				}
+				return Ok(Value::None);
 			}
 			if reached_max {
 				if (Option::<&Value>::None).is_none() {

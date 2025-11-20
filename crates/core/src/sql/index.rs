@@ -180,8 +180,8 @@ impl From<crate::catalog::Distance> for Distance {
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum VectorType {
-	#[default]
 	F64,
+	#[default]
 	F32,
 	I64,
 	I32,

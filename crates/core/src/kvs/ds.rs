@@ -20,6 +20,7 @@ use http::HeaderMap;
 use reblessive::TreeStack;
 #[cfg(feature = "jwks")]
 use tokio::sync::RwLock;
+use tokio_util::sync::CancellationToken;
 use tracing::{instrument, trace};
 use uuid::Uuid;
 #[cfg(target_family = "wasm")]
@@ -224,10 +225,16 @@ pub trait TransactionBuilder: TransactionBuilderRequirements {
 /// provide better error messages before starting the runtime.
 pub trait TransactionBuilderFactory: TransactionBuilderFactoryRequirements {
 	/// Create a new transaction builder and the clock to use throughout the datastore.
+	///
+	/// # Parameters
+	/// - `path`: Database connection path string
+	/// - `clock`: Optional clock for timestamp generation (uses system clock if None)
+	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
 	async fn new_transaction_builder(
 		&self,
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
+		canceller: CancellationToken,
 	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)>;
 
 	/// Validate a datastore path string.
@@ -273,6 +280,7 @@ impl TransactionBuilderFactory for CommunityComposer {
 		&self,
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
+		_canceller: CancellationToken,
 	) -> Result<(Box<dyn TransactionBuilder>, Arc<SizedClock>)> {
 		let (flavour, path) = match path.split_once("://").or_else(|| path.split_once(':')) {
 			None if path == "memory" => ("memory", ""),
@@ -561,7 +569,7 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Self> {
-		Self::new_with_factory(&CommunityComposer(), path).await
+		Self::new_with_factory(&CommunityComposer(), path, CancellationToken::new()).await
 	}
 
 	/// Creates a new datastore instance with a custom transaction builder factory.
@@ -572,14 +580,16 @@ impl Datastore {
 	/// # Parameters
 	/// - `factory`: Transaction builder factory for backend selection
 	/// - `path`: Database path (e.g., "memory", "surrealkv://path", "tikv://host:port")
+	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
 	///
 	/// # Generic parameters
 	/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
 	pub async fn new_with_factory<F: TransactionBuilderFactory>(
 		factory: &F,
 		path: &str,
+		canceller: CancellationToken,
 	) -> Result<Self> {
-		Self::new_with_clock::<F>(factory, path, None).await
+		Self::new_with_clock::<F>(factory, path, None, canceller).await
 	}
 
 	/// Creates a new datastore instance with a custom factory and clock.
@@ -591,6 +601,7 @@ impl Datastore {
 	/// - `factory`: Transaction builder factory for backend selection
 	/// - `path`: Database path (e.g., "memory", "surrealkv://path", "tikv://host:port")
 	/// - `clock`: Optional custom clock for timestamp generation (uses system clock if None)
+	/// - `canceller`: Token for graceful shutdown and cancellation of long-running operations
 	///
 	/// # Generic parameters
 	/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
@@ -598,9 +609,10 @@ impl Datastore {
 		factory: &F,
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
+		canceller: CancellationToken,
 	) -> Result<Datastore> {
 		// Initiate the desired datastore
-		let (builder, clock) = factory.new_transaction_builder(path, clock).await?;
+		let (builder, clock) = factory.new_transaction_builder(path, clock, canceller).await?;
 		// Set the properties on the datastore
 		Self::new_with_builder(builder, clock)
 	}
@@ -1058,10 +1070,10 @@ impl Datastore {
 				lh.try_maintain_lease().await?;
 				let ic = IndexCompactionKey::decode_key(&k)?;
 				// If the index has already been compacted, we can ignore the task
-				if let Some(p) = &previous {
-					if p.index_matches(&ic) {
-						continue;
-					}
+				if let Some(p) = &previous
+					&& p.index_matches(&ic)
+				{
+					continue;
 				}
 				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
 					Some(ix) => match &ix.index {

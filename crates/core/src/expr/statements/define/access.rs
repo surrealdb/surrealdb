@@ -268,7 +268,7 @@ impl DefineAccessStatement {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::AccessRootAlreadyExists {
-									ac: access.name.to_string(),
+									ac: access.name.clone(),
 								});
 							}
 						}
@@ -295,7 +295,7 @@ impl DefineAccessStatement {
 							if !opt.import {
 								bail!(Error::AccessNsAlreadyExists {
 									ns: opt.ns()?.to_string(),
-									ac: access.name.to_string(),
+									ac: access.name.clone(),
 								});
 							}
 						}
@@ -324,7 +324,7 @@ impl DefineAccessStatement {
 								bail!(Error::AccessDbAlreadyExists {
 									ns: opt.ns()?.to_string(),
 									db: opt.db()?.to_string(),
-									ac: access.name.to_string(),
+									ac: access.name.clone(),
 								});
 							}
 						}
@@ -346,10 +346,10 @@ impl DefineAccessStatement {
 	/// Remove information from the access definition which should not be displayed.
 	pub fn redact(mut self) -> Self {
 		fn redact_jwt_access(acc: &mut JwtAccess) {
-			if let JwtAccessVerify::Key(ref mut v) = acc.verify {
-				if v.alg.is_symmetric() {
-					v.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
-				}
+			if let JwtAccessVerify::Key(ref mut v) = acc.verify
+				&& v.alg.is_symmetric()
+			{
+				v.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
 			}
 			if let Some(ref mut s) = acc.issue {
 				s.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));

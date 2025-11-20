@@ -502,10 +502,10 @@ impl Expr {
 					args.push(stk.run(|stk| e.compute(stk, ctx, opt, doc)).await?);
 				}
 
-				if let Value::Object(ref x) = res {
-					if let Some(Value::Closure(x)) = x.get(name.as_str()) {
-						return x.invoke(stk, ctx, opt, doc, args).await.map_err(ControlFlow::Err);
-					}
+				if let Value::Object(ref x) = res
+					&& let Some(Value::Closure(x)) = x.get(name.as_str())
+				{
+					return x.invoke(stk, ctx, opt, doc, args).await.map_err(ControlFlow::Err);
 				};
 				fnc::idiom(stk, ctx, opt, doc, res, name, args).await.map_err(ControlFlow::Err)
 			}

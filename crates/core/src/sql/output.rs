@@ -5,21 +5,16 @@ use crate::sql::{
 	field::{Fields, Selector},
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) enum Output {
+	#[default]
 	None,
 	Null,
 	Diff,
 	After,
 	Before,
 	Fields(Fields),
-}
-
-impl Default for Output {
-	fn default() -> Self {
-		Self::None
-	}
 }
 
 impl Display for Output {

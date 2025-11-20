@@ -381,7 +381,7 @@ fn validate_return(name: String, return_kind: Option<&Kind>, result: Value) -> F
 		Some(kind) => result
 			.coerce_to_kind(kind)
 			.map_err(|e| Error::ReturnCoerce {
-				name: name.to_string(),
+				name: name.clone(),
 				error: Box::new(e),
 			})
 			.map_err(anyhow::Error::new)

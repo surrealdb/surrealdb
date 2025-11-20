@@ -52,7 +52,7 @@ impl AlterTableStatement {
 					return Ok(Value::None);
 				} else {
 					return Err(Error::TbNotFound {
-						name: self.name.to_string(),
+						name: self.name.clone(),
 					}
 					.into());
 				}

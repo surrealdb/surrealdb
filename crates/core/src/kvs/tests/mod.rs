@@ -66,6 +66,7 @@ where
 
 #[cfg(feature = "kv-mem")]
 mod mem {
+	use tokio_util::sync::CancellationToken;
 	use uuid::Uuid;
 
 	use super::{ClockType, Kvs};
@@ -76,10 +77,15 @@ mod mem {
 		// Use a memory datastore instance
 		let path = "memory";
 		// Setup the in-memory datastore
-		let ds = Datastore::new_with_clock(&CommunityComposer(), path, Some(clock))
-			.await
-			.unwrap()
-			.with_node_id(id);
+		let ds = Datastore::new_with_clock(
+			&CommunityComposer(),
+			path,
+			Some(clock),
+			CancellationToken::new(),
+		)
+		.await
+		.unwrap()
+		.with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::Mem)
 	}
@@ -90,6 +96,7 @@ mod mem {
 #[cfg(feature = "kv-rocksdb")]
 mod rocksdb {
 	use temp_dir::TempDir;
+	use tokio_util::sync::CancellationToken;
 	use uuid::Uuid;
 
 	use super::{ClockType, Kvs};
@@ -101,10 +108,15 @@ mod rocksdb {
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		let path = format!("rocksdb:{path}");
 		// Setup the RocksDB datastore
-		let ds = Datastore::new_with_clock(&CommunityComposer(), &path, Some(clock))
-			.await
-			.unwrap()
-			.with_node_id(id);
+		let ds = Datastore::new_with_clock(
+			&CommunityComposer(),
+			&path,
+			Some(clock),
+			CancellationToken::new(),
+		)
+		.await
+		.unwrap()
+		.with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::Rocksdb)
 	}
@@ -115,6 +127,7 @@ mod rocksdb {
 #[cfg(feature = "kv-surrealkv")]
 mod surrealkv {
 	use temp_dir::TempDir;
+	use tokio_util::sync::CancellationToken;
 	use uuid::Uuid;
 
 	use super::{ClockType, Kvs};
@@ -126,10 +139,15 @@ mod surrealkv {
 		let path = TempDir::new().unwrap().path().to_string_lossy().to_string();
 		let path = format!("surrealkv:{path}");
 		// Setup the SurrealKV datastore
-		let ds = Datastore::new_with_clock(&CommunityComposer(), &path, Some(clock))
-			.await
-			.unwrap()
-			.with_node_id(id);
+		let ds = Datastore::new_with_clock(
+			&CommunityComposer(),
+			&path,
+			Some(clock),
+			CancellationToken::new(),
+		)
+		.await
+		.unwrap()
+		.with_node_id(id);
 		// Return the datastore
 		(ds, Kvs::SurrealKV)
 	}
@@ -139,6 +157,7 @@ mod surrealkv {
 
 #[cfg(feature = "kv-tikv")]
 mod tikv {
+	use tokio_util::sync::CancellationToken;
 	use uuid::Uuid;
 
 	use super::{ClockType, Kvs};
@@ -149,10 +168,15 @@ mod tikv {
 		// Setup the cluster connection string
 		let path = "tikv:127.0.0.1:2379";
 		// Setup the TiKV datastore
-		let ds = Datastore::new_with_clock(&CommunityComposer(), path, Some(clock))
-			.await
-			.unwrap()
-			.with_node_id(id);
+		let ds = Datastore::new_with_clock(
+			&CommunityComposer(),
+			path,
+			Some(clock),
+			CancellationToken::new(),
+		)
+		.await
+		.unwrap()
+		.with_node_id(id);
 		// Clear any previous test entries
 		let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await.unwrap();
 		tx.delr(vec![0u8]..vec![0xffu8]).await.unwrap();

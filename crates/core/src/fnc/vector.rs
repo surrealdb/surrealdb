@@ -81,10 +81,10 @@ pub mod distance {
 		(Optional(knn_ref),): (Optional<Value>,),
 	) -> Result<Value> {
 		if let Some((_exe, doc, thg)) = get_execution_context(ctx, doc) {
-			if let Some(ir) = &doc.ir {
-				if let Some(d) = ir.dist() {
-					return Ok(d.into());
-				}
+			if let Some(ir) = &doc.ir
+				&& let Some(d) = ir.dist()
+			{
+				return Ok(d.into());
 			}
 			if let Some(IterationStage::Iterate(Some(results))) = ctx.get_iteration_stage() {
 				let n = if let Some(Value::Number(n)) = knn_ref {

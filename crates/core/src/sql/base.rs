@@ -1,17 +1,12 @@
 use std::fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Base {
+	#[default]
 	Root,
 	Ns,
 	Db,
-}
-
-impl Default for Base {
-	fn default() -> Self {
-		Self::Root
-	}
 }
 
 impl fmt::Display for Base {

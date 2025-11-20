@@ -13,7 +13,9 @@ use crate::expr::order::Ordering;
 use crate::idx::planner::RecordStrategy;
 use crate::val::Value;
 
+#[derive(Default)]
 pub(super) enum Results {
+	#[default]
 	None,
 	Memory(MemoryCollector),
 	MemoryRandom(MemoryRandom),
@@ -36,10 +38,10 @@ impl Results {
 			return Ok(Self::Groups(GroupCollector::new(stm)?));
 		}
 		#[cfg(storage)]
-		if stm.tempfiles() {
-			if let Some(temp_dir) = ctx.temporary_directory() {
-				return Ok(Self::File(Box::new(FileCollector::new(temp_dir)?)));
-			}
+		if stm.tempfiles()
+			&& let Some(temp_dir) = ctx.temporary_directory()
+		{
+			return Ok(Self::File(Box::new(FileCollector::new(temp_dir)?)));
 		}
 		if let Some(ordering) = stm.order() {
 			return match ordering {
@@ -196,12 +198,6 @@ impl Results {
 				g.explain(exp);
 			}
 		}
-	}
-}
-
-impl Default for Results {
-	fn default() -> Self {
-		Self::None
 	}
 }
 
