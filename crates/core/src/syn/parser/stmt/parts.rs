@@ -134,30 +134,11 @@ impl Parser<'_> {
 	) -> ParseResult<Vec<Fetch>> {
 		match self.peek().kind {
 			t!("$param") => Ok(vec![Fetch(Expr::Param(self.next_token_value()?))]),
-			t!("TYPE") => {
-				let fields = self.parse_fields(stk).await?;
-
-				let fetches = match fields {
-					Fields::Value(field) => match *field {
-						Field::All => Vec::new(),
-						Field::Single {
-							expr,
-							..
-						} => vec![Fetch(expr)],
-					},
-					Fields::Select(fields) => fields
-						.into_iter()
-						.filter_map(|f| match f {
-							Field::All => None,
-							Field::Single {
-								expr,
-								..
-							} => Some(Fetch(expr)),
-						})
-						.collect(),
-				};
-
-				Ok(fetches)
+			t!("TYPE")
+				if self.peek1().kind == t!("::")
+					&& (self.peek2().kind == t!("FIELD") || self.peek2().kind == t!("FIELDS")) =>
+			{
+				Ok(vec![Fetch(stk.run(|stk| self.parse_expr_field(stk)).await?)])
 			}
 			_ => Ok(vec![Fetch(Expr::Idiom(self.parse_plain_idiom(stk).await?))]),
 		}
