@@ -393,12 +393,10 @@ impl Transactable for Transaction {
 	/// Cancel a transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn cancel(&self) -> Result<()> {
-		// Check to see if transaction is closed
-		if self.closed() {
+		// Atomically mark transaction as done and check if it was already closed
+		if self.done.swap(true, Ordering::AcqRel) {
 			return Err(Error::TransactionFinished);
 		}
-		// Mark this transaction as done
-		self.done.store(true, Ordering::Release);
 		// Lock the inner transaction
 		let inner = self.inner.lock().await;
 		// Get the inner transaction
@@ -413,8 +411,8 @@ impl Transactable for Transaction {
 	/// Commit a transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn commit(&self) -> Result<()> {
-		// Check to see if transaction is closed
-		if self.closed() {
+		// Atomically mark transaction as done and check if it was already closed
+		if self.done.swap(true, Ordering::AcqRel) {
 			return Err(Error::TransactionFinished);
 		}
 		// Check to see if transaction is writable
@@ -425,9 +423,6 @@ impl Transactable for Transaction {
 		if self.is_restricted(false) && self.contains_writes() {
 			return Err(Error::ReadAndDeleteOnly);
 		}
-		//
-		// Mark this transaction as done
-		self.done.store(true, Ordering::Release);
 		// Get the inner transaction
 		let inner = self
 			.inner

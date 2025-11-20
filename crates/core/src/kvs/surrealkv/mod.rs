@@ -115,12 +115,10 @@ impl Transactable for Transaction {
 	/// Cancels the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn cancel(&self) -> Result<()> {
-		// Check to see if transaction is closed
-		if self.closed() {
+		// Atomically mark transaction as done and check if it was already closed
+		if self.done.swap(true, Ordering::AcqRel) {
 			return Err(Error::TransactionFinished);
 		}
-		// Mark the transaction as done.
-		self.done.store(true, Ordering::Release);
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Rollback this transaction
@@ -132,16 +130,14 @@ impl Transactable for Transaction {
 	/// Commits the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
 	async fn commit(&self) -> Result<()> {
-		// Check to see if transaction is closed
-		if self.closed() {
+		// Atomically mark transaction as done and check if it was already closed
+		if self.done.swap(true, Ordering::AcqRel) {
 			return Err(Error::TransactionFinished);
 		}
 		// Check to see if transaction is writable
 		if !self.writeable() {
 			return Err(Error::TransactionReadonly);
 		}
-		// Mark the transaction as done.
-		self.done.store(true, Ordering::Release);
 		// Load the inner transaction
 		let mut inner = self.inner.write().await;
 		// Commit this transaction
