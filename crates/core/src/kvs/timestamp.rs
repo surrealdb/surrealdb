@@ -33,7 +33,7 @@ impl Timestamp for u64 {
 	}
 	/// Create a timestamp from a version
 	fn from_versionstamp(version: u128) -> Result<Self> {
-		Ok(version as u64)
+		Ok(u64::try_from(version)?)
 	}
 	/// Convert the timestamp to a datetime
 	fn to_datetime(&self) -> DateTime<Utc> {

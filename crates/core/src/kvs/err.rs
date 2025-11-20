@@ -76,6 +76,12 @@ impl Error {
 	}
 }
 
+impl From<std::num::TryFromIntError> for Error {
+	fn from(e: std::num::TryFromIntError) -> Error {
+		Error::TimestampInvalid(e.to_string())
+	}
+}
+
 #[cfg(feature = "kv-mem")]
 impl From<surrealmx::Error> for Error {
 	fn from(e: surrealmx::Error) -> Error {
