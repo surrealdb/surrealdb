@@ -5,6 +5,7 @@ use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use surrealdb_types::{Kind, SurrealValue, Value, kind, object};
+use surrealdb_protocol::proto::rpc::v1::QueryResponse;
 
 use crate::expr::TopLevelExpr;
 use crate::rpc::DbResultError;

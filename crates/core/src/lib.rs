@@ -40,6 +40,7 @@ mod surrealism;
 mod sys;
 
 pub mod api;
+pub mod bridge;
 pub mod catalog;
 pub mod cnf;
 pub mod ctx;
