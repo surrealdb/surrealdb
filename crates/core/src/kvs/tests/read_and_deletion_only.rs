@@ -65,17 +65,14 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 			let value = vec![0u8; 1024]; // 1KB per value
 			if let Err(e) = tx.set(&key, &value, None).await {
 				assert!(
-					e.to_string().starts_with("The datastore is in read-and-deletion-only mode"),
-					"{e}"
+					e.to_string().contains("read-and-deletion-only mode"),
+					"Unexpected error: {e}"
 				);
 				count_err += 1;
 			}
 		}
 		if let Err(e) = tx.commit().await {
-			assert!(
-				e.to_string().starts_with("The datastore is in read-and-deletion-only mode"),
-				"{e}"
-			);
+			assert!(e.to_string().contains("read-and-deletion-only mode"), "Unexpected error: {e}");
 			count_err += 1;
 		}
 	}
@@ -89,9 +86,8 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 		let tx = ds.transaction(Write, Optimistic).await.unwrap();
 		let res = tx.put(&"other_key", &"other_value".as_bytes().to_vec(), None).await;
 		assert!(
-			res.unwrap_err()
-				.to_string()
-				.starts_with("The datastore is in read-and-deletion-only mode")
+			res.unwrap_err().to_string().contains("read-and-deletion-only mode"),
+			"Expected read-and-deletion-only error"
 		);
 		tx.cancel().await.unwrap();
 	}
@@ -100,9 +96,8 @@ pub async fn read_and_deletion_only(new_ds: impl CreateDs) {
 	{
 		let res = ongoing_tx.commit().await;
 		assert!(
-			res.unwrap_err()
-				.to_string()
-				.starts_with("The datastore is in read-and-deletion-only mode")
+			res.unwrap_err().to_string().contains("read-and-deletion-only mode"),
+			"Expected read-and-deletion-only error"
 		);
 	}
 

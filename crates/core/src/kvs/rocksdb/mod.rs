@@ -361,11 +361,11 @@ impl Transaction {
 	}
 
 	/// Check if disk space is restricted
-	fn is_restricted(&self, cached: bool) -> bool {
+	fn is_restricted(&self, recalculate: bool) -> bool {
 		if let Some(dsm) = self.disk_space_manager.as_ref() {
-			match cached {
-				true => dsm.cached_state() == DiskSpaceState::ReadAndDeletionOnly,
-				false => dsm.latest_state() == DiskSpaceState::ReadAndDeletionOnly,
+			match recalculate {
+				false => dsm.cached_state() == DiskSpaceState::ReadAndDeletionOnly,
+				true => dsm.latest_state() == DiskSpaceState::ReadAndDeletionOnly,
 			}
 		} else {
 			false
@@ -420,7 +420,7 @@ impl Transactable for Transaction {
 			return Err(Error::TransactionReadonly);
 		}
 		// Check if we are in read-and-deletion-only mode
-		if self.is_restricted(false) && self.contains_writes() {
+		if self.is_restricted(true) && self.contains_writes() {
 			return Err(Error::ReadAndDeleteOnly);
 		}
 		// Get the inner transaction
@@ -433,7 +433,7 @@ impl Transactable for Transaction {
 		// Commit this transaction
 		inner.commit()?;
 		// Perform compaction if necessary
-		if self.is_restricted(false) && self.contains_deletes() {
+		if self.is_restricted(true) && self.contains_deletes() {
 			self.db.compact_range::<&[u8], &[u8]>(None, None);
 		}
 		// Continue
@@ -524,7 +524,7 @@ impl Transactable for Transaction {
 			return Err(Error::TransactionReadonly);
 		}
 		// Check if we are in read-and-deletion-only mode
-		if self.is_restricted(true) {
+		if self.is_restricted(false) {
 			return Err(Error::ReadAndDeleteOnly);
 		}
 		// Lock the inner transaction
@@ -556,7 +556,7 @@ impl Transactable for Transaction {
 			return Err(Error::TransactionReadonly);
 		}
 		// Check if we are in read-and-deletion-only mode
-		if self.is_restricted(true) {
+		if self.is_restricted(false) {
 			return Err(Error::ReadAndDeleteOnly);
 		}
 		// Lock the inner transaction
@@ -587,7 +587,7 @@ impl Transactable for Transaction {
 			return Err(Error::TransactionReadonly);
 		}
 		// Check if we are in read-and-deletion-only mode
-		if self.is_restricted(true) {
+		if self.is_restricted(false) {
 			return Err(Error::ReadAndDeleteOnly);
 		}
 		// Lock the inner transaction
