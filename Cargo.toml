@@ -40,11 +40,11 @@ surrealdb-macros = { version = "=3.0.0-alpha.14", path = "crates/macros" }
 surrealdb-server = { version = "=3.0.0-alpha.14", path = "crates/server", default-features = false }
 surrealdb-types = { version = "=3.0.0-alpha.14", path = "crates/types" }
 surrealdb-types-derive = { version = "=3.0.0-alpha.14", path = "crates/types-derive" }
-surrealism = { version = "=0.1.1", path = "crates/surrealism/surrealism" }
-surrealism-cli = { version = "=0.1.1", path = "crates/surrealism/surrealism-cli" }
-surrealism-macros = { version = "=0.1.1", path = "crates/surrealism/surrealism-macros", default-features = false }
-surrealism-runtime = { version = "=0.1.1", path = "crates/surrealism/surrealism-runtime" }
-surrealism-types = { version = "=0.1.1", path = "crates/surrealism/surrealism-types", default-features = false }
+surrealism = { version = "=0.1.2", path = "crates/surrealism/surrealism" }
+surrealism-cli = { version = "=0.1.2", path = "crates/surrealism/surrealism-cli" }
+surrealism-macros = { version = "=0.1.2", path = "crates/surrealism/surrealism-macros", default-features = false }
+surrealism-runtime = { version = "=0.1.2", path = "crates/surrealism/surrealism-runtime" }
+surrealism-types = { version = "=0.1.2", path = "crates/surrealism/surrealism-types", default-features = false }
 
 # External surreal crates
 affinitypool = "0.3.1"
