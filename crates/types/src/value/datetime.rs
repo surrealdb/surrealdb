@@ -128,16 +128,22 @@ mod arb {
 				let hour = u.int_in_range(0..=23)?;
 				let minute = u.int_in_range(0..=59)?;
 				if u.arbitrary()? {
-					FixedOffset::west_opt((hour * 3600 + minute * 60) as i32).unwrap()
+					FixedOffset::west_opt(hour * 3600 + minute * 60)
+						.expect("valid because range was ensured")
 				} else {
-					FixedOffset::east_opt((hour * 3600 + minute * 60) as i32).unwrap()
+					FixedOffset::east_opt(hour * 3600 + minute * 60)
+						.expect("valid because range was ensured")
 				}
 			};
 
 			let datetime = NaiveDateTime::new(date, time);
 
 			Ok(Datetime(
-				offset.from_local_datetime(&datetime).earliest().unwrap().with_timezone(&Utc),
+				offset
+					.from_local_datetime(&datetime)
+					.earliest()
+					.expect("earliest should not fail with fixed offest")
+					.with_timezone(&Utc),
 			))
 		}
 	}

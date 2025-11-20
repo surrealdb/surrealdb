@@ -232,7 +232,7 @@ impl Display for AccessStatement {
 				}
 				write!(f, " SHOW")?;
 				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {}", EscapeKwFreeIdent(&v))?,
+					Some(v) => write!(f, " GRANT {}", EscapeKwFreeIdent(v))?,
 					None => match &stmt.cond {
 						Some(v) => write!(f, " {v}")?,
 						None => write!(f, " ALL")?,
@@ -247,7 +247,7 @@ impl Display for AccessStatement {
 				}
 				write!(f, " REVOKE")?;
 				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {}", EscapeKwFreeIdent(&v))?,
+					Some(v) => write!(f, " GRANT {}", EscapeKwFreeIdent(v))?,
 					None => match &stmt.cond {
 						Some(v) => write!(f, " {v}")?,
 						None => write!(f, " ALL")?,

@@ -231,7 +231,7 @@ impl Display for DefineUserStatement {
 			self.name,
 			self.base,
 			QuoteStr(&self.hash),
-			Fmt::comma_separated(self.roles.iter().map(|r| r.to_string().to_uppercase())),
+			Fmt::comma_separated(self.roles.iter().map(|r| r.to_uppercase())),
 		)?;
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible

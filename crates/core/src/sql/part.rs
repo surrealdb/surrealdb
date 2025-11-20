@@ -152,7 +152,7 @@ impl fmt::Display for DestructurePart {
 			DestructurePart::Field(fd) => write!(f, "{}", EscapeKwFreeIdent(fd)),
 			DestructurePart::Aliased(fd, v) => write!(f, "{}: {v}", EscapeKwFreeIdent(fd)),
 			DestructurePart::Destructure(fd, d) => {
-				write!(f, "{}{}", EscapeKwFreeIdent(&fd), Part::Destructure(d.clone()))
+				write!(f, "{}{}", EscapeKwFreeIdent(fd), Part::Destructure(d.clone()))
 			}
 		}
 	}

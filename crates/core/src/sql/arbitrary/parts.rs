@@ -19,7 +19,9 @@ impl<'a> Arbitrary<'a> for Function {
 		match u.int_in_range::<u8>(0..=5)? {
 			0 => {
 				let pick = u.int_in_range(0..=(PATHS.len() - 1))?;
-				Ok(Function::Normal(PATHS.keys().skip(pick).next().unwrap().to_string()))
+				Ok(Function::Normal(
+					PATHS.keys().nth(pick).expect("should be in range").to_string(),
+				))
 			}
 			1 => Ok(Self::Custom(u.arbitrary()?)),
 			2 => Ok(Self::Script(u.arbitrary()?)),

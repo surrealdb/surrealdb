@@ -175,10 +175,10 @@ impl Parser<'_> {
 		let mut found = false;
 		match fields {
 			Fields::Value(field) => {
-				if let Some(alias) = &field.alias {
-					if idiom == alias {
-						found = true;
-					}
+				if let Some(alias) = &field.alias
+					&& idiom == alias
+				{
+					found = true;
 				}
 
 				match &field.expr {
@@ -201,11 +201,11 @@ impl Parser<'_> {
 						return Ok(());
 					};
 
-					if let Some(alias) = &field.alias {
-						if idiom == alias {
-							found = true;
-							break;
-						}
+					if let Some(alias) = &field.alias
+						&& idiom == alias
+					{
+						found = true;
+						break;
 					}
 
 					match &field.expr {

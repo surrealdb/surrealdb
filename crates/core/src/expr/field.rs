@@ -190,7 +190,7 @@ impl Fields {
 							}
 							// This is the end of the expression
 							None => {
-								out.set(stk, ctx, opt, v.alias.as_ref().unwrap_or(&i), x).await?
+								out.set(stk, ctx, opt, v.alias.as_ref().unwrap_or(i), x).await?
 							}
 						}
 					}
@@ -269,7 +269,7 @@ impl Fields {
 								idiom.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
 
 							if let Some(alias) = &v.alias {
-								out.set(stk, ctx, opt, &alias, res).await?;
+								out.set(stk, ctx, opt, alias, res).await?;
 							} else if self.is_single() {
 								out = res
 							} else {
