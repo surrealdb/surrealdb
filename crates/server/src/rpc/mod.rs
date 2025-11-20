@@ -7,12 +7,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::stream::FuturesUnordered;
 use opentelemetry::Context as TelemetryContext;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::{DbResponse, DbResult};
 use tokio::sync::RwLock;
-use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -41,8 +39,6 @@ pub(crate) async fn notifications(
 	state: Arc<RpcState>,
 	canceller: CancellationToken,
 ) {
-	// Store messages being delivered
-	let mut futures = FuturesUnordered::new();
 	// Listen to the notifications channel
 	if let Some(channel) = ds.notifications() {
 		// Loop continuously
@@ -52,8 +48,6 @@ pub(crate) async fn notifications(
 				biased;
 				// Check if this has shutdown
 				_ = canceller.cancelled() => break,
-				// Process any buffered messages
-				Some(_) = futures.next() => continue,
 				// Receive a notification on the channel
 				Ok(notification) = channel.recv() => {
 					// Get the id for this notification
@@ -82,10 +76,7 @@ pub(crate) async fn notifications(
 							// Get the WebSocket sending channel
 							let sender = rpc.channel.clone();
 							// Send the notification to the client
-							// let future = message.send(cx, format, sender);
-							let future = crate::rpc::response::send(message, cx, format, sender);
-							// Pus the future to the pipeline
-							futures.push(future);
+							crate::rpc::response::send(message, cx, format, sender).await;
 						}
 					}
 				},
