@@ -126,6 +126,13 @@ impl Writer {
 		// Return the prepared writes
 		Ok(res)
 	}
+
+	// get returns all the mutations buffered for this transaction.
+	// The timestamp will be provided at commit time.
+	pub(crate) fn clear(&self) {
+		// Clear the internal buffer
+		self.buffer.clear();
+	}
 }
 
 #[cfg(test)]
@@ -180,7 +187,6 @@ mod tests {
 			value_a.into(),
 			DONT_STORE_PREVIOUS,
 		);
-		tx1.complete_changes().await.unwrap();
 		tx1.commit().await.unwrap();
 
 		let tx2 = ds.transaction(Write, Optimistic).await.unwrap();
@@ -198,7 +204,6 @@ mod tests {
 			value_c.into(),
 			DONT_STORE_PREVIOUS,
 		);
-		tx2.complete_changes().await.unwrap();
 		tx2.commit().await.unwrap();
 
 		let tx3 = ds.transaction(Write, Optimistic).await.unwrap();
@@ -230,7 +235,6 @@ mod tests {
 			value_c2.into(),
 			DONT_STORE_PREVIOUS,
 		);
-		tx3.complete_changes().await.unwrap();
 		tx3.commit().await.unwrap();
 
 		// Note that we committed tx1, tx2, and tx3 in this order so far.
@@ -344,7 +348,6 @@ mod tests {
 			value_a.into(),
 			DONT_STORE_PREVIOUS,
 		);
-		tx.complete_changes().await.unwrap();
 		tx.commit().await.unwrap();
 		record_id
 	}

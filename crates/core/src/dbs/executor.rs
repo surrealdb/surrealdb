@@ -301,14 +301,6 @@ impl Executor {
 					return Ok(value);
 				}
 
-				if let Err(e) = txn.complete_changes().await {
-					let _ = txn.cancel().await;
-
-					bail!(Error::QueryNotExecuted {
-						message: e.to_string(),
-					});
-				}
-
 				if let Err(e) = txn.commit().await {
 					bail!(Error::QueryNotExecuted {
 						message: e.to_string(),
@@ -506,12 +498,9 @@ impl Executor {
 					return Ok(());
 				}
 				TopLevelExpr::Commit => {
-					// complete_changes and then commit.
-					// If either error undo results.
-					let e = if let Err(e) = txn.complete_changes().await {
-						let _ = txn.cancel().await;
-						e
-					} else if let Err(e) = txn.commit().await {
+					// Commit the transaction.
+					// If error undo results.
+					let e = if let Err(e) = txn.commit().await {
 						e
 					} else {
 						// Successfully commited. everything is fine.

@@ -89,6 +89,9 @@ impl Transaction {
 	/// This reverses all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn cancel(&self) -> Result<()> {
+		// Clear any buffered changefeed entries
+		self.cf.clear();
+		// Cancel the transaction
 		Ok(self.tr.cancel().await.map_err(Error::from)?)
 	}
 
@@ -97,6 +100,14 @@ impl Transaction {
 	/// This attempts to commit all changes made within the transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip_all)]
 	pub async fn commit(&self) -> Result<()> {
+		// Store any buffered changefeed entries
+		if let Err(e) = self.store_changes().await {
+			// Cancel the transaction if failure
+			let _ = self.cancel().await;
+			// Return the error
+			return Err(e);
+		}
+		// Commit the transaction
 		Ok(self.tr.commit().await.map_err(Error::from)?)
 	}
 
@@ -689,7 +700,7 @@ impl Transaction {
 	//
 	// This function should be called immediately before calling the commit function
 	// to ensure the timestamp reflects the actual commit time.
-	pub(crate) async fn complete_changes(&self) -> Result<()> {
+	pub(crate) async fn store_changes(&self) -> Result<()> {
 		// Get the current transaction timestamp
 		let ts = self.timestamp().await?;
 		// Convert timestamp to bytes for changefeed key
