@@ -14,7 +14,7 @@ use crate::syn::token::{Glued, Span, TokenKind, t};
 impl Parser<'_> {
 	pub(super) fn peek_continues_idiom(&mut self) -> bool {
 		let peek = self.peek().kind;
-		if matches!(peek, t!("->") | t!("[") | t!(".") | t!("...") | t!("?")) {
+		if matches!(peek, t!("->") | t!("[") | t!(".") | t!("...")) {
 			return true;
 		}
 		peek == t!("<") && matches!(self.peek1().kind, t!("-") | t!("~") | t!("->"))
@@ -86,10 +86,6 @@ impl Parser<'_> {
 		let mut res = start;
 		loop {
 			match self.peek_kind() {
-				t!("?") => {
-					self.pop_peek();
-					res.push(Part::Optional);
-				}
 				t!("...") => {
 					self.pop_peek();
 					res.push(Part::Flatten);
@@ -162,10 +158,6 @@ impl Parser<'_> {
 		let mut res = start;
 		loop {
 			match self.peek_kind() {
-				t!("?") => {
-					self.pop_peek();
-					res.push(Part::Optional);
-				}
 				t!("...") => {
 					self.pop_peek();
 					res.push(Part::Flatten);
@@ -247,6 +239,10 @@ impl Parser<'_> {
 	/// Parse the part after the `.` in a idiom
 	pub(super) async fn parse_dot_part(&mut self, stk: &mut Stk) -> ParseResult<Part> {
 		let res = match self.peek_kind() {
+			t!("?") => {
+				self.pop_peek();
+				Part::Optional
+			}
 			t!("*") => {
 				self.pop_peek();
 				Part::All

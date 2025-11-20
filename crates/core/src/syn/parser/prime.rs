@@ -366,6 +366,7 @@ impl Parser<'_> {
 				let value = stk.run(|ctx| this.parse_expr_inherit(ctx)).await?;
 				exprs.push(value);
 
+
 				if !this.eat(t!(",")) {
 					this.expect_closing_delimiter(t!("]"), start)?;
 					break;

@@ -390,11 +390,10 @@ impl Parser<'_> {
 			t!("&&") | t!("AND") => BinaryOperator::And,
 			t!("?:") => BinaryOperator::TenaryCondition,
 			t!("?") => {
-				if self.peek_whitespace1().kind == t!("?") {
-					BinaryOperator::NullCoalescing
-				} else {
+				if !self.eat_whitespace(t!("?")) {
 					unexpected!(self, token, "`??`")
 				}
+				BinaryOperator::NullCoalescing
 			}
 			t!("==") => BinaryOperator::ExactEqual,
 			t!("!=") => BinaryOperator::NotEqual,

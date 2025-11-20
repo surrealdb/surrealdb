@@ -55,10 +55,10 @@ impl Display for DefineAccessStatement {
 				Some(ref dur) => write!(f, "{}", dur)?,
 				None => f.write_str("NONE")?,
 			}
-			f.write_str(", ")?;
+			f.write_str(",")?;
 		}
 
-		f.write_str(" FOR SESSION")?;
+		f.write_str(" FOR SESSION ")?;
 		match self.duration.session {
 			Some(Expr::Literal(Literal::None)) => f.write_str("(NONE)")?,
 			Some(ref dur) => write!(f, "{}", dur)?,
