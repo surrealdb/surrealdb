@@ -11,13 +11,13 @@ value = "[{ bar: 'hello', foo: 'World', id: table:2 }]"
 value = "[{ bar: 'world', id: table:3 }]"
 
 [[test.results]]
-value = '''[{ detail: { direction: 'forward', range: 1..4, table: 'table' }, operation: 'Iterate Range Count' }, { detail: { "Aggregate expressions": {  }, Aggregations: { _a0: 'Count' }, "Group expressions": {  }, "Select expression": { count: '_a0' }, type: 'Group' }, operation: 'Collector' }]'''
+value = '''[{ detail: { direction: 'forward', range: 1..4, table: 'table' }, operation: 'Iterate Range' }, { detail: { "Aggregate expressions": {  }, Aggregations: { _a0: 'Count' }, "Group expressions": {  }, "Select expression": { count: '_a0' }, type: 'Group' }, operation: 'Collector' }]'''
 
 [[test.results]]
 value = "[{ count: 3 }]"
 
 [[test.results]]
-value = "[{ detail: { direction: 'forward', range: 1..4, table: 'table' }, operation: 'Iterate Range Keys' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
+value = "[{ detail: { direction: 'forward', range: 1..4, table: 'table' }, operation: 'Iterate Range' }, { detail: { type: 'Memory' }, operation: 'Collector' }]"
 
 [[test.results]]
 value = "[{ count: 1 }, { count: 1 }, { count: 1 }]"
