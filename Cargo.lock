@@ -6740,7 +6740,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surreal"
-version = "3.0.0-alpha.13"
+version = "3.0.0-alpha.14"
 dependencies = [
  "assert_fs",
  "chrono",
@@ -6772,7 +6772,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb"
-version = "3.0.0-alpha.13"
+version = "3.0.0-alpha.14"
 dependencies = [
  "arrayvec",
  "async-channel",
@@ -6834,7 +6834,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-core"
-version = "3.0.0-alpha.13"
+version = "3.0.0-alpha.14"
 dependencies = [
  "addr",
  "affinitypool",
@@ -7000,7 +7000,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-server"
-version = "3.0.0-alpha.13"
+version = "3.0.0-alpha.14"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -7108,7 +7108,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types"
-version = "3.0.0-alpha.13"
+version = "3.0.0-alpha.14"
 dependencies = [
  "anyhow",
  "bytes",
@@ -7133,7 +7133,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types-derive"
-version = "3.0.0-alpha.13"
+version = "3.0.0-alpha.14"
 dependencies = [
  "proc-macro2",
  "quote",
