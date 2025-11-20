@@ -1,18 +1,19 @@
 #![cfg(feature = "kv-rocksdb")]
 
 mod cnf;
+mod dsm;
 
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::thread;
 use std::time::Duration;
 
+use dsm::{DiskSpaceManager, DiskSpaceState, TransactionState};
 use rocksdb::{
-	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, Env, FlushOptions, LogLevel,
-	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, SstFileManager,
-	WriteOptions,
+	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel,
+	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
 };
 use tokio::sync::Mutex;
 
@@ -30,24 +31,6 @@ pub struct Datastore {
 	disk_space_manager: Option<DiskSpaceManager>,
 }
 
-/// Manages disk space monitoring and enforces space limits for the RocksDB datastore.
-///
-/// This manager tracks SST file space usage and implements a state machine to transition
-/// the datastore between normal operation and read-and-deletion-only mode based on
-/// configured space limits. It provides gradual degradation of service rather than
-/// abrupt failures when disk space is constrained.
-#[derive(Clone)]
-struct DiskSpaceManager {
-	/// SST file manager for monitoring space usage
-	sst_file_manager: Arc<SstFileManager>,
-	/// The maximum space usage allowed for the database.
-	read_and_deletion_limit: u64,
-	/// The number of bytes for 80% of the allowed space usage.
-	limit_80: u64,
-	/// Indicates if the warning for 80% full has been logged
-	warn_80_percent_logged: Arc<AtomicBool>,
-}
-
 pub struct Transaction {
 	/// Is the transaction complete?
 	done: AtomicBool,
@@ -56,98 +39,16 @@ pub struct Transaction {
 	/// The underlying datastore transaction
 	inner: Mutex<Option<rocksdb::Transaction<'static, OptimisticTransactionDB>>>,
 	/// The read options containing the Snapshot
-	ro: ReadOptions,
+	read_options: ReadOptions,
+	/// The current transaction state
+	transaction_state: Arc<AtomicU8>,
+	/// Reference to the disk space manager for checking current operational state during commit.
+	disk_space_manager: Option<DiskSpaceManager>,
 	// The above, supposedly 'static transaction
 	// actually points here, so we need to ensure
 	// the memory is kept alive. This pointer must
 	// be declared last, so that it is dropped last.
 	db: Pin<Arc<OptimisticTransactionDB>>,
-	/// The operational state when this transaction was created.
-	/// If `true`, the datastore was in read-and-deletion-only mode, so only deletions are allowed.
-	/// If `false`, all write operations are permitted.
-	deletion_only: bool,
-	/// Tracks the types of write operations performed in this transaction.
-	/// - `None`: No write operations have been performed yet
-	/// - `Some(true)`: Only deletion operations have been performed
-	/// - `Some(false)`: At least one non-deletion write operation has been performed
-	///
-	/// Used during commit to validate transactions started before the datastore entered
-	/// deletion-only mode.
-	contains_only_deletions: Option<bool>,
-	/// Reference to the disk space manager for checking current operational state during commit.
-	disk_space_manager: Option<DiskSpaceManager>,
-}
-
-impl DiskSpaceManager {
-	/// Creates a new disk space manager with the specified space limit.
-	///
-	/// # Parameters
-	/// - `limit`: The maximum allowed SST file space usage in bytes
-	/// - `opts`: RocksDB options to configure with the SST file manager
-	///
-	/// # Implementation Details
-	/// This method disables RocksDB's built-in hard limit enforcement and instead
-	/// implements application-level space management at the transaction level.
-	/// This approach provides more graceful degradation and allows deletions to
-	/// free space even when the limit is reached.
-	fn new(limit: u64, opts: &mut Options) -> Result<Self> {
-		let env = Env::new()?;
-		let sst_file_manager = SstFileManager::new(&env)?;
-		// Disable RocksDB's built-in hard limit (set to 0 = unlimited).
-		// This prevents RocksDB from blocking writes due to temporary size spikes from
-		// write buffering and pending compactions. Instead, the application manages space
-		// restrictions at the transaction level through state transitions, providing more
-		// graceful handling and allowing deletions to free space.
-		sst_file_manager.set_max_allowed_space_usage(0);
-		opts.set_sst_file_manager(&sst_file_manager);
-		Ok(Self {
-			sst_file_manager: Arc::new(sst_file_manager),
-			read_and_deletion_limit: limit,
-			limit_80: (limit as f64 * 0.8) as u64,
-			warn_80_percent_logged: Arc::new(AtomicBool::new(false)),
-		})
-	}
-
-	/// Checks the datastore operational state based on SST file space usage.
-	///
-	/// This method implements a state machine that transitions between two modes:
-	/// - Normal: All operations allowed (write, read, delete)
-	/// - ReadAndDeletionOnly: Only read and delete operations allowed, writes are blocked
-	///
-	/// State transitions:
-	/// - Normal → ReadAndDeletionOnly: When SST file space usage reaches the configured limit
-	/// - ReadAndDeletionOnly → Normal: When space usage drops below the configured limit (after
-	///   deletions and compaction free up space)
-	///
-	/// Returns `true` if the datastore is in read-and-deletion-only mode, `false` otherwise.
-	/// When `true`, write operations will be rejected with `Error::ReadAndDeleteOnly`.
-	fn is_deletion_only(&self) -> bool {
-		let current_size = self.sst_file_manager.get_total_size();
-		if current_size < self.limit_80 {
-			self.warn_80_percent_logged.store(false, Ordering::Relaxed);
-			return false;
-		}
-		// Use compare_exchange to atomically check and set the flag, ensuring only one thread logs
-		// the warning
-		if self
-			.warn_80_percent_logged
-			.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
-			.is_ok()
-		{
-			warn!(target: TARGET, "SST file space usage is at 80% of the limit ({})", current_size);
-		}
-		// Check current size against the application limit
-		// Transition to read-and-deletion-only mode when the primary limit is exceeded
-		if current_size < self.read_and_deletion_limit {
-			return false;
-		}
-		warn!(
-			target: TARGET,
-			"Transitioning to read-and-deletion-only mode due to primary limit ({}) being reached",
-			current_size
-		);
-		true
-	}
 }
 
 impl Datastore {
@@ -357,7 +258,7 @@ impl Datastore {
 					// Wait for the specified interval
 					thread::sleep(Duration::from_millis(wait));
 					// Flush the WAL to disk periodically
-					if let Err(err) = dbc.flush_wal(*cnf::SYNC_DATA) {
+					if let Err(err) = dbc.flush_wal(true) {
 						error!("Failed to flush WAL: {err}");
 					}
 				}
@@ -383,14 +284,6 @@ impl Datastore {
 		}
 		// All good
 		Ok(())
-	}
-
-	/// Checks if the datastore is currently in read-and-deletion-only mode.
-	///
-	/// Returns `true` if the SST file space usage has exceeded the configured limit,
-	/// `false` otherwise. When no space limit is configured, always returns `false`.
-	fn is_deletion_only(&self) -> bool {
-		self.disk_space_manager.as_ref().map(|dsm| dsm.is_deletion_only()).unwrap_or(false)
 	}
 
 	/// Start a new transaction
@@ -424,100 +317,61 @@ impl Datastore {
 			done: AtomicBool::new(false),
 			write,
 			inner: Mutex::new(Some(inner)),
-			ro,
-			db: self.db.clone(),
-			deletion_only: self.is_deletion_only(),
-			contains_only_deletions: None,
+			read_options: ro,
+			transaction_state: Arc::new(Default::default()),
 			disk_space_manager: self.disk_space_manager.clone(),
+			db: self.db.clone(),
 		}))
 	}
 }
 
-/*impl Transaction {
-	/// Validates that a read operation can be performed in the current transaction.
-	///
-	/// This method checks:
-	/// 1. Version parameter is None (RocksDB doesn't support versioned queries)
-	/// 2. Transaction is still open (not committed or cancelled)
-	///
-	/// Read operations are allowed in all datastore states, so no state checking is needed.
-	fn ensure_read(&self, version: Option<u64>) -> Result<()> {
-		// RocksDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
+impl Transaction {
+	/// Get the current transaction state
+	fn current_state(&self) -> TransactionState {
+		match self.transaction_state.load(Ordering::Acquire) {
+			0 => TransactionState::ReadsOnly,
+			1 => TransactionState::HasDeletes,
+			2 => TransactionState::HasWrites,
+			_ => unreachable!(),
 		}
-		// Check to see if transaction is closed
-		if self.done.load(Ordering::Relaxed) {
-			return Err(Error::TransactionFinished);
-		}
-		// Continue
-		Ok(())
 	}
 
-	/// Validates that a write operation can be performed in the current transaction.
-	///
-	/// This method checks multiple conditions before allowing a write:
-	/// 1. Datastore state allows writes (not in read-only or read-and-deletion-only mode)
-	/// 2. Version parameter is None (RocksDB doesn't support versioned queries)
-	/// 3. Transaction is still open (not committed or cancelled)
-	/// 4. Transaction was created as writable
-	///
-	/// Returns an appropriate error if any validation fails.
-	fn ensure_write(&self, version: Option<u64>) -> Result<()> {
-		// if self.deletion_only {
-		// 	return Err(Error::ReadAndDeleteOnly);
-		// }
-		// RocksDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
+	/// Mark the transaction as containing deletes
+	fn store_deletes(&self) {
+		if self.current_state() < TransactionState::HasDeletes {
+			self.transaction_state.store(TransactionState::HasDeletes as u8, Ordering::Release);
 		}
-		// Check to see if transaction is closed
-		if self.done.load(Ordering::Relaxed) {
-			return Err(Error::TransactionFinished);
-		}
-		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TransactionReadonly);
-		}
-		// Mark this transaction as containing non-deletion operations
-		// self.contains_only_deletions = Some(false);
-		// Continue
-		Ok(())
 	}
 
-	/// Validates that a delete operation can be performed in the current transaction.
-	///
-	/// This method checks conditions before allowing a deletion:
-	/// 1. Version parameter is None (RocksDB doesn't support versioned queries)
-	/// 2. Transaction is still open (not committed or cancelled)
-	/// 3. Transaction was created as writable
-	///
-	/// Unlike `ensure_write()`, this method does NOT check the `deletion_only` flag,
-	/// allowing deletions even in read-and-deletion-only mode. This enables space recovery
-	/// when the datastore is in a restricted state due to space limits.
-	///
-	/// Returns an appropriate error if any validation fails.
-	fn ensure_deletion(&self, version: Option<u64>) -> Result<()> {
-		// RocksDB does not support versioned queries.
-		if version.is_some() {
-			return Err(Error::UnsupportedVersionedQueries);
+	/// Mark the transaction as containing writes
+	fn store_writes(&self) {
+		if self.current_state() < TransactionState::HasWrites {
+			self.transaction_state.store(TransactionState::HasWrites as u8, Ordering::Release);
 		}
-		// Check to see if transaction is closed
-		if self.done.load(Ordering::Relaxed) {
-			return Err(Error::TransactionFinished);
-		}
-		// Check to see if transaction is writable
-		if !self.write {
-			return Err(Error::TransactionReadonly);
-		}
-		// Mark this transaction as containing only deletions if no writes have been performed yet
-		// if self.contains_only_deletions.is_none() {
-		// 	self.contains_only_deletions = Some(true);
-		// }
-		// Continue
-		Ok(())
 	}
-}*/
+
+	/// Check if the transaction contains writes
+	fn contains_deletes(&self) -> bool {
+		self.current_state() == TransactionState::HasDeletes
+	}
+
+	/// Check if the transaction contains writes
+	fn contains_writes(&self) -> bool {
+		self.current_state() == TransactionState::HasWrites
+	}
+
+	/// Check if disk space is restricted
+	fn is_restricted(&self, cached: bool) -> bool {
+		if let Some(dsm) = self.disk_space_manager.as_ref() {
+			match cached {
+				true => dsm.cached_state() == DiskSpaceState::ReadAndDeletionOnly,
+				false => dsm.latest_state() == DiskSpaceState::ReadAndDeletionOnly,
+			}
+		} else {
+			false
+		}
+	}
+}
 
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
@@ -567,17 +421,13 @@ impl Transactable for Transaction {
 		if !self.writeable() {
 			return Err(Error::TransactionReadonly);
 		}
-		// Mark this transaction as done
-		self.done.store(true, Ordering::Release);
 		// Check if we are in read-and-deletion-only mode
-		// This is used for long duration transactions that would have started before disk
-		// conditions changed
-		if let Some(disk_space_manager) = self.disk_space_manager.as_ref()
-			&& disk_space_manager.is_deletion_only()
-			&& self.contains_only_deletions == Some(false)
-		{
+		if self.is_restricted(false) && self.contains_writes() {
 			return Err(Error::ReadAndDeleteOnly);
 		}
+		//
+		// Mark this transaction as done
+		self.done.store(true, Ordering::Release);
 		// Get the inner transaction
 		let inner = self
 			.inner
@@ -587,10 +437,8 @@ impl Transactable for Transaction {
 			.ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Commit this transaction
 		inner.commit()?;
-		// If transaction was created in read-and-deletion-only mode, trigger compaction to reclaim
-		// disk space from deleted keys. This helps the datastore transition back to normal mode
-		// when space usage drops below the limit.
-		if self.deletion_only {
+		// Perform compaction if necessary
+		if self.is_restricted(false) && self.contains_deletes() {
 			self.db.compact_range::<&[u8], &[u8]>(None, None);
 		}
 		// Continue
@@ -614,7 +462,7 @@ impl Transactable for Transaction {
 		let inner =
 			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Get the key
-		let res = inner.get_pinned_opt(key, &self.ro)?.is_some();
+		let res = inner.get_pinned_opt(key, &self.read_options)?.is_some();
 		// Return result
 		Ok(res)
 	}
@@ -636,7 +484,7 @@ impl Transactable for Transaction {
 		let inner =
 			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Get the key
-		let res = inner.get_opt(key, &self.ro)?;
+		let res = inner.get_opt(key, &self.read_options)?;
 		// Return result
 		Ok(res)
 	}
@@ -658,7 +506,7 @@ impl Transactable for Transaction {
 		let inner =
 			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Get the keys
-		let res = inner.multi_get_opt(keys, &self.ro);
+		let res = inner.multi_get_opt(keys, &self.read_options);
 		// Convert result
 		let res = res.into_iter().map(|r| r.map_err(Into::into)).collect::<Result<_>>()?;
 		// Return result
@@ -680,6 +528,10 @@ impl Transactable for Transaction {
 		if !self.writeable() {
 			return Err(Error::TransactionReadonly);
 		}
+		// Check if we are in read-and-deletion-only mode
+		if self.is_restricted(true) {
+			return Err(Error::ReadAndDeleteOnly);
+		}
 		// Lock the inner transaction
 		let inner = self.inner.lock().await;
 		// Get the inner transaction
@@ -687,6 +539,8 @@ impl Transactable for Transaction {
 			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Set the key
 		inner.put(key, val)?;
+		// Mark this transaction as containing a write operation
+		self.store_writes();
 		// Return result
 		Ok(())
 	}
@@ -706,16 +560,22 @@ impl Transactable for Transaction {
 		if !self.writeable() {
 			return Err(Error::TransactionReadonly);
 		}
+		// Check if we are in read-and-deletion-only mode
+		if self.is_restricted(true) {
+			return Err(Error::ReadAndDeleteOnly);
+		}
 		// Lock the inner transaction
 		let inner = self.inner.lock().await;
 		// Get the inner transaction
 		let inner =
 			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Set the key if empty
-		match inner.get_pinned_opt(&key, &self.ro)? {
+		match inner.get_pinned_opt(&key, &self.read_options)? {
 			None => inner.put(key, val)?,
 			_ => return Err(Error::TransactionKeyAlreadyExists),
 		};
+		// Mark this transaction as containing a write operation
+		self.store_writes();
 		// Return result
 		Ok(())
 	}
@@ -731,17 +591,23 @@ impl Transactable for Transaction {
 		if !self.writeable() {
 			return Err(Error::TransactionReadonly);
 		}
+		// Check if we are in read-and-deletion-only mode
+		if self.is_restricted(true) {
+			return Err(Error::ReadAndDeleteOnly);
+		}
 		// Lock the inner transaction
 		let inner = self.inner.lock().await;
 		// Get the inner transaction
 		let inner =
 			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Set the key if empty
-		match (inner.get_pinned_opt(&key, &self.ro)?, chk) {
+		match (inner.get_pinned_opt(&key, &self.read_options)?, chk) {
 			(Some(v), Some(w)) if v.eq(&w) => inner.put(key, val)?,
 			(None, None) => inner.put(key, val)?,
 			_ => return Err(Error::TrandsactionConditionNotMet),
 		};
+		// Mark this transaction as containing a write operation
+		self.store_writes();
 		// Return result
 		Ok(())
 	}
@@ -764,6 +630,8 @@ impl Transactable for Transaction {
 			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Remove the key
 		inner.delete(key)?;
+		// Mark this transaction as containing a delete operation
+		self.store_deletes();
 		// Return result
 		Ok(())
 	}
@@ -785,11 +653,13 @@ impl Transactable for Transaction {
 		let inner =
 			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Delete the key if valid
-		match (inner.get_pinned_opt(&key, &self.ro)?, chk) {
+		match (inner.get_pinned_opt(&key, &self.read_options)?, chk) {
 			(Some(v), Some(w)) if v.eq(&w) => inner.delete(key)?,
 			(None, None) => inner.delete(key)?,
 			_ => return Err(Error::TrandsactionConditionNotMet),
 		};
+		// Mark this transaction as containing a delete operation
+		self.store_deletes();
 		// Return result
 		Ok(())
 	}
