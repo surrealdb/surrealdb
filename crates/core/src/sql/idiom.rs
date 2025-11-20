@@ -45,7 +45,7 @@ impl From<ExprIdioms> for Idioms {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub(crate) struct Idiom(pub(crate) Vec<Part>);
+pub struct Idiom(pub(crate) Vec<Part>);
 
 impl Idiom {
 	/// Simplifies this Idiom for use in object keys

@@ -73,7 +73,7 @@ pub(crate) use self::fetch::{Fetch, Fetchs};
 pub(crate) use self::field::{Field, Fields};
 pub(crate) use self::function::{Function, FunctionCall};
 pub(crate) use self::group::{Group, Groups};
-pub(crate) use self::idiom::Idiom;
+pub use self::idiom::Idiom;
 pub(crate) use self::index::Index;
 pub(crate) use self::kind::Kind;
 pub(crate) use self::limit::Limit;
@@ -84,7 +84,7 @@ pub(crate) use self::model::Model;
 #[cfg_attr(not(feature = "surrealism"), allow(unused_imports))]
 pub(crate) use self::module::{ModuleExecutable, ModuleName, SiloExecutable, SurrealismExecutable};
 pub(crate) use self::operator::{AssignOperator, BinaryOperator, PostfixOperator, PrefixOperator};
-pub(crate) use self::order::Order;
+pub use self::order::{Order, OrderList, Ordering};
 pub(crate) use self::output::Output;
 pub(crate) use self::param::Param;
 pub(crate) use self::part::Part;
