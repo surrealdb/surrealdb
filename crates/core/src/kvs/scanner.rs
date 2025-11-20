@@ -161,10 +161,10 @@ impl<'a, I> Scanner<'a, I> {
 								(self.current_batch_size * 2).min(*MAX_BATCH_SIZE);
 							// Swap prefetch into main and return first item
 							std::mem::swap(&mut self.results, &mut self.prefetch_results);
-							// Update the active result count
-							self.active_result_count = self.results.len();
 							// Remove the first result to return
 							let item = self.results.pop_front().expect("results should have items");
+							// Update the active result count
+							self.active_result_count = self.results.len();
 							// Return the first result
 							return Poll::Ready(Some(Ok(item)));
 						}
@@ -230,13 +230,13 @@ impl<'a, I> Scanner<'a, I> {
 						}
 						// Store the fetched results
 						self.results.extend(v);
-						// Update the active result count
-						self.active_result_count = self.results.len();
 						// Store the latest batch size
 						self.current_batch_size =
 							(self.current_batch_size * 2).min(*MAX_BATCH_SIZE);
 						// Remove the first result to return
 						let item = self.results.pop_front().expect("results should have items");
+						// Update the active result count
+						self.active_result_count = self.results.len();
 						// Return the first result
 						Poll::Ready(Some(Ok(item)))
 					}
