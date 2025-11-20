@@ -1323,34 +1323,6 @@ criteria = "safe-to-deploy"
 version = "0.5.4"
 criteria = "safe-to-deploy"
 
-[[exemptions.surrealdb-librocksdb-sys]]
-version = "0.17.3+10.6.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.surrealdb-rocksdb]]
-version = "0.24.0-surreal.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.surrealism]]
-version = "0.1.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.surrealism-cli]]
-version = "0.1.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.surrealism-macros]]
-version = "0.1.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.surrealism-runtime]]
-version = "0.1.1"
-criteria = "safe-to-deploy"
-
-[[exemptions.surrealism-types]]
-version = "0.1.1"
-criteria = "safe-to-deploy"
-
 [[exemptions.symbolic-common]]
 version = "12.16.3"
 criteria = "safe-to-deploy"
