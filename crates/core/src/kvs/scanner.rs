@@ -133,7 +133,7 @@ impl<'a, I> Scanner<'a, I> {
 						Ok(v) if !v.is_empty() => {
 							// Update limit
 							if let Some(l) = &mut self.limit {
-								*l -= v.len();
+								*l = l.saturating_sub(v.len());
 								if *l == 0 {
 									self.exhausted = true;
 								}
@@ -204,7 +204,7 @@ impl<'a, I> Scanner<'a, I> {
 					Ok(v) if !v.is_empty() => {
 						// Update limit
 						if let Some(l) = &mut self.limit {
-							*l -= v.len();
+							*l = l.saturating_sub(v.len());
 							if *l == 0 {
 								self.exhausted = true;
 							}
