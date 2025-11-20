@@ -503,17 +503,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// Get the current monotonic timestamp
 	#[cfg(not(test))]
 	async fn timestamp(&self) -> Result<Box<dyn Timestamp>> {
-		#[cfg(not(target_family = "wasm"))]
-		use std::time::{SystemTime, UNIX_EPOCH};
-
-		#[cfg(target_family = "wasm")]
-		use wasmtimer::std::{SystemTime, UNIX_EPOCH};
-		Ok(Box::new(
-			SystemTime::now()
-				.duration_since(UNIX_EPOCH)
-				.expect("system time can not be before 1970-01-01 00:00:00 UTC")
-				.as_nanos() as u64,
-		))
+		Ok(Box::new(super::timestamp::HlcTimestamp::next()))
 	}
 
 	/// Convert a versionstamp to timestamp bytes for this storage engine
