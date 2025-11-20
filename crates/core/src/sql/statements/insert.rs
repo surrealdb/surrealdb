@@ -1,9 +1,7 @@
 use std::fmt;
 
-use crate::{
-	fmt::CoverStmtsSql,
-	sql::{Data, Expr, Output, Timeout},
-};
+use crate::fmt::CoverStmtsSql;
+use crate::sql::{Data, Expr, Output, Timeout};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct InsertStatement {

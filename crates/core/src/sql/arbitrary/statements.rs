@@ -1,10 +1,10 @@
 use arbitrary::Arbitrary;
 
+use crate::sql::arbitrary::{arb_group, arb_order, arb_splits, arb_vec1, atleast_one, insert_data};
+use crate::sql::statements::define::{DefineAccessStatement, DefineUserStatement};
 use crate::sql::{
 	AccessType, Base, Data, DefineIndexStatement, Expr, Fields, Index, InsertStatement,
 	KillStatement, Literal, LiveStatement, SelectStatement, View,
-	arbitrary::{arb_group, arb_order, arb_splits, arb_vec1, atleast_one, insert_data},
-	statements::define::{DefineAccessStatement, DefineUserStatement},
 };
 
 impl<'a> Arbitrary<'a> for KillStatement {

@@ -2,14 +2,13 @@ mod idiom;
 mod parts;
 mod statements;
 mod utils;
-pub(crate) use idiom::*;
-pub(crate) use parts::*;
-pub(crate) use utils::*;
-
 use std::time;
 
 use arbitrary::{Arbitrary, Result, Unstructured};
+pub(crate) use idiom::*;
+pub(crate) use parts::*;
 use surrealdb_types::Duration;
+pub(crate) use utils::*;
 
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::statements::SleepStatement;

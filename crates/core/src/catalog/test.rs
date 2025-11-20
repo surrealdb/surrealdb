@@ -8,9 +8,10 @@ use uuid::Uuid;
 use super::*;
 use crate::catalog::record::{Data, Record};
 use crate::catalog::schema::base::Base;
+use crate::expr::field::Selector;
 use crate::expr::{
 	Block, ChangeFeed, Expr, Fetch, Fetchs, Field, Fields, Filter, Groups, Idiom, Kind, Literal,
-	Tokenizer, field::Selector,
+	Tokenizer,
 };
 use crate::iam::Auth;
 use crate::kvs::KVValue;

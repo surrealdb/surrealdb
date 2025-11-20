@@ -1,9 +1,7 @@
 use std::fmt::{self, Display};
 
-use crate::expr::{
-	Expr, Field, Literal,
-	field::{Fields, Selector},
-};
+use crate::expr::field::{Fields, Selector};
+use crate::expr::{Expr, Field, Literal};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) enum Output {

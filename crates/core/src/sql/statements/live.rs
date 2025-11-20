@@ -2,10 +2,8 @@ use std::fmt;
 
 use uuid::Uuid;
 
-use crate::{
-	fmt::CoverStmtsSql,
-	sql::{Cond, Expr, Fetchs, Fields},
-};
+use crate::fmt::CoverStmtsSql;
+use crate::sql::{Cond, Expr, Fetchs, Fields};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LiveStatement {

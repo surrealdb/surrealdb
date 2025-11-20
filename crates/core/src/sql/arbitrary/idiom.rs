@@ -1,11 +1,9 @@
 use arbitrary::Arbitrary;
 use rust_decimal::Decimal;
 
-use crate::sql::{
-	Expr, Idiom, Literal, Part, RecordIdLit,
-	arbitrary::{arb_opt, arb_vec1, atleast_one, record_id_key_no_range},
-	part::RecurseInstruction,
-};
+use crate::sql::arbitrary::{arb_opt, arb_vec1, atleast_one, record_id_key_no_range};
+use crate::sql::part::RecurseInstruction;
+use crate::sql::{Expr, Idiom, Literal, Part, RecordIdLit};
 
 impl<'a> Arbitrary<'a> for Idiom {
 	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {

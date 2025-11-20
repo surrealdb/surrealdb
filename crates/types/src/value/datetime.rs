@@ -112,9 +112,10 @@ impl Deref for Datetime {
 
 #[cfg(feature = "arbitrary")]
 mod arb {
-	use super::*;
 	use arbitrary::Arbitrary;
 	use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset};
+
+	use super::*;
 
 	impl<'a> Arbitrary<'a> for Datetime {
 		fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {

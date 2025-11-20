@@ -26,11 +26,10 @@ mod test;
 
 use anyhow::{Result, bail, ensure};
 use lexer::Lexer;
+pub use parser::ParserSettings;
 use parser::{ParseResult, Parser};
 use reblessive::{Stack, Stk};
 use token::t;
-
-pub use parser::ParserSettings;
 
 const TARGET: &str = "surrealdb::core::syn";
 

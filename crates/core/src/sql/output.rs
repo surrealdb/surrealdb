@@ -1,9 +1,7 @@
 use std::fmt::{self, Display};
 
-use crate::sql::{
-	Expr, Field, Literal,
-	field::{Fields, Selector},
-};
+use crate::sql::field::{Fields, Selector};
+use crate::sql::{Expr, Field, Literal};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

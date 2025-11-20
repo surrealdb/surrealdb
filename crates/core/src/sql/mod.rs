@@ -56,13 +56,12 @@ pub mod statements;
 #[cfg(feature = "arbitrary")]
 pub(crate) mod arbitrary;
 
+pub(crate) use self::access_type::AccessType;
+pub(crate) use self::algorithm::Algorithm;
 #[cfg(not(feature = "arbitrary"))]
 pub(crate) use self::ast::Ast;
 #[cfg(feature = "arbitrary")]
 pub use self::ast::Ast;
-
-pub(crate) use self::access_type::AccessType;
-pub(crate) use self::algorithm::Algorithm;
 pub(crate) use self::ast::TopLevelExpr;
 pub(crate) use self::base::Base;
 pub(crate) use self::block::Block;

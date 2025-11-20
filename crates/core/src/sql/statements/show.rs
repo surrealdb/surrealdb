@@ -2,7 +2,8 @@ use std::fmt;
 
 use surrealdb_types::ToSql;
 
-use crate::{fmt::EscapeKwFreeIdent, types::PublicDatetime};
+use crate::fmt::EscapeKwFreeIdent;
+use crate::types::PublicDatetime;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
