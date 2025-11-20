@@ -123,7 +123,7 @@ impl<'a> IndexOperation<'a> {
 					Err(e) => {
 						if matches!(
 							e.downcast_ref::<Error>(),
-							Some(Error::Kvs(crate::kvs::Error::TrandsactionConditionNotMet))
+							Some(Error::Kvs(crate::kvs::Error::TransactionConditionNotMet))
 						) {
 							Ok(())
 						} else {
@@ -164,7 +164,7 @@ impl<'a> IndexOperation<'a> {
 					Err(e) => {
 						if matches!(
 							e.downcast_ref::<Error>(),
-							Some(Error::Kvs(crate::kvs::Error::TrandsactionConditionNotMet))
+							Some(Error::Kvs(crate::kvs::Error::TransactionConditionNotMet))
 						) {
 							Ok(())
 						} else {

@@ -233,7 +233,7 @@ impl Transactable for Transaction {
 		match (inner.get(&key)?, chk) {
 			(Some(v), Some(w)) if v == w => inner.set(key, val)?,
 			(None, None) => inner.set(key, val)?,
-			_ => return Err(Error::TrandsactionConditionNotMet),
+			_ => return Err(Error::TransactionConditionNotMet),
 		};
 		// Return result
 		Ok(())
@@ -275,7 +275,7 @@ impl Transactable for Transaction {
 		match (inner.get(&key)?, chk) {
 			(Some(v), Some(w)) if v == w => inner.del(key)?,
 			(None, None) => inner.del(key)?,
-			_ => return Err(Error::TrandsactionConditionNotMet),
+			_ => return Err(Error::TransactionConditionNotMet),
 		};
 		// Return result
 		Ok(())
@@ -317,7 +317,7 @@ impl Transactable for Transaction {
 		match (inner.get(&key)?, chk) {
 			(Some(v), Some(w)) if v == w => inner.del(key)?,
 			(None, None) => inner.del(key)?,
-			_ => return Err(Error::TrandsactionConditionNotMet),
+			_ => return Err(Error::TransactionConditionNotMet),
 		};
 		// Return result
 		Ok(())

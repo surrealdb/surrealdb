@@ -50,7 +50,7 @@ pub enum Error {
 
 	/// The conditional value in the request was not equal
 	#[error("Value being checked was not correct")]
-	TrandsactionConditionNotMet,
+	TransactionConditionNotMet,
 
 	/// The key being inserted in the transaction already exists
 	#[error("The key being inserted already exists")]
@@ -81,7 +81,7 @@ impl From<surrealmx::Error> for Error {
 	fn from(e: surrealmx::Error) -> Error {
 		match e {
 			surrealmx::Error::TxNotWritable => Error::TransactionReadonly,
-			surrealmx::Error::ValNotExpectedValue => Error::TrandsactionConditionNotMet,
+			surrealmx::Error::ValNotExpectedValue => Error::TransactionConditionNotMet,
 			surrealmx::Error::TxClosed => Error::TransactionFinished,
 			surrealmx::Error::KeyAlreadyExists => Error::TransactionKeyAlreadyExists,
 			surrealmx::Error::KeyReadConflict => Error::TransactionConflict(e.to_string()),
@@ -123,7 +123,7 @@ impl From<indxdb::Error> for Error {
 			indxdb::Error::TxClosed => Error::TransactionFinished,
 			indxdb::Error::TxNotWritable => Error::TransactionReadonly,
 			indxdb::Error::KeyAlreadyExists => Error::TransactionKeyAlreadyExists,
-			indxdb::Error::ValNotExpectedValue => Error::TrandsactionConditionNotMet,
+			indxdb::Error::ValNotExpectedValue => Error::TransactionConditionNotMet,
 			_ => Error::Transaction(e.to_string()),
 		}
 	}

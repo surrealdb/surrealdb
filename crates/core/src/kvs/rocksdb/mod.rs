@@ -604,7 +604,7 @@ impl Transactable for Transaction {
 		match (inner.get_pinned_opt(&key, &self.read_options)?, chk) {
 			(Some(v), Some(w)) if v.eq(&w) => inner.put(key, val)?,
 			(None, None) => inner.put(key, val)?,
-			_ => return Err(Error::TrandsactionConditionNotMet),
+			_ => return Err(Error::TransactionConditionNotMet),
 		};
 		// Mark this transaction as containing a write operation
 		self.store_writes();
@@ -656,7 +656,7 @@ impl Transactable for Transaction {
 		match (inner.get_pinned_opt(&key, &self.read_options)?, chk) {
 			(Some(v), Some(w)) if v.eq(&w) => inner.delete(key)?,
 			(None, None) => inner.delete(key)?,
-			_ => return Err(Error::TrandsactionConditionNotMet),
+			_ => return Err(Error::TransactionConditionNotMet),
 		};
 		// Mark this transaction as containing a delete operation
 		self.store_deletes();

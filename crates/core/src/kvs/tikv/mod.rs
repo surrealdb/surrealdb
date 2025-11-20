@@ -366,7 +366,7 @@ impl Transactable for Transaction {
 		match (&current, &chk) {
 			(Some(v), Some(w)) if v == w => {}
 			(None, None) => {}
-			_ => return Err(Error::TrandsactionConditionNotMet),
+			_ => return Err(Error::TransactionConditionNotMet),
 		};
 		// Set the key
 		inner.tx.put(key.clone(), val).await?;
@@ -436,7 +436,7 @@ impl Transactable for Transaction {
 		match (&current, &chk) {
 			(Some(v), Some(w)) if v == w => {}
 			(None, None) => {}
-			_ => return Err(Error::TrandsactionConditionNotMet),
+			_ => return Err(Error::TransactionConditionNotMet),
 		};
 		// Delete the key
 		inner.tx.delete(key.clone()).await?;
