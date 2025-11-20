@@ -88,7 +88,7 @@ pub static INDEXING_BATCH_SIZE: LazyLock<u32> =
 	lazy_env_parse!("SURREAL_INDEXING_BATCH_SIZE", u32, 250);
 
 /// The maximum batch size for Scanner adaptive fetching (default: 10,000)
-pub static MAX_BATCH_SIZE: LazyLock<u32> = lazy_env_parse!("SURREAL_MAX_BATCH_SIZE", u32, 10_000);
+pub static MAX_BATCH_SIZE: LazyLock<u32> = lazy_env_parse!("SURREAL_MAX_BATCH_SIZE", u32, 5_000);
 
 /// The maximum size of the priority queue triggering usage of the priority
 /// queue for the result collector.
