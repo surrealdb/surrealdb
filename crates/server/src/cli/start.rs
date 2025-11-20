@@ -243,12 +243,27 @@ pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
 	let datastore = Arc::new(dbs::init::<C>(&composer, &config, canceller.clone(), dbs).await?);
 	// Start the node agent
 	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &config.engine);
+
+	// Check if gRPC is allowed
+	let grpc_allowed = datastore
+		.get_capabilities()
+		.allows_experimental(&surrealdb_core::dbs::capabilities::ExperimentalTarget::Grpc);
+
+	if grpc_allowed {
+		warn!("❌🔒IMPORTANT: gRPC is a pre-release feature. Use with caution.🔒❌");
+	}
+
 	// Start both HTTP and gRPC servers concurrently
 	// Build and run the servers using the provided RouterFactory implementation
-	tokio::try_join!(
-		ntw::init::<C>(&config, datastore.clone(), canceller.clone()),
-		ntw::grpc::init(&config, datastore.clone(), canceller.clone())
-	)?;
+	tokio::try_join!(ntw::init::<C>(&config, datastore.clone(), canceller.clone()), async {
+		if grpc_allowed {
+			ntw::grpc::init(&config, datastore.clone(), canceller.clone()).await
+		} else {
+			// If gRPC not allowed, just wait indefinitely (or until cancelled)
+			canceller.cancelled().await;
+			Ok(())
+		}
+	})?;
 	// Shutdown and stop closed tasks
 	canceller.cancel();
 	// Wait for background tasks to finish

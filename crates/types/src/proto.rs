@@ -21,8 +21,11 @@ use crate::{
 
 impl From<proto::Variables> for Variables {
 	fn from(proto_vars: proto::Variables) -> Self {
-		let map: BTreeMap<String, Value> =
-			proto_vars.variables.into_iter().map(|(k, v)| (k, Value::from(v))).collect();
+		let map: BTreeMap<String, Value> = proto_vars
+			.variables
+			.into_iter()
+			.map(|(k, v)| (k, Value::try_from(v).unwrap_or(Value::None)))
+			.collect();
 		Variables::from(map)
 	}
 }
@@ -41,68 +44,88 @@ impl From<Variables> for proto::Variables {
 // Value conversions
 // =============================================================================
 
-impl From<proto::Value> for Value {
-	fn from(proto_val: proto::Value) -> Self {
-		match proto_val.value {
-			None => Value::None,
-			Some(proto::value::Value::Null(_)) => Value::Null,
-			Some(proto::value::Value::Bool(b)) => Value::Bool(b),
-			Some(proto::value::Value::Int64(i)) => Value::Number(Number::Int(i)),
-			Some(proto::value::Value::Uint64(u)) => {
-				// Convert u64 to i64 if possible, otherwise to f64
-				if let Ok(i) = i64::try_from(u) {
-					Value::Number(Number::Int(i))
-				} else {
-					Value::Number(Number::Float(u as f64))
-				}
-			}
-			Some(proto::value::Value::Float64(f)) => Value::Number(Number::Float(f)),
-			Some(proto::value::Value::Decimal(d)) => {
+impl TryFrom<proto::Value> for Value {
+	type Error = anyhow::Error;
+
+	fn try_from(proto_val: proto::Value) -> Result<Self, Self::Error> {
+		let Some(value) = proto_val.value else {
+			return Ok(Value::None);
+		};
+
+		match value {
+			proto::value::Value::Null(_) => Ok(Value::Null),
+			proto::value::Value::Bool(b) => Ok(Value::Bool(b)),
+			proto::value::Value::Int64(i) => Ok(Value::Number(Number::Int(i))),
+			proto::value::Value::Float64(f) => Ok(Value::Number(Number::Float(f))),
+			proto::value::Value::Decimal(d) => {
 				// Parse decimal string
-				d.value.parse().map(Number::Decimal).map(Value::Number).unwrap_or(Value::None)
+				Ok(d.value.parse().map(Number::Decimal).map(Value::Number).unwrap_or(Value::None))
 			}
-			Some(proto::value::Value::String(s)) => Value::String(s),
-			Some(proto::value::Value::Bytes(b)) => Value::Bytes(Bytes::from(b.to_vec())),
-			Some(proto::value::Value::Duration(d)) => {
+			proto::value::Value::String(s) => Ok(Value::String(s)),
+			proto::value::Value::StringRecordId(s) => {
+				// StringRecordId is represented as a string in protobuf
+				// It should be parsed by the application layer if needed
+				Ok(Value::String(s))
+			}
+			proto::value::Value::Bytes(b) => Ok(Value::Bytes(Bytes::from(b.to_vec()))),
+			proto::value::Value::Duration(d) => {
 				// Convert prost Duration to std Duration
 				let secs = d.seconds as u64;
 				let nanos = d.nanos as u32;
-				Value::Duration(Duration(std::time::Duration::new(secs, nanos)))
+				Ok(Value::Duration(Duration(std::time::Duration::new(secs, nanos))))
 			}
-			Some(proto::value::Value::Datetime(ts)) => {
+			proto::value::Value::Datetime(ts) => {
 				// Convert prost Timestamp to chrono DateTime
-				chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32)
+				Ok(chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32)
 					.map(|dt| Value::Datetime(Datetime(dt)))
-					.unwrap_or(Value::None)
+					.unwrap_or(Value::None))
 			}
-			Some(proto::value::Value::Uuid(u)) => {
+			proto::value::Value::Uuid(u) => {
 				// Parse UUID string
-				u.value.parse().map(Uuid).map(Value::Uuid).unwrap_or(Value::None)
+				Ok(u.value.parse().map(Uuid).map(Value::Uuid).unwrap_or(Value::None))
 			}
-			Some(proto::value::Value::Geometry(g)) => {
-				Geometry::try_from(g).map(Value::Geometry).unwrap_or(Value::None)
+			proto::value::Value::Geometry(g) => {
+				Ok(Geometry::try_from(g).map(Value::Geometry).unwrap_or(Value::None))
 			}
-			Some(proto::value::Value::RecordId(r)) => {
-				RecordId::try_from(r).map(Value::RecordId).unwrap_or(Value::None)
+			proto::value::Value::Table(t) => {
+				Ok(Table::try_from(t).map(Value::Table).unwrap_or(Value::None))
 			}
-			Some(proto::value::Value::File(f)) => Value::File(File {
+			proto::value::Value::RecordId(r) => {
+				Ok(RecordId::try_from(r).map(Value::RecordId).unwrap_or(Value::None))
+			}
+			proto::value::Value::File(f) => Ok(Value::File(File {
 				bucket: f.bucket,
 				key: f.key,
-			}),
-			Some(proto::value::Value::Range(r)) => Value::Range(Box::new((*r).into())),
-			Some(proto::value::Value::Object(o)) => {
-				let map: BTreeMap<String, Value> =
-					o.items.into_iter().map(|(k, v)| (k, Value::from(v))).collect();
-				Value::Object(Object(map))
+			})),
+			proto::value::Value::Range(r) => Ok(Value::Range(Box::new((*r).into()))),
+			proto::value::Value::Object(o) => {
+				let map: BTreeMap<String, Value> = o
+					.items
+					.into_iter()
+					.map(|(k, v)| (k, Value::try_from(v).unwrap_or(Value::None)))
+					.collect();
+				Ok(Value::Object(Object(map)))
 			}
-			Some(proto::value::Value::Array(a)) => {
-				let values: Vec<Value> = a.values.into_iter().map(Value::from).collect();
-				Value::Array(Array(values))
+			proto::value::Value::Array(a) => {
+				let values: Vec<Value> = a
+					.values
+					.into_iter()
+					.map(|v| Value::try_from(v).unwrap_or(Value::None))
+					.collect();
+				Ok(Value::Array(Array(values)))
 			}
-			Some(proto::value::Value::Set(s)) => {
+			proto::value::Value::Set(s) => {
 				#[allow(clippy::mutable_key_type)]
-				let values: std::collections::BTreeSet<Value> = s.values.into_iter().map(Value::from).collect();
-				Value::Set(Set(values))
+				let values: std::collections::BTreeSet<Value> = s
+					.values
+					.into_iter()
+					.map(|v| Value::try_from(v).unwrap_or(Value::None))
+					.collect();
+				Ok(Value::Set(Set(values)))
+			}
+			proto::value::Value::Regex(r) => {
+				// Parse regex pattern
+				Ok(r.parse().map(crate::Regex).map(Value::Regex).unwrap_or(Value::None))
 			}
 		}
 	}
@@ -550,8 +573,12 @@ impl From<proto::Range> for Range {
 		let start = match r.start {
 			None => Bound::Unbounded,
 			Some(b) => match b.bound {
-				Some(proto::value_bound::Bound::Inclusive(v)) => Bound::Included(Value::from(*v)),
-				Some(proto::value_bound::Bound::Exclusive(v)) => Bound::Excluded(Value::from(*v)),
+				Some(proto::value_bound::Bound::Inclusive(v)) => {
+					Bound::Included(Value::try_from(*v).unwrap_or(Value::None))
+				}
+				Some(proto::value_bound::Bound::Exclusive(v)) => {
+					Bound::Excluded(Value::try_from(*v).unwrap_or(Value::None))
+				}
 				Some(proto::value_bound::Bound::Unbounded(_)) | None => Bound::Unbounded,
 			},
 		};
@@ -559,8 +586,12 @@ impl From<proto::Range> for Range {
 		let end = match r.end {
 			None => Bound::Unbounded,
 			Some(b) => match b.bound {
-				Some(proto::value_bound::Bound::Inclusive(v)) => Bound::Included(Value::from(*v)),
-				Some(proto::value_bound::Bound::Exclusive(v)) => Bound::Excluded(Value::from(*v)),
+				Some(proto::value_bound::Bound::Inclusive(v)) => {
+					Bound::Included(Value::try_from(*v).unwrap_or(Value::None))
+				}
+				Some(proto::value_bound::Bound::Exclusive(v)) => {
+					Bound::Excluded(Value::try_from(*v).unwrap_or(Value::None))
+				}
 				Some(proto::value_bound::Bound::Unbounded(_)) | None => Bound::Unbounded,
 			},
 		};
@@ -607,7 +638,8 @@ impl From<Range> for proto::Range {
 
 impl From<proto::Array> for Array {
 	fn from(a: proto::Array) -> Self {
-		let values: Vec<Value> = a.values.into_iter().map(Value::from).collect();
+		let values: Vec<Value> =
+			a.values.into_iter().map(|v| Value::try_from(v).unwrap_or(Value::None)).collect();
 		Array(values)
 	}
 }
@@ -623,8 +655,11 @@ impl From<Array> for proto::Array {
 
 impl From<proto::Object> for Object {
 	fn from(o: proto::Object) -> Self {
-		let map: BTreeMap<String, Value> =
-			o.items.into_iter().map(|(k, v)| (k, Value::from(v))).collect();
+		let map: BTreeMap<String, Value> = o
+			.items
+			.into_iter()
+			.map(|(k, v)| (k, Value::try_from(v).unwrap_or(Value::None)))
+			.collect();
 		Object(map)
 	}
 }
@@ -642,7 +677,8 @@ impl From<Object> for proto::Object {
 impl From<proto::Set> for Set {
 	fn from(s: proto::Set) -> Self {
 		#[allow(clippy::mutable_key_type)]
-		let values: std::collections::BTreeSet<Value> = s.values.into_iter().map(Value::from).collect();
+		let values: std::collections::BTreeSet<Value> =
+			s.values.into_iter().map(|v| Value::try_from(v).unwrap_or(Value::None)).collect();
 		Set(values)
 	}
 }
@@ -845,7 +881,7 @@ mod tests {
 		let proto = proto::Value {
 			value: None,
 		};
-		let value = Value::from(proto);
+		let value = Value::try_from(proto).unwrap();
 		assert_eq!(value, Value::None);
 	}
 
@@ -854,25 +890,8 @@ mod tests {
 		let proto = proto::Value {
 			value: Some(proto::value::Value::Null(proto::NullValue {})),
 		};
-		let value = Value::from(proto);
+		let value = Value::try_from(proto).unwrap();
 		assert_eq!(value, Value::Null);
-	}
-
-	#[test]
-	fn test_proto_to_value_uint64() {
-		// Test u64 that fits in i64
-		let proto = proto::Value {
-			value: Some(proto::value::Value::Uint64(100)),
-		};
-		let value = Value::from(proto);
-		assert_eq!(value, Value::Number(Number::Int(100)));
-
-		// Test u64 that doesn't fit in i64
-		let proto = proto::Value {
-			value: Some(proto::value::Value::Uint64(u64::MAX)),
-		};
-		let value = Value::from(proto);
-		assert!(matches!(value, Value::Number(Number::Float(_))));
 	}
 
 	// =============================================================================
@@ -1061,7 +1080,7 @@ mod tests {
 			])),
 		]));
 		let proto = proto::Value::from(value.clone());
-		let back = Value::from(proto);
+		let back = Value::try_from(proto).unwrap();
 		assert_eq!(value, back);
 	}
 
@@ -1075,7 +1094,7 @@ mod tests {
 
 		let value = Value::Object(Object(outer));
 		let proto = proto::Value::from(value.clone());
-		let back = Value::from(proto);
+		let back = Value::try_from(proto).unwrap();
 		assert_eq!(value, back);
 	}
 }

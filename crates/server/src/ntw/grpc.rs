@@ -448,7 +448,7 @@ impl SurrealDbService for SurrealDbGrpcService {
 
 		// Set the variable in the session using From trait
 		if let Some(value) = value {
-			let val: surrealdb_types::Value = value.into();
+			let val: surrealdb_types::Value = value.try_into().map_err(err_to_status)?;
 			session.variables.insert(name, val);
 		}
 
