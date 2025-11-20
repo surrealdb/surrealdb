@@ -1262,11 +1262,23 @@ user-id = 3987 # Rushmore Mushambi (rushmorem)
 start = "2023-08-29"
 end = "2025-01-24"
 
+[[trusted.surrealdb-librocksdb-sys]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-10-31"
+end = "2026-11-20"
+
 [[trusted.surrealdb-protocol]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2025-07-04"
 end = "2026-07-18"
+
+[[trusted.surrealdb-rocksdb]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-10-31"
+end = "2026-11-20"
 
 [[trusted.surrealdb-server]]
 criteria = "safe-to-deploy"
@@ -1291,6 +1303,36 @@ criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2025-09-16"
 end = "2026-09-23"
+
+[[trusted.surrealism]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-02-13"
+end = "2026-11-20"
+
+[[trusted.surrealism-cli]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-11-05"
+end = "2026-11-20"
+
+[[trusted.surrealism-macros]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-11-05"
+end = "2026-11-20"
+
+[[trusted.surrealism-runtime]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-11-05"
+end = "2026-11-20"
+
+[[trusted.surrealism-types]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-11-05"
+end = "2026-11-20"
 
 [[trusted.surrealkv]]
 criteria = "safe-to-deploy"
