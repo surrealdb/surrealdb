@@ -7363,9 +7363,9 @@ dependencies = [
 
 [[package]]
 name = "surrealmx"
-version = "0.14.2"
+version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54754257823b07ccf809451bb6285a71669683033c38005f79c15d56bf3f69a6"
+checksum = "e4c88126ef0bbc6945b489e20e7777ae94910ba9f803cbbce74a2915727f2c8d"
 dependencies = [
  "ahash 0.8.12",
  "arc-swap",
