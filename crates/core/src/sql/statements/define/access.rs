@@ -2,10 +2,9 @@ use std::fmt::{self, Display};
 
 use super::DefineKind;
 use crate::sql::access::AccessDuration;
-use crate::sql::{AccessType, Base, Expr};
+use crate::sql::{AccessType, Base, Expr, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct DefineAccessStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
@@ -53,6 +52,7 @@ impl Display for DefineAccessStatement {
 				f,
 				" FOR TOKEN {},",
 				match self.duration.token {
+					Some(Expr::Literal(Literal::None)) => format!("(NONE)"),
 					Some(ref dur) => format!("{}", dur),
 					None => "NONE".to_string(),
 				}

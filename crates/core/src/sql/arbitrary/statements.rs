@@ -1,0 +1,243 @@
+use arbitrary::Arbitrary;
+
+use crate::sql::{
+	AccessType, Base, Data, DefineIndexStatement, Expr, Fields, Index, InsertStatement,
+	KillStatement, Literal, LiveStatement, SelectStatement, View,
+	arbitrary::{arb_group, arb_order, arb_splits, arb_vec1, atleast_one, insert_data},
+	statements::define::{DefineAccessStatement, DefineUserStatement},
+};
+
+impl<'a> Arbitrary<'a> for KillStatement {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		let id = match u.int_in_range(0u8..=1)? {
+			0 => Expr::Param(u.arbitrary()?),
+			1 => Expr::Literal(Literal::Uuid(u.arbitrary()?)),
+			_ => unreachable!(),
+		};
+
+		Ok(KillStatement {
+			id,
+		})
+	}
+}
+
+impl<'a> Arbitrary<'a> for DefineAccessStatement {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		let kind = u.arbitrary()?;
+		let name = u.arbitrary()?;
+		let access_type = u.arbitrary()?;
+		let authenticate = u.arbitrary()?;
+		let duration = crate::sql::access::AccessDuration {
+			grant: u.arbitrary()?,
+			token: Some(u.arbitrary()?),
+			session: u.arbitrary()?,
+		};
+		// Work around badly designed code where value `NONE` can conflict with a `NONE` clause.
+		if matches!(duration.token, Some(Expr::Literal(Literal::None))) {
+			return Err(arbitrary::Error::IncorrectFormat);
+		}
+		let comment = u.arbitrary()?;
+
+		let base = if matches!(access_type, AccessType::Record(_)) {
+			Base::Db
+		} else {
+			u.arbitrary()?
+		};
+
+		Ok(DefineAccessStatement {
+			kind,
+			name,
+			base,
+			access_type,
+			authenticate,
+			duration,
+			comment,
+		})
+	}
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for DefineUserStatement {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		let kind = u.arbitrary()?;
+		let name = u.arbitrary()?;
+		let base = u.arbitrary()?;
+		let pass_type = u.arbitrary()?;
+		let session_duration = u.arbitrary()?;
+		let comment = u.arbitrary()?;
+
+		let mut roles = vec![match u.int_in_range(0u8..=2)? {
+			0 => "viewer".to_string(),
+			1 => "editor".to_string(),
+			2 => "owner".to_string(),
+			_ => unreachable!(),
+		}];
+		roles.reserve_exact(u.arbitrary_len::<u8>()?);
+		for _ in 1..roles.capacity() {
+			roles.push(match u.int_in_range(0u8..=2)? {
+				0 => "viewer".to_string(),
+				1 => "editor".to_string(),
+				2 => "owner".to_string(),
+				_ => unreachable!(),
+			});
+		}
+
+		Ok(DefineUserStatement {
+			kind,
+			name,
+			base,
+			pass_type,
+			token_duration: Some(u.arbitrary()?),
+			session_duration,
+			roles,
+			comment,
+		})
+	}
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for DefineIndexStatement {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		let kind = u.arbitrary()?;
+		let name = u.arbitrary()?;
+		let what = u.arbitrary()?;
+		let index = u.arbitrary()?;
+		let comment = u.arbitrary()?;
+		let concurrently = u.arbitrary()?;
+
+		let cols = match index {
+			Index::Uniq | Index::Idx => {
+				let mut cols = vec![u.arbitrary()?];
+				cols.reserve_exact(u.arbitrary_len::<String>()?);
+				for _ in 1..cols.capacity() {
+					cols.push(u.arbitrary()?);
+				}
+				cols
+			}
+			Index::Hnsw(_) | Index::FullText(_) => vec![u.arbitrary()?],
+			Index::Count(_) => Vec::new(),
+		};
+
+		Ok(DefineIndexStatement {
+			kind,
+			name,
+			what,
+			cols,
+			index,
+			comment,
+			concurrently,
+		})
+	}
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for LiveStatement {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		let diff = u.arbitrary()?;
+		let fields = if diff {
+			Fields::none()
+		} else {
+			u.arbitrary()?
+		};
+		let what = u.arbitrary()?;
+		let cond = u.arbitrary()?;
+		let fetch = u.arbitrary()?;
+
+		Ok(LiveStatement {
+			fields,
+			diff,
+			what,
+			cond,
+			fetch,
+		})
+	}
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for InsertStatement {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		let into = match u.int_in_range(0u8..=2)? {
+			0 => None,
+			1 => Some(Expr::Param(u.arbitrary()?)),
+			2 => Some(Expr::Table(u.arbitrary()?)),
+			_ => unreachable!(),
+		};
+
+		let update = if u.arbitrary()? {
+			Some(Data::UpdateExpression(atleast_one(u)?))
+		} else {
+			None
+		};
+
+		Ok(InsertStatement {
+			into,
+			data: insert_data(u)?,
+			ignore: u.arbitrary()?,
+			update,
+			output: u.arbitrary()?,
+			timeout: u.arbitrary()?,
+			parallel: u.arbitrary()?,
+			relation: u.arbitrary()?,
+			version: u.arbitrary()?,
+		})
+	}
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for SelectStatement {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		let expr = u.arbitrary()?;
+
+		let group = if u.arbitrary()? {
+			Some(arb_group(u, &expr)?)
+		} else {
+			None
+		};
+
+		let split = if u.arbitrary()? {
+			Some(arb_splits(u, &expr)?)
+		} else {
+			None
+		};
+
+		let order = if u.arbitrary()? {
+			Some(arb_order(u, &expr)?)
+		} else {
+			None
+		};
+
+		Ok(SelectStatement {
+			expr,
+			omit: u.arbitrary()?,
+			only: u.arbitrary()?,
+			what: arb_vec1(u, Expr::arbitrary)?,
+			with: u.arbitrary()?,
+			cond: u.arbitrary()?,
+			split,
+			group,
+			order,
+			limit: u.arbitrary()?,
+			start: u.arbitrary()?,
+			fetch: u.arbitrary()?,
+			version: u.arbitrary()?,
+			timeout: u.arbitrary()?,
+			parallel: u.arbitrary()?,
+			explain: u.arbitrary()?,
+			tempfiles: u.arbitrary()?,
+		})
+	}
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for View {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		let expr = u.arbitrary()?;
+
+		let group = if u.arbitrary()? {
+			Some(arb_group(u, &expr)?)
+		} else {
+			None
+		};
+
+		Ok(View {
+			expr,
+			what: u.arbitrary()?,
+			cond: u.arbitrary()?,
+			group,
+		})
+	}
+}

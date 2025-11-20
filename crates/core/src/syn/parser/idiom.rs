@@ -3,6 +3,7 @@ use reblessive::Stk;
 use super::basic::NumberToken;
 use super::mac::{expected, unexpected};
 use super::{ParseResult, Parser};
+use crate::sql::field::Selector;
 use crate::sql::lookup::LookupKind;
 use crate::sql::part::{DestructurePart, Recurse, RecurseInstruction};
 use crate::sql::{Dir, Expr, Field, Fields, Idiom, Literal, Lookup, Param, Part};
@@ -28,11 +29,11 @@ impl Parser<'_> {
 		if self.eat(t!("VALUE")) {
 			let expr = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 			let alias = if self.eat(t!("AS")) {
-				Some(self.parse_plain_idiom(stk).await?)
+				Some(self.parse_basic_idiom()?)
 			} else {
 				None
 			};
-			Ok(Fields::Value(Box::new(Field::Single {
+			Ok(Fields::Value(Box::new(Selector {
 				expr,
 				alias,
 			})))
@@ -48,10 +49,10 @@ impl Parser<'_> {
 					} else {
 						None
 					};
-					Field::Single {
+					Field::Single(Selector {
 						expr,
 						alias,
-					}
+					})
 				};
 				fields.push(field);
 				if !self.eat(t!(",")) {
@@ -269,6 +270,22 @@ impl Parser<'_> {
 		};
 		Ok(res)
 	}
+
+	/// Parse the part after the `.` in a idiom
+	pub(super) fn parse_basic_dot_part(&mut self) -> ParseResult<Part> {
+		let res = match self.peek_kind() {
+			t!("*") => {
+				self.pop_peek();
+				Part::All
+			}
+			_ => {
+				let ident = self.parse_ident()?;
+				Part::Field(ident)
+			}
+		};
+		Ok(res)
+	}
+
 	pub(super) async fn parse_function_part(
 		&mut self,
 		stk: &mut Stk,
@@ -491,7 +508,7 @@ impl Parser<'_> {
 	/// Basic idioms differ from normal idioms in that they are more
 	/// restrictive. Flatten, graphs, conditions and indexing by param is not
 	/// allowed.
-	pub(super) async fn parse_basic_idiom(&mut self, stk: &mut Stk) -> ParseResult<Idiom> {
+	pub(super) fn parse_basic_idiom(&mut self) -> ParseResult<Idiom> {
 		let start = self.parse_ident()?;
 		let mut parts = vec![Part::Field(start)];
 		loop {
@@ -499,7 +516,7 @@ impl Parser<'_> {
 			let part = match token.kind {
 				t!(".") => {
 					self.pop_peek();
-					self.parse_dot_part(stk).await?
+					self.parse_basic_dot_part()?
 				}
 				t!("[") => {
 					self.pop_peek();
@@ -526,7 +543,7 @@ impl Parser<'_> {
 							let peek_digit = self.peek_whitespace1();
 							if let TokenKind::Digits = peek_digit.kind {
 								let span = self.recent_span().covers(peek_digit.span);
-								bail!("Unexpected token `-` expected $, *, or a number", @span => "an index can't be negative");
+								bail!("Unexpected token `-` expected $, *, or a number", @span => "an index in a basic idiom can't be negative");
 							}
 							unexpected!(self, peek, "$, * or a number");
 						}
@@ -547,7 +564,7 @@ impl Parser<'_> {
 	/// Basic idioms differ from local idioms in that they are more restrictive.
 	/// Only field, all and number indexing is allowed. Flatten is also allowed
 	/// but only at the end.
-	pub(super) async fn parse_local_idiom(&mut self, stk: &mut Stk) -> ParseResult<Idiom> {
+	pub(super) fn parse_local_idiom(&mut self) -> ParseResult<Idiom> {
 		let start = self.parse_ident()?;
 		let mut parts = vec![Part::Field(start)];
 		loop {
@@ -555,7 +572,7 @@ impl Parser<'_> {
 			let part = match token.kind {
 				t!(".") => {
 					self.pop_peek();
-					self.parse_dot_part(stk).await?
+					self.parse_basic_dot_part()?
 				}
 				t!("[") => {
 					self.pop_peek();
@@ -593,7 +610,7 @@ impl Parser<'_> {
 							let peek_digit = self.peek_whitespace1();
 							if let TokenKind::Digits = peek_digit.kind {
 								let span = self.recent_span().covers(peek_digit.span);
-								bail!("Unexpected token `-` expected $, *, or a number", @span => "an index can't be negative");
+								bail!("Unexpected token `-` expected $, *, or a number", @span => "index in a local idiom can't be negative");
 							}
 							unexpected!(self, token, "$, * or a number");
 						}
@@ -682,9 +699,9 @@ impl Parser<'_> {
 
 				let cond = self.try_parse_condition(stk).await?;
 				let (split, group, order) = if let Some((ref expr, fields_span)) = expr {
-					let split = self.try_parse_split(stk, expr, fields_span).await?;
-					let group = self.try_parse_group(stk, expr, fields_span).await?;
-					let order = self.try_parse_orders(stk, expr, fields_span).await?;
+					let split = self.try_parse_split(expr, fields_span)?;
+					let group = self.try_parse_group(expr, fields_span)?;
+					let order = self.try_parse_orders(expr, fields_span)?;
 					(split, group, order)
 				} else {
 					(None, None, None)

@@ -1,10 +1,9 @@
 use std::fmt;
 
-use crate::fmt::Fmt;
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 use crate::sql::{Expr, Idiom, Model, Script};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Function {
 	Normal(String),
 	Custom(String),
@@ -134,10 +133,22 @@ impl fmt::Display for FunctionCall {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self.receiver {
 			Function::Normal(ref s) => {
-				write!(f, "{s}({})", Fmt::comma_separated(self.arguments.iter()))
+				for (idx, s) in s.split("::").enumerate() {
+					if idx != 0 {
+						f.write_str("::")?;
+					}
+					s.fmt(f)?;
+				}
+
+				write!(f, "({})", Fmt::comma_separated(self.arguments.iter()))
 			}
 			Function::Custom(ref s) => {
-				write!(f, "fn::{s}({})", Fmt::comma_separated(self.arguments.iter()))
+				f.write_str("fn")?;
+				for s in s.split("::") {
+					f.write_str("::")?;
+					EscapeKwFreeIdent(s).fmt(f)?;
+				}
+				write!(f, "({})", Fmt::comma_separated(self.arguments.iter()))
 			}
 			Function::Script(ref s) => {
 				write!(f, "function({}) {{{s}}}", Fmt::comma_separated(self.arguments.iter()))
@@ -145,12 +156,17 @@ impl fmt::Display for FunctionCall {
 			Function::Model(ref m) => {
 				write!(f, "{m}({})", Fmt::comma_separated(self.arguments.iter()))
 			}
-			Function::Module(ref m, ref s) => match s {
-				Some(s) => {
-					write!(f, "mod::{m}::{s}({})", Fmt::comma_separated(self.arguments.iter()))
+			Function::Module(ref m, ref s) => {
+				f.write_str("mod")?;
+				for s in m.split("::") {
+					f.write_str("::")?;
+					EscapeKwFreeIdent(s).fmt(f)?;
 				}
-				None => write!(f, "mod::{m}({})", Fmt::comma_separated(self.arguments.iter())),
-			},
+				if let Some(s) = s {
+					write!(f, "::{}", EscapeKwFreeIdent(s))?;
+				}
+				write!(f, "({})", Fmt::comma_separated(self.arguments.iter()))
+			}
 			Function::Silo {
 				ref org,
 				ref pkg,
@@ -161,12 +177,17 @@ impl fmt::Display for FunctionCall {
 			} => match sub {
 				Some(s) => write!(
 					f,
-					"silo::{org}::{pkg}<{major}.{minor}.{patch}>::{s}({})",
+					"silo::{}::{}<{major}.{minor}.{patch}>::{}({})",
+					EscapeKwFreeIdent(org),
+					EscapeKwFreeIdent(pkg),
+					EscapeKwFreeIdent(s),
 					Fmt::comma_separated(self.arguments.iter())
 				),
 				None => write!(
 					f,
-					"silo::{org}::{pkg}<{major}.{minor}.{patch}>({})",
+					"silo::{}::{}<{major}.{minor}.{patch}>({})",
+					EscapeKwFreeIdent(org),
+					EscapeKwFreeIdent(pkg),
 					Fmt::comma_separated(self.arguments.iter())
 				),
 			},

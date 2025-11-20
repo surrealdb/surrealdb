@@ -1,11 +1,10 @@
 use std::fmt;
 use std::fmt::Write;
 
-use crate::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKwFreeIdent, Fmt, is_pretty, pretty_indent};
 use crate::sql::{Expr, Idiom, Lookup};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) enum Part {
 	All,
 	Flatten,
@@ -96,7 +95,9 @@ impl fmt::Display for Part {
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
 			Part::Graph(v) => write!(f, "{v}"),
 			Part::Value(v) => write!(f, "[{v}]"),
-			Part::Method(v, a) => write!(f, ".{v}({})", Fmt::comma_separated(a)),
+			Part::Method(v, a) => {
+				write!(f, ".{}({})", EscapeKwFreeIdent(v), Fmt::comma_separated(a))
+			}
 			Part::Destructure(v) => {
 				f.write_str(".{")?;
 				if !is_pretty() {
@@ -147,11 +148,11 @@ pub enum DestructurePart {
 impl fmt::Display for DestructurePart {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			DestructurePart::All(fd) => write!(f, "{}.*", EscapeIdent(fd)),
-			DestructurePart::Field(fd) => write!(f, "{}", EscapeIdent(fd)),
-			DestructurePart::Aliased(fd, v) => write!(f, "{}: {v}", EscapeIdent(fd)),
+			DestructurePart::All(fd) => write!(f, "{}.*", EscapeKwFreeIdent(fd)),
+			DestructurePart::Field(fd) => write!(f, "{}", EscapeKwFreeIdent(fd)),
+			DestructurePart::Aliased(fd, v) => write!(f, "{}: {v}", EscapeKwFreeIdent(fd)),
 			DestructurePart::Destructure(fd, d) => {
-				write!(f, "{}{}", EscapeIdent(&fd), Part::Destructure(d.clone()))
+				write!(f, "{}{}", EscapeKwFreeIdent(&fd), Part::Destructure(d.clone()))
 			}
 		}
 	}
@@ -226,7 +227,6 @@ impl From<crate::expr::part::Recurse> for Recurse {
 // ------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RecurseInstruction {
 	Path {
 		// Do we include the starting point in the paths?

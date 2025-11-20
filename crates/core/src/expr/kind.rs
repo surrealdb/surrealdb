@@ -10,7 +10,7 @@ use surrealdb_types::{ToSql, write_sql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
-use crate::fmt::{EscapeIdent, EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKey, EscapeKwFreeIdent, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Range, RecordId, Regex, Set,
 	Uuid,
@@ -467,14 +467,22 @@ impl Display for Kind {
 				if k.is_empty() {
 					f.write_str("table")
 				} else {
-					write!(f, "table<{}>", Fmt::verbar_separated(k))
+					write!(
+						f,
+						"table<{}>",
+						Fmt::verbar_separated(k.iter().map(|x| EscapeKwFreeIdent(x)))
+					)
 				}
 			}
 			Kind::Record(k) => {
 				if k.is_empty() {
 					f.write_str("record")
 				} else {
-					write!(f, "record<{}>", Fmt::verbar_separated(k.iter().map(EscapeIdent)))
+					write!(
+						f,
+						"record<{}>",
+						Fmt::verbar_separated(k.iter().map(|x| EscapeKwFreeIdent(x.as_str())))
+					)
 				}
 			}
 			Kind::Geometry(k) => {
@@ -501,7 +509,11 @@ impl Display for Kind {
 				if k.is_empty() {
 					f.write_str("file")
 				} else {
-					write!(f, "file<{}>", Fmt::verbar_separated(k))
+					write!(
+						f,
+						"file<{}>",
+						Fmt::verbar_separated(k.iter().map(|x| EscapeKwFreeIdent(x)))
+					)
 				}
 			}
 		}

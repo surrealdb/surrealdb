@@ -1222,6 +1222,7 @@ version = "0.4.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "145052bdd345b87320e369255277e3fb5152762ad123a901ef5c262dd38fe8d2"
 dependencies = [
+ "arbitrary",
  "iana-time-zone",
  "js-sys",
  "num-traits",
@@ -7110,14 +7111,17 @@ name = "surrealdb-types"
 version = "3.0.0-alpha.13"
 dependencies = [
  "anyhow",
+ "arbitrary",
  "bytes",
  "chrono",
  "flatbuffers",
  "geo 0.28.0",
+ "geo-types",
  "hex",
  "http 1.3.1",
  "nanoid",
  "regex",
+ "regex-syntax",
  "rquickjs",
  "rstest",
  "rust_decimal",

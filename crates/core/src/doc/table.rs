@@ -10,10 +10,10 @@ use crate::ctx::Context;
 use crate::dbs::{Options, Statement, Workable};
 use crate::doc::{Action, CursorDoc, Document};
 use crate::err::Error;
+use crate::expr::field::Selector;
 use crate::expr::statements::SelectStatement;
 use crate::expr::{
-	BinaryOperator, Cond, Expr, Field, Fields, FlowResultExt as _, Function, FunctionCall, Groups,
-	Literal,
+	BinaryOperator, Cond, Expr, Fields, FlowResultExt as _, Function, FunctionCall, Groups, Literal,
 };
 use crate::idx::planner::RecordStrategy;
 use crate::key;
@@ -602,7 +602,7 @@ impl Document {
 
 			let recalc_stmt = SelectStatement {
 				// SELECT VALUE [recalc1, recalc2,..]
-				expr: Fields::Value(Box::new(Field::Single {
+				expr: Fields::Value(Box::new(Selector {
 					expr: Expr::Literal(Literal::Array(exprs)),
 					alias: None,
 				})),
@@ -981,7 +981,7 @@ impl Document {
 
 			let recalc_stmt = SelectStatement {
 				// SELECT VALUE [recalc1, recalc2,..]
-				expr: Fields::Value(Box::new(Field::Single {
+				expr: Fields::Value(Box::new(Selector {
 					expr: Expr::Literal(Literal::Array(exprs)),
 					alias: None,
 				})),

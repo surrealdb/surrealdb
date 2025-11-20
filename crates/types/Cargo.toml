@@ -17,18 +17,32 @@ categories.workspace = true
 [features]
 default = []
 js = ["dep:js"]
+arbitrary = [
+    "dep:arbitrary",
+    "dep:regex-syntax",
+    "regex-syntax/arbitrary",
+    "rust_decimal/rust-fuzz",
+    "dep:geo-types",
+    "geo-types/arbitrary",
+    "uuid/arbitrary",
+    "chrono/arbitrary",
+]
 
 [dependencies]
 anyhow.workspace = true
+arbitrary = { workspace = true, features = ["derive"], optional = true }
 bytes.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 flatbuffers.workspace = true
 geo = { workspace = true, features = ["use-serde"] }
+geo-types = { workspace = true, optional = true }
 hex.workspace = true
 http.workspace = true
 js = { workspace = true, optional = true }
 nanoid.workspace = true
 regex.workspace = true
+# Used for generating random regexes for fuzzing with arbitrary
+regex-syntax = { workspace = true, optional = true }
 rstest.workspace = true
 rust_decimal.workspace = true
 serde = { workspace = true, features = ["derive"] }

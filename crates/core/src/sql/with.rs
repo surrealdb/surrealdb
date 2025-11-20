@@ -1,12 +1,15 @@
 use std::fmt::{Display, Formatter, Result};
 
-use crate::fmt::{EscapeIdent, Fmt};
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum With {
 	NoIndex,
-	Index(Vec<String>),
+	Index(
+		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+		Vec<String>,
+	),
 }
 
 impl Display for With {
@@ -16,7 +19,7 @@ impl Display for With {
 			With::NoIndex => f.write_str(" NOINDEX"),
 			With::Index(i) => {
 				f.write_str(" INDEX ")?;
-				Fmt::comma_separated(i.iter().map(EscapeIdent)).fmt(f)
+				Fmt::comma_separated(i.iter().map(|x| EscapeKwFreeIdent(x))).fmt(f)
 			}
 		}
 	}

@@ -42,7 +42,6 @@ impl From<crate::expr::Idioms> for Idioms {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct Idiom(pub(crate) Vec<Part>);
 
 impl Idiom {

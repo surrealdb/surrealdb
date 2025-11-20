@@ -1,6 +1,9 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::sql::{Expr, Literal};
+use crate::{
+	fmt::CoverStmtsSql,
+	sql::{Expr, Literal},
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -26,7 +29,7 @@ impl Display for RemoveEventStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", CoverStmtsSql(&self.name), self.what)?;
 		Ok(())
 	}
 }

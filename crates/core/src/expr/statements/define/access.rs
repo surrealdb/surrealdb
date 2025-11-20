@@ -403,23 +403,22 @@ impl Display for DefineAccessStatement {
 			)?;
 		}
 		if self.access_type.can_issue_tokens() {
-			write!(
-				f,
-				" FOR TOKEN {},",
-				match self.duration.token {
-					Some(ref dur) => format!("{}", dur),
-					None => "NONE".to_string(),
-				}
-			)?;
-		}
-		write!(
-			f,
-			" FOR SESSION {}",
-			match self.duration.session {
-				Some(ref dur) => format!("{}", dur),
-				None => "NONE".to_string(),
+			f.write_str(" FOR TOKEN ")?;
+			match self.duration.token {
+				Some(Expr::Literal(Literal::None)) => f.write_str("(NONE)")?,
+				Some(ref dur) => write!(f, "{}", dur)?,
+				None => f.write_str("NONE")?,
 			}
-		)?;
+			f.write_str(",")?;
+		}
+
+		f.write_str(" FOR SESSION ")?;
+		match self.duration.session {
+			Some(Expr::Literal(Literal::None)) => f.write_str("(NONE)")?,
+			Some(ref dur) => write!(f, "{}", dur)?,
+			None => f.write_str("NONE")?,
+		}
+
 		if let Some(ref comment) = self.comment {
 			write!(f, " COMMENT {}", comment)?
 		}

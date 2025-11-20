@@ -10,7 +10,7 @@ use crate::catalog::record::{Data, Record};
 use crate::catalog::schema::base::Base;
 use crate::expr::{
 	Block, ChangeFeed, Expr, Fetch, Fetchs, Field, Fields, Filter, Groups, Idiom, Kind, Literal,
-	Tokenizer,
+	Tokenizer, field::Selector,
 };
 use crate::iam::Auth;
 use crate::kvs::KVValue;
@@ -44,10 +44,10 @@ use crate::vs::VersionStamp;
 	drop: false,
 	schemafull: false,
 	view: Some(ViewDefinition::Select {
-		fields: Fields::Select(vec![Field::All, Field::Single {
+		fields: Fields::Select(vec![Field::All, Field::Single (crate::expr::field::Selector{
 			expr: Expr::Literal(Literal::String("expr".to_string())),
 			alias: Some(Idiom::from_str("field[0]").unwrap()),
-		}]),
+		})]),
 		tables: vec!["what".to_string()],
 		condition: Some(Expr::Literal(Literal::String("cond".to_string()))),
 		groups: Some(Groups::default()),
@@ -67,10 +67,10 @@ use crate::vs::VersionStamp;
 #[case::subscription(SubscriptionDefinition {
 	id: Uuid::default(),
 	node: Uuid::default(),
-	fields: Fields::Select(vec![Field::All, Field::Single {
+	fields: Fields::Select(vec![Field::All, Field::Single(Selector{
 		expr: Expr::Literal(Literal::String("expr".to_string())),
 		alias: Some(Idiom::from_str("field[0]").unwrap()),
-	}]),
+	})]),
 	diff: false,
 	what: Expr::Literal(Literal::String("what".to_string())),
 	cond: Some(Expr::Literal(Literal::String("cond".to_string()))),

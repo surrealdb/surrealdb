@@ -212,7 +212,7 @@ impl Parser<'_> {
 			t!("IF") => {
 				self.pop_peek();
 				let stmt = stk.run(|ctx| self.parse_if_stmt(ctx)).await?;
-				Expr::If(Box::new(stmt))
+				Expr::IfElse(Box::new(stmt))
 			}
 			t!("SELECT") => {
 				self.pop_peek();

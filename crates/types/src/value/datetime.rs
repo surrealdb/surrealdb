@@ -109,3 +109,35 @@ impl Deref for Datetime {
 		&self.0
 	}
 }
+
+#[cfg(feature = "arbitrary")]
+mod arb {
+	use super::*;
+	use arbitrary::Arbitrary;
+	use chrono::{FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, Offset};
+
+	impl<'a> Arbitrary<'a> for Datetime {
+		fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+			let date = u.arbitrary::<NaiveDate>()?;
+			let time = u.arbitrary::<NaiveTime>()?;
+
+			let offset = if u.arbitrary()? {
+				Utc.fix()
+			} else {
+				let hour = u.int_in_range(0..=23)?;
+				let minute = u.int_in_range(0..=59)?;
+				if u.arbitrary()? {
+					FixedOffset::west_opt((hour * 3600 + minute * 60) as i32).unwrap()
+				} else {
+					FixedOffset::east_opt((hour * 3600 + minute * 60) as i32).unwrap()
+				}
+			};
+
+			let datetime = NaiveDateTime::new(date, time);
+
+			Ok(Datetime(
+				offset.from_local_datetime(&datetime).earliest().unwrap().with_timezone(&Utc),
+			))
+		}
+	}
+}

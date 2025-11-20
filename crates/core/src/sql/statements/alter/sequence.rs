@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Write};
 
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKwIdent, is_pretty, pretty_indent};
 use crate::sql::Timeout;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -17,9 +17,9 @@ impl Display for AlterSequenceStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", EscapeIdent(&self.name))?;
+		write!(f, " {}", EscapeKwIdent(&self.name, &["IF"]))?;
 		if let Some(ref timeout) = self.timeout {
-			write!(f, " TIMEOUT {timeout}")?;
+			write!(f, " {timeout}")?;
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

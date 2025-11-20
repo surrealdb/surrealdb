@@ -12,6 +12,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::visit::Visit;
 use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _};
+use crate::fmt::CoverStmtsExpr;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -130,7 +131,11 @@ impl LiveStatement {
 
 impl fmt::Display for LiveStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "LIVE SELECT {} FROM {}", self.fields, self.what)?;
+		write!(f, "LIVE SELECT")?;
+		if self.diff {
+			write!(f, " DIFF")?;
+		}
+		write!(f, " {} FROM {}", self.fields, CoverStmtsExpr(&self.what))?;
 		if let Some(ref v) = self.cond {
 			write!(f, " {v}")?
 		}

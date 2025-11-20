@@ -5,7 +5,6 @@ use crate::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Splits(pub Vec<Split>);
 
 impl fmt::Display for Splits {

@@ -142,3 +142,23 @@ impl<'de> Deserialize<'de> for Regex {
 		deserializer.deserialize_newtype_struct(REGEX_TOKEN, RegexNewtypeVisitor)
 	}
 }
+
+#[cfg(feature = "arbitrary")]
+mod arbitrary {
+	use ::arbitrary::Arbitrary;
+
+	use super::*;
+
+	impl<'a> Arbitrary<'a> for Regex {
+		fn arbitrary(u: &mut ::arbitrary::Unstructured<'a>) -> ::arbitrary::Result<Self> {
+			let ast = regex_syntax::ast::Ast::arbitrary(u)?;
+			let src = &ast.to_string();
+			if src.is_empty() {
+				return Err(::arbitrary::Error::IncorrectFormat);
+			}
+			let regex =
+				RegexBuilder::new(src).build().map_err(|_| ::arbitrary::Error::IncorrectFormat)?;
+			Ok(Regex(regex))
+		}
+	}
+}

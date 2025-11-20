@@ -1,6 +1,9 @@
 use std::fmt::{self, Display};
 
-use crate::sql::field::Fields;
+use crate::sql::{
+	Expr, Field, Literal,
+	field::{Fields, Selector},
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -28,7 +31,33 @@ impl Display for Output {
 			Self::Diff => f.write_str("DIFF"),
 			Self::After => f.write_str("AFTER"),
 			Self::Before => f.write_str("BEFORE"),
-			Self::Fields(v) => Display::fmt(v, f),
+			Self::Fields(v) => {
+				// We need to escape a possible `RETURN NONE` where `NONE` is a value
+				let starts_with_none = match v {
+					Fields::Value(selector) => {
+						matches!(selector.expr, Expr::Literal(Literal::None))
+					}
+					Fields::Select(fields) => fields
+						.first()
+						.map(|x| {
+							matches!(
+								x,
+								Field::Single(Selector {
+									expr: Expr::Literal(Literal::None),
+									..
+								})
+							)
+						})
+						.unwrap_or(false),
+				};
+				if starts_with_none {
+					f.write_str("(")?;
+					Display::fmt(v, f)?;
+					f.write_str(")")
+				} else {
+					Display::fmt(v, f)
+				}
+			}
 		}
 	}
 }

@@ -7,7 +7,7 @@ use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 
 use super::DefineKind;
-use crate::fmt::{EscapeIdent, Fmt, QuoteStr};
+use crate::fmt::{EscapeKwFreeIdent, QuoteStr};
 use crate::sql::{Base, Expr, Literal};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -20,7 +20,6 @@ pub enum PassType {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct DefineUserStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
@@ -65,33 +64,32 @@ impl Display for DefineUserStatement {
 			PassType::Password(ref x) => write!(f, " PASSWORD {}", QuoteStr(x))?,
 		}
 
-		write!(
-			f,
-			" ROLES {}",
-			Fmt::comma_separated(
-				&self.roles.iter().map(|r| EscapeIdent(r.to_uppercase())).collect::<Vec<_>>()
-			),
-		)?;
+		write!(f, " ROLES ")?;
+		for (idx, r) in self.roles.iter().enumerate() {
+			if idx != 0 {
+				f.write_str(", ")?;
+			}
+
+			let r = r.to_uppercase();
+			EscapeKwFreeIdent(&r).fmt(f)?;
+		}
+
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible
 		// None values need to be printed, as they are different from the default values
 		write!(f, " DURATION")?;
-		write!(
-			f,
-			" FOR TOKEN {},",
-			match self.token_duration {
-				Some(ref dur) => format!("{}", dur),
-				None => "NONE".to_string(),
-			}
-		)?;
-		write!(
-			f,
-			" FOR SESSION {}",
-			match self.session_duration {
-				Some(ref dur) => format!("{}", dur),
-				None => "NONE".to_string(),
-			}
-		)?;
+		write!(f, " FOR TOKEN ",)?;
+		match self.token_duration {
+			Some(Expr::Literal(Literal::None)) => f.write_str("(NONE)")?,
+			Some(ref dur) => dur.fmt(f)?,
+			None => f.write_str("NONE")?,
+		}
+		write!(f, ", FOR SESSION ",)?;
+		match self.session_duration {
+			Some(Expr::Literal(Literal::None)) => f.write_str("(NONE)")?,
+			Some(ref dur) => dur.fmt(f)?,
+			None => f.write_str("NONE")?,
+		}
 		if let Some(ref v) = self.comment {
 			write!(f, " COMMENT {}", v)?
 		}

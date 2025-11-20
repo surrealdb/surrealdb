@@ -14,7 +14,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::reference::Reference;
 use crate::expr::{Base, Expr, Idiom, Kind};
-use crate::fmt::{EscapeIdent, QuoteStr};
+use crate::fmt::{EscapeKwIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -175,7 +175,7 @@ impl Display for AlterFieldStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, EscapeIdent(&self.what))?;
+		write!(f, " {} ON {}", self.name, EscapeKwIdent(&self.what, &["IF"]))?;
 
 		match self.kind {
 			AlterKind::Set(ref x) => write!(f, " TYPE {x}")?,

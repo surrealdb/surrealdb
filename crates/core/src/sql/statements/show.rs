@@ -1,6 +1,8 @@
 use std::fmt;
 
-use crate::types::PublicDatetime;
+use surrealdb_types::ToSql;
+
+use crate::{fmt::EscapeKwFreeIdent, types::PublicDatetime};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -42,11 +44,11 @@ impl fmt::Display for ShowStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SHOW CHANGES FOR")?;
 		match self.table {
-			Some(ref v) => write!(f, " TABLE {}", v)?,
+			Some(ref v) => write!(f, " TABLE {}", EscapeKwFreeIdent(v))?,
 			None => write!(f, " DATABASE")?,
 		}
 		match self.since {
-			ShowSince::Timestamp(ref v) => write!(f, " SINCE {}", v)?,
+			ShowSince::Timestamp(ref v) => write!(f, " SINCE {}", v.to_sql())?,
 			ShowSince::Versionstamp(ref v) => write!(f, " SINCE {}", v)?,
 		}
 		if let Some(ref v) = self.limit {

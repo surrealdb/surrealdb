@@ -2,10 +2,12 @@ use std::fmt;
 
 use uuid::Uuid;
 
-use crate::sql::{Cond, Expr, Fetchs, Fields};
+use crate::{
+	fmt::CoverStmtsSql,
+	sql::{Cond, Expr, Fetchs, Fields},
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct LiveStatement {
 	pub fields: Fields,
 	pub diff: bool,
@@ -23,7 +25,7 @@ impl fmt::Display for LiveStatement {
 		if !self.fields.is_empty() {
 			write!(f, " {}", self.fields)?;
 		}
-		write!(f, " FROM {}", self.what)?;
+		write!(f, " FROM {}", CoverStmtsSql(&self.what))?;
 		if let Some(ref v) = self.cond {
 			write!(f, " {v}")?
 		}

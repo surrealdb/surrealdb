@@ -8,6 +8,7 @@ pub mod datetime;
 pub mod duration;
 /// File reference value types for SurrealDB
 pub mod file;
+mod format;
 /// Geometric value types for SurrealDB
 pub mod geometry;
 /// JSON value types for SurrealDB
@@ -60,6 +61,7 @@ use crate::{Kind, SurrealValue, write_sql};
 #[derive(
 	Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
 )]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct SurrealNone;
 
 /// Marker type for value conversions from Value::Null
@@ -69,6 +71,7 @@ pub struct SurrealNone;
 #[derive(
 	Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
 )]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct SurrealNull;
 
 /// Represents a value in SurrealDB
@@ -77,6 +80,7 @@ pub struct SurrealNull;
 /// Each variant corresponds to a different data type supported by the database.
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Value {
 	/// Represents the absence of a value
 	#[default]

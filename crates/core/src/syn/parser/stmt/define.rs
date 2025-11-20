@@ -593,6 +593,10 @@ impl Parser<'_> {
 										unexpected!(self, peek, "a token duration");
 									}
 									_ => {
+										// TODO: This is badly designed,
+										// When introducing general expressions here no thought was
+										// given to the conflict between FOR TOKEN NONE tested
+										// above and the value `NONE`.
 										res.duration.token =
 											Some(stk.run(|ctx| self.parse_expr_field(ctx)).await?)
 									}
@@ -1464,6 +1468,13 @@ impl Parser<'_> {
 								bail!("Custom middlewares are not yet supported")
 							}
 							_ => {
+								if middleware.is_empty() {
+									unexpected!(
+										self,
+										self.peek(),
+										"at least one middleware function"
+									);
+								}
 								break;
 							}
 						};
