@@ -75,7 +75,7 @@ fn spawn_task_node_membership_refresh(
 				_ = canceller.cancelled() => break,
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
-					if let Err(e) = dbs.node_membership_update().await {
+					if let Err(e) = dbs.update_node().await {
 						error!("Error updating node registration information: {e}");
 					}
 				}
@@ -106,7 +106,7 @@ fn spawn_task_node_membership_check(
 				_ = canceller.cancelled() => break,
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
-					if let Err(e) = dbs.node_membership_expire().await {
+					if let Err(e) = dbs.expire_nodes().await {
 						error!("Error processing and archiving inactive nodes: {e}");
 					}
 				}
@@ -137,7 +137,7 @@ fn spawn_task_node_membership_cleanup(
 				_ = canceller.cancelled() => break,
 				// Receive a notification on the channel
 				Some(_) = ticker.next() => {
-					if let Err(e) = dbs.node_membership_remove().await {
+					if let Err(e) = dbs.remove_nodes().await {
 						error!("Error processing and cleaning archived nodes: {e}");
 					}
 				}

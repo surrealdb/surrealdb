@@ -897,7 +897,7 @@ impl Datastore {
 		// Output function invocation details to logs
 		trace!(target: TARGET, "Running datastore shutdown operations");
 		// Delete this datastore from the cluster
-		self.delete_node(self.id).await?;
+		self.delete_node().await?;
 		// Run any storag engine shutdown tasks
 		self.transaction_factory.builder.shutdown().await
 	}
@@ -906,44 +906,11 @@ impl Datastore {
 	// Node functions
 	// --------------------------------------------------
 
-	/// Run the background task to update node registration information
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn node_membership_update(&self) -> Result<()> {
-		// Output function invocation details to logs
-		trace!(target: TARGET, "Updating node registration information");
-		// Update this node in the cluster
-		self.update_node(self.id).await?;
-		// Everything ok
-		Ok(())
-	}
-
-	/// Run the background task to process and archive inactive nodes
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn node_membership_expire(&self) -> Result<()> {
-		// Output function invocation details to logs
-		trace!(target: TARGET, "Processing and archiving inactive nodes");
-		// Mark expired nodes as archived
-		self.expire_nodes().await?;
-		// Everything ok
-		Ok(())
-	}
-
-	/// Run the background task to process and cleanup archived nodes
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn node_membership_remove(&self) -> Result<()> {
-		// Output function invocation details to logs
-		trace!(target: TARGET, "Processing and cleaning archived nodes");
-		// Cleanup expired nodes data
-		self.remove_nodes().await?;
-		// Everything ok
-		Ok(())
-	}
-
 	/// Initialise the cluster and run bootstrap utilities
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip_all)]
 	pub async fn bootstrap(&self) -> Result<()> {
 		// Insert this node in the cluster
-		self.insert_node(self.id).await?;
+		self.insert_node().await?;
 		// Mark inactive nodes as archived
 		self.expire_nodes().await?;
 		// Remove archived nodes
@@ -960,16 +927,16 @@ impl Datastore {
 	/// membership entries. This function must be run at server or database
 	/// startup, in order to write the initial entry and timestamp to storage.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn insert_node(&self, id: uuid::Uuid) -> Result<()> {
+	pub async fn insert_node(&self) -> Result<()> {
 		// Log when this method is run
-		trace!(target: TARGET, "Inserting node in the cluster");
+		trace!(target: TARGET, id = %self.id,"Inserting node in the cluster");
 		// Refresh system usage metrics
 		crate::sys::refresh().await;
 		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
-		let key = crate::key::root::nd::Nd::new(id);
+		let key = crate::key::root::nd::Nd::new(self.id);
 		let now = self.clock_now().await;
-		let node = Node::new(id, now, false);
+		let node = Node::new(self.id, now, false);
 		let res = run!(txn, txn.put(&key, &node, None).await);
 		match res {
 			Err(e) => {
@@ -978,7 +945,7 @@ impl Datastore {
 					Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
 				) {
 					Err(anyhow::Error::new(Error::ClAlreadyExists {
-						id: id.to_string(),
+						id: self.id.to_string(),
 					}))
 				} else {
 					Err(e)
@@ -996,16 +963,16 @@ impl Datastore {
 	/// timestamp. This ensures that the node is not marked as expired by any
 	/// garbage collection tasks, preventing any data cleanup for this node.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn update_node(&self, id: uuid::Uuid) -> Result<()> {
+	pub async fn update_node(&self) -> Result<()> {
 		// Log when this method is run
-		trace!(target: TARGET, "Updating node in the cluster");
+		trace!(target: TARGET, id = %self.id, "Updating node in the cluster");
 		// Refresh system usage metrics
 		crate::sys::refresh().await;
 		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
-		let key = crate::key::root::nd::new(id);
+		let key = crate::key::root::nd::new(self.id);
 		let now = self.clock_now().await;
-		let node = Node::new(id, now, false);
+		let node = Node::new(self.id, now, false);
 		run!(txn, txn.replace(&key, &node).await)
 	}
 
@@ -1017,13 +984,13 @@ impl Datastore {
 	/// Later on when garbage collection is running the live queries assigned
 	/// to this node will be removed, along with the node itself.
 	#[instrument(err, level = "trace", target = "surrealdb::core::kvs::ds", skip(self))]
-	pub async fn delete_node(&self, id: uuid::Uuid) -> Result<()> {
+	pub async fn delete_node(&self) -> Result<()> {
 		// Log when this method is run
-		trace!(target: TARGET, "Archiving node in the cluster");
+		trace!(target: TARGET, id = %self.id, "Archiving node in the cluster");
 		// Open transaction and set node data
 		let txn = self.transaction(Write, Optimistic).await?;
-		let key = crate::key::root::nd::new(id);
-		let val = catch!(txn, txn.get_node(id).await);
+		let key = crate::key::root::nd::new(self.id);
+		let val = catch!(txn, txn.get_node(self.id).await);
 		let node = val.as_ref().archive();
 		run!(txn, txn.replace(&key, &node).await)
 	}
