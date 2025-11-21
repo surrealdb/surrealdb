@@ -192,15 +192,36 @@ use crate::opt::IntoEndpoint;
 use crate::opt::auth::{AccessToken, RefreshToken, SecureToken, Token};
 use crate::{Connect, Result, Surreal};
 
-type LiveQueryMap = HashMap<Uuid, Sender<Result<Notification>>>;
+type LiveQueryMap = HashMap<Uuid, LiveQueryState>;
+
+struct LiveQueryState {
+	session_id: Uuid,
+	sender: Sender<Result<Notification>>,
+}
+
+/// Per-session state for local/embedded connections
+#[derive(Clone)]
+pub(crate) struct LocalSessionState {
+	session: Session,
+	vars: Variables,
+	transactions: HashMap<Uuid, Arc<Transaction>>,
+}
+
+impl Default for LocalSessionState {
+	fn default() -> Self {
+		Self {
+			session: Session::default().with_rt(true),
+			vars: Variables::default(),
+			transactions: HashMap::new(),
+		}
+	}
+}
 
 #[derive(Clone)]
-pub(crate) struct RouterState {
-	pub(crate) kvs: Arc<Datastore>,
-	pub(crate) vars: Arc<RwLock<Variables>>,
-	pub(crate) live_queries: Arc<RwLock<LiveQueryMap>>,
-	pub(crate) session: Arc<RwLock<Session>>,
-	pub(crate) transactions: Arc<RwLock<HashMap<Uuid, Arc<Transaction>>>>,
+struct RouterState {
+	kvs: Arc<Datastore>,
+	live_queries: Arc<RwLock<LiveQueryMap>>,
+	sessions: Arc<RwLock<HashMap<Uuid, LocalSessionState>>>,
 }
 
 #[cfg(not(target_family = "wasm"))]
@@ -517,14 +538,13 @@ async fn kill_live_query(
 async fn router(
 	RequestData {
 		command,
+		session_id,
 		..
 	}: RequestData,
 	RouterState {
 		kvs,
-		session,
-		vars,
+		sessions,
 		live_queries,
-		transactions,
 	}: RouterState,
 ) -> std::result::Result<Vec<QueryResult>, crate::Error> {
 	match command {
@@ -532,18 +552,22 @@ async fn router(
 			namespace,
 			database,
 		} => {
-			let result =
-				kvs.process_use(None, &mut *session.write().await, namespace, database).await?;
+			let session_id = session_id.expect("use command must have a session ID");
+			let mut sessions_lock = sessions.write().await;
+			let state = sessions_lock.get_mut(&session_id).expect("session should exist");
+			let result = kvs.process_use(None, &mut state.session, namespace, database).await?;
 			Ok(vec![result])
 		}
 		Command::Signup {
 			credentials,
 		} => {
+			let session_id = session_id.expect("signup command must have a session ID");
 			let query_result = QueryResultBuilder::started_now();
-			let signup_data =
-				iam::signup::signup(&kvs, &mut *session.write().await, credentials.into())
-					.await
-					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
+			let mut sessions_lock = sessions.write().await;
+			let state = sessions_lock.get_mut(&session_id).expect("session should exist");
+			let signup_data = iam::signup::signup(&kvs, &mut state.session, credentials.into())
+				.await
+				.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
 			let token = match signup_data {
 				iam::Token::Access(token) => Token {
 					access: AccessToken(SecureToken(token)),
@@ -564,11 +588,13 @@ async fn router(
 		Command::Signin {
 			credentials,
 		} => {
+			let session_id = session_id.expect("signin command must have a session ID");
 			let query_result = QueryResultBuilder::started_now();
-			let signin_data =
-				iam::signin::signin(&kvs, &mut *session.write().await, credentials.into())
-					.await
-					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
+			let mut sessions_lock = sessions.write().await;
+			let state = sessions_lock.get_mut(&session_id).expect("session should exist");
+			let signin_data = iam::signin::signin(&kvs, &mut state.session, credentials.into())
+				.await
+				.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?;
 			let token = match signin_data {
 				iam::Token::Access(token) => Token {
 					access: AccessToken(SecureToken(token)),
@@ -588,6 +614,7 @@ async fn router(
 		Command::Authenticate {
 			token,
 		} => {
+			let session_id = session_id.expect("authenticate command must have a session ID");
 			let query_result = QueryResultBuilder::started_now();
 			// Extract the access token and check if this token supports refresh
 			let (access, with_refresh) = match &token {
@@ -598,7 +625,9 @@ async fn router(
 				} => (access, true),
 			};
 			// Attempt to authenticate with the access token
-			let result = match iam::verify::token(&kvs, &mut *session.write().await, access).await {
+			let mut sessions_lock = sessions.write().await;
+			let state = sessions_lock.get_mut(&session_id).expect("session should exist");
+			let result = match iam::verify::token(&kvs, &mut state.session, access).await {
 				// Authentication successful - return the original token
 				Ok(_) => query_result.finish_with_result(Ok(token.into_value())),
 				Err(error) => {
@@ -606,7 +635,7 @@ async fn router(
 					// If the access token is expired and we have a refresh token,
 					// automatically attempt to refresh and return new tokens.
 					if with_refresh && error.to_string().contains("token has expired") {
-						let result = match token.refresh(&kvs, &mut *session.write().await).await {
+						let result = match token.refresh(&kvs, &mut state.session).await {
 							Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
 							Err(error) => query_result.finish_with_result(Err(
 								DbResultError::InternalError(error.to_string()),
@@ -625,9 +654,12 @@ async fn router(
 		Command::Refresh {
 			token,
 		} => {
+			let session_id = session_id.expect("refresh command must have a session ID");
 			// Refresh command: Exchange a refresh token for new access and refresh tokens
 			let query_result = QueryResultBuilder::started_now();
-			let result = match token.refresh(&kvs, &mut *session.write().await).await {
+			let mut sessions_lock = sessions.write().await;
+			let state = sessions_lock.get_mut(&session_id).expect("session should exist");
+			let result = match token.refresh(&kvs, &mut state.session).await {
 				Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
 				Err(error) => query_result
 					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
@@ -635,8 +667,11 @@ async fn router(
 			Ok(vec![result])
 		}
 		Command::Invalidate => {
+			let session_id = session_id.expect("invalidate command must have a session ID");
 			let query_result = QueryResultBuilder::started_now();
-			let result = match iam::clear::clear(&mut *session.write().await) {
+			let mut sessions_lock = sessions.write().await;
+			let state = sessions_lock.get_mut(&session_id).expect("session should exist");
+			let result = match iam::clear::clear(&mut state.session) {
 				Ok(_) => query_result.finish_with_result(Ok(Value::None)),
 				Err(error) => query_result
 					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
@@ -644,11 +679,14 @@ async fn router(
 			Ok(vec![result])
 		}
 		Command::Begin => {
+			let session_id = session_id.expect("begin command must have a session ID");
 			let query_result = QueryResultBuilder::started_now();
 			let result = match kvs.transaction(TransactionType::Write, LockType::Optimistic).await {
 				Ok(txn) => {
 					let id = Uuid::now_v7();
-					transactions.write().await.insert(id, std::sync::Arc::new(txn));
+					let mut sessions_lock = sessions.write().await;
+					let state = sessions_lock.get_mut(&session_id).expect("session should exist");
+					state.transactions.insert(id, std::sync::Arc::new(txn));
 					query_result.finish_with_result(Ok(Value::Uuid(id.into())))
 				}
 				Err(error) => query_result
@@ -671,7 +709,10 @@ async fn router(
 		Command::Rollback {
 			txn,
 		} => {
-			let tx = transactions.write().await.remove(&txn);
+			let session_id = session_id.expect("rollback command must have a session ID");
+			let mut sessions_lock = sessions.write().await;
+			let state = sessions_lock.get_mut(&session_id).expect("session should exist");
+			let tx = state.transactions.remove(&txn);
 			if let Some(tx) = tx {
 				tx.cancel().await?;
 			}
@@ -680,7 +721,10 @@ async fn router(
 		Command::Commit {
 			txn,
 		} => {
-			let tx = transactions.write().await.remove(&txn);
+			let session_id = session_id.expect("commit command must have a session ID");
+			let mut sessions_lock = sessions.write().await;
+			let state = sessions_lock.get_mut(&session_id).expect("session should exist");
+			let tx = state.transactions.remove(&txn);
 			if let Some(tx) = tx {
 				tx.commit().await?;
 			}
@@ -691,22 +735,23 @@ async fn router(
 			query,
 			variables,
 		} => {
-			let mut vars = vars.read().await.clone();
+			let session_id = session_id.expect("query command must have a session ID");
+			// Get the session state
+			let sessions_lock = sessions.read().await;
+			let state = sessions_lock.get(&session_id).expect("session should exist");
+
+			// Merge session vars with query vars
+			let mut vars = state.vars.clone();
 			vars.extend(variables);
 
 			// If a transaction UUID is provided, we need to retrieve it and use it
 			let response = if let Some(txn_id) = txn {
 				// Retrieve the transaction from storage
-				let tx_option = transactions.read().await.get(&txn_id).cloned();
+				let tx_option = state.transactions.get(&txn_id).cloned();
 				if let Some(tx) = tx_option {
 					// Execute with the existing transaction
-					kvs.execute_with_transaction(
-						query.as_ref(),
-						&*session.read().await,
-						Some(vars),
-						tx,
-					)
-					.await?
+					kvs.execute_with_transaction(query.as_ref(), &state.session, Some(vars), tx)
+						.await?
 				} else {
 					// Transaction not found - return error
 					return Ok(vec![QueryResultBuilder::started_now().finish_with_result(Err(
@@ -715,7 +760,7 @@ async fn router(
 				}
 			} else {
 				// No transaction - use normal execution
-				kvs.execute(query.as_ref(), &*session.read().await, Some(vars)).await?
+				kvs.execute(query.as_ref(), &state.session, Some(vars)).await?
 			};
 
 			Ok(response)
@@ -748,14 +793,16 @@ async fn router(
 			path: file,
 			config,
 		} => {
+			let session_id = session_id.expect("export file command must have a session ID");
 			let query_result = QueryResultBuilder::started_now();
 
 			let (tx, rx) = crate::channel::bounded(1);
 			let (mut writer, mut reader) = io::duplex(10_240);
 
 			// Write to channel.
-			let session = session.read().await.clone();
-			let export = export_file(&kvs, &session, tx, config);
+			let state_clone =
+				sessions.read().await.get(&session_id).expect("session should exist").clone();
+			let export = export_file(&kvs, &state_clone.session, tx, config);
 
 			// Read from channel and write to pipe.
 			let bridge = async move {
@@ -797,13 +844,15 @@ async fn router(
 			path,
 			config,
 		} => {
+			let session_id = session_id.expect("export ML command must have a session ID");
 			let query_result = QueryResultBuilder::started_now();
 			let (tx, rx) = crate::channel::bounded(1);
 			let (mut writer, mut reader) = io::duplex(10_240);
 
 			// Write to channel.
-			let session = session.read().await;
-			let export = export_ml(&kvs, &session, tx, config);
+			let sessions_lock = sessions.read().await;
+			let state = sessions_lock.get(&session_id).expect("session should exist");
+			let export = export_ml(&kvs, &state.session, tx, config);
 
 			// Read from channel and write to pipe.
 			let bridge = async move {
@@ -845,14 +894,16 @@ async fn router(
 			bytes,
 			config,
 		} => {
+			let session_id = session_id.expect("export bytes command must have a session ID");
 			let query_result = QueryResultBuilder::started_now();
 			let (tx, rx) = crate::channel::bounded(1);
 
 			let kvs = kvs.clone();
-			let session = session.read().await.clone();
+			let state_clone =
+				sessions.read().await.get(&session_id).expect("session should exist").clone();
 			tokio::spawn(async move {
 				let export = async {
-					if let Err(error) = export_file(&kvs, &session, tx, config).await {
+					if let Err(error) = export_file(&kvs, &state_clone.session, tx, config).await {
 						let _ = bytes.send(Err(error)).await;
 					}
 				};
@@ -875,14 +926,16 @@ async fn router(
 			bytes,
 			config,
 		} => {
+			let session_id = session_id.expect("export bytes ML command must have a session ID");
 			let query_result = QueryResultBuilder::started_now();
 			let (tx, rx) = crate::channel::bounded(1);
 
 			let kvs = kvs.clone();
-			let session = session.clone();
+			let state_clone =
+				sessions.read().await.get(&session_id).expect("session should exist").clone();
 			tokio::spawn(async move {
 				let export = async {
-					if let Err(error) = export_ml(&kvs, &*session.read().await, tx, config).await {
+					if let Err(error) = export_ml(&kvs, &state_clone.session, tx, config).await {
 						let _ = bytes.send(Err(error)).await;
 					}
 				};
@@ -904,6 +957,7 @@ async fn router(
 		Command::ImportFile {
 			path,
 		} => {
+			let session_id = session_id.expect("import file command must have a session ID");
 			let query_result = QueryResultBuilder::started_now();
 			let file = match OpenOptions::new().read(true).open(&path).await {
 				Ok(path) => path,
@@ -939,8 +993,10 @@ async fn router(
 				}
 			});
 
+			let sessions_lock = sessions.read().await;
+			let state = sessions_lock.get(&session_id).expect("session should exist");
 			let responses = kvs
-				.execute_import(&*session.read().await, Some(vars.read().await.clone()), stream)
+				.execute_import(&state.session, Some(state.vars.clone()), stream)
 				.await
 				.map_err(|e| crate::Error::InternalError(e.to_string()))?;
 
@@ -954,6 +1010,7 @@ async fn router(
 		Command::ImportMl {
 			path,
 		} => {
+			let session_id = session_id.expect("import ML command must have a session ID");
 			let query_result = QueryResultBuilder::started_now();
 			let mut file = match OpenOptions::new().read(true).open(&path).await {
 				Ok(path) => path,
@@ -965,10 +1022,14 @@ async fn router(
 				}
 			};
 
+			// Get the session for this session_id
+			let sessions_lock = sessions.read().await;
+			let state = sessions_lock.get(&session_id).expect("session should exist");
+
 			// Ensure a NS and DB are set
-			let (nsv, dbv) = check_ns_db(&*session.read().await)?;
+			let (nsv, dbv) = check_ns_db(&state.session)?;
 			// Check the permissions level
-			kvs.check(&*session.read().await, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))?;
+			kvs.check(&state.session, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))?;
 			// Create a new buffer
 			let mut buffer = Vec::new();
 			// Load all the uploaded file chunks
@@ -992,7 +1053,7 @@ async fn router(
 			let data = file.to_bytes();
 
 			kvs.put_ml_model(
-				&*session.read().await,
+				&state.session,
 				&file.header.name.to_string(),
 				&file.header.version.to_string(),
 				&file.header.description.to_string(),
@@ -1015,14 +1076,17 @@ async fn router(
 			key,
 			value,
 		} => {
+			let session_id = session_id.expect("set command must have a session ID");
 			let query_result = QueryResultBuilder::started_now();
 			surrealdb_core::rpc::check_protected_param(&key)
 				.map_err(|e| crate::Error::InternalError(e.to_string()))?;
 			// Need to compute because certain keys might not be allowed to be set and those
 			// should be rejected by an error.
+			let mut sessions_lock = sessions.write().await;
+			let state = sessions_lock.get_mut(&session_id).expect("session should exist");
 			match value {
-				Value::None => vars.write().await.remove(&key),
-				v => vars.write().await.insert(key, v),
+				Value::None => state.vars.remove(&key),
+				v => state.vars.insert(key, v),
 			};
 
 			Ok(vec![query_result.finish()])
@@ -1030,25 +1094,36 @@ async fn router(
 		Command::Unset {
 			key,
 		} => {
+			let session_id = session_id.expect("unset command must have a session ID");
 			let query_result = QueryResultBuilder::started_now();
-			vars.write().await.remove(&key);
+			let mut sessions_lock = sessions.write().await;
+			let state = sessions_lock.get_mut(&session_id).expect("session should exist");
+			state.vars.remove(&key);
 			Ok(vec![query_result.finish()])
 		}
 		Command::SubscribeLive {
 			uuid,
 			notification_sender,
 		} => {
+			let session_id = session_id.expect("subscribe live command must have a session ID");
 			let query_result = QueryResultBuilder::started_now();
-			live_queries.write().await.insert(uuid, notification_sender);
+			live_queries.write().await.insert(
+				uuid,
+				LiveQueryState {
+					session_id,
+					sender: notification_sender,
+				},
+			);
 			Ok(vec![query_result.finish()])
 		}
 		Command::Kill {
 			uuid,
 		} => {
+			let session_id = session_id.expect("kill live query command must have a session ID");
 			live_queries.write().await.remove(&uuid);
-			let results =
-				kill_live_query(&kvs, uuid, &*session.read().await, vars.read().await.clone())
-					.await?;
+			let sessions_lock = sessions.read().await;
+			let state = sessions_lock.get(&session_id).expect("session should exist");
+			let results = kill_live_query(&kvs, uuid, &state.session, state.vars.clone()).await?;
 			Ok(results)
 		}
 
@@ -1057,6 +1132,7 @@ async fn router(
 			version,
 			args,
 		} => {
+			let session_id = session_id.expect("run command must have a session ID");
 			// Format arguments as comma-separated SQL values
 			let formatted_args = args.iter().map(|v| v.to_sql()).collect::<Vec<_>>().join(", ");
 
@@ -1067,8 +1143,9 @@ async fn router(
 			};
 
 			// Execute the query
-			let results =
-				kvs.execute(&sql, &*session.read().await, Some(vars.read().await.clone())).await?;
+			let sessions_lock = sessions.read().await;
+			let state = sessions_lock.get(&session_id).expect("session should exist");
+			let results = kvs.execute(&sql, &state.session, Some(state.vars.clone())).await?;
 			Ok(results)
 		}
 	}

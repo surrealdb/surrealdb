@@ -94,7 +94,11 @@ pub(crate) enum Command {
 
 impl Command {
 	#[cfg(any(feature = "protocol-ws", feature = "protocol-http"))]
-	pub(crate) fn into_router_request(self, id: Option<i64>) -> Option<RouterRequest> {
+	pub(crate) fn into_router_request(
+		self,
+		id: Option<i64>,
+		session_id: Option<Uuid>,
+	) -> Option<RouterRequest> {
 		use surrealdb_types::Uuid;
 
 		let res = match self {
@@ -109,6 +113,7 @@ impl Command {
 					method: "use",
 					params: Some(Value::Array(Array::from(vec![namespace, database]))),
 					txn: None,
+					session_id,
 				}
 			}
 			Command::Signup {
@@ -118,6 +123,7 @@ impl Command {
 				method: "signup",
 				params: Some(Value::Array(Array::from(vec![Value::from_t(credentials)]))),
 				txn: None,
+				session_id,
 			},
 			Command::Signin {
 				credentials,
@@ -126,6 +132,7 @@ impl Command {
 				method: "signin",
 				params: Some(Value::Array(Array::from(vec![Value::from_t(credentials)]))),
 				txn: None,
+				session_id,
 			},
 			Command::Authenticate {
 				token,
@@ -143,6 +150,7 @@ impl Command {
 					} => access.into_value(),
 				}]))),
 				txn: None,
+				session_id,
 			},
 			Command::Refresh {
 				token,
@@ -153,18 +161,21 @@ impl Command {
 				// to the server for the refresh operation.
 				params: Some(Value::Array(Array::from(vec![Value::from_t(token)]))),
 				txn: None,
+				session_id,
 			},
 			Command::Invalidate => RouterRequest {
 				id,
 				method: "invalidate",
 				params: None,
 				txn: None,
+				session_id,
 			},
 			Command::Begin => RouterRequest {
 				id,
 				method: "begin",
 				params: None,
 				txn: None,
+				session_id,
 			},
 			Command::Commit {
 				txn,
@@ -173,6 +184,7 @@ impl Command {
 				method: "commit",
 				params: Some(Value::Array(Array::from(vec![Value::Uuid(Uuid(txn))]))),
 				txn: None,
+				session_id,
 			},
 			Command::Rollback {
 				txn,
@@ -181,6 +193,7 @@ impl Command {
 				method: "cancel",
 				params: Some(Value::Array(Array::from(vec![Value::Uuid(Uuid(txn))]))),
 				txn: None,
+				session_id,
 			},
 			Command::Revoke {
 				token,
@@ -189,6 +202,7 @@ impl Command {
 				method: "revoke",
 				params: Some(Value::Array(Array::from(vec![token.into_value()]))),
 				txn: None,
+				session_id,
 			},
 			Command::Query {
 				txn,
@@ -202,6 +216,7 @@ impl Command {
 					method: "query",
 					params: Some(Value::Array(Array::from(params))),
 					txn,
+					session_id,
 				}
 			}
 			Command::ExportFile {
@@ -227,12 +242,14 @@ impl Command {
 				method: "ping",
 				params: None,
 				txn: None,
+				session_id,
 			},
 			Command::Version => RouterRequest {
 				id,
 				method: "version",
 				params: None,
 				txn: None,
+				session_id,
 			},
 			Command::Set {
 				key,
@@ -242,6 +259,7 @@ impl Command {
 				method: "let",
 				params: Some(Value::from_t(vec![Value::from_t(key), value])),
 				txn: None,
+				session_id,
 			},
 			Command::Unset {
 				key,
@@ -250,6 +268,7 @@ impl Command {
 				method: "unset",
 				params: Some(Value::from_t(vec![Value::from_t(key)])),
 				txn: None,
+				session_id,
 			},
 			Command::SubscribeLive {
 				..
@@ -261,6 +280,7 @@ impl Command {
 				method: "kill",
 				params: Some(Value::from_t(vec![Value::Uuid(Uuid(uuid))])),
 				txn: None,
+				session_id,
 			},
 			Command::Run {
 				name,
@@ -277,6 +297,7 @@ impl Command {
 						Value::Array(args),
 					]))),
 					txn: None,
+					session_id,
 				}
 			}
 		};
@@ -295,6 +316,8 @@ pub(crate) struct RouterRequest {
 	pub(crate) method: &'static str,
 	pub(crate) params: Option<Value>,
 	pub(crate) txn: Option<Uuid>,
+	#[surreal(rename = "session")]
+	pub(crate) session_id: Option<Uuid>,
 }
 
 #[cfg(test)]
@@ -341,6 +364,7 @@ mod test {
 				Value::String("request".to_string()),
 			]))),
 			txn: Some(Uuid::new_v4()),
+			session_id: Some(Uuid::new_v4()),
 		};
 
 		assert_converts(

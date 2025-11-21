@@ -34,7 +34,7 @@ use crate::method::BoxFuture;
 use crate::opt::Tls;
 use crate::opt::{Endpoint, WaitFor};
 use crate::types::{Value, Variables};
-use crate::{ExtraFeatures, Result, Surreal};
+use crate::{ExtraFeatures, Result, SessionClone, SessionId, Surreal};
 
 pub(crate) const NAGLE_ALG: bool = false;
 
@@ -85,9 +85,11 @@ pub(crate) async fn connect(
 
 impl crate::Connection for Client {}
 impl conn::Sealed for Client {
+	#[allow(private_interfaces)]
 	fn connect(
 		mut address: Endpoint,
 		capacity: usize,
+		session_clone: Option<crate::SessionClone>,
 	) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			address.url = address.url.join(PATH)?;
@@ -110,6 +112,7 @@ impl conn::Sealed for Client {
 				capacity => async_channel::bounded(capacity),
 			};
 			let config = address.config.clone();
+			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 
 			tokio::spawn(run_router(
 				address,
@@ -118,6 +121,7 @@ impl conn::Sealed for Client {
 				ws_config,
 				socket,
 				route_rx,
+				session_clone.receiver.clone(),
 			));
 
 			let mut features = HashSet::new();
@@ -131,8 +135,39 @@ impl conn::Sealed for Client {
 				last_id: AtomicI64::new(0),
 			};
 
-			Ok((router, waiter).into())
+			Ok((router, waiter, session_clone).into())
 		})
+	}
+}
+
+/// Send a clone_session RPC request to the server
+async fn send_clone_session_request(
+	from: Option<uuid::Uuid>,
+	to: uuid::Uuid,
+	sink: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+) {
+	use surrealdb_types::{Array, SurrealValue, Uuid as SurrealUuid};
+
+	let from_value = match from {
+		Some(id) => Value::Uuid(SurrealUuid(id)),
+		None => Value::None,
+	};
+
+	let request = crate::conn::cmd::RouterRequest {
+		id: None, // Fire and forget - we don't wait for response
+		method: "clone_session",
+		params: Some(Value::Array(Array::from(vec![from_value, Value::Uuid(SurrealUuid(to))]))),
+		txn: None,
+		session_id: None, // Session cloning doesn't use a session ID
+	};
+
+	let request_value = request.into_value();
+	let payload = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
+		.expect("router request should serialize");
+	let message = Message::Binary(payload.into());
+
+	if let Err(error) = sink.send(message).await {
+		warn!("Failed to send clone_session request to server: {error}");
 	}
 }
 
@@ -147,6 +182,7 @@ async fn router_handle_route(
 	let RequestData {
 		id,
 		command,
+		session_id,
 	} = request;
 
 	// We probably shouldn't be sending duplicate id requests.
@@ -166,8 +202,13 @@ async fn router_handle_route(
 			query,
 			variables,
 		} => {
-			let mut merged_vars =
-				state.vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Variables>();
+			// Get session-specific vars
+			let session_state = state.sessions.entry(session_id).or_default();
+			let mut merged_vars = session_state
+				.vars
+				.iter()
+				.map(|(k, v)| (k.clone(), v.clone()))
+				.collect::<Variables>();
 			merged_vars.extend(variables);
 			Command::Query {
 				txn,
@@ -216,20 +257,28 @@ async fn router_handle_route(
 		Command::Use {
 			..
 		} => {
-			state.replay.insert(ReplayMethod::Use, command.clone());
+			// Store in session-specific replay
+			let session_state = state.sessions.entry(session_id).or_default();
+			session_state.replay.insert(ReplayMethod::Use, command.clone());
 		}
 		Command::Signup {
 			..
 		} => {
-			state.replay.insert(ReplayMethod::Signup, command.clone());
+			// Store in session-specific replay
+			let session_state = state.sessions.entry(session_id).or_default();
+			session_state.replay.insert(ReplayMethod::Signup, command.clone());
 		}
 		Command::Signin {
 			..
 		} => {
-			state.replay.insert(ReplayMethod::Signin, command.clone());
+			// Store in session-specific replay
+			let session_state = state.sessions.entry(session_id).or_default();
+			session_state.replay.insert(ReplayMethod::Signin, command.clone());
 		}
 		Command::Invalidate => {
-			state.replay.insert(ReplayMethod::Invalidate, command.clone());
+			// Store in session-specific replay
+			let session_state = state.sessions.entry(session_id).or_default();
+			session_state.replay.insert(ReplayMethod::Invalidate, command.clone());
 		}
 		Command::Authenticate {
 			ref token,
@@ -237,13 +286,15 @@ async fn router_handle_route(
 			effect = RequestEffect::Authenticate {
 				token: Some(token.clone()),
 			};
-			state.replay.insert(ReplayMethod::Authenticate, command.clone());
+			// Store in session-specific replay
+			let session_state = state.sessions.entry(session_id).or_default();
+			session_state.replay.insert(ReplayMethod::Authenticate, command.clone());
 		}
 		_ => {}
 	}
 
 	let message = {
-		let Some(request) = command.into_router_request(Some(id)) else {
+		let Some(request) = command.into_router_request(Some(id), session_id) else {
 			let _ = response.send(Err(Error::BackupsNotSupported.into())).await;
 			return HandleResult::Ok;
 		};
@@ -273,6 +324,7 @@ async fn router_handle_route(
 			entry.insert(PendingRequest {
 				effect,
 				response_channel: response,
+				session_id,
 			});
 		}
 		Err(error) => {
@@ -310,12 +362,22 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 												key,
 												value,
 											} => {
-												state.vars.insert(key, value);
+												// Update session-specific vars
+												let session_state = state
+													.sessions
+													.entry(pending.session_id)
+													.or_default();
+												session_state.vars.insert(key, value);
 											}
 											RequestEffect::Clear {
 												key,
 											} => {
-												state.vars.shift_remove(&key);
+												// Update session-specific vars
+												let session_state = state
+													.sessions
+													.entry(pending.session_id)
+													.or_default();
+												session_state.vars.shift_remove(&key);
 											}
 											RequestEffect::Authenticate {
 												..
@@ -341,12 +403,22 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 												key,
 												value,
 											} => {
-												state.vars.insert(key, value);
+												// Update session-specific vars
+												let session_state = state
+													.sessions
+													.entry(pending.session_id)
+													.or_default();
+												session_state.vars.insert(key, value);
 											}
 											RequestEffect::Clear {
 												key,
 											} => {
-												state.vars.shift_remove(&key);
+												// Update session-specific vars
+												let session_state = state
+													.sessions
+													.entry(pending.session_id)
+													.or_default();
+												session_state.vars.shift_remove(&key);
 											}
 											RequestEffect::Authenticate {
 												token,
@@ -393,6 +465,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 															vec![token.into_value()],
 														))),
 														txn: None,
+														session_id: pending.session_id,
 													};
 													let request_value = request.into_value();
 													let value =
@@ -464,7 +537,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 									let request = Command::Kill {
 										uuid: live_query_id,
 									}
-									.into_router_request(None)
+									.into_router_request(None, None)
 									.expect("KILL command should convert to router request");
 
 									let request_value = request.into_value();
@@ -562,39 +635,46 @@ async fn router_reconnect(
 				let (new_sink, new_stream) = s.split();
 				state.sink = new_sink;
 				state.stream = new_stream;
-				for commands in state.replay.values() {
-					let request = commands
-						.clone()
-						.into_router_request(None)
-						.expect("replay commands should always convert to route requests");
+				// Replay state for ALL sessions
+				for (session_id, session_state) in &state.sessions {
+					// Replay commands (USE, SIGNIN, etc.) for this session
+					for commands in session_state.replay.values() {
+						let request = commands
+							.clone()
+							.into_router_request(None, *session_id)
+							.expect("replay commands should always convert to route requests");
 
-					let request_value = request.into_value();
+						let request_value = request.into_value();
 
-					let message = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
-						.expect("router request should serialize");
+						let message =
+							surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
+								.expect("router request should serialize");
 
-					if let Err(error) = state.sink.send(Message::Binary(message.into())).await {
-						trace!("{error}");
-						time::sleep(time::Duration::from_secs(1)).await;
-						continue;
+						if let Err(error) = state.sink.send(Message::Binary(message.into())).await {
+							trace!("{error}");
+							time::sleep(time::Duration::from_secs(1)).await;
+							continue;
+						}
 					}
-				}
-				for (key, value) in &state.vars {
-					let request = Command::Set {
-						key: key.as_str().into(),
-						value: value.clone(),
-					}
-					.into_router_request(None)
-					.expect("SET command should convert to router request");
-					trace!("Request {:?}", request);
-					let request_value = request.into_value();
-					let payload = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
-						.expect("router request should serialize");
+					// Replay vars (SET commands) for this session
+					for (key, value) in &session_state.vars {
+						let request = Command::Set {
+							key: key.as_str().into(),
+							value: value.clone(),
+						}
+						.into_router_request(None, *session_id)
+						.expect("SET command should convert to router request");
+						trace!("Request {:?}", request);
+						let request_value = request.into_value();
+						let payload =
+							surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
+								.expect("router request should serialize");
 
-					if let Err(error) = state.sink.send(Message::Binary(payload.into())).await {
-						trace!("{error}");
-						time::sleep(time::Duration::from_secs(1)).await;
-						continue;
+						if let Err(error) = state.sink.send(Message::Binary(payload.into())).await {
+							trace!("{error}");
+							time::sleep(time::Duration::from_secs(1)).await;
+							continue;
+						}
 					}
 				}
 				trace!("Reconnected successfully");
@@ -615,10 +695,11 @@ pub(crate) async fn run_router(
 	config: WebSocketConfig,
 	socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
 	route_rx: Receiver<Route>,
+	session_rx: Receiver<SessionId>,
 ) {
 	let ping = {
 		let request = Command::Health
-			.into_router_request(None)
+			.into_router_request(None, None)
 			.expect("HEALTH command should convert to router request");
 		let request_value = request.into_value();
 		let value = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
@@ -644,6 +725,27 @@ pub(crate) async fn run_router(
 
 		loop {
 			tokio::select! {
+				biased;
+
+				session = session_rx.recv() => {
+					let Ok(session_id) = session else {
+						break 'router
+					};
+					match session_id {
+						SessionId::Initial(session_id) => {
+							state.sessions.entry(Some(session_id)).or_default();
+							// Clone from default session
+							send_clone_session_request(None, session_id, &mut state.sink).await;
+						}
+						SessionId::Clone { old, new } => {
+							// Clone the local session state
+							let old_state = state.sessions.get(&Some(old)).cloned().unwrap_or_default();
+							state.sessions.insert(Some(new), old_state);
+							// Send clone_session RPC request to server
+							send_clone_session_request(Some(old), new, &mut state.sink).await;
+						}
+					}
+				}
 				route = route_rx.recv() => {
 					// handle incoming route
 

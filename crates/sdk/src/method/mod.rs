@@ -9,7 +9,7 @@ use surrealdb_types::{self, SurrealValue, Value, Variables};
 
 use crate::opt::auth::{Credentials, Token};
 use crate::opt::{IntoEndpoint, IntoExportDestination, WaitFor, auth};
-use crate::{Connect, Connection, OnceLockExt, Surreal};
+use crate::{Connect, Connection, OnceLockExt, SessionClone, Surreal};
 
 pub(crate) mod live;
 pub(crate) mod query;
@@ -195,13 +195,12 @@ where
 	/// }
 	/// ```
 	pub fn init() -> Self {
-		Self {
-			inner: Arc::new(super::Inner {
-				router: OnceLock::new(),
-				waiter: watch::channel(None),
-			}),
-			engine: PhantomData,
-		}
+		Arc::new(super::Inner {
+			router: OnceLock::new(),
+			waiter: watch::channel(None),
+			session_clone: SessionClone::new(),
+		})
+		.into()
 	}
 
 	/// Connects to a local or remote database endpoint
@@ -232,9 +231,9 @@ where
 		}
 	}
 
-	pub fn begin(&self) -> Begin<C> {
+	pub fn begin(self) -> Begin<C> {
 		Begin {
-			client: self.clone(),
+			client: self,
 		}
 	}
 
@@ -250,7 +249,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn use_ns(&'_ self, ns: impl Into<String>) -> UseNs<'_, C> {
+	pub fn use_ns(&self, ns: impl Into<String>) -> UseNs<'_, C> {
 		UseNs {
 			client: Cow::Borrowed(self),
 			ns: ns.into(),
@@ -269,7 +268,7 @@ where
 	/// # Ok(())
 	/// # }
 	/// ```
-	pub fn use_db(&'_ self, db: impl Into<String>) -> UseDb<'_, C> {
+	pub fn use_db(&self, db: impl Into<String>) -> UseDb<'_, C> {
 		UseDb {
 			client: Cow::Borrowed(self),
 			ns: None,

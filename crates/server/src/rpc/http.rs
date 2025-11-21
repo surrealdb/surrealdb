@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use arc_swap::ArcSwap;
+use dashmap::DashMap;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::{DbResult, RpcError, RpcProtocol};
@@ -12,16 +14,19 @@ use crate::cnf::{PKG_NAME, PKG_VERSION};
 pub struct Http {
 	pub kvs: Arc<Datastore>,
 	pub lock: Arc<Semaphore>,
-	pub session: Arc<Session>,
+	pub sessions: DashMap<Option<Uuid>, ArcSwap<Session>>,
 }
 
 impl Http {
 	pub fn new(kvs: Arc<Datastore>, session: Session) -> Self {
-		Self {
+		let http = Self {
 			kvs,
 			lock: Arc::new(Semaphore::new(1)),
-			session: Arc::new(session),
-		}
+			sessions: DashMap::new(),
+		};
+		// Store the default session with None key
+		http.sessions.insert(None, ArcSwap::from(Arc::new(session)));
+		http
 	}
 }
 
@@ -42,25 +47,9 @@ impl RpcProtocol for Http {
 		DbResult::Other(value)
 	}
 
-	// ------------------------------
-	// Sessions
-	// ------------------------------
-
-	/// The current session for this RPC context
-	fn get_session(&self, _id: Option<&Uuid>) -> Arc<Session> {
-		self.session.clone()
-	}
-	/// Mutable access to the current session for this RPC context
-	fn set_session(&self, _id: Option<Uuid>, _session: Arc<Session>) {
-		// Do nothing as HTTP is stateless
-	}
-	/// Mutable access to the current session for this RPC context
-	fn del_session(&self, _id: &Uuid) {
-		// Do nothing as HTTP is stateless
-	}
-	/// Lists all sessions
-	fn list_sessions(&self) -> Vec<Uuid> {
-		vec![]
+	/// A pointer to all active sessions
+	fn session_map(&self) -> &DashMap<Option<Uuid>, ArcSwap<Session>> {
+		&self.sessions
 	}
 
 	// ------------------------------

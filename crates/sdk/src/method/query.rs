@@ -104,11 +104,14 @@ where
 			let router = client.inner.router.extract()?;
 
 			let results = router
-				.execute_query(Command::Query {
-					query: Cow::Owned(query.into_owned()),
-					txn,
-					variables: variables?,
-				})
+				.execute_query(
+					Command::Query {
+						query: Cow::Owned(query.into_owned()),
+						txn,
+						variables: variables?,
+					},
+					client.session_id,
+				)
 				.await?;
 
 			let mut indexed_results = IndexedResults::new();
@@ -125,6 +128,7 @@ where
 						let live_stream = crate::method::live::register(
 							router,
 							live_query_id.into(),
+							client.session_id,
 						)
 						.await
 						.map(|rx| {

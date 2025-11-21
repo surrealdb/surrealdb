@@ -46,9 +46,12 @@ where
 		Box::pin(async move {
 			let router = client.inner.router.extract()?;
 			router
-				.execute(Command::Signin {
-					credentials: credentials.into_object()?,
-				})
+				.execute(
+					Command::Signin {
+						credentials: credentials.into_object()?,
+					},
+					client.session_id,
+				)
 				.await
 		})
 	}

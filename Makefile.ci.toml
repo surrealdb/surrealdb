@@ -519,7 +519,7 @@ script = """
     #!/bin/bash -ex
 
 
-    target/debug/surreal start ${_START_SURREALDB_PATH} --allow-all &>/tmp/surrealdb-${_TEST_API_ENGINE}.log &
+    target/debug/surreal start ${_START_SURREALDB_PATH} --allow-all --deny-guests &>/tmp/surrealdb-${_TEST_API_ENGINE}.log &
 
     echo $! > /tmp/surreal-${_TEST_API_ENGINE}.pid
 
