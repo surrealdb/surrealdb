@@ -5,7 +5,7 @@ use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon}
 use rust_decimal::Decimal;
 use surrealdb_types::ToSql;
 
-use crate::fmt::{EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKey, Float, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::sql::{Expr, RecordIdLit};
 use crate::types::{
 	PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicGeometry, PublicRegex,
@@ -81,13 +81,7 @@ impl fmt::Display for Literal {
 					write!(f, "false")
 				}
 			}
-			Literal::Float(float) => {
-				if float.is_finite() {
-					write!(f, "{float}f")
-				} else {
-					write!(f, "{float}")
-				}
-			}
+			Literal::Float(float) => write!(f, "{}", Float(*float)),
 			Literal::Integer(x) => write!(f, "{x}"),
 			Literal::Decimal(d) => write!(f, "{d}dec"),
 			Literal::String(strand) => write!(f, "{}", QuoteStr(strand)),
@@ -136,9 +130,9 @@ impl fmt::Display for Literal {
 					f.write_str(" }")
 				}
 			}
-			Literal::Duration(duration) => write!(f, "{duration}"),
+			Literal::Duration(duration) => write!(f, "{}", duration.to_sql()),
 			Literal::Datetime(datetime) => write!(f, "d{}", &QuoteStr(&datetime.to_string())),
-			Literal::Uuid(uuid) => write!(f, "{uuid}"),
+			Literal::Uuid(uuid) => write!(f, "{}", uuid.to_sql()),
 			Literal::Geometry(geometry) => write!(f, "{geometry}"),
 			Literal::File(file) => write!(f, "{}", file.to_sql()),
 		}

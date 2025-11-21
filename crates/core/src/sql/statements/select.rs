@@ -1,13 +1,12 @@
 use std::fmt;
 
-use crate::fmt::Fmt;
+use crate::fmt::{CoverStmtsSql, Fmt};
 use crate::sql::order::Ordering;
 use crate::sql::{
 	Cond, Explain, Expr, Fetchs, Fields, Groups, Limit, Splits, Start, Timeout, With,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct SelectStatement {
 	/// The foo,bar part in SELECT foo,bar FROM baz.
 	pub expr: Fields,
@@ -34,13 +33,13 @@ impl fmt::Display for SelectStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SELECT {}", self.expr)?;
 		if !self.omit.is_empty() {
-			write!(f, " OMIT {}", Fmt::comma_separated(self.omit.iter()))?
+			write!(f, " OMIT {}", Fmt::comma_separated(self.omit.iter().map(CoverStmtsSql)))?
 		}
 		write!(f, " FROM")?;
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
+		write!(f, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmtsSql)))?;
 		if let Some(ref v) = self.with {
 			write!(f, " {v}")?
 		}

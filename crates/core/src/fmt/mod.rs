@@ -6,9 +6,10 @@ mod test;
 mod escape;
 use std::cell::Cell;
 use std::fmt::{self, Display, Formatter, Write};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-pub use escape::{EscapeIdent, EscapeKey, EscapeKwFreeIdent, EscapeRid, QuoteStr};
+pub use escape::{EscapeIdent, EscapeKey, EscapeKwFreeIdent, EscapeKwIdent, EscapeRid, QuoteStr};
+
+use crate::{expr, sql};
 
 /// Implements fmt::Display by calling formatter on contents.
 pub(crate) struct Fmt<T, F> {
@@ -158,15 +159,12 @@ pub fn fmt_separated_by<T: Display, I: IntoIterator<Item = T>>(
 }
 
 thread_local! {
-	// Avoid `RefCell`/`UnsafeCell` by using atomic types. Access is synchronized due to
-	// `thread_local!` so all accesses can use `Ordering::Relaxed`.
-
 	/// Whether pretty-printing.
-	static PRETTY: AtomicBool = const {AtomicBool::new(false)};
+	static PRETTY: Cell<bool> = const { Cell::new(false)};
 	/// The current level of indentation, in units of tabs.
-	static INDENT: AtomicU32 = const{AtomicU32::new(0)};
+	static INDENT: Cell<u32> = const{ Cell::new(0)};
 	/// Whether the next formatting action should be preceded by a newline and indentation.
-	static NEW_LINE: AtomicBool = const{AtomicBool::new(false)};
+	static NEW_LINE: Cell<bool> = const{ Cell::new(false)};
 }
 
 /// An adapter that, if enabled, adds pretty print formatting.
@@ -185,13 +183,17 @@ impl<W: std::fmt::Write> Pretty<W> {
 	pub fn conditional(inner: W, enable: bool) -> Self {
 		let pretty_started_here = enable
 			&& PRETTY.with(|pretty| {
-				// Evaluates to true if PRETTY was false and is now true.
-				pretty.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed).is_ok()
+				if pretty.get() {
+					false
+				} else {
+					pretty.set(true);
+					true
+				}
 			});
 		if pretty_started_here {
 			// Clean slate.
-			NEW_LINE.with(|new_line| new_line.store(false, Ordering::Relaxed));
-			INDENT.with(|indent| indent.store(0, Ordering::Relaxed));
+			NEW_LINE.with(|new_line| new_line.set(false));
+			INDENT.with(|indent| indent.set(0));
 		}
 		Self {
 			inner,
@@ -212,16 +214,118 @@ impl<W: std::fmt::Write> Drop for Pretty<W> {
 	fn drop(&mut self) {
 		if self.active {
 			PRETTY.with(|pretty| {
-				debug_assert!(pretty.load(Ordering::Relaxed), "pretty status changed unexpectedly");
-				pretty.store(false, Ordering::Relaxed);
+				debug_assert!(pretty.get(), "pretty status changed unexpectedly");
+				pretty.set(false);
 			});
+		}
+	}
+}
+
+pub struct CoverStmtsSql<'a>(pub &'a sql::Expr);
+
+impl Display for CoverStmtsSql<'_> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		match self.0 {
+			sql::Expr::Literal(_)
+			| sql::Expr::Param(_)
+			| sql::Expr::Idiom(_)
+			| sql::Expr::Table(_)
+			| sql::Expr::Mock(_)
+			| sql::Expr::Block(_)
+			| sql::Expr::Constant(_)
+			| sql::Expr::Prefix {
+				..
+			}
+			| sql::Expr::Postfix {
+				..
+			}
+			| sql::Expr::Binary {
+				..
+			}
+			| sql::Expr::FunctionCall(_)
+			| sql::Expr::Closure(_)
+			| sql::Expr::Break
+			| sql::Expr::Continue
+			| sql::Expr::Throw(_) => self.0.fmt(f),
+			sql::Expr::Return(_)
+			| sql::Expr::IfElse(_)
+			| sql::Expr::Select(_)
+			| sql::Expr::Create(_)
+			| sql::Expr::Update(_)
+			| sql::Expr::Upsert(_)
+			| sql::Expr::Delete(_)
+			| sql::Expr::Relate(_)
+			| sql::Expr::Insert(_)
+			| sql::Expr::Define(_)
+			| sql::Expr::Remove(_)
+			| sql::Expr::Rebuild(_)
+			| sql::Expr::Alter(_)
+			| sql::Expr::Info(_)
+			| sql::Expr::Foreach(_)
+			| sql::Expr::Let(_)
+			| sql::Expr::Sleep(_) => {
+				f.write_str("(")?;
+				self.0.fmt(f)?;
+				f.write_str(")")
+			}
+		}
+	}
+}
+
+pub struct CoverStmtsExpr<'a>(pub &'a expr::Expr);
+
+impl Display for CoverStmtsExpr<'_> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		match self.0 {
+			expr::Expr::Literal(_)
+			| expr::Expr::Param(_)
+			| expr::Expr::Idiom(_)
+			| expr::Expr::Table(_)
+			| expr::Expr::Mock(_)
+			| expr::Expr::Block(_)
+			| expr::Expr::Constant(_)
+			| expr::Expr::Prefix {
+				..
+			}
+			| expr::Expr::Postfix {
+				..
+			}
+			| expr::Expr::Binary {
+				..
+			}
+			| expr::Expr::FunctionCall(_)
+			| expr::Expr::Closure(_)
+			| expr::Expr::Break
+			| expr::Expr::Continue
+			| expr::Expr::Throw(_) => self.0.fmt(f),
+			expr::Expr::Return(_)
+			| expr::Expr::IfElse(_)
+			| expr::Expr::Select(_)
+			| expr::Expr::Create(_)
+			| expr::Expr::Update(_)
+			| expr::Expr::Upsert(_)
+			| expr::Expr::Delete(_)
+			| expr::Expr::Relate(_)
+			| expr::Expr::Insert(_)
+			| expr::Expr::Define(_)
+			| expr::Expr::Remove(_)
+			| expr::Expr::Rebuild(_)
+			| expr::Expr::Alter(_)
+			| expr::Expr::Info(_)
+			| expr::Expr::Foreach(_)
+			| expr::Expr::Let(_)
+			| expr::Expr::Sleep(_) => {
+				f.write_str("(")?;
+				self.0.fmt(f)?;
+				f.write_str(")")
+			}
 		}
 	}
 }
 
 /// Returns whether pretty printing is in effect.
 pub(crate) fn is_pretty() -> bool {
-	PRETTY.with(|pretty| pretty.load(Ordering::Relaxed))
+	PRETTY.with(|pretty| pretty.get())
 }
 
 /// If pretty printing is in effect, increments the indentation level (until the
@@ -235,7 +339,7 @@ pub(crate) fn pretty_indent() -> PrettyGuard {
 /// follow if pretty printing is in effect.
 pub(crate) fn pretty_sequence_item() {
 	// List items need a new line, but no additional indentation.
-	NEW_LINE.with(|new_line| new_line.store(true, Ordering::Relaxed));
+	NEW_LINE.with(|new_line| new_line.set(true));
 }
 
 /// When dropped, applies the opposite increment to the current indentation
@@ -257,12 +361,12 @@ impl PrettyGuard {
 			// Equivalent to `indent += increment` if signed numbers could be added to
 			// unsigned numbers in stable, atomic Rust.
 			if increment >= 0 {
-				indent.fetch_add(increment as u32, Ordering::Relaxed);
+				indent.set(indent.get() + increment as u32);
 			} else {
-				indent.fetch_sub(increment.unsigned_abs() as u32, Ordering::Relaxed);
+				indent.set(indent.get() - increment.unsigned_abs() as u32);
 			}
 		});
-		NEW_LINE.with(|new_line| new_line.store(true, Ordering::Relaxed));
+		NEW_LINE.with(|new_line| new_line.set(true));
 	}
 }
 
@@ -274,16 +378,36 @@ impl Drop for PrettyGuard {
 
 impl<W: std::fmt::Write> std::fmt::Write for Pretty<W> {
 	fn write_str(&mut self, s: &str) -> std::fmt::Result {
-		if self.active && NEW_LINE.with(|new_line| new_line.swap(false, Ordering::Relaxed)) {
+		if self.active && NEW_LINE.with(|new_line| new_line.replace(false)) {
 			// Newline.
 			self.inner.write_char('\n')?;
-			for _ in 0..INDENT.with(|indent| indent.load(Ordering::Relaxed)) {
+			for _ in 0..INDENT.with(|indent| indent.get()) {
 				// One level of indentation.
 				self.inner.write_char('\t')?;
 			}
 		}
 		// What we were asked to write.
 		self.inner.write_str(s)
+	}
+}
+
+pub struct Float(pub f64);
+
+impl Display for Float {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		if !self.0.is_finite() {
+			if self.0.is_nan() {
+				f.write_str("NaN")?;
+			} else if self.0.is_sign_positive() {
+				f.write_str("Infinity")?;
+			} else {
+				f.write_str("-Infinity")?;
+			}
+		} else {
+			self.0.fmt(f)?;
+			f.write_str("f")?;
+		}
+		Ok(())
 	}
 }
 

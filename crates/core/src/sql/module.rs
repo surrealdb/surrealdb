@@ -1,5 +1,6 @@
 use std::fmt::{self, Display};
 
+use crate::fmt::EscapeKwFreeIdent;
 use crate::val::File;
 use crate::{catalog, expr};
 
@@ -13,9 +14,14 @@ pub(crate) enum ModuleName {
 impl Display for ModuleName {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			ModuleName::Module(name) => write!(f, "mod::{}", name),
+			ModuleName::Module(name) => write!(f, "mod::{}", EscapeKwFreeIdent(name)),
 			ModuleName::Silo(org, pkg, major, minor, patch) => {
-				write!(f, "silo::{org}::{pkg}<{major}.{minor}.{patch}>")
+				write!(
+					f,
+					"silo::{}::{}<{major}.{minor}.{patch}>",
+					EscapeKwFreeIdent(org),
+					EscapeKwFreeIdent(pkg)
+				)
 			}
 		}
 	}
@@ -44,6 +50,7 @@ impl From<crate::catalog::ModuleName> for ModuleName {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) enum ModuleExecutable {
 	Surrealism(SurrealismExecutable),
 	Silo(SiloExecutable),
@@ -92,6 +99,7 @@ impl fmt::Display for ModuleExecutable {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct SurrealismExecutable(pub File);
 
 impl From<expr::SurrealismExecutable> for SurrealismExecutable {
@@ -119,6 +127,7 @@ impl fmt::Display for SurrealismExecutable {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct SiloExecutable {
 	pub organisation: String,
 	pub package: String,

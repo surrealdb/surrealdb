@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::fmt::EscapeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct OptionStatement {
@@ -11,9 +11,9 @@ pub(crate) struct OptionStatement {
 impl fmt::Display for OptionStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if self.what {
-			write!(f, "OPTION {}", EscapeIdent(&self.name))
+			write!(f, "OPTION {}", EscapeKwFreeIdent(&self.name))
 		} else {
-			write!(f, "OPTION {} = FALSE", EscapeIdent(&self.name))
+			write!(f, "OPTION {} = FALSE", EscapeKwFreeIdent(&self.name))
 		}
 	}
 }

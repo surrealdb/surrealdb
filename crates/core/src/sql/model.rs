@@ -1,7 +1,8 @@
 use std::fmt;
 
+use crate::fmt::EscapeKwFreeIdent;
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Model {
 	pub name: String,
 	pub version: String,
@@ -9,7 +10,13 @@ pub struct Model {
 
 impl fmt::Display for Model {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ml::{}<{}>", self.name, self.version)
+		f.write_str("ml")?;
+		for s in self.name.split("::") {
+			f.write_str("::")?;
+			EscapeKwFreeIdent(s).fmt(f)?;
+		}
+
+		write!(f, "<{}>", self.version)
 	}
 }
 

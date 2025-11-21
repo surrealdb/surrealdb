@@ -13,7 +13,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Cond, ControlFlow, FlowResult, FlowResultExt as _, RecordIdLit};
-use crate::fmt::EscapeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Array, Datetime, Duration, Object, Value};
 use crate::{catalog, val};
@@ -65,9 +65,17 @@ pub(crate) struct AccessStatementRevoke {
 pub(crate) struct AccessStatementPurge {
 	pub ac: String,
 	pub base: Option<Base>,
-	pub expired: bool,
-	pub revoked: bool,
+	pub kind: PurgeKind,
 	pub grace: Duration,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub enum PurgeKind {
+	#[default]
+	Expired,
+	Revoked,
+	Both,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -863,12 +871,12 @@ async fn compute_purge(
 		// Revocation times should never exceed the current time.
 		// Grants expired or revoked at a future time will not be purged.
 		// Grants expired or revoked at exactly the current second will not be purged.
-		let purge_expired = stmt.expired
+		let purge_expired = matches!(stmt.kind, PurgeKind::Expired | PurgeKind::Both)
 			&& gr.expiration.as_ref().is_some_and(|exp| {
 				                 now.timestamp() >= exp.timestamp() // Prevent saturating when not expired yet.
 				                     && (now.timestamp().saturating_sub(exp.timestamp()) as u64) > stmt.grace.secs()
 				             });
-		let purge_revoked = stmt.revoked
+		let purge_revoked = matches!(stmt.kind, PurgeKind::Revoked | PurgeKind::Both)
 			&& gr.revocation.as_ref().is_some_and(|rev| {
 				                 now.timestamp() >= rev.timestamp() // Prevent saturating when not revoked yet.
 				                     && (now.timestamp().saturating_sub(rev.timestamp()) as u64) > stmt.grace.secs()
@@ -932,25 +940,25 @@ impl Display for AccessStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Grant(stmt) => {
-				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
+				write!(f, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " GRANT")?;
 				match &stmt.subject {
-					Subject::User(x) => write!(f, " FOR USER {}", EscapeIdent(x))?,
+					Subject::User(x) => write!(f, " FOR USER {}", EscapeKwFreeIdent(x))?,
 					Subject::Record(x) => write!(f, " FOR RECORD {}", x)?,
 				}
 				Ok(())
 			}
 			Self::Show(stmt) => {
-				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
+				write!(f, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " SHOW")?;
 				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {}", EscapeIdent(v))?,
+					Some(v) => write!(f, " GRANT {}", EscapeKwFreeIdent(v))?,
 					None => match &stmt.cond {
 						Some(v) => write!(f, " {v}")?,
 						None => write!(f, " ALL")?,
@@ -959,13 +967,13 @@ impl Display for AccessStatement {
 				Ok(())
 			}
 			Self::Revoke(stmt) => {
-				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
+				write!(f, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " REVOKE")?;
 				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {}", EscapeIdent(v))?,
+					Some(v) => write!(f, " GRANT {}", EscapeKwFreeIdent(v))?,
 					None => match &stmt.cond {
 						Some(v) => write!(f, " {v}")?,
 						None => write!(f, " ALL")?,
@@ -974,17 +982,15 @@ impl Display for AccessStatement {
 				Ok(())
 			}
 			Self::Purge(stmt) => {
-				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
+				write!(f, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " PURGE")?;
-				match (stmt.expired, stmt.revoked) {
-					(true, false) => write!(f, " EXPIRED")?,
-					(false, true) => write!(f, " REVOKED")?,
-					(true, true) => write!(f, " EXPIRED, REVOKED")?,
-					// This case should not parse.
-					(false, false) => write!(f, " NONE")?,
+				match stmt.kind {
+					PurgeKind::Expired => write!(f, " EXPIRED")?,
+					PurgeKind::Revoked => write!(f, " REVOKED")?,
+					PurgeKind::Both => write!(f, " EXPIRED, REVOKED")?,
 				};
 				if !stmt.grace.is_zero() {
 					write!(f, " FOR {}", stmt.grace)?;

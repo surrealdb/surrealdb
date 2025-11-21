@@ -20,6 +20,7 @@ use crate::dbs::Options;
 use crate::doc::{self, CursorDoc, Document};
 use crate::err::Error;
 use crate::expr::changefeed::ChangeFeed;
+use crate::expr::field::Selector;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::{
@@ -459,18 +460,18 @@ impl DefineTableStatement {
 		let mut groups = Vec::new();
 		for (idx, g) in analysis.group_expressions.iter().enumerate() {
 			let alias = format!("g{}", idx);
-			fields.push(Field::Single {
+			fields.push(Field::Single(Selector {
 				expr: g.clone(),
 				alias: Some(Idiom::field(alias.clone())),
-			});
+			}));
 			groups.push(Group(Idiom::field(alias)));
 		}
 
 		// calculated aggregations return in field 'a'
-		fields.push(Field::Single {
+		fields.push(Field::Single(Selector {
 			expr: Expr::Literal(Literal::Array(aggregate_value_expr)),
 			alias: Some(Idiom::field("a".to_string())),
-		});
+		}));
 
 		let stmt = SelectStatement {
 			// SELECT [aggregate1, aggregate2, ..] as a, group_expr1 as g0, group_expr2 as g1, ..

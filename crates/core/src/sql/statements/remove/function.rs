@@ -1,5 +1,7 @@
 use std::fmt::{self, Display};
 
+use crate::fmt::EscapeKwFreeIdent;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveFunctionStatement {
@@ -14,7 +16,7 @@ impl Display for RemoveFunctionStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " fn::{}", self.name)?;
+		write!(f, " fn::{}", EscapeKwFreeIdent(&self.name))?;
 		Ok(())
 	}
 }

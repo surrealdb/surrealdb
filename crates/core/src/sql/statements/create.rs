@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::fmt::Fmt;
+use crate::fmt::{CoverStmtsSql, Fmt};
 use crate::sql::{Data, Expr, Output, Timeout};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -9,6 +9,7 @@ pub struct CreateStatement {
 	// A keyword modifier indicating if we are expecting a single result or several
 	pub only: bool,
 	// Where we are creating (i.e. table, or record ID)
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
 	pub what: Vec<Expr>,
 	// The data associated with the record being created
 	pub data: Option<Data>,
@@ -28,7 +29,7 @@ impl fmt::Display for CreateStatement {
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
+		write!(f, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmtsSql)))?;
 		if let Some(ref v) = self.data {
 			write!(f, " {v}")?
 		}

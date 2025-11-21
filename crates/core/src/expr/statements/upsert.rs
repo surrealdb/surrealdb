@@ -8,7 +8,7 @@ use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Cond, Data, Explain, Expr, Output, Timeout, With};
-use crate::fmt::Fmt;
+use crate::fmt::{CoverStmtsExpr, Fmt};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 
@@ -100,7 +100,7 @@ impl fmt::Display for UpsertStatement {
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
+		write!(f, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmtsExpr)))?;
 		if let Some(ref v) = self.with {
 			write!(f, " {v}")?
 		}

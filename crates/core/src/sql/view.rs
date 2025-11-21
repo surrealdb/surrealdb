@@ -1,10 +1,9 @@
 use std::fmt;
 
-use crate::fmt::{EscapeIdent, Fmt};
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 use crate::sql::{Cond, Fields, Groups};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct View {
 	pub expr: Fields,
 	pub what: Vec<String>,
@@ -18,7 +17,7 @@ impl fmt::Display for View {
 			f,
 			"AS SELECT {} FROM {}",
 			self.expr,
-			Fmt::comma_separated(self.what.iter().map(EscapeIdent))
+			Fmt::comma_separated(self.what.iter().map(|x| EscapeKwFreeIdent(x.as_ref())))
 		)?;
 		if let Some(ref v) = self.cond {
 			write!(f, " {v}")?
