@@ -6,6 +6,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use futures::TryStreamExt;
+use futures::future::try_join_all;
 use futures::stream::Stream;
 use uuid::Uuid;
 
@@ -702,18 +703,21 @@ impl Transaction {
 	// to ensure the timestamp reflects the actual commit time.
 	pub(crate) async fn store_changes(&self) -> Result<()> {
 		// Get the current transaction timestamp
-		let ts = self.timestamp().await?;
-		// Convert timestamp to bytes for changefeed key
-		let ts = ts.to_ts_bytes();
-		// Write all buffered changefeed entries
-		for (ns, db, tb, value) in self.cf.changes()? {
+		let ts = self.timestamp().await?.to_ts_bytes();
+		// Convert the timestamp bytes to a slice
+		let ts = ts.as_slice();
+		// Collect all changefeed write operations as futures
+		let futures = self.cf.changes()?.into_iter().map(|(ns, db, tb, value)| async move {
 			// Create the changefeed key with the current timestamp
-			let key = crate::key::change::new(ns, db, &ts, &tb);
-			// Encode the key
-			let key = key.encode_key()?;
+			let key = crate::key::change::new(ns, db, ts, &tb).encode_key()?;
 			// Write the changefeed entry using the raw transactor API
 			self.tr.set(key, value, None).await.map_err(Error::from)?;
-		}
+			// Everything succeeded
+			Ok::<(), anyhow::Error>(())
+		});
+		// Execute all write operations concurrently
+		try_join_all(futures).await?;
+		// All good
 		Ok(())
 	}
 
