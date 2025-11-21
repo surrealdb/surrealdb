@@ -68,7 +68,7 @@ surrealmx = "0.14.3"
 trice = "0.4.0"
 vart = "0.9.3"
 ## Maintained by @Delskayn
-js = { version = "0.9.0", package = "rquickjs" }
+js = { version = "0.10.0", package = "rquickjs" }
 reblessive = "0.4.3"
 ## Maintained by @rushmorem
 ipnet = "2.11.0"

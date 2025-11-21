@@ -17,7 +17,7 @@ pub(crate) use classes::Query;
 use crate::ctx::MutableContext;
 
 /// A class to carry the data to run subqueries.
-#[derive(js::JsLifetime)]
+#[derive(JsLifetime)]
 pub struct QueryContext<'js> {
 	pub context: &'js Context,
 	pub opt: &'js Options,
