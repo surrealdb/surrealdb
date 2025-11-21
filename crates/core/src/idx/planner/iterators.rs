@@ -6,6 +6,7 @@ use anyhow::{Result, bail};
 use radix_trie::Trie;
 
 use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId, Record};
+use crate::cnf::COUNT_BATCH_SIZE;
 use crate::ctx::Context;
 use crate::err::Error;
 use crate::expr::BinaryOperator;
@@ -1673,14 +1674,22 @@ impl IndexCountThingIterator {
 	async fn next_count(&mut self, ctx: &Context, txn: &Transaction, _limit: u32) -> Result<usize> {
 		if let Some(range) = self.0.take() {
 			let mut count: i64 = 0;
-			for (i, key) in txn.keys(range, u32::MAX, None).await?.into_iter().enumerate() {
-				ctx.is_done(i % 1000 == 0).await?;
-				let iu = IndexCountKey::decode_key(&key)?;
-				if iu.pos {
-					count += iu.count as i64;
-				} else {
-					count -= iu.count as i64;
+			let mut loops = 0;
+			let mut current_range = Some(range);
+			while let Some(range) = current_range {
+				let batch = txn.batch_keys(range, *COUNT_BATCH_SIZE, None).await?;
+				for key in batch.result.iter() {
+					loops += 1;
+					ctx.is_done(loops % 1000 == 0).await?;
+					let iu = IndexCountKey::decode_key(key)?;
+					if iu.pos {
+						count += iu.count as i64;
+					} else {
+						count -= iu.count as i64;
+					}
 				}
+				current_range = batch.next;
+				ctx.is_done(true).await?;
 			}
 			Ok(count as usize)
 		} else {
@@ -1697,16 +1706,23 @@ impl IndexCountThingIterator {
 			return Ok(());
 		};
 		let mut count: i64 = 0;
-		for (i, key) in txn.keys(range.clone(), u32::MAX, None).await?.into_iter().enumerate() {
-			if i % 1000 == 0 {
-				yield_now!()
+		let mut loops = 0;
+		let mut current_range = Some(range.clone());
+		while let Some(r) = current_range {
+			let batch = txn.batch_keys(r, *COUNT_BATCH_SIZE, None).await?;
+			for key in batch.result.iter() {
+				loops += 1;
+				if loops % 1000 == 0 {
+					yield_now!()
+				}
+				let iu = IndexCountKey::decode_key(key)?;
+				if iu.pos {
+					count += iu.count as i64;
+				} else {
+					count -= iu.count as i64;
+				}
 			}
-			let iu = IndexCountKey::decode_key(&key)?;
-			if iu.pos {
-				count += iu.count as i64;
-			} else {
-				count -= iu.count as i64;
-			}
+			current_range = batch.next;
 		}
 		txn.delr(range).await?;
 		let pos = count.is_positive();
