@@ -73,7 +73,7 @@ surrealmx = "0.15.0"
 trice = "0.4.0"
 vart = "0.9.3"
 ## Maintained by @Delskayn
-js = { version = "0.9.0", package = "rquickjs", features = ["rust-alloc"] }
+js = { version = "0.11.0", package = "rquickjs", features = ["rust-alloc"] }
 reblessive = "0.4.3"
 
 # External Kv stores
