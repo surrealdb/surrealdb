@@ -63,7 +63,7 @@ pub struct StartCommandArguments {
 		help_heading = "Database"
 	)]
 	#[arg(env = "SURREAL_CHANGEFEED_GC_INTERVAL", long = "changefeed-gc-interval", value_parser = super::validator::duration)]
-	#[arg(default_value = "10s")]
+	#[arg(default_value = "30s")]
 	changefeed_gc_interval: Duration,
 	#[arg(env = "SURREAL_INDEX_COMPACTION_INTERVAL", long = "index-compaction-interval", value_parser = super::validator::duration)]
 	#[arg(default_value = "5s")]
