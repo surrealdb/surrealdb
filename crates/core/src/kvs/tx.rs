@@ -81,7 +81,7 @@ impl Transaction {
 	/// then this function will return [`true`], and any further
 	/// calls to functions on this transaction will result
 	/// in a [`kvs::Error::TransactionFinished`] error.
-	pub async fn closed(&self) -> bool {
+	pub fn closed(&self) -> bool {
 		self.tr.closed()
 	}
 
