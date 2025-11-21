@@ -14,9 +14,10 @@ impl Display for F {
 			} else {
 				f.write_str("-Infinity")?;
 			}
+		} else {
+			self.0.fmt(f)?;
+			f.write_str("f")?;
 		}
-		self.0.fmt(f)?;
-		f.write_str("f")?;
 		Ok(())
 	}
 }

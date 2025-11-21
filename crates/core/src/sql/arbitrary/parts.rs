@@ -290,7 +290,7 @@ impl<'a> Arbitrary<'a> for Middleware {
 
 pub fn either_kind<'a>(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Vec<Kind>> {
 	arb_vec1(u, |u| {
-		let r = match u.int_in_range(0u8..=1)? {
+		let r = match u.int_in_range(0u8..=23)? {
 			0 => Kind::None,
 			1 => Kind::Null,
 			2 => Kind::Bool,
