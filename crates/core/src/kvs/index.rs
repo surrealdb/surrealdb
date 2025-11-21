@@ -174,19 +174,19 @@ impl IndexBuilder {
 	) -> Result<IndexBuilding> {
 		let building = Arc::new(Building::new(ctx, self.tf.clone(), opt, ns, db, tb, ix)?);
 		let b = building.clone();
-		spawn(async move {
-			let guard = BuildingFinishGuard(b.clone());
-			let r = b.run().await;
-			if let Err(err) = &r {
-				b.set_status(BuildingStatus::Error(err.to_string())).await;
-			}
-			if let Some(s) = sdr
-				&& s.send(r).is_err()
-			{
-				warn!("Failed to send index building result to the consumer");
-			}
-			drop(guard);
-		});
+ 	spawn(async move {
+ 		let guard = BuildingFinishGuard(b.clone());
+ 		let r = b.run().await;
+ 		if let Err(err) = &r {
+ 			b.set_status(BuildingStatus::Error(err.to_string())).await;
+ 		}
+ 		drop(guard);
+ 		if let Some(s) = sdr
+ 			&& s.send(r).is_err()
+ 		{
+ 			warn!("Failed to send index building result to the consumer");
+ 		}
+ 	});
 		Ok(building)
 	}
 
