@@ -218,8 +218,8 @@ impl Display for Distance {
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[non_exhaustive]
 pub enum VectorType {
-	#[default]
 	F64,
+	#[default]
 	F32,
 	I64,
 	I32,

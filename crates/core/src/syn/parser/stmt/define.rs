@@ -1204,7 +1204,7 @@ impl Parser<'_> {
 					expected!(self, t!("DIMENSION"));
 					let dimension = self.next_token_value()?;
 					let mut distance = Distance::Euclidean;
-					let mut vector_type = VectorType::F64;
+					let mut vector_type = VectorType::F32;
 					let mut m = None;
 					let mut m0 = None;
 					let mut ml = None;
