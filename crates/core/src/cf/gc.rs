@@ -75,7 +75,7 @@ pub async fn gc_range(
 	dt: DateTime<Utc>,
 ) -> Result<()> {
 	// Fetch the earliest timestamp from the storage engine
-	let beg_ts = tx.timestamp_bytes_from_datetime(DateTime::<Utc>::MIN_UTC).await?;
+	let beg_ts = tx.timestamp_bytes_from_versionstamp(0).await?;
 	// Fetch the watermark timestamp from the storage engine
 	let end_ts = tx.timestamp_bytes_from_datetime(dt).await?;
 	// Create the changefeed range key prefix

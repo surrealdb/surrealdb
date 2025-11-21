@@ -41,7 +41,12 @@ impl Timestamp for u64 {
 	}
 	/// Create a timestamp from a datetime
 	fn from_datetime(datetime: DateTime<Utc>) -> Result<Self> {
-		Ok(datetime.timestamp_nanos() as u64)
+		match datetime.timestamp_nanos_opt() {
+			Some(v) => Ok(v as u64),
+			None => Err(Error::TimestampInvalid(
+				"datetime cannot be represented in nanosecond precision".to_string(),
+			)),
+		}
 	}
 	/// Convert the timestamp to a byte array
 	fn to_ts_bytes(&self) -> Vec<u8> {
@@ -133,8 +138,7 @@ impl Timestamp for HlcTimestamp {
 	/// Convert the timestamp to a datetime
 	/// Extracts the milliseconds component and converts to DateTime
 	fn to_datetime(&self) -> DateTime<Utc> {
-		let millis = self.0 >> 16;
-		DateTime::from_timestamp_millis(millis as i64)
+		DateTime::from_timestamp_millis((self.0 >> 16) as i64)
 			.expect("timestamp milliseconds should be valid")
 	}
 
