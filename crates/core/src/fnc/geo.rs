@@ -1,8 +1,8 @@
 use anyhow::Result;
-use geo::algorithm::bearing::HaversineBearing;
 use geo::algorithm::centroid::Centroid;
 use geo::algorithm::chamberlain_duquette_area::ChamberlainDuquetteArea;
 use geo::algorithm::haversine_distance::HaversineDistance;
+use geo::{Bearing, Haversine};
 
 use crate::val::{Geometry, Value};
 
@@ -24,7 +24,7 @@ pub fn area((arg,): (Geometry,)) -> Result<Value> {
 
 pub fn bearing((v, w): (Geometry, Geometry)) -> Result<Value> {
 	Ok(match (v, w) {
-		(Geometry::Point(v), Geometry::Point(w)) => v.haversine_bearing(w).into(),
+		(Geometry::Point(v), Geometry::Point(w)) => Haversine.bearing(v, w).into(),
 		_ => Value::None,
 	})
 }

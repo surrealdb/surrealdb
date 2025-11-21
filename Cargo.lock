@@ -2899,22 +2899,6 @@ dependencies = [
 
 [[package]]
 name = "geo"
-version = "0.28.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f811f663912a69249fa620dcd2a005db7254529da2d8a0b23942e81f47084501"
-dependencies = [
- "float_next_after",
- "geo-types",
- "geographiclib-rs",
- "log",
- "num-traits",
- "robust",
- "rstar",
- "serde",
-]
-
-[[package]]
-name = "geo"
 version = "0.31.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2fc1a1678e54befc9b4bcab6cd43b8e7f834ae8ea121118b0fd8c42747675b4a"
@@ -5920,7 +5904,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b762d27bdb312a92b2a1786e9dec700186f3c3e8a98b56b36c1b078e6bf2804a"
 dependencies = [
  "chrono",
- "geo 0.31.0",
+ "geo",
  "regex",
  "revision-derive",
  "roaring",
@@ -6998,7 +6982,7 @@ dependencies = [
  "env_logger",
  "flate2",
  "futures",
- "geo 0.28.0",
+ "geo",
  "getrandom 0.3.4",
  "hashbrown 0.14.5",
  "indexmap 2.12.1",
@@ -7079,7 +7063,7 @@ dependencies = [
  "fst",
  "futures",
  "fuzzy-matcher",
- "geo 0.28.0",
+ "geo",
  "geo-types",
  "getrandom 0.3.4",
  "hashbrown 0.14.5",
@@ -7191,7 +7175,7 @@ dependencies = [
  "chrono",
  "flatbuffers",
  "futures",
- "geo 0.31.0",
+ "geo",
  "prost 0.13.5",
  "prost-types 0.13.5",
  "rust_decimal",
@@ -7237,7 +7221,7 @@ dependencies = [
  "env_logger",
  "futures",
  "futures-util",
- "geo 0.28.0",
+ "geo",
  "geo-types",
  "glob",
  "http 1.3.1",
@@ -7329,7 +7313,7 @@ dependencies = [
  "bytes",
  "chrono",
  "flatbuffers",
- "geo 0.28.0",
+ "geo",
  "geo-types",
  "hex",
  "http 1.3.1",

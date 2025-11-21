@@ -110,7 +110,7 @@ fst = "0.4.7"
 futures = "0.3.31"
 futures-util = "0.3.31"
 fuzzy-matcher = "0.3.7"
-geo = { version = "0.28.0", default-features = false }
+geo = { version = "0.31.0", default-features = false }
 geo-types = "0.7.17"
 getrandom = "0.3.4"
 hex = "0.4.3"
