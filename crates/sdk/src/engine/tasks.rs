@@ -60,13 +60,13 @@ fn spawn_task_node_membership_refresh(
 	opts: &EngineOptions,
 ) -> Task {
 	// Get the delay interval from the config
-	let delay = opts.node_membership_refresh_interval;
+	let interval = opts.node_membership_refresh_interval;
 	// Spawn a future
 	Box::pin(spawn(async move {
 		// Log the interval frequency
-		trace!("Updating node registration information every {delay:?}");
+		trace!("Updating node registration information every {interval:?}");
 		// Create a new time-based interval ticket
-		let mut ticker = interval_ticker(delay).await;
+		let mut ticker = interval_ticker(interval).await;
 		// Loop continuously until the task is cancelled
 		loop {
 			tokio::select! {
@@ -91,13 +91,13 @@ fn spawn_task_node_membership_check(
 	opts: &EngineOptions,
 ) -> Task {
 	// Get the delay interval from the config
-	let delay = opts.node_membership_check_interval;
+	let interval = opts.node_membership_check_interval;
 	// Spawn a future
 	Box::pin(spawn(async move {
 		// Log the interval frequency
-		trace!("Processing and archiving inactive nodes every {delay:?}");
+		trace!("Processing and archiving inactive nodes every {interval:?}");
 		// Create a new time-based interval ticket
-		let mut ticker = interval_ticker(delay).await;
+		let mut ticker = interval_ticker(interval).await;
 		// Loop continuously until the task is cancelled
 		loop {
 			tokio::select! {
@@ -122,13 +122,13 @@ fn spawn_task_node_membership_cleanup(
 	opts: &EngineOptions,
 ) -> Task {
 	// Get the delay interval from the config
-	let delay = opts.node_membership_cleanup_interval;
+	let interval = opts.node_membership_cleanup_interval;
 	// Spawn a future
 	Box::pin(spawn(async move {
 		// Log the interval frequency
-		trace!("Processing and cleaning archived nodes every {delay:?}");
+		trace!("Processing and cleaning archived nodes every {interval:?}");
 		// Create a new time-based interval ticket
-		let mut ticker = interval_ticker(delay).await;
+		let mut ticker = interval_ticker(interval).await;
 		// Loop continuously until the task is cancelled
 		loop {
 			tokio::select! {
