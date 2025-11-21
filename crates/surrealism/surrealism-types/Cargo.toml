@@ -23,8 +23,8 @@ thiserror.workspace = true
 uuid.workspace = true
 surrealdb-types.workspace = true
 chrono.workspace = true
-bytes = "1.10.1"
-flatbuffers = "25.2.10"
+bytes = "1.11.0"
+flatbuffers = "25.9.23"
 rust_decimal = "1.39.0"
 
 [lints]

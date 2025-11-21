@@ -72,7 +72,7 @@ js = { version = "0.9.0", package = "rquickjs" }
 reblessive = "0.4.3"
 ## Maintained by @rushmorem
 ipnet = "2.11.0"
-serde-content = "0.1.0"
+serde-content = "0.1.2"
 
 # External Kv stores
 rocksdb = { version = "0.24.0-surreal.1", package = "surrealdb-rocksdb", features = ["lz4", "snappy"] }
@@ -83,125 +83,125 @@ tikv = { version = "0.3.0-surreal.4", default-features = false, package = "surre
 # Other crates
 addr = { version = "0.15.6", default-features = false, features = ["std"] }
 ahash = "0.8.12"
-ammonia = "4.0.0"
+ammonia = "4.1.2"
 anyhow = "1.0.100"
-arbitrary = "1.3.2"
-argon2 = "0.5.2"
+arbitrary = "1.4.2"
+argon2 = "0.5.3"
 arrayvec = "0.7.6"
-async-channel = "2.3.1"
-async-executor = "1.13.1"
+async-channel = "2.5.0"
+async-executor = "1.13.3"
 async-graphql = { version = "7.0.17", default-features = false, features = ["custom-error-conversion"] }
 async-graphql-axum = "7.0.17"
-async-trait = "0.1.88"
-base64 = "0.21.5"
-bcrypt = "0.15.0"
+async-trait = "0.1.89"
+base64 = "0.22.1"
+bcrypt = "0.17.1"
 bincode = "1.3.3"
-blake3 = "1.5.3"
-bytes = "1.5.0"
-castaway = "0.2.3"
-chrono = "0.4.38"
-ciborium = "0.2.1"
+blake3 = "1.8.2"
+bytes = "1.11.0"
+castaway = "0.2.4"
+chrono = "0.4.42"
+ciborium = "0.2.2"
 dashmap = "6.1.0"
-deunicode = "1.6.1"
-ext-sort = "^0.1.4"
+deunicode = "1.6.2"
+ext-sort = "^0.1.5"
 fastnum = "0.3.2"
-flatbuffers = { version = "25.2.10", features = ["serde"] }
+flatbuffers = { version = "25.9.23", features = ["serde"] }
 fst = "0.4.7"
-futures = "0.3.30"
-futures-util = "0.3.30"
+futures = "0.3.31"
+futures-util = "0.3.31"
 fuzzy-matcher = "0.3.7"
 geo = { version = "0.28.0", default-features = false }
-geo-types = "0.7.13"
-getrandom = "0.3.2"
+geo-types = "0.7.17"
+getrandom = "0.3.4"
 hex = "0.4.3"
-http = "1.1.0"
-hyper = "=1.6.0"
+http = "1.3.1"
+hyper = "1.8.1"
 humantime = "2.3.0"
-indexmap = "2.1.0"
-jemallocator = { version = "0.6.0", package = "tikv-jemallocator" }
-jsonwebtoken = "9.3.0"
-linfa-linalg = "=0.2.1"
+indexmap = "2.12.1"
+jemallocator = { version = "0.6.1", package = "tikv-jemallocator" }
+jsonwebtoken = "9.3.1"
+linfa-linalg = "0.2.1"
 md-5 = "0.10.6"
 nanoid = "0.4.0"
-native-tls = "0.2.11"
-ndarray = "=0.16.1"
-ndarray-stats = "=0.6.0"
-num-traits = "0.2.18"
-num_cpus = "1.16.0"
-object_store = "0.12.0"
-ort = "=2.0.0-rc.9"
-ort-sys = "=2.0.0-rc.9"
-parking_lot = "0.12.3"
+native-tls = "0.2.14"
+ndarray = "0.16.1"
+ndarray-stats = "0.6.0"
+num-traits = "0.2.19"
+num_cpus = "1.17.0"
+object_store = "0.12.4"
+ort = "2.0.0-rc.10"
+ort-sys = "2.0.0-rc.10"
+parking_lot = "0.12.5"
 path-clean = "1.0.1"
 pbkdf2 = "0.12.2"
-## TODO: Look at dependency, 3 year old, unmaintained, no license specified.
+# TODO: Look at this dependency - 4 years old, unmaintained.
 pharos = "0.5.3"
-phf = "0.11.2"
-pin-project-lite = "0.2.13"
-quick_cache = "0.6.12"
-# TODO: Look at use of this dependency. Last update was 4 years ago and it is unmaintained
-radix_trie = "0.2.1"
+phf = "0.11.3"
+pin-project-lite = "0.2.16"
+quick_cache = "0.6.18"
+# TODO: Look at this dependency - updated, but unmaintained.
+radix_trie = "0.3.0"
 rand = "0.8.5"
-rayon = "1.10.0"
-regex = "1.10.6"
-regex-syntax = "0.8.4"
-reqwest = { version = "0.12.7", default-features = false }
-ring = "0.17.13"
+rayon = "1.11.0"
+regex = "1.12.2"
+regex-syntax = "0.8.8"
+reqwest = { version = "0.12.24", default-features = false }
+ring = "0.17.14"
 roaring = "0.11.2"
-rustls = { version = "0.23.12", default-features = false }
+rustls = { version = "0.23.35", default-features = false }
 rust_decimal = { version = "1.39.0" }
 rust-s3 = "0.35.1"
-# TODO: Look at dependency, 5 years old seems unmaintained.
+# TODO: Look at dependency - 6 years old, unmaintained.
 rust-stemmers = "1.2.0"
 scrypt = "0.11.0"
 semver = "1.0.27"
-serde = "1.0.209"
+serde = "1.0.228"
 serde_json = "1.0.145"
 sha1 = "0.10.6"
-sha2 = "0.10.8"
-snap = "1.1.0"
+sha2 = "0.10.9"
+snap = "1.1.1"
 strsim = "0.11.1"
 subtle = "2.6"
-surrealdb-protocol = { version = "0.6.0", default-features = false }
-sysinfo = "0.33.0"
-tempfile = "3.10.1"
-thiserror = "1.0.63"
-tokio = { version = "1.44.2", default-features = false }
+surrealdb-protocol = { version = "0.6.1", default-features = false }
+sysinfo = "0.37.2"
+tempfile = "3.23.0"
+thiserror = "1.0.69"
+tokio = { version = "1.48.0", default-features = false }
 tokio-stream = "0.1"
 tokio-tungstenite = "0.28.0"
-tokio-util = "0.7.11"
-tracing = "0.1.40"
-ulid = "1.1.0"
-unicase = "2.7.0"
-url = "2.5.0"
-uuid = "1.17.0"
-wasm-bindgen-futures = "0.4.39"
-wasmtimer = { version = "0.2.0", default-features = false }
-ws_stream_wasm = "0.7.4"
+tokio-util = "0.7.17"
+tracing = "0.1.41"
+ulid = "1.2.1"
+unicase = "2.8.1"
+url = "2.5.7"
+uuid = "1.18.1"
+wasm-bindgen-futures = "0.4.55"
+wasmtimer = { version = "0.2.1", default-features = false }
+ws_stream_wasm = "0.7.5"
 
 # used only in dev-dependencies
 criterion = "0.5.1"
-env_logger = "0.11.7"
-flate2 = "1.0.28"
+env_logger = "0.11.8"
+flate2 = "1.1.5"
 hashbrown = "0.14.5"
-pprof = "0.14.0"
+pprof = "0.14.1"
 rstest = "0.25.0"
 serial_test = "3.2.0"
-temp-dir = "0.1.11"
-test-log = "0.2.13"
-time = "0.3.36"
-tracing-subscriber = "0.3.18"
-wiremock = "0.6.0"
+temp-dir = "0.1.16"
+test-log = "0.2.18"
+time = "0.3.44"
+tracing-subscriber = "0.3.20"
+wiremock = "0.6.5"
 
 # Surrealism specific dependencies
-clap = { version = "4.5.40", features = ["derive"] }
-toml = "0.8.10"
-tar = "0.4.40"
-zstd = "0.13.0"
-wasmtime = { version = "34.0.1", default-features = false, features = ["cranelift", "winch"] }
-wasmtime-wasi = "34.0.1"
+clap = { version = "4.5.53", features = ["derive"] }
+toml = "0.9.8"
+tar = "0.4.44"
+zstd = "0.13.3"
+wasmtime = { version = "34.0.2", default-features = false, features = ["cranelift", "winch"] }
+wasmtime-wasi = "34.0.2"
 walrus = "0.20.3"
-wasm-opt = "0.116.0"
+wasm-opt = "0.116.1"
 candle-core = "0.9.1"
 
 [package]
@@ -260,7 +260,7 @@ surrealdb-types.workspace = true
 nix = { version = "0.27.1", features = ["signal", "user"] }
 
 [dev-dependencies]
-assert_fs = "1.0.13"
+assert_fs = "1.1.3"
 chrono.workspace = true
 ciborium.workspace = true
 futures.workspace = true

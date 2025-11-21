@@ -64,30 +64,30 @@ revision = { workspace = true, features = [
 anyhow.workspace = true
 arc-swap = "1.7.1"
 async-trait.workspace = true
-axum = { version = "0.8.5", features = ["tracing", "ws"] }
-axum-extra = { version = "0.10.2", features = [
+axum = { version = "0.8.7", features = ["tracing", "ws"] }
+axum-extra = { version = "0.12.2", features = [
     "query",
     "typed-routing",
     "typed-header",
 ] }
-axum-server = { version = "0.7.2", features = ["tls-rustls-no-provider"] }
+axum-server = { version = "0.7.3", features = ["tls-rustls-no-provider"] }
 bincode.workspace = true
 console-subscriber = "0.4.1"
-clap = { version = "4.4.11", features = [
+clap = { version = "4.5.53", features = [
     "env",
     "derive",
     "wrap_help",
     "unicode",
 ] }
 dashmap.workspace = true
-glob = "0.3.1"
-http-body = "1.0.0"
-http-body-util = "0.1.1"
+glob = "0.3.3"
+http-body = "1.0.1"
+http-body-util = "0.1.3"
 hyper.workspace = true
 opentelemetry = { version = "0.24" }
 opentelemetry-otlp = { version = "0.17.0", features = ["metrics"] }
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
-rustyline = { version = "17.0.1", features = ["derive"] }
+rustyline = { version = "17.0.2", features = ["derive"] }
 tower = { version = "0.4.13", features = ["limit", "load-shed"] }
 tower-http = { version = "0.5.2", features = [
     "trace",
@@ -104,8 +104,8 @@ tower-http = { version = "0.5.2", features = [
 ] }
 tower-service = "0.3.3"
 tracing-appender = "0.2.3"
-tracing-opentelemetry = "0.25.0"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter", "json"] }
+tracing-opentelemetry = "0.32.0"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json"] }
 urlencoding = "2.1.3"
 
 # Other crates
@@ -162,7 +162,7 @@ nix = { version = "0.27.1", features = ["signal", "user"] }
 
 [dev-dependencies]
 # Crates only used by the root surrealdb crate
-assert_fs = "1.0.13"
+assert_fs = "1.1.3"
 opentelemetry-proto = { version = "0.7.0", features = [
     "gen-tonic",
     "metrics",

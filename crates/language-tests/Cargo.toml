@@ -35,12 +35,12 @@ futures = "0.3.30"
 # Config and cli parsing
 clap = { version = "4.4.11", features = ["cargo"] }
 serde = { version = "1.0.209", features = ["derive"] }
-toml = "0.8.19"
+toml = "0.9.8"
 toml_edit = { version = "0.22", features = ["serde"] }
 semver = "1.0.27"
 
 # Used for formatting output
-base64 = "0.21.5"
+base64 = "0.22.1"
 similar = "2.6.0"
 
 # Used for for communicating with the surrealdb server during upgrade tests.
