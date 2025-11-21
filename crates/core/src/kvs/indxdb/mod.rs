@@ -1,45 +1,37 @@
 #![cfg(feature = "kv-indxdb")]
 
 use std::ops::Range;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use anyhow::{Result, ensure};
+use indxdb::{Database as Db, Transaction as Tx};
+use tokio::sync::RwLock;
 
-use crate::err::Error;
+use super::err::{Error, Result};
 use crate::key::debug::Sprintable;
-use crate::kvs::savepoint::SavePoints;
-use crate::kvs::{Check, Key, Val};
+use crate::kvs::api::Transactable;
+use crate::kvs::{Key, Val};
 
 pub struct Datastore {
-	db: indxdb::Db,
+	db: Db,
 }
 
 pub struct Transaction {
 	/// Is the transaction complete?
-	done: bool,
+	done: AtomicBool,
 	/// Is the transaction writeable?
 	write: bool,
-	/// Should we check unhandled transactions?
-	check: Check,
 	/// The underlying datastore transaction
-	inner: indxdb::Tx,
-	/// The save point implementation
-	save_points: SavePoints,
-}
-
-impl Drop for Transaction {
-	fn drop(&mut self) {
-		self.check.drop_check(self.done, self.write);
-	}
+	inner: RwLock<Tx>,
 }
 
 impl Datastore {
 	/// Open a new database
 	pub async fn new(path: &str) -> Result<Datastore> {
-		match indxdb::db::new(path).await {
+		match indxdb::Database::new(path).await {
 			Ok(db) => Ok(Datastore {
 				db,
 			}),
-			Err(e) => Err(anyhow::Error::new(Error::Ds(e.to_string()))),
+			Err(e) => Err(Error::Datastore(e.to_string())),
 		}
 	}
 	/// Shutdown the database
@@ -48,49 +40,29 @@ impl Datastore {
 		Ok(())
 	}
 	/// Start a new transaction
-	pub async fn transaction(
-		&self,
-		write: bool,
-		_: bool,
-	) -> Result<Box<dyn crate::kvs::api::Transaction>> {
-		// Specify the check level
-		#[cfg(not(debug_assertions))]
-		let check = Check::Warn;
-		#[cfg(debug_assertions)]
-		let check = Check::Error;
+	pub async fn transaction(&self, write: bool, _: bool) -> Result<Box<dyn Transactable>> {
 		// Create a new transaction
 		match self.db.begin(write).await {
-			Ok(inner) => Ok(Box::new(Transaction {
-				done: false,
-				check,
+			Ok(txn) => Ok(Box::new(Transaction {
+				done: AtomicBool::new(false),
 				write,
-				inner,
-				save_points: Default::default(),
+				inner: RwLock::new(txn),
 			})),
-			Err(e) => Err(anyhow::Error::new(Error::Tx(e.to_string()))),
+			Err(e) => Err(Error::from(e)),
 		}
 	}
 }
 
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-impl super::api::Transaction for Transaction {
+impl Transactable for Transaction {
 	fn kind(&self) -> &'static str {
 		"indxdb"
 	}
 
-	fn supports_reverse_scan(&self) -> bool {
-		false
-	}
-
-	/// Behaviour if unclosed
-	fn check_level(&mut self, check: Check) {
-		self.check = check;
-	}
-
 	/// Check if closed
 	fn closed(&self) -> bool {
-		self.done
+		self.done.load(Ordering::Relaxed)
 	}
 
 	/// Check if writeable
@@ -100,164 +72,279 @@ impl super::api::Transaction for Transaction {
 
 	/// Cancel a transaction
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn cancel(&mut self) -> Result<()> {
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
-		// Mark this transaction as done
-		self.done = true;
+	async fn cancel(&self) -> Result<()> {
+		// Atomically mark transaction as done and check if it was already closed
+		if self.done.swap(true, Ordering::AcqRel) {
+			return Err(Error::TransactionFinished);
+		}
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Cancel this transaction
-		self.inner.cancel().await?;
+		inner.cancel().await?;
 		// Continue
 		Ok(())
 	}
 
 	/// Commit a transaction
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn commit(&mut self) -> Result<()> {
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+	async fn commit(&self) -> Result<()> {
+		// Atomically mark transaction as done and check if it was already closed
+		if self.done.swap(true, Ordering::AcqRel) {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
-		// Mark this transaction as done
-		self.done = true;
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Cancel this transaction
-		self.inner.commit().await?;
+		inner.commit().await?;
 		// Continue
 		Ok(())
 	}
 
 	/// Check if a key exists
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn exists(&mut self, key: Key, version: Option<u64>) -> Result<bool> {
+	async fn exists(&self, key: Key, version: Option<u64>) -> Result<bool> {
 		// IndxDB does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Load the inner transaction
+		let inner = self.inner.read().await;
 		// Check the key
-		let res = self.inner.exi(key).await?;
+		let res = inner.exists(key).await?;
 		// Return result
 		Ok(res)
 	}
 
 	/// Fetch a key from the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get(&mut self, key: Key, version: Option<u64>) -> Result<Option<Val>> {
+	async fn get(&self, key: Key, version: Option<u64>) -> Result<Option<Val>> {
 		// IndxDB does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Load the inner transaction
+		let inner = self.inner.read().await;
 		// Get the key
-		let res = self.inner.get(key).await?;
+		let res = inner.get(key).await?;
 		// Return result
 		Ok(res)
 	}
 
 	/// Insert or update a key in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
+	async fn set(&self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
 		// IndxDB does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Set the key
-		self.inner.set(key, val).await?;
+		inner.set(key, val).await?;
 		// Return result
 		Ok(())
 	}
 
 	/// Insert a key if it doesn't exist in the database
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
+	async fn put(&self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
 		// IndxDB does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Set the key
-		self.inner.put(key, val).await?;
+		inner.put(key, val).await?;
 		// Return result
 		Ok(())
 	}
 
 	/// Insert a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<()> {
+	async fn putc(&self, key: Key, val: Val, chk: Option<Val>) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Set the key
-		self.inner.putc(key, val, chk.map(Into::into)).await?;
+		inner.putc(key, val, chk.map(Into::into)).await?;
 		// Return result
 		Ok(())
 	}
 
 	/// Delete a key
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn del(&mut self, key: Key) -> Result<()> {
+	async fn del(&self, key: Key) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Remove the key
-		let res = self.inner.del(key).await?;
+		let res = inner.del(key).await?;
 		// Return result
 		Ok(res)
 	}
 
 	/// Delete a key if the current value matches a condition
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<()> {
+	async fn delc(&self, key: Key, chk: Option<Val>) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		// Load the inner transaction
+		let mut inner = self.inner.write().await;
 		// Remove the key
-		let res = self.inner.delc(key, chk.map(Into::into)).await?;
+		let res = inner.delc(key, chk.map(Into::into)).await?;
 		// Return result
 		Ok(res)
 	}
 
-	/// Retrieve a range of keys from the databases
+	/// Retrieve a range of keys
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys(
-		&mut self,
-		rng: Range<Key>,
-		limit: u32,
-		version: Option<u64>,
-	) -> Result<Vec<Key>> {
+	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
 		// IndxDB does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Load the inner transaction
+		let inner = self.inner.read().await;
 		// Scan the keys
-		let res = self.inner.keys(rng, limit).await?;
+		let res = inner.keys(rng, limit).await?;
 		// Return result
 		Ok(res)
 	}
 
-	/// Retrieve a range of keys from the databases
+	/// Retrieve a range of keys, in reverse
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+		// IndxDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Load the inner transaction
+		let inner = self.inner.read().await;
+		// Scan the keys
+		let res = inner.keysr(rng, limit).await?;
+		// Return result
+		Ok(res)
+	}
+
+	/// Retrieve a range of key-value pairs
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn scan(
-		&mut self,
+		&self,
 		rng: Range<Key>,
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
 		// IndxDB does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
 		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Load the inner transaction
+		let inner = self.inner.read().await;
 		// Scan the keys
-		let res = self.inner.scan(rng, limit).await?;
+		let res = inner.scan(rng, limit).await?;
 		// Return result
 		Ok(res)
 	}
 
-	fn get_save_points(&mut self) -> &mut SavePoints {
-		&mut self.save_points
+	/// Retrieve a range of key-value pairs, in reverse
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scanr(
+		&self,
+		rng: Range<Key>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>> {
+		// IndxDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Load the inner transaction
+		let inner = self.inner.read().await;
+		// Scan the keys
+		let res = inner.scanr(rng, limit).await?;
+		// Return result
+		Ok(res)
+	}
+
+	/// Set a new save point on the transaction.
+	async fn new_save_point(&self) -> Result<()> {
+		self.inner.write().await.set_savepoint().await?;
+		Ok(())
+	}
+
+	/// Rollback to the last save point.
+	async fn rollback_to_save_point(&self) -> Result<()> {
+		self.inner.write().await.rollback_to_savepoint().await?;
+		Ok(())
+	}
+
+	/// Release the last save point.
+	async fn release_last_save_point(&self) -> Result<()> {
+		Ok(())
 	}
 }

@@ -283,7 +283,10 @@ pub async fn create_grant(
 			match res {
 				Ok(_) => {}
 				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+					if matches!(
+						e.downcast_ref(),
+						Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+					) {
 						error!(
 							"A collision was found when attempting to create a new grant. Purging inactive grants is advised"
 						)
@@ -415,7 +418,10 @@ pub async fn create_grant(
 			match res {
 				Ok(_) => {}
 				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+					if matches!(
+						e.downcast_ref(),
+						Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+					) {
 						error!(
 							"A collision was found when attempting to create a new grant. Purging inactive grants is advised"
 						)

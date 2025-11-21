@@ -17,11 +17,11 @@ license-file.workspace = true
 # Public features
 default = ["kv-mem"]
 kv-mem = [
-    "dep:surrealkv",
-    "tokio/time",
-    "dep:tempfile",
-    "dep:ext-sort",
-    "dep:affinitypool",
+	"dep:surrealmx",
+	"tokio/time",
+	"dep:tempfile",
+	"dep:ext-sort",
+	"dep:affinitypool",
 ]
 kv-indxdb = ["dep:indxdb"]
 kv-rocksdb = [
@@ -65,6 +65,7 @@ targets = []
 [dependencies]
 
 # External surreal crates
+surrealmx = { workspace = true, optional = true }
 surrealkv = { workspace = true, optional = true }
 surrealml = { workspace = true, optional = true }
 

@@ -180,12 +180,12 @@ impl IndexBuilder {
 			if let Err(err) = &r {
 				b.set_status(BuildingStatus::Error(err.to_string())).await;
 			}
+			drop(guard);
 			if let Some(s) = sdr
 				&& s.send(r).is_err()
 			{
 				warn!("Failed to send index building result to the consumer");
 			}
-			drop(guard);
 		});
 		Ok(building)
 	}

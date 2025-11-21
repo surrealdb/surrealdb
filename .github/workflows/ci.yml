@@ -488,7 +488,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        engine: [mem, surrealkv] # TODO(tobiemh): add 'rocksdb' and 'tikv' in KVS PR
+        engine: [mem, surrealkv, rocksdb, tikv]
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2

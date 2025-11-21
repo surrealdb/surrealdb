@@ -2,6 +2,8 @@
 
 use std::ops::Range;
 
+use bytes::Bytes;
+
 /// A trait for types that can be converted to a string representation for
 /// readability.
 pub trait Sprintable {
@@ -31,6 +33,15 @@ impl Sprintable for Vec<u8> {
 }
 
 impl Sprintable for &[u8] {
+	fn sprint(&self) -> String {
+		self.iter()
+			.flat_map(|&byte| std::ascii::escape_default(byte))
+			.map(|byte| byte as char)
+			.collect::<String>()
+	}
+}
+
+impl Sprintable for Bytes {
 	fn sprint(&self) -> String {
 		self.iter()
 			.flat_map(|&byte| std::ascii::escape_default(byte))

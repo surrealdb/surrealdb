@@ -53,8 +53,6 @@ impl Document {
 					}
 				);
 			}
-			// Lock the transaction
-			let mut txn = txn.lock().await;
 			// Get temporary edge references
 			let (ref o, ref i) = (Dir::Out, Dir::In);
 			// Store the left pointer edge

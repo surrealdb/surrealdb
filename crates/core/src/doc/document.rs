@@ -452,7 +452,7 @@ impl Document {
 		// Get the table definition
 		match ctx.get_cache() {
 			// A cache is present on the context
-			Some(cache) if txn.local() => {
+			Some(cache) if txn.is_local() => {
 				// Get the cache entry key
 				let key = cache::ds::Lookup::Db(ns, db);
 				// Get or update the cache entry
@@ -483,7 +483,7 @@ impl Document {
 		// Get the table definition
 		match ctx.get_cache() {
 			// A cache is present on the context
-			Some(cache) if txn.local() => {
+			Some(cache) if txn.is_local() => {
 				// Get the cache entry key
 				let key = cache::ds::Lookup::Tb(ns, db, &id.table);
 				// Get or update the cache entry

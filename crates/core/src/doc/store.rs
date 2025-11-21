@@ -62,7 +62,10 @@ impl Document {
 				{
 					// The key already exists, so return an error
 					Err(e) => {
-						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+						if matches!(
+							e.downcast_ref(),
+							Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+						) {
 							Err(anyhow::Error::new(Error::RecordExists {
 								record: rid.as_ref().to_owned(),
 							}))
@@ -95,7 +98,10 @@ impl Document {
 				{
 					// The key already exists, so return an error
 					Err(e) => {
-						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+						if matches!(
+							e.downcast_ref(),
+							Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+						) {
 							Err(anyhow::Error::new(Error::RecordExists {
 								record: rid.as_ref().to_owned(),
 							}))
@@ -128,7 +134,10 @@ impl Document {
 				{
 					// The key already exists, so return an error
 					Err(e) => {
-						if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+						if matches!(
+							e.downcast_ref(),
+							Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+						) {
 							Err(anyhow::Error::new(Error::RecordExists {
 								record: rid.as_ref().to_owned(),
 							}))
