@@ -109,18 +109,18 @@ async fn idiom_graph_with_filter_should_be_flattened() -> Result<()> {
 #[tokio::test]
 async fn idiom_optional_after_value_should_pass_through() -> Result<()> {
 	let sql = r#"
-		none?;
-		null?;
-		1?;
-		'a'?;
-		1s?;
-		time::EPOCH?;
-		u'0192fb97-e8ee-7683-8198-95710b103bd5'?;
-		[]?;
-		{}?;
-		(89.0, 90.0)?;
-		<bytes>"hhehehe"?;
-		person:aeon?;
+		none.?;
+		null.?;
+		1.?;
+		'a'.?;
+		1s.?;
+		time::EPOCH.?;
+		u'0192fb97-e8ee-7683-8198-95710b103bd5'.?;
+		[].?;
+		{}.?;
+		(89.0, 90.0).?;
+		<bytes>"hhehehe".?;
+		person:aeon.?;
 		{
 			type: "Polygon",
 			coordinates: [[
@@ -129,7 +129,7 @@ async fn idiom_optional_after_value_should_pass_through() -> Result<()> {
 				[-104.0910, 40.9974],
 				[-111.0672, 40.9862]
 			]]
-		}?;
+		}.?;
 	"#;
 	Test::new(sql)
 		.await?

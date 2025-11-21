@@ -110,7 +110,7 @@ impl Fields {
 
 		match self {
 			Fields::Value(field) => selector_is_count(field),
-			Fields::Select(fields) => fields.is_empty() && fields.iter().all(field_is_count),
+			Fields::Select(fields) => !fields.is_empty() && fields.iter().all(field_is_count),
 		}
 	}
 

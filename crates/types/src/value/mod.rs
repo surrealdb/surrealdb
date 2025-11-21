@@ -1155,9 +1155,9 @@ mod tests {
 		"items": vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))],
 	}), "{ items: [1, 2] }")]
 	// Geometry
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(0.0, 0.0))), "(0, 0)")]
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))), "(1, 2)")]
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(-123.45, 67.89))), "(-123.45, 67.89)")]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(0.0, 0.0))), "(0f, 0f)")]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))), "(1f, 2f)")]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(-123.45, 67.89))), "(-123.45f, 67.89f)")]
 	// Bytes
 	#[case::bytes(Value::Bytes(Bytes::default()), "b\"\"")]
 	#[case::bytes(Value::Bytes(Bytes::from(vec![1, 2, 3])), "b\"010203\"")]

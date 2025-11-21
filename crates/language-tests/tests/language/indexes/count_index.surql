@@ -14,7 +14,7 @@ value = "{ building: { initial: 0, pending: 0, status: 'ready', updated: 0 } }"
 value = "'OK'"
 
 [[test.results]]
-value = '''[{ detail: { direction: 'forward', table: 't' }, operation: 'Iterate Table' }, { detail: { "Aggregate expressions": {  }, Aggregations: { _a0: 'Count' }, "Group expressions": {  }, "Select expression": { count: '_a0' }, type: 'Group' }, operation: 'Collector' }]'''
+value = '''[{ detail: { plan: { index: 'idx', operator: 'Count' }, table: 't' }, operation: 'Iterate Index Count' }, { detail: { "Aggregate expressions": {  }, Aggregations: { _a0: 'Count' }, "Group expressions": {  }, "Select expression": { count: '_a0' }, type: 'Group' }, operation: 'Collector' }]'''
 
 [[test.results]]
 value = "[{ count: 4 }]"
