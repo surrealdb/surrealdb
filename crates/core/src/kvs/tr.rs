@@ -51,13 +51,8 @@ impl Drop for Transactor {
 			// Warn when running in test mode
 			#[cfg(test)]
 			warn!("A transaction was dropped without being committed or cancelled");
-			// Panic when running in debug mode
+			// Panic when running in normal mode
 			#[cfg(not(test))]
-			#[cfg(debug_assertions)]
-			panic!("A transaction was dropped without being committed or cancelled");
-			// Error when running in release mode
-			#[cfg(not(test))]
-			#[cfg(not(debug_assertions))]
 			error!("A transaction was dropped without being committed or cancelled");
 		}
 	}
