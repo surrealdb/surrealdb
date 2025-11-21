@@ -279,8 +279,8 @@ mod tests {
 	fn test_hlc_bytes_roundtrip() {
 		// Create HLC timestamps with various millisecond and counter values
 		let test_cases = vec![
-			(0u64 << 16) | 0,        // epoch with counter 0
-			(1000u64 << 16) | 0,     // 1 second with counter 0
+			0,                       // epoch with counter 0
+			1000u64 << 16,           // 1 second with counter 0
 			(1000u64 << 16) | 1,     // 1 second with counter 1
 			(1000u64 << 16) | 65535, // 1 second with max counter
 			(u64::MAX >> 16) << 16,  // max milliseconds with counter 0
@@ -304,9 +304,9 @@ mod tests {
 	#[test]
 	fn test_hlc_bytes_lexicographic_ordering() {
 		// Create timestamps with increasing values
-		let ts1 = super::HlcTimestamp((1000u64 << 16) | 0);
+		let ts1 = super::HlcTimestamp(1000u64 << 16);
 		let ts2 = super::HlcTimestamp((1000u64 << 16) | 1);
-		let ts3 = super::HlcTimestamp((1001u64 << 16) | 0);
+		let ts3 = super::HlcTimestamp(1001u64 << 16);
 
 		let bytes1 = ts1.to_ts_bytes();
 		let bytes2 = ts2.to_ts_bytes();
@@ -318,7 +318,7 @@ mod tests {
 
 	#[test]
 	fn test_hlc_versionstamp_roundtrip() {
-		let test_values = vec![(1000u64 << 16) | 0, (1000u64 << 16) | 100, (u64::MAX >> 16) << 16];
+		let test_values = vec![1000u64 << 16, (1000u64 << 16) | 100, (u64::MAX >> 16) << 16];
 
 		for value in test_values {
 			let ts = super::HlcTimestamp(value);
@@ -437,9 +437,9 @@ mod tests {
 	#[test]
 	fn test_hlc_ordering_property() {
 		// Verify that HlcTimestamp implements proper ordering
-		let ts1 = super::HlcTimestamp((1000u64 << 16) | 0);
+		let ts1 = super::HlcTimestamp(1000u64 << 16);
 		let ts2 = super::HlcTimestamp((1000u64 << 16) | 1);
-		let ts3 = super::HlcTimestamp((1001u64 << 16) | 0);
+		let ts3 = super::HlcTimestamp(1001u64 << 16);
 
 		assert!(ts1 < ts2);
 		assert!(ts2 < ts3);
