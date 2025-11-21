@@ -39,7 +39,7 @@ impl fmt::Display for RelateStatement {
 		}
 		f.write_str(" -> ")?;
 
-		if matches!(self.through, Expr::Param(_)) {
+		if matches!(self.through, Expr::Param(_) | Expr::Table(_)) {
 			self.through.fmt(f)?;
 		} else {
 			f.write_str("(")?;

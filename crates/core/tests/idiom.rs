@@ -6,7 +6,7 @@ use helpers::Test;
 async fn idiom_chain_part_optional() -> Result<()> {
 	let sql = r#"
 		{}.prop.is_bool();
-		{}.prop?.is_bool();
+		{}.prop.?.is_bool();
 	"#;
 	Test::new(sql).await?.expect_val("false")?.expect_val("None")?;
 	Ok(())

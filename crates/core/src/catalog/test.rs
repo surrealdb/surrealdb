@@ -64,7 +64,7 @@ use crate::vs::VersionStamp;
 	cache_events_ts: Uuid::default(),
 	cache_tables_ts: Uuid::default(),
 	cache_indexes_ts: Uuid::default(),
-}, 148)]
+}, 149)]
 #[case::subscription(SubscriptionDefinition {
 	id: Uuid::default(),
 	node: Uuid::default(),
@@ -79,7 +79,7 @@ use crate::vs::VersionStamp;
 	auth: Some(Auth::default()),
 	session: Some(Value::default()),
 	vars: BTreeMap::new(),
-}, 99)]
+}, 100)]
 #[case::access(AccessDefinition {
 	name: "access".to_string(),
 	access_type: AccessType::Bearer(BearerAccess {

@@ -67,8 +67,8 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 ])), "{ key: 1 }", "{\n\tkey: 1\n}")]
 #[case::expr_lit_geometry(
 	Expr::Literal(Literal::Geometry(PublicGeometry::Point(Point::new(1.0, 2.0)))),
-	"(1, 2)",
-	"(1, 2)"
+	"(1f, 2f)",
+	"(1f, 2f)"
 )]
 #[case::expr_lit_bytes(Expr::Literal(Literal::Bytes(PublicBytes::from(Bytes(b"hello".to_vec())))), "b\"68656C6C6F\"", "b\"68656C6C6F\"")]
 #[case::expr_lit_datetime(Expr::Literal(Literal::Datetime("1970-01-01T00:00:00Z".parse().unwrap())), "d'1970-01-01T00:00:00Z'", "d'1970-01-01T00:00:00Z'")]
@@ -90,8 +90,8 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 // Expression: Tables
 #[case::expr_table(Expr::Table("table".to_string()), "`table`", "`table`")]
 // Expression: Mocks
-#[case::expr_mock_count(Expr::Mock(Mock::Count("table".to_string(), 1)), "|`table`:1|", "|`table`:1|")]
-#[case::expr_mock_range(Expr::Mock(Mock::Range("table".to_string(), TypedRange::from_range(1..10))), "|`table`:1..10|", "|`table`:1..10|")]
+#[case::expr_mock_count(Expr::Mock(Mock::Count("table".to_string(), 1)), "|table:1|", "|table:1|")]
+#[case::expr_mock_range(Expr::Mock(Mock::Range("table".to_string(), TypedRange::from_range(1..10))), "|table:1..10|", "|table:1..10|")]
 // Expression: Block
 #[case::expr_block_empty(Expr::Block(Box::new(Block(vec![]))), "{;}", "{;}")]
 #[case::expr_block(Expr::Block(Box::new(Block(vec![
