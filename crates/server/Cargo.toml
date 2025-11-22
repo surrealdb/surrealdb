@@ -72,7 +72,7 @@ axum-extra = { version = "0.12.2", features = [
 ] }
 axum-server = { version = "0.7.3", features = ["tls-rustls-no-provider"] }
 bincode.workspace = true
-console-subscriber = "0.4.1"
+console-subscriber = "0.5.0"
 clap = { version = "4.5.53", features = [
     "env",
     "derive",
