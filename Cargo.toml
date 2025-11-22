@@ -117,7 +117,7 @@ hyper = "1.8.1"
 humantime = "2.3.0"
 indexmap = "2.12.1"
 jemallocator = { version = "0.6.1", package = "tikv-jemallocator" }
-jsonwebtoken = { version = "10.2.0", default-features = false, features = ["aws_lc_rs", "use_pem"] }
+jsonwebtoken = { version = "10.2.0", default-features = false, features = ["use_pem"] }
 md-5 = "0.10.6"
 nanoid = "0.4.0"
 native-tls = "0.2.14"
