@@ -119,13 +119,11 @@ humantime = "2.3.0"
 indexmap = "2.12.1"
 jemallocator = { version = "0.6.1", package = "tikv-jemallocator" }
 jsonwebtoken = { version = "10.2.0", default-features = false, features = ["aws_lc_rs", "use_pem"] }
-linfa-linalg = "0.2.1"
 md-5 = "0.10.6"
 nanoid = "0.4.0"
 native-tls = "0.2.14"
-ndarray = "0.16.1"
+ndarray = "0.17.1"
 nix = { version = "0.30.1", default-features = false }
-ndarray-stats = "0.6.0"
 num-traits = "0.2.19"
 num_cpus = "1.17.0"
 object_store = "0.12.4"
