@@ -1320,6 +1320,7 @@ impl Datastore {
 			TaskLeaseType::IndexCompaction,
 			interval * 2,
 		)?;
+		let run = Uuid::now_v7();
 		// We continue without interruptions while there are keys and the lease
 		loop {
 			// Attempt to acquire a lease for the ChangeFeedCleanup task
@@ -1332,7 +1333,7 @@ impl Datastore {
 			// Create a new transaction
 			let txn = self.transaction(Write, Optimistic).await?;
 			// Collect every item in the queue
-			let (beg, end) = IndexCompactionKey::range();
+			let (beg, end) = IndexCompactionKey::full_range();
 			let range = beg..end;
 			let mut previous: Option<IndexCompactionKey<'static>> = None;
 			let mut count = 0;
@@ -1347,6 +1348,7 @@ impl Datastore {
 				{
 					continue;
 				}
+				println!("START COMPACTION {run}");
 				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
 					Some(ix) => match &ix.index {
 						Index::FullText(p) => {
@@ -1373,6 +1375,12 @@ impl Datastore {
 				previous = Some(ic.into_owned());
 			}
 			if count > 0 {
+				println!("END COMPACTION {run}");
+				txn.commit().await?;
+				drop(txn);
+				// Now we can delete the range
+				// Create a new transaction
+				let txn = self.transaction(Write, Optimistic).await?;
 				txn.delr(range).await?;
 				txn.commit().await?;
 			} else {
@@ -1709,7 +1717,7 @@ impl Datastore {
 			Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
 			Some(Error::QueryNotExecuted {
 				message,
-			}) => DbResultError::QueryNotExecuted(message.clone()),
+			}) => DbResultError::QueryNotExecuted(format!("{message} - plan: {plan:?}")),
 			Some(Error::ScriptingNotAllowed) => {
 				DbResultError::MethodNotAllowed("Scripting functions are not allowed".to_string())
 			}

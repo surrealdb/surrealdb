@@ -62,36 +62,38 @@ impl RemoveIndexStatement {
 			}
 			Ok(ix) => ix,
 		};
+		// Stop index compaction if any, clear the index store cache
+		ctx.get_index_stores().index_removed(ctx, ns, db, &ix).await?;
+		// Delete the index data.
+		let res = txn.del_tb_index(ns, db, &what, &name).await;
+		println!("txn.del_tb_index: {res:?}");
+		res?;
 		// Get the table definition
 		let tb = txn.expect_tb(ns, db, &what).await?;
-		// Clear the index store cache
-		ctx.get_index_stores().index_removed(ctx.get_index_builder(), ns, db, &tb, &ix).await?;
-		// Delete the index data.
-		txn.del_tb_index(ns, db, &what, &name).await?;
+		// Update the table definition
+		let res = txn
+			.put_tb(
+				ns_name,
+				db_name,
+				&TableDefinition {
+					cache_indexes_ts: Uuid::now_v7(),
+					..tb.as_ref().clone()
+				},
+			)
+			.await;
+		println!("txn.put_tb: {res:?}");
+		res?;
 
-		// Refresh the table cache for indexes
-		let Some(tb) = txn.get_tb(ns, db, &what).await? else {
-			return Err(Error::TbNotFound {
-				name: what,
-			}
-			.into());
-		};
-
-		txn.put_tb(
-			ns_name,
-			db_name,
-			&TableDefinition {
-				cache_indexes_ts: Uuid::now_v7(),
-				..tb.as_ref().clone()
-			},
-		)
-		.await?;
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
+			println!("cache.clear_tb");
 			cache.clear_tb(ns, db, &what);
 		}
+
+		println!("clear_cache");
 		// Clear the cache
 		txn.clear_cache();
+		println!("OK!");
 		// Ok all good
 		Ok(Value::None)
 	}

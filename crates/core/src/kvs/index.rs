@@ -3,6 +3,7 @@ use std::collections::hash_map::Entry;
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use anyhow::{Result, ensure};
 use futures::channel::oneshot::{Receiver, Sender, channel};
@@ -12,11 +13,12 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tokio::sync::RwLock;
+use tokio::time::sleep;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
 use crate::catalog::{
-	DatabaseDefinition, DatabaseId, IndexDefinition, IndexId, NamespaceId, Record, TableId,
+	DatabaseDefinition, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId, Record, TableId,
 };
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
@@ -27,6 +29,7 @@ use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
 use crate::key::record;
+use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val, impl_kv_value_revisioned};
@@ -259,12 +262,37 @@ impl IndexBuilder {
 
 	pub(crate) async fn remove_index(
 		&self,
+		ctx: &Context,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
-		ix: IndexId,
+		ix: &IndexDefinition,
 	) -> Result<()> {
-		let key = IndexKey::new(ns, db, tb, ix);
+		if matches!(ix.index, Index::FullText(_) | Index::Count(_)) {
+			let range = IndexCompactionKey::range_for_index(ns, db, &ix.table_name, ix.index_id)?;
+			// Wait for compaction to be done
+			loop {
+				if ctx.is_done(false).await? {
+					return Ok(());
+				}
+				{
+					let tx = self
+						.tf
+						.transaction(
+							TransactionType::Read,
+							Optimistic,
+							ctx.try_get_sequences()?.clone(),
+						)
+						.await?;
+					let res = tx.count(range.clone()).await;
+					tx.cancel().await?;
+					if res? == 0 {
+						break;
+					}
+				}
+				sleep(Duration::from_millis(500)).await;
+			}
+		}
+		let key = IndexKey::new(ns, db, &ix.table_name, ix.index_id);
 		if let Some(b) = self.indexes.write().await.remove(&key) {
 			b.abort();
 		}
