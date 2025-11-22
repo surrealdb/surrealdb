@@ -283,6 +283,7 @@ impl IndexBuilder {
 						)
 						.await?;
 					let res = tx.count(range.clone()).await;
+					println!("RES {res:?}");
 					tx.cancel().await?;
 					if res? == 0 {
 						break;

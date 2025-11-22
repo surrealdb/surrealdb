@@ -17,12 +17,9 @@ upgrade = ["backend-surrealkv", "tokio-tungstenite", "revision"] # Upgrade test 
 [dependencies]
 # Crates for running surrealdb.
 surrealdb-core = { path = "../core/", default-features = false, features = ["scripting", "kv-mem"] }
-surrealdb = { path = "../sdk/", default-features = false }
 surrealdb-types = { path = "../types/" }
 reblessive = { version = "0.4.3" }
 rust_decimal = { version = "1.39.0", features = ["maths", "serde-str"] }
-uuid = "1.11.0"
-tokio-util = "0.7"
 
 # Used for capturing logs from core
 #tracing = "*"
