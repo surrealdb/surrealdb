@@ -1347,6 +1347,7 @@ impl Datastore {
 				{
 					continue;
 				}
+				println!("START COMPACTION");
 				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
 					Some(ix) => match &ix.index {
 						Index::FullText(p) => {
@@ -1371,6 +1372,7 @@ impl Datastore {
 					}
 				}
 				previous = Some(ic.into_owned());
+				println!("END COMPACTION");
 			}
 			if count > 0 {
 				txn.delr(range).await?;
