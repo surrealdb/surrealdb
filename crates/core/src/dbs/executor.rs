@@ -303,8 +303,7 @@ impl Executor {
 		};
 		let txn = Arc::new(kvs.transaction(transaction_type, LockType::Optimistic).await?);
 		let receiver = self.prepare_broker();
-
-		match self.execute_plan_in_transaction(txn.clone(), start, plan).await {
+		match self.execute_plan_in_transaction(txn.clone(), start, plan.clone()).await {
 			Ok(value) | Err(ControlFlow::Return(value)) => {
 				// non-writable transactions might return an error on commit.
 				// So cancel them instead. This is fine since a non-writable transaction
@@ -316,7 +315,7 @@ impl Executor {
 
 				if let Err(e) = txn.commit().await {
 					bail!(Error::QueryNotExecuted {
-						message: e.to_string(),
+						message: format!("{e} - plan: {plan}"),
 					});
 				}
 
