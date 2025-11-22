@@ -1717,7 +1717,7 @@ impl Datastore {
 			Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
 			Some(Error::QueryNotExecuted {
 				message,
-			}) => DbResultError::QueryNotExecuted(message.clone()),
+			}) => DbResultError::QueryNotExecuted(format!("{message} - plan: {plan:?}")),
 			Some(Error::ScriptingNotAllowed) => {
 				DbResultError::MethodNotAllowed("Scripting functions are not allowed".to_string())
 			}
