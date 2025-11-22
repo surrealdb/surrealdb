@@ -79,21 +79,29 @@ impl RemoveIndexStatement {
 			.into());
 		};
 
-		txn.put_tb(
-			ns_name,
-			db_name,
-			&TableDefinition {
-				cache_indexes_ts: Uuid::now_v7(),
-				..tb.as_ref().clone()
-			},
-		)
-		.await?;
+		let res = txn
+			.put_tb(
+				ns_name,
+				db_name,
+				&TableDefinition {
+					cache_indexes_ts: Uuid::now_v7(),
+					..tb.as_ref().clone()
+				},
+			)
+			.await;
+		println!("txn.put_tb: {res:?}");
+		res?;
+
 		// Clear the cache
 		if let Some(cache) = ctx.get_cache() {
+			println!("cache.clear_tb");
 			cache.clear_tb(ns, db, &what);
 		}
+
+		println!("clear_cache");
 		// Clear the cache
 		txn.clear_cache();
+		println!("OK!");
 		// Ok all good
 		Ok(Value::None)
 	}
