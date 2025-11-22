@@ -888,7 +888,7 @@ mod tests {
 
 	#[test]
 	fn idiom_quoted_brackets() {
-		let sql = "⟨test⟩";
+		let sql = "`test`";
 		let out = syn::expr(sql).unwrap();
 		assert_eq!("test", format!("{}", out));
 		assert_eq!(out, sql::Expr::Idiom(Idiom(vec![f("test")])));

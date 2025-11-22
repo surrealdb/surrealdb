@@ -19,7 +19,7 @@ pub fn is_notification(msg: &serde_json::Value) -> bool {
 	//
 	// Object {"result": Object {"action": String("CREATE"), "id":
 	// String("04460f07-b0e1-4339-92db-049a94aeec10"), "result": Object {"id":
-	// String("table_FD40A9A361884C56B5908A934164884A:⟨an-id-goes-here⟩"), "name":
+	// String("table_FD40A9A361884C56B5908A934164884A:`an-id-goes-here`"), "name":
 	// String("ok")}}}
 	msg.is_object()
 		&& msg["result"].is_object()
