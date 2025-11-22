@@ -1320,6 +1320,7 @@ impl Datastore {
 			TaskLeaseType::IndexCompaction,
 			interval * 2,
 		)?;
+		let run = Uuid::now_v7();
 		// We continue without interruptions while there are keys and the lease
 		loop {
 			// Attempt to acquire a lease for the ChangeFeedCleanup task
@@ -1347,7 +1348,7 @@ impl Datastore {
 				{
 					continue;
 				}
-				println!("START COMPACTION");
+				println!("START COMPACTION {run}");
 				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
 					Some(ix) => match &ix.index {
 						Index::FullText(p) => {
@@ -1372,9 +1373,9 @@ impl Datastore {
 					}
 				}
 				previous = Some(ic.into_owned());
-				println!("END COMPACTION");
 			}
 			if count > 0 {
+				println!("END COMPACTION {run}");
 				txn.commit().await?;
 				drop(txn);
 				// Now we can delete the range

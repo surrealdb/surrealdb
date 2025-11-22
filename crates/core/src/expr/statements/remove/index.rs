@@ -67,7 +67,9 @@ impl RemoveIndexStatement {
 		// Stop index compaction if any, clear the index store cache
 		ctx.get_index_stores().index_removed(ctx, ns, db, &tb, &ix).await?;
 		// Delete the index data.
-		txn.del_tb_index(ns, db, &what, &name).await?;
+		let res = txn.del_tb_index(ns, db, &what, &name).await;
+		println!("txn.del_tb_index: {res:?}");
+		res?;
 
 		// Refresh the table cache for indexes
 		let Some(tb) = txn.get_tb(ns, db, &what).await? else {
