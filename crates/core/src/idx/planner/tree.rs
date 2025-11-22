@@ -183,7 +183,7 @@ impl<'a> TreeBuilder<'a> {
 			let tx = self.ctx.ctx.tx();
 			let schema = self.lazy_load_schema_resolver(&tx, table).await?;
 			for (pos, ix) in schema.indexes.iter().enumerate() {
-				if let Index::Count(cond) = &ix.index
+				if let Index::Count(cond, _) = &ix.index
 					&& self.ctx.cond.eq(&cond.as_ref())
 				{
 					let index_reference = schema.new_reference(pos);

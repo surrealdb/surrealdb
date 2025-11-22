@@ -3,6 +3,7 @@ use std::collections::hash_map::Entry;
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use anyhow::{Result, ensure};
 use futures::channel::oneshot::{Receiver, Sender, channel};
@@ -12,11 +13,14 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tokio::sync::RwLock;
+use tokio::time::sleep;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{
-	DatabaseDefinition, DatabaseId, IndexDefinition, IndexId, NamespaceId, Record, TableId,
+	CompactionStatus, DatabaseDefinition, DatabaseId, IndexDefinition, IndexId, NamespaceId,
+	Record, TableId,
 };
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
@@ -259,12 +263,59 @@ impl IndexBuilder {
 
 	pub(crate) async fn remove_index(
 		&self,
+		ctx: &Context,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: &str,
-		ix: IndexId,
+		ix: &IndexDefinition,
 	) -> Result<()> {
-		let key = IndexKey::new(ns, db, tb, ix);
+		if let Some(compaction_status) = ix.get_compaction_status() {
+			if !matches!(compaction_status, CompactionStatus::Stopped) {
+				let mut ix = ix.clone();
+				ix.set_compaction(CompactionStatus::Stopping);
+				let tx = self
+					.tf
+					.transaction(
+						TransactionType::Write,
+						Optimistic,
+						ctx.try_get_sequences()?.clone(),
+					)
+					.await?;
+				tx.put_tb_index(ns, db, &ix.table_name, &ix).await?;
+				tx.commit().await?;
+			}
+			// If the compaction is running, we stop it
+			if matches!(compaction_status, CompactionStatus::Running) {
+				// Wait for compaction to be done
+				loop {
+					if ctx.is_done(false).await? {
+						return Ok(());
+					}
+					let tx = self
+						.tf
+						.transaction(
+							TransactionType::Read,
+							Optimistic,
+							ctx.try_get_sequences()?.clone(),
+						)
+						.await?;
+					if let Some(index_definition) =
+						tx.get_tb_index_by_id(ns, db, &ix.table_name, ix.index_id).await?
+					{
+						if let Some(CompactionStatus::Stopped) =
+							index_definition.get_compaction_status()
+						{
+							// The compaction has stopped, we can continue to remove the index.
+							break;
+						}
+					} else {
+						break;
+					}
+					sleep(Duration::from_millis(500)).await;
+				}
+			}
+		}
+
+		let key = IndexKey::new(ns, db, &ix.table_name, ix.index_id);
 		if let Some(b) = self.indexes.write().await.remove(&key) {
 			b.abort();
 		}

@@ -35,7 +35,9 @@ use crate::catalog::providers::{
 	ApiProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, TableProvider,
 	UserProvider,
 };
-use crate::catalog::{ApiDefinition, ApiMethod, Index, NodeLiveQuery, SubscriptionDefinition};
+use crate::catalog::{
+	ApiDefinition, ApiMethod, CompactionStatus, Index, NodeLiveQuery, SubscriptionDefinition,
+};
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
@@ -1348,24 +1350,51 @@ impl Datastore {
 					continue;
 				}
 				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
-					Some(ix) => match &ix.index {
-						Index::FullText(p) => {
-							let ft = FullTextIndex::new(
-								&self.index_stores,
-								&txn,
-								IndexKeyBase::new(ic.ns, ic.db, &ix.table_name, ix.index_id),
-								p,
-							)
-							.await?;
-							ft.compaction(&txn).await?;
+					Some(ix) => {
+						if let Some(compaction) = ix.get_compaction_status() {
+							let do_compaction = match compaction {
+								CompactionStatus::Starting => {
+									let mut ix = ix.as_ref().clone();
+									ix.set_compaction(CompactionStatus::Running);
+									txn.put_tb_index(ic.ns, ic.db, ic.tb.as_ref(), &ix).await?;
+									true
+								}
+								CompactionStatus::Running => true,
+								CompactionStatus::Stopping => {
+									let mut ix = ix.as_ref().clone();
+									ix.set_compaction(CompactionStatus::Stopped);
+									txn.put_tb_index(ic.ns, ic.db, ic.tb.as_ref(), &ix).await?;
+									false
+								}
+								CompactionStatus::Stopped => false,
+							};
+							if do_compaction {
+								match &ix.index {
+									Index::FullText(params, _) => {
+										let ft = FullTextIndex::new(
+											&self.index_stores,
+											&txn,
+											IndexKeyBase::new(
+												ic.ns,
+												ic.db,
+												&ix.table_name,
+												ix.index_id,
+											),
+											params,
+										)
+										.await?;
+										ft.compaction(&txn).await?;
+									}
+									Index::Count(_, _) => {
+										IndexOperation::index_count_compaction(&ic, &txn).await?;
+									}
+									_ => {
+										trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);
+									}
+								}
+							}
 						}
-						Index::Count(_) => {
-							IndexOperation::index_count_compaction(&ic, &txn).await?;
-						}
-						_ => {
-							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);
-						}
-					},
+					}
 					None => {
 						trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ic.ix);
 					}

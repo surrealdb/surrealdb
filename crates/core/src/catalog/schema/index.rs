@@ -77,6 +77,22 @@ impl IndexDefinition {
 			concurrently: false,
 		}
 	}
+
+	pub(crate) fn get_compaction_status(&self) -> Option<CompactionStatus> {
+		match &self.index {
+			Index::Idx | Index::Uniq | Index::Hnsw(_) => None,
+			Index::FullText(_, compaction) => Some(*compaction),
+			Index::Count(_, compaction) => Some(*compaction),
+		}
+	}
+
+	pub(crate) fn set_compaction(&mut self, compaction: CompactionStatus) {
+		match &mut self.index {
+			Index::Idx | Index::Uniq | Index::Hnsw(_) => {}
+			Index::FullText(_, c) => *c = compaction,
+			Index::Count(_, c) => *c = compaction,
+		}
+	}
 }
 
 impl InfoStructure for IndexDefinition {
@@ -98,6 +114,20 @@ impl ToSql for IndexDefinition {
 }
 
 #[revisioned(revision = 1)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub(crate) enum CompactionStatus {
+	#[default]
+	/// The compaction yet to run
+	Starting,
+	/// The compaction is allowed to run
+	Running,
+	/// The compaction should stop (as for an index removal)
+	Stopping,
+	/// The compaction has stopped
+	Stopped,
+}
+
+#[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) enum Index {
 	/// (Basic) non unique
@@ -108,9 +138,9 @@ pub(crate) enum Index {
 	/// HNSW index for distance-based metrics
 	Hnsw(HnswParams),
 	/// Index with Full-Text search capabilities
-	FullText(FullTextParams),
+	FullText(FullTextParams, CompactionStatus),
 	/// Count index
-	Count(Option<Cond>),
+	Count(Option<Cond>, CompactionStatus),
 }
 
 impl Index {
@@ -119,8 +149,8 @@ impl Index {
 			Self::Idx => crate::sql::index::Index::Idx,
 			Self::Uniq => crate::sql::index::Index::Uniq,
 			Self::Hnsw(params) => crate::sql::index::Index::Hnsw(params.clone().into()),
-			Self::FullText(params) => crate::sql::index::Index::FullText(params.clone().into()),
-			Self::Count(cond) => crate::sql::index::Index::Count(cond.clone().map(Into::into)),
+			Self::FullText(params, _) => crate::sql::index::Index::FullText(params.clone().into()),
+			Self::Count(cond, _) => crate::sql::index::Index::Count(cond.clone().map(Into::into)),
 		}
 	}
 }

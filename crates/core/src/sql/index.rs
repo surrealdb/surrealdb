@@ -1,6 +1,7 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
+use crate::catalog::CompactionStatus;
 use crate::fmt::EscapeKwFreeIdent;
 use crate::sql::Cond;
 use crate::sql::scoring::Scoring;
@@ -27,8 +28,8 @@ impl From<Index> for crate::catalog::Index {
 			Index::Idx => Self::Idx,
 			Index::Uniq => Self::Uniq,
 			Index::Hnsw(p) => Self::Hnsw(p.into()),
-			Index::FullText(p) => Self::FullText(p.into()),
-			Index::Count(c) => Self::Count(c.map(Into::into)),
+			Index::FullText(p) => Self::FullText(p.into(), CompactionStatus::default()),
+			Index::Count(c) => Self::Count(c.map(Into::into), CompactionStatus::default()),
 		}
 	}
 }
@@ -39,8 +40,8 @@ impl From<crate::catalog::Index> for Index {
 			crate::catalog::Index::Idx => Self::Idx,
 			crate::catalog::Index::Uniq => Self::Uniq,
 			crate::catalog::Index::Hnsw(p) => Self::Hnsw(p.into()),
-			crate::catalog::Index::FullText(p) => Self::FullText(p.into()),
-			crate::catalog::Index::Count(c) => Self::Count(c.map(Into::into)),
+			crate::catalog::Index::FullText(p, _) => Self::FullText(p.into()),
+			crate::catalog::Index::Count(c, _) => Self::Count(c.map(Into::into)),
 		}
 	}
 }
