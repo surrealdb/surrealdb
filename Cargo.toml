@@ -136,7 +136,7 @@ path-clean = "1.0.1"
 pbkdf2 = "0.12.2"
 # TODO: Look at this dependency - 4 years old, unmaintained.
 pharos = "0.5.3"
-phf = "0.11.3"
+phf = "0.13.1"
 pin-project-lite = "0.2.16"
 pprof = "0.15.0"
 quick_cache = "0.6.18"
