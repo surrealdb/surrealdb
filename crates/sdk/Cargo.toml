@@ -75,7 +75,6 @@ trice = { workspace = true, optional = true }
 
 # Other crates
 arrayvec.workspace = true
-bincode.workspace = true
 async-channel.workspace = true
 castaway.workspace = true
 chrono = { workspace = true, features = ["serde"] }

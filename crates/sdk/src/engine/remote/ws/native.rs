@@ -754,7 +754,6 @@ mod tests {
 	use std::io::Write;
 	use std::time::SystemTime;
 
-	use bincode::Options;
 	use flate2::Compression;
 	use flate2::write::GzEncoder;
 	use rand::{Rng, thread_rng};
@@ -789,80 +788,27 @@ mod tests {
 		}
 		//	Store the results
 		let mut results = vec![];
-		// Calculate the reference
+		// Calculate the reference using FlatBuffers (what we actually use in production)
 		let ref_payload;
 		let ref_compressed;
-		//
-		const BINCODE_REF: &str = "Bincode Vec<i32>";
-		const COMPRESSED_BINCODE_REF: &str = "Compressed Bincode Vec<i32>";
-		{
-			// Bincode Vec<i32>
-			let (duration, payload) = timed(&|| {
-				let mut payload = Vec::new();
-				bincode::options()
-					.with_fixint_encoding()
-					.serialize_into(&mut payload, &vector)
-					.unwrap();
-				payload
-			});
-			ref_payload = payload.len() as f32;
-			results.push((payload.len(), BINCODE_REF, duration, 1.0));
 
-			// Compressed bincode
-			let (compression_duration, payload) = timed(&|| compress(&payload));
-			let duration = duration + compression_duration;
-			ref_compressed = payload.len() as f32;
-			results.push((payload.len(), COMPRESSED_BINCODE_REF, duration, 1.0));
-		}
 		// Build the Value
 		let vector = Value::Array(Array::from(vector));
-		//
-		const BINCODE: &str = "Bincode Vec<Value>";
-		const COMPRESSED_BINCODE: &str = "Compressed Bincode Vec<Value>";
-		{
-			// Bincode Vec<i32>
-			let (duration, payload) = timed(&|| {
-				let mut payload = Vec::new();
-				bincode::options()
-					.with_varint_encoding()
-					.serialize_into(&mut payload, &vector)
-					.unwrap();
-				payload
-			});
-			results.push((payload.len(), BINCODE, duration, payload.len() as f32 / ref_payload));
 
-			// Compressed bincode
-			let (compression_duration, payload) = timed(&|| compress(&payload));
-			let duration = duration + compression_duration;
-			results.push((
-				payload.len(),
-				COMPRESSED_BINCODE,
-				duration,
-				payload.len() as f32 / ref_compressed,
-			));
-		}
 		const FLATBUFFERS: &str = "Flatbuffers Vec<Value>";
 		const FLATBUFFERS_COMPRESSED: &str = "Flatbuffers Compressed Vec<Value>";
 		{
-			// Unversioned
+			// FlatBuffers uncompressed - this is our reference
 			let (duration, payload) =
 				timed(&|| surrealdb_core::rpc::format::flatbuffers::encode(&vector).unwrap());
-			results.push((
-				payload.len(),
-				FLATBUFFERS,
-				duration,
-				payload.len() as f32 / ref_payload,
-			));
+			ref_payload = payload.len() as f32;
+			results.push((payload.len(), FLATBUFFERS, duration, 1.0));
 
-			// Compressed Versioned
+			// FlatBuffers compressed
 			let (compression_duration, payload) = timed(&|| compress(&payload));
 			let duration = duration + compression_duration;
-			results.push((
-				payload.len(),
-				FLATBUFFERS_COMPRESSED,
-				duration,
-				payload.len() as f32 / ref_compressed,
-			));
+			ref_compressed = payload.len() as f32;
+			results.push((payload.len(), FLATBUFFERS_COMPRESSED, duration, 1.0));
 		}
 		//
 		const CBOR: &str = "CBor Vec<Value>";
@@ -893,38 +839,9 @@ mod tests {
 			info!("{name} - Size: {size} - Duration: {duration:?} - Factor: {factor}");
 		}
 
-		// TODO: Figure out what this test was supposed to track.
-		//
-		//	Note this test changed with the value inversion PR, below is the previous
-		// check.
-		//
-		//	vec![
-		//		BINCODE_REF,
-		//		COMPRESSED_BINCODE_REF,
-		//		COMPRESSED_CBOR,
-		//		COMPRESSED_BINCODE,
-		//		COMPRESSED_UNVERSIONED,
-		//		CBOR,
-		//		COMPRESSED_VERSIONED,
-		//		BINCODE,
-		//		UNVERSIONED,
-		//		VERSIONED,
-		//	]
-
 		// Check the expected sorted results
+		// FlatBuffers is what we use in production for SDK-server communication
 		let results: Vec<&str> = results.into_iter().map(|(_, name, _, _)| name).collect();
-		assert_eq!(
-			results,
-			vec![
-				BINCODE_REF,
-				COMPRESSED_BINCODE_REF,
-				COMPRESSED_BINCODE,
-				COMPRESSED_CBOR,
-				BINCODE,
-				CBOR,
-				FLATBUFFERS_COMPRESSED,
-				FLATBUFFERS,
-			]
-		)
+		assert_eq!(results, vec![COMPRESSED_CBOR, CBOR, FLATBUFFERS_COMPRESSED, FLATBUFFERS,])
 	}
 }

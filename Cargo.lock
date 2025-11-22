@@ -836,15 +836,6 @@ dependencies = [
 
 [[package]]
 name = "bincode"
-version = "1.3.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
-dependencies = [
- "serde",
-]
-
-[[package]]
-name = "bincode"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36eaf5d7b090263e8150820482d5d93cd964a81e4019913c972f4edcc6edb740"
@@ -7074,7 +7065,6 @@ version = "3.0.0-alpha.14"
 dependencies = [
  "arrayvec",
  "async-channel",
- "bincode 1.3.3",
  "castaway",
  "chrono",
  "ciborium",
@@ -7146,7 +7136,6 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bcrypt",
- "bincode 1.3.3",
  "blake3",
  "bytes",
  "chrono",
@@ -7310,7 +7299,6 @@ dependencies = [
  "axum-extra",
  "axum-server",
  "base64 0.22.1",
- "bincode 1.3.3",
  "bytes",
  "chrono",
  "ciborium",
@@ -7590,7 +7578,7 @@ checksum = "e4c88126ef0bbc6945b489e20e7777ae94910ba9f803cbbce74a2915727f2c8d"
 dependencies = [
  "ahash 0.8.12",
  "arc-swap",
- "bincode 2.0.1",
+ "bincode",
  "bytes",
  "crossbeam-deque",
  "crossbeam-queue",
