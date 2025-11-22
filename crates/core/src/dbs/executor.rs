@@ -570,58 +570,61 @@ impl Executor {
 					// reintroduce planner later.
 					let plan = stmt;
 
-					let r =
-						match self.execute_plan_in_transaction(txn.clone(), &before, plan).await {
-							Ok(x) => Ok(x),
-							Err(ControlFlow::Return(value)) => {
-								skip_remaining = true;
-								Ok(value)
+					let r = match self
+						.execute_plan_in_transaction(txn.clone(), &before, plan.clone())
+						.await
+					{
+						Ok(x) => Ok(x),
+						Err(ControlFlow::Return(value)) => {
+							skip_remaining = true;
+							Ok(value)
+						}
+						Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
+							Err(anyhow!(Error::InvalidControlFlow))
+						}
+						Err(ControlFlow::Err(e)) => {
+							for res in &mut self.results[start_results..] {
+								res.query_type = QueryType::Other;
+								res.result = Err(DbResultError::QueryNotExecuted(format!(
+									"The query was not executed due to a failed transaction: {}",
+									plan
+								)));
 							}
-							Err(ControlFlow::Break) | Err(ControlFlow::Continue) => {
-								Err(anyhow!(Error::InvalidControlFlow))
-							}
-							Err(ControlFlow::Err(e)) => {
-								for res in &mut self.results[start_results..] {
-									res.query_type = QueryType::Other;
-									res.result = Err(DbResultError::QueryNotExecuted(
-										"The query was not executed due to a failed transaction"
-											.to_string(),
-									));
+
+							// statement return an error. Consume all the other statement until
+							// we hit a cancel or commit.
+							self.results.push(QueryResult {
+								time: before.elapsed(),
+								result: Err(DbResultError::InternalError(e.to_string())),
+								query_type,
+							});
+
+							let _ = txn.cancel().await;
+
+							self.opt.broker = None;
+
+							while let Some(stmt) = stream.next().await {
+								yield_now!();
+								let stmt = stmt?;
+								if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
+									return Ok(());
 								}
 
-								// statement return an error. Consume all the other statement until
-								// we hit a cancel or commit.
 								self.results.push(QueryResult {
-									time: before.elapsed(),
-									result: Err(DbResultError::InternalError(e.to_string())),
-									query_type,
+									time: Duration::ZERO,
+									result: Err(DbResultError::QueryNotExecuted(
+										"The query was not executed due to a cancelled transaction"
+											.to_string(),
+									)),
+									query_type: QueryType::Other,
 								});
-
-								let _ = txn.cancel().await;
-
-								self.opt.broker = None;
-
-								while let Some(stmt) = stream.next().await {
-									yield_now!();
-									let stmt = stmt?;
-									if let TopLevelExpr::Cancel | TopLevelExpr::Commit = stmt {
-										return Ok(());
-									}
-
-									self.results.push(QueryResult {
-										time: Duration::ZERO,
-										result: Err(DbResultError::QueryNotExecuted(
-												"The query was not executed due to a cancelled transaction".to_string(),
-										)),
-										query_type: QueryType::Other,
-									});
-								}
-
-								// ran out of statements before the transaction ended.
-								// Just break as we have nothing else we can do.
-								return Ok(());
 							}
-						};
+
+							// ran out of statements before the transaction ended.
+							// Just break as we have nothing else we can do.
+							return Ok(());
+						}
+					};
 
 					match r {
 						Ok(value) => Ok(convert_value_to_public_value(value)?),
