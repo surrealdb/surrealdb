@@ -6,6 +6,7 @@ use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisione
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{ToSql, write_sql};
 
+use crate::catalog::TableId;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Idiom};
 use crate::kvs::impl_kv_value_revisioned;
@@ -54,6 +55,7 @@ impl From<u32> for IndexId {
 pub struct IndexDefinition {
 	pub(crate) index_id: IndexId,
 	pub(crate) name: String,
+	pub(crate) table_id: TableId,
 	pub(crate) table_name: String,
 	pub(crate) cols: Vec<Idiom>,
 	pub(crate) index: Index,

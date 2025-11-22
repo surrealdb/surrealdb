@@ -82,9 +82,7 @@ impl DefineIndexStatement {
 				DefineKind::IfNotExists => return Ok(Value::None),
 			}
 			// Stop the compaction (if any), and clear the index store cache
-			ctx.get_index_stores()
-				.index_removed(ctx, tb.namespace_id, tb.database_id, &tb, &ix)
-				.await?;
+			ctx.get_index_stores().index_removed(ctx, tb.namespace_id, tb.database_id, &ix).await?;
 			ix.index_id
 		} else {
 			ctx.try_get_sequences()?
@@ -121,6 +119,7 @@ impl DefineIndexStatement {
 		let index_def = IndexDefinition {
 			index_id,
 			name,
+			table_id: tb.table_id,
 			table_name: what,
 			cols: cols.clone(),
 			index: self.index.clone(),

@@ -190,6 +190,7 @@ use crate::val::{Datetime, Value};
 #[case::index(IndexDefinition {
 	index_id: IndexId(123),
 	name: "test".to_string(),
+	table_id: TableId(456),
 	table_name: "what".to_string(),
 	cols: vec![Idiom::from_str("field[0]").unwrap()],
 	index: Index::Idx,
