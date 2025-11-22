@@ -263,7 +263,7 @@ futures-util.workspace = true
 http.workspace = true
 jsonwebtoken.workspace = true
 rand.workspace = true
-rcgen = "0.13.2"
+rcgen = "0.14.5"
 reqwest = { workspace = true, default-features = false, features = [
     "blocking",
     "gzip",
