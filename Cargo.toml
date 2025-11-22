@@ -175,7 +175,7 @@ unicase = "2.8.1"
 url = "2.5.7"
 uuid = "1.18.1"
 wasm-bindgen-futures = "0.4.55"
-wasmtimer = { version = "0.2.1", default-features = false }
+wasmtimer = { version = "0.4.3", default-features = false }
 ws_stream_wasm = "0.7.5"
 
 # used only in dev-dependencies
