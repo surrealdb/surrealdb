@@ -72,7 +72,6 @@ js = { version = "0.10.0", package = "rquickjs" }
 reblessive = "0.4.3"
 ## Maintained by @rushmorem
 ipnet = "2.11.0"
-serde-content = "0.1.2"
 
 # External Kv stores
 rocksdb = { version = "0.24.0-surreal.1", package = "surrealdb-rocksdb", features = ["lz4", "snappy"] }
