@@ -5,6 +5,18 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use anyhow::{Result, ensure};
+use futures::channel::oneshot::{Receiver, Sender, channel};
+use reblessive::TreeStack;
+use revision::revisioned;
+use serde::{Deserialize, Serialize};
+#[cfg(not(target_family = "wasm"))]
+use tokio::spawn;
+use tokio::sync::RwLock;
+use tokio::time::sleep;
+#[cfg(target_family = "wasm")]
+use wasm_bindgen_futures::spawn_local as spawn;
+
 use crate::catalog::{
 	DatabaseDefinition, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId, Record, TableId,
 };
@@ -23,17 +35,6 @@ use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val, impl_kv_value_revisioned};
 use crate::mem::ALLOC;
 use crate::val::{Object, RecordId, RecordIdKey, Value};
-use anyhow::{Result, ensure};
-use futures::channel::oneshot::{Receiver, Sender, channel};
-use reblessive::TreeStack;
-use revision::revisioned;
-use serde::{Deserialize, Serialize};
-#[cfg(not(target_family = "wasm"))]
-use tokio::spawn;
-use tokio::sync::RwLock;
-use tokio::time::sleep;
-#[cfg(target_family = "wasm")]
-use wasm_bindgen_futures::spawn_local as spawn;
 
 #[derive(Debug, Clone)]
 pub(crate) enum BuildingStatus {
@@ -283,7 +284,6 @@ impl IndexBuilder {
 						)
 						.await?;
 					let res = tx.count(range.clone()).await;
-					println!("RES {res:?}");
 					tx.cancel().await?;
 					if res? == 0 {
 						break;

@@ -11,6 +11,7 @@
 //! configuration option.
 use std::borrow::Cow;
 use std::ops::Range;
+
 use storekey::{BorrowDecode, Encode};
 use uuid::Uuid;
 
