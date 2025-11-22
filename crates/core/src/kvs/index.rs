@@ -269,38 +269,46 @@ impl IndexBuilder {
 		ix: &IndexDefinition,
 	) -> Result<()> {
 		if let Some(compaction_status) = ix.get_compaction_status() {
-			if !matches!(compaction_status, CompactionStatus::Stopped) {
-				let mut ix = ix.clone();
-				ix.set_compaction(CompactionStatus::Stopping);
-				let tx = self
-					.tf
-					.transaction(
-						TransactionType::Write,
-						Optimistic,
-						ctx.try_get_sequences()?.clone(),
-					)
-					.await?;
-				tx.put_tb_index(ns, db, &ix.table_name, &ix).await?;
-				tx.commit().await?;
-			}
 			// If the compaction is running, we stop it
 			if matches!(compaction_status, CompactionStatus::Running) {
+				{
+					let mut ix = ix.clone();
+					ix.set_compaction(CompactionStatus::Stopping);
+					let tx = self
+						.tf
+						.transaction(
+							TransactionType::Write,
+							Optimistic,
+							ctx.try_get_sequences()?.clone(),
+						)
+						.await?;
+					let res = tx.put_tb_index(ns, db, &ix.table_name, &ix).await;
+					if res.is_ok() {
+						tx.commit().await?;
+					} else {
+						tx.cancel().await?;
+					}
+					res?
+				}
 				// Wait for compaction to be done
 				loop {
 					if ctx.is_done(false).await? {
 						return Ok(());
 					}
-					let tx = self
-						.tf
-						.transaction(
-							TransactionType::Read,
-							Optimistic,
-							ctx.try_get_sequences()?.clone(),
-						)
-						.await?;
-					if let Some(index_definition) =
-						tx.get_tb_index_by_id(ns, db, &ix.table_name, ix.index_id).await?
-					{
+					let res = {
+						let tx = self
+							.tf
+							.transaction(
+								TransactionType::Read,
+								Optimistic,
+								ctx.try_get_sequences()?.clone(),
+							)
+							.await?;
+						let res = tx.get_tb_index_by_id(ns, db, &ix.table_name, ix.index_id).await;
+						tx.cancel().await?;
+						res?
+					};
+					if let Some(index_definition) = res {
 						if let Some(CompactionStatus::Stopped) =
 							index_definition.get_compaction_status()
 						{
