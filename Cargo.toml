@@ -181,7 +181,7 @@ wasmtimer = { version = "0.2.1", default-features = false }
 ws_stream_wasm = "0.7.5"
 
 # used only in dev-dependencies
-criterion = "0.5.1"
+criterion = "0.7.0"
 env_logger = "0.11.8"
 flate2 = "1.1.5"
 rstest = "0.25.0"

@@ -1,7 +1,8 @@
 #![allow(clippy::unwrap_used)]
 
-use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
-use pprof::criterion::{Output, PProfProfiler};
+use std::hint::black_box;
+
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use surrealdb_core::syn;
 
 macro_rules! parser {
@@ -61,9 +62,5 @@ fn bench_parser(c: &mut Criterion) {
 	c.finish();
 }
 
-criterion_group!(
-	name = benches;
-	config = Criterion::default().with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)));
-	targets = bench_parser
-);
+criterion_group!(benches, bench_parser);
 criterion_main!(benches);
