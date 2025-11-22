@@ -57,7 +57,7 @@ impl super::Routine for Read {
 				let table_name = self.table_name.clone();
 
 				tasks.spawn(async move {
-					let _: Option<Record> = criterion::black_box(
+					let _: Option<Record> = std::hint::black_box(
 						client
 							.select((table_name, task_id as i64))
 							.await

@@ -75,7 +75,6 @@ trice = { workspace = true, optional = true }
 
 # Other crates
 arrayvec.workspace = true
-bincode.workspace = true
 async-channel.workspace = true
 castaway.workspace = true
 chrono = { workspace = true, features = ["serde"] }
@@ -109,7 +108,7 @@ rustls = { workspace = true, default-features = false, features = [
 [target.'cfg(target_family = "wasm")'.dependencies]
 getrandom = { workspace = true, features = ["wasm_js"] }
 pharos.workspace = true
-rustls-pki-types = { version = "1.7.0", features = ["web"] }
+rustls-pki-types = { version = "1.13.0", features = ["web"] }
 ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
 tokio = { workspace = true, default-features = false, features = [
     "rt",
@@ -138,7 +137,6 @@ ciborium.workspace = true
 criterion = { workspace = true, features = ["async_tokio"] }
 env_logger.workspace = true
 flate2.workspace = true
-hashbrown.workspace = true
 nanoid.workspace = true
 parking_lot.workspace = true
 pprof = { workspace = true, features = ["flamegraph", "criterion"] }

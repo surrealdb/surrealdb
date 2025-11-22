@@ -1845,7 +1845,7 @@ impl Datastore {
 				Some(Error::Unencodable) => {
 					DbResultError::SerializationError("Value cannot be serialized".to_string())
 				}
-				Some(Error::Decode(_)) => {
+				Some(Error::Storekey(_)) => {
 					DbResultError::DeserializationError("Key decoding error".to_string())
 				}
 				Some(Error::Revision(_)) => {
@@ -1862,9 +1862,6 @@ impl Datastore {
 				}
 				Some(Error::HighlightError(msg)) => {
 					DbResultError::InternalError(format!("Highlight error: {}", msg))
-				}
-				Some(Error::Bincode(_)) => {
-					DbResultError::SerializationError("Bincode serialization error".to_string())
 				}
 				Some(Error::FstError(_)) => DbResultError::InternalError("FST error".to_string()),
 				Some(Error::Utf8Error(_)) => {

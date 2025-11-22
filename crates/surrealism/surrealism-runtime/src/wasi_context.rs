@@ -1,6 +1,6 @@
 use anyhow::Result;
-use wasmtime_wasi::p2::WasiCtxBuilder;
-use wasmtime_wasi::preview1::WasiP1Ctx;
+use wasmtime_wasi::WasiCtxBuilder;
+use wasmtime_wasi::p1::WasiP1Ctx;
 
 pub fn build() -> Result<WasiP1Ctx> {
 	// Note: stdout/stderr would need to access context from StoreData
