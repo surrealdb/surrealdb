@@ -1375,6 +1375,11 @@ impl Datastore {
 				println!("END COMPACTION");
 			}
 			if count > 0 {
+				txn.commit().await?;
+				drop(txn);
+				// Now we can delete the range
+				// Create a new transaction
+				let txn = self.transaction(Write, Optimistic).await?;
 				txn.delr(range).await?;
 				txn.commit().await?;
 			} else {
