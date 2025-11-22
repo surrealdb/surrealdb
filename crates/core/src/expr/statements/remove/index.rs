@@ -71,14 +71,6 @@ impl RemoveIndexStatement {
 		println!("txn.del_tb_index: {res:?}");
 		res?;
 
-		// Refresh the table cache for indexes
-		let Some(tb) = txn.get_tb(ns, db, &what).await? else {
-			return Err(Error::TbNotFound {
-				name: what,
-			}
-			.into());
-		};
-
 		let res = txn
 			.put_tb(
 				ns_name,
