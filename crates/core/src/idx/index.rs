@@ -83,9 +83,9 @@ impl<'a> IndexOperation<'a> {
 		match &self.ix.index {
 			Index::Uniq => self.index_unique().await,
 			Index::Idx => self.index_non_unique().await,
-			Index::FullText(p, _) => self.index_fulltext(stk, p, require_compaction).await,
+			Index::FullText(p) => self.index_fulltext(stk, p, require_compaction).await,
 			Index::Hnsw(p) => self.index_hnsw(p).await,
-			Index::Count(c, _) => self.index_count(stk, c.as_ref(), require_compaction).await,
+			Index::Count(c) => self.index_count(stk, c.as_ref(), require_compaction).await,
 		}
 	}
 

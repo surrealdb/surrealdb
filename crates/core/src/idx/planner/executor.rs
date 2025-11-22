@@ -143,7 +143,7 @@ impl InnerQueryExecutor {
 		for (exp, io) in ios {
 			let index_reference = io.index_reference();
 			match &index_reference.index {
-				Index::FullText(p, _) => {
+				Index::FullText(p) => {
 					let fulltext_entry: Option<FullTextEntry> = match ir_map
 						.entry(index_reference.clone())
 					{
@@ -390,7 +390,7 @@ impl QueryExecutor {
 		io: &IndexOption,
 	) -> Result<Option<ThingIterator>> {
 		match io.index_reference().index {
-			Index::Idx | Index::Count(_, _) => {
+			Index::Idx | Index::Count(_) => {
 				Ok(self.new_index_iterator(ns, db, irf, io.clone()).await?)
 			}
 			Index::Uniq => Ok(self.new_unique_index_iterator(ns, db, irf, io.clone()).await?),

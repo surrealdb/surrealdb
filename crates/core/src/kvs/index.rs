@@ -5,6 +5,24 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use crate::catalog::{
+	DatabaseDefinition, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId, Record, TableId,
+};
+use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
+use crate::ctx::{Context, MutableContext};
+use crate::dbs::Options;
+use crate::doc::{CursorDoc, Document};
+use crate::err::Error;
+use crate::idx::IndexKeyBase;
+use crate::idx::ft::fulltext::FullTextIndex;
+use crate::idx::index::IndexOperation;
+use crate::key::record;
+use crate::key::root::ic::IndexCompactionKey;
+use crate::kvs::LockType::Optimistic;
+use crate::kvs::ds::TransactionFactory;
+use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val, impl_kv_value_revisioned};
+use crate::mem::ALLOC;
+use crate::val::{Object, RecordId, RecordIdKey, Value};
 use anyhow::{Result, ensure};
 use futures::channel::oneshot::{Receiver, Sender, channel};
 use reblessive::TreeStack;
@@ -16,26 +34,6 @@ use tokio::sync::RwLock;
 use tokio::time::sleep;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
-
-use crate::catalog::providers::TableProvider;
-use crate::catalog::{
-	CompactionStatus, DatabaseDefinition, DatabaseId, IndexDefinition, IndexId, NamespaceId,
-	Record, TableId,
-};
-use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
-use crate::ctx::{Context, MutableContext};
-use crate::dbs::Options;
-use crate::doc::{CursorDoc, Document};
-use crate::err::Error;
-use crate::idx::IndexKeyBase;
-use crate::idx::ft::fulltext::FullTextIndex;
-use crate::idx::index::IndexOperation;
-use crate::key::record;
-use crate::kvs::LockType::Optimistic;
-use crate::kvs::ds::TransactionFactory;
-use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val, impl_kv_value_revisioned};
-use crate::mem::ALLOC;
-use crate::val::{Object, RecordId, RecordIdKey, Value};
 
 #[derive(Debug, Clone)]
 pub(crate) enum BuildingStatus {
@@ -268,61 +266,31 @@ impl IndexBuilder {
 		db: DatabaseId,
 		ix: &IndexDefinition,
 	) -> Result<()> {
-		if let Some(compaction_status) = ix.get_compaction_status() {
-			// If the compaction is running, we stop it
-			if matches!(compaction_status, CompactionStatus::Running) {
+		if matches!(ix.index, Index::FullText(_) | Index::Count(_)) {
+			let range = IndexCompactionKey::range_for_index(ns, db, &ix.table_name, ix.index_id)?;
+			// Wait for compaction to be done
+			loop {
+				if ctx.is_done(false).await? {
+					return Ok(());
+				}
 				{
-					let mut ix = ix.clone();
-					ix.set_compaction(CompactionStatus::Stopping);
 					let tx = self
 						.tf
 						.transaction(
-							TransactionType::Write,
+							TransactionType::Read,
 							Optimistic,
 							ctx.try_get_sequences()?.clone(),
 						)
 						.await?;
-					let res = tx.put_tb_index(ns, db, &ix.table_name, &ix).await;
-					if res.is_ok() {
-						tx.commit().await?;
-					} else {
-						tx.cancel().await?;
-					}
-					res?
-				}
-				// Wait for compaction to be done
-				loop {
-					if ctx.is_done(false).await? {
-						return Ok(());
-					}
-					let res = {
-						let tx = self
-							.tf
-							.transaction(
-								TransactionType::Read,
-								Optimistic,
-								ctx.try_get_sequences()?.clone(),
-							)
-							.await?;
-						let res = tx.get_tb_index_by_id(ns, db, &ix.table_name, ix.index_id).await;
-						tx.cancel().await?;
-						res?
-					};
-					if let Some(index_definition) = res {
-						if let Some(CompactionStatus::Stopped) =
-							index_definition.get_compaction_status()
-						{
-							// The compaction has stopped, we can continue to remove the index.
-							break;
-						}
-					} else {
+					let res = tx.count(range.clone()).await;
+					tx.cancel().await?;
+					if res? == 0 {
 						break;
 					}
-					sleep(Duration::from_millis(500)).await;
 				}
+				sleep(Duration::from_millis(500)).await;
 			}
 		}
-
 		let key = IndexKey::new(ns, db, &ix.table_name, ix.index_id);
 		if let Some(b) = self.indexes.write().await.remove(&key) {
 			b.abort();

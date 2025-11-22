@@ -8,11 +8,15 @@ use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 use futures::FutureExt as _;
+use surrealdb::engine::tasks::{self, Tasks};
 use surrealdb_core::dbs::Capabilities;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::kvs::LockType;
 use surrealdb_core::kvs::TransactionType;
+use surrealdb_core::options::EngineOptions;
 use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 use crate::cli::Backend;
 
@@ -90,8 +94,11 @@ impl CreateInfo {
 			}
 		};
 
-		let ds =
-			ds.with_capabilities(Capabilities::all()).with_notifications().with_auth_enabled(true);
+		let ds = ds
+			.with_capabilities(Capabilities::all())
+			.with_notifications()
+			.with_auth_enabled(true)
+			.with_node_id(Uuid::new_v4());
 
 		ds.bootstrap().await?;
 
@@ -113,6 +120,8 @@ pub struct Provisioner {
 	send: Sender<Datastore>,
 	recv: Receiver<Datastore>,
 	create_info: Arc<CreateInfo>,
+	canceller: CancellationToken,
+	tasks: Option<Tasks>,
 }
 
 pub enum PermitError {
@@ -135,7 +144,8 @@ async fn create_base_datastore() -> Result<Datastore> {
 		.await?
 		.with_capabilities(Capabilities::all())
 		.with_notifications()
-		.with_auth_enabled(true);
+		.with_auth_enabled(true)
+		.with_node_id(Uuid::new_v4());
 
 	db.bootstrap().await?;
 
@@ -207,6 +217,17 @@ impl Provisioner {
 		let info = CreateInfo::new(backend).await?;
 
 		let (send, recv) = mpsc::channel(num_jobs);
+		
+		// Create a shared monitoring datastore for background tasks
+		let (monitor_ds, _) = info.produce_ds().await?;
+		let monitor_ds_arc = Arc::new(monitor_ds);
+		
+		// Initialize cancellation token and spawn background tasks
+		let canceller = CancellationToken::new();
+		let opts = EngineOptions::default();
+		let tasks = tasks::init(monitor_ds_arc, canceller.clone(), &opts);
+		
+		// Create datastores for the test pool
 		for _ in 0..num_jobs {
 			let (db, _) = info.produce_ds().await?;
 			send.try_send(db).unwrap();
@@ -216,6 +237,8 @@ impl Provisioner {
 			send,
 			recv,
 			create_info: Arc::new(info),
+			canceller,
+			tasks: Some(tasks),
 		})
 	}
 
@@ -238,6 +261,15 @@ impl Provisioner {
 	}
 
 	pub async fn shutdown(mut self) -> Result<()> {
+		// Cancel all background tasks
+		self.canceller.cancel();
+		
+		// Wait for background tasks to complete
+		if let Some(tasks) = self.tasks {
+			tasks.resolve().await.context("Failed to resolve background tasks")?;
+		}
+		
+		// Shutdown all datastores
 		mem::drop(self.send);
 		while let Some(x) = self.recv.recv().await {
 			x.shutdown().await.context("Datastore failed to shutdown properly")?;

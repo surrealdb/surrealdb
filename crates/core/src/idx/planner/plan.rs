@@ -527,7 +527,7 @@ impl IndexOption {
 			}
 			IndexOperator::Count => {
 				e.insert("operator", Value::from("Count"));
-				if let Index::Count(Some(c), _) = &self.index_reference.index {
+				if let Index::Count(Some(c)) = &self.index_reference.index {
 					e.insert("where", Value::from(c.to_string()));
 				}
 			}
