@@ -199,12 +199,11 @@ pub async fn init(opt: &Config, ds: Arc<Datastore>, ct: CancellationToken) -> Re
 
 	// Catch the error and try to provide some guidance
 	if let Err(e) = res {
-		if opt.grpc_bind.port() < 1024 {
-			if let Some(io_err) = e.source().and_then(|s| s.downcast_ref::<io::Error>()) {
-				if let io::ErrorKind::PermissionDenied = io_err.kind() {
-					error!(target: LOG, "Binding to ports below 1024 requires privileged access or special permissions.");
-				}
-			}
+		if opt.grpc_bind.port() < 1024
+			&& let Some(io_err) = e.source().and_then(|s| s.downcast_ref::<io::Error>())
+			&& let io::ErrorKind::PermissionDenied = io_err.kind()
+		{
+			error!(target: LOG, "Binding to ports below 1024 requires privileged access or special permissions.");
 		}
 		return Err(e.into());
 	}
