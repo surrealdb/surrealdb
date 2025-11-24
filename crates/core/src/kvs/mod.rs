@@ -54,7 +54,7 @@ pub use err::{Error, Result};
 pub use into::IntoBytes;
 pub(crate) use key::{KVKey, KVValue, impl_kv_key_storekey, impl_kv_value_revisioned};
 pub use scanner::{Direction, Scanner};
-pub use timestamp::Timestamp;
+pub use timestamp::{HlcTimestamp, IncTimestamp, Timestamp};
 pub use tr::{LockType, TransactionType, Transactor};
 pub use tx::Transaction;
 
