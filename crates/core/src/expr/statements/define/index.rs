@@ -81,9 +81,9 @@ impl DefineIndexStatement {
 				DefineKind::Overwrite => {}
 				DefineKind::IfNotExists => return Ok(Value::None),
 			}
-			// Stop the compaction (if any), and clear the index store cache
+			// Clear the index store cache
 			ctx.get_index_stores()
-				.index_removed(ctx, tb.namespace_id, tb.database_id, tb.table_id, &ix)
+				.index_removed(ctx.get_index_builder(), tb.namespace_id, tb.database_id, &tb, &ix)
 				.await?;
 			ix.index_id
 		} else {
@@ -125,6 +125,7 @@ impl DefineIndexStatement {
 			cols: cols.clone(),
 			index: self.index.clone(),
 			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			decommissioned: false,
 		};
 		txn.put_tb_index(tb.namespace_id, tb.database_id, &tb.name, &index_def).await?;
 
@@ -192,7 +193,9 @@ pub(in crate::expr::statements) async fn run_indexing(
 		.build(ctx, opt.clone(), tb, ix, blocking)
 		.await?;
 	if let Some(rcv) = rcv {
-		rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?
+		rcv.await.map_err(|_| Error::IndexingBuildingCancelled {
+			reason: "Channel shutdown".to_string(),
+		})?
 	} else {
 		Ok(())
 	}

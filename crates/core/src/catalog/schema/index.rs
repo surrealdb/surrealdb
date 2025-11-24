@@ -6,6 +6,7 @@ use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisione
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{ToSql, write_sql};
 
+use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Idiom};
 use crate::kvs::impl_kv_value_revisioned;
@@ -58,6 +59,7 @@ pub struct IndexDefinition {
 	pub(crate) cols: Vec<Idiom>,
 	pub(crate) index: Index,
 	pub(crate) comment: Option<String>,
+	pub(crate) decommissioned: bool,
 }
 
 impl_kv_value_revisioned!(IndexDefinition);
@@ -77,6 +79,16 @@ impl IndexDefinition {
 			concurrently: false,
 		}
 	}
+
+	pub(crate) fn expect_not_decommissioned(&self) -> Result<()> {
+		if self.decommissioned {
+			Err(anyhow::Error::new(Error::IndexingBuildingCancelled {
+				reason: "Decommissioned.".to_string(),
+			}))
+		} else {
+			Ok(())
+		}
+	}
 }
 
 impl InfoStructure for IndexDefinition {
@@ -87,6 +99,7 @@ impl InfoStructure for IndexDefinition {
 			"cols".to_string() => Value::Array(Array(self.cols.into_iter().map(|x| x.structure()).collect())),
 			"index".to_string() => self.index.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"decommission".to_string()=> self.decommissioned.into()
 		})
 	}
 }

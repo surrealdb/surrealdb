@@ -52,6 +52,10 @@ impl Document {
 		let rid = self.id()?;
 		// Loop through all index statements
 		for ix in ixs.iter() {
+			// Decommissionned index are ignored
+			if ix.decommissioned {
+				continue;
+			}
 			// Calculate old values
 			let o = Self::build_opt_values(stk, ctx, opt, ix, &self.initial).await?;
 

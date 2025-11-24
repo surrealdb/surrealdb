@@ -13,12 +13,13 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tokio::sync::RwLock;
-use tokio::time::sleep;
+use tokio::time::Instant;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{
-	DatabaseDefinition, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId, Record, TableId,
+	DatabaseDefinition, DatabaseId, IndexDefinition, IndexId, NamespaceId, Record, TableId,
 };
 use crate::cnf::{INDEXING_BATCH_SIZE, NORMAL_FETCH_SIZE};
 use crate::ctx::{Context, MutableContext};
@@ -29,7 +30,6 @@ use crate::idx::IndexKeyBase;
 use crate::idx::ft::fulltext::FullTextIndex;
 use crate::idx::index::IndexOperation;
 use crate::key::record;
-use crate::key::root::ic::IndexCompactionKey;
 use crate::kvs::LockType::Optimistic;
 use crate::kvs::ds::TransactionFactory;
 use crate::kvs::{KVValue, Key, Transaction, TransactionType, Val, impl_kv_value_revisioned};
@@ -201,6 +201,7 @@ impl IndexBuilder {
 		ix: Arc<IndexDefinition>,
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<()>>>> {
+		ix.expect_not_decommissioned()?;
 		let (ns, db) = ctx.expect_ns_db_ids(&opt).await?;
 		let key = IndexKey::new(ns, db, &ix.table_name, ix.index_id);
 		let (rcv, sdr) = if blocking {
@@ -262,37 +263,12 @@ impl IndexBuilder {
 
 	pub(crate) async fn remove_index(
 		&self,
-		ctx: &Context,
 		ns: NamespaceId,
 		db: DatabaseId,
-		ix: &IndexDefinition,
+		tb: &str,
+		ix: IndexId,
 	) -> Result<()> {
-		if matches!(ix.index, Index::FullText(_) | Index::Count(_)) {
-			let range = IndexCompactionKey::range_for_index(ns, db, &ix.table_name, ix.index_id)?;
-			// Wait for compaction to be done
-			loop {
-				if ctx.is_done(false).await? {
-					return Ok(());
-				}
-				{
-					let tx = self
-						.tf
-						.transaction(
-							TransactionType::Read,
-							Optimistic,
-							ctx.try_get_sequences()?.clone(),
-						)
-						.await?;
-					let res = tx.count(range.clone()).await;
-					tx.cancel().await?;
-					if res? == 0 {
-						break;
-					}
-				}
-				sleep(Duration::from_millis(500)).await;
-			}
-		}
-		let key = IndexKey::new(ns, db, &ix.table_name, ix.index_id);
+		let key = IndexKey::new(ns, db, tb, ix);
 		if let Some(b) = self.indexes.write().await.remove(&key) {
 			b.abort();
 		}
@@ -461,6 +437,32 @@ impl Building {
 		Ok(ctx.freeze())
 	}
 
+	async fn check_decommissioned_with_tx(
+		&self,
+		last_decommissioned_check: &mut Instant,
+		tx: &Transaction,
+	) -> Result<()> {
+		if last_decommissioned_check.elapsed() < Duration::from_secs(5) {
+			return Ok(());
+		};
+		// Check the index still exists and is not decommissioned
+		catch!(
+			tx,
+			tx.expect_tb_index(self.ns, self.db, &self.ix.table_name, &self.ix.name)
+				.await?
+				.expect_not_decommissioned()
+		);
+		*last_decommissioned_check = Instant::now();
+		Ok(())
+	}
+
+	async fn check_decommissioned(&self, last_decommissioned_check: &mut Instant) -> Result<()> {
+		let tx = self.new_read_tx().await?;
+		self.check_decommissioned_with_tx(last_decommissioned_check, &tx).await?;
+		tx.cancel().await?;
+		Ok(())
+	}
+
 	async fn run(&self) -> Result<()> {
 		// Remove the index data
 		{
@@ -485,14 +487,18 @@ impl Building {
 			updated: None,
 		})
 		.await;
+		let mut last_decommissioned_check = Instant::now();
+
 		while let Some(rng) = next {
 			if self.is_aborted().await {
 				return Ok(());
 			}
 			self.is_beyond_threshold(None)?;
-			// Get the next batch of records
 			let batch = {
 				let tx = self.new_read_tx().await?;
+				// Check if the index has been decommissioned
+				self.check_decommissioned_with_tx(&mut last_decommissioned_check, &tx).await?;
+				// Get the next batch of records
 				catch!(tx, tx.batch_keys_vals(rng, *INDEXING_BATCH_SIZE, None).await)
 			};
 			// Set the next scan range
@@ -529,6 +535,8 @@ impl Building {
 				return Ok(());
 			}
 			self.is_beyond_threshold(None)?;
+			// Check the index still exists and is not decommissioned
+			self.check_decommissioned(&mut last_decommissioned_check).await?;
 			let range = {
 				let mut queue = self.queue.write().await;
 				if let Some(ni) = next_to_index {

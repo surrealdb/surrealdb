@@ -2,7 +2,9 @@ use reblessive::Stk;
 
 use crate::sql::TableType;
 use crate::sql::statements::alter::field::AlterDefault;
-use crate::sql::statements::alter::{AlterFieldStatement, AlterKind, AlterSequenceStatement};
+use crate::sql::statements::alter::{
+	AlterFieldStatement, AlterIndexStatement, AlterKind, AlterSequenceStatement,
+};
 use crate::sql::statements::{AlterStatement, AlterTableStatement};
 use crate::syn::parser::mac::{expected, unexpected};
 use crate::syn::parser::{ParseResult, Parser};
@@ -13,6 +15,7 @@ impl Parser<'_> {
 		let next = self.next();
 		match next.kind {
 			t!("TABLE") => self.parse_alter_table(stk).await.map(AlterStatement::Table),
+			t!("INDEX") => self.parse_alter_index().await.map(AlterStatement::Index),
 			t!("FIELD") => self.parse_alter_field(stk).await.map(AlterStatement::Field),
 			t!("SEQUENCE") => self.parse_alter_sequence(stk).await.map(AlterStatement::Sequence),
 			_ => unexpected!(self, next, "a alter statement keyword"),
@@ -98,6 +101,27 @@ impl Parser<'_> {
 			}
 		}
 
+		Ok(res)
+	}
+
+	pub(crate) async fn parse_alter_index(&mut self) -> ParseResult<AlterIndexStatement> {
+		let if_exists = if self.eat(t!("IF")) {
+			expected!(self, t!("EXISTS"));
+			true
+		} else {
+			false
+		};
+		let name = self.parse_ident()?;
+		expected!(self, t!("ON"));
+		self.eat(t!("TABLE"));
+		let table = self.parse_ident()?;
+		let decommission = self.eat(t!("DECOMMISSION"));
+		let res = AlterIndexStatement {
+			name,
+			table,
+			if_exists,
+			decommission,
+		};
 		Ok(res)
 	}
 

@@ -9,11 +9,10 @@ use std::time::Duration;
 
 #[allow(unused_imports)]
 use anyhow::bail;
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
-use dashmap::try_result::TryResult::Locked;
 use futures::{Future, Stream};
 use http::HeaderMap;
 use reblessive::TreeStack;
@@ -38,7 +37,7 @@ use crate::catalog::providers::{
 };
 use crate::catalog::{ApiDefinition, ApiMethod, Index, NodeLiveQuery, SubscriptionDefinition};
 use crate::cnf::NORMAL_FETCH_SIZE;
-use crate::ctx::{Context, MutableContext};
+use crate::ctx::MutableContext;
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::capabilities::{
@@ -1333,7 +1332,7 @@ impl Datastore {
 			// Create a new transaction
 			let txn = self.transaction(Write, Optimistic).await?;
 			// Collect every item in the queue
-			let (beg, end) = IndexCompactionKey::full_range();
+			let (beg, end) = IndexCompactionKey::range();
 			let range = beg..end;
 			let mut previous: Option<IndexCompactionKey<'static>> = None;
 			let mut count = 0;
@@ -1349,7 +1348,7 @@ impl Datastore {
 					continue;
 				}
 				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
-					Some(ix) => match &ix.index {
+					Some(ix) if !ix.decommissioned => match &ix.index {
 						Index::FullText(p) => {
 							let ft = FullTextIndex::new(
 								&self.index_stores,
@@ -1367,7 +1366,7 @@ impl Datastore {
 							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);
 						}
 					},
-					None => {
+					_ => {
 						trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ic.ix);
 					}
 				}

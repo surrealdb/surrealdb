@@ -1,0 +1,80 @@
+use std::fmt::{self, Display, Write};
+use std::ops::Deref;
+
+use anyhow::Result;
+
+use crate::catalog::providers::TableProvider;
+use crate::ctx::Context;
+use crate::dbs::Options;
+use crate::err::Error;
+use crate::expr::{Base, Value};
+use crate::fmt::{EscapeKwIdent, is_pretty, pretty_indent};
+use crate::iam::{Action, ResourceKind};
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub(crate) struct AlterIndexStatement {
+	pub name: String,
+	pub table: String,
+	pub if_exists: bool,
+	pub decommission: bool,
+}
+
+impl AlterIndexStatement {
+	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
+		// Allowed to run?
+		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
+		// Get the NS and DB
+		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
+		// Fetch the transaction
+		let txn = ctx.tx();
+		// Get the sequence definition
+		// Get the index definition
+		let mut ix = match txn.get_tb_index(ns, db, &self.table, &self.name).await? {
+			Some(tb) => tb.deref().clone(),
+			None => {
+				if self.if_exists {
+					return Ok(Value::None);
+				} else {
+					return Err(Error::IxNotFound {
+						name: self.name.clone(),
+					}
+					.into());
+				}
+			}
+		};
+
+		if self.decommission {
+			ix.decommissioned = true;
+		}
+
+		// Set the table definition
+		txn.put_tb_index(ns, db, &self.table, &ix).await?;
+
+		// Clear the cache
+		txn.clear_cache();
+
+		// Ok all good
+		Ok(Value::None)
+	}
+}
+
+impl Display for AlterIndexStatement {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "ALTER INDEX")?;
+		if self.if_exists {
+			write!(f, " IF EXISTS")?
+		}
+		write!(f, " {} ON {}", self.name, EscapeKwIdent(&self.table, &["IF"]))?;
+
+		if self.decommission {
+			write!(f, " DECOMMISSION")?;
+		}
+		let _indent = if is_pretty() {
+			Some(pretty_indent())
+		} else {
+			f.write_char(' ')?;
+			None
+		};
+		Ok(())
+	}
+}

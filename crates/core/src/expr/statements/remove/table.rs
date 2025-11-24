@@ -62,7 +62,7 @@ impl RemoveTableStatement {
 			.into());
 		};
 		// Remove the index stores
-		ctx.get_index_stores().table_removed(ctx, &txn, ns, db, &tb).await?;
+		ctx.get_index_stores().table_removed(ctx.get_index_builder(), &txn, ns, db, &tb).await?;
 
 		// Get the foreign tables
 		let fts = txn.all_tb_views(ns, db, &name).await?;

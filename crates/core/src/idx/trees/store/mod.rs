@@ -15,6 +15,7 @@ use crate::idx::trees::hnsw::cache::VectorCache;
 use crate::idx::trees::store::hnsw::{HnswIndexes, SharedHnswIndex};
 use crate::idx::trees::store::mapper::Mappers;
 use crate::kvs::Transaction;
+use crate::kvs::index::IndexBuilder;
 
 #[derive(Clone)]
 pub struct IndexStores(Arc<Inner>);
@@ -51,54 +52,54 @@ impl IndexStores {
 
 	pub(crate) async fn index_removed(
 		&self,
-		ctx: &Context,
+		ib: Option<&IndexBuilder>,
 		ns: NamespaceId,
 		db: DatabaseId,
-		tb: TableId,
+		tb: &TableDefinition,
 		ix: &IndexDefinition,
 	) -> Result<()> {
-		if let Some(ib) = ctx.get_index_builder() {
-			ib.remove_index(ctx, ns, db, ix).await?;
+		if let Some(ib) = ib {
+			ib.remove_index(ns, db, &tb.name, ix.index_id).await?;
 		}
-		self.remove_index(ns, db, tb, ix).await
+		self.remove_index(ns, db, tb.table_id, ix).await
 	}
 
 	pub(crate) async fn namespace_removed(
 		&self,
-		ctx: &Context,
+		ib: Option<&IndexBuilder>,
 		tx: &Transaction,
 		ns: NamespaceId,
 	) -> Result<()> {
 		for db in tx.all_db(ns).await?.iter() {
-			self.database_removed(ctx, tx, ns, db.database_id).await?;
+			self.database_removed(ib, tx, ns, db.database_id).await?;
 		}
 		Ok(())
 	}
 
 	pub(crate) async fn database_removed(
 		&self,
-		ctx: &Context,
+		ib: Option<&IndexBuilder>,
 		tx: &Transaction,
 		ns: NamespaceId,
 		db: DatabaseId,
 	) -> Result<()> {
 		for tb in tx.all_tb(ns, db, None).await?.iter() {
-			self.table_removed(ctx, tx, ns, db, tb).await?;
+			self.table_removed(ib, tx, ns, db, tb).await?;
 		}
 		Ok(())
 	}
 
 	pub(crate) async fn table_removed(
 		&self,
-		ctx: &Context,
+		ib: Option<&IndexBuilder>,
 		tx: &Transaction,
 		ns: NamespaceId,
 		db: DatabaseId,
 		tb: &TableDefinition,
 	) -> Result<()> {
 		for ix in tx.all_tb_indexes(ns, db, &tb.name).await?.iter() {
-			if let Some(ib) = ctx.get_index_builder() {
-				ib.remove_index(ctx, ns, db, ix).await?;
+			if let Some(ib) = ib {
+				ib.remove_index(ns, db, &tb.name, ix.index_id).await?;
 			}
 			self.remove_index(ns, db, tb.table_id, ix).await?;
 		}

@@ -776,7 +776,10 @@ struct SchemaCache {
 
 impl SchemaCache {
 	async fn new(ns: NamespaceId, db: DatabaseId, table: &str, tx: &Transaction) -> Result<Self> {
-		let indexes = tx.all_tb_indexes(ns, db, table).await?;
+		let all_indexes = tx.all_tb_indexes(ns, db, table).await?;
+		// Filter out decommissioned indexes
+		let indexes: Arc<[IndexDefinition]> =
+			all_indexes.iter().filter(|ix| !ix.decommissioned).cloned().collect();
 		let fields = tx.all_tb_fields(ns, db, table, None).await?;
 		Ok(Self {
 			indexes,

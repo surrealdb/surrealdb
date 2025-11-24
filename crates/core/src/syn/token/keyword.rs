@@ -67,6 +67,7 @@ keyword! {
 	Count => "COUNT",
 	Create => "CREATE",
 	Database => "DATABASE",
+	Decommission => "DECOMMISSION",
 	Default => "DEFAULT",
 	Define => "DEFINE",
 	Delete => "DELETE",
