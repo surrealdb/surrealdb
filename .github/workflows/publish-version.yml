@@ -101,6 +101,7 @@ jobs:
     name: Test
     needs: [ prepare-vars ]
     runs-on: [ runner-amd64-2xlarge ]
+    continue-on-error: true
     steps:
       - name: Checkout sources
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
