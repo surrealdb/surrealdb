@@ -237,11 +237,10 @@ impl Datastore {
 			// are batched together and flushed to disk in a single operation, which is more
 			// efficient than flushing each transaction individually, and ensures that the data
 			// is fully durable.
-			info!(target: TARGET, "Grouped commit: enabled (timeout={}, wait_threshold={}, max_batch_size={}, min_siblings={})",
+			info!(target: TARGET, "Grouped commit: enabled (timeout={}, wait_threshold={}, max_batch_size={})",
 				*cnf::ROCKSDB_GROUPED_COMMIT_TIMEOUT,
 				*cnf::ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD,
 				*cnf::ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE,
-				*cnf::ROCKSDB_GROUPED_COMMIT_MIN_SIBLINGS
 			);
 			Some(Arc::new(CommitCoordinator::new(
 				&mut opts,
@@ -249,7 +248,6 @@ impl Datastore {
 				*cnf::ROCKSDB_GROUPED_COMMIT_TIMEOUT,
 				*cnf::ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD,
 				*cnf::ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE,
-				*cnf::ROCKSDB_GROUPED_COMMIT_MIN_SIBLINGS,
 			)))
 		} else if !*cnf::SYNC_DATA {
 			// If the user has disabled synced transaction writes, we defer to the operating system

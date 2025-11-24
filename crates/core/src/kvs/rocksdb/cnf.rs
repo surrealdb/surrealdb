@@ -253,9 +253,3 @@ pub(super) static ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD: LazyLock<usize> =
 /// This setting is only used when SYNC_DATA is enabled and ROCKSDB_BACKGROUND_FLUSH is disabled.
 pub(super) static ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE: LazyLock<usize> =
 	lazy_env_parse!("SURREAL_ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE", usize, 2048);
-
-/// The minimum number of concurrent transactions before enabling grouped commit (default: 2)
-/// When fewer than this many transactions are pending, commits are processed individually
-/// to avoid adding unnecessary latency in low-concurrency scenarios.
-pub(super) static ROCKSDB_GROUPED_COMMIT_MIN_SIBLINGS: LazyLock<usize> =
-	lazy_env_parse!("SURREAL_ROCKSDB_GROUPED_COMMIT_MIN_SIBLINGS", usize, 2);
