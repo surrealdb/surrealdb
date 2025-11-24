@@ -1,4 +1,3 @@
-#![allow(clippy::unwrap_used)]
 mod helpers;
 use std::time::{Duration, SystemTime};
 
