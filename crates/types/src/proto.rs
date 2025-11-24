@@ -88,7 +88,7 @@ impl TryFrom<proto::Value> for Value {
 				Ok(Geometry::try_from(g).map(Value::Geometry).unwrap_or(Value::None))
 			}
 			proto::value::Value::Table(t) => {
-				Ok(Table::try_from(t).map(Value::Table).unwrap_or(Value::None))
+				Ok(Value::Table(Table::from(t)))
 			}
 			proto::value::Value::RecordId(r) => {
 				Ok(RecordId::try_from(r).map(Value::RecordId).unwrap_or(Value::None))
