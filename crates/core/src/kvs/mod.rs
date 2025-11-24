@@ -16,18 +16,19 @@
 
 pub mod export;
 
-pub mod api;
+mod api;
 mod batch;
-mod cf;
 mod clock;
 mod ds;
+mod err;
+mod into;
 mod key;
-mod node;
 mod scanner;
 mod threadpool;
+mod timestamp;
 mod tr;
 mod tx;
-pub(crate) mod version;
+mod util;
 
 mod indxdb;
 mod mem;
@@ -35,22 +36,26 @@ mod rocksdb;
 mod surrealkv;
 mod tikv;
 
+#[cfg(test)]
+mod tests;
+
 pub(crate) mod cache;
 pub(crate) mod index;
-pub mod savepoint;
 pub(crate) mod sequences;
 pub(crate) mod slowlog;
 pub(crate) mod tasklease;
-#[cfg(test)]
-mod tests;
-mod util;
+pub(crate) mod version;
 
-pub use api::Transaction as KVTransaction;
+pub use api::Transactable;
 pub use clock::SizedClock;
 pub use ds::requirements::{TransactionBuilderFactoryRequirements, TransactionBuilderRequirements};
 pub use ds::{Datastore, DatastoreFlavor, TransactionBuilder, TransactionBuilderFactory};
+pub use err::{Error, Result};
+pub use into::IntoBytes;
 pub(crate) use key::{KVKey, KVValue, impl_kv_key_storekey, impl_kv_value_revisioned};
-pub use tr::{Check, LockType, TransactionType, Transactor};
+pub use scanner::{Direction, Scanner};
+pub use timestamp::Timestamp;
+pub use tr::{LockType, TransactionType, Transactor};
 pub use tx::Transaction;
 
 /// The key part of a key-value pair. An alias for [`Vec<u8>`].

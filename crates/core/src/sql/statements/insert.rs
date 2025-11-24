@@ -1,9 +1,9 @@
 use std::fmt;
 
+use crate::fmt::CoverStmtsSql;
 use crate::sql::{Data, Expr, Output, Timeout};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct InsertStatement {
 	pub into: Option<Expr>,
 	pub data: Data,
@@ -27,7 +27,7 @@ impl fmt::Display for InsertStatement {
 			f.write_str(" IGNORE")?
 		}
 		if let Some(into) = &self.into {
-			write!(f, " INTO {}", into)?;
+			write!(f, " INTO {}", CoverStmtsSql(into))?;
 		}
 		write!(f, " {}", self.data)?;
 		if let Some(ref v) = self.update {

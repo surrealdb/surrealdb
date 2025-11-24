@@ -71,6 +71,16 @@ impl<T: AsRef<str>> fmt::Display for EscapeIdent<T> {
 	}
 }
 
+pub struct EscapeKwIdent<'a>(pub &'a str, pub &'a [&'static str]);
+impl fmt::Display for EscapeKwIdent<'_> {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		if self.1.contains(&self.0) {
+			return f.write_fmt(format_args!("`{}`", Escape::escape_str(self.0, '`')));
+		}
+		EscapeKwFreeIdent(self.0).fmt(f)
+	}
+}
+
 /// Escapes identifiers which can never be used in the same place as a keyword.
 ///
 /// Examples of this is a Param as '$' is in front of the identifier so it

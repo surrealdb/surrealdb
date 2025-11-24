@@ -12,6 +12,7 @@ use crate::{SurrealValue, Value, write_sql};
 /// type. The underlying storage is a `BTreeMap<String, Value>` which maintains sorted keys.
 
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Object(pub(crate) BTreeMap<String, Value>);
 
 impl Object {

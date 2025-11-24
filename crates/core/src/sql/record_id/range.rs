@@ -4,7 +4,6 @@ use std::ops::Bound;
 use super::RecordIdKeyLit;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordIdKeyRangeLit {
 	pub start: Bound<RecordIdKeyLit>,
 	pub end: Bound<RecordIdKeyLit>,

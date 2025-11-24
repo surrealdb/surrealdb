@@ -71,8 +71,6 @@ impl Document {
 			let Value::RecordId(ref r) = r else {
 				fail!("Expected a record id for the `out` field, found {r}");
 			};
-			// Lock the transaction
-			let mut txn = txn.lock().await;
 			// Get temporary edge references
 			let (ref o, ref i) = (Dir::Out, Dir::In);
 			// Purge the left pointer edge
@@ -128,7 +126,7 @@ impl Document {
 		let range = prefix..suffix;
 
 		// Obtain a stream of keys
-		let mut stream = txn.stream_keys(range.clone(), None, ScanDirection::Forward);
+		let mut stream = txn.stream_keys(range.clone(), None, None, ScanDirection::Forward);
 		// Loop until no more entries
 		while let Some(res) = stream.next().await {
 			yield_now!();

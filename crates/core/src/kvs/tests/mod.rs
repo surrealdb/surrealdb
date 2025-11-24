@@ -29,10 +29,8 @@ mod multiwriter_same_keys_conflict;
 mod raw;
 #[cfg(feature = "kv-rocksdb")]
 mod read_and_deletion_only;
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 mod reverse_iterator;
 mod snapshot;
-mod timestamp_to_versionstamp;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Kvs {
@@ -90,7 +88,14 @@ mod mem {
 		(ds, Kvs::Mem)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
+	include_tests!(new_ds =>
+		raw,
+		snapshot,
+		multireader,
+		multiwriter_different_keys,
+		multiwriter_same_keys_conflict,
+		reverse_iterator,
+	);
 }
 
 #[cfg(feature = "kv-rocksdb")]
@@ -121,7 +126,15 @@ mod rocksdb {
 		(ds, Kvs::Rocksdb)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp,reverse_iterator, read_and_deletion_only);
+	include_tests!(new_ds =>
+		raw,
+		snapshot,
+		multireader,
+		multiwriter_different_keys,
+		multiwriter_same_keys_conflict,
+		reverse_iterator,
+		read_and_deletion_only,
+	);
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -152,7 +165,14 @@ mod surrealkv {
 		(ds, Kvs::SurrealKV)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
+	include_tests!(new_ds =>
+		raw,
+		snapshot,
+		multireader,
+		multiwriter_different_keys,
+		multiwriter_same_keys_conflict,
+		reverse_iterator,
+	);
 }
 
 #[cfg(feature = "kv-tikv")]
@@ -185,5 +205,12 @@ mod tikv {
 		(ds, Kvs::Tikv)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_allow,timestamp_to_versionstamp,reverse_iterator);
+	include_tests!(new_ds =>
+		raw,
+		snapshot,
+		multireader,
+		multiwriter_different_keys,
+		multiwriter_same_keys_allow,
+		reverse_iterator,
+	);
 }

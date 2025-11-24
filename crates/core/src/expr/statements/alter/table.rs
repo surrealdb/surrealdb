@@ -13,7 +13,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::{Base, ChangeFeed, Kind};
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKwIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -97,7 +97,7 @@ impl AlterTableStatement {
 
 		// Record definition change
 		if changefeed_replaced {
-			txn.lock().await.record_table_change(ns, db, &self.name, &dt);
+			txn.changefeed_buffer_table_change(ns, db, &self.name, &dt);
 		}
 
 		// Set the table definition
@@ -116,7 +116,7 @@ impl Display for AlterTableStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", EscapeIdent(&self.name))?;
+		write!(f, " {}", EscapeKwIdent(&self.name, &["IF"]))?;
 		if let Some(kind) = &self.kind {
 			write!(f, " TYPE")?;
 			match &kind {
@@ -163,7 +163,7 @@ impl Display for AlterTableStatement {
 		}
 
 		match self.changefeed {
-			AlterKind::Set(ref x) => writeln!(f, " CHANGEFEED {x}")?,
+			AlterKind::Set(ref x) => writeln!(f, " {x}")?,
 			AlterKind::Drop => writeln!(f, " DROP CHANGEFEED")?,
 			AlterKind::None => {}
 		}

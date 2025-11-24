@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Write};
 
 use super::AlterKind;
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
 use crate::sql::{ChangeFeed, Kind, Permissions, TableType};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -22,7 +22,7 @@ impl Display for AlterTableStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", EscapeIdent(&self.name))?;
+		write!(f, " {}", EscapeKwFreeIdent(&self.name))?;
 		if let Some(kind) = &self.kind {
 			write!(f, " TYPE")?;
 			match &kind {
@@ -37,7 +37,7 @@ impl Display for AlterTableStatement {
 							if idx != 0 {
 								write!(f, " | ")?;
 							}
-							write!(f, "{}", EscapeIdent(k))?;
+							write!(f, "{}", EscapeKwFreeIdent(k))?;
 						}
 					}
 					if let Some(Kind::Record(kind)) = &rel.to {
@@ -46,7 +46,7 @@ impl Display for AlterTableStatement {
 							if idx != 0 {
 								write!(f, " | ")?;
 							}
-							write!(f, "{}", EscapeIdent(k))?;
+							write!(f, "{}", EscapeKwFreeIdent(k))?;
 						}
 					}
 				}
@@ -69,7 +69,7 @@ impl Display for AlterTableStatement {
 		}
 
 		match self.changefeed {
-			AlterKind::Set(ref changefeed) => write!(f, " CHANGEFEED {}", changefeed)?,
+			AlterKind::Set(ref changefeed) => write!(f, " {}", changefeed)?,
 			AlterKind::Drop => write!(f, " DROP CHANGEFEED")?,
 			AlterKind::None => {}
 		}

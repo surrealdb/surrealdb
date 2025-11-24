@@ -1,7 +1,7 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use crate::fmt::EscapeIdent;
+use crate::fmt::{EscapeKwFreeIdent, EscapeKwIdent};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -48,7 +48,7 @@ impl Display for RebuildIndexStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what))?;
+		write!(f, " {} ON {}", EscapeKwIdent(&self.name, &["IF"]), EscapeKwFreeIdent(&self.what))?;
 		if self.concurrently {
 			write!(f, " CONCURRENTLY")?
 		}

@@ -17,6 +17,7 @@ use crate::{Table, write_sql};
 /// a record within that table. This is the primary way to reference specific records.
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordId {
 	/// The name of the table containing the record
 	pub table: Table,

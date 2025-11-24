@@ -135,24 +135,17 @@ impl Parser<'_> {
 		match self.peek().kind {
 			t!("$param") => Ok(vec![Fetch(Expr::Param(self.next_token_value()?))]),
 			t!("TYPE") => {
+				// This is incorrect, the intention here was probably to only support
+				// `type::field(s)` but now it wil also parse any other `type::*` functions.
 				let fields = self.parse_fields(stk).await?;
 
 				let fetches = match fields {
-					Fields::Value(field) => match *field {
-						Field::All => Vec::new(),
-						Field::Single {
-							expr,
-							..
-						} => vec![Fetch(expr)],
-					},
+					Fields::Value(field) => vec![Fetch(field.expr)],
 					Fields::Select(fields) => fields
 						.into_iter()
 						.filter_map(|f| match f {
 							Field::All => None,
-							Field::Single {
-								expr,
-								..
-							} => Some(Fetch(expr)),
+							Field::Single(selector) => Some(Fetch(selector.expr)),
 						})
 						.collect(),
 				};
@@ -182,21 +175,13 @@ impl Parser<'_> {
 		let mut found = false;
 		match fields {
 			Fields::Value(field) => {
-				let Field::Single {
-					ref expr,
-					ref alias,
-				} = **field
-				else {
-					unreachable!()
-				};
-
-				if let Some(alias) = alias
+				if let Some(alias) = &field.alias
 					&& idiom == alias
 				{
 					found = true;
 				}
 
-				match expr {
+				match &field.expr {
 					Expr::Idiom(x) => {
 						if idiom == x {
 							found = true;
@@ -211,23 +196,19 @@ impl Parser<'_> {
 			}
 			Fields::Select(fields) => {
 				for field in fields.iter() {
-					let Field::Single {
-						expr,
-						alias,
-					} = field
-					else {
+					let Field::Single(field) = field else {
 						// All is in the idiom so assume that the field is present.
 						return Ok(());
 					};
 
-					if let Some(alias) = alias
+					if let Some(alias) = &field.alias
 						&& idiom == alias
 					{
 						found = true;
 						break;
 					}
 
-					match expr {
+					match &field.expr {
 						Expr::Idiom(x) => {
 							if idiom == x {
 								found = true;
@@ -273,9 +254,8 @@ impl Parser<'_> {
 		Ok(())
 	}
 
-	pub(crate) async fn try_parse_group(
+	pub(crate) fn try_parse_group(
 		&mut self,
-		stk: &mut Stk,
 		fields: &Fields,
 		fields_span: Span,
 	) -> ParseResult<Option<Groups>> {
@@ -292,7 +272,7 @@ impl Parser<'_> {
 		let has_all = fields.contains_all();
 
 		let before = self.peek().span;
-		let group = self.parse_basic_idiom(stk).await?;
+		let group = self.parse_basic_idiom()?;
 		let group_span = before.covers(self.last_span());
 		if !has_all {
 			Self::check_idiom(MissingKind::Group, fields, fields_span, &group, group_span)?;
@@ -301,7 +281,7 @@ impl Parser<'_> {
 		let mut groups = Groups(vec![Group(group)]);
 		while self.eat(t!(",")) {
 			let before = self.peek().span;
-			let group = self.parse_basic_idiom(stk).await?;
+			let group = self.parse_basic_idiom()?;
 			let group_span = before.covers(self.last_span());
 			if !has_all {
 				Self::check_idiom(MissingKind::Group, fields, fields_span, &group, group_span)?;
@@ -513,7 +493,7 @@ impl Parser<'_> {
 		}
 
 		let cond = self.try_parse_condition(stk).await?;
-		let group = self.try_parse_group(stk, &fields, fields_span).await?;
+		let group = self.try_parse_group(&fields, fields_span)?;
 
 		Ok(View {
 			expr: fields,

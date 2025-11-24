@@ -11,7 +11,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Expr};
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -83,7 +83,7 @@ impl fmt::Display for DefineModelStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " ml::{}<{}>", self.name, self.version)?;
+		write!(f, " ml::{}<{}>", EscapeKwFreeIdent(&self.name), self.version)?;
 		if let Some(comment) = self.comment.as_ref() {
 			write!(f, " COMMENT {}", comment)?;
 		}

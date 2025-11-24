@@ -1288,7 +1288,7 @@ end = "2026-02-13"
 
 [[trusted.surrealdb-tikv-client]]
 criteria = "safe-to-deploy"
-user-id = 217605 # Yusuke Kuoka (mumoshu)
+user-id = 217605
 start = "2023-06-19"
 end = "2025-07-08"
 
