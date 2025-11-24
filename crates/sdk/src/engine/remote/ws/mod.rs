@@ -66,21 +66,32 @@ struct PendingRequest {
 }
 
 /// Per-session state for WebSocket connections
-#[derive(Clone, Default)]
+#[derive(Default)]
 struct WsSessionState {
 	/// Vars currently set by the set method for this session
 	vars: IndexMap<String, Value>,
 	/// Messages which ought to be replayed on a reconnect for this session
 	replay: IndexMap<ReplayMethod, Command>,
+	/// Pending live queries
+	live_queries: HashMap<Uuid, Sender<Result<Notification>>>,
+	/// Send requests which are still awaiting an awnser.
+	pending_requests: HashMap<i64, PendingRequest>,
+}
+
+impl Clone for WsSessionState {
+	fn clone(&self) -> Self {
+		Self {
+			vars: self.vars.clone(),
+			replay: self.replay.clone(),
+			live_queries: HashMap::new(),
+			pending_requests: HashMap::new(),
+		}
+	}
 }
 
 struct RouterState<Sink, Stream> {
 	/// Per-session state (vars and replay commands)
 	sessions: HashMap<Option<uuid::Uuid>, WsSessionState>,
-	/// Pending live queries
-	live_queries: HashMap<Uuid, Sender<Result<Notification>>>,
-	/// Send requests which are still awaiting an awnser.
-	pending_requests: HashMap<i64, PendingRequest>,
 	/// The last time a message was recieved from the server.
 	last_activity: Instant,
 	/// The sink into which messages are send to surrealdb
@@ -93,8 +104,6 @@ impl<Sink, Stream> RouterState<Sink, Stream> {
 	pub fn new(sink: Sink, stream: Stream) -> Self {
 		RouterState {
 			sessions: HashMap::new(),
-			live_queries: HashMap::new(),
-			pending_requests: HashMap::new(),
 			last_activity: Instant::now(),
 			sink,
 			stream,
@@ -102,20 +111,24 @@ impl<Sink, Stream> RouterState<Sink, Stream> {
 	}
 
 	async fn clear_pending_requests(&mut self) {
-		for (_id, request) in self.pending_requests.drain() {
-			let error = io::Error::from(io::ErrorKind::ConnectionReset);
-			let sender = request.response_channel;
-			let err: crate::err::Error = error.into();
-			sender.send(Err(err.into())).await.ok();
-			sender.close();
+		for (_, state) in &mut self.sessions {
+			for (_id, request) in state.pending_requests.drain() {
+				let error = io::Error::from(io::ErrorKind::ConnectionReset);
+				let sender = request.response_channel;
+				let err: crate::err::Error = error.into();
+				sender.send(Err(err.into())).await.ok();
+				sender.close();
+			}
 		}
 	}
 
 	async fn clear_live_queries(&mut self) {
-		for (_id, sender) in self.live_queries.drain() {
-			let error = io::Error::from(io::ErrorKind::ConnectionReset);
-			sender.send(Err(error.into())).await.ok();
-			sender.close();
+		for (_, state) in &mut self.sessions {
+			for (_id, sender) in state.live_queries.drain() {
+				let error = io::Error::from(io::ErrorKind::ConnectionReset);
+				sender.send(Err(error.into())).await.ok();
+				sender.close();
+			}
 		}
 	}
 

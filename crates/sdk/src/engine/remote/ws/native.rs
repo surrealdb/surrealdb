@@ -185,8 +185,15 @@ async fn router_handle_route(
 		session_id,
 	} = request;
 
-	// We probably shouldn't be sending duplicate id requests.
-	let entry = state.pending_requests.entry(id);
+	let Some(session_state) = state.sessions.get_mut(&session_id) else {
+		let error = Error::InternalError(format!("Session not found: {session_id:?}"));
+		if response.send(Err(error.into())).await.is_err() {
+			trace!("Receiver dropped");
+		}
+		return HandleResult::Ok;
+	};
+
+	let entry = session_state.pending_requests.entry(id);
 	let Entry::Vacant(entry) = entry else {
 		let error = Error::DuplicateRequestId(id);
 		if response.send(Err(error.into())).await.is_err() {
@@ -203,7 +210,6 @@ async fn router_handle_route(
 			variables,
 		} => {
 			// Get session-specific vars
-			let session_state = state.sessions.entry(session_id).or_default();
 			let mut merged_vars = session_state
 				.vars
 				.iter()
@@ -242,7 +248,7 @@ async fn router_handle_route(
 			ref uuid,
 			ref notification_sender,
 		} => {
-			state.live_queries.insert(*uuid, notification_sender.clone());
+			session_state.live_queries.insert(*uuid, notification_sender.clone());
 			if response.clone().send(Ok(vec![QueryResultBuilder::instant_none()])).await.is_err() {
 				trace!("Receiver dropped");
 			}
@@ -252,32 +258,28 @@ async fn router_handle_route(
 		Command::Kill {
 			ref uuid,
 		} => {
-			state.live_queries.remove(uuid);
+			session_state.live_queries.remove(uuid);
 		}
 		Command::Use {
 			..
 		} => {
 			// Store in session-specific replay
-			let session_state = state.sessions.entry(session_id).or_default();
 			session_state.replay.insert(ReplayMethod::Use, command.clone());
 		}
 		Command::Signup {
 			..
 		} => {
 			// Store in session-specific replay
-			let session_state = state.sessions.entry(session_id).or_default();
 			session_state.replay.insert(ReplayMethod::Signup, command.clone());
 		}
 		Command::Signin {
 			..
 		} => {
 			// Store in session-specific replay
-			let session_state = state.sessions.entry(session_id).or_default();
 			session_state.replay.insert(ReplayMethod::Signin, command.clone());
 		}
 		Command::Invalidate => {
 			// Store in session-specific replay
-			let session_state = state.sessions.entry(session_id).or_default();
 			session_state.replay.insert(ReplayMethod::Invalidate, command.clone());
 		}
 		Command::Authenticate {
@@ -287,7 +289,6 @@ async fn router_handle_route(
 				token: Some(token.clone()),
 			};
 			// Store in session-specific replay
-			let session_state = state.sessions.entry(session_id).or_default();
 			session_state.replay.insert(ReplayMethod::Authenticate, command.clone());
 		}
 		_ => {}

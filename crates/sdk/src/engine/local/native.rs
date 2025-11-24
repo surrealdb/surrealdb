@@ -204,7 +204,7 @@ pub(crate) async fn run_router(
 			tokio::spawn(async move {
 				let id = notification.id.0;
 				let session_id = notification.session.map(|x| x.0);
-				
+
 				// Try to get the specific session if we have a session ID
 				let state = if let Some(sid) = session_id {
 					super::get_session(&sessions_clone, &Some(sid)).ok()
@@ -219,7 +219,7 @@ pub(crate) async fn run_router(
 						}
 					})
 				};
-				
+
 				if let Some(state) = state {
 					if let Some(sender) = state.live_queries.get(&id)
 						&& sender.send(Ok(notification)).await.is_err() {

@@ -148,6 +148,8 @@
 //! }
 //! ```
 
+#[cfg(target_family = "wasm")]
+use std::collections::HashMap;
 use std::marker::PhantomData;
 #[cfg(not(target_family = "wasm"))]
 use std::pin::pin;
@@ -190,9 +192,6 @@ use crate::conn::{Command, RequestData};
 use crate::opt::IntoEndpoint;
 use crate::opt::auth::{AccessToken, RefreshToken, SecureToken, Token};
 use crate::{Connect, Result, Surreal};
-
-#[cfg(target_family = "wasm")]
-use std::collections::HashMap;
 
 #[cfg(target_family = "wasm")]
 type LiveQueryMap = HashMap<Uuid, LiveQueryState>;
@@ -587,38 +586,40 @@ async fn router(
 	match command {
 		Command::Use {
 			namespace,
-		database,
-	} => {
-		let session_id = session_id
-			.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
-		let result = {
-			let mut state_ref = sessions.get_mut(&session_id)
-				.ok_or_else(|| crate::Error::InternalError(format!("Session not found: {session_id}")))?;
-			let state = match state_ref.value_mut() {
-				Ok(state) => state,
-				Err(error) => return Err(error.clone().into()),
+			database,
+		} => {
+			let session_id = session_id
+				.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
+			let result = {
+				let mut state_ref = sessions.get_mut(&session_id).ok_or_else(|| {
+					crate::Error::InternalError(format!("Session not found: {session_id}"))
+				})?;
+				let state = match state_ref.value_mut() {
+					Ok(state) => state,
+					Err(error) => return Err(error.clone().into()),
+				};
+				kvs.process_use(None, &mut state.session, namespace, database).await?
 			};
-			kvs.process_use(None, &mut state.session, namespace, database).await?
-		};
-		Ok(vec![result])
-	}
+			Ok(vec![result])
+		}
 		Command::Signup {
 			credentials,
 		} => {
-		let query_result = QueryResultBuilder::started_now();
-		let session_id = session_id
-			.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
-		let signup_data = {
-			let mut state_ref = sessions.get_mut(&session_id)
-				.ok_or_else(|| crate::Error::InternalError(format!("Session not found: {session_id}")))?;
-			let state = match state_ref.value_mut() {
-				Ok(state) => state,
-				Err(error) => return Err(error.clone().into()),
+			let query_result = QueryResultBuilder::started_now();
+			let session_id = session_id
+				.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
+			let signup_data = {
+				let mut state_ref = sessions.get_mut(&session_id).ok_or_else(|| {
+					crate::Error::InternalError(format!("Session not found: {session_id}"))
+				})?;
+				let state = match state_ref.value_mut() {
+					Ok(state) => state,
+					Err(error) => return Err(error.clone().into()),
+				};
+				iam::signup::signup(&kvs, &mut state.session, credentials.into())
+					.await
+					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?
 			};
-			iam::signup::signup(&kvs, &mut state.session, credentials.into())
-				.await
-				.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?
-		};
 			let token = match signup_data {
 				iam::Token::Access(token) => Token {
 					access: AccessToken(SecureToken(token)),
@@ -638,20 +639,21 @@ async fn router(
 		Command::Signin {
 			credentials,
 		} => {
-		let query_result = QueryResultBuilder::started_now();
-		let session_id = session_id
-			.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
-		let signin_data = {
-			let mut state_ref = sessions.get_mut(&session_id)
-				.ok_or_else(|| crate::Error::InternalError(format!("Session not found: {session_id}")))?;
-			let state = match state_ref.value_mut() {
-				Ok(state) => state,
-				Err(error) => return Err(error.clone().into()),
+			let query_result = QueryResultBuilder::started_now();
+			let session_id = session_id
+				.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
+			let signin_data = {
+				let mut state_ref = sessions.get_mut(&session_id).ok_or_else(|| {
+					crate::Error::InternalError(format!("Session not found: {session_id}"))
+				})?;
+				let state = match state_ref.value_mut() {
+					Ok(state) => state,
+					Err(error) => return Err(error.clone().into()),
+				};
+				iam::signin::signin(&kvs, &mut state.session, credentials.into())
+					.await
+					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?
 			};
-			iam::signin::signin(&kvs, &mut state.session, credentials.into())
-				.await
-				.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?
-		};
 			let token = match signin_data {
 				iam::Token::Access(token) => Token {
 					access: AccessToken(SecureToken(token)),
@@ -680,95 +682,101 @@ async fn router(
 					..
 				} => (access, true),
 			};
-		// Attempt to authenticate with the access token
-		let session_id = session_id
-			.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
-		let result = {
-			let mut state_ref = sessions.get_mut(&session_id)
-				.ok_or_else(|| crate::Error::InternalError(format!("Session not found: {session_id}")))?;
-			let state = match state_ref.value_mut() {
-				Ok(state) => state,
-				Err(error) => return Err(error.clone().into()),
-			};
-			match iam::verify::token(&kvs, &mut state.session, access).await {
-				// Authentication successful - return the original token
-				Ok(_) => query_result.finish_with_result(Ok(token.into_value())),
-				Err(error) => {
-					// Automatic refresh token handling:
-					// If the access token is expired and we have a refresh token,
-					// automatically attempt to refresh and return new tokens.
-					if with_refresh && error.to_string().contains("token has expired") {
-						let result = match token.refresh(&kvs, &mut state.session).await {
-							Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
-							Err(error) => query_result.finish_with_result(Err(
-								DbResultError::InternalError(error.to_string()),
-							)),
-						};
-						return Ok(vec![result]);
+			// Attempt to authenticate with the access token
+			let session_id = session_id
+				.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
+			let result = {
+				let mut state_ref = sessions.get_mut(&session_id).ok_or_else(|| {
+					crate::Error::InternalError(format!("Session not found: {session_id}"))
+				})?;
+				let state = match state_ref.value_mut() {
+					Ok(state) => state,
+					Err(error) => return Err(error.clone().into()),
+				};
+				match iam::verify::token(&kvs, &mut state.session, access).await {
+					// Authentication successful - return the original token
+					Ok(_) => query_result.finish_with_result(Ok(token.into_value())),
+					Err(error) => {
+						// Automatic refresh token handling:
+						// If the access token is expired and we have a refresh token,
+						// automatically attempt to refresh and return new tokens.
+						if with_refresh && error.to_string().contains("token has expired") {
+							let result = match token.refresh(&kvs, &mut state.session).await {
+								Ok(token) => {
+									query_result.finish_with_result(Ok(token.into_value()))
+								}
+								Err(error) => query_result.finish_with_result(Err(
+									DbResultError::InternalError(error.to_string()),
+								)),
+							};
+							return Ok(vec![result]);
+						}
+						// If authentication failed and automatic refresh isn't applicable,
+						// return the authentication error
+						query_result.finish_with_result(Err(DbResultError::InternalError(
+							error.to_string(),
+						)))
 					}
-					// If authentication failed and automatic refresh isn't applicable,
-					// return the authentication error
-					query_result
-						.finish_with_result(Err(DbResultError::InternalError(error.to_string())))
 				}
-			}
-		};
-		Ok(vec![result])
+			};
+			Ok(vec![result])
 		}
 		Command::Refresh {
 			token,
 		} => {
-		// Refresh command: Exchange a refresh token for new access and refresh tokens
-		let query_result = QueryResultBuilder::started_now();
-		let session_id = session_id
-			.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
-		let result = {
-			let mut state_ref = sessions.get_mut(&session_id)
-				.ok_or_else(|| crate::Error::InternalError(format!("Session not found: {session_id}")))?;
-			let state = match state_ref.value_mut() {
-				Ok(state) => state,
-				Err(error) => return Err(error.clone().into()),
+			// Refresh command: Exchange a refresh token for new access and refresh tokens
+			let query_result = QueryResultBuilder::started_now();
+			let session_id = session_id
+				.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
+			let result = {
+				let mut state_ref = sessions.get_mut(&session_id).ok_or_else(|| {
+					crate::Error::InternalError(format!("Session not found: {session_id}"))
+				})?;
+				let state = match state_ref.value_mut() {
+					Ok(state) => state,
+					Err(error) => return Err(error.clone().into()),
+				};
+				match token.refresh(&kvs, &mut state.session).await {
+					Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
+					Err(error) => query_result
+						.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
+				}
 			};
-			match token.refresh(&kvs, &mut state.session).await {
-				Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
-				Err(error) => query_result
-					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
-			}
-		};
-		Ok(vec![result])
+			Ok(vec![result])
 		}
-	Command::Invalidate => {
-		let query_result = QueryResultBuilder::started_now();
-		let session_id = session_id
-			.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
-		let result = {
-			let mut state_ref = sessions.get_mut(&session_id)
-				.ok_or_else(|| crate::Error::InternalError(format!("Session not found: {session_id}")))?;
-			let state = match state_ref.value_mut() {
-				Ok(state) => state,
-				Err(error) => return Err(error.clone().into()),
+		Command::Invalidate => {
+			let query_result = QueryResultBuilder::started_now();
+			let session_id = session_id
+				.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
+			let result = {
+				let mut state_ref = sessions.get_mut(&session_id).ok_or_else(|| {
+					crate::Error::InternalError(format!("Session not found: {session_id}"))
+				})?;
+				let state = match state_ref.value_mut() {
+					Ok(state) => state,
+					Err(error) => return Err(error.clone().into()),
+				};
+				match iam::clear::clear(&mut state.session) {
+					Ok(_) => query_result.finish_with_result(Ok(Value::None)),
+					Err(error) => query_result
+						.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
+				}
 			};
-			match iam::clear::clear(&mut state.session) {
-				Ok(_) => query_result.finish_with_result(Ok(Value::None)),
+			Ok(vec![result])
+		}
+		Command::Begin => {
+			let query_result = QueryResultBuilder::started_now();
+			let result = match kvs.transaction(TransactionType::Write, LockType::Optimistic).await {
+				Ok(txn) => {
+					let id = Uuid::now_v7();
+					let state = get_session(&sessions, &session_id)?;
+					state.transactions.insert(id, std::sync::Arc::new(txn));
+					query_result.finish_with_result(Ok(Value::Uuid(id.into())))
+				}
 				Err(error) => query_result
 					.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
-			}
-		};
-		Ok(vec![result])
-	}
-		Command::Begin => {
-		let query_result = QueryResultBuilder::started_now();
-		let result = match kvs.transaction(TransactionType::Write, LockType::Optimistic).await {
-		Ok(txn) => {
-			let id = Uuid::now_v7();
-			let state = get_session(&sessions, &session_id)?;
-			state.transactions.insert(id, std::sync::Arc::new(txn));
-			query_result.finish_with_result(Ok(Value::Uuid(id.into())))
-			}
-			Err(error) => query_result
-				.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
-		};
-		Ok(vec![result])
+			};
+			Ok(vec![result])
 		}
 		Command::Revoke {
 			token,
@@ -782,43 +790,43 @@ async fn router(
 			};
 			Ok(vec![result])
 		}
-Command::Rollback {
-	txn,
-} => {
-	let state = get_session(&sessions, &session_id)?;
-	let tx = state.transactions.remove(&txn).map(|(_, v)| v);
-	if let Some(tx) = tx {
-		tx.cancel().await?;
-	}
-	Ok(vec![QueryResultBuilder::instant_none()])
-}
-Command::Commit {
-	txn,
-} => {
-	let state = get_session(&sessions, &session_id)?;
-	let tx = state.transactions.remove(&txn).map(|(_, v)| v);
-	if let Some(tx) = tx {
-		tx.commit().await?;
-	}
-	Ok(vec![QueryResultBuilder::instant_none()])
-}
-	Command::Query {
-		txn,
-		query,
-		variables,
-	} => {
-		// Get the session state
-		let state = get_session(&sessions, &session_id)?;
+		Command::Rollback {
+			txn,
+		} => {
+			let state = get_session(&sessions, &session_id)?;
+			let tx = state.transactions.remove(&txn).map(|(_, v)| v);
+			if let Some(tx) = tx {
+				tx.cancel().await?;
+			}
+			Ok(vec![QueryResultBuilder::instant_none()])
+		}
+		Command::Commit {
+			txn,
+		} => {
+			let state = get_session(&sessions, &session_id)?;
+			let tx = state.transactions.remove(&txn).map(|(_, v)| v);
+			if let Some(tx) = tx {
+				tx.commit().await?;
+			}
+			Ok(vec![QueryResultBuilder::instant_none()])
+		}
+		Command::Query {
+			txn,
+			query,
+			variables,
+		} => {
+			// Get the session state
+			let state = get_session(&sessions, &session_id)?;
 
-		// Merge session vars with query vars
-		let mut vars = state.vars.clone();
-		vars.extend(variables);
+			// Merge session vars with query vars
+			let mut vars = state.vars.clone();
+			vars.extend(variables);
 
-		// If a transaction UUID is provided, we need to retrieve it and use it
-		let response = if let Some(txn_id) = txn {
-			// Retrieve the transaction from storage
-			let tx_option = state.transactions.get(&txn_id).map(|v| v.clone());
-			if let Some(tx) = tx_option {
+			// If a transaction UUID is provided, we need to retrieve it and use it
+			let response = if let Some(txn_id) = txn {
+				// Retrieve the transaction from storage
+				let tx_option = state.transactions.get(&txn_id).map(|v| v.clone());
+				if let Some(tx) = tx_option {
 					// Execute with the existing transaction
 					kvs.execute_with_transaction(query.as_ref(), &state.session, Some(vars), tx)
 						.await?
@@ -868,9 +876,9 @@ Command::Commit {
 			let (tx, rx) = crate::channel::bounded(1);
 			let (mut writer, mut reader) = io::duplex(10_240);
 
-		// Write to channel.
-		let state_clone = get_session(&sessions, &session_id)?;
-		let export = export_file(&kvs, &state_clone.session, tx, config);
+			// Write to channel.
+			let state_clone = get_session(&sessions, &session_id)?;
+			let export = export_file(&kvs, &state_clone.session, tx, config);
 
 			// Read from channel and write to pipe.
 			let bridge = async move {
@@ -916,9 +924,9 @@ Command::Commit {
 			let (tx, rx) = crate::channel::bounded(1);
 			let (mut writer, mut reader) = io::duplex(10_240);
 
-		// Write to channel.
-		let state = get_session(&sessions, &session_id)?;
-		let export = export_ml(&kvs, &state.session, tx, config);
+			// Write to channel.
+			let state = get_session(&sessions, &session_id)?;
+			let export = export_ml(&kvs, &state.session, tx, config);
 
 			// Read from channel and write to pipe.
 			let bridge = async move {
@@ -955,17 +963,17 @@ Command::Commit {
 			Ok(vec![query_result.finish()])
 		}
 
-	#[cfg(not(target_family = "wasm"))]
-	Command::ExportBytes {
-		bytes,
-		config,
-	} => {
-		let query_result = QueryResultBuilder::started_now();
-		let (tx, rx) = crate::channel::bounded(1);
+		#[cfg(not(target_family = "wasm"))]
+		Command::ExportBytes {
+			bytes,
+			config,
+		} => {
+			let query_result = QueryResultBuilder::started_now();
+			let (tx, rx) = crate::channel::bounded(1);
 
-		let kvs = kvs.clone();
-		let session = get_session(&sessions, &session_id)?.session;
-		tokio::spawn(async move {
+			let kvs = kvs.clone();
+			let session = get_session(&sessions, &session_id)?.session;
+			tokio::spawn(async move {
 				let export = async {
 					if let Err(error) = export_file(&kvs, &session, tx, config).await {
 						let _ = bytes.send(Err(error)).await;
@@ -984,17 +992,17 @@ Command::Commit {
 			});
 			Ok(vec![query_result.finish()])
 		}
-	#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
-	Command::ExportBytesMl {
-		bytes,
-		config,
-	} => {
-		let query_result = QueryResultBuilder::started_now();
-		let (tx, rx) = crate::channel::bounded(1);
+		#[cfg(all(not(target_family = "wasm"), feature = "ml"))]
+		Command::ExportBytesMl {
+			bytes,
+			config,
+		} => {
+			let query_result = QueryResultBuilder::started_now();
+			let (tx, rx) = crate::channel::bounded(1);
 
-		let kvs = kvs.clone();
-		let session = get_session(&sessions, &session_id)?.session;
-		tokio::spawn(async move {
+			let kvs = kvs.clone();
+			let session = get_session(&sessions, &session_id)?.session;
+			tokio::spawn(async move {
 				let export = async {
 					if let Err(error) = export_ml(&kvs, &session, tx, config).await {
 						let _ = bytes.send(Err(error)).await;
@@ -1051,13 +1059,13 @@ Command::Commit {
 						Poll::Ready(Some(Err(error)))
 					}
 				}
-		});
+			});
 
-		let state = get_session(&sessions, &session_id)?;
-		let responses = kvs
-			.execute_import(&state.session, Some(state.vars.clone()), stream)
-			.await
-			.map_err(|e| crate::Error::InternalError(e.to_string()))?;
+			let state = get_session(&sessions, &session_id)?;
+			let responses = kvs
+				.execute_import(&state.session, Some(state.vars.clone()), stream)
+				.await
+				.map_err(|e| crate::Error::InternalError(e.to_string()))?;
 
 			for response in responses {
 				response.result?;
@@ -1080,11 +1088,11 @@ Command::Commit {
 				}
 			};
 
-		// Get the session for this session_id
-		let state = get_session(&sessions, &session_id)?;
+			// Get the session for this session_id
+			let state = get_session(&sessions, &session_id)?;
 
-		// Ensure a NS and DB are set
-		let (nsv, dbv) = check_ns_db(&state.session)?;
+			// Ensure a NS and DB are set
+			let (nsv, dbv) = check_ns_db(&state.session)?;
 			// Check the permissions level
 			kvs.check(&state.session, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))?;
 			// Create a new buffer
@@ -1129,66 +1137,68 @@ Command::Commit {
 				))),
 			])
 		}
-	Command::Set {
-		key,
-		value,
-	} => {
-		let query_result = QueryResultBuilder::started_now();
-		surrealdb_core::rpc::check_protected_param(&key)
-			.map_err(|e| crate::Error::InternalError(e.to_string()))?;
-		// Need to compute because certain keys might not be allowed to be set and those
-		// should be rejected by an error.
-		let session_id = session_id
-			.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
-		{
-			let mut state_ref = sessions.get_mut(&session_id)
-				.ok_or_else(|| crate::Error::InternalError(format!("Session not found: {session_id}")))?;
-			let state = match state_ref.value_mut() {
-				Ok(state) => state,
-				Err(error) => return Err(error.clone().into()),
-			};
-			match value {
-				Value::None => state.vars.remove(&key),
-				v => state.vars.insert(key, v),
-			};
-		}
+		Command::Set {
+			key,
+			value,
+		} => {
+			let query_result = QueryResultBuilder::started_now();
+			surrealdb_core::rpc::check_protected_param(&key)
+				.map_err(|e| crate::Error::InternalError(e.to_string()))?;
+			// Need to compute because certain keys might not be allowed to be set and those
+			// should be rejected by an error.
+			let session_id = session_id
+				.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
+			{
+				let mut state_ref = sessions.get_mut(&session_id).ok_or_else(|| {
+					crate::Error::InternalError(format!("Session not found: {session_id}"))
+				})?;
+				let state = match state_ref.value_mut() {
+					Ok(state) => state,
+					Err(error) => return Err(error.clone().into()),
+				};
+				match value {
+					Value::None => state.vars.remove(&key),
+					v => state.vars.insert(key, v),
+				};
+			}
 
-		Ok(vec![query_result.finish()])
-	}
-	Command::Unset {
-		key,
-	} => {
-		let query_result = QueryResultBuilder::started_now();
-		let session_id = session_id
-			.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
-		{
-			let mut state_ref = sessions.get_mut(&session_id)
-				.ok_or_else(|| crate::Error::InternalError(format!("Session not found: {session_id}")))?;
-			let state = match state_ref.value_mut() {
-				Ok(state) => state,
-				Err(error) => return Err(error.clone().into()),
-			};
-			state.vars.remove(&key);
+			Ok(vec![query_result.finish()])
 		}
-		Ok(vec![query_result.finish()])
-	}
-	Command::SubscribeLive {
-		uuid,
-		notification_sender,
-	} => {
-		let query_result = QueryResultBuilder::started_now();
-		let state = get_session(&sessions, &session_id)?;
-		state.live_queries.insert(uuid, notification_sender);
-		Ok(vec![query_result.finish()])
-	}
-	Command::Kill {
-		uuid,
-	} => {
-		let state = get_session(&sessions, &session_id)?;
-		state.live_queries.remove(&uuid);
-		let results = kill_live_query(&kvs, uuid, &state.session, state.vars.clone()).await?;
-		Ok(results)
-	}
+		Command::Unset {
+			key,
+		} => {
+			let query_result = QueryResultBuilder::started_now();
+			let session_id = session_id
+				.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
+			{
+				let mut state_ref = sessions.get_mut(&session_id).ok_or_else(|| {
+					crate::Error::InternalError(format!("Session not found: {session_id}"))
+				})?;
+				let state = match state_ref.value_mut() {
+					Ok(state) => state,
+					Err(error) => return Err(error.clone().into()),
+				};
+				state.vars.remove(&key);
+			}
+			Ok(vec![query_result.finish()])
+		}
+		Command::SubscribeLive {
+			uuid,
+			notification_sender,
+		} => {
+			let query_result = QueryResultBuilder::started_now();
+			let state = get_session(&sessions, &session_id)?;
+			state.live_queries.insert(uuid, notification_sender);
+			Ok(vec![query_result.finish()])
+		}
+		Command::Kill {
+			uuid,
+		} => {
+			let state = get_session(&sessions, &session_id)?;
+			state.live_queries.remove(&uuid);
+			let results = kill_live_query(&kvs, uuid, &state.session, state.vars.clone()).await?;
+			Ok(results)
+		}
 
 		Command::Run {
 			name,
@@ -1204,10 +1214,10 @@ Command::Commit {
 				None => format!("{name}({formatted_args})"),
 			};
 
-		// Execute the query
-		let state = get_session(&sessions, &session_id)?;
-		let results = kvs.execute(&sql, &state.session, Some(state.vars.clone())).await?;
-		Ok(results)
+			// Execute the query
+			let state = get_session(&sessions, &session_id)?;
+			let results = kvs.execute(&sql, &state.session, Some(state.vars.clone())).await?;
+			Ok(results)
+		}
 	}
-}
 }
