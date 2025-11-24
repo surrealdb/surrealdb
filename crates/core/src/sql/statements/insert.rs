@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::fmt::CoverStmtsSql;
+use crate::fmt::CoverStmts;
 use crate::sql::{Data, Expr, Output, Timeout};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -27,7 +27,7 @@ impl fmt::Display for InsertStatement {
 			f.write_str(" IGNORE")?
 		}
 		if let Some(into) = &self.into {
-			write!(f, " INTO {}", CoverStmtsSql(into))?;
+			write!(f, " INTO {}", CoverStmts(into))?;
 		}
 		write!(f, " {}", self.data)?;
 		if let Some(ref v) = self.update {
@@ -37,7 +37,7 @@ impl fmt::Display for InsertStatement {
 			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.version {
-			write!(f, " VERSION {v}")?
+			write!(f, " VERSION {}", CoverStmts(v))?
 		}
 		if let Some(ref v) = self.timeout {
 			write!(f, " {v}")?

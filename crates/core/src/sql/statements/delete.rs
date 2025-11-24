@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::fmt::{CoverStmtsSql, Fmt};
+use crate::fmt::{CoverStmts, Fmt};
 use crate::sql::{Cond, Explain, Expr, Output, Timeout, With};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -23,7 +23,7 @@ impl fmt::Display for DeleteStatement {
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmtsSql)))?;
+		write!(f, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmts)))?;
 		if let Some(ref v) = self.with {
 			write!(f, " {v}")?
 		}

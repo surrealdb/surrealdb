@@ -10,7 +10,9 @@ use surrealdb_types::{ToSql, write_sql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
-use crate::fmt::{EscapeKey, EscapeKwFreeIdent, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
+use crate::fmt::{
+	EscapeKey, EscapeKwFreeIdent, Float, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent,
+};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Range, RecordId, Regex, Set,
 	Uuid,
@@ -944,8 +946,8 @@ impl Display for KindLiteral {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			KindLiteral::String(s) => write!(f, "{}", QuoteStr(s)),
-			KindLiteral::Integer(n) => write!(f, "{}", n),
-			KindLiteral::Float(n) => write!(f, "{}f", n),
+			KindLiteral::Integer(n) => write!(f, " {}", n),
+			KindLiteral::Float(n) => write!(f, " {}", Float(*n)),
 			KindLiteral::Decimal(n) => write!(f, "{}dec", n),
 			KindLiteral::Duration(d) => write!(f, "{}", d),
 			KindLiteral::Bool(b) => write!(f, "{}", b),

@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Formatter, Write};
 
-use crate::fmt::{CoverStmtsSql, Fmt};
+use crate::fmt::{CoverStmts, Fmt};
 use crate::sql::{Expr, Idiom};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,21 +21,10 @@ impl Fields {
 		Fields::Select(vec![Field::All])
 	}
 
-	pub fn none() -> Fields {
-		Fields::Select(vec![])
-	}
-
 	pub fn contains_all(&self) -> bool {
 		match self {
 			Fields::Value(_) => false,
 			Fields::Select(fields) => fields.iter().any(|x| matches!(x, Field::All)),
-		}
-	}
-
-	pub fn is_empty(&self) -> bool {
-		match self {
-			Fields::Value(_field) => false,
-			Fields::Select(fields) => fields.is_empty(),
 		}
 	}
 }
@@ -116,7 +105,7 @@ impl From<crate::expr::field::Field> for Field {
 
 impl Display for Selector {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&CoverStmtsSql(&self.expr), f)?;
+		Display::fmt(&CoverStmts(&self.expr), f)?;
 		if let Some(alias) = &self.alias {
 			f.write_str(" AS ")?;
 			Display::fmt(alias, f)

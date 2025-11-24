@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Formatter, Write};
 
-use crate::fmt::{is_pretty, pretty_indent, pretty_sequence_item};
+use crate::fmt::{CoverStmts, is_pretty, pretty_indent, pretty_sequence_item};
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -174,7 +174,7 @@ impl Display for Permission {
 		match self {
 			Self::None => f.write_str("NONE"),
 			Self::Full => f.write_str("FULL"),
-			Self::Specific(v) => write!(f, "WHERE {v}"),
+			Self::Specific(v) => write!(f, "WHERE {}", CoverStmts(v)),
 		}
 	}
 }

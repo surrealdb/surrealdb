@@ -6,6 +6,7 @@ use rstest::rstest;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::statements::access::{AccessStatementGrant, Subject};
 use crate::sql::statements::alter::AlterKind;
+use crate::sql::statements::live::LiveFields;
 use crate::sql::statements::rebuild::RebuildIndexStatement;
 use crate::sql::statements::show::ShowSince;
 use crate::sql::statements::{
@@ -317,8 +318,8 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
         subject: Subject::Record(RecordIdLit { table: "user".to_string(), key: RecordIdKeyLit::Number(123) }),
     }))), "ACCESS user GRANT FOR RECORD user:123", "ACCESS user GRANT FOR RECORD user:123")]
 #[case::top_level_kill(TopLevelExpr::Kill(KillStatement { id: Expr::Param(Param::new("id".to_string())) }), "KILL $id", "KILL $id")]
-#[case::top_level_live(TopLevelExpr::Live(Box::new(LiveStatement { fields: Fields::all(), diff: false, what: Expr::Table("user".to_string()), cond: None, fetch: None })), "LIVE SELECT * FROM user", "LIVE SELECT * FROM user")]
-#[case::top_level_live_diff(TopLevelExpr::Live(Box::new(LiveStatement { fields: Fields::none(), diff: true, what: Expr::Table("user".to_string()), cond: None, fetch: None })), "LIVE SELECT DIFF FROM user", "LIVE SELECT DIFF FROM user")]
+#[case::top_level_live(TopLevelExpr::Live(Box::new(LiveStatement { fields: LiveFields::Select(Fields::all()), what: Expr::Table("user".to_string()), cond: None, fetch: None })), "LIVE SELECT * FROM user", "LIVE SELECT * FROM user")]
+#[case::top_level_live_diff(TopLevelExpr::Live(Box::new(LiveStatement { fields: LiveFields::Diff, what: Expr::Table("user".to_string()), cond: None, fetch: None })), "LIVE SELECT DIFF FROM user", "LIVE SELECT DIFF FROM user")]
 #[case::top_level_option(TopLevelExpr::Option(OptionStatement { name: "IMPORT".to_string(), what: true }), "OPTION IMPORT", "OPTION IMPORT")]
 #[case::top_level_use(TopLevelExpr::Use(UseStatement::NsDb("ns".to_string(),"db".to_string())), "USE NS ns DB db", "USE NS ns DB db")]
 #[case::top_level_show(TopLevelExpr::Show(ShowStatement { table: Some("user".to_string()), since: ShowSince::Versionstamp(123), limit: Some(10) }), "SHOW CHANGES FOR TABLE user SINCE 123 LIMIT 10", "SHOW CHANGES FOR TABLE user SINCE 123 LIMIT 10")]

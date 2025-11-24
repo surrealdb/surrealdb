@@ -13,6 +13,7 @@ use crate::iam::token::Token;
 use crate::kvs::{Datastore, LockType, TransactionType};
 use crate::rpc::args::extract_args;
 use crate::rpc::{DbResult, Method, RpcError};
+use crate::sql::statements::live::LiveFields;
 use crate::sql::{
 	Ast, CreateStatement, Data as SqlData, DeleteStatement, Expr, Fields, Function, FunctionCall,
 	InsertStatement, KillStatement, LiveStatement, Model, Output, RelateStatement, SelectStatement,
@@ -619,16 +620,15 @@ pub trait RpcProtocol {
 			x => Expr::from_public_value(x),
 		};
 
-		let (diff, fields) = if diff.unwrap_or_default().is_true() {
-			(true, Fields::none())
+		let fields = if diff.unwrap_or_default().is_true() {
+			LiveFields::Diff
 		} else {
-			(false, Fields::all())
+			LiveFields::Select(Fields::all())
 		};
 
 		// Specify the SQL query string
 		let sql = LiveStatement {
 			fields,
-			diff,
 			what,
 			cond: None,
 			fetch: None,

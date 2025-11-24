@@ -1,7 +1,10 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::{Expr, Literal};
+use crate::{
+	fmt::CoverStmts,
+	sql::{Expr, Literal},
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -31,9 +34,9 @@ impl Display for DefineNamespaceStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", CoverStmts(&self.name))?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+			write!(f, " COMMENT {}", CoverStmts(v))?
 		}
 		Ok(())
 	}

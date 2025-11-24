@@ -12,6 +12,7 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt, Literal};
+use crate::fmt::CoverStmts;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -120,20 +121,20 @@ impl Display for DefineBucketStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", CoverStmts(&self.name))?;
 
 		if self.readonly {
 			write!(f, " READONLY")?;
 		}
 
 		if let Some(ref backend) = self.backend {
-			write!(f, " BACKEND {backend}")?;
+			write!(f, " BACKEND {}", CoverStmts(backend))?;
 		}
 
 		write!(f, " PERMISSIONS {}", self.permissions)?;
 
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?;
+			write!(f, " COMMENT {}", CoverStmts(comment))?;
 		}
 
 		Ok(())

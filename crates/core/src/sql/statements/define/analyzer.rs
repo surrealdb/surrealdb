@@ -1,12 +1,12 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
 use crate::sql::filter::Filter;
 use crate::sql::tokenizer::Tokenizer;
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct DefineAnalyzerStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
@@ -39,18 +39,21 @@ impl Display for DefineAnalyzerStatement {
 		}
 		write!(f, " {}", self.name)?;
 		if let Some(ref i) = self.function {
-			write!(f, " FUNCTION fn::{i}")?
+			write!(f, " FUNCTION fn")?;
+			for x in i.split("::") {
+				f.write_str("::")?;
+				EscapeKwFreeIdent(x).fmt(f)?;
+			}
 		}
 		if let Some(v) = &self.tokenizers {
 			let tokens: Vec<String> = v.iter().map(|f| f.to_string()).collect();
 			write!(f, " TOKENIZERS {}", tokens.join(","))?;
 		}
 		if let Some(v) = &self.filters {
-			let tokens: Vec<String> = v.iter().map(|f| f.to_string()).collect();
-			write!(f, " FILTERS {}", tokens.join(","))?;
+			write!(f, " FILTERS {}", Fmt::comma_separated(v.iter()))?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+			write!(f, " COMMENT {}", CoverStmts(v))?
 		}
 		Ok(())
 	}

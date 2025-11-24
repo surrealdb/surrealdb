@@ -13,7 +13,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::{Base, ChangeFeed, Kind};
-use crate::fmt::{EscapeKwIdent, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKwIdent, QuoteStr, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -157,7 +157,7 @@ impl Display for AlterTableStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(ref x) => writeln!(f, " COMMENT {x}")?,
+			AlterKind::Set(ref x) => writeln!(f, " COMMENT {}", QuoteStr(x))?,
 			AlterKind::Drop => writeln!(f, " DROP COMMENT")?,
 			AlterKind::None => {}
 		}

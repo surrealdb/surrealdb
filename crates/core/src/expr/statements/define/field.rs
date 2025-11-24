@@ -18,7 +18,7 @@ use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::reference::Reference;
 use crate::expr::{Base, Expr, Kind, KindLiteral, Literal, Part, RecordIdKeyLit};
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{CoverStmts, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::Value;
@@ -513,7 +513,7 @@ impl Display for DefineFieldStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what))?;
 		if let Some(ref v) = self.field_kind {
 			write!(f, " TYPE {v}")?;
 			if self.flexible {
@@ -522,26 +522,30 @@ impl Display for DefineFieldStatement {
 		}
 		match self.default {
 			DefineDefault::None => {}
-			DefineDefault::Always(ref expr) => write!(f, " DEFAULT ALWAYS {expr}")?,
-			DefineDefault::Set(ref expr) => write!(f, " DEFAULT {expr}")?,
+			DefineDefault::Always(ref expr) => {
+				write!(f, " DEFAULT ALWAYS {}", CoverStmts(expr))?;
+			}
+			DefineDefault::Set(ref expr) => {
+				write!(f, " DEFAULT {}", CoverStmts(expr))?;
+			}
 		}
 		if self.readonly {
 			write!(f, " READONLY")?
 		}
 		if let Some(ref v) = self.value {
-			write!(f, " VALUE {v}")?
+			write!(f, " VALUE {}", CoverStmts(v))?
 		}
 		if let Some(ref v) = self.assert {
-			write!(f, " ASSERT {v}")?
+			write!(f, " ASSERT {}", CoverStmts(v))?
 		}
 		if let Some(ref v) = self.computed {
-			write!(f, " COMPUTED {v}")?
+			write!(f, " COMPUTED {}", CoverStmts(v))?
 		}
 		if let Some(ref v) = self.reference {
 			write!(f, " REFERENCE {v}")?
 		}
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?
+			write!(f, " COMMENT {}", CoverStmts(comment))?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

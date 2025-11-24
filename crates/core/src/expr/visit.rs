@@ -29,12 +29,13 @@ use crate::expr::statements::{
 	DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement, DefineModelStatement,
 	DefineModuleStatement, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
 	DefineTableStatement, DefineUserStatement, DeleteStatement, ForeachStatement, IfelseStatement,
-	InfoStatement, InsertStatement, KillStatement, LiveStatement, OptionStatement, OutputStatement,
-	RelateStatement, RemoveAccessStatement, RemoveAnalyzerStatement, RemoveDatabaseStatement,
-	RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement, RemoveIndexStatement,
-	RemoveModelStatement, RemoveModuleStatement, RemoveNamespaceStatement, RemoveParamStatement,
-	RemoveStatement, RemoveTableStatement, RemoveUserStatement, SelectStatement, SetStatement,
-	ShowStatement, SleepStatement, UpdateStatement, UpsertStatement, UseStatement,
+	InfoStatement, InsertStatement, KillStatement, LiveFields, LiveStatement, OptionStatement,
+	OutputStatement, RelateStatement, RemoveAccessStatement, RemoveAnalyzerStatement,
+	RemoveDatabaseStatement, RemoveEventStatement, RemoveFieldStatement, RemoveFunctionStatement,
+	RemoveIndexStatement, RemoveModelStatement, RemoveModuleStatement, RemoveNamespaceStatement,
+	RemoveParamStatement, RemoveStatement, RemoveTableStatement, RemoveUserStatement,
+	SelectStatement, SetStatement, ShowStatement, SleepStatement, UpdateStatement, UpsertStatement,
+	UseStatement,
 };
 use crate::expr::{
 	AccessType, Block, ClosureExpr, Data, Expr, Field, Fields, Function, FunctionCall, Idiom,
@@ -195,7 +196,12 @@ implement_visitor! {
 	}
 
 	fn visit_live(this, l: &LiveStatement){
-		this.visit_fields(&l.fields)?;
+		match &l.fields{
+			LiveFields::Diff => {},
+			LiveFields::Select(x) => {
+				this.visit_fields(x)?;
+			}
+		}
 		this.visit_expr(&l.what)?;
 		if let Some(c) = l.cond.as_ref(){
 			this.visit_expr(&c.0)?;
@@ -1629,7 +1635,12 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_live(this, l: &mut LiveStatement){
-		this.visit_mut_fields(&mut l.fields)?;
+		match &mut l.fields{
+			LiveFields::Diff => {},
+			LiveFields::Select(x) => {
+				this.visit_mut_fields(x)?;
+			}
+		}
 		this.visit_mut_expr(&mut l.what)?;
 		if let Some(c) = l.cond.as_mut(){
 			this.visit_mut_expr(&mut c.0)?;

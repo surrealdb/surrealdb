@@ -11,7 +11,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Expr, Idiom, Kind, Model, ModuleExecutable, Script, Value};
-use crate::fmt::{EscapeKwFreeIdent, Fmt};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
 use crate::fnc;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -235,7 +235,6 @@ impl fmt::Display for FunctionCall {
 					}
 					s.fmt(f)?;
 				}
-				write!(f, "({})", Fmt::comma_separated(&self.arguments))
 			}
 			Function::Custom(ref s) => {
 				f.write_str("fn")?;
@@ -243,13 +242,17 @@ impl fmt::Display for FunctionCall {
 					f.write_str("::")?;
 					EscapeKwFreeIdent(s).fmt(f)?;
 				}
-				write!(f, "({})", Fmt::comma_separated(&self.arguments))
 			}
 			Function::Script(ref s) => {
-				write!(f, "function({}) {{{s}}}", Fmt::comma_separated(&self.arguments))
+				write!(
+					f,
+					"function({}) {{{s}}}",
+					Fmt::comma_separated(self.arguments.iter().map(CoverStmts))
+				)?;
+				return Ok(());
 			}
 			Function::Model(ref m) => {
-				write!(f, "{}({})", m, Fmt::comma_separated(&self.arguments))
+				write!(f, "{m}")?;
 			}
 			Function::Module(ref m, ref s) => {
 				f.write_str("mod")?;
@@ -260,7 +263,6 @@ impl fmt::Display for FunctionCall {
 				if let Some(s) = s {
 					write!(f, "::{}", EscapeKwFreeIdent(s))?;
 				}
-				write!(f, "({})", Fmt::comma_separated(&self.arguments))
 			}
 			Function::Silo {
 				ref org,
@@ -272,21 +274,20 @@ impl fmt::Display for FunctionCall {
 			} => match sub {
 				Some(s) => write!(
 					f,
-					"silo::{}::{}<{major}.{minor}.{patch}>::{}({})",
+					"silo::{}::{}<{major}.{minor}.{patch}>::{}",
 					EscapeKwFreeIdent(org),
 					EscapeKwFreeIdent(pkg),
 					EscapeKwFreeIdent(s),
-					Fmt::comma_separated(&self.arguments)
-				),
+				)?,
 				None => write!(
 					f,
-					"silo::{}::{}<{major}.{minor}.{patch}>({})",
+					"silo::{}::{}<{major}.{minor}.{patch}>",
 					EscapeKwFreeIdent(org),
 					EscapeKwFreeIdent(pkg),
-					Fmt::comma_separated(&self.arguments)
-				),
+				)?,
 			},
 		}
+		write!(f, "({})", Fmt::comma_separated(self.arguments.iter().map(CoverStmts)))
 	}
 }
 

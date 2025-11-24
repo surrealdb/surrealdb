@@ -26,6 +26,7 @@ use crate::sql::statements::define::{
 	DefineKind, DefineNamespaceStatement, DefineParamStatement, DefineStatement,
 	DefineTableStatement,
 };
+use crate::sql::statements::live::LiveFields;
 use crate::sql::statements::remove::RemoveAnalyzerStatement;
 use crate::sql::statements::show::{ShowSince, ShowStatement};
 use crate::sql::statements::sleep::SleepStatement;
@@ -2434,8 +2435,7 @@ fn parse_live() {
 	let TopLevelExpr::Live(stmt) = res else {
 		panic!()
 	};
-	assert_eq!(stmt.fields, Fields::Select(vec![]));
-	assert_eq!(stmt.diff, true);
+	assert_eq!(stmt.fields, LiveFields::Diff);
 	assert_eq!(stmt.what, Expr::Param(Param::new("foo".to_owned())));
 
 	let res = syn::parse_with(
@@ -2448,10 +2448,10 @@ fn parse_live() {
 	};
 	assert_eq!(
 		stmt.fields,
-		Fields::Select(vec![Field::Single(Selector {
+		LiveFields::Select(Fields::Select(vec![Field::Single(Selector {
 			expr: Expr::Idiom(Idiom(vec![Part::Field("foo".to_owned())])),
 			alias: None,
-		})],)
+		})],))
 	);
 	assert_eq!(stmt.what, Expr::Table("table".to_owned()));
 	assert_eq!(stmt.cond, Some(Cond(Expr::Literal(Literal::Bool(true)))));

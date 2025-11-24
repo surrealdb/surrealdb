@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 use super::DefineKind;
 use super::config::api::ApiConfig;
 use crate::catalog::ApiMethod;
-use crate::fmt::{Fmt, pretty_indent};
+use crate::fmt::{CoverStmts, Fmt, pretty_indent};
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -38,7 +38,7 @@ impl Display for DefineApiStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.path)?;
+		write!(f, " {}", CoverStmts(&self.path))?;
 		let indent = pretty_indent();
 
 		write!(f, " FOR any")?;
@@ -48,7 +48,7 @@ impl Display for DefineApiStatement {
 			write!(f, "{}", self.config)?;
 
 			if let Some(fallback) = &self.fallback {
-				write!(f, " THEN {}", fallback)?;
+				write!(f, " THEN {}", CoverStmts(fallback))?;
 			}
 
 			drop(indent);
@@ -59,7 +59,7 @@ impl Display for DefineApiStatement {
 		}
 
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?;
+			write!(f, " COMMENT {}", CoverStmts(comment))?;
 		}
 
 		drop(indent);

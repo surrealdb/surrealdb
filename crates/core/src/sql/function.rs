@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::fmt::{EscapeKwFreeIdent, Fmt};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
 use crate::sql::{Expr, Idiom, Model, Script};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -139,8 +139,6 @@ impl fmt::Display for FunctionCall {
 					}
 					s.fmt(f)?;
 				}
-
-				write!(f, "({})", Fmt::comma_separated(self.arguments.iter()))
 			}
 			Function::Custom(ref s) => {
 				f.write_str("fn")?;
@@ -148,13 +146,17 @@ impl fmt::Display for FunctionCall {
 					f.write_str("::")?;
 					EscapeKwFreeIdent(s).fmt(f)?;
 				}
-				write!(f, "({})", Fmt::comma_separated(self.arguments.iter()))
 			}
 			Function::Script(ref s) => {
-				write!(f, "function({}) {{{s}}}", Fmt::comma_separated(self.arguments.iter()))
+				write!(
+					f,
+					"function({}) {{{s}}}",
+					Fmt::comma_separated(self.arguments.iter().map(CoverStmts))
+				)?;
+				return Ok(());
 			}
 			Function::Model(ref m) => {
-				write!(f, "{m}({})", Fmt::comma_separated(self.arguments.iter()))
+				write!(f, "{m}")?;
 			}
 			Function::Module(ref m, ref s) => {
 				f.write_str("mod")?;
@@ -165,7 +167,6 @@ impl fmt::Display for FunctionCall {
 				if let Some(s) = s {
 					write!(f, "::{}", EscapeKwFreeIdent(s))?;
 				}
-				write!(f, "({})", Fmt::comma_separated(self.arguments.iter()))
 			}
 			Function::Silo {
 				ref org,
@@ -177,20 +178,19 @@ impl fmt::Display for FunctionCall {
 			} => match sub {
 				Some(s) => write!(
 					f,
-					"silo::{}::{}<{major}.{minor}.{patch}>::{}({})",
+					"silo::{}::{}<{major}.{minor}.{patch}>::{}",
 					EscapeKwFreeIdent(org),
 					EscapeKwFreeIdent(pkg),
 					EscapeKwFreeIdent(s),
-					Fmt::comma_separated(self.arguments.iter())
-				),
+				)?,
 				None => write!(
 					f,
-					"silo::{}::{}<{major}.{minor}.{patch}>({})",
+					"silo::{}::{}<{major}.{minor}.{patch}>",
 					EscapeKwFreeIdent(org),
 					EscapeKwFreeIdent(pkg),
-					Fmt::comma_separated(self.arguments.iter())
-				),
+				)?,
 			},
 		}
+		write!(f, "({})", Fmt::comma_separated(self.arguments.iter().map(CoverStmts)))
 	}
 }

@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
-use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, is_pretty, pretty_indent};
 use crate::sql::{Expr, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -22,9 +22,9 @@ impl Display for DefineParamStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " ${} VALUE {}", EscapeKwFreeIdent(&self.name), self.value)?;
+		write!(f, " ${} VALUE {}", EscapeKwFreeIdent(&self.name), CoverStmts(&self.value))?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+			write!(f, " COMMENT {}", CoverStmts(v))?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

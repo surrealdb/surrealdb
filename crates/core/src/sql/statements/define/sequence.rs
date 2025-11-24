@@ -1,7 +1,10 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::{Expr, Literal, Timeout};
+use crate::{
+	fmt::CoverStmts,
+	sql::{Expr, Literal, Timeout},
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -33,7 +36,13 @@ impl Display for DefineSequenceStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} BATCH {} START {}", self.name, self.batch, self.start)?;
+		write!(
+			f,
+			" {} BATCH {} START {}",
+			CoverStmts(&self.name),
+			CoverStmts(&self.batch),
+			CoverStmts(&self.start)
+		)?;
 		if let Some(ref v) = self.timeout {
 			write!(f, " {v}")?
 		}

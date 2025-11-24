@@ -1,6 +1,7 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
+use crate::fmt::CoverStmts;
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::{Expr, Literal};
 
@@ -36,12 +37,12 @@ impl Display for DefineDatabaseStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", CoverStmts(&self.name))?;
 		if self.strict {
 			write!(f, " STRICT")?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?;
+			write!(f, " COMMENT {}", CoverStmts(v))?;
 		}
 		if let Some(ref v) = self.changefeed {
 			write!(f, " {v}")?;

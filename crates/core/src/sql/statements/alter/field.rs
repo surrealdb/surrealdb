@@ -1,7 +1,7 @@
 use std::fmt::{self, Display};
 
 use super::AlterKind;
-use crate::fmt::{EscapeKwFreeIdent, QuoteStr};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, QuoteStr};
 use crate::sql::reference::Reference;
 use crate::sql::{Expr, Idiom, Kind, Permissions};
 
@@ -86,25 +86,25 @@ impl Display for AlterFieldStatement {
 			AlterKind::None => {}
 		}
 		match self.value {
-			AlterKind::Set(ref x) => write!(f, " VALUE {x}")?,
+			AlterKind::Set(ref x) => write!(f, " VALUE {}", CoverStmts(x))?,
 			AlterKind::Drop => write!(f, " DROP VALUE")?,
 			AlterKind::None => {}
 		}
 		match self.assert {
-			AlterKind::Set(ref x) => write!(f, " ASSERT {x}")?,
+			AlterKind::Set(ref x) => write!(f, " ASSERT {}", CoverStmts(x))?,
 			AlterKind::Drop => write!(f, " DROP ASSERT")?,
 			AlterKind::None => {}
 		}
 
 		match self.default {
 			AlterDefault::None => {}
-			AlterDefault::Drop => write!(f, "DROP DEFAULT")?,
-			AlterDefault::Always(ref d) => write!(f, "DEFAULT ALWAYS {d}")?,
-			AlterDefault::Set(ref d) => write!(f, "DEFAULT {d}")?,
+			AlterDefault::Drop => write!(f, " DROP DEFAULT")?,
+			AlterDefault::Always(ref d) => write!(f, " DEFAULT ALWAYS {}", CoverStmts(d))?,
+			AlterDefault::Set(ref d) => write!(f, " DEFAULT {}", CoverStmts(d))?,
 		}
 
 		if let Some(permissions) = &self.permissions {
-			write!(f, "{permissions}")?;
+			write!(f, " {permissions}")?;
 		}
 
 		match self.comment {

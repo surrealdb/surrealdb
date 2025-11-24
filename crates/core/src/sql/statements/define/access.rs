@@ -1,6 +1,7 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
+use crate::fmt::CoverStmts;
 use crate::sql::access::AccessDuration;
 use crate::sql::{AccessType, Base, Expr, Literal};
 
@@ -31,7 +32,7 @@ impl Display for DefineAccessStatement {
 		write!(f, " {} ON {} TYPE {}", self.name, self.base, self.access_type)?;
 		// The additional authentication clause
 		if let Some(ref v) = self.authenticate {
-			write!(f, " AUTHENTICATE {v}")?
+			write!(f, " AUTHENTICATE {}", CoverStmts(v))?
 		}
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible
@@ -65,7 +66,7 @@ impl Display for DefineAccessStatement {
 			None => f.write_str("NONE")?,
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+			write!(f, " COMMENT {}", CoverStmts(v))?
 		}
 		Ok(())
 	}

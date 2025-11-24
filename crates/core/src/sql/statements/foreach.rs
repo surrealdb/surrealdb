@@ -1,6 +1,9 @@
 use std::fmt::{self, Display};
 
-use crate::sql::{Block, Expr, Param};
+use crate::{
+	fmt::CoverStmts,
+	sql::{Block, Expr, Param},
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -12,7 +15,7 @@ pub struct ForeachStatement {
 
 impl Display for ForeachStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "FOR {} IN {} {}", self.param, self.range, self.block)
+		write!(f, "FOR {} IN {} {}", self.param, CoverStmts(&self.range), self.block)
 	}
 }
 

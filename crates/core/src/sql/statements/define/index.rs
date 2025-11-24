@@ -1,7 +1,7 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::fmt::Fmt;
+use crate::fmt::{CoverStmts, Fmt};
 use crate::sql::{Expr, Index};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -23,15 +23,15 @@ impl Display for DefineIndexStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what))?;
 		if !self.cols.is_empty() {
-			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter()))?;
+			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter().map(CoverStmts)))?;
 		}
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+			write!(f, " COMMENT {}", CoverStmts(v))?
 		}
 		if self.concurrently {
 			write!(f, " CONCURRENTLY")?

@@ -6,6 +6,7 @@ use crate::sql::access_type::JwtAccessVerify;
 use crate::sql::base::Base;
 use crate::sql::filter::Filter;
 use crate::sql::index::{Distance, HnswParams, VectorType};
+use crate::sql::kind::KindLiteral;
 use crate::sql::statements::define::config::api::{ApiConfig, Middleware};
 use crate::sql::statements::define::config::graphql::{GraphQLConfig, TableConfig};
 use crate::sql::statements::define::config::{ConfigInner, graphql};
@@ -957,6 +958,10 @@ impl Parser<'_> {
 								Kind::Array(inner, _) | Kind::Set(inner, _) => {
 									kind_contains_object(inner)
 								}
+								Kind::Literal(KindLiteral::Object(_)) => true,
+								Kind::Literal(KindLiteral::Array(x)) => {
+									x.iter().any(kind_contains_object)
+								}
 								_ => false,
 							}
 						}
@@ -1554,15 +1559,14 @@ impl Parser<'_> {
 
 					let next = self.next();
 					match next.kind {
-						t!("INCLUDE") => {}
-						t!("EXCLUDE") => {}
 						t!("NONE") => {
 							tmp_fncs = Some(FunctionsConfig::None);
 						}
 						t!("AUTO") => {
 							tmp_fncs = Some(FunctionsConfig::Auto);
 						}
-						_ => unexpected!(self, next, "`NONE`, `AUTO`, `INCLUDE` or `EXCLUDE`"),
+						//TODO: Actually implement INCLUDE and EXCLUDE
+						_ => unexpected!(self, next, "`NONE`, `AUTO`"),
 					}
 				}
 				_ => break,

@@ -7,7 +7,9 @@ mod escape;
 use std::cell::Cell;
 use std::fmt::{self, Display, Formatter, Write};
 
-pub use escape::{EscapeIdent, EscapeKey, EscapeKwFreeIdent, EscapeKwIdent, EscapeRid, QuoteStr};
+pub use escape::{
+	EscapeIdent, EscapeKey, EscapeKwFreeIdent, EscapeKwIdent, EscapeRidKey, QuoteStr,
+};
 
 use crate::{expr, sql};
 
@@ -221,60 +223,9 @@ impl<W: std::fmt::Write> Drop for Pretty<W> {
 	}
 }
 
-pub struct CoverStmtsSql<'a>(pub &'a sql::Expr);
+pub struct CoverStmts<'a, E>(pub &'a E);
 
-impl Display for CoverStmtsSql<'_> {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		match self.0 {
-			sql::Expr::Literal(_)
-			| sql::Expr::Param(_)
-			| sql::Expr::Idiom(_)
-			| sql::Expr::Table(_)
-			| sql::Expr::Mock(_)
-			| sql::Expr::Block(_)
-			| sql::Expr::Constant(_)
-			| sql::Expr::Prefix {
-				..
-			}
-			| sql::Expr::Postfix {
-				..
-			}
-			| sql::Expr::Binary {
-				..
-			}
-			| sql::Expr::FunctionCall(_)
-			| sql::Expr::Closure(_)
-			| sql::Expr::Break
-			| sql::Expr::Continue
-			| sql::Expr::Throw(_) => self.0.fmt(f),
-			sql::Expr::Return(_)
-			| sql::Expr::IfElse(_)
-			| sql::Expr::Select(_)
-			| sql::Expr::Create(_)
-			| sql::Expr::Update(_)
-			| sql::Expr::Upsert(_)
-			| sql::Expr::Delete(_)
-			| sql::Expr::Relate(_)
-			| sql::Expr::Insert(_)
-			| sql::Expr::Define(_)
-			| sql::Expr::Remove(_)
-			| sql::Expr::Rebuild(_)
-			| sql::Expr::Alter(_)
-			| sql::Expr::Info(_)
-			| sql::Expr::Foreach(_)
-			| sql::Expr::Let(_)
-			| sql::Expr::Sleep(_) => {
-				f.write_str("(")?;
-				self.0.fmt(f)?;
-				f.write_str(")")
-			}
-		}
-	}
-}
-
-pub struct CoverStmtsExpr<'a>(pub &'a expr::Expr);
-
-impl Display for CoverStmtsExpr<'_> {
+impl Display for CoverStmts<'_, expr::Expr> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		match self.0 {
 			expr::Expr::Literal(_)
@@ -315,6 +266,55 @@ impl Display for CoverStmtsExpr<'_> {
 			| expr::Expr::Foreach(_)
 			| expr::Expr::Let(_)
 			| expr::Expr::Sleep(_) => {
+				f.write_str("(")?;
+				self.0.fmt(f)?;
+				f.write_str(")")
+			}
+		}
+	}
+}
+
+impl Display for CoverStmts<'_, sql::Expr> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		match self.0 {
+			sql::Expr::Literal(_)
+			| sql::Expr::Param(_)
+			| sql::Expr::Idiom(_)
+			| sql::Expr::Table(_)
+			| sql::Expr::Mock(_)
+			| sql::Expr::Block(_)
+			| sql::Expr::Constant(_)
+			| sql::Expr::Prefix {
+				..
+			}
+			| sql::Expr::Postfix {
+				..
+			}
+			| sql::Expr::Binary {
+				..
+			}
+			| sql::Expr::FunctionCall(_)
+			| sql::Expr::Closure(_)
+			| sql::Expr::Break
+			| sql::Expr::Continue
+			| sql::Expr::Throw(_) => self.0.fmt(f),
+			sql::Expr::Return(_)
+			| sql::Expr::IfElse(_)
+			| sql::Expr::Select(_)
+			| sql::Expr::Create(_)
+			| sql::Expr::Update(_)
+			| sql::Expr::Upsert(_)
+			| sql::Expr::Delete(_)
+			| sql::Expr::Relate(_)
+			| sql::Expr::Insert(_)
+			| sql::Expr::Define(_)
+			| sql::Expr::Remove(_)
+			| sql::Expr::Rebuild(_)
+			| sql::Expr::Alter(_)
+			| sql::Expr::Info(_)
+			| sql::Expr::Foreach(_)
+			| sql::Expr::Let(_)
+			| sql::Expr::Sleep(_) => {
 				f.write_str("(")?;
 				self.0.fmt(f)?;
 				f.write_str(")")

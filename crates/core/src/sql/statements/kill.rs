@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::sql::Expr;
+use crate::{fmt::CoverStmts, sql::Expr};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct KillStatement {
@@ -11,7 +11,7 @@ pub struct KillStatement {
 
 impl fmt::Display for KillStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "KILL {}", self.id)
+		write!(f, "KILL {}", CoverStmts(&self.id))
 	}
 }
 

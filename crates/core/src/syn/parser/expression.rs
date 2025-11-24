@@ -145,8 +145,16 @@ impl Parser<'_> {
 			t!("!") | t!("+") | t!("-") => Some(BindingPower::Prefix),
 			t!("..") => Some(BindingPower::Range),
 			t!("<") => {
-				let peek = self.peek1();
-				if matches!(peek.kind, t!("-") | t!("~") | t!("->")) {
+				let peek = self.peek_whitespace1();
+				if peek.kind == t!("-") {
+					let recover = self.recent_span();
+					if self.peek2().kind == TokenKind::Digits {
+						self.backup_after(recover);
+						return Some(BindingPower::Prefix);
+					}
+					return None;
+				}
+				if matches!(peek.kind, t!("~") | t!("->")) {
 					return None;
 				}
 				Some(BindingPower::Prefix)

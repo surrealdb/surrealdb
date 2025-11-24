@@ -1,5 +1,7 @@
 use std::fmt::{self, Display};
 
+use crate::fmt::EscapeIdent;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RemoveModelStatement {
@@ -15,7 +17,7 @@ impl Display for RemoveModelStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " ml::{}<{}>", &self.name, self.version)?;
+		write!(f, " ml::{}<{}>", EscapeIdent(&self.name), self.version)?;
 		Ok(())
 	}
 }

@@ -7,6 +7,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::fetch::Fetchs;
 use crate::expr::{ControlFlow, Expr, FlowResult};
+use crate::fmt::CoverStmts;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -48,7 +49,7 @@ impl OutputStatement {
 
 impl fmt::Display for OutputStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "RETURN {}", self.what)?;
+		write!(f, "RETURN {}", CoverStmts(&self.what))?;
 		if let Some(ref v) = self.fetch {
 			write!(f, " {v}")?
 		}

@@ -1,7 +1,7 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::fmt::Fmt;
+use crate::fmt::{CoverStmts, Fmt};
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,13 +27,13 @@ impl Display for DefineEventStatement {
 		write!(
 			f,
 			" {} ON {} WHEN {} THEN {}",
-			self.name,
-			self.target_table,
-			self.when,
+			CoverStmts(&self.name),
+			CoverStmts(&self.target_table),
+			CoverStmts(&self.when),
 			Fmt::comma_separated(&self.then)
 		)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+			write!(f, " COMMENT {}", CoverStmts(v))?
 		}
 		Ok(())
 	}

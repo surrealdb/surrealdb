@@ -101,7 +101,7 @@ impl Parser<'_> {
 						stk.run(|ctx| self.parse_lookup(ctx, LookupKind::Graph(Dir::Both))).await?;
 					Expr::Idiom(Idiom(vec![Part::Graph(lookup)]))
 				} else {
-					unexpected!(self, token, "expected either a `<-` or a future")
+					unexpected!(self, token, "`<-`, `<->` or `<~`")
 				}
 			}
 			t!("r\"") | t!("r'") => {

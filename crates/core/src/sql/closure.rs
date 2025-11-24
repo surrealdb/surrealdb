@@ -1,6 +1,9 @@
 use std::fmt;
 
-use crate::sql::{Expr, Kind, Param};
+use crate::{
+	fmt::CoverStmts,
+	sql::{Expr, Kind, Param},
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Closure {
@@ -26,7 +29,7 @@ impl fmt::Display for Closure {
 		if let Some(returns) = &self.returns {
 			write!(f, " -> {returns}")?;
 		}
-		write!(f, " {}", self.body)
+		write!(f, " {}", CoverStmts(&self.body))
 	}
 }
 

@@ -132,10 +132,6 @@ impl Parser<'_> {
 						break;
 					}
 				}
-				t!("..") => {
-					bail!("Unexpected token `{}` expected and idiom",t!(".."),
-						@self.last_span() => "Did you maybe intent to use the flatten operator `...`");
-				}
 				_ => break,
 			}
 		}
@@ -196,10 +192,6 @@ impl Parser<'_> {
 					} else {
 						break;
 					}
-				}
-				t!("..") => {
-					bail!("Unexpected token `{}` expected and idiom",t!(".."),
-						@self.last_span() => "Did you maybe intent to use the flatten operator `...`");
 				}
 				_ => break,
 			}

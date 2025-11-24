@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{CoverStmts, is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
 use crate::sql::{Expr, Kind, Literal, Permissions};
 
@@ -43,7 +43,6 @@ impl From<crate::expr::statements::define::DefineDefault> for DefineDefault {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct DefineFieldStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
@@ -88,41 +87,39 @@ impl Display for DefineFieldStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what))?;
 		if let Some(ref v) = self.field_kind {
 			write!(f, " TYPE {v}")?;
 			if self.flexible {
 				write!(f, " FLEXIBLE")?;
 			}
 		}
-
 		match self.default {
 			DefineDefault::None => {}
 			DefineDefault::Always(ref expr) => {
-				write!(f, " DEFAULT ALWAYS {expr}")?;
+				write!(f, " DEFAULT ALWAYS {}", CoverStmts(expr))?;
 			}
 			DefineDefault::Set(ref expr) => {
-				write!(f, " DEFAULT {expr}")?;
+				write!(f, " DEFAULT {}", CoverStmts(expr))?;
 			}
 		}
-
 		if self.readonly {
 			write!(f, " READONLY")?
 		}
 		if let Some(ref v) = self.value {
-			write!(f, " VALUE {v}")?
+			write!(f, " VALUE {}", CoverStmts(v))?
 		}
 		if let Some(ref v) = self.assert {
-			write!(f, " ASSERT {v}")?
+			write!(f, " ASSERT {}", CoverStmts(v))?
 		}
 		if let Some(ref v) = self.computed {
-			write!(f, " COMPUTED {v}")?
+			write!(f, " COMPUTED {}", CoverStmts(v))?
 		}
 		if let Some(ref v) = self.reference {
 			write!(f, " REFERENCE {v}")?
 		}
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+		if let Some(ref comment) = self.comment {
+			write!(f, " COMMENT {}", CoverStmts(comment))?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
@@ -130,6 +127,7 @@ impl Display for DefineFieldStatement {
 			f.write_char(' ')?;
 			None
 		};
+
 		// Alternate permissions display implementation ignores delete permission
 		// This display is used to show field permissions, where delete has no effect
 		// Displaying the permission could mislead users into thinking it has an effect

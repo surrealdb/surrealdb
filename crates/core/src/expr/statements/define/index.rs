@@ -15,7 +15,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, exprs_to_fields};
 use crate::expr::{Base, Expr, Literal, Part};
-use crate::fmt::Fmt;
+use crate::fmt::{CoverStmts, Fmt};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -162,15 +162,15 @@ impl Display for DefineIndexStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what))?;
 		if !self.cols.is_empty() {
-			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter()))?;
+			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter().map(CoverStmts)))?;
 		}
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index.to_sql())?;
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+			write!(f, " COMMENT {}", CoverStmts(v))?
 		}
 		if self.concurrently {
 			write!(f, " CONCURRENTLY")?

@@ -7,13 +7,14 @@ use crate::sql::statements::access::{
 	AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
 	AccessStatementShow, PurgeKind, Subject,
 };
+use crate::sql::statements::live::LiveFields;
 use crate::sql::statements::rebuild::RebuildIndexStatement;
 use crate::sql::statements::show::ShowSince;
 use crate::sql::statements::{
 	ForeachStatement, InfoStatement, KillStatement, LiveStatement, OptionStatement,
 	OutputStatement, RebuildStatement, SetStatement, ShowStatement, SleepStatement, UseStatement,
 };
-use crate::sql::{AssignOperator, Expr, Fields, Literal, Param, TopLevelExpr};
+use crate::sql::{AssignOperator, Expr, Literal, Param, TopLevelExpr};
 use crate::syn::lexer::compound;
 use crate::syn::parser::mac::unexpected;
 use crate::syn::token::{TokenKind, t};
@@ -419,12 +420,12 @@ impl Parser<'_> {
 	pub(super) async fn parse_live_stmt(&mut self, stk: &mut Stk) -> ParseResult<LiveStatement> {
 		expected!(self, t!("SELECT"));
 
-		let (diff, fields) = match self.peek_kind() {
+		let fields = match self.peek_kind() {
 			t!("DIFF") => {
 				self.pop_peek();
-				(true, Fields::none())
+				LiveFields::Diff
 			}
-			_ => (false, self.parse_fields(stk).await?),
+			_ => LiveFields::Select(self.parse_fields(stk).await?),
 		};
 		expected!(self, t!("FROM"));
 		let what = match self.peek().kind {
@@ -436,7 +437,6 @@ impl Parser<'_> {
 
 		Ok(LiveStatement {
 			fields,
-			diff,
 			what,
 			cond,
 			fetch,

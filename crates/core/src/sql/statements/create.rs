@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::fmt::{CoverStmtsSql, Fmt};
+use crate::fmt::{CoverStmts, Fmt};
 use crate::sql::{Data, Expr, Output, Timeout};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -29,7 +29,7 @@ impl fmt::Display for CreateStatement {
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmtsSql)))?;
+		write!(f, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmts)))?;
 		if let Some(ref v) = self.data {
 			write!(f, " {v}")?
 		}
@@ -37,7 +37,7 @@ impl fmt::Display for CreateStatement {
 			write!(f, " {v}")?
 		}
 		if let Some(ref v) = self.version {
-			write!(f, " VERSION {v}")?
+			write!(f, " VERSION {}", CoverStmts(v))?
 		}
 		if let Some(ref v) = self.timeout {
 			write!(f, " {v}")?

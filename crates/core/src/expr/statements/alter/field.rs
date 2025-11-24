@@ -210,11 +210,11 @@ impl Display for AlterFieldStatement {
 		match self.default {
 			AlterDefault::None => {}
 			AlterDefault::Drop => write!(f, " DROP DEFAULT")?,
-			AlterDefault::Always(ref expr) => write!(f, "DEFAULT ALWAYS {expr}")?,
-			AlterDefault::Set(ref expr) => write!(f, "DEFAULT {expr}")?,
+			AlterDefault::Always(ref expr) => write!(f, " DEFAULT ALWAYS {expr}")?,
+			AlterDefault::Set(ref expr) => write!(f, " DEFAULT {expr}")?,
 		}
 		if let Some(permissions) = &self.permissions {
-			write!(f, "{permissions}")?;
+			write!(f, " {permissions}")?;
 		}
 
 		match self.comment {

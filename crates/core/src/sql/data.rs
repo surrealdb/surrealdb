@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::fmt::Fmt;
+use crate::fmt::{CoverStmts, Fmt};
 use crate::sql::{AssignOperator, Expr, Idiom};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -57,7 +57,9 @@ impl Display for Data {
 				Fmt::comma_separated(v.iter().map(|args| Fmt::new(args, |arg, f| write!(
 					f,
 					"{} {} {}",
-					arg.place, arg.operator, arg.value
+					arg.place,
+					arg.operator,
+					CoverStmts(&arg.value),
 				))))
 			),
 			Self::UnsetExpression(v) => write!(
@@ -79,7 +81,7 @@ impl Display for Data {
 				Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| write!(
 					f,
 					"({})",
-					Fmt::comma_separated(v.iter().map(|(_, v)| v))
+					Fmt::comma_separated(v.iter().map(|(_, v)| CoverStmts(v)))
 				))))
 			),
 			Self::UpdateExpression(v) => write!(
@@ -88,7 +90,9 @@ impl Display for Data {
 				Fmt::comma_separated(v.iter().map(|args| Fmt::new(args, |arg, f| write!(
 					f,
 					"{} {} {}",
-					arg.place, arg.operator, arg.value
+					arg.place,
+					arg.operator,
+					CoverStmts(&arg.value)
 				))))
 			),
 		}

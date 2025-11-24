@@ -1,7 +1,7 @@
 use std::fmt::{self, Write};
 
 use super::DefineKind;
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
+use crate::fmt::{CoverStmts, EscapeIdent, is_pretty, pretty_indent};
 use crate::sql::{Expr, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -38,7 +38,7 @@ impl fmt::Display for DefineModelStatement {
 		}
 		write!(f, " ml::{}<{}>", EscapeIdent(&self.name), self.version)?;
 		if let Some(comment) = self.comment.as_ref() {
-			write!(f, " COMMENT {}", comment)?;
+			write!(f, " COMMENT {}", CoverStmts(comment))?;
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

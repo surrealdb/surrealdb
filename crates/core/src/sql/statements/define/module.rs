@@ -1,7 +1,7 @@
 use std::fmt::{self, Write};
 
 use super::DefineKind;
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{CoverStmts, is_pretty, pretty_indent};
 use crate::sql::{Expr, ModuleExecutable, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,7 +27,7 @@ impl fmt::Display for DefineModuleStatement {
 		}
 		write!(f, " {}", self.executable)?;
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+			write!(f, " COMMENT {}", CoverStmts(v))?
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

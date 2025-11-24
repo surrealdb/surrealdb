@@ -7,7 +7,7 @@ use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 
 use super::DefineKind;
-use crate::fmt::{EscapeKwFreeIdent, QuoteStr};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, QuoteStr};
 use crate::sql::{Base, Expr, Literal};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -56,7 +56,7 @@ impl Display for DefineUserStatement {
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 
-		write!(f, " {} ON {}", self.name, self.base)?;
+		write!(f, " {} ON {}", CoverStmts(&self.name), &self.base)?;
 
 		match self.pass_type {
 			PassType::Unset => write!(f, " PASSHASH \"\" ")?,
@@ -67,7 +67,7 @@ impl Display for DefineUserStatement {
 		write!(f, " ROLES ")?;
 		for (idx, r) in self.roles.iter().enumerate() {
 			if idx != 0 {
-				f.write_str(", ")?;
+				f.write_str(", ")?
 			}
 
 			let r = r.to_uppercase();
@@ -91,7 +91,7 @@ impl Display for DefineUserStatement {
 			None => f.write_str("NONE")?,
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+			write!(f, " COMMENT {}", CoverStmts(v))?
 		}
 		Ok(())
 	}

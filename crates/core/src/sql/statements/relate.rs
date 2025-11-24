@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::sql::{Data, Expr, Literal, Output, Timeout};
+use crate::sql::{Data, Expr, Literal, Output, RecordIdKeyLit, RecordIdLit, Timeout};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -27,9 +27,22 @@ impl fmt::Display for RelateStatement {
 		}
 		f.write_str(" ")?;
 
+		// Only array's, params, and record-id's that are not a range can be expressed without
+		// surrounding parens
 		if matches!(
 			self.from,
-			Expr::Literal(Literal::Array(_) | Literal::RecordId(_)) | Expr::Param(_)
+			Expr::Literal(
+				Literal::Array(_)
+					| Literal::RecordId(RecordIdLit {
+						key: RecordIdKeyLit::Number(_)
+							| RecordIdKeyLit::String(_)
+							| RecordIdKeyLit::Generate(_)
+							| RecordIdKeyLit::Array(_)
+							| RecordIdKeyLit::Object(_)
+							| RecordIdKeyLit::Uuid(_),
+						..
+					})
+			) | Expr::Param(_)
 		) {
 			self.from.fmt(f)?;
 		} else {
@@ -49,9 +62,22 @@ impl fmt::Display for RelateStatement {
 
 		f.write_str(" -> ")?;
 
+		// Only array's, params, and record-id's that are not a range can be expressed without
+		// surrounding parens
 		if matches!(
 			self.to,
-			Expr::Literal(Literal::Array(_) | Literal::RecordId(_)) | Expr::Param(_)
+			Expr::Literal(
+				Literal::Array(_)
+					| Literal::RecordId(RecordIdLit {
+						key: RecordIdKeyLit::Number(_)
+							| RecordIdKeyLit::String(_)
+							| RecordIdKeyLit::Generate(_)
+							| RecordIdKeyLit::Array(_)
+							| RecordIdKeyLit::Object(_)
+							| RecordIdKeyLit::Uuid(_),
+						..
+					})
+			) | Expr::Param(_)
 		) {
 			self.to.fmt(f)?;
 		} else {

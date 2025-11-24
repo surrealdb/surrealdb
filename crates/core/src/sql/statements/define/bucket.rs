@@ -1,7 +1,10 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::sql::{Expr, Literal, Permission};
+use crate::{
+	fmt::CoverStmts,
+	sql::{Expr, Literal, Permission},
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -35,20 +38,20 @@ impl Display for DefineBucketStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", CoverStmts(&self.name))?;
 
 		if self.readonly {
 			write!(f, " READONLY")?;
 		}
 
 		if let Some(ref backend) = self.backend {
-			write!(f, " BACKEND {}", backend)?;
+			write!(f, " BACKEND {}", CoverStmts(backend))?;
 		}
 
 		write!(f, " PERMISSIONS {}", self.permissions)?;
 
 		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?;
+			write!(f, " COMMENT {}", CoverStmts(comment))?;
 		}
 
 		Ok(())

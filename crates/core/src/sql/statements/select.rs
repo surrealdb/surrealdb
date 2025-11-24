@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::fmt::{CoverStmtsSql, Fmt};
+use crate::fmt::{CoverStmts, Fmt};
 use crate::sql::order::Ordering;
 use crate::sql::{
 	Cond, Explain, Expr, Fetchs, Fields, Groups, Limit, Splits, Start, Timeout, With,
@@ -33,13 +33,13 @@ impl fmt::Display for SelectStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SELECT {}", self.expr)?;
 		if !self.omit.is_empty() {
-			write!(f, " OMIT {}", Fmt::comma_separated(self.omit.iter().map(CoverStmtsSql)))?
+			write!(f, " OMIT {}", Fmt::comma_separated(self.omit.iter().map(CoverStmts)))?
 		}
 		write!(f, " FROM")?;
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmtsSql)))?;
+		write!(f, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmts)))?;
 		if let Some(ref v) = self.with {
 			write!(f, " {v}")?
 		}

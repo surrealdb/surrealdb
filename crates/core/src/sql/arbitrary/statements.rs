@@ -1,10 +1,15 @@
 use arbitrary::Arbitrary;
 
-use crate::sql::arbitrary::{arb_group, arb_order, arb_splits, arb_vec1, atleast_one, insert_data};
-use crate::sql::statements::define::{DefineAccessStatement, DefineUserStatement};
+use crate::sql::arbitrary::{
+	arb_group, arb_opt, arb_order, arb_splits, arb_vec1, atleast_one, insert_data,
+};
+use crate::sql::kind::KindLiteral;
+use crate::sql::statements::define::{
+	DefineAccessStatement, DefineAnalyzerStatement, DefineUserStatement,
+};
 use crate::sql::{
-	AccessType, Base, Data, DefineIndexStatement, Expr, Fields, Index, InsertStatement,
-	KillStatement, Literal, LiveStatement, SelectStatement, View,
+	AccessType, Base, Data, DefineFieldStatement, DefineIndexStatement, Expr, Index,
+	InsertStatement, KillStatement, Kind, Literal, SelectStatement, View,
 };
 
 impl<'a> Arbitrary<'a> for KillStatement {
@@ -128,28 +133,6 @@ impl<'a> arbitrary::Arbitrary<'a> for DefineIndexStatement {
 	}
 }
 
-impl<'a> arbitrary::Arbitrary<'a> for LiveStatement {
-	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
-		let diff = u.arbitrary()?;
-		let fields = if diff {
-			Fields::none()
-		} else {
-			u.arbitrary()?
-		};
-		let what = u.arbitrary()?;
-		let cond = u.arbitrary()?;
-		let fetch = u.arbitrary()?;
-
-		Ok(LiveStatement {
-			fields,
-			diff,
-			what,
-			cond,
-			fetch,
-		})
-	}
-}
-
 impl<'a> arbitrary::Arbitrary<'a> for InsertStatement {
 	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
 		let into = match u.int_in_range(0u8..=2)? {
@@ -235,9 +218,63 @@ impl<'a> arbitrary::Arbitrary<'a> for View {
 
 		Ok(View {
 			expr,
-			what: u.arbitrary()?,
+			what: arb_vec1(u, |u| u.arbitrary())?,
 			cond: u.arbitrary()?,
 			group,
+		})
+	}
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for DefineAnalyzerStatement {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		Ok(DefineAnalyzerStatement {
+			kind: u.arbitrary()?,
+			name: u.arbitrary()?,
+			function: u.arbitrary()?,
+			tokenizers: arb_opt(u, |u| arb_vec1(u, Arbitrary::arbitrary))?,
+			filters: arb_opt(u, |u| arb_vec1(u, Arbitrary::arbitrary))?,
+			comment: u.arbitrary()?,
+		})
+	}
+}
+
+impl<'a> arbitrary::Arbitrary<'a> for DefineFieldStatement {
+	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
+		let field_kind = u.arbitrary()?;
+
+		fn contains_object(kind: &Kind) -> bool {
+			match kind {
+				Kind::Object => true,
+				Kind::Either(kinds) => kinds.iter().any(contains_object),
+				Kind::Array(inner, _) | Kind::Set(inner, _) => contains_object(inner),
+				Kind::Literal(KindLiteral::Object(_)) => true,
+				Kind::Literal(KindLiteral::Array(x)) => x.iter().any(contains_object),
+				_ => false,
+			}
+		}
+
+		let flexible = if let Some(kind) = &field_kind
+			&& contains_object(kind)
+		{
+			u.arbitrary()?
+		} else {
+			false
+		};
+
+		Ok(DefineFieldStatement {
+			kind: u.arbitrary()?,
+			name: u.arbitrary()?,
+			what: u.arbitrary()?,
+			field_kind,
+			flexible,
+			readonly: u.arbitrary()?,
+			value: u.arbitrary()?,
+			assert: u.arbitrary()?,
+			computed: u.arbitrary()?,
+			default: u.arbitrary()?,
+			permissions: u.arbitrary()?,
+			comment: u.arbitrary()?,
+			reference: u.arbitrary()?,
 		})
 	}
 }

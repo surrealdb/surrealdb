@@ -1,6 +1,9 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::sql::{Base, Expr, Literal};
+use crate::{
+	fmt::CoverStmts,
+	sql::{Base, Expr, Literal},
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -26,7 +29,7 @@ impl Display for RemoveAccessStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.base)?;
+		write!(f, " {} ON {}", CoverStmts(&self.name), self.base)?;
 		Ok(())
 	}
 }

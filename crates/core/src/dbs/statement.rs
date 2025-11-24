@@ -19,6 +19,7 @@ use crate::expr::output::Output;
 use crate::expr::parameterize::exprs_to_fields;
 use crate::expr::split::Splits;
 use crate::expr::start::Start;
+use crate::expr::statements::LiveFields;
 use crate::expr::statements::access::AccessStatement;
 use crate::expr::statements::create::CreateStatement;
 use crate::expr::statements::delete::DeleteStatement;
@@ -284,7 +285,10 @@ impl Statement<'_> {
 				stmt,
 				..
 			} => Some(&stmt.expr),
-			Statement::Live(v) => Some(&v.fields),
+			Statement::Live(v) => match &v.fields {
+				LiveFields::Diff => None,
+				LiveFields::Select(x) => Some(x),
+			},
 			_ => None,
 		}
 	}
