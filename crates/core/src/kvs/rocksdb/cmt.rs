@@ -115,14 +115,13 @@ impl CommitBatcher {
 						Ok(None) | Err(_) => break,
 					};
 				}
-			} else {
-				// Don't wait long, but quickly drain immediately available transactions
-				while batch.len() < self.batch_size {
-					match self.receiver.try_recv() {
-						Ok(request) => batch.push(request),
-						Err(_) => break,
-					}
-				}
+			}
+			// Drain any additional immediately available transactions
+			if batch.len() < self.batch_size {
+				// Calculate the remaining number of slots in the batch
+				let remaining = self.batch_size - batch.len();
+				// Drain the remaining slots in the batch
+				self.receiver.recv_many(&mut batch, remaining).await;
 			}
 			// Commit as a batch with single fsync
 			affinitypool::spawn_local(|| {
