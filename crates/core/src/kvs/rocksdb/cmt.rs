@@ -87,9 +87,10 @@ impl CommitCoordinator {
 impl CommitBatcher {
 	/// Run the background batcher loop
 	async fn run(mut self) {
+		// Pre-allocate batch vector once
+		let mut batch = Vec::with_capacity(self.batch_size);
+		// Loop continuously until the channel is closed
 		loop {
-			// Start collecting a batch - recv_many will wait for at least one item
-			let mut batch = Vec::with_capacity(self.batch_size);
 			// Immediately drain any requests that are already queued
 			let total = self.receiver.recv_many(&mut batch, self.batch_size).await;
 			// If channel is closed and no items received, exit
@@ -130,7 +131,7 @@ impl CommitBatcher {
 				// Create a vector to store the results
 				let mut results = Vec::with_capacity(batch.len());
 				// Commit each transaction and store the result
-				for request in batch {
+				for request in batch.drain(..) {
 					let result = request.txn.commit().map_err(Into::into);
 					results.push((request.response, result));
 				}
