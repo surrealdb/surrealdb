@@ -12,12 +12,10 @@ use super::batch::Batch;
 use super::tr::Check;
 use super::{Key, Val, Version, util};
 use crate::catalog::providers::{
-	ApiProvider, AuthorisationProvider, BucketProvider, CatalogProvider, DatabaseProvider,
-	NamespaceProvider, NodeProvider, TableProvider, UserProvider,
+	ApiProvider, AuthorisationProvider, BucketProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, RootProvider, TableProvider, UserProvider
 };
 use crate::catalog::{
-	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, IndexId,
-	NamespaceDefinition, NamespaceId, Record, TableDefinition, TableId,
+	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, DefaultsConfig, IndexId, NamespaceDefinition, NamespaceId, Record, TableDefinition, TableId
 };
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::MutableContext;
@@ -517,6 +515,31 @@ impl NodeProvider for Transaction {
 			}
 		}
 		.try_into_type()
+	}
+}
+
+#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+impl RootProvider for Transaction {
+	async fn get_defaults_config(&self) -> Result<Option<Arc<DefaultsConfig>>> {
+		let qey = cache::tx::Lookup::Rcg("defaults");
+		match self.cache.get(&qey) {
+			Some(val) => val,
+			None => {
+				let key = crate::key::root::cg::new("defaults");
+				let Some(val) = self.get(&key, None).await? else {
+					return Ok(None);
+				};
+				let ConfigDefinition::Defaults(val) = val else {
+					fail!("Expected a defaults config but found {val:?} instead");
+				};
+				let val = cache::tx::Entry::Any(Arc::new(val));
+				self.cache.insert(qey, val.clone());
+				val
+			}
+		}
+		.try_into_type()
+		.map(Option::Some)
 	}
 }
 

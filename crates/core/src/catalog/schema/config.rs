@@ -14,6 +14,7 @@ use crate::val::Value;
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ConfigDefinition {
+	Defaults(DefaultsConfig),
 	GraphQL(GraphQLConfig),
 	Api(ApiConfigDefinition),
 }
@@ -23,8 +24,17 @@ impl ConfigDefinition {
 	/// Get the name of the config.
 	pub fn name(&self) -> String {
 		match self {
+			ConfigDefinition::Defaults(_) => ConfigKind::Defaults.to_string(),
 			ConfigDefinition::GraphQL(_) => ConfigKind::GraphQL.to_string(),
 			ConfigDefinition::Api(_) => ConfigKind::Api.to_string(),
+		}
+	}
+
+	pub fn base(&self) -> ConfigBase {
+		match self {
+			ConfigDefinition::Defaults(_) => ConfigBase::Root,
+			ConfigDefinition::GraphQL(_) => ConfigBase::Database,
+			ConfigDefinition::Api(_) => ConfigBase::Database,
 		}
 	}
 
@@ -45,9 +55,15 @@ impl ConfigDefinition {
 	}
 }
 
+pub enum ConfigBase {
+	Root,
+	Database,
+}
+
 impl Display for ConfigDefinition {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self {
+			ConfigDefinition::Defaults(v) => Display::fmt(v, f),
 			ConfigDefinition::GraphQL(v) => Display::fmt(v, f),
 			ConfigDefinition::Api(v) => Display::fmt(v, f),
 		}
@@ -57,6 +73,9 @@ impl Display for ConfigDefinition {
 impl InfoStructure for ConfigDefinition {
 	fn structure(self) -> Value {
 		match self {
+			ConfigDefinition::Defaults(v) => Value::from(map!(
+				"defaults" => v.structure()
+			)),
 			ConfigDefinition::GraphQL(v) => Value::from(map!(
 				"graphql" => v.structure()
 			)),
@@ -200,5 +219,35 @@ impl InfoStructure for GraphQLFunctionsConfig {
 				"exclude" => Value::Array(fs.into_iter().map(Value::from).collect()),
 			)),
 		}
+	}
+}
+
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+pub struct DefaultsConfig {
+	pub namespace: Option<String>,
+	pub database: Option<String>,
+}
+
+impl Display for DefaultsConfig {
+	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+		write!(f, "DEFAULTS")?;
+		if let Some(namespace) = &self.namespace {
+			write!(f, " NAMESPACE {}", namespace)?;
+		}
+		if let Some(database) = &self.database {
+			write!(f, " DATABASE {}", database)?;
+		}
+
+		Ok(())
+	}
+}
+
+impl InfoStructure for DefaultsConfig {
+	fn structure(self) -> Value {
+		Value::from(map!(
+			"namespace", if let Some(x) = self.namespace => Value::String(x),
+			"database", if let Some(x) = self.database => Value::String(x),
+		))
 	}
 }

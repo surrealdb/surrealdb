@@ -42,6 +42,7 @@ pub enum ResourceKind {
 pub enum ConfigKind {
 	GraphQL,
 	Api,
+	Defaults,
 }
 
 impl std::fmt::Display for ResourceKind {
@@ -77,6 +78,7 @@ impl std::fmt::Display for ConfigKind {
 		match self {
 			ConfigKind::GraphQL => write!(f, "GraphQL"),
 			ConfigKind::Api => write!(f, "API"),
+			ConfigKind::Defaults => write!(f, "Defaults"),
 		}
 	}
 }

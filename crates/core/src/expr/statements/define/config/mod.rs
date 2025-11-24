@@ -1,9 +1,11 @@
 pub mod api;
+pub mod defaults;
 
 use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use api::ApiConfig;
+use defaults::DefaultsConfig;
 use reblessive::tree::Stk;
 
 use crate::catalog::providers::DatabaseProvider;
@@ -28,6 +30,7 @@ pub(crate) struct DefineConfigStatement {
 pub(crate) enum ConfigInner {
 	GraphQL(GraphQLConfig),
 	Api(ApiConfig),
+	Defaults(DefaultsConfig),
 }
 
 impl DefineConfigStatement {
@@ -47,6 +50,7 @@ impl DefineConfigStatement {
 		let cg = match &self.inner {
 			ConfigInner::GraphQL(_) => "graphql",
 			ConfigInner::Api(_) => "api",
+			ConfigInner::Defaults(_) => "defaults",
 		};
 		// Check if the definition exists
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
@@ -67,11 +71,21 @@ impl DefineConfigStatement {
 		let store = match &self.inner {
 			ConfigInner::GraphQL(g) => ConfigDefinition::GraphQL(g.clone()),
 			ConfigInner::Api(a) => ConfigDefinition::Api(a.compute(stk, ctx, opt, doc).await?),
+			ConfigInner::Defaults(d) => ConfigDefinition::Defaults(d.compute(stk, ctx, opt, doc).await?),
 		};
 
 		// Process the statement
-		let key = crate::key::database::cg::new(ns, db, cg);
-		txn.replace(&key, &store).await?;
+		match store.base() {
+			crate::catalog::ConfigBase::Root => {
+				let key = crate::key::root::cg::new(cg);
+				txn.replace(&key, &store).await?;
+			}
+			crate::catalog::ConfigBase::Database => {
+				let key = crate::key::database::cg::new(ns, db, cg);
+				txn.replace(&key, &store).await?;
+			}
+		};
+		
 		// Clear the cache
 		txn.clear_cache();
 		// Ok all good
@@ -97,6 +111,7 @@ impl Display for ConfigInner {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self {
 			ConfigInner::GraphQL(v) => Display::fmt(v, f),
+			ConfigInner::Defaults(v) => Display::fmt(v, f),
 			ConfigInner::Api(v) => {
 				write!(f, "API")?;
 				Display::fmt(v, f)

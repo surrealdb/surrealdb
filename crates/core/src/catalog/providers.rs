@@ -9,8 +9,8 @@ use uuid::Uuid;
 
 use crate::catalog;
 use crate::catalog::{
-	DatabaseDefinition, DatabaseId, IndexId, NamespaceDefinition, NamespaceId, Record,
-	TableDefinition, TableId, UserDefinition,
+	DatabaseDefinition, DatabaseId, DefaultsConfig, IndexId, NamespaceDefinition, NamespaceId, 
+	Record, TableDefinition, TableId, UserDefinition,
 };
 use crate::ctx::MutableContext;
 use crate::dbs::node::Node;
@@ -26,6 +26,13 @@ pub(crate) trait NodeProvider {
 
 	/// Retrieve a specific node definition.
 	async fn get_node(&self, id: Uuid) -> Result<Arc<Node>>;
+}
+
+#[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
+pub(crate) trait RootProvider {
+	/// Retrieve a specific root definition.
+	async fn get_defaults_config(&self) -> Result<Option<Arc<DefaultsConfig>>>;
 }
 
 /// Namespace data access provider.

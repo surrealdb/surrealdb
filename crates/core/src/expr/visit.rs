@@ -13,6 +13,7 @@ use crate::expr::statements::access::{
 use crate::expr::statements::alter::{
 	AlterDefault, AlterFieldStatement, AlterKind, AlterSequenceStatement, AlterTableStatement,
 };
+use crate::expr::statements::define::config::defaults::DefaultsConfig;
 use crate::expr::statements::define::config::ConfigInner;
 use crate::expr::statements::define::config::api::ApiConfig;
 use crate::expr::statements::define::{
@@ -833,6 +834,9 @@ implement_visitor! {
 			ConfigInner::Api(api_config) => {
 				this.visit_api_config(api_config)?;
 			},
+			ConfigInner::Defaults(defaults_config) => {
+				this.visit_defaults_config(defaults_config)?;
+			},
 		}
 		Ok(())
 	}
@@ -849,6 +853,16 @@ implement_visitor! {
 			}
 		}
 		this.visit_permission(&d.permissions)?;
+		Ok(())
+	}
+
+	fn visit_defaults_config(this, d: &DefaultsConfig) {
+		if let Some(namespace) = &d.namespace {
+			this.visit_expr(namespace)?;
+		}
+		if let Some(database) = &d.database {
+			this.visit_expr(database)?;
+		}
 		Ok(())
 	}
 
@@ -2263,6 +2277,9 @@ implement_visitor_mut! {
 			ConfigInner::Api(api_config) => {
 				this.visit_mut_api_config(api_config)?;
 			},
+			ConfigInner::Defaults(defaults_config) => {
+				this.visit_mut_defaults_config(defaults_config)?;
+			},
 		}
 		Ok(())
 	}
@@ -2274,6 +2291,16 @@ implement_visitor_mut! {
 			}
 		}
 		this.visit_mut_permission(&mut d.permissions)?;
+		Ok(())
+	}
+
+	fn visit_mut_defaults_config(this, d: &mut DefaultsConfig) {
+		if let Some(namespace) = &mut d.namespace {
+			this.visit_mut_expr(namespace)?;
+		}
+		if let Some(database) = &mut d.database {
+			this.visit_mut_expr(database)?;
+		}
 		Ok(())
 	}
 

@@ -6,8 +6,7 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use crate::catalog::providers::{
-	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, NamespaceProvider,
-	NodeProvider, TableProvider, UserProvider,
+	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, NamespaceProvider, NodeProvider, RootProvider, TableProvider, UserProvider
 };
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -55,6 +54,9 @@ impl InfoStatement {
 				if *structured {
 					let object = map! {
 						"accesses".to_string() => process(txn.all_root_accesses().await?),
+						"defaults".to_string() => txn.get_defaults_config().await?
+							.map(|x| x.as_ref().clone().structure())
+							.unwrap_or_else(|| Value::Object(Default::default())),
 						"namespaces".to_string() => process(txn.all_ns().await?),
 						"nodes".to_string() => process(txn.all_nodes().await?),
 						"system".to_string() => system().await,
@@ -70,6 +72,9 @@ impl InfoStatement {
 							}
 							out.into()
 						},
+						"defaults".to_string() => txn.get_defaults_config().await?
+							.map(|x| x.as_ref().clone().structure())
+							.unwrap_or_else(|| Value::Object(Default::default())),
 						"namespaces".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_ns().await?.iter() {
