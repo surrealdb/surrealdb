@@ -1,5 +1,6 @@
 use std::cmp::max;
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use sysinfo::System;
 
@@ -10,9 +11,11 @@ pub(super) static SYNC_DATA: LazyLock<bool> = lazy_env_parse!("SURREAL_SYNC_DATA
 pub(super) static ROCKSDB_BACKGROUND_FLUSH: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_ROCKSDB_BACKGROUND_FLUSH", bool, false);
 
-/// The interval in milliseconds between background flushes (default: 200)
+/// The interval in milliseconds between background flushes (default: 200ms)
 pub(super) static ROCKSDB_BACKGROUND_FLUSH_INTERVAL: LazyLock<u64> =
-	lazy_env_parse!("SURREAL_ROCKSDB_BACKGROUND_FLUSH_INTERVAL", u64, 200);
+	lazy_env_parse!(duration, "SURREAL_ROCKSDB_BACKGROUND_FLUSH_INTERVAL", u64, || {
+		Duration::from_millis(200).as_nanos() as u64
+	});
 
 /// The number of threads to start for flushing and compaction (default: number
 /// of CPUs)
@@ -231,7 +234,9 @@ pub(super) static ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE: LazyLock<u64> =
 /// This timeout ensures that transactions don't wait indefinitely when there's low concurrency.
 /// The value balances between transaction latency and write throughput.
 pub(super) static ROCKSDB_GROUPED_COMMIT_TIMEOUT: LazyLock<u64> =
-	lazy_env_parse!(duration, "SURREAL_ROCKSDB_GROUPED_COMMIT_TIMEOUT", u64, 500_000);
+	lazy_env_parse!(duration, "SURREAL_ROCKSDB_GROUPED_COMMIT_TIMEOUT", u64, || {
+		Duration::from_micros(500).as_nanos() as u64
+	});
 
 /// The maximum number of transactions to batch before forcing a grouped commit (default: 64)
 /// This setting is only used when SYNC_DATA is enabled and ROCKSDB_BACKGROUND_FLUSH is disabled.

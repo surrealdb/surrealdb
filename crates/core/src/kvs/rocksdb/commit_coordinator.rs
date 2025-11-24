@@ -2,7 +2,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rocksdb::OptimisticTransactionDB;
+use rocksdb::{OptimisticTransactionDB, Options};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 
@@ -10,13 +10,16 @@ use crate::kvs::err::{Error, Result};
 
 /// Coordinator for batching transaction commits together
 pub struct CommitCoordinator {
+	/// The sender for commit requests
 	sender: mpsc::Sender<CommitRequest>,
 }
 
 /// A request to commit a transaction
 struct CommitRequest {
+	/// The transaction to commit
 	txn: rocksdb::Transaction<'static, OptimisticTransactionDB>,
-	response: oneshot::Sender<Result<()>>,
+	/// The channel to send the result of the commit
+	channel: oneshot::Sender<Result<()>>,
 }
 
 /// The background batcher that processes commit requests
@@ -36,6 +39,7 @@ struct CommitBatcher {
 impl CommitCoordinator {
 	/// Create a new commit coordinator and spawn the background batcher task
 	pub fn new(
+		opts: &mut Options,
 		db: Pin<Arc<OptimisticTransactionDB>>,
 		timeout: u64,
 		batch_size: usize,
@@ -43,19 +47,21 @@ impl CommitCoordinator {
 	) -> Self {
 		// Create an unbounded channel
 		let (sender, receiver) = mpsc::channel(batch_size * 4);
+		// Enable manual WAL flushing
+		opts.set_manual_wal_flush(true);
 		// Create a new commit batcher
 		let batcher = CommitBatcher {
 			db,
 			receiver,
 			batch_size,
 			min_siblings,
-			timeout: Duration::from_micros(timeout),
+			timeout: Duration::from_nanos(timeout),
 		};
 		// Spawn the background task
 		tokio::spawn(async move {
 			batcher.run().await;
 		});
-
+		// Return the commit coordinator
 		Self {
 			sender,
 		}
@@ -66,21 +72,21 @@ impl CommitCoordinator {
 		&self,
 		txn: rocksdb::Transaction<'static, OptimisticTransactionDB>,
 	) -> Result<()> {
+		// Create a new oneshot channel
 		let (tx, rx) = oneshot::channel();
+		// Create a new commit request
 		let request = CommitRequest {
 			txn,
-			response: tx,
+			channel: tx,
 		};
-
 		// Send the commit request to the batcher
 		self.sender
 			.send(request)
 			.await
-			.map_err(|_| Error::Internal("commit coordinator channel closed".into()))?;
-
-		// Wait for the response
+			.map_err(|_| Error::Transaction("commit coordinator channel closed".into()))?;
+		// Wait for the transaction to commit
 		rx.await
-			.map_err(|_| Error::Internal("commit coordinator response channel closed".into()))?
+			.map_err(|_| Error::Transaction("commit coordinator response channel closed".into()))?
 	}
 }
 
@@ -120,7 +126,7 @@ impl CommitBatcher {
 				}
 			}
 			// Drain any additional immediately available transactions
-			if batch.len() < self.batch_size {
+			if batch.len() < self.batch_size && self.receiver.len() > 0 {
 				// Calculate the remaining number of slots in the batch
 				let remaining = self.batch_size - batch.len();
 				// Drain the remaining slots in the batch
@@ -133,13 +139,20 @@ impl CommitBatcher {
 				// Commit each transaction and store the result
 				for request in batch.drain(..) {
 					let result = request.txn.commit().map_err(Into::into);
-					results.push((request.response, result));
+					results.push((request.channel, result));
 				}
-				// Ensure the WAL is flushed and synced
-				let _ = self.db.flush_wal(true);
-				// Send responses back to all waiters
-				for (response, result) in results {
-					let _ = response.send(result);
+				// Perform a single WAL flush and disk sync for all commits
+				if let Err(e) = self.db.flush_wal(true) {
+					let err = e.to_string();
+					for (_, result) in &mut results {
+						if result.is_ok() {
+							*result = Err(Error::Transaction(err.clone()));
+						}
+					}
+				}
+				// Send results back to all waiters
+				for (channel, result) in results {
+					let _ = channel.send(result);
 				}
 			})
 			.await;

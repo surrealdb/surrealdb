@@ -60,7 +60,7 @@ impl DiskSpaceManager {
 	/// implements application-level space management at the transaction level.
 	/// This approach provides more graceful degradation and allows deletions to
 	/// free space even when the limit is reached.
-	pub(super) fn new(limit: u64, opts: &mut Options) -> Result<Self> {
+	pub(super) fn new(opts: &mut Options, limit: u64) -> Result<Self> {
 		let env = Env::new()?;
 		let sst_file_manager = SstFileManager::new(&env)?;
 		// Disable RocksDB's built-in hard limit (set to 0 = unlimited).
