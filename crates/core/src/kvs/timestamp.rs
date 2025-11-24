@@ -61,6 +61,65 @@ impl Timestamp for u64 {
 	}
 }
 
+/// Simple monotonically incrementing atomic timestamp.
+///
+/// This uses a global atomic counter that increments for each call to `next()`.
+/// The counter is treated as milliseconds since epoch for datetime conversions.
+/// This provides monotonicity without using system time or bit-splitting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct IncTimestamp(u64);
+
+impl IncTimestamp {
+	/// Generate the next monotonic timestamp.
+	/// Uses a global atomic counter to ensure monotonicity across all calls.
+	///
+	/// This method will never return a timestamp that is less than or equal to any previously
+	/// returned timestamp. Each call increments the counter by 1.
+	pub fn next() -> Self {
+		static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+		IncTimestamp(COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst))
+	}
+}
+
+impl Timestamp for IncTimestamp {
+	/// Convert the timestamp to a version
+	fn to_versionstamp(&self) -> u128 {
+		self.0 as u128
+	}
+
+	/// Create a timestamp from a version
+	fn from_versionstamp(version: u128) -> Result<Self> {
+		Ok(IncTimestamp(u64::try_from(version)?))
+	}
+
+	/// Convert the timestamp to a datetime
+	/// Treats the entire counter value as milliseconds since epoch
+	fn to_datetime(&self) -> DateTime<Utc> {
+		DateTime::from_timestamp_millis(self.0 as i64)
+			.expect("timestamp milliseconds should be valid")
+	}
+
+	/// Create a timestamp from a datetime
+	/// Uses the datetime's milliseconds as the counter value
+	fn from_datetime(datetime: DateTime<Utc>) -> Result<Self> {
+		let millis = datetime.timestamp_millis() as u64;
+		Ok(IncTimestamp(millis))
+	}
+
+	/// Convert the timestamp to a byte array
+	fn to_ts_bytes(&self) -> Vec<u8> {
+		self.0.to_be_bytes().to_vec()
+	}
+
+	/// Create a timestamp from a byte array
+	fn from_ts_bytes(bytes: &[u8]) -> Result<Self> {
+		match bytes.try_into() {
+			Ok(v) => Ok(IncTimestamp(u64::from_be_bytes(v))),
+			Err(_) => Err(Error::TimestampInvalid("timestamp should be 8 bytes".to_string())),
+		}
+	}
+}
+
 /// Hybrid Logical Clock timestamp that combines wall-clock time with a logical counter.
 /// Format: Upper 48 bits = milliseconds since epoch, Lower 16 bits = counter (0-65535)
 ///
