@@ -286,6 +286,7 @@ impl Document {
 
 		let notification = PublicNotification::new(
 			live_subscription.id.into(),
+			None,
 			action,
 			convert_value_to_public_value(Value::RecordId(rid.as_ref().clone()))?,
 			convert_value_to_public_value(result)?,

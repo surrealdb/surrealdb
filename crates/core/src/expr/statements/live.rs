@@ -225,6 +225,7 @@ mod tests {
 			notification,
 			PublicNotification::new(
 				live_id,
+				None,
 				PublicAction::Create,
 				PublicValue::RecordId(PublicRecordId {
 					table: tb.into(),

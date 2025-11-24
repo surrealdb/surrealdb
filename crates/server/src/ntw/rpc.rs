@@ -198,8 +198,8 @@ async fn post_handler(
 			.await;
 			// Return the HTTP response
 			Ok(fmt.res_http(match res {
-				Ok(result) => DbResponse::success(None, result),
-				Err(err) => DbResponse::failure(None, err.into()),
+				Ok(result) => DbResponse::success(None, None, result),
+				Err(err) => DbResponse::failure(None, None, err.into()),
 			})?)
 		}
 		Err(err) => Err(err.into()),

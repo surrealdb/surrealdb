@@ -77,7 +77,7 @@ pub(crate) async fn notifications(
 						state.live_queries.read().await.get(id).copied()
 					};
 					// Ensure the specified WebSocket exists
-					if let Some((id, _)) = websocket.as_ref() {
+					if let Some((id, session_id)) = websocket.as_ref() {
 						// Get the WebSocket for this notification
 						let websocket = {
 							state.web_sockets.read().await.get(id).cloned()
@@ -85,7 +85,7 @@ pub(crate) async fn notifications(
 						// Ensure the specified WebSocket exists
 						if let Some(rpc) = websocket {
 							// Serialize the message to send
-							let message = DbResponse::success(None, DbResult::Live(notification));
+							let message = DbResponse::success(None, session_id.map(Into::into), DbResult::Live(notification));
 							// Add telemetry metrics
 							let cx = TelemetryContext::new();
 							let not_ctx = NotificationContext::default()

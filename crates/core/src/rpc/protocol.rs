@@ -60,28 +60,26 @@ pub trait RpcProtocol {
 	/// A pointer to all active sessions
 	fn session_map(&self) -> &DashMap<Option<Uuid>, ArcSwap<Session>>;
 
-	/// Clones an existing session to a new session ID
-	///
-	/// # Arguments
-	/// * `from` - The session ID to clone from (None = default session)
-	/// * `to` - The new session ID to create
-	fn clone_session(&self, from: &Option<Uuid>, to: Uuid) -> Result<(), RpcError> {
-		let sessions = self.session_map();
-		// Check if destination session already exists
-		if sessions.contains_key(&Some(to)) {
-			return Err(RpcError::SessionExists(to));
+	/// Registers a new session with the given ID
+	fn attach(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
+		match session_id {
+			Some(id) => {
+				self.session_map().insert(Some(id), ArcSwap::from(Arc::new(Session::default())));
+				Ok(DbResult::Other(PublicValue::None))
+			}
+			None => Err(RpcError::InvalidParams("Expected a session ID".to_string())),
 		}
+	}
 
-		// Get the source session to clone from
-		let source =
-			sessions.get(from).map(|s| s.load_full()).ok_or(RpcError::SessionNotFound(*from))?;
-
-		// Clone the session (includes ns, db, auth, everything)
-		let cloned = Arc::new(source.as_ref().clone());
-
-		// Store the cloned session with the new ID
-		sessions.insert(Some(to), ArcSwap::from(cloned));
-		Ok(())
+	/// Detaches a session from the given ID
+	fn detach(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
+		match session_id {
+			Some(id) => {
+				self.del_session(&id);
+				Ok(DbResult::Other(PublicValue::None))
+			}
+			None => Err(RpcError::InvalidParams("Expected a session ID".to_string())),
+		}
 	}
 
 	/// The current session for this RPC context
@@ -197,42 +195,8 @@ pub trait RpcProtocol {
 			Method::Commit => self.commit(txn, session, params).await,
 			Method::Cancel => self.cancel(txn, session, params).await,
 			Method::Sessions => self.sessions().await,
-			Method::CloneSession => {
-				// Process the method arguments
-				let (from, to) = extract_args::<(PublicValue, PublicValue)>(params.into_vec())
-					.ok_or_else(|| RpcError::InvalidParams("Expected (from, to)".to_string()))?;
-
-				// Parse the from parameter (can be null/none for default session)
-				let from = match from {
-					PublicValue::None | PublicValue::Null => None,
-					PublicValue::Uuid(PublicUuid(id)) => Some(id),
-					PublicValue::String(id) => Some(Uuid::parse_str(&id).map_err(|_| {
-						RpcError::InvalidParams(format!("Invalid UUID string: {id}"))
-					})?),
-					unexpected => {
-						return Err(RpcError::InvalidParams(format!(
-							"Expected from to be uuid or null, got {unexpected:?}"
-						)));
-					}
-				};
-
-				// Parse the to parameter (must be a uuid)
-				let to = match to {
-					PublicValue::Uuid(PublicUuid(id)) => id,
-					PublicValue::String(id) => Uuid::parse_str(&id).map_err(|_| {
-						RpcError::InvalidParams(format!("Invalid UUID string: {id}"))
-					})?,
-					unexpected => {
-						return Err(RpcError::InvalidParams(format!(
-							"Expected to to be uuid, got {unexpected:?}"
-						)));
-					}
-				};
-
-				// Clone the session
-				self.clone_session(&from, to)?;
-				Ok(DbResult::Other(PublicValue::None))
-			}
+			Method::Attach => self.attach(session),
+			Method::Detach => self.detach(session),
 			// Deprecated methods
 			Method::Select => self.select(txn, session, params).await,
 			Method::Insert => self.insert(txn, session, params).await,

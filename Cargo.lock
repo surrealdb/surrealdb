@@ -6781,6 +6781,7 @@ dependencies = [
  "chrono",
  "ciborium",
  "criterion",
+ "dashmap",
  "dmp",
  "env_logger",
  "flate2",

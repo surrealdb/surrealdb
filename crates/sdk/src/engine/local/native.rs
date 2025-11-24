@@ -1,19 +1,20 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::task::Poll;
 
 use async_channel::{Receiver, Sender};
+use dashmap::DashMap;
 use futures::StreamExt;
 use futures::stream::poll_fn;
 use surrealdb_core::iam::Level;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::options::EngineOptions;
-use tokio::sync::{RwLock, watch};
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use crate::conn::{self, Route, Router};
-use crate::engine::local::{Db, LiveQueryState, LocalSessionState};
+use crate::engine::local::{Db, LocalSessionState, SessionCloneError};
 use crate::engine::tasks;
 use crate::method::BoxFuture;
 use crate::opt::auth::Root;
@@ -118,12 +119,10 @@ pub(crate) async fn run_router(
 	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
 	let kvs = Arc::new(kvs);
-	let live_queries = Arc::new(RwLock::new(super::LiveQueryMap::new()));
-	let sessions = Arc::new(RwLock::new(HashMap::new()));
+	let sessions = Arc::new(DashMap::new());
 
 	let router_state = super::RouterState {
 		kvs: kvs.clone(),
-		live_queries: live_queries.clone(),
 		sessions: sessions.clone(),
 	};
 
@@ -162,15 +161,19 @@ pub(crate) async fn run_router(
 				let Ok(session_id) = session else {
 					break
 				};
-				match session_id {
-					SessionId::Initial(session_id) => {
-						router_state.sessions.write().await.insert(session_id, LocalSessionState::default());
-					}
-					SessionId::Clone { old, new } => {
-						let state = router_state.sessions.read().await.get(&old).cloned().unwrap_or_default();
-						router_state.sessions.write().await.insert(new, state);
-					}
+			match session_id {
+				SessionId::Initial(session_id) => {
+					router_state.sessions.insert(session_id, Ok(LocalSessionState::default()));
 				}
+				SessionId::Clone { old, new } => {
+					let state = match router_state.sessions.get(&old) {
+						Some(entry) => entry.value().clone(),
+						// If the session is not found, return an error
+						None => Err(SessionCloneError(old)),
+					};
+					router_state.sessions.insert(new, state);
+				}
+			}
 			}
 			route = route_rx.recv() => {
 				let Ok(route) = route else {
@@ -196,23 +199,41 @@ pub(crate) async fn run_router(
 					continue
 				};
 
-				let kvs_clone = kvs.clone();
-				let sessions_clone = sessions.clone();
-				let live_queries_clone = live_queries.clone();
-				tokio::spawn(async move {
-					let id = notification.id.0;
-					if let Some(LiveQueryState { session_id, sender }) = live_queries_clone.read().await.get(&id)
+			let kvs_clone = kvs.clone();
+			let sessions_clone = sessions.clone();
+			tokio::spawn(async move {
+				let id = notification.id.0;
+				let session_id = notification.session.map(|x| x.0);
+				
+				// Try to get the specific session if we have a session ID
+				let state = if let Some(sid) = session_id {
+					super::get_session(&sessions_clone, &Some(sid)).ok()
+				} else {
+					// No session ID in notification, search all sessions for this live query
+					sessions_clone.iter().find_map(|entry| {
+						let state = entry.value().as_ref().ok()?.clone();
+						if state.live_queries.contains_key(&id) {
+							Some(state)
+						} else {
+							None
+						}
+					})
+				};
+				
+				if let Some(state) = state {
+					if let Some(sender) = state.live_queries.get(&id)
 						&& sender.send(Ok(notification)).await.is_err() {
-							live_queries_clone.write().await.remove(&id);
-							let sessions_lock = sessions_clone.read().await;
-							let state = sessions_lock.get(session_id).cloned().unwrap_or_default();
+							state.live_queries.remove(&id);
 							if let Err(error) =
-								super::kill_live_query(&kvs_clone, id, &state.session, state.vars).await
+								super::kill_live_query(&kvs_clone, id, &state.session, state.vars.clone()).await
 							{
 								warn!("Failed to kill live query '{id}'; {error}");
 							}
 						}
-				});
+				} else {
+					warn!("Failed to find session for live query '{id}'");
+				}
+			});
 			}
 		}
 	}

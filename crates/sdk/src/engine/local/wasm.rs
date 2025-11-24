@@ -1,9 +1,10 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 use std::task::Poll;
 
 use async_channel::{Receiver, Sender};
+use dashmap::DashMap;
 use futures::stream::poll_fn;
 use futures::{FutureExt, StreamExt};
 use surrealdb_core::iam::Level;
@@ -14,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 use wasm_bindgen_futures::spawn_local;
 
 use crate::conn::{Route, Router};
-use crate::engine::local::{Db, LiveQueryState};
+use crate::engine::local::{Db, LiveQueryState, LocalSessionState, SessionCloneError};
 use crate::engine::tasks;
 use crate::method::BoxFuture;
 use crate::opt::auth::Root;
@@ -108,7 +109,7 @@ pub(crate) async fn run_router(
 
 	let kvs = Arc::new(kvs);
 	let live_queries = Arc::new(RwLock::new(super::LiveQueryMap::new()));
-	let sessions = Arc::new(RwLock::new(HashMap::new()));
+	let sessions = Arc::new(DashMap::new());
 
 	let router_state = super::RouterState {
 		kvs: kvs.clone(),
@@ -149,15 +150,18 @@ pub(crate) async fn run_router(
 				let Ok(session_id) = session else {
 					break
 				};
-				match session_id {
-					SessionId::Initial(session_id) => {
-						router_state.sessions.write().await.insert(session_id, Default::default());
-					}
-					SessionId::Clone { old, new } => {
-						let state = router_state.sessions.read().await.get(&old).cloned().unwrap_or_default();
-						router_state.sessions.write().await.insert(new, state);
-					}
+			match session_id {
+				SessionId::Initial(session_id) => {
+					router_state.sessions.insert(session_id, Ok(LocalSessionState::default()));
 				}
+				SessionId::Clone { old, new } => {
+					let state = match router_state.sessions.get(&old) {
+						Some(entry) => entry.value().clone(),
+						None => Err(SessionCloneError(old)),
+					};
+					router_state.sessions.insert(new, state);
+				}
+			}
 			}
 			route = route_rx.recv().fuse() => {
 				let Ok(route) = route else {
@@ -182,19 +186,21 @@ pub(crate) async fn run_router(
 				};
 
 				let id = notification.id.0;
-				if let Some(LiveQueryState { session_id, sender }) = live_queries.read().await.get(&id) {
-					let session_id = *session_id;
-					if sender.send(Ok(notification)).await.is_err() {
-						live_queries.write().await.remove(&id);
-						let sessions_lock = sessions.read().await;
-						let state = sessions_lock.get(&session_id).cloned().unwrap_or_default();
-						if let Err(error) =
-							super::kill_live_query(&kvs, id, &state.session, state.vars).await
-						{
-							warn!("Failed to kill live query '{id}'; {error}");
+			if let Some(LiveQueryState { session_id, sender }) = live_queries.read().await.get(&id) {
+				let session_id = *session_id;
+				if sender.send(Ok(notification)).await.is_err() {
+					live_queries.write().await.remove(&id);
+					if let Some(entry) = sessions.get(&session_id) {
+						if let Ok(state) = entry.value() {
+							if let Err(error) =
+								super::kill_live_query(&kvs, id, &state.session, state.vars.clone()).await
+							{
+								warn!("Failed to kill live query '{id}'; {error}");
+							}
 						}
 					}
 				}
+			}
 			}
 		}
 	}
