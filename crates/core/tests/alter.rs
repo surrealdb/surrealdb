@@ -1,8 +1,9 @@
 #![allow(clippy::unwrap_used)]
 mod helpers;
+use std::time::{Duration, SystemTime};
+
 use anyhow::Result;
 use helpers::*;
-use std::time::{Duration, SystemTime};
 use surrealdb_core::dbs::Session;
 use surrealdb_types::Value;
 use tokio::time::sleep;
