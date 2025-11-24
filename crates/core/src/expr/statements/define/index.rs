@@ -130,7 +130,6 @@ impl DefineIndexStatement {
 		txn.put_tb_index(tb.namespace_id, tb.database_id, &tb.name, &index_def).await?;
 
 		// Refresh the table cache
-
 		txn.put_tb(
 			ns,
 			db,

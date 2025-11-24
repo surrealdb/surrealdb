@@ -1,8 +1,7 @@
 use std::fmt::{self, Display, Write};
 use std::ops::Deref;
 
-use anyhow::Result;
-
+use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -10,6 +9,8 @@ use crate::err::Error;
 use crate::expr::{Base, Value};
 use crate::fmt::{EscapeKwIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
+use anyhow::Result;
+use uuid::Uuid;
 
 /// Represents an `ALTER INDEX` statement.
 ///
@@ -34,6 +35,7 @@ impl AlterIndexStatement {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the NS and DB
+		let (ns_name, db_name) = opt.ns_db()?;
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
@@ -58,6 +60,27 @@ impl AlterIndexStatement {
 			// Set the index definition
 			txn.put_tb_index(ns, db, &self.table, &ix).await?;
 
+			// Refresh the table cache for indexes
+			let Some(tb) = txn.get_tb(ns, db, &self.table).await? else {
+				return Err(Error::TbNotFound {
+					name: self.table.to_string(),
+				}
+				.into());
+			};
+
+			txn.put_tb(
+				ns_name,
+				db_name,
+				&TableDefinition {
+					cache_indexes_ts: Uuid::now_v7(),
+					..tb.as_ref().clone()
+				},
+			)
+			.await?;
+			// Clear the cache
+			if let Some(cache) = ctx.get_cache() {
+				cache.clear_tb(ns, db, &self.table);
+			}
 			// Clear the cache
 			txn.clear_cache();
 		}
