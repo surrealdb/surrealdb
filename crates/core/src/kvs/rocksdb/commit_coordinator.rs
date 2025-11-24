@@ -41,8 +41,10 @@ struct CommitBatcher {
 	db: Pin<Arc<OptimisticTransactionDB>>,
 	/// Maximum time to wait for collecting a batch
 	timeout: Duration,
-	/// Maximum number of transactions per batch
-	batch_size: usize,
+	/// Threshold for deciding whether to wait for more transactions
+	wait_threshold: usize,
+	/// Maximum number of transactions in a single batch
+	max_batch_size: usize,
 	/// Minimum number of concurrent transactions before using timeout
 	min_siblings: usize,
 }
@@ -59,14 +61,15 @@ impl CommitCoordinator {
 		opts: &mut Options,
 		db: Pin<Arc<OptimisticTransactionDB>>,
 		timeout: u64,
-		batch_size: usize,
+		wait_threshold: usize,
+		max_batch_size: usize,
 		min_siblings: usize,
 	) -> Self {
 		// Enable manual WAL flushing
 		opts.set_manual_wal_flush(true);
 		// Create shared state with pre-allocated buffer
 		let shared = Arc::new(SharedState {
-			buffer: Mutex::new(Vec::with_capacity(batch_size)),
+			buffer: Mutex::new(Vec::with_capacity(max_batch_size)),
 			condvar: Condvar::new(),
 			shutdown: Mutex::new(false),
 		});
@@ -74,7 +77,8 @@ impl CommitCoordinator {
 		let batcher = CommitBatcher {
 			shared: shared.clone(),
 			db,
-			batch_size,
+			wait_threshold,
+			max_batch_size,
 			min_siblings,
 			timeout: Duration::from_nanos(timeout),
 		};
@@ -125,9 +129,16 @@ impl CommitCoordinator {
 
 impl CommitBatcher {
 	/// Run the background batcher loop
+	///
+	/// Behavior:
+	/// - Wakes when transactions arrive
+	/// - If few transactions and no more pending: commits immediately (low latency)
+	/// - If few transactions but more pending: waits up to `timeout` (better batching)
+	/// - If many transactions: commits immediately (high throughput)
+	/// - Batches capped at `max_batch_size` to prevent unbounded growth
 	async fn run(self) {
 		// Pre-allocate batch vector once
-		let mut batch = Vec::with_capacity(self.batch_size);
+		let mut batch = Vec::with_capacity(self.max_batch_size);
 		// Loop continuously until shutdown
 		loop {
 			// Wait for work to be available
@@ -141,24 +152,24 @@ impl CommitBatcher {
 				if *self.shared.shutdown.lock() && buffer.is_empty() {
 					break;
 				}
-				// Take the right amount of items from the buffer
-				let take = buffer.len().min(self.batch_size);
+				// Initially drain up to wait_threshold items
+				let take = buffer.len().min(self.wait_threshold);
 				// Drain the buffer items into the batch
 				batch.extend(buffer.drain(..take));
 			}
-			// If we have fewer items than batch_size, consider waiting for more
-			let should_wait = batch.len() < self.batch_size && {
-				// Lock the buffer to check the number of items
+			// We wait if batch is below threshold and more transactions are pending
+			let should_wait = batch.len() < self.wait_threshold && {
+				// Lock the buffer to check if more work is pending
 				let buffer = self.shared.buffer.lock();
-				// Check if we have enough items to start a batch
+				// Wait if we have enough concurrent transactions to justify batching
 				buffer.len() >= self.min_siblings.saturating_sub(batch.len())
 			};
 			// If we should wait, collect more requests with timeout
 			if should_wait {
 				// Calculate the timeout deadline
 				let deadline = Instant::now() + self.timeout;
-				// Collect requests until timeout or batch is full
-				while batch.len() < self.batch_size {
+				// Wait for more items until timeout
+				loop {
 					// Get the current instant
 					let now = Instant::now();
 					// Check if deadline is reached
@@ -173,26 +184,30 @@ impl CommitBatcher {
 					if self.shared.condvar.wait_for(&mut buffer, wait.into()).timed_out() {
 						break;
 					}
-					// Take any new items
-					let take = (self.batch_size - batch.len()).min(buffer.len());
-					// Drain the buffer items into the batch
+					// Take available items up to the maximum batch size
+					if !buffer.is_empty() {
+						let take =
+							(self.max_batch_size.saturating_sub(batch.len())).min(buffer.len());
+						if take > 0 {
+							batch.extend(buffer.drain(..take));
+						}
+					}
+				}
+			}
+			// Drain any pending items up to the maximum batch size
+			{
+				let mut buffer = self.shared.buffer.lock();
+				// Check if there are any pending items
+				if !buffer.is_empty() {
+					// Drain any pending items up to the maximum batch size
+					let take = (self.max_batch_size.saturating_sub(batch.len())).min(buffer.len());
 					if take > 0 {
+						// Drain the buffer items into the batch
 						batch.extend(buffer.drain(..take));
 					}
 				}
 			}
-			// Drain any additional immediately available transactions
-			if batch.len() < self.batch_size {
-				// Lock the buffer to check the number of items
-				let mut buffer = self.shared.buffer.lock();
-				// Calculate the remaining number of slots in the batch
-				let take = (self.batch_size - batch.len()).min(buffer.len());
-				// Drain the buffer items into the batch
-				if take > 0 {
-					batch.extend(buffer.drain(..take));
-				}
-			}
-			// Commit as a batch with single fsync
+			// Commit as a batch with single fsync to the WAL and disk
 			affinitypool::spawn_local(|| {
 				// Create a vector to store the results
 				let mut results = Vec::with_capacity(batch.len());
