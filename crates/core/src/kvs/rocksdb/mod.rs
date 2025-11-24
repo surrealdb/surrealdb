@@ -1,5 +1,6 @@
 #![cfg(feature = "kv-rocksdb")]
 
+mod cmt;
 mod cnf;
 mod dsm;
 
@@ -29,6 +30,8 @@ pub struct Datastore {
 	db: Pin<Arc<OptimisticTransactionDB>>,
 	/// Disk space manager for monitoring space usage and enforcing space limits
 	disk_space_manager: Option<DiskSpaceManager>,
+	/// Commit coordinator for batching transaction commits when sync is enabled
+	commit_coordinator: Option<Arc<cmt::CommitCoordinator>>,
 }
 
 pub struct Transaction {
@@ -44,6 +47,8 @@ pub struct Transaction {
 	transaction_state: Arc<AtomicU8>,
 	/// Reference to the disk space manager for checking current operational state during commit.
 	disk_space_manager: Option<DiskSpaceManager>,
+	/// Commit coordinator for batching transaction commits when sync writes are enabled
+	commit_coordinator: Option<Arc<cmt::CommitCoordinator>>,
 	// The above, supposedly 'static transaction
 	// actually points here, so we need to ensure
 	// the memory is kept alive. This pointer must
@@ -213,16 +218,40 @@ impl Datastore {
 		// The SST file manager tracks SST file sizes in real-time. When the configured
 		// space limit is reached, the application transitions to read-and-deletion-only mode.
 		let disk_space_manager = if *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE > 0 {
+			info!(target: TARGET, "Disk space manager: enabled (limit={}B)", *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE);
 			Some(DiskSpaceManager::new(*cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE, &mut opts)?)
 		} else {
+			info!(target: TARGET, "Disk space manager: disabled");
 			None
 		};
 		// Open the database
 		let db = Self::open(opts.clone(), path).await?;
+		// Determine if grouped commit should be enabled
+		// Grouped commit is enabled when SYNC_DATA is true and BACKGROUND_FLUSH is false
+		// It batches multiple transaction commits together to perform a single fsync
+		let commit_coordinator = if *cnf::SYNC_DATA && !*cnf::ROCKSDB_BACKGROUND_FLUSH {
+			info!(target: TARGET, "Grouped commit: enabled (timeout={}μs, batch_size={}, min_siblings={})",
+				*cnf::ROCKSDB_GROUPED_COMMIT_TIMEOUT,
+				*cnf::ROCKSDB_GROUPED_COMMIT_BATCH_SIZE,
+				*cnf::ROCKSDB_GROUPED_COMMIT_MIN_SIBLINGS
+			);
+			Some(Arc::new(cmt::CommitCoordinator::new(
+				db.clone(),
+				*cnf::ROCKSDB_GROUPED_COMMIT_TIMEOUT,
+				*cnf::ROCKSDB_GROUPED_COMMIT_BATCH_SIZE,
+				*cnf::ROCKSDB_GROUPED_COMMIT_MIN_SIBLINGS,
+			)))
+		} else {
+			if *cnf::SYNC_DATA && *cnf::ROCKSDB_BACKGROUND_FLUSH {
+				warn!(target: TARGET, "Grouped commit disabled: incompatible with background flush");
+			}
+			None
+		};
 		// Return the datastore
 		Ok(Datastore {
 			db,
 			disk_space_manager,
+			commit_coordinator,
 		})
 	}
 
@@ -296,10 +325,10 @@ impl Datastore {
 		wo.set_sync(*cnf::SYNC_DATA);
 		// Create a new transaction
 		let inner = self.db.transaction_opt(&wo, &to);
-		// SAFETY: The transaction lifetime is tied to the database through the _db field.
+		// SAFETY: The transaction lifetime is tied to the database through the db field.
 		// The database is guaranteed to outlive the transaction because:
 		// 1. The transaction holds a Pin<Arc<OptimisticTransactionDB>> reference
-		// 2. The transaction struct ensures _db is dropped after inner
+		// 2. The transaction struct ensures db is dropped after inner
 		// 3. The Pin ensures the database isn't moved or dropped while referenced
 		let inner = unsafe {
 			std::mem::transmute::<
@@ -320,6 +349,7 @@ impl Datastore {
 			read_options: ro,
 			transaction_state: Arc::new(Default::default()),
 			disk_space_manager: self.disk_space_manager.clone(),
+			commit_coordinator: self.commit_coordinator.clone(),
 			db: self.db.clone(),
 		}))
 	}
@@ -430,8 +460,14 @@ impl Transactable for Transaction {
 			.await
 			.take()
 			.ok_or_else(|| Error::Internal("expected a transaction".into()))?;
-		// Commit this transaction
-		inner.commit()?;
+		// Commit this transaction using grouped commit if available, otherwise commit directly
+		if let Some(coordinator) = &self.commit_coordinator {
+			// Use grouped commit coordinator for batching
+			coordinator.commit(inner).await?;
+		} else {
+			// Direct commit (traditional behavior)
+			inner.commit()?;
+		}
 		// Perform compaction if necessary
 		if self.is_restricted(true) && self.contains_deletes() {
 			self.db.compact_range::<&[u8], &[u8]>(None, None);
