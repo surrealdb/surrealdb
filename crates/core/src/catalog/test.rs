@@ -195,7 +195,7 @@ use crate::val::{Datetime, Value};
 	index: Index::Idx,
 	comment: Some("comment".to_string()),
 	decommissioned: false,
-}, 33)]
+}, 34)]
 #[case::model(MlModelDefinition {
 	name: "model".to_string(),
 	hash: "hash".to_string(),

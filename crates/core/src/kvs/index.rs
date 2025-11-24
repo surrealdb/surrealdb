@@ -464,6 +464,8 @@ impl Building {
 	}
 
 	async fn run(&self) -> Result<()> {
+		let mut last_decommissioned_check = Instant::now();
+
 		// Remove the index data
 		{
 			self.set_status(BuildingStatus::Cleaning).await;
@@ -487,7 +489,6 @@ impl Building {
 			updated: None,
 		})
 		.await;
-		let mut last_decommissioned_check = Instant::now();
 
 		while let Some(rng) = next {
 			if self.is_aborted().await {
