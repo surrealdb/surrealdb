@@ -2,7 +2,6 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{self, RecordIdKeyRange, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -10,6 +9,7 @@ use super::validate_data;
 use crate::conn::Command;
 use crate::method::{BoxFuture, Content, Merge, OnceLockExt, Patch};
 use crate::opt::{PatchOps, Resource};
+use crate::types::{RecordIdKeyRange, SurrealValue, Value, Variables};
 use crate::{Connection, Result, Surreal};
 
 /// An upsert future
@@ -65,12 +65,12 @@ macro_rules! into_future {
 
 				router
 					.$method(
+						client.session_id,
 						Command::Query {
 							txn,
 							query: Cow::Owned(format!("UPSERT {what}")),
 							variables,
 						},
-						client.session_id,
 					)
 					.await
 			})

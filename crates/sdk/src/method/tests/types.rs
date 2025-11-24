@@ -1,4 +1,4 @@
-use surrealdb_types::SurrealValue;
+use crate::types::SurrealValue;
 
 pub const USER: &str = "user";
 

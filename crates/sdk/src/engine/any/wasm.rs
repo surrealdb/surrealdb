@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::sync::atomic::AtomicI64;
 
 use tokio::sync::watch;
 use wasm_bindgen_futures::spawn_local;
@@ -11,7 +10,7 @@ use crate::engine::any::Any;
 use crate::err::Error;
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, EndpointKind, WaitFor};
-use crate::{ExtraFeatures, Result, SessionClone, Surreal, conn};
+use crate::{conn, ExtraFeatures, Result, SessionClone, Surreal};
 
 impl crate::Connection for Any {}
 impl conn::Sealed for Any {
@@ -81,7 +80,12 @@ impl conn::Sealed for Any {
 					#[cfg(feature = "kv-rocksdb")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
+						spawn_local(engine::local::wasm::run_router(
+							address,
+							conn_tx,
+							route_rx,
+							session_clone.receiver.clone(),
+						));
 						conn_rx.recv().await??;
 					}
 
@@ -93,7 +97,12 @@ impl conn::Sealed for Any {
 					#[cfg(feature = "kv-surrealkv")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
+						spawn_local(engine::local::wasm::run_router(
+							address,
+							conn_tx,
+							route_rx,
+							session_clone.receiver.clone(),
+						));
 						conn_rx.recv().await??;
 					}
 
@@ -107,7 +116,12 @@ impl conn::Sealed for Any {
 					#[cfg(feature = "kv-tikv")]
 					{
 						features.insert(ExtraFeatures::LiveQueries);
-						spawn_local(engine::local::wasm::run_router(address, conn_tx, route_rx));
+						spawn_local(engine::local::wasm::run_router(
+							address,
+							conn_tx,
+							route_rx,
+							session_clone.receiver.clone(),
+						));
 						conn_rx.recv().await??;
 					}
 
@@ -164,7 +178,6 @@ impl conn::Sealed for Any {
 				features,
 				config,
 				sender: route_tx,
-				last_id: AtomicI64::new(0),
 			};
 
 			Ok((router, waiter, session_clone).into())

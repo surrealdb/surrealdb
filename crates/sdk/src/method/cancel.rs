@@ -34,12 +34,12 @@ where
 	fn into_future(self) -> Self::IntoFuture {
 		Box::pin(async move {
 			let router = self.client.inner.router.extract()?;
-			let _: surrealdb_types::Value = router
+			let _: crate::types::Value = router
 				.execute(
+					self.client.session_id,
 					Command::Rollback {
 						txn: self.txn,
 					},
-					self.client.session_id,
 				)
 				.await?;
 			Ok(self.client)

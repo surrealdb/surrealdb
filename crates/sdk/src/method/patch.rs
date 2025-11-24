@@ -2,12 +2,12 @@ use std::borrow::Cow;
 use std::future::IntoFuture;
 use std::marker::PhantomData;
 
-use surrealdb_types::{SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use crate::conn::Command;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::opt::{PatchOp, PatchOps, Resource};
+use crate::types::{SurrealValue, Value, Variables};
 use crate::{Connection, Result, Surreal};
 
 /// A patch future
@@ -50,9 +50,9 @@ macro_rules! into_future {
 			Box::pin(async move {
 				let mut vec = Vec::with_capacity(patches.len());
 				for patch in patches.into_iter() {
-					vec.push(surrealdb_types::Value::from(patch));
+					vec.push(crate::types::Value::from(patch));
 				}
-				let patches = surrealdb_types::Value::Array(surrealdb_types::Array::from(vec));
+				let patches = crate::types::Value::Array(crate::types::Array::from(vec));
 				let router = client.inner.router.extract()?;
 
 				let what = resource?;
@@ -74,7 +74,7 @@ macro_rules! into_future {
 					variables,
 				};
 
-				router.$method(cmd, client.session_id).await
+				router.$method(client.session_id, cmd).await
 			})
 		}
 	};

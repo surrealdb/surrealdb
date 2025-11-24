@@ -20,6 +20,7 @@ js = ["dep:js"]
 [dependencies]
 anyhow.workspace = true
 bytes.workspace = true
+papaya.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 flatbuffers.workspace = true
 geo = { workspace = true, features = ["use-serde"] }

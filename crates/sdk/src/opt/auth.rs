@@ -3,7 +3,8 @@
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
-use surrealdb_types::{Kind, Object, SurrealValue, Value, kind};
+
+use crate::types::{Kind, Object, SurrealValue, Value, kind};
 
 /// A signup action
 #[derive(Debug)]
@@ -98,7 +99,7 @@ impl<P: SurrealValue> SurrealValue for Record<P> {
 		Value::Object(obj)
 	}
 
-	fn from_value(value: Value) -> surrealdb_types::anyhow::Result<Self> {
+	fn from_value(value: Value) -> crate::types::anyhow::Result<Self> {
 		if let Value::Object(mut obj) = value {
 			let namespace = obj
 				.remove("ns")
@@ -109,7 +110,7 @@ impl<P: SurrealValue> SurrealValue for Record<P> {
 						None
 					}
 				})
-				.ok_or_else(|| surrealdb_types::anyhow::anyhow!("Missing 'ns' field"))?;
+				.ok_or_else(|| crate::types::anyhow::anyhow!("Missing 'ns' field"))?;
 			let database = obj
 				.remove("db")
 				.and_then(|v| {
@@ -119,7 +120,7 @@ impl<P: SurrealValue> SurrealValue for Record<P> {
 						None
 					}
 				})
-				.ok_or_else(|| surrealdb_types::anyhow::anyhow!("Missing 'db' field"))?;
+				.ok_or_else(|| crate::types::anyhow::anyhow!("Missing 'db' field"))?;
 			let access = obj
 				.remove("ac")
 				.and_then(|v| {
@@ -129,7 +130,7 @@ impl<P: SurrealValue> SurrealValue for Record<P> {
 						None
 					}
 				})
-				.ok_or_else(|| surrealdb_types::anyhow::anyhow!("Missing 'ac' field"))?;
+				.ok_or_else(|| crate::types::anyhow::anyhow!("Missing 'ac' field"))?;
 
 			// The remaining fields go into params
 			let params = P::from_value(Value::Object(obj))?;
@@ -141,7 +142,7 @@ impl<P: SurrealValue> SurrealValue for Record<P> {
 				params,
 			})
 		} else {
-			Err(surrealdb_types::anyhow::anyhow!("Expected an object for Record"))
+			Err(crate::types::anyhow::anyhow!("Expected an object for Record"))
 		}
 	}
 }
@@ -223,7 +224,7 @@ impl SurrealValue for Token {
 		}
 	}
 
-	fn from_value(value: Value) -> surrealdb_types::anyhow::Result<Self> {
+	fn from_value(value: Value) -> crate::types::anyhow::Result<Self> {
 		match value {
 			Value::String(string) => Ok(Token::from(string)),
 			value => {

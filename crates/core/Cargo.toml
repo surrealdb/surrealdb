@@ -134,6 +134,7 @@ num_cpus.workspace = true
 num-traits.workspace = true
 object_store.workspace = true
 parking_lot.workspace = true
+papaya.workspace = true
 path-clean.workspace = true
 pbkdf2 = { workspace = true, features = ["simple"] }
 phf = { workspace = true, features = ["macros", "unicase"] }

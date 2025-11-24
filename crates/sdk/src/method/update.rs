@@ -3,7 +3,6 @@ use std::future::IntoFuture;
 use std::marker::PhantomData;
 use std::ops::Bound;
 
-use surrealdb_types::{self, RecordId, RecordIdKeyRange, SurrealValue, Value, Variables};
 use uuid::Uuid;
 
 use super::transaction::WithTransaction;
@@ -11,6 +10,7 @@ use super::validate_data;
 use crate::conn::Command;
 use crate::method::{BoxFuture, Content, Merge, OnceLockExt, Patch};
 use crate::opt::{PatchOps, Resource};
+use crate::types::{RecordId, RecordIdKeyRange, SurrealValue, Value, Variables};
 use crate::{Connection, Error, Result, Surreal};
 
 /// An update future
@@ -66,12 +66,12 @@ macro_rules! into_future {
 
 				router
 					.$method(
+						client.session_id,
 						Command::Query {
 							txn,
 							query: Cow::Owned(format!("UPDATE {what}")),
 							variables,
 						},
-						client.session_id,
 					)
 					.await
 			})

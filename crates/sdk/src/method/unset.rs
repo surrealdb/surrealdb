@@ -39,10 +39,10 @@ where
 			let router = self.client.inner.router.extract()?;
 			router
 				.execute_unit(
+					self.client.session_id,
 					Command::Unset {
 						key: self.key,
 					},
-					self.client.session_id,
 				)
 				.await
 		})

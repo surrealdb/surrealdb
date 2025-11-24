@@ -1,10 +1,9 @@
 use std::borrow::Cow;
 use std::future::IntoFuture;
 
-use surrealdb_types::Value;
-
 use crate::conn::Command;
 use crate::method::{BoxFuture, OnceLockExt};
+use crate::types::Value;
 use crate::{Connection, Result, Surreal};
 
 /// A set future
@@ -42,11 +41,11 @@ where
 			let router = self.client.inner.router.extract()?;
 			router
 				.execute_unit(
+					self.client.session_id,
 					Command::Set {
 						key: self.key,
 						value: self.value,
 					},
-					self.client.session_id,
 				)
 				.await
 		})

@@ -76,12 +76,15 @@ trice = { workspace = true, optional = true }
 # Other crates
 arrayvec.workspace = true
 bincode.workspace = true
+boxcar.workspace = true
 async-channel.workspace = true
 castaway.workspace = true
+dashmap.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 futures.workspace = true
 geo = { workspace = true, features = ["use-serde"] }
 indexmap = { workspace = true, features = ["serde"] }
+papaya.workspace = true
 path-clean.workspace = true
 rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
 semver = { workspace = true, features = ["serde"] }

@@ -1,11 +1,10 @@
 use std::borrow::Cow;
 use std::future::IntoFuture;
 
-use surrealdb_types::Value;
-
 use crate::conn::Command;
 use crate::method::{BoxFuture, OnceLockExt};
 use crate::opt::auth::Token;
+use crate::types::Value;
 use crate::{Connection, Result, Surreal};
 
 /// A signup future
@@ -47,10 +46,10 @@ where
 			let router = client.inner.router.extract()?;
 			router
 				.execute(
+					client.session_id,
 					Command::Signup {
 						credentials: credentials.into_object()?,
 					},
-					client.session_id,
 				)
 				.await
 		})

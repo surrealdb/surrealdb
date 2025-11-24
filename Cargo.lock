@@ -953,6 +953,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "boxcar"
+version = "0.2.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36f64beae40a84da1b4b26ff2761a5b895c12adc41dc25aaee1c4f2bbfe97a6e"
+
+[[package]]
 name = "brotli"
 version = "8.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4709,6 +4715,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 
 [[package]]
+name = "papaya"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f92dd0b07c53a0a0c764db2ace8c541dc47320dad97c2200c2a637ab9dd2328f"
+dependencies = [
+ "equivalent",
+ "seize",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6315,6 +6331,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "seize"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b55fb86dfd3a2f5f76ea78310a88f96c4ea21a3031f8d212443d56123fd0521"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "semver"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6777,10 +6803,12 @@ dependencies = [
  "arrayvec",
  "async-channel",
  "bincode",
+ "boxcar",
  "castaway",
  "chrono",
  "ciborium",
  "criterion",
+ "dashmap",
  "dmp",
  "env_logger",
  "flate2",
@@ -6792,6 +6820,7 @@ dependencies = [
  "js-sys",
  "nanoid",
  "native-tls",
+ "papaya",
  "parking_lot",
  "path-clean",
  "pharos",
@@ -6889,6 +6918,7 @@ dependencies = [
  "num-traits",
  "num_cpus",
  "object_store",
+ "papaya",
  "parking_lot",
  "path-clean",
  "pbkdf2",
@@ -7044,6 +7074,7 @@ dependencies = [
  "opentelemetry_sdk",
  "ort",
  "ort-sys",
+ "papaya",
  "pin-project-lite",
  "pprof",
  "rand 0.8.5",
@@ -7122,6 +7153,7 @@ dependencies = [
  "hex",
  "http 1.3.1",
  "nanoid",
+ "papaya",
  "regex",
  "rquickjs",
  "rstest",

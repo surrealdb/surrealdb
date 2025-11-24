@@ -69,9 +69,6 @@ vart = "0.9.3"
 ## Maintained by @Delskayn
 js = { version = "0.9.0", package = "rquickjs" }
 reblessive = "0.4.3"
-## Maintained by @rushmorem
-ipnet = "2.11.0"
-serde-content = "0.1.0"
 
 # External Kv stores
 rocksdb = { version = "0.24.0-surreal.1", package = "surrealdb-rocksdb", features = ["lz4", "snappy"] }
@@ -97,6 +94,7 @@ base64 = "0.21.5"
 bcrypt = "0.15.0"
 bincode = "1.3.3"
 blake3 = "1.5.3"
+boxcar = "0.2.14"
 bytes = "1.5.0"
 castaway = "0.2.3"
 chrono = "0.4.38"
@@ -118,6 +116,7 @@ http = "1.1.0"
 hyper = "=1.6.0"
 humantime = "2.3.0"
 indexmap = "2.1.0"
+ipnet = "2.11.0"
 jemallocator = { version = "0.6.0", package = "tikv-jemallocator" }
 jsonwebtoken = "9.3.0"
 linfa-linalg = "=0.2.1"
@@ -131,6 +130,7 @@ num_cpus = "1.16.0"
 object_store = "0.12.0"
 ort = "=2.0.0-rc.9"
 ort-sys = "=2.0.0-rc.9"
+papaya = "0.2.3"
 parking_lot = "0.12.3"
 path-clean = "1.0.1"
 pbkdf2 = "0.12.2"

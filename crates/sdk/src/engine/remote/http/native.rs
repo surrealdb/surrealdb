@@ -1,31 +1,19 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::atomic::AtomicI64;
+use std::collections::HashSet;
+use std::sync::Arc;
 
 use async_channel::Receiver;
-use indexmap::IndexMap;
 use reqwest::ClientBuilder;
-use reqwest::header::HeaderMap;
 use surrealdb_core::cnf::SURREALDB_USER_AGENT;
 use tokio::sync::watch;
-use url::Url;
-use uuid::Uuid;
 
-use super::{Auth, Client};
+use super::{Client, RouterState};
 use crate::conn::{Route, Router};
+use crate::engine::SessionError;
 use crate::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::opt::Tls;
 use crate::opt::{Endpoint, WaitFor};
-use crate::types::Value;
-use crate::{ExtraFeatures, Result, SessionClone, SessionId, Surreal, conn};
-
-/// Per-session state for HTTP connections
-#[derive(Debug, Default, Clone)]
-struct SessionState {
-	headers: HeaderMap,
-	vars: IndexMap<String, Value>,
-	auth: Option<Auth>,
-}
+use crate::{conn, Error, ExtraFeatures, Result, SessionClone, SessionId, Surreal};
 
 impl crate::Connection for Client {}
 impl conn::Sealed for Client {
@@ -67,7 +55,7 @@ impl conn::Sealed for Client {
 			};
 			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 
-			tokio::spawn(run_router(base_url, client, route_rx, session_clone.receiver.clone()));
+			tokio::spawn(run_router(client, base_url, route_rx, session_clone.receiver.clone()));
 
 			let mut features = HashSet::new();
 			features.insert(ExtraFeatures::Backup);
@@ -77,7 +65,6 @@ impl conn::Sealed for Client {
 				features,
 				config,
 				sender: route_tx,
-				last_id: AtomicI64::new(0),
 			};
 
 			Ok((router, waiter, session_clone).into())
@@ -85,48 +72,13 @@ impl conn::Sealed for Client {
 	}
 }
 
-/// Send a clone_session RPC request to the server asynchronously
-async fn send_clone_session_request(
-	from: Option<uuid::Uuid>,
-	to: uuid::Uuid,
+pub(crate) async fn run_router(
 	client: reqwest::Client,
 	base_url: url::Url,
-) {
-	use surrealdb_types::{Array, SurrealValue, Uuid as SurrealUuid, Value};
-
-	let from_value = match from {
-		Some(id) => Value::Uuid(SurrealUuid(id)),
-		None => Value::None,
-	};
-
-	let request = crate::conn::cmd::RouterRequest {
-		id: None, // Fire and forget - we don't wait for response
-		method: "clone_session",
-		params: Some(Value::Array(Array::from(vec![from_value, Value::Uuid(SurrealUuid(to))]))),
-		txn: None,
-		session_id: None, // Session cloning doesn't use a session ID
-	};
-
-	let request_value = request.into_value();
-	let payload = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
-		.expect("router request should serialize");
-
-	let result = client.post(base_url.join("rpc").expect("valid URL")).body(payload).send().await;
-
-	if let Err(error) = result {
-		warn!("Failed to send clone_session request to server: {error}");
-	}
-}
-
-pub(crate) async fn run_router(
-	base_url: Url,
-	client: reqwest::Client,
 	route_rx: Receiver<Route>,
 	session_rx: Receiver<SessionId>,
 ) {
-	// Store per-session state
-	let mut sessions: HashMap<Option<Uuid>, SessionState> = HashMap::new();
-
+	let state = Arc::new(RouterState::new(client, base_url));
 	loop {
 		tokio::select! {
 			biased;
@@ -136,18 +88,15 @@ pub(crate) async fn run_router(
 					break
 				};
 				match session_id {
-				SessionId::Initial(session_id) => {
-					sessions.entry(Some(session_id)).or_default();
-					// Clone from default session
-					send_clone_session_request(None, session_id, client.clone(), base_url.clone()).await;
-				}
-				SessionId::Clone { old, new } => {
-					// Clone the local session state
-					let old_state = sessions.get(&Some(old)).cloned().unwrap_or_default();
-					sessions.insert(Some(new), old_state);
-					// Send clone_session RPC request to server
-					send_clone_session_request(Some(old), new, client.clone(), base_url.clone()).await;
-				}
+					SessionId::Initial(session_id) => {
+						state.handle_session_initial(session_id).await;
+					}
+					SessionId::Clone { old, new } => {
+						state.handle_session_clone(old, new).await;
+					}
+					SessionId::Drop(session_id) => {
+						state.handle_session_drop(session_id).await;
+					}
 				}
 			}
 			route = route_rx.recv() => {
@@ -156,22 +105,44 @@ pub(crate) async fn run_router(
 				};
 
 				let session_id = route.request.session_id;
+				let command = route.request.command.clone();
 
-				// Get or create session state for this session_id
-				let session_state = sessions.entry(session_id).or_default();
+				// Get session state for this session_id
+				let session_state = match state.sessions.get(&session_id) {
+					Some(Ok(state)) => state,
+					Some(Err(error)) => {
+						route.response.send(Err(Error::from(error).into())).await.ok();
+						continue;
+					}
+					None => {
+						let error = Error::from(SessionError::NotFound(session_id));
+						route.response.send(Err(error.into())).await.ok();
+						continue;
+					}
+				};
 
-				let result = super::router(
-					route.request,
-					&base_url,
-					&client,
-					&mut session_state.headers,
-					&mut session_state.vars,
-					&mut session_state.auth,
-				)
-				.await;
-				// Convert api::err::Error to DbResultError
-				let db_result = result.map_err(surrealdb_core::rpc::DbResultError::from);
-				let _ = route.response.send(db_result).await;
+				// Spawn the request handling in a background task
+				// SessionState uses RwLock internally, so we can share the Arc directly
+				let router_state = state.clone();
+				tokio::spawn(async move {
+					let result = super::router(
+						route.request,
+						&router_state.base_url,
+						&router_state.client,
+						&session_state,
+					)
+					.await;
+
+					// On success, add replayable commands to the replay list
+					// boxcar::Vec is lock-free, so this is safe to do concurrently
+					if result.is_ok() && command.replayable() {
+						session_state.replay.push(command);
+					}
+
+					// Convert api::err::Error to DbResultError
+					let db_result = result.map_err(surrealdb_core::rpc::DbResultError::from);
+					route.response.send(db_result).await.ok();
+				});
 			}
 		}
 	}

@@ -2295,10 +2295,11 @@ pub async fn rpc_capability(cfg_server: Option<Format>, cfg_format: Format) {
 	}
 	// Deny all
 	{
-		// Start server disallowing all RPC methods except for version and use
+		// Start server disallowing all RPC methods except for version, use, and attach
+		// attach is required for the SDK to establish a session
 		let (addr, mut server) = common::start_server(StartServerArguments {
 			// Deny all routes except for RPC
-			args: "--deny-rpc --allow-rpc version,use".to_string(),
+			args: "--deny-rpc --allow-rpc version,use,attach".to_string(),
 			// Auth disabled to ensure unauthorized errors are due to capabilities
 			auth: false,
 			..Default::default()
@@ -2437,8 +2438,8 @@ pub async fn multi_session_isolation(cfg_server: Option<Format>, cfg_format: For
 	let session1 = "11111111-1111-1111-1111-111111111111";
 	let session2 = "22222222-2222-2222-2222-222222222222";
 
-	socket.send_request("clone_session", json!([null, session1])).await.unwrap();
-	socket.send_request("clone_session", json!([null, session2])).await.unwrap();
+	socket.send_request_with_session("attach", json!([]), session1).await.unwrap();
+	socket.send_request_with_session("attach", json!([]), session2).await.unwrap();
 
 	// Test 1: Variable isolation between named sessions
 	// Setup session1 with auth and namespace/database
@@ -2530,8 +2531,8 @@ pub async fn multi_session_authentication(cfg_server: Option<Format>, cfg_format
 	let session1 = "11111111-1111-1111-1111-111111111111";
 	let session2 = "22222222-2222-2222-2222-222222222222";
 
-	socket.send_request("clone_session", json!([null, session1])).await.unwrap();
-	socket.send_request("clone_session", json!([null, session2])).await.unwrap();
+	socket.send_request_with_session("attach", json!([]), session1).await.unwrap();
+	socket.send_request_with_session("attach", json!([]), session2).await.unwrap();
 
 	// Authenticate session 1 as root user
 	let res = socket
@@ -2590,9 +2591,9 @@ pub async fn multi_session_management(cfg_server: Option<Format>, cfg_format: Fo
 	assert_eq!(res["result"].as_array().unwrap().len(), 0, "Expected no sessions initially");
 
 	// Test 2: Create sessions with proper authentication and namespace/database setup
-	socket.send_request("clone_session", json!([null, session1])).await.unwrap();
-	socket.send_request("clone_session", json!([null, session2])).await.unwrap();
-	socket.send_request("clone_session", json!([null, session3])).await.unwrap();
+	socket.send_request_with_session("attach", json!([]), session1).await.unwrap();
+	socket.send_request_with_session("attach", json!([]), session2).await.unwrap();
+	socket.send_request_with_session("attach", json!([]), session3).await.unwrap();
 	let res = socket.send_request("sessions", json!([])).await.unwrap();
 	let sessions = res["result"].as_array().unwrap();
 	assert_eq!(sessions.len(), 3, "Expected 3 sessions");

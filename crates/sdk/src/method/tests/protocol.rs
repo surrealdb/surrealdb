@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::OnceLock;
-use std::sync::atomic::AtomicI64;
 
 use tokio::sync::watch;
 use url::Url;
@@ -59,7 +58,6 @@ impl conn::Sealed for Client {
 				features,
 				sender: route_tx,
 				config: address.config,
-				last_id: AtomicI64::new(0),
 			};
 			server::mock(route_rx);
 			let session_clone = session_clone.unwrap_or_else(SessionClone::new);

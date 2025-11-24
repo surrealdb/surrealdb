@@ -1,10 +1,8 @@
-use std::mem;
 use std::sync::Arc;
 
 use anyhow::{Result, ensure};
-use arc_swap::ArcSwap;
-use dashmap::DashMap;
-use tokio::sync::Semaphore;
+use surrealdb_types::HashMap;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
@@ -48,8 +46,6 @@ fn singular(value: &PublicValue) -> bool {
 pub trait RpcProtocol {
 	/// The datastore for this RPC interface
 	fn kvs(&self) -> &Datastore;
-	/// Retrieves the modification lock for this RPC context
-	fn lock(&self) -> Arc<Semaphore>;
 	/// The version information for this RPC context
 	fn version_data(&self) -> DbResult;
 
@@ -58,43 +54,46 @@ pub trait RpcProtocol {
 	// ------------------------------
 
 	/// A pointer to all active sessions
-	fn session_map(&self) -> &DashMap<Option<Uuid>, ArcSwap<Session>>;
+	fn session_map(&self) -> &HashMap<Option<Uuid>, Arc<RwLock<Session>>>;
 
-	/// Clones an existing session to a new session ID
-	///
-	/// # Arguments
-	/// * `from` - The session ID to clone from (None = default session)
-	/// * `to` - The new session ID to create
-	fn clone_session(&self, from: &Option<Uuid>, to: Uuid) -> Result<(), RpcError> {
-		let sessions = self.session_map();
-		// Check if destination session already exists
-		if sessions.contains_key(&Some(to)) {
-			return Err(RpcError::SessionExists(to));
+	/// Registers a new session with the given ID
+	async fn attach(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
+		let mut session = Session::default().with_rt(Self::LQ_SUPPORT);
+		session.id = session_id;
+		match session_id {
+			Some(id) => {
+				if self.session_map().contains_key(&Some(id)) {
+					return Err(RpcError::SessionExists(id));
+				}
+				self.session_map().insert(Some(id), Arc::new(RwLock::new(session)));
+				Ok(DbResult::Other(PublicValue::None))
+			}
+			None => Err(RpcError::InvalidParams("Expected a session ID".to_string())),
 		}
+	}
 
-		// Get the source session to clone from
-		let source =
-			sessions.get(from).map(|s| s.load_full()).ok_or(RpcError::SessionNotFound(*from))?;
-
-		// Clone the session (includes ns, db, auth, everything)
-		let cloned = Arc::new(source.as_ref().clone());
-
-		// Store the cloned session with the new ID
-		sessions.insert(Some(to), ArcSwap::from(cloned));
-		Ok(())
+	/// Detaches a session from the given ID
+	async fn detach(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
+		match session_id {
+			Some(id) => {
+				self.del_session(&id);
+				Ok(DbResult::Other(PublicValue::None))
+			}
+			None => Err(RpcError::InvalidParams("Expected a session ID".to_string())),
+		}
 	}
 
 	/// The current session for this RPC context
-	fn get_session(&self, id: &Option<Uuid>) -> Result<Arc<Session>, RpcError> {
+	fn get_session(&self, id: &Option<Uuid>) -> Result<Arc<RwLock<Session>>, RpcError> {
 		match self.session_map().get(id) {
-			Some(session) => Ok(session.load_full()),
+			Some(session) => Ok(session),
 			None => Err(RpcError::SessionNotFound(*id)),
 		}
 	}
 
 	/// Mutable access to the current session for this RPC context
-	fn set_session(&self, id: Option<Uuid>, session: Arc<Session>) {
-		self.session_map().insert(id, ArcSwap::from(session));
+	fn set_session(&self, id: Option<Uuid>, session: Arc<RwLock<Session>>) {
+		self.session_map().insert(id, session);
 	}
 
 	/// Deletes a session
@@ -106,8 +105,9 @@ pub trait RpcProtocol {
 	async fn sessions(&self) -> Result<DbResult, RpcError> {
 		let array = self
 			.session_map()
-			.iter()
-			.filter_map(|x| *x.key())
+			.to_vec()
+			.into_iter()
+			.filter_map(|(key, _)| key)
 			.map(|x| PublicValue::Uuid(PublicUuid(x)))
 			.collect();
 		Ok(DbResult::Other(PublicValue::Array(array)))
@@ -197,42 +197,8 @@ pub trait RpcProtocol {
 			Method::Commit => self.commit(txn, session, params).await,
 			Method::Cancel => self.cancel(txn, session, params).await,
 			Method::Sessions => self.sessions().await,
-			Method::CloneSession => {
-				// Process the method arguments
-				let (from, to) = extract_args::<(PublicValue, PublicValue)>(params.into_vec())
-					.ok_or_else(|| RpcError::InvalidParams("Expected (from, to)".to_string()))?;
-
-				// Parse the from parameter (can be null/none for default session)
-				let from = match from {
-					PublicValue::None | PublicValue::Null => None,
-					PublicValue::Uuid(PublicUuid(id)) => Some(id),
-					PublicValue::String(id) => Some(Uuid::parse_str(&id).map_err(|_| {
-						RpcError::InvalidParams(format!("Invalid UUID string: {id}"))
-					})?),
-					unexpected => {
-						return Err(RpcError::InvalidParams(format!(
-							"Expected from to be uuid or null, got {unexpected:?}"
-						)));
-					}
-				};
-
-				// Parse the to parameter (must be a uuid)
-				let to = match to {
-					PublicValue::Uuid(PublicUuid(id)) => id,
-					PublicValue::String(id) => Uuid::parse_str(&id).map_err(|_| {
-						RpcError::InvalidParams(format!("Invalid UUID string: {id}"))
-					})?,
-					unexpected => {
-						return Err(RpcError::InvalidParams(format!(
-							"Expected to to be uuid, got {unexpected:?}"
-						)));
-					}
-				};
-
-				// Clone the session
-				self.clone_session(&from, to)?;
-				Ok(DbResult::Other(PublicValue::None))
-			}
+			Method::Attach => self.attach(session).await,
+			Method::Detach => self.detach(session).await,
 			// Deprecated methods
 			Method::Select => self.select(txn, session, params).await,
 			Method::Insert => self.insert(txn, session, params).await,
@@ -258,23 +224,25 @@ pub trait RpcProtocol {
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
-		let session = self.get_session(&session_id)?;
-		// Check if the user is allowed to query
-		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
+		let session_lock = self.get_session(&session_id)?;
+
+		// Check permissions with read lock
+		{
+			let session = session_lock.read().await;
+			// Check if the user is allowed to query
+			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
+				return Err(RpcError::MethodNotAllowed);
+			}
 		}
+
 		// For both ns+db, string = change, null = unset, none = do nothing
 		// We need to be able to adjust either ns or db without affecting the other
 		// To be able to select a namespace, and then list resources in that namespace,
 		// as an example
 		let (ns, db) = extract_args::<(PublicValue, PublicValue)>(params.into_vec())
 			.ok_or(RpcError::InvalidParams("Expected (ns, db)".to_string()))?;
-		// Get the context lock
-		let mutex = self.lock().clone();
-		// Lock the context for update
-		let guard = mutex.acquire().await;
-		// Clone the current session
-		let mut session = session.as_ref().clone();
+		// Get a write lock on the session to modify it
+		let mut session = session_lock.write().await;
 		// Update the selected namespace
 		match ns {
 			PublicValue::None => (),
@@ -315,10 +283,6 @@ pub trait RpcProtocol {
 		if session.ns.is_none() && session.db.is_some() {
 			session.db = None;
 		}
-		// Store the updated session
-		self.set_session(session_id, Arc::new(session));
-		// Drop the mutex guard
-		mem::drop(guard);
 		// Return nothing
 		Ok(DbResult::Other(PublicValue::None))
 	}
@@ -332,22 +296,14 @@ pub trait RpcProtocol {
 		let Some(PublicValue::Object(params)) = extract_args(params.into_vec()) else {
 			return Err(RpcError::InvalidParams("Expected (params:object)".to_string()));
 		};
-		// Get the context lock
-		let mutex = self.lock().clone();
-		// Lock the context for update
-		let guard = mutex.acquire().await;
-		// Clone the current session
-		let mut session = self.get_session(&session_id)?.as_ref().clone();
+		// Get a write lock on the session
+		let session_lock = self.get_session(&session_id)?;
+		let mut session = session_lock.write().await;
 		// Attempt signup, mutating the session
 		let out: Result<PublicValue> =
 			crate::iam::signup::signup(self.kvs(), &mut session, params.into())
 				.await
 				.map(SurrealValue::into_value);
-
-		// Store the updated session
-		self.set_session(session_id, Arc::new(session));
-		// Drop the mutex guard
-		mem::drop(guard);
 		// Return the signup result
 		out.map(DbResult::Other).map_err(Into::into)
 	}
@@ -361,21 +317,14 @@ pub trait RpcProtocol {
 		let Some(PublicValue::Object(params)) = extract_args(params.into_vec()) else {
 			return Err(RpcError::InvalidParams("Expected (params:object)".to_string()));
 		};
-		// Get the context lock
-		let mutex = self.lock().clone();
-		// Lock the context for update
-		let guard = mutex.acquire().await;
-		// Clone the current session
-		let mut session = self.get_session(&session_id)?.as_ref().clone();
+		// Get a write lock on the session
+		let session_lock = self.get_session(&session_id)?;
+		let mut session = session_lock.write().await;
 		// Attempt signin, mutating the session
 		let out: Result<PublicValue> =
 			crate::iam::signin::signin(self.kvs(), &mut session, params.into())
 				.await
 				.map(SurrealValue::into_value);
-		// Store the updated session
-		self.set_session(session_id, Arc::new(session));
-		// Drop the mutex guard
-		mem::drop(guard);
 		// Return the signin result
 		out.map(DbResult::Other).map_err(From::from)
 	}
@@ -389,21 +338,14 @@ pub trait RpcProtocol {
 		let Some(PublicValue::String(token)) = extract_args(params.into_vec()) else {
 			return Err(RpcError::InvalidParams("Expected (token:string)".to_string()));
 		};
-		// Get the context lock
-		let mutex = self.lock().clone();
-		// Lock the context for update
-		let guard = mutex.acquire().await;
-		// Clone the current session
-		let mut session = self.get_session(&session_id)?.as_ref().clone();
+		// Get a write lock on the session
+		let session_lock = self.get_session(&session_id)?;
+		let mut session = session_lock.write().await;
 		// Attempt authentication, mutating the session
 		let out: Result<PublicValue> =
 			crate::iam::verify::token(self.kvs(), &mut session, token.as_str())
 				.await
 				.map(|_| PublicValue::None);
-		// Store the updated session
-		self.set_session(session_id, Arc::new(session));
-		// Drop the mutex guard
-		mem::drop(guard);
 		// Return nothing on success
 		out.map(DbResult::Other).map_err(From::from)
 	}
@@ -447,12 +389,9 @@ pub trait RpcProtocol {
 		let Ok(token) = Token::from_value(value) else {
 			return Err(unexpected());
 		};
-		// Get the context lock
-		let mutex = self.lock().clone();
-		// Lock the context for update
-		let guard = mutex.acquire().await;
-		// Clone the current session
-		let mut session = self.get_session(&session_id)?.as_ref().clone();
+		// Get a write lock on the session
+		let session_lock = self.get_session(&session_id)?;
+		let mut session = session_lock.write().await;
 		// Attempt token refresh, which will:
 		// - Validate the refresh token
 		// - Revoke the old refresh token
@@ -460,27 +399,16 @@ pub trait RpcProtocol {
 		// - Update the session with the new authentication state
 		let out: Result<PublicValue> =
 			token.refresh(self.kvs(), &mut session).await.map(Token::into_value);
-		// Store the updated session
-		self.set_session(session_id, Arc::new(session));
-		// Drop the mutex guard
-		mem::drop(guard);
 		// Return the new token pair
 		out.map(DbResult::Other).map_err(From::from)
 	}
 
 	async fn invalidate(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
-		// Get the context lock
-		let mutex = self.lock().clone();
-		// Lock the context for update
-		let guard = mutex.acquire().await;
-		// Clone the current session
-		let mut session = self.get_session(&session_id)?.as_ref().clone();
+		// Get a write lock on the session
+		let session_lock = self.get_session(&session_id)?;
+		let mut session = session_lock.write().await;
 		// Clear the current session
 		crate::iam::clear::clear(&mut session)?;
-		// Store the updated session
-		self.set_session(session_id, Arc::new(session));
-		// Drop the mutex guard
-		mem::drop(guard);
 		// Return nothing on success
 		Ok(DbResult::Other(PublicValue::None))
 	}
@@ -529,22 +457,15 @@ pub trait RpcProtocol {
 	}
 
 	async fn reset(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
-		// Get the context lock
-		let mutex = self.lock().clone();
-		// Lock the context for update
-		let guard = mutex.acquire().await;
 		if let Some(session_id) = session_id {
 			self.del_session(&session_id);
 		} else {
-			// Clone the current session
-			let mut session = self.get_session(&session_id)?.as_ref().clone();
+			// Get a write lock on the session
+			let session_lock = self.get_session(&session_id)?;
+			let mut session = session_lock.write().await;
 			// Reset the current session
 			crate::iam::reset::reset(&mut session);
-			// Store the updated session
-			self.set_session(session_id, Arc::new(session));
 		}
-		// Drop the mutex guard
-		mem::drop(guard);
 		// Cleanup live queries
 		self.cleanup_lqs(session_id.as_ref()).await;
 		// Return nothing on success
@@ -560,7 +481,8 @@ pub trait RpcProtocol {
 		_txn: Option<Uuid>,
 		session_id: Option<Uuid>,
 	) -> Result<DbResult, RpcError> {
-		let session = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id)?;
+		let session = session_lock.read().await;
 		let vars = Some(session.variables.clone());
 		let mut res = self.kvs().execute("SELECT * FROM $auth", &session, vars).await?;
 
@@ -579,11 +501,17 @@ pub trait RpcProtocol {
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
-		let session = self.get_session(&session_id)?;
-		// Check if the user is allowed to query
-		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
+		let session_lock = self.get_session(&session_id)?;
+
+		// Check permissions with read lock
+		{
+			let session = session_lock.read().await;
+			// Check if the user is allowed to query
+			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
+				return Err(RpcError::MethodNotAllowed);
+			}
 		}
+
 		// Process the method arguments
 		let Some((PublicValue::String(key), val)) =
 			extract_args::<(PublicValue, Option<PublicValue>)>(params.into_vec())
@@ -591,9 +519,8 @@ pub trait RpcProtocol {
 			return Err(RpcError::InvalidParams("Expected (key:string, value:Value)".to_string()));
 		};
 
-		let mutex = self.lock();
-		let guard = mutex.acquire().await.expect("mutex should not be poisoned");
-		let mut session = session.as_ref().clone();
+		// Get a write lock on the session
+		let mut session = session_lock.write().await;
 
 		if session.expired() {
 			return Err(anyhow::Error::new(Error::ExpiredSession).into());
@@ -606,9 +533,6 @@ pub trait RpcProtocol {
 				session.variables.insert(key, val)
 			}
 		}
-		self.set_session(session_id, Arc::new(session));
-
-		mem::drop(guard);
 
 		// Return nothing
 		Ok(DbResult::Other(PublicValue::Null))
@@ -619,23 +543,25 @@ pub trait RpcProtocol {
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
-		let session = self.get_session(&session_id)?;
-		// Check if the user is allowed to query
-		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
-			return Err(RpcError::MethodNotAllowed);
+		let session_lock = self.get_session(&session_id)?;
+
+		// Check permissions with read lock
+		{
+			let session = session_lock.read().await;
+			// Check if the user is allowed to query
+			if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
+				return Err(RpcError::MethodNotAllowed);
+			}
 		}
+
 		// Process the method arguments
 		let Some(PublicValue::String(key)) = extract_args(params.into_vec()) else {
 			return Err(RpcError::InvalidParams("Expected (key)".to_string()));
 		};
 
-		// Get the context lock
-		let mutex = self.lock().clone();
-		let guard = mutex.acquire().await;
-		let mut session = session.as_ref().clone();
+		// Get a write lock on the session
+		let mut session = session_lock.write().await;
 		session.variables.remove(key.as_str());
-		self.set_session(session_id, Arc::new(session));
-		mem::drop(guard);
 
 		Ok(DbResult::Other(PublicValue::Null))
 	}
@@ -650,7 +576,8 @@ pub trait RpcProtocol {
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
-		let session = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id)?;
+		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -679,7 +606,8 @@ pub trait RpcProtocol {
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
-		let session = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id)?;
+		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -731,7 +659,8 @@ pub trait RpcProtocol {
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
-		let session = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id)?;
+		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -794,7 +723,8 @@ pub trait RpcProtocol {
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
-		let session = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id)?;
+		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -823,7 +753,7 @@ pub trait RpcProtocol {
 		};
 		let ast = Ast::single_expr(Expr::Insert(Box::new(sql)));
 		// Specify the query parameters
-		let var = Some(self.get_session(&session_id)?.variables.clone());
+		let var = Some(session.variables.clone());
 		// Execute the query on the database
 		let mut res = run_query(self, txn, session_id, QueryForm::Parsed(ast), var).await?;
 		// Extract the first query result
@@ -837,7 +767,8 @@ pub trait RpcProtocol {
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
-		let session = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id)?;
+		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -886,7 +817,8 @@ pub trait RpcProtocol {
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
-		let session = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id)?;
+		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -939,7 +871,8 @@ pub trait RpcProtocol {
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
-		let session = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id)?;
+		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -995,7 +928,8 @@ pub trait RpcProtocol {
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
-		let session = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id)?;
+		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -1034,7 +968,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(ast, session.as_ref(), var).await?;
+		let mut res = self.kvs().process(ast, &session, var).await?;
 		// Extract the first query result
 		let first = res.remove(0).result?;
 		Ok(DbResult::Other(first))
@@ -1050,7 +984,8 @@ pub trait RpcProtocol {
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
-		let session = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id)?;
+		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -1101,7 +1036,8 @@ pub trait RpcProtocol {
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
-		let session = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id)?;
+		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -1152,7 +1088,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(Ast::single_expr(expr), session.as_ref(), var).await?;
+		let mut res = self.kvs().process(Ast::single_expr(expr), &session, var).await?;
 		// Extract the first query result
 		let first = res.remove(0).result?;
 		Ok(DbResult::Other(first))
@@ -1168,7 +1104,8 @@ pub trait RpcProtocol {
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
-		let session = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id)?;
+		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -1210,7 +1147,7 @@ pub trait RpcProtocol {
 		// Specify the query parameters
 		let var = Some(session.variables.clone());
 		// Execute the query on the database
-		let mut res = self.kvs().process(Ast::single_expr(expr), session.as_ref(), var).await?;
+		let mut res = self.kvs().process(Ast::single_expr(expr), &session, var).await?;
 		// Extract the first query result
 		let first = res.remove(0).result?;
 		Ok(DbResult::Other(first))
@@ -1226,7 +1163,8 @@ pub trait RpcProtocol {
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
-		let session = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id)?;
+		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -1276,7 +1214,8 @@ pub trait RpcProtocol {
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
-		let session = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id)?;
+		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -1319,7 +1258,8 @@ pub trait RpcProtocol {
 		session_id: Option<Uuid>,
 		params: PublicArray,
 	) -> Result<DbResult, RpcError> {
-		let session = self.get_session(&session_id)?;
+		let session_lock = self.get_session(&session_id)?;
+		let session = session_lock.read().await;
 		// Check if the user is allowed to query
 		if !self.kvs().allows_query_by_subject(session.au.as_ref()) {
 			return Err(RpcError::MethodNotAllowed);
@@ -1514,7 +1454,8 @@ async fn run_query<T>(
 where
 	T: RpcProtocol + ?Sized,
 {
-	let session = this.get_session(&session_id)?;
+	let session_lock = this.get_session(&session_id)?;
+	let session = session_lock.read().await;
 	ensure!(T::LQ_SUPPORT || !session.rt, RpcError::BadLQConfig);
 
 	// If a transaction UUID is provided, retrieve it and execute with it

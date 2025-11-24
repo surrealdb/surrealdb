@@ -2,7 +2,6 @@ use core::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use arc_swap::ArcSwap;
 use axum::extract::ws::close_code::AGAIN;
 use axum::extract::ws::{CloseFrame, Message, WebSocket};
 use bytes::Bytes;
@@ -16,8 +15,8 @@ use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
 use surrealdb_core::mem::ALLOC;
 use surrealdb_core::rpc::format::Format;
 use surrealdb_core::rpc::{DbResponse, DbResult, DbResultError, Method, RpcProtocol};
-use surrealdb_types::{Array, Value};
-use tokio::sync::Semaphore;
+use surrealdb_types::{Array, HashMap, Value};
+use tokio::sync::RwLock;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -50,10 +49,8 @@ pub struct Websocket {
 	pub(crate) state: Arc<RpcState>,
 	/// The datastore accessible to all RPC WebSocket connections
 	pub(crate) datastore: Arc<Datastore>,
-	/// Whether this WebSocket is locked
-	pub(crate) lock: Arc<Semaphore>,
 	/// The active sessions for this WebSocket connection
-	pub(crate) sessions: DashMap<Option<Uuid>, ArcSwap<Session>>,
+	pub(crate) sessions: HashMap<Option<Uuid>, Arc<RwLock<Session>>>,
 	/// The active transactions for this WebSocket connection
 	pub(crate) transactions: DashMap<Uuid, Arc<Transaction>>,
 	/// A cancellation token called when shutting down the server
@@ -83,16 +80,17 @@ impl Websocket {
 			id,
 			format,
 			state: state.clone(),
-			lock: Arc::new(Semaphore::new(1)),
 			shutdown: CancellationToken::new(),
 			canceller: CancellationToken::new(),
-			sessions: DashMap::new(),
+			sessions: HashMap::new(),
 			transactions: DashMap::new(),
 			channel: sender.clone(),
 			datastore,
 		});
 		// Store the default session with None key
-		rpc.sessions.insert(None, ArcSwap::from(Arc::new(session)));
+		// Enable realtime queries for WebSocket connections
+		let session = session.with_rt(true);
+		rpc.set_session(None, Arc::new(RwLock::new(session)));
 		// Add this WebSocket to the list
 		state.web_sockets.write().await.insert(id, rpc.clone());
 		// Start telemetry metrics for this connection
@@ -367,7 +365,7 @@ impl Websocket {
 							if shutdown.is_cancelled() {
 								// Process the response
 								crate::rpc::response::send(
-									DbResponse::failure(req.id, DbResultError::InternalError(SERVER_SHUTTING_DOWN.to_string())),
+									DbResponse::failure(req.id, req.session_id.map(Into::into), DbResultError::InternalError(SERVER_SHUTTING_DOWN.to_string())),
 									otel_cx.clone(),
 									rpc.format,
 									chn
@@ -379,7 +377,7 @@ impl Websocket {
 							else if ALLOC.is_beyond_threshold() {
 								// Process the response
 								crate::rpc::response::send(
-									DbResponse::failure(req.id, DbResultError::InternalError(SERVER_OVERLOADED.to_string())),
+									DbResponse::failure(req.id, req.session_id.map(Into::into), DbResultError::InternalError(SERVER_OVERLOADED.to_string())),
 									otel_cx.clone(),
 									rpc.format,
 									chn
@@ -401,8 +399,8 @@ impl Websocket {
 
 								crate::rpc::response::send(
 									match result {
-										Ok(result) => DbResponse::success(req.id, result),
-										Err(err) => DbResponse::failure(req.id, err),
+										Ok(result) => DbResponse::success(req.id, req.session_id.map(Into::into), result),
+										Err(err) => DbResponse::failure(req.id, req.session_id.map(Into::into), err),
 									},
 									otel_cx.clone(),
 									rpc.format,
@@ -417,7 +415,7 @@ impl Websocket {
 				Err(err) => {
 					// Process the response
 					crate::rpc::response::send(
-						DbResponse::failure(None, err),
+						DbResponse::failure(None, None, err),
 						otel_cx.clone(),
 						rpc.format,
 						chn
@@ -474,11 +472,6 @@ impl RpcProtocol for Websocket {
 		&self.datastore
 	}
 
-	/// Retrieves the modification lock for this RPC context
-	fn lock(&self) -> Arc<Semaphore> {
-		self.lock.clone()
-	}
-
 	/// The version information for this RPC context
 	fn version_data(&self) -> DbResult {
 		let value = Value::String(format!("{PKG_NAME}-{}", *PKG_VERSION));
@@ -486,7 +479,7 @@ impl RpcProtocol for Websocket {
 	}
 
 	/// A pointer to all active sessions
-	fn session_map(&self) -> &DashMap<Option<Uuid>, ArcSwap<Session>> {
+	fn session_map(&self) -> &HashMap<Option<Uuid>, Arc<RwLock<Session>>> {
 		&self.sessions
 	}
 

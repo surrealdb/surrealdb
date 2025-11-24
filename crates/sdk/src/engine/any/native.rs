@@ -1,18 +1,15 @@
 use std::collections::HashSet;
-use std::sync::atomic::AtomicI64;
 
 // Removed anyhow::bail - using return Err() instead
 #[cfg(feature = "protocol-http")]
 use reqwest::ClientBuilder;
 use tokio::sync::watch;
 #[cfg(feature = "protocol-ws")]
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
+#[cfg(feature = "protocol-ws")]
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use tokio_tungstenite::Connector;
-#[cfg(feature = "protocol-ws")]
-use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 
-#[allow(unused_imports, reason = "Used by the DB engines.")]
-use crate::ExtraFeatures;
 use crate::conn::Router;
 #[allow(unused_imports, reason = "Used by the DB engines.")]
 use crate::engine;
@@ -25,7 +22,9 @@ use crate::method::BoxFuture;
 #[cfg(feature = "protocol-http")]
 use crate::opt::Tls;
 use crate::opt::{Endpoint, EndpointKind, WaitFor};
-use crate::{Result, SessionClone, Surreal, conn};
+#[allow(unused_imports, reason = "Used by the DB engines.")]
+use crate::ExtraFeatures;
+use crate::{conn, Result, SessionClone, Surreal};
 impl crate::Connection for Any {}
 impl conn::Sealed for Any {
 	#[allow(
@@ -157,8 +156,8 @@ impl conn::Sealed for Any {
 						);
 						http::health(req).await?;
 						tokio::spawn(http::native::run_router(
-							base_url,
 							client,
+							base_url,
 							route_rx,
 							session_clone.receiver.clone(),
 						));
@@ -203,7 +202,6 @@ impl conn::Sealed for Any {
 						tokio::spawn(engine::remote::ws::native::run_router(
 							endpoint,
 							maybe_connector,
-							capacity,
 							config,
 							socket,
 							route_rx,
@@ -224,7 +222,6 @@ impl conn::Sealed for Any {
 				features,
 				config,
 				sender: route_tx,
-				last_id: AtomicI64::new(0),
 			};
 
 			Ok((router, waiter, session_clone).into())
