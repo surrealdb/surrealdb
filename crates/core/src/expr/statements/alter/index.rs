@@ -1,6 +1,9 @@
 use std::fmt::{self, Display, Write};
 use std::ops::Deref;
 
+use anyhow::Result;
+use uuid::Uuid;
+
 use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
@@ -9,8 +12,6 @@ use crate::err::Error;
 use crate::expr::{Base, Value};
 use crate::fmt::{EscapeKwIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
-use anyhow::Result;
-use uuid::Uuid;
 
 /// Represents an `ALTER INDEX` statement.
 ///
@@ -61,13 +62,7 @@ impl AlterIndexStatement {
 			txn.put_tb_index(ns, db, &self.table, &ix).await?;
 
 			// Refresh the table cache for indexes
-			let Some(tb) = txn.get_tb(ns, db, &self.table).await? else {
-				return Err(Error::TbNotFound {
-					name: self.table.to_string(),
-				}
-				.into());
-			};
-
+			let tb = txn.expect_tb(ns, db, &self.table).await?;
 			txn.put_tb(
 				ns_name,
 				db_name,
