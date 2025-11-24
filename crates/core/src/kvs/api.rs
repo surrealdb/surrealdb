@@ -496,8 +496,7 @@ pub trait Transactable: requirements::TransactionRequirements {
 	/// Get the current monotonic timestamp
 	#[cfg(test)]
 	async fn timestamp(&self) -> Result<Box<dyn Timestamp>> {
-		static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-		Ok(Box::new(COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst)))
+		Ok(Box::new(super::timestamp::IncTimestamp::next()))
 	}
 
 	/// Get the current monotonic timestamp
