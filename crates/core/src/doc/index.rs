@@ -52,7 +52,7 @@ impl Document {
 		let rid = self.id()?;
 		// Loop through all index statements
 		for ix in ixs.iter() {
-			// Decommissionned index are ignored
+			// Decommissioned indexes are ignored
 			if ix.decommissioned {
 				continue;
 			}

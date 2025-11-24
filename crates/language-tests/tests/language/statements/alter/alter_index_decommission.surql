@@ -11,7 +11,7 @@ value = "'OK'"
 value = "NONE"
 
 [[test.results]]
-value = "{ events: [ ], fields: [ ], indexes: [ { cols: [ ], decommission: false, index: 'COUNT', name: 'count_idx', what: 'test' } ], lives: [ ], tables: [ ] }"
+value = "{ events: [ ], fields: [ ], indexes: [ { cols: [ ], decommissioned: false, index: 'COUNT', name: 'count_idx', what: 'test' } ], lives: [ ], tables: [ ] }"
 
 [[test.results]]
 value = '''[{ detail: { plan: { index: 'count_idx', operator: 'Count' }, table: 'test' }, operation: 'Iterate Index Count' }, { detail: { "Aggregate expressions": {  }, Aggregations: { _a0: 'Count' }, "Group expressions": {  }, "Select expression": { count: '_a0' }, type: 'Group' }, operation: 'Collector' }]'''
@@ -23,7 +23,7 @@ value = "[{ count: 3 }]"
 value = "NONE"
 
 [[test.results]]
-value = "{ events: [ ], fields: [ ], indexes: [ { cols: [ ], decommission: true, index: 'COUNT', name: 'count_idx', what: 'test' } ], lives: [ ], tables: [ ] }"
+value = "{ events: [ ], fields: [ ], indexes: [ { cols: [ ], decommissioned: true, index: 'COUNT', name: 'count_idx', what: 'test' } ], lives: [ ], tables: [ ] }"
 
 [[test.results]]
 value = '''[{ detail: { direction: 'forward', table: 'test' }, operation: 'Iterate Table Count' }, { detail: { "Aggregate expressions": {  }, Aggregations: { _a0: 'Count' }, "Group expressions": {  }, "Select expression": { count: '_a0' }, type: 'Group' }, operation: 'Collector' }]'''

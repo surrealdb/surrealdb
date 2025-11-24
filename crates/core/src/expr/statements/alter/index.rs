@@ -11,23 +11,32 @@ use crate::expr::{Base, Value};
 use crate::fmt::{EscapeKwIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 
+/// Represents an `ALTER INDEX` statement.
+///
+/// Currently supports decommissioning indexes as a safe preparation step before removal.
+/// Decommissioning an index:
+/// - Cancels any ongoing concurrent index builds
+/// - Prevents the query planner from using the index
+/// - Stops updating the index on record changes
+///
+/// This allows administrators to verify query performance before permanently removing an index.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct AlterIndexStatement {
 	pub name: String,
 	pub table: String,
 	pub if_exists: bool,
+	/// If true, marks the index as decommissioned
 	pub decommission: bool,
 }
 
 impl AlterIndexStatement {
 	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Sequence, &Base::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Index, &Base::Db)?;
 		// Get the NS and DB
 		let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 		// Fetch the transaction
 		let txn = ctx.tx();
-		// Get the sequence definition
 		// Get the index definition
 		let mut ix = match txn.get_tb_index(ns, db, &self.table, &self.name).await? {
 			Some(tb) => tb.deref().clone(),
@@ -43,15 +52,15 @@ impl AlterIndexStatement {
 			}
 		};
 
-		if self.decommission {
+		if self.decommission && !ix.decommissioned {
 			ix.decommissioned = true;
+
+			// Set the index definition
+			txn.put_tb_index(ns, db, &self.table, &ix).await?;
+
+			// Clear the cache
+			txn.clear_cache();
 		}
-
-		// Set the table definition
-		txn.put_tb_index(ns, db, &self.table, &ix).await?;
-
-		// Clear the cache
-		txn.clear_cache();
 
 		// Ok all good
 		Ok(Value::None)

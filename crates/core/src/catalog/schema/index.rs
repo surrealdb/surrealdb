@@ -59,6 +59,9 @@ pub struct IndexDefinition {
 	pub(crate) cols: Vec<Idiom>,
 	pub(crate) index: Index,
 	pub(crate) comment: Option<String>,
+	/// Whether this index has been marked for decommission.
+	/// Decommissioned indexes are excluded from query planning and document indexing,
+	/// and any concurrent index builds are cancelled.
 	pub(crate) decommissioned: bool,
 }
 
@@ -80,6 +83,14 @@ impl IndexDefinition {
 		}
 	}
 
+	/// Checks if this index is decommissioned and returns an error if it is.
+	///
+	/// This method is used during concurrent index building to detect when an index
+	/// has been decommissioned, allowing the build process to be cancelled gracefully.
+	///
+	/// # Errors
+	///
+	/// Returns `Error::IndexingBuildingCancelled` if the index is decommissioned.
 	pub(crate) fn expect_not_decommissioned(&self) -> Result<()> {
 		if self.decommissioned {
 			Err(anyhow::Error::new(Error::IndexingBuildingCancelled {
@@ -99,7 +110,7 @@ impl InfoStructure for IndexDefinition {
 			"cols".to_string() => Value::Array(Array(self.cols.into_iter().map(|x| x.structure()).collect())),
 			"index".to_string() => self.index.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-			"decommission".to_string()=> self.decommissioned.into()
+			"decommissioned".to_string()=> self.decommissioned.into()
 		})
 	}
 }

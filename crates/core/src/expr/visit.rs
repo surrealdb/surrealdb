@@ -336,8 +336,8 @@ implement_visitor! {
 
 	fn visit_alter(this, a: &AlterStatement){
 		match a {
-			AlterStatement::Table(a)=>{ this.visit_alter_table(a)?;},
-			AlterStatement::Index(a) => {this.visit_alter_index(a)?;},
+			AlterStatement::Table(a)=>{ this.visit_alter_table(a)?; },
+			AlterStatement::Index(a) => { this.visit_alter_index(a)?; },
 			AlterStatement::Sequence(a) => { this.visit_alter_sequence(a)?; },
 			AlterStatement::Field(a) => { this.visit_alter_field(a)?; },
 		}
@@ -1776,8 +1776,8 @@ implement_visitor_mut! {
 	fn visit_mut_alter(this, a: &mut AlterStatement){
 		match a {
 			AlterStatement::Table(a)=>{ this.visit_mut_alter_table(a)?;},
-				AlterStatement::Index(a)=>{ this.visit_mut_alter_index(a)?;},
-		AlterStatement::Sequence(a) => { this.visit_mut_alter_sequence(a)?; },
+			AlterStatement::Index(a)=>{ this.visit_mut_alter_index(a)?;},
+			AlterStatement::Sequence(a) => { this.visit_mut_alter_sequence(a)?; },
 			AlterStatement::Field(a) => { this.visit_mut_alter_field(a)?; },
 		}
 		Ok(())
@@ -1790,10 +1790,9 @@ implement_visitor_mut! {
 		Ok(())
 	}
 
-		fn visit_mut_alter_index(this, a: &mut AlterIndexStatement){
+	fn visit_mut_alter_index(this, a: &mut AlterIndexStatement){
 		Ok(())
 	}
-
 
 	fn visit_mut_alter_sequence(this, a: &mut AlterSequenceStatement){
 		Ok(())
