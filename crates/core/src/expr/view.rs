@@ -8,7 +8,7 @@ use crate::catalog::aggregation::{AggregateFields, AggregationAnalysis};
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Fields, Groups, Value};
-use crate::fmt::{EscapeIdent, Fmt};
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct View {
@@ -64,7 +64,7 @@ impl fmt::Display for View {
 			f,
 			"AS SELECT {} FROM {}",
 			self.expr,
-			Fmt::comma_separated(self.what.iter().map(EscapeIdent))
+			Fmt::comma_separated(self.what.iter().map(|x| EscapeKwFreeIdent(x)))
 		)?;
 		if let Some(ref v) = self.cond {
 			write!(f, " {v}")?

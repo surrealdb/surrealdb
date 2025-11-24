@@ -52,7 +52,7 @@ pub(crate) enum Expr {
 	Throw(Box<Expr>),
 
 	Return(Box<OutputStatement>),
-	If(Box<IfelseStatement>),
+	IfElse(Box<IfelseStatement>),
 	Select(Box<SelectStatement>),
 	Create(Box<CreateStatement>),
 	Update(Box<UpdateStatement>),
@@ -165,7 +165,7 @@ impl Expr {
 			| Expr::Continue
 			| Expr::Throw(_)
 			| Expr::Return(_)
-			| Expr::If(_)
+			| Expr::IfElse(_)
 			| Expr::Select(_)
 			| Expr::Create(_)
 			| Expr::Update(_)
@@ -457,7 +457,7 @@ impl fmt::Display for Expr {
 			Expr::Continue => write!(f, "CONTINUE"),
 			Expr::Return(x) => write!(f, "{x}"),
 			Expr::Throw(expr) => write!(f, "THROW {expr}"),
-			Expr::If(s) => write!(f, "{s}"),
+			Expr::IfElse(s) => write!(f, "{s}"),
 			Expr::Select(s) => write!(f, "{s}"),
 			Expr::Create(s) => write!(f, "{s}"),
 			Expr::Update(s) => write!(f, "{s}"),
@@ -517,7 +517,7 @@ impl From<Expr> for crate::expr::Expr {
 			Expr::Continue => crate::expr::Expr::Continue,
 			Expr::Return(e) => crate::expr::Expr::Return(Box::new((*e).into())),
 			Expr::Throw(e) => crate::expr::Expr::Throw(Box::new((*e).into())),
-			Expr::If(s) => crate::expr::Expr::IfElse(Box::new((*s).into())),
+			Expr::IfElse(s) => crate::expr::Expr::IfElse(Box::new((*s).into())),
 			Expr::Select(s) => crate::expr::Expr::Select(Box::new((*s).into())),
 			Expr::Create(s) => crate::expr::Expr::Create(Box::new((*s).into())),
 			Expr::Update(s) => crate::expr::Expr::Update(Box::new((*s).into())),
@@ -577,7 +577,7 @@ impl From<crate::expr::Expr> for Expr {
 			crate::expr::Expr::Continue => Expr::Continue,
 			crate::expr::Expr::Return(e) => Expr::Return(Box::new((*e).into())),
 			crate::expr::Expr::Throw(e) => Expr::Throw(Box::new((*e).into())),
-			crate::expr::Expr::IfElse(s) => Expr::If(Box::new((*s).into())),
+			crate::expr::Expr::IfElse(s) => Expr::IfElse(Box::new((*s).into())),
 			crate::expr::Expr::Select(s) => Expr::Select(Box::new((*s).into())),
 			crate::expr::Expr::Create(s) => Expr::Create(Box::new((*s).into())),
 			crate::expr::Expr::Update(s) => Expr::Update(Box::new((*s).into())),

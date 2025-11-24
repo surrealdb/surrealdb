@@ -135,7 +135,7 @@ impl Parser<'_> {
 			t!("+") | t!("-") => Some(BindingPower::AddSub),
 			t!("*") | t!("×") | t!("/") | t!("÷") | t!("%") => Some(BindingPower::MulDiv),
 			t!("**") => Some(BindingPower::Power),
-			t!("?:") | t!("??") => Some(BindingPower::Nullish),
+			t!("?:") | t!("?") => Some(BindingPower::Nullish),
 			_ => None,
 		}
 	}
@@ -389,7 +389,12 @@ impl Parser<'_> {
 			t!("||") | t!("OR") => BinaryOperator::Or,
 			t!("&&") | t!("AND") => BinaryOperator::And,
 			t!("?:") => BinaryOperator::TenaryCondition,
-			t!("??") => BinaryOperator::NullCoalescing,
+			t!("?") => {
+				if !self.eat_whitespace(t!("?")) {
+					unexpected!(self, token, "`??`")
+				}
+				BinaryOperator::NullCoalescing
+			}
 			t!("==") => BinaryOperator::ExactEqual,
 			t!("!=") => BinaryOperator::NotEqual,
 			t!("*=") => BinaryOperator::AllEqual,
@@ -647,7 +652,7 @@ impl Parser<'_> {
 			}
 
 			// explain that assignment operators can't be used in normal expressions.
-			if let t!("+=") | t!("*=") | t!("-=") | t!("+?=") = token.kind {
+			if let t!("+=") | t!("-=") | t!("+?=") = token.kind {
 				unexpected!(self,token,"an operator",
 					=> "assignment operators are only allowed in SET and DUPLICATE KEY UPDATE clauses")
 			}

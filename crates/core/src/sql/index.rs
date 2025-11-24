@@ -1,7 +1,7 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use crate::fmt::EscapeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 use crate::sql::Cond;
 use crate::sql::scoring::Scoring;
 use crate::types::PublicNumber;
@@ -213,7 +213,7 @@ impl Display for Index {
 				Ok(())
 			}
 			Self::FullText(p) => {
-				write!(f, "FULLTEXT ANALYZER {} {}", EscapeIdent(&p.az), p.sc,)?;
+				write!(f, "FULLTEXT ANALYZER {} {}", EscapeKwFreeIdent(&p.az), p.sc,)?;
 				if p.hl {
 					f.write_str(" HIGHLIGHTS")?
 				}

@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Write};
 
-use crate::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
+use crate::fmt::{CoverStmtsSql, Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -8,6 +8,7 @@ use crate::sql::Expr;
 pub struct IfelseStatement {
 	/// The first if condition followed by a body, followed by any number of
 	/// else if's
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
 	pub exprs: Vec<(Expr, Expr)>,
 	/// the final else body, if there is one
 	pub close: Option<Expr>,
@@ -50,12 +51,12 @@ impl Display for IfelseStatement {
 					self.exprs.iter().map(|args| {
 						Fmt::new(args, |(cond, then), f| {
 							if is_pretty() {
-								write!(f, "IF {cond}")?;
+								write!(f, "IF {}", CoverStmtsSql(cond))?;
 								let indent = pretty_indent();
 								write!(f, "{then}")?;
 								drop(indent);
 							} else {
-								write!(f, "IF {cond} {then}")?;
+								write!(f, "IF {} {then}", CoverStmtsSql(cond))?;
 							}
 							Ok(())
 						})
@@ -86,12 +87,12 @@ impl Display for IfelseStatement {
 					self.exprs.iter().map(|args| {
 						Fmt::new(args, |(cond, then), f| {
 							if is_pretty() {
-								write!(f, "IF {cond} THEN")?;
+								write!(f, "IF {} THEN", CoverStmtsSql(cond))?;
 								let indent = pretty_indent();
 								write!(f, "{then}")?;
 								drop(indent);
 							} else {
-								write!(f, "IF {cond} THEN {then}")?;
+								write!(f, "IF {} THEN {then}", CoverStmtsSql(cond))?;
 							}
 							Ok(())
 						})

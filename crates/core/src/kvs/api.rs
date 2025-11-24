@@ -3,18 +3,14 @@
 
 use std::ops::Range;
 
-use anyhow::{Context, Result, ensure};
+use chrono::{DateTime, Utc};
 
-use super::tr::Check;
+use super::err::{Error, Result};
 use super::util;
 use crate::cnf::{COUNT_BATCH_SIZE, NORMAL_FETCH_SIZE};
-use crate::err::Error;
-use crate::key::database::vs::VsKey;
 use crate::key::debug::Sprintable;
 use crate::kvs::batch::Batch;
-use crate::kvs::savepoint::{SaveOperation, SavePoints, SavePrepare, SavedValue};
-use crate::kvs::{KVKey, KVValue, Key, Val, Version};
-use crate::vs::VersionStamp;
+use crate::kvs::{Key, Timestamp, Val, Version};
 
 pub mod requirements {
 	//! This module defines the trait requirements for a transaction.
@@ -42,12 +38,12 @@ pub mod requirements {
 
 	/// This trait defines non-WASM requirements for a transaction.
 	#[cfg(not(target_family = "wasm"))]
-	pub trait TransactionRequirements: Send {}
+	pub trait TransactionRequirements: Send + Sync {}
 
 	/// Implements the `TransactionRequirements` trait for all types that are
 	/// `Send`.
 	#[cfg(not(target_family = "wasm"))]
-	impl<T: Send> TransactionRequirements for T {}
+	impl<T: Send + Sync> TransactionRequirements for T {}
 }
 
 /// This trait defines the API for a transaction in a key-value store.
@@ -57,29 +53,16 @@ pub mod requirements {
 #[allow(dead_code, reason = "Not used when none of the storage backends are enabled.")]
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-pub trait Transaction: requirements::TransactionRequirements {
-	/// Returns if the transaction supports scanning in reverse.
-	fn supports_reverse_scan(&self) -> bool;
-
+pub trait Transactable: requirements::TransactionRequirements {
 	/// Get the name of the transaction type.
 	fn kind(&self) -> &'static str;
-
-	/// Specify how we should handle unclosed transactions.
-	///
-	/// If a transaction is not cancelled or rolled back then
-	/// this can cause issues on some storage engine
-	/// implementations. In tests we can ignore unhandled
-	/// transactions, whilst in development we should panic
-	/// so that any unintended behaviour is detected, and in
-	/// production we should only log a warning.
-	fn check_level(&mut self, check: Check);
 
 	/// Check if transaction is finished.
 	///
 	/// If the transaction has been cancelled or committed,
 	/// then this function will return [`true`], and any further
 	/// calls to functions on this transaction will result
-	/// in an [`Error::TxFinished`] error.
+	/// in a [`kvs::Error::TransactionFinished`] error.
 	fn closed(&self) -> bool;
 
 	/// Check if transaction is writeable.
@@ -88,70 +71,62 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// transaction, then this function will return [`true`].
 	/// This fuction can be used to check whether a transaction
 	/// allows data to be modified, and if not then the function
-	/// will return an [`Error::TxReadonly`] error.
+	/// will return a [`kvs::Error::TransactionReadonly`] error.
 	fn writeable(&self) -> bool;
 
 	/// Cancel a transaction.
 	///
 	/// This reverses all changes made within the transaction.
-	async fn cancel(&mut self) -> Result<()>;
+	async fn cancel(&self) -> Result<()>;
 
 	/// Commit a transaction.
 	///
 	/// This attempts to commit all changes made within the transaction.
-	async fn commit(&mut self) -> Result<()>;
+	async fn commit(&self) -> Result<()>;
 
 	/// Check if a key exists in the datastore.
-	async fn exists(&mut self, key: Key, version: Option<u64>) -> Result<bool>;
+	async fn exists(&self, key: Key, version: Option<u64>) -> Result<bool>;
 
 	/// Fetch a key from the datastore.
-	async fn get(&mut self, key: Key, version: Option<u64>) -> Result<Option<Val>>;
+	async fn get(&self, key: Key, version: Option<u64>) -> Result<Option<Val>>;
 
 	/// Insert or update a key in the datastore.
-	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()>;
+	async fn set(&self, key: Key, val: Val, version: Option<u64>) -> Result<()>;
 
 	/// Insert a key if it doesn't exist in the datastore.
-	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()>;
+	async fn put(&self, key: Key, val: Val, version: Option<u64>) -> Result<()>;
 
 	/// Update a key in the datastore if the current value matches a condition.
-	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<()>;
+	async fn putc(&self, key: Key, val: Val, chk: Option<Val>) -> Result<()>;
 
 	/// Delete a key from the datastore.
-	async fn del(&mut self, key: Key) -> Result<()>;
+	async fn del(&self, key: Key) -> Result<()>;
 
 	/// Delete a key from the datastore if the current value matches a
 	/// condition.
-	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<()>;
+	async fn delc(&self, key: Key, chk: Option<Val>) -> Result<()>;
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of keys without values, in a single
 	/// request to the underlying datastore.
-	async fn keys(&mut self, rng: Range<Key>, limit: u32, version: Option<u64>)
-	-> Result<Vec<Key>>;
+	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>>;
 
-	/// Retrieve a specific range of keys from the datastore.
+	/// Retrieve a specific range of keys from the datastore, in reverse order.
 	///
 	/// This function fetches the full range of keys without values, in a single
 	/// request to the underlying datastore.
-	async fn keysr(
-		&mut self,
-		_rng: Range<Key>,
-		_limit: u32,
-		_version: Option<u64>,
-	) -> Result<Vec<Key>> {
-		Err(anyhow::Error::new(Error::UnsupportedReversedScans))
-	}
+	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>>;
 
 	/// Retrieve a specific range of keys from the datastore.
 	///
 	/// This function fetches the full range of key-value pairs, in a single
 	/// request to the underlying datastore.
 	async fn scan(
-		&mut self,
-		_rng: Range<Key>,
-		_limit: u32,
-		_version: Option<u64>,
+		&self,
+		rng: Range<Key>,
+		limit: u32,
+		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>>;
 
 	/// Retrieve a specific range of keys from the datastore in reverse order.
@@ -159,30 +134,28 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// This function fetches the full range of key-value pairs, in a single
 	/// request to the underlying datastore.
 	async fn scanr(
-		&mut self,
-		_rng: Range<Key>,
-		_limit: u32,
-		_version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>> {
-		Err(anyhow::Error::new(Error::UnsupportedReversedScans))
-	}
+		&self,
+		rng: Range<Key>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>>;
 
 	/// Insert or replace a key in the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn replace(&mut self, key: Key, val: Val) -> Result<()> {
+	async fn replace(&self, key: Key, val: Val) -> Result<()> {
 		self.set(key, val, None).await
 	}
 
 	/// Delete all versions of a key from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn clr(&mut self, key: Key) -> Result<()> {
+	async fn clr(&self, key: Key) -> Result<()> {
 		self.del(key).await
 	}
 
 	/// Delete all versions of a key from the datastore if the current value
 	/// matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn clrc(&mut self, key: Key, chk: Option<Val>) -> Result<()> {
+	async fn clrc(&self, key: Key, chk: Option<Val>) -> Result<()> {
 		self.delc(key, chk).await
 	}
 
@@ -191,13 +164,15 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// This function fetches all matching keys pairs from the underlying
 	/// datastore concurrently.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.sprint()))]
-	async fn getm(&mut self, keys: Vec<Key>) -> Result<Vec<Option<Val>>> {
+	async fn getm(&self, keys: Vec<Key>, version: Option<u64>) -> Result<Vec<Option<Val>>> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Continue with function logic
 		let mut out = Vec::with_capacity(keys.len());
 		for key in keys.into_iter() {
-			if let Some(val) = self.get(key, None).await? {
+			if let Some(val) = self.get(key, version).await? {
 				out.push(Some(val));
 			} else {
 				out.push(None);
@@ -211,9 +186,11 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// This function fetches all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn getp(&mut self, key: Key) -> Result<Vec<(Key, Val)>> {
+	async fn getp(&self, key: Key) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Continue with function logic
 		let range = util::to_prefix_range(key)?;
 		self.getr(range, None).await
@@ -224,9 +201,11 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// This function fetches all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn getr(&mut self, rng: Range<Key>, version: Option<u64>) -> Result<Vec<(Key, Val)>> {
+	async fn getr(&self, rng: Range<Key>, version: Option<u64>) -> Result<Vec<(Key, Val)>> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Continue with function logic
 		let mut out = vec![];
 		let mut next = Some(rng);
@@ -245,11 +224,15 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// This function deletes all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn delp(&mut self, key: Key) -> Result<()> {
+	async fn delp(&self, key: Key) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
 		// Continue with function logic
 		let range = util::to_prefix_range(key)?;
 		self.delr(range).await
@@ -260,11 +243,15 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// This function deletes all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn delr(&mut self, rng: Range<Key>) -> Result<()> {
+	async fn delr(&self, rng: Range<Key>) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
 		// Continue with function logic
 		let mut next = Some(rng);
 		while let Some(rng) = next {
@@ -282,12 +269,16 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// This function deletes all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn clrp(&mut self, key: Key) -> Result<()> {
+	async fn clrp(&self, key: Key) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
-
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		// Continue with function logic
 		let range = util::to_prefix_range(key)?;
 		self.clrr(range).await
 	}
@@ -297,11 +288,15 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// This function deletes all matching key-value pairs from the underlying
 	/// datastore in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn clrr(&mut self, rng: Range<Key>) -> Result<()> {
+	async fn clrr(&self, rng: Range<Key>) -> Result<()> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
 		// Continue with function logic
 		let mut next = Some(rng);
 		while let Some(rng) = next {
@@ -319,9 +314,11 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// This function fetches the total key count from the underlying datastore
 	/// in grouped batches.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn count(&mut self, rng: Range<Key>) -> Result<usize> {
+	async fn count(&self, rng: Range<Key>) -> Result<usize> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Continue with function logic
 		let mut len = 0;
 		let mut next = Some(rng);
@@ -340,12 +337,16 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// pairs, in a single request to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = _rng.sprint()))]
 	async fn scan_all_versions(
-		&mut self,
+		&self,
 		_rng: Range<Key>,
 		_limit: u32,
 	) -> Result<Vec<(Key, Val, Version, bool)>> {
-		Err(anyhow::Error::new(Error::UnsupportedVersionedQueries))
+		Err(Error::UnsupportedVersionedQueries)
 	}
+
+	// --------------------------------------------------
+	// Batch functions
+	// --------------------------------------------------
 
 	/// Retrieve a batched scan over a specific range of keys in the datastore.
 	///
@@ -353,13 +354,15 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn batch_keys(
-		&mut self,
+		&self,
 		rng: Range<Key>,
 		batch: u32,
 		version: Option<u64>,
 	) -> Result<Batch<Key>> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Continue with function logic
 		let end = rng.end.clone();
 		// Scan for the next batch
@@ -394,13 +397,15 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn batch_keys_vals(
-		&mut self,
+		&self,
 		rng: Range<Key>,
 		batch: u32,
 		version: Option<u64>,
 	) -> Result<Batch<(Key, Val)>> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Continue with function logic
 		let end = rng.end.clone();
 		// Scan for the next batch
@@ -413,7 +418,6 @@ pub trait Transaction: requirements::TransactionRequirements {
 				Some((k, _)) => {
 					let mut k = k.clone();
 					util::advance_key(&mut k);
-
 					Ok(Batch::<(Key, Val)>::new(
 						Some(Range {
 							start: k,
@@ -436,12 +440,14 @@ pub trait Transaction: requirements::TransactionRequirements {
 	/// requests to the underlying datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
 	async fn batch_keys_vals_versions(
-		&mut self,
+		&self,
 		rng: Range<Key>,
 		batch: u32,
 	) -> Result<Batch<(Key, Val, Version, bool)>> {
 		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Continue with function logic
 		let end = rng.end.clone();
 		// Scan for the next batch
@@ -470,112 +476,43 @@ pub trait Transaction: requirements::TransactionRequirements {
 		}
 	}
 
-	/// Obtain a new change timestamp for a key
-	/// which is replaced with the current timestamp when the transaction is
-	/// committed. NOTE: This should be called when composing the change feed
-	/// entries for this transaction, which should be done immediately before
-	/// the transaction commit. That is to keep other transactions commit
-	/// delay(pessimistic) or conflict(optimistic) as less as possible.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn get_timestamp(&mut self, key: VsKey) -> Result<VersionStamp> {
-		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
+	// --------------------------------------------------
+	// Savepoint functions
+	// --------------------------------------------------
 
-		let key_encoded = key.encode_key()?;
-		// Calculate the version number
-		let ver = match self.get(key_encoded.clone(), None).await? {
-			Some(prev) => <VsKey as KVKey>::ValueType::kv_decode_value(prev)?
-				.next()
-				.context("exhausted all possible timestamps")?,
-			None => VersionStamp::from_u64(1),
-		};
-		// Store the timestamp to prevent other transactions from committing
-		self.set(key_encoded, ver.kv_encode_value()?, None).await?;
-		// Return the uint64 representation of the timestamp as the result
-		Ok(ver)
-	}
-
-	/// Insert the versionstamped key into the datastore.
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn set_versionstamp(
-		&mut self,
-		ts_key: VsKey,
-		prefix: Key,
-		suffix: Key,
-		val: Val,
-	) -> Result<()> {
-		// Check to see if transaction is closed
-		ensure!(!self.closed(), Error::TxFinished);
-		// Check to see if transaction is writable
-		ensure!(self.writeable(), Error::TxReadonly);
-		// Continue with function logic
-		let ts = self.get_timestamp(ts_key).await?;
-		let mut k: Vec<u8> = prefix;
-		k.extend_from_slice(&ts.as_bytes());
-		k.extend_from_slice(&suffix);
-
-		self.set(k, val, None).await
-	}
-
-	/// Get the save points for this transaction.
-	fn get_save_points(&mut self) -> &mut SavePoints;
-
-	/// Set a new current save point for this transaction.
-	fn new_save_point(&mut self) {
-		self.get_save_points().new_save_point()
-	}
-
-	/// Rollback to the last save point.
-	async fn rollback_to_save_point(&mut self) -> Result<()> {
-		let sp = self.get_save_points().pop()?;
-
-		for (key, saved_value) in sp {
-			match saved_value.last_operation {
-				SaveOperation::Set | SaveOperation::Put => {
-					if let Some(initial_value) = saved_value.saved_val {
-						// If the last operation was a SET or PUT
-						// then we just have set back the key to its initial value
-						self.set(key, initial_value, saved_value.saved_version).await?;
-					} else {
-						// If the last operation on this key was not a DEL operation,
-						// then we have to delete the key
-						self.del(key).await?;
-					}
-				}
-				SaveOperation::Del => {
-					if let Some(initial_value) = saved_value.saved_val {
-						// If the last operation was a DEL,
-						// then we have to put back the initial value
-						self.put(key, initial_value, saved_value.saved_version).await?;
-					}
-				}
-			}
-		}
-		Ok(())
-	}
+	/// Set a new save point on the transaction.
+	async fn new_save_point(&self) -> Result<()>;
 
 	/// Release the last save point.
-	fn release_last_save_point(&mut self) -> Result<()> {
-		self.get_save_points().pop()?;
-		Ok(())
+	async fn release_last_save_point(&self) -> Result<()>;
+
+	/// Rollback to the last save point.
+	async fn rollback_to_save_point(&self) -> Result<()>;
+
+	// --------------------------------------------------
+	// Timestamp functions
+	// --------------------------------------------------
+
+	/// Get the current monotonic timestamp
+	#[cfg(test)]
+	async fn timestamp(&self) -> Result<Box<dyn Timestamp>> {
+		static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+		Ok(Box::new(COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst)))
 	}
 
-	/// Prepare a save point for a key.
-	async fn save_point_prepare(
-		&mut self,
-		key: &Key,
-		version: Option<u64>,
-		op: SaveOperation,
-	) -> Result<Option<SavePrepare>> {
-		let is_saved_key = self.get_save_points().is_saved_key(key);
-		let r = match is_saved_key {
-			None => None,
-			Some(true) => Some(SavePrepare::AlreadyPresent(key.clone(), op)),
-			Some(false) => {
-				let val = self.get(key.clone(), version).await?;
-				Some(SavePrepare::NewKey(key.clone(), SavedValue::new(val, version, op)))
-			}
-		};
-		Ok(r)
+	/// Get the current monotonic timestamp
+	#[cfg(not(test))]
+	async fn timestamp(&self) -> Result<Box<dyn Timestamp>> {
+		Ok(Box::new(super::timestamp::HlcTimestamp::next()))
+	}
+
+	/// Convert a versionstamp to timestamp bytes for this storage engine
+	async fn timestamp_bytes_from_versionstamp(&self, version: u128) -> Result<Vec<u8>> {
+		Ok(<u64 as Timestamp>::from_versionstamp(version)?.to_ts_bytes())
+	}
+
+	/// Convert a datetime to timestamp bytes for this storage engine
+	async fn timestamp_bytes_from_datetime(&self, datetime: DateTime<Utc>) -> Result<Vec<u8>> {
+		Ok(<u64 as Timestamp>::from_datetime(datetime)?.to_ts_bytes())
 	}
 }

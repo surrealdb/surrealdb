@@ -112,9 +112,8 @@ impl<'a> IndexOperation<'a> {
 	}
 
 	async fn index_unique(&mut self) -> Result<()> {
-		// Lock the transaction
-		let tx = self.ctx.tx();
-		let mut txn = tx.lock().await;
+		// Get the transaction
+		let txn = self.ctx.tx();
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
@@ -122,7 +121,10 @@ impl<'a> IndexOperation<'a> {
 				let key = self.get_unique_index_key(&o)?;
 				match txn.delc(&key, Some(self.rid)).await {
 					Err(e) => {
-						if matches!(e.downcast_ref::<Error>(), Some(Error::TxConditionNotMet)) {
+						if matches!(
+							e.downcast_ref::<Error>(),
+							Some(Error::Kvs(crate::kvs::Error::TransactionConditionNotMet))
+						) {
 							Ok(())
 						} else {
 							Err(e)
@@ -152,8 +154,7 @@ impl<'a> IndexOperation<'a> {
 
 	async fn index_non_unique(&mut self) -> Result<()> {
 		// Lock the transaction
-		let tx = self.ctx.tx();
-		let mut txn = tx.lock().await;
+		let txn = self.ctx.tx();
 		// Delete the old index data
 		if let Some(o) = self.o.take() {
 			let i = Indexable::new(o, self.ix);
@@ -161,7 +162,10 @@ impl<'a> IndexOperation<'a> {
 				let key = self.get_non_unique_index_key(&o)?;
 				match txn.delc(&key, Some(self.rid)).await {
 					Err(e) => {
-						if matches!(e.downcast_ref::<Error>(), Some(Error::TxConditionNotMet)) {
+						if matches!(
+							e.downcast_ref::<Error>(),
+							Some(Error::Kvs(crate::kvs::Error::TransactionConditionNotMet))
+						) {
 							Ok(())
 						} else {
 							Err(e)
@@ -225,7 +229,7 @@ impl<'a> IndexOperation<'a> {
 			relative_count > 0,
 			relative_count.unsigned_abs() as u64,
 		);
-		self.ctx.tx().lock().await.put(&key, &(), None).await?;
+		self.ctx.tx().put(&key, &(), None).await?;
 		*require_compaction = true;
 		Ok(())
 	}

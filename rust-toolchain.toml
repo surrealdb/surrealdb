@@ -1,4 +1,7 @@
 [toolchain]
-channel = "1.91.1"
+# Don't add a patch number to the channel!
+# 1.91.1 (for example) is not valid toolchains and adding it breaks rust-analyzer and other tooling.
+# adding only the minor version will already run on the latest patch version.
+channel = "1.91"
 components = [ "rustfmt", "clippy" ]
 targets = [ "wasm32-unknown-unknown" ]
