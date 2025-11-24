@@ -62,14 +62,14 @@ impl RemoveIndexStatement {
 			}
 			Ok(ix) => ix,
 		};
+		// Get the table definition
+		let tb = txn.expect_tb(ns, db, &what).await?;
 		// Stop index compaction if any, clear the index store cache
-		ctx.get_index_stores().index_removed(ctx, ns, db, &ix).await?;
+		ctx.get_index_stores().index_removed(ctx, ns, db, tb.table_id, &ix).await?;
 		// Delete the index data.
 		let res = txn.del_tb_index(ns, db, &what, &name).await;
 		println!("txn.del_tb_index: {res:?}");
 		res?;
-		// Get the table definition
-		let tb = txn.expect_tb(ns, db, &what).await?;
 		// Update the table definition
 		let res = txn
 			.put_tb(

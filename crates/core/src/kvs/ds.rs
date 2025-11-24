@@ -9,10 +9,11 @@ use std::time::Duration;
 
 #[allow(unused_imports)]
 use anyhow::bail;
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
 use dashmap::DashMap;
+use dashmap::try_result::TryResult::Locked;
 use futures::{Future, Stream};
 use http::HeaderMap;
 use reblessive::TreeStack;
@@ -37,7 +38,7 @@ use crate::catalog::providers::{
 };
 use crate::catalog::{ApiDefinition, ApiMethod, Index, NodeLiveQuery, SubscriptionDefinition};
 use crate::cnf::NORMAL_FETCH_SIZE;
-use crate::ctx::MutableContext;
+use crate::ctx::{Context, MutableContext};
 #[cfg(feature = "jwks")]
 use crate::dbs::capabilities::NetTarget;
 use crate::dbs::capabilities::{
@@ -1320,7 +1321,6 @@ impl Datastore {
 			TaskLeaseType::IndexCompaction,
 			interval * 2,
 		)?;
-		let run = Uuid::now_v7();
 		// We continue without interruptions while there are keys and the lease
 		loop {
 			// Attempt to acquire a lease for the ChangeFeedCleanup task
@@ -1348,7 +1348,6 @@ impl Datastore {
 				{
 					continue;
 				}
-				println!("START COMPACTION {run}");
 				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
 					Some(ix) => match &ix.index {
 						Index::FullText(p) => {
@@ -1375,12 +1374,6 @@ impl Datastore {
 				previous = Some(ic.into_owned());
 			}
 			if count > 0 {
-				println!("END COMPACTION {run}");
-				txn.commit().await?;
-				drop(txn);
-				// Now we can delete the range
-				// Create a new transaction
-				let txn = self.transaction(Write, Optimistic).await?;
 				txn.delr(range).await?;
 				txn.commit().await?;
 			} else {

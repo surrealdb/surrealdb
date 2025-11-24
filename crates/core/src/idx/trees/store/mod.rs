@@ -54,12 +54,13 @@ impl IndexStores {
 		ctx: &Context,
 		ns: NamespaceId,
 		db: DatabaseId,
+		tb: TableId,
 		ix: &IndexDefinition,
 	) -> Result<()> {
 		if let Some(ib) = ctx.get_index_builder() {
 			ib.remove_index(ctx, ns, db, ix).await?;
 		}
-		self.remove_index(ns, db, ix).await
+		self.remove_index(ns, db, tb, ix).await
 	}
 
 	pub(crate) async fn namespace_removed(
@@ -99,7 +100,7 @@ impl IndexStores {
 			if let Some(ib) = ctx.get_index_builder() {
 				ib.remove_index(ctx, ns, db, ix).await?;
 			}
-			self.remove_index(ns, db, ix).await?;
+			self.remove_index(ns, db, tb.table_id, ix).await?;
 		}
 		Ok(())
 	}
@@ -108,11 +109,12 @@ impl IndexStores {
 		&self,
 		ns: NamespaceId,
 		db: DatabaseId,
+		tb: TableId,
 		ix: &IndexDefinition,
 	) -> Result<()> {
 		if matches!(ix.index, Index::Hnsw(_)) {
 			let ikb = IndexKeyBase::new(ns, db, &ix.table_name, ix.index_id);
-			self.remove_hnsw_index(ix.table_id, ikb).await?;
+			self.remove_hnsw_index(tb, ikb).await?;
 		}
 		Ok(())
 	}
