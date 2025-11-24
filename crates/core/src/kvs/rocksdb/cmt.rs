@@ -88,17 +88,19 @@ impl CommitBatcher {
 	/// Run the background batcher loop
 	async fn run(mut self) {
 		loop {
-			// Wait for the first request
-			let Some(first_request) = self.receiver.recv().await else {
-				// Channel closed, exit
+			// Start collecting a batch - recv_many will wait for at least one item
+			let mut batch = Vec::with_capacity(self.batch_size);
+			// Immediately drain any requests that are already queued
+			let total = self.receiver.recv_many(&mut batch, self.batch_size).await;
+			// If channel is closed and no items received, exit
+			if total == 0 {
 				break;
-			};
-			// Start collecting a batch
-			let mut batch = vec![first_request];
-			// Peek at queue depth to decide if we should wait
-			let should_wait = self.receiver.len() >= self.min_siblings - 1;
+			}
+			// If we still don't have enough, check if we should wait for more
+			let wait =
+				batch.len() < self.batch_size && self.receiver.len() >= self.min_siblings - 1;
 			// If we should wait, collect more requests with timeout
-			if should_wait {
+			if wait {
 				// Start the timer
 				let deadline = Instant::now() + self.timeout;
 				// Collect requests until timeout or batch is full
