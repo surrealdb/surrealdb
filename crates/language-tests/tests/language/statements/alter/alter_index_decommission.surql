@@ -31,6 +31,9 @@ value = '''[{ detail: { direction: 'forward', table: 'test' }, operation: 'Itera
 [[test.results]]
 value = "[{ count: 3 }]"
 
+[[test.results]]
+value = "NONE"
+
 */
 
 -- Define the table
@@ -63,3 +66,6 @@ INFO FOR TABLE test STRUCTURE;
 -- Check that SELECT EXPLAIN does not use the index anymore
 SELECT count() FROM test GROUP ALL EXPLAIN;
 SELECT count() FROM test GROUP ALL;
+
+-- We can safely remove the index
+REMOVE INDEX count_idx ON test;
