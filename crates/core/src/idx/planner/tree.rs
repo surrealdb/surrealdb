@@ -183,6 +183,9 @@ impl<'a> TreeBuilder<'a> {
 			let tx = self.ctx.ctx.tx();
 			let schema = self.lazy_load_schema_resolver(&tx, table).await?;
 			for (pos, ix) in schema.indexes.iter().enumerate() {
+				if ix.decommissioned {
+					continue;
+				}
 				if let Index::Count(cond) = &ix.index
 					&& self.ctx.cond.eq(&cond.as_ref())
 				{
@@ -364,6 +367,9 @@ impl<'a> TreeBuilder<'a> {
 		}
 		let mut irs = Vec::new();
 		for (idx, ix) in schema.indexes.iter().enumerate() {
+			if ix.decommissioned {
+				continue;
+			}
 			if let Some(idiom_index) = ix.cols.iter().position(|p| p.eq(i)) {
 				let ixr = schema.new_reference(idx);
 				// Check if the WITH clause allows the index to be used
@@ -776,10 +782,7 @@ struct SchemaCache {
 
 impl SchemaCache {
 	async fn new(ns: NamespaceId, db: DatabaseId, table: &str, tx: &Transaction) -> Result<Self> {
-		let all_indexes = tx.all_tb_indexes(ns, db, table).await?;
-		// Filter out decommissioned indexes
-		let indexes: Arc<[IndexDefinition]> =
-			all_indexes.iter().filter(|ix| !ix.decommissioned).cloned().collect();
+		let indexes = tx.all_tb_indexes(ns, db, table).await?;
 		let fields = tx.all_tb_fields(ns, db, table, None).await?;
 		Ok(Self {
 			indexes,
