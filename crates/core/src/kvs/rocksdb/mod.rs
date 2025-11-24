@@ -227,9 +227,9 @@ impl Datastore {
 		};
 		// Open the database
 		let db = Self::open(opts.clone(), path).await?;
-		// Determine if grouped commit should be enabled
-		// Grouped commit is enabled when SYNC_DATA is true and BACKGROUND_FLUSH is false
-		// It batches multiple transaction commits together to perform a single fsync
+		// Configure whether batched group commit should be enabled.
+		// Grouped commit is enabled when SYNC_DATA is true and BACKGROUND_FLUSH is false.
+		// It batches multiple transaction commits together to perform a single fsync.
 		let commit_coordinator = if *cnf::SYNC_DATA && !*cnf::ROCKSDB_BACKGROUND_FLUSH {
 			// If the user has enabled synced transaction writes and disabled background flushing,
 			// we enable grouped commit. This means that the transaction commits are batched

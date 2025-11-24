@@ -2,16 +2,27 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use parking_lot::{Condvar, Mutex};
 use rocksdb::{OptimisticTransactionDB, Options};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 use tokio::time::Instant;
 
 use crate::kvs::err::{Error, Result};
 
+/// Shared state between producers (transactions) and consumer (batcher)
+struct SharedState {
+	/// Buffer of pending commit requests
+	buffer: Mutex<Vec<CommitRequest>>,
+	/// Condition variable to wake the batcher thread
+	condvar: Condvar,
+	/// Flag indicating the coordinator is shutting down
+	shutdown: Mutex<bool>,
+}
+
 /// Coordinator for batching transaction commits together
 pub struct CommitCoordinator {
-	/// The sender for commit requests
-	sender: mpsc::Sender<CommitRequest>,
+	/// Shared state for communication with the batcher
+	shared: Arc<SharedState>,
 }
 
 /// A request to commit a transaction
@@ -24,8 +35,8 @@ struct CommitRequest {
 
 /// The background batcher that processes commit requests
 struct CommitBatcher {
-	/// Channel receiver for incoming commit requests
-	receiver: mpsc::Receiver<CommitRequest>,
+	/// Shared state for receiving commit requests
+	shared: Arc<SharedState>,
 	/// Reference to the database for explicit WAL flushing
 	db: Pin<Arc<OptimisticTransactionDB>>,
 	/// Maximum time to wait for collecting a batch
@@ -34,6 +45,12 @@ struct CommitBatcher {
 	batch_size: usize,
 	/// Minimum number of concurrent transactions before using timeout
 	min_siblings: usize,
+}
+
+impl Drop for CommitCoordinator {
+	fn drop(&mut self) {
+		self.shutdown();
+	}
 }
 
 impl CommitCoordinator {
@@ -45,14 +62,18 @@ impl CommitCoordinator {
 		batch_size: usize,
 		min_siblings: usize,
 	) -> Self {
-		// Create an unbounded channel
-		let (sender, receiver) = mpsc::channel(batch_size * 4);
 		// Enable manual WAL flushing
 		opts.set_manual_wal_flush(true);
+		// Create shared state with pre-allocated buffer
+		let shared = Arc::new(SharedState {
+			buffer: Mutex::new(Vec::with_capacity(batch_size)),
+			condvar: Condvar::new(),
+			shutdown: Mutex::new(false),
+		});
 		// Create a new commit batcher
 		let batcher = CommitBatcher {
+			shared: shared.clone(),
 			db,
-			receiver,
 			batch_size,
 			min_siblings,
 			timeout: Duration::from_nanos(timeout),
@@ -63,8 +84,14 @@ impl CommitCoordinator {
 		});
 		// Return the commit coordinator
 		Self {
-			sender,
+			shared,
 		}
+	}
+
+	/// Signal shutdown to the batcher thread
+	fn shutdown(&self) {
+		*self.shared.shutdown.lock() = true;
+		self.shared.condvar.notify_all();
 	}
 
 	/// Submit a transaction for grouped commit
@@ -72,18 +99,24 @@ impl CommitCoordinator {
 		&self,
 		txn: rocksdb::Transaction<'static, OptimisticTransactionDB>,
 	) -> Result<()> {
-		// Create a new oneshot channel
+		// Create a new oneshot response channel
 		let (tx, rx) = oneshot::channel();
 		// Create a new commit request
 		let request = CommitRequest {
 			txn,
 			channel: tx,
 		};
-		// Send the commit request to the batcher
-		self.sender
-			.send(request)
-			.await
-			.map_err(|_| Error::Transaction("commit coordinator channel closed".into()))?;
+		// Add to shared buffer and notify batcher
+		{
+			let mut buffer = self.shared.buffer.lock();
+			// Check if shutting down
+			if *self.shared.shutdown.lock() {
+				return Err(Error::Transaction("commit coordinator is shutting down".into()));
+			}
+			buffer.push(request);
+			// Notify the batcher that work is available
+			self.shared.condvar.notify_one();
+		}
 		// Wait for the transaction to commit
 		rx.await
 			.map_err(|_| Error::Transaction("commit coordinator response channel closed".into()))?
@@ -92,23 +125,37 @@ impl CommitCoordinator {
 
 impl CommitBatcher {
 	/// Run the background batcher loop
-	async fn run(mut self) {
+	async fn run(self) {
 		// Pre-allocate batch vector once
 		let mut batch = Vec::with_capacity(self.batch_size);
-		// Loop continuously until the channel is closed
+		// Loop continuously until shutdown
 		loop {
-			// Immediately drain any requests that are already queued
-			let total = self.receiver.recv_many(&mut batch, self.batch_size).await;
-			// If channel is closed and no items received, exit
-			if total == 0 {
-				break;
+			// Wait for work to be available
+			{
+				let mut buffer = self.shared.buffer.lock();
+				// Wait for items or shutdown
+				while buffer.is_empty() && !*self.shared.shutdown.lock() {
+					self.shared.condvar.wait(&mut buffer);
+				}
+				// Check for shutdown
+				if *self.shared.shutdown.lock() && buffer.is_empty() {
+					break;
+				}
+				// Take the right amount of items from the buffer
+				let take = buffer.len().min(self.batch_size);
+				// Drain the buffer items into the batch
+				batch.extend(buffer.drain(..take));
 			}
-			// If we still don't have enough, check if we should wait for more
-			let wait =
-				batch.len() < self.batch_size && self.receiver.len() >= self.min_siblings - 1;
+			// If we have fewer items than batch_size, consider waiting for more
+			let should_wait = batch.len() < self.batch_size && {
+				// Lock the buffer to check the number of items
+				let buffer = self.shared.buffer.lock();
+				// Check if we have enough items to start a batch
+				buffer.len() >= self.min_siblings.saturating_sub(batch.len())
+			};
 			// If we should wait, collect more requests with timeout
-			if wait {
-				// Start the timer
+			if should_wait {
+				// Calculate the timeout deadline
 				let deadline = Instant::now() + self.timeout;
 				// Collect requests until timeout or batch is full
 				while batch.len() < self.batch_size {
@@ -118,19 +165,32 @@ impl CommitBatcher {
 					if now >= deadline {
 						break;
 					}
-					// Try to receive more requests within the remaining time
-					match tokio::time::timeout_at(deadline.into(), self.receiver.recv()).await {
-						Ok(Some(request)) => batch.push(request),
-						Ok(None) | Err(_) => break,
-					};
+					// Calculate the remaining time
+					let wait = deadline - now;
+					// Wait on condvar with timeout
+					let mut buffer = self.shared.buffer.lock();
+					// Wait for items or timeout
+					if self.shared.condvar.wait_for(&mut buffer, wait.into()).timed_out() {
+						break;
+					}
+					// Take any new items
+					let take = (self.batch_size - batch.len()).min(buffer.len());
+					// Drain the buffer items into the batch
+					if take > 0 {
+						batch.extend(buffer.drain(..take));
+					}
 				}
 			}
 			// Drain any additional immediately available transactions
-			if batch.len() < self.batch_size && self.receiver.len() > 0 {
+			if batch.len() < self.batch_size {
+				// Lock the buffer to check the number of items
+				let mut buffer = self.shared.buffer.lock();
 				// Calculate the remaining number of slots in the batch
-				let remaining = self.batch_size - batch.len();
-				// Drain the remaining slots in the batch
-				self.receiver.recv_many(&mut batch, remaining).await;
+				let take = (self.batch_size - batch.len()).min(buffer.len());
+				// Drain the buffer items into the batch
+				if take > 0 {
+					batch.extend(buffer.drain(..take));
+				}
 			}
 			// Commit as a batch with single fsync
 			affinitypool::spawn_local(|| {
