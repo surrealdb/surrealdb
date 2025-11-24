@@ -110,7 +110,7 @@ impl InfoStructure for IndexDefinition {
 			"cols".to_string() => Value::Array(Array(self.cols.into_iter().map(|x| x.structure()).collect())),
 			"index".to_string() => self.index.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-			"decommissioned".to_string()=> self.decommissioned.into()
+			"decommissioned".to_string(), if self.decommissioned => self.decommissioned.into()
 		})
 	}
 }

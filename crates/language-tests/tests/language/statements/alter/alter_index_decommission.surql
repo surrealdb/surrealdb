@@ -11,7 +11,7 @@ value = "'OK'"
 value = "NONE"
 
 [[test.results]]
-value = "{ events: [ ], fields: [ ], indexes: [ { cols: [ ], decommissioned: false, index: 'COUNT', name: 'count_idx', what: 'test' } ], lives: [ ], tables: [ ] }"
+value = "{ events: [ ], fields: [ ], indexes: [ { cols: [ ], index: 'COUNT', name: 'count_idx', what: 'test' } ], lives: [ ], tables: [ ] }"
 
 [[test.results]]
 value = '''[{ detail: { plan: { index: 'count_idx', operator: 'Count' }, table: 'test' }, operation: 'Iterate Index Count' }, { detail: { "Aggregate expressions": {  }, Aggregations: { _a0: 'Count' }, "Group expressions": {  }, "Select expression": { count: '_a0' }, type: 'Group' }, operation: 'Collector' }]'''
