@@ -176,7 +176,7 @@ impl CommitBatcher {
 					// Wait on condvar with timeout
 					let mut buffer = self.shared.buffer.lock();
 					// Wait for items or timeout
-					if self.shared.condvar.wait_for(&mut buffer, wait.into()).timed_out() {
+					if self.shared.condvar.wait_for(&mut buffer, wait).timed_out() {
 						break;
 					}
 					// Take available items up to the maximum batch size
