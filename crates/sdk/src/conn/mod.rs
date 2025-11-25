@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicI64, Ordering};
 
 use async_channel::{Receiver, Sender};
 use surrealdb_core::dbs::QueryResult;
@@ -20,7 +19,6 @@ use super::opt::Config;
 #[derive(Debug)]
 #[allow(dead_code, reason = "Used by the embedded and remote connections.")]
 pub struct RequestData {
-	pub(crate) id: i64,
 	pub(crate) command: Command,
 	pub(crate) session_id: Option<Uuid>,
 }
@@ -35,20 +33,15 @@ pub(crate) struct Route {
 }
 
 /// Message router
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Router {
 	pub(crate) sender: Sender<Route>,
 	#[allow(dead_code)]
 	pub(crate) config: Config,
-	pub(crate) last_id: AtomicI64,
 	pub(crate) features: HashSet<ExtraFeatures>,
 }
 
 impl Router {
-	pub(crate) fn next_id(&self) -> i64 {
-		self.last_id.fetch_add(1, Ordering::SeqCst)
-	}
-
 	#[allow(clippy::type_complexity)]
 	pub(crate) fn send_command(
 		&self,
@@ -56,11 +49,9 @@ impl Router {
 		session_id: Option<Uuid>,
 	) -> BoxFuture<'_, Result<Receiver<std::result::Result<Vec<QueryResult>, DbResultError>>>> {
 		Box::pin(async move {
-			let id = self.next_id();
 			let (sender, receiver) = async_channel::bounded(1);
 			let route = Route {
 				request: RequestData {
-					id,
 					command,
 					session_id,
 				},

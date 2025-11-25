@@ -187,9 +187,7 @@ where
 					Err(e) => return Err(e),
 				}
 			}
-			let inner =
-				Arc::into_inner(client.inner).expect("new connection to have no references");
-			let router = inner.router.into_inner().expect("router to be set");
+			let router = client.inner.router.wait().clone();
 			self.surreal.inner.router.set(router).map_err(|_| Error::AlreadyConnected)?;
 			// Both ends of the channel are still alive at this point
 			self.surreal.inner.waiter.0.send(Some(WaitFor::Connection)).ok();
@@ -211,6 +209,7 @@ enum SessionId {
 		old: Uuid,
 		new: Uuid,
 	},
+	Drop(Uuid),
 }
 
 #[derive(Debug, Clone)]
@@ -337,6 +336,15 @@ where
 			session_id,
 			engine: self.engine,
 		}
+	}
+}
+
+impl<C> Drop for Surreal<C>
+where
+	C: Connection,
+{
+	fn drop(&mut self) {
+		self.inner.session_clone.sender.try_send(SessionId::Drop(self.session_id)).ok();
 	}
 }
 

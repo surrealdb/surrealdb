@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::sync::atomic::AtomicI64;
 
 // Removed anyhow::bail - using return Err() instead
 #[cfg(feature = "protocol-http")]
@@ -224,7 +223,6 @@ impl conn::Sealed for Any {
 				features,
 				config,
 				sender: route_tx,
-				last_id: AtomicI64::new(0),
 			};
 
 			Ok((router, waiter, session_clone).into())

@@ -15,7 +15,7 @@ use tokio_util::sync::CancellationToken;
 use wasm_bindgen_futures::spawn_local;
 
 use crate::conn::{Route, Router};
-use crate::engine::local::{Db, LiveQueryState, LocalSessionState, SessionCloneError};
+use crate::engine::local::{Db, LiveQueryState, SessionCloneError, SessionState};
 use crate::engine::tasks;
 use crate::method::BoxFuture;
 use crate::opt::auth::Root;
@@ -152,7 +152,7 @@ pub(crate) async fn run_router(
 				};
 			match session_id {
 				SessionId::Initial(session_id) => {
-					router_state.sessions.insert(session_id, Ok(LocalSessionState::default()));
+					router_state.sessions.insert(session_id, Ok(SessionState::default()));
 				}
 				SessionId::Clone { old, new } => {
 					let state = match router_state.sessions.get(&old) {

@@ -122,7 +122,15 @@ async fn router_handle_request(
 		session_id,
 	} = request;
 
-	let entry = state.pending_requests.entry(id);
+	let Some(session_state) = state.sessions.get_mut(&session_id) else {
+		let error = Error::InternalError(format!("Session not found: {session_id:?}"));
+		if response.send(Err(error.into())).await.is_err() {
+			trace!("Receiver dropped");
+		}
+		return HandleResult::Ok;
+	};
+
+	let entry = session_state.pending_requests.entry(id);
 	// We probably shouldn't be sending duplicate id requests.
 	let Entry::Vacant(entry) = entry else {
 		let error = Error::DuplicateRequestId(id);
@@ -179,7 +187,7 @@ async fn router_handle_request(
 			ref uuid,
 			ref notification_sender,
 		} => {
-			state.live_queries.insert(*uuid, notification_sender.clone());
+			session_state.live_queries.insert(*uuid, notification_sender.clone());
 			if response.send(Ok(vec![QueryResultBuilder::instant_none()])).await.is_err() {
 				trace!("Receiver dropped");
 			}
@@ -189,7 +197,7 @@ async fn router_handle_request(
 		Command::Kill {
 			ref uuid,
 		} => {
-			state.live_queries.remove(uuid);
+			session_state.live_queries.remove(uuid);
 		}
 		Command::Use {
 			..
@@ -277,8 +285,16 @@ async fn router_handle_response(
 					// If `id` is set this is a normal response
 					Some(id) => {
 						if let Ok(id) = id.into_int() {
+							// Find the pending request by searching through all sessions
+							let mut pending_opt = None;
+							for (_, session_state) in &mut state.sessions {
+								if let Some(pending) = session_state.pending_requests.remove(&id) {
+									pending_opt = Some(pending);
+									break;
+								}
+							}
 							// We can only route responses with IDs
-							if let Some(mut pending) = state.pending_requests.remove(&id) {
+							if let Some(mut pending) = pending_opt {
 								match response.result {
 									Ok(DbResult::Query(results)) => {
 										// Apply effect only on success
@@ -409,9 +425,16 @@ async fn router_handle_response(
 																RequestEffect::Authenticate {
 																	token: None,
 																};
-															state
-																.pending_requests
-																.insert(id, pending);
+															// Re-insert into the session's pending
+															// requests
+															if let Some(session_state) = state
+																.sessions
+																.get_mut(&pending.session_id)
+															{
+																session_state
+																	.pending_requests
+																	.insert(id, pending);
+															}
 														}
 													}
 
@@ -436,31 +459,42 @@ async fn router_handle_response(
 					None => match response.result {
 						Ok(DbResult::Live(notification)) => {
 							let live_query_id = notification.id;
-							// Check if this live query is registered
-							if let Some(sender) = state.live_queries.get(&live_query_id) {
-								// Send the notification back to the caller or kill live query if
-								// the receiver is already dropped
-								if sender.send(Ok(notification)).await.is_err() {
-									state.live_queries.remove(&live_query_id);
-									let kill = {
-										let request = Command::Kill {
-											uuid: live_query_id.0,
-										}
-										.into_router_request(None, None)
-										.into_value();
+							// Find which session has this live query registered
+							let mut found_session = None;
+							for (session_id, session_state) in &state.sessions {
+								if session_state.live_queries.contains_key(&live_query_id) {
+									found_session = Some(*session_id);
+									break;
+								}
+							}
+							if let Some(session_id) = found_session {
+								let session_state = state.sessions.get_mut(&session_id).unwrap();
+								if let Some(sender) = session_state.live_queries.get(&live_query_id)
+								{
+									// Send the notification back to the caller or kill live query
+									// if the receiver is already dropped
+									if sender.send(Ok(notification)).await.is_err() {
+										session_state.live_queries.remove(&live_query_id);
+										let kill = {
+											let request = Command::Kill {
+												uuid: live_query_id.0,
+											}
+											.into_router_request(None, session_id)
+											.into_value();
 
-										let value =
-											surrealdb_core::rpc::format::flatbuffers::encode(
-												&request,
-											)
-											.unwrap();
-										Message::Binary(value)
-									};
-									if let Err(error) = state.sink.send(kill).await {
-										trace!(
-											"failed to send kill query to the server; {error:?}"
-										);
-										return HandleResult::Disconnected;
+											let value =
+												surrealdb_core::rpc::format::flatbuffers::encode(
+													&request,
+												)
+												.unwrap();
+											Message::Binary(value)
+										};
+										if let Err(error) = state.sink.send(kill).await {
+											trace!(
+												"failed to send kill query to the server; {error:?}"
+											);
+											return HandleResult::Disconnected;
+										}
 									}
 								}
 							}
@@ -485,7 +519,15 @@ async fn router_handle_response(
 				{
 					// Return an error if an ID was returned
 					if let Some(Ok(id)) = id.map(Value::into_int) {
-						if let Some(req) = state.pending_requests.remove(&id) {
+						// Find the pending request by searching through all sessions
+						let mut pending_opt = None;
+						for (_, session_state) in &mut state.sessions {
+							if let Some(pending) = session_state.pending_requests.remove(&id) {
+								pending_opt = Some(pending);
+								break;
+							}
+						}
+						if let Some(req) = pending_opt {
 							let _res = req.response_channel.send(Err(error.into())).await;
 						} else {
 							warn!(

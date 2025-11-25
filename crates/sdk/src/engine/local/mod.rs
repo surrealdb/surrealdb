@@ -148,8 +148,11 @@
 //! }
 //! ```
 
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod native;
 #[cfg(target_family = "wasm")]
-use std::collections::HashMap;
+pub(crate) mod wasm;
+
 use std::marker::PhantomData;
 #[cfg(not(target_family = "wasm"))]
 use std::pin::pin;
@@ -160,11 +163,11 @@ use std::task::{Poll, ready};
 use std::{future::Future, path::PathBuf};
 
 use async_channel::Sender;
-use dashmap::DashMap;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use futures::StreamExt;
 #[cfg(not(target_family = "wasm"))]
 use futures::stream::poll_fn;
+use papaya::HashMap;
 use surrealdb_core::dbs::{QueryResult, QueryResultBuilder, Session};
 use surrealdb_core::iam;
 #[cfg(not(target_family = "wasm"))]
@@ -177,6 +180,7 @@ use surrealdb_core::{
 	ml::storage::surml_file::SurMlFile,
 };
 use surrealdb_types::{Notification, SurrealValue, ToSql, Value, Variables};
+use tokio::sync::RwLock;
 #[cfg(not(target_family = "wasm"))]
 use tokio::{
 	fs::OpenOptions,
@@ -186,84 +190,12 @@ use tokio::{
 use tokio_util::bytes::BytesMut;
 use uuid::Uuid;
 
+use crate::conn::Command;
 #[cfg(all(not(target_family = "wasm"), feature = "ml"))]
 use crate::conn::MlExportConfig;
-use crate::conn::{Command, RequestData};
 use crate::opt::IntoEndpoint;
 use crate::opt::auth::{AccessToken, RefreshToken, SecureToken, Token};
-use crate::{Connect, Result, Surreal};
-
-#[cfg(target_family = "wasm")]
-type LiveQueryMap = HashMap<Uuid, LiveQueryState>;
-
-#[cfg(target_family = "wasm")]
-struct LiveQueryState {
-	session_id: Uuid,
-	sender: Sender<Result<Notification>>,
-}
-
-/// Per-session state for local/embedded connections
-#[derive(Clone)]
-pub(crate) struct LocalSessionState {
-	session: Session,
-	vars: Variables,
-	transactions: Arc<DashMap<Uuid, Arc<Transaction>>>,
-	live_queries: Arc<DashMap<Uuid, Sender<Result<Notification>>>>,
-}
-
-impl Default for LocalSessionState {
-	fn default() -> Self {
-		Self {
-			session: Session::default().with_rt(true),
-			vars: Variables::default(),
-			transactions: Arc::new(DashMap::new()),
-			live_queries: Arc::new(DashMap::new()),
-		}
-	}
-}
-
-#[derive(Debug, Clone)]
-struct SessionCloneError(Uuid);
-
-impl From<SessionCloneError> for crate::Error {
-	fn from(error: SessionCloneError) -> Self {
-		crate::Error::InternalError(format!("Session clone error: {} not found", error.0))
-	}
-}
-
-type Sessions = Arc<DashMap<Uuid, std::result::Result<LocalSessionState, SessionCloneError>>>;
-
-fn get_session(sessions: &Sessions, session_id: &Option<Uuid>) -> Result<LocalSessionState> {
-	let session_id = session_id
-		.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
-	match sessions.get(&session_id) {
-		Some(entry) => match entry.value() {
-			Ok(state) => Ok(state.clone()),
-			Err(error) => Err(error.clone().into()),
-		},
-		None => Err(crate::Error::InternalError(format!("Session not found: {session_id}"))),
-	}
-}
-
-#[cfg(not(target_family = "wasm"))]
-#[derive(Clone)]
-struct RouterState {
-	kvs: Arc<Datastore>,
-	sessions: Sessions,
-}
-
-#[cfg(target_family = "wasm")]
-#[derive(Clone)]
-struct RouterState {
-	kvs: Arc<Datastore>,
-	live_queries: Arc<tokio::sync::RwLock<LiveQueryMap>>,
-	sessions: Sessions,
-}
-
-#[cfg(not(target_family = "wasm"))]
-pub(crate) mod native;
-#[cfg(target_family = "wasm")]
-pub(crate) mod wasm;
+use crate::{Connect, Surreal};
 
 /// In-memory database
 ///
@@ -481,12 +413,105 @@ impl Surreal<Db> {
 }
 
 #[cfg(not(target_family = "wasm"))]
+struct RouterState {
+	kvs: Arc<Datastore>,
+	sessions: Sessions,
+}
+
+type SessionResult = Result<Arc<SessionState>, SessionError>;
+
+struct Sessions(HashMap<Uuid, SessionResult>);
+
+impl Sessions {
+	fn insert(&self, session_id: Uuid, result: SessionResult) {
+		self.0.pin().insert(session_id, result);
+	}
+
+	fn get(&self, session_id: &Option<Uuid>) -> SessionResult {
+		let session_id = session_id.ok_or(SessionError::MissingId)?;
+		match self.0.pin().get(&session_id) {
+			Some(Ok(state)) => Ok(state.clone()),
+			Some(error) => error.clone(),
+			None => Err(SessionError::NotFound(session_id)),
+		}
+	}
+
+	fn remove(&self, session_id: &Uuid) {
+		self.0.pin().remove(session_id);
+	}
+}
+
+/// Per-session state for local/embedded connections
+pub(crate) struct SessionState {
+	session: RwLock<Session>,
+	vars: RwLock<Variables>,
+	transactions: HashMap<Uuid, Arc<Transaction>>,
+	live_queries: HashMap<Uuid, Sender<crate::Result<Notification>>>,
+}
+
+impl SessionState {
+	fn insert_txn(&self, id: Uuid, arc: Arc<Transaction>) {
+		self.transactions.pin().insert(id, arc);
+	}
+
+	fn get_txn(&self, id: &Uuid) -> Option<Arc<Transaction>> {
+		self.transactions.pin().get(id).cloned()
+	}
+
+	fn remove_txn(&self, id: &Uuid) -> Option<Arc<Transaction>> {
+		self.transactions.pin().remove(id).cloned()
+	}
+
+	fn insert_live_query(&self, id: Uuid, sender: Sender<crate::Result<Notification>>) {
+		self.live_queries.pin().insert(id, sender);
+	}
+
+	fn get_live_query(&self, id: &Uuid) -> Option<Sender<crate::Result<Notification>>> {
+		self.live_queries.pin().get(id).cloned()
+	}
+
+	fn remove_live_query(&self, id: &Uuid) {
+		self.live_queries.pin().remove(id);
+	}
+}
+
+impl Default for SessionState {
+	fn default() -> Self {
+		Self {
+			session: RwLock::new(Session::default().with_rt(true)),
+			vars: RwLock::new(Variables::default()),
+			transactions: HashMap::new(),
+			live_queries: HashMap::new(),
+		}
+	}
+}
+
+#[derive(Debug, Clone)]
+enum SessionError {
+	MissingId,
+	NotFound(Uuid),
+}
+
+impl From<SessionError> for crate::Error {
+	fn from(error: SessionError) -> Self {
+		match error {
+			SessionError::MissingId => {
+				crate::Error::InternalError("Session ID required".to_owned())
+			}
+			SessionError::NotFound(id) => {
+				crate::Error::InternalError(format!("Session not foundr: {id}"))
+			}
+		}
+	}
+}
+
+#[cfg(not(target_family = "wasm"))]
 async fn export_file(
 	kvs: &Datastore,
 	sess: &Session,
 	chn: async_channel::Sender<Vec<u8>>,
 	config: Option<DbExportConfig>,
-) -> std::result::Result<(), crate::Error> {
+) -> Result<(), crate::Error> {
 	let res = match config {
 		Some(config) => kvs.export_with_config(sess, chn, config).await?.await,
 		None => kvs.export(sess, chn).await?.await,
@@ -515,7 +540,7 @@ async fn export_ml(
 		name,
 		version,
 	}: MlExportConfig,
-) -> std::result::Result<(), crate::Error> {
+) -> Result<(), crate::Error> {
 	let (nsv, dbv) = check_ns_db(sess).map_err(|e| crate::Error::InternalError(e.to_string()))?;
 	// Check the permissions level
 	kvs.check(sess, Action::View, ResourceKind::Model.on_db(&nsv, &dbv))
@@ -548,7 +573,7 @@ async fn copy<'a, R, W>(
 	path: PathBuf,
 	reader: &'a mut R,
 	writer: &'a mut W,
-) -> std::result::Result<(), crate::Error>
+) -> Result<(), crate::Error>
 where
 	R: tokio::io::AsyncRead + Unpin + ?Sized,
 	W: tokio::io::AsyncWrite + Unpin + ?Sized,
@@ -564,7 +589,7 @@ async fn kill_live_query(
 	id: Uuid,
 	session: &Session,
 	vars: Variables,
-) -> std::result::Result<Vec<QueryResult>, DbResultError> {
+) -> Result<Vec<QueryResult>, DbResultError> {
 	let sql = format!("KILL {id}");
 
 	let results = kvs.execute(&sql, session, Some(vars)).await?;
@@ -573,32 +598,18 @@ async fn kill_live_query(
 
 #[cfg(not(target_family = "wasm"))]
 async fn router(
-	RequestData {
-		command,
-		session_id,
-		..
-	}: RequestData,
-	RouterState {
-		kvs,
-		sessions,
-	}: RouterState,
-) -> std::result::Result<Vec<QueryResult>, crate::Error> {
+	kvs: &Arc<Datastore>,
+	state: &SessionState,
+	command: Command,
+) -> Result<Vec<QueryResult>, crate::Error> {
 	match command {
 		Command::Use {
 			namespace,
 			database,
 		} => {
-			let session_id = session_id
-				.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
 			let result = {
-				let mut state_ref = sessions.get_mut(&session_id).ok_or_else(|| {
-					crate::Error::InternalError(format!("Session not found: {session_id}"))
-				})?;
-				let state = match state_ref.value_mut() {
-					Ok(state) => state,
-					Err(error) => return Err(error.clone().into()),
-				};
-				kvs.process_use(None, &mut state.session, namespace, database).await?
+				kvs.process_use(None, &mut *state.session.write().await, namespace, database)
+					.await?
 			};
 			Ok(vec![result])
 		}
@@ -606,17 +617,8 @@ async fn router(
 			credentials,
 		} => {
 			let query_result = QueryResultBuilder::started_now();
-			let session_id = session_id
-				.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
 			let signup_data = {
-				let mut state_ref = sessions.get_mut(&session_id).ok_or_else(|| {
-					crate::Error::InternalError(format!("Session not found: {session_id}"))
-				})?;
-				let state = match state_ref.value_mut() {
-					Ok(state) => state,
-					Err(error) => return Err(error.clone().into()),
-				};
-				iam::signup::signup(&kvs, &mut state.session, credentials.into())
+				iam::signup::signup(kvs, &mut *state.session.write().await, credentials.into())
 					.await
 					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?
 			};
@@ -640,17 +642,8 @@ async fn router(
 			credentials,
 		} => {
 			let query_result = QueryResultBuilder::started_now();
-			let session_id = session_id
-				.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
 			let signin_data = {
-				let mut state_ref = sessions.get_mut(&session_id).ok_or_else(|| {
-					crate::Error::InternalError(format!("Session not found: {session_id}"))
-				})?;
-				let state = match state_ref.value_mut() {
-					Ok(state) => state,
-					Err(error) => return Err(error.clone().into()),
-				};
-				iam::signin::signin(&kvs, &mut state.session, credentials.into())
+				iam::signin::signin(kvs, &mut *state.session.write().await, credentials.into())
 					.await
 					.map_err(|e| DbResultError::InvalidAuth(e.to_string()))?
 			};
@@ -683,17 +676,8 @@ async fn router(
 				} => (access, true),
 			};
 			// Attempt to authenticate with the access token
-			let session_id = session_id
-				.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
 			let result = {
-				let mut state_ref = sessions.get_mut(&session_id).ok_or_else(|| {
-					crate::Error::InternalError(format!("Session not found: {session_id}"))
-				})?;
-				let state = match state_ref.value_mut() {
-					Ok(state) => state,
-					Err(error) => return Err(error.clone().into()),
-				};
-				match iam::verify::token(&kvs, &mut state.session, access).await {
+				match iam::verify::token(kvs, &mut *state.session.write().await, access).await {
 					// Authentication successful - return the original token
 					Ok(_) => query_result.finish_with_result(Ok(token.into_value())),
 					Err(error) => {
@@ -701,14 +685,15 @@ async fn router(
 						// If the access token is expired and we have a refresh token,
 						// automatically attempt to refresh and return new tokens.
 						if with_refresh && error.to_string().contains("token has expired") {
-							let result = match token.refresh(&kvs, &mut state.session).await {
-								Ok(token) => {
-									query_result.finish_with_result(Ok(token.into_value()))
-								}
-								Err(error) => query_result.finish_with_result(Err(
-									DbResultError::InternalError(error.to_string()),
-								)),
-							};
+							let result =
+								match token.refresh(kvs, &mut *state.session.write().await).await {
+									Ok(token) => {
+										query_result.finish_with_result(Ok(token.into_value()))
+									}
+									Err(error) => query_result.finish_with_result(Err(
+										DbResultError::InternalError(error.to_string()),
+									)),
+								};
 							return Ok(vec![result]);
 						}
 						// If authentication failed and automatic refresh isn't applicable,
@@ -726,17 +711,8 @@ async fn router(
 		} => {
 			// Refresh command: Exchange a refresh token for new access and refresh tokens
 			let query_result = QueryResultBuilder::started_now();
-			let session_id = session_id
-				.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
 			let result = {
-				let mut state_ref = sessions.get_mut(&session_id).ok_or_else(|| {
-					crate::Error::InternalError(format!("Session not found: {session_id}"))
-				})?;
-				let state = match state_ref.value_mut() {
-					Ok(state) => state,
-					Err(error) => return Err(error.clone().into()),
-				};
-				match token.refresh(&kvs, &mut state.session).await {
+				match token.refresh(kvs, &mut *state.session.write().await).await {
 					Ok(token) => query_result.finish_with_result(Ok(token.into_value())),
 					Err(error) => query_result
 						.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
@@ -746,17 +722,8 @@ async fn router(
 		}
 		Command::Invalidate => {
 			let query_result = QueryResultBuilder::started_now();
-			let session_id = session_id
-				.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
 			let result = {
-				let mut state_ref = sessions.get_mut(&session_id).ok_or_else(|| {
-					crate::Error::InternalError(format!("Session not found: {session_id}"))
-				})?;
-				let state = match state_ref.value_mut() {
-					Ok(state) => state,
-					Err(error) => return Err(error.clone().into()),
-				};
-				match iam::clear::clear(&mut state.session) {
+				match iam::clear::clear(&mut *state.session.write().await) {
 					Ok(_) => query_result.finish_with_result(Ok(Value::None)),
 					Err(error) => query_result
 						.finish_with_result(Err(DbResultError::InternalError(error.to_string()))),
@@ -769,8 +736,7 @@ async fn router(
 			let result = match kvs.transaction(TransactionType::Write, LockType::Optimistic).await {
 				Ok(txn) => {
 					let id = Uuid::now_v7();
-					let state = get_session(&sessions, &session_id)?;
-					state.transactions.insert(id, std::sync::Arc::new(txn));
+					state.insert_txn(id, Arc::new(txn));
 					query_result.finish_with_result(Ok(Value::Uuid(id.into())))
 				}
 				Err(error) => query_result
@@ -793,9 +759,7 @@ async fn router(
 		Command::Rollback {
 			txn,
 		} => {
-			let state = get_session(&sessions, &session_id)?;
-			let tx = state.transactions.remove(&txn).map(|(_, v)| v);
-			if let Some(tx) = tx {
+			if let Some(tx) = state.remove_txn(&txn) {
 				tx.cancel().await?;
 			}
 			Ok(vec![QueryResultBuilder::instant_none()])
@@ -803,9 +767,7 @@ async fn router(
 		Command::Commit {
 			txn,
 		} => {
-			let state = get_session(&sessions, &session_id)?;
-			let tx = state.transactions.remove(&txn).map(|(_, v)| v);
-			if let Some(tx) = tx {
+			if let Some(tx) = state.remove_txn(&txn) {
 				tx.commit().await?;
 			}
 			Ok(vec![QueryResultBuilder::instant_none()])
@@ -815,21 +777,23 @@ async fn router(
 			query,
 			variables,
 		} => {
-			// Get the session state
-			let state = get_session(&sessions, &session_id)?;
-
 			// Merge session vars with query vars
-			let mut vars = state.vars.clone();
+			let mut vars = state.vars.read().await.clone();
 			vars.extend(variables);
 
 			// If a transaction UUID is provided, we need to retrieve it and use it
 			let response = if let Some(txn_id) = txn {
 				// Retrieve the transaction from storage
-				let tx_option = state.transactions.get(&txn_id).map(|v| v.clone());
+				let tx_option = state.get_txn(&txn_id);
 				if let Some(tx) = tx_option {
 					// Execute with the existing transaction
-					kvs.execute_with_transaction(query.as_ref(), &state.session, Some(vars), tx)
-						.await?
+					kvs.execute_with_transaction(
+						query.as_ref(),
+						&*state.session.read().await,
+						Some(vars),
+						tx,
+					)
+					.await?
 				} else {
 					// Transaction not found - return error
 					return Ok(vec![QueryResultBuilder::started_now().finish_with_result(Err(
@@ -838,7 +802,7 @@ async fn router(
 				}
 			} else {
 				// No transaction - use normal execution
-				kvs.execute(query.as_ref(), &state.session, Some(vars)).await?
+				kvs.execute(query.as_ref(), &*state.session.read().await, Some(vars)).await?
 			};
 
 			Ok(response)
@@ -877,8 +841,8 @@ async fn router(
 			let (mut writer, mut reader) = io::duplex(10_240);
 
 			// Write to channel.
-			let state_clone = get_session(&sessions, &session_id)?;
-			let export = export_file(&kvs, &state_clone.session, tx, config);
+			let session = state.session.read().await.clone();
+			let export = export_file(&kvs, &session, tx, config);
 
 			// Read from channel and write to pipe.
 			let bridge = async move {
@@ -925,8 +889,7 @@ async fn router(
 			let (mut writer, mut reader) = io::duplex(10_240);
 
 			// Write to channel.
-			let state = get_session(&sessions, &session_id)?;
-			let export = export_ml(&kvs, &state.session, tx, config);
+			let export = export_ml(&kvs, &*state.session.read().await, tx, config);
 
 			// Read from channel and write to pipe.
 			let bridge = async move {
@@ -972,7 +935,7 @@ async fn router(
 			let (tx, rx) = crate::channel::bounded(1);
 
 			let kvs = kvs.clone();
-			let session = get_session(&sessions, &session_id)?.session;
+			let session = state.session.read().await.clone();
 			tokio::spawn(async move {
 				let export = async {
 					if let Err(error) = export_file(&kvs, &session, tx, config).await {
@@ -1001,10 +964,11 @@ async fn router(
 			let (tx, rx) = crate::channel::bounded(1);
 
 			let kvs = kvs.clone();
-			let session = get_session(&sessions, &session_id)?.session;
 			tokio::spawn(async move {
 				let export = async {
-					if let Err(error) = export_ml(&kvs, &session, tx, config).await {
+					if let Err(error) =
+						export_ml(&kvs, &*state.session.read().await, tx, config).await
+					{
 						let _ = bytes.send(Err(error)).await;
 					}
 				};
@@ -1061,9 +1025,12 @@ async fn router(
 				}
 			});
 
-			let state = get_session(&sessions, &session_id)?;
 			let responses = kvs
-				.execute_import(&state.session, Some(state.vars.clone()), stream)
+				.execute_import(
+					&*state.session.read().await,
+					Some(state.vars.read().await.clone()),
+					stream,
+				)
 				.await
 				.map_err(|e| crate::Error::InternalError(e.to_string()))?;
 
@@ -1088,11 +1055,8 @@ async fn router(
 				}
 			};
 
-			// Get the session for this session_id
-			let state = get_session(&sessions, &session_id)?;
-
 			// Ensure a NS and DB are set
-			let (nsv, dbv) = check_ns_db(&state.session)?;
+			let (nsv, dbv) = check_ns_db(&*state.session.read().await)?;
 			// Check the permissions level
 			kvs.check(&state.session, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))?;
 			// Create a new buffer
@@ -1118,7 +1082,7 @@ async fn router(
 			let data = file.to_bytes();
 
 			kvs.put_ml_model(
-				&state.session,
+				&*state.session.read().await,
 				&file.header.name.to_string(),
 				&file.header.version.to_string(),
 				&file.header.description.to_string(),
@@ -1146,21 +1110,10 @@ async fn router(
 				.map_err(|e| crate::Error::InternalError(e.to_string()))?;
 			// Need to compute because certain keys might not be allowed to be set and those
 			// should be rejected by an error.
-			let session_id = session_id
-				.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
-			{
-				let mut state_ref = sessions.get_mut(&session_id).ok_or_else(|| {
-					crate::Error::InternalError(format!("Session not found: {session_id}"))
-				})?;
-				let state = match state_ref.value_mut() {
-					Ok(state) => state,
-					Err(error) => return Err(error.clone().into()),
-				};
-				match value {
-					Value::None => state.vars.remove(&key),
-					v => state.vars.insert(key, v),
-				};
-			}
+			match value {
+				Value::None => state.vars.write().await.remove(&key),
+				v => state.vars.write().await.insert(key, v),
+			};
 
 			Ok(vec![query_result.finish()])
 		}
@@ -1168,18 +1121,7 @@ async fn router(
 			key,
 		} => {
 			let query_result = QueryResultBuilder::started_now();
-			let session_id = session_id
-				.ok_or_else(|| crate::Error::InternalError("Session ID is required".to_string()))?;
-			{
-				let mut state_ref = sessions.get_mut(&session_id).ok_or_else(|| {
-					crate::Error::InternalError(format!("Session not found: {session_id}"))
-				})?;
-				let state = match state_ref.value_mut() {
-					Ok(state) => state,
-					Err(error) => return Err(error.clone().into()),
-				};
-				state.vars.remove(&key);
-			}
+			state.vars.write().await.remove(&key);
 			Ok(vec![query_result.finish()])
 		}
 		Command::SubscribeLive {
@@ -1187,16 +1129,20 @@ async fn router(
 			notification_sender,
 		} => {
 			let query_result = QueryResultBuilder::started_now();
-			let state = get_session(&sessions, &session_id)?;
-			state.live_queries.insert(uuid, notification_sender);
+			state.insert_live_query(uuid, notification_sender);
 			Ok(vec![query_result.finish()])
 		}
 		Command::Kill {
 			uuid,
 		} => {
-			let state = get_session(&sessions, &session_id)?;
-			state.live_queries.remove(&uuid);
-			let results = kill_live_query(&kvs, uuid, &state.session, state.vars.clone()).await?;
+			state.remove_live_query(&uuid);
+			let results = kill_live_query(
+				&kvs,
+				uuid,
+				&*state.session.read().await,
+				state.vars.read().await.clone(),
+			)
+			.await?;
 			Ok(results)
 		}
 
@@ -1215,8 +1161,9 @@ async fn router(
 			};
 
 			// Execute the query
-			let state = get_session(&sessions, &session_id)?;
-			let results = kvs.execute(&sql, &state.session, Some(state.vars.clone())).await?;
+			let results = kvs
+				.execute(&sql, &*state.session.read().await, Some(state.vars.read().await.clone()))
+				.await?;
 			Ok(results)
 		}
 	}

@@ -351,7 +351,15 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 				Some(id) => {
 					// Try to extract i64 from Value
 					if let Value::Number(surrealdb_types::Number::Int(id_num)) = id {
-						match state.pending_requests.remove(&id_num) {
+						// Find the pending request by searching through all sessions
+						let mut pending_opt = None;
+						for (_, session_state) in &mut state.sessions {
+							if let Some(pending) = session_state.pending_requests.remove(&id_num) {
+								pending_opt = Some(pending);
+								break;
+							}
+						}
+						match pending_opt {
 							Some(mut pending) => {
 								// We can only route responses with IDs
 								match response.result {
@@ -500,9 +508,16 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 																RequestEffect::Authenticate {
 																	token: None,
 																};
-															state
-																.pending_requests
-																.insert(id_num, pending);
+															// Re-insert into the session's pending
+															// requests
+															if let Some(session_state) = state
+																.sessions
+																.get_mut(&pending.session_id)
+															{
+																session_state
+																	.pending_requests
+																	.insert(id_num, pending);
+															}
 														}
 													}
 													return HandleResult::Ok;
@@ -528,30 +543,43 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 				None => {
 					if let Ok(DbResult::Live(notification)) = response.result {
 						let live_query_id = notification.id.0;
-						// Check if this live query is registered
-						if let Some(sender) = state.live_queries.get(&live_query_id) {
-							// Send the notification back to the caller or kill live query
-							// if the receiver is already dropped
-							if sender.send(Ok(notification)).await.is_err() {
-								state.live_queries.remove(&live_query_id);
-								let kill = {
-									let request = Command::Kill {
-										uuid: live_query_id,
+						// Find which session has this live query registered
+						let mut found_session = None;
+						for (session_id, session_state) in &state.sessions {
+							if session_state.live_queries.contains_key(&live_query_id) {
+								found_session = Some(*session_id);
+								break;
+							}
+						}
+						if let Some(session_id) = found_session {
+							let session_state = state.sessions.get_mut(&session_id).unwrap();
+							if let Some(sender) = session_state.live_queries.get(&live_query_id) {
+								// Send the notification back to the caller or kill live query
+								// if the receiver is already dropped
+								if sender.send(Ok(notification)).await.is_err() {
+									session_state.live_queries.remove(&live_query_id);
+									let kill = {
+										let request = Command::Kill {
+											uuid: live_query_id,
+										}
+										.into_router_request(None, session_id)
+										.expect("KILL command should convert to router request");
+
+										let request_value = request.into_value();
+
+										let value =
+											surrealdb_core::rpc::format::flatbuffers::encode(
+												&request_value,
+											)
+											.expect("router request should serialize");
+										Message::Binary(value.into())
+									};
+									if let Err(error) = state.sink.send(kill).await {
+										trace!(
+											"failed to send kill query to the server; {error:?}"
+										);
+										return HandleResult::Disconnected;
 									}
-									.into_router_request(None, None)
-									.expect("KILL command should convert to router request");
-
-									let request_value = request.into_value();
-
-									let value = surrealdb_core::rpc::format::flatbuffers::encode(
-										&request_value,
-									)
-									.expect("router request should serialize");
-									Message::Binary(value.into())
-								};
-								if let Err(error) = state.sink.send(kill).await {
-									trace!("failed to send kill query to the server; {error:?}");
-									return HandleResult::Disconnected;
 								}
 							}
 						}
@@ -573,7 +601,17 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 					}) => {
 						// Return an error if an ID was returned
 						if let Some(Value::Number(surrealdb_types::Number::Int(id_num))) = id {
-							match state.pending_requests.remove(&id_num) {
+							// Find the pending request by searching through all sessions
+							let mut pending_opt = None;
+							for (_, session_state) in &mut state.sessions {
+								if let Some(pending) =
+									session_state.pending_requests.remove(&id_num)
+								{
+									pending_opt = Some(pending);
+									break;
+								}
+							}
+							match pending_opt {
 								Some(pending) => {
 									let _res =
 										pending.response_channel.send(Err(error.into())).await;

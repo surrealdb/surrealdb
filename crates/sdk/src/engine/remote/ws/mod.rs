@@ -8,6 +8,7 @@ pub(crate) mod wasm;
 use std::collections::HashMap;
 use std::io;
 use std::marker::PhantomData;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use async_channel::Sender;
@@ -61,8 +62,6 @@ struct PendingRequest {
 	// The channel to send the result of the request into.
 	response_channel:
 		Sender<std::result::Result<Vec<QueryResult>, surrealdb_core::rpc::DbResultError>>,
-	// The session ID associated with this request.
-	session_id: Option<uuid::Uuid>,
 }
 
 /// Per-session state for WebSocket connections
@@ -76,6 +75,8 @@ struct WsSessionState {
 	live_queries: HashMap<Uuid, Sender<Result<Notification>>>,
 	/// Send requests which are still awaiting an awnser.
 	pending_requests: HashMap<i64, PendingRequest>,
+	/// The last ID used for a request
+	last_id: i64,
 }
 
 impl Clone for WsSessionState {
@@ -101,6 +102,10 @@ struct RouterState<Sink, Stream> {
 }
 
 impl<Sink, Stream> RouterState<Sink, Stream> {
+	pub(crate) fn next_id(&self) -> i64 {
+		self.last_id.fetch_add(1, Ordering::SeqCst)
+	}
+
 	pub fn new(sink: Sink, stream: Stream) -> Self {
 		RouterState {
 			sessions: HashMap::new(),

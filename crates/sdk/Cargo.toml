@@ -83,6 +83,7 @@ chrono = { workspace = true, features = ["serde"] }
 futures.workspace = true
 geo = { workspace = true, features = ["use-serde"] }
 indexmap = { workspace = true, features = ["serde"] }
+papaya.workspace = true
 path-clean.workspace = true
 rust_decimal = { workspace = true, features = ["maths", "serde-str"] }
 semver = { workspace = true, features = ["serde"] }

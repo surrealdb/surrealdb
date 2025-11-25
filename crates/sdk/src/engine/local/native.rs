@@ -1,20 +1,20 @@
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::AtomicI64;
 use std::task::Poll;
 
 use async_channel::{Receiver, Sender};
-use dashmap::DashMap;
 use futures::StreamExt;
 use futures::stream::poll_fn;
+use papaya::HashMap;
 use surrealdb_core::iam::Level;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::options::EngineOptions;
-use tokio::sync::watch;
+use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
 
+use super::Sessions;
 use crate::conn::{self, Route, Router};
-use crate::engine::local::{Db, LocalSessionState, SessionCloneError};
+use crate::engine::local::{Db, SessionState};
 use crate::engine::tasks;
 use crate::method::BoxFuture;
 use crate::opt::auth::Root;
@@ -52,7 +52,6 @@ impl conn::Sealed for Db {
 				features,
 				config,
 				sender: route_tx,
-				last_id: AtomicI64::new(0),
 			};
 
 			Ok((router, waiter, session_clone).into())
@@ -118,12 +117,9 @@ pub(crate) async fn run_router(
 	#[cfg(storage)]
 	let kvs = kvs.with_temporary_directory(address.config.temporary_directory);
 
-	let kvs = Arc::new(kvs);
-	let sessions = Arc::new(DashMap::new());
-
 	let router_state = super::RouterState {
-		kvs: kvs.clone(),
-		sessions: sessions.clone(),
+		kvs: Arc::new(kvs),
+		sessions: Sessions(HashMap::new()),
 	};
 
 	let canceller = CancellationToken::new();
@@ -141,9 +137,9 @@ pub(crate) async fn run_router(
 	if let Some(interval) = address.config.changefeed_gc_interval {
 		opt.changefeed_gc_interval = interval;
 	}
-	let tasks = tasks::init(kvs.clone(), canceller.clone(), &opt);
+	let tasks = tasks::init(router_state.kvs.clone(), canceller.clone(), &opt);
 
-	let mut notifications = kvs.notifications().map(Box::pin);
+	let mut notifications = router_state.kvs.notifications().map(Box::pin);
 	let mut notification_stream = poll_fn(move |cx| match &mut notifications {
 		Some(rx) => rx.poll_next_unpin(cx),
 		// return poll pending so that this future is never woken up again and therefore not
@@ -152,8 +148,6 @@ pub(crate) async fn run_router(
 	});
 
 	loop {
-		let router_state = router_state.clone();
-
 		tokio::select! {
 			biased;
 
@@ -161,79 +155,88 @@ pub(crate) async fn run_router(
 				let Ok(session_id) = session else {
 					break
 				};
-			match session_id {
-				SessionId::Initial(session_id) => {
-					router_state.sessions.insert(session_id, Ok(LocalSessionState::default()));
+				match session_id {
+					SessionId::Initial(session_id) => {
+						router_state.sessions.insert(session_id, Ok(Arc::new(SessionState::default())));
+					}
+					SessionId::Clone { old, new } => {
+						let state = match router_state.sessions.get(&Some(old)) {
+							Ok(state) => Ok(Arc::new(SessionState {
+								session: RwLock::new(state.session.read().await.clone()),
+								vars: RwLock::new(state.vars.read().await.clone()),
+								transactions: HashMap::new(),
+								live_queries: HashMap::new()
+							})),
+							Err(error) => Err(error),
+						};
+						router_state.sessions.insert(new, state);
+					}
+					SessionId::Drop(session_id) => {
+						router_state.sessions.remove(&session_id);
+					}
 				}
-				SessionId::Clone { old, new } => {
-					let state = match router_state.sessions.get(&old) {
-						Some(entry) => entry.value().clone(),
-						// If the session is not found, return an error
-						None => Err(SessionCloneError(old)),
-					};
-					router_state.sessions.insert(new, state);
-				}
-			}
 			}
 			route = route_rx.recv() => {
 				let Ok(route) = route else {
 					break
 				};
-				tokio::spawn(async move {
-					match super::router(route.request, router_state)
-						.await
-					{
-						Ok(value) => {
-							route.response.send(Ok(value)).await.ok();
-						}
-						Err(error) => {
-							route.response.send(Err(error.into())).await.ok();
-						}
+				match router_state.sessions.get(&route.request.session_id) {
+					Ok(state) => {
+						let kvs = router_state.kvs.clone();
+						tokio::spawn(async move {
+							match super::router(&kvs, &state, route.request.command)
+								.await
+							{
+								Ok(value) => {
+									route.response.send(Ok(value)).await.ok();
+								}
+								Err(error) => {
+									route.response.send(Err(error.into())).await.ok();
+								}
+							}
+						});
 					}
-				});
+					Err(error) => {
+						route.response.send(Err(crate::Error::from(error).into())).await.ok();
+					}
+				}
 			}
 			notification = notification_stream.next() => {
 				let Some(notification) = notification else {
-					// TODO: Maybe we should do something more then ignore a closed notifications
-					// channel?
 					continue
 				};
 
-			let kvs_clone = kvs.clone();
-			let sessions_clone = sessions.clone();
-			tokio::spawn(async move {
-				let id = notification.id.0;
 				let session_id = notification.session.map(|x| x.0);
+				let live_query_id = notification.id.0;
 
-				// Try to get the specific session if we have a session ID
-				let state = if let Some(sid) = session_id {
-					super::get_session(&sessions_clone, &Some(sid)).ok()
-				} else {
-					// No session ID in notification, search all sessions for this live query
-					sessions_clone.iter().find_map(|entry| {
-						let state = entry.value().as_ref().ok()?.clone();
-						if state.live_queries.contains_key(&id) {
-							Some(state)
-						} else {
-							None
-						}
-					})
-				};
-
-				if let Some(state) = state {
-					if let Some(sender) = state.live_queries.get(&id)
-						&& sender.send(Ok(notification)).await.is_err() {
-							state.live_queries.remove(&id);
-							if let Err(error) =
-								super::kill_live_query(&kvs_clone, id, &state.session, state.vars.clone()).await
-							{
-								warn!("Failed to kill live query '{id}'; {error}");
+				match router_state.sessions.get(&session_id) {
+					Ok(state) => {
+						match state.get_live_query(&live_query_id) {
+							Some(sender) => {
+								let kvs = router_state.kvs.clone();
+								let vars = state.vars.read().await.clone();
+								let session = state.session.read().await.clone();
+								tokio::spawn(async move {
+									if sender.send(Ok(notification)).await.is_err() {
+										state.remove_live_query(&live_query_id);
+										if let Err(error) =
+											super::kill_live_query(&kvs, live_query_id, &session, vars).await
+										{
+											warn!("Failed to kill live query '{live_query_id}'; {error}");
+										}
+									}
+								});
+							}
+							None => {
+								warn!("Failed to find live query '{live_query_id}' for session '{session_id:?}'");
 							}
 						}
-				} else {
-					warn!("Failed to find session for live query '{id}'");
+					}
+					Err(error) => {
+						let error = crate::Error::from(error);
+						warn!("Failed to find session '{session_id:?}' for live query '{live_query_id}'; {error}");
+					}
 				}
-			});
 			}
 		}
 	}
@@ -242,5 +245,5 @@ pub(crate) async fn run_router(
 	// Wait for background tasks to finish
 	tasks.resolve().await.ok();
 	// Delete this node from the cluster
-	kvs.shutdown().await.ok();
+	router_state.kvs.shutdown().await.ok();
 }
