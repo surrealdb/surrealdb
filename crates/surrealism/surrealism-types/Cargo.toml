@@ -1,6 +1,6 @@
 [package]
 name = "surrealism-types"
-version = "0.1.2"
+version = "0.1.3"
 description = "Types for Surrealism"
 edition.workspace = true
 authors.workspace = true
