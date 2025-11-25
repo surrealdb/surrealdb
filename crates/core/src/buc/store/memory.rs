@@ -87,7 +87,7 @@ impl ObjectStore for MemoryStore {
 		Box::pin(async move {
 			let data = self.store.get(key).map(|v| ObjectMeta {
 				size: v.bytes.len() as u64,
-				updated: v.updated.clone(),
+				updated: v.updated.0,
 				key: key.to_owned(),
 			});
 
@@ -239,7 +239,7 @@ impl ObjectStore for MemoryStore {
 				objects.push(ObjectMeta {
 					key: x.key().clone(),
 					size: entry.bytes.len() as u64,
-					updated: entry.updated.clone(),
+					updated: entry.updated.0,
 				});
 			}
 

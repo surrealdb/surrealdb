@@ -3,6 +3,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 
 use crate::err::Error;
 use crate::val::{Datetime, File, Object, Value};
@@ -10,21 +11,22 @@ use crate::val::{Datetime, File, Object, Value};
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) mod file;
 pub(crate) mod memory;
+pub(crate) mod path;
 pub(crate) mod prefixed;
-pub(crate) mod util;
 
-pub use util::ObjectKey;
+// Expose type for external composers
+pub use path::ObjectKey;
 
 pub struct ObjectMeta {
 	pub size: u64,
-	pub updated: Datetime,
+	pub updated: DateTime<Utc>,
 	pub key: ObjectKey,
 }
 
 impl ObjectMeta {
 	pub(crate) fn into_value(self, bucket: String) -> Value {
 		Value::from(map! {
-			"updated" => Value::from(self.updated),
+			"updated" => Value::from(Datetime(self.updated)),
 			"size" => Value::from(self.size),
 			"file" => Value::File(File {
 				bucket,
