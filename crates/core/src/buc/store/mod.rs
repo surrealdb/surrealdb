@@ -12,16 +12,17 @@ pub(crate) mod file;
 pub(crate) mod memory;
 pub(crate) mod prefixed;
 pub(crate) mod util;
+
 pub(crate) use util::ObjectKey;
 
-pub(crate) struct ObjectMeta {
+pub struct ObjectMeta {
 	pub size: u64,
 	pub updated: Datetime,
 	pub key: ObjectKey,
 }
 
 impl ObjectMeta {
-	pub fn into_value(self, bucket: String) -> Value {
+	pub(crate) fn into_value(self, bucket: String) -> Value {
 		Value::from(map! {
 			"updated" => Value::from(self.updated),
 			"size" => Value::from(self.size),
@@ -34,7 +35,7 @@ impl ObjectMeta {
 }
 
 #[derive(Default)]
-pub(crate) struct ListOptions {
+pub struct ListOptions {
 	pub start: Option<ObjectKey>,
 	pub prefix: Option<ObjectKey>,
 	pub limit: Option<usize>,
@@ -62,7 +63,7 @@ impl TryFrom<Object> for ListOptions {
 	}
 }
 
-pub(crate) trait ObjectStore: Send + Sync + 'static {
+pub trait ObjectStore: Send + Sync + 'static {
 	fn put<'a>(
 		&'a self,
 		key: &'a ObjectKey,

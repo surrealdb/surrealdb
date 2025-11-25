@@ -29,7 +29,8 @@ extern crate tracing;
 #[macro_use]
 mod mac;
 
-mod buc;
+#[doc(hidden)]
+pub mod buc;
 mod cf;
 mod doc;
 mod exe;
@@ -81,10 +82,6 @@ pub(crate) mod types {
 
 #[cfg(feature = "ml")]
 pub use surrealml as ml;
-
-#[cfg(feature = "enterprise")]
-#[rustfmt::skip]
-pub mod ent;
 
 /// Channels for receiving a SurrealQL database export
 pub mod channel {

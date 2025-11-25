@@ -32,6 +32,7 @@ use ml::MlCommand;
 use semver::Version;
 use sql::SqlCommandArguments;
 use start::StartCommandArguments;
+use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::kvs::TransactionBuilderFactory;
 use upgrade::UpgradeCommandArguments;
 use validate::ValidateCommandArguments;
@@ -215,7 +216,9 @@ impl LogFileRotation {
 ///     storage backend)
 ///   - `RouterFactory` (constructs the HTTP router, allowing embedders to customize server routes)
 ///   - `ConfigCheck` (validates configuration before initialization)
-pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
+pub async fn init<
+	C: TransactionBuilderFactory + RouterFactory + ConfigCheck + BucketStoreProvider,
+>(
 	composer: C,
 ) -> ExitCode {
 	// Enables ANSI code support on Windows

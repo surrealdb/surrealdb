@@ -6,6 +6,7 @@ use anyhow::Result;
 use clap::Args;
 use rand::Rng;
 use surrealdb::opt::capabilities::Capabilities as SdkCapabilities;
+use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::kvs::{Datastore, TransactionBuilderFactory};
 use tokio::time::{Instant, sleep, timeout};
 use tokio_util::sync::CancellationToken;
@@ -662,8 +663,8 @@ where
 ///
 /// # Generic parameters
 /// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
-pub async fn init<F: TransactionBuilderFactory>(
-	factory: &F,
+pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
+	composer: C,
 	opt: &Config,
 	canceller: CancellationToken,
 	StartCommandDbsOptions {
@@ -719,7 +720,7 @@ pub async fn init<F: TransactionBuilderFactory>(
 	// Log the specified server capabilities
 	debug!("Server capabilities: {capabilities}");
 	// Parse and setup the desired kv datastore
-	let dbs = Datastore::new_with_factory::<F>(factory, &opt.path, canceller)
+	let dbs = Datastore::new_with_factory::<C>(composer, &opt.path, canceller)
 		.await?
 		.with_notifications()
 		.with_query_timeout(query_timeout)
