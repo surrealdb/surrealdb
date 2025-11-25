@@ -116,6 +116,10 @@ impl ExplainItem {
 				name: "Iterate Thing".into(),
 				details: vec![("thing", Value::RecordId(t.clone()))],
 			},
+			Iterable::ManyThings(t, k) => Self {
+				name: "Iterate ManyThings".into(),
+				details: vec![("things", Value::Array(k.iter().map(|k| Value::RecordId(RecordId::new(t.clone(), k.clone()))).collect()))],
+			},
 			Iterable::Defer(t) => Self {
 				name: "Iterate Defer".into(),
 				details: vec![("thing", Value::RecordId(t.clone()))],

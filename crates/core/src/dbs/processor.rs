@@ -548,6 +548,7 @@ pub(super) trait Collector {
 				}
 				Iterable::Yield(v) => self.collect(Collected::Yield(v)).await?,
 				Iterable::Thing(v) => self.collect(Collected::RecordId(v)).await?,
+				Iterable::ManyThings(t, k) => self.collect_many_things(ctx, opt, &t, k).await?,
 				Iterable::Defer(v) => self.collect(Collected::Defer(v)).await?,
 				Iterable::Lookup {
 					from,
@@ -895,6 +896,39 @@ pub(super) trait Collector {
 		let count = txn.count(beg..end).await?;
 		// Collect the count
 		self.collect(Collected::Count(count)).await?;
+		// Everything ok
+		Ok(())
+	}
+
+	async fn collect_many_things(
+		&mut self,
+		ctx: &Context,
+		opt: &Options,
+		table: &str,
+		keys: Vec<RecordIdKey>,
+	) -> Result<()> {
+		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+
+		// Get the transaction
+		let txn = ctx.tx();
+		// keys
+		let keys = keys.iter().map(|k| {
+			let key = crate::key::record::new(ns, db, table, k);
+			key.encode_key()
+		}).collect::<Result<Vec<_>>>()?;
+
+		let results = txn.getm(keys.clone(), opt.version).await?;
+		let entries = keys.into_iter().zip(results).collect::<Vec<_>>();
+		// Loop over the entries
+		for (k, v) in entries.into_iter() {
+			// TODO how do we handle optional values? Just guessing now
+			// Do we even care about keys here? Or do we just get values and otherwise none
+			if let Some(v) = v {
+				self.collect(Collected::KeyVal(k, v)).await?;
+			} else {
+				self.collect(Collected::TableKey(k)).await?;
+			}
+		}
 		// Everything ok
 		Ok(())
 	}

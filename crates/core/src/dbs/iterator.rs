@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::mem;
 use std::sync::Arc;
 
@@ -44,6 +45,7 @@ pub(crate) enum Iterable {
 	/// An iterable which needs to fetch the data of a
 	/// specific record before processing the document.
 	Thing(RecordId),
+	ManyThings(String, Vec<RecordIdKey>),
 	/// An iterable which needs to fetch the related edges
 	/// of a record before processing each document.
 	Lookup {
@@ -130,6 +132,7 @@ pub(crate) struct Iterator {
 	results: Results,
 	/// Iterator input values
 	entries: Vec<Iterable>,
+	record_entries: HashMap<String, Vec<RecordIdKey>>,
 	/// Should we always return a record?
 	guaranteed: Option<Iterable>,
 	/// Set if the iterator can be cancelled once it reaches start/limit
@@ -151,6 +154,7 @@ impl Clone for Iterator {
 			error: None,
 			results: Results::default(),
 			entries: self.entries.clone(),
+			record_entries: self.record_entries.clone(),
 			guaranteed: None,
 			cancel_on_limit: None,
 			cancel_threshold: None,
@@ -166,7 +170,11 @@ impl Iterator {
 
 	/// Ingests an iterable for processing
 	pub(crate) fn ingest(&mut self, val: Iterable) {
-		self.entries.push(val)
+		if let Iterable::Thing(rid) = val {
+			self.record_entries.entry(rid.table.clone()).or_default().push(rid.key.clone());
+		} else {
+			self.entries.push(val);
+		}
 	}
 
 	/// Prepares a value for processing
@@ -230,6 +238,10 @@ impl Iterator {
 			}
 			x => self.prepare_computed(stk, ctx, opt, doc, planner, stm_ctx, x).await?,
 		};
+		// Ingest all the record_entries as ManyThings iterables
+		for (table, keys) in self.record_entries.drain() {
+			self.entries.push(Iterable::ManyThings(table, keys));
+		}
 		// All ingested ok
 		Ok(())
 	}
