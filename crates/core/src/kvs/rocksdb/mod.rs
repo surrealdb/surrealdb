@@ -248,7 +248,7 @@ impl Datastore {
 				*cnf::ROCKSDB_GROUPED_COMMIT_TIMEOUT,
 				*cnf::ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD,
 				*cnf::ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE,
-			)))
+			)?))
 		} else if !*cnf::SYNC_DATA {
 			// If the user has disabled synced transaction writes, we defer to the operating system
 			// buffers for disk sync. This means that the transaction commits are written to WAL,
@@ -300,18 +300,26 @@ impl Datastore {
 			// Clone the database reference
 			let dbc = db.clone();
 			// Create a new background thread
-			thread::spawn(move || {
-				loop {
-					// Get the specified flush interval
-					let wait = *cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL;
-					// Wait for the specified interval
-					thread::sleep(Duration::from_nanos(wait));
-					// Flush the WAL to disk periodically
-					if let Err(err) = dbc.flush_wal(true) {
-						error!("Failed to flush WAL: {err}");
+			let res = thread::Builder::new().name("rocksdb-background-flusher".to_string()).spawn(
+				move || {
+					loop {
+						// Get the specified flush interval
+						let wait = *cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL;
+						// Wait for the specified interval
+						thread::sleep(Duration::from_nanos(wait));
+						// Flush the WAL to disk periodically
+						if let Err(err) = dbc.flush_wal(true) {
+							error!("Failed to flush WAL: {err}");
+						}
 					}
-				}
-			});
+				},
+			);
+			// Catch any thread spawning errors
+			if res.is_err() {
+				return Err(Error::Datastore(
+					"failed to spawn RocksDB background flush thread".to_string(),
+				));
+			}
 			// Return the datastore
 			Ok(db)
 		}

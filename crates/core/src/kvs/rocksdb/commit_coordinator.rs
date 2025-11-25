@@ -1,11 +1,11 @@
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use parking_lot::{Condvar, Mutex};
 use rocksdb::{OptimisticTransactionDB, Options};
 use tokio::sync::oneshot;
-use tokio::time::Instant;
 
 use crate::kvs::err::{Error, Result};
 
@@ -61,7 +61,7 @@ impl CommitCoordinator {
 		timeout: u64,
 		wait_threshold: usize,
 		max_batch_size: usize,
-	) -> Self {
+	) -> Result<Self> {
 		// Enable manual WAL flushing
 		opts.set_manual_wal_flush(true);
 		// Create shared state with pre-allocated buffer
@@ -78,14 +78,22 @@ impl CommitCoordinator {
 			max_batch_size,
 			timeout: Duration::from_nanos(timeout),
 		};
-		// Spawn the background task
-		tokio::spawn(async move {
-			batcher.run().await;
-		});
-		// Return the commit coordinator
-		Self {
-			shared,
+		// Spawn the background thread
+		let res = thread::Builder::new().name("rocksdb-commit-coordinator".to_string()).spawn(
+			move || {
+				batcher.run();
+			},
+		);
+		// Catch any thread spawning errors
+		if res.is_err() {
+			return Err(Error::Datastore(
+				"failed to spawn RocksDB commit coordinator thread".to_string(),
+			));
 		}
+		// Return the commit coordinator
+		Ok(Self {
+			shared,
+		})
 	}
 
 	/// Signal shutdown to the batcher thread
@@ -132,7 +140,7 @@ impl CommitBatcher {
 	/// - If some transactions (above `wait_threshold`): waits up to `timeout` (better batching)
 	/// - If many transactions (up to `max_batch_size`): commits immediately (high throughput)
 	/// - Batches capped at `max_batch_size` to prevent unbounded growth
-	async fn run(self) {
+	fn run(self) {
 		// Pre-allocate batch vector once
 		let mut batch = Vec::with_capacity(self.max_batch_size);
 		// Loop continuously until shutdown
@@ -211,29 +219,26 @@ impl CommitBatcher {
 				}
 			}
 			// Commit as a batch with single fsync to the WAL and disk
-			affinitypool::spawn_local(|| {
-				// Create a vector to store the results
-				let mut results = Vec::with_capacity(batch.len());
-				// Commit each transaction and store the result
-				for request in batch.drain(..) {
-					let result = request.txn.commit().map_err(Into::into);
-					results.push((request.channel, result));
-				}
-				// Perform a single WAL flush and disk sync for all commits
-				if let Err(e) = self.db.flush_wal(true) {
-					let err = e.to_string();
-					for (_, result) in &mut results {
-						if result.is_ok() {
-							*result = Err(Error::Transaction(err.clone()));
-						}
+			// Create a vector to store the results
+			let mut results = Vec::with_capacity(batch.len());
+			// Commit each transaction and store the result
+			for request in batch.drain(..) {
+				let result = request.txn.commit().map_err(Into::into);
+				results.push((request.channel, result));
+			}
+			// Perform a single WAL flush and disk sync for all commits
+			if let Err(e) = self.db.flush_wal(true) {
+				let err = e.to_string();
+				for (_, result) in &mut results {
+					if result.is_ok() {
+						*result = Err(Error::Transaction(err.clone()));
 					}
 				}
-				// Send results back to all waiters
-				for (channel, result) in results {
-					let _ = channel.send(result);
-				}
-			})
-			.await;
+			}
+			// Send results back to all waiters
+			for (channel, result) in results {
+				let _ = channel.send(result);
+			}
 		}
 	}
 }
