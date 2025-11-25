@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use crate::catalog::providers::CatalogProvider;
@@ -117,7 +118,7 @@ impl LiveStatement {
 			}
 			v => {
 				bail!(Error::LiveStatement {
-					value: v.to_string(),
+					value: v.to_sql(),
 				});
 			}
 		};

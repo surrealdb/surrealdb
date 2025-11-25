@@ -1,4 +1,4 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::Fmt;
 use crate::sql::{Expr, Idiom, Model, Script};
@@ -28,7 +28,7 @@ impl Function {
 			Self::Script(_) => Idiom::field("function".to_owned()),
 			Self::Normal(f) => Idiom::field(f.to_owned()),
 			Self::Custom(name) => Idiom::field(format!("fn::{name}")),
-			Self::Model(m) => Idiom::field(m.to_string()),
+			Self::Model(m) => Idiom::field(m.to_sql()),
 			Self::Module(m, s) => match s {
 				Some(s) => Idiom::field(format!("mod::{m}::{s}")),
 				None => Idiom::field(format!("mod::{m}")),
@@ -130,26 +130,38 @@ impl From<crate::expr::FunctionCall> for FunctionCall {
 	}
 }
 
-impl fmt::Display for FunctionCall {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for FunctionCall {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self.receiver {
 			Function::Normal(ref s) => {
-				write!(f, "{s}({})", Fmt::comma_separated(self.arguments.iter()))
+				write_sql!(f, fmt, "{s}({})", Fmt::comma_separated(self.arguments.iter()))
 			}
 			Function::Custom(ref s) => {
-				write!(f, "fn::{s}({})", Fmt::comma_separated(self.arguments.iter()))
+				write_sql!(f, fmt, "fn::{s}({})", Fmt::comma_separated(self.arguments.iter()))
 			}
 			Function::Script(ref s) => {
-				write!(f, "function({}) {{{s}}}", Fmt::comma_separated(self.arguments.iter()))
+				write_sql!(
+					f,
+					fmt,
+					"function({}) {{{s}}}",
+					Fmt::comma_separated(self.arguments.iter())
+				)
 			}
 			Function::Model(ref m) => {
-				write!(f, "{m}({})", Fmt::comma_separated(self.arguments.iter()))
+				write_sql!(f, fmt, "{m}({})", Fmt::comma_separated(self.arguments.iter()))
 			}
 			Function::Module(ref m, ref s) => match s {
 				Some(s) => {
-					write!(f, "mod::{m}::{s}({})", Fmt::comma_separated(self.arguments.iter()))
+					write_sql!(
+						f,
+						fmt,
+						"mod::{m}::{s}({})",
+						Fmt::comma_separated(self.arguments.iter())
+					)
 				}
-				None => write!(f, "mod::{m}({})", Fmt::comma_separated(self.arguments.iter())),
+				None => {
+					write_sql!(f, fmt, "mod::{m}({})", Fmt::comma_separated(self.arguments.iter()))
+				}
 			},
 			Function::Silo {
 				ref org,
@@ -159,13 +171,15 @@ impl fmt::Display for FunctionCall {
 				ref patch,
 				ref sub,
 			} => match sub {
-				Some(s) => write!(
+				Some(s) => write_sql!(
 					f,
+					fmt,
 					"silo::{org}::{pkg}<{major}.{minor}.{patch}>::{s}({})",
 					Fmt::comma_separated(self.arguments.iter())
 				),
-				None => write!(
+				None => write_sql!(
 					f,
+					fmt,
 					"silo::{org}::{pkg}<{major}.{minor}.{patch}>({})",
 					Fmt::comma_separated(self.arguments.iter())
 				),

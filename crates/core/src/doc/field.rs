@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::{self, FieldDefinition};
 use crate::ctx::{Context, MutableContext};
@@ -106,7 +107,7 @@ impl Document {
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
 								table: tb.name.clone(),
-								field: current_doc_field_idiom.to_owned(),
+								field: current_doc_field_idiom.to_sql(),
 							}
 						);
 
@@ -122,7 +123,7 @@ impl Document {
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
 								table: tb.name.clone(),
-								field: current_doc_field_idiom.to_owned(),
+								field: current_doc_field_idiom.to_sql(),
 							}
 						);
 
@@ -190,8 +191,8 @@ impl Document {
 					ensure!(
 						self.is_new() || val == *old,
 						Error::FieldReadonly {
-							field: fd.name.clone(),
-							record: rid.to_string(),
+							field: fd.name.to_sql(),
+							record: rid.to_sql(),
 						}
 					);
 
@@ -231,8 +232,8 @@ impl Document {
 							// allowed, and we throw an error.
 							_ => {
 								bail!(Error::FieldReadonly {
-									field: fd.name.clone(),
-									record: rid.to_string(),
+									field: fd.name.to_sql(),
+									record: rid.to_sql(),
 								});
 							}
 						}
@@ -397,8 +398,8 @@ impl FieldEditContext<'_> {
 
 						// Check the type of the ID part
 						inner.coerce_to_kind(kind).map_err(|e| Error::FieldCoerce {
-							record: self.rid.to_string(),
-							field_name: self.def.name.to_string(),
+							record: self.rid.to_sql(),
+							field_name: self.def.name.to_sql(),
 							error: Box::new(e),
 						})?;
 					}
@@ -407,7 +408,7 @@ impl FieldEditContext<'_> {
 				else {
 					// There was a field check error
 					bail!(Error::FieldCoerce {
-						record: self.rid.to_string(),
+						record: self.rid.to_sql(),
 						field_name: "id".to_string(),
 						error: Box::new(CoerceError::InvalidKind {
 							from: val,
@@ -420,8 +421,8 @@ impl FieldEditContext<'_> {
 			else {
 				// Check the type of the field value
 				let val = val.coerce_to_kind(kind).map_err(|e| Error::FieldCoerce {
-					record: self.rid.to_string(),
-					field_name: self.def.name.to_string(),
+					record: self.rid.to_sql(),
+					field_name: self.def.name.to_sql(),
 					error: Box::new(e),
 				})?;
 				// Return the modified value
@@ -563,10 +564,10 @@ impl FieldEditContext<'_> {
 			ensure!(
 				res.is_truthy(),
 				Error::FieldValue {
-					record: self.rid.to_string(),
-					field: self.def.name.clone(),
-					check: expr.to_string(),
-					value: now.to_string(),
+					record: self.rid.to_sql(),
+					field: self.def.name.to_sql(),
+					check: expr.to_sql(),
+					value: now.to_sql(),
 				}
 			);
 		}
@@ -699,7 +700,7 @@ impl FieldEditContext<'_> {
 			}
 
 			// Process the actions
-			let ff = self.def.name.to_string();
+			let ff = self.def.name.to_sql();
 			for action in actions.into_iter() {
 				match action {
 					RefAction::Set(rid) => {

@@ -1,4 +1,3 @@
-use std::fmt;
 use std::ops::Bound;
 
 use reblessive::tree::Stk;
@@ -321,9 +320,9 @@ impl Expr {
 			Expr::Literal(l) => match l {
 				Literal::String(s) => Idiom::field(s.clone()),
 				Literal::Datetime(d) => Idiom::field(d.to_raw_string()),
-				x => Idiom::field(x.to_string()),
+				x => Idiom::field(x.to_sql()),
 			},
-			x => Idiom::field(x.to_string()),
+			x => Idiom::field(x.to_sql()),
 		}
 	}
 
@@ -714,7 +713,7 @@ impl Expr {
 		match self {
 			Expr::Idiom(idiom) => idiom.to_raw_string(),
 			Expr::Table(ident) => ident.clone(),
-			_ => self.to_string(),
+			_ => self.to_sql(),
 		}
 	}
 
@@ -766,14 +765,6 @@ impl Expr {
 	}
 }
 
-impl fmt::Display for Expr {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		// Convert to sql module type and use its Display implementation
-		let sql_expr: crate::sql::Expr = self.clone().into();
-		fmt::Display::fmt(&sql_expr, f)
-	}
-}
-
 impl ToSql for Expr {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		let sql_expr: crate::sql::Expr = self.clone().into();
@@ -783,7 +774,7 @@ impl ToSql for Expr {
 
 impl InfoStructure for Expr {
 	fn structure(self) -> Value {
-		self.to_string().into()
+		self.to_sql().into()
 	}
 }
 
@@ -798,7 +789,7 @@ impl SerializeRevisioned for Expr {
 		&self,
 		writer: &mut W,
 	) -> Result<(), revision::Error> {
-		SerializeRevisioned::serialize_revisioned(&self.to_string(), writer)
+		SerializeRevisioned::serialize_revisioned(&self.to_sql(), writer)
 	}
 }
 

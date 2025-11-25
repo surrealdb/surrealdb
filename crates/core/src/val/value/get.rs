@@ -3,6 +3,7 @@ use std::ops::Deref;
 
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::cnf::MAX_COMPUTATION_DEPTH;
 use crate::ctx::Context;
@@ -211,7 +212,7 @@ impl Value {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},
-						Value::RecordId(t) => match v.get(&t.to_string()) {
+						Value::RecordId(t) => match v.get(&t.to_sql()) {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => Ok(Value::None),
 						},

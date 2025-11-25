@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{
@@ -714,7 +715,7 @@ impl QueryExecutor {
 
 		// If no previous case were successful, we end up with a user error
 		Err(anyhow::Error::new(Error::NoIndexFoundForMatch {
-			exp: exp.to_string(),
+			exp: exp.to_sql(),
 		}))
 	}
 

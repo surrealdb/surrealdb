@@ -1,5 +1,3 @@
-use std::fmt;
-
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::{Data, Expr, Output, Timeout};
@@ -21,56 +19,24 @@ pub(crate) struct RelateStatement {
 	pub parallel: bool,
 }
 
-impl fmt::Display for RelateStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "RELATE")?;
-		if self.only {
-			f.write_str(" ONLY")?
-		}
-		write!(f, " {} -> {} -> {}", self.from, self.through, self.to)?;
-		if self.uniq {
-			f.write_str(" UNIQUE")?
-		}
-		if let Some(ref v) = self.data {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.output {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
-		}
-		if self.parallel {
-			f.write_str(" PARALLEL")?
-		}
-		Ok(())
-	}
-}
-
 impl ToSql for RelateStatement {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		f.push_str("RELATE");
 		if self.only {
 			f.push_str(" ONLY");
 		}
-		f.push(' ');
-		self.from.fmt_sql(f, fmt);
-		f.push_str(" -> ");
-		self.through.fmt_sql(f, fmt);
-		f.push_str(" -> ");
-		self.to.fmt_sql(f, fmt);
+		write_sql!(f, sql_fmt, " {} -> {} -> {}", self.from, self.through, self.to);
 		if self.uniq {
 			f.push_str(" UNIQUE");
 		}
 		if let Some(ref v) = self.data {
-			f.push(' ');
-			v.fmt_sql(f, fmt);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 		if let Some(ref v) = self.output {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {v}");
 		}
 		if let Some(ref v) = self.timeout {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {v}");
 		}
 		if self.parallel {
 			f.push_str(" PARALLEL");

@@ -2,6 +2,7 @@ use std::collections::btree_map::Entry;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -102,7 +103,7 @@ impl Value {
 						Value::Object(obj) => {
 							let v = match v {
 								Value::String(x) => x.as_str().to_owned(),
-								x => x.to_string(),
+								x => x.to_sql(),
 							};
 
 							match obj.entry(v) {
@@ -259,9 +260,9 @@ impl Value {
 					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?;
 					match v {
 						Value::String(x) => x,
-						Value::RecordId(x) => x.to_string(),
+						Value::RecordId(x) => x.to_sql(),
 						Value::Number(x) => x.to_string(),
-						Value::Range(x) => x.to_string(),
+						Value::Range(x) => x.to_sql(),
 						_ => return Ok(()),
 					}
 				}

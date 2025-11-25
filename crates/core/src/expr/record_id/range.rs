@@ -1,4 +1,3 @@
-use std::fmt;
 use std::ops::Bound;
 
 use anyhow::Result;
@@ -14,22 +13,6 @@ use crate::val::RecordIdKeyRange;
 pub(crate) struct RecordIdKeyRangeLit {
 	pub(crate) start: Bound<RecordIdKeyLit>,
 	pub(crate) end: Bound<RecordIdKeyLit>,
-}
-
-impl fmt::Display for RecordIdKeyRangeLit {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match &self.start {
-			Bound::Unbounded => write!(f, ""),
-			Bound::Included(v) => write!(f, "{v}"),
-			Bound::Excluded(v) => write!(f, "{v}>"),
-		}?;
-		match &self.end {
-			Bound::Unbounded => write!(f, ".."),
-			Bound::Excluded(v) => write!(f, "..{v}"),
-			Bound::Included(v) => write!(f, "..={v}"),
-		}?;
-		Ok(())
-	}
 }
 
 impl RecordIdKeyRangeLit {

@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{self, DatabaseId, Index, IndexDefinition, IndexId, NamespaceId};
@@ -282,7 +283,7 @@ impl<'a> TreeBuilder<'a> {
 				Ok(Node::Computable)
 			}
 			Expr::Literal(Literal::Array(a)) => self.eval_array(stk, a).await,
-			_ => Ok(Node::Unsupported(format!("Unsupported expression: {}", v))),
+			_ => Ok(Node::Unsupported(format!("Unsupported expression: {}", v.to_sql()))),
 		}
 	}
 
@@ -290,7 +291,7 @@ impl<'a> TreeBuilder<'a> {
 		Ok(if n == Node::Computable {
 			match stk.run(|stk| v.compute(stk, self.ctx.ctx, self.ctx.opt, None)).await {
 				Ok(v) => Node::Computed(v.into()),
-				Err(_) => Node::Unsupported(format!("Unsupported expression: {}", v)),
+				Err(_) => Node::Unsupported(format!("Unsupported expression: {}", v.to_sql())),
 			}
 		} else {
 			n

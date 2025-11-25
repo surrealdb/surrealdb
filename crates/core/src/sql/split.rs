@@ -1,5 +1,6 @@
-use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
+
+use surrealdb_types::write_sql;
 
 use crate::fmt::Fmt;
 use crate::sql::idiom::Idiom;
@@ -8,9 +9,9 @@ use crate::sql::idiom::Idiom;
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Splits(pub Vec<Split>);
 
-impl fmt::Display for Splits {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "SPLIT ON {}", Fmt::comma_separated(&self.0))
+impl surrealdb_types::ToSql for Splits {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		write_sql!(f, fmt, "SPLIT ON {}", Fmt::comma_separated(&self.0))
 	}
 }
 
@@ -37,9 +38,9 @@ impl Deref for Split {
 	}
 }
 
-impl Display for Split {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&self.0, f)
+impl surrealdb_types::ToSql for Split {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		self.0.fmt_sql(f, fmt);
 	}
 }
 

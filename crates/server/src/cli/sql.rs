@@ -217,7 +217,7 @@ pub async fn init(
 					continue;
 				}
 				// Run the query provided
-				let mut result = client.query(query.to_string()).with_stats().await;
+				let mut result = client.query(query.to_sql()).with_stats().await;
 
 				if let Ok(WithStats(res)) = &mut result {
 					for (i, n) in vars.into_iter().enumerate() {

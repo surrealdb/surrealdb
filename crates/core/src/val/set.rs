@@ -1,5 +1,5 @@
 use std::collections::BTreeSet;
-use std::fmt::{self, Display, Formatter, Write};
+use std::fmt::Write;
 use std::ops::{Deref, DerefMut};
 
 use revision::revisioned;
@@ -184,31 +184,25 @@ impl IntoIterator for Set {
 	}
 }
 
-impl Display for Set {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl ToSql for Set {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		if self.is_empty() {
-			return f.write_str("{,}");
+			return f.push_str("{,}");
 		}
 
 		// Format as Python-style set literal: `{,}`, `{val,}`, `{val, val, val}`
-		f.write_char('{')?;
+		f.push('{');
 		let len = self.len();
 		for (i, v) in self.iter().enumerate() {
-			Display::fmt(v, f)?;
+			write_sql!(f, sql_fmt, "{}", v);
 			// If this is not the last element, add a comma.
 			// If this is the first element, add a comma.
 			if len == 1 {
-				f.write_str(",")?;
+				f.push(',');
 			} else if i < len - 1 {
-				f.write_str(", ")?;
+				f.push_str(", ");
 			}
 		}
-		f.write_char('}')
-	}
-}
-
-impl ToSql for Set {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+		f.push('}');
 	}
 }

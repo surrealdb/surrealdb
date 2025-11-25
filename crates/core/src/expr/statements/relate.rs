@@ -1,5 +1,6 @@
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
@@ -61,13 +62,13 @@ impl RelateStatement {
 								Some(v) => out.push(v),
 								_ => {
 									bail!(Error::RelateStatementIn {
-										value: v.to_string(),
+										value: v.to_sql(),
 									})
 								}
 							},
 							v => {
 								bail!(Error::RelateStatementIn {
-									value: v.to_string(),
+									value: v.to_sql(),
 								})
 							}
 						}
@@ -77,13 +78,13 @@ impl RelateStatement {
 					Some(v) => out.push(v),
 					None => {
 						bail!(Error::RelateStatementIn {
-							value: v.to_string(),
+							value: v.to_sql(),
 						})
 					}
 				},
 				v => {
 					bail!(Error::RelateStatementIn {
-						value: v.to_string(),
+						value: v.to_sql(),
 					})
 				}
 			};
@@ -103,13 +104,13 @@ impl RelateStatement {
 								Some(v) => out.push(v),
 								None => {
 									bail!(Error::RelateStatementId {
-										value: v.to_string(),
+										value: v.to_sql(),
 									})
 								}
 							},
 							v => {
 								bail!(Error::RelateStatementId {
-									value: v.to_string(),
+									value: v.to_sql(),
 								})
 							}
 						}
@@ -119,13 +120,13 @@ impl RelateStatement {
 					Some(v) => out.push(v),
 					None => {
 						bail!(Error::RelateStatementId {
-							value: v.to_string(),
+							value: v.to_sql(),
 						})
 					}
 				},
 				v => {
 					bail!(Error::RelateStatementId {
-						value: v.to_string(),
+						value: v.to_sql(),
 					})
 				}
 			};
@@ -192,7 +193,7 @@ impl TryFrom<Value> for RelateThrough {
 			Value::RecordId(id) => Ok(RelateThrough::RecordId(id)),
 			Value::Table(table) => Ok(RelateThrough::Table(table.into_string())),
 			_ => bail!(Error::RelateStatementOut {
-				value: value.to_string()
+				value: value.to_sql()
 			}),
 		}
 	}

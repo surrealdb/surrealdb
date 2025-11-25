@@ -1,8 +1,8 @@
 #![allow(clippy::derived_hash_with_manual_eq)]
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::hash;
 use std::iter::once;
-use std::{fmt, hash};
 
 use geo::algorithm::contains::Contains;
 use geo::algorithm::intersects::Intersects;
@@ -628,80 +628,89 @@ impl From<surrealdb_types::Geometry> for Geometry {
 	}
 }
 
-impl fmt::Display for Geometry {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for Geometry {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
 			Self::Point(v) => {
-				write!(f, "({}, {})", v.x(), v.y())
+				write_sql!(f, sql_fmt, "({}, {})", v.x(), v.y())
 			}
-			Self::Line(v) => write!(
+			Self::Line(v) => write_sql!(
 				f,
+				sql_fmt,
 				"{{ type: 'LineString', coordinates: [{}] }}",
-				Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f| write!(
+				Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f, fmt| write_sql!(
 					f,
+					fmt,
 					"[{}, {}]",
 					v.x(),
 					v.y()
 				))))
 			),
-			Self::Polygon(v) => write!(
+			Self::Polygon(v) => write_sql!(
 				f,
+				sql_fmt,
 				"{{ type: 'Polygon', coordinates: [{}] }}",
 				Fmt::comma_separated(once(v.exterior()).chain(v.interiors()).map(|v| Fmt::new(
 					v,
-					|v, f| write!(
+					|v, f, fmt| write_sql!(
 						f,
+						fmt,
 						"[{}]",
-						Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f| write!(
-							f,
-							"[{}, {}]",
-							v.x(),
-							v.y()
-						))))
+						Fmt::comma_separated(v.points().map(|v| Fmt::new(
+							v,
+							|v, f, fmt| write_sql!(f, fmt, "[{}, {}]", v.x(), v.y())
+						)))
 					)
 				)))
 			),
 			Self::MultiPoint(v) => {
-				write!(
+				write_sql!(
 					f,
+					sql_fmt,
 					"{{ type: 'MultiPoint', coordinates: [{}] }}",
-					Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| write!(
+					Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f, fmt| write_sql!(
 						f,
+						fmt,
 						"[{}, {}]",
 						v.x(),
 						v.y()
 					))))
 				)
 			}
-			Self::MultiLine(v) => write!(
-				f,
-				"{{ type: 'MultiLineString', coordinates: [{}] }}",
-				Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| write!(
+			Self::MultiLine(v) => {
+				write_sql!(
 					f,
-					"[{}]",
-					Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f| write!(
+					sql_fmt,
+					"{{ type: 'MultiLineString', coordinates: [{}] }}",
+					Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f, fmt| write_sql!(
 						f,
-						"[{}, {}]",
-						v.x(),
-						v.y()
+						fmt,
+						"[{}]",
+						Fmt::comma_separated(v.points().map(|v| Fmt::new(
+							v,
+							|v, f, fmt| write_sql!(f, fmt, "[{}, {}]", v.x(), v.y())
+						)))
 					))))
-				))))
-			),
+				)
+			}
 			Self::MultiPolygon(v) => {
-				write!(
+				write_sql!(
 					f,
+					sql_fmt,
 					"{{ type: 'MultiPolygon', coordinates: [{}] }}",
-					Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| {
-						write!(
+					Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f, fmt| {
+						write_sql!(
 							f,
+							fmt,
 							"[{}]",
 							Fmt::comma_separated(once(v.exterior()).chain(v.interiors()).map(
-								|v| Fmt::new(v, |v, f| write!(
+								|v| Fmt::new(v, |v, f, fmt| write_sql!(
 									f,
+									fmt,
 									"[{}]",
 									Fmt::comma_separated(v.points().map(|v| Fmt::new(
 										v,
-										|v, f| write!(f, "[{}, {}]", v.x(), v.y())
+										|v, f, fmt| write_sql!(f, fmt, "[{}, {}]", v.x(), v.y())
 									)))
 								))
 							))
@@ -710,8 +719,9 @@ impl fmt::Display for Geometry {
 				)
 			}
 			Self::Collection(v) => {
-				write!(
+				write_sql!(
 					f,
+					sql_fmt,
 					"{{ type: 'GeometryCollection', geometries: [{}] }}",
 					Fmt::comma_separated(v)
 				)
@@ -964,12 +974,6 @@ impl<'de, F> BorrowDecode<'de, F> for Geometry {
 			}
 			_ => Err(storekey::DecodeError::InvalidFormat),
 		}
-	}
-}
-
-impl ToSql for Geometry {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
 	}
 }
 

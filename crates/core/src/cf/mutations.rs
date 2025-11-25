@@ -1,8 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self, Display, Formatter};
 
 use revision::revisioned;
-use surrealdb_types::ToSql;
 
 use crate::catalog::TableDefinition;
 use crate::expr::Operation;
@@ -148,44 +146,40 @@ impl ChangeSet {
 	}
 }
 
-impl Display for TableMutation {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			TableMutation::Set(id, v) => write!(f, "SET {} {}", id, v),
-			TableMutation::SetWithDiff(id, _previous, v) => write!(f, "SET {} {:?}", id, v),
-			TableMutation::Del(id) => write!(f, "DEL {}", id),
-			TableMutation::DelWithOriginal(id, _) => write!(f, "DEL {}", id),
-			TableMutation::Def(t) => {
-				write!(f, "{}", t.to_sql())
-			}
-		}
-	}
-}
+// impl ToSql for TableMutation {
+// 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+// 		match self {
+// 			TableMutation::Set(id, v) => write_sql!(f, fmt, "SET {} {}", id, v),
+// 			TableMutation::SetWithDiff(id, _previous, v) => write_sql!(f, fmt, "SET {} {}", id, v),
+// 			TableMutation::Del(id) => write_sql!(f, fmt, "DEL {}", id),
+// 			TableMutation::DelWithOriginal(id, _) => write_sql!(f, fmt, "DEL {}", id),
+// 			TableMutation::Def(t) => write_sql!(f, fmt, "{}", t),
+// 		}
+// 	}
+// }
 
-impl Display for TableMutations {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		let tb = &self.0;
-		let muts = &self.1;
-		write!(f, "{}", tb)?;
-		muts.iter().try_for_each(|v| write!(f, "{}", v))
-	}
-}
+// impl ToSql for TableMutations {
+// 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+// 		let tb = &self.0;
+// 		let muts = &self.1;
+// 		write_sql!(f, fmt, "{}", tb)?;
+// 		muts.iter().for_each(|v| write_sql!(f, fmt, "{}", v))
+// 	}
+// }
 
-impl Display for DatabaseMutation {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		let x = &self.0;
+// impl ToSql for DatabaseMutation {
+// 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+// 		let x = &self.0;
 
-		x.iter().try_for_each(|v| write!(f, "{}", v))
-	}
-}
+// 		x.iter().for_each(|v| write!(f, "{}", v))
+// 	}
+// }
 
-impl Display for ChangeSet {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		let x = &self.1;
-
-		write!(f, "{}", x)
-	}
-}
+// impl ToSql for ChangeSet {
+// 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+// 		write_sql!(f, fmt, "{}", self.1)
+// 	}
+// }
 
 // WriteMutationSet is a set of mutations to be to a table at the specific
 // timestamp.

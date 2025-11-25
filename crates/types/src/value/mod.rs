@@ -51,7 +51,7 @@ pub use self::table::Table;
 pub use self::uuid::Uuid;
 use crate::sql::{SqlFormat, ToSql};
 use crate::utils::escape::QuoteStr;
-use crate::{Kind, SurrealValue, write_sql};
+use crate::{Kind, SurrealValue};
 
 /// Marker type for value conversions from Value::None
 ///
@@ -736,7 +736,9 @@ impl ToSql for Value {
 			Value::Null => f.push_str("NULL"),
 			Value::Bool(v) => v.fmt_sql(f, fmt),
 			Value::Number(v) => v.fmt_sql(f, fmt),
-			Value::String(v) => write_sql!(f, "{}", QuoteStr(v.as_str())),
+			Value::String(v) => {
+				QuoteStr(v.as_str()).fmt_sql(f, fmt);
+			}
 			Value::Duration(v) => v.fmt_sql(f, fmt),
 			Value::Datetime(v) => v.fmt_sql(f, fmt),
 			Value::Uuid(v) => v.fmt_sql(f, fmt),

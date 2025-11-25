@@ -8,8 +8,8 @@ pub struct SleepStatement {
 }
 
 impl ToSql for SleepStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "SLEEP {}", self.duration);
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "SLEEP {}", self.duration);
 	}
 }
 

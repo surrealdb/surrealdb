@@ -26,16 +26,16 @@ impl Default for DefineSequenceStatement {
 }
 
 impl ToSql for DefineSequenceStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "DEFINE SEQUENCE");
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "DEFINE SEQUENCE");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write_sql!(f, " OVERWRITE"),
-			DefineKind::IfNotExists => write_sql!(f, " IF NOT EXISTS"),
+			DefineKind::Overwrite => write_sql!(f, sql_fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
 		}
-		write_sql!(f, " {} BATCH {} START {}", self.name, self.batch, self.start);
+		write_sql!(f, sql_fmt, " {} BATCH {} START {}", self.name, self.batch, self.start);
 		if let Some(ref v) = self.timeout {
-			write_sql!(f, " {v}");
+			write_sql!(f, sql_fmt, " {v}");
 		}
 	}
 }

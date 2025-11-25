@@ -1,7 +1,6 @@
-use std::fmt;
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::config::api::ApiConfig;
 use super::{CursorDoc, DefineKind};
@@ -39,12 +38,12 @@ impl DefineApiStatement {
 		let txn = ctx.tx();
 		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
 		// Check if the definition exists
-		if txn.get_db_api(ns, db, &self.path.to_string()).await?.is_some() {
+		if txn.get_db_api(ns, db, &self.path.to_sql()).await?.is_some() {
 			match self.kind {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::ApAlreadyExists {
-							value: self.path.to_string(),
+							value: self.path.to_sql(),
 						});
 					}
 				}
@@ -91,13 +90,11 @@ pub(crate) struct ApiAction {
 	pub config: ApiConfig,
 }
 
-impl fmt::Display for ApiAction {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "FOR {}", Fmt::comma_separated(self.methods.iter()))?;
+impl ToSql for ApiAction {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "FOR {}", Fmt::comma_separated(self.methods.iter()));
 		let indent = pretty_indent();
-		write!(f, "{}", &self.config)?;
-		write!(f, " THEN {}", self.action)?;
+		write_sql!(f, sql_fmt, "{} THEN {}", self.config, self.action);
 		drop(indent);
-		Ok(())
 	}
 }

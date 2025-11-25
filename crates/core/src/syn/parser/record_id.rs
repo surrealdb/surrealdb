@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::ops::Bound;
 
 use reblessive::Stk;
+use surrealdb_types::ToSql;
 
 use super::{ParseResult, Parser};
 use crate::sql::lookup::LookupSubject;
@@ -80,7 +81,7 @@ impl Parser<'_> {
 					if token.kind == t!("$param") {
 						let param = self.next_token_value::<Param>()?;
 						bail!("Unexpected token `$param` expected a record-id key",
-							@token.span => "Record-id's can be create from a param with `type::record(\"{}\",{})`", ident,param);
+							@token.span => "Record-id's can be create from a param with `type::record(\"{}\",{})`", ident, param.to_sql());
 					}
 
 					// we haven't matched anything so far so we still want any type of id.

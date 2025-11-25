@@ -1,5 +1,6 @@
 use js::JsLifetime;
 use js::class::Trace;
+use surrealdb_types::ToSql;
 
 use crate::val::{RecordId, Value};
 
@@ -44,11 +45,11 @@ impl Record {
 	/// Convert the object to a string
 	#[qjs(rename = "toString")]
 	pub fn js_to_string(&self) -> String {
-		self.value.to_string()
+		self.value.to_sql()
 	}
 	/// Convert the object to JSON
 	#[qjs(rename = "toJSON")]
 	pub fn to_json(&self) -> String {
-		self.value.to_string()
+		self.value.to_sql()
 	}
 }

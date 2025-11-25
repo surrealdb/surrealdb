@@ -121,6 +121,12 @@ impl Display for ApiMethod {
 	}
 }
 
+impl ToSql for ApiMethod {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_string().fmt_sql(f, fmt)
+	}
+}
+
 impl InfoStructure for ApiMethod {
 	fn structure(self) -> Value {
 		Value::from(self.to_string())
@@ -151,7 +157,7 @@ impl InfoStructure for ApiActionDefinition {
 	fn structure(self) -> Value {
 		Value::from(map!(
 			"methods" => Value::from(self.methods.into_iter().map(InfoStructure::structure).collect::<Vec<Value>>()),
-			"action" => Value::from(self.action.to_string()),
+			"action" => Value::from(self.action.to_sql()),
 			"config" => self.config.structure(),
 		))
 	}
@@ -188,7 +194,7 @@ impl InfoStructure for ApiConfigDefinition {
 						.map(|m| {
 							let value = m.args
 								.iter()
-								.map(|x| Value::String(x.to_string()))
+								.map(|x| Value::String(x.to_sql()))
 								.collect();
 
 							(m.name.clone(), Value::Array(Array(value)))
@@ -200,10 +206,9 @@ impl InfoStructure for ApiConfigDefinition {
 	}
 }
 
-impl Display for ApiConfigDefinition {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use surrealdb_types::ToSql;
-		write!(f, "{}", self.to_sql_config().to_sql())
+impl ToSql for ApiConfigDefinition {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_sql_config().fmt_sql(f, fmt)
 	}
 }
 

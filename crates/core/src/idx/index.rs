@@ -15,6 +15,7 @@
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::{
 	DatabaseId, FullTextParams, HnswParams, Index, IndexDefinition, NamespaceId, TableId,
@@ -245,8 +246,8 @@ impl<'a> IndexOperation<'a> {
 			record: rid,
 			index: self.ix.name.clone(),
 			value: match n.0.len() {
-				1 => n.0.remove(0).to_string(),
-				_ => n.to_string(),
+				1 => n.0.remove(0).to_sql(),
+				_ => n.to_sql(),
 			},
 		})
 	}

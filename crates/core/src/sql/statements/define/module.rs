@@ -1,9 +1,6 @@
-use std::fmt::{self, Write};
-
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::fmt::{is_pretty, pretty_indent};
 use crate::sql::{Expr, ModuleExecutable, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,34 +13,8 @@ pub(crate) struct DefineModuleStatement {
 	pub permissions: Permission,
 }
 
-impl fmt::Display for DefineModuleStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE MODULE")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		if let Some(name) = &self.name {
-			write!(f, " mod::{name} AS")?;
-		}
-		write!(f, " {}", self.executable)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
-		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		write!(f, "PERMISSIONS {}", self.permissions)?;
-		Ok(())
-	}
-}
-
 impl ToSql for DefineModuleStatement {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		f.push_str("DEFINE MODULE");
 		match self.kind {
 			DefineKind::Default => {}
@@ -51,20 +22,19 @@ impl ToSql for DefineModuleStatement {
 			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
 		if let Some(name) = &self.name {
-			write_sql!(f, " mod::{} AS", name);
+			write_sql!(f, sql_fmt, " mod::{} AS", name);
 		}
-		write_sql!(f, " {}", self.executable);
+		write_sql!(f, sql_fmt, " {}", self.executable);
 		if let Some(ref v) = self.comment {
-			f.push_str(" COMMENT ");
-			v.fmt_sql(f, fmt);
+			write_sql!(f, sql_fmt, " COMMENT {}", v);
 		}
-		if fmt.is_pretty() {
+		if sql_fmt.is_pretty() {
 			f.push('\n');
-			fmt.write_indent(f);
+			sql_fmt.write_indent(f);
 		} else {
 			f.push(' ');
 		}
-		write_sql!(f, "PERMISSIONS {}", self.permissions);
+		write_sql!(f, sql_fmt, "PERMISSIONS {}", self.permissions);
 	}
 }
 

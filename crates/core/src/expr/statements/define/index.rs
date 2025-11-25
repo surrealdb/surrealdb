@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::DefineKind;
@@ -71,7 +72,7 @@ impl DefineIndexStatement {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::IxAlreadyExists {
-							name: self.name.to_string(),
+							name: self.name.to_sql(),
 						});
 					}
 				}

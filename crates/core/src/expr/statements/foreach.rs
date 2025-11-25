@@ -1,4 +1,5 @@
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
@@ -57,7 +58,7 @@ impl ForeachStatement {
 
 			v => {
 				return Err(ControlFlow::from(anyhow::Error::new(Error::InvalidStatementTarget {
-					value: v.to_string(),
+					value: v.to_sql(),
 				})));
 			}
 		};

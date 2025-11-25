@@ -4,6 +4,7 @@ use std::hash::Hash;
 use std::sync::Arc;
 
 use anyhow::Result;
+use surrealdb_types::ToSql;
 
 use crate::catalog::Index;
 use crate::expr::operator::{MatchesOperator, NearestNeighbor};
@@ -489,7 +490,7 @@ impl IndexOption {
 		e.insert("index", Value::from(self.index_reference().name.clone()));
 		match self.op() {
 			IndexOperator::Equality(v) => {
-				e.insert("operator", Value::from(BinaryOperator::Equal.to_string()));
+				e.insert("operator", Value::from(BinaryOperator::Equal.to_sql()));
 				e.insert("value", Self::reduce_array(v));
 			}
 			IndexOperator::Union(v) => {
@@ -506,11 +507,11 @@ impl IndexOption {
 				e.insert("joins", joins);
 			}
 			IndexOperator::Matches(qs, op) => {
-				e.insert("operator", Value::from(BinaryOperator::Matches(op.clone()).to_string()));
+				e.insert("operator", Value::from(BinaryOperator::Matches(op.clone()).to_sql()));
 				e.insert("value", Value::from(qs.to_owned()));
 			}
 			IndexOperator::RangePart(op, v) => {
-				e.insert("operator", Value::from(op.to_string()));
+				e.insert("operator", Value::from(op.to_sql()));
 				e.insert("value", v.as_ref().to_owned());
 			}
 			IndexOperator::Range(equals, ranges) => {
@@ -519,7 +520,7 @@ impl IndexOption {
 					.iter()
 					.map(|(o, v)| {
 						let o = Object::from(BTreeMap::from([
-							("operator", Value::from(o.to_string())),
+							("operator", Value::from(o.to_sql())),
 							("value", v.as_ref().to_owned()),
 						]));
 						Value::from(o)
@@ -528,7 +529,7 @@ impl IndexOption {
 				e.insert("ranges", Value::from(a));
 			}
 			IndexOperator::Ann(a, k, ef) => {
-				let expr = NearestNeighbor::Approximate(*k, *ef).to_string();
+				let expr = NearestNeighbor::Approximate(*k, *ef).to_sql();
 				let op = Value::from(expr);
 				let val = Value::Array(Array::from(a.as_ref().clone()));
 				e.insert("operator", op);
@@ -547,7 +548,7 @@ impl IndexOption {
 			IndexOperator::Count => {
 				e.insert("operator", Value::from("Count"));
 				if let Index::Count(Some(c)) = &self.index_reference.index {
-					e.insert("where", Value::from(c.to_string()));
+					e.insert("where", Value::from(c.to_sql()));
 				}
 			}
 		};

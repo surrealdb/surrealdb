@@ -63,14 +63,14 @@ pub struct AlterFieldStatement {
 }
 
 impl ToSql for AlterFieldStatement {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		f.push_str("ALTER FIELD");
 		if self.if_exists {
 			f.push_str(" IF EXISTS");
 		}
-		write_sql!(f, " {} ON {}", self.name, EscapeIdent(&self.what));
+		write_sql!(f, sql_fmt, " {} ON {}", self.name, EscapeIdent(&self.what));
 		match self.kind {
-			AlterKind::Set(ref x) => write_sql!(f, " TYPE {}", x),
+			AlterKind::Set(ref x) => write_sql!(f, sql_fmt, " TYPE {}", x),
 			AlterKind::Drop => f.push_str(" DROP TYPE"),
 			AlterKind::None => {}
 		}
@@ -86,16 +86,14 @@ impl ToSql for AlterFieldStatement {
 		}
 		match self.value {
 			AlterKind::Set(ref x) => {
-				f.push_str(" VALUE ");
-				x.fmt_sql(f, fmt);
+				write_sql!(f, sql_fmt, "VALUE {x}");
 			}
 			AlterKind::Drop => f.push_str(" DROP VALUE"),
 			AlterKind::None => {}
 		}
 		match self.assert {
 			AlterKind::Set(ref x) => {
-				f.push_str(" ASSERT ");
-				x.fmt_sql(f, fmt);
+				write_sql!(f, sql_fmt, "ASSERT {x}");
 			}
 			AlterKind::Drop => f.push_str(" DROP ASSERT"),
 			AlterKind::None => {}
@@ -105,29 +103,25 @@ impl ToSql for AlterFieldStatement {
 			AlterDefault::None => {}
 			AlterDefault::Drop => f.push_str("DROP DEFAULT"),
 			AlterDefault::Always(ref d) => {
-				f.push_str("DEFAULT ALWAYS ");
-				d.fmt_sql(f, fmt);
+				write_sql!(f, sql_fmt, "DEFAULT ALWAYS {d}");
 			}
 			AlterDefault::Set(ref d) => {
-				f.push_str("DEFAULT ");
-				d.fmt_sql(f, fmt);
+				write_sql!(f, sql_fmt, "DEFAULT {d}");
 			}
 		}
 
 		if let Some(permissions) = &self.permissions {
-			f.push(' ');
-			permissions.fmt_sql(f, fmt);
+			write_sql!(f, sql_fmt, " {permissions}");
 		}
 
 		match self.comment {
-			AlterKind::Set(ref x) => write_sql!(f, " COMMENT {}", QuoteStr(x)),
+			AlterKind::Set(ref x) => write_sql!(f, sql_fmt, " COMMENT {}", QuoteStr(x)),
 			AlterKind::Drop => f.push_str(" DROP COMMENT"),
 			AlterKind::None => {}
 		}
 		match self.reference {
 			AlterKind::Set(ref x) => {
-				f.push_str(" REFERENCE ");
-				x.fmt_sql(f, fmt);
+				write_sql!(f, sql_fmt, "REFERENCE {x}");
 			}
 			AlterKind::Drop => f.push_str(" DROP REFERENCE"),
 			AlterKind::None => {}

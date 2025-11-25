@@ -1,4 +1,4 @@
-use std::fmt::{Display, Formatter, Result};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{EscapeIdent, Fmt};
 
@@ -9,14 +9,18 @@ pub enum With {
 	Index(Vec<String>),
 }
 
-impl Display for With {
-	fn fmt(&self, f: &mut Formatter) -> Result {
-		f.write_str("WITH")?;
+impl ToSql for With {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "WITH");
 		match self {
-			With::NoIndex => f.write_str(" NOINDEX"),
+			With::NoIndex => write_sql!(f, sql_fmt, " NOINDEX"),
 			With::Index(i) => {
-				f.write_str(" INDEX ")?;
-				Fmt::comma_separated(i.iter().map(EscapeIdent)).fmt(f)
+				write_sql!(
+					f,
+					sql_fmt,
+					" INDEX {}",
+					Fmt::comma_separated(i.iter().map(EscapeIdent))
+				);
 			}
 		}
 	}

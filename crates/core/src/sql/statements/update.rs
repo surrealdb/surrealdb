@@ -1,5 +1,3 @@
-use std::fmt;
-
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::Fmt;
@@ -19,72 +17,15 @@ pub(crate) struct UpdateStatement {
 	pub explain: Option<Explain>,
 }
 
-impl fmt::Display for UpdateStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "UPDATE")?;
-		if self.only {
-			f.write_str(" ONLY")?
-		}
-		write!(f, " {}", Fmt::comma_separated(self.what.iter()))?;
-		if let Some(ref v) = self.with {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.data {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.cond {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.output {
-			write!(f, " {v}")?
-		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
-		}
-		if self.parallel {
-			f.write_str(" PARALLEL")?
-		}
-		if let Some(ref v) = self.explain {
-			write!(f, " {v}")?
-		}
-		Ok(())
-	}
-}
-
 impl ToSql for UpdateStatement {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		f.push_str("UPDATE");
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "UPDATE");
 		if self.only {
-			f.push_str(" ONLY");
+			write_sql!(f, sql_fmt, " ONLY");
 		}
-		f.push(' ');
-		for (i, expr) in self.what.iter().enumerate() {
-			if i > 0 {
-				f.push_str(", ");
-			}
-			expr.fmt_sql(f, fmt);
-		}
+		write_sql!(f, sql_fmt, " {}", Fmt::comma_separated(self.what.iter()));
 		if let Some(ref v) = self.with {
-			write_sql!(f, " {}", v);
-		}
-		if let Some(ref v) = self.data {
-			f.push(' ');
-			v.fmt_sql(f, fmt);
-		}
-		if let Some(ref v) = self.cond {
-			write_sql!(f, " {}", v);
-		}
-		if let Some(ref v) = self.output {
-			write_sql!(f, " {}", v);
-		}
-		if let Some(ref v) = self.timeout {
-			write_sql!(f, " {}", v);
-		}
-		if self.parallel {
-			f.push_str(" PARALLEL");
-		}
-		if let Some(ref v) = self.explain {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {v}");
 		}
 	}
 }

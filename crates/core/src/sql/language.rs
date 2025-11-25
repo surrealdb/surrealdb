@@ -1,6 +1,8 @@
 use std::fmt;
 use std::fmt::Display;
 
+use surrealdb_types::{SqlFormat, ToSql};
+
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Language {
@@ -52,6 +54,12 @@ impl Language {
 impl Display for Language {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str(self.as_str())
+	}
+}
+
+impl ToSql for Language {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str(self.as_str())
 	}
 }
 

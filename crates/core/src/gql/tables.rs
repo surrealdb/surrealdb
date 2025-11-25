@@ -7,6 +7,7 @@ use async_graphql::dynamic::{
 	TypeRef,
 };
 use async_graphql::{Name, Value as GqlValue};
+use surrealdb_types::ToSql;
 
 use super::error::{GqlError, resolver_error};
 use super::schema::{gql_to_sql_kind, sql_value_to_gql_value};
@@ -326,7 +327,7 @@ pub async fn process_tbs(
 				// so we don't take any new definition for it.
 				continue;
 			};
-			let fd_name = Name::new(fd.name.to_string());
+			let fd_name = Name::new(fd.name.to_sql());
 			let fd_type = kind_to_type(kind.clone(), types)?;
 			table_orderable = table_orderable.item(fd_name.to_string());
 			let type_filter_name = format!("_filter_{}", unwrap_type(fd_type.clone()));
@@ -337,11 +338,11 @@ pub async fn process_tbs(
 			types.push(type_filter);
 
 			table_filter = table_filter
-				.field(InputValue::new(fd.name.to_string(), TypeRef::named(type_filter_name)));
+				.field(InputValue::new(fd.name.to_sql(), TypeRef::named(type_filter_name)));
 
 			table_ty_obj = table_ty_obj
 				.field(Field::new(
-					fd.name.to_string(),
+					fd.name.to_sql(),
 					fd_type,
 					make_table_field_resolver(fd_name.as_str(), fd.field_kind.clone()),
 				))
@@ -628,7 +629,7 @@ fn aggregate(
 fn binop(field_name: &str, val: &GqlValue, fds: &[FieldDefinition]) -> Result<Expr, GqlError> {
 	let obj = val.as_object().ok_or(resolver_error("Field filter should be object"))?;
 
-	let Some(fd) = fds.iter().find(|fd| fd.name.to_string() == field_name) else {
+	let Some(fd) = fds.iter().find(|fd| fd.name.to_sql() == field_name) else {
 		return Err(resolver_error(format!("Field `{field_name}` not found")));
 	};
 

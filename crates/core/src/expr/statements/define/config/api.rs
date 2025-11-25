@@ -1,14 +1,12 @@
-use std::fmt;
-
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::{ApiConfigDefinition, MiddlewareDefinition, Permission};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResultExt};
-use crate::fmt::Fmt;
 
 /// The api configuration as it is received from ast.
 
@@ -53,22 +51,27 @@ impl ApiConfig {
 	}
 }
 
-impl fmt::Display for ApiConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for ApiConfig {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		if !self.middleware.is_empty() {
-			write!(f, " MIDDLEWARE ")?;
-			write!(
-				f,
-				"{}",
-				Fmt::pretty_comma_separated(self.middleware.iter().map(|m| format!(
-					"{}({})",
-					m.name,
-					Fmt::pretty_comma_separated(m.args.iter())
-				)))
-			)?
+			f.push_str(" MIDDLEWARE ");
+			for (i, m) in self.middleware.iter().enumerate() {
+				if i > 0 {
+					sql_fmt.write_separator(f);
+				}
+				f.push_str(&m.name);
+				f.push('(');
+				for (j, arg) in m.args.iter().enumerate() {
+					if j > 0 {
+						sql_fmt.write_separator(f);
+					}
+					arg.fmt_sql(f, sql_fmt);
+				}
+				f.push(')');
+			}
 		}
 
-		write!(f, " PERMISSIONS {}", self.permissions)?;
-		Ok(())
+		f.push_str(" PERMISSIONS ");
+		self.permissions.fmt_sql(f, sql_fmt);
 	}
 }

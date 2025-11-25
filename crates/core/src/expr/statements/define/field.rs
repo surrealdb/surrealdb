@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::DefineKind;
@@ -146,7 +147,7 @@ impl DefineFieldStatement {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::FdAlreadyExists {
-							name: fd.name.to_string(),
+							name: fd.name.to_sql(),
 						});
 					}
 				}
@@ -279,7 +280,7 @@ impl DefineFieldStatement {
 				// Add a new subtype
 				name.0.push(Part::All);
 				// Get the field name
-				let fd = name.to_string();
+				let fd = name.to_sql();
 				// Set the subtype `DEFINE FIELD` definition
 				let key = crate::key::table::fd::new(ns, db, &definition.what, &fd);
 				let val = if let Some(existing) =
@@ -326,7 +327,7 @@ impl DefineFieldStatement {
 			// Ensure the field is top-level
 			ensure!(
 				definition.name.len() == 1,
-				Error::ComputedNestedField(definition.name.to_string())
+				Error::ComputedNestedField(definition.name.to_sql())
 			);
 
 			// Ensure there are no conflicting clauses
@@ -343,8 +344,8 @@ impl DefineFieldStatement {
 			for field in fields.iter() {
 				if field.name.starts_with(&definition.name) && field.name != definition.name {
 					bail!(Error::ComputedNestedFieldConflict(
-						definition.name.to_string(),
-						field.name.to_string()
+						definition.name.to_sql(),
+						field.name.to_sql()
 					));
 				}
 			}
@@ -356,8 +357,8 @@ impl DefineFieldStatement {
 					&& field.name != definition.name
 				{
 					bail!(Error::ComputedParentFieldConflict(
-						definition.name.to_string(),
-						field.name.to_string()
+						definition.name.to_sql(),
+						field.name.to_sql()
 					));
 				}
 			}
@@ -374,7 +375,7 @@ impl DefineFieldStatement {
 		if self.reference.is_some() {
 			ensure!(
 				definition.name.len() == 1,
-				Error::ReferenceNestedField(definition.name.to_string())
+				Error::ReferenceNestedField(definition.name.to_sql())
 			);
 
 			fn valid(kind: &Kind, outer: bool) -> bool {
@@ -405,7 +406,7 @@ impl DefineFieldStatement {
 			ensure!(
 				is_record_id,
 				Error::ReferenceTypeConflict(
-					self.field_kind.as_ref().unwrap_or(&Kind::Any).to_string()
+					self.field_kind.as_ref().unwrap_or(&Kind::Any).to_sql()
 				)
 			);
 		}
@@ -431,10 +432,10 @@ impl DefineFieldStatement {
 					let path = definition.name[fd.name.len()..].to_vec();
 					if !fd_kind.allows_nested_kind(&path, self_kind) {
 						bail!(Error::MismatchedFieldTypes {
-							name: definition.name.to_string(),
-							kind: self_kind.to_string(),
-							existing_name: fd.name.to_string(),
-							existing_kind: fd_kind.to_string(),
+							name: definition.name.to_sql(),
+							kind: self_kind.to_sql(),
+							existing_name: fd.name.to_sql(),
+							existing_kind: fd_kind.to_sql(),
 						});
 					}
 				}
@@ -468,7 +469,7 @@ impl DefineFieldStatement {
 			if let Some(ref kind) = self.field_kind {
 				ensure!(
 					RecordIdKeyLit::kind_supported(kind),
-					Error::IdFieldUnsupportedKind(kind.to_string())
+					Error::IdFieldUnsupportedKind(kind.to_sql())
 				);
 			}
 		}

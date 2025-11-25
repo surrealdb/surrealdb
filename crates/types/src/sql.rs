@@ -1,5 +1,8 @@
 //! SQL utilities.
 
+use std::sync::Arc;
+
+use crate as surrealdb_types;
 use crate::utils::escape::QuoteStr;
 
 /// Trait for types that can be converted to SQL representation.
@@ -118,8 +121,6 @@ pub fn fmt_sql_key_value<'a, V: ToSql + 'a>(
 	f: &mut String,
 	fmt: SqlFormat,
 ) {
-	use std::fmt::Write;
-
 	use crate::utils::escape::EscapeKey;
 
 	let pairs: Vec<_> = pairs.into_iter().collect();
@@ -132,9 +133,7 @@ pub fn fmt_sql_key_value<'a, V: ToSql + 'a>(
 		if i > 0 {
 			fmt.write_separator(f);
 		}
-		write!(f, "{}: ", EscapeKey(key.as_ref()))
-			.expect("Write cannot fail when writing to a String");
-		value.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "{}: {}", EscapeKey(key.as_ref()), value);
 	}
 	if fmt.is_pretty() && !pairs.is_empty() {
 		f.push('\n');
@@ -151,33 +150,62 @@ pub fn fmt_sql_key_value<'a, V: ToSql + 'a>(
 
 /// Macro for writing to a SQL string.
 ///
-/// This will panic if the write fails but the expectation is that it is only used in ToSql
-/// implementations which operate on a `&mut String`. `write!` cannot fail when writing to a
-/// `String`.
-#[macro_export]
-macro_rules! write_sql {
-	($f:expr, $($tt:tt)*) => {{
-		use std::fmt::Write;
-		let __f: &mut String = $f;
-		write!(__f, $($tt)*).expect("Write cannot fail when writing to a String")
-	}}
-}
+/// This macro parses format strings at compile time and generates code that calls
+/// `ToSql::fmt_sql` for each placeholder argument.
+///
+/// # Syntax
+///
+/// ```ignore
+/// write_sql!(f, fmt, "format string", arg1, arg2, ...)
+/// ```
+///
+/// Where:
+/// - `f` is a mutable reference to a `String`
+/// - `fmt` is a `SqlFormat` value
+/// - `"format string"` contains literal text and placeholders
+/// - Arguments follow for each positional placeholder
+///
+/// # Placeholders
+///
+/// - `{}` - Positional placeholder (uses corresponding argument from the list)
+/// - `{identifier}` - Named placeholder (uses variable with that name in scope)
+///
+/// # Examples
+///
+/// ```ignore
+/// use surrealdb_types::{write_sql, SqlFormat, ToSql};
+///
+/// let mut f = String::new();
+/// let fmt = SqlFormat::SingleLine;
+///
+/// // Positional placeholders
+/// write_sql!(f, fmt, "{}", value);
+/// write_sql!(f, fmt, "a: {}, {}", b, c);
+///
+/// // Named placeholders
+/// let x = 42;
+/// write_sql!(f, fmt, "x = {x}");
+///
+/// // Mixed
+/// write_sql!(f, fmt, "{a} {} {c}", b);
+/// ```
+pub use surrealdb_types_derive::write_sql;
 
 impl ToSql for String {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", QuoteStr(self))
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str(self.as_str());
 	}
 }
 
-impl ToSql for &str {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", QuoteStr(self))
+impl ToSql for str {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str(self);
 	}
 }
 
-impl ToSql for &&str {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", QuoteStr(self))
+impl<'a> ToSql for &'a str {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str(*self);
 	}
 }
 
@@ -191,8 +219,50 @@ impl ToSql for bool {
 	}
 }
 
-impl ToSql for i64 {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+macro_rules! impl_to_sql_for_numeric {
+	($($t:ty),+) => {
+		$(
+			impl ToSql for $t {
+				fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+					f.push_str(&self.to_string())
+				}
+			}
+		)+
+	};
+}
+
+impl_to_sql_for_numeric!(u8, u16, u32, u64, i8, i16, i32, i64, usize, isize, f32, f64);
+
+impl<T: ToSql> ToSql for &T {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		(**self).fmt_sql(f, fmt)
+	}
+}
+
+// Blanket impl for Box
+impl<T: ToSql + ?Sized> ToSql for Box<T> {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		(**self).fmt_sql(f, fmt)
+	}
+}
+
+// Blanket impl for Arc
+impl<T: ToSql + ?Sized> ToSql for Arc<T> {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		(**self).fmt_sql(f, fmt)
+	}
+}
+
+impl ToSql for uuid::Uuid {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push('u');
+		QuoteStr(&self.to_string()).fmt_sql(f, fmt);
+	}
+}
+
+impl ToSql for rust_decimal::Decimal {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_string().fmt_sql(f, fmt);
+		f.push_str("dec");
 	}
 }

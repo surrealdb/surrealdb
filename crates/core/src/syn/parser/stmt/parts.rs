@@ -1,6 +1,7 @@
 //! Contains parsing code for smaller common parts of statements.
 
 use reblessive::Stk;
+use surrealdb_types::ToSql;
 
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::index::{Distance, VectorType};
@@ -249,21 +250,24 @@ impl Parser<'_> {
 			match kind {
 				MissingKind::Split => {
 					bail!(
-						"Missing split idiom `{idiom}` in statement selection",
+						"Missing split idiom `{:?}` in statement selection",
+						idiom.to_sql(),
 						@idiom_span,
 						@field_span => "Idiom missing here",
 					)
 				}
 				MissingKind::Order => {
 					bail!(
-						"Missing order idiom `{idiom}` in statement selection",
+						"Missing order idiom `{}` in statement selection",
+						idiom.to_sql(),
 						@idiom_span,
 						@field_span => "Idiom missing here",
 					)
 				}
 				MissingKind::Group => {
 					bail!(
-						"Missing group idiom `{idiom}` in statement selection",
+						"Missing group idiom `{}` in statement selection",
+						idiom.to_sql(),
 						@idiom_span,
 						@field_span => "Idiom missing here",
 					)

@@ -1,4 +1,5 @@
 use revision::revisioned;
+use surrealdb_types::ToSql;
 
 mod access;
 mod analyzer;
@@ -70,20 +71,32 @@ impl InfoStructure for Permission {
 		match self {
 			Permission::None => Value::Bool(false),
 			Permission::Full => Value::Bool(true),
-			Permission::Specific(v) => v.to_string().into(),
+			Permission::Specific(v) => v.to_sql().into(),
 		}
 	}
 }
 
 impl Display for Permission {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-		self.to_sql_definition().fmt(f)
+		write!(f, "{}", self.to_sql())
+	}
+}
+
+impl ToSql for Permission {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: surrealdb_types::SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, sql_fmt);
 	}
 }
 
 impl Display for Permissions {
 	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-		write!(f, "{}", self.to_sql_definition())
+		write!(f, "{}", self.to_sql())
+	}
+}
+
+impl ToSql for Permissions {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: surrealdb_types::SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, sql_fmt);
 	}
 }
 

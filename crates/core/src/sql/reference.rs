@@ -1,17 +1,9 @@
-use std::fmt;
-
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct Reference {
 	pub on_delete: ReferenceDeleteStrategy,
-}
-
-impl fmt::Display for Reference {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ON DELETE {}", &self.on_delete)
-	}
 }
 
 impl surrealdb_types::ToSql for Reference {
@@ -59,18 +51,6 @@ pub(crate) enum ReferenceDeleteStrategy {
 	Cascade,
 	Unset,
 	Custom(Expr),
-}
-
-impl fmt::Display for ReferenceDeleteStrategy {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			ReferenceDeleteStrategy::Reject => write!(f, "REJECT"),
-			ReferenceDeleteStrategy::Ignore => write!(f, "IGNORE"),
-			ReferenceDeleteStrategy::Cascade => write!(f, "CASCADE"),
-			ReferenceDeleteStrategy::Unset => write!(f, "UNSET"),
-			ReferenceDeleteStrategy::Custom(v) => write!(f, "THEN {}", v),
-		}
-	}
 }
 
 impl From<ReferenceDeleteStrategy> for crate::expr::reference::ReferenceDeleteStrategy {

@@ -24,16 +24,16 @@ impl Default for DefineNamespaceStatement {
 }
 
 impl ToSql for DefineNamespaceStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "DEFINE NAMESPACE");
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "DEFINE NAMESPACE");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write_sql!(f, " OVERWRITE"),
-			DefineKind::IfNotExists => write_sql!(f, " IF NOT EXISTS"),
+			DefineKind::Overwrite => write_sql!(f, sql_fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
 		}
-		write_sql!(f, " {}", self.name);
+		write_sql!(f, sql_fmt, " {}", self.name);
 		if let Some(ref v) = self.comment {
-			write_sql!(f, " COMMENT {}", v);
+			write_sql!(f, sql_fmt, " COMMENT {}", v);
 		}
 	}
 }

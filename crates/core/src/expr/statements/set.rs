@@ -1,5 +1,3 @@
-use std::fmt;
-
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -83,23 +81,18 @@ impl ToSql for SetStatement {
 	}
 }
 
-impl fmt::Display for SetStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use surrealdb_types::ToSql;
-		write!(f, "{}", self.to_sql())
-	}
-}
-
 #[cfg(test)]
 mod tests {
+	use surrealdb_types::ToSql;
+
 	use crate::syn;
 
 	#[test]
 	fn check_type() {
 		let query = syn::expr("LET $param = 5").unwrap();
-		assert_eq!(format!("{}", query), "LET $param = 5");
+		assert_eq!(query.to_sql(), "LET $param = 5");
 
 		let query = syn::expr("LET $param: number = 5").unwrap();
-		assert_eq!(format!("{}", query), "LET $param: number = 5");
+		assert_eq!(query.to_sql(), "LET $param: number = 5");
 	}
 }

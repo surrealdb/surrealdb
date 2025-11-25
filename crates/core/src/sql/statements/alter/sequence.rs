@@ -12,14 +12,14 @@ pub struct AlterSequenceStatement {
 }
 
 impl ToSql for AlterSequenceStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		f.push_str("ALTER SEQUENCE");
 		if self.if_exists {
 			f.push_str(" IF EXISTS");
 		}
-		write_sql!(f, " {}", EscapeIdent(&self.name));
+		write_sql!(f, sql_fmt, " {}", EscapeIdent(&self.name));
 		if let Some(ref timeout) = self.timeout {
-			write_sql!(f, " TIMEOUT {}", timeout);
+			write_sql!(f, sql_fmt, " TIMEOUT {}", timeout);
 		}
 	}
 }

@@ -39,18 +39,18 @@ pub struct ShowStatement {
 }
 
 impl ToSql for ShowStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		f.push_str("SHOW CHANGES FOR");
 		match self.table {
-			Some(ref v) => write_sql!(f, " TABLE {}", v),
+			Some(ref v) => write_sql!(f, sql_fmt, " TABLE {}", v),
 			None => f.push_str(" DATABASE"),
 		}
 		match self.since {
-			ShowSince::Timestamp(ref v) => write_sql!(f, " SINCE {}", v),
-			ShowSince::Versionstamp(ref v) => write_sql!(f, " SINCE {}", v),
+			ShowSince::Timestamp(ref v) => write_sql!(f, sql_fmt, " SINCE {}", v),
+			ShowSince::Versionstamp(ref v) => write_sql!(f, sql_fmt, " SINCE {}", v),
 		}
 		if let Some(ref v) = self.limit {
-			write_sql!(f, " LIMIT {}", v);
+			write_sql!(f, sql_fmt, " LIMIT {}", v);
 		}
 	}
 }

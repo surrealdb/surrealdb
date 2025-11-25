@@ -1,6 +1,8 @@
-use std::fmt::{self, Display, Formatter, Write};
+use std::fmt::Write;
 
-use crate::fmt::{EscapeIdent, Fmt};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use crate::fmt::EscapeIdent;
 use crate::sql::order::Ordering;
 use crate::sql::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits, Start};
 
@@ -21,55 +23,73 @@ pub(crate) struct Lookup {
 	pub alias: Option<Idiom>,
 }
 
-impl Display for Lookup {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl surrealdb_types::ToSql for Lookup {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		use surrealdb_types::ToSql;
 		if self.what.len() <= 1
-			// When the singular lookup subject has a referencing field, it needs to be wrapped in parentheses
-			// Otherwise <~table.field will be parsed as [Lookup(<~table), Field(.field)]
-			// Whereas <~(table.field) will be parsed as [Lookup(<~table.field)]
 			&& self.what.iter().all(|v| v.referencing_field().is_none())
 			&& self.cond.is_none()
 			&& self.alias.is_none()
 			&& self.expr.is_none()
 		{
-			Display::fmt(&self.kind, f)?;
+			self.kind.fmt_sql(f, fmt);
 			if self.what.is_empty() {
-				f.write_char('?')
+				f.push('?');
 			} else {
-				Fmt::comma_separated(self.what.iter()).fmt(f)
+				for (i, item) in self.what.iter().enumerate() {
+					if i > 0 {
+						fmt.write_separator(f);
+					}
+					item.fmt_sql(f, fmt);
+				}
 			}
 		} else {
-			write!(f, "{}(", self.kind)?;
+			self.kind.fmt_sql(f, fmt);
+			f.push('(');
 			if let Some(ref expr) = self.expr {
-				write!(f, "SELECT {} FROM ", expr)?;
+				f.push_str("SELECT ");
+				expr.fmt_sql(f, fmt);
+				f.push_str(" FROM ");
 			}
 			if self.what.is_empty() {
-				f.write_char('?')
+				f.push('?');
 			} else {
-				Display::fmt(&Fmt::comma_separated(&self.what), f)
-			}?;
+				for (i, item) in self.what.iter().enumerate() {
+					if i > 0 {
+						fmt.write_separator(f);
+					}
+					item.fmt_sql(f, fmt);
+				}
+			}
 			if let Some(ref v) = self.cond {
-				write!(f, " {v}")?
+				f.push(' ');
+				v.fmt_sql(f, fmt);
 			}
 			if let Some(ref v) = self.split {
-				write!(f, " {v}")?
+				f.push(' ');
+				v.fmt_sql(f, fmt);
 			}
 			if let Some(ref v) = self.group {
-				write!(f, " {v}")?
+				f.push(' ');
+				v.fmt_sql(f, fmt);
 			}
 			if let Some(ref v) = self.order {
-				write!(f, " {v}")?
+				f.push(' ');
+				v.fmt_sql(f, fmt);
 			}
 			if let Some(ref v) = self.limit {
-				write!(f, " {v}")?
+				f.push(' ');
+				v.fmt_sql(f, fmt);
 			}
 			if let Some(ref v) = self.start {
-				write!(f, " {v}")?
+				f.push(' ');
+				v.fmt_sql(f, fmt);
 			}
 			if let Some(ref v) = self.alias {
-				write!(f, " AS {v}")?
+				f.push_str(" AS ");
+				v.fmt_sql(f, fmt);
 			}
-			f.write_char(')')
+			f.push(')');
 		}
 	}
 }
@@ -122,11 +142,11 @@ impl Default for LookupKind {
 	}
 }
 
-impl Display for LookupKind {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl ToSql for LookupKind {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
-			Self::Graph(dir) => Display::fmt(dir, f),
-			Self::Reference => write!(f, "<~"),
+			Self::Graph(dir) => dir.fmt_sql(f, sql_fmt),
+			Self::Reference => f.push_str("<~"),
 		}
 	}
 }
@@ -179,29 +199,27 @@ impl LookupSubject {
 	}
 }
 
-impl Display for LookupSubject {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl ToSql for LookupSubject {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
 			Self::Table {
 				table,
 				referencing_field,
 			} => {
-				Display::fmt(&EscapeIdent(table), f)?;
+				EscapeIdent(table).fmt_sql(f, sql_fmt);
 				if let Some(referencing_field) = referencing_field {
-					write!(f, " FIELD {}", EscapeIdent(referencing_field))?;
+					write_sql!(f, sql_fmt, " FIELD {}", EscapeIdent(referencing_field));
 				}
-				Ok(())
 			}
 			Self::Range {
 				table,
 				range,
 				referencing_field,
 			} => {
-				write!(f, "{}:{range}", EscapeIdent(table))?;
+				write_sql!(f, sql_fmt, "{}:{range}", EscapeIdent(table));
 				if let Some(referencing_field) = referencing_field {
-					write!(f, " FIELD {}", EscapeIdent(referencing_field))?;
+					write_sql!(f, sql_fmt, " FIELD {}", EscapeIdent(referencing_field));
 				}
-				Ok(())
 			}
 		}
 	}

@@ -1,6 +1,5 @@
-use std::fmt::{self, Display, Formatter, Write};
+use std::fmt::Write;
 
-use crate::fmt::Fmt;
 use crate::sql::{Expr, Idiom};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -59,11 +58,21 @@ impl From<crate::expr::field::Fields> for Fields {
 	}
 }
 
-impl Display for Fields {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl surrealdb_types::ToSql for Fields {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
 		match self {
-			Fields::Value(v) => write!(f, "VALUE {}", &v),
-			Fields::Select(x) => Display::fmt(&Fmt::comma_separated(x), f),
+			Fields::Value(v) => {
+				f.push_str("VALUE ");
+				v.fmt_sql(f, fmt);
+			}
+			Fields::Select(x) => {
+				for (i, item) in x.iter().enumerate() {
+					if i > 0 {
+						fmt.write_separator(f);
+					}
+					item.fmt_sql(f, fmt);
+				}
+			}
 		}
 	}
 }
@@ -82,20 +91,18 @@ pub(crate) enum Field {
 	},
 }
 
-impl Display for Field {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl surrealdb_types::ToSql for Field {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
 		match self {
-			Self::All => f.write_char('*'),
+			Self::All => f.push('*'),
 			Self::Single {
 				expr,
 				alias,
 			} => {
-				Display::fmt(expr, f)?;
+				expr.fmt_sql(f, fmt);
 				if let Some(alias) = alias {
-					f.write_str(" AS ")?;
-					Display::fmt(alias, f)
-				} else {
-					Ok(())
+					f.push_str(" AS ");
+					alias.fmt_sql(f, fmt);
 				}
 			}
 		}

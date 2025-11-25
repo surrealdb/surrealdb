@@ -17,12 +17,12 @@ pub struct AlterTableStatement {
 }
 
 impl ToSql for AlterTableStatement {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		f.push_str("ALTER TABLE");
 		if self.if_exists {
 			f.push_str(" IF EXISTS");
 		}
-		write_sql!(f, " {}", EscapeIdent(&self.name));
+		write_sql!(f, sql_fmt, " {}", EscapeIdent(&self.name));
 		if let Some(kind) = &self.kind {
 			f.push_str(" TYPE");
 			match &kind {
@@ -37,7 +37,7 @@ impl ToSql for AlterTableStatement {
 							if idx != 0 {
 								f.push_str(" | ");
 							}
-							write_sql!(f, "{}", EscapeIdent(k));
+							write_sql!(f, sql_fmt, "{}", EscapeIdent(k));
 						}
 					}
 					if let Some(Kind::Record(kind)) = &rel.to {
@@ -46,7 +46,7 @@ impl ToSql for AlterTableStatement {
 							if idx != 0 {
 								f.push_str(" | ");
 							}
-							write_sql!(f, "{}", EscapeIdent(k));
+							write_sql!(f, sql_fmt, "{}", EscapeIdent(k));
 						}
 					}
 				}
@@ -64,8 +64,7 @@ impl ToSql for AlterTableStatement {
 
 		match self.comment {
 			AlterKind::Set(ref comment) => {
-				f.push_str(" COMMENT ");
-				comment.fmt_sql(f, fmt);
+				write_sql!(f, sql_fmt, "COMMENT {comment}");
 			}
 			AlterKind::Drop => f.push_str(" DROP COMMENT"),
 			AlterKind::None => {}
@@ -73,15 +72,14 @@ impl ToSql for AlterTableStatement {
 
 		match self.changefeed {
 			AlterKind::Set(ref changefeed) => {
-				f.push_str(" CHANGEFEED ");
-				changefeed.fmt_sql(f, fmt);
+				write_sql!(f, sql_fmt, "CHANGEFEED {changefeed}");
 			}
 			AlterKind::Drop => f.push_str(" DROP CHANGEFEED"),
 			AlterKind::None => {}
 		}
 
 		if let Some(permissions) = &self.permissions {
-			permissions.fmt_sql(f, fmt);
+			write_sql!(f, sql_fmt, " {permissions}");
 		}
 	}
 }

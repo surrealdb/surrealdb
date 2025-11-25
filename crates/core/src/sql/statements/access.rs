@@ -186,51 +186,51 @@ impl From<crate::expr::statements::access::Subject> for Subject {
 }
 
 impl ToSql for AccessStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
 			Self::Grant(stmt) => {
-				write_sql!(f, "ACCESS {}", EscapeIdent(&stmt.ac));
+				write_sql!(f, sql_fmt, "ACCESS {}", EscapeIdent(&stmt.ac));
 				if let Some(ref v) = stmt.base {
-					write_sql!(f, " ON {v}");
+					write_sql!(f, sql_fmt, " ON {v}");
 				}
 				f.push_str(" GRANT");
 				match &stmt.subject {
-					Subject::User(x) => write_sql!(f, " FOR USER {}", EscapeIdent(x)),
-					Subject::Record(x) => write_sql!(f, " FOR RECORD {}", x),
+					Subject::User(x) => write_sql!(f, sql_fmt, " FOR USER {}", EscapeIdent(x)),
+					Subject::Record(x) => write_sql!(f, sql_fmt, " FOR RECORD {}", x),
 				}
 			}
 			Self::Show(stmt) => {
-				write_sql!(f, "ACCESS {}", EscapeIdent(&stmt.ac));
+				write_sql!(f, sql_fmt, "ACCESS {}", EscapeIdent(&stmt.ac));
 				if let Some(ref v) = stmt.base {
-					write_sql!(f, " ON {v}");
+					write_sql!(f, sql_fmt, " ON {v}");
 				}
 				f.push_str(" SHOW");
 				match &stmt.gr {
-					Some(v) => write_sql!(f, " GRANT {}", EscapeIdent(v)),
+					Some(v) => write_sql!(f, sql_fmt, " GRANT {}", EscapeIdent(v)),
 					None => match &stmt.cond {
-						Some(v) => write_sql!(f, " {v}"),
+						Some(v) => write_sql!(f, sql_fmt, " {v}"),
 						None => f.push_str(" ALL"),
 					},
 				}
 			}
 			Self::Revoke(stmt) => {
-				write_sql!(f, "ACCESS {}", EscapeIdent(&stmt.ac));
+				write_sql!(f, sql_fmt, "ACCESS {}", EscapeIdent(&stmt.ac));
 				if let Some(ref v) = stmt.base {
-					write_sql!(f, " ON {v}");
+					write_sql!(f, sql_fmt, " ON {v}");
 				}
 				f.push_str(" REVOKE");
 				match &stmt.gr {
-					Some(v) => write_sql!(f, " GRANT {}", EscapeIdent(v)),
+					Some(v) => write_sql!(f, sql_fmt, " GRANT {}", EscapeIdent(v)),
 					None => match &stmt.cond {
-						Some(v) => write_sql!(f, " {v}"),
+						Some(v) => write_sql!(f, sql_fmt, " {v}"),
 						None => f.push_str(" ALL"),
 					},
 				}
 			}
 			Self::Purge(stmt) => {
-				write_sql!(f, "ACCESS {}", EscapeIdent(&stmt.ac));
+				write_sql!(f, sql_fmt, "ACCESS {}", EscapeIdent(&stmt.ac));
 				if let Some(ref v) = stmt.base {
-					write_sql!(f, " ON {v}");
+					write_sql!(f, sql_fmt, " ON {v}");
 				}
 				f.push_str(" PURGE");
 				match (stmt.expired, stmt.revoked) {
@@ -240,7 +240,7 @@ impl ToSql for AccessStatement {
 					(false, false) => f.push_str(" NONE"),
 				}
 				if !stmt.grace.is_zero() {
-					write_sql!(f, " FOR {}", stmt.grace);
+					write_sql!(f, sql_fmt, " FOR {}", stmt.grace);
 				}
 			}
 		}

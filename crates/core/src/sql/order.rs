@@ -1,5 +1,6 @@
-use std::fmt;
 use std::ops::Deref;
+
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::Fmt;
 use crate::sql::Idiom;
@@ -11,11 +12,13 @@ pub enum Ordering {
 	Order(OrderList),
 }
 
-impl fmt::Display for Ordering {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl surrealdb_types::ToSql for Ordering {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
 		match self {
-			Ordering::Random => write!(f, "ORDER BY RAND()"),
-			Ordering::Order(list) => writeln!(f, "ORDER BY {list}"),
+			Ordering::Random => f.push_str("ORDER BY RAND()"),
+			Ordering::Order(list) => {
+				write_sql!(f, fmt, "ORDER BY {}", list);
+			}
 		}
 	}
 }
@@ -49,9 +52,9 @@ impl Deref for OrderList {
 	}
 }
 
-impl fmt::Display for OrderList {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", Fmt::comma_separated(&self.0))
+impl ToSql for OrderList {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "{}", Fmt::comma_separated(&self.0))
 	}
 }
 
@@ -78,19 +81,18 @@ pub struct Order {
 	pub direction: bool,
 }
 
-impl fmt::Display for Order {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.value)?;
+impl ToSql for Order {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.value.fmt_sql(f, fmt);
 		if self.collate {
-			write!(f, " COLLATE")?;
+			f.push_str(" COLLATE");
 		}
 		if self.numeric {
-			write!(f, " NUMERIC")?;
+			f.push_str(" NUMERIC");
 		}
 		if !self.direction {
-			write!(f, " DESC")?;
+			f.push_str(" DESC");
 		}
-		Ok(())
 	}
 }
 

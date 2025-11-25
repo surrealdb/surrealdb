@@ -21,12 +21,12 @@ impl Default for RemoveTableStatement {
 }
 
 impl ToSql for RemoveTableStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "REMOVE TABLE");
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "REMOVE TABLE");
 		if self.if_exists {
-			write_sql!(f, " IF EXISTS");
+			write_sql!(f, sql_fmt, " IF EXISTS");
 		}
-		write_sql!(f, " {}", self.name);
+		write_sql!(f, sql_fmt, " {}", self.name);
 	}
 }
 

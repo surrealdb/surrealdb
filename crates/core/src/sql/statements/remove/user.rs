@@ -21,12 +21,12 @@ impl Default for RemoveUserStatement {
 }
 
 impl ToSql for RemoveUserStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "REMOVE USER");
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "REMOVE USER");
 		if self.if_exists {
-			write_sql!(f, " IF EXISTS");
+			write_sql!(f, sql_fmt, " IF EXISTS");
 		}
-		write_sql!(f, " {} ON {}", self.name, self.base);
+		write_sql!(f, sql_fmt, " {} ON {}", self.name, self.base);
 	}
 }
 

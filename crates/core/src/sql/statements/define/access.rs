@@ -17,31 +17,31 @@ pub(crate) struct DefineAccessStatement {
 }
 
 impl ToSql for DefineAccessStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "DEFINE ACCESS");
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "DEFINE ACCESS");
 		match self.kind {
 			DefineKind::Default => {}
 			DefineKind::Overwrite => {
-				write_sql!(f, " OVERWRITE");
+				write_sql!(f, sql_fmt, " OVERWRITE");
 			}
 			DefineKind::IfNotExists => {
-				write_sql!(f, " IF NOT EXISTS");
+				write_sql!(f, sql_fmt, " IF NOT EXISTS");
 			}
 		}
 		// The specific access method definition is displayed by AccessType
-		write_sql!(f, " {} ON {} TYPE {}", self.name, self.base, self.access_type);
+		write_sql!(f, sql_fmt, " {} ON {} TYPE {}", self.name, self.base, self.access_type);
 		// The additional authentication clause
 		if let Some(ref v) = self.authenticate {
-			write_sql!(f, " AUTHENTICATE {v}");
+			write_sql!(f, sql_fmt, " AUTHENTICATE {v}");
 		}
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible
 		// None values need to be printed, as they are different from the default values
-		write_sql!(f, " DURATION");
+		write_sql!(f, sql_fmt, " DURATION");
 		if self.access_type.can_issue_grants() {
 			f.push_str(" FOR GRANT ");
 			match self.duration.grant {
-				Some(ref dur) => write_sql!(f, "{}", dur),
+				Some(ref dur) => write_sql!(f, sql_fmt, "{}", dur),
 				None => f.push_str("NONE"),
 			}
 			f.push(',');
@@ -49,18 +49,18 @@ impl ToSql for DefineAccessStatement {
 		if self.access_type.can_issue_tokens() {
 			f.push_str(" FOR TOKEN ");
 			match self.duration.token {
-				Some(ref dur) => write_sql!(f, "{}", dur),
+				Some(ref dur) => write_sql!(f, sql_fmt, "{}", dur),
 				None => f.push_str("NONE"),
 			}
 			f.push(',');
 		}
 		f.push_str(" FOR SESSION ");
 		match self.duration.session {
-			Some(ref dur) => write_sql!(f, "{}", dur),
+			Some(ref dur) => write_sql!(f, sql_fmt, "{}", dur),
 			None => f.push_str("NONE"),
 		}
 		if let Some(ref v) = self.comment {
-			write_sql!(f, " COMMENT {}", v);
+			write_sql!(f, sql_fmt, " COMMENT {}", v);
 		}
 	}
 }

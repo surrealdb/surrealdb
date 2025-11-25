@@ -48,24 +48,25 @@ impl Default for DefineUserStatement {
 }
 
 impl ToSql for DefineUserStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "DEFINE USER");
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "DEFINE USER");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write_sql!(f, " OVERWRITE"),
-			DefineKind::IfNotExists => write_sql!(f, " IF NOT EXISTS"),
+			DefineKind::Overwrite => write_sql!(f, sql_fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
 		}
 
-		write_sql!(f, " {} ON {}", self.name, self.base);
+		write_sql!(f, sql_fmt, " {} ON {}", self.name, self.base);
 
 		match self.pass_type {
-			PassType::Unset => write_sql!(f, " PASSHASH \"\" "),
-			PassType::Hash(ref x) => write_sql!(f, " PASSHASH {}", QuoteStr(x)),
-			PassType::Password(ref x) => write_sql!(f, " PASSWORD {}", QuoteStr(x)),
+			PassType::Unset => write_sql!(f, sql_fmt, " PASSHASH \"\" "),
+			PassType::Hash(ref x) => write_sql!(f, sql_fmt, " PASSHASH {}", QuoteStr(x)),
+			PassType::Password(ref x) => write_sql!(f, sql_fmt, " PASSWORD {}", QuoteStr(x)),
 		}
 
 		write_sql!(
 			f,
+			sql_fmt,
 			" ROLES {}",
 			Fmt::comma_separated(
 				&self.roles.iter().map(|r| EscapeIdent(r.to_uppercase())).collect::<Vec<_>>()
@@ -74,19 +75,19 @@ impl ToSql for DefineUserStatement {
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible
 		// None values need to be printed, as they are different from the default values
-		write_sql!(f, " DURATION");
+		write_sql!(f, sql_fmt, " DURATION");
 		f.push_str(" FOR TOKEN ");
 		match self.token_duration {
-			Some(ref dur) => write_sql!(f, "{}", dur),
+			Some(ref dur) => write_sql!(f, sql_fmt, "{}", dur),
 			None => f.push_str("NONE"),
 		}
 		f.push_str(", FOR SESSION ");
 		match self.session_duration {
-			Some(ref dur) => write_sql!(f, "{}", dur),
+			Some(ref dur) => write_sql!(f, sql_fmt, "{}", dur),
 			None => f.push_str("NONE"),
 		}
 		if let Some(ref v) = self.comment {
-			write_sql!(f, " COMMENT {}", v);
+			write_sql!(f, sql_fmt, " COMMENT {}", v);
 		}
 	}
 }

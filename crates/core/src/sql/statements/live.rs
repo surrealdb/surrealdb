@@ -14,20 +14,20 @@ pub struct LiveStatement {
 }
 
 impl ToSql for LiveStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "LIVE SELECT");
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "LIVE SELECT");
 		if self.diff {
-			write_sql!(f, " DIFF");
+			write_sql!(f, sql_fmt, " DIFF");
 		}
 		if !self.fields.is_empty() {
-			write_sql!(f, " {}", self.fields);
+			write_sql!(f, sql_fmt, " {}", self.fields);
 		}
-		write_sql!(f, " FROM {}", self.what);
+		write_sql!(f, sql_fmt, " FROM {}", self.what);
 		if let Some(ref v) = self.cond {
-			write_sql!(f, " {v}");
+			write_sql!(f, sql_fmt, " {v}");
 		}
 		if let Some(ref v) = self.fetch {
-			write_sql!(f, " {v}");
+			write_sql!(f, sql_fmt, " {v}");
 		}
 	}
 }

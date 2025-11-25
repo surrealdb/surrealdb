@@ -1,4 +1,5 @@
 use anyhow::{Result, ensure};
+use surrealdb_types::ToSql;
 
 use crate::err::Error;
 use crate::expr::Operation;
@@ -139,8 +140,8 @@ impl Value {
 					ensure!(
 						value == val,
 						Error::PatchTest {
-							expected: value.to_string(),
-							got: val.to_string(),
+							expected: value.to_sql(),
+							got: val.to_sql(),
 						}
 					);
 				}

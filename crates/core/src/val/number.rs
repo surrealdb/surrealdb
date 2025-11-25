@@ -207,8 +207,8 @@ impl Display for Number {
 }
 
 impl ToSql for Number {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "{}", self)
 	}
 }
 

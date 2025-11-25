@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use radix_trie::Trie;
+use surrealdb_types::ToSql;
 
 use crate::catalog::{DatabaseId, IndexDefinition, IndexId, NamespaceId, Record};
 use crate::ctx::Context;
@@ -488,7 +489,10 @@ impl IndexRangeThingIterator {
 				BinaryOperator::MoreThan => from.push((key, true, v.clone())),
 				BinaryOperator::MoreThanEqual => from.push((key, false, v.clone())),
 				_ => {
-					bail!(Error::Unreachable(format!("Invalid operator for range extraction {op}")))
+					bail!(Error::Unreachable(format!(
+						"Invalid operator for range extraction {}",
+						op.to_sql()
+					)))
 				}
 			}
 		}

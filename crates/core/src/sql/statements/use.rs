@@ -10,13 +10,13 @@ pub struct UseStatement {
 }
 
 impl ToSql for UseStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		f.push_str("USE");
 		if let Some(ref ns) = self.ns {
-			write_sql!(f, " NS {}", EscapeIdent(ns));
+			write_sql!(f, sql_fmt, " NS {}", EscapeIdent(ns));
 		}
 		if let Some(ref db) = self.db {
-			write_sql!(f, " DB {}", EscapeIdent(db));
+			write_sql!(f, sql_fmt, " DB {}", EscapeIdent(db));
 		}
 	}
 }

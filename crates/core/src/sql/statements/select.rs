@@ -30,15 +30,15 @@ pub struct SelectStatement {
 }
 
 impl ToSql for SelectStatement {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		write_sql!(f, "SELECT {}", self.expr);
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "SELECT {}", self.expr);
 		if !self.omit.is_empty() {
 			f.push_str(" OMIT ");
 			for (i, expr) in self.omit.iter().enumerate() {
 				if i > 0 {
 					f.push_str(", ");
 				}
-				expr.fmt_sql(f, fmt);
+				expr.fmt_sql(f, sql_fmt);
 			}
 		}
 		f.push_str(" FROM");
@@ -50,44 +50,43 @@ impl ToSql for SelectStatement {
 			if i > 0 {
 				f.push_str(", ");
 			}
-			expr.fmt_sql(f, fmt);
+			expr.fmt_sql(f, sql_fmt);
 		}
 		if let Some(ref v) = self.with {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 		if let Some(ref v) = self.cond {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 		if let Some(ref v) = self.split {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 		if let Some(ref v) = self.group {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 		if let Some(ref v) = self.order {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 		if let Some(ref v) = self.limit {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 		if let Some(ref v) = self.start {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 		if let Some(ref v) = self.fetch {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 		if let Some(ref v) = self.version {
-			f.push_str(" VERSION ");
-			v.fmt_sql(f, fmt);
+			write_sql!(f, sql_fmt, " VERSION {v}");
 		}
 		if let Some(ref v) = self.timeout {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {v}");
 		}
 		if self.parallel {
 			f.push_str(" PARALLEL");
 		}
 		if let Some(ref v) = self.explain {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {v}");
 		}
 	}
 }

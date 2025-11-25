@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use anyhow::{Result, bail};
 use argon2::Argon2;
 use argon2::password_hash::{PasswordHasher, SaltString};
@@ -219,11 +217,5 @@ impl ToSql for DefineUserStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		let sql_stmt: crate::sql::statements::define::DefineUserStatement = self.clone().into();
 		sql_stmt.fmt_sql(f, fmt);
-	}
-}
-
-impl Display for DefineUserStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.to_sql())
 	}
 }

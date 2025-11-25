@@ -60,12 +60,12 @@ impl Node {
 }
 
 impl ToSql for Node {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "NODE {} SEEN {}", self.id, self.heartbeat);
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "NODE {} SEEN {}", self.id, self.heartbeat);
 		if self.gc {
-			write_sql!(f, " ARCHIVED");
+			write_sql!(f, sql_fmt, " ARCHIVED");
 		} else {
-			write_sql!(f, " ACTIVE");
+			write_sql!(f, sql_fmt, " ACTIVE");
 		}
 	}
 }
@@ -118,6 +118,12 @@ impl Sub<Duration> for Timestamp {
 impl Display for Timestamp {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}", self.value)
+	}
+}
+
+impl ToSql for Timestamp {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "{}", self.value)
 	}
 }
 

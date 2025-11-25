@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
@@ -110,12 +108,5 @@ impl ToSql for DefineAnalyzerStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		let sql_stmt: crate::sql::statements::define::DefineAnalyzerStatement = self.clone().into();
 		sql_stmt.fmt_sql(f, fmt);
-	}
-}
-
-impl Display for DefineAnalyzerStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use surrealdb_types::ToSql;
-		write!(f, "{}", self.to_sql())
 	}
 }

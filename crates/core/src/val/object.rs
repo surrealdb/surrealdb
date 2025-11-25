@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self, Display, Formatter, Write};
+use std::fmt::Write;
 use std::ops::{Deref, DerefMut};
 
 use anyhow::Result;
@@ -7,10 +7,11 @@ use http::{HeaderMap, HeaderName, HeaderValue};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::err::Error;
 use crate::expr::literal::ObjectEntry;
-use crate::fmt::{EscapeKey, Fmt, Pretty, is_pretty, pretty_indent};
+use crate::fmt::EscapeKey;
 use crate::val::{IndexFormat, RecordId, Value};
 
 /// Invariant: Keys never contain NUL bytes.
@@ -153,35 +154,35 @@ impl Object {
 			.collect()
 	}
 
-	pub(crate) fn display<V: Display>(f: &mut Formatter, o: &BTreeMap<String, V>) -> fmt::Result {
-		let mut f = Pretty::from(f);
-		if is_pretty() {
-			f.write_char('{')?;
-		} else {
-			f.write_str("{ ")?;
-		}
-		if !o.is_empty() {
-			let indent = pretty_indent();
-			write!(
-				f,
-				"{}",
-				Fmt::pretty_comma_separated(
-					o.iter().map(|args| Fmt::new(args, |(k, v), f| write!(
-						f,
-						"{}: {}",
-						EscapeKey(k),
-						v
-					))),
-				)
-			)?;
-			drop(indent);
-		}
-		if is_pretty() {
-			f.write_char('}')
-		} else {
-			f.write_str(" }")
-		}
-	}
+	// pub(crate) fn display<V: ToSql>(f: &mut String, o: &BTreeMap<String, V>) -> fmt::Result {
+	// 	let mut f = Pretty::from(f);
+	// 	if is_pretty() {
+	// 		f.write_char('{')?;
+	// 	} else {
+	// 		f.write_str("{ ")?;
+	// 	}
+	// 	if !o.is_empty() {
+	// 		let indent = pretty_indent();
+	// 		write_sql!(
+	// 			f, fmt,
+	// 			"{}",
+	// 			Fmt::pretty_comma_separated(
+	// 				o.iter().map(|args| Fmt::new(args, |(k, v), f, fmt| write_sql!(
+	// 					f, fmt,
+	// 					"{}: {}",
+	// 					EscapeKey(k),
+	// 					v
+	// 				))),
+	// 			)
+	// 		)?;
+	// 		drop(indent);
+	// 	}
+	// 	if is_pretty() {
+	// 		f.write_char('}')
+	// 	} else {
+	// 		f.write_str(" }")
+	// 	}
+	// }
 }
 
 impl std::ops::Add for Object {
@@ -194,31 +195,21 @@ impl std::ops::Add for Object {
 	}
 }
 
-impl Display for Object {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Object::display(f, &self.0)
-	}
-}
-
-impl surrealdb_types::ToSql for Object {
-	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
-		use surrealdb_types::write_sql;
-
-		use crate::fmt::EscapeKey;
-
+impl ToSql for Object {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		if self.is_empty() {
 			return f.push_str("{  }");
 		}
 
-		if fmt.is_pretty() {
+		if sql_fmt.is_pretty() {
 			f.push('{');
 		} else {
 			f.push_str("{ ");
 		}
 
 		if !self.is_empty() {
-			let inner_fmt = fmt.increment();
-			if fmt.is_pretty() {
+			let inner_fmt = sql_fmt.increment();
+			if sql_fmt.is_pretty() {
 				f.push('\n');
 				inner_fmt.write_indent(f);
 			}
@@ -226,16 +217,16 @@ impl surrealdb_types::ToSql for Object {
 				if i > 0 {
 					inner_fmt.write_separator(f);
 				}
-				write_sql!(f, "{}: ", EscapeKey(key));
+				write_sql!(f, sql_fmt, "{}: ", EscapeKey(key));
 				value.fmt_sql(f, inner_fmt);
 			}
-			if fmt.is_pretty() {
+			if sql_fmt.is_pretty() {
 				f.push('\n');
-				fmt.write_indent(f);
+				sql_fmt.write_indent(f);
 			}
 		}
 
-		if fmt.is_pretty() {
+		if sql_fmt.is_pretty() {
 			f.push('}');
 		} else {
 			f.push_str(" }");

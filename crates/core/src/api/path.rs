@@ -3,6 +3,7 @@ use std::ops::Deref;
 use std::str::FromStr;
 
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::expr::Kind;
@@ -71,8 +72,14 @@ impl IntoIterator for Path {
 
 impl Display for Path {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "/")?;
-		Display::fmt(&Fmt::new(self.iter(), fmt_separated_by("/")), f)
+		self.to_sql().fmt(f)
+	}
+}
+
+impl ToSql for Path {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push('/');
+		Fmt::new(self.iter(), fmt_separated_by("/")).fmt_sql(f, fmt);
 	}
 }
 
@@ -303,12 +310,30 @@ impl Display for Segment {
 			Self::Dynamic(v, k) => {
 				write!(f, ":{v}")?;
 				if let Some(k) = k {
-					write!(f, "<{k}>")?;
+					write!(f, "<{}>", k.to_sql())?;
 				}
 
 				Ok(())
 			}
 			Self::Rest(v) => write!(f, "*{v}"),
+		}
+	}
+}
+
+impl ToSql for Segment {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		use std::fmt::Write;
+		match self {
+			Self::Fixed(v) => write!(f, "{v}").expect("Write cannot fail when writing to a String"),
+			Self::Dynamic(v, k) => {
+				write!(f, ":{v}").expect("Write cannot fail when writing to a String");
+				if let Some(k) = k {
+					f.push('<');
+					k.fmt_sql(f, fmt);
+					f.push('>');
+				}
+			}
+			Self::Rest(v) => write!(f, "*{v}").expect("Write cannot fail when writing to a String"),
 		}
 	}
 }

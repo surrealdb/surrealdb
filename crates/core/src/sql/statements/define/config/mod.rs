@@ -1,7 +1,6 @@
 pub mod api;
 use surrealdb_types::{SqlFormat, ToSql};
 pub mod graphql;
-use std::fmt::{self, Display};
 
 use api::ApiConfig;
 pub use graphql::GraphQLConfig;
@@ -63,13 +62,6 @@ impl ToSql for ConfigInner {
 				v.fmt_sql(f, fmt);
 			}
 		}
-	}
-}
-
-impl Display for ConfigInner {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use surrealdb_types::ToSql;
-		write!(f, "{}", self.to_sql())
 	}
 }
 

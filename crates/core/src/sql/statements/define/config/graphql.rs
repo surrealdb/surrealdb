@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use surrealdb_types::{SqlFormat, ToSql};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -97,13 +95,6 @@ impl ToSql for GraphQLConfig {
 	}
 }
 
-impl Display for GraphQLConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use surrealdb_types::ToSql;
-		write!(f, "{}", self.to_sql())
-	}
-}
-
 impl From<FunctionsConfig> for crate::catalog::GraphQLFunctionsConfig {
 	fn from(v: FunctionsConfig) -> Self {
 		match v {
@@ -153,13 +144,6 @@ impl ToSql for TablesConfig {
 	}
 }
 
-impl Display for TablesConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use surrealdb_types::ToSql;
-		write!(f, "{}", self.to_sql())
-	}
-}
-
 impl ToSql for TableConfig {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		self.name.fmt_sql(f, fmt);
@@ -192,18 +176,5 @@ impl ToSql for FunctionsConfig {
 				f.push(']');
 			}
 		}
-	}
-}
-
-impl Display for FunctionsConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use surrealdb_types::ToSql;
-		write!(f, "{}", self.to_sql())
-	}
-}
-
-impl Display for TableConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.name)
 	}
 }

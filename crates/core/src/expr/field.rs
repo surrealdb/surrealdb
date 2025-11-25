@@ -1,10 +1,11 @@
 use std::borrow::Cow;
-use std::fmt::{self, Display, Formatter, Write};
+use std::fmt::Write;
 use std::slice::Iter;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::paths::ID;
 use crate::ctx::Context;
@@ -12,7 +13,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, FlowResultExt as _, Function, Idiom, Part};
-use crate::fmt::Fmt;
 use crate::fnc::args::FromArgs;
 use crate::syn;
 use crate::val::{Array, Value};
@@ -30,18 +30,17 @@ pub(crate) enum Fields {
 	Select(Vec<Field>),
 }
 
-impl Display for Fields {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			Fields::Value(v) => write!(f, "VALUE {}", &v),
-			Fields::Select(x) => Display::fmt(&Fmt::comma_separated(x), f),
-		}
+impl surrealdb_types::ToSql for Fields {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		let sql_fields: crate::sql::Fields = self.clone().into();
+		sql_fields.fmt_sql(f, fmt);
 	}
 }
 
 impl InfoStructure for Fields {
 	fn structure(self) -> Value {
-		self.to_string().into()
+		use surrealdb_types::ToSql;
+		self.to_sql().into()
 	}
 }
 
@@ -387,20 +386,18 @@ impl Field {
 	}
 }
 
-impl Display for Field {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl ToSql for Field {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::All => f.write_char('*'),
+			Self::All => f.push('*'),
 			Self::Single {
 				expr,
 				alias,
 			} => {
-				Display::fmt(expr, f)?;
+				expr.fmt_sql(f, fmt);
 				if let Some(alias) = alias {
-					f.write_str(" AS ")?;
-					Display::fmt(alias, f)
-				} else {
-					Ok(())
+					f.push_str(" AS ");
+					alias.fmt_sql(f, fmt);
 				}
 			}
 		}

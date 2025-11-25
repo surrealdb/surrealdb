@@ -45,6 +45,7 @@ use ahash::HashMap;
 use anyhow::{Result, bail, ensure};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use surrealdb_types::ToSql;
 
 use crate::err::Error;
 use crate::expr::statements::define::DefineConfigStatement;
@@ -263,7 +264,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 						name: "math::max".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
-							arguments[*arg]
+							arguments[*arg].to_sql()
 						),
 					})
 				};
@@ -280,7 +281,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 						name: "math::min".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
-							arguments[*arg]
+							arguments[*arg].to_sql()
 						),
 					})
 				};
@@ -297,7 +298,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 						name: "math::sum".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
-							arguments[*arg]
+							arguments[*arg].to_sql()
 						),
 					})
 				};
@@ -313,7 +314,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 						name: "math::mean".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
-							arguments[*arg]
+							arguments[*arg].to_sql()
 						),
 					})
 				};
@@ -332,7 +333,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 						name: "math::stddev".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
-							arguments[*arg]
+							arguments[*arg].to_sql()
 						),
 					})
 				};
@@ -352,7 +353,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 						name: "math::variance".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `number` but found `{}`",
-							arguments[*arg]
+							arguments[*arg].to_sql()
 						),
 					})
 				};
@@ -370,7 +371,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 						name: "time::max".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
-							arguments[*arg]
+							arguments[*arg].to_sql()
 						),
 					})
 				};
@@ -388,7 +389,7 @@ pub fn add_to_aggregation_stats(arguments: &[Value], stats: &mut [AggregationSta
 						name: "time::min".to_string(),
 						message: format!(
 							"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
-							arguments[*arg]
+							arguments[*arg].to_sql()
 						),
 					})
 				};
@@ -651,8 +652,9 @@ impl MutVisitor for AggregateExprCollector<'_> {
 						} else {
 							bail!(Error::Query {
 								message: format!(
-									"Found idiom `{i}` within the selector of a materialized aggregate view.\n\
-											 Selection of document fields which are not used within the argument of an optimized aggregate function is currently not supported"
+									"Found idiom `{}` within the selector of a materialized aggregate view.\n\
+											 Selection of document fields which are not used within the argument of an optimized aggregate function is currently not supported",
+									i.to_sql()
 								)
 							})
 						}
@@ -1084,7 +1086,7 @@ impl AggregationAnalysis {
 				else {
 					// all is not a valid aggregate selector.
 					bail!(Error::InvalidAggregationSelector {
-						expr: field.to_string()
+						expr: field.to_sql()
 					})
 				};
 				let mut expr = expr.clone();
@@ -1101,7 +1103,7 @@ impl AggregationAnalysis {
 					else {
 						// all is not a valid aggregate selector.
 						bail!(Error::InvalidAggregationSelector {
-							expr: f.to_string()
+							expr: f.to_sql()
 						})
 					};
 

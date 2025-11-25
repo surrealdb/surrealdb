@@ -5,10 +5,11 @@ mod test;
 
 mod escape;
 use std::cell::Cell;
-use std::fmt::{self, Display, Formatter, Write};
+use std::fmt::{Display, Formatter, Write};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 pub use escape::{EscapeIdent, EscapeKey, EscapeKwFreeIdent, EscapeRid, QuoteStr};
+use surrealdb_types::{SqlFormat, ToSql};
 
 /// Implements fmt::Display by calling formatter on contents.
 pub(crate) struct Fmt<T, F> {
@@ -16,7 +17,7 @@ pub(crate) struct Fmt<T, F> {
 	formatter: F,
 }
 
-impl<T, F: Fn(T, &mut Formatter) -> fmt::Result> Fmt<T, F> {
+impl<T, F: Fn(T, &mut String, SqlFormat)> Fmt<T, F> {
 	pub(crate) fn new(t: T, formatter: F) -> Self {
 		Self {
 			contents: Cell::new(Some(t)),
@@ -25,15 +26,15 @@ impl<T, F: Fn(T, &mut Formatter) -> fmt::Result> Fmt<T, F> {
 	}
 }
 
-impl<T, F: Fn(T, &mut Formatter) -> fmt::Result> Display for Fmt<T, F> {
+impl<T, F: Fn(T, &mut String, SqlFormat)> ToSql for Fmt<T, F> {
 	/// fmt is single-use only.
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		let contents = self.contents.replace(None).expect("only call Fmt::fmt once");
-		(self.formatter)(contents, f)
+		(self.formatter)(contents, f, fmt)
 	}
 }
 
-impl<I: IntoIterator<Item = T>, T: Display> Fmt<I, fn(I, &mut Formatter) -> fmt::Result> {
+impl<I: IntoIterator<Item = T>, T: ToSql> Fmt<I, fn(I, &mut String, SqlFormat)> {
 	/// Formats values with a comma and a space separating them.
 	pub(crate) fn comma_separated(into_iter: I) -> Self {
 		Self::new(into_iter, fmt_comma_separated)
@@ -61,99 +62,99 @@ impl<I: IntoIterator<Item = T>, T: Display> Fmt<I, fn(I, &mut Formatter) -> fmt:
 	}
 }
 
-fn fmt_comma_separated<T: Display, I: IntoIterator<Item = T>>(
+fn fmt_comma_separated<T: ToSql, I: IntoIterator<Item = T>>(
 	into_iter: I,
-	f: &mut Formatter,
-) -> fmt::Result {
+	f: &mut String,
+	fmt: SqlFormat,
+) {
 	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
-			f.write_str(", ")?;
+			f.push_str(", ");
 		}
-		Display::fmt(&v, f)?;
+		ToSql::fmt_sql(&v, f, fmt);
 	}
-	Ok(())
 }
 
-fn fmt_verbar_separated<T: Display, I: IntoIterator<Item = T>>(
+fn fmt_verbar_separated<T: ToSql, I: IntoIterator<Item = T>>(
 	into_iter: I,
-	f: &mut Formatter,
-) -> fmt::Result {
+	f: &mut String,
+	fmt: SqlFormat,
+) {
 	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
-			f.write_str(" | ")?;
+			f.push_str(" | ");
 		}
-		Display::fmt(&v, f)?;
+		ToSql::fmt_sql(&v, f, fmt);
 	}
-	Ok(())
 }
 
-fn fmt_pretty_comma_separated<T: Display, I: IntoIterator<Item = T>>(
+fn fmt_pretty_comma_separated<T: ToSql, I: IntoIterator<Item = T>>(
 	into_iter: I,
-	f: &mut Formatter,
-) -> fmt::Result {
+	f: &mut String,
+	fmt: SqlFormat,
+) {
 	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
 			if is_pretty() {
-				f.write_char(',')?;
+				f.push(',');
 				pretty_sequence_item();
 			} else {
-				f.write_str(", ")?;
+				f.push_str(", ");
 			}
 		}
-		Display::fmt(&v, f)?;
+		ToSql::fmt_sql(&v, f, fmt);
 	}
-	Ok(())
 }
 
-fn fmt_one_line_separated<T: Display, I: IntoIterator<Item = T>>(
+fn fmt_one_line_separated<T: ToSql, I: IntoIterator<Item = T>>(
 	into_iter: I,
-	f: &mut Formatter,
-) -> fmt::Result {
+	f: &mut String,
+	fmt: SqlFormat,
+) {
 	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
 			if is_pretty() {
 				pretty_sequence_item();
 			} else {
-				f.write_char('\n')?;
+				f.push('\n');
 			}
 		}
-		Display::fmt(&v, f)?;
+		ToSql::fmt_sql(&v, f, fmt);
 	}
-	Ok(())
 }
 
-fn fmt_two_line_separated<T: Display, I: IntoIterator<Item = T>>(
+fn fmt_two_line_separated<T: ToSql, I: IntoIterator<Item = T>>(
 	into_iter: I,
-	f: &mut Formatter,
-) -> fmt::Result {
+	f: &mut String,
+	fmt: SqlFormat,
+) {
 	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
 			if is_pretty() {
-				f.write_char('\n')?;
+				f.push('\n');
 				pretty_sequence_item();
 			} else {
-				f.write_char('\n')?;
-				f.write_char('\n')?;
+				f.push('\n');
+				f.push('\n');
 			}
 		}
-		Display::fmt(&v, f)?;
+		ToSql::fmt_sql(&v, f, fmt);
 	}
-	Ok(())
 }
 
 /// Creates a formatting function that joins iterators with an arbitrary
 /// separator.
-pub fn fmt_separated_by<T: Display, I: IntoIterator<Item = T>>(
+pub fn fmt_separated_by<T: ToSql, I: IntoIterator<Item = T>>(
 	separator: impl Display,
-) -> impl Fn(I, &mut Formatter) -> fmt::Result {
-	move |into_iter: I, f: &mut Formatter| {
+) -> impl Fn(I, &mut String, SqlFormat) {
+	move |into_iter: I, f: &mut String, fmt: SqlFormat| {
+		use std::fmt::Write;
 		for (i, v) in into_iter.into_iter().enumerate() {
 			if i > 0 {
-				Display::fmt(&separator, f)?;
+				write!(f, "{}", separator).expect("Write cannot fail when writing to a String");
 			}
-			Display::fmt(&v, f)?;
+			ToSql::fmt_sql(&v, f, fmt);
 		}
-		Ok(())
 	}
 }
 
@@ -289,6 +290,8 @@ impl<W: std::fmt::Write> std::fmt::Write for Pretty<W> {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_types::ToSql;
+
 	use crate::syn::{expr, parse};
 
 	#[test]
@@ -317,14 +320,14 @@ mod tests {
 	#[test]
 	fn pretty_value() {
 		let value = expr("{foo: [1, 2, 3]}").unwrap();
-		assert_eq!(format!("{}", value), "{ foo: [1, 2, 3] }");
-		assert_eq!(format!("{:#}", value), "{\n\tfoo: [\n\t\t1,\n\t\t2,\n\t\t3\n\t]\n}");
+		assert_eq!(value.to_sql(), "{ foo: [1, 2, 3] }");
+		assert_eq!(value.to_sql_pretty(), "{\n\tfoo: [\n\t\t1,\n\t\t2,\n\t\t3\n\t]\n}");
 	}
 
 	#[test]
 	fn pretty_array() {
 		let array = expr("[1, 2, 3]").unwrap();
-		assert_eq!(format!("{}", array), "[1, 2, 3]");
-		assert_eq!(format!("{:#}", array), "[\n\t1,\n\t2,\n\t3\n]");
+		assert_eq!(array.to_sql(), "[1, 2, 3]");
+		assert_eq!(array.to_sql_pretty(), "[\n\t1,\n\t2,\n\t3\n]");
 	}
 }

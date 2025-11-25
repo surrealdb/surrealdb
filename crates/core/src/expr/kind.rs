@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashSet};
-use std::fmt::{self, Display, Formatter, Write};
+use std::fmt::Write;
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
@@ -10,7 +10,6 @@ use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
-use crate::fmt::{EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Range, RecordId, Regex, Set,
 	Uuid,
@@ -26,20 +25,6 @@ pub enum GeometryKind {
 	MultiLine,
 	MultiPolygon,
 	Collection,
-}
-
-impl Display for GeometryKind {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			GeometryKind::Point => write!(f, "point"),
-			GeometryKind::Line => write!(f, "line"),
-			GeometryKind::Polygon => write!(f, "polygon"),
-			GeometryKind::MultiPoint => write!(f, "multipoint"),
-			GeometryKind::MultiLine => write!(f, "multiline"),
-			GeometryKind::MultiPolygon => write!(f, "multipolygon"),
-			GeometryKind::Collection => write!(f, "collection"),
-		}
-	}
 }
 
 impl FromStr for GeometryKind {
@@ -439,78 +424,6 @@ impl From<&Kind> for Box<Kind> {
 	}
 }
 
-impl Display for Kind {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		// Convert to sql module type and use its Display implementation
-		let sql_kind: crate::sql::Kind = self.clone().into();
-		fmt::Display::fmt(&sql_kind, f)
-	}
-}
-
-// impl Display for Kind (COMMENTED OUT - using new implementation above) {
-// 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-// 		match self {
-// 			Kind::Any => f.write_str("any"),
-// 			Kind::None => f.write_str("none"),
-// 			Kind::Null => f.write_str("null"),
-// 			Kind::Bool => f.write_str("bool"),
-// 			Kind::Bytes => f.write_str("bytes"),
-// 			Kind::Datetime => f.write_str("datetime"),
-// 			Kind::Decimal => f.write_str("decimal"),
-// 			Kind::Duration => f.write_str("duration"),
-// 			Kind::Float => f.write_str("float"),
-// 			Kind::Int => f.write_str("int"),
-// 			Kind::Number => f.write_str("number"),
-// 			Kind::Object => f.write_str("object"),
-// 			Kind::String => f.write_str("string"),
-// 			Kind::Uuid => f.write_str("uuid"),
-// 			Kind::Regex => f.write_str("regex"),
-// 			Kind::Function(_, _) => f.write_str("function"),
-// 			Kind::Table(k) => {
-// 				if k.is_empty() {
-// 					f.write_str("table")
-// 				} else {
-// 					write!(f, "table<{}>", Fmt::verbar_separated(k))
-// 				}
-// 			}
-// 			Kind::Record(k) => {
-// 				if k.is_empty() {
-// 					f.write_str("record")
-// 				} else {
-// 					write!(f, "record<{}>", Fmt::verbar_separated(k.iter().map(EscapeIdent)))
-// 				}
-// 			}
-// 			Kind::Geometry(k) => {
-// 				if k.is_empty() {
-// 					f.write_str("geometry")
-// 				} else {
-// 					write!(f, "geometry<{}>", Fmt::verbar_separated(k))
-// 				}
-// 			}
-// 			Kind::Set(k, l) => match (k, l) {
-// 				(k, None) if k.is_any() => f.write_str("set"),
-// 				(k, None) => write!(f, "set<{}>", k),
-// 				(k, Some(l)) => write!(f, "set<{}, {}>", k, l),
-// 			},
-// 			Kind::Array(k, l) => match (k, l) {
-// 				(k, None) if k.is_any() => f.write_str("array"),
-// 				(k, None) => write!(f, "array<{}>", k),
-// 				(k, Some(l)) => write!(f, "array<{}, {}>", k, l),
-// 			},
-// 			Kind::Either(k) => write!(f, "{}", Fmt::verbar_separated(k)),
-// 			Kind::Range => f.write_str("range"),
-// 			Kind::Literal(l) => write!(f, "{}", l),
-// 			Kind::File(k) => {
-// 				if k.is_empty() {
-// 					f.write_str("file")
-// 				} else {
-// 					write!(f, "file<{}>", Fmt::verbar_separated(k))
-// 				}
-// 			}
-// 		}
-// 	}
-// }
-
 impl ToSql for Kind {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		let sql_kind: crate::sql::Kind = self.clone().into();
@@ -520,7 +433,7 @@ impl ToSql for Kind {
 
 impl InfoStructure for Kind {
 	fn structure(self) -> Value {
-		self.to_string().into()
+		self.to_sql().into()
 	}
 }
 
@@ -663,6 +576,13 @@ impl From<KindLiteral> for crate::types::PublicKindLiteral {
 			),
 			KindLiteral::Bool(b) => crate::types::PublicKindLiteral::Bool(b),
 		}
+	}
+}
+
+impl ToSql for KindLiteral {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let sql_literal: crate::sql::kind::KindLiteral = self.clone().into();
+		sql_literal.fmt_sql(f, fmt);
 	}
 }
 
@@ -933,89 +853,6 @@ impl KindLiteral {
 			},
 			*/
 			_ => false,
-		}
-	}
-}
-
-impl Display for KindLiteral {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			KindLiteral::String(s) => write!(f, "{}", QuoteStr(s)),
-			KindLiteral::Integer(n) => write!(f, "{}", n),
-			KindLiteral::Float(n) => write!(f, "{}f", n),
-			KindLiteral::Decimal(n) => write!(f, "{}dec", n),
-			KindLiteral::Duration(d) => write!(f, "{}", d),
-			KindLiteral::Bool(b) => write!(f, "{}", b),
-			KindLiteral::Array(a) => {
-				let mut f = Pretty::from(f);
-				f.write_char('[')?;
-				if !a.is_empty() {
-					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(a.as_slice()))?;
-					drop(indent);
-				}
-				f.write_char(']')
-			}
-			KindLiteral::Object(o) => {
-				let mut f = Pretty::from(f);
-				if is_pretty() {
-					f.write_char('{')?;
-				} else {
-					f.write_str("{ ")?;
-				}
-				if !o.is_empty() {
-					let indent = pretty_indent();
-					write!(
-						f,
-						"{}",
-						Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
-							args,
-							|(k, v), f| write!(f, "{}: {}", EscapeKey(k), v)
-						)),)
-					)?;
-					drop(indent);
-				}
-				if is_pretty() {
-					f.write_char('}')
-				} else {
-					f.write_str(" }")
-				}
-			} /*
-			  KindLiteral::DiscriminatedObject(_, discriminants) => {
-				  let mut f = Pretty::from(f);
-
-				  for (i, o) in discriminants.iter().enumerate() {
-					  if i > 0 {
-						  f.write_str(" | ")?;
-					  }
-
-					  if is_pretty() {
-						  f.write_char('{')?;
-					  } else {
-						  f.write_str("{ ")?;
-					  }
-					  if !o.is_empty() {
-						  let indent = pretty_indent();
-						  write!(
-							  f,
-							  "{}",
-							  Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
-								  args,
-								  |(k, v), f| write!(f, "{}: {}", EscapeKey(k), v)
-							  )),)
-						  )?;
-						  drop(indent);
-					  }
-					  if is_pretty() {
-						  f.write_char('}')?;
-					  } else {
-						  f.write_str(" }")?;
-					  }
-				  }
-
-				  Ok(())
-			  }
-			  */
 		}
 	}
 }

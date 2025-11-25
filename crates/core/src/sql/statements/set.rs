@@ -12,13 +12,12 @@ pub struct SetStatement {
 }
 
 impl ToSql for SetStatement {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		write_sql!(f, "LET ${}", EscapeIdent(&self.name));
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "LET ${}", EscapeIdent(&self.name));
 		if let Some(ref kind) = self.kind {
-			write_sql!(f, ": {}", kind);
+			write_sql!(f, sql_fmt, ": {}", kind);
 		}
-		f.push_str(" = ");
-		self.what.fmt_sql(f, fmt);
+		write_sql!(f, sql_fmt, " = {}", self.what);
 	}
 }
 

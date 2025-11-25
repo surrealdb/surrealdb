@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::field::Fields;
 
@@ -14,16 +14,15 @@ pub(crate) enum Output {
 	Fields(Fields),
 }
 
-impl Display for Output {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str("RETURN ")?;
+impl ToSql for Output {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::None => f.write_str("NONE"),
-			Self::Null => f.write_str("NULL"),
-			Self::Diff => f.write_str("DIFF"),
-			Self::After => f.write_str("AFTER"),
-			Self::Before => f.write_str("BEFORE"),
-			Self::Fields(v) => Display::fmt(v, f),
+			Self::None => write_sql!(f, fmt, "RETURN NONE"),
+			Self::Null => write_sql!(f, fmt, "RETURN NULL"),
+			Self::Diff => write_sql!(f, fmt, "RETURN DIFF"),
+			Self::After => write_sql!(f, fmt, "RETURN AFTER"),
+			Self::Before => write_sql!(f, fmt, "RETURN BEFORE"),
+			Self::Fields(v) => write_sql!(f, fmt, "RETURN {}", v),
 		}
 	}
 }

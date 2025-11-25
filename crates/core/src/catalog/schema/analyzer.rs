@@ -48,7 +48,7 @@ impl InfoStructure for AnalyzerDefinition {
 			"tokenizers".to_string(), if let Some(v) = self.tokenizers =>
 				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),
 			"filters".to_string(), if let Some(v) = self.filters =>
-				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),
+				v.into_iter().map(|v| v.to_sql().into()).collect::<Array>().into(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})
 	}

@@ -1,6 +1,7 @@
 use js::class::Trace;
 use js::prelude::{Coerced, Opt};
 use js::{Array, Ctx, Exception, FromJs, JsLifetime, Result, Value};
+use surrealdb_types::ToSql;
 
 use crate::dbs::Variables;
 use crate::expr::Expr;
@@ -108,7 +109,7 @@ impl Query {
 
 	#[qjs(rename = "toString")]
 	pub fn js_to_string(&self) -> String {
-		format!("{}", self.query)
+		self.query.to_sql()
 	}
 
 	pub fn bind(&mut self, key: Coerced<String>, value: SurValue) {

@@ -37,14 +37,14 @@ impl Default for DefineTableStatement {
 }
 
 impl ToSql for DefineTableStatement {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		f.push_str("DEFINE TABLE");
 		match self.kind {
 			DefineKind::Default => {}
 			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
 			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
-		write_sql!(f, " {}", self.name);
+		write_sql!(f, sql_fmt, " {}", self.name);
 		f.push_str(" TYPE");
 		match &self.table_type {
 			TableType::Normal => f.push_str(" NORMAL"),
@@ -56,7 +56,7 @@ impl ToSql for DefineTableStatement {
 						if idx != 0 {
 							f.push_str(" | ");
 						}
-						write_sql!(f, "{}", k);
+						write_sql!(f, sql_fmt, "{}", k);
 					}
 				}
 				if let Some(Kind::Record(kind)) = &rel.to {
@@ -65,7 +65,7 @@ impl ToSql for DefineTableStatement {
 						if idx != 0 {
 							f.push_str(" | ");
 						}
-						write_sql!(f, "{}", k);
+						write_sql!(f, sql_fmt, "{}", k);
 					}
 				}
 				if rel.enforced {
@@ -83,25 +83,22 @@ impl ToSql for DefineTableStatement {
 			" SCHEMALESS"
 		});
 		if let Some(ref comment) = self.comment {
-			f.push_str(" COMMENT ");
-			comment.fmt_sql(f, fmt);
+			write_sql!(f, sql_fmt, " COMMENT {}", comment);
 		}
 		if let Some(ref v) = self.view {
-			f.push(' ');
-			v.fmt_sql(f, fmt);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 		if let Some(ref v) = self.changefeed {
-			f.push(' ');
-			v.fmt_sql(f, fmt);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
-		if fmt.is_pretty() {
+		if sql_fmt.is_pretty() {
 			f.push('\n');
-			let inner_fmt = fmt.increment();
+			let inner_fmt = sql_fmt.increment();
 			inner_fmt.write_indent(f);
 		} else {
 			f.push(' ');
 		}
-		self.permissions.fmt_sql(f, fmt);
+		write_sql!(f, sql_fmt, " {}", self.permissions);
 	}
 }
 

@@ -1,5 +1,3 @@
-use std::fmt::{self};
-
 use anyhow::{Result, bail};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
@@ -377,12 +375,5 @@ impl ToSql for DefineAccessStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		let sql_stmt: crate::sql::statements::define::DefineAccessStatement = self.clone().into();
 		sql_stmt.fmt_sql(f, fmt);
-	}
-}
-
-impl fmt::Display for DefineAccessStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use surrealdb_types::ToSql;
-		write!(f, "{}", self.to_sql())
 	}
 }

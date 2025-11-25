@@ -1,6 +1,5 @@
-use std::fmt;
-
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -50,23 +49,9 @@ impl IfelseStatement {
 	}
 }
 
-impl fmt::Display for IfelseStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		// Convert to sql module type and use its Display implementation
+impl ToSql for IfelseStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		let sql_stmt: crate::sql::statements::IfelseStatement = self.clone().into();
-		fmt::Display::fmt(&sql_stmt, f)
-	}
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests {
-	use crate::syn;
-
-	#[test]
-	fn format_pretty() {
-		let query = syn::expr("IF 1 { 1 } ELSE IF 2 { 2 }").unwrap();
-		assert_eq!(format!("{}", query), "IF 1 { 1 } ELSE IF 2 { 2 }");
-		assert_eq!(format!("{:#}", query), "IF 1\n\t{ 1 }\nELSE IF 2\n\t{ 2 }");
+		sql_stmt.fmt_sql(f, fmt);
 	}
 }

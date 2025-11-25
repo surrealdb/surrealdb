@@ -16,7 +16,7 @@ pub struct DeleteStatement {
 }
 
 impl ToSql for DeleteStatement {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		f.push_str("DELETE");
 		if self.only {
 			f.push_str(" ONLY");
@@ -26,25 +26,25 @@ impl ToSql for DeleteStatement {
 			if i > 0 {
 				f.push_str(", ");
 			}
-			expr.fmt_sql(f, fmt);
+			expr.fmt_sql(f, sql_fmt);
 		}
 		if let Some(ref v) = self.with {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 		if let Some(ref v) = self.cond {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 		if let Some(ref v) = self.output {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 		if let Some(ref v) = self.timeout {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 		if self.parallel {
 			f.push_str(" PARALLEL");
 		}
 		if let Some(ref v) = self.explain {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 	}
 }

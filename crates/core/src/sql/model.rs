@@ -1,4 +1,4 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -7,9 +7,9 @@ pub struct Model {
 	pub version: String,
 }
 
-impl fmt::Display for Model {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ml::{}<{}>", self.name, self.version)
+impl ToSql for Model {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "ml::{}<{}>", self.name, self.version)
 	}
 }
 

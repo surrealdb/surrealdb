@@ -1,5 +1,6 @@
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
@@ -68,7 +69,7 @@ impl InsertStatement {
 					Value::Table(into) => Some(into),
 					v => {
 						bail!(Error::InsertStatement {
-							value: v.to_string(),
+							value: v.to_sql(),
 						})
 					}
 				}
@@ -114,7 +115,7 @@ impl InsertStatement {
 					}
 					v => {
 						bail!(Error::InsertStatement {
-							value: v.to_string(),
+							value: v.to_sql(),
 						})
 					}
 				}
@@ -145,7 +146,7 @@ fn iterable(tb: String, id: Option<RecordIdKey>, v: Value, relation: bool) -> Re
 			Value::RecordId(v) => v,
 			v => {
 				bail!(Error::InsertStatementIn {
-					value: v.to_string(),
+					value: v.to_sql(),
 				})
 			}
 		};
@@ -153,7 +154,7 @@ fn iterable(tb: String, id: Option<RecordIdKey>, v: Value, relation: bool) -> Re
 			Value::RecordId(v) => v,
 			v => {
 				bail!(Error::InsertStatementOut {
-					value: v.to_string(),
+					value: v.to_sql(),
 				})
 			}
 		};
@@ -186,7 +187,7 @@ fn extract_tb_id(v: &Value, into: &Option<Table>) -> Result<(String, Option<Reco
 			// Any other value cannot be converted to a record id key
 			v => {
 				bail!(Error::InsertStatementId {
-					value: v.to_string(),
+					value: v.to_sql(),
 				});
 			}
 		};
@@ -197,7 +198,7 @@ fn extract_tb_id(v: &Value, into: &Option<Table>) -> Result<(String, Option<Reco
 			Ok((rid.table, Some(rid.key)))
 		} else {
 			bail!(Error::InsertStatementId {
-				value: v.to_string(),
+				value: v.to_sql(),
 			});
 		}
 	}

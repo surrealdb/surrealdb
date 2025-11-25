@@ -1,9 +1,8 @@
-use std::fmt::{self, Display, Write};
+use std::fmt::Write;
 
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::fmt::{is_pretty, pretty_indent};
 use crate::sql::reference::Reference;
 use crate::sql::{Expr, Kind, Literal, Permissions};
 
@@ -82,67 +81,8 @@ impl Default for DefineFieldStatement {
 	}
 }
 
-impl Display for DefineFieldStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE FIELD")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {} ON {}", self.name, self.what)?;
-		if let Some(ref v) = self.field_kind {
-			write!(f, " TYPE {v}")?;
-			if self.flexible {
-				write!(f, " FLEXIBLE")?;
-			}
-		}
-
-		match self.default {
-			DefineDefault::None => {}
-			DefineDefault::Always(ref expr) => {
-				write!(f, " DEFAULT ALWAYS {expr}")?;
-			}
-			DefineDefault::Set(ref expr) => {
-				write!(f, " DEFAULT {expr}")?;
-			}
-		}
-
-		if self.readonly {
-			write!(f, " READONLY")?
-		}
-		if let Some(ref v) = self.value {
-			write!(f, " VALUE {v}")?
-		}
-		if let Some(ref v) = self.assert {
-			write!(f, " ASSERT {v}")?
-		}
-		if let Some(ref v) = self.computed {
-			write!(f, " COMPUTED {v}")?
-		}
-		if let Some(ref v) = self.reference {
-			write!(f, " REFERENCE {v}")?
-		}
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
-		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
-		// Alternate permissions display implementation ignores delete permission
-		// This display is used to show field permissions, where delete has no effect
-		// Displaying the permission could mislead users into thinking it has an effect
-		// Additionally, including the permission will cause a parsing error in 3.0.0
-		write!(f, "{:#}", self.permissions)?;
-		Ok(())
-	}
-}
-
 impl ToSql for DefineFieldStatement {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		use surrealdb_types::write_sql;
 		f.push_str("DEFINE FIELD");
 		match self.kind {
@@ -150,9 +90,9 @@ impl ToSql for DefineFieldStatement {
 			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
 			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
-		write_sql!(f, " {} ON {}", self.name, self.what);
+		write_sql!(f, sql_fmt, " {} ON {}", self.name, self.what);
 		if let Some(ref v) = self.field_kind {
-			write_sql!(f, " TYPE {}", v);
+			write_sql!(f, sql_fmt, " TYPE {}", v);
 			if self.flexible {
 				f.push_str(" FLEXIBLE");
 			}
@@ -161,12 +101,10 @@ impl ToSql for DefineFieldStatement {
 		match self.default {
 			DefineDefault::None => {}
 			DefineDefault::Always(ref expr) => {
-				f.push_str(" DEFAULT ALWAYS ");
-				expr.fmt_sql(f, fmt);
+				write_sql!(f, sql_fmt, " DEFAULT ALWAYS {expr}");
 			}
 			DefineDefault::Set(ref expr) => {
-				f.push_str(" DEFAULT ");
-				expr.fmt_sql(f, fmt);
+				write_sql!(f, sql_fmt, " DEFAULT {expr}");
 			}
 		}
 
@@ -174,34 +112,28 @@ impl ToSql for DefineFieldStatement {
 			f.push_str(" READONLY");
 		}
 		if let Some(ref v) = self.value {
-			f.push_str(" VALUE ");
-			v.fmt_sql(f, fmt);
+			write_sql!(f, sql_fmt, " VALUE {v}");
 		}
 		if let Some(ref v) = self.assert {
-			f.push_str(" ASSERT ");
-			v.fmt_sql(f, fmt);
+			write_sql!(f, sql_fmt, " ASSERT {v}");
 		}
 		if let Some(ref v) = self.computed {
-			f.push_str(" COMPUTED ");
-			v.fmt_sql(f, fmt);
+			write_sql!(f, sql_fmt, " COMPUTED {v}");
 		}
 		if let Some(ref v) = self.reference {
-			f.push_str(" REFERENCE ");
-			v.fmt_sql(f, fmt);
+			write_sql!(f, sql_fmt, " REFERENCE {v}");
 		}
 		if let Some(ref v) = self.comment {
-			f.push_str(" COMMENT ");
-			v.fmt_sql(f, fmt);
+			write_sql!(f, sql_fmt, " COMMENT {v}");
 		}
-		if fmt.is_pretty() {
+		if sql_fmt.is_pretty() {
 			f.push('\n');
-			fmt.write_indent(f);
+			sql_fmt.write_indent(f);
 		} else {
 			f.push(' ');
 		}
-		// Special handling for field permissions - uses alternate format to skip delete
-		// which has no effect for field permissions
-		write_sql!(f, "{:#}", self.permissions);
+
+		self.permissions.fmt_sql(f, sql_fmt);
 	}
 }
 

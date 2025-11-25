@@ -30,27 +30,27 @@ impl Default for DefineAnalyzerStatement {
 }
 
 impl ToSql for DefineAnalyzerStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "DEFINE ANALYZER");
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "DEFINE ANALYZER");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write_sql!(f, " IF NOT EXISTS"),
-			DefineKind::IfNotExists => write_sql!(f, " OVERWRITE"),
+			DefineKind::Overwrite => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
+			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " OVERWRITE"),
 		}
-		write_sql!(f, " {}", self.name);
+		write_sql!(f, sql_fmt, " {}", self.name);
 		if let Some(ref i) = self.function {
-			write_sql!(f, " FUNCTION fn::{i}");
+			write_sql!(f, sql_fmt, " FUNCTION fn::{i}");
 		}
 		if let Some(v) = &self.tokenizers {
-			let tokens: Vec<String> = v.iter().map(|f| f.to_string()).collect();
-			write_sql!(f, " TOKENIZERS {}", tokens.join(","));
+			let tokens: Vec<String> = v.iter().map(|f| f.to_sql()).collect();
+			write_sql!(f, sql_fmt, " TOKENIZERS {}", tokens.join(","));
 		}
 		if let Some(v) = &self.filters {
-			let tokens: Vec<String> = v.iter().map(|f| f.to_string()).collect();
-			write_sql!(f, " FILTERS {}", tokens.join(","));
+			let tokens: Vec<String> = v.iter().map(|f| f.to_sql()).collect();
+			write_sql!(f, sql_fmt, " FILTERS {}", tokens.join(","));
 		}
 		if let Some(ref v) = self.comment {
-			write_sql!(f, " COMMENT {}", v);
+			write_sql!(f, sql_fmt, " COMMENT {}", v);
 		}
 	}
 }

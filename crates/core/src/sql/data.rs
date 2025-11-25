@@ -1,8 +1,5 @@
-use std::fmt::{self, Display, Formatter};
-
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::Fmt;
 use crate::sql::{AssignOperator, Expr, Idiom};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -49,56 +46,8 @@ impl From<crate::expr::data::Assignment> for Assignment {
 	}
 }
 
-impl Display for Data {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			Self::EmptyExpression => Ok(()),
-			Self::SetExpression(v) => write!(
-				f,
-				"SET {}",
-				Fmt::comma_separated(v.iter().map(|args| Fmt::new(args, |arg, f| write!(
-					f,
-					"{} {} {}",
-					arg.place, arg.operator, arg.value
-				))))
-			),
-			Self::UnsetExpression(v) => write!(
-				f,
-				"UNSET {}",
-				Fmt::comma_separated(v.iter().map(|args| Fmt::new(args, |l, f| write!(f, "{l}",))))
-			),
-			Self::PatchExpression(v) => write!(f, "PATCH {v}"),
-			Self::MergeExpression(v) => write!(f, "MERGE {v}"),
-			Self::ReplaceExpression(v) => write!(f, "REPLACE {v}"),
-			Self::ContentExpression(v) => write!(f, "CONTENT {v}"),
-			Self::SingleExpression(v) => Display::fmt(v, f),
-			Self::ValuesExpression(v) => write!(
-				f,
-				"({}) VALUES {}",
-				Fmt::comma_separated(
-					v.first().expect("values expression is non-empty").iter().map(|(v, _)| v)
-				),
-				Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| write!(
-					f,
-					"({})",
-					Fmt::comma_separated(v.iter().map(|(_, v)| v))
-				))))
-			),
-			Self::UpdateExpression(v) => write!(
-				f,
-				"ON DUPLICATE KEY UPDATE {}",
-				Fmt::comma_separated(v.iter().map(|args| Fmt::new(args, |arg, f| write!(
-					f,
-					"{} {} {}",
-					arg.place, arg.operator, arg.value
-				))))
-			),
-		}
-	}
-}
-
 impl ToSql for Data {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
 			Self::EmptyExpression => {}
 			Self::SetExpression(v) => {
@@ -107,8 +56,8 @@ impl ToSql for Data {
 					if i > 0 {
 						f.push_str(", ");
 					}
-					write_sql!(f, "{} {} ", arg.place, arg.operator);
-					arg.value.fmt_sql(f, fmt);
+					write_sql!(f, sql_fmt, "{} {} ", arg.place, arg.operator);
+					arg.value.fmt_sql(f, sql_fmt);
 				}
 			}
 			Self::UnsetExpression(v) => {
@@ -117,26 +66,22 @@ impl ToSql for Data {
 					if i > 0 {
 						f.push_str(", ");
 					}
-					write_sql!(f, "{}", idiom);
+					write_sql!(f, sql_fmt, "{}", idiom);
 				}
 			}
 			Self::PatchExpression(v) => {
-				f.push_str("PATCH ");
-				v.fmt_sql(f, fmt);
+				write_sql!(f, sql_fmt, "PATCH {v}");
 			}
 			Self::MergeExpression(v) => {
-				f.push_str("MERGE ");
-				v.fmt_sql(f, fmt);
+				write_sql!(f, sql_fmt, "MERGE {v}");
 			}
 			Self::ReplaceExpression(v) => {
-				f.push_str("REPLACE ");
-				v.fmt_sql(f, fmt);
+				write_sql!(f, sql_fmt, "REPLACE {v}");
 			}
 			Self::ContentExpression(v) => {
-				f.push_str("CONTENT ");
-				v.fmt_sql(f, fmt);
+				write_sql!(f, sql_fmt, "CONTENT {v}");
 			}
-			Self::SingleExpression(v) => v.fmt_sql(f, fmt),
+			Self::SingleExpression(v) => v.fmt_sql(f, sql_fmt),
 			Self::ValuesExpression(v) => {
 				f.push('(');
 				if let Some(first) = v.first() {
@@ -144,7 +89,7 @@ impl ToSql for Data {
 						if i > 0 {
 							f.push_str(", ");
 						}
-						write_sql!(f, "{}", idiom);
+						write_sql!(f, sql_fmt, "{idiom}");
 					}
 				}
 				f.push_str(") VALUES ");
@@ -157,7 +102,7 @@ impl ToSql for Data {
 						if j > 0 {
 							f.push_str(", ");
 						}
-						expr.fmt_sql(f, fmt);
+						expr.fmt_sql(f, sql_fmt);
 					}
 					f.push(')');
 				}
@@ -167,8 +112,8 @@ impl ToSql for Data {
 					if i > 0 {
 						f.push_str(", ");
 					}
-					write_sql!(f, "{} {} ", arg.place, arg.operator);
-					arg.value.fmt_sql(f, fmt);
+					write_sql!(f, sql_fmt, "{} {} ", arg.place, arg.operator);
+					arg.value.fmt_sql(f, sql_fmt);
 				}
 			}
 		}

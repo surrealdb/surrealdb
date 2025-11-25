@@ -124,3 +124,39 @@ impl fmt::Display for EscapeRid<'_> {
 		f.write_str(s)
 	}
 }
+
+// ToSql implementations for escape types
+impl surrealdb_types::ToSql for QuoteStr<'_> {
+	fn fmt_sql(&self, f: &mut String, _fmt: surrealdb_types::SqlFormat) {
+		use std::fmt::Write;
+		write!(f, "{}", self).expect("Write cannot fail when writing to a String")
+	}
+}
+
+impl<T: AsRef<str>> surrealdb_types::ToSql for EscapeIdent<T> {
+	fn fmt_sql(&self, f: &mut String, _fmt: surrealdb_types::SqlFormat) {
+		use std::fmt::Write;
+		write!(f, "{}", self).expect("Write cannot fail when writing to a String")
+	}
+}
+
+impl surrealdb_types::ToSql for EscapeKwFreeIdent<'_> {
+	fn fmt_sql(&self, f: &mut String, _fmt: surrealdb_types::SqlFormat) {
+		use std::fmt::Write;
+		write!(f, "{}", self).expect("Write cannot fail when writing to a String")
+	}
+}
+
+impl surrealdb_types::ToSql for EscapeKey<'_> {
+	fn fmt_sql(&self, f: &mut String, _fmt: surrealdb_types::SqlFormat) {
+		use std::fmt::Write;
+		write!(f, "{}", self).expect("Write cannot fail when writing to a String")
+	}
+}
+
+impl surrealdb_types::ToSql for EscapeRid<'_> {
+	fn fmt_sql(&self, f: &mut String, _fmt: surrealdb_types::SqlFormat) {
+		use std::fmt::Write;
+		write!(f, "{}", self).expect("Write cannot fail when writing to a String")
+	}
+}

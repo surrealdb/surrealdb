@@ -1,5 +1,4 @@
 use std::cmp::Ordering;
-use std::fmt;
 use std::ops::Bound;
 
 use nanoid::nanoid;
@@ -60,20 +59,19 @@ impl Ord for RecordIdKeyRange {
 	}
 }
 
-impl fmt::Display for RecordIdKeyRange {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for RecordIdKeyRange {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self.start {
 			Bound::Unbounded => {}
-			Bound::Included(ref x) => write!(f, "{x}")?,
-			Bound::Excluded(ref x) => write!(f, "{x}>")?,
+			Bound::Included(ref x) => write_sql!(f, sql_fmt, "{x}"),
+			Bound::Excluded(ref x) => write_sql!(f, sql_fmt, "{x}>"),
 		}
-		write!(f, "..")?;
+		write_sql!(f, sql_fmt, "..");
 		match self.end {
 			Bound::Unbounded => {}
-			Bound::Included(ref x) => write!(f, "={x}")?,
-			Bound::Excluded(ref x) => write!(f, "{x}")?,
+			Bound::Included(ref x) => write_sql!(f, sql_fmt, "={x}"),
+			Bound::Excluded(ref x) => write_sql!(f, sql_fmt, "{x}"),
 		}
-		Ok(())
 	}
 }
 
@@ -376,15 +374,15 @@ impl PartialEq<Value> for RecordIdKey {
 	}
 }
 
-impl fmt::Display for RecordIdKey {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl ToSql for RecordIdKey {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
-			RecordIdKey::Number(n) => write!(f, "{n}"),
-			RecordIdKey::String(v) => EscapeRid(v).fmt(f),
-			RecordIdKey::Uuid(uuid) => uuid.fmt(f),
-			RecordIdKey::Object(object) => object.fmt(f),
-			RecordIdKey::Array(array) => array.fmt(f),
-			RecordIdKey::Range(rid) => rid.fmt(f),
+			RecordIdKey::Number(n) => write_sql!(f, sql_fmt, "{n}"),
+			RecordIdKey::String(v) => write_sql!(f, sql_fmt, "{}", EscapeRid(v)),
+			RecordIdKey::Uuid(uuid) => write_sql!(f, sql_fmt, "{}", uuid),
+			RecordIdKey::Object(object) => write_sql!(f, sql_fmt, "{}", object),
+			RecordIdKey::Array(array) => write_sql!(f, sql_fmt, "{}", array),
+			RecordIdKey::Range(rid) => write_sql!(f, sql_fmt, "{}", rid),
 		}
 	}
 }
@@ -455,12 +453,6 @@ impl RecordId {
 	}
 }
 
-impl fmt::Display for RecordId {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}:{}", EscapeRid(&self.table), self.key)
-	}
-}
-
 impl TryFrom<RecordId> for crate::types::PublicRecordId {
 	type Error = anyhow::Error;
 
@@ -482,7 +474,7 @@ impl From<crate::types::PublicRecordId> for RecordId {
 }
 
 impl ToSql for RecordId {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "{}:{}", EscapeRid(&self.table), self.key)
 	}
 }

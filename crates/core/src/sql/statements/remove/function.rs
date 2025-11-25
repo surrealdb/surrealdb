@@ -8,12 +8,12 @@ pub struct RemoveFunctionStatement {
 }
 
 impl ToSql for RemoveFunctionStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "REMOVE FUNCTION");
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "REMOVE FUNCTION");
 		if self.if_exists {
-			write_sql!(f, " IF EXISTS");
+			write_sql!(f, sql_fmt, " IF EXISTS");
 		}
-		write_sql!(f, " fn::{}", self.name);
+		write_sql!(f, sql_fmt, " fn::{}", self.name);
 	}
 }
 

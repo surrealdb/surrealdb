@@ -11,11 +11,10 @@ pub struct OutputStatement {
 }
 
 impl ToSql for OutputStatement {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		f.push_str("RETURN ");
-		self.what.fmt_sql(f, fmt);
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "RETURN {}", self.what);
 		if let Some(ref v) = self.fetch {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 	}
 }

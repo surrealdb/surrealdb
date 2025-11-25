@@ -15,23 +15,23 @@ pub(crate) struct DefineParamStatement {
 }
 
 impl ToSql for DefineParamStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "DEFINE PARAM");
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "DEFINE PARAM");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write_sql!(f, " OVERWRITE"),
-			DefineKind::IfNotExists => write_sql!(f, " IF NOT EXISTS"),
+			DefineKind::Overwrite => write_sql!(f, sql_fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
 		}
-		write_sql!(f, " ${} VALUE {}", EscapeIdent(&self.name), self.value);
+		write_sql!(f, sql_fmt, " ${} VALUE {}", EscapeIdent(&self.name), self.value);
 		if let Some(ref v) = self.comment {
-			write_sql!(f, " COMMENT {}", v);
+			write_sql!(f, sql_fmt, " COMMENT {}", v);
 		}
 		if is_pretty() {
 			let _indent = pretty_indent();
 		} else {
 			f.push(' ');
 		}
-		write_sql!(f, "PERMISSIONS {}", self.permissions);
+		write_sql!(f, sql_fmt, "PERMISSIONS {}", self.permissions);
 	}
 }
 

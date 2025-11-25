@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::Record;
 use crate::catalog::providers::TableProvider;
@@ -346,7 +347,7 @@ impl Iterator {
 					..Default::default()
 				}),
 			])
-			.to_string();
+			.to_sql();
 			bail!(Error::InvalidStatementTarget {
 				value,
 			})
@@ -378,7 +379,7 @@ impl Iterator {
 		ensure!(
 			!ctx.stm.is_create(),
 			Error::InvalidStatementTarget {
-				value: v.to_string(),
+				value: v.to_sql(),
 			}
 		);
 		// Evaluate if we can only scan keys (rather than keys AND values), or count
@@ -417,7 +418,7 @@ impl Iterator {
 						v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 						v => {
 							bail!(Error::InvalidStatementTarget {
-								value: v.to_string(),
+								value: v.to_sql(),
 							})
 						}
 					}
@@ -426,7 +427,7 @@ impl Iterator {
 			v if stm_ctx.stm.is_select() => self.ingest(Iterable::Value(v)),
 			v => {
 				bail!(Error::InvalidStatementTarget {
-					value: v.to_string(),
+					value: v.to_sql(),
 				})
 			}
 		}

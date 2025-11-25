@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::{Expr, Permission};
@@ -12,7 +10,7 @@ pub(crate) struct ApiConfig {
 }
 
 impl ToSql for ApiConfig {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		if !self.middleware.is_empty() {
 			f.push_str(" MIDDLEWARE ");
 			let middleware_strs: Vec<String> = self
@@ -27,14 +25,7 @@ impl ToSql for ApiConfig {
 			f.push_str(&middleware_strs.join(", "));
 		}
 
-		write_sql!(f, " PERMISSIONS {}", self.permissions);
-	}
-}
-
-impl Display for ApiConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use surrealdb_types::ToSql;
-		write!(f, "{}", self.to_sql())
+		write_sql!(f, sql_fmt, " PERMISSIONS {}", self.permissions);
 	}
 }
 

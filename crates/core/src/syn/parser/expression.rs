@@ -1,6 +1,7 @@
 //! This module defines the pratt parser for operators.
 
 use reblessive::Stk;
+use surrealdb_types::ToSql;
 
 use super::enter_query_recursion;
 use super::mac::unexpected;
@@ -683,7 +684,7 @@ impl Parser<'_> {
 			return Ok(());
 		};
 		bail!("Parameter declarations without `let` are deprecated.",
-			@span => "Replace with `let {} = ...` to keep the previous behavior.", p)
+			@span => "Replace with `let {} = ...` to keep the previous behavior.", p.to_sql())
 	}
 }
 

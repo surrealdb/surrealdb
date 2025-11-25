@@ -22,7 +22,7 @@ pub struct CreateStatement {
 }
 
 impl ToSql for CreateStatement {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		f.push_str("CREATE");
 		if self.only {
 			f.push_str(" ONLY");
@@ -32,21 +32,20 @@ impl ToSql for CreateStatement {
 			if i > 0 {
 				f.push_str(", ");
 			}
-			expr.fmt_sql(f, fmt);
+			expr.fmt_sql(f, sql_fmt);
 		}
 		if let Some(ref v) = self.data {
 			f.push(' ');
-			v.fmt_sql(f, fmt);
+			v.fmt_sql(f, sql_fmt);
 		}
 		if let Some(ref v) = self.output {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 		if let Some(ref v) = self.version {
-			f.push_str(" VERSION ");
-			v.fmt_sql(f, fmt);
+			write_sql!(f, sql_fmt, "VERSION {v}");
 		}
 		if let Some(ref v) = self.timeout {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {v}");
 		}
 		if self.parallel {
 			f.push_str(" PARALLEL");

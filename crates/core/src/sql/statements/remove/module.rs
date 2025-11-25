@@ -10,12 +10,12 @@ pub struct RemoveModuleStatement {
 }
 
 impl ToSql for RemoveModuleStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		write_sql!(f, "REMOVE MODULE");
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "REMOVE MODULE");
 		if self.if_exists {
-			write_sql!(f, " IF EXISTS");
+			write_sql!(f, sql_fmt, " IF EXISTS");
 		}
-		write_sql!(f, " {}", self.name);
+		write_sql!(f, sql_fmt, " {}", self.name);
 	}
 }
 

@@ -50,13 +50,13 @@ impl InfoStructure for FunctionDefinition {
 			"name".to_string() => self.name.into(),
 			"args".to_string() => self.args
 				.into_iter()
-				.map(|(n, k)| vec![n.into(), k.to_string().into()].into())
+				.map(|(n, k)| vec![n.into(), k.to_sql().into()].into())
 				.collect::<Vec<Value>>()
 				.into(),
-			"block".to_string() => self.block.to_string().into(),
+			"block".to_string() => self.block.to_sql().into(),
 			"permissions".to_string() => self.permissions.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.to_sql().into(),
-			"returns".to_string(), if let Some(v) = self.returns => v.to_string().into(),
+			"returns".to_string(), if let Some(v) = self.returns => v.to_sql().into(),
 		})
 	}
 }

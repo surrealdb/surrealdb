@@ -247,7 +247,7 @@ impl InfoStatement {
 						"configs".to_string() => {
 							let mut out = Object::default();
 							for v in txn.all_db_configs(ns, db).await?.iter() {
-								out.insert(v.name(), v.to_string().into());
+								out.insert(v.name(), v.to_sql().into());
 							}
 							out.into()
 						},

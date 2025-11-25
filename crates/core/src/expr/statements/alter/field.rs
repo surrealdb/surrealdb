@@ -2,6 +2,7 @@ use std::ops::Deref;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 use uuid::Uuid;
 
 use super::AlterKind;
@@ -57,7 +58,7 @@ impl AlterFieldStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the table definition
-		let name = self.name.to_string();
+		let name = self.name.to_sql();
 		let mut df = match txn.get_tb_field(ns, db, &self.what, &name).await? {
 			Some(tb) => tb.deref().clone(),
 			None => {

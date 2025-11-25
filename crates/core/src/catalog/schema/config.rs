@@ -2,6 +2,7 @@ use std::fmt::{self, Display};
 
 use anyhow::Result;
 use revision::revisioned;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::ApiConfigDefinition;
 use crate::expr::statements::info::InfoStructure;
@@ -32,30 +33,27 @@ impl ConfigDefinition {
 	pub fn try_into_graphql(self) -> Result<GraphQLConfig> {
 		match self {
 			ConfigDefinition::GraphQL(g) => Ok(g),
-			c => fail!("found {c} when a graphql config was expected"),
+			c => fail!("found {} when a graphql config was expected", c.to_sql()),
 		}
 	}
 
 	pub fn try_as_api(&self) -> Result<&ApiConfigDefinition> {
 		match self {
 			ConfigDefinition::Api(a) => Ok(a),
-			c => fail!("found {c} when a api config was expected"),
+			c => fail!("found {} when a api config was expected", c.to_sql()),
 		}
 	}
 }
 
-impl Display for ConfigDefinition {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		use surrealdb_types::ToSql;
+impl ToSql for ConfigDefinition {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match &self {
 			ConfigDefinition::GraphQL(v) => {
 				let sql_config: crate::sql::statements::define::config::GraphQLConfig =
 					v.clone().into();
-				write!(f, "{}", sql_config.to_sql())
+				sql_config.fmt_sql(f, fmt)
 			}
-			ConfigDefinition::Api(v) => {
-				write!(f, "{}", v)
-			}
+			ConfigDefinition::Api(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }

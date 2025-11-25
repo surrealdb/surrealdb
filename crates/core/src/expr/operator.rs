@@ -1,8 +1,7 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::catalog::Distance;
 use crate::expr::{Expr, Kind};
-use crate::fmt::Fmt;
 use crate::idx::ft::MatchRef;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -20,16 +19,10 @@ pub enum PrefixOperator {
 	Cast(Kind),
 }
 
-impl fmt::Display for PrefixOperator {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::Not => write!(f, "!"),
-			Self::Positive => write!(f, "+"),
-			Self::Negate => write!(f, "-"),
-			Self::Range => write!(f, ".."),
-			Self::RangeInclusive => write!(f, "..="),
-			Self::Cast(kind) => write!(f, "<{kind}> "),
-		}
+impl ToSql for PrefixOperator {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let prefix_operator: crate::sql::PrefixOperator = self.clone().into();
+		prefix_operator.fmt_sql(f, sql_fmt);
 	}
 }
 
@@ -42,18 +35,10 @@ pub(crate) enum PostfixOperator {
 	Call(Vec<Expr>),
 }
 
-impl fmt::Display for PostfixOperator {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::Range => write!(f, ".."),
-			Self::RangeSkip => write!(f, ">.."),
-			Self::MethodCall(name, expr) => {
-				write!(f, ".{name}({})", Fmt::comma_separated(expr.iter()))
-			}
-			Self::Call(expr) => {
-				write!(f, "({})", Fmt::comma_separated(expr.iter()))
-			}
-		}
+impl ToSql for PostfixOperator {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let postfix_operator: crate::sql::PostfixOperator = self.clone().into();
+		postfix_operator.fmt_sql(f, sql_fmt);
 	}
 }
 
@@ -147,18 +132,18 @@ pub(crate) struct MatchesOperator {
 	pub operator: BooleanOperator,
 }
 
-impl fmt::Display for MatchesOperator {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for MatchesOperator {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		if let Some(r) = self.rf {
 			if self.operator != BooleanOperator::And {
-				write!(f, "@{r},{}@", self.operator)
+				write_sql!(f, sql_fmt, "@{r},{}@", self.operator)
 			} else {
-				write!(f, "@{r}@")
+				write_sql!(f, sql_fmt, "@{r}@")
 			}
 		} else if self.operator != BooleanOperator::And {
-			write!(f, "@{}@", self.operator)
+			write_sql!(f, sql_fmt, "@{}@", self.operator)
 		} else {
-			f.write_str("@@")
+			write_sql!(f, sql_fmt, "@@")
 		}
 	}
 }
@@ -171,11 +156,11 @@ pub enum BooleanOperator {
 	Or,
 }
 
-impl fmt::Display for BooleanOperator {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for BooleanOperator {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
-			Self::And => f.write_str("AND"),
-			Self::Or => f.write_str("OR"),
+			Self::And => f.push_str("AND"),
+			Self::Or => f.push_str("OR"),
 		}
 	}
 }
@@ -190,63 +175,17 @@ pub(crate) enum NearestNeighbor {
 	Approximate(u32, u32),
 }
 
-impl fmt::Display for NearestNeighbor {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			NearestNeighbor::KTree(k) => {
-				write!(f, "<|{k}|>")
-			}
-			NearestNeighbor::K(k, distance) => {
-				write!(f, "<|{k},{distance}|>")
-			}
-			NearestNeighbor::Approximate(k, ef) => {
-				write!(f, "<|{k},{ef}|>")
-			}
-		}
+impl ToSql for NearestNeighbor {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let nn: crate::sql::operator::NearestNeighbor = self.clone().into();
+		nn.fmt_sql(f, sql_fmt);
 	}
 }
 
-impl fmt::Display for BinaryOperator {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match self {
-			Self::Or => write!(f, "OR"),
-			Self::And => write!(f, "AND"),
-			Self::NullCoalescing => write!(f, "??"),
-			Self::TenaryCondition => write!(f, "?:"),
-			Self::Add => write!(f, "+"),
-			Self::Subtract => write!(f, "-"),
-			Self::Multiply => write!(f, "*"),
-			Self::Divide => write!(f, "/"),
-			Self::Remainder => write!(f, "%"),
-			Self::Power => write!(f, "**"),
-			Self::Equal => write!(f, "="),
-			Self::ExactEqual => write!(f, "=="),
-			Self::NotEqual => write!(f, "!="),
-			Self::AllEqual => write!(f, "*="),
-			Self::AnyEqual => write!(f, "?="),
-			Self::LessThan => write!(f, "<"),
-			Self::LessThanEqual => write!(f, "<="),
-			Self::MoreThan => write!(f, ">"),
-			Self::MoreThanEqual => write!(f, ">="),
-			Self::Contain => write!(f, "CONTAINS"),
-			Self::NotContain => write!(f, "CONTAINSNOT"),
-			Self::ContainAll => write!(f, "CONTAINSALL"),
-			Self::ContainAny => write!(f, "CONTAINSANY"),
-			Self::ContainNone => write!(f, "CONTAINSNONE"),
-			Self::Inside => write!(f, "INSIDE"),
-			Self::NotInside => write!(f, "NOTINSIDE"),
-			Self::AllInside => write!(f, "ALLINSIDE"),
-			Self::AnyInside => write!(f, "ANYINSIDE"),
-			Self::NoneInside => write!(f, "NONEINSIDE"),
-			Self::Outside => write!(f, "OUTSIDE"),
-			Self::Intersects => write!(f, "INTERSECTS"),
-			Self::Matches(x) => x.fmt(f),
-			Self::Range => write!(f, ".."),
-			Self::RangeInclusive => write!(f, "..="),
-			Self::RangeSkip => write!(f, ">.."),
-			Self::RangeSkipInclusive => write!(f, ">..="),
-			Self::NearestNeighbor(n) => n.fmt(f),
-		}
+impl ToSql for BinaryOperator {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let binary_operator: crate::sql::BinaryOperator = self.clone().into();
+		binary_operator.fmt_sql(f, sql_fmt);
 	}
 }
 
@@ -258,14 +197,10 @@ pub enum AssignOperator {
 	Extend,
 }
 
-impl fmt::Display for AssignOperator {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::Assign => write!(f, "="),
-			Self::Add => write!(f, "+="),
-			Self::Subtract => write!(f, "-="),
-			Self::Extend => write!(f, "+?="),
-		}
+impl ToSql for AssignOperator {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let op: crate::sql::AssignOperator = self.clone().into();
+		op.fmt_sql(f, sql_fmt);
 	}
 }
 

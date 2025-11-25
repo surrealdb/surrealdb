@@ -14,12 +14,13 @@ use object_store::Error as ObjectStoreError;
 use revision::Error as RevisionError;
 use serde::Serialize;
 use storekey::DecodeError;
+use surrealdb_types::ToSql;
 use thiserror::Error;
 
 use crate::api::err::ApiError;
 use crate::buc::BucketOperation;
+use crate::expr::Expr;
 use crate::expr::operation::PatchError;
-use crate::expr::{Expr, Idiom};
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
@@ -90,13 +91,13 @@ pub(crate) enum Error {
 	InvalidQuery(RenderedParserError),
 
 	/// There was an error with the SQL query
-	#[error("Cannot use {value} in a CONTENT clause")]
+	#[error("Cannot use {} in a CONTENT clause", value.to_sql())]
 	InvalidContent {
 		value: Value,
 	},
 
 	/// There was an error with the SQL query
-	#[error("Cannot use {value} in a MERGE clause")]
+	#[error("Cannot use {} in a MERGE clause", value.to_sql())]
 	InvalidMerge {
 		value: Value,
 	},
@@ -131,7 +132,7 @@ pub(crate) enum Error {
 	},
 
 	/// The FETCH clause accepts idioms, strings and fields.
-	#[error("Found {value} on FETCH CLAUSE, but FETCH expects an idiom, a string or fields")]
+	#[error("Found {} on FETCH CLAUSE, but FETCH expects an idiom, a string or fields", value.to_sql())]
 	InvalidFetch {
 		value: Expr,
 	},
@@ -502,13 +503,13 @@ pub(crate) enum Error {
 	},
 
 	/// A database entry for the specified record already exists
-	#[error("Database record `{record}` already exists")]
+	#[error("Database record `{record}` already exists", record = record.to_sql())]
 	RecordExists {
 		record: RecordId,
 	},
 
 	/// A database index entry for the specified record already exists
-	#[error("Database index `{index}` already contains {value}, with record `{record}`")]
+	#[error("Database index `{index}` already contains {value}, with record `{record}`", record = record.to_sql())]
 	IndexExists {
 		record: RecordId,
 		index: String,
@@ -530,7 +531,7 @@ pub(crate) enum Error {
 	FieldValue {
 		record: String,
 		value: String,
-		field: Idiom,
+		field: String,
 		check: String,
 	},
 
@@ -562,14 +563,14 @@ pub(crate) enum Error {
 	)]
 	FieldReadonly {
 		record: String,
-		field: Idiom,
+		field: String,
 	},
 
 	/// The specified field on a SCHEMAFUL table was not defined
 	#[error("Found field '{field}', but no such field exists for table '{table}'")]
 	FieldUndefined {
 		table: String,
-		field: Idiom,
+		field: String,
 	},
 
 	/// Found a record id for the record but this is not a valid id

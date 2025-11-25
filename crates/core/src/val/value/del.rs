@@ -1,5 +1,6 @@
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -80,10 +81,10 @@ impl Value {
 							},
 							Value::RecordId(t) => match path.len() {
 								1 => {
-									v.remove(&t.to_string());
+									v.remove(&t.to_sql());
 									Ok(())
 								}
-								_ => match v.get_mut(&t.to_string()) {
+								_ => match v.get_mut(&t.to_sql()) {
 									Some(v) if !v.is_nullish() => {
 										stk.run(|stk| v.del(stk, ctx, opt, path.next())).await
 									}

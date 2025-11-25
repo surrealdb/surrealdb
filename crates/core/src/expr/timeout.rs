@@ -1,7 +1,6 @@
-use std::fmt;
-
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -30,8 +29,8 @@ impl Timeout {
 	}
 }
 
-impl fmt::Display for Timeout {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "TIMEOUT {}", self.0)
+impl ToSql for Timeout {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "TIMEOUT {}", self.0)
 	}
 }

@@ -1,4 +1,3 @@
-use std::fmt;
 use std::ops::Bound;
 
 use surrealdb_types::{SqlFormat, ToSql};
@@ -27,22 +26,6 @@ impl From<crate::expr::RecordIdKeyRangeLit> for RecordIdKeyRangeLit {
 			start: value.start.map(|x| x.into()),
 			end: value.end.map(|x| x.into()),
 		}
-	}
-}
-
-impl fmt::Display for RecordIdKeyRangeLit {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match &self.start {
-			Bound::Unbounded => write!(f, ""),
-			Bound::Included(v) => write!(f, "{v}"),
-			Bound::Excluded(v) => write!(f, "{v}>"),
-		}?;
-		match &self.end {
-			Bound::Unbounded => write!(f, ".."),
-			Bound::Excluded(v) => write!(f, "..{v}"),
-			Bound::Included(v) => write!(f, "..={v}"),
-		}?;
-		Ok(())
 	}
 }
 

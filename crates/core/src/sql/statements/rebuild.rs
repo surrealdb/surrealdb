@@ -9,9 +9,9 @@ pub enum RebuildStatement {
 }
 
 impl ToSql for RebuildStatement {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
-			Self::Index(v) => v.fmt_sql(f, fmt),
+			Self::Index(v) => v.fmt_sql(f, sql_fmt),
 		}
 	}
 }
@@ -42,12 +42,12 @@ pub struct RebuildIndexStatement {
 }
 
 impl ToSql for RebuildIndexStatement {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		f.push_str("REBUILD INDEX");
 		if self.if_exists {
 			f.push_str(" IF EXISTS");
 		}
-		write_sql!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what));
+		write_sql!(f, sql_fmt, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what));
 		if self.concurrently {
 			f.push_str(" CONCURRENTLY");
 		}

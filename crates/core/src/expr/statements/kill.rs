@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
@@ -38,7 +39,7 @@ impl KillStatement {
 		{
 			Err(_) => {
 				bail!(Error::KillStatement {
-					value: self.id.to_string(),
+					value: self.id.to_sql(),
 				})
 			}
 			Ok(id) => id,
@@ -69,7 +70,7 @@ impl KillStatement {
 			}
 			None => {
 				bail!(Error::KillStatement {
-					value: self.id.to_string(),
+					value: self.id.to_sql(),
 				});
 			}
 		}

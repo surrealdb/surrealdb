@@ -1,4 +1,3 @@
-use std::fmt::{self, Display, Formatter};
 use std::ops::Bound;
 
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
@@ -119,24 +118,17 @@ impl From<crate::expr::RecordIdKeyLit> for RecordIdKeyLit {
 	}
 }
 
-impl Display for RecordIdKeyLit {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		use surrealdb_types::ToSql;
-		write!(f, "{}", self.to_sql())
-	}
-}
-
 impl ToSql for RecordIdKeyLit {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
-			Self::Number(v) => write_sql!(f, "{}", v),
-			Self::String(v) => write_sql!(f, "{}", EscapeRid(v)),
-			Self::Uuid(v) => write_sql!(f, "{}", v.to_sql()),
+			Self::Number(v) => write_sql!(f, sql_fmt, "{}", v),
+			Self::String(v) => write_sql!(f, sql_fmt, "{}", EscapeRid(v)),
+			Self::Uuid(v) => write_sql!(f, sql_fmt, "{}", v.to_sql()),
 			Self::Array(v) => {
 				f.push('[');
 				if !v.is_empty() {
-					let inner_fmt = fmt.increment();
-					if fmt.is_pretty() {
+					let inner_fmt = sql_fmt.increment();
+					if sql_fmt.is_pretty() {
 						f.push('\n');
 						inner_fmt.write_indent(f);
 					}
@@ -146,22 +138,22 @@ impl ToSql for RecordIdKeyLit {
 						}
 						expr.fmt_sql(f, inner_fmt);
 					}
-					if fmt.is_pretty() {
+					if sql_fmt.is_pretty() {
 						f.push('\n');
-						fmt.write_indent(f);
+						sql_fmt.write_indent(f);
 					}
 				}
 				f.push(']');
 			}
 			Self::Object(v) => {
-				if fmt.is_pretty() {
+				if sql_fmt.is_pretty() {
 					f.push('{');
 				} else {
 					f.push_str("{ ");
 				}
 				if !v.is_empty() {
-					let inner_fmt = fmt.increment();
-					if fmt.is_pretty() {
+					let inner_fmt = sql_fmt.increment();
+					if sql_fmt.is_pretty() {
 						f.push('\n');
 						inner_fmt.write_indent(f);
 					}
@@ -169,15 +161,15 @@ impl ToSql for RecordIdKeyLit {
 						if i > 0 {
 							inner_fmt.write_separator(f);
 						}
-						write_sql!(f, "{}: ", EscapeKey(&entry.key));
+						write_sql!(f, sql_fmt, "{}: ", EscapeKey(&entry.key));
 						entry.value.fmt_sql(f, inner_fmt);
 					}
-					if fmt.is_pretty() {
+					if sql_fmt.is_pretty() {
 						f.push('\n');
-						fmt.write_indent(f);
+						sql_fmt.write_indent(f);
 					}
 				}
-				if fmt.is_pretty() {
+				if sql_fmt.is_pretty() {
 					f.push('}');
 				} else {
 					f.push_str(" }");
@@ -188,7 +180,7 @@ impl ToSql for RecordIdKeyLit {
 				RecordIdKeyGen::Ulid => f.push_str("ulid()"),
 				RecordIdKeyGen::Uuid => f.push_str("uuid()"),
 			},
-			Self::Range(v) => v.fmt_sql(f, fmt),
+			Self::Range(v) => v.fmt_sql(f, sql_fmt),
 		}
 	}
 }

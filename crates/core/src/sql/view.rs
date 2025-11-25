@@ -12,22 +12,22 @@ pub(crate) struct View {
 }
 
 impl ToSql for View {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		write_sql!(f, "AS SELECT {}", self.expr);
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "AS SELECT {}", self.expr);
 		if !self.what.is_empty() {
 			f.push_str(" FROM ");
 			for (i, expr) in self.what.iter().enumerate() {
 				if i > 0 {
 					f.push_str(", ");
 				}
-				expr.fmt_sql(f, fmt);
+				expr.fmt_sql(f, sql_fmt);
 			}
 		}
 		if let Some(ref v) = self.cond {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 		if let Some(ref v) = self.group {
-			write_sql!(f, " {}", v);
+			write_sql!(f, sql_fmt, " {}", v);
 		}
 	}
 }
