@@ -582,7 +582,7 @@ impl Datastore {
 	///
 	/// # Generic parameters
 	/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
-	pub async fn new_with_factory<F: TransactionBuilderFactory + BucketStoreProvider>(
+	pub async fn new_with_factory<F: TransactionBuilderFactory + BucketStoreProvider + 'static>(
 		composer: F,
 		path: &str,
 		canceller: CancellationToken,
@@ -603,7 +603,9 @@ impl Datastore {
 	///
 	/// # Generic parameters
 	/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
-	pub(crate) async fn new_with_clock<C: TransactionBuilderFactory + BucketStoreProvider>(
+	pub(crate) async fn new_with_clock<
+		C: TransactionBuilderFactory + BucketStoreProvider + 'static,
+	>(
 		composer: C,
 		path: &str,
 		clock: Option<Arc<SizedClock>>,

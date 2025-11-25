@@ -7,6 +7,7 @@ pub use controller::BucketOperation;
 
 use crate::CommunityComposer;
 use crate::buc::store::ObjectStore;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::buc::store::file::FileStore;
 use crate::buc::store::memory::MemoryStore;
 use crate::err::Error;

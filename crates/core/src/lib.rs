@@ -109,4 +109,5 @@ pub mod channel {
 /// // Pass the composer to init functions
 /// surreal::init(CommunityComposer())
 /// ```
+#[derive(Default)]
 pub struct CommunityComposer();
