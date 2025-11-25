@@ -59,10 +59,10 @@ pub struct IndexDefinition {
 	pub(crate) cols: Vec<Idiom>,
 	pub(crate) index: Index,
 	pub(crate) comment: Option<String>,
-	/// Whether this index has been marked for decommission.
+	/// Whether this index has been marked for removal.
 	/// Decommissioned indexes are excluded from query planning and document indexing,
 	/// and any concurrent index builds are cancelled.
-	pub(crate) decommissioned: bool,
+	pub(crate) prepare_remove: bool,
 }
 
 impl_kv_value_revisioned!(IndexDefinition);
@@ -91,10 +91,10 @@ impl IndexDefinition {
 	/// # Errors
 	///
 	/// Returns `Error::IndexingBuildingCancelled` if the index is decommissioned.
-	pub(crate) fn expect_not_decommissioned(&self) -> Result<()> {
-		if self.decommissioned {
+	pub(crate) fn expect_not_prepare_remove(&self) -> Result<()> {
+		if self.prepare_remove {
 			Err(anyhow::Error::new(Error::IndexingBuildingCancelled {
-				reason: "Decommissioned.".to_string(),
+				reason: "Prepare remove.".to_string(),
 			}))
 		} else {
 			Ok(())
@@ -110,7 +110,7 @@ impl InfoStructure for IndexDefinition {
 			"cols".to_string() => Value::Array(Array(self.cols.into_iter().map(|x| x.structure()).collect())),
 			"index".to_string() => self.index.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
-			"decommissioned".to_string(), if self.decommissioned => self.decommissioned.into()
+			"prepare_remove".to_string(), if self.prepare_remove => self.prepare_remove.into()
 		})
 	}
 }

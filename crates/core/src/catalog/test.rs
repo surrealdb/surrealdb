@@ -194,7 +194,7 @@ use crate::val::{Datetime, Value};
 	cols: vec![Idiom::from_str("field[0]").unwrap()],
 	index: Index::Idx,
 	comment: Some("comment".to_string()),
-	decommissioned: false,
+	prepare_remove: false,
 }, 34)]
 #[case::model(MlModelDefinition {
 	name: "model".to_string(),

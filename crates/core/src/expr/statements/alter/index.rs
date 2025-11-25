@@ -28,7 +28,7 @@ pub(crate) struct AlterIndexStatement {
 	pub table: String,
 	pub if_exists: bool,
 	/// If true, marks the index as decommissioned
-	pub decommission: bool,
+	pub prepare_remove: bool,
 }
 
 impl AlterIndexStatement {
@@ -55,8 +55,8 @@ impl AlterIndexStatement {
 			}
 		};
 
-		if self.decommission && !ix.decommissioned {
-			ix.decommissioned = true;
+		if self.prepare_remove && !ix.prepare_remove {
+			ix.prepare_remove = true;
 
 			// Set the index definition
 			txn.put_tb_index(ns, db, &self.table, &ix).await?;
@@ -93,8 +93,8 @@ impl Display for AlterIndexStatement {
 		}
 		write!(f, " {} ON {}", self.name, EscapeKwIdent(&self.table, &["IF"]))?;
 
-		if self.decommission {
-			write!(f, " DECOMMISSION")?;
+		if self.prepare_remove {
+			write!(f, " PREPARE REMOVE")?;
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

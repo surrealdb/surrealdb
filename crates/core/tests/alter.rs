@@ -7,12 +7,12 @@ use surrealdb_core::dbs::Session;
 use surrealdb_types::Value;
 use tokio::time::sleep;
 
-async fn alter_statement_index_decommissioned(def_index: &str, skip_def: usize) -> Result<()> {
+async fn alter_statement_index_prepare_remove(def_index: &str, skip_def: usize) -> Result<()> {
 	let session = Session::owner().with_ns("test").with_db("test");
 	let ds = new_ds().await?;
 
 	// Populate initial records
-	// We need enough records so we reach at least 5 seconds
+	// We need enough records so that the indexation should last more than 5 seconds
 	let mut r = ds
 		.execute(
 			"CREATE |user:40000| SET
@@ -33,7 +33,7 @@ async fn alter_statement_index_decommissioned(def_index: &str, skip_def: usize) 
 	sleep(Duration::from_millis(500)).await;
 
 	// Decommissions then index
-	let mut r = ds.execute("ALTER INDEX test ON user DECOMMISSION", &session, None).await?;
+	let mut r = ds.execute("ALTER INDEX test ON user PREPARE REMOVE", &session, None).await?;
 	skip_ok(&mut r, 1)?;
 
 	// Loop until the index built is in error
@@ -58,10 +58,10 @@ async fn alter_statement_index_decommissioned(def_index: &str, skip_def: usize) 
 					continue;
 				}
 				"error" => {
-					// We expect the decommission to be reported
+					// We expect "prepare remove" to be reported
 					assert_eq!(
 						tmp.into_json_value().to_string(),
-						"{\"building\":{\"error\":\"Index building has been cancelled: Decommissioned.\",\"status\":\"error\"}}"
+						"{\"building\":{\"error\":\"Index building has been cancelled: Prepare remove.\",\"status\":\"error\"}}"
 					);
 					break;
 				}
@@ -78,7 +78,7 @@ async fn alter_statement_index_decommissioned(def_index: &str, skip_def: usize) 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn alter_statement_index_concurrently_full_text() -> Result<()> {
-	alter_statement_index_decommissioned(
+	alter_statement_index_prepare_remove(
 		"DEFINE ANALYZER simple TOKENIZERS blank,class;
 		DEFINE INDEX test ON user FIELDS email FULLTEXT ANALYZER simple BM25 HIGHLIGHTS CONCURRENTLY;",
 		2,

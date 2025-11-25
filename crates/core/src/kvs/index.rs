@@ -201,7 +201,7 @@ impl IndexBuilder {
 		ix: Arc<IndexDefinition>,
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<()>>>> {
-		ix.expect_not_decommissioned()?;
+		ix.expect_not_prepare_remove()?;
 		let (ns, db) = ctx.expect_ns_db_ids(&opt).await?;
 		let key = IndexKey::new(ns, db, &ix.table_name, ix.index_id);
 		let (rcv, sdr) = if blocking {
@@ -437,12 +437,12 @@ impl Building {
 		Ok(ctx.freeze())
 	}
 
-	async fn check_decommissioned_with_tx(
+	async fn check_prepare_remove_with_tx(
 		&self,
-		last_decommissioned_check: &mut Instant,
+		last_prepare_remove_check: &mut Instant,
 		tx: &Transaction,
 	) -> Result<()> {
-		if last_decommissioned_check.elapsed() < Duration::from_secs(5) {
+		if last_prepare_remove_check.elapsed() < Duration::from_secs(5) {
 			return Ok(());
 		};
 		// Check the index still exists and is not decommissioned
@@ -450,21 +450,21 @@ impl Building {
 			tx,
 			tx.expect_tb_index(self.ns, self.db, &self.ix.table_name, &self.ix.name)
 				.await?
-				.expect_not_decommissioned()
+				.expect_not_prepare_remove()
 		);
-		*last_decommissioned_check = Instant::now();
+		*last_prepare_remove_check = Instant::now();
 		Ok(())
 	}
 
-	async fn check_decommissioned(&self, last_decommissioned_check: &mut Instant) -> Result<()> {
+	async fn check_prepare_remove(&self, last_decommissioned_check: &mut Instant) -> Result<()> {
 		let tx = self.new_read_tx().await?;
-		self.check_decommissioned_with_tx(last_decommissioned_check, &tx).await?;
+		self.check_prepare_remove_with_tx(last_decommissioned_check, &tx).await?;
 		tx.cancel().await?;
 		Ok(())
 	}
 
 	async fn run(&self) -> Result<()> {
-		let mut last_decommissioned_check = Instant::now();
+		let mut last_prepare_remove_check = Instant::now();
 
 		// Remove the index data
 		{
@@ -498,7 +498,7 @@ impl Building {
 			let batch = {
 				let tx = self.new_read_tx().await?;
 				// Check if the index has been decommissioned
-				self.check_decommissioned_with_tx(&mut last_decommissioned_check, &tx).await?;
+				self.check_prepare_remove_with_tx(&mut last_prepare_remove_check, &tx).await?;
 				// Get the next batch of records
 				catch!(tx, tx.batch_keys_vals(rng, *INDEXING_BATCH_SIZE, None).await)
 			};
@@ -537,7 +537,7 @@ impl Building {
 			}
 			self.is_beyond_threshold(None)?;
 			// Check the index still exists and is not decommissioned
-			self.check_decommissioned(&mut last_decommissioned_check).await?;
+			self.check_prepare_remove(&mut last_prepare_remove_check).await?;
 			let range = {
 				let mut queue = self.queue.write().await;
 				if let Some(ni) = next_to_index {

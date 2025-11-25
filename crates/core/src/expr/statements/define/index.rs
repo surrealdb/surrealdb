@@ -125,7 +125,7 @@ impl DefineIndexStatement {
 			cols: cols.clone(),
 			index: self.index.clone(),
 			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
-			decommissioned: false,
+			prepare_remove: false,
 		};
 		txn.put_tb_index(tb.namespace_id, tb.database_id, &tb.name, &index_def).await?;
 

@@ -53,7 +53,7 @@ impl Document {
 		// Loop through all index statements
 		for ix in ixs.iter() {
 			// Decommissioned indexes are ignored
-			if ix.decommissioned {
+			if ix.prepare_remove {
 				continue;
 			}
 			// Calculate old values

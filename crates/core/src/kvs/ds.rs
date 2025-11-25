@@ -1348,7 +1348,7 @@ impl Datastore {
 					continue;
 				}
 				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
-					Some(ix) if !ix.decommissioned => match &ix.index {
+					Some(ix) if !ix.prepare_remove => match &ix.index {
 						Index::FullText(p) => {
 							let ft = FullTextIndex::new(
 								&self.index_stores,

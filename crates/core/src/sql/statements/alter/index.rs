@@ -8,7 +8,7 @@ pub struct AlterIndexStatement {
 	pub name: String,
 	pub table: String,
 	pub if_exists: bool,
-	pub decommission: bool,
+	pub prepare_remove: bool,
 }
 
 impl Display for AlterIndexStatement {
@@ -19,8 +19,8 @@ impl Display for AlterIndexStatement {
 		}
 		write!(f, " {} ON {}", self.name, EscapeKwIdent(&self.table, &["IF"]))?;
 
-		if self.decommission {
-			write!(f, " DECOMMISSION")?;
+		if self.prepare_remove {
+			write!(f, " PREPARE REMOVE")?;
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
@@ -38,7 +38,7 @@ impl From<AlterIndexStatement> for crate::expr::statements::alter::AlterIndexSta
 			name: v.name,
 			table: v.table,
 			if_exists: v.if_exists,
-			decommission: v.decommission,
+			prepare_remove: v.prepare_remove,
 		}
 	}
 }
@@ -48,7 +48,7 @@ impl From<crate::expr::statements::alter::AlterIndexStatement> for AlterIndexSta
 			name: v.name,
 			table: v.table,
 			if_exists: v.if_exists,
-			decommission: v.decommission,
+			prepare_remove: v.prepare_remove,
 		}
 	}
 }

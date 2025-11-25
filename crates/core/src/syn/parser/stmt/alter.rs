@@ -115,12 +115,13 @@ impl Parser<'_> {
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
 		let table = self.parse_ident()?;
-		expected!(self, t!("DECOMMISSION"));
+		expected!(self, t!("PREPARE"));
+		expected!(self, t!("REMOVE"));
 		let res = AlterIndexStatement {
 			name,
 			table,
 			if_exists,
-			decommission: true,
+			prepare_remove: true,
 		};
 		Ok(res)
 	}
