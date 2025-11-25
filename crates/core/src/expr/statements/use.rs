@@ -1,22 +1,20 @@
 use std::fmt;
 
-use crate::fmt::EscapeIdent;
+use crate::expr::Expr;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct UseStatement {
-	pub ns: Option<String>,
-	pub db: Option<String>,
+	pub ns: Option<Expr>,
+	pub db: Option<Expr>,
 }
 
 impl fmt::Display for UseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str("USE")?;
 		if let Some(ref ns) = self.ns {
-			let ns = EscapeIdent(ns);
 			write!(f, " NS {ns}")?;
 		}
 		if let Some(ref db) = self.db {
-			let db = EscapeIdent(db);
 			write!(f, " DB {db}")?;
 		}
 		Ok(())

@@ -11,7 +11,7 @@ use surrealdb::engine::any::{self, connect};
 use surrealdb::method::WithStats;
 use surrealdb::opt::Config;
 use surrealdb::{IndexedResults, Notification};
-use surrealdb_core::dbs::Capabilities as CoreCapabilities;
+use surrealdb_core::dbs::{Capabilities as CoreCapabilities, QueryType};
 use surrealdb_core::rpc::DbResultStats;
 use surrealdb_types::{SurrealValue, ToSql, Value, object};
 
@@ -200,9 +200,6 @@ pub async fn init(
 		match surrealdb_core::syn::parse_with_capabilities(&line, &capabilities) {
 			Ok(mut query) => {
 				let init_length = query.num_statements();
-
-				let namespace = query.get_used_namespace();
-				let database = query.get_used_database();
 				let vars = query.get_let_statements();
 
 				for var in &vars {
@@ -210,7 +207,7 @@ pub async fn init(
 				}
 
 				// Extract the namespace and database from the current prompt
-				let (prompt_ns, prompt_db) = split_prompt(&prompt)?;
+				let (prompt_ns, _) = split_prompt(&prompt)?;
 				// The namespace should be set before the database can be set
 				if namespace.is_none() && prompt_ns.is_empty() && database.is_some() {
 					eprintln!("Specify a namespace to use\n");
@@ -219,10 +216,33 @@ pub async fn init(
 				// Run the query provided
 				let mut result = client.query(query.to_string()).with_stats().await;
 
+				let mut use_ns = None;
+				let mut use_db = None;
 				if let Ok(WithStats(res)) = &mut result {
 					for (i, n) in vars.into_iter().enumerate() {
 						if let Result::<Value, _>::Ok(v) = res.take(init_length + i) {
 							let _ = client.set(n, v).await;
+						}
+					}
+
+					// Obtain the last used namespace and database
+					for (_, (stats, result)) in res.results.iter().rev() {
+						if let Some(QueryType::Use) = stats.query_type {
+							let Ok(Value::Array(array)) = result else {
+								// TODO is it worth erroring here? This is the expected outcome, though maybe not for old versions
+								break;
+							};
+
+							if let Some(Value::String(ns)) = array.get(0) {
+								use_ns = Some(ns.clone());
+
+								if let Some(Value::String(db)) = array.get(1) {
+									use_db = Some(db.clone());
+								}
+							}
+
+							// We reversed iteration, so the first `Use` statement we find is actually the most recent one
+							break;
 						}
 					}
 				}
@@ -235,22 +255,15 @@ pub async fn init(
 				}
 
 				// Process the last `use` statements, if any
-				if namespace.is_some() || database.is_some() {
-					// Use the namespace provided in the query if any, otherwise use the one in the
-					// prompt
-					let namespace = namespace.as_deref().unwrap_or(prompt_ns);
-					// Use the database provided in the query if any, otherwise use the one in the
-					// prompt
-					let database = database.as_deref().unwrap_or(prompt_db);
-					// If the database is empty we should only use the namespace
-					if database.is_empty() {
-						if client.use_ns(namespace).await.is_ok() {
-							prompt = format!("{namespace}> ");
+				if let Some(use_ns) = use_ns {
+					if let Some(use_db) = use_db {
+						if client.use_ns(use_ns.clone()).use_db(use_db.clone()).await.is_ok() {
+							prompt = format!("{use_ns}/{use_db}> ");
 						}
-					}
-					// Otherwise we should use both the namespace and database
-					else if client.use_ns(namespace).use_db(database).await.is_ok() {
-						prompt = format!("{namespace}/{database}> ");
+					} else {
+						if client.use_ns(use_ns.clone()).await.is_ok() {
+							prompt = format!("{use_ns}> ");
+						}
 					}
 				}
 			}
@@ -296,6 +309,7 @@ fn process(
 		let (stats, result) = response.take(index).ok_or_else(|| {
 			anyhow!("Expected some result for a query with index {index}, but found none")
 		})?;
+		
 		let output = result.unwrap_or_else(|e| Value::String(e.to_string()));
 		vec.push((stats, output));
 	}

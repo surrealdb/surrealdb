@@ -2221,7 +2221,7 @@ fn parse_use() {
 	.pop()
 	.unwrap();
 	let expect = TopLevelExpr::Use(UseStatement {
-		ns: Some("foo".to_owned()),
+		ns: Some(Expr::Idiom(Idiom::field("foo".to_owned()))),
 		db: None,
 	});
 	assert_eq!(res, expect);
@@ -2234,7 +2234,7 @@ fn parse_use() {
 	.pop()
 	.unwrap();
 	let expect = TopLevelExpr::Use(UseStatement {
-		ns: Some("foo".to_owned()),
+		ns: Some(Expr::Idiom(Idiom::field("foo".to_owned()))),
 		db: None,
 	});
 	assert_eq!(res, expect);
@@ -2248,8 +2248,8 @@ fn parse_use() {
 	.unwrap();
 
 	let expect = TopLevelExpr::Use(UseStatement {
-		ns: Some("bar".to_owned()),
-		db: Some("foo".to_owned()),
+		ns: Some(Expr::Idiom(Idiom::field("bar".to_owned()))),
+		db: Some(Expr::Idiom(Idiom::field("foo".to_owned()))),
 	});
 	assert_eq!(res, expect);
 }
@@ -2264,7 +2264,7 @@ fn parse_use_lowercase() {
 	.pop()
 	.unwrap();
 	let expect = TopLevelExpr::Use(UseStatement {
-		ns: Some("foo".to_owned()),
+		ns: Some(Expr::Idiom(Idiom::field("foo".to_owned()))),
 		db: None,
 	});
 	assert_eq!(res, expect);
@@ -2279,7 +2279,7 @@ fn parse_use_lowercase() {
 
 	let expect = TopLevelExpr::Use(UseStatement {
 		ns: None,
-		db: Some("foo".to_owned()),
+		db: Some(Expr::Idiom(Idiom::field("foo".to_owned()))),
 	});
 	assert_eq!(res, expect);
 
@@ -2292,8 +2292,8 @@ fn parse_use_lowercase() {
 	.unwrap();
 
 	let expect = TopLevelExpr::Use(UseStatement {
-		ns: Some("bar".to_owned()),
-		db: Some("foo".to_owned()),
+		ns: Some(Expr::Idiom(Idiom::field("bar".to_owned()))),
+		db: Some(Expr::Idiom(Idiom::field("foo".to_owned()))),
 	});
 	assert_eq!(res, expect);
 }

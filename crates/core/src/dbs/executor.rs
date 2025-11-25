@@ -13,13 +13,14 @@ use trice::Instant;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
-use crate::catalog::providers::{CatalogProvider, NamespaceProvider};
+use crate::catalog::providers::{CatalogProvider, NamespaceProvider, RootProvider};
 use crate::ctx::Context;
 use crate::ctx::reason::Reason;
 use crate::dbs::response::QueryResult;
 use crate::dbs::{Force, Options, QueryType};
 use crate::doc::DefaultBroker;
 use crate::err::Error;
+use crate::expr::parameterize::expr_to_ident;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
 use crate::expr::statements::OptionStatement;
@@ -116,10 +117,46 @@ impl Executor {
 		}
 		let res = match plan {
 			TopLevelExpr::Use(stmt) => {
+				let opt_ref = self.opt.clone();
+				
 				// Avoid moving in and out of the context via Arc::get_mut
 				let ctx = ctx_mut!();
 
-				if let Some(ns) = stmt.ns {
+				let (use_ns, use_db) = match (stmt.ns, stmt.db) {
+					(None, None) => {
+						if let Some(x) = txn.get_defaults_config().await? {
+							(x.namespace.clone(), x.database.clone())
+						} else {
+							(None, None)
+						}
+					},
+					(ns, db) => {
+						let ns = if let Some(ns) = ns {
+							Some(self
+								.stack
+								.enter(|stk| expr_to_ident(stk, &ctx.freeze(), &opt_ref, None, &ns, "namespace"))
+								.finish()
+								.await?)
+						} else {
+							None
+						};
+
+						let db = if let Some(db) = db {
+							Some(self
+								.stack
+								.enter(|stk| expr_to_ident(stk, &ctx.freeze(), &opt_ref, None, &db, "database"))
+								.finish()
+								.await?)
+						} else {
+							None
+						};
+
+						(ns, db)
+					}
+				};
+
+				// Apply new namespace
+				if let Some(ns) = use_ns {
 					txn.get_or_add_ns(Some(ctx), &ns).await?;
 
 					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
@@ -127,7 +164,9 @@ impl Executor {
 					session.put(NS.as_ref(), ns.into());
 					ctx.add_value("session", session.into());
 				}
-				if let Some(db) = stmt.db {
+
+				// Apply new database
+				if let Some(db) = use_db {
 					let Some(ns) = &self.opt.ns else {
 						return Err(ControlFlow::Err(anyhow::anyhow!(
 							"Cannot use database without namespace"
@@ -141,7 +180,13 @@ impl Executor {
 					session.put(DB.as_ref(), db.into());
 					ctx.add_value("session", session.into());
 				}
-				Ok(Value::None)
+
+				// Return the current namespace and database
+				Ok(match (self.opt.ns.clone(), self.opt.db.clone()) {
+					(Some(ns), Some(db)) => Value::Array(vec![Value::String(ns.to_string()), Value::String(db.to_string())].into()),
+					(Some(ns), None) => Value::Array(vec![Value::String(ns.to_string()), Value::None].into()),
+					_ => Value::Array(vec![Value::None, Value::None].into()),
+				})
 			}
 			TopLevelExpr::Option(_) => {
 				return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
@@ -741,6 +786,7 @@ impl Executor {
 		let mut stream = pin!(stream);
 
 		while let Some(stmt) = stream.next().await {
+			println!("Stmt: {:#?}", stmt);
 			let stmt = match stmt {
 				Ok(x) => x,
 				Err(e) => {
@@ -787,6 +833,7 @@ impl Executor {
 
 					let now = Instant::now();
 					let result = this.execute_bare_statement(kvs, &now, stmt).await;
+					println!("Result: {:#?}", result);
 					let result = match result {
 						Ok(value) => Ok(convert_value_to_public_value(value)?),
 						Err(err) => Err(DbResultError::InternalError(err.to_string())),
