@@ -37,13 +37,11 @@ mod exe;
 mod fmt;
 mod fnc;
 mod key;
+#[doc(hidden)]
+pub mod str;
 #[cfg(feature = "surrealism")]
 mod surrealism;
 mod sys;
-mod val;
-
-#[doc(hidden)]
-pub mod str;
 
 pub mod api;
 pub mod catalog;
@@ -63,6 +61,7 @@ pub mod options;
 pub mod rpc;
 pub mod sql;
 pub mod syn;
+pub mod val;
 
 pub(crate) mod types {
 	//! Re-export the types from the types crate for internal use prefixed with Public.
