@@ -13,7 +13,7 @@ pub(crate) mod memory;
 pub(crate) mod prefixed;
 pub(crate) mod util;
 
-pub(crate) use util::ObjectKey;
+pub use util::ObjectKey;
 
 pub struct ObjectMeta {
 	pub size: u64,
