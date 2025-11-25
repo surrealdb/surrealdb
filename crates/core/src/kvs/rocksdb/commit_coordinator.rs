@@ -128,11 +128,9 @@ impl CommitBatcher {
 	///
 	/// Behavior:
 	/// - Wakes when transactions arrive
-	/// - If few initial transactions (below `wait_threshold`): commits immediately (low latency)
-	/// - If some initial transactions (above `wait_threshold`): waits up to `timeout` (better
-	///   batching)
-	/// - If many initial transactions (up to `max_batch_size`): commits immediately (high
-	///   throughput)
+	/// - If few transactions (below `wait_threshold`): commits immediately (low latency)
+	/// - If some transactions (above `wait_threshold`): waits up to `timeout` (better batching)
+	/// - If many transactions (up to `max_batch_size`): commits immediately (high throughput)
 	/// - Batches capped at `max_batch_size` to prevent unbounded growth
 	async fn run(self) {
 		// Pre-allocate batch vector once
@@ -189,6 +187,10 @@ impl CommitBatcher {
 						let take = self.max_batch_size.saturating_sub(total).min(extra);
 						// Drain any pending items up to the maximum batch size
 						batch.extend(buffer.drain(..take));
+					}
+					// Break if we've reached maximum batch size
+					if batch.len() >= self.max_batch_size {
+						break;
 					}
 				}
 			}
