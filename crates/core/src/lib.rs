@@ -61,6 +61,7 @@ pub mod options;
 pub mod rpc;
 pub mod sql;
 pub mod syn;
+#[doc(hidden)]
 pub mod val;
 
 pub(crate) mod types {
