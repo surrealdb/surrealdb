@@ -24,14 +24,24 @@ pub trait BucketStoreProviderRequirements: Send + Sync + 'static {}
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 pub trait BucketStoreProvider: BucketStoreProviderRequirements {
-	async fn connect(&self, url: &str, readonly: bool) -> Result<Arc<dyn ObjectStore>>;
+	async fn connect(
+		&self,
+		url: &str,
+		global: bool,
+		readonly: bool,
+	) -> Result<Arc<dyn ObjectStore>>;
 }
 
 impl BucketStoreProviderRequirements for CommunityComposer {}
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 impl BucketStoreProvider for CommunityComposer {
-	async fn connect(&self, url: &str, _readonly: bool) -> Result<Arc<dyn ObjectStore>> {
+	async fn connect(
+		&self,
+		url: &str,
+		_global: bool,
+		_readonly: bool,
+	) -> Result<Arc<dyn ObjectStore>> {
 		if MemoryStore::parse_url(url) {
 			return Ok(Arc::new(MemoryStore::new()));
 		}

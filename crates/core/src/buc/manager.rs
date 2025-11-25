@@ -42,7 +42,7 @@ impl BucketsManager {
 		if !global && *GLOBAL_BUCKET_ENFORCED {
 			bail!(Error::GlobalBucketEnforced);
 		}
-		self.provider.connect(url, readonly).await
+		self.provider.connect(url, global, readonly).await
 	}
 
 	/// Connect to a global bucket, if one is configured
@@ -60,7 +60,7 @@ impl BucketsManager {
 		};
 
 		// Connect to the global bucket
-		let global = self.connect(url, true, false).await?;
+		let global = self.provider.connect(url, true, false).await?;
 
 		// Create a prefixstore for the specified bucket
 		let key = ObjectKey::new(format!("/{ns}/{db}/{bu}"));
