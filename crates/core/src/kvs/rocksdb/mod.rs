@@ -1,5 +1,6 @@
 #![cfg(feature = "kv-rocksdb")]
 
+mod background_flusher;
 mod cnf;
 mod commit_coordinator;
 mod disk_space_manager;
@@ -8,9 +9,8 @@ use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::thread;
-use std::time::Duration;
 
+use background_flusher::BackgroundFlusher;
 use commit_coordinator::CommitCoordinator;
 use disk_space_manager::{DiskSpaceManager, DiskSpaceState, TransactionState};
 use rocksdb::{
@@ -30,9 +30,11 @@ pub struct Datastore {
 	/// The underlying RocksDB optimistic transaction database
 	db: Pin<Arc<OptimisticTransactionDB>>,
 	/// Disk space manager for monitoring space usage and enforcing space limits
-	disk_space_manager: Option<DiskSpaceManager>,
+	disk_space_manager: Option<Arc<DiskSpaceManager>>,
 	/// Commit coordinator for batching transaction commits when sync is enabled
 	commit_coordinator: Option<Arc<CommitCoordinator>>,
+	/// Background flusher for periodically flushing WAL to disk
+	background_flusher: Option<Arc<BackgroundFlusher>>,
 }
 
 pub struct Transaction {
@@ -47,7 +49,7 @@ pub struct Transaction {
 	/// The current transaction state
 	transaction_state: Arc<AtomicU8>,
 	/// Reference to the disk space manager for checking current operational state during commit.
-	disk_space_manager: Option<DiskSpaceManager>,
+	disk_space_manager: Option<Arc<DiskSpaceManager>>,
 	/// Commit coordinator for batching transaction commits when sync writes are enabled
 	commit_coordinator: Option<Arc<CommitCoordinator>>,
 	// The above, supposedly 'static transaction
@@ -68,6 +70,8 @@ impl Datastore {
 		opts.create_if_missing(true);
 		// Create column families if missing
 		opts.create_missing_column_families(true);
+		// Default to WAL flush on every commit
+		opts.set_manual_wal_flush(false);
 		// Increase the background thread count
 		info!(target: TARGET, "Background thread count: {}", *cnf::ROCKSDB_THREAD_COUNT);
 		opts.increase_parallelism(*cnf::ROCKSDB_THREAD_COUNT);
@@ -215,118 +219,51 @@ impl Datastore {
 				)));
 			}
 		});
-		// Configure SST file manager for disk space monitoring and management.
-		// The SST file manager tracks SST file sizes in real-time. When the configured
-		// space limit is reached, the application transitions to read-and-deletion-only mode.
-		let disk_space_manager = if *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE > 0 {
-			info!(target: TARGET, "Disk space manager: enabled (limit={}B)", *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE);
-			Some(DiskSpaceManager::new(&mut opts, *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE)?)
+		// Pre-configure the disk space manager
+		let should_create_disk_space_manager = DiskSpaceManager::configure(&mut opts)?;
+		// Pre-configure the background flusher
+		let should_create_background_flusher = BackgroundFlusher::configure(&mut opts)?;
+		// Pre-configure the commit coordinator
+		let should_create_commit_coordinator = CommitCoordinator::configure(&mut opts)?;
+		// Create the disk space manager if enabled
+		let disk_space_manager = if should_create_disk_space_manager {
+			Some(Arc::new(DiskSpaceManager::new(&mut opts)?))
 		} else {
-			info!(target: TARGET, "Disk space manager: disabled");
 			None
 		};
 		// Open the database
-		let db = Self::open(opts.clone(), path).await?;
-		// Configure whether batched group commit should be enabled.
-		// Grouped commit is enabled when SYNC_DATA is true and BACKGROUND_FLUSH is false.
-		// It batches multiple transaction commits together to perform a single fsync.
-		let commit_coordinator = if *cnf::SYNC_DATA && !*cnf::ROCKSDB_BACKGROUND_FLUSH {
-			// If the user has enabled synced transaction writes and disabled background flushing,
-			// we enable grouped commit. This means that the transaction commits are batched
-			// together, written to WAL, and then flushed to disk. This ensures that transactions
-			// are batched together and flushed to disk in a single operation, which is more
-			// efficient than flushing each transaction individually, and ensures that the data
-			// is fully durable.
-			info!(target: TARGET, "Grouped commit: enabled (timeout={}, wait_threshold={}, max_batch_size={})",
-				*cnf::ROCKSDB_GROUPED_COMMIT_TIMEOUT,
-				*cnf::ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD,
-				*cnf::ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE,
-			);
-			Some(Arc::new(CommitCoordinator::new(
-				&mut opts,
-				db.clone(),
-				*cnf::ROCKSDB_GROUPED_COMMIT_TIMEOUT,
-				*cnf::ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD,
-				*cnf::ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE,
-			)?))
-		} else if !*cnf::SYNC_DATA {
-			// If the user has disabled synced transaction writes, we defer to the operating system
-			// buffers for disk sync. This means that the transaction commits are written to WAL,
-			// and then flushed to disk by the operating system. This is the default behavior and
-			// is the most efficient way to write data to disk, but may result in some writes being
-			// lost if the machine crashes.
-			info!(target: TARGET, "Defering to operating system buffers for disk sync");
-			None
+		let db = Arc::pin(OptimisticTransactionDB::open(&opts, path)?);
+		// Create the background flusher if enabled
+		let background_flusher = if should_create_background_flusher {
+			Some(Arc::new(BackgroundFlusher::new(db.clone())?))
 		} else {
-			// If the user has enabled both synced transaction writes and background flushing,
-			// we return an error because the two features are incompatible. When sync is enabled,
-			// the transaction commits are always batched together, written to WAL, and then
-			// flushed to disk. This means that the background flushing is redundant.
-			return Err(Error::Datastore(
-				"Synced transaction writes and background flushing are incompatible".to_string(),
-			));
+			None
+		};
+		// Create the commit coordinator if enabled
+		let commit_coordinator = if should_create_commit_coordinator {
+			Some(Arc::new(CommitCoordinator::new(db.clone())?))
+		} else {
+			None
 		};
 		// Return the datastore
 		Ok(Datastore {
 			db,
 			disk_space_manager,
+			background_flusher,
 			commit_coordinator,
 		})
 	}
 
-	/// Open database with normal configuration
-	async fn open(mut opts: Options, path: &str) -> Result<Pin<Arc<OptimisticTransactionDB>>> {
-		// Check if background flush is disabled
-		if !*cnf::ROCKSDB_BACKGROUND_FLUSH {
-			// Background flush is disabled which
-			// means that the WAL will be flushed
-			// whenever a transaction is committed.
-			// Display the configuration setting
-			info!(target: TARGET, "Background write-ahead-log flushing: disabled");
-			// Enable manual WAL flush
-			opts.set_manual_wal_flush(false);
-			// Create the optimistic datastore
-			Ok(Arc::pin(OptimisticTransactionDB::open(&opts, path)?))
-		} else {
-			// Background flush is enabled so we
-			// spawn a background worker thread to
-			// flush the WAL to disk periodically.
-			// Display the configuration setting
-			info!(target: TARGET, "Background write-ahead-log flushing: enabled every {}", *cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL);
-			// Enable manual WAL flush
-			opts.set_manual_wal_flush(true);
-			// Create the optimistic datastore
-			let db = Arc::pin(OptimisticTransactionDB::open(&opts, path)?);
-			// Clone the database reference
-			let dbc = db.clone();
-			// Create a new background thread
-			let res = thread::Builder::new().name("rocksdb-background-flusher".to_string()).spawn(
-				move || {
-					loop {
-						// Get the specified flush interval
-						let wait = *cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL;
-						// Wait for the specified interval
-						thread::sleep(Duration::from_nanos(wait));
-						// Flush the WAL to disk periodically
-						if let Err(err) = dbc.flush_wal(true) {
-							error!("Failed to flush WAL: {err}");
-						}
-					}
-				},
-			);
-			// Catch any thread spawning errors
-			if res.is_err() {
-				return Err(Error::Datastore(
-					"failed to spawn RocksDB background flush thread".to_string(),
-				));
-			}
-			// Return the datastore
-			Ok(db)
-		}
-	}
-
 	/// Shutdown the database
 	pub(crate) async fn shutdown(&self) -> Result<()> {
+		// Wait for the background flusher to finish
+		if let Some(background_flusher) = &self.background_flusher {
+			background_flusher.shutdown()?;
+		}
+		// Wait for the commit coordinator to finish
+		if let Some(commit_coordinator) = &self.commit_coordinator {
+			commit_coordinator.shutdown()?;
+		}
 		// Create new flush options
 		let mut opts = FlushOptions::default();
 		// Wait for the sync to finish

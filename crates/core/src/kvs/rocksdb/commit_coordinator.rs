@@ -5,65 +5,143 @@ use std::time::{Duration, Instant};
 
 use parking_lot::{Condvar, Mutex};
 use rocksdb::{OptimisticTransactionDB, Options};
-use tokio::sync::oneshot;
+use tokio::sync::oneshot::{self, Sender};
 
+use super::{TARGET, cnf};
 use crate::kvs::err::{Error, Result};
 
-/// Shared state between producers (transactions) and consumer (batcher)
+/// Shared state for producer-consumer communication between transaction submitters and the batcher.
+///
+/// This structure implements the synchronization primitives for a multi-producer, single-consumer
+/// pattern where multiple threads can submit transactions for commit while a single background
+/// thread (the [`CommitBatcher`]) processes them in batches.
+///
+/// # Communication Protocol
+///
+/// **Producers** ([`CommitCoordinator::commit`]):
+/// 1. Lock the `buffer` mutex
+/// 2. Check the `shutdown` flag to ensure the coordinator is still running
+/// 3. Push a [`CommitRequest`] into the buffer
+/// 4. Signal the `condvar` to wake the batcher
+/// 5. Release the lock and await the response channel
+///
+/// **Consumer** ([`CommitBatcher::run`]):
+/// 1. Lock the `buffer` mutex
+/// 2. Wait on the `condvar` until the buffer is non-empty or shutdown is signaled
+/// 3. Drain transactions from the buffer (up to `max_batch_size`)
+/// 4. Release the lock and process the batch
+/// 5. Send results back through each request's response channel
+///
+/// # Thread Safety
+///
+/// All fields are protected by appropriate synchronization primitives (`Mutex` and `Condvar`)
+/// to ensure safe concurrent access from multiple threads. The condition variable prevents
+/// busy-waiting and ensures efficient wake-up semantics.
 struct SharedState {
-	/// Buffer of pending commit requests
+	/// Buffer of pending commit requests awaiting batch processing
 	buffer: Mutex<Vec<CommitRequest>>,
-	/// Condition variable to wake the batcher thread
+	/// Condition variable to wake the batcher thread when work arrives
 	condvar: Condvar,
-	/// Flag indicating the coordinator is shutting down
+	/// Flag indicating the coordinator is shutting down; checked by both producers and consumer
 	shutdown: Mutex<bool>,
 }
 
-/// Coordinator for batching transaction commits together
-pub struct CommitCoordinator {
-	/// Shared state for communication with the batcher
-	shared: Arc<SharedState>,
-}
-
-/// A request to commit a transaction
+/// A request to commit a transaction.
+///
+/// This structure encapsulates a RocksDB transaction along with a response channel.
+/// When the transaction is committed by the background batcher, the result is sent
+/// back through the channel to the waiting caller.
 struct CommitRequest {
 	/// The transaction to commit
 	txn: rocksdb::Transaction<'static, OptimisticTransactionDB>,
 	/// The channel to send the result of the commit
-	channel: oneshot::Sender<Result<()>>,
+	channel: Sender<Result<()>>,
 }
 
-/// The background batcher that processes commit requests
-struct CommitBatcher {
-	/// Shared state for receiving commit requests
+/// Coordinator for batching transaction commits together with adaptive grouping.
+///
+/// This coordinator collects multiple transaction commits and processes them in batches
+/// to reduce the overhead of disk synchronization operations. When synced writes are enabled,
+/// each batch is committed with a single `fsync` to the Write-Ahead Log (WAL) and disk,
+/// significantly improving throughput while maintaining durability guarantees.
+///
+/// # Adaptive Batching Strategy
+///
+/// The coordinator employs an adaptive batching algorithm that balances latency and throughput:
+///
+/// - **Low load** (< `wait_threshold`): Commits immediately for low latency
+/// - **Moderate load** (≥ `wait_threshold`, < `max_batch_size`): Waits up to `timeout` to collect
+///   more transactions for better batching efficiency
+/// - **High load** (≥ `max_batch_size`): Commits immediately to maintain high throughput
+///
+/// # Configuration
+///
+/// Batching behavior is controlled by environment variables:
+/// - `SURREAL_ROCKSDB_GROUPED_COMMIT_TIMEOUT`: Maximum wait time for collecting a batch
+///   (nanoseconds)
+/// - `SURREAL_ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD`: Transaction count to trigger waiting
+/// - `SURREAL_ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE`: Maximum transactions per batch
+///
+/// # Durability
+///
+/// When enabled, this coordinator provides full durability guarantees. All committed transactions
+/// are fully persisted to disk and will survive system crashes or power failures. This is achieved
+/// by explicitly flushing the WAL to disk after each batch.
+pub struct CommitCoordinator {
+	/// Shared state for communication with the batcher
 	shared: Arc<SharedState>,
-	/// Reference to the database for explicit WAL flushing
-	db: Pin<Arc<OptimisticTransactionDB>>,
-	/// Maximum time to wait for collecting a batch
-	timeout: Duration,
-	/// Threshold for deciding whether to wait for more transactions
-	wait_threshold: usize,
-	/// Maximum number of transactions in a single batch
-	max_batch_size: usize,
-}
-
-impl Drop for CommitCoordinator {
-	fn drop(&mut self) {
-		self.shutdown();
-	}
+	/// Handle to the background batcher thread
+	handle: Mutex<Option<thread::JoinHandle<()>>>,
 }
 
 impl CommitCoordinator {
-	/// Create a new commit coordinator and spawn the background batcher task
-	pub fn new(
-		opts: &mut Options,
-		db: Pin<Arc<OptimisticTransactionDB>>,
-		timeout: u64,
-		wait_threshold: usize,
-		max_batch_size: usize,
-	) -> Result<Self> {
-		// Enable manual WAL flushing
-		opts.set_manual_wal_flush(true);
+	/// Pre-configure the commit coordinator
+	pub(super) fn configure(opts: &mut Options) -> Result<bool> {
+		// If the user has enabled both synced transaction writes and background flushing,
+		// we return an error because the two features are incompatible. When sync is enabled,
+		// the transaction commits are always batched together, written to WAL, and then
+		// flushed to disk. This means that the background flushing is redundant.
+		if *cnf::SYNC_DATA && *cnf::ROCKSDB_BACKGROUND_FLUSH {
+			Err(Error::Datastore(
+				"Synced transaction writes and background flushing are incompatible".to_string(),
+			))
+		}
+		// If the user has enabled synced transaction writes and disabled background flushing,
+		// we enable grouped commit. This means that the transaction commits are batched
+		// together, written to WAL, and then flushed to disk. This ensures that transactions
+		// are grouped together and flushed to disk in a single operation, reducing the impact
+		// of disk syncing for each individual transaction. In this mode, when a transaction is
+		// committed, the data is fully durable and will not be lost in the event of a system crash.
+		else if *cnf::SYNC_DATA {
+			// Log the batched group commit configuration options
+			info!(target: TARGET, "Grouped commit: enabled (timeout={}, wait_threshold={}, max_batch_size={})",
+				*cnf::ROCKSDB_GROUPED_COMMIT_TIMEOUT,
+				*cnf::ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD,
+				*cnf::ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE,
+			);
+			// Enable manual WAL flushing
+			opts.set_manual_wal_flush(true);
+			// Continue
+			Ok(true)
+		}
+		// If the user has disabled both synced transaction writes and background flushing,
+		// we defer to the operating system buffers for disk sync. This means that the transaction
+		// commits are written to WAL on commit, but are then flushed to disk by the operating
+		// system at an unspecified time. In the event of a system crash, data may be lost if the
+		// operating system has not yet flushed and synced the data to disk.
+		else {
+			// Log that the batched commit coordinator is disabled
+			info!(target: TARGET, "Batched commit coordinator: disabled");
+			// Continue
+			Ok(false)
+		}
+	}
+	/// Create a new commit coordinator
+	pub fn new(db: Pin<Arc<OptimisticTransactionDB>>) -> Result<Self> {
+		// Get the batched commit configuration options
+		let timeout = *cnf::ROCKSDB_GROUPED_COMMIT_TIMEOUT;
+		let wait_threshold = *cnf::ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD;
+		let max_batch_size = *cnf::ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE;
 		// Create shared state with pre-allocated buffer
 		let shared = Arc::new(SharedState {
 			buffer: Mutex::new(Vec::with_capacity(max_batch_size)),
@@ -78,28 +156,20 @@ impl CommitCoordinator {
 			max_batch_size,
 			timeout: Duration::from_nanos(timeout),
 		};
-		// Spawn the background thread
-		let res = thread::Builder::new().name("rocksdb-commit-coordinator".to_string()).spawn(
-			move || {
+		// Spawn the background commit coordinator thread
+		let handle = thread::Builder::new()
+			.name("rocksdb-commit-coordinator".to_string())
+			.spawn(move || {
 				batcher.run();
-			},
-		);
-		// Catch any thread spawning errors
-		if res.is_err() {
-			return Err(Error::Datastore(
-				"failed to spawn RocksDB commit coordinator thread".to_string(),
-			));
-		}
-		// Return the commit coordinator
+			})
+			.map_err(|_| {
+				Error::Datastore("failed to spawn RocksDB commit coordinator thread".to_string())
+			})?;
+		// Create a new commit coordinator
 		Ok(Self {
 			shared,
+			handle: Mutex::new(Some(handle)),
 		})
-	}
-
-	/// Signal shutdown to the batcher thread
-	fn shutdown(&self) {
-		*self.shared.shutdown.lock() = true;
-		self.shared.condvar.notify_all();
 	}
 
 	/// Submit a transaction for grouped commit
@@ -129,6 +199,65 @@ impl CommitCoordinator {
 		rx.await
 			.map_err(|_| Error::Transaction("commit coordinator response channel closed".into()))?
 	}
+
+	/// Shutdown the commit coordinator
+	pub fn shutdown(&self) -> Result<()> {
+		// Signal shutdown
+		*self.shared.shutdown.lock() = true;
+		// Notify the batcher
+		self.shared.condvar.notify_all();
+		// Wait for thread to finish
+		if let Some(handle) = self.handle.lock().take() {
+			let _ = handle.join();
+		}
+		// All good
+		Ok(())
+	}
+}
+
+/// Background worker thread that processes commit requests in batches.
+///
+/// The `CommitBatcher` runs in a dedicated thread and implements the core batching logic
+/// for grouped transaction commits. It continuously receives commit requests from the
+/// [`CommitCoordinator`], accumulates them into batches, and performs a single WAL flush
+/// for the entire batch to minimize disk synchronization overhead.
+///
+/// # Thread Safety
+///
+/// The batcher communicates with producer threads (submitting transactions) through
+/// a shared buffer protected by a mutex and condition variable. This allows multiple
+/// concurrent transactions to be queued while the batcher processes batches atomically.
+///
+/// # Batching Algorithm
+///
+/// The batcher implements an adaptive strategy based on the current transaction load:
+///
+/// 1. **Wait for work**: The batcher sleeps on a condition variable until transactions arrive
+/// 2. **Collect initial batch**: Drains up to `max_batch_size` transactions from the buffer
+/// 3. **Adaptive waiting**:
+///    - If batch size < `wait_threshold`: Process immediately (optimize for latency)
+///    - If batch size ≥ `wait_threshold` and < `max_batch_size`: Wait up to `timeout` for more
+///      transactions to arrive (optimize for throughput)
+///    - If batch size ≥ `max_batch_size`: Process immediately (prevent unbounded growth)
+/// 4. **Commit batch**: Commit all transactions individually (optimistic locking validation)
+/// 5. **Flush WAL**: Perform a single `flush_wal(true)` to sync all commits to disk
+/// 6. **Send results**: Notify all waiting callers through their response channels
+///
+/// # Shutdown
+///
+/// The batcher monitors the shutdown flag and gracefully terminates after processing
+/// all remaining transactions in the buffer.
+struct CommitBatcher {
+	/// Shared state for receiving commit requests
+	shared: Arc<SharedState>,
+	/// Reference to the database for explicit WAL flushing
+	db: Pin<Arc<OptimisticTransactionDB>>,
+	/// Maximum time to wait for collecting a batch
+	timeout: Duration,
+	/// Threshold for deciding whether to wait for more transactions
+	wait_threshold: usize,
+	/// Maximum number of transactions in a single batch
+	max_batch_size: usize,
 }
 
 impl CommitBatcher {
