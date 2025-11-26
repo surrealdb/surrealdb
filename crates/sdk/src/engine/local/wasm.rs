@@ -152,11 +152,26 @@ pub(crate) async fn run_router(
 				};
 			match session_id {
 				SessionId::Initial(session_id) => {
-					router_state.sessions.insert(session_id, Ok(SessionState::default()));
+					let mut state = SessionState::default();
+					state.session.get_mut().id = Some(session_id.to_string());
+					router_state.sessions.insert(session_id, Ok(state));
 				}
 				SessionId::Clone { old, new } => {
 					let state = match router_state.sessions.get(&old) {
-						Some(entry) => entry.value().clone(),
+						Some(entry) => match entry.value() {
+							Ok(state) => {
+								let mut session = state.session.lock().await.clone();
+								session.id = Some(new.to_string());
+								let mut cloned_state = SessionState {
+									session: Mutex::new(session),
+									vars: Mutex::new(state.vars.lock().await.clone()),
+									transactions: DashMap::new(),
+									live_queries: DashMap::new(),
+								};
+								Ok(cloned_state)
+							}
+							Err(e) => Err(e.clone()),
+						},
 						None => Err(SessionCloneError(old)),
 					};
 					router_state.sessions.insert(new, state);

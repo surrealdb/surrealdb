@@ -157,16 +157,20 @@ pub(crate) async fn run_router(
 				};
 				match session_id {
 					SessionId::Initial(session_id) => {
-						router_state.sessions.insert(session_id, Ok(Arc::new(SessionState::default())));
+						router_state.sessions.insert(session_id, Ok(Arc::new(SessionState::new(session_id))));
 					}
 					SessionId::Clone { old, new } => {
 						let state = match router_state.sessions.get(&Some(old)) {
-							Ok(state) => Ok(Arc::new(SessionState {
-								session: RwLock::new(state.session.read().await.clone()),
-								vars: RwLock::new(state.vars.read().await.clone()),
-								transactions: HashMap::new(),
-								live_queries: HashMap::new()
-							})),
+							Ok(state) => {
+								let mut session = state.session.read().await.clone();
+								session.id = Some(new);
+								Ok(Arc::new(SessionState {
+									session: RwLock::new(session),
+									vars: RwLock::new(state.vars.read().await.clone()),
+									transactions: HashMap::new(),
+									live_queries: HashMap::new()
+								}))
+							}
 							Err(error) => Err(error),
 						};
 						router_state.sessions.insert(new, state);

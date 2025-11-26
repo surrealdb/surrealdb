@@ -450,6 +450,17 @@ pub(crate) struct SessionState {
 }
 
 impl SessionState {
+	fn new(id: Uuid) -> Self {
+		let mut session = Session::default().with_rt(true);
+		session.id = Some(id);
+		Self {
+			session: RwLock::new(session),
+			vars: RwLock::new(Variables::default()),
+			transactions: HashMap::new(),
+			live_queries: HashMap::new(),
+		}
+	}
+
 	fn insert_txn(&self, id: Uuid, arc: Arc<Transaction>) {
 		self.transactions.pin().insert(id, arc);
 	}
@@ -472,17 +483,6 @@ impl SessionState {
 
 	fn remove_live_query(&self, id: &Uuid) {
 		self.live_queries.pin().remove(id);
-	}
-}
-
-impl Default for SessionState {
-	fn default() -> Self {
-		Self {
-			session: RwLock::new(Session::default().with_rt(true)),
-			vars: RwLock::new(Variables::default()),
-			transactions: HashMap::new(),
-			live_queries: HashMap::new(),
-		}
 	}
 }
 
