@@ -155,13 +155,6 @@ user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
 
-[[publisher.bytes]]
-version = "1.10.1"
-when = "2025-03-05"
-user-id = 6741
-user-login = "Darksonn"
-user-name = "Alice Ryhl"
-
 [[publisher.bzip2]]
 version = "0.5.2"
 when = "2025-02-28"
@@ -1125,15 +1118,15 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb]]
-version = "3.0.0-alpha.14"
-when = "2025-11-20"
+version = "3.0.0-alpha.16"
+when = "2025-11-24"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-core]]
-version = "3.0.0-alpha.14"
-when = "2025-11-20"
+version = "3.0.0-alpha.16"
+when = "2025-11-24"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
@@ -1160,50 +1153,50 @@ user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-types]]
-version = "3.0.0-alpha.14"
-when = "2025-11-20"
+version = "3.0.0-alpha.16"
+when = "2025-11-24"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealdb-types-derive]]
-version = "3.0.0-alpha.14"
-when = "2025-11-20"
+version = "3.0.0-alpha.16"
+when = "2025-11-24"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealism]]
-version = "0.1.2"
-when = "2025-11-20"
+version = "0.1.3"
+when = "2025-11-24"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealism-cli]]
-version = "0.1.2"
-when = "2025-11-20"
+version = "0.1.3"
+when = "2025-11-24"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealism-macros]]
-version = "0.1.2"
-when = "2025-11-20"
+version = "0.1.3"
+when = "2025-11-24"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealism-runtime]]
-version = "0.1.2"
-when = "2025-11-20"
+version = "0.1.3"
+when = "2025-11-24"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
 
 [[publisher.surrealism-types]]
-version = "0.1.2"
-when = "2025-11-20"
+version = "0.1.3"
+when = "2025-11-24"
 user-id = 145457
 user-login = "tobiemh"
 user-name = "Tobie Morgan Hitchcock"
