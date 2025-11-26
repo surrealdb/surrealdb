@@ -106,6 +106,17 @@ impl CommitCoordinator {
 				"Synced transaction writes and background flushing are incompatible".to_string(),
 			))
 		}
+		// If the user has specifically disabled grouped commit, skip coordinator setup entirely.
+		// In this mode, when SYNC_DATA is enabled, each transaction will commit individually and
+		// perform its own WAL flush to disk. This provides traditional per-transaction durability
+		// with potentially lower latency for single transactions, at the cost of reduced throughput
+		// under high concurrent load (more frequent fsync operations).
+		else if !*cnf::ROCKSDB_GROUPED_COMMIT {
+			// Log the batched group commit option is disabled
+			info!(target: TARGET, "Grouped commit coordinator: disabled");
+			// Continue
+			return Ok(false);
+		}
 		// If the user has enabled synced transaction writes and disabled background flushing,
 		// we enable grouped commit. This means that the transaction commits are batched
 		// together, written to WAL, and then flushed to disk. This ensures that transactions
@@ -131,7 +142,7 @@ impl CommitCoordinator {
 		// operating system has not yet flushed and synced the data to disk.
 		else {
 			// Log that the batched commit coordinator is disabled
-			info!(target: TARGET, "Batched commit coordinator: disabled");
+			info!(target: TARGET, "Grouped commit coordinator: disabled");
 			// Continue
 			Ok(false)
 		}

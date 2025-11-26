@@ -230,6 +230,15 @@ pub(super) static ROCKSDB_DELETION_FACTORY_RATIO: LazyLock<f64> =
 pub(super) static ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE: LazyLock<u64> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE", u64, 0);
 
+/// Whether to enable grouped commit when sync is enabled (default: true)
+/// When enabled, multiple transaction commits are batched together and flushed to disk with a
+/// single fsync operation, improving throughput. When disabled, each transaction is committed
+/// and synced individually, which may provide lower latency for single transactions at the cost
+/// of reduced throughput under high load.
+/// This setting is only used when SYNC_DATA is enabled and ROCKSDB_BACKGROUND_FLUSH is disabled.
+pub(super) static ROCKSDB_GROUPED_COMMIT: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_ROCKSDB_GROUPED_COMMIT", bool, true);
+
 /// The maximum wait time in microseconds before forcing a grouped commit (default: 500µs)
 /// This timeout ensures that transactions don't wait indefinitely when there's low concurrency.
 /// The value balances between transaction latency and write throughput.

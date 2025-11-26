@@ -436,8 +436,12 @@ impl Transactable for Transaction {
 			// Use grouped commit coordinator for batching
 			coordinator.commit(inner).await?;
 		} else {
-			// Direct commit (traditional behavior)
+			// Commit the transaction directly without grouped commit
 			inner.commit()?;
+			// If synced writes are enabled, flush the WAL to disk
+			if *cnf::SYNC_DATA {
+				self.db.flush_wal(true)?;
+			}
 		}
 		// Perform compaction if necessary
 		if self.is_restricted(true) && self.contains_deletes() {
