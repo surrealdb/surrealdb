@@ -8,6 +8,7 @@ use crate::sql::{
 use crate::syn;
 use crate::syn::parser::{Parser, ParserSettings};
 use crate::types::PublicGeometry;
+use surrealdb_types::ToSql;
 
 #[test]
 fn parse_index_expression() {
@@ -290,7 +291,7 @@ fn scientific_decimal() {
 	})
 	.unwrap();
 	assert!(matches!(res, Expr::Literal(Literal::Decimal(_))));
-	assert_eq!(res.to_string(), "0.00000097dec")
+	assert_eq!(res.to_sql(), "0.00000097dec")
 }
 
 #[test]
@@ -300,7 +301,7 @@ fn scientific_number() {
 	})
 	.unwrap();
 	assert!(matches!(res, Expr::Literal(Literal::Float(_))));
-	assert_eq!(res.to_string(), "0.000097f")
+	assert_eq!(res.to_sql(), "0.000097f")
 }
 
 #[test]

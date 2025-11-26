@@ -574,11 +574,7 @@ impl ToSql for Value {
 		match self {
 			Value::None => f.push_str("NONE"),
 			Value::Null => f.push_str("NULL"),
-			Value::Bool(v) => f.push_str(if *v {
-				"true"
-			} else {
-				"false"
-			}),
+			Value::Bool(v) => v.fmt_sql(f, sql_fmt),
 			Value::Number(v) => v.fmt_sql(f, sql_fmt),
 			Value::String(v) => write_sql!(f, sql_fmt, "{}", QuoteStr(v)),
 			Value::Duration(v) => v.fmt_sql(f, sql_fmt),

@@ -362,7 +362,7 @@ mod tests {
 		let sql = "test:id";
 		let res = record(sql);
 		let out = res.unwrap();
-		assert_eq!("test:id", format!("{}", out));
+		assert_eq!("test:id", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
@@ -377,7 +377,7 @@ mod tests {
 		let sql = "test:001";
 		let res = record(sql);
 		let out = res.unwrap();
-		assert_eq!("test:1", format!("{}", out));
+		assert_eq!("test:1", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
@@ -452,7 +452,7 @@ mod tests {
 		let sql::Expr::Literal(sql::Literal::RecordId(out)) = res else {
 			panic!()
 		};
-		assert_eq!("test:1", format!("{}", out));
+		assert_eq!("test:1", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
@@ -466,7 +466,7 @@ mod tests {
 		let sql::Expr::Literal(sql::Literal::RecordId(out)) = res else {
 			panic!()
 		};
-		assert_eq!("test:1", format!("{}", out));
+		assert_eq!("test:1", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
@@ -481,7 +481,7 @@ mod tests {
 		let sql = "`test`:`id`";
 		let res = record(sql);
 		let out = res.unwrap();
-		assert_eq!("test:id", format!("{}", out));
+		assert_eq!("test:id", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
@@ -496,7 +496,7 @@ mod tests {
 		let sql = "⟨test⟩:⟨id⟩";
 		let res = record(sql);
 		let out = res.unwrap();
-		assert_eq!("test:id", format!("{}", out));
+		assert_eq!("test:id", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
@@ -511,7 +511,7 @@ mod tests {
 		let sql = "test:{ location: 'GBR', year: 2022 }";
 		let res = record(sql);
 		let out = res.unwrap();
-		assert_eq!("test:{ location: 'GBR', year: 2022 }", format!("{}", out));
+		assert_eq!("test:{ location: 'GBR', year: 2022 }", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {
@@ -535,7 +535,7 @@ mod tests {
 		let sql = "test:['GBR', 2022]";
 		let res = record(sql);
 		let out = res.unwrap();
-		assert_eq!("test:['GBR', 2022]", format!("{}", out));
+		assert_eq!("test:['GBR', 2022]", out.to_sql());
 		assert_eq!(
 			out,
 			RecordIdLit {

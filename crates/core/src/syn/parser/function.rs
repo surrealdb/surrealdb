@@ -334,12 +334,13 @@ impl Parser<'_> {
 mod test {
 	use super::*;
 	use crate::{sql, syn};
+	use surrealdb_types::ToSql;
 
 	#[test]
 	fn function_single() {
 		let sql = "count()";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("count()", format!("{}", out));
+		assert_eq!("count()", out.to_sql());
 		let Expr::FunctionCall(f) = out else {
 			panic!()
 		};
@@ -351,7 +352,7 @@ mod test {
 	fn function_single_not() {
 		let sql = "not(10)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("not(10)", format!("{}", out));
+		assert_eq!("not(10)", out.to_sql());
 		let Expr::FunctionCall(f) = out else {
 			panic!()
 		};
@@ -363,7 +364,7 @@ mod test {
 	fn function_module() {
 		let sql = "rand::uuid()";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("rand::uuid()", format!("{}", out));
+		assert_eq!("rand::uuid()", out.to_sql());
 		let Expr::FunctionCall(f) = out else {
 			panic!()
 		};
@@ -375,7 +376,7 @@ mod test {
 	fn function_arguments() {
 		let sql = "string::is_numeric(null)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("string::is_numeric(NULL)", format!("{}", out));
+		assert_eq!("string::is_numeric(NULL)", out.to_sql());
 		let Expr::FunctionCall(f) = out else {
 			panic!()
 		};
@@ -387,7 +388,7 @@ mod test {
 	fn function_simple_together() {
 		let sql = "function() { return 'test'; }";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("function() { return 'test'; }", format!("{}", out));
+		assert_eq!("function() { return 'test'; }", out.to_sql());
 		let Expr::FunctionCall(f) = out else {
 			panic!()
 		};
@@ -399,7 +400,7 @@ mod test {
 	fn function_simple_whitespace() {
 		let sql = "function () { return 'test'; }";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("function() { return 'test'; }", format!("{}", out));
+		assert_eq!("function() { return 'test'; }", out.to_sql());
 		let Expr::FunctionCall(f) = out else {
 			panic!()
 		};
@@ -413,7 +414,7 @@ mod test {
 		let out = syn::expr(sql).unwrap();
 		assert_eq!(
 			"function() { return this.tags.filter(t => { return t.length > 3; }); }",
-			format!("{}", out)
+			out.to_sql()
 		);
 		let Expr::FunctionCall(f) = out else {
 			panic!()
@@ -438,7 +439,7 @@ mod test {
 		let out = syn::expr(sql).unwrap();
 		assert_eq!(
 			"ml::insurance::prediction<1.0.0>({ age: 18, disposable_income: 'yes', purchased_before: true })",
-			out.to_string()
+			out.to_sql()
 		);
 	}
 
@@ -457,7 +458,7 @@ mod test {
 		let out = syn::parse(sql).unwrap();
 		assert_eq!(
 			"SELECT name, age, ml::insurance::prediction<1.0.0>({ age: age, disposable_income: math::round(income), purchased_before: array::len(->purchased->property) > 0 }) AS likely_to_buy FROM person:tobie;",
-			out.to_string()
+			out.to_sql()
 		);
 	}
 
@@ -465,14 +466,14 @@ mod test {
 	fn ml_model_with_mutiple_arguments() {
 		let sql = "ml::insurance::prediction<1.0.0>(1,2,3,4,)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("ml::insurance::prediction<1.0.0>(1, 2, 3, 4)", out.to_string());
+		assert_eq!("ml::insurance::prediction<1.0.0>(1, 2, 3, 4)", out.to_sql());
 	}
 
 	#[test]
 	fn script_basic() {
 		let sql = "function(){return true;}";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("function() {return true;}", format!("{}", out));
+		assert_eq!("function() {return true;}", out.to_sql());
 		let Expr::FunctionCall(f) = out else {
 			panic!()
 		};
@@ -486,7 +487,7 @@ mod test {
 		let out = syn::expr(sql).unwrap();
 		assert_eq!(
 			"function() {return { test: true, something: { other: true } };}",
-			format!("{}", out)
+			out.to_sql()
 		);
 		let Expr::FunctionCall(f) = out else {
 			panic!()
@@ -507,7 +508,7 @@ mod test {
 		let out = syn::expr(sql).unwrap();
 		assert_eq!(
 			"function() {return this.values.map(v => `This value is ${Number(v * 3)}`);}",
-			format!("{}", out)
+					out.to_sql()
 		);
 		let Expr::FunctionCall(f) = out else {
 			panic!()
@@ -528,7 +529,7 @@ mod test {
 		let out = syn::expr(sql).unwrap();
 		assert_eq!(
 			r#"function() {return { test: true, some: { object: "some text with uneven {{{ {} \" brackets", else: false } };}"#,
-			format!("{}", out)
+			out.to_sql()
 		);
 		let Expr::FunctionCall(f) = out else {
 			panic!()
@@ -567,7 +568,7 @@ mod test {
 		let sql = "function() {".to_owned() + body + "}";
 		let out = syn::expr(&sql).unwrap();
 
-		assert_eq!(sql, format!("{}", out));
+		assert_eq!(sql, out.to_sql());
 		let Expr::FunctionCall(f) = out else {
 			panic!()
 		};

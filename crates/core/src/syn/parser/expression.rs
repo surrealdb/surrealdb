@@ -692,12 +692,13 @@ impl Parser<'_> {
 mod test {
 	use crate::sql::{BinaryOperator, Expr, Kind, Literal, PrefixOperator};
 	use crate::syn;
+	use surrealdb_types::ToSql;
 
 	#[test]
 	fn cast_int() {
 		let sql = "<int>1.2345";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("<int> 1.2345f", format!("{}", out));
+		assert_eq!("<int> 1.2345f", out.to_sql());
 		assert_eq!(
 			out,
 			Expr::Prefix {
@@ -711,7 +712,7 @@ mod test {
 	fn cast_string() {
 		let sql = "<string>1.2345";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("<string> 1.2345f", format!("{}", out));
+		assert_eq!("<string> 1.2345f", out.to_sql());
 		assert_eq!(
 			out,
 			Expr::Prefix {
@@ -725,77 +726,77 @@ mod test {
 	fn expression_statement() {
 		let sql = "true AND false";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("true AND false", format!("{}", out));
+		assert_eq!("true AND false", out.to_sql());
 	}
 
 	#[test]
 	fn expression_left_opened() {
 		let sql = "3 * 3 * 3 = 27";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("3 * 3 * 3 = 27", format!("{}", out));
+		assert_eq!("3 * 3 * 3 = 27", out.to_sql());
 	}
 
 	#[test]
 	fn expression_left_closed() {
 		let sql = "(3 * 3 * 3) = 27";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("3 * 3 * 3 = 27", format!("{}", out));
+		assert_eq!("3 * 3 * 3 = 27", out.to_sql());
 	}
 
 	#[test]
 	fn expression_right_opened() {
 		let sql = "27 = 3 * 3 * 3";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("27 = 3 * 3 * 3", format!("{}", out));
+		assert_eq!("27 = 3 * 3 * 3", out.to_sql());
 	}
 
 	#[test]
 	fn expression_right_closed() {
 		let sql = "27 = (3 * 3 * 3)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("27 = 3 * 3 * 3", format!("{}", out));
+		assert_eq!("27 = 3 * 3 * 3", out.to_sql());
 	}
 
 	#[test]
 	fn expression_both_opened() {
 		let sql = "3 * 3 * 3 = 3 * 3 * 3";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("3 * 3 * 3 = 3 * 3 * 3", format!("{}", out));
+		assert_eq!("3 * 3 * 3 = 3 * 3 * 3", out.to_sql());
 	}
 
 	#[test]
 	fn expression_both_closed() {
 		let sql = "(3 * 3 * 3) = (3 * 3 * 3)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("3 * 3 * 3 = 3 * 3 * 3", format!("{}", out));
+		assert_eq!("3 * 3 * 3 = 3 * 3 * 3", out.to_sql());
 	}
 
 	#[test]
 	fn expression_closed_required() {
 		let sql = "(3 + 3) * 3";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("(3 + 3) * 3", format!("{}", out));
+		assert_eq!("(3 + 3) * 3", out.to_sql());
 	}
 
 	#[test]
 	fn range_closed_required() {
 		let sql = "(1..2)..3";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("(1..2)..3", format!("{}", out));
+		assert_eq!("(1..2)..3", out.to_sql());
 	}
 
 	#[test]
 	fn expression_unary() {
 		let sql = "-a";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!(sql, format!("{}", out));
+		assert_eq!(sql, out.to_sql());
 	}
 
 	#[test]
 	fn expression_with_unary() {
 		let sql = "-(5) + 5";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("-5 + 5", format!("{}", out));
+		assert_eq!("-5 + 5", out.to_sql());
 	}
 
 	#[test]

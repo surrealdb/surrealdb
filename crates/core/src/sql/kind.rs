@@ -666,8 +666,8 @@ mod tests {
 	#[case::either(Kind::Either(vec![Kind::String, Kind::Int]), "string | int")]
 	#[case::file_empty(Kind::File(vec![]), "file")]
 	#[case::file_single(Kind::File(vec!["bucket".to_string()]), "file<bucket>")]
-	fn test_kind_display(#[case] kind: Kind, #[case] expected: &str) {
-		assert_eq!(kind.to_string(), expected);
+	fn test_kind_to_sql(#[case] kind: Kind, #[case] expected: &str) {
+		assert_eq!(kind.to_sql(), expected);
 	}
 
 	#[rstest]

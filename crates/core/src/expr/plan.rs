@@ -46,3 +46,10 @@ impl surrealdb_types::ToSql for TopLevelExpr {
 		sql_expr.fmt_sql(f, fmt);
 	}
 }
+
+impl surrealdb_types::ToSql for LogicalPlan {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		let sql_ast: crate::sql::Ast = self.clone().into();
+		sql_ast.fmt_sql(f, fmt);
+	}
+}

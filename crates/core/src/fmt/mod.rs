@@ -297,9 +297,9 @@ mod tests {
 	#[test]
 	fn pretty_query() {
 		let query = parse("SELECT * FROM {foo: [1, 2, 3]};").unwrap();
-		assert_eq!(format!("{query}"), "SELECT * FROM { foo: [1, 2, 3] };");
+		assert_eq!(query.to_sql(), "SELECT * FROM { foo: [1, 2, 3] };");
 		assert_eq!(
-			format!("{:#}", query),
+			query.to_sql_pretty(),
 			"SELECT * FROM {\n\tfoo: [\n\t\t1,\n\t\t2,\n\t\t3\n\t]\n};"
 		);
 	}
@@ -308,11 +308,11 @@ mod tests {
 	fn pretty_define_query() {
 		let query = parse("DEFINE TABLE test SCHEMAFULL PERMISSIONS FOR create, update, delete NONE FOR select WHERE public = true;").unwrap();
 		assert_eq!(
-			format!("{}", query),
+			query.to_sql(),
 			"DEFINE TABLE test TYPE NORMAL SCHEMAFULL PERMISSIONS FOR select WHERE public = true, FOR create, update, delete NONE;"
 		);
 		assert_eq!(
-			format!("{:#}", query),
+			query.to_sql_pretty(),
 			"DEFINE TABLE test TYPE NORMAL SCHEMAFULL\n\tPERMISSIONS\n\t\tFOR select\n\t\t\tWHERE public = true\n\t\tFOR create, update, delete NONE\n;"
 		);
 	}

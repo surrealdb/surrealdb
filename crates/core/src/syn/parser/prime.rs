@@ -610,26 +610,27 @@ impl Parser<'_> {
 mod tests {
 	use super::*;
 	use crate::syn;
+	use surrealdb_types::ToSql;
 
 	#[test]
 	fn subquery_expression_statement() {
 		let sql = "(1 + 2 + 3)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("1 + 2 + 3", format!("{}", out))
+		assert_eq!("1 + 2 + 3", out.to_sql())
 	}
 
 	#[test]
 	fn subquery_ifelse_statement() {
 		let sql = "IF true THEN false END";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("IF true THEN false END", format!("{}", out))
+		assert_eq!("IF true THEN false END", out.to_sql())
 	}
 
 	#[test]
 	fn subquery_select_statement() {
 		let sql = "(SELECT * FROM test)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("SELECT * FROM test", format!("{}", out))
+		assert_eq!("SELECT * FROM test", out.to_sql())
 	}
 
 	#[test]
@@ -638,7 +639,7 @@ mod tests {
 		let out = syn::expr(sql).unwrap();
 		assert_eq!(
 			"DEFINE EVENT foo ON bar WHEN $event = 'CREATE' THEN CREATE x SET y = 1",
-			format!("{}", out)
+			out.to_sql()
 		)
 	}
 
@@ -646,21 +647,21 @@ mod tests {
 	fn subquery_remove_statement() {
 		let sql = "(REMOVE EVENT foo_event ON foo)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("REMOVE EVENT foo_event ON foo", format!("{}", out))
+		assert_eq!("REMOVE EVENT foo_event ON foo", out.to_sql())
 	}
 
 	#[test]
 	fn subquery_insert_statment() {
 		let sql = "(INSERT INTO test [])";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("INSERT INTO test []", format!("{}", out))
+		assert_eq!("INSERT INTO test []", out.to_sql())
 	}
 
 	#[test]
 	fn mock_count() {
 		let sql = "|test:1000|";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("|test:1000|", format!("{}", out));
+		assert_eq!("|test:1000|", out.to_sql());
 		assert_eq!(out, Expr::Mock(Mock::Count(String::from("test"), 1000)));
 	}
 
@@ -668,7 +669,7 @@ mod tests {
 	fn mock_range() {
 		let sql = "|test:1..1000|";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("|test:1..1000|", format!("{}", out));
+		assert_eq!("|test:1..1000|", out.to_sql());
 		assert_eq!(
 			out,
 			Expr::Mock(Mock::Range(String::from("test"), TypedRange::from_range(1..1000)))
@@ -679,7 +680,7 @@ mod tests {
 	fn regex_simple() {
 		let sql = "/test/";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("/test/", format!("{}", out));
+		assert_eq!("/test/", out.to_sql());
 		let Expr::Literal(Literal::Regex(regex)) = out else {
 			panic!()
 		};
@@ -690,7 +691,7 @@ mod tests {
 	fn regex_complex() {
 		let sql = r"/(?i)test\/[a-z]+\/\s\d\w{1}.*/";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!(r"/(?i)test\/[a-z]+\/\s\d\w{1}.*/", format!("{}", out));
+		assert_eq!(r"/(?i)test\/[a-z]+\/\s\d\w{1}.*/", out.to_sql());
 		let Expr::Literal(Literal::Regex(regex)) = out else {
 			panic!()
 		};
@@ -701,25 +702,25 @@ mod tests {
 	fn plain_string() {
 		let sql = r#""hello""#;
 		let out = syn::expr(sql).unwrap();
-		assert_eq!(r#"'hello'"#, format!("{}", out));
+		assert_eq!(r#"'hello'"#, out.to_sql());
 
 		let sql = r#"s"hello""#;
 		let out = syn::expr(sql).unwrap();
-		assert_eq!(r#"'hello'"#, format!("{}", out));
+		assert_eq!(r#"'hello'"#, out.to_sql());
 
 		let sql = r#"s'hello'"#;
 		let out = syn::expr(sql).unwrap();
-		assert_eq!(r#"'hello'"#, format!("{}", out));
+		assert_eq!(r#"'hello'"#, out.to_sql());
 	}
 
 	#[test]
 	fn params() {
 		let sql = "$hello";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("$hello", format!("{}", out));
+		assert_eq!("$hello", out.to_sql());
 
 		let sql = "$__hello";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("$__hello", format!("{}", out));
+		assert_eq!("$__hello", out.to_sql());
 	}
 }

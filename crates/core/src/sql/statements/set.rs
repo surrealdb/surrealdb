@@ -44,13 +44,14 @@ impl From<crate::expr::statements::SetStatement> for SetStatement {
 #[cfg(test)]
 mod tests {
 	use crate::syn;
+	use surrealdb_types::ToSql;
 
 	#[test]
 	fn check_type() {
 		let query = syn::parse("LET $param = 5").unwrap();
-		assert_eq!(format!("{}", query), "LET $param = 5;");
+		assert_eq!(query.to_sql(), "LET $param = 5;");
 
 		let query = syn::parse("LET $param: number = 5").unwrap();
-		assert_eq!(format!("{}", query), "LET $param: number = 5;");
+		assert_eq!(query.to_sql(), "LET $param: number = 5;");
 	}
 }

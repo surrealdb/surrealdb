@@ -2,6 +2,7 @@ use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
 use crate::expr::{Expr, Literal};
 use crate::val::Value;
+use surrealdb_types::ToSql;
 
 impl Value {
 	/// Returns a list of idioms for then entries of a possibly nested value.
@@ -198,7 +199,7 @@ mod tests {
 		let val =
 			val.every(Some(&Idiom::from(syn::idiom("test").unwrap())), true, ArrayBehaviour::Full);
 		for v in val.iter() {
-			println!("{}", v);
+			println!("{}", v.to_sql());
 		}
 
 		let res: Vec<Idiom> = vec![
