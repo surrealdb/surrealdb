@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::sync::atomic::AtomicI64;
 
 use tokio::sync::watch;
 use wasm_bindgen_futures::spawn_local;
@@ -164,7 +163,6 @@ impl conn::Sealed for Any {
 				features,
 				config,
 				sender: route_tx,
-				last_id: AtomicI64::new(0),
 			};
 
 			Ok((router, waiter, session_clone).into())

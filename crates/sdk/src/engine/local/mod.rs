@@ -412,7 +412,6 @@ impl Surreal<Db> {
 	}
 }
 
-#[cfg(not(target_family = "wasm"))]
 struct RouterState {
 	kvs: Arc<Datastore>,
 	sessions: Sessions,
@@ -596,7 +595,6 @@ async fn kill_live_query(
 	Ok(results)
 }
 
-#[cfg(not(target_family = "wasm"))]
 async fn router(
 	kvs: &Arc<Datastore>,
 	state: &SessionState,
