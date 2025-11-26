@@ -85,9 +85,9 @@ impl ToSql for Literal {
 					write_sql!(f, sql_fmt, "{float}")
 				}
 			}
-		Literal::Integer(x) => write_sql!(f, sql_fmt, "{x}"),
-		Literal::Decimal(d) => write_sql!(f, sql_fmt, "{d}"),
-		Literal::String(strand) => write_sql!(f, sql_fmt, "{}", QuoteStr(strand)),
+			Literal::Integer(x) => write_sql!(f, sql_fmt, "{x}"),
+			Literal::Decimal(d) => write_sql!(f, sql_fmt, "{d}"),
+			Literal::String(strand) => write_sql!(f, sql_fmt, "{}", QuoteStr(strand)),
 			Literal::Bytes(bytes) => write_sql!(f, sql_fmt, "{}", bytes.to_sql()),
 			Literal::Regex(regex) => write_sql!(f, sql_fmt, "{}", regex.to_sql()),
 			Literal::RecordId(record_id_lit) => record_id_lit.fmt_sql(f, sql_fmt),

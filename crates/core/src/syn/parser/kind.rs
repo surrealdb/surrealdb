@@ -272,7 +272,7 @@ impl Parser<'_> {
 mod tests {
 	use reblessive::Stack;
 	use rstest::rstest;
-use surrealdb_types::ToSql;
+	use surrealdb_types::ToSql;
 
 	use super::*;
 

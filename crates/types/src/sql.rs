@@ -192,20 +192,20 @@ pub fn fmt_sql_key_value<'a, V: ToSql + 'a>(
 pub use surrealdb_types_derive::write_sql;
 
 impl ToSql for String {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		f.push_str(self.as_str());
 	}
 }
 
 impl ToSql for str {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		f.push_str(self);
 	}
 }
 
-impl<'a> ToSql for &'a str {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		f.push_str(*self);
+impl ToSql for &str {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(self);
 	}
 }
 

@@ -36,7 +36,7 @@ impl Iterator for Escape<'_> {
 }
 
 impl ToSql for Escape<'_> {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		for x in self.clone() {
 			f.push(x);
 		}

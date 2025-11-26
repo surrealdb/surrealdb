@@ -332,9 +332,10 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod test {
+	use surrealdb_types::ToSql;
+
 	use super::*;
 	use crate::{sql, syn};
-	use surrealdb_types::ToSql;
 
 	#[test]
 	fn function_single() {
@@ -485,10 +486,7 @@ mod test {
 	fn script_object() {
 		let sql = "function(){return { test: true, something: { other: true } };}";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!(
-			"function() {return { test: true, something: { other: true } };}",
-			out.to_sql()
-		);
+		assert_eq!("function() {return { test: true, something: { other: true } };}", out.to_sql());
 		let Expr::FunctionCall(f) = out else {
 			panic!()
 		};
@@ -508,7 +506,7 @@ mod test {
 		let out = syn::expr(sql).unwrap();
 		assert_eq!(
 			"function() {return this.values.map(v => `This value is ${Number(v * 3)}`);}",
-					out.to_sql()
+			out.to_sql()
 		);
 		let Expr::FunctionCall(f) = out else {
 			panic!()

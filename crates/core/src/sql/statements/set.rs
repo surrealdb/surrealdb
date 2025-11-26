@@ -43,8 +43,9 @@ impl From<crate::expr::statements::SetStatement> for SetStatement {
 
 #[cfg(test)]
 mod tests {
-	use crate::syn;
 	use surrealdb_types::ToSql;
+
+	use crate::syn;
 
 	#[test]
 	fn check_type() {

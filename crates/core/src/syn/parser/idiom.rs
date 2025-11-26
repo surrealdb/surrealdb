@@ -738,11 +738,12 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_types::ToSql;
+
 	use super::*;
 	use crate::sql::lookup::LookupSubject;
 	use crate::sql::{self, BinaryOperator, RecordIdKeyLit, RecordIdLit};
 	use crate::syn;
-	use surrealdb_types::ToSql;
 
 	#[test]
 	fn graph_in() {

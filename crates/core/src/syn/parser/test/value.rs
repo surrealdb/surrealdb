@@ -1,5 +1,6 @@
 use reblessive::Stack;
 use rust_decimal::Decimal;
+use surrealdb_types::ToSql;
 
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{
@@ -8,7 +9,6 @@ use crate::sql::{
 use crate::syn;
 use crate::syn::parser::{Parser, ParserSettings};
 use crate::types::PublicGeometry;
-use surrealdb_types::ToSql;
 
 #[test]
 fn parse_index_expression() {

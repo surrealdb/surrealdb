@@ -1,8 +1,9 @@
+use surrealdb_types::ToSql;
+
 use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
 use crate::expr::{Expr, Literal};
 use crate::val::Value;
-use surrealdb_types::ToSql;
 
 impl Value {
 	/// Returns a list of idioms for then entries of a possibly nested value.

@@ -608,9 +608,10 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_types::ToSql;
+
 	use super::*;
 	use crate::syn;
-	use surrealdb_types::ToSql;
 
 	#[test]
 	fn subquery_expression_statement() {

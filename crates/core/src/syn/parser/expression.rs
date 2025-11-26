@@ -690,9 +690,10 @@ impl Parser<'_> {
 
 #[cfg(test)]
 mod test {
+	use surrealdb_types::ToSql;
+
 	use crate::sql::{BinaryOperator, Expr, Kind, Literal, PrefixOperator};
 	use crate::syn;
-	use surrealdb_types::ToSql;
 
 	#[test]
 	fn cast_int() {

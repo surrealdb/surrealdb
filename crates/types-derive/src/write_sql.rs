@@ -65,7 +65,7 @@ fn parse_format_string(format_str: &str) -> Result<Vec<FormatPart>, String> {
 				let mut placeholder_content = String::new();
 				let mut found_close = false;
 
-				while let Some(inner_ch) = chars.next() {
+				for inner_ch in chars.by_ref() {
 					if inner_ch == '}' {
 						found_close = true;
 						break;
