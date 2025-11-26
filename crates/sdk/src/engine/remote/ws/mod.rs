@@ -14,13 +14,14 @@ use async_channel::Sender;
 use indexmap::IndexMap;
 use surrealdb_core::dbs::QueryResult;
 use surrealdb_core::iam::token::Token;
+use surrealdb_core::rpc::DbResultError;
 use surrealdb_types::{Notification, Value};
 use trice::Instant;
 use uuid::Uuid;
 
 use crate::conn::Command;
 use crate::opt::IntoEndpoint;
-use crate::{Connect, Result, Surreal};
+use crate::{Connect, Surreal};
 
 pub(crate) const PATH: &str = "rpc";
 const PING_INTERVAL: Duration = Duration::from_secs(5);
@@ -48,6 +49,7 @@ enum RequestEffect {
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 enum ReplayMethod {
+	Attach,
 	Use,
 	Signup,
 	Signin,
@@ -59,26 +61,25 @@ struct PendingRequest {
 	// Does resolving this request has some effects.
 	effect: RequestEffect,
 	// The channel to send the result of the request into.
-	response_channel:
-		Sender<std::result::Result<Vec<QueryResult>, surrealdb_core::rpc::DbResultError>>,
+	response_channel: Sender<Result<Vec<QueryResult>, DbResultError>>,
 }
 
 /// Per-session state for WebSocket connections
 #[derive(Default)]
-struct WsSessionState {
+struct SessionState {
 	/// Vars currently set by the set method for this session
 	vars: IndexMap<String, Value>,
 	/// Messages which ought to be replayed on a reconnect for this session
 	replay: IndexMap<ReplayMethod, Command>,
 	/// Pending live queries
-	live_queries: HashMap<Uuid, Sender<Result<Notification>>>,
+	live_queries: HashMap<Uuid, Sender<crate::Result<Notification>>>,
 	/// Send requests which are still awaiting an awnser.
 	pending_requests: HashMap<i64, PendingRequest>,
 	/// The last ID used for a request
 	last_id: i64,
 }
 
-impl Clone for WsSessionState {
+impl Clone for SessionState {
 	fn clone(&self) -> Self {
 		Self {
 			vars: self.vars.clone(),
@@ -92,7 +93,7 @@ impl Clone for WsSessionState {
 
 struct RouterState<Sink, Stream> {
 	/// Per-session state (vars and replay commands)
-	sessions: HashMap<uuid::Uuid, WsSessionState>,
+	sessions: HashMap<Uuid, SessionState>,
 	/// The last time a message was received from the server.
 	last_activity: Instant,
 	/// The sink into which messages are send to surrealdb

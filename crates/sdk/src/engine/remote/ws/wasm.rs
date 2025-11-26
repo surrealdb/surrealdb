@@ -77,18 +77,15 @@ impl conn::Sealed for Client {
 }
 
 /// Send an attach RPC request to the server
-async fn attach_session_request(
-	session_id: uuid::Uuid,
-	sink: &mut MessageSink,
-) {
+async fn attach_session_request(session_id: uuid::Uuid, sink: &mut MessageSink) {
 	use surrealdb_types::{Array, SurrealValue, Uuid as SurrealUuid};
 
 	let request = crate::conn::cmd::RouterRequest {
 		id: None, // Fire and forget - we don't wait for response
 		method: "attach",
-		params: Some(vec![Value::Uuid(SurrealUuid(session_id))].into()),
+		params: None,
 		txn: None,
-		session_id: None, // Session cloning doesn't need to use a session ID
+		session_id: Some(session_id),
 	};
 
 	let request_value = request.into_value();

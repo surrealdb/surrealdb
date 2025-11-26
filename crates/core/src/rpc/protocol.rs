@@ -64,11 +64,9 @@ pub trait RpcProtocol {
 	fn attach(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
 		let mut session = Session::default();
 		session.id = session_id;
-		match dbg!(session_id) {
+		match session_id {
 			Some(id) => {
-				self.session_map()
-					.pin()
-					.insert(Some(id), ArcSwap::from(Arc::new(session)));
+				self.session_map().pin().insert(Some(id), ArcSwap::from(Arc::new(session)));
 				Ok(DbResult::Other(PublicValue::None))
 			}
 			None => Err(RpcError::InvalidParams("Expected a session ID".to_string())),

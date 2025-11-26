@@ -8,7 +8,7 @@ use serde::Deserialize;
 use surrealdb_core::dbs::QueryResultBuilder;
 use surrealdb_core::iam::token::Token;
 use surrealdb_core::rpc::{DbResponse, DbResult};
-use surrealdb_types::{Array, SurrealValue};
+use surrealdb_types::{Array, Number, SurrealValue};
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tokio::time;
@@ -21,6 +21,7 @@ use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use trice::Instant;
+use uuid::Uuid;
 
 use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
 use crate::conn::cmd::RouterRequest;
@@ -143,14 +144,14 @@ async fn attach_session_request(
 	session_id: uuid::Uuid,
 	sink: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
 ) {
-	use surrealdb_types::{Array, SurrealValue, Uuid as SurrealUuid};
+	use surrealdb_types::SurrealValue;
 
 	let request = crate::conn::cmd::RouterRequest {
 		id: None, // Fire and forget - we don't wait for response
 		method: "attach",
-		params: Some(Value::Array(Array::from(vec![Value::Uuid(SurrealUuid(session_id))]))),
+		params: None,
 		txn: None,
-		session_id: Some(session_id), // Session attaching doesn't need to use a session ID
+		session_id: Some(session_id),
 	};
 
 	let request_value = request.into_value();
@@ -339,22 +340,22 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 			let Some(response) = response else {
 				return HandleResult::Ok;
 			};
+			let Some(session_id) = response.session_id else {
+				return HandleResult::Ok;
+			};
 
 			match response.id {
 				// If `id` is set this is a normal response
 				Some(id) => {
 					// Try to extract i64 from Value
-					if let Value::Number(surrealdb_types::Number::Int(id_num)) = id {
+					if let Value::Number(Number::Int(id_num)) = id {
 						// Find the pending request by searching through all sessions
-						let mut pending_opt = None;
-						let mut found_session_id = None;
-						for (session_id, session_state) in &mut state.sessions {
-							if let Some(pending) = session_state.pending_requests.remove(&id_num) {
-								pending_opt = Some(pending);
-								found_session_id = Some(*session_id);
-								break;
-							}
-						}
+						let pending_opt =
+							if let Some(session_state) = state.sessions.get_mut(&session_id) {
+								session_state.pending_requests.remove(&id_num)
+							} else {
+								None
+							};
 						match pending_opt {
 							Some(mut pending) => {
 								// We can only route responses with IDs
@@ -370,7 +371,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 												// Update session-specific vars
 												let session_state = state
 													.sessions
-													.entry(found_session_id.unwrap())
+													.entry(session_id)
 													.or_default();
 												session_state.vars.insert(key, value);
 											}
@@ -587,6 +588,8 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 			#[derive(Deserialize, SurrealValue)]
 			struct ErrorResponse {
 				id: Option<Value>,
+				#[surreal(rename = "session")]
+				session_id: Option<Uuid>,
 			}
 
 			// Let's try to find out the ID of the response that failed to deserialise
