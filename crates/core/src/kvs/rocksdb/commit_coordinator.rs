@@ -1,5 +1,6 @@
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -38,12 +39,12 @@ use crate::kvs::err::{Error, Result};
 /// to ensure safe concurrent access from multiple threads. The condition variable prevents
 /// busy-waiting and ensures efficient wake-up semantics.
 struct SharedState {
+	/// Shutdown flag
+	shutdown: Arc<AtomicBool>,
 	/// Buffer of pending commit requests awaiting batch processing
 	buffer: Mutex<Vec<CommitRequest>>,
 	/// Condition variable to wake the batcher thread when work arrives
 	condvar: Condvar,
-	/// Flag indicating the coordinator is shutting down; checked by both producers and consumer
-	shutdown: Mutex<bool>,
 }
 
 /// A request to commit a transaction.
@@ -112,7 +113,7 @@ impl CommitCoordinator {
 		// with potentially lower latency for single transactions, at the cost of reduced throughput
 		// under high concurrent load (more frequent fsync operations).
 		else if !*cnf::ROCKSDB_GROUPED_COMMIT {
-			// Log the batched group commit option is disabled
+			// Log that the batched group commit option is disabled
 			info!(target: TARGET, "Grouped commit coordinator: disabled");
 			// Continue
 			return Ok(false);
@@ -155,9 +156,9 @@ impl CommitCoordinator {
 		let max_batch_size = *cnf::ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE;
 		// Create shared state with pre-allocated buffer
 		let shared = Arc::new(SharedState {
+			shutdown: Arc::new(AtomicBool::new(false)),
 			buffer: Mutex::new(Vec::with_capacity(max_batch_size)),
 			condvar: Condvar::new(),
-			shutdown: Mutex::new(false),
 		});
 		// Create a new commit batcher
 		let batcher = CommitBatcher {
@@ -197,11 +198,13 @@ impl CommitCoordinator {
 		};
 		// Add to shared buffer and notify batcher
 		{
-			let mut buffer = self.shared.buffer.lock();
 			// Check if shutting down
-			if *self.shared.shutdown.lock() {
+			if self.shared.shutdown.load(Ordering::Acquire) {
 				return Err(Error::Transaction("commit coordinator is shutting down".into()));
 			}
+			// Lock the buffer
+			let mut buffer = self.shared.buffer.lock();
+			// Add the request to the buffer
 			buffer.push(request);
 			// Notify the batcher that work is available
 			self.shared.condvar.notify_one();
@@ -214,7 +217,7 @@ impl CommitCoordinator {
 	/// Shutdown the commit coordinator
 	pub fn shutdown(&self) -> Result<()> {
 		// Signal shutdown
-		*self.shared.shutdown.lock() = true;
+		self.shared.shutdown.store(true, Ordering::Relaxed);
 		// Notify the batcher
 		self.shared.condvar.notify_all();
 		// Wait for thread to finish
@@ -232,12 +235,6 @@ impl CommitCoordinator {
 /// for grouped transaction commits. It continuously receives commit requests from the
 /// [`CommitCoordinator`], accumulates them into batches, and performs a single WAL flush
 /// for the entire batch to minimize disk synchronization overhead.
-///
-/// # Thread Safety
-///
-/// The batcher communicates with producer threads (submitting transactions) through
-/// a shared buffer protected by a mutex and condition variable. This allows multiple
-/// concurrent transactions to be queued while the batcher processes batches atomically.
 ///
 /// # Batching Algorithm
 ///
@@ -289,12 +286,17 @@ impl CommitBatcher {
 			{
 				let mut buffer = self.shared.buffer.lock();
 				// Wait for items or shutdown
-				while buffer.is_empty() && !*self.shared.shutdown.lock() {
+				loop {
+					// Check if we have work to do
+					if !buffer.is_empty() {
+						break;
+					}
+					// Check shutdown flag without holding buffer lock
+					if self.shared.shutdown.load(Ordering::Acquire) {
+						return;
+					}
+					// Wait for notification
 					self.shared.condvar.wait(&mut buffer);
-				}
-				// Check for shutdown
-				if *self.shared.shutdown.lock() && buffer.is_empty() {
-					break;
 				}
 				// Initially drain up to max_batch_size items
 				let take = buffer.len().min(self.max_batch_size);
