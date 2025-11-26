@@ -116,7 +116,7 @@ impl CommitCoordinator {
 			// Log that the batched group commit option is disabled
 			info!(target: TARGET, "Grouped commit coordinator: disabled");
 			// Continue
-			return Ok(false);
+			Ok(false)
 		}
 		// If the user has enabled synced transaction writes and disabled background flushing,
 		// we enable grouped commit. This means that the transaction commits are batched
