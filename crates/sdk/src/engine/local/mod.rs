@@ -412,21 +412,25 @@ impl Surreal<Db> {
 	}
 }
 
-struct RouterState {
-	kvs: Arc<Datastore>,
-	sessions: Sessions,
+pub(super) struct RouterState {
+	pub(super) kvs: Arc<Datastore>,
+	pub(super) sessions: Sessions,
 }
 
 type SessionResult = Result<Arc<SessionState>, SessionError>;
 
-struct Sessions(HashMap<Uuid, SessionResult>);
+pub(super) struct Sessions(HashMap<Uuid, SessionResult>);
 
 impl Sessions {
-	fn insert(&self, session_id: Uuid, result: SessionResult) {
+	pub(super) fn new() -> Self {
+		Self(HashMap::new())
+	}
+
+	pub(super) fn insert(&self, session_id: Uuid, result: SessionResult) {
 		self.0.pin().insert(session_id, result);
 	}
 
-	fn get(&self, session_id: &Option<Uuid>) -> SessionResult {
+	pub(super) fn get(&self, session_id: &Option<Uuid>) -> SessionResult {
 		let session_id = session_id.ok_or(SessionError::MissingId)?;
 		match self.0.pin().get(&session_id) {
 			Some(Ok(state)) => Ok(state.clone()),
@@ -435,7 +439,7 @@ impl Sessions {
 		}
 	}
 
-	fn remove(&self, session_id: &Uuid) {
+	pub(super) fn remove(&self, session_id: &Uuid) {
 		self.0.pin().remove(session_id);
 	}
 }
@@ -449,7 +453,7 @@ pub(crate) struct SessionState {
 }
 
 impl SessionState {
-	fn new(id: Uuid) -> Self {
+	pub(super) fn new(id: Uuid) -> Self {
 		let mut session = Session::default().with_rt(true);
 		session.id = Some(id);
 		Self {
@@ -460,33 +464,33 @@ impl SessionState {
 		}
 	}
 
-	fn insert_txn(&self, id: Uuid, arc: Arc<Transaction>) {
+	pub(super) fn insert_txn(&self, id: Uuid, arc: Arc<Transaction>) {
 		self.transactions.pin().insert(id, arc);
 	}
 
-	fn get_txn(&self, id: &Uuid) -> Option<Arc<Transaction>> {
+	pub(super) fn get_txn(&self, id: &Uuid) -> Option<Arc<Transaction>> {
 		self.transactions.pin().get(id).cloned()
 	}
 
-	fn remove_txn(&self, id: &Uuid) -> Option<Arc<Transaction>> {
+	pub(super) fn remove_txn(&self, id: &Uuid) -> Option<Arc<Transaction>> {
 		self.transactions.pin().remove(id).cloned()
 	}
 
-	fn insert_live_query(&self, id: Uuid, sender: Sender<crate::Result<Notification>>) {
+	pub(super) fn insert_live_query(&self, id: Uuid, sender: Sender<crate::Result<Notification>>) {
 		self.live_queries.pin().insert(id, sender);
 	}
 
-	fn get_live_query(&self, id: &Uuid) -> Option<Sender<crate::Result<Notification>>> {
+	pub(super) fn get_live_query(&self, id: &Uuid) -> Option<Sender<crate::Result<Notification>>> {
 		self.live_queries.pin().get(id).cloned()
 	}
 
-	fn remove_live_query(&self, id: &Uuid) {
+	pub(super) fn remove_live_query(&self, id: &Uuid) {
 		self.live_queries.pin().remove(id);
 	}
 }
 
 #[derive(Debug, Clone)]
-enum SessionError {
+pub(super) enum SessionError {
 	MissingId,
 	NotFound(Uuid),
 }

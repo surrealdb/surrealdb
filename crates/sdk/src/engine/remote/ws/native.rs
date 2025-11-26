@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::collections::hash_map::Entry;
-use std::sync::atomic::AtomicI64;
 
 use async_channel::Receiver;
 use futures::stream::{SplitSink, SplitStream};
@@ -132,7 +131,6 @@ impl conn::Sealed for Client {
 				features,
 				config,
 				sender: route_tx,
-				last_id: AtomicI64::new(0),
 			};
 
 			Ok((router, waiter, session_clone).into())
@@ -180,7 +178,6 @@ async fn router_handle_route(
 	state: &mut RouterState,
 ) -> HandleResult {
 	let RequestData {
-		id,
 		command,
 		session_id,
 	} = request;
@@ -192,6 +189,10 @@ async fn router_handle_route(
 		}
 		return HandleResult::Ok;
 	};
+
+	// Generate a new request ID for this session
+	session_state.last_id += 1;
+	let id = session_state.last_id;
 
 	let entry = session_state.pending_requests.entry(id);
 	let Entry::Vacant(entry) = entry else {
@@ -325,7 +326,6 @@ async fn router_handle_route(
 			entry.insert(PendingRequest {
 				effect,
 				response_channel: response,
-				session_id,
 			});
 		}
 		Err(error) => {
@@ -353,9 +353,11 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 					if let Value::Number(surrealdb_types::Number::Int(id_num)) = id {
 						// Find the pending request by searching through all sessions
 						let mut pending_opt = None;
-						for (_, session_state) in &mut state.sessions {
+						let mut found_session_id = None;
+						for (session_id, session_state) in &mut state.sessions {
 							if let Some(pending) = session_state.pending_requests.remove(&id_num) {
 								pending_opt = Some(pending);
+								found_session_id = *session_id;
 								break;
 							}
 						}
@@ -374,7 +376,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 												// Update session-specific vars
 												let session_state = state
 													.sessions
-													.entry(pending.session_id)
+													.entry(found_session_id)
 													.or_default();
 												session_state.vars.insert(key, value);
 											}
@@ -384,7 +386,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 												// Update session-specific vars
 												let session_state = state
 													.sessions
-													.entry(pending.session_id)
+													.entry(found_session_id)
 													.or_default();
 												session_state.vars.shift_remove(&key);
 											}
@@ -415,7 +417,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 												// Update session-specific vars
 												let session_state = state
 													.sessions
-													.entry(pending.session_id)
+													.entry(found_session_id)
 													.or_default();
 												session_state.vars.insert(key, value);
 											}
@@ -425,7 +427,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 												// Update session-specific vars
 												let session_state = state
 													.sessions
-													.entry(pending.session_id)
+													.entry(found_session_id)
 													.or_default();
 												session_state.vars.shift_remove(&key);
 											}
@@ -474,7 +476,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 															vec![token.into_value()],
 														))),
 														txn: None,
-														session_id: pending.session_id,
+														session_id: found_session_id,
 													};
 													let request_value = request.into_value();
 													let value =
@@ -512,7 +514,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 															// requests
 															if let Some(session_state) = state
 																.sessions
-																.get_mut(&pending.session_id)
+																.get_mut(&found_session_id)
 															{
 																session_state
 																	.pending_requests
@@ -782,6 +784,12 @@ pub(crate) async fn run_router(
 							state.sessions.insert(Some(new), old_state);
 							// Send clone_session RPC request to server
 							send_clone_session_request(Some(old), new, &mut state.sink).await;
+						}
+						SessionId::Drop(session_id) => {
+							// Remove the session from local state
+							state.sessions.remove(&Some(session_id));
+							// Note: We don't send a drop_session RPC request to the server
+							// The server will clean up the session when it detects inactivity
 						}
 					}
 				}

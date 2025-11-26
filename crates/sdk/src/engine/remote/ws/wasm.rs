@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::collections::hash_map::Entry;
-use std::sync::atomic::AtomicI64;
 use std::time::Duration;
 
 use async_channel::{Receiver, Sender};
@@ -62,18 +61,17 @@ impl conn::Sealed for Client {
 
 			conn_rx.recv().await??;
 
-			let mut features = HashSet::new();
-			features.insert(ExtraFeatures::LiveQueries);
+		let mut features = HashSet::new();
+		features.insert(ExtraFeatures::LiveQueries);
 
-			let waiter = watch::channel(Some(WaitFor::Connection));
-			let router = Router {
-				features,
-				config,
-				sender: route_tx,
-				last_id: AtomicI64::new(0),
-			};
+		let waiter = watch::channel(Some(WaitFor::Connection));
+		let router = Router {
+			features,
+			config,
+			sender: route_tx,
+		};
 
-			Ok((router, waiter, session_clone).into())
+		Ok((router, waiter, session_clone).into())
 		})
 	}
 }
@@ -680,18 +678,24 @@ pub(crate) async fn run_router(
 						break
 					};
 					match session_id {
-					SessionId::Initial(session_id) => {
-						state.sessions.entry(Some(session_id)).or_default();
-						// Clone from default session
-						send_clone_session_request(None, session_id, &mut state.sink).await;
-					}
-					SessionId::Clone { old, new } => {
-						// Clone the local session state
-						let old_state = state.sessions.get(&Some(old)).cloned().unwrap_or_default();
-						state.sessions.insert(Some(new), old_state);
-						// Send clone_session RPC request to server
-						send_clone_session_request(Some(old), new, &mut state.sink).await;
-					}
+						SessionId::Initial(session_id) => {
+							state.sessions.entry(Some(session_id)).or_default();
+							// Clone from default session
+							send_clone_session_request(None, session_id, &mut state.sink).await;
+						}
+						SessionId::Clone { old, new } => {
+							// Clone the local session state
+							let old_state = state.sessions.get(&Some(old)).cloned().unwrap_or_default();
+							state.sessions.insert(Some(new), old_state);
+							// Send clone_session RPC request to server
+							send_clone_session_request(Some(old), new, &mut state.sink).await;
+						}
+						SessionId::Drop(session_id) => {
+							// Remove the session from local state
+							state.sessions.remove(&Some(session_id));
+							// Note: We don't send a drop_session RPC request to the server
+							// The server will clean up the session when it detects inactivity
+						}
 					}
 				}
 				route = route_rx.recv().fuse() => {

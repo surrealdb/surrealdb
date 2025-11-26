@@ -11,11 +11,12 @@ use surrealdb_core::kvs::Datastore;
 use surrealdb_core::options::EngineOptions;
 use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 
-use super::SessionState;
+use super::{RouterState, SessionState, Sessions};
 use crate::conn::{Route, Router};
-use crate::engine::local::{Db, RouterState, Sessions};
+use crate::engine::local::Db;
 use crate::engine::tasks;
 use crate::method::BoxFuture;
 use crate::opt::auth::Root;
@@ -108,7 +109,7 @@ pub(crate) async fn run_router(
 
 	let router_state = RouterState {
 		kvs: Arc::new(kvs),
-		sessions: Sessions(HashMap::new()),
+		sessions: Sessions::new(),
 	};
 
 	let canceller = CancellationToken::new();

@@ -12,7 +12,6 @@ use surrealdb_core::options::EngineOptions;
 use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
 
-use super::Sessions;
 use crate::conn::{self, Route, Router};
 use crate::engine::local::{Db, SessionState};
 use crate::engine::tasks;
@@ -119,7 +118,7 @@ pub(crate) async fn run_router(
 
 	let router_state = super::RouterState {
 		kvs: Arc::new(kvs),
-		sessions: Sessions(HashMap::new()),
+		sessions: super::Sessions::new(),
 	};
 
 	let canceller = CancellationToken::new();
