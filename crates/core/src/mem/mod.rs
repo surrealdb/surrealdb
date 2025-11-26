@@ -15,10 +15,7 @@ pub static ALLOC: fake::FakeAlloc = fake::FakeAlloc::new();
 		target_os = "netbsd",
 		target_os = "openbsd"
 	),
-	any(
-		target_arch = "x86_64",
-		target_arch = "x86"
-	)
+	any(target_arch = "x86_64", target_arch = "x86")
 )))]
 #[global_allocator]
 pub static ALLOC: track::TrackAlloc<std::alloc::System> =
@@ -35,10 +32,7 @@ pub static ALLOC: track::TrackAlloc<std::alloc::System> =
 		target_os = "netbsd",
 		target_os = "openbsd"
 	),
-	any(
-		target_arch = "x86_64",
-		target_arch = "x86"
-	)
+	any(target_arch = "x86_64", target_arch = "x86")
 ))]
 #[global_allocator]
 pub static ALLOC: track::TrackAlloc<jemallocator::Jemalloc> =
