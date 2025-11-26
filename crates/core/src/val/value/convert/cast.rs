@@ -937,12 +937,10 @@ impl Value {
 				true => self.cast_to::<RecordId>().map(Value::from),
 				false => self.cast_to_record(t).map(Value::from),
 			},
-			Kind::Geometry(t) => match self.clone().cast_to::<Geometry>() {
+			// <geometry> (Geometry without inner type)
+			Kind::Geometry(_) => match self.cast_to::<Geometry>() {
 				Ok(v) => Ok(Value::from(v)),
-				Err(_) => Err(CastError::InvalidKind {
-					from: self,
-					into: t.iter().map(|kind| kind.to_string()).collect::<Vec<String>>().join("|"),
-				}),
+				Err(e) => Err(e)
 			},
 			Kind::Either(k) => {
 				let Some(k) = k.iter().find(|x| self.can_cast_to_kind(x)) else {
