@@ -151,10 +151,10 @@ async fn decode_response(res: Response) -> Result<PublicValue> {
 						.map_err(|e| Error::Http(e.to_string()))?;
 					Ok(val)
 				}
-				Ok(v) if v.starts_with("application/octet-stream") => {
-					let bytes = res.bytes().await.map_err(Error::from)?;
-					Ok(PublicValue::Bytes(PublicBytes::from(bytes.to_vec())))
-				}
+			Ok(v) if v.starts_with("application/octet-stream") => {
+				let bytes = res.bytes().await.map_err(Error::from)?;
+				Ok(PublicValue::Bytes(PublicBytes::from(bytes)))
+			}
 				Ok(v) if v.starts_with("text") => {
 					let txt = res.text().await.map_err(Error::from)?;
 					let val = PublicValue::String(txt);

@@ -106,8 +106,8 @@ mod tests {
 	#[case::string(Value::String("".to_string()))]
 	#[case::string(Value::String("Hello, World!".to_string()))]
 	// Bytes
-	#[case::bytes(Value::Bytes(Bytes::from(vec![1, 2, 3, 4, 5])))]
-	#[case::bytes(Value::Bytes(Bytes::from(vec![0; 1024])))]
+	#[case::bytes(Value::Bytes(Bytes(::bytes::Bytes::from(vec![1_u8, 2, 3, 4, 5]))))]
+	#[case::bytes(Value::Bytes(Bytes(::bytes::Bytes::from(vec![0_u8; 1024]))))]
 	// Table
 	#[case::table(Value::Table(Table::new("test_table")))]
 	// RecordId

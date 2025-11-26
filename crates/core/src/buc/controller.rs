@@ -18,7 +18,7 @@ use crate::val::{Bytes, File, Value};
 fn accept_payload(value: Value) -> Result<bytes::Bytes> {
 	value
 		.cast_to::<Bytes>()
-		.map(|x| bytes::Bytes::from(x.0))
+		.map(|x| x.0)
 		.map_err(err::Error::from)
 		.map_err(anyhow::Error::new)
 }
@@ -124,7 +124,7 @@ impl<'a> BucketController<'a> {
 			None => return Ok(None),
 		};
 
-		Ok(Some(bytes.to_vec().into()))
+		Ok(Some(Bytes(bytes)))
 	}
 
 	pub(crate) async fn delete(&mut self, key: &ObjectKey) -> Result<()> {

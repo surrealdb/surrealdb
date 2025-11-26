@@ -78,17 +78,17 @@ impl<'js> FromJs<'js> for Value {
 					return Ok(v.value.clone().into());
 				}
 
-				if let Some(v) = v.as_typed_array::<u8>() {
-					let Some(data) = v.as_bytes() else {
-						return Err(Error::new_from_js_message(
-							"Uint8Array",
-							"Bytes",
-							"Uint8Array data was consumed.",
-						));
-					};
+			if let Some(v) = v.as_typed_array::<u8>() {
+				let Some(data) = v.as_bytes() else {
+					return Err(Error::new_from_js_message(
+						"Uint8Array",
+						"Bytes",
+						"Uint8Array data was consumed.",
+					));
+				};
 
-					return Ok(Value::Bytes(Bytes(data.to_vec())));
-				}
+				return Ok(Value::Bytes(Bytes::from(data.to_vec())));
+			}
 
 				// Check to see if this object is a date
 				let date: js::Object = ctx.globals().get(js::atom::PredefinedAtom::Date)?;

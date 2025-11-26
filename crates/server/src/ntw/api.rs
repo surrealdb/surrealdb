@@ -104,14 +104,14 @@ async fn handler(
 					);
 					v.into_bytes()
 				}
-				Value::Bytes(v) => {
-					res.headers.entry(CONTENT_TYPE).or_insert(
-						surrealdb_core::api::format::OCTET_STREAM
-							.parse()
-							.map_err(|_| ApiError::Unreachable("Expected a valid format".into()))?,
-					);
-					v.into()
-				}
+			Value::Bytes(v) => {
+				res.headers.entry(CONTENT_TYPE).or_insert(
+					surrealdb_core::api::format::OCTET_STREAM
+						.parse()
+						.map_err(|_| ApiError::Unreachable("Expected a valid format".into()))?,
+				);
+				v.into_inner().to_vec()
+			}
 				v => {
 					return Err(ApiError::InvalidApiResponse(format!(
 						"Expected bytes or string, found {}",
