@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::AtomicI64;
 
 use async_channel::Receiver;
 use indexmap::IndexMap;
@@ -77,7 +76,6 @@ impl conn::Sealed for Client {
 				features,
 				config,
 				sender: route_tx,
-				last_id: AtomicI64::new(0),
 			};
 
 			Ok((router, waiter, session_clone).into())
@@ -136,18 +134,21 @@ pub(crate) async fn run_router(
 					break
 				};
 				match session_id {
-				SessionId::Initial(session_id) => {
-					sessions.entry(Some(session_id)).or_default();
-					// Clone from default session
-					send_clone_session_request(None, session_id, client.clone(), base_url.clone()).await;
-				}
-				SessionId::Clone { old, new } => {
-					// Clone the local session state
-					let old_state = sessions.get(&Some(old)).cloned().unwrap_or_default();
-					sessions.insert(Some(new), old_state);
-					// Send clone_session RPC request to server
-					send_clone_session_request(Some(old), new, client.clone(), base_url.clone()).await;
-				}
+					SessionId::Initial(session_id) => {
+						sessions.entry(Some(session_id)).or_default();
+						// Clone from default session
+						send_clone_session_request(None, session_id, client.clone(), base_url.clone()).await;
+					}
+					SessionId::Clone { old, new } => {
+						// Clone the local session state
+						let old_state = sessions.get(&Some(old)).cloned().unwrap_or_default();
+						sessions.insert(Some(new), old_state);
+						// Send clone_session RPC request to server
+						send_clone_session_request(Some(old), new, client.clone(), base_url.clone()).await;
+					}
+					SessionId::Drop(session_id) => {
+						sessions.remove(&Some(session_id));
+					}
 				}
 			}
 			route = route_rx.recv() => {
