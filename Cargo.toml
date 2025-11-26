@@ -242,8 +242,6 @@ storage-surrealkv = ["surrealdb-server/storage-surrealkv"]
 storage-rocksdb = ["surrealdb-server/storage-rocksdb"]
 storage-tikv = ["surrealdb-server/storage-tikv"]
 storage-indxdb = ["surrealdb-server/storage-indxdb"]
-# Commercial features
-enterprise = ["surrealdb-server/enterprise"]
 
 [dependencies]
 # workspace internal dependencies

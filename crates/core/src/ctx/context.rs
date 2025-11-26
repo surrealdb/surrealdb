@@ -17,13 +17,11 @@ use trice::Instant;
 #[cfg(feature = "http")]
 use url::Url;
 
+use crate::buc::manager::BucketsManager;
 #[cfg(feature = "surrealism")]
 use crate::buc::store::ObjectKey;
 use crate::buc::store::ObjectStore;
-use crate::buc::{self, BucketConnectionKey, BucketConnections};
-use crate::catalog::providers::{
-	BucketProvider, CatalogProvider, DatabaseProvider, NamespaceProvider,
-};
+use crate::catalog::providers::{CatalogProvider, DatabaseProvider, NamespaceProvider};
 use crate::catalog::{DatabaseDefinition, DatabaseId, NamespaceId};
 use crate::cnf::PROTECTED_PARAM_NAMES;
 use crate::ctx::canceller::Canceller;
@@ -90,7 +88,7 @@ pub struct MutableContext {
 	// Does not read from parent `values`.
 	isolated: bool,
 	// A map of bucket connections
-	buckets: Option<Arc<BucketConnections>>,
+	buckets: Option<BucketsManager>,
 	// The surrealism cache
 	#[cfg(feature = "surrealism")]
 	surrealism_cache: Option<Arc<SurrealismCache>>,
@@ -245,7 +243,7 @@ impl MutableContext {
 		sequences: Sequences,
 		cache: Arc<DatastoreCache>,
 		#[cfg(storage)] temporary_directory: Option<Arc<PathBuf>>,
-		buckets: Arc<BucketConnections>,
+		buckets: BucketsManager,
 		#[cfg(feature = "surrealism")] surrealism_cache: Arc<SurrealismCache>,
 	) -> Result<MutableContext> {
 		let mut ctx = Self {
@@ -729,8 +727,8 @@ impl MutableContext {
 		}
 	}
 
-	pub(crate) fn get_buckets(&self) -> Option<Arc<BucketConnections>> {
-		self.buckets.clone()
+	pub(crate) fn get_buckets(&self) -> Option<&BucketsManager> {
+		self.buckets.as_ref()
 	}
 
 	/// Obtain the connection for a bucket
@@ -742,26 +740,7 @@ impl MutableContext {
 	) -> Result<Arc<dyn ObjectStore>> {
 		// Do we have a buckets context?
 		if let Some(buckets) = &self.buckets {
-			// Attempt to obtain an existing bucket connection
-			let key = BucketConnectionKey::new(ns, db, bu);
-			if let Some(bucket_ref) = buckets.get(&key) {
-				Ok((*bucket_ref).clone())
-			} else {
-				// Obtain the bucket definition
-				let tx = self.tx();
-				let bd = tx.expect_db_bucket(ns, db, bu).await?;
-
-				// Connect to the bucket
-				let store = if let Some(ref backend) = bd.backend {
-					buc::connect(backend, false, bd.readonly).await?
-				} else {
-					buc::connect_global(ns, db, bu).await?
-				};
-
-				// Persist the bucket connection
-				buckets.insert(key, store.clone());
-				Ok(store)
-			}
+			buckets.get_bucket_store(&self.tx(), ns, db, bu).await
 		} else {
 			bail!(Error::BucketUnavailable(bu.into()))
 		}

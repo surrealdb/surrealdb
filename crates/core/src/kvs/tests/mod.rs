@@ -76,7 +76,7 @@ mod mem {
 		let path = "memory";
 		// Setup the in-memory datastore
 		let ds = Datastore::new_with_clock(
-			&CommunityComposer(),
+			CommunityComposer(),
 			path,
 			Some(clock),
 			CancellationToken::new(),
@@ -114,7 +114,7 @@ mod rocksdb {
 		let path = format!("rocksdb:{path}");
 		// Setup the RocksDB datastore
 		let ds = Datastore::new_with_clock(
-			&CommunityComposer(),
+			CommunityComposer(),
 			&path,
 			Some(clock),
 			CancellationToken::new(),
@@ -153,7 +153,7 @@ mod surrealkv {
 		let path = format!("surrealkv:{path}");
 		// Setup the SurrealKV datastore
 		let ds = Datastore::new_with_clock(
-			&CommunityComposer(),
+			CommunityComposer(),
 			&path,
 			Some(clock),
 			CancellationToken::new(),
@@ -189,7 +189,7 @@ mod tikv {
 		let path = "tikv:127.0.0.1:2379";
 		// Setup the TiKV datastore
 		let ds = Datastore::new_with_clock(
-			&CommunityComposer(),
+			CommunityComposer(),
 			path,
 			Some(clock),
 			CancellationToken::new(),
