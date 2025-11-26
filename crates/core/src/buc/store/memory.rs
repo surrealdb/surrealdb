@@ -1,3 +1,8 @@
+//! In-memory object store implementation.
+//!
+//! This module provides a simple in-memory implementation of the [`ObjectStore`] trait,
+//! useful for testing and development environments where persistence is not required.
+
 use std::future::Future;
 use std::pin::Pin;
 
@@ -8,6 +13,7 @@ use url::Url;
 use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 use crate::val::Datetime;
 
+/// Internal storage entry containing data and metadata.
 #[derive(Clone, Debug)]
 pub struct Entry {
 	bytes: Bytes,
@@ -23,16 +29,32 @@ impl From<Bytes> for Entry {
 	}
 }
 
+/// An in-memory implementation of [`ObjectStore`].
+///
+/// This store keeps all data in memory using a concurrent hash map ([`DashMap`]).
+/// Data is not persisted and will be lost when the store is dropped.
+///
+/// # URL Format
+/// - `memory` or `memory://`
+///
+/// # Use Cases
+/// - Testing and development
+/// - Temporary storage that doesn't require persistence
+/// - Caching layers
 #[derive(Clone, Debug, Default)]
 pub struct MemoryStore {
 	store: DashMap<ObjectKey, Entry>,
 }
 
 impl MemoryStore {
+	/// Creates a new empty in-memory store.
 	pub fn new() -> Self {
 		MemoryStore::default()
 	}
 
+	/// Checks if the given URL refers to a memory store.
+	///
+	/// Returns `true` for URLs like `memory` or `memory://`.
 	pub fn parse_url(url: &str) -> bool {
 		if url == "memory" {
 			return true;

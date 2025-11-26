@@ -12,8 +12,18 @@ use crate::cnf::{GLOBAL_BUCKET, GLOBAL_BUCKET_ENFORCED};
 use crate::err::Error;
 use crate::kvs::Transaction;
 
+/// Type alias for the concurrent map of bucket connections.
 type BucketConnections = Arc<DashMap<BucketConnectionKey, Arc<dyn ObjectStore>>>;
 
+/// Manages bucket storage connections with caching.
+///
+/// The `BucketsManager` is responsible for:
+/// - Creating and caching connections to bucket storage backends
+/// - Managing global bucket connections with automatic namespacing
+/// - Enforcing global bucket policies when configured
+///
+/// Connections are cached by namespace, database, and bucket name to avoid
+/// redundant connection establishment.
 #[derive(Clone)]
 pub(crate) struct BucketsManager {
 	buckets: BucketConnections,
@@ -21,6 +31,10 @@ pub(crate) struct BucketsManager {
 }
 
 impl BucketsManager {
+	/// Creates a new `BucketsManager` with the given storage provider.
+	///
+	/// # Arguments
+	/// * `provider` - The bucket store provider used to create new connections
 	pub(crate) fn new(provider: Arc<dyn BucketStoreProvider>) -> Self {
 		Self {
 			buckets: Default::default(),
@@ -28,10 +42,17 @@ impl BucketsManager {
 		}
 	}
 
+	/// Clears all cached bucket connections.
+	///
+	/// This is typically called during datastore restart to ensure fresh connections.
 	pub(crate) fn clear(&self) {
 		self.buckets.clear();
 	}
 
+	/// Connects to a bucket storage backend.
+	///
+	/// If global bucket enforcement is enabled and this is not a global connection,
+	/// returns `GlobalBucketEnforced` error.
 	async fn connect(
 		&self,
 		url: &str,
@@ -45,9 +66,11 @@ impl BucketsManager {
 		self.provider.connect(url, global, readonly).await
 	}
 
-	/// Connect to a global bucket, if one is configured
-	/// If no global bucket is configured, the NoGlobalBucket error will be returned
-	/// The key in the global bucket will be: `{ns}/{db}/{bu}`
+	/// Connects to a global bucket with automatic namespacing.
+	///
+	/// If no global bucket is configured, returns `NoGlobalBucket` error.
+	/// The returned store is wrapped in a `PrefixedStore` with the key pattern:
+	/// `/{ns}/{db}/{bu}` to isolate data between namespaces, databases, and buckets.
 	async fn connect_global(
 		&self,
 		ns: NamespaceId,
@@ -67,6 +90,17 @@ impl BucketsManager {
 		Ok(Arc::new(PrefixedStore::new(global, key)))
 	}
 
+	/// Gets or creates a connection to a bucket's object store.
+	///
+	/// This method first checks the cache for an existing connection. If not found,
+	/// it retrieves the bucket definition from the transaction, establishes a new
+	/// connection (either to the specified backend or the global bucket), and caches it.
+	///
+	/// # Arguments
+	/// * `tx` - The transaction to use for fetching the bucket definition
+	/// * `ns` - The namespace ID
+	/// * `db` - The database ID
+	/// * `bu` - The bucket name
 	pub(crate) async fn get_bucket_store(
 		&self,
 		tx: &Transaction,
@@ -95,6 +129,17 @@ impl BucketsManager {
 		}
 	}
 
+	/// Creates and caches a new backend connection for a bucket.
+	///
+	/// This is called when defining a new bucket to validate the backend URL
+	/// and pre-populate the connection cache.
+	///
+	/// # Arguments
+	/// * `ns` - The namespace ID
+	/// * `db` - The database ID
+	/// * `bu` - The bucket name
+	/// * `read_only` - Whether the bucket should be read-only
+	/// * `backend` - Optional backend URL; if `None`, uses the global bucket
 	pub(crate) async fn new_backend(
 		&self,
 		ns: NamespaceId,
@@ -117,6 +162,9 @@ impl BucketsManager {
 	}
 }
 
+/// Key for caching bucket connections.
+///
+/// Uniquely identifies a bucket by its namespace, database, and bucket name.
 #[derive(Hash, PartialEq, Eq)]
 pub(super) struct BucketConnectionKey {
 	ns: NamespaceId,
@@ -125,6 +173,7 @@ pub(super) struct BucketConnectionKey {
 }
 
 impl BucketConnectionKey {
+	/// Creates a new bucket connection key.
 	pub fn new(ns: NamespaceId, db: DatabaseId, bu: &str) -> Self {
 		Self {
 			ns,
