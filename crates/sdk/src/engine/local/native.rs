@@ -183,7 +183,7 @@ pub(crate) async fn run_router(
 				let Ok(route) = route else {
 					break
 				};
-				match router_state.sessions.get(&route.request.session_id) {
+				match router_state.sessions.get(&Some(route.request.session_id)) {
 					Ok(state) => {
 						let kvs = router_state.kvs.clone();
 						tokio::spawn(async move {

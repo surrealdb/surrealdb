@@ -174,22 +174,22 @@ where
 			if let Some(config) = self.ml_config {
 				return router
 					.execute_unit(
+						self.client.session_id,
 						Command::ExportMl {
 							path: self.target,
 							config,
 						},
-						self.client.session_id,
 					)
 					.await;
 			}
 
 			router
 				.execute_unit(
+					self.client.session_id,
 					Command::ExportFile {
 						path: self.target,
 						config: self.db_config,
 					},
-					self.client.session_id,
 				)
 				.await
 		})
@@ -218,11 +218,11 @@ where
 			if let Some(config) = self.ml_config {
 				router
 					.execute_unit(
+						self.client.session_id,
 						Command::ExportBytesMl {
 							bytes: tx,
 							config,
 						},
-						self.client.session_id,
 					)
 					.await?;
 				return Ok(Backup {
@@ -232,11 +232,11 @@ where
 
 			router
 				.execute_unit(
+					self.client.session_id,
 					Command::ExportBytes {
 						bytes: tx,
 						config: self.db_config,
 					},
-					self.client.session_id,
 				)
 				.await?;
 

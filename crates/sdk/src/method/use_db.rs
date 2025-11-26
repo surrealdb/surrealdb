@@ -40,11 +40,11 @@ where
 			let router = self.client.inner.router.extract()?;
 			router
 				.execute_unit(
+					self.client.session_id,
 					Command::Use {
 						namespace: self.ns,
 						database: Some(self.db),
 					},
-					self.client.session_id,
 				)
 				.await?;
 			self.client.inner.waiter.0.send(Some(WaitFor::Database)).ok();

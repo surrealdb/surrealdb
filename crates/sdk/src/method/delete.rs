@@ -64,12 +64,12 @@ macro_rules! into_future {
 
 				router
 					.$method(
+						client.session_id,
 						Command::Query {
 							txn,
 							query: Cow::Owned(format!("DELETE FROM {what} RETURN BEFORE")),
 							variables,
 						},
-						client.session_id,
 					)
 					.await
 			})

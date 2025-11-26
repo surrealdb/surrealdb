@@ -296,7 +296,7 @@ async fn router_handle_route(
 	}
 
 	let message = {
-		let Some(request) = command.into_router_request(Some(id), session_id) else {
+		let Some(request) = command.into_router_request(Some(id), Some(session_id)) else {
 			let _ = response.send(Err(Error::BackupsNotSupported.into())).await;
 			return HandleResult::Ok;
 		};
@@ -357,7 +357,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 						for (session_id, session_state) in &mut state.sessions {
 							if let Some(pending) = session_state.pending_requests.remove(&id_num) {
 								pending_opt = Some(pending);
-								found_session_id = *session_id;
+								found_session_id = Some(*session_id);
 								break;
 							}
 						}
@@ -376,7 +376,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 												// Update session-specific vars
 												let session_state = state
 													.sessions
-													.entry(found_session_id)
+													.entry(found_session_id.unwrap())
 													.or_default();
 												session_state.vars.insert(key, value);
 											}
@@ -386,7 +386,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 												// Update session-specific vars
 												let session_state = state
 													.sessions
-													.entry(found_session_id)
+													.entry(found_session_id.unwrap())
 													.or_default();
 												session_state.vars.shift_remove(&key);
 											}
@@ -417,7 +417,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 												// Update session-specific vars
 												let session_state = state
 													.sessions
-													.entry(found_session_id)
+													.entry(found_session_id.unwrap())
 													.or_default();
 												session_state.vars.insert(key, value);
 											}
@@ -427,7 +427,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 												// Update session-specific vars
 												let session_state = state
 													.sessions
-													.entry(found_session_id)
+													.entry(found_session_id.unwrap())
 													.or_default();
 												session_state.vars.shift_remove(&key);
 											}
@@ -514,7 +514,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 															// requests
 															if let Some(session_state) = state
 																.sessions
-																.get_mut(&found_session_id)
+																.get_mut(&found_session_id.unwrap())
 															{
 																session_state
 																	.pending_requests
@@ -564,7 +564,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 										let request = Command::Kill {
 											uuid: live_query_id,
 										}
-										.into_router_request(None, session_id)
+										.into_router_request(None, Some(session_id))
 										.expect("KILL command should convert to router request");
 
 										let request_value = request.into_value();
@@ -682,7 +682,7 @@ async fn router_reconnect(
 					for commands in session_state.replay.values() {
 						let request = commands
 							.clone()
-							.into_router_request(None, *session_id)
+							.into_router_request(None, Some(*session_id))
 							.expect("replay commands should always convert to route requests");
 
 						let request_value = request.into_value();
@@ -703,7 +703,7 @@ async fn router_reconnect(
 							key: key.as_str().into(),
 							value: value.clone(),
 						}
-						.into_router_request(None, *session_id)
+						.into_router_request(None, Some(*session_id))
 						.expect("SET command should convert to router request");
 						trace!("Request {:?}", request);
 						let request_value = request.into_value();
@@ -774,20 +774,20 @@ pub(crate) async fn run_router(
 					};
 					match session_id {
 						SessionId::Initial(session_id) => {
-							state.sessions.entry(Some(session_id)).or_default();
+							state.sessions.entry(session_id).or_default();
 							// Clone from default session
 							send_clone_session_request(None, session_id, &mut state.sink).await;
 						}
-						SessionId::Clone { old, new } => {
-							// Clone the local session state
-							let old_state = state.sessions.get(&Some(old)).cloned().unwrap_or_default();
-							state.sessions.insert(Some(new), old_state);
-							// Send clone_session RPC request to server
-							send_clone_session_request(Some(old), new, &mut state.sink).await;
-						}
-						SessionId::Drop(session_id) => {
-							// Remove the session from local state
-							state.sessions.remove(&Some(session_id));
+					SessionId::Clone { old, new } => {
+						// Clone the local session state
+						let old_state = state.sessions.get(&old).cloned().unwrap_or_default();
+						state.sessions.insert(new, old_state);
+						// Send clone_session RPC request to server
+						send_clone_session_request(Some(old), new, &mut state.sink).await;
+					}
+					SessionId::Drop(session_id) => {
+						// Remove the session from local state
+						state.sessions.remove(&session_id);
 							// Note: We don't send a drop_session RPC request to the server
 							// The server will clean up the session when it detects inactivity
 						}

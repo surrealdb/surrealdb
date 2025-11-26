@@ -8,7 +8,6 @@ pub(crate) mod wasm;
 use std::collections::HashMap;
 use std::io;
 use std::marker::PhantomData;
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use async_channel::Sender;
@@ -86,13 +85,14 @@ impl Clone for WsSessionState {
 			replay: self.replay.clone(),
 			live_queries: HashMap::new(),
 			pending_requests: HashMap::new(),
+			last_id: 0,
 		}
 	}
 }
 
 struct RouterState<Sink, Stream> {
 	/// Per-session state (vars and replay commands)
-	sessions: HashMap<Option<uuid::Uuid>, WsSessionState>,
+	sessions: HashMap<uuid::Uuid, WsSessionState>,
 	/// The last time a message was recieved from the server.
 	last_activity: Instant,
 	/// The sink into which messages are send to surrealdb
@@ -102,10 +102,6 @@ struct RouterState<Sink, Stream> {
 }
 
 impl<Sink, Stream> RouterState<Sink, Stream> {
-	pub(crate) fn next_id(&self) -> i64 {
-		self.last_id.fetch_add(1, Ordering::SeqCst)
-	}
-
 	pub fn new(sink: Sink, stream: Stream) -> Self {
 		RouterState {
 			sessions: HashMap::new(),

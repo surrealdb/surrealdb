@@ -20,7 +20,7 @@ use super::opt::Config;
 #[allow(dead_code, reason = "Used by the embedded and remote connections.")]
 pub struct RequestData {
 	pub(crate) command: Command,
-	pub(crate) session_id: Option<Uuid>,
+	pub(crate) session_id: Uuid,
 }
 
 #[derive(Debug)]
@@ -45,8 +45,8 @@ impl Router {
 	#[allow(clippy::type_complexity)]
 	pub(crate) fn send_command(
 		&self,
+		session_id: Uuid,
 		command: Command,
-		session_id: Option<Uuid>,
 	) -> BoxFuture<'_, Result<Receiver<std::result::Result<Vec<QueryResult>, DbResultError>>>> {
 		Box::pin(async move {
 			let (sender, receiver) = async_channel::bounded(1);
@@ -100,12 +100,12 @@ impl Router {
 	}
 
 	/// Execute all methods except `query`
-	pub(crate) fn execute<R>(&self, command: Command, session_id: Uuid) -> BoxFuture<'_, Result<R>>
+	pub(crate) fn execute<R>(&self, session_id: Uuid, command: Command) -> BoxFuture<'_, Result<R>>
 	where
 		R: SurrealValue,
 	{
 		Box::pin(async move {
-			let rx = self.send_command(command, Some(session_id)).await?;
+			let rx = self.send_command(session_id, command).await?;
 			let value = self.recv_value(rx).await?;
 			// Handle single-element arrays that might be returned from operations like
 			// signup/signin
@@ -122,14 +122,14 @@ impl Router {
 	/// Execute methods that return an optional single response
 	pub(crate) fn execute_opt<R>(
 		&self,
-		command: Command,
 		session_id: Uuid,
+		command: Command,
 	) -> BoxFuture<'_, Result<Option<R>>>
 	where
 		R: SurrealValue,
 	{
 		Box::pin(async move {
-			let rx = self.send_command(command, Some(session_id)).await?;
+			let rx = self.send_command(session_id, command).await?;
 			match self.recv_value(rx).await? {
 				Value::None | Value::Null => Ok(None),
 				Value::Array(array) => match array.len() {
@@ -151,14 +151,14 @@ impl Router {
 	/// Execute methods that return multiple responses
 	pub(crate) fn execute_vec<R>(
 		&self,
-		command: Command,
 		session_id: Uuid,
+		command: Command,
 	) -> BoxFuture<'_, Result<Vec<R>>>
 	where
 		R: SurrealValue,
 	{
 		Box::pin(async move {
-			let rx = self.send_command(command, Some(session_id)).await?;
+			let rx = self.send_command(session_id, command).await?;
 			match self.recv_value(rx).await? {
 				Value::None | Value::Null => Ok(Vec::new()),
 				Value::Array(array) => array
@@ -173,11 +173,11 @@ impl Router {
 	/// Execute methods that return nothing
 	pub(crate) fn execute_unit(
 		&self,
-		command: Command,
 		session_id: Uuid,
+		command: Command,
 	) -> BoxFuture<'_, Result<()>> {
 		Box::pin(async move {
-			let rx = self.send_command(command, Some(session_id)).await?;
+			let rx = self.send_command(session_id, command).await?;
 			match self.recv_value(rx).await? {
 				Value::None | Value::Null => Ok(()),
 				Value::Array(array) if array.is_empty() => Ok(()),
@@ -192,11 +192,11 @@ impl Router {
 	/// Execute methods that return a raw value
 	pub(crate) fn execute_value(
 		&self,
-		command: Command,
 		session_id: Uuid,
+		command: Command,
 	) -> BoxFuture<'_, Result<Value>> {
 		Box::pin(async move {
-			let rx = self.send_command(command, Some(session_id)).await?;
+			let rx = self.send_command(session_id, command).await?;
 			self.recv_value(rx).await
 		})
 	}
@@ -204,11 +204,11 @@ impl Router {
 	/// Execute the `query` method
 	pub(crate) fn execute_query(
 		&self,
-		command: Command,
 		session_id: Uuid,
+		command: Command,
 	) -> BoxFuture<'_, Result<Vec<QueryResult>>> {
 		Box::pin(async move {
-			let rx = self.send_command(command, Some(session_id)).await?;
+			let rx = self.send_command(session_id, command).await?;
 			self.recv_results(rx).await
 		})
 	}

@@ -117,12 +117,12 @@ where
 		// Execute the LIVE SELECT query directly to get the UUID
 		let results = router
 			.execute_query(
+				client.session_id,
 				Command::Query {
 					query: Cow::Owned(query),
 					txn: None,
 					variables,
 				},
-				client.session_id,
 			)
 			.await?;
 
@@ -163,11 +163,11 @@ pub(crate) async fn register(
 	let (tx, rx) = async_channel::unbounded();
 	router
 		.execute_unit(
+			session_id,
 			Command::SubscribeLive {
 				uuid: id,
 				notification_sender: tx,
 			},
-			session_id,
 		)
 		.await?;
 	Ok(rx)
@@ -330,10 +330,10 @@ where
 		if let Ok(router) = client.inner.router.extract() {
 			router
 				.execute_unit(
+					client.session_id,
 					Command::Kill {
 						uuid,
 					},
-					client.session_id,
 				)
 				.await
 				.ok();

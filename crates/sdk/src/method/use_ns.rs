@@ -53,11 +53,11 @@ where
 			let router = self.client.inner.router.extract()?;
 			router
 				.execute_unit(
+					self.client.session_id,
 					Command::Use {
 						namespace: Some(self.ns),
 						database: None,
 					},
-					self.client.session_id,
 				)
 				.await
 		})

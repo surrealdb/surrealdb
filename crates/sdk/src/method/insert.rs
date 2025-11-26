@@ -78,12 +78,12 @@ macro_rules! into_future {
 
 				router
 					.$method(
+						client.session_id,
 						Command::Query {
 							txn,
 							query,
 							variables,
 						},
-						client.session_id,
 					)
 					.await
 			})

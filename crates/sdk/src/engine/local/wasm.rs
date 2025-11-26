@@ -11,7 +11,6 @@ use surrealdb_core::kvs::Datastore;
 use surrealdb_core::options::EngineOptions;
 use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
-use uuid::Uuid;
 use wasm_bindgen_futures::spawn_local;
 
 use super::{RouterState, SessionState, Sessions};
@@ -175,7 +174,7 @@ pub(crate) async fn run_router(
 					// termination requested
 					break
 				};
-				match router_state.sessions.get(&route.request.session_id) {
+				match router_state.sessions.get(&Some(route.request.session_id)) {
 					Ok(state) => {
 						let kvs = router_state.kvs.clone();
 						spawn_local(async move {

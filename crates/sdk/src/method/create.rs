@@ -67,7 +67,7 @@ macro_rules! into_future {
 					query: Cow::Owned(format!("CREATE {what}")),
 					variables,
 				};
-				router.$method(cmd, client.session_id).await
+				router.$method(client.session_id, cmd).await
 			})
 		}
 	};

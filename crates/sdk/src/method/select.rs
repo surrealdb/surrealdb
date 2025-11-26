@@ -65,12 +65,12 @@ macro_rules! into_future {
 
 				router
 					.$method(
+						client.session_id,
 						Command::Query {
 							txn,
 							query: Cow::Owned(format!("SELECT * FROM {what}")),
 							variables,
 						},
-						client.session_id,
 					)
 					.await
 			})

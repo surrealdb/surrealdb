@@ -61,17 +61,17 @@ impl conn::Sealed for Client {
 
 			conn_rx.recv().await??;
 
-		let mut features = HashSet::new();
-		features.insert(ExtraFeatures::LiveQueries);
+			let mut features = HashSet::new();
+			features.insert(ExtraFeatures::LiveQueries);
 
-		let waiter = watch::channel(Some(WaitFor::Connection));
-		let router = Router {
-			features,
-			config,
-			sender: route_tx,
-		};
+			let waiter = watch::channel(Some(WaitFor::Connection));
+			let router = Router {
+				features,
+				config,
+				sender: route_tx,
+			};
 
-		Ok((router, waiter, session_clone).into())
+			Ok((router, waiter, session_clone).into())
 		})
 	}
 }
@@ -239,7 +239,7 @@ async fn router_handle_request(
 	}
 
 	let message = {
-		let Some(req) = command.into_router_request(Some(id), session_id) else {
+		let Some(req) = command.into_router_request(Some(id), Some(session_id)) else {
 			let _ = response.send(Err(Error::BackupsNotSupported.into())).await;
 			return HandleResult::Ok;
 		};
@@ -477,7 +477,7 @@ async fn router_handle_response(
 											let request = Command::Kill {
 												uuid: live_query_id.0,
 											}
-											.into_router_request(None, session_id)
+											.into_router_request(None, Some(session_id))
 											.into_value();
 
 											let value =
@@ -575,8 +575,10 @@ async fn router_reconnect(
 				for (session_id, session_state) in &state.sessions {
 					// Replay commands (USE, SIGNIN, etc.) for this session
 					for (_, message) in &session_state.replay {
-						let message =
-							message.clone().into_router_request(None, *session_id).into_value();
+						let message = message
+							.clone()
+							.into_router_request(None, Some(*session_id))
+							.into_value();
 
 						let message =
 							surrealdb_core::rpc::format::flatbuffers::encode(&message).unwrap();
@@ -593,7 +595,7 @@ async fn router_reconnect(
 							key: key.as_str().into(),
 							value: value.clone(),
 						}
-						.into_router_request(None, *session_id)
+						.into_router_request(None, Some(*session_id))
 						.into_value();
 
 						trace!("Request {:?}", request);

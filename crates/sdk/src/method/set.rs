@@ -42,11 +42,11 @@ where
 			let router = self.client.inner.router.extract()?;
 			router
 				.execute_unit(
+					self.client.session_id,
 					Command::Set {
 						key: self.key,
 						value: self.value,
 					},
-					self.client.session_id,
 				)
 				.await
 		})

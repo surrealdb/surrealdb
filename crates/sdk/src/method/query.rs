@@ -105,12 +105,12 @@ where
 
 			let results = router
 				.execute_query(
+					client.session_id,
 					Command::Query {
 						query: Cow::Owned(query.into_owned()),
 						txn,
 						variables: variables?,
 					},
-					client.session_id,
 				)
 				.await?;
 

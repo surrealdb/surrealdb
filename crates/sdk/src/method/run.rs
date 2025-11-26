@@ -58,12 +58,12 @@ where
 
 			router
 				.execute(
+					client.session_id,
 					Command::Run {
 						name,
 						version,
 						args,
 					},
-					client.session_id,
 				)
 				.await
 		})

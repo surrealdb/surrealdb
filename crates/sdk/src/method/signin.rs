@@ -47,10 +47,10 @@ where
 			let router = client.inner.router.extract()?;
 			router
 				.execute(
+					client.session_id,
 					Command::Signin {
 						credentials: credentials.into_object()?,
 					},
-					client.session_id,
 				)
 				.await
 		})

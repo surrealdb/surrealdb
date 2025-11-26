@@ -74,7 +74,7 @@ macro_rules! into_future {
 					variables,
 				};
 
-				router.$method(cmd, client.session_id).await
+				router.$method(client.session_id, cmd).await
 			})
 		}
 	};
