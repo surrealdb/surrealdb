@@ -10,10 +10,12 @@ use crate::doc::CursorDoc;
 use crate::val::Value;
 
 mod field;
+mod index;
 mod sequence;
 mod table;
 
 pub(crate) use field::{AlterDefault, AlterFieldStatement};
+pub(crate) use index::AlterIndexStatement;
 pub(crate) use sequence::AlterSequenceStatement;
 pub(crate) use table::AlterTableStatement;
 
@@ -78,6 +80,7 @@ impl<T: Revisioned + DeserializeRevisioned> DeserializeRevisioned for AlterKind<
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum AlterStatement {
 	Table(AlterTableStatement),
+	Index(AlterIndexStatement),
 	Sequence(AlterSequenceStatement),
 	Field(AlterFieldStatement),
 }
@@ -92,9 +95,10 @@ impl AlterStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		match self {
-			Self::Table(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Table(v) => v.compute(ctx, opt).await,
+			Self::Index(v) => v.compute(ctx, opt).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Field(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Field(v) => v.compute(ctx, opt).await,
 		}
 	}
 }
@@ -103,6 +107,7 @@ impl Display for AlterStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
 			Self::Table(v) => Display::fmt(v, f),
+			Self::Index(v) => Display::fmt(v, f),
 			Self::Sequence(v) => Display::fmt(v, f),
 			Self::Field(v) => Display::fmt(v, f),
 		}

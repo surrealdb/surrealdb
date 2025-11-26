@@ -1354,7 +1354,7 @@ impl Datastore {
 					continue;
 				}
 				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
-					Some(ix) => match &ix.index {
+					Some(ix) if !ix.prepare_remove => match &ix.index {
 						Index::FullText(p) => {
 							let ft = FullTextIndex::new(
 								&self.index_stores,
@@ -1372,7 +1372,7 @@ impl Datastore {
 							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);
 						}
 					},
-					None => {
+					_ => {
 						trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ic.ix);
 					}
 				}
@@ -1715,7 +1715,7 @@ impl Datastore {
 			Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
 			Some(Error::QueryNotExecuted {
 				message,
-			}) => DbResultError::QueryNotExecuted(message.clone()),
+			}) => DbResultError::QueryNotExecuted(format!("{message} - plan: {plan:?}")),
 			Some(Error::ScriptingNotAllowed) => {
 				DbResultError::MethodNotAllowed("Scripting functions are not allowed".to_string())
 			}

@@ -876,9 +876,11 @@ pub(crate) enum Error {
 		name: String,
 	},
 
-	/// A database index entry for the specified table is already building
-	#[error("Index building has been cancelled")]
-	IndexingBuildingCancelled,
+	/// A the index building has been cancelled
+	#[error("Index building has been cancelled: {reason}")]
+	IndexingBuildingCancelled {
+		reason: String,
+	},
 
 	/// The token has expired
 	#[error("The token has expired")]
@@ -888,7 +890,7 @@ pub(crate) enum Error {
 	#[error("The session has expired")]
 	ExpiredSession,
 
-	/// The supplied type could not be serialiazed into `expr::Value`
+	/// The supplied type could not be serialized into `expr::Value`
 	#[error("Serialization error: {0}")]
 	Serialization(String),
 
