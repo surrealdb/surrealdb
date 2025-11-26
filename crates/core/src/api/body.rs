@@ -38,13 +38,15 @@ impl ApiBody {
 
 	// The `max` variable is unused in WASM only
 	#[cfg_attr(target_family = "wasm", expect(unused_variables))]
-	pub(crate) async fn stream(self, max: Option<Bytesize>) -> Result<Vec<u8>, Error> {
+	pub(crate) async fn stream(self, max: Option<Bytesize>) -> Result<::bytes::Bytes, Error> {
 		match self {
 			#[cfg(not(target_family = "wasm"))]
 			Self::Stream(mut stream) => {
+				use bytes::BytesMut;
+
 				let max = max.unwrap_or(Bytesize::MAX);
 				let mut size: u64 = 0;
-				let mut bytes: Vec<u8> = Vec::new();
+				let mut bytes = BytesMut::new();
 
 				while let Some(chunk) = stream.next().await {
 					yield_now!();
@@ -57,7 +59,7 @@ impl ApiBody {
 					bytes.extend_from_slice(&chunk);
 				}
 
-				Ok(bytes)
+				Ok(bytes.freeze())
 			}
 			_ => Err(Error::Unreachable(
 				"Encountered a native body whilst trying to stream one".into(),
@@ -94,7 +96,7 @@ impl ApiBody {
 			let bytes = self.stream(ctx.request_body_max).await?;
 
 			if ctx.request_body_raw {
-				Ok(PublicValue::Bytes(surrealdb_types::Bytes::from(bytes)))
+				Ok(PublicValue::Bytes(surrealdb_types::Bytes::new(bytes)))
 			} else {
 				let content_type =
 					invocation.headers.get(CONTENT_TYPE).and_then(|v| v.to_str().ok());
@@ -103,7 +105,7 @@ impl ApiBody {
 					Some(super::format::JSON) => json::decode(&bytes),
 					Some(super::format::CBOR) => cbor::decode(&bytes),
 					Some(super::format::FLATBUFFERS) => flatbuffers::decode(&bytes),
-					_ => return Ok(PublicValue::Bytes(surrealdb_types::Bytes::from(bytes))),
+					_ => return Ok(PublicValue::Bytes(surrealdb_types::Bytes::new(bytes))),
 				};
 
 				parsed.map_err(|_| Error::ApiError(ApiError::BodyDecodeFailure))

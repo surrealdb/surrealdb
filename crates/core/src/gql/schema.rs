@@ -225,9 +225,9 @@ pub(crate) fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> 
 				})
 				.collect(),
 		),
-	SurValue::Geometry(_) => return Err(resolver_error("unimplemented: Geometry types")),
-	SurValue::Bytes(b) => GqlValue::Binary(b.into_inner()),
-	SurValue::RecordId(t) => GqlValue::String(t.to_string()),
+		SurValue::Geometry(_) => return Err(resolver_error("unimplemented: Geometry types")),
+		SurValue::Bytes(b) => GqlValue::Binary(b.into_inner()),
+		SurValue::RecordId(t) => GqlValue::String(t.to_string()),
 		v => return Err(internal_error(format!("found unsupported value variant: {v:?}"))),
 	};
 	Ok(out)
@@ -510,10 +510,10 @@ pub(crate) fn gql_to_sql_kind(val: &GqlValue, kind: Kind) -> Result<SurValue, Gq
 			GqlValue::Boolean(b) => Ok(SurValue::Bool(*b)),
 			_ => Err(type_error(kind, val)),
 		},
-	Kind::Bytes => match val {
-		GqlValue::Binary(b) => Ok(SurValue::Bytes(bytes::Bytes::copy_from_slice(b).into())),
-		_ => Err(type_error(kind, val)),
-	},
+		Kind::Bytes => match val {
+			GqlValue::Binary(b) => Ok(SurValue::Bytes(bytes::Bytes::copy_from_slice(b).into())),
+			_ => Err(type_error(kind, val)),
+		},
 		Kind::Datetime => match val {
 			GqlValue::String(s) => match syn::datetime(s) {
 				Ok(dt) => Ok(SurValue::Datetime(dt.into())),

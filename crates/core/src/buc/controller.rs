@@ -16,11 +16,7 @@ use crate::iam::Action;
 use crate::val::{Bytes, File, Value};
 
 fn accept_payload(value: Value) -> Result<bytes::Bytes> {
-	value
-		.cast_to::<Bytes>()
-		.map(|x| x.0)
-		.map_err(err::Error::from)
-		.map_err(anyhow::Error::new)
+	value.cast_to::<Bytes>().map(|x| x.0).map_err(err::Error::from).map_err(anyhow::Error::new)
 }
 
 /// Allows you to control a specific bucket in the context of the current user
