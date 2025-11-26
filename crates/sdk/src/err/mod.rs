@@ -110,13 +110,6 @@ pub enum Error {
 		error: String,
 	},
 
-	/// Failed to deserialize a binary response
-	#[error("Failed to deserialize a binary response: {error}")]
-	ResponseFromBinary {
-		binary: Vec<u8>,
-		error: bincode::Error,
-	},
-
 	/// Failed to serialize `sql::Value` to JSON string
 	#[error("Failed to serialize `{value:?}` to JSON string: {error}")]
 	ToJsonString {
@@ -458,12 +451,6 @@ impl From<Error> for DbResultError {
 				value: _,
 				error,
 			} => DbResultError::InvalidParams(format!("Value conversion error: {}", error)),
-			Error::ResponseFromBinary {
-				error: _,
-				..
-			} => DbResultError::DeserializationError(
-				"Binary response deserialization error".to_string(),
-			),
 			Error::ToJsonString {
 				value: _,
 				error,

@@ -274,10 +274,10 @@ pub async fn start_server(
 
 		let CertifiedKey {
 			cert,
-			key_pair,
+			signing_key,
 		} = rcgen::generate_simple_self_signed(Vec::new()).unwrap();
 		fs::write(&crt_path, cert.pem()).unwrap();
-		fs::write(&key_path, key_pair.serialize_pem()).unwrap();
+		fs::write(&key_path, signing_key.serialize_pem()).unwrap();
 
 		extra_args.push_str(format!(" --web-crt {crt_path} --web-key {key_path}").as_str());
 	}

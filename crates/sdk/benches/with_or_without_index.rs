@@ -1,9 +1,10 @@
 #![allow(clippy::unwrap_used)]
 
 use std::collections::BTreeMap;
+use std::hint::black_box;
 use std::time::Duration;
 
-use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use surrealdb_core::dbs::capabilities::{FuncTarget, Targets};
 use surrealdb_core::dbs::{Capabilities, Session};
 use surrealdb_core::kvs::Datastore;

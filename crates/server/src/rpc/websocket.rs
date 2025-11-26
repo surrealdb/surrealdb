@@ -96,9 +96,7 @@ impl Websocket {
 		// Add this WebSocket to the list
 		state.web_sockets.write().await.insert(id, rpc.clone());
 		// Start telemetry metrics for this connection
-		if let Err(err) = telemetry::metrics::ws::on_connect() {
-			error!("Error running metrics::ws::on_connect hook: {err}");
-		}
+		telemetry::metrics::ws::on_connect();
 		// Store all concurrent spawned tasks
 		let mut tasks = JoinSet::new();
 		// Buffer the WebSocket response stream
@@ -137,9 +135,7 @@ impl Websocket {
 		// Remove this WebSocket from the list
 		state.web_sockets.write().await.remove(&id);
 		// Stop telemetry metrics for this connection
-		if let Err(err) = telemetry::metrics::ws::on_disconnect() {
-			error!("Error running metrics::ws::on_disconnect hook: {err}");
-		}
+		telemetry::metrics::ws::on_disconnect();
 	}
 
 	/// Send Ping messages to the client

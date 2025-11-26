@@ -1,8 +1,9 @@
 #![allow(clippy::unwrap_used)]
 
-use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
+use std::hint::black_box;
+
+use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use futures::Future;
-use pprof::criterion::{Output, PProfProfiler};
 use surrealdb_core::dbs::{Capabilities, Session};
 use surrealdb_core::kvs::Datastore;
 
@@ -71,9 +72,5 @@ fn bench_executor(c: &mut Criterion) {
 	c.finish();
 }
 
-criterion_group!(
-	name = benches;
-	config = Criterion::default().with_profiler(PProfProfiler::new(1000, Output::Flamegraph(None)));
-	targets = bench_executor
-);
+criterion_group!(benches, bench_executor);
 criterion_main!(benches);

@@ -6,9 +6,7 @@ use std::sync::Arc;
 
 use ahash::{AHasher, HashSet};
 use anyhow::{Result, ensure};
-use linfa_linalg::norm::Norm;
 use ndarray::{Array1, LinalgScalar, Zip};
-use ndarray_stats::DeviationExt;
 use num_traits::Zero;
 use revision::specialised::{
 	RevisionSpecialisedVecF32, RevisionSpecialisedVecF64, RevisionSpecialisedVecI16,
@@ -121,16 +119,10 @@ impl Vector {
 
 	fn chebyshev_distance(&self, other: &Self) -> f64 {
 		match (self, other) {
-			(Self::F64(a), Self::F64(b)) => a.linf_dist(b).unwrap_or(f64::INFINITY),
-			(Self::F32(a), Self::F32(b)) => {
-				a.linf_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY)
-			}
-			(Self::I64(a), Self::I64(b)) => {
-				a.linf_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY)
-			}
-			(Self::I32(a), Self::I32(b)) => {
-				a.linf_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY)
-			}
+			(Self::F64(a), Self::F64(b)) => Self::chebyshev(a, b),
+			(Self::F32(a), Self::F32(b)) => Self::chebyshev(a, b),
+			(Self::I64(a), Self::I64(b)) => Self::chebyshev(a, b),
+			(Self::I32(a), Self::I32(b)) => Self::chebyshev(a, b),
 			(Self::I16(a), Self::I16(b)) => Self::chebyshev(a, b),
 			_ => f64::NAN,
 		}
@@ -139,16 +131,16 @@ impl Vector {
 	#[inline]
 	fn cosine_distance_f64(a: &Array1<f64>, b: &Array1<f64>) -> f64 {
 		let dot_product = a.dot(b);
-		let norm_a = a.norm_l2();
-		let norm_b = b.norm_l2();
+		let norm_a = a.mapv(|x| x * x).sum().sqrt();
+		let norm_b = b.mapv(|x| x * x).sum().sqrt();
 		1.0 - dot_product / (norm_a * norm_b)
 	}
 
 	#[inline]
 	fn cosine_distance_f32(a: &Array1<f32>, b: &Array1<f32>) -> f64 {
 		let dot_product = a.dot(b) as f64;
-		let norm_a = a.norm_l2() as f64;
-		let norm_b = b.norm_l2() as f64;
+		let norm_a = (a.mapv(|x| x * x).sum() as f64).sqrt();
+		let norm_b = (b.mapv(|x| x * x).sum() as f64).sqrt();
 		1.0 - dot_product / (norm_a * norm_b)
 	}
 
@@ -183,10 +175,10 @@ impl Vector {
 	}
 	fn euclidean_distance(&self, other: &Self) -> f64 {
 		match (self, other) {
-			(Self::F64(a), Self::F64(b)) => a.l2_dist(b).unwrap_or(f64::INFINITY),
-			(Self::F32(a), Self::F32(b)) => a.l2_dist(b).unwrap_or(f64::INFINITY),
-			(Self::I64(a), Self::I64(b)) => a.l2_dist(b).unwrap_or(f64::INFINITY),
-			(Self::I32(a), Self::I32(b)) => a.l2_dist(b).unwrap_or(f64::INFINITY),
+			(Self::F64(a), Self::F64(b)) => Self::euclidean(a, b),
+			(Self::F32(a), Self::F32(b)) => Self::euclidean(a, b),
+			(Self::I64(a), Self::I64(b)) => Self::euclidean(a, b),
+			(Self::I32(a), Self::I32(b)) => Self::euclidean(a, b),
 			(Self::I16(a), Self::I16(b)) => Self::euclidean(a, b),
 			_ => f64::INFINITY,
 		}
@@ -280,10 +272,10 @@ impl Vector {
 
 	pub(super) fn manhattan_distance(&self, other: &Self) -> f64 {
 		match (self, other) {
-			(Self::F64(a), Self::F64(b)) => a.l1_dist(b).unwrap_or(f64::INFINITY),
-			(Self::F32(a), Self::F32(b)) => a.l1_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY),
-			(Self::I64(a), Self::I64(b)) => a.l1_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY),
-			(Self::I32(a), Self::I32(b)) => a.l1_dist(b).map(|r| r as f64).unwrap_or(f64::INFINITY),
+			(Self::F64(a), Self::F64(b)) => Self::manhattan(a, b),
+			(Self::F32(a), Self::F32(b)) => Self::manhattan(a, b),
+			(Self::I64(a), Self::I64(b)) => Self::manhattan(a, b),
+			(Self::I32(a), Self::I32(b)) => Self::manhattan(a, b),
 			(Self::I16(a), Self::I16(b)) => Self::manhattan(a, b),
 			_ => f64::NAN,
 		}
