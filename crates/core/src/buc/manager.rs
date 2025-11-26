@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry;
 
 use crate::buc::BucketStoreProvider;
 use crate::buc::store::prefixed::PrefixedStore;
@@ -110,22 +111,21 @@ impl BucketsManager {
 	) -> Result<Arc<dyn ObjectStore>> {
 		// Attempt to obtain an existing bucket connection
 		let key = BucketConnectionKey::new(ns, db, bu);
-		if let Some(bucket_ref) = self.buckets.get(&key) {
-			Ok((*bucket_ref).clone())
-		} else {
-			// Obtain the bucket definition
-			let bd = tx.expect_db_bucket(ns, db, bu).await?;
-
-			// Connect to the bucket
-			let store = if let Some(ref backend) = bd.backend {
-				self.connect(backend, false, bd.readonly).await?
-			} else {
-				self.connect_global(ns, db, bu).await?
-			};
-
-			// Persist the bucket connection
-			self.buckets.insert(key, store.clone());
-			Ok(store)
+		match self.buckets.entry(key) {
+			Entry::Occupied(e) => Ok(e.get().clone()),
+			Entry::Vacant(e) => {
+				// Obtain the bucket definition
+				let bd = tx.expect_db_bucket(ns, db, bu).await?;
+				// Connect to the bucket
+				let store = if let Some(ref backend) = bd.backend {
+					self.connect(backend, false, bd.readonly).await?
+				} else {
+					self.connect_global(ns, db, bu).await?
+				};
+				// Persist the bucket connection
+				e.insert(store.clone());
+				Ok(store)
+			}
 		}
 	}
 
