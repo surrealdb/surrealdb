@@ -5,13 +5,13 @@ use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use surrealdb_types::{ToSql, kind, object};
 use thiserror::Error;
+use uuid::Uuid;
 
 use crate::dbs::QueryResult;
 use crate::rpc::RpcError;
 use crate::rpc::request::SESSION_ID;
 use crate::types::{
-	PublicArray, PublicKind, PublicNotification, PublicObject, PublicUuid, PublicValue,
-	SurrealValue,
+	PublicArray, PublicKind, PublicNotification, PublicObject, PublicValue, SurrealValue,
 };
 use crate::{dbs, map};
 
@@ -314,14 +314,14 @@ impl From<RpcError> for DbResultError {
 #[derive(Debug)]
 pub struct DbResponse {
 	pub id: Option<PublicValue>,
-	pub session_id: Option<PublicUuid>,
+	pub session_id: Option<Uuid>,
 	pub result: Result<DbResult, DbResultError>,
 }
 
 impl DbResponse {
 	pub fn new(
 		id: Option<PublicValue>,
-		session_id: Option<PublicUuid>,
+		session_id: Option<Uuid>,
 		result: Result<DbResult, DbResultError>,
 	) -> Self {
 		Self {
@@ -333,7 +333,7 @@ impl DbResponse {
 
 	pub fn failure(
 		id: Option<PublicValue>,
-		session_id: Option<PublicUuid>,
+		session_id: Option<Uuid>,
 		error: DbResultError,
 	) -> Self {
 		Self {
@@ -343,11 +343,7 @@ impl DbResponse {
 		}
 	}
 
-	pub fn success(
-		id: Option<PublicValue>,
-		session_id: Option<PublicUuid>,
-		result: DbResult,
-	) -> Self {
+	pub fn success(id: Option<PublicValue>, session_id: Option<Uuid>, result: DbResult) -> Self {
 		Self {
 			id,
 			session_id,
@@ -381,7 +377,7 @@ impl SurrealValue for DbResponse {
 			value.insert("id".to_string(), id);
 		}
 		if let Some(session_id) = self.session_id {
-			value.insert(SESSION_ID.to_string(), PublicValue::Uuid(session_id));
+			value.insert(SESSION_ID.to_string(), PublicValue::Uuid(session_id.into()));
 		}
 		PublicValue::Object(PublicObject::from(value))
 	}

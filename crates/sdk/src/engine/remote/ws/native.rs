@@ -349,7 +349,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 				Some(id) => {
 					// Try to extract i64 from Value
 					if let Value::Number(Number::Int(id_num)) = id {
-						// Find the pending request by searching through all sessions
+						// Find the pending request by session ID
 						let pending_opt =
 							if let Some(session_state) = state.sessions.get_mut(&session_id) {
 								session_state.pending_requests.remove(&id_num)
@@ -369,20 +369,16 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 												value,
 											} => {
 												// Update session-specific vars
-												let session_state = state
-													.sessions
-													.entry(session_id)
-													.or_default();
+												let session_state =
+													state.sessions.entry(session_id).or_default();
 												session_state.vars.insert(key, value);
 											}
 											RequestEffect::Clear {
 												key,
 											} => {
 												// Update session-specific vars
-												let session_state = state
-													.sessions
-													.entry(found_session_id.unwrap())
-													.or_default();
+												let session_state =
+													state.sessions.entry(session_id).or_default();
 												session_state.vars.shift_remove(&key);
 											}
 											RequestEffect::Authenticate {
@@ -410,20 +406,16 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 												value,
 											} => {
 												// Update session-specific vars
-												let session_state = state
-													.sessions
-													.entry(found_session_id.unwrap())
-													.or_default();
+												let session_state =
+													state.sessions.entry(session_id).or_default();
 												session_state.vars.insert(key, value);
 											}
 											RequestEffect::Clear {
 												key,
 											} => {
 												// Update session-specific vars
-												let session_state = state
-													.sessions
-													.entry(found_session_id.unwrap())
-													.or_default();
+												let session_state =
+													state.sessions.entry(session_id).or_default();
 												session_state.vars.shift_remove(&key);
 											}
 											RequestEffect::Authenticate {
@@ -471,7 +463,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 															vec![token.into_value()],
 														))),
 														txn: None,
-														session_id: found_session_id,
+														session_id: Some(session_id),
 													};
 													let request_value = request.into_value();
 													let value =
@@ -507,9 +499,8 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 																};
 															// Re-insert into the session's pending
 															// requests
-															if let Some(session_state) = state
-																.sessions
-																.get_mut(&found_session_id.unwrap())
+															if let Some(session_state) =
+																state.sessions.get_mut(&session_id)
 															{
 																session_state
 																	.pending_requests
@@ -540,43 +531,32 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 				None => {
 					if let Ok(DbResult::Live(notification)) = response.result {
 						let live_query_id = notification.id.0;
-						// Find which session has this live query registered
-						let mut found_session = None;
-						for (session_id, session_state) in &state.sessions {
-							if session_state.live_queries.contains_key(&live_query_id) {
-								found_session = Some(*session_id);
-								break;
-							}
-						}
-						if let Some(session_id) = found_session {
-							let session_state = state.sessions.get_mut(&session_id).unwrap();
-							if let Some(sender) = session_state.live_queries.get(&live_query_id) {
-								// Send the notification back to the caller or kill live query
-								// if the receiver is already dropped
-								if sender.send(Ok(notification)).await.is_err() {
-									session_state.live_queries.remove(&live_query_id);
-									let kill = {
-										let request = Command::Kill {
-											uuid: live_query_id,
-										}
-										.into_router_request(None, Some(session_id))
-										.expect("KILL command should convert to router request");
-
-										let request_value = request.into_value();
-
-										let value =
-											surrealdb_core::rpc::format::flatbuffers::encode(
-												&request_value,
-											)
-											.expect("router request should serialize");
-										Message::Binary(value.into())
-									};
-									if let Err(error) = state.sink.send(kill).await {
-										trace!(
-											"failed to send kill query to the server; {error:?}"
-										);
-										return HandleResult::Disconnected;
+						let Some(session_state) = state.sessions.get_mut(&session_id) else {
+							return HandleResult::Ok;
+						};
+						if let Some(sender) = session_state.live_queries.get(&live_query_id) {
+							// Send the notification back to the caller or kill live query
+							// if the receiver is already dropped
+							if sender.send(Ok(notification)).await.is_err() {
+								session_state.live_queries.remove(&live_query_id);
+								let kill = {
+									let request = Command::Kill {
+										uuid: live_query_id,
 									}
+									.into_router_request(None, Some(session_id))
+									.expect("KILL command should convert to router request");
+
+									let request_value = request.into_value();
+
+									let value = surrealdb_core::rpc::format::flatbuffers::encode(
+										&request_value,
+									)
+									.expect("router request should serialize");
+									Message::Binary(value.into())
+								};
+								if let Err(error) = state.sink.send(kill).await {
+									trace!("failed to send kill query to the server; {error:?}");
+									return HandleResult::Disconnected;
 								}
 							}
 						}
@@ -597,19 +577,17 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 				match surrealdb_core::rpc::format::flatbuffers::decode(&binary) {
 					Ok(ErrorResponse {
 						id,
+						session_id,
 					}) => {
 						// Return an error if an ID was returned
-						if let Some(Value::Number(surrealdb_types::Number::Int(id_num))) = id {
-							// Find the pending request by searching through all sessions
-							let mut pending_opt = None;
-							for (_, session_state) in &mut state.sessions {
-								if let Some(pending) =
-									session_state.pending_requests.remove(&id_num)
-								{
-									pending_opt = Some(pending);
-									break;
-								}
-							}
+						if let Some(Value::Number(Number::Int(id_num))) = id {
+							let pending_opt = if let Some(session_id) = session_id
+								&& let Some(session_state) = state.sessions.get_mut(&session_id)
+							{
+								session_state.pending_requests.remove(&id_num)
+							} else {
+								None
+							};
 							match pending_opt {
 								Some(pending) => {
 									let _res =

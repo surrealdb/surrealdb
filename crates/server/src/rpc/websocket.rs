@@ -368,7 +368,7 @@ impl Websocket {
 							if shutdown.is_cancelled() {
 								// Process the response
 								crate::rpc::response::send(
-									DbResponse::failure(req.id, req.session_id, DbResultError::InternalError(SERVER_SHUTTING_DOWN.to_string())),
+									DbResponse::failure(req.id, req.session_id.map(Into::into), DbResultError::InternalError(SERVER_SHUTTING_DOWN.to_string())),
 									otel_cx.clone(),
 									rpc.format,
 									chn
@@ -380,7 +380,7 @@ impl Websocket {
 							else if ALLOC.is_beyond_threshold() {
 								// Process the response
 								crate::rpc::response::send(
-									DbResponse::failure(req.id, req.session_id, DbResultError::InternalError(SERVER_OVERLOADED.to_string())),
+									DbResponse::failure(req.id, req.session_id.map(Into::into), DbResultError::InternalError(SERVER_OVERLOADED.to_string())),
 									otel_cx.clone(),
 									rpc.format,
 									chn
@@ -402,8 +402,8 @@ impl Websocket {
 
 								crate::rpc::response::send(
 									match result {
-										Ok(result) => DbResponse::success(req.id, req.session_id, result),
-										Err(err) => DbResponse::failure(req.id, req.session_id, err),
+										Ok(result) => DbResponse::success(req.id, req.session_id.map(Into::into), result),
+										Err(err) => DbResponse::failure(req.id, req.session_id.map(Into::into), err),
 									},
 									otel_cx.clone(),
 									rpc.format,
