@@ -462,10 +462,10 @@ script = """
     else
         cargo build
     fi
-    if [ "${_TEST_API_ENGINE}" = "tikv" ] || [ "${_TEST_API_ENGINE}" = "foundation" ]; then
-        ./target/debug/surrealql-test --color always run --no-wip -j 1 --backend ${_TEST_API_ENGINE}
+    if [ "${_TEST_API_ENGINE}" = "surrealkv" ] || [ "${_TEST_API_ENGINE}" = "tikv" ] || [ "${_TEST_API_ENGINE}" = "foundation" ]; then
+        ./target/debug/surrealql-test --color always run --no-wip --jobs 1 --backend ${_TEST_API_ENGINE}
     else
-        ./target/debug/surrealql-test --color always run --no-wip -j 3 --backend ${_TEST_API_ENGINE}
+        ./target/debug/surrealql-test --color always run --no-wip --jobs 3 --backend ${_TEST_API_ENGINE}
     fi
 """
 

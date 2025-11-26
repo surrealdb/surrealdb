@@ -5,7 +5,6 @@ readme = "README.md"
 documentation = "https://docs.rs/surrealdb-core/"
 edition.workspace = true
 version.workspace = true
-rust-version.workspace = true
 authors.workspace = true
 description.workspace = true
 repository.workspace = true
@@ -18,11 +17,11 @@ license-file.workspace = true
 # Public features
 default = ["kv-mem"]
 kv-mem = [
-    "dep:surrealkv",
-    "tokio/time",
-    "dep:tempfile",
-    "dep:ext-sort",
-    "dep:affinitypool",
+	"dep:surrealmx",
+	"tokio/time",
+	"dep:tempfile",
+	"dep:ext-sort",
+	"dep:affinitypool",
 ]
 kv-indxdb = ["dep:indxdb"]
 kv-rocksdb = [
@@ -53,6 +52,7 @@ arbitrary = [
     "rust_decimal/rust-fuzz",
     "geo-types/arbitrary",
     "uuid/arbitrary",
+    "surrealdb-types/arbitrary",
 ]
 allocation-tracking = []
 enterprise = ["dep:rust-s3"]
@@ -65,10 +65,11 @@ targets = []
 [dependencies]
 
 # External surreal crates
+surrealmx = { workspace = true, optional = true }
 surrealkv = { workspace = true, optional = true }
 surrealml = { workspace = true, optional = true }
+
 affinitypool = { workspace = true, optional = true }
-#derive.workspace = true
 dmp.workspace = true
 indxdb = { workspace = true, optional = true }
 js = { workspace = true, features = [
@@ -86,6 +87,7 @@ lexicmp.workspace = true
 reblessive = { workspace = true, features = ["tree"] }
 revision.workspace = true
 storekey.workspace = true
+surrealdb-types = { workspace = true }
 vart.workspace = true
 
 # External KV stores
@@ -181,11 +183,11 @@ getrandom = { workspace = true, features = ["wasm_js"] }
 pharos.workspace = true
 ring = { workspace = true, features = ["wasm32_unknown_unknown_js"] }
 surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers"] }
-surrealdb-types = { workspace = true }
 tokio = { workspace = true, default-features = false, features = [
     "rt",
     "sync",
 ] }
+tokio-util.workspace = true
 uuid = { workspace = true, features = ["serde", "js", "v4", "v7"] }
 wasm-bindgen-futures.workspace = true
 wasmtimer = { workspace = true, default-features = false, features = ["tokio"] }
@@ -197,7 +199,6 @@ ws_stream_wasm.workspace = true
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 rust-s3 = { workspace = true, optional = true }
 surrealdb-protocol = { workspace = true, features = ["proto", "flatbuffers", "rpc"] }
-surrealdb-types = { workspace = true }
 tokio = { workspace = true, default-features = false, features = [
     "macros",
     "io-util",
@@ -208,6 +209,7 @@ tokio = { workspace = true, default-features = false, features = [
     "sync",
 ] }
 tokio-tungstenite = { workspace = true, optional = true }
+tokio-util.workspace = true
 uuid = { workspace = true, features = ["serde", "v4", "v7"] }
 surrealism-runtime = { workspace = true, optional = true }
 
@@ -228,6 +230,7 @@ temp-dir.workspace = true
 test-log = { workspace = true, features = ["trace"] }
 time = { workspace = true, features = ["serde"] }
 tokio = { workspace = true, features = ["macros", "sync", "rt-multi-thread"] }
+tokio-util.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 wiremock.workspace = true
 

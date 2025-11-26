@@ -1,6 +1,6 @@
 use std::fmt::{self, Display};
 
-use crate::fmt::Fmt;
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 use crate::sql::{Expr, Permission};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -14,15 +14,19 @@ impl Display for ApiConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		if !self.middleware.is_empty() {
 			write!(f, " MIDDLEWARE ")?;
-			write!(
-				f,
-				"{}",
-				Fmt::pretty_comma_separated(self.middleware.iter().map(|m| format!(
-					"{}({})",
-					m.name,
-					Fmt::pretty_comma_separated(m.args.iter())
-				)))
-			)?
+
+			for (idx, m) in self.middleware.iter().enumerate() {
+				if idx != 0 {
+					f.write_str(", ")?;
+				}
+				for (idx, s) in m.name.split("::").enumerate() {
+					if idx != 0 {
+						f.write_str("::")?;
+					}
+					EscapeKwFreeIdent(s).fmt(f)?;
+				}
+				write!(f, "({})", Fmt::pretty_comma_separated(m.args.iter()))?;
+			}
 		}
 
 		write!(f, " PERMISSIONS {}", self.permissions)?;
@@ -48,7 +52,6 @@ impl From<crate::expr::statements::define::config::api::ApiConfig> for ApiConfig
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct Middleware {
 	pub name: String,
 	pub args: Vec<Expr>,

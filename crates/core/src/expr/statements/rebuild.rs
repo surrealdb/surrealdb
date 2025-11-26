@@ -11,7 +11,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::statements::define::run_indexing;
-use crate::fmt::EscapeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -66,7 +66,7 @@ impl RebuildIndexStatement {
 					return Ok(Value::None);
 				} else {
 					return Err(Error::IxNotFound {
-						name: self.name.to_string(),
+						name: self.name.clone(),
 					}
 					.into());
 				}
@@ -87,7 +87,7 @@ impl Display for RebuildIndexStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what))?;
+		write!(f, " {} ON {}", EscapeKwFreeIdent(&self.name), EscapeKwFreeIdent(&self.what))?;
 		if self.concurrently {
 			write!(f, " CONCURRENTLY")?
 		}

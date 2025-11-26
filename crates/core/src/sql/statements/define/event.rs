@@ -11,6 +11,7 @@ pub(crate) struct DefineEventStatement {
 	pub name: Expr,
 	pub target_table: Expr,
 	pub when: Expr,
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
 	pub then: Vec<Expr>,
 	pub comment: Option<Expr>,
 }

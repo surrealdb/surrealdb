@@ -22,7 +22,7 @@ use crate::doc::DefaultBroker;
 use crate::err::Error;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
-use crate::expr::statements::OptionStatement;
+use crate::expr::statements::{OptionStatement, UseStatement};
 use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::slowlog::SlowLogVisit;
@@ -119,28 +119,41 @@ impl Executor {
 				// Avoid moving in and out of the context via Arc::get_mut
 				let ctx = ctx_mut!();
 
-				if let Some(ns) = stmt.ns {
-					txn.get_or_add_ns(Some(ctx), &ns).await?;
+				match stmt {
+					UseStatement::Ns(ns) => {
+						txn.get_or_add_ns(Some(ctx), &ns).await?;
 
-					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
-					self.opt.set_ns(Some(ns.as_str().into()));
-					session.put(NS.as_ref(), ns.into());
-					ctx.add_value("session", session.into());
+						let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+						self.opt.set_ns(Some(ns.as_str().into()));
+						session.put(NS.as_ref(), ns.into());
+						ctx.add_value("session", session.into());
+					}
+					UseStatement::Db(db) => {
+						let Some(ns) = &self.opt.ns else {
+							return Err(ControlFlow::Err(anyhow::anyhow!(
+								"Cannot use database without namespace"
+							)));
+						};
+
+						txn.ensure_ns_db(Some(ctx), ns, &db).await?;
+
+						let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+						self.opt.set_db(Some(db.as_str().into()));
+						session.put(DB.as_ref(), db.into());
+						ctx.add_value("session", session.into());
+					}
+					UseStatement::NsDb(ns, db) => {
+						txn.ensure_ns_db(Some(ctx), &ns, &db).await?;
+
+						let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
+						self.opt.set_ns(Some(ns.as_str().into()));
+						self.opt.set_db(Some(db.as_str().into()));
+						session.put(NS.as_ref(), ns.into());
+						session.put(DB.as_ref(), db.into());
+						ctx.add_value("session", session.into());
+					}
 				}
-				if let Some(db) = stmt.db {
-					let Some(ns) = &self.opt.ns else {
-						return Err(ControlFlow::Err(anyhow::anyhow!(
-							"Cannot use database without namespace"
-						)));
-					};
 
-					txn.ensure_ns_db(Some(ctx), ns, &db).await?;
-
-					let mut session = ctx.value("session").unwrap_or(&Value::None).clone();
-					self.opt.set_db(Some(db.as_str().into()));
-					session.put(DB.as_ref(), db.into());
-					ctx.add_value("session", session.into());
-				}
 				Ok(Value::None)
 			}
 			TopLevelExpr::Option(_) => {
@@ -165,7 +178,7 @@ impl Executor {
 					Some(kind) => res
 						.coerce_to_kind(kind)
 						.map_err(|e| Error::SetCoerce {
-							name: stm.name.to_string(),
+							name: stm.name.clone(),
 							error: Box::new(e),
 						})
 						.map_err(anyhow::Error::new)?,
@@ -293,25 +306,15 @@ impl Executor {
 
 		match self.execute_plan_in_transaction(txn.clone(), start, plan).await {
 			Ok(value) | Err(ControlFlow::Return(value)) => {
-				let mut lock = txn.lock().await;
-
 				// non-writable transactions might return an error on commit.
 				// So cancel them instead. This is fine since a non-writable transaction
 				// has nothing to commit anyway.
 				if let TransactionType::Read = transaction_type {
-					let _ = lock.cancel().await;
+					let _ = txn.cancel().await;
 					return Ok(value);
 				}
 
-				if let Err(e) = lock.complete_changes(false).await {
-					let _ = lock.cancel().await;
-
-					bail!(Error::QueryNotExecuted {
-						message: e.to_string(),
-					});
-				}
-
-				if let Err(e) = lock.commit().await {
+				if let Err(e) = txn.commit().await {
 					bail!(Error::QueryNotExecuted {
 						message: e.to_string(),
 					});
@@ -508,14 +511,9 @@ impl Executor {
 					return Ok(());
 				}
 				TopLevelExpr::Commit => {
-					let mut lock = txn.lock().await;
-
-					// complete_changes and then commit.
-					// If either error undo results.
-					let e = if let Err(e) = lock.complete_changes(false).await {
-						let _ = lock.cancel().await;
-						e
-					} else if let Err(e) = lock.commit().await {
+					// Commit the transaction.
+					// If error undo results.
+					let e = if let Err(e) = txn.commit().await {
 						e
 					} else {
 						// Successfully commited. everything is fine.
@@ -610,12 +608,12 @@ impl Executor {
 									}
 
 									self.results.push(QueryResult {
-									time: Duration::ZERO,
-									result: Err(DbResultError::QueryNotExecuted(
-										"The query was not executed due to a cancelled transaction".to_string(),
-									)),
-									query_type: QueryType::Other,
-								});
+										time: Duration::ZERO,
+										result: Err(DbResultError::QueryNotExecuted(
+												"The query was not executed due to a cancelled transaction".to_string(),
+										)),
+										query_type: QueryType::Other,
+									});
 								}
 
 								// ran out of statements before the transaction ended.

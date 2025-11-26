@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 
-use crate::fmt::EscapeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -15,7 +15,7 @@ impl Display for RemoveParamStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " ${}", EscapeIdent(&self.name))?;
+		write!(f, " ${}", EscapeKwFreeIdent(&self.name))?;
 		Ok(())
 	}
 }

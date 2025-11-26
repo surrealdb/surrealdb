@@ -201,6 +201,9 @@ pub async fn init(
 			Ok(mut query) => {
 				let init_length = query.num_statements();
 
+				// TODO: This assumes that there is a single db or namespace used in a single
+				// query.
+				// This is not necessarily the case.
 				let namespace = query.get_used_namespace();
 				let database = query.get_used_database();
 				let vars = query.get_let_statements();

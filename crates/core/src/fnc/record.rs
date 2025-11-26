@@ -70,10 +70,10 @@ pub mod is {
 				// As an example, we may use this function inside a select predicate or filter
 				// get_record() can potentially do a new fetch on the KV store, which at scale can
 				// be expensive Let's short circuit if the rid matches the current document
-				if let Some(doc) = doc {
-					if doc.rid.as_ref().is_some_and(|x| x.as_ref() == &rid) {
-						return Ok(Value::Bool(doc.doc.is_edge()));
-					}
+				if let Some(doc) = doc
+					&& doc.rid.as_ref().is_some_and(|x| x.as_ref() == &rid)
+				{
+					return Ok(Value::Bool(doc.doc.is_edge()));
 				}
 
 				// Ensure we have a valid database context (namespace and database must be set)

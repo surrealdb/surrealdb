@@ -289,9 +289,9 @@ impl Display for Distance {
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Hash)]
 pub enum VectorType {
 	/// 64-bit floating point.
-	#[default]
 	F64,
 	/// 32-bit floating point.
+	#[default]
 	F32,
 	/// 64-bit signed integer.
 	I64,

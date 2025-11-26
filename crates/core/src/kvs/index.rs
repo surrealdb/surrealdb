@@ -117,7 +117,7 @@ impl From<BuildingStatus> for Value {
 			}
 			BuildingStatus::Aborted => "aborted",
 			BuildingStatus::Error(error) => {
-				o.insert("error".to_string(), error.to_string().into());
+				o.insert("error".to_string(), error.clone().into());
 				"error"
 			}
 		};
@@ -180,12 +180,12 @@ impl IndexBuilder {
 			if let Err(err) = &r {
 				b.set_status(BuildingStatus::Error(err.to_string())).await;
 			}
-			if let Some(s) = sdr {
-				if s.send(r).is_err() {
-					warn!("Failed to send index building result to the consumer");
-				}
-			}
 			drop(guard);
+			if let Some(s) = sdr
+				&& s.send(r).is_err()
+			{
+				warn!("Failed to send index building result to the consumer");
+			}
 		});
 		Ok(building)
 	}
@@ -699,10 +699,10 @@ impl Building {
 	}
 
 	fn is_beyond_threshold(&self, count: Option<usize>) -> Result<()> {
-		if let Some(count) = count {
-			if count % 100 != 0 {
-				return Ok(());
-			}
+		if let Some(count) = count
+			&& count % 100 != 0
+		{
+			return Ok(());
 		}
 		if ALLOC.is_beyond_threshold() {
 			Err(anyhow::Error::new(Error::QueryBeyondMemoryThreshold))

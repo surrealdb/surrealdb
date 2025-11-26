@@ -18,6 +18,7 @@ use crate::val::{Duration, TrySub};
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Hash)]
 #[serde(rename = "$surrealdb::private::Datetime")]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Datetime(pub DateTime<Utc>);
 
 impl Datetime {

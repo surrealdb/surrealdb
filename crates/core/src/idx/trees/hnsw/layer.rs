@@ -252,16 +252,16 @@ where
 		e_id: ElementId,
 		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<bool> {
-		if let Some(docs) = search.vec_docs().get_docs(tx, e_pt).await? {
-			if chk.check_truthy(db, tx, stk, search.docs(), docs).await? {
-				w.push(e_dist, e_id);
-				if w.len() > search.ef() {
-					if let Some((_, id)) = w.pop_last() {
-						chk.expire(id);
-					}
-				}
-				return Ok(true);
+		if let Some(docs) = search.vec_docs().get_docs(tx, e_pt).await?
+			&& chk.check_truthy(db, tx, stk, search.docs(), docs).await?
+		{
+			w.push(e_dist, e_id);
+			if w.len() > search.ef()
+				&& let Some((_, id)) = w.pop_last()
+			{
+				chk.expire(id);
 			}
+			return Ok(true);
 		}
 		Ok(false)
 	}
@@ -287,17 +287,17 @@ where
 
 		for e_id in neighbors {
 			if let Some(e_conn) = self.graph.get_edges(&e_id) {
-				if e_conn.len() > self.m_max {
-					if let Some(e_pt) = elements.get_vector(tx, &e_id).await? {
-						let e_c = self.build_priority_list(tx, elements, e_id, e_conn).await?;
-						let mut e_new_conn = self.graph.new_edges();
-						heuristic
-							.select(tx, elements, self, e_id, &e_pt, e_c, None, &mut e_new_conn)
-							.await?;
-						#[cfg(debug_assertions)]
-						assert!(!e_new_conn.contains(&e_id));
-						self.graph.set_node(e_id, e_new_conn);
-					}
+				if e_conn.len() > self.m_max
+					&& let Some(e_pt) = elements.get_vector(tx, &e_id).await?
+				{
+					let e_c = self.build_priority_list(tx, elements, e_id, e_conn).await?;
+					let mut e_new_conn = self.graph.new_edges();
+					heuristic
+						.select(tx, elements, self, e_id, &e_pt, e_c, None, &mut e_new_conn)
+						.await?;
+					#[cfg(debug_assertions)]
+					assert!(!e_new_conn.contains(&e_id));
+					self.graph.set_node(e_id, e_new_conn);
 				}
 			} else {
 				#[cfg(debug_assertions)]

@@ -178,7 +178,7 @@ pub async fn db_access(
 		Some(db) => db,
 		None => {
 			return Err(Error::DbNotFound {
-				name: db.to_string(),
+				name: db.clone(),
 			}
 			.into());
 		}
@@ -301,7 +301,7 @@ pub async fn db_access(
 			Some(Error::Thrown(_)) => Err(e),
 			// If the SIGNUP clause failed due to an unexpected error, be more specific
 			// This allows clients to handle these errors, which may be retryable
-			Some(Error::Tx(_) | Error::TxRetryable(_)) => {
+			Some(Error::Kvs(kvs_err)) if kvs_err.is_retryable() => {
 				debug!("Unexpected error found while executing a SIGNUP clause: {e}");
 				Err(anyhow::Error::new(Error::UnexpectedAuth))
 			}

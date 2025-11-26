@@ -8,6 +8,7 @@ pub mod datetime;
 pub mod duration;
 /// File reference value types for SurrealDB
 pub mod file;
+mod format;
 /// Geometric value types for SurrealDB
 pub mod geometry;
 /// JSON value types for SurrealDB
@@ -60,6 +61,7 @@ use crate::{Kind, SurrealValue, write_sql};
 #[derive(
 	Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
 )]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct SurrealNone;
 
 /// Marker type for value conversions from Value::Null
@@ -69,6 +71,7 @@ pub struct SurrealNone;
 #[derive(
 	Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
 )]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct SurrealNull;
 
 /// Represents a value in SurrealDB
@@ -77,6 +80,7 @@ pub struct SurrealNull;
 /// Each variant corresponds to a different data type supported by the database.
 
 #[derive(Clone, Debug, Default, Hash, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Value {
 	/// Represents the absence of a value
 	#[default]
@@ -610,10 +614,10 @@ impl Value {
 			Kind::Set(kind, max) => {
 				self.is_set_and(|set| {
 					// Check max length if specified
-					if let Some(max_len) = max {
-						if set.len() > *max_len as usize {
-							return false;
-						}
+					if let Some(max_len) = max
+						&& set.len() > *max_len as usize
+					{
+						return false;
 					}
 					// Check all elements match the kind
 					set.iter().all(|v| v.is_kind(kind))
@@ -622,10 +626,10 @@ impl Value {
 			Kind::Array(kind, max) => {
 				self.is_array_and(|arr| {
 					// Check max length if specified
-					if let Some(max_len) = max {
-						if arr.len() > *max_len as usize {
-							return false;
-						}
+					if let Some(max_len) = max
+						&& arr.len() > *max_len as usize
+					{
+						return false;
 					}
 					// Check all elements match the kind
 					arr.iter().all(|v| v.is_kind(kind))
@@ -1151,9 +1155,9 @@ mod tests {
 		"items": vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))],
 	}), "{ items: [1, 2] }")]
 	// Geometry
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(0.0, 0.0))), "(0, 0)")]
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))), "(1, 2)")]
-	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(-123.45, 67.89))), "(-123.45, 67.89)")]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(0.0, 0.0))), "(0f, 0f)")]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(1.0, 2.0))), "(1f, 2f)")]
+	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(-123.45, 67.89))), "(-123.45f, 67.89f)")]
 	// Bytes
 	#[case::bytes(Value::Bytes(Bytes::default()), "b\"\"")]
 	#[case::bytes(Value::Bytes(Bytes::from(vec![1, 2, 3])), "b\"010203\"")]

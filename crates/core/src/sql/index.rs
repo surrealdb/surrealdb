@@ -1,7 +1,7 @@
 use std::fmt;
 use std::fmt::{Display, Formatter};
 
-use crate::fmt::EscapeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 use crate::sql::Cond;
 use crate::sql::scoring::Scoring;
 use crate::types::PublicNumber;
@@ -180,8 +180,8 @@ impl From<crate::catalog::Distance> for Distance {
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum VectorType {
-	#[default]
 	F64,
+	#[default]
 	F32,
 	I64,
 	I32,
@@ -213,7 +213,7 @@ impl Display for Index {
 				Ok(())
 			}
 			Self::FullText(p) => {
-				write!(f, "FULLTEXT ANALYZER {} {}", EscapeIdent(&p.az), p.sc,)?;
+				write!(f, "FULLTEXT ANALYZER {} {}", EscapeKwFreeIdent(&p.az), p.sc,)?;
 				if p.hl {
 					f.write_str(" HIGHLIGHTS")?
 				}

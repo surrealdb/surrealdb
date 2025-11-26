@@ -19,6 +19,7 @@ pub const ID_CHARS: [char; 36] = [
 #[derive(
 	Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize, SurrealValue,
 )]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[surreal(untagged, lowercase)]
 pub enum RecordIdKey {
 	/// A numeric key

@@ -46,7 +46,7 @@ impl DefineFunctionStatement {
 				DefineKind::Default => {
 					if !opt.import {
 						bail!(Error::FcAlreadyExists {
-							name: self.name.to_string(),
+							name: self.name.clone(),
 						});
 					}
 				}
@@ -90,7 +90,12 @@ impl fmt::Display for DefineFunctionStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " fn::{}(", &*self.name)?;
+		f.write_str(" fn")?;
+		for s in self.name.split("::") {
+			f.write_str("::")?;
+			EscapeKwFreeIdent(s).fmt(f)?;
+		}
+		f.write_str("(")?;
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			if i > 0 {
 				f.write_str(", ")?;

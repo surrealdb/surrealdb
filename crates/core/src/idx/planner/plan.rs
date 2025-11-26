@@ -38,7 +38,6 @@ pub(super) struct PlanBuilderParameters {
 	pub(super) all_and: bool,
 	pub(super) all_expressions_with_index: bool,
 	pub(super) all_and_groups: HashMap<GroupRef, bool>,
-	pub(super) has_reverse_scan: bool,
 }
 
 impl PlanBuilder {
@@ -71,7 +70,7 @@ impl PlanBuilder {
 
 		// Handle explicit NO INDEX directive
 		if let Some(With::NoIndex) = ctx.with {
-			return Self::table_iterator(ctx, Some("WITH NOINDEX"), p.has_reverse_scan, p.gp).await;
+			return Self::table_iterator(ctx, Some("WITH NOINDEX"), p.gp).await;
 		}
 
 		if let Some(io) = p.index_count {
@@ -80,11 +79,11 @@ impl PlanBuilder {
 
 		//Analyse the query AST to discover indexable conditions and collect
 		//optimisation opportunities
-		if let Some(root) = &p.root {
-			if let Err(e) = b.eval_node(root) {
-				// Fall back to table scan if analysis fails
-				return Self::table_iterator(ctx, Some(&e), p.has_reverse_scan, p.gp).await;
-			}
+		if let Some(root) = &p.root
+			&& let Err(e) = b.eval_node(root)
+		{
+			// Fall back to table scan if analysis fails
+			return Self::table_iterator(ctx, Some(&e), p.gp).await;
 		}
 
 		//Optimisation path 1: All conditions connected by AND operators
@@ -98,10 +97,10 @@ impl PlanBuilder {
 			for (ixr, vals) in p.compound_indexes {
 				if let Some((cols, io)) = b.check_compound_index_all_and(&ixr, vals) {
 					// Prefer indexes that cover more columns (higher selectivity)
-					if let Some((c, _)) = &compound_index {
-						if cols <= *c {
-							continue; // Skip if this index covers fewer columns
-						}
+					if let Some((c, _)) = &compound_index
+						&& cols <= *c
+					{
+						continue; // Skip if this index covers fewer columns
 					}
 					// Only consider true compound indexes (multiple columns)
 					if cols > 1 {
@@ -119,35 +118,28 @@ impl PlanBuilder {
 			}
 
 			// Select the first available range query (deterministic group order)
-			if let Some((_, group)) = b.groups.into_iter().next() {
-				if let Some((index_reference, rq)) = group.take_first_range() {
-					// Evaluate the record strategy
-					let record_strategy =
-						ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
-					let (is_order, sc) = if let Some(io) = p.order_limit {
-						#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
-						{
-							(io.index_reference == index_reference, ScanDirection::Forward)
-						}
-						#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-						{
-							(
-								io.index_reference == index_reference,
-								Self::check_range_scan_direction(p.has_reverse_scan, io.op()),
-							)
-						}
-					} else {
-						(false, ScanDirection::Forward)
-					};
-					// Return the plan
-					return Ok(Plan::SingleIndexRange(
-						index_reference,
-						rq,
-						record_strategy,
-						sc,
-						is_order,
-					));
-				}
+			if let Some((_, group)) = b.groups.into_iter().next()
+				&& let Some((index_reference, rq)) = group.take_first_range()
+			{
+				// Evaluate the record strategy
+				let record_strategy =
+					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
+				let (is_order, sc) = if let Some(io) = p.order_limit {
+					(
+						io.index_reference == index_reference,
+						Self::check_range_scan_direction(io.op()),
+					)
+				} else {
+					(false, ScanDirection::Forward)
+				};
+				// Return the plan
+				return Ok(Plan::SingleIndexRange(
+					index_reference,
+					rq,
+					record_strategy,
+					sc,
+					is_order,
+				));
 			}
 
 			// Otherwise, pick a non-range single-index
@@ -164,11 +156,8 @@ impl PlanBuilder {
 				// Evaluate the record strategy
 				let record_strategy =
 					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
-				// Check compatibility with reverse-scan capability
-				if Self::check_order_scan(p.has_reverse_scan, o.op()) {
-					// Return the plan
-					return Ok(Plan::SingleIndex(None, o.clone(), record_strategy));
-				}
+				// Return the plan
+				return Ok(Plan::SingleIndex(None, o.clone(), record_strategy));
 			}
 		}
 		// If every expression is backed by an index we can use the MultiIndex plan
@@ -186,33 +175,25 @@ impl PlanBuilder {
 			// Return the plan
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges, record_strategy));
 		}
-		Self::table_iterator(ctx, None, p.has_reverse_scan, p.gp).await
+		Self::table_iterator(ctx, None, p.gp).await
 	}
 
 	async fn table_iterator(
 		ctx: &StatementContext<'_>,
 		reason: Option<&str>,
-		has_reverse_scan: bool,
 		granted_permission: GrantedPermission,
 	) -> Result<Plan> {
 		// Evaluate the record strategy
 		let rs = ctx.check_record_strategy(false, granted_permission)?;
 		// Evaluate the scan direction
-		let sc = ctx.check_scan_direction(has_reverse_scan);
+		let sc = ctx.check_scan_direction();
 		// Collect the reason if any
 		let reason = reason.map(|s| s.to_string());
 		Ok(Plan::TableIterator(reason, rs, sc))
 	}
 
-	/// Check if the ordering is compatible with the datastore transaction
-	/// capabilities
-	fn check_order_scan(has_reverse_scan: bool, op: &IndexOperator) -> bool {
-		has_reverse_scan || matches!(op, IndexOperator::Order(false))
-	}
-
-	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-	fn check_range_scan_direction(has_reverse_scan: bool, op: &IndexOperator) -> ScanDirection {
-		if has_reverse_scan && matches!(op, IndexOperator::Order(true)) {
+	fn check_range_scan_direction(op: &IndexOperator) -> ScanDirection {
+		if matches!(op, IndexOperator::Order(true)) {
 			return ScanDirection::Backward;
 		}
 		ScanDirection::Forward
@@ -351,10 +332,10 @@ impl PlanBuilder {
 				right,
 				exp,
 			} => {
-				if let Some(io) = io {
-					if self.with_indexes.allowed_index(io.index_reference.index_id) {
-						self.add_index_option(*group, exp.clone(), io.clone());
-					}
+				if let Some(io) = io
+					&& self.with_indexes.allowed_index(io.index_reference.index_id)
+				{
+					self.add_index_option(*group, exp.clone(), io.clone());
 				}
 				self.eval_node(left)?;
 				self.eval_node(right)?;
@@ -476,10 +457,10 @@ impl IndexOption {
 	}
 
 	fn reduce_array(value: &Value) -> Value {
-		if let Value::Array(a) = value {
-			if a.len() == 1 {
-				return a[0].clone();
-			}
+		if let Value::Array(a) = value
+			&& a.len() == 1
+		{
+			return a[0].clone();
 		}
 		value.clone()
 	}

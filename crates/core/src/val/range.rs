@@ -175,6 +175,7 @@ impl Range {
 /// A range of a specific type, can be converted back into a general range and
 /// coerced from a general range.
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct TypedRange<T> {
 	pub start: Bound<T>,
 	pub end: Bound<T>,
@@ -342,10 +343,10 @@ impl Iterator for IntegerRangeIter {
 
 	fn next(&mut self) -> Option<i64> {
 		let cur = self.cur;
-		if let Some(end) = self.end {
-			if cur >= end {
-				return None;
-			}
+		if let Some(end) = self.end
+			&& cur >= end
+		{
+			return None;
 		}
 		if let Some(x) = cur.checked_add(1) {
 			self.cur = x

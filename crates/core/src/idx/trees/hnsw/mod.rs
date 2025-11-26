@@ -372,21 +372,21 @@ where
 		vec_docs: &VecDocs,
 		chk: &mut HnswConditionChecker<'_>,
 	) -> Result<Vec<(f64, ElementId)>> {
-		if let Some((ep_dist, ep_id)) = self.search_ep(tx, &search.pt).await? {
-			if let Some(ep_pt) = self.elements.get_vector(tx, &ep_id).await? {
-				let search_ctx = HnswCheckedSearchContext::new(
-					&self.elements,
-					hnsw_docs,
-					vec_docs,
-					&search.pt,
-					search.ef,
-				);
-				let w = self
-					.layer0
-					.search_single_checked(db, tx, stk, &search_ctx, &ep_pt, ep_dist, ep_id, chk)
-					.await?;
-				return Ok(w.to_vec_limit(search.k));
-			}
+		if let Some((ep_dist, ep_id)) = self.search_ep(tx, &search.pt).await?
+			&& let Some(ep_pt) = self.elements.get_vector(tx, &ep_id).await?
+		{
+			let search_ctx = HnswCheckedSearchContext::new(
+				&self.elements,
+				hnsw_docs,
+				vec_docs,
+				&search.pt,
+				search.ef,
+			);
+			let w = self
+				.layer0
+				.search_single_checked(db, tx, stk, &search_ctx, &ep_pt, ep_dist, ep_id, chk)
+				.await?;
+			return Ok(w.to_vec_limit(search.k));
 		}
 		Ok(vec![])
 	}
@@ -496,11 +496,11 @@ mod tests {
 				if collection.is_unique() {
 					let mut found = false;
 					for (_, e_id) in &res {
-						if let Some(v) = h.get_vector(tx, e_id).await.unwrap() {
-							if v.eq(obj) {
-								found = true;
-								break;
-							}
+						if let Some(v) = h.get_vector(tx, e_id).await.unwrap()
+							&& v.eq(obj)
+						{
+							found = true;
+							break;
 						}
 					}
 					assert!(

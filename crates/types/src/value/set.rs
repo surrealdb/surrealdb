@@ -13,6 +13,7 @@ use crate::sql::ToSql;
 /// deduplication and sorted iteration based on `Value`'s `Ord` implementation.
 #[derive(Clone, Debug, Default, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Set(pub(crate) BTreeSet<Value>);
 
 impl Set {

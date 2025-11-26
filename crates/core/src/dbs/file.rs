@@ -66,11 +66,11 @@ impl FileCollector {
 	}
 
 	fn check_reader(&mut self) -> Result<(), Error> {
-		if self.reader.is_none() {
-			if let Some(writer) = self.writer.take() {
-				writer.flush()?;
-				self.reader = Some(FileReader::new(self.len, &self.dir)?);
-			}
+		if self.reader.is_none()
+			&& let Some(writer) = self.writer.take()
+		{
+			writer.flush()?;
+			self.reader = Some(FileReader::new(self.len, &self.dir)?);
 		}
 		Ok(())
 	}
@@ -89,13 +89,13 @@ impl FileCollector {
 
 	pub(super) async fn take_vec(&mut self) -> Result<Vec<Value>, Error> {
 		self.check_reader()?;
-		if let Some(mut reader) = self.reader.take() {
-			if let Some((start, num)) = self.paging.get_start_num(reader.len as u32) {
-				if let Some(orders) = self.orders.take() {
-					return self.sort_and_take_vec(reader, orders, start, num).await;
-				}
-				return reader.take_vec(start, num);
+		if let Some(mut reader) = self.reader.take()
+			&& let Some((start, num)) = self.paging.get_start_num(reader.len as u32)
+		{
+			if let Some(orders) = self.orders.take() {
+				return self.sort_and_take_vec(reader, orders, start, num).await;
 			}
+			return reader.take_vec(start, num);
 		}
 		Ok(vec![])
 	}

@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::fmt::Fmt;
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 use crate::sql::index::Distance;
 use crate::sql::{Expr, Kind};
 
@@ -104,7 +104,9 @@ impl fmt::Display for PostfixOperator {
 		match self {
 			Self::Range => write!(f, ".."),
 			Self::RangeSkip => write!(f, ">.."),
-			Self::MethodCall(name, x) => write!(f, "{name}({})", Fmt::comma_separated(x)),
+			Self::MethodCall(name, x) => {
+				write!(f, ".{}({})", EscapeKwFreeIdent(name), Fmt::comma_separated(x))
+			}
 			Self::Call(args) => write!(f, "({})", Fmt::comma_separated(args.iter())),
 		}
 	}
@@ -600,8 +602,25 @@ impl BindingPower {
 	pub fn for_expr(expr: &Expr) -> BindingPower {
 		match expr {
 			Expr::Prefix {
+				op,
 				..
-			} => BindingPower::Prefix,
+			} => {
+				if let PrefixOperator::Range | PrefixOperator::RangeInclusive = *op {
+					BindingPower::Range
+				} else {
+					BindingPower::Prefix
+				}
+			}
+			Expr::Postfix {
+				op,
+				..
+			} => {
+				if let PostfixOperator::Range | PostfixOperator::RangeSkip = *op {
+					BindingPower::Range
+				} else {
+					BindingPower::Prefix
+				}
+			}
 			Expr::Binary {
 				op,
 				..

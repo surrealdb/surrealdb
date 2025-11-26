@@ -1,23 +1,22 @@
 use std::cmp::max;
-use std::sync::{LazyLock, OnceLock};
+use std::sync::LazyLock;
 
 use sysinfo::System;
 
 /// Should we sync writes to disk before acknowledgement
 pub(super) static SYNC_DATA: LazyLock<bool> = lazy_env_parse!("SURREAL_SYNC_DATA", bool, false);
 
-/// The size to store values in the tree, or a separate log file (default: 64
-/// bytes)
-pub(super) static SURREALKV_MAX_VALUE_THRESHOLD: LazyLock<usize> =
-	lazy_env_parse!(bytes, "SURREAL_SURREALKV_MAX_VALUE_THRESHOLD", usize, 64);
+/// Whether to enable value log separation (default: true)
+pub(super) static SURREALKV_ENABLE_VLOG: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_SURREALKV_ENABLE_VLOG", bool, true);
 
-/// The maximum size of a single data file segment (default: 512 MiB)
-pub(super) static SURREALKV_MAX_SEGMENT_SIZE: LazyLock<u64> =
-	lazy_env_parse!(bytes, "SURREAL_SURREALKV_MAX_SEGMENT_SIZE", u64, 1 << 29);
+/// The block size in bytes (default: 64 KiB)
+pub(super) static SURREALKV_BLOCK_SIZE: LazyLock<usize> =
+	lazy_env_parse!(bytes, "SURREAL_SURREALKV_BLOCK_SIZE", usize, 64 * 1024);
 
-/// The size of the in-memory value cache (default: 16 MiB)
-pub(super) static SURREALKV_MAX_VALUE_CACHE_SIZE: LazyLock<u64> =
-	lazy_env_parse!(bytes, "SURREAL_SURREALKV_MAX_VALUE_CACHE_SIZE", u64, || {
+/// The maximum value log file size in bytes (default: dynamic from 64 MiB to 512 MiB)
+pub(super) static SURREALKV_VLOG_MAX_FILE_SIZE: LazyLock<u64> =
+	lazy_env_parse!(bytes, "SURREAL_SURREALKV_VLOG_MAX_FILE_SIZE", u64, || {
 		// Load the system attributes
 		let mut system = System::new_all();
 		// Refresh the system memory
@@ -27,23 +26,58 @@ pub(super) static SURREALKV_MAX_VALUE_CACHE_SIZE: LazyLock<u64> =
 			Some(limits) => limits.total_memory,
 			None => system.total_memory(),
 		};
-		// Divide the total system memory by 2
-		let memory = memory.saturating_div(2);
-		// Subtract 1 GiB from the memory size
-		let memory = memory.saturating_sub(1024 * 1024 * 1024);
+		// Dynamically set the vlog max file size based on available memory
+		if memory < 4 * 1024 * 1024 * 1024 {
+			64 * 1024 * 1024 // For systems with < 4 GiB, use 64 MiB
+		} else if memory < 16 * 1024 * 1024 * 1024 {
+			128 * 1024 * 1024 // For systems with < 16 GiB, use 128 MiB
+		} else if memory < 64 * 1024 * 1024 * 1024 {
+			256 * 1024 * 1024 // For systems with < 64 GiB, use 256 MiB
+		} else {
+			512 * 1024 * 1024 // For systems with > 64 GiB, use 512 MiB
+		}
+	});
+
+/// The value log cache capacity in bytes (default: dynamic from 16 MiB to 256 MiB)
+pub(super) static SURREALKV_VLOG_CACHE_CAPACITY: LazyLock<u64> =
+	lazy_env_parse!(bytes, "SURREAL_SURREALKV_VLOG_CACHE_CAPACITY", u64, || {
+		// Load the system attributes
+		let mut system = System::new_all();
+		// Refresh the system memory
+		system.refresh_memory();
+		// Get the available memory
+		let memory = match system.cgroup_limits() {
+			Some(limits) => limits.total_memory,
+			None => system.total_memory(),
+		};
+		// Dynamically set the vlog cache capacity based on available memory
+		if memory < 4 * 1024 * 1024 * 1024 {
+			16 * 1024 * 1024 // For systems with < 4 GiB, use 16 MiB
+		} else if memory < 16 * 1024 * 1024 * 1024 {
+			64 * 1024 * 1024 // For systems with < 16 GiB, use 64 MiB
+		} else if memory < 64 * 1024 * 1024 * 1024 {
+			128 * 1024 * 1024 // For systems with < 64 GiB, use 128 MiB
+		} else {
+			256 * 1024 * 1024 // For systems with > 64 GiB, use 256 MiB
+		}
+	});
+
+/// The block cache capacity in bytes (default: dynamic based on memory)
+pub(super) static SURREALKV_BLOCK_CACHE_CAPACITY: LazyLock<u64> =
+	lazy_env_parse!(bytes, "SURREAL_SURREALKV_BLOCK_CACHE_CAPACITY", u64, || {
+		// Load the system attributes
+		let mut system = System::new_all();
+		// Refresh the system memory
+		system.refresh_memory();
+		// Get the available memory
+		let memory = match system.cgroup_limits() {
+			Some(limits) => limits.total_memory,
+			None => system.total_memory(),
+		};
+		// Divide the total memory by 4 for block cache
+		let memory = memory.saturating_div(4);
+		// Subtract 512 MiB from the memory size
+		let memory = memory.saturating_sub(512 * 1024 * 1024);
 		// Take the larger of 16MiB or available memory
 		max(memory, 16 * 1024 * 1024)
 	});
-
-pub(super) static SKV_COMMIT_POOL: OnceLock<affinitypool::Threadpool> = OnceLock::new();
-
-pub(super) fn commit_pool() -> &'static affinitypool::Threadpool {
-	SKV_COMMIT_POOL.get_or_init(|| {
-		affinitypool::Builder::new()
-			.thread_name("surrealkv-commitpool")
-			.thread_stack_size(5 * 1024 * 1024)
-			.thread_per_core(false)
-			.worker_threads(1)
-			.build()
-	})
-}

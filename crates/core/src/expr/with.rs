@@ -1,6 +1,6 @@
 use std::fmt::{Display, Formatter, Result};
 
-use crate::fmt::{EscapeIdent, Fmt};
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum With {
@@ -15,7 +15,7 @@ impl Display for With {
 			With::NoIndex => f.write_str(" NOINDEX"),
 			With::Index(i) => {
 				f.write_str(" INDEX ")?;
-				Fmt::comma_separated(i.iter().map(EscapeIdent)).fmt(f)
+				Fmt::comma_separated(i.iter().map(|x| EscapeKwFreeIdent(x.as_str()))).fmt(f)
 			}
 		}
 	}

@@ -3,9 +3,10 @@ use std::fmt::{self, Display, Formatter};
 use crate::expr::{AssignOperator, Expr, Idiom};
 use crate::fmt::Fmt;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[allow(clippy::enum_variant_names)]
 pub(crate) enum Data {
+	#[default]
 	EmptyExpression,
 	SetExpression(Vec<Assignment>),
 	UnsetExpression(Vec<Idiom>),
@@ -28,12 +29,6 @@ pub(crate) struct Assignment {
 impl Display for Assignment {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		write!(f, "{} {} {}", self.place, self.operator, self.value)
-	}
-}
-
-impl Default for Data {
-	fn default() -> Self {
-		Self::EmptyExpression
 	}
 }
 

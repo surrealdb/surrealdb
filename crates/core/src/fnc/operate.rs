@@ -135,15 +135,15 @@ fn get_executor_and_thing<'a>(
 	doc: &'a CursorDoc,
 ) -> Option<(&'a QueryExecutor, &'a RecordId)> {
 	if let Some(thg) = &doc.rid {
-		if let Some(exe) = ctx.get_query_executor() {
-			if exe.is_table(&thg.table) {
-				return Some((exe, thg.as_ref()));
-			}
+		if let Some(exe) = ctx.get_query_executor()
+			&& exe.is_table(&thg.table)
+		{
+			return Some((exe, thg.as_ref()));
 		}
-		if let Some(pla) = ctx.get_query_planner() {
-			if let Some(exe) = pla.get_query_executor(&thg.table) {
-				return Some((exe, thg));
-			}
+		if let Some(pla) = ctx.get_query_planner()
+			&& let Some(exe) = pla.get_query_executor(&thg.table)
+		{
+			return Some((exe, thg));
 		}
 	}
 	None
@@ -154,15 +154,15 @@ fn get_executor_option<'a>(
 	doc: Option<&'a CursorDoc>,
 	exp: &'a Expr,
 ) -> ExecutorOption<'a> {
-	if let Some(doc) = doc {
-		if let Some((exe, thg)) = get_executor_and_thing(ctx, doc) {
-			if let Some(ir) = &doc.ir {
-				if exe.is_iterator_expression(ir.irf(), exp) {
-					return ExecutorOption::PreMatch;
-				}
-			}
-			return ExecutorOption::Execute(exe, thg);
+	if let Some(doc) = doc
+		&& let Some((exe, thg)) = get_executor_and_thing(ctx, doc)
+	{
+		if let Some(ir) = &doc.ir
+			&& exe.is_iterator_expression(ir.irf(), exp)
+		{
+			return ExecutorOption::PreMatch;
 		}
+		return ExecutorOption::Execute(exe, thg);
 	}
 	ExecutorOption::None
 }

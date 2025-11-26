@@ -90,10 +90,10 @@ impl Mapper {
 	}
 
 	pub(super) fn map(&self, token: &str) -> FilterResult {
-		if let Ok(key) = VariableSizeKey::from_str(token) {
-			if let Some((lemme, _, _)) = self.terms.get(&key, 0) {
-				return FilterResult::Term(Term::NewTerm(lemme, 0));
-			}
+		if let Ok(key) = VariableSizeKey::from_str(token)
+			&& let Some((lemme, _, _)) = self.terms.get(&key, 0)
+		{
+			return FilterResult::Term(Term::NewTerm(lemme, 0));
 		}
 		FilterResult::Term(Term::Unchanged)
 	}

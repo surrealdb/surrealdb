@@ -45,13 +45,13 @@ impl Closure {
 		ctx.attach_variables(self.captures.clone())?;
 
 		// check for missing arguments.
-		if self.args.len() > args.len() {
-			if let Some(x) = self.args[args.len()..].iter().find(|x| !x.1.can_be_none()) {
-				bail!(Error::InvalidArguments {
-					name: "ANONYMOUS".to_string(),
-					message: format!("Expected a value for {}", x.0),
-				})
-			}
+		if self.args.len() > args.len()
+			&& let Some(x) = self.args[args.len()..].iter().find(|x| !x.1.can_be_none())
+		{
+			bail!(Error::InvalidArguments {
+				name: "ANONYMOUS".to_string(),
+				message: format!("Expected a value for {}", x.0),
+			})
 		}
 
 		for ((name, kind), val) in self.args.iter().zip(args.into_iter()) {

@@ -1,26 +1,26 @@
 #![cfg(feature = "kv-rocksdb")]
 
 mod cnf;
+mod dsm;
 
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{Result, bail, ensure};
+use dsm::{DiskSpaceManager, DiskSpaceState, TransactionState};
 use rocksdb::{
-	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, Env, FlushOptions, LogLevel,
-	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, SstFileManager,
-	WriteOptions,
+	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel,
+	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
 };
+use tokio::sync::Mutex;
 
-use super::savepoint::SavePoints;
-use crate::err::Error;
+use super::err::{Error, Result};
 use crate::key::debug::Sprintable;
-use crate::kvs::rocksdb::cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE;
-use crate::kvs::{Check, Key, Val};
+use crate::kvs::api::Transactable;
+use crate::kvs::{Key, Val};
 
 const TARGET: &str = "surrealdb::core::kvs::rocksdb";
 
@@ -31,132 +31,24 @@ pub struct Datastore {
 	disk_space_manager: Option<DiskSpaceManager>,
 }
 
-/// Manages disk space monitoring and enforces space limits for the RocksDB datastore.
-///
-/// This manager tracks SST file space usage and implements a state machine to transition
-/// the datastore between normal operation and read-and-deletion-only mode based on
-/// configured space limits. It provides gradual degradation of service rather than
-/// abrupt failures when disk space is constrained.
-#[derive(Clone)]
-struct DiskSpaceManager {
-	/// SST file manager for monitoring space usage
-	sst_file_manager: Arc<SstFileManager>,
-	/// The maximum space usage allowed for the database.
-	read_and_deletion_limit: u64,
-	/// The number of bytes for 80% of the allowed space usage.
-	limit_80: u64,
-	/// Indicates if the warning for 80% full has been logged
-	warn_80_percent_logged: Arc<AtomicBool>,
-}
-
 pub struct Transaction {
 	/// Is the transaction complete?
-	done: bool,
+	done: AtomicBool,
 	/// Is the transaction writeable?
 	write: bool,
-	/// Should we check unhandled transactions?
-	check: Check,
 	/// The underlying datastore transaction
-	inner: Option<rocksdb::Transaction<'static, OptimisticTransactionDB>>,
+	inner: Mutex<Option<rocksdb::Transaction<'static, OptimisticTransactionDB>>>,
 	/// The read options containing the Snapshot
-	ro: ReadOptions,
+	read_options: ReadOptions,
+	/// The current transaction state
+	transaction_state: Arc<AtomicU8>,
+	/// Reference to the disk space manager for checking current operational state during commit.
+	disk_space_manager: Option<DiskSpaceManager>,
 	// The above, supposedly 'static transaction
 	// actually points here, so we need to ensure
 	// the memory is kept alive. This pointer must
 	// be declared last, so that it is dropped last.
 	db: Pin<Arc<OptimisticTransactionDB>>,
-	/// The operational state when this transaction was created.
-	/// If `true`, the datastore was in read-and-deletion-only mode, so only deletions are allowed.
-	/// If `false`, all write operations are permitted.
-	deletion_only: bool,
-	/// Tracks the types of write operations performed in this transaction.
-	/// - `None`: No write operations have been performed yet
-	/// - `Some(true)`: Only deletion operations have been performed
-	/// - `Some(false)`: At least one non-deletion write operation has been performed
-	///
-	/// Used during commit to validate transactions started before the datastore entered
-	/// deletion-only mode.
-	contains_only_deletions: Option<bool>,
-	/// Reference to the disk space manager for checking current operational state during commit.
-	disk_space_manager: Option<DiskSpaceManager>,
-}
-
-impl Drop for Transaction {
-	fn drop(&mut self) {
-		self.check.drop_check(self.done, self.write);
-	}
-}
-
-impl DiskSpaceManager {
-	/// Creates a new disk space manager with the specified space limit.
-	///
-	/// # Parameters
-	/// - `limit`: The maximum allowed SST file space usage in bytes
-	/// - `opts`: RocksDB options to configure with the SST file manager
-	///
-	/// # Implementation Details
-	/// This method disables RocksDB's built-in hard limit enforcement and instead
-	/// implements application-level space management at the transaction level.
-	/// This approach provides more graceful degradation and allows deletions to
-	/// free space even when the limit is reached.
-	fn new(limit: u64, opts: &mut Options) -> Result<Self> {
-		let env = Env::new()?;
-		let sst_file_manager = SstFileManager::new(&env)?;
-		// Disable RocksDB's built-in hard limit (set to 0 = unlimited).
-		// This prevents RocksDB from blocking writes due to temporary size spikes from
-		// write buffering and pending compactions. Instead, the application manages space
-		// restrictions at the transaction level through state transitions, providing more
-		// graceful handling and allowing deletions to free space.
-		sst_file_manager.set_max_allowed_space_usage(0);
-		opts.set_sst_file_manager(&sst_file_manager);
-		Ok(Self {
-			sst_file_manager: Arc::new(sst_file_manager),
-			read_and_deletion_limit: limit,
-			limit_80: (limit as f64 * 0.8) as u64,
-			warn_80_percent_logged: Arc::new(AtomicBool::new(false)),
-		})
-	}
-
-	/// Checks the datastore operational state based on SST file space usage.
-	///
-	/// This method implements a state machine that transitions between two modes:
-	/// - Normal: All operations allowed (write, read, delete)
-	/// - ReadAndDeletionOnly: Only read and delete operations allowed, writes are blocked
-	///
-	/// State transitions:
-	/// - Normal → ReadAndDeletionOnly: When SST file space usage reaches the configured limit
-	/// - ReadAndDeletionOnly → Normal: When space usage drops below the configured limit (after
-	///   deletions and compaction free up space)
-	///
-	/// Returns `true` if the datastore is in read-and-deletion-only mode, `false` otherwise.
-	/// When `true`, write operations will be rejected with `Error::DbReadAndDeleteOnly`.
-	fn is_deletion_only(&self) -> bool {
-		let current_size = self.sst_file_manager.get_total_size();
-		if current_size < self.limit_80 {
-			self.warn_80_percent_logged.store(false, Ordering::Relaxed);
-			return false;
-		}
-		// Use compare_exchange to atomically check and set the flag, ensuring only one thread logs
-		// the warning
-		if self
-			.warn_80_percent_logged
-			.compare_exchange(false, true, Ordering::Relaxed, Ordering::Relaxed)
-			.is_ok()
-		{
-			warn!(target: TARGET, "SST file space usage is at 80% of the limit ({})", current_size);
-		}
-		// Check current size against the application limit
-		// Transition to read-and-deletion-only mode when the primary limit is exceeded
-		if current_size < self.read_and_deletion_limit {
-			return false;
-		}
-		warn!(
-			target: TARGET,
-			"Transitioning to read-and-deletion-only mode due to primary limit ({}) being reached",
-			current_size
-		);
-		true
-	}
 }
 
 impl Datastore {
@@ -226,7 +118,7 @@ impl Datastore {
 				"lz4" => DBCompressionType::Lz4,
 				"zstd" => DBCompressionType::Zstd,
 				l => {
-					bail!(Error::Ds(format!("Invalid compression type: {l}")));
+					return Err(Error::Datastore(format!("Invalid compression type: {l}")));
 				}
 			});
 		}
@@ -299,9 +191,9 @@ impl Datastore {
 		opts.set_compression_per_level(&[
 			DBCompressionType::None,
 			DBCompressionType::None,
-			DBCompressionType::Snappy,
-			DBCompressionType::Snappy,
-			DBCompressionType::Snappy,
+			DBCompressionType::Lz4,
+			DBCompressionType::Lz4,
+			DBCompressionType::Lz4,
 		]);
 		// Set specific storage log level
 		info!(target: TARGET, "Setting storage engine log level: {}", *cnf::ROCKSDB_STORAGE_LOG_LEVEL);
@@ -312,19 +204,21 @@ impl Datastore {
 			"error" => LogLevel::Error,
 			"fatal" => LogLevel::Fatal,
 			l => {
-				bail!(Error::Ds(format!("Invalid storage engine log level specified: {l}")));
+				return Err(Error::Datastore(format!(
+					"Invalid storage engine log level specified: {l}"
+				)));
 			}
 		});
 		// Configure SST file manager for disk space monitoring and management.
 		// The SST file manager tracks SST file sizes in real-time. When the configured
 		// space limit is reached, the application transitions to read-and-deletion-only mode.
-		let disk_space_manager = if *ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE > 0 {
-			Some(DiskSpaceManager::new(*ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE, &mut opts)?)
+		let disk_space_manager = if *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE > 0 {
+			Some(DiskSpaceManager::new(*cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE, &mut opts)?)
 		} else {
 			None
 		};
 		// Open the database
-		let db = Self::open(opts.clone(), false, path).await?;
+		let db = Self::open(opts.clone(), path).await?;
 		// Return the datastore
 		Ok(Datastore {
 			db,
@@ -333,12 +227,8 @@ impl Datastore {
 	}
 
 	/// Open database with normal configuration
-	async fn open(
-		mut opts: Options,
-		force_disabling_flush: bool,
-		path: &str,
-	) -> Result<Pin<Arc<OptimisticTransactionDB>>> {
-		if !*cnf::ROCKSDB_BACKGROUND_FLUSH || force_disabling_flush {
+	async fn open(mut opts: Options, path: &str) -> Result<Pin<Arc<OptimisticTransactionDB>>> {
+		if !*cnf::ROCKSDB_BACKGROUND_FLUSH {
 			// Background flush is disabled which
 			// means that the WAL will be flushed
 			// whenever a transaction is committed.
@@ -368,7 +258,7 @@ impl Datastore {
 					// Wait for the specified interval
 					thread::sleep(Duration::from_millis(wait));
 					// Flush the WAL to disk periodically
-					if let Err(err) = dbc.flush_wal(*cnf::SYNC_DATA) {
+					if let Err(err) = dbc.flush_wal(true) {
 						error!("Failed to flush WAL: {err}");
 					}
 				}
@@ -396,20 +286,8 @@ impl Datastore {
 		Ok(())
 	}
 
-	/// Checks if the datastore is currently in read-and-deletion-only mode.
-	///
-	/// Returns `true` if the SST file space usage has exceeded the configured limit,
-	/// `false` otherwise. When no space limit is configured, always returns `false`.
-	fn is_deletion_only(&self) -> bool {
-		self.disk_space_manager.as_ref().map(|dsm| dsm.is_deletion_only()).unwrap_or(false)
-	}
-
 	/// Start a new transaction
-	pub(crate) async fn transaction(
-		&self,
-		write: bool,
-		_: bool,
-	) -> Result<Box<dyn crate::kvs::api::Transaction>> {
+	pub(crate) async fn transaction(&self, write: bool, _: bool) -> Result<Box<dyn Transactable>> {
 		// Set the transaction options
 		let mut to = OptimisticTransactionOptions::default();
 		to.set_snapshot(true);
@@ -418,12 +296,11 @@ impl Datastore {
 		wo.set_sync(*cnf::SYNC_DATA);
 		// Create a new transaction
 		let inner = self.db.transaction_opt(&wo, &to);
-		// The database reference must always outlive
-		// the transaction. If it doesn't then this
-		// is undefined behaviour. This unsafe block
-		// ensures that the transaction reference is
-		// static, but will cause a crash if the
-		// datastore is dropped prematurely.
+		// SAFETY: The transaction lifetime is tied to the database through the _db field.
+		// The database is guaranteed to outlive the transaction because:
+		// 1. The transaction holds a Pin<Arc<OptimisticTransactionDB>> reference
+		// 2. The transaction struct ensures _db is dropped after inner
+		// 3. The Pin ensures the database isn't moved or dropped while referenced
 		let inner = unsafe {
 			std::mem::transmute::<
 				rocksdb::Transaction<'_, OptimisticTransactionDB>,
@@ -435,110 +312,77 @@ impl Datastore {
 		ro.set_snapshot(&inner.snapshot());
 		ro.set_async_io(true);
 		ro.fill_cache(true);
-		// Specify the check level
-		#[cfg(not(debug_assertions))]
-		let check = Check::Warn;
-		#[cfg(debug_assertions)]
-		let check = Check::Error;
 		// Create a new transaction
 		Ok(Box::new(Transaction {
-			done: false,
+			done: AtomicBool::new(false),
 			write,
-			check,
-			inner: Some(inner),
-			ro,
-			db: self.db.clone(),
-			deletion_only: self.is_deletion_only(),
-			contains_only_deletions: None,
+			inner: Mutex::new(Some(inner)),
+			read_options: ro,
+			transaction_state: Arc::new(Default::default()),
 			disk_space_manager: self.disk_space_manager.clone(),
+			db: self.db.clone(),
 		}))
 	}
 }
 
 impl Transaction {
-	/// Validates that a write operation can be performed in the current transaction.
-	///
-	/// This method checks multiple conditions before allowing a write:
-	/// 1. Datastore state allows writes (not in read-only or read-and-deletion-only mode)
-	/// 2. Version parameter is None (RocksDB doesn't support versioned queries)
-	/// 3. Transaction is still open (not committed or cancelled)
-	/// 4. Transaction was created as writable
-	///
-	/// Returns an appropriate error if any validation fails.
-	fn ensure_write(&mut self, version: Option<u64>) -> Result<()> {
-		ensure!(!self.deletion_only, Error::DbReadAndDeleteOnly);
-		// RocksDB does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
-		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
-		// Mark this transaction as containing non-deletion operations
-		self.contains_only_deletions = Some(false);
-		Ok(())
-	}
-
-	/// Validates that a delete operation can be performed in the current transaction.
-	///
-	/// This method checks conditions before allowing a deletion:
-	/// 1. Version parameter is None (RocksDB doesn't support versioned queries)
-	/// 2. Transaction is still open (not committed or cancelled)
-	/// 3. Transaction was created as writable
-	///
-	/// Unlike `ensure_write()`, this method does NOT check the `deletion_only` flag,
-	/// allowing deletions even in read-and-deletion-only mode. This enables space recovery
-	/// when the datastore is in a restricted state due to space limits.
-	///
-	/// Returns an appropriate error if any validation fails.
-	fn ensure_deletion(&mut self, version: Option<u64>) -> Result<()> {
-		// RocksDB does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
-		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
-		// Mark this transaction as containing only deletions if no writes have been performed yet
-		if self.contains_only_deletions.is_none() {
-			self.contains_only_deletions = Some(true);
+	/// Get the current transaction state
+	fn current_state(&self) -> TransactionState {
+		match self.transaction_state.load(Ordering::Acquire) {
+			0 => TransactionState::ReadsOnly,
+			1 => TransactionState::HasDeletes,
+			2 => TransactionState::HasWrites,
+			_ => unreachable!(),
 		}
-		Ok(())
 	}
 
-	/// Validates that a read operation can be performed in the current transaction.
-	///
-	/// This method checks:
-	/// 1. Version parameter is None (RocksDB doesn't support versioned queries)
-	/// 2. Transaction is still open (not committed or cancelled)
-	///
-	/// Read operations are allowed in all datastore states, so no state checking is needed.
-	fn ensure_read(&self, version: Option<u64>) -> Result<()> {
-		// RocksDB does not support versioned queries.
-		ensure!(version.is_none(), Error::UnsupportedVersionedQueries);
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
-		Ok(())
+	/// Mark the transaction as containing deletes
+	fn store_deletes(&self) {
+		if self.current_state() < TransactionState::HasDeletes {
+			self.transaction_state.store(TransactionState::HasDeletes as u8, Ordering::Release);
+		}
+	}
+
+	/// Mark the transaction as containing writes
+	fn store_writes(&self) {
+		if self.current_state() < TransactionState::HasWrites {
+			self.transaction_state.store(TransactionState::HasWrites as u8, Ordering::Release);
+		}
+	}
+
+	/// Check if the transaction contains writes
+	fn contains_deletes(&self) -> bool {
+		self.current_state() == TransactionState::HasDeletes
+	}
+
+	/// Check if the transaction contains writes
+	fn contains_writes(&self) -> bool {
+		self.current_state() == TransactionState::HasWrites
+	}
+
+	/// Check if disk space is restricted
+	fn is_restricted(&self, recalculate: bool) -> bool {
+		if let Some(dsm) = self.disk_space_manager.as_ref() {
+			match recalculate {
+				false => dsm.cached_state() == DiskSpaceState::ReadAndDeletionOnly,
+				true => dsm.latest_state() == DiskSpaceState::ReadAndDeletionOnly,
+			}
+		} else {
+			false
+		}
 	}
 }
 
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
-impl super::api::Transaction for Transaction {
+impl Transactable for Transaction {
 	fn kind(&self) -> &'static str {
 		"rocksdb"
 	}
 
-	fn supports_reverse_scan(&self) -> bool {
-		true
-	}
-
-	/// Behaviour if unclosed
-	fn check_level(&mut self, check: Check) {
-		self.check = check;
-	}
-
 	/// Check if closed
 	fn closed(&self) -> bool {
-		self.done
+		self.done.load(Ordering::Relaxed)
 	}
 
 	/// Check if writeable
@@ -546,247 +390,388 @@ impl super::api::Transaction for Transaction {
 		self.write
 	}
 
-	/// Cancel a transaction
+	/// Cancel a transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn cancel(&mut self) -> Result<()> {
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
-		// Mark this transaction as done
-		self.done = true;
+	async fn cancel(&self) -> Result<()> {
+		// Atomically mark transaction as done and check if it was already closed
+		if self.done.swap(true, Ordering::AcqRel) {
+			return Err(Error::TransactionFinished);
+		}
+		// Lock the inner transaction
+		let inner = self.inner.lock().await;
+		// Get the inner transaction
+		let inner =
+			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Cancel this transaction
-		self.inner.as_ref().expect("transaction should have inner").rollback()?;
+		inner.rollback()?;
 		// Continue
 		Ok(())
 	}
 
-	/// Commit a transaction
+	/// Commit a transaction.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self))]
-	async fn commit(&mut self) -> Result<()> {
-		// Check to see if transaction is closed
-		ensure!(!self.done, Error::TxFinished);
-		// Check to see if transaction is writable
-		ensure!(self.write, Error::TxReadonly);
-		// Mark this transaction as done
-		self.done = true;
-		// Check if we are in read-and-deletion-only mode
-		// This is used for long duration transactions that would have started before disk
-		// conditions changed
-		if let Some(disk_space_manager) = self.disk_space_manager.as_ref() {
-			if disk_space_manager.is_deletion_only() && self.contains_only_deletions == Some(false)
-			{
-				bail!(Error::DbReadAndDeleteOnly);
-			}
+	async fn commit(&self) -> Result<()> {
+		// Atomically mark transaction as done and check if it was already closed
+		if self.done.swap(true, Ordering::AcqRel) {
+			return Err(Error::TransactionFinished);
 		}
+		// Check to see if transaction is writable
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		// Check if we are in read-and-deletion-only mode
+		if self.is_restricted(true) && self.contains_writes() {
+			return Err(Error::ReadAndDeleteOnly);
+		}
+		// Get the inner transaction
+		let inner = self
+			.inner
+			.lock()
+			.await
+			.take()
+			.ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Commit this transaction
-		self.inner.take().expect("transaction should have inner").commit()?;
-		// If transaction was created in read-and-deletion-only mode, trigger compaction to reclaim
-		// disk space from deleted keys. This helps the datastore transition back to normal mode
-		// when space usage drops below the limit.
-		if self.deletion_only {
+		inner.commit()?;
+		// Perform compaction if necessary
+		if self.is_restricted(true) && self.contains_deletes() {
 			self.db.compact_range::<&[u8], &[u8]>(None, None);
 		}
 		// Continue
 		Ok(())
 	}
 
-	/// Check if a key exists
+	/// Check if a key exists.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn exists(&mut self, key: Key, version: Option<u64>) -> Result<bool> {
-		self.ensure_read(version)?;
+	async fn exists(&self, key: Key, version: Option<u64>) -> Result<bool> {
+		// RocksDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Lock the inner transaction
+		let inner = self.inner.lock().await;
+		// Get the inner transaction
+		let inner =
+			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Get the key
-		let res = self
-			.inner
-			.as_ref()
-			.expect("transaction should have inner")
-			.get_pinned_opt(key, &self.ro)?
-			.is_some();
+		let res = inner.get_pinned_opt(key, &self.read_options)?.is_some();
 		// Return result
 		Ok(res)
 	}
 
-	/// Fetch a key from the database
+	/// Fetch a key from the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn get(&mut self, key: Key, version: Option<u64>) -> Result<Option<Val>> {
-		self.ensure_read(version)?;
+	async fn get(&self, key: Key, version: Option<u64>) -> Result<Option<Val>> {
+		// RocksDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Lock the inner transaction
+		let inner = self.inner.lock().await;
+		// Get the inner transaction
+		let inner =
+			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Get the key
-		let res =
-			self.inner.as_ref().expect("transaction should have inner").get_opt(key, &self.ro)?;
+		let res = inner.get_opt(key, &self.read_options)?;
 		// Return result
 		Ok(res)
 	}
 
 	/// Fetch many keys from the datastore.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.sprint()))]
-	async fn getm(&mut self, keys: Vec<Key>) -> Result<Vec<Option<Val>>> {
-		self.ensure_read(None)?;
+	async fn getm(&self, keys: Vec<Key>, version: Option<u64>) -> Result<Vec<Option<Val>>> {
+		// RocksDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Lock the inner transaction
+		let inner = self.inner.lock().await;
+		// Get the inner transaction
+		let inner =
+			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Get the keys
-		let res = self
-			.inner
-			.as_ref()
-			.expect("transaction should have inner")
-			.multi_get_opt(keys, &self.ro);
+		let res = inner.multi_get_opt(keys, &self.read_options);
 		// Convert result
-		let res = res.into_iter().collect::<Result<_, _>>()?;
+		let res = res.into_iter().map(|r| r.map_err(Into::into)).collect::<Result<_>>()?;
 		// Return result
 		Ok(res)
 	}
 
-	/// Insert or update a key in the database
+	/// Insert or update a key in the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn set(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
-		self.ensure_write(version)?;
+	async fn set(&self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
+		// RocksDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		// Check if we are in read-and-deletion-only mode
+		if self.is_restricted(false) {
+			return Err(Error::ReadAndDeleteOnly);
+		}
+		// Lock the inner transaction
+		let inner = self.inner.lock().await;
+		// Get the inner transaction
+		let inner =
+			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Set the key
-		self.inner.as_ref().expect("transaction should have inner").put(key, val)?;
+		inner.put(key, val)?;
+		// Mark this transaction as containing a write operation
+		self.store_writes();
 		// Return result
 		Ok(())
 	}
 
-	/// Insert a key if it doesn't exist in the database
+	/// Insert a key if it doesn't exist in the database.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn put(&mut self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
-		self.ensure_write(version)?;
+	async fn put(&self, key: Key, val: Val, version: Option<u64>) -> Result<()> {
+		// RocksDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		// Check if we are in read-and-deletion-only mode
+		if self.is_restricted(false) {
+			return Err(Error::ReadAndDeleteOnly);
+		}
+		// Lock the inner transaction
+		let inner = self.inner.lock().await;
+		// Get the inner transaction
+		let inner =
+			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Set the key if empty
-		match self
-			.inner
-			.as_ref()
-			.expect("transaction should have inner")
-			.get_pinned_opt(&key, &self.ro)?
-		{
-			None => self.inner.as_ref().expect("transaction should have inner").put(key, val)?,
-			_ => bail!(Error::TxKeyAlreadyExists),
+		match inner.get_pinned_opt(&key, &self.read_options)? {
+			None => inner.put(key, val)?,
+			_ => return Err(Error::TransactionKeyAlreadyExists),
 		};
+		// Mark this transaction as containing a write operation
+		self.store_writes();
 		// Return result
 		Ok(())
 	}
 
-	/// Insert a key if the current value matches a condition
+	/// Insert a key if the current value matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn putc(&mut self, key: Key, val: Val, chk: Option<Val>) -> Result<()> {
-		self.ensure_write(None)?;
+	async fn putc(&self, key: Key, val: Val, chk: Option<Val>) -> Result<()> {
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		// Check if we are in read-and-deletion-only mode
+		if self.is_restricted(false) {
+			return Err(Error::ReadAndDeleteOnly);
+		}
+		// Lock the inner transaction
+		let inner = self.inner.lock().await;
+		// Get the inner transaction
+		let inner =
+			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Set the key if empty
-		match (
-			self.inner
-				.as_ref()
-				.expect("transaction should have inner")
-				.get_pinned_opt(&key, &self.ro)?,
-			chk,
-		) {
-			(Some(v), Some(w)) if v.eq(&w) => {
-				self.inner.as_ref().expect("transaction should have inner").put(key, val)?
-			}
-			(None, None) => {
-				self.inner.as_ref().expect("transaction should have inner").put(key, val)?
-			}
-			_ => bail!(Error::TxConditionNotMet),
+		match (inner.get_pinned_opt(&key, &self.read_options)?, chk) {
+			(Some(v), Some(w)) if v.eq(&w) => inner.put(key, val)?,
+			(None, None) => inner.put(key, val)?,
+			_ => return Err(Error::TransactionConditionNotMet),
 		};
+		// Mark this transaction as containing a write operation
+		self.store_writes();
 		// Return result
 		Ok(())
 	}
 
-	/// Delete a key
+	/// Delete a key.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn del(&mut self, key: Key) -> Result<()> {
-		self.ensure_deletion(None)?;
+	async fn del(&self, key: Key) -> Result<()> {
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		// Lock the inner transaction
+		let inner = self.inner.lock().await;
+		// Get the inner transaction
+		let inner =
+			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Remove the key
-		self.inner.as_ref().expect("transaction should have inner").delete(key)?;
+		inner.delete(key)?;
+		// Mark this transaction as containing a delete operation
+		self.store_deletes();
 		// Return result
 		Ok(())
 	}
 
-	/// Delete a key if the current value matches a condition
+	/// Delete a key if the current value matches a condition.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(key = key.sprint()))]
-	async fn delc(&mut self, key: Key, chk: Option<Val>) -> Result<()> {
-		self.ensure_deletion(None)?;
+	async fn delc(&self, key: Key, chk: Option<Val>) -> Result<()> {
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Check to see if transaction is writable
+		if !self.writeable() {
+			return Err(Error::TransactionReadonly);
+		}
+		// Lock the inner transaction
+		let inner = self.inner.lock().await;
+		// Get the inner transaction
+		let inner =
+			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Delete the key if valid
-		match (
-			self.inner
-				.as_ref()
-				.expect("transaction should have inner")
-				.get_pinned_opt(&key, &self.ro)?,
-			chk,
-		) {
-			(Some(v), Some(w)) if v.eq(&w) => {
-				self.inner.as_ref().expect("transaction should have inner").delete(key)?
-			}
-			(None, None) => {
-				self.inner.as_ref().expect("transaction should have inner").delete(key)?
-			}
-			_ => bail!(Error::TxConditionNotMet),
+		match (inner.get_pinned_opt(&key, &self.read_options)?, chk) {
+			(Some(v), Some(w)) if v.eq(&w) => inner.delete(key)?,
+			(None, None) => inner.delete(key)?,
+			_ => return Err(Error::TransactionConditionNotMet),
 		};
+		// Mark this transaction as containing a delete operation
+		self.store_deletes();
 		// Return result
 		Ok(())
 	}
 
-	/// Retrieve a range of keys from the databases
+	/// Count the total number of keys within a range.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keys(
-		&mut self,
-		rng: Range<Key>,
-		limit: u32,
-		version: Option<u64>,
-	) -> Result<Vec<Key>> {
-		self.ensure_read(version)?;
+	async fn count(&self, rng: Range<Key>) -> Result<usize> {
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Execute on the blocking threadpool
-		let res = affinitypool::spawn_local(move || {
-			// Create result set
-			let mut res = vec![];
+		let res = affinitypool::spawn_local(move || -> Result<_> {
 			// Set the key range
 			let beg = rng.start.as_slice();
 			let end = rng.end.as_slice();
+			// Load the inner transaction
+			let inner = self.inner.blocking_lock();
+			// Get the inner transaction
+			let inner =
+				inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 			// Set the ReadOptions with the snapshot
 			let mut ro = ReadOptions::default();
-			ro.set_snapshot(
-				&self.inner.as_ref().expect("transaction should have inner").snapshot(),
-			);
+			ro.set_snapshot(&inner.snapshot());
 			ro.set_iterate_lower_bound(beg);
 			ro.set_iterate_upper_bound(end);
 			ro.set_async_io(true);
-			ro.fill_cache(true);
+			ro.fill_cache(false);
 			// Create the iterator
-			let mut iter =
-				self.inner.as_ref().expect("transaction should have inner").raw_iterator_opt(ro);
+			let mut iter = inner.raw_iterator_opt(ro);
 			// Seek to the start key
 			iter.seek(&rng.start);
-			// Check the scan limit
-			while res.len() < limit as usize {
-				// Check the key and value
-				if let Some(k) = iter.key() {
-					// Check the range validity
-					if k >= beg && k < end {
-						res.push(k.to_vec());
-						iter.next();
-						continue;
-					}
-				}
-				// Exit
-				break;
+			// Count the items
+			let mut res = 0;
+			while iter.valid() {
+				res += 1;
+				iter.next();
 			}
 			// Drop the iterator
 			drop(iter);
 			// Return result
-			res
+			Ok(res)
 		})
-		.await;
+		.await?;
 		// Return result
 		Ok(res)
 	}
 
-	/// Retrieve a range of keys from the databases
+	/// Retrieve a range of keys.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn keysr(
-		&mut self,
-		rng: Range<Key>,
-		limit: u32,
-		version: Option<u64>,
-	) -> Result<Vec<Key>> {
-		self.ensure_read(version)?;
-		// Get the transaction
-		let inner = self.inner.as_ref().expect("transaction should have inner");
+	async fn keys(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+		// RocksDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Create result set
-		let mut res = vec![];
+		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
+		// Lock the inner transaction
+		let inner = self.inner.lock().await;
+		// Get the inner transaction
+		let inner =
+			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
+		// Set the ReadOptions with the snapshot
+		let mut ro = ReadOptions::default();
+		ro.set_snapshot(&inner.snapshot());
+		ro.set_iterate_lower_bound(beg);
+		ro.set_iterate_upper_bound(end);
+		ro.set_async_io(true);
+		ro.fill_cache(true);
+		// Create the iterator
+		let mut iter = inner.raw_iterator_opt(ro);
+		// Seek to the start key
+		iter.seek(&rng.start);
+		// Check the scan limit
+		while res.len() < limit as usize {
+			// Check the key and value
+			if let Some(k) = iter.key() {
+				res.push(k.to_vec());
+				iter.next();
+			} else {
+				break;
+			}
+		}
+		// Drop the iterator
+		drop(iter);
+		// Return result
+		Ok(res)
+	}
+
+	/// Retrieve a range of keys, in reverse.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn keysr(&self, rng: Range<Key>, limit: u32, version: Option<u64>) -> Result<Vec<Key>> {
+		// RocksDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Create result set
+		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
+		// Set the key range
+		let beg = rng.start.as_slice();
+		let end = rng.end.as_slice();
+		// Lock the inner transaction
+		let inner = self.inner.lock().await;
+		// Get the inner transaction
+		let inner =
+			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Set the ReadOptions with the snapshot
 		let mut ro = ReadOptions::default();
 		ro.set_snapshot(&inner.snapshot());
@@ -802,89 +787,97 @@ impl super::api::Transaction for Transaction {
 		while res.len() < limit as usize {
 			// Check the key and value
 			if let Some(k) = iter.key() {
-				// Check the range validity
-				if k >= beg && k < end {
-					res.push(k.to_vec());
-					iter.prev();
-					continue;
-				}
-			}
-			// Exit
-			break;
-		}
-		// Return result
-		Ok(res)
-	}
-
-	/// Retrieve a range of keys from the databases
-	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn scan(
-		&mut self,
-		rng: Range<Key>,
-		limit: u32,
-		version: Option<u64>,
-	) -> Result<Vec<(Key, Val)>> {
-		self.ensure_read(version)?;
-		// Execute on the blocking threadpool
-		let res = affinitypool::spawn_local(move || {
-			// Create result set
-			let mut res = vec![];
-			// Set the key range
-			let beg = rng.start.as_slice();
-			let end = rng.end.as_slice();
-			// Set the ReadOptions with the snapshot
-			let mut ro = ReadOptions::default();
-			ro.set_snapshot(
-				&self.inner.as_ref().expect("transaction should have inner").snapshot(),
-			);
-			ro.set_iterate_lower_bound(beg);
-			ro.set_iterate_upper_bound(end);
-			ro.set_async_io(true);
-			ro.fill_cache(true);
-			// Create the iterator
-			let mut iter =
-				self.inner.as_ref().expect("transaction should have inner").raw_iterator_opt(ro);
-			// Seek to the start key
-			iter.seek(&rng.start);
-			// Check the scan limit
-			while res.len() < limit as usize {
-				// Check the key and value
-				if let Some((k, v)) = iter.item() {
-					// Check the range validity
-					if k >= beg && k < end {
-						res.push((k.to_vec(), v.to_vec()));
-						iter.next();
-						continue;
-					}
-				}
-				// Exit
+				res.push(k.to_vec());
+				iter.prev();
+			} else {
 				break;
 			}
-			// Drop the iterator
-			drop(iter);
-			// Return result
-			res
-		})
-		.await;
+		}
+		// Drop the iterator
+		drop(iter);
 		// Return result
 		Ok(res)
 	}
 
+	/// Retrieve a range of key-value pairs.
 	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
-	async fn scanr(
-		&mut self,
+	async fn scan(
+		&self,
 		rng: Range<Key>,
 		limit: u32,
 		version: Option<u64>,
 	) -> Result<Vec<(Key, Val)>> {
-		self.ensure_read(version)?;
-		// Get the transaction
-		let inner = self.inner.as_ref().expect("transaction should have inner");
+		// RocksDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
 		// Create result set
-		let mut res = vec![];
+		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
 		// Set the key range
 		let beg = rng.start.as_slice();
 		let end = rng.end.as_slice();
+		// Lock the inner transaction
+		let inner = self.inner.lock().await;
+		// Get the inner transaction
+		let inner =
+			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
+		// Set the ReadOptions with the snapshot
+		let mut ro = ReadOptions::default();
+		ro.set_snapshot(&inner.snapshot());
+		ro.set_iterate_lower_bound(beg);
+		ro.set_iterate_upper_bound(end);
+		ro.set_async_io(true);
+		ro.fill_cache(true);
+		// Create the iterator
+		let mut iter = inner.raw_iterator_opt(ro);
+		// Seek to the start key
+		iter.seek(&rng.start);
+		// Check the scan limit
+		while res.len() < limit as usize {
+			// Check the key and value
+			if let Some((k, v)) = iter.item() {
+				res.push((k.to_vec(), v.to_vec()));
+				iter.next();
+			} else {
+				break;
+			}
+		}
+		// Drop the iterator
+		drop(iter);
+		// Return result
+		Ok(res)
+	}
+
+	/// Retrieve a range of key-value pairs, in reverse.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(rng = rng.sprint()))]
+	async fn scanr(
+		&self,
+		rng: Range<Key>,
+		limit: u32,
+		version: Option<u64>,
+	) -> Result<Vec<(Key, Val)>> {
+		// RocksDB does not support versioned queries.
+		if version.is_some() {
+			return Err(Error::UnsupportedVersionedQueries);
+		}
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Create result set
+		let mut res = Vec::with_capacity(limit.min(10_000) as usize);
+		// Set the key range
+		let beg = rng.start.as_slice();
+		let end = rng.end.as_slice();
+		// Lock the inner transaction
+		let inner = self.inner.lock().await;
+		// Get the inner transaction
+		let inner =
+			inner.as_ref().ok_or_else(|| Error::Internal("expected a transaction".into()))?;
 		// Set the ReadOptions with the snapshot
 		let mut ro = ReadOptions::default();
 		ro.set_snapshot(&inner.snapshot());
@@ -900,41 +893,38 @@ impl super::api::Transaction for Transaction {
 		while res.len() < limit as usize {
 			// Check the key and value
 			if let Some((k, v)) = iter.item() {
-				// Check the range validity
-				if k >= beg && k < end {
-					res.push((k.to_vec(), v.to_vec()));
-					iter.prev();
-					continue;
-				}
+				res.push((k.to_vec(), v.to_vec()));
+				iter.prev();
+			} else {
+				break;
 			}
-			// Exit
-			break;
 		}
+		// Drop the iterator
+		drop(iter);
 		// Return result
 		Ok(res)
 	}
 
-	fn get_save_points(&mut self) -> &mut SavePoints {
-		unimplemented!("Get save points not implemented for the RocksDB backend");
-	}
-
-	fn new_save_point(&mut self) {
-		// Get the transaction
-		let inner = self.inner.as_ref().expect("transaction should have inner");
-		// Set the save point
-		inner.set_savepoint();
-	}
-
-	async fn rollback_to_save_point(&mut self) -> Result<()> {
-		// Get the transaction
-		let inner = self.inner.as_ref().expect("transaction should have inner");
-		// Rollback
-		inner.rollback_to_savepoint()?;
-		//
+	/// Set a new save point on the transaction.
+	async fn new_save_point(&self) -> Result<()> {
+		let inner = self.inner.lock().await;
+		if let Some(inner) = inner.as_ref() {
+			inner.set_savepoint();
+		}
 		Ok(())
 	}
 
-	fn release_last_save_point(&mut self) -> Result<()> {
+	/// Rollback to the last save point.
+	async fn rollback_to_save_point(&self) -> Result<()> {
+		let inner = self.inner.lock().await;
+		if let Some(inner) = inner.as_ref() {
+			inner.rollback_to_savepoint()?;
+		}
+		Ok(())
+	}
+
+	/// Release the last save point.
+	async fn release_last_save_point(&self) -> Result<()> {
 		Ok(())
 	}
 }

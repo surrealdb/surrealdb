@@ -111,7 +111,7 @@ impl Parser<'_> {
 		} else {
 			false
 		};
-		let name = self.parse_local_idiom(stk).await?;
+		let name = self.parse_local_idiom()?;
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
 		let what = self.parse_ident()?;

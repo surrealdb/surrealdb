@@ -13,7 +13,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Cond, ControlFlow, FlowResult, FlowResultExt as _, RecordIdLit};
-use crate::fmt::EscapeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Array, Datetime, Duration, Object, Value};
 use crate::{catalog, val};
@@ -65,9 +65,17 @@ pub(crate) struct AccessStatementRevoke {
 pub(crate) struct AccessStatementPurge {
 	pub ac: String,
 	pub base: Option<Base>,
-	pub expired: bool,
-	pub revoked: bool,
+	pub kind: PurgeKind,
 	pub grace: Duration,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub enum PurgeKind {
+	#[default]
+	Expired,
+	Revoked,
+	Both,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -196,7 +204,7 @@ pub async fn create_grant(
 		Base::Ns => {
 			let ns = ctx.expect_ns_id(opt).await?;
 			txn.get_ns_access(ns, &access).await?.ok_or_else(|| Error::AccessNsNotFound {
-				ac: access.to_string(),
+				ac: access.clone(),
 				// The namespace is expected above
 				ns: opt.ns.as_deref().expect("namespace validated by expect_ns_id").to_owned(),
 			})?
@@ -204,7 +212,7 @@ pub async fn create_grant(
 		Base::Db => {
 			let (ns, db) = ctx.expect_ns_db_ids(opt).await?;
 			txn.get_db_access(ns, db, &access).await?.ok_or_else(|| Error::AccessDbNotFound {
-				ac: access.to_string(),
+				ac: access.clone(),
 				// The namespace and database is expected above
 				ns: opt.ns.as_deref().expect("namespace validated by expect_ns_db_ids").to_owned(),
 				db: opt.db.as_deref().expect("database validated by expect_ns_db_ids").to_owned(),
@@ -275,7 +283,10 @@ pub async fn create_grant(
 			match res {
 				Ok(_) => {}
 				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+					if matches!(
+						e.downcast_ref(),
+						Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+					) {
 						error!(
 							"A collision was found when attempting to create a new grant. Purging inactive grants is advised"
 						)
@@ -313,7 +324,7 @@ pub async fn create_grant(
 							let ns_id = ctx.get_ns_id(opt).await?;
 							txn.get_ns_user(ns_id, user).await?.ok_or_else(|| {
 								Error::UserNsNotFound {
-									name: user.to_string(),
+									name: user.clone(),
 									// We just retrieved the ns_id above
 									ns: opt
 										.ns()
@@ -326,7 +337,7 @@ pub async fn create_grant(
 							let (ns_id, db_id) = ctx.expect_ns_db_ids(opt).await?;
 							txn.get_db_user(ns_id, db_id, user).await?.ok_or_else(|| {
 								Error::UserDbNotFound {
-									name: user.to_string(),
+									name: user.clone(),
 									// We just retrieved the ns_id and db_id above
 									ns: opt
 										.ns()
@@ -407,7 +418,10 @@ pub async fn create_grant(
 			match res {
 				Ok(_) => {}
 				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+					if matches!(
+						e.downcast_ref(),
+						Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+					) {
 						error!(
 							"A collision was found when attempting to create a new grant. Purging inactive grants is advised"
 						)
@@ -472,7 +486,7 @@ async fn compute_show(
 			let ns = ctx.expect_ns_id(opt).await?;
 			if txn.get_ns_access(ns, &stmt.ac).await?.is_none() {
 				bail!(Error::AccessNsNotFound {
-					ac: stmt.ac.to_string(),
+					ac: stmt.ac.clone(),
 					// We expected a namespace above
 					ns: opt.ns.as_deref().expect("namespace validated by expect_ns_id").to_owned(),
 				});
@@ -483,7 +497,7 @@ async fn compute_show(
 			// We expected a namespace above
 			if txn.get_db_access(ns, db, &stmt.ac).await?.is_none() {
 				bail!(Error::AccessDbNotFound {
-					ac: stmt.ac.to_string(),
+					ac: stmt.ac.clone(),
 					// We expected a namespace and database above
 					ns: opt
 						.ns
@@ -863,12 +877,12 @@ async fn compute_purge(
 		// Revocation times should never exceed the current time.
 		// Grants expired or revoked at a future time will not be purged.
 		// Grants expired or revoked at exactly the current second will not be purged.
-		let purge_expired = stmt.expired
+		let purge_expired = matches!(stmt.kind, PurgeKind::Expired | PurgeKind::Both)
 			&& gr.expiration.as_ref().is_some_and(|exp| {
 				                 now.timestamp() >= exp.timestamp() // Prevent saturating when not expired yet.
 				                     && (now.timestamp().saturating_sub(exp.timestamp()) as u64) > stmt.grace.secs()
 				             });
-		let purge_revoked = stmt.revoked
+		let purge_revoked = matches!(stmt.kind, PurgeKind::Revoked | PurgeKind::Both)
 			&& gr.revocation.as_ref().is_some_and(|rev| {
 				                 now.timestamp() >= rev.timestamp() // Prevent saturating when not revoked yet.
 				                     && (now.timestamp().saturating_sub(rev.timestamp()) as u64) > stmt.grace.secs()
@@ -932,25 +946,25 @@ impl Display for AccessStatement {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Grant(stmt) => {
-				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
+				write!(f, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " GRANT")?;
 				match &stmt.subject {
-					Subject::User(x) => write!(f, " FOR USER {}", EscapeIdent(x))?,
+					Subject::User(x) => write!(f, " FOR USER {}", EscapeKwFreeIdent(x))?,
 					Subject::Record(x) => write!(f, " FOR RECORD {}", x)?,
 				}
 				Ok(())
 			}
 			Self::Show(stmt) => {
-				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
+				write!(f, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " SHOW")?;
 				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {}", EscapeIdent(v))?,
+					Some(v) => write!(f, " GRANT {}", EscapeKwFreeIdent(v))?,
 					None => match &stmt.cond {
 						Some(v) => write!(f, " {v}")?,
 						None => write!(f, " ALL")?,
@@ -959,13 +973,13 @@ impl Display for AccessStatement {
 				Ok(())
 			}
 			Self::Revoke(stmt) => {
-				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
+				write!(f, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " REVOKE")?;
 				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {}", EscapeIdent(v))?,
+					Some(v) => write!(f, " GRANT {}", EscapeKwFreeIdent(v))?,
 					None => match &stmt.cond {
 						Some(v) => write!(f, " {v}")?,
 						None => write!(f, " ALL")?,
@@ -974,17 +988,15 @@ impl Display for AccessStatement {
 				Ok(())
 			}
 			Self::Purge(stmt) => {
-				write!(f, "ACCESS {}", EscapeIdent(&stmt.ac))?;
+				write!(f, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac))?;
 				if let Some(ref v) = stmt.base {
 					write!(f, " ON {v}")?;
 				}
 				write!(f, " PURGE")?;
-				match (stmt.expired, stmt.revoked) {
-					(true, false) => write!(f, " EXPIRED")?,
-					(false, true) => write!(f, " REVOKED")?,
-					(true, true) => write!(f, " EXPIRED, REVOKED")?,
-					// This case should not parse.
-					(false, false) => write!(f, " NONE")?,
+				match stmt.kind {
+					PurgeKind::Expired => write!(f, " EXPIRED")?,
+					PurgeKind::Revoked => write!(f, " REVOKED")?,
+					PurgeKind::Both => write!(f, " EXPIRED, REVOKED")?,
 				};
 				if !stmt.grace.is_zero() {
 					write!(f, " FOR {}", stmt.grace)?;

@@ -24,6 +24,7 @@ pub(crate) static NANOSECONDS_PER_MICROSECOND: u32 = 1000;
 #[derive(
 	Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
 )]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Duration(pub(crate) std::time::Duration);
 
 impl Duration {

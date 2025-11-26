@@ -212,7 +212,7 @@ impl Parser<'_> {
 			t!("IF") => {
 				self.pop_peek();
 				let stmt = stk.run(|ctx| self.parse_if_stmt(ctx)).await?;
-				Expr::If(Box::new(stmt))
+				Expr::IfElse(Box::new(stmt))
 			}
 			t!("SELECT") => {
 				self.pop_peek();
@@ -365,6 +365,7 @@ impl Parser<'_> {
 
 				let value = stk.run(|ctx| this.parse_expr_inherit(ctx)).await?;
 				exprs.push(value);
+
 
 				if !this.eat(t!(",")) {
 					this.expect_closing_delimiter(t!("]"), start)?;
@@ -539,14 +540,14 @@ impl Parser<'_> {
 			_ => stk.run(|ctx| self.parse_expr_inherit(ctx)).await?,
 		};
 		let token = self.peek();
-		if token.kind != t!(")") && Self::starts_disallowed_subquery_statement(peek.kind) {
-			if let Expr::Idiom(Idiom(ref idiom)) = res {
-				if idiom.len() == 1 {
-					bail!("Unexpected token `{}` expected `)`",peek.kind,
-					@token.span,
-					@peek.span => "This is a reserved keyword here and can't be an identifier");
-				}
-			}
+		if token.kind != t!(")")
+			&& Self::starts_disallowed_subquery_statement(peek.kind)
+			&& let Expr::Idiom(Idiom(ref idiom)) = res
+			&& idiom.len() == 1
+		{
+			bail!("Unexpected token `{}` expected `)`",peek.kind,
+			@token.span,
+			@peek.span => "This is a reserved keyword here and can't be an identifier");
 		}
 		self.expect_closing_delimiter(t!(")"), start)?;
 		Ok(res)

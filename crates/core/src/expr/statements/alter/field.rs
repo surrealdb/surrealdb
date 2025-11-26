@@ -14,7 +14,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::reference::Reference;
 use crate::expr::{Base, Expr, Idiom, Kind};
-use crate::fmt::{EscapeIdent, QuoteStr};
+use crate::fmt::{EscapeKwIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -147,7 +147,7 @@ impl AlterFieldStatement {
 		// Refresh the table cache
 		let Some(tb) = txn.get_tb(ns, db, &self.what).await? else {
 			return Err(Error::TbNotFound {
-				name: self.what.to_string(),
+				name: self.what.clone(),
 			}
 			.into());
 		};
@@ -175,7 +175,7 @@ impl Display for AlterFieldStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, EscapeIdent(&self.what))?;
+		write!(f, " {} ON {}", self.name, EscapeKwIdent(&self.what, &["IF"]))?;
 
 		match self.kind {
 			AlterKind::Set(ref x) => write!(f, " TYPE {x}")?,

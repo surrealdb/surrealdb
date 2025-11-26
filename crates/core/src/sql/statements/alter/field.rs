@@ -1,7 +1,7 @@
 use std::fmt::{self, Display};
 
 use super::AlterKind;
-use crate::fmt::{EscapeIdent, QuoteStr};
+use crate::fmt::{EscapeKwFreeIdent, QuoteStr};
 use crate::sql::reference::Reference;
 use crate::sql::{Expr, Idiom, Kind, Permissions};
 
@@ -48,6 +48,7 @@ impl From<AlterDefault> for crate::expr::statements::alter::AlterDefault {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AlterFieldStatement {
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::local_idiom))]
 	pub name: Idiom,
 	pub what: String,
 	pub if_exists: bool,
@@ -68,7 +69,7 @@ impl Display for AlterFieldStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, EscapeIdent(&self.what))?;
+		write!(f, " {} ON {}", self.name, EscapeKwFreeIdent(&self.what))?;
 		match self.kind {
 			AlterKind::Set(ref x) => write!(f, " TYPE {x}")?,
 			AlterKind::Drop => write!(f, " DROP TYPE")?,

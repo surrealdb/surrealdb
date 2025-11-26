@@ -555,10 +555,10 @@ impl FullTextIndex {
 		};
 
 		// Create and return an iterator if we have matching documents
-		if let Some(hits) = hits {
-			if !hits.is_empty() {
-				return Some(FullTextHitsIterator::new(self.ikb.clone(), hits));
-			}
+		if let Some(hits) = hits
+			&& !hits.is_empty()
+		{
+			return Some(FullTextHitsIterator::new(self.ikb.clone(), hits));
 		}
 
 		// No documents match the terms
@@ -666,11 +666,11 @@ impl FullTextIndex {
 			dlc.total_docs_length += st.total_docs_length;
 			has_log = true;
 		}
-		if let Some(compact_log) = compact_log {
-			if has_log {
-				tx.delr(range).await?;
-				*compact_log = true;
-			}
+		if let Some(compact_log) = compact_log
+			&& has_log
+		{
+			tx.delr(range).await?;
+			*compact_log = true;
 		}
 		Ok(dlc)
 	}
@@ -876,16 +876,14 @@ impl Scorer {
 		let tl = qt.tokens.list();
 		let doc_length = fti.get_doc_length(tx, doc_id).await?.unwrap_or(0) as f64;
 		for (i, d) in qt.docs.iter().enumerate() {
-			if let Some(docs) = d {
-				if docs.contains(doc_id) {
-					if let Some(token) = tl.get(i) {
-						let term = qt.tokens.get_token_string(token)?;
-						let td = fti.get_term_document(tx, doc_id, term).await?;
-						if let Some(td) = td {
-							sc +=
-								self.compute_bm25_score(td.f as f64, docs.len() as f64, doc_length)
-						}
-					}
+			if let Some(docs) = d
+				&& docs.contains(doc_id)
+				&& let Some(token) = tl.get(i)
+			{
+				let term = qt.tokens.get_token_string(token)?;
+				let td = fti.get_term_document(tx, doc_id, term).await?;
+				if let Some(td) = td {
+					sc += self.compute_bm25_score(td.f as f64, docs.len() as f64, doc_length)
 				}
 			}
 		}
