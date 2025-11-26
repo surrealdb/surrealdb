@@ -1,4 +1,4 @@
-use std::fmt::{self, Display, Write};
+use std::fmt::{self, Display};
 use std::ops::Deref;
 
 use anyhow::Result;
@@ -9,8 +9,9 @@ use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
+use crate::expr::statements::alter::AlterKind;
 use crate::expr::{Base, Value};
-use crate::fmt::{EscapeKwIdent, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKwIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 
 /// Represents an `ALTER INDEX` statement.
@@ -29,6 +30,7 @@ pub(crate) struct AlterIndexStatement {
 	pub if_exists: bool,
 	/// If true, marks the index as decommissioned
 	pub prepare_remove: bool,
+	pub comment: AlterKind<String>,
 }
 
 impl AlterIndexStatement {
@@ -55,30 +57,36 @@ impl AlterIndexStatement {
 			}
 		};
 
+		match self.comment {
+			AlterKind::Set(ref k) => ix.comment = Some(k.clone()),
+			AlterKind::Drop => ix.comment = None,
+			AlterKind::None => {}
+		}
+
 		if self.prepare_remove && !ix.prepare_remove {
 			ix.prepare_remove = true;
-
-			// Set the index definition
-			txn.put_tb_index(ns, db, &self.table, &ix).await?;
-
-			// Refresh the table cache for indexes
-			let tb = txn.expect_tb(ns, db, &self.table).await?;
-			txn.put_tb(
-				ns_name,
-				db_name,
-				&TableDefinition {
-					cache_indexes_ts: Uuid::now_v7(),
-					..tb.as_ref().clone()
-				},
-			)
-			.await?;
-			// Clear the cache
-			if let Some(cache) = ctx.get_cache() {
-				cache.clear_tb(ns, db, &self.table);
-			}
-			// Clear the cache
-			txn.clear_cache();
 		}
+
+		// Set the index definition
+		txn.put_tb_index(ns, db, &self.table, &ix).await?;
+
+		// Refresh the table cache for indexes
+		let tb = txn.expect_tb(ns, db, &self.table).await?;
+		txn.put_tb(
+			ns_name,
+			db_name,
+			&TableDefinition {
+				cache_indexes_ts: Uuid::now_v7(),
+				..tb.as_ref().clone()
+			},
+		)
+		.await?;
+		// Clear the cache
+		if let Some(cache) = ctx.get_cache() {
+			cache.clear_tb(ns, db, &self.table);
+		}
+		// Clear the cache
+		txn.clear_cache();
 
 		// Ok all good
 		Ok(Value::None)
@@ -96,12 +104,11 @@ impl Display for AlterIndexStatement {
 		if self.prepare_remove {
 			write!(f, " PREPARE REMOVE")?;
 		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
+		match self.comment {
+			AlterKind::Set(ref x) => write!(f, " COMMENT {}", QuoteStr(x))?,
+			AlterKind::Drop => write!(f, " DROP COMMENT")?,
+			AlterKind::None => {}
+		}
 		Ok(())
 	}
 }

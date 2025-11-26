@@ -115,14 +115,45 @@ impl Parser<'_> {
 		expected!(self, t!("ON"));
 		self.eat(t!("TABLE"));
 		let table = self.parse_ident()?;
-		expected!(self, t!("PREPARE"));
-		expected!(self, t!("REMOVE"));
-		let res = AlterIndexStatement {
+
+		let mut res = AlterIndexStatement {
 			name,
 			table,
 			if_exists,
-			prepare_remove: true,
+			..Default::default()
 		};
+
+		loop {
+			match self.peek_kind() {
+				t!("DROP") => {
+					self.pop_peek();
+					let peek = self.peek();
+					match peek.kind {
+						t!("COMMENT") => {
+							self.pop_peek();
+							res.comment = AlterKind::Drop;
+						}
+						_ => {
+							unexpected!(self, peek, "`COMMENT`")
+						}
+					}
+				}
+				t!("COMMENT") => {
+					self.pop_peek();
+					res.comment = AlterKind::Set(self.parse_string_lit()?);
+				}
+				t!("PREPARE") => {
+					self.pop_peek();
+					self.eat(t!("REMOVE"));
+					res.prepare_remove = true;
+				}
+				_ => break,
+			}
+		}
+
+		if !res.prepare_remove && matches!(res.comment, AlterKind::None) {
+			unexpected!(self, self.peek(), "`PREPARE`, `DROP` or `COMMENT`")
+		}
 		Ok(res)
 	}
 

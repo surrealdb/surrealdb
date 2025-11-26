@@ -1,6 +1,7 @@
-use std::fmt::{self, Display, Write};
+use std::fmt::{self, Display};
 
-use crate::fmt::{EscapeKwIdent, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKwIdent, QuoteStr};
+use crate::sql::statements::alter::AlterKind;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -9,6 +10,7 @@ pub struct AlterIndexStatement {
 	pub table: String,
 	pub if_exists: bool,
 	pub prepare_remove: bool,
+	pub comment: AlterKind<String>,
 }
 
 impl Display for AlterIndexStatement {
@@ -22,12 +24,11 @@ impl Display for AlterIndexStatement {
 		if self.prepare_remove {
 			write!(f, " PREPARE REMOVE")?;
 		}
-		let _indent = if is_pretty() {
-			Some(pretty_indent())
-		} else {
-			f.write_char(' ')?;
-			None
-		};
+		match self.comment {
+			AlterKind::Set(ref x) => write!(f, " COMMENT {}", QuoteStr(x))?,
+			AlterKind::Drop => write!(f, " DROP COMMENT")?,
+			AlterKind::None => {}
+		}
 		Ok(())
 	}
 }
@@ -39,6 +40,7 @@ impl From<AlterIndexStatement> for crate::expr::statements::alter::AlterIndexSta
 			table: v.table,
 			if_exists: v.if_exists,
 			prepare_remove: v.prepare_remove,
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -49,6 +51,7 @@ impl From<crate::expr::statements::alter::AlterIndexStatement> for AlterIndexSta
 			table: v.table,
 			if_exists: v.if_exists,
 			prepare_remove: v.prepare_remove,
+			comment: v.comment.into(),
 		}
 	}
 }

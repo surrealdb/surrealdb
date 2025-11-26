@@ -29,20 +29,19 @@ extern crate tracing;
 #[macro_use]
 mod mac;
 
-mod buc;
+#[doc(hidden)]
+pub mod buc;
 mod cf;
 mod doc;
 mod exe;
 mod fmt;
 mod fnc;
 mod key;
+#[doc(hidden)]
+pub mod str;
 #[cfg(feature = "surrealism")]
 mod surrealism;
 mod sys;
-mod val;
-
-#[doc(hidden)]
-pub mod str;
 
 pub mod api;
 pub mod catalog;
@@ -62,6 +61,8 @@ pub mod options;
 pub mod rpc;
 pub mod sql;
 pub mod syn;
+#[doc(hidden)]
+pub mod val;
 
 pub(crate) mod types {
 	//! Re-export the types from the types crate for internal use prefixed with Public.
@@ -81,10 +82,6 @@ pub(crate) mod types {
 
 #[cfg(feature = "ml")]
 pub use surrealml as ml;
-
-#[cfg(feature = "enterprise")]
-#[rustfmt::skip]
-pub mod ent;
 
 /// Channels for receiving a SurrealQL database export
 pub mod channel {
@@ -112,4 +109,5 @@ pub mod channel {
 /// // Pass the composer to init functions
 /// surreal::init(CommunityComposer())
 /// ```
+#[derive(Default)]
 pub struct CommunityComposer();

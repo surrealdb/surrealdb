@@ -23,7 +23,7 @@ value = "[{ count: 3 }]"
 value = "NONE"
 
 [[test.results]]
-value = "{ events: [ ], fields: [ ], indexes: [ { cols: [ ], prepare_remove: true, index: 'COUNT', name: 'count_idx', what: 'test' } ], lives: [ ], tables: [ ] }"
+value = "{ events: [ ], fields: [ ], indexes: [ { cols: [ ], prepare_remove: true, index: 'COUNT', name: 'count_idx', comment: 'may rebuild instead', what: 'test' } ], lives: [ ], tables: [ ] }"
 
 [[test.results]]
 value = '''[{ detail: { direction: 'forward', table: 'test' }, operation: 'Iterate Table Count' }, { detail: { "Aggregate expressions": {  }, Aggregations: { _a0: 'Count' }, "Group expressions": {  }, "Select expression": { count: '_a0' }, type: 'Group' }, operation: 'Collector' }]'''
@@ -58,7 +58,7 @@ SELECT count() FROM test GROUP ALL EXPLAIN;
 SELECT count() FROM test GROUP ALL;
 
 -- Decommission the index with ALTER INDEX
-ALTER INDEX count_idx ON test PREPARE REMOVE;
+ALTER INDEX count_idx ON test PREPARE REMOVE COMMENT 'may rebuild instead';
 
 -- Check INFO FOR TABLE STRUCTURE shows prepare_remove: true
 INFO FOR TABLE test STRUCTURE;

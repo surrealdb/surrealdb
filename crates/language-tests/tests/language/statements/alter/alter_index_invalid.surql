@@ -3,7 +3,7 @@
 
 [test.results]
 parsing-error = """
-Unexpected token `;`, expected PREPARE
+Unexpected token `;`, expected `PREPARE`, `DROP` or `COMMENT`
   --> [16:19]
    |
 16 | ALTER INDEX a ON t;

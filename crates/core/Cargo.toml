@@ -17,11 +17,11 @@ license-file.workspace = true
 # Public features
 default = ["kv-mem"]
 kv-mem = [
-	"dep:surrealmx",
-	"tokio/time",
-	"dep:tempfile",
-	"dep:ext-sort",
-	"dep:affinitypool",
+    "dep:surrealmx",
+    "tokio/time",
+    "dep:tempfile",
+    "dep:ext-sort",
+    "dep:affinitypool",
 ]
 kv-indxdb = ["dep:indxdb"]
 kv-rocksdb = [
@@ -55,7 +55,6 @@ arbitrary = [
     "surrealdb-types/arbitrary",
 ]
 allocation-tracking = []
-enterprise = ["dep:rust-s3"]
 
 [package.metadata.docs.rs]
 rustdoc-args = ["--cfg", "docsrs"]
