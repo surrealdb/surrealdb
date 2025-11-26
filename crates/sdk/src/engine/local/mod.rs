@@ -891,7 +891,8 @@ async fn router(
 			let (mut writer, mut reader) = io::duplex(10_240);
 
 			// Write to channel.
-			let export = export_ml(&kvs, &*state.session.read().await, tx, config);
+			let session = state.session.read().await;
+			let export = export_ml(&kvs, &session, tx, config);
 
 			// Read from channel and write to pipe.
 			let bridge = async move {
@@ -966,10 +967,11 @@ async fn router(
 			let (tx, rx) = crate::channel::bounded(1);
 
 			let kvs = kvs.clone();
+			let session = state.session.read().await.clone();
 			tokio::spawn(async move {
 				let export = async {
 					if let Err(error) =
-						export_ml(&kvs, &*state.session.read().await, tx, config).await
+						export_ml(&kvs, &session, tx, config).await
 					{
 						let _ = bytes.send(Err(error)).await;
 					}
@@ -1060,7 +1062,7 @@ async fn router(
 			// Ensure a NS and DB are set
 			let (nsv, dbv) = check_ns_db(&*state.session.read().await)?;
 			// Check the permissions level
-			kvs.check(&state.session, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))?;
+			kvs.check(&*state.session.read().await, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))?;
 			// Create a new buffer
 			let mut buffer = Vec::new();
 			// Load all the uploaded file chunks

@@ -93,11 +93,11 @@ impl Clone for WsSessionState {
 struct RouterState<Sink, Stream> {
 	/// Per-session state (vars and replay commands)
 	sessions: HashMap<uuid::Uuid, WsSessionState>,
-	/// The last time a message was recieved from the server.
+	/// The last time a message was received from the server.
 	last_activity: Instant,
 	/// The sink into which messages are send to surrealdb
 	sink: Sink,
-	/// The stream from which messages are recieved from surrealdb
+	/// The stream from which messages are received from surrealdb
 	stream: Stream,
 }
 

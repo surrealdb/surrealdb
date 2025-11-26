@@ -99,7 +99,7 @@ async fn get_handler(
 	// This session supports live queries
 	session.rt = true;
 	// Store the connection id in session
-	session.id = Some(id.to_string());
+	session.id = Some(id);
 	// Check if a connection with this id already exists
 	if rpc_state.web_sockets.read().await.contains_key(&id) {
 		return Err(NetError::Request);

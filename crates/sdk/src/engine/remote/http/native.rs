@@ -159,7 +159,7 @@ pub(crate) async fn run_router(
 				let session_id = route.request.session_id;
 
 				// Get or create session state for this session_id
-				let session_state = sessions.entry(session_id).or_default();
+				let session_state = sessions.entry(Some(session_id)).or_default();
 
 				let result = super::router(
 					route.request,

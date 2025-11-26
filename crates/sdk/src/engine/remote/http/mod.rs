@@ -339,7 +339,7 @@ async fn router(
 				namespace: namespace.clone(),
 				database: database.clone(),
 			}
-			.into_router_request(None, session_id)
+			.into_router_request(None, Some(session_id))
 			.expect("USE command should convert to router request");
 			// process request to check permissions
 			let out = send_request(req, base_url, client, headers, auth).await?;
@@ -362,7 +362,7 @@ async fn router(
 			let req = Command::Signin {
 				credentials: credentials.clone(),
 			}
-			.into_router_request(None, session_id)
+			.into_router_request(None, Some(session_id))
 			.expect("signin should be a valid router request");
 
 			let results = send_request(req, base_url, client, headers, auth).await?;
@@ -403,7 +403,7 @@ async fn router(
 			let req = Command::Authenticate {
 				token: token.clone(),
 			}
-			.into_router_request(None, session_id)
+			.into_router_request(None, Some(session_id))
 			.expect("authenticate should be a valid router request");
 			let mut results = send_request(req, base_url, client, headers, auth).await?;
 			if let Some(result) = results.first_mut() {
@@ -428,7 +428,12 @@ async fn router(
 							if error.to_string().contains("token has expired") {
 								// Call the refresh_token helper to get new tokens
 								let (value, refresh_results) = refresh_token(
-									token, base_url, client, headers, auth, session_id,
+									token,
+									base_url,
+									client,
+									headers,
+									auth,
+									Some(session_id),
 								)
 								.await?;
 								// Update the stored authentication with the new access token
@@ -448,7 +453,7 @@ async fn router(
 			token,
 		} => {
 			let (value, results) =
-				refresh_token(token, base_url, client, headers, auth, session_id).await?;
+				refresh_token(token, base_url, client, headers, auth, Some(session_id)).await?;
 			*auth = Some(Auth::Bearer {
 				token: Token::from_value(value)?.access,
 			});
@@ -457,7 +462,7 @@ async fn router(
 		Command::Invalidate => {
 			// Send invalidate to server to clear stored session
 			let req = Command::Invalidate
-				.into_router_request(None, session_id)
+				.into_router_request(None, Some(session_id))
 				.expect("invalidate should be a valid router request");
 			let results = send_request(req, base_url, client, headers, auth).await?;
 			// Then clear local auth so future requests don't include auth headers
@@ -609,14 +614,14 @@ async fn router(
 				variables: merged_vars,
 			};
 			let req = cmd
-				.into_router_request(None, session_id)
+				.into_router_request(None, Some(session_id))
 				.expect("command should convert to router request");
 			let res = send_request(req, base_url, client, headers, auth).await?;
 			Ok(res)
 		}
 		cmd => {
 			let req = cmd
-				.into_router_request(None, session_id)
+				.into_router_request(None, Some(session_id))
 				.expect("command should convert to router request");
 			let res = send_request(req, base_url, client, headers, auth).await?;
 			Ok(res)
