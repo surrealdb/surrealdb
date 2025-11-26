@@ -970,9 +970,7 @@ async fn router(
 			let session = state.session.read().await.clone();
 			tokio::spawn(async move {
 				let export = async {
-					if let Err(error) =
-						export_ml(&kvs, &session, tx, config).await
-					{
+					if let Err(error) = export_ml(&kvs, &session, tx, config).await {
 						let _ = bytes.send(Err(error)).await;
 					}
 				};
@@ -1062,7 +1060,11 @@ async fn router(
 			// Ensure a NS and DB are set
 			let (nsv, dbv) = check_ns_db(&*state.session.read().await)?;
 			// Check the permissions level
-			kvs.check(&*state.session.read().await, Action::Edit, ResourceKind::Model.on_db(&nsv, &dbv))?;
+			kvs.check(
+				&*state.session.read().await,
+				Action::Edit,
+				ResourceKind::Model.on_db(&nsv, &dbv),
+			)?;
 			// Create a new buffer
 			let mut buffer = Vec::new();
 			// Load all the uploaded file chunks

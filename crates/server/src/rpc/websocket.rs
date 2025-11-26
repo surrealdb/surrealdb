@@ -11,6 +11,7 @@ use futures::stream::FuturesUnordered;
 use futures::{Sink, SinkExt, StreamExt};
 use opentelemetry::Context as TelemetryContext;
 use opentelemetry::trace::FutureExt;
+use papaya::HashMap;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::{Datastore, LockType, Transaction, TransactionType};
 use surrealdb_core::mem::ALLOC;
@@ -53,7 +54,7 @@ pub struct Websocket {
 	/// Whether this WebSocket is locked
 	pub(crate) lock: Arc<Semaphore>,
 	/// The active sessions for this WebSocket connection
-	pub(crate) sessions: DashMap<Option<Uuid>, ArcSwap<Session>>,
+	pub(crate) sessions: HashMap<Option<Uuid>, ArcSwap<Session>>,
 	/// The active transactions for this WebSocket connection
 	pub(crate) transactions: DashMap<Uuid, Arc<Transaction>>,
 	/// A cancellation token called when shutting down the server
@@ -86,13 +87,13 @@ impl Websocket {
 			lock: Arc::new(Semaphore::new(1)),
 			shutdown: CancellationToken::new(),
 			canceller: CancellationToken::new(),
-			sessions: DashMap::new(),
+			sessions: HashMap::new(),
 			transactions: DashMap::new(),
 			channel: sender.clone(),
 			datastore,
 		});
 		// Store the default session with None key
-		rpc.sessions.insert(None, ArcSwap::from(Arc::new(session)));
+		rpc.set_session(None, Arc::new(session));
 		// Add this WebSocket to the list
 		state.web_sockets.write().await.insert(id, rpc.clone());
 		// Start telemetry metrics for this connection
@@ -486,7 +487,7 @@ impl RpcProtocol for Websocket {
 	}
 
 	/// A pointer to all active sessions
-	fn session_map(&self) -> &DashMap<Option<Uuid>, ArcSwap<Session>> {
+	fn session_map(&self) -> &HashMap<Option<Uuid>, ArcSwap<Session>> {
 		&self.sessions
 	}
 

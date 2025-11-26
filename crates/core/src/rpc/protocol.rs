@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, ensure};
 use arc_swap::ArcSwap;
-use dashmap::DashMap;
+use papaya::HashMap;
 use tokio::sync::Semaphore;
 use uuid::Uuid;
 
@@ -58,13 +58,17 @@ pub trait RpcProtocol {
 	// ------------------------------
 
 	/// A pointer to all active sessions
-	fn session_map(&self) -> &DashMap<Option<Uuid>, ArcSwap<Session>>;
+	fn session_map(&self) -> &HashMap<Option<Uuid>, ArcSwap<Session>>;
 
 	/// Registers a new session with the given ID
 	fn attach(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
-		match session_id {
+		let mut session = Session::default();
+		session.id = session_id;
+		match dbg!(session_id) {
 			Some(id) => {
-				self.session_map().insert(Some(id), ArcSwap::from(Arc::new(Session::default())));
+				self.session_map()
+					.pin()
+					.insert(Some(id), ArcSwap::from(Arc::new(session)));
 				Ok(DbResult::Other(PublicValue::None))
 			}
 			None => Err(RpcError::InvalidParams("Expected a session ID".to_string())),
@@ -84,7 +88,7 @@ pub trait RpcProtocol {
 
 	/// The current session for this RPC context
 	fn get_session(&self, id: &Option<Uuid>) -> Result<Arc<Session>, RpcError> {
-		match self.session_map().get(id) {
+		match self.session_map().pin().get(id) {
 			Some(session) => Ok(session.load_full()),
 			None => Err(RpcError::SessionNotFound(*id)),
 		}
@@ -92,20 +96,21 @@ pub trait RpcProtocol {
 
 	/// Mutable access to the current session for this RPC context
 	fn set_session(&self, id: Option<Uuid>, session: Arc<Session>) {
-		self.session_map().insert(id, ArcSwap::from(session));
+		self.session_map().pin().insert(id, ArcSwap::from(session));
 	}
 
 	/// Deletes a session
 	fn del_session(&self, id: &Uuid) {
-		self.session_map().remove(&Some(*id));
+		self.session_map().pin().remove(&Some(*id));
 	}
 
 	/// Lists all non-default sessions
 	async fn sessions(&self) -> Result<DbResult, RpcError> {
 		let array = self
 			.session_map()
+			.pin()
 			.iter()
-			.filter_map(|x| *x.key())
+			.filter_map(|(key, _)| *key)
 			.map(|x| PublicValue::Uuid(PublicUuid(x)))
 			.collect();
 		Ok(DbResult::Other(PublicValue::Array(array)))

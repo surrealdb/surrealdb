@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
-use dashmap::DashMap;
+use papaya::HashMap;
 use surrealdb_core::dbs::Session;
 use surrealdb_core::kvs::Datastore;
 use surrealdb_core::rpc::{DbResult, RpcError, RpcProtocol};
@@ -14,7 +14,7 @@ use crate::cnf::{PKG_NAME, PKG_VERSION};
 pub struct Http {
 	pub kvs: Arc<Datastore>,
 	pub lock: Arc<Semaphore>,
-	pub sessions: DashMap<Option<Uuid>, ArcSwap<Session>>,
+	pub sessions: HashMap<Option<Uuid>, ArcSwap<Session>>,
 }
 
 impl Http {
@@ -22,10 +22,10 @@ impl Http {
 		let http = Self {
 			kvs,
 			lock: Arc::new(Semaphore::new(1)),
-			sessions: DashMap::new(),
+			sessions: HashMap::new(),
 		};
 		// Store the default session with None key
-		http.sessions.insert(None, ArcSwap::from(Arc::new(session)));
+		http.sessions.pin().insert(None, ArcSwap::from(Arc::new(session)));
 		http
 	}
 }
@@ -48,7 +48,7 @@ impl RpcProtocol for Http {
 	}
 
 	/// A pointer to all active sessions
-	fn session_map(&self) -> &DashMap<Option<Uuid>, ArcSwap<Session>> {
+	fn session_map(&self) -> &HashMap<Option<Uuid>, ArcSwap<Session>> {
 		&self.sessions
 	}
 

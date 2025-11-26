@@ -125,6 +125,7 @@ num_cpus.workspace = true
 # Pinned until SurrealML is compatible with later versions
 ort.workspace = true
 ort-sys.workspace = true
+papaya.workspace = true
 pin-project-lite.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, default-features = false, features = [

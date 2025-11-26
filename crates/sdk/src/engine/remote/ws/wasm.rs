@@ -76,25 +76,19 @@ impl conn::Sealed for Client {
 	}
 }
 
-/// Send a clone_session RPC request to the server
-async fn send_clone_session_request(
-	from: Option<uuid::Uuid>,
-	to: uuid::Uuid,
+/// Send an attach RPC request to the server
+async fn attach_session_request(
+	session_id: uuid::Uuid,
 	sink: &mut MessageSink,
 ) {
 	use surrealdb_types::{Array, SurrealValue, Uuid as SurrealUuid};
 
-	let from_value = match from {
-		Some(id) => Value::Uuid(SurrealUuid(id)),
-		None => Value::None,
-	};
-
 	let request = crate::conn::cmd::RouterRequest {
 		id: None, // Fire and forget - we don't wait for response
-		method: "clone_session",
-		params: Some(Value::Array(Array::from(vec![from_value, Value::Uuid(SurrealUuid(to))]))),
+		method: "attach",
+		params: Some(vec![Value::Uuid(SurrealUuid(session_id))].into()),
 		txn: None,
-		session_id: None, // Session cloning doesn't use a session ID
+		session_id: None, // Session cloning doesn't need to use a session ID
 	};
 
 	let request_value = request.into_value();
@@ -682,15 +676,15 @@ pub(crate) async fn run_router(
 					match session_id {
 						SessionId::Initial(session_id) => {
 							state.sessions.entry(Some(session_id)).or_default();
-							// Clone from default session
-							send_clone_session_request(None, session_id, &mut state.sink).await;
+							// Attach to the session
+							attach_session_request(session_id, &mut state.sink).await;
 						}
 						SessionId::Clone { old, new } => {
 							// Clone the local session state
 							let old_state = state.sessions.get(&Some(old)).cloned().unwrap_or_default();
 							state.sessions.insert(Some(new), old_state);
-							// Send clone_session RPC request to server
-							send_clone_session_request(Some(old), new, &mut state.sink).await;
+							// Attach to the session
+							attach_session_request(new, &mut state.sink).await;
 						}
 						SessionId::Drop(session_id) => {
 							// Remove the session from local state
