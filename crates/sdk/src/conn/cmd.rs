@@ -85,6 +85,12 @@ pub(crate) enum Command {
 	Kill {
 		uuid: Uuid,
 	},
+	Attach {
+		session_id: Uuid,
+	},
+	Detach {
+		session_id: Uuid,
+	},
 	Run {
 		name: String,
 		version: Option<String>,
@@ -281,6 +287,24 @@ impl Command {
 				params: Some(Value::from_t(vec![Value::Uuid(Uuid(uuid))])),
 				txn: None,
 				session_id,
+			},
+			Command::Attach {
+				session_id,
+			} => RouterRequest {
+				id,
+				method: "attach",
+				params: None,
+				txn: None,
+				session_id: Some(session_id),
+			},
+			Command::Detach {
+				session_id,
+			} => RouterRequest {
+				id,
+				method: "detach",
+				params: None,
+				txn: None,
+				session_id: Some(session_id),
 			},
 			Command::Run {
 				name,

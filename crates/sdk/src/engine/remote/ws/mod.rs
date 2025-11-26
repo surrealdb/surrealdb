@@ -50,6 +50,7 @@ enum RequestEffect {
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 enum ReplayMethod {
 	Attach,
+	Detach,
 	Use,
 	Signup,
 	Signin,
