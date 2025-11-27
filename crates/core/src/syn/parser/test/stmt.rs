@@ -2243,7 +2243,10 @@ fn parse_use() {
 	.pop()
 	.unwrap();
 
-	let expect = TopLevelExpr::Use(UseStatement::NsDb(Expr::Idiom(Idiom::field("bar".to_owned())), Expr::Idiom(Idiom::field("foo".to_owned()))));
+	let expect = TopLevelExpr::Use(UseStatement::NsDb(
+		Expr::Idiom(Idiom::field("bar".to_owned())),
+		Expr::Idiom(Idiom::field("foo".to_owned())),
+	));
 	assert_eq!(res, expect);
 }
 
@@ -2278,7 +2281,10 @@ fn parse_use_lowercase() {
 	.pop()
 	.unwrap();
 
-	let expect = TopLevelExpr::Use(UseStatement::NsDb(Expr::Idiom(Idiom::field("bar".to_owned())), Expr::Idiom(Idiom::field("foo".to_owned()))));
+	let expect = TopLevelExpr::Use(UseStatement::NsDb(
+		Expr::Idiom(Idiom::field("bar".to_owned())),
+		Expr::Idiom(Idiom::field("foo".to_owned())),
+	));
 	assert_eq!(res, expect);
 }
 

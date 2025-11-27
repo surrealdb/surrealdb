@@ -17,9 +17,7 @@ impl fmt::Display for UseStatement {
 		match self {
 			UseStatement::Ns(ns) => write!(f, " NS {ns}")?,
 			UseStatement::Db(db) => write!(f, " DB {db}")?,
-			UseStatement::NsDb(ns, db) => {
-				write!(f, " NS {ns} DB {db}")?
-			}
+			UseStatement::NsDb(ns, db) => write!(f, " NS {ns} DB {db}")?,
 			UseStatement::Defaults => write!(f, " DEFAULTS")?,
 		}
 		Ok(())

@@ -128,16 +128,10 @@ impl Executor {
 						}
 					}
 					UseStatement::Ns(ns) => {
-						let ns = self.stack
+						let ns = self
+							.stack
 							.enter(|stk| {
-								expr_to_ident(
-									stk,
-									&self.ctx,
-									&opt_ref,
-									None,
-									&ns,
-									"namespace",
-								)
+								expr_to_ident(stk, &self.ctx, &opt_ref, None, &ns, "namespace")
 							})
 							.finish()
 							.await?;
@@ -145,16 +139,10 @@ impl Executor {
 						(Some(ns), None)
 					}
 					UseStatement::Db(db) => {
-						let db = self.stack
+						let db = self
+							.stack
 							.enter(|stk| {
-								expr_to_ident(
-									stk,
-									&self.ctx,
-									&opt_ref,
-									None,
-									&db,
-									"database",
-								)
+								expr_to_ident(stk, &self.ctx, &opt_ref, None, &db, "database")
 							})
 							.finish()
 							.await?;
@@ -162,30 +150,18 @@ impl Executor {
 						(None, Some(db))
 					}
 					UseStatement::NsDb(ns, db) => {
-						let ns = self.stack
+						let ns = self
+							.stack
 							.enter(|stk| {
-								expr_to_ident(
-									stk,
-									&self.ctx,
-									&opt_ref,
-									None,
-									&ns,
-									"namespace",
-								)
+								expr_to_ident(stk, &self.ctx, &opt_ref, None, &ns, "namespace")
 							})
 							.finish()
 							.await?;
 
-						let db = self.stack
+						let db = self
+							.stack
 							.enter(|stk| {
-								expr_to_ident(
-									stk,
-									&self.ctx,
-									&opt_ref,
-									None,
-									&db,
-									"database",
-								)
+								expr_to_ident(stk, &self.ctx, &opt_ref, None, &db, "database")
 							})
 							.finish()
 							.await?;
