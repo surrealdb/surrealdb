@@ -23,7 +23,7 @@ async fn info_for_root() {
 	)
 	.unwrap();
 	t.expect_regex(
-		r"\{ accesses: \[\{.*\}\], namespaces: \[\{ .* \}\], nodes: \[.*\], system: \{ .* \}, users: \[\{ .* \}\] \}",
+		r"\{ accesses: \[\{.*\}\], defaults: \{ .* \}, namespaces: \[\{ .* \}\], nodes: \[.*\], system: \{ .* \}, users: \[\{ .* \}\] \}",
 	)
 	.unwrap();
 }

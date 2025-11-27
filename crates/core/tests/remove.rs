@@ -238,7 +238,7 @@ async fn should_not_error_when_remove_table_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE TABLE IF EXISTS foo;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -398,7 +398,7 @@ async fn should_not_error_when_remove_param_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE PARAM IF EXISTS $foo;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -429,7 +429,7 @@ async fn should_not_error_when_remove_access_if_exists() -> Result<()> {
 #[tokio::test]
 async fn should_not_error_when_remove_user_if_exists() -> Result<()> {
 	let sql = "
-		USE NS test DB test;
+		USE NS j DB test;
 		REMOVE USER IF EXISTS foo ON ROOT;
 	";
 	let dbs = new_ds().await?;
@@ -438,7 +438,7 @@ async fn should_not_error_when_remove_user_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE USER IF EXISTS foo ON ROOT;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
