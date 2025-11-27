@@ -1,80 +1,20 @@
 use std::fmt::{self, Display, Formatter};
 use std::ops::Deref;
 
+use revision::revisioned;
 use serde::de::{self, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
 
 use crate::val::IndexFormat;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
+#[revisioned(revision = 1)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash, Encode, BorrowDecode)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[storekey(format = "()")]
+#[storekey(format = "IndexFormat")]
 #[repr(transparent)]
 pub struct Bytes(pub(crate) ::bytes::Bytes);
-
-// Manual implementation of Revisioned traits
-impl revision::Revisioned for Bytes {
-	fn revision() -> u16 {
-		1
-	}
-}
-
-impl revision::SerializeRevisioned for Bytes {
-	fn serialize_revisioned<W: std::io::Write>(
-		&self,
-		writer: &mut W,
-	) -> Result<(), revision::Error> {
-		// Serialize the inner bytes as Vec<u8>
-		let vec: Vec<u8> = self.0.as_ref().to_vec();
-		vec.serialize_revisioned(writer)
-	}
-}
-
-impl revision::DeserializeRevisioned for Bytes {
-	fn deserialize_revisioned<R: std::io::Read>(reader: &mut R) -> Result<Self, revision::Error> {
-		// Deserialize as Vec<u8> and convert to bytes::Bytes
-		let vec = Vec::<u8>::deserialize_revisioned(reader)?;
-		Ok(Bytes(bytes::Bytes::from(vec)))
-	}
-}
-
-// Manual implementation of Encode for Bytes
-impl Encode<()> for Bytes {
-	fn encode<W: std::io::Write>(
-		&self,
-		w: &mut storekey::Writer<W>,
-	) -> Result<(), storekey::EncodeError> {
-		// Encode as a byte slice
-		w.write_slice(self.0.as_ref())
-	}
-}
-
-impl Encode<IndexFormat> for Bytes {
-	fn encode<W: std::io::Write>(
-		&self,
-		w: &mut storekey::Writer<W>,
-	) -> Result<(), storekey::EncodeError> {
-		// Encode as a byte slice
-		w.write_slice(self.0.as_ref())
-	}
-}
-
-// Manual implementation of BorrowDecode for Bytes
-impl<'de> BorrowDecode<'de, ()> for Bytes {
-	fn borrow_decode(r: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
-		// Decode as a cow and convert to bytes::Bytes
-		let cow = r.read_cow()?;
-		Ok(Bytes(bytes::Bytes::copy_from_slice(cow.as_ref())))
-	}
-}
-
-impl<'de> BorrowDecode<'de, IndexFormat> for Bytes {
-	fn borrow_decode(r: &mut storekey::BorrowReader<'de>) -> Result<Self, storekey::DecodeError> {
-		// Decode as a cow and convert to bytes::Bytes
-		let cow = r.read_cow()?;
-		Ok(Bytes(bytes::Bytes::copy_from_slice(cow.as_ref())))
-	}
-}
 
 impl Bytes {
 	pub fn into_inner(self) -> bytes::Bytes {

@@ -1071,9 +1071,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.10.1"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
+checksum = "b35204fbdc0b3f4446b89fc1ac2cf84a8a68971995d0bf2e925ec7cd960f9cb3"
 dependencies = [
  "serde",
 ]
@@ -5787,10 +5787,11 @@ dependencies = [
 
 [[package]]
 name = "revision"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b762d27bdb312a92b2a1786e9dec700186f3c3e8a98b56b36c1b078e6bf2804a"
+checksum = "1afd502a7bd15659a0b81479de42a249afa2dd3bdcc689871d6da4b3d005018d"
 dependencies = [
+ "bytes",
  "chrono",
  "geo 0.31.0",
  "regex",
@@ -5802,9 +5803,9 @@ dependencies = [
 
 [[package]]
 name = "revision-derive"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e05651c26aaf33d5e642e380a43b1e5112f76668085aab9377130694160d5177"
+checksum = "400e8b48caaca9faa40f590f643c5c155d6c8700378e700de1bd8f453e11578d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6714,19 +6715,20 @@ checksum = "d7beae5182595e9a8b683fa98c4317f956c9a2dec3b9716990d20023cc60c766"
 
 [[package]]
 name = "storekey"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79f0a20b9cc597130e6b3ae22f2bc0892095c0def0361b4b86e64a609ef222ef"
+checksum = "ac0a0c60667da4e707563b1f1616534926d4a2508d6a7cdb26414a9103f63e1c"
 dependencies = [
+ "bytes",
  "storekey-derive",
  "uuid",
 ]
 
 [[package]]
 name = "storekey-derive"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b17310dd353bab243079e8669927142cc4bde8e6b91bc966c65e347e78563a3"
+checksum = "7555a4e3498505187316766c9f4fc23d54ac1ee4455e6c931f87a6990efbb8ba"
 dependencies = [
  "proc-macro2",
  "quote",
