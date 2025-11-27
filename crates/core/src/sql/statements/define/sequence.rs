@@ -1,10 +1,8 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::{
-	fmt::CoverStmts,
-	sql::{Expr, Literal, Timeout},
-};
+use crate::fmt::CoverStmts;
+use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -13,7 +11,7 @@ pub(crate) struct DefineSequenceStatement {
 	pub name: Expr,
 	pub batch: Expr,
 	pub start: Expr,
-	pub timeout: Option<Timeout>,
+	pub timeout: Expr,
 }
 
 impl Default for DefineSequenceStatement {
@@ -23,7 +21,7 @@ impl Default for DefineSequenceStatement {
 			name: Expr::Literal(Literal::None),
 			batch: Expr::Literal(Literal::Integer(0)),
 			start: Expr::Literal(Literal::Integer(0)),
-			timeout: None,
+			timeout: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -43,8 +41,8 @@ impl Display for DefineSequenceStatement {
 			CoverStmts(&self.batch),
 			CoverStmts(&self.start)
 		)?;
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
 		}
 		Ok(())
 	}
@@ -57,7 +55,7 @@ impl From<DefineSequenceStatement> for crate::expr::statements::define::DefineSe
 			name: v.name.into(),
 			batch: v.batch.into(),
 			start: v.start.into(),
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.into(),
 		}
 	}
 }
@@ -69,7 +67,7 @@ impl From<crate::expr::statements::define::DefineSequenceStatement> for DefineSe
 			name: v.name.into(),
 			batch: v.batch.into(),
 			start: v.start.into(),
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.into(),
 		}
 	}
 }

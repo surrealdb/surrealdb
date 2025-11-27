@@ -10,8 +10,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Expr, ModuleExecutable};
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::expr::{Base, Expr, FlowResultExt, ModuleExecutable};
+use crate::fmt::{CoverStmts, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -20,7 +20,7 @@ pub(crate) struct DefineModuleStatement {
 	pub kind: DefineKind,
 	pub name: Option<String>,
 	pub executable: ModuleExecutable,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub permissions: Permission,
 }
 
@@ -55,11 +55,16 @@ impl DefineModuleStatement {
 				}
 			}
 		}
+
 		// Process the statement
-		{
-			let (ns, db) = opt.ns_db()?;
-			txn.get_or_add_db(Some(ctx), ns, db).await?
-		};
+		let (ns_name, db_name) = opt.ns_db()?;
+		txn.get_or_add_db(Some(ctx), ns_name, db_name).await?;
+
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
 
 		txn.put_db_module(
 			ns,
@@ -67,7 +72,7 @@ impl DefineModuleStatement {
 			&ModuleDefinition {
 				name: self.name.clone(),
 				executable: self.executable.clone().into(),
-				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+				comment,
 				permissions: self.permissions.clone(),
 			},
 		)
@@ -91,9 +96,7 @@ impl fmt::Display for DefineModuleStatement {
 			write!(f, " mod::{name} AS")?;
 		}
 		write!(f, " {}", self.executable)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
-		}
+		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
 		} else {

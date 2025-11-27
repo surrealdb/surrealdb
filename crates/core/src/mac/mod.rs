@@ -88,14 +88,6 @@ macro_rules! map_opt {
 	};
 }
 
-/// Computes a value and coerces it to a type
-macro_rules! compute_to {
-	($stk:ident, $ctx:ident, $opt:ident, $doc:ident, $x:expr => $t:ty) => {{
-		use crate::expr::FlowResultExt;
-		$stk.run(|stk| $x.compute(stk, $ctx, $opt, $doc)).await.catch_return()?.coerce_to::<$t>()?
-	}};
-}
-
 /// Extends a b-tree map of key-value pairs.
 ///
 /// This macro extends the supplied map, by cloning

@@ -12,7 +12,7 @@ pub(crate) struct DefineDatabaseStatement {
 	pub id: Option<u32>,
 	pub name: Expr,
 	pub strict: bool,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub changefeed: Option<ChangeFeed>,
 }
 
@@ -22,7 +22,7 @@ impl Default for DefineDatabaseStatement {
 			kind: DefineKind::Default,
 			id: None,
 			name: Expr::Literal(Literal::None),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 			changefeed: None,
 			strict: false,
 		}
@@ -41,9 +41,7 @@ impl Display for DefineDatabaseStatement {
 		if self.strict {
 			write!(f, " STRICT")?;
 		}
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", CoverStmts(v))?;
-		}
+		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		if let Some(ref v) = self.changefeed {
 			write!(f, " {v}")?;
 		}
@@ -57,7 +55,7 @@ impl From<DefineDatabaseStatement> for crate::expr::statements::DefineDatabaseSt
 			kind: v.kind.into(),
 			id: v.id,
 			name: v.name.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			changefeed: v.changefeed.map(Into::into),
 			strict: v.strict,
 		}
@@ -72,7 +70,7 @@ impl From<crate::expr::statements::DefineDatabaseStatement> for DefineDatabaseSt
 			id: v.id,
 			name: v.name.into(),
 			strict: v.strict,
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			changefeed: v.changefeed.map(Into::into),
 		}
 	}

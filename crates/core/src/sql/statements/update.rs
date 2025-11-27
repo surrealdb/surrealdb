@@ -1,9 +1,9 @@
 use std::fmt;
 
 use crate::fmt::{CoverStmts, Fmt};
-use crate::sql::{Cond, Data, Explain, Expr, Output, Timeout, With};
+use crate::sql::{Cond, Data, Explain, Expr, Literal, Output, With};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct UpdateStatement {
 	pub only: bool,
@@ -13,9 +13,25 @@ pub(crate) struct UpdateStatement {
 	pub data: Option<Data>,
 	pub cond: Option<Cond>,
 	pub output: Option<Output>,
-	pub timeout: Option<Timeout>,
+	pub timeout: Expr,
 	pub parallel: bool,
 	pub explain: Option<Explain>,
+}
+
+impl Default for UpdateStatement {
+	fn default() -> Self {
+		Self {
+			only: Default::default(),
+			what: Default::default(),
+			with: Default::default(),
+			data: Default::default(),
+			cond: Default::default(),
+			output: Default::default(),
+			timeout: Expr::Literal(Literal::None),
+			parallel: Default::default(),
+			explain: Default::default(),
+		}
+	}
 }
 
 impl fmt::Display for UpdateStatement {
@@ -37,8 +53,8 @@ impl fmt::Display for UpdateStatement {
 		if let Some(ref v) = self.output {
 			write!(f, " {v}")?
 		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
 		}
 		if self.parallel {
 			f.write_str(" PARALLEL")?
@@ -59,7 +75,7 @@ impl From<UpdateStatement> for crate::expr::statements::UpdateStatement {
 			data: v.data.map(Into::into),
 			cond: v.cond.map(Into::into),
 			output: v.output.map(Into::into),
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.into(),
 			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
 		}
@@ -75,7 +91,7 @@ impl From<crate::expr::statements::UpdateStatement> for UpdateStatement {
 			data: v.data.map(Into::into),
 			cond: v.cond.map(Into::into),
 			output: v.output.map(Into::into),
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.into(),
 			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
 		}

@@ -10,18 +10,18 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Expr};
+use crate::expr::{Base, Expr, FlowResultExt};
 use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct DefineModelStatement {
 	pub kind: DefineKind,
 	pub hash: String,
 	pub name: String,
 	pub version: String,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub permissions: Permission,
 }
 
@@ -54,6 +54,12 @@ impl DefineModelStatement {
 			}
 		}
 
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
+
 		// Process the statement
 		let key = crate::key::database::ml::new(ns, db, &self.name, &self.version);
 		txn.set(
@@ -62,7 +68,7 @@ impl DefineModelStatement {
 				hash: self.hash.clone(),
 				name: self.name.clone(),
 				version: self.version.clone(),
-				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+				comment,
 				permissions: self.permissions.clone(),
 			},
 			None,
@@ -84,9 +90,7 @@ impl fmt::Display for DefineModelStatement {
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " ml::{}<{}>", EscapeKwFreeIdent(&self.name), self.version)?;
-		if let Some(comment) = self.comment.as_ref() {
-			write!(f, " COMMENT {}", comment)?;
-		}
+		write!(f, " COMMENT {}", &self.comment)?;
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
 		} else {

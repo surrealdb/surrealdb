@@ -428,10 +428,7 @@ impl Parser<'_> {
 			_ => LiveFields::Select(self.parse_fields(stk).await?),
 		};
 		expected!(self, t!("FROM"));
-		let what = match self.peek().kind {
-			t!("$param") => Expr::Param(self.next_token_value()?),
-			_ => self.parse_expr_table(stk).await?,
-		};
+		let what = self.parse_expr_table(stk).await?;
 		let cond = self.try_parse_condition(stk).await?;
 		let fetch = self.try_parse_fetch(stk).await?;
 

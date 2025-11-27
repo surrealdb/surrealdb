@@ -6,7 +6,7 @@ use reblessive::tree::Stk;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Expr, FlowResultExt, Function, Idiom};
+use crate::expr::{Expr, FlowResultExt, Function, Idiom, Part};
 
 pub async fn exprs_to_fields(
 	stk: &mut Stk,
@@ -82,30 +82,28 @@ pub async fn expr_to_ident(
 	into: &str,
 ) -> Result<String> {
 	match expr {
-		crate::expr::Expr::Idiom(x) if x.is_field(None) => {
-			let Some(crate::expr::Part::Field(x)) = x.first() else {
-				fail!("Expected a field idiom");
-			};
-
-			Ok(x.clone())
-		}
-		x => match stk
-			.run(|stk| x.compute(stk, ctx, opt, doc))
-			.await
-			.catch_return()?
-			.coerce_to::<String>()
-		{
-			Err(crate::val::value::CoerceError::InvalidKind {
-				from,
-				..
-			}) => Err(crate::val::value::CoerceError::InvalidKind {
-				from,
-				into: into.to_string(),
-			}),
-			x => x,
-		}
-		.map_err(anyhow::Error::from),
+		Expr::Idiom(Idiom(x)) => match x.as_slice() {
+			[Part::Field(x)] => return Ok(x.clone()),
+			_ => {}
+		},
+		_ => {}
 	}
+	match stk
+		.run(|stk| expr.compute(stk, ctx, opt, doc))
+		.await
+		.catch_return()?
+		.coerce_to::<String>()
+	{
+		Err(crate::val::value::CoerceError::InvalidKind {
+			from,
+			..
+		}) => Err(crate::val::value::CoerceError::InvalidKind {
+			from,
+			into: into.to_string(),
+		}),
+		x => x,
+	}
+	.map_err(anyhow::Error::from)
 }
 
 pub async fn expr_to_idiom(
@@ -117,7 +115,7 @@ pub async fn expr_to_idiom(
 	into: &str,
 ) -> Result<Idiom> {
 	match expr {
-		crate::expr::Expr::Idiom(x) => Ok(x.clone()),
+		Expr::Idiom(x) => Ok(x.clone()),
 		x => {
 			let raw = match stk
 				.run(|stk| x.compute(stk, ctx, opt, doc))

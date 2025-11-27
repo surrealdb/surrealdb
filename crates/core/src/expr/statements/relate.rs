@@ -7,9 +7,10 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
+use crate::expr::{Data, Expr, FlowResultExt as _, Literal, Output, Value};
+use crate::fmt::CoverStmts;
 use crate::idx::planner::RecordStrategy;
-use crate::val::{RecordId, RecordIdKey, Table};
+use crate::val::{Duration, RecordId, RecordIdKey, Table};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct RelateStatement {
@@ -23,7 +24,7 @@ pub(crate) struct RelateStatement {
 	pub uniq: bool,
 	pub data: Option<Data>,
 	pub output: Option<Output>,
-	pub timeout: Option<Timeout>,
+	pub timeout: Expr,
 	pub parallel: bool,
 }
 
@@ -41,14 +42,20 @@ impl RelateStatement {
 		// Create a new iterator
 		let mut i = Iterator::new();
 		// Check if there is a timeout
-		let ctx = match self.timeout.as_ref() {
+		let ctx_store: Context;
+		let ctx = match stk
+			.run(|stk| self.timeout.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to::<Option<Duration>>()?
+		{
 			Some(timeout) => {
-				let x = timeout.compute(stk, ctx, opt, doc).await?.0;
-				let mut ctx = MutableContext::new(ctx);
-				ctx.add_timeout(x)?;
-				ctx.freeze()
+				let mut new_ctx = MutableContext::new(ctx);
+				new_ctx.add_timeout(timeout.0)?;
+				ctx_store = new_ctx.freeze();
+				&ctx_store
 			}
-			None => ctx.clone(),
+			None => ctx,
 		};
 		// Loop over the from targets
 		let from = {
@@ -187,8 +194,8 @@ impl fmt::Display for RelateStatement {
 		if let Some(ref v) = self.output {
 			write!(f, " {v}")?
 		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
 		}
 		if self.parallel {
 			f.write_str(" PARALLEL")?

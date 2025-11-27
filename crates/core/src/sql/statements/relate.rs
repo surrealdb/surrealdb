@@ -1,6 +1,7 @@
 use std::fmt;
 
-use crate::sql::{Data, Expr, Literal, Output, RecordIdKeyLit, RecordIdLit, Timeout};
+use crate::fmt::CoverStmts;
+use crate::sql::{Data, Expr, Literal, Output, RecordIdKeyLit, RecordIdLit};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -15,7 +16,7 @@ pub(crate) struct RelateStatement {
 	pub uniq: bool,
 	pub data: Option<Data>,
 	pub output: Option<Output>,
-	pub timeout: Option<Timeout>,
+	pub timeout: Expr,
 	pub parallel: bool,
 }
 
@@ -95,8 +96,8 @@ impl fmt::Display for RelateStatement {
 		if let Some(ref v) = self.output {
 			write!(f, " {v}")?
 		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
 		}
 		if self.parallel {
 			f.write_str(" PARALLEL")?
@@ -115,7 +116,7 @@ impl From<RelateStatement> for crate::expr::statements::RelateStatement {
 			uniq: v.uniq,
 			data: v.data.map(Into::into),
 			output: v.output.map(Into::into),
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.into(),
 			parallel: v.parallel,
 		}
 	}
@@ -131,7 +132,7 @@ impl From<crate::expr::statements::RelateStatement> for RelateStatement {
 			uniq: v.uniq,
 			data: v.data.map(Into::into),
 			output: v.output.map(Into::into),
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.into(),
 			parallel: v.parallel,
 		}
 	}

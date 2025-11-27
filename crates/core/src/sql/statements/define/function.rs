@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
 use crate::fmt::{CoverStmts, EscapeKwFreeIdent, is_pretty, pretty_indent};
-use crate::sql::{Block, Expr, Kind, Permission};
+use crate::sql::{Block, Expr, Kind, Literal, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -11,7 +11,7 @@ pub(crate) struct DefineFunctionStatement {
 	pub name: String,
 	pub args: Vec<(String, Kind)>,
 	pub block: Block,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub permissions: Permission,
 	pub returns: Option<Kind>,
 }
@@ -41,8 +41,8 @@ impl fmt::Display for DefineFunctionStatement {
 			write!(f, "-> {v} ")?;
 		}
 		Display::fmt(&self.block, f)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", CoverStmts(v))?
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
@@ -62,7 +62,7 @@ impl From<DefineFunctionStatement> for crate::expr::statements::DefineFunctionSt
 			name: v.name,
 			args: v.args.into_iter().map(|(i, k)| (i, k.into())).collect(),
 			block: v.block.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			permissions: v.permissions.into(),
 			returns: v.returns.map(Into::into),
 		}
@@ -76,7 +76,7 @@ impl From<crate::expr::statements::DefineFunctionStatement> for DefineFunctionSt
 			name: v.name,
 			args: v.args.into_iter().map(|(i, k)| (i, k.into())).collect(),
 			block: v.block.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			permissions: v.permissions.into(),
 			returns: v.returns.map(Into::into),
 		}

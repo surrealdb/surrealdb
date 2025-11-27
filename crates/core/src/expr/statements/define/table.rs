@@ -27,7 +27,7 @@ use crate::expr::{
 	Base, BinaryOperator, Cond, Expr, Field, Fields, FlowResultExt, Function, FunctionCall, Group,
 	Groups, Idiom, Kind, Literal, SelectStatement, View,
 };
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
+use crate::fmt::{CoverStmts, EscapeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::key;
 use crate::kvs::Transaction;
@@ -43,7 +43,7 @@ pub(crate) struct DefineTableStatement {
 	pub view: Option<View>,
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub table_type: TableType,
 }
 
@@ -58,7 +58,7 @@ impl Default for DefineTableStatement {
 			view: None,
 			permissions: Permissions::default(),
 			changefeed: None,
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 			table_type: TableType::default(),
 		}
 	}
@@ -102,6 +102,12 @@ impl DefineTableStatement {
 			ctx.try_get_sequences()?.next_table_id(Some(ctx), ns, db).await?
 		};
 
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
+
 		// Process the statement
 		let cache_ts = Uuid::now_v7();
 		let mut tb_def = TableDefinition {
@@ -114,7 +120,7 @@ impl DefineTableStatement {
 			table_type: self.table_type.clone(),
 			view: self.view.clone().map(|v| v.to_definition()).transpose()?,
 			permissions: self.permissions.clone(),
-			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			comment,
 			changefeed: self.changefeed,
 
 			cache_fields_ts: cache_ts,
@@ -751,7 +757,7 @@ impl Display for DefineTableStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", CoverStmts(&self.name))?;
 		write!(f, " TYPE")?;
 		match &self.table_type {
 			TableType::Normal => {
@@ -793,9 +799,7 @@ impl Display for DefineTableStatement {
 		} else {
 			" SCHEMALESS"
 		})?;
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?
-		}
+		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		if let Some(ref v) = self.view {
 			write!(f, " {v}")?
 		}

@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::fmt::{EscapeIdent, Pretty};
+use crate::fmt::{CoverStmts, EscapeIdent, Pretty};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::operator::BindingPower;
 use crate::sql::statements::{
@@ -141,7 +141,7 @@ impl Expr {
 	// NOTE: Changes to this function also likely require changes to
 	// crate::expr::Expr::needs_parentheses
 	/// Returns if this expression needs to be parenthesized when inside another expression.
-	fn needs_parentheses(&self) -> bool {
+	pub(crate) fn needs_parentheses(&self) -> bool {
 		match self {
 			Expr::Literal(Literal::UnboundedRange | Literal::RecordId(_))
 			| Expr::Closure(_)
@@ -405,6 +405,7 @@ impl fmt::Display for Expr {
 				if expr.needs_parentheses()
 					|| expr_bp < op_bp
 					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
+					|| matches!(op, PostfixOperator::Call(_))
 				{
 					write!(f, "({expr}){op}")
 				} else {
@@ -423,8 +424,10 @@ impl fmt::Display for Expr {
 				if left.needs_parentheses()
 					|| left_bp < op_bp
 					|| left_bp == op_bp
-						&& matches!(left_bp, BindingPower::Range | BindingPower::Relation)
-				{
+						&& matches!(
+							left_bp,
+							BindingPower::Range | BindingPower::Relation | BindingPower::Equality
+						) {
 					write!(f, "({left})")?;
 				} else {
 					write!(f, "{left}")?;
@@ -445,8 +448,10 @@ impl fmt::Display for Expr {
 				if right.needs_parentheses()
 					|| right_bp < op_bp
 					|| right_bp == op_bp
-						&& matches!(right_bp, BindingPower::Range | BindingPower::Relation)
-				{
+						&& matches!(
+							right_bp,
+							BindingPower::Range | BindingPower::Relation | BindingPower::Equality
+						) {
 					write!(f, "({right})")
 				} else {
 					write!(f, "{right}")
@@ -457,7 +462,7 @@ impl fmt::Display for Expr {
 			Expr::Break => write!(f, "BREAK"),
 			Expr::Continue => write!(f, "CONTINUE"),
 			Expr::Return(x) => write!(f, "{x}"),
-			Expr::Throw(expr) => write!(f, "THROW {expr}"),
+			Expr::Throw(expr) => write!(f, "THROW {}", CoverStmts(expr.as_ref())),
 			Expr::IfElse(s) => write!(f, "{s}"),
 			Expr::Select(s) => write!(f, "{s}"),
 			Expr::Create(s) => write!(f, "{s}"),

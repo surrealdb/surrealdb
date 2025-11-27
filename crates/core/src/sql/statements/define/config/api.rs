@@ -1,6 +1,6 @@
 use std::fmt::{self, Display};
 
-use crate::fmt::{EscapeKwFreeIdent, Fmt};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt};
 use crate::sql::{Expr, Permission};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -25,7 +25,7 @@ impl Display for ApiConfig {
 					}
 					EscapeKwFreeIdent(s).fmt(f)?;
 				}
-				write!(f, "({})", Fmt::pretty_comma_separated(m.args.iter()))?;
+				write!(f, "({})", Fmt::pretty_comma_separated(m.args.iter().map(CoverStmts)))?;
 			}
 		}
 

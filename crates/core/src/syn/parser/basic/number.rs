@@ -80,7 +80,7 @@ impl TokenValue for f32 {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();
 		match token.kind {
-			t!("+") | t!("-") | TokenKind::Digits => {
+			t!("+") | t!("-") | TokenKind::Digits | TokenKind::NaN | TokenKind::Infinity => {
 				parser.pop_peek();
 				Ok(parser.lexer.lex_compound(token, compound::float)?.value)
 			}
@@ -93,7 +93,7 @@ impl TokenValue for f64 {
 	fn from_token(parser: &mut Parser<'_>) -> ParseResult<Self> {
 		let token = parser.peek();
 		match token.kind {
-			t!("+") | t!("-") | TokenKind::Digits => {
+			t!("+") | t!("-") | TokenKind::Digits | TokenKind::NaN | TokenKind::Infinity => {
 				parser.pop_peek();
 				Ok(parser.lexer.lex_compound(token, compound::float)?.value)
 			}
@@ -112,6 +112,13 @@ impl TokenValue for Numeric {
 					panic!("Glued token was next but glued value was not of the correct value");
 				};
 				let number_str = parser.lexer.span_str(token.span);
+				// We only need to check these because other float keywords don't need to be glued.
+				if number_str.starts_with("+I") {
+					return Ok(Numeric::Float(f64::INFINITY));
+				}
+				if number_str.starts_with("-I") {
+					return Ok(Numeric::Float(f64::NEG_INFINITY));
+				}
 				match x {
 					NumberKind::Integer => number_str
 						.parse()
@@ -137,17 +144,17 @@ impl TokenValue for Numeric {
 					}
 				}
 			}
-			t!("+") => {
+			t!("+") | t!("-") | TokenKind::Digits => {
 				parser.pop_peek();
 				Ok((parser.lexer.lex_compound(token, compound::number))?.value)
 			}
-			t!("-") => {
+			TokenKind::NaN => {
 				parser.pop_peek();
-				Ok((parser.lexer.lex_compound(token, compound::number))?.value)
+				Ok(Numeric::Float(f64::NAN))
 			}
-			TokenKind::Digits => {
+			TokenKind::Infinity => {
 				parser.pop_peek();
-				Ok((parser.lexer.lex_compound(token, compound::number))?.value)
+				Ok(Numeric::Float(f64::INFINITY))
 			}
 			_ => unexpected!(parser, token, "a number"),
 		}

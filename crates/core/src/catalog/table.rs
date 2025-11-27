@@ -6,6 +6,7 @@ use crate::catalog::{DatabaseId, NamespaceId, Permissions, ViewDefinition};
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{ChangeFeed, Kind};
 use crate::kvs::impl_kv_value_revisioned;
+use crate::sql;
 use crate::sql::statements::DefineTableStatement;
 use crate::val::Value;
 
@@ -104,7 +105,7 @@ impl TableDefinition {
 	fn to_sql_definition(&self) -> DefineTableStatement {
 		DefineTableStatement {
 			id: Some(self.table_id.0),
-			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
+			name: sql::Expr::Idiom(sql::Idiom::field(self.name.clone())),
 			drop: self.drop,
 			full: self.schemafull,
 			view: self.view.clone().map(|v| v.to_sql_definition()),
@@ -113,7 +114,8 @@ impl TableDefinition {
 			comment: self
 				.comment
 				.clone()
-				.map(|v| crate::sql::Expr::Literal(crate::sql::Literal::String(v))),
+				.map(|v| sql::Expr::Literal(sql::Literal::String(v)))
+				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 			table_type: self.table_type.clone().into(),
 			..Default::default()
 		}

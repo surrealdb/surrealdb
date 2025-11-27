@@ -2282,9 +2282,10 @@ impl Datastore {
 		let model = DefineModelStatement {
 			name: name.to_string(),
 			version: version.to_string(),
-			comment: Some(Expr::Literal(Literal::String(description.to_string()))),
+			comment: Expr::Literal(Literal::String(description.to_string())),
 			hash,
-			..Default::default()
+			kind: Default::default(),
+			permissions: Default::default(),
 		};
 
 		let q = LogicalPlan {

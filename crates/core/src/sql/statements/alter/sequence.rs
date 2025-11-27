@@ -1,14 +1,24 @@
 use std::fmt::{self, Display, Write};
 
-use crate::fmt::{EscapeKwIdent, is_pretty, pretty_indent};
-use crate::sql::Timeout;
+use crate::fmt::{CoverStmts, EscapeKwIdent, is_pretty, pretty_indent};
+use crate::sql::{Expr, Literal};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct AlterSequenceStatement {
 	pub name: String,
 	pub if_exists: bool,
-	pub timeout: Option<Timeout>,
+	pub timeout: Expr,
+}
+
+impl Default for AlterSequenceStatement {
+	fn default() -> Self {
+		Self {
+			name: Default::default(),
+			if_exists: Default::default(),
+			timeout: Expr::Literal(Literal::None),
+		}
+	}
 }
 
 impl Display for AlterSequenceStatement {
@@ -18,8 +28,8 @@ impl Display for AlterSequenceStatement {
 			write!(f, " IF EXISTS")?
 		}
 		write!(f, " {}", EscapeKwIdent(&self.name, &["IF"]))?;
-		if let Some(ref timeout) = self.timeout {
-			write!(f, " {timeout}")?;
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
@@ -36,7 +46,7 @@ impl From<AlterSequenceStatement> for crate::expr::statements::alter::AlterSeque
 		crate::expr::statements::alter::AlterSequenceStatement {
 			name: v.name,
 			if_exists: v.if_exists,
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.into(),
 		}
 	}
 }
@@ -45,7 +55,7 @@ impl From<crate::expr::statements::alter::AlterSequenceStatement> for AlterSeque
 		AlterSequenceStatement {
 			name: v.name,
 			if_exists: v.if_exists,
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.into(),
 		}
 	}
 }

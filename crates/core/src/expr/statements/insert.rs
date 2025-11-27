@@ -9,12 +9,12 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::relate::RelateThrough;
-use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
+use crate::expr::{Data, Expr, FlowResultExt as _, Literal, Output, Value};
 use crate::fmt::CoverStmts;
 use crate::idx::planner::RecordStrategy;
-use crate::val::{Datetime, RecordIdKey, Table};
+use crate::val::{Datetime, Duration, RecordIdKey, Table};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct InsertStatement {
 	pub into: Option<Expr>,
 	pub data: Data,
@@ -22,10 +22,26 @@ pub(crate) struct InsertStatement {
 	pub ignore: bool,
 	pub update: Option<Data>,
 	pub output: Option<Output>,
-	pub timeout: Option<Timeout>,
+	pub timeout: Expr,
 	pub parallel: bool,
 	pub relation: bool,
 	pub version: Option<Expr>,
+}
+
+impl Default for InsertStatement {
+	fn default() -> Self {
+		Self {
+			into: Default::default(),
+			data: Default::default(),
+			ignore: Default::default(),
+			update: Default::default(),
+			output: Default::default(),
+			timeout: Expr::Literal(Literal::None),
+			parallel: Default::default(),
+			relation: Default::default(),
+			version: Default::default(),
+		}
+	}
 }
 
 impl InsertStatement {
@@ -54,14 +70,20 @@ impl InsertStatement {
 		};
 		let opt = &opt.clone().with_version(version);
 		// Check if there is a timeout
-		let ctx = match self.timeout.as_ref() {
+		let ctx_store;
+		let ctx = match stk
+			.run(|stk| self.timeout.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to::<Option<Duration>>()?
+		{
 			Some(timeout) => {
-				let x = timeout.compute(stk, ctx, opt, doc).await?.0;
 				let mut ctx = MutableContext::new(ctx);
-				ctx.add_timeout(x)?;
-				ctx.freeze()
+				ctx.add_timeout(timeout.0)?;
+				ctx_store = ctx.freeze();
+				&ctx_store
 			}
-			None => ctx.clone(),
+			None => ctx,
 		};
 		// Parse the INTO expression
 		let into = match &self.into {
@@ -164,8 +186,8 @@ impl fmt::Display for InsertStatement {
 		if let Some(ref v) = self.version {
 			write!(f, "VERSION {v}")?
 		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
 		}
 		if self.parallel {
 			f.write_str(" PARALLEL")?

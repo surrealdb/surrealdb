@@ -123,6 +123,9 @@ mod arb {
 			let time = u.arbitrary::<NaiveTime>()?;
 			// Arbitrary was able to create times with 60 seconds instead of the 59 second limit.
 			let time = time.with_second(time.second() % 60).expect("0 to 59 is a valid second");
+			let time = time
+				.with_nanosecond(time.nanosecond() % 1_000_000_000)
+				.expect("0 to 999_999_999 is a valid nanosecond");
 
 			let offset = if u.arbitrary()? {
 				Utc.fix()

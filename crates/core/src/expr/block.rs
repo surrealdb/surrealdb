@@ -9,8 +9,8 @@ use crate::ctx::{Context, MutableContext};
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::statements::info::InfoStructure;
-use crate::expr::{Expr, Value};
-use crate::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
+use crate::expr::{Expr, Literal, Value};
+use crate::fmt::{Pretty, is_pretty, pretty_indent, pretty_sequence_item};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct Block(pub(crate) Vec<Expr>);
@@ -91,12 +91,17 @@ impl Block {
 impl Display for Block {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		let mut f = Pretty::from(f);
-		match (self.len(), self.first()) {
-			(0, _) => f.write_str("{;}"),
-			(1, Some(v)) => {
-				write!(f, "{{ {v} }}")
+		match self.len() {
+			0 => f.write_str("{;}"),
+			1 => {
+				let v = &self.0[0];
+				if let Expr::Literal(Literal::RecordId(_)) = v {
+					write!(f, "{{ ({v}) }}")
+				} else {
+					write!(f, "{{ {v} }}")
+				}
 			}
-			(l, _) => {
+			l => {
 				f.write_char('{')?;
 				if l > 1 {
 					f.write_char('\n')?;
@@ -105,21 +110,34 @@ impl Display for Block {
 				}
 				let indent = pretty_indent();
 				if is_pretty() {
-					write!(
-						f,
-						"{}",
-						&Fmt::two_line_separated(
-							self.0.iter().map(|args| Fmt::new(args, |v, f| write!(f, "{};", v))),
-						)
-					)?;
+					for (idx, x) in self.0.iter().enumerate() {
+						if idx > 0 {
+							f.write_char('\n')?;
+							pretty_sequence_item();
+						}
+
+						if idx == 0
+							&& let Expr::Literal(Literal::RecordId(_)) = x
+						{
+							write!(f, "({});", x)?;
+						} else {
+							write!(f, "{};", x)?;
+						}
+					}
 				} else {
-					write!(
-						f,
-						"{}",
-						&Fmt::one_line_separated(
-							self.0.iter().map(|args| Fmt::new(args, |v, f| write!(f, "{};", v))),
-						)
-					)?;
+					for (idx, x) in self.0.iter().enumerate() {
+						if idx > 0 {
+							f.write_char('\n')?;
+						}
+
+						if idx == 0
+							&& let Expr::Literal(Literal::RecordId(_)) = x
+						{
+							write!(f, "({});", x)?;
+						} else {
+							write!(f, "{};", x)?;
+						}
+					}
 				}
 				drop(indent);
 				if l > 1 {

@@ -1,9 +1,9 @@
 use std::fmt;
 
 use crate::fmt::CoverStmts;
-use crate::sql::{Data, Expr, Output, Timeout};
+use crate::sql::{Data, Expr, Literal, Output};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InsertStatement {
 	pub into: Option<Expr>,
 	pub data: Data,
@@ -11,10 +11,26 @@ pub struct InsertStatement {
 	pub ignore: bool,
 	pub update: Option<Data>,
 	pub output: Option<Output>,
-	pub timeout: Option<Timeout>,
+	pub timeout: Expr,
 	pub parallel: bool,
 	pub relation: bool,
 	pub version: Option<Expr>,
+}
+
+impl Default for InsertStatement {
+	fn default() -> Self {
+		Self {
+			into: Default::default(),
+			data: Default::default(),
+			ignore: Default::default(),
+			update: Default::default(),
+			output: Default::default(),
+			timeout: Expr::Literal(Literal::None),
+			parallel: Default::default(),
+			relation: Default::default(),
+			version: Default::default(),
+		}
+	}
 }
 
 impl fmt::Display for InsertStatement {
@@ -39,8 +55,8 @@ impl fmt::Display for InsertStatement {
 		if let Some(ref v) = self.version {
 			write!(f, " VERSION {}", CoverStmts(v))?
 		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
 		}
 		if self.parallel {
 			f.write_str(" PARALLEL")?
@@ -57,7 +73,7 @@ impl From<InsertStatement> for crate::expr::statements::InsertStatement {
 			ignore: v.ignore,
 			update: v.update.map(Into::into),
 			output: v.output.map(Into::into),
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.into(),
 			parallel: v.parallel,
 			relation: v.relation,
 			version: v.version.map(From::from),
@@ -73,7 +89,7 @@ impl From<crate::expr::statements::InsertStatement> for InsertStatement {
 			ignore: v.ignore,
 			update: v.update.map(Into::into),
 			output: v.output.map(Into::into),
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.into(),
 			parallel: v.parallel,
 			relation: v.relation,
 			version: v.version.map(From::from),

@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Formatter, Write};
 
-use crate::fmt::{Fmt, Pretty, is_pretty, pretty_indent};
-use crate::sql::Expr;
+use crate::fmt::{Pretty, is_pretty, pretty_indent, pretty_sequence_item};
+use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -28,7 +28,11 @@ impl Display for Block {
 			0 => f.write_str("{;}"),
 			1 => {
 				let v = &self.0[0];
-				write!(f, "{{ {v} }}")
+				if let Expr::Literal(Literal::RecordId(_)) = v {
+					write!(f, "{{ ({v}) }}")
+				} else {
+					write!(f, "{{ {v} }}")
+				}
 			}
 			l => {
 				f.write_char('{')?;
@@ -39,21 +43,34 @@ impl Display for Block {
 				}
 				let indent = pretty_indent();
 				if is_pretty() {
-					write!(
-						f,
-						"{}",
-						&Fmt::two_line_separated(
-							self.0.iter().map(|args| Fmt::new(args, |v, f| write!(f, "{};", v))),
-						)
-					)?;
+					for (idx, x) in self.0.iter().enumerate() {
+						if idx > 0 {
+							f.write_char('\n')?;
+							pretty_sequence_item();
+						}
+
+						if idx == 0
+							&& let Expr::Literal(Literal::RecordId(_)) = x
+						{
+							write!(f, "({});", x)?;
+						} else {
+							write!(f, "{};", x)?;
+						}
+					}
 				} else {
-					write!(
-						f,
-						"{}",
-						&Fmt::one_line_separated(
-							self.0.iter().map(|args| Fmt::new(args, |v, f| write!(f, "{};", v))),
-						)
-					)?;
+					for (idx, x) in self.0.iter().enumerate() {
+						if idx > 0 {
+							f.write_char('\n')?;
+						}
+
+						if idx == 0
+							&& let Expr::Literal(Literal::RecordId(_)) = x
+						{
+							write!(f, "({});", x)?;
+						} else {
+							write!(f, "{};", x)?;
+						}
+					}
 				}
 				drop(indent);
 				if l > 1 {

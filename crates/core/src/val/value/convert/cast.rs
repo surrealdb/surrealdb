@@ -702,6 +702,22 @@ impl Cast for crate::val::Table {
 	}
 }
 
+impl<T: Cast> Cast for Option<T> {
+	fn can_cast(v: &Value) -> bool {
+		if let Value::None = v {
+			return true;
+		}
+		T::can_cast(v)
+	}
+
+	fn cast(v: Value) -> Result<Self, CastError> {
+		match v {
+			Value::None => Ok(None),
+			x => T::cast(x).map(Some),
+		}
+	}
+}
+
 macro_rules! impl_direct {
 	($($name:ident => $inner:ty $(= $kind:ident)?),*$(,)?) => {
 		$(

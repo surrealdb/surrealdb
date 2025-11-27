@@ -14,6 +14,7 @@ use crate::val::duration::{
 	SECONDS_PER_DAY, SECONDS_PER_HOUR, SECONDS_PER_MINUTE, SECONDS_PER_WEEK, SECONDS_PER_YEAR,
 };
 
+#[derive(Debug)]
 pub enum Numeric {
 	Float(f64),
 	Integer(i64),
@@ -66,6 +67,7 @@ pub fn numeric_kind(lexer: &mut Lexer, start: Token) -> Result<NumericKind, Synt
 			NumberKind::Float => Ok(NumericKind::Float),
 			NumberKind::Decimal => Ok(NumericKind::Decimal),
 		},
+		TokenKind::NaN | TokenKind::Infinity => Ok(NumericKind::Float),
 		TokenKind::Digits => match lexer.reader.peek() {
 			Some(b'n' | b's' | b'm' | b'h' | b'y' | b'w' | b'u') => {
 				duration(lexer, start).map(NumericKind::Duration)
@@ -129,6 +131,7 @@ pub fn number_kind(lexer: &mut Lexer, start: Token) -> Result<NumberKind, Syntax
 		}
 		TokenKind::Digits => {}
 		TokenKind::Infinity => return Ok(NumberKind::Float),
+		TokenKind::NaN => return Ok(NumberKind::Float),
 		x => bail!("Unexpected start token for integer: {x}",@start.span),
 	}
 
@@ -174,9 +177,15 @@ pub fn number(lexer: &mut Lexer, start: Token) -> Result<Numeric, SyntaxError> {
 	let span = lexer.current_span();
 	let number_str = prepare_number_str(lexer.span_str(span));
 	match kind {
-		NumberKind::Integer => {
+		NumberKind::Integer => number_str
+			.parse()
+			.map(Numeric::Integer)
+			.map_err(|e| syntax_error!("Failed to parse number: {e}", @lexer.current_span())),
+		NumberKind::Float => {
 			// Number strings cannot be empty so checking the first byte is always valid.
-			if number_str.as_bytes()[0] == b'-' && number_str.as_bytes()[1] == b'I' {
+			if number_str.as_bytes()[0] == b'N' {
+				Ok(Numeric::Float(f64::NAN))
+			} else if number_str.as_bytes()[0] == b'-' && number_str.as_bytes()[1] == b'I' {
 				// No need to check the whole string, if it starts with '-I' it  has to be negative
 				// infinity
 				Ok(Numeric::Float(f64::NEG_INFINITY))
@@ -187,17 +196,11 @@ pub fn number(lexer: &mut Lexer, start: Token) -> Result<Numeric, SyntaxError> {
 				// infinity
 				Ok(Numeric::Float(f64::INFINITY))
 			} else {
-				number_str.parse().map(Numeric::Integer).map_err(
+				let number_str = number_str.trim_end_matches('f');
+				number_str.parse().map(Numeric::Float).map_err(
 					|e| syntax_error!("Failed to parse number: {e}", @lexer.current_span()),
 				)
 			}
-		}
-		NumberKind::Float => {
-			let number_str = number_str.trim_end_matches('f');
-			number_str
-				.parse()
-				.map(Numeric::Float)
-				.map_err(|e| syntax_error!("Failed to parse number: {e}", @lexer.current_span()))
 		}
 		NumberKind::Decimal => {
 			let number_str = number_str.trim_end_matches("dec");
@@ -258,18 +261,60 @@ where
 	str.parse().map_err(|e| syntax_error!("Invalid integer: {e}", @span))
 }
 
+pub trait Float: Sized {
+	const NAN: Self;
+	const NEG_INFINITY: Self;
+	const INFINITY: Self;
+
+	fn from_str(s: &str) -> Result<Self, ParseFloatError>;
+}
+
+impl Float for f64 {
+	const NAN: Self = f64::NAN;
+
+	const NEG_INFINITY: Self = f64::NEG_INFINITY;
+
+	const INFINITY: Self = f64::INFINITY;
+
+	fn from_str(s: &str) -> Result<Self, ParseFloatError> {
+		s.parse()
+	}
+}
+impl Float for f32 {
+	const NAN: Self = f32::NAN;
+
+	const NEG_INFINITY: Self = f32::NEG_INFINITY;
+
+	const INFINITY: Self = f32::INFINITY;
+
+	fn from_str(s: &str) -> Result<Self, ParseFloatError> {
+		s.parse()
+	}
+}
+
 /// Generic integer parsing method,
 /// works for all unsigned integers.
-pub fn float<I>(lexer: &mut Lexer, start: Token) -> Result<I, SyntaxError>
+pub fn float<F>(lexer: &mut Lexer, start: Token) -> Result<F, SyntaxError>
 where
-	I: FromStr<Err = ParseFloatError>,
+	F: Float,
 {
 	let offset = start.span.offset;
 	match start.kind {
-		t!("-") | t!("+") => {
+		t!("-") => {
+			if eat_infinity(lexer, offset)? {
+				return Ok(F::NEG_INFINITY);
+			}
+			eat_digits1(lexer, offset)?;
+		}
+		t!("+") => {
+			if eat_infinity(lexer, offset)? {
+				return Ok(F::INFINITY);
+			}
 			eat_digits1(lexer, offset)?;
 		}
 		TokenKind::Digits => {}
+		TokenKind::NaN => return Ok(F::NAN),
+		TokenKind::Infinity => return Ok(F::INFINITY),
 		x => bail!("Unexpected token {x}, expected floating point number",@start.span),
 	};
 
@@ -298,7 +343,7 @@ where
 	}
 
 	let str = prepare_number_str(lexer.span_str(number_span));
-	str.parse()
+	F::from_str(str.as_ref())
 		.map_err(|e| syntax_error!("Invalid floating point number: {e}", @lexer.current_span()))
 }
 
@@ -326,39 +371,39 @@ pub fn duration(lexer: &mut Lexer, start: Token) -> Result<Duration, SyntaxError
 			DurationSuffix::Second => Duration::from_secs(numeric_value),
 			DurationSuffix::Minute => {
 				let minutes = numeric_value.checked_mul(SECONDS_PER_MINUTE).ok_or_else(
-					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
-				)?;
+						|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
+					)?;
 				Duration::from_secs(minutes)
 			}
 			DurationSuffix::Hour => {
 				let hours = numeric_value.checked_mul(SECONDS_PER_HOUR).ok_or_else(
-					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
-				)?;
+						|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
+					)?;
 				Duration::from_secs(hours)
 			}
 			DurationSuffix::Day => {
 				let day = numeric_value.checked_mul(SECONDS_PER_DAY).ok_or_else(
-					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
-				)?;
+						|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
+					)?;
 				Duration::from_secs(day)
 			}
 			DurationSuffix::Week => {
 				let week = numeric_value.checked_mul(SECONDS_PER_WEEK).ok_or_else(
-					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
-				)?;
+						|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
+					)?;
 				Duration::from_secs(week)
 			}
 			DurationSuffix::Year => {
 				let year = numeric_value.checked_mul(SECONDS_PER_YEAR).ok_or_else(
-					|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
-				)?;
+						|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
+					)?;
 				Duration::from_secs(year)
 			}
 		};
 
 		duration = duration.checked_add(addition).ok_or_else(
-			|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
-		)?;
+				|| syntax_error!("Invalid duration, value overflowed maximum allowed value", @lexer.current_span()),
+			)?;
 
 		match lexer.reader.peek() {
 			Some(x) if x.is_ascii_digit() => {
@@ -450,20 +495,20 @@ fn eat_digits(lexer: &mut Lexer) {
 }
 
 fn eat_infinity(lexer: &mut Lexer, start: u32) -> Result<bool, SyntaxError> {
-	if !lexer.reader.eat(b'I') {
-		return Ok(false);
-	}
-
-	for b in b"nfinity" {
-		match lexer.reader.next() {
-			Some(x) if x == *b => {}
-			Some(x) => {
-				bail!("Invalid number token, expected `{}` found: {x}",*b as char, @lexer.span_since(start))
-			}
-			None => {
-				bail!("Unexpected end of file, expected a number token digit", @lexer.span_since(start));
+	if lexer.reader.eat(b'I') {
+		for b in b"nfinity" {
+			match lexer.reader.next() {
+				Some(x) if x == *b => {}
+				Some(x) => {
+					bail!("Invalid number token, expected `{}` found: {x}",*b as char, @lexer.span_since(start))
+				}
+				None => {
+					bail!("Unexpected end of file, expected a number token digit", @lexer.span_since(start));
+				}
 			}
 		}
+		Ok(true)
+	} else {
+		Ok(false)
 	}
-	Ok(true)
 }

@@ -9,10 +9,11 @@ impl Parser<'_> {
 	pub(super) fn glue_and_peek1(&mut self) -> ParseResult<Token> {
 		let token = self.peek();
 		match token.kind {
+			TokenKind::NaN | TokenKind::Infinity => return Ok(self.peek1()),
 			TokenKind::Glued(_) => return Ok(self.peek1()),
 			t!("+") | t!("-") => {
 				let peek1 = self.peek_whitespace1();
-				if !matches!(peek1.kind, TokenKind::Digits) {
+				if !matches!(peek1.kind, TokenKind::Digits | TokenKind::Infinity) {
 					return Ok(token);
 				}
 

@@ -1,10 +1,8 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::{
-	fmt::CoverStmts,
-	sql::{Expr, Literal},
-};
+use crate::fmt::CoverStmts;
+use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -12,7 +10,7 @@ pub struct DefineNamespaceStatement {
 	pub kind: DefineKind,
 	pub id: Option<u32>,
 	pub name: Expr,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl Default for DefineNamespaceStatement {
@@ -21,7 +19,7 @@ impl Default for DefineNamespaceStatement {
 			kind: DefineKind::Default,
 			id: None,
 			name: Expr::Literal(Literal::None),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -35,9 +33,7 @@ impl Display for DefineNamespaceStatement {
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " {}", CoverStmts(&self.name))?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", CoverStmts(v))?
-		}
+		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		Ok(())
 	}
 }
@@ -48,7 +44,7 @@ impl From<DefineNamespaceStatement> for crate::expr::statements::DefineNamespace
 			kind: v.kind.into(),
 			id: v.id,
 			name: v.name.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -60,7 +56,7 @@ impl From<crate::expr::statements::DefineNamespaceStatement> for DefineNamespace
 			kind: v.kind.into(),
 			id: v.id,
 			name: v.name.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }

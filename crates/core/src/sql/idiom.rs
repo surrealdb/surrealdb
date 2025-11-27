@@ -3,7 +3,7 @@ use std::ops::Deref;
 
 use crate::expr::idiom::Idioms as ExprIdioms;
 use crate::fmt::{EscapeIdent, Fmt};
-use crate::sql::{Expr, Part};
+use crate::sql::Part;
 
 // TODO: Remove unnessacry newtype.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -80,17 +80,13 @@ impl Display for Idiom {
 		let mut iter = self.0.iter();
 		match iter.next() {
 			Some(Part::Field(v)) => EscapeIdent(v).fmt(f)?,
-			Some(Part::Start(x)) => match x {
-				Expr::Block(_)
-				| Expr::Literal(_)
-				| Expr::Table(_)
-				| Expr::Mock(_)
-				| Expr::Constant(_)
-				| Expr::Param(_) => x.fmt(f)?,
-				_ => {
+			Some(Part::Start(x)) => {
+				if x.needs_parentheses() {
 					write!(f, "({x})")?;
+				} else {
+					write!(f, "{x}")?;
 				}
-			},
+			}
 			Some(x) => x.fmt(f)?,
 			None => {}
 		};

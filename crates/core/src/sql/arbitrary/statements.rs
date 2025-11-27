@@ -34,13 +34,9 @@ impl<'a> Arbitrary<'a> for DefineAccessStatement {
 		let authenticate = u.arbitrary()?;
 		let duration = crate::sql::access::AccessDuration {
 			grant: u.arbitrary()?,
-			token: Some(u.arbitrary()?),
+			token: u.arbitrary()?,
 			session: u.arbitrary()?,
 		};
-		// Work around badly designed code where value `NONE` can conflict with a `NONE` clause.
-		if matches!(duration.token, Some(Expr::Literal(Literal::None))) {
-			return Err(arbitrary::Error::IncorrectFormat);
-		}
 		let comment = u.arbitrary()?;
 
 		let base = if matches!(access_type, AccessType::Record(_)) {
@@ -67,7 +63,6 @@ impl<'a> arbitrary::Arbitrary<'a> for DefineUserStatement {
 		let name = u.arbitrary()?;
 		let base = u.arbitrary()?;
 		let pass_type = u.arbitrary()?;
-		let session_duration = u.arbitrary()?;
 		let comment = u.arbitrary()?;
 
 		let mut roles = vec![match u.int_in_range(0u8..=2)? {
@@ -91,8 +86,8 @@ impl<'a> arbitrary::Arbitrary<'a> for DefineUserStatement {
 			name,
 			base,
 			pass_type,
-			token_duration: Some(u.arbitrary()?),
-			session_duration,
+			token_duration: u.arbitrary()?,
+			session_duration: u.arbitrary()?,
 			roles,
 			comment,
 		})

@@ -940,9 +940,9 @@ mod tests {
 
 	use super::*;
 	use crate::iam::token::{Audience, HEADER};
-	use crate::sql::Ast;
 	use crate::sql::statements::define::DefineKind;
 	use crate::sql::statements::define::user::PassType;
+	use crate::sql::{Ast, Literal};
 
 	struct TestLevel {
 		level: &'static str,
@@ -1101,9 +1101,9 @@ mod tests {
 						.to_string(),
 				),
 				roles: vec!["nonexistent".to_owned()],
-				token_duration: None,
-				session_duration: None,
-				comment: None,
+				token_duration: Expr::Literal(Literal::None),
+				session_duration: Expr::Literal(Literal::None),
+				comment: Expr::Literal(Literal::None),
 			};
 
 			let ast = Ast {

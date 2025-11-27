@@ -55,7 +55,7 @@ pub(crate) struct DefineFieldStatement {
 	pub computed: Option<Expr>,
 	pub default: DefineDefault,
 	pub permissions: Permissions,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub reference: Option<Reference>,
 }
 
@@ -73,7 +73,7 @@ impl Default for DefineFieldStatement {
 			computed: None,
 			default: DefineDefault::None,
 			permissions: Permissions::default(),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 			reference: None,
 		}
 	}
@@ -118,8 +118,8 @@ impl Display for DefineFieldStatement {
 		if let Some(ref v) = self.reference {
 			write!(f, " REFERENCE {v}")?
 		}
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", CoverStmts(comment))?
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
@@ -151,7 +151,7 @@ impl From<DefineFieldStatement> for crate::expr::statements::DefineFieldStatemen
 			computed: v.computed.map(Into::into),
 			default: v.default.into(),
 			permissions: v.permissions.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			reference: v.reference.map(Into::into),
 		}
 	}
@@ -172,7 +172,7 @@ impl From<crate::expr::statements::DefineFieldStatement> for DefineFieldStatemen
 			computed: v.computed.map(Into::into),
 			default: v.default.into(),
 			permissions: v.permissions.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			reference: v.reference.map(Into::into),
 		}
 	}

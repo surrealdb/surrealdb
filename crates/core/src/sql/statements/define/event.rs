@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use super::DefineKind;
 use crate::fmt::{CoverStmts, Fmt};
-use crate::sql::Expr;
+use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -13,7 +13,7 @@ pub(crate) struct DefineEventStatement {
 	pub when: Expr,
 	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
 	pub then: Vec<Expr>,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl Display for DefineEventStatement {
@@ -32,8 +32,8 @@ impl Display for DefineEventStatement {
 			CoverStmts(&self.when),
 			Fmt::comma_separated(&self.then)
 		)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", CoverStmts(v))?
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		}
 		Ok(())
 	}
@@ -47,7 +47,7 @@ impl From<DefineEventStatement> for crate::expr::statements::DefineEventStatemen
 			target_table: v.target_table.into(),
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -61,7 +61,7 @@ impl From<crate::expr::statements::DefineEventStatement> for DefineEventStatemen
 			target_table: v.target_table.into(),
 			when: v.when.into(),
 			then: v.then.into_iter().map(From::from).collect(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }

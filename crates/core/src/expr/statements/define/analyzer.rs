@@ -14,7 +14,8 @@ use crate::err::Error;
 use crate::expr::filter::Filter;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::tokenizer::Tokenizer;
-use crate::expr::{Base, Expr, Idiom, Literal, Value};
+use crate::expr::{Base, Expr, FlowResultExt, Idiom, Literal, Value};
+use crate::fmt::CoverStmts;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -24,7 +25,7 @@ pub(crate) struct DefineAnalyzerStatement {
 	pub function: Option<String>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl Default for DefineAnalyzerStatement {
@@ -35,7 +36,7 @@ impl Default for DefineAnalyzerStatement {
 			function: None,
 			tokenizers: None,
 			filters: None,
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -48,12 +49,18 @@ impl DefineAnalyzerStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<catalog::AnalyzerDefinition> {
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
+
 		Ok(catalog::AnalyzerDefinition {
 			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "analyzer name").await?,
 			function: self.function.clone(),
 			tokenizers: self.tokenizers.clone(),
 			filters: self.filters.clone(),
-			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			comment,
 		})
 	}
 
@@ -64,7 +71,11 @@ impl DefineAnalyzerStatement {
 			function: def.function.clone(),
 			tokenizers: def.tokenizers.clone(),
 			filters: def.filters.clone(),
-			comment: def.comment.as_ref().map(|x| Expr::Literal(Literal::String(x.clone()))),
+			comment: def
+				.comment
+				.as_ref()
+				.map(|x| Expr::Literal(Literal::String(x.clone())))
+				.unwrap_or(Expr::Literal(Literal::None)),
 		}
 	}
 
@@ -127,9 +138,7 @@ impl Display for DefineAnalyzerStatement {
 			let tokens: Vec<String> = v.iter().map(|f| f.to_string()).collect();
 			write!(f, " FILTERS {}", tokens.join(","))?;
 		}
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
-		}
+		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		Ok(())
 	}
 }

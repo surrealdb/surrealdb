@@ -235,9 +235,7 @@ impl Parser<'_> {
 			..Default::default()
 		};
 
-		if let Some(to) = self.try_parse_timeout(stk).await? {
-			res.timeout = Some(to);
-		}
+		res.timeout = self.try_parse_timeout(stk).await?;
 
 		Ok(res)
 	}

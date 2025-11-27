@@ -17,7 +17,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::reference::Reference;
-use crate::expr::{Base, Expr, Kind, KindLiteral, Literal, Part, RecordIdKeyLit};
+use crate::expr::{Base, Expr, FlowResultExt, Kind, KindLiteral, Literal, Part, RecordIdKeyLit};
 use crate::fmt::{CoverStmts, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
@@ -44,7 +44,7 @@ pub(crate) struct DefineFieldStatement {
 	pub computed: Option<Expr>,
 	pub default: DefineDefault,
 	pub permissions: Permissions,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub reference: Option<Reference>,
 }
 
@@ -62,7 +62,7 @@ impl Default for DefineFieldStatement {
 			computed: None,
 			default: DefineDefault::None,
 			permissions: Permissions::default(),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 			reference: None,
 		}
 	}
@@ -84,6 +84,12 @@ impl DefineFieldStatement {
 			}
 		}
 
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
+
 		Ok(catalog::FieldDefinition {
 			name: expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?,
 			what: expr_to_ident(stk, ctx, opt, doc, &self.what, "table name").await?,
@@ -101,7 +107,7 @@ impl DefineFieldStatement {
 			select_permission: convert_permission(&self.permissions.select),
 			create_permission: convert_permission(&self.permissions.create),
 			update_permission: convert_permission(&self.permissions.update),
-			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			comment,
 			reference: self.reference.clone(),
 		})
 	}
@@ -544,9 +550,7 @@ impl Display for DefineFieldStatement {
 		if let Some(ref v) = self.reference {
 			write!(f, " REFERENCE {v}")?
 		}
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", CoverStmts(comment))?
-		}
+		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
 		} else {

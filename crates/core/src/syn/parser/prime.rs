@@ -508,7 +508,12 @@ impl Parser<'_> {
 	) -> ParseResult<Expr> {
 		let peek = self.peek();
 		let res = match peek.kind {
-			TokenKind::Digits | TokenKind::Glued(Glued::Number) | t!("+") | t!("-") => {
+			TokenKind::NaN
+			| TokenKind::Infinity
+			| TokenKind::Digits
+			| TokenKind::Glued(Glued::Number)
+			| t!("+")
+			| t!("-") => {
 				if self.glue_and_peek1()?.kind == t!(",") {
 					let number_span = self.peek().span;
 					let number = self.next_token_value::<Numeric>()?;
@@ -517,10 +522,6 @@ impl Parser<'_> {
 
 					let x = match number {
 						Numeric::Duration(_) | Numeric::Decimal(_) => {
-							bail!("Unexpected token, expected a non-decimal, non-NaN, number",
-								@number_span => "Coordinate numbers can't be NaN or a decimal");
-						}
-						Numeric::Float(x) if x.is_nan() => {
 							bail!("Unexpected token, expected a non-decimal, non-NaN, number",
 								@number_span => "Coordinate numbers can't be NaN or a decimal");
 						}

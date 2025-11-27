@@ -18,8 +18,8 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::user::UserDuration;
-use crate::expr::{Base, Expr, Idiom, Literal};
-use crate::fmt::{Fmt, QuoteStr};
+use crate::expr::{Base, Expr, FlowResultExt, Idiom, Literal};
+use crate::fmt::{CoverStmts, Fmt, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Duration, Value};
 
@@ -32,7 +32,7 @@ pub(crate) struct DefineUserStatement {
 	pub code: String,
 	pub roles: Vec<String>,
 	pub duration: UserDuration,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl Default for DefineUserStatement {
@@ -45,7 +45,7 @@ impl Default for DefineUserStatement {
 			code: String::new(),
 			roles: vec![],
 			duration: UserDuration::default(),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -67,7 +67,7 @@ impl DefineUserStatement {
 				.collect::<String>(),
 			roles: vec![role],
 			duration: UserDuration::default(),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 
@@ -78,14 +78,33 @@ impl DefineUserStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<catalog::UserDefinition> {
+		let token_duration = stk
+			.run(|stk| self.duration.token.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to::<Option<Duration>>()?
+			.map(|x| x.0);
+		let session_duration = stk
+			.run(|stk| self.duration.token.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to::<Option<Duration>>()?
+			.map(|x| x.0);
+
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
+
 		Ok(UserDefinition {
 			name: expr_to_ident(stk, ctx, opt, doc, &self.name, "user name").await?,
 			hash: self.hash.clone(),
 			code: self.code.clone(),
 			roles: self.roles.clone(),
-			token_duration: map_opt!(x as &self.duration.token => compute_to!(stk, ctx, opt, doc, x => Duration).0),
-			session_duration: map_opt!(x as &self.duration.session => compute_to!(stk, ctx, opt, doc, x => Duration).0),
-			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			token_duration,
+			session_duration,
+			comment,
 			base: self.base.into(),
 		})
 	}
@@ -101,12 +120,18 @@ impl DefineUserStatement {
 			duration: UserDuration {
 				token: def
 					.token_duration
-					.map(|x| Expr::Literal(Literal::Duration(val::Duration(x)))),
+					.map(|x| Expr::Literal(Literal::Duration(val::Duration(x))))
+					.unwrap_or(Expr::Literal(Literal::None)),
 				session: def
 					.session_duration
-					.map(|x| Expr::Literal(Literal::Duration(val::Duration(x)))),
+					.map(|x| Expr::Literal(Literal::Duration(val::Duration(x))))
+					.unwrap_or(Expr::Literal(Literal::None)),
 			},
-			comment: def.comment.as_ref().map(|x| Expr::Idiom(Idiom::field(x.clone()))),
+			comment: def
+				.comment
+				.as_ref()
+				.map(|x| Expr::Idiom(Idiom::field(x.clone())))
+				.unwrap_or(Expr::Literal(Literal::None)),
 		}
 	}
 
@@ -236,23 +261,13 @@ impl Display for DefineUserStatement {
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible
 		// None values need to be printed, as they are different from the default values
-		write!(f, " DURATION")?;
-		write!(f, " FOR TOKEN ",)?;
-		match self.duration.token {
-			Some(Expr::Literal(Literal::None)) => f.write_str("(NONE)")?,
-			Some(ref dur) => dur.fmt(f)?,
-			None => f.write_str("NONE")?,
-		}
-		write!(f, ", FOR SESSION ",)?;
-		match self.duration.session {
-			Some(Expr::Literal(Literal::None)) => f.write_str("(NONE)")?,
-			Some(ref dur) => dur.fmt(f)?,
-			None => f.write_str("NONE")?,
-		}
-
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?
-		}
+		write!(
+			f,
+			" DURATION FOR TOKEN {} , FOR SESSION {}",
+			CoverStmts(&self.duration.token),
+			CoverStmts(&self.duration.session)
+		)?;
+		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		Ok(())
 	}
 }

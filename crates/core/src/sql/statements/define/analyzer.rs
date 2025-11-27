@@ -13,7 +13,7 @@ pub(crate) struct DefineAnalyzerStatement {
 	pub function: Option<String>,
 	pub tokenizers: Option<Vec<Tokenizer>>,
 	pub filters: Option<Vec<Filter>>,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl Default for DefineAnalyzerStatement {
@@ -24,7 +24,7 @@ impl Default for DefineAnalyzerStatement {
 			function: None,
 			tokenizers: None,
 			filters: None,
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -52,9 +52,7 @@ impl Display for DefineAnalyzerStatement {
 		if let Some(v) = &self.filters {
 			write!(f, " FILTERS {}", Fmt::comma_separated(v.iter()))?;
 		}
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", CoverStmts(v))?
-		}
+		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		Ok(())
 	}
 }
@@ -67,7 +65,7 @@ impl From<DefineAnalyzerStatement> for crate::expr::statements::DefineAnalyzerSt
 			function: v.function,
 			tokenizers: v.tokenizers.map(|v| v.into_iter().map(Into::into).collect()),
 			filters: v.filters.map(|v| v.into_iter().map(Into::into).collect()),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -80,7 +78,7 @@ impl From<crate::expr::statements::DefineAnalyzerStatement> for DefineAnalyzerSt
 			function: v.function,
 			tokenizers: v.tokenizers.map(|v| v.into_iter().map(Into::into).collect()),
 			filters: v.filters.map(|v| v.into_iter().map(Into::into).collect()),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }

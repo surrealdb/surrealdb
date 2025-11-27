@@ -322,7 +322,14 @@ impl Parser<'_> {
 		} else {
 			NearestNeighbor::KTree(amount)
 		};
-		self.expect_closing_delimiter(t!("|>"), token.span)?;
+		if !self.eat(t!("|")) || !self.eat_whitespace(t!(">")) {
+			bail!("Unexpected token `{}` expected delimiter `|>`",
+				self.peek().kind,
+				@self.recent_span(),
+				@token.span=> "expected this delimiter to close"
+			);
+		}
+
 		Ok(res)
 	}
 
@@ -333,29 +340,25 @@ impl Parser<'_> {
 				| BinaryOperator::NotEqual
 				| BinaryOperator::AllEqual
 				| BinaryOperator::AnyEqual
+				| BinaryOperator::LessThan
+				| BinaryOperator::LessThanEqual
+				| BinaryOperator::MoreThan
+				| BinaryOperator::MoreThanEqual
+				| BinaryOperator::Matches(_)
 				| BinaryOperator::Contain
 				| BinaryOperator::NotContain
-				| BinaryOperator::NotInside
 				| BinaryOperator::ContainAll
+				| BinaryOperator::ContainAny
 				| BinaryOperator::ContainNone
+				| BinaryOperator::Inside
+				| BinaryOperator::NotInside
 				| BinaryOperator::AllInside
 				| BinaryOperator::AnyInside
 				| BinaryOperator::NoneInside
 				| BinaryOperator::Outside
 				| BinaryOperator::Intersects
-				| BinaryOperator::Inside
 				| BinaryOperator::NearestNeighbor(_)
 		)
-	}
-
-	fn expr_is_relation(expr: &Expr) -> bool {
-		match expr {
-			Expr::Binary {
-				op,
-				..
-			} => Self::operator_is_relation(op),
-			_ => false,
-		}
 	}
 
 	fn expr_is_range(expr: &Expr) -> bool {
@@ -474,13 +477,12 @@ impl Parser<'_> {
 			// should be unreachable as we previously check if the token was a prefix op.
 			x => unreachable!("found non-operator token {x:?}"),
 		};
-		let before = self.recent_span();
 		let rhs_covered = self.peek().kind == t!("(");
 		let rhs = stk.run(|ctx| self.pratt_parse_expr(ctx, min_bp)).await?;
 
 		let is_relation = Self::operator_is_relation(&operator);
-		if !lhs_prime && is_relation && Self::expr_is_relation(&lhs) {
-			let span = before.covers(self.recent_span());
+		if !lhs_prime && is_relation && BindingPower::for_expr(&lhs) == min_bp {
+			let span = token.span.covers(self.recent_span());
 			bail!("Chained relational operators have no defined associativity.",
 				@span => "Use parens, '()', to specify which operator must be evaluated first")
 		}
@@ -493,19 +495,19 @@ impl Parser<'_> {
 				| BinaryOperator::RangeInclusive
 		);
 		if !lhs_prime && is_range && Self::expr_is_range(&lhs) {
-			let span = before.covers(self.recent_span());
+			let span = token.span.covers(self.recent_span());
 			bail!("Chained range operators has no specified associativity",
 				@span => "use parens, '()', to specify which operator must be evaluated first")
 		}
 
-		if !rhs_covered && is_relation && Self::expr_is_relation(&rhs) {
-			let span = before.covers(self.recent_span());
+		if !rhs_covered && is_relation && BindingPower::for_expr(&rhs) == min_bp {
+			let span = token.span.covers(self.recent_span());
 			bail!("Chained relational operators have no defined associativity.",
 				@span => "Use parens, '()', to specify which operator must be evaluated first")
 		}
 
 		if !rhs_covered && is_range && Self::expr_is_range(&rhs) {
-			let span = before.covers(self.recent_span());
+			let span = token.span.covers(self.recent_span());
 			bail!("Chained range operators have no defined associativity.",
 				@span => "Use parens, '()', to specify which operator must be evaluated first")
 		}

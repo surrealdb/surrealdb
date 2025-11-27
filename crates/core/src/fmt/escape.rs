@@ -6,7 +6,8 @@ use std::str::Chars;
 #[derive(Clone)]
 pub struct Escape<'a> {
 	chars: Chars<'a>,
-	pending: Option<char>,
+	pending_buffer: [char; 4],
+	pending_len: u8,
 	escape_char: char,
 }
 
@@ -14,7 +15,8 @@ impl<'a> Escape<'a> {
 	fn escape_str(s: &'a str, escape_char: char) -> Self {
 		Escape {
 			chars: s.chars(),
-			pending: None,
+			pending_buffer: ['\0'; 4],
+			pending_len: 0u8,
 			escape_char,
 		}
 	}
@@ -24,12 +26,23 @@ impl Iterator for Escape<'_> {
 	type Item = char;
 
 	fn next(&mut self) -> Option<char> {
-		if let Some(x) = self.pending.take() {
-			return Some(x);
+		if self.pending_len > 0 {
+			self.pending_len -= 1;
+			return Some(self.pending_buffer[self.pending_len as usize]);
 		}
 		let next = self.chars.next()?;
 		if next == self.escape_char || next == '\\' {
-			self.pending = Some(next);
+			self.pending_buffer[0] = self.escape_char;
+			self.pending_len = 1;
+			return Some('\\');
+		}
+		// Always escape backspace
+		if next == '\u{8}' {
+			self.pending_buffer[3] = 'u';
+			self.pending_buffer[2] = '{';
+			self.pending_buffer[1] = '8';
+			self.pending_buffer[0] = '}';
+			self.pending_len = 4;
 			return Some('\\');
 		}
 		Some(next)
@@ -127,12 +140,13 @@ impl fmt::Display for EscapeRidKey<'_> {
 			|| s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
 			|| !s.contains(|x: char| !x.is_ascii_digit() && x != '_')
 		{
-			return match *crate::cnf::ACCESSIBLE_OUTPUT {
-				true => f.write_fmt(format_args!("`{}`", Escape::escape_str(s, '`'))),
-				false => f.write_fmt(format_args!("⟨{}⟩", Escape::escape_str(s, '⟩'))),
-			};
+			if *crate::cnf::ACCESSIBLE_OUTPUT {
+				f.write_fmt(format_args!("`{}`", Escape::escape_str(s, '`')))
+			} else {
+				f.write_fmt(format_args!("⟨{}⟩", Escape::escape_str(s, '⟩')))
+			}
+		} else {
+			f.write_str(s)
 		}
-
-		f.write_str(s)
 	}
 }

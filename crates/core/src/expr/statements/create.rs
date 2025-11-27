@@ -7,12 +7,12 @@ use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout};
+use crate::expr::{Data, Expr, FlowResultExt as _, Literal, Output};
 use crate::fmt::{CoverStmts, Fmt};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::{Datetime, Value};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct CreateStatement {
 	// A keyword modifier indicating if we are expecting a single result or several
 	pub only: bool,
@@ -23,11 +23,25 @@ pub(crate) struct CreateStatement {
 	//  What the result of the statement should resemble (i.e. Diff or no result etc).
 	pub(crate) output: Option<Output>,
 	// The timeout for the statement
-	pub timeout: Option<Timeout>,
+	pub timeout: Expr,
 	// If the statement should be run in parallel
 	pub parallel: bool,
 	// Version as nanosecond timestamp passed down to Datastore
 	pub(crate) version: Option<Expr>,
+}
+
+impl Default for CreateStatement {
+	fn default() -> Self {
+		Self {
+			only: Default::default(),
+			what: Default::default(),
+			data: Default::default(),
+			output: Default::default(),
+			timeout: Expr::Literal(Literal::None),
+			parallel: Default::default(),
+			version: Default::default(),
+		}
+	}
 }
 
 impl CreateStatement {
@@ -128,8 +142,8 @@ impl fmt::Display for CreateStatement {
 		if let Some(ref v) = self.version {
 			write!(f, " VERSION {v}")?
 		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
 		}
 		if self.parallel {
 			f.write_str(" PARALLEL")?

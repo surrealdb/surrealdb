@@ -1,10 +1,8 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::{
-	fmt::CoverStmts,
-	sql::{Expr, Literal, Permission},
-};
+use crate::fmt::CoverStmts;
+use crate::sql::{Expr, Literal, Permission};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -14,7 +12,7 @@ pub(crate) struct DefineBucketStatement {
 	pub backend: Option<Expr>,
 	pub permissions: Permission,
 	pub readonly: bool,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl Default for DefineBucketStatement {
@@ -25,7 +23,7 @@ impl Default for DefineBucketStatement {
 			backend: None,
 			permissions: Permission::default(),
 			readonly: false,
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -50,9 +48,7 @@ impl Display for DefineBucketStatement {
 
 		write!(f, " PERMISSIONS {}", self.permissions)?;
 
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", CoverStmts(comment))?;
-		}
+		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 
 		Ok(())
 	}
@@ -66,7 +62,7 @@ impl From<DefineBucketStatement> for crate::expr::statements::define::DefineBuck
 			backend: v.backend.map(Into::into),
 			permissions: v.permissions.into(),
 			readonly: v.readonly,
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -79,7 +75,7 @@ impl From<crate::expr::statements::define::DefineBucketStatement> for DefineBuck
 			backend: v.backend.map(Into::into),
 			permissions: v.permissions.into(),
 			readonly: v.readonly,
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }

@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 use super::DefineKind;
 use crate::fmt::CoverStmts;
 use crate::sql::access::AccessDuration;
-use crate::sql::{AccessType, Base, Expr, Literal};
+use crate::sql::{AccessType, Base, Expr};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DefineAccessStatement {
@@ -13,7 +13,7 @@ pub(crate) struct DefineAccessStatement {
 	pub access_type: AccessType,
 	pub authenticate: Option<Expr>,
 	pub duration: AccessDuration,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl Display for DefineAccessStatement {
@@ -39,35 +39,14 @@ impl Display for DefineAccessStatement {
 		// None values need to be printed, as they are different from the default values
 		write!(f, " DURATION")?;
 		if self.access_type.can_issue_grants() {
-			write!(
-				f,
-				" FOR GRANT {},",
-				match self.duration.grant {
-					Some(ref dur) => format!("{}", dur),
-					None => "NONE".to_string(),
-				}
-			)?;
+			write!(f, " FOR GRANT {},", CoverStmts(&self.duration.grant))?;
 		}
 		if self.access_type.can_issue_tokens() {
-			f.write_str(" FOR TOKEN ")?;
-
-			match self.duration.token {
-				Some(Expr::Literal(Literal::None)) => f.write_str("(NONE)")?,
-				Some(ref dur) => write!(f, "{}", dur)?,
-				None => f.write_str("NONE")?,
-			}
-			f.write_str(",")?;
+			write!(f, " FOR TOKEN {},", CoverStmts(&self.duration.token))?;
 		}
 
-		f.write_str(" FOR SESSION ")?;
-		match self.duration.session {
-			Some(Expr::Literal(Literal::None)) => f.write_str("(NONE)")?,
-			Some(ref dur) => write!(f, "{}", dur)?,
-			None => f.write_str("NONE")?,
-		}
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", CoverStmts(v))?
-		}
+		write!(f, " FOR SESSION {}", CoverStmts(&self.duration.session))?;
+		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		Ok(())
 	}
 }
@@ -81,7 +60,7 @@ impl From<DefineAccessStatement> for crate::expr::statements::DefineAccessStatem
 			access_type: v.access_type.into(),
 			authenticate: v.authenticate.map(Into::into),
 			duration: v.duration.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -95,7 +74,7 @@ impl From<crate::expr::statements::DefineAccessStatement> for DefineAccessStatem
 			access_type: v.access_type.into(),
 			authenticate: v.authenticate.map(Into::into),
 			duration: v.duration.into(),
-			comment: v.comment.map(Into::into),
+			comment: v.comment.into(),
 		}
 	}
 }

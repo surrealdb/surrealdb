@@ -30,8 +30,9 @@ use crate::expr::statements::select::SelectStatement;
 use crate::expr::statements::show::ShowStatement;
 use crate::expr::statements::update::UpdateStatement;
 use crate::expr::statements::upsert::UpsertStatement;
-use crate::expr::{Explain, Idiom, Timeout, With};
+use crate::expr::{Explain, Expr, FlowResultExt, Idiom, With};
 use crate::idx::planner::QueryPlanner;
+use crate::val::Duration;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Statement<'a> {
@@ -483,17 +484,17 @@ impl Statement<'_> {
 		}
 	}
 
-	pub(crate) fn timeout(&self) -> Option<&Timeout> {
+	pub(crate) fn timeout(&self) -> Option<&Expr> {
 		match self {
-			Statement::Create(s) => s.timeout.as_ref(),
-			Statement::Delete(s) => s.timeout.as_ref(),
-			Statement::Insert(s) => s.timeout.as_ref(),
+			Statement::Create(s) => Some(&s.timeout),
+			Statement::Delete(s) => Some(&s.timeout),
+			Statement::Insert(s) => Some(&s.timeout),
 			Statement::Select {
 				stmt,
 				..
-			} => stmt.timeout.as_ref(),
-			Statement::Update(s) => s.timeout.as_ref(),
-			Statement::Upsert(s) => s.timeout.as_ref(),
+			} => Some(&stmt.timeout),
+			Statement::Update(s) => Some(&s.timeout),
+			Statement::Upsert(s) => Some(&s.timeout),
 			_ => None,
 		}
 	}
@@ -505,9 +506,16 @@ impl Statement<'_> {
 		doc: Option<&CursorDoc>,
 	) -> Result<Cow<'a, Context>> {
 		if let Some(t) = self.timeout() {
-			let x = t.compute(stk, ctx, opt, doc).await?.0;
+			let Some(x) = stk
+				.run(|stk| t.compute(stk, ctx, opt, doc))
+				.await
+				.catch_return()?
+				.cast_to::<Option<Duration>>()?
+			else {
+				return Ok(Cow::Borrowed(ctx));
+			};
 			let mut ctx = MutableContext::new(ctx);
-			ctx.add_timeout(x)?;
+			ctx.add_timeout(x.0)?;
 			Ok(Cow::Owned(ctx.freeze()))
 		} else {
 			Ok(Cow::Borrowed(ctx))

@@ -6,7 +6,7 @@ use reblessive::tree::Stk;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Expr, Literal};
+use crate::expr::{Expr, FlowResultExt, Literal};
 use crate::val::Duration;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -14,7 +14,7 @@ pub(crate) struct Timeout(pub(crate) Expr);
 
 impl Default for Timeout {
 	fn default() -> Self {
-		Self(Expr::Literal(Literal::Duration(Duration::default())))
+		Self(Expr::Literal(Literal::None))
 	}
 }
 
@@ -25,8 +25,8 @@ impl Timeout {
 		ctx: &Context,
 		opt: &Options,
 		doc: Option<&CursorDoc>,
-	) -> Result<Duration> {
-		Ok(compute_to!(stk, ctx, opt, doc, self.0 => Duration))
+	) -> Result<Option<Duration>> {
+		Ok(stk.run(|stk| self.0.compute(stk, ctx, opt, doc)).await.catch_return()?.cast_to()?)
 	}
 }
 

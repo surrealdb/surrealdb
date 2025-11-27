@@ -4,7 +4,7 @@ use std::str;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Script(pub String);
+pub struct Script(#[cfg_attr(feature = "arbitrary", arbitrary(default))] pub String);
 
 impl From<String> for Script {
 	fn from(s: String) -> Self {

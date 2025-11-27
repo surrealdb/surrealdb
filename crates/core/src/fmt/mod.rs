@@ -57,11 +57,6 @@ impl<I: IntoIterator<Item = T>, T: Display> Fmt<I, fn(I, &mut Formatter) -> fmt:
 	pub(crate) fn one_line_separated(into_iter: I) -> Self {
 		Self::new(into_iter, fmt_one_line_separated)
 	}
-
-	/// Formats values with a new line separating them.
-	pub(crate) fn two_line_separated(into_iter: I) -> Self {
-		Self::new(into_iter, fmt_two_line_separated)
-	}
 }
 
 fn fmt_comma_separated<T: Display, I: IntoIterator<Item = T>>(
@@ -117,25 +112,6 @@ fn fmt_one_line_separated<T: Display, I: IntoIterator<Item = T>>(
 			if is_pretty() {
 				pretty_sequence_item();
 			} else {
-				f.write_char('\n')?;
-			}
-		}
-		Display::fmt(&v, f)?;
-	}
-	Ok(())
-}
-
-fn fmt_two_line_separated<T: Display, I: IntoIterator<Item = T>>(
-	into_iter: I,
-	f: &mut Formatter,
-) -> fmt::Result {
-	for (i, v) in into_iter.into_iter().enumerate() {
-		if i > 0 {
-			if is_pretty() {
-				f.write_char('\n')?;
-				pretty_sequence_item();
-			} else {
-				f.write_char('\n')?;
 				f.write_char('\n')?;
 			}
 		}

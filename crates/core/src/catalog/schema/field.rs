@@ -6,7 +6,7 @@ use crate::expr::reference::Reference;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Idiom, Kind};
 use crate::kvs::impl_kv_value_revisioned;
-use crate::sql::DefineFieldStatement;
+use crate::sql::{self, DefineFieldStatement};
 use crate::val::Value;
 
 #[revisioned(revision = 1)]
@@ -46,9 +46,9 @@ impl_kv_value_revisioned!(FieldDefinition);
 impl FieldDefinition {
 	pub fn to_sql_definition(&self) -> DefineFieldStatement {
 		DefineFieldStatement {
-			kind: crate::sql::statements::define::DefineKind::Default,
+			kind: sql::statements::define::DefineKind::Default,
 			name: Expr::Idiom(self.name.clone()).into(),
-			what: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.what.clone())),
+			what: sql::Expr::Idiom(sql::Idiom::field(self.what.clone())),
 			field_kind: self.field_kind.clone().map(|x| x.into()),
 			flexible: self.flexible,
 			readonly: self.readonly,
@@ -56,24 +56,25 @@ impl FieldDefinition {
 			assert: self.assert.clone().map(|x| x.into()),
 			computed: self.computed.clone().map(|x| x.into()),
 			default: match &self.default {
-				DefineDefault::None => crate::sql::statements::define::DefineDefault::None,
+				DefineDefault::None => sql::statements::define::DefineDefault::None,
 				DefineDefault::Set(x) => {
-					crate::sql::statements::define::DefineDefault::Set(x.clone().into())
+					sql::statements::define::DefineDefault::Set(x.clone().into())
 				}
 				DefineDefault::Always(x) => {
-					crate::sql::statements::define::DefineDefault::Always(x.clone().into())
+					sql::statements::define::DefineDefault::Always(x.clone().into())
 				}
 			},
-			permissions: crate::sql::Permissions {
+			permissions: sql::Permissions {
 				select: self.select_permission.to_sql_definition(),
 				create: self.create_permission.to_sql_definition(),
 				update: self.update_permission.to_sql_definition(),
-				delete: crate::sql::Permission::Full,
+				delete: sql::Permission::Full,
 			},
 			comment: self
 				.comment
 				.clone()
-				.map(|x| crate::sql::Expr::Literal(crate::sql::Literal::String(x))),
+				.map(|x| sql::Expr::Literal(sql::Literal::String(x)))
+				.unwrap_or(sql::Expr::Literal(sql::Literal::None)),
 			reference: self.reference.clone().map(|x| x.into()),
 		}
 	}
