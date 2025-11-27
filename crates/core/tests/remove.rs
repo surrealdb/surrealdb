@@ -258,7 +258,7 @@ async fn should_not_error_when_remove_analyzer_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE ANALYZER IF EXISTS foo;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -278,7 +278,7 @@ async fn should_not_error_when_remove_database_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE DATABASE IF EXISTS foo;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -298,7 +298,7 @@ async fn should_not_error_when_remove_event_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE EVENT IF EXISTS foo ON bar;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -318,7 +318,7 @@ async fn should_not_error_when_remove_field_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE FIELD IF EXISTS foo ON bar;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -338,7 +338,7 @@ async fn should_not_error_when_remove_function_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE FUNCTION IF EXISTS fn::foo;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -358,7 +358,7 @@ async fn should_not_error_when_remove_index_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE INDEX IF EXISTS foo ON bar;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -378,7 +378,7 @@ async fn should_not_error_when_remove_namespace_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE NAMESPACE IF EXISTS foo;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -418,7 +418,7 @@ async fn should_not_error_when_remove_access_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE ACCESS IF EXISTS foo ON DB;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -429,7 +429,7 @@ async fn should_not_error_when_remove_access_if_exists() -> Result<()> {
 #[tokio::test]
 async fn should_not_error_when_remove_user_if_exists() -> Result<()> {
 	let sql = "
-		USE NS j DB test;
+		USE NS test DB test;
 		REMOVE USER IF EXISTS foo ON ROOT;
 	";
 	let dbs = new_ds().await?;
