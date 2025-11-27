@@ -154,6 +154,7 @@ keyword! {
 	Permissions => "PERMISSIONS",
 	PostingsCache => "POSTINGS_CACHE",
 	PostingsOrder => "POSTINGS_ORDER",
+	Prepare => "PREPARE",
 	Punct => "PUNCT",
 	Purge => "PURGE",
 	Range => "RANGE",

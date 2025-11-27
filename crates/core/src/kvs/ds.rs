@@ -12,7 +12,6 @@ use anyhow::bail;
 use anyhow::{Context, Result, ensure};
 use async_channel::{Receiver, Sender};
 use bytes::{Bytes, BytesMut};
-use dashmap::DashMap;
 use futures::{Future, Stream};
 use http::HeaderMap;
 use reblessive::TreeStack;
@@ -30,7 +29,8 @@ use super::version::MajorVersion;
 use crate::api::body::ApiBody;
 use crate::api::invocation::ApiInvocation;
 use crate::api::response::{ApiResponse, ResponseInstruction};
-use crate::buc::BucketConnections;
+use crate::buc::BucketStoreProvider;
+use crate::buc::manager::BucketsManager;
 use crate::catalog::providers::{
 	ApiProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, TableProvider,
 	UserProvider,
@@ -121,7 +121,7 @@ pub struct Datastore {
 	// The temporary directory
 	temporary_directory: Option<Arc<PathBuf>>,
 	// Map of bucket connections
-	buckets: Arc<BucketConnections>,
+	buckets: BucketsManager,
 	// The sequences
 	sequences: Sequences,
 	// The surrealism cache
@@ -567,7 +567,7 @@ impl Datastore {
 	/// # }
 	/// ```
 	pub async fn new(path: &str) -> Result<Self> {
-		Self::new_with_factory(&CommunityComposer(), path, CancellationToken::new()).await
+		Self::new_with_factory(CommunityComposer(), path, CancellationToken::new()).await
 	}
 
 	/// Creates a new datastore instance with a custom transaction builder factory.
@@ -582,12 +582,12 @@ impl Datastore {
 	///
 	/// # Generic parameters
 	/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
-	pub async fn new_with_factory<F: TransactionBuilderFactory>(
-		factory: &F,
+	pub async fn new_with_factory<F: TransactionBuilderFactory + BucketStoreProvider + 'static>(
+		composer: F,
 		path: &str,
 		canceller: CancellationToken,
 	) -> Result<Self> {
-		Self::new_with_clock::<F>(factory, path, None, canceller).await
+		Self::new_with_clock::<F>(composer, path, None, canceller).await
 	}
 
 	/// Creates a new datastore instance with a custom factory and clock.
@@ -603,20 +603,25 @@ impl Datastore {
 	///
 	/// # Generic parameters
 	/// - `F`: Transaction builder factory type implementing `TransactionBuilderFactory`
-	pub async fn new_with_clock<F: TransactionBuilderFactory>(
-		factory: &F,
+	pub(crate) async fn new_with_clock<
+		C: TransactionBuilderFactory + BucketStoreProvider + 'static,
+	>(
+		composer: C,
 		path: &str,
 		clock: Option<Arc<SizedClock>>,
 		canceller: CancellationToken,
 	) -> Result<Datastore> {
 		// Initiate the desired datastore
-		let (builder, clock) = factory.new_transaction_builder(path, clock, canceller).await?;
+		let (builder, clock) = composer.new_transaction_builder(path, clock, canceller).await?;
+		//
+		let buckets = BucketsManager::new(Arc::new(composer));
 		// Set the properties on the datastore
-		Self::new_with_builder(builder, clock)
+		Self::new_with_builder(builder, buckets, clock)
 	}
 
-	pub fn new_with_builder(
+	pub(crate) fn new_with_builder(
 		builder: Box<dyn TransactionBuilder>,
+		buckets: BucketsManager,
 		clock: Arc<SizedClock>,
 	) -> Result<Self> {
 		let tf = TransactionFactory::new(clock, builder);
@@ -637,7 +642,7 @@ impl Datastore {
 			#[cfg(storage)]
 			temporary_directory: None,
 			cache: Arc::new(DatastoreCache::new()),
-			buckets: Arc::new(DashMap::new()),
+			buckets,
 			sequences: Sequences::new(tf, id),
 			#[cfg(feature = "surrealism")]
 			surrealism_cache: Arc::new(SurrealismCache::new()),
@@ -647,11 +652,12 @@ impl Datastore {
 	/// Create a new datastore with the same persistent data (inner), with
 	/// flushed cache. Simulating a server restart
 	pub fn restart(self) -> Self {
+		self.buckets.clear();
 		Self {
 			id: self.id,
 			auth_enabled: self.auth_enabled,
 			query_timeout: self.query_timeout,
-			slow_log: self.slow_log.clone(),
+			slow_log: self.slow_log,
 			transaction_timeout: self.transaction_timeout,
 			capabilities: self.capabilities,
 			notification_channel: self.notification_channel,
@@ -662,7 +668,7 @@ impl Datastore {
 			#[cfg(storage)]
 			temporary_directory: self.temporary_directory,
 			cache: Arc::new(DatastoreCache::new()),
-			buckets: Arc::new(DashMap::new()),
+			buckets: self.buckets,
 			sequences: Sequences::new(self.transaction_factory.clone(), self.id),
 			transaction_factory: self.transaction_factory,
 			#[cfg(feature = "surrealism")]
@@ -1348,7 +1354,7 @@ impl Datastore {
 					continue;
 				}
 				match txn.get_tb_index_by_id(ic.ns, ic.db, ic.tb.as_ref(), ic.ix).await? {
-					Some(ix) => match &ix.index {
+					Some(ix) if !ix.prepare_remove => match &ix.index {
 						Index::FullText(p) => {
 							let ft = FullTextIndex::new(
 								&self.index_stores,
@@ -1366,7 +1372,7 @@ impl Datastore {
 							trace!(target: TARGET, "Index compaction: Index {:?} does not support compaction, skipping", ic.ix);
 						}
 					},
-					None => {
+					_ => {
 						trace!(target: TARGET, "Index compaction: Index {:?} not found, skipping", ic.ix);
 					}
 				}
@@ -1709,7 +1715,7 @@ impl Datastore {
 			Some(Error::QueryCancelled) => DbResultError::QueryCancelled,
 			Some(Error::QueryNotExecuted {
 				message,
-			}) => DbResultError::QueryNotExecuted(message.clone()),
+			}) => DbResultError::QueryNotExecuted(format!("{message} - plan: {plan:?}")),
 			Some(Error::ScriptingNotAllowed) => {
 				DbResultError::MethodNotAllowed("Scripting functions are not allowed".to_string())
 			}

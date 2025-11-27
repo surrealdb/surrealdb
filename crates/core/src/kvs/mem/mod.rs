@@ -119,7 +119,7 @@ impl Transactable for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Load the inner transaction
-		let mut inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Get the key
 		let res = match version {
 			Some(ts) => inner.get_at_version(key, ts)?.is_some(),
@@ -137,7 +137,7 @@ impl Transactable for Transaction {
 			return Err(Error::TransactionFinished);
 		}
 		// Load the inner transaction
-		let mut inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Get the key
 		let res = match version {
 			Some(ts) => inner.get_at_version(key, ts)?,
@@ -145,6 +145,24 @@ impl Transactable for Transaction {
 		};
 		// Return result
 		Ok(res.map(Val::from))
+	}
+
+	/// Fetch multiple keys from the database.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::api", skip(self), fields(keys = keys.sprint()))]
+	async fn getm(&self, keys: Vec<Key>, version: Option<u64>) -> Result<Vec<Option<Val>>> {
+		// Check to see if transaction is closed
+		if self.closed() {
+			return Err(Error::TransactionFinished);
+		}
+		// Load the inner transaction
+		let inner = self.inner.read().await;
+		// Get the keys
+		let res = match version {
+			Some(ts) => inner.getm_at_version(keys, ts)?,
+			None => inner.getm(keys)?,
+		};
+		// Return result
+		Ok(res.into_iter().map(|opt| opt.map(Val::from)).collect())
 	}
 
 	/// Insert or update a key in the database.
@@ -330,7 +348,7 @@ impl Transactable for Transaction {
 		let beg = rng.start;
 		let end = rng.end;
 		// Load the inner transaction
-		let mut inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Execute on the blocking threadpool
 		let res = affinitypool::spawn_local(move || -> Result<_> {
 			// Count the items in the range
@@ -354,7 +372,7 @@ impl Transactable for Transaction {
 		let beg = rng.start;
 		let end = rng.end;
 		// Load the inner transaction
-		let mut inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Retrieve the scan range
 		let res = match version {
 			Some(ts) => inner.keys_at_version(beg..end, None, Some(limit as usize), ts)?,
@@ -375,7 +393,7 @@ impl Transactable for Transaction {
 		let beg = rng.start;
 		let end = rng.end;
 		// Load the inner transaction
-		let mut inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Retrieve the scan range
 		let res = match version {
 			Some(ts) => inner.keys_at_version_reverse(beg..end, None, Some(limit as usize), ts)?,
@@ -401,7 +419,7 @@ impl Transactable for Transaction {
 		let beg = rng.start;
 		let end = rng.end;
 		// Load the inner transaction
-		let mut inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Retrieve the scan range
 		let res = match version {
 			Some(ts) => inner.scan_at_version(beg..end, None, Some(limit as usize), ts)?,
@@ -427,7 +445,7 @@ impl Transactable for Transaction {
 		let beg = rng.start;
 		let end = rng.end;
 		// Load the inner transaction
-		let mut inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Retrieve the scan range
 		let res = match version {
 			Some(ts) => inner.scan_at_version_reverse(beg..end, None, Some(limit as usize), ts)?,
@@ -452,7 +470,7 @@ impl Transactable for Transaction {
 		let beg = rng.start;
 		let end = rng.end;
 		// Load the inner transaction
-		let mut inner = self.inner.write().await;
+		let inner = self.inner.read().await;
 		// Retrieve the scan range
 		let res = inner
 			.scan_all_versions(beg..end, None, Some(limit as usize))?

@@ -4,7 +4,6 @@ use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 
 use super::{CursorDoc, DefineKind};
-use crate::buc::{self, BucketConnectionKey};
 use crate::catalog::providers::BucketProvider;
 use crate::catalog::{BucketDefinition, Permission};
 use crate::ctx::Context;
@@ -82,17 +81,11 @@ impl DefineBucketStatement {
 			None
 		};
 
-		// Validate the store
-		let store = if let Some(ref backend) = backend {
-			buc::connect(backend, false, self.readonly).await?
-		} else {
-			buc::connect_global(ns, db, &name).await?
-		};
-
-		// Persist the store to cache
+		// Create and cache a new backend
 		if let Some(buckets) = ctx.get_buckets() {
-			let key = BucketConnectionKey::new(ns, db, &name);
-			buckets.insert(key, store);
+			buckets.new_backend(ns, db, &name, self.readonly, backend.as_deref()).await?;
+		} else {
+			bail!(Error::BucketUnavailable(name));
 		}
 
 		// Process the statement

@@ -555,7 +555,6 @@ impl Parser<'_> {
 							}
 							t!("TOKEN") => {
 								self.pop_peek();
-								let peek = self.peek();
 								res.duration.token =
 									stk.run(|ctx| self.parse_expr_field(ctx)).await?;
 							}

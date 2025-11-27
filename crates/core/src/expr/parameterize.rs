@@ -81,12 +81,10 @@ pub async fn expr_to_ident(
 	expr: &Expr,
 	into: &str,
 ) -> Result<String> {
-	match expr {
-		Expr::Idiom(Idiom(x)) => match x.as_slice() {
-			[Part::Field(x)] => return Ok(x.clone()),
-			_ => {}
-		},
-		_ => {}
+	if let Expr::Idiom(Idiom(x)) = expr
+		&& let [Part::Field(x)] = x.as_slice()
+	{
+		return Ok(x.clone());
 	}
 	match stk
 		.run(|stk| expr.compute(stk, ctx, opt, doc))

@@ -89,7 +89,7 @@ impl InsertStatement {
 		let into = match &self.into {
 			None => None,
 			Some(into) => {
-				match stk.run(|stk| into.compute(stk, &ctx, opt, doc)).await.catch_return()? {
+				match stk.run(|stk| into.compute(stk, ctx, opt, doc)).await.catch_return()? {
 					Value::Table(into) => Some(into),
 					v => {
 						bail!(Error::InsertStatement {
@@ -110,8 +110,8 @@ impl InsertStatement {
 					// Set each field from the expression
 					for (k, v) in v.iter() {
 						let v =
-							stk.run(|stk| v.compute(stk, &ctx, opt, None)).await.catch_return()?;
-						o.set(stk, &ctx, opt, k, v).await?;
+							stk.run(|stk| v.compute(stk, ctx, opt, None)).await.catch_return()?;
+						o.set(stk, ctx, opt, k, v).await?;
 					}
 					// Specify the new table record id
 					let (tb, id) = extract_tb_id(&o, &into)?;
@@ -121,7 +121,7 @@ impl InsertStatement {
 			}
 			// Check if this is a modern statement
 			Data::SingleExpression(v) => {
-				let v = stk.run(|stk| v.compute(stk, &ctx, opt, doc)).await.catch_return()?;
+				let v = stk.run(|stk| v.compute(stk, ctx, opt, doc)).await.catch_return()?;
 				match v {
 					Value::Array(v) => {
 						for v in v {
@@ -152,7 +152,7 @@ impl InsertStatement {
 		// Ensure the database exists.
 		ctx.get_db(opt).await?;
 
-		CursorDoc::update_parent(&ctx, doc, async |ctx| {
+		CursorDoc::update_parent(ctx, doc, async |ctx| {
 			// Process the statement
 			let res = i.output(stk, &ctx, opt, &stm, RecordStrategy::KeysAndValues).await?;
 			// Catch statement timeout

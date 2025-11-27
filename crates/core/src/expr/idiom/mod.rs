@@ -81,22 +81,6 @@ impl Idiom {
 	pub(crate) fn is_special(&self) -> bool {
 		self.0.len() == 1 && [&ID[0], &IN[0], &OUT[0]].contains(&&self.0[0])
 	}
-	/// Check if this Idiom is an specific field
-	pub(crate) fn is_field(&self, other: Option<&str>) -> bool {
-		if self.len() != 1 {
-			return false;
-		}
-
-		let Part::Field(ref x) = self.0[0] else {
-			return false;
-		};
-
-		if let Some(other) = other {
-			return x.as_str() == other;
-		}
-
-		true
-	}
 
 	/// Returns a raw string representation of this idiom without any escaping.
 	pub(crate) fn to_raw_string(&self) -> String {
