@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::catalog;
 use crate::catalog::{
-	DatabaseDefinition, DatabaseId, DefaultsConfig, IndexId, NamespaceDefinition, NamespaceId, 
+	DatabaseDefinition, DatabaseId, DefaultsConfig, IndexId, NamespaceDefinition, NamespaceId,
 	Record, TableDefinition, TableId, UserDefinition,
 };
 use crate::ctx::MutableContext;
@@ -33,6 +33,20 @@ pub(crate) trait NodeProvider {
 pub(crate) trait RootProvider {
 	/// Retrieve a specific root definition.
 	async fn get_defaults_config(&self) -> Result<Option<Arc<DefaultsConfig>>>;
+
+	/// Retrieve a specific config definition from the root.
+	async fn get_root_config(&self, cg: &str) -> Result<Option<Arc<catalog::ConfigDefinition>>>;
+
+	/// Retrieve a specific config definition from the root returning an error if it does not exist.
+	async fn expect_root_config(&self, cg: &str) -> Result<Arc<catalog::ConfigDefinition>> {
+		if let Some(val) = self.get_root_config(cg).await? {
+			Ok(val)
+		} else {
+			Err(anyhow::Error::new(Error::CgNotFound {
+				name: cg.to_owned(),
+			}))
+		}
+	}
 }
 
 /// Namespace data access provider.

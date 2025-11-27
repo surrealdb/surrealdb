@@ -51,7 +51,7 @@ pub struct DatabaseSelectionArguments {
 pub struct LevelSelectionArguments {
 	#[arg(help = "The selected namespace")]
 	#[arg(env = "SURREAL_NAMESPACE", long = "namespace", visible_alias = "ns")]
-	#[arg(default_value = "default")]
+	#[arg(default_value = "main")]
 	pub(crate) namespace: Option<String>,
 	#[arg(help = "The selected database")]
 	#[arg(
@@ -60,7 +60,7 @@ pub struct LevelSelectionArguments {
 		visible_alias = "db",
 		requires = "namespace"
 	)]
-	#[arg(default_value = "default")]
+	#[arg(default_value = "main")]
 	pub(crate) database: Option<String>,
 }
 

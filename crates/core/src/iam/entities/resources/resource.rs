@@ -2,6 +2,7 @@ use revision::revisioned;
 use serde::{Deserialize, Serialize};
 
 use super::Level;
+use crate::catalog::base::Base;
 
 #[revisioned(revision = 5)]
 #[derive(Clone, Default, Debug, Eq, PartialEq, PartialOrd, Hash, Serialize, Deserialize)]
@@ -43,6 +44,16 @@ pub enum ConfigKind {
 	GraphQL,
 	Api,
 	Defaults,
+}
+
+impl ConfigKind {
+	pub fn base(&self) -> Base {
+		match self {
+			ConfigKind::Defaults => Base::Root,
+			ConfigKind::GraphQL => Base::Db,
+			ConfigKind::Api => Base::Db,
+		}
+	}
 }
 
 impl std::fmt::Display for ResourceKind {

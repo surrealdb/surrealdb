@@ -13,9 +13,9 @@ use crate::expr::statements::access::{
 use crate::expr::statements::alter::{
 	AlterDefault, AlterFieldStatement, AlterKind, AlterSequenceStatement, AlterTableStatement,
 };
-use crate::expr::statements::define::config::defaults::DefaultsConfig;
 use crate::expr::statements::define::config::ConfigInner;
 use crate::expr::statements::define::config::api::ApiConfig;
+use crate::expr::statements::define::config::defaults::DefaultsConfig;
 use crate::expr::statements::define::{
 	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault, DefineSequenceStatement,
 };

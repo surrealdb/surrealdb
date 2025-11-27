@@ -118,9 +118,6 @@ impl Executor {
 		let res = match plan {
 			TopLevelExpr::Use(stmt) => {
 				let opt_ref = self.opt.clone();
-				
-				// Avoid moving in and out of the context via Arc::get_mut
-				let ctx = ctx_mut!();
 
 				let (use_ns, use_db) = match (stmt.ns, stmt.db) {
 					(None, None) => {
@@ -129,24 +126,39 @@ impl Executor {
 						} else {
 							(None, None)
 						}
-					},
+					}
 					(ns, db) => {
 						let ns = if let Some(ns) = ns {
-							Some(self
-								.stack
-								.enter(|stk| expr_to_ident(stk, &ctx.freeze(), &opt_ref, None, &ns, "namespace"))
-								.finish()
-								.await?)
+							Some(
+								self.stack
+									.enter(|stk| {
+										expr_to_ident(
+											stk,
+											&self.ctx,
+											&opt_ref,
+											None,
+											&ns,
+											"namespace",
+										)
+									})
+									.finish()
+									.await?,
+							)
 						} else {
 							None
 						};
 
 						let db = if let Some(db) = db {
-							Some(self
-								.stack
-								.enter(|stk| expr_to_ident(stk, &ctx.freeze(), &opt_ref, None, &db, "database"))
-								.finish()
-								.await?)
+							Some(
+								self.stack
+									.enter(|stk| {
+										expr_to_ident(
+											stk, &self.ctx, &opt_ref, None, &db, "database",
+										)
+									})
+									.finish()
+									.await?,
+							)
 						} else {
 							None
 						};
@@ -154,6 +166,8 @@ impl Executor {
 						(ns, db)
 					}
 				};
+
+				let ctx = ctx_mut!();
 
 				// Apply new namespace
 				if let Some(ns) = use_ns {
@@ -182,11 +196,10 @@ impl Executor {
 				}
 
 				// Return the current namespace and database
-				Ok(match (self.opt.ns.clone(), self.opt.db.clone()) {
-					(Some(ns), Some(db)) => Value::Array(vec![Value::String(ns.to_string()), Value::String(db.to_string())].into()),
-					(Some(ns), None) => Value::Array(vec![Value::String(ns.to_string()), Value::None].into()),
-					_ => Value::Array(vec![Value::None, Value::None].into()),
-				})
+				Ok(Value::from(map! {
+					"namespace".to_string() => self.opt.ns.clone().map(|x| Value::String(x.to_string())).unwrap_or(Value::None),
+					"database".to_string() => self.opt.db.clone().map(|x| Value::String(x.to_string())).unwrap_or(Value::None),
+				}))
 			}
 			TopLevelExpr::Option(_) => {
 				return Err(ControlFlow::Err(anyhow::Error::new(Error::unreachable(
@@ -786,7 +799,6 @@ impl Executor {
 		let mut stream = pin!(stream);
 
 		while let Some(stmt) = stream.next().await {
-			println!("Stmt: {:#?}", stmt);
 			let stmt = match stmt {
 				Ok(x) => x,
 				Err(e) => {
@@ -833,7 +845,6 @@ impl Executor {
 
 					let now = Instant::now();
 					let result = this.execute_bare_statement(kvs, &now, stmt).await;
-					println!("Result: {:#?}", result);
 					let result = match result {
 						Ok(value) => Ok(convert_value_to_public_value(value)?),
 						Err(err) => Err(DbResultError::InternalError(err.to_string())),

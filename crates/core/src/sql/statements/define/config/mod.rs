@@ -1,12 +1,12 @@
 pub mod api;
-pub mod graphql;
 pub mod defaults;
+pub mod graphql;
 
 use std::fmt::{self, Display};
 
 use api::ApiConfig;
-use graphql::GraphQLConfig;
 use defaults::DefaultsConfig;
+use graphql::GraphQLConfig;
 
 use super::DefineKind;
 

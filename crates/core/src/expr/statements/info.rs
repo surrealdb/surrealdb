@@ -6,7 +6,8 @@ use reblessive::tree::Stk;
 use surrealdb_types::ToSql;
 
 use crate::catalog::providers::{
-	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, NamespaceProvider, NodeProvider, RootProvider, TableProvider, UserProvider
+	ApiProvider, AuthorisationProvider, BucketProvider, DatabaseProvider, NamespaceProvider,
+	NodeProvider, RootProvider, TableProvider, UserProvider,
 };
 use crate::ctx::Context;
 use crate::dbs::Options;

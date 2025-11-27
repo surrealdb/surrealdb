@@ -8,14 +8,15 @@ use api::ApiConfig;
 use defaults::DefaultsConfig;
 use reblessive::tree::Stk;
 
-use crate::catalog::providers::DatabaseProvider;
+use crate::catalog::base::Base;
+use crate::catalog::providers::{DatabaseProvider, RootProvider};
 use crate::catalog::{ConfigDefinition, GraphQLConfig};
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
+use crate::expr::Value;
 use crate::expr::statements::define::DefineKind;
-use crate::expr::{Base, Value};
 use crate::iam::{Action, ConfigKind, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -33,6 +34,32 @@ pub(crate) enum ConfigInner {
 	Defaults(DefaultsConfig),
 }
 
+impl ConfigInner {
+	pub(crate) fn kind(&self) -> ConfigKind {
+		match self {
+			ConfigInner::Defaults(_) => ConfigKind::Defaults,
+			ConfigInner::GraphQL(_) => ConfigKind::GraphQL,
+			ConfigInner::Api(_) => ConfigKind::Api,
+		}
+	}
+
+	pub(crate) async fn compute(
+		&self,
+		stk: &mut Stk,
+		ctx: &Context,
+		opt: &Options,
+		doc: Option<&CursorDoc>,
+	) -> Result<ConfigDefinition> {
+		Ok(match self {
+			ConfigInner::GraphQL(g) => ConfigDefinition::GraphQL(g.clone()),
+			ConfigInner::Api(a) => ConfigDefinition::Api(a.compute(stk, ctx, opt, doc).await?),
+			ConfigInner::Defaults(d) => {
+				ConfigDefinition::Defaults(d.compute(stk, ctx, opt, doc).await?)
+			}
+		})
+	}
+}
+
 impl DefineConfigStatement {
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
@@ -42,8 +69,10 @@ impl DefineConfigStatement {
 		opt: &Options,
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
+		let kind = self.inner.kind();
+		let base = kind.base();
 		// Allowed to run?
-		opt.is_allowed(Action::Edit, ResourceKind::Config(ConfigKind::GraphQL), &Base::Db)?;
+		opt.is_allowed(Action::Edit, ResourceKind::Config(kind), &base.clone().into())?;
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the config kind
@@ -52,42 +81,60 @@ impl DefineConfigStatement {
 			ConfigInner::Api(_) => "api",
 			ConfigInner::Defaults(_) => "defaults",
 		};
-		// Check if the definition exists
-		let (ns, db) = ctx.get_ns_db_ids(opt).await?;
-		if txn.expect_db_config(ns, db, cg).await.is_ok() {
-			match self.kind {
-				DefineKind::Default => {
-					if !opt.import {
-						bail!(Error::CgAlreadyExists {
-							name: cg.to_string(),
-						});
+
+		match base {
+			Base::Root => {
+				if txn.expect_root_config(cg).await.is_ok() {
+					match self.kind {
+						DefineKind::Default => {
+							if !opt.import {
+								bail!(Error::CgAlreadyExists {
+									name: cg.to_string(),
+								});
+							}
+						}
+						DefineKind::Overwrite => {}
+						DefineKind::IfNotExists => return Ok(Value::None),
 					}
 				}
-				DefineKind::Overwrite => {}
-				DefineKind::IfNotExists => return Ok(Value::None),
+
+				// Compute the config
+				let key = crate::key::root::cg::new(cg);
+				let store = self.inner.compute(stk, ctx, opt, doc).await?;
+				// Put the config
+				txn.replace(&key, &store).await?;
+				// Clear the cache
+				txn.clear_cache();
+			}
+			Base::Ns => {
+				fail!("defining config on a namespace is not supported");
+			}
+			Base::Db => {
+				// Check if the definition exists
+				let (ns, db) = ctx.get_ns_db_ids(opt).await?;
+				if txn.expect_db_config(ns, db, cg).await.is_ok() {
+					match self.kind {
+						DefineKind::Default => {
+							if !opt.import {
+								bail!(Error::CgAlreadyExists {
+									name: cg.to_string(),
+								});
+							}
+						}
+						DefineKind::Overwrite => {}
+						DefineKind::IfNotExists => return Ok(Value::None),
+					}
+				}
+
+				// Compute the config
+				let key = crate::key::database::cg::new(ns, db, cg);
+				let store = self.inner.compute(stk, ctx, opt, doc).await?;
+				// Put the config
+				txn.replace(&key, &store).await?;
+				// Clear the cache
+				txn.clear_cache();
 			}
 		}
-
-		let store = match &self.inner {
-			ConfigInner::GraphQL(g) => ConfigDefinition::GraphQL(g.clone()),
-			ConfigInner::Api(a) => ConfigDefinition::Api(a.compute(stk, ctx, opt, doc).await?),
-			ConfigInner::Defaults(d) => ConfigDefinition::Defaults(d.compute(stk, ctx, opt, doc).await?),
-		};
-
-		// Process the statement
-		match store.base() {
-			crate::catalog::ConfigBase::Root => {
-				let key = crate::key::root::cg::new(cg);
-				txn.replace(&key, &store).await?;
-			}
-			crate::catalog::ConfigBase::Database => {
-				let key = crate::key::database::cg::new(ns, db, cg);
-				txn.replace(&key, &store).await?;
-			}
-		};
-		
-		// Clear the cache
-		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
 	}

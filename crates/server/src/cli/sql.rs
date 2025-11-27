@@ -117,24 +117,27 @@ pub async fn init(
 	}));
 	// Load the command-line history
 	let _ = rl.load_history("history.txt");
-	// Configure the prompt
-	let mut prompt = "> ".to_owned();
 
 	// Keep track of current namespace/database.
 	let is_not_empty = |s: &&str| !s.is_empty();
 	let namespace = namespace.as_deref().map(str::trim).filter(is_not_empty);
 	let database = database.as_deref().map(str::trim).filter(is_not_empty);
-	match (namespace, database) {
-		(Some(namespace), Some(database)) => {
-			client.use_ns(namespace).use_db(database).await?;
-			prompt = format!("{namespace}/{database}> ");
+	let (namespace, database) = match (namespace, database) {
+		(Some(namespace), Some(database)) => client.use_ns(namespace).use_db(database).await?,
+		(Some(namespace), None) => client.use_ns(namespace).await?,
+		(None, None) => client.use_defaults().await?,
+		_ => (None, None),
+	};
+
+	let mut prompt = if let Some(namespace) = &namespace {
+		if let Some(database) = &database {
+			format!("{namespace}/{database}> ")
+		} else {
+			format!("{namespace}> ")
 		}
-		(Some(namespace), None) => {
-			client.use_ns(namespace).await?;
-			prompt = format!("{namespace}> ");
-		}
-		_ => {}
-	}
+	} else {
+		"> ".to_owned()
+	};
 
 	if !hide_welcome {
 		let hints = [
@@ -228,20 +231,22 @@ pub async fn init(
 					// Obtain the last used namespace and database
 					for (_, (stats, result)) in res.results.iter().rev() {
 						if let Some(QueryType::Use) = stats.query_type {
-							let Ok(Value::Array(array)) = result else {
-								// TODO is it worth erroring here? This is the expected outcome, though maybe not for old versions
+							let Ok(Value::Object(obj)) = result else {
+								// TODO is it worth erroring here? This is the expected outcome,
+								// though maybe not for old versions
 								break;
 							};
 
-							if let Some(Value::String(ns)) = array.get(0) {
+							if let Some(Value::String(ns)) = obj.get("namespace") {
 								use_ns = Some(ns.clone());
 
-								if let Some(Value::String(db)) = array.get(1) {
+								if let Some(Value::String(db)) = obj.get("database") {
 									use_db = Some(db.clone());
 								}
 							}
 
-							// We reversed iteration, so the first `Use` statement we find is actually the most recent one
+							// We reversed iteration, so the first `Use` statement we find is
+							// actually the most recent one
 							break;
 						}
 					}
@@ -260,10 +265,8 @@ pub async fn init(
 						if client.use_ns(use_ns.clone()).use_db(use_db.clone()).await.is_ok() {
 							prompt = format!("{use_ns}/{use_db}> ");
 						}
-					} else {
-						if client.use_ns(use_ns.clone()).await.is_ok() {
-							prompt = format!("{use_ns}> ");
-						}
+					} else if client.use_ns(use_ns.clone()).await.is_ok() {
+						prompt = format!("{use_ns}> ");
 					}
 				}
 			}
@@ -309,7 +312,7 @@ fn process(
 		let (stats, result) = response.take(index).ok_or_else(|| {
 			anyhow!("Expected some result for a query with index {index}, but found none")
 		})?;
-		
+
 		let output = result.unwrap_or_else(|e| Value::String(e.to_string()));
 		vec.push((stats, output));
 	}

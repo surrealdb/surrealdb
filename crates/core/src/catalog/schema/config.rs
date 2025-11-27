@@ -30,14 +30,6 @@ impl ConfigDefinition {
 		}
 	}
 
-	pub fn base(&self) -> ConfigBase {
-		match self {
-			ConfigDefinition::Defaults(_) => ConfigBase::Root,
-			ConfigDefinition::GraphQL(_) => ConfigBase::Database,
-			ConfigDefinition::Api(_) => ConfigBase::Database,
-		}
-	}
-
 	/// Convert the config definition into a graphql config.
 	#[allow(unused)]
 	pub fn try_into_graphql(self) -> Result<GraphQLConfig> {
@@ -53,11 +45,6 @@ impl ConfigDefinition {
 			c => fail!("found {c} when a api config was expected"),
 		}
 	}
-}
-
-pub enum ConfigBase {
-	Root,
-	Database,
 }
 
 impl Display for ConfigDefinition {

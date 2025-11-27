@@ -18,6 +18,9 @@ impl fmt::Display for UseStatement {
 		if let Some(ref db) = self.db {
 			write!(f, " DB {db}")?;
 		}
+		if self.ns.is_none() && self.db.is_none() {
+			write!(f, " DEFAULTS")?;
+		}
 		Ok(())
 	}
 }

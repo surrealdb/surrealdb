@@ -114,7 +114,9 @@ where
 			let mut indexed_results = IndexedResults::new();
 
 			for (index, result) in results.into_iter().enumerate() {
-				let stats = DbResultStats::default().with_execution_time(result.time).with_query_type(result.query_type);
+				let stats = DbResultStats::default()
+					.with_execution_time(result.time)
+					.with_query_type(result.query_type);
 
 				match result.query_type {
 					QueryType::Other => {
@@ -132,7 +134,7 @@ where
 						});
 						indexed_results.live_queries.insert(index, live_stream);
 					}
-					QueryType::Kill => {},
+					QueryType::Kill => {}
 					QueryType::Use => {
 						indexed_results.results.insert(index, (stats, result.result));
 					}

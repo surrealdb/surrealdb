@@ -1442,7 +1442,10 @@ impl Parser<'_> {
 		})
 	}
 
-	pub(crate) async fn parse_defaults_config(&mut self, stk: &mut Stk) -> ParseResult<DefaultsConfig> {
+	pub(crate) async fn parse_defaults_config(
+		&mut self,
+		stk: &mut Stk,
+	) -> ParseResult<DefaultsConfig> {
 		let mut config = DefaultsConfig::default();
 		loop {
 			match self.peek_kind() {

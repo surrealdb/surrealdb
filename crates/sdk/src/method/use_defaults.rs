@@ -5,32 +5,29 @@ use surrealdb_types::Value;
 
 use crate::conn::Command;
 use crate::method::{BoxFuture, OnceLockExt};
-use crate::opt::WaitFor;
 use crate::{Connection, Result, Surreal};
 
+/// Stores the namespace to use
 #[derive(Debug)]
 #[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct UseDb<'r, C: Connection> {
+pub struct UseDefaults<'r, C: Connection> {
 	pub(super) client: Cow<'r, Surreal<C>>,
-	pub(super) ns: Option<String>,
-	pub(super) db: String,
 }
 
-impl<C> UseDb<'_, C>
+impl<C> UseDefaults<'_, C>
 where
 	C: Connection,
 {
 	/// Converts to an owned type which can easily be moved to a different
 	/// thread
-	pub fn into_owned(self) -> UseDb<'static, C> {
-		UseDb {
+	pub fn into_owned(self) -> UseDefaults<'static, C> {
+		UseDefaults {
 			client: Cow::Owned(self.client.into_owned()),
-			..self
 		}
 	}
 }
 
-impl<'r, Client> IntoFuture for UseDb<'r, Client>
+impl<'r, Client> IntoFuture for UseDefaults<'r, Client>
 where
 	Client: Connection,
 {
@@ -42,11 +39,10 @@ where
 			let router = self.client.inner.router.extract()?;
 			let result = router
 				.execute_value(Command::Use {
-					namespace: self.ns,
-					database: Some(self.db),
+					namespace: None,
+					database: None,
 				})
 				.await?;
-			self.client.inner.waiter.0.send(Some(WaitFor::Database)).ok();
 
 			let Value::Object(obj) = result else {
 				return Ok((None, None));

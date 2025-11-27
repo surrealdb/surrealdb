@@ -12,10 +12,12 @@ use super::batch::Batch;
 use super::tr::Check;
 use super::{Key, Val, Version, util};
 use crate::catalog::providers::{
-	ApiProvider, AuthorisationProvider, BucketProvider, CatalogProvider, DatabaseProvider, NamespaceProvider, NodeProvider, RootProvider, TableProvider, UserProvider
+	ApiProvider, AuthorisationProvider, BucketProvider, CatalogProvider, DatabaseProvider,
+	NamespaceProvider, NodeProvider, RootProvider, TableProvider, UserProvider,
 };
 use crate::catalog::{
-	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, DefaultsConfig, IndexId, NamespaceDefinition, NamespaceId, Record, TableDefinition, TableId
+	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, DefaultsConfig, IndexId,
+	NamespaceDefinition, NamespaceId, Record, TableDefinition, TableId,
 };
 use crate::cnf::NORMAL_FETCH_SIZE;
 use crate::ctx::MutableContext;
@@ -540,6 +542,26 @@ impl RootProvider for Transaction {
 		}
 		.try_into_type()
 		.map(Option::Some)
+	}
+
+	/// Retrieve a specific config definition from the root.
+	#[instrument(level = "trace", target = "surrealdb::core::kvs::tx", skip(self))]
+	async fn get_root_config(&self, cg: &str) -> Result<Option<Arc<ConfigDefinition>>> {
+		let qey = cache::tx::Lookup::Rcg(cg);
+		match self.cache.get(&qey) {
+			Some(val) => val.try_into_type().map(Option::Some),
+			None => {
+				let key = crate::key::root::cg::new(cg);
+				if let Some(val) = self.get(&key, None).await? {
+					let val = Arc::new(val);
+					let entr = cache::tx::Entry::Any(val.clone());
+					self.cache.insert(qey, entr);
+					Ok(Some(val))
+				} else {
+					Ok(None)
+				}
+			}
+		}
 	}
 }
 

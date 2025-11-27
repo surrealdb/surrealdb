@@ -742,15 +742,17 @@ pub async fn init<F: TransactionBuilderFactory>(
 		.with_capabilities(capabilities)
 		.with_slow_log(slow_log_threshold, slow_log_param_allow, slow_log_param_deny);
 	// Ensure the storage version is up to date to prevent corruption
-	let (_, is_new) = retry_with_timeout("check_version", || async { dbs.check_version().await }).await?;
+	let (_, is_new) =
+		retry_with_timeout("check_version", || async { dbs.check_version().await }).await?;
 	// Create default namespace and database if not disabled
 	if is_new && !no_defaults {
-		let default_namespace = default_namespace.unwrap_or_else(|| "default".to_string());
-		let default_database = 	default_database.unwrap_or_else(|| "default".to_string());
+		let default_namespace = default_namespace.unwrap_or_else(|| "main".to_string());
+		let default_database = default_database.unwrap_or_else(|| "main".to_string());
 		// Initialise defaults
-		retry_with_timeout("initialise_defaults", || async { 
-			dbs.initialise_defaults(&default_namespace, &default_database).await 
-		}).await?;
+		retry_with_timeout("initialise_defaults", || async {
+			dbs.initialise_defaults(&default_namespace, &default_database).await
+		})
+		.await?;
 	}
 	// Import file at start, if provided
 	if let Some(file) = import_file {
