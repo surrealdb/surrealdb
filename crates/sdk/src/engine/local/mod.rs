@@ -1172,5 +1172,19 @@ async fn router(
 				.await?;
 			Ok(results)
 		}
+		Command::Attach {
+			..
+		} => {
+			// Local engines don't use remote sessions, so attach is a no-op
+			let query_result = QueryResultBuilder::started_now();
+			Ok(vec![query_result.finish()])
+		}
+		Command::Detach {
+			..
+		} => {
+			// Local engines don't use remote sessions, so detach is a no-op
+			let query_result = QueryResultBuilder::started_now();
+			Ok(vec![query_result.finish()])
+		}
 	}
 }

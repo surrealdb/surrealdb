@@ -63,6 +63,9 @@ pub trait RpcProtocol {
 	/// Registers a new session with the given ID
 	fn attach(&self, session_id: Option<Uuid>) -> Result<DbResult, RpcError> {
 		let mut session = Session::default();
+		if Self::LQ_SUPPORT {
+			session.rt = true;
+		}
 		session.id = session_id;
 		match session_id {
 			Some(id) => {

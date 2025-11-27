@@ -85,6 +85,12 @@ pub(super) fn mock(route_rx: Receiver<Route>) {
 				}
 				| Command::ImportFile {
 					..
+				}
+				| Command::Attach {
+					..
+				}
+				| Command::Detach {
+					..
 				} => query_result,
 			};
 

@@ -93,6 +93,8 @@ impl Websocket {
 			datastore,
 		});
 		// Store the default session with None key
+		// Enable realtime queries for WebSocket connections
+		let session = session.with_rt(true);
 		rpc.set_session(None, Arc::new(session));
 		// Add this WebSocket to the list
 		state.web_sockets.write().await.insert(id, rpc.clone());

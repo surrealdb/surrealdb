@@ -747,149 +747,150 @@ pub(crate) async fn run_router(
 
 		loop {
 			tokio::select! {
-				biased;
+					biased;
 
-				session = session_rx.recv() => {
-					let Ok(session_id) = session else {
-						break 'router
-					};
-					match session_id {
-						SessionId::Initial(session_id) => {
-							state.sessions.entry(session_id).or_default();
-							// Clone from default session
-							attach_session_request(session_id, &mut state.sink).await;
-							if let Some(session_state) = state.sessions.get_mut(&session_id) {
+					session = session_rx.recv() => {
+						let Ok(session_id) = session else {
+							break 'router
+						};
+						match session_id {
+							SessionId::Initial(session_id) => {
+								state.sessions.entry(session_id).or_default();
+								// Clone from default session
+								attach_session_request(session_id, &mut state.sink).await;
+								if let Some(session_state) = state.sessions.get_mut(&session_id) {
+									session_state.replay.insert(ReplayMethod::Attach, Command::Attach {
+										session_id,
+									});
+								}
+							}
+						SessionId::Clone { old, new } => {
+							// Clone the local session state
+							let old_state = state.sessions.get(&old).cloned().unwrap_or_default();
+							state.sessions.insert(new, old_state);
+							// Replay the session state
+							if let Some(session_state) = state.sessions.get_mut(&new) {
 								session_state.replay.insert(ReplayMethod::Attach, Command::Attach {
-									session_id,
+									session_id: new,
 								});
+								replay_session(new, session_state, &mut state.sink).await;
 							}
 						}
-					SessionId::Clone { old, new } => {
-						// Clone the local session state
-						let old_state = state.sessions.get(&old).cloned().unwrap_or_default();
-						state.sessions.insert(new, old_state);
-						// Replay the session state
-						if let Some(session_state) = state.sessions.get_mut(&new) {
-							session_state.replay.insert(ReplayMethod::Attach, Command::Attach {
-								session_id: new,
-							});
-							replay_session(new, session_state, &mut state.sink).await;
-						}
+				SessionId::Drop(session_id) => {
+					// Detach from the session before removing it
+					if let Some(session_state) = state.sessions.get_mut(&session_id) {
+						session_state.replay.clear();
+						session_state.replay.insert(ReplayMethod::Detach, Command::Detach {
+							session_id,
+						});
+						replay_session(session_id, session_state, &mut state.sink).await;
 					}
-					SessionId::Drop(session_id) => {
-						// Remove the session from local state
-						state.sessions.remove(&session_id);
-							if let Some(session_state) = state.sessions.get_mut(&session_id) {
-								session_state.replay.clear();
-								session_state.replay.insert(ReplayMethod::Detach, Command::Detach {
-									session_id,
-								});
-								replay_session(session_id, session_state, &mut state.sink).await;
-							}
-						}
-					}
-				}
-				route = route_rx.recv() => {
-					// handle incoming route
-
-					let Ok(response) = route else {
-						// route returned Err, frontend dropped the channel, meaning the router
-						// should quit.
-						match state.sink.send(Message::Close(None)).await {
-							Ok(..) => trace!("Connection closed successfully"),
-							Err(error) => {
-								warn!("Failed to close database connection; {error}")
-							}
-						}
-						break 'router;
-					};
-
-					match router_handle_route(response, config.max_message_size, &mut state).await {
-						HandleResult::Ok => {},
-						HandleResult::Disconnected => {
-							router_reconnect(
-								&maybe_connector,
-								&config,
-								&mut state,
-								&endpoint,
-							)
-							.await;
-							continue 'router;
-						}
-					}
-				}
-				result = state.stream.next() => {
-					// Handle result from database.
-
-					let Some(result) = result else {
-						// stream returned none meaning the connection dropped, try to reconnect.
-						router_reconnect(
-							&maybe_connector,
-							&config,
-							&mut state,
-							&endpoint,
-						)
-						.await;
-						continue 'router;
-					};
-
-					state.last_activity = Instant::now();
-					match result {
-						Ok(message) => {
-							match router_handle_response(message, &mut state).await {
-								HandleResult::Ok => continue,
-								HandleResult::Disconnected => {
-									router_reconnect(
-										&maybe_connector,
-										&config,
-										&mut state,
-										&endpoint,
-									)
-									.await;
-									continue 'router;
-								}
-							}
-						}
-						Err(error) => {
-							state.reset().await;
-							match error {
-								WsError::ConnectionClosed => {
-									trace!("Connection successfully closed on the server");
-								}
-								error => {
-									trace!("{error}");
-								}
-							}
-							router_reconnect(
-								&maybe_connector,
-								&config,
-								&mut state,
-								&endpoint,
-							)
-							.await;
-							continue 'router;
-						}
-					}
-				}
-				_ = pinger.next() => {
-					// only ping if we haven't talked to the server recently
-					if state.last_activity.elapsed() >= PING_INTERVAL {
-						trace!("Pinging the server");
-						if let Err(error) = state.sink.send(ping.clone()).await {
-							trace!("failed to ping the server; {error:?}");
-							router_reconnect(
-								&maybe_connector,
-								&config,
-								&mut state,
-								&endpoint,
-							)
-							.await;
-							continue 'router;
-						}
-					}
-
+					// Remove the session from local state
+					state.sessions.remove(&session_id);
 				}
 			}
+			}
+					route = route_rx.recv() => {
+						// handle incoming route
+
+						let Ok(response) = route else {
+							// route returned Err, frontend dropped the channel, meaning the router
+							// should quit.
+							match state.sink.send(Message::Close(None)).await {
+								Ok(..) => trace!("Connection closed successfully"),
+								Err(error) => {
+									warn!("Failed to close database connection; {error}")
+								}
+							}
+							break 'router;
+						};
+
+						match router_handle_route(response, config.max_message_size, &mut state).await {
+							HandleResult::Ok => {},
+							HandleResult::Disconnected => {
+								router_reconnect(
+									&maybe_connector,
+									&config,
+									&mut state,
+									&endpoint,
+								)
+								.await;
+								continue 'router;
+							}
+						}
+					}
+					result = state.stream.next() => {
+						// Handle result from database.
+
+						let Some(result) = result else {
+							// stream returned none meaning the connection dropped, try to reconnect.
+							router_reconnect(
+								&maybe_connector,
+								&config,
+								&mut state,
+								&endpoint,
+							)
+							.await;
+							continue 'router;
+						};
+
+						state.last_activity = Instant::now();
+						match result {
+							Ok(message) => {
+								match router_handle_response(message, &mut state).await {
+									HandleResult::Ok => continue,
+									HandleResult::Disconnected => {
+										router_reconnect(
+											&maybe_connector,
+											&config,
+											&mut state,
+											&endpoint,
+										)
+										.await;
+										continue 'router;
+									}
+								}
+							}
+							Err(error) => {
+								state.reset().await;
+								match error {
+									WsError::ConnectionClosed => {
+										trace!("Connection successfully closed on the server");
+									}
+									error => {
+										trace!("{error}");
+									}
+								}
+								router_reconnect(
+									&maybe_connector,
+									&config,
+									&mut state,
+									&endpoint,
+								)
+								.await;
+								continue 'router;
+							}
+						}
+					}
+					_ = pinger.next() => {
+						// only ping if we haven't talked to the server recently
+						if state.last_activity.elapsed() >= PING_INTERVAL {
+							trace!("Pinging the server");
+							if let Err(error) = state.sink.send(ping.clone()).await {
+								trace!("failed to ping the server; {error:?}");
+								router_reconnect(
+									&maybe_connector,
+									&config,
+									&mut state,
+									&endpoint,
+								)
+								.await;
+								continue 'router;
+							}
+						}
+
+					}
+				}
 		}
 	}
 }
