@@ -10,7 +10,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Timeout, Value};
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKwIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 
@@ -55,7 +55,7 @@ impl AlterSequenceStatement {
 				sq.timeout = Some(timeout);
 			}
 		}
-		// Set the table definition
+		// Set the sequence definition
 		let key = Sq::new(ns, db, &self.name);
 		txn.set(&key, &sq, None).await?;
 		// Clear the cache
@@ -71,9 +71,9 @@ impl Display for AlterSequenceStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", EscapeIdent(&self.name))?;
+		write!(f, " {}", EscapeKwIdent(&self.name, &["IF"]))?;
 		if let Some(ref timeout) = self.timeout {
-			write!(f, " TIMEOUT {timeout}")?;
+			write!(f, " {timeout}")?;
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

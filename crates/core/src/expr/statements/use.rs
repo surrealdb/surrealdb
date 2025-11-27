@@ -3,22 +3,24 @@ use std::fmt;
 use crate::expr::Expr;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub(crate) struct UseStatement {
-	pub ns: Option<Expr>,
-	pub db: Option<Expr>,
+pub enum UseStatement {
+	Ns(Expr),
+	Db(Expr),
+	NsDb(Expr, Expr),
+	Defaults,
 }
 
 impl fmt::Display for UseStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		f.write_str("USE")?;
-		if let Some(ref ns) = self.ns {
-			write!(f, " NS {ns}")?;
-		}
-		if let Some(ref db) = self.db {
-			write!(f, " DB {db}")?;
-		}
-		if self.ns.is_none() && self.db.is_none() {
-			write!(f, " DEFAULTS")?;
+
+		match self {
+			UseStatement::Ns(ns) => write!(f, " NS {ns}")?,
+			UseStatement::Db(db) => write!(f, " DB {db}")?,
+			UseStatement::NsDb(ns, db) => {
+				write!(f, " NS {ns} DB {db}")?
+			}
+			UseStatement::Defaults => write!(f, " DEFAULTS")?,
 		}
 		Ok(())
 	}

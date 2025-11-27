@@ -51,7 +51,6 @@ pub(crate) enum RecordStrategy {
 #[derive(Clone, Copy, Debug)]
 pub enum ScanDirection {
 	Forward,
-	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 	Backward,
 }
 
@@ -59,7 +58,6 @@ impl Display for ScanDirection {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		match self {
 			ScanDirection::Forward => f.write_str("forward"),
-			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 			ScanDirection::Backward => f.write_str("backward"),
 		}
 	}
@@ -208,14 +206,10 @@ impl<'a> StatementContext<'a> {
 	/// descending. Typically: `ORDER BY id DESC`
 	/// Determine forward/backward scan direction for table/range iterators.
 	///
-	/// On backends that support reverse scans (e.g., RocksDB/TiKV), we reverse
-	/// the direction when the first ORDER BY is `id DESC`. Otherwise, we
-	/// default to forward.
-	#[allow(unused_variables)]
-	pub(crate) fn check_scan_direction(&self, has_reverse_scan: bool) -> ScanDirection {
-		#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-		if has_reverse_scan
-			&& let Some(Ordering::Order(o)) = self.order
+	/// We reverse the direction when the first ORDER BY is `id DESC`.
+	/// Otherwise, we default to forward scan direction.
+	pub(crate) fn check_scan_direction(&self) -> ScanDirection {
+		if let Some(Ordering::Order(o)) = self.order
 			&& let Some(o) = o.first()
 			&& !o.direction
 			&& o.value.is_id()
@@ -308,7 +302,6 @@ impl QueryPlanner {
 			all_and: tree.all_and,
 			all_expressions_with_index: tree.all_expressions_with_index,
 			all_and_groups: tree.all_and_groups,
-			has_reverse_scan: ctx.ctx.tx().has_reverse_scan(),
 		};
 		match PlanBuilder::build(ctx, p).await? {
 			Plan::SingleIndex(exp, io, rs) => {

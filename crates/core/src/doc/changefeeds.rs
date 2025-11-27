@@ -29,7 +29,7 @@ impl Document {
 		if let Some(cf) = dbcf.or(tbcf) {
 			// Create the changefeed entry
 			if let Some(id) = &self.id {
-				ctx.tx().lock().await.record_change(
+				ctx.tx().changefeed_buffer_record_change(
 					ns,
 					db,
 					tbv.name.as_str(),

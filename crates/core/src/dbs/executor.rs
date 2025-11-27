@@ -23,7 +23,7 @@ use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::paths::{DB, NS};
 use crate::expr::plan::LogicalPlan;
-use crate::expr::statements::OptionStatement;
+use crate::expr::statements::{OptionStatement, UseStatement};
 use crate::expr::{Base, ControlFlow, Expr, FlowResult, TopLevelExpr};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::slowlog::SlowLogVisit;
@@ -119,51 +119,78 @@ impl Executor {
 			TopLevelExpr::Use(stmt) => {
 				let opt_ref = self.opt.clone();
 
-				let (use_ns, use_db) = match (stmt.ns, stmt.db) {
-					(None, None) => {
+				let (use_ns, use_db) = match stmt {
+					UseStatement::Defaults => {
 						if let Some(x) = txn.get_defaults_config().await? {
 							(x.namespace.clone(), x.database.clone())
 						} else {
 							(None, None)
 						}
 					}
-					(ns, db) => {
-						let ns = if let Some(ns) = ns {
-							Some(
-								self.stack
-									.enter(|stk| {
-										expr_to_ident(
-											stk,
-											&self.ctx,
-											&opt_ref,
-											None,
-											&ns,
-											"namespace",
-										)
-									})
-									.finish()
-									.await?,
-							)
-						} else {
-							None
-						};
+					UseStatement::Ns(ns) => {
+						let ns = self.stack
+							.enter(|stk| {
+								expr_to_ident(
+									stk,
+									&self.ctx,
+									&opt_ref,
+									None,
+									&ns,
+									"namespace",
+								)
+							})
+							.finish()
+							.await?;
 
-						let db = if let Some(db) = db {
-							Some(
-								self.stack
-									.enter(|stk| {
-										expr_to_ident(
-											stk, &self.ctx, &opt_ref, None, &db, "database",
-										)
-									})
-									.finish()
-									.await?,
-							)
-						} else {
-							None
-						};
+						(Some(ns), None)
+					}
+					UseStatement::Db(db) => {
+						let db = self.stack
+							.enter(|stk| {
+								expr_to_ident(
+									stk,
+									&self.ctx,
+									&opt_ref,
+									None,
+									&db,
+									"database",
+								)
+							})
+							.finish()
+							.await?;
 
-						(ns, db)
+						(None, Some(db))
+					}
+					UseStatement::NsDb(ns, db) => {
+						let ns = self.stack
+							.enter(|stk| {
+								expr_to_ident(
+									stk,
+									&self.ctx,
+									&opt_ref,
+									None,
+									&ns,
+									"namespace",
+								)
+							})
+							.finish()
+							.await?;
+
+						let db = self.stack
+							.enter(|stk| {
+								expr_to_ident(
+									stk,
+									&self.ctx,
+									&opt_ref,
+									None,
+									&db,
+									"database",
+								)
+							})
+							.finish()
+							.await?;
+
+						(Some(ns), Some(db))
 					}
 				};
 
@@ -351,25 +378,15 @@ impl Executor {
 
 		match self.execute_plan_in_transaction(txn.clone(), start, plan).await {
 			Ok(value) | Err(ControlFlow::Return(value)) => {
-				let mut lock = txn.lock().await;
-
 				// non-writable transactions might return an error on commit.
 				// So cancel them instead. This is fine since a non-writable transaction
 				// has nothing to commit anyway.
 				if let TransactionType::Read = transaction_type {
-					let _ = lock.cancel().await;
+					let _ = txn.cancel().await;
 					return Ok(value);
 				}
 
-				if let Err(e) = lock.complete_changes(false).await {
-					let _ = lock.cancel().await;
-
-					bail!(Error::QueryNotExecuted {
-						message: e.to_string(),
-					});
-				}
-
-				if let Err(e) = lock.commit().await {
+				if let Err(e) = txn.commit().await {
 					bail!(Error::QueryNotExecuted {
 						message: e.to_string(),
 					});
@@ -509,9 +526,10 @@ impl Executor {
 
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(DbResultError::QueryNotExecuted(
-							"The query was not executed due to a failed transaction".to_string(),
-						));
+						res.result = Err(DbResultError::QueryNotExecuted(format!(
+							"The query was not executed due to a failed transaction: {}",
+							stmt
+						)));
 					}
 
 					self.results.push(QueryResult {
@@ -534,10 +552,10 @@ impl Executor {
 
 						self.results.push(QueryResult {
 							time: Duration::ZERO,
-							result: Err(DbResultError::QueryNotExecuted(
-								"The query was not executed due to a failed transaction"
-									.to_string(),
-							)),
+							result: Err(DbResultError::QueryNotExecuted(format!(
+								"The query was not executed due to a failed transaction: {}",
+								stmt
+							))),
 							query_type: QueryType::Other,
 						});
 					}
@@ -566,14 +584,9 @@ impl Executor {
 					return Ok(());
 				}
 				TopLevelExpr::Commit => {
-					let mut lock = txn.lock().await;
-
-					// complete_changes and then commit.
-					// If either error undo results.
-					let e = if let Err(e) = lock.complete_changes(false).await {
-						let _ = lock.cancel().await;
-						e
-					} else if let Err(e) = lock.commit().await {
+					// Commit the transaction.
+					// If error undo results.
+					let e = if let Err(e) = txn.commit().await {
 						e
 					} else {
 						// Successfully commited. everything is fine.
@@ -668,12 +681,12 @@ impl Executor {
 									}
 
 									self.results.push(QueryResult {
-									time: Duration::ZERO,
-									result: Err(DbResultError::QueryNotExecuted(
-										"The query was not executed due to a cancelled transaction".to_string(),
-									)),
-									query_type: QueryType::Other,
-								});
+										time: Duration::ZERO,
+										result: Err(DbResultError::QueryNotExecuted(
+												"The query was not executed due to a cancelled transaction".to_string(),
+										)),
+										query_type: QueryType::Other,
+									});
 								}
 
 								// ran out of statements before the transaction ended.

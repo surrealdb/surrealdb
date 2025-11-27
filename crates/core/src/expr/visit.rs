@@ -3,6 +3,7 @@ use std::ops::Bound;
 use crate::catalog::{GraphQLConfig, Permission, Permissions, Relation, TableType};
 use crate::expr::access_type::{BearerAccess, JwtAccessVerify};
 use crate::expr::data::Assignment;
+use crate::expr::field::Selector;
 use crate::expr::lookup::LookupSubject;
 use crate::expr::order::Ordering;
 use crate::expr::part::{DestructurePart, Recurse, RecurseInstruction};
@@ -11,7 +12,8 @@ use crate::expr::statements::access::{
 	AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke, AccessStatementShow, Subject,
 };
 use crate::expr::statements::alter::{
-	AlterDefault, AlterFieldStatement, AlterKind, AlterSequenceStatement, AlterTableStatement,
+	AlterDefault, AlterFieldStatement, AlterIndexStatement, AlterKind, AlterSequenceStatement,
+	AlterTableStatement,
 };
 use crate::expr::statements::define::config::ConfigInner;
 use crate::expr::statements::define::config::api::ApiConfig;
@@ -335,7 +337,8 @@ implement_visitor! {
 
 	fn visit_alter(this, a: &AlterStatement){
 		match a {
-			AlterStatement::Table(a)=>{ this.visit_alter_table(a)?;},
+			AlterStatement::Table(a)=>{ this.visit_alter_table(a)?; },
+			AlterStatement::Index(a) => { this.visit_alter_index(a)?; },
 			AlterStatement::Sequence(a) => { this.visit_alter_sequence(a)?; },
 			AlterStatement::Field(a) => { this.visit_alter_field(a)?; },
 		}
@@ -346,6 +349,10 @@ implement_visitor! {
 		if let Some(p) = a.permissions.as_ref(){
 			this.visit_permissions(p)?;
 		}
+		Ok(())
+	}
+
+	fn visit_alter_index(this, a: &AlterIndexStatement){
 		Ok(())
 	}
 
@@ -1527,7 +1534,7 @@ implement_visitor! {
 	fn visit_fields(this, fields: &Fields) {
 		match fields {
 			Fields::Value(field) => {
-				this.visit_field(field)?;
+				this.visit_selector(field)?;
 			},
 			Fields::Select(fields) => {
 				for f in fields.iter(){
@@ -1542,12 +1549,17 @@ implement_visitor! {
 	fn visit_field(this, field: &Field){
 		match field {
 			Field::All => {},
-			Field::Single { expr, alias } => {
-				this.visit_expr(expr)?;
-				if let Some(alias) = alias.as_ref(){
-					this.visit_idiom(alias)?;
-				}
+			Field::Single(s) => {
+				this.visit_selector(s)?;
 			},
+		}
+		Ok(())
+	}
+
+	fn visit_selector(this, selector: &Selector){
+		this.visit_expr(&selector.expr)?;
+		if let Some(alias) = &selector.alias {
+			this.visit_idiom(alias)?;
 		}
 		Ok(())
 	}
@@ -1778,6 +1790,7 @@ implement_visitor_mut! {
 	fn visit_mut_alter(this, a: &mut AlterStatement){
 		match a {
 			AlterStatement::Table(a)=>{ this.visit_mut_alter_table(a)?;},
+			AlterStatement::Index(a)=>{ this.visit_mut_alter_index(a)?;},
 			AlterStatement::Sequence(a) => { this.visit_mut_alter_sequence(a)?; },
 			AlterStatement::Field(a) => { this.visit_mut_alter_field(a)?; },
 		}
@@ -1788,6 +1801,10 @@ implement_visitor_mut! {
 		if let Some(p) = a.permissions.as_mut(){
 			this.visit_mut_permissions(p)?;
 		}
+		Ok(())
+	}
+
+	fn visit_mut_alter_index(this, a: &mut AlterIndexStatement){
 		Ok(())
 	}
 
@@ -2976,7 +2993,7 @@ implement_visitor_mut! {
 	fn visit_mut_fields(this, fields: &mut Fields) {
 		match fields {
 			Fields::Value(field) => {
-				this.visit_mut_field(field)?;
+				this.visit_mut_selector(field)?;
 			},
 			Fields::Select(fields) => {
 				for f in fields.iter_mut(){
@@ -2991,12 +3008,15 @@ implement_visitor_mut! {
 	fn visit_mut_field(this, field: &mut Field){
 		match field {
 			Field::All => {},
-			Field::Single { expr, alias } => {
-				this.visit_mut_expr(expr)?;
-				if let Some(alias) = alias.as_mut(){
-					this.visit_mut_idiom(alias)?;
-				}
-			},
+			Field::Single(s) => this.visit_mut_selector(s)?,
+		}
+		Ok(())
+	}
+
+	fn visit_mut_selector(this, selector: &mut Selector){
+		this.visit_mut_expr(&mut selector.expr)?;
+		if let Some(alias) = &mut selector.alias{
+			this.visit_mut_idiom(alias)?;
 		}
 		Ok(())
 	}

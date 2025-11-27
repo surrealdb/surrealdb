@@ -2,18 +2,16 @@ use std::fmt::{self, Display, Write};
 use std::ops::Deref;
 
 use anyhow::Result;
-use reblessive::tree::Stk;
 
 use super::AlterKind;
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{Permissions, TableType};
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::DefineTableStatement;
 use crate::expr::{Base, ChangeFeed, Kind};
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKwIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -29,13 +27,7 @@ pub(crate) struct AlterTableStatement {
 }
 
 impl AlterTableStatement {
-	pub(crate) async fn compute(
-		&self,
-		_stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value> {
+	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Table, &Base::Db)?;
 		// Get the NS and DB
@@ -97,7 +89,7 @@ impl AlterTableStatement {
 
 		// Record definition change
 		if changefeed_replaced {
-			txn.lock().await.record_table_change(ns, db, &self.name, &dt);
+			txn.changefeed_buffer_table_change(ns, db, &self.name, &dt);
 		}
 
 		// Set the table definition
@@ -116,7 +108,7 @@ impl Display for AlterTableStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", EscapeIdent(&self.name))?;
+		write!(f, " {}", EscapeKwIdent(&self.name, &["IF"]))?;
 		if let Some(kind) = &self.kind {
 			write!(f, " TYPE")?;
 			match &kind {
@@ -163,7 +155,7 @@ impl Display for AlterTableStatement {
 		}
 
 		match self.changefeed {
-			AlterKind::Set(ref x) => writeln!(f, " CHANGEFEED {x}")?,
+			AlterKind::Set(ref x) => writeln!(f, " {x}")?,
 			AlterKind::Drop => writeln!(f, " DROP CHANGEFEED")?,
 			AlterKind::None => {}
 		}

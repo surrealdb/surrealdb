@@ -13,6 +13,7 @@ use super::schema::{gql_to_sql_kind, sql_value_to_gql_value};
 use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, FieldDefinition, NamespaceId, TableDefinition};
 use crate::dbs::Session;
+use crate::expr::field::Selector;
 use crate::expr::order::{OrderList, Ordering};
 use crate::expr::statements::SelectStatement;
 use crate::expr::{
@@ -272,7 +273,7 @@ pub async fn process_tbs(
 						// Build SELECT VALUE id FROM ONLY <record_id>
 						let select_stmt = SelectStatement {
 							what: vec![Value::RecordId(record_id.clone()).into_literal()],
-							expr: Fields::Value(Box::new(expr::Field::Single {
+							expr: Fields::Value(Box::new(Selector {
 								expr: expr::Expr::Idiom(Idiom::field("id".to_string())),
 								alias: None,
 							})),
@@ -382,7 +383,7 @@ pub async fn process_tbs(
 					// Build SELECT VALUE id FROM ONLY <record_id>
 					let select_stmt = SelectStatement {
 						what: vec![Value::RecordId(record_id.clone()).into_literal()],
-						expr: Fields::Value(Box::new(expr::Field::Single {
+						expr: Fields::Value(Box::new(Selector {
 							expr: expr::Expr::Idiom(Idiom::field("id".to_string())),
 							alias: None,
 						})),
@@ -430,7 +431,7 @@ fn make_table_field_resolver(
 				// Build SELECT VALUE <field> FROM ONLY <record_id>
 				let select_stmt = SelectStatement {
 					what: vec![Value::RecordId(rid.clone()).into_literal()],
-					expr: Fields::Value(Box::new(expr::Field::Single {
+					expr: Fields::Value(Box::new(Selector {
 						expr: expr::Expr::Idiom(Idiom::field(fd_name.clone())),
 						alias: None,
 					})),

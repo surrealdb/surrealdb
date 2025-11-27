@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
-use crate::fmt::{EscapeIdent, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
 use crate::sql::{Block, Expr, Kind, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -24,12 +24,17 @@ impl fmt::Display for DefineFunctionStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " fn::{}(", &self.name)?;
+		f.write_str(" fn")?;
+		for s in self.name.split("::") {
+			f.write_str("::")?;
+			EscapeKwFreeIdent(s).fmt(f)?;
+		}
+		f.write_str("(")?;
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			if i > 0 {
 				f.write_str(", ")?;
 			}
-			write!(f, "${}: {kind}", EscapeIdent(name))?;
+			write!(f, "${}: {kind}", EscapeKwFreeIdent(name))?;
 		}
 		f.write_str(") ")?;
 		if let Some(ref v) = self.returns {

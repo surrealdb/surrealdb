@@ -29,10 +29,8 @@ mod multiwriter_same_keys_conflict;
 mod raw;
 #[cfg(feature = "kv-rocksdb")]
 mod read_and_deletion_only;
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 mod reverse_iterator;
 mod snapshot;
-mod timestamp_to_versionstamp;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Kvs {
@@ -78,7 +76,7 @@ mod mem {
 		let path = "memory";
 		// Setup the in-memory datastore
 		let ds = Datastore::new_with_clock(
-			&CommunityComposer(),
+			CommunityComposer(),
 			path,
 			Some(clock),
 			CancellationToken::new(),
@@ -90,7 +88,14 @@ mod mem {
 		(ds, Kvs::Mem)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
+	include_tests!(new_ds =>
+		raw,
+		snapshot,
+		multireader,
+		multiwriter_different_keys,
+		multiwriter_same_keys_conflict,
+		reverse_iterator,
+	);
 }
 
 #[cfg(feature = "kv-rocksdb")]
@@ -109,7 +114,7 @@ mod rocksdb {
 		let path = format!("rocksdb:{path}");
 		// Setup the RocksDB datastore
 		let ds = Datastore::new_with_clock(
-			&CommunityComposer(),
+			CommunityComposer(),
 			&path,
 			Some(clock),
 			CancellationToken::new(),
@@ -121,7 +126,15 @@ mod rocksdb {
 		(ds, Kvs::Rocksdb)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp,reverse_iterator, read_and_deletion_only);
+	include_tests!(new_ds =>
+		raw,
+		snapshot,
+		multireader,
+		multiwriter_different_keys,
+		multiwriter_same_keys_conflict,
+		reverse_iterator,
+		read_and_deletion_only,
+	);
 }
 
 #[cfg(feature = "kv-surrealkv")]
@@ -140,7 +153,7 @@ mod surrealkv {
 		let path = format!("surrealkv:{path}");
 		// Setup the SurrealKV datastore
 		let ds = Datastore::new_with_clock(
-			&CommunityComposer(),
+			CommunityComposer(),
 			&path,
 			Some(clock),
 			CancellationToken::new(),
@@ -152,7 +165,14 @@ mod surrealkv {
 		(ds, Kvs::SurrealKV)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_conflict,timestamp_to_versionstamp);
+	include_tests!(new_ds =>
+		raw,
+		snapshot,
+		multireader,
+		multiwriter_different_keys,
+		multiwriter_same_keys_conflict,
+		reverse_iterator,
+	);
 }
 
 #[cfg(feature = "kv-tikv")]
@@ -169,7 +189,7 @@ mod tikv {
 		let path = "tikv:127.0.0.1:2379";
 		// Setup the TiKV datastore
 		let ds = Datastore::new_with_clock(
-			&CommunityComposer(),
+			CommunityComposer(),
 			path,
 			Some(clock),
 			CancellationToken::new(),
@@ -185,5 +205,12 @@ mod tikv {
 		(ds, Kvs::Tikv)
 	}
 
-	include_tests!(new_ds => raw,snapshot,multireader,multiwriter_different_keys,multiwriter_same_keys_allow,timestamp_to_versionstamp,reverse_iterator);
+	include_tests!(new_ds =>
+		raw,
+		snapshot,
+		multireader,
+		multiwriter_different_keys,
+		multiwriter_same_keys_allow,
+		reverse_iterator,
+	);
 }

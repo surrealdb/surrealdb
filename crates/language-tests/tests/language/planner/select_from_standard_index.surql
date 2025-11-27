@@ -29,13 +29,13 @@ value = "[{ detail: { plan: { index: 'time', operator: 'Order' }, table: 'sessio
 value = "[{ id: session:3, other: 'test' }, { id: session:4, time: NULL }, { id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:5, time: d'2024-07-01T02:00:00Z' }]"
 
 [[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'session' }, operation: 'Iterate Table' }, { detail: { limit: 4, type: 'MemoryOrderedLimit' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 0 }, operation: 'Fetch' }]"
+value = "[{ detail: { plan: { index: 'time', operator: 'ReverseOrder' }, table: 'session' }, operation: 'Iterate Index' }, { detail: { limit: 4, type: 'MemoryOrderedLimit' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { CancelOnLimit: 4 }, operation: 'StartLimitStrategy' }, { detail: { count: 0 }, operation: 'Fetch' }]"
 
 [[test.results]]
 value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:2, time: d'2024-06-30T23:00:00Z' }]"
 
 [[test.results]]
-value = "[{ detail: { direction: 'forward', table: 'session' }, operation: 'Iterate Table' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 6 }, operation: 'Fetch' }]"
+value = "[{ detail: { plan: { index: 'time', operator: 'ReverseOrder' }, table: 'session' }, operation: 'Iterate Index' }, { detail: { type: 'MemoryOrdered' }, operation: 'Collector' }, { detail: { type: 'KeysAndValues' }, operation: 'RecordStrategy' }, { detail: { count: 6 }, operation: 'Fetch' }]"
 
 [[test.results]]
 value = "[{ id: session:5, time: d'2024-07-01T02:00:00Z' }, { id: session:1, time: d'2024-07-01T01:00:00Z' }, { id: session:6, time: d'2024-06-30T23:30:00Z' }, { id: session:2, time: d'2024-06-30T23:00:00Z' }, { id: session:4, time: NULL }, { id: session:3, other: 'test' }]"

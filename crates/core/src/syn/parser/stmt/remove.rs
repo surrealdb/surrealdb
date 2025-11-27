@@ -116,11 +116,11 @@ impl Parser<'_> {
 						expected_whitespace!(self, t!("::"));
 						let package = self.parse_ident()?;
 						expected_whitespace!(self, t!("<"));
-						let major = self.next_token_value::<u32>()?;
+						let major = self.parse_version_digits()?;
 						expected_whitespace!(self, t!("."));
-						let minor = self.next_token_value::<u32>()?;
+						let minor = self.parse_version_digits()?;
 						expected_whitespace!(self, t!("."));
-						let patch = self.next_token_value::<u32>()?;
+						let patch = self.parse_version_digits()?;
 						expected_whitespace!(self, t!(">"));
 						ModuleName::Silo(organisation, package, major, minor, patch)
 					}

@@ -183,6 +183,9 @@ impl<'a> TreeBuilder<'a> {
 			let tx = self.ctx.ctx.tx();
 			let schema = self.lazy_load_schema_resolver(&tx, table).await?;
 			for (pos, ix) in schema.indexes.iter().enumerate() {
+				if ix.prepare_remove {
+					continue;
+				}
 				if let Index::Count(cond) = &ix.index
 					&& self.ctx.cond.eq(&cond.as_ref())
 				{
@@ -364,6 +367,9 @@ impl<'a> TreeBuilder<'a> {
 		}
 		let mut irs = Vec::new();
 		for (idx, ix) in schema.indexes.iter().enumerate() {
+			if ix.prepare_remove {
+				continue;
+			}
 			if let Some(idiom_index) = ix.cols.iter().position(|p| p.eq(i)) {
 				let ixr = schema.new_reference(idx);
 				// Check if the WITH clause allows the index to be used

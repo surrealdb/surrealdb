@@ -5,7 +5,7 @@ use super::{ParseResult, Parser};
 use crate::sql::data::Assignment;
 use crate::sql::statements::access::{
 	AccessStatement, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke,
-	AccessStatementShow, Subject,
+	AccessStatementShow, PurgeKind, Subject,
 };
 use crate::sql::statements::rebuild::RebuildIndexStatement;
 use crate::sql::statements::show::ShowSince;
@@ -220,27 +220,36 @@ impl Parser<'_> {
 			}
 			t!("PURGE") => {
 				self.pop_peek();
-				let mut expired = false;
-				let mut revoked = false;
-				loop {
+				let mut kind = None;
+				let kind = loop {
 					match self.peek_kind() {
 						t!("EXPIRED") => {
 							self.pop_peek();
-							expired = true;
+							match kind {
+								None => kind = Some(PurgeKind::Expired),
+								Some(PurgeKind::Revoked) => kind = Some(PurgeKind::Both),
+								_ => unexpected!(self, peek, "ACCESS PURGE statement to end"),
+							}
 						}
 						t!("REVOKED") => {
 							self.pop_peek();
-							revoked = true;
+							match kind {
+								None => kind = Some(PurgeKind::Revoked),
+								Some(PurgeKind::Expired) => kind = Some(PurgeKind::Both),
+								_ => unexpected!(self, peek, "ACCESS PURGE statement to end"),
+							}
 						}
 						_ => {
-							if !expired && !revoked {
-								unexpected!(self, peek, "EXPIRED, REVOKED or both");
-							}
-							break;
+							let Some(kind) = kind else {
+								unexpected!(self, peek, "EXPIRED, or REVOKED")
+							};
+							break kind;
 						}
 					}
+					//TODO: This is kind of bad syntax, we should either choose to have a `,`
+					//between keywords or not, not allow both and just ignore it.
 					self.eat(t!(","));
-				}
+				};
 				let grace = if self.eat(t!("FOR")) {
 					self.next_token_value()?
 				} else {
@@ -249,8 +258,7 @@ impl Parser<'_> {
 				Ok(AccessStatement::Purge(AccessStatementPurge {
 					ac,
 					base,
-					expired,
-					revoked,
+					kind,
 					grace,
 				}))
 			}
@@ -291,33 +299,30 @@ impl Parser<'_> {
 	/// Expects `USE` to already be consumed.
 	async fn parse_use_stmt(&mut self, stk: &mut Stk) -> ParseResult<UseStatement> {
 		let peek = self.peek();
-		let (ns, db) = match peek.kind {
+		let stmt = match peek.kind {
 			t!("NAMESPACE") => {
 				self.pop_peek();
 				let ns = stk.run(|stk| self.parse_expr_field(stk)).await?;
-				let db = if self.eat(t!("DATABASE")) {
-					Some(stk.run(|stk| self.parse_expr_field(stk)).await?)
+				if self.eat(t!("DATABASE")) {
+					let db = stk.run(|stk| self.parse_expr_field(stk)).await?;
+					UseStatement::NsDb(ns, db)
 				} else {
-					None
-				};
-				(Some(ns), db)
+					UseStatement::Ns(ns)
+				}
 			}
 			t!("DATABASE") => {
 				self.pop_peek();
 				let db = stk.run(|stk| self.parse_expr_field(stk)).await?;
-				(None, Some(db))
+				UseStatement::Db(db)
 			}
 			t!("DEFAULTS") => {
 				self.pop_peek();
-				(None, None)
+				UseStatement::Defaults
 			}
 			_ => unexpected!(self, peek, "either DATABASE or NAMESPACE"),
 		};
 
-		Ok(UseStatement {
-			ns,
-			db,
-		})
+		Ok(stmt)
 	}
 
 	/// Parsers a FOR statement.

@@ -212,7 +212,7 @@ impl Parser<'_> {
 			t!("IF") => {
 				self.pop_peek();
 				let stmt = stk.run(|ctx| self.parse_if_stmt(ctx)).await?;
-				Expr::If(Box::new(stmt))
+				Expr::IfElse(Box::new(stmt))
 			}
 			t!("SELECT") => {
 				self.pop_peek();
@@ -365,6 +365,7 @@ impl Parser<'_> {
 
 				let value = stk.run(|ctx| this.parse_expr_inherit(ctx)).await?;
 				exprs.push(value);
+
 
 				if !this.eat(t!(",")) {
 					this.expect_closing_delimiter(t!("]"), start)?;

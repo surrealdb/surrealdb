@@ -1,15 +1,18 @@
 use std::fmt::{self, Display, Formatter, Write};
 
-use crate::fmt::Fmt;
+use crate::fmt::{CoverStmtsSql, Fmt};
 use crate::sql::{Expr, Idiom};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[cfg_attr(feature = "arbitrary", derive(::arbitrary::Arbitrary))]
 pub(crate) enum Fields {
 	/// Fields had the `VALUE` clause and should only return the given selector
-	Value(Box<Field>),
+	Value(Box<Selector>),
 	/// Normal fields where an object with the selected fields is expected
-	Select(Vec<Field>),
+	Select(
+		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+		Vec<Field>,
+	),
 }
 
 impl Fields {
@@ -24,8 +27,8 @@ impl Fields {
 
 	pub fn contains_all(&self) -> bool {
 		match self {
-			Fields::Value(field) => matches!(**field, Field::All),
-			Fields::Select(fields) => fields.iter().all(|x| matches!(x, Field::All)),
+			Fields::Value(_) => false,
+			Fields::Select(fields) => fields.iter().any(|x| matches!(x, Field::All)),
 		}
 	}
 
@@ -75,29 +78,20 @@ pub(crate) enum Field {
 	#[default]
 	All,
 	/// The 'rating' in `SELECT rating FROM ...`
-	Single {
-		expr: Expr,
-		/// The `quality` in `SELECT rating AS quality FROM ...`
-		alias: Option<Idiom>,
-	},
+	Single(Selector),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Selector {
+	pub expr: Expr,
+	pub alias: Option<Idiom>,
 }
 
 impl Display for Field {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::All => f.write_char('*'),
-			Self::Single {
-				expr,
-				alias,
-			} => {
-				Display::fmt(expr, f)?;
-				if let Some(alias) = alias {
-					f.write_str(" AS ")?;
-					Display::fmt(alias, f)
-				} else {
-					Ok(())
-				}
-			}
+			Self::Single(s) => Display::fmt(s, f),
 		}
 	}
 }
@@ -106,13 +100,7 @@ impl From<Field> for crate::expr::field::Field {
 	fn from(v: Field) -> Self {
 		match v {
 			Field::All => Self::All,
-			Field::Single {
-				expr,
-				alias,
-			} => Self::Single {
-				expr: expr.into(),
-				alias: alias.map(Into::into),
-			},
+			Field::Single(s) => crate::expr::field::Field::Single(s.into()),
 		}
 	}
 }
@@ -121,13 +109,37 @@ impl From<crate::expr::field::Field> for Field {
 	fn from(v: crate::expr::field::Field) -> Self {
 		match v {
 			crate::expr::field::Field::All => Self::All,
-			crate::expr::field::Field::Single {
-				expr,
-				alias,
-			} => Self::Single {
-				expr: expr.into(),
-				alias: alias.map(Into::into),
-			},
+			crate::expr::field::Field::Single(s) => Self::Single(s.into()),
+		}
+	}
+}
+
+impl Display for Selector {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		Display::fmt(&CoverStmtsSql(&self.expr), f)?;
+		if let Some(alias) = &self.alias {
+			f.write_str(" AS ")?;
+			Display::fmt(alias, f)
+		} else {
+			Ok(())
+		}
+	}
+}
+
+impl From<Selector> for crate::expr::field::Selector {
+	fn from(v: Selector) -> Self {
+		crate::expr::field::Selector {
+			expr: v.expr.into(),
+			alias: v.alias.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::field::Selector> for Selector {
+	fn from(v: crate::expr::field::Selector) -> Self {
+		Selector {
+			expr: v.expr.into(),
+			alias: v.alias.map(Into::into),
 		}
 	}
 }

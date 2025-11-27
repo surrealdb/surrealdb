@@ -6,7 +6,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResult, Value};
-use crate::fmt::{Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
+use crate::fmt::{CoverStmtsExpr, Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct IfelseStatement {
@@ -61,12 +61,12 @@ impl Display for IfelseStatement {
 					self.exprs.iter().map(|args| {
 						Fmt::new(args, |(cond, then), f| {
 							if is_pretty() {
-								write!(f, "IF {cond}")?;
+								write!(f, "IF {}", CoverStmtsExpr(cond))?;
 								let indent = pretty_indent();
 								write!(f, "{then}")?;
 								drop(indent);
 							} else {
-								write!(f, "IF {cond} {then}")?;
+								write!(f, "IF {} {then}", CoverStmtsExpr(cond))?;
 							}
 							Ok(())
 						})
@@ -97,12 +97,12 @@ impl Display for IfelseStatement {
 					self.exprs.iter().map(|args| {
 						Fmt::new(args, |(cond, then), f| {
 							if is_pretty() {
-								write!(f, "IF {cond} THEN")?;
+								write!(f, "IF {} THEN", CoverStmtsExpr(cond))?;
 								let indent = pretty_indent();
 								write!(f, "{then}")?;
 								drop(indent);
 							} else {
-								write!(f, "IF {cond} THEN {then}")?;
+								write!(f, "IF {} THEN {then}", CoverStmtsExpr(cond))?;
 							}
 							Ok(())
 						})
