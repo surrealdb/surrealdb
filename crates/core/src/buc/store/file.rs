@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::path::{Path as OsPath, PathBuf};
 use std::pin::Pin;
+use std::time::SystemTime;
 
 use bytes::Bytes;
 use path_clean::PathClean;
@@ -11,7 +12,6 @@ use url::Url;
 use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 use crate::cnf::BUCKET_FOLDER_ALLOWLIST;
 use crate::err::Error;
-use crate::val::Datetime;
 
 /// Options for configuring the FileStore
 #[derive(Clone, Debug)]
@@ -318,10 +318,7 @@ impl ObjectStore for FileStore {
 			let size = metadata.len();
 
 			// Get modified time if available
-			let updated = metadata
-				.modified()
-				.map(|time| Datetime(time.into()))
-				.unwrap_or_else(|_| Datetime::now());
+			let updated = metadata.modified().unwrap_or_else(|_| SystemTime::now()).into();
 
 			Ok(Some(ObjectMeta {
 				size,
@@ -499,10 +496,7 @@ impl ObjectStore for FileStore {
 				}
 
 				let size = metadata.len();
-				let updated = metadata
-					.modified()
-					.map(|time| Datetime(time.into()))
-					.unwrap_or_else(|_| Datetime::now());
+				let updated = metadata.modified().unwrap_or_else(|_| SystemTime::now()).into();
 				return Ok(vec![ObjectMeta {
 					key: base_key,
 					size,
@@ -570,10 +564,7 @@ impl ObjectStore for FileStore {
 				.into_iter()
 				.map(|(entry_key, metadata)| {
 					let size = metadata.len();
-					let updated = metadata
-						.modified()
-						.map(|time| Datetime(time.into()))
-						.unwrap_or_else(|_| Datetime::now());
+					let updated = metadata.modified().unwrap_or_else(|_| SystemTime::now()).into();
 					ObjectMeta {
 						key: entry_key,
 						size,

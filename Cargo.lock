@@ -1071,9 +1071,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.10.1"
+version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d71b6127be86fdcfddb610f7182ac57211d4b18a3e9c82eb2d17662f2227ad6a"
+checksum = "b35204fbdc0b3f4446b89fc1ac2cf84a8a68971995d0bf2e925ec7cd960f9cb3"
 dependencies = [
  "serde",
 ]
@@ -4812,6 +4812,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 
 [[package]]
+name = "papaya"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f92dd0b07c53a0a0c764db2ace8c541dc47320dad97c2200c2a637ab9dd2328f"
+dependencies = [
+ "equivalent",
+ "seize",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6394,6 +6404,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "seize"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b55fb86dfd3a2f5f76ea78310a88f96c4ea21a3031f8d212443d56123fd0521"
+dependencies = [
+ "libc",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "semver"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6819,7 +6839,7 @@ checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
 
 [[package]]
 name = "surreal"
-version = "3.0.0-alpha.15"
+version = "3.0.0-alpha.16"
 dependencies = [
  "assert_fs",
  "chrono",
@@ -6851,7 +6871,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb"
-version = "3.0.0-alpha.15"
+version = "3.0.0-alpha.16"
 dependencies = [
  "arrayvec",
  "async-channel",
@@ -6913,7 +6933,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-core"
-version = "3.0.0-alpha.15"
+version = "3.0.0-alpha.16"
 dependencies = [
  "addr",
  "affinitypool",
@@ -7080,7 +7100,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-server"
-version = "3.0.0-alpha.15"
+version = "3.0.0-alpha.16"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -7188,7 +7208,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types"
-version = "3.0.0-alpha.15"
+version = "3.0.0-alpha.16"
 dependencies = [
  "anyhow",
  "arbitrary",
@@ -7216,7 +7236,7 @@ dependencies = [
 
 [[package]]
 name = "surrealdb-types-derive"
-version = "3.0.0-alpha.15"
+version = "3.0.0-alpha.16"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7225,7 +7245,7 @@ dependencies = [
 
 [[package]]
 name = "surrealism"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "chrono",
@@ -7241,7 +7261,7 @@ dependencies = [
 
 [[package]]
 name = "surrealism-cli"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7263,7 +7283,7 @@ dependencies = [
 
 [[package]]
 name = "surrealism-macros"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -7272,7 +7292,7 @@ dependencies = [
 
 [[package]]
 name = "surrealism-runtime"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7296,7 +7316,7 @@ dependencies = [
 
 [[package]]
 name = "surrealism-types"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7367,11 +7387,10 @@ dependencies = [
 
 [[package]]
 name = "surrealmx"
-version = "0.14.3"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4c88126ef0bbc6945b489e20e7777ae94910ba9f803cbbce74a2915727f2c8d"
+checksum = "dbe0aa6326a59dbc86821220a1e9d9a2f46a354deaadd93637cdfac1862e6b0e"
 dependencies = [
- "ahash 0.8.12",
  "arc-swap",
  "bincode 2.0.1",
  "bytes",
@@ -7379,10 +7398,11 @@ dependencies = [
  "crossbeam-queue",
  "crossbeam-skiplist",
  "lz4",
+ "papaya",
  "parking_lot",
  "serde",
  "smallvec",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "tracing",
 ]
 
