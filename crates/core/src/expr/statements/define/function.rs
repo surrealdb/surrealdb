@@ -1,4 +1,3 @@
-use std::fmt::{self, Display, Write};
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
@@ -12,7 +11,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Block, Expr, Kind};
-use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 

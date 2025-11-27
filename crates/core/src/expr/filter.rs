@@ -1,8 +1,7 @@
 use revision::revisioned;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr::language::Language;
-use crate::fmt::QuoteStr;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

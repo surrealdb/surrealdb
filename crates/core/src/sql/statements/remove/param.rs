@@ -1,8 +1,6 @@
-use std::fmt::{self, Display, Formatter};
 
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::fmt::EscapeKwFreeIdent;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

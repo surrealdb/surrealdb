@@ -1,19 +1,17 @@
 use std::borrow::Cow;
-use std::fmt::{self, Display, Formatter, Write};
+use std::fmt::Write;
 use std::slice::Iter;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::revisioned;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::paths::ID;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, FlowResultExt as _, Function, Idiom, Part};
-use crate::fmt::Fmt;
 use crate::fnc::args::FromArgs;
 use crate::syn;
 use crate::val::{Array, Value};

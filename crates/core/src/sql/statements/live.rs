@@ -1,4 +1,3 @@
-use std::fmt;
 
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use uuid::Uuid;

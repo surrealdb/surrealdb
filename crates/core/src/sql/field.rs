@@ -1,4 +1,4 @@
-use std::fmt::{self, Display, Formatter, Write};
+use std::fmt::Write;
 
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 

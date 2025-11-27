@@ -1,10 +1,9 @@
-use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
 use reblessive::tree::Stk;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
 use crate::catalog::providers::{AuthorisationProvider, NamespaceProvider};

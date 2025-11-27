@@ -1,10 +1,8 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
 
 use anyhow::{Result, bail, ensure};
 use rand::Rng;
 use reblessive::tree::Stk;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::providers::{
 	AuthorisationProvider, CatalogProvider, NamespaceProvider, UserProvider,
@@ -14,7 +12,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Cond, ControlFlow, FlowResult, FlowResultExt as _, RecordIdLit};
-use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Array, Datetime, Duration, Object, Value};
 use crate::{catalog, val};

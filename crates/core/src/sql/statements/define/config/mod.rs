@@ -1,5 +1,5 @@
 pub mod api;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 pub mod graphql;
 
 use api::ApiConfig;

@@ -1,8 +1,7 @@
-use std::fmt;
 
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::{ControlFlow, FlowResult, FlowResultExt as _};
 use crate::catalog::Permission;
@@ -12,7 +11,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Expr, Idiom, Kind, Model, ModuleExecutable, Script, Value};
-use crate::fmt::{EscapeKwFreeIdent, Fmt};
 use crate::fnc;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

@@ -1,4 +1,3 @@
-use std::fmt::{self, Display, Write};
 use std::ops::Deref;
 
 use anyhow::Result;
@@ -11,7 +10,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Timeout, Value};
-use crate::fmt::EscapeKwIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 

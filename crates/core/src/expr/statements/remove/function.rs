@@ -1,4 +1,3 @@
-use std::fmt::{self, Display};
 
 use anyhow::Result;
 use surrealdb_types::{SqlFormat, ToSql};
@@ -8,7 +7,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Value};
-use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]

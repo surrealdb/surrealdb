@@ -1,5 +1,5 @@
 use revision::revisioned;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::Expr;
 

@@ -1,4 +1,3 @@
-use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use argon2::Argon2;
@@ -7,7 +6,7 @@ use rand::Rng as _;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 use reblessive::tree::Stk;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, UserProvider};
@@ -19,7 +18,6 @@ use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::user::UserDuration;
 use crate::expr::{Base, Expr, Idiom, Literal};
-use crate::fmt::{Fmt, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Duration, Value};
 

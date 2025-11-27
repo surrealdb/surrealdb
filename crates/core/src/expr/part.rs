@@ -1,9 +1,8 @@
-use std::fmt;
 use std::fmt::Write;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::cnf::IDIOM_RECURSION_LIMIT;
 use crate::ctx::Context;
@@ -15,7 +14,7 @@ use crate::expr::idiom::recursion::{
 	self, Recursion, clean_iteration, compute_idiom_recursion, is_final,
 };
 use crate::expr::{Expr, FlowResultExt as _, Idiom, Literal, Lookup, Value};
-use crate::fmt::{EscapeKwFreeIdent, Fmt};
+use crate::fmt::EscapeKwFreeIdent;
 use crate::val::{Array, RecordId};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

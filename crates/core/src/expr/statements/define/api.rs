@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::config::api::ApiConfig;
 use super::{CursorDoc, DefineKind};
@@ -11,7 +11,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
-use crate::fmt::Fmt;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

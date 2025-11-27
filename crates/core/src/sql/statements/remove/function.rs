@@ -1,4 +1,3 @@
-use std::fmt::{self, Display};
 
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 

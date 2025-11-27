@@ -1,16 +1,15 @@
 use std::collections::BTreeMap;
-use std::fmt::{self, Write as _};
+use std::fmt::Write as _;
 use std::hash::{Hash, Hasher};
 
 use reblessive::tree::Stk;
 use rust_decimal::Decimal;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResult, RecordIdLit};
-use crate::fmt::{EscapeKey, Float, Fmt, QuoteStr};
 use crate::val::{
 	Array, Bytes, Datetime, Duration, File, Geometry, Number, Object, Range, Regex, Uuid, Value,
 };

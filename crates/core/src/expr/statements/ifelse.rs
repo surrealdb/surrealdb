@@ -1,4 +1,3 @@
-use std::fmt::{self, Display, Write};
 
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
@@ -7,7 +6,6 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResult, Value};
-use crate::fmt::{CoverStmtsExpr, Fmt, fmt_separated_by};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct IfelseStatement {

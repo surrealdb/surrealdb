@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::fmt;
 
 use anyhow::Result;
 use reblessive::tree::Stk;

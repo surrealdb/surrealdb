@@ -1,6 +1,6 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::FlowResultExt as _;
 use crate::ctx::Context;

@@ -1,10 +1,9 @@
-use std::fmt;
 use std::ops::Deref;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::fmt::EscapeIdent;
 use crate::val::IndexFormat;

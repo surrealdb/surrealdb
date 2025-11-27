@@ -1,4 +1,4 @@
-use std::fmt::{self, Write as _};
+use std::fmt::Write as _;
 
 //use async_graphql::dynamic::Object;
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};

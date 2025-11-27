@@ -1,9 +1,8 @@
-use std::fmt::{self, Display};
 use std::ops::Deref;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 use uuid::Uuid;
 
 use super::AlterKind;
@@ -15,7 +14,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::reference::Reference;
 use crate::expr::{Base, Expr, Idiom, Kind};
-use crate::fmt::{EscapeKwIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 

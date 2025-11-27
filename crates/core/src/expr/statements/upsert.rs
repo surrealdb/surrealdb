@@ -1,4 +1,3 @@
-use std::fmt;
 
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
@@ -9,7 +8,6 @@ use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Cond, Data, Explain, Expr, Output, Timeout, With};
-use crate::fmt::{CoverStmtsExpr, Fmt};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 

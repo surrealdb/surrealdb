@@ -1,4 +1,4 @@
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::Distance;
 use crate::expr::{Expr, Kind};

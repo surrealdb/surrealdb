@@ -5,7 +5,7 @@ mod test;
 
 mod escape;
 use std::cell::Cell;
-use std::fmt::{self, Display, Formatter, Write};
+use std::fmt::Display;
 
 pub use escape::{EscapeIdent, EscapeKey, EscapeKwFreeIdent, EscapeKwIdent, EscapeRid, QuoteStr};
 use surrealdb_types::{SqlFormat, ToSql};

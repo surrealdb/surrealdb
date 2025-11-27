@@ -1,9 +1,9 @@
-use std::fmt::{self, Display, Formatter, Write};
+use std::fmt::Write;
 use std::ops::Bound;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
@@ -12,7 +12,6 @@ use crate::doc::CursorDoc;
 use crate::expr::order::Ordering;
 use crate::expr::start::Start;
 use crate::expr::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits};
-use crate::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt};
 use crate::kvs::KVKey;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
 

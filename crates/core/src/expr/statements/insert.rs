@@ -1,4 +1,3 @@
-use std::fmt;
 
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
@@ -11,7 +10,6 @@ use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::relate::RelateThrough;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
-use crate::fmt::CoverStmtsExpr;
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Datetime, RecordIdKey, Table};
 

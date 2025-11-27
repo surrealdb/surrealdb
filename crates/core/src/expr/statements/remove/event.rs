@@ -1,4 +1,3 @@
-use std::fmt::{self, Display, Formatter};
 
 use anyhow::Result;
 use reblessive::tree::Stk;
@@ -13,7 +12,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
-use crate::fmt::CoverStmtsExpr;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

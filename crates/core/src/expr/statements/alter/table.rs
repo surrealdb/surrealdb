@@ -1,4 +1,3 @@
-use std::fmt::{self, Display, Write};
 use std::ops::Deref;
 
 use anyhow::Result;
@@ -13,8 +12,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::DefineTableStatement;
-use crate::expr::{Base, ChangeFeed, Kind};
-use crate::fmt::EscapeKwIdent;
+use crate::expr::{Base, ChangeFeed};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 

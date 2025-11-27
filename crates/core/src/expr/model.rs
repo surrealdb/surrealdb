@@ -2,7 +2,7 @@
 use std::collections::HashMap;
 
 use reblessive::tree::Stk;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 #[cfg(feature = "ml")]
 use surrealml::errors::error::SurrealError;
 #[cfg(feature = "ml")]
