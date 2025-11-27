@@ -5,7 +5,7 @@
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
+value = "{ database: 'strict_test', namespace: 'test' }"
 
 [[test.results]]
 error = "The table 'foo' does not exist"

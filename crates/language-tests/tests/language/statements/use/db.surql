@@ -8,7 +8,7 @@ value = "NONE"
 value = "['test', 'test', 'test', 'test']"
 
 [[test.results]]
-value = "NONE"
+value = "{ database: 'my_db', namespace: 'test' }"
 
 [[test.results]]
 value = "['test', 'test', 'my_db', 'my_db']"

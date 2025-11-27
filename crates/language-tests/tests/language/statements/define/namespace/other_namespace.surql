@@ -10,13 +10,13 @@ clean = true
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
+value = "{ database: NONE, namespace: 'foo' }"
 
 [[test.results]]
 value = "{ accesses: {  }, databases: {  }, users: {  } }"
 
 [[test.results]]
-value = "NONE"
+value = "{ database: NONE, namespace: 'TEST' }"
 
 [[test.results]]
 value = "{ accesses: {  }, databases: {  }, users: {  } }"
