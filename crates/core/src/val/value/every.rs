@@ -1,5 +1,3 @@
-use surrealdb_types::ToSql;
-
 use crate::expr::idiom::Idiom;
 use crate::expr::part::Part;
 use crate::expr::{Expr, Literal};
@@ -102,6 +100,8 @@ pub enum ArrayBehaviour {
 
 #[cfg(test)]
 mod tests {
+
+	use surrealdb_types::ToSql;
 
 	use super::*;
 	use crate::syn;

@@ -1,5 +1,8 @@
+use std::fmt::{self, Display, Formatter};
+
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
@@ -10,6 +13,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
+use crate::fmt::CoverStmtsExpr;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -91,5 +95,12 @@ impl RemoveEventStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
+	}
+}
+
+impl ToSql for RemoveEventStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::remove::RemoveEventStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

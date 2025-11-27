@@ -1,12 +1,12 @@
+use std::fmt;
 use std::fmt::Write;
 
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt};
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 use crate::sql::{Expr, Idiom, Lookup};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) enum Part {
 	All,
 	Flatten,
@@ -88,59 +88,43 @@ impl From<crate::expr::Part> for Part {
 impl ToSql for Part {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Part::All => write_sql!(f, fmt, ".*"),
-			Part::Last => write_sql!(f, fmt, "[$]"),
-			Part::First => write_sql!(f, fmt, "[0]"),
+			Part::All => f.push_str(".*"),
+			Part::Last => f.push_str("[$]"),
+			Part::First => f.push_str("[0]"),
 			Part::Start(v) => v.fmt_sql(f, fmt),
 			Part::Field(v) => write_sql!(f, fmt, ".{}", EscapeKwFreeIdent(v)),
-			Part::Flatten => write_sql!(f, fmt, "…"),
-			Part::Where(v) => write_sql!(f, fmt, "[WHERE {}]", v),
+			Part::Flatten => f.push_str("…"),
+			Part::Where(v) => write_sql!(f, fmt, "[WHERE {v}]"),
 			Part::Graph(v) => v.fmt_sql(f, fmt),
-			Part::Value(v) => write_sql!(f, fmt, "[{}]", v),
+			Part::Value(v) => write_sql!(f, fmt, "[{v}]"),
 			Part::Method(v, a) => {
-				write_sql!(f, fmt, ".{v}({})", Fmt::comma_separated(a))
+				write_sql!(f, fmt, ".{}({})", EscapeKwFreeIdent(v), Fmt::comma_separated(a))
 			}
 			Part::Destructure(v) => {
 				f.push_str(".{");
-				if fmt.is_pretty() {
-					let inner_fmt = fmt.increment();
-					if !v.is_empty() {
-						f.push('\n');
-						for (i, item) in v.iter().enumerate() {
-							if i > 0 {
-								inner_fmt.write_separator(f);
-							}
-							inner_fmt.write_indent(f);
-							item.fmt_sql(f, inner_fmt);
-						}
-						f.push('\n');
-						fmt.write_indent(f);
-					}
-				} else {
-					f.push(' ');
-					for (i, item) in v.iter().enumerate() {
-						if i > 0 {
-							f.push_str(", ");
-						}
-						item.fmt_sql(f, fmt);
-					}
+				if !fmt.is_pretty() {
 					f.push(' ');
 				}
-				f.push('}');
+				if !v.is_empty() {
+					let fmt = fmt.increment();
+					write_sql!(f, fmt, "{}", Fmt::pretty_comma_separated(v));
+				}
+				if fmt.is_pretty() {
+					f.push('}');
+				} else {
+					f.push_str(" }");
+				}
 			}
 			Part::Optional => f.push('?'),
 			Part::Recurse(v, nest, instruction) => {
-				f.push_str(".{");
-				v.fmt_sql(f, fmt);
+				write_sql!(f, fmt, ".{{{v}");
 				if let Some(instruction) = instruction {
-					f.push('+');
-					instruction.fmt_sql(f, fmt);
+					write_sql!(f, fmt, "+{instruction}");
 				}
-				f.push('}');
+				f.push_str("}}");
+
 				if let Some(nest) = nest {
-					f.push('(');
-					nest.fmt_sql(f, fmt);
-					f.push(')');
+					write_sql!(f, fmt, "({nest})");
 				}
 			}
 			Part::Doc => f.push('@'),
@@ -161,13 +145,13 @@ pub enum DestructurePart {
 }
 
 impl ToSql for DestructurePart {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			DestructurePart::All(fd) => write_sql!(f, sql_fmt, "{}.*", EscapeIdent(fd)),
-			DestructurePart::Field(fd) => write_sql!(f, sql_fmt, "{}", EscapeIdent(fd)),
-			DestructurePart::Aliased(fd, v) => write_sql!(f, sql_fmt, "{}: {v}", EscapeIdent(fd)),
+			DestructurePart::All(fd) => write_sql!(f, fmt, "{}.*", EscapeKwFreeIdent(fd)),
+			DestructurePart::Field(fd) => write_sql!(f, fmt, "{}", EscapeKwFreeIdent(fd)),
+			DestructurePart::Aliased(fd, v) => write_sql!(f, fmt, "{}: {v}", EscapeKwFreeIdent(fd)),
 			DestructurePart::Destructure(fd, d) => {
-				write_sql!(f, sql_fmt, "{}{}", EscapeIdent(&fd), Part::Destructure(d.clone()))
+				write_sql!(f, fmt, "{}{}", EscapeKwFreeIdent(fd), Part::Destructure(d.clone()))
 			}
 		}
 	}
@@ -209,14 +193,24 @@ pub enum Recurse {
 }
 
 impl ToSql for Recurse {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		match self {
-			Recurse::Fixed(v) => write_sql!(f, sql_fmt, "{v}"),
+			Recurse::Fixed(v) => f.push_str(&v.to_string()),
 			Recurse::Range(beg, end) => match (beg, end) {
-				(None, None) => write_sql!(f, sql_fmt, ".."),
-				(Some(beg), None) => write_sql!(f, sql_fmt, "{beg}.."),
-				(None, Some(end)) => write_sql!(f, sql_fmt, "..{end}"),
-				(Some(beg), Some(end)) => write_sql!(f, sql_fmt, "{beg}..{end}"),
+				(None, None) => f.push_str(".."),
+				(Some(beg), None) => {
+					f.push_str(&beg.to_string());
+					f.push_str("..");
+				}
+				(None, Some(end)) => {
+					f.push_str("..");
+					f.push_str(&end.to_string());
+				}
+				(Some(beg), Some(end)) => {
+					f.push_str(&beg.to_string());
+					f.push_str("..");
+					f.push_str(&end.to_string());
+				}
 			},
 		}
 	}
@@ -239,11 +233,9 @@ impl From<crate::expr::part::Recurse> for Recurse {
 		}
 	}
 }
-
 // ------------------------------
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum RecurseInstruction {
 	Path {
 		// Do we include the starting point in the paths?
@@ -262,34 +254,34 @@ pub enum RecurseInstruction {
 }
 
 impl ToSql for RecurseInstruction {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			Self::Path {
 				inclusive,
 			} => {
-				write_sql!(f, sql_fmt, "path");
+				f.push_str("path");
 
 				if *inclusive {
-					write_sql!(f, sql_fmt, "+inclusive");
+					f.push_str("+inclusive");
 				}
 			}
 			Self::Collect {
 				inclusive,
 			} => {
-				write_sql!(f, sql_fmt, "collect");
+				f.push_str("collect");
 
 				if *inclusive {
-					write_sql!(f, sql_fmt, "+inclusive");
+					f.push_str("+inclusive");
 				}
 			}
 			Self::Shortest {
 				expects,
 				inclusive,
 			} => {
-				write_sql!(f, sql_fmt, "shortest={expects}");
+				write_sql!(f, fmt, "shortest={expects}");
 
 				if *inclusive {
-					write_sql!(f, sql_fmt, "+inclusive");
+					f.push_str("+inclusive");
 				}
 			}
 		}

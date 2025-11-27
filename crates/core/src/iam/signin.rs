@@ -417,7 +417,7 @@ pub async fn db_access(
 									// If the SIGNIN clause failed due to an unexpected error, be
 									// more specific This allows clients to handle these
 									// errors, which may be retryable
-									Some(Error::Tx(_) | Error::TxRetryable(_)) => {
+									Some(Error::Kvs(kvs_err)) if kvs_err.is_retryable() => {
 										debug!(
 											"Unexpected error found while executing a SIGNIN clause: {e}"
 										);

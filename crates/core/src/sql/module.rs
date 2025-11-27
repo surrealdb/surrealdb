@@ -1,5 +1,8 @@
+use std::fmt::{self, Display};
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::fmt::EscapeKwFreeIdent;
 use crate::val::File;
 use crate::{catalog, expr};
 
@@ -11,11 +14,17 @@ pub(crate) enum ModuleName {
 }
 
 impl ToSql for ModuleName {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			ModuleName::Module(name) => write_sql!(f, sql_fmt, "mod::{}", name),
+			ModuleName::Module(name) => write_sql!(f, fmt, "mod::{}", EscapeKwFreeIdent(name)),
 			ModuleName::Silo(org, pkg, major, minor, patch) => {
-				write_sql!(f, sql_fmt, "silo::{org}::{pkg}<{major}.{minor}.{patch}>")
+				write_sql!(
+					f,
+					fmt,
+					"silo::{}::{}<{major}.{minor}.{patch}>",
+					EscapeKwFreeIdent(org),
+					EscapeKwFreeIdent(pkg)
+				);
 			}
 		}
 	}
@@ -44,6 +53,7 @@ impl From<crate::catalog::ModuleName> for ModuleName {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) enum ModuleExecutable {
 	Surrealism(SurrealismExecutable),
 	Silo(SiloExecutable),
@@ -92,6 +102,7 @@ impl ToSql for ModuleExecutable {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct SurrealismExecutable(pub File);
 
 impl From<expr::SurrealismExecutable> for SurrealismExecutable {
@@ -114,11 +125,12 @@ impl From<SurrealismExecutable> for expr::SurrealismExecutable {
 
 impl ToSql for SurrealismExecutable {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		self.0.fmt_sql(f, fmt)
+		self.0.fmt_sql(f, fmt);
 	}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct SiloExecutable {
 	pub organisation: String,
 	pub package: String,

@@ -1,4 +1,6 @@
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use std::fmt::{self, Display, Formatter};
+
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::sql::{Expr, Literal};
 
@@ -21,12 +23,9 @@ impl Default for RemoveEventStatement {
 }
 
 impl ToSql for RemoveEventStatement {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "REMOVE EVENT");
-		if self.if_exists {
-			write_sql!(f, sql_fmt, " IF EXISTS");
-		}
-		write_sql!(f, sql_fmt, " {} ON {}", self.name, self.what);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::remove::RemoveEventStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }
 

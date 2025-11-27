@@ -2,6 +2,7 @@ use std::ops::Bound;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::RecordIdKeyLit;
 use crate::ctx::Context;
@@ -68,5 +69,12 @@ impl RecordIdKeyRangeLit {
 			start,
 			end,
 		})
+	}
+}
+
+impl ToSql for RecordIdKeyRangeLit {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let range: crate::sql::record_id::range::RecordIdKeyRangeLit = self.clone().into();
+		range.fmt_sql(f, fmt);
 	}
 }

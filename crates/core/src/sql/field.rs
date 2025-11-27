@@ -1,14 +1,20 @@
-use std::fmt::Write;
+use std::fmt::{self, Display, Formatter, Write};
 
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
+use crate::fmt::{CoverStmtsSql, Fmt};
 use crate::sql::{Expr, Idiom};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+#[cfg_attr(feature = "arbitrary", derive(::arbitrary::Arbitrary))]
 pub(crate) enum Fields {
 	/// Fields had the `VALUE` clause and should only return the given selector
-	Value(Box<Field>),
+	Value(Box<Selector>),
 	/// Normal fields where an object with the selected fields is expected
-	Select(Vec<Field>),
+	Select(
+		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+		Vec<Field>,
+	),
 }
 
 impl Fields {
@@ -23,8 +29,8 @@ impl Fields {
 
 	pub fn contains_all(&self) -> bool {
 		match self {
-			Fields::Value(field) => matches!(**field, Field::All),
-			Fields::Select(fields) => fields.iter().all(|x| matches!(x, Field::All)),
+			Fields::Value(_) => false,
+			Fields::Select(fields) => fields.iter().any(|x| matches!(x, Field::All)),
 		}
 	}
 
@@ -58,21 +64,14 @@ impl From<crate::expr::field::Fields> for Fields {
 	}
 }
 
-impl surrealdb_types::ToSql for Fields {
-	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+impl ToSql for Fields {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			Fields::Value(v) => {
 				f.push_str("VALUE ");
 				v.fmt_sql(f, fmt);
 			}
-			Fields::Select(x) => {
-				for (i, item) in x.iter().enumerate() {
-					if i > 0 {
-						fmt.write_separator(f);
-					}
-					item.fmt_sql(f, fmt);
-				}
-			}
+			Fields::Select(x) => write_sql!(f, fmt, "{}", Fmt::comma_separated(x)),
 		}
 	}
 }
@@ -84,27 +83,20 @@ pub(crate) enum Field {
 	#[default]
 	All,
 	/// The 'rating' in `SELECT rating FROM ...`
-	Single {
-		expr: Expr,
-		/// The `quality` in `SELECT rating AS quality FROM ...`
-		alias: Option<Idiom>,
-	},
+	Single(Selector),
 }
 
-impl surrealdb_types::ToSql for Field {
-	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Selector {
+	pub expr: Expr,
+	pub alias: Option<Idiom>,
+}
+
+impl ToSql for Field {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			Self::All => f.push('*'),
-			Self::Single {
-				expr,
-				alias,
-			} => {
-				expr.fmt_sql(f, fmt);
-				if let Some(alias) = alias {
-					f.push_str(" AS ");
-					alias.fmt_sql(f, fmt);
-				}
-			}
+			Self::Single(s) => s.fmt_sql(f, fmt),
 		}
 	}
 }
@@ -113,13 +105,7 @@ impl From<Field> for crate::expr::field::Field {
 	fn from(v: Field) -> Self {
 		match v {
 			Field::All => Self::All,
-			Field::Single {
-				expr,
-				alias,
-			} => Self::Single {
-				expr: expr.into(),
-				alias: alias.map(Into::into),
-			},
+			Field::Single(s) => crate::expr::field::Field::Single(s.into()),
 		}
 	}
 }
@@ -128,13 +114,35 @@ impl From<crate::expr::field::Field> for Field {
 	fn from(v: crate::expr::field::Field) -> Self {
 		match v {
 			crate::expr::field::Field::All => Self::All,
-			crate::expr::field::Field::Single {
-				expr,
-				alias,
-			} => Self::Single {
-				expr: expr.into(),
-				alias: alias.map(Into::into),
-			},
+			crate::expr::field::Field::Single(s) => Self::Single(s.into()),
+		}
+	}
+}
+
+impl ToSql for Selector {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "{}", CoverStmtsSql(&self.expr));
+		if let Some(alias) = &self.alias {
+			f.push_str(" AS ");
+			alias.fmt_sql(f, fmt);
+		}
+	}
+}
+
+impl From<Selector> for crate::expr::field::Selector {
+	fn from(v: Selector) -> Self {
+		crate::expr::field::Selector {
+			expr: v.expr.into(),
+			alias: v.alias.map(Into::into),
+		}
+	}
+}
+
+impl From<crate::expr::field::Selector> for Selector {
+	fn from(v: crate::expr::field::Selector) -> Self {
+		Selector {
+			expr: v.expr.into(),
+			alias: v.alias.map(Into::into),
 		}
 	}
 }

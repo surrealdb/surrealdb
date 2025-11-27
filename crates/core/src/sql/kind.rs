@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, HashSet};
-use std::fmt::Write;
+use std::fmt::{self, Display, Formatter, Write};
 use std::hash;
 
 use rust_decimal::Decimal;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeIdent, EscapeKey, Fmt, QuoteStr};
+use crate::fmt::{EscapeKey, EscapeKwFreeIdent, Fmt, QuoteStr};
 use crate::types::PublicDuration;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -21,15 +21,15 @@ pub enum GeometryKind {
 }
 
 impl ToSql for GeometryKind {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		match self {
-			GeometryKind::Point => write_sql!(f, fmt, "point"),
-			GeometryKind::Line => write_sql!(f, fmt, "line"),
-			GeometryKind::Polygon => write_sql!(f, fmt, "polygon"),
-			GeometryKind::MultiPoint => write_sql!(f, fmt, "multipoint"),
-			GeometryKind::MultiLine => write_sql!(f, fmt, "multiline"),
-			GeometryKind::MultiPolygon => write_sql!(f, fmt, "multipolygon"),
-			GeometryKind::Collection => write_sql!(f, fmt, "collection"),
+			GeometryKind::Point => f.push_str("point"),
+			GeometryKind::Line => f.push_str("line"),
+			GeometryKind::Polygon => f.push_str("polygon"),
+			GeometryKind::MultiPoint => f.push_str("multipoint"),
+			GeometryKind::MultiLine => f.push_str("multiline"),
+			GeometryKind::MultiPolygon => f.push_str("multipolygon"),
+			GeometryKind::Collection => f.push_str("collection"),
 		}
 	}
 }
@@ -134,7 +134,10 @@ pub enum Kind {
 	Geometry(Vec<GeometryKind>),
 	/// An either type.
 	/// Can be any of the kinds in the vec.
-	Either(Vec<Kind>),
+	Either(
+		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::either_kind))]
+		Vec<Kind>,
+	),
 	/// A set type.
 	Set(Box<Kind>, Option<u64>),
 	/// An array type.
@@ -343,71 +346,76 @@ impl From<crate::types::PublicKind> for Kind {
 impl ToSql for Kind {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Kind::Any => write_sql!(f, fmt, "any"),
-			Kind::None => write_sql!(f, fmt, "none"),
-			Kind::Null => write_sql!(f, fmt, "null"),
-			Kind::Bool => write_sql!(f, fmt, "bool"),
-			Kind::Bytes => write_sql!(f, fmt, "bytes"),
-			Kind::Datetime => write_sql!(f, fmt, "datetime"),
-			Kind::Decimal => write_sql!(f, fmt, "decimal"),
-			Kind::Duration => write_sql!(f, fmt, "duration"),
-			Kind::Float => write_sql!(f, fmt, "float"),
-			Kind::Int => write_sql!(f, fmt, "int"),
-			Kind::Number => write_sql!(f, fmt, "number"),
-			Kind::Object => write_sql!(f, fmt, "object"),
-			Kind::String => write_sql!(f, fmt, "string"),
-			Kind::Uuid => write_sql!(f, fmt, "uuid"),
-			Kind::Regex => write_sql!(f, fmt, "regex"),
-			Kind::Function(_, _) => write_sql!(f, fmt, "function"),
+			Kind::Any => f.push_str("any"),
+			Kind::None => f.push_str("none"),
+			Kind::Null => f.push_str("null"),
+			Kind::Bool => f.push_str("bool"),
+			Kind::Bytes => f.push_str("bytes"),
+			Kind::Datetime => f.push_str("datetime"),
+			Kind::Decimal => f.push_str("decimal"),
+			Kind::Duration => f.push_str("duration"),
+			Kind::Float => f.push_str("float"),
+			Kind::Int => f.push_str("int"),
+			Kind::Number => f.push_str("number"),
+			Kind::Object => f.push_str("object"),
+			Kind::String => f.push_str("string"),
+			Kind::Uuid => f.push_str("uuid"),
+			Kind::Regex => f.push_str("regex"),
+			Kind::Function(_, _) => f.push_str("function"),
 			Kind::Table(k) => {
 				if k.is_empty() {
-					write_sql!(f, fmt, "table")
+					f.push_str("table");
 				} else {
 					write_sql!(
 						f,
 						fmt,
 						"table<{}>",
-						Fmt::verbar_separated(k.iter().map(EscapeIdent))
-					)
+						Fmt::verbar_separated(k.iter().map(|x| EscapeKwFreeIdent(x)))
+					);
 				}
 			}
 			Kind::Record(k) => {
 				if k.is_empty() {
-					write_sql!(f, fmt, "record")
+					f.push_str("record");
 				} else {
 					write_sql!(
 						f,
 						fmt,
 						"record<{}>",
-						Fmt::verbar_separated(k.iter().map(EscapeIdent))
-					)
+						Fmt::verbar_separated(k.iter().map(|x| EscapeKwFreeIdent(x)))
+					);
 				}
 			}
 			Kind::Geometry(k) => {
 				if k.is_empty() {
-					write_sql!(f, fmt, "geometry")
+					f.push_str("geometry");
 				} else {
-					write_sql!(f, fmt, "geometry<{}>", Fmt::verbar_separated(k))
+					write_sql!(f, fmt, "geometry<{}>", Fmt::verbar_separated(k));
 				}
 			}
 			Kind::Set(k, l) => match (k, l) {
-				(k, None) if matches!(**k, Kind::Any) => write_sql!(f, fmt, "set"),
+				(k, None) if matches!(**k, Kind::Any) => f.push_str("set"),
 				(k, None) => write_sql!(f, fmt, "set<{k}>"),
 				(k, Some(l)) => write_sql!(f, fmt, "set<{k}, {l}>"),
 			},
 			Kind::Array(k, l) => match (k, l) {
-				(k, None) if matches!(**k, Kind::Any) => write_sql!(f, fmt, "array"),
+				(k, None) if matches!(**k, Kind::Any) => f.push_str("array"),
 				(k, None) => write_sql!(f, fmt, "array<{k}>"),
 				(k, Some(l)) => write_sql!(f, fmt, "array<{k}, {l}>"),
 			},
 			Kind::Either(k) => write_sql!(f, fmt, "{}", Fmt::verbar_separated(k)),
-			Kind::Range => write_sql!(f, fmt, "range"),
-			Kind::Literal(l) => write_sql!(f, fmt, "{}", l),
+			Kind::Range => f.push_str("range"),
+			Kind::Literal(l) => l.fmt_sql(f, fmt),
 			Kind::File(k) => {
 				if k.is_empty() {
-					write_sql!(f, fmt, "file")
+					f.push_str("file");
 				} else {
-					write_sql!(f, fmt, "file<{}>", Fmt::verbar_separated(k))
+					write_sql!(
+						f,
+						fmt,
+						"file<{}>",
+						Fmt::verbar_separated(k.iter().map(|x| EscapeKwFreeIdent(x)))
+					);
 				}
 			}
 		}
@@ -511,18 +519,18 @@ impl ToSql for KindLiteral {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			KindLiteral::String(s) => write_sql!(f, fmt, "{}", QuoteStr(s)),
-			KindLiteral::Integer(n) => write_sql!(f, fmt, "{}", n),
-			KindLiteral::Float(n) => write_sql!(f, fmt, "{}", n),
-			KindLiteral::Decimal(n) => write_sql!(f, fmt, "{}", n),
-			KindLiteral::Duration(d) => write_sql!(f, fmt, "{}", d),
-			KindLiteral::Bool(b) => write_sql!(f, fmt, "{}", b),
+			KindLiteral::Integer(n) => f.push_str(&n.to_string()),
+			KindLiteral::Float(n) => f.push_str(&n.to_string()),
+			KindLiteral::Decimal(n) => f.push_str(&n.to_string()),
+			KindLiteral::Duration(d) => d.fmt_sql(f, fmt),
+			KindLiteral::Bool(b) => f.push_str(&b.to_string()),
 			KindLiteral::Array(a) => {
 				f.push('[');
 				if !a.is_empty() {
 					let fmt = fmt.increment();
 					write_sql!(f, fmt, "{}", Fmt::pretty_comma_separated(a.as_slice()));
 				}
-				f.push(']')
+				f.push(']');
 			}
 			KindLiteral::Object(o) => {
 				if fmt.is_pretty() {
@@ -543,12 +551,18 @@ impl ToSql for KindLiteral {
 					);
 				}
 				if fmt.is_pretty() {
-					f.push('}')
+					f.push('}');
 				} else {
-					f.push_str(" }")
+					f.push_str(" }");
 				}
 			}
 		}
+	}
+}
+
+impl Display for Kind {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", self.to_sql())
 	}
 }
 
@@ -668,6 +682,7 @@ mod tests {
 	#[case::file_single(Kind::File(vec!["bucket".to_string()]), "file<bucket>")]
 	fn test_kind_to_sql(#[case] kind: Kind, #[case] expected: &str) {
 		assert_eq!(kind.to_sql(), expected);
+		assert_eq!(kind.to_string(), expected);
 	}
 
 	#[rstest]

@@ -44,6 +44,7 @@ impl Limit {
 
 impl ToSql for Limit {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "LIMIT {}", self.0)
+		let stmt: crate::sql::limit::Limit = self.clone().into();
+		stmt.fmt_sql(f, sql_fmt);
 	}
 }

@@ -12,6 +12,7 @@ use crate::sql::{SqlFormat, ToSql};
 /// Bytes stores raw binary data as a vector of unsigned 8-bit integers.
 
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Bytes(pub(crate) Vec<u8>);
 
 impl Bytes {

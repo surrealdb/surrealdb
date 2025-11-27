@@ -220,7 +220,7 @@ impl Value {
 		match self {
 			Value::String(v) => v,
 			Value::Uuid(v) => v.to_raw(),
-			Value::Datetime(v) => v.to_raw_string(),
+			Value::Datetime(v) => v.to_string(),
 			_ => self.to_sql(),
 		}
 	}
@@ -230,7 +230,7 @@ impl Value {
 		match self {
 			Value::String(v) => v.clone(),
 			Value::Uuid(v) => v.to_raw(),
-			Value::Datetime(v) => v.to_raw_string(),
+			Value::Datetime(v) => v.to_string(),
 			_ => self.to_sql(),
 		}
 	}

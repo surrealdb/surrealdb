@@ -1,3 +1,5 @@
+use std::fmt;
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::EscapeIdent;
@@ -52,7 +54,7 @@ pub(crate) enum Expr {
 	Throw(Box<Expr>),
 
 	Return(Box<OutputStatement>),
-	If(Box<IfelseStatement>),
+	IfElse(Box<IfelseStatement>),
 	Select(Box<SelectStatement>),
 	Create(Box<CreateStatement>),
 	Update(Box<UpdateStatement>),
@@ -165,7 +167,7 @@ impl Expr {
 			| Expr::Continue
 			| Expr::Throw(_)
 			| Expr::Return(_)
-			| Expr::If(_)
+			| Expr::IfElse(_)
 			| Expr::Select(_)
 			| Expr::Create(_)
 			| Expr::Update(_)
@@ -372,49 +374,41 @@ impl ToSql for Expr {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			Expr::Literal(literal) => literal.fmt_sql(f, fmt),
-			// All other variants can delegate to Display since they don't have nested structures
-			// that need pretty printing
-			Expr::Param(param) => write_sql!(f, fmt, "{}", param),
-			Expr::Idiom(idiom) => write_sql!(f, fmt, "{}", idiom),
+			Expr::Param(param) => param.fmt_sql(f, fmt),
+			Expr::Idiom(idiom) => idiom.fmt_sql(f, fmt),
 			Expr::Table(ident) => write_sql!(f, fmt, "{}", EscapeIdent(ident)),
-			Expr::Mock(mock) => write_sql!(f, fmt, "{}", mock),
+			Expr::Mock(mock) => mock.fmt_sql(f, fmt),
 			Expr::Block(block) => block.fmt_sql(f, fmt),
-			Expr::Constant(constant) => write_sql!(f, fmt, "{}", constant),
+			Expr::Constant(constant) => constant.fmt_sql(f, fmt),
 			Expr::Prefix {
 				op,
 				expr,
 			} => {
-				let needs_parens = expr.needs_parentheses() || {
-					let expr_bp = BindingPower::for_expr(expr);
-					let op_bp = BindingPower::for_prefix_operator(op);
-					expr_bp < op_bp || (expr_bp == op_bp && matches!(expr_bp, BindingPower::Range))
-				};
-				write_sql!(f, fmt, "{}", op);
-				if needs_parens {
-					f.push('(');
-					expr.fmt_sql(f, fmt);
-					f.push(')');
+				let expr_bp = BindingPower::for_expr(expr);
+				let op_bp = BindingPower::for_prefix_operator(op);
+				if expr.needs_parentheses()
+					|| expr_bp < op_bp
+					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
+				{
+					write_sql!(f, fmt, "{op}({expr})");
 				} else {
-					expr.fmt_sql(f, fmt);
+					write_sql!(f, fmt, "{op}{expr}");
 				}
 			}
 			Expr::Postfix {
 				expr,
 				op,
 			} => {
-				let needs_parens = expr.needs_parentheses() || {
-					let expr_bp = BindingPower::for_expr(expr);
-					let op_bp = BindingPower::for_postfix_operator(op);
-					expr_bp < op_bp || (expr_bp == op_bp && matches!(expr_bp, BindingPower::Range))
-				};
-				if needs_parens {
-					f.push('(');
-					expr.fmt_sql(f, fmt);
-					f.push(')');
+				let expr_bp = BindingPower::for_expr(expr);
+				let op_bp = BindingPower::for_postfix_operator(op);
+				if expr.needs_parentheses()
+					|| expr_bp < op_bp
+					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
+				{
+					write_sql!(f, fmt, "({expr}){op}");
 				} else {
-					expr.fmt_sql(f, fmt);
+					write_sql!(f, fmt, "{expr}{op}");
 				}
-				write_sql!(f, fmt, "{}", op);
 			}
 			Expr::Binary {
 				left,
@@ -425,17 +419,14 @@ impl ToSql for Expr {
 				let left_bp = BindingPower::for_expr(left);
 				let right_bp = BindingPower::for_expr(right);
 
-				let left_needs_parens = left.needs_parentheses()
+				if left.needs_parentheses()
 					|| left_bp < op_bp
-					|| (left_bp == op_bp
-						&& matches!(left_bp, BindingPower::Range | BindingPower::Relation));
-
-				if left_needs_parens {
-					f.push('(');
-					left.fmt_sql(f, fmt);
-					f.push(')');
+					|| left_bp == op_bp
+						&& matches!(left_bp, BindingPower::Range | BindingPower::Relation)
+				{
+					write_sql!(f, fmt, "({left})");
 				} else {
-					left.fmt_sql(f, fmt);
+					write_sql!(f, fmt, "{left}");
 				}
 
 				if matches!(
@@ -445,35 +436,30 @@ impl ToSql for Expr {
 						| BinaryOperator::RangeInclusive
 						| BinaryOperator::RangeSkipInclusive
 				) {
-					write_sql!(f, fmt, "{}", op);
+					op.fmt_sql(f, fmt);
 				} else {
-					write_sql!(f, fmt, " {} ", op);
+					f.push(' ');
+					op.fmt_sql(f, fmt);
+					f.push(' ');
 				}
 
-				let right_needs_parens = right.needs_parentheses()
+				if right.needs_parentheses()
 					|| right_bp < op_bp
-					|| (right_bp == op_bp
-						&& matches!(right_bp, BindingPower::Range | BindingPower::Relation));
-
-				if right_needs_parens {
-					f.push('(');
-					right.fmt_sql(f, fmt);
-					f.push(')');
+					|| right_bp == op_bp
+						&& matches!(right_bp, BindingPower::Range | BindingPower::Relation)
+				{
+					write_sql!(f, fmt, "({right})");
 				} else {
-					right.fmt_sql(f, fmt);
+					write_sql!(f, fmt, "{right}");
 				}
 			}
-			Expr::FunctionCall(function_call) => write_sql!(f, fmt, "{}", function_call),
-			Expr::Closure(closure) => write_sql!(f, fmt, "{}", closure),
+			Expr::FunctionCall(function_call) => function_call.fmt_sql(f, fmt),
+			Expr::Closure(closure) => closure.fmt_sql(f, fmt),
 			Expr::Break => f.push_str("BREAK"),
 			Expr::Continue => f.push_str("CONTINUE"),
 			Expr::Return(x) => x.fmt_sql(f, fmt),
-			Expr::Throw(expr) => {
-				write_sql!(f, fmt, "THROW ");
-				expr.fmt_sql(f, fmt);
-			}
-			// Statement variants - delegate to their ToSql implementations
-			Expr::If(s) => s.fmt_sql(f, fmt),
+			Expr::Throw(expr) => write_sql!(f, fmt, "THROW {expr}"),
+			Expr::IfElse(s) => s.fmt_sql(f, fmt),
 			Expr::Select(s) => s.fmt_sql(f, fmt),
 			Expr::Create(s) => s.fmt_sql(f, fmt),
 			Expr::Update(s) => s.fmt_sql(f, fmt),
@@ -533,7 +519,7 @@ impl From<Expr> for crate::expr::Expr {
 			Expr::Continue => crate::expr::Expr::Continue,
 			Expr::Return(e) => crate::expr::Expr::Return(Box::new((*e).into())),
 			Expr::Throw(e) => crate::expr::Expr::Throw(Box::new((*e).into())),
-			Expr::If(s) => crate::expr::Expr::IfElse(Box::new((*s).into())),
+			Expr::IfElse(s) => crate::expr::Expr::IfElse(Box::new((*s).into())),
 			Expr::Select(s) => crate::expr::Expr::Select(Box::new((*s).into())),
 			Expr::Create(s) => crate::expr::Expr::Create(Box::new((*s).into())),
 			Expr::Update(s) => crate::expr::Expr::Update(Box::new((*s).into())),
@@ -593,7 +579,7 @@ impl From<crate::expr::Expr> for Expr {
 			crate::expr::Expr::Continue => Expr::Continue,
 			crate::expr::Expr::Return(e) => Expr::Return(Box::new((*e).into())),
 			crate::expr::Expr::Throw(e) => Expr::Throw(Box::new((*e).into())),
-			crate::expr::Expr::IfElse(s) => Expr::If(Box::new((*s).into())),
+			crate::expr::Expr::IfElse(s) => Expr::IfElse(Box::new((*s).into())),
 			crate::expr::Expr::Select(s) => Expr::Select(Box::new((*s).into())),
 			crate::expr::Expr::Create(s) => Expr::Create(Box::new((*s).into())),
 			crate::expr::Expr::Update(s) => Expr::Update(Box::new((*s).into())),

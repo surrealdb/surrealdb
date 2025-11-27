@@ -48,6 +48,7 @@ use serde::{Deserialize, Serialize};
 use surrealdb_types::ToSql;
 
 use crate::err::Error;
+use crate::expr::field::Selector;
 use crate::expr::statements::define::DefineConfigStatement;
 use crate::expr::statements::{
 	CreateStatement, DefineAccessStatement, DefineApiStatement, DefineFieldStatement,
@@ -1079,27 +1080,17 @@ impl AggregationAnalysis {
 		let fields = match fields {
 			Fields::Value(field) => {
 				// alias is unused when using a value selector.
-				let Field::Single {
-					expr,
-					..
-				} = field.as_ref()
-				else {
-					// all is not a valid aggregate selector.
-					bail!(Error::InvalidAggregationSelector {
-						expr: field.to_sql()
-					})
-				};
-				let mut expr = expr.clone();
+				let mut expr = field.expr.clone();
 				collect.visit_mut_expr(&mut expr)?;
 				AggregateFields::Value(expr)
 			}
 			Fields::Select(fields) => {
 				let mut collect_fields = Vec::with_capacity(fields.len());
 				for f in fields.iter() {
-					let Field::Single {
+					let Field::Single(Selector {
 						expr,
 						alias,
-					} = f
+					}) = f
 					else {
 						// all is not a valid aggregate selector.
 						bail!(Error::InvalidAggregationSelector {

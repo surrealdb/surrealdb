@@ -1,15 +1,15 @@
-use std::fmt::Write;
+use std::fmt::{self, Display, Formatter, Write};
+use std::ops::Bound;
 
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::EscapeIdent;
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 use crate::sql::order::Ordering;
 use crate::sql::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits, Start};
 
 /// A lookup is a unified way of looking up graph edges and record references.
 /// Since they both work very similarly, they also both support the same operations
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct Lookup {
 	pub kind: LookupKind,
 	pub expr: Option<Fields>,
@@ -23,11 +23,24 @@ pub(crate) struct Lookup {
 	pub alias: Option<Idiom>,
 }
 
-impl surrealdb_types::ToSql for Lookup {
-	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
-		use surrealdb_types::ToSql;
+impl ToSql for Lookup {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		if self.what.len() <= 1
-			&& self.what.iter().all(|v| v.referencing_field().is_none())
+			// When the singular lookup subject has a referencing field, it needs to be wrapped in parentheses
+			// Otherwise <~table.field will be parsed as [Lookup(<~table), Field(.field)]
+			// Whereas <~(table.field) will be parsed as [Lookup(<~table.field)]
+			//
+			// Further more `<-foo:a..` can lead to issues when the next part of the idiom starts
+			// with a `.`
+			&& self.what.iter().all(|v| {
+				if v.referencing_field().is_some() {
+					return false
+				}
+				if let LookupSubject::Range { range: RecordIdKeyRangeLit{ end: Bound::Unbounded, .. }, ..} = v {
+					return false
+				}
+				true
+			})
 			&& self.cond.is_none()
 			&& self.alias.is_none()
 			&& self.expr.is_none()
@@ -36,58 +49,38 @@ impl surrealdb_types::ToSql for Lookup {
 			if self.what.is_empty() {
 				f.push('?');
 			} else {
-				for (i, item) in self.what.iter().enumerate() {
-					if i > 0 {
-						fmt.write_separator(f);
-					}
-					item.fmt_sql(f, fmt);
-				}
+				write_sql!(f, fmt, "{}", Fmt::comma_separated(self.what.iter()));
 			}
 		} else {
-			self.kind.fmt_sql(f, fmt);
-			f.push('(');
+			write_sql!(f, fmt, "{}(", self.kind);
 			if let Some(ref expr) = self.expr {
-				f.push_str("SELECT ");
-				expr.fmt_sql(f, fmt);
-				f.push_str(" FROM ");
+				write_sql!(f, fmt, "SELECT {} FROM ", expr);
 			}
 			if self.what.is_empty() {
 				f.push('?');
 			} else {
-				for (i, item) in self.what.iter().enumerate() {
-					if i > 0 {
-						fmt.write_separator(f);
-					}
-					item.fmt_sql(f, fmt);
-				}
+				write_sql!(f, fmt, "{}", Fmt::comma_separated(&self.what));
 			}
 			if let Some(ref v) = self.cond {
-				f.push(' ');
-				v.fmt_sql(f, fmt);
+				write_sql!(f, fmt, " {v}");
 			}
 			if let Some(ref v) = self.split {
-				f.push(' ');
-				v.fmt_sql(f, fmt);
+				write_sql!(f, fmt, " {v}");
 			}
 			if let Some(ref v) = self.group {
-				f.push(' ');
-				v.fmt_sql(f, fmt);
+				write_sql!(f, fmt, " {v}");
 			}
 			if let Some(ref v) = self.order {
-				f.push(' ');
-				v.fmt_sql(f, fmt);
+				write_sql!(f, fmt, " {v}");
 			}
 			if let Some(ref v) = self.limit {
-				f.push(' ');
-				v.fmt_sql(f, fmt);
+				write_sql!(f, fmt, " {v}");
 			}
 			if let Some(ref v) = self.start {
-				f.push(' ');
-				v.fmt_sql(f, fmt);
+				write_sql!(f, fmt, " {v}");
 			}
 			if let Some(ref v) = self.alias {
-				f.push_str(" AS ");
-				v.fmt_sql(f, fmt);
+				write_sql!(f, fmt, " AS {v}");
 			}
 			f.push(')');
 		}
@@ -143,9 +136,9 @@ impl Default for LookupKind {
 }
 
 impl ToSql for LookupKind {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::Graph(dir) => dir.fmt_sql(f, sql_fmt),
+			Self::Graph(dir) => dir.fmt_sql(f, fmt),
 			Self::Reference => f.push_str("<~"),
 		}
 	}
@@ -200,15 +193,15 @@ impl LookupSubject {
 }
 
 impl ToSql for LookupSubject {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			Self::Table {
 				table,
 				referencing_field,
 			} => {
-				EscapeIdent(table).fmt_sql(f, sql_fmt);
+				write_sql!(f, fmt, "{}", EscapeKwFreeIdent(table));
 				if let Some(referencing_field) = referencing_field {
-					write_sql!(f, sql_fmt, " FIELD {}", EscapeIdent(referencing_field));
+					write_sql!(f, fmt, " FIELD {}", EscapeKwFreeIdent(referencing_field));
 				}
 			}
 			Self::Range {
@@ -216,9 +209,9 @@ impl ToSql for LookupSubject {
 				range,
 				referencing_field,
 			} => {
-				write_sql!(f, sql_fmt, "{}:{range}", EscapeIdent(table));
+				write_sql!(f, fmt, "{}:{range}", EscapeKwFreeIdent(table));
 				if let Some(referencing_field) = referencing_field {
-					write_sql!(f, sql_fmt, " FIELD {}", EscapeIdent(referencing_field));
+					write_sql!(f, fmt, " FIELD {}", EscapeKwFreeIdent(referencing_field));
 				}
 			}
 		}

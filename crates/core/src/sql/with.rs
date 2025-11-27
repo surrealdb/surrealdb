@@ -1,25 +1,31 @@
+use std::fmt::{Display, Formatter, Result};
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeIdent, Fmt};
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum With {
 	NoIndex,
-	Index(Vec<String>),
+	Index(
+		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+		Vec<String>,
+	),
 }
 
 impl ToSql for With {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "WITH");
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("WITH");
 		match self {
-			With::NoIndex => write_sql!(f, sql_fmt, " NOINDEX"),
+			With::NoIndex => f.push_str(" NOINDEX"),
 			With::Index(i) => {
+				f.push_str(" INDEX ");
 				write_sql!(
 					f,
-					sql_fmt,
-					" INDEX {}",
-					Fmt::comma_separated(i.iter().map(EscapeIdent))
+					fmt,
+					"{}",
+					Fmt::comma_separated(i.iter().map(|x| EscapeKwFreeIdent(x)))
 				);
 			}
 		}

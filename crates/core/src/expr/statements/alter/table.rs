@@ -1,7 +1,9 @@
+use std::fmt::{self, Display, Write};
 use std::ops::Deref;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::AlterKind;
 use crate::catalog::providers::TableProvider;
@@ -11,7 +13,8 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::statements::DefineTableStatement;
-use crate::expr::{Base, ChangeFeed};
+use crate::expr::{Base, ChangeFeed, Kind};
+use crate::fmt::EscapeKwIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -95,7 +98,7 @@ impl AlterTableStatement {
 
 		// Record definition change
 		if changefeed_replaced {
-			txn.lock().await.record_table_change(ns, db, &self.name, &dt);
+			txn.changefeed_buffer_table_change(ns, db, &self.name, &dt);
 		}
 
 		// Set the table definition
@@ -105,5 +108,12 @@ impl AlterTableStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
+	}
+}
+
+impl ToSql for AlterTableStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::alter::AlterTableStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

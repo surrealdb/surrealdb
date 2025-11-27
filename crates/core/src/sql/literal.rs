@@ -1,11 +1,11 @@
-use std::fmt::Write as _;
+use std::fmt::{self, Write as _};
 
 //use async_graphql::dynamic::Object;
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use rust_decimal::Decimal;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeKey, QuoteStr};
+use crate::fmt::{EscapeKey, Float, Fmt, QuoteStr};
 use crate::sql::{Expr, RecordIdLit};
 use crate::types::{
 	PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicGeometry, PublicRegex,
@@ -68,108 +68,82 @@ impl PartialEq for Literal {
 impl Eq for Literal {}
 
 impl ToSql for Literal {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			Literal::None => f.push_str("NONE"),
 			Literal::Null => f.push_str("NULL"),
 			Literal::UnboundedRange => f.push_str(".."),
-			Literal::Bool(x) => f.push_str(if *x {
-				"true"
-			} else {
-				"false"
-			}),
-			Literal::Float(float) => {
-				if float.is_finite() {
-					write_sql!(f, sql_fmt, "{float}f")
+			Literal::Bool(x) => {
+				if *x {
+					f.push_str("true");
 				} else {
-					write_sql!(f, sql_fmt, "{float}")
+					f.push_str("false");
 				}
 			}
-			Literal::Integer(x) => write_sql!(f, sql_fmt, "{x}"),
-			Literal::Decimal(d) => write_sql!(f, sql_fmt, "{d}"),
-			Literal::String(strand) => write_sql!(f, sql_fmt, "{}", QuoteStr(strand)),
-			Literal::Bytes(bytes) => write_sql!(f, sql_fmt, "{}", bytes.to_sql()),
-			Literal::Regex(regex) => write_sql!(f, sql_fmt, "{}", regex.to_sql()),
-			Literal::RecordId(record_id_lit) => record_id_lit.fmt_sql(f, sql_fmt),
+			Literal::Float(float) => write_sql!(f, fmt, "{}", Float(*float)),
+			Literal::Integer(x) => f.push_str(&x.to_string()),
+			Literal::Decimal(d) => {
+				f.push_str(&d.to_string());
+				f.push_str("dec");
+			}
+			Literal::String(strand) => write_sql!(f, fmt, "{}", QuoteStr(strand)),
+			Literal::Bytes(bytes) => bytes.fmt_sql(f, fmt),
+			Literal::Regex(regex) => regex.fmt_sql(f, fmt),
+			Literal::RecordId(record_id_lit) => record_id_lit.fmt_sql(f, fmt),
 			Literal::Array(exprs) => {
 				f.push('[');
 				if !exprs.is_empty() {
-					let inner_fmt = sql_fmt.increment();
-					if sql_fmt.is_pretty() {
-						f.push('\n');
-						inner_fmt.write_indent(f);
-					}
-					for (i, expr) in exprs.iter().enumerate() {
-						if i > 0 {
-							inner_fmt.write_separator(f);
-						}
-						expr.fmt_sql(f, inner_fmt);
-					}
-					if sql_fmt.is_pretty() {
-						f.push('\n');
-						sql_fmt.write_indent(f);
-					}
+					let fmt = fmt.increment();
+					write_sql!(f, fmt, "{}", Fmt::pretty_comma_separated(exprs.as_slice()));
 				}
 				f.push(']');
 			}
 			Literal::Set(exprs) => {
 				f.push('{');
 				if !exprs.is_empty() {
-					let inner_fmt = sql_fmt.increment();
-					if sql_fmt.is_pretty() {
-						f.push('\n');
-						inner_fmt.write_indent(f);
-					}
-					for (i, expr) in exprs.iter().enumerate() {
-						if i > 0 {
-							inner_fmt.write_separator(f);
-						}
-						expr.fmt_sql(f, inner_fmt);
-					}
-					if sql_fmt.is_pretty() {
-						f.push('\n');
-						sql_fmt.write_indent(f);
-					}
+					let fmt = fmt.increment();
+					write_sql!(f, fmt, "{}", Fmt::pretty_comma_separated(exprs.as_slice()));
 				}
 				f.push('}');
 			}
 			Literal::Object(items) => {
-				if sql_fmt.is_pretty() {
+				if fmt.is_pretty() {
 					f.push('{');
 				} else {
 					f.push_str("{ ");
 				}
 				if !items.is_empty() {
-					let inner_fmt = sql_fmt.increment();
-					if sql_fmt.is_pretty() {
-						f.push('\n');
-						inner_fmt.write_indent(f);
-					}
-					for (i, entry) in items.iter().enumerate() {
-						if i > 0 {
-							inner_fmt.write_separator(f);
-						}
-						write_sql!(f, sql_fmt, "{}: ", EscapeKey(&entry.key));
-						entry.value.fmt_sql(f, inner_fmt);
-					}
-					if sql_fmt.is_pretty() {
-						f.push('\n');
-						sql_fmt.write_indent(f);
-					}
+					let fmt = fmt.increment();
+					write_sql!(
+						f,
+						fmt,
+						"{}",
+						Fmt::pretty_comma_separated(items.iter().map(|args| Fmt::new(
+							args,
+							|entry, f, fmt| write_sql!(
+								f,
+								fmt,
+								"{}: {}",
+								EscapeKey(&entry.key),
+								entry.value
+							)
+						)),)
+					);
 				}
-				if sql_fmt.is_pretty() {
+				if fmt.is_pretty() {
 					f.push('}');
 				} else {
 					f.push_str(" }");
 				}
 			}
-			Literal::Duration(duration) => write_sql!(f, sql_fmt, "{}", duration),
+			Literal::Duration(duration) => duration.fmt_sql(f, fmt),
 			Literal::Datetime(datetime) => {
-				write_sql!(f, sql_fmt, "d{}", QuoteStr(&datetime.to_string()))
+				f.push('d');
+				write_sql!(f, fmt, "{}", QuoteStr(&datetime.to_string()));
 			}
-			Literal::Uuid(uuid) => write_sql!(f, sql_fmt, "{}", uuid),
-			Literal::Geometry(geometry) => write_sql!(f, sql_fmt, "{}", geometry),
-			Literal::File(file) => write_sql!(f, sql_fmt, "{}", file),
+			Literal::Uuid(uuid) => uuid.fmt_sql(f, fmt),
+			Literal::Geometry(geometry) => geometry.fmt_sql(f, fmt),
+			Literal::File(file) => file.fmt_sql(f, fmt),
 		}
 	}
 }
@@ -424,7 +398,7 @@ impl From<crate::expr::literal::ObjectEntry> for ObjectEntry {
 }
 
 impl ToSql for ObjectEntry {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "{}: {}", EscapeKey(&self.key), self.value)
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "{}: {}", EscapeKey(&self.key), self.value);
 	}
 }

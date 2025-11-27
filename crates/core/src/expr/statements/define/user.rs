@@ -1,3 +1,5 @@
+use std::fmt::{self, Display};
+
 use anyhow::{Result, bail};
 use argon2::Argon2;
 use argon2::password_hash::{PasswordHasher, SaltString};
@@ -5,7 +7,7 @@ use rand::Rng as _;
 use rand::distributions::Alphanumeric;
 use rand::rngs::OsRng;
 use reblessive::tree::Stk;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, NamespaceProvider, UserProvider};
@@ -17,6 +19,7 @@ use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::user::UserDuration;
 use crate::expr::{Base, Expr, Idiom, Literal};
+use crate::fmt::{Fmt, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 use crate::val::{self, Duration, Value};
 
@@ -213,9 +216,10 @@ impl DefineUserStatement {
 		}
 	}
 }
+
 impl ToSql for DefineUserStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let sql_stmt: crate::sql::statements::define::DefineUserStatement = self.clone().into();
-		sql_stmt.fmt_sql(f, fmt);
+		let stmt: crate::sql::statements::define::DefineUserStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

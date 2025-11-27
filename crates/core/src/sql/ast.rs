@@ -29,8 +29,10 @@ impl Ast {
 
 	pub fn get_used_namespace(&self) -> Option<String> {
 		for expr in &self.expressions {
-			if let TopLevelExpr::Use(stmt) = expr {
-				return stmt.ns.clone();
+			if let TopLevelExpr::Use(UseStatement::Ns(ns))
+			| TopLevelExpr::Use(UseStatement::NsDb(ns, _)) = expr
+			{
+				return Some(ns.clone());
 			}
 		}
 		None
@@ -38,8 +40,10 @@ impl Ast {
 
 	pub fn get_used_database(&self) -> Option<String> {
 		for expr in &self.expressions {
-			if let TopLevelExpr::Use(stmt) = expr {
-				return stmt.db.clone();
+			if let TopLevelExpr::Use(UseStatement::Db(db))
+			| TopLevelExpr::Use(UseStatement::NsDb(_, db)) = expr
+			{
+				return Some(db.clone());
 			}
 		}
 		None

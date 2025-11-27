@@ -384,7 +384,7 @@ impl Iterator {
 		);
 		// Evaluate if we can only scan keys (rather than keys AND values), or count
 		let rs = ctx.check_record_strategy(false, p)?;
-		let sc = ctx.check_scan_direction(ctx.ctx.tx().has_reverse_scan());
+		let sc = ctx.check_scan_direction();
 		// Add the record to the iterator
 		if let (tb, RecordIdKey::Range(v)) = (v.table, v.key) {
 			self.ingest(Iterable::Range(tb, *v, rs, sc));
@@ -516,7 +516,7 @@ impl Iterator {
 		rs: RecordStrategy,
 	) -> Result<Value> {
 		// Log the statement
-		trace!(target: TARGET, statement = %stm, "Iterating statement");
+		trace!(target: TARGET, statement = %stm.to_sql(), "Iterating statement");
 		// Enable context override
 		let mut cancel_ctx = MutableContext::new(ctx);
 		self.run = cancel_ctx.add_cancel();

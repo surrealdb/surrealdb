@@ -1,3 +1,5 @@
+use std::fmt::{self, Display, Write};
+
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -5,6 +7,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Expr, FlowResult, Value};
+use crate::fmt::{CoverStmtsExpr, Fmt, fmt_separated_by};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct IfelseStatement {
@@ -22,7 +25,6 @@ impl IfelseStatement {
 			&& self.close.as_ref().map(|x| x.read_only()).unwrap_or(true)
 	}
 	/// Check if we require a writeable transaction
-	#[allow(dead_code)]
 	pub(crate) fn bracketed(&self) -> bool {
 		self.exprs.iter().all(|(_, v)| matches!(v, Expr::Block(_)))
 			&& (self.close.as_ref().is_none()
@@ -51,7 +53,21 @@ impl IfelseStatement {
 
 impl ToSql for IfelseStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let sql_stmt: crate::sql::statements::IfelseStatement = self.clone().into();
-		sql_stmt.fmt_sql(f, fmt);
+		let stmt: crate::sql::statements::ifelse::IfelseStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
+	}
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+	use super::*;
+	use crate::syn;
+
+	#[test]
+	fn format_pretty() {
+		let query = syn::expr("IF 1 { 1 } ELSE IF 2 { 2 }").unwrap();
+		assert_eq!(query.to_sql(), "IF 1 { 1 } ELSE IF 2 { 2 }");
+		assert_eq!(query.to_sql_pretty(), "IF 1\n\t{ 1 }\nELSE IF 2\n\t{ 2 }");
 	}
 }

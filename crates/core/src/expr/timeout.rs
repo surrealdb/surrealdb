@@ -31,6 +31,7 @@ impl Timeout {
 
 impl ToSql for Timeout {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		write_sql!(f, fmt, "TIMEOUT {}", self.0)
+		let stmt: crate::sql::timeout::Timeout = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

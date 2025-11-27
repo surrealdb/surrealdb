@@ -1,6 +1,10 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
 use anyhow::{Result, bail, ensure};
 use rand::Rng;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::catalog::providers::{
 	AuthorisationProvider, CatalogProvider, NamespaceProvider, UserProvider,
@@ -10,6 +14,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Cond, ControlFlow, FlowResult, FlowResultExt as _, RecordIdLit};
+use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Array, Datetime, Duration, Object, Value};
 use crate::{catalog, val};
@@ -61,9 +66,17 @@ pub(crate) struct AccessStatementRevoke {
 pub(crate) struct AccessStatementPurge {
 	pub ac: String,
 	pub base: Option<Base>,
-	pub expired: bool,
-	pub revoked: bool,
+	pub kind: PurgeKind,
 	pub grace: Duration,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
+pub enum PurgeKind {
+	#[default]
+	Expired,
+	Revoked,
+	Both,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -271,7 +284,10 @@ pub async fn create_grant(
 			match res {
 				Ok(_) => {}
 				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+					if matches!(
+						e.downcast_ref(),
+						Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+					) {
 						error!(
 							"A collision was found when attempting to create a new grant. Purging inactive grants is advised"
 						)
@@ -403,7 +419,10 @@ pub async fn create_grant(
 			match res {
 				Ok(_) => {}
 				Err(e) => {
-					if matches!(e.downcast_ref(), Some(Error::TxKeyAlreadyExists)) {
+					if matches!(
+						e.downcast_ref(),
+						Some(Error::Kvs(crate::kvs::Error::TransactionKeyAlreadyExists))
+					) {
 						error!(
 							"A collision was found when attempting to create a new grant. Purging inactive grants is advised"
 						)
@@ -859,12 +878,12 @@ async fn compute_purge(
 		// Revocation times should never exceed the current time.
 		// Grants expired or revoked at a future time will not be purged.
 		// Grants expired or revoked at exactly the current second will not be purged.
-		let purge_expired = stmt.expired
+		let purge_expired = matches!(stmt.kind, PurgeKind::Expired | PurgeKind::Both)
 			&& gr.expiration.as_ref().is_some_and(|exp| {
 				                 now.timestamp() >= exp.timestamp() // Prevent saturating when not expired yet.
 				                     && (now.timestamp().saturating_sub(exp.timestamp()) as u64) > stmt.grace.secs()
 				             });
-		let purge_revoked = stmt.revoked
+		let purge_revoked = matches!(stmt.kind, PurgeKind::Revoked | PurgeKind::Both)
 			&& gr.revocation.as_ref().is_some_and(|rev| {
 				                 now.timestamp() >= rev.timestamp() // Prevent saturating when not revoked yet.
 				                     && (now.timestamp().saturating_sub(rev.timestamp()) as u64) > stmt.grace.secs()
@@ -921,5 +940,12 @@ impl AccessStatement {
 				compute_purge(stmt, ctx, opt, doc).await.map_err(ControlFlow::Err)
 			}
 		}
+	}
+}
+
+impl ToSql for AccessStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let sql_stmt: crate::sql::statements::AccessStatement = self.clone().into();
+		sql_stmt.fmt_sql(f, fmt);
 	}
 }

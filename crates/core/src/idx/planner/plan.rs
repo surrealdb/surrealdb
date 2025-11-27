@@ -39,7 +39,6 @@ pub(super) struct PlanBuilderParameters {
 	pub(super) all_and: bool,
 	pub(super) all_expressions_with_index: bool,
 	pub(super) all_and_groups: HashMap<GroupRef, bool>,
-	pub(super) has_reverse_scan: bool,
 }
 
 impl PlanBuilder {
@@ -72,7 +71,7 @@ impl PlanBuilder {
 
 		// Handle explicit NO INDEX directive
 		if let Some(With::NoIndex) = ctx.with {
-			return Self::table_iterator(ctx, Some("WITH NOINDEX"), p.has_reverse_scan, p.gp).await;
+			return Self::table_iterator(ctx, Some("WITH NOINDEX"), p.gp).await;
 		}
 
 		if let Some(io) = p.index_count {
@@ -85,7 +84,7 @@ impl PlanBuilder {
 			&& let Err(e) = b.eval_node(root)
 		{
 			// Fall back to table scan if analysis fails
-			return Self::table_iterator(ctx, Some(&e), p.has_reverse_scan, p.gp).await;
+			return Self::table_iterator(ctx, Some(&e), p.gp).await;
 		}
 
 		//Optimisation path 1: All conditions connected by AND operators
@@ -127,17 +126,10 @@ impl PlanBuilder {
 				let record_strategy =
 					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
 				let (is_order, sc) = if let Some(io) = p.order_limit {
-					#[cfg(not(any(feature = "kv-rocksdb", feature = "kv-tikv")))]
-					{
-						(io.index_reference == index_reference, ScanDirection::Forward)
-					}
-					#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-					{
-						(
-							io.index_reference == index_reference,
-							Self::check_range_scan_direction(p.has_reverse_scan, io.op()),
-						)
-					}
+					(
+						io.index_reference == index_reference,
+						Self::check_range_scan_direction(io.op()),
+					)
 				} else {
 					(false, ScanDirection::Forward)
 				};
@@ -165,11 +157,8 @@ impl PlanBuilder {
 				// Evaluate the record strategy
 				let record_strategy =
 					ctx.check_record_strategy(p.all_expressions_with_index, p.gp)?;
-				// Check compatibility with reverse-scan capability
-				if Self::check_order_scan(p.has_reverse_scan, o.op()) {
-					// Return the plan
-					return Ok(Plan::SingleIndex(None, o.clone(), record_strategy));
-				}
+				// Return the plan
+				return Ok(Plan::SingleIndex(None, o.clone(), record_strategy));
 			}
 		}
 		// If every expression is backed by an index we can use the MultiIndex plan
@@ -187,33 +176,25 @@ impl PlanBuilder {
 			// Return the plan
 			return Ok(Plan::MultiIndex(b.non_range_indexes, ranges, record_strategy));
 		}
-		Self::table_iterator(ctx, None, p.has_reverse_scan, p.gp).await
+		Self::table_iterator(ctx, None, p.gp).await
 	}
 
 	async fn table_iterator(
 		ctx: &StatementContext<'_>,
 		reason: Option<&str>,
-		has_reverse_scan: bool,
 		granted_permission: GrantedPermission,
 	) -> Result<Plan> {
 		// Evaluate the record strategy
 		let rs = ctx.check_record_strategy(false, granted_permission)?;
 		// Evaluate the scan direction
-		let sc = ctx.check_scan_direction(has_reverse_scan);
+		let sc = ctx.check_scan_direction();
 		// Collect the reason if any
 		let reason = reason.map(|s| s.to_string());
 		Ok(Plan::TableIterator(reason, rs, sc))
 	}
 
-	/// Check if the ordering is compatible with the datastore transaction
-	/// capabilities
-	fn check_order_scan(has_reverse_scan: bool, op: &IndexOperator) -> bool {
-		has_reverse_scan || matches!(op, IndexOperator::Order(false))
-	}
-
-	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-	fn check_range_scan_direction(has_reverse_scan: bool, op: &IndexOperator) -> ScanDirection {
-		if has_reverse_scan && matches!(op, IndexOperator::Order(true)) {
+	fn check_range_scan_direction(op: &IndexOperator) -> ScanDirection {
+		if matches!(op, IndexOperator::Order(true)) {
 			return ScanDirection::Backward;
 		}
 		ScanDirection::Forward

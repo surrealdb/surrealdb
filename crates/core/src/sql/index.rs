@@ -1,6 +1,9 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::EscapeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 use crate::sql::Cond;
 use crate::sql::scoring::Scoring;
 use crate::types::PublicNumber;
@@ -200,26 +203,26 @@ impl ToSql for VectorType {
 }
 
 impl ToSql for Index {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			Self::Idx => {}
 			Self::Uniq => f.push_str("UNIQUE"),
 			Self::Count(c) => {
 				f.push_str("COUNT");
 				if let Some(v) = c {
-					write_sql!(f, sql_fmt, " {}", v);
+					write_sql!(f, fmt, " {}", v)
 				}
 			}
 			Self::FullText(p) => {
-				write_sql!(f, sql_fmt, "FULLTEXT ANALYZER {} {}", EscapeIdent(&p.az), p.sc);
+				write_sql!(f, fmt, "FULLTEXT ANALYZER {} {}", EscapeKwFreeIdent(&p.az), p.sc);
 				if p.hl {
-					f.push_str(" HIGHLIGHTS");
+					f.push_str(" HIGHLIGHTS")
 				}
 			}
 			Self::Hnsw(p) => {
 				write_sql!(
 					f,
-					sql_fmt,
+					fmt,
 					"HNSW DIMENSION {} DIST {} TYPE {} EFC {} M {} M0 {} LM {}",
 					p.dimension,
 					p.distance,
@@ -230,10 +233,10 @@ impl ToSql for Index {
 					p.ml
 				);
 				if p.extend_candidates {
-					f.push_str(" EXTEND_CANDIDATES");
+					f.push_str(" EXTEND_CANDIDATES")
 				}
 				if p.keep_pruned_connections {
-					f.push_str(" KEEP_PRUNED_CONNECTIONS");
+					f.push_str(" KEEP_PRUNED_CONNECTIONS")
 				}
 			}
 		}

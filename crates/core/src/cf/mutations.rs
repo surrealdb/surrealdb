@@ -7,7 +7,6 @@ use crate::expr::Operation;
 use crate::expr::statements::info::InfoStructure;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, Number, Object, RecordId, Value};
-use crate::vs::VersionStamp;
 
 // Mutation is a single mutation to a table.
 #[revisioned(revision = 1)]
@@ -66,10 +65,11 @@ impl Default for DatabaseMutation {
 	}
 }
 
-// Change is a set of mutations made to a table at the specific timestamp.
+// ChangeSet is a set of mutations made to a database at a specific timestamp.
+// The u128 timestamp represents the version number when these changes occurred.
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct ChangeSet(pub VersionStamp, pub DatabaseMutation);
+pub struct ChangeSet(pub u128, pub DatabaseMutation);
 
 impl TableMutation {
 	/// Convert a stored change feed table mutation (record change) into a
@@ -139,7 +139,7 @@ impl DatabaseMutation {
 impl ChangeSet {
 	pub fn into_value(self) -> Value {
 		let mut m = BTreeMap::<String, Value>::new();
-		m.insert("versionstamp".to_string(), Value::from(self.0.into_u128()));
+		m.insert("versionstamp".to_string(), Value::from(self.0));
 		m.insert("changes".to_string(), self.1.into_value());
 		let so: Object = m.into();
 		Value::Object(so)
@@ -198,7 +198,7 @@ mod tests {
 	#[test]
 	fn serialization() {
 		let cs = ChangeSet(
-			VersionStamp::from_u64(1),
+			65536u128,
 			DatabaseMutation(vec![TableMutations(
 				"mytb".to_string(),
 				vec![
@@ -233,7 +233,7 @@ mod tests {
 	#[test]
 	fn serialization_rev2() {
 		let cs = ChangeSet(
-			VersionStamp::from_u64(1),
+			65536u128,
 			DatabaseMutation(vec![TableMutations(
 				"mytb".to_string(),
 				vec![

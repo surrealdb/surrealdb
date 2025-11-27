@@ -1,3 +1,5 @@
+use std::fmt;
+
 use futures::future::try_join_all;
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
@@ -10,7 +12,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Expr, Idiom, Kind, Model, ModuleExecutable, Script, Value};
-use crate::fmt::Fmt;
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 use crate::fnc;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -226,47 +228,8 @@ impl FunctionCall {
 
 impl ToSql for FunctionCall {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		match self.receiver {
-			Function::Normal(ref s) => {
-				write_sql!(f, fmt, "{s}({})", Fmt::comma_separated(&self.arguments))
-			}
-			Function::Custom(ref s) => {
-				write_sql!(f, fmt, "fn::{s}({})", Fmt::comma_separated(&self.arguments))
-			}
-			Function::Script(ref s) => {
-				write_sql!(f, fmt, "function({}) {{{s}}}", Fmt::comma_separated(&self.arguments))
-			}
-			Function::Model(ref m) => {
-				write_sql!(f, fmt, "{}({})", m, Fmt::comma_separated(&self.arguments))
-			}
-			Function::Module(ref m, ref s) => match s {
-				Some(s) => {
-					write_sql!(f, fmt, "mod::{m}::{s}({})", Fmt::comma_separated(&self.arguments))
-				}
-				None => write_sql!(f, fmt, "mod::{m}({})", Fmt::comma_separated(&self.arguments)),
-			},
-			Function::Silo {
-				ref org,
-				ref pkg,
-				ref major,
-				ref minor,
-				ref patch,
-				ref sub,
-			} => match sub {
-				Some(s) => write_sql!(
-					f,
-					fmt,
-					"silo::{org}::{pkg}<{major}.{minor}.{patch}>::{s}({})",
-					Fmt::comma_separated(&self.arguments)
-				),
-				None => write_sql!(
-					f,
-					fmt,
-					"silo::{org}::{pkg}<{major}.{minor}.{patch}>({})",
-					Fmt::comma_separated(&self.arguments)
-				),
-			},
-		}
+		let fnc: crate::sql::FunctionCall = self.clone().into();
+		fnc.fmt_sql(f, fmt);
 	}
 }
 

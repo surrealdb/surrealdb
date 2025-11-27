@@ -1,10 +1,14 @@
+use std::fmt::{self, Display};
+
 use anyhow::Result;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Value};
+use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -39,5 +43,12 @@ impl RemoveFunctionStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
+	}
+}
+
+impl ToSql for RemoveFunctionStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::remove::RemoveFunctionStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

@@ -57,12 +57,6 @@ impl Deref for Table {
 	}
 }
 
-impl fmt::Display for Table {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		EscapeIdent(&self.0).fmt(f)
-	}
-}
-
 impl From<surrealdb_types::Table> for Table {
 	fn from(value: surrealdb_types::Table) -> Self {
 		Table(value.into_string())
@@ -77,6 +71,6 @@ impl From<Table> for surrealdb_types::Table {
 
 impl ToSql for Table {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "{}", self)
+		EscapeIdent(&self.0).fmt_sql(f, sql_fmt);
 	}
 }

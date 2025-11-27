@@ -8,28 +8,15 @@ use crate::syn::token::{TokenKind, t};
 
 impl Parser<'_> {
 	pub(crate) async fn parse_function_name(&mut self) -> ParseResult<Function> {
-		let mut start = self.peek();
-		let mut last_span = start.span;
-
-		let fnc = match start.kind {
+		let fnc = match self.peek_kind() {
 			t!("fn") => {
 				self.pop_peek();
 				expected!(self, t!("::"));
-				start = self.peek();
-				let peek = self.peek();
-				if !Self::kind_is_identifier(peek.kind) {
-					unexpected!(self, peek, "an identifier")
-				}
-				last_span = self.pop_peek().span;
+				let mut name = self.parse_ident()?;
 				while self.eat(t!("::")) {
-					let peek = self.peek();
-					if !Self::kind_is_identifier(peek.kind) {
-						unexpected!(self, peek, "an identifier")
-					}
-					last_span = self.pop_peek().span;
+					name.push_str("::");
+					name.push_str(self.parse_ident_str()?);
 				}
-
-				let name = self.lexer.span_str(start.span.covers(last_span)).to_string();
 
 				Function::Custom(name)
 			}
@@ -66,11 +53,11 @@ impl Parser<'_> {
 				expected!(self, t!("::"));
 				let pkg = self.parse_ident()?;
 				expected!(self, t!("<"));
-				let major = self.next_token_value::<u32>()?;
+				let major = self.parse_version_digits()?;
 				expected!(self, t!("."));
-				let minor = self.next_token_value::<u32>()?;
+				let minor = self.parse_version_digits()?;
 				expected!(self, t!("."));
-				let patch = self.next_token_value::<u32>()?;
+				let patch = self.parse_version_digits()?;
 				expected!(self, t!(">"));
 				let sub = if self.eat(t!("::")) {
 					Some(self.parse_ident()?)
@@ -90,21 +77,13 @@ impl Parser<'_> {
 			t!("ml") => {
 				self.pop_peek();
 				expected!(self, t!("::"));
-				start = self.peek();
-				let peek = self.peek();
-				if !Self::kind_is_identifier(peek.kind) {
-					unexpected!(self, peek, "an identifier")
-				}
-				last_span = self.pop_peek().span;
+
+				let mut name = self.parse_ident()?;
 				while self.eat(t!("::")) {
-					let peek = self.peek();
-					if !Self::kind_is_identifier(peek.kind) {
-						unexpected!(self, peek, "an identifier")
-					}
-					last_span = self.pop_peek().span;
+					name.push_str("::");
+					name.push_str(self.parse_ident_str()?);
 				}
 
-				let name = self.lexer.span_str(start.span.covers(last_span)).to_string();
 				let (major, minor, patch) = self.parse_model_version()?;
 				let version = format!("{}.{}.{}", major, minor, patch);
 
@@ -114,16 +93,11 @@ impl Parser<'_> {
 				})
 			}
 			TokenKind::Identifier => {
-				self.pop_peek();
+				let mut name = self.parse_ident()?;
 				while self.eat(t!("::")) {
-					let peek = self.peek();
-					if !Self::kind_is_identifier(peek.kind) {
-						unexpected!(self, peek, "an identifier")
-					}
-					last_span = self.pop_peek().span;
+					name.push_str("::");
+					name.push_str(self.parse_ident_str()?)
 				}
-
-				let name = self.lexer.span_str(start.span.covers(last_span)).to_string();
 				Function::Normal(name)
 			}
 			_ => unexpected!(self, self.peek(), "a function name"),
@@ -143,7 +117,7 @@ impl Parser<'_> {
 		let mut name = self.parse_ident()?;
 		while self.eat(t!("::")) {
 			name.push_str("::");
-			name.push_str(&self.parse_ident()?)
+			name.push_str(self.parse_ident_str()?)
 		}
 
 		expected!(self, t!("(")).span;
@@ -202,11 +176,11 @@ impl Parser<'_> {
 		expected!(self, t!("::"));
 		let pkg = self.parse_ident()?;
 		expected!(self, t!("<"));
-		let major = self.next_token_value::<u32>()?;
+		let major = self.parse_version_digits()?;
 		expected!(self, t!("."));
-		let minor = self.next_token_value::<u32>()?;
+		let minor = self.parse_version_digits()?;
 		expected!(self, t!("."));
-		let patch = self.next_token_value::<u32>()?;
+		let patch = self.parse_version_digits()?;
 		expected!(self, t!(">"));
 		let sub = if self.eat(t!("::")) {
 			Some(self.parse_ident()?)
@@ -250,39 +224,30 @@ impl Parser<'_> {
 		Ok(args)
 	}
 
+	pub fn parse_version_digits(&mut self) -> ParseResult<u32> {
+		let token = self.next();
+		match token.kind {
+			TokenKind::Digits => self
+				.lexer
+				.span_str(token.span)
+				.parse::<u32>()
+				.map_err(|e| syntax_error!("Failed to parse model version: {e}", @token.span)),
+			_ => unexpected!(self, token, "an integer"),
+		}
+	}
+
 	pub(super) fn parse_model_version(&mut self) -> ParseResult<(u32, u32, u32)> {
 		let start = expected!(self, t!("<")).span;
 
-		let token = self.next();
-		let major: u32 =
-			match token.kind {
-				TokenKind::Digits => self.lexer.span_str(token.span).parse().map_err(
-					|e| syntax_error!("Failed to parse model version: {e}", @token.span),
-				)?,
-				_ => unexpected!(self, token, "an integer"),
-			};
+		let major: u32 = self.parse_version_digits()?;
 
 		expected_whitespace!(self, t!("."));
 
-		let token = self.next_whitespace();
-		let minor: u32 =
-			match token.kind {
-				TokenKind::Digits => self.lexer.span_str(token.span).parse().map_err(
-					|e| syntax_error!("Failed to parse model version: {e}", @token.span),
-				)?,
-				_ => unexpected!(self, token, "an integer"),
-			};
+		let minor: u32 = self.parse_version_digits()?;
 
 		expected_whitespace!(self, t!("."));
 
-		let token = self.next_whitespace();
-		let patch: u32 =
-			match token.kind {
-				TokenKind::Digits => self.lexer.span_str(token.span).parse().map_err(
-					|e| syntax_error!("Failed to parse model version: {e}", @token.span),
-				)?,
-				_ => unexpected!(self, token, "an integer"),
-			};
+		let patch: u32 = self.parse_version_digits()?;
 
 		self.expect_closing_delimiter(t!(">"), start)?;
 
@@ -294,10 +259,11 @@ impl Parser<'_> {
 	/// Expects `ml` to already be called.
 	pub(super) async fn parse_model(&mut self, stk: &mut Stk) -> ParseResult<FunctionCall> {
 		expected!(self, t!("::"));
+
 		let mut name = self.parse_ident()?;
 		while self.eat(t!("::")) {
 			name.push_str("::");
-			name.push_str(&self.parse_ident()?)
+			name.push_str(self.parse_ident_str()?)
 		}
 
 		let (major, minor, patch) = self.parse_model_version()?;

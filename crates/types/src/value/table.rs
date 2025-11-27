@@ -9,6 +9,7 @@ use crate::sql::{SqlFormat, ToSql};
 /// A value type referencing a specific table.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[repr(transparent)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Table(String);
 
 impl Table {

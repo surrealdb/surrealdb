@@ -1,6 +1,8 @@
+use std::fmt;
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::EscapeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 use crate::sql::{Expr, Kind};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -12,12 +14,12 @@ pub struct SetStatement {
 }
 
 impl ToSql for SetStatement {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "LET ${}", EscapeIdent(&self.name));
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "LET ${}", EscapeKwFreeIdent(&self.name));
 		if let Some(ref kind) = self.kind {
-			write_sql!(f, sql_fmt, ": {}", kind);
+			write_sql!(f, fmt, ": {}", kind);
 		}
-		write_sql!(f, sql_fmt, " = {}", self.what);
+		write_sql!(f, fmt, " = {}", self.what);
 	}
 }
 
@@ -43,8 +45,7 @@ impl From<crate::expr::statements::SetStatement> for SetStatement {
 
 #[cfg(test)]
 mod tests {
-	use surrealdb_types::ToSql;
-
+	use super::*;
 	use crate::syn;
 
 	#[test]

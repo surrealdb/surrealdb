@@ -1,11 +1,15 @@
+use std::fmt;
+
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::Context;
 use crate::dbs::{Iterator, Options, Statement};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Cond, Data, Explain, Expr, Output, Timeout, With};
+use crate::fmt::{CoverStmtsExpr, Fmt};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::Value;
 
@@ -85,5 +89,12 @@ impl UpdateStatement {
 			}
 		})
 		.await
+	}
+}
+
+impl ToSql for UpdateStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::update::UpdateStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

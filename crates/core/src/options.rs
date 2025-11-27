@@ -31,7 +31,7 @@ impl Default for EngineOptions {
 			node_membership_refresh_interval: Duration::from_secs(3),
 			node_membership_check_interval: Duration::from_secs(15),
 			node_membership_cleanup_interval: Duration::from_secs(300),
-			changefeed_gc_interval: Duration::from_secs(10),
+			changefeed_gc_interval: Duration::from_secs(30),
 			index_compaction_interval: Duration::from_secs(5),
 		}
 	}

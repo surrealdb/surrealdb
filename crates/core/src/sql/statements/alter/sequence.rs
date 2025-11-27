@@ -1,6 +1,8 @@
+use std::fmt::{self, Display, Write};
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::EscapeIdent;
+use crate::fmt::EscapeKwIdent;
 use crate::sql::Timeout;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -12,14 +14,14 @@ pub struct AlterSequenceStatement {
 }
 
 impl ToSql for AlterSequenceStatement {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		f.push_str("ALTER SEQUENCE");
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "ALTER SEQUENCE");
 		if self.if_exists {
-			f.push_str(" IF EXISTS");
+			write_sql!(f, fmt, " IF EXISTS");
 		}
-		write_sql!(f, sql_fmt, " {}", EscapeIdent(&self.name));
+		write_sql!(f, fmt, " {}", EscapeKwIdent(&self.name, &["IF"]));
 		if let Some(ref timeout) = self.timeout {
-			write_sql!(f, sql_fmt, " TIMEOUT {}", timeout);
+			write_sql!(f, fmt, " {timeout}");
 		}
 	}
 }

@@ -1,7 +1,9 @@
+use std::fmt::{self, Display, Write};
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
-use crate::fmt::EscapeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 use crate::sql::{Block, Expr, Kind, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -17,35 +19,35 @@ pub(crate) struct DefineFunctionStatement {
 }
 
 impl ToSql for DefineFunctionStatement {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		f.push_str("DEFINE FUNCTION");
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "DEFINE FUNCTION");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
-			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
+			DefineKind::Overwrite => write_sql!(f, fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, fmt, " IF NOT EXISTS"),
 		}
-		write_sql!(f, sql_fmt, " fn::{}(", self.name);
+		write_sql!(f, fmt, " fn");
+		for s in self.name.split("::") {
+			write_sql!(f, fmt, "::");
+			EscapeKwFreeIdent(s).fmt_sql(f, fmt);
+		}
+		write_sql!(f, fmt, "(");
 		for (i, (name, kind)) in self.args.iter().enumerate() {
 			if i > 0 {
 				f.push_str(", ");
 			}
-			write_sql!(f, sql_fmt, "${}: {}", EscapeIdent(name), kind);
+			write_sql!(f, fmt, "${}: {kind}", EscapeKwFreeIdent(name));
 		}
 		f.push_str(") ");
 		if let Some(ref v) = self.returns {
-			write_sql!(f, sql_fmt, "-> {} ", v);
+			write_sql!(f, fmt, "-> {v} ");
 		}
-		self.block.fmt_sql(f, sql_fmt);
+		self.block.fmt_sql(f, fmt);
 		if let Some(ref v) = self.comment {
-			write_sql!(f, sql_fmt, " COMMENT {v}");
+			write_sql!(f, fmt, " COMMENT {}", v);
 		}
-		if sql_fmt.is_pretty() {
-			f.push('\n');
-			sql_fmt.write_indent(f);
-		} else {
-			f.push(' ');
-		}
-		write_sql!(f, sql_fmt, "PERMISSIONS {}", self.permissions);
+		let fmt = fmt.increment();
+		write_sql!(f, fmt, " PERMISSIONS {}", self.permissions);
 	}
 }
 

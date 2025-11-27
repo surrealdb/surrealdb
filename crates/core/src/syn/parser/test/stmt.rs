@@ -8,6 +8,7 @@ use crate::sql::access_type::{
 };
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::data::Assignment;
+use crate::sql::field::Selector;
 use crate::sql::filter::Filter;
 use crate::sql::index::{Distance, FullTextParams, HnswParams, VectorType};
 use crate::sql::language::Language;
@@ -16,6 +17,7 @@ use crate::sql::lookup::{LookupKind, LookupSubject};
 use crate::sql::order::{OrderList, Ordering};
 use crate::sql::statements::access::{
 	self, AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke, AccessStatementShow,
+	PurgeKind,
 };
 use crate::sql::statements::define::user::PassType;
 use crate::sql::statements::define::{
@@ -142,7 +144,7 @@ fn parse_create() {
 					value: ident_field("baz")
 				},
 			])),
-			output: Some(Output::Fields(Fields::Value(Box::new(Field::Single {
+			output: Some(Output::Fields(Fields::Value(Box::new(Selector {
 				expr: ident_field("foo"),
 				alias: Some(Idiom(vec![Part::Field("bar".to_string())])),
 			})))),
@@ -1662,10 +1664,10 @@ fn parse_define_table() {
 			drop: true,
 			full: true,
 			view: Some(crate::sql::View {
-				expr: Fields::Select(vec![Field::Single {
+				expr: Fields::Select(vec![Field::Single(Selector {
 					expr: ident_field("foo"),
 					alias: None,
-				}],),
+				})],),
 				what: vec!["bar".to_string()],
 				cond: None,
 				group: Some(Groups(vec![Group(Idiom(vec![Part::Field("foo".to_string())]))]))
@@ -1926,10 +1928,10 @@ pub fn parse_for() {
 			param: Param::new("foo".to_owned()),
 			range: Expr::Binary {
 				left: Box::new(Expr::Select(Box::new(SelectStatement {
-					expr: Fields::Select(vec![Field::Single {
+					expr: Fields::Select(vec![Field::Single(Selector {
 						expr: ident_field("foo"),
 						alias: None
-					}],),
+					})],),
 					what: vec![Expr::Table("bar".to_string())],
 					omit: vec![],
 					only: false,
@@ -1964,7 +1966,7 @@ fn parse_if() {
 	.unwrap();
 	assert_eq!(
 		res,
-		Expr::If(Box::new(IfelseStatement {
+		Expr::IfElse(Box::new(IfelseStatement {
 			exprs: vec![
 				(ident_field("foo"), ident_field("bar")),
 				(ident_field("faz"), ident_field("baz")),
@@ -1983,7 +1985,7 @@ fn parse_if_block() {
 	.unwrap();
 	assert_eq!(
 		res,
-		Expr::If(Box::new(IfelseStatement {
+		Expr::IfElse(Box::new(IfelseStatement {
 			exprs: vec![
 				(ident_field("foo"), Expr::Block(Box::new(Block(vec![ident_field("bar")]))),),
 				(ident_field("faz"), Expr::Block(Box::new(Block(vec![ident_field("baz")]))),)
@@ -2096,21 +2098,21 @@ fn parse_select() {
 		res,
 		Expr::Select(Box::new(SelectStatement {
 			expr: Fields::Select(vec![
-				Field::Single {
+				Field::Single(Selector {
 					expr: ident_field("bar"),
 					alias: Some(Idiom(vec![Part::Field("foo".to_owned())])),
-				},
-				Field::Single {
+				}),
+				Field::Single(Selector {
 					expr: Expr::Literal(Literal::Array(vec![
 						Expr::Literal(Literal::Integer(1)),
 						Expr::Literal(Literal::Integer(2))
 					])),
 					alias: None,
-				},
-				Field::Single {
+				}),
+				Field::Single(Selector {
 					expr: ident_field("bar"),
 					alias: None,
-				},
+				}),
 			],),
 			omit: vec![Expr::Idiom(Idiom(vec![Part::Field("bar".to_string())]))],
 			only: true,
@@ -2220,10 +2222,7 @@ fn parse_use() {
 	.expressions
 	.pop()
 	.unwrap();
-	let expect = TopLevelExpr::Use(UseStatement {
-		ns: Some("foo".to_owned()),
-		db: None,
-	});
+	let expect = TopLevelExpr::Use(UseStatement::Ns("foo".to_owned()));
 	assert_eq!(res, expect);
 
 	let res = syn::parse_with(r"USE NS foo".as_bytes(), async |parser, stk| {
@@ -2233,10 +2232,7 @@ fn parse_use() {
 	.expressions
 	.pop()
 	.unwrap();
-	let expect = TopLevelExpr::Use(UseStatement {
-		ns: Some("foo".to_owned()),
-		db: None,
-	});
+	let expect = TopLevelExpr::Use(UseStatement::Ns("foo".to_owned()));
 	assert_eq!(res, expect);
 
 	let res = syn::parse_with(r"USE NS bar DB foo".as_bytes(), async |parser, stk| {
@@ -2247,10 +2243,7 @@ fn parse_use() {
 	.pop()
 	.unwrap();
 
-	let expect = TopLevelExpr::Use(UseStatement {
-		ns: Some("bar".to_owned()),
-		db: Some("foo".to_owned()),
-	});
+	let expect = TopLevelExpr::Use(UseStatement::NsDb("bar".to_owned(), "foo".to_owned()));
 	assert_eq!(res, expect);
 }
 
@@ -2263,10 +2256,7 @@ fn parse_use_lowercase() {
 	.expressions
 	.pop()
 	.unwrap();
-	let expect = TopLevelExpr::Use(UseStatement {
-		ns: Some("foo".to_owned()),
-		db: None,
-	});
+	let expect = TopLevelExpr::Use(UseStatement::Ns("foo".to_owned()));
 	assert_eq!(res, expect);
 
 	let res = syn::parse_with(r"use db foo".as_bytes(), async |parser, stk| {
@@ -2277,10 +2267,7 @@ fn parse_use_lowercase() {
 	.pop()
 	.unwrap();
 
-	let expect = TopLevelExpr::Use(UseStatement {
-		ns: None,
-		db: Some("foo".to_owned()),
-	});
+	let expect = TopLevelExpr::Use(UseStatement::Db("foo".to_owned()));
 	assert_eq!(res, expect);
 
 	let res = syn::parse_with(r"use ns bar db foo".as_bytes(), async |parser, stk| {
@@ -2291,10 +2278,7 @@ fn parse_use_lowercase() {
 	.pop()
 	.unwrap();
 
-	let expect = TopLevelExpr::Use(UseStatement {
-		ns: Some("bar".to_owned()),
-		db: Some("foo".to_owned()),
-	});
+	let expect = TopLevelExpr::Use(UseStatement::NsDb("bar".to_owned(), "foo".to_owned()));
 	assert_eq!(res, expect);
 }
 
@@ -2375,10 +2359,10 @@ fn parse_insert_select() {
 		Expr::Insert(Box::new(InsertStatement {
 			into: Some(Expr::Table("bar".to_owned())),
 			data: Data::SingleExpression(Expr::Select(Box::new(SelectStatement {
-				expr: Fields::Select(vec![Field::Single {
+				expr: Fields::Select(vec![Field::Single(Selector {
 					expr: Expr::Idiom(Idiom(vec![Part::Field("foo".to_owned())])),
 					alias: None
-				}],),
+				})],),
 				omit: vec![],
 				only: false,
 				what: vec![Expr::Table("baz".to_owned())],
@@ -2464,10 +2448,10 @@ fn parse_live() {
 	};
 	assert_eq!(
 		stmt.fields,
-		Fields::Select(vec![Field::Single {
+		Fields::Select(vec![Field::Single(Selector {
 			expr: Expr::Idiom(Idiom(vec![Part::Field("foo".to_owned())])),
 			alias: None,
-		}],)
+		})],)
 	);
 	assert_eq!(stmt.what, Expr::Table("table".to_owned()));
 	assert_eq!(stmt.cond, Some(Cond(Expr::Literal(Literal::Bool(true)))));
@@ -2974,8 +2958,7 @@ fn parse_access_purge() {
 			TopLevelExpr::Access(Box::new(AccessStatement::Purge(AccessStatementPurge {
 				ac: "a".to_owned(),
 				base: Some(Base::Db),
-				expired: true,
-				revoked: true,
+				kind: PurgeKind::Both,
 				grace: PublicDuration::from_millis(0),
 			})))
 		);
@@ -2993,8 +2976,7 @@ fn parse_access_purge() {
 			TopLevelExpr::Access(Box::new(AccessStatement::Purge(AccessStatementPurge {
 				ac: "a".to_owned(),
 				base: Some(Base::Db),
-				expired: true,
-				revoked: false,
+				kind: PurgeKind::Expired,
 				grace: PublicDuration::from_millis(0),
 			})))
 		);
@@ -3012,8 +2994,7 @@ fn parse_access_purge() {
 			TopLevelExpr::Access(Box::new(AccessStatement::Purge(AccessStatementPurge {
 				ac: "a".to_owned(),
 				base: Some(Base::Db),
-				expired: false,
-				revoked: true,
+				kind: PurgeKind::Revoked,
 				grace: PublicDuration::from_millis(0),
 			})))
 		);
@@ -3031,8 +3012,7 @@ fn parse_access_purge() {
 			TopLevelExpr::Access(Box::new(AccessStatement::Purge(AccessStatementPurge {
 				ac: "a".to_owned(),
 				base: Some(Base::Db),
-				expired: true,
-				revoked: false,
+				kind: PurgeKind::Expired,
 				grace: PublicDuration::from_days(90).unwrap(),
 			})))
 		);
@@ -3050,8 +3030,7 @@ fn parse_access_purge() {
 			TopLevelExpr::Access(Box::new(AccessStatement::Purge(AccessStatementPurge {
 				ac: "a".to_owned(),
 				base: Some(Base::Db),
-				expired: false,
-				revoked: true,
+				kind: PurgeKind::Revoked,
 				grace: PublicDuration::from_days(90).unwrap(),
 			})))
 		);
@@ -3069,8 +3048,7 @@ fn parse_access_purge() {
 			TopLevelExpr::Access(Box::new(AccessStatement::Purge(AccessStatementPurge {
 				ac: "a".to_owned(),
 				base: Some(Base::Db),
-				expired: true,
-				revoked: true,
+				kind: PurgeKind::Both,
 				grace: PublicDuration::from_days(90).unwrap(),
 			})))
 		);

@@ -38,7 +38,7 @@ pub(crate) async fn authenticate_record(
 				Some(Error::Thrown(_)) => Err(e),
 				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
 				// This allows clients to handle these errors, which may be retryable
-				Some(Error::Tx(_) | Error::TxRetryable(_)) => {
+				Some(Error::Kvs(kvs_err)) if kvs_err.is_retryable() => {
 					debug!("Unexpected error found while executing AUTHENTICATE clause: {e}");
 					Err(anyhow::Error::new(Error::UnexpectedAuth))
 				}
@@ -84,7 +84,7 @@ pub(crate) async fn authenticate_generic(
 				Some(Error::Thrown(_)) => Err(e),
 				// If the AUTHENTICATE clause failed due to an unexpected error, be more specific
 				// This allows clients to handle these errors, which may be retryable
-				Some(Error::Tx(_) | Error::TxRetryable(_)) => {
+				Some(Error::Kvs(kvs_err)) if kvs_err.is_retryable() => {
 					debug!("Unexpected error found while executing an AUTHENTICATE clause: {e}");
 					Err(anyhow::Error::new(Error::UnexpectedAuth))
 				}

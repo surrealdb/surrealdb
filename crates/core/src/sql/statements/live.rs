@@ -1,10 +1,12 @@
+use std::fmt;
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use uuid::Uuid;
 
+use crate::fmt::CoverStmtsSql;
 use crate::sql::{Cond, Expr, Fetchs, Fields};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct LiveStatement {
 	pub fields: Fields,
 	pub diff: bool,
@@ -14,20 +16,20 @@ pub struct LiveStatement {
 }
 
 impl ToSql for LiveStatement {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "LIVE SELECT");
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "LIVE SELECT");
 		if self.diff {
-			write_sql!(f, sql_fmt, " DIFF");
+			write_sql!(f, fmt, " DIFF");
 		}
 		if !self.fields.is_empty() {
-			write_sql!(f, sql_fmt, " {}", self.fields);
+			write_sql!(f, fmt, " {}", self.fields);
 		}
-		write_sql!(f, sql_fmt, " FROM {}", self.what);
+		write_sql!(f, fmt, " FROM {}", CoverStmtsSql(&self.what));
 		if let Some(ref v) = self.cond {
-			write_sql!(f, sql_fmt, " {v}");
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.fetch {
-			write_sql!(f, sql_fmt, " {v}");
+			write_sql!(f, fmt, " {v}");
 		}
 	}
 }

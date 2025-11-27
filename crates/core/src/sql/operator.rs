@@ -1,6 +1,8 @@
+use std::fmt;
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::Fmt;
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 use crate::sql::index::Distance;
 use crate::sql::{Expr, Kind};
 
@@ -49,11 +51,11 @@ impl From<crate::expr::PrefixOperator> for PrefixOperator {
 impl ToSql for PrefixOperator {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::Not => write_sql!(f, fmt, "!"),
-			Self::Positive => write_sql!(f, fmt, "+"),
-			Self::Negate => write_sql!(f, fmt, "-"),
-			Self::Range => write_sql!(f, fmt, ".."),
-			Self::RangeInclusive => write_sql!(f, fmt, "..="),
+			Self::Not => f.push('!'),
+			Self::Positive => f.push('+'),
+			Self::Negate => f.push('-'),
+			Self::Range => f.push_str(".."),
+			Self::RangeInclusive => f.push_str("..="),
 			Self::Cast(kind) => write_sql!(f, fmt, "<{kind}> "),
 		}
 	}
@@ -100,14 +102,14 @@ impl From<crate::expr::PostfixOperator> for PostfixOperator {
 }
 
 impl ToSql for PostfixOperator {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::Range => write_sql!(f, sql_fmt, ".."),
-			Self::RangeSkip => write_sql!(f, sql_fmt, ">.."),
+			Self::Range => f.push_str(".."),
+			Self::RangeSkip => f.push_str(">.."),
 			Self::MethodCall(name, x) => {
-				write_sql!(f, sql_fmt, "{name}({})", Fmt::comma_separated(x))
+				write_sql!(f, fmt, ".{}({})", EscapeKwFreeIdent(name), Fmt::comma_separated(x));
 			}
-			Self::Call(args) => write_sql!(f, sql_fmt, "({})", Fmt::comma_separated(args.iter())),
+			Self::Call(args) => write_sql!(f, fmt, "({})", Fmt::comma_separated(args.iter())),
 		}
 	}
 }
@@ -205,17 +207,17 @@ pub struct MatchesOperator {
 }
 
 impl ToSql for MatchesOperator {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		if let Some(r) = self.rf {
 			if let Some(ref o) = self.operator {
-				write_sql!(f, sql_fmt, "@{r},{o}@")
+				write_sql!(f, fmt, "@{r},{o}@");
 			} else {
-				write_sql!(f, sql_fmt, "@{r}@")
+				write_sql!(f, fmt, "@{r}@");
 			}
 		} else if let Some(ref o) = self.operator {
-			write_sql!(f, sql_fmt, "@{o}@")
+			write_sql!(f, fmt, "@{o}@");
 		} else {
-			write_sql!(f, sql_fmt, "@@")
+			f.push_str("@@");
 		}
 	}
 }
@@ -268,10 +270,10 @@ impl From<crate::expr::operator::BooleanOperator> for BooleanOperator {
 }
 
 impl ToSql for BooleanOperator {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		match self {
-			Self::And => write_sql!(f, sql_fmt, "AND"),
-			Self::Or => write_sql!(f, sql_fmt, "OR"),
+			Self::And => f.push_str("AND"),
+			Self::Or => f.push_str("OR"),
 		}
 	}
 }
@@ -388,6 +390,7 @@ impl ToSql for NearestNeighbor {
 		}
 	}
 }
+
 impl From<NearestNeighbor> for crate::expr::operator::NearestNeighbor {
 	fn from(value: NearestNeighbor) -> Self {
 		match value {
@@ -415,43 +418,53 @@ impl From<crate::expr::operator::NearestNeighbor> for NearestNeighbor {
 impl ToSql for BinaryOperator {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::Or => write_sql!(f, fmt, "OR"),
-			Self::And => write_sql!(f, fmt, "AND"),
-			Self::NullCoalescing => write_sql!(f, fmt, "??"),
-			Self::TenaryCondition => write_sql!(f, fmt, "?:"),
-			Self::Add => write_sql!(f, fmt, "+"),
-			Self::Subtract => write_sql!(f, fmt, "-"),
-			Self::Multiply => write_sql!(f, fmt, "*"),
-			Self::Divide => write_sql!(f, fmt, "/"),
-			Self::Remainder => write_sql!(f, fmt, "%"),
-			Self::Power => write_sql!(f, fmt, "**"),
-			Self::Equal => write_sql!(f, fmt, "="),
-			Self::ExactEqual => write_sql!(f, fmt, "=="),
-			Self::NotEqual => write_sql!(f, fmt, "!="),
-			Self::AllEqual => write_sql!(f, fmt, "*="),
-			Self::AnyEqual => write_sql!(f, fmt, "?="),
-			Self::LessThan => write_sql!(f, fmt, "<"),
-			Self::LessThanEqual => write_sql!(f, fmt, "<="),
-			Self::MoreThan => write_sql!(f, fmt, ">"),
-			Self::MoreThanEqual => write_sql!(f, fmt, ">="),
-			Self::Contain => write_sql!(f, fmt, "CONTAINS"),
-			Self::NotContain => write_sql!(f, fmt, "CONTAINSNOT"),
-			Self::ContainAll => write_sql!(f, fmt, "CONTAINSALL"),
-			Self::ContainAny => write_sql!(f, fmt, "CONTAINSANY"),
-			Self::ContainNone => write_sql!(f, fmt, "CONTAINSNONE"),
-			Self::Inside => write_sql!(f, fmt, "INSIDE"),
-			Self::NotInside => write_sql!(f, fmt, "NOTINSIDE"),
-			Self::AllInside => write_sql!(f, fmt, "ALLINSIDE"),
-			Self::AnyInside => write_sql!(f, fmt, "ANYINSIDE"),
-			Self::NoneInside => write_sql!(f, fmt, "NONEINSIDE"),
-			Self::Outside => write_sql!(f, fmt, "OUTSIDE"),
-			Self::Intersects => write_sql!(f, fmt, "INTERSECTS"),
+			Self::Or => f.push_str("OR"),
+			Self::And => f.push_str("AND"),
+			Self::NullCoalescing => f.push_str("??"),
+			Self::TenaryCondition => f.push_str("?:"),
+			Self::Add => f.push('+'),
+			Self::Subtract => f.push('-'),
+			Self::Multiply => f.push('*'),
+			Self::Divide => f.push('/'),
+			Self::Remainder => f.push('%'),
+			Self::Power => f.push_str("**"),
+			Self::Equal => f.push('='),
+			Self::ExactEqual => f.push_str("=="),
+			Self::NotEqual => f.push_str("!="),
+			Self::AllEqual => f.push_str("*="),
+			Self::AnyEqual => f.push_str("?="),
+			Self::LessThan => f.push('<'),
+			Self::LessThanEqual => f.push_str("<="),
+			Self::MoreThan => f.push('>'),
+			Self::MoreThanEqual => f.push_str(">="),
+			Self::Contain => f.push_str("CONTAINS"),
+			Self::NotContain => f.push_str("CONTAINSNOT"),
+			Self::ContainAll => f.push_str("CONTAINSALL"),
+			Self::ContainAny => f.push_str("CONTAINSANY"),
+			Self::ContainNone => f.push_str("CONTAINSNONE"),
+			Self::Inside => f.push_str("INSIDE"),
+			Self::NotInside => f.push_str("NOTINSIDE"),
+			Self::AllInside => f.push_str("ALLINSIDE"),
+			Self::AnyInside => f.push_str("ANYINSIDE"),
+			Self::NoneInside => f.push_str("NONEINSIDE"),
+			Self::Outside => f.push_str("OUTSIDE"),
+			Self::Intersects => f.push_str("INTERSECTS"),
 			Self::Matches(m) => m.fmt_sql(f, fmt),
-			Self::Range => write_sql!(f, fmt, ".."),
-			Self::RangeInclusive => write_sql!(f, fmt, "..="),
-			Self::RangeSkip => write_sql!(f, fmt, ">.."),
-			Self::RangeSkipInclusive => write_sql!(f, fmt, ">..="),
-			Self::NearestNeighbor(n) => n.fmt_sql(f, fmt),
+			Self::Range => f.push_str(".."),
+			Self::RangeInclusive => f.push_str("..="),
+			Self::RangeSkip => f.push_str(">.."),
+			Self::RangeSkipInclusive => f.push_str(">..="),
+			Self::NearestNeighbor(n) => match &**n {
+				NearestNeighbor::KTree(k) => {
+					write_sql!(f, fmt, "<|{k}|>");
+				}
+				NearestNeighbor::K(k, distance) => {
+					write_sql!(f, fmt, "<|{k},{distance}|>");
+				}
+				NearestNeighbor::Approximate(k, ef) => {
+					write_sql!(f, fmt, "<|{k},{ef}|>");
+				}
+			},
 		}
 	}
 }
@@ -487,12 +500,12 @@ impl From<crate::expr::AssignOperator> for AssignOperator {
 }
 
 impl ToSql for AssignOperator {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		match self {
-			Self::Assign => write_sql!(f, fmt, "="),
-			Self::Add => write_sql!(f, fmt, "+="),
-			Self::Subtract => write_sql!(f, fmt, "-="),
-			Self::Extend => write_sql!(f, fmt, "+?="),
+			Self::Assign => f.push('='),
+			Self::Add => f.push_str("+="),
+			Self::Subtract => f.push_str("-="),
+			Self::Extend => f.push_str("+?="),
 		}
 	}
 }
@@ -601,8 +614,25 @@ impl BindingPower {
 	pub fn for_expr(expr: &Expr) -> BindingPower {
 		match expr {
 			Expr::Prefix {
+				op,
 				..
-			} => BindingPower::Prefix,
+			} => {
+				if let PrefixOperator::Range | PrefixOperator::RangeInclusive = *op {
+					BindingPower::Range
+				} else {
+					BindingPower::Prefix
+				}
+			}
+			Expr::Postfix {
+				op,
+				..
+			} => {
+				if let PostfixOperator::Range | PostfixOperator::RangeSkip = *op {
+					BindingPower::Range
+				} else {
+					BindingPower::Prefix
+				}
+			}
 			Expr::Binary {
 				op,
 				..

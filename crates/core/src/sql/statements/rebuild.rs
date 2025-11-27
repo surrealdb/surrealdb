@@ -1,6 +1,9 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::EscapeIdent;
+use crate::fmt::{EscapeKwFreeIdent, EscapeKwIdent};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -9,9 +12,9 @@ pub enum RebuildStatement {
 }
 
 impl ToSql for RebuildStatement {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::Index(v) => v.fmt_sql(f, sql_fmt),
+			Self::Index(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }
@@ -42,14 +45,20 @@ pub struct RebuildIndexStatement {
 }
 
 impl ToSql for RebuildIndexStatement {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		f.push_str("REBUILD INDEX");
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "REBUILD INDEX");
 		if self.if_exists {
-			f.push_str(" IF EXISTS");
+			write_sql!(f, fmt, " IF EXISTS");
 		}
-		write_sql!(f, sql_fmt, " {} ON {}", EscapeIdent(&self.name), EscapeIdent(&self.what));
+		write_sql!(
+			f,
+			fmt,
+			" {} ON {}",
+			EscapeKwIdent(&self.name, &["IF"]),
+			EscapeKwFreeIdent(&self.what)
+		);
 		if self.concurrently {
-			f.push_str(" CONCURRENTLY");
+			write_sql!(f, fmt, " CONCURRENTLY");
 		}
 	}
 }

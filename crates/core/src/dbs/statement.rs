@@ -3,6 +3,7 @@ use std::fmt;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::{Permission, TableDefinition};
 use crate::ctx::{Context, MutableContext};
@@ -132,52 +133,51 @@ impl<'a> From<&'a AccessStatement> for Statement<'a> {
 	}
 }
 
-impl fmt::Display for Statement<'_> {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use surrealdb_types::ToSql;
+impl ToSql for Statement<'_> {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			Statement::Live(v) => {
 				let sql_stmt: crate::sql::statements::LiveStatement = (*v).clone().into();
-				write!(f, "{}", sql_stmt.to_sql())
+				sql_stmt.fmt_sql(f, fmt);
 			}
 			Statement::Show(v) => {
 				let sql_stmt: crate::sql::statements::ShowStatement = (*v).clone().into();
-				write!(f, "{}", sql_stmt.to_sql())
+				sql_stmt.fmt_sql(f, fmt);
 			}
 			Statement::Select {
 				stmt,
 				..
 			} => {
 				let sql_stmt: crate::sql::statements::SelectStatement = (*stmt).clone().into();
-				write!(f, "{}", sql_stmt.to_sql())
+				sql_stmt.fmt_sql(f, fmt);
 			}
 			Statement::Create(v) => {
 				let sql_stmt: crate::sql::statements::CreateStatement = (*v).clone().into();
-				write!(f, "{}", sql_stmt.to_sql())
+				sql_stmt.fmt_sql(f, fmt);
 			}
 			Statement::Upsert(v) => {
 				let sql_stmt: crate::sql::statements::UpsertStatement = (*v).clone().into();
-				write!(f, "{}", sql_stmt.to_sql())
+				sql_stmt.fmt_sql(f, fmt);
 			}
 			Statement::Update(v) => {
 				let sql_stmt: crate::sql::statements::UpdateStatement = (*v).clone().into();
-				write!(f, "{}", sql_stmt.to_sql())
+				sql_stmt.fmt_sql(f, fmt);
 			}
 			Statement::Relate(v) => {
 				let sql_stmt: crate::sql::statements::RelateStatement = (*v).clone().into();
-				write!(f, "{}", sql_stmt.to_sql())
+				sql_stmt.fmt_sql(f, fmt);
 			}
 			Statement::Delete(v) => {
 				let sql_stmt: crate::sql::statements::DeleteStatement = (*v).clone().into();
-				write!(f, "{}", sql_stmt.to_sql())
+				sql_stmt.fmt_sql(f, fmt);
 			}
 			Statement::Insert(v) => {
 				let sql_stmt: crate::sql::statements::InsertStatement = (*v).clone().into();
-				write!(f, "{}", sql_stmt.to_sql())
+				sql_stmt.fmt_sql(f, fmt);
 			}
 			Statement::Access(v) => {
 				let sql_stmt: crate::sql::statements::AccessStatement = (*v).clone().into();
-				write!(f, "{}", sql_stmt.to_sql())
+				sql_stmt.fmt_sql(f, fmt);
 			}
 		}
 	}

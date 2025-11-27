@@ -1,11 +1,12 @@
+use std::fmt::{self, Display};
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::sql::access::AccessDuration;
-use crate::sql::{AccessType, Base, Expr};
+use crate::sql::{AccessType, Base, Expr, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct DefineAccessStatement {
 	pub kind: DefineKind,
 	pub name: Expr,
@@ -17,50 +18,57 @@ pub(crate) struct DefineAccessStatement {
 }
 
 impl ToSql for DefineAccessStatement {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "DEFINE ACCESS");
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "DEFINE ACCESS");
 		match self.kind {
 			DefineKind::Default => {}
 			DefineKind::Overwrite => {
-				write_sql!(f, sql_fmt, " OVERWRITE");
+				write_sql!(f, fmt, " OVERWRITE");
 			}
 			DefineKind::IfNotExists => {
-				write_sql!(f, sql_fmt, " IF NOT EXISTS");
+				write_sql!(f, fmt, " IF NOT EXISTS");
 			}
 		}
 		// The specific access method definition is displayed by AccessType
-		write_sql!(f, sql_fmt, " {} ON {} TYPE {}", self.name, self.base, self.access_type);
+		write_sql!(f, fmt, " {} ON {} TYPE {}", self.name, self.base, self.access_type);
 		// The additional authentication clause
 		if let Some(ref v) = self.authenticate {
-			write_sql!(f, sql_fmt, " AUTHENTICATE {v}");
+			write_sql!(f, fmt, " AUTHENTICATE {v}");
 		}
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible
 		// None values need to be printed, as they are different from the default values
-		write_sql!(f, sql_fmt, " DURATION");
+		write_sql!(f, fmt, " DURATION");
 		if self.access_type.can_issue_grants() {
-			f.push_str(" FOR GRANT ");
-			match self.duration.grant {
-				Some(ref dur) => write_sql!(f, sql_fmt, "{}", dur),
-				None => f.push_str("NONE"),
-			}
-			f.push(',');
+			write_sql!(
+				f,
+				fmt,
+				" FOR GRANT {},",
+				match self.duration.grant {
+					Some(ref dur) => dur.to_sql(),
+					None => "NONE".to_string(),
+				}
+			);
 		}
 		if self.access_type.can_issue_tokens() {
-			f.push_str(" FOR TOKEN ");
+			write_sql!(f, fmt, " FOR TOKEN ");
+
 			match self.duration.token {
-				Some(ref dur) => write_sql!(f, sql_fmt, "{}", dur),
-				None => f.push_str("NONE"),
+				Some(Expr::Literal(Literal::None)) => write_sql!(f, fmt, "(NONE)"),
+				Some(ref dur) => write_sql!(f, fmt, "{}", dur),
+				None => write_sql!(f, fmt, "NONE"),
 			}
-			f.push(',');
+			write_sql!(f, fmt, ",");
 		}
-		f.push_str(" FOR SESSION ");
+
+		write_sql!(f, fmt, " FOR SESSION ");
 		match self.duration.session {
-			Some(ref dur) => write_sql!(f, sql_fmt, "{}", dur),
-			None => f.push_str("NONE"),
+			Some(Expr::Literal(Literal::None)) => write_sql!(f, fmt, "(NONE)"),
+			Some(ref dur) => write_sql!(f, fmt, "{}", dur),
+			None => write_sql!(f, fmt, "NONE"),
 		}
 		if let Some(ref v) = self.comment {
-			write_sql!(f, sql_fmt, " COMMENT {}", v);
+			write_sql!(f, fmt, " COMMENT {}", v);
 		}
 	}
 }

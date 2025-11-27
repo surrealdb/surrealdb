@@ -1,9 +1,11 @@
+use std::fmt;
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 use crate::sql::{Cond, Fields, Groups};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct View {
 	pub expr: Fields,
 	pub what: Vec<String>,
@@ -12,22 +14,19 @@ pub(crate) struct View {
 }
 
 impl ToSql for View {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "AS SELECT {}", self.expr);
-		if !self.what.is_empty() {
-			f.push_str(" FROM ");
-			for (i, expr) in self.what.iter().enumerate() {
-				if i > 0 {
-					f.push_str(", ");
-				}
-				expr.fmt_sql(f, sql_fmt);
-			}
-		}
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(
+			f,
+			fmt,
+			"AS SELECT {} FROM {}",
+			self.expr,
+			Fmt::comma_separated(self.what.iter().map(|x| EscapeKwFreeIdent(x.as_ref())))
+		);
 		if let Some(ref v) = self.cond {
-			write_sql!(f, sql_fmt, " {}", v);
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.group {
-			write_sql!(f, sql_fmt, " {}", v);
+			write_sql!(f, fmt, " {v}");
 		}
 	}
 }

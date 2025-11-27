@@ -1,6 +1,8 @@
+use std::fmt;
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::EscapeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -19,11 +21,11 @@ impl OptionStatement {
 }
 
 impl ToSql for OptionStatement {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		if self.what {
-			write_sql!(f, sql_fmt, "OPTION {}", EscapeIdent(&self.name))
+			write_sql!(f, fmt, "OPTION {}", EscapeKwFreeIdent(&self.name))
 		} else {
-			write_sql!(f, sql_fmt, "OPTION {} = FALSE", EscapeIdent(&self.name))
+			write_sql!(f, fmt, "OPTION {} = FALSE", EscapeKwFreeIdent(&self.name))
 		}
 	}
 }

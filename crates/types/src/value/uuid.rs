@@ -15,6 +15,7 @@ use crate::sql::{SqlFormat, ToSql};
 #[derive(
 	Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize,
 )]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Uuid(pub uuid::Uuid);
 
 impl ToSql for Uuid {

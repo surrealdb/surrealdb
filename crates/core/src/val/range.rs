@@ -174,6 +174,7 @@ impl Range {
 /// A range of a specific type, can be converted back into a general range and
 /// coerced from a general range.
 #[derive(Debug, Eq, PartialEq, Clone, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct TypedRange<T> {
 	pub start: Bound<T>,
 	pub end: Bound<T>,

@@ -1,8 +1,10 @@
+use std::fmt::{self, Display};
+
 use anyhow::{Result, bail};
 use rand::Rng;
 use rand::distributions::Alphanumeric;
 use reblessive::tree::Stk;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::catalog::providers::{AuthorisationProvider, NamespaceProvider};
@@ -371,9 +373,10 @@ impl DefineAccessStatement {
 		self
 	}
 }
+
 impl ToSql for DefineAccessStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let sql_stmt: crate::sql::statements::define::DefineAccessStatement = self.clone().into();
-		sql_stmt.fmt_sql(f, fmt);
+		let stmt: crate::sql::statements::define::DefineAccessStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

@@ -1,3 +1,4 @@
+use std::fmt;
 use std::fmt::Debug;
 
 use anyhow::{Result, bail};
@@ -8,6 +9,7 @@ use crate::catalog::aggregation::{AggregateFields, AggregationAnalysis};
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Fields, Groups, Value};
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct View {
@@ -58,12 +60,11 @@ impl View {
 }
 
 impl ToSql for View {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		let sql_view: crate::sql::View = self.clone().into();
-		sql_view.fmt_sql(f, sql_fmt);
+		sql_view.fmt_sql(f, fmt);
 	}
 }
-
 impl InfoStructure for View {
 	fn structure(self) -> Value {
 		self.to_sql().into()

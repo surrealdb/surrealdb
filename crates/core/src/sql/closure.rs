@@ -3,7 +3,6 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::sql::{Expr, Kind, Param};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Closure {
 	pub args: Vec<(Param, Kind)>,
 	pub returns: Option<Kind>,

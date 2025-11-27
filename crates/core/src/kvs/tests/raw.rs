@@ -14,7 +14,7 @@ pub async fn initialise(new_ds: impl CreateDs) {
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.put(&"test", &"ok".as_bytes().to_vec(), None).await.unwrap();
 	tx.commit().await.unwrap();
 }
@@ -25,11 +25,11 @@ pub async fn exists(new_ds: impl CreateDs) {
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.put(&"test", &"ok".as_bytes().to_vec(), None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.exists(&"test", None).await.unwrap();
 	assert!(val);
 	let val = tx.exists(&"none", None).await.unwrap();
@@ -43,11 +43,11 @@ pub async fn get(new_ds: impl CreateDs) {
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.put(&"test", &"ok".as_bytes().to_vec(), None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.get(&"test", None).await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"ok")));
 	let val = tx.get(&"none", None).await.unwrap();
@@ -61,20 +61,20 @@ pub async fn set(new_ds: impl CreateDs) {
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.set(&"test", &"one".as_bytes().to_vec(), None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.get(&"test", None).await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"one")));
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.set(&"test", &"two".as_bytes().to_vec(), None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.get(&"test", None).await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"two")));
 	tx.cancel().await.unwrap();
@@ -86,20 +86,20 @@ pub async fn put(new_ds: impl CreateDs) {
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.put(&"test", &"one".as_bytes().to_vec(), None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.get(&"test", None).await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"one")));
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	assert!(tx.put(&"test", &"two".as_bytes().to_vec(), None).await.is_err());
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.get(&"test", None).await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"one")));
 	tx.cancel().await.unwrap();
@@ -111,25 +111,25 @@ pub async fn putc(new_ds: impl CreateDs) {
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.put(&"test", &"one".as_bytes().to_vec(), None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.get(&"test", None).await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"one")));
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.putc(&"test", &"two".as_bytes().to_vec(), Some(&"one".as_bytes().to_vec())).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.get(&"test", None).await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"two")));
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	assert!(
 		tx.putc(&"test", &"tre".as_bytes().to_vec(), Some(&"one".as_bytes().to_vec()))
 			.await
@@ -137,7 +137,7 @@ pub async fn putc(new_ds: impl CreateDs) {
 	);
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.get(&"test", None).await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"two")));
 	tx.cancel().await.unwrap();
@@ -149,15 +149,15 @@ pub async fn del(new_ds: impl CreateDs) {
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.put(&"test", &"one".as_bytes().to_vec(), None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.del(&"test").await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.get(&"test", None).await.unwrap();
 	assert!(val.as_deref().is_none());
 	tx.cancel().await.unwrap();
@@ -169,24 +169,24 @@ pub async fn delc(new_ds: impl CreateDs) {
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.put(&"test", &"one".as_bytes().to_vec(), None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	assert!(tx.delc(&"test", Some(&"two".as_bytes().to_vec())).await.is_err());
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.get(&"test", None).await.unwrap();
 	assert!(matches!(val.as_deref(), Some(b"one")));
 	tx.cancel().await.unwrap();
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.delc(&"test", Some(&"one".as_bytes().to_vec())).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.get(&"test", None).await.unwrap();
 	assert!(val.as_deref().is_none());
 	tx.cancel().await.unwrap();
@@ -198,7 +198,7 @@ pub async fn keys(new_ds: impl CreateDs) {
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.put(&"test1", &"1".as_bytes().to_vec(), None).await.unwrap();
 	tx.put(&"test2", &"2".as_bytes().to_vec(), None).await.unwrap();
 	tx.put(&"test3", &"3".as_bytes().to_vec(), None).await.unwrap();
@@ -206,7 +206,7 @@ pub async fn keys(new_ds: impl CreateDs) {
 	tx.put(&"test5", &"5".as_bytes().to_vec(), None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.keys("test1".."test9", u32::MAX, None).await.unwrap();
 	assert_eq!(val.len(), 5);
 	assert_eq!(val[0], b"test1");
@@ -216,14 +216,14 @@ pub async fn keys(new_ds: impl CreateDs) {
 	assert_eq!(val[4], b"test5");
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.keys("test2".."test4", u32::MAX, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0], b"test2");
 	assert_eq!(val[1], b"test3");
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.keys("test1".."test9", 2, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0], b"test1");
@@ -231,14 +231,13 @@ pub async fn keys(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 }
 
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 pub async fn keysr(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("83b81cc2-9609-4533-bede-c170ab9f7bbe").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.put(&"test1", &"1".as_bytes().to_vec(), None).await.unwrap();
 	tx.put(&"test2", &"2".as_bytes().to_vec(), None).await.unwrap();
 	tx.put(&"test3", &"3".as_bytes().to_vec(), None).await.unwrap();
@@ -246,7 +245,7 @@ pub async fn keysr(new_ds: impl CreateDs) {
 	tx.put(&"test5", &"5".as_bytes().to_vec(), None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.keysr("test1".."test9", u32::MAX, None).await.unwrap();
 	assert_eq!(val.len(), 5);
 	assert_eq!(val[0], b"test5");
@@ -256,14 +255,14 @@ pub async fn keysr(new_ds: impl CreateDs) {
 	assert_eq!(val[4], b"test1");
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.keysr("test2".."test4", u32::MAX, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0], b"test3");
 	assert_eq!(val[1], b"test2");
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.keysr("test1".."test9", 2, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0], b"test5");
@@ -277,7 +276,7 @@ pub async fn scan(new_ds: impl CreateDs) {
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.put(&"test1", &"1".as_bytes().to_vec(), None).await.unwrap();
 	tx.put(&"test2", &"2".as_bytes().to_vec(), None).await.unwrap();
 	tx.put(&"test3", &"3".as_bytes().to_vec(), None).await.unwrap();
@@ -285,7 +284,7 @@ pub async fn scan(new_ds: impl CreateDs) {
 	tx.put(&"test5", &"5".as_bytes().to_vec(), None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.scan("test1".."test9", u32::MAX, None).await.unwrap();
 	assert_eq!(val.len(), 5);
 	assert_eq!(val[0].0, b"test1");
@@ -300,7 +299,7 @@ pub async fn scan(new_ds: impl CreateDs) {
 	assert_eq!(val[4].1, b"5");
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.scan("test2".."test4", u32::MAX, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0].0, b"test2");
@@ -309,7 +308,7 @@ pub async fn scan(new_ds: impl CreateDs) {
 	assert_eq!(val[1].1, b"3");
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.scan("test1".."test9", 2, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0].0, b"test1");
@@ -319,14 +318,13 @@ pub async fn scan(new_ds: impl CreateDs) {
 	tx.cancel().await.unwrap();
 }
 
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 pub async fn scanr(new_ds: impl CreateDs) {
 	// Create a new datastore
 	let node_id = Uuid::parse_str("83b81cc2-9609-4533-bede-c170ab9f7bbe").unwrap();
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.put(&"test1", &"1".as_bytes().to_vec(), None).await.unwrap();
 	tx.put(&"test2", &"2".as_bytes().to_vec(), None).await.unwrap();
 	tx.put(&"test3", &"3".as_bytes().to_vec(), None).await.unwrap();
@@ -334,7 +332,7 @@ pub async fn scanr(new_ds: impl CreateDs) {
 	tx.put(&"test5", &"5".as_bytes().to_vec(), None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.scanr("test1".."test9", u32::MAX, None).await.unwrap();
 	assert_eq!(val.len(), 5);
 	assert_eq!(val[0].0, b"test5");
@@ -349,7 +347,7 @@ pub async fn scanr(new_ds: impl CreateDs) {
 	assert_eq!(val[4].1, b"1");
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.scanr("test2".."test4", u32::MAX, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0].0, b"test3");
@@ -358,7 +356,7 @@ pub async fn scanr(new_ds: impl CreateDs) {
 	assert_eq!(val[1].1, b"2");
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let val = tx.scanr("test1".."test9", 2, None).await.unwrap();
 	assert_eq!(val.len(), 2);
 	assert_eq!(val[0].0, b"test5");
@@ -374,7 +372,7 @@ pub async fn batch(new_ds: impl CreateDs) {
 	let clock = Arc::new(SizedClock::Fake(FakeClock::new(Timestamp::default())));
 	let (ds, _) = new_ds.create_ds(node_id, clock).await;
 	// Create a writeable transaction
-	let mut tx = ds.transaction(Write, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Write, Optimistic).await.unwrap();
 	tx.put(&"test1", &"1".as_bytes().to_vec(), None).await.unwrap();
 	tx.put(&"test2", &"2".as_bytes().to_vec(), None).await.unwrap();
 	tx.put(&"test3", &"3".as_bytes().to_vec(), None).await.unwrap();
@@ -382,7 +380,7 @@ pub async fn batch(new_ds: impl CreateDs) {
 	tx.put(&"test5", &"5".as_bytes().to_vec(), None).await.unwrap();
 	tx.commit().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let rng = "test1".."test9";
 	let res = tx.batch_keys_vals(rng, u32::MAX, None).await.unwrap();
 	let val = res.result;
@@ -399,7 +397,7 @@ pub async fn batch(new_ds: impl CreateDs) {
 	assert_eq!(val[4].1, b"5");
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let rng = "test2".."test4";
 	let res = tx.batch_keys_vals(rng, u32::MAX, None).await.unwrap();
 	let val = res.result;
@@ -410,7 +408,7 @@ pub async fn batch(new_ds: impl CreateDs) {
 	assert_eq!(val[1].1, b"3");
 	tx.cancel().await.unwrap();
 	// Create a readonly transaction
-	let mut tx = ds.transaction(Read, Optimistic).await.unwrap().inner();
+	let tx = ds.transaction(Read, Optimistic).await.unwrap();
 	let rng = "test2".."test4";
 	let res = tx.batch_keys_vals(rng, u32::MAX, None).await.unwrap();
 	let val = res.result;
@@ -478,7 +476,6 @@ macro_rules! define_tests {
 			super::raw::keys($new_ds).await;
 		}
 
-		#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 		#[tokio::test]
 		#[serial_test::serial]
 		async fn keysr() {
@@ -491,7 +488,6 @@ macro_rules! define_tests {
 			super::raw::scan($new_ds).await;
 		}
 
-		#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 		#[tokio::test]
 		#[serial_test::serial]
 		async fn scanr() {

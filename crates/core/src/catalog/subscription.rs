@@ -57,7 +57,7 @@ impl InfoStructure for SubscriptionDefinition {
 		Value::from(map! {
 			"id".to_string() => crate::val::Uuid(self.id).into(),
 			"node".to_string() => crate::val::Uuid(self.node).into(),
-			"fields".to_string() => self.fields.structure(),
+			"fields".to_string() => self.fields.to_sql().into(),
 			"diff".to_string() => self.diff.into(),
 			"what".to_string() => self.what.structure(),
 			"cond".to_string(), if let Some(v) = self.cond => v.structure(),

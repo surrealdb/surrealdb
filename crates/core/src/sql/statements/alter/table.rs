@@ -1,7 +1,9 @@
+use std::fmt::{self, Display, Write};
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::AlterKind;
-use crate::fmt::EscapeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 use crate::sql::{ChangeFeed, Kind, Permissions, TableType};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -17,69 +19,64 @@ pub struct AlterTableStatement {
 }
 
 impl ToSql for AlterTableStatement {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		f.push_str("ALTER TABLE");
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "ALTER TABLE");
 		if self.if_exists {
-			f.push_str(" IF EXISTS");
+			write_sql!(f, fmt, " IF EXISTS");
 		}
-		write_sql!(f, sql_fmt, " {}", EscapeIdent(&self.name));
+		write_sql!(f, fmt, " {}", EscapeKwFreeIdent(&self.name));
 		if let Some(kind) = &self.kind {
-			f.push_str(" TYPE");
+			write_sql!(f, fmt, " TYPE");
 			match &kind {
 				TableType::Normal => {
-					f.push_str(" NORMAL");
+					write_sql!(f, fmt, " NORMAL");
 				}
 				TableType::Relation(rel) => {
-					f.push_str(" RELATION");
+					write_sql!(f, fmt, " RELATION");
 					if let Some(Kind::Record(kind)) = &rel.from {
-						f.push_str(" IN ");
+						write_sql!(f, fmt, " IN ");
 						for (idx, k) in kind.iter().enumerate() {
 							if idx != 0 {
-								f.push_str(" | ");
+								write_sql!(f, fmt, " | ");
 							}
-							write_sql!(f, sql_fmt, "{}", EscapeIdent(k));
+							write_sql!(f, fmt, "{}", EscapeKwFreeIdent(k));
 						}
 					}
 					if let Some(Kind::Record(kind)) = &rel.to {
-						f.push_str(" OUT ");
+						write_sql!(f, fmt, " OUT ");
 						for (idx, k) in kind.iter().enumerate() {
 							if idx != 0 {
-								f.push_str(" | ");
+								write_sql!(f, fmt, " | ");
 							}
-							write_sql!(f, sql_fmt, "{}", EscapeIdent(k));
+							write_sql!(f, fmt, "{}", EscapeKwFreeIdent(k));
 						}
 					}
 				}
 				TableType::Any => {
-					f.push_str(" ANY");
+					write_sql!(f, fmt, " ANY");
 				}
 			}
 		}
 
 		match self.schemafull {
-			AlterKind::Set(_) => f.push_str(" SCHEMAFULL"),
-			AlterKind::Drop => f.push_str(" SCHEMALESS"),
+			AlterKind::Set(_) => write_sql!(f, fmt, " SCHEMAFULL"),
+			AlterKind::Drop => write_sql!(f, fmt, " SCHEMALESS"),
 			AlterKind::None => {}
 		}
 
 		match self.comment {
-			AlterKind::Set(ref comment) => {
-				write_sql!(f, sql_fmt, "COMMENT {comment}");
-			}
-			AlterKind::Drop => f.push_str(" DROP COMMENT"),
+			AlterKind::Set(ref comment) => write_sql!(f, fmt, " COMMENT {}", comment),
+			AlterKind::Drop => write_sql!(f, fmt, " DROP COMMENT"),
 			AlterKind::None => {}
 		}
 
 		match self.changefeed {
-			AlterKind::Set(ref changefeed) => {
-				write_sql!(f, sql_fmt, "CHANGEFEED {changefeed}");
-			}
-			AlterKind::Drop => f.push_str(" DROP CHANGEFEED"),
+			AlterKind::Set(ref changefeed) => write_sql!(f, fmt, " {}", changefeed),
+			AlterKind::Drop => write_sql!(f, fmt, " DROP CHANGEFEED"),
 			AlterKind::None => {}
 		}
-
 		if let Some(permissions) = &self.permissions {
-			write_sql!(f, sql_fmt, " {permissions}");
+			write_sql!(f, fmt, " {permissions}");
 		}
 	}
 }

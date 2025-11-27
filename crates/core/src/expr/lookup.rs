@@ -1,9 +1,9 @@
-use std::fmt::Write;
+use std::fmt::{self, Display, Formatter, Write};
 use std::ops::Bound;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::catalog::{DatabaseId, NamespaceId};
 use crate::ctx::Context;
@@ -12,6 +12,7 @@ use crate::doc::CursorDoc;
 use crate::expr::order::Ordering;
 use crate::expr::start::Start;
 use crate::expr::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits};
+use crate::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt};
 use crate::kvs::KVKey;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
 
@@ -31,25 +32,10 @@ pub(crate) struct Lookup {
 	pub(crate) alias: Option<Idiom>,
 }
 
-impl Lookup {
-	/// Convert the graph edge to a raw String
-	pub fn to_raw(&self) -> String {
-		use surrealdb_types::ToSql;
-		self.to_sql()
-	}
-}
-
 impl ToSql for Lookup {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let sql_lookup: crate::sql::Lookup = self.clone().into();
-		sql_lookup.fmt_sql(f, sql_fmt);
-	}
-}
-
-impl surrealdb_types::ToSql for LookupSubject {
-	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
-		let sql_lookup_subject: crate::sql::lookup::LookupSubject = self.clone().into();
-		sql_lookup_subject.fmt_sql(f, fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::lookup::Lookup = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }
 
@@ -63,6 +49,15 @@ pub enum LookupKind {
 impl Default for LookupKind {
 	fn default() -> Self {
 		Self::Graph(Dir::default())
+	}
+}
+
+impl ToSql for LookupKind {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Self::Graph(dir) => dir.fmt_sql(f, fmt),
+			Self::Reference => f.push_str("<~"),
+		}
 	}
 }
 
@@ -315,5 +310,12 @@ impl ComputedLookupSubject {
 				}
 			},
 		}
+	}
+}
+
+impl ToSql for LookupSubject {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::lookup::LookupSubject = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

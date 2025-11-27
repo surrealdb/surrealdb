@@ -1,6 +1,8 @@
+use std::fmt;
+
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
-use surrealdb_types::ToSql;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use uuid::Uuid;
 
 use crate::catalog::providers::CatalogProvider;
@@ -11,6 +13,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::visit::Visit;
 use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _};
+use crate::fmt::CoverStmtsExpr;
 use crate::val::Value;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]

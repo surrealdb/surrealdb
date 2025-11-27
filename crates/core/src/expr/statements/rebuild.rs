@@ -1,5 +1,9 @@
+use std::fmt;
+use std::fmt::{Display, Formatter};
+
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
@@ -28,6 +32,13 @@ impl RebuildStatement {
 		match self {
 			Self::Index(s) => s.compute(ctx, opt).await,
 		}
+	}
+}
+
+impl ToSql for RebuildStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::rebuild::RebuildStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }
 
@@ -66,5 +77,12 @@ impl RebuildIndexStatement {
 		run_indexing(ctx, opt, tb.table_id, ix, !self.concurrently).await?;
 		// Ok all good
 		Ok(Value::None)
+	}
+}
+
+impl ToSql for RebuildIndexStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::rebuild::RebuildIndexStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

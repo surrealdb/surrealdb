@@ -1,6 +1,9 @@
+use std::fmt::{self, Display};
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::sql::field::Fields;
+use crate::sql::field::{Fields, Selector};
+use crate::sql::{Expr, Field, Literal};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -16,13 +19,40 @@ pub(crate) enum Output {
 
 impl ToSql for Output {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("RETURN ");
 		match self {
-			Self::None => write_sql!(f, fmt, "RETURN NONE"),
-			Self::Null => write_sql!(f, fmt, "RETURN NULL"),
-			Self::Diff => write_sql!(f, fmt, "RETURN DIFF"),
-			Self::After => write_sql!(f, fmt, "RETURN AFTER"),
-			Self::Before => write_sql!(f, fmt, "RETURN BEFORE"),
-			Self::Fields(v) => write_sql!(f, fmt, "RETURN {}", v),
+			Self::None => f.push_str("NONE"),
+			Self::Null => f.push_str("NULL"),
+			Self::Diff => f.push_str("DIFF"),
+			Self::After => f.push_str("AFTER"),
+			Self::Before => f.push_str("BEFORE"),
+			Self::Fields(v) => {
+				// We need to escape a possible `RETURN NONE` where `NONE` is a value
+				let starts_with_none = match v {
+					Fields::Value(selector) => {
+						matches!(selector.expr, Expr::Literal(Literal::None))
+					}
+					Fields::Select(fields) => fields
+						.first()
+						.map(|x| {
+							matches!(
+								x,
+								Field::Single(Selector {
+									expr: Expr::Literal(Literal::None),
+									..
+								})
+							)
+						})
+						.unwrap_or(false),
+				};
+				if starts_with_none {
+					f.push('(');
+					v.fmt_sql(f, fmt);
+					f.push(')');
+				} else {
+					v.fmt_sql(f, fmt);
+				}
+			}
 		}
 	}
 }

@@ -38,7 +38,8 @@ pub(crate) struct Model {
 
 impl ToSql for Model {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "ml::{}<{}>", self.name, self.version)
+		let stmt: crate::sql::model::Model = self.clone().into();
+		stmt.fmt_sql(f, sql_fmt);
 	}
 }
 

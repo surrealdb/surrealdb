@@ -1,5 +1,6 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::fmt::{CoverStmtsSql, Fmt, fmt_separated_by};
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -7,6 +8,7 @@ use crate::sql::Expr;
 pub struct IfelseStatement {
 	/// The first if condition followed by a body, followed by any number of
 	/// else if's
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
 	pub exprs: Vec<(Expr, Expr)>,
 	/// the final else body, if there is one
 	pub close: Option<Expr>,
@@ -40,42 +42,90 @@ impl From<crate::expr::statements::IfelseStatement> for IfelseStatement {
 
 impl ToSql for IfelseStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		// Always use the bracketed logic since we don't have a separate Display implementation
-		for (i, (cond, then)) in self.exprs.iter().enumerate() {
-			if i > 0 {
+		if self.bracketed() {
+			write_sql!(
+				f,
+				fmt,
+				"{}",
+				&Fmt::new(
+					self.exprs.iter().map(|args| {
+						Fmt::new(args, |(cond, then), f, fmt| {
+							if fmt.is_pretty() {
+								write_sql!(f, fmt, "IF {}", CoverStmtsSql(cond));
+								let fmt = fmt.increment();
+								write_sql!(f, fmt, "{then}");
+							} else {
+								write_sql!(f, fmt, "IF {} {then}", CoverStmtsSql(cond));
+							}
+						})
+					}),
+					if fmt.is_pretty() {
+						fmt_separated_by("ELSE ")
+					} else {
+						fmt_separated_by(" ELSE ")
+					},
+				),
+			);
+			if let Some(ref v) = self.close {
 				if fmt.is_pretty() {
-					f.push('\n');
-					f.push_str("ELSE ");
+					write_sql!(f, fmt, "ELSE");
+					let fmt = fmt.increment();
+					write_sql!(f, fmt, "{v}");
 				} else {
-					f.push_str(" ELSE ");
+					write_sql!(f, fmt, " ELSE {v}");
 				}
 			}
-			if fmt.is_pretty() && self.bracketed() {
-				f.push_str("IF ");
-				cond.fmt_sql(f, fmt);
-				let inner_fmt = fmt.increment();
-				f.push('\n');
-				inner_fmt.write_indent(f);
-				then.fmt_sql(f, inner_fmt);
+		} else {
+			write_sql!(
+				f,
+				fmt,
+				"{}",
+				&Fmt::new(
+					self.exprs.iter().map(|args| {
+						Fmt::new(args, |(cond, then), f, fmt| {
+							if fmt.is_pretty() {
+								write_sql!(f, fmt, "IF {} THEN", CoverStmtsSql(cond));
+								let fmt = fmt.increment();
+								write_sql!(f, fmt, "{then}");
+							} else {
+								write_sql!(f, fmt, "IF {} THEN {then}", CoverStmtsSql(cond));
+							}
+						})
+					}),
+					if fmt.is_pretty() {
+						fmt_separated_by("ELSE ")
+					} else {
+						fmt_separated_by(" ELSE ")
+					},
+				),
+			);
+			if let Some(ref v) = self.close {
+				if fmt.is_pretty() {
+					write_sql!(f, fmt, "ELSE");
+					let fmt = fmt.increment();
+					write_sql!(f, fmt, "{v}");
+				} else {
+					write_sql!(f, fmt, " ELSE {v}");
+				}
+			}
+			if fmt.is_pretty() {
+				write_sql!(f, fmt, "END");
 			} else {
-				f.push_str("IF ");
-				cond.fmt_sql(f, fmt);
-				f.push(' ');
-				then.fmt_sql(f, fmt);
+				write_sql!(f, fmt, " END");
 			}
 		}
-		if let Some(ref v) = self.close {
-			if fmt.is_pretty() && self.bracketed() {
-				f.push('\n');
-				f.push_str("ELSE");
-				let inner_fmt = fmt.increment();
-				f.push('\n');
-				inner_fmt.write_indent(f);
-				v.fmt_sql(f, inner_fmt);
-			} else {
-				f.push_str(" ELSE ");
-				v.fmt_sql(f, fmt);
-			}
-		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::syn;
+
+	#[test]
+	fn format_pretty() {
+		let query = syn::parse("IF 1 { 1 } ELSE IF 2 { 2 }").unwrap();
+		assert_eq!(query.to_sql(), "IF 1 { 1 } ELSE IF 2 { 2 };");
+		assert_eq!(query.to_sql_pretty(), "IF 1\n\t{ 1 }\nELSE IF 2\n\t{ 2 }\n;");
 	}
 }

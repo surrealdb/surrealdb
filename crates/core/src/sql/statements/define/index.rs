@@ -5,7 +5,6 @@ use crate::fmt::Fmt;
 use crate::sql::{Expr, Index};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct DefineIndexStatement {
 	pub kind: DefineKind,
 	pub name: Expr,

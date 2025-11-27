@@ -4,7 +4,10 @@ use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct Block(pub(crate) Vec<Expr>);
+pub struct Block(
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+	pub(crate) Vec<Expr>,
+);
 
 impl From<Block> for crate::expr::Block {
 	fn from(v: Block) -> Self {

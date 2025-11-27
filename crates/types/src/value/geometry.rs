@@ -19,6 +19,7 @@ use crate::{GeometryKind, Object, SurrealValue, Value, array, object};
 /// The types used internally originate from the `geo` crate.
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Geometry {
 	/// A single point in 2D space
 	Point(Point<f64>),
@@ -74,9 +75,11 @@ macro_rules! impl_geometry {
 
 impl Display for Geometry {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		use crate::value::format::F;
+
 		match self {
 			Self::Point(v) => {
-				write!(f, "({}, {})", v.x(), v.y())
+				write!(f, "({}, {})", F(v.x()), F(v.y()))
 			}
 			Self::Line(v) => {
 				write!(f, "{{ type: 'LineString', coordinates: [")?;
@@ -84,7 +87,7 @@ impl Display for Geometry {
 					if i > 0 {
 						write!(f, ", ")?;
 					}
-					write!(f, "[{}, {}]", point.x(), point.y())?;
+					write!(f, "[{}, {}]", F(point.x()), F(point.y()))?;
 				}
 				write!(f, "] }}")
 			}
@@ -99,7 +102,7 @@ impl Display for Geometry {
 						if i > 0 {
 							write!(f, ", ")?;
 						}
-						write!(f, "[{}, {}]", point.x(), point.y())?;
+						write!(f, "[{}, {}]", F(point.x()), F(point.y()))?;
 					}
 					write!(f, "]")?;
 				}
@@ -111,7 +114,7 @@ impl Display for Geometry {
 					if i > 0 {
 						write!(f, ", ")?;
 					}
-					write!(f, "[{}, {}]", point.x(), point.y())?;
+					write!(f, "[{}, {}]", F(point.x()), F(point.y()))?;
 				}
 				write!(f, "] }}")
 			}
@@ -126,7 +129,7 @@ impl Display for Geometry {
 						if i > 0 {
 							write!(f, ", ")?;
 						}
-						write!(f, "[{}, {}]", point.x(), point.y())?;
+						write!(f, "[{}, {}]", F(point.x()), F(point.y()))?;
 					}
 					write!(f, "]")?;
 				}
@@ -150,7 +153,7 @@ impl Display for Geometry {
 							if i > 0 {
 								write!(f, ", ")?;
 							}
-							write!(f, "[{}, {}]", point.x(), point.y())?;
+							write!(f, "[{}, {}]", F(point.x()), F(point.y()))?;
 						}
 						write!(f, "]")?;
 					}

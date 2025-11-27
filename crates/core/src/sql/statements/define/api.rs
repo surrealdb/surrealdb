@@ -3,7 +3,7 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use super::DefineKind;
 use super::config::api::ApiConfig;
 use crate::catalog::ApiMethod;
-use crate::fmt::{Fmt, pretty_indent};
+use crate::fmt::Fmt;
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -39,19 +39,17 @@ impl ToSql for DefineApiStatement {
 			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
 		}
 		write_sql!(f, sql_fmt, " {}", self.path);
-		let indent = pretty_indent();
+		let sql_fmt = sql_fmt.increment();
 
 		write_sql!(f, sql_fmt, " FOR any");
 		{
-			let indent = pretty_indent();
+			let sql_fmt = sql_fmt.increment();
 
 			write_sql!(f, sql_fmt, "{}", self.config);
 
 			if let Some(fallback) = &self.fallback {
 				write_sql!(f, sql_fmt, " THEN {}", fallback);
 			}
-
-			drop(indent);
 		}
 
 		for action in &self.actions {
@@ -61,8 +59,6 @@ impl ToSql for DefineApiStatement {
 		if let Some(ref comment) = self.comment {
 			write_sql!(f, sql_fmt, " COMMENT {}", comment);
 		}
-
-		drop(indent);
 	}
 }
 

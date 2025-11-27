@@ -1,6 +1,8 @@
+use std::fmt;
+
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
-use surrealdb_types::ToSql;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{Iterable, Iterator, Options, Statement};
@@ -9,6 +11,7 @@ use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::relate::RelateThrough;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
+use crate::fmt::CoverStmtsExpr;
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Datetime, RecordIdKey, Table};
 
@@ -137,6 +140,13 @@ impl InsertStatement {
 			Ok(res)
 		})
 		.await
+	}
+}
+
+impl ToSql for InsertStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::insert::InsertStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }
 

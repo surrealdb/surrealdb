@@ -1,8 +1,9 @@
+use std::fmt;
 use std::fmt::Write;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::cnf::IDIOM_RECURSION_LIMIT;
 use crate::ctx::Context;
@@ -14,7 +15,7 @@ use crate::expr::idiom::recursion::{
 	self, Recursion, clean_iteration, compute_idiom_recursion, is_final,
 };
 use crate::expr::{Expr, FlowResultExt as _, Idiom, Literal, Lookup, Value};
-use crate::fmt::EscapeKwFreeIdent;
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 use crate::val::{Array, RecordId};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -135,16 +136,16 @@ impl Part {
 	pub(crate) fn to_raw_string(&self) -> String {
 		match self {
 			Part::Start(v) => v.to_raw_string(),
-			Part::Field(v) => format!(".{}", EscapeKwFreeIdent(v)),
+			Part::Field(v) => format!(".{}", EscapeKwFreeIdent(v).to_sql()),
 			_ => self.to_sql(),
 		}
 	}
 }
 
 impl ToSql for Part {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let sql_part: crate::sql::Part = self.clone().into();
-		sql_part.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let part: crate::sql::part::Part = self.clone().into();
+		part.fmt_sql(f, fmt);
 	}
 }
 
@@ -379,9 +380,9 @@ impl DestructurePart {
 }
 
 impl ToSql for DestructurePart {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let sql_destructure_part: crate::sql::part::DestructurePart = self.clone().into();
-		sql_destructure_part.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::part::DestructurePart = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }
 
@@ -422,9 +423,9 @@ impl TryInto<(u32, Option<u32>)> for Recurse {
 }
 
 impl ToSql for Recurse {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let sql_recurse: crate::sql::part::Recurse = self.clone().into();
-		sql_recurse.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let recurse: crate::sql::part::Recurse = self.clone().into();
+		recurse.fmt_sql(f, fmt);
 	}
 }
 
@@ -604,8 +605,8 @@ impl RecurseInstruction {
 }
 
 impl ToSql for RecurseInstruction {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let sql_recurse_instruction: crate::sql::part::RecurseInstruction = self.clone().into();
-		sql_recurse_instruction.fmt_sql(f, sql_fmt);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::part::RecurseInstruction = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

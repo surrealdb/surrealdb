@@ -31,7 +31,7 @@ pub(crate) use module::DefineModuleStatement;
 pub(crate) use namespace::DefineNamespaceStatement;
 pub(crate) use param::DefineParamStatement;
 pub(crate) use sequence::DefineSequenceStatement;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 pub(crate) use table::DefineTableStatement;
 pub(crate) use user::DefineUserStatement;
 
@@ -77,12 +77,14 @@ pub(crate) enum DefineStatement {
 	Field(DefineFieldStatement),
 	Index(DefineIndexStatement),
 	User(DefineUserStatement),
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Model(DefineModelStatement),
 	Access(DefineAccessStatement),
 	Config(DefineConfigStatement),
 	Api(DefineApiStatement),
 	Bucket(DefineBucketStatement),
 	Sequence(DefineSequenceStatement),
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Module(DefineModuleStatement),
 }
 

@@ -43,7 +43,10 @@ impl From<crate::expr::order::Ordering> for Ordering {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
-pub struct OrderList(pub Vec<Order>);
+pub struct OrderList(
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+	pub  Vec<Order>,
+);
 
 impl Deref for OrderList {
 	type Target = Vec<Order>;

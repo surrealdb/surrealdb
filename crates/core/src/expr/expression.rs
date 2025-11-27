@@ -319,7 +319,7 @@ impl Expr {
 			Expr::FunctionCall(x) => x.receiver.to_idiom(),
 			Expr::Literal(l) => match l {
 				Literal::String(s) => Idiom::field(s.clone()),
-				Literal::Datetime(d) => Idiom::field(d.to_raw_string()),
+				Literal::Datetime(d) => Idiom::field(d.to_string()),
 				x => Idiom::field(x.to_sql()),
 			},
 			x => Idiom::field(x.to_sql()),

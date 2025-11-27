@@ -15,6 +15,7 @@ use crate::sql::{SqlFormat, ToSql};
 /// This enum provides type-safe representation for all numeric types.
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Number {
 	/// A 64-bit signed integer
 	Int(i64),

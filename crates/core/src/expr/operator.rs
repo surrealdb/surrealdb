@@ -134,17 +134,8 @@ pub(crate) struct MatchesOperator {
 
 impl ToSql for MatchesOperator {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		if let Some(r) = self.rf {
-			if self.operator != BooleanOperator::And {
-				write_sql!(f, sql_fmt, "@{r},{}@", self.operator)
-			} else {
-				write_sql!(f, sql_fmt, "@{r}@")
-			}
-		} else if self.operator != BooleanOperator::And {
-			write_sql!(f, sql_fmt, "@{}@", self.operator)
-		} else {
-			write_sql!(f, sql_fmt, "@@")
-		}
+		let matches_operator: crate::sql::operator::MatchesOperator = self.clone().into();
+		matches_operator.fmt_sql(f, sql_fmt);
 	}
 }
 
@@ -308,8 +299,9 @@ impl BindingPower {
 	pub fn for_expr(expr: &Expr) -> BindingPower {
 		match expr {
 			Expr::Prefix {
+				op,
 				..
-			} => BindingPower::Prefix,
+			} => Self::for_prefix_operator(op),
 			Expr::Postfix {
 				op,
 				..

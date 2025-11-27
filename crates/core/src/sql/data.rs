@@ -3,7 +3,6 @@ use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use crate::sql::{AssignOperator, Expr, Idiom};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[allow(clippy::enum_variant_names)]
 pub(crate) enum Data {
 	#[default]
@@ -22,6 +21,7 @@ pub(crate) enum Data {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct Assignment {
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::plain_idiom))]
 	pub place: Idiom,
 	pub operator: AssignOperator,
 	pub value: Expr,

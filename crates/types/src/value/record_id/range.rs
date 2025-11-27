@@ -13,6 +13,7 @@ use crate::{Kind, Range, RecordIdKey, SurrealValue, Value, kind};
 /// allowing queries like "find all records with IDs between X and Y".
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct RecordIdKeyRange {
 	/// The lower bound of the range
 	pub start: Bound<RecordIdKey>,

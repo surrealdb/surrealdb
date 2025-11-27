@@ -46,9 +46,9 @@ impl Value {
 			}
 
 			match p {
-				Part::Lookup(g) => {
+				Part::Lookup(lookup) => {
 					match place {
-						Value::Object(obj) => match obj.entry(g.to_raw()) {
+						Value::Object(obj) => match obj.entry(lookup.to_sql()) {
 							Entry::Vacant(x) => {
 								let v = x.insert(Value::None);
 								return Self::assign(stk, ctx, opt, v, val, iter.as_slice()).await;
@@ -254,7 +254,7 @@ impl Value {
 	) -> Result<()> {
 		for p in path.iter().rev() {
 			let name = match p {
-				Part::Lookup(x) => x.to_raw(),
+				Part::Lookup(x) => x.to_sql(),
 				Part::Field(f) => f.as_str().to_owned(),
 				Part::Value(x) => {
 					let v = stk.run(|stk| x.compute(stk, ctx, opt, None)).await.catch_return()?;

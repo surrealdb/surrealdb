@@ -1,5 +1,8 @@
+use std::fmt::{self, Display, Write};
+
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
 use crate::catalog::providers::{CatalogProvider, DatabaseProvider};
@@ -9,6 +12,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Block, Expr, Kind};
+use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -76,5 +80,12 @@ impl DefineFunctionStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
+	}
+}
+
+impl ToSql for DefineFunctionStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::define::DefineFunctionStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

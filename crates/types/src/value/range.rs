@@ -12,6 +12,7 @@ use crate::{SurrealValue, Value};
 /// This is commonly used for range queries and comparisons.
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Range {
 	/// The lower bound of the range
 	pub start: Bound<Value>,

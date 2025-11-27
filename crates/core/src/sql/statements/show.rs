@@ -1,5 +1,8 @@
+use std::fmt;
+
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::fmt::EscapeKwFreeIdent;
 use crate::types::PublicDatetime;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
@@ -39,18 +42,18 @@ pub struct ShowStatement {
 }
 
 impl ToSql for ShowStatement {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		f.push_str("SHOW CHANGES FOR");
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "SHOW CHANGES FOR");
 		match self.table {
-			Some(ref v) => write_sql!(f, sql_fmt, " TABLE {}", v),
-			None => f.push_str(" DATABASE"),
+			Some(ref v) => write_sql!(f, fmt, " TABLE {}", EscapeKwFreeIdent(v)),
+			None => write_sql!(f, fmt, " DATABASE"),
 		}
 		match self.since {
-			ShowSince::Timestamp(ref v) => write_sql!(f, sql_fmt, " SINCE {}", v),
-			ShowSince::Versionstamp(ref v) => write_sql!(f, sql_fmt, " SINCE {}", v),
+			ShowSince::Timestamp(ref v) => write_sql!(f, fmt, " SINCE {}", v),
+			ShowSince::Versionstamp(ref v) => write_sql!(f, fmt, " SINCE {}", v),
 		}
 		if let Some(ref v) = self.limit {
-			write_sql!(f, sql_fmt, " LIMIT {}", v);
+			write_sql!(f, fmt, " LIMIT {}", v)
 		}
 	}
 }

@@ -11,7 +11,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Expr, FlowResultExt as _, Value};
-use crate::fmt::{Fmt, pretty_indent};
+use crate::fmt::Fmt;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -92,9 +92,7 @@ pub(crate) struct ApiAction {
 
 impl ToSql for ApiAction {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "FOR {}", Fmt::comma_separated(self.methods.iter()));
-		let indent = pretty_indent();
-		write_sql!(f, sql_fmt, "{} THEN {}", self.config, self.action);
-		drop(indent);
+		let stmt: crate::sql::statements::define::ApiAction = self.clone().into();
+		stmt.fmt_sql(f, sql_fmt);
 	}
 }

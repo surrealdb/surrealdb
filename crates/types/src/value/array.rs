@@ -11,6 +11,7 @@ use crate::{SurrealValue, Value};
 /// The underlying storage is a `Vec<Value>`.
 
 #[derive(Clone, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Array(pub(crate) Vec<Value>);
 
 impl Array {

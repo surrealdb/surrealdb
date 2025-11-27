@@ -1,12 +1,12 @@
 use std::collections::{BTreeMap, HashSet};
-use std::fmt::Write;
+use std::fmt::{self, Display, Formatter, Write};
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use revision::revisioned;
 use rust_decimal::Decimal;
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
@@ -25,6 +25,20 @@ pub enum GeometryKind {
 	MultiLine,
 	MultiPolygon,
 	Collection,
+}
+
+impl ToSql for GeometryKind {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			GeometryKind::Point => f.push_str("point"),
+			GeometryKind::Line => f.push_str("line"),
+			GeometryKind::Polygon => f.push_str("polygon"),
+			GeometryKind::MultiPoint => f.push_str("multipoint"),
+			GeometryKind::MultiLine => f.push_str("multiline"),
+			GeometryKind::MultiPolygon => f.push_str("multipolygon"),
+			GeometryKind::Collection => f.push_str("collection"),
+		}
+	}
 }
 
 impl FromStr for GeometryKind {
@@ -426,14 +440,20 @@ impl From<&Kind> for Box<Kind> {
 
 impl ToSql for Kind {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let sql_kind: crate::sql::Kind = self.clone().into();
-		sql_kind.fmt_sql(f, fmt);
+		let kind: crate::sql::Kind = self.clone().into();
+		kind.fmt_sql(f, fmt);
+	}
+}
+
+impl Display for Kind {
+	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		write!(f, "{}", self.to_sql())
 	}
 }
 
 impl InfoStructure for Kind {
 	fn structure(self) -> Value {
-		self.to_sql().into()
+		self.to_string().into()
 	}
 }
 
@@ -576,13 +596,6 @@ impl From<KindLiteral> for crate::types::PublicKindLiteral {
 			),
 			KindLiteral::Bool(b) => crate::types::PublicKindLiteral::Bool(b),
 		}
-	}
-}
-
-impl ToSql for KindLiteral {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let sql_literal: crate::sql::kind::KindLiteral = self.clone().into();
-		sql_literal.fmt_sql(f, fmt);
 	}
 }
 
@@ -854,5 +867,12 @@ impl KindLiteral {
 			*/
 			_ => false,
 		}
+	}
+}
+
+impl ToSql for KindLiteral {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let lit: crate::sql::kind::KindLiteral = self.clone().into();
+		lit.fmt_sql(f, fmt)
 	}
 }

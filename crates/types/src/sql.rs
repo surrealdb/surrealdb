@@ -192,24 +192,35 @@ pub fn fmt_sql_key_value<'a, V: ToSql + 'a>(
 pub use surrealdb_types_derive::write_sql;
 
 impl ToSql for String {
+	#[inline]
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		f.push_str(self.as_str());
 	}
 }
 
 impl ToSql for str {
+	#[inline]
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		f.push_str(self);
 	}
 }
 
 impl ToSql for &str {
+	#[inline]
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		f.push_str(self);
 	}
 }
 
+impl ToSql for char {
+	#[inline]
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push(*self);
+	}
+}
+
 impl ToSql for bool {
+	#[inline]
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		f.push_str(if *self {
 			"true"
@@ -223,6 +234,7 @@ macro_rules! impl_to_sql_for_numeric {
 	($($t:ty),+) => {
 		$(
 			impl ToSql for $t {
+				#[inline]
 				fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 					f.push_str(&self.to_string())
 				}
@@ -234,6 +246,7 @@ macro_rules! impl_to_sql_for_numeric {
 impl_to_sql_for_numeric!(u8, u16, u32, u64, i8, i16, i32, i64, usize, isize, f32, f64);
 
 impl<T: ToSql> ToSql for &T {
+	#[inline]
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		(**self).fmt_sql(f, fmt)
 	}
@@ -241,6 +254,7 @@ impl<T: ToSql> ToSql for &T {
 
 // Blanket impl for Box
 impl<T: ToSql + ?Sized> ToSql for Box<T> {
+	#[inline]
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		(**self).fmt_sql(f, fmt)
 	}
@@ -248,12 +262,14 @@ impl<T: ToSql + ?Sized> ToSql for Box<T> {
 
 // Blanket impl for Arc
 impl<T: ToSql + ?Sized> ToSql for Arc<T> {
+	#[inline]
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		(**self).fmt_sql(f, fmt)
 	}
 }
 
 impl ToSql for uuid::Uuid {
+	#[inline]
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		f.push('u');
 		QuoteStr(&self.to_string()).fmt_sql(f, fmt);
@@ -261,6 +277,7 @@ impl ToSql for uuid::Uuid {
 }
 
 impl ToSql for rust_decimal::Decimal {
+	#[inline]
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		self.to_string().fmt_sql(f, fmt);
 		f.push_str("dec");

@@ -1,7 +1,9 @@
+use std::fmt::{self, Display, Write};
 use std::ops::Deref;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::providers::DatabaseProvider;
 use crate::ctx::Context;
@@ -9,6 +11,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Timeout, Value};
+use crate::fmt::EscapeKwIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 
@@ -60,5 +63,12 @@ impl AlterSequenceStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
+	}
+}
+
+impl ToSql for AlterSequenceStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::alter::AlterSequenceStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }
