@@ -107,7 +107,7 @@ impl Datetime {
 
 impl Display for Datetime {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "{}", self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true))
+		self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true).fmt(f)
 	}
 }
 

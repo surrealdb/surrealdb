@@ -589,7 +589,7 @@ impl ToSql for Value {
 			Value::File(v) => v.fmt_sql(f, sql_fmt),
 			Value::Regex(v) => v.fmt_sql(f, sql_fmt),
 			Value::Range(v) => v.fmt_sql(f, sql_fmt),
-			Value::Closure(_) => f.push_str("<Closure>"),
+			Value::Closure(v) => v.fmt_sql(f, sql_fmt),
 		}
 	}
 }

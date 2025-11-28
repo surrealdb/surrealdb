@@ -59,12 +59,50 @@ impl Document {
 			// Create a vector to store the keys
 			let mut defined_field_names = IdiomTrie::new();
 
+			// First pass: collect all explicitly defined field names
+			let mut explicit_field_names = HashSet::new();
+			for fd in self.fd(ctx, opt).await?.iter() {
+				explicit_field_names.insert(fd.name.clone());
+			}
+
 			// Loop through all field definitions
 			for fd in self.fd(ctx, opt).await?.iter() {
-				let is_flex = fd.flexible;
 				let is_literal = fd.field_kind.as_ref().is_some_and(Kind::contains_literal);
+				let is_any = fd.field_kind.as_ref().is_some_and(Kind::is_any);
+
+				// Check if the kind contains object (including option<object>, array<object>, etc.)
+				fn kind_contains_object(kind: &Kind) -> bool {
+					match kind {
+						Kind::Object => true,
+						Kind::Either(kinds) => kinds.iter().any(kind_contains_object),
+						Kind::Array(inner, _) | Kind::Set(inner, _) => kind_contains_object(inner),
+						_ => false,
+					}
+				}
+				let contains_object = fd.field_kind.as_ref().is_some_and(kind_contains_object);
+
+				// In SCHEMAFULL tables:
+				// - TYPE any: allows nested (inherent)
+				// - TYPE containing object without FLEXIBLE: strict (does NOT allow arbitrary
+				//   nested)
+				// - TYPE containing object with FLEXIBLE: allows nested
+				// - Literal types: allow nested
+				let allows_nested = is_any || is_literal || (contains_object && fd.flexible);
+
 				for k in self.current.doc.as_ref().each(&fd.name).into_iter() {
-					defined_field_names.insert(&k, is_flex || is_literal);
+					defined_field_names.insert(&k, allows_nested);
+
+					// Also insert all ancestor paths
+					// BUT only mark them as allowing nested if they don't have their own explicit
+					// definition
+					for i in 1..k.len() {
+						let ancestor = Idiom(k[..i].to_vec());
+						if !explicit_field_names.contains(&ancestor) {
+							// This ancestor doesn't have an explicit definition, treat as
+							// schemaless object
+							defined_field_names.insert(&k[..i], true);
+						}
+					}
 				}
 			}
 

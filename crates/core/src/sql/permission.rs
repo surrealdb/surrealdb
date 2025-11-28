@@ -85,6 +85,11 @@ impl surrealdb_types::ToSql for Permissions {
 		.into_iter()
 		.zip([&self.select, &self.create, &self.update, &self.delete])
 		{
+			// Skip delete permission if it's Full (default), since catalog fields don't track it
+			if matches!(c, PermissionKind::Delete) && matches!(permission, Permission::Full) {
+				continue;
+			}
+
 			if let Some((existing, _)) = lines.iter_mut().find(|(_, p)| *p == permission) {
 				existing.push(c);
 			} else {

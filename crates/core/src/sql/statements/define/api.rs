@@ -104,8 +104,6 @@ impl ToSql for ApiAction {
 			f.push('\n');
 			let inner_fmt = sql_fmt.increment();
 			inner_fmt.write_indent(f);
-		} else {
-			f.push(' ');
 		}
 		write_sql!(f, sql_fmt, "{} THEN {}", self.config, self.action);
 	}

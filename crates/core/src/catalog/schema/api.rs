@@ -208,6 +208,7 @@ impl InfoStructure for ApiConfigDefinition {
 
 impl ToSql for ApiConfigDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("API");
 		self.to_sql_config().fmt_sql(f, fmt)
 	}
 }

@@ -77,8 +77,9 @@ impl ToSql for EscapeKwIdent<'_> {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		if self.1.contains(&self.0) {
 			write_sql!(f, fmt, "`{}`", Escape::escape_str(self.0, '`'));
+		} else {
+			EscapeKwFreeIdent(self.0).fmt_sql(f, fmt);
 		}
-		EscapeKwFreeIdent(self.0).fmt_sql(f, fmt);
 	}
 }
 
@@ -96,8 +97,9 @@ impl ToSql for EscapeKwFreeIdent<'_> {
 			|| s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
 		{
 			write_sql!(f, fmt, "`{}`", Escape::escape_str(s, '`'));
+		} else {
+			f.push_str(s);
 		}
-		f.push_str(s)
 	}
 }
 
@@ -111,9 +113,9 @@ impl ToSql for EscapeKey<'_> {
 			|| s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
 		{
 			write_sql!(f, fmt, "\"{}\"", Escape::escape_str(s, '\"'));
+		} else {
+			f.push_str(s);
 		}
-
-		f.push_str(s)
 	}
 }
 

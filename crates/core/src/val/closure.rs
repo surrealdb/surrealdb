@@ -61,7 +61,7 @@ impl Closure {
 				bail!(Error::InvalidArguments {
 					name: "ANONYMOUS".to_string(),
 					message: format!(
-						"Expected a value of type '{}' for argument '{}'",
+						"Expected a value of type '{}' for argument {}",
 						kind.to_sql(),
 						name.to_sql()
 					),

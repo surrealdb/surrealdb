@@ -208,12 +208,22 @@ impl ToSql for MatchesOperator {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		if let Some(r) = self.rf {
 			if let Some(ref o) = self.operator {
-				write_sql!(f, fmt, "@{r},{o}@");
+				// Don't show AND operator since it's the default
+				if !matches!(o, BooleanOperator::And) {
+					write_sql!(f, fmt, "@{r},{o}@");
+				} else {
+					write_sql!(f, fmt, "@{r}@");
+				}
 			} else {
 				write_sql!(f, fmt, "@{r}@");
 			}
 		} else if let Some(ref o) = self.operator {
-			write_sql!(f, fmt, "@{o}@");
+			// Don't show AND operator since it's the default
+			if !matches!(o, BooleanOperator::And) {
+				write_sql!(f, fmt, "@{o}@");
+			} else {
+				f.push_str("@@");
+			}
 		} else {
 			f.push_str("@@");
 		}
