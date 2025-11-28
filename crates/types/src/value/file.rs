@@ -47,9 +47,11 @@ impl File {
 
 impl ToSql for crate::File {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		use std::fmt::Write;
-		write!(f, "f\"{}:{}\"", fmt_inner(&self.bucket, true), fmt_inner(&self.key, false))
-			.expect("Write cannot fail when writing to a String")
+		f.push_str("f\"");
+		f.push_str(&fmt_inner(&self.bucket, true));
+		f.push(':');
+		f.push_str(&fmt_inner(&self.key, false));
+		f.push('"');
 	}
 }
 

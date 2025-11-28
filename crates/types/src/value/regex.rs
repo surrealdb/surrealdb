@@ -84,8 +84,9 @@ impl Display for Regex {
 
 impl ToSql for Regex {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		use std::fmt::Write;
-		write!(f, "{}", self).expect("Write cannot fail when writing to a String")
+		f.push('/');
+		f.push_str(&self.0.to_string().replace('/', "\\/"));
+		f.push('/');
 	}
 }
 

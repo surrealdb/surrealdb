@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use anyhow::Result;
 use revision::revisioned;
 use surrealdb_types::{SqlFormat, ToSql};
@@ -55,14 +53,6 @@ impl ToSql for ConfigDefinition {
 			}
 			ConfigDefinition::Api(v) => v.fmt_sql(f, fmt),
 		}
-	}
-}
-
-impl Display for GraphQLConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use surrealdb_types::ToSql;
-		let sql_config: crate::sql::statements::define::config::GraphQLConfig = self.clone().into();
-		write!(f, "{}", sql_config.to_sql())
 	}
 }
 

@@ -76,21 +76,9 @@ impl InfoStructure for Permission {
 	}
 }
 
-impl Display for Permission {
-	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-		write!(f, "{}", self.to_sql())
-	}
-}
-
 impl ToSql for Permission {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: surrealdb_types::SqlFormat) {
 		self.to_sql_definition().fmt_sql(f, sql_fmt);
-	}
-}
-
-impl Display for Permissions {
-	fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-		write!(f, "{}", self.to_sql())
 	}
 }
 

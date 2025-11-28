@@ -85,8 +85,7 @@ impl ToSql for Number {
 					f.push('f');
 				} else {
 					// NaN, inf, -inf
-					use std::fmt::Write;
-					write!(f, "{v}").expect("Write cannot fail when writing to a String");
+					f.push_str(&v.to_string());
 				}
 			}
 			Number::Decimal(v) => v.fmt_sql(f, fmt),

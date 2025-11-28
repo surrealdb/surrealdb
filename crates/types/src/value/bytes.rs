@@ -72,8 +72,9 @@ impl Display for Bytes {
 
 impl ToSql for crate::Bytes {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		use std::fmt::Write;
-		write!(f, "{}", self).expect("Write cannot fail when writing to a String")
+		f.push_str("b\"");
+		f.push_str(&hex::encode_upper(&self.0));
+		f.push('"');
 	}
 }
 

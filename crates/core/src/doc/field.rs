@@ -145,7 +145,7 @@ impl Document {
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
 								table: tb.name.clone(),
-								field: current_doc_field_idiom.to_sql(),
+								field: current_doc_field_idiom.clone(),
 							}
 						);
 
@@ -161,7 +161,7 @@ impl Document {
 							// If strict, then throw an error on an undefined field
 							Error::FieldUndefined {
 								table: tb.name.clone(),
-								field: current_doc_field_idiom.to_sql(),
+								field: current_doc_field_idiom.clone(),
 							}
 						);
 
@@ -229,7 +229,7 @@ impl Document {
 					ensure!(
 						self.is_new() || val == *old,
 						Error::FieldReadonly {
-							field: fd.name.to_sql(),
+							field: fd.name.clone(),
 							record: rid.to_sql(),
 						}
 					);
@@ -270,7 +270,7 @@ impl Document {
 							// allowed, and we throw an error.
 							_ => {
 								bail!(Error::FieldReadonly {
-									field: fd.name.to_sql(),
+									field: fd.name.clone(),
 									record: rid.to_sql(),
 								});
 							}
@@ -603,7 +603,7 @@ impl FieldEditContext<'_> {
 				res.is_truthy(),
 				Error::FieldValue {
 					record: self.rid.to_sql(),
-					field: self.def.name.to_sql(),
+					field: self.def.name.clone(),
 					check: expr.to_sql(),
 					value: now.to_sql(),
 				}
@@ -696,11 +696,6 @@ impl FieldEditContext<'_> {
 	}
 	/// Process any REFERENCE clause for the field definition
 	async fn process_reference_clause(&mut self, val: &Value) -> Result<()> {
-		// TODO: RecordReferences was removed from ExperimentalTarget enum
-		// if !self.ctx.get_capabilities().allows_experimental(&
-		// ExperimentalTarget::RecordReferences) { 	return Ok(());
-		// }
-
 		// Is there a `REFERENCE` clause?
 		if self.def.reference.is_some() {
 			// Check if the value has actually changed

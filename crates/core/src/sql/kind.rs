@@ -546,7 +546,10 @@ impl ToSql for KindLiteral {
 						"{}",
 						Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
 							args,
-							|(k, v), f, fmt| write_sql!(f, fmt, "{}: {}", EscapeKey(k), v)
+							|tuple, f, fmt| {
+								let (k, v) = tuple;
+								write_sql!(f, fmt, "{}: {}", EscapeKey(k), v)
+							}
 						)),)
 					);
 				}

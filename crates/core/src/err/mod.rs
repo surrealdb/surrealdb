@@ -19,8 +19,8 @@ use thiserror::Error;
 
 use crate::api::err::ApiError;
 use crate::buc::BucketOperation;
-use crate::expr::Expr;
 use crate::expr::operation::PatchError;
+use crate::expr::{Expr, Idiom};
 use crate::iam::Error as IamError;
 use crate::idx::ft::MatchRef;
 use crate::idx::trees::vector::SharedVector;
@@ -493,12 +493,13 @@ pub(crate) enum Error {
 
 	/// The specified field did not conform to the field ASSERT clause
 	#[error(
-		"Found {value} for field `{field}`, with record `{record}`, but field must conform to: {check}"
+		"Found {value} for field `{field}`, with record `{record}`, but field must conform to: {check}",
+		field = field.to_sql()
 	)]
 	FieldValue {
 		record: String,
 		value: String,
-		field: String,
+		field: Idiom,
 		check: String,
 	},
 
@@ -526,18 +527,19 @@ pub(crate) enum Error {
 
 	/// The specified field did not conform to the field ASSERT clause
 	#[error(
-		"Found changed value for field `{field}`, with record `{record}`, but field is readonly"
+		"Found changed value for field `{field}`, with record `{record}`, but field is readonly",
+		field = field.to_sql()
 	)]
 	FieldReadonly {
 		record: String,
-		field: String,
+		field: Idiom,
 	},
 
 	/// The specified field on a SCHEMAFUL table was not defined
-	#[error("Found field '{field}', but no such field exists for table '{table}'")]
+	#[error("Found field '{field}', but no such field exists for table '{table}'", field = field.to_sql())]
 	FieldUndefined {
 		table: String,
-		field: String,
+		field: Idiom,
 	},
 
 	/// Found a record id for the record but this is not a valid id

@@ -1,12 +1,13 @@
 use std::fmt::{self, Display};
 
 use revision::revisioned;
-use surrealdb_types::{SqlFormat, SurrealValue, ToSql};
+use surrealdb_types::{SqlFormat, SurrealValue, ToSql, write_sql};
 
 use crate::api::path::Path;
 use crate::catalog::Permission;
 use crate::expr::Expr;
 use crate::expr::statements::info::InfoStructure;
+use crate::fmt::Fmt;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, Object, Value};
 
@@ -209,7 +210,20 @@ impl InfoStructure for ApiConfigDefinition {
 impl ToSql for ApiConfigDefinition {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		f.push_str("API");
-		self.to_sql_config().fmt_sql(f, fmt)
+		if !self.middleware.is_empty() {
+			write_sql!(f, fmt, " MIDDLEWARE ");
+			write_sql!(
+				f,
+				fmt,
+				"{}",
+				Fmt::pretty_comma_separated(self.middleware.iter().map(|m| {
+					let args = Fmt::pretty_comma_separated(m.args.iter()).to_sql();
+					format!("{}({})", m.name, args)
+				}))
+			);
+		}
+
+		write_sql!(f, fmt, " PERMISSIONS {}", self.permissions);
 	}
 }
 

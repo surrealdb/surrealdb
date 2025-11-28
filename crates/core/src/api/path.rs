@@ -3,7 +3,7 @@ use std::ops::Deref;
 use std::str::FromStr;
 
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::err::Error;
 use crate::expr::Kind;
@@ -303,37 +303,17 @@ impl Segment {
 	}
 }
 
-impl Display for Segment {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			Self::Fixed(v) => write!(f, "{v}"),
-			Self::Dynamic(v, k) => {
-				write!(f, ":{v}")?;
-				if let Some(k) = k {
-					write!(f, "<{}>", k.to_sql())?;
-				}
-
-				Ok(())
-			}
-			Self::Rest(v) => write!(f, "*{v}"),
-		}
-	}
-}
-
 impl ToSql for Segment {
-	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
-		use std::fmt::Write;
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::Fixed(v) => write!(f, "{v}").expect("Write cannot fail when writing to a String"),
+			Self::Fixed(v) => v.fmt_sql(f, fmt),
 			Self::Dynamic(v, k) => {
-				write!(f, ":{v}").expect("Write cannot fail when writing to a String");
+				write_sql!(f, fmt, ":{v}");
 				if let Some(k) = k {
-					f.push('<');
-					k.fmt_sql(f, fmt);
-					f.push('>');
+					write_sql!(f, fmt, "<{k}>");
 				}
 			}
-			Self::Rest(v) => write!(f, "*{v}").expect("Write cannot fail when writing to a String"),
+			Self::Rest(v) => write_sql!(f, fmt, "*{v}"),
 		}
 	}
 }

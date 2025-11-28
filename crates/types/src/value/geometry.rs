@@ -177,8 +177,7 @@ impl Display for Geometry {
 
 impl ToSql for Geometry {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		use std::fmt::Write;
-		write!(f, "{}", self).expect("Write cannot fail when writing to a String")
+		f.push_str(&self.to_string());
 	}
 }
 

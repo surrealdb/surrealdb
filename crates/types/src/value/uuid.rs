@@ -20,8 +20,9 @@ pub struct Uuid(pub uuid::Uuid);
 
 impl ToSql for Uuid {
 	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		use std::fmt::Write;
-		write!(f, "u'{}'", self).expect("Write cannot fail when writing to a String")
+		f.push_str("u'");
+		f.push_str(&self.0.to_string());
+		f.push('\'');
 	}
 }
 

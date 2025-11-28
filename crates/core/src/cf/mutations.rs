@@ -146,41 +146,6 @@ impl ChangeSet {
 	}
 }
 
-// impl ToSql for TableMutation {
-// 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-// 		match self {
-// 			TableMutation::Set(id, v) => write_sql!(f, fmt, "SET {} {}", id, v),
-// 			TableMutation::SetWithDiff(id, _previous, v) => write_sql!(f, fmt, "SET {} {}", id, v),
-// 			TableMutation::Del(id) => write_sql!(f, fmt, "DEL {}", id),
-// 			TableMutation::DelWithOriginal(id, _) => write_sql!(f, fmt, "DEL {}", id),
-// 			TableMutation::Def(t) => write_sql!(f, fmt, "{}", t),
-// 		}
-// 	}
-// }
-
-// impl ToSql for TableMutations {
-// 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-// 		let tb = &self.0;
-// 		let muts = &self.1;
-// 		write_sql!(f, fmt, "{}", tb)?;
-// 		muts.iter().for_each(|v| write_sql!(f, fmt, "{}", v))
-// 	}
-// }
-
-// impl ToSql for DatabaseMutation {
-// 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-// 		let x = &self.0;
-
-// 		x.iter().for_each(|v| write!(f, "{}", v))
-// 	}
-// }
-
-// impl ToSql for ChangeSet {
-// 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-// 		write_sql!(f, fmt, "{}", self.1)
-// 	}
-// }
-
 // WriteMutationSet is a set of mutations to be to a table at the specific
 // timestamp.
 #[revisioned(revision = 1)]
