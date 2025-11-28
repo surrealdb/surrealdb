@@ -3,7 +3,7 @@ use std::ops::Bound;
 
 use surrealdb_types::ToSql;
 
-use crate::fmt::{EscapeKey, EscapeRid, Fmt, Pretty, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKey, EscapeRidKey, Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{Expr, RecordIdKeyRangeLit};
 use crate::types::{PublicRecordIdKey, PublicUuid};
@@ -123,7 +123,7 @@ impl Display for RecordIdKeyLit {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			Self::Number(v) => Display::fmt(v, f),
-			Self::String(v) => EscapeRid(v).fmt(f),
+			Self::String(v) => EscapeRidKey(v).fmt(f),
 			Self::Uuid(v) => f.write_str(&v.to_sql()),
 			Self::Array(v) => {
 				let mut f = Pretty::from(f);

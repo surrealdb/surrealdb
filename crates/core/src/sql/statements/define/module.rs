@@ -1,8 +1,8 @@
 use std::fmt::{self, Write};
 
 use super::DefineKind;
-use crate::fmt::{is_pretty, pretty_indent};
-use crate::sql::{Expr, ModuleExecutable, Permission};
+use crate::fmt::{CoverStmts, is_pretty, pretty_indent};
+use crate::sql::{Expr, Literal, ModuleExecutable, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -10,7 +10,7 @@ pub(crate) struct DefineModuleStatement {
 	pub kind: DefineKind,
 	pub name: Option<String>,
 	pub executable: ModuleExecutable,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub permissions: Permission,
 }
 
@@ -26,8 +26,8 @@ impl fmt::Display for DefineModuleStatement {
 			write!(f, " mod::{name} AS")?;
 		}
 		write!(f, " {}", self.executable)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
@@ -46,7 +46,7 @@ impl From<DefineModuleStatement> for crate::expr::statements::DefineModuleStatem
 			kind: v.kind.into(),
 			name: v.name,
 			executable: v.executable.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			permissions: v.permissions.into(),
 		}
 	}
@@ -58,7 +58,7 @@ impl From<crate::expr::statements::DefineModuleStatement> for DefineModuleStatem
 			kind: v.kind.into(),
 			name: v.name,
 			executable: v.executable.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			permissions: v.permissions.into(),
 		}
 	}

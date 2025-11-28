@@ -79,7 +79,11 @@ impl NamespaceDefinition {
 	fn to_sql_definition(&self) -> DefineNamespaceStatement {
 		DefineNamespaceStatement {
 			name: crate::sql::Expr::Idiom(crate::sql::Idiom::field(self.name.clone())),
-			comment: self.comment.clone().map(|v| Expr::Literal(Literal::String(v))),
+			comment: self
+				.comment
+				.clone()
+				.map(|v| Expr::Literal(Literal::String(v)))
+				.unwrap_or(Expr::Literal(Literal::None)),
 			..Default::default()
 		}
 	}

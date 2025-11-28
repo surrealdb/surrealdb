@@ -1,5 +1,6 @@
 use std::fmt::{self, Display};
 
+use crate::fmt::CoverStmts;
 use crate::sql::{Block, Expr, Param};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -12,7 +13,7 @@ pub struct ForeachStatement {
 
 impl Display for ForeachStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "FOR {} IN {} {}", self.param, self.range, self.block)
+		write!(f, "FOR {} IN {} {}", self.param, CoverStmts(&self.range), self.block)
 	}
 }
 

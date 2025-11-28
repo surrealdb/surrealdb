@@ -67,86 +67,103 @@ impl Parser<'_> {
 			return Ok(Data::SingleExpression(value));
 		}
 
-		self.pop_peek();
-		// might still be a subquery `(select foo from ...`
-		let subquery = stk.run(|ctx| self.parse_expr_field(ctx)).await?;
+		// No way to correctly parse this without backtracking.
+		// Try to first parse the VALUES case, if that doesn't work retry.
+		let speculate_result = self
+			.speculate(stk, async |stk, this| {
+				this.pop_peek();
 
-		let mut idioms = Vec::new();
-		let select_span = if self.eat(t!(",")) {
-			// found an values expression, so subquery must be an idiom
-			let Expr::Idiom(idiom) = subquery else {
-				bail!("Invalid value, expected an idiom in INSERT VALUES statement.",
-					@token.span.covers(self.last_span()) => "Only idioms are allowed here")
-			};
+				// If the first value fails to match a idiom, it could still be a valid normal
+				// expression so retry in this case.
+				let Ok(first) = this.parse_plain_idiom(stk).await else {
+					return Ok(None);
+				};
 
-			idioms.push(idiom);
+				let mut idioms = vec![first];
+				let mut ate_comma = false;
+				loop {
+					if !this.eat(t!(",")) {
+						if ate_comma{
+							this.expect_closing_delimiter(t!(")"), token.span)?;
+						}else if !this.eat(t!(")")){
+							return Ok(None)
+						}
+						break;
+					}
 
-			loop {
-				idioms.push(self.parse_plain_idiom(stk).await?);
+					ate_comma = true;
 
-				if !self.eat(t!(",")) {
-					break;
+					if this.eat(t!(")")) {
+						break;
+					}
+
+					// at this point we are sure it has to be a values expression because we ate a
+					// `,` so we can throw an error if this fails to parse.
+					idioms.push(this.parse_plain_idiom(stk).await?);
 				}
-			}
 
-			self.expect_closing_delimiter(t!(")"), token.span)?;
+				let select_span = token.span.covers(this.last_span());
 
-			expected!(self, t!("VALUES"));
+				if ate_comma {
+					expected!(this, t!("VALUES"));
+				} else {
+					// if we did not eat `,` it could still be a single expression.
+					// if we do not find `VALUES` we will have to try again.
+					if !this.eat(t!("VALUES")) {
+						return Ok(None);
+					}
+				}
 
-			token.span.covers(self.last_span())
+				// after this point it has to be a values expression.
+
+				let mut insertions = Vec::new();
+				loop {
+					let mut values = Vec::new();
+					let start = expected!(this, t!("(")).span;
+					loop {
+						values.push(stk.run(|ctx| this.parse_expr_field(ctx)).await?);
+
+						if !this.eat(t!(",")) {
+							this.expect_closing_delimiter(t!(")"), start)?;
+							break;
+						}
+
+						if this.eat(t!(")")){
+							break
+						}
+
+					}
+
+					let span = start.covers(this.last_span());
+
+					if values.len() != idioms.len() {
+						bail!("Invalid numbers of values to insert, found {} value(s) but selector requires {} value(s).",
+						values.len(), idioms.len(),
+						@span,
+						@select_span => "This selector has {} field(s)",idioms.len()
+						);
+					}
+
+					insertions.push(values);
+
+					if !this.eat(t!(",")) {
+						break;
+					}
+				}
+
+				Ok(Some(
+						insertions.into_iter().map(|row| idioms.iter().cloned().zip(row).collect()).collect(),
+				))
+
+			})
+		.await?;
+
+		if let Some(x) = speculate_result {
+			Ok(Data::ValuesExpression(x))
 		} else {
-			// not a comma so it might be a single (a) VALUES (b) or a subquery
-			self.expect_closing_delimiter(t!(")"), token.span)?;
-			let select_span = token.span.covers(self.last_span());
-
-			if !self.eat(t!("VALUES")) {
-				// found a subquery
-				return Ok(Data::SingleExpression(subquery));
-			}
-
-			// found an values expression, so subquery must be an idiom
-			let Expr::Idiom(idiom) = subquery else {
-				bail!("Invalid value, expected an idiom in INSERT VALUES statement.",
-					@select_span => "Only idioms are allowed here")
-			};
-
-			idioms.push(idiom);
-			select_span
-		};
-
-		let mut insertions = Vec::new();
-		loop {
-			let mut values = Vec::new();
-			let start = expected!(self, t!("(")).span;
-			loop {
-				values.push(stk.run(|ctx| self.parse_expr_field(ctx)).await?);
-
-				if !self.eat(t!(",")) {
-					break;
-				}
-			}
-
-			self.expect_closing_delimiter(t!(")"), start)?;
-			let span = start.covers(self.last_span());
-
-			if values.len() != idioms.len() {
-				bail!("Invalid numbers of values to insert, found {} value(s) but selector requires {} value(s).",
-					values.len(), idioms.len(),
-					@span,
-					@select_span => "This selector has {} field(s)",idioms.len()
-				);
-			}
-
-			insertions.push(values);
-
-			if !self.eat(t!(",")) {
-				break;
-			}
+			let expr = stk.run(|stk| self.parse_expr_field(stk)).await?;
+			Ok(Data::SingleExpression(expr))
 		}
-
-		Ok(Data::ValuesExpression(
-			insertions.into_iter().map(|row| idioms.iter().cloned().zip(row).collect()).collect(),
-		))
 	}
 
 	async fn parse_insert_update(&mut self, stk: &mut Stk) -> ParseResult<Data> {

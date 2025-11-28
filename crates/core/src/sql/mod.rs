@@ -44,7 +44,6 @@ pub(crate) mod start;
 pub(crate) mod table_type;
 #[cfg(test)]
 mod test_to_sql;
-pub(crate) mod timeout;
 pub(crate) mod tokenizer;
 pub(crate) mod user;
 pub(crate) mod view;
@@ -107,6 +106,5 @@ pub(crate) use self::statements::{
 	UpdateStatement, UpsertStatement,
 };
 pub(crate) use self::table_type::TableType;
-pub(crate) use self::timeout::Timeout;
 pub(crate) use self::view::View;
 pub(crate) use self::with::With;

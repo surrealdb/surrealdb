@@ -12,7 +12,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, Literal, Value};
-use crate::fmt::CoverStmtsExpr;
+use crate::fmt::CoverStmts;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -103,7 +103,7 @@ impl Display for RemoveEventStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", CoverStmtsExpr(&self.name), self.table_name)?;
+		write!(f, " {} ON {}", CoverStmts(&self.name), self.table_name)?;
 		Ok(())
 	}
 }

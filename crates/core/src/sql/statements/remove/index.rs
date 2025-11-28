@@ -1,5 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 
+use crate::fmt::CoverStmts;
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -26,7 +27,7 @@ impl Display for RemoveIndexStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what))?;
 		Ok(())
 	}
 }

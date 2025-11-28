@@ -7,7 +7,9 @@ mod escape;
 use std::cell::Cell;
 use std::fmt::{self, Display, Formatter, Write};
 
-pub use escape::{EscapeIdent, EscapeKey, EscapeKwFreeIdent, EscapeKwIdent, EscapeRid, QuoteStr};
+pub use escape::{
+	EscapeIdent, EscapeKey, EscapeKwFreeIdent, EscapeKwIdent, EscapeRidKey, QuoteStr,
+};
 
 use crate::{expr, sql};
 
@@ -54,11 +56,6 @@ impl<I: IntoIterator<Item = T>, T: Display> Fmt<I, fn(I, &mut Formatter) -> fmt:
 	/// Formats values with a new line separating them.
 	pub(crate) fn one_line_separated(into_iter: I) -> Self {
 		Self::new(into_iter, fmt_one_line_separated)
-	}
-
-	/// Formats values with a new line separating them.
-	pub(crate) fn two_line_separated(into_iter: I) -> Self {
-		Self::new(into_iter, fmt_two_line_separated)
 	}
 }
 
@@ -115,25 +112,6 @@ fn fmt_one_line_separated<T: Display, I: IntoIterator<Item = T>>(
 			if is_pretty() {
 				pretty_sequence_item();
 			} else {
-				f.write_char('\n')?;
-			}
-		}
-		Display::fmt(&v, f)?;
-	}
-	Ok(())
-}
-
-fn fmt_two_line_separated<T: Display, I: IntoIterator<Item = T>>(
-	into_iter: I,
-	f: &mut Formatter,
-) -> fmt::Result {
-	for (i, v) in into_iter.into_iter().enumerate() {
-		if i > 0 {
-			if is_pretty() {
-				f.write_char('\n')?;
-				pretty_sequence_item();
-			} else {
-				f.write_char('\n')?;
 				f.write_char('\n')?;
 			}
 		}
@@ -221,60 +199,9 @@ impl<W: std::fmt::Write> Drop for Pretty<W> {
 	}
 }
 
-pub struct CoverStmtsSql<'a>(pub &'a sql::Expr);
+pub struct CoverStmts<'a, E>(pub &'a E);
 
-impl Display for CoverStmtsSql<'_> {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		match self.0 {
-			sql::Expr::Literal(_)
-			| sql::Expr::Param(_)
-			| sql::Expr::Idiom(_)
-			| sql::Expr::Table(_)
-			| sql::Expr::Mock(_)
-			| sql::Expr::Block(_)
-			| sql::Expr::Constant(_)
-			| sql::Expr::Prefix {
-				..
-			}
-			| sql::Expr::Postfix {
-				..
-			}
-			| sql::Expr::Binary {
-				..
-			}
-			| sql::Expr::FunctionCall(_)
-			| sql::Expr::Closure(_)
-			| sql::Expr::Break
-			| sql::Expr::Continue
-			| sql::Expr::Throw(_) => self.0.fmt(f),
-			sql::Expr::Return(_)
-			| sql::Expr::IfElse(_)
-			| sql::Expr::Select(_)
-			| sql::Expr::Create(_)
-			| sql::Expr::Update(_)
-			| sql::Expr::Upsert(_)
-			| sql::Expr::Delete(_)
-			| sql::Expr::Relate(_)
-			| sql::Expr::Insert(_)
-			| sql::Expr::Define(_)
-			| sql::Expr::Remove(_)
-			| sql::Expr::Rebuild(_)
-			| sql::Expr::Alter(_)
-			| sql::Expr::Info(_)
-			| sql::Expr::Foreach(_)
-			| sql::Expr::Let(_)
-			| sql::Expr::Sleep(_) => {
-				f.write_str("(")?;
-				self.0.fmt(f)?;
-				f.write_str(")")
-			}
-		}
-	}
-}
-
-pub struct CoverStmtsExpr<'a>(pub &'a expr::Expr);
-
-impl Display for CoverStmtsExpr<'_> {
+impl Display for CoverStmts<'_, expr::Expr> {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
 		match self.0 {
 			expr::Expr::Literal(_)
@@ -315,6 +242,55 @@ impl Display for CoverStmtsExpr<'_> {
 			| expr::Expr::Foreach(_)
 			| expr::Expr::Let(_)
 			| expr::Expr::Sleep(_) => {
+				f.write_str("(")?;
+				self.0.fmt(f)?;
+				f.write_str(")")
+			}
+		}
+	}
+}
+
+impl Display for CoverStmts<'_, sql::Expr> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		match self.0 {
+			sql::Expr::Literal(_)
+			| sql::Expr::Param(_)
+			| sql::Expr::Idiom(_)
+			| sql::Expr::Table(_)
+			| sql::Expr::Mock(_)
+			| sql::Expr::Block(_)
+			| sql::Expr::Constant(_)
+			| sql::Expr::Prefix {
+				..
+			}
+			| sql::Expr::Postfix {
+				..
+			}
+			| sql::Expr::Binary {
+				..
+			}
+			| sql::Expr::FunctionCall(_)
+			| sql::Expr::Closure(_)
+			| sql::Expr::Break
+			| sql::Expr::Continue
+			| sql::Expr::Throw(_) => self.0.fmt(f),
+			sql::Expr::Return(_)
+			| sql::Expr::IfElse(_)
+			| sql::Expr::Select(_)
+			| sql::Expr::Create(_)
+			| sql::Expr::Update(_)
+			| sql::Expr::Upsert(_)
+			| sql::Expr::Delete(_)
+			| sql::Expr::Relate(_)
+			| sql::Expr::Insert(_)
+			| sql::Expr::Define(_)
+			| sql::Expr::Remove(_)
+			| sql::Expr::Rebuild(_)
+			| sql::Expr::Alter(_)
+			| sql::Expr::Info(_)
+			| sql::Expr::Foreach(_)
+			| sql::Expr::Let(_)
+			| sql::Expr::Sleep(_) => {
 				f.write_str("(")?;
 				self.0.fmt(f)?;
 				f.write_str(")")

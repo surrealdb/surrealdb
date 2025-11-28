@@ -84,7 +84,10 @@ pub fn local_idiom<'a>(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result
 					}
 					1 => {
 						let n = u.arbitrary::<f64>()?;
-						let n = if n < 0.0 {
+
+						let n = if !n.is_finite() {
+							0.0
+						} else if n < 0.0 {
 							-n
 						} else {
 							n

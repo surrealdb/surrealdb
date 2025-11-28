@@ -87,7 +87,7 @@ impl<'a> Arbitrary<'a> for Data {
 	fn arbitrary(u: &mut arbitrary::Unstructured<'a>) -> arbitrary::Result<Self> {
 		let r = match u.int_in_range(0u8..=5)? {
 			0 => Data::SetExpression(atleast_one(u)?),
-			1 => Data::UnsetExpression(atleast_one(u)?),
+			1 => Data::UnsetExpression(arb_vec1(u, |u| plain_idiom(u))?),
 			2 => Data::PatchExpression(u.arbitrary()?),
 			3 => Data::MergeExpression(u.arbitrary()?),
 			4 => Data::ReplaceExpression(u.arbitrary()?),
@@ -205,8 +205,13 @@ impl<'a> Arbitrary<'a> for Selector {
 			None
 		};
 
+		let expr = match u.arbitrary()? {
+			Expr::Table(x) => Expr::Idiom(Idiom::field(x)),
+			x => x,
+		};
+
 		Ok(Selector {
-			expr: u.arbitrary()?,
+			expr,
 			alias,
 		})
 	}

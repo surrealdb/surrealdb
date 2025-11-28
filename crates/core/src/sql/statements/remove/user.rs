@@ -1,5 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 
+use crate::fmt::CoverStmts;
 use crate::sql::{Base, Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -26,7 +27,7 @@ impl Display for RemoveUserStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {} ON {}", self.name, self.base)?;
+		write!(f, " {} ON {}", CoverStmts(&self.name), self.base)?;
 		Ok(())
 	}
 }

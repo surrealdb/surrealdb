@@ -26,29 +26,32 @@ impl Display for Output {
 			Self::Before => f.write_str("BEFORE"),
 			Self::Fields(v) => {
 				// We need to escape a possible `RETURN NONE` where `NONE` is a value
-				let starts_with_none = match v {
-					Fields::Value(selector) => {
-						matches!(selector.expr, Expr::Literal(Literal::None))
+				match v {
+					Fields::Select(fields) => {
+						let mut iter = fields.iter();
+						match iter.next() {
+							Some(Field::Single(Selector {
+								expr: Expr::Literal(Literal::None),
+								alias,
+							})) => {
+								f.write_str("(NONE)")?;
+								if let Some(alias) = alias {
+									write!(f, " AS {alias}")?;
+								}
+							}
+							Some(x) => {
+								x.fmt(f)?;
+							}
+							None => {}
+						}
+
+						for x in iter {
+							write!(f, ", {x}")?
+						}
+
+						Ok(())
 					}
-					Fields::Select(fields) => fields
-						.first()
-						.map(|x| {
-							matches!(
-								x,
-								Field::Single(Selector {
-									expr: Expr::Literal(Literal::None),
-									..
-								})
-							)
-						})
-						.unwrap_or(false),
-				};
-				if starts_with_none {
-					f.write_str("(")?;
-					Display::fmt(v, f)?;
-					f.write_str(")")
-				} else {
-					Display::fmt(v, f)
+					x => x.fmt(f),
 				}
 			}
 		}

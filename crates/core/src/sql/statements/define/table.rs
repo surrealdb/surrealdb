@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::fmt::{CoverStmts, is_pretty, pretty_indent};
 use crate::sql::changefeed::ChangeFeed;
 use crate::sql::{Expr, Kind, Literal, Permissions, TableType, View};
 
@@ -16,7 +16,7 @@ pub(crate) struct DefineTableStatement {
 	pub view: Option<View>,
 	pub permissions: Permissions,
 	pub changefeed: Option<ChangeFeed>,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub table_type: TableType,
 }
 
@@ -31,7 +31,7 @@ impl Default for DefineTableStatement {
 			view: None,
 			permissions: Permissions::none(),
 			changefeed: None,
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 			table_type: TableType::default(),
 		}
 	}
@@ -45,7 +45,7 @@ impl Display for DefineTableStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", CoverStmts(&self.name))?;
 		write!(f, " TYPE")?;
 		match &self.table_type {
 			TableType::Normal => {
@@ -88,8 +88,8 @@ impl Display for DefineTableStatement {
 		} else {
 			" SCHEMALESS"
 		})?;
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		}
 		if let Some(ref v) = self.view {
 			write!(f, " {v}")?
@@ -119,7 +119,7 @@ impl From<DefineTableStatement> for crate::expr::statements::DefineTableStatemen
 			view: v.view.map(Into::into),
 			permissions: v.permissions.into(),
 			changefeed: v.changefeed.map(Into::into),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			table_type: v.table_type.into(),
 		}
 	}
@@ -137,7 +137,7 @@ impl From<crate::expr::statements::DefineTableStatement> for DefineTableStatemen
 			view: v.view.map(Into::into),
 			permissions: v.permissions.into(),
 			changefeed: v.changefeed.map(Into::into),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			table_type: v.table_type.into(),
 		}
 	}

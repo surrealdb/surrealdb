@@ -9,7 +9,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{ControlFlow, Expr, FlowResult, Kind, Value};
-use crate::fmt::EscapeKwFreeIdent;
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct SetStatement {
@@ -83,7 +83,7 @@ impl fmt::Display for SetStatement {
 		if let Some(ref kind) = self.kind {
 			write!(f, ": {}", kind)?;
 		}
-		write!(f, " = {}", self.what)?;
+		write!(f, " = {}", CoverStmts(&self.what))?;
 		Ok(())
 	}
 }

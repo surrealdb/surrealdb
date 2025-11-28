@@ -9,27 +9,27 @@ use crate::types::PublicDuration;
 pub struct AccessDuration {
 	// Duration after which the grants generated with the access method expire
 	// For access methods whose grants are tokens, this value is irrelevant
-	pub grant: Option<Expr>,
+	pub grant: Expr,
 	// Duration after which the tokens obtained with the access method expire
 	// For access methods that cannot issue tokens, this value is irrelevant
-	pub token: Option<Expr>,
+	pub token: Expr,
 	// Duration after which the session authenticated with the access method expires
-	pub session: Option<Expr>,
+	pub session: Expr,
 }
 
 impl Default for AccessDuration {
 	fn default() -> Self {
 		Self {
 			// By default, access grants expire in 30 days.
-			grant: Some(Expr::Literal(Literal::Duration(
+			grant: Expr::Literal(Literal::Duration(
 				PublicDuration::from_days(30).expect("30 days should fit in a duration"),
-			))),
+			)),
 			// By default, tokens expire after one hour
-			token: Some(Expr::Literal(Literal::Duration(
+			token: Expr::Literal(Literal::Duration(
 				PublicDuration::from_hours(1).expect("1 hour should fit in a duration"),
-			))),
+			)),
 			// By default, sessions do not expire
-			session: None,
+			session: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -37,9 +37,9 @@ impl Default for AccessDuration {
 impl From<AccessDuration> for crate::expr::access::AccessDuration {
 	fn from(v: AccessDuration) -> Self {
 		Self {
-			grant: v.grant.map(Into::into),
-			token: v.token.map(Into::into),
-			session: v.session.map(Into::into),
+			grant: v.grant.into(),
+			token: v.token.into(),
+			session: v.session.into(),
 		}
 	}
 }
@@ -47,9 +47,9 @@ impl From<AccessDuration> for crate::expr::access::AccessDuration {
 impl From<crate::expr::access::AccessDuration> for AccessDuration {
 	fn from(v: crate::expr::access::AccessDuration) -> Self {
 		Self {
-			grant: v.grant.map(Into::into),
-			token: v.token.map(Into::into),
-			session: v.session.map(Into::into),
+			grant: v.grant.into(),
+			token: v.token.into(),
+			session: v.session.into(),
 		}
 	}
 }

@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 use super::DefineKind;
 use super::config::api::ApiConfig;
 use crate::catalog::ApiMethod;
-use crate::fmt::{Fmt, pretty_indent};
+use crate::fmt::{CoverStmts, Fmt, pretty_indent};
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -14,7 +14,7 @@ pub(crate) struct DefineApiStatement {
 	pub actions: Vec<ApiAction>,
 	pub fallback: Option<Expr>,
 	pub config: ApiConfig,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl Default for DefineApiStatement {
@@ -25,7 +25,7 @@ impl Default for DefineApiStatement {
 			actions: Vec::new(),
 			fallback: None,
 			config: ApiConfig::default(),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -38,7 +38,7 @@ impl Display for DefineApiStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.path)?;
+		write!(f, " {}", CoverStmts(&self.path))?;
 		let indent = pretty_indent();
 
 		write!(f, " FOR any")?;
@@ -48,7 +48,7 @@ impl Display for DefineApiStatement {
 			write!(f, "{}", self.config)?;
 
 			if let Some(fallback) = &self.fallback {
-				write!(f, " THEN {}", fallback)?;
+				write!(f, " THEN {}", CoverStmts(fallback))?;
 			}
 
 			drop(indent);
@@ -58,8 +58,8 @@ impl Display for DefineApiStatement {
 			write!(f, " {}", action)?;
 		}
 
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		}
 
 		drop(indent);
@@ -75,7 +75,7 @@ impl From<DefineApiStatement> for crate::expr::statements::DefineApiStatement {
 			actions: v.actions.into_iter().map(Into::into).collect(),
 			fallback: v.fallback.map(Into::into),
 			config: v.config.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -88,7 +88,7 @@ impl From<crate::expr::statements::DefineApiStatement> for DefineApiStatement {
 			actions: v.actions.into_iter().map(Into::into).collect(),
 			fallback: v.fallback.map(Into::into),
 			config: v.config.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -96,6 +96,7 @@ impl From<crate::expr::statements::DefineApiStatement> for DefineApiStatement {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct ApiAction {
+	#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
 	pub methods: Vec<ApiMethod>,
 	pub action: Expr,
 	pub config: ApiConfig,

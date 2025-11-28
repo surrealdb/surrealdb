@@ -1,5 +1,6 @@
 use std::fmt;
 
+use crate::fmt::CoverStmts;
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -8,7 +9,7 @@ pub(crate) struct Cond(pub(crate) Expr);
 
 impl fmt::Display for Cond {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "WHERE {}", self.0)
+		write!(f, "WHERE {}", CoverStmts(&self.0))
 	}
 }
 

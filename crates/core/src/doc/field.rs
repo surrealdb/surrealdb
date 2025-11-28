@@ -12,7 +12,7 @@ use crate::err::Error;
 use crate::expr::FlowResultExt as _;
 use crate::expr::data::Data;
 use crate::expr::idiom::{Idiom, IdiomTrie, IdiomTrieContains};
-use crate::expr::kind::Kind;
+use crate::expr::kind::{Kind, KindLiteral};
 use crate::iam::Action;
 use crate::val::value::CoerceError;
 use crate::val::value::every::ArrayBehaviour;
@@ -78,6 +78,8 @@ impl Document {
 						Kind::Object => true,
 						Kind::Either(kinds) => kinds.iter().any(kind_contains_object),
 						Kind::Array(inner, _) | Kind::Set(inner, _) => kind_contains_object(inner),
+						Kind::Literal(KindLiteral::Object(_)) => true,
+						Kind::Literal(KindLiteral::Array(x)) => x.iter().any(kind_contains_object),
 						_ => false,
 					}
 				}

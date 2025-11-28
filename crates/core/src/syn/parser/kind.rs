@@ -1,3 +1,4 @@
+use core::f64;
 use std::collections::BTreeMap;
 
 use reblessive::Stk;
@@ -204,6 +205,14 @@ impl Parser<'_> {
 			t!("'") | t!("\"") => {
 				let s = self.parse_string_lit()?;
 				Ok(KindLiteral::String(s))
+			}
+			TokenKind::NaN => {
+				self.pop_peek();
+				Ok(KindLiteral::Float(f64::NAN))
+			}
+			TokenKind::Infinity => {
+				self.pop_peek();
+				Ok(KindLiteral::Float(f64::INFINITY))
 			}
 			t!("+") | t!("-") | TokenKind::Glued(Glued::Number) => {
 				let kind = self.next_token_value::<NumberToken>()?;

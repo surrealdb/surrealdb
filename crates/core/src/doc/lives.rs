@@ -8,7 +8,7 @@ use reblessive::TreeStack;
 use reblessive::tree::Stk;
 
 use super::IgnoreError;
-use crate::catalog::{Permission, SubscriptionDefinition};
+use crate::catalog::{Permission, SubscriptionDefinition, SubscriptionFields};
 use crate::ctx::{Context, MutableContext};
 use crate::dbs::{MessageBroker, Options, Statement};
 use crate::doc::{CursorDoc, Document};
@@ -214,63 +214,80 @@ impl Document {
 		// Let's check what type of statement
 		// caused this LIVE query to run, and obtain
 		// the relevant result.
-		let (action, mut result) = if live_subscription.diff {
-			// DIFF mode: return JSON patch operations instead of full document
-			if is_delete {
-				// For DELETE: compute diff from initial document to empty object
-				let operations = self.initial.doc.as_ref().diff(&Value::None);
-				let result = Value::Array(
-					operations.into_iter().map(|op| Value::Object(op.into_object())).collect(),
-				);
-				(PublicAction::Delete, result)
-			} else if self.is_new() {
-				// For CREATE: compute diff from empty object to current document
-				let operations = Value::None.diff(doc.doc.as_ref());
-				let result = Value::Array(
-					operations.into_iter().map(|op| Value::Object(op.into_object())).collect(),
-				);
-				(PublicAction::Create, result)
-			} else {
-				// For UPDATE: compute diff from initial to current document
-				let operations = self.initial.doc.as_ref().diff(doc.doc.as_ref());
-				let result = Value::Array(
-					operations.into_iter().map(|op| Value::Object(op.into_object())).collect(),
-				);
-				(PublicAction::Update, result)
+		let (action, mut result) = match live_subscription.fields {
+			SubscriptionFields::Diff => {
+				// DIFF mode: return JSON patch operations instead of full document
+				if is_delete {
+					// For DELETE: compute diff from initial document to empty object
+					let operations = self.initial.doc.as_ref().diff(&Value::None);
+					let result = Value::Array(
+						operations.into_iter().map(|op| Value::Object(op.into_object())).collect(),
+					);
+					(PublicAction::Delete, result)
+				} else if self.is_new() {
+					// For CREATE: compute diff from empty object to current document
+					let operations = Value::None.diff(doc.doc.as_ref());
+					let result = Value::Array(
+						operations.into_iter().map(|op| Value::Object(op.into_object())).collect(),
+					);
+					(PublicAction::Create, result)
+				} else {
+					// For UPDATE: compute diff from initial to current document
+					let operations = self.initial.doc.as_ref().diff(doc.doc.as_ref());
+					let result = Value::Array(
+						operations.into_iter().map(|op| Value::Object(op.into_object())).collect(),
+					);
+					(PublicAction::Update, result)
+				}
 			}
-		} else if is_delete {
-			// Prepare a DELETE notification
-			// An error ignore here is about livequery not the query which invoked the
-			// livequery trigger. So we should catch the ignore and skip this entry in this
-			// case.
-			let result = match self.lq_pluck(stk, &ctx, &opt, &live_subscription, &doc).await {
-				Err(IgnoreError::Ignore) => return Ok(()),
-				Err(IgnoreError::Error(e)) => return Err(e),
-				Ok(x) => x,
-			};
-			(PublicAction::Delete, result)
-		} else if self.is_new() {
-			// Prepare a CREATE notification
-			// An error ignore here is about livequery not the query which invoked the
-			// livequery trigger. So we should catch the ignore and skip this entry in this
-			// case.
-			let result = match self.lq_pluck(stk, &ctx, &opt, &live_subscription, &doc).await {
-				Err(IgnoreError::Ignore) => return Ok(()),
-				Err(IgnoreError::Error(e)) => return Err(e),
-				Ok(x) => x,
-			};
-			(PublicAction::Create, result)
-		} else {
-			// Prepare a UPDATE notification
-			// An error ignore here is about livequery not the query which invoked the
-			// livequery trigger. So we should catch the ignore and skip this entry in this
-			// case.
-			let result = match self.lq_pluck(stk, &ctx, &opt, &live_subscription, &doc).await {
-				Err(IgnoreError::Ignore) => return Ok(()),
-				Err(IgnoreError::Error(e)) => return Err(e),
-				Ok(x) => x,
-			};
-			(PublicAction::Update, result)
+			SubscriptionFields::Select(x) => {
+				if is_delete {
+					// Prepare a DELETE notification
+					// An error ignore here is about livequery not the query which invoked the
+					// livequery trigger. So we should catch the ignore and skip this entry in this
+					// case.
+					let result = match x
+						.compute(stk, &ctx, &opt, Some(&doc))
+						.await
+						.map_err(IgnoreError::from)
+					{
+						Err(IgnoreError::Ignore) => return Ok(()),
+						Err(IgnoreError::Error(e)) => return Err(e),
+						Ok(x) => x,
+					};
+					(PublicAction::Delete, result)
+				} else if self.is_new() {
+					// Prepare a CREATE notification
+					// An error ignore here is about livequery not the query which invoked the
+					// livequery trigger. So we should catch the ignore and skip this entry in this
+					// case.
+					let result = match x
+						.compute(stk, &ctx, &opt, Some(&doc))
+						.await
+						.map_err(IgnoreError::from)
+					{
+						Err(IgnoreError::Ignore) => return Ok(()),
+						Err(IgnoreError::Error(e)) => return Err(e),
+						Ok(x) => x,
+					};
+					(PublicAction::Create, result)
+				} else {
+					// Prepare a UPDATE notification
+					// An error ignore here is about livequery not the query which invoked the
+					// livequery trigger. So we should catch the ignore and skip this entry in this
+					// case.
+					let result = match x
+						.compute(stk, &ctx, &opt, Some(&doc))
+						.await
+						.map_err(IgnoreError::from)
+					{
+						Err(IgnoreError::Ignore) => return Ok(()),
+						Err(IgnoreError::Error(e)) => return Err(e),
+						Ok(x) => x,
+					};
+					(PublicAction::Update, result)
+				}
+			}
 		};
 
 		// Process any potential `FETCH` clause on the live statement
@@ -358,17 +375,6 @@ impl Document {
 		}
 		// Carry on
 		Ok(())
-	}
-
-	async fn lq_pluck(
-		&self,
-		stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		live_subscription: &SubscriptionDefinition,
-		doc: &CursorDoc,
-	) -> Result<Value, IgnoreError> {
-		live_subscription.fields.compute(stk, ctx, opt, Some(doc)).await.map_err(IgnoreError::from)
 	}
 }
 

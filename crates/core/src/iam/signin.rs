@@ -1084,7 +1084,7 @@ mod tests {
 	use crate::iam::Role;
 	use crate::sql::statements::define::DefineKind;
 	use crate::sql::statements::define::user::PassType;
-	use crate::sql::{Ast, Expr, TopLevelExpr};
+	use crate::sql::{Ast, Expr, Literal, TopLevelExpr};
 
 	struct TestLevel {
 		level: &'static str,
@@ -4214,9 +4214,9 @@ dn/RsYEONbwQSjIfMPkvxF+8HQ==
 						.to_string(),
 				),
 				roles: vec!["nonexistent".to_owned()],
-				session_duration: None,
-				token_duration: None,
-				comment: None,
+				session_duration: Expr::Literal(Literal::None),
+				token_duration: Expr::Literal(Literal::None),
+				comment: Expr::Literal(Literal::None),
 			};
 
 			let ast = Ast {

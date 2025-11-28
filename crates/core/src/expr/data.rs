@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Formatter};
 
 use crate::expr::{AssignOperator, Expr, Idiom};
-use crate::fmt::Fmt;
+use crate::fmt::{CoverStmts, Fmt};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 #[allow(clippy::enum_variant_names)]
@@ -28,7 +28,7 @@ pub(crate) struct Assignment {
 
 impl Display for Assignment {
 	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-		write!(f, "{} {} {}", self.place, self.operator, self.value)
+		write!(f, "{} {} {}", self.place, self.operator, CoverStmts(&self.value))
 	}
 }
 
@@ -56,7 +56,7 @@ impl Display for Data {
 				Fmt::comma_separated(v.iter().map(|v| Fmt::new(v, |v, f| write!(
 					f,
 					"({})",
-					Fmt::comma_separated(v.iter().map(|(_, v)| v))
+					Fmt::comma_separated(v.iter().map(|(_, v)| CoverStmts(v)))
 				))))
 			),
 			Self::UpdateExpression(v) => {

@@ -1,5 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 
+use crate::fmt::CoverStmts;
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -24,7 +25,7 @@ impl Display for RemoveAnalyzerStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", CoverStmts(&self.name))?;
 		Ok(())
 	}
 }

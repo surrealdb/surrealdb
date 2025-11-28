@@ -6,7 +6,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::FlowResult;
-use crate::fmt::EscapeRid;
+use crate::fmt::EscapeIdent;
 use crate::val::RecordId;
 
 pub(crate) mod key;
@@ -42,6 +42,6 @@ impl RecordIdLit {
 
 impl fmt::Display for RecordIdLit {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}:{}", EscapeRid(&self.table), self.key)
+		write!(f, "{}:{}", EscapeIdent(&self.table), self.key)
 	}
 }

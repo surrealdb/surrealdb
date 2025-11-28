@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Write};
 
-use crate::fmt::{Fmt, Pretty, pretty_indent};
+use crate::fmt::{EscapeKwFreeIdent, Fmt, Pretty, pretty_indent};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -33,8 +33,14 @@ pub enum TablesConfig {
 	#[default]
 	None,
 	Auto,
-	Include(Vec<TableConfig>),
-	Exclude(Vec<TableConfig>),
+	Include(
+		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+		Vec<TableConfig>,
+	),
+	Exclude(
+		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::atleast_one))]
+		Vec<TableConfig>,
+	),
 }
 
 impl From<TablesConfig> for crate::catalog::GraphQLTablesConfig {
@@ -83,7 +89,10 @@ pub enum FunctionsConfig {
 	#[default]
 	None,
 	Auto,
+	// These variants are not actually implemented yet
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Include(Vec<String>),
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Exclude(Vec<String>),
 }
 
@@ -135,7 +144,7 @@ impl Display for TablesConfig {
 			}
 			TablesConfig::Exclude(cs) => {
 				let mut f = Pretty::from(f);
-				write!(f, "EXCLUDE")?;
+				write!(f, "EXCLUDE ")?;
 				if !cs.is_empty() {
 					let indent = pretty_indent();
 					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
@@ -150,7 +159,7 @@ impl Display for TablesConfig {
 
 impl Display for TableConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}", self.name)?;
+		write!(f, "{}", EscapeKwFreeIdent(&self.name))?;
 		Ok(())
 	}
 }

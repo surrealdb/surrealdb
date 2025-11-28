@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::fmt::EscapeRid;
+use crate::fmt::EscapeIdent;
 
 pub mod key;
 pub(crate) use key::{RecordIdKeyGen, RecordIdKeyLit};
@@ -36,6 +36,6 @@ impl From<crate::expr::RecordIdLit> for RecordIdLit {
 
 impl fmt::Display for RecordIdLit {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}:{}", EscapeRid(&self.table), self.key)
+		write!(f, "{}:{}", EscapeIdent(&self.table), self.key)
 	}
 }

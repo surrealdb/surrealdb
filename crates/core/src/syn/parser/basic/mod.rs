@@ -274,6 +274,16 @@ impl TokenValue for NumberToken {
 					}
 				}
 			}
+			TokenKind::NaN => {
+				parser.pop_peek();
+
+				Ok(NumberToken::Float(f64::NAN))
+			}
+			TokenKind::Infinity => {
+				parser.pop_peek();
+
+				Ok(NumberToken::Float(f64::INFINITY))
+			}
 			_ => unexpected!(parser, token, "a number"),
 		}
 	}

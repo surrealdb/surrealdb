@@ -14,8 +14,8 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, exprs_to_fields};
-use crate::expr::{Base, Expr, Literal, Part};
-use crate::fmt::Fmt;
+use crate::expr::{Base, Expr, FlowResultExt, Literal, Part};
+use crate::fmt::{CoverStmts, Fmt};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -26,7 +26,7 @@ pub(crate) struct DefineIndexStatement {
 	pub what: Expr,
 	pub cols: Vec<Expr>,
 	pub index: Index,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub concurrently: bool,
 }
 
@@ -38,7 +38,7 @@ impl Default for DefineIndexStatement {
 			what: Expr::Literal(Literal::None),
 			cols: Vec::new(),
 			index: Index::Idx,
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 			concurrently: false,
 		}
 	}
@@ -117,6 +117,12 @@ impl DefineIndexStatement {
 			}
 		}
 
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
+
 		// Process the statement
 		let index_def = IndexDefinition {
 			index_id,
@@ -124,7 +130,7 @@ impl DefineIndexStatement {
 			table_name: what,
 			cols: cols.clone(),
 			index: self.index.clone(),
-			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			comment,
 			prepare_remove: false,
 		};
 		txn.put_tb_index(tb.namespace_id, tb.database_id, &tb.name, &index_def).await?;
@@ -162,15 +168,15 @@ impl Display for DefineIndexStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what))?;
 		if !self.cols.is_empty() {
-			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter()))?;
+			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter().map(CoverStmts)))?;
 		}
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index.to_sql())?;
 		}
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {v}")?
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		}
 		if self.concurrently {
 			write!(f, " CONCURRENTLY")?

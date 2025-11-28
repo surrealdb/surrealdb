@@ -23,32 +23,33 @@ impl Display for Output {
 			Self::Diff => f.write_str("DIFF"),
 			Self::After => f.write_str("AFTER"),
 			Self::Before => f.write_str("BEFORE"),
-			Self::Fields(v) => {
-				let starts_with_none = match v {
-					Fields::Value(selector) => {
-						matches!(selector.expr, Expr::Literal(Literal::None))
+			Self::Fields(v) => match v {
+				Fields::Select(fields) => {
+					let mut iter = fields.iter();
+					match iter.next() {
+						Some(Field::Single(Selector {
+							expr: Expr::Literal(Literal::None),
+							alias,
+						})) => {
+							f.write_str("(NONE)")?;
+							if let Some(alias) = alias {
+								write!(f, " AS {alias}")?;
+							}
+						}
+						Some(x) => {
+							x.fmt(f)?;
+						}
+						None => {}
 					}
-					Fields::Select(fields) => fields
-						.first()
-						.map(|x| {
-							matches!(
-								x,
-								Field::Single(Selector {
-									expr: Expr::Literal(Literal::None),
-									..
-								})
-							)
-						})
-						.unwrap_or(false),
-				};
-				if starts_with_none {
-					f.write_str("(")?;
-					Display::fmt(v, f)?;
-					f.write_str(")")
-				} else {
-					Display::fmt(v, f)
+
+					for x in iter {
+						write!(f, ", {x}")?
+					}
+
+					Ok(())
 				}
-			}
+				x => x.fmt(f),
+			},
 		}
 	}
 }

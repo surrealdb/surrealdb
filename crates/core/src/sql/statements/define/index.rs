@@ -1,8 +1,8 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
-use crate::fmt::Fmt;
-use crate::sql::{Expr, Index};
+use crate::fmt::{CoverStmts, Fmt};
+use crate::sql::{Expr, Index, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DefineIndexStatement {
@@ -11,7 +11,7 @@ pub(crate) struct DefineIndexStatement {
 	pub what: Expr,
 	pub cols: Vec<Expr>,
 	pub index: Index,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub concurrently: bool,
 }
 
@@ -23,18 +23,18 @@ impl Display for DefineIndexStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what))?;
 		if !self.cols.is_empty() {
-			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter()))?;
+			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter().map(CoverStmts)))?;
 		}
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
 		}
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		}
 		if self.concurrently {
-			write!(f, " CONCURRENTLY")?
+			write!(f, " CONCURRENTLY")?;
 		}
 		Ok(())
 	}
@@ -48,7 +48,7 @@ impl From<DefineIndexStatement> for crate::expr::statements::DefineIndexStatemen
 			what: v.what.into(),
 			cols: v.cols.into_iter().map(From::from).collect(),
 			index: v.index.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			concurrently: v.concurrently,
 		}
 	}
@@ -62,7 +62,7 @@ impl From<crate::expr::statements::DefineIndexStatement> for DefineIndexStatemen
 			what: v.what.into(),
 			cols: v.cols.into_iter().map(From::from).collect(),
 			index: v.index.into(),
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 			concurrently: v.concurrently,
 		}
 	}

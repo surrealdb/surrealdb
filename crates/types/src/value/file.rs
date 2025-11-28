@@ -80,9 +80,11 @@ mod arb {
 			];
 
 			let mut bucket = String::new();
-			bucket.push(CHAR[u.int_in_range(0u8..=55)? as usize] as char);
+			// Forward slash is not allowed in the bucket name so we exclude it by limiting the
+			// range.
+			bucket.push(CHAR[u.int_in_range(0u8..=54)? as usize] as char);
 			for _ in 0..u.arbitrary_len::<u8>()? {
-				bucket.push(CHAR[u.int_in_range(0u8..=55)? as usize] as char);
+				bucket.push(CHAR[u.int_in_range(0u8..=54)? as usize] as char);
 			}
 			let mut key = "/".to_string();
 			for _ in 0..u.arbitrary_len::<u8>()? {

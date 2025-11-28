@@ -1,6 +1,7 @@
 use std::fmt::{self, Display};
 
 use super::DefineKind;
+use crate::fmt::CoverStmts;
 use crate::sql::{Expr, Literal, Permission};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -11,7 +12,7 @@ pub(crate) struct DefineBucketStatement {
 	pub backend: Option<Expr>,
 	pub permissions: Permission,
 	pub readonly: bool,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 }
 
 impl Default for DefineBucketStatement {
@@ -22,7 +23,7 @@ impl Default for DefineBucketStatement {
 			backend: None,
 			permissions: Permission::default(),
 			readonly: false,
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 		}
 	}
 }
@@ -35,20 +36,20 @@ impl Display for DefineBucketStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {}", self.name)?;
+		write!(f, " {}", CoverStmts(&self.name))?;
 
 		if self.readonly {
 			write!(f, " READONLY")?;
 		}
 
 		if let Some(ref backend) = self.backend {
-			write!(f, " BACKEND {}", backend)?;
+			write!(f, " BACKEND {}", CoverStmts(backend))?;
 		}
 
 		write!(f, " PERMISSIONS {}", self.permissions)?;
 
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		}
 
 		Ok(())
@@ -63,7 +64,7 @@ impl From<DefineBucketStatement> for crate::expr::statements::define::DefineBuck
 			backend: v.backend.map(Into::into),
 			permissions: v.permissions.into(),
 			readonly: v.readonly,
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }
@@ -76,7 +77,7 @@ impl From<crate::expr::statements::define::DefineBucketStatement> for DefineBuck
 			backend: v.backend.map(Into::into),
 			permissions: v.permissions.into(),
 			readonly: v.readonly,
-			comment: v.comment.map(|x| x.into()),
+			comment: v.comment.into(),
 		}
 	}
 }

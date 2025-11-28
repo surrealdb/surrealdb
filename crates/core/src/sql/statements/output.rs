@@ -1,5 +1,6 @@
 use std::fmt;
 
+use crate::fmt::CoverStmts;
 use crate::sql::Expr;
 use crate::sql::fetch::Fetchs;
 
@@ -12,7 +13,7 @@ pub struct OutputStatement {
 
 impl fmt::Display for OutputStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "RETURN {}", self.what)?;
+		write!(f, "RETURN {}", CoverStmts(&self.what))?;
 		if let Some(ref v) = self.fetch {
 			write!(f, " {v}")?
 		}

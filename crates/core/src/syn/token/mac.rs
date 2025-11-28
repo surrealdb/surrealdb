@@ -91,10 +91,6 @@ macro_rules! t {
 	("<|") => {
 		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::KnnOpen)
 	};
-	("|>") => {
-		$crate::syn::token::TokenKind::Operator($crate::syn::token::Operator::KnnClose)
-	};
-
 	(";") => {
 		$crate::syn::token::TokenKind::SemiColon
 	};

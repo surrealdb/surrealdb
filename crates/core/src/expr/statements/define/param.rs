@@ -10,8 +10,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Expr, FlowResultExt as _};
-use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
+use crate::expr::{Base, Expr, FlowResultExt as _, Literal};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -20,7 +20,7 @@ pub(crate) struct DefineParamStatement {
 	pub kind: DefineKind,
 	pub name: String,
 	pub value: Expr,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub permissions: Permission,
 }
 
@@ -62,6 +62,11 @@ impl DefineParamStatement {
 			txn.get_or_add_db(Some(ctx), ns, db).await?
 		};
 
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
 		// Process the statement
 		txn.put_db_param(
 			db.namespace_id,
@@ -69,7 +74,7 @@ impl DefineParamStatement {
 			&ParamDefinition {
 				value,
 				name: self.name.clone(),
-				comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+				comment,
 				permissions: self.permissions.clone(),
 			},
 		)
@@ -90,8 +95,8 @@ impl Display for DefineParamStatement {
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " ${} VALUE {}", EscapeKwFreeIdent(&self.name), self.value)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

@@ -14,7 +14,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{self, Expr, Field, Fields, Literal, SelectStatement};
-use crate::fmt::EscapeRid;
+use crate::fmt::EscapeRidKey;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::{Array, IndexFormat, Number, Object, Range, Uuid, Value};
 
@@ -379,7 +379,7 @@ impl fmt::Display for RecordIdKey {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match self {
 			RecordIdKey::Number(n) => write!(f, "{n}"),
-			RecordIdKey::String(v) => EscapeRid(v).fmt(f),
+			RecordIdKey::String(v) => EscapeRidKey(v).fmt(f),
 			RecordIdKey::Uuid(uuid) => uuid.fmt(f),
 			RecordIdKey::Object(object) => object.fmt(f),
 			RecordIdKey::Array(array) => array.fmt(f),
@@ -456,7 +456,7 @@ impl RecordId {
 
 impl fmt::Display for RecordId {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "{}:{}", EscapeRid(&self.table), self.key)
+		write!(f, "{}:{}", EscapeRidKey(&self.table), self.key)
 	}
 }
 

@@ -24,7 +24,7 @@ use crate::expr::{
 	BinaryOperator, Block, Constant, ControlFlow, FlowResult, FunctionCall, Idiom, Literal, Mock,
 	ObjectEntry, Param, PostfixOperator, PrefixOperator, RecordIdKeyLit, RecordIdLit,
 };
-use crate::fmt::{EscapeIdent, Pretty};
+use crate::fmt::{CoverStmts, EscapeIdent, Pretty};
 use crate::fnc;
 use crate::types::PublicValue;
 use crate::val::{Array, Range, Table, Value};
@@ -725,24 +725,8 @@ impl Expr {
 	/// Returns if this expression needs to be parenthesized when inside another expression.
 	fn needs_parentheses(&self) -> bool {
 		match self {
-			Expr::Literal(_)
-			| Expr::Param(_)
-			| Expr::Idiom(_)
-			| Expr::Table(_)
-			| Expr::Mock(_)
-			| Expr::Block(_)
-			| Expr::Constant(_)
-			| Expr::Prefix {
-				..
-			}
-			| Expr::Postfix {
-				..
-			}
-			| Expr::Binary {
-				..
-			}
-			| Expr::FunctionCall(_) => false,
-			Expr::Closure(_)
+			Expr::Literal(Literal::UnboundedRange | Literal::RecordId(_))
+			| Expr::Closure(_)
 			| Expr::Break
 			| Expr::Continue
 			| Expr::Throw(_)
@@ -763,6 +747,24 @@ impl Expr {
 			| Expr::Foreach(_)
 			| Expr::Let(_)
 			| Expr::Sleep(_) => true,
+
+			Expr::Literal(_)
+			| Expr::Param(_)
+			| Expr::Idiom(_)
+			| Expr::Table(_)
+			| Expr::Mock(_)
+			| Expr::Block(_)
+			| Expr::Constant(_)
+			| Expr::Prefix {
+				..
+			}
+			| Expr::Postfix {
+				..
+			}
+			| Expr::Binary {
+				..
+			}
+			| Expr::FunctionCall(_) => false,
 		}
 	}
 }
@@ -803,6 +805,7 @@ impl fmt::Display for Expr {
 				if expr.needs_parentheses()
 					|| expr_bp < op_bp
 					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
+					|| matches!(op, PostfixOperator::Call(_))
 				{
 					write!(f, "({expr}){op}")
 				} else {
@@ -820,9 +823,11 @@ impl fmt::Display for Expr {
 
 				if left.needs_parentheses()
 					|| left_bp < op_bp
-					|| left_bp == right_bp
-						&& matches!(left_bp, BindingPower::Range | BindingPower::Relation)
-				{
+					|| left_bp == op_bp
+						&& matches!(
+							left_bp,
+							BindingPower::Range | BindingPower::Relation | BindingPower::Equality
+						) {
 					write!(f, "({left})")?;
 				} else {
 					write!(f, "{left}")?;
@@ -842,9 +847,11 @@ impl fmt::Display for Expr {
 
 				if right.needs_parentheses()
 					|| right_bp < op_bp
-					|| left_bp == right_bp
-						&& matches!(right_bp, BindingPower::Range | BindingPower::Relation)
-				{
+					|| right_bp == op_bp
+						&& matches!(
+							op_bp,
+							BindingPower::Range | BindingPower::Relation | BindingPower::Equality
+						) {
 					write!(f, "({right})")
 				} else {
 					write!(f, "{right}")
@@ -855,7 +862,7 @@ impl fmt::Display for Expr {
 			Expr::Break => write!(f, "BREAK"),
 			Expr::Continue => write!(f, "CONTINUE"),
 			Expr::Return(x) => write!(f, "{x}"),
-			Expr::Throw(expr) => write!(f, "THROW {expr}"),
+			Expr::Throw(expr) => write!(f, "THROW {}", CoverStmts(expr.as_ref())),
 			Expr::IfElse(s) => write!(f, "{s}"),
 			Expr::Select(s) => write!(f, "{s}"),
 			Expr::Create(s) => write!(f, "{s}"),

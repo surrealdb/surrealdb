@@ -7,27 +7,27 @@ use crate::val::Duration;
 pub(crate) struct AccessDuration {
 	// Duration after which the grants generated with the access method expire
 	// For access methods whose grants are tokens, this value is irrelevant
-	pub(crate) grant: Option<Expr>,
+	pub(crate) grant: Expr,
 	// Duration after which the tokens obtained with the access method expire
 	// For access methods that cannot issue tokens, this value is irrelevant
-	pub(crate) token: Option<Expr>,
+	pub(crate) token: Expr,
 	// Duration after which the session authenticated with the access method expires
-	pub(crate) session: Option<Expr>,
+	pub(crate) session: Expr,
 }
 
 impl Default for AccessDuration {
 	fn default() -> Self {
 		Self {
 			// By default, access grants expire in 30 days.
-			grant: Some(Expr::Literal(Literal::Duration(
+			grant: Expr::Literal(Literal::Duration(
 				Duration::from_days(30).expect("30 days should fit in a duration"),
-			))),
+			)),
 			// By default, tokens expire after one hour
-			token: Some(Expr::Literal(Literal::Duration(
+			token: Expr::Literal(Literal::Duration(
 				Duration::from_hours(1).expect("1 hour should fit in a duration"),
-			))),
+			)),
 			// By default, sessions do not expire
-			session: None,
+			session: Expr::Literal(Literal::None),
 		}
 	}
 }

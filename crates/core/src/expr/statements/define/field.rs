@@ -17,8 +17,8 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::{expr_to_ident, expr_to_idiom};
 use crate::expr::reference::Reference;
-use crate::expr::{Base, Expr, Kind, KindLiteral, Literal, Part, RecordIdKeyLit};
-use crate::fmt::{is_pretty, pretty_indent};
+use crate::expr::{Base, Expr, FlowResultExt, Kind, KindLiteral, Literal, Part, RecordIdKeyLit};
+use crate::fmt::{CoverStmts, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::kvs::Transaction;
 use crate::val::Value;
@@ -44,7 +44,7 @@ pub(crate) struct DefineFieldStatement {
 	pub computed: Option<Expr>,
 	pub default: DefineDefault,
 	pub permissions: Permissions,
-	pub comment: Option<Expr>,
+	pub comment: Expr,
 	pub reference: Option<Reference>,
 }
 
@@ -62,7 +62,7 @@ impl Default for DefineFieldStatement {
 			computed: None,
 			default: DefineDefault::None,
 			permissions: Permissions::default(),
-			comment: None,
+			comment: Expr::Literal(Literal::None),
 			reference: None,
 		}
 	}
@@ -84,6 +84,12 @@ impl DefineFieldStatement {
 			}
 		}
 
+		let comment = stk
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
+			.await
+			.catch_return()?
+			.cast_to()?;
+
 		Ok(catalog::FieldDefinition {
 			name: expr_to_idiom(stk, ctx, opt, doc, &self.name, "field name").await?,
 			what: expr_to_ident(stk, ctx, opt, doc, &self.what, "table name").await?,
@@ -101,7 +107,7 @@ impl DefineFieldStatement {
 			select_permission: convert_permission(&self.permissions.select),
 			create_permission: convert_permission(&self.permissions.create),
 			update_permission: convert_permission(&self.permissions.update),
-			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			comment,
 			reference: self.reference.clone(),
 		})
 	}
@@ -513,7 +519,7 @@ impl Display for DefineFieldStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write!(f, " {} ON {}", CoverStmts(&self.name), CoverStmts(&self.what))?;
 		if let Some(ref v) = self.field_kind {
 			write!(f, " TYPE {v}")?;
 			if self.flexible {
@@ -522,26 +528,30 @@ impl Display for DefineFieldStatement {
 		}
 		match self.default {
 			DefineDefault::None => {}
-			DefineDefault::Always(ref expr) => write!(f, " DEFAULT ALWAYS {expr}")?,
-			DefineDefault::Set(ref expr) => write!(f, " DEFAULT {expr}")?,
+			DefineDefault::Always(ref expr) => {
+				write!(f, " DEFAULT ALWAYS {}", CoverStmts(expr))?;
+			}
+			DefineDefault::Set(ref expr) => {
+				write!(f, " DEFAULT {}", CoverStmts(expr))?;
+			}
 		}
 		if self.readonly {
 			write!(f, " READONLY")?
 		}
 		if let Some(ref v) = self.value {
-			write!(f, " VALUE {v}")?
+			write!(f, " VALUE {}", CoverStmts(v))?
 		}
 		if let Some(ref v) = self.assert {
-			write!(f, " ASSERT {v}")?
+			write!(f, " ASSERT {}", CoverStmts(v))?
 		}
 		if let Some(ref v) = self.computed {
-			write!(f, " COMPUTED {v}")?
+			write!(f, " COMPUTED {}", CoverStmts(v))?
 		}
 		if let Some(ref v) = self.reference {
 			write!(f, " REFERENCE {v}")?
 		}
-		if let Some(ref comment) = self.comment {
-			write!(f, " COMMENT {}", comment)?
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

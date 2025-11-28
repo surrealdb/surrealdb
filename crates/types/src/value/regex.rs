@@ -33,11 +33,7 @@ impl FromStr for Regex {
 	type Err = <regex::Regex as FromStr>::Err;
 
 	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		if s.contains('\0') {
-			Err(regex::Error::Syntax("regex contained NUL byte".to_owned()))
-		} else {
-			Ok(Regex(RegexBuilder::new(&s.replace("\\/", "/")).build()?))
-		}
+		Ok(Regex(RegexBuilder::new(&s.replace("\\/", "/")).build()?))
 	}
 }
 

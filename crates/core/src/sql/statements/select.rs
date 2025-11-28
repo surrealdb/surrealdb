@@ -1,9 +1,9 @@
 use std::fmt;
 
-use crate::fmt::{CoverStmtsSql, Fmt};
+use crate::fmt::{CoverStmts, Fmt};
 use crate::sql::order::Ordering;
 use crate::sql::{
-	Cond, Explain, Expr, Fetchs, Fields, Groups, Limit, Splits, Start, Timeout, With,
+	Cond, Explain, Expr, Fetchs, Fields, Groups, Limit, Literal, Splits, Start, With,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -23,7 +23,7 @@ pub struct SelectStatement {
 	pub start: Option<Start>,
 	pub fetch: Option<Fetchs>,
 	pub version: Option<Expr>,
-	pub timeout: Option<Timeout>,
+	pub timeout: Expr,
 	pub parallel: bool,
 	pub explain: Option<Explain>,
 	pub tempfiles: bool,
@@ -33,13 +33,13 @@ impl fmt::Display for SelectStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "SELECT {}", self.expr)?;
 		if !self.omit.is_empty() {
-			write!(f, " OMIT {}", Fmt::comma_separated(self.omit.iter().map(CoverStmtsSql)))?
+			write!(f, " OMIT {}", Fmt::comma_separated(self.omit.iter().map(CoverStmts)))?
 		}
 		write!(f, " FROM")?;
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmtsSql)))?;
+		write!(f, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmts)))?;
 		if let Some(ref v) = self.with {
 			write!(f, " {v}")?
 		}
@@ -67,8 +67,8 @@ impl fmt::Display for SelectStatement {
 		if let Some(ref v) = self.version {
 			write!(f, " VERSION {v}")?
 		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
 		}
 		if self.parallel {
 			f.write_str(" PARALLEL")?
@@ -96,7 +96,7 @@ impl From<SelectStatement> for crate::expr::statements::SelectStatement {
 			start: v.start.map(Into::into),
 			fetch: v.fetch.map(Into::into),
 			version: v.version.map(Into::into),
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.into(),
 			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
 			tempfiles: v.tempfiles,
@@ -120,7 +120,7 @@ impl From<crate::expr::statements::SelectStatement> for SelectStatement {
 			start: v.start.map(Into::into),
 			fetch: v.fetch.map(Into::into),
 			version: v.version.map(Into::into),
-			timeout: v.timeout.map(Into::into),
+			timeout: v.timeout.into(),
 			parallel: v.parallel,
 			explain: v.explain.map(Into::into),
 			tempfiles: v.tempfiles,

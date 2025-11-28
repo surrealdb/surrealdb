@@ -5,22 +5,27 @@ use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use crate::catalog::providers::CatalogProvider;
-use crate::catalog::{NodeLiveQuery, SubscriptionDefinition};
+use crate::catalog::{NodeLiveQuery, SubscriptionDefinition, SubscriptionFields};
 use crate::ctx::Context;
 use crate::dbs::{Options, ParameterCapturePass, Variables};
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::visit::Visit;
 use crate::expr::{Cond, Expr, Fetchs, Fields, FlowResultExt as _};
-use crate::fmt::CoverStmtsExpr;
+use crate::fmt::CoverStmts;
 use crate::val::Value;
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub enum LiveFields {
+	Diff,
+	Select(Fields),
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) struct LiveStatement {
 	pub id: Uuid,
 	pub node: Uuid,
-	pub fields: Fields,
-	pub diff: bool,
+	pub fields: LiveFields,
 	pub what: Expr,
 	pub cond: Option<Cond>,
 	pub fetch: Option<Fetchs>,
@@ -47,7 +52,9 @@ impl LiveStatement {
 			context: ctx,
 			captures: &mut vars,
 		};
-		let _ = self.fields.visit(&mut pass);
+		if let LiveFields::Select(x) = &self.fields {
+			let _ = x.visit(&mut pass);
+		};
 		let _ = self.what.visit(&mut pass);
 		if let Some(cond) = &self.cond {
 			let _ = cond.0.visit(&mut pass);
@@ -58,12 +65,16 @@ impl LiveStatement {
 			}
 		}
 
+		let fields = match &self.fields {
+			LiveFields::Diff => SubscriptionFields::Diff,
+			LiveFields::Select(x) => SubscriptionFields::Select(x.clone()),
+		};
+
 		// Check that auth has been set
 		let mut subscription_definition = SubscriptionDefinition {
 			id: self.id,
 			node: self.node,
-			fields: self.fields.clone(),
-			diff: self.diff,
+			fields,
 			what: self.what.clone(),
 			cond: self.cond.clone().map(|c| c.0),
 			fetch: self.fetch.clone(),
@@ -132,10 +143,13 @@ impl LiveStatement {
 impl fmt::Display for LiveStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "LIVE SELECT")?;
-		if self.diff {
-			write!(f, " DIFF")?;
+		match &self.fields {
+			LiveFields::Diff => write!(f, " DIFF")?,
+			LiveFields::Select(fields) => {
+				write!(f, " {}", fields)?;
+			}
 		}
-		write!(f, " {} FROM {}", self.fields, CoverStmtsExpr(&self.what))?;
+		write!(f, " FROM {}", CoverStmts(&self.what))?;
 		if let Some(ref v) = self.cond {
 			write!(f, " {v}")?
 		}

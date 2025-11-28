@@ -10,10 +10,10 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::order::Ordering;
 use crate::expr::{
-	Cond, Explain, Expr, Fetchs, Fields, FlowResultExt as _, Groups, Limit, Splits, Start, Timeout,
+	Cond, Explain, Expr, Fetchs, Fields, FlowResultExt as _, Groups, Limit, Literal, Splits, Start,
 	With,
 };
-use crate::fmt::Fmt;
+use crate::fmt::{CoverStmts, Fmt};
 use crate::idx::planner::{QueryPlanner, RecordStrategy, StatementContext};
 use crate::val::{Datetime, Value};
 
@@ -34,7 +34,7 @@ pub(crate) struct SelectStatement {
 	pub start: Option<Start>,
 	pub fetch: Option<Fetchs>,
 	pub version: Option<Expr>,
-	pub timeout: Option<Timeout>,
+	pub timeout: Expr,
 	pub parallel: bool,
 	pub explain: Option<Explain>,
 	pub tempfiles: bool,
@@ -56,7 +56,7 @@ impl Default for SelectStatement {
 			start: None,
 			fetch: None,
 			version: None,
-			timeout: None,
+			timeout: Expr::Literal(Literal::None),
 			parallel: false,
 			explain: None,
 			tempfiles: false,
@@ -188,8 +188,8 @@ impl fmt::Display for SelectStatement {
 		if let Some(ref v) = self.version {
 			write!(f, " VERSION {v}")?
 		}
-		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
 		}
 		if self.parallel {
 			f.write_str(" PARALLEL")?

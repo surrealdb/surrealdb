@@ -4,7 +4,9 @@ use std::hash;
 
 use rust_decimal::Decimal;
 
-use crate::fmt::{EscapeKey, EscapeKwFreeIdent, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
+use crate::fmt::{
+	EscapeKey, EscapeKwFreeIdent, Float, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent,
+};
 use crate::types::PublicDuration;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -516,8 +518,8 @@ impl Display for KindLiteral {
 		match self {
 			KindLiteral::String(s) => write!(f, "{}", QuoteStr(s)),
 			KindLiteral::Integer(n) => write!(f, "{}", n),
-			KindLiteral::Float(n) => write!(f, "{}", n),
-			KindLiteral::Decimal(n) => write!(f, "{}", n),
+			KindLiteral::Float(n) => write!(f, " {}", Float(*n)),
+			KindLiteral::Decimal(n) => write!(f, " {}dec", n),
 			KindLiteral::Duration(d) => write!(f, "{}", d),
 			KindLiteral::Bool(b) => write!(f, "{}", b),
 			KindLiteral::Array(a) => {

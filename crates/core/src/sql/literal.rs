@@ -5,7 +5,7 @@ use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon}
 use rust_decimal::Decimal;
 use surrealdb_types::ToSql;
 
-use crate::fmt::{EscapeKey, Float, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
+use crate::fmt::{CoverStmts, EscapeKey, Float, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::sql::{Expr, RecordIdLit};
 use crate::types::{
 	PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicGeometry, PublicRegex,
@@ -92,7 +92,7 @@ impl fmt::Display for Literal {
 				f.write_char('[')?;
 				if !exprs.is_empty() {
 					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(exprs.as_slice()))?;
+					write!(f, "{}", Fmt::pretty_comma_separated(exprs.iter().map(CoverStmts)))?;
 					drop(indent);
 				}
 				f.write_char(']')
@@ -101,8 +101,13 @@ impl fmt::Display for Literal {
 				f.write_char('{')?;
 				if !exprs.is_empty() {
 					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(exprs.as_slice()))?;
+					write!(f, "{}", Fmt::pretty_comma_separated(exprs.iter().map(CoverStmts)))?;
 					drop(indent);
+					if exprs.len() == 1 {
+						f.write_char(',')?;
+					}
+				} else {
+					f.write_char(',')?;
 				}
 				f.write_char('}')
 			}
@@ -119,7 +124,12 @@ impl fmt::Display for Literal {
 						"{}",
 						Fmt::pretty_comma_separated(items.iter().map(|args| Fmt::new(
 							args,
-							|entry, f| write!(f, "{}: {}", EscapeKey(&entry.key), entry.value)
+							|entry, f| write!(
+								f,
+								"{}: {}",
+								EscapeKey(&entry.key),
+								CoverStmts(&entry.value)
+							)
 						)),)
 					)?;
 					drop(indent);

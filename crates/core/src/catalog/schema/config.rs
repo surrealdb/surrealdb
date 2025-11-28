@@ -5,7 +5,7 @@ use revision::revisioned;
 
 use crate::catalog::ApiConfigDefinition;
 use crate::expr::statements::info::InfoStructure;
-use crate::fmt::{Fmt, Pretty, pretty_indent};
+use crate::fmt::{EscapeKwFreeIdent, Fmt, Pretty, pretty_indent};
 use crate::iam::ConfigKind;
 use crate::kvs::impl_kv_value_revisioned;
 use crate::val::Value;
@@ -113,16 +113,28 @@ impl Display for GraphQLTablesConfig {
 				write!(f, "INCLUDE ")?;
 				if !cs.is_empty() {
 					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
+					write!(
+						f,
+						"{}",
+						Fmt::pretty_comma_separated(
+							cs.iter().map(|x| EscapeKwFreeIdent(x.as_str()))
+						)
+					)?;
 					drop(indent);
 				}
 			}
 			GraphQLTablesConfig::Exclude(cs) => {
 				let mut f = Pretty::from(f);
-				write!(f, "EXCLUDE")?;
+				write!(f, "EXCLUDE ")?;
 				if !cs.is_empty() {
 					let indent = pretty_indent();
-					write!(f, "{}", Fmt::pretty_comma_separated(cs.as_slice()))?;
+					write!(
+						f,
+						"{}",
+						Fmt::pretty_comma_separated(
+							cs.iter().map(|x| EscapeKwFreeIdent(x.as_str()))
+						)
+					)?;
 					drop(indent);
 				}
 			}

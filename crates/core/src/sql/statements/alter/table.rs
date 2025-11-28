@@ -1,7 +1,7 @@
 use std::fmt::{self, Display, Write};
 
 use super::AlterKind;
-use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKwFreeIdent, QuoteStr, is_pretty, pretty_indent};
 use crate::sql::{ChangeFeed, Kind, Permissions, TableType};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -63,7 +63,7 @@ impl Display for AlterTableStatement {
 		}
 
 		match self.comment {
-			AlterKind::Set(ref comment) => write!(f, " COMMENT {}", comment)?,
+			AlterKind::Set(ref comment) => write!(f, " COMMENT {}", QuoteStr(comment))?,
 			AlterKind::Drop => write!(f, " DROP COMMENT")?,
 			AlterKind::None => {}
 		}

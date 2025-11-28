@@ -1,7 +1,7 @@
 use std::fmt;
 use std::fmt::Write;
 
-use crate::fmt::{EscapeKwFreeIdent, Fmt, is_pretty, pretty_indent};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, Fmt, is_pretty, pretty_indent};
 use crate::sql::{Expr, Idiom, Lookup};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -96,7 +96,12 @@ impl fmt::Display for Part {
 			Part::Graph(v) => write!(f, "{v}"),
 			Part::Value(v) => write!(f, "[{v}]"),
 			Part::Method(v, a) => {
-				write!(f, ".{}({})", EscapeKwFreeIdent(v), Fmt::comma_separated(a))
+				write!(
+					f,
+					".{}({})",
+					EscapeKwFreeIdent(v),
+					Fmt::comma_separated(a.iter().map(CoverStmts))
+				)
 			}
 			Part::Destructure(v) => {
 				f.write_str(".{")?;
@@ -114,7 +119,7 @@ impl fmt::Display for Part {
 					f.write_str(" }")
 				}
 			}
-			Part::Optional => write!(f, "?"),
+			Part::Optional => write!(f, ".?"),
 			Part::Recurse(v, nest, instruction) => {
 				write!(f, ".{{{v}")?;
 				if let Some(instruction) = instruction {
@@ -123,7 +128,11 @@ impl fmt::Display for Part {
 				write!(f, "}}")?;
 
 				if let Some(nest) = nest {
-					write!(f, "({nest})")?;
+					f.write_char('(')?;
+					for p in nest.0.iter() {
+						p.fmt(f)?;
+					}
+					f.write_char(')')?;
 				}
 
 				Ok(())

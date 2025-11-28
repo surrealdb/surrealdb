@@ -7,9 +7,9 @@ use crate::sql::Expr;
 // does not expire
 pub struct UserDuration {
 	// Duration after which the token obtained after authenticating with user credentials expires
-	pub token: Option<Expr>,
+	pub token: Expr,
 	// Duration after which the session authenticated with user credentials or token expires
-	pub session: Option<Expr>,
+	pub session: Expr,
 }
 
 /*
@@ -28,16 +28,16 @@ impl Default for UserDuration {
 impl From<UserDuration> for crate::expr::user::UserDuration {
 	fn from(v: UserDuration) -> Self {
 		crate::expr::user::UserDuration {
-			token: v.token.map(Into::into),
-			session: v.session.map(Into::into),
+			token: v.token.into(),
+			session: v.session.into(),
 		}
 	}
 }
 impl From<crate::expr::user::UserDuration> for UserDuration {
 	fn from(v: crate::expr::user::UserDuration) -> Self {
 		UserDuration {
-			token: v.token.map(Into::into),
-			session: v.session.map(Into::into),
+			token: v.token.into(),
+			session: v.session.into(),
 		}
 	}
 }

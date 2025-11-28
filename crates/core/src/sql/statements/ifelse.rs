@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Write};
 
-use crate::fmt::{CoverStmtsSql, Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
+use crate::fmt::{CoverStmts, Fmt, Pretty, fmt_separated_by, is_pretty, pretty_indent};
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -51,12 +51,12 @@ impl Display for IfelseStatement {
 					self.exprs.iter().map(|args| {
 						Fmt::new(args, |(cond, then), f| {
 							if is_pretty() {
-								write!(f, "IF {}", CoverStmtsSql(cond))?;
+								write!(f, "IF {}", CoverStmts(cond))?;
 								let indent = pretty_indent();
 								write!(f, "{then}")?;
 								drop(indent);
 							} else {
-								write!(f, "IF {} {then}", CoverStmtsSql(cond))?;
+								write!(f, "IF {} {then}", CoverStmts(cond))?;
 							}
 							Ok(())
 						})
@@ -72,10 +72,10 @@ impl Display for IfelseStatement {
 				if is_pretty() {
 					write!(f, "ELSE")?;
 					let indent = pretty_indent();
-					write!(f, "{v}")?;
+					write!(f, "{}", CoverStmts(v))?;
 					drop(indent);
 				} else {
-					write!(f, " ELSE {v}")?;
+					write!(f, " ELSE {}", CoverStmts(v))?;
 				}
 			}
 			Ok(())
@@ -87,12 +87,12 @@ impl Display for IfelseStatement {
 					self.exprs.iter().map(|args| {
 						Fmt::new(args, |(cond, then), f| {
 							if is_pretty() {
-								write!(f, "IF {} THEN", CoverStmtsSql(cond))?;
+								write!(f, "IF {} THEN", CoverStmts(cond))?;
 								let indent = pretty_indent();
 								write!(f, "{then}")?;
 								drop(indent);
 							} else {
-								write!(f, "IF {} THEN {then}", CoverStmtsSql(cond))?;
+								write!(f, "IF {} THEN {then}", CoverStmts(cond))?;
 							}
 							Ok(())
 						})
@@ -108,10 +108,10 @@ impl Display for IfelseStatement {
 				if is_pretty() {
 					write!(f, "ELSE")?;
 					let indent = pretty_indent();
-					write!(f, "{v}")?;
+					write!(f, "{}", CoverStmts(v))?;
 					drop(indent);
 				} else {
-					write!(f, " ELSE {v}")?;
+					write!(f, " ELSE {}", CoverStmts(v))?;
 				}
 			}
 			if is_pretty() {

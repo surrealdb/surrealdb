@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::fmt::EscapeKwFreeIdent;
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent};
 use crate::sql::{Expr, Kind};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -17,7 +17,7 @@ impl fmt::Display for SetStatement {
 		if let Some(ref kind) = self.kind {
 			write!(f, ": {}", kind)?;
 		}
-		write!(f, " = {}", self.what)?;
+		write!(f, " = {}", CoverStmts(&self.what))?;
 		Ok(())
 	}
 }

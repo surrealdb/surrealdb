@@ -132,10 +132,6 @@ impl Parser<'_> {
 						break;
 					}
 				}
-				t!("..") => {
-					bail!("Unexpected token `{}` expected and idiom",t!(".."),
-						@self.last_span() => "Did you maybe intent to use the flatten operator `...`");
-				}
 				_ => break,
 			}
 		}
@@ -196,10 +192,6 @@ impl Parser<'_> {
 					} else {
 						break;
 					}
-				}
-				t!("..") => {
-					bail!("Unexpected token `{}` expected and idiom",t!(".."),
-						@self.last_span() => "Did you maybe intent to use the flatten operator `...`");
 				}
 				_ => break,
 			}
@@ -995,7 +987,7 @@ mod tests {
 	fn idiom_start_thing_remote_traversal() {
 		let sql = "person:test.friend->like->person";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("person:test.friend->like->person", format!("{}", out));
+		assert_eq!("(person:test).friend->like->person", format!("{}", out));
 		assert_eq!(
 			out,
 			Expr::Idiom(Idiom(vec![

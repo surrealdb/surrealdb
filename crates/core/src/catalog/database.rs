@@ -83,7 +83,11 @@ impl DatabaseDefinition {
 	fn to_sql_definition(&self) -> DefineDatabaseStatement {
 		DefineDatabaseStatement {
 			name: Expr::Idiom(Idiom::field(self.name.clone())),
-			comment: self.comment.clone().map(|v| Expr::Literal(Literal::String(v))),
+			comment: self
+				.comment
+				.clone()
+				.map(|v| Expr::Literal(Literal::String(v)))
+				.unwrap_or(Expr::Literal(Literal::None)),
 			changefeed: self.changefeed.map(|v| v.into()),
 			..Default::default()
 		}

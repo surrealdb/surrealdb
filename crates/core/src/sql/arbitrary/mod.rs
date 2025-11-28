@@ -16,7 +16,7 @@ use crate::sql::statements::SleepStatement;
 impl<'a> Arbitrary<'a> for ChangeFeed {
 	fn arbitrary(u: &mut Unstructured<'a>) -> Result<Self> {
 		Ok(Self {
-			expiry: time::Duration::new(u64::arbitrary(u)?, u32::arbitrary(u)?).into(),
+			expiry: u.arbitrary()?,
 			store_diff: bool::arbitrary(u)?,
 		})
 	}
