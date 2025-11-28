@@ -63,11 +63,11 @@ impl ToSql for Block {
 					f.push('\n');
 					// Write indent at the block's level (not the content level)
 					// The content was at fmt (incremented), so block's level is one less
-					if let SqlFormat::Indented(level) = fmt {
-						if level > 0 {
-							for _ in 0..(level - 1) {
-								f.push('\t');
-							}
+					if let SqlFormat::Indented(level) = fmt
+						&& level > 0
+					{
+						for _ in 0..(level - 1) {
+							f.push('\t');
 						}
 					}
 					f.push('\n');

@@ -1,9 +1,8 @@
-
 use std::ops::Deref;
 
 use anyhow::Result;
-use uuid::Uuid;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
 use crate::catalog::providers::TableProvider;

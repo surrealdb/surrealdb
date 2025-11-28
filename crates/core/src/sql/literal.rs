@@ -102,11 +102,11 @@ impl ToSql for Literal {
 					if fmt.is_pretty() {
 						f.push('\n');
 						// One level less indentation for closing bracket
-						if let SqlFormat::Indented(level) = fmt {
-							if level > 0 {
-								for _ in 0..(level - 1) {
-									f.push('\t');
-								}
+						if let SqlFormat::Indented(level) = fmt
+							&& level > 0
+						{
+							for _ in 0..(level - 1) {
+								f.push('\t');
 							}
 						}
 					}
@@ -130,11 +130,11 @@ impl ToSql for Literal {
 					if fmt.is_pretty() {
 						f.push('\n');
 						// One level less indentation for closing bracket
-						if let SqlFormat::Indented(level) = fmt {
-							if level > 0 {
-								for _ in 0..(level - 1) {
-									f.push('\t');
-								}
+						if let SqlFormat::Indented(level) = fmt
+							&& level > 0
+						{
+							for _ in 0..(level - 1) {
+								f.push('\t');
 							}
 						}
 					}
@@ -162,11 +162,11 @@ impl ToSql for Literal {
 					if fmt.is_pretty() {
 						f.push('\n');
 						// One level less indentation for closing bracket
-						if let SqlFormat::Indented(level) = fmt {
-							if level > 0 {
-								for _ in 0..(level - 1) {
-									f.push('\t');
-								}
+						if let SqlFormat::Indented(level) = fmt
+							&& level > 0
+						{
+							for _ in 0..(level - 1) {
+								f.push('\t');
 							}
 						}
 					}

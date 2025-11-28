@@ -1,6 +1,7 @@
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::{fmt::{EscapeKwIdent, QuoteStr}, sql::statements::alter::AlterKind};
+use crate::fmt::{EscapeKwIdent, QuoteStr};
+use crate::sql::statements::alter::AlterKind;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

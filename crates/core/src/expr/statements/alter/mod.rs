@@ -1,12 +1,12 @@
 use anyhow::Result;
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::val::Value;
-use surrealdb_types::{SqlFormat, ToSql};
 
 mod field;
 mod index;
