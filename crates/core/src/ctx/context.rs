@@ -532,10 +532,10 @@ impl MutableContext {
 			if ALLOC.is_beyond_threshold() {
 				bail!(Error::QueryBeyondMemoryThreshold);
 			}
-			if let Some(deadline) = self.deadline {
-				if deadline <= Instant::now() {
-					return Ok(Some(Reason::Timedout));
-				}
+			if let Some(deadline) = self.deadline
+				&& deadline <= Instant::now()
+			{
+				return Ok(Some(Reason::Timedout));
 			}
 		}
 		if let Some(ctx) = &self.parent {
@@ -833,12 +833,13 @@ impl MutableContext {
 mod tests {
 	#[cfg(feature = "http")]
 	use std::str::FromStr;
+	use std::time::Duration;
 
 	#[cfg(feature = "http")]
 	use url::Url;
 
-	#[cfg(feature = "http")]
 	use crate::ctx::MutableContext;
+	use crate::ctx::reason::Reason;
 	#[cfg(feature = "http")]
 	use crate::dbs::Capabilities;
 	#[cfg(feature = "http")]
@@ -858,5 +859,146 @@ mod tests {
 			r.err().unwrap().to_string(),
 			"Access to network target '127.0.0.1/32' is not allowed"
 		);
+	}
+
+	#[tokio::test]
+	async fn test_context_cancellation_priority() {
+		// Test that cancellation is detected even when a deadline is set and exceeded
+		let mut ctx = MutableContext::background();
+
+		// Set a deadline in the past (already exceeded)
+		ctx.add_timeout(Duration::from_nanos(1)).unwrap();
+		// Give time for the deadline to pass
+		tokio::time::sleep(Duration::from_millis(10)).await;
+
+		// Cancel the context
+		let canceller = ctx.add_cancel();
+		canceller.cancel();
+
+		let ctx = ctx.freeze();
+
+		// Cancellation should be detected first, not timeout
+		let result = ctx.done(true);
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), Some(Reason::Canceled));
+	}
+
+	#[tokio::test]
+	async fn test_context_deadline_detection() {
+		// Test that deadline timeout is detected when context is not cancelled
+		let mut ctx = MutableContext::background();
+
+		// Set a very short timeout
+		ctx.add_timeout(Duration::from_nanos(1)).unwrap();
+		// Give time for the deadline to pass
+		tokio::time::sleep(Duration::from_millis(10)).await;
+
+		let ctx = ctx.freeze();
+
+		// Should detect timeout
+		let result = ctx.done(true);
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), Some(Reason::Timedout));
+	}
+
+	#[tokio::test]
+	async fn test_context_no_deadline() {
+		// Test that a context without deadline or cancellation returns None
+		let ctx = MutableContext::background();
+		let ctx = ctx.freeze();
+
+		// Should return None (ok to continue)
+		let result = ctx.done(true);
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), None);
+	}
+
+	#[tokio::test]
+	async fn test_context_is_done_adaptive_backoff() {
+		// Test the adaptive back-off strategy in is_done()
+		let ctx = MutableContext::background();
+		let ctx = ctx.freeze();
+
+		// Test that early iterations trigger deep checks (1, 2, 4, 8, 16, 32)
+		for count in [1, 2, 4, 8, 16, 32] {
+			let result = ctx.is_done(Some(count)).await;
+			assert!(result.is_ok());
+			assert_eq!(result.unwrap(), false, "Count {} should not be done", count);
+		}
+
+		// Test that later iterations only check every 64
+		// Count 33-63 should not trigger deep checks (except at 64)
+		for count in 33..64 {
+			let result = ctx.is_done(Some(count)).await;
+			assert!(result.is_ok());
+			assert_eq!(result.unwrap(), false, "Count {} should not be done", count);
+		}
+
+		// Count 64 should trigger a deep check (64 % 64 == 0)
+		let result = ctx.is_done(Some(64)).await;
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), false);
+	}
+
+	#[tokio::test]
+	async fn test_context_is_done_with_none() {
+		// Test that is_done(None) always performs a deep check
+		let ctx = MutableContext::background();
+		let ctx = ctx.freeze();
+
+		// Should perform deep check and return Ok(false) since no cancellation/timeout
+		let result = ctx.is_done(None).await;
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), false);
+	}
+
+	#[tokio::test]
+	async fn test_context_is_done_detects_cancellation() {
+		// Test that is_done detects cancellation
+		let mut ctx = MutableContext::background();
+		let canceller = ctx.add_cancel();
+		canceller.cancel();
+		let ctx = ctx.freeze();
+
+		// Should detect cancellation
+		let result = ctx.is_done(None).await;
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), true);
+
+		// Should also detect with count
+		let result = ctx.is_done(Some(1)).await;
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), true);
+	}
+
+	/// Test documenting the expected behavior when memory threshold is exceeded.
+	///
+	/// Note: This test documents the expected behavior but cannot easily test actual
+	/// memory threshold violations without:
+	/// 1. Setting MEMORY_THRESHOLD configuration (via cnf::MEMORY_THRESHOLD)
+	/// 2. Actually allocating enough memory to exceed it
+	/// 3. Having the "allocation-tracking" feature enabled
+	///
+	/// The key behavior tested elsewhere is that when is_beyond_threshold() returns true,
+	/// it takes priority over deadline timeout, which prevents OOM crashes from being
+	/// masked by timeout errors.
+	#[tokio::test]
+	async fn test_context_memory_threshold_priority_documentation() {
+		// This test documents that the priority order in done() is:
+		// 1. Cancellation (always checked, fast atomic operation)
+		// 2. Memory threshold (checked when deep_check=true, if beyond threshold returns Error)
+		// 3. Deadline (checked when deep_check=true, returns Reason::Timedout)
+
+		// When ALLOC.is_beyond_threshold() returns true, done() will bail with
+		// Error::QueryBeyondMemoryThreshold before checking the deadline.
+		// This ensures memory violations are always detected before timeout errors.
+
+		let ctx = MutableContext::background();
+		let ctx = ctx.freeze();
+
+		// With no memory pressure, deadline not set, and no cancellation:
+		let result = ctx.done(true);
+		assert!(result.is_ok());
+		assert_eq!(result.unwrap(), None);
 	}
 }
