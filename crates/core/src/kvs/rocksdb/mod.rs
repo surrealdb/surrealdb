@@ -1,16 +1,18 @@
 #![cfg(feature = "kv-rocksdb")]
 
+mod background_flusher;
 mod cnf;
-mod dsm;
+mod commit_coordinator;
+mod disk_space_manager;
 
 use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::thread;
-use std::time::Duration;
 
-use dsm::{DiskSpaceManager, DiskSpaceState, TransactionState};
+use background_flusher::BackgroundFlusher;
+use commit_coordinator::CommitCoordinator;
+use disk_space_manager::{DiskSpaceManager, DiskSpaceState, TransactionState};
 use rocksdb::{
 	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel,
 	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
@@ -28,7 +30,11 @@ pub struct Datastore {
 	/// The underlying RocksDB optimistic transaction database
 	db: Pin<Arc<OptimisticTransactionDB>>,
 	/// Disk space manager for monitoring space usage and enforcing space limits
-	disk_space_manager: Option<DiskSpaceManager>,
+	disk_space_manager: Option<Arc<DiskSpaceManager>>,
+	/// Commit coordinator for batching transaction commits when sync is enabled
+	commit_coordinator: Option<Arc<CommitCoordinator>>,
+	/// Background flusher for periodically flushing WAL to disk
+	background_flusher: Option<Arc<BackgroundFlusher>>,
 }
 
 pub struct Transaction {
@@ -43,7 +49,9 @@ pub struct Transaction {
 	/// The current transaction state
 	transaction_state: Arc<AtomicU8>,
 	/// Reference to the disk space manager for checking current operational state during commit.
-	disk_space_manager: Option<DiskSpaceManager>,
+	disk_space_manager: Option<Arc<DiskSpaceManager>>,
+	/// Commit coordinator for batching transaction commits when sync writes are enabled
+	commit_coordinator: Option<Arc<CommitCoordinator>>,
 	// The above, supposedly 'static transaction
 	// actually points here, so we need to ensure
 	// the memory is kept alive. This pointer must
@@ -62,6 +70,8 @@ impl Datastore {
 		opts.create_if_missing(true);
 		// Create column families if missing
 		opts.create_missing_column_families(true);
+		// Default to WAL flush on every commit
+		opts.set_manual_wal_flush(false);
 		// Increase the background thread count
 		info!(target: TARGET, "Background thread count: {}", *cnf::ROCKSDB_THREAD_COUNT);
 		opts.increase_parallelism(*cnf::ROCKSDB_THREAD_COUNT);
@@ -209,67 +219,51 @@ impl Datastore {
 				)));
 			}
 		});
-		// Configure SST file manager for disk space monitoring and management.
-		// The SST file manager tracks SST file sizes in real-time. When the configured
-		// space limit is reached, the application transitions to read-and-deletion-only mode.
-		let disk_space_manager = if *cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE > 0 {
-			Some(DiskSpaceManager::new(*cnf::ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE, &mut opts)?)
+		// Pre-configure the disk space manager
+		let should_create_disk_space_manager = DiskSpaceManager::configure(&mut opts)?;
+		// Pre-configure the background flusher
+		let should_create_background_flusher = BackgroundFlusher::configure(&mut opts)?;
+		// Pre-configure the commit coordinator
+		let should_create_commit_coordinator = CommitCoordinator::configure(&mut opts)?;
+		// Create the disk space manager if enabled
+		let disk_space_manager = if should_create_disk_space_manager {
+			Some(Arc::new(DiskSpaceManager::new(&mut opts)?))
 		} else {
 			None
 		};
 		// Open the database
-		let db = Self::open(opts.clone(), path).await?;
+		let db = Arc::pin(OptimisticTransactionDB::open(&opts, path)?);
+		// Create the background flusher if enabled
+		let background_flusher = if should_create_background_flusher {
+			Some(Arc::new(BackgroundFlusher::new(db.clone())?))
+		} else {
+			None
+		};
+		// Create the commit coordinator if enabled
+		let commit_coordinator = if should_create_commit_coordinator {
+			Some(Arc::new(CommitCoordinator::new(db.clone())?))
+		} else {
+			None
+		};
 		// Return the datastore
 		Ok(Datastore {
 			db,
 			disk_space_manager,
+			background_flusher,
+			commit_coordinator,
 		})
-	}
-
-	/// Open database with normal configuration
-	async fn open(mut opts: Options, path: &str) -> Result<Pin<Arc<OptimisticTransactionDB>>> {
-		if !*cnf::ROCKSDB_BACKGROUND_FLUSH {
-			// Background flush is disabled which
-			// means that the WAL will be flushed
-			// whenever a transaction is committed.
-			// Display the configuration setting
-			info!(target: TARGET, "Background write-ahead-log flushing: disabled");
-			// Enable manual WAL flush
-			opts.set_manual_wal_flush(false);
-			// Create the optimistic datastore
-			Ok(Arc::pin(OptimisticTransactionDB::open(&opts, path)?))
-		} else {
-			// Background flush is enabled so we
-			// spawn a background worker thread to
-			// flush the WAL to disk periodically.
-			// Display the configuration setting
-			info!(target: TARGET, "Background write-ahead-log flushing: enabled every {}ms", *cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL);
-			// Enable manual WAL flush
-			opts.set_manual_wal_flush(true);
-			// Create the optimistic datastore
-			let db = Arc::pin(OptimisticTransactionDB::open(&opts, path)?);
-			// Clone the database reference
-			let dbc = db.clone();
-			// Create a new background thread
-			thread::spawn(move || {
-				loop {
-					// Get the specified flush interval
-					let wait = *cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL;
-					// Wait for the specified interval
-					thread::sleep(Duration::from_millis(wait));
-					// Flush the WAL to disk periodically
-					if let Err(err) = dbc.flush_wal(true) {
-						error!("Failed to flush WAL: {err}");
-					}
-				}
-			});
-			// Return the datastore
-			Ok(db)
-		}
 	}
 
 	/// Shutdown the database
 	pub(crate) async fn shutdown(&self) -> Result<()> {
+		// Wait for the background flusher to finish
+		if let Some(background_flusher) = &self.background_flusher {
+			background_flusher.shutdown()?;
+		}
+		// Wait for the commit coordinator to finish
+		if let Some(commit_coordinator) = &self.commit_coordinator {
+			commit_coordinator.shutdown()?;
+		}
 		// Create new flush options
 		let mut opts = FlushOptions::default();
 		// Wait for the sync to finish
@@ -293,13 +287,19 @@ impl Datastore {
 		to.set_snapshot(true);
 		// Set the write options
 		let mut wo = WriteOptions::default();
-		wo.set_sync(*cnf::SYNC_DATA);
+		// When using commit coordinator, disable per-transaction sync
+		// The coordinator will do a single fsync for the entire batch
+		// Automatic transaction sync is disabled, because disk sync will be handled
+		// by the commit coordinator, or the background flush thread. If both the
+		// commit coordinator and background flush thread are disabled, then we leave
+		// it up to the operating system to flush the data to disk.
+		wo.set_sync(false);
 		// Create a new transaction
 		let inner = self.db.transaction_opt(&wo, &to);
-		// SAFETY: The transaction lifetime is tied to the database through the _db field.
+		// SAFETY: The transaction lifetime is tied to the database through the db field.
 		// The database is guaranteed to outlive the transaction because:
 		// 1. The transaction holds a Pin<Arc<OptimisticTransactionDB>> reference
-		// 2. The transaction struct ensures _db is dropped after inner
+		// 2. The transaction struct ensures db is dropped after inner
 		// 3. The Pin ensures the database isn't moved or dropped while referenced
 		let inner = unsafe {
 			std::mem::transmute::<
@@ -320,6 +320,7 @@ impl Datastore {
 			read_options: ro,
 			transaction_state: Arc::new(Default::default()),
 			disk_space_manager: self.disk_space_manager.clone(),
+			commit_coordinator: self.commit_coordinator.clone(),
 			db: self.db.clone(),
 		}))
 	}
@@ -430,8 +431,18 @@ impl Transactable for Transaction {
 			.await
 			.take()
 			.ok_or_else(|| Error::Internal("expected a transaction".into()))?;
-		// Commit this transaction
-		inner.commit()?;
+		// Commit this transaction using grouped commit if available, otherwise commit directly
+		if let Some(coordinator) = &self.commit_coordinator {
+			// Use grouped commit coordinator for batching
+			coordinator.commit(inner).await?;
+		} else {
+			// Commit the transaction directly without grouped commit
+			inner.commit()?;
+			// If synced writes are enabled, flush the WAL to disk
+			if *cnf::SYNC_DATA {
+				self.db.flush_wal(true)?;
+			}
+		}
 		// Perform compaction if necessary
 		if self.is_restricted(true) && self.contains_deletes() {
 			self.db.compact_range::<&[u8], &[u8]>(None, None);

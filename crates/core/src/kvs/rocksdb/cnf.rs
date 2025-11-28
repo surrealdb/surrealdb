@@ -1,18 +1,21 @@
 use std::cmp::max;
 use std::sync::LazyLock;
+use std::time::Duration;
 
 use sysinfo::System;
 
 /// Should we sync writes to disk before acknowledgement
-pub(super) static SYNC_DATA: LazyLock<bool> = lazy_env_parse!("SURREAL_SYNC_DATA", bool, false);
+pub(super) static SYNC_DATA: LazyLock<bool> = lazy_env_parse!("SURREAL_SYNC_DATA", bool, true);
 
 /// Whether to enable background WAL file flushing (default: false)
 pub(super) static ROCKSDB_BACKGROUND_FLUSH: LazyLock<bool> =
 	lazy_env_parse!("SURREAL_ROCKSDB_BACKGROUND_FLUSH", bool, false);
 
-/// The interval in milliseconds between background flushes (default: 200)
+/// The interval in milliseconds between background flushes (default: 200ms)
 pub(super) static ROCKSDB_BACKGROUND_FLUSH_INTERVAL: LazyLock<u64> =
-	lazy_env_parse!("SURREAL_ROCKSDB_BACKGROUND_FLUSH_INTERVAL", u64, 200);
+	lazy_env_parse!(duration, "SURREAL_ROCKSDB_BACKGROUND_FLUSH_INTERVAL", u64, || {
+		Duration::from_millis(200).as_nanos() as u64
+	});
 
 /// The number of threads to start for flushing and compaction (default: number
 /// of CPUs)
@@ -226,3 +229,36 @@ pub(super) static ROCKSDB_DELETION_FACTORY_RATIO: LazyLock<f64> =
 /// Set to 0 to disable space monitoring.
 pub(super) static ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE: LazyLock<u64> =
 	lazy_env_parse!(bytes, "SURREAL_ROCKSDB_SST_MAX_ALLOWED_SPACE_USAGE", u64, 0);
+
+/// Whether to enable grouped commit when sync is enabled (default: true)
+/// When enabled, multiple transaction commits are batched together and flushed to disk with a
+/// single fsync operation, improving throughput. When disabled, each transaction is committed
+/// and synced individually, which may provide lower latency for single transactions at the cost
+/// of reduced throughput under high load.
+/// This setting is only used when SYNC_DATA is enabled and ROCKSDB_BACKGROUND_FLUSH is disabled.
+pub(super) static ROCKSDB_GROUPED_COMMIT: LazyLock<bool> =
+	lazy_env_parse!("SURREAL_ROCKSDB_GROUPED_COMMIT", bool, true);
+
+/// The maximum wait time in microseconds before forcing a grouped commit (default: 500µs)
+/// This timeout ensures that transactions don't wait indefinitely when there's low concurrency.
+/// The value balances between transaction latency and write throughput.
+pub(super) static ROCKSDB_GROUPED_COMMIT_TIMEOUT: LazyLock<u64> =
+	lazy_env_parse!(duration, "SURREAL_ROCKSDB_GROUPED_COMMIT_TIMEOUT", u64, || {
+		Duration::from_micros(500).as_nanos() as u64
+	});
+
+/// Threshold for deciding whether to wait for more transactions (default: 64)
+/// If we have fewer than this AND more transactions are pending, we'll wait up to
+/// ROCKSDB_GROUPED_COMMIT_TIMEOUT to collect a larger batch. This is NOT a hard requirement -
+/// under low load, smaller batches will be committed immediately to maintain low latency.
+/// Under high load, batches naturally form and can exceed this threshold.
+/// This setting is only used when SYNC_DATA is enabled and ROCKSDB_BACKGROUND_FLUSH is disabled.
+pub(super) static ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_ROCKSDB_GROUPED_COMMIT_WAIT_THRESHOLD", usize, 64);
+
+/// The maximum number of transactions in a single grouped commit batch (default: 2048)
+/// This prevents unbounded memory growth while still allowing large batches for efficiency.
+/// Larger batches improve throughput but increase memory usage and batch processing time.
+/// This setting is only used when SYNC_DATA is enabled and ROCKSDB_BACKGROUND_FLUSH is disabled.
+pub(super) static ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE: LazyLock<usize> =
+	lazy_env_parse!("SURREAL_ROCKSDB_GROUPED_COMMIT_MAX_BATCH_SIZE", usize, 2048);
