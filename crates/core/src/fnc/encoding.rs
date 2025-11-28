@@ -32,7 +32,7 @@ pub mod base64 {
 	/// Decodes a base64 string to a `Bytes` value. It accepts both padded and
 	/// non-padded base64 strings.
 	pub fn decode((arg,): (String,)) -> Result<Value> {
-		Ok(Value::from(Bytes(STANDARD_GENERIC_DECODER.decode(arg).map_err(|_| {
+		Ok(Value::from(Bytes::from(STANDARD_GENERIC_DECODER.decode(arg).map_err(|_| {
 			Error::InvalidArguments {
 				name: "encoding::base64::decode".to_owned(),
 				message: "invalid base64".to_owned(),
@@ -56,11 +56,11 @@ pub mod cbor {
 			message: "Value could not be encoded into CBOR".to_owned(),
 		})?;
 
-		Ok(Value::Bytes(Bytes(val)))
+		Ok(Value::Bytes(Bytes::from(val)))
 	}
 
 	pub fn decode((arg,): (Bytes,)) -> Result<Value> {
-		let public_val = cbor::decode(arg.as_slice()).map_err(|_| Error::InvalidArguments {
+		let public_val = cbor::decode(arg.as_ref()).map_err(|_| Error::InvalidArguments {
 			name: "encoding::cbor::decode".to_owned(),
 			message: "invalid cbor".to_owned(),
 		})?;
@@ -77,7 +77,7 @@ mod tests {
 
 	#[test]
 	fn test_base64_encode() {
-		let input = Bytes(b"hello".to_vec());
+		let input = Bytes::from(b"hello".to_vec());
 		let result = base64::encode((input.clone(), Optional(None))).unwrap();
 		assert_eq!(result, Value::from("aGVsbG8"));
 
@@ -87,7 +87,7 @@ mod tests {
 
 	#[test]
 	fn test_base64_encode_padded() {
-		let input = Bytes(b"hello".to_vec());
+		let input = Bytes::from(b"hello".to_vec());
 		let result = base64::encode((input, Optional(Some(true)))).unwrap();
 		assert_eq!(result, Value::from("aGVsbG8="));
 	}
@@ -96,13 +96,13 @@ mod tests {
 	fn test_base64_decode_no_pad() {
 		let input = "aGVsbG8".to_string();
 		let result = base64::decode((input,)).unwrap();
-		assert_eq!(result, Value::from(Bytes(b"hello".to_vec())));
+		assert_eq!(result, Value::from(Bytes::from(b"hello".to_vec())));
 	}
 
 	#[test]
 	fn test_base64_decode_with_pad() {
 		let input = "aGVsbG8=".to_string();
 		let result = base64::decode((input,)).unwrap();
-		assert_eq!(result, Value::from(Bytes(b"hello".to_vec())));
+		assert_eq!(result, Value::from(Bytes::from(b"hello".to_vec())));
 	}
 }

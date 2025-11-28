@@ -19,11 +19,7 @@ use crate::val::{Bytes, File, Value};
 ///
 /// Accepts `Bytes` or `String` values and converts them into `bytes::Bytes`.
 fn accept_payload(value: Value) -> Result<bytes::Bytes> {
-	value
-		.cast_to::<Bytes>()
-		.map(|x| bytes::Bytes::from(x.0))
-		.map_err(err::Error::from)
-		.map_err(anyhow::Error::new)
+	value.cast_to::<Bytes>().map(|x| x.0).map_err(err::Error::from).map_err(anyhow::Error::new)
 }
 
 /// Allows you to control a specific bucket in the context of the current user
@@ -146,7 +142,7 @@ impl<'a> BucketController<'a> {
 			None => return Ok(None),
 		};
 
-		Ok(Some(bytes.to_vec().into()))
+		Ok(Some(Bytes(bytes)))
 	}
 
 	/// Deletes an object from the bucket.
