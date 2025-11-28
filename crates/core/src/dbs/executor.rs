@@ -454,9 +454,10 @@ impl Executor {
 
 					for res in &mut self.results[start_results..] {
 						res.query_type = QueryType::Other;
-						res.result = Err(DbResultError::QueryNotExecuted(
-							"The query was not executed due to a failed transaction".to_string(),
-						));
+						res.result = Err(DbResultError::QueryNotExecuted(format!(
+							"The query was not executed due to a failed transaction: {}",
+							stmt.to_sql()
+						)));
 					}
 
 					self.results.push(QueryResult {
@@ -479,10 +480,10 @@ impl Executor {
 
 						self.results.push(QueryResult {
 							time: Duration::ZERO,
-							result: Err(DbResultError::QueryNotExecuted(
-								"The query was not executed due to a failed transaction"
-									.to_string(),
-							)),
+							result: Err(DbResultError::QueryNotExecuted(format!(
+								"The query was not executed due to a failed transaction: {}",
+								stmt.to_sql()
+							))),
 							query_type: QueryType::Other,
 						});
 					}

@@ -239,6 +239,10 @@ criteria = "safe-to-deploy"
 version = "1.10.2"
 criteria = "safe-to-deploy"
 
+[[exemptions.bytes]]
+version = "1.11.0"
+criteria = "safe-to-deploy"
+
 [[exemptions.candle-core]]
 version = "0.9.1"
 criteria = "safe-to-deploy"
@@ -955,6 +959,10 @@ criteria = "safe-to-deploy"
 version = "0.24.1"
 criteria = "safe-to-deploy"
 
+[[exemptions.papaya]]
+version = "0.2.3"
+criteria = "safe-to-deploy"
+
 [[exemptions.parking]]
 version = "2.2.1"
 criteria = "safe-to-deploy"
@@ -1287,6 +1295,10 @@ criteria = "safe-to-deploy"
 version = "2.15.0"
 criteria = "safe-to-deploy"
 
+[[exemptions.seize]]
+version = "0.5.1"
+criteria = "safe-to-deploy"
+
 [[exemptions.send_wrapper]]
 version = "0.6.0"
 criteria = "safe-to-deploy"
@@ -1372,7 +1384,7 @@ version = "0.3.0-surreal.4"
 criteria = "safe-to-deploy"
 
 [[exemptions.surrealmx]]
-version = "0.14.3"
+version = "0.15.0"
 criteria = "safe-to-deploy"
 
 [[exemptions.symbolic-common]]

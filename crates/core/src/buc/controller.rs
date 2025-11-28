@@ -15,6 +15,9 @@ use crate::expr::FlowResultExt;
 use crate::iam::Action;
 use crate::val::{Bytes, File, Value};
 
+/// Converts a Value into raw bytes for storage.
+///
+/// Accepts `Bytes` or `String` values and converts them into `bytes::Bytes`.
 fn accept_payload(value: Value) -> Result<bytes::Bytes> {
 	value
 		.cast_to::<Bytes>()
@@ -35,9 +38,20 @@ pub(crate) struct BucketController<'a> {
 }
 
 impl<'a> BucketController<'a> {
-	/// Create a `FileController` for a specified file
-	/// Will obtain a bucket connection and return back a `FileController` or
-	/// `Error`
+	/// Creates a new `BucketController` for the specified bucket.
+	///
+	/// Obtains a bucket connection from the context and returns a controller
+	/// that can be used to perform operations on the bucket.
+	///
+	/// # Arguments
+	/// * `stk` - The reblessive stack for async recursion
+	/// * `ctx` - The execution context
+	/// * `opt` - The database options
+	/// * `doc` - Optional cursor document for permission evaluation
+	/// * `buc` - The name of the bucket to control
+	///
+	/// # Errors
+	/// Returns an error if the bucket doesn't exist or connection fails.
 	pub(crate) async fn new(
 		stk: &'a mut Stk,
 		ctx: &'a Context,
@@ -84,10 +98,12 @@ impl<'a> BucketController<'a> {
 		Ok(())
 	}
 
-	/// Attempt to put a file
-	/// `Bytes` and `String` values are supported, and will be converted into
-	/// `Bytes` Create or update permissions will be used, based on if the
-	/// remote file already exists
+	/// Stores data at the specified key only if the key does not already exist.
+	///
+	/// Unlike [`put`](Self::put), this method will not overwrite existing data.
+	/// If the key already exists, the operation is a no-op.
+	///
+	/// `Bytes` and `String` values are supported and will be converted into bytes.
 	pub(crate) async fn put_if_not_exists(&mut self, key: &ObjectKey, value: Value) -> Result<()> {
 		let payload = accept_payload(value)?;
 		self.require_writeable()?;
@@ -101,6 +117,9 @@ impl<'a> BucketController<'a> {
 		Ok(())
 	}
 
+	/// Retrieves metadata for an object without fetching its contents.
+	///
+	/// Returns `None` if the object does not exist.
 	pub(crate) async fn head(&mut self, key: &ObjectKey) -> Result<Option<ObjectMeta>> {
 		self.check_permission(BucketOperation::Head, Some(key), None).await?;
 
@@ -111,6 +130,9 @@ impl<'a> BucketController<'a> {
 			.map_err(anyhow::Error::new)
 	}
 
+	/// Retrieves the contents of an object.
+	///
+	/// Returns `None` if the object does not exist.
 	pub(crate) async fn get(&mut self, key: &ObjectKey) -> Result<Option<Bytes>> {
 		self.check_permission(BucketOperation::Get, Some(key), None).await?;
 
@@ -127,6 +149,9 @@ impl<'a> BucketController<'a> {
 		Ok(Some(bytes.to_vec().into()))
 	}
 
+	/// Deletes an object from the bucket.
+	///
+	/// This operation is idempotent - deleting a non-existent object is not an error.
 	pub(crate) async fn delete(&mut self, key: &ObjectKey) -> Result<()> {
 		self.require_writeable()?;
 		self.check_permission(BucketOperation::Delete, Some(key), None).await?;
@@ -139,6 +164,9 @@ impl<'a> BucketController<'a> {
 		Ok(())
 	}
 
+	/// Copies an object to a new location within the bucket.
+	///
+	/// The source object remains unchanged. If the target already exists, it will be overwritten.
 	pub(crate) async fn copy(&mut self, key: &ObjectKey, target: ObjectKey) -> Result<()> {
 		self.require_writeable()?;
 		self.check_permission(BucketOperation::Copy, Some(key), Some(&target)).await?;
@@ -151,6 +179,9 @@ impl<'a> BucketController<'a> {
 		Ok(())
 	}
 
+	/// Copies an object to a new location only if the target does not already exist.
+	///
+	/// The source object remains unchanged. If the target exists, this is a no-op.
 	pub(crate) async fn copy_if_not_exists(
 		&mut self,
 		key: &ObjectKey,
@@ -167,6 +198,10 @@ impl<'a> BucketController<'a> {
 		Ok(())
 	}
 
+	/// Moves an object to a new location within the bucket.
+	///
+	/// The source object is deleted after a successful copy. If the target already exists,
+	/// it will be overwritten.
 	pub(crate) async fn rename(&mut self, key: &ObjectKey, target: ObjectKey) -> Result<()> {
 		self.require_writeable()?;
 		self.check_permission(BucketOperation::Rename, Some(key), Some(&target)).await?;
@@ -179,6 +214,9 @@ impl<'a> BucketController<'a> {
 		Ok(())
 	}
 
+	/// Moves an object to a new location only if the target does not already exist.
+	///
+	/// The source object is deleted after a successful copy. If the target exists, this is a no-op.
 	pub(crate) async fn rename_if_not_exists(
 		&mut self,
 		key: &ObjectKey,
@@ -195,6 +233,7 @@ impl<'a> BucketController<'a> {
 		Ok(())
 	}
 
+	/// Checks whether an object exists in the bucket.
 	pub(crate) async fn exists(&mut self, key: &ObjectKey) -> Result<bool> {
 		self.check_permission(BucketOperation::Exists, Some(key), None).await?;
 		self.store
@@ -204,6 +243,10 @@ impl<'a> BucketController<'a> {
 			.map_err(anyhow::Error::new)
 	}
 
+	/// Lists objects in the bucket according to the provided options.
+	///
+	/// The listing can be filtered by prefix and paginated using start key and limit.
+	/// Note: Guest and Record users are not allowed to list files in buckets.
 	pub(crate) async fn list(&mut self, opts: &ListOptions) -> Result<Vec<ObjectMeta>> {
 		self.check_permission(BucketOperation::Exists, None, None).await?;
 		self.store
@@ -213,6 +256,16 @@ impl<'a> BucketController<'a> {
 			.map_err(anyhow::Error::new)
 	}
 
+	/// Checks if the current user has permission to perform the specified operation.
+	///
+	/// This method evaluates the bucket's permission policy against the current user
+	/// and operation. For operations involving files, the `$action`, `$file`, and
+	/// optionally `$target` variables are made available to the permission expression.
+	///
+	/// # Arguments
+	/// * `op` - The bucket operation being performed
+	/// * `key` - The source object key (if applicable)
+	/// * `target` - The target object key for copy/rename operations (if applicable)
 	pub(crate) async fn check_permission(
 		&mut self,
 		op: BucketOperation,
@@ -287,19 +340,34 @@ impl<'a> BucketController<'a> {
 	}
 }
 
+/// Represents the different operations that can be performed on a bucket.
+///
+/// These operations are used for permission checking and action logging.
 #[derive(Clone, Copy, Debug)]
 pub enum BucketOperation {
+	/// Store data at a key
 	Put,
+	/// Retrieve data from a key
 	Get,
+	/// Retrieve metadata for a key
 	Head,
+	/// Remove data at a key
 	Delete,
+	/// Copy data from one key to another
 	Copy,
+	/// Move data from one key to another
 	Rename,
+	/// Check if a key exists
 	Exists,
+	/// List objects in the bucket
 	List,
 }
 
 impl BucketOperation {
+	/// Returns `true` if this is a list operation.
+	///
+	/// List operations have special permission restrictions - guest and record
+	/// users are not allowed to list files in buckets.
 	pub fn is_list(self) -> bool {
 		matches!(self, Self::List)
 	}

@@ -123,11 +123,11 @@ impl DefineIndexStatement {
 			cols: cols.clone(),
 			index: self.index.clone(),
 			comment: map_opt!(x as &self.comment => compute_to!(stk, ctx, opt, doc, x => String)),
+			prepare_remove: false,
 		};
 		txn.put_tb_index(tb.namespace_id, tb.database_id, &tb.name, &index_def).await?;
 
 		// Refresh the table cache
-
 		txn.put_tb(
 			ns,
 			db,
@@ -164,7 +164,9 @@ pub(in crate::expr::statements) async fn run_indexing(
 		.build(ctx, opt.clone(), tb, ix, blocking)
 		.await?;
 	if let Some(rcv) = rcv {
-		rcv.await.map_err(|_| Error::IndexingBuildingCancelled)?
+		rcv.await.map_err(|_| Error::IndexingBuildingCancelled {
+			reason: "Channel shutdown".to_string(),
+		})?
 	} else {
 		Ok(())
 	}

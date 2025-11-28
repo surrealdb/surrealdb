@@ -54,7 +54,7 @@ impl AlterSequenceStatement {
 				sq.timeout = Some(timeout);
 			}
 		}
-		// Set the table definition
+		// Set the sequence definition
 		let key = Sq::new(ns, db, &self.name);
 		txn.set(&key, &sq, None).await?;
 		// Clear the cache

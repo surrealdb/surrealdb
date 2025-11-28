@@ -12,7 +12,8 @@ use crate::expr::statements::access::{
 	AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke, AccessStatementShow, Subject,
 };
 use crate::expr::statements::alter::{
-	AlterDefault, AlterFieldStatement, AlterKind, AlterSequenceStatement, AlterTableStatement,
+	AlterDefault, AlterFieldStatement, AlterIndexStatement, AlterKind, AlterSequenceStatement,
+	AlterTableStatement,
 };
 use crate::expr::statements::define::config::ConfigInner;
 use crate::expr::statements::define::config::api::ApiConfig;
@@ -335,7 +336,8 @@ implement_visitor! {
 
 	fn visit_alter(this, a: &AlterStatement){
 		match a {
-			AlterStatement::Table(a)=>{ this.visit_alter_table(a)?;},
+			AlterStatement::Table(a)=>{ this.visit_alter_table(a)?; },
+			AlterStatement::Index(a) => { this.visit_alter_index(a)?; },
 			AlterStatement::Sequence(a) => { this.visit_alter_sequence(a)?; },
 			AlterStatement::Field(a) => { this.visit_alter_field(a)?; },
 		}
@@ -346,6 +348,10 @@ implement_visitor! {
 		if let Some(p) = a.permissions.as_ref(){
 			this.visit_permissions(p)?;
 		}
+		Ok(())
+	}
+
+	fn visit_alter_index(this, a: &AlterIndexStatement){
 		Ok(())
 	}
 
@@ -1770,6 +1776,7 @@ implement_visitor_mut! {
 	fn visit_mut_alter(this, a: &mut AlterStatement){
 		match a {
 			AlterStatement::Table(a)=>{ this.visit_mut_alter_table(a)?;},
+			AlterStatement::Index(a)=>{ this.visit_mut_alter_index(a)?;},
 			AlterStatement::Sequence(a) => { this.visit_mut_alter_sequence(a)?; },
 			AlterStatement::Field(a) => { this.visit_mut_alter_field(a)?; },
 		}
@@ -1780,6 +1787,10 @@ implement_visitor_mut! {
 		if let Some(p) = a.permissions.as_mut(){
 			this.visit_mut_permissions(p)?;
 		}
+		Ok(())
+	}
+
+	fn visit_mut_alter_index(this, a: &mut AlterIndexStatement){
 		Ok(())
 	}
 

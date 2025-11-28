@@ -6,12 +6,15 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::val::Value;
+use surrealdb_types::{SqlFormat, ToSql};
 
 mod field;
+mod index;
 mod sequence;
 mod table;
 
 pub(crate) use field::{AlterDefault, AlterFieldStatement};
+pub(crate) use index::AlterIndexStatement;
 pub(crate) use sequence::AlterSequenceStatement;
 pub(crate) use table::AlterTableStatement;
 
@@ -76,6 +79,7 @@ impl<T: Revisioned + DeserializeRevisioned> DeserializeRevisioned for AlterKind<
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub(crate) enum AlterStatement {
 	Table(AlterTableStatement),
+	Index(AlterIndexStatement),
 	Sequence(AlterSequenceStatement),
 	Field(AlterFieldStatement),
 }
@@ -90,9 +94,21 @@ impl AlterStatement {
 		doc: Option<&CursorDoc>,
 	) -> Result<Value> {
 		match self {
-			Self::Table(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Table(v) => v.compute(ctx, opt).await,
+			Self::Index(v) => v.compute(ctx, opt).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
-			Self::Field(v) => v.compute(stk, ctx, opt, doc).await,
+			Self::Field(v) => v.compute(ctx, opt).await,
+		}
+	}
+}
+
+impl ToSql for AlterStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Self::Table(v) => v.fmt_sql(f, fmt),
+			Self::Index(v) => v.fmt_sql(f, fmt),
+			Self::Sequence(v) => v.fmt_sql(f, fmt),
+			Self::Field(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }

@@ -10,8 +10,6 @@ use surrealdb_core::dbs::Session;
 use surrealdb_core::iam::{Level, Role};
 use surrealdb_core::syn;
 use surrealdb_types::Value;
-use test_log::test;
-use tracing::info;
 
 #[tokio::test]
 async fn define_statement_namespace() -> Result<()> {
@@ -92,7 +90,6 @@ async fn define_statement_index_concurrently_building_status(
 	let session = Session::owner().with_ns("test").with_db("test");
 	let ds = new_ds().await?;
 	// Populate initial records
-	info!("Populate: {}", initial_size);
 	for i in 0..initial_size {
 		let mut responses = ds
 			.execute(
@@ -104,7 +101,6 @@ async fn define_statement_index_concurrently_building_status(
 		skip_ok(&mut responses, 1)?;
 	}
 	// Create the index concurrently
-	info!("Indexing starts");
 	let mut r = ds.execute(def_index, &session, None).await?;
 	assert_eq!(r.len(), skip_def);
 	skip_ok(&mut r, skip_def)?;
@@ -116,7 +112,6 @@ async fn define_statement_index_concurrently_building_status(
 	let mut updated_count = None;
 	let mut appended_count = 0;
 	// While the concurrent indexing is running, we update and delete records
-	info!("Loop");
 	let time_out = Duration::from_secs(300);
 	loop {
 		if now.elapsed().map_err(|e| anyhow::anyhow!(e.to_string()))?.gt(&time_out) {
@@ -147,31 +142,26 @@ async fn define_statement_index_concurrently_building_status(
 			let new_updated = o.get("updated").cloned();
 			match s.as_str() {
 				"started" => {
-					info!("Started");
 					continue;
 				}
 				"cleaning" => {
-					info!("Cleaning");
 					continue;
 				}
 				"indexing" => {
 					{
 						if new_initial != initial_count {
 							assert!(new_initial > initial_count, "{new_initial:?}");
-							info!("New initial count: {:?}", new_initial);
 							initial_count = new_initial;
 						}
 					}
 					{
 						if new_pending != pending_count {
-							info!("New pending count: {:?}", new_pending);
 							pending_count = new_pending;
 						}
 					}
 					{
 						if new_updated != updated_count {
 							assert!(new_updated > updated_count, "{new_updated:?}");
-							info!("New updated count: {:?}", new_updated);
 							updated_count = new_updated;
 						}
 					}
@@ -193,7 +183,6 @@ async fn define_statement_index_concurrently_building_status(
 		}
 		panic!("Invalid info: {tmp:#?}");
 	}
-	info!("Appended: {appended_count}");
 	Ok(())
 }
 
@@ -219,7 +208,7 @@ async fn define_statement_index_concurrently_building_status_standard_overwrite(
 	.await
 }
 
-#[test(tokio::test)]
+#[tokio::test(flavor = "multi_thread")]
 async fn define_statement_index_concurrently_building_status_full_text() -> Result<()> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE ANALYZER simple TOKENIZERS blank,class;
@@ -231,7 +220,7 @@ async fn define_statement_index_concurrently_building_status_full_text() -> Resu
 	.await
 }
 
-#[test(tokio::test)]
+#[tokio::test(flavor = "multi_thread")]
 async fn define_statement_index_concurrently_building_status_full_text_overwrite() -> Result<()> {
 	define_statement_index_concurrently_building_status(
 		"DEFINE ANALYZER simple TOKENIZERS blank,class;
