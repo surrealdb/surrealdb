@@ -50,7 +50,7 @@ pub trait ToSql {
 pub enum SqlFormat {
 	/// Single line formatting.
 	SingleLine,
-	/// Indented by the number of tabs specified (2 spaces per tab).
+	/// Indented by the number of tabs specified.
 	Indented(u8),
 }
 

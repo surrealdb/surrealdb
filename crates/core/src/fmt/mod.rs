@@ -4,7 +4,7 @@
 mod test;
 
 mod escape;
-use std::cell::RefCell;
+use std::cell::Cell;
 use std::fmt::Display;
 
 pub use escape::{EscapeIdent, EscapeKey, EscapeKwFreeIdent, EscapeKwIdent, EscapeRid, QuoteStr};
@@ -14,81 +14,28 @@ use crate::sql;
 
 /// Implements ToSql by calling formatter on contents.
 pub(crate) struct Fmt<T, F> {
-	contents: T,
+	contents: Cell<Option<T>>,
 	formatter: F,
 }
 
-impl<T, F> Fmt<T, F> {
+impl<T, F: Fn(T, &mut String, SqlFormat)> Fmt<T, F> {
 	pub(crate) fn new(t: T, formatter: F) -> Self {
 		Self {
-			contents: t,
+			contents: Cell::new(Some(t)),
 			formatter,
 		}
 	}
 }
 
-impl Fmt<(), ()> {
-	/// Formats values with a comma and a space separating them.
-	pub(crate) fn comma_separated<T: ToSql, I: IntoIterator<Item = T>>(
-		into_iter: I,
-	) -> FmtIter<T, I> {
-		FmtIter::comma_separated(into_iter)
-	}
-
-	/// Formats values with a verbar and a space separating them.
-	pub(crate) fn verbar_separated<T: ToSql, I: IntoIterator<Item = T>>(
-		into_iter: I,
-	) -> FmtIter<T, I> {
-		FmtIter::verbar_separated(into_iter)
-	}
-
-	/// Formats values with a comma and a space separating them or, if pretty
-	/// printing is in effect, a comma, a newline, and indentation.
-	pub(crate) fn pretty_comma_separated<T: ToSql, I: IntoIterator<Item = T>>(
-		into_iter: I,
-	) -> FmtIter<T, I> {
-		FmtIter::pretty_comma_separated(into_iter)
-	}
-
-	/// Formats values with a new line separating them.
-	pub(crate) fn one_line_separated<T: ToSql, I: IntoIterator<Item = T>>(
-		into_iter: I,
-	) -> FmtIter<T, I> {
-		FmtIter::one_line_separated(into_iter)
-	}
-
-	/// Formats values with a new line separating them.
-	pub(crate) fn two_line_separated<T: ToSql, I: IntoIterator<Item = T>>(
-		into_iter: I,
-	) -> FmtIter<T, I> {
-		FmtIter::two_line_separated(into_iter)
-	}
-}
-
-// ToSql impl for non-iterator types (formatter takes &T)
-// This applies to closure types used with Fmt::new
-impl<T, F: Fn(&T, &mut String, SqlFormat)> ToSql for Fmt<T, F> {
+impl<T, F: Fn(T, &mut String, SqlFormat)> ToSql for Fmt<T, F> {
+	/// fmt is single-use only.
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		(self.formatter)(&self.contents, f, fmt)
+		let contents = self.contents.replace(None).expect("only call Fmt::fmt once");
+		(self.formatter)(contents, f, fmt)
 	}
 }
 
-// Helper type that formats an iterator by calling into_iter() and passing to formatter.
-// Uses RefCell to allow consuming the iterator with &self.
-// Can only be formatted once; subsequent calls will produce empty output.
-pub(crate) struct FmtIter<T: ToSql, I: IntoIterator<Item = T>> {
-	into_iter: RefCell<Option<I>>,
-	formatter: fn(I::IntoIter, &mut String, SqlFormat),
-}
-
-impl<T: ToSql, I: IntoIterator<Item = T>> FmtIter<T, I> {
-	fn new(into_iter: I, formatter: fn(I::IntoIter, &mut String, SqlFormat)) -> Self {
-		Self {
-			into_iter: RefCell::new(Some(into_iter)),
-			formatter,
-		}
-	}
-
+impl<I: IntoIterator<Item = T>, T: ToSql> Fmt<I, fn(I, &mut String, SqlFormat)> {
 	/// Formats values with a comma and a space separating them.
 	pub(crate) fn comma_separated(into_iter: I) -> Self {
 		Self::new(into_iter, fmt_comma_separated)
@@ -116,16 +63,12 @@ impl<T: ToSql, I: IntoIterator<Item = T>> FmtIter<T, I> {
 	}
 }
 
-impl<T: ToSql, I: IntoIterator<Item = T>> ToSql for FmtIter<T, I> {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		if let Some(into_iter) = self.into_iter.borrow_mut().take() {
-			(self.formatter)(into_iter.into_iter(), f, fmt)
-		}
-	}
-}
-
-fn fmt_comma_separated<T: ToSql, I: Iterator<Item = T>>(iter: I, f: &mut String, fmt: SqlFormat) {
-	for (i, v) in iter.enumerate() {
+fn fmt_comma_separated<T: ToSql, I: IntoIterator<Item = T>>(
+	into_iter: I,
+	f: &mut String,
+	fmt: SqlFormat,
+) {
+	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
 			f.push_str(", ");
 		}
@@ -133,8 +76,12 @@ fn fmt_comma_separated<T: ToSql, I: Iterator<Item = T>>(iter: I, f: &mut String,
 	}
 }
 
-fn fmt_verbar_separated<T: ToSql, I: Iterator<Item = T>>(iter: I, f: &mut String, fmt: SqlFormat) {
-	for (i, v) in iter.enumerate() {
+fn fmt_verbar_separated<T: ToSql, I: IntoIterator<Item = T>>(
+	into_iter: I,
+	f: &mut String,
+	fmt: SqlFormat,
+) {
+	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
 			f.push_str(" | ");
 		}
@@ -142,12 +89,12 @@ fn fmt_verbar_separated<T: ToSql, I: Iterator<Item = T>>(iter: I, f: &mut String
 	}
 }
 
-fn fmt_pretty_comma_separated<T: ToSql, I: Iterator<Item = T>>(
-	iter: I,
+fn fmt_pretty_comma_separated<T: ToSql, I: IntoIterator<Item = T>>(
+	into_iter: I,
 	f: &mut String,
 	fmt: SqlFormat,
 ) {
-	for (i, v) in iter.enumerate() {
+	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
 			if fmt.is_pretty() {
 				f.push_str(",\n");
@@ -160,12 +107,12 @@ fn fmt_pretty_comma_separated<T: ToSql, I: Iterator<Item = T>>(
 	}
 }
 
-fn fmt_one_line_separated<T: ToSql, I: Iterator<Item = T>>(
-	iter: I,
+fn fmt_one_line_separated<T: ToSql, I: IntoIterator<Item = T>>(
+	into_iter: I,
 	f: &mut String,
 	fmt: SqlFormat,
 ) {
-	for (i, v) in iter.enumerate() {
+	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
 			f.push('\n');
 			// if fmt.is_pretty() {
@@ -178,21 +125,18 @@ fn fmt_one_line_separated<T: ToSql, I: Iterator<Item = T>>(
 	}
 }
 
-fn fmt_two_line_separated<T: ToSql, I: Iterator<Item = T>>(
-	iter: I,
+fn fmt_two_line_separated<T: ToSql, I: IntoIterator<Item = T>>(
+	into_iter: I,
 	f: &mut String,
 	fmt: SqlFormat,
 ) {
-	for (i, v) in iter.enumerate() {
+	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
 			if fmt.is_pretty() {
-				f.push_str("\n\n");
-				fmt.write_indent(f);
-			} else {
 				f.push('\n');
+			} else {
+				f.push_str("\n\n");
 			}
-		} else if fmt.is_pretty() {
-			fmt.write_indent(f);
 		}
 		v.fmt_sql(f, fmt);
 	}
@@ -200,12 +144,12 @@ fn fmt_two_line_separated<T: ToSql, I: Iterator<Item = T>>(
 
 /// Creates a formatting function that joins iterators with an arbitrary
 /// separator.
-pub fn fmt_separated_by<T: ToSql, IntoI: IntoIterator<Item = T> + Clone>(
+pub fn fmt_separated_by<T: ToSql, I: IntoIterator<Item = T>>(
 	separator: impl Display,
-) -> impl Fn(&IntoI, &mut String, SqlFormat) {
-	move |into_iter: &IntoI, f: &mut String, fmt: SqlFormat| {
+) -> impl Fn(I, &mut String, SqlFormat) {
+	move |into_iter: I, f: &mut String, fmt: SqlFormat| {
 		let separator = separator.to_string();
-		for (i, v) in into_iter.clone().into_iter().enumerate() {
+		for (i, v) in into_iter.into_iter().enumerate() {
 			if i > 0 {
 				f.push_str(&separator);
 			}

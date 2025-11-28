@@ -247,7 +247,7 @@ mod tests {
 	#[case::datetime(Value::Datetime(Datetime(DateTime::<Utc>::from_timestamp(1_000_000_000, 0).unwrap())))]
 	#[case::uuid(Value::Uuid(Uuid::default()))]
 	#[case::string(Value::String("Hello, World!".to_string()))]
-	#[case::bytes(Value::Bytes(Bytes(vec![1, 2, 3, 4, 5])))]
+	#[case::bytes(Value::Bytes(Bytes(::bytes::Bytes::from(vec![1_u8, 2, 3, 4, 5]))))]
 	#[case::thing(Value::RecordId(RecordId::new("test_table", RecordIdKey::Number(42))))] // Example Thing
 	#[case::thing_range(Value::RecordId(RecordId::new("test_table", RecordIdKey::Range(Box::new(RecordIdKeyRange { start: Bound::Included(RecordIdKey::String("a".to_string())), end: Bound::Unbounded })))))]
 	#[case::object(Value::Object(Object(BTreeMap::from([("key".to_string(), Value::String("value".to_owned()))]))))]

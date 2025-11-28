@@ -73,7 +73,7 @@ impl ToSql for Ast {
 			&Fmt::one_line_separated(
 				self.expressions
 					.iter()
-					.map(|v| Fmt::new(v, |&v, f, fmt| write_sql!(f, fmt, "{v};"))),
+					.map(|v| Fmt::new(v, |v, f, fmt| write_sql!(f, fmt, "{v};"))),
 			),
 		)
 	}

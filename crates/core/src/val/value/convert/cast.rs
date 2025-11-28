@@ -345,10 +345,10 @@ impl Cast for String {
 
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
-			Value::Bytes(b) => match String::from_utf8(b.0) {
+			Value::Bytes(b) => match String::from_utf8(b.0.to_vec()) {
 				Ok(x) => Ok(x),
 				Err(e) => Err(CastError::InvalidKind {
-					from: Value::Bytes(Bytes(e.into_bytes())),
+					from: Value::Bytes(Bytes::from(e.into_bytes())),
 					into: "string".to_owned(),
 				}),
 			},
@@ -454,7 +454,7 @@ impl Cast for Bytes {
 	fn cast(v: Value) -> Result<Self, CastError> {
 		match v {
 			Value::Bytes(b) => Ok(b),
-			Value::String(s) => Ok(Bytes(s.into_bytes())),
+			Value::String(s) => Ok(Bytes::from(s.into_bytes())),
 			Value::Array(x) => {
 				// Optimization to check first if the conversion can succeed to avoid possibly
 				// cloning large values.
@@ -474,7 +474,7 @@ impl Cast for Bytes {
 					res.push(x as u8);
 				}
 
-				Ok(Bytes(res))
+				Ok(Bytes::from(res))
 			}
 			_ => Err(CastError::InvalidKind {
 				from: v,

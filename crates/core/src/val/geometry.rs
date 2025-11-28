@@ -638,7 +638,7 @@ impl ToSql for Geometry {
 				f,
 				sql_fmt,
 				"{{ type: 'LineString', coordinates: [{}] }}",
-				Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |&v, f, fmt| write_sql!(
+				Fmt::comma_separated(v.points().map(|v| Fmt::new(v, |v, f, fmt| write_sql!(
 					f,
 					fmt,
 					"[{}, {}]",

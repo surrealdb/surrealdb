@@ -544,13 +544,11 @@ impl ToSql for KindLiteral {
 						f,
 						fmt,
 						"{}",
-						Fmt::pretty_comma_separated(o.iter().map(|args| Fmt::new(
-							args,
-							|tuple, f, fmt| {
-								let (k, v) = tuple;
+						Fmt::pretty_comma_separated(
+							o.iter().map(|args| Fmt::new(args, |(k, v), f, fmt| {
 								write_sql!(f, fmt, "{}: {}", EscapeKey(k), v)
-							}
-						)),)
+							})),
+						)
 					);
 				}
 				if fmt.is_pretty() {

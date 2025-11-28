@@ -146,7 +146,7 @@ impl ToSql for RecordIdKeyLit {
 						"{}",
 						Fmt::pretty_comma_separated(v.iter().map(|args| Fmt::new(
 							args,
-							|&entry, f, fmt| write_sql!(
+							|entry, f, fmt| write_sql!(
 								f,
 								fmt,
 								"{}: {}",

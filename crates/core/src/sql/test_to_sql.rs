@@ -39,7 +39,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 #[case::value_set_two(Value::Set(Set::from(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))])), "{1, 2}", "{1, 2}")]
 #[case::value_object(Value::Object(Object::from_iter(vec![(String::from("key"), Value::Number(Number::Int(1)))].into_iter())), "{ key: 1 }", "{\n\tkey: 1\n}")]
 #[case::value_geometry(Value::Geometry(Geometry::Point(Point::new(1.0, 2.0))), "(1, 2)", "(1, 2)")]
-#[case::value_bytes(Value::Bytes(Bytes(b"hello".to_vec())), "b\"68656C6C6F\"", "b\"68656C6C6F\"")]
+#[case::value_bytes(Value::Bytes(Bytes::from(b"hello".to_vec())), "b\"68656C6C6F\"", "b\"68656C6C6F\"")]
 #[case::value_datetime(Value::Datetime("1970-01-01T00:00:00Z".parse().unwrap()), "d'1970-01-01T00:00:00Z'", "d'1970-01-01T00:00:00Z'")]
 #[case::value_duration(Value::Duration(Duration::from_secs(1)), "1s", "1s")]
 #[case::value_file(Value::File(File::new("bucket".to_string(), "path/to/file.txt".to_string())), "f\"bucket:/path/to/file.txt\"", "f\"bucket:/path/to/file.txt\"")]
@@ -69,7 +69,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 	"(1f, 2f)",
 	"(1f, 2f)"
 )]
-#[case::expr_lit_bytes(Expr::Literal(Literal::Bytes(PublicBytes::from(Bytes(b"hello".to_vec())))), "b\"68656C6C6F\"", "b\"68656C6C6F\"")]
+#[case::expr_lit_bytes(Expr::Literal(Literal::Bytes(PublicBytes::from(Bytes::from(b"hello".to_vec())))), "b\"68656C6C6F\"", "b\"68656C6C6F\"")]
 #[case::expr_lit_datetime(Expr::Literal(Literal::Datetime("1970-01-01T00:00:00Z".parse().unwrap())), "d'1970-01-01T00:00:00Z'", "d'1970-01-01T00:00:00Z'")]
 #[case::expr_lit_duration(
 	Expr::Literal(Literal::Duration(PublicDuration::from(Duration::from_secs(1)))),
