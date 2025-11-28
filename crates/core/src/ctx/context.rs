@@ -502,12 +502,17 @@ impl MutableContext {
 
 	/// Check if the context is done. If it returns `None` the operation may
 	/// proceed, otherwise the operation should be stopped.
-	/// Note regarding `deep_check`:
-	/// Checking Instant::now() takes tens to hundreds of nanoseconds
-	/// Checking an AtomicBool takes a single-digit nanoseconds.
-	/// We may not want to check for the deadline on every call.
-	/// An iteration loop may want to check it every 10 or 100 calls.
-	/// Eg.: ctx.done(count % 100 == 0)
+	///
+	/// # Parameters
+	/// - `deep_check`: When `true`, performs expensive checks including:
+	///   - Memory threshold via `ALLOC.is_beyond_threshold()`
+	///   - Deadline check via `Instant::now()`
+	///   When `false`, only checks the cancellation flag (fast atomic operation).
+	///
+	/// # Performance Note
+	/// Checking `Instant::now()` takes tens to hundreds of nanoseconds.
+	/// Checking an `AtomicBool` takes single-digit nanoseconds.
+	/// Use `deep_check = false` for hot loops to minimize overhead.
 	pub(crate) fn done(&self, deep_check: bool) -> Result<Option<Reason>> {
 		if deep_check {
 			if ALLOC.is_beyond_threshold() {
@@ -527,21 +532,34 @@ impl MutableContext {
 
 	/// Check if there is some reason to stop processing the current query.
 	///
-	/// Returns true when the query is cancelled or if check_deadline is true
-	/// when the query deadline is met.
+	/// Returns `true` when the query should be stopped (cancelled, timed out, or exceeded memory threshold).
+	///
+	/// # Parameters
+	/// - `count`: Optional iteration count for optimization. Pass:
+	///   - `Some(count)` when called in a loop - enables adaptive checking to balance
+	///     responsiveness with performance. The method will:
+	///     - Yield every 32 iterations to allow other tasks to run
+	///     - Perform deep checks (memory/deadline) at iterations 1, 2, 4, 8, 16, 32, then every 64
+	///   - `None` when called outside a loop (e.g., single operations) - always performs
+	///     a deep check for immediate cancellation/timeout detection
+	///
+	/// # Performance
+	/// The adaptive checking strategy ("jitter-based back-off") minimizes overhead in hot loops
+	/// while maintaining reasonable responsiveness to cancellation and timeout events.
 	pub(crate) async fn is_done(&self, count: Option<usize>) -> Result<bool> {
 		let deep_check = if let Some(count) = count {
 			// We yield every 32 iterations
 			if count % 32 == 0 {
 				yield_now!();
 			}
-			// Jitt-off logic for deepcheck based on the iteration number,
+			// Adaptive back-off strategy for deep checks based on iteration number:
+			// Check frequently early (powers of 2), then settle into every 64 iterations
 			match count {
 				1 | 2 | 4 | 8 | 16 | 32 => true,
 				_ => count % 64 == 0,
 			}
 		} else {
-			// If there is no count, it is likely to be a single statement, we do a deep check
+			// No count provided - perform a deep check immediately (single operation context)
 			true
 		};
 		Ok(self.done(deep_check)?.is_some())
