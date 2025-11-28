@@ -106,7 +106,7 @@ impl<'de> Deserialize<'de> for Bytes {
 			where
 				E: de::Error,
 			{
-				Ok(Bytes(::bytes::Bytes::from(v.to_vec())))
+				Ok(Bytes(::bytes::Bytes::copy_from_slice(v)))
 			}
 
 			fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
