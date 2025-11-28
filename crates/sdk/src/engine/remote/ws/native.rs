@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::collections::hash_map::Entry;
-use std::sync::atomic::AtomicI64;
 
 use async_channel::Receiver;
 use futures::stream::{SplitSink, SplitStream};
@@ -9,7 +8,7 @@ use serde::Deserialize;
 use surrealdb_core::dbs::QueryResultBuilder;
 use surrealdb_core::iam::token::Token;
 use surrealdb_core::rpc::{DbResponse, DbResult};
-use surrealdb_types::{Array, SurrealValue};
+use surrealdb_types::{Array, Number, SurrealValue};
 use tokio::net::TcpStream;
 use tokio::sync::watch;
 use tokio::time;
@@ -22,19 +21,20 @@ use tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{Connector, MaybeTlsStream, WebSocketStream};
 use trice::Instant;
+use uuid::Uuid;
 
 use super::{HandleResult, PATH, PendingRequest, ReplayMethod, RequestEffect};
 use crate::conn::cmd::RouterRequest;
 use crate::conn::{self, Command, RequestData, Route, Router};
 use crate::engine::IntervalStream;
-use crate::engine::remote::ws::{Client, PING_INTERVAL};
+use crate::engine::remote::ws::{Client, PING_INTERVAL, SessionState};
 use crate::err::Error;
 use crate::method::BoxFuture;
 #[cfg(any(feature = "native-tls", feature = "rustls"))]
 use crate::opt::Tls;
 use crate::opt::{Endpoint, WaitFor};
 use crate::types::{Value, Variables};
-use crate::{ExtraFeatures, Result, Surreal};
+use crate::{ExtraFeatures, Result, SessionClone, SessionId, Surreal};
 
 pub(crate) const NAGLE_ALG: bool = false;
 
@@ -85,9 +85,11 @@ pub(crate) async fn connect(
 
 impl crate::Connection for Client {}
 impl conn::Sealed for Client {
+	#[allow(private_interfaces)]
 	fn connect(
 		mut address: Endpoint,
 		capacity: usize,
+		session_clone: Option<crate::SessionClone>,
 	) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			address.url = address.url.join(PATH)?;
@@ -110,6 +112,7 @@ impl conn::Sealed for Client {
 				capacity => async_channel::bounded(capacity),
 			};
 			let config = address.config.clone();
+			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 
 			tokio::spawn(run_router(
 				address,
@@ -118,6 +121,7 @@ impl conn::Sealed for Client {
 				ws_config,
 				socket,
 				route_rx,
+				session_clone.receiver.clone(),
 			));
 
 			let mut features = HashSet::new();
@@ -128,11 +132,35 @@ impl conn::Sealed for Client {
 				features,
 				config,
 				sender: route_tx,
-				last_id: AtomicI64::new(0),
 			};
 
-			Ok((router, waiter).into())
+			Ok((router, waiter, session_clone).into())
 		})
+	}
+}
+
+/// Send a clone_session RPC request to the server
+async fn attach_session_request(
+	session_id: uuid::Uuid,
+	sink: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+) {
+	use surrealdb_types::SurrealValue;
+
+	let request = crate::conn::cmd::RouterRequest {
+		id: None, // Fire and forget - we don't wait for response
+		method: "attach",
+		params: None,
+		txn: None,
+		session_id: Some(session_id),
+	};
+
+	let request_value = request.into_value();
+	let payload = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
+		.expect("router request should serialize");
+	let message = Message::Binary(payload.into());
+
+	if let Err(error) = sink.send(message).await {
+		warn!("Failed to send attach request to server: {error}");
 	}
 }
 
@@ -145,12 +173,23 @@ async fn router_handle_route(
 	state: &mut RouterState,
 ) -> HandleResult {
 	let RequestData {
-		id,
 		command,
+		session_id,
 	} = request;
 
-	// We probably shouldn't be sending duplicate id requests.
-	let entry = state.pending_requests.entry(id);
+	let Some(session_state) = state.sessions.get_mut(&session_id) else {
+		let error = Error::InternalError(format!("Session not found: {session_id:?}"));
+		if response.send(Err(error.into())).await.is_err() {
+			trace!("Receiver dropped");
+		}
+		return HandleResult::Ok;
+	};
+
+	// Generate a new request ID for this session
+	session_state.last_id += 1;
+	let id = session_state.last_id;
+
+	let entry = session_state.pending_requests.entry(id);
 	let Entry::Vacant(entry) = entry else {
 		let error = Error::DuplicateRequestId(id);
 		if response.send(Err(error.into())).await.is_err() {
@@ -166,8 +205,12 @@ async fn router_handle_route(
 			query,
 			variables,
 		} => {
-			let mut merged_vars =
-				state.vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Variables>();
+			// Get session-specific vars
+			let mut merged_vars = session_state
+				.vars
+				.iter()
+				.map(|(k, v)| (k.clone(), v.clone()))
+				.collect::<Variables>();
 			merged_vars.extend(variables);
 			Command::Query {
 				txn,
@@ -201,7 +244,7 @@ async fn router_handle_route(
 			ref uuid,
 			ref notification_sender,
 		} => {
-			state.live_queries.insert(*uuid, notification_sender.clone());
+			session_state.live_queries.insert(*uuid, notification_sender.clone());
 			if response.clone().send(Ok(vec![QueryResultBuilder::instant_none()])).await.is_err() {
 				trace!("Receiver dropped");
 			}
@@ -211,25 +254,29 @@ async fn router_handle_route(
 		Command::Kill {
 			ref uuid,
 		} => {
-			state.live_queries.remove(uuid);
+			session_state.live_queries.remove(uuid);
 		}
 		Command::Use {
 			..
 		} => {
-			state.replay.insert(ReplayMethod::Use, command.clone());
+			// Store in session-specific replay
+			session_state.replay.insert(ReplayMethod::Use, command.clone());
 		}
 		Command::Signup {
 			..
 		} => {
-			state.replay.insert(ReplayMethod::Signup, command.clone());
+			// Store in session-specific replay
+			session_state.replay.insert(ReplayMethod::Signup, command.clone());
 		}
 		Command::Signin {
 			..
 		} => {
-			state.replay.insert(ReplayMethod::Signin, command.clone());
+			// Store in session-specific replay
+			session_state.replay.insert(ReplayMethod::Signin, command.clone());
 		}
 		Command::Invalidate => {
-			state.replay.insert(ReplayMethod::Invalidate, command.clone());
+			// Store in session-specific replay
+			session_state.replay.insert(ReplayMethod::Invalidate, command.clone());
 		}
 		Command::Authenticate {
 			ref token,
@@ -237,13 +284,14 @@ async fn router_handle_route(
 			effect = RequestEffect::Authenticate {
 				token: Some(token.clone()),
 			};
-			state.replay.insert(ReplayMethod::Authenticate, command.clone());
+			// Store in session-specific replay
+			session_state.replay.insert(ReplayMethod::Authenticate, command.clone());
 		}
 		_ => {}
 	}
 
 	let message = {
-		let Some(request) = command.into_router_request(Some(id)) else {
+		let Some(request) = command.into_router_request(Some(id), Some(session_id)) else {
 			let _ = response.send(Err(Error::BackupsNotSupported.into())).await;
 			return HandleResult::Ok;
 		};
@@ -292,13 +340,23 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 			let Some(response) = response else {
 				return HandleResult::Ok;
 			};
+			let Some(session_id) = response.session_id else {
+				return HandleResult::Ok;
+			};
 
 			match response.id {
 				// If `id` is set this is a normal response
 				Some(id) => {
 					// Try to extract i64 from Value
-					if let Value::Number(surrealdb_types::Number::Int(id_num)) = id {
-						match state.pending_requests.remove(&id_num) {
+					if let Value::Number(Number::Int(id_num)) = id {
+						// Find the pending request by session ID
+						let pending_opt =
+							if let Some(session_state) = state.sessions.get_mut(&session_id) {
+								session_state.pending_requests.remove(&id_num)
+							} else {
+								None
+							};
+						match pending_opt {
 							Some(mut pending) => {
 								// We can only route responses with IDs
 								match response.result {
@@ -310,12 +368,18 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 												key,
 												value,
 											} => {
-												state.vars.insert(key, value);
+												// Update session-specific vars
+												let session_state =
+													state.sessions.entry(session_id).or_default();
+												session_state.vars.insert(key, value);
 											}
 											RequestEffect::Clear {
 												key,
 											} => {
-												state.vars.shift_remove(&key);
+												// Update session-specific vars
+												let session_state =
+													state.sessions.entry(session_id).or_default();
+												session_state.vars.shift_remove(&key);
 											}
 											RequestEffect::Authenticate {
 												..
@@ -341,12 +405,18 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 												key,
 												value,
 											} => {
-												state.vars.insert(key, value);
+												// Update session-specific vars
+												let session_state =
+													state.sessions.entry(session_id).or_default();
+												session_state.vars.insert(key, value);
 											}
 											RequestEffect::Clear {
 												key,
 											} => {
-												state.vars.shift_remove(&key);
+												// Update session-specific vars
+												let session_state =
+													state.sessions.entry(session_id).or_default();
+												session_state.vars.shift_remove(&key);
 											}
 											RequestEffect::Authenticate {
 												token,
@@ -393,6 +463,7 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 															vec![token.into_value()],
 														))),
 														txn: None,
+														session_id: Some(session_id),
 													};
 													let request_value = request.into_value();
 													let value =
@@ -426,9 +497,15 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 																RequestEffect::Authenticate {
 																	token: None,
 																};
-															state
-																.pending_requests
-																.insert(id_num, pending);
+															// Re-insert into the session's pending
+															// requests
+															if let Some(session_state) =
+																state.sessions.get_mut(&session_id)
+															{
+																session_state
+																	.pending_requests
+																	.insert(id_num, pending);
+															}
 														}
 													}
 													return HandleResult::Ok;
@@ -454,17 +531,19 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 				None => {
 					if let Ok(DbResult::Live(notification)) = response.result {
 						let live_query_id = notification.id.0;
-						// Check if this live query is registered
-						if let Some(sender) = state.live_queries.get(&live_query_id) {
+						let Some(session_state) = state.sessions.get_mut(&session_id) else {
+							return HandleResult::Ok;
+						};
+						if let Some(sender) = session_state.live_queries.get(&live_query_id) {
 							// Send the notification back to the caller or kill live query
 							// if the receiver is already dropped
 							if sender.send(Ok(notification)).await.is_err() {
-								state.live_queries.remove(&live_query_id);
+								session_state.live_queries.remove(&live_query_id);
 								let kill = {
 									let request = Command::Kill {
 										uuid: live_query_id,
 									}
-									.into_router_request(None)
+									.into_router_request(None, Some(session_id))
 									.expect("KILL command should convert to router request");
 
 									let request_value = request.into_value();
@@ -489,6 +568,8 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 			#[derive(Deserialize, SurrealValue)]
 			struct ErrorResponse {
 				id: Option<Value>,
+				#[surreal(rename = "session")]
+				session_id: Option<Uuid>,
 			}
 
 			// Let's try to find out the ID of the response that failed to deserialise
@@ -496,10 +577,18 @@ async fn router_handle_response(message: Message, state: &mut RouterState) -> Ha
 				match surrealdb_core::rpc::format::flatbuffers::decode(&binary) {
 					Ok(ErrorResponse {
 						id,
+						session_id,
 					}) => {
 						// Return an error if an ID was returned
-						if let Some(Value::Number(surrealdb_types::Number::Int(id_num))) = id {
-							match state.pending_requests.remove(&id_num) {
+						if let Some(Value::Number(Number::Int(id_num))) = id {
+							let pending_opt = if let Some(session_id) = session_id
+								&& let Some(session_state) = state.sessions.get_mut(&session_id)
+							{
+								session_state.pending_requests.remove(&id_num)
+							} else {
+								None
+							};
+							match pending_opt {
 								Some(pending) => {
 									let _res =
 										pending.response_channel.send(Err(error.into())).await;
@@ -549,6 +638,50 @@ fn db_response_from_message(message: &Message) -> Result<Option<DbResponse>> {
 	}
 }
 
+async fn replay_session(
+	session_id: Uuid,
+	state: &mut SessionState,
+	sink: &mut SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>,
+) {
+	// Replay commands (USE, SIGNIN, etc.) for this session
+	for commands in state.replay.values() {
+		let request = commands
+			.clone()
+			.into_router_request(None, Some(session_id))
+			.expect("replay commands should always convert to route requests");
+
+		let request_value = request.into_value();
+
+		let message = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
+			.expect("router request should serialize");
+
+		if let Err(error) = sink.send(Message::Binary(message.into())).await {
+			trace!("{error}");
+			time::sleep(time::Duration::from_secs(1)).await;
+			continue;
+		}
+	}
+	// Replay vars (SET commands) for this session
+	for (key, value) in &state.vars {
+		let request = Command::Set {
+			key: key.as_str().into(),
+			value: value.clone(),
+		}
+		.into_router_request(None, Some(session_id))
+		.expect("SET command should convert to router request");
+		trace!("Request {:?}", request);
+		let request_value = request.into_value();
+		let payload = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
+			.expect("router request should serialize");
+
+		if let Err(error) = sink.send(Message::Binary(payload.into())).await {
+			trace!("{error}");
+			time::sleep(time::Duration::from_secs(1)).await;
+			continue;
+		}
+	}
+}
+
 async fn router_reconnect(
 	maybe_connector: &Option<Connector>,
 	config: &WebSocketConfig,
@@ -562,40 +695,9 @@ async fn router_reconnect(
 				let (new_sink, new_stream) = s.split();
 				state.sink = new_sink;
 				state.stream = new_stream;
-				for commands in state.replay.values() {
-					let request = commands
-						.clone()
-						.into_router_request(None)
-						.expect("replay commands should always convert to route requests");
-
-					let request_value = request.into_value();
-
-					let message = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
-						.expect("router request should serialize");
-
-					if let Err(error) = state.sink.send(Message::Binary(message.into())).await {
-						trace!("{error}");
-						time::sleep(time::Duration::from_secs(1)).await;
-						continue;
-					}
-				}
-				for (key, value) in &state.vars {
-					let request = Command::Set {
-						key: key.as_str().into(),
-						value: value.clone(),
-					}
-					.into_router_request(None)
-					.expect("SET command should convert to router request");
-					trace!("Request {:?}", request);
-					let request_value = request.into_value();
-					let payload = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
-						.expect("router request should serialize");
-
-					if let Err(error) = state.sink.send(Message::Binary(payload.into())).await {
-						trace!("{error}");
-						time::sleep(time::Duration::from_secs(1)).await;
-						continue;
-					}
+				// Replay state for ALL sessions
+				for (session_id, session_state) in &mut state.sessions {
+					replay_session(*session_id, session_state, &mut state.sink).await;
 				}
 				trace!("Reconnected successfully");
 				break;
@@ -615,10 +717,11 @@ pub(crate) async fn run_router(
 	config: WebSocketConfig,
 	socket: WebSocketStream<MaybeTlsStream<TcpStream>>,
 	route_rx: Receiver<Route>,
+	session_rx: Receiver<SessionId>,
 ) {
 	let ping = {
 		let request = Command::Health
-			.into_router_request(None)
+			.into_router_request(None, None)
 			.expect("HEALTH command should convert to router request");
 		let request_value = request.into_value();
 		let value = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
@@ -644,107 +747,150 @@ pub(crate) async fn run_router(
 
 		loop {
 			tokio::select! {
-				route = route_rx.recv() => {
-					// handle incoming route
+					biased;
 
-					let Ok(response) = route else {
-						// route returned Err, frontend dropped the channel, meaning the router
-						// should quit.
-						match state.sink.send(Message::Close(None)).await {
-							Ok(..) => trace!("Connection closed successfully"),
-							Err(error) => {
-								warn!("Failed to close database connection; {error}")
-							}
-						}
-						break 'router;
-					};
-
-					match router_handle_route(response, config.max_message_size, &mut state).await {
-						HandleResult::Ok => {},
-						HandleResult::Disconnected => {
-							router_reconnect(
-								&maybe_connector,
-								&config,
-								&mut state,
-								&endpoint,
-							)
-							.await;
-							continue 'router;
-						}
-					}
-				}
-				result = state.stream.next() => {
-					// Handle result from database.
-
-					let Some(result) = result else {
-						// stream returned none meaning the connection dropped, try to reconnect.
-						router_reconnect(
-							&maybe_connector,
-							&config,
-							&mut state,
-							&endpoint,
-						)
-						.await;
-						continue 'router;
-					};
-
-					state.last_activity = Instant::now();
-					match result {
-						Ok(message) => {
-							match router_handle_response(message, &mut state).await {
-								HandleResult::Ok => continue,
-								HandleResult::Disconnected => {
-									router_reconnect(
-										&maybe_connector,
-										&config,
-										&mut state,
-										&endpoint,
-									)
-									.await;
-									continue 'router;
+					session = session_rx.recv() => {
+						let Ok(session_id) = session else {
+							break 'router
+						};
+						match session_id {
+							SessionId::Initial(session_id) => {
+								state.sessions.entry(session_id).or_default();
+								// Clone from default session
+								attach_session_request(session_id, &mut state.sink).await;
+								if let Some(session_state) = state.sessions.get_mut(&session_id) {
+									session_state.replay.insert(ReplayMethod::Attach, Command::Attach {
+										session_id,
+									});
 								}
 							}
-						}
-						Err(error) => {
-							state.reset().await;
-							match error {
-								WsError::ConnectionClosed => {
-									trace!("Connection successfully closed on the server");
-								}
-								error => {
-									trace!("{error}");
-								}
+						SessionId::Clone { old, new } => {
+							// Clone the local session state
+							let old_state = state.sessions.get(&old).cloned().unwrap_or_default();
+							state.sessions.insert(new, old_state);
+							// Replay the session state
+							if let Some(session_state) = state.sessions.get_mut(&new) {
+								session_state.replay.insert(ReplayMethod::Attach, Command::Attach {
+									session_id: new,
+								});
+								replay_session(new, session_state, &mut state.sink).await;
 							}
-							router_reconnect(
-								&maybe_connector,
-								&config,
-								&mut state,
-								&endpoint,
-							)
-							.await;
-							continue 'router;
 						}
+				SessionId::Drop(session_id) => {
+					// Detach from the session before removing it
+					if let Some(session_state) = state.sessions.get_mut(&session_id) {
+						session_state.replay.clear();
+						session_state.replay.insert(ReplayMethod::Detach, Command::Detach {
+							session_id,
+						});
+						replay_session(session_id, session_state, &mut state.sink).await;
 					}
-				}
-				_ = pinger.next() => {
-					// only ping if we haven't talked to the server recently
-					if state.last_activity.elapsed() >= PING_INTERVAL {
-						trace!("Pinging the server");
-						if let Err(error) = state.sink.send(ping.clone()).await {
-							trace!("failed to ping the server; {error:?}");
-							router_reconnect(
-								&maybe_connector,
-								&config,
-								&mut state,
-								&endpoint,
-							)
-							.await;
-							continue 'router;
-						}
-					}
-
+					// Remove the session from local state
+					state.sessions.remove(&session_id);
 				}
 			}
+			}
+					route = route_rx.recv() => {
+						// handle incoming route
+
+						let Ok(response) = route else {
+							// route returned Err, frontend dropped the channel, meaning the router
+							// should quit.
+							match state.sink.send(Message::Close(None)).await {
+								Ok(..) => trace!("Connection closed successfully"),
+								Err(error) => {
+									warn!("Failed to close database connection; {error}")
+								}
+							}
+							break 'router;
+						};
+
+						match router_handle_route(response, config.max_message_size, &mut state).await {
+							HandleResult::Ok => {},
+							HandleResult::Disconnected => {
+								router_reconnect(
+									&maybe_connector,
+									&config,
+									&mut state,
+									&endpoint,
+								)
+								.await;
+								continue 'router;
+							}
+						}
+					}
+					result = state.stream.next() => {
+						// Handle result from database.
+
+						let Some(result) = result else {
+							// stream returned none meaning the connection dropped, try to reconnect.
+							router_reconnect(
+								&maybe_connector,
+								&config,
+								&mut state,
+								&endpoint,
+							)
+							.await;
+							continue 'router;
+						};
+
+						state.last_activity = Instant::now();
+						match result {
+							Ok(message) => {
+								match router_handle_response(message, &mut state).await {
+									HandleResult::Ok => continue,
+									HandleResult::Disconnected => {
+										router_reconnect(
+											&maybe_connector,
+											&config,
+											&mut state,
+											&endpoint,
+										)
+										.await;
+										continue 'router;
+									}
+								}
+							}
+							Err(error) => {
+								state.reset().await;
+								match error {
+									WsError::ConnectionClosed => {
+										trace!("Connection successfully closed on the server");
+									}
+									error => {
+										trace!("{error}");
+									}
+								}
+								router_reconnect(
+									&maybe_connector,
+									&config,
+									&mut state,
+									&endpoint,
+								)
+								.await;
+								continue 'router;
+							}
+						}
+					}
+					_ = pinger.next() => {
+						// only ping if we haven't talked to the server recently
+						if state.last_activity.elapsed() >= PING_INTERVAL {
+							trace!("Pinging the server");
+							if let Err(error) = state.sink.send(ping.clone()).await {
+								trace!("failed to ping the server; {error:?}");
+								router_reconnect(
+									&maybe_connector,
+									&config,
+									&mut state,
+									&endpoint,
+								)
+								.await;
+								continue 'router;
+							}
+						}
+
+					}
+				}
 		}
 	}
 }

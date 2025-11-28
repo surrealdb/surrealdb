@@ -14,13 +14,14 @@ use async_channel::Sender;
 use indexmap::IndexMap;
 use surrealdb_core::dbs::QueryResult;
 use surrealdb_core::iam::token::Token;
+use surrealdb_core::rpc::DbResultError;
 use surrealdb_types::{Notification, Value};
 use trice::Instant;
 use uuid::Uuid;
 
 use crate::conn::Command;
 use crate::opt::IntoEndpoint;
-use crate::{Connect, Result, Surreal};
+use crate::{Connect, Surreal};
 
 pub(crate) const PATH: &str = "rpc";
 const PING_INTERVAL: Duration = Duration::from_secs(5);
@@ -48,6 +49,8 @@ enum RequestEffect {
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash)]
 enum ReplayMethod {
+	Attach,
+	Detach,
 	Use,
 	Signup,
 	Signin,
@@ -59,34 +62,51 @@ struct PendingRequest {
 	// Does resolving this request has some effects.
 	effect: RequestEffect,
 	// The channel to send the result of the request into.
-	response_channel:
-		Sender<std::result::Result<Vec<QueryResult>, surrealdb_core::rpc::DbResultError>>,
+	response_channel: Sender<Result<Vec<QueryResult>, DbResultError>>,
+}
+
+/// Per-session state for WebSocket connections
+#[derive(Default)]
+struct SessionState {
+	/// Vars currently set by the set method for this session
+	vars: IndexMap<String, Value>,
+	/// Messages which ought to be replayed on a reconnect for this session
+	replay: IndexMap<ReplayMethod, Command>,
+	/// Pending live queries
+	live_queries: HashMap<Uuid, Sender<crate::Result<Notification>>>,
+	/// Send requests which are still awaiting an awnser.
+	pending_requests: HashMap<i64, PendingRequest>,
+	/// The last ID used for a request
+	last_id: i64,
+}
+
+impl Clone for SessionState {
+	fn clone(&self) -> Self {
+		Self {
+			vars: self.vars.clone(),
+			replay: self.replay.clone(),
+			live_queries: HashMap::new(),
+			pending_requests: HashMap::new(),
+			last_id: 0,
+		}
+	}
 }
 
 struct RouterState<Sink, Stream> {
-	/// Vars currently set by the set method,
-	vars: IndexMap<String, Value>,
-	/// Messages which aught to be replayed on a reconnect.
-	replay: IndexMap<ReplayMethod, Command>,
-	/// Pending live queries
-	live_queries: HashMap<Uuid, Sender<Result<Notification>>>,
-	/// Send requests which are still awaiting an awnser.
-	pending_requests: HashMap<i64, PendingRequest>,
-	/// The last time a message was recieved from the server.
+	/// Per-session state (vars and replay commands)
+	sessions: HashMap<Uuid, SessionState>,
+	/// The last time a message was received from the server.
 	last_activity: Instant,
 	/// The sink into which messages are send to surrealdb
 	sink: Sink,
-	/// The stream from which messages are recieved from surrealdb
+	/// The stream from which messages are received from surrealdb
 	stream: Stream,
 }
 
 impl<Sink, Stream> RouterState<Sink, Stream> {
 	pub fn new(sink: Sink, stream: Stream) -> Self {
 		RouterState {
-			vars: IndexMap::new(),
-			replay: IndexMap::new(),
-			live_queries: HashMap::new(),
-			pending_requests: HashMap::new(),
+			sessions: HashMap::new(),
 			last_activity: Instant::now(),
 			sink,
 			stream,
@@ -94,20 +114,24 @@ impl<Sink, Stream> RouterState<Sink, Stream> {
 	}
 
 	async fn clear_pending_requests(&mut self) {
-		for (_id, request) in self.pending_requests.drain() {
-			let error = io::Error::from(io::ErrorKind::ConnectionReset);
-			let sender = request.response_channel;
-			let err: crate::err::Error = error.into();
-			sender.send(Err(err.into())).await.ok();
-			sender.close();
+		for (_, state) in &mut self.sessions {
+			for (_id, request) in state.pending_requests.drain() {
+				let error = io::Error::from(io::ErrorKind::ConnectionReset);
+				let sender = request.response_channel;
+				let err: crate::err::Error = error.into();
+				sender.send(Err(err.into())).await.ok();
+				sender.close();
+			}
 		}
 	}
 
 	async fn clear_live_queries(&mut self) {
-		for (_id, sender) in self.live_queries.drain() {
-			let error = io::Error::from(io::ErrorKind::ConnectionReset);
-			sender.send(Err(error.into())).await.ok();
-			sender.close();
+		for (_, state) in &mut self.sessions {
+			for (_id, sender) in state.live_queries.drain() {
+				let error = io::Error::from(io::ErrorKind::ConnectionReset);
+				sender.send(Err(error.into())).await.ok();
+				sender.close();
+			}
 		}
 	}
 

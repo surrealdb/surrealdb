@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::sync::atomic::AtomicI64;
 
 // Removed anyhow::bail - using return Err() instead
 #[cfg(feature = "protocol-http")]
@@ -25,16 +24,21 @@ use crate::method::BoxFuture;
 #[cfg(feature = "protocol-http")]
 use crate::opt::Tls;
 use crate::opt::{Endpoint, EndpointKind, WaitFor};
-use crate::{Result, Surreal, conn};
+use crate::{Result, SessionClone, Surreal, conn};
 impl crate::Connection for Any {}
 impl conn::Sealed for Any {
 	#[allow(
 		unused_variables,
+		private_interfaces,
 		unreachable_code,
 		unused_mut,
 		reason = "These are all used depending on the enabled features."
 	)]
-	fn connect(address: Endpoint, capacity: usize) -> BoxFuture<'static, Result<Surreal<Self>>> {
+	fn connect(
+		address: Endpoint,
+		capacity: usize,
+		session_clone: Option<crate::SessionClone>,
+	) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			let (route_tx, route_rx) = match capacity {
 				0 => async_channel::unbounded(),
@@ -43,6 +47,7 @@ impl conn::Sealed for Any {
 
 			let (conn_tx, conn_rx) = async_channel::bounded::<Result<()>>(1);
 			let config = address.config.clone();
+			let session_clone = session_clone.unwrap_or_else(SessionClone::new);
 			let mut features = HashSet::new();
 
 			match EndpointKind::from(address.url.scheme()) {
@@ -51,7 +56,12 @@ impl conn::Sealed for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						tokio::spawn(engine::local::native::run_router(address, conn_tx, route_rx));
+						tokio::spawn(engine::local::native::run_router(
+							address,
+							conn_tx,
+							route_rx,
+							session_clone.receiver.clone(),
+						));
 						conn_rx.recv().await??
 					}
 
@@ -64,7 +74,12 @@ impl conn::Sealed for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						tokio::spawn(engine::local::native::run_router(address, conn_tx, route_rx));
+						tokio::spawn(engine::local::native::run_router(
+							address,
+							conn_tx,
+							route_rx,
+							session_clone.receiver.clone(),
+						));
 						conn_rx.recv().await??
 					}
 
@@ -79,7 +94,12 @@ impl conn::Sealed for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						tokio::spawn(engine::local::native::run_router(address, conn_tx, route_rx));
+						tokio::spawn(engine::local::native::run_router(
+							address,
+							conn_tx,
+							route_rx,
+							session_clone.receiver.clone(),
+						));
 						conn_rx.recv().await??
 					}
 
@@ -94,7 +114,12 @@ impl conn::Sealed for Any {
 					{
 						features.insert(ExtraFeatures::Backup);
 						features.insert(ExtraFeatures::LiveQueries);
-						tokio::spawn(engine::local::native::run_router(address, conn_tx, route_rx));
+						tokio::spawn(engine::local::native::run_router(
+							address,
+							conn_tx,
+							route_rx,
+							session_clone.receiver.clone(),
+						));
 						conn_rx.recv().await??
 					}
 
@@ -130,7 +155,12 @@ impl conn::Sealed for Any {
 							&*surrealdb_core::cnf::SURREALDB_USER_AGENT,
 						);
 						http::health(req).await?;
-						tokio::spawn(http::native::run_router(base_url, client, route_rx));
+						tokio::spawn(http::native::run_router(
+							base_url,
+							client,
+							route_rx,
+							session_clone.receiver.clone(),
+						));
 					}
 
 					#[cfg(not(feature = "protocol-http"))]
@@ -176,6 +206,7 @@ impl conn::Sealed for Any {
 							config,
 							socket,
 							route_rx,
+							session_clone.receiver.clone(),
 						));
 					}
 
@@ -192,10 +223,9 @@ impl conn::Sealed for Any {
 				features,
 				config,
 				sender: route_tx,
-				last_id: AtomicI64::new(0),
 			};
 
-			Ok((router, waiter).into())
+			Ok((router, waiter, session_clone).into())
 		})
 	}
 }

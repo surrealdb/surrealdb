@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 use std::collections::hash_map::Entry;
-use std::sync::atomic::AtomicI64;
 use std::time::Duration;
 
 use async_channel::{Receiver, Sender};
@@ -26,7 +25,7 @@ use crate::engine::remote::ws::{Client, PING_INTERVAL};
 use crate::err::Error;
 use crate::method::BoxFuture;
 use crate::opt::{Endpoint, WaitFor};
-use crate::{ExtraFeatures, Result, Surreal};
+use crate::{ExtraFeatures, Result, SessionId, Surreal};
 
 type MessageStream = SplitStream<WsStream>;
 type MessageSink = SplitSink<WsStream, Message>;
@@ -34,9 +33,11 @@ type RouterState = super::RouterState<MessageSink, MessageStream>;
 
 impl crate::Connection for Client {}
 impl conn::Sealed for Client {
+	#[allow(private_interfaces)]
 	fn connect(
 		mut address: Endpoint,
 		capacity: usize,
+		session_clone: Option<crate::SessionClone>,
 	) -> BoxFuture<'static, Result<Surreal<Self>>> {
 		Box::pin(async move {
 			address.url = address.url.join(PATH)?;
@@ -48,8 +49,15 @@ impl conn::Sealed for Client {
 
 			let (conn_tx, conn_rx) = async_channel::bounded(1);
 			let config = address.config.clone();
+			let session_clone = session_clone.unwrap_or_else(crate::SessionClone::new);
 
-			spawn_local(run_router(address, capacity, conn_tx, route_rx));
+			spawn_local(run_router(
+				address,
+				capacity,
+				conn_tx,
+				route_rx,
+				session_clone.receiver.clone(),
+			));
 
 			conn_rx.recv().await??;
 
@@ -61,11 +69,32 @@ impl conn::Sealed for Client {
 				features,
 				config,
 				sender: route_tx,
-				last_id: AtomicI64::new(0),
 			};
 
-			Ok((router, waiter).into())
+			Ok((router, waiter, session_clone).into())
 		})
+	}
+}
+
+/// Send an attach RPC request to the server
+async fn attach_session_request(session_id: uuid::Uuid, sink: &mut MessageSink) {
+	use surrealdb_types::{Array, SurrealValue, Uuid as SurrealUuid};
+
+	let request = crate::conn::cmd::RouterRequest {
+		id: None, // Fire and forget - we don't wait for response
+		method: "attach",
+		params: None,
+		txn: None,
+		session_id: Some(session_id),
+	};
+
+	let request_value = request.into_value();
+	let payload = surrealdb_core::rpc::format::flatbuffers::encode(&request_value)
+		.expect("router request should serialize");
+	let message = Message::Binary(payload);
+
+	if let Err(error) = sink.send(message).await {
+		warn!("Failed to send clone_session request to server: {error}");
 	}
 }
 
@@ -79,9 +108,18 @@ async fn router_handle_request(
 	let RequestData {
 		id,
 		command,
+		session_id,
 	} = request;
 
-	let entry = state.pending_requests.entry(id);
+	let Some(session_state) = state.sessions.get_mut(&session_id) else {
+		let error = Error::InternalError(format!("Session not found: {session_id:?}"));
+		if response.send(Err(error.into())).await.is_err() {
+			trace!("Receiver dropped");
+		}
+		return HandleResult::Ok;
+	};
+
+	let entry = session_state.pending_requests.entry(id);
 	// We probably shouldn't be sending duplicate id requests.
 	let Entry::Vacant(entry) = entry else {
 		let error = Error::DuplicateRequestId(id);
@@ -98,8 +136,13 @@ async fn router_handle_request(
 			query,
 			variables,
 		} => {
-			let mut merged_vars =
-				state.vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect::<Variables>();
+			// Get session-specific vars
+			let session_state = state.sessions.entry(session_id).or_default();
+			let mut merged_vars = session_state
+				.vars
+				.iter()
+				.map(|(k, v)| (k.clone(), v.clone()))
+				.collect::<Variables>();
 			merged_vars.extend(variables);
 			Command::Query {
 				txn,
@@ -133,7 +176,7 @@ async fn router_handle_request(
 			ref uuid,
 			ref notification_sender,
 		} => {
-			state.live_queries.insert(*uuid, notification_sender.clone());
+			session_state.live_queries.insert(*uuid, notification_sender.clone());
 			if response.send(Ok(vec![QueryResultBuilder::instant_none()])).await.is_err() {
 				trace!("Receiver dropped");
 			}
@@ -143,27 +186,35 @@ async fn router_handle_request(
 		Command::Kill {
 			ref uuid,
 		} => {
-			state.live_queries.remove(uuid);
+			session_state.live_queries.remove(uuid);
 		}
 		Command::Use {
 			..
 		} => {
-			state.replay.insert(ReplayMethod::Use, command.clone());
+			// Store in session-specific replay
+			let session_state = state.sessions.entry(session_id).or_default();
+			session_state.replay.insert(ReplayMethod::Use, command.clone());
 		}
 		Command::Signup {
 			..
 		} => {
-			state.replay.insert(ReplayMethod::Signup, command.clone());
+			// Store in session-specific replay
+			let session_state = state.sessions.entry(session_id).or_default();
+			session_state.replay.insert(ReplayMethod::Signup, command.clone());
 		}
 		Command::Signin {
 			..
 		} => {
-			state.replay.insert(ReplayMethod::Signin, command.clone());
+			// Store in session-specific replay
+			let session_state = state.sessions.entry(session_id).or_default();
+			session_state.replay.insert(ReplayMethod::Signin, command.clone());
 		}
 		Command::Invalidate {
 			..
 		} => {
-			state.replay.insert(ReplayMethod::Invalidate, command.clone());
+			// Store in session-specific replay
+			let session_state = state.sessions.entry(session_id).or_default();
+			session_state.replay.insert(ReplayMethod::Invalidate, command.clone());
 		}
 		Command::Authenticate {
 			ref token,
@@ -171,13 +222,15 @@ async fn router_handle_request(
 			effect = RequestEffect::Authenticate {
 				token: Some(token.clone()),
 			};
-			state.replay.insert(ReplayMethod::Authenticate, command.clone());
+			// Store in session-specific replay
+			let session_state = state.sessions.entry(session_id).or_default();
+			session_state.replay.insert(ReplayMethod::Authenticate, command.clone());
 		}
 		_ => {}
 	}
 
 	let message = {
-		let Some(req) = command.into_router_request(Some(id)) else {
+		let Some(req) = command.into_router_request(Some(id), Some(session_id)) else {
 			let _ = response.send(Err(Error::BackupsNotSupported.into())).await;
 			return HandleResult::Ok;
 		};
@@ -193,6 +246,7 @@ async fn router_handle_request(
 			entry.insert(PendingRequest {
 				effect,
 				response_channel: response,
+				session_id,
 			});
 		}
 		Err(error) => {
@@ -220,8 +274,16 @@ async fn router_handle_response(
 					// If `id` is set this is a normal response
 					Some(id) => {
 						if let Ok(id) = id.into_int() {
+							// Find the pending request by searching through all sessions
+							let mut pending_opt = None;
+							for (_, session_state) in &mut state.sessions {
+								if let Some(pending) = session_state.pending_requests.remove(&id) {
+									pending_opt = Some(pending);
+									break;
+								}
+							}
 							// We can only route responses with IDs
-							if let Some(mut pending) = state.pending_requests.remove(&id) {
+							if let Some(mut pending) = pending_opt {
 								match response.result {
 									Ok(DbResult::Query(results)) => {
 										// Apply effect only on success
@@ -231,12 +293,22 @@ async fn router_handle_response(
 												key,
 												value,
 											} => {
-												state.vars.insert(key, value);
+												// Update session-specific vars
+												let session_state = state
+													.sessions
+													.entry(pending.session_id)
+													.or_default();
+												session_state.vars.insert(key, value);
 											}
 											RequestEffect::Clear {
 												key,
 											} => {
-												state.vars.shift_remove(&key);
+												// Update session-specific vars
+												let session_state = state
+													.sessions
+													.entry(pending.session_id)
+													.or_default();
+												session_state.vars.shift_remove(&key);
 											}
 											_ => {}
 										}
@@ -254,12 +326,22 @@ async fn router_handle_response(
 												key,
 												value,
 											} => {
-												state.vars.insert(key, value);
+												// Update session-specific vars
+												let session_state = state
+													.sessions
+													.entry(pending.session_id)
+													.or_default();
+												session_state.vars.insert(key, value);
 											}
 											RequestEffect::Clear {
 												key,
 											} => {
-												state.vars.shift_remove(&key);
+												// Update session-specific vars
+												let session_state = state
+													.sessions
+													.entry(pending.session_id)
+													.or_default();
+												session_state.vars.shift_remove(&key);
 											}
 											RequestEffect::Authenticate {
 												..
@@ -298,6 +380,7 @@ async fn router_handle_response(
 															vec![token.into_value()],
 														))),
 														txn: None,
+														session_id: pending.session_id,
 													};
 													let request_value = request.into_value();
 													let value =
@@ -331,9 +414,16 @@ async fn router_handle_response(
 																RequestEffect::Authenticate {
 																	token: None,
 																};
-															state
-																.pending_requests
-																.insert(id, pending);
+															// Re-insert into the session's pending
+															// requests
+															if let Some(session_state) = state
+																.sessions
+																.get_mut(&pending.session_id)
+															{
+																session_state
+																	.pending_requests
+																	.insert(id, pending);
+															}
 														}
 													}
 
@@ -358,31 +448,42 @@ async fn router_handle_response(
 					None => match response.result {
 						Ok(DbResult::Live(notification)) => {
 							let live_query_id = notification.id;
-							// Check if this live query is registered
-							if let Some(sender) = state.live_queries.get(&live_query_id) {
-								// Send the notification back to the caller or kill live query if
-								// the receiver is already dropped
-								if sender.send(Ok(notification)).await.is_err() {
-									state.live_queries.remove(&live_query_id);
-									let kill = {
-										let request = Command::Kill {
-											uuid: live_query_id.0,
-										}
-										.into_router_request(None)
-										.into_value();
+							// Find which session has this live query registered
+							let mut found_session = None;
+							for (session_id, session_state) in &state.sessions {
+								if session_state.live_queries.contains_key(&live_query_id) {
+									found_session = Some(*session_id);
+									break;
+								}
+							}
+							if let Some(session_id) = found_session {
+								let session_state = state.sessions.get_mut(&session_id).unwrap();
+								if let Some(sender) = session_state.live_queries.get(&live_query_id)
+								{
+									// Send the notification back to the caller or kill live query
+									// if the receiver is already dropped
+									if sender.send(Ok(notification)).await.is_err() {
+										session_state.live_queries.remove(&live_query_id);
+										let kill = {
+											let request = Command::Kill {
+												uuid: live_query_id.0,
+											}
+											.into_router_request(None, Some(session_id))
+											.into_value();
 
-										let value =
-											surrealdb_core::rpc::format::flatbuffers::encode(
-												&request,
-											)
-											.unwrap();
-										Message::Binary(value)
-									};
-									if let Err(error) = state.sink.send(kill).await {
-										trace!(
-											"failed to send kill query to the server; {error:?}"
-										);
-										return HandleResult::Disconnected;
+											let value =
+												surrealdb_core::rpc::format::flatbuffers::encode(
+													&request,
+												)
+												.unwrap();
+											Message::Binary(value)
+										};
+										if let Err(error) = state.sink.send(kill).await {
+											trace!(
+												"failed to send kill query to the server; {error:?}"
+											);
+											return HandleResult::Disconnected;
+										}
 									}
 								}
 							}
@@ -407,7 +508,15 @@ async fn router_handle_response(
 				{
 					// Return an error if an ID was returned
 					if let Some(Ok(id)) = id.map(Value::into_int) {
-						if let Some(req) = state.pending_requests.remove(&id) {
+						// Find the pending request by searching through all sessions
+						let mut pending_opt = None;
+						for (_, session_state) in &mut state.sessions {
+							if let Some(pending) = session_state.pending_requests.remove(&id) {
+								pending_opt = Some(pending);
+								break;
+							}
+						}
+						if let Some(req) = pending_opt {
 							let _res = req.response_channel.send(Err(error.into())).await;
 						} else {
 							warn!(
@@ -453,33 +562,41 @@ async fn router_reconnect(
 						}
 					}
 				};
-				for (_, message) in &state.replay {
-					let message = message.clone().into_router_request(None).into_value();
+				// Replay state for ALL sessions
+				for (session_id, session_state) in &state.sessions {
+					// Replay commands (USE, SIGNIN, etc.) for this session
+					for (_, message) in &session_state.replay {
+						let message = message
+							.clone()
+							.into_router_request(None, Some(*session_id))
+							.into_value();
 
-					let message =
-						surrealdb_core::rpc::format::flatbuffers::encode(&message).unwrap();
+						let message =
+							surrealdb_core::rpc::format::flatbuffers::encode(&message).unwrap();
 
-					if let Err(error) = state.sink.send(Message::Binary(message)).await {
-						trace!("{error}");
-						time::sleep(Duration::from_secs(1)).await;
-						continue;
+						if let Err(error) = state.sink.send(Message::Binary(message)).await {
+							trace!("{error}");
+							time::sleep(Duration::from_secs(1)).await;
+							continue;
+						}
 					}
-				}
-				for (key, value) in &state.vars {
-					let request = Command::Set {
-						key: key.as_str().into(),
-						value: value.clone(),
-					}
-					.into_router_request(None)
-					.into_value();
+					// Replay vars (SET commands) for this session
+					for (key, value) in &session_state.vars {
+						let request = Command::Set {
+							key: key.as_str().into(),
+							value: value.clone(),
+						}
+						.into_router_request(None, Some(*session_id))
+						.into_value();
 
-					trace!("Request {:?}", request);
-					let serialize =
-						surrealdb_core::rpc::format::flatbuffers::encode(&request).unwrap();
-					if let Err(error) = state.sink.send(Message::Binary(serialize)).await {
-						trace!("{error}");
-						time::sleep(Duration::from_secs(1)).await;
-						continue;
+						trace!("Request {:?}", request);
+						let serialize =
+							surrealdb_core::rpc::format::flatbuffers::encode(&request).unwrap();
+						if let Err(error) = state.sink.send(Message::Binary(serialize)).await {
+							trace!("{error}");
+							time::sleep(Duration::from_secs(1)).await;
+							continue;
+						}
 					}
 				}
 				trace!("Reconnected successfully");
@@ -498,6 +615,7 @@ pub(crate) async fn run_router(
 	capacity: usize,
 	conn_tx: Sender<Result<()>>,
 	route_rx: Receiver<Route>,
+	session_rx: Receiver<SessionId>,
 ) {
 	let connect = WsMeta::connect(&endpoint.url, vec!["flatbuffers"]).await;
 	let (mut ws, socket) = match connect {
@@ -536,7 +654,7 @@ pub(crate) async fn run_router(
 
 	let mut state = RouterState::new(socket_sink, socket_stream);
 
-	'router: loop {
+	loop {
 		let mut interval = time::interval(PING_INTERVAL);
 		// don't bombard the server with pings if we miss some ticks
 		interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -548,6 +666,31 @@ pub(crate) async fn run_router(
 
 		loop {
 			futures::select! {
+				session = session_rx.recv().fuse() => {
+					let Ok(session_id) = session else {
+						break
+					};
+					match session_id {
+						SessionId::Initial(session_id) => {
+							state.sessions.entry(Some(session_id)).or_default();
+							// Attach to the session
+							attach_session_request(session_id, &mut state.sink).await;
+						}
+						SessionId::Clone { old, new } => {
+							// Clone the local session state
+							let old_state = state.sessions.get(&Some(old)).cloned().unwrap_or_default();
+							state.sessions.insert(Some(new), old_state);
+							// Attach to the session
+							attach_session_request(new, &mut state.sink).await;
+						}
+						SessionId::Drop(session_id) => {
+							// Remove the session from local state
+							state.sessions.remove(&Some(session_id));
+							// Note: We don't send a drop_session RPC request to the server
+							// The server will clean up the session when it detects inactivity
+						}
+					}
+				}
 				route = route_rx.recv().fuse() => {
 					let Ok(route) = route else {
 						match ws.close().await {
@@ -556,7 +699,7 @@ pub(crate) async fn run_router(
 								warn!("Failed to close database connection; {error}")
 							}
 						}
-						break 'router;
+						break;
 					};
 
 					match router_handle_request(route, &mut state).await {

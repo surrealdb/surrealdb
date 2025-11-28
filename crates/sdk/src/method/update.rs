@@ -65,11 +65,14 @@ macro_rules! into_future {
 				let what = what.for_sql_query(&mut variables)?;
 
 				router
-					.$method(Command::Query {
-						txn,
-						query: Cow::Owned(format!("UPDATE {what}")),
-						variables,
-					})
+					.$method(
+						client.session_id,
+						Command::Query {
+							txn,
+							query: Cow::Owned(format!("UPDATE {what}")),
+							variables,
+						},
+					)
 					.await
 			})
 		}
