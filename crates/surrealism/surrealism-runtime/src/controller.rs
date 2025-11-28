@@ -77,6 +77,7 @@ impl Runtime {
 			config,
 		}: SurrealismPackage,
 	) -> Result<Self> {
+		println!("starting wasm compilation");
 		// Configure engine for fast compilation in debug, optimized runtime in release
 		let mut engine_config = Config::new();
 		// Enable async support for async host functions
@@ -93,14 +94,17 @@ impl Runtime {
 			engine_config.cranelift_opt_level(OptLevel::Speed);
 		}
 		let engine = Engine::new(&engine_config)?;
+		println!("wasm compilation: engine created");
 		let module =
 			Module::new(&engine, wasm).prefix_err(|| "Failed to construct module from bytes")?;
+		println!("wasm compilation: module compiled");
 
 		let mut linker: Linker<StoreData> = Linker::new(&engine);
 		preview1::add_to_linker_async(&mut linker, |data| &mut data.wasi)
 			.prefix_err(|| "failed to add WASI to linker")?;
 		implement_host_functions(&mut linker)
 			.prefix_err(|| "failed to implement host functions")?;
+		println!("wasm compilation: linker created");
 
 		Ok(Self {
 			engine,

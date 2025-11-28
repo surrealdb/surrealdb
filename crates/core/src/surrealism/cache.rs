@@ -1,12 +1,18 @@
+use std::future::Future;
 use std::sync::Arc;
 
+use anyhow::Result;
+use dashmap::DashMap;
 use quick_cache::{Equivalent, Weighter};
 use surrealism_runtime::controller::Runtime;
+use tokio::sync::Mutex;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 
 pub struct SurrealismCache {
 	cache: quick_cache::sync::Cache<SurrealismCacheKey, SurrealismCacheValue, Weight>,
+	// Tracks in-progress plugin compilations to prevent duplicate work
+	loading: DashMap<SurrealismCacheKey, Arc<Mutex<()>>>,
 }
 
 impl SurrealismCache {
@@ -17,6 +23,7 @@ impl SurrealismCache {
 				*crate::cnf::SURREALISM_CACHE_SIZE as u64,
 				Weight,
 			),
+			loading: DashMap::new(),
 		}
 	}
 
@@ -24,21 +31,90 @@ impl SurrealismCache {
 		self.cache.get(lookup)
 	}
 
-	pub fn insert(&self, key: SurrealismCacheKey, value: SurrealismCacheValue) {
-		self.cache.insert(key, value);
-	}
-
 	pub fn remove(&self, lookup: &SurrealismCacheLookup) {
 		self.cache.remove(lookup);
 	}
+
+	/// Get from cache or compute the value if not present.
+	/// Only one task will compute for a given key; others will wait.
+	pub async fn insert_if_not_exists<F, Fut>(
+		&self,
+		lookup: SurrealismCacheLookup<'_>,
+		compute: F,
+	) -> Result<Arc<Runtime>>
+	where
+		F: FnOnce(SurrealismCacheKey) -> Fut,
+		Fut: Future<Output = Result<Arc<Runtime>>>,
+	{
+		// Fast path: already cached
+		if let Some(value) = self.get(&lookup) {
+			return Ok(value.runtime);
+		}
+
+		let cache_key: SurrealismCacheKey = lookup.into();
+		let loading_lock = self.get_loading_lock(&cache_key);
+		let _guard = loading_lock.lock().await;
+
+		// Double-check after acquiring lock
+		// Another task may have completed compilation while we waited
+		if let Some(value) = self.get(&cache_key.as_lookup()) {
+			self.remove_loading_lock(&cache_key);
+			return Ok(value.runtime);
+		}
+
+		// We're the first task, compute the value
+		// Clone the key to pass to compute closure
+		let result = compute(cache_key.clone()).await;
+
+		// Always clean up loading lock
+		self.remove_loading_lock(&cache_key);
+
+		// If successful, cache the result
+		match result {
+			Ok(runtime) => {
+				self.cache.insert(
+					cache_key,
+					SurrealismCacheValue {
+						runtime: runtime.clone(),
+					},
+				);
+				Ok(runtime)
+			}
+			Err(e) => Err(e),
+		}
+	}
+
+	/// Get or create a loading lock for a specific plugin.
+	/// This ensures only one task compiles a given plugin at a time.
+	fn get_loading_lock(&self, key: &SurrealismCacheKey) -> Arc<Mutex<()>> {
+		self.loading.entry(key.clone()).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+	}
+
+	/// Remove a loading lock after compilation completes or fails.
+	fn remove_loading_lock(&self, key: &SurrealismCacheKey) {
+		self.loading.remove(key);
+	}
 }
 
-#[derive(Hash, Eq, PartialEq)]
+#[derive(Clone, Hash, Eq, PartialEq)]
 pub enum SurrealismCacheKey {
 	// NS - DB - BUCKET - KEY
 	File(NamespaceId, DatabaseId, String, String),
 	// Organisation - Package - MAJOR - MINOR - PATCH
 	Silo(String, String, u32, u32, u32),
+}
+
+impl SurrealismCacheKey {
+	pub fn as_lookup(&self) -> SurrealismCacheLookup<'_> {
+		match self {
+			SurrealismCacheKey::File(ns, db, bucket, key) => {
+				SurrealismCacheLookup::File(ns, db, bucket.as_str(), key.as_str())
+			}
+			SurrealismCacheKey::Silo(org, pkg, maj, min, pat) => {
+				SurrealismCacheLookup::Silo(org.as_str(), pkg.as_str(), *maj, *min, *pat)
+			}
+		}
+	}
 }
 
 #[derive(Hash, Eq, PartialEq, Debug)]

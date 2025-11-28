@@ -43,7 +43,7 @@ use crate::kvs::slowlog::SlowLog;
 use crate::mem::ALLOC;
 use crate::sql::expression::convert_public_value_to_internal;
 #[cfg(feature = "surrealism")]
-use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup, SurrealismCacheValue};
+use crate::surrealism::cache::{SurrealismCache, SurrealismCacheKey, SurrealismCacheLookup};
 use crate::types::{PublicNotification, PublicVariables};
 use crate::val::Value;
 
@@ -766,31 +766,29 @@ impl MutableContext {
 			bail!("Surrealism cache is not available");
 		};
 
-		if let Some(value) = cache.get(&lookup) {
-			Ok(value.runtime.clone())
-		} else {
-			let SurrealismCacheLookup::File(ns, db, bucket, key) = lookup else {
-				bail!("silo lookups are not supported yet");
-			};
-			let bucket = self.get_bucket_store(*ns, *db, bucket).await?;
-			let key = ObjectKey::new(key);
-			let surli =
-				bucket.get(&key).await.map_err(|e| anyhow::anyhow!("failed to get file: {}", e))?;
+		cache
+			.insert_if_not_exists(lookup, async |cache_key| {
+				let SurrealismCacheKey::File(ns, db, bucket, key) = &cache_key else {
+					bail!("silo lookups are not supported yet");
+				};
 
-			let Some(surli) = surli else {
-				bail!("file not found");
-			};
+				let bucket = self.get_bucket_store(*ns, *db, bucket).await?;
+				let key = ObjectKey::new(key);
+				let surli = bucket
+					.get(&key)
+					.await
+					.map_err(|e| anyhow::anyhow!("failed to get file: {}", e))?;
 
-			let package = SurrealismPackage::from_reader(std::io::Cursor::new(surli))?;
-			let runtime = Arc::new(Runtime::new(package)?);
-			cache.insert(
-				lookup.into(),
-				SurrealismCacheValue {
-					runtime: runtime.clone(),
-				},
-			);
-			Ok(runtime)
-		}
+				let Some(surli) = surli else {
+					bail!("file not found");
+				};
+
+				let package = SurrealismPackage::from_reader(std::io::Cursor::new(surli))?;
+				let runtime = Arc::new(Runtime::new(package)?);
+
+				Ok(runtime)
+			})
+			.await
 	}
 }
 
