@@ -87,7 +87,7 @@ impl<'js> FromJs<'js> for Value {
 						));
 					};
 
-					return Ok(Value::Bytes(Bytes(data.to_vec())));
+					return Ok(Value::Bytes(Bytes::from(data.to_vec())));
 				}
 
 				// Check to see if this object is a date

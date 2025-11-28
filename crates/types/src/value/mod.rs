@@ -773,7 +773,7 @@ mod tests {
 	#[case::string(Value::String("".to_string()), true)]
 	#[case::string(Value::String("hello".to_string()), false)]
 	#[case::bytes(Value::Bytes(Bytes::default()), true)]
-	#[case::bytes(Value::Bytes(Bytes::new(vec![1, 2, 3])), false)]
+	#[case::bytes(Value::Bytes(Bytes::new(::bytes::Bytes::from(vec![1_u8, 2, 3]))), false)]
 	#[case::object(Value::Object(Object::default()), true)]
 	#[case::object(Value::Object(Object::from_iter([("key".to_string(), Value::String("value".to_string()))])), false)]
 	#[case::array(Value::Array(Array::new()), true)]
@@ -1160,8 +1160,8 @@ mod tests {
 	#[case::geometry(Value::Geometry(Geometry::Point(geo::Point::new(-123.45, 67.89))), "(-123.45f, 67.89f)")]
 	// Bytes
 	#[case::bytes(Value::Bytes(Bytes::default()), "b\"\"")]
-	#[case::bytes(Value::Bytes(Bytes::from(vec![1, 2, 3])), "b\"010203\"")]
-	#[case::bytes(Value::Bytes(Bytes::from(vec![255, 0, 128])), "b\"FF0080\"")]
+	#[case::bytes(Value::Bytes(Bytes::new(::bytes::Bytes::from(vec![1_u8, 2, 3]))), "b\"010203\"")]
+	#[case::bytes(Value::Bytes(Bytes::new(::bytes::Bytes::from(vec![255_u8, 0, 128]))), "b\"FF0080\"")]
 	// Tables
 	#[case::table(Value::Table("test".into()), "test")]
 	#[case::table(Value::Table("escap'd".into()), "`escap'd`")]

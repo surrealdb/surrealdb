@@ -110,7 +110,7 @@ async fn handler(
 							.parse()
 							.map_err(|_| ApiError::Unreachable("Expected a valid format".into()))?,
 					);
-					v.into()
+					v.into_inner().to_vec()
 				}
 				v => {
 					return Err(ApiError::InvalidApiResponse(format!(

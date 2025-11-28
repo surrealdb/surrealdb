@@ -766,12 +766,12 @@ impl_surreal_value!(
 impl_surreal_value!(
 	bytes::Bytes as kind!(bytes),
 	(value) => matches!(value, Value::Bytes(_)),
-	(self) => Value::Bytes(Bytes(self.to_vec())),
+	(self) => Value::Bytes(Bytes(self)),
 	(value) => {
 		let Value::Bytes(Bytes(b)) = value else {
 			return Err(conversion_error(Self::kind_of(), value));
 		};
-		Ok(bytes::Bytes::from(b))
+		Ok(b)
 	}
 );
 
