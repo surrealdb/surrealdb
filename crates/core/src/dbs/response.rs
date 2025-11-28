@@ -35,8 +35,6 @@ pub enum QueryType {
 	Live,
 	// Indicates that the live query should be removed from tracking
 	Kill,
-	// Indicates that this is the result of a use statement
-	Use,
 }
 
 impl fmt::Display for QueryType {
@@ -45,7 +43,6 @@ impl fmt::Display for QueryType {
 			QueryType::Other => "other".fmt(f),
 			QueryType::Live => "live".fmt(f),
 			QueryType::Kill => "kill".fmt(f),
-			QueryType::Use => "use".fmt(f),
 		}
 	}
 }
@@ -56,7 +53,6 @@ impl QueryType {
 		match expr {
 			TopLevelExpr::Live(_) => QueryType::Live,
 			TopLevelExpr::Kill(_) => QueryType::Kill,
-			TopLevelExpr::Use(_) => QueryType::Use,
 			_ => QueryType::Other,
 		}
 	}

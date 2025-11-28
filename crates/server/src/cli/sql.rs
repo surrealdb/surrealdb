@@ -11,7 +11,7 @@ use surrealdb::engine::any::{self, connect};
 use surrealdb::method::WithStats;
 use surrealdb::opt::Config;
 use surrealdb::{IndexedResults, Notification};
-use surrealdb_core::dbs::{Capabilities as CoreCapabilities, QueryType};
+use surrealdb_core::dbs::Capabilities as CoreCapabilities;
 use surrealdb_core::rpc::DbResultStats;
 use surrealdb_types::{SurrealValue, ToSql, Value, object};
 
@@ -209,6 +209,8 @@ pub async fn init(
 					query.add_param(var.clone());
 				}
 
+				query.add_param("session".to_string());
+
 				// Extract the namespace and database from the current prompt
 				let (prompt_ns, _) = split_prompt(&prompt)?;
 				// The namespace should be set before the database can be set
@@ -222,32 +224,18 @@ pub async fn init(
 				let mut use_ns = None;
 				let mut use_db = None;
 				if let Ok(WithStats(res)) = &mut result {
-					for (i, n) in vars.into_iter().enumerate() {
-						if let Result::<Value, _>::Ok(v) = res.take(init_length + i) {
-							let _ = client.set(n, v).await;
+					if let Ok(Value::Object(obj)) = res.take(init_length + vars.len()) {
+						if let Some(Value::String(ns)) = obj.get("ns") {
+							use_ns = Some(ns.clone());
+						}
+						if let Some(Value::String(db)) = obj.get("db") {
+							use_db = Some(db.clone());
 						}
 					}
 
-					// Obtain the last used namespace and database
-					for (_, (stats, result)) in res.results.iter().rev() {
-						if let Some(QueryType::Use) = stats.query_type {
-							let Ok(Value::Object(obj)) = result else {
-								// TODO is it worth erroring here? This is the expected outcome,
-								// though maybe not for old versions
-								break;
-							};
-
-							if let Some(Value::String(ns)) = obj.get("namespace") {
-								use_ns = Some(ns.clone());
-
-								if let Some(Value::String(db)) = obj.get("database") {
-									use_db = Some(db.clone());
-								}
-							}
-
-							// We reversed iteration, so the first `Use` statement we find is
-							// actually the most recent one
-							break;
+					for (i, n) in vars.into_iter().enumerate() {
+						if let Result::<Value, _>::Ok(v) = res.take(init_length + i) {
+							let _ = client.set(n, v).await;
 						}
 					}
 				}

@@ -135,9 +135,6 @@ where
 						indexed_results.live_queries.insert(index, live_stream);
 					}
 					QueryType::Kill => {}
-					QueryType::Use => {
-						indexed_results.results.insert(index, (stats, result.result));
-					}
 				}
 			}
 
