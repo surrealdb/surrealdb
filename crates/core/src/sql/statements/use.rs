@@ -8,7 +8,7 @@ pub enum UseStatement {
 	Ns(Expr),
 	Db(Expr),
 	NsDb(Expr, Expr),
-	Defaults,
+	Default,
 }
 
 impl fmt::Display for UseStatement {
@@ -18,7 +18,7 @@ impl fmt::Display for UseStatement {
 			UseStatement::Ns(ns) => write!(f, " NS {ns}")?,
 			UseStatement::Db(db) => write!(f, " DB {db}")?,
 			UseStatement::NsDb(ns, db) => write!(f, " NS {ns} DB {db}")?,
-			UseStatement::Defaults => write!(f, " DEFAULTS")?,
+			UseStatement::Default => write!(f, " DEFAULT")?,
 		}
 		Ok(())
 	}
@@ -32,7 +32,7 @@ impl From<UseStatement> for crate::expr::statements::UseStatement {
 			UseStatement::NsDb(ns, db) => {
 				crate::expr::statements::UseStatement::NsDb(ns.into(), db.into())
 			}
-			UseStatement::Defaults => crate::expr::statements::UseStatement::Defaults,
+			UseStatement::Default => crate::expr::statements::UseStatement::Default,
 		}
 	}
 }
@@ -45,7 +45,7 @@ impl From<crate::expr::statements::UseStatement> for UseStatement {
 			crate::expr::statements::UseStatement::NsDb(ns, db) => {
 				UseStatement::NsDb(ns.into(), db.into())
 			}
-			crate::expr::statements::UseStatement::Defaults => UseStatement::Defaults,
+			crate::expr::statements::UseStatement::Default => UseStatement::Default,
 		}
 	}
 }

@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 use crate::catalog;
 use crate::catalog::{
-	DatabaseDefinition, DatabaseId, DefaultsConfig, IndexId, NamespaceDefinition, NamespaceId,
+	DatabaseDefinition, DatabaseId, DefaultConfig, IndexId, NamespaceDefinition, NamespaceId,
 	Record, TableDefinition, TableId, UserDefinition,
 };
 use crate::ctx::MutableContext;
@@ -32,7 +32,7 @@ pub(crate) trait NodeProvider {
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 pub(crate) trait RootProvider {
 	/// Retrieve a specific root definition.
-	async fn get_defaults_config(&self) -> Result<Option<Arc<DefaultsConfig>>>;
+	async fn get_default_config(&self) -> Result<Option<Arc<DefaultConfig>>>;
 
 	/// Retrieve a specific config definition from the root.
 	async fn get_root_config(&self, cg: &str) -> Result<Option<Arc<catalog::ConfigDefinition>>>;

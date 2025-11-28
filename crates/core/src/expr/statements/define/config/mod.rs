@@ -5,7 +5,7 @@ use std::fmt::{self, Display};
 
 use anyhow::{Result, bail};
 use api::ApiConfig;
-use defaults::DefaultsConfig;
+use defaults::DefaultConfig;
 use reblessive::tree::Stk;
 
 use crate::catalog::base::Base;
@@ -31,13 +31,13 @@ pub(crate) struct DefineConfigStatement {
 pub(crate) enum ConfigInner {
 	GraphQL(GraphQLConfig),
 	Api(ApiConfig),
-	Defaults(DefaultsConfig),
+	Default(DefaultConfig),
 }
 
 impl ConfigInner {
 	pub(crate) fn kind(&self) -> ConfigKind {
 		match self {
-			ConfigInner::Defaults(_) => ConfigKind::Defaults,
+			ConfigInner::Default(_) => ConfigKind::Default,
 			ConfigInner::GraphQL(_) => ConfigKind::GraphQL,
 			ConfigInner::Api(_) => ConfigKind::Api,
 		}
@@ -53,8 +53,8 @@ impl ConfigInner {
 		Ok(match self {
 			ConfigInner::GraphQL(g) => ConfigDefinition::GraphQL(g.clone()),
 			ConfigInner::Api(a) => ConfigDefinition::Api(a.compute(stk, ctx, opt, doc).await?),
-			ConfigInner::Defaults(d) => {
-				ConfigDefinition::Defaults(d.compute(stk, ctx, opt, doc).await?)
+			ConfigInner::Default(d) => {
+				ConfigDefinition::Default(d.compute(stk, ctx, opt, doc).await?)
 			}
 		})
 	}
@@ -79,7 +79,7 @@ impl DefineConfigStatement {
 		let cg = match &self.inner {
 			ConfigInner::GraphQL(_) => "graphql",
 			ConfigInner::Api(_) => "api",
-			ConfigInner::Defaults(_) => "defaults",
+			ConfigInner::Default(_) => "default",
 		};
 
 		match base {
@@ -158,7 +158,7 @@ impl Display for ConfigInner {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self {
 			ConfigInner::GraphQL(v) => Display::fmt(v, f),
-			ConfigInner::Defaults(v) => Display::fmt(v, f),
+			ConfigInner::Default(v) => Display::fmt(v, f),
 			ConfigInner::Api(v) => {
 				write!(f, "API")?;
 				Display::fmt(v, f)

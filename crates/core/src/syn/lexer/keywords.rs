@@ -114,7 +114,6 @@ pub(crate) static KEYWORDS: phf::Map<UniCase<&'static str>, TokenKind> = phf_map
 	UniCase::ascii("DATABASE") => TokenKind::Keyword(Keyword::Database),
 	UniCase::ascii("DB") => TokenKind::Keyword(Keyword::Database),
 	UniCase::ascii("DEFAULT") => TokenKind::Keyword(Keyword::Default),
-	UniCase::ascii("DEFAULTS") => TokenKind::Keyword(Keyword::Defaults),
 	UniCase::ascii("DEFINE") => TokenKind::Keyword(Keyword::Define),
 	UniCase::ascii("DELETE") => TokenKind::Keyword(Keyword::Delete),
 	UniCase::ascii("DESC") => TokenKind::Keyword(Keyword::Descending),

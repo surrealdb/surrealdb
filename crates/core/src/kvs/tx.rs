@@ -17,7 +17,7 @@ use crate::catalog::providers::{
 	NamespaceProvider, NodeProvider, RootProvider, TableProvider, UserProvider,
 };
 use crate::catalog::{
-	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, DefaultsConfig, IndexId,
+	self, ApiDefinition, ConfigDefinition, DatabaseDefinition, DatabaseId, DefaultConfig, IndexId,
 	NamespaceDefinition, NamespaceId, Record, TableDefinition, TableId,
 };
 use crate::ctx::MutableContext;
@@ -790,17 +790,17 @@ impl NodeProvider for Transaction {
 #[cfg_attr(target_family = "wasm", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_family = "wasm"), async_trait::async_trait)]
 impl RootProvider for Transaction {
-	async fn get_defaults_config(&self) -> Result<Option<Arc<DefaultsConfig>>> {
-		let qey = cache::tx::Lookup::Rcg("defaults");
+	async fn get_default_config(&self) -> Result<Option<Arc<DefaultConfig>>> {
+		let qey = cache::tx::Lookup::Rcg("default");
 		match self.cache.get(&qey) {
 			Some(val) => val,
 			None => {
-				let key = crate::key::root::cg::new("defaults");
+				let key = crate::key::root::cg::new("default");
 				let Some(val) = self.get(&key, None).await? else {
 					return Ok(None);
 				};
-				let ConfigDefinition::Defaults(val) = val else {
-					fail!("Expected a defaults config but found {val:?} instead");
+				let ConfigDefinition::Default(val) = val else {
+					fail!("Expected a default config but found {val:?} instead");
 				};
 				let val = cache::tx::Entry::Any(Arc::new(val));
 				self.cache.insert(qey, val.clone());

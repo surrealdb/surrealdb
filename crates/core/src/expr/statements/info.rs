@@ -55,7 +55,7 @@ impl InfoStatement {
 				if *structured {
 					let object = map! {
 						"accesses".to_string() => process(txn.all_root_accesses().await?),
-						"defaults".to_string() => txn.get_defaults_config().await?
+						"defaults".to_string() => txn.get_default_config().await?
 							.map(|x| x.as_ref().clone().structure())
 							.unwrap_or_else(|| Value::Object(Default::default())),
 						"namespaces".to_string() => process(txn.all_ns().await?),
@@ -73,7 +73,7 @@ impl InfoStatement {
 							}
 							out.into()
 						},
-						"defaults".to_string() => txn.get_defaults_config().await?
+						"defaults".to_string() => txn.get_default_config().await?
 							.map(|x| x.as_ref().clone().structure())
 							.unwrap_or_else(|| Value::Object(Default::default())),
 						"namespaces".to_string() => {

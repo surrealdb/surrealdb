@@ -7,7 +7,7 @@ pub enum UseStatement {
 	Ns(Expr),
 	Db(Expr),
 	NsDb(Expr, Expr),
-	Defaults,
+	Default,
 }
 
 impl fmt::Display for UseStatement {
@@ -18,7 +18,7 @@ impl fmt::Display for UseStatement {
 			UseStatement::Ns(ns) => write!(f, " NS {ns}")?,
 			UseStatement::Db(db) => write!(f, " DB {db}")?,
 			UseStatement::NsDb(ns, db) => write!(f, " NS {ns} DB {db}")?,
-			UseStatement::Defaults => write!(f, " DEFAULTS")?,
+			UseStatement::Default => write!(f, " DEFAULT")?,
 		}
 		Ok(())
 	}

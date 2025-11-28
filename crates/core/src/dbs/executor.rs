@@ -120,8 +120,8 @@ impl Executor {
 				let opt_ref = self.opt.clone();
 
 				let (use_ns, use_db) = match stmt {
-					UseStatement::Defaults => {
-						if let Some(x) = txn.get_defaults_config().await? {
+					UseStatement::Default => {
+						if let Some(x) = txn.get_default_config().await? {
 							(x.namespace.clone(), x.database.clone())
 						} else {
 							(None, None)

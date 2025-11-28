@@ -68,7 +68,6 @@ keyword! {
 	Create => "CREATE",
 	Database => "DATABASE",
 	Default => "DEFAULT",
-	Defaults => "DEFAULTS",
 	Define => "DEFINE",
 	Delete => "DELETE",
 	Descending => "DESCENDING",

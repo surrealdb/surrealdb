@@ -43,13 +43,13 @@ pub enum ResourceKind {
 pub enum ConfigKind {
 	GraphQL,
 	Api,
-	Defaults,
+	Default,
 }
 
 impl ConfigKind {
 	pub fn base(&self) -> Base {
 		match self {
-			ConfigKind::Defaults => Base::Root,
+			ConfigKind::Default => Base::Root,
 			ConfigKind::GraphQL => Base::Db,
 			ConfigKind::Api => Base::Db,
 		}
@@ -89,7 +89,7 @@ impl std::fmt::Display for ConfigKind {
 		match self {
 			ConfigKind::GraphQL => write!(f, "GraphQL"),
 			ConfigKind::Api => write!(f, "API"),
-			ConfigKind::Defaults => write!(f, "Defaults"),
+			ConfigKind::Default => write!(f, "Default"),
 		}
 	}
 }

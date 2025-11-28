@@ -315,9 +315,9 @@ impl Parser<'_> {
 				let db = stk.run(|stk| self.parse_expr_field(stk)).await?;
 				UseStatement::Db(db)
 			}
-			t!("DEFAULTS") => {
+			t!("DEFAULT") => {
 				self.pop_peek();
-				UseStatement::Defaults
+				UseStatement::Default
 			}
 			_ => unexpected!(self, peek, "either DATABASE or NAMESPACE"),
 		};

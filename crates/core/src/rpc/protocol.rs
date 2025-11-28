@@ -204,7 +204,7 @@ pub trait RpcProtocol {
 		if ns.is_none() && db.is_none() {
 			let kvs = self.kvs();
 			let tx = kvs.transaction(TransactionType::Write, LockType::Optimistic).await?;
-			let (ns, db) = if let Some(x) = tx.get_defaults_config().await? {
+			let (ns, db) = if let Some(x) = tx.get_default_config().await? {
 				(x.namespace.clone(), x.database.clone())
 			} else {
 				(None, None)

@@ -14,7 +14,7 @@ use crate::val::Value;
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ConfigDefinition {
-	Defaults(DefaultsConfig),
+	Default(DefaultConfig),
 	GraphQL(GraphQLConfig),
 	Api(ApiConfigDefinition),
 }
@@ -24,7 +24,7 @@ impl ConfigDefinition {
 	/// Get the name of the config.
 	pub fn name(&self) -> String {
 		match self {
-			ConfigDefinition::Defaults(_) => ConfigKind::Defaults.to_string(),
+			ConfigDefinition::Default(_) => ConfigKind::Default.to_string(),
 			ConfigDefinition::GraphQL(_) => ConfigKind::GraphQL.to_string(),
 			ConfigDefinition::Api(_) => ConfigKind::Api.to_string(),
 		}
@@ -50,7 +50,7 @@ impl ConfigDefinition {
 impl Display for ConfigDefinition {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self {
-			ConfigDefinition::Defaults(v) => Display::fmt(v, f),
+			ConfigDefinition::Default(v) => Display::fmt(v, f),
 			ConfigDefinition::GraphQL(v) => Display::fmt(v, f),
 			ConfigDefinition::Api(v) => Display::fmt(v, f),
 		}
@@ -60,7 +60,7 @@ impl Display for ConfigDefinition {
 impl InfoStructure for ConfigDefinition {
 	fn structure(self) -> Value {
 		match self {
-			ConfigDefinition::Defaults(v) => Value::from(map!(
+			ConfigDefinition::Default(v) => Value::from(map!(
 				"defaults" => v.structure()
 			)),
 			ConfigDefinition::GraphQL(v) => Value::from(map!(
@@ -211,14 +211,14 @@ impl InfoStructure for GraphQLFunctionsConfig {
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
-pub struct DefaultsConfig {
+pub struct DefaultConfig {
 	pub namespace: Option<String>,
 	pub database: Option<String>,
 }
 
-impl Display for DefaultsConfig {
+impl Display for DefaultConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFAULTS")?;
+		write!(f, "DEFAULT")?;
 		if let Some(namespace) = &self.namespace {
 			write!(f, " NAMESPACE {}", namespace)?;
 		}
@@ -230,7 +230,7 @@ impl Display for DefaultsConfig {
 	}
 }
 
-impl InfoStructure for DefaultsConfig {
+impl InfoStructure for DefaultConfig {
 	fn structure(self) -> Value {
 		Value::from(map!(
 			"namespace", if let Some(x) = self.namespace => Value::String(x),

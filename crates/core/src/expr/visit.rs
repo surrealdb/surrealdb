@@ -17,7 +17,7 @@ use crate::expr::statements::alter::{
 };
 use crate::expr::statements::define::config::ConfigInner;
 use crate::expr::statements::define::config::api::ApiConfig;
-use crate::expr::statements::define::config::defaults::DefaultsConfig;
+use crate::expr::statements::define::config::defaults::DefaultConfig;
 use crate::expr::statements::define::{
 	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault, DefineSequenceStatement,
 };
@@ -841,8 +841,8 @@ implement_visitor! {
 			ConfigInner::Api(api_config) => {
 				this.visit_api_config(api_config)?;
 			},
-			ConfigInner::Defaults(defaults_config) => {
-				this.visit_defaults_config(defaults_config)?;
+			ConfigInner::Default(default_config) => {
+				this.visit_default_config(default_config)?;
 			},
 		}
 		Ok(())
@@ -863,7 +863,7 @@ implement_visitor! {
 		Ok(())
 	}
 
-	fn visit_defaults_config(this, d: &DefaultsConfig) {
+	fn visit_default_config(this, d: &DefaultConfig) {
 		if let Some(namespace) = &d.namespace {
 			this.visit_expr(namespace)?;
 		}
@@ -2294,8 +2294,8 @@ implement_visitor_mut! {
 			ConfigInner::Api(api_config) => {
 				this.visit_mut_api_config(api_config)?;
 			},
-			ConfigInner::Defaults(defaults_config) => {
-				this.visit_mut_defaults_config(defaults_config)?;
+			ConfigInner::Default(default_config) => {
+				this.visit_mut_default_config(default_config)?;
 			},
 		}
 		Ok(())
@@ -2311,7 +2311,7 @@ implement_visitor_mut! {
 		Ok(())
 	}
 
-	fn visit_mut_defaults_config(this, d: &mut DefaultsConfig) {
+	fn visit_mut_default_config(this, d: &mut DefaultConfig) {
 		if let Some(namespace) = &mut d.namespace {
 			this.visit_mut_expr(namespace)?;
 		}
