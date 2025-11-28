@@ -1,5 +1,6 @@
-use std::fmt;
 use std::ops::Bound;
+
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::EscapeKwFreeIdent;
 use crate::val::range::TypedRange;
@@ -12,23 +13,23 @@ pub enum Mock {
 	// Add new variants here
 }
 
-impl fmt::Display for Mock {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for Mock {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			Mock::Count(tb, c) => {
-				write!(f, "|{}:{}|", EscapeKwFreeIdent(tb), c)
+				write_sql!(f, fmt, "|{}:{}|", EscapeKwFreeIdent(tb), c);
 			}
 			Mock::Range(tb, r) => {
-				write!(f, "|{}:", EscapeKwFreeIdent(tb))?;
+				write_sql!(f, fmt, "|{}:", EscapeKwFreeIdent(tb));
 				match r.start {
-					Bound::Included(x) => write!(f, "{x}..")?,
-					Bound::Excluded(x) => write!(f, "{x}>..")?,
-					Bound::Unbounded => write!(f, "..")?,
+					Bound::Included(x) => write_sql!(f, fmt, "{x}.."),
+					Bound::Excluded(x) => write_sql!(f, fmt, "{x}>.."),
+					Bound::Unbounded => f.push_str(".."),
 				}
 				match r.end {
-					Bound::Included(x) => write!(f, "={x}|"),
-					Bound::Excluded(x) => write!(f, "{x}|"),
-					Bound::Unbounded => write!(f, "|"),
+					Bound::Included(x) => write_sql!(f, fmt, "={x}|"),
+					Bound::Excluded(x) => write_sql!(f, fmt, "{x}|"),
+					Bound::Unbounded => f.push('|'),
 				}
 			}
 		}

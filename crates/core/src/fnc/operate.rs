@@ -209,7 +209,7 @@ mod tests {
 		let two = Value::from(4);
 		let res = add(one, two);
 		let out = res.unwrap();
-		assert_eq!("9", format!("{}", out));
+		assert_eq!(out, Value::from(9));
 	}
 
 	#[test]
@@ -218,7 +218,7 @@ mod tests {
 		let two = Value::from(4);
 		let res = sub(one, two);
 		let out = res.unwrap();
-		assert_eq!("1", format!("{}", out));
+		assert_eq!(out, Value::from(1));
 	}
 
 	#[test]
@@ -227,7 +227,7 @@ mod tests {
 		let two = Value::from(4);
 		let res = mul(one, two);
 		let out = res.unwrap();
-		assert_eq!("20", format!("{}", out));
+		assert_eq!(out, Value::from(20));
 	}
 
 	#[test]
@@ -236,7 +236,7 @@ mod tests {
 		let two = Value::from(4);
 		let res = div(one, two);
 		let out = res.unwrap();
-		assert_eq!("1", format!("{}", out));
+		assert_eq!(out, Value::from(1));
 	}
 
 	#[test]
@@ -245,6 +245,6 @@ mod tests {
 		let two = Value::from(4.0);
 		let res = div(one, two);
 		let out = res.unwrap();
-		assert_eq!("1.25f", format!("{}", out));
+		assert_eq!(out, Value::from(1.25_f64));
 	}
 }

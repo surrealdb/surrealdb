@@ -1,9 +1,7 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
-
 use anyhow::{Result, bail, ensure};
 use rand::Rng;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::providers::{
 	AuthorisationProvider, CatalogProvider, NamespaceProvider, UserProvider,
@@ -13,7 +11,6 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::{Base, Cond, ControlFlow, FlowResult, FlowResultExt as _, RecordIdLit};
-use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::{Array, Datetime, Duration, Object, Value};
 use crate::{catalog, val};
@@ -942,67 +939,9 @@ impl AccessStatement {
 	}
 }
 
-impl Display for AccessStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			Self::Grant(stmt) => {
-				write!(f, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac))?;
-				if let Some(ref v) = stmt.base {
-					write!(f, " ON {v}")?;
-				}
-				write!(f, " GRANT")?;
-				match &stmt.subject {
-					Subject::User(x) => write!(f, " FOR USER {}", EscapeKwFreeIdent(x))?,
-					Subject::Record(x) => write!(f, " FOR RECORD {}", x)?,
-				}
-				Ok(())
-			}
-			Self::Show(stmt) => {
-				write!(f, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac))?;
-				if let Some(ref v) = stmt.base {
-					write!(f, " ON {v}")?;
-				}
-				write!(f, " SHOW")?;
-				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {}", EscapeKwFreeIdent(v))?,
-					None => match &stmt.cond {
-						Some(v) => write!(f, " {v}")?,
-						None => write!(f, " ALL")?,
-					},
-				};
-				Ok(())
-			}
-			Self::Revoke(stmt) => {
-				write!(f, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac))?;
-				if let Some(ref v) = stmt.base {
-					write!(f, " ON {v}")?;
-				}
-				write!(f, " REVOKE")?;
-				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {}", EscapeKwFreeIdent(v))?,
-					None => match &stmt.cond {
-						Some(v) => write!(f, " {v}")?,
-						None => write!(f, " ALL")?,
-					},
-				};
-				Ok(())
-			}
-			Self::Purge(stmt) => {
-				write!(f, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac))?;
-				if let Some(ref v) = stmt.base {
-					write!(f, " ON {v}")?;
-				}
-				write!(f, " PURGE")?;
-				match stmt.kind {
-					PurgeKind::Expired => write!(f, " EXPIRED")?,
-					PurgeKind::Revoked => write!(f, " REVOKED")?,
-					PurgeKind::Both => write!(f, " EXPIRED, REVOKED")?,
-				};
-				if !stmt.grace.is_zero() {
-					write!(f, " FOR {}", stmt.grace)?;
-				}
-				Ok(())
-			}
-		}
+impl ToSql for AccessStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let sql_stmt: crate::sql::statements::AccessStatement = self.clone().into();
+		sql_stmt.fmt_sql(f, fmt);
 	}
 }

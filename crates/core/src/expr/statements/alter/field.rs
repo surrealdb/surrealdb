@@ -1,7 +1,7 @@
-use std::fmt::{self, Display};
 use std::ops::Deref;
 
 use anyhow::Result;
+use surrealdb_types::{SqlFormat, ToSql};
 use uuid::Uuid;
 
 use super::AlterKind;
@@ -12,7 +12,6 @@ use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::reference::Reference;
 use crate::expr::{Base, Expr, Idiom, Kind};
-use crate::fmt::{EscapeKwIdent, QuoteStr};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -51,7 +50,7 @@ impl AlterFieldStatement {
 		// Fetch the transaction
 		let txn = ctx.tx();
 		// Get the table definition
-		let name = self.name.to_string();
+		let name = self.name.to_sql();
 		let mut df = match txn.get_tb_field(ns, db, &self.what, &name).await? {
 			Some(tb) => tb.deref().clone(),
 			None => {
@@ -161,66 +160,9 @@ impl AlterFieldStatement {
 	}
 }
 
-impl Display for AlterFieldStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ALTER FIELD")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " {} ON {}", self.name, EscapeKwIdent(&self.what, &["IF"]))?;
-
-		match self.kind {
-			AlterKind::Set(ref x) => write!(f, " TYPE {x}")?,
-			AlterKind::Drop => write!(f, " DROP TYPE")?,
-			AlterKind::None => {}
-		}
-
-		match self.flexible {
-			AlterKind::Set(_) => write!(f, " FLEXIBLE")?,
-			AlterKind::Drop => write!(f, " DROP FLEXIBLE")?,
-			AlterKind::None => {}
-		}
-
-		match self.readonly {
-			AlterKind::Set(_) => write!(f, " READONLY")?,
-			AlterKind::Drop => write!(f, " DROP READONLY")?,
-			AlterKind::None => {}
-		}
-
-		match self.value {
-			AlterKind::Set(ref v) => write!(f, " VALUE {v}")?,
-			AlterKind::Drop => write!(f, " DROP VALUE")?,
-			AlterKind::None => {}
-		}
-
-		match self.assert {
-			AlterKind::Set(ref v) => write!(f, " ASSERT {v}")?,
-			AlterKind::Drop => write!(f, " DROP ASSERT")?,
-			AlterKind::None => {}
-		}
-
-		match self.default {
-			AlterDefault::None => {}
-			AlterDefault::Drop => write!(f, " DROP DEFAULT")?,
-			AlterDefault::Always(ref expr) => write!(f, "DEFAULT ALWAYS {expr}")?,
-			AlterDefault::Set(ref expr) => write!(f, "DEFAULT {expr}")?,
-		}
-		if let Some(permissions) = &self.permissions {
-			write!(f, "{permissions}")?;
-		}
-
-		match self.comment {
-			AlterKind::Set(ref x) => write!(f, " COMMENT {}", QuoteStr(x))?,
-			AlterKind::Drop => write!(f, " DROP COMMENT")?,
-			AlterKind::None => {}
-		}
-
-		match self.reference {
-			AlterKind::Set(ref v) => write!(f, " REFERENCE {v}")?,
-			AlterKind::Drop => write!(f, " DROP REFERENCE")?,
-			AlterKind::None => {}
-		}
-
-		Ok(())
+impl ToSql for AlterFieldStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::alter::field::AlterFieldStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

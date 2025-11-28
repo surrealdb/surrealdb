@@ -7,8 +7,11 @@ use std::fmt::Display;
 pub use geometry::*;
 pub use literal::*;
 use serde::{Deserialize, Serialize};
+use surrealdb_types_derive::write_sql;
 
+use crate as surrealdb_types;
 use crate::utils::display::format_seperated;
+use crate::{SqlFormat, ToSql};
 
 /// The kind of a SurrealDB value.
 #[derive(Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -110,64 +113,70 @@ impl Kind {
 	}
 }
 
-impl Display for Kind {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl ToSql for Kind {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Kind::Any => write!(f, "any"),
-			Kind::None => write!(f, "none"),
-			Kind::Null => write!(f, "null"),
-			Kind::Bool => write!(f, "bool"),
-			Kind::Bytes => write!(f, "bytes"),
-			Kind::Datetime => write!(f, "datetime"),
-			Kind::Decimal => write!(f, "decimal"),
-			Kind::Duration => write!(f, "duration"),
-			Kind::Float => write!(f, "float"),
-			Kind::Int => write!(f, "int"),
-			Kind::Number => write!(f, "number"),
-			Kind::Object => write!(f, "object"),
-			Kind::String => write!(f, "string"),
-			Kind::Uuid => write!(f, "uuid"),
-			Kind::Regex => write!(f, "regex"),
+			Kind::Any => f.push_str("any"),
+			Kind::None => f.push_str("none"),
+			Kind::Null => f.push_str("null"),
+			Kind::Bool => f.push_str("bool"),
+			Kind::Bytes => f.push_str("bytes"),
+			Kind::Datetime => f.push_str("datetime"),
+			Kind::Decimal => f.push_str("decimal"),
+			Kind::Duration => f.push_str("duration"),
+			Kind::Float => f.push_str("float"),
+			Kind::Int => f.push_str("int"),
+			Kind::Number => f.push_str("number"),
+			Kind::Object => f.push_str("object"),
+			Kind::String => f.push_str("string"),
+			Kind::Uuid => f.push_str("uuid"),
+			Kind::Regex => f.push_str("regex"),
 			Kind::Table(tables) => {
 				if tables.is_empty() {
-					write!(f, "table")
+					f.push_str("table")
 				} else {
-					write!(f, "table<{}>", format_seperated(tables, " | "))
+					write_sql!(f, fmt, "table<{}>", format_seperated(tables, " | "));
 				}
 			}
 			Kind::Record(table) => {
 				if table.is_empty() {
-					write!(f, "record")
+					f.push_str("record")
 				} else {
-					write!(f, "record<{}>", format_seperated(table, " | "))
+					write_sql!(f, fmt, "record<{}>", format_seperated(table, " | "))
 				}
 			}
 			Kind::Geometry(kinds) => {
 				if kinds.is_empty() {
-					write!(f, "geometry")
+					f.push_str("geometry")
 				} else {
-					write!(f, "geometry<{}>", format_seperated(kinds, " | "))
+					write_sql!(f, fmt, "geometry<{}>", format_seperated(kinds, " | "))
 				}
 			}
-			Kind::Either(kinds) => write!(f, "{}", format_seperated(kinds, " | ")),
+			Kind::Either(kinds) => write_sql!(f, fmt, "{}", format_seperated(kinds, " | ")),
 			Kind::Set(kind, max) => match max {
-				Some(max) => write!(f, "set<{}, {}>", kind, max),
-				None => write!(f, "set<{}>", kind),
+				Some(max) => write_sql!(f, fmt, "set<{}, {}>", kind, max),
+				None => write_sql!(f, fmt, "set<{}>", kind),
 			},
 			Kind::Array(kind, max) => match max {
-				Some(max) => write!(f, "array<{}, {}>", kind, max),
-				None => write!(f, "array<{}>", kind),
+				Some(max) => write_sql!(f, fmt, "array<{}, {}>", kind, max),
+				None => write_sql!(f, fmt, "array<{}>", kind),
 			},
-			Kind::Function(_, _) => write!(f, "function"),
-			Kind::Range => write!(f, "range"),
-			Kind::Literal(literal) => write!(f, "{}", literal),
+			Kind::Function(_, _) => f.push_str("function"),
+			Kind::Range => f.push_str("range"),
+			Kind::Literal(literal) => literal.fmt_sql(f, fmt),
 			Kind::File(bucket) => {
 				if bucket.is_empty() {
-					write!(f, "file")
+					f.push_str("file")
 				} else {
-					write!(f, "file<{}>", format_seperated(bucket, " | "))
+					write_sql!(f, fmt, "file<{}>", format_seperated(bucket, " | "))
 				}
 			}
 		}
+	}
+}
+
+impl Display for Kind {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		f.write_str(&self.to_sql())
 	}
 }

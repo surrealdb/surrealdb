@@ -6,6 +6,7 @@ use std::str::FromStr;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::Datetime;
 use crate::fmt::QuoteStr;
@@ -120,6 +121,12 @@ impl Deref for Uuid {
 
 impl Display for Uuid {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "u{}", QuoteStr(&self.0.to_string()))
+		self.0.fmt(f)
+	}
+}
+
+impl ToSql for Uuid {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "{}", &QuoteStr(&self.0.to_string()))
 	}
 }

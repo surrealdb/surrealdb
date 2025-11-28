@@ -1,10 +1,9 @@
-use std::fmt::{self, Debug, Display, Formatter};
+use std::fmt::Debug;
 use std::ops::Deref;
 
 use revision::revisioned;
 
 use crate::expr::idiom::Idiom;
-use crate::fmt::Fmt;
 
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -20,18 +19,6 @@ impl Groups {
 	}
 }
 
-// Note: IntoIterator trait intentionally not implemented to avoid exposing private Group type
-
-impl Display for Groups {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		if self.0.is_empty() {
-			write!(f, "GROUP ALL")
-		} else {
-			write!(f, "GROUP BY {}", Fmt::comma_separated(&self.0))
-		}
-	}
-}
-
 #[revisioned(revision = 1)]
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct Group(pub(crate) Idiom);
@@ -43,8 +30,16 @@ impl Deref for Group {
 	}
 }
 
-impl Display for Group {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		Display::fmt(&self.0, f)
+impl surrealdb_types::ToSql for Groups {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		let sql_groups: crate::sql::Groups = self.clone().into();
+		sql_groups.fmt_sql(f, fmt);
+	}
+}
+
+impl surrealdb_types::ToSql for Group {
+	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
+		let sql_group: crate::sql::Group = self.clone().into();
+		sql_group.fmt_sql(f, fmt);
 	}
 }

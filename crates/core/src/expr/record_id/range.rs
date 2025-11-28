@@ -1,8 +1,8 @@
-use std::fmt;
 use std::ops::Bound;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::RecordIdKeyLit;
 use crate::ctx::Context;
@@ -14,22 +14,6 @@ use crate::val::RecordIdKeyRange;
 pub(crate) struct RecordIdKeyRangeLit {
 	pub(crate) start: Bound<RecordIdKeyLit>,
 	pub(crate) end: Bound<RecordIdKeyLit>,
-}
-
-impl fmt::Display for RecordIdKeyRangeLit {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match &self.start {
-			Bound::Unbounded => write!(f, ""),
-			Bound::Included(v) => write!(f, "{v}"),
-			Bound::Excluded(v) => write!(f, "{v}>"),
-		}?;
-		match &self.end {
-			Bound::Unbounded => write!(f, ".."),
-			Bound::Excluded(v) => write!(f, "..{v}"),
-			Bound::Included(v) => write!(f, "..={v}"),
-		}?;
-		Ok(())
-	}
 }
 
 impl RecordIdKeyRangeLit {
@@ -85,5 +69,12 @@ impl RecordIdKeyRangeLit {
 			start,
 			end,
 		})
+	}
+}
+
+impl ToSql for RecordIdKeyRangeLit {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let range: crate::sql::record_id::range::RecordIdKeyRangeLit = self.clone().into();
+		range.fmt_sql(f, fmt);
 	}
 }

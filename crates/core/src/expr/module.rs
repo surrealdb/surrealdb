@@ -1,9 +1,9 @@
-use std::fmt;
 #[cfg(feature = "surrealism")]
 use std::thread;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog;
 use crate::catalog::{DatabaseId, NamespaceId};
@@ -83,12 +83,10 @@ impl ModuleExecutable {
 	}
 }
 
-impl fmt::Display for ModuleExecutable {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			ModuleExecutable::Surrealism(surrealism) => surrealism.fmt(f),
-			ModuleExecutable::Silo(silo) => silo.fmt(f),
-		}
+impl ToSql for ModuleExecutable {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let module_executable: crate::sql::ModuleExecutable = self.clone().into();
+		module_executable.fmt_sql(f, sql_fmt);
 	}
 }
 
@@ -116,9 +114,10 @@ impl From<SurrealismExecutable> for catalog::SurrealismExecutable {
 	}
 }
 
-impl fmt::Display for SurrealismExecutable {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		self.0.fmt(f)
+impl ToSql for SurrealismExecutable {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let surrealism_executable: crate::sql::SurrealismExecutable = self.clone().into();
+		surrealism_executable.fmt_sql(f, sql_fmt);
 	}
 }
 
@@ -253,13 +252,10 @@ impl From<SiloExecutable> for catalog::SiloExecutable {
 	}
 }
 
-impl fmt::Display for SiloExecutable {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(
-			f,
-			"silo::{}::{}<{}.{}.{}>",
-			self.organisation, self.package, self.major, self.minor, self.patch
-		)
+impl ToSql for SiloExecutable {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let silo_executable: crate::sql::SiloExecutable = self.clone().into();
+		silo_executable.fmt_sql(f, sql_fmt);
 	}
 }
 

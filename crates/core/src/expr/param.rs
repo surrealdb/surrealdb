@@ -1,9 +1,10 @@
 use std::ops::Deref;
-use std::{fmt, str};
+use std::str;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::FlowResultExt as _;
 use crate::catalog::Permission;
@@ -158,8 +159,9 @@ impl Param {
 	}
 }
 
-impl fmt::Display for Param {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "${}", EscapeKwFreeIdent(&self.0))
+impl ToSql for Param {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push('$');
+		EscapeKwFreeIdent(&self.0).fmt_sql(f, fmt);
 	}
 }

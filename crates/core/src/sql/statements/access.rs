@@ -1,5 +1,4 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{EscapeIdent, EscapeKwFreeIdent};
 use crate::sql::{Base, Cond, RecordIdLit};
@@ -210,66 +209,53 @@ impl From<crate::expr::statements::access::Subject> for Subject {
 	}
 }
 
-impl Display for AccessStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+impl ToSql for AccessStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
 			Self::Grant(stmt) => {
-				write!(f, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac))?;
+				write_sql!(f, fmt, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac));
 				if let Some(ref v) = stmt.base {
-					write!(f, " ON {v}")?;
+					write_sql!(f, fmt, " ON {v}");
 				}
-				write!(f, " GRANT")?;
+				write_sql!(f, fmt, " GRANT");
 				match &stmt.subject {
-					Subject::User(x) => write!(f, " FOR USER {}", EscapeIdent(&x))?,
-					Subject::Record(x) => write!(f, " FOR RECORD {}", x)?,
+					Subject::User(x) => write_sql!(f, fmt, " FOR USER {}", EscapeIdent(&x)),
+					Subject::Record(x) => write_sql!(f, fmt, " FOR RECORD {}", x),
 				}
-				Ok(())
 			}
 			Self::Show(stmt) => {
-				write!(f, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac))?;
+				write_sql!(f, fmt, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac));
 				if let Some(ref v) = stmt.base {
-					write!(f, " ON {v}")?;
+					write_sql!(f, fmt, " ON {v}");
 				}
-				write!(f, " SHOW")?;
+				write_sql!(f, fmt, " SHOW");
 				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {}", EscapeKwFreeIdent(v))?,
+					Some(v) => write_sql!(f, fmt, " GRANT {}", EscapeKwFreeIdent(v)),
 					None => match &stmt.cond {
-						Some(v) => write!(f, " {v}")?,
-						None => write!(f, " ALL")?,
+						Some(v) => write_sql!(f, fmt, " {v}"),
+						None => write_sql!(f, fmt, " ALL"),
 					},
 				};
-				Ok(())
 			}
 			Self::Revoke(stmt) => {
-				write!(f, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac))?;
+				write_sql!(f, fmt, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac));
 				if let Some(ref v) = stmt.base {
-					write!(f, " ON {v}")?;
+					write_sql!(f, fmt, " ON {v}");
 				}
-				write!(f, " REVOKE")?;
+				write_sql!(f, fmt, " REVOKE");
 				match &stmt.gr {
-					Some(v) => write!(f, " GRANT {}", EscapeKwFreeIdent(v))?,
+					Some(v) => write_sql!(f, fmt, " GRANT {}", EscapeKwFreeIdent(v)),
 					None => match &stmt.cond {
-						Some(v) => write!(f, " {v}")?,
-						None => write!(f, " ALL")?,
+						Some(v) => write_sql!(f, fmt, " {v}"),
+						None => write_sql!(f, fmt, " ALL"),
 					},
 				};
-				Ok(())
 			}
 			Self::Purge(stmt) => {
-				write!(f, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac))?;
+				write_sql!(f, fmt, "ACCESS {}", EscapeKwFreeIdent(&stmt.ac));
 				if let Some(ref v) = stmt.base {
-					write!(f, " ON {v}")?;
+					write_sql!(f, fmt, " ON {v}");
 				}
-				write!(f, " PURGE")?;
-				match stmt.kind {
-					PurgeKind::Expired => write!(f, " EXPIRED")?,
-					PurgeKind::Revoked => write!(f, " REVOKED")?,
-					PurgeKind::Both => write!(f, " EXPIRED, REVOKED")?,
-				}
-				if !stmt.grace.is_zero() {
-					write!(f, " FOR {}", stmt.grace)?;
-				}
-				Ok(())
 			}
 		}
 	}

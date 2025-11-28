@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::aggregation::{self, AggregateFields, AggregationAnalysis, AggregationStat};
 use crate::ctx::Context;
@@ -66,7 +67,7 @@ impl GroupCollector {
 			.aggregate_arguments
 			.iter()
 			.enumerate()
-			.map(|(idx, x)| (format!("expr{idx}"), Value::from(x.to_string())))
+			.map(|(idx, x)| (format!("expr{idx}"), Value::from(x.to_sql())))
 			.collect::<Value>();
 
 		let group_expr = self
@@ -74,13 +75,13 @@ impl GroupCollector {
 			.group_expressions
 			.iter()
 			.enumerate()
-			.map(|(idx, x)| (format!("_g{idx}"), Value::from(x.to_string())))
+			.map(|(idx, x)| (format!("_g{idx}"), Value::from(x.to_sql())))
 			.collect::<Value>();
 
 		let selector = match &self.analysis.fields {
-			AggregateFields::Value(expr) => Value::from(expr.to_string()),
+			AggregateFields::Value(expr) => Value::from(expr.to_sql()),
 			AggregateFields::Fields(items) => {
-				items.iter().map(|(k, v)| (k.to_string(), Value::from(v.to_string()))).collect()
+				items.iter().map(|(k, v)| (k.to_sql(), Value::from(v.to_sql()))).collect()
 			}
 		};
 

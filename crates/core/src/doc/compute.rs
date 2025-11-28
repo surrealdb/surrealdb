@@ -1,4 +1,5 @@
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::FieldDefinition;
 use crate::ctx::Context;
@@ -57,8 +58,8 @@ impl Document {
 				let mut val = computed.compute(stk, ctx, opt, Some(doc)).await.catch_return()?;
 				if let Some(kind) = fd.field_kind.as_ref() {
 					val = val.coerce_to_kind(kind).map_err(|e| Error::FieldCoerce {
-						record: rid.to_string(),
-						field_name: fd.name.to_string(),
+						record: rid.to_sql(),
+						field_name: fd.name.to_sql(),
 						error: Box::new(e),
 					})?;
 				}

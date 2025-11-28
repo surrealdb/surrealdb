@@ -1,8 +1,6 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self, Display, Formatter};
 
 use revision::revisioned;
-use surrealdb_types::ToSql;
 
 use crate::catalog::TableDefinition;
 use crate::expr::Operation;
@@ -145,45 +143,6 @@ impl ChangeSet {
 		m.insert("changes".to_string(), self.1.into_value());
 		let so: Object = m.into();
 		Value::Object(so)
-	}
-}
-
-impl Display for TableMutation {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			TableMutation::Set(id, v) => write!(f, "SET {} {}", id, v),
-			TableMutation::SetWithDiff(id, _previous, v) => write!(f, "SET {} {:?}", id, v),
-			TableMutation::Del(id) => write!(f, "DEL {}", id),
-			TableMutation::DelWithOriginal(id, _) => write!(f, "DEL {}", id),
-			TableMutation::Def(t) => {
-				write!(f, "{}", t.to_sql())
-			}
-		}
-	}
-}
-
-impl Display for TableMutations {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		let tb = &self.0;
-		let muts = &self.1;
-		write!(f, "{}", tb)?;
-		muts.iter().try_for_each(|v| write!(f, "{}", v))
-	}
-}
-
-impl Display for DatabaseMutation {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		let x = &self.0;
-
-		x.iter().try_for_each(|v| write!(f, "{}", v))
-	}
-}
-
-impl Display for ChangeSet {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		let x = &self.1;
-
-		write!(f, "{}", x)
 	}
 }
 

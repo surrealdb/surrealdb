@@ -8,8 +8,8 @@ use geo::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
-use crate::{GeometryKind, Object, SurrealValue, Value, array, object, write_sql};
+use crate::sql::{SqlFormat, ToSql};
+use crate::{GeometryKind, Object, SurrealValue, Value, array, object};
 
 /// Represents geometric shapes in SurrealDB
 ///
@@ -176,8 +176,8 @@ impl Display for Geometry {
 }
 
 impl ToSql for Geometry {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(&self.to_string());
 	}
 }
 

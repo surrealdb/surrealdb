@@ -101,6 +101,8 @@ pub enum ArrayBehaviour {
 #[cfg(test)]
 mod tests {
 
+	use surrealdb_types::ToSql;
+
 	use super::*;
 	use crate::syn;
 
@@ -198,7 +200,7 @@ mod tests {
 		let val =
 			val.every(Some(&Idiom::from(syn::idiom("test").unwrap())), true, ArrayBehaviour::Full);
 		for v in val.iter() {
-			println!("{}", v);
+			println!("{}", v.to_sql());
 		}
 
 		let res: Vec<Idiom> = vec![

@@ -1,9 +1,9 @@
-use std::fmt;
 use std::ops::Deref;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::fmt::EscapeIdent;
 use crate::val::IndexFormat;
@@ -56,12 +56,6 @@ impl Deref for Table {
 	}
 }
 
-impl fmt::Display for Table {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		EscapeIdent(&self.0).fmt(f)
-	}
-}
-
 impl From<surrealdb_types::Table> for Table {
 	fn from(value: surrealdb_types::Table) -> Self {
 		Table(value.into_string())
@@ -71,5 +65,11 @@ impl From<surrealdb_types::Table> for Table {
 impl From<Table> for surrealdb_types::Table {
 	fn from(value: Table) -> Self {
 		surrealdb_types::Table::new(value.0)
+	}
+}
+
+impl ToSql for Table {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		EscapeIdent(&self.0).fmt_sql(f, sql_fmt);
 	}
 }

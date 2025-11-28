@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::ModuleName;
 
@@ -9,15 +9,13 @@ pub struct RemoveModuleStatement {
 	pub if_exists: bool,
 }
 
-impl Display for RemoveModuleStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		// Bypass ident display since we don't want backticks arround the ident.
-		write!(f, "REMOVE MODULE")?;
+impl ToSql for RemoveModuleStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "REMOVE MODULE");
 		if self.if_exists {
-			write!(f, " IF EXISTS")?
+			write_sql!(f, sql_fmt, " IF EXISTS");
 		}
-		write!(f, " {}", self.name)?;
-		Ok(())
+		write_sql!(f, sql_fmt, " {}", self.name);
 	}
 }
 

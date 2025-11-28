@@ -1,9 +1,8 @@
 pub mod field;
+use surrealdb_types::{SqlFormat, ToSql};
 mod index;
 mod sequence;
 mod table;
-
-use std::fmt::{self, Display};
 
 pub use field::AlterFieldStatement;
 pub use index::AlterIndexStatement;
@@ -54,13 +53,13 @@ pub enum AlterStatement {
 	Field(AlterFieldStatement),
 }
 
-impl Display for AlterStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for AlterStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Self::Table(v) => Display::fmt(v, f),
-			Self::Index(v) => Display::fmt(v, f),
-			Self::Sequence(v) => Display::fmt(v, f),
-			Self::Field(v) => Display::fmt(v, f),
+			Self::Table(v) => v.fmt_sql(f, fmt),
+			Self::Index(v) => v.fmt_sql(f, fmt),
+			Self::Sequence(v) => v.fmt_sql(f, fmt),
+			Self::Field(v) => v.fmt_sql(f, fmt),
 		}
 	}
 }

@@ -1,5 +1,5 @@
 use revision::revisioned;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::Permission;
 use crate::expr::statements::info::InfoStructure;
@@ -50,19 +50,19 @@ impl InfoStructure for FunctionDefinition {
 			"name".to_string() => self.name.into(),
 			"args".to_string() => self.args
 				.into_iter()
-				.map(|(n, k)| vec![n.into(), k.to_string().into()].into())
+				.map(|(n, k)| vec![n.into(), k.to_sql().into()].into())
 				.collect::<Vec<Value>>()
 				.into(),
-			"block".to_string() => self.block.to_string().into(),
+			"block".to_string() => self.block.to_sql().into(),
 			"permissions".to_string() => self.permissions.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.to_sql().into(),
-			"returns".to_string(), if let Some(v) = self.returns => v.to_string().into(),
+			"returns".to_string(), if let Some(v) = self.returns => v.to_sql().into(),
 		})
 	}
 }
 
 impl ToSql for &FunctionDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, fmt)
 	}
 }

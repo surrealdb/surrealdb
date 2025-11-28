@@ -1,7 +1,6 @@
-use std::fmt;
-
 use anyhow::Result;
 use chrono::{TimeZone, Utc};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::val::{Datetime, Duration, Value};
 
@@ -83,34 +82,9 @@ impl Constant {
 	}
 }
 
-impl fmt::Display for Constant {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str(match self {
-			Self::MathE => "math::E",
-			Self::MathFrac1Pi => "math::FRAC_1_PI",
-			Self::MathFrac1Sqrt2 => "math::FRAC_1_SQRT_2",
-			Self::MathFrac2Pi => "math::FRAC_2_PI",
-			Self::MathFrac2SqrtPi => "math::FRAC_2_SQRT_PI",
-			Self::MathFracPi2 => "math::FRAC_PI_2",
-			Self::MathFracPi3 => "math::FRAC_PI_3",
-			Self::MathFracPi4 => "math::FRAC_PI_4",
-			Self::MathFracPi6 => "math::FRAC_PI_6",
-			Self::MathFracPi8 => "math::FRAC_PI_8",
-			Self::MathInf => "math::INF",
-			Self::MathLn10 => "math::LN_10",
-			Self::MathLn2 => "math::LN_2",
-			Self::MathLog102 => "math::LOG10_2",
-			Self::MathLog10E => "math::LOG10_E",
-			Self::MathLog210 => "math::LOG2_10",
-			Self::MathLog2E => "math::LOG2_E",
-			Self::MathNegInf => "math::NEG_INF",
-			Self::MathPi => "math::PI",
-			Self::MathSqrt2 => "math::SQRT_2",
-			Self::MathTau => "math::TAU",
-			Self::TimeEpoch => "time::EPOCH",
-			Self::TimeMin => "time::MINIMUM",
-			Self::TimeMax => "time::MAXIMUM",
-			Self::DurationMax => "duration::MAX",
-		})
+impl ToSql for Constant {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let constant: crate::sql::Constant = self.clone().into();
+		constant.fmt_sql(f, sql_fmt);
 	}
 }

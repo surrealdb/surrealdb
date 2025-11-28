@@ -3,6 +3,7 @@ pub(super) mod invoke;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
+use surrealdb_types::ToSql;
 
 use crate::expr::statements::info::InfoStructure;
 use crate::val::{Array, Object, Value};
@@ -17,7 +18,7 @@ impl InfoStructure for RequestMiddleware {
 			self.0
 				.into_iter()
 				.map(|(k, v)| {
-					let value = v.iter().map(|x| Value::String(x.to_string())).collect();
+					let value = v.iter().map(|x| Value::String(x.to_sql())).collect();
 
 					(k, Value::Array(Array(value)))
 				})

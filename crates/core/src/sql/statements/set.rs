@@ -1,4 +1,4 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::EscapeKwFreeIdent;
 use crate::sql::{Expr, Kind};
@@ -11,14 +11,13 @@ pub struct SetStatement {
 	pub kind: Option<Kind>,
 }
 
-impl fmt::Display for SetStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "LET ${}", EscapeKwFreeIdent(&self.name))?;
+impl ToSql for SetStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "LET ${}", EscapeKwFreeIdent(&self.name));
 		if let Some(ref kind) = self.kind {
-			write!(f, ": {}", kind)?;
+			write_sql!(f, fmt, ": {}", kind);
 		}
-		write!(f, " = {}", self.what)?;
-		Ok(())
+		write_sql!(f, fmt, " = {}", self.what);
 	}
 }
 
@@ -44,14 +43,15 @@ impl From<crate::expr::statements::SetStatement> for SetStatement {
 
 #[cfg(test)]
 mod tests {
+	use super::*;
 	use crate::syn;
 
 	#[test]
 	fn check_type() {
 		let query = syn::parse("LET $param = 5").unwrap();
-		assert_eq!(format!("{}", query), "LET $param = 5;");
+		assert_eq!(query.to_sql(), "LET $param = 5;");
 
 		let query = syn::parse("LET $param: number = 5").unwrap();
-		assert_eq!(format!("{}", query), "LET $param: number = 5;");
+		assert_eq!(query.to_sql(), "LET $param: number = 5;");
 	}
 }

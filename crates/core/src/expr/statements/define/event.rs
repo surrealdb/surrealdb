@@ -1,5 +1,3 @@
-use std::fmt::{self, Display};
-
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
 use uuid::Uuid;
@@ -13,7 +11,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr};
-use crate::fmt::Fmt;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -100,28 +97,5 @@ impl DefineEventStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for DefineEventStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE EVENT",)?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(
-			f,
-			" {} ON {} WHEN {} THEN {}",
-			self.name,
-			self.target_table,
-			self.when,
-			Fmt::comma_separated(self.then.iter())
-		)?;
-		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
-		}
-		Ok(())
 	}
 }

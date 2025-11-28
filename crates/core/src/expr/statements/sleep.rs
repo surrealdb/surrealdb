@@ -1,5 +1,3 @@
-use std::fmt;
-
 use anyhow::Result;
 
 use crate::ctx::Context;
@@ -36,12 +34,6 @@ impl SleepStatement {
 		tokio::time::sleep(dur).await;
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl fmt::Display for SleepStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "SLEEP {}", self.duration)
 	}
 }
 

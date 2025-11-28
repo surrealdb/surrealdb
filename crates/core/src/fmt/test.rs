@@ -1,9 +1,11 @@
+use surrealdb_types::ToSql;
+
 pub fn ensure_formats(s: &str) {
 	let parsed = crate::syn::parse(s).unwrap();
-	let parsed_formated = crate::syn::parse(&parsed.to_string()).unwrap();
+	let parsed_formated = crate::syn::parse(&parsed.to_sql()).unwrap();
 
 	let plan: crate::expr::LogicalPlan = parsed.clone().into();
-	let parsed_formated_plan = crate::syn::parse(&plan.to_string()).unwrap();
+	let parsed_formated_plan = crate::syn::parse(&plan.to_sql()).unwrap();
 
 	assert_eq!(parsed, parsed_formated, "formatting the sql type changed the query");
 	assert_eq!(parsed, parsed_formated_plan, "formatting the expr type changed the query");

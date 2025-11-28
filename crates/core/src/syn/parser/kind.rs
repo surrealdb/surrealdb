@@ -272,6 +272,7 @@ impl Parser<'_> {
 mod tests {
 	use reblessive::Stack;
 	use rstest::rstest;
+	use surrealdb_types::ToSql;
 
 	use super::*;
 
@@ -330,7 +331,7 @@ mod tests {
 	fn test_kind(#[case] sql: &str, #[case] expected_str: &str, #[case] expected_kind: Kind) {
 		let res = kind(sql);
 		let out = res.unwrap();
-		assert_eq!(expected_str, format!("{}", out));
+		assert_eq!(expected_str, out.to_sql());
 		assert_eq!(expected_kind, out);
 	}
 }

@@ -1,4 +1,3 @@
-use std::fmt::{self, Display, Formatter};
 use std::time;
 
 use revision::revisioned;
@@ -12,15 +11,6 @@ use crate::val::{Duration, Value};
 pub(crate) struct ChangeFeed {
 	pub expiry: time::Duration,
 	pub store_diff: bool,
-}
-impl Display for ChangeFeed {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "CHANGEFEED {}", Duration(self.expiry))?;
-		if self.store_diff {
-			write!(f, " INCLUDE ORIGINAL")?;
-		};
-		Ok(())
-	}
 }
 
 impl Default for ChangeFeed {

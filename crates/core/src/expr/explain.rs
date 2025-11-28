@@ -1,14 +1,11 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct Explain(pub bool);
 
-impl fmt::Display for Explain {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str("EXPLAIN")?;
-		if self.0 {
-			f.write_str(" FULL")?;
-		}
-		Ok(())
+impl ToSql for Explain {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		let explain: crate::sql::Explain = (*self).into();
+		explain.fmt_sql(f, sql_fmt);
 	}
 }

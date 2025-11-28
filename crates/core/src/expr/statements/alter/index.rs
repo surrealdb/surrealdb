@@ -1,7 +1,7 @@
-use std::fmt::{self, Display};
 use std::ops::Deref;
 
 use anyhow::Result;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use uuid::Uuid;
 
 use crate::catalog::TableDefinition;
@@ -93,22 +93,21 @@ impl AlterIndexStatement {
 	}
 }
 
-impl Display for AlterIndexStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "ALTER INDEX")?;
+impl ToSql for AlterIndexStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "ALTER INDEX");
 		if self.if_exists {
-			write!(f, " IF EXISTS")?
+			write_sql!(f, fmt, " IF EXISTS");
 		}
-		write!(f, " {} ON {}", self.name, EscapeKwIdent(&self.table, &["IF"]))?;
+		write_sql!(f, fmt, " {} ON {}", self.name, EscapeKwIdent(&self.table, &["IF"]));
 
 		if self.prepare_remove {
-			write!(f, " PREPARE REMOVE")?;
+			write_sql!(f, fmt, " PREPARE REMOVE");
 		}
 		match self.comment {
-			AlterKind::Set(ref x) => write!(f, " COMMENT {}", QuoteStr(x))?,
-			AlterKind::Drop => write!(f, " DROP COMMENT")?,
+			AlterKind::Set(ref x) => write_sql!(f, fmt, " COMMENT {}", QuoteStr(x)),
+			AlterKind::Drop => write_sql!(f, fmt, " DROP COMMENT"),
 			AlterKind::None => {}
 		}
-		Ok(())
 	}
 }

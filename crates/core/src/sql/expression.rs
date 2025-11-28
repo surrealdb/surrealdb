@@ -1,6 +1,6 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeIdent, Pretty};
+use crate::fmt::EscapeIdent;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::operator::BindingPower;
 use crate::sql::statements::{
@@ -79,9 +79,9 @@ impl Expr {
 			Expr::Literal(l) => match l {
 				Literal::String(s) => Idiom::field(s.clone()),
 				Literal::Datetime(d) => Idiom::field(d.to_string()),
-				x => Idiom::field(x.to_string()),
+				x => Idiom::field(x.to_sql()),
 			},
-			x => Idiom::field(x.to_string()),
+			x => Idiom::field(x.to_sql()),
 		}
 	}
 
@@ -368,18 +368,16 @@ fn convert_public_record_id_key_to_internal(
 	}
 }
 
-impl fmt::Display for Expr {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		use std::fmt::Write;
-		let mut f = Pretty::from(f);
+impl ToSql for Expr {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		match self {
-			Expr::Literal(literal) => write!(f, "{literal}"),
-			Expr::Param(param) => write!(f, "{param}"),
-			Expr::Idiom(idiom) => write!(f, "{idiom}"),
-			Expr::Table(ident) => write!(f, "{}", EscapeIdent(ident)),
-			Expr::Mock(mock) => write!(f, "{mock}"),
-			Expr::Block(block) => write!(f, "{block}"),
-			Expr::Constant(constant) => write!(f, "{constant}"),
+			Expr::Literal(literal) => literal.fmt_sql(f, fmt),
+			Expr::Param(param) => param.fmt_sql(f, fmt),
+			Expr::Idiom(idiom) => idiom.fmt_sql(f, fmt),
+			Expr::Table(ident) => write_sql!(f, fmt, "{}", EscapeIdent(ident)),
+			Expr::Mock(mock) => mock.fmt_sql(f, fmt),
+			Expr::Block(block) => block.fmt_sql(f, fmt),
+			Expr::Constant(constant) => constant.fmt_sql(f, fmt),
 			Expr::Prefix {
 				op,
 				expr,
@@ -390,9 +388,9 @@ impl fmt::Display for Expr {
 					|| expr_bp < op_bp
 					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
 				{
-					write!(f, "{op}({expr})")
+					write_sql!(f, fmt, "{op}({expr})");
 				} else {
-					write!(f, "{op}{expr}")
+					write_sql!(f, fmt, "{op}{expr}");
 				}
 			}
 			Expr::Postfix {
@@ -405,9 +403,9 @@ impl fmt::Display for Expr {
 					|| expr_bp < op_bp
 					|| expr_bp == op_bp && matches!(expr_bp, BindingPower::Range)
 				{
-					write!(f, "({expr}){op}")
+					write_sql!(f, fmt, "({expr}){op}");
 				} else {
-					write!(f, "{expr}{op}")
+					write_sql!(f, fmt, "{expr}{op}");
 				}
 			}
 			Expr::Binary {
@@ -424,9 +422,9 @@ impl fmt::Display for Expr {
 					|| left_bp == op_bp
 						&& matches!(left_bp, BindingPower::Range | BindingPower::Relation)
 				{
-					write!(f, "({left})")?;
+					write_sql!(f, fmt, "({left})");
 				} else {
-					write!(f, "{left}")?;
+					write_sql!(f, fmt, "{left}");
 				}
 
 				if matches!(
@@ -436,9 +434,11 @@ impl fmt::Display for Expr {
 						| BinaryOperator::RangeInclusive
 						| BinaryOperator::RangeSkipInclusive
 				) {
-					write!(f, "{op}")?;
+					op.fmt_sql(f, fmt);
 				} else {
-					write!(f, " {op} ")?;
+					f.push(' ');
+					op.fmt_sql(f, fmt);
+					f.push(' ');
 				}
 
 				if right.needs_parentheses()
@@ -446,33 +446,33 @@ impl fmt::Display for Expr {
 					|| right_bp == op_bp
 						&& matches!(right_bp, BindingPower::Range | BindingPower::Relation)
 				{
-					write!(f, "({right})")
+					write_sql!(f, fmt, "({right})");
 				} else {
-					write!(f, "{right}")
+					write_sql!(f, fmt, "{right}");
 				}
 			}
-			Expr::FunctionCall(function_call) => write!(f, "{function_call}"),
-			Expr::Closure(closure) => write!(f, "{closure}"),
-			Expr::Break => write!(f, "BREAK"),
-			Expr::Continue => write!(f, "CONTINUE"),
-			Expr::Return(x) => write!(f, "{x}"),
-			Expr::Throw(expr) => write!(f, "THROW {expr}"),
-			Expr::IfElse(s) => write!(f, "{s}"),
-			Expr::Select(s) => write!(f, "{s}"),
-			Expr::Create(s) => write!(f, "{s}"),
-			Expr::Update(s) => write!(f, "{s}"),
-			Expr::Delete(s) => write!(f, "{s}"),
-			Expr::Relate(s) => write!(f, "{s}"),
-			Expr::Insert(s) => write!(f, "{s}"),
-			Expr::Define(s) => write!(f, "{s}"),
-			Expr::Remove(s) => write!(f, "{s}"),
-			Expr::Rebuild(s) => write!(f, "{s}"),
-			Expr::Upsert(s) => write!(f, "{s}"),
-			Expr::Alter(s) => write!(f, "{s}"),
-			Expr::Info(s) => write!(f, "{s}"),
-			Expr::Foreach(s) => write!(f, "{s}"),
-			Expr::Let(s) => write!(f, "{s}"),
-			Expr::Sleep(s) => write!(f, "{s}"),
+			Expr::FunctionCall(function_call) => function_call.fmt_sql(f, fmt),
+			Expr::Closure(closure) => closure.fmt_sql(f, fmt),
+			Expr::Break => f.push_str("BREAK"),
+			Expr::Continue => f.push_str("CONTINUE"),
+			Expr::Return(x) => x.fmt_sql(f, fmt),
+			Expr::Throw(expr) => write_sql!(f, fmt, "THROW {expr}"),
+			Expr::IfElse(s) => s.fmt_sql(f, fmt),
+			Expr::Select(s) => s.fmt_sql(f, fmt),
+			Expr::Create(s) => s.fmt_sql(f, fmt),
+			Expr::Update(s) => s.fmt_sql(f, fmt),
+			Expr::Delete(s) => s.fmt_sql(f, fmt),
+			Expr::Relate(s) => s.fmt_sql(f, fmt),
+			Expr::Insert(s) => s.fmt_sql(f, fmt),
+			Expr::Define(s) => s.fmt_sql(f, fmt),
+			Expr::Remove(s) => s.fmt_sql(f, fmt),
+			Expr::Rebuild(s) => s.fmt_sql(f, fmt),
+			Expr::Upsert(s) => s.fmt_sql(f, fmt),
+			Expr::Alter(s) => s.fmt_sql(f, fmt),
+			Expr::Info(s) => s.fmt_sql(f, fmt),
+			Expr::Foreach(s) => s.fmt_sql(f, fmt),
+			Expr::Let(s) => s.fmt_sql(f, fmt),
+			Expr::Sleep(s) => s.fmt_sql(f, fmt),
 		}
 	}
 }

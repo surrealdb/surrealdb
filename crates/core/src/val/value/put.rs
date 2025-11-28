@@ -1,3 +1,5 @@
+use surrealdb_types::ToSql;
+
 use crate::expr::part::{Next, Part};
 use crate::val::Value;
 
@@ -9,14 +11,14 @@ impl Value {
 			Some(p) => match self {
 				// Current value at path is an object
 				Value::Object(v) => match p {
-					Part::Lookup(g) => {
-						let entry = v.entry(g.to_raw()).or_insert_with(Value::empty_object);
+					Part::Lookup(lookup) => {
+						let entry = v.entry(lookup.to_sql()).or_insert_with(Value::empty_object);
 						if !entry.is_nullish() {
 							entry.put(path.next(), val);
 						} else {
 							let mut obj = Value::empty_object();
 							obj.put(path.next(), val);
-							v.insert(g.to_raw(), obj);
+							v.insert(lookup.to_sql(), obj);
 						}
 					}
 					Part::Field(f) => {

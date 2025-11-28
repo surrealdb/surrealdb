@@ -1,4 +1,5 @@
 use anyhow::Result;
+use surrealdb_types::ToSql;
 
 use crate::err::Error;
 use crate::val::{RecordId, RecordIdKey, Value};
@@ -65,7 +66,7 @@ impl Value {
 			}
 			// Any other value is wrong
 			id => Err(anyhow::Error::new(Error::IdInvalid {
-				value: id.to_string(),
+				value: id.to_sql(),
 			})),
 		}
 	}

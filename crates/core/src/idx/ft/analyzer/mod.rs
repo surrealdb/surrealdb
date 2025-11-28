@@ -5,6 +5,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use filter::Filter;
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog;
 use crate::ctx::Context;
@@ -64,10 +65,10 @@ impl Analyzer {
 		match val {
 			Value::String(s) => tks.push(self.generate_tokens(stk, ctx, opt, stage, s).await?),
 			Value::Number(n) => {
-				tks.push(self.generate_tokens(stk, ctx, opt, stage, n.to_string()).await?)
+				tks.push(self.generate_tokens(stk, ctx, opt, stage, n.to_sql()).await?)
 			}
 			Value::Bool(b) => {
-				tks.push(self.generate_tokens(stk, ctx, opt, stage, b.to_string()).await?)
+				tks.push(self.generate_tokens(stk, ctx, opt, stage, b.to_sql()).await?)
 			}
 			Value::Array(a) => {
 				for v in a.0 {

@@ -2,7 +2,6 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::{self, Write};
 use std::ops::Bound;
 
 use anyhow::{Result, bail};
@@ -12,13 +11,13 @@ use revision::revisioned;
 use rust_decimal::prelude::*;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::err::Error;
 use crate::expr::kind::GeometryKind;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{self, ClosureExpr};
-use crate::fmt::{Pretty, QuoteStr};
+use crate::fmt::QuoteStr;
 use crate::sql::expression::convert_public_value_to_internal;
 
 pub(crate) mod array;
@@ -220,8 +219,8 @@ impl Value {
 		match self {
 			Value::String(v) => v,
 			Value::Uuid(v) => v.to_raw(),
-			Value::Datetime(v) => v.to_raw_string(),
-			_ => self.to_string(),
+			Value::Datetime(v) => v.to_string(),
+			_ => self.to_sql(),
 		}
 	}
 
@@ -230,8 +229,8 @@ impl Value {
 		match self {
 			Value::String(v) => v.clone(),
 			Value::Uuid(v) => v.to_raw(),
-			Value::Datetime(v) => v.to_raw_string(),
-			_ => self.to_string(),
+			Value::Datetime(v) => v.to_string(),
+			_ => self.to_sql(),
 		}
 	}
 
@@ -569,42 +568,35 @@ impl Value {
 	}
 }
 
-impl fmt::Display for Value {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		let mut f = Pretty::from(f);
-		match &self {
-			Value::None => write!(f, "NONE"),
-			Value::Null => write!(f, "NULL"),
-			Value::Array(v) => write!(f, "{v}"),
-			Value::Set(v) => write!(f, "{v}"),
-			Value::Bool(v) => write!(f, "{v}"),
-			Value::Bytes(v) => write!(f, "{v}"),
-			Value::Datetime(v) => write!(f, "{v}"),
-			Value::Duration(v) => write!(f, "{v}"),
-			Value::Geometry(v) => write!(f, "{v}"),
-			Value::Number(v) => write!(f, "{v}"),
-			Value::Object(v) => write!(f, "{v}"),
-			Value::Range(v) => write!(f, "{v}"),
-			Value::Regex(v) => write!(f, "{v}"),
-			Value::String(v) => write!(f, "{}", QuoteStr(v)),
-			Value::RecordId(v) => write!(f, "{v}"),
-			Value::Uuid(v) => write!(f, "{v}"),
-			Value::Closure(v) => write!(f, "{v}"),
-			Value::File(v) => write!(f, "{v}"),
-			Value::Table(v) => write!(f, "{v}"),
-		}
-	}
-}
-
 impl ToSql for Value {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		match self {
+			Value::None => f.push_str("NONE"),
+			Value::Null => f.push_str("NULL"),
+			Value::Bool(v) => v.fmt_sql(f, sql_fmt),
+			Value::Number(v) => v.fmt_sql(f, sql_fmt),
+			Value::String(v) => write_sql!(f, sql_fmt, "{}", QuoteStr(v)),
+			Value::Duration(v) => v.fmt_sql(f, sql_fmt),
+			Value::Datetime(v) => v.fmt_sql(f, sql_fmt),
+			Value::Uuid(v) => v.fmt_sql(f, sql_fmt),
+			Value::Array(v) => v.fmt_sql(f, sql_fmt),
+			Value::Set(v) => v.fmt_sql(f, sql_fmt),
+			Value::Object(v) => v.fmt_sql(f, sql_fmt),
+			Value::Geometry(v) => v.fmt_sql(f, sql_fmt),
+			Value::Bytes(v) => v.fmt_sql(f, sql_fmt),
+			Value::Table(v) => v.fmt_sql(f, sql_fmt),
+			Value::RecordId(v) => v.fmt_sql(f, sql_fmt),
+			Value::File(v) => v.fmt_sql(f, sql_fmt),
+			Value::Regex(v) => v.fmt_sql(f, sql_fmt),
+			Value::Range(v) => v.fmt_sql(f, sql_fmt),
+			Value::Closure(v) => v.fmt_sql(f, sql_fmt),
+		}
 	}
 }
 
 impl InfoStructure for Value {
 	fn structure(self) -> Value {
-		self.to_string().into()
+		self.to_sql().into()
 	}
 }
 
@@ -754,7 +746,7 @@ impl TryNeg for Value {
 	fn try_neg(self) -> Result<Self> {
 		Ok(match self {
 			Self::Number(n) => Self::Number(n.try_neg()?),
-			v => bail!(Error::TryNeg(v.to_string())),
+			v => bail!(Error::TryNeg(v.to_sql())),
 		})
 	}
 }

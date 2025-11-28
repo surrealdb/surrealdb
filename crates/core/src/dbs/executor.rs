@@ -438,7 +438,7 @@ impl Executor {
 				continue;
 			}
 
-			trace!(target: TARGET, statement = %stmt, "Executing statement");
+			trace!(target: TARGET, statement = %stmt.to_sql(), "Executing statement");
 
 			let query_type = match stmt {
 				TopLevelExpr::Live(_) => QueryType::Live,
@@ -456,7 +456,7 @@ impl Executor {
 						res.query_type = QueryType::Other;
 						res.result = Err(DbResultError::QueryNotExecuted(format!(
 							"The query was not executed due to a failed transaction: {}",
-							stmt
+							stmt.to_sql()
 						)));
 					}
 
@@ -482,7 +482,7 @@ impl Executor {
 							time: Duration::ZERO,
 							result: Err(DbResultError::QueryNotExecuted(format!(
 								"The query was not executed due to a failed transaction: {}",
-								stmt
+								stmt.to_sql()
 							))),
 							query_type: QueryType::Other,
 						});

@@ -6,10 +6,11 @@ pub mod range;
 pub use key::*;
 pub use range::*;
 use serde::{Deserialize, Serialize};
+use surrealdb_types_derive::write_sql;
 
-use crate::sql::ToSql;
-use crate::utils::escape::EscapeSqonIdent;
-use crate::{Table, write_sql};
+use crate as surrealdb_types;
+use crate::Table;
+use crate::sql::{SqlFormat, ToSql};
 
 /// Represents a record identifier in SurrealDB
 ///
@@ -48,8 +49,8 @@ impl RecordId {
 }
 
 impl ToSql for RecordId {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}:", EscapeSqonIdent(self.table.as_str()));
-		self.key.fmt_sql(f);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		use crate::utils::escape::EscapeSqonIdent;
+		write_sql!(f, fmt, "{}:{}", EscapeSqonIdent(self.table.as_str()), self.key);
 	}
 }

@@ -1,5 +1,3 @@
-use std::fmt::{self, Display, Formatter};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
 
@@ -126,16 +124,5 @@ impl RemoveUserStatement {
 				Ok(Value::None)
 			}
 		}
-	}
-}
-
-impl Display for RemoveUserStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE USER")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " {} ON {}", self.name, self.base)?;
-		Ok(())
 	}
 }

@@ -7,6 +7,7 @@ use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
@@ -232,6 +233,12 @@ impl fmt::Display for Duration {
 			write!(f, "{nano}ns")?;
 		}
 		Ok(())
+	}
+}
+
+impl ToSql for Duration {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		self.to_string().fmt_sql(f, sql_fmt)
 	}
 }
 

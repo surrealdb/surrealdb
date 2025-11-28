@@ -1,4 +1,4 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::Expr;
 use crate::sql::fetch::Fetchs;
@@ -10,13 +10,12 @@ pub struct OutputStatement {
 	pub fetch: Option<Fetchs>,
 }
 
-impl fmt::Display for OutputStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "RETURN {}", self.what)?;
+impl ToSql for OutputStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "RETURN {}", self.what);
 		if let Some(ref v) = self.fetch {
-			write!(f, " {v}")?
+			write_sql!(f, sql_fmt, " {}", v);
 		}
-		Ok(())
 	}
 }
 

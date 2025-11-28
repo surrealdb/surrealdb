@@ -1,6 +1,7 @@
 use std::ops::Bound;
 
 use anyhow::{Result, ensure};
+use surrealdb_types::ToSql;
 
 use super::args::{Any, Cast, Optional};
 use crate::cnf::GENERATION_ALLOCATION_LIMIT;
@@ -138,7 +139,7 @@ pub fn replace((val, search, replace): (String, Value, String)) -> Result<Value>
 			name: "string::replace".to_string(),
 			message: format!(
 				"Argument 2 was the wrong type. Expected a string but found {}",
-				search
+				search.to_sql()
 			),
 		})),
 	}
@@ -632,6 +633,8 @@ pub mod semver {
 
 #[cfg(test)]
 mod tests {
+	use surrealdb_types::ToSql;
+
 	use super::{matches, replace, slice};
 	use crate::fnc::args::{Cast, Optional};
 	use crate::val::Value;
@@ -672,7 +675,7 @@ mod tests {
 				Value::from(expected),
 				"replace({},{},{})",
 				base,
-				pattern,
+				pattern.to_sql(),
 				replacement
 			);
 		}

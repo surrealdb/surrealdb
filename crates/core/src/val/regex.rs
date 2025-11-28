@@ -11,6 +11,7 @@ use revision::revisioned;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::cnf::{REGEX_CACHE_SIZE, REGEX_SIZE_LIMIT};
 
@@ -89,8 +90,14 @@ impl Debug for Regex {
 
 impl Display for Regex {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+		std::fmt::Display::fmt(&self.0, f)
+	}
+}
+
+impl ToSql for Regex {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		let t = self.0.to_string().replace('/', "\\/");
-		write!(f, "/{}/", &t)
+		write_sql!(f, sql_fmt, "/{}/", &t)
 	}
 }
 

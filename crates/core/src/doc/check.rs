@@ -36,7 +36,7 @@ impl Document {
 				ensure!(
 					tb.allows_normal(),
 					Error::TableCheck {
-						record: self.id()?.to_string(),
+						record: self.id()?.to_sql(),
 						relation: false,
 						target_type: tb.table_type.to_sql(),
 					}
@@ -46,7 +46,7 @@ impl Document {
 				ensure!(
 					tb.allows_normal(),
 					Error::TableCheck {
-						record: self.id()?.to_string(),
+						record: self.id()?.to_sql(),
 						relation: false,
 						target_type: tb.table_type.to_sql(),
 					}
@@ -56,7 +56,7 @@ impl Document {
 				ensure!(
 					tb.allows_relation(),
 					Error::TableCheck {
-						record: self.id()?.to_string(),
+						record: self.id()?.to_sql(),
 						relation: true,
 						target_type: tb.table_type.to_sql(),
 					}
@@ -67,7 +67,7 @@ impl Document {
 					ensure!(
 						tb.allows_relation(),
 						Error::TableCheck {
-							record: self.id()?.to_string(),
+							record: self.id()?.to_sql(),
 							relation: true,
 							target_type: tb.table_type.to_sql(),
 						}
@@ -77,7 +77,7 @@ impl Document {
 					ensure!(
 						tb.allows_normal(),
 						Error::TableCheck {
-							record: self.id()?.to_string(),
+							record: self.id()?.to_sql(),
 							relation: false,
 							target_type: tb.table_type.to_sql(),
 						}
@@ -127,7 +127,7 @@ impl Document {
 			match v.pick(p) {
 				Value::RecordId(v) if v.key.is_range() => {
 					bail!(Error::IdInvalid {
-						value: v.to_string(),
+						value: v.to_sql(),
 					})
 				}
 				Value::RecordId(v) if v.eq(r) => {}
@@ -136,7 +136,7 @@ impl Document {
 					ensure!(
 						r.key == v,
 						Error::IdMismatch {
-							value: v.to_string()
+							value: v.to_sql()
 						}
 					)
 				}
@@ -155,7 +155,7 @@ impl Document {
 		ensure!(
 			!rid.key.is_range(),
 			Error::IdInvalid {
-				value: rid.to_string(),
+				value: rid.to_sql(),
 			}
 		);
 

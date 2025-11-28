@@ -1,4 +1,4 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{CoverStmtsSql, Fmt};
 use crate::sql::{Cond, Explain, Expr, Output, Timeout, With};
@@ -17,32 +17,31 @@ pub struct DeleteStatement {
 	pub explain: Option<Explain>,
 }
 
-impl fmt::Display for DeleteStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DELETE")?;
+impl ToSql for DeleteStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "DELETE");
 		if self.only {
-			f.write_str(" ONLY")?
+			f.push_str(" ONLY")
 		}
-		write!(f, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmtsSql)))?;
+		write_sql!(f, fmt, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmtsSql)));
 		if let Some(ref v) = self.with {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.cond {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.output {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if self.parallel {
-			f.write_str(" PARALLEL")?
+			f.push_str(" PARALLEL");
 		}
 		if let Some(ref v) = self.explain {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
-		Ok(())
 	}
 }
 

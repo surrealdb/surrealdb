@@ -1,4 +1,4 @@
-use std::fmt;
+use crate::{SqlFormat, ToSql};
 
 pub fn format_seperated<'a, I>(i: &'a [I], seperator: &'a str) -> Seperated<'a, I> {
 	Seperated {
@@ -12,17 +12,16 @@ pub struct Seperated<'a, I> {
 	seperator: &'a str,
 }
 
-impl<'a, I> fmt::Display for Seperated<'a, I>
+impl<'a, I> ToSql for Seperated<'a, I>
 where
-	I: fmt::Display,
+	I: ToSql,
 {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
 		for (idx, i) in self.items.iter().enumerate() {
 			if idx != 0 {
-				f.write_str(self.seperator)?;
+				f.push_str(self.seperator);
 			}
-			i.fmt(f)?;
+			i.fmt_sql(f, fmt);
 		}
-		Ok(())
 	}
 }

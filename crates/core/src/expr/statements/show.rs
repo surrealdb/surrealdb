@@ -1,12 +1,9 @@
-use std::fmt;
-
 use anyhow::Result;
 
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::expr::{Base, Value};
-use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Datetime;
 
@@ -45,23 +42,5 @@ impl ShowStatement {
 		// Return the changes
 		let a: Vec<Value> = r.iter().cloned().map(|x| x.into_value()).collect();
 		Ok(a.into())
-	}
-}
-
-impl fmt::Display for ShowStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "SHOW CHANGES FOR")?;
-		match self.table {
-			Some(ref v) => write!(f, " TABLE {}", EscapeKwFreeIdent(v))?,
-			None => write!(f, " DATABASE")?,
-		}
-		match self.since {
-			ShowSince::Timestamp(ref v) => write!(f, " SINCE {}", v)?,
-			ShowSince::Versionstamp(ref v) => write!(f, " SINCE {}", v)?,
-		}
-		if let Some(ref v) = self.limit {
-			write!(f, " LIMIT {}", v)?
-		}
-		Ok(())
 	}
 }

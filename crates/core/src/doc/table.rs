@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::aggregation::{self, AggregateFields, AggregationAnalysis, AggregationStat};
 use crate::catalog::providers::TableProvider;
@@ -765,7 +766,7 @@ impl Document {
 							name: "math::max".to_string(),
 							message: format!(
 								"Argument 1 was the wrong type. Expected `number` but found `{}`",
-								after_args[*arg]
+								after_args[*arg].to_sql()
 							),
 						})
 					};
@@ -795,7 +796,7 @@ impl Document {
 							name: "math::min".to_string(),
 							message: format!(
 								"Argument 1 was the wrong type. Expected `number` but found `{}`",
-								after_args[*arg]
+								after_args[*arg].to_sql()
 							),
 						})
 					};
@@ -822,7 +823,7 @@ impl Document {
 							name: "math::sum".to_string(),
 							message: format!(
 								"Argument 1 was the wrong type. Expected `number` but found `{}`",
-								after_args[*arg]
+								after_args[*arg].to_sql()
 							),
 						})
 					};
@@ -845,7 +846,7 @@ impl Document {
 							name: "math::mean".to_string(),
 							message: format!(
 								"Argument 1 was the wrong type. Expected `number` but found `{}`",
-								after_args[*arg]
+								after_args[*arg].to_sql()
 							),
 						})
 					};
@@ -866,7 +867,7 @@ impl Document {
 							name: "time::max".to_string(),
 							message: format!(
 								"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
-								after_args[*arg]
+								after_args[*arg].to_sql()
 							),
 						})
 					};
@@ -894,7 +895,7 @@ impl Document {
 							name: "time::min".to_string(),
 							message: format!(
 								"Argument 1 was the wrong type. Expected `datetime` but found `{}`",
-								after_args[*arg]
+								after_args[*arg].to_sql()
 							),
 						})
 					};

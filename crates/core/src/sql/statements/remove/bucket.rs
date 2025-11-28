@@ -1,4 +1,4 @@
-use std::fmt::{self, Display, Formatter};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::{Expr, Literal};
 
@@ -18,14 +18,13 @@ impl Default for RemoveBucketStatement {
 	}
 }
 
-impl Display for RemoveBucketStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REMOVE BUCKET")?;
+impl ToSql for RemoveBucketStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "REMOVE BUCKET");
 		if self.if_exists {
-			write!(f, " IF EXISTS")?
+			write_sql!(f, sql_fmt, " IF EXISTS");
 		}
-		write!(f, " {}", self.name)?;
-		Ok(())
+		write_sql!(f, sql_fmt, " {}", self.name);
 	}
 }
 

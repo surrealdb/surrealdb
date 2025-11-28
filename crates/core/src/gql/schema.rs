@@ -8,6 +8,7 @@ use async_graphql::{Name, Value as GqlValue};
 use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use serde_json::Number;
+use surrealdb_types::ToSql;
 
 use super::error::{GqlError, resolver_error};
 #[cfg(debug_assertions)]
@@ -207,7 +208,7 @@ pub(crate) fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> 
 			num @ SurNumber::Decimal(_) => GqlValue::String(num.to_string()),
 		},
 		SurValue::String(s) => GqlValue::String(s),
-		d @ SurValue::Duration(_) => GqlValue::String(d.to_string()),
+		d @ SurValue::Duration(_) => GqlValue::String(d.to_sql()),
 		SurValue::Datetime(d) => GqlValue::String(d.to_rfc3339()),
 		SurValue::Uuid(uuid) => GqlValue::String(uuid.to_string()),
 		SurValue::Array(a) => GqlValue::List(
@@ -227,7 +228,7 @@ pub(crate) fn sql_value_to_gql_value(v: SurValue) -> Result<GqlValue, GqlError> 
 		),
 		SurValue::Geometry(_) => return Err(resolver_error("unimplemented: Geometry types")),
 		SurValue::Bytes(b) => GqlValue::Binary(b.into_inner()),
-		SurValue::RecordId(t) => GqlValue::String(t.to_string()),
+		SurValue::RecordId(t) => GqlValue::String(t.to_sql()),
 		v => return Err(internal_error(format!("found unsupported value variant: {v:?}"))),
 	};
 	Ok(out)
@@ -251,7 +252,7 @@ pub fn kind_to_type(kind: Kind, types: &mut Vec<Type>) -> Result<TypeRef, GqlErr
 		Kind::Regex => return Err(schema_error("Kind::Regex is not yet supported")),
 		Kind::String => TypeRef::named(TypeRef::STRING),
 		Kind::Uuid => TypeRef::named("uuid"),
-		Kind::Table(ref _t) => TypeRef::named(kind.to_string()),
+		Kind::Table(ref _t) => TypeRef::named(kind.to_sql()),
 		Kind::Record(mut tables) => match tables.len() {
 			0 => TypeRef::named("record"),
 			1 => TypeRef::named(tables.pop().expect("single table in record kind")),

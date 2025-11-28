@@ -1,4 +1,4 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql};
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -31,9 +31,9 @@ pub enum Constant {
 	// Add new variants here
 }
 
-impl fmt::Display for Constant {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		f.write_str(match self {
+impl ToSql for Constant {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(match self {
 			Self::MathE => "math::E",
 			Self::MathFrac1Pi => "math::FRAC_1_PI",
 			Self::MathFrac1Sqrt2 => "math::FRAC_1_SQRT_2",

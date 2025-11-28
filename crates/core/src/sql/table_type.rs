@@ -1,5 +1,4 @@
-use std::fmt;
-use std::fmt::Display;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::Kind;
 
@@ -13,29 +12,28 @@ pub enum TableType {
 	Relation(Relation),
 }
 
-impl Display for TableType {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl ToSql for TableType {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
 		match self {
 			TableType::Normal => {
-				f.write_str(" NORMAL")?;
+				write_sql!(f, sql_fmt, " NORMAL");
 			}
 			TableType::Relation(rel) => {
-				f.write_str(" RELATION")?;
+				write_sql!(f, sql_fmt, " RELATION");
 				if let Some(kind) = &rel.from {
-					write!(f, " IN {kind}")?;
+					write_sql!(f, sql_fmt, " IN {kind}");
 				}
 				if let Some(kind) = &rel.to {
-					write!(f, " OUT {kind}")?;
+					write_sql!(f, sql_fmt, " OUT {kind}");
 				}
 				if rel.enforced {
-					write!(f, " ENFORCED")?;
+					write_sql!(f, sql_fmt, " ENFORCED");
 				}
 			}
 			TableType::Any => {
-				f.write_str(" ANY")?;
+				write_sql!(f, sql_fmt, " ANY");
 			}
 		}
-		Ok(())
 	}
 }
 

@@ -1,5 +1,3 @@
-use std::fmt::{self, Display, Formatter};
-
 use crate::types::PublicDuration;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -7,13 +5,14 @@ pub struct ChangeFeed {
 	pub expiry: PublicDuration,
 	pub store_diff: bool,
 }
-impl Display for ChangeFeed {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "CHANGEFEED {}", self.expiry)?;
+
+impl surrealdb_types::ToSql for ChangeFeed {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: surrealdb_types::SqlFormat) {
+		use surrealdb_types::write_sql;
+		write_sql!(f, sql_fmt, "CHANGEFEED {}", self.expiry);
 		if self.store_diff {
-			write!(f, " INCLUDE ORIGINAL")?;
-		};
-		Ok(())
+			f.push_str(" INCLUDE ORIGINAL");
+		}
 	}
 }
 

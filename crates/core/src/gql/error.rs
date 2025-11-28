@@ -2,6 +2,7 @@ use std::backtrace;
 use std::fmt::Debug;
 
 use async_graphql::{InputType, InputValueError};
+use surrealdb_types::ToSql;
 use thiserror::Error;
 
 use crate::expr::Kind;
@@ -29,7 +30,7 @@ pub enum GqlError {
 	#[error("Internal Error: {0}")]
 	InternalError(String),
 
-	#[error("Error converting value: {val} to type: {target}")]
+	#[error("Error converting value: {val} to type: {}", target.to_sql())]
 	TypeError {
 		target: Kind,
 		val: async_graphql::Value,

@@ -1,4 +1,4 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::EscapeKwFreeIdent;
 
@@ -21,9 +21,9 @@ impl Param {
 	}
 }
 
-impl fmt::Display for Param {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "${}", EscapeKwFreeIdent(&self.0))
+impl ToSql for Param {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "${}", EscapeKwFreeIdent(&self.0))
 	}
 }
 

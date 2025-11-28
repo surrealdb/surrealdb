@@ -1,5 +1,5 @@
 use revision::revisioned;
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Filter, Tokenizer};
@@ -35,8 +35,8 @@ impl AnalyzerDefinition {
 }
 
 impl ToSql for &AnalyzerDefinition {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self.to_sql_definition())
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_sql_definition().fmt_sql(f, fmt)
 	}
 }
 
@@ -48,7 +48,7 @@ impl InfoStructure for AnalyzerDefinition {
 			"tokenizers".to_string(), if let Some(v) = self.tokenizers =>
 				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),
 			"filters".to_string(), if let Some(v) = self.filters =>
-				v.into_iter().map(|v| v.to_string().into()).collect::<Array>().into(),
+				v.into_iter().map(|v| v.to_sql().into()).collect::<Array>().into(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
 		})
 	}

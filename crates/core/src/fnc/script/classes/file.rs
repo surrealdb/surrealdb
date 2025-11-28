@@ -1,5 +1,6 @@
 use js::JsLifetime;
 use js::class::Trace;
+use surrealdb_types::ToSql;
 
 use crate::val;
 
@@ -21,7 +22,7 @@ impl File {
 
 	#[qjs(get)]
 	pub fn value(&self) -> String {
-		self.value.to_string()
+		self.value.to_sql()
 	}
 	// Compare two File instances
 	pub fn is(a: &File, b: &File) -> bool {

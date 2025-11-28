@@ -5,8 +5,7 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 
-use crate::sql::ToSql;
-use crate::write_sql;
+use crate::sql::{SqlFormat, ToSql};
 
 pub(crate) static SECONDS_PER_YEAR: u64 = 365 * SECONDS_PER_DAY;
 pub(crate) static SECONDS_PER_WEEK: u64 = 7 * SECONDS_PER_DAY;
@@ -117,13 +116,13 @@ impl Duration {
 		weeks.checked_mul(SECONDS_PER_WEEK).map(std::time::Duration::from_secs).map(|x| x.into())
 	}
 
-	pub(crate) fn fmt_internal(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+	pub(crate) fn fmt_sql_internal(&self, f: &mut String) {
 		// Split up the duration
 		let secs = self.0.as_secs();
 		let nano = self.0.subsec_nanos();
 		// Ensure no empty output
 		if secs == 0 && nano == 0 {
-			return write!(f, "0ns");
+			return f.push_str("0ns");
 		}
 		// Calculate the total years
 		let year = secs / SECONDS_PER_YEAR;
@@ -148,33 +147,41 @@ impl Duration {
 		let nano = nano % NANOSECONDS_PER_MICROSECOND;
 		// Write the different parts
 		if year > 0 {
-			write!(f, "{year}y")?;
+			f.push_str(&year.to_string());
+			f.push('y');
 		}
 		if week > 0 {
-			write!(f, "{week}w")?;
+			f.push_str(&week.to_string());
+			f.push('w');
 		}
 		if days > 0 {
-			write!(f, "{days}d")?;
+			f.push_str(&days.to_string());
+			f.push('d');
 		}
 		if hour > 0 {
-			write!(f, "{hour}h")?;
+			f.push_str(&hour.to_string());
+			f.push('h');
 		}
 		if mins > 0 {
-			write!(f, "{mins}m")?;
+			f.push_str(&mins.to_string());
+			f.push('m');
 		}
 		if secs > 0 {
-			write!(f, "{secs}s")?;
+			f.push_str(&secs.to_string());
+			f.push('s');
 		}
 		if msec > 0 {
-			write!(f, "{msec}ms")?;
+			f.push_str(&msec.to_string());
+			f.push_str("ms");
 		}
 		if usec > 0 {
-			write!(f, "{usec}µs")?;
+			f.push_str(&usec.to_string());
+			f.push_str("µs");
 		}
 		if nano > 0 {
-			write!(f, "{nano}ns")?;
+			f.push_str(&nano.to_string());
+			f.push_str("ns");
 		}
-		Ok(())
 	}
 }
 
@@ -333,13 +340,13 @@ impl Deref for Duration {
 
 impl std::fmt::Display for Duration {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-		self.fmt_internal(f)
+		f.write_str(&self.to_sql())
 	}
 }
 
 impl ToSql for Duration {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		self.fmt_sql_internal(f);
 	}
 }
 

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
-use surrealdb_types::{ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use uuid::Uuid;
 
 use crate::expr::statements::info::InfoStructure;
@@ -59,20 +59,14 @@ impl Node {
 	}
 }
 
-impl Display for Node {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "NODE {} SEEN {}", self.id, self.heartbeat)?;
-		match self.gc {
-			true => write!(f, " ARCHIVED")?,
-			false => write!(f, " ACTIVE")?,
-		};
-		Ok(())
-	}
-}
-
 impl ToSql for Node {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "NODE {} SEEN {}", self.id, self.heartbeat);
+		if self.gc {
+			write_sql!(f, sql_fmt, " ARCHIVED");
+		} else {
+			write_sql!(f, sql_fmt, " ACTIVE");
+		}
 	}
 }
 
@@ -124,6 +118,12 @@ impl Sub<Duration> for Timestamp {
 impl Display for Timestamp {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, "{}", self.value)
+	}
+}
+
+impl ToSql for Timestamp {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "{}", self.value)
 	}
 }
 

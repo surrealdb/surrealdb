@@ -16,8 +16,6 @@ mod sequence;
 mod table;
 mod user;
 
-use std::fmt::{self, Display};
-
 pub(crate) use access::DefineAccessStatement;
 pub(crate) use analyzer::DefineAnalyzerStatement;
 use anyhow::Result;
@@ -100,30 +98,6 @@ impl DefineStatement {
 			Self::Bucket(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Sequence(v) => v.compute(stk, ctx, opt, doc).await,
 			Self::Module(v) => v.compute(stk, ctx, opt, doc).await,
-		}
-	}
-}
-
-impl Display for DefineStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		match self {
-			Self::Namespace(v) => Display::fmt(v, f),
-			Self::Database(v) => Display::fmt(v, f),
-			Self::Function(v) => Display::fmt(v, f),
-			Self::User(v) => Display::fmt(v, f),
-			Self::Param(v) => Display::fmt(v, f),
-			Self::Table(v) => Display::fmt(v, f),
-			Self::Event(v) => Display::fmt(v, f),
-			Self::Field(v) => Display::fmt(v, f),
-			Self::Index(v) => Display::fmt(v, f),
-			Self::Analyzer(v) => Display::fmt(v, f),
-			Self::Model(v) => Display::fmt(v, f),
-			Self::Access(v) => Display::fmt(v, f),
-			Self::Config(v) => Display::fmt(v, f),
-			Self::Api(v) => Display::fmt(v, f),
-			Self::Bucket(v) => Display::fmt(v, f),
-			Self::Sequence(v) => Display::fmt(v, f),
-			Self::Module(v) => Display::fmt(v, f),
 		}
 	}
 }

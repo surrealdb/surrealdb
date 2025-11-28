@@ -1,7 +1,6 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::DefineKind;
-use crate::fmt::Fmt;
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -16,26 +15,31 @@ pub(crate) struct DefineEventStatement {
 	pub comment: Option<Expr>,
 }
 
-impl Display for DefineEventStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE EVENT",)?;
+impl ToSql for DefineEventStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push_str("DEFINE EVENT");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => f.push_str(" OVERWRITE"),
+			DefineKind::IfNotExists => f.push_str(" IF NOT EXISTS"),
 		}
-		write!(
-			f,
-			" {} ON {} WHEN {} THEN {}",
-			self.name,
-			self.target_table,
-			self.when,
-			Fmt::comma_separated(&self.then)
-		)?;
+		f.push(' ');
+		self.name.fmt_sql(f, fmt);
+		f.push_str(" ON ");
+		self.target_table.fmt_sql(f, fmt);
+		f.push_str(" WHEN ");
+		self.when.fmt_sql(f, fmt);
+		f.push_str(" THEN ");
+		for (i, expr) in self.then.iter().enumerate() {
+			if i > 0 {
+				f.push_str(", ");
+			}
+			expr.fmt_sql(f, fmt);
+		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+			f.push_str(" COMMENT ");
+			v.fmt_sql(f, fmt);
 		}
-		Ok(())
 	}
 }
 

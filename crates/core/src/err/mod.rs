@@ -14,6 +14,7 @@ use object_store::Error as ObjectStoreError;
 use revision::Error as RevisionError;
 use serde::Serialize;
 use storekey::DecodeError;
+use surrealdb_types::ToSql;
 use thiserror::Error;
 
 use crate::api::err::ApiError;
@@ -57,13 +58,13 @@ pub(crate) enum Error {
 	InvalidQuery(RenderedParserError),
 
 	/// There was an error with the SQL query
-	#[error("Cannot use {value} in a CONTENT clause")]
+	#[error("Cannot use {} in a CONTENT clause", value.to_sql())]
 	InvalidContent {
 		value: Value,
 	},
 
 	/// There was an error with the SQL query
-	#[error("Cannot use {value} in a MERGE clause")]
+	#[error("Cannot use {} in a MERGE clause", value.to_sql())]
 	InvalidMerge {
 		value: Value,
 	},
@@ -98,7 +99,7 @@ pub(crate) enum Error {
 	},
 
 	/// The FETCH clause accepts idioms, strings and fields.
-	#[error("Found {value} on FETCH CLAUSE, but FETCH expects an idiom, a string or fields")]
+	#[error("Found {} on FETCH CLAUSE, but FETCH expects an idiom, a string or fields", value.to_sql())]
 	InvalidFetch {
 		value: Expr,
 	},
@@ -469,13 +470,13 @@ pub(crate) enum Error {
 	},
 
 	/// A database entry for the specified record already exists
-	#[error("Database record `{record}` already exists")]
+	#[error("Database record `{record}` already exists", record = record.to_sql())]
 	RecordExists {
 		record: RecordId,
 	},
 
 	/// A database index entry for the specified record already exists
-	#[error("Database index `{index}` already contains {value}, with record `{record}`")]
+	#[error("Database index `{index}` already contains {value}, with record `{record}`", record = record.to_sql())]
 	IndexExists {
 		record: RecordId,
 		index: String,
@@ -492,7 +493,8 @@ pub(crate) enum Error {
 
 	/// The specified field did not conform to the field ASSERT clause
 	#[error(
-		"Found {value} for field `{field}`, with record `{record}`, but field must conform to: {check}"
+		"Found {value} for field `{field}`, with record `{record}`, but field must conform to: {check}",
+		field = field.to_sql()
 	)]
 	FieldValue {
 		record: String,
@@ -525,7 +527,8 @@ pub(crate) enum Error {
 
 	/// The specified field did not conform to the field ASSERT clause
 	#[error(
-		"Found changed value for field `{field}`, with record `{record}`, but field is readonly"
+		"Found changed value for field `{field}`, with record `{record}`, but field is readonly",
+		field = field.to_sql()
 	)]
 	FieldReadonly {
 		record: String,
@@ -533,7 +536,7 @@ pub(crate) enum Error {
 	},
 
 	/// The specified field on a SCHEMAFUL table was not defined
-	#[error("Found field '{field}', but no such field exists for table '{table}'")]
+	#[error("Found field '{field}', but no such field exists for table '{table}'", field = field.to_sql())]
 	FieldUndefined {
 		table: String,
 		field: Idiom,

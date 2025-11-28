@@ -1,4 +1,4 @@
-use std::fmt;
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{CoverStmtsSql, Fmt};
 use crate::sql::order::Ordering;
@@ -29,54 +29,58 @@ pub struct SelectStatement {
 	pub tempfiles: bool,
 }
 
-impl fmt::Display for SelectStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "SELECT {}", self.expr)?;
+impl ToSql for SelectStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "SELECT {}", self.expr);
 		if !self.omit.is_empty() {
-			write!(f, " OMIT {}", Fmt::comma_separated(self.omit.iter().map(CoverStmtsSql)))?
+			write_sql!(
+				f,
+				fmt,
+				" OMIT {}",
+				Fmt::comma_separated(self.omit.iter().map(CoverStmtsSql))
+			);
 		}
-		write!(f, " FROM")?;
+		write_sql!(f, fmt, " FROM");
 		if self.only {
-			f.write_str(" ONLY")?
+			write_sql!(f, fmt, " ONLY");
 		}
-		write!(f, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmtsSql)))?;
+		write_sql!(f, fmt, " {}", Fmt::comma_separated(self.what.iter().map(CoverStmtsSql)));
 		if let Some(ref v) = self.with {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.cond {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.split {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.group {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.order {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.limit {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.start {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.fetch {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.version {
-			write!(f, " VERSION {v}")?
+			write_sql!(f, fmt, " VERSION {v}");
 		}
 		if let Some(ref v) = self.timeout {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if self.parallel {
-			f.write_str(" PARALLEL")?
+			write_sql!(f, fmt, " PARALLEL");
 		}
 		if let Some(ref v) = self.explain {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
-		Ok(())
 	}
 }
 

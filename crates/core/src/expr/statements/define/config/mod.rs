@@ -1,7 +1,5 @@
 pub mod api;
 
-use std::fmt::{self, Display};
-
 use anyhow::{Result, bail};
 use api::ApiConfig;
 use reblessive::tree::Stk;
@@ -76,31 +74,5 @@ impl DefineConfigStatement {
 		txn.clear_cache();
 		// Ok all good
 		Ok(Value::None)
-	}
-}
-
-impl Display for DefineConfigStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE CONFIG")?;
-		match self.kind {
-			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
-		}
-		write!(f, " {}", self.inner)?;
-
-		Ok(())
-	}
-}
-
-impl Display for ConfigInner {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		match &self {
-			ConfigInner::GraphQL(v) => Display::fmt(v, f),
-			ConfigInner::Api(v) => {
-				write!(f, "API")?;
-				Display::fmt(v, f)
-			}
-		}
 	}
 }
