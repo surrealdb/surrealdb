@@ -4,6 +4,7 @@ pub mod client_ip;
 pub mod error;
 mod export;
 mod gql;
+pub mod grpc;
 pub(crate) mod headers;
 mod health;
 mod import;
@@ -221,7 +222,7 @@ pub async fn init<F: RouterFactory>(
 	let axum_app = axum_app.with_state(rpc_state.clone());
 
 	// Spawn a task to handle notifications
-	tokio::spawn(async move { notifications(ds, rpc_state, ct.clone()).await });
+	tokio::spawn(async move { notifications(ds.clone(), rpc_state.clone(), ct.clone()).await });
 	// If a certificate and key are specified, then setup TLS
 	let res = if let (Some(cert), Some(key)) = (&opt.crt, &opt.key) {
 		// Configure certificate and private key used by https
