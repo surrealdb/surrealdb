@@ -1451,12 +1451,12 @@ impl Parser<'_> {
 		stk: &mut Stk,
 	) -> ParseResult<DefaultConfig> {
 		let mut config = DefaultConfig::default();
-		
+
 		let peek = self.peek();
 		if !matches!(peek.kind, t!("NAMESPACE") | t!("DATABASE")) {
 			unexpected!(self, peek, "a namespace or database name");
 		}
-		
+
 		loop {
 			match self.peek_kind() {
 				t!("NAMESPACE") => {

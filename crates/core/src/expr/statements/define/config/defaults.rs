@@ -5,8 +5,8 @@ use reblessive::tree::Stk;
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
-use crate::expr::{Expr, Literal};
 use crate::expr::parameterize::expr_to_ident;
+use crate::expr::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
