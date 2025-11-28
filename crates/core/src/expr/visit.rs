@@ -864,12 +864,8 @@ implement_visitor! {
 	}
 
 	fn visit_default_config(this, d: &DefaultConfig) {
-		if let Some(namespace) = &d.namespace {
-			this.visit_expr(namespace)?;
-		}
-		if let Some(database) = &d.database {
-			this.visit_expr(database)?;
-		}
+		this.visit_expr(&d.namespace)?;
+		this.visit_expr(&d.database)?;
 		Ok(())
 	}
 
@@ -2312,12 +2308,8 @@ implement_visitor_mut! {
 	}
 
 	fn visit_mut_default_config(this, d: &mut DefaultConfig) {
-		if let Some(namespace) = &mut d.namespace {
-			this.visit_mut_expr(namespace)?;
-		}
-		if let Some(database) = &mut d.database {
-			this.visit_mut_expr(database)?;
-		}
+		this.visit_mut_expr(&mut d.namespace)?;
+		this.visit_mut_expr(&mut d.database)?;
 		Ok(())
 	}
 

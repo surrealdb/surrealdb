@@ -1461,11 +1461,11 @@ impl Parser<'_> {
 			match self.peek_kind() {
 				t!("NAMESPACE") => {
 					self.pop_peek();
-					config.namespace = Some(stk.run(|stk| self.parse_expr_field(stk)).await?);
+					config.namespace = stk.run(|stk| self.parse_expr_field(stk)).await?;
 				}
 				t!("DATABASE") => {
 					self.pop_peek();
-					config.database = Some(stk.run(|stk| self.parse_expr_field(stk)).await?);
+					config.database = stk.run(|stk| self.parse_expr_field(stk)).await?;
 				}
 				_ => break,
 			}

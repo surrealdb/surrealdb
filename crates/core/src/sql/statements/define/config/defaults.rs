@@ -1,23 +1,28 @@
 use std::fmt::{self, Display};
 
-use crate::sql::Expr;
+use crate::sql::{Expr, Literal};
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct DefaultConfig {
-	pub namespace: Option<Expr>,
-	pub database: Option<Expr>,
+	pub namespace: Expr,
+	pub database: Expr,
+}
+
+impl Default for DefaultConfig {
+	fn default() -> Self {
+		Self {
+			namespace: Expr::Literal(Literal::None),
+			database: Expr::Literal(Literal::None),
+		}
+	}
 }
 
 impl Display for DefaultConfig {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		write!(f, " DEFAULT")?;
-		if let Some(namespace) = &self.namespace {
-			write!(f, " NAMESPACE {}", namespace)?;
-		}
-		if let Some(database) = &self.database {
-			write!(f, " DATABASE {}", database)?;
-		}
+		write!(f, " NAMESPACE {}", self.namespace)?;
+		write!(f, " DATABASE {}", self.database)?;
 		Ok(())
 	}
 }
@@ -25,16 +30,16 @@ impl Display for DefaultConfig {
 impl From<DefaultConfig> for crate::expr::statements::define::config::defaults::DefaultConfig {
 	fn from(v: DefaultConfig) -> Self {
 		crate::expr::statements::define::config::defaults::DefaultConfig {
-			namespace: v.namespace.map(Into::into),
-			database: v.database.map(Into::into),
+			namespace: v.namespace.into(),
+			database: v.database.into(),
 		}
 	}
 }
 impl From<crate::expr::statements::define::config::defaults::DefaultConfig> for DefaultConfig {
 	fn from(v: crate::expr::statements::define::config::defaults::DefaultConfig) -> Self {
 		DefaultConfig {
-			namespace: v.namespace.map(Into::into),
-			database: v.database.map(Into::into),
+			namespace: v.namespace.into(),
+			database: v.database.into(),
 		}
 	}
 }
