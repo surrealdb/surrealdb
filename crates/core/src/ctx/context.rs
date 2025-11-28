@@ -4,7 +4,7 @@ use std::fmt::{self, Debug};
 #[cfg(storage)]
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 
 use anyhow::{Result, bail};
@@ -509,39 +509,41 @@ impl MutableContext {
 	/// An iteration loop may want to check it every 10 or 100 calls.
 	/// Eg.: ctx.done(count % 100 == 0)
 	pub(crate) fn done(&self, deep_check: bool) -> Result<Option<Reason>> {
-		match self.deadline {
-			Some(deadline) if deep_check && deadline <= Instant::now() => {
-				Ok(Some(Reason::Timedout))
-			}
-			_ if self.cancelled.load(Ordering::Relaxed) => Ok(Some(Reason::Canceled)),
-			_ => {
-				if deep_check && ALLOC.is_beyond_threshold() {
-					bail!(Error::QueryBeyondMemoryThreshold);
-				}
-				match &self.parent {
-					Some(ctx) => ctx.done(deep_check),
-					_ => Ok(None),
-				}
-			}
-		}
-	}
-
-	/// Check if the context is ok to continue.
-	pub(crate) async fn is_ok(&self, deep_check: bool) -> Result<bool> {
 		if deep_check {
-			yield_now!();
+			if ALLOC.is_beyond_threshold() {
+				bail!(Error::QueryBeyondMemoryThreshold);
+			}
+			if let Some(deadline) = self.deadline {
+				if deadline <= Instant::now() {
+					return Ok(Some(Reason::Timedout));
+				}
+			}
 		}
-		Ok(self.done(deep_check)?.is_none())
+		if let Some(ctx) = &self.parent {
+			return ctx.done(deep_check);
+		}
+		Ok(None)
 	}
 
 	/// Check if there is some reason to stop processing the current query.
 	///
-	/// Returns true when the query is canceled or if check_deadline is true
+	/// Returns true when the query is cancelled or if check_deadline is true
 	/// when the query deadline is met.
-	pub(crate) async fn is_done(&self, deep_check: bool) -> Result<bool> {
-		if deep_check {
-			yield_now!();
-		}
+	pub(crate) async fn is_done(&self, count: Option<usize>) -> Result<bool> {
+		let deep_check = if let Some(count) = count {
+			// We yield every 32 iterations
+			if count % 32 == 0 {
+				yield_now!();
+			}
+			// Jitt-off logic for deepcheck based on the iteration number,
+			match count {
+				1 | 2 | 4 | 8 | 16 | 32 => true,
+				_ => count % 64 == 0,
+			}
+		} else {
+			// If there is no count, it is likely to be a single statement, we do a deep check
+			true
+		};
 		Ok(self.done(deep_check)?.is_some())
 	}
 
