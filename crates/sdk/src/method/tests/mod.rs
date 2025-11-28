@@ -31,7 +31,7 @@ async fn api() {
 	let _: () = DB.invalidate().await.unwrap();
 
 	// use
-	let _: () = DB.use_ns("test-ns").use_db("test-db").await.unwrap();
+	let _: (Option<String>, Option<String>) = DB.use_ns("test-ns").use_db("test-db").await.unwrap();
 
 	// signup
 	let _: Token = DB

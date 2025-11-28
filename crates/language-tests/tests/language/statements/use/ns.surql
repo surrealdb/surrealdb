@@ -5,7 +5,7 @@
 value = "['test', 'test', 'test', 'test']"
 
 [[test.results]]
-value = "NONE"
+value = "{ database: 'test', namespace: 'my_ns' }"
 
 [[test.results]]
 value = "['my_ns', 'my_ns', 'test', 'test']"

@@ -8,7 +8,7 @@ timeout = 10000
 [test]
 
 [[test.results]]
-value = "NONE"
+value = "{ database: NONE, namespace: 'ns' }"
 
 [[test.results]]
 value = "NONE"

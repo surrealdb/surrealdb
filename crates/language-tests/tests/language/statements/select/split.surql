@@ -1,6 +1,5 @@
 /**
 [test]
-wip = true
 
 [[test.results]]
 value = "[{ id: post:1, tags: ['a', 'b'] }]"

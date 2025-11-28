@@ -62,6 +62,8 @@ pub(crate) enum Key {
 	Lvs(NamespaceId, DatabaseId, String),
 	/// A cache key for a node
 	Nd(Uuid),
+	/// A cache key for a root config
+	Rcg(String),
 	/// A cache key for a root user
 	Ru(String),
 	/// A cache key for a root access
@@ -150,6 +152,7 @@ impl<'a> From<Lookup<'a>> for Key {
 			Lookup::Lvs(a, b, c) => Key::Lvs(a, b, c.to_string()),
 			//
 			Lookup::Nd(a) => Key::Nd(a),
+			Lookup::Rcg(a) => Key::Rcg(a.to_string()),
 			Lookup::Ru(a) => Key::Ru(a.to_string()),
 			Lookup::Ra(a) => Key::Ra(a.to_string()),
 			Lookup::Rg(a, b) => Key::Rg(a.to_string(), b.to_string()),

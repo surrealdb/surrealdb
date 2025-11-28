@@ -39,6 +39,7 @@ mod unset;
 mod update;
 mod upsert;
 mod use_db;
+mod use_defaults;
 mod use_ns;
 mod version;
 
@@ -72,6 +73,7 @@ pub use unset::Unset;
 pub use update::Update;
 pub use upsert::Upsert;
 pub use use_db::UseDb;
+pub use use_defaults::UseDefaults;
 pub use use_ns::UseNs;
 pub use version::Version;
 
@@ -235,6 +237,24 @@ where
 	pub fn begin(&self) -> Begin<C> {
 		Begin {
 			client: self.clone(),
+		}
+	}
+
+	/// Switch to a specific namespace
+	///
+	/// # Examples
+	///
+	/// ```no_run
+	/// # #[tokio::main]
+	/// # async fn main() -> surrealdb::Result<()> {
+	/// # let db = surrealdb::engine::any::connect("mem://").await?;
+	/// db.use_ns("namespace").await?;
+	/// # Ok(())
+	/// # }
+	/// ```
+	pub fn use_defaults(&'_ self) -> UseDefaults<'_, C> {
+		UseDefaults {
+			client: Cow::Borrowed(self),
 		}
 	}
 

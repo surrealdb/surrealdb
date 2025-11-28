@@ -8,7 +8,7 @@ value = "NONE"
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
+value = "{ database: '', namespace: '' }"
 
 [[test.results]]
 value = "NONE"

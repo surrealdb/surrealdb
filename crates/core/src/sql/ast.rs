@@ -27,28 +27,6 @@ impl Ast {
 		self.expressions.len()
 	}
 
-	pub fn get_used_namespace(&self) -> Option<String> {
-		for expr in &self.expressions {
-			if let TopLevelExpr::Use(UseStatement::Ns(ns))
-			| TopLevelExpr::Use(UseStatement::NsDb(ns, _)) = expr
-			{
-				return Some(ns.clone());
-			}
-		}
-		None
-	}
-
-	pub fn get_used_database(&self) -> Option<String> {
-		for expr in &self.expressions {
-			if let TopLevelExpr::Use(UseStatement::Db(db))
-			| TopLevelExpr::Use(UseStatement::NsDb(_, db)) = expr
-			{
-				return Some(db.clone());
-			}
-		}
-		None
-	}
-
 	pub fn get_let_statements(&self) -> Vec<String> {
 		let mut let_var_names = Vec::new();
 		for expr in &self.expressions {

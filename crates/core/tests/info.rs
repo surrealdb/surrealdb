@@ -23,7 +23,7 @@ async fn info_for_root() {
 	)
 	.unwrap();
 	t.expect_regex(
-		r"\{ accesses: \[\{.*\}\], namespaces: \[\{ .* \}\], nodes: \[.*\], system: \{ .* \}, users: \[\{ .* \}\] \}",
+		r"\{ accesses: \[\{.*\}\], defaults: \{ .* \}, namespaces: \[\{ .* \}\], nodes: \[.*\], system: \{ .* \}, users: \[\{ .* \}\] \}",
 	)
 	.unwrap();
 }
@@ -175,7 +175,7 @@ async fn permissions_checks_info_root() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check = "{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }";
+	let check = r#"{ accesses: {  }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }"#.to_string();
 
 	let test_cases = [
 		// Root level

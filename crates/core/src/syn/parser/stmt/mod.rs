@@ -102,7 +102,7 @@ impl Parser<'_> {
 			}
 			t!("USE") => {
 				self.pop_peek();
-				self.parse_use_stmt().map(TopLevelExpr::Use)
+				self.parse_use_stmt(stk).await.map(TopLevelExpr::Use)
 			}
 			t!("ACCESS") => {
 				self.pop_peek();
@@ -297,14 +297,14 @@ impl Parser<'_> {
 	///
 	/// # Parser State
 	/// Expects `USE` to already be consumed.
-	fn parse_use_stmt(&mut self) -> ParseResult<UseStatement> {
+	async fn parse_use_stmt(&mut self, stk: &mut Stk) -> ParseResult<UseStatement> {
 		let peek = self.peek();
 		let stmt = match peek.kind {
 			t!("NAMESPACE") => {
 				self.pop_peek();
-				let ns = self.parse_ident()?;
+				let ns = stk.run(|stk| self.parse_expr_field(stk)).await?;
 				if self.eat(t!("DATABASE")) {
-					let db = self.parse_ident()?;
+					let db = stk.run(|stk| self.parse_expr_field(stk)).await?;
 					UseStatement::NsDb(ns, db)
 				} else {
 					UseStatement::Ns(ns)
@@ -312,8 +312,12 @@ impl Parser<'_> {
 			}
 			t!("DATABASE") => {
 				self.pop_peek();
-				let db = self.parse_ident()?;
+				let db = stk.run(|stk| self.parse_expr_field(stk)).await?;
 				UseStatement::Db(db)
+			}
+			t!("DEFAULT") => {
+				self.pop_peek();
+				UseStatement::Default
 			}
 			_ => unexpected!(self, peek, "either DATABASE or NAMESPACE"),
 		};

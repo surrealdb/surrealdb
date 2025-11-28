@@ -7,7 +7,7 @@ clean = true
 upgrade = true
 
 [[test.results]]
-value = "NONE"
+value = "{ database: 'test', namespace: 'test_namespace' }"
 
 [[test.results]]
 value = '''{ accesses: {  }, databases: { test_database: "DEFINE DATABASE test_database COMMENT 'a test database'" }, users: {  } }'''
