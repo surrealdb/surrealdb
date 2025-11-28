@@ -100,7 +100,7 @@ impl<'js> IntoJs<'js> for &Value {
 				}
 				x.into_js(ctx)
 			}
-			Value::Bytes(ref v) => TypedArray::new_copy(ctx.clone(), v.0.as_slice())?.into_js(ctx),
+			Value::Bytes(ref v) => TypedArray::new_copy(ctx.clone(), v.as_ref())?.into_js(ctx),
 			Value::Geometry(ref v) => v.into_js(ctx),
 			Value::File(ref v) => Ok(Class::<classes::file::File>::instance(
 				ctx.clone(),
