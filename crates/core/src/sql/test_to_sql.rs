@@ -96,7 +96,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 #[case::expr_block(Expr::Block(Box::new(Block(vec![
     Expr::Literal(Literal::Integer(1)),
     Expr::Literal(Literal::Integer(2))
-]))), "{\n1;\n2;\n}", "{\n\n\t1;\n\n\t2;\n\n}")]
+]))), "{ 1; 2; }", "{\n\n\t1;\n\n\t2;\n}")]
 // Expression: Constants
 #[case::expr_constant_math_e(Expr::Constant(Constant::MathE), "math::E", "math::E")]
 // Expression: Prefix
@@ -121,7 +121,16 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 // Expression: Return
 #[case::expr_return(Expr::Return(Box::new(OutputStatement { what: Expr::Literal(Literal::Integer(1)), fetch: None })), "RETURN 1", "RETURN 1")]
 // Expression: If
-#[case::expr_if(Expr::IfElse(Box::new(IfelseStatement { exprs: vec![(Expr::Literal(Literal::Bool(true)), Expr::Block(Box::new(Block(vec![Expr::Literal(Literal::Integer(1))]))))], close: None })), "IF true { 1 }", "IF true\n\t{ 1 }")]
+#[case::expr_if(Expr::IfElse(Box::new(IfelseStatement { exprs: vec![(Expr::Literal(Literal::Bool(true)), Expr::Block(Box::new(Block(vec![Expr::Literal(Literal::Integer(1))]))))], close: None })), "IF true { 1 }", "IF true { 1 }")]
+#[case::expr_if_multi(Expr::IfElse(Box::new(IfelseStatement {
+    exprs: vec![
+        (Expr::Literal(Literal::Bool(true)), Expr::Block(Box::new(Block(vec![
+            Expr::Literal(Literal::Integer(1)),
+            Expr::Literal(Literal::Integer(2)),
+        ])))),
+        (Expr::Literal(Literal::Bool(false)), Expr::Block(Box::new(Block(vec![
+            Expr::Literal(Literal::Integer(3)),
+        ]))))], close: None })), "IF true {\n\t1;\n\t2;\n} ELSE IF false { 3 }", "IF true {\n\n\t1;\n\t2;\n} ELSE IF false { 3 }")]
 // Expression: Select
 #[case::expr_select(Expr::Select(Box::new(SelectStatement { expr: Fields::all(), omit: vec![], only: false, what: vec![Expr::Table("user".to_string())], with: None, cond: None, split: None, group: None, order: None, limit: None, start: None, fetch: None, version: None, timeout: None, parallel: false, explain: None, tempfiles: false })), "SELECT * FROM user", "SELECT * FROM user")]
 // Expression: Create
@@ -159,7 +168,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 	"INFO FOR ROOT"
 )]
 // Expression: Foreach
-#[case::expr_foreach(Expr::Foreach(Box::new(ForeachStatement { param: Param::new("item".to_string()), range: Expr::Literal(Literal::Array(vec![Expr::Literal(Literal::Integer(1)), Expr::Literal(Literal::Integer(2))])), block: Block(vec![Expr::Literal(Literal::Integer(1))]) })), "FOR $item IN [1, 2] { 1 }", "FOR $item IN [\n\t1,\n\t2\n] { 1 }")]
+#[case::expr_foreach(Expr::Foreach(Box::new(ForeachStatement { param: Param::new("item".to_string()), range: Expr::Literal(Literal::Array(vec![Expr::Literal(Literal::Integer(1)), Expr::Literal(Literal::Integer(2))])), block: Block(vec![Expr::Literal(Literal::Integer(1))]) })), "FOR $item IN [1, 2] { 1 }", "FOR $item IN [\n\t1,\n\t2\n] {\n\n\t1\n}")]
 // Expression: Let
 #[case::expr_let(Expr::Let(Box::new(SetStatement { name: "x".to_string(), what: Expr::Literal(Literal::Integer(5)), kind: None })), "LET $x = 5", "LET $x = 5")]
 // Expression: Sleep
@@ -260,7 +269,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
         ])
     })),
     "FOR $user IN SELECT * FROM users { IF user.active = true { CREATE active_users CONTENT $user } }",
-    "FOR $user IN SELECT * FROM users { IF user.active = true\n\t{ CREATE active_users CONTENT $user }\n }"
+    "FOR $user IN SELECT * FROM users {\n\n\tIF user.active = true\n\t{ CREATE active_users CONTENT $user }\n}"
 )]
 #[case::deeply_nested_object(
     Expr::Literal(Literal::Object(vec![

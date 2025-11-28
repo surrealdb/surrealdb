@@ -60,6 +60,7 @@ mod tests {
 	fn format_pretty() {
 		let query = syn::expr("IF 1 { 1 } ELSE IF 2 { 2 }").unwrap();
 		assert_eq!(query.to_sql(), "IF 1 { 1 } ELSE IF 2 { 2 }");
-		assert_eq!(query.to_sql_pretty(), "IF 1\n\t{ 1 }\nELSE IF 2\n\t{ 2 }");
+		// Single-statement blocks stay inline even in pretty mode
+		assert_eq!(query.to_sql_pretty(), "IF 1 { 1 } ELSE IF 2 { 2 }");
 	}
 }

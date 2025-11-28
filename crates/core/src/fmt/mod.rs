@@ -56,11 +56,6 @@ impl<I: IntoIterator<Item = T>, T: ToSql> Fmt<I, fn(I, &mut String, SqlFormat)> 
 	pub(crate) fn one_line_separated(into_iter: I) -> Self {
 		Self::new(into_iter, fmt_one_line_separated)
 	}
-
-	/// Formats values with a new line separating them.
-	pub(crate) fn two_line_separated(into_iter: I) -> Self {
-		Self::new(into_iter, fmt_two_line_separated)
-	}
 }
 
 fn fmt_comma_separated<T: ToSql, I: IntoIterator<Item = T>>(
@@ -120,23 +115,6 @@ fn fmt_one_line_separated<T: ToSql, I: IntoIterator<Item = T>>(
 			// } else {
 			// 	f.push('\n');
 			// }
-		}
-		v.fmt_sql(f, fmt);
-	}
-}
-
-fn fmt_two_line_separated<T: ToSql, I: IntoIterator<Item = T>>(
-	into_iter: I,
-	f: &mut String,
-	fmt: SqlFormat,
-) {
-	for (i, v) in into_iter.into_iter().enumerate() {
-		if i > 0 {
-			if fmt.is_pretty() {
-				f.push('\n');
-			} else {
-				f.push_str("\n\n");
-			}
 		}
 		v.fmt_sql(f, fmt);
 	}
@@ -253,7 +231,7 @@ mod tests {
 		);
 		assert_eq!(
 			query.to_sql_pretty(),
-			"DEFINE TABLE test TYPE NORMAL SCHEMAFULL\n\tPERMISSIONS\n\t\tFOR select\n\t\t\tWHERE public = true\n\t\tFOR create, update, delete NONE\n;"
+			"DEFINE TABLE test TYPE NORMAL SCHEMAFULL\n\tPERMISSIONS\n\tFOR select WHERE public = true,\n\tFOR create, update, delete NONE;"
 		);
 	}
 

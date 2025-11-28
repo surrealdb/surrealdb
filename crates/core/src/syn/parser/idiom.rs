@@ -825,10 +825,7 @@ mod tests {
 	fn graph_select_where_order() {
 		let sql = "->(SELECT amount FROM likes WHERE amount > 10 ORDER BY amount)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!(
-			"->(SELECT amount FROM likes WHERE amount > 10 ORDER BY amount\n)",
-			out.to_sql()
-		);
+		assert_eq!("->(SELECT amount FROM likes WHERE amount > 10 ORDER BY amount)", out.to_sql());
 	}
 
 	#[test]
@@ -836,7 +833,7 @@ mod tests {
 		let sql = "->(SELECT amount FROM likes WHERE amount > 10 ORDER BY amount LIMIT 1)";
 		let out = syn::expr(sql).unwrap();
 		assert_eq!(
-			"->(SELECT amount FROM likes WHERE amount > 10 ORDER BY amount\n LIMIT 1)",
+			"->(SELECT amount FROM likes WHERE amount > 10 ORDER BY amount LIMIT 1)",
 			out.to_sql()
 		);
 	}
@@ -852,14 +849,14 @@ mod tests {
 	fn graph_select_order() {
 		let sql = "->(SELECT amount FROM likes ORDER BY amount)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("->(SELECT amount FROM likes ORDER BY amount\n)", out.to_sql());
+		assert_eq!("->(SELECT amount FROM likes ORDER BY amount)", out.to_sql());
 	}
 
 	#[test]
 	fn graph_select_order_limit() {
 		let sql = "->(SELECT amount FROM likes ORDER BY amount LIMIT 1)";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("->(SELECT amount FROM likes ORDER BY amount\n LIMIT 1)", out.to_sql());
+		assert_eq!("->(SELECT amount FROM likes ORDER BY amount LIMIT 1)", out.to_sql());
 	}
 
 	/// creates a field part

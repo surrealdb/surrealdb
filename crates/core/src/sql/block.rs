@@ -1,6 +1,5 @@
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::fmt::Fmt;
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,39 +26,47 @@ impl ToSql for Block {
 			0 => f.push_str("{;}"),
 			1 => {
 				let v = &self.0[0];
-				// Check if we need special formatting for statement-like expressions
-				let needs_newline =
-					fmt.is_pretty() && matches!(v, Expr::IfElse(_) | Expr::Foreach(_));
-
-				f.push_str("{ ");
-				v.fmt_sql(f, fmt);
-				if needs_newline {
-					f.push_str("\n ");
-				} else {
-					f.push(' ');
-				}
-				f.push('}');
-			}
-			l => {
-				f.push('{');
-				if l > 1 {
-					f.push('\n');
-				} else if !fmt.is_pretty() {
-					f.push(' ');
-				}
-				let fmt = fmt.increment();
 				if fmt.is_pretty() {
+					// Pretty mode: use expanded format even for single element
+					f.push('{');
 					f.push('\n');
-					write_sql!(
-						f,
-						fmt,
-						"{}",
-						&Fmt::two_line_separated(
-							self.0.iter().map(|args| Fmt::new(args, |v, f, fmt| write_sql!(
-								f, fmt, "{};", v
-							))),
-						)
-					);
+					f.push('\n');
+					let fmt = fmt.increment();
+					fmt.write_indent(f);
+					v.fmt_sql(f, fmt);
+					f.push('\n');
+					// Write indent at the block's level
+					if let SqlFormat::Indented(level) = fmt
+						&& level > 0
+					{
+						for _ in 0..(level - 1) {
+							f.push('\t');
+						}
+					}
+					f.push('}')
+				} else {
+					// Non-pretty: compact format
+					f.push_str("{ ");
+					v.fmt_sql(f, fmt);
+					f.push_str(" }");
+				}
+			}
+			_ => {
+				// Multi-element blocks
+				if fmt.is_pretty() {
+					f.push('{');
+					f.push('\n');
+					f.push('\n');
+					let fmt = fmt.increment();
+					for (i, v) in self.0.iter().enumerate() {
+						if i > 0 {
+							f.push('\n');
+							f.push('\n');
+						}
+						fmt.write_indent(f);
+						v.fmt_sql(f, fmt);
+						f.push(';');
+					}
 					f.push('\n');
 					// Write indent at the block's level (not the content level)
 					// The content was at fmt (incremented), so block's level is one less
@@ -70,25 +77,19 @@ impl ToSql for Block {
 							f.push('\t');
 						}
 					}
-					f.push('\n');
+					f.push('}')
 				} else {
-					write_sql!(
-						f,
-						fmt,
-						"{}",
-						&Fmt::one_line_separated(
-							self.0.iter().map(|args| Fmt::new(args, |v, f, fmt| write_sql!(
-								f, fmt, "{};", v
-							))),
-						)
-					);
+					// Non-pretty: all on one line with space separation
+					f.push_str("{ ");
+					for (i, v) in self.0.iter().enumerate() {
+						if i > 0 {
+							f.push(' ');
+						}
+						v.fmt_sql(f, fmt);
+						f.push(';');
+					}
+					f.push_str(" }")
 				}
-				if l > 1 && !fmt.is_pretty() {
-					f.push('\n');
-				} else if l == 1 && !fmt.is_pretty() {
-					f.push(' ');
-				}
-				f.push('}')
 			}
 		}
 	}
