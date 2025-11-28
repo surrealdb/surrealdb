@@ -14,7 +14,7 @@ CREATE person:13059;
 CREATE person:`some record id`;
 
 -- CREATE a new table record with a angle bracket escaped string
-CREATE person:⟨some record id⟩;
+CREATE person:`some record id`;
 
 -- CREATE a new table record with an complex array based id
 CREATE person:['London', time::now()];
@@ -95,7 +95,7 @@ SELECT
         }
     } AS object,
     rand::uuid::v4() AS a_uuid_field,
-    u"ff36afd6-6689-4c02-8c8c-7df478924645" AS ⟨another id field⟩,
+    u"ff36afd6-6689-4c02-8c8c-7df478924645" AS `another id field`,
 	if true {
 		'Yay'
 	} else {

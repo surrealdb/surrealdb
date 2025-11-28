@@ -16,10 +16,10 @@ skip-record-id-key = true
 value = "[{ count: 1 }]"
 
 [[test.results]]
-value = "[{ id: relationship_node_plain:⟨'explicit_id'⟩ }]"
+value = "[{ id: relationship_node_plain:`'explicit_id'` }]"
 
 [[test.results]]
-value = "[{ id: relationship_node_plain:⟨'explicit_id'⟩, predicate: 'p2' }]"
+value = "[{ id: relationship_node_plain:`'explicit_id'`, predicate: 'p2' }]"
 
 [[test.results]]
 value = "[{ count: 1 }, { count: 1 }]"
@@ -43,10 +43,10 @@ SELECT id, predicate FROM relationship_node_plain;
 SELECT count() FROM relationship_node_plain;
 
 -- Test 4: CREATE with explicit ID should work
-CREATE relationship_node_plain:⟨'explicit_id'⟩ SET predicate='p2' RETURN id;
+CREATE relationship_node_plain:`'explicit_id'` SET predicate='p2' RETURN id;
 
 -- Test 5: SELECT should show both records including the explicit ID
-SELECT id, predicate FROM relationship_node_plain:⟨'explicit_id'⟩;
+SELECT id, predicate FROM relationship_node_plain:`'explicit_id'`;
 
 -- Test 6: Final count should show both records
 SELECT count() FROM relationship_node_plain;

@@ -6,7 +6,7 @@ reason = "Tests `natural order` or the order that record-id's are naturally sort
 value = "'OK'"
 
 [[test.results]]
-value = "[{ id: test:-1000000 }, { id: test:-1 }, { id: test:1 }, { id: test:1000000 }, { id: test:⟨-100000000000000000000⟩ }, { id: test:⟨100000000000000000000⟩ }, { id: test:A }, { id: test:Z }, { id: test:a }, { id: test:z }, { id: test:u'00000000-0000-0000-0000-000000000000' }, { id: test:u'ffffffff-ffff-ffff-ffff-ffffffffffff' }, { id: test:[NONE] }, { id: test:[NULL] }, { id: test:[1, 2, 3] }, { id: test:['a'] }, { id: test:{ a: NONE } }, { id: test:{ a: NULL } }, { id: test:{ a: 1 } }, { id: test:{ a: 'a' } }, { id: test:{ z: NONE } }, { id: test:{ z: NULL } }, { id: test:{ z: 1 } }, { id: test:{ z: 'a' } }]"
+value = "[{ id: test:-1000000 }, { id: test:-1 }, { id: test:1 }, { id: test:1000000 }, { id: test:`-100000000000000000000` }, { id: test:`100000000000000000000` }, { id: test:A }, { id: test:Z }, { id: test:a }, { id: test:z }, { id: test:u'00000000-0000-0000-0000-000000000000' }, { id: test:u'ffffffff-ffff-ffff-ffff-ffffffffffff' }, { id: test:[NONE] }, { id: test:[NULL] }, { id: test:[1, 2, 3] }, { id: test:['a'] }, { id: test:{ a: NONE } }, { id: test:{ a: NULL } }, { id: test:{ a: 1 } }, { id: test:{ a: 'a' } }, { id: test:{ z: NONE } }, { id: test:{ z: NULL } }, { id: test:{ z: 1 } }, { id: test:{ z: 'a' } }]"
 
 */
 
