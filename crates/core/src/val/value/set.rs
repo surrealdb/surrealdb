@@ -261,7 +261,7 @@ impl Value {
 					match v {
 						Value::String(x) => x,
 						Value::RecordId(x) => x.to_sql(),
-						Value::Number(x) => x.to_string(),
+						Value::Number(x) => x.to_sql(),
 						Value::Range(x) => x.to_sql(),
 						_ => return Ok(()),
 					}

@@ -148,7 +148,7 @@ pub enum BooleanOperator {
 }
 
 impl ToSql for BooleanOperator {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		match self {
 			Self::And => f.push_str("AND"),
 			Self::Or => f.push_str("OR"),

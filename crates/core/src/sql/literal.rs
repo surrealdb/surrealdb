@@ -1,11 +1,9 @@
-use std::fmt::Write as _;
-
 //use async_graphql::dynamic::Object;
 use geo::{LineString, MultiLineString, MultiPoint, MultiPolygon, Point, Polygon};
 use rust_decimal::Decimal;
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use crate::fmt::{EscapeKey, Float, Fmt, QuoteStr};
+use crate::fmt::{EscapeKey, Float, QuoteStr};
 use crate::sql::{Expr, RecordIdLit};
 use crate::types::{
 	PublicBytes, PublicDatetime, PublicDuration, PublicFile, PublicGeometry, PublicRegex,
@@ -82,10 +80,7 @@ impl ToSql for Literal {
 			}
 			Literal::Float(float) => write_sql!(f, fmt, "{}", Float(*float)),
 			Literal::Integer(x) => f.push_str(&x.to_string()),
-			Literal::Decimal(d) => {
-				f.push_str(&d.to_string());
-				f.push_str("dec");
-			}
+			Literal::Decimal(d) => d.fmt_sql(f, fmt),
 			Literal::String(strand) => write_sql!(f, fmt, "{}", QuoteStr(strand)),
 			Literal::Bytes(bytes) => bytes.fmt_sql(f, fmt),
 			Literal::Regex(regex) => regex.fmt_sql(f, fmt),
@@ -94,7 +89,27 @@ impl ToSql for Literal {
 				f.push('[');
 				if !exprs.is_empty() {
 					let fmt = fmt.increment();
-					write_sql!(f, fmt, "{}", Fmt::pretty_comma_separated(exprs.as_slice()));
+					if fmt.is_pretty() {
+						f.push('\n');
+						fmt.write_indent(f);
+					}
+					for (i, expr) in exprs.iter().enumerate() {
+						if i > 0 {
+							fmt.write_separator(f);
+						}
+						expr.fmt_sql(f, fmt);
+					}
+					if fmt.is_pretty() {
+						f.push('\n');
+						// One level less indentation for closing bracket
+						if let SqlFormat::Indented(level) = fmt {
+							if level > 0 {
+								for _ in 0..(level - 1) {
+									f.push('\t');
+								}
+							}
+						}
+					}
 				}
 				f.push(']');
 			}
@@ -102,7 +117,27 @@ impl ToSql for Literal {
 				f.push('{');
 				if !exprs.is_empty() {
 					let fmt = fmt.increment();
-					write_sql!(f, fmt, "{}", Fmt::pretty_comma_separated(exprs.as_slice()));
+					if fmt.is_pretty() {
+						f.push('\n');
+						fmt.write_indent(f);
+					}
+					for (i, expr) in exprs.iter().enumerate() {
+						if i > 0 {
+							fmt.write_separator(f);
+						}
+						expr.fmt_sql(f, fmt);
+					}
+					if fmt.is_pretty() {
+						f.push('\n');
+						// One level less indentation for closing bracket
+						if let SqlFormat::Indented(level) = fmt {
+							if level > 0 {
+								for _ in 0..(level - 1) {
+									f.push('\t');
+								}
+							}
+						}
+					}
 				}
 				f.push('}');
 			}
@@ -114,21 +149,27 @@ impl ToSql for Literal {
 				}
 				if !items.is_empty() {
 					let fmt = fmt.increment();
-					write_sql!(
-						f,
-						fmt,
-						"{}",
-						Fmt::pretty_comma_separated(items.iter().map(|args| Fmt::new(
-							args,
-							|entry, f, fmt| write_sql!(
-								f,
-								fmt,
-								"{}: {}",
-								EscapeKey(&entry.key),
-								entry.value
-							)
-						)),)
-					);
+					if fmt.is_pretty() {
+						f.push('\n');
+						fmt.write_indent(f);
+					}
+					for (i, entry) in items.iter().enumerate() {
+						if i > 0 {
+							fmt.write_separator(f);
+						}
+						write_sql!(f, fmt, "{}: {}", EscapeKey(&entry.key), entry.value);
+					}
+					if fmt.is_pretty() {
+						f.push('\n');
+						// One level less indentation for closing bracket
+						if let SqlFormat::Indented(level) = fmt {
+							if level > 0 {
+								for _ in 0..(level - 1) {
+									f.push('\t');
+								}
+							}
+						}
+					}
 				}
 				if fmt.is_pretty() {
 					f.push('}');

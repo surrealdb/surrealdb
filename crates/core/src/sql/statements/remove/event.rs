@@ -1,6 +1,6 @@
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
-use surrealdb_types::{SqlFormat, ToSql};
-
+use crate::fmt::CoverStmtsSql;
 use crate::sql::{Expr, Literal};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -23,8 +23,11 @@ impl Default for RemoveEventStatement {
 
 impl ToSql for RemoveEventStatement {
 	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		let stmt: crate::sql::statements::remove::RemoveEventStatement = self.clone().into();
-		stmt.fmt_sql(f, fmt);
+		write_sql!(f, fmt, "REMOVE EVENT");
+		if self.if_exists {
+			write_sql!(f, fmt, " IF EXISTS");
+		}
+		write_sql!(f, fmt, " {} ON {}", CoverStmtsSql(&self.name), self.what);
 	}
 }
 

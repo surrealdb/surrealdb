@@ -1,5 +1,3 @@
-use std::fmt::Write;
-
 use anyhow::Result;
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};

@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::fmt::Write as _;
 use std::hash::{Hash, Hasher};
 
 use reblessive::tree::Stk;

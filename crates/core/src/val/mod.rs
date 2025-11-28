@@ -2,7 +2,6 @@
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::Write;
 use std::ops::Bound;
 
 use anyhow::{Result, bail};

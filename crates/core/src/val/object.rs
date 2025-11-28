@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap};
-use std::fmt::Write;
 use std::ops::{Deref, DerefMut};
 
 use anyhow::Result;

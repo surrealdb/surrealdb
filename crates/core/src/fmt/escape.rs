@@ -38,7 +38,7 @@ impl Iterator for Escape<'_> {
 }
 
 impl ToSql for Escape<'_> {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		for x in self.clone() {
 			f.push(x);
 		}
@@ -66,8 +66,9 @@ impl<T: AsRef<str>> ToSql for EscapeIdent<T> {
 		let s = self.0.as_ref();
 		if crate::syn::could_be_reserved_keyword(s) {
 			write_sql!(f, fmt, "`{}`", Escape::escape_str(s, '`'));
+		} else {
+			EscapeKwFreeIdent(s).fmt_sql(f, fmt);
 		}
-		EscapeKwFreeIdent(s).fmt_sql(f, fmt);
 	}
 }
 

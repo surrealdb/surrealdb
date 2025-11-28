@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashSet};
-use std::fmt::{self, Display, Formatter, Write};
+use std::fmt::{self, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
@@ -28,7 +28,7 @@ pub enum GeometryKind {
 }
 
 impl ToSql for GeometryKind {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		match self {
 			GeometryKind::Point => f.push_str("point"),
 			GeometryKind::Line => f.push_str("line"),

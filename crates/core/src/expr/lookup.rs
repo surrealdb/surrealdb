@@ -1,4 +1,3 @@
-use std::fmt::Write;
 use std::ops::Bound;
 
 use anyhow::{Result, bail};
@@ -72,21 +71,6 @@ pub(crate) enum LookupSubject {
 		range: RecordIdKeyRangeLit,
 		referencing_field: Option<String>,
 	},
-}
-
-impl LookupSubject {
-	pub(crate) fn referencing_field(&self) -> Option<&String> {
-		match self {
-			LookupSubject::Table {
-				referencing_field,
-				..
-			} => referencing_field.as_ref(),
-			LookupSubject::Range {
-				referencing_field,
-				..
-			} => referencing_field.as_ref(),
-		}
-	}
 }
 
 impl LookupSubject {

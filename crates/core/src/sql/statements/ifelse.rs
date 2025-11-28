@@ -52,7 +52,9 @@ impl ToSql for IfelseStatement {
 						Fmt::new(args, |(cond, then), f, fmt| {
 							if fmt.is_pretty() {
 								write_sql!(f, fmt, "IF {}", CoverStmtsSql(cond));
+								f.push('\n');
 								let fmt = fmt.increment();
+								fmt.write_indent(f);
 								write_sql!(f, fmt, "{then}");
 							} else {
 								write_sql!(f, fmt, "IF {} {then}", CoverStmtsSql(cond));
@@ -60,7 +62,7 @@ impl ToSql for IfelseStatement {
 						})
 					}),
 					if fmt.is_pretty() {
-						fmt_separated_by("ELSE ")
+						fmt_separated_by("\nELSE ")
 					} else {
 						fmt_separated_by(" ELSE ")
 					},
@@ -68,8 +70,11 @@ impl ToSql for IfelseStatement {
 			);
 			if let Some(ref v) = self.close {
 				if fmt.is_pretty() {
+					f.push('\n');
 					write_sql!(f, fmt, "ELSE");
+					f.push('\n');
 					let fmt = fmt.increment();
+					fmt.write_indent(f);
 					write_sql!(f, fmt, "{v}");
 				} else {
 					write_sql!(f, fmt, " ELSE {v}");
@@ -85,7 +90,9 @@ impl ToSql for IfelseStatement {
 						Fmt::new(args, |(cond, then), f, fmt| {
 							if fmt.is_pretty() {
 								write_sql!(f, fmt, "IF {} THEN", CoverStmtsSql(cond));
+								f.push('\n');
 								let fmt = fmt.increment();
+								fmt.write_indent(f);
 								write_sql!(f, fmt, "{then}");
 							} else {
 								write_sql!(f, fmt, "IF {} THEN {then}", CoverStmtsSql(cond));
@@ -93,7 +100,7 @@ impl ToSql for IfelseStatement {
 						})
 					}),
 					if fmt.is_pretty() {
-						fmt_separated_by("ELSE ")
+						fmt_separated_by("\nELSE ")
 					} else {
 						fmt_separated_by(" ELSE ")
 					},
@@ -101,8 +108,11 @@ impl ToSql for IfelseStatement {
 			);
 			if let Some(ref v) = self.close {
 				if fmt.is_pretty() {
+					f.push('\n');
 					write_sql!(f, fmt, "ELSE");
+					f.push('\n');
 					let fmt = fmt.increment();
+					fmt.write_indent(f);
 					write_sql!(f, fmt, "{v}");
 				} else {
 					write_sql!(f, fmt, " ELSE {v}");

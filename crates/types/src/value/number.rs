@@ -76,9 +76,21 @@ impl Display for Number {
 }
 
 impl ToSql for Number {
-	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
-		use std::fmt::Write;
-		write!(f, "{}", self).expect("Write cannot fail when writing to a String")
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		match self {
+			Number::Int(v) => f.push_str(&v.to_string()),
+			Number::Float(v) => {
+				if v.is_finite() {
+					f.push_str(&v.to_string());
+					f.push('f');
+				} else {
+					// NaN, inf, -inf
+					use std::fmt::Write;
+					write!(f, "{v}").expect("Write cannot fail when writing to a String");
+				}
+			}
+			Number::Decimal(v) => v.fmt_sql(f, fmt),
+		}
 	}
 }
 

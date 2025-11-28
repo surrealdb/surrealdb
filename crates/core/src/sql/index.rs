@@ -1,4 +1,3 @@
-
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::EscapeKwFreeIdent;
@@ -189,7 +188,7 @@ pub enum VectorType {
 }
 
 impl ToSql for VectorType {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		match self {
 			Self::F64 => f.push_str("F64"),
 			Self::F32 => f.push_str("F32"),

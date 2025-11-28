@@ -22,7 +22,7 @@ impl fmt::Display for Base {
 }
 
 impl ToSql for Base {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		match self {
 			Self::Ns => write_sql!(f, sql_fmt, "NAMESPACE"),
 			Self::Db => write_sql!(f, sql_fmt, "DATABASE"),

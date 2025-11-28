@@ -58,7 +58,7 @@ impl Display for Language {
 }
 
 impl ToSql for Language {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		f.push_str(self.as_str())
 	}
 }

@@ -1,4 +1,3 @@
-
 use anyhow::{Result, bail};
 use rand::Rng;
 use rand::distributions::Alphanumeric;

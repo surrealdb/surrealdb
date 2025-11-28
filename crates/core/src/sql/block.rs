@@ -1,5 +1,6 @@
-use surrealdb_types::{SqlFormat, ToSql};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
+use crate::fmt::Fmt;
 use crate::sql::Expr;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -25,49 +26,69 @@ impl ToSql for Block {
 		match self.0.len() {
 			0 => f.push_str("{;}"),
 			1 => {
-				let start_len = f.len();
+				let v = &self.0[0];
+				// Check if we need special formatting for statement-like expressions
+				let needs_newline =
+					fmt.is_pretty() && matches!(v, Expr::IfElse(_) | Expr::Foreach(_));
+
 				f.push_str("{ ");
-				self.0[0].fmt_sql(f, fmt);
-				// Check if the statement added newlines (pretty-formatted itself)
-				let content = &f[start_len..];
-				if fmt.is_pretty() && content.contains('\n') {
+				v.fmt_sql(f, fmt);
+				if needs_newline {
 					f.push_str("\n ");
 				} else {
 					f.push(' ');
 				}
 				f.push('}');
 			}
-			_ => {
+			l => {
 				f.push('{');
-
-				let inner_fmt = fmt.increment();
-				if fmt.is_pretty() {
-					// Pretty mode: two line separated with semicolons - \n\n before each,
-					// \n<indent>\n after all
-					for expr in self.0.iter() {
-						f.push('\n');
-						f.push('\n');
-						inner_fmt.write_indent(f);
-						expr.fmt_sql(f, inner_fmt);
-						f.push(';');
-					}
+				if l > 1 {
 					f.push('\n');
-					fmt.write_indent(f); // Write current level indent (one less than inner)
+				} else if !fmt.is_pretty() {
+					f.push(' ');
+				}
+				let fmt = fmt.increment();
+				if fmt.is_pretty() {
+					f.push('\n');
+					write_sql!(
+						f,
+						fmt,
+						"{}",
+						&Fmt::two_line_separated(
+							self.0.iter().map(|args| Fmt::new(args, |v, f, fmt| write_sql!(
+								f, fmt, "{};", v
+							))),
+						)
+					);
+					f.push('\n');
+					// Write indent at the block's level (not the content level)
+					// The content was at fmt (incremented), so block's level is one less
+					if let SqlFormat::Indented(level) = fmt {
+						if level > 0 {
+							for _ in 0..(level - 1) {
+								f.push('\t');
+							}
+						}
+					}
 					f.push('\n');
 				} else {
-					// Single line: one line separated with semicolons
-					f.push('\n');
-					for (i, expr) in self.0.iter().enumerate() {
-						if i > 0 {
-							f.push('\n');
-						}
-						expr.fmt_sql(f, inner_fmt);
-						f.push(';');
-					}
-					f.push('\n');
+					write_sql!(
+						f,
+						fmt,
+						"{}",
+						&Fmt::one_line_separated(
+							self.0.iter().map(|args| Fmt::new(args, |v, f, fmt| write_sql!(
+								f, fmt, "{};", v
+							))),
+						)
+					);
 				}
-
-				f.push('}');
+				if l > 1 && !fmt.is_pretty() {
+					f.push('\n');
+				} else if l == 1 && !fmt.is_pretty() {
+					f.push(' ');
+				}
+				f.push('}')
 			}
 		}
 	}

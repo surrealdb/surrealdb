@@ -1,4 +1,3 @@
-
 use argon2::Argon2;
 use argon2::password_hash::{PasswordHasher, SaltString};
 use rand::Rng;

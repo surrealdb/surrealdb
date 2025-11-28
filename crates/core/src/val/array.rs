@@ -1,5 +1,4 @@
 use std::collections::{BTreeSet, HashSet, VecDeque};
-use std::fmt::Write;
 use std::ops::{Deref, DerefMut};
 
 use anyhow::{Result, ensure};

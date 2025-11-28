@@ -1,5 +1,4 @@
 use std::collections::BTreeSet;
-use std::fmt::Write;
 use std::ops::{Deref, DerefMut};
 
 use revision::revisioned;

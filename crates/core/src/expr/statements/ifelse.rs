@@ -1,4 +1,3 @@
-
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};
 
@@ -22,12 +21,7 @@ impl IfelseStatement {
 		self.exprs.iter().all(|x| x.0.read_only() && x.1.read_only())
 			&& self.close.as_ref().map(|x| x.read_only()).unwrap_or(true)
 	}
-	/// Check if we require a writeable transaction
-	pub(crate) fn bracketed(&self) -> bool {
-		self.exprs.iter().all(|(_, v)| matches!(v, Expr::Block(_)))
-			&& (self.close.as_ref().is_none()
-				|| self.close.as_ref().is_some_and(|v| matches!(v, Expr::Block(_))))
-	}
+
 	/// Process this type returning a computed simple Value
 	pub(crate) async fn compute(
 		&self,

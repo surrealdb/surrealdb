@@ -10,7 +10,7 @@ use std::fmt::Display;
 pub use escape::{EscapeIdent, EscapeKey, EscapeKwFreeIdent, EscapeKwIdent, EscapeRid, QuoteStr};
 use surrealdb_types::{SqlFormat, ToSql};
 
-use crate::{expr, sql};
+use crate::sql;
 
 /// Implements ToSql by calling formatter on contents.
 pub(crate) struct Fmt<T, F> {
@@ -114,12 +114,12 @@ fn fmt_one_line_separated<T: ToSql, I: IntoIterator<Item = T>>(
 ) {
 	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
-			if fmt.is_pretty() {
-				// pretty_sequence_item();
-				f.push_str("\n");
-			} else {
-				f.push_str("\n");
-			}
+			f.push('\n');
+			// if fmt.is_pretty() {
+			// 	f.push('\n');
+			// } else {
+			// 	f.push('\n');
+			// }
 		}
 		v.fmt_sql(f, fmt);
 	}
@@ -133,12 +133,13 @@ fn fmt_two_line_separated<T: ToSql, I: IntoIterator<Item = T>>(
 	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
 			if fmt.is_pretty() {
-				f.push_str("\n");
-				// pretty_sequence_item();
-			} else {
 				f.push_str("\n\n");
+				fmt.write_indent(f);
+			} else {
 				f.push('\n');
 			}
+		} else if fmt.is_pretty() {
+			fmt.write_indent(f);
 		}
 		v.fmt_sql(f, fmt);
 	}
@@ -203,60 +204,9 @@ impl ToSql for CoverStmtsSql<'_> {
 			| sql::Expr::Foreach(_)
 			| sql::Expr::Let(_)
 			| sql::Expr::Sleep(_) => {
-				f.push_str("(");
+				f.push('(');
 				self.0.fmt_sql(f, fmt);
-				f.push_str(")")
-			}
-		}
-	}
-}
-
-pub struct CoverStmtsExpr<'a>(pub &'a expr::Expr);
-
-impl ToSql for CoverStmtsExpr<'_> {
-	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
-		match self.0 {
-			expr::Expr::Literal(_)
-			| expr::Expr::Param(_)
-			| expr::Expr::Idiom(_)
-			| expr::Expr::Table(_)
-			| expr::Expr::Mock(_)
-			| expr::Expr::Block(_)
-			| expr::Expr::Constant(_)
-			| expr::Expr::Prefix {
-				..
-			}
-			| expr::Expr::Postfix {
-				..
-			}
-			| expr::Expr::Binary {
-				..
-			}
-			| expr::Expr::FunctionCall(_)
-			| expr::Expr::Closure(_)
-			| expr::Expr::Break
-			| expr::Expr::Continue
-			| expr::Expr::Throw(_) => self.0.fmt_sql(f, fmt),
-			expr::Expr::Return(_)
-			| expr::Expr::IfElse(_)
-			| expr::Expr::Select(_)
-			| expr::Expr::Create(_)
-			| expr::Expr::Update(_)
-			| expr::Expr::Upsert(_)
-			| expr::Expr::Delete(_)
-			| expr::Expr::Relate(_)
-			| expr::Expr::Insert(_)
-			| expr::Expr::Define(_)
-			| expr::Expr::Remove(_)
-			| expr::Expr::Rebuild(_)
-			| expr::Expr::Alter(_)
-			| expr::Expr::Info(_)
-			| expr::Expr::Foreach(_)
-			| expr::Expr::Let(_)
-			| expr::Expr::Sleep(_) => {
-				f.push_str("(");
-				self.0.fmt_sql(f, fmt);
-				f.push_str(")")
+				f.push(')')
 			}
 		}
 	}
@@ -276,7 +226,7 @@ impl ToSql for Float {
 			}
 		} else {
 			self.0.fmt_sql(f, fmt);
-			f.push_str("f");
+			f.push('f');
 		}
 	}
 }

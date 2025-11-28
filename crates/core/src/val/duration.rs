@@ -7,7 +7,7 @@ use anyhow::Result;
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
@@ -236,6 +236,12 @@ impl fmt::Display for Duration {
 	}
 }
 
+impl ToSql for Duration {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		self.to_string().fmt_sql(f, sql_fmt)
+	}
+}
+
 impl ops::Add for Duration {
 	type Output = Self;
 	fn add(self, other: Self) -> Self {
@@ -401,11 +407,5 @@ impl<'a> Sum<&'a Self> for Duration {
 impl InfoStructure for Duration {
 	fn structure(self) -> Value {
 		self.to_string().into()
-	}
-}
-
-impl ToSql for Duration {
-	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "{}", self)
 	}
 }

@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::fmt::Write;
 use std::slice::Iter;
 
 use anyhow::Result;

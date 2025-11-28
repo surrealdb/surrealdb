@@ -42,9 +42,9 @@ impl ToSql for Output {
 						.unwrap_or(false),
 				};
 				if starts_with_none {
-					f.push_str("(");
+					f.push('(');
 					v.fmt_sql(f, fmt);
-					f.push_str(")")
+					f.push(')')
 				} else {
 					v.fmt_sql(f, fmt)
 				}

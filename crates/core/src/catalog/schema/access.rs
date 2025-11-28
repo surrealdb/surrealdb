@@ -2,7 +2,7 @@ use std::fmt;
 use std::time::Duration;
 
 use revision::revisioned;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::schema::base::Base;
 use crate::expr::Expr;
@@ -213,7 +213,7 @@ impl fmt::Display for Algorithm {
 
 impl ToSql for Algorithm {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "{}", self)
+		self.to_string().fmt_sql(f, sql_fmt)
 	}
 }
 

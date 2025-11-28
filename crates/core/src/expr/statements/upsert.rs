@@ -1,4 +1,3 @@
-
 use anyhow::{Result, ensure};
 use reblessive::tree::Stk;
 use surrealdb_types::{SqlFormat, ToSql};

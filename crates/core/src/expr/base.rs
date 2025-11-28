@@ -22,7 +22,7 @@ impl fmt::Display for Base {
 
 impl ToSql for Base {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		let sql_base: crate::sql::Base = self.clone().into();
+		let sql_base: crate::sql::Base = (*self).into();
 		sql_base.fmt_sql(f, sql_fmt);
 	}
 }

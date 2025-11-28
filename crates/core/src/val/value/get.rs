@@ -201,7 +201,7 @@ impl Value {
 						.await
 						.catch_return()?
 					{
-						Value::Number(n) => match v.get(&n.to_string()) {
+						Value::Number(n) => match v.get(&n.to_sql()) {
 							Some(v) => stk.run(|stk| v.get(stk, ctx, opt, doc, path.next())).await,
 							None => {
 								stk.run(|stk| Value::None.get(stk, ctx, opt, doc, path.next()))

@@ -1,4 +1,3 @@
-
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::fmt::{EscapeKwFreeIdent, Fmt};

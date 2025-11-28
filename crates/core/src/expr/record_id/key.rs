@@ -1,4 +1,3 @@
-use std::fmt::Write as _;
 use std::ops::Bound;
 
 use anyhow::Result;

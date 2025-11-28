@@ -1,4 +1,3 @@
-
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::CoverStmtsSql;

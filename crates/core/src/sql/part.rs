@@ -1,5 +1,3 @@
-use std::fmt::Write;
-
 use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::fmt::{EscapeKwFreeIdent, Fmt};
@@ -92,7 +90,7 @@ impl ToSql for Part {
 			Part::First => f.push_str("[0]"),
 			Part::Start(v) => v.fmt_sql(f, fmt),
 			Part::Field(v) => write_sql!(f, fmt, ".{}", EscapeKwFreeIdent(v)),
-			Part::Flatten => f.push_str("…"),
+			Part::Flatten => f.push('…'),
 			Part::Where(v) => write_sql!(f, fmt, "[WHERE {v}]"),
 			Part::Graph(v) => v.fmt_sql(f, fmt),
 			Part::Value(v) => write_sql!(f, fmt, "[{v}]"),

@@ -5,7 +5,6 @@ pub struct Groups(pub Vec<Group>);
 
 impl surrealdb_types::ToSql for Groups {
 	fn fmt_sql(&self, f: &mut String, fmt: surrealdb_types::SqlFormat) {
-		use surrealdb_types::ToSql;
 		if self.0.is_empty() {
 			f.push_str("GROUP ALL");
 		} else {

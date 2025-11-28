@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, HashSet};
-use std::fmt::{Display, Write};
+use std::fmt::Display;
 use std::hash;
 
 use rust_decimal::Decimal;

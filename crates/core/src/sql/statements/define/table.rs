@@ -98,7 +98,7 @@ impl ToSql for DefineTableStatement {
 		} else {
 			f.push(' ');
 		}
-		write_sql!(f, sql_fmt, " {}", self.permissions);
+		write_sql!(f, sql_fmt, "{}", self.permissions);
 	}
 }
 

@@ -1,4 +1,3 @@
-
 use anyhow::{Result, bail};
 use argon2::Argon2;
 use argon2::password_hash::{PasswordHasher, SaltString};

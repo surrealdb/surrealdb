@@ -90,14 +90,14 @@ impl Debug for Regex {
 
 impl Display for Regex {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		let t = self.0.to_string().replace('/', "\\/");
-		write!(f, "/{}/", &t)
+		std::fmt::Display::fmt(&self.0, f)
 	}
 }
 
 impl ToSql for Regex {
 	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
-		write_sql!(f, sql_fmt, "{}", self)
+		let t = self.0.to_string().replace('/', "\\/");
+		write_sql!(f, sql_fmt, "/{}/", &t)
 	}
 }
 

@@ -1,4 +1,3 @@
-
 use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::sql::field::{Fields, Selector};
