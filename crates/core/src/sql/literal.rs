@@ -210,7 +210,7 @@ impl From<crate::expr::Literal> for Literal {
 /// behaviour>
 ///
 /// The behaviour around geometries needs to be improved but until then this is
-/// her to ensure they still work like they previously would.
+/// here to ensure they still work like they previously would.
 fn convert_geometry(map: Vec<ObjectEntry>) -> crate::expr::Literal {
 	if let Some(geom) = collect_geometry(&map) {
 		crate::expr::Literal::Geometry(geom)
