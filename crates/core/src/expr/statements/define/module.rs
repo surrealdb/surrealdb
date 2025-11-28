@@ -10,7 +10,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Expr, FlowResultExt, ModuleExecutable};
+use crate::expr::{Base, Expr, FlowResultExt, Literal, ModuleExecutable};
 use crate::fmt::{CoverStmts, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
@@ -96,7 +96,9 @@ impl fmt::Display for DefineModuleStatement {
 			write!(f, " mod::{name} AS")?;
 		}
 		write!(f, " {}", self.executable)?;
-		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
 		} else {

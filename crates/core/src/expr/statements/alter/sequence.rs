@@ -9,27 +9,17 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Expr, FlowResultExt, Literal, Value};
+use crate::expr::{Base, Expr, FlowResultExt, Value};
 use crate::fmt::{CoverStmts, EscapeKwIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 use crate::val::Duration;
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Default)]
 pub(crate) struct AlterSequenceStatement {
 	pub name: String,
 	pub if_exists: bool,
-	pub timeout: Expr,
-}
-
-impl Default for AlterSequenceStatement {
-	fn default() -> Self {
-		Self {
-			name: Default::default(),
-			if_exists: Default::default(),
-			timeout: Expr::Literal(Literal::None),
-		}
-	}
+	pub timeout: Option<Expr>,
 }
 
 impl AlterSequenceStatement {
@@ -57,14 +47,19 @@ impl AlterSequenceStatement {
 				}
 			}
 		};
-		// Process the statement
-		if let Some(timeout) = stk
-			.run(|stk| self.timeout.compute(stk, ctx, opt, doc))
-			.await
-			.catch_return()?
-			.cast_to::<Option<Duration>>()?
-		{
-			sq.timeout = Some(timeout.0);
+
+		if let Some(timeout) = &self.timeout {
+			// Process the statement
+			if let Some(timeout) = stk
+				.run(|stk| timeout.compute(stk, ctx, opt, doc))
+				.await
+				.catch_return()?
+				.cast_to::<Option<Duration>>()?
+			{
+				sq.timeout = Some(timeout.0);
+			} else {
+				sq.timeout = None;
+			}
 		}
 		// Set the sequence definition
 		let key = Sq::new(ns, db, &self.name);
@@ -83,8 +78,8 @@ impl Display for AlterSequenceStatement {
 			write!(f, " IF EXISTS")?
 		}
 		write!(f, " {}", EscapeKwIdent(&self.name, &["IF"]))?;
-		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
-			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
+		if let Some(timeout) = &self.timeout {
+			write!(f, " TIMEOUT {}", CoverStmts(timeout))?;
 		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())

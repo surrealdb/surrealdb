@@ -32,7 +32,7 @@ impl Iterator for Escape<'_> {
 		}
 		let next = self.chars.next()?;
 		if next == self.escape_char || next == '\\' {
-			self.pending_buffer[0] = self.escape_char;
+			self.pending_buffer[0] = next;
 			self.pending_len = 1;
 			return Some('\\');
 		}

@@ -1,9 +1,7 @@
 use std::fmt;
 
-use crate::{
-	fmt::CoverStmts,
-	sql::{Base, Expr},
-};
+use crate::fmt::CoverStmts;
+use crate::sql::{Base, Expr};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]

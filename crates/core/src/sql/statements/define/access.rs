@@ -3,7 +3,7 @@ use std::fmt::{self, Display};
 use super::DefineKind;
 use crate::fmt::CoverStmts;
 use crate::sql::access::AccessDuration;
-use crate::sql::{AccessType, Base, Expr};
+use crate::sql::{AccessType, Base, Expr, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DefineAccessStatement {
@@ -46,7 +46,9 @@ impl Display for DefineAccessStatement {
 		}
 
 		write!(f, " FOR SESSION {}", CoverStmts(&self.duration.session))?;
-		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		Ok(())
 	}
 }

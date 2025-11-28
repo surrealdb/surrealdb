@@ -799,7 +799,9 @@ impl Display for DefineTableStatement {
 		} else {
 			" SCHEMALESS"
 		})?;
-		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		if let Some(ref v) = self.view {
 			write!(f, " {v}")?
 		}

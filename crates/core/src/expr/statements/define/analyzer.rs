@@ -138,7 +138,9 @@ impl Display for DefineAnalyzerStatement {
 			let tokens: Vec<String> = v.iter().map(|f| f.to_string()).collect();
 			write!(f, " FILTERS {}", tokens.join(","))?;
 		}
-		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		Ok(())
 	}
 }

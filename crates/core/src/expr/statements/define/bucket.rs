@@ -132,7 +132,9 @@ impl Display for DefineBucketStatement {
 		}
 
 		write!(f, " PERMISSIONS {}", self.permissions)?;
-		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 
 		Ok(())
 	}

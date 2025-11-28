@@ -253,7 +253,7 @@ impl DefineAccessStatement {
 			.cast_to::<Option<Duration>>()?
 			.map(|x| x.0);
 		let comment = stk
-			.run(|stk| self.duration.session.compute(stk, ctx, opt, doc))
+			.run(|stk| self.comment.compute(stk, ctx, opt, doc))
 			.await
 			.catch_return()?
 			.cast_to()?;
@@ -441,7 +441,9 @@ impl Display for DefineAccessStatement {
 			write!(f, " FOR TOKEN {}", CoverStmts(&self.duration.token))?;
 		}
 		write!(f, " FOR SESSION {}", CoverStmts(&self.duration.session))?;
-		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		Ok(())
 	}
 }

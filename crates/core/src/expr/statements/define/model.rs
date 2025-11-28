@@ -10,8 +10,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Expr, FlowResultExt};
-use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
+use crate::expr::{Base, Expr, FlowResultExt, Literal};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -90,7 +90,9 @@ impl fmt::Display for DefineModelStatement {
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " ml::{}<{}>", EscapeKwFreeIdent(&self.name), self.version)?;
-		write!(f, " COMMENT {}", &self.comment)?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
 		} else {

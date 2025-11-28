@@ -311,10 +311,12 @@ impl Parser<'_> {
 				loop {
 					stk.run(|stk| self.parse_specific_permission(stk, &mut permission, field))
 						.await?;
-					if !self.eat(t!(",")) {
+
+					self.eat(t!(","));
+
+					if !self.eat(t!("FOR")) {
 						break;
 					}
-					expected!(self, t!("FOR"));
 				}
 				Ok(permission)
 			}

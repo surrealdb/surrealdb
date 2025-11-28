@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Write};
 
 use super::DefineKind;
 use crate::fmt::{CoverStmts, EscapeKwFreeIdent, is_pretty, pretty_indent};
-use crate::sql::{Expr, Permission};
+use crate::sql::{Expr, Literal, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -23,7 +23,9 @@ impl Display for DefineParamStatement {
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " ${} VALUE {}", EscapeKwFreeIdent(&self.name), CoverStmts(&self.value))?;
-		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
 		} else {

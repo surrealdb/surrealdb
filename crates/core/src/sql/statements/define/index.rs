@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use super::DefineKind;
 use crate::fmt::{CoverStmts, Fmt};
-use crate::sql::{Expr, Index};
+use crate::sql::{Expr, Index, Literal};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct DefineIndexStatement {
@@ -30,7 +30,9 @@ impl Display for DefineIndexStatement {
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index)?;
 		}
-		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		if self.concurrently {
 			write!(f, " CONCURRENTLY")?;
 		}

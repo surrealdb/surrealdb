@@ -58,7 +58,9 @@ impl Display for DefineApiStatement {
 			write!(f, " {}", action)?;
 		}
 
-		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 
 		drop(indent);
 		Ok(())

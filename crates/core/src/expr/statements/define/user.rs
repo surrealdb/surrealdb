@@ -85,7 +85,7 @@ impl DefineUserStatement {
 			.cast_to::<Option<Duration>>()?
 			.map(|x| x.0);
 		let session_duration = stk
-			.run(|stk| self.duration.token.compute(stk, ctx, opt, doc))
+			.run(|stk| self.duration.session.compute(stk, ctx, opt, doc))
 			.await
 			.catch_return()?
 			.cast_to::<Option<Duration>>()?
@@ -267,7 +267,9 @@ impl Display for DefineUserStatement {
 			CoverStmts(&self.duration.token),
 			CoverStmts(&self.duration.session)
 		)?;
-		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		Ok(())
 	}
 }

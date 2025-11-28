@@ -41,7 +41,9 @@ impl Display for DefineDatabaseStatement {
 		if self.strict {
 			write!(f, " STRICT")?;
 		}
-		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		if let Some(ref v) = self.changefeed {
 			write!(f, " {v}")?;
 		}

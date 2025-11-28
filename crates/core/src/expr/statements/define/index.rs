@@ -175,7 +175,9 @@ impl Display for DefineIndexStatement {
 		if Index::Idx != self.index {
 			write!(f, " {}", self.index.to_sql())?;
 		}
-		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		if self.concurrently {
 			write!(f, " CONCURRENTLY")?
 		}

@@ -823,7 +823,7 @@ impl fmt::Display for Expr {
 
 				if left.needs_parentheses()
 					|| left_bp < op_bp
-					|| left_bp == right_bp
+					|| left_bp == op_bp
 						&& matches!(
 							left_bp,
 							BindingPower::Range | BindingPower::Relation | BindingPower::Equality
@@ -847,9 +847,9 @@ impl fmt::Display for Expr {
 
 				if right.needs_parentheses()
 					|| right_bp < op_bp
-					|| left_bp == right_bp
+					|| right_bp == op_bp
 						&& matches!(
-							right_bp,
+							op_bp,
 							BindingPower::Range | BindingPower::Relation | BindingPower::Equality
 						) {
 					write!(f, "({right})")

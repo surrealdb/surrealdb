@@ -12,7 +12,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
-use crate::expr::{Base, Expr, FlowResultExt};
+use crate::expr::{Base, Expr, FlowResultExt, Literal};
 use crate::fmt::{CoverStmts, Fmt};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
@@ -124,7 +124,9 @@ impl Display for DefineEventStatement {
 			CoverStmts(&self.when),
 			Fmt::comma_separated(self.then.iter().map(CoverStmts))
 		)?;
-		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		Ok(())
 	}
 }

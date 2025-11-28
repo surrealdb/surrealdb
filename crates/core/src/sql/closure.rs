@@ -1,9 +1,7 @@
 use std::fmt;
 
-use crate::{
-	fmt::CoverStmts,
-	sql::{Expr, Kind, Param},
-};
+use crate::fmt::CoverStmts;
+use crate::sql::{Expr, Kind, Param};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Closure {

@@ -2,7 +2,7 @@ use std::fmt::{self, Write};
 
 use super::DefineKind;
 use crate::fmt::{CoverStmts, is_pretty, pretty_indent};
-use crate::sql::{Expr, ModuleExecutable, Permission};
+use crate::sql::{Expr, Literal, ModuleExecutable, Permission};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -26,7 +26,9 @@ impl fmt::Display for DefineModuleStatement {
 			write!(f, " mod::{name} AS")?;
 		}
 		write!(f, " {}", self.executable)?;
-		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
 		} else {

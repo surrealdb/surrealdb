@@ -37,7 +37,9 @@ impl fmt::Display for DefineModelStatement {
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " ml::{}<{}>", EscapeIdent(&self.name), self.version)?;
-		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
 		} else {

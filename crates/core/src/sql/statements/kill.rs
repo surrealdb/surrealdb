@@ -1,6 +1,7 @@
 use std::fmt;
 
-use crate::{fmt::CoverStmts, sql::Expr};
+use crate::fmt::CoverStmts;
+use crate::sql::Expr;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct KillStatement {

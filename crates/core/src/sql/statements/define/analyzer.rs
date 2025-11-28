@@ -52,7 +52,9 @@ impl Display for DefineAnalyzerStatement {
 		if let Some(v) = &self.filters {
 			write!(f, " FILTERS {}", Fmt::comma_separated(v.iter()))?;
 		}
-		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		Ok(())
 	}
 }

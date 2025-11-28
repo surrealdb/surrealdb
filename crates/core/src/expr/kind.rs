@@ -946,7 +946,7 @@ impl Display for KindLiteral {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
 		match self {
 			KindLiteral::String(s) => write!(f, "{}", QuoteStr(s)),
-			KindLiteral::Integer(n) => write!(f, " {}", n),
+			KindLiteral::Integer(n) => write!(f, "{}", n),
 			KindLiteral::Float(n) => write!(f, " {}", Float(*n)),
 			KindLiteral::Decimal(n) => write!(f, "{}dec", n),
 			KindLiteral::Duration(d) => write!(f, "{}", d),

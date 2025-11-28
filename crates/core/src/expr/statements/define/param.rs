@@ -10,8 +10,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Expr, FlowResultExt as _};
-use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
+use crate::expr::{Base, Expr, FlowResultExt as _, Literal};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -95,7 +95,9 @@ impl Display for DefineParamStatement {
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
 		write!(f, " ${} VALUE {}", EscapeKwFreeIdent(&self.name), self.value)?;
-		write!(f, " COMMENT {}", &self.comment)?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
 		} else {

@@ -550,7 +550,9 @@ impl Display for DefineFieldStatement {
 		if let Some(ref v) = self.reference {
 			write!(f, " REFERENCE {v}")?
 		}
-		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
 		} else {

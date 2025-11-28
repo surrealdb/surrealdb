@@ -10,8 +10,8 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
-use crate::expr::{Base, Block, Expr, FlowResultExt, Kind};
-use crate::fmt::{EscapeKwFreeIdent, is_pretty, pretty_indent};
+use crate::expr::{Base, Block, Expr, FlowResultExt, Kind, Literal};
+use crate::fmt::{CoverStmts, EscapeKwFreeIdent, is_pretty, pretty_indent};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -112,7 +112,9 @@ impl fmt::Display for DefineFunctionStatement {
 			write!(f, "-> {v} ")?;
 		}
 		Display::fmt(&self.block, f)?;
-		write!(f, " COMMENT {}", &self.comment)?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		let _indent = if is_pretty() {
 			Some(pretty_indent())
 		} else {

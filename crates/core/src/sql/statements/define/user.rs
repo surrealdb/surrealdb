@@ -78,10 +78,13 @@ impl Display for DefineUserStatement {
 		// If default values were not printed, exports would not be forward compatible
 		// None values need to be printed, as they are different from the default values
 		write!(f, " DURATION")?;
-		write!(f, " FOR TOKEN ",)?;
+		write!(f, " FOR TOKEN ")?;
 		CoverStmts(&self.token_duration).fmt(f)?;
+		write!(f, ", FOR SESSION ")?;
 		CoverStmts(&self.session_duration).fmt(f)?;
-		write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		if !matches!(self.comment, Expr::Literal(Literal::None)) {
+			write!(f, " COMMENT {}", CoverStmts(&self.comment))?;
+		}
 		Ok(())
 	}
 }

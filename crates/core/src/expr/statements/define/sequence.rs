@@ -12,6 +12,7 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::parameterize::expr_to_ident;
 use crate::expr::{Base, Expr, FlowResultExt, Literal, Value};
+use crate::fmt::CoverStmts;
 use crate::iam::{Action, ResourceKind};
 use crate::key::database::sq::Sq;
 use crate::key::sequence::Prefix;
@@ -134,7 +135,17 @@ impl Display for DefineSequenceStatement {
 			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
 			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
 		}
-		write!(f, " {} BATCH {} START {} {}", &self.name, self.batch, self.start, self.timeout)?;
+		write!(
+			f,
+			" {} BATCH {} START {} ",
+			CoverStmts(&self.name),
+			CoverStmts(&self.batch),
+			CoverStmts(&self.start)
+		)?;
+		if !matches!(self.timeout, Expr::Literal(Literal::None)) {
+			write!(f, " TIMEOUT {}", CoverStmts(&self.timeout))?;
+		}
+
 		Ok(())
 	}
 }
