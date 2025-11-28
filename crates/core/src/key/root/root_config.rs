@@ -8,7 +8,7 @@ use crate::key::category::{Categorise, Category};
 use crate::kvs::impl_kv_key_storekey;
 
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Encode, BorrowDecode)]
-pub(crate) struct Cg<'a> {
+pub(crate) struct RootConfig<'a> {
 	__: u8,
 	_a: u8,
 	_b: u8,
@@ -16,19 +16,19 @@ pub(crate) struct Cg<'a> {
 	pub ty: Cow<'a, str>,
 }
 
-impl_kv_key_storekey!(Cg<'_> => ConfigDefinition);
+impl_kv_key_storekey!(RootConfig<'_> => ConfigDefinition);
 
-pub fn new(ty: &str) -> Cg<'_> {
-	Cg::new(ty)
+pub fn new(ty: &str) -> RootConfig<'_> {
+	RootConfig::new(ty)
 }
 
-impl Categorise for Cg<'_> {
+impl Categorise for RootConfig<'_> {
 	fn categorise(&self) -> Category {
 		Category::RootConfig
 	}
 }
 
-impl<'a> Cg<'a> {
+impl<'a> RootConfig<'a> {
 	pub fn new(ty: &'a str) -> Self {
 		Self {
 			__: b'/',
@@ -48,10 +48,10 @@ mod tests {
 	#[test]
 	fn key() {
 		#[rustfmt::skip]
-		let val = Cg::new(
+		let val = RootConfig::new(
 			"testty",
 		);
-		let enc = Cg::encode_key(&val).unwrap();
+		let enc = RootConfig::encode_key(&val).unwrap();
 		assert_eq!(enc, b"/!cgtestty\0");
 	}
 }

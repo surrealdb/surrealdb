@@ -1,7 +1,7 @@
 pub mod ac;
 pub mod access;
 pub mod all;
-pub mod cg;
+pub mod root_config;
 pub mod ic;
 pub mod nd;
 pub mod nh;

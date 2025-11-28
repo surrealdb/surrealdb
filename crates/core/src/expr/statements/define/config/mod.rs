@@ -99,7 +99,7 @@ impl DefineConfigStatement {
 				}
 
 				// Compute the config
-				let key = crate::key::root::cg::new(cg);
+				let key = crate::key::root::root_config::new(cg);
 				let store = self.inner.compute(stk, ctx, opt, doc).await?;
 				// Put the config
 				txn.replace(&key, &store).await?;

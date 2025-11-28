@@ -795,7 +795,7 @@ impl RootProvider for Transaction {
 		match self.cache.get(&qey) {
 			Some(val) => val,
 			None => {
-				let key = crate::key::root::cg::new("default");
+				let key = crate::key::root::root_config::new("default");
 				let Some(val) = self.get(&key, None).await? else {
 					return Ok(None);
 				};
@@ -818,7 +818,7 @@ impl RootProvider for Transaction {
 		match self.cache.get(&qey) {
 			Some(val) => val.try_into_type().map(Option::Some),
 			None => {
-				let key = crate::key::root::cg::new(cg);
+				let key = crate::key::root::root_config::new(cg);
 				if let Some(val) = self.get(&key, None).await? {
 					let val = Arc::new(val);
 					let entr = cache::tx::Entry::Any(val.clone());
