@@ -4,7 +4,7 @@ use std::fmt::{self, Debug};
 #[cfg(storage)]
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use anyhow::{Result, bail};
@@ -503,17 +503,31 @@ impl MutableContext {
 	/// Check if the context is done. If it returns `None` the operation may
 	/// proceed, otherwise the operation should be stopped.
 	///
+	/// # Check Priority Order
+	/// The checks are performed in the following order, with earlier checks taking priority:
+	/// 1. **Cancellation** (always checked): Fast atomic flag check via `self.cancelled`
+	/// 2. **Memory threshold** (only if `deep_check = true`): Expensive check via
+	///    `ALLOC.is_beyond_threshold()`
+	/// 3. **Deadline** (only if `deep_check = true`): Moderately expensive check via
+	///    `Instant::now()`
+	///
 	/// # Parameters
-	/// - `deep_check`: When `true`, performs expensive checks including:
-	///   - Memory threshold via `ALLOC.is_beyond_threshold()`
-	///   - Deadline check via `Instant::now()`
-	///   When `false`, only checks the cancellation flag (fast atomic operation).
+	/// - `deep_check`: When `true`, performs all checks (cancellation, memory, deadline). When
+	///   `false`, only checks the cancellation flag (fast atomic operation).
 	///
 	/// # Performance Note
-	/// Checking `Instant::now()` takes tens to hundreds of nanoseconds.
-	/// Checking an `AtomicBool` takes single-digit nanoseconds.
-	/// Use `deep_check = false` for hot loops to minimize overhead.
+	/// - Checking an `AtomicBool` (cancellation): single-digit nanoseconds
+	/// - Checking `Instant::now()` (deadline): tens to hundreds of nanoseconds
+	/// - Checking `ALLOC.is_beyond_threshold()` (memory): hundreds of nanoseconds (requires lock +
+	///   traversal)
+	///
+	/// Use `deep_check = false` in hot loops to minimize overhead while still allowing
+	/// cancellation.
 	pub(crate) fn done(&self, deep_check: bool) -> Result<Option<Reason>> {
+		// Check cancellation FIRST (fast atomic operation)
+		if self.cancelled.load(Ordering::Relaxed) {
+			return Ok(Some(Reason::Canceled));
+		}
 		if deep_check {
 			if ALLOC.is_beyond_threshold() {
 				bail!(Error::QueryBeyondMemoryThreshold);
@@ -532,7 +546,8 @@ impl MutableContext {
 
 	/// Check if there is some reason to stop processing the current query.
 	///
-	/// Returns `true` when the query should be stopped (cancelled, timed out, or exceeded memory threshold).
+	/// Returns `true` when the query should be stopped (cancelled, timed out, or exceeded memory
+	/// threshold).
 	///
 	/// # Parameters
 	/// - `count`: Optional iteration count for optimization. Pass:
@@ -540,8 +555,8 @@ impl MutableContext {
 	///     responsiveness with performance. The method will:
 	///     - Yield every 32 iterations to allow other tasks to run
 	///     - Perform deep checks (memory/deadline) at iterations 1, 2, 4, 8, 16, 32, then every 64
-	///   - `None` when called outside a loop (e.g., single operations) - always performs
-	///     a deep check for immediate cancellation/timeout detection
+	///   - `None` when called outside a loop (e.g., single operations) - always performs a deep
+	///     check for immediate cancellation/timeout detection
 	///
 	/// # Performance
 	/// The adaptive checking strategy ("jitter-based back-off") minimizes overhead in hot loops
