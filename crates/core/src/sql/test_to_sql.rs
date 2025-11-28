@@ -82,7 +82,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 #[case::expr_lit_record_id(Expr::Literal(Literal::RecordId(RecordIdLit {
     table: "table".to_string(),
     key: RecordIdKeyLit::Number(123)
-})), "table:123", "table:123")]
+})), "`table`:123", "`table`:123")]
 #[case::expr_lit_regex(Expr::Literal(Literal::Regex("hello".parse().unwrap())), "/hello/", "/hello/")]
 // Expression: Params
 #[case::expr_param(Expr::Param(Param::new("x".to_string())), "$x", "$x")]
@@ -261,8 +261,8 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
             }))
         ])
     })),
-    "FOR $user IN SELECT * FROM users { IF user.active = true { CREATE active_users CONTENT $user } }",
-    "FOR $user IN SELECT * FROM users { IF user.active = true\n\t{ CREATE active_users CONTENT $user }\n }"
+    "FOR $user IN (SELECT * FROM users) { IF user.active = true { CREATE active_users CONTENT $user } }",
+    "FOR $user IN (SELECT * FROM users) { IF user.active = true\n\t{ CREATE active_users CONTENT $user }\n }"
 )]
 #[case::deeply_nested_object(
     Expr::Literal(Literal::Object(vec![

@@ -987,7 +987,7 @@ mod tests {
 	fn idiom_start_thing_remote_traversal() {
 		let sql = "person:test.friend->like->person";
 		let out = syn::expr(sql).unwrap();
-		assert_eq!("person:test.friend->like->person", format!("{}", out));
+		assert_eq!("(person:test).friend->like->person", format!("{}", out));
 		assert_eq!(
 			out,
 			Expr::Idiom(Idiom(vec![

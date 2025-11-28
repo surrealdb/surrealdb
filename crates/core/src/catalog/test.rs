@@ -77,7 +77,7 @@ use crate::val::{Datetime, Value};
 	auth: Some(Auth::default()),
 	session: Some(Value::default()),
 	vars: BTreeMap::new(),
-}, 100)]
+}, 101)]
 #[case::access(AccessDefinition {
 	name: "access".to_string(),
 	access_type: AccessType::Bearer(BearerAccess {

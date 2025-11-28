@@ -173,37 +173,52 @@ macro_rules! run {
 
 #[cfg(test)]
 mod test {
+
 	use crate::err::Error;
 
+	#[track_caller]
 	fn fail_func() -> Result<(), anyhow::Error> {
 		fail!("Reached unreachable code");
 	}
 
+	#[track_caller]
 	fn fail_func_args() -> Result<(), anyhow::Error> {
 		fail!("Found {} but expected {}", "test", "other");
 	}
 
 	#[test]
 	fn fail_literal() {
+		let line = line!();
 		let Ok(Error::Unreachable(msg)) = fail_func().unwrap_err().downcast() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:187: Reached unreachable code", msg);
+		assert_eq!(
+			format!("crates/core/src/mac/mod.rs:{}: Reached unreachable code", line + 1),
+			msg
+		);
 	}
 
 	#[test]
 	fn fail_call() {
+		let line = line!();
 		let Error::Unreachable(msg) = Error::unreachable("Reached unreachable code") else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:204: Reached unreachable code", msg);
+		assert_eq!(
+			format!("crates/core/src/mac/mod.rs:{}: Reached unreachable code", line + 1),
+			msg
+		);
 	}
 
 	#[test]
 	fn fail_arguments() {
+		let line = line!();
 		let Ok(Error::Unreachable(msg)) = fail_func_args().unwrap_err().downcast() else {
 			panic!()
 		};
-		assert_eq!("crates/core/src/mac/mod.rs:191: Found test but expected other", msg);
+		assert_eq!(
+			format!("crates/core/src/mac/mod.rs:{}: Found test but expected other", line + 1),
+			msg
+		);
 	}
 }

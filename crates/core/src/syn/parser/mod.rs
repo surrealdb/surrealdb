@@ -467,10 +467,7 @@ impl<'a> Parser<'a> {
 				self.backup_after(backup);
 				Ok(None)
 			}
-			Err(e) => {
-				self.backup_after(backup);
-				Err(e)
-			}
+			Err(e) => Err(e),
 		}
 	}
 }
