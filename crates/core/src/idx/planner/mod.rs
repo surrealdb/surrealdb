@@ -17,7 +17,7 @@ use crate::catalog::DatabaseDefinition;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
-use crate::expr::order::Ordering;
+use crate::expr::order::{OrderDirection, Ordering};
 use crate::expr::with::With;
 use crate::expr::{Cond, Fields, Groups};
 use crate::idx::planner::executor::{InnerQueryExecutor, IteratorEntry, QueryExecutor};
@@ -48,7 +48,7 @@ pub(crate) enum RecordStrategy {
 	KeysAndValues,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ScanDirection {
 	Forward,
 	Backward,
@@ -211,7 +211,7 @@ impl<'a> StatementContext<'a> {
 	pub(crate) fn check_scan_direction(&self) -> ScanDirection {
 		if let Some(Ordering::Order(o)) = self.order
 			&& let Some(o) = o.first()
-			&& !o.direction
+			&& matches!(o.direction, OrderDirection::Descending)
 			&& o.value.is_id()
 		{
 			return ScanDirection::Backward;
@@ -304,44 +304,51 @@ impl QueryPlanner {
 			all_and_groups: tree.all_and_groups,
 		};
 		match PlanBuilder::build(ctx, p).await? {
-			Plan::SingleIndex(exp, io, rs) => {
+			Plan::SingleIndex(exp, io, rs, direction) => {
 				if io.require_distinct() {
 					self.requires_distinct = true;
 				}
 				let is_order = io.is_order();
-				let ir = exe.add_iterator(IteratorEntry::Single(exp, io));
-				self.add(t.clone(), Some(ir), exe, it, rs);
+				let ir = exe.add_iterator(IteratorEntry::Single(exp, io, direction));
+				self.add(t.clone(), Some(ir), exe, it, rs, direction);
 				if is_order {
 					self.ordering_indexes.push(ir);
 				}
 			}
 			Plan::MultiIndex(non_range_indexes, ranges_indexes, rs) => {
 				for (exp, io) in non_range_indexes {
-					let ie = IteratorEntry::Single(Some(exp), io);
+					let ie = IteratorEntry::Single(Some(exp), io, ScanDirection::Forward);
 					let ir = exe.add_iterator(ie);
-					it.ingest(Iterable::Index(t.clone(), ir, rs));
+					it.ingest(Iterable::Index(t.clone(), ir, rs, ScanDirection::Forward));
 				}
 				for (ixr, rq) in ranges_indexes {
 					let ie =
 						IteratorEntry::Range(rq.exps, ixr, rq.from, rq.to, ScanDirection::Forward);
 					let ir = exe.add_iterator(ie);
-					it.ingest(Iterable::Index(t.clone(), ir, rs));
+					it.ingest(Iterable::Index(t.clone(), ir, rs, ScanDirection::Forward));
 				}
 				self.requires_distinct = true;
-				self.add(t.clone(), None, exe, it, rs);
+				self.add(t.clone(), None, exe, it, rs, ScanDirection::Forward);
 			}
-			Plan::SingleIndexRange(ixn, rq, keys_only, sc, is_order) => {
-				let ir = exe.add_iterator(IteratorEntry::Range(rq.exps, ixn, rq.from, rq.to, sc));
-				if is_order {
+			Plan::SingleIndexRange(ixn, rq, keys_strategy, scan_direction, pre_ordered) => {
+				let ir = exe.add_iterator(IteratorEntry::Range(
+					rq.exps,
+					ixn,
+					rq.from,
+					rq.to,
+					scan_direction,
+				));
+				if pre_ordered {
 					self.ordering_indexes.push(ir);
 				}
-				self.add(t.clone(), Some(ir), exe, it, keys_only);
+				self.add(t.clone(), Some(ir), exe, it, keys_strategy, scan_direction);
 			}
 			Plan::TableIterator(reason, rs, sc) => {
 				if let Some(reason) = reason {
 					self.fallbacks.push(reason);
 				}
-				self.add(t.clone(), None, exe, it, rs);
+				// TODO EK: It is pre-ordered if the storage engine provide the record ordered by ID
+				self.add(t.clone(), None, exe, it, rs, sc);
 				it.ingest(Iterable::Table(t.clone(), rs, sc));
 				is_table_iterator = true;
 			}
@@ -361,10 +368,11 @@ impl QueryPlanner {
 		exe: InnerQueryExecutor,
 		it: &mut Iterator,
 		rs: RecordStrategy,
+		direction: ScanDirection,
 	) {
 		self.executors.insert(tb.clone(), exe.into());
 		if let Some(irf) = irf {
-			it.ingest(Iterable::Index(tb, irf, rs));
+			it.ingest(Iterable::Index(tb, irf, rs, direction));
 		}
 	}
 	pub(crate) fn has_executors(&self) -> bool {

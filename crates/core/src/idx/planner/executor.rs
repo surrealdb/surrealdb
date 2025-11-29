@@ -14,6 +14,7 @@ use crate::dbs::Options;
 use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::operator::{BooleanOperator, MatchesOperator};
+use crate::expr::order::OrderDirection;
 use crate::expr::{Cond, Expr, FlowResultExt as _, Idiom};
 use crate::idx::IndexKeyBase;
 use crate::idx::ft::MatchRef;
@@ -100,14 +101,14 @@ impl From<InnerQueryExecutor> for QueryExecutor {
 }
 
 pub(super) enum IteratorEntry {
-	Single(Option<Arc<Expr>>, IndexOption),
+	Single(Option<Arc<Expr>>, IndexOption, ScanDirection),
 	Range(HashSet<Arc<Expr>>, IndexReference, RangeValue, RangeValue, ScanDirection),
 }
 
 impl IteratorEntry {
 	pub(super) fn explain(&self) -> Value {
 		match self {
-			Self::Single(_, io) => io.explain(),
+			Self::Single(_, io, sc) => io.explain(Some(*sc)),
 			Self::Range(_, ir, from, to, sc) => {
 				let mut e = HashMap::default();
 				e.insert("index", Value::from(ir.name.clone()));
@@ -365,7 +366,7 @@ impl QueryExecutor {
 	) -> Result<Option<ThingIterator>> {
 		if let Some(it_entry) = self.0.it_entries.get(ir) {
 			match it_entry {
-				IteratorEntry::Single(_, io) => self.new_single_iterator(ns, db, ir, io).await,
+				IteratorEntry::Single(_, io, _sc) => self.new_single_iterator(ns, db, ir, io).await,
 				IteratorEntry::Range(_, index_reference, from, to, sc) => Ok(self
 					.new_range_iterator(
 						ir,
@@ -448,8 +449,8 @@ impl QueryExecutor {
 					Box::new(IndexJoinThingIterator::new(ir, ns, db, ix.clone(), iterators)?);
 				Some(ThingIterator::IndexJoin(index_join))
 			}
-			IndexOperator::Order(reverse) => {
-				if *reverse {
+			IndexOperator::Order(direction) => {
+				if matches!(direction, OrderDirection::Descending) {
 					Some(ThingIterator::IndexRangeReverse(
 						IndexRangeReverseThingIterator::full_range(ir, ns, db, ix)?,
 					))
@@ -576,8 +577,8 @@ impl QueryExecutor {
 				)?);
 				Some(ThingIterator::UniqueJoin(unique_join))
 			}
-			IndexOperator::Order(reverse) => {
-				if *reverse {
+			IndexOperator::Order(direction) => {
+				if matches!(direction, OrderDirection::Descending) {
 					Some(ThingIterator::UniqueRangeReverse(
 						UniqueRangeReverseThingIterator::full_range(
 							irf,
