@@ -4,6 +4,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use dashmap::DashMap;
 use quick_cache::{Equivalent, Weighter};
+use std::hash::Hash;
 use surrealism_runtime::controller::Runtime;
 use tokio::sync::Mutex;
 
@@ -11,7 +12,6 @@ use crate::catalog::{DatabaseId, NamespaceId};
 
 pub struct SurrealismCache {
 	cache: quick_cache::sync::Cache<SurrealismCacheKey, SurrealismCacheValue, Weight>,
-	// Tracks in-progress plugin compilations to prevent duplicate work
 	loading: DashMap<SurrealismCacheKey, Arc<Mutex<()>>>,
 }
 
@@ -27,70 +27,72 @@ impl SurrealismCache {
 		}
 	}
 
-	pub fn get(&self, lookup: &SurrealismCacheLookup) -> Option<SurrealismCacheValue> {
+	pub fn get<K: Equivalent<SurrealismCacheKey> + Hash>(
+		&self,
+		lookup: &K,
+	) -> Option<SurrealismCacheValue> {
 		self.cache.get(lookup)
 	}
 
-	pub fn remove(&self, lookup: &SurrealismCacheLookup) {
+	pub fn remove<K: Equivalent<SurrealismCacheKey> + Hash>(&self, lookup: &K) {
 		self.cache.remove(lookup);
 	}
 
-	/// Get from cache or compute the value if not present.
-	/// Only one task will compute for a given key; others will wait.
-	pub async fn insert_if_not_exists<F, Fut>(
+	/// Gets the runtime from the cache or computes it if not present using the provided function
+	pub async fn get_or_insert_with<F, Fut>(
 		&self,
-		lookup: SurrealismCacheLookup<'_>,
+		lookup: &SurrealismCacheLookup<'_>,
 		compute: F,
 	) -> Result<Arc<Runtime>>
 	where
-		F: FnOnce(SurrealismCacheKey) -> Fut,
+		F: FnOnce() -> Fut,
 		Fut: Future<Output = Result<Arc<Runtime>>>,
 	{
-		// Fast path: already cached
-		if let Some(value) = self.get(&lookup) {
+		// if already cached, return it
+		if let Some(value) = self.get(lookup) {
 			return Ok(value.runtime);
 		}
 
-		let cache_key: SurrealismCacheKey = lookup.into();
+		// if not cached, acquire the loading lock
+		let cache_key: SurrealismCacheKey = lookup.clone().into();
 		let loading_lock = self.get_loading_lock(&cache_key);
 		let _guard = loading_lock.lock().await;
 
-		// Double-check after acquiring lock
-		// Another task may have completed compilation while we waited
-		if let Some(value) = self.get(&cache_key.as_lookup()) {
+		// double-check if it got cached while waiting for the lock
+		if let Some(value) = self.get(&cache_key) {
 			self.remove_loading_lock(&cache_key);
 			return Ok(value.runtime);
 		}
 
-		// We're the first task, compute the value
-		// Clone the key to pass to compute closure
-		let result = compute(cache_key.clone()).await;
+		// compute the runtime
+		let result = compute().await;
 
-		// Always clean up loading lock
+		// if successful, insert into cache
+		if let Ok(runtime) = &result {
+			self.cache.insert(
+				cache_key.clone(),
+				SurrealismCacheValue {
+					runtime: runtime.clone(),
+				},
+			);
+		}
+
 		self.remove_loading_lock(&cache_key);
 
-		// If successful, cache the result
-		match result {
-			Ok(runtime) => {
-				self.cache.insert(
-					cache_key,
-					SurrealismCacheValue {
-						runtime: runtime.clone(),
-					},
-				);
-				Ok(runtime)
+		result
+	}
+
+	fn get_loading_lock(&self, key: &SurrealismCacheKey) -> Arc<Mutex<()>> {
+		match self.loading.get(key) {
+			Some(lock) => lock.clone(),
+			None => {
+				let lock = Arc::new(Mutex::new(()));
+				self.loading.insert(key.clone(), lock.clone());
+				lock
 			}
-			Err(e) => Err(e),
 		}
 	}
 
-	/// Get or create a loading lock for a specific plugin.
-	/// This ensures only one task compiles a given plugin at a time.
-	fn get_loading_lock(&self, key: &SurrealismCacheKey) -> Arc<Mutex<()>> {
-		self.loading.entry(key.clone()).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
-	}
-
-	/// Remove a loading lock after compilation completes or fails.
 	fn remove_loading_lock(&self, key: &SurrealismCacheKey) {
 		self.loading.remove(key);
 	}
@@ -104,20 +106,7 @@ pub enum SurrealismCacheKey {
 	Silo(String, String, u32, u32, u32),
 }
 
-impl SurrealismCacheKey {
-	pub fn as_lookup(&self) -> SurrealismCacheLookup<'_> {
-		match self {
-			SurrealismCacheKey::File(ns, db, bucket, key) => {
-				SurrealismCacheLookup::File(ns, db, bucket.as_str(), key.as_str())
-			}
-			SurrealismCacheKey::Silo(org, pkg, maj, min, pat) => {
-				SurrealismCacheLookup::Silo(org.as_str(), pkg.as_str(), *maj, *min, *pat)
-			}
-		}
-	}
-}
-
-#[derive(Hash, Eq, PartialEq, Debug)]
+#[derive(Clone, Hash, Eq, PartialEq, Debug)]
 pub enum SurrealismCacheLookup<'a> {
 	// NS - DB - BUCKET - KEY
 	File(&'a NamespaceId, &'a DatabaseId, &'a str, &'a str),

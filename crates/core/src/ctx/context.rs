@@ -43,7 +43,7 @@ use crate::kvs::slowlog::SlowLog;
 use crate::mem::ALLOC;
 use crate::sql::expression::convert_public_value_to_internal;
 #[cfg(feature = "surrealism")]
-use crate::surrealism::cache::{SurrealismCache, SurrealismCacheKey, SurrealismCacheLookup};
+use crate::surrealism::cache::{SurrealismCache, SurrealismCacheLookup};
 use crate::types::{PublicNotification, PublicVariables};
 use crate::val::Value;
 
@@ -767,8 +767,8 @@ impl MutableContext {
 		};
 
 		cache
-			.insert_if_not_exists(lookup, async |cache_key| {
-				let SurrealismCacheKey::File(ns, db, bucket, key) = &cache_key else {
+			.get_or_insert_with(&lookup, async || {
+				let SurrealismCacheLookup::File(ns, db, bucket, key) = lookup else {
 					bail!("silo lookups are not supported yet");
 				};
 
