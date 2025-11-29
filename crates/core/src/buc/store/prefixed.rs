@@ -1,3 +1,8 @@
+//! Prefixed object store wrapper.
+//!
+//! This module provides a wrapper that adds a prefix to all object keys,
+//! allowing multiple logical buckets to share a single physical storage backend.
+
 use std::future::Future;
 use std::pin::Pin;
 
@@ -5,6 +10,18 @@ use bytes::Bytes;
 
 use super::{ListOptions, ObjectKey, ObjectMeta, ObjectStore};
 
+/// A wrapper that adds a prefix to all keys in an underlying [`ObjectStore`].
+///
+/// This is used to namespace objects within a shared storage backend, typically
+/// for global bucket configurations where all buckets share a single backend
+/// but need isolated key spaces.
+///
+/// All operations automatically prepend the prefix to keys and strip it from
+/// results, making the prefixing transparent to callers.
+///
+/// # Example
+/// If the prefix is `/ns1/db1/bucket1` and you store data at key `/file.txt`,
+/// the actual key in the underlying store will be `/ns1/db1/bucket1/file.txt`.
 #[derive(Clone, Debug)]
 pub struct PrefixedStore<T: ObjectStore> {
 	prefix: ObjectKey,
@@ -12,6 +29,11 @@ pub struct PrefixedStore<T: ObjectStore> {
 }
 
 impl<T: ObjectStore> PrefixedStore<T> {
+	/// Creates a new prefixed store wrapping the given store with the specified prefix.
+	///
+	/// # Arguments
+	/// * `store` - The underlying object store to wrap
+	/// * `prefix` - The prefix to prepend to all keys
 	pub fn new(store: T, prefix: ObjectKey) -> Self {
 		Self {
 			store,

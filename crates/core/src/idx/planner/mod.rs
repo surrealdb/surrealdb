@@ -17,9 +17,7 @@ use crate::catalog::DatabaseDefinition;
 use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
 use crate::dbs::{Iterable, Iterator, Options, Statement};
-#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-use crate::expr::order::OrderDirection;
-use crate::expr::order::Ordering;
+use crate::expr::order::{OrderDirection, Ordering};
 use crate::expr::with::With;
 use crate::expr::{Cond, Fields, Groups};
 use crate::idx::planner::executor::{InnerQueryExecutor, IteratorEntry, QueryExecutor};
@@ -53,7 +51,6 @@ pub(crate) enum RecordStrategy {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ScanDirection {
 	Forward,
-	#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 	Backward,
 }
 
@@ -61,7 +58,6 @@ impl Display for ScanDirection {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		match self {
 			ScanDirection::Forward => f.write_str("forward"),
-			#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
 			ScanDirection::Backward => f.write_str("backward"),
 		}
 	}
@@ -210,20 +206,15 @@ impl<'a> StatementContext<'a> {
 	/// descending. Typically: `ORDER BY id DESC`
 	/// Determine forward/backward scan direction for table/range iterators.
 	///
-	/// On backends that support reverse scans (e.g., RocksDB/TiKV), we reverse
-	/// the direction when the first ORDER BY is `id DESC`. Otherwise, we
-	/// default to forward.
-	#[allow(unused_variables)]
-	pub(crate) fn check_scan_direction(&self, has_reverse_scan: bool) -> ScanDirection {
-		#[cfg(any(feature = "kv-rocksdb", feature = "kv-tikv"))]
-		if has_reverse_scan {
-			if let Some(Ordering::Order(o)) = self.order {
-				if let Some(o) = o.first() {
-					if matches!(o.direction, OrderDirection::Descending) && o.value.is_id() {
-						return ScanDirection::Backward;
-					}
-				}
-			}
+	/// We reverse the direction when the first ORDER BY is `id DESC`.
+	/// Otherwise, we default to forward scan direction.
+	pub(crate) fn check_scan_direction(&self) -> ScanDirection {
+		if let Some(Ordering::Order(o)) = self.order
+			&& let Some(o) = o.first()
+			&& matches!(o.direction, OrderDirection::Descending)
+			&& o.value.is_id()
+		{
+			return ScanDirection::Backward;
 		}
 		ScanDirection::Forward
 	}
@@ -311,7 +302,6 @@ impl QueryPlanner {
 			all_and: tree.all_and,
 			all_expressions_with_index: tree.all_expressions_with_index,
 			all_and_groups: tree.all_and_groups,
-			has_reverse_scan: ctx.ctx.tx().has_reverse_scan(),
 		};
 		match PlanBuilder::build(ctx, p).await? {
 			Plan::SingleIndex(exp, io, rs, direction) => {

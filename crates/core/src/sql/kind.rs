@@ -4,7 +4,7 @@ use std::hash;
 
 use rust_decimal::Decimal;
 
-use crate::fmt::{EscapeIdent, EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKey, EscapeKwFreeIdent, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::types::PublicDuration;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -90,10 +90,11 @@ impl From<crate::types::PublicGeometryKind> for GeometryKind {
 }
 
 /// The kind, or data type, of a value or field.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Kind {
 	/// The most generic type, can be anything.
+	#[default]
 	Any,
 	/// None type.
 	None,
@@ -132,7 +133,10 @@ pub enum Kind {
 	Geometry(Vec<GeometryKind>),
 	/// An either type.
 	/// Can be any of the kinds in the vec.
-	Either(Vec<Kind>),
+	Either(
+		#[cfg_attr(feature = "arbitrary", arbitrary(with = crate::sql::arbitrary::either_kind))]
+		Vec<Kind>,
+	),
 	/// A set type.
 	Set(Box<Kind>, Option<u64>),
 	/// An array type.
@@ -153,12 +157,6 @@ pub enum Kind {
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
 	File(Vec<String>),
-}
-
-impl Default for Kind {
-	fn default() -> Self {
-		Self::Any
-	}
 }
 
 impl Kind {
@@ -367,14 +365,22 @@ impl Display for Kind {
 				if k.is_empty() {
 					write!(f, "table")
 				} else {
-					write!(f, "table<{}>", Fmt::verbar_separated(k.iter().map(EscapeIdent)))
+					write!(
+						f,
+						"table<{}>",
+						Fmt::verbar_separated(k.iter().map(|x| EscapeKwFreeIdent(x)))
+					)
 				}
 			}
 			Kind::Record(k) => {
 				if k.is_empty() {
 					write!(f, "record")
 				} else {
-					write!(f, "record<{}>", Fmt::verbar_separated(k.iter().map(EscapeIdent)))
+					write!(
+						f,
+						"record<{}>",
+						Fmt::verbar_separated(k.iter().map(|x| EscapeKwFreeIdent(x)))
+					)
 				}
 			}
 			Kind::Geometry(k) => {
@@ -401,7 +407,11 @@ impl Display for Kind {
 				if k.is_empty() {
 					write!(f, "file")
 				} else {
-					write!(f, "file<{}>", Fmt::verbar_separated(k))
+					write!(
+						f,
+						"file<{}>",
+						Fmt::verbar_separated(k.iter().map(|x| EscapeKwFreeIdent(x)))
+					)
 				}
 			}
 		}

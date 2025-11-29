@@ -3,7 +3,6 @@ use std::fmt;
 use crate::sql::Expr;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct KillStatement {
 	// Uuid of Live Query
 	// or Param resolving to Uuid of Live Query

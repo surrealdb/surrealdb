@@ -1,13 +1,13 @@
 use std::fmt::{self, Display, Formatter, Write};
+use std::ops::Bound;
 
-use crate::fmt::{EscapeIdent, Fmt};
+use crate::fmt::{EscapeKwFreeIdent, Fmt};
 use crate::sql::order::Ordering;
 use crate::sql::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits, Start};
 
 /// A lookup is a unified way of looking up graph edges and record references.
 /// Since they both work very similarly, they also both support the same operations
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub(crate) struct Lookup {
 	pub kind: LookupKind,
 	pub expr: Option<Fields>,
@@ -27,7 +27,18 @@ impl Display for Lookup {
 			// When the singular lookup subject has a referencing field, it needs to be wrapped in parentheses
 			// Otherwise <~table.field will be parsed as [Lookup(<~table), Field(.field)]
 			// Whereas <~(table.field) will be parsed as [Lookup(<~table.field)]
-			&& self.what.iter().all(|v| v.referencing_field().is_none())
+			//
+			// Further more `<-foo:a..` can lead to issues when the next part of the idiom starts
+			// with a `.`
+			&& self.what.iter().all(|v| {
+				if v.referencing_field().is_some() {
+					return false
+				}
+				if let LookupSubject::Range { range: RecordIdKeyRangeLit{ end: Bound::Unbounded, .. }, ..} = v {
+					return false
+				}
+				true
+			})
 			&& self.cond.is_none()
 			&& self.alias.is_none()
 			&& self.expr.is_none()
@@ -186,9 +197,9 @@ impl Display for LookupSubject {
 				table,
 				referencing_field,
 			} => {
-				Display::fmt(&EscapeIdent(table), f)?;
+				Display::fmt(&EscapeKwFreeIdent(table), f)?;
 				if let Some(referencing_field) = referencing_field {
-					write!(f, " FIELD {}", EscapeIdent(referencing_field))?;
+					write!(f, " FIELD {}", EscapeKwFreeIdent(referencing_field))?;
 				}
 				Ok(())
 			}
@@ -197,9 +208,9 @@ impl Display for LookupSubject {
 				range,
 				referencing_field,
 			} => {
-				write!(f, "{}:{range}", EscapeIdent(table))?;
+				write!(f, "{}:{range}", EscapeKwFreeIdent(table))?;
 				if let Some(referencing_field) = referencing_field {
-					write!(f, " FIELD {}", EscapeIdent(referencing_field))?;
+					write!(f, " FIELD {}", EscapeKwFreeIdent(referencing_field))?;
 				}
 				Ok(())
 			}

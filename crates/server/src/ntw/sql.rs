@@ -92,28 +92,27 @@ async fn handle_socket(state: AppState, ws: WebSocket, session: Session) {
 	let (mut tx, mut rx) = ws.split();
 	// Wait to receive the next message
 	while let Some(res) = rx.next().await {
-		if let Ok(msg) = res {
-			if let Ok(sql) = msg.to_text() {
-				// Get a database reference
-				let db = &state.datastore;
-				// Execute the received sql query
-				let _ = match db.execute(sql, &session, None).await {
-					// Convert the response to JSON
-					Ok(v) => match surrealdb_core::rpc::format::json::encode_str(Value::Array(
-						Array::from(v.into_iter().map(|x| x.into_value()).collect::<Vec<_>>()),
-					)) {
-						// Send the JSON response to the client
-						Ok(v) => tx.send(Message::Text(v.into())).await,
-						// There was an error converting to JSON
-						Err(e) => {
-							tx.send(Message::Text(format!("Failed to parse JSON: {e}",).into()))
-								.await
-						}
-					},
-					// There was an error when executing the query
-					Err(e) => tx.send(Message::Text(e.to_string().into())).await,
-				};
-			}
+		if let Ok(msg) = res
+			&& let Ok(sql) = msg.to_text()
+		{
+			// Get a database reference
+			let db = &state.datastore;
+			// Execute the received sql query
+			let _ = match db.execute(sql, &session, None).await {
+				// Convert the response to JSON
+				Ok(v) => match surrealdb_core::rpc::format::json::encode_str(Value::Array(
+					Array::from(v.into_iter().map(|x| x.into_value()).collect::<Vec<_>>()),
+				)) {
+					// Send the JSON response to the client
+					Ok(v) => tx.send(Message::Text(v.into())).await,
+					// There was an error converting to JSON
+					Err(e) => {
+						tx.send(Message::Text(format!("Failed to parse JSON: {e}",).into())).await
+					}
+				},
+				// There was an error when executing the query
+				Err(e) => tx.send(Message::Text(e.to_string().into())).await,
+			};
 		}
 	}
 }

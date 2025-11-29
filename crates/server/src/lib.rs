@@ -32,6 +32,7 @@ pub use cli::{Config, ConfigCheck, ConfigCheckRequirements};
 /// Re-export `RpcState` for convenience so embedders can `use surreal::RpcState`.
 pub use rpc::RpcState;
 pub use surrealdb_core as core;
+use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::kvs::TransactionBuilderFactory;
 
 // Re-export the core crate in the same path used across internal modules
@@ -50,7 +51,9 @@ use crate::ntw::RouterFactory;
 ///   - `TransactionBuilderFactory` (selects/validates the datastore backend)
 ///   - `RouterFactory` (constructs the HTTP router)
 ///   - `ConfigCheck` (validates configuration before initialization)
-pub fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(composer: C) -> ExitCode {
+pub fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck + BucketStoreProvider>(
+	composer: C,
+) -> ExitCode {
 	with_enough_stack(cli::init::<C>(composer))
 }
 

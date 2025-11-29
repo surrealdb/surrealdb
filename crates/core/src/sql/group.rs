@@ -4,7 +4,6 @@ use crate::fmt::Fmt;
 use crate::sql::idiom::Idiom;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Groups(pub Vec<Group>);
 
 impl Display for Groups {

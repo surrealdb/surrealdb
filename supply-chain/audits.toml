@@ -316,7 +316,7 @@ end = "2025-08-31"
 
 [[trusted.bytes]]
 criteria = "safe-to-deploy"
-user-id = 10 # Carl Lerche (carllerche)
+user-id = 10
 start = "2019-03-06"
 end = "2025-09-03"
 
@@ -388,7 +388,7 @@ end = "2026-10-30"
 
 [[trusted.cc]]
 criteria = "safe-to-deploy"
-user-id = 55123 # rust-lang-owner
+user-id = 55123
 start = "2022-10-29"
 end = "2026-10-30"
 
@@ -604,7 +604,7 @@ end = "2025-08-06"
 
 [[trusted.http-body]]
 criteria = "safe-to-deploy"
-user-id = 10 # Carl Lerche (carllerche)
+user-id = 10
 start = "2019-04-04"
 end = "2025-09-03"
 
@@ -754,7 +754,7 @@ end = "2026-10-30"
 
 [[trusted.loom]]
 criteria = "safe-to-deploy"
-user-id = 10 # Carl Lerche (carllerche)
+user-id = 10
 start = "2019-08-08"
 end = "2025-09-03"
 
@@ -814,7 +814,7 @@ end = "2025-08-06"
 
 [[trusted.mio]]
 criteria = "safe-to-deploy"
-user-id = 10 # Carl Lerche (carllerche)
+user-id = 10
 start = "2019-05-15"
 end = "2025-09-03"
 
@@ -1262,11 +1262,23 @@ user-id = 3987 # Rushmore Mushambi (rushmorem)
 start = "2023-08-29"
 end = "2025-01-24"
 
+[[trusted.surrealdb-librocksdb-sys]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-10-31"
+end = "2026-11-20"
+
 [[trusted.surrealdb-protocol]]
 criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2025-07-04"
 end = "2026-07-18"
+
+[[trusted.surrealdb-rocksdb]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-10-31"
+end = "2026-11-20"
 
 [[trusted.surrealdb-server]]
 criteria = "safe-to-deploy"
@@ -1276,7 +1288,7 @@ end = "2026-02-13"
 
 [[trusted.surrealdb-tikv-client]]
 criteria = "safe-to-deploy"
-user-id = 217605 # Yusuke Kuoka (mumoshu)
+user-id = 217605
 start = "2023-06-19"
 end = "2025-07-08"
 
@@ -1291,6 +1303,36 @@ criteria = "safe-to-deploy"
 user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
 start = "2025-09-16"
 end = "2026-09-23"
+
+[[trusted.surrealism]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-02-13"
+end = "2026-11-20"
+
+[[trusted.surrealism-cli]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-11-05"
+end = "2026-11-20"
+
+[[trusted.surrealism-macros]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-11-05"
+end = "2026-11-20"
+
+[[trusted.surrealism-runtime]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-11-05"
+end = "2026-11-20"
+
+[[trusted.surrealism-types]]
+criteria = "safe-to-deploy"
+user-id = 145457 # Tobie Morgan Hitchcock (tobiemh)
+start = "2025-11-05"
+end = "2026-11-20"
 
 [[trusted.surrealkv]]
 criteria = "safe-to-deploy"
@@ -1366,7 +1408,7 @@ end = "2026-10-12"
 
 [[trusted.tokio]]
 criteria = "safe-to-deploy"
-user-id = 10 # Carl Lerche (carllerche)
+user-id = 10
 start = "2019-03-02"
 end = "2025-09-03"
 
@@ -1384,7 +1426,7 @@ end = "2026-05-06"
 
 [[trusted.tokio-macros]]
 criteria = "safe-to-deploy"
-user-id = 10 # Carl Lerche (carllerche)
+user-id = 10
 start = "2019-04-24"
 end = "2025-09-03"
 
@@ -1396,7 +1438,7 @@ end = "2025-09-03"
 
 [[trusted.tokio-util]]
 criteria = "safe-to-deploy"
-user-id = 10 # Carl Lerche (carllerche)
+user-id = 10
 start = "2019-11-26"
 end = "2025-09-03"
 
@@ -1426,13 +1468,13 @@ end = "2026-10-30"
 
 [[trusted.tower]]
 criteria = "safe-to-deploy"
-user-id = 10 # Carl Lerche (carllerche)
+user-id = 10
 start = "2019-04-27"
 end = "2025-09-03"
 
 [[trusted.tower-layer]]
 criteria = "safe-to-deploy"
-user-id = 10 # Carl Lerche (carllerche)
+user-id = 10
 start = "2019-04-27"
 end = "2025-09-03"
 

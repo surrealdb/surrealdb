@@ -153,7 +153,7 @@ async fn decode_response(res: Response) -> Result<PublicValue> {
 				}
 				Ok(v) if v.starts_with("application/octet-stream") => {
 					let bytes = res.bytes().await.map_err(Error::from)?;
-					Ok(PublicValue::Bytes(PublicBytes::from(bytes.to_vec())))
+					Ok(PublicValue::Bytes(PublicBytes::from(bytes)))
 				}
 				Ok(v) if v.starts_with("text") => {
 					let txt = res.text().await.map_err(Error::from)?;
@@ -183,7 +183,7 @@ async fn request(
 	opts: impl Into<Object>,
 ) -> Result<Value> {
 	// Check if the URI is valid and allowed
-	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.to_string()))?;
+	let url = Url::parse(&uri).map_err(|_| Error::InvalidUrl(uri.clone()))?;
 	ctx.check_allowed_net(&url).await?;
 
 	let body = match body {

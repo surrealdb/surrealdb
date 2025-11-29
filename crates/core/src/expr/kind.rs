@@ -10,7 +10,7 @@ use surrealdb_types::{ToSql, write_sql};
 
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Expr, Literal, Part, Value};
-use crate::fmt::{EscapeIdent, EscapeKey, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKey, EscapeKwFreeIdent, Fmt, Pretty, QuoteStr, is_pretty, pretty_indent};
 use crate::val::{
 	Array, Bytes, Closure, Datetime, Duration, File, Geometry, Number, Range, RecordId, Regex, Set,
 	Uuid,
@@ -89,9 +89,10 @@ impl From<crate::types::PublicGeometryKind> for GeometryKind {
 
 /// The kind, or data type, of a value or field.
 #[revisioned(revision = 1)]
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub enum Kind {
 	/// The most generic type, can be anything.
+	#[default]
 	Any,
 	/// None type.
 	None,
@@ -153,12 +154,6 @@ pub enum Kind {
 	/// If the kind was specified without a bucket the vec will be empty.
 	/// So `<file>` is just `Kind::File(Vec::new())`
 	File(Vec<String>),
-}
-
-impl Default for Kind {
-	fn default() -> Self {
-		Self::Any
-	}
 }
 
 impl Kind {
@@ -255,10 +250,10 @@ impl Kind {
 					return match path.first() {
 						Some(Part::All) => inner.allows_nested_kind(&path[1..], kind),
 						Some(Part::Value(Expr::Literal(Literal::Integer(i)))) => {
-							if let Some(len) = len {
-								if *i >= *len as i64 {
-									return false;
-								}
+							if let Some(len) = len
+								&& *i >= *len as i64
+							{
+								return false;
 							}
 
 							inner.allows_nested_kind(&path[1..], kind)
@@ -467,14 +462,22 @@ impl Display for Kind {
 				if k.is_empty() {
 					f.write_str("table")
 				} else {
-					write!(f, "table<{}>", Fmt::verbar_separated(k))
+					write!(
+						f,
+						"table<{}>",
+						Fmt::verbar_separated(k.iter().map(|x| EscapeKwFreeIdent(x)))
+					)
 				}
 			}
 			Kind::Record(k) => {
 				if k.is_empty() {
 					f.write_str("record")
 				} else {
-					write!(f, "record<{}>", Fmt::verbar_separated(k.iter().map(EscapeIdent)))
+					write!(
+						f,
+						"record<{}>",
+						Fmt::verbar_separated(k.iter().map(|x| EscapeKwFreeIdent(x.as_str())))
+					)
 				}
 			}
 			Kind::Geometry(k) => {
@@ -501,7 +504,11 @@ impl Display for Kind {
 				if k.is_empty() {
 					f.write_str("file")
 				} else {
-					write!(f, "file<{}>", Fmt::verbar_separated(k))
+					write!(
+						f,
+						"file<{}>",
+						Fmt::verbar_separated(k.iter().map(|x| EscapeKwFreeIdent(x)))
+					)
 				}
 			}
 		}
@@ -763,10 +770,10 @@ impl KindLiteral {
 			Self::Integer(_) | Self::Float(_) | Self::Decimal(_) => Kind::Number,
 			Self::Duration(_) => Kind::Duration,
 			Self::Array(a) => {
-				if let Some(inner) = a.first() {
-					if a.iter().all(|x| x == inner) {
-						return Kind::Array(Box::new(inner.to_owned()), Some(a.len() as u64));
-					}
+				if let Some(inner) = a.first()
+					&& a.iter().all(|x| x == inner)
+				{
+					return Kind::Array(Box::new(inner.to_owned()), Some(a.len() as u64));
 				}
 
 				Kind::Array(Box::new(Kind::Any), None)

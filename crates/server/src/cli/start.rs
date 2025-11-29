@@ -8,6 +8,7 @@ use anyhow::Context;
 use anyhow::Result;
 use clap::Args;
 use surrealdb::engine::{any, tasks};
+use surrealdb_core::buc::BucketStoreProvider;
 use surrealdb_core::kvs::TransactionBuilderFactory;
 use surrealdb_core::options::EngineOptions;
 use tokio_util::sync::CancellationToken;
@@ -63,7 +64,7 @@ pub struct StartCommandArguments {
 		help_heading = "Database"
 	)]
 	#[arg(env = "SURREAL_CHANGEFEED_GC_INTERVAL", long = "changefeed-gc-interval", value_parser = super::validator::duration)]
-	#[arg(default_value = "10s")]
+	#[arg(default_value = "30s")]
 	changefeed_gc_interval: Duration,
 	#[arg(env = "SURREAL_INDEX_COMPACTION_INTERVAL", long = "index-compaction-interval", value_parser = super::validator::duration)]
 	#[arg(default_value = "5s")]
@@ -160,7 +161,9 @@ struct StartCommandWebTlsOptions {
 ///   - `TransactionBuilderFactory` (datastore transaction builder for storage/backend selection)
 ///   - `RouterFactory` (HTTP router factory for route/middleware customization)
 ///   - `ConfigCheck` (validates configuration before initialization)
-pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
+pub async fn init<
+	C: TransactionBuilderFactory + RouterFactory + ConfigCheck + BucketStoreProvider,
+>(
 	mut composer: C,
 	StartCommandArguments {
 		path,
@@ -234,10 +237,9 @@ pub async fn init<C: TransactionBuilderFactory + RouterFactory + ConfigCheck>(
 	// Create a token to cancel tasks
 	let canceller = CancellationToken::new();
 	// Start the datastore
-	let datastore = Arc::new(dbs::init::<C>(&composer, &config, dbs).await?);
+	let datastore = Arc::new(dbs::init::<C>(composer, &config, canceller.clone(), dbs).await?);
 	// Start the node agent
 	let nodetasks = tasks::init(datastore.clone(), canceller.clone(), &config.engine);
-	// Start the web server
 	// Build and run the HTTP server using the provided RouterFactory implementation
 	ntw::init::<C>(&config, datastore.clone(), canceller.clone()).await?;
 	// Shutdown and stop closed tasks

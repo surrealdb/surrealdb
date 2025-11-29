@@ -6,6 +6,7 @@ use revision::{DeserializeRevisioned, Revisioned, SerializeRevisioned, revisione
 use storekey::{BorrowDecode, Encode};
 use surrealdb_types::{ToSql, write_sql};
 
+use crate::err::Error;
 use crate::expr::statements::info::InfoStructure;
 use crate::expr::{Cond, Idiom};
 use crate::kvs::impl_kv_value_revisioned;
@@ -58,6 +59,10 @@ pub struct IndexDefinition {
 	pub(crate) cols: Vec<Idiom>,
 	pub(crate) index: Index,
 	pub(crate) comment: Option<String>,
+	/// Whether this index has been marked for removal.
+	/// Decommissioned indexes are excluded from query planning and document indexing,
+	/// and any concurrent index builds are cancelled.
+	pub(crate) prepare_remove: bool,
 }
 
 impl_kv_value_revisioned!(IndexDefinition);
@@ -77,6 +82,24 @@ impl IndexDefinition {
 			concurrently: false,
 		}
 	}
+
+	/// Checks if this index is decommissioned and returns an error if it is.
+	///
+	/// This method is used during concurrent index building to detect when an index
+	/// has been decommissioned, allowing the build process to be cancelled gracefully.
+	///
+	/// # Errors
+	///
+	/// Returns `Error::IndexingBuildingCancelled` if the index is decommissioned.
+	pub(crate) fn expect_not_prepare_remove(&self) -> Result<()> {
+		if self.prepare_remove {
+			Err(anyhow::Error::new(Error::IndexingBuildingCancelled {
+				reason: "Prepare remove.".to_string(),
+			}))
+		} else {
+			Ok(())
+		}
+	}
 }
 
 impl InfoStructure for IndexDefinition {
@@ -87,6 +110,7 @@ impl InfoStructure for IndexDefinition {
 			"cols".to_string() => Value::Array(Array(self.cols.into_iter().map(|x| x.structure()).collect())),
 			"index".to_string() => self.index.structure(),
 			"comment".to_string(), if let Some(v) = self.comment => v.into(),
+			"prepare_remove".to_string(), if self.prepare_remove => self.prepare_remove.into()
 		})
 	}
 }
@@ -289,9 +313,9 @@ impl Display for Distance {
 #[derive(Clone, Copy, Default, Debug, Eq, PartialEq, Hash)]
 pub enum VectorType {
 	/// 64-bit floating point.
-	#[default]
 	F64,
 	/// 32-bit floating point.
+	#[default]
 	F32,
 	/// 64-bit signed integer.
 	I64,

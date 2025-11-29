@@ -6,7 +6,6 @@ authors.workspace = true
 edition.workspace = true
 license-file.workspace = true
 version.workspace = true
-rust-version.workspace = true
 description.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -38,9 +37,6 @@ storage-indxdb = ["surrealdb/kv-indxdb", "surrealdb-core/kv-indxdb"]
 storage-rocksdb = ["surrealdb/kv-rocksdb", "surrealdb-core/kv-rocksdb"]
 storage-surrealkv = ["surrealdb/kv-surrealkv", "surrealdb-core/kv-surrealkv"]
 storage-tikv = ["surrealdb/kv-tikv", "surrealdb-core/kv-tikv"]
-storage-fdb = ["surrealdb/kv-fdb", "surrealdb-core/kv-fdb"]
-# Commercial features
-enterprise = ["surrealdb-core/enterprise"]
 
 [dependencies]
 # workspace internal dependencies
@@ -85,7 +81,7 @@ dashmap.workspace = true
 glob = "0.3.1"
 http-body = "1.0.0"
 http-body-util = "0.1.1"
-hyper = "1.4.1"
+hyper.workspace = true
 opentelemetry = { version = "0.24" }
 opentelemetry-otlp = { version = "0.17.0", features = ["metrics"] }
 opentelemetry_sdk = { version = "0.24", features = ["rt-tokio"] }
@@ -124,6 +120,9 @@ geo = { workspace = true, default-features = false }
 geo-types.workspace = true
 http.workspace = true
 num_cpus.workspace = true
+# Pinned until SurrealML is compatible with later versions
+ort.workspace = true
+ort-sys.workspace = true
 pin-project-lite.workspace = true
 rand.workspace = true
 reqwest = { workspace = true, default-features = false, features = [

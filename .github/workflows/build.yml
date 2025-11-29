@@ -13,11 +13,6 @@ on:
         required: false
         type: string
         description: "Release branch"
-      rust-version:
-        required: false
-        type: string
-        default: "1.87.0"
-        description: "The Rust version to use for building binaries"
       onnx-version:
         required: false
         type: string
@@ -213,13 +208,10 @@ jobs:
           push: false
           outputs: type=docker,dest=${{ steps.image.outputs.folder }}/surrealdb-builder-${{ steps.image.outputs.tag }}-${{ matrix.platform }}
           tags: surrealdb-builder:${{ steps.image.outputs.tag }}-${{ matrix.platform }}
-          build-args: |
-            RUST_VERSION=${{ inputs.rust-version }}
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ inputs.rust-version }}
           targets: ${{ matrix.arch }}
 
       - name: Output package versions
@@ -379,10 +371,9 @@ jobs:
         with:
           ref: ${{ inputs.release-branch }}
 
-      - name: Install stable toolchain
-        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # (Actions must be pinned by commit hash) master
+      - name: Setup environment
+        uses: ./.github/actions/setup-environment
         with:
-          toolchain: ${{ inputs.rust-version }}
           targets: ${{ matrix.arch }}
 
       - name: Output package versions

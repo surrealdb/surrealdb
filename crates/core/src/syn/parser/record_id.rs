@@ -170,14 +170,6 @@ impl Parser<'_> {
 		}
 	}
 
-	pub(crate) async fn parse_record_id_with_range(
-		&mut self,
-		stk: &mut Stk,
-	) -> ParseResult<RecordIdLit> {
-		let ident = self.parse_ident()?;
-		self.parse_record_id_or_range(stk, ident).await
-	}
-
 	pub(crate) async fn parse_record_id(&mut self, stk: &mut Stk) -> ParseResult<RecordIdLit> {
 		let ident = self.parse_ident()?;
 		self.parse_record_id_from_ident(stk, ident).await

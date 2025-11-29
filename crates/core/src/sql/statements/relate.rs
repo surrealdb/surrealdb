@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::sql::{Data, Expr, Output, Timeout};
+use crate::sql::{Data, Expr, Literal, Output, Timeout};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
@@ -25,7 +25,41 @@ impl fmt::Display for RelateStatement {
 		if self.only {
 			f.write_str(" ONLY")?
 		}
-		write!(f, " {} -> {} -> {}", self.from, self.through, self.to)?;
+		f.write_str(" ")?;
+
+		if matches!(
+			self.from,
+			Expr::Literal(Literal::Array(_) | Literal::RecordId(_)) | Expr::Param(_)
+		) {
+			self.from.fmt(f)?;
+		} else {
+			f.write_str("(")?;
+			self.from.fmt(f)?;
+			f.write_str(")")?;
+		}
+		f.write_str(" -> ")?;
+
+		if matches!(self.through, Expr::Param(_) | Expr::Table(_)) {
+			self.through.fmt(f)?;
+		} else {
+			f.write_str("(")?;
+			self.through.fmt(f)?;
+			f.write_str(")")?;
+		}
+
+		f.write_str(" -> ")?;
+
+		if matches!(
+			self.to,
+			Expr::Literal(Literal::Array(_) | Literal::RecordId(_)) | Expr::Param(_)
+		) {
+			self.to.fmt(f)?;
+		} else {
+			f.write_str("(")?;
+			self.to.fmt(f)?;
+			f.write_str(")")?;
+		}
+
 		if self.uniq {
 			f.write_str(" UNIQUE")?
 		}

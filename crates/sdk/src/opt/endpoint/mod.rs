@@ -3,8 +3,6 @@ mod http;
 #[cfg(feature = "protocol-ws")]
 mod ws;
 
-#[cfg(feature = "kv-fdb")]
-mod fdb;
 #[cfg(feature = "kv-indxdb")]
 mod indxdb;
 #[cfg(feature = "kv-mem")]
@@ -121,7 +119,6 @@ pub enum EndpointKind {
 	Https,
 	Ws,
 	Wss,
-	FoundationDb,
 	#[cfg(target_family = "wasm")]
 	IndxDb,
 	Memory,
@@ -139,7 +136,6 @@ impl From<&str> for EndpointKind {
 			"https" => Self::Https,
 			"ws" => Self::Ws,
 			"wss" => Self::Wss,
-			"fdb" => Self::FoundationDb,
 			#[cfg(target_family = "wasm")]
 			"indxdb" => Self::IndxDb,
 			"mem" => Self::Memory,

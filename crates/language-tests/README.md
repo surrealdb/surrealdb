@@ -33,7 +33,6 @@ Other supported backends include:
 - `rocksdb`: RocksDB embedded storage engine (requires `backend-rocksdb` feature)
 - `surrealkv` or `file`: SurrealKV file-based storage engine (requires `backend-surrealkv` feature)
 - `tikv`: TiKV distributed storage engine (requires `backend-tikv` feature and a running TiKV cluster)
-- `foundation`: FoundationDB storage engine (requires `backend-foundation` feature)
 
 Note that some backends require the corresponding Cargo feature to be enabled when building:
 ```bash

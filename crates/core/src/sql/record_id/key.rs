@@ -1,6 +1,8 @@
 use std::fmt::{self, Display, Formatter, Write as _};
 use std::ops::Bound;
 
+use surrealdb_types::ToSql;
+
 use crate::fmt::{EscapeKey, EscapeRid, Fmt, Pretty, is_pretty, pretty_indent};
 use crate::sql::literal::ObjectEntry;
 use crate::sql::{Expr, RecordIdKeyRangeLit};
@@ -101,7 +103,7 @@ impl From<crate::expr::RecordIdKeyLit> for RecordIdKeyLit {
 	fn from(value: crate::expr::RecordIdKeyLit) -> Self {
 		match value {
 			crate::expr::RecordIdKeyLit::Number(x) => RecordIdKeyLit::Number(x),
-			crate::expr::RecordIdKeyLit::String(x) => RecordIdKeyLit::String(x.to_string()),
+			crate::expr::RecordIdKeyLit::String(x) => RecordIdKeyLit::String(x.clone()),
 			crate::expr::RecordIdKeyLit::Uuid(uuid) => {
 				RecordIdKeyLit::Uuid(surrealdb_types::Uuid(uuid.0))
 			}
@@ -122,7 +124,7 @@ impl Display for RecordIdKeyLit {
 		match self {
 			Self::Number(v) => Display::fmt(v, f),
 			Self::String(v) => EscapeRid(v).fmt(f),
-			Self::Uuid(v) => Display::fmt(v, f),
+			Self::Uuid(v) => f.write_str(&v.to_sql()),
 			Self::Array(v) => {
 				let mut f = Pretty::from(f);
 				f.write_char('[')?;

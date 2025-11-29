@@ -14,7 +14,7 @@ use crate::expr::idiom::recursion::{
 	self, Recursion, clean_iteration, compute_idiom_recursion, is_final,
 };
 use crate::expr::{Expr, FlowResultExt as _, Idiom, Literal, Lookup, Value};
-use crate::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt, is_pretty, pretty_indent};
+use crate::fmt::{EscapeKwFreeIdent, Fmt, is_pretty, pretty_indent};
 use crate::val::{Array, RecordId};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -153,7 +153,9 @@ impl fmt::Display for Part {
 			Part::Where(v) => write!(f, "[WHERE {v}]"),
 			Part::Lookup(v) => write!(f, "{v}"),
 			Part::Value(v) => write!(f, "[{v}]"),
-			Part::Method(v, a) => write!(f, ".{v}({})", Fmt::comma_separated(a)),
+			Part::Method(v, a) => {
+				write!(f, ".{}({})", EscapeKwFreeIdent(v), Fmt::comma_separated(a))
+			}
 			Part::Destructure(v) => {
 				f.write_str(".{")?;
 				if !is_pretty() {
@@ -423,11 +425,11 @@ impl DestructurePart {
 impl fmt::Display for DestructurePart {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		match self {
-			DestructurePart::All(fd) => write!(f, "{}.*", EscapeIdent(fd)),
-			DestructurePart::Field(fd) => write!(f, "{}", EscapeIdent(fd)),
-			DestructurePart::Aliased(fd, v) => write!(f, "{}: {v}", EscapeIdent(fd)),
+			DestructurePart::All(fd) => write!(f, "{}.*", EscapeKwFreeIdent(fd)),
+			DestructurePart::Field(fd) => write!(f, "{}", EscapeKwFreeIdent(fd)),
+			DestructurePart::Aliased(fd, v) => write!(f, "{}: {v}", EscapeKwFreeIdent(fd)),
 			DestructurePart::Destructure(fd, d) => {
-				write!(f, "{}{}", EscapeIdent(fd), Part::Destructure(d.clone()))
+				write!(f, "{}{}", EscapeKwFreeIdent(fd), Part::Destructure(d.clone()))
 			}
 		}
 	}
@@ -555,17 +557,17 @@ async fn walk_paths(
 				path.push(step.to_owned());
 				Value::from(path)
 			};
-			if let Some(expects) = expects {
-				if step == expects {
-					let steps = match val {
-						Value::Array(v) => v.0,
-						v => vec![v],
-					};
-					for step in steps {
-						finished.push(step);
-					}
-					return Ok(Value::None);
+			if let Some(expects) = expects
+				&& step == expects
+			{
+				let steps = match val {
+					Value::Array(v) => v.0,
+					v => vec![v],
+				};
+				for step in steps {
+					finished.push(step);
 				}
+				return Ok(Value::None);
 			}
 			if reached_max {
 				if (Option::<&Value>::None).is_none() {

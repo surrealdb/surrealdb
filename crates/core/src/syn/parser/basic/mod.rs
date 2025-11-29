@@ -311,17 +311,19 @@ impl Parser<'_> {
 	}
 
 	pub(crate) fn parse_ident(&mut self) -> ParseResult<String> {
+		self.parse_ident_str().map(|x| x.to_owned())
+	}
+
+	pub(crate) fn parse_ident_str(&mut self) -> ParseResult<&str> {
 		let token = self.next();
 		match token.kind {
 			TokenKind::Identifier => {
 				let str = self.lexer.span_str(token.span);
-				let str = Lexer::unescape_ident_span(str, token.span, &mut self.unscape_buffer)?;
-				// Safety: Lexer guarentees no null bytes.
-				Ok(str.to_owned())
+				Ok(Lexer::unescape_ident_span(str, token.span, &mut self.unscape_buffer)?)
 			}
 			x if Self::kind_is_keyword_like(x) => {
 				// Safety: Lexer guarentees no null bytes.
-				Ok(self.lexer.span_str(token.span).to_owned())
+				Ok(self.lexer.span_str(token.span))
 			}
 			_ => {
 				unexpected!(self, token, "an identifier");

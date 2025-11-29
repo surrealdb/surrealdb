@@ -268,7 +268,7 @@ impl DefineAccessStatement {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::AccessRootAlreadyExists {
-									ac: access.name.to_string(),
+									ac: access.name.clone(),
 								});
 							}
 						}
@@ -295,7 +295,7 @@ impl DefineAccessStatement {
 							if !opt.import {
 								bail!(Error::AccessNsAlreadyExists {
 									ns: opt.ns()?.to_string(),
-									ac: access.name.to_string(),
+									ac: access.name.clone(),
 								});
 							}
 						}
@@ -324,7 +324,7 @@ impl DefineAccessStatement {
 								bail!(Error::AccessDbAlreadyExists {
 									ns: opt.ns()?.to_string(),
 									db: opt.db()?.to_string(),
-									ac: access.name.to_string(),
+									ac: access.name.clone(),
 								});
 							}
 						}
@@ -346,10 +346,10 @@ impl DefineAccessStatement {
 	/// Remove information from the access definition which should not be displayed.
 	pub fn redact(mut self) -> Self {
 		fn redact_jwt_access(acc: &mut JwtAccess) {
-			if let JwtAccessVerify::Key(ref mut v) = acc.verify {
-				if v.alg.is_symmetric() {
-					v.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
-				}
+			if let JwtAccessVerify::Key(ref mut v) = acc.verify
+				&& v.alg.is_symmetric()
+			{
+				v.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
 			}
 			if let Some(ref mut s) = acc.issue {
 				s.key = Expr::Literal(Literal::String("[REDACTED]".to_string()));
@@ -403,23 +403,22 @@ impl Display for DefineAccessStatement {
 			)?;
 		}
 		if self.access_type.can_issue_tokens() {
-			write!(
-				f,
-				" FOR TOKEN {},",
-				match self.duration.token {
-					Some(ref dur) => format!("{}", dur),
-					None => "NONE".to_string(),
-				}
-			)?;
-		}
-		write!(
-			f,
-			" FOR SESSION {}",
-			match self.duration.session {
-				Some(ref dur) => format!("{}", dur),
-				None => "NONE".to_string(),
+			f.write_str(" FOR TOKEN ")?;
+			match self.duration.token {
+				Some(Expr::Literal(Literal::None)) => f.write_str("(NONE)")?,
+				Some(ref dur) => write!(f, "{}", dur)?,
+				None => f.write_str("NONE")?,
 			}
-		)?;
+			f.write_str(",")?;
+		}
+
+		f.write_str(" FOR SESSION ")?;
+		match self.duration.session {
+			Some(Expr::Literal(Literal::None)) => f.write_str("(NONE)")?,
+			Some(ref dur) => write!(f, "{}", dur)?,
+			None => f.write_str("NONE")?,
+		}
+
 		if let Some(ref comment) = self.comment {
 			write!(f, " COMMENT {}", comment)?
 		}

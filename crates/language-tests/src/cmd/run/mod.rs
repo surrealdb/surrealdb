@@ -87,10 +87,6 @@ pub async fn run(color: ColorMode, matches: &ArgMatches) -> Result<()> {
 		Backend::TikV => {}
 		#[cfg(not(feature = "backend-tikv"))]
 		Backend::TikV => bail!("TiKV backend feature is not enabled"),
-		#[cfg(feature = "backend-foundation")]
-		Backend::Foundation => {}
-		#[cfg(not(feature = "backend-foundation"))]
-		Backend::Foundation => bail!("FoundationDB backend features is not enabled"),
 	}
 
 	let subset = filter_testset_from_arguments(testset, matches);
@@ -303,15 +299,12 @@ pub async fn test_task(context: TestTaskContext) -> Result<()> {
 		.env
 		.as_ref()
 		.map(|x| x.timeout().map(Duration::from_millis).unwrap_or(Duration::MAX))
-		.unwrap_or(Duration::from_secs(1));
+		.unwrap_or(Duration::from_secs(3));
 
 	let res = context
 		.ds
 		.with(
-			move |ds| {
-				ds.with_capabilities(capabilities)
-					.with_query_timeout(Some(timeout_duration))
-			},
+			move |ds| ds.with_capabilities(capabilities).with_query_timeout(Some(timeout_duration)),
 			async |ds| run_test_with_dbs(context.id, &context.testset, ds).await,
 		)
 		.await;
@@ -402,7 +395,9 @@ async fn run_test_with_dbs(
 			.get_capabilities()
 			.allows_experimental(&ExperimentalTarget::DefineApi),
 		files_enabled: dbs.get_capabilities().allows_experimental(&ExperimentalTarget::Files),
-		surrealism_enabled: dbs.get_capabilities().allows_experimental(&ExperimentalTarget::Surrealism),
+		surrealism_enabled: dbs
+			.get_capabilities()
+			.allows_experimental(&ExperimentalTarget::Surrealism),
 		..Default::default()
 	};
 

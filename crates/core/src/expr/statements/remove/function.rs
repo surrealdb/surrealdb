@@ -7,6 +7,7 @@ use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::err::Error;
 use crate::expr::{Base, Value};
+use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
@@ -51,7 +52,7 @@ impl Display for RemoveFunctionStatement {
 		if self.if_exists {
 			write!(f, " IF EXISTS")?
 		}
-		write!(f, " fn::{}", &*self.name)?;
+		write!(f, " fn::{}", EscapeKwFreeIdent(&self.name))?;
 		Ok(())
 	}
 }

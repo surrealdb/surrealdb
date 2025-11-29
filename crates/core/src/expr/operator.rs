@@ -371,8 +371,9 @@ impl BindingPower {
 	pub fn for_expr(expr: &Expr) -> BindingPower {
 		match expr {
 			Expr::Prefix {
+				op,
 				..
-			} => BindingPower::Prefix,
+			} => Self::for_prefix_operator(op),
 			Expr::Postfix {
 				op,
 				..

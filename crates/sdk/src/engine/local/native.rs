@@ -84,12 +84,11 @@ pub(crate) async fn run_router(
 				return;
 			}
 			// If a root user is specified, setup the initial datastore credentials
-			if let Some(root) = &configured_root {
-				if let Err(error) = kvs.initialise_credentials(&root.username, &root.password).await
-				{
-					conn_tx.send(Err(crate::Error::InternalError(error.to_string()))).await.ok();
-					return;
-				}
+			if let Some(root) = &configured_root
+				&& let Err(error) = kvs.initialise_credentials(&root.username, &root.password).await
+			{
+				conn_tx.send(Err(crate::Error::InternalError(error.to_string()))).await.ok();
+				return;
 			}
 			conn_tx.send(Ok(())).await.ok();
 			kvs.with_auth_enabled(configured_root.is_some())
@@ -185,9 +184,9 @@ pub(crate) async fn run_router(
 				let live_queries_clone = live_queries.clone();
 				tokio::spawn(async move {
 					let id = notification.id.0;
-					if let Some(sender) = live_queries_clone.read().await.get(&id) {
+					if let Some(sender) = live_queries_clone.read().await.get(&id)
 
-						if sender.send(Ok(notification)).await.is_err() {
+						&& sender.send(Ok(notification)).await.is_err() {
 							live_queries_clone.write().await.remove(&id);
 							if let Err(error) =
 								super::kill_live_query(&kvs_clone, id, &*session_clone.read().await, vars_clone.read().await.clone()).await
@@ -195,7 +194,6 @@ pub(crate) async fn run_router(
 								warn!("Failed to kill live query '{id}'; {error}");
 							}
 						}
-					}
 				});
 			}
 		}

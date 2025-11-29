@@ -74,7 +74,7 @@ impl InvocationContext for DemoHost {
 		println!("The module is running a function:");
 		println!(
 			" - {fnc}{version}({})",
-			args.iter().map(|x| x.to_sql().to_string()).collect::<Vec<String>>().join(", ")
+			args.iter().map(|x| x.to_sql().clone()).collect::<Vec<String>>().join(", ")
 		);
 		println!("\nPlease enter the result:");
 

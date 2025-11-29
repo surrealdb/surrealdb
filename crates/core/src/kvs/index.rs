@@ -3,6 +3,7 @@ use std::collections::hash_map::Entry;
 use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use anyhow::{Result, ensure};
 use futures::channel::oneshot::{Receiver, Sender, channel};
@@ -12,9 +13,11 @@ use serde::{Deserialize, Serialize};
 #[cfg(not(target_family = "wasm"))]
 use tokio::spawn;
 use tokio::sync::RwLock;
+use tokio::time::Instant;
 #[cfg(target_family = "wasm")]
 use wasm_bindgen_futures::spawn_local as spawn;
 
+use crate::catalog::providers::TableProvider;
 use crate::catalog::{
 	DatabaseDefinition, DatabaseId, IndexDefinition, IndexId, NamespaceId, Record, TableId,
 };
@@ -117,7 +120,7 @@ impl From<BuildingStatus> for Value {
 			}
 			BuildingStatus::Aborted => "aborted",
 			BuildingStatus::Error(error) => {
-				o.insert("error".to_string(), error.to_string().into());
+				o.insert("error".to_string(), error.clone().into());
 				"error"
 			}
 		};
@@ -180,12 +183,12 @@ impl IndexBuilder {
 			if let Err(err) = &r {
 				b.set_status(BuildingStatus::Error(err.to_string())).await;
 			}
-			if let Some(s) = sdr {
-				if s.send(r).is_err() {
-					warn!("Failed to send index building result to the consumer");
-				}
-			}
 			drop(guard);
+			if let Some(s) = sdr
+				&& s.send(r).is_err()
+			{
+				warn!("Failed to send index building result to the consumer");
+			}
 		});
 		Ok(building)
 	}
@@ -198,6 +201,7 @@ impl IndexBuilder {
 		ix: Arc<IndexDefinition>,
 		blocking: bool,
 	) -> Result<Option<Receiver<Result<()>>>> {
+		ix.expect_not_prepare_remove()?;
 		let (ns, db) = ctx.expect_ns_db_ids(&opt).await?;
 		let key = IndexKey::new(ns, db, &ix.table_name, ix.index_id);
 		let (rcv, sdr) = if blocking {
@@ -433,7 +437,35 @@ impl Building {
 		Ok(ctx.freeze())
 	}
 
+	async fn check_prepare_remove_with_tx(
+		&self,
+		last_prepare_remove_check: &mut Instant,
+		tx: &Transaction,
+	) -> Result<()> {
+		if last_prepare_remove_check.elapsed() < Duration::from_secs(5) {
+			return Ok(());
+		};
+		// Check the index still exists and is not decommissioned
+		catch!(
+			tx,
+			tx.expect_tb_index(self.ns, self.db, &self.ix.table_name, &self.ix.name)
+				.await?
+				.expect_not_prepare_remove()
+		);
+		*last_prepare_remove_check = Instant::now();
+		Ok(())
+	}
+
+	async fn check_prepare_remove(&self, last_decommissioned_check: &mut Instant) -> Result<()> {
+		let tx = self.new_read_tx().await?;
+		self.check_prepare_remove_with_tx(last_decommissioned_check, &tx).await?;
+		tx.cancel().await?;
+		Ok(())
+	}
+
 	async fn run(&self) -> Result<()> {
+		let mut last_prepare_remove_check = Instant::now();
+
 		// Remove the index data
 		{
 			self.set_status(BuildingStatus::Cleaning).await;
@@ -457,14 +489,17 @@ impl Building {
 			updated: None,
 		})
 		.await;
+
 		while let Some(rng) = next {
 			if self.is_aborted().await {
 				return Ok(());
 			}
 			self.is_beyond_threshold(None)?;
-			// Get the next batch of records
 			let batch = {
 				let tx = self.new_read_tx().await?;
+				// Check if the index has been decommissioned
+				self.check_prepare_remove_with_tx(&mut last_prepare_remove_check, &tx).await?;
+				// Get the next batch of records
 				catch!(tx, tx.batch_keys_vals(rng, *INDEXING_BATCH_SIZE, None).await)
 			};
 			// Set the next scan range
@@ -501,6 +536,8 @@ impl Building {
 				return Ok(());
 			}
 			self.is_beyond_threshold(None)?;
+			// Check the index still exists and is not decommissioned
+			self.check_prepare_remove(&mut last_prepare_remove_check).await?;
 			let range = {
 				let mut queue = self.queue.write().await;
 				if let Some(ni) = next_to_index {
@@ -699,10 +736,10 @@ impl Building {
 	}
 
 	fn is_beyond_threshold(&self, count: Option<usize>) -> Result<()> {
-		if let Some(count) = count {
-			if count % 100 != 0 {
-				return Ok(());
-			}
+		if let Some(count) = count
+			&& count % 100 != 0
+		{
+			return Ok(());
 		}
 		if ALLOC.is_beyond_threshold() {
 			Err(anyhow::Error::new(Error::QueryBeyondMemoryThreshold))

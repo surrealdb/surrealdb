@@ -13,7 +13,7 @@ use surrealdb_core::dbs::capabilities::{
 };
 use surrealdb_core::syn::parser::ParserSettings;
 use surrealdb_core::syn::{self};
-use surrealdb_types::{Object, RecordId, Value, ToSql};
+use surrealdb_types::{Object, RecordId, ToSql, Value};
 
 /// Root test config struct.
 #[derive(Default, Clone, Debug, Deserialize, Serialize)]

@@ -40,7 +40,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 #[case::value_set_two(Value::Set(Set::from(vec![Value::Number(Number::Int(1)), Value::Number(Number::Int(2))])), "{1, 2}", "{1, 2}")]
 #[case::value_object(Value::Object(Object::from_iter(vec![(String::from("key"), Value::Number(Number::Int(1)))].into_iter())), "{ key: 1 }", "{\n\tkey: 1\n}")]
 #[case::value_geometry(Value::Geometry(Geometry::Point(Point::new(1.0, 2.0))), "(1, 2)", "(1, 2)")]
-#[case::value_bytes(Value::Bytes(Bytes(b"hello".to_vec())), "b\"68656C6C6F\"", "b\"68656C6C6F\"")]
+#[case::value_bytes(Value::Bytes(Bytes::from(b"hello".to_vec())), "b\"68656C6C6F\"", "b\"68656C6C6F\"")]
 #[case::value_datetime(Value::Datetime("1970-01-01T00:00:00Z".parse().unwrap()), "d'1970-01-01T00:00:00Z'", "d'1970-01-01T00:00:00Z'")]
 #[case::value_duration(Value::Duration(Duration::from_secs(1)), "1s", "1s")]
 #[case::value_file(Value::File(File::new("bucket".to_string(), "path/to/file.txt".to_string())), "f\"bucket:/path/to/file.txt\"", "f\"bucket:/path/to/file.txt\"")]
@@ -67,10 +67,10 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 ])), "{ key: 1 }", "{\n\tkey: 1\n}")]
 #[case::expr_lit_geometry(
 	Expr::Literal(Literal::Geometry(PublicGeometry::Point(Point::new(1.0, 2.0)))),
-	"(1, 2)",
-	"(1, 2)"
+	"(1f, 2f)",
+	"(1f, 2f)"
 )]
-#[case::expr_lit_bytes(Expr::Literal(Literal::Bytes(PublicBytes::from(Bytes(b"hello".to_vec())))), "b\"68656C6C6F\"", "b\"68656C6C6F\"")]
+#[case::expr_lit_bytes(Expr::Literal(Literal::Bytes(PublicBytes::from(Bytes::from(b"hello".to_vec())))), "b\"68656C6C6F\"", "b\"68656C6C6F\"")]
 #[case::expr_lit_datetime(Expr::Literal(Literal::Datetime("1970-01-01T00:00:00Z".parse().unwrap())), "d'1970-01-01T00:00:00Z'", "d'1970-01-01T00:00:00Z'")]
 #[case::expr_lit_duration(
 	Expr::Literal(Literal::Duration(PublicDuration::from(Duration::from_secs(1)))),
@@ -90,8 +90,8 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 // Expression: Tables
 #[case::expr_table(Expr::Table("table".to_string()), "`table`", "`table`")]
 // Expression: Mocks
-#[case::expr_mock_count(Expr::Mock(Mock::Count("table".to_string(), 1)), "|`table`:1|", "|`table`:1|")]
-#[case::expr_mock_range(Expr::Mock(Mock::Range("table".to_string(), TypedRange::from_range(1..10))), "|`table`:1..10|", "|`table`:1..10|")]
+#[case::expr_mock_count(Expr::Mock(Mock::Count("table".to_string(), 1)), "|table:1|", "|table:1|")]
+#[case::expr_mock_range(Expr::Mock(Mock::Range("table".to_string(), TypedRange::from_range(1..10))), "|table:1..10|", "|table:1..10|")]
 // Expression: Block
 #[case::expr_block_empty(Expr::Block(Box::new(Block(vec![]))), "{;}", "{;}")]
 #[case::expr_block(Expr::Block(Box::new(Block(vec![
@@ -122,7 +122,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 // Expression: Return
 #[case::expr_return(Expr::Return(Box::new(OutputStatement { what: Expr::Literal(Literal::Integer(1)), fetch: None })), "RETURN 1", "RETURN 1")]
 // Expression: If
-#[case::expr_if(Expr::If(Box::new(IfelseStatement { exprs: vec![(Expr::Literal(Literal::Bool(true)), Expr::Block(Box::new(Block(vec![Expr::Literal(Literal::Integer(1))]))))], close: None })), "IF true { 1 }", "IF true\n\t{ 1 }")]
+#[case::expr_if(Expr::IfElse(Box::new(IfelseStatement { exprs: vec![(Expr::Literal(Literal::Bool(true)), Expr::Block(Box::new(Block(vec![Expr::Literal(Literal::Integer(1))]))))], close: None })), "IF true { 1 }", "IF true\n\t{ 1 }")]
 // Expression: Select
 #[case::expr_select(Expr::Select(Box::new(SelectStatement { expr: Fields::all(), omit: vec![], only: false, what: vec![Expr::Table("user".to_string())], with: None, cond: None, split: None, group: None, order: None, limit: None, start: None, fetch: None, version: None, timeout: None, parallel: false, explain: None, tempfiles: false })), "SELECT * FROM user", "SELECT * FROM user")]
 // Expression: Create
@@ -167,7 +167,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 #[case::expr_sleep(Expr::Sleep(Box::new(SleepStatement { duration: PublicDuration::from(Duration::from_secs(1)) })), "SLEEP 1s", "SLEEP 1s")]
 // Complex nested expressions
 #[case::nested_if_else(
-    Expr::If(Box::new(IfelseStatement {
+    Expr::IfElse(Box::new(IfelseStatement {
         exprs: vec![
             (
                 Expr::Binary {
@@ -234,7 +234,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
             tempfiles: false
         })),
         block: Block(vec![
-            Expr::If(Box::new(IfelseStatement {
+            Expr::IfElse(Box::new(IfelseStatement {
                 exprs: vec![(
                     Expr::Binary {
                         left: Box::new(Expr::Idiom(Idiom(vec![
@@ -320,7 +320,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 #[case::top_level_live(TopLevelExpr::Live(Box::new(LiveStatement { fields: Fields::all(), diff: false, what: Expr::Table("user".to_string()), cond: None, fetch: None })), "LIVE SELECT * FROM user", "LIVE SELECT * FROM user")]
 #[case::top_level_live_diff(TopLevelExpr::Live(Box::new(LiveStatement { fields: Fields::none(), diff: true, what: Expr::Table("user".to_string()), cond: None, fetch: None })), "LIVE SELECT DIFF FROM user", "LIVE SELECT DIFF FROM user")]
 #[case::top_level_option(TopLevelExpr::Option(OptionStatement { name: "IMPORT".to_string(), what: true }), "OPTION IMPORT", "OPTION IMPORT")]
-#[case::top_level_use(TopLevelExpr::Use(UseStatement { ns: Some("ns".to_string()), db: Some("db".to_string()) }), "USE NS ns DB db", "USE NS ns DB db")]
+#[case::top_level_use(TopLevelExpr::Use(UseStatement::NsDb("ns".to_string(),"db".to_string())), "USE NS ns DB db", "USE NS ns DB db")]
 #[case::top_level_show(TopLevelExpr::Show(ShowStatement { table: Some("user".to_string()), since: ShowSince::Versionstamp(123), limit: Some(10) }), "SHOW CHANGES FOR TABLE user SINCE 123 LIMIT 10", "SHOW CHANGES FOR TABLE user SINCE 123 LIMIT 10")]
 #[case::top_level_expr(TopLevelExpr::Expr(Expr::Literal(Literal::Integer(1))), "1", "1")]
 fn test_to_sql(#[case] v: impl Display, #[case] expected: &str, #[case] expected_pretty: &str) {

@@ -11,7 +11,7 @@ use crate::doc::CursorDoc;
 use crate::expr::order::Ordering;
 use crate::expr::start::Start;
 use crate::expr::{Cond, Dir, Fields, Groups, Idiom, Limit, RecordIdKeyRangeLit, Splits};
-use crate::fmt::{EscapeIdent, Fmt};
+use crate::fmt::{EscapeIdent, EscapeKwFreeIdent, Fmt};
 use crate::kvs::KVKey;
 use crate::val::{RecordId, RecordIdKey, RecordIdKeyRange};
 
@@ -44,7 +44,19 @@ impl Display for Lookup {
 			// When the singular lookup subject has a referencing field, it needs to be wrapped in parentheses
 			// Otherwise <~table.field will be parsed as [Lookup(<~table), Field(.field)]
 			// Whereas <~(table.field) will be parsed as [Lookup(<~table.field)]
-			&& self.what.iter().all(|v| v.referencing_field().is_none())
+			//
+			//
+			// Further more `<-foo:a..` can lead to issues when the next part of the idiom starts
+			// with a `.`
+			&& self.what.iter().all(|v| {
+				if v.referencing_field().is_some() {
+					return false
+				}
+				if let LookupSubject::Range { range: RecordIdKeyRangeLit{ end: Bound::Unbounded, .. }, ..} = v {
+					return false
+				}
+				true
+			})
 			&& self.cond.is_none()
 			&& self.alias.is_none()
 			&& self.expr.is_none()
@@ -373,7 +385,7 @@ impl Display for LookupSubject {
 			} => {
 				EscapeIdent(table).fmt(f)?;
 				if let Some(referencing_field) = referencing_field {
-					write!(f, " FIELD {}", EscapeIdent(referencing_field))?;
+					write!(f, " FIELD {}", EscapeKwFreeIdent(referencing_field))?;
 				}
 				Ok(())
 			}
@@ -382,9 +394,9 @@ impl Display for LookupSubject {
 				range,
 				referencing_field,
 			} => {
-				write!(f, "{}:{range}", EscapeIdent(table))?;
+				write!(f, "{}:{range}", EscapeKwFreeIdent(table))?;
 				if let Some(referencing_field) = referencing_field {
-					write!(f, " FIELD {}", EscapeIdent(referencing_field))?;
+					write!(f, " FIELD {}", EscapeKwFreeIdent(referencing_field))?;
 				}
 				Ok(())
 			}

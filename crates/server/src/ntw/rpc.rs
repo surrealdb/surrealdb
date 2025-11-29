@@ -170,10 +170,10 @@ async fn post_handler(
 	// Get the output format from the Accept header
 	let out: Option<Format> = accept.as_deref().map(Into::into);
 	// Check that the input format and the output format match
-	if let Some(out) = out {
-		if fmt != out {
-			return Err(NetError::InvalidType.into());
-		}
+	if let Some(out) = out
+		&& fmt != out
+	{
+		return Err(NetError::InvalidType.into());
 	}
 	// Create a new HTTP instance
 	let rpc = Http::new(Arc::clone(&state.datastore), session);

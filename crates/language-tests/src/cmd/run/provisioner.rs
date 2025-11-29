@@ -88,15 +88,6 @@ impl CreateInfo {
 				tx.commit().await?;
 				ds
 			}
-			Backend::Foundation => {
-				let p = self.produce_path();
-				let ds = Datastore::new(&format!("fdb://{p}")).await?;
-				let tx = ds.transaction(TransactionType::Write, LockType::Optimistic).await?;
-				tx.delr(vec![0u8]..vec![0xffu8]).await?;
-				tx.commit().await?;
-				path = Some(p);
-				ds
-			}
 		};
 
 		let ds =

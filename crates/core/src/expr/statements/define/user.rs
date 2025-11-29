@@ -133,7 +133,7 @@ impl DefineUserStatement {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::UserRootAlreadyExists {
-									name: user.name.to_string(),
+									name: user.name.clone(),
 								});
 							}
 						}
@@ -158,7 +158,7 @@ impl DefineUserStatement {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::UserNsAlreadyExists {
-									name: user.name.to_string(),
+									name: user.name.clone(),
 									ns: opt.ns()?.into(),
 								});
 							}
@@ -190,7 +190,7 @@ impl DefineUserStatement {
 						DefineKind::Default => {
 							if !opt.import {
 								bail!(Error::UserDbAlreadyExists {
-									name: user.name.to_string(),
+									name: user.name.clone(),
 									ns: opt.ns()?.to_string(),
 									db: opt.db()?.to_string(),
 								});
@@ -231,30 +231,25 @@ impl Display for DefineUserStatement {
 			self.name,
 			self.base,
 			QuoteStr(&self.hash),
-			Fmt::comma_separated(
-				&self.roles.iter().map(|r| r.to_string().to_uppercase()).collect::<Vec<_>>()
-			),
+			Fmt::comma_separated(self.roles.iter().map(|r| r.to_uppercase())),
 		)?;
 		// Always print relevant durations so defaults can be changed in the future
 		// If default values were not printed, exports would not be forward compatible
 		// None values need to be printed, as they are different from the default values
 		write!(f, " DURATION")?;
-		write!(
-			f,
-			" FOR TOKEN {},",
-			match self.duration.token {
-				Some(ref dur) => format!("{}", dur),
-				None => "NONE".to_string(),
-			}
-		)?;
-		write!(
-			f,
-			" FOR SESSION {}",
-			match self.duration.session {
-				Some(ref dur) => format!("{}", dur),
-				None => "NONE".to_string(),
-			}
-		)?;
+		write!(f, " FOR TOKEN ",)?;
+		match self.duration.token {
+			Some(Expr::Literal(Literal::None)) => f.write_str("(NONE)")?,
+			Some(ref dur) => dur.fmt(f)?,
+			None => f.write_str("NONE")?,
+		}
+		write!(f, ", FOR SESSION ",)?;
+		match self.duration.session {
+			Some(Expr::Literal(Literal::None)) => f.write_str("(NONE)")?,
+			Some(ref dur) => dur.fmt(f)?,
+			None => f.write_str("NONE")?,
+		}
+
 		if let Some(ref comment) = self.comment {
 			write!(f, " COMMENT {}", comment)?
 		}

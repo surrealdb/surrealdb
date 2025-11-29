@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::fmt::EscapeIdent;
+use crate::fmt::EscapeKwFreeIdent;
 use crate::sql::{Expr, Kind};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -13,7 +13,7 @@ pub struct SetStatement {
 
 impl fmt::Display for SetStatement {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "LET ${}", EscapeIdent(&self.name))?;
+		write!(f, "LET ${}", EscapeKwFreeIdent(&self.name))?;
 		if let Some(ref kind) = self.kind {
 			write!(f, ": {}", kind)?;
 		}

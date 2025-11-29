@@ -10,6 +10,7 @@ use crate::err::Error;
 use crate::expr::paths::{IN, OUT};
 use crate::expr::statements::relate::RelateThrough;
 use crate::expr::{Data, Expr, FlowResultExt as _, Output, Timeout, Value};
+use crate::fmt::CoverStmtsExpr;
 use crate::idx::planner::RecordStrategy;
 use crate::val::{Datetime, RecordIdKey, Table};
 
@@ -151,7 +152,7 @@ impl fmt::Display for InsertStatement {
 			f.write_str(" IGNORE")?
 		}
 		if let Some(into) = &self.into {
-			write!(f, " INTO {}", into)?;
+			write!(f, " INTO {}", CoverStmtsExpr(into))?;
 		}
 		write!(f, " {}", self.data)?;
 		if let Some(ref v) = self.update {

@@ -78,12 +78,14 @@ pub(crate) enum DefineStatement {
 	Field(DefineFieldStatement),
 	Index(DefineIndexStatement),
 	User(DefineUserStatement),
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Model(DefineModelStatement),
 	Access(DefineAccessStatement),
 	Config(DefineConfigStatement),
 	Api(DefineApiStatement),
 	Bucket(DefineBucketStatement),
 	Sequence(DefineSequenceStatement),
+	#[cfg_attr(feature = "arbitrary", arbitrary(skip))]
 	Module(DefineModuleStatement),
 }
 
