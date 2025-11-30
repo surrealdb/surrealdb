@@ -39,9 +39,13 @@ impl InvocationContext for Host {
 		query: String,
 		vars: PublicObject,
 	) -> Result<PublicValue> {
-		let mut ctx = MutableContext::new(&self.ctx);
-		ctx.attach_public_variables(vars.into())?;
-		let ctx = ctx.freeze();
+		let ctx = if vars.is_empty() {
+			self.ctx.clone()
+		} else {
+			let mut ctx = MutableContext::new(&self.ctx);
+			ctx.attach_public_variables(vars.into())?;
+			ctx.freeze()
+		};
 
 		let expr: Expr = syn::expr(&query)?.into();
 		let res = self
