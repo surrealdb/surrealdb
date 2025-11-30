@@ -5,7 +5,6 @@ use anyhow::{Error, Result};
 use quick_cache::{Equivalent, Weighter};
 use std::hash::Hash;
 use surrealism_runtime::controller::Runtime;
-use tokio::sync::OnceCell;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 
@@ -24,7 +23,7 @@ impl SurrealismCache {
 		}
 	}
 
-	pub fn remove<K: Equivalent<SurrealismCacheKey> + Hash>(&self, lookup: &K) {
+	pub fn remove(&self, lookup: &SurrealismCacheLookup) {
 		self.cache.remove(lookup);
 	}
 
@@ -38,19 +37,22 @@ impl SurrealismCache {
 		F: FnOnce() -> Fut,
 		Fut: Future<Output = Result<Arc<Runtime>>>,
 	{
-		// This match is only needed to avoid allocating in the fast path
-		let cell = match self.cache.get(lookup) {
-			Some(cell) => cell,
+		// This match is only needed to avoid allocating for the key in the fast path
+		let value = match self.cache.get(lookup) {
+			Some(runtime) => runtime,
 			None => {
-				let cache_key: SurrealismCacheKey = lookup.clone().into();
-				self.cache.get_or_insert_with(&cache_key, || {
-					Result::<_, Error>::Ok(Arc::new(OnceCell::new()))
-				})?
+				let compute = async {
+					let value = SurrealismCacheValue {
+						runtime: compute().await?,
+					};
+					Result::<_, Error>::Ok(value)
+				};
+
+				self.cache.get_or_insert_async(&lookup.to_key(), compute).await?
 			}
 		};
 
-		let result = cell.get_or_try_init(compute).await;
-		result.map(|r| r.clone())
+		Ok(value.runtime.clone())
 	}
 }
 
@@ -62,7 +64,7 @@ pub enum SurrealismCacheKey {
 	Silo(String, String, u32, u32, u32),
 }
 
-#[derive(Clone, Hash, Eq, PartialEq, Debug)]
+#[derive(Hash, Eq, PartialEq, Debug)]
 pub enum SurrealismCacheLookup<'a> {
 	// NS - DB - BUCKET - KEY
 	File(&'a NamespaceId, &'a DatabaseId, &'a str, &'a str),
@@ -70,16 +72,22 @@ pub enum SurrealismCacheLookup<'a> {
 	Silo(&'a str, &'a str, u32, u32, u32),
 }
 
-impl<'a> From<SurrealismCacheLookup<'a>> for SurrealismCacheKey {
-	fn from(lookup: SurrealismCacheLookup<'a>) -> Self {
-		match lookup {
+impl SurrealismCacheLookup<'_> {
+	pub fn to_key(&self) -> SurrealismCacheKey {
+		match self {
 			SurrealismCacheLookup::File(ns, db, bucket, key) => {
-				SurrealismCacheKey::File(*ns, *db, bucket.to_owned(), key.to_owned())
+				SurrealismCacheKey::File(**ns, **db, bucket.to_string(), key.to_string())
 			}
 			SurrealismCacheLookup::Silo(org, pkg, maj, min, pat) => {
-				SurrealismCacheKey::Silo(org.to_string(), pkg.to_string(), maj, min, pat)
+				SurrealismCacheKey::Silo(org.to_string(), pkg.to_string(), *maj, *min, *pat)
 			}
 		}
+	}
+}
+
+impl<'a> From<SurrealismCacheLookup<'a>> for SurrealismCacheKey {
+	fn from(lookup: SurrealismCacheLookup<'a>) -> Self {
+		lookup.to_key()
 	}
 }
 
@@ -96,7 +104,10 @@ impl Equivalent<SurrealismCacheKey> for SurrealismCacheLookup<'_> {
     }
 }
 
-pub type SurrealismCacheValue = Arc<OnceCell<Arc<Runtime>>>;
+#[derive(Clone)]
+pub struct SurrealismCacheValue {
+	pub(crate) runtime: Arc<Runtime>,
+}
 
 #[derive(Clone)]
 pub(crate) struct Weight;
