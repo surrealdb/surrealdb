@@ -1,18 +1,16 @@
 use std::future::Future;
 use std::sync::Arc;
 
-use anyhow::Result;
-use dashmap::DashMap;
+use anyhow::{Error, Result};
 use quick_cache::{Equivalent, Weighter};
 use std::hash::Hash;
 use surrealism_runtime::controller::Runtime;
-use tokio::sync::Mutex;
+use tokio::sync::OnceCell;
 
 use crate::catalog::{DatabaseId, NamespaceId};
 
 pub struct SurrealismCache {
 	cache: quick_cache::sync::Cache<SurrealismCacheKey, SurrealismCacheValue, Weight>,
-	loading: DashMap<SurrealismCacheKey, Arc<Mutex<()>>>,
 }
 
 impl SurrealismCache {
@@ -23,15 +21,7 @@ impl SurrealismCache {
 				*crate::cnf::SURREALISM_CACHE_SIZE as u64,
 				Weight,
 			),
-			loading: DashMap::new(),
 		}
-	}
-
-	pub fn get<K: Equivalent<SurrealismCacheKey> + Hash>(
-		&self,
-		lookup: &K,
-	) -> Option<SurrealismCacheValue> {
-		self.cache.get(lookup)
 	}
 
 	pub fn remove<K: Equivalent<SurrealismCacheKey> + Hash>(&self, lookup: &K) {
@@ -48,53 +38,19 @@ impl SurrealismCache {
 		F: FnOnce() -> Fut,
 		Fut: Future<Output = Result<Arc<Runtime>>>,
 	{
-		// if already cached, return it
-		if let Some(value) = self.get(lookup) {
-			return Ok(value.runtime);
-		}
-
-		// if not cached, acquire the loading lock
-		let cache_key: SurrealismCacheKey = lookup.clone().into();
-		let loading_lock = self.get_loading_lock(&cache_key);
-		let _guard = loading_lock.lock().await;
-
-		// double-check if it got cached while waiting for the lock
-		if let Some(value) = self.get(&cache_key) {
-			self.remove_loading_lock(&cache_key);
-			return Ok(value.runtime);
-		}
-
-		// compute the runtime
-		let result = compute().await;
-
-		// if successful, insert into cache
-		if let Ok(runtime) = &result {
-			self.cache.insert(
-				cache_key.clone(),
-				SurrealismCacheValue {
-					runtime: runtime.clone(),
-				},
-			);
-		}
-
-		self.remove_loading_lock(&cache_key);
-
-		result
-	}
-
-	fn get_loading_lock(&self, key: &SurrealismCacheKey) -> Arc<Mutex<()>> {
-		match self.loading.get(key) {
-			Some(lock) => lock.clone(),
+		// This match is only needed to avoid allocating in the fast path
+		let cell = match self.cache.get(lookup) {
+			Some(cell) => cell,
 			None => {
-				let lock = Arc::new(Mutex::new(()));
-				self.loading.insert(key.clone(), lock.clone());
-				lock
+				let cache_key: SurrealismCacheKey = lookup.clone().into();
+				self.cache.get_or_insert_with(&cache_key, || {
+					Result::<_, Error>::Ok(Arc::new(OnceCell::new()))
+				})?
 			}
-		}
-	}
+		};
 
-	fn remove_loading_lock(&self, key: &SurrealismCacheKey) {
-		self.loading.remove(key);
+		let result = cell.get_or_try_init(compute).await;
+		result.map(|r| r.clone())
 	}
 }
 
@@ -140,10 +96,7 @@ impl Equivalent<SurrealismCacheKey> for SurrealismCacheLookup<'_> {
     }
 }
 
-#[derive(Clone)]
-pub struct SurrealismCacheValue {
-	pub(crate) runtime: Arc<Runtime>,
-}
+pub type SurrealismCacheValue = Arc<OnceCell<Arc<Runtime>>>;
 
 #[derive(Clone)]
 pub(crate) struct Weight;
