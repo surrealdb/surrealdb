@@ -246,6 +246,7 @@ command = "cargo"
 env = { LLVM_PROFILE_FILE = "target/llvm-cov-target/%p-%m.profraw" }
 args = [
     "llvm-cov",
+    "nextest",
     "--lcov",
     "--output-path",
     "lcov.info",
