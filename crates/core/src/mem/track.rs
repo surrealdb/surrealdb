@@ -20,7 +20,7 @@ thread_local! {
 	/// Per-thread accumulation buffer for batched updates
 	static THREAD_STATE: ThreadState = const { ThreadState::new() };
 
-	/// Recursion depth counter to prevent infinite recursion while tracking nested allocations
+	/// Recursion depth counter to prevent infinite recursion with nested allocations
 	static RECURSION_DEPTH: Cell<u32> = const { Cell::new(0) };
 }
 
@@ -68,7 +68,7 @@ impl ThreadState {
 ///
 /// - Lock-free operations for zero contention
 /// - Batched updates (64KB threshold) to reduce atomic operations
-/// - Recursion depth tracking (up to 3 levels) prevents infinite recursion while tracking nested allocations
+/// - Recursion depth tracking prevents infinite recursion while tracking nested allocations
 /// - O(1) usage queries regardless of thread count
 /// - Automatic cleanup when threads exit
 #[derive(Debug)]
