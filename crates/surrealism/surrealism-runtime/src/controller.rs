@@ -77,8 +77,6 @@ impl Runtime {
 			config,
 		}: SurrealismPackage,
 	) -> Result<Self> {
-		println!("Compiling WASM module");
-
 		// Configure engine for fast compilation in debug, optimized runtime in release
 		let mut engine_config = Config::new();
 		// Enable async support for async host functions
