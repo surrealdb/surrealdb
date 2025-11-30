@@ -29,7 +29,7 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 trait BenchAllocator: Send + Sync {
 	fn alloc(&self, size: usize);
 	fn dealloc(&self, size: usize);
-	fn current_usage(&self) -> (usize, usize); // (bytes, threads)
+	fn current_usage(&self) -> usize;
 }
 
 // ============================================================================
@@ -55,8 +55,8 @@ impl BenchAllocator for NoOpAllocator {
 		// No-op: measure cost of just the function call
 	}
 
-	fn current_usage(&self) -> (usize, usize) {
-		(0, 0)
+	fn current_usage(&self) -> usize {
+		0
 	}
 }
 
@@ -66,14 +66,12 @@ impl BenchAllocator for NoOpAllocator {
 
 struct AtomicAllocator {
 	total_bytes: AtomicUsize,
-	thread_count: AtomicUsize,
 }
 
 impl AtomicAllocator {
 	fn new() -> Self {
 		Self {
 			total_bytes: AtomicUsize::new(0),
-			thread_count: AtomicUsize::new(0),
 		}
 	}
 }
@@ -89,8 +87,8 @@ impl BenchAllocator for AtomicAllocator {
 		self.total_bytes.fetch_sub(size, Ordering::Relaxed);
 	}
 
-	fn current_usage(&self) -> (usize, usize) {
-		(self.total_bytes.load(Ordering::Relaxed), self.thread_count.load(Ordering::Relaxed))
+	fn current_usage(&self) -> usize {
+		self.total_bytes.load(Ordering::Relaxed)
 	}
 }
 
@@ -105,7 +103,6 @@ struct ThreadCounterNode {
 
 struct PerThreadAllocator {
 	node_layout: Layout,
-	active_threads: AtomicUsize,
 	global_list_head: AtomicPtr<ThreadCounterNode>,
 	global_list_lock: Mutex<()>,
 }
@@ -114,7 +111,6 @@ impl PerThreadAllocator {
 	fn new() -> Self {
 		Self {
 			node_layout: Layout::new::<ThreadCounterNode>(),
-			active_threads: AtomicUsize::new(0),
 			global_list_head: AtomicPtr::new(null_mut()),
 			global_list_lock: Mutex::new(()),
 		}
@@ -152,8 +148,6 @@ impl PerThreadAllocator {
 					self.global_list_head.store(node_raw, Ordering::Relaxed);
 				}
 
-				self.active_threads.fetch_add(1, Ordering::Relaxed);
-
 				*cell.borrow_mut() = node_raw;
 				node_ptr = node_raw;
 			}
@@ -179,9 +173,8 @@ impl BenchAllocator for PerThreadAllocator {
 		}
 	}
 
-	fn current_usage(&self) -> (usize, usize) {
+	fn current_usage(&self) -> usize {
 		let mut total = 0;
-		let mut threads = 0;
 
 		let _guard = self.global_list_lock.lock();
 		let mut current = self.global_list_head.load(Ordering::Relaxed);
@@ -190,134 +183,153 @@ impl BenchAllocator for PerThreadAllocator {
 			unsafe {
 				total += (*current).counter.load(Ordering::Relaxed);
 				current = (*current).next.load(Ordering::Relaxed);
-				threads += 1;
 			}
 		}
 
-		(total, threads)
+		total
 	}
 }
 
 // ============================================================================
-// Implementation 3: Hierarchical Lock-Free Tracking
+// Implementation 3: Lock-Free Batched Tracking (matches actual TrackAlloc)
 // ============================================================================
 
 /// Batch threshold - flush to global every 64KB of delta
-const BATCH_THRESHOLD: i64 = 64 * 1024;
-
-struct LockFreeAllocator {
-	global_total_bytes: AtomicI64,
-	active_thread_count: AtomicUsize,
-}
+const BATCH_THRESHOLD: i64 = 12 * 1024;
 
 /// Per-thread state for batched updates
 struct LockFreeThreadState {
 	local_bytes: Cell<i64>,
-	global_bytes: *const AtomicI64,
-	thread_count: *const AtomicUsize,
+	global_bytes: Cell<*const AtomicI64>,
 }
 
 impl LockFreeThreadState {
-	fn new(global_bytes: *const AtomicI64, thread_count: *const AtomicUsize) -> Self {
-		unsafe {
-			(*thread_count).fetch_add(1, Ordering::Relaxed);
-		}
+	const fn new() -> Self {
 		Self {
 			local_bytes: Cell::new(0),
-			global_bytes,
-			thread_count,
+			global_bytes: Cell::new(std::ptr::null()),
 		}
 	}
 
 	fn flush_to_global(&self) {
 		let delta = self.local_bytes.get();
 		if delta != 0 {
-			unsafe {
-				(*self.global_bytes).fetch_add(delta, Ordering::Relaxed);
+			let global_ptr = self.global_bytes.get();
+			if !global_ptr.is_null() {
+				unsafe {
+					(*global_ptr).fetch_add(delta, Ordering::Relaxed);
+				}
 			}
 			self.local_bytes.set(0);
 		}
 	}
 }
 
-impl Drop for LockFreeThreadState {
-	fn drop(&mut self) {
-		// Flush any remaining bytes when thread exits
-		self.flush_to_global();
-		unsafe {
-			(*self.thread_count).fetch_sub(1, Ordering::Relaxed);
-		}
-	}
+struct LockFreeAllocator {
+	global_total_bytes: AtomicI64,
 }
 
 impl LockFreeAllocator {
 	fn new() -> Arc<Self> {
 		Arc::new(Self {
 			global_total_bytes: AtomicI64::new(0),
-			active_thread_count: AtomicUsize::new(0),
 		})
 	}
 
-	fn get_thread_state(&self) -> Option<&'static LockFreeThreadState> {
+	// Mirrors the actual TrackAlloc::add() implementation
+	#[inline(always)]
+	fn add(&self, size: usize) {
 		thread_local! {
-			static THREAD_STATE: RefCell<Option<Box<LockFreeThreadState>>> = const { RefCell::new(None) };
-			static INSIDE_ALLOCATOR: Cell<bool> = const { Cell::new(false) };
+			static THREAD_STATE: LockFreeThreadState = const { LockFreeThreadState::new() };
+			static RECURSION_DEPTH: Cell<u32> = const { Cell::new(0) };
 		}
 
-		// Reentrancy guard - return None to skip tracking
-		if INSIDE_ALLOCATOR.with(|flag| flag.get()) {
-			return None;
-		}
+		const MAX_DEPTH: u32 = 3;
 
-		INSIDE_ALLOCATOR.with(|flag| flag.set(true));
-
-		let state_ref = THREAD_STATE.with(|cell| {
-			let mut opt = cell.borrow_mut();
-			if opt.is_none() {
-				let global_ptr = &self.global_total_bytes as *const AtomicI64;
-				let count_ptr = &self.active_thread_count as *const AtomicUsize;
-				*opt = Some(Box::new(LockFreeThreadState::new(global_ptr, count_ptr)));
+		let depth = RECURSION_DEPTH.with(|d| {
+			let current = d.get();
+			if current >= MAX_DEPTH {
+				return MAX_DEPTH;
 			}
-			// SAFETY: We leak the reference here but ThreadState lives until thread exit
-			unsafe { &*(opt.as_ref().unwrap().as_ref() as *const LockFreeThreadState) }
+			d.set(current + 1);
+			current
 		});
 
-		INSIDE_ALLOCATOR.with(|flag| flag.set(false));
-		Some(state_ref)
+		if depth >= MAX_DEPTH {
+			return;
+		}
+
+		let global_ptr = &self.global_total_bytes as *const AtomicI64;
+		THREAD_STATE.with(|state| {
+			// Initialize pointer on first use
+			if state.global_bytes.get().is_null() {
+				state.global_bytes.set(global_ptr);
+			}
+
+			let bytes = state.local_bytes.get() + size as i64;
+			state.local_bytes.set(bytes);
+			if bytes >= BATCH_THRESHOLD {
+				state.flush_to_global();
+			}
+		});
+
+		RECURSION_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
+	}
+
+	// Mirrors the actual TrackAlloc::sub() implementation
+	#[inline(always)]
+	fn sub(&self, size: usize) {
+		thread_local! {
+			static THREAD_STATE: LockFreeThreadState = const { LockFreeThreadState::new() };
+			static RECURSION_DEPTH: Cell<u32> = const { Cell::new(0) };
+		}
+
+		const MAX_DEPTH: u32 = 3;
+
+		let depth = RECURSION_DEPTH.with(|d| {
+			let current = d.get();
+			if current >= MAX_DEPTH {
+				return MAX_DEPTH;
+			}
+			d.set(current + 1);
+			current
+		});
+
+		if depth >= MAX_DEPTH {
+			return;
+		}
+
+		let global_ptr = &self.global_total_bytes as *const AtomicI64;
+		THREAD_STATE.with(|state| {
+			// Initialize pointer on first use
+			if state.global_bytes.get().is_null() {
+				state.global_bytes.set(global_ptr);
+			}
+
+			let bytes = state.local_bytes.get() - size as i64;
+			state.local_bytes.set(bytes);
+			if bytes <= -BATCH_THRESHOLD {
+				state.flush_to_global();
+			}
+		});
+
+		RECURSION_DEPTH.with(|d| d.set(d.get().saturating_sub(1)));
 	}
 }
 
 impl BenchAllocator for LockFreeAllocator {
 	#[inline(always)]
 	fn alloc(&self, size: usize) {
-		if let Some(state) = self.get_thread_state() {
-			// Batch updates locally
-			state.local_bytes.set(state.local_bytes.get() + size as i64);
-
-			// Flush to global if batch threshold reached
-			if state.local_bytes.get() >= BATCH_THRESHOLD {
-				state.flush_to_global();
-			}
-		}
+		self.add(size);
 	}
 
 	#[inline(always)]
 	fn dealloc(&self, size: usize) {
-		if let Some(state) = self.get_thread_state() {
-			state.local_bytes.set(state.local_bytes.get() - size as i64);
-
-			// Flush if significant negative delta
-			if state.local_bytes.get() <= -BATCH_THRESHOLD {
-				state.flush_to_global();
-			}
-		}
+		self.sub(size);
 	}
 
-	fn current_usage(&self) -> (usize, usize) {
-		// O(1) operation - just read the global atomic
-		let total = self.global_total_bytes.load(Ordering::Relaxed);
-		let threads = self.active_thread_count.load(Ordering::Relaxed);
-		(total.max(0) as usize, threads)
+	fn current_usage(&self) -> usize {
+		self.global_total_bytes.load(Ordering::Relaxed).max(0) as usize
 	}
 }
 
@@ -769,6 +781,42 @@ fn bench_mixed_workload(c: &mut Criterion) {
 }
 
 // ============================================================================
+// Nested Allocation Benchmarks
+// ============================================================================
+
+fn bench_nested_allocations(c: &mut Criterion) {
+	let mut group = c.benchmark_group("nested_allocations");
+
+	// Benchmark 1: Single allocation (baseline)
+	group.bench_function("single", |b| {
+		b.iter(|| {
+			let v = vec![0u8; 1024];
+			black_box(v);
+		});
+	});
+
+	// Benchmark 2: Nested allocation (Vec in Vec)
+	group.bench_function("nested_vec", |b| {
+		b.iter(|| {
+			let outer = vec![vec![0u8; 256]; 4];
+			black_box(outer);
+		});
+	});
+
+	// Benchmark 3: Deep nesting (tests recursion limit)
+	group.bench_function("deep_nesting", |b| {
+		b.iter(|| {
+			let v1 = vec![0u8; 100];
+			let v2 = vec![v1.clone(); 2];
+			let v3 = vec![v2.clone(); 2];
+			black_box(v3);
+		});
+	});
+
+	group.finish();
+}
+
+// ============================================================================
 // Main Benchmark Configuration
 // ============================================================================
 
@@ -778,6 +826,7 @@ criterion_group!(
 	bench_multi_threaded,
 	bench_usage_queries,
 	bench_high_contention,
-	bench_mixed_workload
+	bench_mixed_workload,
+	bench_nested_allocations
 );
 criterion_main!(benches);

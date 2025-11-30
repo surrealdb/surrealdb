@@ -23,9 +23,9 @@ impl FakeAlloc {
 }
 
 impl FakeAlloc {
-	/// Returns the number of bytes that are allocated to the process
-	pub fn current_usage(&self) -> (usize, usize) {
-		(0, 0)
+	/// Returns the current total allocated bytes.
+	pub fn memory_usage(&self) -> usize {
+		0
 	}
 	/// Checks whether the allocator is above the memory limit threshold
 	pub fn is_beyond_threshold(&self) -> bool {
