@@ -4,7 +4,7 @@
 [profile.default]
 retries = 5
 fail-fast = false
-test-threads = -1
+test-threads = 4
 slow-timeout = "180s"
 global-timeout = "30m"
 
@@ -12,6 +12,12 @@ global-timeout = "30m"
 filter = 'test(kvs::tests::)'
 test-group = 'serial-kvs'
 
+[[profile.default.overrides]]
+filter = 'test(syn::test::test_excessive_size)'
+test-group = 'excessive'
+threads-required = 4
+
 [test-groups]
 # Ensure all KVS tests run serially
 serial-kvs = { max-threads = 1 }
+excessive = { max-threads = 1 }
