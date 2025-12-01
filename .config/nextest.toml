@@ -5,7 +5,7 @@
 retries = 5
 fail-fast = false
 test-threads = 8
-slow-timeout = "180s"
+slow-timeout = "15s"
 global-timeout = "30m"
 
 [[profile.default.overrides]]
