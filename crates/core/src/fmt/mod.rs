@@ -93,7 +93,6 @@ fn fmt_pretty_comma_separated<T: ToSql, I: IntoIterator<Item = T>>(
 		if i > 0 {
 			if fmt.is_pretty() {
 				f.push_str(",\n");
-				// pretty_sequence_item();
 			} else {
 				f.push_str(", ");
 			}
@@ -110,11 +109,6 @@ fn fmt_one_line_separated<T: ToSql, I: IntoIterator<Item = T>>(
 	for (i, v) in into_iter.into_iter().enumerate() {
 		if i > 0 {
 			f.push('\n');
-			// if fmt.is_pretty() {
-			// 	f.push('\n');
-			// } else {
-			// 	f.push('\n');
-			// }
 		}
 		v.fmt_sql(f, fmt);
 	}

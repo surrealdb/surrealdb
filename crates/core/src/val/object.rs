@@ -152,36 +152,6 @@ impl Object {
 			})
 			.collect()
 	}
-
-	// pub(crate) fn display<V: ToSql>(f: &mut String, o: &BTreeMap<String, V>) -> fmt::Result {
-	// 	let mut f = Pretty::from(f);
-	// 	if is_pretty() {
-	// 		f.write_char('{')?;
-	// 	} else {
-	// 		f.write_str("{ ")?;
-	// 	}
-	// 	if !o.is_empty() {
-	// 		let indent = pretty_indent();
-	// 		write_sql!(
-	// 			f, fmt,
-	// 			"{}",
-	// 			Fmt::pretty_comma_separated(
-	// 				o.iter().map(|args| Fmt::new(args, |(k, v), f, fmt| write_sql!(
-	// 					f, fmt,
-	// 					"{}: {}",
-	// 					EscapeKey(k),
-	// 					v
-	// 				))),
-	// 			)
-	// 		)?;
-	// 		drop(indent);
-	// 	}
-	// 	if is_pretty() {
-	// 		f.write_char('}')
-	// 	} else {
-	// 		f.write_str(" }")
-	// 	}
-	// }
 }
 
 impl std::ops::Add for Object {

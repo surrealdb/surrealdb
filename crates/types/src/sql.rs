@@ -148,47 +148,6 @@ pub fn fmt_sql_key_value<'a, V: ToSql + 'a>(
 	}
 }
 
-/// Macro for writing to a SQL string.
-///
-/// This macro parses format strings at compile time and generates code that calls
-/// `ToSql::fmt_sql` for each placeholder argument.
-///
-/// # Syntax
-///
-/// ```ignore
-/// write_sql!(f, fmt, "format string", arg1, arg2, ...)
-/// ```
-///
-/// Where:
-/// - `f` is a mutable reference to a `String`
-/// - `fmt` is a `SqlFormat` value
-/// - `"format string"` contains literal text and placeholders
-/// - Arguments follow for each positional placeholder
-///
-/// # Placeholders
-///
-/// - `{}` - Positional placeholder (uses corresponding argument from the list)
-/// - `{identifier}` - Named placeholder (uses variable with that name in scope)
-///
-/// # Examples
-///
-/// ```ignore
-/// use surrealdb_types::{write_sql, SqlFormat, ToSql};
-///
-/// let mut f = String::new();
-/// let fmt = SqlFormat::SingleLine;
-///
-/// // Positional placeholders
-/// write_sql!(f, fmt, "{}", value);
-/// write_sql!(f, fmt, "a: {}, {}", b, c);
-///
-/// // Named placeholders
-/// let x = 42;
-/// write_sql!(f, fmt, "x = {x}");
-///
-/// // Mixed
-/// write_sql!(f, fmt, "{a} {} {c}", b);
-/// ```
 pub use surrealdb_types_derive::write_sql;
 
 impl ToSql for String {
