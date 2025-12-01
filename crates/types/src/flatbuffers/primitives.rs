@@ -305,6 +305,6 @@ impl FromFlatbuffers for Bytes {
 	#[inline]
 	fn from_fb(input: Self::Input<'_>) -> anyhow::Result<Self> {
 		let data = input.value().ok_or_else(|| anyhow::anyhow!("Missing value in Bytes"))?;
-		Ok(Bytes(data.bytes().to_vec()))
+		Ok(Bytes(::bytes::Bytes::copy_from_slice(data.bytes())))
 	}
 }

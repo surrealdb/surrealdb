@@ -27,6 +27,7 @@
 //! crate::key::root::ns                 /!ns{ns} -> NamespaceDefinition
 //! crate::key::root::us                 /!us{us}
 //! crate::key::root::tl                 /!tl{tl}
+//! crate::key::root::cg                 /!cg{ty}
 //!
 //! crate::key::node::all                /${nd}
 //! crate::key::node::lq                 /${nd}!lq{lq}{ns}{db}

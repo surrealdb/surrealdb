@@ -12,10 +12,12 @@ use crate::expr::statements::access::{
 	AccessStatementGrant, AccessStatementPurge, AccessStatementRevoke, AccessStatementShow, Subject,
 };
 use crate::expr::statements::alter::{
-	AlterDefault, AlterFieldStatement, AlterKind, AlterSequenceStatement, AlterTableStatement,
+	AlterDefault, AlterFieldStatement, AlterIndexStatement, AlterKind, AlterSequenceStatement,
+	AlterTableStatement,
 };
 use crate::expr::statements::define::config::ConfigInner;
 use crate::expr::statements::define::config::api::ApiConfig;
+use crate::expr::statements::define::config::defaults::DefaultConfig;
 use crate::expr::statements::define::{
 	ApiAction, DefineBucketStatement, DefineConfigStatement, DefineDefault, DefineSequenceStatement,
 };
@@ -335,7 +337,8 @@ implement_visitor! {
 
 	fn visit_alter(this, a: &AlterStatement){
 		match a {
-			AlterStatement::Table(a)=>{ this.visit_alter_table(a)?;},
+			AlterStatement::Table(a)=>{ this.visit_alter_table(a)?; },
+			AlterStatement::Index(a) => { this.visit_alter_index(a)?; },
 			AlterStatement::Sequence(a) => { this.visit_alter_sequence(a)?; },
 			AlterStatement::Field(a) => { this.visit_alter_field(a)?; },
 		}
@@ -346,6 +349,10 @@ implement_visitor! {
 		if let Some(p) = a.permissions.as_ref(){
 			this.visit_permissions(p)?;
 		}
+		Ok(())
+	}
+
+	fn visit_alter_index(this, a: &AlterIndexStatement){
 		Ok(())
 	}
 
@@ -834,6 +841,9 @@ implement_visitor! {
 			ConfigInner::Api(api_config) => {
 				this.visit_api_config(api_config)?;
 			},
+			ConfigInner::Default(default_config) => {
+				this.visit_default_config(default_config)?;
+			},
 		}
 		Ok(())
 	}
@@ -850,6 +860,12 @@ implement_visitor! {
 			}
 		}
 		this.visit_permission(&d.permissions)?;
+		Ok(())
+	}
+
+	fn visit_default_config(this, d: &DefaultConfig) {
+		this.visit_expr(&d.namespace)?;
+		this.visit_expr(&d.database)?;
 		Ok(())
 	}
 
@@ -1770,6 +1786,7 @@ implement_visitor_mut! {
 	fn visit_mut_alter(this, a: &mut AlterStatement){
 		match a {
 			AlterStatement::Table(a)=>{ this.visit_mut_alter_table(a)?;},
+			AlterStatement::Index(a)=>{ this.visit_mut_alter_index(a)?;},
 			AlterStatement::Sequence(a) => { this.visit_mut_alter_sequence(a)?; },
 			AlterStatement::Field(a) => { this.visit_mut_alter_field(a)?; },
 		}
@@ -1780,6 +1797,10 @@ implement_visitor_mut! {
 		if let Some(p) = a.permissions.as_mut(){
 			this.visit_mut_permissions(p)?;
 		}
+		Ok(())
+	}
+
+	fn visit_mut_alter_index(this, a: &mut AlterIndexStatement){
 		Ok(())
 	}
 
@@ -2269,6 +2290,9 @@ implement_visitor_mut! {
 			ConfigInner::Api(api_config) => {
 				this.visit_mut_api_config(api_config)?;
 			},
+			ConfigInner::Default(default_config) => {
+				this.visit_mut_default_config(default_config)?;
+			},
 		}
 		Ok(())
 	}
@@ -2280,6 +2304,12 @@ implement_visitor_mut! {
 			}
 		}
 		this.visit_mut_permission(&mut d.permissions)?;
+		Ok(())
+	}
+
+	fn visit_mut_default_config(this, d: &mut DefaultConfig) {
+		this.visit_mut_expr(&mut d.namespace)?;
+		this.visit_mut_expr(&mut d.database)?;
 		Ok(())
 	}
 

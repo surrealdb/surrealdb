@@ -238,7 +238,7 @@ async fn should_not_error_when_remove_table_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE TABLE IF EXISTS foo;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -258,7 +258,7 @@ async fn should_not_error_when_remove_analyzer_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE ANALYZER IF EXISTS foo;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -278,7 +278,7 @@ async fn should_not_error_when_remove_database_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE DATABASE IF EXISTS foo;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -298,7 +298,7 @@ async fn should_not_error_when_remove_event_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE EVENT IF EXISTS foo ON bar;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -318,7 +318,7 @@ async fn should_not_error_when_remove_field_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE FIELD IF EXISTS foo ON bar;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -338,7 +338,7 @@ async fn should_not_error_when_remove_function_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE FUNCTION IF EXISTS fn::foo;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -358,7 +358,7 @@ async fn should_not_error_when_remove_index_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE INDEX IF EXISTS foo ON bar;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -378,7 +378,7 @@ async fn should_not_error_when_remove_namespace_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE NAMESPACE IF EXISTS foo;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -398,7 +398,7 @@ async fn should_not_error_when_remove_param_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE PARAM IF EXISTS $foo;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -418,7 +418,7 @@ async fn should_not_error_when_remove_access_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE ACCESS IF EXISTS foo ON DB;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -438,7 +438,7 @@ async fn should_not_error_when_remove_user_if_exists() -> Result<()> {
 	assert_eq!(res.len(), 2);
 	// USE NS test DB test;
 	let tmp = res.remove(0).result?;
-	assert_eq!(tmp, Value::None);
+	assert_eq!(tmp, crate::syn::value(r#"{ database: "test", namespace: "test" }"#)?);
 	// REMOVE USER IF EXISTS foo ON ROOT;
 	let tmp = res.remove(0).result?;
 	assert_eq!(tmp, Value::None);
@@ -470,8 +470,8 @@ async fn permissions_checks_remove_ns() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }".to_string();
-	let check_error = "{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }".to_string();
+	let check_success = "{ accesses: {  }, defaults: {  }, namespaces: {  }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
+	let check_error = "{ accesses: {  }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
 
 	let test_cases = [
 		// Root level
@@ -684,8 +684,8 @@ async fn permissions_checks_remove_root_access() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }".to_string();
-	let check_error = r#"{ accesses: { access: "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }"#.to_string();
+	let check_success = "{ accesses: {  }, defaults: {  }, namespaces: { NS: 'DEFINE NAMESPACE NS' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
+	let check_error = r#"{ accesses: { access: "DEFINE ACCESS access ON ROOT TYPE JWT ALGORITHM HS512 KEY '[REDACTED]' WITH ISSUER KEY '[REDACTED]' DURATION FOR TOKEN 1h, FOR SESSION NONE" }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }"#.to_string();
 
 	let test_cases = [
 		// Root level
@@ -896,8 +896,8 @@ async fn permissions_checks_remove_root_user() {
 
 	// Define the expected results for the check statement when the test statement
 	// succeeded and when it failed
-	let check_success = "{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: {  } }".to_string();
-	let check_error = r#"{ accesses: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0, threads: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }"#.to_string();
+	let check_success = "{ accesses: {  }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: {  } }".to_string();
+	let check_error = r#"{ accesses: {  }, defaults: {  }, namespaces: { {{NS}}: 'DEFINE NAMESPACE {{NS}}' }, nodes: {  }, system: { available_parallelism: 0, cpu_usage: 0.0f, load_average: [0.0f, 0.0f, 0.0f], memory_allocated: 0, memory_usage: 0, physical_cores: 0 }, users: { user: "DEFINE USER user ON ROOT PASSHASH 'secret' ROLES VIEWER DURATION FOR TOKEN 1h, FOR SESSION NONE" } }"#.to_string();
 
 	let test_cases = [
 		// Root level

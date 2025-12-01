@@ -2,7 +2,6 @@ use std::fmt::{self, Display};
 use std::ops::Deref;
 
 use anyhow::Result;
-use reblessive::tree::Stk;
 use uuid::Uuid;
 
 use super::AlterKind;
@@ -10,7 +9,6 @@ use crate::catalog::providers::TableProvider;
 use crate::catalog::{self, Permission, Permissions, TableDefinition};
 use crate::ctx::Context;
 use crate::dbs::Options;
-use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::reference::Reference;
 use crate::expr::{Base, Expr, Idiom, Kind};
@@ -44,13 +42,7 @@ pub(crate) struct AlterFieldStatement {
 }
 
 impl AlterFieldStatement {
-	pub(crate) async fn compute(
-		&self,
-		_stk: &mut Stk,
-		ctx: &Context,
-		opt: &Options,
-		_doc: Option<&CursorDoc>,
-	) -> Result<Value> {
+	pub(crate) async fn compute(&self, ctx: &Context, opt: &Options) -> Result<Value> {
 		// Allowed to run?
 		opt.is_allowed(Action::Edit, ResourceKind::Field, &Base::Db)?;
 		// Get the NS and DB

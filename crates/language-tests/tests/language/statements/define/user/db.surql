@@ -8,10 +8,7 @@ timeout = 10000
 [test]
 
 [[test.results]]
-value = "NONE"
-
-[[test.results]]
-value = "NONE"
+value = "{ database: 'db', namespace: 'ns' }"
 
 [[test.results]]
 value = "NONE"
@@ -33,8 +30,7 @@ error = "The user 'test' does not exist in the namespace 'ns'"
 */
 
 
-USE NS ns;
-USE DB db;
+USE NS ns DB db;
 DEFINE USER test ON DB PASSWORD 'test';
 
 INFO FOR USER test;

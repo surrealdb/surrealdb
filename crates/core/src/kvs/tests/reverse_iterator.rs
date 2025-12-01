@@ -224,7 +224,7 @@ pub async fn range(new_ds: impl CreateDs) {
 
 	// Run the test
 	let sql = "
-		USE NS test; USE DB test;
+		USE NS test DB test;
 		FOR $i IN 1..1500 { CREATE t:[$i]; };
 		SELECT * FROM t:[500]..=[550] ORDER BY id DESC LIMIT 3;
 		SELECT * FROM t:[500]..[550] ORDER BY id DESC LIMIT 3;
@@ -232,9 +232,8 @@ pub async fn range(new_ds: impl CreateDs) {
 	";
 	let mut r = ds.execute(sql, &Session::owner(), None).await.unwrap();
 	//Check the result
-	for _ in 0..3 {
-		check(&mut r, "NONE");
-	}
+	check(&mut r, r#"{ database: "test", namespace: "test" }"#);
+	check(&mut r, "NONE");
 	check(&mut r, "[{ id: t:[550]},{ id: t:[549] },{ id: t:[548] }]");
 	check(&mut r, "[{ id: t:[549]},{ id: t:[548] },{ id: t:[547] }]");
 	check(
