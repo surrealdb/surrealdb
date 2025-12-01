@@ -76,10 +76,10 @@ impl SurrealismCacheLookup<'_> {
 	pub fn to_key(&self) -> SurrealismCacheKey {
 		match self {
 			SurrealismCacheLookup::File(ns, db, bucket, key) => {
-				SurrealismCacheKey::File(**ns, **db, bucket.to_string(), key.to_string())
+				SurrealismCacheKey::File(**ns, **db, (*bucket).to_string(), (*key).to_string())
 			}
 			SurrealismCacheLookup::Silo(org, pkg, maj, min, pat) => {
-				SurrealismCacheKey::Silo(org.to_string(), pkg.to_string(), *maj, *min, *pat)
+				SurrealismCacheKey::Silo((*org).to_string(), (*pkg).to_string(), *maj, *min, *pat)
 			}
 		}
 	}
