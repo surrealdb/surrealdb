@@ -87,7 +87,7 @@ impl<A> TrackAlloc<A> {
 impl<A: GlobalAlloc> TrackAlloc<A> {
 	/// Returns the current total allocated bytes.
 	#[cfg(not(feature = "allocation-tracking"))]
-	pub fn memory_usage(&self) -> usize {
+	pub fn memory_allocated(&self) -> usize {
 		0
 	}
 
@@ -105,7 +105,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 
 	/// Returns the current total allocated bytes.
 	#[cfg(feature = "allocation-tracking")]
-	pub fn memory_usage(&self) -> usize {
+	pub fn memory_allocated(&self) -> usize {
 		GLOBAL_TOTAL_BYTES.load(Ordering::Relaxed).max(0) as usize
 	}
 
@@ -122,7 +122,7 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 	pub fn is_beyond_threshold(&self) -> bool {
 		match *crate::cnf::MEMORY_THRESHOLD {
 			0 => false,
-			v => self.memory_usage() > v,
+			v => self.memory_allocated() > v,
 		}
 	}
 

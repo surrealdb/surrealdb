@@ -24,7 +24,7 @@ impl FakeAlloc {
 
 impl FakeAlloc {
 	/// Returns the current total allocated bytes.
-	pub fn memory_usage(&self) -> usize {
+	pub fn memory_allocated(&self) -> usize {
 		0
 	}
 
