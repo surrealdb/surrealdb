@@ -597,7 +597,9 @@ mod tests {
 
 	use crate::ctx::reason::Reason;
 	use crate::ctx::MutableContext;
+	#[cfg(feature = "http")]
 	use crate::dbs::capabilities::{NetTarget, Targets};
+	#[cfg(feature = "http")]
 	use crate::dbs::Capabilities;
 	#[cfg(feature = "http")]
 	use std::str::FromStr;
