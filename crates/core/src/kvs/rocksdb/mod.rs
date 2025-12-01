@@ -4,6 +4,7 @@ mod background_flusher;
 mod cnf;
 mod commit_coordinator;
 mod disk_space_manager;
+mod memory_manager;
 
 use std::ops::Range;
 use std::pin::Pin;
@@ -13,9 +14,10 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use background_flusher::BackgroundFlusher;
 use commit_coordinator::CommitCoordinator;
 use disk_space_manager::{DiskSpaceManager, DiskSpaceState, TransactionState};
+use memory_manager::MemoryManager;
 use rocksdb::{
-	BlockBasedOptions, Cache, DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel,
-	OptimisticTransactionDB, OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
+	DBCompactionStyle, DBCompressionType, FlushOptions, LogLevel, OptimisticTransactionDB,
+	OptimisticTransactionOptions, Options, ReadOptions, WriteOptions,
 };
 use tokio::sync::Mutex;
 
@@ -29,6 +31,8 @@ const TARGET: &str = "surrealdb::core::kvs::rocksdb";
 pub struct Datastore {
 	/// The underlying RocksDB optimistic transaction database
 	db: Pin<Arc<OptimisticTransactionDB>>,
+	/// Memory manager for managing memory usage
+	memory_manager: Arc<MemoryManager>,
 	/// Disk space manager for monitoring space usage and enforcing space limits
 	disk_space_manager: Option<Arc<DiskSpaceManager>>,
 	/// Commit coordinator for batching transaction commits when sync is enabled
@@ -84,21 +88,12 @@ impl Datastore {
 		// Set the number of log files to keep
 		info!(target: TARGET, "Number of log files to keep: {}", *cnf::ROCKSDB_KEEP_LOG_FILE_NUM);
 		opts.set_keep_log_file_num(*cnf::ROCKSDB_KEEP_LOG_FILE_NUM);
-		// Set the maximum number of write buffers
-		info!(target: TARGET, "Maximum write buffers: {}", *cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER);
-		opts.set_max_write_buffer_number(*cnf::ROCKSDB_MAX_WRITE_BUFFER_NUMBER);
-		// Set the amount of data to build up in memory
-		info!(target: TARGET, "Write buffer size: {}", *cnf::ROCKSDB_WRITE_BUFFER_SIZE);
-		opts.set_write_buffer_size(*cnf::ROCKSDB_WRITE_BUFFER_SIZE);
 		// Set the target file size for compaction
 		info!(target: TARGET, "Target file size for compaction: {}", *cnf::ROCKSDB_TARGET_FILE_SIZE_BASE);
 		opts.set_target_file_size_base(*cnf::ROCKSDB_TARGET_FILE_SIZE_BASE);
 		// Set the levelled target file size multipler
 		info!(target: TARGET, "Target file size compaction multiplier: {}", *cnf::ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER);
 		opts.set_target_file_size_multiplier(*cnf::ROCKSDB_TARGET_FILE_SIZE_MULTIPLIER);
-		// Set minimum number of write buffers to merge
-		info!(target: TARGET, "Minimum write buffers to merge: {}", *cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE);
-		opts.set_min_write_buffer_number_to_merge(*cnf::ROCKSDB_MIN_WRITE_BUFFER_NUMBER_TO_MERGE);
 		// Delay compaction until the minimum number of files accumulate
 		info!(target: TARGET, "Number of files to trigger compaction: {}", *cnf::ROCKSDB_FILE_COMPACTION_TRIGGER);
 		opts.set_level_zero_file_num_compaction_trigger(*cnf::ROCKSDB_FILE_COMPACTION_TRIGGER);
@@ -156,27 +151,6 @@ impl Datastore {
 		opts.set_enable_write_thread_adaptive_yield(true);
 		// Log if writes should be synced
 		info!(target: TARGET, "Wait for disk sync acknowledgement: {}", *cnf::SYNC_DATA);
-		// Set the block cache size in bytes
-		info!(target: TARGET, "Block cache size: {}", *cnf::ROCKSDB_BLOCK_CACHE_SIZE);
-		// Configure the in-memory cache options
-		let cache = Cache::new_lru_cache(*cnf::ROCKSDB_BLOCK_CACHE_SIZE);
-		// Configure the block based file options
-		let mut block_opts = BlockBasedOptions::default();
-		block_opts.set_pin_l0_filter_and_index_blocks_in_cache(true);
-		block_opts.set_pin_top_level_index_and_filter(true);
-		block_opts.set_bloom_filter(10.0, false);
-		block_opts.set_block_size(*cnf::ROCKSDB_BLOCK_SIZE);
-		block_opts.set_block_cache(&cache);
-		// Configure the database with the cache
-		opts.set_block_based_table_factory(&block_opts);
-		opts.set_blob_cache(&cache);
-		opts.set_row_cache(&cache);
-		// Configure memory-mapped reads
-		info!(target: TARGET, "Enable memory-mapped reads: {}", *cnf::ROCKSDB_ENABLE_MEMORY_MAPPED_READS);
-		opts.set_allow_mmap_reads(*cnf::ROCKSDB_ENABLE_MEMORY_MAPPED_READS);
-		// Configure memory-mapped writes
-		info!(target: TARGET, "Enable memory-mapped writes: {}", *cnf::ROCKSDB_ENABLE_MEMORY_MAPPED_WRITES);
-		opts.set_allow_mmap_writes(*cnf::ROCKSDB_ENABLE_MEMORY_MAPPED_WRITES);
 		// Set the delete compaction factory
 		info!(target: TARGET, "Setting delete compaction factory: {} / {} ({})",
 			*cnf::ROCKSDB_DELETION_FACTORY_WINDOW_SIZE,
@@ -219,6 +193,8 @@ impl Datastore {
 				)));
 			}
 		});
+		// Configure and create the memory manager
+		let memory_manager = Arc::new(MemoryManager::configure(&mut opts)?);
 		// Pre-configure the disk space manager
 		let should_create_disk_space_manager = DiskSpaceManager::configure(&mut opts)?;
 		// Pre-configure the background flusher
@@ -248,6 +224,7 @@ impl Datastore {
 		// Return the datastore
 		Ok(Datastore {
 			db,
+			memory_manager,
 			disk_space_manager,
 			background_flusher,
 			commit_coordinator,
@@ -431,17 +408,19 @@ impl Transactable for Transaction {
 			.await
 			.take()
 			.ok_or_else(|| Error::Internal("expected a transaction".into()))?;
-		// Commit this transaction using grouped commit if available, otherwise commit directly
+		// Always commit the RocksDB transaction on the caller thread for parallel commits
+		inner.commit()?;
+		// If we don't need durability, we're done
+		if !*cnf::SYNC_DATA {
+			return Ok(());
+		}
+		// If we have a coordinator, wait for the grouped fsync
 		if let Some(coordinator) = &self.commit_coordinator {
-			// Use grouped commit coordinator for batching
-			coordinator.commit(inner).await?;
+			// Wait for the WAL to be flushed as part of a batch
+			coordinator.wait_for_sync().await?;
 		} else {
-			// Commit the transaction directly without grouped commit
-			inner.commit()?;
-			// If synced writes are enabled, flush the WAL to disk
-			if *cnf::SYNC_DATA {
-				self.db.flush_wal(true)?;
-			}
+			// Perform an individual WAL flush for this transaction
+			self.db.flush_wal(true)?;
 		}
 		// Perform compaction if necessary
 		if self.is_restricted(true) && self.contains_deletes() {

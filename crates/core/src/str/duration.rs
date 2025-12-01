@@ -25,7 +25,7 @@ impl ParseDuration for &str {
 		let number = number.trim().parse::<u128>().map_err(|_| "Invalid number")?;
 		// Parse the supplied suffix as a multiplier (converting to nanoseconds)
 		let suffix: u128 = match suffix.trim().to_lowercase().as_str() {
-			"" | "ns" => 1,
+			"ns" => 1,
 			"µs" | "us" => 1_000,
 			"ms" => 1_000_000,
 			"s" => 1_000_000_000,
