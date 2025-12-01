@@ -1,9 +1,11 @@
 pub mod api;
+pub mod defaults;
 pub mod graphql;
 
 use std::fmt::{self, Display};
 
 use api::ApiConfig;
+use defaults::DefaultConfig;
 use graphql::GraphQLConfig;
 
 use super::DefineKind;
@@ -38,6 +40,7 @@ impl From<crate::expr::statements::define::DefineConfigStatement> for DefineConf
 pub(crate) enum ConfigInner {
 	GraphQL(GraphQLConfig),
 	Api(ApiConfig),
+	Default(DefaultConfig),
 }
 
 impl Display for DefineConfigStatement {
@@ -59,6 +62,7 @@ impl Display for ConfigInner {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match &self {
 			ConfigInner::GraphQL(v) => Display::fmt(v, f),
+			ConfigInner::Default(v) => Display::fmt(v, f),
 			ConfigInner::Api(v) => {
 				write!(f, "API")?;
 				Display::fmt(v, f)
@@ -73,6 +77,9 @@ impl From<ConfigInner> for crate::expr::statements::define::config::ConfigInner 
 			ConfigInner::GraphQL(v) => {
 				crate::expr::statements::define::config::ConfigInner::GraphQL(v.into())
 			}
+			ConfigInner::Default(v) => {
+				crate::expr::statements::define::config::ConfigInner::Default(v.into())
+			}
 			ConfigInner::Api(v) => {
 				crate::expr::statements::define::config::ConfigInner::Api(v.into())
 			}
@@ -85,6 +92,9 @@ impl From<crate::expr::statements::define::config::ConfigInner> for ConfigInner 
 		match v {
 			crate::expr::statements::define::config::ConfigInner::GraphQL(v) => {
 				ConfigInner::GraphQL(v.into())
+			}
+			crate::expr::statements::define::config::ConfigInner::Default(v) => {
+				ConfigInner::Default(v.into())
 			}
 			crate::expr::statements::define::config::ConfigInner::Api(v) => {
 				ConfigInner::Api(v.into())

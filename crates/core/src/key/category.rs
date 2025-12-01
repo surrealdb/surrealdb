@@ -31,6 +31,8 @@ pub enum Category {
 	User,
 	/// crate::key::root::tl                 /!tl{tl}
 	TaskLease,
+	/// crate::key::root::cg                 /!cg{ty}
+	RootConfig,
 	/// crate::key::root::ic                 /!ic{ns}{db}{tb}{ix}{nid}{uuid}
 	IndexCompaction,
 	///
@@ -271,6 +273,7 @@ impl Display for Category {
 			Self::SequenceState => "SequenceState",
 			Self::SequenceBatch => "SequenceBatch",
 			Self::TaskLease => "TaskLease",
+			Self::RootConfig => "RootConfig",
 			Self::IndexInvertedDocIds => "IndexInvertedDocIds",
 			Self::IndexFullTextDocIdsSequenceState => "IndexFullTextDocIdsSequenceState",
 			Self::IndexFullTextDocCountAndLength => "IndexFullTextDocCountAndLength",
