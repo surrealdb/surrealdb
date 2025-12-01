@@ -1,7 +1,16 @@
-.PHONY: default
-default:
-	@echo "Choose a Makefile target:"
-	@$(MAKE) -pRrq -f $(lastword $(MAKEFILE_LIST)) : 2>/dev/null | awk -v RS= -F: '/^# File/,/^# Finished Make data base/ {if ($$1 !~ "^[#.]") {print "  - " $$1}}' | sort
+.DEFAULT_GOAL := default
+
+# Ignore Makefile as a target
+Makefile:;
+
+# Default target - run the default task
+.PHONY: default check-deps
+default: check-deps
+	@cargo make
+
+# Catch-all - pass any target through to cargo make
+%: check-deps
+	@cargo make $@
 
 .PHONY: check-deps
 check-deps:
@@ -12,51 +21,3 @@ check-deps:
 		echo >&2; \
 		exit 1; \
 	}
-
-.PHONY: setup
-setup: check-deps
-	cargo make setup
-
-.PHONY: docs
-docs: check-deps
-	cargo make docs
-
-.PHONY: fmt
-fmt: check-deps
-	cargo make fmt
-
-.PHONY: test
-test: check-deps
-	cargo make test
-
-.PHONY: check
-check: check-deps
-	cargo make check
-
-.PHONY: clean
-clean: check-deps
-	cargo make clean
-
-.PHONY: bench
-bench: check-deps
-	cargo make bench
-
-.PHONY: serve
-serve: check-deps
-	cargo make serve
-
-.PHONY: sql
-sql: check-deps
-	cargo make sql
-
-.PHONY: repl
-repl: check-deps
-	cargo make repl
-
-.PHONY: build
-build: check-deps
-	cargo make build
-
-.PHONY: release
-release: check-deps
-	cargo make release
