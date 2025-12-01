@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::{self, Display, Formatter, Write};
 use std::hash::{Hash, Hasher};
@@ -832,8 +833,6 @@ impl KindLiteral {
 			},
 			Self::Object(lit) => match value {
 				Value::Object(val) => {
-					use std::cmp::Ordering;
-
 					let mut lit_iter = lit.iter();
 					let mut val_iter = val.iter();
 
