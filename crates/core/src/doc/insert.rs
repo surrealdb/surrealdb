@@ -14,6 +14,10 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
+		if ctx.is_done(None).await? {
+			// Don't process the document
+			return Err(Error::Ignore);
+		}
 		// On the first iteration, this will always be
 		// false, as we do not first attempt to fetch the
 		// record from the storage engine. After attempting

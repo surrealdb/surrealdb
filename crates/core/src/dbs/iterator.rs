@@ -169,7 +169,7 @@ impl Iterator {
 	) -> Result<(), Error> {
 		// Match the values
 		match val {
-			Value::Mock(v) => self.prepare_mock(ctx, v)?,
+			Value::Mock(v) => self.prepare_mock(ctx, v).await?,
 			Value::Table(v) => self.prepare_table(stk, planner, ctx, v).await?,
 			Value::Edges(v) => self.prepare_edges(ctx.stm, *v)?,
 			Value::Object(v) if !ctx.stm.is_select() => self.prepare_object(ctx.stm, v)?,
@@ -238,7 +238,7 @@ impl Iterator {
 	}
 
 	/// Prepares a value for processing
-	pub(crate) fn prepare_mock(
+	pub(crate) async fn prepare_mock(
 		&mut self,
 		ctx: &StatementContext<'_>,
 		v: Mock,
@@ -253,7 +253,7 @@ impl Iterator {
 				false => self.ingest(Iterable::Thing(v)),
 			}
 			// Check if the context is finished
-			if ctx.ctx.is_done(count % 100 == 0)? {
+			if ctx.ctx.is_done(Some(count)).await? {
 				break;
 			}
 		}
@@ -341,7 +341,7 @@ impl Iterator {
 		// Add the records to the iterator
 		for v in v {
 			match v {
-				Value::Mock(v) => self.prepare_mock(ctx, v)?,
+				Value::Mock(v) => self.prepare_mock(ctx, v).await?,
 				Value::Table(v) => self.prepare_table(stk, planner, ctx, v).await?,
 				Value::Edges(v) => self.prepare_edges(ctx.stm, *v)?,
 				Value::Object(v) if !ctx.stm.is_select() => self.prepare_object(ctx.stm, v)?,
@@ -754,7 +754,7 @@ impl Iterator {
 			v.iterate(stk, ctx, &opt, stm, self, distinct.as_mut()).await?;
 			// MOCK can create a large collection of iterators,
 			// we need to make space for possible cancellations
-			if ctx.is_done(count % 100 == 0)? {
+			if ctx.is_done(Some(count)).await? {
 				break;
 			}
 		}
