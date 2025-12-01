@@ -393,7 +393,7 @@ jobs:
           tikv: ${{ matrix.engine == 'tikv' }}
 
       - name: Test engine
-        run: cargo make ci-${{ matrix.engine }}-kvs
+        run: cargo make ci-kvs-${{ matrix.engine }}
 
   # ----------------------------------------
   # Rust SDK tests
