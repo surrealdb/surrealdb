@@ -68,6 +68,13 @@ fn with_enough_stack(fut: impl Future<Output = ExitCode> + Send) -> ExitCode {
 		.worker_threads(*cnf::RUNTIME_WORKER_THREADS)
 		.thread_stack_size(*cnf::RUNTIME_STACK_SIZE)
 		.thread_name("surrealdb-worker")
+		// When a thread is parked, ensure that local memory
+		// tracking is flushed to the global tracking counter.
+		.on_thread_park(|| core::mem::ALLOC.flush_local_allocations())
+		// When a thread is shutdown, ensure that local memory
+		// tracking is flushed to the global tracking counter.
+		.on_thread_stop(|| core::mem::ALLOC.flush_local_allocations())
+		// Build the runtime
 		.build();
 	// Check the success of the runtime creation
 	match runtime {

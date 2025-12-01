@@ -91,6 +91,12 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 		0
 	}
 
+	/// Ensures that local allocations are flushed to the global tracking counter.
+	#[cfg(not(feature = "allocation-tracking"))]
+	pub fn flush_local_allocations(&self) {
+		// Does nothing
+	}
+
 	/// Checks if the current usage exceeds a configured threshold.
 	#[cfg(not(feature = "allocation-tracking"))]
 	pub fn is_beyond_threshold(&self) -> bool {
@@ -101,6 +107,14 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 	#[cfg(feature = "allocation-tracking")]
 	pub fn memory_usage(&self) -> usize {
 		GLOBAL_TOTAL_BYTES.load(Ordering::Relaxed).max(0) as usize
+	}
+
+	/// Ensures that local allocations are flushed to the global tracking counter.
+	#[cfg(feature = "allocation-tracking")]
+	pub fn flush_local_allocations(&self) {
+		THREAD_STATE.with(|state| {
+			state.flush_to_global();
+		});
 	}
 
 	/// Checks if the current usage exceeds a configured threshold.
