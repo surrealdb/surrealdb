@@ -38,7 +38,7 @@ jobs:
           tools: cargo-llvm-cov,cargo-nextest,cargo-make
 
       - name: Generate coverage report
-        run: cargo make ci-workspace-coverage
+        run: cargo make ci-workspace-coverage-with-server
 
       - name: Upload coverage report
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

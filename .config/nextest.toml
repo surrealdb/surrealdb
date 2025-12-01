@@ -14,15 +14,12 @@ test-group = 'serial-kvs'
 
 [[profile.default.overrides]]
 filter = 'test(idx::trees::hnsw::tests::)'
-test-group = 'excessive'
-threads-required = 8
+threads-required = 2
 
 [[profile.default.overrides]]
 filter = 'test(syn::test::test_excessive_size)'
-test-group = 'excessive'
-threads-required = 8
+threads-required = 4
 
 [test-groups]
 # Ensure all KVS tests run serially
 serial-kvs = { max-threads = 1 }
-excessive = { max-threads = 1 }
