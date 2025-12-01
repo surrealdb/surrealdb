@@ -8,13 +8,13 @@ value = "['test', 'test','test','test']"
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
+value = "{ database: 'test', namespace: 'my_ns' }"
 
 [[test.results]]
 value = "NONE"
 
 [[test.results]]
-value = "NONE"
+value = "{ database: 'my_db', namespace: 'my_ns' }"
 
 [[test.results]]
 value = "['my_ns', 'my_ns','my_db','my_db']"

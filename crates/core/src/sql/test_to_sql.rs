@@ -320,7 +320,7 @@ use crate::val::{Bytes, Duration, File, Geometry, Number, Object, RecordId, Set,
 #[case::top_level_live(TopLevelExpr::Live(Box::new(LiveStatement { fields: Fields::all(), diff: false, what: Expr::Table("user".to_string()), cond: None, fetch: None })), "LIVE SELECT * FROM user", "LIVE SELECT * FROM user")]
 #[case::top_level_live_diff(TopLevelExpr::Live(Box::new(LiveStatement { fields: Fields::none(), diff: true, what: Expr::Table("user".to_string()), cond: None, fetch: None })), "LIVE SELECT DIFF FROM user", "LIVE SELECT DIFF FROM user")]
 #[case::top_level_option(TopLevelExpr::Option(OptionStatement { name: "IMPORT".to_string(), what: true }), "OPTION IMPORT", "OPTION IMPORT")]
-#[case::top_level_use(TopLevelExpr::Use(UseStatement::NsDb("ns".to_string(),"db".to_string())), "USE NS ns DB db", "USE NS ns DB db")]
+#[case::top_level_use(TopLevelExpr::Use(UseStatement::NsDb(Expr::Idiom(Idiom::field("ns".to_string())), Expr::Idiom(Idiom::field("db".to_string())))), "USE NS ns DB db", "USE NS ns DB db")]
 #[case::top_level_show(TopLevelExpr::Show(ShowStatement { table: Some("user".to_string()), since: ShowSince::Versionstamp(123), limit: Some(10) }), "SHOW CHANGES FOR TABLE user SINCE 123 LIMIT 10", "SHOW CHANGES FOR TABLE user SINCE 123 LIMIT 10")]
 #[case::top_level_expr(TopLevelExpr::Expr(Expr::Literal(Literal::Integer(1))), "1", "1")]
 fn test_to_sql(#[case] v: impl Display, #[case] expected: &str, #[case] expected_pretty: &str) {
