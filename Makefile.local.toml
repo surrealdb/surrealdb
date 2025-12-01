@@ -96,9 +96,9 @@ args = [
     "--conn",
     "memory",
     "--ns",
-    "test",
+    "main",
     "--db",
-    "test",
+    "main",
     "${@}",
 ]
 
