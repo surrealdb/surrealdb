@@ -67,6 +67,16 @@ pub struct StartCommandDbsOptions {
 	#[arg(env = "SURREAL_SLOW_QUERY_LOG_PARAM_DENY", long = "slow-log-param-deny")]
 	#[arg(value_delimiter = ',', num_args = 1..)]
 	slow_log_param_deny: Vec<String>,
+	#[arg(help = "The default namespace for a new instance")]
+	#[arg(env = "SURREAL_DEFAULT_NAMESPACE", long = "default-namespace")]
+	default_namespace: Option<String>,
+	#[arg(help = "The default database for a new instance")]
+	#[arg(env = "SURREAL_DEFAULT_DATABASE", long = "default-database")]
+	default_database: Option<String>,
+	#[arg(help = "Whether to disable default namespace and database creation")]
+	#[arg(env = "SURREAL_NO_DEFAULTS", long = "no-defaults", conflicts_with_all = ["default_namespace", "default_database"])]
+	#[arg(default_value_t = false)]
+	no_defaults: bool,
 }
 
 #[derive(Args, Debug)]
@@ -678,6 +688,9 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		slow_log_threshold,
 		slow_log_param_allow,
 		slow_log_param_deny,
+		default_namespace,
+		default_database,
+		no_defaults,
 	}: StartCommandDbsOptions,
 ) -> Result<Datastore> {
 	// Warn about the strict mode flag being unused.
@@ -730,7 +743,18 @@ pub async fn init<C: TransactionBuilderFactory + BucketStoreProvider>(
 		.with_capabilities(capabilities)
 		.with_slow_log(slow_log_threshold, slow_log_param_allow, slow_log_param_deny);
 	// Ensure the storage version is up to date to prevent corruption
-	retry_with_timeout("check_version", || async { dbs.check_version().await }).await?;
+	let (_, is_new) =
+		retry_with_timeout("check_version", || async { dbs.check_version().await }).await?;
+	// Create default namespace and database if not disabled
+	if is_new && !no_defaults {
+		let default_namespace = default_namespace.unwrap_or_else(|| "main".to_string());
+		let default_database = default_database.unwrap_or_else(|| "main".to_string());
+		// Initialise defaults
+		retry_with_timeout("initialise_defaults", || async {
+			dbs.initialise_defaults(&default_namespace, &default_database).await
+		})
+		.await?;
+	}
 	// Import file at start, if provided
 	if let Some(file) = import_file {
 		// Log the startup import path

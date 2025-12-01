@@ -115,7 +115,7 @@ mod cli_integration {
 				output.contains("DEFINE TABLE thing TYPE ANY SCHEMALESS PERMISSIONS NONE;"),
 				"{output}"
 			);
-			assert!(output.contains("INSERT [ { id: thing:one } ];"), "{output}");
+			assert!(output.contains("INSERT [ { id: thing:one } ]"), "{output}");
 		}
 
 		info!("* Export to file");

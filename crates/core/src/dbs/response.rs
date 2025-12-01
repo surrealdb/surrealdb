@@ -10,7 +10,20 @@ use crate::expr::TopLevelExpr;
 use crate::rpc::DbResultError;
 
 #[revisioned(revision = 1)]
-#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize, SurrealValue)]
+#[derive(
+	Debug,
+	Copy,
+	Clone,
+	Default,
+	PartialEq,
+	Eq,
+	PartialOrd,
+	Ord,
+	Hash,
+	Serialize,
+	Deserialize,
+	SurrealValue,
+)]
 #[surreal(untagged, lowercase)]
 #[serde(rename_all = "lowercase")]
 pub enum QueryType {
