@@ -50,7 +50,7 @@ pub async fn run(
 	arg: Vec<Value>,
 ) -> Result<Value> {
 	// Check the context
-	if context.is_done(true).await? {
+	if context.is_done(None).await? {
 		return Ok(Value::None);
 	}
 
