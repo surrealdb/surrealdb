@@ -363,7 +363,7 @@ run_task = "ci-api-integration"
 
 [tasks.ci-api-integration-ws]
 category = "CI - INTEGRATION TESTS"
-env = { _TEST_API_ENGINE = "ws", _TEST_FEATURES = "protocol-ws", SURREAL_WEBSOCKET_MAX_MESSAGE_SIZE = 268435456 }
+env = { _TEST_API_ENGINE = "ws", _TEST_FEATURES = "protocol-ws" }
 run_task = "ci-api-integration"
 
 [tasks.ci-api-integration-any]
