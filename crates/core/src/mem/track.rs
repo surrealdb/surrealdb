@@ -60,14 +60,13 @@ impl ThreadState {
 /// Note: While ThreadState does not implement Drop (due to Rust's restriction
 /// that "the global allocator may not use TLS with destructors"), unflushed
 /// thread-local bytes are periodically synced via the batch threshold mechanism.
-/// At thread termination, any remaining unflushed bytes (up to 64KB) may not
-/// be reflected in the global counter, which is acceptable for approximate
-/// memory tracking purposes.
+/// At thread termination, any remaining unflushed bytes may not be reflected in
+/// the global counter, which is fine for approximate memory tracking purposes.
 ///
 /// # Design Features
 ///
 /// - Lock-free operations for zero contention
-/// - Batched updates (64KB threshold) to reduce atomic operations
+/// - Batched updates to reduce atomic operations
 /// - Recursion depth tracking prevents infinite recursion while tracking nested allocations
 /// - O(1) usage queries regardless of thread count
 /// - Automatic cleanup when threads exit
