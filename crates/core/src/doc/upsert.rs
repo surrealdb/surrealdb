@@ -14,6 +14,9 @@ impl Document {
 		opt: &Options,
 		stm: &Statement<'_>,
 	) -> Result<Value, Error> {
+		if ctx.is_done(None).await? {
+			return Err(Error::Ignore);
+		}
 		// On the first iteration, we do not first attempt
 		// to fetch the record from the storage engine. After
 		// trying to create the record, if the record already

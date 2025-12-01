@@ -26,7 +26,7 @@ impl Document {
 		// Loop over maximum two times
 		for _ in 0..2 {
 			// Check current context
-			if ctx.is_done(true)? {
+			if ctx.is_done(None).await? {
 				// Don't process the document
 				return Ok(());
 			}
