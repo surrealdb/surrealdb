@@ -14,7 +14,7 @@ use crate::catalog::providers::TableProvider;
 use crate::catalog::{DatabaseId, FieldDefinition, NamespaceId, TableDefinition};
 use crate::dbs::Session;
 use crate::expr::field::Selector;
-use crate::expr::order::{OrderList, Ordering};
+use crate::expr::order::{OrderDirection, OrderList, Ordering};
 use crate::expr::statements::SelectStatement;
 use crate::expr::{
 	self, BinaryOperator, Cond, Expr, Fields, Idiom, Kind, Limit, Literal, LogicalPlan, Start,
@@ -29,7 +29,7 @@ use crate::val::{RecordId, Value};
 fn order_asc(field_name: String) -> expr::Order {
 	expr::Order {
 		value: Idiom::field(field_name),
-		direction: true,
+		direction: OrderDirection::Ascending,
 		..Default::default()
 	}
 }
@@ -37,7 +37,8 @@ fn order_asc(field_name: String) -> expr::Order {
 fn order_desc(field_name: String) -> expr::Order {
 	expr::Order {
 		value: Idiom::field(field_name),
-		..expr::Order::default()
+		direction: OrderDirection::Descending,
+		..Default::default()
 	}
 }
 

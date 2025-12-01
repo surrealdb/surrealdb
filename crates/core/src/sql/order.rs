@@ -71,14 +71,20 @@ impl From<crate::expr::order::OrderList> for OrderList {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) enum OrderDirection {
+	#[default]
+	Ascending,
+	Descending,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub struct Order {
 	/// The value to order by
 	pub value: Idiom,
 	pub collate: bool,
 	pub numeric: bool,
-	/// true if the direction is ascending
-	pub direction: bool,
+	pub direction: OrderDirection,
 }
 
 impl fmt::Display for Order {
@@ -90,7 +96,7 @@ impl fmt::Display for Order {
 		if self.numeric {
 			write!(f, " NUMERIC")?;
 		}
-		if !self.direction {
+		if matches!(self.direction, OrderDirection::Descending) {
 			write!(f, " DESC")?;
 		}
 		Ok(())
@@ -103,7 +109,10 @@ impl From<Order> for crate::expr::order::Order {
 			value: v.value.into(),
 			collate: v.collate,
 			numeric: v.numeric,
-			direction: v.direction,
+			direction: match v.direction {
+				OrderDirection::Ascending => crate::expr::order::OrderDirection::Ascending,
+				OrderDirection::Descending => crate::expr::order::OrderDirection::Descending,
+			},
 		}
 	}
 }
@@ -113,7 +122,10 @@ impl From<crate::expr::order::Order> for Order {
 			value: v.value.into(),
 			collate: v.collate,
 			numeric: v.numeric,
-			direction: v.direction,
+			direction: match v.direction {
+				crate::expr::order::OrderDirection::Ascending => OrderDirection::Ascending,
+				crate::expr::order::OrderDirection::Descending => OrderDirection::Descending,
+			},
 		}
 	}
 }

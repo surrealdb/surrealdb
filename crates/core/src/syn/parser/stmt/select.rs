@@ -1,7 +1,7 @@
 use reblessive::Stk;
 
 use super::parts::MissingKind;
-use crate::sql::order::{OrderList, Ordering};
+use crate::sql::order::{OrderDirection, OrderList, Ordering};
 use crate::sql::statements::SelectStatement;
 use crate::sql::{Fields, Limit, Order, Split, Splits, Start};
 use crate::syn::parser::mac::expected;
@@ -174,13 +174,13 @@ impl Parser<'_> {
 		let direction = match self.peek_kind() {
 			t!("ASCENDING") => {
 				self.pop_peek();
-				true
+				OrderDirection::Ascending
 			}
 			t!("DESCENDING") => {
 				self.pop_peek();
-				false
+				OrderDirection::Descending
 			}
-			_ => true,
+			_ => OrderDirection::Ascending,
 		};
 		Ok(Order {
 			value: start,

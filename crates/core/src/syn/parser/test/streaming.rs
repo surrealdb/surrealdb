@@ -14,7 +14,7 @@ use crate::sql::index::FullTextParams;
 use crate::sql::language::Language;
 use crate::sql::literal::ObjectEntry;
 use crate::sql::lookup::{LookupKind, LookupSubject};
-use crate::sql::order::{OrderList, Ordering};
+use crate::sql::order::{OrderDirection, OrderList, Ordering};
 use crate::sql::statements::define::{
 	DefineAccessStatement, DefineAnalyzerStatement, DefineDatabaseStatement, DefineDefault,
 	DefineEventStatement, DefineFieldStatement, DefineFunctionStatement, DefineIndexStatement,
@@ -495,7 +495,7 @@ fn statements() -> Vec<TopLevelExpr> {
 				value: Idiom(vec![Part::Field("foo".to_owned())]),
 				collate: true,
 				numeric: true,
-				direction: true,
+				direction: OrderDirection::Ascending,
 			}]))),
 			limit: Some(Limit(Expr::Literal(Literal::RecordId(RecordIdLit {
 				table: "a".to_owned(),

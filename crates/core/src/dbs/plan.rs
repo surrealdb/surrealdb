@@ -188,20 +188,22 @@ impl ExplainItem {
 					("value", v.to_owned()),
 				],
 			},
-			Iterable::Index(t, ir, rs) => {
+			Iterable::Index(t, ir, rs, sc) => {
 				let mut details = vec![("table", Value::String(t.clone()))];
 				if let Some(qp) = ctx.get_query_planner()
 					&& let Some(exe) = qp.get_query_executor(t.as_str())
 				{
 					details.push(("plan", exe.explain(*ir)));
 				}
+				let name = match rs {
+					RecordStrategy::Count => "Iterate Index Count",
+					RecordStrategy::KeysOnly => "Iterate Index Keys",
+					RecordStrategy::KeysAndValues => "Iterate Index",
+				}
+				.to_string();
+				details.push(("direction", sc.to_string().into()));
 				Self {
-					name: match rs {
-						RecordStrategy::Count => "Iterate Index Count",
-						RecordStrategy::KeysOnly => "Iterate Index Keys",
-						RecordStrategy::KeysAndValues => "Iterate Index",
-					}
-					.into(),
+					name: name.into(),
 					details,
 				}
 			}
