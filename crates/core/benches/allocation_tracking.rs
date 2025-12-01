@@ -194,7 +194,7 @@ impl BenchAllocator for PerThreadAllocator {
 // Implementation 3: Lock-Free Batched Tracking (matches actual TrackAlloc)
 // ============================================================================
 
-/// Batch threshold - flush to global every 64KB of delta
+/// Batch threshold - flush to global every 12KB of delta
 const BATCH_THRESHOLD: i64 = 12 * 1024;
 
 /// Per-thread state for batched updates
