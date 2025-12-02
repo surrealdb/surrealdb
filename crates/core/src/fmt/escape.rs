@@ -125,7 +125,7 @@ impl fmt::Display for EscapeRid<'_> {
 			|| s.contains(|x: char| !x.is_ascii_alphanumeric() && x != '_')
 			|| !s.contains(|x: char| !x.is_ascii_digit() && x != '_')
 		{
-			f.write_fmt(format_args!("`{}`", Escape::escape_str(s, '`')))?;
+			return f.write_fmt(format_args!("`{}`", Escape::escape_str(s, '`')));
 		}
 
 		f.write_str(s)
