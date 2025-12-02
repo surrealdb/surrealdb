@@ -1,10 +1,11 @@
+use surrealdb_types::{SqlFormat, ToSql};
+
 use crate::ctx::Context;
 use crate::dbs::Options;
 use crate::expr::statements::alter::AlterKind;
 use crate::expr::{Base, Timeout};
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
-use surrealdb_types::{SqlFormat, ToSql};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Hash)]
 pub(crate) struct AlterSystemStatement {

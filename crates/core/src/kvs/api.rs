@@ -1,9 +1,10 @@
 //! This module defines the API for a transaction in a key-value store.
 #![warn(clippy::missing_docs_in_private_items)]
 
+use std::ops::Range;
+
 use anyhow::bail;
 use chrono::{DateTime, Utc};
-use std::ops::Range;
 
 use super::err::{Error, Result};
 use super::util;

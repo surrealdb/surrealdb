@@ -1,6 +1,7 @@
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
+
 use crate::sql::Timeout;
 use crate::sql::statements::alter::AlterKind;
-use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
