@@ -85,6 +85,8 @@ impl BackgroundFlusher {
 	pub fn new(db: Pin<Arc<OptimisticTransactionDB>>) -> Result<Self> {
 		// Get the background flusher configuration options
 		let interval = *cnf::ROCKSDB_BACKGROUND_FLUSH_INTERVAL;
+		// Convert the interval to a duration
+		let duration = Duration::from_nanos(interval);
 		// Create a new shutdown flag
 		let shutdown = Arc::new(AtomicBool::new(false));
 		// Clone the shutdown flag
@@ -94,12 +96,8 @@ impl BackgroundFlusher {
 			.name("rocksdb-background-flusher".to_string())
 			.spawn(move || {
 				loop {
-					// Check shutdown flag before sleeping
-					if finished.load(Ordering::Relaxed) {
-						break;
-					}
 					// Wait for the specified interval
-					thread::sleep(Duration::from_nanos(interval));
+					thread::sleep(duration);
 					// Check shutdown flag again after sleep
 					if finished.load(Ordering::Relaxed) {
 						break;
