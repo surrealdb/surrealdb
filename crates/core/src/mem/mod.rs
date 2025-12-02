@@ -1,6 +1,8 @@
 mod fake;
 mod track;
 
+pub use track::{MemoryReporter, cleanup_memory_reporters, register_memory_reporter};
+
 #[cfg(not(feature = "allocator"))]
 pub static ALLOC: fake::FakeAlloc = fake::FakeAlloc::new();
 

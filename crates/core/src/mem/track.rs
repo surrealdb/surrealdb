@@ -4,7 +4,12 @@ use std::alloc::{GlobalAlloc, Layout, System};
 #[cfg(feature = "allocation-tracking")]
 use std::cell::Cell;
 #[cfg(feature = "allocation-tracking")]
+use std::sync::Weak;
+#[cfg(feature = "allocation-tracking")]
 use std::sync::atomic::{AtomicI64, Ordering};
+
+#[cfg(feature = "allocation-tracking")]
+use parking_lot::RwLock;
 
 #[cfg(feature = "allocation-tracking")]
 static GLOBAL_TOTAL_BYTES: AtomicI64 = AtomicI64::new(0);
@@ -14,6 +19,45 @@ const BATCH_THRESHOLD: i64 = 12 * 1024; // Flush every 12KB
 
 #[cfg(feature = "allocation-tracking")]
 const MAX_DEPTH: u32 = 3; // Max recursion depth for tracking
+
+#[cfg(feature = "allocation-tracking")]
+static MEMORY_REPORTERS: RwLock<Vec<Weak<dyn MemoryReporter>>> = RwLock::new(Vec::new());
+
+/// Trait for objects that can report their memory usage to the global allocator tracker
+pub trait MemoryReporter: Send + Sync {
+	/// Returns the amount of memory currently allocated by this object
+	fn memory_allocated(&self) -> usize;
+}
+
+#[cfg(feature = "allocation-tracking")]
+/// Register a memory reporter to be included in total memory tracking
+pub fn register_memory_reporter(reporter: Weak<dyn MemoryReporter>) {
+	// Acquire the write lock
+	let mut reporters = MEMORY_REPORTERS.write();
+	// Clean up dead weak references while we're here
+	reporters.retain(|r| r.strong_count() > 0);
+	// Add the reporter to the list
+	reporters.push(reporter);
+}
+
+#[cfg(not(feature = "allocation-tracking"))]
+/// Register a memory reporter to be included in total memory tracking
+pub fn register_memory_reporter(_: Weak<dyn MemoryReporter>) {
+	// Does nothing when allocation tracking is disabled
+}
+
+#[cfg(feature = "allocation-tracking")]
+/// Clean up dead weak references from the memory reporter registry
+pub fn cleanup_memory_reporters() {
+	let mut reporters = MEMORY_REPORTERS.write();
+	reporters.retain(|r| r.strong_count() > 0);
+}
+
+#[cfg(not(feature = "allocation-tracking"))]
+/// Clean up dead weak references from the memory reporter registry
+pub fn cleanup_memory_reporters() {
+	// Does nothing when allocation tracking is disabled
+}
 
 #[cfg(feature = "allocation-tracking")]
 thread_local! {
@@ -106,6 +150,22 @@ impl<A: GlobalAlloc> TrackAlloc<A> {
 	/// Returns the current total allocated bytes.
 	#[cfg(feature = "allocation-tracking")]
 	pub fn memory_allocated(&self) -> usize {
+		// Get the heap memory allocated
+		let heap_memory = GLOBAL_TOTAL_BYTES.load(Ordering::Relaxed).max(0) as usize;
+		// Get the external memory allocated
+		let external_memory = MEMORY_REPORTERS
+			.read()
+			.iter()
+			.filter_map(|weak| weak.upgrade())
+			.map(|reporter| reporter.memory_allocated())
+			.sum::<usize>();
+		// Return the total memory allocated
+		heap_memory + external_memory
+	}
+
+	/// Returns only the heap allocated bytes (excluding external memory reporters).
+	#[cfg(feature = "allocation-tracking")]
+	pub fn heap_memory_allocated(&self) -> usize {
 		GLOBAL_TOTAL_BYTES.load(Ordering::Relaxed).max(0) as usize
 	}
 

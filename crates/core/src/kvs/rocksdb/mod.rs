@@ -221,6 +221,8 @@ impl Datastore {
 		} else {
 			None
 		};
+		// Register the memory manager with the global allocator tracker
+		memory_manager.register_with_allocator_tracker();
 		// Return the datastore
 		Ok(Datastore {
 			db,
@@ -253,6 +255,8 @@ impl Datastore {
 		if let Err(e) = self.db.flush_opt(&opts) {
 			error!("An error occurred flushing memtables to SST files: {e}");
 		}
+		// Shutdown the memory manager
+		self.memory_manager.shutdown()?;
 		// All good
 		Ok(())
 	}

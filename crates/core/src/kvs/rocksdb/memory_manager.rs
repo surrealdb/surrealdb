@@ -1,13 +1,22 @@
+use std::sync::Arc;
+
 use rocksdb::{BlockBasedOptions, Cache, Options, WriteBufferManager};
 
 use super::{TARGET, cnf};
 use crate::kvs::Result;
+use crate::mem::{MemoryReporter, cleanup_memory_reporters, register_memory_reporter};
 
 pub(super) struct MemoryManager {
 	/// The write buffer manager
 	write_buffer_manager: WriteBufferManager,
 	/// The RocksDB block cache
 	cache: Cache,
+}
+
+impl MemoryReporter for MemoryManager {
+	fn memory_allocated(&self) -> usize {
+		self.write_buffer_manager.get_usage() + self.cache.get_usage()
+	}
 }
 
 impl MemoryManager {
@@ -59,5 +68,21 @@ impl MemoryManager {
 			write_buffer_manager,
 			cache,
 		})
+	}
+
+	// Register the memory manager with the global allocator tracker
+	pub(super) fn register_with_allocator_tracker(self: &Arc<Self>) {
+		// Downgrade the memory manager to a memory reporter
+		let reporter: Arc<dyn MemoryReporter> = self.clone();
+		// Register with the global allocator tracker
+		register_memory_reporter(Arc::downgrade(&reporter));
+	}
+
+	/// Shutdown the memory manager
+	pub fn shutdown(&self) -> Result<()> {
+		// Clean up the memory manager
+		cleanup_memory_reporters();
+		// All good
+		Ok(())
 	}
 }
