@@ -339,7 +339,7 @@ fn process(
 				// Yes prettify the SurrealQL response
 				(false, true) => format!(
 					"-- Notification (action: {action:?}, live query ID: {query_id})\n{}",
-					data.to_sql()
+					data.to_sql_pretty()
 				),
 				// Don't pretty print the JSON response
 				(true, false) => {
@@ -375,7 +375,7 @@ fn process(
 				let execution_time = stats.execution_time.unwrap_or_default();
 				format!(
 					"-- Query {query_num} (execution time: {execution_time:?})\n{:#}",
-					value.to_sql()
+					value.to_sql_pretty()
 				)
 			})
 			.collect::<Vec<String>>()
