@@ -1,5 +1,6 @@
-use ast::Span;
+use common::span::Span;
 use logos::{Lexer, Logos};
+use std::fmt;
 
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum LexError {
@@ -833,6 +834,18 @@ pub enum BaseTokenKind {
 	Decimal,
 	#[regex(r"[0-9]+", priority = 3)]
 	Int,
+}
+
+impl BaseTokenKind {
+	pub fn as_str(&self) -> &'static str {
+		todo!()
+	}
+}
+
+impl fmt::Display for BaseTokenKind {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+		f.write_str(self.as_str())
+	}
 }
 
 #[macro_export]

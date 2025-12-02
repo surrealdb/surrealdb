@@ -1,5 +1,9 @@
 use common::id;
-use std::{any::Any, hash::Hash};
+use std::{
+	any::Any,
+	hash::Hash,
+	ops::{Index, IndexMut},
+};
 
 mod collections;
 
@@ -23,12 +27,23 @@ pub trait NodeSet<T: UniqueNode>: NodeCollection<T> {
 pub trait Node: Any {}
 pub trait UniqueNode: Any + Eq + Hash {}
 
+#[derive(Debug)]
 pub struct NodeList<T> {
-	cur: NodeId<T>,
-	next: Option<NodeId<T>>,
+	pub cur: NodeId<T>,
+	pub next: Option<NodeListId<T>>,
 }
 
+impl<T: Node> Node for NodeList<T> {}
+
+/// An id for a linked list of nodes.
+#[derive(Eq, PartialEq, Hash, Debug)]
 pub struct NodeListId<T>(pub NodeId<NodeList<T>>);
+impl<T> Clone for NodeListId<T> {
+	fn clone(&self) -> Self {
+		*self
+	}
+}
+impl<T> Copy for NodeListId<T> {}
 
 pub trait NodeLibrary {
 	fn empty() -> Self;
@@ -63,8 +78,57 @@ impl<L: NodeLibrary> Ast<L> {
 		self.library.insert_set(value)
 	}
 
+	pub fn push_list<T: Node>(
+		&mut self,
+		value: T,
+		head: &mut Option<NodeListId<T>>,
+		tail: &mut Option<NodeListId<T>>,
+	) {
+		let node = self.push(value);
+		let list_entry = NodeListId(self.push(NodeList {
+			cur: node,
+			next: None,
+		}));
+
+		if tail.is_none() {
+			*tail = Some(list_entry)
+		}
+
+		if let Some(prev) = head.replace(list_entry) {
+			self[prev].next = Some(list_entry);
+		}
+	}
+
 	pub fn clear(&mut self) {
 		self.library.clear();
+	}
+}
+
+impl<T: Any, L: NodeLibrary> Index<NodeId<T>> for Ast<L> {
+	type Output = T;
+
+	fn index(&self, index: NodeId<T>) -> &Self::Output {
+		self.library.get(index).expect("Tried to access node in ast which did not exist")
+	}
+}
+
+impl<T: Any, L: NodeLibrary> IndexMut<NodeId<T>> for Ast<L> {
+	fn index_mut(&mut self, index: NodeId<T>) -> &mut Self::Output {
+		self.library.get_mut(index).expect("Tried to access node in ast which did not exist")
+	}
+}
+
+impl<T: Any, L: NodeLibrary> Index<NodeListId<T>> for Ast<L> {
+	type Output = NodeList<T>;
+
+	fn index(&self, index: NodeListId<T>) -> &Self::Output {
+		self.library.get(index.0).expect("Tried to access node in ast which did not exist")
+	}
+}
+
+impl<T: Any, L: NodeLibrary> IndexMut<NodeListId<T>> for Ast<L> {
+	fn index_mut(&mut self, index: NodeListId<T>) -> &mut Self::Output {
+		self.library.get_mut(index.0).expect("Tried to access node in ast which did not exist")
 	}
 }
 

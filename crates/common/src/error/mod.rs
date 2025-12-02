@@ -6,6 +6,7 @@ use std::{
 };
 
 mod code;
+pub mod source;
 pub use code::ErrorCode;
 mod raw;
 use raw::{RawError, RawTypedError};
