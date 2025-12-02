@@ -47,7 +47,6 @@ mod tests {
 	#[test]
 	fn test_parse_duration_nanoseconds() {
 		assert_eq!("100ns".parse_duration::<u64>().unwrap(), 100);
-		assert_eq!("100".parse_duration::<u64>().unwrap(), 100);
 	}
 
 	#[test]
@@ -84,6 +83,12 @@ mod tests {
 	#[test]
 	fn test_parse_duration_overflow() {
 		let result = "18446744073709551616".parse_duration::<u64>();
+		assert!(result.is_err());
+	}
+
+	#[test]
+	fn test_parse_duration_nosuffix() {
+		let result = "18471".parse_duration::<u64>();
 		assert!(result.is_err());
 	}
 
