@@ -9,6 +9,7 @@ use chrono::{DateTime, SecondsFormat, TimeZone, Utc};
 use revision::revisioned;
 use serde::{Deserialize, Serialize};
 use storekey::{BorrowDecode, Encode};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::err::Error;
 use crate::fmt::QuoteStr;
@@ -84,11 +85,6 @@ impl Deref for Datetime {
 }
 
 impl Datetime {
-	/// Convert the Datetime to a raw String
-	pub fn to_raw_string(&self) -> String {
-		self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true)
-	}
-
 	/// Convert to nanosecond timestamp.
 	pub fn to_u64(&self) -> Option<u64> {
 		self.0.timestamp_nanos_opt().map(|v| v as u64)
@@ -111,7 +107,13 @@ impl Datetime {
 
 impl Display for Datetime {
 	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "d{}", &QuoteStr(&self.to_raw_string()))
+		self.0.to_rfc3339_opts(SecondsFormat::AutoSi, true).fmt(f)
+	}
+}
+
+impl ToSql for Datetime {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "d{}", QuoteStr(&self.to_string()))
 	}
 }
 
@@ -179,6 +181,6 @@ mod tests {
 		assert_eq!(internal_actual, expected);
 		assert_eq!(public_actual, expected_public);
 
-		assert_eq!(internal_actual.to_raw_string(), public_actual.to_string());
+		assert_eq!(internal_actual.to_string(), public_actual.to_string());
 	}
 }

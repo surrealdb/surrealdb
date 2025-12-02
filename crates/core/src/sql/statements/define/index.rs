@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use super::DefineKind;
 use crate::fmt::Fmt;
@@ -15,28 +15,27 @@ pub(crate) struct DefineIndexStatement {
 	pub concurrently: bool,
 }
 
-impl Display for DefineIndexStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "DEFINE INDEX")?;
+impl ToSql for DefineIndexStatement {
+	fn fmt_sql(&self, f: &mut String, sql_fmt: SqlFormat) {
+		write_sql!(f, sql_fmt, "DEFINE INDEX");
 		match self.kind {
 			DefineKind::Default => {}
-			DefineKind::Overwrite => write!(f, " OVERWRITE")?,
-			DefineKind::IfNotExists => write!(f, " IF NOT EXISTS")?,
+			DefineKind::Overwrite => write_sql!(f, sql_fmt, " OVERWRITE"),
+			DefineKind::IfNotExists => write_sql!(f, sql_fmt, " IF NOT EXISTS"),
 		}
-		write!(f, " {} ON {}", self.name, self.what)?;
+		write_sql!(f, sql_fmt, " {} ON {}", self.name, self.what);
 		if !self.cols.is_empty() {
-			write!(f, " FIELDS {}", Fmt::comma_separated(self.cols.iter()))?;
+			write_sql!(f, sql_fmt, " FIELDS {}", Fmt::comma_separated(self.cols.iter()));
 		}
 		if Index::Idx != self.index {
-			write!(f, " {}", self.index)?;
+			write_sql!(f, sql_fmt, " {}", self.index);
 		}
 		if let Some(ref v) = self.comment {
-			write!(f, " COMMENT {}", v)?
+			write_sql!(f, sql_fmt, " COMMENT {}", v);
 		}
 		if self.concurrently {
-			write!(f, " CONCURRENTLY")?
+			write_sql!(f, sql_fmt, " CONCURRENTLY");
 		}
-		Ok(())
 	}
 }
 

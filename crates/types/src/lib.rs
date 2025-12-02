@@ -17,7 +17,7 @@ pub use error::*;
 pub use flatbuffers::*;
 pub use kind::*;
 pub use notification::*;
-pub use sql::ToSql;
+pub use sql::{SqlFormat, ToSql, write_sql};
 // Re-export the derive macro
 pub use surrealdb_types_derive::{SurrealValue, kind};
 pub use traits::*;

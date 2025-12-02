@@ -1,5 +1,8 @@
 //! SQL utilities.
 
+use std::sync::Arc;
+
+use crate as surrealdb_types;
 use crate::utils::escape::QuoteStr;
 
 /// Trait for types that can be converted to SQL representation.
@@ -27,48 +30,157 @@ pub trait ToSql {
 	/// Convert the type to a SQL string.
 	fn to_sql(&self) -> String {
 		let mut f = String::new();
-		self.fmt_sql(&mut f);
+		self.fmt_sql(&mut f, SqlFormat::SingleLine);
+		f
+	}
+
+	/// Convert the type to a pretty-printed SQL string with indentation.
+	fn to_sql_pretty(&self) -> String {
+		let mut f = String::new();
+		self.fmt_sql(&mut f, SqlFormat::Indented(0));
 		f
 	}
 
 	/// Format the type to a SQL string.
-	fn fmt_sql(&self, f: &mut String);
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat);
 }
 
-/// Macro for writing to a SQL string.
-///
-/// This will panic if the write fails but the expectation is that it is only used in ToSql
-/// implementations which operate on a `&mut String`. `write!` cannot fail when writing to a
-/// `String`.
-#[macro_export]
-macro_rules! write_sql {
-	($f:expr, $($tt:tt)*) => {{
-		use std::fmt::Write;
-		let __f: &mut String = $f;
-		write!(__f, $($tt)*).expect("Write cannot fail when writing to a String")
-	}}
+/// SQL formatting mode for pretty printing.
+#[derive(Debug, Clone, Copy)]
+pub enum SqlFormat {
+	/// Single line formatting.
+	SingleLine,
+	/// Indented by the number of tabs specified.
+	Indented(u8),
 }
+
+impl SqlFormat {
+	/// Returns true if this is pretty (indented) formatting.
+	pub fn is_pretty(&self) -> bool {
+		matches!(self, SqlFormat::Indented(_))
+	}
+
+	/// Increments the indentation level.
+	pub fn increment(&self) -> Self {
+		match self {
+			SqlFormat::SingleLine => SqlFormat::SingleLine,
+			SqlFormat::Indented(level) => SqlFormat::Indented(level.saturating_add(1)),
+		}
+	}
+
+	/// Writes indentation to the string.
+	pub fn write_indent(&self, f: &mut String) {
+		if let SqlFormat::Indented(level) = self {
+			for _ in 0..*level {
+				f.push('\t');
+			}
+		}
+	}
+
+	/// Writes a separator (comma + space or comma + newline + indent).
+	pub fn write_separator(&self, f: &mut String) {
+		match self {
+			SqlFormat::SingleLine => f.push_str(", "),
+			SqlFormat::Indented(_) => {
+				f.push(',');
+				f.push('\n');
+				self.write_indent(f);
+			}
+		}
+	}
+}
+
+/// Formats a slice of items that implement ToSql with comma separation.
+pub fn fmt_sql_comma_separated<T: ToSql>(items: &[T], f: &mut String, fmt: SqlFormat) {
+	if fmt.is_pretty() && !items.is_empty() {
+		f.push('\n');
+		fmt.write_indent(f);
+	}
+	for (i, item) in items.iter().enumerate() {
+		if i > 0 {
+			fmt.write_separator(f);
+		}
+		item.fmt_sql(f, fmt);
+	}
+	if fmt.is_pretty() && !items.is_empty() {
+		f.push('\n');
+		// Write one level less indentation for the closing bracket
+		if let SqlFormat::Indented(level) = fmt
+			&& level > 0
+		{
+			for _ in 0..(level - 1) {
+				f.push('\t');
+			}
+		}
+	}
+}
+
+/// Formats key-value pairs with comma separation.
+pub fn fmt_sql_key_value<'a, V: ToSql + 'a>(
+	pairs: impl IntoIterator<Item = (impl AsRef<str>, &'a V)>,
+	f: &mut String,
+	fmt: SqlFormat,
+) {
+	use crate::utils::escape::EscapeKey;
+
+	let pairs: Vec<_> = pairs.into_iter().collect();
+
+	if fmt.is_pretty() && !pairs.is_empty() {
+		f.push('\n');
+		fmt.write_indent(f);
+	}
+	for (i, (key, value)) in pairs.iter().enumerate() {
+		if i > 0 {
+			fmt.write_separator(f);
+		}
+		write_sql!(f, fmt, "{}: {}", EscapeKey(key.as_ref()), value);
+	}
+	if fmt.is_pretty() && !pairs.is_empty() {
+		f.push('\n');
+		// Write one level less indentation for the closing bracket
+		if let SqlFormat::Indented(level) = fmt
+			&& level > 0
+		{
+			for _ in 0..(level - 1) {
+				f.push('\t');
+			}
+		}
+	}
+}
+
+pub use surrealdb_types_derive::write_sql;
 
 impl ToSql for String {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", QuoteStr(self))
+	#[inline]
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(self.as_str());
+	}
+}
+
+impl ToSql for str {
+	#[inline]
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(self);
 	}
 }
 
 impl ToSql for &str {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", QuoteStr(self))
+	#[inline]
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push_str(self);
 	}
 }
 
-impl ToSql for &&str {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", QuoteStr(self))
+impl ToSql for char {
+	#[inline]
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+		f.push(*self);
 	}
 }
 
 impl ToSql for bool {
-	fn fmt_sql(&self, f: &mut String) {
+	#[inline]
+	fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
 		f.push_str(if *self {
 			"true"
 		} else {
@@ -77,8 +189,56 @@ impl ToSql for bool {
 	}
 }
 
-impl ToSql for i64 {
-	fn fmt_sql(&self, f: &mut String) {
-		write_sql!(f, "{}", self)
+macro_rules! impl_to_sql_for_numeric {
+	($($t:ty),+) => {
+		$(
+			impl ToSql for $t {
+				#[inline]
+				fn fmt_sql(&self, f: &mut String, _fmt: SqlFormat) {
+					f.push_str(&self.to_string())
+				}
+			}
+		)+
+	};
+}
+
+impl_to_sql_for_numeric!(u8, u16, u32, u64, i8, i16, i32, i64, usize, isize, f32, f64);
+
+impl<T: ToSql> ToSql for &T {
+	#[inline]
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		(**self).fmt_sql(f, fmt)
+	}
+}
+
+// Blanket impl for Box
+impl<T: ToSql + ?Sized> ToSql for Box<T> {
+	#[inline]
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		(**self).fmt_sql(f, fmt)
+	}
+}
+
+// Blanket impl for Arc
+impl<T: ToSql + ?Sized> ToSql for Arc<T> {
+	#[inline]
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		(**self).fmt_sql(f, fmt)
+	}
+}
+
+impl ToSql for uuid::Uuid {
+	#[inline]
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		f.push('u');
+		QuoteStr(&self.to_string()).fmt_sql(f, fmt);
+	}
+}
+
+impl ToSql for rust_decimal::Decimal {
+	#[inline]
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		self.to_string().fmt_sql(f, fmt);
+		f.push_str("dec");
 	}
 }

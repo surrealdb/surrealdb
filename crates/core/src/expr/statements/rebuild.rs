@@ -1,8 +1,6 @@
-use std::fmt;
-use std::fmt::{Display, Formatter};
-
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use crate::catalog::providers::TableProvider;
 use crate::ctx::Context;
@@ -11,7 +9,6 @@ use crate::doc::CursorDoc;
 use crate::err::Error;
 use crate::expr::Base;
 use crate::expr::statements::define::run_indexing;
-use crate::fmt::EscapeKwFreeIdent;
 use crate::iam::{Action, ResourceKind};
 use crate::val::Value;
 
@@ -35,11 +32,10 @@ impl RebuildStatement {
 	}
 }
 
-impl Display for RebuildStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		match self {
-			Self::Index(v) => Display::fmt(v, f),
-		}
+impl ToSql for RebuildStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::rebuild::RebuildStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }
 
@@ -81,16 +77,9 @@ impl RebuildIndexStatement {
 	}
 }
 
-impl Display for RebuildIndexStatement {
-	fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-		write!(f, "REBUILD INDEX")?;
-		if self.if_exists {
-			write!(f, " IF EXISTS")?
-		}
-		write!(f, " {} ON {}", EscapeKwFreeIdent(&self.name), EscapeKwFreeIdent(&self.what))?;
-		if self.concurrently {
-			write!(f, " CONCURRENTLY")?
-		}
-		Ok(())
+impl ToSql for RebuildIndexStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let stmt: crate::sql::statements::rebuild::RebuildIndexStatement = self.clone().into();
+		stmt.fmt_sql(f, fmt);
 	}
 }

@@ -1,4 +1,4 @@
-use std::fmt::{self, Display};
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 
 use crate::sql::{Expr, Literal};
 
@@ -18,12 +18,11 @@ impl Default for DefaultConfig {
 	}
 }
 
-impl Display for DefaultConfig {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, " DEFAULT")?;
-		write!(f, " NAMESPACE {}", self.namespace)?;
-		write!(f, " DATABASE {}", self.database)?;
-		Ok(())
+impl ToSql for DefaultConfig {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, " DEFAULT");
+		write_sql!(f, fmt, " NAMESPACE {}", self.namespace);
+		write_sql!(f, fmt, " DATABASE {}", self.database);
 	}
 }
 

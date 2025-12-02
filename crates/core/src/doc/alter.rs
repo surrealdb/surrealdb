@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail, ensure};
 use reblessive::tree::Stk;
+use surrealdb_types::ToSql;
 
 use crate::catalog::RecordType;
 use crate::ctx::{Context, MutableContext};
@@ -53,7 +54,7 @@ impl Document {
 			ensure!(
 				!id.key.is_range(),
 				Error::IdInvalid {
-					value: id.to_string(),
+					value: id.to_sql(),
 				}
 			);
 			// Set the document id
@@ -104,7 +105,7 @@ impl Document {
 				// Otherwise this is attempting to override the `in` field
 				(v, _) => {
 					bail!(Error::InOverride {
-						value: v.to_string(),
+						value: v.to_sql(),
 					})
 				}
 			}
@@ -121,7 +122,7 @@ impl Document {
 				// Otherwise this is attempting to override the `in` field
 				(v, _) => {
 					bail!(Error::OutOverride {
-						value: v.to_string(),
+						value: v.to_sql(),
 					})
 				}
 			}

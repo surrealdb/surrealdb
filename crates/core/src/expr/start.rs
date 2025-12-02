@@ -1,7 +1,6 @@
-use std::fmt;
-
 use anyhow::Result;
 use reblessive::tree::Stk;
+use surrealdb_types::{SqlFormat, ToSql};
 
 use super::FlowResultExt as _;
 use crate::ctx::Context;
@@ -43,8 +42,9 @@ impl Start {
 	}
 }
 
-impl fmt::Display for Start {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "START {}", self.0)
+impl ToSql for Start {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		let sql_start: crate::sql::Start = self.clone().into();
+		sql_start.fmt_sql(f, fmt);
 	}
 }

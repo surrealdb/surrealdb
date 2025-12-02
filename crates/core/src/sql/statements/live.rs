@@ -1,5 +1,4 @@
-use std::fmt;
-
+use surrealdb_types::{SqlFormat, ToSql, write_sql};
 use uuid::Uuid;
 
 use crate::fmt::CoverStmtsSql;
@@ -14,23 +13,22 @@ pub struct LiveStatement {
 	pub fetch: Option<Fetchs>,
 }
 
-impl fmt::Display for LiveStatement {
-	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-		write!(f, "LIVE SELECT")?;
+impl ToSql for LiveStatement {
+	fn fmt_sql(&self, f: &mut String, fmt: SqlFormat) {
+		write_sql!(f, fmt, "LIVE SELECT");
 		if self.diff {
-			write!(f, " DIFF")?;
+			write_sql!(f, fmt, " DIFF");
 		}
 		if !self.fields.is_empty() {
-			write!(f, " {}", self.fields)?;
+			write_sql!(f, fmt, " {}", self.fields);
 		}
-		write!(f, " FROM {}", CoverStmtsSql(&self.what))?;
+		write_sql!(f, fmt, " FROM {}", CoverStmtsSql(&self.what));
 		if let Some(ref v) = self.cond {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
 		if let Some(ref v) = self.fetch {
-			write!(f, " {v}")?
+			write_sql!(f, fmt, " {v}");
 		}
-		Ok(())
 	}
 }
 
