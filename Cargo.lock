@@ -4064,6 +4064,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lz4_flex"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ab6473172471198271ff72e9379150e9dfd70d8e533e0752a27e515b48dd375e"
+dependencies = [
+ "twox-hash",
+]
+
+[[package]]
 name = "lzma-rs"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7336,8 +7345,7 @@ dependencies = [
 [[package]]
 name = "surrealkv"
 version = "0.15.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae2e4384e4e61954e97d74798f9b13423988b32f60e8377b0b49efbcd7540ba5"
+source = "git+https://github.com/surrealdb/surrealkv?branch=wal-fix#a67a9ba442b866dde2efea25065bd2d4cfce8896"
 dependencies = [
  "arc-swap",
  "async-channel",
@@ -7357,6 +7365,7 @@ dependencies = [
  "integer-encoding",
  "interval-heap",
  "log",
+ "lz4_flex",
  "memmap2",
  "parking_lot",
  "quick_cache",
@@ -8274,6 +8283,12 @@ dependencies = [
  "url",
  "utf-8",
 ]
+
+[[package]]
+name = "twox-hash"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ea3136b675547379c4bd395ca6b938e5ad3c3d20fad76e7fe85f9e0d011419c"
 
 [[package]]
 name = "typenum"
