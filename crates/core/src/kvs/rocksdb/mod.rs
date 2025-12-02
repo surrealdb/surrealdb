@@ -77,7 +77,7 @@ impl Datastore {
 		// Default to WAL flush on every commit
 		opts.set_manual_wal_flush(false);
 		// Set incremental asynchronous bytes per sync to 2MiB
-		opts.set_wal_bytes_per_sync(1 * 1024 * 1024);
+		opts.set_wal_bytes_per_sync(2 * 1024 * 1024);
 		// Increase the background thread count
 		info!(target: TARGET, "Background thread count: {}", *cnf::ROCKSDB_THREAD_COUNT);
 		opts.increase_parallelism(*cnf::ROCKSDB_THREAD_COUNT);
