@@ -125,7 +125,7 @@ pub(super) static ROCKSDB_BLOB_COMPRESSION_TYPE: LazyLock<Option<String>> =
 
 /// Whether to enable blob garbage collection (default: false)
 pub(super) static ROCKSDB_ENABLE_BLOB_GC: LazyLock<bool> =
-	lazy_env_parse!("SURREAL_ROCKSDB_ENABLE_BLOB_GC", bool, false);
+	lazy_env_parse!("SURREAL_ROCKSDB_ENABLE_BLOB_GC", bool, true);
 
 /// Fractional age cutoff for blob GC eligibility in [0,1] (default: 0.25)
 pub(super) static ROCKSDB_BLOB_GC_AGE_CUTOFF: LazyLock<f64> =
